@@ -313,7 +313,7 @@ file but a misconfigured global setting can override that.
 ## Where to file bugs
 
 * SDK metadata, schema, portable API, or reference-emitter bug: [`github.com/alplabai/alp-sdk/issues`](https://github.com/alplabai/alp-sdk/issues)
-* Tan planner, executor, or command bug: [`github.com/alplabai/tan-cli`](https://github.com/alplabai/tan-cli). Python Tan owns build/run/flash/size/image/clean/Renode and the relocated planner; only `migrate`, `lock`, and `quality` still forward to west.
+* Tan planner, executor, or command bug: [`github.com/alplabai/tan-cli`](https://github.com/alplabai/tan-cli). Python Tan owns build/run/flash/size/image/clean and the relocated planner; only `migrate`, `lock`, and `quality` still forward to west.
 * Chip driver bug: file against alp-sdk; include the `driver_status` from the
   chip's metadata yaml.
 

@@ -14,6 +14,13 @@ with `renode --console --disable-xwt --plain` — no `tan renode` involved, whic
 is exactly why retiring the verb costs alp-sdk no simulator coverage. The models
 under `metadata/renode/*.repl` / `*.resc` are retained for the same reason. Only
 the three `--sim-mode` e2e STEPS inside `pr-renode-sim-mode` are no-ops.
+**Superseded by Amendment 2 (2026-08-17) — the retirement is re-instated and
+widened.** Everything above this paragraph is the 2026-08-07 record, kept
+verbatim per the append-only rule; it is history, not current state. As of
+2026-08-17 the Renode-retirement clause is back in force, and it now also
+covers the four `pr-renode-*` workflows, the `metadata/renode/` models and the
+`tests/renode/` fixtures that the paragraph above calls untouched and retained.
+See "Amendment 2", below Amendment 1.
 Date: 2026-08-04 (Caner)
 Deciders: alpCaner (alp-sdk)
 Supersedes: [0020](0020-sdk-owns-build-execution.md) — narrowly, two clauses
@@ -78,6 +85,98 @@ Consequently:
 What still stands unamended: the Python-executor clause in full, and this ADR's
 narrow supersession of ADR 0020's Rust-executor **language** claim. Only the
 `renode` command-surface supersession of 0020 is withdrawn.
+
+## Amendment 2 — 2026-08-17: the retirement is re-instated and widened
+
+Amendment 1 withdrew the Renode-retirement clause on 2026-08-07. **That
+withdrawal is itself now superseded.** On 2026-08-17 the maintainer re-instated
+the retirement and widened it past this ADR's original scope: Renode leaves
+alp-sdk, `tan-cli` and alp-sdk-vscode completely, before the pending v0.16.0
+(alp-sdk) / v0.6.0 (`tan-cli`) GA releases. Amendment 1's text above is
+preserved verbatim per `docs/adr/README.md`'s append-only rule — it is the
+record of a withdrawal that held for ten days, not the current state. The order
+to read is: accepted 2026-08-04 → withdrawn 2026-08-07 → re-instated and
+widened 2026-08-17.
+
+**Withdrawn, then re-instated.** Decision points 2 and 3, withdrawn by
+Amendment 1, are back in force. `renode` comes out of every live "supported
+command" listing in this repo's docs again, and a reader who reaches for
+`tan renode` is again told what to do instead — build + flash to real hardware
+(`tan build` + `tan flash`), or a headless `native_sim` run via `tan run` for a
+single-image target with no cross-core dependency. The narrower caveat
+Amendment 1 salvaged is unaffected and still true: there is no simulated
+substitute for the cross-core RPMsg handshake specifically; it must be verified
+on real hardware.
+
+**Widened, clause (a): alp-sdk's own Renode CI goes.** Amendment 1's
+"alp-sdk's own Renode CI is untouched and still runs" is no longer true. All
+four workflows are deleted — `.github/workflows/pr-renode-aen-smoke.yml`,
+`.github/workflows/pr-renode-dual-os.yml`, `.github/workflows/pr-renode-sim-mode.yml`,
+`.github/workflows/pr-renode-v2n-sci0-smoke.yml` — and with them the hardcoded
+Renode v1.16.1 pin each one carries (each job downloads
+`renode-1.16.1.linux-portable-dotnet.tar.gz` from the upstream release), along
+with the `renode --console --disable-xwt --plain` boot that the Status block
+cites as the reason retiring the verb cost alp-sdk no coverage. Four copies of
+a pinned third-party emulator version, maintained by hand, is a standing
+upgrade tax that only makes sense while the gates are load-bearing.
+
+**Widened, clause (b): the assets go with them.** The
+`metadata/renode/*.repl` / `*.resc` removal that the Related section below
+calls "sequenced separately, not part of this change" is now in scope:
+`metadata/renode/alif_ensemble_e8.repl`, `metadata/renode/alif_ensemble_e8.resc`,
+`metadata/renode/renesas_rzv2n.repl`, `metadata/renode/renesas_rzv2n.resc`. So
+are the Renode-only fixtures under `tests/renode/`:
+`aen_m55_itcm_run.overlay`, `aen_m55_sim.conf`, `v2n_m33_ramconsole.conf`,
+`v2n_m33_sci0_console.conf`, `v2n_m33_sci0_console.overlay`. With no workflow
+and no verb left to consume them, they are hand-maintained models that nothing
+exercises — worse than absent, because an unexercised model silently rots into
+a wrong description of the silicon.
+
+**Decision point 4 is RESOLVED.** That point reserved the disposition of
+`examples/aen/aen-sim-vision` to a separate human decision, and Amendment 1
+noted its premise had improved because the `tan renode` run path still existed.
+That path is now gone, so the coherence argument cuts the other way: the whole
+directory (all 8 files) is **deleted**. An example whose only run path is a
+retired verb against deleted models cannot be run, reviewed, or repaired.
+
+**The `tan-cli` side.** The `tan renode` verb is removed, together with its
+three modules and its 27 published `renode.*` issue codes; `tan-cli`#448 is
+re-scoped back from "retain with a support-paused warning" to removal, which is
+what this ADR originally assumed. Removing published issue codes shrinks the
+`envelope-contract.json` release asset — a breaking change to the published CLI
+surface, not an additive one, and consumers that key off the contract (starting
+with alp-sdk-vscode) see codes disappear. That break is deliberately carried by
+v0.6.0 / v0.16.0 rather than deferred to a later major: pre-1.0, with the codes
+already unemittable once the verb is gone, shipping the shrunk contract
+alongside the retirement is better than cutting a GA whose published contract
+advertises 27 codes nothing can produce.
+
+**What survives, and why.** The `diagnostics.sim_console` `board.yaml` field is
+**retained** everywhere — schema, metadata, emitters and docs. It serves
+alp-studio's hardware simulator (issue #686 / alp-studio#74) by emitting
+`CONFIG_RAM_CONSOLE=y` for headless cores; that is a studio bundle concern, not
+a `tan renode` one, and nothing about this amendment makes it stale. Only one
+sentence changes: the `RENODE_MODE=real` reference in its description in
+`metadata/schemas/board.schema.json` is reworded, because that env var names
+the studio simulator's mode and must no longer read as a pointer to a retired
+alp-sdk capability. The historical record is likewise untouched, exactly as
+Decision point 2 already carves out — ADR 0010's Renode references, ADR 0014's,
+ADR 0020's superseded text, the two `docs/superpowers/specs/` heterogeneous-OS
+design specs, every RELEASED-section `CHANGELOG.md` entry, and `VERSIONS.md`'s
+v0.10.1 / v0.12.0 release rows all stand as written. They were true when
+written and remain true as history; a later reader must not "fix" them.
+
+**The cost, stated plainly.** alp-sdk loses its pre-silicon simulator coverage
+outright. There is no replacement and none is planned: after this change no CI
+job boots any alp-sdk image at all, on any core, so a regression that breaks
+the AEN M55 or the V2N M33 boot path is caught on the bench or not caught.
+`pr-twister-aen.yml` and `pr-getting-started-aen801.yml` become the only CI
+that cross-compiles for the AEN801 boards, and both are compile-only — they
+prove the tree still builds for `alp_e1m_aen801_m55_he` / `_hp`, never that the
+result runs. The V2N M33 sci0 console path loses its only automated check
+entirely. Amendment 1's "retiring the verb costs alp-sdk no simulator coverage"
+was accurate about the verb alone; widening to the CI is precisely what makes
+it false. That loss is accepted with open eyes, not mitigated.
 
 ## Context
 
