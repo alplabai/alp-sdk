@@ -697,6 +697,57 @@ def test_check_soc_vela_memory_profile_survives_a_non_object_npu_toolchain(tmp_p
         f"expected a `no npu_toolchain.vela` complaint, got {failures!r}")
 
 
+def test_check_soc_vela_memory_profile_survives_a_non_object_vela_block(tmp_path):
+    """The sibling the guard above did NOT close.  Guarding `npu_toolchain`
+    itself (above) is not the same as guarding `npu_toolchain.vela` -- a
+    version STRING authored where the vela profile OBJECT belongs
+    (`{"vela": "5.1.0"}`) is still a truthy non-dict, so `.get("vela") or {}`
+    passes it straight through and the very next line, `vela.get(
+    "memory_mode")`, raised an unhandled `AttributeError: 'str' object has
+    no attribute 'get'`, proven against the shipped gate. Same shape, same
+    fix, one guard short: `vela` must be normalised the same way
+    `npu_toolchain` is, not merely defaulted on falsy."""
+    soc = tmp_path / "bogus.json"
+    soc.write_text(json.dumps({
+        "ref": "bogus/soc",
+        "npus": [{"type": "ethos-u85", "subtype": "generative"}],
+        "npu_toolchain": {"vela": "5.1.0"},
+    }), encoding="utf-8")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(V, "REPO", tmp_path)
+        failures = V._check_soc_vela_memory_profile([soc])  # must not raise
+    assert failures and any(
+        "no npu_toolchain.vela" in m for _, msgs in failures for m in msgs), (
+        f"expected a `no npu_toolchain.vela` complaint, got {failures!r}")
+
+
+def test_check_soc_vela_memory_profile_survives_non_object_list_entries(tmp_path):
+    """The two OTHER unguarded `.get()` calls in the same function, both one
+    or two lines from the `npu_toolchain` guard: `npus[]` entries (used to
+    build `ethos`) and `external_memory_interfaces[]` entries (used to build
+    `kinds`) are schema-typed lists of objects, but nothing stopped a
+    non-object entry in either from reaching a bare `.get()` and raising
+    `AttributeError` here, same as `vela` above. A doc with malformed entries
+    in ALL THREE places at once must still return cleanly rather than crash
+    on the first one reached."""
+    soc = tmp_path / "bogus.json"
+    soc.write_text(json.dumps({
+        "ref": "bogus/soc",
+        "npus": ["not-a-dict"],
+        "npu_toolchain": {"vela": {"memory_mode": "Dedicated_Sram_384KB"}},
+        "external_memory_interfaces": ["not-a-dict"],
+    }), encoding="utf-8")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(V, "REPO", tmp_path)
+        failures = V._check_soc_vela_memory_profile([soc])  # must not raise
+    # `npus` filtered to dicts is empty, so `ethos` is empty too, and `vela`
+    # (a real object) with no `ethos` NPU trips rule (1)'s converse -- the
+    # important assertion is that this line was reached at all, not raised.
+    assert failures and any(
+        "no ethos-u* NPU" in m for _, msgs in failures for m in msgs), (
+        f"expected a `no ethos-u* NPU` complaint, got {failures!r}")
+
+
 @pytest.fixture
 def _host_soc_with_non_object_npu_toolchain(tmp_path):
     """A scratch `metadata/` copy with E1M-AEN801's host SoC spec
@@ -756,6 +807,41 @@ def test_an_ethos_u_point_against_a_soc_with_no_npu_toolchain_block_is_refused(
         for _, msgs in failures for m in msgs), (
         f"expected a `declares no npu_toolchain block at all` refusal, got "
         f"{failures!r}")
+
+
+@pytest.fixture
+def _scratch_metadata_with_malformed_hw_revisions(tmp_path):
+    """A scratch `metadata/` copy with the `aen` family's
+    `hw-revisions.yaml` replaced by a top-level LIST, for rule 4's
+    `measured_on.hw_rev` cross-check. `strict_yaml_load` is a mapping in
+    every valid hw-revisions.yaml, but the schema pass that would reject a
+    malformed one runs separately and is not guaranteed to have run first."""
+    root = tmp_path / "scratch"
+    for sub in ("socs", "e1m_modules"):
+        shutil.copytree(_ROOT / "metadata" / sub, root / "metadata" / sub)
+    table = root / "metadata" / "e1m_modules" / "aen" / "hw-revisions.yaml"
+    table.write_text("- not\n- a\n- mapping\n", encoding="utf-8")
+    return root
+
+
+def test_hw_rev_cross_check_survives_a_non_mapping_hw_revisions_table(
+        _scratch_metadata_with_malformed_hw_revisions):
+    """`(revisions or {}).get("hw_revisions")` assumed a mapping. A
+    top-level LIST in `hw-revisions.yaml` (e.g. authored with a stray `-`)
+    used to raise an unhandled `AttributeError: 'list' object has no
+    attribute 'get'` here, proven against the shipped gate. Same shape,
+    same fix, as the SoC-spec guards this fix also applies."""
+    doc = _load(_BASE)
+    doc.pop("_fixture", None)
+    path = _scratch_metadata_with_malformed_hw_revisions / _BASE_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(V, "REPO", _scratch_metadata_with_malformed_hw_revisions)
+        failures = V._check_model_perf_semantics([path])  # must not raise
+    assert failures and any(
+        "is not a revision of the" in m for _, msgs in failures for m in msgs), (
+        f"expected a `is not a revision of the` refusal, got {failures!r}")
 
 
 # ---------------------------------------------------------------------------

@@ -86,3 +86,15 @@ def test_real_alif_socs_pass_the_gate():
     socs = sorted((V.SOCS / "alif" / "ensemble").glob("e*.json"))
     assert socs, "no Alif ensemble SoC specs found"
     assert V._check_soc_npu_pairing(socs) == []
+
+
+def test_non_object_npus_and_cores_entries_do_not_crash_the_gate(tmp_path, monkeypatch):
+    """`npus[]`/`cores[]` entries are schema-typed objects, but the schema
+    pass that would reject a non-object entry runs separately and is not
+    guaranteed to have run first. A bare string in either list used to reach
+    a bare `.get()` and raise `AttributeError` here, hiding the schema FAIL
+    line that already explains the real problem. Filtered to dicts, this doc
+    must return cleanly -- no real npu survives the filter, so there is
+    nothing left to pair."""
+    doc = {"cores": ["not-a-dict"], "npus": ["not-a-dict"]}
+    assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise

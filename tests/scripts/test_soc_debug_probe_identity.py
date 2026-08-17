@@ -83,6 +83,22 @@ def test_real_alif_socs_pass_the_gate():
     assert V._check_soc_debug_probe_identity(socs) == []
 
 
+def test_non_object_variants_and_cores_entries_do_not_crash_the_gate(tmp_path, monkeypatch):
+    """`variants[]`/`cores[]` entries are schema-typed objects, but the
+    schema pass that would reject a non-object entry runs separately and is
+    not guaranteed to have run first. A bare string in either list used to
+    reach a bare `.get()` (or, for `cores[]`, an even less forgiving `c["id"]`
+    direct index) and raise `AttributeError`/`TypeError` here, hiding the
+    schema FAIL line that already explains the real problem. Filtered to
+    dicts, this doc must return cleanly -- no real variant/core survives the
+    filter, so there is nothing left to cross-reference."""
+    doc = {
+        "cores": ["not-a-dict"],
+        "variants": ["not-a-dict"],
+    }
+    assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
+
+
 # ---------------------------------------------------------------------
 # `debug.expect_dpidr` must not be published half-armed (#1355)
 #
