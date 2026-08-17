@@ -33,6 +33,7 @@ import copy
 import hashlib
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -251,6 +252,57 @@ def test_a_local_disk_model_source_is_refused_before_it_looks_like_a_store(sourc
     assert V._LOCAL_PATH_REFERENCE.search(source)
 
 
+@pytest.mark.parametrize("source", [
+    "https:C:\\Users\\user\\log.txt",
+    "http:D:\\bench\\run.log",
+])
+def test_a_drive_letter_path_after_a_store_is_still_a_local_disk_leak(source):
+    """The residual this fix closes: `_LOCAL_PATH_REFERENCE`'s drive-letter
+    alternative used to be anchored (`^[A-Za-z]:[/\\\\]`), so it only ever
+    caught a LEADING drive letter -- a drive path tacked on AFTER a
+    legitimate-looking store (`https:C:\\Users\\user\\log.txt`) was invisible
+    to it, even though it names one developer's machine exactly as surely as
+    a leading `C:\\` does. Measured accepted (rc=0) before this fix; must be
+    refused now."""
+    assert V._LOCAL_PATH_REFERENCE.search(source), (
+        f"{source!r}: a drive-letter path after a store prefix must still be "
+        f"refused as a local-machine leak")
+
+
+@pytest.mark.parametrize("source", [
+    "https://example.org/zoo/x.tflite",
+    "http://example.org/zoo/x.tflite",
+    "alp-sdk-internal:bench/captures/2026-08-16-aen801-person-detect.log",
+])
+def test_the_unanchored_drive_letter_check_does_not_false_positive_on_a_real_url(source):
+    """The trap the naive fix falls into: unanchoring `[A-Za-z]:[/\\\\]`
+    outright would match the `s` immediately before `://` in `https://...`
+    (a single letter followed by `:` then `/`), refusing every legitimate URL
+    citation. The word-boundary guard (the letter must sit at the string
+    start or after a non-alphanumeric character) is what keeps a real
+    `https://`/`http://` URL -- where that letter is always preceded by
+    another letter -- from matching."""
+    assert not V._LOCAL_PATH_REFERENCE.search(source), (
+        f"{source!r}: a legitimate citation must not be flagged as a local "
+        f"machine path")
+
+
+def test_a_single_slash_after_a_store_is_a_documented_residual_not_a_local_path():
+    """The third probe from the same review finding: `https:/home/user/x.log`
+    (one slash, not `https://`'s two) is NOT a drive-letter path and not a
+    leading local path, so `_LOCAL_PATH_REFERENCE` correctly does not flag it
+    -- unanchoring the leading-slash alternative to catch it would also flag
+    every legitimate citation whose path-within-store starts with `/`, which
+    is the normal shape of a URL path. This shape is the store-allowlist
+    residual documented in changelog.d/1520.md's "Left open, deliberately"
+    paragraph (item 6): `_STORE_CITATION` requires only `<store>:` plus one
+    non-space character, so `https:/home/user/x.log` still reads as a
+    citation of the `https` store."""
+    source = "https:/home/user/x.log"
+    assert not V._LOCAL_PATH_REFERENCE.search(source)
+    assert V._STORE_CITATION.match(source)
+
+
 def test_a_bare_word_model_source_is_not_provenance():
     """`"somewhere"` used to PASS while a real citation failed.  It is neither
     a citation nor a path that resolves, so it must fail."""
@@ -296,6 +348,83 @@ def test_model_source_and_capture_reference_agree_on_the_store_allowlist():
         f"metadata/schemas/model-perf-v1.schema.json capture.reference.pattern "
         f"{schema_pattern!r} disagrees with validate_metadata._STORE_CITATION.pattern "
         f"{V._STORE_CITATION.pattern!r}")
+
+
+#: ECMA-262 escapes of a non-special character with a backslash outside a
+#: character class ARE a `SyntaxError` under `u`/`v` mode, but Python's `re`
+#: accepts them via Annex-B leniency -- exactly the gap `re.escape("alp-sdk-
+#: internal")` fell into, shipping `alp\-sdk\-internal` in both this pattern
+#: and the JSON Schema it must stay byte-identical to.  A JS/TS consumer that
+#: compiles JSON Schema `pattern` strings under unicode mode by default (Ajv's
+#: `unicodeRegExp: true`, which alp-sdk-vscode's Ajv inherits) could not
+#: compile the schema AT ALL while that escape shipped.
+_ECMA262_RECOGNISED_ESCAPES = set("^$\\.*+?()[]{}|/bBdDsSwWnrtfv0123456789ukxc")
+
+
+def _non_ecma262_escapes(pattern: str) -> list[str]:
+    """Every `\\X` in `pattern` where X is not one of ECMA-262's recognised
+    escape targets AND the escape sits outside a `[...]` character class
+    (escaping a `-` is legal INSIDE one). Returns the empty list for a
+    pattern with no such escape."""
+    bad = []
+    in_class = False
+    i = 0
+    while i < len(pattern):
+        c = pattern[i]
+        if c == "\\" and i + 1 < len(pattern):
+            nxt = pattern[i + 1]
+            if not in_class and nxt not in _ECMA262_RECOGNISED_ESCAPES:
+                bad.append(pattern[i:i + 2])
+            i += 2
+            continue
+        if c == "[":
+            in_class = True
+        elif c == "]":
+            in_class = False
+        i += 1
+    return bad
+
+
+def test_store_citation_pattern_has_no_non_ecma262_escape():
+    """Regression guard for the exact defect fixed here, bound to the LIVE
+    pattern (never a hand-copied literal) so a future edit is checked
+    automatically -- `_STORE_CITATION` used to read `alp\\-sdk\\-internal`, an
+    escaped `-` OUTSIDE a character class."""
+    live = V._STORE_CITATION.pattern
+    bad = _non_ecma262_escapes(live)
+    assert not bad, (
+        f"validate_metadata._STORE_CITATION.pattern {live!r} escapes {bad} "
+        f"outside a character class -- invalid under ECMA-262")
+
+    # Mutation proof: reintroducing the exact defect on the live pattern must
+    # be caught by the same helper.
+    mutated = live.replace("alp-sdk-internal", "alp\\-sdk\\-internal")
+    assert mutated != live, "mutation did not change the pattern -- test is vacuous"
+    assert _non_ecma262_escapes(mutated) == ["\\-", "\\-"], (
+        f"the helper failed to flag the reintroduced defect in {mutated!r}")
+
+
+def test_store_citation_pattern_compiles_as_an_ecma262_regexp():
+    """The strongest form of the guard: actually compile the shipped pattern
+    as a `RegExp` under Node's unicode mode (`'u'` flag), the same mode Ajv
+    (and so alp-sdk-vscode's Ajv-based JSON Schema consumer) uses by default.
+    Skipped, not failed, when `node` is not on PATH -- `test_store_citation_
+    pattern_has_no_non_ecma262_escape` above is the portable fallback that
+    always runs."""
+    node = shutil.which("node") or shutil.which("nodejs")
+    if node is None:
+        pytest.skip("node not available on PATH")
+    script = (
+        "try { new RegExp(process.argv[1], 'u'); process.exit(0); } "
+        "catch (e) { console.error(e.message); process.exit(1); }"
+    )
+    result = subprocess.run(
+        [node, "-e", script, V._STORE_CITATION.pattern],
+        capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, (
+        f"validate_metadata._STORE_CITATION.pattern {V._STORE_CITATION.pattern!r} "
+        f"does not compile as an ECMA-262 RegExp under unicode mode: "
+        f"{result.stderr.strip()}")
 
 
 def test_no_published_point_is_a_synthetic_fixture():
@@ -458,6 +587,96 @@ def test_the_fixture_filename_carries_the_digest_of_its_own_profile():
     helper produces for the profile inside it."""
     doc = _load(_BASE)
     assert _BASE.stem.endswith("+" + V._toolchain_profile_digest(doc["toolchain"]))
+
+
+# ---------------------------------------------------------------------------
+# A non-object `npu_toolchain` must not crash the gate with a traceback, and
+# an ethos_u point against a SoC that declares NO npu_toolchain block at all
+# must be refused rather than silently passed.
+# ---------------------------------------------------------------------------
+
+def test_check_soc_vela_memory_profile_survives_a_non_object_npu_toolchain(tmp_path):
+    """`(doc.get("npu_toolchain") or {}).get("vela")` assumed a mapping.  A
+    non-object `npu_toolchain` (e.g. authored as a list) used to raise an
+    unhandled `AttributeError: 'list' object has no attribute 'get'`, proven
+    against the shipped gate at f724d3e4 -- AFTER the schema pass had already
+    printed the real `FAIL ... npu_toolchain: [...] is not of type 'object'`
+    line, so the traceback hid a failure the gate had already found.  The
+    schema catching it separately does not excuse this function crashing;
+    they run as two independent passes over the same file."""
+    soc = tmp_path / "bogus.json"
+    soc.write_text(json.dumps({
+        "ref": "bogus/soc",
+        "npus": [{"type": "ethos-u55", "subtype": "high-perf"}],
+        "npu_toolchain": ["vela"],
+    }), encoding="utf-8")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(V, "REPO", tmp_path)
+        failures = V._check_soc_vela_memory_profile([soc])  # must not raise
+    assert failures and any(
+        "no npu_toolchain.vela" in m for _, msgs in failures for m in msgs), (
+        f"expected a `no npu_toolchain.vela` complaint, got {failures!r}")
+
+
+@pytest.fixture
+def _host_soc_with_non_object_npu_toolchain(tmp_path):
+    """A scratch `metadata/` copy with E1M-AEN801's host SoC spec
+    (`metadata/socs/alif/ensemble/e8.json`)'s `npu_toolchain` replaced by a
+    list, for `_soc_npu_toolchain_names` / the rule-6 toolchain.name
+    cross-check.  Function-scoped and independent of the module-scoped `gate`
+    fixture above, since this mutates a SoC file rather than a perf point and
+    must not leak into the other mutation cases sharing that fixture."""
+    root = tmp_path / "scratch"
+    for sub in ("socs", "e1m_modules"):
+        shutil.copytree(_ROOT / "metadata" / sub, root / "metadata" / sub)
+    e8 = root / "metadata" / "socs" / "alif" / "ensemble" / "e8.json"
+    doc = json.loads(e8.read_text(encoding="utf-8"))
+    doc["npu_toolchain"] = ["vela"]
+    e8.write_text(json.dumps(doc), encoding="utf-8")
+    return root
+
+
+def test_toolchain_name_cross_check_survives_a_non_object_npu_toolchain(
+        _host_soc_with_non_object_npu_toolchain):
+    """The same guard, exercised end to end through
+    `_check_model_perf_semantics`: an `ethos_u` point against a host SoC whose
+    `npu_toolchain` is a list must not crash
+    (`validate_metadata.py`'s `_soc_npu_toolchain_names`)."""
+    doc = _load(_BASE)
+    doc.pop("_fixture", None)
+    path = _host_soc_with_non_object_npu_toolchain / _BASE_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(V, "REPO", _host_soc_with_non_object_npu_toolchain)
+        failures = V._check_model_perf_semantics([path])  # must not raise
+    assert failures, "a non-object npu_toolchain must not be silently accepted"
+
+
+def test_an_ethos_u_point_against_a_soc_with_no_npu_toolchain_block_is_refused(
+        _host_soc_with_non_object_npu_toolchain):
+    """Rule 6's fail-closed contract: `if known_toolchains and tc_name not in
+    known_toolchains:` used to skip silently whenever the SoC declared no
+    `npu_toolchain` block (empty OR non-object both resolve to an empty
+    `known_toolchains` set) -- measured accepted (`OK`) at rc=0 with e8.json's
+    block removed, and again with it set to `{}`, while every sibling rule
+    (2/3/4/5) in this same function refuses an unresolvable SKU rather than
+    pass over it.  A non-object `npu_toolchain` (this fixture) exercises the
+    identical empty-set path `_soc_npu_toolchain_names` takes for a MISSING
+    block, so the same message must fire."""
+    doc = _load(_BASE)
+    doc.pop("_fixture", None)
+    path = _host_soc_with_non_object_npu_toolchain / _BASE_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(V, "REPO", _host_soc_with_non_object_npu_toolchain)
+        failures = V._check_model_perf_semantics([path])
+    assert failures and any(
+        "declares no npu_toolchain block at all" in m
+        for _, msgs in failures for m in msgs), (
+        f"expected a `declares no npu_toolchain block at all` refusal, got "
+        f"{failures!r}")
 
 
 # ---------------------------------------------------------------------------

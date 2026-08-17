@@ -812,7 +812,15 @@ def _check_soc_vela_memory_profile(soc_files) -> list:
         rel = path.relative_to(REPO).as_posix()
         npus = doc.get("npus") or []
         ethos = [n for n in npus if str(n.get("type", "")).startswith("ethos-u")]
-        vela = (doc.get("npu_toolchain") or {}).get("vela") or {}
+        # `npu_toolchain` is a mapping in every valid doc, but the schema pass
+        # that would reject a malformed one (e.g. a list) runs separately and
+        # is not guaranteed to have run first -- guard rather than let a
+        # non-object raise `AttributeError: '<type>' object has no attribute
+        # 'get'` here and abort the whole gate mid-run, hiding the schema
+        # FAIL line that already explains the real problem.
+        npu_toolchain = doc.get("npu_toolchain")
+        npu_toolchain = npu_toolchain if isinstance(npu_toolchain, dict) else {}
+        vela = npu_toolchain.get("vela") or {}
         msgs: list[str] = []
 
         # (1) presence is decided by the accelerator the SoC actually carries.
@@ -1412,12 +1420,17 @@ def _soc_npu_toolchain_names(sku: str, metadata_root: Path) -> set[str]:
     declares -- today always a subset of `{"vela"}`, since `npu_toolchain` is
     only ever written for an Ethos-U part (`_check_soc_vela_memory_profile`
     enforces that pairing on the SoC spec itself).  Empty when the SoC
-    declares no `npu_toolchain` block at all.
+    declares no `npu_toolchain` block at all, OR when it declares one that is
+    not a mapping (guarded rather than left to raise `AttributeError` here --
+    the same shape as `_check_soc_vela_memory_profile`'s `vela` lookup, and
+    the schema pass that would reject the malformed shape runs separately).
 
     Raises `LookupError` for the same reason `_resolve_host_soc` does.
     """
     host = _resolve_host_soc(sku, metadata_root)
-    return set((host.get("npu_toolchain") or {}).keys())
+    npu_toolchain = host.get("npu_toolchain")
+    npu_toolchain = npu_toolchain if isinstance(npu_toolchain, dict) else {}
+    return set(npu_toolchain.keys())
 
 
 def _perf_target_map(sku: str, metadata_root: Path) -> dict[tuple[str, str], str | None]:
@@ -1466,7 +1479,18 @@ def _resolve_perf_targets(sku: str, metadata_root: Path) -> set[tuple[str, str]]
 #: public repo must never carry them (see the repo-wide "no local paths" rule);
 #: a citation that resolves for nobody else also makes the point
 #: unreproducible, which is the only thing a bench measurement is worth.
-_LOCAL_PATH_REFERENCE = re.compile(r"^[/\\]|^[A-Za-z]:[/\\]|onedrive", re.IGNORECASE)
+#:
+#: The drive-letter alternative is deliberately NOT anchored to the string
+#: start (unlike the leading-slash alternative): `https:C:\Users\user\log.txt`
+#: and `http:D:\bench\run.log` -- a Windows drive path tacked on AFTER a
+#: legitimate-looking store -- are still local-machine leaks, and an anchored
+#: `^[A-Za-z]:[/\\]` never sees them.  It still cannot fire on a real
+#: `https://` / `http://` URL: the character immediately before the drive
+#: letter must be the string start or a non-alphanumeric character, and in
+#: `https://example.org/...` the `s` before `://` is preceded by `p`
+#: (alphanumeric), so it never qualifies as a drive letter.
+_LOCAL_PATH_REFERENCE = re.compile(
+    r"^[/\\]|(?:^|[^A-Za-z0-9])[A-Za-z]:[/\\]|onedrive", re.IGNORECASE)
 
 #: The stores a `<store>:<path>` citation may legitimately name.  This
 #: allowlists the STORE SEGMENT itself, not the character class in front of
@@ -1490,8 +1514,17 @@ _STORE_NAMES = ("alp-sdk-internal", "https", "http")
 #: `$ref` a Python constant, so the two are kept in lockstep by
 #: `test_model_source_and_capture_reference_agree_on_the_store_allowlist`
 #: instead, which fails the moment one is edited without the other.
+#: Joined WITHOUT `re.escape`: the three store names contain no regex
+#: metacharacter (a `-` needs escaping only INSIDE a character class), and
+#: `re.escape` used to escape it anyway, producing `alp\-sdk\-internal` --
+#: legal for Python's `re` (Annex-B leniency lets `\-` mean a literal `-`
+#: outside a class) but an invalid escape under ECMA-262 `u`/`v` mode, which
+#: is what Ajv (and any JS/TS JSON Schema consumer, e.g. alp-sdk-vscode)
+#: compiles a `pattern` string under by default (`unicodeRegExp: true`) --
+#: so the shipped schema could not be compiled by a JavaScript consumer at
+#: all.  `test_store_citation_pattern_has_no_non_ecma262_escape` guards this.
 _STORE_CITATION = re.compile(
-    r"^(?:" + "|".join(re.escape(name) for name in _STORE_NAMES) + r"):\S")
+    r"^(?:" + "|".join(_STORE_NAMES) + r"):\S")
 
 #: The bench recipe's timed-run floor (docs/bench/model-perf-capture.md §4).
 #: 100 timed runs after >= 10 discarded warm-ups, so `latency_ms_p95` is the
@@ -1568,7 +1601,16 @@ def _check_model_perf_semantics(perf_files) -> list:
          SoC spec's own `npu_toolchain` block names (today always `vela`) --
          `toolchain.name` is one of the eight consumer match-key fields, so an
          `ethos_u` point naming, say, `dxcom` is not cosmetic: it makes the
-         point unmatchable, or matchable by the wrong consumer.
+         point unmatchable, or matchable by the wrong consumer.  This
+         `toolchain.name` cross-check is `ethos_u`-only: it cannot be enforced
+         for `drpai`/`deepx_dxm1`/`cpu` today because their host SoC specs
+         declare no `npu_toolchain` block at all (only an Ethos-U part carries
+         one).  A SoC that resolves as `ethos_u` yet declares no
+         `npu_toolchain` block is a refusal, not a skip, matching this
+         function's other fail-closed rules -- unreachable while every
+         shipping Ethos-U SoC spec's own `npu_toolchain.vela` block is itself
+         enforced present by `_check_soc_vela_memory_profile`, but not
+         provably so from this function alone.
       7. `measured.latency_ms_p95` must be >= `measured.latency_ms_mean`.  A
          p95 below the mean is not a tighter number, it is two runs' figures
          pasted into one point.
@@ -1755,6 +1797,14 @@ def _check_model_perf_semantics(perf_files) -> list:
             # the point unmatchable, or matchable by the wrong consumer.  The
             # SoC spec's own npu_toolchain block already names the only
             # toolchain that compiles for this accelerator.
+            #
+            # This is ETHOS_U ONLY -- the rationale above applies identically
+            # to drpai/deepx_dxm1/cpu points, but it cannot be enforced for
+            # them today because their host SoC specs (metadata/socs/renesas/
+            # rzv2n/n44.json, metadata/socs/deepx/dx/m1.json) declare no
+            # `npu_toolchain` block at all; `npu_toolchain` is written only
+            # for an Ethos-U part.  Adding that block to those SoC specs would
+            # let this same cross-check run for those backends too.
             if isinstance(sku, str) and isinstance(tc_name, str):
                 try:
                     known_toolchains = _soc_npu_toolchain_names(sku, metadata_root)
@@ -1764,7 +1814,17 @@ def _check_model_perf_semantics(perf_files) -> list:
                         f"module's SoC spec to check toolchain.name against "
                         f"its npu_toolchain block ({exc})")
                 else:
-                    if known_toolchains and tc_name not in known_toolchains:
+                    if not known_toolchains:
+                        msgs.append(
+                            f"measured_on.sku={sku!r}: backend `ethos_u` but "
+                            f"this module's SoC spec declares no "
+                            f"npu_toolchain block at all -- refused rather "
+                            f"than skipped, because toolchain.name="
+                            f"{tc_name!r} cannot be checked against a "
+                            f"toolchain list that is not there, and this "
+                            f"function's other rules already refuse an "
+                            f"unresolvable SKU rather than pass over it")
+                    elif tc_name not in known_toolchains:
                         msgs.append(
                             f"backend `ethos_u` but toolchain.name={tc_name!r} "
                             f"-- {sku}'s SoC spec's npu_toolchain block names "
