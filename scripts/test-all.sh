@@ -331,6 +331,7 @@ stage_twister() {
     python3 "${ZEPHYR_BASE}/scripts/twister" \
         --testsuite-root "${REPO_ROOT}/tests/unit" \
         --testsuite-root "${REPO_ROOT}/tests/zephyr" \
+        --testsuite-root "${REPO_ROOT}/tests/console" \
         --testsuite-root "${REPO_ROOT}/examples" \
         -p native_sim/native/64 \
         --extra-args=CONFIG_COMPILER_WARNINGS_AS_ERRORS=y \
