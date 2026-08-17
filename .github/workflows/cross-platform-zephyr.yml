@@ -36,13 +36,27 @@
 #
 #     NOTE: this workflow's jobs (python-smoke, loader-smoke) are not
 #     in dev's or main's required-status-check list (verified via
-#     `gh api repos/alplabai/alp-sdk/rulesets` -> `[]` and
 #     `.../branches/{dev,main}/protection/required_status_checks`,
 #     neither of which lists these six contexts), so a red run here
 #     is visible but does not block merge yet -- removing
 #     continue-on-error buys a real signal, not enforcement. Adding
 #     these six contexts (three OSes x two jobs) to branch protection
-#     is a separate follow-up requiring the maintainer's decision.
+#     is a separate follow-up requiring the maintainer's decision
+#     (alp-sdk#1528). `dev` runs an active merge-queue ruleset ("dev
+#     merge queue", confirmed via `gh api
+#     repos/alplabai/alp-sdk/rulesets`), so before that promotion
+#     happens the workflow ALSO needs `merge_group` in its own
+#     trigger list -- otherwise a queued PR would wait on a check
+#     this workflow can never raise on a `merge_group` ref (#1415),
+#     exactly the trap `pr-twister.yml` and `pr-static-analysis.yml`
+#     already document for their own required contexts. Added below.
+#     What #1528 does NOT fix: `pull_request`/`push` below still
+#     `paths:`-filter this workflow, so a PR that touches none of
+#     those paths never runs it at all -- promoting python-smoke to
+#     required without ALSO resolving that (widen the filter, or add
+#     a `pr-bootstrap-distro-install.yml`-style unfiltered trigger +
+#     fail-closed skip) reproduces the alp-sdk#1474 permanently-
+#     blocked-PR incident. Still the maintainer's call.
 #
 #   - check_cross_platform.py: runs with --fail-on-warning on every
 #                               runner. The existing-doc cleanup this
@@ -109,6 +123,18 @@ on:
       # back to a single filename is how two unparseable workflows
       # reached `dev` unnoticed.
       - '.github/workflows/**'
+  # NOT yet load-bearing -- python-smoke/loader-smoke are not required
+  # contexts on `dev` or `main` today (see the NOTE above, alp-sdk#1528).
+  # Added ahead of that promotion anyway: `dev` runs an active merge-queue
+  # ruleset, and GitHub raises `merge_group` -- not `push` or
+  # `pull_request` -- for a queued entry. pr-twister.yml and
+  # pr-static-analysis.yml already needed this for their own required
+  # contexts (#1415); a future required-context here would hit the same
+  # AWAITING_CHECKS hang without it. Bare (no `paths:`): `merge_group`
+  # doesn't support the same path-filter semantics `pull_request`/`push`
+  # get above, and neither job below carries a job-level `if:` that would
+  # need teaching about this event.
+  merge_group:
   workflow_dispatch:
 
 # Cancel in-flight runs on the same branch when a new commit lands.
