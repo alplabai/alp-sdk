@@ -41,7 +41,7 @@ with **no `--config` at all** exits `rc=0`, its network summary reports
 verbatim:
 
 ```
-Warning: No configuration file specified. Using a default of ['<venv>/ethosu/config_files/Arm/vela.ini']. Compilation may be invalid or non-optimal.
+Warning: No configuration file specified. Using a default of ['<venv>/lib/python3.12/site-packages/ethosu/config_files/Arm/vela.ini']. Compilation may be invalid or non-optimal.
 Warning: No system configuration specified. Using a default of Ethos_U85_SYS_DRAM_Mid. Compilation may be invalid or non-optimal.
 ```
 
@@ -49,10 +49,34 @@ Warning: No system configuration specified. Using a default of Ethos_U85_SYS_DRA
 (`vela --list-configs Arm/vela.ini` lists it beside five siblings — no vendor
 `.ini` needed to reach it), so **a correct arena figure alone does not prove
 `ensemble_vela.ini` was used.** `system_config` is a different story: with
-`--config`/`--system-config` not both given, it silently falls back to
+**`--system-config` not given at all**, it silently falls back to
 `Ethos_U85_SYS_DRAM_Mid` — one of eleven Arm built-in `System_Config`
 sections in the same `Arm/vela.ini` — which is **DRAM-backed**, a machine the
-E8 does not have. Alif's own SRAM-only sections (`Ethos_U85_SRAM_Only` and its
+E8 does not have.
+
+That fallback is keyed on `--system-config` itself being absent, not on
+`--config` also being absent — measured, both mixed cases, on this fixture:
+
+```
+vela --accelerator-config ethos-u85-256 --memory-mode Sram_Only \
+     --system-config Ethos_U85_SYS_Flash_Low \
+     --output-dir <tmp> tests/fixtures/models/person_detect_int8.tflite
+```
+
+exits `rc=0` with no fallback at all — its network summary reports `System
+configuration  Ethos_U85_SYS_Flash_Low`, the name actually passed. And
+`--system-config` on its own, with neither `--config` nor `--memory-mode`
+given:
+
+```
+vela --accelerator-config ethos-u85-256 --system-config Ethos_U85_SYS_DRAM_Low \
+     --output-dir <tmp> tests/fixtures/models/person_detect_int8.tflite
+```
+
+also exits `rc=0` and reports `System configuration  Ethos_U85_SYS_DRAM_Low`
+— again the name actually passed, not silently overridden to
+`Ethos_U85_SYS_DRAM_Mid`. Only the "neither given" invocation quoted above
+falls back. Alif's own SRAM-only sections (`Ethos_U85_SRAM_Only` and its
 per-core siblings) live only in the proprietary `ensemble_vela.ini`, which
 alp-sdk does not redistribute. `memory_mode` and `system_config` are not the
 same claim: `memory_mode` governs **placement** (where the arena lives, and
@@ -88,11 +112,18 @@ exists to catch, one field over — and rule 14 alone cannot see it.
 `System_Config` names — checked against the flag, not against a value the
 spec may not declare (`_VELA_BUILTIN_SYSTEM_CONFIGS` in
 `scripts/validate_metadata.py`, measured against `ethos-u-vela` 5.1.0's own
-`Arm/vela.ini` via `vela --list-configs`). **A point captured without
-`ensemble_vela.ini` on a part that requires one is refused at publish time**,
-with no override field: a genuinely off-profile experiment belongs in the raw
-capture log `capture.reference` already cites, never in
-`metadata/model_perf/`.
+`Arm/vela.ini` via `vela --list-configs`). **A point that records one of
+vela's Arm built-in `system_config` names on a part that requires a vendor
+one is refused at publish time**, with no override field: a genuinely
+off-profile experiment belongs in the raw capture log `capture.reference`
+already cites, never in `metadata/model_perf/`. That is a check on the
+recorded NAME, not proof the vendor `.ini` compiled the run: a point
+recording `system_config: "Ethos_U85_SRAM_Only"` (Alif's own, outside the
+built-in set) publishes clean through the real gate
+(`tests/scripts/test_model_perf_metadata.py::
+test_a_vendor_system_config_passes_on_the_part_that_requires_one`) with
+nothing in that check proving `ensemble_vela.ini` was ever on the compiling
+machine — only that the value written down isn't one of Arm's eleven.
 
 This makes `ensemble_vela.ini` — Alif-proprietary, gitignored
 (`.gitignore:150-155`), not redistributed by alp-sdk — a **hard prerequisite
@@ -101,6 +132,35 @@ falls back to `Ethos_U85_SYS_DRAM_Mid`, rule 15 refuses the resulting point,
 and no Ethos-U measurement can be published from that run. **Get
 `ensemble_vela.ini` before you book bench time**, not after a capture is
 refused.
+
+**Getting the file is not the whole recipe — vela also refuses `--config`
+passed without a paired `--system-config`, before compilation starts.**
+Measured on this fixture:
+
+```
+vela --accelerator-config ethos-u85-256 --memory-mode Sram_Only \
+     --config Arm/vela.ini \
+     --output-dir <tmp> tests/fixtures/models/person_detect_int8.tflite
+```
+
+exits `rc=1` and prints, verbatim (only the install path elided, same
+reason as above):
+
+```
+ethosu.vela.errors.CliOptionError: "Error: Incorrect argument to CLI option --config=['<venv>/lib/python3.12/site-packages/ethosu/config_files/Arm/vela.ini']: Specifying a configuration file is not allowed when using a default system configuration"
+```
+
+Recognise that traceback if it shows up on the bench run that used the
+`.ini` you just got — it means `--config` was passed alone. The correct
+shape pairs `--config` with an explicit `--system-config` (and, on the E8,
+`--memory-mode`) in the SAME invocation — never `--config` on its own; §2's
+full command line is the pairing to copy:
+
+```
+vela --accelerator-config <accel_config> --config <ensemble_vela.ini> \
+     --system-config <system_config> --memory-mode <memory_mode> \
+     --output-dir <out_dir> <model.tflite>
+```
 
 *Recognise the failure at the terminal, not at review.* Compiling without
 `--config` still exits `rc=0` — vela does not fail the compile — and prints
@@ -242,7 +302,16 @@ vela --accelerator-config <accel_config> \
      <model.tflite>
 ```
 
-* `--config` / `--system-config` / `--memory-mode` are **all three or none**.
+* Pass **all three of `--config` / `--system-config` / `--memory-mode`
+  explicitly, every capture** — this is alp-sdk's own bench policy, not a
+  vela CLI requirement: §0(a) measures several partial combinations that
+  each exit `rc=0` on their own (`--memory-mode` alone; `--system-config`
+  alone; `--memory-mode` with `--system-config` and no `--config`), and only
+  `--config` passed alone hard-fails (`rc=1`, §0(a)). The policy exists
+  because omitting any of the three risks the exact hazard §0(a)
+  demonstrates: a flagless `--system-config` silently resolves to
+  `Ethos_U85_SYS_DRAM_Mid` — DRAM-backed, a machine the E8 does not have —
+  with no diagnostic beyond two easily-missed `Warning:` lines and `rc=0`.
   The Alif `.ini` is proprietary and comes from `alp-sdk-internal`; the SoC
   spec's `npu_toolchain.vela` block
   (`metadata/socs/alif/ensemble/e8.json` declares `memory_mode: "Sram_Only"`,

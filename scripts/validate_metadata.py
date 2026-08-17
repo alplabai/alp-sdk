@@ -1791,18 +1791,30 @@ def _check_model_perf_semantics(perf_files) -> list:
          next to a latency modelled on a machine the part does not have,
          at `confidence: "certain"`, undetected.  The flag is the SoC
          spec's own declaration that Arm's built-in `System_Config` set does
-         not describe this part (every Alif Ensemble `System_Config`
-         section models `OffChipFlash` or `Dram` bandwidth; none is
-         SRAM-only) -- so this rule keys off the FLAG rather than off a
-         `system_config` value the spec may not carry.  Deliberately the
-         INVERSE of an enumerated denylist of "known-bad" profile names:
-         Arm ships new built-in `System_Config` sections in new
-         `ethos-u-vela` releases (eleven today, pinned in
-         `_VELA_BUILTIN_SYSTEM_CONFIGS` against 5.1.0's own
-         `Arm/vela.ini`, measured via `vela --list-configs`), and "not one
-         of Arm's" stays correct across that churn where a fixed list of
-         "known-bad" names would silently stop matching a name Arm adds
-         later.  Silent (like rule 14) wherever the flag is absent or
+         not describe this part (every Arm BUILT-IN `System_Config` section
+         models `OffChipFlash` or `Dram` bandwidth; none is SRAM-only --
+         Alif's own sections are the opposite of that: SRAM-only is
+         precisely what `ensemble_vela.ini` adds) -- so this rule keys off
+         the FLAG rather than off a `system_config` value the spec may not
+         carry.  This IS an enumerated list of Arm's own built-in names
+         (`_VELA_BUILTIN_SYSTEM_CONFIGS`, eleven today, pinned against
+         `ethos-u-vela` 5.1.0's own `Arm/vela.ini`, measured via `vela
+         --list-configs`), not a self-updating derivation -- it goes stale
+         the moment a later `ethos-u-vela` release ships a twelfth
+         `System_Config` section, because that new name is not "one of
+         Arm's" as far as this hardcoded set is concerned, and a point
+         recording it would pass this rule silently, undetected, the same
+         way rule 14 misses the DRAM-backed-default case this rule exists
+         to catch.  What keeps the set honest is
+         `tests/scripts/test_vela_profile_metadata.py::
+         test_builtin_system_config_names_are_fresh_against_the_installed_vela_ini`:
+         it re-derives the section names from the INSTALLED `Arm/vela.ini`
+         on every run where `ethos-u-vela` is importable, and fails --
+         never a silent skip when the toolchain IS present -- the moment
+         this literal, or its second hand-kept copy in that same test
+         file, drifts from what the toolchain actually ships.  Bump
+         `_VELA_BUILTIN_SYSTEM_CONFIGS` (and that test-file twin) when that
+         test does.  Silent (like rule 14) wherever the flag is absent or
          `false` -- imx93 declares `system_config_requires_vendor_config:
          false`, so this rule never fires there, even when its point
          happens to record an Arm built-in `system_config` (imx93's own
@@ -2166,11 +2178,11 @@ def _check_model_perf_semantics(perf_files) -> list:
                 # memory_mode check is satisfied while system_config is
                 # silently vela's DRAM-backed flagless default, and rule 14
                 # stays silent because there is nothing declared to
-                # contradict).  This is the inverse of an enumerated
-                # denylist on purpose (see this function's own docstring,
-                # rule 15): "not one of Arm's built-ins" stays correct as
-                # Arm adds sections in later ethos-u-vela releases, where a
-                # fixed "known-bad" list would not.
+                # contradict).  `_VELA_BUILTIN_SYSTEM_CONFIGS` IS a hardcoded
+                # enumeration of Arm's eleven names, not a self-updating
+                # derivation (see this function's own docstring, rule 15,
+                # for why and for the freshness test that catches the drift
+                # when ethos-u-vela ships a twelfth section).
                 if declared_vela.get("system_config_requires_vendor_config") is True:
                     point_sysconf = toolchain.get("system_config")
                     if (isinstance(point_sysconf, str) and point_sysconf

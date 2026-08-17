@@ -18,10 +18,13 @@ inheriting vela's default.  These tests pin the invariants that make the block
 safe to consume; `scripts/validate_metadata.py`'s `_check_soc_vela_memory_profile`
 enforces the same set inside the metadata gate.
 """
+import configparser
 import json
 from pathlib import Path
 
 import pytest
+
+import validate_metadata as V  # scripts/ on sys.path via conftest
 
 _ROOT = Path(__file__).resolve().parents[2]
 _META = _ROOT / "metadata"
@@ -278,4 +281,68 @@ def test_a_soc_with_no_ethos_u_npu_declares_no_vela_profile():
              if not _has_ethos_u(spec) and _vela(spec)]
     assert not stray, (
         f"SoCs with npu_toolchain.vela but no Ethos-U NPU: {stray}"
+    )
+
+
+def test_builtin_system_config_names_are_fresh_against_the_installed_vela_ini():
+    """The eleven names in `_BUILTIN_SYSTEM_CONFIGS` (this file) and in
+    `scripts/validate_metadata.py`'s `_VELA_BUILTIN_SYSTEM_CONFIGS` (rule 15)
+    are two independent, hand-kept copies of the same set -- and rule 15's own
+    docstring stakes a durability claim on them: "not one of Arm's" is meant
+    to stay correct when a later `ethos-u-vela` release adds a twelfth
+    `System_Config` section, where a name comparison against these two
+    literals alone would not notice the new section at all. Nothing re-derives
+    the literals from the toolchain, so that claim is only as true as this
+    test keeps it: freshness-check both copies against the `System_Config`
+    sections the INSTALLED `Arm/vela.ini` actually ships, every run.
+
+    Skips LOUDLY, never a silent pass, when `ethos-u-vela` is not on this
+    interpreter (it is an optional, heavy toolchain -- same posture as
+    `test_gen_npu_ops.py`'s vela-on-PATH smoke test): the location is derived
+    from the importable `ethosu` package's own `__path__`, never a hardcoded
+    venv path (`check_local_paths.py` would refuse that in a checked-in file).
+    """
+    ethosu = pytest.importorskip(
+        "ethosu",
+        reason="ethos-u-vela not installed on this interpreter -- cannot "
+        "freshness-check _BUILTIN_SYSTEM_CONFIGS / "
+        "_VELA_BUILTIN_SYSTEM_CONFIGS against the installed Arm/vela.ini "
+        "(pip install ethos-u-vela)",
+    )
+    ini_candidates = [Path(root) / "config_files" / "Arm" / "vela.ini"
+                       for root in ethosu.__path__]
+    ini_path = next((p for p in ini_candidates if p.is_file()), None)
+    if ini_path is None:
+        pytest.skip(
+            f"ethosu package importable ({list(ethosu.__path__)}) but no "
+            f"config_files/Arm/vela.ini found under it -- cannot "
+            f"freshness-check the built-in System_Config name sets"
+        )
+
+    parser = configparser.ConfigParser()
+    parser.read(ini_path)
+    installed = {name.split(".", 1)[1] for name in parser.sections()
+                 if name.startswith("System_Config.")}
+    assert installed, f"{ini_path} parsed to zero [System_Config.*] sections"
+
+    assert installed == _BUILTIN_SYSTEM_CONFIGS, (
+        f"this file's _BUILTIN_SYSTEM_CONFIGS is stale against the installed "
+        f"{ini_path}: the .ini has {sorted(installed - _BUILTIN_SYSTEM_CONFIGS)} "
+        f"not listed here, and this file lists "
+        f"{sorted(_BUILTIN_SYSTEM_CONFIGS - installed)} the .ini does not have -- "
+        f"update _BUILTIN_SYSTEM_CONFIGS to match"
+    )
+    assert installed == V._VELA_BUILTIN_SYSTEM_CONFIGS, (
+        f"scripts/validate_metadata.py's _VELA_BUILTIN_SYSTEM_CONFIGS is stale "
+        f"against the installed {ini_path}: the .ini has "
+        f"{sorted(installed - V._VELA_BUILTIN_SYSTEM_CONFIGS)} not listed there, "
+        f"and validate_metadata.py lists "
+        f"{sorted(V._VELA_BUILTIN_SYSTEM_CONFIGS - installed)} the .ini does not "
+        f"have -- update _VELA_BUILTIN_SYSTEM_CONFIGS to match"
+    )
+    assert _BUILTIN_SYSTEM_CONFIGS == V._VELA_BUILTIN_SYSTEM_CONFIGS, (
+        "this file's _BUILTIN_SYSTEM_CONFIGS and scripts/validate_metadata.py's "
+        "_VELA_BUILTIN_SYSTEM_CONFIGS have drifted apart from each other even "
+        "though both matched the installed .ini above -- update both to the "
+        "same set"
     )
