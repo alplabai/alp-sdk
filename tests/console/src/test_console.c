@@ -252,4 +252,29 @@ ZTEST(alp_console, test_wifi_connect_still_accepts_wpa3_token)
 	                 out);
 }
 
+ZTEST(alp_console, test_wifi_ap_rejects_unrecognised_fourth_token)
+{
+	const char *out = run("alp companion wifi ap my ssid secret");
+
+	zassert_not_null(strstr(out, "unrecognised argument"),
+	                 "an unrecognised 4th token must fail loudly, not be dropped: %s",
+	                 out);
+	zassert_not_null(strstr(out, "must be quoted"), "the refusal must say how to fix it: %s", out);
+	/* It must be rejected DURING parsing -- before any companion/state check. */
+	zassert_is_null(strstr(out, "companion not registered"),
+	                "a usage error must not be reported as a missing companion: %s",
+	                out);
+}
+
+ZTEST(alp_console, test_wifi_ap_still_accepts_wpa3_token)
+{
+	const char *out = run("alp companion wifi ap \"my ssid\" secret wpa3");
+
+	zassert_is_null(
+	    strstr(out, "unrecognised argument"), "\"wpa3\" is the one legal 4th token: %s", out);
+	zassert_not_null(strstr(out, "companion not registered"),
+	                 "a well-formed wpa3 ap should reach the companion check: %s",
+	                 out);
+}
+
 ZTEST_SUITE(alp_console, NULL, suite_setup, NULL, NULL, NULL);
