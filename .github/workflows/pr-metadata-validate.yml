@@ -138,9 +138,13 @@ jobs:
           python-version-file: .python-version
 
       - name: Install Python deps
-        # model-io adds tflite + flatbuffers so the .alpmodel tensor-I/O
-        # tests run here (they importorskip otherwise); cbor2 is a base dep.
-        run: pip install -e ".[dev,model-io]"
+        # model-compile is model-io (tflite + flatbuffers, for the .alpmodel
+        # tensor-I/O tests, which importorskip otherwise) PLUS ethos-u-vela:
+        # without it, tests/scripts/test_vela_profile_metadata.py's
+        # pytest.importorskip("ethosu") guard skips in every automatic run,
+        # so a System_Config Arm adds upstream would never be caught here.
+        # cbor2 is a base dep either way.
+        run: pip install -e ".[dev,model-compile]"
 
       - name: Validate every SoC file against the v1 schema
         run: python3 scripts/validate_metadata.py
