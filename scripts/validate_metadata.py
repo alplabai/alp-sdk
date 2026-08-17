@@ -694,9 +694,15 @@ def _check_soc_npu_pairing(soc_files) -> list:
     byte-identical in both M55 cores' generated CMSIS headers (rtss_hp/soc.h
     and rtss_he/soc.h), unlike the two U55s, which alias the same local
     address (0x400E1000) under per-core names (NPU_HP_BASE / NPU_HE_BASE)
-    with an interrupt in only their own core's NVIC. Whether the A32 cluster
-    can also reach the U85 is unverified -- there is no A32 SVD view or
-    board devicetree NPU node either way.
+    with an interrupt in only their own core's NVIC. The A32 cluster can
+    reach the U85 too -- register-programmable, not merely interrupt-notified:
+    Alif E8 HWRM (AHRM0012NDA v0.3) Table 10-2 places 0x49042000 inside the
+    Shared Peripherals row (0x48000000, 32MB -- A32/M55-HP/M55-HE all Y),
+    unlike the M55-local-peripherals row directly above it (A32 N); Table 10-6
+    lists NPU-HG at that same 0x49042000 among the Shared Peripherals; and
+    Table 4-13 fans NPU_HG_IRQ to all three cores -- GIC400_IRQS[355] on the
+    A32, M55HP_IRQS[366] / M55HE_IRQS[366] on the M55s (366 is the M55 NVIC
+    number, not an A32 IRQ; the A32's own number, via GIC400, is 355).
     Returns a failure list shaped like `_check_files()`.
     """
     failures: list[tuple[Path, list[str]]] = []

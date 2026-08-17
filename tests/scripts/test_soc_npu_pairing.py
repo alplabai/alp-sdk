@@ -138,3 +138,38 @@ def test_no_shipped_metadata_or_schema_claims_an_hg_subsystem():
         "RTSS-HP, A32 APSS); NPU_HG is the U85 NPU block's own instance "
         "name, not a fourth subsystem: " + "; ".join(hits)
     )
+
+
+def test_no_shipped_metadata_or_schema_claims_a32_npu_reach_is_unverified():
+    """Whether the A32 cluster can reach the E8's Ethos-U85 (NPU_HG,
+    0x49042000) used to be hedged as unverified in both `paired_core`'s
+    schema description and `_check_soc_npu_pairing`'s own docstring -- "there
+    is no A32 SVD view or board devicetree NPU node to confirm either way".
+    It is now class-1 vendor-sourced: the Alif E8 Hardware Reference Manual
+    (AHRM0012NDA v0.3) Table 10-2 places NPU_HG's 0x49042000 inside the
+    Shared Peripherals region (A32/M55-HP/M55-HE all Y, unlike the
+    M55-local-peripherals row above it), Table 10-6 lists NPU-HG there by
+    address, and Table 4-13 fans its interrupt to all three cores
+    (GIC400_IRQS[355] on the A32). Same two-surface walk as the HG-subsystem
+    pin above, and for the same reason: `metadata/**` alone cannot see
+    `_check_soc_npu_pairing`'s docstring in `scripts/validate_metadata.py`.
+    `tests/scripts/` is deliberately NOT walked -- this docstring itself
+    quotes the forbidden phrase. Stops either surface from reintroducing the
+    now-superseded hedge."""
+    hits = []
+    needle = "unverified -- there is no A32 SVD view or board devicetree NPU node"
+    for pattern in ("metadata/**/*", "scripts/**/*.py"):
+        for p in sorted(V.REPO.glob(pattern)):
+            if not p.is_file():
+                continue
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if needle in text:
+                hits.append(f"{p.relative_to(V.REPO)}")
+    assert hits == [], (
+        "shipped metadata/schema text or scripts/ source must not reassert "
+        "A32-vs-U85 reachability as unverified -- the Alif E8 HWRM "
+        "(AHRM0012NDA v0.3) Tables 10-2/10-6/4-13 settle it: " + "; ".join(hits)
+    )
