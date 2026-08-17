@@ -92,7 +92,16 @@ jobs:
     # or the run was dispatched by hand.
     if: needs.detect.outputs.renode == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # #1477: this job is `detect`-gated (above) and never fired in the 30
+    # most-recent successful runs of this file sampled for #1477 -- every
+    # per-step timeout-minutes below is therefore a default, not a
+    # measurement, matched to the equivalent step class on this file's
+    # sibling renode gates (pr-renode-aen-smoke.yml,
+    # pr-renode-v2n-sci0-smoke.yml) where real timings exist. Raised from
+    # 40 -> 45 to keep headroom over the sum-of-step-caps model (44min)
+    # after giving the three `west build` steps below 5min each instead
+    # of a flat 3min.
+    timeout-minutes: 45
 
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
@@ -187,12 +196,16 @@ jobs:
           "$HOME/renode/renode" --version
 
       # Build a headless V2N M33 image whose console lands in ram_console.
+      # #1477: no measurable run history (see the job-level comment
+      # above); defaulted to 5min, matching a real `west build` step's
+      # cap on the sibling renode gates rather than the flat 3min this
+      # job's other (non-build) setup steps use.
       - name: Build headless V2N M33 ram_console image
         id: build_fw
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           # Register alp-sdk as a Zephyr module so its board_root/dts_root
@@ -210,11 +223,13 @@ jobs:
       # Build a real AEN M55-HP image, ITCM-linked (chosen zephyr,flash =
       # &itcm) so it runs from the CPU-local 0x0 -- dodging Renode 1.16.1's
       # high-VTOR Cortex-M55 bug.  The M55 has a wired UART5 console (#687).
+      # #1477: no measurable run history; same 5min default as the
+      # V2N build step above.
       - name: Build AEN M55 ITCM-run image
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           west build -p always \
@@ -239,11 +254,15 @@ jobs:
           test -f "${GITHUB_WORKSPACE}/tflite-micro/zephyr/module.yml"
 
       # Build the aen-sim-vision demo (real TFLM inference on the M55).
+      # #1477: no measurable run history; same 5min default -- this
+      # was previously 3min, LOWER than the plain hello_world build cap
+      # on the sibling gate, which was backwards for a TFLM-inference
+      # image that does strictly more work.
       - name: Build aen-sim-vision (TFLM) ITCM-run image
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           west build -p always \

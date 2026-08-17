@@ -281,9 +281,17 @@ jobs:
 
       # ---------------------------------------------------------
       # 4. Test sweep -- the same pytest battery the Linux PR
-      #    gate runs.  ~370 tests; <30 s on every OS.
+      #    gate runs.  ~370 tests; <30 s on every OS on Linux/macOS, but
+      #    Windows is far slower (worst observed successful run 1009s/
+      #    16.8min across the sampled history) -- #1477 gave this step an
+      #    explicit timeout-minutes rather than leaving it to the
+      #    uncapped-step 1min/step budget
+      #    test_job_ceiling_exceeds_the_sum_of_its_step_timeouts assumes,
+      #    which was never true for this step (see that constant's own
+      #    comment in the test file).
       # ---------------------------------------------------------
       - name: pytest tests/scripts/
+        timeout-minutes: 25
         run: python -m pytest tests/scripts/ -q
 
   # ---------------------------------------------------------------

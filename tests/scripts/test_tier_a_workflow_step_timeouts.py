@@ -232,10 +232,20 @@ def test_network_and_compile_steps_carry_their_own_timeout(workflow: Path) -> No
                 f"the job's {_ceiling(job)}-minute ceiling"
             )
 
-    assert any_flagged, (
-        f"no step in any {workflow.name} job matched the network/compile "
-        f"heuristic -- the heuristic itself is broken"
-    )
+    if not any_flagged:
+        # #1477: this used to be a bare `assert any_flagged`, correct only
+        # while WORKFLOWS was the original two files (#1274's
+        # pr-tier-a-libraries.yml and #1319's pr-twister.yml), both of
+        # which are network/compile-heavy by construction. Now that
+        # WORKFLOWS is every workflow in the repo, a genuinely pure-local
+        # file (no marketplace `uses:`, no pip/apt/west/curl/wget/git-
+        # clone/cmake/make/twister `run:` body) is a real, valid shape --
+        # asserting on it would name "the heuristic itself is broken" at
+        # the wrong culprit. Skip instead of failing; if a future workflow
+        # SHOULD have matched and didn't, that is a `_NETWORK_OR_COMPILE_
+        # MARKERS` gap to fix directly, not something this per-file test
+        # can distinguish from "this file really has none".
+        pytest.skip(f"{workflow.name} has no step matching the network/compile heuristic -- nothing here needs its own timeout-minutes")
 
 
 # A step that does not match the network/compile heuristic above (so the

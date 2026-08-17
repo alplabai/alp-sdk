@@ -127,16 +127,19 @@ jobs:
   validate:
     name: validate · soc-spec-v1
     runs-on: ubuntu-latest
-    # #1477: worst observed successful run 1069s/17.8min across 3 sampled
-    # runs -- driven almost entirely by the "Pytest -- linter + schema
-    # regression + topology defaults" step (~757s of that total), which is
-    # pure local Python and so carries no timeout-minutes of its own; the
-    # job ceiling is what actually bounds it. This job also runs ~46
-    # other uncapped local-check steps (the `Gate — ...` sweep), each
-    # budgeted 1min by test_job_ceiling_exceeds_the_sum_of_its_step_timeouts
-    # -- that budget sum, not the raw 2x-observed figure, is what pushes
-    # the ceiling to 60min rather than the ~40min a bare 2x would give.
-    timeout-minutes: 60
+    # #1477: worst observed successful run 812s/13.5min for the "Pytest
+    # -- linter + schema regression + topology defaults" step alone
+    # (corrected from a 3-run sample and now given its own explicit cap
+    # below rather than riding the 1min/step uncapped-step budget --
+    # that budget was never true for this step, see the comment on
+    # `_UNCAPPED_STEP_BUDGET_MINUTES` in the test file). With that step
+    # capped at 20min, the sum-of-step-caps model is: 12min (5
+    # already-capped steps) + 20min (the pytest step) + 45min (the
+    # remaining ~45 trivial local `Gate — ...`/schema-check steps,
+    # budgeted 1min each by the test) = 77min, so the ceiling needs
+    # real headroom above that, not just above the ~18min the job
+    # actually takes on a real run.
+    timeout-minutes: 80
 
     steps:
       - name: Checkout
@@ -501,6 +504,11 @@ jobs:
       # for commit e3a4c6b's bulk-strip).  These all share fixtures
       # with the orchestrator tests and run in <2 s.
       - name: Pytest -- linter + schema regression + topology defaults
+        # #1477: worst observed successful run 812s/13.5min -- explicit
+        # cap instead of the (untrue for this step) 1min uncapped-step
+        # budget; see the job-level comment above for the sum-of-caps
+        # this ceiling has to clear.
+        timeout-minutes: 20
         run: |
           python3 -m pytest tests/scripts/ -v --tb=short
 
