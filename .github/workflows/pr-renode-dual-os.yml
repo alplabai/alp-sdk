@@ -63,7 +63,7 @@ jobs:
 
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         timeout-minutes: 2
         with:
           path: alp-sdk
@@ -95,7 +95,7 @@ jobs:
       # pr-bitbake.yml run (when triggered via workflow_run) or
       # the latest successful run on main (when manually dispatched).
       - name: Download V2N A55 bitbake image
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         timeout-minutes: 2
         with:
           name: bitbake-e1m-v2n101-a55-image
@@ -121,7 +121,7 @@ jobs:
       # an explicit `actions/upload-artifact` for the per-slice ELF
       # in pr-alp-build.yml, update the name pattern below.
       - name: Download M33-SM Zephyr ELF
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         timeout-minutes: 2
         with:
           name: system-manifest-E1M-V2N101-heterogeneous-default

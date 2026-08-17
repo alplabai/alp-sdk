@@ -44,7 +44,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         timeout-minutes: 3
         with:
           fetch-depth: 0  # need history so HEAD~ resolves
@@ -128,7 +128,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         timeout-minutes: 2
 
       - name: Install cppcheck
@@ -164,7 +164,7 @@ jobs:
 
       - name: Upload cppcheck.xml
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         timeout-minutes: 2
         with:
           name: cppcheck
