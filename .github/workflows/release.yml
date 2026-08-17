@@ -226,8 +226,18 @@ jobs:
 
       - name: Build source tarball
         id: archive
+        # TAG is the RAW pushed tag: `steps.tag.outputs.tag` is set from
+        # GITHUB_REF_NAME verbatim, and the core-version guard above only
+        # validates the part before the first `-` (`VERSION%%-*`), so the
+        # pre-release suffix reaches here unchecked.  git-check-ref-format
+        # permits `"`, `$`, backtick, `(`, `)` and `;` in a tag name, so a
+        # tag like `v0.6.0-$(id)` passes that guard and would be
+        # substituted into this block's SOURCE TEXT before bash parsed it.
+        # Route it through env: and read it as a quoted shell variable
+        # instead -- the value is then only ever data (#1475).
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          TAG="${{ steps.tag.outputs.tag }}"
           ARCHIVE="alp-sdk-${TAG}.tar.gz"
           git archive --format=tar --prefix="alp-sdk-${TAG}/" HEAD | gzip -n > "$ARCHIVE"
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
@@ -235,8 +245,15 @@ jobs:
           sha512sum "$ARCHIVE" > "$ARCHIVE.sha512"
 
       - name: Emit SBOM + build receipt
+        # Same raw tag, same treatment: a workflow expression is
+        # re-substituted into every run: block independently, so
+        # env-indirecting it in the step above does not protect this one
+        # (#1475).  Written without expression delimiters on purpose -- see
+        # the header note about empty expressions rejecting the whole file.
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          python3 scripts/gen_sbom.py --output "alp-sdk-${{ steps.tag.outputs.tag }}.cdx.json"
+          python3 scripts/gen_sbom.py --output "alp-sdk-${TAG}.cdx.json"
           # (receipt for a source release: the tarball is the sole image)
 
       - name: Emit base64-encoded digests for the provenance job
@@ -247,8 +264,13 @@ jobs:
         # produces one provenance subject; the tarball is the only
         # canonical release artefact (checksums + provenance bundle
         # are derived, not subjects in their own right).
+        #
+        # ARCHIVE is `alp-sdk-<raw tag>.tar.gz`, so it carries the same
+        # unvalidated pre-release suffix one step further; env-indirected
+        # for the same reason (#1475).
+        env:
+          ARCHIVE: ${{ steps.archive.outputs.archive }}
         run: |
-          ARCHIVE="${{ steps.archive.outputs.archive }}"
           HASH=$(sha256sum "$ARCHIVE" | base64 -w0)
           echo "hashes=$HASH" >> "$GITHUB_OUTPUT"
 

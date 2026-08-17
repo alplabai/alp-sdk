@@ -115,6 +115,94 @@ Runner environment (in `~/actions-runner/.env`):
 
 Run **ephemeral or containerized** (fresh per job) for defense-in-depth.
 
+## Untrusted-input handling in `run:` blocks
+
+GitHub Actions substitutes every `${{ }}` expression into a step's `run:`
+block **as source text, before the shell parses it** — not as a shell
+argument. If the expression's value is attacker-influencable and contains
+shell metacharacters (`$()`, backticks, `;`, `&`, `|` — all legal in, e.g., a
+git branch name per `git-check-ref-format`), that text executes as code on
+the runner. This is a template injection, not a shell-quoting bug, so
+quoting inside the `run:` script does not help — the payload is already
+part of the script by the time bash sees it (alp-sdk#1475).
+
+**Rule:** never splice one of the following contexts directly into a `run:`
+block via `${{ }}`. Route it through the step's `env:` block instead, and
+reference it as a quoted shell variable (`"$THE_VAR"`). This is the complete
+list — it is the `_ATTACKER_CONTEXTS` tuple in
+`tests/scripts/test_workflows_are_loadable.py`, and the two must stay
+identical:
+
+- `github.event.pull_request` (especially `.head.ref`, `.head.sha`,
+  `.title`, `.body`)
+- `github.event.issue`
+- `github.event.comment`
+- `github.event.review`
+- `github.event.head_commit`
+- `github.event.commits`
+- `github.event.inputs`
+- `github.event.workflow_run`
+- `github.head_ref`
+- `github.ref_name`
+- `github.ref`
+- `github.actor`
+
+Matching is substring containment, so each entry covers its whole subtree
+(`github.event.pull_request` covers `.head.ref`, and `github.ref` also
+covers `github.ref_name`/`.ref_type`/`.ref_protected`).
+
+```yaml
+# Wrong -- payload substituted into the script before bash parses it:
+run: echo "${{ github.event.pull_request.head.ref }}"
+
+# Right -- the value is only ever *data*:
+env:
+  HEAD_REF: ${{ github.event.pull_request.head.ref }}
+run: echo "$HEAD_REF"
+```
+
+This has to be applied **per step**, not once per workflow: `${{ }}` is
+re-substituted independently into every `run:` block, so quoting a value at
+the step that first receives it does not protect a later step that reads it
+back out of `steps.<id>.outputs.*` and splices it again. Each consuming step
+needs its own `env:` indirection.
+
+A step output carries no trust of its own. `steps.<id>.outputs.*` is only as
+trustworthy as the expression that assigned it, so a `${{ }}` reference in a
+`run:` body must be judged on that **root**, not on the fact that it names a
+`steps.*` value. `release.yml` is the worked example: its `Parse tag + verify
+against metadata` step published `GITHUB_REF_NAME` verbatim as
+`steps.tag.outputs.tag`, validating
+only the part before the first `-`, and three later steps spliced that output
+into their `run:` source text. Nothing in those three bodies named a context
+at all.
+
+`tests/scripts/test_workflows_are_loadable.py` checks this: it fails if a
+`run:` block interpolates one of the contexts above directly. Three limits on
+how much that check is worth:
+
+- **It matches direct context references only.** The check is substring
+  containment against the text of each `${{ }}` expression, so it cannot see
+  a value that reaches a `run:` body transitively through
+  `steps.<id>.outputs.*` — the `release.yml` case above passed it green.
+  Tracing a step output back to its root is a **manual** step; do it by hand
+  whenever a `run:` body reads one, and do not treat a green run as having
+  done it for you. (Covering it mechanically needs data-flow analysis across
+  steps rather than substring matching, and the check does not attempt that.)
+- **It is advisory, not blocking.** On a workflow-only edit the sole job
+  running `pytest tests/scripts/` is `cross-platform-zephyr`'s
+  `python-smoke` (no other workflow's `paths:` filter matches
+  `.github/workflows/**`), and `python-smoke` is in neither branch's
+  required-status-check list. `main` requires exactly
+  `twister · native_sim/native/64` and `clang-format · diff-only`;
+  `dev` requires exactly `twister-shard 1/4`, `twister-shard 2/4`,
+  `twister-shard 3/4`, `twister-shard 4/4`, `clang-format · diff-only`
+  and `distro install · all`. A violation therefore posts a red,
+  non-required check; it does not block the merge.
+- **It covers `run:` bodies only.** A `${{ }}` splice into an
+  `actions/github-script` `with: script:` body is the same class of
+  template injection and is *not* checked. Apply the rule there by hand.
+
 ## Adding a new self-hosted job
 
 Follow the same shape as bitbake: a GitHub-hosted bridge in `alp-sdk`

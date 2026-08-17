@@ -58,14 +58,28 @@ jobs:
 
       - name: Determine diff base
         id: base
+        # BASE_SHA is routed through env + a quoted shell variable rather
+        # than spliced via ${{ }} into this run: block's source text --
+        # same construct pr-bitbake.yml's Resolve step had to fix (#1475),
+        # applied here too for consistency even though base.sha is a
+        # commit hash of the PR's own target branch, not fork-controlled
+        # data.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "ref=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "ref=$BASE_SHA" >> "$GITHUB_OUTPUT"
           else
             echo "ref=HEAD~1" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run clang-format-diff on changed lines
+        # DIFF_BASE is routed through env, matching the producing step above
+        # -- ${{ }} re-substitutes into every run: block's source text
+        # independently, so quoting the value once at the producer does not
+        # protect this consuming step on its own.
+        env:
+          DIFF_BASE: ${{ steps.base.outputs.ref }}
         run: |
           # clang-format-diff.py from the pinned pip wheel; it shells out to the
           # wheel's bundled v22 clang-format, so the diff check uses v22 too.
@@ -84,7 +98,7 @@ jobs:
           # test_gen_rzv2n_cm33_svd.py asserts they stay byte-identical
           # to the real module headers.  Reformatting them would break
           # the very property the fixture exists to hold.
-          git diff -U0 ${{ steps.base.outputs.ref }} -- '*.c' '*.h' \
+          git diff -U0 "$DIFF_BASE" -- '*.c' '*.h' \
               ':!vendors/**' ':!zephyr/**' \
               ':!tests/scripts/fixtures/rzv2n_svd/**' \
               | python3 "$DIFF_TOOL" -p1 \

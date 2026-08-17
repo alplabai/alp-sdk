@@ -83,3 +83,169 @@ def test_workflow_has_no_conflict_markers(wf: Path) -> None:
         for m in _CONFLICT_MARKER.finditer(text)
     ]
     assert not hits, "unresolved merge-conflict markers committed in a workflow: " + ", ".join(hits)
+
+
+# Contexts whose value is chosen by somebody other than this repo's
+# workflow authors: a PR/issue/comment/review author, their own GitHub
+# login, whoever named the branch or tag a run fires on, whoever typed a
+# `workflow_dispatch` input, and whoever wrote the commit messages a push
+# carries. See docs/ci/runner-architecture.md's
+# "Untrusted-input handling in run: blocks" section for the rule this test
+# enforces (alp-sdk#1475): `pr-bitbake.yml` spliced
+# `${{ github.event.pull_request.head.ref }}` -- a fork PR's own branch
+# name, which may legally contain shell metacharacters ($(), backticks, ;,
+# &, | are all valid in git-check-ref-format -- directly into a `run:`
+# block's SOURCE TEXT. GitHub substitutes `${{ }}` into that text *before*
+# bash ever parses it, so this is a template injection, not a quoting bug --
+# quoting inside the script does not help, and the fix is always to route
+# the value through the step's own `env:` block and reference a quoted
+# shell variable instead.
+#
+# Matching is plain substring containment, so `github.ref` also covers
+# `github.ref_name`, `github.ref_type` and `github.ref_protected`;
+# `github.ref_name` is listed anyway because it is the form the fixed
+# `dispatch-tan-parity.yml` site used and the one a reader looks for.
+_ATTACKER_CONTEXTS = (
+    "github.event.pull_request",
+    "github.event.issue",
+    "github.event.comment",
+    "github.event.review",
+    "github.event.head_commit",
+    "github.event.commits",
+    "github.event.inputs",
+    "github.event.workflow_run",
+    "github.head_ref",
+    "github.ref_name",
+    "github.ref",
+    "github.actor",
+)
+
+# One `${{ ... }}` expression at a time, non-greedy so two expressions on
+# the same line are matched separately rather than merged into one span
+# running from the first `${{` to the last `}}`.
+_EXPRESSION = re.compile(r"\$\{\{.*?\}\}")
+
+
+def _run_steps(doc: object) -> list[tuple[str, str, str]]:
+    """(job_id, step_name, run_text) for every step in `doc` that carries a
+    `run:` key. A step with no `run:` (a `uses:` action, for instance) has
+    no shell source text and is out of scope for this check."""
+    out: list[tuple[str, str, str]] = []
+    if not isinstance(doc, dict):
+        return out
+    jobs = doc.get("jobs")
+    if not isinstance(jobs, dict):
+        return out
+    for job_id, job in jobs.items():
+        if not isinstance(job, dict):
+            continue
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for idx, step in enumerate(steps):
+            if not isinstance(step, dict):
+                continue
+            run_text = step.get("run")
+            if not isinstance(run_text, str):
+                continue
+            step_name = step.get("name", f"step[{idx}]")
+            out.append((str(job_id), str(step_name), run_text))
+    return out
+
+
+def _attacker_context_splices(run_text: str) -> list[str]:
+    """Every `${{ ... }}` expression in `run_text` that references one of
+    `_ATTACKER_CONTEXTS` directly, in the order it appears."""
+    return [expr for expr in _EXPRESSION.findall(run_text) if any(ctx in expr for ctx in _ATTACKER_CONTEXTS)]
+
+
+@pytest.mark.parametrize("wf", _workflow_files(), ids=lambda p: p.name)
+def test_workflow_run_blocks_do_not_splice_attacker_context(wf: Path) -> None:
+    """The check that would have caught #1475. Until now the invariant
+    "route every `_ATTACKER_CONTEXTS` member through env:, never splice it
+    into a run: block" was defended only by a comment at each fixed site --
+    nothing failed CI if a future edit reintroduced the construct, here or
+    in a workflow file nobody thought to re-sweep.
+
+    SCOPE: `run:` bodies only. `_run_steps` reads a step's `run` key and
+    nothing else, so a `${{ }}` splice into an `actions/github-script`
+    `with: script:` body -- the other place GitHub substitutes an
+    expression into executable source text -- is NOT covered by this test.
+    Do not read a green run here as "no template-injection sink anywhere".
+
+    PROOF this is a real regression test, not a tautology: run against the
+    `.github/workflows/` tree of alp-sdk@63a5eceb (the commit #1475 was
+    filed against, before any of its fix landed), this parametrised test
+    fails on exactly three files -- `pr-bitbake.yml`,
+    `dispatch-tan-parity.yml` and `pr-static-analysis.yml`, i.e. all three
+    sites the fix touches -- and passes on the other 26. With the shorter
+    `_ATTACKER_CONTEXTS` this test first shipped with, the
+    `dispatch-tan-parity.yml` node PASSED against that same unfixed tree:
+    its splice is `${{ github.ref_name }}`, which matched no member of the
+    list, so the gate failed open on a site this very commit fixes.
+    """
+    doc = yaml.safe_load(wf.read_text(encoding="utf-8"))
+    violations = [
+        f"{wf.name}: job `{job_id}` step `{step_name}` splices {expr!r} directly into a run: "
+        "block's source text -- route it through that step's env: block instead and reference "
+        'a quoted shell variable (e.g. env: {VAR: '
+        + expr
+        + "}, run: echo \"$VAR\"); see docs/ci/runner-architecture.md's "
+        '"Untrusted-input handling in run: blocks"'
+        for job_id, step_name, run_text in _run_steps(doc)
+        for expr in _attacker_context_splices(run_text)
+    ]
+    assert not violations, "\n".join(violations)
+
+
+def test_attacker_context_splice_detector_catches_a_seeded_violation() -> None:
+    """Guard against the guard: if `_attacker_context_splices` ever stopped
+    matching anything -- an over-narrowed regex, a refactor that stops
+    walking `steps:` correctly -- the test above would report green over a
+    workflow tree that still splices attacker context into a run: block,
+    silently, the same way the original #1475 defect sat unnoticed as a
+    YAML comment for hours. Prove the detector fires on the exact
+    construct it exists to catch, and does NOT fire on the safe patterns
+    this repo's workflows actually use (env:-block assignment, a step
+    output derived from repo-controlled data, a GitHub-assigned SHA),
+    before trusting it against the real tree.
+    """
+    seeded_violation = 'echo "${{ github.event.pull_request.head.ref }}"\n'
+    assert _attacker_context_splices(seeded_violation) == ["${{ github.event.pull_request.head.ref }}"]
+
+    seeded_actor = 'echo "${{ github.actor }} did it"\n'
+    assert _attacker_context_splices(seeded_actor) == ["${{ github.actor }}"]
+
+    for safe_run_text in (
+        'echo "${{ github.sha }}"\n',
+        'echo "${{ steps.t.outputs.sha }}"\n',
+        'echo "${{ matrix.som }}"\n',
+        'echo "${{ needs.build.outputs.tag }}"\n',
+        # env:-block indirection itself is not a run: string at all -- this
+        # line only proves the detector does not choke on the safe shell
+        # variable form the fix produces.
+        'echo "$HEAD_REF"\n',
+    ):
+        assert _attacker_context_splices(safe_run_text) == [], safe_run_text
+
+    # The env:-block form is safe because it is a mapping VALUE, not run:
+    # text -- _run_steps() only ever looks at a step's `run` key, so an
+    # env: assignment of the same expression must never be reported.
+    doc_with_env_indirection = {
+        "jobs": {
+            "dispatch": {
+                "steps": [
+                    {
+                        "name": "Resolve",
+                        "env": {"HEAD_REF": "${{ github.event.pull_request.head.ref }}"},
+                        "run": 'echo "ref=$HEAD_REF" >> "$GITHUB_OUTPUT"\n',
+                    }
+                ]
+            }
+        }
+    }
+    assert _run_steps(doc_with_env_indirection) == [
+        ("dispatch", "Resolve", 'echo "ref=$HEAD_REF" >> "$GITHUB_OUTPUT"\n')
+    ]
+    for _, _, run_text in _run_steps(doc_with_env_indirection):
+        assert _attacker_context_splices(run_text) == []
