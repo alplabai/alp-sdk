@@ -19,7 +19,8 @@
 #   2. Plain-CMake / baremetal build (compile-only -- no tests yet)
 #   3. Zephyr twister (skipped if ZEPHYR_BASE is unset)
 #   4. clang-format diff vs HEAD~1 (skipped if no clang-format)
-#   5. shellcheck over scripts/*.sh (skipped if shellcheck isn't installed)
+#   5. shellcheck over scripts/*.sh + scripts/bench/**/*.sh (skipped if
+#      that tool isn't installed)
 #   6. bash -n parse of every shipped *.sh under REAL bash 3.2.57 in a
 #      container (skipped, loudly, if podman/docker isn't on PATH --
 #      cross-platform-zephyr.yml's macos-latest leg still covers it)
@@ -363,6 +364,18 @@ stage_shellcheck() {
         [ "${other}" = "scripts/test-all.sh" ] && continue
         "${sc}" -S error "${other}" || rc=1
     done
+    # #1527: the `scripts/*.sh` glob above is flat -- it never reached
+    # scripts/bench/aen/*.sh (or any future scripts/bench/<som>/), so this
+    # stage ran clean while flash-update-log-firewall-probe.sh:147's stray
+    # literal `n` (#1478, an SC1012-class defect) sat undetected. `git
+    # ls-files` walks the tree recursively where a shell glob won't.
+    # -S warning (not -S error) here to match pr-static-analysis.yml's
+    # mirror job -- SC1012 is warning-severity, so -S error alone would not
+    # have caught #1478.
+    local bench
+    while IFS= read -r bench; do
+        "${sc}" -S warning "${bench}" || rc=1
+    done < <(git ls-files 'scripts/bench/**/*.sh')
     return "${rc}"
 }
 

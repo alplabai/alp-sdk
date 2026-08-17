@@ -6,6 +6,14 @@
 #      reformat; CI tightens incrementally.
 #   2. cppcheck — full tree under src/ + chips/, treats warnings as
 #      informational (not fatal) until v0.2.
+#   3. shellcheck — scripts/bench/** only (#1527). Before this job,
+#      NOTHING linted scripts/bench/**: scripts/test-all.sh's
+#      stage_shellcheck globs the flat, non-recursive `scripts/*.sh`
+#      (never reaches a subdirectory), and the only shellcheck that ran
+#      anywhere in CI was onramp-clean-container.yml's, scoped to
+#      scripts/bootstrap.sh alone. #1478 (a stray literal `n` passed to
+#      JLinkExe on a wrong-board MRAM-write preflight) sat undetected for
+#      exactly this reason.
 #
 # Build-context-aware tools (clang-tidy + ABI snapshot) need a
 # proper compile_commands.json — they land in v0.2 once we have a
@@ -171,3 +179,46 @@ jobs:
           path: cppcheck.xml
           retention-days: 14
           if-no-files-found: ignore
+
+  shellcheck-bench:
+    name: shellcheck · scripts/bench
+    runs-on: ubuntu-latest
+    # #1527: 13 small scripts, worst observed local run well under a
+    # minute; 10min gives headroom over an apt stall, strictly above this
+    # job's own step timeouts (2+2+2=6) per test_tier_a_workflow_step_timeouts.py.
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        timeout-minutes: 2
+
+      - name: Install shellcheck
+        timeout-minutes: 2
+        run: |
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends shellcheck
+
+      - name: Shellcheck scripts/bench/**
+        # #1527: `git ls-files` walks the tree recursively where a shell
+        # glob won't -- this is what scripts/*.sh (both here and
+        # scripts/test-all.sh's stage_shellcheck) misses. One shellcheck
+        # invocation PER FILE, not a single multi-file invocation: passing
+        # every file to shellcheck at once lets its source-following
+        # cross-file analysis mask a real per-file SC2034 (verified: it
+        # dropped flash-jlink-mramxip.sh's GD32_DPIDR finding entirely).
+        # -S warning matches stage_shellcheck's local mirror -- SC1012 (the
+        # #1478 stray-`\n` class) is warning-severity, so -S error alone
+        # would not have caught it.
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(git ls-files 'scripts/bench/**/*.sh')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::'git ls-files scripts/bench/**/*.sh' matched no files -- refusing to report a silent pass."
+            exit 1
+          fi
+          rc=0
+          for f in "${files[@]}"; do
+            shellcheck -S warning "$f" || rc=1
+          done
+          exit "$rc"

@@ -105,6 +105,12 @@ esac
 # so this is a hard ABORT, not a warning -- read-only connect first, no writes
 # happen until the ID is confirmed.
 AEN_DPIDR="4C013477"
+# GD32_DPIDR itself is unread (only AEN_DPIDR is; see the echo two lines
+# below and bench_jlink_assert_aen_dpidr). Kept as the documented
+# wrong-board value alongside AEN_DPIDR's pin -- #1527: do NOT delete this
+# pair to silence the linter, that weakened the wrong-board MRAM-write
+# gate during #1488 and had to be reverted.
+# shellcheck disable=SC2034
 GD32_DPIDR="0BE12477"
 cat > /tmp/flowd-mramxip-preflight.jlink <<EOF
 $SEL
