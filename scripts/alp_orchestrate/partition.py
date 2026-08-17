@@ -430,13 +430,35 @@ def resolve_storage_partitions(
                          if entry.offset_kib is not None
                          else f"auto-allocated offset {base_bytes // 1024} KiB")
                 if overlap_with in reserved_names:
+                    # `overlap_with` is a `carveout: false` SUB-region (e.g.
+                    # AEN's `mcuboot` / `storage` / `atoc`) -- it has no
+                    # Devicetree label of its own and is refused by
+                    # `_resolve_flash_device()` above, so it must NOT be
+                    # named here as something to target directly (#1484).
+                    # Point at a flash device that actually resolves.
+                    # A name in `_known_flash_devices()` is not enough --
+                    # e.g. an `ospi_memories:` entry with a TBD capacity
+                    # (E1M-AEN801's `ospi1`) is known but does not actually
+                    # resolve.  Only recommend one that would.
+                    alt_devices = [
+                        d for d in _known_flash_devices(
+                            project.som_preset, METADATA_ROOT)
+                        if d != device_name
+                        and _resolve_flash_device(
+                            d, project.som_preset, METADATA_ROOT)[0]
+                        is not None]
+                    remedy = (
+                        f"pick an offset on '{device_name}' outside the "
+                        f"SoM's declared regions")
+                    if alt_devices:
+                        remedy += (
+                            f", or use a different flash_device: "
+                            f"({', '.join(alt_devices)})")
                     return 0, size_aligned, (
                         f"storage entry '{entry.name}' {where} overlaps SoM "
                         f"region '{overlap_with}' on device '{device_name}' "
-                        f"-- that region is not customer-writable. Target it "
-                        f"directly with flash_device: {overlap_with} if you "
-                        f"meant to allocate inside it, or pick an offset "
-                        f"outside the SoM's declared regions.")
+                        f"-- that region is not customer-writable. "
+                        f"{remedy}.")
                 return 0, size_aligned, (
                     f"storage entry '{entry.name}' {where} overlaps "
                     f"sibling partition '{overlap_with}' on device "

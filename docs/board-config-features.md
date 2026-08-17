@@ -268,8 +268,13 @@ resolution (#1484): that flag also means the region is a partition
 inside the `mram_storage` flash node -- not a flash device with a
 Devicetree label of its own. Naming one as `flash_device:` refuses
 with a reason instead of silently decorating a DT label that doesn't
-exist on the board. Target the flash-class region itself (`mram_main`
-on AEN) instead.
+exist on the board. Target one of the SoM's real flash devices
+instead -- an `on_module.ospi_memories:` entry (`ospi0` on
+E1M-AEN301..801) or, capacity permitting, the flash-class node itself
+(`mram_main` on AEN). Note that on every AEN preset the six
+`carveout: false` sub-regions above already tile `mram_main` exactly
+(64 + 2688 + 2688 + 64 + 96 + 32 = 5632 KiB), so `mram_main` itself
+has no free room today.
 
 The loader rejects typoed `flash_device:` references at parse time
 with the list of known devices for the project's SoM.  When the

@@ -37,6 +37,11 @@ from alp_orchestrate import (  # noqa: E402
     load_board_yaml,
     resolve_storage_partitions,
 )
+from alp_orchestrate.partition import (  # noqa: E402
+    _known_flash_devices,
+    _resolve_flash_device,
+)
+from alp_orchestrate.paths import METADATA_ROOT  # noqa: E402
 
 
 def _aen801(storage_body: str) -> str:
@@ -114,13 +119,35 @@ class TestExplicitOffset:
         assert "mcuboot" in (logs.reason or ""), logs.reason
 
     def test_the_refusal_names_the_remedy(self, tmp_path):
-        """A block that doesn't say what to do instead is a dead end."""
-        parts = _resolve(tmp_path, """
+        """A block that doesn't say what to do instead is a dead end.
+
+        The remedy must name a flash_device: that actually resolves
+        (alp-sdk#1484) -- naming the reserved region itself back at the
+        caller is a dead end, since that region is refused by
+        `_resolve_flash_device()`. Prove it round-trips rather than just
+        asserting the literal "flash_device:" substring, which the dead-end
+        text also contained.
+        """
+        board_path = _write_board(tmp_path, _aen801("""
       - { name: logs, size_kib: 32, fs: littlefs, flash_device: mram_main, offset_kib: 0, mount: /lfs/logs }
-    """)
+    """))
+        project = load_board_yaml(board_path)
+        parts = resolve_storage_partitions(project)
         reason = _by_name(parts)["logs"].reason or ""
         assert "not customer-writable" in reason, reason
-        assert "flash_device:" in reason, reason
+
+        # The remedy must name an ALTERNATIVE device (not `mram_main`
+        # itself, which is what the entry already targeted and is fully
+        # tiled) that actually resolves.
+        known = _known_flash_devices(project.som_preset, METADATA_ROOT)
+        alt = [d for d in known if d != "mram_main" and d in reason]
+        assert alt, (
+            f"reason names no alternative device from {known}: {reason}")
+        for device in alt:
+            descriptor, err = _resolve_flash_device(
+                device, project.som_preset, METADATA_ROOT)
+            assert descriptor is not None, (
+                f"remedy named '{device}' but it does not resolve: {err}")
 
     def test_offset_inside_the_atoc_band_is_refused(self, tmp_path):
         """The #1289 band, reached the customer-facing way.
@@ -147,10 +174,31 @@ class TestTargetingARegionDirectly:
         gets, not resolve it and decorate a label the board tree never
         defines.
         """
-        with pytest.raises(OrchestratorError, match="storage"):
+        with pytest.raises(
+                OrchestratorError,
+                match="does not resolve to any flash device"):
             _resolve(tmp_path, """
       - { name: settings, size_kib: 32, fs: littlefs, flash_device: storage, mount: /lfs/settings }
     """)
+
+    def test_resolve_flash_device_refuses_the_subregion_directly(
+            self, tmp_path):
+        """Defense in depth: `_resolve_flash_device()` itself must refuse a
+        `carveout: false` sub-region even for a caller that bypasses the
+        loader's eager `_known_flash_devices()` cross-check (partition.py
+        lines 193-206). Exercised directly since nothing else in this file
+        reaches that branch -- the loader check above always fires first
+        for a board.yaml-driven call.
+        """
+        path = _write_board(tmp_path, _aen801("""
+      - { name: settings, size_kib: 32, fs: littlefs, flash_device: ospi0, mount: /lfs/settings }
+    """))
+        project = load_board_yaml(path)
+        descriptor, reason = _resolve_flash_device(
+            "storage", project.som_preset, METADATA_ROOT)
+        assert descriptor is None, descriptor
+        assert "is a partition inside a" in (reason or ""), reason
+        assert "flash-class region" in (reason or ""), reason
 
 
 class TestNoFalsePositives:
