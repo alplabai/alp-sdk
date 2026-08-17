@@ -108,23 +108,33 @@ def test_no_shipped_metadata_or_schema_claims_an_hg_subsystem():
     `SHMEM_CLK_CTRL`), not a fourth subsystem: `NPU_HG_BASE 0x49042000` is
     byte-identical in both M55 cores' generated CMSIS headers, unlike the two
     U55s, which alias one local address (0x400E1000) under per-core names
-    (NPU_HP_BASE / NPU_HE_BASE).  This pins the fix to `paired_core`'s schema
-    description and to `_check_soc_npu_pairing`'s docstring, and stops any
-    new metadata/schema text from reintroducing the invented subsystem."""
+    (NPU_HP_BASE / NPU_HE_BASE).  This pins the fix to BOTH code surfaces the
+    fix actually touched: every shipped document under `metadata/**` (schema
+    descriptions, including `paired_core`'s, and every SoC spec) AND every
+    Python source under `scripts/**` (which is where
+    `_check_soc_npu_pairing`'s own docstring lives, in
+    `scripts/validate_metadata.py` -- a walk scoped to `metadata/**` alone
+    cannot see that file and so cannot pin half of what this docstring used
+    to claim). `tests/scripts/` is deliberately NOT walked: it is where this
+    very assertion message quotes the phrase it forbids, so scanning it would
+    make the gate fail on itself. Stops either surface from reintroducing the
+    invented subsystem."""
     hits = []
-    for p in sorted(V.REPO.glob("metadata/**/*")):
-        if not p.is_file():
-            continue
-        try:
-            text = p.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue
-        for needle in ("HG subsystem", "HG-subsystem", "HG_subsystem"):
-            if needle in text:
-                hits.append(f"{p.relative_to(V.REPO)}: {needle!r}")
+    needles = ("HG subsystem", "HG-subsystem", "HG_subsystem")
+    for pattern in ("metadata/**/*", "scripts/**/*.py"):
+        for p in sorted(V.REPO.glob(pattern)):
+            if not p.is_file():
+                continue
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            for needle in needles:
+                if needle in text:
+                    hits.append(f"{p.relative_to(V.REPO)}: {needle!r}")
     assert hits == [], (
-        "shipped metadata/schema text must not claim an 'HG subsystem' -- "
-        "the E8 has exactly three subsystems (RTSS-HE, RTSS-HP, A32 APSS); "
-        "NPU_HG is the U85 NPU block's own instance name, not a fourth "
-        "subsystem: " + "; ".join(hits)
+        "shipped metadata/schema text or scripts/ source must not claim an "
+        "'HG subsystem' -- the E8 has exactly three subsystems (RTSS-HE, "
+        "RTSS-HP, A32 APSS); NPU_HG is the U85 NPU block's own instance "
+        "name, not a fourth subsystem: " + "; ".join(hits)
     )

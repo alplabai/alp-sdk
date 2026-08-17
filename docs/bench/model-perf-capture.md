@@ -37,10 +37,31 @@ per-core siblings) live only in the proprietary `ensemble_vela.ini`, which
 alp-sdk does not redistribute, and handing vela a section it cannot resolve is
 a hard `rc=1`, not a degradation.
 
-*Consequence for this recipe:* an `ethos_u` point **must** record both
-`toolchain.system_config` and `toolchain.memory_mode`.
-`scripts/validate_metadata.py` refuses one that does not — a point that omits
-the profile cannot be told apart from a point captured under the default.
+*Consequence for this recipe:* `scripts/validate_metadata.py` rule 14 requires
+the point's recorded `toolchain.memory_mode` (and `toolchain.system_config`,
+where the part's own SoC spec declares one) to **equal** the module's SoC
+spec's declared `npu_toolchain.vela` profile — not merely be present. (Rule 6
+requires presence; rule 14 is the stricter check that decides whether a
+present-but-wrong profile is publishable, and it is not.) There is no
+override field. The E8 declares `npu_toolchain.vela.memory_mode:
+"Sram_Only"` (`metadata/socs/alif/ensemble/e8.json`); vela's built-in default
+reports `"Dedicated_Sram_384KB"`. **A point captured under vela's built-in
+default is refused at publish time, unconditionally** — recording the
+profile is not enough when the recorded profile is the wrong one.
+
+This makes `ensemble_vela.ini` — Alif-proprietary, gitignored
+(`.gitignore:150-155`), not redistributed by alp-sdk — a **hard prerequisite
+for any Ethos-U capture**, not an optional refinement. Without it on the
+compiling machine, vela falls back to its built-in default, rule 14 refuses
+the resulting point, and no Ethos-U measurement can be published from that
+run. This is deliberate, not an obstacle: a point captured under the
+built-in default is *exactly measured* and *describes a DRAM-backed machine
+the Alif part is not* — the same shape that produced a 5.3x SRAM
+overstatement once published at `confidence: "certain"`. Failing at capture
+time puts the error in front of the operator who can still re-run the
+compile with the right `.ini`, instead of a consumer downstream who cannot.
+**Get `ensemble_vela.ini` before you book bench time**, not after a capture
+is refused.
 
 **(b) The const-region question — what does `req_sram_kib` actually count?**
 `req_sram_kib` today reports the **arena alone** (the plan records 72 KiB
@@ -96,9 +117,22 @@ hardware revision — there is no SoM-side ADC cross-check
 does not. Before recording `measured_on.hw_rev`, read the manifest off the
 exact module on the bench:
 
+`examples/bringup/board-selftest`'s **source** is portable across every E1M
+family (no chip driver — `docs/portability.md`), but its `board.yaml` ships
+pinned to `som.sku: E1M-AEN801` / `preset: e1m-evk` (the example's own header
+comment already says as much), and `-b <your-board-target>` selects the
+Zephyr board CMake target only — it does not touch `som.sku`.
+`scripts/alp_project.py` reads `som.sku` straight from `board.yaml`
+(`CMakeLists.txt:16`), so on any module other than an E1M-AEN801 the command
+below configures for the wrong SoM and either fails to configure or (worse)
+silently builds a point for the wrong module. **If the module on the bench
+is not an E1M-AEN801, edit `som.sku` (and `preset:`, if you are not on an
+EVK carrier) in `examples/bringup/board-selftest/board.yaml` first.**
+
 ```bash
-# Any E1M SoM -- portable Ring-1 example, no chip driver
-# (docs/portability.md), the one to run first on any board:
+# Portable Ring-1 example, no chip driver (docs/portability.md).
+# board.yaml ships pinned to som.sku: E1M-AEN801 / preset: e1m-evk --
+# edit both fields first if that is not the module on your bench.
 west build -b <your-board-target> examples/bringup/board-selftest
 west flash
 ```
@@ -112,9 +146,11 @@ markdown link here becomes an unresolvable `\ref` and fails the build).
 A `FAIL (ALP_ERR_NOT_PROVISIONED)` there means the module was never run
 through `scripts/program_eeprom.py` — fix provisioning before benching, do not
 guess a revision. Family-specific equivalents that dump the raw 128-byte
-manifest and every decoded field exist too — `examples/aen/aen-eeprom-manifest`
-(bench-verified on E1M-AEN801) and `examples/v2n/v2n-eeprom-manifest-dump` —
-use either if you want the full manifest, not just the summary line.
+manifest and every decoded field exist too, and need no `som.sku` edit — each
+ships already pinned to its own family's SKU:
+`examples/aen/aen-eeprom-manifest` (`som.sku: E1M-AEN801`; bench-verified) and
+`examples/v2n/v2n-eeprom-manifest-dump` (`som.sku: E1M-V2N101`) — use either
+if you want the full manifest, not just the summary line.
 There is no separate HOST-side reader today: the manifest is read by the
 module's own firmware over I2C
 ([`alp_hw_info_read()`](../../include/alp/hw_info.h),
