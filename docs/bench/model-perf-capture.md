@@ -125,17 +125,40 @@ test_a_vendor_system_config_passes_on_the_part_that_requires_one`) with
 nothing in that check proving `ensemble_vela.ini` was ever on the compiling
 machine — only that the value written down isn't one of Arm's eleven.
 
-This makes `ensemble_vela.ini` — Alif-proprietary, gitignored
-(`.gitignore:150-155`), not redistributed by alp-sdk — a **hard prerequisite
-for any Ethos-U capture on the E8**: without it on the compiling machine, vela
-falls back to `Ethos_U85_SYS_DRAM_Mid`, rule 15 refuses the resulting point,
-and no Ethos-U measurement can be published from that run. **Get
-`ensemble_vela.ini` before you book bench time**, not after a capture is
-refused.
+`ensemble_vela.ini` is Alif-proprietary and stays gitignored in this repo
+(`.gitignore:150-155`) — alp-sdk itself does not redistribute it. **That does
+not make it something to go acquire before booking bench time.** It already
+ships inside the Alif SDK tree every AEN capture host needs anyway, to build
+the firmware being profiled, at the relative path
+`samples/modules/executorch/ensemble_vela.ini` under that SDK checkout's
+root. What a bench operator owes this step is narrower: **confirm the file is
+present on the capture host, and pass it** — paired with an explicit
+`--system-config` and `--memory-mode` in the same invocation (never
+`--config` alone; it hard-fails, below).
 
-**Getting the file is not the whole recipe — vela also refuses `--config`
-passed without a paired `--system-config`, before compilation starts.**
-Measured on this fixture:
+Proven on this checkout, pointed at the real file:
+
+```
+vela --accelerator-config ethos-u85-256 --config <ensemble_vela.ini> \
+     --system-config Ethos_U85_SRAM_Only --memory-mode Sram_Only \
+     --output-dir <tmp> tests/fixtures/models/person_detect_int8.tflite
+```
+
+exits `rc=0` and its network summary reports, verbatim, `System
+configuration  Ethos_U85_SRAM_Only` — one of Alif's own `System_Config`
+sections, not one of Arm's built-in eleven (established above). A point
+captured this way and recording that name satisfies rule 14 (a real,
+declared arena — `Total SRAM used  72.00 KiB` here) and rule 15 (a
+`system_config` outside the built-in set) at once: it is a genuine
+vendor-profile capture, not vela's flagless default. Without
+`ensemble_vela.ini` on the compiling machine — or with `--system-config`
+left off even when the file is present — vela instead falls back to
+`Ethos_U85_SYS_DRAM_Mid` (above), rule 15 refuses the resulting point, and no
+Ethos-U measurement can be published from that run.
+
+**Pointing `--config` at the file is not the whole recipe — vela also
+refuses `--config` passed without a paired `--system-config`, before
+compilation starts.** Measured on this fixture:
 
 ```
 vela --accelerator-config ethos-u85-256 --memory-mode Sram_Only \
@@ -150,8 +173,8 @@ reason as above):
 ethosu.vela.errors.CliOptionError: "Error: Incorrect argument to CLI option --config=['<venv>/lib/python3.12/site-packages/ethosu/config_files/Arm/vela.ini']: Specifying a configuration file is not allowed when using a default system configuration"
 ```
 
-Recognise that traceback if it shows up on the bench run that used the
-`.ini` you just got — it means `--config` was passed alone. The correct
+Recognise that traceback if it shows up on a bench run that used
+`ensemble_vela.ini` — it means `--config` was passed alone. The correct
 shape pairs `--config` with an explicit `--system-config` (and, on the E8,
 `--memory-mode`) in the SAME invocation — never `--config` on its own; §2's
 full command line is the pairing to copy:
@@ -170,6 +193,63 @@ output. A point built from that run records
 15 refuses it at publish time, not at bench time — by then the run, and the
 bench reservation that produced it, are already spent. Read the vela output
 for those two lines before trusting any figure from the run.
+
+**`ensemble_vela.ini` offers two shapes of `System_Config` — a campaign has
+to pick one.** The file carries NPU-level sections (`Ethos_U85_SRAM_Only`,
+`Ethos_U85_SRAM_MRAM`, `Ethos_U85_SRAM_OSPI`) alongside per-core RTSS
+sections (`RTSS_HP_*`, `RTSS_HE_*`), and they model materially different
+machines even where the `_SRAM_Only` suffix reads the same. Straight from
+the file:
+
+```
+[System_Config.Ethos_U85_SRAM_Only]   core_clock=400e6  axi0_port=Sram  axi1_port=OnChipFlash
+    Sram_burst_length=32  Sram_read_latency=2   Sram_write_latency=2
+    Sram_ports_used=2  Sram_max_reads=2  Sram_max_writes=2
+
+[System_Config.RTSS_HP_SRAM_Only]     core_clock=400e6  axi0_port=Sram  axi1_port=OnChipFlash
+    Sram_burst_length=8   Sram_read_latency=29  Sram_write_latency=29
+    (no ports_used / max_reads / max_writes)
+```
+
+Both compile `rc=0` for `ethos-u85-256` under `--memory-mode Sram_Only`, on
+this fixture, with the **same** arena and **different** flash footprints —
+run and read verbatim, not inferred from the `.ini`:
+
+```
+Ethos_U85_SRAM_Only  ->  Total SRAM used 72.00 KiB,  Total On-chip Flash used 248.95 KiB,  7077252 MACs/batch
+RTSS_HP_SRAM_Only    ->  Total SRAM used 72.00 KiB,  Total On-chip Flash used 228.80 KiB,  7077252 MACs/batch
+```
+
+**Do not read a latency claim into that.** Neither run's network summary
+prints a cycle count or an inference-time estimate — vela's summary block
+stops at the SRAM/Flash footprint, the CPU/NPU op split and the MAC count
+(§2 lists everything it does report). What is measured is that the two
+profiles' modelled memory timings differ (`Sram_burst_length` 32 vs 8,
+`Sram_read_latency`/`Sram_write_latency` 2 vs 29) and their flash footprints
+differ by about 20 KiB. Whether that moves on-device latency is a bench
+question; this vela summary does not answer it, so this document does not
+claim it does.
+
+**Which one a point records is part of its identity, not a cosmetic
+choice.** `system_config` is one of the `toolchain` keys
+`_toolchain_profile_digest` (`scripts/validate_metadata.py`) hashes into the
+filename's `<profile12>` segment — confirmed against the function itself: it
+canonicalises every `toolchain` key other than `name` and `version`. So an
+`Ethos_U85_SRAM_Only` point and an `RTSS_HP_SRAM_Only` point of the same
+model, SoM, revision, core and toolchain version land at two different
+filenames rather than one overwriting the other (§6). It is deliberately
+**not** part of the eight-field consumer match key (§8 — sku, hw_rev, core,
+backend, accel_config, model `sha256`, toolchain name, toolchain version): a
+customer holding no toolchain cannot state a profile, so the match key skips
+it and a consumer facing more than one surviving point falls through to the
+next tier instead of guessing between them. That makes the profile a
+filename/identity decision, not a match-key one — but it is still a decision:
+WHICH `system_config` a campaign records must be deliberate and stated, and
+the same choice used across any set of points meant to be compared.
+**Recommendation, to confirm at the bench rather than a sourced fact:**
+record the NPU-level `Ethos_U85_SRAM_Only` for a U85 point, because it is the
+accelerator's own AXI memory view — the thing actually doing the inference —
+rather than an RTSS core's.
 
 **(b) The const-region question — what does `req_sram_kib` actually count?**
 `req_sram_kib` today reports the **arena alone** (the plan records 72 KiB
@@ -312,8 +392,8 @@ vela --accelerator-config <accel_config> \
   demonstrates: a flagless `--system-config` silently resolves to
   `Ethos_U85_SYS_DRAM_Mid` — DRAM-backed, a machine the E8 does not have —
   with no diagnostic beyond two easily-missed `Warning:` lines and `rc=0`.
-  The Alif `.ini` is proprietary and comes from `alp-sdk-internal`; the SoC
-  spec's `npu_toolchain.vela` block
+  The Alif `.ini` is proprietary and ships inside the Alif SDK tree, not in
+  this repo (§0(a)); the SoC spec's `npu_toolchain.vela` block
   (`metadata/socs/alif/ensemble/e8.json` declares `memory_mode: "Sram_Only"`,
   `system_config_requires_vendor_config: true`,
   `vendor_config_filename: "ensemble_vela.ini"`) says which names apply.
