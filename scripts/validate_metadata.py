@@ -1471,6 +1471,29 @@ def _soc_npu_toolchain_names(sku: str, metadata_root: Path) -> set[str]:
     return set(npu_toolchain.keys())
 
 
+def _soc_npu_toolchain_profile(sku: str, metadata_root: Path, name: str) -> dict | None:
+    """The SKU's HOST SoC spec's declared `npu_toolchain.<name>` PROFILE dict
+    (e.g. `npu_toolchain.vela`), or `None` when the SoC declares no block for
+    that name at all.  Sibling of `_soc_npu_toolchain_names`, which returns
+    only the declared toolchain NAMES; this returns the profile itself so a
+    caller can check a measured toolchain field against the part's own
+    declared value, not merely against whether the name is one this SoC
+    recognises.
+
+    Guarded rather than left to raise `AttributeError` on a malformed
+    (non-mapping) `npu_toolchain` or profile entry -- the schema pass that
+    would reject that shape runs separately and is not guaranteed to have run
+    first (same shape as `_soc_npu_toolchain_names`).
+
+    Raises `LookupError` for the same reason `_resolve_host_soc` does.
+    """
+    host = _resolve_host_soc(sku, metadata_root)
+    npu_toolchain = host.get("npu_toolchain")
+    npu_toolchain = npu_toolchain if isinstance(npu_toolchain, dict) else {}
+    profile = npu_toolchain.get(name)
+    return profile if isinstance(profile, dict) else None
+
+
 def _perf_target_map(sku: str, metadata_root: Path) -> dict[tuple[str, str], str | None]:
     """`(backend, accel_config)` -> declared `paired_core`, for one SoM SKU.
 
@@ -1735,6 +1758,18 @@ def _check_model_perf_semantics(perf_files) -> list:
          incapable of absorbing one.
      13. `capture.reference` and `model.source` must cite a store, not a local
          filesystem path.
+     14. An `ethos_u` point's `toolchain.memory_mode` (and `toolchain.
+         system_config`, where the SoC spec declares one) must EQUAL the
+         module's own SoC spec's declared `npu_toolchain.vela` profile, not
+         merely be present (rule 6).  Refused at publish time, with no
+         override field: a point measured under a profile the part does not
+         use is a mis-measurement, not a deliberate off-profile record --
+         tan already catches this class of mismatch on read (a 5.3x SRAM
+         overstatement published at `confidence: "certain"`), and leaving it
+         publishable would force every future consumer to re-implement the
+         refusal or repeat the error. A genuine off-profile experiment
+         belongs in the raw capture log `capture.reference` already cites,
+         never in `metadata/model_perf/`.
 
     Reading `model.source` back -- re-hashing the in-repo model file and
     requiring it to equal `model.sha256` -- deliberately does NOT live here.
@@ -2042,6 +2077,45 @@ def _check_model_perf_semantics(perf_files) -> list:
                 f"so it is read as a repo-relative path -- and it climbs out "
                 f"of the checkout with `..`, which resolves somewhere different "
                 f"on every machine")
+
+        # (14) an ethos_u point's recorded vela profile must not CONTRADICT
+        # what the module's own SoC spec declares under `npu_toolchain.vela`.
+        # Rule 6 already requires the fields to be PRESENT; this checks them
+        # against the part's own declared answer instead of taking the
+        # point's word for it -- tan catches exactly this mismatch on read
+        # (a 5.3x SRAM overstatement was published at `confidence: "certain"`
+        # before this existed), and publish time is where it belongs: a
+        # point captured under a profile the part does not use is a
+        # mis-measurement, not a deliberate off-profile record, and there is
+        # NO override field -- a genuinely off-profile experiment belongs in
+        # the raw capture log (`capture.reference`), never in
+        # `metadata/model_perf/`.  Only fields the SoC spec actually declares
+        # are compared: `memory_mode` is `required` on every `vela_profile`
+        # and so is always checked; `system_config` is OPTIONAL there
+        # (permitted only on a SoC with exactly one distinct Ethos-U type --
+        # every Alif Ensemble part declares two or three and so declares
+        # none today), and is compared only when the SoC spec happens to
+        # carry one. Where the SoC spec is silent, this rule is silent too --
+        # it never infers a contradiction from an absence.
+        if backend == "ethos_u" and isinstance(sku, str):
+            try:
+                declared_vela = _soc_npu_toolchain_profile(sku, metadata_root, "vela")
+            except LookupError:
+                declared_vela = None
+            if declared_vela:
+                for field in ("memory_mode", "system_config"):
+                    declared_value = declared_vela.get(field)
+                    point_value = toolchain.get(field)
+                    if (isinstance(declared_value, str) and isinstance(point_value, str)
+                            and point_value != declared_value):
+                        msgs.append(
+                            f"toolchain.{field}={point_value!r} contradicts "
+                            f"{sku}'s SoC spec's declared "
+                            f"npu_toolchain.vela.{field}={declared_value!r} -- "
+                            f"a point captured under a different profile is a "
+                            f"mis-measurement, not a deliberate record, and "
+                            f"there is no override: fix the capture and "
+                            f"re-bench, or omit the point")
 
         if msgs:
             print(f"FAIL {rel}")

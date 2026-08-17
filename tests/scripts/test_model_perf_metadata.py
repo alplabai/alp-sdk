@@ -1069,6 +1069,25 @@ _MUTATIONS = [
      None, lambda d: _drop(d, "capture", "reference"), "reference"),
     ("unknown-top-level-key",
      None, lambda d: _set(d, "precomputed", "source"), "source"),
+    # --- rule 14: an ethos_u point's vela profile must not CONTRADICT what
+    #     the module's own SoC spec declares (`npu_toolchain.vela`).  Rule 6
+    #     already requires `memory_mode` to be PRESENT; this checks it
+    #     against E1M-AEN801's host SoC spec's OWN declared value
+    #     (metadata/socs/alif/ensemble/e8.json's `npu_toolchain.vela.
+    #     memory_mode` is `Sram_Only`).  The mutant is placed at the path its
+    #     OWN changed profile digest implies (recomputed via
+    #     `V._toolchain_profile_digest`, never hand-copied), so rule 1's
+    #     path-identity check stays silent and this case tests rule 14 alone.
+    ("ethos-u-point-contradicts-the-socs-declared-memory-mode",
+     "metadata/model_perf/E1M-AEN801/ethos-u85-256/"
+     "person-detect-int8-808cfdfc0cf3@vela-5.1.0+r2+m55_hp+"
+     + V._toolchain_profile_digest({
+         "name": "vela", "version": "5.1.0",
+         "system_config": "Ethos_U85_SRAM_Only",
+         "memory_mode": "Dedicated_Sram_384KB",
+     }) + ".json",
+     lambda d: _set(d, "Dedicated_Sram_384KB", "toolchain", "memory_mode"),
+     "npu_toolchain.vela.memory_mode"),
 ]
 
 
