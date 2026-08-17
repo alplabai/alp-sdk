@@ -147,8 +147,9 @@ jobs:
           #
           # NOTE (residual correlation gap, see dispatch-confirm.sh): the run
           # this creates on tan-cli carries tan-cli's own default-branch
-          # head_sha, not ${{ github.sha }} -- repository_dispatch does not
-          # let the sender's SHA travel into the receiver's run ref. So
+          # head_sha, not this workflow's github.sha (SDK_REF above) --
+          # repository_dispatch does not let the sender's SHA travel into
+          # the receiver's run ref. So
           # nothing in this repo can filter tan-cli's run list down to "the
           # run THIS dispatch caused" versus a concurrent alp-sdk push (or
           # any other repository_dispatch sender to tan-cli); dispatch-confirm.sh
@@ -156,10 +157,15 @@ jobs:
           # Closing that gap needs a tan-cli-side change (e.g. tan's
           # parity.yml naming its run from client_payload.sdk_ref so it's
           # visible in the run list) -- tracked as follow-up, not done here.
+          # -f (raw string), not -F: -F reinterprets its value after the
+          # shell hands it over (leading `@` reads a FILE, `{owner}`/
+          # `{repo}`/`{branch}` are substituted, bare true/false/null/
+          # integers become JSON non-strings) -- see pr-bitbake.yml's
+          # Dispatch step for the same reasoning.
           gh api repos/alplabai/tan-cli/dispatches \
             -f event_type=alp-sdk-planner-change \
-            -F "client_payload[sdk_ref]=$SDK_REF" \
-            -F "client_payload[branch]=$BRANCH_REF"
+            -f "client_payload[sdk_ref]=$SDK_REF" \
+            -f "client_payload[branch]=$BRANCH_REF"
           echo "::notice::dispatched alp-sdk-planner-change to tan-cli for $SDK_REF ($BRANCH_REF)"
 
       - name: Find this workflow's previous dispatch (self-calibration baseline)

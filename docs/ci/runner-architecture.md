@@ -115,6 +115,46 @@ Runner environment (in `~/actions-runner/.env`):
 
 Run **ephemeral or containerized** (fresh per job) for defense-in-depth.
 
+## Untrusted-input handling in `run:` blocks
+
+GitHub Actions substitutes every `${{ }}` expression into a step's `run:`
+block **as source text, before the shell parses it** — not as a shell
+argument. If the expression's value is attacker-influencable and contains
+shell metacharacters (`$()`, backticks, `;`, `&`, `|` — all legal in, e.g., a
+git branch name per `git-check-ref-format`), that text executes as code on
+the runner. This is a template injection, not a shell-quoting bug, so
+quoting inside the `run:` script does not help — the payload is already
+part of the script by the time bash sees it (alp-sdk#1475).
+
+**Rule:** never splice one of the following contexts directly into a `run:`
+block via `${{ }}`. Route it through the step's `env:` block instead, and
+reference it as a quoted shell variable (`"$THE_VAR"`):
+
+- `github.event.pull_request.*` (especially `.head.ref`, `.head.sha`,
+  `.title`, `.body`)
+- `github.event.issue.*`, `github.event.comment.*`, `github.event.review.*`
+- `github.head_ref`
+- `github.actor`
+
+```yaml
+# Wrong -- payload substituted into the script before bash parses it:
+run: echo "${{ github.event.pull_request.head.ref }}"
+
+# Right -- the value is only ever *data*:
+env:
+  HEAD_REF: ${{ github.event.pull_request.head.ref }}
+run: echo "$HEAD_REF"
+```
+
+This has to be applied **per step**, not once per workflow: `${{ }}` is
+re-substituted independently into every `run:` block, so quoting a value at
+the step that first receives it does not protect a later step that reads it
+back out of `steps.<id>.outputs.*` and splices it again. Each consuming step
+needs its own `env:` indirection.
+
+`tests/scripts/test_workflows_are_loadable.py` gates this: it fails the
+build if a `run:` block interpolates one of the contexts above directly.
+
 ## Adding a new self-hosted job
 
 Follow the same shape as bitbake: a GitHub-hosted bridge in `alp-sdk`

@@ -98,9 +98,19 @@ jobs:
 
       - name: Guard — internal events only (forks never dispatch)
         id: guard
+        # HEAD_REPO is routed through env, matching every other
+        # github.event.pull_request.* reference in this file -- GitHub
+        # restricts a repo full_name's charset to have no shell
+        # metacharacters, so this specific value cannot itself carry a
+        # payload, but the blanket rule (never splice this context
+        # directly into a run: block) is simpler to keep than an
+        # exception, and it's what tests/scripts/test_workflows_are_loadable.py
+        # mechanically enforces.
+        env:
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ] && \
-             [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+             [ "$HEAD_REPO" != "${{ github.repository }}" ]; then
             echo "Fork PR detected — skipping private dispatch (secrets do not reach forks anyway)."
             echo "go=false" >> "$GITHUB_OUTPUT"
           else
@@ -111,8 +121,9 @@ jobs:
         if: steps.guard.outputs.go == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.t.outputs.sha }}
         run: |
-          gh api repos/${{ github.repository }}/statuses/${{ steps.t.outputs.sha }} \
+          gh api repos/${{ github.repository }}/statuses/"$TARGET_SHA" \
             -f state=pending \
             -f context="bitbake (alp-sdk-internal)" \
             -f description="Dispatched to the private Yocto runner…"
@@ -127,11 +138,13 @@ jobs:
           owner: alplabai
           repositories: alp-sdk-internal
 
-      # steps.t.outputs.ref still carries the raw fork branch name (env-quoted
-      # above, but that only protects the step that WROTE it) -- ${{ }} is
-      # re-substituted into every run: block's source text independently, so
-      # this consuming step needs the same env indirection, not just the
-      # producing one.
+      # steps.t.outputs.ref is a branch name chosen by anyone with write
+      # access, same as the raw github.event.pull_request.head.ref it was
+      # derived from -- this step's own `if:` guard (forks never reach here)
+      # does not change that. ${{ }} is substituted into every run: block's
+      # source text independently, so quoting the value once at the
+      # producing step (above) does not protect this consuming step; it
+      # needs the same env indirection on its own account.
       - name: Dispatch build to alp-sdk-internal
         if: steps.guard.outputs.go == 'true'
         env:
@@ -140,8 +153,15 @@ jobs:
           TARGET_REF: ${{ steps.t.outputs.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number || 0 }}
         run: |
+          # -f (raw string) for sha/ref, not -F: -F reinterprets its value
+          # after the shell hands it over -- a leading `@` reads a FILE
+          # (`@-` reads stdin), `{owner}`/`{repo}`/`{branch}` are
+          # substituted, and bare true/false/null/integers become JSON
+          # non-strings -- and `@foo`, `{owner}`, `true`, `null` are all
+          # legal git branch names. -F stays only for `pr`, which genuinely
+          # wants a JSON number.
           gh api repos/alplabai/alp-sdk-internal/dispatches \
             -f event_type=bitbake \
-            -F "client_payload[sha]=$TARGET_SHA" \
-            -F "client_payload[ref]=$TARGET_REF" \
+            -f "client_payload[sha]=$TARGET_SHA" \
+            -f "client_payload[ref]=$TARGET_REF" \
             -F "client_payload[pr]=$PR_NUMBER"
