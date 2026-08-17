@@ -65,12 +65,14 @@ jobs:
   # its output gates the heavy boot below.
   detect:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       renode: ${{ steps.filter.outputs.renode }}
     steps:
       - name: Detect renode-relevant changes
         id: filter
         uses: dorny/paths-filter@v3
+        timeout-minutes: 2
         with:
           filters: |
             renode:
@@ -98,16 +100,19 @@ jobs:
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        timeout-minutes: 3
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
+        timeout-minutes: 3
         with:
           python-version-file: alp-sdk/.python-version
 
       - name: Install host build tools
+        timeout-minutes: 3
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -117,6 +122,7 @@ jobs:
               ca-certificates curl gnupg
 
       - name: Install west + Python deps
+        timeout-minutes: 3
         run: pip3 install west jsonschema pyyaml pytest
 
       - name: Bootstrap Zephyr workspace
@@ -127,6 +133,7 @@ jobs:
       # friends; install the pinned Zephyr build requirements now that the
       # workspace exists.
       - name: Install Zephyr build requirements
+        timeout-minutes: 3
         run: |
           set -euo pipefail
           pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements-base.txt"
@@ -153,6 +160,7 @@ jobs:
 
       - name: Install Zephyr SDK (arm-zephyr-eabi)
         working-directory: ${{ github.workspace }}
+        timeout-minutes: 3
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 --retry-delay 5 -o /tmp/zephyr-sdk.tar.xz "${ZEPHYR_SDK_URL}"
@@ -168,6 +176,7 @@ jobs:
 
       # Same v1.16.1 pin as the other Renode gates.
       - name: Install Renode
+        timeout-minutes: 3
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 --retry-delay 5 https://github.com/renode/renode/releases/download/v1.16.1/renode-1.16.1.linux-portable-dotnet.tar.gz \
@@ -183,6 +192,7 @@ jobs:
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+        timeout-minutes: 3
         run: |
           set -euo pipefail
           # Register alp-sdk as a Zephyr module so its board_root/dts_root
@@ -204,6 +214,7 @@ jobs:
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+        timeout-minutes: 3
         run: |
           set -euo pipefail
           west build -p always \
@@ -218,6 +229,7 @@ jobs:
       # tflite-micro is an OPTIONAL Zephyr module (not fetched by default);
       # clone it at the manifest-pinned revision for the vision demo.
       - name: Fetch tflite-micro (optional module)
+        timeout-minutes: 3
         run: |
           set -euo pipefail
           TFLM_REV=fcc760af130f3a595b5802cdebcc77461e54f382
@@ -231,6 +243,7 @@ jobs:
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+        timeout-minutes: 3
         run: |
           set -euo pipefail
           west build -p always \

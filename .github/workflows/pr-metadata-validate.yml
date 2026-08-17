@@ -127,19 +127,32 @@ jobs:
   validate:
     name: validate · soc-spec-v1
     runs-on: ubuntu-latest
+    # #1477: worst observed successful run 1069s/17.8min across 3 sampled
+    # runs -- driven almost entirely by the "Pytest -- linter + schema
+    # regression + topology defaults" step (~757s of that total), which is
+    # pure local Python and so carries no timeout-minutes of its own; the
+    # job ceiling is what actually bounds it. This job also runs ~46
+    # other uncapped local-check steps (the `Gate — ...` sweep), each
+    # budgeted 1min by test_job_ceiling_exceeds_the_sum_of_its_step_timeouts
+    # -- that budget sum, not the raw 2x-observed figure, is what pushes
+    # the ceiling to 60min rather than the ~40min a bare 2x would give.
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        timeout-minutes: 2
 
       - name: Set up Python
         uses: actions/setup-python@v6
+        timeout-minutes: 2
         with:
           python-version-file: .python-version
 
       - name: Install Python deps
         # model-io adds tflite + flatbuffers so the .alpmodel tensor-I/O
         # tests run here (they importorskip otherwise); cbor2 is a base dep.
+        timeout-minutes: 3
         run: pip install -e ".[dev,model-io]"
 
       - name: Validate every SoC file against the v1 schema
@@ -176,6 +189,7 @@ jobs:
           cat /tmp/alp.conf
 
       - name: Smoke-test board.yaml loader (cmake-args)
+        timeout-minutes: 2
         run: |
           python3 scripts/alp_project.py \
               --input metadata/templates/board.yaml.example \
@@ -366,6 +380,7 @@ jobs:
       # Catches both the literal-agreement drift and the actual trap --
       # two distinct cores resolving app: to the same CMakeLists.txt.
       - name: "Gate — Zephyr core app: <-> CMakeLists.txt --core mapping"
+        timeout-minutes: 3
         run: python3 scripts/check_core_cmakelists_mapping.py
 
       # Unit-test the loader contract -- schema pass/fail, missing-

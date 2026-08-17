@@ -112,7 +112,16 @@ jobs:
   twister-aen:
     name: twister · AEN801 (M55-HE + M55-HP)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Raised from 30 -> 60 (#1477): the twister step itself is the long
+    # pole (worst observed successful run 1055s/17.6min across 3 sampled
+    # runs -> capped at 25min below), plus 6 other flagged setup steps each
+    # now carrying their own timeout-minutes. The sum of all per-step caps
+    # (47min) already exceeded the old 30-minute job ceiling, which would
+    # fail test_job_ceiling_exceeds_the_sum_of_its_step_timeouts even
+    # though the job's real historical wall time (worst observed 1234s /
+    # 20.6min) fits comfortably under 30. 60min keeps real headroom above
+    # both the 47min step-cap sum and the 20.6min observed total.
+    timeout-minutes: 60
 
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
@@ -120,18 +129,21 @@ jobs:
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        timeout-minutes: 2
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
+        timeout-minutes: 2
         with:
           # Repo is checked out under alp-sdk/ (path:), but setup-python (a
           # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
           python-version-file: alp-sdk/.python-version
 
       - name: Install host build tools
+        timeout-minutes: 5
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -141,6 +153,7 @@ jobs:
               ca-certificates curl gnupg
 
       - name: Install west + Python deps
+        timeout-minutes: 3
         run: pip3 install west jsonschema pyyaml
 
       # Zephyr workspace lives next to alp-sdk.  bootstrap.sh is
@@ -192,6 +205,7 @@ jobs:
       # runs twister successfully in CI with this exact install -- copied
       # verbatim rather than guessing a requirements file name.
       - name: pip install Zephyr requirements
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements.txt"
@@ -220,6 +234,7 @@ jobs:
       # arm-zephyr-eabi cross builds, unlike the native_sim twister gate.
       - name: Install Zephyr SDK (arm-zephyr-eabi)
         working-directory: ${{ github.workspace }}
+        timeout-minutes: 3
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 --retry-delay 5 -o /tmp/zephyr-sdk.tar.xz "${ZEPHYR_SDK_URL}"
@@ -248,6 +263,10 @@ jobs:
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
           EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
+        # #1477: worst observed successful run 1055s/17.6min across 3
+        # sampled runs; 25min = ~1.4x headroom, kept under the job's own
+        # 60min ceiling (raised above, see that job-level comment).
+        timeout-minutes: 25
         run: |
           python3 zephyr/scripts/twister \
             -p alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
@@ -263,6 +282,7 @@ jobs:
       - name: Upload twister reports artefact
         if: always()
         uses: actions/upload-artifact@v7
+        timeout-minutes: 2
         with:
           name: twister-out-aen
           path: |

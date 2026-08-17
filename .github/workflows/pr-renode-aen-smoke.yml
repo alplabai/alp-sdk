@@ -66,7 +66,13 @@ jobs:
   renode-aen-smoke:
     name: renode · AEN801 M55-HP hello-world
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # #1477: raised from 30 -> 35 so the ceiling stays strictly above the
+    # sum of this job's newly-capped step timeouts (29min) plus the
+    # 1min/step budget for its 2 remaining uncapped steps -- the job's
+    # own real worst observed total (174s/2.9min across 3 sampled runs)
+    # fit comfortably under the old 30min; it's the declared-cap sum, not
+    # the real duration, that needed the extra headroom.
+    timeout-minutes: 35
 
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
@@ -74,18 +80,21 @@ jobs:
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        timeout-minutes: 2
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
+        timeout-minutes: 2
         with:
           # Repo is checked out under alp-sdk/ (path:), but setup-python (a
           # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
           python-version-file: alp-sdk/.python-version
 
       - name: Install host build tools
+        timeout-minutes: 3
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -95,6 +104,7 @@ jobs:
               ca-certificates curl gnupg
 
       - name: Install west + Python deps
+        timeout-minutes: 3
         run: pip3 install west jsonschema pyyaml
 
       # Zephyr workspace lives next to alp-sdk.  bootstrap.sh is
@@ -114,6 +124,7 @@ jobs:
       # `continue-on-error: true` swallowed for as long as the e2e below was a
       # no-op echo: the job reported success having never produced an ELF.
       - name: Install Zephyr build requirements
+        timeout-minutes: 2
         run: |
           set -euo pipefail
           pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements-base.txt"
@@ -142,6 +153,7 @@ jobs:
       # the native_sim twister gate), so the Zephyr SDK is required.
       - name: Install Zephyr SDK (arm-zephyr-eabi)
         working-directory: ${{ github.workspace }}
+        timeout-minutes: 3
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 --retry-delay 5 -o /tmp/zephyr-sdk.tar.xz "${ZEPHYR_SDK_URL}"
@@ -159,6 +171,7 @@ jobs:
       # Same v1.16.1 pin as pr-renode-dual-os.yml so both Renode gates
       # exercise identical emulator behaviour.
       - name: Install Renode
+        timeout-minutes: 2
         run: |
           set -euo pipefail
           # v1.16.1 portable-dotnet build: self-contained .NET, no Mono/GTK#
@@ -187,6 +200,7 @@ jobs:
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           west build -p always \
@@ -266,6 +280,7 @@ jobs:
       - name: Upload Renode boot log
         if: always()
         uses: actions/upload-artifact@v7
+        timeout-minutes: 2
         with:
           name: renode-boot-log
           path: ${{ runner.temp }}/renode-boot.log

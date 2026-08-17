@@ -151,7 +151,14 @@ jobs:
     name: onramp · bare container -- prereqs + bootstrap.sh (docs §1)
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Raised from 10 -> 25 (#1477): this job's own real wall time is short
+    # (worst observed successful run 49s), but it carries NINE flagged
+    # network/compile steps once each got its own timeout-minutes cap --
+    # summing those individual caps (21min) already exceeded the old
+    # 10-minute job ceiling, which would fail
+    # test_job_ceiling_exceeds_the_sum_of_its_step_timeouts even though no
+    # single step is slow. 25min keeps real headroom above that 21min sum.
+    timeout-minutes: 25
     container:
       image: ubuntu:24.04
     steps:
@@ -163,6 +170,7 @@ jobs:
       # upstream), this job silently stops testing what it claims to.
       - name: Assert the base image is actually bare (git/curl/cmake/python3/ninja/xz/wget absent)
         shell: bash
+        timeout-minutes: 2
         run: |
           set -uo pipefail
           missing=0
@@ -176,6 +184,7 @@ jobs:
 
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        timeout-minutes: 2
         with:
           path: alp-sdk
           fetch-depth: 1
@@ -184,6 +193,7 @@ jobs:
       # quickstart -- `git`/`curl` first, since bootstrap.sh itself
       # can't be fetched without them.
       - name: Install git + curl (docs/getting-started.md's own prerequisite note)
+        timeout-minutes: 3
         run: |
           apt-get update -o Acquire::Retries=3
           apt-get install -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates
@@ -193,6 +203,7 @@ jobs:
       # tool-name list -- the exact defect #949 addendum item 2 fixes.
       - name: bootstrap.sh refuses with an actionable per-tool hint (expect failure)
         working-directory: alp-sdk
+        timeout-minutes: 2
         run: |
           set +e
           out="$(bash scripts/bootstrap.sh 2>&1)"
@@ -232,6 +243,7 @@ jobs:
       # first place -- see docs/getting-started.md:194 for the source of
       # truth this must keep matching).
       - name: Install prerequisites (docs/getting-started.md section 1's Debian/Ubuntu one-liner, verbatim)
+        timeout-minutes: 3
         run: |
           apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
               cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
@@ -245,6 +257,7 @@ jobs:
         # download and can absorb it. This job's job is proving the
         # venv + prerequisite layer alone, not re-proving west.yml
         # resolves (pr-twister.yml already covers that on every PR).
+        timeout-minutes: 3
         run: |
           # set -e (not set -euo pipefail) is deliberate here: the refusal
           # step above (line ~131) captures rc/output BEFORE dying for the
@@ -277,6 +290,7 @@ jobs:
       # kept out of the "Install prerequisites" step above so that step
       # stays an honest mirror of docs/getting-started.md's own one-liner.
       - name: Install shellcheck
+        timeout-minutes: 2
         run: apt-get install -y --no-install-recommends shellcheck
 
       # #1024: scripts/bootstrap.sh IS already shellchecked -- but only by
@@ -292,6 +306,7 @@ jobs:
       - name: Shellcheck scripts/bootstrap.sh + tan-cli's install.sh
         working-directory: alp-sdk
         shell: bash
+        timeout-minutes: 2
         run: |
           set -euo pipefail
           shellcheck -S error scripts/bootstrap.sh
@@ -311,6 +326,7 @@ jobs:
       # relevant PR.
       - name: Smoke-run the published release installer on this bare container
         shell: bash
+        timeout-minutes: 2
         run: |
           set +e
           out="$(curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh -s -- --dir /tmp/tan-smoke-bin --no-modify-path 2>&1)"
@@ -335,6 +351,7 @@ jobs:
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        timeout-minutes: 2
         with:
           path: alp-sdk
           fetch-depth: 1
@@ -388,6 +405,7 @@ jobs:
       # Homebrew somewhere this loop doesn't check.
       - name: Hide xz + wget (and prove neither remains resolvable)
         shell: bash
+        timeout-minutes: 2
         run: |
           set -euo pipefail
           for bin in xz wget; do
@@ -417,6 +435,7 @@ jobs:
       - name: bootstrap.sh --no-west succeeds on macOS without xz/wget
         working-directory: alp-sdk
         shell: bash
+        timeout-minutes: 3
         run: |
           set +e
           out="$(bash scripts/bootstrap.sh --no-west 2>&1)"
@@ -470,6 +489,15 @@ jobs:
        contains(github.event.pull_request.labels.*.name, 'run-full-quickstart'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # #1477: the per-step timeout-minutes below are a flat 3min default,
+    # not measurements -- this job's own `if:` above gates it to
+    # schedule/workflow_dispatch/a labelled PR, and none of those fired in
+    # the 3 most-recent successful runs of this file sampled for #1477, so
+    # no real per-step duration was available. 3min is comfortably inside
+    # this job's pre-existing 30min ceiling (their sum is 21min) and in
+    # line with the per-step caps measured on this file's sibling
+    # `prereqs-and-bootstrap` job, whose steps do the same class of work
+    # (apt install / bootstrap.sh runs) with real timings.
     container:
       image: ubuntu:24.04
     steps:
@@ -482,18 +510,21 @@ jobs:
       # mirrors prereqs-and-bootstrap's own "Install git + curl" /
       # "Install prerequisites" split above.
       - name: Install checkout prerequisites (git/curl/ca-certificates -- not part of docs/getting-started.md section 1)
+        timeout-minutes: 3
         run: |
           apt-get update -o Acquire::Retries=3
           apt-get install -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates
 
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        timeout-minutes: 3
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Checkout tan-cli Python port
         uses: actions/checkout@v6
+        timeout-minutes: 3
         with:
           repository: alplabai/tan-cli
           ref: dev
@@ -505,12 +536,14 @@ jobs:
       # here anyway so this stays a mirror of the doc and any future
       # divergence between the two reddens this job).
       - name: Install prerequisites (docs/getting-started.md section 1's Debian/Ubuntu one-liner, verbatim)
+        timeout-minutes: 3
         run: |
           apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
               cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
 
       - name: Install tan-cli/dev (docs quickstart step 2)
         shell: bash
+        timeout-minutes: 3
         run: |
           set -euo pipefail
           python3 -m venv tan-cli/.venv
@@ -559,6 +592,7 @@ jobs:
       - name: Cache Zephyr SDK (arm-zephyr-eabi only)
         uses: actions/cache@v5
         id: zephyr-sdk-cache
+        timeout-minutes: 3
         with:
           path: zephyr-sdk
           key: onramp-sdk-${{ env.ZEPHYR_SDK_VERSION }}-arm-zephyr-eabi-${{ runner.os }}
@@ -583,6 +617,7 @@ jobs:
         # builtin and this container's /bin/sh is dash, which has `.` instead
         # and answers `source: not found` with exit 127 before west is reached.
         shell: bash
+        timeout-minutes: 3
         run: |
           source .venv/bin/activate
           west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
