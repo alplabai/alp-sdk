@@ -167,10 +167,28 @@ the step that first receives it does not protect a later step that reads it
 back out of `steps.<id>.outputs.*` and splices it again. Each consuming step
 needs its own `env:` indirection.
 
+A step output carries no trust of its own. `steps.<id>.outputs.*` is only as
+trustworthy as the expression that assigned it, so a `${{ }}` reference in a
+`run:` body must be judged on that **root**, not on the fact that it names a
+`steps.*` value. `release.yml` is the worked example: its `Parse tag + verify
+against metadata` step published `GITHUB_REF_NAME` verbatim as
+`steps.tag.outputs.tag`, validating
+only the part before the first `-`, and three later steps spliced that output
+into their `run:` source text. Nothing in those three bodies named a context
+at all.
+
 `tests/scripts/test_workflows_are_loadable.py` checks this: it fails if a
-`run:` block interpolates one of the contexts above directly. Two limits on
+`run:` block interpolates one of the contexts above directly. Three limits on
 how much that check is worth:
 
+- **It matches direct context references only.** The check is substring
+  containment against the text of each `${{ }}` expression, so it cannot see
+  a value that reaches a `run:` body transitively through
+  `steps.<id>.outputs.*` — the `release.yml` case above passed it green.
+  Tracing a step output back to its root is a **manual** step; do it by hand
+  whenever a `run:` body reads one, and do not treat a green run as having
+  done it for you. (Covering it mechanically needs data-flow analysis across
+  steps rather than substring matching, and the check does not attempt that.)
 - **It is advisory, not blocking.** On a workflow-only edit the sole job
   running `pytest tests/scripts/` is `cross-platform-zephyr`'s
   `python-smoke` (no other workflow's `paths:` filter matches
