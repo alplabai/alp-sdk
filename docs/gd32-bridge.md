@@ -142,9 +142,6 @@ entries, on purpose:
 helper_firmware:
   - name:          gd32_bridge
     chip:          gd32g553
-    # No local flash path.  GD32 programming is separated out of tan
-    # entirely (#1439, tan-cli#732), so `flash_method` and `flash_args`
-    # are ABSENT rather than set.
     flash_policy:   recovery_only        # who may flash it locally, and when
     update_channel: alp_ota_spi_bridge   # how it is updated in the field
 ```
@@ -152,11 +149,14 @@ helper_firmware:
 `flash_policy` and `update_channel` stay independent keys exactly as
 before -- `flash_policy` answers who may reach a local flash path *if
 one is ever added*, and the schema requires it on every helper entry
-whether or not a `flash_method` exists.  With neither `flash_method`
-nor `firmware_path` present, `tan flash` refuses this helper cleanly
-with its "has no output_artefact / firmware_path; can't flash" message
-rather than writing anywhere -- there is currently no `tan`-driven
-recovery command to run.  As measured against the tan-cli checkout at
+whether or not a `flash_method` exists.  With no `flash_method` but an
+`update_channel` present, `tan flash` skips this helper with `flash:
+helper 'gd32_bridge' is Alp-OTA-updated (update_channel:
+alp_ota_spi_bridge), not a customer flash target; skipping` (status
+`skipped`, rc `-1` -- never a run failure; see
+`python/tan/commands/flash_cmd.py:1186-1198`) rather than writing
+anywhere -- there is currently no `tan`-driven recovery command to
+run.  As measured against the tan-cli checkout at
 tan-cli v0.5.2-rc1.dev0 (`python/tan/version.py`), tan still ships the
 `swd_probe` backend (`python/tan/core/flash_plan.py::plan_swd_probe`);
 neither a `--recover` flag nor `ALP_FLASH_REQUIRE_DPIDR` exist anywhere

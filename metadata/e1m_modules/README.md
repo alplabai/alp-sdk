@@ -140,10 +140,10 @@ Field updates stream over the bridge link into the slot-A/B application
 bootloader (protocol v0.6 Path A).
 
 There is **no `flash_method`**, and no `flash_args`.  GD32 programming
-is separated out of `tan` entirely (#1439, tan-cli#732), so declaring a
-backend `tan` has removed would hit `executionPolicy.unknownBackend`,
-which is `fail`.  Alp Lab flashes the part in production over SWD with
-its own tooling.  The on-SoM host-driven bit-bang route
+is separated out of tan's scope entirely (#1439, tan-cli#732) -- tan
+does not flash this part, and no preset names a local flash path for
+it.  Alp Lab flashes the part in production over SWD with its own
+tooling.  The on-SoM host-driven bit-bang route
 (`chips/gd32_swd/`, Path B, `metadata/chips/gd32_swd.yaml`) is a
 separate mechanism and is unaffected.
 

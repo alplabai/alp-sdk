@@ -247,9 +247,9 @@ def test_helper_mcu_keeps_sibling_keys_alongside_update_channel(
         f"vanished from the manifest: {sorted(gd32)}"
     )
     assert gd32["flash_policy"] == "recovery_only"
-    # And the removed axis stays removed -- an SDK re-emitting
-    # `flash_method: swd_probe` to a tan without that backend hits
-    # `executionPolicy.unknownBackend`, which is `fail`.
+    # And the removed axis stays removed -- GD32 programming is out of
+    # tan's scope (#1439, tan-cli#732); no preset names a local flash
+    # path for it.
     assert "flash_method" not in gd32
     assert "flash_args" not in gd32
 
