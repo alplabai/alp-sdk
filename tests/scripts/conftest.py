@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-# Make packages under scripts/ (alp_model, alp_cli, ...) importable directly.
+# Make packages under scripts/ (alp_cli, alp_orchestrate, ...) importable directly.
 _scripts = Path(__file__).resolve().parents[2] / "scripts"
 if str(_scripts) not in sys.path:
     sys.path.insert(0, str(_scripts))

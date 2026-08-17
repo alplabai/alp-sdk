@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * aen-npu-inference-alp-u55 overlay for the E1M-AEN801 (Ensemble E8, M55-HE).
- * This is the U55 sibling of aen-npu-inference-alp (which runs the U85).  On the
- * E8 the U85 (HG subsystem, ethosu85@49042000) is the flagship NPU, but the SoC
- * ALSO carries two Ethos-U55s paired with the M55-HE / M55-HP cores
- * (ethosu55@400e1000, IRQ 55).  This overlay exercises the M55-HE-paired U55.
+ * This is the U55 sibling of aen-npu-inference-alp (which runs the U85).  On
+ * the E8 the U85 (Alif block name NPU_HG, ethosu85@49042000) is the flagship
+ * NPU, but the SoC ALSO carries two Ethos-U55s paired with the M55-HE / M55-HP
+ * cores (ethosu55@400e1000, IRQ 55).  This overlay exercises the M55-HE-paired
+ * U55.
  *
  * The core Ethos-U driver compiles for exactly ONE accelerator config
  * (CONFIG_ETHOS_U55_256 here; see prj.conf), and binds every status="okay"

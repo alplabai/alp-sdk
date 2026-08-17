@@ -117,21 +117,21 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["dram_mbit", "flash_mbit"],
-      "description": "Off-SoC module memory capacities, REQUIRED on every preset in one canonical shape.  `TBD` encodes 'pending the authoritative HW config' or 'per-BOM-variant' (per the no-inventing-values rule); on-die SRAM/MRAM is derived from the SoC variant, never declared here.",
+      "description": "Off-SoC module memory capacities, REQUIRED on every preset in one canonical shape.  Three states, and they are NOT interchangeable: a positive integer is a populated capacity; `0` means the module populates NO such part (the controller and even a designed-in footprint may still exist -- population per part is stated by `on_module.ospi_memories[].assembled` / `on_module.hyperram.assembled`, and the designed-in part's own capacity by their `capacity_mbit`); `TBD` means the capacity is still pending the authoritative HW config.  `0` is a RESOLVED fact and `TBD` is an open question -- never spell a known-absent part `TBD` (per the no-inventing-values rule), or a consumer cannot tell a module with no DRAM from one whose DRAM nobody has written down yet.  On-die SRAM/MRAM is derived from the SoC variant, never declared here.",
       "properties": {
         "dram_mbit": {
           "oneOf": [
-            { "type": "integer", "minimum": 1 },
+            { "type": "integer", "minimum": 0 },
             { "type": "string", "const": "TBD" }
           ],
-          "description": "External volatile memory in Mbit (LPDDR4X on V2N/V2M, HyperRAM on AEN)."
+          "description": "External volatile memory in Mbit (LPDDR4X on V2N/V2M, HyperRAM on AEN).  `0` = no external volatile memory populated on any current BOM variant of this SKU."
         },
         "flash_mbit": {
           "oneOf": [
-            { "type": "integer", "minimum": 1 },
+            { "type": "integer", "minimum": 0 },
             { "type": "string", "const": "TBD" }
           ],
-          "description": "External non-volatile memory in Mbit (eMMC on V2N/V2M, OSPI NOR on AEN)."
+          "description": "External non-volatile memory in Mbit (eMMC on V2N/V2M, OSPI NOR on AEN).  `0` = no external non-volatile memory populated on any current BOM variant of this SKU; on-die MRAM is not counted here (it is derived from the SoC variant)."
         }
       }
     },
@@ -345,6 +345,13 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]+$",
           "description": "HyperRAM MPN (e.g. `W958D8NBYA5I`), or the literal `TBD`."
+        },
+        "assembled": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "string", "enum": ["optional"] }
+          ],
+          "description": "Population status: true (default), false (DNI), or \"optional\" (assembled per BOM variant).  Without this key the block could only ever describe a HyperRAM that IS fitted, so a designed-in but unpopulated part had no way to say so and `memory.dram_mbit` inherited a capacity the module does not carry."
         },
         "capacity_mbit": {
           "oneOf": [

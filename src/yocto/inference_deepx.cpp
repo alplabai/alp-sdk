@@ -42,7 +42,8 @@
  * Blob format
  *   cfg.model_data is a `.dxnn` compiled model (magic "DXNN", 8 KiB
  *   self-describing header) produced by the host dxcom compiler
- *   (scripts/alp_model/adapters/deepx.py).  We hand the raw bytes to the
+ *   (tan.model.adapters.deepx, tan-cli; formerly scripts/alp_model/
+ *   adapters/deepx.py here before ADR-0028).  We hand the raw bytes to the
  *   in-memory InferenceEngine ctor; dx_rt parses the header and primes
  *   the device command-stream decoder.
  *

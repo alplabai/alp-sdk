@@ -138,9 +138,11 @@ jobs:
           python-version-file: .python-version
 
       - name: Install Python deps
-        # model-io adds tflite + flatbuffers so the .alpmodel tensor-I/O
-        # tests run here (they importorskip otherwise); cbor2 is a base dep.
-        run: pip install -e ".[dev,model-io]"
+        # cbor2 (the .alpmodel container codec) is a base dep. The model-io
+        # extra (tflite + flatbuffers) was here for scripts/alp_model/'s
+        # tensor-I/O tests; that package moved to tan.model (ADR-0028) and
+        # took the extra with it -- alp-sdk keeps only the on-device C reader.
+        run: pip install -e ".[dev]"
 
       - name: Validate every SoC file against the v1 schema
         run: python3 scripts/validate_metadata.py

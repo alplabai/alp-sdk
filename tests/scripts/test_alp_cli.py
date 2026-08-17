@@ -11,7 +11,7 @@ def test_alp_cli_help_lists_subcommands():
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
     for sub in ("init", "run", "emit", "validate",
-                "model", "doctor", "monitor", "explain", "faultdecode",
+                "doctor", "monitor", "explain", "faultdecode",
                 "new-som"):
         assert sub in result.output
 

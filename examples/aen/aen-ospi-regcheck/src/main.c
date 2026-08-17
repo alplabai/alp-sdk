@@ -51,8 +51,8 @@
  * while the real failure (a crash before the RESULT line) went unreported.
  * This app instead states the SKIP explicitly: "no XiP slave in DT;
  * SOC_FEAT_OSPI_HAS_XIP_SER=0 on AE822".  A live XiP read stays additionally
- * unverifiable regardless (no octal-NOR/HyperBus part populated this
- * hardware batch) but is not the reason for the skip.
+ * unverifiable regardless (no octal-NOR/HyperBus part is populated on ANY AEN
+ * SKU) but is not the reason for the skip.
  *
  * This example has caught three real, distinct silicon/build bugs on a board
  * with nothing on the OSPI bus (the clock-gate fault, the MPU Device-mapping
@@ -249,14 +249,14 @@ int main(void)
 	 * register file reads back its documented CTRLR0 reset value. XiP setup
 	 * is out of scope for this gate (see the module header SKIP note); a
 	 * live XiP read stays HW-blocked regardless (no octal-NOR/HyperBus part
-	 * populated this batch).
+	 * is populated on ANY AEN SKU).
 	 */
 	if (node_ok && hal_init_ok && ctrlr0_ok) {
 		printk("RESULT PASS: OSPI/HexSPI node BINDS -- ospi0@83000000 binds to "
 		       "snps,designware-ospi at the fork reg/aes-reg base with IRQ 96; "
 		       "alif_hal_ospi_initialize() is reachable and links; CTRLR0 reads "
 		       "its documented reset value; XiP SKIPPED (no XIP_SER on this die), "
-		       "live XiP HW-blocked (no part populated this batch)\n");
+		       "live XiP HW-blocked (no part populated on any AEN SKU)\n");
 	} else {
 		printk("RESULT FAIL: OSPI/HexSPI node NOT staged "
 		       "(bound=%d base_ok=%d irq_ok=%d hal_init_ok=%d ctrlr0_ok=%d -- node "

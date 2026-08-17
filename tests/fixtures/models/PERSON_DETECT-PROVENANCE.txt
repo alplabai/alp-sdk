@@ -1,0 +1,29 @@
+person_detect_int8.tflite -- third-party, vendored test fixture (not Alp Lab's own).
+
+Source:      tensorflow/lite/micro/models/person_detect.tflite
+Upstream:    github.com/zephyrproject-rtos/tflite-micro (the same fork + revision
+             already pinned by metadata/libraries/tflite-micro.yaml -- this is not
+             a new upstream dependency, just the first time one of its sample
+             models is vendored as bytes instead of fetched at west-module time)
+Revision:    fcc760af130f3a595b5802cdebcc77461e54f382
+License:     Apache License 2.0 (c) Google LLC / The TensorFlow Authors
+sha256:      808cfdfc0cf3a6fa6f6fa26bfa379ea97c16d5db7334637766e39c3408502e9d
+Size:        300568 bytes
+
+This is the canonical TFLite-Micro "person detect" MobileNet: int8-quantized
+throughout (verified against the flatbuffer schema, not assumed -- every
+tensor is TensorType.INT8 or INT8-typed INT32 bias; input tensor `input` is
+INT8 [1,96,96,1], output tensor `MobilenetV1/Predictions/Reshape_1` is INT8
+[1,2]). Already bench-verified on real E1M-AEN801 (E8) Ethos-U85 silicon --
+see examples/aen/aen-npu-inference-person-mram/README.md -- and re-verified
+compiling clean with `ethos-u-vela` for this fixture's use as the Ethos-U
+real-model proof in tan-cli's `tests/model/test_vela_yolo_internal.py`:
+
+    vela --accelerator-config ethos-u85-256 person_detect_int8.tflite
+      -> CPU operators = 0 (0.0%), NPU operators = 44 (100.0%)
+      -> Neural network macs 7077252 MACs/batch
+
+Vendored here (rather than fetched from the tflite-micro Zephyr module at
+build time, the way the Zephyr example above does it) because this fixture is
+consumed by a host-side Python test with no west/Zephyr build in its path --
+see NOTICE for the third-party-components entry.

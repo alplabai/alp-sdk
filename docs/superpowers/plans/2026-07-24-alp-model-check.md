@@ -1,5 +1,31 @@
 # `alp model check` — Pre-flight Fit/Perf Analyzer (Slice 1a) Implementation Plan
 
+> **SUPERSEDED (2026-08-15).** Replaced by
+> `docs/superpowers/plans/2026-08-15-tan-model-check-doctor.md` — the
+> maintainer-approved partition-screen plan for `tan model check` + `doctor`.
+> Kept here as historical record; do not delete and do not execute this plan.
+> Two things this plan got wrong, both retired by ADR-0028's 2026-08-15
+> amendment:
+>
+> - The `fits | cpu-fallback | no-fit` verdict enum (below, and throughout) is
+>   retired. No backend can deliver a static `fits` verdict — Vela attaches
+>   quantization/shape constraints to every operator, and DRP-AI/DEEPX gate on
+>   enumerated kernel×stride×padding×dilation×groups that a static screen
+>   cannot see. The real failure mode this domain has is **silent CPU
+>   fallback**, not refusal, so the new plan reserves `fits` for
+>   `basis: compiled` / `basis: bench` and reports everything else as
+>   `npu-eligible` (certified-in only when a real compile or bench confirms
+>   it) or `cpu-certain` (a sound negative) — never a static "fits".
+> - `:41`'s "TFLite input only in 1a" scope was a category error, not a
+>   phasing choice: DRP-AI TVM and dxcom both ingest **ONNX**, not TFLite, so a
+>   `.tflite` artifact cannot be scored against either backend at all — the
+>   right answer for that pairing is "wrong format", never a 0%-coverage
+>   verdict. This is also why the metadata this plan's Task 2 describes
+>   shipped in a different, table-keyed shape (see that plan's Task 1).
+>
+> This plan's Task 2 (the metadata) already shipped, in the different shape
+> the new plan's Task 1 documents.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add `alp model check <model> --sku <SKU>` — an offline, no-toolchain static analyzer that answers "will this model fit my SoM's NPU, and roughly how fast?" before any compile.

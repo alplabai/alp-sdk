@@ -11,7 +11,6 @@ from alp_cli.explain import explain_cmd
 from alp_cli.faultdecode import faultdecode_cmd
 from alp_cli.generate import generate_cmd
 from alp_cli.init import init_cmd
-from alp_cli.model import model_group
 from alp_cli.monitor import monitor_cmd
 from alp_cli.new_som import new_som_cmd
 from alp_cli.run import run_cmd
@@ -30,7 +29,6 @@ cli.add_command(explain_cmd)
 cli.add_command(faultdecode_cmd)
 cli.add_command(generate_cmd)
 cli.add_command(init_cmd)
-cli.add_command(model_group)
 cli.add_command(monitor_cmd)
 cli.add_command(new_som_cmd)
 cli.add_command(run_cmd)

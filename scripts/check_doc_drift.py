@@ -171,6 +171,15 @@ _ALLOWLIST: set[str] = {
     # tan-cli's flash_cmd.py (a different repo), not an alp-sdk symbol --
     # it will never appear in this repo's headers/Kconfig/generators.
     "ALP_FLASH_REQUIRE_DPIDR",
+    # docs/bring-up-drpai-v2n.md's Model-compile section names the maintainer-
+    # exported env var tan.model.adapters.drpai reads (`os.environ.get(
+    # "ALP_DRPAI_TVM_HOME")`). Until ADR-0028 this was a real harvested token
+    # via scripts/alp_model/adapters/drpai.py's own copy of that same
+    # os.environ.get() call; that file relocated to tan-cli's
+    # python/tan/model/adapters/drpai.py, so the symbol is genuinely gone from
+    # this repo's tree now -- same shape as ALP_FLASH_REQUIRE_DPIDR above, a
+    # different repo's env var, not an alp-sdk symbol.
+    "ALP_DRPAI_TVM_HOME",
 }
 
 # Identifier shapes we treat as SDK symbols.  The optional `CONFIG_`

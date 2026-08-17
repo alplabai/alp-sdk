@@ -19,8 +19,9 @@ static alp_inference_backend_t _backend_enum(const char *s)
 	return ALP_INFERENCE_BACKEND_AUTO; /* sentinel: unknown */
 }
 
-/* Every format string the .alpmodel writer (scripts/alp_model/manifest.py)
- * can emit must have an explicit case here.  This used to default every
+/* Every format string the .alpmodel writer (tan.model.manifest -- tan-cli;
+ * formerly scripts/alp_model/manifest.py here before ADR-0028) can emit must
+ * have an explicit case here.  This used to default every
  * unrecognised string to ALP_INFERENCE_MODEL_TFLITE: a typo'd or newly added
  * format silently ran the TFLite parser and reported ALP_OK, which is
  * undebuggable from a customer's side -- nothing on the wire says "decoded
@@ -47,8 +48,10 @@ static bool _fmt_enum(const char *s, alp_inference_model_format_t *out)
 		return true;
 	}
 	if (strcmp(s, "executorch") == 0) {
-		/* scripts/alp_model/adapters/executorch.py is the host-side
-		 * writer that emits this string (issue #1260). */
+		/* tan.model.adapters.executorch (tan-cli; formerly
+		 * scripts/alp_model/adapters/executorch.py here before
+		 * ADR-0028) is the host-side writer that emits this string
+		 * (issue #1260). */
 		*out = ALP_INFERENCE_MODEL_EXECUTORCH;
 		return true;
 	}
