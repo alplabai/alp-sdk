@@ -104,8 +104,13 @@ esac
 # 0x0BE12477. Flashing the wrong board is the one unrecoverable bench mistake,
 # so this is a hard ABORT, not a warning -- read-only connect first, no writes
 # happen until the ID is confirmed.
-AEN_DPIDR="4C013477"
-GD32_DPIDR="0BE12477"
+#
+# AEN_DPIDR/GD32_DPIDR come from bench-env.sh, which is the single source for
+# both IDs -- do not re-declare them here (this script used to shadow both
+# with the same literal values bench-env.sh already exports; extending
+# stage_shellcheck's coverage to scripts/bench/*/*.sh, #1488 finding 4, flagged
+# the redundant GD32_DPIDR as SC2034 unused, since only AEN_DPIDR is read
+# below).
 cat > /tmp/flowd-mramxip-preflight.jlink <<EOF
 $SEL
 si SWD

@@ -310,3 +310,79 @@ def test_every_target_touching_helper_gates_on_the_dpidr():
             and "bench_jlink_assert_aen_dpidr" not in p.read_text(encoding="utf-8"))
     ]
     assert not missing, f"helper writes/executes on a target with no DPIDR gate: {missing}"
+
+
+# --- alp-sdk#1488: `verifybin`'s outcome must gate the script, not just the
+# connect check -------------------------------------------------------------
+#
+# flash-jlink.sh / flash-update-log-dual.sh / flash-update-log-firewall-probe.sh
+# each issued `verifybin` and never read its result: the transcript went to a
+# display-only pipe, the connect check was the only thing that could fail the
+# script, so a `Verify failed.` line exited 0 and reported a good flash on a
+# board that was NOT actually written. flash-jlink-hp.sh and
+# flash-jlink-mramxip.sh had already been fixed for the identical defect under
+# alp-sdk#1343 -- but nothing derived the FULL set of verifybin sites from the
+# script bodies, so the other 3 went uncaught for months (before this test,
+# this file had ZERO occurrences of "verifybin" or "verify successful"). This
+# is that derivation: a NEW verifybin site that does not also grep ITS OWN
+# capture file for both outcomes fails here rather than shipping ungated.
+
+# Any `verifybin` invocation, wherever it lives (these all sit inside a
+# `cat > /tmp/*.jlink <<EOF ... EOF` CommanderScript heredoc).
+_VERIFYBIN_RE = re.compile(r"^[ \t]*verifybin[ \t]", re.M)
+
+# The file each write step's JLinkExe transcript lands in, resolved from
+# whichever capture shape follows the `-CommanderScript` invocation --
+# either the SIGPIPE-prone `... | tee <file> | ...` shape (still used by
+# flash-jlink-hp.sh / flash-jlink-mramxip.sh, deliberately left alone by
+# alp-sdk#1488 finding 5 -- out of scope, pre-existing) or the
+# write-then-grep-the-finished-file shape finding 5 moved the other three
+# scripts to (`... > <file> 2>&1 || true`, then a separate grep pass).
+_CAPTURE_RE = re.compile(r"\|\s*tee\s+(?P<tee>/tmp/\S+)|>\s*(?P<redir>/tmp/\S+)\s*2>&1")
+
+
+def _verifybin_capture_file(body: str, after: int) -> str | None:
+    """The transcript file the write step immediately after a `verifybin`
+    line (at body[after:]) captures its JLinkExe output to. Bounded window --
+    the capture always follows within the same CommanderScript write block,
+    not somewhere else in the file."""
+    m = _CAPTURE_RE.search(body[after : after + 2000])
+    return (m.group("tee") or m.group("redir")) if m else None
+
+
+def test_every_verifybin_site_is_gated_on_its_own_transcript() -> None:
+    """The gate is worthless if a `verifybin` site forgets to read the
+    result. This is the check that keeps the alp-sdk#1488 fix from rotting:
+    it derives the set of verifybin sites from the actual `verifybin`
+    invocations in each script and resolves each one's OWN transcript file,
+    so a newly added site -- or one accidentally checking a SIBLING script's
+    stale transcript file, the exact copy-paste trap the changelog calls out
+    -- fails this test rather than shipping ungated."""
+    missing: list[str] = []
+
+    for path in _bench_scripts():
+        body = path.read_text(encoding="utf-8")
+        for m in _VERIFYBIN_RE.finditer(body):
+            line_no = body[: m.start()].count("\n") + 1
+            out = _verifybin_capture_file(body, m.end())
+            if out is None:
+                missing.append(f"{path.name}:{line_no} issues verifybin but no capture file could be resolved")
+                continue
+            fail_re = re.compile(
+                r'grep\s+-\w*\s+"verify failed\|verification failed\|mismatch"\s+' + re.escape(out)
+            )
+            ok_re = re.compile(r'grep\s+-\w*\s+"verify successful"\s+' + re.escape(out))
+            if not fail_re.search(body):
+                missing.append(f"{path.name}:{line_no} verifybin -> {out}, never greps that file for verify-failed/mismatch")
+            if not ok_re.search(body):
+                missing.append(f"{path.name}:{line_no} verifybin -> {out}, never greps that file for verify-successful")
+
+    assert not missing, "verifybin site with no verify-outcome gate on its own transcript:\n  " + "\n  ".join(missing)
+
+
+def test_the_verifybin_regex_actually_matches_something() -> None:
+    """Guard against the guard: if the regex stops matching (a refactor
+    changes the invocation shape), test_every_verifybin_site_is_gated_on_its_own_transcript
+    would pass vacuously and cover nothing."""
+    total = sum(len(_VERIFYBIN_RE.findall(p.read_text(encoding="utf-8"))) for p in _bench_scripts())
+    assert total >= 5, f"expected >=5 verifybin sites, matched {total} -- regex has drifted"

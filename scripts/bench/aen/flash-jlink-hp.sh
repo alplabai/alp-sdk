@@ -35,7 +35,12 @@ BD="$1"
 BEACON="${2:-0x02000000}"
 bench_require_setools || exit $?
 SET="$SETOOLS_DIR"
-OBJ="$(bench_tool_prefix)" || exit $?
+# Validate the toolchain resolves (unlike flash-jlink.sh / flash-jlink-mramxip.sh,
+# this script reads the HP liveness beacon over SWD, never an ELF via nm/objdump,
+# so the resolved prefix itself is unused -- discard it rather than capture it
+# into a dead variable (extending stage_shellcheck's coverage to
+# scripts/bench/*/*.sh, #1488 finding 4, flagged the unused capture as SC2034).
+bench_tool_prefix >/dev/null || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
 # See ram-run.sh for why the selector is conditional on JLINK_SN.
 JLINK_ARGS=("$JLINK")

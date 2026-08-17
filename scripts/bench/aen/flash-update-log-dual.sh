@@ -141,8 +141,18 @@ g
 exit
 EOF
 
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-dual-write.jlink 2>&1 | tee /tmp/firmware-update-log-dual-write.out | \
-	grep -iE "could not connect|fail|error|Verify|O\\.K\\.|Reset|Writing|Programming" | head -40
+# Write the transcript FIRST, fully, then grep|head it for display (#1488
+# finding 5) -- a `... | tee out | grep ... | head -N` pipeline lets `head`
+# exit after N lines and SIGPIPE grep, which then closes tee's stdout pipe;
+# tee can die from that SIGPIPE before JLinkExe's full transcript (including
+# the `Verify successful.` / `Verify failed.` line the gate below depends on)
+# is written to disk. Once a genuinely good flash's transcript got truncated
+# that way, the absence of "verify successful" in the truncated file would
+# read as a hard exit 3 on a board that actually flashed fine.
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-dual-write.jlink \
+	> /tmp/firmware-update-log-dual-write.out 2>&1 || true
+grep -iE "could not connect|fail|error|Verify|O\\.K\\.|Reset|Writing|Programming" \
+	/tmp/firmware-update-log-dual-write.out | head -40
 
 if grep -qiE "Could not connect to the target device|Cannot connect to the probe/programmer" \
 	/tmp/firmware-update-log-dual-write.out; then

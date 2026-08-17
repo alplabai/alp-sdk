@@ -101,8 +101,16 @@ r
 g
 exit
 EOF
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd.jlink 2>&1 | tee /tmp/flowd.out | \
-  grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Reset|Cortex|Found" | head -30
+# Write the transcript FIRST, fully, then grep|head it for display (#1488
+# finding 5) -- a `... | tee out | grep ... | head -N` pipeline lets `head`
+# exit after N lines and SIGPIPE grep, which then closes tee's stdout pipe;
+# tee can die from that SIGPIPE before JLinkExe's full transcript (including
+# the `Verify successful.` / `Verify failed.` line the gate below depends on)
+# is written to disk. Once a genuinely good flash's transcript got truncated
+# that way, the absence of "verify successful" in the truncated file would
+# read as a hard exit 3 on a board that actually flashed fine.
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd.jlink > /tmp/flowd.out 2>&1 || true
+grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Reset|Cortex|Found" /tmp/flowd.out | head -30
 echo "----- (full log: /tmp/flowd.out) -----"
 if grep -qi "Could not connect to the target device" /tmp/flowd.out; then
   echo "!! $DEV profile FAILED to connect -- flow D not unlocked on this probe (same blocker the doc records)."
