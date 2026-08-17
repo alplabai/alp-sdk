@@ -85,8 +85,11 @@ def test_workflow_has_no_conflict_markers(wf: Path) -> None:
     assert not hits, "unresolved merge-conflict markers committed in a workflow: " + ", ".join(hits)
 
 
-# Contexts a PR author (or issue/comment/review author, or their own GitHub
-# login) controls the value of. See docs/ci/runner-architecture.md's
+# Contexts whose value is chosen by somebody other than this repo's
+# workflow authors: a PR/issue/comment/review author, their own GitHub
+# login, whoever named the branch or tag a run fires on, whoever typed a
+# `workflow_dispatch` input, and whoever wrote the commit messages a push
+# carries. See docs/ci/runner-architecture.md's
 # "Untrusted-input handling in run: blocks" section for the rule this test
 # enforces (alp-sdk#1475): `pr-bitbake.yml` spliced
 # `${{ github.event.pull_request.head.ref }}` -- a fork PR's own branch
@@ -97,12 +100,23 @@ def test_workflow_has_no_conflict_markers(wf: Path) -> None:
 # quoting inside the script does not help, and the fix is always to route
 # the value through the step's own `env:` block and reference a quoted
 # shell variable instead.
+#
+# Matching is plain substring containment, so `github.ref` also covers
+# `github.ref_name`, `github.ref_type` and `github.ref_protected`;
+# `github.ref_name` is listed anyway because it is the form the fixed
+# `dispatch-tan-parity.yml` site used and the one a reader looks for.
 _ATTACKER_CONTEXTS = (
     "github.event.pull_request",
     "github.event.issue",
     "github.event.comment",
     "github.event.review",
+    "github.event.head_commit",
+    "github.event.commits",
+    "github.event.inputs",
+    "github.event.workflow_run",
     "github.head_ref",
+    "github.ref_name",
+    "github.ref",
     "github.actor",
 )
 
@@ -147,19 +161,28 @@ def _attacker_context_splices(run_text: str) -> list[str]:
 
 @pytest.mark.parametrize("wf", _workflow_files(), ids=lambda p: p.name)
 def test_workflow_run_blocks_do_not_splice_attacker_context(wf: Path) -> None:
-    """The check that would have caught #1475 -- and would still catch its
-    second (dispatch-tan-parity.yml) and third (pr-static-analysis.yml)
-    sites, all found only by hand-sweeping every workflow file. Until now
-    the invariant "route github.event.pull_request.*/.issue.*/.comment.*/
-    .review.*/github.head_ref/github.actor through env:, never splice it
+    """The check that would have caught #1475. Until now the invariant
+    "route every `_ATTACKER_CONTEXTS` member through env:, never splice it
     into a run: block" was defended only by a comment at each fixed site --
     nothing failed CI if a future edit reintroduced the construct, here or
-    in a 29th workflow file nobody thought to re-sweep.
+    in a workflow file nobody thought to re-sweep.
 
-    PROOF this is a real regression test, not a tautology: at
-    alp-sdk@63a5eceb (the commit #1475 was filed against, before any of its
-    fix landed), this test fails against pr-bitbake.yml with the exact
-    `${{ github.event.pull_request.head.ref }}` splice the issue reports.
+    SCOPE: `run:` bodies only. `_run_steps` reads a step's `run` key and
+    nothing else, so a `${{ }}` splice into an `actions/github-script`
+    `with: script:` body -- the other place GitHub substitutes an
+    expression into executable source text -- is NOT covered by this test.
+    Do not read a green run here as "no template-injection sink anywhere".
+
+    PROOF this is a real regression test, not a tautology: run against the
+    `.github/workflows/` tree of alp-sdk@63a5eceb (the commit #1475 was
+    filed against, before any of its fix landed), this parametrised test
+    fails on exactly three files -- `pr-bitbake.yml`,
+    `dispatch-tan-parity.yml` and `pr-static-analysis.yml`, i.e. all three
+    sites the fix touches -- and passes on the other 26. With the shorter
+    `_ATTACKER_CONTEXTS` this test first shipped with, the
+    `dispatch-tan-parity.yml` node PASSED against that same unfixed tree:
+    its splice is `${{ github.ref_name }}`, which matched no member of the
+    list, so the gate failed open on a site this very commit fixes.
     """
     doc = yaml.safe_load(wf.read_text(encoding="utf-8"))
     violations = [
