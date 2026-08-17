@@ -115,6 +115,48 @@ def test_real_alif_ensemble_socs_resolve_clean():
     assert not failures
 
 
+def test_non_object_variants_entry_does_not_crash_the_gate():
+    """`variants[]` entries are schema-typed objects, but the schema pass
+    that would reject a non-object entry runs separately and is not
+    guaranteed to have run first. A bare string in the list used to reach a
+    bare `.get()` and raise `AttributeError` here, hiding the schema FAIL
+    line that already explains the real problem. Filtered to dicts, this doc
+    must return cleanly -- no real variant survives the filter."""
+    vm = _load_vm()
+    p = _write_fixture(
+        "non-object-variant",
+        _ALIF_ENSEMBLE_HEADER + '"variants": [ "not-a-dict" ] }',
+    )
+    try:
+        failures = vm._check_soc_jlink_flash_device_declared([p])
+    finally:
+        p.unlink(missing_ok=True)
+    assert not failures  # must not raise
+
+
+def test_non_object_debug_block_does_not_crash_the_gate():
+    """`variants[].debug` is schema-typed as an object, but a malformed
+    document can still carry a NON-STRING scalar there (e.g. a bare
+    integer, which is truthy) -- that used to reach `"jlink_flash_device"
+    not in debug` and raise `TypeError: argument of type 'int' is not
+    iterable` (a string would merely do a substring check and not crash,
+    which is why this needs its own scalar type). Normalised to `{}`, the
+    variant is treated as carrying no debug facts -- so the key is absent
+    and the check correctly still fails, just without crashing."""
+    vm = _load_vm()
+    p = _write_fixture(
+        "non-object-debug",
+        _ALIF_ENSEMBLE_HEADER
+        + '"variants": [ { "order_code": "AE999X", "debug": 5 } ] }',
+    )
+    try:
+        failures = vm._check_soc_jlink_flash_device_declared([p])
+    finally:
+        p.unlink(missing_ok=True)
+    assert failures  # must not raise; still correctly flags the absent key
+    assert "debug.jlink_flash_device is absent" in failures[0][1][0]
+
+
 def test_removing_the_key_from_a_real_soc_file_fails(tmp_path):
     """Proves the guard actually regresses: temporarily strip
     `jlink_flash_device` from a real, currently-clean variant (e5, the

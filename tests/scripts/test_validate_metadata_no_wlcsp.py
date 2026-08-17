@@ -108,6 +108,25 @@ def test_ignores_non_alif_ensemble_socs():
     assert not failures
 
 
+def test_non_object_variants_entry_does_not_crash_the_gate():
+    """`variants[]` entries are schema-typed objects, but the schema pass
+    that would reject a non-object entry runs separately and is not
+    guaranteed to have run first. A bare string in the list used to reach a
+    bare `.get()` and raise `AttributeError` here, hiding the schema FAIL
+    line that already explains the real problem. Filtered to dicts, this doc
+    must return cleanly -- no real variant survives the filter."""
+    vm = _load_vm()
+    p = _write_fixture(
+        "non-object-variant",
+        _HEADER + '"variants": [ "not-a-dict" ] }',
+    )
+    try:
+        failures = vm._check_soc_no_wlcsp_variants([p])
+    finally:
+        p.unlink(missing_ok=True)
+    assert not failures  # must not raise
+
+
 def test_the_real_corpus_is_clean():
     real = sorted(ENSEMBLE.glob("e*.json"))
     assert len(real) == 6

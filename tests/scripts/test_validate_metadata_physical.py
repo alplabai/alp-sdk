@@ -59,6 +59,65 @@ def test_passive_net_must_resolve(tmp_path):
     failures = vm._check_chip_physical([p])
     assert failures and any("SCLL" in m for _, msgs in failures for m in msgs)
 
+def test_physical_string_does_not_crash_the_gate(tmp_path):
+    """`physical:` is schema-typed as an object, but `if not phys: continue`
+    does not protect a non-empty scalar (e.g. a bare string, which is
+    truthy) -- that used to reach `phys.get("pins", [])` and raise
+    `AttributeError`, aborting the whole gate mid-run instead of leaving the
+    schema FAIL line (which already flags the type mismatch) to explain the
+    real problem."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm_phys_str", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    p = tmp_path / "w.yaml"; p.write_text(yaml.safe_dump({
+        "schema_version": 1, "chip_id": "w", "display_name": "W", "vendor": "v",
+        "mpn_population": ["W"], "datasheet": {}, "bus": "i2c",
+        "signals": [{"name": "SDA", "type": "bidir"}],
+        "physical": "not-an-object",
+    }))
+    failures = vm._check_chip_physical([p])  # must not raise
+    assert failures == []
+
+def test_non_object_pin_entry_does_not_crash_the_gate(tmp_path):
+    """`physical.pins[]` entries are schema-typed objects, but a non-object
+    entry (e.g. a bare string) used to reach `pin.get("signal")` and raise
+    `AttributeError` here."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm_pin_str", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    p = tmp_path / "v.yaml"; p.write_text(yaml.safe_dump({
+        "schema_version": 1, "chip_id": "v", "display_name": "V", "vendor": "v",
+        "mpn_population": ["V"], "datasheet": {}, "bus": "i2c",
+        "signals": [{"name": "SDA", "type": "bidir"}],
+        "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
+                     "visibility": "public",
+                     "pins": ["not-an-object"]},
+    }))
+    failures = vm._check_chip_physical([p])  # must not raise
+    assert failures == []
+
+def test_non_object_passive_entry_does_not_crash_the_gate(tmp_path):
+    """`physical.passives[]` entries are schema-typed objects, but a
+    non-object entry (e.g. a bare string) used to reach `passive.get("net")`
+    and raise `AttributeError` here."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm_passive_str", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    p = tmp_path / "u.yaml"; p.write_text(yaml.safe_dump({
+        "schema_version": 1, "chip_id": "u", "display_name": "U", "vendor": "v",
+        "mpn_population": ["U"], "datasheet": {}, "bus": "i2c",
+        "signals": [{"name": "SDA", "type": "bidir"}],
+        "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
+                     "visibility": "public", "provenance": "web_provisional",
+                     "pins": [{"pad": "1", "signal": "SDA"}],
+                     "passives": ["not-an-object"]},
+    }))
+    failures = vm._check_chip_physical([p])  # must not raise
+    assert failures == []
+
 def test_block_schema_exists():
     schema = json.loads((REPO / "metadata/schemas/block-v1.schema.json").read_text())
     assert schema["properties"]["block_id"]["pattern"] == "^[a-z][a-z0-9_]*$"
@@ -93,6 +152,83 @@ def test_realization_maps_must_be_in_interface(tmp_path):
     }))
     failures = vm._check_block_realizations([blk], chip_files=[])
     assert failures and any("NOT_IN_INTERFACE" in m for _, msgs in failures for m in msgs)
+
+def test_non_object_realization_entry_does_not_crash_the_gate(tmp_path):
+    """`realizations[]` entries are schema-typed objects, but a non-object
+    entry (e.g. a bare string) used to reach `r.get("parts", [])` and raise
+    `AttributeError` here, aborting the whole gate mid-run instead of
+    leaving the schema FAIL line (which already flags the type mismatch) to
+    explain the real problem."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm6", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    blk = tmp_path / "d.yaml"; blk.write_text(yaml.safe_dump({
+        "schema_version": 1, "block_id": "d", "display_name": "D",
+        "kconfig": "ALP_SDK_BLOCK_D",
+        "interface": [{"signal": "LED", "dir": "output"}],
+        "realizations": ["not-an-object"],
+    }))
+    failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
+    assert failures == []
+
+def test_non_object_part_entry_does_not_crash_the_gate(tmp_path):
+    """`realizations[].parts[]` entries are schema-typed objects, but a
+    non-object entry used to reach `part.get("chip")`/`part.get("maps")` and
+    raise `AttributeError` here -- the sixth site a previous audit round
+    named `r.get("parts", [])` but not the nested `part.get(...)` calls it
+    feeds."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm7", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    blk = tmp_path / "e.yaml"; blk.write_text(yaml.safe_dump({
+        "schema_version": 1, "block_id": "e", "display_name": "E",
+        "kconfig": "ALP_SDK_BLOCK_E",
+        "interface": [{"signal": "LED", "dir": "output"}],
+        "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
+                          "parts": ["not-an-object"]}],
+    }))
+    failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
+    assert failures == []
+
+def test_non_object_realization_passive_entry_does_not_crash_the_gate(tmp_path):
+    """`realizations[].passives[]` entries are schema-typed objects, but a
+    non-object entry used to reach `passive.get("net")` and raise
+    `AttributeError` here."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm8", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    blk = tmp_path / "f.yaml"; blk.write_text(yaml.safe_dump({
+        "schema_version": 1, "block_id": "f", "display_name": "F",
+        "kconfig": "ALP_SDK_BLOCK_F",
+        "interface": [{"signal": "LED", "dir": "output"}],
+        "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
+                          "parts": [], "passives": ["not-an-object"]}],
+    }))
+    failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
+    assert failures == []
+
+def test_non_object_maps_does_not_crash_the_gate(tmp_path):
+    """`realizations[].parts[].maps` is schema-typed as an object, but a
+    non-object value (e.g. a bare string) used to reach `.items()` and raise
+    `AttributeError` here."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm9", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    blk = tmp_path / "g.yaml"; blk.write_text(yaml.safe_dump({
+        "schema_version": 1, "block_id": "g", "display_name": "G",
+        "kconfig": "ALP_SDK_BLOCK_G",
+        "interface": [{"signal": "LED", "dir": "output"}],
+        "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
+                          "parts": [{"chip": "x", "maps": "not-an-object"}]}],
+    }))
+    failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
+    # `chip: x` has no manifest either (chip_files=[]), so this still
+    # reports a FAIL -- the point is that it reports one instead of raising.
+    assert failures
 
 def test_validate_metadata_passes_on_real_tree():
     # The full validator must stay green with the new chip pass wired in.
@@ -200,6 +336,19 @@ def test_board_qualified_matching_tree_accepted(tmp_path):
         "m55_he": {"board": "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"},
         "a32_cluster": {"machine": "e1m-aen801-a32"}}}))  # yocto slice: no board, skipped
     assert vm._check_board_targets([p]) == []
+
+def test_non_object_topology_does_not_crash_the_gate(tmp_path):
+    """`topology:` is schema-typed as an object, but `doc.get("topology") or
+    {}` does not protect a non-empty scalar (e.g. a bare string, which is
+    truthy) -- that used to reach `topology.items()` and raise
+    `AttributeError`, aborting the whole gate mid-run instead of leaving the
+    schema FAIL line (which already flags the type mismatch) to explain the
+    real problem."""
+    vm = _load_vm("vm_bt4"); import yaml
+    p = tmp_path / "E1M-AEN801.yaml"
+    p.write_text(yaml.safe_dump({"topology": "not-an-object"}))
+    failures = vm._check_board_targets([p])  # must not raise
+    assert failures == []
 
 
 # --- issue #1004: two soft-fail sites migrated onto resolve_soc_path() ---
