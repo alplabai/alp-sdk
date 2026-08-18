@@ -96,7 +96,6 @@ from alp_project_loader import (  # noqa: F401  (compat re-export)
 )
 from alp_project_emit import (  # noqa: F401  (compat re-export)
     _CHIP_SUBSYSTEMS,
-    _PERIPHERAL_KCONFIG,
     _SOC_FAMILY_TOKEN,
     _emit_carrier_netlist,
     _emit_composed_route_table,

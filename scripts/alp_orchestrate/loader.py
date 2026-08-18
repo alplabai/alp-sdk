@@ -796,6 +796,7 @@ def _validate_topology_cores(
     silicon: str,
     board_preset: dict[str, Any],
     board_name: Optional[str],
+    metadata_root: Path,
 ) -> tuple[dict[str, Slice], list[IpcEntry]]:
     """Stage 3 of the #673 Phase-1 `load_board_yaml` split: per-core
     topology resolution + OS/class enforcement, IPC endpoint
@@ -897,7 +898,7 @@ def _validate_topology_cores(
             slot0_load_address=slot0_load_address,
         )
         _enforce_flow_d_preflight_pair(slice_, variant_debug, sku)
-        _enforce_loader_rules(slice_)
+        _enforce_loader_rules(slice_, metadata_root)
         _enforce_os_matches_core_class(
             slice_, soc_core_type_by_id.get(core_id, ""))
         cores[core_id] = slice_
@@ -1252,7 +1253,7 @@ def load_board_yaml(path: Path, *,
 
     cores, ipc_entries = _validate_topology_cores(
         project, som_preset, soc_spec, sku, silicon, board_preset,
-        board_name)
+        board_name, metadata_root)
 
     storage_entries = _resolve_storage(project, som_preset, sku, metadata_root)
 

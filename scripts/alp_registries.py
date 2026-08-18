@@ -11,13 +11,21 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
 
-PERIPHERAL_KCONFIG_REGISTRY = METADATA_ROOT / "registries" / "peripheral-kconfig.json"
 
+@functools.lru_cache(maxsize=None)
+def peripheral_kconfig(metadata_root: Path) -> dict[str, tuple[str, ...]]:
+    """Return board.yaml peripheral tokens -> Zephyr Kconfig symbol bundles.
 
-@functools.lru_cache(maxsize=1)
-def peripheral_kconfig() -> dict[str, tuple[str, ...]]:
-    """Return board.yaml peripheral tokens -> Zephyr Kconfig symbol bundles."""
-    data = json.loads(PERIPHERAL_KCONFIG_REGISTRY.read_text(encoding="utf-8"))
+    *metadata_root* is REQUIRED -- every caller must pass the project's own
+    ``project.effective_metadata_root()`` (or the SDK's own in-tree
+    ``METADATA_ROOT`` for a repo self-check). A module-level default here
+    is exactly the shape that let this registry silently ignore a project's
+    `--metadata-root` override (#1485): the cache is keyed on
+    *metadata_root* so a second root in the same process doesn't reuse the
+    first root's table.
+    """
+    registry = Path(metadata_root) / "registries" / "peripheral-kconfig.json"
+    data = json.loads(registry.read_text(encoding="utf-8"))
     return {
         token: tuple(symbols)
         for token, symbols in data["peripherals"].items()

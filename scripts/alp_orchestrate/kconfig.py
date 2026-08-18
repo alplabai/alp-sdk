@@ -45,6 +45,7 @@ from alp_project import (
     silicon_to_kconfig,
     som_unpopulated_capabilities,
 )
+from alp_registries import peripheral_kconfig
 from sentinels import is_tbd
 
 from . import libraries as _library_layer
@@ -54,7 +55,6 @@ from .paths import REPO
 from .partition import resolve_storage_partitions
 from .slugs import (
     _BLOCK_SLUGS,
-    _PERIPHERAL_KCONFIG,
     _board_define_slug,
     _slugs_from_helper_firmware,
     _slugs_from_on_module,
@@ -821,15 +821,18 @@ def _emit_chips(
     return lines, chip_subsystems, resolved_chip_state
 
 
-def _emit_subsystems(slice_: Slice, chip_subsystems: set[str]) -> list[str]:
+def _emit_subsystems(
+    project: BoardProject, slice_: Slice, chip_subsystems: set[str]
+) -> list[str]:
     """Zephyr subsystems required by the slice: union of (chip-driver-
     required subsystems, from `_emit_chips`) and (this core's
     `peripherals:` array, which adds to the union per spec §4.6).
     """
     lines: list[str] = []
+    periph_kconfig = peripheral_kconfig(project.effective_metadata_root())
     periph_subsystems: set[str] = set()
     for periph in slice_.peripherals or []:
-        periph_subsystems.update(_PERIPHERAL_KCONFIG.get(periph, ()))
+        periph_subsystems.update(periph_kconfig.get(periph, ()))
     all_subsystems = chip_subsystems | periph_subsystems
     if all_subsystems:
         lines.append(f"# Zephyr subsystems required on core "
@@ -1824,7 +1827,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     which declare a ``raw_shmem`` ``ipc:`` entry) stay byte-identical.
     """
     silicon = project.som_preset.get("silicon")
-    kconfig = silicon_to_kconfig(silicon)
+    kconfig = silicon_to_kconfig(silicon, project.effective_metadata_root())
     diagnostics = project.diagnostics
 
     # Lazy-import alp_project tables — alp_project imports us, so a
@@ -1850,7 +1853,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     chip_lines, chip_subsystems, resolved_chip_state = _emit_chips(
         project, _CHIP_SUBSYSTEMS)
     lines.extend(chip_lines)
-    lines.extend(_emit_subsystems(slice_, chip_subsystems))
+    lines.extend(_emit_subsystems(project, slice_, chip_subsystems))
 
     iot_lines = _zephyr_iot_kconfig(project, slice_, resolved_chip_state)
     if iot_lines:

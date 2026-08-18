@@ -282,7 +282,7 @@ def _enforce_os_matches_core_class(slice_: Slice, core_type: str) -> None:
             f"disable it or 'baremetal' for no-OS firmware -- got os: '{slice_.os}'.")
 
 
-def _enforce_loader_rules(slice_: Slice) -> None:
+def _enforce_loader_rules(slice_: Slice, metadata_root: Path) -> None:
     """Loader rules from spec §4.5: every non-off slice must declare
     enough to actually build."""
     if slice_.os == "off":
@@ -302,6 +302,6 @@ def _enforce_loader_rules(slice_: Slice) -> None:
             raise OrchestratorError(
                 f"core '{slice_.core_id}': os: yocto requires either "
                 f"`app:` (custom recipe) or `image:` (stock recipe)")
-    elif slice_.os not in _core_os_choices():
+    elif slice_.os not in _core_os_choices(metadata_root):
         raise OrchestratorError(
             f"core '{slice_.core_id}': unknown os '{slice_.os}'")

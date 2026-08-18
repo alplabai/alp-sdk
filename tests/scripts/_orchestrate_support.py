@@ -57,7 +57,8 @@ def _synthetic_nx9101_root(tmp_path: Path, monkeypatch) -> Path:
     e1m = meta / "e1m_modules"
     socs = meta / "socs" / "nxp" / "imx9"
     schemas = meta / "schemas"
-    for d in (e1m, socs, schemas):
+    registries = meta / "registries"
+    for d in (e1m, socs, schemas, registries):
         d.mkdir(parents=True)
 
     real_meta = REPO / "metadata"
@@ -69,6 +70,13 @@ def _synthetic_nx9101_root(tmp_path: Path, monkeypatch) -> Path:
                 schemas / "soc-spec-v1.schema.json")
     shutil.copy(real_meta / "socs" / "nxp" / "imx9" / "imx93.json",
                 socs / "imx93.json")
+    # `_slice_alp_conf` resolves the SoM-silicon + peripheral Kconfig
+    # symbols against `project.effective_metadata_root()` too (#1485) --
+    # copy the real registries so this scratch root resolves for real.
+    shutil.copy(real_meta / "registries" / "silicon-kconfig.json",
+                registries / "silicon-kconfig.json")
+    shutil.copy(real_meta / "registries" / "peripheral-kconfig.json",
+                registries / "peripheral-kconfig.json")
     # The ADR-0018 library layer resolves `libraries:` against
     # `metadata_root` too (#1485) -- copy the real curated-library
     # manifests + alias table so a test declaring `libraries: [mbedtls]`

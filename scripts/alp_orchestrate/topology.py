@@ -15,9 +15,8 @@ from __future__ import annotations
 
 import functools
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
-from .paths import BOARD_SCHEMA
 
 if TYPE_CHECKING:
     from .models import BoardProject
@@ -44,15 +43,18 @@ def _default_os_from_core_type(core_type: str) -> str:
 
 
 @functools.lru_cache(maxsize=None)
-def _core_os_choices() -> tuple[str, ...]:
-    """The runtimes a core's `os:` may resolve to, read from the board
-    schema's `$defs/core_entry/properties/os` enum.
+def _core_os_choices(metadata_root: Path) -> tuple[str, ...]:
+    """The runtimes a core's `os:` may resolve to, read from *metadata_root*'s
+    board schema's `$defs/core_entry/properties/os` enum.
 
     Derived (not re-typed) so the value-set has exactly one source of truth
     and cannot drift between the schema and the code.  `off` skips the core
-    (no slice is built).
+    (no slice is built).  *metadata_root* is REQUIRED and the cache is keyed
+    on it -- a fixed in-tree default here silently ignored a project's
+    `--metadata-root` override (#1485).
     """
-    schema = json.loads(BOARD_SCHEMA.read_text(encoding="utf-8"))
+    schema_path = Path(metadata_root) / "schemas" / "board.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
     return tuple(schema["$defs"]["core_entry"]["properties"]["os"]["enum"])
 
 
@@ -79,12 +81,12 @@ def _cross_class_os(core_type: str) -> set[str]:
     return set(CLASS_RUNTIMES) - {_default_os_from_core_type(core_type)}
 
 
-def _allowed_os_for_core(core_type: str) -> list[str]:
+def _allowed_os_for_core(core_type: str, metadata_root: Path) -> list[str]:
     """The os: values valid for this core: every runtime minus the other
     class's OS -- e.g. Cortex-A -> [yocto, baremetal, off], Cortex-M ->
     [zephyr, baremetal, off]."""
     cross = _cross_class_os(core_type)
-    return [o for o in _core_os_choices() if o not in cross]
+    return [o for o in _core_os_choices(metadata_root) if o not in cross]
 
 
 def core_os_topology(project: "BoardProject") -> dict[str, Any]:
@@ -114,7 +116,8 @@ def core_os_topology(project: "BoardProject") -> dict[str, Any]:
             "effective_os":  sl.os,
             "enabled":       sl.os != "off",
             "overridden":    sl.os != default_os,
-            "allowed_os":    _allowed_os_for_core(core_type),
+            "allowed_os":    _allowed_os_for_core(
+                core_type, project.effective_metadata_root()),
         })
     return {
         "schema_version": 1,

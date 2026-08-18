@@ -28,14 +28,13 @@ class TestLoaderContract(unittest.TestCase):
     """Schema + preset resolution behaviour."""
 
     def test_peripheral_kconfig_registry_is_shared(self) -> None:
-        """alp_project and alp_orchestrate consume one metadata registry."""
-        import alp_project
+        """alp_project and alp_orchestrate consume the same metadata
+        registry function -- `alp_registries.peripheral_kconfig()`, keyed
+        on an explicit `metadata_root` (#1485: no module-level frozen
+        table, so a project's `--metadata-root` override is honoured)."""
         import alp_registries
-        from alp_orchestrate.slugs import _PERIPHERAL_KCONFIG as orchestrate_map
 
-        registry_map = alp_registries.peripheral_kconfig()
-        self.assertEqual(alp_project._PERIPHERAL_KCONFIG, registry_map)
-        self.assertEqual(orchestrate_map, registry_map)
+        registry_map = alp_registries.peripheral_kconfig(alp_registries.METADATA_ROOT)
         self.assertEqual(registry_map["uart"], ("SERIAL",))
 
     def test_peripheral_kconfig_registry_covers_schema_enum(self) -> None:
@@ -50,7 +49,8 @@ class TestLoaderContract(unittest.TestCase):
             schema["$defs"]["core_entry"]["properties"]["peripherals"]
             ["items"]["enum"]
         )
-        self.assertEqual(set(alp_registries.peripheral_kconfig()), enum)
+        registry_map = alp_registries.peripheral_kconfig(alp_registries.METADATA_ROOT)
+        self.assertEqual(set(registry_map), enum)
 
     def test_peripheral_kconfig_registry_schema_is_gated(self) -> None:
         """validate_metadata rejects malformed peripheral registry data."""
