@@ -214,17 +214,19 @@ pip install west
 wsl --install -d Ubuntu
 ```
 
-**Verify your setup first.** Before building anything, run Tan's read-only
-build/flash readiness preflight. It checks the SDK and project, the resolved
-west/Zephyr workspace and pin, the effective Python floor, host prerequisites,
-the Zephyr SDK, and programming tools. Each problem includes a fix hint:
+**Verify your setup first.** Before building anything, run Tan's build/flash
+readiness preflight -- read-only unless you pass `--fix`. It checks the SDK
+and project, the resolved west/Zephyr workspace and pin, the effective
+Python floor, host prerequisites, the Zephyr SDK, and programming tools.
+Each problem includes a fix hint:
 
 ```bash
 tan doctor                    # human-readable report
 tan doctor --format json      # machine-readable
 ```
 
-It is HW-free (no build and no flash), so it is safe to run anytime. An
+Without `--fix` it is HW-free (no build and no flash), so it is safe to run
+anytime. An
 unhealthy environment exits 4. `--build` remains accepted for compatibility
 with v0.4 callers but no longer changes the checklist. Interactive `--fix`
 (it needs a TTY on both stdin and stderr) can run manifest remedies: a
