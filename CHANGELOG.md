@@ -478,14 +478,17 @@ nesting is readable in the emit golden itself: that slice of
 `artifacts` block today — tan parses it into the slice record
 (`python/tan/core/build_plan.py:224`) and never reads it again — so the wrong
 spelling was a defect in the published contract, not an observed crash. It
-still matters, because the same un-nested spelling exists independently in a
-tan path that IS live: `tan renode` resolves its ELF from
-`system-manifest.yaml` via `core/renode_plan.py::zephyr_elf_from_manifest`,
-and a slice with no `output_artefact` falls back to
-`<build_dir>/zephyr/zephyr.elf` — calling that function directly with
-`build_dir: m55_he-zephyr` returns `build/m55_he-zephyr/zephyr/zephyr.elf`,
-the path west never writes. That fallback is tan's own defect and is NOT
-fixed here; this change removes the SDK-side spelling it agrees with.
+mattered when this entry was written because the same un-nested spelling
+existed independently in a tan path that was live then: `tan renode` resolved
+its ELF from `system-manifest.yaml` via
+`core/renode_plan.py::zephyr_elf_from_manifest`, and a slice with no
+`output_artefact` fell back to `<build_dir>/zephyr/zephyr.elf` — calling that
+function directly with `build_dir: m55_he-zephyr` returned
+`build/m55_he-zephyr/zephyr/zephyr.elf`, the path west never writes. That
+second copy was never fixed; it was deleted. `tan renode` and
+`core/renode_plan.py` are gone with the Renode retirement (ADR 0022,
+Amendment 2), later in this same v0.16.0 cycle. This change removes the
+SDK-side spelling it agreed with, which stands on its own.
 
 All six Zephyr paths move: `elf`, `map`, `bin`, `sizeReport` (`zephyr.stat`)
 and `symbols` (`zephyr.symbols`) now sit under `<buildDir>/build/zephyr/`, and
