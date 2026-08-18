@@ -287,10 +287,11 @@ against the live core's, refusing the working
 `os == "zephyr"` on both roles, matching `_enforce_flow_d_preflight_pair`'s
 existing convention — and a real gap #1295 did not close: any AEN301/501/
 601/701 board.yaml that left its sibling core at the SoM's `alp-stock-shim`
-default (the common case) then refused, because at the time none of
-those four SoM presets declared a disjoint `he_slot0`/`hp_slot0`
-`memory_map:` override the way `E1M-AEN801.yaml` does. (E1M-AEN401 never hit
-this refusal: at the time, the loader only called `_resolve_slot0_load_address`
+default (the common case) would have refused, because the #1295 slice alone
+left none of those four SoM presets declaring a disjoint `he_slot0`/`hp_slot0`
+`memory_map:` override the way `E1M-AEN801.yaml` does — a state that never
+reached `dev`, since the #1445 slice of the same commit closed it. (E1M-AEN401
+never hit this refusal: at the time, the loader only called `_resolve_slot0_load_address`
 when `debug.jlink_flash_device` was truthy, and the E4 variant's explicit
 `null` is not truthy, so the resolver never ran for it. #1444/#1446 later
 changed that gate to test key presence instead of truthiness.) This gap and
@@ -304,7 +305,8 @@ affected, and the four SKUs never actually refused on `dev`, since #1445's
 memory_map overrides landed in the same commit — until #1452's sweep
 restored its 18-of-21 count. `docs/portability.md`, `docs/v1.0-readiness.md`,
 `README.md`, and `docs/tutorials/04-cross-family-portability.md` always
-recorded 18 of 21 and were never changed. Populating a per-SoM memory map is
+recorded 18 of 21, and none of them ever recorded the 12 failing cells.
+Populating a per-SoM memory map is
 a firmware-policy decision (slot sizing, per-core OTA support) that the
 #1295 slice did not make; the #1445 slice of the same commit made it.
 
