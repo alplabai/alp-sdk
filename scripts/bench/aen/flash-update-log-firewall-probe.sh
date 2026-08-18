@@ -144,7 +144,8 @@ device $JLINK_DEVICE_READ
 connect
 exit
 EOF
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/fwprobe-preflight.jlink \n  > /tmp/fwprobe-preflight.out 2>&1 || true
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/fwprobe-preflight.jlink \
+  > /tmp/fwprobe-preflight.out 2>&1 || true
 bench_jlink_assert_connected /tmp/fwprobe-preflight.out "firewall-probe preflight" || exit 7
 bench_jlink_assert_aen_dpidr /tmp/fwprobe-preflight.out "firewall-probe preflight" || exit 4
 
@@ -161,14 +162,59 @@ g
 exit
 EOF
 
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-firewall-probe-write.jlink 2>&1 | tee /tmp/firmware-update-log-firewall-probe-write.out | \
-	grep -iE "could not connect|fail|error|Verify|O\\.K\\.|Reset|Writing|Programming" | head -40
+# Write the transcript FIRST, fully, then grep|head it for display (#1488
+# finding 5) -- a `... | tee out | grep ... | head -N` pipeline lets `head`
+# exit after N lines and SIGPIPE grep, which then closes tee's stdout pipe;
+# tee can die from that SIGPIPE before JLinkExe's full transcript (including
+# the `Verify successful.` / `Verify failed.` line the gate below depends on)
+# is written to disk. Once a genuinely good flash's transcript got truncated
+# that way, the absence of "verify successful" in the truncated file would
+# read as a hard exit 3 on a board that actually flashed fine.
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-firewall-probe-write.jlink \
+	> /tmp/firmware-update-log-firewall-probe-write.out 2>&1 || true
+grep -iE "could not connect|fail|error|Verify|O\\.K\\.|Reset|Writing|Programming" \
+	/tmp/firmware-update-log-firewall-probe-write.out | head -40
 
 if grep -qiE "Could not connect to the target device|Cannot connect to the probe/programmer" \
 	/tmp/firmware-update-log-firewall-probe-write.out; then
 	echo "!! $JLINK_DEVICE_FLASH profile failed to connect" >&2
 	exit 2
 fi
+
+# GATE ON THE VERIFY RESULT (#1488) -- same defect flash-jlink-hp.sh was fixed
+# for under #1343. The `verifybin` above was issued but its outcome was never
+# read: the output went to a display-only pipe and the connect check was the
+# only thing that could fail this script, so a `Verify failed.` exited 0 and
+# reported a good flash.
+#
+# What this gate actually does -- and does NOT do: `loadbin`, `verifybin`,
+# `RSetType 2`, `r`, and `g` are all inside the SAME CommanderScript JLinkExe
+# has already finished executing by the time the greps below run, and the
+# ATOC entry above carries `"flags": ["load", "boot"]` -- the SE has already
+# pin-reset and BOOTED the HE probe. So this gate can only suppress the false
+# "flash complete" report and the beacon read-back
+# (read-update-log-proof.sh) that follows; it does NOT and CANNOT prevent the
+# write, or the boot that lets the HE probe attempt it. See the exit-3 data-
+# loss caveats below.
+if grep -qiE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-firewall-probe-write.out; then
+	echo "!! VERIFY FAILED -- the bytes on the part do NOT match $PKG." >&2
+	grep -iE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-firewall-probe-write.out | head -5 >&2
+	echo "   Do not treat this board as flashed." >&2
+	echo "   DATA LOSS: the board was already pin-reset and released (RSetType 2; r; g" >&2
+	echo "   already ran inside the same CommanderScript), so alp_ulog_partition may" >&2
+	echo "   ALREADY have been overwritten by the HE probe -- re-read the partition from a" >&2
+	echo "   known-good state before trusting BASELINE_WORDS captured earlier in this run." >&2
+	exit 3
+fi
+if ! grep -qi "verify successful" /tmp/firmware-update-log-firewall-probe-write.out; then
+	echo "!! no verifybin success reported -- treating as FAILED (the verify never ran)." >&2
+	echo "   DATA LOSS: the board was already pin-reset and released (RSetType 2; r; g" >&2
+	echo "   already ran inside the same CommanderScript), so alp_ulog_partition may" >&2
+	echo "   ALREADY have been overwritten by the HE probe -- re-read the partition from a" >&2
+	echo "   known-good state before trusting BASELINE_WORDS captured earlier in this run." >&2
+	exit 3
+fi
+echo "verify: verifybin OK ($PKG @ $ATOC_ADDR)" >&2
 
 echo "flash complete; reading firewall-probe beacon" >&2
 sleep 3

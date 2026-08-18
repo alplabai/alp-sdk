@@ -3217,7 +3217,7 @@
       "script": "scripts/check_agents_md_generators.py"
     },
     {
-      "purpose": "Refuse an Alif Ensemble (AEN) layout that leaves the top of the App MRAM window writable by the application.",
+      "purpose": "Refuse an Alif Ensemble (AEN) layout that leaves the top of the App MRAM window writable by the application, or that publishes a slot0 flash address disagreeing with `loader._resolve_slot0_load_address()` (#1482).",
       "script": "scripts/check_atoc_reservation.py"
     },
     {
@@ -3700,6 +3700,7 @@
         "alp_inference_get_input",
         "alp_inference_get_output",
         "alp_inference_invoke",
+        "alp_inference_last_invoke_latency_us",
         "alp_inference_num_inputs",
         "alp_inference_num_outputs",
         "alp_inference_open",

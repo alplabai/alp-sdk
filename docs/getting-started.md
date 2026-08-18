@@ -384,9 +384,10 @@ in-process planner. The SDK's `alp_orchestrate --emit build-plan` path is kept
 as its reference/parity producer:
 
 1. **Validates** the app's `board.yaml` (schema + SoM SKU preset +
-   board preset + `hw_rev` / SDK-version compatibility window +
-   `peripherals:` vs SoC caps) — the same check `tan validate` runs
-   standalone.
+   board preset + `hw_rev` / SDK-version compatibility window) — run
+   `tan validate` first for the full check, including the advisory
+   `peripherals:` vs SoC caps cross-check; `tan build` plans in-process
+   and never spawns the SDK validator.
 2. **Materialises** every generated artefact the plan carries,
    including the build-time hw_info header at
    `<build>/generated/alp_hw_info_build.h` so apps that include
@@ -669,8 +670,11 @@ resolves the MPN to the silicon ref (`alif:ensemble:e8` for
 hand.  The validator also cross-checks every entry in
 `peripherals:` against the SoC's `metadata/socs/<vendor>/<family>/<part>.json`
 caps -- a board.yaml asking for `i2s` on a SoC that doesn't route
-I²S fails at `tan build` time with exit code 3, before any
-compile work (the same check runs standalone via `tan validate`).
+I²S is reported by `tan validate` as an `ALP-B010` **warning**
+(`scripts/validate_board_yaml.py` still exits 0; the check is advisory
+because SoC peripheral metadata is incomplete for some parts and some
+peripherals are board-side). `tan build` does not re-run this
+cross-check at all.
 
 At runtime, the documented caps drive the per-`*_open` validation:
 e.g. `alp_adc_open` with `resolution_bits = 16` on a 12-bit SoC

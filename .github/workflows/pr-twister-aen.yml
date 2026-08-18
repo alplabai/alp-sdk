@@ -2,16 +2,19 @@
 #
 # AEN801 real-silicon twister gate (issue #1076).
 #
-# The problem this closes: examples/aen/** now carries 62 testcase.yaml
-# files, 53 of which name AEN board targets in platform_allow
-# (alp_e1m_aen801_m55_he/... and /_hp/...), contributing 60 of the tree's
-# 70 scenarios. The other 9 files are native_sim/native/64-only by design
+# The problem this closes: examples/aen/** now carries 61 testcase.yaml
+# files, 52 of which name AEN board targets in platform_allow
+# (alp_e1m_aen801_m55_he/... and /_hp/...), contributing 59 of the tree's
+# 69 scenarios. The other 9 files are native_sim/native/64-only by design
 # (aen-analog-validate, the five aen-cc3501e-* companion examples,
 # aen-eeprom-manifest, aen-secure-element-sign, edgeai-vision-aen) and are
-# not this gate's business. Of the 62 files, 25 predate this gate, 36 were
+# not this gate's business. Of the 61 files, 25 predate this gate, 35 were
 # added by the #1076 metadata sweep (#1095), and 1 (aen-sdcard-readout) by
 # #1097 once its driver linked; PR #1085 added the workflow itself, not the
-# metadata. pr-twister.yml's shards run
+# metadata. (The counts were 62/53/60/70 and a 36-file #1095 bucket until
+# docs/adr/0022 Amendment 2 deleted the Renode-sim aen-sim-vision example,
+# which carried one HP-only scenario from that sweep.)
+# pr-twister.yml's shards run
 # `-p native_sim/native/64` only (by design -- see that file's own header
 # comment: it deliberately skips the Zephyr SDK to dodge a disk-space
 # failure mode), so every AEN-only scenario is statically filtered out of
@@ -131,7 +134,7 @@ jobs:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
         # #1477: worst observed successful run 4s across 10 sampled runs.
-        timeout-minutes: 1
+        timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
@@ -139,26 +142,34 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         # #1477: worst observed successful run 1s across 10 sampled runs.
-        timeout-minutes: 1
+        timeout-minutes: 5
         with:
           # Repo is checked out under alp-sdk/ (path:), but setup-python (a
           # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
           python-version-file: alp-sdk/.python-version
 
       - name: Install host build tools
-        # #1477: worst observed successful run 32s across 10 sampled runs.
-        timeout-minutes: 1
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        # Worst observed successful run 32s across 10 sampled runs, but
+        # #1477's 1-minute cap derived from that TIMED OUT on a real PR
+        # (2026-08-18, run 32129302570): apt-get against a slow mirror
+        # routinely exceeds it. The cap is here to catch a hang, not to
+        # police apt, so it now carries ~10x the observed time.
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
               ninja-build gperf ccache dfu-util device-tree-compiler \
               python3-dev python3-pip python3-setuptools python3-wheel \
               libffi-dev libssl-dev xz-utils file make gcc \
               ca-certificates curl gnupg
 
       - name: Install west + Python deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # #1477: worst observed successful run 7s across 10 sampled runs.
-        timeout-minutes: 1
         run: pip3 install west jsonschema pyyaml
 
       # Zephyr workspace lives next to alp-sdk.  bootstrap.sh is
@@ -210,8 +221,10 @@ jobs:
       # runs twister successfully in CI with this exact install -- copied
       # verbatim rather than guessing a requirements file name.
       - name: pip install Zephyr requirements
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # #1477: worst observed successful run 26s across 10 sampled runs.
-        timeout-minutes: 1
         run: |
           set -euo pipefail
           pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements.txt"
@@ -239,9 +252,11 @@ jobs:
       # Both AEN801 board targets (M55-HE and M55-HP) are real
       # arm-zephyr-eabi cross builds, unlike the native_sim twister gate.
       - name: Install Zephyr SDK (arm-zephyr-eabi)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         working-directory: ${{ github.workspace }}
         # #1477: worst observed successful run 9s across 10 sampled runs.
-        timeout-minutes: 1
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 --retry-delay 5 -o /tmp/zephyr-sdk.tar.xz "${ZEPHYR_SDK_URL}"

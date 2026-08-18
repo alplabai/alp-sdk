@@ -18,7 +18,7 @@
     },
     {
       "id": "atoc-reservation",
-      "description": "Every AEN board .dts and every SoM preset memory_map reserves the top of the App MRAM window as an 'atoc' region -- SETOOLS top-anchors the ATOC boot table there (#1289).",
+      "description": "Every AEN board .dts and every SoM preset memory_map reserves the top of the App MRAM window as an 'atoc' region -- SETOOLS top-anchors the ATOC boot table there (#1289) -- and every AEN board .dts with an m55_he/m55_hp role publishes a slot0 flash address that agrees with loader._resolve_slot0_load_address() (#1482).",
       "runner": "check-script",
       "script": "scripts/check_atoc_reservation.py",
       "gate": true,

@@ -55,15 +55,15 @@ jobs:
   tan-docs-drift:
     name: "tan-docs-drift · Python Tan surface (advisory)"
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
 
       - name: Checkout tan-cli Python port
         uses: actions/checkout@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           repository: alplabai/tan-cli
           ref: dev
@@ -71,12 +71,14 @@ jobs:
 
       - name: Set up Python
         uses: actions/setup-python@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 
       - name: Install Python Tan from source
-        timeout-minutes: 3
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: python3 -m pip install ./.tan-cli/python
 
       - name: Sanity-check tan is really on PATH
