@@ -231,14 +231,18 @@ See `docs/ota.md` + `docs/ota-device-contract.md` + ADR 0009.
 ```yaml
 storage:
   - { name: settings,        fs: littlefs, size_kib: 64,  mount: /lfs/settings,
-      flash_device: ospi0 }
+      flash_device: <your SoM's flash device> }
   - { name: app_data,        fs: littlefs, size_kib: 128, mount: /lfs/app,
-      flash_device: ospi0 }
+      flash_device: <your SoM's flash device> }
   - { name: mcuboot_scratch, fs: raw,      size_kib: 32,
-      flash_device: ospi0 }
+      flash_device: <your SoM's flash device> }
   - { name: pinned_low,      fs: raw,      size_kib: 32,
-      flash_device: ospi0, offset_kib: 0 }    # explicit offset override
+      flash_device: <your SoM's flash device>, offset_kib: 0 }    # explicit offset override
 ```
+
+`<your SoM's flash device>` above is a placeholder, not a value to copy
+verbatim -- see below: no AEN SKU has a working `storage[].flash_device:`
+target today (#1556).
 
 Project-wide.  Each entry declares a fixed partition on the
 referenced flash device.  Partitions on the same device are
@@ -257,10 +261,12 @@ name-sort position -- `pinned_low` above sorts after `app_data` and
 1. `memory_map:` region names (e.g. `mram_main`, `ocram_low`) --
    either declared on the SoM or auto-derived from the SoC variant's
    `mram_mb` / `sram_banks_kb` (the same resolution `resolve_memory_map()`
-   does for IPC carve-outs).  Neither example name above resolves to a
-   working target today -- see the `dt_label:` caveat below.
+   does for IPC carve-outs).  Neither `mram_main` nor `ocram_low` resolves
+   to a working target today -- see the `dt_label:` caveat below.
 2. `on_module.ospi_memories:` keys (e.g. `ospi0`) -- external OSPI
-   flash declared on the SoM.
+   flash declared on the SoM.  This is the more misleading of the two:
+   `ospi0` matches a real controller node by name but resolves to a
+   disabled DT node -- see the `dt_label:` caveat below.
 
 A `memory_map:` region marked `carveout: false` is excluded from
 resolution (#1484): that flag also means the region is a partition

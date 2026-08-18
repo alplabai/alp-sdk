@@ -170,6 +170,9 @@ class TestExplicitOffset:
         assert "use a different flash_device:" not in reason, reason
         assert "ospi0" not in reason, reason
 
+        # A dead end must at least name where to follow up (#1556 re-review).
+        assert "alp-sdk#1556" in reason, reason
+
     def test_offset_inside_the_atoc_band_is_refused(self, tmp_path):
         """The #1289 band, reached the customer-facing way.
 
@@ -278,6 +281,40 @@ class TestReservedBytesLessThanCapacity:
             assert descriptor is not None, (
                 f"remedy named '{device}' but it does not resolve: {err}")
 
+    def test_a_named_alternative_with_a_real_dt_label_round_trips(
+            self, tmp_path):
+        """Synthetic drive for the round-trip guarantee above.
+
+        `_has_real_dt_label()` returns False for every device on every SoM
+        today (alp-sdk#1556), so `test_a_named_alternative_always_round_trips`
+        never executes its own body -- its `if "use a different
+        flash_device:" not in reason: return` guard fires every run. This
+        pins the SAME property against a hand-built `som_preset` carrying an
+        explicit `dt_label:` override, so the guarantee is actually
+        exercised at least once rather than only ever agreeing with itself.
+        """
+        path = _write_board(tmp_path, _aen801("""
+      - { name: logs, size_kib: 32, fs: littlefs, flash_device: mram_main, offset_kib: 0, mount: /lfs/logs }
+    """))
+        project = load_board_yaml(path)
+        # A synthetic second device.  `base: "TBD"` keeps it out of
+        # `_reserved_spans()`'s address-window derivation for `mram_main`
+        # (only integer bases enter that computation), while it still
+        # resolves via `_resolve_flash_device()` since `size_kib` is an int.
+        project.som_preset["memory_map"] = list(
+            project.som_preset["memory_map"]) + [{
+                "name": "test_alt_device",
+                "base": "TBD",
+                "size_kib": 64,
+                "accessible_from": ["m55_he", "m55_hp"],
+                "cacheable": True,
+                "dt_label": "test_alt_device",
+            }]
+        parts = resolve_storage_partitions(project)
+        reason = _by_name(parts)["logs"].reason or ""
+        assert "use a different flash_device:" in reason, reason
+        assert "test_alt_device" in reason, reason
+
     def test_aen401_fully_tiled_names_no_undefined_alternative(
             self, tmp_path):
         """Regression for the #1484 re-review major finding: E1M-AEN401's
@@ -318,6 +355,7 @@ class TestReservedBytesLessThanCapacity:
         assert "fully tiled" in reason, reason
         assert "use a different flash_device:" not in reason, reason
         assert "ospi0" not in reason, reason
+        assert "alp-sdk#1556" in reason, reason
 
 
 class TestTargetingARegionDirectly:

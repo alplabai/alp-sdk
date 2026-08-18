@@ -555,7 +555,7 @@ def resolve_storage_partitions(
                             f"own regions ({capacity_bytes // 1024} KiB, "
                             f"no free room) and no other flash_device: on "
                             f"this SoM both resolves and has a verified "
-                            f"Devicetree label")
+                            f"Devicetree label (alp-sdk#1556)")
                     return 0, size_aligned, (
                         f"storage entry '{entry.name}' {where} overlaps SoM "
                         f"region '{overlap_with}' on device '{device_name}' "
