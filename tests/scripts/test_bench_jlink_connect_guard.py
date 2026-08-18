@@ -165,6 +165,44 @@ def test_missing_file_is_a_hard_error(tmp_path: Path) -> None:
     assert res.returncode == 7
 
 
+# alp-sdk#1551: the guard enumerated FAILURE strings, so any failure mode that
+# stopped JLinkExe before it printed one of them passed. Verbatim capture from
+# the bench probe (J-Link Commander V9.46) running the pre-alp-sdk#1478 line
+# shape, whose stray literal `n` made JLinkExe reject its own command line --
+# this is the COMPLETE 147-byte transcript, nothing is trimmed.
+REAL_REJECTED_COMMAND_LINE = """\
+SEGGER J-Link Commander V9.46 (Compiled May 27 2026 12:24:58)
+DLL version V9.46, compiled May 27 2026 12:23:54
+
+Unknown command line option n.
+"""
+
+
+@_NEEDS_BASH
+def test_transcript_with_no_commander_prompt_is_a_hard_error(tmp_path: Path) -> None:
+    """JLinkExe that never ran the script must not read as a good connect.
+
+    This transcript contains none of the guard's failure strings -- no "Cannot
+    connect to the probe/programmer", no "Failed to connect to target" -- and it
+    is not empty, so before alp-sdk#1551 it returned 0. On the read-back-only
+    paths (reread.sh, the post-flash console dumps) this guard is the ONLY
+    check, with no DPIDR gate behind it, so a 0 here decoded the absent output
+    as a silent app.
+    """
+    out = tmp_path / "jlink.out"
+    out.write_text(REAL_REJECTED_COMMAND_LINE, encoding="utf-8")
+
+    res = _call_guard(out)
+
+    assert res.returncode == 7, f"expected exit 7, got {res.returncode}\n{res.stderr}"
+    # Say what actually happened -- an operator reading this must not go hunting
+    # for a probe/cable fault when JLinkExe rejected its own arguments.
+    assert "no 'J-Link>' command" in res.stderr
+    assert "never executed" in res.stderr
+    # The offending line has to be visible, not just described.
+    assert "Unknown command line option n." in res.stderr
+
+
 # Every `-CommanderScript ... > <file> || true` read-back site. Derived from the
 # script bodies, NOT a hand-maintained allowlist -- a new read-back added
 # without the assertion fails this test rather than slipping through.
