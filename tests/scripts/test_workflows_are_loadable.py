@@ -325,13 +325,19 @@ _SHA_PIN = re.compile(r"^[0-9a-f]{40}$")
 
 # The ONE reference in this repo deliberately left tag-pinned. Upstream's
 # own README ("Referencing SLSA builders and generators") requires its
-# builders/generators be referenced as `@vX.Y.Z` so slsa-verifier can
-# verify the ref of the trusted reusable workflow -- a hash pin is not
-# supported (tracked upstream as slsa-verifier#12). See the comment above
-# `release.yml`'s `provenance:` job and docs/ci/runner-architecture.md's
-# "Third-party action pinning" section, which this test's docstring and
-# this comment must stay in sync with.
+# builders/generators be referenced as `@vX.Y.Z` -- not a shorter `@vX.Y`
+# or `@vX`, which upstream's README says will fail the build -- so
+# slsa-verifier can verify the ref of the trusted reusable workflow; a hash
+# pin is not supported (tracked upstream as slsa-verifier#12). See the
+# comment above `release.yml`'s `provenance:` job and
+# docs/ci/runner-architecture.md's "Third-party action pinning" section,
+# which this test's docstring and this comment must stay in sync with.
+# `_EXEMPT_TAG_PIN` enforces the full three-part form: a bare prefix match
+# with no assertion on the ref would let a future bump to `@v2` or
+# `@v2.2` pass this gate silently -- the same blind spot #1479 fixed for
+# everything else.
 _TAG_PIN_EXEMPT_PREFIX = "slsa-framework/slsa-github-generator/"
+_EXEMPT_TAG_PIN = re.compile(r"^v\d+\.\d+\.\d+$")
 
 
 def _uses_values(doc: object) -> list[tuple[str, str, str]]:
@@ -364,6 +370,33 @@ def _uses_values(doc: object) -> list[tuple[str, str, str]]:
     return out
 
 
+def _uses_violation(wf_name: str, job_id: str, step_name: str, uses: str) -> str | None:
+    """Return a violation message if `uses` isn't correctly pinned, else
+    None. Split out of `test_workflow_uses_are_sha_pinned` so the exempt
+    branch's own ref format can be unit-tested directly, without needing a
+    seeded workflow file on disk."""
+    if uses.startswith("./") or uses.startswith("docker://"):
+        return None
+    if uses.startswith(_TAG_PIN_EXEMPT_PREFIX):
+        ref = uses.rsplit("@", 1)[-1] if "@" in uses else ""
+        if _EXEMPT_TAG_PIN.match(ref):
+            return None
+        return (
+            f"{wf_name}: job `{job_id}` step `{step_name}` uses `{uses}` -- the documented "
+            "slsa-github-generator exemption only covers a full `vX.Y.Z` ref, not a shorter "
+            "`vX.Y`/`vX` or a non-tag ref (alp-sdk#1479); see docs/ci/runner-architecture.md's "
+            '"Third-party action pinning"'
+        )
+    ref = uses.rsplit("@", 1)[-1] if "@" in uses else ""
+    if not _SHA_PIN.match(ref):
+        return (
+            f"{wf_name}: job `{job_id}` step `{step_name}` uses `{uses}` -- not pinned to a "
+            "40-character commit SHA (alp-sdk#1479); see docs/ci/runner-architecture.md's "
+            '"Third-party action pinning"'
+        )
+    return None
+
+
 @pytest.mark.parametrize("wf", _workflow_files(), ids=lambda p: p.name)
 def test_workflow_uses_are_sha_pinned(wf: Path) -> None:
     """The check #1479's own follow-on left undone: without this, the next
@@ -375,7 +408,11 @@ def test_workflow_uses_are_sha_pinned(wf: Path) -> None:
     upstream tag to pin, it is this repo's own code at whatever commit
     checked it out. `slsa-framework/slsa-github-generator`'s
     reusable-workflow call is the one documented exception (see
-    `_TAG_PIN_EXEMPT_PREFIX`).
+    `_TAG_PIN_EXEMPT_PREFIX`), and even that exemption requires a full
+    `vX.Y.Z` ref (see `_EXEMPT_TAG_PIN` and
+    `test_exempt_slsa_ref_must_be_full_semver_tag`) -- a bare prefix match
+    with no assertion on the ref would let a future `@v2` or `@v2.2` bump
+    slip past this gate exactly like the SHA-pin blocker it exists to catch.
 
     PROOF this is a real regression test: run against
     `.github/workflows/release.yml` from alp-sdk@03f44889 (the commit
@@ -388,17 +425,9 @@ def test_workflow_uses_are_sha_pinned(wf: Path) -> None:
     doc = yaml.safe_load(wf.read_text(encoding="utf-8"))
     violations = []
     for job_id, step_name, uses in _uses_values(doc):
-        if uses.startswith("./") or uses.startswith("docker://"):
-            continue
-        if uses.startswith(_TAG_PIN_EXEMPT_PREFIX):
-            continue
-        ref = uses.rsplit("@", 1)[-1] if "@" in uses else ""
-        if not _SHA_PIN.match(ref):
-            violations.append(
-                f"{wf.name}: job `{job_id}` step `{step_name}` uses `{uses}` -- not pinned to a "
-                "40-character commit SHA (alp-sdk#1479); see docs/ci/runner-architecture.md's "
-                '"Third-party action pinning"'
-            )
+        violation = _uses_violation(wf.name, job_id, step_name, uses)
+        if violation:
+            violations.append(violation)
     assert not violations, "\n".join(violations)
 
 
@@ -427,3 +456,19 @@ def test_sha_pin_detector_catches_a_seeded_tag_reference() -> None:
     assert ("build", "Checkout", "actions/checkout@v4") in values
     assert not _SHA_PIN.match("v4")
     assert _SHA_PIN.match("a26af69be951a213d495a4c3e4e4022e16d87065")
+
+
+def test_exempt_slsa_ref_must_be_full_semver_tag() -> None:
+    """Fix-round follow-up to #1479: the exempt branch used to be a bare
+    `uses.startswith(_TAG_PIN_EXEMPT_PREFIX)` with no check on the ref
+    itself, so ANY ref on that prefix -- including a future `@v2` or
+    `@v2.2` bump -- passed the gate silently, the same blind spot the SHA
+    pin closed for every other action. This asserts `_uses_violation`
+    rejects anything but a full `vX.Y.Z` ref on the exempt prefix."""
+    exempt_prefix = "slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml"
+    assert _uses_violation("release.yml", "provenance", "(reusable-workflow job)", f"{exempt_prefix}@v2.1.0") is None
+    for bad_ref in ("v2", "v2.1", "main", "a26af69be951a213d495a4c3e4e4022e16d87065"):
+        assert (
+            _uses_violation("release.yml", "provenance", "(reusable-workflow job)", f"{exempt_prefix}@{bad_ref}")
+            is not None
+        )
