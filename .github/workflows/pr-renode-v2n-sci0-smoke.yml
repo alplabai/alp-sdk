@@ -58,7 +58,7 @@ jobs:
   renode-v2n-sci0-smoke:
     name: renode · V2N101 M33-SM sci0 console
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
@@ -78,7 +78,7 @@ jobs:
           python-version-file: alp-sdk/.python-version
 
       - name: Install host build tools
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -88,7 +88,7 @@ jobs:
               ca-certificates curl gnupg
 
       - name: Install west + Python deps
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: pip3 install west jsonschema pyyaml
 
       - name: Bootstrap Zephyr workspace
@@ -122,7 +122,7 @@ jobs:
 
       - name: Install Zephyr SDK (arm-zephyr-eabi)
         working-directory: ${{ github.workspace }}
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 --retry-delay 5 -o /tmp/zephyr-sdk.tar.xz "${ZEPHYR_SDK_URL}"

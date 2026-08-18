@@ -126,7 +126,7 @@ jobs:
   yocto:
     name: plain-cmake · yocto backend + tests
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
@@ -136,7 +136,7 @@ jobs:
       # Without these the CMakeLists falls back to the NOSUPPORT
       # stubs and we'd lose coverage in CI.
       - name: Install Yocto-side runtime deps
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -172,12 +172,12 @@ jobs:
     # replace.
     name: plain-cmake · yocto + zcbor (#1254)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
       - name: Install Yocto-side runtime deps
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -248,7 +248,7 @@ jobs:
     # ALSA/OpenSSL) wired in, so the strict profile actually sees them.
     name: plain-cmake · strict-warnings (#634)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -266,7 +266,7 @@ jobs:
         timeout-minutes: 3
       - name: Install Yocto-side runtime deps
         if: matrix.name == 'yocto'
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -338,12 +338,12 @@ jobs:
     # path instead of add_subdirectory()).
     name: plain-cmake · find_package() consumer (#607)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
       - name: Install Yocto-side runtime deps
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \

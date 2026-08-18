@@ -101,7 +101,7 @@ jobs:
     # 40 -> 45 to keep headroom over the sum-of-step-caps model (44min)
     # after giving the three `west build` steps below 5min each instead
     # of a flat 3min.
-    timeout-minutes: 70
+    timeout-minutes: 100
 
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
@@ -121,7 +121,7 @@ jobs:
           python-version-file: alp-sdk/.python-version
 
       - name: Install host build tools
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -131,7 +131,7 @@ jobs:
               ca-certificates curl gnupg
 
       - name: Install west + Python deps
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: pip3 install west jsonschema pyyaml pytest
 
       - name: Bootstrap Zephyr workspace
@@ -169,7 +169,7 @@ jobs:
 
       - name: Install Zephyr SDK (arm-zephyr-eabi)
         working-directory: ${{ github.workspace }}
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 --retry-delay 5 -o /tmp/zephyr-sdk.tar.xz "${ZEPHYR_SDK_URL}"
