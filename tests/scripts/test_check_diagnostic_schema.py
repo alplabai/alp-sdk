@@ -3,8 +3,8 @@
 
 This gate is NOT run by any GitHub Actions workflow -- it only runs via
 `scripts/test-all.sh`'s local registry loop -- so this file is the sole CI
-coverage for it (it runs under `pr-metadata-validate.yml:462` and
-`cross-platform-zephyr.yml:321`).
+coverage for it (it runs under `pr-metadata-validate.yml:513` and
+`cross-platform-zephyr.yml:337`).
 
 Locks in the `--fixture` guard the in-process rewrite (#1363) had to grow to
 replace `click.Path(exists=True, dir_okay=False)`: a bad `--fixture` must

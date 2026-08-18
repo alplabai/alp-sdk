@@ -9,20 +9,21 @@ sits in `AWAITING_CHECKS` until the queue's `check_response_timeout_minutes`
 expires and drops it. The queue does not fail loudly; it simply never merges
 anything.
 
-`dev`'s five required contexts come from two files:
+`dev`'s six required contexts come from three files:
 
     twister-shard 1/4 .. 4/4     .github/workflows/pr-twister.yml
     clang-format · diff-only     .github/workflows/pr-static-analysis.yml
+    distro install · all         .github/workflows/pr-bootstrap-distro-install.yml
 
-Read from branch protection on 2026-08-13:
+Read from branch protection on 2026-08-18:
 
     $ gh api repos/alplabai/alp-sdk/branches/dev/protection \\
         --jq '.required_status_checks.contexts'
     ["twister-shard 1/4","twister-shard 2/4","twister-shard 3/4",
-     "twister-shard 4/4","clang-format · diff-only"]
+     "twister-shard 4/4","clang-format · diff-only","distro install · all"]
 
 That list lives in branch protection, not in this repo, so this gate cannot
-derive it -- the two filenames below are pinned by hand and this docstring is
+derive it -- the three filenames below are pinned by hand and this docstring is
 the record of where they came from. If the required-context set changes, this
 list has to change with it; a stale entry here is caught by the
 `the file exists` half of each case, a MISSING entry is not.
@@ -42,6 +43,7 @@ WORKFLOWS = REPO / ".github" / "workflows"
 REQUIRED_CONTEXT_WORKFLOWS = {
     "pr-twister.yml": "twister-shard 1/4 .. 4/4",
     "pr-static-analysis.yml": "clang-format · diff-only",
+    "pr-bootstrap-distro-install.yml": "distro install · all",
 }
 
 
