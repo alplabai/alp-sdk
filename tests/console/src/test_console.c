@@ -173,6 +173,34 @@ ZTEST(alp_console, test_companion_ble_group_registered)
 	zassert_is_null(strstr(out, "Unknown command"), "companion ble not registered: %s", out);
 }
 
+/* Sibling of the wifi connect/ap guards above (#1376/#1480): `ble connect`'s
+ * 3rd token is the only optional flag and must be "random"; a mistyped token
+ * used to be compared `== 0` and otherwise silently ignored, connecting as
+ * address type public with no diagnostic. */
+ZTEST(alp_console, test_ble_connect_rejects_unrecognised_third_token)
+{
+	const char *out = run("alp companion ble connect aa:bb:cc:dd:ee:ff randm");
+
+	zassert_not_null(strstr(out, "unrecognised argument"),
+	                 "an unrecognised 3rd token must fail loudly, not be dropped: %s",
+	                 out);
+	/* It must be rejected DURING parsing -- before any companion/state check. */
+	zassert_is_null(strstr(out, "companion not registered"),
+	                "a usage error must not be reported as a missing companion: %s",
+	                out);
+}
+
+ZTEST(alp_console, test_ble_connect_still_accepts_random_token)
+{
+	const char *out = run("alp companion ble connect aa:bb:cc:dd:ee:ff random");
+
+	zassert_is_null(
+	    strstr(out, "unrecognised argument"), "\"random\" is the one legal 3rd token: %s", out);
+	zassert_not_null(strstr(out, "companion not registered"),
+	                 "a well-formed random connect should reach the companion check: %s",
+	                 out);
+}
+
 ZTEST(alp_console, test_companion_ble_gatt_subgroup_registered)
 {
 	const char *out = run("alp companion ble gatt read 0");
@@ -201,19 +229,22 @@ ZTEST(alp_console, test_companion_sock_group_registered)
 	zassert_is_null(strstr(out, "Unknown command"), "companion sock not registered: %s", out);
 }
 
-/* #1376: an unrecognised 4th token used to be silently DROPPED.  The dangerous
- * shape is an UNQUOTED SSID containing a space: it splits across argv[1]/argv[2],
- * the real passphrase lands in argv[3], and the old `strcmp(argv[3], "wpa3") == 0`
- * test ignored it -- so the console printed a confident "connecting" line for an
+/* #1376/#1480: an unrecognised 4th token used to be silently DROPPED, for both
+ * `wifi connect` and `wifi ap`.  The dangerous shape is an UNQUOTED SSID
+ * containing a space: it splits across argv[1]/argv[2], the real passphrase
+ * lands in argv[3], and the old `strcmp(argv[3], "wpa3") == 0` test ignored it
+ * -- so the console printed a confident "connecting"/"ap starting" line for an
  * SSID the user never typed, with their passphrase eaten as a security token.
  * Associating with a truncated SSID is worse than refusing.
  *
- * These three tests are a set and should stay one: the first proves the dangerous
- * form is now refused, the others prove the refusal did not simply ban spaces or
- * break the one legal flag.  No companion is registered in this suite, so a
- * command that gets PAST argument validation reports "companion not registered" --
- * that reply is the marker for "parsed fine", and its absence in the first case is
- * the marker for "rejected during parsing". */
+ * These six tests (three `wifi connect` + three `wifi ap`, below) are one set
+ * and should stay one: each family's first test proves the dangerous form is
+ * now refused, and its other test(s) prove the refusal did not simply ban
+ * spaces or break the one legal flag.  No companion is registered in this
+ * suite, so a command that gets PAST argument validation reports "companion
+ * not registered" -- that reply is the marker for "parsed fine", and its
+ * absence in the rejection case is the marker for "rejected during
+ * parsing". */
 ZTEST(alp_console, test_wifi_connect_rejects_unrecognised_fourth_token)
 {
 	const char *out = run("alp companion wifi connect my ssid secret");
@@ -249,6 +280,44 @@ ZTEST(alp_console, test_wifi_connect_still_accepts_wpa3_token)
 	    strstr(out, "unrecognised argument"), "\"wpa3\" is the one legal 4th token: %s", out);
 	zassert_not_null(strstr(out, "companion not registered"),
 	                 "a well-formed wpa3 connect should reach the companion check: %s",
+	                 out);
+}
+
+ZTEST(alp_console, test_wifi_ap_rejects_unrecognised_fourth_token)
+{
+	const char *out = run("alp companion wifi ap my ssid secret");
+
+	zassert_not_null(strstr(out, "unrecognised argument"),
+	                 "an unrecognised 4th token must fail loudly, not be dropped: %s",
+	                 out);
+	zassert_not_null(strstr(out, "must be quoted"), "the refusal must say how to fix it: %s", out);
+	/* It must be rejected DURING parsing -- before any companion/state check. */
+	zassert_is_null(strstr(out, "companion not registered"),
+	                "a usage error must not be reported as a missing companion: %s",
+	                out);
+}
+
+ZTEST(alp_console, test_wifi_ap_accepts_quoted_ssid_with_space)
+{
+	const char *out = run("alp companion wifi ap \"my ssid\" secret");
+
+	zassert_is_null(strstr(out, "unrecognised argument"),
+	                "a QUOTED ssid containing a space must still parse: %s",
+	                out);
+	/* Parsed cleanly, so it reached the companion check. */
+	zassert_not_null(strstr(out, "companion not registered"),
+	                 "a well-formed ap should reach the companion check: %s",
+	                 out);
+}
+
+ZTEST(alp_console, test_wifi_ap_still_accepts_wpa3_token)
+{
+	const char *out = run("alp companion wifi ap \"my ssid\" secret wpa3");
+
+	zassert_is_null(
+	    strstr(out, "unrecognised argument"), "\"wpa3\" is the one legal 4th token: %s", out);
+	zassert_not_null(strstr(out, "companion not registered"),
+	                 "a well-formed wpa3 ap should reach the companion check: %s",
 	                 out);
 }
 

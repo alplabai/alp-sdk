@@ -199,6 +199,28 @@ static int cmd_companion_wifi_disconnect(const struct shell *sh, size_t argc, ch
 
 static int cmd_companion_wifi_ap(const struct shell *sh, size_t argc, char **argv)
 {
+	/* Validate the token shape BEFORE any state check -- same ordering
+	 * rationale as cmd_companion_wifi_connect() above (#1376): a wrong
+	 * argument shape is wrong regardless of whether a companion is bound,
+	 * and this guard was the one `wifi ap` was missing (#1480). The 4th
+	 * token is the ONLY optional flag, and it must be "wpa3". It used to be
+	 * tested with `== 0` and otherwise IGNORED, which made the dangerous
+	 * case silent: an UNQUOTED SSID containing a space splits across
+	 * argv[1]/argv[2], pushing the real passphrase into argv[3], where it
+	 * was dropped without a word -- the AP came up on an SSID fragment as
+	 * its PSK, and a mistyped security token silently downgraded WPA3-SAE
+	 * to WPA2-PSK. Both are worse than refusing, so an unrecognised token
+	 * is now an error. */
+	if (argc >= 4 && strcmp(argv[3], "wpa3") != 0) {
+		shell_error(sh,
+		            "unrecognised argument \"%s\" -- the only optional 4th token is "
+		            "\"wpa3\".",
+		            argv[3]);
+		shell_error(sh,
+		            "an SSID or passphrase containing spaces must be quoted: "
+		            "wifi ap \"my ssid\" \"my pass\" [wpa3]");
+		return -EINVAL;
+	}
 	if (companion_cc3501e == NULL) {
 		shell_warn(sh, "companion not registered");
 		return -ENODEV;
@@ -206,9 +228,10 @@ static int cmd_companion_wifi_ap(const struct shell *sh, size_t argc, char **arg
 	const char *ssid = argv[1];
 	const char *pass = (argc >= 3) ? argv[2] : "";
 	/* Same security rule as `wifi connect`: no passphrase -> open, a
-	 * passphrase -> WPA2-PSK, a trailing "wpa3" token -> WPA3-SAE. */
+	 * passphrase -> WPA2-PSK, a trailing "wpa3" token -> WPA3-SAE
+	 * (validated above). */
 	uint8_t sec = (pass[0] == '\0') ? 0u : 1u;
-	if (argc >= 4 && strcmp(argv[3], "wpa3") == 0) {
+	if (argc >= 4) {
 		sec = 2u;
 	}
 

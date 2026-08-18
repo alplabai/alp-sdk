@@ -208,6 +208,101 @@ def test_non_string_family_matrix_core_does_not_crash_the_gate(tmp_path, monkeyp
     assert isinstance(failures, list)
 
 
+def test_non_string_topology_keys_do_not_crash_the_gate(tmp_path, monkeypatch):
+    """`topology`'s own KEYS are schema-typed as strings (core ids), but
+    YAML -- unlike JSON -- permits int/float/bool/null mapping keys. When
+    `core` is not found in `topology`, the unfiltered
+    `sorted(topology)` used to raise `TypeError: '<' not supported
+    between instances of 'str' and 'int'` building the `available:` list
+    (mixed str/int keys)."""
+    vm = _load_vm(tmp_path, monkeypatch, "vm_tier_a_int_topology_key")
+    registry = tmp_path / "tier-a-library-ci.json"
+    registry.write_text(json.dumps({
+        "hostBuild": {"libraries": [], "excludedLibraries": {}},
+        "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": "m33_sm"}],
+        "excludedFamilies": {},
+    }))
+    monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
+    som = tmp_path / "E1M-TST001.yaml"
+    # `99:` is a YAML integer key, sitting alongside the string key
+    # `a55_cluster`; `core` ("m33_sm") is in neither, so the `core not in
+    # topology` branch's `sorted(topology)` call over the mixed-type key
+    # set is exercised.
+    som.write_text(
+        "sku: E1M-TST001\nfamily: aen\n"
+        "topology:\n  a55_cluster:\n    board: x\n  99:\n    board: y\n"
+    )
+    failures = vm._check_tier_a_library_ci([], [som])  # must not raise
+    assert failures
+    assert "a55_cluster" in failures[0][1][0]
+    assert "is not a topology core" in failures[0][1][0]
+
+
+def test_all_non_string_topology_keys_do_not_crash_the_gate(tmp_path, monkeypatch):
+    """The all-non-string-key variant of the same class: with every
+    `topology` key a YAML int, the unfiltered `sorted(topology)` reaches
+    the `", ".join(...)` and raises `TypeError: sequence item 0: expected
+    str instance, int found` instead."""
+    vm = _load_vm(tmp_path, monkeypatch, "vm_tier_a_all_int_topology_keys")
+    registry = tmp_path / "tier-a-library-ci.json"
+    registry.write_text(json.dumps({
+        "hostBuild": {"libraries": [], "excludedLibraries": {}},
+        "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": "m33_sm"}],
+        "excludedFamilies": {},
+    }))
+    monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
+    som = tmp_path / "E1M-TST001.yaml"
+    som.write_text(
+        "sku: E1M-TST001\nfamily: aen\n"
+        "topology:\n  99:\n    board: y\n"
+    )
+    failures = vm._check_tier_a_library_ci([], [som])  # must not raise
+    assert failures
+    assert "available: <none>" in failures[0][1][0]
+
+
+def test_null_som_reports_diagnostic_not_silently_dropped(tmp_path, monkeypatch):
+    """A JSON `null` `som` is hashable (unlike a dict/list) and safe for
+    `som_docs.get(som)` -- an overbroad `not isinstance(som, str)` skip
+    (rather than one scoped to the actual unhashable-type hazard) would
+    silently drop the `has no SoM preset` diagnostic instead of reporting
+    it."""
+    vm = _load_vm(tmp_path, monkeypatch, "vm_tier_a_null_som")
+    registry = tmp_path / "tier-a-library-ci.json"
+    registry.write_text(json.dumps({
+        "hostBuild": {"libraries": [], "excludedLibraries": {}},
+        "familyMatrix": [{"family": "aen", "som": None, "core": "m33_sm"}],
+        "excludedFamilies": {},
+    }))
+    monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
+    failures = vm._check_tier_a_library_ci([], [])  # must not raise
+    assert failures
+    assert "familyMatrix[0]/som: `None` has no SoM preset" in failures[0][1][0]
+
+
+def test_null_core_reports_diagnostic_not_silently_dropped(tmp_path, monkeypatch):
+    """Same reasoning as the `som` case above, for `core`: a JSON `null`
+    is hashable and safe for `core not in topology`, and must still
+    surface the `is not a topology core` diagnostic."""
+    vm = _load_vm(tmp_path, monkeypatch, "vm_tier_a_null_core")
+    registry = tmp_path / "tier-a-library-ci.json"
+    registry.write_text(json.dumps({
+        "hostBuild": {"libraries": [], "excludedLibraries": {}},
+        "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": None}],
+        "excludedFamilies": {},
+    }))
+    monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
+    som = tmp_path / "E1M-TST001.yaml"
+    som.write_text(
+        "sku: E1M-TST001\nfamily: aen\n"
+        "topology:\n  m33_sm:\n    board: x\n"
+    )
+    failures = vm._check_tier_a_library_ci([], [som])  # must not raise
+    assert failures
+    assert ("familyMatrix[0]/core: `None` is not a topology core on "
+            "E1M-TST001 (available: m33_sm)") in failures[0][1][0]
+
+
 def test_real_tier_a_library_ci_registry_resolves_clean():
     """The one real shipped registry this rule actually guards -- must stay
     clean against the live checkout, not just a synthetic fixture."""

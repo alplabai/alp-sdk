@@ -940,13 +940,17 @@ def _check_chip_physical(chip_files) -> list:
             # `sig`/`pad` are schema-typed strings, but a malformed
             # manifest can carry a dict/list there -- `sig not in
             # sig_names` / `pad in seen_pads` raise `TypeError: unhashable
-            # type` unfiltered. A non-string `sig` is reported as an
-            # unresolved signal directly rather than crash; a non-string
-            # `pad` skips the duplicate-pad check (the schema pass already
-            # flags its shape).
-            if not isinstance(sig, str) or (sig not in sig_names and sig not in _POWER_NETS):
+            # type` unfiltered. Scope the skip to the actual hazard
+            # (dict/list is unhashable) rather than a blanket
+            # `not isinstance(..., str)`: every other schema-shape
+            # violation (int, bool, YAML `null`) IS hashable and safe to
+            # membership-test, and a blanket str-only filter would
+            # silently drop the "not in signals[]" / "used more than
+            # once" diagnostics for those values instead of reporting
+            # them.
+            if isinstance(sig, (dict, list)) or (sig not in sig_names and sig not in _POWER_NETS):
                 msgs.append(f"physical.pins pad {pad}: signal '{sig}' not in signals[] or power nets")
-            if isinstance(pad, str):
+            if not isinstance(pad, (dict, list)):
                 if pad in seen_pads:
                     msgs.append(f"physical.pins: pad '{pad}' used more than once")
                 seen_pads[pad] = True
@@ -954,7 +958,7 @@ def _check_chip_physical(chip_files) -> list:
             net = passive.get("net")
             # Same reasoning as `sig` above -- guard the unhashable case
             # before the set-membership tests.
-            if not isinstance(net, str) or (net not in sig_names and net not in _POWER_NETS):
+            if isinstance(net, (dict, list)) or (net not in sig_names and net not in _POWER_NETS):
                 msgs.append(f"physical.passives: net '{net}' not in signals[] or power nets")
         if msgs:
             failures.append((rel, msgs))
@@ -1201,11 +1205,16 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
             families_seen.add(family)
             if isinstance(som, str):
                 family_to_som[family] = som
-        if not isinstance(som, str):
-            # A non-string `som` (e.g. a nested dict/list) is already a
-            # schema-shape violation reported by the schema pass; used
-            # unfiltered it would also raise `TypeError: unhashable type`
-            # on `som_docs.get(som)` below.
+        if isinstance(som, (dict, list)):
+            # A dict/list `som` is unhashable -- `som_docs.get(som)` below
+            # would raise `TypeError: unhashable type`. Every other
+            # schema-shape violation (int, bool, or a JSON `null`) IS
+            # hashable and safe to look up; a blanket `not isinstance(som,
+            # str)` would also silently drop the "has no SoM preset"
+            # diagnostic `dcda807d` used to emit for a `null` `som` --
+            # scope the skip to the actual hazard (unhashability), same as
+            # the truthy-only skip in `_check_silicon_kconfig`'s
+            # `knownSilicon[]` guard.
             continue
         doc = som_docs.get(som)
         if doc is None:
@@ -1221,13 +1230,21 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
         # to `{}` rather than crash the gate (same shape as
         # `_check_board_targets`).
         topology = topology if isinstance(topology, dict) else {}
-        if not isinstance(core, str):
+        if isinstance(core, (dict, list)):
             # Same reasoning as `som` above -- `core not in topology` /
             # `topology.get(core)` below would raise on an unhashable
-            # value.
+            # value, but every other value (int, bool, `null`) is
+            # hashable and must still surface the `core` `is not a
+            # topology core` diagnostic below.
             continue
         if core not in topology:
-            available = ", ".join(sorted(topology)) or "<none>"
+            # `topology` is a YAML mapping (unlike the JSON-sourced
+            # `core_ids`/`macs` sets above) -- YAML permits int/float/bool/
+            # null keys, so an unfiltered `sorted(topology)` over its keys
+            # raises `TypeError` on a mixed str/non-str key set, or on an
+            # all-non-str key set at the `join()` (non-str items). Filter
+            # to strings, same idiom as `core_ids` above.
+            available = ", ".join(sorted(k for k in topology if isinstance(k, str))) or "<none>"
             msgs.append(f"familyMatrix[{idx}]/core: `{core}` is not a topology core "
                         f"on {som} (available: {available})")
         elif not isinstance(topology.get(core), dict) or "board" not in topology[core]:
@@ -1354,17 +1371,21 @@ def _check_board_targets(som_files) -> list:
 
         msgs: list[str] = []
         checked = 0
-        # `topology` is schema-typed as an object, but a non-empty scalar
-        # (e.g. a bare string, which is truthy) would otherwise reach
-        # `.items()` and raise `AttributeError` here, aborting the whole
-        # gate mid-run instead of leaving the schema FAIL line (which
-        # already explains the real problem) to do the talking. `_as_dict`
-        # already degrades any non-dict value to `{}` -- a standalone
-        # `isinstance(..., dict)` guard-and-continue on top of it was
-        # behaviourally redundant (reverting it alone reddens no test),
-        # so `_as_dict` alone carries this, same as every other
-        # array/object field in this file.
-        topology = _as_dict(doc.get("topology"))
+        raw_topology = doc.get("topology")
+        if raw_topology is not None and not isinstance(raw_topology, dict):
+            # `topology` is schema-typed as an object, but a non-empty
+            # scalar (e.g. a bare string, which is truthy) would otherwise
+            # reach `.items()` below and raise `AttributeError`, aborting
+            # the whole gate mid-run instead of leaving the schema FAIL
+            # line (which already explains the real problem) to do the
+            # talking (same shape as `_check_chip_physical`'s `physical`
+            # guard). `_as_dict` alone is NOT equivalent here: it would
+            # degrade this to `{}` and fall through to `checked == 0` ->
+            # an `OK ... (board targets: 0 Zephyr slice(s) resolve)` line
+            # printed for a file the schema pass FAILs in the same run --
+            # skip the file instead so this check stays silent on it.
+            continue
+        topology = _as_dict(raw_topology)
         for core_id, entry in topology.items():
             if not isinstance(entry, dict):
                 continue

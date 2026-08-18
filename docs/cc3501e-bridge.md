@@ -148,7 +148,7 @@ association — and Wi-Fi and BLE run **concurrently**.  Measured on silicon
 |---|---|---|
 | `wifi scan` | ~3 s | survives |
 | `ble scan` / `ble enable` | scan/enable window | survives (NimBLE host up) |
-| `wifi connect` (STA associate) | **~15 s association** | **survives** — async connect, shell stays live; `ver` after the connect still returns (no desync, no power-cycle) |
+| `wifi connect` (STA associate) | **~15 s association**; worst case, a never-associating AP blocks `companion_conn_thread` for the console's full `ALP_COMPANION_WIFI_CONN_MS = 50000u` (50 s) before it reports the failure — accounting-derived, not bench-measured; it was ~16.7 s before the #1481 poll-budget fix | **survives** — async connect, shell stays live; `ver` after the connect still returns (no desync, no power-cycle) |
 | Wi-Fi + BLE concurrent (`wifi scan` + `ble enable` + `wifi connect`) | continuous | survives — all succeed together, bridge does not desync |
 
 The earlier CS-less r1 limitation — a long radio op (the ~15 s

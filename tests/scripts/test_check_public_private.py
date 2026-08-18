@@ -262,7 +262,17 @@ def test_discover_files_skips_abi_but_scans_superpowers(tmp_path: Path) -> None:
     assert "docs/superpowers/plan.md" in found
 
 
-def test_superpowers_exempts_planning_vocabulary_but_not_lab_endpoints(tmp_path: Path) -> None:
+def test_superpowers_has_no_per_rule_exemption(tmp_path: Path) -> None:
+    # Issue #1515 measured a per-rule docs/superpowers opt-out for
+    # PRIVATE_AUDIT_REFERENCE against the live tree (98 files / 50,112
+    # lines) and got zero hits: the false-positive risk the exemption was
+    # meant to absorb never materialized, so the per-rule
+    # ``scan_superpowers`` flag was deleted rather than kept unexercised
+    # (see check_public_private.py's module docstring).  Every rule --
+    # PRIVATE_AUDIT_REFERENCE included, plus the other design-secrecy rules
+    # (PRIVATE_DESIGN_REFERENCE, SOM_PHYSICAL_DESIGN_DETAIL,
+    # PCB_ROUTING_DETAIL) and a lab-endpoint rule (LAB_SSH_ENDPOINT) -- now
+    # scans docs/superpowers exactly like any other tracked tree.
     audit_note = _write(
         tmp_path,
         "docs/superpowers/plans/example.md",
@@ -273,10 +283,39 @@ def test_superpowers_exempts_planning_vocabulary_but_not_lab_endpoints(tmp_path:
         "docs/superpowers/plans/example2.md",
         "Bench access: ssh root@10.0" ".0.88 for now.\n",
     )
-    findings = classifier.scan([audit_note, ssh_note], base=tmp_path)
+    design_note = _write(
+        tmp_path,
+        "docs/superpowers/plans/example3.md",
+        "See the private" " repo netlist for the routing.\n",
+    )
+    som_note = _write(
+        tmp_path,
+        "docs/superpowers/plans/example4.md",
+        "Flashed via bench" " rework fixture for this step.\n",
+    )
+    pcb_note = _write(
+        tmp_path,
+        "docs/superpowers/plans/example5.md",
+        "Notes on the layer" " stackup for this rev.\n",
+    )
+    findings = classifier.scan(
+        [audit_note, ssh_note, design_note, som_note, pcb_note], base=tmp_path
+    )
     categories = {f.category for f in findings}
-    assert "PRIVATE_AUDIT_REFERENCE" not in categories
-    assert categories == {"LAB_SSH_ENDPOINT"}
+    assert categories == {
+        "PRIVATE_AUDIT_REFERENCE",
+        "LAB_SSH_ENDPOINT",
+        "PRIVATE_DESIGN_REFERENCE",
+        "SOM_PHYSICAL_DESIGN_DETAIL",
+        "PCB_ROUTING_DETAIL",
+    }
+
+
+def test_rule_has_no_scan_superpowers_field(tmp_path: Path) -> None:
+    # Guard against the flag silently coming back: Rule carries no
+    # per-category docs/superpowers opt-out any more (see
+    # test_superpowers_has_no_per_rule_exemption above for why).
+    assert "scan_superpowers" not in classifier.Rule.__dataclass_fields__
 
 
 def test_json_output(tmp_path: Path) -> None:

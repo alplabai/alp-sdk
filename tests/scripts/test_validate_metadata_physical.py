@@ -223,6 +223,49 @@ def test_non_string_passive_net_does_not_crash_the_gate(tmp_path):
     failures = vm._check_chip_physical([p])  # must not raise
     assert failures  # non-string net is reported as unresolved
 
+def test_null_pad_duplicate_still_reported(tmp_path):
+    """A YAML `null` `pad` is hashable (unlike a dict/list) and safe as a
+    `seen_pads` key -- an overbroad `isinstance(pad, str)` gate (rather
+    than one scoped to the actual unhashable-type hazard) would silently
+    drop the `used more than once` diagnostic for a duplicated `null` pad
+    instead of reporting it (the pre-hardening behaviour)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm_pinpad_null", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    p = tmp_path / "pnull.yaml"; p.write_text(yaml.safe_dump({
+        "schema_version": 1, "chip_id": "pnull", "display_name": "PNULL", "vendor": "v",
+        "mpn_population": ["PNULL"], "datasheet": {}, "bus": "i2c",
+        "signals": [{"name": "VDD", "type": "power"}],
+        "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
+                     "visibility": "public",
+                     "pins": [{"pad": None, "signal": "VDD"}, {"pad": None, "signal": "GND"}]},
+    }))
+    failures = vm._check_chip_physical([p])  # must not raise
+    assert failures and any("pad 'None' used more than once" in m
+                             for _, msgs in failures for m in msgs)
+
+def test_null_pin_signal_reports_diagnostic_not_silently_dropped(tmp_path):
+    """Same reasoning as the `pad` case above, for `signal`: a YAML
+    `null` is hashable and safe for the `sig_names`/`_POWER_NETS`
+    membership tests, and must still surface the `not in signals[] or
+    power nets` diagnostic."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm_pinsig_null", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    p = tmp_path / "signull.yaml"; p.write_text(yaml.safe_dump({
+        "schema_version": 1, "chip_id": "signull", "display_name": "SIGNULL", "vendor": "v",
+        "mpn_population": ["SIGNULL"], "datasheet": {}, "bus": "i2c",
+        "signals": [{"name": "SDA", "type": "bidir"}],
+        "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
+                     "visibility": "public",
+                     "pins": [{"pad": "1", "signal": None}]},
+    }))
+    failures = vm._check_chip_physical([p])  # must not raise
+    assert failures and any("signal 'None' not in signals[] or power nets" in m
+                             for _, msgs in failures for m in msgs)
+
 def test_block_schema_exists():
     schema = json.loads((REPO / "metadata/schemas/block-v1.schema.json").read_text())
     assert schema["properties"]["block_id"]["pattern"] == "^[a-z][a-z0-9_]*$"
@@ -564,6 +607,21 @@ def test_non_object_topology_does_not_crash_the_gate(tmp_path):
     p.write_text(yaml.safe_dump({"topology": "not-an-object"}))
     failures = vm._check_board_targets([p])  # must not raise
     assert failures == []
+
+def test_non_object_topology_produces_no_output_line(tmp_path, capsys):
+    """A malformed `topology:` scalar must SKIP this check entirely, not
+    normalise via `_as_dict` and fall through to `checked == 0` -- that
+    used to print a green `OK ... (board targets: 0 Zephyr slice(s)
+    resolve)` line for a file the schema pass FAILs in the very same run.
+    A file this check has nothing to say about must stay silent (restores
+    `dcda807d`'s behaviour)."""
+    vm = _load_vm("vm_bt4b"); import yaml
+    p = tmp_path / "E1M-AEN801.yaml"
+    p.write_text(yaml.safe_dump({"topology": "not-an-object"}))
+    failures = vm._check_board_targets([p])
+    assert failures == []
+    out = capsys.readouterr().out
+    assert out == "", f"expected no output for a skipped file, got: {out!r}"
 
 
 # --- issue #1004: two soft-fail sites migrated onto resolve_soc_path() ---
