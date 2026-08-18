@@ -248,7 +248,7 @@ false, so its binary-fetch step downloads a release asset at this ref,
 which must be a tag. The trust anchor for this one reference is the
 Sigstore-signed builder identity, not a SHA pin.
 
-`tests/scripts/test_workflows_are_loadable.py::test_workflow_uses_are_sha_pinned`
+`tests/scripts/test_workflows_are_loadable.py::%test_workflow_uses_are_sha_pinned`
 enforces the rule, with the SLSA generator call as its one documented
 exemption. `.github/dependabot.yml` bumping these pins, and
 `persist-credentials: false` on `actions/checkout` steps, are tracked as
