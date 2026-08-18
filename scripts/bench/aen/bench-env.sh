@@ -261,6 +261,45 @@ bench_jlink_assert_connected() {
 		echo "           Full J-Link transcript: $out" >&2
 		return 7
 	fi
+	# POSITIVE evidence, not just the absence of a known negative (alp-sdk#1551).
+	# The checks above enumerate failure strings, so any failure mode that stops
+	# JLinkExe BEFORE it prints one of them passed. Measured case: the alp-sdk#1478
+	# stray literal `n` made JLinkExe reject its own command line and exit, giving
+	# this COMPLETE 147-byte transcript -- no connect attempted, no DP read:
+	#
+	#     SEGGER J-Link Commander V9.46 (Compiled May 27 2026 12:24:58)
+	#     DLL version V9.46, compiled May 27 2026 12:23:54
+	#
+	#     Unknown command line option n.
+	#
+	# It contains none of the strings above, so this function returned 0 on it.
+	# Only the sibling DPIDR gate caught that run, and the read-back-only paths
+	# (reread.sh, the post-flash console dumps) have no DPIDR gate after them --
+	# there this function is the sole check.
+	#
+	# The marker is the `J-Link>` command prompt: JLinkExe echoes it for every
+	# CommanderScript line it executes, so its presence proves the script ran at
+	# all. Deliberately NOT "Connecting to J-Link ...O.K." -- that is the stronger
+	# signal but it is absent from trimmed transcripts (the alp-sdk#1318 REAL_GOOD_READ
+	# fixture starts at the first `J-Link>` line), and this guard must not reject a
+	# genuine read-back just because its capture began mid-run.
+	#
+	# ponytail: prompt-presence only, which cannot tell "connected" from "ran but
+	# reached no target" -- that is bench_jlink_assert_aen_dpidr's job. Tighten to
+	# the O.K. line if a failure mode ever slips past this that still prints a prompt.
+	if ! grep -q 'J-Link>' "$out"; then
+		echo "bench-env: $ctx produced J-Link output containing no 'J-Link>' command" >&2
+		echo "           prompt, so the CommanderScript never executed -- JLinkExe" >&2
+		echo "           exited before running it. Nothing was read from the target;" >&2
+		echo "           any decoded output is empty for an infrastructure reason." >&2
+		echo >&2
+		head -5 "$out" >&2
+		echo >&2
+		echo "           A rejected command line does this (see alp-sdk#1478: a stray" >&2
+		echo "           argument gave 'Unknown command line option n.' and nothing else)." >&2
+		echo "           Full J-Link transcript: $out" >&2
+		return 7
+	fi
 	return 0
 }
 

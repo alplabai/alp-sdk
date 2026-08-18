@@ -75,16 +75,19 @@ jobs:
       # `west init -l alp-sdk`.
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        timeout-minutes: 2
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
+        timeout-minutes: 2
         with:
           python-version-file: alp-sdk/.python-version
 
       - name: Install host build tools
+        timeout-minutes: 5
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -115,6 +118,7 @@ jobs:
 
       - name: Cache Zephyr workspace (modules + zephyr)
         uses: actions/cache@v5
+        timeout-minutes: 3
         with:
           path: |
             zephyr
@@ -123,6 +127,7 @@ jobs:
 
       - name: Cache Zephyr SDK
         uses: actions/cache@v5
+        timeout-minutes: 3
         with:
           path: zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}
           key: getting-started-aen801-sdk-${{ env.ZEPHYR_SDK_VERSION }}-arm-zephyr-eabi-${{ runner.os }}
@@ -145,6 +150,7 @@ jobs:
       # vs. ~17 GB for the full zephyrprojectrtos/ci image -- see
       # pr-twister.yml's comment on why that image isn't used here either).
       - name: Install Zephyr SDK (arm-zephyr-eabi only)
+        timeout-minutes: 3
         run: |
           set -euo pipefail
           ARCHIVE="zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz"
@@ -168,6 +174,7 @@ jobs:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
           ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}
           ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+        timeout-minutes: 5
         run: |
           source .venv/bin/activate
           # The runner's setup-python step exports Python3_ROOT_DIR, which

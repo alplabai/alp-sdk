@@ -40,17 +40,21 @@ jobs:
   doxygen:
     name: doxygen · public headers
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        timeout-minutes: 2
 
       - name: Set up Python
         uses: actions/setup-python@v6
+        timeout-minutes: 2
         with:
           python-version-file: .python-version
 
       - name: Install Doxygen
+        timeout-minutes: 3
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y doxygen graphviz
@@ -87,6 +91,7 @@ jobs:
       - name: Upload HTML artefact
         if: always()
         uses: actions/upload-artifact@v7
+        timeout-minutes: 2
         with:
           name: doxygen-html
           path: doxygen-out/html/

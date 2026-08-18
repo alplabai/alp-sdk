@@ -478,14 +478,17 @@ nesting is readable in the emit golden itself: that slice of
 `artifacts` block today — tan parses it into the slice record
 (`python/tan/core/build_plan.py:224`) and never reads it again — so the wrong
 spelling was a defect in the published contract, not an observed crash. It
-still matters, because the same un-nested spelling exists independently in a
-tan path that IS live: `tan renode` resolves its ELF from
-`system-manifest.yaml` via `core/renode_plan.py::zephyr_elf_from_manifest`,
-and a slice with no `output_artefact` falls back to
-`<build_dir>/zephyr/zephyr.elf` — calling that function directly with
-`build_dir: m55_he-zephyr` returns `build/m55_he-zephyr/zephyr/zephyr.elf`,
-the path west never writes. That fallback is tan's own defect and is NOT
-fixed here; this change removes the SDK-side spelling it agrees with.
+mattered when this entry was written because the same un-nested spelling
+existed independently in a tan path that was live then: `tan renode` resolved
+its ELF from `system-manifest.yaml` via
+`core/renode_plan.py::zephyr_elf_from_manifest`, and a slice with no
+`output_artefact` fell back to `<build_dir>/zephyr/zephyr.elf` — calling that
+function directly with `build_dir: m55_he-zephyr` returned
+`build/m55_he-zephyr/zephyr/zephyr.elf`, the path west never writes. That
+second copy was never fixed; it was deleted. `tan renode` and
+`core/renode_plan.py` are gone with the Renode retirement (ADR 0022,
+Amendment 2), later in this same v0.16.0 cycle. This change removes the
+SDK-side spelling it agreed with, which stands on its own.
 
 All six Zephyr paths move: `elf`, `map`, `bin`, `sizeReport` (`zephyr.stat`)
 and `symbols` (`zephyr.symbols`) now sit under `<buildDir>/build/zephyr/`, and
@@ -1448,8 +1451,13 @@ exited 1 correctly all along. Only the west wrappers lost it, and nothing about
 `return run(args)` looks wrong at the call site — it is the same idiom the
 `main()` three lines below uses. west's contract is the unusual half:
 `west.commands.CommandError(returncode)` is the mechanism, and a plain `return`
-is silently a no-op. `alp_emit.py` was the one wrapper already doing it right,
-via `log.die()`.
+is silently a no-op. `alp_emit.py` looked like the one wrapper already doing it
+right, via `log.die()`. **That reading was wrong and is corrected here (#1476):**
+`log.die()` covers only its two pre-flight checks (no workspace, missing
+`board.yaml`); the failure that matters — the child orchestrator's own non-zero
+exit — was the same bare `return subprocess.call(...)` fixed in the other three,
+so `west alp-emit build-plan > plan.json` wrote an empty file and exited 0 until
+#1476.
 
 All three now raise `CommandError(rc)`, with `CommandError` imported alongside
 `WestCommand` and mirrored in each file's existing no-west fallback shim so the

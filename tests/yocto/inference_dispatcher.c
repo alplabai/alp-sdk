@@ -102,6 +102,9 @@ static void test_null_handle_methods_are_safe(void)
 	ALP_ASSERT_EQ_INT(alp_inference_get_output(NULL, 0, &t), ALP_ERR_NOT_READY);
 	ALP_ASSERT_EQ_INT(alp_inference_invoke(NULL), ALP_ERR_NOT_READY);
 
+	uint64_t us = 0u;
+	ALP_ASSERT_EQ_INT(alp_inference_last_invoke_latency_us(NULL, &us), ALP_ERR_NOT_READY);
+
 	/* alp_inference_close(NULL) must not crash either. */
 	alp_inference_close(NULL);
 	ALP_TEST_PASS();

@@ -33,12 +33,20 @@ jobs:
   seam1:
     name: "seam1 -- build-plan shape parity"
     runs-on: ubuntu-latest
+    # #1477: worst observed successful run 14s across 3 sampled runs.
+    # Raised from the formula's 10min to 15min so the ceiling stays
+    # strictly above the sum of its capped steps plus the 1min/step
+    # budget for the uncapped ones below.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        timeout-minutes: 3
       - uses: actions/setup-python@v5
+        timeout-minutes: 3
         with:
           python-version: "3.x"
       - name: install emit deps
+        timeout-minutes: 2
         run: pip install jsonschema pyyaml pytest
       # The comparator's own unit tests, BEFORE the live comparison it guards.
       # These 15 ran in no workflow on either side: this job invoked only

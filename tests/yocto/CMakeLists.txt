@@ -75,6 +75,30 @@ target_compile_features(alp_test_inference_dispatcher PRIVATE c_std_99)
 add_test(NAME alp_test_inference_dispatcher
          COMMAND alp_test_inference_dispatcher)
 
+# alp_inference_last_invoke_latency_us() end-to-end regression: the last-
+# successful-invoke-latency accessor added alongside <alp/inference.h>'s
+# model-perf-capture support. #includes src/yocto/inference_yocto.c
+# directly (see the test's own header comment) through a fake DEEPX_DXM1
+# backend -- deliberately NOT linked against alp::sdk, same ODR rationale
+# as alp_test_inference_invoke_close_race below. Needs stub_core.c
+# (alp_internal_set_last_error) and alp_slot_claim.c (the close drain) for
+# the same reason that test does. Single-threaded: no Threads dependency.
+add_executable(alp_test_inference_latency
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_latency.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+)
+target_include_directories(alp_test_inference_latency PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+)
+target_compile_features(alp_test_inference_latency PRIVATE c_std_99)
+
+add_test(NAME alp_test_inference_latency
+         COMMAND alp_test_inference_latency)
+
 # Issue #1254 end-to-end regression: an "onnx" blob_format .alpmodel,
 # decoded by the REAL zcbor-backed alp_model_parse() (src/common/
 # alp_model.c, compiled in place of the ALP_ERR_NOSUPPORT stub only
@@ -243,6 +267,31 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     add_test(NAME alp_test_inference_invoke_close_race
              COMMAND alp_test_inference_invoke_close_race)
+
+    # Inference dispatcher invoke()-vs-invoke() overlap regression (PR
+    # #1541 review): alp_inference_last_invoke_latency_us()'s "last-store-
+    # wins" contract for two concurrent alp_inference_invoke() calls on
+    # the SAME handle had no test at all. Same #include-the-.c-directly +
+    # fake-DEEPX-backend technique as alp_test_inference_invoke_close_race
+    # above, deliberately NOT linked against alp::sdk (same ODR
+    # rationale).
+    add_executable(alp_test_inference_invoke_overlap_race
+        ${CMAKE_CURRENT_SOURCE_DIR}/inference_invoke_overlap_race.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+    )
+    target_link_libraries(alp_test_inference_invoke_overlap_race PRIVATE Threads::Threads)
+    target_include_directories(alp_test_inference_invoke_overlap_race PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_inference_invoke_overlap_race PRIVATE c_std_99)
+
+    add_test(NAME alp_test_inference_invoke_overlap_race
+             COMMAND alp_test_inference_invoke_overlap_race)
+    set_tests_properties(alp_test_inference_invoke_overlap_race PROPERTIES TIMEOUT 30)
 
     # Mechanism-level regression for issue #1114's round-2 dev-review
     # finding: src/backends/security/zephyr_drv.c's ensure_psa() elect-once-

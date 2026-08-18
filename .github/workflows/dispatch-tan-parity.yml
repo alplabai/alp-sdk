@@ -107,10 +107,12 @@ jobs:
   dispatch:
     name: "dispatch · tan parity"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Mint a short-lived App token (scoped to tan-cli)
         id: apptoken
         uses: actions/create-github-app-token@v1
+        timeout-minutes: 2
         with:
           app-id: ${{ secrets.ALP_CI_APP_ID }}
           private-key: ${{ secrets.ALP_CI_APP_PRIVATE_KEY }}
@@ -227,6 +229,7 @@ jobs:
       # the one file is all this job reads.
       - name: Check out the confirm script
         uses: actions/checkout@v6
+        timeout-minutes: 2
         with:
           fetch-depth: 1
           sparse-checkout: |

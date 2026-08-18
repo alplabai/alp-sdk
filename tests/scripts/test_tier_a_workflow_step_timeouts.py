@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Regression test for #1274 and #1319.
+"""Regression test for #1274, #1319 and #1477.
 
 `pr-tier-a-libraries.yml`'s jobs each carry a job-level `timeout-minutes`,
 but until #1274 none of their individual steps did. When one setup step
@@ -14,9 +14,24 @@ uncapped setup sequence AND no job-level ceiling either, so GitHub's
 360-minute runner default applied -- to the lane feeding `twister ·
 native_sim/native/64`, one of only two required branch-protection
 contexts on `dev` (`clang-format · diff-only` is the other). `grep -c
-timeout-minutes .github/workflows/pr-twister.yml` returned `0`. Both
-workflows are checked here now, parametrized over `WORKFLOWS`; a third
-workflow only has to be added to that tuple.
+timeout-minutes .github/workflows/pr-twister.yml` returned `0`.
+
+#1477 found the same defect on `clang-format · diff-only` itself --
+`pr-static-analysis.yml` had zero `timeout-minutes` anywhere -- and, worse,
+found that THIS test could not have caught it: `WORKFLOWS` was a literal
+two-element tuple naming only the two files #1274 and #1319 had already
+fixed, so every other workflow in `.github/workflows/` was silently
+unchecked. `WORKFLOWS` is now a glob over every workflow file (see
+`_workflow_files()` below) instead of a hardcoded list, with a
+guard-against-the-guard test of its own (`test_there_are_workflows_to_glob`,
+matching the idiom `test_workflows_are_loadable.py::test_there_are_workflows_to_check`
+already uses) so a shrunken or empty glob fails loudly rather than quietly
+covering nothing. Widening the glob surfaced 30 more uncapped jobs across
+17 files (coverity.yml's `scan`, all 9 of pr-plain-cmake.yml's build jobs,
+release.yml's `build` and `provenance`, and others) -- every one of them
+is capped in the same change that widens the gate, on purpose: an
+allowlist of "workflows not yet checked" would just reinstate the silent
+hole this issue is about under a new name.
 
 Which steps "need" their own timeout is derived from each step's `run:`/
 `uses:` body (network-fetch/install/compile commands, or any marketplace
@@ -50,15 +65,22 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 _WORKFLOW_DIR = REPO / ".github" / "workflows"
 
-# Every workflow whose jobs must carry both a job-level ceiling and
-# per-step timeouts on their network/compile steps. pr-tier-a-libraries
-# is #1274's subject; pr-twister is #1319's, and is the more load-bearing
-# of the two -- its aggregator job `twister · native_sim/native/64` is a
-# required branch-protection context on `dev`.
-WORKFLOWS = (
-    _WORKFLOW_DIR / "pr-tier-a-libraries.yml",
-    _WORKFLOW_DIR / "pr-twister.yml",
-)
+
+def _workflow_files() -> tuple[Path, ...]:
+    """Every workflow file whose jobs must carry both a job-level ceiling
+    and per-step timeouts on their network/compile steps -- ALL of
+    `.github/workflows/`, not just the files a past fix happened to touch
+    (#1477: that was exactly how `pr-static-analysis.yml`, producing the
+    required `clang-format · diff-only` context, went uncapped while this
+    file's own docstring described the defect class it was still missing).
+    """
+    return tuple(sorted([*_WORKFLOW_DIR.glob("*.yml"), *_WORKFLOW_DIR.glob("*.yaml")]))
+
+
+# Evaluated once at import/collection time, matching how `pytest.mark.parametrize`
+# below needs it -- see `test_there_are_workflows_to_glob` for the guard that
+# keeps this from silently shrinking to nothing.
+WORKFLOWS = _workflow_files()
 
 # GitHub's implicit per-job ceiling when `timeout-minutes:` is absent.
 # Quoted in the failure message so the number a missing ceiling actually
@@ -110,6 +132,19 @@ def _load_jobs(workflow: Path) -> dict:
     return doc["jobs"]
 
 
+def _is_reusable_workflow_call(job: dict) -> bool:
+    """True if `job` calls a reusable workflow (`uses: <owner>/<repo>/.github/
+    workflows/<file>.yml@<ref>`) rather than running on a runner directly.
+    GitHub's schema for such a job does not accept `timeout-minutes` at
+    all -- only the CALLED workflow's own jobs may declare one -- so
+    requiring it here would demand an invalid workflow file. `release.yml`'s
+    `provenance` job (the SLSA L3 generator) is this repo's only instance
+    (#1477); it also has no `steps:` of its own, which is why the two
+    step-level tests below need no equivalent carve-out -- `job.get("steps")
+    or []` already treats it as trivially empty."""
+    return "uses" in job and "runs-on" not in job
+
+
 def _ceiling(job: dict) -> int:
     """The job's EFFECTIVE ceiling in minutes. A job with no declared
     `timeout-minutes:` really does run under GitHub's 360-minute default,
@@ -120,10 +155,23 @@ def _ceiling(job: dict) -> int:
 
 
 # `ids=` keeps the failure line naming the workflow file, so a red run
-# says which of the two regressed without decoding a parameter index.
+# names the actual regressed file without decoding a parameter index.
 _workflows = pytest.mark.parametrize(
     "workflow", WORKFLOWS, ids=[path.name for path in WORKFLOWS]
 )
+
+
+def test_there_are_workflows_to_glob() -> None:
+    """Guard against the guard (#1477): if `_workflow_files()` ever
+    returns too few files -- a typo'd glob, a directory move, `.yml` files
+    all renamed to `.yaml` and only one extension globbed -- every test
+    below parametrized over `WORKFLOWS` would silently shrink or vanish
+    with it, and the suite would stay green while covering less than it
+    did yesterday. Same idiom as
+    `test_workflows_are_loadable.py::test_there_are_workflows_to_check`.
+    The repo has ~29-30 workflow files as of #1477; >=25 leaves room to
+    add or remove a handful without this test itself needing edits."""
+    assert len(WORKFLOWS) >= 25, f"expected >=25 workflow files, found {len(WORKFLOWS)} -- glob has drifted"
 
 
 @_workflows
@@ -136,6 +184,12 @@ def test_every_job_declares_a_timeout(workflow: Path) -> None:
     # 360-minute default rather than raising a bare KeyError that names
     # neither the defect nor its cost.
     for job_id, job in _load_jobs(workflow).items():
+        if _is_reusable_workflow_call(job):
+            # #1477: GitHub's schema forbids timeout-minutes on a job that
+            # calls a reusable workflow -- see _is_reusable_workflow_call's
+            # docstring. Not an allowlist entry for THIS job by name; any
+            # job shaped this way (uses: + no runs-on:) is exempt.
+            continue
         assert "timeout-minutes" in job, (
             f"{workflow.name} job {job_id!r} declares no timeout-minutes "
             f"-- GitHub's "
@@ -151,11 +205,19 @@ def test_network_and_compile_steps_carry_their_own_timeout(workflow: Path) -> No
     any_flagged = False
 
     for job_id, job in jobs.items():
-        flagged = [step for step in job["steps"] if _needs_own_timeout(step)]
+        # A reusable-workflow-call job (see _is_reusable_workflow_call) has
+        # no `steps:` of its own -- `.get(..., [])` treats that as
+        # trivially empty rather than a KeyError (#1477).
+        flagged = [step for step in job.get("steps") or [] if _needs_own_timeout(step)]
         any_flagged = any_flagged or bool(flagged)
 
         for step in flagged:
-            name = step["name"]
+            # Not every step has an explicit `name:` -- a bare
+            # `- uses: actions/checkout@v6` is common across the wider
+            # glob this test covers since #1477 (the original two-file
+            # WORKFLOWS tuple happened to have none). Fall back to the
+            # `uses:` value so the failure message still names the step.
+            name = step.get("name") or step.get("uses") or "<unnamed step>"
             step_timeout = step.get("timeout-minutes")
             assert step_timeout is not None, (
                 f"{workflow.name} job {job_id!r} step {name!r} does real "
@@ -170,10 +232,20 @@ def test_network_and_compile_steps_carry_their_own_timeout(workflow: Path) -> No
                 f"the job's {_ceiling(job)}-minute ceiling"
             )
 
-    assert any_flagged, (
-        f"no step in any {workflow.name} job matched the network/compile "
-        f"heuristic -- the heuristic itself is broken"
-    )
+    if not any_flagged:
+        # #1477: this used to be a bare `assert any_flagged`, correct only
+        # while WORKFLOWS was the original two files (#1274's
+        # pr-tier-a-libraries.yml and #1319's pr-twister.yml), both of
+        # which are network/compile-heavy by construction. Now that
+        # WORKFLOWS is every workflow in the repo, a genuinely pure-local
+        # file (no marketplace `uses:`, no pip/apt/west/curl/wget/git-
+        # clone/cmake/make/twister `run:` body) is a real, valid shape --
+        # asserting on it would name "the heuristic itself is broken" at
+        # the wrong culprit. Skip instead of failing; if a future workflow
+        # SHOULD have matched and didn't, that is a `_NETWORK_OR_COMPILE_
+        # MARKERS` gap to fix directly, not something this per-file test
+        # can distinguish from "this file really has none".
+        pytest.skip(f"{workflow.name} has no step matching the network/compile heuristic -- nothing here needs its own timeout-minutes")
 
 
 # A step that does not match the network/compile heuristic above (so the
@@ -212,7 +284,7 @@ def test_job_ceiling_exceeds_the_sum_of_its_step_timeouts(workflow: Path) -> Non
     for job_id, job in _load_jobs(workflow).items():
         capped_total = 0
         uncapped_steps = 0
-        for step in job["steps"]:
+        for step in job.get("steps") or []:
             if "timeout-minutes" in step:
                 capped_total += step["timeout-minutes"]
             else:

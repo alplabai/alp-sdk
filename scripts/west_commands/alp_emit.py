@@ -21,7 +21,10 @@ from pathlib import Path
 
 try:
     from west import log                          # type: ignore[import-not-found]
-    from west.commands import WestCommand         # type: ignore[import-not-found]
+    from west.commands import (                   # type: ignore[import-not-found]
+        CommandError,
+        WestCommand,
+    )
     _HAVE_WEST = True
 except ImportError:  # pragma: no cover - unit tests run without west installed
     # Import-safe without west so `_EMIT_MODES` stays importable by the
@@ -33,6 +36,13 @@ except ImportError:  # pragma: no cover - unit tests run without west installed
 
         def __init__(self, *args, **kwargs):  # noqa: D401,ANN002,ANN003
             pass
+
+    class CommandError(RuntimeError):  # type: ignore[no-redef]
+        """Mirrors `west.commands.CommandError` for the no-west path."""
+
+        def __init__(self, returncode: int = 1) -> None:
+            super().__init__()
+            self.returncode = returncode
 
     class _StubLog:
         """west.log stand-in; only die() is reachable outside west."""
@@ -124,4 +134,13 @@ class AlpEmit(WestCommand):
             cmd += ["--build-root", args.build_root]
         if args.core:
             cmd += ["--core", args.core]
-        return subprocess.call(cmd, env=env_with_sdk(sdk_root))
+        # west DISCARDS `do_run`'s return value and derives the exit status from
+        # exceptions only, so `return subprocess.call(...)` threw the child's rc
+        # away -- `west alp-emit build-plan > plan.json` wrote an empty file and
+        # still exited 0. Same defect and same fix as the three siblings
+        # (#1427); the two log.die() pre-flight checks above already exited
+        # non-zero, which is why this line was mistaken for correct (#1476).
+        rc = subprocess.call(cmd, env=env_with_sdk(sdk_root))
+        if rc:
+            raise CommandError(rc)
+        return rc
