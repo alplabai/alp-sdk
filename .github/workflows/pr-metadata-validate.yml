@@ -144,15 +144,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
 
       - name: Set up Python
         uses: actions/setup-python@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 
       - name: Install Python deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # model-compile is model-io (tflite + flatbuffers, for the .alpmodel
         # tensor-I/O tests, which importorskip otherwise) PLUS ethos-u-vela:
         # without it, the four vela-gated tests in test_alp_model_adapters.py
@@ -161,7 +164,6 @@ jobs:
         # shutil.which("vela")-skipif'd) SKIP in every automatic run instead
         # of actually exercising the real compiler. cbor2 is a base dep
         # either way.
-        timeout-minutes: 3
         run: pip install -e ".[dev,model-compile]"
 
       - name: Validate every SoC file against the v1 schema

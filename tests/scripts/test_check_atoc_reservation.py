@@ -157,6 +157,81 @@ class TestPresetCheck(unittest.TestCase):
         self.assertEqual(atoc._check_preset(p), [])
 
 
+class TestSlot0AddressCheck(unittest.TestCase):
+    """alp-sdk#1482: zephyr,code-partition must match the preset's slot0."""
+
+    def setUp(self):
+        import tempfile
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+        self._orig_repo = atoc.REPO
+        self._orig_presets = atoc.PRESETS
+        atoc.REPO = self.tmp
+        atoc.PRESETS = self.tmp / "metadata" / "e1m_modules"
+        atoc.PRESETS.mkdir(parents=True)
+        (atoc.PRESETS / "E1M-AEN999.yaml").write_text(
+            "memory_map:\n"
+            "  - { name: mcuboot,  base: 0x80000000, size_kib: 64 }\n"
+            "  - { name: he_slot0, base: 0x80010000, size_kib: 2688, "
+            "accessible_from: [m55_he] }\n"
+            "  - { name: hp_slot0, base: 0x802b0000, size_kib: 2688, "
+            "accessible_from: [m55_hp] }\n",
+            encoding="utf-8")
+
+    def tearDown(self):
+        atoc.REPO = self._orig_repo
+        atoc.PRESETS = self._orig_presets
+        self._tmpdir.cleanup()
+
+    def _board(self, name: str, slot0_off: int) -> Path:
+        d = self.tmp / name
+        d.mkdir(parents=True)
+        p = d / f"{name}.dts"
+        p.write_text(
+            "/dts-v1/;\n"
+            "/ { chosen { zephyr,code-partition = &slot0_partition; }; };\n"
+            "&mram { partitions { compatible = \"fixed-partitions\";\n"
+            f"\tslot0_partition: partition@{slot0_off:x} {{\n"
+            f"\t\treg = <0x{slot0_off:x} DT_SIZE_K(2688)>;\n"
+            "\t};\n"
+            "}; };\n", encoding="utf-8")
+        return p
+
+    def test_matching_address_passes(self):
+        p = self._board("e1m_aen999_m55_hp", 0x2b0000)
+        self.assertEqual(atoc._check_slot0_address(p), [])
+
+    def test_mismatched_address_fails(self):
+        p = self._board("e1m_aen999_m55_hp", 0x10000)
+        failures = atoc._check_slot0_address(p)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("0x80010000", failures[0])
+        self.assertIn("0x802b0000", failures[0])
+
+    def test_non_m55_board_dir_is_skipped(self):
+        p = self._board("e1m_aen999_a32", 0x10000)
+        self.assertEqual(atoc._check_slot0_address(p), [])
+
+    def test_unknown_sku_is_skipped(self):
+        p = self._board("e1m_aen000_m55_hp", 0x10000)
+        self.assertEqual(atoc._check_slot0_address(p), [])
+
+    def test_half_authored_preset_fails_clean_not_traceback(self):
+        # he_slot0 declared, hp_slot0 missing -- the resolver raises
+        # OrchestratorError; the gate must turn that into a failure
+        # string, not propagate the exception (#1482 fix-round finding).
+        (atoc.PRESETS / "E1M-AEN998.yaml").write_text(
+            "memory_map:\n"
+            "  - { name: mcuboot,  base: 0x80000000, size_kib: 64 }\n"
+            "  - { name: he_slot0, base: 0x80010000, size_kib: 2688, "
+            "accessible_from: [m55_he] }\n",
+            encoding="utf-8")
+        p = self._board("e1m_aen998_m55_hp", 0x2b0000)
+        failures = atoc._check_slot0_address(p)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("hp", failures[0])
+
+
 class TestRealTree(unittest.TestCase):
     def test_the_committed_tree_passes(self):
         self.assertEqual(atoc.main([]), 0)
