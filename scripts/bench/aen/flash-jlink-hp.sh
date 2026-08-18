@@ -35,6 +35,11 @@ BD="$1"
 BEACON="${2:-0x02000000}"
 bench_require_setools || exit $?
 SET="$SETOOLS_DIR"
+# OBJ itself is unused (this flow reads the beacon via J-Link `mem32`, not
+# $OBJ-nm/-readelf); the assignment is kept as a preflight -- `|| exit $?`
+# fails fast if the arm-zephyr-eabi toolchain doesn't resolve, matching
+# every sibling flash-jlink*.sh.
+# shellcheck disable=SC2034
 OBJ="$(bench_tool_prefix)" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
 # See ram-run.sh for why the selector is conditional on JLINK_SN.

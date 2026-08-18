@@ -19,7 +19,8 @@
 #   2. Plain-CMake / baremetal build (compile-only -- no tests yet)
 #   3. Zephyr twister (skipped if ZEPHYR_BASE is unset)
 #   4. clang-format diff vs HEAD~1 (skipped if no clang-format)
-#   5. shellcheck over scripts/*.sh (skipped if shellcheck isn't installed)
+#   5. shellcheck over scripts/*.sh + scripts/bench/*.sh (skipped if
+#      that tool isn't installed)
 #   6. bash -n parse of every shipped *.sh under REAL bash 3.2.57 in a
 #      container (skipped, loudly, if podman/docker isn't on PATH --
 #      cross-platform-zephyr.yml's macos-latest leg still covers it)
@@ -344,7 +345,11 @@ stage_shellcheck() {
     # cd-without-guard, a `set -u` empty-array trap, a POSIX-portability
     # slip that only bites macOS's bash 3.2) is caught on Linux BEFORE it
     # reddens macOS/Windows python-smoke.  Resolve shellcheck on PATH or
-    # the no-root ~/.local/bin install.
+    # the no-root ~/.local/bin install.  NOTE: unlike
+    # pr-static-analysis.yml's CI mirror (pinned to the v0.10.0 upstream
+    # release tarball), this resolves whatever shellcheck version is
+    # already installed locally -- a version skew here can disagree with
+    # CI about what counts as clean; install v0.10.0 locally to match.
     local sc
     sc=$(command -v shellcheck 2>/dev/null || true)
     if [ -z "${sc}" ] && [ -x "${HOME}/.local/bin/shellcheck" ]; then
@@ -363,6 +368,37 @@ stage_shellcheck() {
     for other in scripts/*.sh; do
         [ "${other}" = "scripts/test-all.sh" ] && continue
         "${sc}" -S error "${other}" || rc=1
+    done
+    # #1527: the `scripts/*.sh` glob above is flat -- it never reached
+    # scripts/bench/aen/*.sh (or any future scripts/bench/<som>/), so this
+    # stage ran clean while flash-update-log-firewall-probe.sh:147's stray
+    # literal `n` (#1478, an SC1012-class defect) sat undetected. `git
+    # ls-files` -- the same tool stage_bash32_parse uses below -- walks the
+    # tree recursively where a shell glob won't. The pattern is
+    # `scripts/bench/*.sh`, NOT `scripts/bench/**/*.sh`: in a git pathspec
+    # a bare `*` already crosses `/`, so `**/` instead forces at least one
+    # intervening directory and would silently skip a script added
+    # directly at scripts/bench/<name>.sh. -S warning (not -S error) here
+    # to match pr-static-analysis.yml's mirror job -- SC1012 is
+    # warning-severity, so -S error alone would not have caught #1478.
+    # -x (follow `source`) also matches the CI mirror: without it,
+    # flash-jlink-mramxip.sh's GD32_DPIDR -- read cross-file by
+    # bench-env.sh's bench_jlink_assert_aen_dpidr -- reports a false-
+    # positive SC2034.
+    local -a bench_files=()
+    local bench
+    while IFS= read -r bench; do
+        bench_files+=("${bench}")
+    done < <(git ls-files 'scripts/bench/*.sh')
+    # An empty file list must never read as "0 broken files == PASS" --
+    # that is a silent-empty-loop, the exact shape of gate this PR argues
+    # against, and stage_bash32_parse below guards the identical case.
+    if [ "${#bench_files[@]}" -eq 0 ]; then
+        echo "stage_shellcheck: 'git ls-files scripts/bench/*.sh' returned NO files -- refusing to report a silent pass."
+        return 1
+    fi
+    for bench in "${bench_files[@]}"; do
+        "${sc}" -x -S warning "${bench}" || rc=1
     done
     return "${rc}"
 }
