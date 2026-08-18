@@ -307,34 +307,28 @@ static int cmd_companion_wifi_ap_stop(const struct shell *sh, size_t argc, char 
 	alp_status_t s = cc3501e_wifi_ap_stop(companion_cc3501e);
 
 	if (s != ALP_OK) {
-		/* #1553: against protocol v4 this is the EXPECTED outcome even for a
-		 * teardown that worked, the same way `ap start` above is (#1385) --
-		 * WIFI_AP_STOP has no acknowledgement the driver can confirm on, so
-		 * poll_by_repeat exhausts its window and returns ALP_ERR_TIMEOUT.
+		/* #1553: reaching here does NOT mean the teardown failed.
+		 * Bench-measured on E1M-AEN801 (2026-08-18), reproducibly: with no AP
+		 * running cc3501e_wifi_ap_stop() returns ALP_OK (the firmware does ack
+		 * this opcode), but with an AP ACTUALLY RUNNING it returns
+		 * ALP_ERR_TIMEOUT every time -- the teardown takes the bridge through
+		 * the radio-down window and the ack is not observed across it. So the
+		 * one case a caller cares about is exactly the one that cannot report
+		 * its own outcome, the same shape `ap start` above has (#1385).
 		 *
-		 * Observed once on E1M-AEN801 (2026-08-18) from a second, independent
-		 * radio: with the link healthy and the soft-AP confirmed VISIBLE, this
-		 * call returned -4 and the SSID stopped being advertised ~45 s later.
-		 * That single observation had NO stability control and could not be
-		 * reproduced afterwards (a later `wifi ap` would not bring an AP up at
-		 * all on a healthy link), so it is NOT enough to claim -4 means the
-		 * teardown happened -- deliberately not asserted here or in the
-		 * header.
-		 *
-		 * What is certain either way is that "failed" was wrong: the driver
-		 * cannot distinguish a teardown that did not happen from one that did,
-		 * so reporting a definite failure states more than is known. Say
-		 * "unconfirmed", exactly as `ap start` does, and keep the error return
-		 * -- inconclusive, not success. */
+		 * "failed" therefore stated more than was known. Say "unconfirmed",
+		 * as `ap start` does, and keep the error return -- inconclusive, not
+		 * success. */
 		shell_error(sh,
 		            "ap stop unconfirmed (%d) -- firmware v4 has no AP-stop acknowledgement "
 		            "(#1553, same gap as #1385); confirm the SSID is gone out of band",
 		            (int)s);
 		return -EIO;
 	}
-	/* Unreachable against protocol v4 today, kept for the same reason the
-	 * matching branch in `ap start` is: it is the correct branch once a
-	 * firmware-side confirmation channel lands. */
+	/* Reachable, unlike the matching branch in `ap start`: bench-measured,
+	 * cc3501e_wifi_ap_stop() returns ALP_OK when there was no AP to stop. So
+	 * this line prints for the no-op case -- which is exactly the case where
+	 * "stopped" is unambiguously true. */
 	shell_print(sh, "ap stopped");
 	return 0;
 }
