@@ -271,17 +271,31 @@ def _has_real_dt_label(
     against the board `.dts` (see the schema's `memory_region.dt_label`
     description -- AEN's `mram_main` region, for example, names its flash
     node `mram_storage`, not `mram_main`). Emitting `&<name>` for one of
-    those is the exact defect #1484 closes, so only trust:
+    those is the exact defect #1484 closes.
 
-      - an `on_module.ospi_memories:` key -- it IS its own DT node label by
-        construction (`ospi0` etc.; see the `ospi0: ospi0@...` node in
-        zephyr/dts/alif/ensemble_e8_peripherals.dtsi), or
-      - a `memory_map:` region that carries an EXPLICIT `dt_label:`.
+    An `on_module.ospi_memories:` key does NOT qualify, despite its name
+    matching a controller node's label 1:1 on paper. Measured against the
+    generated Zephyr board trees (#1484 re-review): `ospi0` is the ONLY
+    `ospi<n>` label that exists anywhere under `zephyr/`
+    (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:503`), it is included by
+    only the two E1M-AEN801 board `.dts` files, and there it is the OSPI
+    CONTROLLER node (`compatible = "snps,designware-ospi"`,
+    `status = "disabled"`) -- neither AEN801 board tree enables it or gives
+    it a flash-chip child, so a `fixed-partitions` overlay under `&ospi0`
+    would not be a working flash area even on the one SKU where the label
+    exists. E1M-AEN401/601 have a board tree with no `ospi0` node at all;
+    E1M-AEN301/501/701 have no board tree in `zephyr/boards/alp/` at all.
+    `scripts/gen_zephyr_board.py` never generates an `ospi<n>` node either.
+    So until a real per-instance DT label is wired up and verified against
+    an ENABLED node, no `ospi_memories:` key is trustworthy here.
+
+    Only trust a `memory_map:` region that carries an EXPLICIT `dt_label:`
+    override -- nothing does yet, so this currently returns `False` for
+    every device on every SoM. That is the correct interim answer: it means
+    `alt_devices` never recommends a target this resolver cannot verify,
+    rather than recommending one that merely LOOKS verified (alp-sdk#1556
+    tracks wiring up and verifying real per-region/per-instance DT labels).
     """
-    om = som_preset.get("on_module") or {}
-    ospi = om.get("ospi_memories") or {}
-    if isinstance(ospi, dict) and flash_device in ospi:
-        return True
     for region in resolve_memory_map(som_preset, metadata_root):
         if region.get("name") == flash_device:
             return isinstance(region.get("dt_label"), str)
@@ -526,11 +540,22 @@ def resolve_storage_partitions(
                             f"no free room) -- use a different "
                             f"flash_device: ({', '.join(alt_devices)})")
                     else:
+                        # NOT "no other flash_device: resolves" -- on an
+                        # AEN SoM, ospi0 typically DOES resolve
+                        # (`_resolve_flash_device()`), it just has no
+                        # verified Devicetree label yet (see
+                        # `_has_real_dt_label()`). Naming it here would
+                        # recommend the very label #1484 exists to stop
+                        # fabricating, so the message must stay true for
+                        # BOTH cases (nothing resolves / something
+                        # resolves but is unverified) without naming a
+                        # device either way.
                         remedy = (
                             f"'{device_name}' is fully tiled by the SoM's "
                             f"own regions ({capacity_bytes // 1024} KiB, "
-                            f"no free room) and no other flash_device: "
-                            f"resolves for this SoM")
+                            f"no free room) and no other flash_device: on "
+                            f"this SoM both resolves and has a verified "
+                            f"Devicetree label")
                     return 0, size_aligned, (
                         f"storage entry '{entry.name}' {where} overlaps SoM "
                         f"region '{overlap_with}' on device '{device_name}' "

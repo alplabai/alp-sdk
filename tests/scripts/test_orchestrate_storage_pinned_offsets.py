@@ -27,9 +27,15 @@ region directly -- alp-sdk#1484 removed that as a legal `flash_device:`
 target: `storage` is a `carveout: false` region, a partition label *inside*
 the `mram_storage` flash node, not a Devicetree label of its own, so naming
 it decorated a node the board tree never defines. These fixtures now target
-`ospi0`, E1M-AEN301's real external OSPI NOR (32 MiB, `capacity_mbit: 256`,
-declared in `metadata/e1m_modules/E1M-AEN301.yaml`'s `on_module.ospi_memories`)
--- a genuine flash device with room to spare, unaffected by this fix.
+`ospi0` (32 MiB, `capacity_mbit: 256`, declared in
+`metadata/e1m_modules/E1M-AEN301.yaml`'s `on_module.ospi_memories`) --
+`_resolve_flash_device()` still resolves it with room to spare, unaffected
+by this fix, so it works for the pin-vs-bump allocator logic under test
+here (device-independent). NOT a claim that `ospi0` is a verified,
+board-tree-backed flash device on E1M-AEN301: #1484 re-review found that
+SKU has no board tree at all under `zephyr/boards/alp/`, so `ospi0` has no
+Devicetree label the resolver will recommend as an alternative
+(`_has_real_dt_label()`).
 
 Sizes are left at the reduced values #1445 introduced for the 96 KiB
 `storage` region (settings 64->16, app_data 128->32, mcuboot_scratch /

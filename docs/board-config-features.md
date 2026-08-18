@@ -269,15 +269,28 @@ resolution (#1484): that flag also means the region is a partition
 inside the `mram_storage` flash node -- not a flash device with a
 Devicetree label of its own. Naming one as `flash_device:` refuses
 with a reason instead of silently decorating a DT label that doesn't
-exist on the board. Target one of the SoM's real flash devices
-instead -- an `on_module.ospi_memories:` entry (`ospi0` on
-E1M-AEN301..801). `mram_main` itself is not a usable target either:
-no AEN preset declares a `dt_label:` override for it, so it falls
-back to a Devicetree label of `mram_main` -- but the generated board
-tree never defines that node, only `mram_storage` (`grep -rn
-mram_main zephyr/` returns nothing); that gap has no tracking issue
-yet (as of this writing) and closes when a `dt_label: mram_storage`
-override is added to the region.
+exist on the board.
+
+No AEN SKU has a working `storage[].flash_device:` target today. Both
+candidates the resolver will accept still resolve to an unverified DT
+label:
+
+* `mram_main` -- no AEN preset declares a `dt_label:` override for it, so
+  it falls back to a Devicetree label of `mram_main`, but the generated
+  board tree never defines that node, only `mram_storage` (`grep -rn
+  mram_main zephyr/` returns nothing).
+* an `on_module.ospi_memories:` entry (e.g. `ospi0`) -- despite the name
+  matching a controller node 1:1 on paper, `ospi0` is the ONLY `ospi<n>`
+  label anywhere under `zephyr/`
+  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:503`), only the two
+  E1M-AEN801 board `.dts` files include it, and there it is the OSPI
+  CONTROLLER node (`status = "disabled"`, no flash-chip child) -- not an
+  enabled flash device. E1M-AEN301/501/701 have no board tree at all;
+  E1M-AEN401/601 have one with no `ospi0` node.
+
+#1556 tracks the fix for both: validating `dt_label` against the
+generated board tree (or requiring an explicit, verified `dt_label:`
+override) before either target is usable.
 
 The loader rejects typoed `flash_device:` references at parse time
 with the list of known devices for the project's SoM.  When the

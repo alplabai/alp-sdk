@@ -14,9 +14,16 @@ E1M-AEN801 is used deliberately: it is the one SKU with an explicit, fully
 tiled `memory_map:` (#1069 disjoint slot0 + #1289 atoc). E1M-AEN301 carries
 the same explicit tiling since alp-sdk#1445 -- its `mram_main` is also fully
 tiled by its own `carveout: false` sub-regions, with 0 KiB free -- so the
-pre-existing storage tests that target E1M-AEN301 are unaffected by this
-change because they now target `ospi0`, its real external OSPI NOR, not
-because AEN301 has nothing to reserve.
+pre-existing storage tests that target E1M-AEN301 now target `ospi0`
+instead, which `_resolve_flash_device()` still resolves (a
+`capacity_mbit:` is declared in `metadata/e1m_modules/E1M-AEN301.yaml`'s
+`on_module.ospi_memories`) with room to spare for the bump-allocator
+bounds logic under test here. #1484 re-review: `ospi0` is NOT a verified
+Devicetree label on E1M-AEN301 -- that SKU has no board tree at all under
+`zephyr/boards/alp/` -- so do not read "resolves" as "is a real,
+board-tree-backed flash device"; these tests exercise allocator bounds
+logic, which is device-independent, not a claim that `ospi0` is wired up
+on this SKU.
 
 Run locally:
 
@@ -141,23 +148,27 @@ class TestExplicitOffset:
         # `mram_main` is fully tiled by its own carveout:false sub-regions
         # on every AEN preset (0 KiB free) -- the remedy must NOT lead with
         # "pick an offset on 'mram_main' outside the SoM's declared
-        # regions", since that advice is unfollowable on the only device
-        # this branch fires for.
+        # regions", since that advice is unfollowable on the fully-tiled
+        # case this test pins (AEN801 mram_main, 0 KiB free).
         assert "pick an offset on 'mram_main'" not in reason, reason
         assert "fully tiled" in reason, reason
 
-        # The remedy must name an ALTERNATIVE device (not `mram_main`
-        # itself, which is what the entry already targeted and is fully
-        # tiled) that actually resolves.
+        # #1484 re-review: AEN801's `ospi0` is a KNOWN, RESOLVING device
+        # (`_known_flash_devices()` / `_resolve_flash_device()`) but it has
+        # no verified Devicetree label (`_has_real_dt_label()` -- `ospi0`
+        # is the OSPI CONTROLLER node in
+        # zephyr/dts/alif/ensemble_e8_peripherals.dtsi, `status =
+        # "disabled"`, no flash-chip child; neither E1M-AEN801 board `.dts`
+        # enables it). Recommending it back to the customer would decorate
+        # a node that isn't a working flash area -- the exact defect
+        # #1484 is titled after -- so the remedy must name NO alternative
+        # device at all until a real per-instance DT label is verified.
         known = _known_flash_devices(project.som_preset, METADATA_ROOT)
         alt = [d for d in known if d != "mram_main" and d in reason]
-        assert alt, (
-            f"reason names no alternative device from {known}: {reason}")
-        for device in alt:
-            descriptor, err = _resolve_flash_device(
-                device, project.som_preset, METADATA_ROOT)
-            assert descriptor is not None, (
-                f"remedy named '{device}' but it does not resolve: {err}")
+        assert not alt, (
+            f"remedy names unverified alternative device(s) {alt}: {reason}")
+        assert "use a different flash_device:" not in reason, reason
+        assert "ospi0" not in reason, reason
 
     def test_offset_inside_the_atoc_band_is_refused(self, tmp_path):
         """The #1289 band, reached the customer-facing way.
@@ -235,6 +246,16 @@ class TestReservedBytesLessThanCapacity:
         overlap), every name in the parenthesised list must itself
         resolve AND carry a verified Devicetree label -- guards against a
         future SoM/region reintroducing the #1484 defect shape.
+
+        Kept general (not hardcoded to "no alternative is ever named")
+        because `_has_real_dt_label()` legitimately starts returning
+        `True` again once a `memory_map:` region grows an explicit
+        `dt_label:`; this is deliberately NOT a tautology against that
+        future -- it asserts the referent (`_has_real_dt_label()` +
+        `_resolve_flash_device()` are exactly the two predicates
+        `alt_devices` is filtered on, see partition.py), which is exactly
+        what would need to move in lockstep if either predicate loosened
+        incorrectly.
         """
         from alp_orchestrate.partition import _has_real_dt_label
 
@@ -256,6 +277,47 @@ class TestReservedBytesLessThanCapacity:
                 device, project.som_preset, METADATA_ROOT)
             assert descriptor is not None, (
                 f"remedy named '{device}' but it does not resolve: {err}")
+
+    def test_aen401_fully_tiled_names_no_undefined_alternative(
+            self, tmp_path):
+        """Regression for the #1484 re-review major finding: E1M-AEN401's
+        `mram_main` is fully tiled (64 + 2688 + 2688 + 64 + 96 + 32 = 5632
+        KiB, 0 KiB free -- `metadata/e1m_modules/E1M-AEN401.yaml:129-135`),
+        and its `on_module.ospi_memories.ospi0` resolves
+        (`_resolve_flash_device()`) but has NO verified Devicetree label:
+        E1M-AEN401's board tree (`zephyr/boards/alp/e1m_aen401_m55_hp/`)
+        never includes `zephyr/dts/alif/ensemble_e8_peripherals.dtsi`
+        (the only file anywhere under `zephyr/` that defines an `ospi0:`
+        node) and never declares any `ospi` node of its own
+        (`grep -rn ospi zephyr/boards/alp/e1m_aen401_m55_hp/` finds none).
+        Recommending `ospi0` here -- as the pre-re-review code did --
+        decorated a Devicetree label the board tree never defines: the
+        mirror of the E1M-V2N101 case above, on the SKU the original
+        finding measured against.
+        """
+        path = _write_board(tmp_path, """
+        name: test-aen401-fully-tiled
+        som:
+          sku: E1M-AEN401
+          hw_rev: r1
+
+        cores:
+          m55_hp:
+            os: zephyr
+            app: ./m55_hp
+
+        storage:
+          - { name: logs, size_kib: 32, fs: littlefs, flash_device: mram_main, offset_kib: 0, mount: /lfs/logs }
+        """)
+        project = load_board_yaml(path)
+        parts = resolve_storage_partitions(project)
+        logs = _by_name(parts)["logs"]
+        assert getattr(logs, "status", None) == "blocked", logs
+        reason = logs.reason or ""
+        assert "not customer-writable" in reason, reason
+        assert "fully tiled" in reason, reason
+        assert "use a different flash_device:" not in reason, reason
+        assert "ospi0" not in reason, reason
 
 
 class TestTargetingARegionDirectly:
@@ -311,8 +373,13 @@ class TestNoFalsePositives:
         E1M-AEN301's `mram_main` is fully tiled by its own sub-regions
         (alp-sdk#1445), so no `memory_map:` device on this SoM is free; this
         now exercises the same "must not false-positive" property against
-        `ospi0`, E1M-AEN301's real external OSPI NOR
-        (`on_module.ospi_memories`, 32 MiB, unaffected by this fix).
+        `ospi0` (`on_module.ospi_memories`, 32 MiB via `capacity_mbit:
+        256`), which `_resolve_flash_device()` still resolves and has room
+        to spare -- unaffected by this fix, since the allocator bounds
+        logic under test is device-independent. Not a claim that `ospi0`
+        is a verified, board-tree-backed flash device on E1M-AEN301:
+        #1484 re-review found that SKU has no board tree at all under
+        `zephyr/boards/alp/`.
         """
         path = _write_board(tmp_path, """
         name: test-aen301-region-target
