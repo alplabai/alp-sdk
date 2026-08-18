@@ -6,21 +6,27 @@
 #      reformat; CI tightens incrementally.
 #   2. cppcheck — full tree under src/ + chips/, treats warnings as
 #      informational (not fatal) until v0.2.
-#   3. shellcheck — scripts/bench/** only (#1527), as extra steps INSIDE
-#      the clang-format-diff job rather than a job of its own: a separate
-#      job's status context is not in dev's/main's required-status-checks
-#      list (only `clang-format · diff-only` is), so it would show red
-#      without blocking a merge -- exactly the "Expected Behavior" #1527
-#      asks for ("A shell defect in a bench script fails a PR check").
-#      Piggybacking on the already-required job hard-blocks with zero
-#      branch-protection change. Before this, NOTHING linted
-#      scripts/bench/**: scripts/test-all.sh's stage_shellcheck globs the
-#      flat, non-recursive `scripts/*.sh` (never reaches a subdirectory),
-#      and the only shellcheck that ran anywhere in CI was
-#      onramp-clean-container.yml's, scoped to scripts/bootstrap.sh plus
-#      tan-cli's install.sh.
-#      #1478 (a stray literal `n` passed to JLinkExe on a wrong-board
-#      MRAM-write preflight) sat undetected for exactly this reason.
+#   3. shellcheck — every shipped *.sh (#1550; widened from
+#      scripts/bench/** only, #1527's original scope), as extra steps
+#      INSIDE the clang-format-diff job rather than a job of its own: a
+#      separate job's status context is not in dev's/main's
+#      required-status-checks list (only `clang-format · diff-only` is),
+#      so it would show red without blocking a merge -- exactly the
+#      "Expected Behavior" #1527 asks for ("A shell defect in a bench
+#      script fails a PR check"). Piggybacking on the already-required
+#      job hard-blocks with zero branch-protection change. Before #1527,
+#      NOTHING linted scripts/bench/**: scripts/test-all.sh's
+#      stage_shellcheck globbed the flat, non-recursive `scripts/*.sh`
+#      (never reached a subdirectory), and the only shellcheck that ran
+#      anywhere in CI was onramp-clean-container.yml's, scoped to
+#      scripts/bootstrap.sh plus tan-cli's install.sh. #1478 (a stray
+#      literal `n` passed to JLinkExe on a wrong-board MRAM-write
+#      preflight) sat undetected for exactly this reason. #1527 then left
+#      two more groups unchecked in CI: root scripts/*.sh (checked only
+#      by the local stage_shellcheck mirror) and 8 files entirely outside
+#      scripts/ (checked nowhere). #1550 closes both gaps with a
+#      repo-wide `git ls-files '*.sh'` sweep, matching
+#      stage_shellcheck's local mirror below.
 #
 # Build-context-aware tools (clang-tidy + ABI snapshot) need a
 # proper compile_commands.json — they land in v0.2 once we have a
@@ -55,7 +61,8 @@ jobs:
     # context and previously had no ceiling at all (GitHub's implicit
     # 360-minute default applied). Worst observed successful run 23s
     # across 3 sampled runs. #1527 added the two shellcheck steps below
-    # (13 small scripts, worst observed local run well under a minute) --
+    # (originally 13 small bench scripts; #1550 widened the sweep to
+    # every shipped *.sh -- 26 files as of this change, local run 2.7s) --
     # 15min still gives real headroom over both while failing fast on a
     # PyPI/GitHub-releases/apt stall in the steps below, and stays above
     # this job's own step timeouts summed
@@ -157,17 +164,15 @@ jobs:
           sudo install "shellcheck-${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
           shellcheck --version
 
-      - name: Shellcheck scripts/bench/**
-        # `git ls-files` walks the tree recursively where a shell glob
-        # won't. The pattern is `scripts/bench/*.sh`, NOT
-        # `scripts/bench/**/*.sh` -- in a git pathspec a bare `*` already
-        # crosses `/`, so adding `**/` instead forces at least one
-        # intervening directory and would silently skip a script added
-        # directly at scripts/bench/<name>.sh (verified: `git ls-files
-        # 'scripts/bench/**/*.sh'` misses a file at that depth that
-        # `scripts/bench/*.sh` catches).
+      - name: Shellcheck every shipped *.sh
+        # #1550: widened from `scripts/bench/*.sh` (#1527's original
+        # scope) to a repo-wide `git ls-files '*.sh'` sweep -- `git
+        # ls-files` walks the tree recursively where a shell glob won't,
+        # matching stage_shellcheck's local mirror in
+        # scripts/test-all.sh.
         #
-        # One shellcheck invocation PER FILE, with -x (follow `source`):
+        # One shellcheck invocation PER FILE. scripts/bench/** keeps -x
+        # (follow `source`) and -S warning, the bar #1527 set:
         # `flash-jlink-mramxip.sh` sources `bench-env.sh`, and its
         # `GD32_DPIDR` local is read by that file's
         # `bench_jlink_assert_aen_dpidr` -- a real cross-file use that
@@ -178,18 +183,33 @@ jobs:
         # does not mask real per-file findings, only resolves cross-file
         # reads). -S warning matches stage_shellcheck's local mirror --
         # SC1012 (the #1478 stray-`\n` class) is warning-severity, so
-        # -S error alone would not have caught it.
+        # -S error alone would not have caught it. scripts/test-all.sh
+        # also runs at -S warning here, matching stage_shellcheck's local
+        # treatment of that file (the load-bearing wrapper itself).
+        # Every other shipped *.sh runs at -S error, matching
+        # stage_shellcheck's own default severity and
+        # onramp-clean-container.yml's scripts/bootstrap.sh step.
         timeout-minutes: 2
         run: |
           set -euo pipefail
-          mapfile -t files < <(git ls-files 'scripts/bench/*.sh')
+          mapfile -t files < <(git ls-files '*.sh')
           if [ "${#files[@]}" -eq 0 ]; then
-            echo "::error::'git ls-files scripts/bench/*.sh' matched no files -- refusing to report a silent pass."
+            echo "::error::'git ls-files *.sh' matched no files -- refusing to report a silent pass."
             exit 1
           fi
           rc=0
           for f in "${files[@]}"; do
-            shellcheck -x -S warning "$f" || rc=1
+            case "$f" in
+            scripts/bench/*)
+              shellcheck -x -S warning "$f" || rc=1
+              ;;
+            scripts/test-all.sh)
+              shellcheck -S warning "$f" || rc=1
+              ;;
+            *)
+              shellcheck -S error "$f" || rc=1
+              ;;
+            esac
           done
           exit "$rc"
 
