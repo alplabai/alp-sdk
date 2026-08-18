@@ -27,6 +27,19 @@ derive it -- the three filenames below are pinned by hand and this docstring is
 the record of where they came from. If the required-context set changes, this
 list has to change with it; a stale entry here is caught by the
 `the file exists` half of each case, a MISSING entry is not.
+
+PENDING (#1528): cross-platform-zephyr.yml gained a `merge_group:` trigger
+ahead of `python-smoke` being promoted to a required context (via the
+new `python-smoke · all` summary job that file's `jobs:` block adds --
+see that file's header NOTE). It is deliberately NOT added to
+REQUIRED_CONTEXT_WORKFLOWS below yet: `python-smoke · all` is not a
+required context on `dev` or `main` today, and adding it here would
+misstate this docstring's own "dev's six required contexts come from
+three files" claim. Add cross-platform-zephyr.yml to the map in the
+same PR that actually promotes `python-smoke · all` to required --
+until then, a regression that drops its `merge_group:` trigger is a
+MISSING-entry case, which (per the paragraph above) this gate does not
+catch.
 """
 
 from __future__ import annotations

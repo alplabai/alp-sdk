@@ -3441,6 +3441,10 @@
       "script": "scripts/check_west_manifest_module_resolution.py"
     },
     {
+      "purpose": "Reject a job-level `if:` that references a GitHub Actions context it does not get.",
+      "script": "scripts/check_workflow_expressions.py"
+    },
+    {
       "purpose": "Guard: every scripts/ and firmware/ write_text() of a repo-tree text artifact passes newline=\"\".",
       "script": "scripts/check_write_text_newline.py"
     },
