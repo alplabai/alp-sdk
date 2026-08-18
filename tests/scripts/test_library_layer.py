@@ -132,6 +132,38 @@ def test_validate_metadata_rejects_name_filename_mismatch(tmp_path: Path) -> Non
     assert failures and "must match the manifest filename" in failures[0][1][0]
 
 
+def test_non_list_requires_capabilities_does_not_crash_the_gate(tmp_path: Path) -> None:
+    """`requires.capabilities` is itself schema-typed as an array, but a
+    malformed manifest can carry a non-list scalar there (e.g. the bare int
+    `5`, which is truthy) -- iterating the unfiltered value used to raise
+    `TypeError: 'int' object is not iterable`, aborting the whole gate
+    mid-run instead of leaving the schema FAIL line (which already flags
+    the type mismatch) to explain the real problem."""
+    import validate_metadata as vm
+    bad = tmp_path / "badcap2.yaml"
+    doc = _valid_manifest()
+    doc["name"] = "badcap2"
+    doc["requires"] = {"capabilities": 5}
+    bad.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    failures = vm._check_library_semantics([bad])  # must not raise
+    assert failures == []
+
+
+def test_non_string_requires_capability_entry_does_not_crash_the_gate(tmp_path: Path) -> None:
+    """`requires.capabilities[]` entries are schema-typed as strings, but a
+    malformed manifest can carry a dict/list entry there -- the unfiltered
+    `cap not in vocab` membership test used to raise `TypeError: unhashable
+    type: 'dict'`."""
+    import validate_metadata as vm
+    bad = tmp_path / "badcap3.yaml"
+    doc = _valid_manifest()
+    doc["name"] = "badcap3"
+    doc["requires"] = {"capabilities": [{"nested": "dict"}]}
+    bad.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    failures = vm._check_library_semantics([bad])  # must not raise
+    assert failures  # non-string capability is reported as unknown
+
+
 def test_capability_vocabulary_is_grounded() -> None:
     import validate_metadata as vm
     vocab = vm._capability_vocabulary()

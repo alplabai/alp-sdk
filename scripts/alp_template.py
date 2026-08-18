@@ -1225,13 +1225,47 @@ def _core_board(sku: str, core_id: str | None, metadata_root: Path) -> str | Non
     return (topology.get(core_id) or {}).get("board")
 
 
+def _tag_resolves(base_dir: Path, tag: str) -> bool:
+    """Whether `tag` exists in `base_dir`'s git checkout.
+
+    Local-only: `git rev-parse` against the checkout's own refs, never a
+    network call -- scaffolding must work offline, and an `alp init` that
+    stalled on `git ls-remote` would be a worse defect than the dead link
+    this guards. A checkout that fetched from origin has origin's tags, so
+    "resolves here" is the closest offline proxy for "resolves on GitHub"
+    available, and every way it can be wrong (no git binary, tarball
+    export, `--no-tags` clone, shallow CI checkout) fails the same
+    direction: no tag found, pin to `main`, links stay live.
+    """
+    try:
+        return subprocess.run(
+            ["git", "-C", str(base_dir), "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}"],
+            capture_output=True,
+            check=False,
+        ).returncode == 0
+    except (OSError, subprocess.SubprocessError):  # no git binary, not a repo
+        return False
+
+
 def _docs_ref(base_dir: Path) -> str:
     """The GitHub ref a scaffolded README's doc links should pin to
     (issue #864 Fable-review MINOR H): `metadata/sdk_version.yaml`'s
     own `v<version>` tag when `status: released` (a released checkout's
     docs are stable at that tag; linking `main` could point at docs
     that have since changed or moved), else `main` -- an unreleased/
-    development checkout has no matching tag yet to pin to."""
+    development checkout has no matching tag yet to pin to.
+
+    The tag has to RESOLVE, not merely be declared (#1508). Between an rc
+    cut and its GA tag this file says `version: 0.16.0` / `status:
+    released` while only `v0.16.0-rc1` exists, so pinning on the declared
+    pair alone put three dead
+    `https://github.com/alplabai/alp-sdk/blob/v0.16.0/docs/...` links in
+    the README of every project scaffolded in that window -- six days wide
+    for v0.15.0. Flipping `status:` for the interim was rejected as the fix
+    (CHANGELOG.md, v0.15.0 window: it "would churn `alp.lock` and every
+    consumer that reads it"), so the check moves here, where a missing tag
+    degrades to `main` instead of shipping a 404.
+    """
     try:
         doc = yaml.safe_load(
             (base_dir / "metadata" / "sdk_version.yaml").read_text(encoding="utf-8")
@@ -1239,7 +1273,7 @@ def _docs_ref(base_dir: Path) -> str:
     except OSError:
         return "main"
     version = doc.get("version")
-    if doc.get("status") == "released" and version:
+    if doc.get("status") == "released" and version and _tag_resolves(base_dir, f"v{version}"):
         return f"v{version}"
     return "main"
 

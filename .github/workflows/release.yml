@@ -80,6 +80,14 @@ permissions: read-all
 jobs:
   build:
     runs-on: ubuntu-latest
+    # #1477: worst observed successful run 22s across 3 sampled release
+    # runs -- comfortably inside the formula's 10min floor, but this job
+    # makes several independent network round trips (pip install, the
+    # tarball's GitHub Release upload) and release.yml fires rarely
+    # enough (a handful of times a month) that the 3-run sample is thin.
+    # 20min keeps headroom over both that floor and the sum of this job's
+    # own capped + budgeted-uncapped step timeouts.
+    timeout-minutes: 20
     permissions:
       contents: write  # required to create the GitHub Release
     outputs:
@@ -88,15 +96,18 @@ jobs:
     steps:
       - name: Checkout (full history for CHANGELOG slice)
         uses: actions/checkout@v6
+        timeout-minutes: 2
         with:
           fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
+        timeout-minutes: 2
         with:
           python-version-file: .python-version
 
       - name: Install Python deps
+        timeout-minutes: 2
         run: pip install pyyaml jsonschema
 
       - name: Parse tag + verify against metadata
@@ -276,6 +287,7 @@ jobs:
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
+        timeout-minutes: 3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.tag }}
@@ -292,6 +304,16 @@ jobs:
   # above cannot tamper with the attestation -- the source of L3.
   # Bundle is uploaded to the GitHub Release the build job created
   # via `upload-assets: true`.
+  #
+  # #1477: this job carries no `timeout-minutes` -- GitHub's schema for a
+  # job that calls a reusable workflow (`uses:` with no `runs-on:`) does
+  # not accept that key; only the CALLED workflow's own jobs can declare
+  # one, and this generator is not ours to add it to. Worst observed
+  # total wall time across 3 sampled release runs was 95s, well inside
+  # the isolated runner's own limits, so this is a real schema
+  # constraint, not a gap being waved through --
+  # tests/scripts/test_tier_a_workflow_step_timeouts.py exempts exactly
+  # this job shape (`uses:` present, `runs-on:` absent).
   provenance:
     needs: [build]
     permissions:

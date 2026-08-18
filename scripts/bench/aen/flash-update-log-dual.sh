@@ -141,14 +141,61 @@ g
 exit
 EOF
 
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-dual-write.jlink 2>&1 | tee /tmp/firmware-update-log-dual-write.out | \
-	grep -iE "could not connect|fail|error|Verify|O\\.K\\.|Reset|Writing|Programming" | head -40
+# Write the transcript FIRST, fully, then grep|head it for display (#1488
+# finding 5) -- a `... | tee out | grep ... | head -N` pipeline lets `head`
+# exit after N lines and SIGPIPE grep, which then closes tee's stdout pipe;
+# tee can die from that SIGPIPE before JLinkExe's full transcript (including
+# the `Verify successful.` / `Verify failed.` line the gate below depends on)
+# is written to disk. Once a genuinely good flash's transcript got truncated
+# that way, the absence of "verify successful" in the truncated file would
+# read as a hard exit 3 on a board that actually flashed fine.
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-dual-write.jlink \
+	> /tmp/firmware-update-log-dual-write.out 2>&1 || true
+grep -iE "could not connect|fail|error|Verify|O\\.K\\.|Reset|Writing|Programming" \
+	/tmp/firmware-update-log-dual-write.out | head -40
 
 if grep -qiE "Could not connect to the target device|Cannot connect to the probe/programmer" \
 	/tmp/firmware-update-log-dual-write.out; then
 	echo "!! $JLINK_DEVICE_FLASH profile failed to connect" >&2
 	exit 2
 fi
+
+# GATE ON THE VERIFY RESULT (#1488) -- same defect flash-jlink-hp.sh was fixed
+# for under #1343. The `verifybin` above was issued but its outcome was never
+# read: the output went to a display-only pipe and the connect check was the
+# only thing that could fail this script, so a `Verify failed.` exited 0 and
+# reported a good flash.
+#
+# What this gate actually does -- and does NOT do: `loadbin`, `verifybin`,
+# `RSetType 2`, `r`, and `g` are all inside the SAME CommanderScript JLinkExe
+# has already finished executing by the time the greps below run, and the
+# HP-OWNER entry above carries `"flags": ["load", "boot"]` -- the SE has
+# already pin-reset and BOOTED the HP owner, which releases the HE client. So
+# this gate can only suppress the false "flash complete" report and the beacon
+# read-back (read-update-log-proof.sh) that follows; it does NOT and CANNOT
+# prevent the write, or the boot that lets the booted images append to the
+# update log. See the exit-3 data-loss caveats below.
+if grep -qiE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-dual-write.out; then
+	echo "!! VERIFY FAILED -- the bytes on the part do NOT match $PKG." >&2
+	grep -iE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-dual-write.out | head -5 >&2
+	echo "   Do not treat this board as flashed." >&2
+	echo "   DATA LOSS: the board was already pin-reset and released (RSetType 2; r; g" >&2
+	echo "   already ran inside the same CommanderScript), so the HP owner has already" >&2
+	echo "   booted and released the HE client -- alp_ulog_partition may ALREADY have" >&2
+	echo "   been appended to by this unverified package. Re-read the partition from a" >&2
+	echo "   known-good state before trusting the update log this run produced." >&2
+	exit 3
+fi
+if ! grep -qi "verify successful" /tmp/firmware-update-log-dual-write.out; then
+	echo "!! no verifybin success reported -- treating as FAILED (the verify never ran)." >&2
+	echo "   DATA LOSS: the board was already pin-reset and released (RSetType 2; r; g" >&2
+	echo "   already ran inside the same CommanderScript), so the HP owner has already" >&2
+	echo "   booted and released the HE client -- alp_ulog_partition may ALREADY have" >&2
+	echo "   been appended to by this unverified package. Re-read the partition from a" >&2
+	echo "   known-good state before trusting the update log this run produced." >&2
+	exit 3
+fi
+echo "verify: verifybin OK ($PKG @ $ATOC_ADDR)" >&2
 
 echo "flash complete; capture labgrid console for HP owner + HE client output" >&2
 sleep 3

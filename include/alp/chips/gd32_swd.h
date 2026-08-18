@@ -58,8 +58,17 @@
 extern "C" {
 #endif
 
-/** Expected SW-DP IDCODE for the GD32G553 (Cortex-M33 r0p1 SW-DPv2).
- *  Boards can match against this value in production test. */
+/** Generic ADIv5 SW-DP IDCODE for a Cortex-M33 r0p1 SW-DPv2.
+ *
+ *  @warning UNVERIFIED on a GD32G553 -- this value comes from the core's
+ *  generic expectation, not from a probe on the part. The bench measures
+ *  the GD32 bridge answering `0x0BE12477`, and `0x6BA02477` as the V2N
+ *  CM33 DAP (`Found Cortex-M33 r0p4`), both on place `e1mx-v2n-m1-01`;
+ *  see `scripts/bench/aen/bench-env.sh`. A correctly-wired GD32 therefore
+ *  fails a comparison against this macro, so do NOT make a mismatch fatal
+ *  (`gd32_swd_connect()` deliberately does not). Settling it needs a probe
+ *  on a GD32: alp-sdk#1440, #1369. A production test that wants to refuse
+ *  on a mismatch should match against a value measured on its own board. */
 #define GD32_SWD_EXPECTED_IDCODE 0x6BA02477u
 
 /** Default clock-delay loop count.  Higher = slower SWCLK. */
