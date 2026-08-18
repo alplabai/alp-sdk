@@ -44,6 +44,9 @@ jobs:
         timeout-minutes: 3
 
       - name: Install arm-none-eabi toolchain
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y \
@@ -75,7 +78,7 @@ jobs:
   vectors:
     name: cc3501e-bridge · wire vectors
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3

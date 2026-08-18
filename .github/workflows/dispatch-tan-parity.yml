@@ -107,7 +107,7 @@ jobs:
   dispatch:
     name: "dispatch · tan parity"
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - name: Mint a short-lived App token (scoped to tan-cli)
         id: apptoken

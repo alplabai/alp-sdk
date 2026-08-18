@@ -44,7 +44,7 @@ jobs:
   baremetal:
     name: plain-cmake · baremetal stub backend
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
@@ -65,7 +65,7 @@ jobs:
     # HAL link arrives in v0.2.x via cpackget AlifSemiconductor::Ensemble.
     name: plain-cmake · baremetal AEN (vendor scaffolding)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
@@ -85,7 +85,7 @@ jobs:
     # v0.4 alongside the V2N HIL bring-up.
     name: plain-cmake · baremetal V2N (vendor scaffolding)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
@@ -106,7 +106,7 @@ jobs:
     # CMake project that add_subdirectory()s alp-sdk the documented way.
     name: plain-cmake · add_subdirectory() consumer (#598)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     strategy:
       matrix:
         som: ["none", "aen"]
@@ -136,6 +136,9 @@ jobs:
       # Without these the CMakeLists falls back to the NOSUPPORT
       # stubs and we'd lose coverage in CI.
       - name: Install Yocto-side runtime deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -176,11 +179,17 @@ jobs:
       - uses: actions/checkout@v6
         timeout-minutes: 3
       - name: Install Yocto-side runtime deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Build zcbor at the recipe's own pin (tag 0.9.1)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
           set -e
           git clone --depth 1 --branch 0.9.1 \
@@ -262,6 +271,9 @@ jobs:
       - uses: actions/checkout@v6
         timeout-minutes: 3
       - name: Install Yocto-side runtime deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         if: matrix.name == 'yocto'
         run: |
           sudo apt-get update -o Acquire::Retries=3
@@ -310,7 +322,7 @@ jobs:
     # as the source of truth for the portable surface).
     name: plain-cmake · link-completeness (#593)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
@@ -339,6 +351,9 @@ jobs:
       - uses: actions/checkout@v6
         timeout-minutes: 3
       - name: Install Yocto-side runtime deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \

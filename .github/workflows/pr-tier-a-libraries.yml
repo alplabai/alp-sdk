@@ -102,7 +102,7 @@ jobs:
     name: tier-a-libraries · ${{ matrix.som }}
     needs: compute-family-matrix
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 45
 
     strategy:
       fail-fast: false
@@ -143,6 +143,9 @@ jobs:
       # stays under the job's 45-minute ceiling so a step running late can
       # still be killed by its own timeout first.
       - name: Install host build tools
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -154,6 +157,9 @@ jobs:
       # #1274: same failure class as "Install host build tools" above
       # (PyPI/mirror stall), same job, and it runs before the build.
       - name: Install west
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip3 install west
 
       # #1274: `west update` fetches every Zephyr module over the network,
@@ -195,6 +201,9 @@ jobs:
             ccache-${{ runner.os }}-tier-a-${{ matrix.som }}-
 
       - name: pip install Zephyr + alp-sdk requirements
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         working-directory: ${{ github.workspace }}/zephyrproject
         run: |
           pip3 install -r zephyr/scripts/requirements.txt
@@ -286,6 +295,9 @@ jobs:
       # pip/apt/west steps -- an uncapped install here can still eat this
       # job's 10-minute ceiling and land the timeout on the pytest step below.
       - name: Install Python deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip install click jsonschema pyyaml pytest
 
       # #1274: this job's `pytest` invocation is the only lane that runs

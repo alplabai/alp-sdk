@@ -90,7 +90,7 @@ jobs:
   detect:
     if: github.event_name != 'merge_group'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     outputs:
       manifest: ${{ steps.filter.outputs.manifest }}
     steps:
@@ -157,7 +157,7 @@ jobs:
     # matching branch-protection update.
     name: distro install · ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     container:
       image: ${{ matrix.image }}
     # `set -euo pipefail` below is bash-only. GitHub Actions' own default
@@ -200,6 +200,9 @@ jobs:
       # (load-bearing for tan-cli#650's root-strip on a customer's non-root
       # host) is dropped the same way tan's --fix does before executing.
       - name: Render prerequisites.install.linux.${{ matrix.pm }} as a runnable script
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         env:
           PM: ${{ matrix.pm }}
         run: |
@@ -283,7 +286,7 @@ jobs:
     # pr-twister.yml's `twister` aggregator -- the clock starts when the
     # job starts (not while it waits on `needs`), so a stuck runner here
     # can no longer hold the required check open indefinitely.
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       # Verdict logic mirrors the fail-closed rewrite #1473 did one layer
       # down in `distro-install`'s own `if:`, and for the same reason: a

@@ -54,6 +54,9 @@ jobs:
           python-version-file: .python-version
 
       - name: Install Doxygen
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # #1477 set this to 3 from observed runs; it then TIMED OUT on a
         # real PR (2026-08-18, run 32129302623) -- the step fetches a
         # ~50 MB tarball from GitHub releases and a slow mirror blows a

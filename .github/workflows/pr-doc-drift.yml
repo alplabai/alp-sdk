@@ -57,7 +57,7 @@ jobs:
     # Raised from the formula's 10min to 15min so the ceiling stays
     # strictly above the sum of its capped steps plus the 1min/step
     # budget for the 7 uncapped (pure-Python) doc-drift check steps below.
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     steps:
       - name: Checkout

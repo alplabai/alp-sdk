@@ -53,7 +53,7 @@ jobs:
     # Raised from the formula's 10min to 15min so the ceiling stays
     # strictly above the sum of its capped steps plus the 1min/step
     # budget for the uncapped ones below.
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3

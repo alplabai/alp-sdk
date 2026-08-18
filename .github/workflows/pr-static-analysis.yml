@@ -70,6 +70,9 @@ jobs:
           fetch-depth: 0  # need history so HEAD~ resolves
 
       - name: Install clang-format 22 (pinned)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # Pinned to clang-format-22 via the pip wheel (clang-format==22.1.5),
         # which ships BOTH the `clang-format` binary and `clang-format-diff.py`.
         # We pin via pip, NOT apt: apt's `clang-format` floats with the runner
@@ -101,6 +104,9 @@ jobs:
           fi
 
       - name: Run clang-format-diff on changed lines
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # DIFF_BASE is routed through env, matching the producing step above
         # -- ${{ }} re-substitutes into every run: block's source text
         # independently, so quoting the value once at the producer does not
@@ -137,6 +143,9 @@ jobs:
           echo "clang-format clean on the diff."
 
       - name: Install shellcheck (pinned)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # Pinned to the upstream release tarball, NOT apt: apt's
         # `shellcheck` floats with the runner image, so an unpinned bump
         # could add or drop warning-severity checks between runs of this
@@ -198,13 +207,16 @@ jobs:
     # `|| true` with --error-exitcode=0 -- but it too had no ceiling
     # (360-minute implicit default). Worst observed successful run 42s
     # across 3 sampled runs; 15min gives headroom over that.
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         timeout-minutes: 5
 
       - name: Install cppcheck
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y cppcheck

@@ -74,7 +74,7 @@ jobs:
   dispatch:
     name: bitbake · dispatch to alp-sdk-internal
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     permissions:
       statuses: write          # pending status on THIS repo (same-repo, no PAT)
     steps:

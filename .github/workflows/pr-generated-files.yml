@@ -100,7 +100,7 @@ jobs:
     # strictly above the sum of its capped steps plus the 1min/step
     # budget test_job_ceiling_exceeds_the_sum_of_its_step_timeouts assigns
     # each of the 13 uncapped (pure-Python regen/diff) steps below.
-    timeout-minutes: 35
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -119,6 +119,9 @@ jobs:
       # floats with the runner image).  Without it the regen below is unformatted
       # and the in-sync diff fails.
       - name: Install clang-format 22 (pinned)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
           python3 -m pip install --user 'clang-format==22.1.5'
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -129,6 +132,9 @@ jobs:
       # also schema-validates its output.  setup-python's interpreter ships
       # neither package, so install them explicitly.
       - name: Install generator dependencies
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: python3 -m pip install --user pyyaml jsonschema
 
       # gen_soc_caps.py emits include/alp/soc_caps.h AND the capability

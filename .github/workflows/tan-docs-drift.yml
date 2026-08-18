@@ -76,6 +76,9 @@ jobs:
           python-version-file: .python-version
 
       - name: Install Python Tan from source
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: python3 -m pip install ./.tan-cli/python
 
       - name: Sanity-check tan is really on PATH

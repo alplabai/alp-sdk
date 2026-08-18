@@ -55,6 +55,9 @@ jobs:
         timeout-minutes: 3
 
       - name: Install arm-none-eabi toolchain
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # Pull libnewlib-arm-none-eabi explicitly -- it carries
         # `string.h` + friends and gcc-arm-none-eabi alone doesn't
         # recommend it strongly enough to land via `apt-get install
@@ -99,6 +102,9 @@ jobs:
               vendors/gd32_firmware_library/upstream
 
       - name: Install arm-none-eabi toolchain
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # Pull libnewlib-arm-none-eabi explicitly -- it carries
         # `string.h` + friends and gcc-arm-none-eabi alone doesn't
         # recommend it strongly enough to land via `apt-get install

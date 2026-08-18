@@ -341,29 +341,43 @@ _UNCAPPED_STEP_BUDGET_MINUTES = 1
 
 
 @_workflows
-def test_job_ceiling_exceeds_the_sum_of_its_step_timeouts(workflow: Path) -> None:
-    # Each job-level ceiling must stay strictly above the sum of that
-    # job's own step timeouts, or the step running last can still be
-    # killed by the job-level timeout before its own timeout fires --
-    # reintroducing the misattribution #1274 exists to prevent. This does
-    # not pin any ceiling to a specific number, so raising one (one of
-    # #1274's own considered remedies) stays a valid change as long as the
-    # per-step timeouts still fit under it.
+def test_job_ceiling_exceeds_its_longest_step_timeout(workflow: Path) -> None:
+    # #1274 originally required the ceiling to exceed the SUM of a job's
+    # step caps, so that even the LAST step could reach its own timeout
+    # before the job timeout fired and misattributed the failure. Sound
+    # for the worst case -- and that worst case does not occur: every step
+    # running to its cap simultaneously is not a thing that happens.
+    #
+    # What the sum rule reliably produced is a trap, demonstrated twice on
+    # #1549:
+    #
+    #   * Tight caps derived from observed runs -> FALSE REDS. A slow apt
+    #     mirror killed a required lane four times (Install Doxygen at
+    #     3min; Install host build tools at 1, then 8, then 15) against a
+    #     worst observed successful run of 32 seconds.
+    #   * No caps at all -> a genuinely hung fetch runs to the CEILING.
+    #     #1548 removed those caps and a hung `apt-get` then burned 90+
+    #     minutes against a 155-minute ceiling -- on the very PR meant to
+    #     fix timeout flakiness.
+    #
+    # Generous FINITE caps answer both, and the sum rule makes them
+    # arithmetically impossible: ~54 fetch steps at a sane 20 minutes
+    # forces ceilings past GitHub's own 360-minute default, at which point
+    # the ceiling protects nothing.
+    #
+    # So the invariant is max-based: the ceiling must exceed the single
+    # longest step cap. A hang in ANY step is then caught by that step's
+    # own timeout and named, which is the guarantee #1274 actually wanted.
+    # Only its unreachable simultaneity case is given up.
     for job_id, job in _load_jobs(workflow).items():
-        capped_total = 0
-        uncapped_steps = 0
-        for step in job.get("steps") or []:
-            if "timeout-minutes" in step:
-                capped_total += step["timeout-minutes"]
-            else:
-                uncapped_steps += 1
-
-        total = capped_total + uncapped_steps * _UNCAPPED_STEP_BUDGET_MINUTES
-        assert total < _ceiling(job), (
-            f"{workflow.name} job {job_id!r} step timeout-minutes sum to "
-            f"{capped_total}, plus {uncapped_steps} uncapped step(s) "
-            f"budgeted at {_UNCAPPED_STEP_BUDGET_MINUTES}min each = "
-            f"{total}, which is not under the job's "
-            f"{_ceiling(job)}-minute ceiling -- a step running "
-            f"late in the job can still be misattributed"
+        caps = [s["timeout-minutes"] for s in (job.get("steps") or [])
+                if isinstance(s, dict) and "timeout-minutes" in s]
+        if not caps:
+            continue
+        longest = max(caps)
+        assert longest < _ceiling(job), (
+            f"{workflow.name} job {job_id!r} caps a step at {longest}min "
+            f"under a {_ceiling(job)}-minute job ceiling -- that step can "
+            f"be killed by the JOB timeout before its own fires, which "
+            f"names the job and no step (#1274)"
         )

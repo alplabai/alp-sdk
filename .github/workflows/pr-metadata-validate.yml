@@ -139,7 +139,7 @@ jobs:
     # budgeted 1min each by the test) = 77min, so the ceiling needs
     # real headroom above that, not just above the ~18min the job
     # actually takes on a real run.
-    timeout-minutes: 95
+    timeout-minutes: 80
 
     steps:
       - name: Checkout
@@ -153,6 +153,9 @@ jobs:
           python-version-file: .python-version
 
       - name: Install Python deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # model-compile is model-io (tflite + flatbuffers, for the .alpmodel
         # tensor-I/O tests, which importorskip otherwise) PLUS ethos-u-vela:
         # without it, the four vela-gated tests in test_alp_model_adapters.py

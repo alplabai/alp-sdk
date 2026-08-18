@@ -69,6 +69,9 @@ jobs:
           python-version-file: alp-sdk/.python-version
 
       - name: Install west
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip3 install --user west pyyaml
 
       - name: Derive extras-tier1 library list from west.yml

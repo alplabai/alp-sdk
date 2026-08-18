@@ -167,6 +167,9 @@ jobs:
       # premise: if these ever stop being absent (a base-image change
       # upstream), this job silently stops testing what it claims to.
       - name: Assert the base image is actually bare (git/curl/cmake/python3/ninja/xz/wget absent)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         shell: bash
         # #1477: worst observed successful run <1s across 30 sampled runs.
         run: |
@@ -192,6 +195,9 @@ jobs:
       # quickstart -- `git`/`curl` first, since bootstrap.sh itself
       # can't be fetched without them.
       - name: Install git + curl (docs/getting-started.md's own prerequisite note)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # #1477: worst observed successful run 38s across 30 sampled runs
         # -- the worst step in this job; still fits the 1min budget.
         run: |
@@ -202,6 +208,9 @@ jobs:
       # still absent) with a curated per-tool install hint, not a bare
       # tool-name list -- the exact defect #949 addendum item 2 fixes.
       - name: bootstrap.sh refuses with an actionable per-tool hint (expect failure)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         working-directory: alp-sdk
         # #1477: worst observed successful run <1s across 30 sampled runs.
         run: |
@@ -243,6 +252,9 @@ jobs:
       # first place -- see docs/getting-started.md:194 for the source of
       # truth this must keep matching).
       - name: Install prerequisites (docs/getting-started.md section 1's Debian/Ubuntu one-liner, verbatim)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # #1477: worst observed successful run 14s across 30 sampled runs.
         run: |
           apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -291,6 +303,9 @@ jobs:
       # kept out of the "Install prerequisites" step above so that step
       # stays an honest mirror of docs/getting-started.md's own one-liner.
       - name: Install shellcheck
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # #1477: worst observed successful run <5s across 30 sampled runs.
         run: apt-get install -y --no-install-recommends shellcheck
 
@@ -305,6 +320,9 @@ jobs:
       # stage_shellcheck's own severity for non-test-all.sh scripts, so
       # this does not diverge from the local gate's bar.
       - name: Shellcheck scripts/bootstrap.sh + tan-cli's install.sh
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         working-directory: alp-sdk
         shell: bash
         # #1477: worst observed successful run <5s across 30 sampled runs.
@@ -326,6 +344,9 @@ jobs:
       # it here too costs nothing extra and closes that window to every
       # relevant PR.
       - name: Smoke-run the published release installer on this bare container
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         shell: bash
         # #1477: worst observed successful run <5s across 30 sampled runs.
         run: |
@@ -348,7 +369,7 @@ jobs:
     name: onramp · macos-latest -- prereqs + bootstrap.sh --no-west (docs §1, #1033)
     if: github.event_name != 'schedule'
     runs-on: macos-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
@@ -406,6 +427,9 @@ jobs:
       # than silently degrading to a no-op on a runner image that moved
       # Homebrew somewhere this loop doesn't check.
       - name: Hide xz + wget (and prove neither remains resolvable)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         shell: bash
         run: |
           set -euo pipefail
@@ -434,6 +458,9 @@ jobs:
       # python3 ninja) on Darwin -- this must succeed with xz/wget
       # unreachable, and must not name either as missing.
       - name: bootstrap.sh --no-west succeeds on macOS without xz/wget
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         working-directory: alp-sdk
         shell: bash
         run: |
@@ -488,7 +515,7 @@ jobs:
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'run-full-quickstart'))
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 30
     # #1477: the per-step timeout-minutes below are a flat 3min default,
     # not measurements -- this job's own `if:` above gates it to
     # schedule/workflow_dispatch/a labelled PR, and none of those fired in
@@ -510,6 +537,9 @@ jobs:
       # mirrors prereqs-and-bootstrap's own "Install git + curl" /
       # "Install prerequisites" split above.
       - name: Install checkout prerequisites (git/curl/ca-certificates -- not part of docs/getting-started.md section 1)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
           apt-get update -o Acquire::Retries=3
           apt-get install -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates
@@ -535,12 +565,18 @@ jobs:
       # here anyway so this stays a mirror of the doc and any future
       # divergence between the two reddens this job).
       - name: Install prerequisites (docs/getting-started.md section 1's Debian/Ubuntu one-liner, verbatim)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # #1477: worst observed successful run 14s across 30 sampled runs.
         run: |
           apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
               cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
 
       - name: Install tan-cli/dev (docs quickstart step 2)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         shell: bash
         run: |
           set -euo pipefail
