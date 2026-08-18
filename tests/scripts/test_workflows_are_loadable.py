@@ -457,6 +457,22 @@ def test_sha_pin_detector_catches_a_seeded_tag_reference() -> None:
     assert not _SHA_PIN.match("v4")
     assert _SHA_PIN.match("a26af69be951a213d495a4c3e4e4022e16d87065")
 
+    # End-to-end: a broad early-return added to `_uses_violation` (e.g. one
+    # that short-circuits before the `_SHA_PIN` check) would leave the
+    # assertions above green while the real gate passes over a mutable-tag
+    # workflow. Call `_uses_violation` itself on the seeded data so that
+    # class of regression fails here too.
+    assert _uses_violation("seeded.yml", "build", "Checkout", "actions/checkout@v4") is not None
+    assert (
+        _uses_violation(
+            "seeded.yml",
+            "build",
+            "Pinned",
+            "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
+        )
+        is None
+    )
+
 
 def test_exempt_slsa_ref_must_be_full_semver_tag() -> None:
     """Fix-round follow-up to #1479: the exempt branch used to be a bare
