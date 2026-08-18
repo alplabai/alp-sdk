@@ -144,7 +144,8 @@ device $JLINK_DEVICE_READ
 connect
 exit
 EOF
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/fwprobe-preflight.jlink \n  > /tmp/fwprobe-preflight.out 2>&1 || true
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/fwprobe-preflight.jlink \
+  > /tmp/fwprobe-preflight.out 2>&1 || true
 bench_jlink_assert_connected /tmp/fwprobe-preflight.out "firewall-probe preflight" || exit 7
 bench_jlink_assert_aen_dpidr /tmp/fwprobe-preflight.out "firewall-probe preflight" || exit 4
 

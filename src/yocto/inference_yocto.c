@@ -50,6 +50,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 
 #include "alp/inference.h"
 
@@ -206,6 +207,12 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
 		return NULL;
 	}
 	h->backend = backend;
+	/* pool_acquire()'s claim-time memset zeroed this to 0, not the "no
+	 * sample yet" sentinel -- set it before any op can run.  Plain
+	 * store: lifecycle is still UNOPENED here, so no concurrent op/
+	 * reader can observe this handle yet (see the struct's field
+	 * comment for why every OTHER access to this field is atomic). */
+	h->last_invoke_latency_us = UINT64_MAX;
 
 	alp_status_t rc = ALP_ERR_NOSUPPORT;
 	switch (backend) {
@@ -404,6 +411,15 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf)
 	if (inf == NULL || !alp_handle_op_enter(&inf->lifecycle, &inf->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	/* Bracket the backend's synchronous executor with CLOCK_MONOTONIC
+	 * -- this is what makes alp_inference_last_invoke_latency_us()
+	 * below work identically for every backend without any of them
+	 * opting in: ORT's api->Run(), the DEEPX engine->Run(), and the
+	 * DRP-AI runtime.Run() all block this thread until the result
+	 * lands, so a dispatcher-level host timestamp IS the backend's
+	 * execution time, not an approximation of it. */
+	struct timespec t0, t1;
+	clock_gettime(CLOCK_MONOTONIC, &t0);
 	alp_status_t rc;
 	switch (inf->backend) {
 #if defined(ALP_SDK_USE_DEEPX_DXM1)
@@ -425,8 +441,58 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf)
 		rc = ALP_ERR_NOSUPPORT;
 		break;
 	}
+	clock_gettime(CLOCK_MONOTONIC, &t1);
+	if (rc == ALP_OK) {
+		/* Round-nearest microseconds from a nanosecond delta -- never
+		 * floors a genuinely nonzero duration to a truncation-biased 0,
+		 * and stays in int64_t/uint64_t throughout so neither a very
+		 * fast invoke (sub-us) nor a very slow one (32-bit us overflow)
+		 * corrupts the stored value. */
+		int64_t delta_ns = ((int64_t)t1.tv_sec - (int64_t)t0.tv_sec) * 1000000000LL +
+		                   ((int64_t)t1.tv_nsec - (int64_t)t0.tv_nsec);
+		if (delta_ns < 0) delta_ns = 0; /* CLOCK_MONOTONIC never regresses; guard anyway */
+		uint64_t us = (uint64_t)((delta_ns + 500) / 1000);
+		/* Concurrent invokes on one handle are a real interleaving
+		 * (active_ops is a drain counter, not a mutex -- see the
+		 * struct's field comment), so this write races a concurrent
+		 * alp_inference_last_invoke_latency_us() reader (or another
+		 * invoke()) on a genuinely multi-threaded caller: atomic
+		 * store, not a plain assignment. */
+		__atomic_store_n(&inf->last_invoke_latency_us, us, __ATOMIC_RELEASE);
+	}
 	alp_handle_op_leave(&inf->active_ops);
 	return rc;
+}
+
+alp_status_t alp_inference_last_invoke_latency_us(alp_inference_t *inf, uint64_t *out_us)
+{
+	/* out_us-NULL check stays FIRST, ahead of the handle check.
+	 *
+	 * This used to check inf first, matching this file's
+	 * get_input()/get_output() convention above -- but that convention
+	 * is itself pinned by an existing test
+	 * (tests/yocto/inference_dispatcher.c's
+	 * test_get_input_null_out_returns_invalid expects NOT_READY for
+	 * (NULL, NULL)), which this brand-new accessor has no equivalent
+	 * of. Checking inf first meant (NULL, NULL) and (closed, NULL) both
+	 * returned ALP_ERR_NOT_READY here, while the Zephyr dispatcher
+	 * (src/inference_dispatch.c) -- checking out_us first, like every
+	 * OTHER op in that file -- returned ALP_ERR_INVAL for the same two
+	 * calls: the same public function disagreeing with itself across
+	 * OSes (MAJOR 2). <alp/inference.h> lists ALP_ERR_INVAL before
+	 * ALP_ERR_NOT_READY with no handle-state qualifier, so out_us-first
+	 * is the order the header actually describes -- this function moves
+	 * to match Zephyr and the header rather than this file's other two
+	 * ops. */
+	if (out_us == NULL) return ALP_ERR_INVAL;
+	if (inf == NULL || !alp_handle_op_enter(&inf->lifecycle, &inf->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	uint64_t us = __atomic_load_n(&inf->last_invoke_latency_us, __ATOMIC_ACQUIRE);
+	alp_handle_op_leave(&inf->active_ops);
+	if (us == UINT64_MAX) return ALP_ERR_NOT_READY; /* no successful invoke yet */
+	*out_us = us;
+	return ALP_OK;
 }
 
 void alp_inference_close(alp_inference_t *inf)

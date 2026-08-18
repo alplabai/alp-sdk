@@ -8,6 +8,7 @@
  */
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "alp/inference.h"
 #include "alp/peripheral.h"
@@ -49,6 +50,16 @@ alp_status_t alp_inference_get_output(alp_inference_t *i, size_t idx, alp_infere
 alp_status_t alp_inference_invoke(alp_inference_t *i)
 {
 	(void)i;
+	return ALP_ERR_NOSUPPORT;
+}
+alp_status_t alp_inference_last_invoke_latency_us(alp_inference_t *i, uint64_t *out_us)
+{
+	(void)i;
+	/* No inference backend at all in this build -- unlike the real
+	 * dispatchers' NOT_READY ("no successful invoke yet"), there is no
+	 * timing mechanism here to ever populate, so NOSUPPORT is the
+	 * honest answer regardless of @p out_us. */
+	(void)out_us;
 	return ALP_ERR_NOSUPPORT;
 }
 void alp_inference_close(alp_inference_t *i)

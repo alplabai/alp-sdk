@@ -3696,6 +3696,7 @@
         "alp_inference_get_input",
         "alp_inference_get_output",
         "alp_inference_invoke",
+        "alp_inference_last_invoke_latency_us",
         "alp_inference_num_inputs",
         "alp_inference_num_outputs",
         "alp_inference_open",
