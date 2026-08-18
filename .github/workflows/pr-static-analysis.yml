@@ -36,9 +36,16 @@ jobs:
   clang-format-diff:
     name: clang-format · diff-only
     runs-on: ubuntu-latest
+    # #1477: this job produces the required `clang-format · diff-only`
+    # context and previously had no ceiling at all (GitHub's implicit
+    # 360-minute default applied). Worst observed successful run 23s
+    # across 3 sampled runs; 10min gives real headroom over that while
+    # still failing fast on a PyPI/apt stall in the steps below.
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        timeout-minutes: 3
         with:
           fetch-depth: 0  # need history so HEAD~ resolves
 
@@ -51,6 +58,7 @@ jobs:
         # tree is formatted against v22; .clang-format also locks
         # Cpp11BracedListStyle so designated-initialiser output stays
         # reproducible across patch releases.
+        timeout-minutes: 3
         run: |
           python3 -m pip install --user 'clang-format==22.1.5'
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -58,14 +66,29 @@ jobs:
 
       - name: Determine diff base
         id: base
+        # BASE_SHA is routed through env + a quoted shell variable rather
+        # than spliced via ${{ }} into this run: block's source text --
+        # same construct pr-bitbake.yml's Resolve step had to fix (#1475),
+        # applied here too for consistency even though base.sha is a
+        # commit hash of the PR's own target branch, not fork-controlled
+        # data.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "ref=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "ref=$BASE_SHA" >> "$GITHUB_OUTPUT"
           else
             echo "ref=HEAD~1" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run clang-format-diff on changed lines
+        # DIFF_BASE is routed through env, matching the producing step above
+        # -- ${{ }} re-substitutes into every run: block's source text
+        # independently, so quoting the value once at the producer does not
+        # protect this consuming step on its own.
+        env:
+          DIFF_BASE: ${{ steps.base.outputs.ref }}
+        timeout-minutes: 2
         run: |
           # clang-format-diff.py from the pinned pip wheel; it shells out to the
           # wheel's bundled v22 clang-format, so the diff check uses v22 too.
@@ -84,7 +107,7 @@ jobs:
           # test_gen_rzv2n_cm33_svd.py asserts they stay byte-identical
           # to the real module headers.  Reformatting them would break
           # the very property the fixture exists to hold.
-          git diff -U0 ${{ steps.base.outputs.ref }} -- '*.c' '*.h' \
+          git diff -U0 "$DIFF_BASE" -- '*.c' '*.h' \
               ':!vendors/**' ':!zephyr/**' \
               ':!tests/scripts/fixtures/rzv2n_svd/**' \
               | python3 "$DIFF_TOOL" -p1 \
@@ -98,11 +121,18 @@ jobs:
   cppcheck:
     name: cppcheck · src + chips
     runs-on: ubuntu-latest
+    # #1477: not a required context, and its own run step already ends
+    # `|| true` with --error-exitcode=0 -- but it too had no ceiling
+    # (360-minute implicit default). Worst observed successful run 42s
+    # across 3 sampled runs; 15min gives headroom over that.
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        timeout-minutes: 2
 
       - name: Install cppcheck
+        timeout-minutes: 3
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y cppcheck
@@ -135,6 +165,7 @@ jobs:
       - name: Upload cppcheck.xml
         if: always()
         uses: actions/upload-artifact@v7
+        timeout-minutes: 2
         with:
           name: cppcheck
           path: cppcheck.xml

@@ -15,6 +15,15 @@ J-Link flash profile -- for hardware that does not exist here.
 `_check_soc_no_wlcsp_variants` in `scripts/validate_metadata.py` is the
 guard. Non-Alif-Ensemble SoCs (Renesas, NXP, DEEPX) are untouched: their
 package choices are not ours to rule on.
+
+Synthetic fixtures below live under pytest's `tmp_path`, not the real
+`metadata/socs/alif/ensemble/` tree: `Path.rglob("*.json")` (what
+`validate_metadata.py`'s own `SOCS.rglob("*.json")` walk uses) matches
+dot-prefixed files too, so a fixture dropped into the real tree is picked up
+by every other test/gate that walks it (`test_validate_metadata_passes_on_
+real_tree`, a hand-run `python3 scripts/validate_metadata.py`, ...). `REPO`
+is monkeypatched to `tmp_path` so the checked function's own
+`path.relative_to(REPO)` still resolves.
 """
 
 import importlib.util
@@ -25,19 +34,18 @@ REPO = Path(__file__).resolve().parents[2]
 ENSEMBLE = REPO / "metadata" / "socs" / "alif" / "ensemble"
 
 
-def _load_vm():
+def _load_vm(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location(
         "vm_no_wlcsp", REPO / "scripts/validate_metadata.py"
     )
     vm = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(vm)
+    monkeypatch.setattr(vm, "REPO", tmp_path)
     return vm
 
 
-def _write_fixture(name: str, body: str) -> Path:
-    # The check reports paths relative to REPO, so the fixture must live
-    # inside the checkout.
-    p = ENSEMBLE / f".test-wlcsp-{name}.json"
+def _write_fixture(tmp_path: Path, name: str, body: str) -> Path:
+    p = tmp_path / f"{name}.json"
     p.write_text(body, encoding="utf-8")
     return p
 
@@ -45,17 +53,14 @@ def _write_fixture(name: str, body: str) -> Path:
 _HEADER = '{ "vendor": "Alif Semiconductor", "family": "Ensemble", '
 
 
-def test_rejects_a_wlcsp_variant():
-    vm = _load_vm()
+def test_rejects_a_wlcsp_variant(tmp_path, monkeypatch):
+    vm = _load_vm(tmp_path, monkeypatch)
     p = _write_fixture(
-        "reject",
+        tmp_path, "reject",
         _HEADER + '"variants": [ { "order_code": "AE999XAS", '
         '"package": "WLCSP208" } ] }',
     )
-    try:
-        failures = vm._check_soc_no_wlcsp_variants([p])
-    finally:
-        p.unlink(missing_ok=True)
+    failures = vm._check_soc_no_wlcsp_variants([p])
     assert failures
     message = failures[0][1][0]
     assert "AE999XAS" in message, message
@@ -64,54 +69,109 @@ def test_rejects_a_wlcsp_variant():
     assert "Drop the variant" in message, message
 
 
-def test_accepts_a_bga_variant():
-    vm = _load_vm()
+def test_accepts_a_bga_variant(tmp_path, monkeypatch):
+    vm = _load_vm(tmp_path, monkeypatch)
     p = _write_fixture(
-        "accept",
+        tmp_path, "accept",
         _HEADER + '"variants": [ { "order_code": "AE999XLS", '
         '"package": "FBGA194" } ] }',
     )
-    try:
-        failures = vm._check_soc_no_wlcsp_variants([p])
-    finally:
-        p.unlink(missing_ok=True)
+    failures = vm._check_soc_no_wlcsp_variants([p])
     assert not failures
 
 
-def test_a_variant_with_no_package_is_not_refused():
+def test_a_variant_with_no_package_is_not_refused(tmp_path, monkeypatch):
     """`package` is optional in soc-spec-v1. An undeclared package is not a
     WLCSP claim, and this guard must not turn absence into a failure."""
-    vm = _load_vm()
+    vm = _load_vm(tmp_path, monkeypatch)
     p = _write_fixture(
-        "no-package",
+        tmp_path, "no-package",
         _HEADER + '"variants": [ { "order_code": "AE999X" } ] }',
     )
-    try:
-        failures = vm._check_soc_no_wlcsp_variants([p])
-    finally:
-        p.unlink(missing_ok=True)
+    failures = vm._check_soc_no_wlcsp_variants([p])
     assert not failures
 
 
-def test_ignores_non_alif_ensemble_socs():
+def test_ignores_non_alif_ensemble_socs(tmp_path, monkeypatch):
     """Another vendor's package choices are not this rule's business."""
-    vm = _load_vm()
+    vm = _load_vm(tmp_path, monkeypatch)
     p = _write_fixture(
-        "non-alif",
+        tmp_path, "non-alif",
         '{ "vendor": "Renesas", "family": "RZ/V2N", "variants": '
         '[ { "order_code": "R9A09G077", "package": "WLCSP208" } ] }',
     )
-    try:
-        failures = vm._check_soc_no_wlcsp_variants([p])
-    finally:
-        p.unlink(missing_ok=True)
+    failures = vm._check_soc_no_wlcsp_variants([p])
     assert not failures
+
+
+def test_non_object_variants_entry_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`variants[]` entries are schema-typed objects, but the schema pass
+    that would reject a non-object entry runs separately and is not
+    guaranteed to have run first. A bare string in the list used to reach a
+    bare `.get()` and raise `AttributeError` here, hiding the schema FAIL
+    line that already explains the real problem. Filtered to dicts, this doc
+    must return cleanly -- no real variant survives the filter."""
+    vm = _load_vm(tmp_path, monkeypatch)
+    p = _write_fixture(
+        tmp_path, "non-object-variant",
+        _HEADER + '"variants": [ "not-a-dict" ] }',
+    )
+    failures = vm._check_soc_no_wlcsp_variants([p])
+    assert not failures  # must not raise
+
+
+def test_non_string_package_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`package` is schema-typed as a string, but a malformed document can
+    carry a non-string truthy value there (e.g. the bare int `208`, seen on
+    a real Alif Ensemble part file) -- `package.upper()` used to raise
+    `AttributeError: 'int' object has no attribute 'upper'` here, aborting
+    the whole gate mid-run instead of leaving the schema FAIL line (which
+    already flags the type mismatch) to explain the real problem."""
+    vm = _load_vm(tmp_path, monkeypatch)
+    p = _write_fixture(
+        tmp_path, "non-string-package",
+        _HEADER + '"variants": [ { "order_code": "AE999X", "package": 208 } ] }',
+    )
+    failures = vm._check_soc_no_wlcsp_variants([p])
+    assert failures == []  # must not raise; a non-string package is not a WLCSP claim
+
+
+def test_non_object_top_level_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """The SoC doc's top level is schema-typed as an object, but a
+    malformed file could parse to a bare JSON array -- `doc.get("vendor")`
+    used to raise `AttributeError: 'list' object has no attribute 'get'`
+    here, aborting the whole gate mid-run instead of leaving the schema
+    FAIL line (which already flags the type mismatch) to explain the real
+    problem."""
+    vm = _load_vm(tmp_path, monkeypatch)
+    p = _write_fixture(tmp_path, "non-object-doc", "[]")
+    failures = vm._check_soc_no_wlcsp_variants([p])
+    assert failures == []  # must not raise
+
+
+def test_non_list_variants_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`variants` itself is schema-typed as an array, but a malformed
+    document can carry a non-list scalar there (e.g. the bare int `5`,
+    which is truthy) -- `for i, v in enumerate(variants)` over the
+    unfiltered value used to raise `TypeError: 'int' object is not
+    iterable` here, aborting the whole gate mid-run instead of leaving the
+    schema FAIL line (which already flags the type mismatch) to explain
+    the real problem."""
+    vm = _load_vm(tmp_path, monkeypatch)
+    p = _write_fixture(tmp_path, "non-list-variants", _HEADER + '"variants": 5 }')
+    failures = vm._check_soc_no_wlcsp_variants([p])
+    assert failures == []  # must not raise
 
 
 def test_the_real_corpus_is_clean():
     real = sorted(ENSEMBLE.glob("e*.json"))
     assert len(real) == 6
-    assert not _load_vm()._check_soc_no_wlcsp_variants(real)
+    spec = importlib.util.spec_from_file_location(
+        "vm_no_wlcsp_real", REPO / "scripts/validate_metadata.py"
+    )
+    vm = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vm)
+    assert not vm._check_soc_no_wlcsp_variants(real)
 
 
 def test_every_shipped_variant_is_bga():

@@ -1451,8 +1451,13 @@ exited 1 correctly all along. Only the west wrappers lost it, and nothing about
 `return run(args)` looks wrong at the call site — it is the same idiom the
 `main()` three lines below uses. west's contract is the unusual half:
 `west.commands.CommandError(returncode)` is the mechanism, and a plain `return`
-is silently a no-op. `alp_emit.py` was the one wrapper already doing it right,
-via `log.die()`.
+is silently a no-op. `alp_emit.py` looked like the one wrapper already doing it
+right, via `log.die()`. **That reading was wrong and is corrected here (#1476):**
+`log.die()` covers only its two pre-flight checks (no workspace, missing
+`board.yaml`); the failure that matters — the child orchestrator's own non-zero
+exit — was the same bare `return subprocess.call(...)` fixed in the other three,
+so `west alp-emit build-plan > plan.json` wrote an empty file and exited 0 until
+#1476.
 
 All three now raise `CommandError(rc)`, with `CommandError` imported alongside
 `WestCommand` and mirrored in each file's existing no-west fallback shim so the

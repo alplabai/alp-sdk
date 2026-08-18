@@ -1,5 +1,6 @@
 # tests/scripts/test_alp_model_build.py
 """build_model: resolve targets -> run available adapters -> write .alpmodel."""
+import shutil
 from pathlib import Path
 
 import pytest
@@ -96,15 +97,25 @@ def test_build_model_default_registry_tflite_source_still_uses_cpu_adapter(tmp_p
     # steal the "cpu" backend key from CpuAdapter for an ordinary .tflite build
     # (a naive `{a.backend: a for a in registry}` dict would let the later
     # entry in _ADAPTERS silently win here).
+    #
+    # This uses the DEFAULT registry (unlike the sibling test above, which
+    # injects only CpuAdapter), so VelaAdapter is genuinely in play whenever
+    # `ethos-u-vela` is installed on the host -- e.g. CI once it installs the
+    # `model-compile` extra. `adapter.compile()` is not caught in
+    # `build_model()` (a real, available tool that fails to compile is a
+    # loud error, not a silent skip -- see build.py's module docstring), so
+    # a dummy/invalid payload here would raise instead of being ignored. Use
+    # the real fixture so the vela targets compile cleanly too; this test's
+    # own assertions still only inspect the `cpu` target.
     src = tmp_path / "m.tflite"
-    src.write_bytes(b"TFL3-DUMMY")
+    shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite", src)
     out = build_model(sku="E1M-AEN801", name="demo", source=src, out_dir=tmp_path,
                       metadata_root=_META)   # default registry
     mft, blobs = read_package(out.read_bytes())
     cpu = [t for t in mft.targets if t.backend == "cpu"]
     assert len(cpu) == 1
     assert cpu[0].blob_format == "tflite"
-    assert blobs[cpu[0].blob] == b"TFL3-DUMMY"
+    assert blobs[cpu[0].blob] == src.read_bytes()
 
 
 def test_build_model_v2m101_records_drpai_and_deepx_skips(tmp_path, monkeypatch):
