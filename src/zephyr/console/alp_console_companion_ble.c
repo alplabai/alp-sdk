@@ -216,16 +216,29 @@ static int cmd_companion_ble_scan_stop(const struct shell *sh, size_t argc, char
 
 static int cmd_companion_ble_connect(const struct shell *sh, size_t argc, char **argv)
 {
-	if (companion_cc3501e == NULL) {
-		shell_warn(sh, "companion not registered");
-		return -ENODEV;
-	}
 	uint8_t addr[6];
 	if (companion_parse_ble_addr(argv[1], addr) != 0) {
 		shell_error(sh, "usage: alp companion ble connect <aa:bb:cc:dd:ee:ff> [random]");
 		return -EINVAL;
 	}
-	uint8_t addr_type = (argc >= 3 && strcmp(argv[2], "random") == 0) ? 1u : 0u;
+	/* The 3rd token is the ONLY optional flag, and it must be "random" (the
+	 * companion wifi connect/ap fix, #1376/#1480, applies here too): a
+	 * mistyped token used to be compared `== 0` and otherwise silently
+	 * IGNORED, so `ble connect <addr> randm` connected as address type
+	 * public with no diagnostic -- the exact silent-fallback those fixes
+	 * remove. An unrecognised token is now an error instead. */
+	if (argc >= 3 && strcmp(argv[2], "random") != 0) {
+		shell_error(sh,
+		            "unrecognised argument \"%s\" -- the only optional 3rd token is "
+		            "\"random\".",
+		            argv[2]);
+		return -EINVAL;
+	}
+	if (companion_cc3501e == NULL) {
+		shell_warn(sh, "companion not registered");
+		return -ENODEV;
+	}
+	uint8_t      addr_type = (argc >= 3) ? 1u : 0u;
 	alp_status_t s = cc3501e_ble_connect(companion_cc3501e, addr, addr_type, ALP_COMPANION_BLE_MS);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble connect failed (%d)", (int)s);
