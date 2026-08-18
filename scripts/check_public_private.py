@@ -19,16 +19,18 @@ Default scan roots:
   zephyr/, meta-alp-sdk/, .github/workflows/
 
 Generated ABI snapshots, vendored code, and build outputs are always
-skipped.  ``docs/superpowers`` (raw internal planning notes) is exempt from
-the rules that key off ordinary planning vocabulary -- those would drown in
-false positives on a tree that legitimately talks *about* the private-notes
-system and internal review process -- but IS scanned for the lab-endpoint
-shapes (dangling private-notes links, labgrid-place identifiers, probe
-serials, SSH-to-a-literal-IP), since that is precisely the tree lab IP has leaked
-from before (issue #524).  See ``Rule.scan_superpowers`` below.  The
-patterns are intentionally narrow; normal uses of "internal" for an on-chip
-reference, software implementation detail, or customer/private extension
-repo are not findings.
+skipped.  ``docs/superpowers`` (raw internal planning notes) is scanned by
+every rule, no exemptions -- it is precisely the tree lab IP has leaked
+from before (issue #524).  Issue #1515 measured a per-rule opt-out for
+``PRIVATE_AUDIT_REFERENCE`` (its "audit"/"report" vocabulary was thought to
+false-positive on planning prose describing the private-notes system
+itself) against the live tree -- 98 files / 50,112 lines of
+docs/superpowers, forcing that rule on -- and got zero hits: the
+false-positive risk the exemption was meant to absorb never materialized,
+so there is nothing for a per-rule flag to buy.  The patterns are
+intentionally narrow; normal uses of "internal" for an on-chip reference,
+software implementation detail, or customer/private extension repo are not
+findings.
 
 Local invocation:
 
@@ -80,13 +82,6 @@ DEFAULT_EXCLUDES: tuple[str, ...] = (
     "__pycache__",
 )
 
-# docs/superpowers is 85 files of raw internal planning notes -- exactly the
-# tree issue #524's lab IP (a bench SSH endpoint) accumulated in, sitting
-# past a wholesale directory exclusion for over two months.  It is NOT in
-# DEFAULT_EXCLUDES any more: per-rule ``scan_superpowers`` (see Rule below)
-# decides, category by category, whether that tree is in scope.
-SUPERPOWERS_ROOT = "docs/superpowers"
-
 TEXT_SUFFIXES: frozenset[str] = frozenset({
     ".bb",
     ".bbappend",
@@ -129,16 +124,6 @@ class Rule:
     category: str
     pattern: re.Pattern[str]
     suggestion: str
-    # Whether this rule also runs inside docs/superpowers.  Default False:
-    # most rules key off ordinary planning-doc vocabulary ("audit", "design",
-    # "report", schematic terms) that raw internal notes use legitimately
-    # while *talking about* the private/public boundary itself -- scanning
-    # them there would be noise, not signal.  The lab-endpoint rules (a
-    # dangling private-notes link, a labgrid-place identifier, a probe
-    # serial, an ssh-to-a-literal-IP) opt in with True: those are never legitimate in
-    # planning prose either, and docs/superpowers is where they've actually
-    # leaked.
-    scan_superpowers: bool = False
     # Whether a match is exempt when the enclosing bullet/paragraph itself
     # states that the cited artifact left the public tree (see
     # _describes_removal below).  Default False.  PRIVATE_AUDIT_REFERENCE is
@@ -264,9 +249,12 @@ def _validate_reviewed_accepted(entries: tuple[ReviewedAcceptedEntry, ...]) -> N
 # recording that two artifacts -- an Ensemble peripheral-coverage audit doc
 # and a carrier errata note -- left the public tree) or a historical
 # citation of the audit doc's since-relocated filename -- never a
-# reproduction of the private content itself.  Do not add an entry here to
-# make a NEW finding go away; that is what this list is not for -- take it
-# to the maintainer first.
+# reproduction of the private content itself.  Issue #1515 adds one more:
+# a docs/superpowers planning-doc line that names alp-sdk-internal as the
+# destination for SoM-internal detail, itself describing the public/private
+# boundary rather than disclosing anything across it.  Do not add an entry
+# here to make a NEW finding go away; that is what this list is not for --
+# take it to the maintainer first.
 REVIEWED_ACCEPTED: tuple[ReviewedAcceptedEntry, ...] = (
     ReviewedAcceptedEntry(
         path="CHANGELOG.md",
@@ -332,6 +320,26 @@ REVIEWED_ACCEPTED: tuple[ReviewedAcceptedEntry, ...] = (
             "portability gap it closed.  Predates the relocation entry, so "
             "it carries no removed/moved-to language of its own.  No audit "
             "content reproduced, only the filename."
+        ),
+    ),
+    ReviewedAcceptedEntry(
+        path="docs/superpowers/plans/2026-07-05-block-physical-layer.md",
+        line=23,
+        category="PRIVATE_DESIGN_REFERENCE",
+        # Issue #1515: the one legitimate PRIVATE_DESIGN_REFERENCE hit
+        # measured across all of docs/superpowers (98 files / 50,112
+        # lines) -- SOM_PHYSICAL_DESIGN_DETAIL and PCB_ROUTING_DETAIL
+        # measured zero there.  Split so this source line does not itself
+        # trip PRIVATE_DESIGN_REFERENCE;
+        # runtime value unchanged -- see the NOTE ON FIXTURE STRINGS in
+        # tests/scripts/test_check_public_private.py.
+        excerpt="mark `visibility: internal` and leave the detail-rich body for `alp-sdk-" "internal`",
+        reason=(
+            "This line is planning-doc guidance instructing authors to route "
+            "SoM-internal detail to alp-sdk-internal and mark it "
+            "visibility: internal -- it names the private repo as a "
+            "destination, describing the public/private boundary itself, "
+            "and reproduces no design/netlist/schematic content."
         ),
     ),
 )
@@ -492,7 +500,6 @@ RULES: tuple[Rule, ...] = (
             r"(?:/home/" r"caner(?:/|\b)|C:\\Users\\" r"Caner(?:\\|\b))"
         ),
         "Use a placeholder such as <repo>, <ti-sdk>, or derive the path from the script location.",
-        scan_superpowers=True,
     ),
     Rule(
         "PRIVATE_AUDIT_REFERENCE",
@@ -546,13 +553,11 @@ RULES: tuple[Rule, ...] = (
         # convention actually leaks past it.
         re.compile(r"\bmemory/(?:project|feedback|reference)[-_][A-Za-z0-9_-]*\.md\b"),
         "Drop the private-notes citation; keep the technical statement it was attached to on its own.",
-        scan_superpowers=True,
     ),
     Rule(
         "LABGRID_PLACE",
         re.compile(r"labgrid " r"place ", re.IGNORECASE),
         "Drop the internal labgrid-place identifier; keep the bench-proven claim and its date.",
-        scan_superpowers=True,
     ),
     Rule(
         "PROBE_SERIAL",
@@ -561,7 +566,6 @@ RULES: tuple[Rule, ...] = (
             re.IGNORECASE,
         ),
         "Drop the probe serial number; keep the troubleshooting point it illustrates.",
-        scan_superpowers=True,
     ),
     Rule(
         "LAB_SSH_ENDPOINT",
@@ -570,7 +574,6 @@ RULES: tuple[Rule, ...] = (
         # which are customer-facing placeholder / mDNS forms and stay clean.
         re.compile(r"\broot@\d{1,3}(?:\.\d{1,3}){3}\b"),
         "Generalise to a placeholder (e.g. root@<bench-host>); do not substitute a different real address.",
-        scan_superpowers=True,
     ),
     Rule(
         "LAB_INFRA_HOSTNAME",
@@ -589,7 +592,6 @@ RULES: tuple[Rule, ...] = (
             re.IGNORECASE,
         ),
         "Generalise the internal host to a placeholder (e.g. <ops-host>.alplab.ai) or drop it.",
-        scan_superpowers=True,
     ),
     Rule(
         "LAB_INFRA_IP",
@@ -615,7 +617,6 @@ RULES: tuple[Rule, ...] = (
             r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)`"
         ),
         "Generalise the address to a placeholder; do not substitute a different real one.",
-        scan_superpowers=True,
     ),
     Rule(
         "PCB_ROUTING_DETAIL",
@@ -648,12 +649,6 @@ def _is_excluded(rel: str, excludes: Iterable[str] = DEFAULT_EXCLUDES) -> bool:
         if parts[:len(excl_parts)] == excl_parts:
             return True
     return False
-
-
-def _under_superpowers(rel: str) -> bool:
-    parts = rel.split("/")
-    root_parts = SUPERPOWERS_ROOT.split("/")
-    return parts[:len(root_parts)] == root_parts
 
 
 def _is_text_path(path: Path) -> bool:
@@ -709,7 +704,6 @@ def scan(paths: Iterable[Path], *, base: Path) -> list[Finding]:
         except OSError:
             continue
         rel = _rel(path, base)
-        in_superpowers = _under_superpowers(rel)
         lines = text.splitlines()
         # A REVIEWED_ACCEPTED entry only suppresses a finding when its
         # excerpt matches EXACTLY ONE line of this file -- see the
@@ -737,8 +731,6 @@ def scan(paths: Iterable[Path], *, base: Path) -> list[Finding]:
         ]
         for line_no, line in enumerate(lines, start=1):
             for rule in RULES:
-                if in_superpowers and not rule.scan_superpowers:
-                    continue
                 match = rule.pattern.search(line)
                 if not match:
                     continue

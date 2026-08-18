@@ -101,14 +101,39 @@ r
 g
 exit
 EOF
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd.jlink 2>&1 | tee /tmp/flowd.out | \
-  grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Reset|Cortex|Found" | head -30
+# Write the transcript FIRST, fully, then grep|head it for display (#1488
+# finding 5) -- a `... | tee out | grep ... | head -N` pipeline lets `head`
+# exit after N lines and SIGPIPE grep, which then closes tee's stdout pipe;
+# tee can die from that SIGPIPE before JLinkExe's full transcript (including
+# the `Verify successful.` / `Verify failed.` line the gate below depends on)
+# is written to disk. Once a genuinely good flash's transcript got truncated
+# that way, the absence of "verify successful" in the truncated file would
+# read as a hard exit 3 on a board that actually flashed fine.
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd.jlink > /tmp/flowd.out 2>&1 || true
+grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Reset|Cortex|Found" /tmp/flowd.out | head -30
 echo "----- (full log: /tmp/flowd.out) -----"
 if grep -qi "Could not connect to the target device" /tmp/flowd.out; then
   echo "!! $DEV profile FAILED to connect -- flow D not unlocked on this probe (same blocker the doc records)."
   echo "   The MRAM was NOT written. Check the new probe's firmware / connect-under-reset behaviour."
   exit 2
 fi
+
+# GATE ON THE VERIFY RESULT (#1488) -- same defect flash-jlink-hp.sh was fixed
+# for under #1343. The `verifybin` above was issued but its outcome was never
+# read: the output went to a display-only pipe and the connect check was the
+# only thing that could fail this script, so a `Verify failed.` exited 0 and
+# reported a good flash.
+if grep -qiE "verify failed|verification failed|mismatch" /tmp/flowd.out; then
+  echo "!! VERIFY FAILED -- the bytes on the part do NOT match $PKG."
+  grep -iE "verify failed|verification failed|mismatch" /tmp/flowd.out | head -5
+  echo "   Do not treat this board as flashed."
+  exit 3
+fi
+if ! grep -qi "verify successful" /tmp/flowd.out; then
+  echo "!! no verifybin success reported -- treating as FAILED (the verify never ran)."
+  exit 3
+fi
+echo "verify: verifybin OK ($PKG @ $ADDR)"
 
 # 4. SES has re-booted the app; attach read-only with the GENERIC device and dump
 #    the RAM console (the part-number profile can't re-halt the running secure core).
