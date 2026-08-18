@@ -38,13 +38,12 @@ jobs:
   stub:
     name: cc3501e-bridge · CC3501E_HAL_BACKEND=stub
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
 
       - name: Install arm-none-eabi toolchain
-        timeout-minutes: 15
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y \

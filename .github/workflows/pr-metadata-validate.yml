@@ -161,7 +161,6 @@ jobs:
         # shutil.which("vela")-skipif'd) SKIP in every automatic run instead
         # of actually exercising the real compiler. cbor2 is a base dep
         # either way.
-        timeout-minutes: 5
         run: pip install -e ".[dev,model-compile]"
 
       - name: Validate every SoC file against the v1 schema

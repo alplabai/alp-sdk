@@ -66,7 +66,7 @@ jobs:
   aen801-build:
     name: getting-started · AEN801 real-silicon build (docs §7)
     runs-on: ubuntu-latest
-    timeout-minutes: 80
+    timeout-minutes: 50
 
     steps:
       # Checked out under alp-sdk/ so the workspace layout matches
@@ -87,7 +87,6 @@ jobs:
           python-version-file: alp-sdk/.python-version
 
       - name: Install host build tools
-        timeout-minutes: 15
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -150,7 +149,6 @@ jobs:
       # vs. ~17 GB for the full zephyrprojectrtos/ci image -- see
       # pr-twister.yml's comment on why that image isn't used here either).
       - name: Install Zephyr SDK (arm-zephyr-eabi only)
-        timeout-minutes: 15
         run: |
           set -euo pipefail
           ARCHIVE="zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz"

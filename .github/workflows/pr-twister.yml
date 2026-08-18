@@ -67,7 +67,7 @@ jobs:
     # ceiling to be STRICTLY above the sum -- a ceiling equal to it leaves no
     # room for a step to be killed by its own timeout first, which is the
     # whole point.  The gate caught that, which is the gate working.
-    timeout-minutes: 210
+    timeout-minutes: 155
 
     strategy:
       # Run every shard even if one fails, so a single failing suite
@@ -125,7 +125,6 @@ jobs:
       # guards against is exactly a mirror going slow and 8min = 480s =
       # 5.6x the worst good run will not fire on a slow-but-fine one.
       - name: Install host build tools (dtc, ninja, ccache, gperf, libffi)
-        timeout-minutes: 15
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -137,7 +136,6 @@ jobs:
       # #1319: same failure class as "Install host build tools" above
       # (PyPI/mirror stall).  Worst successful run 13s; 2min = 9.2x.
       - name: Install west
-        timeout-minutes: 15
         run: pip3 install west
 
       # Zephyr workspace lives next to alp-sdk.  We use west init
@@ -192,7 +190,6 @@ jobs:
       # the same value the precedent gives its equivalent step.
       - name: pip install Zephyr requirements
         working-directory: ${{ github.workspace }}/zephyrproject
-        timeout-minutes: 15
         run: |
           pip3 install -r zephyr/scripts/requirements.txt
 
@@ -201,7 +198,6 @@ jobs:
       # Zephyr's requirements-base.txt).  Install it after the
       # Zephyr deps so version pins don't override.
       - name: pip install Alp SDK Python deps
-        timeout-minutes: 15
         run: |
           pip3 install jsonschema
 

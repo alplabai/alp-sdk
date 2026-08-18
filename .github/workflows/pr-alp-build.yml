@@ -64,7 +64,7 @@ jobs:
   alp-build:
     name: alp-build · ${{ matrix.som }} · ${{ matrix.scenario }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 30
 
     strategy:
       # Partial failures should surface every broken cell at once
@@ -101,7 +101,6 @@ jobs:
           python-version-file: alp-sdk/.python-version
 
       - name: Install Python deps
-        timeout-minutes: 5
         run: pip install jsonschema pyyaml
 
       # Mirror pr-twister.yml's workspace pattern: Zephyr workspace

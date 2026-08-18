@@ -49,7 +49,7 @@ jobs:
     # ceiling derived from the no-op runs alone would be dangerously
     # tight against that real path, so this is set with headroom over the
     # documented ~20min rather than 2x the (unrepresentative) 85s sample.
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     steps:
       - name: Check for Coverity token
@@ -70,7 +70,6 @@ jobs:
 
       - name: Install build dependencies
         if: steps.token_check.outputs.configured == 'true'
-        timeout-minutes: 5
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -86,7 +85,6 @@ jobs:
           # COVERITY_PROJECT in repo Actions vars if your project
           # was registered under a different name.
           COV_PROJECT: ${{ vars.COVERITY_PROJECT || 'alplabai/alp-sdk' }}
-        timeout-minutes: 5
         run: |
           # Coverity's documented form is POST with form-encoded body;
           # GET with query string fails auth.  -f makes curl exit
@@ -141,7 +139,6 @@ jobs:
           COV_TOKEN: ${{ secrets.COVERITY_TOKEN }}
           COV_EMAIL: ${{ secrets.COVERITY_EMAIL }}
           COV_PROJECT: ${{ vars.COVERITY_PROJECT || 'alplabai/alp-sdk' }}
-        timeout-minutes: 2
         run: |
           # Same project-name source-of-truth as the download step.
           # The submit endpoint URL-encodes the project parameter

@@ -157,7 +157,7 @@ jobs:
     # matching branch-protection update.
     name: distro install · ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     container:
       image: ${{ matrix.image }}
     # `set -euo pipefail` below is bash-only. GitHub Actions' own default
@@ -202,7 +202,6 @@ jobs:
       - name: Render prerequisites.install.linux.${{ matrix.pm }} as a runnable script
         env:
           PM: ${{ matrix.pm }}
-        timeout-minutes: 5
         run: |
           set -euo pipefail
           python3 - <<'PY' > /tmp/pm-install.sh

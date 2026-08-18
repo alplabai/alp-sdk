@@ -87,7 +87,7 @@ jobs:
     # enough (a handful of times a month) that the 3-run sample is thin.
     # 20min keeps headroom over both that floor and the sum of this job's
     # own capped + budgeted-uncapped step timeouts.
-    timeout-minutes: 35
+    timeout-minutes: 30
     permissions:
       contents: write  # required to create the GitHub Release
     outputs:
@@ -107,7 +107,6 @@ jobs:
           python-version-file: .python-version
 
       - name: Install Python deps
-        timeout-minutes: 5
         run: pip install pyyaml jsonschema
 
       - name: Parse tag + verify against metadata

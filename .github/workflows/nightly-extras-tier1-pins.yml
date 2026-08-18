@@ -51,7 +51,7 @@ concurrency:
 jobs:
   fetch-and-verify:
     runs-on: ubuntu-22.04
-    timeout-minutes: 50
+    timeout-minutes: 35
 
     steps:
       - name: Checkout alp-sdk
@@ -69,7 +69,6 @@ jobs:
           python-version-file: alp-sdk/.python-version
 
       - name: Install west
-        timeout-minutes: 15
         run: pip3 install --user west pyyaml
 
       - name: Derive extras-tier1 library list from west.yml

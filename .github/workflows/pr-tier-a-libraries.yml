@@ -102,7 +102,7 @@ jobs:
     name: tier-a-libraries · ${{ matrix.som }}
     needs: compute-family-matrix
     runs-on: ubuntu-latest
-    timeout-minutes: 95
+    timeout-minutes: 55
 
     strategy:
       fail-fast: false
@@ -143,7 +143,6 @@ jobs:
       # stays under the job's 45-minute ceiling so a step running late can
       # still be killed by its own timeout first.
       - name: Install host build tools
-        timeout-minutes: 15
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -155,7 +154,6 @@ jobs:
       # #1274: same failure class as "Install host build tools" above
       # (PyPI/mirror stall), same job, and it runs before the build.
       - name: Install west
-        timeout-minutes: 15
         run: pip3 install west
 
       # #1274: `west update` fetches every Zephyr module over the network,
@@ -198,7 +196,6 @@ jobs:
 
       - name: pip install Zephyr + alp-sdk requirements
         working-directory: ${{ github.workspace }}/zephyrproject
-        timeout-minutes: 15
         run: |
           pip3 install -r zephyr/scripts/requirements.txt
           pip3 install jsonschema pyyaml
@@ -266,7 +263,7 @@ jobs:
   cmsis-nn-metadata:
     name: tier-a-libraries · cmsis-nn metadata
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
 
     steps:
       # #1274: same reasoning as compute-family-matrix's Checkout/Set up
@@ -289,7 +286,6 @@ jobs:
       # pip/apt/west steps -- an uncapped install here can still eat this
       # job's 10-minute ceiling and land the timeout on the pytest step below.
       - name: Install Python deps
-        timeout-minutes: 5
         run: pip install click jsonschema pyyaml pytest
 
       # #1274: this job's `pytest` invocation is the only lane that runs

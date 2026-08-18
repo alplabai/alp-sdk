@@ -88,17 +88,39 @@ WORKFLOWS = _workflow_files()
 # costs is visible at the point of failure, not just in this docstring.
 _GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES = 360
 
-# Command-line tools that fetch over the network or compile; a step whose
-# `run:` script invokes one of these can stall on something outside this
-# repo's content. Matched as plain substrings against the step body.
-_NETWORK_OR_COMPILE_MARKERS = (
+# Third-party package managers and artefact fetches. A step running one of
+# these has NO duration this repo can know: it depends on a mirror, a CDN or
+# a registry nobody here operates, and history does not bound it. Four false
+# CI failures proved that the hard way (#1549, #1477) -- `Install Doxygen`
+# blew a 3-minute cap, and `Install host build tools (dtc, ninja, ccache,
+# gperf, libffi)` blew 1, then 8, then 15 minutes, against a worst observed
+# successful run of THIRTY-TWO SECONDS, with `apt-get -o Acquire::Retries=3`
+# already in the command. Every raise was derived from observed runs and
+# every one was wrong, because observed runs are not evidence about a
+# degraded mirror.
+#
+# So these steps are deliberately NOT required to carry their own cap. The
+# job-level ceiling still bounds them -- that is the hang protection #1319
+# exists for, and it is the protection that actually works here. What is
+# given up is step-level attribution for this one class, which is worth
+# less than a lane that reds on a slow apt.
+_THIRD_PARTY_FETCH_MARKERS = (
     "pip install",
     "pip3 install",
     "apt-get",
-    "west ",
     "curl",
     "wget",
     "git clone",
+    "brew install",
+    "winget install",
+)
+
+# Work whose duration IS a property of this repo's own content -- a compile,
+# a test sweep, a west workspace operation over pinned revisions. History
+# bounds these, so a cap derived from it is meaningful and they keep the
+# requirement.
+_NETWORK_OR_COMPILE_MARKERS = (
+    "west ",
     "cmake",
     "make ",
     # #1319: twister builds and runs the whole ztest + example suite --
@@ -122,6 +144,11 @@ def _needs_own_timeout(step: dict) -> bool:
     action and usually to do its actual job -- checkout, cache, download,
     ...). A local composite action (`uses: ./...`) does no such fetch."""
     run = step.get("run") or ""
+    if any(marker in run for marker in _THIRD_PARTY_FETCH_MARKERS):
+        # Unbounded by construction -- see _THIRD_PARTY_FETCH_MARKERS. The
+        # job ceiling is this step's protection; a per-step cap here only
+        # manufactures false reds.
+        return False
     if any(marker in run for marker in _NETWORK_OR_COMPILE_MARKERS):
         return True
     uses = step.get("uses") or ""

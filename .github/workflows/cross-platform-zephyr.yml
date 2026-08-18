@@ -156,7 +156,6 @@ jobs:
       - name: Install Python deps
         # model-io adds tflite + flatbuffers so the .alpmodel tensor-I/O
         # tests run here (they importorskip otherwise); cbor2 is a base dep.
-        timeout-minutes: 5
         run: pip install -e ".[dev,model-io]"
 
       # ---------------------------------------------------------
@@ -308,7 +307,7 @@ jobs:
     # budget test_job_ceiling_exceeds_the_sum_of_its_step_timeouts assigns
     # every uncapped `emit *` step (6 of them; only the flagged setup
     # steps above carry their own cap).
-    timeout-minutes: 35
+    timeout-minutes: 30
 
     strategy:
       fail-fast: false
@@ -327,7 +326,6 @@ jobs:
           python-version-file: .python-version
 
       - name: Install Python deps
-        timeout-minutes: 5
         run: pip install jsonschema pyyaml
 
       # Exercise every emit mode against the canonical template.
