@@ -139,12 +139,14 @@ on:
   # AWAITING_CHECKS hang without it. Bare (no `paths:`): `merge_group`
   # doesn't support the same path-filter semantics `pull_request`/`push`
   # get above. `merge_group` also can't be scoped by matrix leg at the
-  # trigger level, so each job below carries a job-level `if:` that skips
-  # the macOS/Windows legs on that event -- only `ubuntu-latest` is a
-  # candidate for the eventual required context, and `merge_group` fires
-  # unconditionally on every `dev` merge-queue entry with no `paths:` to
-  # narrow it, so the other two legs would otherwise bill full matrix cost
-  # (macOS 10x, Windows 2x) on every queue entry while gating nothing.
+  # trigger level, so each job below scopes its own `strategy.matrix.os`
+  # (a job-level `if:` can't do this -- `matrix` isn't in the context list
+  # `jobs.<job_id>.if` gets) to just `ubuntu-latest` on that event -- the
+  # only leg that's a candidate for the eventual required context --
+  # since `merge_group` fires unconditionally on every `dev` merge-queue
+  # entry with no `paths:` to narrow it, and the other two legs would
+  # otherwise bill full matrix cost (macOS 10x, Windows 2x) on every queue
+  # entry while gating nothing.
   merge_group:
   workflow_dispatch:
 
@@ -163,11 +165,6 @@ jobs:
   python-smoke:
     name: python-smoke
     runs-on: ${{ matrix.os }}
-    # merge_group has no paths: filter (see the trigger comment above), so
-    # cap it to the ubuntu-latest leg -- the only leg that's a candidate
-    # for the eventual required context -- rather than billing the full
-    # macOS (10x)/Windows (2x) matrix cost on every dev merge-queue entry.
-    if: github.event_name != 'merge_group' || matrix.os == 'ubuntu-latest'
     # #1477: worst observed successful run 1068s/17.8min (windows-latest,
     # across 9 sampled runs) -- driven by the `pytest tests/scripts/`
     # step below, which is pure local Python and so (per this file's own
@@ -182,7 +179,15 @@ jobs:
       # a second angle.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # merge_group has no paths: filter (see the trigger comment above), so
+        # cap it to the ubuntu-latest leg -- the only leg that's a candidate
+        # for the eventual required context -- rather than billing the full
+        # macOS (10x)/Windows (2x) matrix cost on every dev merge-queue entry.
+        # The cap has to live here, not in a job-level `if:` -- `matrix` is
+        # not in the context list `jobs.<job_id>.if` gets (only `github`,
+        # `inputs`, `needs`, `vars`); `jobs.<job_id>.strategy` does get
+        # `github`, so the conditional selects the matrix values instead.
+        os: ${{ github.event_name == 'merge_group' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]') }}
 
     steps:
       - name: Checkout alp-sdk
@@ -344,11 +349,6 @@ jobs:
   loader-smoke:
     name: loader-smoke
     runs-on: ${{ matrix.os }}
-    # merge_group has no paths: filter (see the trigger comment above), so
-    # cap it to the ubuntu-latest leg -- the only leg that's a candidate
-    # for the eventual required context -- rather than billing the full
-    # macOS (10x)/Windows (2x) matrix cost on every dev merge-queue entry.
-    if: github.event_name != 'merge_group' || matrix.os == 'ubuntu-latest'
     # #1477: worst observed successful run 26s across 9 sampled runs.
     # Raised from the formula's 15min to 20min so the job ceiling stays
     # strictly above the sum of its own step timeouts plus the 1min/step
@@ -360,7 +360,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # merge_group has no paths: filter (see the trigger comment above), so
+        # cap it to the ubuntu-latest leg -- the only leg that's a candidate
+        # for the eventual required context -- rather than billing the full
+        # macOS (10x)/Windows (2x) matrix cost on every dev merge-queue entry.
+        # The cap has to live here, not in a job-level `if:` -- `matrix` is
+        # not in the context list `jobs.<job_id>.if` gets (only `github`,
+        # `inputs`, `needs`, `vars`); `jobs.<job_id>.strategy` does get
+        # `github`, so the conditional selects the matrix values instead.
+        os: ${{ github.event_name == 'merge_group' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]') }}
 
     steps:
       - name: Checkout alp-sdk
