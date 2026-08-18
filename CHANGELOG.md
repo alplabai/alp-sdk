@@ -298,16 +298,15 @@ its fix landed together, in the same commit (`bd8be484`, PR #1447) — see
 "### Fixed — E1M-AEN301/401/501/601/701 declare disjoint M55 slot0 windows
 (#1445)" below, after which all five presets (AEN301/401/501/601/701)
 declare `he_slot0` at `0x80010000` and `hp_slot0` at `0x802b0000`, 2688 KiB
-each. `docs/portability-matrix.md`, `docs/portability.md`,
-`docs/v1.0-readiness.md`, `README.md`, and
-`docs/tutorials/04-cross-family-portability.md` briefly recorded the 12
-swap-test cells this caused to fail after that commit landed (the emitted
-`alp.conf` itself was unaffected — the four SKUs refused at board-topology
-validation, before config emission), until #1452's sweep restored
-`docs/portability-matrix.md`'s 18 of 21 cells passing again. Populating a
-per-SoM memory map was a firmware-policy decision (slot sizing, per-core OTA
-support) this change did not make — it landed together with this change,
-under #1445.
+each. `docs/portability-matrix.md` briefly recorded the 12 swap-test cells
+as failing after that commit landed — the emitted `alp.conf` was never
+affected, and the four SKUs never actually refused on `dev`, since #1445's
+memory_map overrides landed in the same commit — until #1452's sweep
+restored its 18-of-21 count. `docs/portability.md`, `docs/v1.0-readiness.md`,
+`README.md`, and `docs/tutorials/04-cross-family-portability.md` always
+recorded 18 of 21 and were never changed. Populating a per-SoM memory map is
+a firmware-policy decision (slot sizing, per-core OTA support) that the
+#1295 slice did not make; the #1445 slice of the same commit made it.
 
 ### Fixed — `executionPolicy.missingTool` stops pinning the outcome to PATH, and ADR-0020 says what "never PATH" means
 
