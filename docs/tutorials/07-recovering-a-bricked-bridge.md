@@ -64,6 +64,26 @@ at full clock.  Override via `gd32_swd_set_clock_delay()` if your
 host's GPIO is much faster (a tighter spin loop on a different
 silicon) or you need to slow it down for noisy boards.
 
+## Cross-reference -- the wrong-board recovery hazard
+
+This tutorial's IDCODE caveat names `0x0BE12477` as the value a
+healthy, correctly-wired GD32 answers.  [`docs/gd32-bridge.md`](../gd32-bridge.md)'s
+"Recovering a bricked bridge" section disagrees: it treats
+`0x0BE12477` as an unattested, claimed-but-unmeasured value (see
+#1369) and its DPIDR preflight refuses to accept it as a pass
+condition.  Both claims are live in this repo at once -- do not pick
+a winner by reading only one of the two documents.
+
+**`docs/gd32-bridge.md`'s hazard section governs the recovery-flash
+decision**, because it is the section an operator follows immediately
+before a write that can reach the wrong board.  This tutorial's table
+is the weaker claim: it reproduces
+`scripts/bench/aen/bench-env.sh`'s `GD32_DPIDR` export, and that
+export's own "BENCH-VERIFIED" banner cites `docs/aen-bench-bringup.md`,
+a document that does not mention the GD32 at all.  Whether
+`0x0BE12477` was ever read off a GD32 with a probe attached is open at
+#1440 and #1369 and needs silicon to close, not doc surgery.
+
 ## See also
 
 * [`<alp/chips/gd32_swd.h>`](../../include/alp/chips/gd32_swd.h)

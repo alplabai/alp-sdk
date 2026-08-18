@@ -203,6 +203,22 @@ candidate on record, and it too **has not been measured on a GD32
 with a probe attached**.  See #1369 for the open issue tracking that
 measurement, and #1440 for the `0x6BA02477` mislabeling above.
 
+**This disagrees with `docs/tutorials/07-recovering-a-bricked-bridge.md`'s
+"IDCODE caveat" section**, which tables `0x0BE12477` as a bench-measured
+fact ("A healthy, correctly-wired GD32 answers `0x0BE12477`").  Do not
+silently pick a winner between the two documents: whether `0x0BE12477`
+was ever read off a GD32 with a probe attached is #1440's and #1369's
+open question, and it needs silicon to close, not doc surgery.  Until it
+does, **this section governs the recovery-flash decision** -- it is the
+one an operator follows immediately before a write that can reach the
+wrong board, which is exactly the moment treating an unattested value as
+a pass condition would matter.  The tutorial's table is the weaker claim:
+it reproduces `scripts/bench/aen/bench-env.sh`'s `GD32_DPIDR` export, and
+that export's own "BENCH-VERIFIED" banner (`scripts/bench/aen/bench-env.sh:145`)
+cites `docs/aen-bench-bringup.md`, which does not mention the GD32 at
+all -- so the tutorial's "fact" traces back to an uncited assertion, not
+an independent measurement.
+
 **Required step on the alplab-gw bench: read the DPIDR by hand before
 flashing, and abort on a match to either of two known-wrong boards.**
 The GD32 probe (USB path `3-4.2`) and the AEN E8 probe (`3-4.4.3`)
@@ -222,8 +238,9 @@ CommanderScript line, line 110; there is no equivalent conversion on
 this hand-run recovery path, so `export JLINK_SN=603000869` alone
 does nothing here.)
 
-Follow this order, exactly -- the read only constrains the write that
-immediately follows it, on the same selected probe:
+Follow this order, exactly -- it is step 1's physical detach of the
+AEN E8, not the read-write pairing itself, that removes the
+cloned-serial ambiguity for every invocation that follows:
 
 1. **Detach the AEN E8 probe from the bench first**, physically, for
    the duration of the recovery flash.  A read taken while the AEN E8
@@ -232,6 +249,19 @@ immediately follows it, on the same selected probe:
    choice is arbitrary per `JLinkExe` run, which is this section's own
    premise. Detaching the AEN E8 is what removes the cloned-serial
    ambiguity for every invocation from here on.
+
+   Identify the two probes at the connector before pulling either
+   one: run `lsusb -t` and match USB path `3-4.4.3` to the AEN E8
+   against `3-4.2` for the GD32 (both enumerate under the shared
+   J-Link serial `603000869`; those USB paths are recorded at
+   `CHANGELOG.md:2736` and `CHANGELOG.md:3339`, not in
+   `bench-env.sh`).  After detaching, re-run `lsusb -t` and confirm
+   exactly one `603000869` probe still enumerates before moving on to
+   step 2.
+
+   **Re-plugging the AEN E8 at any point before the write in step 4
+   completes voids this procedure.**  Do not resume by re-reading --
+   physically detach it again and restart from this step.
 2. Select the probe explicitly, by serial, with the identical
    CommanderScript line on every remaining invocation. Run this exact
    read-only preflight (matches `flash-jlink-mramxip.sh`'s "0b. SAFETY
@@ -251,16 +281,27 @@ immediately follows it, on the same selected probe:
    (`600107451`, a different serial) by construction; it is the
    AEN-vs-GD32 ambiguity within the shared `603000869` serial that
    step 1's physical detach resolves, not this selector.
-3. Read the `Found SW-DP with ID 0x...` line out of the transcript by
-   eye.  Abort before any write if the ID matches `AEN_DPIDR`
-   (`4C013477` -- bench-verified AEN E8) **or** `V2N_CM33_DPIDR`
-   (`6BA02477` -- the V2N CM33 DAP, `scripts/bench/aen/bench-env.sh:150`;
-   see #1440) -- both are an unconditional STOP, not merely "not the
-   AEN E8".  Do not treat `GD32_DPIDR` (`0BE12477` -- a
-   claimed-but-unattested GD32 value; see #1369) as a pass condition:
-   an ID that matches neither abort value is necessary but not
-   sufficient to proceed, since it has not itself been proven to be
-   the GD32.  `bench-env.sh`'s own "BENCH-VERIFIED" label on
+3. Read the transcript by eye and **require a `Found SW-DP with ID
+   0x...` line to be present**.  This preflight is fail-closed, not
+   fail-open: **abort if that line is absent**, for any reason --
+   a connect failure, the gated-DAP `Could not find core in CoreSight
+   setup` state, a rejected command line, or any other transcript
+   with no SW-DP ID line at all is a STOP, not a silent permit to
+   proceed, mirroring `bench_jlink_assert_aen_dpidr`'s own
+   abort-unless-seen shape (`scripts/bench/aen/bench-env.sh:177-180`)
+   rather than aborting only on a positive match to a known-wrong ID.
+   When the line is present, abort before any write if the ID matches
+   `AEN_DPIDR` (`4C013477` -- bench-verified AEN E8) **or**
+   `V2N_CM33_DPIDR` (`6BA02477` -- the V2N CM33 DAP,
+   `scripts/bench/aen/bench-env.sh:150`; see #1440) -- both are an
+   unconditional STOP, not merely "not the AEN E8".  Do not treat
+   `GD32_DPIDR` (`0BE12477` -- a claimed-but-unattested GD32 value;
+   see #1369) as a pass condition, and **do not proceed on any ID the
+   operator cannot positively attribute to the GD32**: an ID that
+   matches neither abort value is necessary but not sufficient to
+   proceed, since it has not itself been proven to be the GD32, and an
+   unrecognized ID is itself grounds to abort and investigate, not to
+   guess.  `bench-env.sh`'s own "BENCH-VERIFIED" label on
    `GD32_DPIDR` cites `docs/aen-bench-bringup.md`, which does not
    mention the GD32 at all, so treat that label as unattested too and
    rely on the manual read, not the `GD32_DPIDR` value, to prove the
@@ -272,11 +313,16 @@ immediately follows it, on the same selected probe:
    `JLinkExe` invocation -- may land between the read in step 3 and
    this write; a transcript from an earlier invocation does not
    constrain a later one, since probe selection is per-invocation.
-5. **Re-read and re-compare (repeat steps 2-3) after any re-plug of
+5. **Re-read and re-compare (repeat steps 1-3) after any re-plug of
    either probe, or after any intervening `JLinkExe` invocation**
    between the last passing read and the write.  A stale "it read
    clean earlier" does not carry across a re-plug or another
-   invocation.
+   invocation.  Repeating step 1 means physically detaching the AEN
+   E8 again and confirming with `lsusb -t` that exactly one
+   `603000869` probe enumerates before re-reading -- re-selecting the
+   probe (step 2) or re-reading (step 3) alone does not clear a
+   re-plug of the AEN E8, since only the fresh detach removes the
+   ambiguity those later steps depend on.
 
 Do **not** gate this on `scripts/bench/aen/bench-env.sh`'s
 `bench_jlink_assert_aen_dpidr` -- that helper is written to protect

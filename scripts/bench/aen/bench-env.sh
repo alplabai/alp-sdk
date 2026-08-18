@@ -142,9 +142,13 @@ export JLINK_SN="${JLINK_SN:-${JLINK_SERIAL:-}}"
 # writes to or executes on a target checks it and aborts on a mismatch
 # (alp-sdk#1312).
 #
-# BENCH-VERIFIED IDs. AEN and GD32 per docs/aen-bench-bringup.md; the V2N
-# CM33 measured 2026-08-08 on the bench (`Found SW-DP with ID 0x6BA02477`,
+# AEN_DPIDR is BENCH-VERIFIED per docs/aen-bench-bringup.md. The V2N CM33
+# was measured 2026-08-08 on the bench (`Found SW-DP with ID 0x6BA02477`,
 # `Found Cortex-M33 r0p4`) -- note that core answers on SWD, NOT JTAG.
+# GD32_DPIDR is NOT bench-verified: 0x0BE12477 is the only GD32 candidate
+# on record but has NOT been measured on a GD32 with a probe attached
+# (see #1369) -- treat it as unattested, not bench-verified, matching
+# flash-jlink-mramxip.sh's "0b. SAFETY GATE" comment.
 export AEN_DPIDR="${AEN_DPIDR:-4C013477}"
 export GD32_DPIDR="${GD32_DPIDR:-0BE12477}"
 export V2N_CM33_DPIDR="${V2N_CM33_DPIDR:-6BA02477}"
