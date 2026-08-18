@@ -295,9 +295,31 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
  * floored internally to the radio down-window and the request is re-issued on a
  * bounded backoff until it lands, like @ref cc3501e_wifi_disconnect.
  *
+ * @warning The status depends on whether there was actually an AP to stop, and
+ *          only the no-op case is conclusive.  Bench-measured on E1M-AEN801
+ *          (2026-08-18), reproducibly:
+ *
+ *          - **No soft-AP running** -> ALP_OK.  The firmware DOES acknowledge
+ *            this opcode, so ALP_OK is reachable and means what it says.
+ *          - **A soft-AP actually running** -> ALP_ERR_TIMEOUT, every time.
+ *            Tearing the AP down takes the bridge through the radio-down
+ *            window and the acknowledgement is not observed across it, so the
+ *            call cannot report on the outcome it was asked about (#1553; the
+ *            same shape @ref cc3501e_wifi_ap_start documents under #1385).
+ *
+ *          So ALP_ERR_TIMEOUT here is INCONCLUSIVE, and it is precisely the
+ *          case a caller cares about: not proof the teardown failed, not proof
+ *          it succeeded.  Confirm out of band if it matters.  Note also that
+ *          this sequence is a reliable way to wedge the transport -- an
+ *          `ap start` followed by `ap-stop` left the bridge returning
+ *          ALP_ERR_IO to every subsequent request until it was reset.
+ *
  * @param ctx  Initialised driver context.
- * @return ALP_OK once the firmware acknowledged the AP stop; ALP_ERR_TIMEOUT
- *         if it stayed busy for the whole down-window; mapped error otherwise.
+ * @return ALP_OK when there was no soft-AP to stop (the firmware acknowledges
+ *         that case, so this is conclusive); ALP_ERR_TIMEOUT when an AP WAS
+ *         running -- see the warning above: not proof the teardown failed, and
+ *         not proof it succeeded; ALP_ERR_NOT_READY if @p ctx is NULL or not
+ *         initialised; mapped error otherwise.
  */
 alp_status_t cc3501e_wifi_ap_stop(cc3501e_t *ctx);
 
