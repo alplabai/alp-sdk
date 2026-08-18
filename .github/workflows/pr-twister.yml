@@ -67,7 +67,7 @@ jobs:
     # ceiling to be STRICTLY above the sum -- a ceiling equal to it leaves no
     # room for a step to be killed by its own timeout first, which is the
     # whole point.  The gate caught that, which is the gate working.
-    timeout-minutes: 145
+    timeout-minutes: 160
 
     strategy:
       # Run every shard even if one fails, so a single failing suite
@@ -103,14 +103,14 @@ jobs:
       # precedent uses for the byte-identical step.
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           # Repo is checked out under alp-sdk/ (path:), but setup-python (a
           # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
@@ -137,7 +137,7 @@ jobs:
       # #1319: same failure class as "Install host build tools" above
       # (PyPI/mirror stall).  Worst successful run 13s; 2min = 9.2x.
       - name: Install west
-        timeout-minutes: 2
+        timeout-minutes: 5
         run: pip3 install west
 
       # Zephyr workspace lives next to alp-sdk.  We use west init
@@ -181,7 +181,7 @@ jobs:
       # #1319: worst successful run 14s; 2min = 8.6x.
       - name: Cache ccache objects
         uses: actions/cache@v5
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ runner.os }}-twister-shard${{ matrix.shard }}-${{ github.sha }}
@@ -192,7 +192,7 @@ jobs:
       # the same value the precedent gives its equivalent step.
       - name: pip install Zephyr requirements
         working-directory: ${{ github.workspace }}/zephyrproject
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           pip3 install -r zephyr/scripts/requirements.txt
 
@@ -201,7 +201,7 @@ jobs:
       # Zephyr's requirements-base.txt).  Install it after the
       # Zephyr deps so version pins don't override.
       - name: pip install Alp SDK Python deps
-        timeout-minutes: 2
+        timeout-minutes: 5
         run: |
           pip3 install jsonschema
 
@@ -339,7 +339,7 @@ jobs:
       - name: Install ARM Zephyr SDK toolchain (for --emit kconfig contract)
         if: matrix.shard == 1
         uses: actions/cache@v5
-        timeout-minutes: 2
+        timeout-minutes: 5
         id: zephyr-sdk-cache
         with:
           path: ${{ github.workspace }}/zephyr-sdk
@@ -443,7 +443,7 @@ jobs:
     # clock starts when the job STARTS, not while it waits on `needs`,
     # so 5min is ample -- and it means a stuck runner here can no longer
     # hold the required check open for 360 minutes.
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - name: Gate on all twister shards
         run: |

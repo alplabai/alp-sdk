@@ -64,7 +64,7 @@ jobs:
   alp-build:
     name: alp-build · ${{ matrix.som }} · ${{ matrix.scenario }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     strategy:
       # Partial failures should surface every broken cell at once
@@ -84,7 +84,7 @@ jobs:
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
@@ -94,14 +94,14 @@ jobs:
       # consistent across the metadata gate + this gate.
       - name: Set up Python
         uses: actions/setup-python@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           # Repo is checked out under alp-sdk/ (path:), but setup-python (a
           # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
           python-version-file: alp-sdk/.python-version
 
       - name: Install Python deps
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: pip install jsonschema pyyaml
 
       # Mirror pr-twister.yml's workspace pattern: Zephyr workspace

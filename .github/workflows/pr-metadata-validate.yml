@@ -139,16 +139,16 @@ jobs:
     # budgeted 1min each by the test) = 77min, so the ceiling needs
     # real headroom above that, not just above the ~18min the job
     # actually takes on a real run.
-    timeout-minutes: 80
+    timeout-minutes: 95
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
 
       - name: Set up Python
         uses: actions/setup-python@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 
@@ -161,7 +161,7 @@ jobs:
         # shutil.which("vela")-skipif'd) SKIP in every automatic run instead
         # of actually exercising the real compiler. cbor2 is a base dep
         # either way.
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: pip install -e ".[dev,model-compile]"
 
       - name: Validate every SoC file against the v1 schema

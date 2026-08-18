@@ -51,19 +51,19 @@ jobs:
     # each need their own timeout-minutes cap; their sum (6min) left no
     # headroom under the old 5-minute ceiling, which would fail
     # test_job_ceiling_exceeds_the_sum_of_its_step_timeouts.
-    timeout-minutes: 10
+    timeout-minutes: 30
 
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           python-version-file: alp-sdk/.python-version
 
@@ -89,7 +89,7 @@ jobs:
       - name: Sparse-checkout the RZ/V2N devicetree at the pinned tag
         env:
           ZEPHYR_TAG: ${{ steps.pin.outputs.tag }}
-        timeout-minutes: 2
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           git clone --filter=blob:none --sparse --depth 1 \

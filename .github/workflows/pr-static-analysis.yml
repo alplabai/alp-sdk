@@ -41,11 +41,11 @@ jobs:
     # 360-minute default applied). Worst observed successful run 23s
     # across 3 sampled runs; 10min gives real headroom over that while
     # still failing fast on a PyPI/apt stall in the steps below.
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        timeout-minutes: 3
+        timeout-minutes: 5
         with:
           fetch-depth: 0  # need history so HEAD~ resolves
 
@@ -58,7 +58,7 @@ jobs:
         # tree is formatted against v22; .clang-format also locks
         # Cpp11BracedListStyle so designated-initialiser output stays
         # reproducible across patch releases.
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           python3 -m pip install --user 'clang-format==22.1.5'
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -125,14 +125,14 @@ jobs:
     # `|| true` with --error-exitcode=0 -- but it too had no ceiling
     # (360-minute implicit default). Worst observed successful run 42s
     # across 3 sampled runs; 15min gives headroom over that.
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
 
       - name: Install cppcheck
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y cppcheck

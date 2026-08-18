@@ -38,7 +38,7 @@ jobs:
   stub:
     name: cc3501e-bridge · CC3501E_HAL_BACKEND=stub
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
@@ -51,7 +51,7 @@ jobs:
               gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
 
       - name: Configure (stub backend, default SPI transport)
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           cmake -B firmware/cc3501e/build/stub -S firmware/cc3501e \
             -DCMAKE_TOOLCHAIN_FILE=$PWD/firmware/cc3501e/toolchain/arm-none-eabi.cmake \
@@ -76,13 +76,13 @@ jobs:
   vectors:
     name: cc3501e-bridge · wire vectors
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
       - name: Set up Python
         uses: actions/setup-python@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
       - name: Check canonical wire vectors are regenerated

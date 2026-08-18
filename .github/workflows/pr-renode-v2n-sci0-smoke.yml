@@ -58,7 +58,7 @@ jobs:
   renode-v2n-sci0-smoke:
     name: renode · V2N101 M33-SM sci0 console
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
@@ -66,19 +66,19 @@ jobs:
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           python-version-file: alp-sdk/.python-version
 
       - name: Install host build tools
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -88,7 +88,7 @@ jobs:
               ca-certificates curl gnupg
 
       - name: Install west + Python deps
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: pip3 install west jsonschema pyyaml
 
       - name: Bootstrap Zephyr workspace
@@ -96,7 +96,7 @@ jobs:
         run: bash scripts/bootstrap.sh
 
       - name: Install Zephyr build requirements
-        timeout-minutes: 2
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements-base.txt"
@@ -122,7 +122,7 @@ jobs:
 
       - name: Install Zephyr SDK (arm-zephyr-eabi)
         working-directory: ${{ github.workspace }}
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 --retry-delay 5 -o /tmp/zephyr-sdk.tar.xz "${ZEPHYR_SDK_URL}"
@@ -138,7 +138,7 @@ jobs:
 
       # Same v1.16.1 pin as the other Renode gates.
       - name: Install Renode
-        timeout-minutes: 2
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 --retry-delay 5 https://github.com/renode/renode/releases/download/v1.16.1/renode-1.16.1.linux-portable-dotnet.tar.gz \

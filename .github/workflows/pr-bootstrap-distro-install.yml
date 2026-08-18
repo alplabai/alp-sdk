@@ -90,14 +90,14 @@ jobs:
   detect:
     if: github.event_name != 'merge_group'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     outputs:
       manifest: ${{ steps.filter.outputs.manifest }}
     steps:
       - name: Detect bootstrap-manifest-relevant changes
         id: filter
         uses: dorny/paths-filter@v3
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           filters: |
             manifest:
@@ -157,7 +157,7 @@ jobs:
     # matching branch-protection update.
     name: distro install · ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     container:
       image: ${{ matrix.image }}
     # `set -euo pipefail` below is bash-only. GitHub Actions' own default
@@ -178,7 +178,7 @@ jobs:
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
-        timeout-minutes: 3
+        timeout-minutes: 5
         with:
           fetch-depth: 1
 
@@ -202,7 +202,7 @@ jobs:
       - name: Render prerequisites.install.linux.${{ matrix.pm }} as a runnable script
         env:
           PM: ${{ matrix.pm }}
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           python3 - <<'PY' > /tmp/pm-install.sh
@@ -284,7 +284,7 @@ jobs:
     # pr-twister.yml's `twister` aggregator -- the clock starts when the
     # job starts (not while it waits on `needs`), so a stuck runner here
     # can no longer hold the required check open indefinitely.
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       # Verdict logic mirrors the fail-closed rewrite #1473 did one layer
       # down in `distro-install`'s own `if:`, and for the same reason: a

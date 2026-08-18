@@ -57,6 +57,7 @@ Run locally:
 """
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -161,17 +162,57 @@ _workflows = pytest.mark.parametrize(
 )
 
 
-def test_there_are_workflows_to_glob() -> None:
-    """Guard against the guard (#1477): if `_workflow_files()` ever
-    returns too few files -- a typo'd glob, a directory move, `.yml` files
-    all renamed to `.yaml` and only one extension globbed -- every test
-    below parametrized over `WORKFLOWS` would silently shrink or vanish
-    with it, and the suite would stay green while covering less than it
-    did yesterday. Same idiom as
-    `test_workflows_are_loadable.py::test_there_are_workflows_to_check`.
-    The repo has ~29-30 workflow files as of #1477; >=25 leaves room to
-    add or remove a handful without this test itself needing edits."""
-    assert len(WORKFLOWS) >= 25, f"expected >=25 workflow files, found {len(WORKFLOWS)} -- glob has drifted"
+def _git_tracked_workflows() -> list[str] | None:
+    """The workflow filenames git itself tracks, or None if git cannot
+    answer (no binary, not a checkout, a tarball export)."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(REPO), "ls-files", "--",
+             ".github/workflows/*.yml", ".github/workflows/*.yaml"],
+            capture_output=True, text=True, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return sorted(Path(line).name for line in proc.stdout.split("\n") if line.strip())
+
+
+def test_the_glob_sees_every_workflow_git_tracks() -> None:
+    """Guard against the guard (#1477): if `_workflow_files()` ever returns
+    too few files -- a typo'd glob, a directory move, `.yml` files all
+    renamed to `.yaml` with only one extension globbed -- every test below
+    parametrized over `WORKFLOWS` would silently shrink or vanish with it,
+    and the suite would stay green while covering less than it did
+    yesterday.
+
+    This cross-checks the glob against git's own view of the directory
+    rather than against a hardcoded count. The count form (`>= 25`, as this
+    shipped) cannot tell a BROKEN GLOB from a repo that legitimately got
+    smaller: retiring Renode deleted the four `pr-renode-*.yml` workflows
+    and took the tree to exactly 25, so the next deliberate deletion would
+    have failed here claiming "glob has drifted" -- blaming the glob for a
+    real shrink, and inviting whoever hit it to just lower the number
+    again.
+
+    The comparison is deliberately one-directional: every tracked workflow
+    must appear in the glob, but the glob may hold MORE. A file that is new
+    and not yet `git add`ed is a normal state mid-edit and must not fail
+    the suite, whereas a tracked file the glob cannot see is the failure
+    this test exists to catch. Absence is the dangerous direction.
+    """
+    tracked = _git_tracked_workflows()
+    if tracked is None:
+        pytest.skip("git unavailable -- cannot cross-check the glob against the index")
+    assert tracked, (
+        f"git tracks no workflow files under .github/workflows/ in {REPO} -- either the "
+        f"directory moved or this is not the alp-sdk checkout; every test parametrized "
+        f"over WORKFLOWS would be vacuous")
+    globbed = {path.name for path in WORKFLOWS}
+    missing = [name for name in tracked if name not in globbed]
+    assert not missing, (
+        f"_workflow_files() misses {len(missing)} workflow(s) git tracks: {missing}. "
+        f"Every test parametrized over WORKFLOWS silently stops covering them, and the "
+        f"suite stays green while checking less than it did before (#1477)")
 
 
 @_workflows

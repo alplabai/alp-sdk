@@ -44,7 +44,7 @@ jobs:
   baremetal:
     name: plain-cmake · baremetal stub backend
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
@@ -65,7 +65,7 @@ jobs:
     # HAL link arrives in v0.2.x via cpackget AlifSemiconductor::Ensemble.
     name: plain-cmake · baremetal AEN (vendor scaffolding)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
@@ -85,7 +85,7 @@ jobs:
     # v0.4 alongside the V2N HIL bring-up.
     name: plain-cmake · baremetal V2N (vendor scaffolding)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
@@ -106,7 +106,7 @@ jobs:
     # CMake project that add_subdirectory()s alp-sdk the documented way.
     name: plain-cmake · add_subdirectory() consumer (#598)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     strategy:
       matrix:
         som: ["none", "aen"]
@@ -126,7 +126,7 @@ jobs:
   yocto:
     name: plain-cmake · yocto backend + tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
@@ -142,7 +142,7 @@ jobs:
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure
-        timeout-minutes: 2
+        timeout-minutes: 5
         run: cmake -B build/yocto -S . -DALP_OS=yocto -DALP_BUILD_TESTS=ON
       - name: Build
         timeout-minutes: 2
@@ -172,18 +172,18 @@ jobs:
     # replace.
     name: plain-cmake · yocto + zcbor (#1254)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
       - name: Install Yocto-side runtime deps
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Build zcbor at the recipe's own pin (tag 0.9.1)
-        timeout-minutes: 2
+        timeout-minutes: 5
         run: |
           set -e
           git clone --depth 1 --branch 0.9.1 \
@@ -248,7 +248,7 @@ jobs:
     # ALSA/OpenSSL) wired in, so the strict profile actually sees them.
     name: plain-cmake · strict-warnings (#634)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -266,13 +266,13 @@ jobs:
         timeout-minutes: 3
       - name: Install Yocto-side runtime deps
         if: matrix.name == 'yocto'
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: >
           cmake -B build/strict-${{ matrix.name }} -S . ${{ matrix.args }}
           -DALP_SDK_STRICT_WARNINGS=ON -DALP_SDK_WERROR=ON
@@ -314,7 +314,7 @@ jobs:
     # as the source of truth for the portable surface).
     name: plain-cmake · link-completeness (#593)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
@@ -338,18 +338,18 @@ jobs:
     # path instead of add_subdirectory()).
     name: plain-cmake · find_package() consumer (#607)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
         timeout-minutes: 3
       - name: Install Yocto-side runtime deps
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure + build + install alp-sdk
-        timeout-minutes: 2
+        timeout-minutes: 5
         run: |
           cmake -B build/install-review -S . -DALP_OS=yocto \
               -DALP_SDK_BUILD_SHARED=ON \

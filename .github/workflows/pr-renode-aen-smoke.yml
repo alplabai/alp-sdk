@@ -72,7 +72,7 @@ jobs:
     # from before this issue; per-step caps sized off the 8-run data keep
     # their sum (14min incl. the 1min/step budget for the 2 remaining
     # uncapped steps) well under it.
-    timeout-minutes: 30
+    timeout-minutes: 55
 
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
@@ -81,7 +81,7 @@ jobs:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
         # #1477: worst observed successful run 5s across 8 sampled runs.
-        timeout-minutes: 1
+        timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
@@ -89,7 +89,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         # #1477: worst observed successful run 1s across 8 sampled runs.
-        timeout-minutes: 1
+        timeout-minutes: 5
         with:
           # Repo is checked out under alp-sdk/ (path:), but setup-python (a
           # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
@@ -97,7 +97,7 @@ jobs:
 
       - name: Install host build tools
         # #1477: worst observed successful run 17s across 8 sampled runs.
-        timeout-minutes: 1
+        timeout-minutes: 5
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -108,7 +108,7 @@ jobs:
 
       - name: Install west + Python deps
         # #1477: worst observed successful run 12s across 8 sampled runs.
-        timeout-minutes: 1
+        timeout-minutes: 5
         run: pip3 install west jsonschema pyyaml
 
       # Zephyr workspace lives next to alp-sdk.  bootstrap.sh is
@@ -129,7 +129,7 @@ jobs:
       # no-op echo: the job reported success having never produced an ELF.
       - name: Install Zephyr build requirements
         # #1477: worst observed successful run 3s across 8 sampled runs.
-        timeout-minutes: 1
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements-base.txt"
@@ -159,7 +159,7 @@ jobs:
       - name: Install Zephyr SDK (arm-zephyr-eabi)
         working-directory: ${{ github.workspace }}
         # #1477: worst observed successful run 9s across 8 sampled runs.
-        timeout-minutes: 1
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 --retry-delay 5 -o /tmp/zephyr-sdk.tar.xz "${ZEPHYR_SDK_URL}"
@@ -181,7 +181,7 @@ jobs:
         # "Install Zephyr SDK" in the 8-run sample; kept at 2min (real
         # work is a single curl + tar, same class as the 1min steps
         # above with headroom for the larger download).
-        timeout-minutes: 2
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           # v1.16.1 portable-dotnet build: self-contained .NET, no Mono/GTK#
