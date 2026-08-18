@@ -545,9 +545,10 @@ human-readable cause chain.
 # AEN (E1M-AEN801 M55): build every slice + flash over SWD, one line.
 cd examples/peripheral-io/gpio-button-led && tan build && tan flash
 
-# V2N helper MCU (GD32 bridge): the preset carries no `flash_method`
-# (only `flash_policy: recovery_only` + `update_channel:
-# alp_ota_spi_bridge`), so both commands below SKIP today -- GD32
+# V2N helper MCU (GD32 bridge): `flash_policy: recovery_only` is
+# checked ahead of any `flash_method` presence
+# (python/tan/core/flash_plan.py::helper_flash_gate, tan-cli#611), so
+# both commands below SKIP today without `--recover` -- GD32
 # programming was separated out of `tan` (#1439, tan-cli#732); see
 # docs/gd32-bridge.md for the out-of-`tan` bricked-bridge recovery path.
 tan flash examples/v2n/v2n-gd32-bridge-functional --helper gd32_bridge --dry-run

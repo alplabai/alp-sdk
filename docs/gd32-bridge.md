@@ -161,7 +161,7 @@ flash: helper 'gd32_bridge' is programmed by Alp Lab in production
 and is customer-flashable only to recover a bricked device, with Alp
 Lab-supplied binaries; skipping. Field updates arrive over
 update_channel: alp_ota_spi_bridge. To recover a bricked device
-deliberately, re-run with --helper gd32_bridge --recover.
+deliberately, re-run with `--helper gd32_bridge --recover`.
 ```
 
 status `skipped`, rc `-1` -- never a run failure.  `tan` DOES expose
@@ -209,11 +209,12 @@ out-of-`tan` path, selection by serial alone is ambiguous between the
 two probes, and the write can land on whichever of the two
 identically-serialled probes the tool resolves first, which may be the
 AEN E8, not the GD32.  Before flashing, run the same read-only
-preflight pattern `scripts/bench/aen/flash-jlink-mramxip.sh:100-118`
-uses (a `JLinkExe` script that does only `si SWD` / `speed` / `device`
-/ `connect`, no write commands) and read the reported SW-DP ID: the AEN
-E8's is bench-verified `0x4C013477` (see
-`scripts/bench/aen/bench-env.sh`'s `AEN_DPIDR`) -- if the probe that
+preflight pattern `scripts/bench/aen/flash-jlink-mramxip.sh`'s "0b.
+SAFETY GATE" block uses (a `JLinkExe` script that does only `si SWD` /
+`speed` / `device` / `connect`, no write commands) and read the
+reported SW-DP ID via `scripts/bench/aen/bench-env.sh`'s
+`bench_jlink_assert_aen_dpidr`: the AEN E8's is bench-verified
+`0x4C013477` (see that same file's `AEN_DPIDR`) -- if the probe that
 answers is the AEN E8, the resolved adapter is the wrong one and the
 run must stop before any write.  Neither GD32 candidate ID
 (`0x6BA02477` / `0x0BE12477`) is itself bench-measured yet, so this

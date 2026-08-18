@@ -276,7 +276,7 @@ helper_firmware:
     # production and is customer-flashable only to recover a bricked
     # device...; skipping.  Field updates arrive over update_channel:
     # alp_ota_spi_bridge.  To recover a bricked device deliberately, re-run
-    # with --helper gd32_bridge --recover.` (status `skipped`, rc `-1` --
+    # with `--helper gd32_bridge --recover`.` (status `skipped`, rc `-1` --
     # see docs/gd32-bridge.md's "Who flashes it, and when" section) rather
     # than spawning a real flasher against a nonexistent `TBD` path -- see
     # docs/v0.6-tbd-and-assumptions.md §1.4.
