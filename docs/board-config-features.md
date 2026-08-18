@@ -284,7 +284,12 @@ label:
 * `mram_main` -- no AEN preset declares a `dt_label:` override for it, so
   it falls back to a Devicetree label of `mram_main`, but the generated
   board tree never defines that node, only `mram_storage` (`grep -rn
-  mram_main zephyr/` returns nothing).
+  mram_main zephyr/` returns nothing). Even a verified label would not
+  help: `mram_main` is 100% tiled on all six AEN presets (`mcuboot` +
+  `he_slot0` + `hp_slot0` + `reserved` + `storage` + `atoc`, all
+  `carveout: false`, summing to exactly its own 5632 KiB capacity), so
+  a `storage:` entry targeting it always resolves `status: blocked`,
+  never `status: ok`, regardless of the label.
 * an `on_module.ospi_memories:` entry (e.g. `ospi0`) -- despite the name
   matching a controller node 1:1 on paper, `ospi0` is the ONLY `ospi<n>`
   label anywhere under `zephyr/`
