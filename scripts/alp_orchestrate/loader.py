@@ -316,9 +316,12 @@ def _resolve_slot0_load_address(
     -- there is nothing here for a test to keep in sync by hand. Applies
     uniformly to EVERY role in the no-override case (not just `he`): the
     stock layout has exactly one slot0 window, and whichever M55 core a
-    SoM boots lands on it -- including `m55_hp` on the single-M55
-    E1M-AEN401/E1M-AEN601 boards, the case a role-keyed (`he`-only)
-    fallback would still refuse.
+    SoM boots lands on it -- including an `m55_hp` that boots alone, the
+    case a role-keyed (`he`-only) fallback would still refuse. (This
+    sentence used to call E1M-AEN401/E1M-AEN601 "single-M55"; both are
+    DUAL-M55 -- see the paragraph below -- and #1446 cites that wrong
+    clause as the justification for having put two cores' slot0 at one
+    address until #1445.)
 
     E1M-AEN401/E1M-AEN601 declare BOTH `m55_hp` and `m55_he` in
     `topology:` (only the HP board's Zephyr tree is generated today --
@@ -330,8 +333,11 @@ def _resolve_slot0_load_address(
     by a FUTURE AEN variant that publishes `jlink_flash_device` without
     also declaring a disjoint-slot0 override -- `_validate_topology_cores`
     only calls this resolver once the SoC variant publishes
-    `jlink_flash_device`, and every AEN variant that does today (AEN801,
-    AEN401, AEN601) already declares the override. That residual risk is
+    `jlink_flash_device`, and every AEN preset already declares the
+    override. (Do not read that as a list of the variants which publish
+    `jlink_flash_device`: E4 does not -- `metadata/socs/alif/ensemble/
+    e4.json` declares `"jlink_flash_device": null`, so AEN401 never
+    reaches this resolver -- while E3/E5/E7 do, for AEN301/AEN501/AEN701.) That residual risk is
     tracked, not silently accepted: #1384.
     """
     if not core_id.startswith("m55_"):

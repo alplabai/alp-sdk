@@ -99,7 +99,7 @@ def _boot_target_is_single_slot(project: BoardProject) -> bool:
     and a real scratch partition.  `_aen_role_slot0_map` asks the real
     question instead: does THIS role have its own `<role>_slot0`
     region (the only shape that drops slot1/scratch, #1069 --
-    E1M-AEN801, E1M-AEN401 and E1M-AEN601 all set one: each SoM's
+    every AEN preset sets one: each SoM's
     M55 cores share one physical App MRAM, so slot0 is split into
     per-core windows and the secondary/scratch slot was dropped
     rather than forced to fit)?
