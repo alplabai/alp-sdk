@@ -156,7 +156,7 @@ jobs:
     # 10->25 raise). timeout-minutes unchanged from before this issue;
     # its 9 flagged steps are each 1min below (sum 9min, real headroom
     # under 10).
-    timeout-minutes: 10
+    timeout-minutes: 30
     container:
       image: ubuntu:24.04
     steps:
@@ -167,9 +167,11 @@ jobs:
       # premise: if these ever stop being absent (a base-image change
       # upstream), this job silently stops testing what it claims to.
       - name: Assert the base image is actually bare (git/curl/cmake/python3/ninja/xz/wget absent)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         shell: bash
         # #1477: worst observed successful run <1s across 30 sampled runs.
-        timeout-minutes: 1
         run: |
           set -uo pipefail
           missing=0
@@ -184,7 +186,7 @@ jobs:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
         # #1477: worst observed successful run 4s across 30 sampled runs.
-        timeout-minutes: 1
+        timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
@@ -193,20 +195,24 @@ jobs:
       # quickstart -- `git`/`curl` first, since bootstrap.sh itself
       # can't be fetched without them.
       - name: Install git + curl (docs/getting-started.md's own prerequisite note)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # #1477: worst observed successful run 38s across 30 sampled runs
         # -- the worst step in this job; still fits the 1min budget.
-        timeout-minutes: 1
         run: |
-          apt-get update -o Acquire::Retries=3
-          apt-get install -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates
+          apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
+          apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates
 
       # scripts/bootstrap.sh should refuse HERE (cmake/python3/ninja/xz/wget
       # still absent) with a curated per-tool install hint, not a bare
       # tool-name list -- the exact defect #949 addendum item 2 fixes.
       - name: bootstrap.sh refuses with an actionable per-tool hint (expect failure)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         working-directory: alp-sdk
         # #1477: worst observed successful run <1s across 30 sampled runs.
-        timeout-minutes: 1
         run: |
           set +e
           out="$(bash scripts/bootstrap.sh 2>&1)"
@@ -246,10 +252,12 @@ jobs:
       # first place -- see docs/getting-started.md:194 for the source of
       # truth this must keep matching).
       - name: Install prerequisites (docs/getting-started.md section 1's Debian/Ubuntu one-liner, verbatim)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # #1477: worst observed successful run 14s across 30 sampled runs.
-        timeout-minutes: 1
         run: |
-          apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
               cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
 
       - name: bootstrap.sh succeeds once every prerequisite is installed
@@ -262,7 +270,7 @@ jobs:
         # venv + prerequisite layer alone, not re-proving west.yml
         # resolves (pr-twister.yml already covers that on every PR).
         # #1477: worst observed successful run 14s across 30 sampled runs.
-        timeout-minutes: 1
+        timeout-minutes: 5
         run: |
           # set -e (not set -euo pipefail) is deliberate here: the refusal
           # step above (line ~131) captures rc/output BEFORE dying for the
@@ -295,8 +303,10 @@ jobs:
       # kept out of the "Install prerequisites" step above so that step
       # stays an honest mirror of docs/getting-started.md's own one-liner.
       - name: Install shellcheck
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # #1477: worst observed successful run <5s across 30 sampled runs.
-        timeout-minutes: 1
         run: apt-get install -y --no-install-recommends shellcheck
 
       # #1024: scripts/bootstrap.sh IS already shellchecked -- but only by
@@ -310,10 +320,12 @@ jobs:
       # stage_shellcheck's own severity for non-test-all.sh scripts, so
       # this does not diverge from the local gate's bar.
       - name: Shellcheck scripts/bootstrap.sh + tan-cli's install.sh
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         working-directory: alp-sdk
         shell: bash
         # #1477: worst observed successful run <5s across 30 sampled runs.
-        timeout-minutes: 1
         run: |
           set -euo pipefail
           shellcheck -S error scripts/bootstrap.sh
@@ -332,9 +344,11 @@ jobs:
       # it here too costs nothing extra and closes that window to every
       # relevant PR.
       - name: Smoke-run the published release installer on this bare container
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         shell: bash
         # #1477: worst observed successful run <5s across 30 sampled runs.
-        timeout-minutes: 1
         run: |
           set +e
           out="$(curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh -s -- --dir /tmp/tan-smoke-bin --no-modify-path 2>&1)"
@@ -355,12 +369,12 @@ jobs:
     name: onramp · macos-latest -- prereqs + bootstrap.sh --no-west (docs §1, #1033)
     if: github.event_name != 'schedule'
     runs-on: macos-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
         # #1477: worst observed successful run 4s across 30 sampled runs.
-        timeout-minutes: 1
+        timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
@@ -413,8 +427,10 @@ jobs:
       # than silently degrading to a no-op on a runner image that moved
       # Homebrew somewhere this loop doesn't check.
       - name: Hide xz + wget (and prove neither remains resolvable)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         shell: bash
-        timeout-minutes: 2
         run: |
           set -euo pipefail
           for bin in xz wget; do
@@ -442,9 +458,11 @@ jobs:
       # python3 ninja) on Darwin -- this must succeed with xz/wget
       # unreachable, and must not name either as missing.
       - name: bootstrap.sh --no-west succeeds on macOS without xz/wget
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         working-directory: alp-sdk
         shell: bash
-        timeout-minutes: 3
         run: |
           set +e
           out="$(bash scripts/bootstrap.sh --no-west 2>&1)"
@@ -519,21 +537,23 @@ jobs:
       # mirrors prereqs-and-bootstrap's own "Install git + curl" /
       # "Install prerequisites" split above.
       - name: Install checkout prerequisites (git/curl/ca-certificates -- not part of docs/getting-started.md section 1)
-        timeout-minutes: 3
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
-          apt-get update -o Acquire::Retries=3
-          apt-get install -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates
+          apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
+          apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates
 
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
-        timeout-minutes: 3
+        timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Checkout tan-cli Python port
         uses: actions/checkout@v6
-        timeout-minutes: 3
+        timeout-minutes: 5
         with:
           repository: alplabai/tan-cli
           ref: dev
@@ -545,15 +565,19 @@ jobs:
       # here anyway so this stays a mirror of the doc and any future
       # divergence between the two reddens this job).
       - name: Install prerequisites (docs/getting-started.md section 1's Debian/Ubuntu one-liner, verbatim)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # #1477: worst observed successful run 14s across 30 sampled runs.
-        timeout-minutes: 1
         run: |
-          apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
               cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
 
       - name: Install tan-cli/dev (docs quickstart step 2)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         shell: bash
-        timeout-minutes: 3
         run: |
           set -euo pipefail
           python3 -m venv tan-cli/.venv
@@ -602,7 +626,7 @@ jobs:
       - name: Cache Zephyr SDK (arm-zephyr-eabi only)
         uses: actions/cache@v5
         id: zephyr-sdk-cache
-        timeout-minutes: 3
+        timeout-minutes: 15
         with:
           path: zephyr-sdk
           key: onramp-sdk-${{ env.ZEPHYR_SDK_VERSION }}-arm-zephyr-eabi-${{ runner.os }}
@@ -627,7 +651,7 @@ jobs:
         # builtin and this container's /bin/sh is dash, which has `.` instead
         # and answers `source: not found` with exit 127 before west is reached.
         shell: bash
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           source .venv/bin/activate
           west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \

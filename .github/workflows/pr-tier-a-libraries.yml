@@ -64,7 +64,7 @@ jobs:
   compute-family-matrix:
     name: tier-a-libraries · compute family matrix
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 25
 
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
@@ -75,14 +75,14 @@ jobs:
       # step here -- same reasoning as tier-a-library-build's caps below.
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           python-version-file: alp-sdk/.python-version
 
@@ -119,14 +119,14 @@ jobs:
       # this job already caps.
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           python-version-file: alp-sdk/.python-version
 
@@ -143,10 +143,12 @@ jobs:
       # stays under the job's 45-minute ceiling so a step running late can
       # still be killed by its own timeout first.
       - name: Install host build tools
-        timeout-minutes: 8
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
               ninja-build gperf ccache dfu-util device-tree-compiler \
               python3-dev python3-pip python3-setuptools python3-wheel \
               libffi-dev libssl-dev xz-utils file make gcc gcc-multilib \
@@ -155,7 +157,9 @@ jobs:
       # #1274: same failure class as "Install host build tools" above
       # (PyPI/mirror stall), same job, and it runs before the build.
       - name: Install west
-        timeout-minutes: 2
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip3 install west
 
       # #1274: `west update` fetches every Zephyr module over the network,
@@ -180,7 +184,7 @@ jobs:
       # 3min = 180s = 2.9x headroom.
       - name: Cache Zephyr modules
         uses: actions/cache@v5
-        timeout-minutes: 3
+        timeout-minutes: 5
         with:
           path: |
             ${{ github.workspace }}/zephyrproject/modules
@@ -189,7 +193,7 @@ jobs:
 
       - name: Cache ccache objects
         uses: actions/cache@v5
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ runner.os }}-tier-a-${{ matrix.som }}-${{ github.sha }}
@@ -197,8 +201,10 @@ jobs:
             ccache-${{ runner.os }}-tier-a-${{ matrix.som }}-
 
       - name: pip install Zephyr + alp-sdk requirements
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         working-directory: ${{ github.workspace }}/zephyrproject
-        timeout-minutes: 3
         run: |
           pip3 install -r zephyr/scripts/requirements.txt
           pip3 install jsonschema pyyaml
@@ -266,7 +272,7 @@ jobs:
   cmsis-nn-metadata:
     name: tier-a-libraries · cmsis-nn metadata
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     steps:
       # #1274: same reasoning as compute-family-matrix's Checkout/Set up
@@ -274,14 +280,14 @@ jobs:
       # round trip and can stall.
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           python-version-file: alp-sdk/.python-version
 
@@ -289,7 +295,9 @@ jobs:
       # pip/apt/west steps -- an uncapped install here can still eat this
       # job's 10-minute ceiling and land the timeout on the pytest step below.
       - name: Install Python deps
-        timeout-minutes: 2
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip install click jsonschema pyyaml pytest
 
       # #1274: this job's `pytest` invocation is the only lane that runs
