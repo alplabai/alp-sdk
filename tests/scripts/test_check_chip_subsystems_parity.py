@@ -166,3 +166,72 @@ def test_real_tree_passes() -> None:
     """The real repo's _CHIP_SUBSYSTEMS is in parity today (issue #1487
     fixed) -- run against REPO itself, not a synthetic tree."""
     assert gate.find_problems(REPO) == []
+
+
+def test_multiple_depends_on_lines_union(tmp_path: Path) -> None:
+    """A block with TWO `depends on` lines (Kconfig permits ANDing them
+    across lines) must union both -- a table entry naming only one of the
+    two subsystems must fail, not silently pass with `.search()`'s
+    first-match-only behaviour (review finding on #1487)."""
+    _write_tree(
+        tmp_path,
+        "config ALP_SDK_CHIP_TWO_DEPS\n"
+        "\tbool \"driver\"\n"
+        "\tdepends on I2C\n"
+        "\tdepends on GPIO\n"
+        "\thelp\n"
+        "\t  text\n",
+        '    "two_deps": ("I2C",),\n',
+    )
+    problems = gate.find_problems(tmp_path)
+    assert len(problems) == 1
+    assert "two_deps" in problems[0]
+    assert "GPIO" in problems[0]
+
+    _write_tree(
+        tmp_path,
+        "config ALP_SDK_CHIP_TWO_DEPS\n"
+        "\tbool \"driver\"\n"
+        "\tdepends on I2C\n"
+        "\tdepends on GPIO\n"
+        "\thelp\n"
+        "\t  text\n",
+        '    "two_deps": ("I2C", "GPIO"),\n',
+    )
+    assert gate.find_problems(tmp_path) == []
+
+
+def test_intervening_if_block_does_not_donate_depends_on(tmp_path: Path) -> None:
+    """The CC3501E shape (chips.kconfig:128-153): a chip config (here with
+    NO `depends on` line of its own -- the case the old code's `.search()`
+    "first match wins" trick doesn't save) followed by `if <CHIP>` / a
+    sub-option config that DOES carry a `depends on` / `endif` before the
+    NEXT ALP_SDK_CHIP/BLOCK_ config. The sub-option's `depends on GPIO`
+    must NOT be attributed to the preceding chip -- the block must end at
+    the `if` line, not run on to the next CHIP/BLOCK config and pick up an
+    unrelated sub-option's dependency."""
+    _write_tree(
+        tmp_path,
+        "config ALP_SDK_CHIP_WITH_SUBOPT\n"
+        "\tbool \"driver\"\n"
+        "\thelp\n"
+        "\t  text\n"
+        "\n"
+        "if ALP_SDK_CHIP_WITH_SUBOPT\n"
+        "\n"
+        "config ALP_SDK_WITH_SUBOPT_TIMEOUT_MS\n"
+        "\tint \"timeout\"\n"
+        "\tdepends on GPIO\n"
+        "\tdefault 100\n"
+        "\n"
+        "endif # ALP_SDK_CHIP_WITH_SUBOPT\n"
+        "\n"
+        "config ALP_SDK_CHIP_LSM6DSO\n"
+        "\tbool \"driver\"\n"
+        "\tdepends on I2C\n"
+        "\thelp\n"
+        "\t  text\n",
+        '    "with_subopt": (),\n'
+        '    "lsm6dso": ("I2C",),\n',
+    )
+    assert gate.find_problems(tmp_path) == []

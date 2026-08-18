@@ -55,6 +55,13 @@ REPO = Path(__file__).resolve().parent.parent
 _CONFIG_RE = re.compile(r"^config ALP_SDK_(?:CHIP|BLOCK)_([A-Z0-9_]+)$", re.MULTILINE)
 _DEPENDS_RE = re.compile(r"^\s*depends on (.+)$", re.MULTILINE)
 _TOKEN_RE = re.compile(r"[A-Z][A-Z0-9_]*")
+# Any of these line-starts closes the current chip's block: another config
+# entry (whether or not it's an ALP_SDK_CHIP/BLOCK_ one -- an intervening
+# sub-option like `config ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS` must NOT
+# donate its (absent, here) `depends on` line to the preceding chip), or an
+# `if <chip>` / `endif` guard wrapping such a sub-option (chips.kconfig:128-153
+# has exactly this shape around ALP_SDK_CHIP_CC3501E).
+_BLOCK_END_RE = re.compile(r"^(?:config |if |endif\b)", re.MULTILINE)
 
 
 def _kconfig_subsystems(root: Path) -> dict[str, frozenset[str]]:
@@ -63,13 +70,17 @@ def _kconfig_subsystems(root: Path) -> dict[str, frozenset[str]]:
     text = path.read_text(encoding="utf-8")
     matches = list(_CONFIG_RE.finditer(text))
     result: dict[str, frozenset[str]] = {}
-    for i, m in enumerate(matches):
+    for m in matches:
         slug = m.group(1).lower()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        end_m = _BLOCK_END_RE.search(text, m.end())
+        end = end_m.start() if end_m else len(text)
         block = text[m.end():end]
-        dep_m = _DEPENDS_RE.search(block)
-        tokens = frozenset(_TOKEN_RE.findall(dep_m.group(1))) if dep_m else frozenset()
-        result[slug] = tokens
+        # Union every `depends on` line in the block, not just the first --
+        # Kconfig permits multiple ANDed `depends on` lines in one block.
+        tokens: set[str] = set()
+        for dep in _DEPENDS_RE.findall(block):
+            tokens.update(_TOKEN_RE.findall(dep))
+        result[slug] = frozenset(tokens)
     return result
 
 
