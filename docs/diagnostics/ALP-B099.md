@@ -9,15 +9,22 @@ specific codes -- `required` to
 `enum`/`pattern` to [ALP-B003](ALP-B003.md), `type` to [ALP-B004](ALP-B004.md)
 -- and ALP-B099 is the fallback for every other jsonschema `validator`
 keyword the schema currently uses (`minimum`/`maximum`, `minItems`,
-`uniqueItems`, `oneOf`/`anyOf`/`allOf`, `not`, `if`/`then`, and any other
-keyword a future schema revision adds). The `message` text is whatever
-`jsonschema` produced for that keyword, forwarded verbatim; there is no
-`hint`.
+`minProperties`, `uniqueItems`, `oneOf`, `not`, and any other keyword a
+future schema revision adds). `anyOf`, `allOf`, and `if`/`then` never reach
+ALP-B099: `board.schema.json`'s only `if`/`then` site
+(`board.schema.json:40-48`) surfaces its violation as `required` --
+[ALP-B001](ALP-B001.md) -- and its two `anyOf` sites
+(`board.schema.json:16`, `:41`) both sit inside a `not:`, which `jsonschema`
+evaluates with `is_valid()` rather than `iter_errors()` -- it never yields an
+`anyOf`/`allOf` error of its own, only the enclosing `not` (see the Cause
+bullet below). The `message` text is whatever `jsonschema` produced for the
+keyword that actually fired, forwarded verbatim; there is no `hint`.
 
 ## Cause
 
-- A value violates a numeric bound or array-size constraint in the schema
-  that isn't one of `required`/`additionalProperties`/`enum`/`pattern`/`type`
+- A value violates a numeric bound, array-size, or object-size constraint
+  (`minimum`/`maximum`, `minItems`, `minProperties`) in the schema that
+  isn't one of `required`/`additionalProperties`/`enum`/`pattern`/`type`
   (those four map to [ALP-B001](ALP-B001.md)-[ALP-B004](ALP-B004.md) instead).
 - A list that must have unique entries (`uniqueItems`) has a duplicate.
 - A block that must satisfy exactly one of several shapes (`oneOf`) matches
@@ -31,16 +38,17 @@ keyword a future schema revision adds). The `message` text is whatever
   should not be valid under {...}` -- the first `{...}` is the whole
   document (or matched sub-schema) as jsonschema saw it, the second is the
   sub-schema it wasn't supposed to satisfy; read the second `{...}`'s
-  `required`/`allOf` list to see which forbidden combination fired.
+  `required` list (the `os:` case) or `anyOf`/`allOf` list (the `preset:`
+  case) to see which forbidden combination fired.
 
 ## Diagnose
 
-Read-only; validates the file without touching the build:
+Read-only; validates the file without touching the build. Only the SDK's own
+CLI prints the full diagnostic frame with the `ALP-B099` code and the
+`= see:` pointer below:
 
 ```sh
-tan validate --board-yaml board.yaml
-# or, for the machine-readable form (LSP-style ranges):
-tan validate --format json --board-yaml board.yaml
+python3 -m alp_cli validate board.yaml
 ```
 
 The diagnostic points at the offending block and carries the raw
@@ -59,6 +67,32 @@ error[ALP-B099]: ['e1m-evk', 'e1m-evk'] has non-unique elements
 
 (`uniqueItems` fires on the array itself, so the reported position is the
 first key of the enclosing mapping rather than the `supported_boards:` line.)
+
+`tan validate --board-yaml board.yaml` runs that same validator as a
+subprocess. `tan` `v0.5.1` prints only the raw `jsonschema` message,
+no code:
+
+```
+validate: validation failure
+['e1m-evk', 'e1m-evk'] has non-unique elements
+```
+
+`tan` `v0.6.0-rc1` and `dev` (checked as `0.6.0-rc2.dev0`) prefix the code
+and add the `see:` pointer:
+
+```
+validate: validation failure
+ALP-B099: ['e1m-evk', 'e1m-evk'] has non-unique elements
+  see: docs/diagnostics/ALP-B099.md
+```
+
+`tan validate --format json --board-yaml board.yaml` carries a `tan`-own
+code in `issues[].code` (`validate.schema-violation`) and no LSP-style
+range. For the machine-readable form with ranges, use:
+
+```sh
+tan validate --format diagnostic-v1 --board-yaml board.yaml
+```
 
 Cross-check the field against
 [`metadata/schemas/board.schema.json`](../../metadata/schemas/board.schema.json)

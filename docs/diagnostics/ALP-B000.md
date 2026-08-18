@@ -33,6 +33,9 @@ precise position to:
 
 ```
 error[ALP-B000]: YAML parse error: mapping values are not allowed here
+  in "<unicode string>", line 2, column 20:
+      variant: e1m-x-v1: bogus
+                       ^
   --> board.yaml:1:1
    |
  1 | som:
@@ -46,18 +49,26 @@ embedded position, not the fixed `1:1` the diagnostic frame shows, to find
 the actual offending line.
 
 `tan validate --board-yaml board.yaml` (the default, SDK-spawning path) runs
-that same validator as a subprocess but forwards only its message text, not
-the code -- the `ALP-B000` code above never appears in its output. It prints:
+that same validator as a subprocess. Only `tan` `v0.5.1` and older drop the
+code and forward just the message text; `v0.6.0-rc1` and the `dev` line
+(checked as `0.6.0-rc2.dev0`) prefix the code back onto the message:
 
 ```
 validate: validation failure
-YAML parse error: mapping values are not allowed here
+ALP-B000: YAML parse error: mapping values are not allowed here
 ```
 
-`tan validate --format json --board-yaml board.yaml` and `--format
-diagnostic-v1` carry a `tan`-own code instead of `ALP-B000`
-(`validate.schema-violation` and `validate-schema-violation` respectively),
-neither with a `documentationUri`. `tan validate --offline --board-yaml
+(`tan` `v0.5.1` prints the same two lines minus the `ALP-B000: ` prefix on
+the second one.)
+
+`tan validate --format json --board-yaml board.yaml` still carries a
+`tan`-own code in `issues[].code` (`validate.schema-violation`), but on
+`v0.6.0-rc1`/`dev` its `message` is prefixed `ALP-B000: ` too. `tan validate
+--format diagnostic-v1 --board-yaml board.yaml` instead carries the exact
+SDK code, `"code": "ALP-B000"` -- no `tan`-own substitute there -- on both
+`v0.6.0-rc1` and `dev`. Neither `--format` carries a `documentationUri` for
+this code: the YAML-parse-failure path never reaches the SDK's rich
+diagnostic object that carries one. `tan validate --offline --board-yaml
 board.yaml` hits the same parse failure through tan's own structural
 pre-parse and also has no `ALP-B000` code anywhere in its output; it prints:
 
