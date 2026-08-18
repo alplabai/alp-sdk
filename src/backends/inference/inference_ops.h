@@ -94,22 +94,31 @@ struct alp_inference {
 	 * single LDR/STR, exactly like active_ops/lifecycle below), so
 	 * __atomic_store_n/__atomic_load_n on this field compiles to plain
 	 * instructions with no libcall. The tradeoff is range: values
-	 * saturate at UINT32_MAX us (~4294.967295 s, ~71.58 minutes) --
-	 * see alp_inference_last_invoke_latency_us()'s header doc
+	 * saturate at UINT32_MAX - 1 us (~4294.967294 s, just under the
+	 * ~71.58-minute field ceiling) -- see
+	 * alp_inference_last_invoke_latency_us()'s header doc
 	 * (<alp/inference.h>) for the ceiling and the saturate-not-wrap
-	 * behaviour. UINT32_MAX doubles as the "no successful invoke yet"
-	 * sentinel (a real invoke can plausibly hit UINT32_MAX-1 us but
-	 * hitting the exact all-ones value and being misread as
-	 * NOT_READY is not worth guarding -- a wall-clock invoke pinned to
-	 * that specific microsecond is not a value one is exactly on the
-	 * ceiling); alp_inference_last_invoke_latency_us()
-	 * (src/inference_dispatch.c) translates that sentinel to
-	 * ALP_ERR_NOT_READY at the public API boundary rather than
-	 * exposing it.  The claim-time memset in _alloc() zeroes this
-	 * field along with everything else before in_use, so
-	 * alp_inference_open() must explicitly (re)set it to UINT32_MAX
-	 * once the handle is claimed -- a fresh handle must read
-	 * NOT_READY, not "0 us". active_ops permits concurrent ops on one
+	 * behaviour. UINT32_MAX itself is RESERVED as the "no successful
+	 * invoke yet" sentinel and deliberately never written by a real
+	 * measurement: src/inference_dispatch.c's alp_inference_invoke()
+	 * clamps any duration that reaches the raw UINT32_MAX ceiling down
+	 * to UINT32_MAX - 1, precisely so a genuinely saturated reading
+	 * stays distinguishable from "never invoked" instead of colliding
+	 * with it (an earlier version of this field clamped to UINT32_MAX
+	 * and reasoned the exact-all-ones coincidence "wasn't worth
+	 * guarding" -- wrong: the clamp itself made the WHOLE tail
+	 * [UINT32_MAX, inf) of measured durations land on that value, not
+	 * a 1-in-2^32 coincidence, so every one of them silently read back
+	 * as ALP_ERR_NOT_READY with *out_us never written). With the
+	 * UINT32_MAX - 1 clamp, alp_inference_last_invoke_latency_us()
+	 * (src/inference_dispatch.c) can treat UINT32_MAX as an
+	 * unambiguous sentinel and translate it to ALP_ERR_NOT_READY at
+	 * the public API boundary without ever misreading a real
+	 * (saturated) measurement that way. The claim-time memset in
+	 * _alloc() zeroes this field along with everything else before
+	 * in_use, so alp_inference_open() must explicitly (re)set it to
+	 * UINT32_MAX once the handle is claimed -- a fresh handle must
+	 * read NOT_READY, not "0 us". active_ops permits concurrent ops on one
 	 * handle (it is a drain counter, not a mutex -- see
 	 * alp_slot_claim.h), so a concurrent invoke()-writer and
 	 * latency-reader is a real interleaving: always access this field

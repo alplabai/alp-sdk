@@ -377,29 +377,85 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf);
  *                     @c __atomic_load_n to a libatomic call, and the
  *                     Zephyr SDK's arm-zephyr-eabi toolchain ships no
  *                     libatomic -- every Cortex-M app failed to link).
- *                     A duration exceeding @c UINT32_MAX microseconds
- *                     (4294967295 us, ~71.58 minutes) therefore
- *                     SATURATES at @c UINT32_MAX rather than wrapping
- *                     -- implausible for one invoke in practice, but
- *                     the honest ceiling. On a target without
- *                     @c CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER the
- *                     underlying hardware cycle counter wraps modulo
- *                     2^32 cycles first (depends on
- *                     @c CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC -- e.g.
- *                     ~10.74 s at 400 MHz), which is the tighter of the
- *                     two limits on such a target; on
+ *                     A duration exceeding @c UINT32_MAX - 1
+ *                     microseconds (4294967294 us, just under
+ *                     ~71.58 minutes) therefore SATURATES at
+ *                     @c UINT32_MAX - 1 rather than wrapping -- the
+ *                     raw @c UINT32_MAX value is reserved as the "no
+ *                     successful invoke yet" sentinel (see
+ *                     @ref ALP_ERR_NOT_READY below) and is never
+ *                     returned as a measured duration, so the ceiling
+ *                     is one microsecond short of the field's true
+ *                     numeric range. Saturating here is implausible
+ *                     for one invoke in practice, but it is the
+ *                     honest, OBSERVABLE ceiling: a caller reads
+ *                     @c ALP_OK plus this saturated value, not
+ *                     @ref ALP_ERR_NOT_READY.
+ *
+ *                     A second, TIGHTER, and considerably more
+ *                     dangerous limit sits in front of that one on a
+ *                     target without
+ *                     @c CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER: the
+ *                     underlying hardware cycle counter itself wraps
+ *                     modulo 2^32 cycles first (depends on
+ *                     @c CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC), and this
+ *                     accessor has no way to detect that wrap -- unlike
+ *                     the 32-bit storage ceiling above, which fails
+ *                     safe (a saturated value that reads back as
+ *                     implausibly huge), a wrapped cycle-counter delta
+ *                     produces a plausible-looking, too-small duration
+ *                     reported with @c ALP_OK, not an error. Zephyr's
+ *                     @c CORTEX_M_SYSTICK_64BIT_CYCLE_COUNTER Kconfig
+ *                     (which a plain Cortex-M SysTick target's
+ *                     @c CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER depends
+ *                     on) defaults to `y` only when
+ *                     @c CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC exceeds
+ *                     60 MHz, so under STOCK Kconfig the 32-bit-counter
+ *                     fallback this paragraph describes only actually
+ *                     compiles in on a target clocked at 60 MHz or
+ *                     below, where the wrap ceiling is
+ *                     >= ~71.58 s (2^32 cycles / 60 MHz) -- a
+ *                     400 MHz target left at Kconfig defaults selects
+ *                     the 64-bit counter instead and never hits this
+ *                     wrap at all; "~10.74 s at 400 MHz" (a naive
+ *                     2^32-cycles-at-400 MHz calculation) is not a
+ *                     combination stock Kconfig produces. On
  *                     @c CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER targets
- *                     (e.g. the E1M-AEN801 M55 cores) the 32-bit
- *                     storage ceiling above is the binding one. The
- *                     Yocto/A-class dispatcher has neither limit
- *                     (native 64-bit atomics on x86-64/aarch64, a
- *                     64-bit @c CLOCK_MONOTONIC nanosecond delta).
+ *                     (e.g. the E1M-AEN801 M55 cores, and any target
+ *                     with an ARM architected/GIC timer, which selects
+ *                     this Kconfig unconditionally) the wrap limit
+ *                     does not apply and the 32-bit storage ceiling
+ *                     above is the binding one. The Yocto/A-class
+ *                     dispatcher has neither limit (native 64-bit
+ *                     atomics on x86-64/aarch64, a 64-bit
+ *                     @c CLOCK_MONOTONIC nanosecond delta), so it has
+ *                     no ceiling to saturate against at all.
+ *
+ *                     Cross-OS ceiling contract: on BOTH OSes, once
+ *                     @ref alp_inference_invoke has completed with
+ *                     @ref ALP_OK at least once, this accessor reports
+ *                     @c ALP_OK with a real duration -- never
+ *                     @ref ALP_ERR_NOT_READY merely because that
+ *                     duration was long. Zephyr's UINT32_MAX - 1 clamp
+ *                     (above) is what makes this true there: without
+ *                     it, a duration landing exactly on the field's
+ *                     raw numeric ceiling would collide with the "no
+ *                     successful invoke yet" sentinel and read back as
+ *                     @ref ALP_ERR_NOT_READY with @p out_us never
+ *                     written, silently contradicting the SATURATES
+ *                     wording above. @ref ALP_ERR_NOT_READY means
+ *                     exactly one thing on either OS: @p inf is
+ *                     NULL/closed, or no invoke has ever completed
+ *                     with @ref ALP_OK on this handle yet -- never "the
+ *                     invoke was too slow to report."
  *
  * @return ALP_OK, or one of:
  *         - @ref ALP_ERR_INVAL -- @p out_us is NULL.
  *         - @ref ALP_ERR_NOT_READY -- @p inf is NULL/closed, or no
  *           @ref alp_inference_invoke call has completed with
- *           @ref ALP_OK on this handle yet.
+ *           @ref ALP_OK on this handle yet. Never returned merely
+ *           because the last successful invoke's duration was long --
+ *           see the Cross-OS ceiling contract above.
  *         - @ref ALP_ERR_NOSUPPORT -- the stub build only (no
  *           inference backend compiled in at all): there is no timing
  *           mechanism here that could ever have been populated, so

@@ -4,10 +4,10 @@
  *
  * Regression for the overlapping-invoke semantics <alp/inference.h>
  * documents for alp_inference_last_invoke_latency_us(): two threads
- * calling alp_inference_invoke() concurrently on the SAME handle is a
- * real interleaving this handle's op-counting permits (active_ops is a
- * drain counter, not a mutex), and the stored value is last-STORE-wins,
- * not largest-duration-wins or largest-t1-wins.
+ * calling alp_inference_invoke() on the SAME handle with no serializing
+ * mutex between them (active_ops is a drain counter, not a mutex) is
+ * real usage the handle permits, and the stored value is
+ * last-STORE-wins, not largest-duration-wins or largest-t1-wins.
  *
  * PR #1541 review (also-fix item): the atomic store/load this design
  * relies on had no concurrent-writer test anywhere -- the sibling
@@ -16,26 +16,52 @@
  * inference_invoke_close_race.c only races invoke() against close(),
  * never invoke() against another invoke(). This file closes that gap.
  *
- * The test makes the interleaving DETERMINISTIC instead of relying on
- * scheduler luck (see alp-lab:writing-race-safe-dispatch-handlers'
- * "prove it" guidance): thread SLOW sleeps a long, fixed duration in
- * its fake backend invoke, then signals g_slow_done; thread FAST
- * sleeps a short, fixed duration and then BLOCKS on g_slow_done before
- * returning, so FAST's dispatcher-level atomic store is guaranteed to
- * execute strictly after SLOW's, even though FAST's own intended
- * "compute" duration is the smaller of the two. If the implementation
- * instead kept whichever value were LARGER (or whichever call started
- * first), the final read would come back as SLOW's (large) duration;
- * this test asserts it is FAST's instead, proving "last store", not
- * "largest value" or "first caller", wins.
+ * Determinism, not scheduler luck (see
+ * alp-lab:writing-race-safe-dispatch-handlers' "prove it" guidance):
+ * thread SLOW calls alp_inference_invoke(), sleeps a long, fixed 40ms
+ * in its fake backend body, reads back its own just-stored value, then
+ * signals g_slow_done. Thread FAST does NOT call
+ * alp_inference_invoke() at all until it has observed g_slow_done --
+ * i.e. until SLOW's atomic store has already landed -- so FAST's own
+ * store is guaranteed, by happens-before construction rather than by
+ * timing, to execute strictly after SLOW's. Only once that gate
+ * releases does FAST call alp_inference_invoke(), whose fake backend
+ * body sleeps a short, fixed 2ms.
+ *
+ * Because the g_slow_done wait sits OUTSIDE
+ * alp_inference_invoke()'s clock_gettime() bracket, none of that wait
+ * folds into FAST's measured duration -- FAST's own reading comes back
+ * genuinely small (~2ms), not inflated to SLOW's ~40ms. That
+ * combination -- FAST's store is provably the LAST one, and FAST's own
+ * duration is provably the SMALLER one -- is what lets the final read
+ * discriminate "last store wins" from "largest value wins": a
+ * last-store-wins dispatcher reports FAST's small value; a
+ * largest-value-wins dispatcher would instead report SLOW's large
+ * value, which the assertion below catches. (An earlier version of
+ * this test put the g_slow_done wait INSIDE the fake backend body, so
+ * it counted toward FAST's own measured duration -- FAST then measured
+ * ~SLOW's total wait too, making the two readings nearly identical and
+ * letting a largest-value-wins mutant survive most runs.)
+ *
+ * This test does not exercise true wall-clock overlap of the two
+ * dispatcher-level invoke() calls -- FAST does not call
+ * alp_inference_invoke() until SLOW's has already returned and stored.
+ * What it exercises is two threads calling the same handle's invoke()
+ * with no serializing mutex between them, which is exactly the
+ * property <alp/inference.h> documents ("last-STORE-wins ... not
+ * largest-duration- or largest-finish-time-wins"). Genuine wall-clock
+ * overlap of a different op pair (invoke() racing a concurrent
+ * close()) is covered separately by inference_invoke_close_race.c.
  *
  * Each thread reads back its own just-stored value immediately after
- * its own alp_inference_invoke() call returns and before the other
- * thread's store can possibly have landed (SLOW reads before signalling
- * g_slow_done; FAST reads after unblocking, and by then SLOW has long
- * since finished) -- so both baseline readings are race-free by
- * construction, and only the FINAL post-join read exercises the actual
- * concurrent-store race this file is testing.
+ * its own alp_inference_invoke() call returns: SLOW reads before
+ * signalling g_slow_done (so no store from FAST -- which has not even
+ * called alp_inference_invoke() yet -- can have landed first); FAST
+ * reads right after its own call returns, and by construction SLOW's
+ * store landed well before FAST's gate released. Both baseline
+ * readings are therefore race-free by construction, and only the FINAL
+ * post-join read exercises the actual last-store-wins race this file
+ * is testing.
  *
  * #includes src/yocto/inference_yocto.c directly (same technique as
  * inference_invoke_close_race.c) through a fake DEEPX_DXM1 backend --
@@ -59,11 +85,6 @@
 #include "../../src/yocto/inference_yocto.c"
 
 static atomic_int g_slow_done;
-/* Which fake-invoke call is currently running: FAST's backend body uses
- * this (not a fixed sleep duration alone) to decide when SLOW's backend
- * body has entered its long sleep, so FAST genuinely overlaps SLOW
- * in-flight rather than merely running after it starts. */
-static atomic_int g_slow_entered;
 
 alp_status_t alp_inference_deepx_open(struct alp_inference *h, const alp_inference_config_t *cfg)
 {
@@ -109,30 +130,22 @@ alp_inference_deepx_get_output(struct alp_inference *h, size_t index, alp_infere
  * ops table. */
 static _Thread_local int t_is_slow;
 
+/* SLOW sleeps 40ms; FAST sleeps 2ms. FAST's caller (fast_thread(),
+ * below) does not call alp_inference_invoke() -- and therefore never
+ * reaches this function -- until it has already observed g_slow_done,
+ * so unlike an earlier version of this test, nothing in here needs to
+ * wait on SLOW: by the time this runs for FAST, SLOW's store has
+ * already landed. */
 alp_status_t alp_inference_deepx_invoke(struct alp_inference *h)
 {
 	(void)h;
+	struct timespec ts;
 	if (t_is_slow) {
-		atomic_store(&g_slow_entered, 1);
-		struct timespec slow_ts = { .tv_sec = 0, .tv_nsec = 40000000L }; /* 40ms */
-		nanosleep(&slow_ts, NULL);
-		return ALP_OK; /* caller stores, then signals g_slow_done */
+		ts = (struct timespec){ .tv_sec = 0, .tv_nsec = 40000000L }; /* 40ms */
+	} else {
+		ts = (struct timespec){ .tv_sec = 0, .tv_nsec = 2000000L }; /* 2ms */
 	}
-	/* FAST: wait for SLOW to have genuinely entered its own invoke (real
-	 * overlap, not "FAST ran entirely after SLOW"), do a short sleep of
-	 * its own, then block until SLOW's store has landed -- guaranteeing
-	 * FAST's store lands strictly after SLOW's regardless of either
-	 * sleep length. */
-	while (!atomic_load(&g_slow_entered)) {
-		struct timespec tick = { .tv_sec = 0, .tv_nsec = 100000L }; /* 100us poll */
-		nanosleep(&tick, NULL);
-	}
-	struct timespec fast_ts = { .tv_sec = 0, .tv_nsec = 2000000L }; /* 2ms */
-	nanosleep(&fast_ts, NULL);
-	while (!atomic_load(&g_slow_done)) {
-		struct timespec tick = { .tv_sec = 0, .tv_nsec = 100000L }; /* 100us poll */
-		nanosleep(&tick, NULL);
-	}
+	nanosleep(&ts, NULL);
 	return ALP_OK;
 }
 
@@ -151,9 +164,9 @@ static void *slow_thread(void *arg)
 	thread_arg_t *a = arg;
 	t_is_slow       = 1;
 	ALP_ASSERT_EQ_INT(alp_inference_invoke(a->h), ALP_OK);
-	/* Race-free: FAST is still blocked in its own backend body waiting
-	 * on g_slow_done, which has not been set yet -- no store from FAST
-	 * can have landed before this read. */
+	/* Race-free: FAST has not even called alp_inference_invoke() yet --
+	 * it is still polling g_slow_done, which this thread has not set
+	 * yet -- so no store from FAST can have landed before this read. */
 	ALP_ASSERT_EQ_INT(alp_inference_last_invoke_latency_us(a->h, &a->own_us), ALP_OK);
 	atomic_store(&g_slow_done, 1);
 	return NULL;
@@ -163,10 +176,18 @@ static void *fast_thread(void *arg)
 {
 	thread_arg_t *a = arg;
 	t_is_slow       = 0;
+	/* Wait OUTSIDE alp_inference_invoke()'s clock_gettime() bracket for
+	 * SLOW's store to have already landed -- see this file's header
+	 * comment. This is what guarantees FAST's own store lands strictly
+	 * after SLOW's while keeping the wait itself out of FAST's own
+	 * measured duration. */
+	while (!atomic_load(&g_slow_done)) {
+		struct timespec tick = { .tv_sec = 0, .tv_nsec = 100000L }; /* 100us poll */
+		nanosleep(&tick, NULL);
+	}
 	ALP_ASSERT_EQ_INT(alp_inference_invoke(a->h), ALP_OK);
-	/* Race-free: SLOW has already returned and stored (that is exactly
-	 * what unblocked this thread's fake backend body above) -- this
-	 * read observes FAST's own just-landed store. */
+	/* Race-free: SLOW's store landed before this thread's gate above
+	 * released -- this read observes FAST's own just-landed store. */
 	ALP_ASSERT_EQ_INT(alp_inference_last_invoke_latency_us(a->h, &a->own_us), ALP_OK);
 	return NULL;
 }
@@ -183,7 +204,6 @@ static void test_overlapping_invoke_is_last_store_wins(void)
 	ALP_ASSERT_TRUE(h != NULL);
 
 	atomic_store(&g_slow_done, 0);
-	atomic_store(&g_slow_entered, 0);
 
 	thread_arg_t slow_arg = { .h = h, .own_us = 0u };
 	thread_arg_t fast_arg = { .h = h, .own_us = 0u };

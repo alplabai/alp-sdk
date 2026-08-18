@@ -213,18 +213,28 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf)
 	 * backend's execution time, not an approximation of it.
 	 *
 	 * 64-bit vs 32-bit cycle capture: a plain k_cycle_get_32() wraps
-	 * modulo 2^32 cycles -- on the AEN801 M55
-	 * (CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC=400000000) that is ~10.74 s,
-	 * so an invoke longer than that would report a wrapped, too-small
-	 * duration (the "subtracting two uint32_t counts is correct modulo
-	 * 2^32" property this used to rely on is only true across a SINGLE
-	 * wrap, and doesn't help if the counter wraps because the delta
-	 * itself is >= 2^32 cycles). CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER
-	 * targets (AEN801 M55 among them) don't have that problem at all,
-	 * so use k_cycle_get_64() there; targets without it fall back to
-	 * k_cycle_get_32() and keep the same 2^32-cycle ceiling as before
-	 * (see the header's alp_inference_last_invoke_latency_us() doc for
-	 * the number). Either way k_cyc_to_us_near64() does the cycles->us
+	 * modulo 2^32 cycles -- hypothetically, at the AEN801 M55's
+	 * CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC=400000000, that would be
+	 * ~10.74 s, so an invoke longer than that would report a wrapped,
+	 * too-small duration (the "subtracting two uint32_t counts is
+	 * correct modulo 2^32" property this used to rely on is only true
+	 * across a SINGLE wrap, and doesn't help if the counter wraps
+	 * because the delta itself is >= 2^32 cycles). That 400 MHz + plain
+	 * 32-bit-counter combination never actually ships, though: Zephyr's
+	 * CORTEX_M_SYSTICK_64BIT_CYCLE_COUNTER Kconfig (which
+	 * CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER depends on for a plain
+	 * Cortex-M SysTick target) defaults to `y` once
+	 * CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC exceeds 60 MHz, so the AEN801
+	 * M55 (400 MHz) selects k_cycle_get_64() below under stock Kconfig,
+	 * same as every other target with an ARM architected/GIC timer
+	 * (which selects it unconditionally). The k_cycle_get_32() fallback
+	 * only actually compiles in on a target at or below 60 MHz left at
+	 * Kconfig defaults, where the wrap ceiling is correspondingly >=
+	 * ~71.58 s, not ~10.74 s (see the header's
+	 * alp_inference_last_invoke_latency_us() doc for the exact numbers
+	 * and for the more dangerous part of this: an unnoticed wrap reports
+	 * ALP_OK with a plausible-looking too-small value, not an error).
+	 * Either way k_cyc_to_us_near64() does the cycles->us
 	 * conversion at 64-bit precision with round-nearest (not the
 	 * floor-then-truncate-to-32-bit an app-level k_cycle_get_32()
 	 * harness would do), so a very fast invoke rounds sub-us to 0
@@ -248,8 +258,17 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf)
 		/* last_invoke_latency_us is uint32_t (no libatomic on
 		 * Cortex-M -- see the struct's field comment), so saturate
 		 * rather than silently truncate/wrap a duration that
-		 * exceeds the field's ~71.58-minute ceiling. */
-		uint32_t us = (us64 > UINT32_MAX) ? UINT32_MAX : (uint32_t)us64;
+		 * exceeds the field's ~71.58-minute ceiling. Clamp the
+		 * CEILING to UINT32_MAX - 1, not UINT32_MAX: UINT32_MAX
+		 * itself is reserved as the "no successful invoke yet"
+		 * sentinel below alp_inference_open() sets and
+		 * alp_inference_last_invoke_latency_us() checks for, so a
+		 * duration that actually hits the raw UINT32_MAX ceiling
+		 * must be pushed one below it -- otherwise it would collide
+		 * with the sentinel and this call's readers would see
+		 * ALP_ERR_NOT_READY (and never get *out_us at all) instead
+		 * of the documented saturated value. */
+		uint32_t us = (us64 >= UINT32_MAX) ? (UINT32_MAX - 1u) : (uint32_t)us64;
 		/* Concurrent invokes on one handle are a real interleaving
 		 * (active_ops is a drain counter, not a mutex -- see the
 		 * struct's field comment), so this write races a concurrent
