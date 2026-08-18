@@ -133,3 +133,48 @@ def test_non_list_npus_and_cores_do_not_crash_the_gate(tmp_path, monkeypatch):
     the type mismatch) to explain the real problem."""
     doc = {"cores": 5, "npus": 5}
     assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
+
+
+def test_non_string_core_id_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`cores[].id` is schema-typed as a string, but a malformed doc can
+    carry a dict/list there -- the unfiltered `core_ids` set comprehension
+    used to raise `TypeError: unhashable type: 'dict'` building the set.
+    A real dict-typed `id` alongside a real string `id` (paired to the one
+    real npu) proves the filter, not just an early-continue."""
+    doc = {
+        "cores": [{"id": {"nested": "dict"}}, {"id": "m55_he"}],
+        "npus": [{"type": "ethos-u55", "subtype": "high-efficiency",
+                   "mac_per_cycle": 128, "paired_core": "m55_he"}],
+    }
+    assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
+
+
+def test_non_string_paired_core_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`npus[].paired_core` is schema-typed as a string, but a malformed
+    doc can carry a dict/list there -- the unfiltered `pc not in core_ids`
+    membership test used to raise `TypeError: unhashable type: 'dict'`.
+    A non-string `paired_core` is reported as a mismatch, not skipped."""
+    doc = {
+        "cores": [{"id": "m55_he"}],
+        "npus": [{"type": "ethos-u55", "subtype": "high-efficiency",
+                   "mac_per_cycle": 128, "paired_core": {"nested": "dict"}}],
+    }
+    assert _run(tmp_path, monkeypatch, doc) == 1  # must not raise; reported as a mismatch
+
+
+def test_non_int_mac_per_cycle_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`npus[].mac_per_cycle` is schema-typed as an integer, but a malformed
+    doc can carry a dict/list there -- the unfiltered `macs` set
+    comprehension used to raise `TypeError: unhashable type: 'dict'`
+    building the set (and a mixed str/int set would separately raise on
+    the `sorted(macs)` message below it)."""
+    doc = {
+        "cores": [{"id": "m55_hp"}, {"id": "m55_he"}],
+        "npus": [
+            {"type": "ethos-u55", "subtype": "high-perf",
+             "mac_per_cycle": {"nested": "dict"}, "paired_core": "m55_hp"},
+            {"type": "ethos-u55", "subtype": "high-efficiency",
+             "mac_per_cycle": 128, "paired_core": "m55_he"},
+        ],
+    }
+    assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise

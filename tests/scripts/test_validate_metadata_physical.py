@@ -1,4 +1,4 @@
-import json, subprocess, sys
+import json, shutil, subprocess, sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -139,6 +139,89 @@ def test_non_list_pins_and_signals_do_not_crash_the_gate(tmp_path):
     }))
     failures = vm._check_chip_physical([p])  # must not raise
     assert failures == []
+
+def test_non_string_signal_name_does_not_crash_the_gate(tmp_path):
+    """`signals[].name` is schema-typed as a string, but a malformed
+    manifest can carry a dict/list there -- the unfiltered `sig_names`
+    set comprehension used to raise `TypeError: unhashable type: 'dict'`
+    building the set."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm_signame_dict", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    p = tmp_path / "sn.yaml"; p.write_text(yaml.safe_dump({
+        "schema_version": 1, "chip_id": "sn", "display_name": "SN", "vendor": "v",
+        "mpn_population": ["SN"], "datasheet": {}, "bus": "i2c",
+        "signals": [{"name": {"nested": "dict"}}, {"name": "SDA", "type": "bidir"}],
+        "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
+                     "visibility": "public",
+                     "pins": [{"pad": "1", "signal": "SDA"}]},
+    }))
+    failures = vm._check_chip_physical([p])  # must not raise
+    assert failures == []
+
+def test_non_string_pin_signal_does_not_crash_the_gate(tmp_path):
+    """`physical.pins[].signal` is schema-typed as a string, but a
+    malformed manifest can carry a dict/list there -- the unfiltered
+    `sig not in sig_names` membership test used to raise `TypeError:
+    unhashable type: 'dict'`. A non-string `signal` is reported as
+    unresolved, not skipped."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm_pinsig_dict", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    p = tmp_path / "ps.yaml"; p.write_text(yaml.safe_dump({
+        "schema_version": 1, "chip_id": "ps", "display_name": "PS", "vendor": "v",
+        "mpn_population": ["PS"], "datasheet": {}, "bus": "i2c",
+        "signals": [{"name": "SDA", "type": "bidir"}],
+        "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
+                     "visibility": "public",
+                     "pins": [{"pad": "1", "signal": {"nested": "dict"}}]},
+    }))
+    failures = vm._check_chip_physical([p])  # must not raise
+    assert failures  # non-string signal is reported as unresolved
+
+def test_non_string_pin_pad_does_not_crash_the_gate(tmp_path):
+    """`physical.pins[].pad` is schema-typed as a string, but a malformed
+    manifest can carry a dict/list there -- the unfiltered `pad in
+    seen_pads` / `seen_pads[pad] = True` used to raise `TypeError:
+    unhashable type: 'dict'`."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm_pinpad_dict", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    p = tmp_path / "pp.yaml"; p.write_text(yaml.safe_dump({
+        "schema_version": 1, "chip_id": "pp", "display_name": "PP", "vendor": "v",
+        "mpn_population": ["PP"], "datasheet": {}, "bus": "i2c",
+        "signals": [{"name": "SDA", "type": "bidir"}],
+        "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
+                     "visibility": "public",
+                     "pins": [{"pad": {"nested": "dict"}, "signal": "SDA"}]},
+    }))
+    failures = vm._check_chip_physical([p])  # must not raise
+    assert failures == []
+
+def test_non_string_passive_net_does_not_crash_the_gate(tmp_path):
+    """`physical.passives[].net` is schema-typed as a string, but a
+    malformed manifest can carry a dict/list there -- the unfiltered
+    `net not in sig_names` membership test used to raise `TypeError:
+    unhashable type: 'dict'`."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm_passivenet_dict", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    p = tmp_path / "pn.yaml"; p.write_text(yaml.safe_dump({
+        "schema_version": 1, "chip_id": "pn", "display_name": "PN", "vendor": "v",
+        "mpn_population": ["PN"], "datasheet": {}, "bus": "i2c",
+        "signals": [{"name": "SDA", "type": "bidir"}],
+        "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
+                     "visibility": "public", "provenance": "web_provisional",
+                     "pins": [{"pad": "1", "signal": "SDA"}],
+                     "passives": [{"role": "pullup", "value": "4k7",
+                                   "net": {"nested": "dict"}, "refdes_prefix": "R"}]},
+    }))
+    failures = vm._check_chip_physical([p])  # must not raise
+    assert failures  # non-string net is reported as unresolved
 
 def test_block_schema_exists():
     schema = json.loads((REPO / "metadata/schemas/block-v1.schema.json").read_text())
@@ -282,6 +365,85 @@ def test_non_list_realizations_and_parts_do_not_crash_the_gate(tmp_path):
     }))
     failures2 = vm._check_block_realizations([blk2], chip_files=[])  # must not raise
     assert failures2 == []
+
+def test_non_string_interface_signal_does_not_crash_the_gate(tmp_path):
+    """`interface[].signal` is schema-typed as a string, but a malformed
+    manifest can carry a dict/list there -- the unfiltered `iface` set
+    comprehension used to raise `TypeError: unhashable type: 'dict'`
+    building the set."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm11", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    blk = tmp_path / "j.yaml"; blk.write_text(yaml.safe_dump({
+        "schema_version": 1, "block_id": "j", "display_name": "J",
+        "kconfig": "ALP_SDK_BLOCK_J",
+        "interface": [{"signal": {"nested": "dict"}, "dir": "output"},
+                      {"signal": "LED", "dir": "output"}],
+        "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
+                          "parts": [], "passives": []}],
+    }))
+    failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
+    assert failures == []
+
+def test_non_string_realization_part_chip_does_not_crash_the_gate(tmp_path):
+    """`realizations[].parts[].chip` is schema-typed as a string, but a
+    malformed manifest can carry a dict/list there -- the unfiltered
+    `part.get("chip") not in chip_ids` membership test used to raise
+    `TypeError: unhashable type: 'dict'`."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm12", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    blk = tmp_path / "k.yaml"; blk.write_text(yaml.safe_dump({
+        "schema_version": 1, "block_id": "k", "display_name": "K",
+        "kconfig": "ALP_SDK_BLOCK_K",
+        "interface": [{"signal": "LED", "dir": "output"}],
+        "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
+                          "parts": [{"chip": {"nested": "dict"}, "maps": {}}]}],
+    }))
+    failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
+    assert failures  # non-string chip is reported as unresolved
+
+def test_non_string_realization_maps_target_does_not_crash_the_gate(tmp_path):
+    """`realizations[].parts[].maps` values are schema-typed as strings,
+    but a malformed manifest can carry a dict/list value there -- the
+    unfiltered `sig not in iface` membership test used to raise
+    `TypeError: unhashable type: 'dict'`."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm13", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    blk = tmp_path / "l.yaml"; blk.write_text(yaml.safe_dump({
+        "schema_version": 1, "block_id": "l", "display_name": "L",
+        "kconfig": "ALP_SDK_BLOCK_L",
+        "interface": [{"signal": "LED", "dir": "output"}],
+        "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
+                          "parts": [{"chip": "x", "maps": {"A": {"nested": "dict"}}}]}],
+    }))
+    failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
+    assert failures  # non-string maps target is reported as unresolved (plus the missing chip)
+
+def test_non_string_realization_passive_net_does_not_crash_the_gate(tmp_path):
+    """`realizations[].passives[].net` is schema-typed as a string, but a
+    malformed manifest can carry a dict/list there -- the unfiltered
+    `net not in iface` membership test used to raise `TypeError:
+    unhashable type: 'dict'`."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm14", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    blk = tmp_path / "m.yaml"; blk.write_text(yaml.safe_dump({
+        "schema_version": 1, "block_id": "m", "display_name": "M",
+        "kconfig": "ALP_SDK_BLOCK_M",
+        "interface": [{"signal": "LED", "dir": "output"}],
+        "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
+                          "parts": [],
+                          "passives": [{"role": "pullup", "value": "4k7",
+                                        "net": {"nested": "dict"}, "refdes_prefix": "R"}]}],
+    }))
+    failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
+    assert failures  # non-string net is reported as unresolved
 
 def test_validate_metadata_passes_on_real_tree():
     # The full validator must stay green with the new chip pass wired in.
@@ -474,6 +636,23 @@ def test_silicon_kconfig_non_list_known_silicon_does_not_crash_the_gate(tmp_path
     assert not failures  # nothing to check; the schema pass (when present) flags the shape
 
 
+def test_silicon_kconfig_non_string_known_silicon_entry_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`knownSilicon[]` entries are schema-typed as strings, but a
+    malformed registry can carry a non-string entry there (e.g. a nested
+    mapping) -- `resolve_soc_path(ref, ...)` used to reach
+    `silicon.split(":")` on a truthy non-string value and raise
+    `AttributeError: 'dict' object has no attribute 'split'`."""
+    vm = _load_vm("vm_sk4"); import json
+    monkeypatch.setattr(vm, "REPO", tmp_path)
+    registry = tmp_path / "silicon-kconfig.json"
+    registry.write_text(json.dumps(
+        {"socSymbolPrefix": "SOC_ALP_", "knownSilicon": [{"a": "b"}]}))
+    monkeypatch.setattr(vm, "SILICON_KCONFIG_REGISTRY", registry)
+    monkeypatch.setattr(vm, "SILICON_KCONFIG_SCHEMA", tmp_path / "does-not-exist.json")
+    failures = vm._check_silicon_kconfig()  # must not raise
+    assert not failures  # the malformed entry is skipped; nothing left to flag
+
+
 def test_peripheral_kconfig_non_object_top_level_does_not_crash_the_gate(tmp_path, monkeypatch):
     """Same class of bug as `_check_silicon_kconfig`, one function over:
     `data.get("peripherals", {})` is reached only when `msgs` is empty, and
@@ -489,6 +668,55 @@ def test_peripheral_kconfig_non_object_top_level_does_not_crash_the_gate(tmp_pat
     monkeypatch.setattr(vm, "PERIPHERAL_KCONFIG_SCHEMA", tmp_path / "does-not-exist.json")
     failures = vm._check_peripheral_kconfig()  # must not raise
     assert failures
+
+
+def test_peripheral_kconfig_malformed_on_disk_registry_fails_cleanly_via_subprocess(tmp_path):
+    """The REAL crash this class of bug is about does not happen inside
+    `_check_peripheral_kconfig()` at all -- it happens at IMPORT time.
+    `alp_orchestrate/slugs.py` calls `alp_registries.peripheral_kconfig()`
+    at MODULE scope, and every import of `validate_metadata.py` reaches
+    that transitively: `from alp_orchestrate.sdk_compat import ...` ->
+    `alp_orchestrate/__init__.py` -> `.loader` -> `alp_project` ->
+    `alp_project_emit` -> `alp_registries.peripheral_kconfig()` (module
+    scope there too). That runs, against the REAL on-disk
+    `metadata/registries/peripheral-kconfig.json`, well before `main()`
+    -- and `_check_peripheral_kconfig()`'s own top-level guard above --
+    ever run.
+
+    An in-process monkeypatch (like the test above) can never reach that
+    crash: it repoints `vm.PERIPHERAL_KCONFIG_REGISTRY` on an
+    ALREADY-IMPORTED `validate_metadata` module, whose import already
+    succeeded once, in this process, against the REAL on-disk registry --
+    Python does not re-run module-scope import code on a second `import`
+    of an already-cached module. Only a fresh subprocess, with a
+    malformed registry actually on disk where the import chain reads it,
+    reproduces the real failure. `scripts/` modules resolve their own
+    `REPO` from `__file__`, so this copies the whole tree (its modules
+    import each other by absolute path) into a scratch root and drops a
+    malformed registry at the real relative location -- verified against
+    the pre-fix `alp_registries.peripheral_kconfig()` to raise a raw
+    `AttributeError` there; this asserts the fixed, clean `ValueError`
+    shape instead.
+    """
+    tmp_scripts = tmp_path / "scripts"
+    shutil.copytree(REPO / "scripts", tmp_scripts)
+    registry = tmp_path / "metadata" / "registries" / "peripheral-kconfig.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(json.dumps(
+        {"schemaVersion": "peripheral-kconfig-v1", "peripherals": "not-an-object"}))
+    r = subprocess.run(
+        [sys.executable, str(tmp_scripts / "validate_metadata.py")],
+        cwd=tmp_path, capture_output=True, text=True)
+    out = r.stdout + r.stderr
+    assert r.returncode != 0, out
+    assert "peripheral-kconfig.json" in out
+    assert "peripherals" in out
+    # The whole point of `alp_registries.peripheral_kconfig()`'s guard: a
+    # clean, named `ValueError`, not a raw `AttributeError`/`KeyError`
+    # traceback several import-frames from anything this test wrote.
+    assert "ValueError" in out
+    assert "AttributeError" not in out
+    assert "KeyError" not in out
 
 
 def test_silicon_capability_restrictions_malformed_soc_json_does_not_crash_the_gate(

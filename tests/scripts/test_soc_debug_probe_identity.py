@@ -143,6 +143,22 @@ def test_non_object_debug_block_does_not_crash_the_gate(tmp_path, monkeypatch):
     assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
 
 
+def test_non_string_core_id_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`cores[].id` is schema-typed as a string, but a malformed doc can
+    carry a dict/list there -- both `core_ids` and (for Cortex-M rows)
+    `m_core_ids` are built via unfiltered set comprehensions that used to
+    raise `TypeError: unhashable type: 'dict'`. A real dict-typed `id`
+    alongside a real string `id` (whose `jlink_device` entry the one real
+    variant carries) proves the filter runs, not an early short-circuit."""
+    doc = {
+        "cores": [{"id": {"nested": "dict"}, "type": "cortex-m55"},
+                  {"id": "m55_hp", "type": "cortex-m55"}],
+        "variants": [{"order_code": "AE999X",
+                      "debug": {"jlink_device": {"m55_hp": "Cortex-M55"}}}],
+    }
+    assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
+
+
 def test_non_object_jlink_device_does_not_crash_the_gate(tmp_path, monkeypatch):
     """`debug.jlink_device` is schema-typed as an object, but
     `debug.get("jlink_device") or {}` does not protect a non-empty NON-STRING

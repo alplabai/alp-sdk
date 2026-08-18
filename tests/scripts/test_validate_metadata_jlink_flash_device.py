@@ -176,16 +176,24 @@ def test_non_list_variants_does_not_crash_the_gate(tmp_path, monkeypatch):
     assert failures == []  # must not raise
 
 
-def test_removing_the_key_from_a_real_soc_file_fails(tmp_path):
-    """Proves the guard actually regresses: temporarily strip
-    `jlink_flash_device` from a real, currently-clean variant (e5, the
-    single-variant file) and confirm the check goes red, byte-for-byte
-    restoring the original afterwards."""
+def test_removing_the_key_from_a_real_soc_file_fails(tmp_path, monkeypatch):
+    """Proves the guard actually regresses: strip `jlink_flash_device`
+    from a COPY of a real, currently-clean variant (e5, the
+    single-variant file) and confirm the check goes red.
+
+    Mutates a copy under `tmp_path`, never the real tracked file -- a
+    prior version of this test mutated `metadata/socs/.../e5.json`
+    in-process with a `try`/`finally` restore, and that restore does not
+    survive a SIGKILL (this host has been killing runs), which would
+    leave the real tree dirty with a stripped SoC file. Same `tmp_path`
+    copy idiom `test_hw_rev_table_unreadable.py::_metadata_copy` uses.
+    """
     spec = importlib.util.spec_from_file_location(
         "vm_jlink_flash_device_mutate", REPO / "scripts/validate_metadata.py"
     )
     vm = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(vm)
+    monkeypatch.setattr(vm, "REPO", tmp_path)
     real = REPO / "metadata" / "socs" / "alif" / "ensemble" / "e5.json"
     original = real.read_bytes()
     assert b'"jlink_flash_device": "AE512F80F55D5_HE"' in original
@@ -193,12 +201,11 @@ def test_removing_the_key_from_a_real_soc_file_fails(tmp_path):
         b',\n        "jlink_flash_device": "AE512F80F55D5_HE"', b""
     )
     assert mutated != original
-    try:
-        real.write_bytes(mutated)
-        failures = vm._check_soc_jlink_flash_device_declared([real])
-        assert failures
-        assert "AE512F80F55D5LS" in failures[0][1][0]
-        assert "debug.jlink_flash_device is absent" in failures[0][1][0]
-    finally:
-        real.write_bytes(original)
+    copy = tmp_path / "e5.json"
+    copy.write_bytes(mutated)
+    failures = vm._check_soc_jlink_flash_device_declared([copy])
+    assert failures
+    assert "AE512F80F55D5LS" in failures[0][1][0]
+    assert "debug.jlink_flash_device is absent" in failures[0][1][0]
+    # The real tracked file must be byte-for-byte untouched.
     assert real.read_bytes() == original

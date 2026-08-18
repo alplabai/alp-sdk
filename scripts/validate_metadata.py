@@ -423,6 +423,18 @@ def _check_silicon_kconfig() -> list:
             msgs.append(f"{loc}: {err.message}")
 
     for ref in _as_list(data.get("knownSilicon")):
+        if ref and not isinstance(ref, str):
+            # A TRUTHY non-string entry (e.g. a nested dict/int) is already
+            # a schema-shape violation reported by the schema pass; used
+            # unfiltered it would also raise `AttributeError` inside
+            # `resolve_soc_path()` -> `split_silicon_ref()`'s colon split
+            # on a non-string value. A FALSY entry (JSON `null`, `0`, `""`)
+            # is deliberately let through instead of skipped here --
+            # `split_silicon_ref()`'s own falsy check already handles
+            # every falsy value safely, and a `null` entry is pinned
+            # elsewhere to still report the "not a ref" message rather
+            # than being silently skipped.
+            continue
         soc_path = resolve_soc_path(ref, SOCS.parent)
         if soc_path is None:
             msgs.append(f"knownSilicon[{ref}]: not a <vendor>:<family>:<part> ref")
@@ -460,6 +472,20 @@ def _check_peripheral_kconfig() -> list:
     # type check and lands in `msgs`, skipping the `else` branch below --
     # but that's incidental to the schema pass running at all, not a
     # guarantee. Make it deliberate (same shape as _check_silicon_kconfig).
+    #
+    # Reachability, stated honestly: on the real CLI path this guard
+    # cannot fire against a malformed ON-DISK registry. Importing this
+    # module already transitively imports `alp_orchestrate`, which calls
+    # `alp_registries.peripheral_kconfig()` at MODULE scope
+    # (`alp_orchestrate/slugs.py`) against the SAME
+    # PERIPHERAL_KCONFIG_REGISTRY file, before `main()` -- and this
+    # function -- ever run. A malformed registry now raises there first
+    # (a `ValueError`, not a crash), aborting `import validate_metadata`
+    # itself. Kept anyway, deliberately, because it IS reachable when
+    # this function runs against a registry path re-pointed after a
+    # successful import -- every regression test for this function does
+    # exactly that -- and as defence in depth should the import-time
+    # guard's shape ever change.
     if not isinstance(data, dict):
         msg = f"top-level value is a {type(data).__name__}, expected an object"
         print(f"FAIL {rel}: {msg}")
@@ -559,13 +585,26 @@ def _check_soc_npu_pairing(soc_files) -> list:
         if not npus:
             continue
         rel = path.relative_to(REPO).as_posix()
-        core_ids = {c.get("id") for c in _dict_entries(doc.get("cores")) if c.get("id")}
+        # `c.get("id")` is schema-typed as a string, but a malformed SoC
+        # doc can carry any value there -- an unfiltered set comprehension
+        # raises `TypeError: unhashable type` building this set from a
+        # dict/list `id`, and a mixed str/int `id` set raises on the
+        # `sorted()` call below. Filter to strings, same idiom as the
+        # `unpopulated` guard in `_check_silicon_capability_restrictions()`.
+        core_ids = {
+            c.get("id") for c in _dict_entries(doc.get("cores"))
+            if isinstance(c.get("id"), str)
+        }
         msgs: list[str] = []
 
         # (1) referential integrity of every declared paired_core.
         for i, n in enumerate(npus):
             pc = n.get("paired_core")
-            if pc is not None and pc not in core_ids:
+            # `pc not in core_ids` alone raises `TypeError: unhashable
+            # type` when `pc` is a dict/list -- short-circuit on a
+            # non-string `pc` first so a malformed value is reported as a
+            # mismatch instead of aborting the gate.
+            if pc is not None and (not isinstance(pc, str) or pc not in core_ids):
                 msgs.append(
                     f"npus[{i}] ({n.get('type')}/{n.get('subtype')}): "
                     f"paired_core={pc!r} is not a cores[].id "
@@ -576,7 +615,15 @@ def _check_soc_npu_pairing(soc_files) -> list:
         for n in npus:
             by_type.setdefault(str(n.get("type", "")), []).append(n)
         for ntype, insts in by_type.items():
-            macs = {n.get("mac_per_cycle") for n in insts if n.get("mac_per_cycle")}
+            # `mac_per_cycle` is schema-typed as an integer, but a
+            # malformed doc can carry a dict/list there (unhashable --
+            # `TypeError` building this set) or a str alongside a real
+            # int (mixed-type `sorted()` below raises too). Filter to
+            # ints, same idiom as `core_ids` above.
+            macs = {
+                n.get("mac_per_cycle") for n in insts
+                if isinstance(n.get("mac_per_cycle"), int)
+            }
             if len(macs) > 1:
                 unpaired = [n for n in insts if not n.get("paired_core")]
                 if unpaired:
@@ -644,7 +691,17 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
         if not variants:
             continue
         rel = path.relative_to(REPO).as_posix()
-        core_ids = {c.get("id") for c in _dict_entries(doc.get("cores")) if c.get("id")}
+        # `c.get("id")` is schema-typed as a string, but a malformed SoC
+        # doc can carry any value there -- an unfiltered set comprehension
+        # raises `TypeError: unhashable type` building this set from a
+        # dict/list `id`, and a mixed str/int `id` set raises on the
+        # `sorted()` calls below (`core_id!r ... sorted(core_ids)` and the
+        # `expect_dpidr` uncovered-core sort). Filter to strings, same
+        # idiom as `_check_soc_npu_pairing()`'s `core_ids`.
+        core_ids = {
+            c.get("id") for c in _dict_entries(doc.get("cores"))
+            if isinstance(c.get("id"), str)
+        }
         # Cortex-M cores only for the `expect_dpidr` pairing rule below: the
         # DPIDR preflight guards the Zephyr-on-M J-Link flash path, and
         # `debug.jlink_device` is legitimately sparse across `cores[]` --
@@ -653,8 +710,8 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
         # being J-Link flashed. Demanding coverage of every core would fail
         # the very variant this rule exists to protect.
         m_core_ids = {
-            c["id"] for c in _dict_entries(doc.get("cores"))
-            if c.get("id") and str(c.get("type") or "").startswith("cortex-m")
+            c.get("id") for c in _dict_entries(doc.get("cores"))
+            if isinstance(c.get("id"), str) and str(c.get("type") or "").startswith("cortex-m")
         }
         msgs: list[str] = []
 
@@ -867,19 +924,37 @@ def _check_chip_physical(chip_files) -> list:
         # rather than let a non-list container or a non-object entry raise
         # `AttributeError`/`TypeError` on `.get()` here (same shape as
         # `_check_soc_npu_pairing`).
-        sig_names = {s["name"] for s in _dict_entries(doc.get("signals")) if "name" in s}
+        # `s.get("name")` is schema-typed as a string, but a malformed chip
+        # manifest can carry a dict/list there -- an unfiltered set
+        # comprehension raises `TypeError: unhashable type` building this
+        # set. Filter to strings, same idiom as `core_ids` in
+        # `_check_soc_npu_pairing()`.
+        sig_names = {
+            s["name"] for s in _dict_entries(doc.get("signals"))
+            if isinstance(s.get("name"), str)
+        }
         msgs: list = []
         seen_pads: dict = {}
         for pin in _dict_entries(phys.get("pins")):
             sig = pin.get("signal"); pad = pin.get("pad")
-            if sig not in sig_names and sig not in _POWER_NETS:
+            # `sig`/`pad` are schema-typed strings, but a malformed
+            # manifest can carry a dict/list there -- `sig not in
+            # sig_names` / `pad in seen_pads` raise `TypeError: unhashable
+            # type` unfiltered. A non-string `sig` is reported as an
+            # unresolved signal directly rather than crash; a non-string
+            # `pad` skips the duplicate-pad check (the schema pass already
+            # flags its shape).
+            if not isinstance(sig, str) or (sig not in sig_names and sig not in _POWER_NETS):
                 msgs.append(f"physical.pins pad {pad}: signal '{sig}' not in signals[] or power nets")
-            if pad in seen_pads:
-                msgs.append(f"physical.pins: pad '{pad}' used more than once")
-            seen_pads[pad] = True
+            if isinstance(pad, str):
+                if pad in seen_pads:
+                    msgs.append(f"physical.pins: pad '{pad}' used more than once")
+                seen_pads[pad] = True
         for passive in _dict_entries(phys.get("passives")):
             net = passive.get("net")
-            if net not in sig_names and net not in _POWER_NETS:
+            # Same reasoning as `sig` above -- guard the unhashable case
+            # before the set-membership tests.
+            if not isinstance(net, str) or (net not in sig_names and net not in _POWER_NETS):
                 msgs.append(f"physical.passives: net '{net}' not in signals[] or power nets")
         if msgs:
             failures.append((rel, msgs))
@@ -911,7 +986,15 @@ def _check_block_realizations(block_files, chip_files) -> list:
             continue  # parse errors already reported by the schema pass
         if not isinstance(doc, dict):
             continue
-        iface = {e["signal"] for e in _dict_entries(doc.get("interface")) if "signal" in e}
+        # `e.get("signal")` is schema-typed as a string, but a malformed
+        # block manifest can carry a dict/list there -- an unfiltered set
+        # comprehension raises `TypeError: unhashable type` building this
+        # set. Filter to strings, same idiom as `sig_names` in
+        # `_check_chip_physical()`.
+        iface = {
+            e["signal"] for e in _dict_entries(doc.get("interface"))
+            if isinstance(e.get("signal"), str)
+        }
         msgs: list = []
         # `realizations[]`/`parts[]`/`passives[]` may themselves be a
         # non-list scalar, and their entries are schema-typed objects -- but
@@ -922,15 +1005,23 @@ def _check_block_realizations(block_files, chip_files) -> list:
         # `_check_soc_npu_pairing`).
         for r in _dict_entries(doc.get("realizations")):
             for part in _dict_entries(r.get("parts")):
-                if part.get("chip") not in chip_ids:
-                    msgs.append(f"realization '{r.get('id')}': part chip '{part.get('chip')}' has no metadata/chips manifest")
+                # `chip` is schema-typed as a string, but a malformed
+                # manifest can carry a dict/list there -- `not in
+                # chip_ids` raises `TypeError: unhashable type`
+                # unfiltered. Guard before the membership test.
+                chip = part.get("chip")
+                if not isinstance(chip, str) or chip not in chip_ids:
+                    msgs.append(f"realization '{r.get('id')}': part chip '{chip}' has no metadata/chips manifest")
                 maps = _as_dict(part.get("maps"))
                 for _pin, sig in maps.items():
-                    if sig not in iface:
+                    # Same reasoning -- a `maps` value can be any YAML
+                    # type; `sig not in iface` raises unfiltered.
+                    if not isinstance(sig, str) or sig not in iface:
                         msgs.append(f"realization '{r.get('id')}': maps target '{sig}' not in interface[]")
             for passive in _dict_entries(r.get("passives")):
                 net = passive.get("net")
-                if net not in iface and net not in _POWER_NETS:
+                # Same reasoning as `chip`/`sig` above.
+                if not isinstance(net, str) or (net not in iface and net not in _POWER_NETS):
                     msgs.append(f"realization '{r.get('id')}': passives net '{net}' not in interface[] or power nets")
         if msgs:
             failures.append((rel, msgs))
@@ -984,7 +1075,10 @@ def _check_library_semantics(library_files) -> list:
             # than the raw value so that reaches a clean skip instead of
             # `TypeError: 'int' object is not iterable`.
             for cap in _as_list(requires.get("capabilities")):
-                if cap not in vocab:
+                # `cap` is schema-typed as a string, but a malformed
+                # manifest can carry a dict/list there -- `cap not in
+                # vocab` raises `TypeError: unhashable type` unfiltered.
+                if not isinstance(cap, str) or cap not in vocab:
                     offered = ", ".join(sorted(vocab)) or "<none>"
                     msgs.append(
                         f"requires/capabilities[{cap}]: not a known SoC capability "
@@ -1056,8 +1150,13 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     # used to reach `set(<int>)` (`TypeError: 'int' object is not
     # iterable`) and `.keys()` used to reach a non-dict directly
     # (`AttributeError`). Route both through the same container guards as
-    # every other array/object field in this file.
-    host_libraries = set(_as_list(host.get("libraries")))
+    # every other array/object field in this file. And a `libraries[]`
+    # ITEM is schema-typed as a string, but a malformed registry can carry
+    # a dict/list entry there -- `set()` raises `TypeError: unhashable
+    # type` unfiltered, and a mixed str/int set raises on the `sorted()`
+    # calls below. Filter to strings, same idiom used throughout this
+    # file.
+    host_libraries = {x for x in _as_list(host.get("libraries")) if isinstance(x, str)}
     excluded = set(_as_dict(host.get("excludedLibraries")).keys())
     known = set(library_docs)
 
@@ -1102,6 +1201,12 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
             families_seen.add(family)
             if isinstance(som, str):
                 family_to_som[family] = som
+        if not isinstance(som, str):
+            # A non-string `som` (e.g. a nested dict/list) is already a
+            # schema-shape violation reported by the schema pass; used
+            # unfiltered it would also raise `TypeError: unhashable type`
+            # on `som_docs.get(som)` below.
+            continue
         doc = som_docs.get(som)
         if doc is None:
             msgs.append(f"familyMatrix[{idx}]/som: `{som}` has no SoM preset")
@@ -1116,6 +1221,11 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
         # to `{}` rather than crash the gate (same shape as
         # `_check_board_targets`).
         topology = topology if isinstance(topology, dict) else {}
+        if not isinstance(core, str):
+            # Same reasoning as `som` above -- `core not in topology` /
+            # `topology.get(core)` below would raise on an unhashable
+            # value.
+            continue
         if core not in topology:
             available = ", ".join(sorted(topology)) or "<none>"
             msgs.append(f"familyMatrix[{idx}]/core: `{core}` is not a topology core "
@@ -1244,16 +1354,17 @@ def _check_board_targets(som_files) -> list:
 
         msgs: list[str] = []
         checked = 0
-        raw_topology = doc.get("topology")
-        if raw_topology is not None and not isinstance(raw_topology, dict):
-            # `topology` is schema-typed as an object, but a non-empty
-            # scalar (e.g. a bare string, which is truthy) used to reach
-            # `.items()` and raise `AttributeError` here, aborting the
-            # whole gate mid-run instead of leaving the schema FAIL line
-            # (which already explains the real problem) to do the talking
-            # (same shape as `_check_chip_physical`'s `physical` guard).
-            continue
-        topology = _as_dict(raw_topology)
+        # `topology` is schema-typed as an object, but a non-empty scalar
+        # (e.g. a bare string, which is truthy) would otherwise reach
+        # `.items()` and raise `AttributeError` here, aborting the whole
+        # gate mid-run instead of leaving the schema FAIL line (which
+        # already explains the real problem) to do the talking. `_as_dict`
+        # already degrades any non-dict value to `{}` -- a standalone
+        # `isinstance(..., dict)` guard-and-continue on top of it was
+        # behaviourally redundant (reverting it alone reddens no test),
+        # so `_as_dict` alone carries this, same as every other
+        # array/object field in this file.
+        topology = _as_dict(doc.get("topology"))
         for core_id, entry in topology.items():
             if not isinstance(entry, dict):
                 continue

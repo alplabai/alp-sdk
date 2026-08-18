@@ -153,6 +153,61 @@ def test_non_list_family_matrix_and_non_list_host_libraries_do_not_crash_the_gat
     vm._check_tier_a_library_ci([], [])  # must not raise
 
 
+def test_non_string_host_library_entry_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`hostBuild.libraries[]` entries are schema-typed as strings, but a
+    malformed registry can carry a dict/list entry there -- the unfiltered
+    `set(_as_list(host.get("libraries")))` used to raise `TypeError:
+    unhashable type: 'dict'` building the set."""
+    vm = _load_vm(tmp_path, monkeypatch, "vm_tier_a_nonstring_lib")
+    registry = tmp_path / "tier-a-library-ci.json"
+    registry.write_text(json.dumps({
+        "hostBuild": {"libraries": [{"nested": "dict"}], "excludedLibraries": {}},
+        "familyMatrix": [],
+        "excludedFamilies": {},
+    }))
+    monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
+    failures = vm._check_tier_a_library_ci([], [])  # must not raise
+    assert isinstance(failures, list)
+
+
+def test_non_string_family_matrix_som_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`familyMatrix[].som` is schema-typed as a string, but a malformed
+    registry can carry a dict/list there -- the unfiltered
+    `som_docs.get(som)` used to raise `TypeError: unhashable type: 'dict'`."""
+    vm = _load_vm(tmp_path, monkeypatch, "vm_tier_a_nonstring_som")
+    registry = tmp_path / "tier-a-library-ci.json"
+    registry.write_text(json.dumps({
+        "hostBuild": {"libraries": [], "excludedLibraries": {}},
+        "familyMatrix": [{"family": "aen", "som": {"nested": "dict"}, "core": "m33_sm"}],
+        "excludedFamilies": {},
+    }))
+    monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
+    failures = vm._check_tier_a_library_ci([], [])  # must not raise
+    assert isinstance(failures, list)
+
+
+def test_non_string_family_matrix_core_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`familyMatrix[].core` is schema-typed as a string, but a malformed
+    registry can carry a dict/list there -- the unfiltered `core not in
+    topology` membership test used to raise `TypeError: unhashable type:
+    'dict'`."""
+    vm = _load_vm(tmp_path, monkeypatch, "vm_tier_a_nonstring_core")
+    registry = tmp_path / "tier-a-library-ci.json"
+    registry.write_text(json.dumps({
+        "hostBuild": {"libraries": [], "excludedLibraries": {}},
+        "familyMatrix": [{"family": "aen", "som": "E1M-TST001", "core": {"nested": "dict"}}],
+        "excludedFamilies": {},
+    }))
+    monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
+    som = tmp_path / "E1M-TST001.yaml"
+    som.write_text(
+        "sku: E1M-TST001\nfamily: aen\n"
+        "topology:\n  m33_sm:\n    board: alp_e1m_tst001_m33_sm\n"
+    )
+    failures = vm._check_tier_a_library_ci([], [som])  # must not raise
+    assert isinstance(failures, list)
+
+
 def test_real_tier_a_library_ci_registry_resolves_clean():
     """The one real shipped registry this rule actually guards -- must stay
     clean against the live checkout, not just a synthetic fixture."""
