@@ -50,7 +50,7 @@ def find_problems(root: Path) -> list[str]:
             firmware_path = entry.get("firmware_path")
             if firmware_path is None:
                 # Deliberately absent -- schema-legal, and the point of the
-                # key: no artefact exists yet. Not this gate's job either way.
+                # key: no artefact exists yet. Not this gate's job.
                 continue
             name = entry.get("name", "<unnamed>")
             resolved = (root / firmware_path).resolve()
