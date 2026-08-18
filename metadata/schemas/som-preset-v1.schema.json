@@ -548,7 +548,7 @@
         "firmware_path": {
           "type": "string",
           "minLength": 1,
-          "description": "Repo-relative path to the prebuilt / shipped firmware image.  Omit this key entirely when no artefact exists yet (schema-legal -- only `name`, `chip` and `flash_policy` are required).  No SoM preset declares `flash_method` today, so `tan flash` skips every helper entry before ever inspecting this field; an entry that gains a `flash_method` while this field stays absent then gets `tan flash`'s clean refusal ('has no output_artefact / firmware_path; can't flash') instead of resolving a sentinel path."
+          "description": "Repo-relative path to the prebuilt / shipped firmware image.  Omit this key entirely when no artefact exists yet (schema-legal -- only `name`, `chip` and `flash_policy` are required)."
         },
         "flash_method": {
           "type": "string",
