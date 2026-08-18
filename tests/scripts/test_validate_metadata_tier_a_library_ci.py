@@ -8,8 +8,7 @@ against each cell's SoM preset `topology.<core>`.
 string, which is truthy) -- a malformed SoM preset used to reach
 `topology.get(core)` and raise `AttributeError`, aborting the whole gate
 mid-run instead of producing a clean FAIL line (same class of bug as
-`_check_board_targets`'s `topology.items()`, #see propagating-code-changes
-audit).
+`_check_board_targets`'s `topology.items()`).
 """
 
 import importlib.util
@@ -81,6 +80,77 @@ def test_object_topology_with_matching_core_passes(tmp_path, monkeypatch):
 
     failures = vm._check_tier_a_library_ci([], [som])
     assert not failures
+
+
+def test_excluded_libraries_as_a_list_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`hostBuild.excludedLibraries` is schema-typed as an object (name ->
+    reason), but a malformed registry can carry a list there instead --
+    `.keys()` on that used to raise `AttributeError: 'list' object has no
+    attribute 'keys'` here, aborting the whole gate mid-run instead of
+    leaving the schema FAIL line (which already flags the type mismatch) to
+    explain the real problem."""
+    vm = _load_vm(tmp_path, monkeypatch, "vm_tier_a_excluded_libs_list")
+    registry = tmp_path / "tier-a-library-ci.json"
+    registry.write_text(json.dumps({"hostBuild": {"excludedLibraries": ["foo"]}}))
+    monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
+    # `_as_dict()` normalises the malformed (list, not object) container to
+    # `{}` -- same as a non-dict `capabilities:`/`hostBuild:` elsewhere in
+    # this file -- so `foo` is not carried through as a name to check
+    # against; the point pinned here is that this must not raise.
+    failures = vm._check_tier_a_library_ci([], [])  # must not raise
+    assert isinstance(failures, list)
+
+
+def test_excluded_families_as_a_list_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`excludedFamilies` is schema-typed as an object (family -> reason),
+    but a malformed registry can carry a list there instead -- `.items()` on
+    that used to raise `AttributeError: 'list' object has no attribute
+    'items'` here, aborting the whole gate mid-run instead of leaving the
+    schema FAIL line (which already flags the type mismatch) to explain the
+    real problem."""
+    vm = _load_vm(tmp_path, monkeypatch, "vm_tier_a_excluded_families_list")
+    registry = tmp_path / "tier-a-library-ci.json"
+    registry.write_text(json.dumps({"excludedFamilies": ["foo"]}))
+    monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
+    failures = vm._check_tier_a_library_ci([], [])  # must not raise
+    assert failures == []  # a list `excludedFamilies` iterates to nothing meaningful to check
+
+
+def test_non_object_top_level_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """The registry's top level is schema-typed as an object, but a
+    malformed file could parse to a bare JSON array -- `data.get("hostBuild",
+    {})` used to raise `AttributeError: 'list' object has no attribute
+    'get'` here, aborting the whole gate mid-run instead of leaving the
+    schema FAIL line (which already flags the type mismatch) to explain the
+    real problem."""
+    vm = _load_vm(tmp_path, monkeypatch, "vm_tier_a_non_object_top")
+    registry = tmp_path / "tier-a-library-ci.json"
+    registry.write_text(json.dumps([]))
+    monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
+    failures = vm._check_tier_a_library_ci([], [])  # must not raise
+    assert failures
+
+
+def test_non_list_family_matrix_and_non_list_host_libraries_do_not_crash_the_gate(
+    tmp_path, monkeypatch
+):
+    """`familyMatrix` and `hostBuild.libraries` are themselves schema-typed
+    as arrays, but a malformed registry can carry a non-list scalar there
+    (e.g. the bare int `5`, which is truthy) -- `enumerate(data.get(
+    "familyMatrix") or [])` and `set(host.get("libraries") or [])` over the
+    unfiltered value used to raise `TypeError: 'int' object is not
+    iterable`, aborting the whole gate mid-run instead of leaving the schema
+    FAIL line (which already flags the type mismatch) to explain the real
+    problem."""
+    vm = _load_vm(tmp_path, monkeypatch, "vm_tier_a_non_list_fields")
+    registry = tmp_path / "tier-a-library-ci.json"
+    registry.write_text(json.dumps({
+        "hostBuild": {"libraries": 5, "excludedLibraries": {}},
+        "familyMatrix": 5,
+        "excludedFamilies": {},
+    }))
+    monkeypatch.setattr(vm, "TIER_A_LIBRARY_CI_REGISTRY", registry)
+    vm._check_tier_a_library_ci([], [])  # must not raise
 
 
 def test_real_tier_a_library_ci_registry_resolves_clean():

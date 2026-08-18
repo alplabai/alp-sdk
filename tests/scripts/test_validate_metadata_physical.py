@@ -118,6 +118,28 @@ def test_non_object_passive_entry_does_not_crash_the_gate(tmp_path):
     failures = vm._check_chip_physical([p])  # must not raise
     assert failures == []
 
+def test_non_list_pins_and_signals_do_not_crash_the_gate(tmp_path):
+    """`physical.pins[]` and top-level `signals[]` are themselves
+    schema-typed as arrays, but a malformed chip manifest can carry a
+    non-list scalar there (e.g. the bare int `5`, which is truthy) --
+    iterating the unfiltered value used to raise `TypeError: 'int' object
+    is not iterable`, aborting the whole gate mid-run instead of leaving
+    the schema FAIL line (which already flags the type mismatch) to
+    explain the real problem."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm_pins_nonlist", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    p = tmp_path / "t.yaml"; p.write_text(yaml.safe_dump({
+        "schema_version": 1, "chip_id": "t", "display_name": "T", "vendor": "v",
+        "mpn_population": ["T"], "datasheet": {}, "bus": "i2c",
+        "signals": 5,
+        "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
+                     "visibility": "public", "pins": 5, "passives": 5},
+    }))
+    failures = vm._check_chip_physical([p])  # must not raise
+    assert failures == []
+
 def test_block_schema_exists():
     schema = json.loads((REPO / "metadata/schemas/block-v1.schema.json").read_text())
     assert schema["properties"]["block_id"]["pattern"] == "^[a-z][a-z0-9_]*$"
@@ -229,6 +251,37 @@ def test_non_object_maps_does_not_crash_the_gate(tmp_path):
     # `chip: x` has no manifest either (chip_files=[]), so this still
     # reports a FAIL -- the point is that it reports one instead of raising.
     assert failures
+
+def test_non_list_realizations_and_parts_do_not_crash_the_gate(tmp_path):
+    """`realizations[]` and `realizations[].parts[]` are themselves
+    schema-typed as arrays, but a malformed block manifest can carry a
+    non-list scalar there (e.g. the bare int `5`, which is truthy) --
+    iterating the unfiltered value used to raise `TypeError: 'int' object
+    is not iterable`, aborting the whole gate mid-run instead of leaving
+    the schema FAIL line (which already flags the type mismatch) to
+    explain the real problem."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vm10", REPO / "scripts/validate_metadata.py")
+    vm = importlib.util.module_from_spec(spec); spec.loader.exec_module(vm)
+    import yaml
+    blk = tmp_path / "h.yaml"; blk.write_text(yaml.safe_dump({
+        "schema_version": 1, "block_id": "h", "display_name": "H",
+        "kconfig": "ALP_SDK_BLOCK_H",
+        "interface": [{"signal": "LED", "dir": "output"}],
+        "realizations": 5,
+    }))
+    failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
+    assert failures == []
+
+    blk2 = tmp_path / "i.yaml"; blk2.write_text(yaml.safe_dump({
+        "schema_version": 1, "block_id": "i", "display_name": "I",
+        "kconfig": "ALP_SDK_BLOCK_I",
+        "interface": [{"signal": "LED", "dir": "output"}],
+        "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
+                          "parts": 5, "passives": 5}],
+    }))
+    failures2 = vm._check_block_realizations([blk2], chip_files=[])  # must not raise
+    assert failures2 == []
 
 def test_validate_metadata_passes_on_real_tree():
     # The full validator must stay green with the new chip pass wired in.
@@ -385,3 +438,119 @@ def test_silicon_kconfig_null_known_silicon_rejected(tmp_path, monkeypatch):
     failures = vm._check_silicon_kconfig()
     assert failures and any(
         "not a <vendor>:<family>:<part> ref" in m for _, msgs in failures for m in msgs)
+
+
+# --- second-round crash guards found on top of #1004's fix ---
+
+def test_silicon_kconfig_non_object_top_level_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """The registry's top level is schema-typed as an object, but
+    `data.get("knownSilicon", [])` ran unconditionally -- before the schema
+    pass even had a chance to flag the shape, and regardless of whether it
+    would have -- so a registry parsing to a bare JSON list used to raise
+    `AttributeError: 'list' object has no attribute 'get'` here, aborting
+    the whole gate instead of reporting a clean FAIL."""
+    vm = _load_vm("vm_sk2"); import json
+    monkeypatch.setattr(vm, "REPO", tmp_path)
+    registry = tmp_path / "silicon-kconfig.json"
+    registry.write_text(json.dumps([]))
+    monkeypatch.setattr(vm, "SILICON_KCONFIG_REGISTRY", registry)
+    monkeypatch.setattr(vm, "SILICON_KCONFIG_SCHEMA", tmp_path / "does-not-exist.json")
+    failures = vm._check_silicon_kconfig()  # must not raise
+    assert failures
+
+
+def test_silicon_kconfig_non_list_known_silicon_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`knownSilicon` is itself schema-typed as an array, but a malformed
+    registry can carry a non-list scalar there (e.g. the bare int `5`,
+    which is truthy) -- iterating the unfiltered value used to raise
+    `TypeError: 'int' object is not iterable`."""
+    vm = _load_vm("vm_sk3"); import json
+    monkeypatch.setattr(vm, "REPO", tmp_path)
+    registry = tmp_path / "silicon-kconfig.json"
+    registry.write_text(json.dumps({"socSymbolPrefix": "SOC_ALP_", "knownSilicon": 5}))
+    monkeypatch.setattr(vm, "SILICON_KCONFIG_REGISTRY", registry)
+    monkeypatch.setattr(vm, "SILICON_KCONFIG_SCHEMA", tmp_path / "does-not-exist.json")
+    failures = vm._check_silicon_kconfig()  # must not raise
+    assert not failures  # nothing to check; the schema pass (when present) flags the shape
+
+
+def test_peripheral_kconfig_non_object_top_level_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """Same class of bug as `_check_silicon_kconfig`, one function over:
+    `data.get("peripherals", {})` is reached only when `msgs` is empty, and
+    stayed safe only BY ACCIDENT (when the schema exists, a non-object top
+    level lands in `msgs` first) -- with the schema absent, a registry
+    parsing to a bare JSON list used to reach `len(data.get(...))` and raise
+    `AttributeError: 'list' object has no attribute 'get'`."""
+    vm = _load_vm("vm_pk1"); import json
+    monkeypatch.setattr(vm, "REPO", tmp_path)
+    registry = tmp_path / "peripheral-kconfig.json"
+    registry.write_text(json.dumps([]))
+    monkeypatch.setattr(vm, "PERIPHERAL_KCONFIG_REGISTRY", registry)
+    monkeypatch.setattr(vm, "PERIPHERAL_KCONFIG_SCHEMA", tmp_path / "does-not-exist.json")
+    failures = vm._check_peripheral_kconfig()  # must not raise
+    assert failures
+
+
+def test_silicon_capability_restrictions_malformed_soc_json_does_not_crash_the_gate(
+    tmp_path, monkeypatch
+):
+    """A BARE `json.loads()` on the referenced SoC file (no try/except) used
+    to let a syntactically invalid SoC JSON raise `JSONDecodeError` straight
+    out of the gate -- the schema pass over `soc_files` reports that
+    failure separately; this cross-check must degrade to a diagnostic
+    message instead."""
+    vm = _load_vm("vm_scr2"); import yaml
+    monkeypatch.setattr(vm, "REPO", tmp_path)
+    soc = tmp_path / "soc.json"
+    soc.write_text("{ not valid json")
+    monkeypatch.setattr(vm, "resolve_soc_path", lambda ref, root: soc)
+    p = tmp_path / "E1M-TEST.yaml"
+    p.write_text(yaml.safe_dump({
+        "silicon": "acme:widget",
+        "silicon_capabilities": {"unpopulated": ["camera"]},
+    }))
+    failures = vm._check_silicon_capability_restrictions([p])  # must not raise
+    assert failures and any("fails to parse" in m for _, msgs in failures for m in msgs)
+
+
+def test_silicon_capability_restrictions_non_dict_capabilities_does_not_crash_the_gate(
+    tmp_path, monkeypatch
+):
+    """`capabilities:` is schema-typed as an object, but a malformed SoC doc
+    can carry a non-dict scalar there (e.g. the bare int `5`) --
+    `soc_caps.get(name)` / `soc_caps.items()` used to raise `AttributeError`
+    on that."""
+    vm = _load_vm("vm_scr3"); import yaml, json
+    monkeypatch.setattr(vm, "REPO", tmp_path)
+    soc = tmp_path / "soc.json"
+    soc.write_text(json.dumps({"capabilities": 5}))
+    monkeypatch.setattr(vm, "resolve_soc_path", lambda ref, root: soc)
+    p = tmp_path / "E1M-TEST.yaml"
+    p.write_text(yaml.safe_dump({
+        "silicon": "acme:widget",
+        "silicon_capabilities": {"unpopulated": ["camera"]},
+    }))
+    failures = vm._check_silicon_capability_restrictions([p])  # must not raise
+    assert failures  # `camera` is not offered by the (normalised-to-empty) capability set
+
+
+def test_silicon_capability_restrictions_non_string_unpopulated_entry_does_not_crash_the_gate(
+    tmp_path, monkeypatch
+):
+    """`unpopulated[]` entries are schema-typed as strings, but a malformed
+    preset can carry a non-string entry there (e.g. a nested mapping) --
+    `soc_caps.get(name)` / `name in som_caps` used to raise `TypeError:
+    unhashable type: 'dict'` on that, since a dict can't be a dict key or a
+    set/dict membership probe."""
+    vm = _load_vm("vm_scr4"); import yaml, json
+    monkeypatch.setattr(vm, "REPO", tmp_path)
+    soc = tmp_path / "soc.json"
+    soc.write_text(json.dumps({"capabilities": {"camera": True}}))
+    monkeypatch.setattr(vm, "resolve_soc_path", lambda ref, root: soc)
+    p = tmp_path / "E1M-TEST.yaml"
+    p.write_text(yaml.safe_dump({
+        "silicon": "acme:widget",
+        "silicon_capabilities": {"unpopulated": [{"a": "b"}]},
+    }))
+    failures = vm._check_silicon_capability_restrictions([p])  # must not raise
+    assert failures == []  # the malformed entry is skipped; nothing left to flag

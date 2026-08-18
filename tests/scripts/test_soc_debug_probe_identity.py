@@ -90,8 +90,44 @@ def test_non_object_variants_and_cores_entries_do_not_crash_the_gate(tmp_path, m
     reach a bare `.get()` and raise `AttributeError` here, hiding the schema
     FAIL line that already explains the real problem. Filtered to dicts,
     this doc must return cleanly -- no real variant survives the filter, so
-    there is nothing left to cross-reference."""
-    doc = {"cores": ["not-a-dict"], "variants": ["not-a-dict"]}
+    there is nothing left to cross-reference.
+
+    `variants` also carries ONE real dict entry (whose `jlink_device` names
+    the one real `cores` dict entry) so the function does not short-circuit
+    at `if not variants: continue` before ever reaching the `core_ids` /
+    `m_core_ids` filters this test exists to exercise -- a prior version of
+    this fixture (`variants: ["not-a-dict"]` only) never actually reached
+    either line, so reverting either guard alone would not have reddened
+    this test."""
+    doc = {
+        "cores": ["not-a-dict", {"id": "m55_hp", "type": "cortex-m55"}],
+        "variants": ["not-a-dict", {"order_code": "AE999X",
+                                     "debug": {"jlink_device": {"m55_hp": "Cortex-M55"}}}],
+    }
+    assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
+
+
+def test_non_object_top_level_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """The SoC doc's top level is schema-typed as an object, but a
+    malformed file could parse to a bare JSON array -- `doc.get("variants")`
+    used to raise `AttributeError: 'list' object has no attribute 'get'`
+    here, aborting the whole gate mid-run instead of leaving the schema
+    FAIL line (which already flags the type mismatch) to explain the real
+    problem."""
+    monkeypatch.setattr(V, "REPO", tmp_path)
+    p = tmp_path / "soc.json"
+    p.write_text(json.dumps([]))
+    assert V._check_soc_debug_probe_identity([p]) == []  # must not raise
+
+
+def test_non_list_variants_and_cores_do_not_crash_the_gate(tmp_path, monkeypatch):
+    """`variants`/`cores` are themselves schema-typed as arrays, but a
+    malformed document can carry a non-list scalar there (e.g. the bare int
+    `5`, which is truthy) -- iterating the unfiltered value used to raise
+    `TypeError: 'int' object is not iterable`, aborting the whole gate
+    mid-run instead of leaving the schema FAIL line (which already flags
+    the type mismatch) to explain the real problem."""
+    doc = {"cores": 5, "variants": 5}
     assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
 
 

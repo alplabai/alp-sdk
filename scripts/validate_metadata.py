@@ -42,6 +42,41 @@ from strict_loaders import strict_json_loads, strict_yaml_load  # noqa: E402
 # Power/ground nets are allowed as pin signals without a signals[] entry.
 _POWER_NETS = {"VDD", "VDDIO", "VCC", "GND", "VSS", "AVDD", "DVDD"}
 
+
+def _as_list(value) -> list:
+    """Normalise a schema-typed array field to a list, tolerating a
+    non-list value (e.g. an errant scalar/mapping in a malformed YAML/JSON
+    manifest) instead of raising `TypeError` on iteration.
+
+    JSON Schema validation is supposed to reject the shape, but every
+    semantic pass below runs whether or not that pass already ran on this
+    file -- and, for a file with no matching schema at all (a registry
+    whose schema file is absent), it may never run.  Degrade to `[]`
+    rather than let a bare scalar (`npus: 5`, `variants: 5`, ...) abort
+    the whole gate mid-run with a traceback instead of a clean FAIL.
+    """
+    return value if isinstance(value, list) else []
+
+
+def _as_dict(value) -> dict:
+    """Normalise a schema-typed object field to a dict, tolerating a
+    non-dict value instead of raising on `.get()`/`.items()`/`.keys()`.
+    See `_as_list()` for why this runs regardless of schema-pass order.
+    """
+    return value if isinstance(value, dict) else {}
+
+
+def _dict_entries(value) -> list[dict]:
+    """`_as_list(value)` filtered to its dict entries -- the "array of
+    schema-typed objects" shape used throughout this file (`npus[]`,
+    `cores[]`, `variants[]`, `pins[]`, `realizations[]`, ...).  Combines
+    the container-level guard (`_as_list`) with the existing per-entry
+    `isinstance(x, dict)` filter so neither a non-list container nor a
+    non-object entry can reach a bare `.get()`/`[...]` downstream.
+    """
+    return [v for v in _as_list(value) if isinstance(v, dict)]
+
+
 SCHEMA = REPO / "metadata" / "schemas" / "soc-spec-v1.schema.json"
 SOM_SCHEMA = REPO / "metadata" / "schemas" / "som-preset-v1.schema.json"
 HWREV_SCHEMA = REPO / "metadata" / "schemas" / "hw-revisions-v1.schema.json"
@@ -172,6 +207,7 @@ def _check_silicon_capability_restrictions(som_files) -> list:
 
         msgs: list[str] = []
         soc_caps: dict = {}
+        have_soc_caps = False
         silicon = str(doc.get("silicon", ""))
         soc_path = resolve_soc_path(silicon, SOCS.parent)
         if soc_path is None or not soc_path.is_file():
@@ -179,12 +215,38 @@ def _check_silicon_capability_restrictions(som_files) -> list:
                         f"resolve to a metadata/socs/ spec, cannot validate "
                         f"`unpopulated:` against the silicon capability set")
         else:
-            soc_doc = json.loads(soc_path.read_text(encoding="utf-8"))
-            soc_caps = soc_doc.get("capabilities") or {}
+            # A bare `json.loads` here used to raise `JSONDecodeError`
+            # straight out of the gate on a syntactically invalid SoC
+            # file -- the schema pass over `soc_files` reports THAT
+            # failure separately; this cross-check only needs to
+            # degrade gracefully when it can't read the referenced doc.
+            try:
+                soc_doc = json.loads(soc_path.read_text(encoding="utf-8"))
+            except Exception as e:
+                msgs.append(
+                    f"silicon_capabilities: silicon ref `{silicon}` resolves to "
+                    f"{soc_path.relative_to(REPO).as_posix()} but it fails to "
+                    f"parse ({e}), cannot validate `unpopulated:` against the "
+                    f"silicon capability set")
+            else:
+                # `capabilities:` is schema-typed as an object, but a
+                # malformed SoC doc (or a non-dict top level entirely)
+                # can carry a scalar there -- `soc_caps.get(name)` /
+                # `.items()` below would raise on that. Normalise to `{}`
+                # rather than crash the gate.
+                soc_caps = _as_dict(soc_doc.get("capabilities") if isinstance(soc_doc, dict) else None)
+                have_soc_caps = True
 
-        som_caps = doc.get("capabilities") or {}
+        # Same reasoning for the preset's own `capabilities:` block.
+        som_caps = _as_dict(doc.get("capabilities"))
         for name in unpopulated:
-            if soc_path is not None and soc_path.is_file() and not soc_caps.get(name):
+            if not isinstance(name, str):
+                # A non-string entry (e.g. a nested dict) is already a
+                # schema-shape violation reported by the schema pass; used
+                # unfiltered it would also raise `TypeError: unhashable
+                # type` on `soc_caps.get(name)` / `name in som_caps` below.
+                continue
+            if have_soc_caps and not soc_caps.get(name):
                 offered = ", ".join(sorted(k for k, v in soc_caps.items() if v)) or "<none>"
                 msgs.append(
                     f"silicon_capabilities/unpopulated[{name}]: not a capability the "
@@ -341,6 +403,17 @@ def _check_silicon_kconfig() -> list:
         print(f"FAIL {rel}: parse error ({e})")
         return [(rel, [f"invalid JSON parse: {e}"])]
 
+    # `data.get("knownSilicon", [])` below ran unconditionally, before this
+    # guard existed, regardless of whether the schema pass below already
+    # flagged a non-object top level -- a registry parsing to a bare JSON
+    # list (or any other non-dict) reached `data.get(...)` and raised
+    # `AttributeError`, aborting the gate mid-run instead of reporting the
+    # schema FAIL line that already names the real problem.
+    if not isinstance(data, dict):
+        msg = f"top-level value is a {type(data).__name__}, expected an object"
+        print(f"FAIL {rel}: {msg}")
+        return [(rel, [msg])]
+
     msgs: list[str] = []
     if SILICON_KCONFIG_SCHEMA.is_file():
         schema = json.loads(SILICON_KCONFIG_SCHEMA.read_text(encoding="utf-8"))
@@ -349,7 +422,7 @@ def _check_silicon_kconfig() -> list:
             loc = "/".join(str(p) for p in err.absolute_path) or "<root>"
             msgs.append(f"{loc}: {err.message}")
 
-    for ref in data.get("knownSilicon", []):
+    for ref in _as_list(data.get("knownSilicon")):
         soc_path = resolve_soc_path(ref, SOCS.parent)
         if soc_path is None:
             msgs.append(f"knownSilicon[{ref}]: not a <vendor>:<family>:<part> ref")
@@ -364,7 +437,7 @@ def _check_silicon_kconfig() -> list:
             print(f"  · {m}")
         failures.append((rel, msgs))
     else:
-        n = len(data.get("knownSilicon", []))
+        n = len(_as_list(data.get("knownSilicon")))
         print(f"OK   {rel}  (knownSilicon={n}, all resolve to socs/)")
     return failures
 
@@ -381,6 +454,17 @@ def _check_peripheral_kconfig() -> list:
         print(f"FAIL {rel}: parse error ({e})")
         return [(rel, [f"invalid JSON parse: {e}"])]
 
+    # `data.get("peripherals", {})` below is reached only when `msgs` stays
+    # empty, and today it stays safe only BY ACCIDENT: when
+    # PERIPHERAL_KCONFIG_SCHEMA exists, a non-dict `data` fails the object
+    # type check and lands in `msgs`, skipping the `else` branch below --
+    # but that's incidental to the schema pass running at all, not a
+    # guarantee. Make it deliberate (same shape as _check_silicon_kconfig).
+    if not isinstance(data, dict):
+        msg = f"top-level value is a {type(data).__name__}, expected an object"
+        print(f"FAIL {rel}: {msg}")
+        return [(rel, [msg])]
+
     msgs: list[str] = []
     if PERIPHERAL_KCONFIG_SCHEMA.is_file():
         schema = json.loads(PERIPHERAL_KCONFIG_SCHEMA.read_text(encoding="utf-8"))
@@ -395,7 +479,7 @@ def _check_peripheral_kconfig() -> list:
             print(f"  · {m}")
         failures.append((rel, msgs))
     else:
-        n = len(data.get("peripherals", {}))
+        n = len(_as_dict(data.get("peripherals")))
         print(f"OK   {rel}  (peripherals={n})")
     return failures
 
@@ -461,18 +545,21 @@ def _check_soc_npu_pairing(soc_files) -> list:
             doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
-        # `npus[]`/`cores[]` entries are schema-typed objects, but the
-        # schema pass that would reject a malformed one is not guaranteed to
-        # have run first -- filter to dicts rather than let a non-object
-        # raise `AttributeError` here and abort the whole gate mid-run,
-        # hiding the schema FAIL line that already explains the real
-        # problem (same shape as `_check_chip_physical`).
-        npus = [n for n in (doc.get("npus") or []) if isinstance(n, dict)]
+        if not isinstance(doc, dict):
+            continue  # non-object top level; schema pass already flags it
+        # `npus[]`/`cores[]` may themselves be a non-list scalar, and their
+        # entries are schema-typed objects -- but the schema pass that
+        # would reject either malformation is not guaranteed to have run
+        # first. `_dict_entries()` filters to dicts rather than let a
+        # non-list container or a non-object entry raise `AttributeError`/
+        # `TypeError` here and abort the whole gate mid-run, hiding the
+        # schema FAIL line that already explains the real problem (same
+        # shape as `_check_chip_physical`).
+        npus = _dict_entries(doc.get("npus"))
         if not npus:
             continue
         rel = path.relative_to(REPO).as_posix()
-        core_ids = {c.get("id") for c in (doc.get("cores") or [])
-                    if isinstance(c, dict) and c.get("id")}
+        core_ids = {c.get("id") for c in _dict_entries(doc.get("cores")) if c.get("id")}
         msgs: list[str] = []
 
         # (1) referential integrity of every declared paired_core.
@@ -543,18 +630,21 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
             doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
-        # `variants[]`/`cores[]` entries are schema-typed objects, but the
-        # schema pass that would reject a malformed one is not guaranteed to
-        # have run first -- filter to dicts rather than let a non-object
-        # raise `AttributeError` here and abort the whole gate mid-run,
-        # hiding the schema FAIL line that already explains the real
-        # problem (same shape as `_check_chip_physical`).
-        variants = [v for v in (doc.get("variants") or []) if isinstance(v, dict)]
+        if not isinstance(doc, dict):
+            continue  # non-object top level; schema pass already flags it
+        # `variants[]`/`cores[]` may themselves be a non-list scalar, and
+        # their entries are schema-typed objects -- but the schema pass
+        # that would reject either malformation is not guaranteed to have
+        # run first. `_dict_entries()` filters to dicts rather than let a
+        # non-list container or a non-object entry raise `AttributeError`/
+        # `TypeError` here and abort the whole gate mid-run, hiding the
+        # schema FAIL line that already explains the real problem (same
+        # shape as `_check_chip_physical`).
+        variants = _dict_entries(doc.get("variants"))
         if not variants:
             continue
         rel = path.relative_to(REPO).as_posix()
-        core_ids = {c.get("id") for c in (doc.get("cores") or [])
-                    if isinstance(c, dict) and c.get("id")}
+        core_ids = {c.get("id") for c in _dict_entries(doc.get("cores")) if c.get("id")}
         # Cortex-M cores only for the `expect_dpidr` pairing rule below: the
         # DPIDR preflight guards the Zephyr-on-M J-Link flash path, and
         # `debug.jlink_device` is legitimately sparse across `cores[]` --
@@ -563,9 +653,8 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
         # being J-Link flashed. Demanding coverage of every core would fail
         # the very variant this rule exists to protect.
         m_core_ids = {
-            c["id"] for c in (doc.get("cores") or [])
-            if isinstance(c, dict) and c.get("id")
-            and str(c.get("type") or "").startswith("cortex-m")
+            c["id"] for c in _dict_entries(doc.get("cores"))
+            if c.get("id") and str(c.get("type") or "").startswith("cortex-m")
         }
         msgs: list[str] = []
 
@@ -628,15 +717,19 @@ def _check_soc_jlink_flash_device_declared(soc_files) -> list:
             doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue  # non-object top level; schema pass already flags it
         if doc.get("vendor") != "Alif Semiconductor" or doc.get("family") != "Ensemble":
             continue
-        # `variants[]` entries are schema-typed objects, but the schema pass
-        # that would reject a malformed one is not guaranteed to have run
-        # first -- filter to dicts rather than let a non-object raise
-        # `AttributeError` here and abort the whole gate mid-run, hiding the
-        # schema FAIL line that already explains the real problem (same
-        # shape as `_check_chip_physical`).
-        variants = [v for v in (doc.get("variants") or []) if isinstance(v, dict)]
+        # `variants[]` may itself be a non-list scalar, and its entries are
+        # schema-typed objects -- but the schema pass that would reject
+        # either malformation is not guaranteed to have run first.
+        # `_dict_entries()` filters to dicts rather than let a non-list
+        # container or a non-object entry raise `AttributeError`/`TypeError`
+        # here and abort the whole gate mid-run, hiding the schema FAIL line
+        # that already explains the real problem (same shape as
+        # `_check_chip_physical`).
+        variants = _dict_entries(doc.get("variants"))
         if not variants:
             continue
         rel = path.relative_to(REPO).as_posix()
@@ -692,20 +785,30 @@ def _check_soc_no_wlcsp_variants(soc_files) -> list:
             doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue  # non-object top level; schema pass already flags it
         if doc.get("vendor") != "Alif Semiconductor" or doc.get("family") != "Ensemble":
             continue
         rel = path.relative_to(REPO).as_posix()
         msgs: list[str] = []
 
-        # `variants[]` entries are schema-typed objects, but the schema pass
-        # that would reject a malformed one is not guaranteed to have run
-        # first -- filter to dicts rather than let a non-object raise
-        # `AttributeError` here and abort the whole gate mid-run, hiding the
-        # schema FAIL line that already explains the real problem (same
-        # shape as `_check_chip_physical`).
-        variants = [v for v in (doc.get("variants") or []) if isinstance(v, dict)]
+        # `variants[]` may itself be a non-list scalar, and its entries are
+        # schema-typed objects -- but the schema pass that would reject
+        # either malformation is not guaranteed to have run first.
+        # `_dict_entries()` filters to dicts rather than let a non-list
+        # container or a non-object entry raise `AttributeError`/`TypeError`
+        # here and abort the whole gate mid-run, hiding the schema FAIL line
+        # that already explains the real problem (same shape as
+        # `_check_chip_physical`).
+        variants = _dict_entries(doc.get("variants"))
         for i, v in enumerate(variants):
-            package = v.get("package") or ""
+            # `package` is schema-typed as a string, but a malformed
+            # document can carry a non-string truthy value there (e.g. the
+            # bare int `208`) -- `package.upper()` would raise
+            # `AttributeError` on that. Normalise to a string first, same
+            # shape as every other scalar guard in this file.
+            package = v.get("package")
+            package = package if isinstance(package, str) else ""
             if "WLCSP" in package.upper():
                 msgs.append(
                     f"variants[{i}] ({v.get('order_code')}): package "
@@ -755,23 +858,26 @@ def _check_chip_physical(chip_files) -> list:
             # than let `phys.get(...)` raise `AttributeError` here and abort
             # the whole gate mid-run, hiding the schema FAIL line that
             # already explains the real problem (same shape as
-            # `_check_soc_vela_memory_profile`).
+            # `_check_board_targets`'s `topology` guard below).
             continue
-        sig_names = {s["name"] for s in doc.get("signals", []) if isinstance(s, dict) and "name" in s}
+        # `signals[]`/`pins[]`/`passives[]` may themselves be a non-list
+        # scalar, and their entries are schema-typed objects -- but the
+        # schema pass that would reject either malformation is not
+        # guaranteed to have run first. `_dict_entries()` filters to dicts
+        # rather than let a non-list container or a non-object entry raise
+        # `AttributeError`/`TypeError` on `.get()` here (same shape as
+        # `_check_soc_npu_pairing`).
+        sig_names = {s["name"] for s in _dict_entries(doc.get("signals")) if "name" in s}
         msgs: list = []
         seen_pads: dict = {}
-        # `pins[]`/`passives[]` entries are schema-typed objects, but the
-        # schema pass is not guaranteed to have run first -- filter to
-        # dicts rather than let a non-object raise `AttributeError` on
-        # `.get()` here (same shape as `_check_soc_npu_pairing`).
-        for pin in [p for p in phys.get("pins", []) if isinstance(p, dict)]:
+        for pin in _dict_entries(phys.get("pins")):
             sig = pin.get("signal"); pad = pin.get("pad")
             if sig not in sig_names and sig not in _POWER_NETS:
                 msgs.append(f"physical.pins pad {pad}: signal '{sig}' not in signals[] or power nets")
             if pad in seen_pads:
                 msgs.append(f"physical.pins: pad '{pad}' used more than once")
             seen_pads[pad] = True
-        for passive in [p for p in phys.get("passives", []) if isinstance(p, dict)]:
+        for passive in _dict_entries(phys.get("passives")):
             net = passive.get("net")
             if net not in sig_names and net not in _POWER_NETS:
                 msgs.append(f"physical.passives: net '{net}' not in signals[] or power nets")
@@ -805,24 +911,24 @@ def _check_block_realizations(block_files, chip_files) -> list:
             continue  # parse errors already reported by the schema pass
         if not isinstance(doc, dict):
             continue
-        iface = {e["signal"] for e in doc.get("interface", []) if isinstance(e, dict) and "signal" in e}
+        iface = {e["signal"] for e in _dict_entries(doc.get("interface")) if "signal" in e}
         msgs: list = []
-        # `realizations[]` entries are schema-typed objects, but the schema
-        # pass is not guaranteed to have run first -- filter to dicts rather
-        # than let a non-object raise `AttributeError` on `.get()` here
-        # (same shape as `_check_soc_npu_pairing`).
-        for r in [r for r in doc.get("realizations", []) if isinstance(r, dict)]:
-            # Same reasoning for `parts[]`/`passives[]` entries within a
-            # realization -- a non-object entry must not crash the gate.
-            for part in [p for p in r.get("parts", []) if isinstance(p, dict)]:
+        # `realizations[]`/`parts[]`/`passives[]` may themselves be a
+        # non-list scalar, and their entries are schema-typed objects -- but
+        # the schema pass that would reject either malformation is not
+        # guaranteed to have run first. `_dict_entries()` filters to dicts
+        # rather than let a non-list container or a non-object entry raise
+        # `AttributeError`/`TypeError` on `.get()` here (same shape as
+        # `_check_soc_npu_pairing`).
+        for r in _dict_entries(doc.get("realizations")):
+            for part in _dict_entries(r.get("parts")):
                 if part.get("chip") not in chip_ids:
                     msgs.append(f"realization '{r.get('id')}': part chip '{part.get('chip')}' has no metadata/chips manifest")
-                maps = part.get("maps")
-                maps = maps if isinstance(maps, dict) else {}
+                maps = _as_dict(part.get("maps"))
                 for _pin, sig in maps.items():
                     if sig not in iface:
                         msgs.append(f"realization '{r.get('id')}': maps target '{sig}' not in interface[]")
-            for passive in [p for p in r.get("passives", []) if isinstance(p, dict)]:
+            for passive in _dict_entries(r.get("passives")):
                 net = passive.get("net")
                 if net not in iface and net not in _POWER_NETS:
                     msgs.append(f"realization '{r.get('id')}': passives net '{net}' not in interface[] or power nets")
@@ -873,7 +979,11 @@ def _check_library_semantics(library_files) -> list:
 
         requires = doc.get("requires") or {}
         if isinstance(requires, dict):
-            for cap in requires.get("capabilities") or []:
+            # `capabilities` may itself be a non-list scalar (e.g. a bare
+            # int) in a malformed manifest -- iterate `_as_list()` rather
+            # than the raw value so that reaches a clean skip instead of
+            # `TypeError: 'int' object is not iterable`.
+            for cap in _as_list(requires.get("capabilities")):
                 if cap not in vocab:
                     offered = ", ".join(sorted(vocab)) or "<none>"
                     msgs.append(
@@ -912,6 +1022,16 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
         print(f"FAIL {rel}: parse error ({e})")
         return [(rel, [f"invalid JSON parse: {e}"])]
 
+    # Unlike the other registry checks, this function keeps gathering
+    # referential-integrity messages even when the schema pass below
+    # already flagged a shape problem -- so a non-object top level must be
+    # refused up front, before `data.get(...)` runs unconditionally further
+    # down (same shape as `_check_silicon_kconfig`).
+    if not isinstance(data, dict):
+        msg = f"top-level value is a {type(data).__name__}, expected an object"
+        print(f"FAIL {rel}: {msg}")
+        return [(rel, [msg])]
+
     msgs: list[str] = []
     if TIER_A_LIBRARY_CI_SCHEMA.is_file():
         schema = json.loads(TIER_A_LIBRARY_CI_SCHEMA.read_text(encoding="utf-8"))
@@ -930,9 +1050,15 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
             library_docs[doc["name"]] = doc
 
     tier_a = {name for name, doc in library_docs.items() if doc.get("tier") == "A"}
-    host = data.get("hostBuild", {}) if isinstance(data.get("hostBuild"), dict) else {}
-    host_libraries = set(host.get("libraries") or [])
-    excluded = set((host.get("excludedLibraries") or {}).keys())
+    host = _as_dict(data.get("hostBuild"))
+    # `libraries`/`excludedLibraries` may themselves be a non-list/non-dict
+    # scalar in a malformed registry -- `set(host.get("libraries") or [])`
+    # used to reach `set(<int>)` (`TypeError: 'int' object is not
+    # iterable`) and `.keys()` used to reach a non-dict directly
+    # (`AttributeError`). Route both through the same container guards as
+    # every other array/object field in this file.
+    host_libraries = set(_as_list(host.get("libraries")))
+    excluded = set(_as_dict(host.get("excludedLibraries")).keys())
     known = set(library_docs)
 
     for name in sorted(host_libraries | excluded):
@@ -966,7 +1092,7 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
 
     families_seen: set[str] = set()
     family_to_som: dict[str, str] = {}
-    for idx, cell in enumerate(data.get("familyMatrix") or []):
+    for idx, cell in enumerate(_as_list(data.get("familyMatrix"))):
         if not isinstance(cell, dict):
             continue
         family = cell.get("family")
@@ -1011,7 +1137,7 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     # its family's SoM has no buildable hw_rev at all -- assert that against
     # live metadata the same way `excludedLibraries` above is asserted to
     # still be Tier A, instead of trusting the prose forever.
-    for family, _reason in sorted((data.get("excludedFamilies") or {}).items()):
+    for family, _reason in sorted(_as_dict(data.get("excludedFamilies")).items()):
         som = family_to_som.get(family)
         if som is None:
             msgs.append(f"excludedFamilies[{family}]: no familyMatrix cell "
@@ -1041,7 +1167,7 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     else:
         n_libs = len(host_libraries)
         n_excluded = len(excluded)
-        n_cells = len(data.get("familyMatrix") or [])
+        n_cells = len(_as_list(data.get("familyMatrix")))
         print(f"OK   {rel}  (hostBuild={n_libs}, excluded={n_excluded}, "
               f"familyMatrix={n_cells})")
     return failures
@@ -1118,15 +1244,16 @@ def _check_board_targets(som_files) -> list:
 
         msgs: list[str] = []
         checked = 0
-        topology = doc.get("topology") or {}
-        if not isinstance(topology, dict):
-            # `topology` is schema-typed as an object, but `doc.get("topology")
-            # or {}` does not protect a non-empty scalar (e.g. a bare string,
-            # which is truthy) -- skip rather than let `.items()` raise
-            # `AttributeError` here and abort the whole gate mid-run, hiding
-            # the schema FAIL line that already explains the real problem
-            # (same shape as `_check_soc_vela_memory_profile`).
+        raw_topology = doc.get("topology")
+        if raw_topology is not None and not isinstance(raw_topology, dict):
+            # `topology` is schema-typed as an object, but a non-empty
+            # scalar (e.g. a bare string, which is truthy) used to reach
+            # `.items()` and raise `AttributeError` here, aborting the
+            # whole gate mid-run instead of leaving the schema FAIL line
+            # (which already explains the real problem) to do the talking
+            # (same shape as `_check_chip_physical`'s `physical` guard).
             continue
+        topology = _as_dict(raw_topology)
         for core_id, entry in topology.items():
             if not isinstance(entry, dict):
                 continue

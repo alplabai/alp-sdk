@@ -95,6 +95,41 @@ def test_non_object_npus_and_cores_entries_do_not_crash_the_gate(tmp_path, monke
     a bare `.get()` and raise `AttributeError` here, hiding the schema FAIL
     line that already explains the real problem. Filtered to dicts, this doc
     must return cleanly -- no real npu survives the filter, so there is
-    nothing left to pair."""
-    doc = {"cores": ["not-a-dict"], "npus": ["not-a-dict"]}
+    nothing left to pair.
+
+    `npus` also carries ONE real dict entry (paired to the one real `cores`
+    dict entry) so the function does not short-circuit at `if not npus:
+    continue` before ever reaching the `cores[]` filter this test exists to
+    exercise -- a prior version of this fixture (`npus: ["not-a-dict"]`
+    only) never actually reached that line, so reverting its guard alone
+    would not have reddened this test."""
+    doc = {
+        "cores": ["not-a-dict", {"id": "m55_hp"}],
+        "npus": ["not-a-dict", {"type": "ethos-u55", "subtype": "high-perf",
+                                 "mac_per_cycle": 256, "paired_core": "m55_hp"}],
+    }
+    assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
+
+
+def test_non_object_top_level_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """The SoC doc's top level is schema-typed as an object, but a
+    malformed file could parse to a bare JSON array -- `doc.get("npus")`
+    used to raise `AttributeError: 'list' object has no attribute 'get'`
+    here, aborting the whole gate mid-run instead of leaving the schema
+    FAIL line (which already flags the type mismatch) to explain the real
+    problem."""
+    monkeypatch.setattr(V, "REPO", tmp_path)
+    p = tmp_path / "soc.json"
+    p.write_text(json.dumps([]))
+    assert V._check_soc_npu_pairing([p]) == []  # must not raise
+
+
+def test_non_list_npus_and_cores_do_not_crash_the_gate(tmp_path, monkeypatch):
+    """`npus`/`cores` are themselves schema-typed as arrays, but a malformed
+    document can carry a non-list scalar there (e.g. the bare int `5`,
+    which is truthy) -- iterating the unfiltered value used to raise
+    `TypeError: 'int' object is not iterable`, aborting the whole gate
+    mid-run instead of leaving the schema FAIL line (which already flags
+    the type mismatch) to explain the real problem."""
+    doc = {"cores": 5, "npus": 5}
     assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
