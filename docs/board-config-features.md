@@ -231,13 +231,13 @@ See `docs/ota.md` + `docs/ota-device-contract.md` + ADR 0009.
 ```yaml
 storage:
   - { name: settings,        fs: littlefs, size_kib: 64,  mount: /lfs/settings,
-      flash_device: mram_main }
+      flash_device: ospi0 }
   - { name: app_data,        fs: littlefs, size_kib: 128, mount: /lfs/app,
-      flash_device: mram_main }
+      flash_device: ospi0 }
   - { name: mcuboot_scratch, fs: raw,      size_kib: 32,
-      flash_device: mram_main }
+      flash_device: ospi0 }
   - { name: pinned_low,      fs: raw,      size_kib: 32,
-      flash_device: mram_main, offset_kib: 0 }    # explicit offset override
+      flash_device: ospi0, offset_kib: 0 }    # explicit offset override
 ```
 
 Project-wide.  Each entry declares a fixed partition on the
@@ -270,11 +270,13 @@ Devicetree label of its own. Naming one as `flash_device:` refuses
 with a reason instead of silently decorating a DT label that doesn't
 exist on the board. Target one of the SoM's real flash devices
 instead -- an `on_module.ospi_memories:` entry (`ospi0` on
-E1M-AEN301..801) or, capacity permitting, the flash-class node itself
-(`mram_main` on AEN). Note that on every AEN preset the six
-`carveout: false` sub-regions above already tile `mram_main` exactly
-(64 + 2688 + 2688 + 64 + 96 + 32 = 5632 KiB), so `mram_main` itself
-has no free room today.
+E1M-AEN301..801). `mram_main` itself is not a usable target either:
+no AEN preset declares a `dt_label:` override for it, so it falls
+back to a Devicetree label of `mram_main` -- but the generated board
+tree never defines that node, only `mram_storage` (`grep -rn
+mram_main zephyr/` returns nothing); that gap is tracked separately
+and closes when a `dt_label: mram_storage` override is added to the
+region.
 
 The loader rejects typoed `flash_device:` references at parse time
 with the list of known devices for the project's SoM.  When the

@@ -31,8 +31,11 @@ it decorated a node the board tree never defines. These fixtures now target
 declared in `metadata/e1m_modules/E1M-AEN301.yaml`'s `on_module.ospi_memories`)
 -- a genuine flash device with room to spare, unaffected by this fix.
 
-Sizes are unchanged from their original values -- `ospi0` has ample room.
-What is under test is the pinned-vs-bump interaction -- pin ordering, overlap
+Sizes are left at the reduced values #1445 introduced for the 96 KiB
+`storage` region (settings 64->16, app_data 128->32, mcuboot_scratch /
+pinned_low 32->8, etc.) -- `ospi0` has 32 MiB of room and did not need
+the shrink, but there was no reason to re-inflate them either. What is
+under test is the pinned-vs-bump interaction -- pin ordering, overlap
 detection, auto-layout stability -- and that is device-independent; only the
 `flash_device:` fixtures moved.
 

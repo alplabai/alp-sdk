@@ -440,11 +440,11 @@ Sets the SDK's log verbosity.  Maps to Zephyr's
 ```yaml
 storage:
   - { name: settings,        fs: littlefs, size_kib: 64,  mount: /lfs/settings,
-      flash_device: mram_main }
+      flash_device: ospi0 }
   - { name: app_data,        fs: littlefs, size_kib: 128, mount: /lfs/app,
-      flash_device: mram_main }
+      flash_device: ospi0 }
   - { name: mcuboot_scratch, fs: raw,      size_kib: 32,
-      flash_device: mram_main }
+      flash_device: ospi0 }
 ```
 
 Each entry declares one fixed partition.  `flash_device:` resolves
@@ -464,9 +464,9 @@ above the resolver yields:
 
 | Partition          | Offset | Size  | DT label        |
 |--------------------|--------|-------|-----------------|
-| `app_data`         |   0    | 128 K | `&mram_main`    |
-| `mcuboot_scratch`  | 128 K  |  32 K | `&mram_main`    |
-| `settings`         | 160 K  |  64 K | `&mram_main`    |
+| `app_data`         |   0    | 128 K | `&ospi0`        |
+| `mcuboot_scratch`  | 128 K  |  32 K | `&ospi0`        |
+| `settings`         | 160 K  |  64 K | `&ospi0`        |
 
 (name-sorted, hence `app_data` before `mcuboot_scratch` before
 `settings`).  Override the allocator with `offset_kib: <N>` on any

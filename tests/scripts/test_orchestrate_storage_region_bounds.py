@@ -11,10 +11,12 @@ real regression coverage rather than tests that merely agree with the new
 implementation.
 
 E1M-AEN801 is used deliberately: it is the one SKU with an explicit, fully
-tiled `memory_map:` (#1069 disjoint slot0 + #1289 atoc). E1M-AEN301's map is
-auto-derived to a bare `mram_main` alias with no sibling regions, which is why
-the pre-existing storage tests are unaffected by this change -- there is
-nothing there to reserve.
+tiled `memory_map:` (#1069 disjoint slot0 + #1289 atoc). E1M-AEN301 carries
+the same explicit tiling since alp-sdk#1445 -- its `mram_main` is also fully
+tiled by its own `carveout: false` sub-regions, with 0 KiB free -- so the
+pre-existing storage tests that target E1M-AEN301 are unaffected by this
+change because they now target `ospi0`, its real external OSPI NOR, not
+because AEN301 has nothing to reserve.
 
 Run locally:
 
@@ -135,6 +137,14 @@ class TestExplicitOffset:
         parts = resolve_storage_partitions(project)
         reason = _by_name(parts)["logs"].reason or ""
         assert "not customer-writable" in reason, reason
+
+        # `mram_main` is fully tiled by its own carveout:false sub-regions
+        # on every AEN preset (0 KiB free) -- the remedy must NOT lead with
+        # "pick an offset on 'mram_main' outside the SoM's declared
+        # regions", since that advice is unfollowable on the only device
+        # this branch fires for.
+        assert "pick an offset on 'mram_main'" not in reason, reason
+        assert "fully tiled" in reason, reason
 
         # The remedy must name an ALTERNATIVE device (not `mram_main`
         # itself, which is what the entry already targeted and is fully

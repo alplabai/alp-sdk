@@ -36,7 +36,9 @@ def _known_flash_devices(
 
     Today this is the union of:
       - `memory_map:` region names (explicit override or derived from
-        the SoC variant), AND
+        the SoC variant), excluding any region marked `carveout: false`
+        (a partition INSIDE a flash-class node, not a device of its
+        own, #1484), AND
       - `on_module.ospi_memories:` keys (when declared on the SoM).
 
     Kept as a list so the loader's "did you mean..." message can sort
@@ -447,13 +449,36 @@ def resolve_storage_partitions(
                         and _resolve_flash_device(
                             d, project.som_preset, METADATA_ROOT)[0]
                         is not None]
-                    remedy = (
-                        f"pick an offset on '{device_name}' outside the "
-                        f"SoM's declared regions")
-                    if alt_devices:
-                        remedy += (
-                            f", or use a different flash_device: "
-                            f"({', '.join(alt_devices)})")
+                    # Only lead with "pick an offset on <device>" when the
+                    # device actually has free room outside its reserved
+                    # spans -- on every AEN preset `mram_main` (the only
+                    # device this branch fires for, since it's the only
+                    # one with `carveout: false` sub-regions) is tiled
+                    # exactly by them with 0 KiB free, so that advice was
+                    # unfollowable on the one platform that reaches it
+                    # (#1484 review).
+                    reserved_bytes = sum(
+                        hi - lo for lo, hi, _ in reserved_spans)
+                    if reserved_bytes < capacity_bytes:
+                        remedy = (
+                            f"pick an offset on '{device_name}' outside "
+                            f"the SoM's declared regions")
+                        if alt_devices:
+                            remedy += (
+                                f", or use a different flash_device: "
+                                f"({', '.join(alt_devices)})")
+                    elif alt_devices:
+                        remedy = (
+                            f"'{device_name}' is fully tiled by the SoM's "
+                            f"own regions ({capacity_bytes // 1024} KiB, "
+                            f"no free room) -- use a different "
+                            f"flash_device: ({', '.join(alt_devices)})")
+                    else:
+                        remedy = (
+                            f"'{device_name}' is fully tiled by the SoM's "
+                            f"own regions ({capacity_bytes // 1024} KiB, "
+                            f"no free room) and no other flash_device: "
+                            f"resolves for this SoM")
                     return 0, size_aligned, (
                         f"storage entry '{entry.name}' {where} overlaps SoM "
                         f"region '{overlap_with}' on device '{device_name}' "
