@@ -195,62 +195,99 @@ procedure: `metadata/chips/gd32_swd.yaml` currently arms its
 wrong-board guard with `0x6BA02477`, but that value is not a GD32
 reading -- it is the bench-measured SW-DP ID of the V2N CM33 DAP, a
 third J-Link on this rack (`scripts/bench/aen/bench-env.sh:150`,
-measured 2026-08-08, `Found Cortex-M33 r0p4`; `CHANGELOG.md:1727-1731`),
-tracked as #1440.  An unattributed `0x0BE12477` elsewhere in this
-repo is the only GD32 candidate on record, and it too **has not been
-measured on a GD32 with a probe attached**.  See #1369 for the open
-issue tracking that measurement, and #1440 for the `0x6BA02477`
-mislabeling above.
+measured 2026-08-08, `Found Cortex-M33 r0p4`; the `e1mx-v2n-m1-01`
+probe table, `CHANGELOG.md:3364` and `CHANGELOG.md:3367`), tracked as
+#1440.  An
+unattributed `0x0BE12477` elsewhere in this repo is the only GD32
+candidate on record, and it too **has not been measured on a GD32
+with a probe attached**.  See #1369 for the open issue tracking that
+measurement, and #1440 for the `0x6BA02477` mislabeling above.
 
 **Required step on the alplab-gw bench: read the DPIDR by hand before
 flashing, and abort on a match to either of two known-wrong boards.**
 The GD32 probe (USB path `3-4.2`) and the AEN E8 probe (`3-4.4.3`)
 enumerate the same J-Link serial `603000869`, and `JLinkExe` selects
 an adapter only by serial -- with no port selector and no armed
-DPIDR guard on this out-of-`tan` path, `JLINK_SN` narrows probe
-choice but cannot prove which board is on the other end; for the
-cloned pair it is ambiguous by construction
-(`scripts/bench/aen/bench-env.sh:138-143`).  Before flashing, run the
-same read-only preflight pattern
-`scripts/bench/aen/flash-jlink-mramxip.sh`'s "0b. SAFETY GATE" block
-uses (a `JLinkExe` script that does only `si SWD` / `speed` /
-`device` / `connect`, no write commands) and read the `Found SW-DP
-with ID 0x...` line out of the transcript by hand.  Do **not** gate
-this on `scripts/bench/aen/bench-env.sh`'s
+DPIDR guard on this out-of-`tan` path, probe choice for the cloned
+pair is ambiguous by construction
+(`scripts/bench/aen/bench-env.sh:138-143`).  Setting the shell
+variable `JLINK_SN` has **no effect on a hand-run `JLinkExe`
+invocation**: `JLinkExe` takes a probe selector only from a
+`-SelectEmuBySN <sn>` command-line flag or a `SelectEmuBySN` line
+inside its CommanderScript, never from the environment.  (The env var
+works in `scripts/bench/aen/flash-jlink-mramxip.sh` only because that
+script itself converts it -- `SEL="${JLINK_SN:+SelectEmuBySN
+$JLINK_SN}"`, line 67 -- and splices `$SEL` in as the first
+CommanderScript line, line 110; there is no equivalent conversion on
+this hand-run recovery path, so `export JLINK_SN=603000869` alone
+does nothing here.)
+
+Follow this order, exactly -- the read only constrains the write that
+immediately follows it, on the same selected probe:
+
+1. **Detach the AEN E8 probe from the bench first**, physically, for
+   the duration of the recovery flash.  A read taken while the AEN E8
+   is still attached proves nothing about which of the two
+   `603000869` probes will answer the *next* invocation -- probe
+   choice is arbitrary per `JLinkExe` run, which is this section's own
+   premise. Detaching the AEN E8 is what removes the cloned-serial
+   ambiguity for every invocation from here on.
+2. Select the probe explicitly, by serial, with the identical
+   CommanderScript line on every remaining invocation. Run this exact
+   read-only preflight (matches `flash-jlink-mramxip.sh`'s "0b. SAFETY
+   GATE" shape, but with the GD32's own selector and a generic
+   Cortex-M33 device -- not the AEN part profile):
+
+   ```text
+   SelectEmuBySN 603000869
+   si SWD
+   speed 4000
+   device Cortex-M33
+   connect
+   exit
+   ```
+
+   `SelectEmuBySN 603000869` also excludes the V2N CM33 DAP
+   (`600107451`, a different serial) by construction; it is the
+   AEN-vs-GD32 ambiguity within the shared `603000869` serial that
+   step 1's physical detach resolves, not this selector.
+3. Read the `Found SW-DP with ID 0x...` line out of the transcript by
+   eye.  Abort before any write if the ID matches `AEN_DPIDR`
+   (`4C013477` -- bench-verified AEN E8) **or** `V2N_CM33_DPIDR`
+   (`6BA02477` -- the V2N CM33 DAP, `scripts/bench/aen/bench-env.sh:150`;
+   see #1440) -- both are an unconditional STOP, not merely "not the
+   AEN E8".  Do not treat `GD32_DPIDR` (`0BE12477` -- a
+   claimed-but-unattested GD32 value; see #1369) as a pass condition:
+   an ID that matches neither abort value is necessary but not
+   sufficient to proceed, since it has not itself been proven to be
+   the GD32.  `bench-env.sh`'s own "BENCH-VERIFIED" label on
+   `GD32_DPIDR` cites `docs/aen-bench-bringup.md`, which does not
+   mention the GD32 at all, so treat that label as unattested too and
+   rely on the manual read, not the `GD32_DPIDR` value, to prove the
+   probe is not on a known-wrong board.
+4. **Flash immediately** after a passing read, using the same
+   `SelectEmuBySN 603000869` line as the first line of the flash
+   CommanderScript -- the identical selector, not merely the same
+   serial typed again.  Nothing else -- no re-plug, no other
+   `JLinkExe` invocation -- may land between the read in step 3 and
+   this write; a transcript from an earlier invocation does not
+   constrain a later one, since probe selection is per-invocation.
+5. **Re-read and re-compare (repeat steps 2-3) after any re-plug of
+   either probe, or after any intervening `JLinkExe` invocation**
+   between the last passing read and the write.  A stale "it read
+   clean earlier" does not carry across a re-plug or another
+   invocation.
+
+Do **not** gate this on `scripts/bench/aen/bench-env.sh`'s
 `bench_jlink_assert_aen_dpidr` -- that helper is written to protect
 AEN-targeted writes: it *passes* (returns 0) when the transcript shows
 the AEN E8's DPIDR and *aborts* (returns 4) when it shows the GD32's,
-which is exactly inverted for this recovery flow.  Instead abort
-before any write if the transcript's ID matches `AEN_DPIDR`
-(`4C013477` -- bench-verified AEN E8) **or** `V2N_CM33_DPIDR`
-(`6BA02477` -- the V2N CM33 DAP, `scripts/bench/aen/bench-env.sh:150`;
-see #1440) -- both are an unconditional STOP, not merely "not the AEN
-E8".  Do not treat `GD32_DPIDR` (`0BE12477` -- a
-claimed-but-unattested GD32 value; see #1369) as a pass condition: an
-ID that matches neither abort value is necessary but not sufficient
-to proceed, since it has not itself been proven to be the GD32 --
-combine it with the `JLINK_SN` narrowing and probe-detach steps below
-before flashing.  No helper for the GD32-recovery direction (the
-inverse of `bench_jlink_assert_aen_dpidr`) exists yet.  The only GD32
-candidate ID on record, `0x0BE12477`, has itself not been measured on
-a GD32 with a probe attached yet (see #1369); `bench-env.sh`'s own
-"BENCH-VERIFIED" label on `GD32_DPIDR` cites
-`docs/aen-bench-bringup.md`, which does not mention the GD32 at all,
-so treat that label as unattested too and rely on the manual read,
-not the `GD32_DPIDR` value, to prove the probe is not on a
-known-wrong board (AEN E8 or V2N CM33 DAP).  For the cloned-serial
-pair specifically (GD32 bridge and AEN E8, both `603000869`), first
-narrow probe selection with `export JLINK_SN=603000869` -- this
-excludes the V2N CM33 DAP (`600107451`) but still cannot by itself
-distinguish the GD32 from the AEN E8 (`bench-env.sh:138-143`).
-Physically detaching the AEN E8 probe from the bench for the duration
-of the recovery flash then removes that remaining cloned-serial
-ambiguity and is the surer of the two; it says nothing about the V2N
-CM33 DAP, which the DPIDR stop-list above and the `JLINK_SN`
-narrowing already exclude.  There is currently no armed wrong-board
-guard on this recovery path; treat the DPIDR-read, `JLINK_SN`
-narrowing, and AEN-detach steps as manual and mandatory until #1369
-lands a measured GD32 DPIDR to arm a real guard against.
+which is exactly inverted for this recovery flow.  No helper for the
+GD32-recovery direction (the inverse of `bench_jlink_assert_aen_dpidr`)
+exists yet.  There is currently no armed wrong-board guard on this
+recovery path; treat the AEN-detach, `SelectEmuBySN` selection, and
+DPIDR-read steps above as manual and mandatory until #1369 lands a
+measured GD32 DPIDR to arm a real guard against.
 
 `update_channel: alp_ota_spi_bridge` is deliberately a different value
 from the CC3501E's `alp_ota_spi_otp`: this channel streams into the

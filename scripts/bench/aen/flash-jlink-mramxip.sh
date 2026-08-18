@@ -100,12 +100,12 @@ esac
 
 # 0b. SAFETY GATE -- confirm we are talking to the AEN E8, not some other probe
 # on the bench, BEFORE any MRAM write. The AEN E8 SW-DP IDR is 0x4C013477
-# (BENCH-VERIFIED, see docs/bring-up-aen.md); the V2N-M1 GD32 probe reads
-# 0x0BE12477. Flashing the wrong board is the one unrecoverable bench mistake,
-# so this is a hard ABORT, not a warning -- read-only connect first, no writes
-# happen until the ID is confirmed.
-AEN_DPIDR="4C013477"
-GD32_DPIDR="0BE12477"
+# (BENCH-VERIFIED, see docs/bring-up-aen.md); GD32_DPIDR (0x0BE12477,
+# exported by bench-env.sh) is the only GD32 candidate on record but has
+# NOT been measured on a GD32 with a probe attached (see #1369) -- treat
+# it as unattested, not bench-verified. Flashing the wrong board is the one
+# unrecoverable bench mistake, so this is a hard ABORT, not a warning --
+# read-only connect first, no writes happen until the ID is confirmed.
 cat > /tmp/flowd-mramxip-preflight.jlink <<EOF
 $SEL
 si SWD
