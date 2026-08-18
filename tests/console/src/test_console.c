@@ -321,4 +321,68 @@ ZTEST(alp_console, test_wifi_ap_still_accepts_wpa3_token)
 	                 out);
 }
 
+/* #1552: the "wpa3" token with an EMPTY passphrase used to be accepted, because
+ * the empty passphrase selected open and `if (argc >= 4) { sec = 2u; }` then
+ * overwrote that with WPA3-SAE -- which has no open mode, so the result was a
+ * declared WPA3-SAE network with no PSK. Bench-measured on E1M-AEN801 before
+ * the fix: `wifi ap TestAP-1480 "" wpa3` was accepted and the AP was started.
+ * Both commands carry the identical shape, so both get the identical test. */
+
+ZTEST(alp_console, test_wifi_connect_rejects_wpa3_with_empty_passphrase)
+{
+	const char *out = run("alp companion wifi connect \"my ssid\" \"\" wpa3");
+
+	zassert_not_null(strstr(out, "requires a passphrase"),
+	                 "wpa3 with an empty passphrase must be refused, not silently "
+	                 "configured as SAE with no PSK: %s",
+	                 out);
+	/* Refused DURING parsing -- before any companion/state check, same
+	 * ordering the #1376/#1480 token guards established. */
+	zassert_is_null(strstr(out, "companion not registered"),
+	                "a usage error must not be reported as a missing companion: %s",
+	                out);
+}
+
+ZTEST(alp_console, test_wifi_ap_rejects_wpa3_with_empty_passphrase)
+{
+	const char *out = run("alp companion wifi ap \"my ssid\" \"\" wpa3");
+
+	zassert_not_null(strstr(out, "requires a passphrase"),
+	                 "wpa3 with an empty passphrase must be refused, not silently "
+	                 "configured as SAE with no PSK: %s",
+	                 out);
+	zassert_is_null(strstr(out, "companion not registered"),
+	                "a usage error must not be reported as a missing companion: %s",
+	                out);
+}
+
+/* Controls: the guard must reject ONLY the contradiction, not the two
+ * legitimate ways to ask for an open network. Without these, deleting the
+ * `argc >= 4` half of the condition would still pass the two tests above while
+ * banning every open network. */
+
+ZTEST(alp_console, test_wifi_connect_still_accepts_empty_passphrase_without_wpa3)
+{
+	const char *out = run("alp companion wifi connect \"my ssid\" \"\"");
+
+	zassert_is_null(strstr(out, "requires a passphrase"),
+	                "an empty passphrase with no wpa3 token is a valid open network: %s",
+	                out);
+	zassert_not_null(strstr(out, "companion not registered"),
+	                 "a well-formed open connect should reach the companion check: %s",
+	                 out);
+}
+
+ZTEST(alp_console, test_wifi_ap_still_accepts_empty_passphrase_without_wpa3)
+{
+	const char *out = run("alp companion wifi ap \"my ssid\" \"\"");
+
+	zassert_is_null(strstr(out, "requires a passphrase"),
+	                "an empty passphrase with no wpa3 token is a valid open soft-AP: %s",
+	                out);
+	zassert_not_null(strstr(out, "companion not registered"),
+	                 "a well-formed open ap should reach the companion check: %s",
+	                 out);
+}
+
 ZTEST_SUITE(alp_console, NULL, suite_setup, NULL, NULL, NULL);

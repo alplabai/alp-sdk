@@ -97,7 +97,7 @@ jobs:
       - name: Detect bootstrap-manifest-relevant changes
         id: filter
         uses: dorny/paths-filter@v3
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           filters: |
             manifest:
@@ -157,7 +157,7 @@ jobs:
     # matching branch-protection update.
     name: distro install · ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     container:
       image: ${{ matrix.image }}
     # `set -euo pipefail` below is bash-only. GitHub Actions' own default
@@ -178,7 +178,7 @@ jobs:
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
-        timeout-minutes: 3
+        timeout-minutes: 5
         with:
           fetch-depth: 1
 
@@ -200,9 +200,11 @@ jobs:
       # (load-bearing for tan-cli#650's root-strip on a customer's non-root
       # host) is dropped the same way tan's --fix does before executing.
       - name: Render prerequisites.install.linux.${{ matrix.pm }} as a runnable script
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         env:
           PM: ${{ matrix.pm }}
-        timeout-minutes: 3
         run: |
           set -euo pipefail
           python3 - <<'PY' > /tmp/pm-install.sh

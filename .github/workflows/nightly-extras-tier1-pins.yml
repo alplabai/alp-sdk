@@ -51,25 +51,27 @@ concurrency:
 jobs:
   fetch-and-verify:
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           path: alp-sdk
 
       - name: Set up Python + west
         uses: actions/setup-python@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           # Repo is checked out under alp-sdk/ (path:), but setup-python (a
           # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
           python-version-file: alp-sdk/.python-version
 
       - name: Install west
-        timeout-minutes: 2
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip3 install --user west pyyaml
 
       - name: Derive extras-tier1 library list from west.yml
