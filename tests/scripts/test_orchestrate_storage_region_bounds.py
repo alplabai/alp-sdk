@@ -173,6 +173,91 @@ class TestExplicitOffset:
         assert "atoc" in (logs.reason or ""), logs.reason
 
 
+class TestReservedBytesLessThanCapacity:
+    """The `reserved_bytes < capacity_bytes` branch (partition.py) -- the
+    OTHER shape a reserved-region overlap can take, distinct from AEN's
+    fully-tiled `mram_main`.  E1M-V2N101's `ddr_main` has a single reserved
+    span (`m33_tcm`) and 4194176 KiB of free room, so this is the
+    `pick an offset on '<device>' outside the SoM's declared regions`
+    remedy, not the `fully tiled` one -- and per #1484 review it has NO
+    prior coverage in this file (both TestExplicitOffset cases pin AEN801,
+    which is fully tiled and never reaches this branch).
+    """
+
+    def test_v2n101_ddr_main_overlap_names_no_undefined_alternative(
+            self, tmp_path):
+        """Regression for the #1484 review major finding: naming `m33_tcm`
+        (the very region just refused) or `ocram_low` as a "different
+        flash_device:" alternative -- neither has a Devicetree label
+        (`grep -rn "m33_tcm\\|ocram_low" zephyr/` finds no DT node for
+        either), so following that remedy would decorate an undefined
+        node. E1M-V2N101 has no `on_module.ospi_memories:` and no
+        `memory_map:` region carries an explicit `dt_label:` override, so
+        the correct remedy names NO alternative device at all.
+        """
+        path = _write_board(tmp_path, """
+        name: test-v2n101-ddr-main-overlap
+        som:
+          sku: E1M-V2N101
+          hw_rev: r1
+
+        cores:
+          m33_sm:
+            app: ./m33_sm
+
+        storage:
+          - { name: blob, size_kib: 4096, fs: raw, flash_device: ddr_main, offset_kib: 917504 }
+        """)
+        project = load_board_yaml(path)
+        parts = resolve_storage_partitions(project)
+        blob = _by_name(parts)["blob"]
+        assert getattr(blob, "status", None) == "blocked", blob
+        reason = blob.reason or ""
+        assert "m33_tcm" in reason, reason
+        assert "not customer-writable" in reason, reason
+
+        # The branch under test: room is free outside the reserved span,
+        # so the remedy must lead with "pick an offset", not "fully tiled".
+        assert "pick an offset on 'ddr_main'" in reason, reason
+        assert "fully tiled" not in reason, reason
+
+        # The defect: neither reserved region may be offered back as a
+        # "different flash_device:" -- both are refused sub-regions with
+        # no verified Devicetree label.
+        assert "m33_tcm" not in reason.split(
+            "not customer-writable")[1], (
+            f"remedy re-offers the refused region: {reason}")
+        assert "ocram_low" not in reason, reason
+        assert "use a different flash_device:" not in reason, reason
+
+    def test_a_named_alternative_always_round_trips(self, tmp_path):
+        """Whenever the remedy DOES name an alternative (any SoM, any
+        overlap), every name in the parenthesised list must itself
+        resolve AND carry a verified Devicetree label -- guards against a
+        future SoM/region reintroducing the #1484 defect shape.
+        """
+        from alp_orchestrate.partition import _has_real_dt_label
+
+        path = _write_board(tmp_path, _aen801("""
+      - { name: logs, size_kib: 32, fs: littlefs, flash_device: mram_main, offset_kib: 0, mount: /lfs/logs }
+    """))
+        project = load_board_yaml(path)
+        parts = resolve_storage_partitions(project)
+        reason = _by_name(parts)["logs"].reason or ""
+        if "use a different flash_device:" not in reason:
+            return
+        listed = reason.split(
+            "use a different flash_device: (")[1].split(")")[0]
+        for device in (d.strip() for d in listed.split(",")):
+            assert _has_real_dt_label(
+                device, project.som_preset, METADATA_ROOT), (
+                f"remedy named '{device}' with no verified DT label")
+            descriptor, err = _resolve_flash_device(
+                device, project.som_preset, METADATA_ROOT)
+            assert descriptor is not None, (
+                f"remedy named '{device}' but it does not resolve: {err}")
+
+
 class TestTargetingARegionDirectly:
     def test_naming_the_mram_storage_subregion_directly_is_refused(
             self, tmp_path):

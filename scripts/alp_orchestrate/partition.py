@@ -258,6 +258,36 @@ def _resolve_flash_device(
         f"{som_preset.get('sku', '<unknown>')}")
 
 
+def _has_real_dt_label(
+    flash_device: str,
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+) -> bool:
+    """True when `flash_device`'s Devicetree label is KNOWN, not fabricated.
+
+    `_resolve_flash_device()` succeeding is NOT enough to recommend a device
+    to a customer: its `dt_label` DEFAULTS to the device name whenever the
+    metadata omits an explicit override, and that default is unverified
+    against the board `.dts` (see the schema's `memory_region.dt_label`
+    description -- AEN's `mram_main` region, for example, names its flash
+    node `mram_storage`, not `mram_main`). Emitting `&<name>` for one of
+    those is the exact defect #1484 closes, so only trust:
+
+      - an `on_module.ospi_memories:` key -- it IS its own DT node label by
+        construction (`ospi0` etc.; see the `ospi0: ospi0@...` node in
+        zephyr/dts/alif/ensemble_e8_peripherals.dtsi), or
+      - a `memory_map:` region that carries an EXPLICIT `dt_label:`.
+    """
+    om = som_preset.get("on_module") or {}
+    ospi = om.get("ospi_memories") or {}
+    if isinstance(ospi, dict) and flash_device in ospi:
+        return True
+    for region in resolve_memory_map(som_preset, metadata_root):
+        if region.get("name") == flash_device:
+            return isinstance(region.get("dt_label"), str)
+    return False
+
+
 def _blocked_partition(
     entry: StorageEntry,
     reason: str,
@@ -342,6 +372,15 @@ def resolve_storage_partitions(
 
         dt_label = descriptor["dt_label"]
         capacity_bytes = descriptor["size_bytes"]
+        # True when `device_name` is an `on_module.ospi_memories:` key --
+        # an off-chip OSPI part that legitimately has no `memory_map:`
+        # presence at all, vs. an on-chip `memory_map:` device (`ddr_main`
+        # etc.) where the SoM's own regions really do live on the same
+        # address window.  Used below to keep the reserved-spans warning
+        # for the case it exists to catch.
+        is_ospi_device = device_name in (
+            (project.som_preset.get("on_module") or {}).get(
+                "ospi_memories") or {})
         # Page-aligned high-water mark; sibling partitions allocate
         # bottom-up from offset 0.  Page = 4 KiB matches the IPC
         # carve-out allocator; storage erase blocks on every silicon
@@ -361,10 +400,15 @@ def resolve_storage_partitions(
             device_name, capacity_bytes, project.som_preset, METADATA_ROOT)
         reserved_names = {name for _, _, name in reserved_spans}
         allocated.extend(reserved_spans)
-        if reserved_reason is not None:
+        if reserved_reason is not None and not is_ospi_device:
             # Degrading to sibling-only checking is exactly the silent
             # false-PASS this fix exists to remove, so SAY so rather than
             # letting the caller believe the SoM's regions were honoured.
+            # Suppressed for an `ospi_memories:` device: an off-chip OSPI
+            # part has no `memory_map:` presence to begin with, so sibling-
+            # only checking isn't a degradation there -- warning on it
+            # would fire on every AEN storage build using `ospi0` (#1484
+            # review).
             print(f"alp_orchestrate.partition: WARNING: {reserved_reason}; "
                   f"storage offsets on '{device_name}' are checked against "
                   f"sibling partitions only", file=sys.stderr)
@@ -432,31 +476,39 @@ def resolve_storage_partitions(
                          if entry.offset_kib is not None
                          else f"auto-allocated offset {base_bytes // 1024} KiB")
                 if overlap_with in reserved_names:
-                    # `overlap_with` is a `carveout: false` SUB-region (e.g.
-                    # AEN's `mcuboot` / `storage` / `atoc`) -- it has no
-                    # Devicetree label of its own and is refused by
-                    # `_resolve_flash_device()` above, so it must NOT be
-                    # named here as something to target directly (#1484).
-                    # Point at a flash device that actually resolves.
-                    # A name in `_known_flash_devices()` is not enough --
-                    # e.g. an `ospi_memories:` entry with a TBD capacity
-                    # (E1M-AEN801's `ospi1`) is known but does not actually
-                    # resolve.  Only recommend one that would.
+                    # `overlap_with` is one of the SoM's OWN regions (any
+                    # `memory_map:` region with an addressed `base:` is
+                    # seeded into `reserved_spans` regardless of its
+                    # `carveout:` value -- see `_reserved_spans()`) -- it
+                    # must NOT be named here as something to target
+                    # directly (#1484), and neither may any other reserved
+                    # region: they are exactly what this entry just failed
+                    # to overlap.  A name in `_known_flash_devices()` is
+                    # not enough either -- e.g. an `ospi_memories:` entry
+                    # with a TBD capacity (E1M-AEN801's `ospi1`) is known
+                    # but does not actually resolve, and a device that DOES
+                    # resolve may still be recommending an undefined DT
+                    # node (`_resolve_flash_device()` defaults `dt_label`
+                    # to the device name when unset -- see
+                    # `_has_real_dt_label()`).  Only recommend a device
+                    # that both resolves AND has a verified DT label.
                     alt_devices = [
                         d for d in _known_flash_devices(
                             project.som_preset, METADATA_ROOT)
                         if d != device_name
+                        and d not in reserved_names
+                        and _has_real_dt_label(
+                            d, project.som_preset, METADATA_ROOT)
                         and _resolve_flash_device(
                             d, project.som_preset, METADATA_ROOT)[0]
                         is not None]
                     # Only lead with "pick an offset on <device>" when the
                     # device actually has free room outside its reserved
-                    # spans -- on every AEN preset `mram_main` (the only
-                    # device this branch fires for, since it's the only
-                    # one with `carveout: false` sub-regions) is tiled
-                    # exactly by them with 0 KiB free, so that advice was
-                    # unfollowable on the one platform that reaches it
-                    # (#1484 review).
+                    # spans.  Reserved spans come from ANY addressed
+                    # memory_map region, `carveout: false` or not; AEN's
+                    # `mram_main` is the fully-tiled case (0 KiB free,
+                    # tiled exactly by its `carveout: false` sub-regions),
+                    # not the only case this branch can fire for.
                     reserved_bytes = sum(
                         hi - lo for lo, hi, _ in reserved_spans)
                     if reserved_bytes < capacity_bytes:

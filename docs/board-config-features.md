@@ -257,7 +257,8 @@ name-sort position -- `pinned_low` above sorts after `app_data` and
 1. `memory_map:` region names (e.g. `mram_main`, `ocram_low`) --
    either declared on the SoM or auto-derived from the SoC variant's
    `mram_mb` / `sram_banks_kb` (the same resolution `resolve_memory_map()`
-   does for IPC carve-outs).
+   does for IPC carve-outs).  Neither example name above resolves to a
+   working target today -- see the `dt_label:` caveat below.
 2. `on_module.ospi_memories:` keys (e.g. `ospi0`) -- external OSPI
    flash declared on the SoM.
 
@@ -274,9 +275,9 @@ E1M-AEN301..801). `mram_main` itself is not a usable target either:
 no AEN preset declares a `dt_label:` override for it, so it falls
 back to a Devicetree label of `mram_main` -- but the generated board
 tree never defines that node, only `mram_storage` (`grep -rn
-mram_main zephyr/` returns nothing); that gap is tracked separately
-and closes when a `dt_label: mram_storage` override is added to the
-region.
+mram_main zephyr/` returns nothing); that gap has no tracking issue
+yet (as of this writing) and closes when a `dt_label: mram_storage`
+override is added to the region.
 
 The loader rejects typoed `flash_device:` references at parse time
 with the list of known devices for the project's SoM.  When the
