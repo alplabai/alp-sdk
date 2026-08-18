@@ -50,7 +50,7 @@ from sentinels import is_tbd
 from . import libraries as _library_layer
 from .loader import _library_alias_table
 from .models import BoardProject, OrchestratorError, Slice
-from .paths import METADATA_ROOT, REPO
+from .paths import REPO
 from .partition import resolve_storage_partitions
 from .slugs import (
     _BLOCK_SLUGS,
@@ -842,8 +842,8 @@ def _emit_subsystems(slice_: Slice, chip_subsystems: set[str]) -> list[str]:
 
 def _per_core_library_kconfig(
         lib: str,
-        manifest: Optional[dict] = None,
-        metadata_root: Path = METADATA_ROOT) -> Optional[list[str]]:
+        manifest: Optional[dict],
+        metadata_root: Path) -> Optional[list[str]]:
     """Base-Kconfig lines for a per-core `libraries:` token, read from the
     library's ADR 0018 manifest (metadata/libraries/<canonical>.yaml) rather
     than a hand-maintained table (WS6-c #610 §6).

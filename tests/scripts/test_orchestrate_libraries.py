@@ -232,7 +232,7 @@ def test_curated_library_kconfig_resolves_against_explicit_metadata_root(
     line must come from the manifest at `metadata_root`, not the SDK's
     own in-tree `metadata/libraries/cmsis-dsp.yaml` -- pre-fix,
     `kconfig.py`'s `_library_layer.zephyr_kconfig_lines(project, slice_)`
-    (and five siblings) called the ADR-0018 layer without its third
+    (and four siblings) called the ADR-0018 layer without its third
     `metadata_root` argument, so they always read the in-tree manifest
     even under `load_board_yaml(..., metadata_root=<scratch>)`.
 

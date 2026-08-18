@@ -23,7 +23,6 @@ except ImportError:
 import json
 
 from alp_project_loader import (
-    METADATA_ROOT,
     _load_yaml,
     _sku_family,
     resolve_capabilities,
@@ -40,11 +39,16 @@ _SOC_FAMILY_TOKEN: dict[str, str] = {
 }
 
 
-def _library_alias_table(
-        metadata_root: Path = METADATA_ROOT) -> dict[str, str]:
+def _library_alias_table(metadata_root: Path) -> dict[str, str]:
     """Legacy per-core `libraries:` token -> canonical manifest name
     (metadata/library-aliases-v1.json).  Empty dict if the table is
-    absent (keeps callers robust)."""
+    absent (keeps callers robust).
+
+    `metadata_root` is required, not defaulted, on purpose: a default of
+    `METADATA_ROOT` is exactly the shape that hid #1485's original defect
+    (an omitted argument silently resolving against the SDK's own in-tree
+    `metadata/` instead of raising).  Callers pass the project's
+    `effective_metadata_root()`."""
     path = metadata_root / "library-aliases-v1.json"
     if not path.is_file():
         return {}
@@ -55,7 +59,7 @@ def _library_alias_table(
 
 def _emit_library_hw_backends(
         libs: list[str], sku: str,
-        metadata_root: Path = METADATA_ROOT) -> list[str]:
+        metadata_root: Path) -> list[str]:
     """Per-library HW-accelerator binding loader.
 
     For each enabled library whose canonical manifest (resolved via the
@@ -85,13 +89,13 @@ def _emit_library_hw_backends(
         metadata for the roadmap but are not emitted as active build
         claims.
 
-    `metadata_root` defaults to the SDK's own in-tree `metadata/`; an
-    explicit override (threaded from `load_board_yaml(...,
-    metadata_root=...)` via `BoardProject.effective_metadata_root()`)
-    makes every read below -- the SKU preset, the alias table, and each
-    library manifest -- resolve against the SAME tree the rest of the
-    project was validated against, instead of silently falling back to
-    the SDK's own in-tree metadata (#1485).
+    `metadata_root` is required, not defaulted -- pass the project's
+    `effective_metadata_root()` (threaded from `load_board_yaml(...,
+    metadata_root=...)`) so every read below -- the SKU preset, the alias
+    table, and each library manifest -- resolves against the SAME tree the
+    rest of the project was validated against, instead of an omitted
+    argument silently falling back to the SDK's own in-tree metadata
+    (#1485).
     """
     # An unrecognised SKU pattern (a synthetic/test-only SKU, or a real SKU
     # from a family this matcher doesn't know) resolves to "no HW backend
@@ -244,8 +248,11 @@ _OTA_PROVIDER_WEST_MODULES: dict[str, str] = {
 
 def _load_curated_library_manifest(
         lib: str,
-        metadata_root: Path = METADATA_ROOT) -> dict[str, Any] | None:
-    """Load a top-level ADR 0018 library manifest if one exists."""
+        metadata_root: Path) -> dict[str, Any] | None:
+    """Load a top-level ADR 0018 library manifest if one exists.
+
+    `metadata_root` is required, not defaulted -- see `_library_alias_table`.
+    """
     path = metadata_root / "libraries" / f"{lib}.yaml"
     if not path.is_file():
         return None
@@ -260,7 +267,7 @@ def _emit_west_libraries(
     *,
     v2_libraries: list[str] | None = None,
     v2_project_libraries: list[str] | None = None,
-    metadata_root: Path = METADATA_ROOT,
+    metadata_root: Path,
 ) -> str:
     """Emit a west.yml fragment that the customer's manifest can
     import to pin the Zephyr modules board.yaml's `libraries:` array
@@ -275,10 +282,10 @@ def _emit_west_libraries(
     by name or emit a standalone west project pin from the manifest's
     `integration.zephyr.west` block.
 
-    `metadata_root` defaults to the SDK's own in-tree `metadata/`; pass the
-    project's `effective_metadata_root()` so the alias table and every
-    curated library manifest resolve against the SAME tree `--metadata-root`
-    validated the rest of the project against (#1485).
+    `metadata_root` is required, not defaulted -- pass the project's
+    `effective_metadata_root()` so the alias table and every curated library
+    manifest resolve against the SAME tree `--metadata-root` validated the
+    rest of the project against (#1485).
     """
     del sku_preset, board_preset  # unused -- libraries are SoM-agnostic
     if v2_libraries is not None:

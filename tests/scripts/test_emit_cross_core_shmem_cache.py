@@ -45,8 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from alp_orchestrate import kconfig as K  # noqa: E402
 from alp_orchestrate.models import IpcEntry, Slice  # noqa: E402
-
-_MR = K.METADATA_ROOT
+from alp_orchestrate.paths import METADATA_ROOT as _MR  # noqa: E402
 
 
 def _project(ipc: list[IpcEntry]) -> types.SimpleNamespace:
