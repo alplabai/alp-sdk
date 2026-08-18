@@ -126,6 +126,13 @@ jobs:
   python-smoke:
     name: python-smoke
     runs-on: ${{ matrix.os }}
+    # #1477: worst observed successful run 1068s/17.8min (windows-latest,
+    # across 9 sampled runs) -- driven by the `pytest tests/scripts/`
+    # step below, which is pure local Python and so (per this file's own
+    # network/compile heuristic) carries no timeout-minutes of its own;
+    # the job ceiling is what actually bounds it. 40min = ~2.2x that
+    # observed worst case.
+    timeout-minutes: 40
 
     strategy:
       # Every leg reports independently: a Windows-only break must not
@@ -138,15 +145,18 @@ jobs:
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        timeout-minutes: 3
 
       - name: Set up Python
         uses: actions/setup-python@v6
+        timeout-minutes: 2
         with:
           python-version-file: .python-version
 
       - name: Install Python deps
         # model-io adds tflite + flatbuffers so the .alpmodel tensor-I/O
         # tests run here (they importorskip otherwise); cbor2 is a base dep.
+        timeout-minutes: 3
         run: pip install -e ".[dev,model-io]"
 
       # ---------------------------------------------------------
@@ -271,9 +281,17 @@ jobs:
 
       # ---------------------------------------------------------
       # 4. Test sweep -- the same pytest battery the Linux PR
-      #    gate runs.  ~370 tests; <30 s on every OS.
+      #    gate runs.  ~370 tests; <30 s on every OS on Linux/macOS, but
+      #    Windows is far slower (worst observed successful run 1009s/
+      #    16.8min across the sampled history) -- #1477 gave this step an
+      #    explicit timeout-minutes rather than leaving it to the
+      #    uncapped-step 1min/step budget
+      #    test_job_ceiling_exceeds_the_sum_of_its_step_timeouts assumes,
+      #    which was never true for this step (see that constant's own
+      #    comment in the test file).
       # ---------------------------------------------------------
       - name: pytest tests/scripts/
+        timeout-minutes: 25
         run: python -m pytest tests/scripts/ -q
 
   # ---------------------------------------------------------------
@@ -284,6 +302,13 @@ jobs:
   loader-smoke:
     name: loader-smoke
     runs-on: ${{ matrix.os }}
+    # #1477: worst observed successful run 26s across 9 sampled runs.
+    # Raised from the formula's 15min to 20min so the job ceiling stays
+    # strictly above the sum of its own step timeouts plus the 1min/step
+    # budget test_job_ceiling_exceeds_the_sum_of_its_step_timeouts assigns
+    # every uncapped `emit *` step (6 of them; only the flagged setup
+    # steps above carry their own cap).
+    timeout-minutes: 20
 
     strategy:
       fail-fast: false
@@ -293,13 +318,16 @@ jobs:
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        timeout-minutes: 3
 
       - name: Set up Python
         uses: actions/setup-python@v6
+        timeout-minutes: 2
         with:
           python-version-file: .python-version
 
       - name: Install Python deps
+        timeout-minutes: 3
         run: pip install jsonschema pyyaml
 
       # Exercise every emit mode against the canonical template.
@@ -309,6 +337,7 @@ jobs:
         run: python scripts/alp_project.py --input metadata/templates/board.yaml.example --emit zephyr-conf
 
       - name: emit cmake-args
+        timeout-minutes: 2
         run: python scripts/alp_project.py --input metadata/templates/board.yaml.example --emit cmake-args
 
       - name: emit hw-info-h
