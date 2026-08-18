@@ -316,7 +316,15 @@ emits `CONFIG_ALP_SDK_CHIP_<NAME>=y` per chip slug (or
 helper rather than a `chips/` driver — the `button_led` and
 `pdm_mic` exceptions).  The orchestrator also pulls in each chip
 driver's required Zephyr subsystems (`CONFIG_I2C=y`, `CONFIG_SPI=y`,
-…) via the `_CHIP_SUBSYSTEMS` table in `scripts/alp_project.py`.
+…) via the `_CHIP_SUBSYSTEMS` table in
+`scripts/alp_project_emit/__init__.py` (`scripts/alp_project.py`
+re-exports the name, but the table itself lives in the emit package).
+A chip whose Kconfig `depends on` line is an OR (e.g. `gd32g553`'s
+`depends on (SPI || I2C)`) turns **both** sides of the `||` on rather
+than picking one — always sufficient for the OR, and it can't silently
+drop whichever transport a future board relies on
+(`scripts/check_chip_subsystems_parity.py` pins this table against
+`zephyr/kconfigs/chips.kconfig`, issue #1487).
 
 Devices marked `assembled: optional` in `i2c_devices:` (DNI on some
 builds) are **not** auto-enabled; the customer opts them in via
