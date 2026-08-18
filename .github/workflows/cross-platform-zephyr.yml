@@ -96,12 +96,15 @@ on:
       - 'tests/scripts/**'
       - 'docs/**/*.md'
       - 'README.md'
-      # Every workflow, not just this one. This job is the only place
-      # `pytest tests/scripts/` runs, and that is where
-      # test_workflows_are_loadable.py lives -- so a PR that breaks a
-      # DIFFERENT workflow's YAML must still trigger it. Narrowing this
-      # back to a single filename is how two unparseable workflows
-      # reached `dev` unnoticed.
+      # Every workflow, not just this one. `pytest tests/scripts/` also
+      # runs in pr-metadata-validate.yml's `validate` job, but that job's
+      # own `paths:` only include '.github/workflows/pr-metadata-validate.yml'
+      # -- an edit to a DIFFERENT workflow file doesn't trigger it. This
+      # is the only workflow where an edit to ANY workflow file reaches
+      # test_workflows_are_loadable.py, which lives under tests/scripts/
+      # and is exercised by this job's pytest step. Narrowing this back to
+      # a single filename is how two unparseable workflows reached `dev`
+      # unnoticed.
       - '.github/workflows/**'
   push:
     branches: [main]
@@ -116,12 +119,15 @@ on:
       - 'tests/scripts/**'
       - 'docs/**/*.md'
       - 'README.md'
-      # Every workflow, not just this one. This job is the only place
-      # `pytest tests/scripts/` runs, and that is where
-      # test_workflows_are_loadable.py lives -- so a PR that breaks a
-      # DIFFERENT workflow's YAML must still trigger it. Narrowing this
-      # back to a single filename is how two unparseable workflows
-      # reached `dev` unnoticed.
+      # Every workflow, not just this one. `pytest tests/scripts/` also
+      # runs in pr-metadata-validate.yml's `validate` job, but that job's
+      # own `paths:` only include '.github/workflows/pr-metadata-validate.yml'
+      # -- an edit to a DIFFERENT workflow file doesn't trigger it. This
+      # is the only workflow where an edit to ANY workflow file reaches
+      # test_workflows_are_loadable.py, which lives under tests/scripts/
+      # and is exercised by this job's pytest step. Narrowing this back to
+      # a single filename is how two unparseable workflows reached `dev`
+      # unnoticed.
       - '.github/workflows/**'
   # NOT yet load-bearing -- python-smoke/loader-smoke are not required
   # contexts on `dev` or `main` today (see the NOTE above, alp-sdk#1528).
@@ -132,8 +138,13 @@ on:
   # contexts (#1415); a future required-context here would hit the same
   # AWAITING_CHECKS hang without it. Bare (no `paths:`): `merge_group`
   # doesn't support the same path-filter semantics `pull_request`/`push`
-  # get above, and neither job below carries a job-level `if:` that would
-  # need teaching about this event.
+  # get above. `merge_group` also can't be scoped by matrix leg at the
+  # trigger level, so each job below carries a job-level `if:` that skips
+  # the macOS/Windows legs on that event -- only `ubuntu-latest` is a
+  # candidate for the eventual required context, and `merge_group` fires
+  # unconditionally on every `dev` merge-queue entry with no `paths:` to
+  # narrow it, so the other two legs would otherwise bill full matrix cost
+  # (macOS 10x, Windows 2x) on every queue entry while gating nothing.
   merge_group:
   workflow_dispatch:
 
@@ -152,6 +163,11 @@ jobs:
   python-smoke:
     name: python-smoke
     runs-on: ${{ matrix.os }}
+    # merge_group has no paths: filter (see the trigger comment above), so
+    # cap it to the ubuntu-latest leg -- the only leg that's a candidate
+    # for the eventual required context -- rather than billing the full
+    # macOS (10x)/Windows (2x) matrix cost on every dev merge-queue entry.
+    if: github.event_name != 'merge_group' || matrix.os == 'ubuntu-latest'
     # #1477: worst observed successful run 1068s/17.8min (windows-latest,
     # across 9 sampled runs) -- driven by the `pytest tests/scripts/`
     # step below, which is pure local Python and so (per this file's own
@@ -328,6 +344,11 @@ jobs:
   loader-smoke:
     name: loader-smoke
     runs-on: ${{ matrix.os }}
+    # merge_group has no paths: filter (see the trigger comment above), so
+    # cap it to the ubuntu-latest leg -- the only leg that's a candidate
+    # for the eventual required context -- rather than billing the full
+    # macOS (10x)/Windows (2x) matrix cost on every dev merge-queue entry.
+    if: github.event_name != 'merge_group' || matrix.os == 'ubuntu-latest'
     # #1477: worst observed successful run 26s across 9 sampled runs.
     # Raised from the formula's 15min to 20min so the job ceiling stays
     # strictly above the sum of its own step timeouts plus the 1min/step
