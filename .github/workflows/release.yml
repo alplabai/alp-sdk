@@ -320,7 +320,17 @@ jobs:
       actions: read       # needed to read the workflow trigger event
       id-token: write     # OIDC token for Sigstore signing
       contents: write     # write the attestation to the Release
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a  # v2.1.0
+    # alp-sdk#1479: deliberately NOT SHA-pinned, unlike every other `uses:`
+    # in this repo. slsa-framework/slsa-github-generator's own README
+    # ("Referencing SLSA builders and generators") requires its builders
+    # and generators be referenced by tag as `@vX.Y.Z` so slsa-verifier can
+    # verify the ref of the trusted reusable workflow -- a hash pin is not
+    # supported (tracked upstream as slsa-verifier#12). The generator's
+    # `compile-generator` input also defaults to false here, meaning its
+    # binary-fetch step downloads a release asset at this ref, which MUST
+    # be a tag; a commit SHA breaks that fetch. Trust anchor for this one
+    # reference is the Sigstore-signed builder identity, not a SHA pin.
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: "${{ needs.build.outputs.hashes }}"
       upload-assets: true
