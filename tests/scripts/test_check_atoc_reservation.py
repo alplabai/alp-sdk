@@ -216,6 +216,21 @@ class TestSlot0AddressCheck(unittest.TestCase):
         p = self._board("e1m_aen000_m55_hp", 0x10000)
         self.assertEqual(atoc._check_slot0_address(p), [])
 
+    def test_half_authored_preset_fails_clean_not_traceback(self):
+        # he_slot0 declared, hp_slot0 missing -- the resolver raises
+        # OrchestratorError; the gate must turn that into a failure
+        # string, not propagate the exception (#1482 fix-round finding).
+        (atoc.PRESETS / "E1M-AEN998.yaml").write_text(
+            "memory_map:\n"
+            "  - { name: mcuboot,  base: 0x80000000, size_kib: 64 }\n"
+            "  - { name: he_slot0, base: 0x80010000, size_kib: 2688, "
+            "accessible_from: [m55_he] }\n",
+            encoding="utf-8")
+        p = self._board("e1m_aen998_m55_hp", 0x2b0000)
+        failures = atoc._check_slot0_address(p)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("hp", failures[0])
+
 
 class TestRealTree(unittest.TestCase):
     def test_the_committed_tree_passes(self):

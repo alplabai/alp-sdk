@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Refuse an Alif Ensemble (AEN) layout that leaves the top of the App MRAM
-window writable by the application.
+window writable by the application, or that publishes a slot0 flash address
+disagreeing with `loader._resolve_slot0_load_address()` (#1482).
 
 Alif's SETOOLS (`app-gen-toc` / `app-write-mram`) does not place the ATOC
 application table at a fixed address: it top-anchors the generated package at
@@ -85,6 +86,8 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
 from alp_orchestrate.loader import _resolve_slot0_load_address  # noqa: E402
+from alp_orchestrate.models import OrchestratorError  # noqa: E402
+from gen_zephyr_board import _AEN_MRAM_BASE  # noqa: E402
 
 PRESETS = REPO / "metadata" / "e1m_modules"
 
@@ -113,8 +116,6 @@ _CODE_PARTITION_RE = re.compile(
 
 # `zephyr/boards/alp/e1m_<part>_m55_<role>/*.dts` -> (SoM preset SKU, core_id).
 _BOARD_DIR_RE = re.compile(r'^e1m_(?P<part>[a-z0-9]+)_m55_(?P<role>he|hp)$')
-
-_AEN_MRAM_BASE = 0x80000000
 
 
 def _aen_board_dts() -> "list[Path]":
@@ -203,7 +204,10 @@ def _check_slot0_address(path: Path) -> "list[str]":
                 f"which no partition{{}} node in this .dts declares."]
     dts_address = _AEN_MRAM_BASE + node_offsets[target_node]
 
-    expected = _resolve_slot0_load_address(preset, core_id)
+    try:
+        expected = _resolve_slot0_load_address(preset, core_id)
+    except OrchestratorError as exc:
+        return [f"{preset_path.relative_to(REPO).as_posix()}: {exc}"]
     if expected is None:
         return []
     if int(expected, 16) != dts_address:

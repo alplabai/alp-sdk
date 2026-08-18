@@ -322,15 +322,17 @@ def _resolve_slot0_load_address(
 
     E1M-AEN401/E1M-AEN601 declare BOTH `m55_hp` and `m55_he` in
     `topology:` (only the HP board's Zephyr tree is generated today --
-    #999, a separate, tracked gap), and neither declares a `memory_map:`
-    override, so this returns the SAME default address for both roles.
-    That is not reachable today -- `_validate_topology_cores` only calls
-    this resolver when the SoC variant already publishes
-    `jlink_flash_device`, and no non-E1M-AEN801 AEN variant does yet -- but
-    nothing stops a future variant from publishing `jlink_flash_device`
-    without a disjoint-slot0 override, which would silently reintroduce
-    #1069's HE/HP collision in `flash_args`. Tracked, not silently
-    accepted: #1384.
+    #999, a separate, tracked gap), and since #1445 both also declare
+    per-role `he_slot0`/`hp_slot0` overrides in `memory_map:`
+    (metadata/e1m_modules/E1M-AEN401.yaml, E1M-AEN601.yaml), so this
+    resolves to DISJOINT addresses for the two roles, not the
+    no-override default above. The no-override branch is reachable only
+    by a FUTURE AEN variant that publishes `jlink_flash_device` without
+    also declaring a disjoint-slot0 override -- `_validate_topology_cores`
+    only calls this resolver once the SoC variant publishes
+    `jlink_flash_device`, and every AEN variant that does today (AEN801,
+    AEN401, AEN601) already declares the override. That residual risk is
+    tracked, not silently accepted: #1384.
     """
     if not core_id.startswith("m55_"):
         return None
