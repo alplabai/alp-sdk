@@ -63,8 +63,8 @@ jobs:
         # tight cap. A step cap exists to catch a HANG, not to enforce a
         # download SLA, so this is deliberately generous.
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y doxygen graphviz
+          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y doxygen graphviz
 
       # Fast pre-flight: catch a missing @brief before we spin up
       # the full Doxygen build.  Currently at 100% coverage on main;

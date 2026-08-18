@@ -201,8 +201,8 @@ jobs:
         # #1477: worst observed successful run 38s across 30 sampled runs
         # -- the worst step in this job; still fits the 1min budget.
         run: |
-          apt-get update -o Acquire::Retries=3
-          apt-get install -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates
+          apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
+          apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates
 
       # scripts/bootstrap.sh should refuse HERE (cmake/python3/ninja/xz/wget
       # still absent) with a curated per-tool install hint, not a bare
@@ -257,7 +257,7 @@ jobs:
         timeout-minutes: 20
         # #1477: worst observed successful run 14s across 30 sampled runs.
         run: |
-          apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
               cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
 
       - name: bootstrap.sh succeeds once every prerequisite is installed
@@ -541,8 +541,8 @@ jobs:
         # HUNG fetch fails here and names this step (#1549).
         timeout-minutes: 20
         run: |
-          apt-get update -o Acquire::Retries=3
-          apt-get install -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates
+          apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
+          apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates
 
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
@@ -570,7 +570,7 @@ jobs:
         timeout-minutes: 20
         # #1477: worst observed successful run 14s across 30 sampled runs.
         run: |
-          apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
               cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
 
       - name: Install tan-cli/dev (docs quickstart step 2)
