@@ -20,12 +20,11 @@ mapping syntax), reported verbatim.
 
 ## Diagnose
 
-Read-only; validates the file without touching the build:
+Read-only; validates the file without touching the build. Only the SDK's own
+CLI prints the full diagnostic frame with the `ALP-B000` code:
 
 ```sh
-tan validate --board-yaml board.yaml
-# or, for the machine-readable form (LSP-style ranges):
-tan validate --format json --board-yaml board.yaml
+python3 -m alp_cli validate board.yaml
 ```
 
 The diagnostic carries the parser's own error text and always points at
@@ -41,17 +40,34 @@ error[ALP-B000]: YAML parse error: mapping values are not allowed here
    = see: docs/diagnostics/ALP-B000.md
 ```
 
-Most YAML loaders (including PyYAML, which `tan`/`alp_cli` use under the
-hood) report a `line N, column M` inside the message text itself -- read
-that embedded position, not the fixed `1:1` the diagnostic frame shows, to
-find the actual offending line.
+Most YAML loaders (including PyYAML, which `alp_cli` uses under the hood)
+report a `line N, column M` inside the message text itself -- read that
+embedded position, not the fixed `1:1` the diagnostic frame shows, to find
+the actual offending line.
 
-The ALP-B000 code above is what the default `tan validate` prints -- it
-spawns the SDK's own validator as a subprocess and forwards its output.
-`tan validate --offline` hits the same parse failure through tan's own
-structural pre-parse instead, and reports it without the ALP-B000 code, as
-`schema-violation: board.yaml is not valid: could not be parsed as YAML:
-...`.
+`tan validate --board-yaml board.yaml` (the default, SDK-spawning path) runs
+that same validator as a subprocess but forwards only its message text, not
+the code -- the `ALP-B000` code above never appears in its output. It prints:
+
+```
+validate: validation failure
+YAML parse error: mapping values are not allowed here
+```
+
+`tan validate --format json --board-yaml board.yaml` and `--format
+diagnostic-v1` carry a `tan`-own code instead of `ALP-B000`
+(`validate.schema-violation` and `validate-schema-violation` respectively),
+neither with a `documentationUri`. `tan validate --offline --board-yaml
+board.yaml` hits the same parse failure through tan's own structural
+pre-parse and also has no `ALP-B000` code anywhere in its output; it prints:
+
+```
+validate: validation failure
+board.yaml is not valid: could not be parsed as YAML: mapping values are not allowed here
+  in "<unicode string>", line 2, column 20:
+      variant: e1m-x-v1: bogus
+                       ^
+```
 
 ## Fix
 
@@ -64,8 +80,7 @@ duplicate key.
 ## Escalate
 
 If the file looks syntactically correct to you (renders fine in an online
-YAML linter) but `tan validate` (the default, SDK-spawning path) still
-reports ALP-B000 -- or `tan validate --offline` still reports
-`schema-violation: ... could not be parsed as YAML` -- open an issue with
-the (sanitized) `board.yaml` attached; that's a loader compatibility gap,
-not a config mistake.
+YAML linter) but `python3 -m alp_cli validate` still reports ALP-B000 -- or
+`tan validate` / `tan validate --offline` still fails to parse it -- open an
+issue with the (sanitized) `board.yaml` attached; that's a loader
+compatibility gap, not a config mistake.

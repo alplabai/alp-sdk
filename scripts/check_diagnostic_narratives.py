@@ -20,7 +20,7 @@ walks the docs/diagnostics/ALP-B*.md page set -- it does not walk the
 scripts/alp_cli/validator.py `code="ALP-B..."` emission sites, so a code
 that validator.py starts emitting without ever getting a page stays
 invisible to CI. A future gate that greps the emission sites and asserts
-each has a page would close that, but does not exist yet.
+each has a page would close that; tracked as #1569, not implemented yet.
 
 This gate fails when a docs/diagnostics/ALP-B*.md page:
 
