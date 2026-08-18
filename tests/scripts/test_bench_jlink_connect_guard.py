@@ -460,6 +460,22 @@ def _run_verify_gate(
     rewritten to a bare filename and bash runs with cwd=tmp_path, so the
     drive-letter flavour of whichever bash Python resolves cannot matter.
     `set -e` matches the real scripts, all of which run under errexit.
+
+    The block is written to a FILE and run as `bash gate.sh`, never handed to
+    `bash -c` as a string. On Windows, `subprocess` rebuilds the argument list
+    into one command line (`list2cmdline`) which the MSYS runtime then re-parses,
+    and double quotes inside a `$( ... )` command substitution do not survive the
+    round trip: `v=$(grep -ci "verify successful" t.out || true)` reaches grep as
+    the three arguments `-ci`, `"verify`, `successful"`, so grep reports
+    `grep: successful": No such file or directory` and the count comes back empty.
+    flash-jlink-mramxip.sh's gate is the only one that puts a quoted grep inside a
+    command substitution -- the other four use a bare `if grep -qi "..."`, which
+    survives -- so this manifested as exactly one parametrisation failing, naming a
+    script whose gate is CORRECT (run from a file it returns 0 on a good transcript
+    and 3 on a failing one). GitHub's windows-latest never saw it because
+    _NEEDS_BASH skips there; a developer with Git Bash installed sees a red test
+    pointing at the wrong file, which is the same misleading-failure class
+    _NEEDS_BASH exists to prevent. A file has no second parse, so it cannot recur.
     """
     name = "transcript.out"
     target = tmp_path / name
@@ -467,8 +483,12 @@ def _run_verify_gate(
         target.unlink(missing_ok=True)
     else:
         target.write_text(transcript, encoding="utf-8")
+    gate = tmp_path / "gate.sh"
+    # write_bytes, not write_text: the gate must keep LF endings whatever the
+    # host default is -- CRLF inside the block would reach bash as stray \r.
+    gate.write_bytes(("set -e\n" + block.replace(out, name)).encode("utf-8"))
     return subprocess.run(
-        ["bash", "-c", "set -e\n" + block.replace(out, name)],
+        ["bash", gate.name],
         cwd=tmp_path,
         capture_output=True,
         text=True,
