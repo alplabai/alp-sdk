@@ -312,23 +312,23 @@ static int cmd_companion_wifi_ap_stop(const struct shell *sh, size_t argc, char 
 		 * WIFI_AP_STOP has no acknowledgement the driver can confirm on, so
 		 * poll_by_repeat exhausts its window and returns ALP_ERR_TIMEOUT.
 		 *
-		 * BENCH-MEASURED 2026-08-18 on E1M-AEN801, observed from a second,
-		 * independent radio (the host's Intel AX200 via `netsh wlan show
-		 * networks`, validated against known APs first): with the link healthy
-		 * (`ver` -> protocol v4) and the soft-AP confirmed VISIBLE, this call
-		 * returned -4 and the SSID stopped being advertised ~45 s later. The
-		 * teardown happens; only the confirmation is missing.
+		 * Observed once on E1M-AEN801 (2026-08-18) from a second, independent
+		 * radio: with the link healthy and the soft-AP confirmed VISIBLE, this
+		 * call returned -4 and the SSID stopped being advertised ~45 s later.
+		 * That single observation had NO stability control and could not be
+		 * reproduced afterwards (a later `wifi ap` would not bring an AP up at
+		 * all on a healthy link), so it is NOT enough to claim -4 means the
+		 * teardown happened -- deliberately not asserted here or in the
+		 * header.
 		 *
-		 * So "failed" was actively misleading -- an operator cannot tell a
-		 * teardown that did not happen from one that did, and the flat failure
-		 * pushed them toward the wrong conclusion. Say "unconfirmed", exactly
-		 * as `ap start` does. One measurement is not proof the status is
-		 * ALWAYS benign, though, so this stays an error return: it is
-		 * inconclusive, not success. */
+		 * What is certain either way is that "failed" was wrong: the driver
+		 * cannot distinguish a teardown that did not happen from one that did,
+		 * so reporting a definite failure states more than is known. Say
+		 * "unconfirmed", exactly as `ap start` does, and keep the error return
+		 * -- inconclusive, not success. */
 		shell_error(sh,
 		            "ap stop unconfirmed (%d) -- firmware v4 has no AP-stop acknowledgement "
-		            "(#1553, same gap as #1385); the teardown is bench-measured to happen "
-		            "anyway, confirm the SSID is gone out of band",
+		            "(#1553, same gap as #1385); confirm the SSID is gone out of band",
 		            (int)s);
 		return -EIO;
 	}

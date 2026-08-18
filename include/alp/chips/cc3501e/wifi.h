@@ -299,15 +299,15 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
  *          acknowledgement it can confirm on, so it returns ALP_ERR_TIMEOUT
  *          for a teardown that worked -- the same gap @ref
  *          cc3501e_wifi_ap_start documents for WIFI_AP_START (#1385), tracked
- *          for this opcode as #1553.  Unlike ap_start, the teardown itself is
- *          bench-measured to TAKE EFFECT: on E1M-AEN801 (2026-08-18), with the
- *          link healthy and the soft-AP confirmed visible from an independent
- *          radio, this call returned ALP_ERR_TIMEOUT and the SSID stopped
- *          being advertised ~45 s later.  Treat ALP_ERR_TIMEOUT as
- *          INCONCLUSIVE rather than as failure: one measurement does not make
- *          it a success code, and it still covers a busy bridge or a
- *          transport fault during the radio-down window.  Confirm out of band
- *          if it matters.
+ *          for this opcode as #1553.  Treat ALP_ERR_TIMEOUT as INCONCLUSIVE:
+ *          it is not proof the teardown failed, and it is not proof it
+ *          succeeded -- it also covers a busy bridge and a transport fault
+ *          during the radio-down window.  Confirm out of band if it matters.
+ *          (A single E1M-AEN801 observation on 2026-08-18 did see the SSID
+ *          stop being advertised ~45 s after this call returned
+ *          ALP_ERR_TIMEOUT, but it had no stability control and did not
+ *          reproduce, so it is recorded on #1553 as an observation and NOT
+ *          relied on here.)
  *
  * @param ctx  Initialised driver context.
  * @return ALP_ERR_TIMEOUT for the expected outcome -- see the warning above:
