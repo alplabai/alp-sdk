@@ -91,7 +91,7 @@ without rewriting the layer above.
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
   │ Dev Tooling   │ ─► │  board.yaml → Python tan (in-process planner + executor)               │
   │               │    │  SDK reference emits: alp_project.py · alp_orchestrate                 │
-  │               │    │  tan build / flash / image / size / renode / clean                     │
+  │               │    │  tan build / flash / image / size / clean                              │
   │               │    │  validate_board_yaml.py · program_eeprom.py · VS Code extension        │
   │               │    │  tan model build  →  .alpmodel   (the model-compile front-end)         │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘

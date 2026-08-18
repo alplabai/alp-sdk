@@ -12,7 +12,7 @@ reference.
 
 ## Workflows shipped
 
-`.github/workflows/` carries **29** workflow files as of this revision
+`.github/workflows/` carries **25** workflow files as of this revision
 (counted via `ls .github/workflows/*.yml .github/workflows/*.yaml
 2>/dev/null | wc -l`; recount before trusting this number, it moves
 every time a workflow is added or retired).  The table below is a
@@ -29,7 +29,7 @@ that replaced it).
 |--------------------------------------------------------------------------------|------------------|------------|------------------------------------------------------------------------------------------------|
 | [`pr-twister.yml`](../../.github/workflows/pr-twister.yml)                        | every PR + push  | active     | Runs on `ubuntu-latest` (no docker container) with `ZEPHYR_TOOLCHAIN_VARIANT=host` so native_sim uses the runner's stock gcc.  west init + west update (cached), twister against `tests/zephyr/**` + `examples/**` on `native_sim/native/64`.  PR fails if any ztest fails. |
 | [`pr-plain-cmake.yml`](../../.github/workflows/pr-plain-cmake.yml)                | PR + push (paths)| active     | Plain-CMake builds for `ALP_OS=baremetal`, `ALP_OS=baremetal -DALP_SOM={aen,v2n}`, and `ALP_OS=yocto` with `ALP_BUILD_TESTS=ON`.  Installs `libmosquitto-dev` + `libasound2-dev` + `libssl-dev` + `pkg-config` so the Yocto-side wrappers (MQTT, ALSA audio, OpenSSL security) compile + their ctest binaries run. |
-| [`pr-static-analysis.yml`](../../.github/workflows/pr-static-analysis.yml)        | PR + push        | active     | `clang-format-diff` on changed lines + `cppcheck` informational pass over `src/` + `chips/`.  Diff-only format check (`clang-format · diff-only` is one of `dev`'s required contexts). |
+| [`pr-static-analysis.yml`](../../.github/workflows/pr-static-analysis.yml)        | PR + push        | active     | `clang-format-diff` on changed lines + `shellcheck -x -S warning` over `scripts/bench/**` (issue #1527), both in the `clang-format-diff` job so a shellcheck defect hard-blocks too (`clang-format · diff-only` is one of `dev`'s required contexts; a separate job's context is not) + `cppcheck` informational pass over `src/` + `chips/` in its own non-required job. |
 | [`pr-generated-files.yml`](../../.github/workflows/pr-generated-files.yml)        | PR + push (paths)| active     | Catches drift in `<alp/soc_caps.h>` (re-runs `scripts/gen_soc_caps.py`) and `docs/abi/*.json` (re-runs `scripts/abi_snapshot.py`).             |
 | [`pr-metadata-validate.yml`](../../.github/workflows/pr-metadata-validate.yml)    | PR + push (paths)| active     | Validates every `metadata/socs/**/*.json` against the schema via `scripts/validate_metadata.py` + smoke-tests `scripts/alp_project.py` against `metadata/templates/board.yaml.example`. |
 | [`pr-doxygen.yml`](../../.github/workflows/pr-doxygen.yml)                        | PR + push (paths)| active     | Generates Doxygen HTML from `include/alp/**`.  Runs with `FAIL_ON_WARNINGS=YES` — zero warnings required; PR fails on any warning. |
@@ -76,9 +76,8 @@ result attached to the PR or release that needs it — see
   `--list-required-gate-scripts`).  It covers the GitHub-hosted,
   hardware-free PR gates; it does **not** cover the self-hosted/bitbake
   build (`pr-bitbake.yml`), the GD32 / CC3501E bridge-firmware builds,
-  the Renode simulation smoke workflows (`pr-renode-*.yml`), or the
-  AEN onramp quickstart container — those still need a push through
-  CI (or their own local invocation) to exercise.  See
+  or the AEN onramp quickstart container — those still need a push
+  through CI (or their own local invocation) to exercise.  See
   [`docs/testing.md`](../testing.md).  (The VS Code extension's
   build lives in [`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)
   since the 2026-05-12 split; its own CI runs there.)
