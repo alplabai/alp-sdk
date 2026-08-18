@@ -54,8 +54,12 @@ def find_problems(root: Path) -> list[str]:
             firmware_path = entry.get("firmware_path")
             if firmware_path is None:
                 # Deliberately absent -- schema-legal, and the point of the
-                # key: no artefact exists yet, so `tan flash` refuses cleanly
-                # instead of resolving a sentinel path. Not this gate's job.
+                # key: no artefact exists yet. No preset declares
+                # `flash_method` today, so `tan flash` skips the entry before
+                # ever reaching this field; only an entry that also gains a
+                # `flash_method` would reach `tan flash`'s clean "has no
+                # output_artefact / firmware_path" refusal. Not this gate's
+                # job either way.
                 continue
             name = entry.get("name", "<unnamed>")
             resolved = (root / firmware_path).resolve()

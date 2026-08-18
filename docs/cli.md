@@ -548,8 +548,10 @@ cd examples/peripheral-io/gpio-button-led && tan build && tan flash
 # V2N helper MCU (GD32 bridge): `flash_policy: recovery_only` is
 # checked ahead of any `flash_method` presence
 # (python/tan/core/flash_plan.py::helper_flash_gate, tan-cli#611), so
-# both commands below SKIP today without `--recover` -- GD32
-# programming was separated out of `tan` (#1439, tan-cli#732); see
+# both commands below SKIP today -- adding `--helper gd32_bridge
+# --recover` also skips, because the entry declares no `flash_method`
+# (same `_flash_entry` path, past the policy gate) -- GD32 programming
+# was separated out of `tan` (#1439, tan-cli#732); see
 # docs/gd32-bridge.md for the out-of-`tan` bricked-bridge recovery path.
 tan flash examples/v2n/v2n-gd32-bridge-functional --helper gd32_bridge --dry-run
 tan flash examples/v2n/v2n-gd32-bridge-functional --helper gd32_bridge
