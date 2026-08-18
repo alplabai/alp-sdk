@@ -194,7 +194,7 @@ Note the SW-DP ID guard is **unarmed** on that
 procedure: `metadata/chips/gd32_swd.yaml` currently arms its
 wrong-board guard with `0x6BA02477`, but that value is not a GD32
 reading -- it is the bench-measured SW-DP ID of the V2N CM33 DAP, a
-third J-Link on this rack (`scripts/bench/aen/bench-env.sh:150`,
+third J-Link on this rack (`scripts/bench/aen/bench-env.sh:145-147`,
 measured 2026-08-08, `Found Cortex-M33 r0p4`; the `e1mx-v2n-m1-01`
 probe table, `CHANGELOG.md:3364` and `CHANGELOG.md:3367`), tracked as
 #1440.  An
@@ -209,15 +209,20 @@ fact ("A healthy, correctly-wired GD32 answers `0x0BE12477`").  Do not
 silently pick a winner between the two documents: whether `0x0BE12477`
 was ever read off a GD32 with a probe attached is #1440's and #1369's
 open question, and it needs silicon to close, not doc surgery.  Until it
-does, **this section governs the recovery-flash decision** -- it is the
-one an operator follows immediately before a write that can reach the
-wrong board, which is exactly the moment treating an unattested value as
-a pass condition would matter.  The tutorial's table is the weaker claim:
-it reproduces `scripts/bench/aen/bench-env.sh`'s `GD32_DPIDR` export, and
-that export's own "BENCH-VERIFIED" banner (`scripts/bench/aen/bench-env.sh:145`)
-cites `docs/aen-bench-bringup.md`, which does not mention the GD32 at
-all -- so the tutorial's "fact" traces back to an uncited assertion, not
-an independent measurement.
+does, **this section governs the J-Link/external-probe recovery-flash
+decision** (the alternative to this tutorial's on-SoM bit-bang route,
+`chips/gd32_swd/` -- SWDIO/SWCLK/NRST on P70/P71/P74, no J-Link, no
+cloned serial) -- it is the one an operator follows immediately before a
+write that can reach the wrong board, which is exactly the moment
+treating an unattested value as a pass condition would matter.  The
+tutorial's table is the weaker claim: it reproduces
+`scripts/bench/aen/bench-env.sh`'s `GD32_DPIDR` export, and that export
+formerly carried its own "BENCH-VERIFIED" banner covering `GD32_DPIDR`
+too; that banner cited `docs/aen-bench-bringup.md`, which does not
+mention the GD32 at all, and is now hedged
+(`scripts/bench/aen/bench-env.sh:148-151`) -- so the tutorial's "fact"
+traces back to a since-hedged, uncited assertion, not an independent
+measurement.
 
 **Required step on the alplab-gw bench: read the DPIDR by hand before
 flashing, and abort on a match to either of two known-wrong boards.**
@@ -234,7 +239,7 @@ inside its CommanderScript, never from the environment.  (The env var
 works in `scripts/bench/aen/flash-jlink-mramxip.sh` only because that
 script itself converts it -- `SEL="${JLINK_SN:+SelectEmuBySN
 $JLINK_SN}"`, line 67 -- and splices `$SEL` in as the first
-CommanderScript line, line 110; there is no equivalent conversion on
+CommanderScript line, line 121; there is no equivalent conversion on
 this hand-run recovery path, so `export JLINK_SN=603000869` alone
 does nothing here.)
 
@@ -288,12 +293,12 @@ cloned-serial ambiguity for every invocation that follows:
    setup` state, a rejected command line, or any other transcript
    with no SW-DP ID line at all is a STOP, not a silent permit to
    proceed, mirroring `bench_jlink_assert_aen_dpidr`'s own
-   abort-unless-seen shape (`scripts/bench/aen/bench-env.sh:177-180`)
+   abort-unless-seen shape (`scripts/bench/aen/bench-env.sh:181-185`)
    rather than aborting only on a positive match to a known-wrong ID.
    When the line is present, abort before any write if the ID matches
    `AEN_DPIDR` (`4C013477` -- bench-verified AEN E8) **or**
    `V2N_CM33_DPIDR` (`6BA02477` -- the V2N CM33 DAP,
-   `scripts/bench/aen/bench-env.sh:150`; see #1440) -- both are an
+   `scripts/bench/aen/bench-env.sh:154`; see #1440) -- both are an
    unconditional STOP, not merely "not the AEN E8".  Do not treat
    `GD32_DPIDR` (`0BE12477` -- a claimed-but-unattested GD32 value;
    see #1369) as a pass condition, and **do not proceed on any ID the
@@ -301,11 +306,12 @@ cloned-serial ambiguity for every invocation that follows:
    matches neither abort value is necessary but not sufficient to
    proceed, since it has not itself been proven to be the GD32, and an
    unrecognized ID is itself grounds to abort and investigate, not to
-   guess.  `bench-env.sh`'s own "BENCH-VERIFIED" label on
-   `GD32_DPIDR` cites `docs/aen-bench-bringup.md`, which does not
-   mention the GD32 at all, so treat that label as unattested too and
-   rely on the manual read, not the `GD32_DPIDR` value, to prove the
-   probe is not on a known-wrong board.
+   guess.  `bench-env.sh` formerly carried a "BENCH-VERIFIED" label on
+   `GD32_DPIDR` citing `docs/aen-bench-bringup.md`, which does not
+   mention the GD32 at all; that label is now hedged
+   (`scripts/bench/aen/bench-env.sh:148-151`), so rely on the manual
+   read, not the `GD32_DPIDR` value, to prove the probe is not on a
+   known-wrong board.
 4. **Flash immediately** after a passing read, using the same
    `SelectEmuBySN 603000869` line as the first line of the flash
    CommanderScript -- the identical selector, not merely the same

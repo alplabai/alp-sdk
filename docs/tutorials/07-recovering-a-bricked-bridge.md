@@ -64,8 +64,10 @@ never been measured on a GD32.** It is the generic ADIv5
 expectation for a Cortex-M33 r0p1 SW-DPv2, carried over from the
 part's core, not read off the part.
 
-What the bench actually records, both measured on place
-`e1mx-v2n-m1-01` (`scripts/bench/aen/bench-env.sh`):
+What the bench actually records at place `e1mx-v2n-m1-01`
+(`scripts/bench/aen/bench-env.sh`) -- only the V2N CM33 DAP row is
+measured; the GD32 row is the claimed-but-unattested value carried over
+unchanged (see #1369, #1440):
 
 | probe        | SW-DP IDR    |
 |--------------|--------------|
@@ -130,14 +132,19 @@ condition.  Both claims are live in this repo at once -- do not pick
 a winner by reading only one of the two documents.
 
 **`docs/gd32-bridge.md`'s hazard section governs the recovery-flash
-decision**, because it is the section an operator follows immediately
-before a write that can reach the wrong board.  This tutorial's table
-is the weaker claim: it reproduces
-`scripts/bench/aen/bench-env.sh`'s `GD32_DPIDR` export, and that
-export's own "BENCH-VERIFIED" banner cites `docs/aen-bench-bringup.md`,
-a document that does not mention the GD32 at all.  Whether
-`0x0BE12477` was ever read off a GD32 with a probe attached is open at
-#1440 and #1369 and needs silicon to close, not doc surgery.
+decision for the J-Link/external-probe path it documents** (this
+tutorial's on-SoM bit-bang route, `chips/gd32_swd/` -- SWDIO/SWCLK/NRST
+on P70/P71/P74, no J-Link, no cloned serial -- is unaffected by that
+section's detach / `lsusb -t` / `SelectEmuBySN` procedure), because it
+is the section an operator follows immediately before a J-Link write
+that can reach the wrong board.  This tutorial's table is the weaker
+claim: it reproduces `scripts/bench/aen/bench-env.sh`'s `GD32_DPIDR`
+export, and that export formerly carried its own "BENCH-VERIFIED"
+banner covering `GD32_DPIDR` too; that banner cited
+`docs/aen-bench-bringup.md`, a document that does not mention the GD32
+at all, and is now hedged (`scripts/bench/aen/bench-env.sh:148-151`).
+Whether `0x0BE12477` was ever read off a GD32 with a probe attached is
+open at #1440 and #1369 and needs silicon to close, not doc surgery.
 
 ## See also
 
