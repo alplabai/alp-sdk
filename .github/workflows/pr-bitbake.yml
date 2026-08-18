@@ -74,6 +74,7 @@ jobs:
   dispatch:
     name: bitbake · dispatch to alp-sdk-internal
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       statuses: write          # pending status on THIS repo (same-repo, no PAT)
     steps:
@@ -132,6 +133,7 @@ jobs:
         if: steps.guard.outputs.go == 'true'
         id: apptoken
         uses: actions/create-github-app-token@v1
+        timeout-minutes: 2
         with:
           app-id: ${{ secrets.ALP_CI_APP_ID }}
           private-key: ${{ secrets.ALP_CI_APP_PRIVATE_KEY }}

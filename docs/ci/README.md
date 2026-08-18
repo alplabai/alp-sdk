@@ -120,3 +120,13 @@ Workflow filenames follow `{stage}-{target}.yml`:
 - `stage` is one of `pr` (per-PR), `nightly`, `release`.
 - `target` is the SoM family (`aen`, `v2n`, `v2n-m1`) or a global
   scope (`twister`, `doxygen`, `metadata-validate`).
+
+Every job needs a `timeout-minutes:` (#1477 -- GitHub's implicit
+360-minute runner default otherwise applies silently). Every job's ceiling
+must stay strictly above the sum of its own step-level `timeout-minutes:`
+plus 1 minute for each step that has none, or a step running late can
+still be killed by the job-level timeout before its own fires --
+`tests/scripts/test_tier_a_workflow_step_timeouts.py` enforces both, over
+every file under `.github/workflows/`. Derive each ceiling from real
+observed run durations (`gh api .../actions/runs/<id>/jobs`), not a guess;
+comment the derivation at the site for anything non-obvious.

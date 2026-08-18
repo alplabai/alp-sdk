@@ -56,17 +56,20 @@ jobs:
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        timeout-minutes: 2
         with:
           path: alp-sdk
 
       - name: Set up Python + west
         uses: actions/setup-python@v6
+        timeout-minutes: 2
         with:
           # Repo is checked out under alp-sdk/ (path:), but setup-python (a
           # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
           python-version-file: alp-sdk/.python-version
 
       - name: Install west
+        timeout-minutes: 2
         run: pip3 install --user west pyyaml
 
       - name: Derive extras-tier1 library list from west.yml
@@ -119,6 +122,7 @@ jobs:
           # (runtime substitution) instead of a template (source
           # substitution), not by quoting.
           EXTRAS_TIER1_NAMES: ${{ steps.extras-tier1.outputs.names }}
+        timeout-minutes: 5
         run: |
           set -e
           west init -l .
@@ -151,6 +155,7 @@ jobs:
           # See the env: comment on the "West init + update" step above --
           # same injection rationale applies to this step's run: body.
           EXTRAS_TIER1_PATHS: ${{ steps.extras-tier1.outputs.paths }}
+        timeout-minutes: 2
         run: |
           set -euo pipefail
           status=0
@@ -214,6 +219,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         if: always()
+        timeout-minutes: 3
         with:
           name: extras-tier1-audit
           path: /tmp/extras-tier1-audit/
