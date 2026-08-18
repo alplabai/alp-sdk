@@ -17,7 +17,9 @@
  * itself.
  *
  * Single-threaded -- no race under test here (that's
- * inference_invoke_close_race.c's job), so no pthreads dependency.
+ * inference_invoke_close_race.c's job for invoke-vs-close, and
+ * inference_invoke_overlap_race.c's for invoke-vs-invoke's last-store-
+ * wins semantics), so no pthreads dependency.
  *
  * Build with:
  *   cmake -B build -DALP_OS=yocto -DALP_BUILD_TESTS=ON
@@ -122,6 +124,31 @@ static void test_null_out_returns_invalid(void)
 	alp_inference_close(h);
 }
 
+/* MAJOR 2 (PR #1541 review): this accessor used to check the handle
+ * first here, so (NULL, NULL) returned ALP_ERR_NOT_READY on this
+ * (Yocto) dispatcher while the Zephyr dispatcher
+ * (src/inference_dispatch.c) -- checking out_us first, like every
+ * other op in that file -- returned ALP_ERR_INVAL for the identical
+ * call: the same public function disagreeing with itself across OSes.
+ * Both dispatchers now check out_us first, matching
+ * <alp/inference.h>'s documented order (ALP_ERR_INVAL listed before
+ * ALP_ERR_NOT_READY). */
+static void test_null_handle_and_null_out_returns_invalid(void)
+{
+	ALP_ASSERT_EQ_INT(alp_inference_last_invoke_latency_us(NULL, NULL), ALP_ERR_INVAL);
+}
+
+/* Same MAJOR 2 fix, exercised against a CLOSED (not just NULL) handle --
+ * out_us-NULL must win over the handle's closed state too. */
+static void test_closed_handle_null_out_returns_invalid(void)
+{
+	alp_inference_t *h = open_fake_handle();
+	ALP_ASSERT_TRUE(h != NULL);
+	alp_inference_close(h);
+
+	ALP_ASSERT_EQ_INT(alp_inference_last_invoke_latency_us(h, NULL), ALP_ERR_INVAL);
+}
+
 static void test_populated_after_successful_invoke(void)
 {
 	g_fail_next_invoke = 0;
@@ -164,6 +191,8 @@ int main(void)
 {
 	test_before_any_invoke_returns_not_ready();
 	test_null_out_returns_invalid();
+	test_null_handle_and_null_out_returns_invalid();
+	test_closed_handle_null_out_returns_invalid();
 	test_populated_after_successful_invoke();
 	test_unchanged_after_failed_invoke();
 

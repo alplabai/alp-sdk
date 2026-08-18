@@ -466,27 +466,33 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf)
 
 alp_status_t alp_inference_last_invoke_latency_us(alp_inference_t *inf, uint64_t *out_us)
 {
-	/* NULL-handle check stays FIRST, ahead of the out-NULL check --
-	 * matches this file's get_input/get_output contract (both NULL
-	 * yields NOT_READY, not INVAL; see their comments above) so the
-	 * file has one param-check ordering throughout, not two. */
+	/* out_us-NULL check stays FIRST, ahead of the handle check.
+	 *
+	 * This used to check inf first, matching this file's
+	 * get_input()/get_output() convention above -- but that convention
+	 * is itself pinned by an existing test
+	 * (tests/yocto/inference_dispatcher.c's
+	 * test_get_input_null_out_returns_invalid expects NOT_READY for
+	 * (NULL, NULL)), which this brand-new accessor has no equivalent
+	 * of. Checking inf first meant (NULL, NULL) and (closed, NULL) both
+	 * returned ALP_ERR_NOT_READY here, while the Zephyr dispatcher
+	 * (src/inference_dispatch.c) -- checking out_us first, like every
+	 * OTHER op in that file -- returned ALP_ERR_INVAL for the same two
+	 * calls: the same public function disagreeing with itself across
+	 * OSes (MAJOR 2). <alp/inference.h> lists ALP_ERR_INVAL before
+	 * ALP_ERR_NOT_READY with no handle-state qualifier, so out_us-first
+	 * is the order the header actually describes -- this function moves
+	 * to match Zephyr and the header rather than this file's other two
+	 * ops. */
+	if (out_us == NULL) return ALP_ERR_INVAL;
 	if (inf == NULL || !alp_handle_op_enter(&inf->lifecycle, &inf->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc;
-	if (out_us == NULL) {
-		rc = ALP_ERR_INVAL;
-	} else {
-		uint64_t us = __atomic_load_n(&inf->last_invoke_latency_us, __ATOMIC_ACQUIRE);
-		if (us == UINT64_MAX) {
-			rc = ALP_ERR_NOT_READY; /* no successful invoke yet */
-		} else {
-			*out_us = us;
-			rc      = ALP_OK;
-		}
-	}
+	uint64_t us = __atomic_load_n(&inf->last_invoke_latency_us, __ATOMIC_ACQUIRE);
 	alp_handle_op_leave(&inf->active_ops);
-	return rc;
+	if (us == UINT64_MAX) return ALP_ERR_NOT_READY; /* no successful invoke yet */
+	*out_us = us;
+	return ALP_OK;
 }
 
 void alp_inference_close(alp_inference_t *inf)

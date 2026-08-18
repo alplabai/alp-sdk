@@ -183,6 +183,13 @@ ZTEST(alp_inference_registry, test_get_input_on_null_returns_not_ready)
 static alp_status_t fake_invoke_ok(alp_inference_backend_state_t *state)
 {
 	(void)state;
+	/* Real measurable work -- borrows the Yocto twin's shape
+	 * (tests/yocto/inference_latency.c's fake DEEPX invoke, which
+	 * sleeps 2ms and asserts >= 1000us). Before this, fake_invoke_ok()
+	 * did no work and test_last_invoke_latency_populated_after_
+	 * successful_invoke()'s only assertion was "us < 1000000u", which
+	 * an implementation returning a hardcoded 0 would also pass. */
+	k_sleep(K_MSEC(2));
 	return ALP_OK;
 }
 
@@ -213,16 +220,41 @@ ZTEST(alp_inference_registry, test_last_invoke_latency_null_out_returns_inval)
 	zassert_equal(alp_inference_last_invoke_latency_us(&fake, NULL), ALP_ERR_INVAL);
 }
 
+/* MAJOR 2 (PR #1541 review): out_us-NULL is checked BEFORE the handle,
+ * matching every other op in this file ("param check before enter") and
+ * <alp/inference.h>'s documented order (ALP_ERR_INVAL listed before
+ * ALP_ERR_NOT_READY) -- so (NULL, NULL) is ALP_ERR_INVAL, not
+ * ALP_ERR_NOT_READY. See tests/yocto/inference_latency.c for the
+ * matching case on the Yocto dispatcher. */
+ZTEST(alp_inference_registry, test_last_invoke_latency_null_handle_and_null_out_returns_inval)
+{
+	zassert_equal(alp_inference_last_invoke_latency_us(NULL, NULL), ALP_ERR_INVAL);
+}
+
+/* Same MAJOR 2 fix, exercised against a closed (never-opened) handle --
+ * out_us-NULL must win over the handle's non-OPEN lifecycle too. */
+ZTEST(alp_inference_registry, test_last_invoke_latency_closed_handle_null_out_returns_inval)
+{
+	struct alp_inference fake = {
+		.state     = { .ops = &k_fake_ops_ok },
+		.lifecycle = ALP_HANDLE_LC_UNOPENED,
+		.in_use    = true,
+	};
+	zassert_equal(alp_inference_last_invoke_latency_us(&fake, NULL), ALP_ERR_INVAL);
+}
+
 ZTEST(alp_inference_registry, test_last_invoke_latency_before_any_invoke_returns_not_ready)
 {
 	/* A fabricated handle skips alp_inference_open() -- the only place
-	 * that sets the UINT64_MAX "no sample yet" sentinel -- so set it
+	 * that sets the UINT32_MAX "no sample yet" sentinel -- so set it
 	 * by hand to stand in for a freshly-opened, never-invoked real
-	 * handle. */
+	 * handle. UINT32_MAX, not UINT64_MAX: last_invoke_latency_us is a
+	 * uint32_t (no libatomic on Cortex-M -- see the struct's field
+	 * comment in src/backends/inference/inference_ops.h). */
 	struct alp_inference fake = {
 		.state                  = { .ops = &k_fake_ops_ok },
 		.lifecycle              = ALP_HANDLE_LC_OPEN,
-		.last_invoke_latency_us = UINT64_MAX,
+		.last_invoke_latency_us = UINT32_MAX,
 		.in_use                 = true,
 	};
 	uint64_t us = 0u;
@@ -234,18 +266,21 @@ ZTEST(alp_inference_registry, test_last_invoke_latency_populated_after_successfu
 	struct alp_inference fake = {
 		.state                  = { .ops = &k_fake_ops_ok },
 		.lifecycle              = ALP_HANDLE_LC_OPEN,
-		.last_invoke_latency_us = UINT64_MAX,
+		.last_invoke_latency_us = UINT32_MAX,
 		.in_use                 = true,
 	};
 	zassert_equal(alp_inference_invoke(&fake), ALP_OK);
 
 	uint64_t us = UINT64_MAX;
 	zassert_equal(alp_inference_last_invoke_latency_us(&fake, &us), ALP_OK);
-	/* fake_invoke_ok() does no work, so the measured duration is
-	 * whatever a near-instant native_sim invoke rounds to -- assert
-	 * only that ALP_OK was returned (a real sample was captured,
-	 * distinguishing it from NOT_READY) and that the value is sane,
-	 * not a specific magnitude. */
+	/* fake_invoke_ok() now sleeps 2ms (see its definition above) --
+	 * assert BOTH a lower and an upper bound, not just an upper one:
+	 * "us < 1000000u" alone also passes against a hardcoded-0
+	 * implementation, which is exactly the gap this test used to have
+	 * (PR #1541 review). The lower bound proves a REAL measurement was
+	 * taken, matching tests/yocto/inference_latency.c's
+	 * test_populated_after_successful_invoke shape. */
+	zassert_true(us >= 1000u, "suspiciously small latency sample: %llu us", (unsigned long long)us);
 	zassert_true(us < 1000000u, "implausible latency sample: %llu us", (unsigned long long)us);
 }
 
@@ -254,7 +289,7 @@ ZTEST(alp_inference_registry, test_last_invoke_latency_unchanged_after_failed_in
 	struct alp_inference fake = {
 		.state                  = { .ops = &k_fake_ops_ok },
 		.lifecycle              = ALP_HANDLE_LC_OPEN,
-		.last_invoke_latency_us = UINT64_MAX,
+		.last_invoke_latency_us = UINT32_MAX,
 		.in_use                 = true,
 	};
 	zassert_equal(alp_inference_invoke(&fake), ALP_OK);

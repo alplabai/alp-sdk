@@ -82,21 +82,43 @@ struct alp_inference {
 	alp_capabilities_t            cached_caps;
 	/* Last successful alp_inference_invoke()'s wall-clock duration, in
 	 * microseconds -- written by the dispatcher itself (it brackets
-	 * ops->invoke), never by a backend.  UINT64_MAX means "no
-	 * successful invoke yet"; alp_inference_last_invoke_latency_us()
+	 * ops->invoke), never by a backend.  uint32_t, NOT uint64_t
+	 * (issue: 64-bit atomics don't link on Cortex-M -- M-profile has
+	 * no 64-bit atomic instruction, GCC lowers __atomic_{load,store}_n
+	 * on a uint64_t to __atomic_load_8/__atomic_store_8 libatomic
+	 * calls, and the Zephyr SDK's arm-zephyr-eabi toolchain ships no
+	 * libatomic, so every Cortex-M app failed to link the moment this
+	 * dispatcher -- which zephyr/CMakeLists.txt compiles
+	 * unconditionally -- pulled one in). A naturally-aligned 32-bit
+	 * load/store IS lock-free on every Cortex-M this SDK targets (a
+	 * single LDR/STR, exactly like active_ops/lifecycle below), so
+	 * __atomic_store_n/__atomic_load_n on this field compiles to plain
+	 * instructions with no libcall. The tradeoff is range: values
+	 * saturate at UINT32_MAX us (~4294.967295 s, ~71.58 minutes) --
+	 * see alp_inference_last_invoke_latency_us()'s header doc
+	 * (<alp/inference.h>) for the ceiling and the saturate-not-wrap
+	 * behaviour. UINT32_MAX doubles as the "no successful invoke yet"
+	 * sentinel (a real invoke can plausibly hit UINT32_MAX-1 us but
+	 * hitting the exact all-ones value and being misread as
+	 * NOT_READY is not worth guarding -- a wall-clock invoke pinned to
+	 * that specific microsecond is not a value one is exactly on the
+	 * ceiling); alp_inference_last_invoke_latency_us()
 	 * (src/inference_dispatch.c) translates that sentinel to
 	 * ALP_ERR_NOT_READY at the public API boundary rather than
 	 * exposing it.  The claim-time memset in _alloc() zeroes this
 	 * field along with everything else before in_use, so
-	 * alp_inference_open() must explicitly (re)set it to UINT64_MAX
+	 * alp_inference_open() must explicitly (re)set it to UINT32_MAX
 	 * once the handle is claimed -- a fresh handle must read
 	 * NOT_READY, not "0 us". active_ops permits concurrent ops on one
 	 * handle (it is a drain counter, not a mutex -- see
 	 * alp_slot_claim.h), so a concurrent invoke()-writer and
 	 * latency-reader is a real interleaving: always access this field
 	 * via __atomic_store_n/__atomic_load_n, never a plain read/write
-	 * (issue #629 discipline). */
-	uint64_t last_invoke_latency_us;
+	 * (issue #629 discipline). The public accessor's out_us stays
+	 * uint64_t (see <alp/inference.h>) -- only the internal storage
+	 * narrowed, so this is not an ABI change to the new (still
+	 * ABI-EXPERIMENTAL) accessor's signature. */
+	uint32_t last_invoke_latency_us;
 	/* lifecycle/active_ops drive the generic open/op/close guard in
 	 * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/
 	 * begin_close, issue #629) -- placed before in_use so the atomic-

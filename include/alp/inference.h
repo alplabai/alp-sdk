@@ -338,6 +338,28 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf);
  * last value a *successful* invoke produced (or @ref ALP_ERR_NOT_READY
  * if none has succeeded yet).
  *
+ * Overlapping invokes on one handle -- two threads calling @ref
+ * alp_inference_invoke on the SAME @p inf concurrently, a real
+ * interleaving this handle's op-counting permits (it is a drain
+ * counter, not a mutex) -- are last-STORE-wins, not largest-duration-
+ * or largest-finish-time-wins: the stored value is whichever invoke's
+ * atomic store instruction executes last, which is not necessarily the
+ * invoke that finished last in wall-clock time (a scheduler can
+ * preempt between an invoke's compute finishing and its store
+ * running). Concurrent invokes on one handle are unusual -- most
+ * callers own one handle per thread -- but the SDK does not forbid it,
+ * and this accessor makes no attempt to attribute a reading to a
+ * specific invoke call when more than one is in flight. Read this only
+ * when you know at most one @ref alp_inference_invoke is outstanding
+ * on this handle, or treat a reading taken while invokes may overlap
+ * as "some recent invoke's duration," not "this specific call's."
+ *
+ * Units: MICROSECONDS. A caller feeding this into the tier-2 benchmark
+ * recipe schema's `latency_ms_mean` / `latency_ms_p95` fields
+ * (MILLISECONDS) must divide by 1000 itself -- this accessor performs
+ * no unit conversion, and a missed division publishes a number 1000x
+ * too large.
+ *
  * @param[in]  inf     Handle from @ref alp_inference_open.
  * @param[out] out_us  Filled with the last successful invoke's
  *                     duration in whole microseconds (rounded to
@@ -345,11 +367,44 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf);
  *                     invoke reports 0 only when it truly rounds to
  *                     0, not by truncation bias).  Must be non-NULL.
  *
+ *                     Ceiling: the Zephyr/M-class dispatcher stores the
+ *                     value in a 32-bit field internally -- a
+ *                     naturally-aligned @c uint32_t load/store is
+ *                     lock-free on every Cortex-M this SDK targets,
+ *                     unlike the @c uint64_t the field used to be
+ *                     (M-profile has no 64-bit atomic instruction, so
+ *                     GCC lowers a 64-bit @c __atomic_store_n /
+ *                     @c __atomic_load_n to a libatomic call, and the
+ *                     Zephyr SDK's arm-zephyr-eabi toolchain ships no
+ *                     libatomic -- every Cortex-M app failed to link).
+ *                     A duration exceeding @c UINT32_MAX microseconds
+ *                     (4294967295 us, ~71.58 minutes) therefore
+ *                     SATURATES at @c UINT32_MAX rather than wrapping
+ *                     -- implausible for one invoke in practice, but
+ *                     the honest ceiling. On a target without
+ *                     @c CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER the
+ *                     underlying hardware cycle counter wraps modulo
+ *                     2^32 cycles first (depends on
+ *                     @c CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC -- e.g.
+ *                     ~10.74 s at 400 MHz), which is the tighter of the
+ *                     two limits on such a target; on
+ *                     @c CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER targets
+ *                     (e.g. the E1M-AEN801 M55 cores) the 32-bit
+ *                     storage ceiling above is the binding one. The
+ *                     Yocto/A-class dispatcher has neither limit
+ *                     (native 64-bit atomics on x86-64/aarch64, a
+ *                     64-bit @c CLOCK_MONOTONIC nanosecond delta).
+ *
  * @return ALP_OK, or one of:
  *         - @ref ALP_ERR_INVAL -- @p out_us is NULL.
  *         - @ref ALP_ERR_NOT_READY -- @p inf is NULL/closed, or no
  *           @ref alp_inference_invoke call has completed with
  *           @ref ALP_OK on this handle yet.
+ *         - @ref ALP_ERR_NOSUPPORT -- the stub build only (no
+ *           inference backend compiled in at all): there is no timing
+ *           mechanism here that could ever have been populated, so
+ *           this is the honest answer regardless of @p out_us or
+ *           handle state.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      New accessor; the file-level marker stays [ABI-STABLE] -- see

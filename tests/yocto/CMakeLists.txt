@@ -268,6 +268,31 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_inference_invoke_close_race
              COMMAND alp_test_inference_invoke_close_race)
 
+    # Inference dispatcher invoke()-vs-invoke() overlap regression (PR
+    # #1541 review): alp_inference_last_invoke_latency_us()'s "last-store-
+    # wins" contract for two concurrent alp_inference_invoke() calls on
+    # the SAME handle had no test at all. Same #include-the-.c-directly +
+    # fake-DEEPX-backend technique as alp_test_inference_invoke_close_race
+    # above, deliberately NOT linked against alp::sdk (same ODR
+    # rationale).
+    add_executable(alp_test_inference_invoke_overlap_race
+        ${CMAKE_CURRENT_SOURCE_DIR}/inference_invoke_overlap_race.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+    )
+    target_link_libraries(alp_test_inference_invoke_overlap_race PRIVATE Threads::Threads)
+    target_include_directories(alp_test_inference_invoke_overlap_race PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_inference_invoke_overlap_race PRIVATE c_std_99)
+
+    add_test(NAME alp_test_inference_invoke_overlap_race
+             COMMAND alp_test_inference_invoke_overlap_race)
+    set_tests_properties(alp_test_inference_invoke_overlap_race PROPERTIES TIMEOUT 30)
+
     # Mechanism-level regression for issue #1114's round-2 dev-review
     # finding: src/backends/security/zephyr_drv.c's ensure_psa() elect-once-
     # init algorithm must not hang a losing waiter when the elected

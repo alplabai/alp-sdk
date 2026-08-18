@@ -39,8 +39,10 @@
  * own POSIX clock_gettime() timing below), so pulling in
  * <zephyr/kernel.h> unconditionally here is safe -- unlike
  * src/rpc_dispatch.c, which compiles into both OSes and gates the
- * same need behind __ZEPHYR__. k_cycle_get_32() brackets ops->invoke()
- * for alp_inference_last_invoke_latency_us() below. */
+ * same need behind __ZEPHYR__. k_cycle_get_64()/k_cycle_get_32()
+ * bracket ops->invoke() for alp_inference_last_invoke_latency_us()
+ * below -- see alp_inference_invoke()'s comment for which one runs on
+ * a given target and why. */
 #include <zephyr/kernel.h>
 
 #include <alp/backend.h>
@@ -124,8 +126,10 @@ alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg)
 	 * sample yet" sentinel -- set it explicitly before any op can run.
 	 * Plain store: lifecycle is still UNOPENED here, so no concurrent
 	 * op/reader can observe this handle yet (see the struct's field
-	 * comment for why every OTHER access to this field is atomic). */
-	h->last_invoke_latency_us = UINT64_MAX;
+	 * comment for why every OTHER access to this field is atomic).
+	 * UINT32_MAX, not UINT64_MAX -- the field is a uint32_t (see the
+	 * struct's field comment: no libatomic on Cortex-M). */
+	h->last_invoke_latency_us = UINT32_MAX;
 	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
@@ -206,29 +210,56 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf)
 	 * opting in: every shipped invoke() (TFLM/Ethos-U interpreter,
 	 * DRP-AI Run(), DEEPX engine->Run()) blocks this thread until the
 	 * result lands, so a dispatcher-level host timestamp IS the
-	 * backend's execution time, not an approximation of it. Subtracting
-	 * two uint32_t cycle counts is correct modulo 2^32 even across a
-	 * single counter wrap; k_cyc_to_us_near64() then does the
-	 * cycles->us conversion at 64-bit precision with round-nearest (not
-	 * the floor-then-truncate-to-32-bit an app-level k_cycle_get_32()
-	 * harness would do), so neither a very fast invoke (sub-us
-	 * rounds-to-0, not a truncation bias) nor a very slow one (32-bit
-	 * us overflow) corrupts the stored value. */
-	uint32_t     t0 = k_cycle_get_32();
+	 * backend's execution time, not an approximation of it.
+	 *
+	 * 64-bit vs 32-bit cycle capture: a plain k_cycle_get_32() wraps
+	 * modulo 2^32 cycles -- on the AEN801 M55
+	 * (CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC=400000000) that is ~10.74 s,
+	 * so an invoke longer than that would report a wrapped, too-small
+	 * duration (the "subtracting two uint32_t counts is correct modulo
+	 * 2^32" property this used to rely on is only true across a SINGLE
+	 * wrap, and doesn't help if the counter wraps because the delta
+	 * itself is >= 2^32 cycles). CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER
+	 * targets (AEN801 M55 among them) don't have that problem at all,
+	 * so use k_cycle_get_64() there; targets without it fall back to
+	 * k_cycle_get_32() and keep the same 2^32-cycle ceiling as before
+	 * (see the header's alp_inference_last_invoke_latency_us() doc for
+	 * the number). Either way k_cyc_to_us_near64() does the cycles->us
+	 * conversion at 64-bit precision with round-nearest (not the
+	 * floor-then-truncate-to-32-bit an app-level k_cycle_get_32()
+	 * harness would do), so a very fast invoke rounds sub-us to 0
+	 * rather than truncating with a bias. */
+#if defined(CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER)
+	uint64_t t0 = k_cycle_get_64();
+#else
+	uint32_t t0 = k_cycle_get_32();
+#endif
 	alp_status_t rc = (inf->state.ops == NULL || inf->state.ops->invoke == NULL)
 	                      ? ALP_ERR_NOT_IMPLEMENTED
 	                      : inf->state.ops->invoke(&inf->state);
-	uint32_t     t1 = k_cycle_get_32();
+#if defined(CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER)
+	uint64_t t1 = k_cycle_get_64();
+#else
+	uint32_t t1 = k_cycle_get_32();
+#endif
 	if (rc == ALP_OK) {
+		uint64_t delta_cycles = (uint64_t)(t1 - t0); /* correct across a single wrap */
+		uint64_t us64         = k_cyc_to_us_near64(delta_cycles);
+		/* last_invoke_latency_us is uint32_t (no libatomic on
+		 * Cortex-M -- see the struct's field comment), so saturate
+		 * rather than silently truncate/wrap a duration that
+		 * exceeds the field's ~71.58-minute ceiling. */
+		uint32_t us = (us64 > UINT32_MAX) ? UINT32_MAX : (uint32_t)us64;
 		/* Concurrent invokes on one handle are a real interleaving
 		 * (active_ops is a drain counter, not a mutex -- see the
 		 * struct's field comment), so this write races a concurrent
 		 * alp_inference_last_invoke_latency_us() reader (or another
 		 * invoke()) on a genuinely multi-threaded caller: atomic
-		 * store, not a plain assignment. */
-		__atomic_store_n(&inf->last_invoke_latency_us,
-		                 k_cyc_to_us_near64((uint32_t)(t1 - t0)),
-		                 __ATOMIC_RELEASE);
+		 * store, not a plain assignment. A naturally-aligned
+		 * uint32_t store is lock-free on every Cortex-M this SDK
+		 * targets -- no libatomic call, unlike the uint64_t this
+		 * field used to be. */
+		__atomic_store_n(&inf->last_invoke_latency_us, us, __ATOMIC_RELEASE);
 	}
 	alp_handle_op_leave(&inf->active_ops);
 	return rc;
@@ -236,14 +267,28 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf)
 
 alp_status_t alp_inference_last_invoke_latency_us(alp_inference_t *inf, uint64_t *out_us)
 {
+	/* out_us-NULL check stays FIRST, ahead of the handle check -- same
+	 * "param check before enter" convention as get_input()/get_output()
+	 * above (a pure param check with no handle-state deref may run
+	 * before op_enter; see alp-lab:writing-race-safe-dispatch-handlers
+	 * rule 2) and the order <alp/inference.h> documents (ALP_ERR_INVAL
+	 * listed before ALP_ERR_NOT_READY). MAJOR 2: the Yocto dispatcher
+	 * (src/yocto/inference_yocto.c) used to check the handle first,
+	 * so (NULL, NULL) and (closed, NULL) returned ALP_ERR_NOT_READY
+	 * there instead of ALP_ERR_INVAL -- fixed to match this ordering,
+	 * not the other way, since this is the ordering every other op in
+	 * this file already uses. */
 	if (out_us == NULL) return ALP_ERR_INVAL; /* param check before enter */
 	if (inf == NULL || !alp_handle_op_enter(&inf->lifecycle, &inf->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	uint64_t us = __atomic_load_n(&inf->last_invoke_latency_us, __ATOMIC_ACQUIRE);
+	/* last_invoke_latency_us is uint32_t (no libatomic on Cortex-M --
+	 * see the struct's field comment); widen to the public uint64_t
+	 * out_us after the sentinel check below. */
+	uint32_t us = __atomic_load_n(&inf->last_invoke_latency_us, __ATOMIC_ACQUIRE);
 	alp_handle_op_leave(&inf->active_ops);
-	if (us == UINT64_MAX) return ALP_ERR_NOT_READY; /* no successful invoke yet */
-	*out_us = us;
+	if (us == UINT32_MAX) return ALP_ERR_NOT_READY; /* no successful invoke yet */
+	*out_us = (uint64_t)us;
 	return ALP_OK;
 }
 
