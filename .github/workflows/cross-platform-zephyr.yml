@@ -39,17 +39,26 @@
 #     `.../branches/{dev,main}/protection/required_status_checks`,
 #     neither of which lists these six contexts), so a red run here
 #     is visible but does not block merge yet -- removing
-#     continue-on-error buys a real signal, not enforcement. Adding
-#     these six contexts (three OSes x two jobs) to branch protection
-#     is a separate follow-up requiring the maintainer's decision
-#     (alp-sdk#1528). `dev` runs an active merge-queue ruleset ("dev
-#     merge queue", confirmed via `gh api
-#     repos/alplabai/alp-sdk/rulesets`), so before that promotion
-#     happens the workflow ALSO needs `merge_group` in its own
-#     trigger list -- otherwise a queued PR would wait on a check
-#     this workflow can never raise on a `merge_group` ref (#1415),
-#     exactly the trap `pr-twister.yml` and `pr-static-analysis.yml`
-#     already document for their own required contexts. Added below.
+#     continue-on-error buys a real signal, not enforcement. Whether
+#     to promote all six of these contexts (three OSes x two jobs),
+#     or only the two ubuntu-latest ones, is a separate follow-up
+#     requiring the maintainer's decision (alp-sdk#1528 leaves this
+#     open). `dev` runs an active merge-queue ruleset ("dev merge
+#     queue", confirmed via `gh api repos/alplabai/alp-sdk/rulesets`),
+#     so before EITHER promotion happens the workflow ALSO needs
+#     `merge_group` in its own trigger list -- otherwise a queued PR
+#     would wait on a check this workflow can never raise on a
+#     `merge_group` ref (#1415), exactly the trap `pr-twister.yml` and
+#     `pr-static-analysis.yml` already document for their own required
+#     contexts. Added below, but capped to the ubuntu-latest leg on
+#     `merge_group` (see the trigger comment) to avoid billing the
+#     full 3-OS matrix on every queue entry -- that cap PRESUMES the
+#     ubuntu-latest-only promotion. If the maintainer instead requires
+#     the macOS/Windows contexts too, this cap must be widened to run
+#     those legs on `merge_group` FIRST, or the queue will hang in
+#     AWAITING_CHECKS on the four contexts that can then never report
+#     on a queue ref -- the same #1415 trap, reintroduced by the cap
+#     itself.
 #     What #1528 does NOT fix: `pull_request`/`push` below still
 #     `paths:`-filter this workflow, so a PR that touches none of
 #     those paths never runs it at all -- promoting python-smoke to
@@ -97,10 +106,11 @@ on:
       - 'docs/**/*.md'
       - 'README.md'
       # Every workflow, not just this one. `pytest tests/scripts/` also
-      # runs in pr-metadata-validate.yml's `validate` job, but that job's
-      # own `paths:` only include '.github/workflows/pr-metadata-validate.yml'
-      # -- an edit to a DIFFERENT workflow file doesn't trigger it. This
-      # is the only workflow where an edit to ANY workflow file reaches
+      # runs in pr-metadata-validate.yml's `validate` job, but that
+      # workflow's `pull_request` `paths:` list has exactly one
+      # '.github/workflows/' entry -- its own file -- so an edit to a
+      # DIFFERENT workflow file doesn't trigger it. This is the only
+      # workflow where an edit to ANY workflow file reaches
       # test_workflows_are_loadable.py, which lives under tests/scripts/
       # and is exercised by this job's pytest step. Narrowing this back to
       # a single filename is how two unparseable workflows reached `dev`
@@ -120,9 +130,10 @@ on:
       - 'docs/**/*.md'
       - 'README.md'
       # Every workflow, not just this one. `pytest tests/scripts/` also
-      # runs in pr-metadata-validate.yml's `validate` job, but that job's
-      # own `paths:` only include '.github/workflows/pr-metadata-validate.yml'
-      # -- an edit to a DIFFERENT workflow file doesn't trigger it. This
+      # runs in pr-metadata-validate.yml's `validate` job, but that
+      # workflow's `push` `paths:` list has no '.github/workflows/' entry
+      # at all -- not even its own file -- so an edit to ANY workflow
+      # file, including a DIFFERENT one, doesn't trigger it on push. This
       # is the only workflow where an edit to ANY workflow file reaches
       # test_workflows_are_loadable.py, which lives under tests/scripts/
       # and is exercised by this job's pytest step. Narrowing this back to
@@ -141,12 +152,16 @@ on:
   # get above. `merge_group` also can't be scoped by matrix leg at the
   # trigger level, so each job below scopes its own `strategy.matrix.os`
   # (a job-level `if:` can't do this -- `matrix` isn't in the context list
-  # `jobs.<job_id>.if` gets) to just `ubuntu-latest` on that event -- the
-  # only leg that's a candidate for the eventual required context --
-  # since `merge_group` fires unconditionally on every `dev` merge-queue
-  # entry with no `paths:` to narrow it, and the other two legs would
-  # otherwise bill full matrix cost (macOS 10x, Windows 2x) on every queue
-  # entry while gating nothing.
+  # `jobs.<job_id>.if` gets) to just `ubuntu-latest` on that event -- this
+  # PRESUMES the eventual required context ends up ubuntu-latest-only
+  # (alp-sdk#1528 leaves that open) -- since `merge_group` fires
+  # unconditionally on every `dev` merge-queue entry with no `paths:` to
+  # narrow it, and the other two legs would otherwise bill full matrix
+  # cost (macOS 10x, Windows 2x) on every queue entry while gating
+  # nothing. If the maintainer instead requires the macOS/Windows
+  # contexts, widen this cap to include those legs FIRST -- promoting
+  # them as required while they're capped out of `merge_group` reproduces
+  # the #1415 AWAITING_CHECKS hang this trigger exists to avoid.
   merge_group:
   workflow_dispatch:
 
@@ -180,9 +195,12 @@ jobs:
       fail-fast: false
       matrix:
         # merge_group has no paths: filter (see the trigger comment above), so
-        # cap it to the ubuntu-latest leg -- the only leg that's a candidate
-        # for the eventual required context -- rather than billing the full
-        # macOS (10x)/Windows (2x) matrix cost on every dev merge-queue entry.
+        # cap it to the ubuntu-latest leg -- this PRESUMES the eventual
+        # required context ends up ubuntu-latest-only (alp-sdk#1528 leaves
+        # that open; widen this cap first if macOS/Windows get required
+        # instead, or the queue hangs on those contexts per #1415) --
+        # rather than billing the full macOS (10x)/Windows (2x) matrix
+        # cost on every dev merge-queue entry.
         # The cap has to live here, not in a job-level `if:` -- `matrix` is
         # not in the context list `jobs.<job_id>.if` gets (only `github`,
         # `inputs`, `needs`, `vars`); `jobs.<job_id>.strategy` does get
@@ -361,9 +379,12 @@ jobs:
       fail-fast: false
       matrix:
         # merge_group has no paths: filter (see the trigger comment above), so
-        # cap it to the ubuntu-latest leg -- the only leg that's a candidate
-        # for the eventual required context -- rather than billing the full
-        # macOS (10x)/Windows (2x) matrix cost on every dev merge-queue entry.
+        # cap it to the ubuntu-latest leg -- this PRESUMES the eventual
+        # required context ends up ubuntu-latest-only (alp-sdk#1528 leaves
+        # that open; widen this cap first if macOS/Windows get required
+        # instead, or the queue hangs on those contexts per #1415) --
+        # rather than billing the full macOS (10x)/Windows (2x) matrix
+        # cost on every dev merge-queue entry.
         # The cap has to live here, not in a job-level `if:` -- `matrix` is
         # not in the context list `jobs.<job_id>.if` gets (only `github`,
         # `inputs`, `needs`, `vars`); `jobs.<job_id>.strategy` does get
