@@ -25,7 +25,7 @@ def _write_board(tmp: Path, body: str, name: str = "board.yaml") -> Path:
     return path
 
 
-def _synthetic_nx9101_root(tmp_path: Path, monkeypatch) -> Path:
+def _synthetic_nx9101_root(tmp_path: Path) -> Path:
     """Build a scratch metadata root carrying a synthetic E1M-NX9101
     preset, isolated from the repo's real
     `metadata/e1m_modules/imx93/hw-revisions.yaml`. Returns the scratch
@@ -116,9 +116,6 @@ def _synthetic_nx9101_root(tmp_path: Path, monkeypatch) -> Path:
         default_hw_rev: r1
     """).lstrip("\n"), encoding="utf-8")
 
-    import alp_orchestrate
-    monkeypatch.setattr(alp_orchestrate, "BOARD_SCHEMA",
-                        schemas / "board.schema.json")
     return meta
 
 

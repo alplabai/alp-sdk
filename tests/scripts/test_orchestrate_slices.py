@@ -707,7 +707,7 @@ cores:
 
 
 def test_slice_alp_conf_iot_tls_only_emits_network_base(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
 ) -> None:
     """issue #874 item 1: `iot.tls: true` alone (no `wifi:`/`mqtt:`) must
     still emit the networking base -- CONFIG_TLS_CREDENTIALS depends on
@@ -720,7 +720,7 @@ def test_slice_alp_conf_iot_tls_only_emits_network_base(
     docstring)."""
     import alp_orchestrate
 
-    meta = _synthetic_nx9101_root(tmp_path, monkeypatch)
+    meta = _synthetic_nx9101_root(tmp_path)
     body = """
 som:
   sku: E1M-NX9101
@@ -805,7 +805,7 @@ cores:
 
 
 def test_slice_alp_conf_iot_unknown_provider_uses_generic_zephyr(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
 ) -> None:
     """A SoM whose wireless provider is still TBD emits the generic Zephyr
     networking / MQTT / TLS / BLE gates rather than a false provider.
@@ -817,7 +817,7 @@ def test_slice_alp_conf_iot_unknown_provider_uses_generic_zephyr(
     what this test actually exercises, same as the real one's."""
     import alp_orchestrate
 
-    meta = _synthetic_nx9101_root(tmp_path, monkeypatch)
+    meta = _synthetic_nx9101_root(tmp_path)
     body = """
 som:
   sku: E1M-NX9101

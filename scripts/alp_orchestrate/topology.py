@@ -18,6 +18,9 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .models import OrchestratorError
+from .paths import BOARD_SCHEMA
+
 if TYPE_CHECKING:
     from .models import BoardProject
 
@@ -52,8 +55,17 @@ def _core_os_choices(metadata_root: Path) -> tuple[str, ...]:
     (no slice is built).  *metadata_root* is REQUIRED and the cache is keyed
     on it -- a fixed in-tree default here silently ignored a project's
     `--metadata-root` override (#1485).
+
+    Falls back to the in-tree `BOARD_SCHEMA` when *metadata_root* has no
+    `schemas/` of its own (e.g. a synthetic test root) -- the same fallback
+    `loader._validate_board` applies, so a scratch root without a schema copy
+    still resolves instead of raising a raw `FileNotFoundError`.
     """
     schema_path = Path(metadata_root) / "schemas" / "board.schema.json"
+    if not schema_path.is_file():
+        schema_path = BOARD_SCHEMA
+    if not schema_path.is_file():
+        raise OrchestratorError(f"board schema not found: {schema_path}")
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     return tuple(schema["$defs"]["core_entry"]["properties"]["os"]["enum"])
 
