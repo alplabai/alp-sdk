@@ -167,12 +167,12 @@ _ALLOWLIST: set[str] = {
     # re-widening the harvest, pending a maintainer decision to finish
     # the PSA<->OPTIGA wiring or mark it not-yet-implemented in the doc.
     "ALP_SDK_PSA_ATTESTATION_OPTIGA",
-    # docs/gd32-bridge.md's recovery-runbook narration names this env var,
-    # but it does not exist in tan-cli today (zero hits, checked against
-    # the tan-cli checkout) or in alp-sdk -- a dead name kept only in the
-    # doc's historical narration.  Allowlisted BECAUSE it will never
-    # appear in this repo's headers/Kconfig/generators; drop the entry
-    # if docs/gd32-bridge.md ever stops naming it.
+    # docs/gd32-bridge.md's recovery-runbook narration names this env var
+    # read by tan-cli's flash_cmd.py (a different repo,
+    # python/tan/commands/flash_cmd.py's REQUIRE_DPIDR_ENV, tan-cli#589),
+    # not an alp-sdk symbol.  Allowlisted BECAUSE it will never appear in
+    # this repo's headers/Kconfig/generators; drop the entry if
+    # docs/gd32-bridge.md ever stops naming it.
     "ALP_FLASH_REQUIRE_DPIDR",
 }
 

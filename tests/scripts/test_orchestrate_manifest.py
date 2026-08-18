@@ -190,11 +190,14 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     (`crates/tan-cli/src/commands/flash/mod.rs`) -- it became the artefact
     string and a real flasher was spawned against a nonexistent `TBD`
     path. Dropping the field entirely means nothing resolves that sentinel
-    path; with no `flash_method` but an `update_channel` present, Python
-    Tan's `python/tan/commands/flash_cmd.py` (:1186-1198) SKIPS this
-    helper instead ("is Alp-OTA-updated (update_channel:
-    alp_ota_spi_bridge), not a customer flash target; skipping" -- status
-    `skipped`, rc `-1`). No `firmware_path` key means no TBD note either.
+    path; it is `flash_policy: recovery_only`, not `update_channel`, that
+    decides this entry's fate -- Python Tan's
+    `python/tan/core/flash_plan.py::helper_flash_gate` (tan-cli#611)
+    declines it ahead of any `flash_method` check ("is programmed by Alp
+    Lab in production and is customer-flashable only to recover a bricked
+    device...; skipping. Field updates arrive over update_channel:
+    alp_ota_spi_bridge." -- status `skipped`, rc `-1`). No `firmware_path`
+    key means no TBD note either.
     """
     path = _write_board(tmp_path, V2N_HAPPY)
     project = load_board_yaml(path)

@@ -149,21 +149,38 @@ helper_firmware:
 `flash_policy` and `update_channel` stay independent keys exactly as
 before -- `flash_policy` answers who may reach a local flash path *if
 one is ever added*, and the schema requires it on every helper entry
-whether or not a `flash_method` exists.  With no `flash_method` but an
-`update_channel` present, `tan flash` skips this helper with `flash:
-helper 'gd32_bridge' is Alp-OTA-updated (update_channel:
-alp_ota_spi_bridge), not a customer flash target; skipping` (status
-`skipped`, rc `-1` -- never a run failure; see
-`python/tan/commands/flash_cmd.py:1186-1198`) rather than writing
-anywhere -- there is currently no `tan`-driven recovery command to
-run.  As measured against the tan-cli checkout at
-tan-cli v0.5.2-rc1.dev0 (`python/tan/version.py`), tan still ships the
-`swd_probe` backend (`python/tan/core/flash_plan.py::plan_swd_probe`);
-neither a `--recover` flag nor `ALP_FLASH_REQUIRE_DPIDR` exist anywhere
-in tan-cli today, so both are dead in `tan` as well as in this repo's
-metadata.  Only the metadata stopped naming `swd_probe`, and moving the
-GD32/CC3501E SWD programming path out of alp-sdk entirely is tracked
-separately in #1370.
+whether or not a `flash_method` exists.  It is `flash_policy:
+recovery_only`, not `update_channel`, that decides this entry's fate:
+`tan flash` declines it before it ever reaches the `flash_method`
+check (`python/tan/core/flash_plan.py::helper_flash_gate`, called
+ahead of `python/tan/commands/flash_cmd.py::_flash_entry`'s own
+`flash_method` check -- tan-cli#611) with:
+
+```text
+flash: helper 'gd32_bridge' is programmed by Alp Lab in production
+and is customer-flashable only to recover a bricked device, with Alp
+Lab-supplied binaries; skipping. Field updates arrive over
+update_channel: alp_ota_spi_bridge. To recover a bricked device
+deliberately, re-run with --helper gd32_bridge --recover.
+```
+
+status `skipped`, rc `-1` -- never a run failure.  `tan` DOES expose
+`--helper gd32_bridge --recover` and names it in its own skip message
+above, but because the entry declares no `flash_method` that re-run
+also skips without writing (same `_flash_entry` path, past the policy
+gate) -- so bricked-bridge recovery is still an out-of-`tan` SWD
+procedure today.  As measured against tan-cli tag `v0.6.0-rc1`, tan
+still ships the `swd_probe` backend
+(`python/tan/core/flash_plan.py::plan_swd_probe`); both `--recover`
+(`python/tan/commands/flash_cmd.py`, the `recover` CLI option) and
+`ALP_FLASH_REQUIRE_DPIDR` (`python/tan/commands/flash_cmd.py`'s
+`REQUIRE_DPIDR_ENV`, documented at tan-cli `docs/setools.md`'s
+"`ALP_FLASH_REQUIRE_DPIDR=1`" section) exist in tan-cli today; they
+are inapplicable to this entry only because the preset declares no
+`flash_method`, not because either is dead code.  Only the metadata
+stopped naming `swd_probe`, and moving the GD32/CC3501E SWD
+programming path out of alp-sdk entirely is tracked separately in
+#1370.
 
 **Recovering a bricked bridge today is an out-of-`tan` SWD procedure**:
 attach a J-Link (or compatible SWD probe) directly to the GD32's
