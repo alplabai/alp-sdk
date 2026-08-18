@@ -49,7 +49,7 @@ jobs:
     # ceiling derived from the no-op runs alone would be dangerously
     # tight against that real path, so this is set with headroom over the
     # documented ~20min rather than 2x the (unrepresentative) 85s sample.
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     steps:
       - name: Check for Coverity token
@@ -66,17 +66,22 @@ jobs:
       - name: Checkout
         if: steps.token_check.outputs.configured == 'true'
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
-        timeout-minutes: 2
+        timeout-minutes: 5
 
       - name: Install build dependencies
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         if: steps.token_check.outputs.configured == 'true'
-        timeout-minutes: 3
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
               build-essential cmake python3 wget
 
       - name: Download Coverity Build Tool
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         if: steps.token_check.outputs.configured == 'true'
         env:
           COV_TOKEN: ${{ secrets.COVERITY_TOKEN }}
@@ -86,7 +91,6 @@ jobs:
           # COVERITY_PROJECT in repo Actions vars if your project
           # was registered under a different name.
           COV_PROJECT: ${{ vars.COVERITY_PROJECT || 'alplabai/alp-sdk' }}
-        timeout-minutes: 5
         run: |
           # Coverity's documented form is POST with form-encoded body;
           # GET with query string fails auth.  -f makes curl exit
@@ -127,7 +131,7 @@ jobs:
 
       - name: Capture build with Coverity
         if: steps.token_check.outputs.configured == 'true'
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: |
           cov-build --dir cov-int cmake --build build --parallel
 
@@ -136,12 +140,14 @@ jobs:
         run: tar czf alp-sdk-cov.tgz cov-int
 
       - name: Submit to Coverity Scan
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         if: steps.token_check.outputs.configured == 'true'
         env:
           COV_TOKEN: ${{ secrets.COVERITY_TOKEN }}
           COV_EMAIL: ${{ secrets.COVERITY_EMAIL }}
           COV_PROJECT: ${{ vars.COVERITY_PROJECT || 'alplabai/alp-sdk' }}
-        timeout-minutes: 2
         run: |
           # Same project-name source-of-truth as the download step.
           # The submit endpoint URL-encodes the project parameter

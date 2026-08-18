@@ -55,20 +55,24 @@ jobs:
     # context and previously had no ceiling at all (GitHub's implicit
     # 360-minute default applied). Worst observed successful run 23s
     # across 3 sampled runs. #1527 added the two shellcheck steps below
-    # (13 small scripts, worst observed local run well under a minute) --
-    # 15min still gives real headroom over both while failing fast on a
-    # PyPI/GitHub-releases/apt stall in the steps below, and stays above
-    # this job's own step timeouts summed
-    # (3+3+2+2+2=12) per test_tier_a_workflow_step_timeouts.py.
-    timeout-minutes: 15
+    # (13 small scripts, worst observed local run well under a minute).
+    # The ceiling is set by this job's summed step caps, not by that
+    # observed time: #1549's fix put a 5-minute floor on network steps and
+    # 15 on the heavy installers, so the sum moved and this had to move
+    # with it, per test_tier_a_workflow_step_timeouts.py's
+    # ceiling-exceeds-the-sum invariant (#1274).
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
-        timeout-minutes: 3
+        timeout-minutes: 5
         with:
           fetch-depth: 0  # need history so HEAD~ resolves
 
       - name: Install clang-format 22 (pinned)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # Pinned to clang-format-22 via the pip wheel (clang-format==22.1.5),
         # which ships BOTH the `clang-format` binary and `clang-format-diff.py`.
         # We pin via pip, NOT apt: apt's `clang-format` floats with the runner
@@ -77,7 +81,6 @@ jobs:
         # tree is formatted against v22; .clang-format also locks
         # Cpp11BracedListStyle so designated-initialiser output stays
         # reproducible across patch releases.
-        timeout-minutes: 3
         run: |
           python3 -m pip install --user 'clang-format==22.1.5'
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -101,13 +104,15 @@ jobs:
           fi
 
       - name: Run clang-format-diff on changed lines
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # DIFF_BASE is routed through env, matching the producing step above
         # -- ${{ }} re-substitutes into every run: block's source text
         # independently, so quoting the value once at the producer does not
         # protect this consuming step on its own.
         env:
           DIFF_BASE: ${{ steps.base.outputs.ref }}
-        timeout-minutes: 2
         run: |
           # clang-format-diff.py from the pinned pip wheel; it shells out to the
           # wheel's bundled v22 clang-format, so the diff check uses v22 too.
@@ -138,6 +143,9 @@ jobs:
           echo "clang-format clean on the diff."
 
       - name: Install shellcheck (pinned)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # Pinned to the upstream release tarball, NOT apt: apt's
         # `shellcheck` floats with the runner image, so an unpinned bump
         # could add or drop warning-severity checks between runs of this
@@ -147,7 +155,6 @@ jobs:
         # whatever `shellcheck` is on PATH / ~/.local/bin (see
         # scripts/test-all.sh's stage_shellcheck); only pinning both sides
         # to the same v0.10.0 closes that half of the gap.
-        timeout-minutes: 2
         run: |
           set -euo pipefail
           SHELLCHECK_VERSION="v0.10.0"
@@ -200,17 +207,19 @@ jobs:
     # `|| true` with --error-exitcode=0 -- but it too had no ceiling
     # (360-minute implicit default). Worst observed successful run 42s
     # across 3 sampled runs; 15min gives headroom over that.
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
-        timeout-minutes: 2
+        timeout-minutes: 5
 
       - name: Install cppcheck
-        timeout-minutes: 3
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y cppcheck
+          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y cppcheck
 
       - name: Run cppcheck
         # cppcheck without a build context misses some symbols

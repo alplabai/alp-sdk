@@ -40,24 +40,31 @@ jobs:
   doxygen:
     name: doxygen · public headers
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
-        timeout-minutes: 2
+        timeout-minutes: 5
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 
       - name: Install Doxygen
-        timeout-minutes: 3
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        # #1477 set this to 3 from observed runs; it then TIMED OUT on a
+        # real PR (2026-08-18, run 32129302623) -- the step fetches a
+        # ~50 MB tarball from GitHub releases and a slow mirror blows a
+        # tight cap. A step cap exists to catch a HANG, not to enforce a
+        # download SLA, so this is deliberately generous.
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y doxygen graphviz
+          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y doxygen graphviz
 
       # Fast pre-flight: catch a missing @brief before we spin up
       # the full Doxygen build.  Currently at 100% coverage on main;

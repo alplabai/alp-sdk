@@ -105,11 +105,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
-        timeout-minutes: 2
+        timeout-minutes: 5
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 
@@ -119,7 +119,9 @@ jobs:
       # floats with the runner image).  Without it the regen below is unformatted
       # and the in-sync diff fails.
       - name: Install clang-format 22 (pinned)
-        timeout-minutes: 2
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
           python3 -m pip install --user 'clang-format==22.1.5'
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -130,7 +132,9 @@ jobs:
       # also schema-validates its output.  setup-python's interpreter ships
       # neither package, so install them explicitly.
       - name: Install generator dependencies
-        timeout-minutes: 2
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: python3 -m pip install --user pyyaml jsonschema
 
       # gen_soc_caps.py emits include/alp/soc_caps.h AND the capability

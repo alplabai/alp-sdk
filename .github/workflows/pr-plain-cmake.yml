@@ -126,7 +126,7 @@ jobs:
   yocto:
     name: plain-cmake · yocto backend + tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         timeout-minutes: 3
@@ -136,13 +136,15 @@ jobs:
       # Without these the CMakeLists falls back to the NOSUPPORT
       # stubs and we'd lose coverage in CI.
       - name: Install Yocto-side runtime deps
-        timeout-minutes: 5
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure
-        timeout-minutes: 2
+        timeout-minutes: 5
         run: cmake -B build/yocto -S . -DALP_OS=yocto -DALP_BUILD_TESTS=ON
       - name: Build
         timeout-minutes: 2
@@ -172,18 +174,22 @@ jobs:
     # replace.
     name: plain-cmake · yocto + zcbor (#1254)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         timeout-minutes: 3
       - name: Install Yocto-side runtime deps
-        timeout-minutes: 3
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Build zcbor at the recipe's own pin (tag 0.9.1)
-        timeout-minutes: 2
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
           set -e
           git clone --depth 1 --branch 0.9.1 \
@@ -248,7 +254,7 @@ jobs:
     # ALSA/OpenSSL) wired in, so the strict profile actually sees them.
     name: plain-cmake · strict-warnings (#634)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -265,14 +271,16 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         timeout-minutes: 3
       - name: Install Yocto-side runtime deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         if: matrix.name == 'yocto'
-        timeout-minutes: 3
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure
-        timeout-minutes: 3
+        timeout-minutes: 5
         run: >
           cmake -B build/strict-${{ matrix.name }} -S . ${{ matrix.args }}
           -DALP_SDK_STRICT_WARNINGS=ON -DALP_SDK_WERROR=ON
@@ -338,18 +346,20 @@ jobs:
     # path instead of add_subdirectory()).
     name: plain-cmake · find_package() consumer (#607)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         timeout-minutes: 3
       - name: Install Yocto-side runtime deps
-        timeout-minutes: 3
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure + build + install alp-sdk
-        timeout-minutes: 2
+        timeout-minutes: 5
         run: |
           cmake -B build/install-review -S . -DALP_OS=yocto \
               -DALP_SDK_BUILD_SHARED=ON \

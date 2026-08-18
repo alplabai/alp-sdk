@@ -37,7 +37,7 @@ jobs:
     # Raised from the formula's 10min to 15min so the ceiling stays
     # strictly above the sum of its capped steps plus the 1min/step
     # budget for the uncapped ones below.
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         timeout-minutes: 3
@@ -46,7 +46,9 @@ jobs:
         with:
           python-version: "3.x"
       - name: install emit deps
-        timeout-minutes: 2
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip install jsonschema pyyaml pytest
       # The comparator's own unit tests, BEFORE the live comparison it guards.
       # These 15 ran in no workflow on either side: this job invoked only

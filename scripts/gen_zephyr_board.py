@@ -714,8 +714,12 @@ def _aen_flash_partitions(
     Stock layout (no per-role memory_map entry for *role*): the
     original symmetric two-slot MCUboot swap-using-scratch map --
     mcuboot, image-0 (primary/code-partition), image-1 (secondary,
-    OTA), scratch, storage -- unchanged, and still what every
-    single-M55 AEN SKU (aen401, aen601) generates.
+    OTA), scratch, storage -- unchanged. This now applies only to a
+    genuinely single-M55 AEN SoM that declares no `<role>_slot0`
+    region. E1M-AEN401 and E1M-AEN601 are DUAL-M55 (see
+    `_aen_role_slot0_map` above) and have generated the disjoint-slot0
+    layout below since #1445 -- `_aen_require_disjoint_slot0` refuses
+    to let a dual-M55 SoM fall back to this stock layout at all.
 
     Disjoint-slot0 layout (*role*'s `<role>_slot0` memory_map entry is
     declared, #1069): mcuboot, this role's own slot0 (labelled
