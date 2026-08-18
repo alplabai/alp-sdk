@@ -3,16 +3,21 @@
 """Kconfig / board-define slug derivation -- a shared leaf.
 
 The slug + symbol helpers the per-slice config emitters (alp.conf, cmake-args)
-share: the board-define slug, the on-module / helper-firmware Kconfig slug
-derivation (+ the non-chip field set they skip), and the peripheral->Kconfig
-symbol table. A dependency-free leaf so every per-slice emitter pulls them from
-one place instead of duplicating. Extracted as a #285 leaf seam (the paths.py /
-memregion.py move) ahead of the kconfig emitter.
+share: the board-define slug and the on-module / helper-firmware Kconfig slug
+derivation (+ the non-chip field set they skip). A dependency-free leaf so
+every per-slice emitter pulls them from one place instead of duplicating.
+Extracted as a #285 leaf seam (the paths.py / memregion.py move) ahead of the
+kconfig emitter.
+
+The peripheral->Kconfig symbol table used to live here too, as a module-level
+constant computed once at import time from the SDK's own in-tree metadata/ --
+a project's `--metadata-root` override never reached it (#1485). Callers now
+import `alp_registries.peripheral_kconfig` directly and pass
+`project.effective_metadata_root()` at the point of use.
 """
 
 from __future__ import annotations
 
-from alp_registries import peripheral_kconfig
 from sentinels import is_tbd
 
 
@@ -131,8 +136,6 @@ def _slugs_from_helper_firmware(helper_firmware: list) -> list[str]:
             seen.add(chip)
     return sorted(seen)
 
-
-_PERIPHERAL_KCONFIG: dict[str, tuple[str, ...]] = peripheral_kconfig()
 
 # Slugs that map to BLOCK_ Kconfig symbols rather than CHIP_.
 # These live under blocks/ + <alp/blocks/*.h> because they are

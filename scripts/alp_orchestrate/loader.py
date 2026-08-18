@@ -804,6 +804,7 @@ def _validate_topology_cores(
     silicon: str,
     board_preset: dict[str, Any],
     board_name: Optional[str],
+    metadata_root: Path,
 ) -> tuple[dict[str, Slice], list[IpcEntry]]:
     """Stage 3 of the #673 Phase-1 `load_board_yaml` split: per-core
     topology resolution + OS/class enforcement, IPC endpoint
@@ -905,7 +906,7 @@ def _validate_topology_cores(
             slot0_load_address=slot0_load_address,
         )
         _enforce_flow_d_preflight_pair(slice_, variant_debug, sku)
-        _enforce_loader_rules(slice_)
+        _enforce_loader_rules(slice_, metadata_root)
         _enforce_os_matches_core_class(
             slice_, soc_core_type_by_id.get(core_id, ""))
         cores[core_id] = slice_
@@ -1003,6 +1004,7 @@ def _resolve_storage(
     project: dict[str, Any],
     som_preset: dict[str, Any],
     sku: str,
+    metadata_root: Path,
 ) -> list[StorageEntry]:
     """Stage 4 of the #673 Phase-1 `load_board_yaml` split: storage
     partitions (board.yaml `storage:` block).  Parse into StorageEntry
@@ -1035,7 +1037,7 @@ def _resolve_storage(
 
     # Cross-field: known flash device set is memory_map names + ospi keys.
     if storage_entries:
-        known_devices = set(_known_flash_devices(som_preset, METADATA_ROOT))
+        known_devices = set(_known_flash_devices(som_preset, metadata_root))
         for entry in storage_entries:
             if entry.flash_device is None:
                 continue   # resolver will block it with a clear reason
@@ -1063,6 +1065,7 @@ def _validate_cross_fields(
     som_preset: dict[str, Any],
     sku: str,
     storage_entries: list[StorageEntry],
+    metadata_root: Path,
 ) -> dict[str, Any]:
     """Stage 5 of the #673 Phase-1 `load_board_yaml` split:
     `security.psa:` cross-field validation.  The schema is
@@ -1081,7 +1084,7 @@ def _validate_cross_fields(
     if psa:
         storage_name_set = {e.name for e in storage_entries}
         try:
-            mem_map = resolve_memory_map(som_preset, METADATA_ROOT)
+            mem_map = resolve_memory_map(som_preset, metadata_root)
         except Exception:                                # noqa: BLE001
             mem_map = []
         region_names = {
@@ -1258,12 +1261,12 @@ def load_board_yaml(path: Path, *,
 
     cores, ipc_entries = _validate_topology_cores(
         project, som_preset, soc_spec, sku, silicon, board_preset,
-        board_name)
+        board_name, metadata_root)
 
-    storage_entries = _resolve_storage(project, som_preset, sku)
+    storage_entries = _resolve_storage(project, som_preset, sku, metadata_root)
 
     security_block = _validate_cross_fields(
-        project, som_preset, sku, storage_entries)
+        project, som_preset, sku, storage_entries, metadata_root)
 
     out = BoardProject(
         sku=sku,
@@ -1284,6 +1287,7 @@ def load_board_yaml(path: Path, *,
         storage=storage_entries,
         security=security_block,
         raw=project,
+        metadata_root=metadata_root,
     )
 
     # Cross-field consistency pass (v0.6 P2.3).  Runs last so it can

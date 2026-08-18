@@ -123,6 +123,60 @@ def test_allowed_os_derived_from_schema_minus_cross_class(tmp_path: Path) -> Non
     assert "yocto" in cores["a55_cluster"]["allowed_os"]
 
 
+def test_allowed_os_keyed_on_metadata_root(tmp_path: Path) -> None:
+    """#1485 round three: `_core_os_choices` (the `allowed_os` enum source)
+    must resolve against `--metadata-root`, not the in-tree
+    `metadata/schemas/board.schema.json` -- it caches on `metadata_root`
+    itself (`functools.lru_cache`), so a fixed in-tree read here would
+    silently ignore a project's `--metadata-root` override the same way
+    the two registry sites did before #1485's first two rounds.
+
+    Same shape as `test_orchestrate_registries.py`'s scratch-root check:
+    mutate a scratch copy's `board.schema.json` os enum with a
+    scratch-only marker value, then assert the CLI's `allowed_os` reflects
+    it under the override and NOT without one.
+    """
+    import shutil
+
+    meta = tmp_path / "metadata"
+    shutil.copytree(REPO / "metadata", meta)
+
+    schema_path = meta / "schemas" / "board.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    enum = schema["$defs"]["core_entry"]["properties"]["os"]["enum"]
+    assert "os_scratch_marker" not in enum
+    enum.append("os_scratch_marker")
+    schema_path.write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+
+    body = """
+        som:
+          sku: E1M-V2N101
+        cores:
+          m33_sm:
+            app: ./src
+    """
+    p = _write_board(tmp_path, body)
+
+    # Scratch root: allowed_os must carry the scratch marker.
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), "--input", str(p),
+         "--metadata-root", str(meta), "--emit", "os-topology"],
+        capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    cores = _by_id(json.loads(proc.stdout))
+    assert "os_scratch_marker" in cores["m33_sm"]["allowed_os"]
+    assert "os_scratch_marker" in cores["a55_cluster"]["allowed_os"]
+
+    # No override: must resolve against the real in-tree schema.
+    proc_intree = subprocess.run(
+        [sys.executable, str(SCRIPT), "--input", str(p), "--emit", "os-topology"],
+        capture_output=True, text=True)
+    assert proc_intree.returncode == 0, proc_intree.stdout + proc_intree.stderr
+    cores_intree = _by_id(json.loads(proc_intree.stdout))
+    assert "os_scratch_marker" not in cores_intree["m33_sm"]["allowed_os"]
+    assert "os_scratch_marker" not in cores_intree["a55_cluster"]["allowed_os"]
+
+
 def test_cli_emit_os_topology(tmp_path: Path) -> None:
     body = """
         som:

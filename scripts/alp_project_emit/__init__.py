@@ -35,8 +35,6 @@ byte-identical-output pin.
 
 from __future__ import annotations
 
-from alp_registries import peripheral_kconfig
-
 
 # ---------------------------------------------------------------------
 # Shared resolved model: canonical E1M / E1M-X GPIO pad order
@@ -191,12 +189,6 @@ _CHIP_SUBSYSTEMS: dict[str, tuple[str, ...]] = {
     # entries above did.
     "gd32g553":           ("SPI", "I2C"),
 }
-
-
-# Peripheral name (from board.yaml's `peripherals:` array) -> Zephyr Kconfig
-# symbols.  Single-sourced in metadata/registries/peripheral-kconfig.json and
-# shared with alp_orchestrate/slugs.py.
-_PERIPHERAL_KCONFIG: dict[str, tuple[str, ...]] = peripheral_kconfig()
 
 
 # ---------------------------------------------------------------------
