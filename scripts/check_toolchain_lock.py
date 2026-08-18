@@ -35,25 +35,29 @@ fails loudly when:
      let pr-twister.yml silently reuse a stale cached toolchain forever
      across an SDK bump. See `_check_sdk_reference_drift`'s own docstring
      for the full, authoritative list of what it scans for.
-  4. Any of TOOLCHAIN_WORKFLOWS below (the four workflows issue #949 item 3
-     originally named) no longer contains a real read of
-     metadata/toolchains.json at all. This is a DIFFERENT assertion from
-     check 3 above: check 3 scans every workflow, repo-wide, for a drifted
-     COPY of a manifest fact; this one polices four specific files for
-     still HAVING a manifest read in the first place -- so silently
-     deleting just that one step (while every literal elsewhere in the
-     file, e.g. an unchanged `${ZEPHYR_SDK_URL}` reference, still looks
-     untouched) is caught too. See `_check_still_reads_manifest`.
+  4. Any of TOOLCHAIN_WORKFLOWS below -- today TWO files, the survivors of
+     the four workflows issue #949 item 3 originally named (the other two
+     were pr-renode-aen-smoke.yml and pr-renode-sim-mode.yml, deleted by
+     docs/adr/0022 Amendment 2's Renode retirement) -- no longer contains
+     a real read of metadata/toolchains.json at all. This is a DIFFERENT
+     assertion from check 3 above: check 3 scans every workflow,
+     repo-wide, for a drifted COPY of a manifest fact; this one polices
+     those specific files for still HAVING a manifest read in the first
+     place -- so silently deleting just that one step (while every literal
+     elsewhere in the file, e.g. an unchanged `${ZEPHYR_SDK_URL}`
+     reference, still looks untouched) is caught too. See
+     `_check_still_reads_manifest`.
 
 Why check 3 looks like this (history): this gate originally scanned only
-TOOLCHAIN_WORKFLOWS -- a curated, four-file list, with the stated rationale
-that "a repo-wide scan over every *.yml would need its own allowlist for
-false positives". That is the exact argument already made, and rejected, for
-the sibling `check_bootstrap_manifest.py` gate's own winget-identifier scan
-(issue #949 review): a verb-triggered repo-wide scan there needed a
-sixteen-entry allowlist of legitimate lines, and re-keying the trigger on a
-DISTINCTIVE IDENTIFIER derived from the manifest (the winget package ID, not
-a bare "winget install" verb) collapsed that allowlist to zero. Applied here:
+TOOLCHAIN_WORKFLOWS -- then a curated, four-file list, with the stated
+rationale that "a repo-wide scan over every *.yml would need its own
+allowlist for false positives". That is the exact argument already made,
+and rejected, for the sibling `check_bootstrap_manifest.py` gate's own
+winget-identifier scan (issue #949 review): a verb-triggered repo-wide scan
+there needed a sixteen-entry allowlist of legitimate lines, and re-keying
+the trigger on a DISTINCTIVE IDENTIFIER derived from the manifest (the
+winget package ID, not a bare "winget install" verb) collapsed that
+allowlist to zero. Applied here:
 the distinctive identifiers are the sdk-ng release URL path
 (`zephyrSdk.baseUrl`, minus its trailing version path segment) and the
 artifact filename shapes (each `zephyrSdk.artifacts[].filename`, minus its
@@ -65,7 +69,7 @@ not actually occur (see the repo-wide sweep this change ran: today, ZERO
 non-curated workflow mentions sdk-ng/zephyr-sdk/ZEPHYR_SDK at all).
 
 The curated four-file scan-scope this replaces was also a real, reproduced
-bypass, not a hypothetical: it protects exactly the four files it names and
+bypass, not a hypothetical: it protected exactly the four files it named and
 nothing past them, so a FIFTH workflow dropping in its own SDK install with
 a hardcoded version, a hardcoded URL, and no hash check at all passed this
 gate cleanly -- reproducing precisely the four defects it exists to prevent.
@@ -101,7 +105,9 @@ Zephyr-version checks, only reads `zephyr.version` as the input to point 2
 above.
 
 Git-blame finding on the historical `SDK_VER=0.16.8` in
-pr-renode-aen-smoke.yml: introduced in commit cbb8a44... adding the workflow
+pr-renode-aen-smoke.yml (the workflow itself no longer exists -- deleted by
+docs/adr/0022 Amendment 2; read the finding off git history): introduced in
+commit cbb8a44... adding the workflow
 from scratch, at a time this repo already pinned Zephyr v4.4.0 (whose own
 `SDK_VERSION` was already `1.0.1`, same as at the current v4.4.1 pin) -- so
 `0.16.8` was never correct for any Zephyr revision this repo has built
@@ -164,26 +170,32 @@ SCHEMA = REPO / "metadata" / "schemas" / "toolchains-v1.schema.json"
 BOOTSTRAP_MANIFEST = REPO / "metadata" / "bootstrap.json"
 WORKFLOWS_DIR = REPO / ".github" / "workflows"
 
-# The four CI workflows issue #949 item 3 originally named as "the only
-# things that reference the Zephyr SDK" -- kept here, but demoted from "the
-# scan's full scope" to a POSITIVE assertion (check 4, module docstring):
-# each of these four must still contain a real read of
-# metadata/toolchains.json somewhere. Check 3's repo-wide scan below is what
-# now defines the actual scan scope (`_iter_workflow_files`); this list's
-# only remaining job is to catch one of these four having its manifest-read
-# step silently deleted, which a repo-wide COPY-drift scan cannot see for a
-# file (like pr-twister.yml) that names no sdk-ng URL/filename literal to
-# begin with.
+# The CI workflows issue #949 item 3 originally named as "the only things
+# that reference the Zephyr SDK" -- kept here, but demoted from "the scan's
+# full scope" to a POSITIVE assertion (check 4, module docstring): each of
+# these must still contain a real read of metadata/toolchains.json
+# somewhere. Check 3's repo-wide scan below is what now defines the actual
+# scan scope (`_iter_workflow_files`); this list's only remaining job is to
+# catch one of these having its manifest-read step silently deleted, which a
+# repo-wide COPY-drift scan cannot see for a file (like pr-twister.yml) that
+# names no sdk-ng URL/filename literal to begin with.
+#
+# #949 named FOUR. Two of them -- pr-renode-aen-smoke.yml and
+# pr-renode-sim-mode.yml -- were deleted by docs/adr/0022 Amendment 2's
+# Renode retirement, so the list is two today. Shrinking it is not a
+# weakening of check 4: check 4 only ever asserted a property OF the files
+# it names, and a deleted file has no manifest-read step to lose. Nothing
+# else changed about which files are eligible; a future workflow that grows
+# a manifest read belongs here too.
 TOOLCHAIN_WORKFLOWS = [
-    REPO / ".github" / "workflows" / "pr-renode-aen-smoke.yml",
-    REPO / ".github" / "workflows" / "pr-renode-sim-mode.yml",
     REPO / ".github" / "workflows" / "pr-getting-started-aen801.yml",
     REPO / ".github" / "workflows" / "pr-twister.yml",
 ]
 
 # A real read of the manifest -- `open("metadata/toolchains.json")` or
 # `open("alp-sdk/metadata/toolchains.json")` (the `path:`-checked-out form
-# three of the four TOOLCHAIN_WORKFLOWS use) -- as opposed to merely
+# one of the two TOOLCHAIN_WORKFLOWS uses -- pr-getting-started-aen801.yml;
+# pr-twister.yml uses the plain form) -- as opposed to merely
 # MENTIONING the path in a comment, which a stale rationale comment left
 # behind after the real read was deleted would still do. Used by both
 # `_check_sdk_reference_drift`'s per-file "did this actually read the
@@ -510,7 +522,7 @@ def _check_still_reads_manifest(path: Path) -> list[str]:
     contain a real read of metadata/toolchains.json (`_MANIFEST_READ_RE`).
     A DIFFERENT assertion from `_check_sdk_reference_drift` above: that one
     scans for a drifted COPY of a manifest fact repo-wide; this one polices
-    four specific files for still HAVING a manifest read in the first
+    the curated files for still HAVING a manifest read in the first
     place, so deleting just that one step is caught even for a file (like
     pr-twister.yml, which installs the SDK via `west sdk install` and never
     spells out a URL/filename literal at all) that gives
@@ -522,7 +534,7 @@ def _check_still_reads_manifest(path: Path) -> list[str]:
         return []
     rel = path.relative_to(REPO).as_posix()
     return [
-        f"{rel}: no longer reads metadata/toolchains.json anywhere -- this is one of the four "
+        f"{rel}: no longer reads metadata/toolchains.json anywhere -- this is one of the "
         f"workflows TOOLCHAIN_WORKFLOWS asserts must source the Zephyr SDK pin from the "
         f"manifest, and its manifest-read step is gone"
     ]

@@ -1,26 +1,29 @@
 # 0022. `tan` ships as Python, not Rust; Renode is retired from the command surface
 
-Status: Accepted in part — amended 2026-08-07. The Python-executor clause
-SHIPPED and stands (`tan` v0.5.0+ is a PyInstaller freeze of the Python
-package `alp-tan`). **The Renode-retirement clause did NOT ship and is
-WITHDRAWN** — see "Amendment 1" immediately below the Status block.
-`tan renode` is still a live, registered verb; Decision points 2 and 3 below
-are withdrawn, and the doc removals they authorised are being reverted.
-This ADR retired the `tan renode` VERB only. alp-sdk's own Renode CI is untouched
-and still runs: `pr-renode-aen-smoke`, `pr-renode-dual-os`, `pr-renode-sim-mode`
-and `pr-renode-v2n-sci0-smoke` are all active workflows, and
-`pr-renode-aen-smoke` installs the pinned Renode v1.16.1 and boots a real image
-with `renode --console --disable-xwt --plain` — no `tan renode` involved, which
-is exactly why retiring the verb costs alp-sdk no simulator coverage. The models
-under `metadata/renode/*.repl` / `*.resc` are retained for the same reason. Only
-the three `--sim-mode` e2e STEPS inside `pr-renode-sim-mode` are no-ops.
-**Superseded by Amendment 2 (2026-08-17) — the retirement is re-instated and
-widened.** Everything above this paragraph is the 2026-08-07 record, kept
-verbatim per the append-only rule; it is history, not current state. As of
-2026-08-17 the Renode-retirement clause is back in force, and it now also
-covers the four `pr-renode-*` workflows, the `metadata/renode/` models and the
-`tests/renode/` fixtures that the paragraph above calls untouched and retained.
-See "Amendment 2", below Amendment 1.
+Status: Accepted — amended twice (2026-08-07, 2026-08-17). The
+Python-executor clause SHIPPED and stands (`tan` v0.5.0+ is a PyInstaller
+freeze of the Python package `alp-tan`). **The Renode-retirement clause was
+WITHDRAWN by Amendment 1 on 2026-08-07 and RE-INSTATED, and widened, by
+Amendment 2 on 2026-08-17.** It is in force: Decision points 2 and 3 stand
+again, and Decision point 4 is resolved — `examples/aen/aen-sim-vision` is
+deleted. Renode leaves alp-sdk entirely, not just the `tan` command surface.
+The four `pr-renode-*` workflows — `pr-renode-aen-smoke`,
+`pr-renode-dual-os`, `pr-renode-sim-mode`, `pr-renode-v2n-sci0-smoke` — are
+DELETED, and with them the hand-maintained Renode v1.16.1 pin and the
+`renode --console --disable-xwt --plain` boot that were the whole of
+alp-sdk's pre-silicon simulator coverage. `metadata/renode/*.repl` /
+`*.resc` and `tests/renode/*` are in scope and go once the `tan-cli` side
+lands; they are still present at this commit because `tan-cli`'s
+`parity.yml` seam-2 job references those model paths by name. What survives:
+the `diagnostics.sim_console` `board.yaml` field, which serves alp-studio's
+hardware simulator, not `tan renode`. alp-sdk ships no simulator of its own
+and none is planned — the cost is stated plainly in Amendment 2. This block
+records CURRENT state and is rewritten in place on each amendment, per the
+in-place Status-amendment precedent of ADRs 0006, 0017 and 0020 (and of
+Amendment 1's own rewrite, commit `5497a1a5`); the 2026-08-04 and 2026-08-07
+wordings it replaces are in git history and quoted where load-bearing in
+Amendments 1 and 2. The Decision body below is append-only and stays
+verbatim.
 Date: 2026-08-04 (Caner)
 Deciders: alpCaner (alp-sdk)
 Supersedes: [0020](0020-sdk-owns-build-execution.md) — narrowly, two clauses
@@ -115,14 +118,15 @@ four workflows are deleted — `.github/workflows/pr-renode-aen-smoke.yml`,
 `.github/workflows/pr-renode-v2n-sci0-smoke.yml` — and with them the hardcoded
 Renode v1.16.1 pin each one carries (each job downloads
 `renode-1.16.1.linux-portable-dotnet.tar.gz` from the upstream release), along
-with the `renode --console --disable-xwt --plain` boot that the Status block
-cites as the reason retiring the verb cost alp-sdk no coverage. Four copies of
-a pinned third-party emulator version, maintained by hand, is a standing
-upgrade tax that only makes sense while the gates are load-bearing.
+with the `renode --console --disable-xwt --plain` boot that the pre-2026-08-17
+Status block cited as the reason retiring the verb cost alp-sdk no coverage.
+Four copies of a pinned third-party emulator version, maintained by hand, is
+a standing upgrade tax that only makes sense while the gates are load-bearing.
 
-**Widened, clause (b): the assets go with them.** The
-`metadata/renode/*.repl` / `*.resc` removal that the Related section below
-calls "sequenced separately, not part of this change" is now in scope:
+**Widened, clause (b): the assets go with them — brought into scope here,
+deleted in a later commit.** The `metadata/renode/*.repl` / `*.resc` removal
+that the Related section below calls "sequenced separately, not part of this
+change" is now IN SCOPE of this ADR:
 `metadata/renode/alif_ensemble_e8.repl`, `metadata/renode/alif_ensemble_e8.resc`,
 `metadata/renode/renesas_rzv2n.repl`, `metadata/renode/renesas_rzv2n.resc`. So
 are the Renode-only fixtures under `tests/renode/`:
@@ -132,20 +136,38 @@ and no verb left to consume them, they are hand-maintained models that nothing
 exercises — worse than absent, because an unexercised model silently rots into
 a wrong description of the silicon.
 
+**All nine files are still PRESENT at this commit**, and that is deliberate,
+not an oversight: `tan-cli`'s `.github/workflows/parity.yml` seam-2 job
+hard-references those `metadata/renode/` model paths, so deleting them before
+the `tan-cli` side lands would red a job in another repo. Authorising the
+removal (this amendment) and performing it are two steps here; the deletion
+follows the `tan-cli` change. Clause (a) has no such constraint — `tan-cli`
+never reads alp-sdk's own workflow files — which is why the four `pr-renode-*`
+workflows go in the same commit that resolves Decision point 4, and these nine
+do not.
+
 **Decision point 4 is RESOLVED.** That point reserved the disposition of
 `examples/aen/aen-sim-vision` to a separate human decision, and Amendment 1
 noted its premise had improved because the `tan renode` run path still existed.
-That path is now gone, so the coherence argument cuts the other way: the whole
-directory (all 8 files) is **deleted**. An example whose only run path is a
-retired verb against deleted models cannot be run, reviewed, or repaired.
+That path is retired by this amendment, so the coherence argument cuts the
+other way: the whole directory (all 8 files) is **deleted**. An example whose
+only run path is a retired verb against retired models cannot be run,
+reviewed, or repaired.
 
-**The `tan-cli` side.** The `tan renode` verb is removed, together with its
-three modules and its 27 published `renode.*` issue codes; `tan-cli`#448 is
-re-scoped back from "retain with a support-paused warning" to removal, which is
-what this ADR originally assumed. Removing published issue codes shrinks the
-`envelope-contract.json` release asset — a breaking change to the published CLI
-surface, not an additive one, and consumers that key off the contract (starting
-with alp-sdk-vscode) see codes disappear. That break is deliberately carried by
+**The `tan-cli` side — decided here, landed there.** The `tan renode` verb
+WILL BE removed, together with its three modules
+(`python/tan/commands/renode_cmd.py`, `renode_plan.py`, `renode_sim.py`) and
+its 27 published `renode.*` issue codes; `tan-cli`#448 is re-scoped back from
+"retain with a support-paused warning" to removal, which is what this ADR
+originally assumed. None of that has happened yet: at the time of writing the
+verb is still registered (`app.command("renode", …)` in `python/tan/cli.py`),
+all three modules are present, and all 27 codes are still published in
+`contract/issue-codes.json`. This amendment is the DECISION; the `tan-cli`
+change is a separate repo's commit and lands on its own. Removing published
+issue codes shrinks the `envelope-contract.json` release asset — a breaking
+change to the published CLI surface, not an additive one, and consumers that
+key off the contract (starting with alp-sdk-vscode) will see codes disappear.
+That break is deliberately carried by
 v0.6.0 / v0.16.0 rather than deferred to a later major: pre-1.0, with the codes
 already unemittable once the verb is gone, shipping the shrunk contract
 alongside the retirement is better than cutting a GA whose published contract
