@@ -103,14 +103,14 @@ jobs:
       # precedent uses for the byte-identical step.
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           # Repo is checked out under alp-sdk/ (path:), but setup-python (a
           # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
@@ -125,10 +125,12 @@ jobs:
       # guards against is exactly a mirror going slow and 8min = 480s =
       # 5.6x the worst good run will not fire on a slow-but-fine one.
       - name: Install host build tools (dtc, ninja, ccache, gperf, libffi)
-        timeout-minutes: 8
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
               ninja-build gperf ccache dfu-util device-tree-compiler \
               python3-dev python3-pip python3-setuptools python3-wheel \
               libffi-dev libssl-dev xz-utils file make gcc gcc-multilib \
@@ -137,7 +139,9 @@ jobs:
       # #1319: same failure class as "Install host build tools" above
       # (PyPI/mirror stall).  Worst successful run 13s; 2min = 9.2x.
       - name: Install west
-        timeout-minutes: 2
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip3 install west
 
       # Zephyr workspace lives next to alp-sdk.  We use west init
@@ -181,7 +185,7 @@ jobs:
       # #1319: worst successful run 14s; 2min = 8.6x.
       - name: Cache ccache objects
         uses: actions/cache@v5
-        timeout-minutes: 2
+        timeout-minutes: 5
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ runner.os }}-twister-shard${{ matrix.shard }}-${{ github.sha }}
@@ -191,8 +195,10 @@ jobs:
       # #1319: worst successful run 72s (median 41s); 3min = 180s = 2.5x,
       # the same value the precedent gives its equivalent step.
       - name: pip install Zephyr requirements
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         working-directory: ${{ github.workspace }}/zephyrproject
-        timeout-minutes: 3
         run: |
           pip3 install -r zephyr/scripts/requirements.txt
 
@@ -201,7 +207,9 @@ jobs:
       # Zephyr's requirements-base.txt).  Install it after the
       # Zephyr deps so version pins don't override.
       - name: pip install Alp SDK Python deps
-        timeout-minutes: 2
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
           pip3 install jsonschema
 
@@ -340,7 +348,7 @@ jobs:
       - name: Install ARM Zephyr SDK toolchain (for --emit kconfig contract)
         if: matrix.shard == 1
         uses: actions/cache@v5
-        timeout-minutes: 2
+        timeout-minutes: 15
         id: zephyr-sdk-cache
         with:
           path: ${{ github.workspace }}/zephyr-sdk
