@@ -38,26 +38,32 @@ jobs:
   stub:
     name: cc3501e-bridge · CC3501E_HAL_BACKEND=stub
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+        timeout-minutes: 3
 
       - name: Install arm-none-eabi toolchain
+        timeout-minutes: 5
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y \
               gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
 
       - name: Configure (stub backend, default SPI transport)
+        timeout-minutes: 3
         run: |
           cmake -B firmware/cc3501e/build/stub -S firmware/cc3501e \
             -DCMAKE_TOOLCHAIN_FILE=$PWD/firmware/cc3501e/toolchain/arm-none-eabi.cmake \
             -DCC3501E_HAL_BACKEND=stub
 
       - name: Build (stub backend)
+        timeout-minutes: 2
         run: cmake --build firmware/cc3501e/build/stub --parallel
 
       - name: Configure + build (stub backend, SDIO transport)
         # The opt-in SDIO transport must also compile.
+        timeout-minutes: 2
         run: |
           cmake -B firmware/cc3501e/build/stub-sdio -S firmware/cc3501e \
             -DCMAKE_TOOLCHAIN_FILE=$PWD/firmware/cc3501e/toolchain/arm-none-eabi.cmake \
@@ -70,10 +76,13 @@ jobs:
   vectors:
     name: cc3501e-bridge · wire vectors
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        timeout-minutes: 3
       - name: Set up Python
         uses: actions/setup-python@v6
+        timeout-minutes: 2
         with:
           python-version-file: .python-version
       - name: Check canonical wire vectors are regenerated

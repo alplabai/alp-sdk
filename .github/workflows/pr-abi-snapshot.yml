@@ -49,12 +49,19 @@ permissions:
 jobs:
   snapshot-diff:
     runs-on: ubuntu-latest
+    # #1477: worst observed successful run 11s across 3 sampled runs.
+    # Raised from the formula's 10min to 15min so the ceiling stays
+    # strictly above the sum of its capped steps plus the 1min/step
+    # budget for the uncapped ones below.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        timeout-minutes: 3
         with:
           fetch-depth: 0
 
       - uses: actions/setup-python@v6
+        timeout-minutes: 3
         with:
           python-version-file: .python-version
 
@@ -112,6 +119,7 @@ jobs:
       - name: Post diff to the PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v9
+        timeout-minutes: 2
         with:
           script: |
             const fs = require('fs');

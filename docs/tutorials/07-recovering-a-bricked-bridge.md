@@ -1,4 +1,6 @@
-<!-- Last verified: 2026-05-18 against slice-3b state. -->
+<!-- Last verified: 2026-08-17 against dev (#1512).  The flow itself is
+     still UNPROVEN on silicon -- see "Status of this flow" below; this date
+     records a documentation review, not a bench run. -->
 
 # 07 -- Recovering a bricked bridge
 
@@ -29,9 +31,14 @@ gd32_swd_init(&swd, swdio_pin, swclk_pin, nrst_pin);
 /* 1. Link up -- line reset + JTAG-to-SWD switch + DPIDR read. */
 gd32_swd_connect(&swd);
 if (swd.idcode != GD32_SWD_EXPECTED_IDCODE) {
-    /* 0x6BA02477 -- Cortex-M33 r0p1 SW-DPv2.  Mismatch means
-     * mis-wiring or a non-G5x3 part. */
-    abort();
+    /* Log and CONTINUE -- do not abort here.  See the IDCODE
+     * caveat below: on this bench a healthy GD32 answers
+     * 0x0BE12477, not GD32_SWD_EXPECTED_IDCODE's 0x6BA02477,
+     * so a hard stop refuses exactly the board you came to
+     * recover.  Match the shipped example, which warns and
+     * proceeds. */
+    printf("[swd] WARN: IDCODE mismatch -- got 0x%08X, expected 0x%08X\n",
+           (unsigned)swd.idcode, (unsigned)GD32_SWD_EXPECTED_IDCODE);
 }
 
 /* 2. Stop the running firmware so it doesn't trash FMC concurrently. */
@@ -49,6 +56,54 @@ gd32_swd_flash_verify(&swd, GD32_SWD_FMC_FLASH_BASE, image_bytes, image_size);
 /* 6. Hand control back to the chip. */
 gd32_swd_reset_and_run(&swd);
 ```
+
+## The IDCODE caveat -- read this before you trust step 1
+
+`GD32_SWD_EXPECTED_IDCODE` is `0x6BA02477`, and **that value has
+never been measured on a GD32.** It is the generic ADIv5
+expectation for a Cortex-M33 r0p1 SW-DPv2, carried over from the
+part's core, not read off the part.
+
+What the bench actually records, both measured on place
+`e1mx-v2n-m1-01` (`scripts/bench/aen/bench-env.sh`):
+
+| probe        | SW-DP IDR    |
+|--------------|--------------|
+| GD32 bridge  | `0x0BE12477` |
+| V2N CM33 DAP | `0x6BA02477` |
+
+So `0x6BA02477` is this bench's **V2N CM33 DAP** -- and the
+measurement that produced it also reported `Found Cortex-M33
+r0p4`, not the `r0p1` the constant's comment claims. A healthy,
+correctly-wired GD32 answers `0x0BE12477` and therefore *fails*
+the `GD32_SWD_EXPECTED_IDCODE` comparison.
+
+Consequences for anyone writing a recovery tool from this page:
+
+* **A mismatch here is not evidence of mis-wiring or a wrong
+  part.** Until the constant is settled against a probe on a
+  GD32, the comparison tells you almost nothing. Check the wiring
+  because the link failed, not because the IDCODE differed.
+* **Do not turn the comparison into a hard stop**, which is what
+  this tutorial used to do (#1512). Nothing shipped does:
+  `gd32_swd_connect()` deliberately does not reject a mismatch
+  (`chips/gd32_swd/gd32_swd.c`), and
+  `examples/v2n/v2n-gd32-swd-flash/src/main.c` warns and
+  continues. A production test that *wants* to refuse on a
+  mismatch should opt into that explicitly, against a value it
+  has measured on its own hardware.
+
+Settling the constant needs a probe on a GD32 and is tracked at
+#1440 (`needs-silicon`) with #1369.
+
+## Status of this flow
+
+`chips/gd32_swd/` is `driver_status: partial` /
+`hil_silicon: untested` (`metadata/chips/gd32_swd.yaml`) -- the
+packet layer, DPIDR read, halt and FMC erase/write/verify are all
+coded and the V2N pad assignments are resolved (P70/P71/P74), but
+**none of it has been exercised on real silicon yet.** Treat this
+whole procedure as paper-correct, not proven.
 
 ## Why this works when the bridge is bricked
 

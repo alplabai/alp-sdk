@@ -27,10 +27,11 @@ overlay filename (the example *slice* layer).
 Rule
 ----
 Applies only to examples that ship a `board.yaml` (a plain Zephyr app
-with no `board.yaml` -- e.g. `examples/aen/aen-sim-vision`, which
-enforces its target via a `BOARD` guard in `CMakeLists.txt`, a
-`*-regcheck` bench app, or a multi-slice example whose per-core
-sub-directory owns its own overlays -- is out of scope; it never goes
+with no `board.yaml` -- e.g. `examples/connectivity/firmware-update-log`,
+which picks its per-core retarget with a `BOARD MATCHES` guard in
+`CMakeLists.txt`, a `*-regcheck` bench app, or a multi-slice example
+whose per-core sub-directory owns its own overlays -- is out of scope;
+it never goes
 through `alp_project.py`'s per-core `board.yaml` -> qualified-target
 resolution this gate is checking).
 

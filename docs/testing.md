@@ -196,7 +196,7 @@ Every CI workflow has a local counterpart that runs the same coverage:
 |--------------------------------|-----------------------------------------------------------|
 | `pr-plain-cmake.yml`           | `bash scripts/test-all.sh --yocto-only`                   |
 | `pr-twister.yml`               | `bash scripts/test-all.sh --zephyr-only`                  |
-| `pr-static-analysis.yml`       | `bash scripts/test-all.sh` (clang-format-diff stage)      |
+| `pr-static-analysis.yml`       | `bash scripts/test-all.sh` (clang-format-diff + shellcheck stages) |
 | `pr-generated-files.yml`       | `python3 scripts/gen_soc_caps.py --check`                 |
 | `pr-metadata-validate.yml`     | `python3 scripts/validate_metadata.py` + alp_project.py   |
 | public/private classifier      | `python3 scripts/check_public_private.py`                 |

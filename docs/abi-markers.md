@@ -66,7 +66,7 @@ the PR for experimental symbols.
 | `iot.h`               | `[ABI-STABLE]`     | v0.2-v0.4; Wi-Fi station + MQTT (TLS) signatures stable.          |
 | `security.h`          | `[ABI-STABLE]`     | v0.3 MbedTLS PSA Crypto wrapper.                                  |
 | `ble.h`               | `[ABI-STABLE]`     | v0.2 decl + v0.3 impl; advertise + connect + GATT-read shape stable. |
-| `inference.h`         | `[ABI-STABLE]`     | v0.3 dispatcher (auto/cpu/ethos_u/drpai/deepx_dxm1); v0.5 adds `alp_inference_open_alpmodel()` + the `.alpmodel` loader/selection engine. |
+| `inference.h`         | `[ABI-STABLE]`     | v0.3 dispatcher (auto/cpu/ethos_u/drpai/deepx_dxm1); v0.5 adds `alp_inference_open_alpmodel()` + the `.alpmodel` loader/selection engine.  v0.16 adds `alp_inference_last_invoke_latency_us()` (the model-perf-capture latency accessor), marked `[ABI-EXPERIMENTAL]` at function granularity -- the file-level marker stays STABLE. |
 | `mproc.h`             | `[ABI-STABLE]`     | v0.3 mailbox + shmem + hwsem.  v0.9 adds `alp_mproc_boot_core` (peer-core release), marked `[ABI-EXPERIMENTAL]` at function granularity. |
 | `hw_info.h`           | `[ABI-STABLE]`     | v0.3 EEPROM manifest (sole SoM-rev source); `som_board_id_mv` removed pre-1.0 (no-legacy-compat).  v0.9 adds the SoC-identity block (`alp_soc_info_read` / `alp_soc_secure_fw_ping`), marked `[ABI-EXPERIMENTAL]` at function granularity. |
 | `e1m_pinout.h`        | `[ABI-STABLE]`     | v0.1 portable instance IDs (`ALP_E1M_I2C0`, etc.); pinned by e1m-spec. |

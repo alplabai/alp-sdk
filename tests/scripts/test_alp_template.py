@@ -634,6 +634,63 @@ def test_scaffold_cmakelists_leaves_a_detached_comment_run_alone():
     assert "# Resolve the alp-sdk root." not in peer
 
 
+def _fake_sdk_checkout(root, version, status, tags=()):
+    """A minimal git checkout carrying `metadata/sdk_version.yaml` and
+    `tags` -- enough for `_docs_ref` to read and for `git rev-parse` to
+    answer against. One empty commit, because a tag needs an object."""
+    (root / "metadata").mkdir(parents=True)
+    (root / "metadata" / "sdk_version.yaml").write_text(
+        f"version: {version}\nstatus:  {status}\n", encoding="utf-8")
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    subprocess.run(["git", "init", "-q", str(root)], check=True, env=env)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "--allow-empty", "-m", "x"],
+                   check=True, env=env)
+    for tag in tags:
+        subprocess.run(["git", "-C", str(root), "tag", tag], check=True, env=env)
+    return root
+
+
+def test_docs_ref_falls_back_to_main_when_the_declared_tag_does_not_exist(tmp_path):
+    """#1508. Between an rc cut and its GA tag `metadata/sdk_version.yaml`
+    declares `version: 0.16.0` / `status: released` while only
+    `v0.16.0-rc1` exists, and pinning on that declared pair alone put
+    three unresolvable `blob/v0.16.0/docs/...` links in every scaffolded
+    README for the whole window (six days, for v0.15.0).
+
+    The rc tag being present is the point: this is not "no tags at all",
+    it is the exact shape that fooled the old check.
+    """
+    root = _fake_sdk_checkout(tmp_path / "rc", "0.16.0", "released", tags=("v0.16.0-rc1",))
+    assert alp_template._docs_ref(root) == "main"
+
+
+def test_docs_ref_pins_the_tag_once_it_actually_resolves(tmp_path):
+    """The other direction, so the fix cannot degrade into "always main"
+    -- that would silently drop the stable-docs pin #864 added."""
+    root = _fake_sdk_checkout(tmp_path / "ga", "0.16.0", "released",
+                              tags=("v0.16.0-rc1", "v0.16.0"))
+    assert alp_template._docs_ref(root) == "v0.16.0"
+
+
+def test_docs_ref_is_main_for_a_development_checkout(tmp_path):
+    """Unchanged pre-#1508 behaviour: a non-`released` status never pins,
+    tag present or not."""
+    root = _fake_sdk_checkout(tmp_path / "dev", "0.17.0", "development", tags=("v0.17.0",))
+    assert alp_template._docs_ref(root) == "main"
+
+
+def test_docs_ref_is_main_outside_a_git_checkout(tmp_path):
+    """A tarball export or `--no-tags` clone has the metadata but no refs.
+    `_tag_resolves` must degrade to `main`, never raise -- an exception
+    here would abort the whole scaffold over a README link."""
+    root = tmp_path / "tarball"
+    (root / "metadata").mkdir(parents=True)
+    (root / "metadata" / "sdk_version.yaml").write_text(
+        "version: 0.16.0\nstatus:  released\n", encoding="utf-8")
+    assert alp_template._docs_ref(root) == "main"
+
+
 def test_scaffold_readme_has_no_dangling_sdk_tree_links_or_self_path():
     envelope = dict(alp_template.render_to_envelope("minimal", "E1M-AEN801"))
     readme = envelope["README.md"]
