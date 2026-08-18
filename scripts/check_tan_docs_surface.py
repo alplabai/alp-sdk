@@ -181,13 +181,12 @@ positive each rule still catches):
   - check_invocation_shapes only looks inside a ```-fenced block (further
     narrowed to a `bash`/`sh`/`shell`/`console`/`zsh` language tag -- see
     `extract_tan_invocations`'s own docstring) or an inline code span --
-    never a 4-space-indented Markdown code block. The corpus has exactly one
-    of these (`examples/aen/aen-sim-vision/README.md`'s `tan renode --board
-    E1M-AEN801 --image-bundle build`) and it is correct (verified by hand
-    against a real `tan renode --help`, which genuinely lists both
-    `--board <SKU>` and `--image-bundle <DIR>`), so there is nothing to
-    prove the extraction is missing today -- flagged here as a real gap
-    that would matter the moment an indented-block invocation is wrong.
+    never a 4-space-indented Markdown code block. The corpus has none of
+    these today -- the only one that ever existed sat in the Renode-sim
+    example deleted by docs/adr/0022 Amendment 2, and invoked a verb that
+    amendment retired -- so there is nothing to prove the extraction is
+    missing. Flagged here as a real gap that would matter the moment an
+    indented-block invocation lands and is wrong.
 
 Deliberately OUT of scope (log it here, don't let silence read as coverage):
   - Output TEXT and semantic behaviour (the "Reusing compatible ... workspace"

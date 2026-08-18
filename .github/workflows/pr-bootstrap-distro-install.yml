@@ -90,12 +90,14 @@ jobs:
   detect:
     if: github.event_name != 'merge_group'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       manifest: ${{ steps.filter.outputs.manifest }}
     steps:
       - name: Detect bootstrap-manifest-relevant changes
         id: filter
         uses: dorny/paths-filter@v3
+        timeout-minutes: 2
         with:
           filters: |
             manifest:
@@ -176,6 +178,7 @@ jobs:
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        timeout-minutes: 3
         with:
           fetch-depth: 1
 
@@ -199,6 +202,7 @@ jobs:
       - name: Render prerequisites.install.linux.${{ matrix.pm }} as a runnable script
         env:
           PM: ${{ matrix.pm }}
+        timeout-minutes: 3
         run: |
           set -euo pipefail
           python3 - <<'PY' > /tmp/pm-install.sh

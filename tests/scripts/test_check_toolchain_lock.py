@@ -3,7 +3,7 @@
 
 The gate is regex/schema-driven against metadata/toolchains.json + its
 schema + metadata/bootstrap.json + a repo-wide `.github/workflows/*.yml`
-scan (plus a positive assertion over four curated workflows and a live
+scan (plus a positive assertion over the curated workflows and a live
 `git show <rev>:SDK_VERSION` cross-check against a pinned Zephyr checkout).
 Each test here mutates a TEMP COPY of that corpus (or a throwaway fake
 Zephyr git repo) and asserts the gate actually fires for the documented
@@ -33,14 +33,12 @@ import check_toolchain_lock as gate  # noqa: E402
 # The exact relative-path corpus the gate reads (mirrors
 # gate.TOOLCHAIN_WORKFLOWS + its other module-level Path constants). This is
 # also the full set of files `_iter_workflow_files` sees in the scaffolded
-# tmp_path corpus -- tests that need a FIFTH, non-curated workflow to
+# tmp_path corpus -- tests that need an EXTRA, non-curated workflow to
 # exercise the repo-wide scan add one explicitly (see `_add_workflow`).
 _CORPUS_RELPATHS = [
     "metadata/toolchains.json",
     "metadata/schemas/toolchains-v1.schema.json",
     "metadata/bootstrap.json",
-    ".github/workflows/pr-renode-aen-smoke.yml",
-    ".github/workflows/pr-renode-sim-mode.yml",
     ".github/workflows/pr-getting-started-aen801.yml",
     ".github/workflows/pr-twister.yml",
 ]
@@ -64,8 +62,6 @@ def _point_gate_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gate, "BOOTSTRAP_MANIFEST", tmp_path / "metadata/bootstrap.json")
     monkeypatch.setattr(gate, "WORKFLOWS_DIR", tmp_path / ".github/workflows")
     monkeypatch.setattr(gate, "TOOLCHAIN_WORKFLOWS", [
-        tmp_path / ".github/workflows/pr-renode-aen-smoke.yml",
-        tmp_path / ".github/workflows/pr-renode-sim-mode.yml",
         tmp_path / ".github/workflows/pr-getting-started-aen801.yml",
         tmp_path / ".github/workflows/pr-twister.yml",
     ])
@@ -79,7 +75,7 @@ def _point_gate_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _add_workflow(tmp_path: Path, name: str, text: str) -> Path:
-    """Drop a FIFTH workflow file into the scaffolded corpus -- the exact
+    """Drop an EXTRA workflow file into the scaffolded corpus -- the exact
     shape of the real bypass this change closes: a workflow
     TOOLCHAIN_WORKFLOWS never named, dropped straight into
     .github/workflows/, that the repo-wide scan must still cover."""
@@ -320,7 +316,7 @@ def test_bypass_b_env_default_and_interpolated_url_fails(tmp_path, monkeypatch, 
 
 def test_manifest_sourced_env_var_with_hash_check_passes(tmp_path, monkeypatch, capsys):
     """The real, correct pattern -- a NEW workflow (not one of the curated
-    four) that reads metadata/toolchains.json, references the version/URL
+    ones) that reads metadata/toolchains.json, references the version/URL
     only via the canonical `${ZEPHYR_SDK_VERSION}` / `${ZEPHYR_SDK_URL}`
     forms, and verifies `ZEPHYR_SDK_SHA256` -- must PASS. This is the
     no-false-positive proof for the repo-wide scan."""
@@ -392,8 +388,8 @@ def test_prose_comment_quoting_version_is_not_flagged(tmp_path, monkeypatch, cap
 def test_sdk_cache_key_category_confusion_fails(tmp_path, monkeypatch, capsys):
     """The exact defect-4 regression: an SDK cache key naming the
     *Zephyr* version instead of `${{ env.ZEPHYR_SDK_VERSION }}`. Repo-wide
-    now, not curated-scope, but pr-twister.yml (one of the four) is still
-    where this literal lives."""
+    now, not curated-scope, but pr-twister.yml (one of the curated
+    workflows) is still where this literal lives."""
     _scaffold(tmp_path)
     _replace(
         tmp_path / ".github/workflows/pr-twister.yml",
@@ -423,16 +419,21 @@ def test_zephyr_only_cache_key_not_flagged_as_sdk_confusion(tmp_path, monkeypatc
 
 def test_sdk_url_without_sha256_verification_fails(tmp_path, monkeypatch, capsys):
     """A file that fetches the SDK archive by URL but never verifies it --
-    defect 3's exact shape (the historical wget-with-no-check)."""
+    defect 3's exact shape (the historical wget-with-no-check).
+    pr-getting-started-aen801.yml is the vehicle because it is the corpus's
+    only remaining workflow that fetches the archive by URL at all
+    (pr-twister.yml installs via `west sdk install`); this test used
+    pr-renode-aen-smoke.yml until docs/adr/0022 Amendment 2 deleted it."""
     _scaffold(tmp_path)
-    text = (tmp_path / ".github/workflows/pr-renode-aen-smoke.yml").read_text(encoding="utf-8")
-    text = text.replace("ZEPHYR_SDK_SHA256", "SOME_OTHER_NAME")
-    (tmp_path / ".github/workflows/pr-renode-aen-smoke.yml").write_text(text, encoding="utf-8")
+    wf = tmp_path / ".github/workflows/pr-getting-started-aen801.yml"
+    text = wf.read_text(encoding="utf-8")
+    assert "ZEPHYR_SDK_SHA256" in text, "fixture assumption broken: no sha256 check to remove"
+    wf.write_text(text.replace("ZEPHYR_SDK_SHA256", "SOME_OTHER_NAME"), encoding="utf-8")
     _point_gate_at(tmp_path, monkeypatch)
     rv = gate.main()
     err = capsys.readouterr().err
     assert rv == 1
-    assert "pr-renode-aen-smoke.yml" in err
+    assert "pr-getting-started-aen801.yml" in err
     assert "no ZEPHYR_SDK_SHA256 verification" in err
 
 
@@ -454,8 +455,8 @@ def test_missing_workflow_fails(tmp_path, monkeypatch, capsys):
 
 def test_curated_workflow_manifest_read_deleted_fails(tmp_path, monkeypatch, capsys):
     """Item 2's whole reason to exist: TOOLCHAIN_WORKFLOWS is repurposed
-    from "the scan scope" to a positive assertion that each of the four
-    still contains a manifest read. pr-twister.yml never names an sdk-ng
+    from "the scan scope" to a positive assertion that each curated
+    workflow still contains a manifest read. pr-twister.yml never names an sdk-ng
     URL/filename literal at all (it installs via `west sdk install`), so
     the repo-wide scan (check 3) has NOTHING to trigger on here -- deleting
     its manifest-read step must still fail, and only this separate check

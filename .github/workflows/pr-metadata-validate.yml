@@ -133,20 +133,42 @@ jobs:
   validate:
     name: validate · soc-spec-v1
     runs-on: ubuntu-latest
+    # #1477: worst observed successful run 812s/13.5min for the "Pytest
+    # -- linter + schema regression + topology defaults" step alone
+    # (corrected from a 3-run sample and now given its own explicit cap
+    # below rather than riding the 1min/step uncapped-step budget --
+    # that budget was never true for this step, see the comment on
+    # `_UNCAPPED_STEP_BUDGET_MINUTES` in the test file). With that step
+    # capped at 20min, the sum-of-step-caps model is: 12min (5
+    # already-capped steps) + 20min (the pytest step) + 45min (the
+    # remaining ~45 trivial local `Gate — ...`/schema-check steps,
+    # budgeted 1min each by the test) = 77min, so the ceiling needs
+    # real headroom above that, not just above the ~18min the job
+    # actually takes on a real run.
+    timeout-minutes: 80
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        timeout-minutes: 2
 
       - name: Set up Python
         uses: actions/setup-python@v6
+        timeout-minutes: 2
         with:
           python-version-file: .python-version
 
       - name: Install Python deps
-        # model-io adds tflite + flatbuffers so the .alpmodel tensor-I/O
-        # tests run here (they importorskip otherwise); cbor2 is a base dep.
-        run: pip install -e ".[dev,model-io]"
+        # model-compile is model-io (tflite + flatbuffers, for the .alpmodel
+        # tensor-I/O tests, which importorskip otherwise) PLUS ethos-u-vela:
+        # without it, the four vela-gated tests in test_alp_model_adapters.py
+        # (test_vela_real_compile_of_tiny_fixture and the three
+        # test_vela_real_compile_for_e8_accel_configs cases, both
+        # shutil.which("vela")-skipif'd) SKIP in every automatic run instead
+        # of actually exercising the real compiler. cbor2 is a base dep
+        # either way.
+        timeout-minutes: 3
+        run: pip install -e ".[dev,model-compile]"
 
       - name: Validate every SoC file against the v1 schema
         run: python3 scripts/validate_metadata.py
@@ -182,6 +204,7 @@ jobs:
           cat /tmp/alp.conf
 
       - name: Smoke-test board.yaml loader (cmake-args)
+        timeout-minutes: 2
         run: |
           python3 scripts/alp_project.py \
               --input metadata/templates/board.yaml.example \
@@ -372,6 +395,7 @@ jobs:
       # Catches both the literal-agreement drift and the actual trap --
       # two distinct cores resolving app: to the same CMakeLists.txt.
       - name: "Gate — Zephyr core app: <-> CMakeLists.txt --core mapping"
+        timeout-minutes: 3
         run: python3 scripts/check_core_cmakelists_mapping.py
 
       # Unit-test the loader contract -- schema pass/fail, missing-
@@ -499,6 +523,11 @@ jobs:
       # for commit e3a4c6b's bulk-strip).  These all share fixtures
       # with the orchestrator tests and run in <2 s.
       - name: Pytest -- linter + schema regression + topology defaults
+        # #1477: worst observed successful run 812s/13.5min -- explicit
+        # cap instead of the (untrue for this step) 1min uncapped-step
+        # budget; see the job-level comment above for the sum-of-caps
+        # this ceiling has to clear.
+        timeout-minutes: 20
         run: |
           python3 -m pytest tests/scripts/ -v --tb=short
 
