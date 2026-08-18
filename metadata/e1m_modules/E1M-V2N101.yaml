@@ -268,9 +268,14 @@ helper_firmware:
     # a gitignored build output, absent from every clone (#852).  Build it
     # yourself per firmware/gd32-bridge/README.md before flashing, or wait
     # for an Alp Lab firmware release.  `firmware_path` is deliberately
-    # ABSENT (not `TBD`) so `tan flash` refuses cleanly ("has no
-    # output_artefact / firmware_path; can't flash") instead of spawning a
-    # real flasher against a nonexistent `TBD` path -- see
+    # ABSENT (not `TBD`) so nothing resolves a sentinel path.  With no
+    # `flash_method` but an `update_channel` present, `tan flash` SKIPS
+    # this helper (`flash: helper 'gd32_bridge' is Alp-OTA-updated
+    # (update_channel: alp_ota_spi_bridge), not a customer flash target;
+    # skipping`, status `skipped`, rc `-1` -- see
+    # python/tan/commands/flash_cmd.py:1186-1198 and
+    # docs/gd32-bridge.md:152-158) rather than spawning a real flasher
+    # against a nonexistent `TBD` path -- see
     # docs/v0.6-tbd-and-assumptions.md §1.4.
     # No local flash path.  GD32 programming is separated out of tan's
     # scope entirely (#1439, tan-cli#732), so `flash_method` and

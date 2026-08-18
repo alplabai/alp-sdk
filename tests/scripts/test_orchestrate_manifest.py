@@ -189,10 +189,12 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     as a sentinel by the frozen v0.4.1 Rust flash planner
     (`crates/tan-cli/src/commands/flash/mod.rs`) -- it became the artefact
     string and a real flasher was spawned against a nonexistent `TBD`
-    path. Dropping the field entirely makes both the oracle and Python Tan's
-    `python/tan/commands/flash_cmd.py` clean-refusal
-    path fire instead ("has no output_artefact / firmware_path; can't
-    flash"). No `firmware_path` key means no TBD note either.
+    path. Dropping the field entirely means nothing resolves that sentinel
+    path; with no `flash_method` but an `update_channel` present, Python
+    Tan's `python/tan/commands/flash_cmd.py` (:1186-1198) SKIPS this
+    helper instead ("is Alp-OTA-updated (update_channel:
+    alp_ota_spi_bridge), not a customer flash target; skipping" -- status
+    `skipped`, rc `-1`). No `firmware_path` key means no TBD note either.
     """
     path = _write_board(tmp_path, V2N_HAPPY)
     project = load_board_yaml(path)

@@ -183,17 +183,30 @@ expectation, not a GD32-specific reading) and an unattributed
 on a GD32 with a probe attached**.  See #1369 for the open issue
 tracking the measurement.
 
-**Required step on the alplab-gw bench: verify the probe by hand before
-flashing.** The GD32 probe (USB path `3-4.2`) and the AEN E8 probe
-(`3-4.4.3`) enumerate the same J-Link serial `603000869`, and
-`JLinkExe` selects an adapter only by serial -- with no port selector
-and no armed DPIDR guard on this out-of-`tan` path, selection by
-serial alone is ambiguous between the two probes, and the write can
-land on whichever of the two identically-serialled probes the tool
-resolves first, which may be the AEN E8, not the GD32.  There is
-currently no armed wrong-board guard on this recovery path; treat the
-USB path check as manual and mandatory until #1369 lands a measured
-DPIDR to arm against.
+**Required step on the alplab-gw bench: read the DPIDR by hand before
+flashing, and abort on a match to the AEN E8.** The GD32 probe (USB
+path `3-4.2`) and the AEN E8 probe (`3-4.4.3`) enumerate the same
+J-Link serial `603000869`, and `JLinkExe` selects an adapter only by
+serial -- with no port selector and no armed DPIDR guard on this
+out-of-`tan` path, selection by serial alone is ambiguous between the
+two probes, and the write can land on whichever of the two
+identically-serialled probes the tool resolves first, which may be the
+AEN E8, not the GD32.  Before flashing, run the same read-only
+preflight pattern `scripts/bench/aen/flash-jlink-mramxip.sh:100-118`
+uses (a `JLinkExe` script that does only `si SWD` / `speed` / `device`
+/ `connect`, no write commands) and read the reported SW-DP ID: the AEN
+E8's is bench-verified `0x4C013477` (see
+`scripts/bench/aen/bench-env.sh`'s `AEN_DPIDR`) -- if the probe that
+answers is the AEN E8, the resolved adapter is the wrong one and the
+run must stop before any write.  Neither GD32 candidate ID
+(`0x6BA02477` / `0x0BE12477`) is itself bench-measured yet, so this
+preflight can only prove "not the AEN E8", not "definitely the GD32";
+physically detaching the AEN E8 probe from the bench for the duration
+of the recovery flash removes the ambiguity entirely and is the surer
+of the two.  There is currently no armed wrong-board guard on this
+recovery path; treat this DPIDR-read-and-detach check as manual and
+mandatory until #1369 lands a measured GD32 DPIDR to arm a real guard
+against.
 
 `update_channel: alp_ota_spi_bridge` is deliberately a different value
 from the CC3501E's `alp_ota_spi_otp`: this channel streams into the

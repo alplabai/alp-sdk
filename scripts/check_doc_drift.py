@@ -170,8 +170,9 @@ _ALLOWLIST: set[str] = {
     # docs/gd32-bridge.md's recovery-runbook narration names this env var,
     # but it does not exist in tan-cli today (zero hits, checked against
     # the tan-cli checkout) or in alp-sdk -- a dead name kept only in the
-    # doc's historical narration.  Allowlisted so it never appears in this
-    # repo's headers/Kconfig/generators either.
+    # doc's historical narration.  Allowlisted BECAUSE it will never
+    # appear in this repo's headers/Kconfig/generators; drop the entry
+    # if docs/gd32-bridge.md ever stops naming it.
     "ALP_FLASH_REQUIRE_DPIDR",
 }
 
