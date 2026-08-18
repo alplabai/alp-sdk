@@ -2,16 +2,19 @@
 #
 # AEN801 real-silicon twister gate (issue #1076).
 #
-# The problem this closes: examples/aen/** now carries 62 testcase.yaml
-# files, 53 of which name AEN board targets in platform_allow
-# (alp_e1m_aen801_m55_he/... and /_hp/...), contributing 60 of the tree's
-# 70 scenarios. The other 9 files are native_sim/native/64-only by design
+# The problem this closes: examples/aen/** now carries 61 testcase.yaml
+# files, 52 of which name AEN board targets in platform_allow
+# (alp_e1m_aen801_m55_he/... and /_hp/...), contributing 59 of the tree's
+# 69 scenarios. The other 9 files are native_sim/native/64-only by design
 # (aen-analog-validate, the five aen-cc3501e-* companion examples,
 # aen-eeprom-manifest, aen-secure-element-sign, edgeai-vision-aen) and are
-# not this gate's business. Of the 62 files, 25 predate this gate, 36 were
+# not this gate's business. Of the 61 files, 25 predate this gate, 35 were
 # added by the #1076 metadata sweep (#1095), and 1 (aen-sdcard-readout) by
 # #1097 once its driver linked; PR #1085 added the workflow itself, not the
-# metadata. pr-twister.yml's shards run
+# metadata. (The counts were 62/53/60/70 and a 36-file #1095 bucket until
+# docs/adr/0022 Amendment 2 deleted the Renode-sim aen-sim-vision example,
+# which carried one HP-only scenario from that sweep.)
+# pr-twister.yml's shards run
 # `-p native_sim/native/64` only (by design -- see that file's own header
 # comment: it deliberately skips the Zephyr SDK to dodge a disk-space
 # failure mode), so every AEN-only scenario is statically filtered out of

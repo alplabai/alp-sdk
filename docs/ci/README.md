@@ -12,7 +12,7 @@ reference.
 
 ## Workflows shipped
 
-`.github/workflows/` carries **29** workflow files as of this revision
+`.github/workflows/` carries **25** workflow files as of this revision
 (counted via `ls .github/workflows/*.yml .github/workflows/*.yaml
 2>/dev/null | wc -l`; recount before trusting this number, it moves
 every time a workflow is added or retired).  The table below is a
@@ -76,9 +76,8 @@ result attached to the PR or release that needs it — see
   `--list-required-gate-scripts`).  It covers the GitHub-hosted,
   hardware-free PR gates; it does **not** cover the self-hosted/bitbake
   build (`pr-bitbake.yml`), the GD32 / CC3501E bridge-firmware builds,
-  the Renode simulation smoke workflows (`pr-renode-*.yml`), or the
-  AEN onramp quickstart container — those still need a push through
-  CI (or their own local invocation) to exercise.  See
+  or the AEN onramp quickstart container — those still need a push
+  through CI (or their own local invocation) to exercise.  See
   [`docs/testing.md`](../testing.md).  (The VS Code extension's
   build lives in [`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)
   since the 2026-05-12 split; its own CI runs there.)

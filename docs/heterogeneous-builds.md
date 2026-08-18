@@ -521,11 +521,21 @@ jumps straight to the right log on a failure.
 ### Verifying without a board
 
 Renode-based simulation (`tan renode`) is retired — see
-[ADR 0022](adr/0022-python-executor-renode-retirement.md). There is no
-simulated substitute today for the cross-core RPMsg handshake itself:
-verify it with `tan build` + `tan flash` on real hardware. A single
-core's own logic, if it has no cross-core dependency, can still be
-smoke-tested headless with `tan run` under `native_sim`.
+[ADR 0022](adr/0022-python-executor-renode-retirement.md), **Amendment
+2**, which re-instated the retirement Amendment 1 had withdrawn and
+widened it. The `pr-renode-*` CI workflows are deleted; the
+`metadata/renode/` platform models and the `tests/renode/` fixtures are
+authorised for removal and go once the `tan-cli` side lands, which is
+also when the verb itself stops being registered.
+alp-sdk ships no simulator of its own, and none is planned.
+
+**Verify on real hardware instead.** `tan build` + `tan flash`, then
+read the per-slice logs listed above. There is no simulated substitute
+for the cross-core RPMsg handshake itself — it can only be exercised on
+silicon. A single core's own logic, if it has no cross-core dependency,
+can still be smoke-tested headless with `tan run` under `native_sim`;
+that is the only board-free path alp-sdk has left, and it covers one
+image at a time, never the multi-core system.
 
 ## 9. Cross-core API
 

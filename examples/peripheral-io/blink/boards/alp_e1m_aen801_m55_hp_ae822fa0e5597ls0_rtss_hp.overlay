@@ -14,7 +14,7 @@
  * example that touches GPIO on real silicon ships its own.  Without
  * this file the example builds, links, boots, reaches main() and then
  * fails at the first call with ALP_ERR_INVAL, because the array does
- * not exist.  Verified in Renode before this overlay was added:
+ * not exist.  Verified before this overlay was added:
  *
  *     [blink] init led=BOARD_PIN_LED_RED
  *     [blink] failed: open status=-1
