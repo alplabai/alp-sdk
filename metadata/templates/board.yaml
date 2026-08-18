@@ -195,7 +195,7 @@ e1m_routes:
 # `flash_device:` references either a SoM `memory_map:` region or an
 # `on_module.ospi_memories:` key (e.g. ospi0 when the SoM ships with
 # external OSPI flash) -- see docs/board-config-features.md's
-# "Flash / persistent storage partitions" section for the full
+# "Storage partitions (`storage:`)" section for the full
 # resolution order.  Neither kind of reference resolves to a WORKING
 # target on any AEN SKU today (#1484 / #1556): a `memory_map:` region's
 # Devicetree label defaults to the region name when the SoM preset sets

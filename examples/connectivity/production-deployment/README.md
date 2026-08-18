@@ -107,8 +107,8 @@ emits `status: blocked` in the generated `dts-partitions.dtsi`
 with free room: no AEN preset declares a `dt_label:` override for it,
 so it resolves to a Devicetree label of `mram_main`, but the
 generated board tree never defines that node -- only `mram_storage`
-(alp-sdk#1484; see `docs/board-config-features.md`'s "Flash /
-persistent storage partitions" section). This section demonstrates
+(alp-sdk#1484; see `docs/board-config-features.md`'s "Storage
+partitions (`storage:`)" section). This section demonstrates
 the `storage:` declarative shape only, not a working layout, on this
 SKU.
 

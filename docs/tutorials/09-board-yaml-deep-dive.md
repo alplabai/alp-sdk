@@ -457,14 +457,18 @@ node rather than a flash device of its own (on E1M-AEN301..801 that's
 all living inside the `mram_storage` flash node) and is refused as a
 `flash_device:` target with a reason (#1484).
 
-> **No AEN SKU has a working `flash_device:` target today.** Both
-> `mram_main` (its Devicetree label defaults to the region name, but
-> the generated board tree only defines `mram_storage`) and an
-> `on_module.ospi_memories:` key like `ospi0` (the label exists only
-> in the E1M-AEN801 board trees, and there it names a *disabled* OSPI
-> controller node, not an enabled flash device) resolve `status: ok`
-> without a verified Devicetree label. #1556 tracks validating the
-> resolved `dt_label` against the generated board tree.
+> **No AEN SKU has a working `flash_device:` target today.** An
+> `on_module.ospi_memories:` key like `ospi0` resolves `status: ok`
+> without a verified Devicetree label (the label exists only in the
+> E1M-AEN801 board trees, and there it names a *disabled* OSPI
+> controller node, not an enabled flash device). `mram_main` resolves
+> as a flash *device* too (its Devicetree label defaults to the region
+> name, but the generated board tree only defines `mram_storage`, so
+> that label is unverified either), but every AEN preset's own
+> `carveout: false` sub-regions already tile all 5632 KiB of it, so
+> a `storage:` entry targeting it always projects `status: blocked` --
+> not `status: ok`. #1556 tracks validating the resolved `dt_label`
+> against the generated board tree.
 
 The orchestrator allocates partitions bottom-up within each device,
 **name-sorted, page-aligned to 4 KiB**, so addresses stay byte-stable
