@@ -344,7 +344,11 @@ stage_shellcheck() {
     # cd-without-guard, a `set -u` empty-array trap, a POSIX-portability
     # slip that only bites macOS's bash 3.2) is caught on Linux BEFORE it
     # reddens macOS/Windows python-smoke.  Resolve shellcheck on PATH or
-    # the no-root ~/.local/bin install.
+    # the no-root ~/.local/bin install.  NOTE: unlike
+    # pr-static-analysis.yml's CI mirror (pinned to the v0.10.0 upstream
+    # release tarball), this resolves whatever shellcheck version is
+    # already installed locally -- a version skew here can disagree with
+    # CI about what counts as clean; install v0.10.0 locally to match.
     local sc
     sc=$(command -v shellcheck 2>/dev/null || true)
     if [ -z "${sc}" ] && [ -x "${HOME}/.local/bin/shellcheck" ]; then

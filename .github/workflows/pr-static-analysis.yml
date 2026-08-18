@@ -17,7 +17,8 @@
 #      scripts/bench/**: scripts/test-all.sh's stage_shellcheck globs the
 #      flat, non-recursive `scripts/*.sh` (never reaches a subdirectory),
 #      and the only shellcheck that ran anywhere in CI was
-#      onramp-clean-container.yml's, scoped to scripts/bootstrap.sh alone.
+#      onramp-clean-container.yml's, scoped to scripts/bootstrap.sh plus
+#      tan-cli's install.sh.
 #      #1478 (a stray literal `n` passed to JLinkExe on a wrong-board
 #      MRAM-write preflight) sat undetected for exactly this reason.
 #
@@ -138,11 +139,14 @@ jobs:
 
       - name: Install shellcheck (pinned)
         # Pinned to the upstream release tarball, NOT apt: apt's
-        # `shellcheck` floats with the runner image, and an unpinned bump
-        # can add or drop warning-severity checks -- making this job and
-        # the local `stage_shellcheck` mirror (whatever version is on
-        # PATH / ~/.local/bin) disagree about what "clean" means, which is
-        # the exact property #1527 exists to guarantee.
+        # `shellcheck` floats with the runner image, so an unpinned bump
+        # could add or drop warning-severity checks between runs of this
+        # job and silently move CI's own bar with no diff to review. This
+        # pin does NOT by itself guarantee CI and the local
+        # `stage_shellcheck` mirror agree -- that mirror still resolves
+        # whatever `shellcheck` is on PATH / ~/.local/bin (see
+        # scripts/test-all.sh's stage_shellcheck); only pinning both sides
+        # to the same v0.10.0 closes that half of the gap.
         timeout-minutes: 2
         run: |
           set -euo pipefail
