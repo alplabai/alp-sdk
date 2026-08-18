@@ -303,9 +303,10 @@ each. `docs/portability-matrix.md` briefly recorded the 12 swap-test cells
 as failing after that commit landed — the emitted `alp.conf` was never
 affected, and the four SKUs never actually refused on `dev`, since #1445's
 memory_map overrides landed in the same commit — until #1452's sweep
-restored its 18-of-21 count. `docs/portability.md`, `docs/v1.0-readiness.md`,
-`README.md`, and `docs/tutorials/04-cross-family-portability.md` always
-recorded 18 of 21, and none of them ever recorded the 12 failing cells.
+restored its 18-of-21 count. None of `docs/portability.md`,
+`docs/v1.0-readiness.md`, `README.md`, or
+`docs/tutorials/04-cross-family-portability.md` ever recorded the 12
+failing cells.
 Populating a per-SoM memory map is
 a firmware-policy decision (slot sizing, per-core OTA support) that the
 #1295 slice did not make; the #1445 slice of the same commit made it.

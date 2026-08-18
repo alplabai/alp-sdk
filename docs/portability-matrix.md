@@ -235,32 +235,34 @@ U85-carrying SKUs (AEN401 / AEN601 / AEN801, visible as
 `Ethos-U U55+U85` in the Notes column) are the population that
 motivated Gap G-1 below.
 
-**AEN301 / AEN501 / AEN601 / AEN701 were briefly ❌ under #1295, for a
-different reason than NX9101 — not a Kconfig-content regression.**
+**AEN301 / AEN501 / AEN601 / AEN701 were briefly RECORDED here as ❌
+under #1295, for a different reason than NX9101 — not a Kconfig-content
+regression.**
 #1295 populated `debug.jlink_flash_device` for the E3/E5/E6/E7 SoC
 variants (previously only E8's did), which is what promotes an AEN
 Zephyr slice to J-Link Flow D flashing in the first place. Doing so
-made `scripts/alp_orchestrate/loader.py`'s `_enforce_slot0_disjoint_across_roles`
-reachable for these four SoMs for the first time (it was previously
-inert -- see its docstring and #1384): the swap-test's temp
-`board.yaml` sets only ONE explicit `cores.<key>:` (per the Method's
-step 2); the sibling M55 core is left at the SoM preset's
-`topology:` default (`alp-stock-shim`, which defaults to `os: zephyr`
-for a `cortex-m*` core). With no `memory_map:` override, BOTH the
-target core and the stock-shim sibling resolved `flash_args.
-slot0_load_address` to the SAME default address -- the exact #1069
-HE/HP MRAM collision E1M-AEN801's own `memory_map:` override was
-written to prevent, then live for four more SoMs. `load_board_yaml`
-refused this loudly (by design -- see `_enforce_flow_d_preflight_pair`'s
+would have made `scripts/alp_orchestrate/loader.py`'s
+`_enforce_slot0_disjoint_across_roles` reachable for these four SoMs for
+the first time (it was previously inert -- see its docstring and
+#1384): the swap-test's temp `board.yaml` sets only ONE explicit
+`cores.<key>:` (per the Method's step 2); the sibling M55 core is left
+at the SoM preset's `topology:` default (`alp-stock-shim`, which
+defaults to `os: zephyr` for a `cortex-m*` core). With no `memory_map:`
+override, BOTH the target core and the stock-shim sibling would have
+resolved `flash_args.slot0_load_address` to the SAME default address --
+the exact #1069 HE/HP MRAM collision E1M-AEN801's own `memory_map:`
+override was written to prevent. `load_board_yaml` WOULD HAVE refused
+this loudly (by design -- see `_enforce_flow_d_preflight_pair`'s
 identical philosophy immediately above it in that file) *before*
-`--emit zephyr-conf` ever reached the target core's own config, so the
-byte-identical-`alp.conf` claim above was unprovable by the automated
-probe for those four SKUs, not falsified: nothing about the
-Kconfig content changed. #1445 landed the fix: every AEN preset now
-declares `he_slot0` at `0x80010000` and `hp_slot0` at `0x802b0000`,
-2688 KiB each, so these four SKUs generate cleanly again and the
-byte-identity claim above is provable by the automated probe once
-more. (E1M-AEN401 never hit this refusal: at the time, the loader only
+`--emit zephyr-conf` ever reached the target core's own config -- a
+state that never reached `dev`, since #1445's `memory_map:` overrides
+landed in the same commit (`bd8be484`, PR #1447) as #1295: every AEN
+preset declares `he_slot0` at `0x80010000` and `hp_slot0` at
+`0x802b0000`, 2688 KiB each, from that commit on, so the
+byte-identical-`alp.conf` claim above was never actually unprovable by
+the automated probe for those four SKUs -- nothing about the Kconfig
+content ever changed, and these four SKUs have always generated
+cleanly on `dev`. (E1M-AEN401 never hit this refusal: at the time, the loader only
 invoked `_resolve_slot0_load_address` when `jlink_flash_device` was truthy,
 and its E4 variant's explicit `null` is not truthy. #1444/#1446 later
 changed that gate to test key presence instead of truthiness, so the
