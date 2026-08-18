@@ -66,6 +66,12 @@ jobs:
   renode-aen-smoke:
     name: renode · AEN801 M55-HP hello-world
     runs-on: ubuntu-latest
+    # #1477: worst observed successful run 205s/3.42min across 8 sampled
+    # runs (corrected from a 3-run sample that produced an unnecessary
+    # 30->35 raise -- see per-step comments below). 30min is unchanged
+    # from before this issue; per-step caps sized off the 8-run data keep
+    # their sum (14min incl. the 1min/step budget for the 2 remaining
+    # uncapped steps) well under it.
     timeout-minutes: 30
 
     env:
@@ -74,18 +80,24 @@ jobs:
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        # #1477: worst observed successful run 5s across 8 sampled runs.
+        timeout-minutes: 1
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
+        # #1477: worst observed successful run 1s across 8 sampled runs.
+        timeout-minutes: 1
         with:
           # Repo is checked out under alp-sdk/ (path:), but setup-python (a
           # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
           python-version-file: alp-sdk/.python-version
 
       - name: Install host build tools
+        # #1477: worst observed successful run 17s across 8 sampled runs.
+        timeout-minutes: 1
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -95,6 +107,8 @@ jobs:
               ca-certificates curl gnupg
 
       - name: Install west + Python deps
+        # #1477: worst observed successful run 12s across 8 sampled runs.
+        timeout-minutes: 1
         run: pip3 install west jsonschema pyyaml
 
       # Zephyr workspace lives next to alp-sdk.  bootstrap.sh is
@@ -114,6 +128,8 @@ jobs:
       # `continue-on-error: true` swallowed for as long as the e2e below was a
       # no-op echo: the job reported success having never produced an ELF.
       - name: Install Zephyr build requirements
+        # #1477: worst observed successful run 3s across 8 sampled runs.
+        timeout-minutes: 1
         run: |
           set -euo pipefail
           pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements-base.txt"
@@ -142,6 +158,8 @@ jobs:
       # the native_sim twister gate), so the Zephyr SDK is required.
       - name: Install Zephyr SDK (arm-zephyr-eabi)
         working-directory: ${{ github.workspace }}
+        # #1477: worst observed successful run 9s across 8 sampled runs.
+        timeout-minutes: 1
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 --retry-delay 5 -o /tmp/zephyr-sdk.tar.xz "${ZEPHYR_SDK_URL}"
@@ -159,6 +177,11 @@ jobs:
       # Same v1.16.1 pin as pr-renode-dual-os.yml so both Renode gates
       # exercise identical emulator behaviour.
       - name: Install Renode
+        # #1477: no per-step measurement isolated this step from
+        # "Install Zephyr SDK" in the 8-run sample; kept at 2min (real
+        # work is a single curl + tar, same class as the 1min steps
+        # above with headroom for the larger download).
+        timeout-minutes: 2
         run: |
           set -euo pipefail
           # v1.16.1 portable-dotnet build: self-contained .NET, no Mono/GTK#
@@ -187,6 +210,8 @@ jobs:
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+        # #1477: worst observed successful run 25s across 8 sampled runs.
+        timeout-minutes: 1
         run: |
           set -euo pipefail
           west build -p always \
@@ -218,7 +243,9 @@ jobs:
       # normal exit path -- pause+quit has exited 0 on every observed
       # run.
       - name: AEN801 M55-HP Renode boot e2e
-        timeout-minutes: 5
+        # #1477: worst observed successful run 4s across 8 sampled runs
+        # (was a pre-existing 5min guess predating this issue).
+        timeout-minutes: 1
         working-directory: ${{ github.workspace }}/alp-sdk
         run: |
           set -uo pipefail
@@ -266,6 +293,7 @@ jobs:
       - name: Upload Renode boot log
         if: always()
         uses: actions/upload-artifact@v7
+        timeout-minutes: 2
         with:
           name: renode-boot-log
           path: ${{ runner.temp }}/renode-boot.log

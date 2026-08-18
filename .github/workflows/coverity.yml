@@ -42,6 +42,14 @@ jobs:
   scan:
     name: scan · coverity build + submit
     runs-on: ubuntu-latest
+    # #1477: every sampled successful run (85s worst of 3) took the
+    # COVERITY_TOKEN-missing no-op exit-0 short-circuit above, NOT a real
+    # analysis -- this file's own header comment says the real Coverity
+    # capture + submit takes ~20min once the token is provisioned. A
+    # ceiling derived from the no-op runs alone would be dangerously
+    # tight against that real path, so this is set with headroom over the
+    # documented ~20min rather than 2x the (unrepresentative) 85s sample.
+    timeout-minutes: 45
 
     steps:
       - name: Check for Coverity token
@@ -58,9 +66,11 @@ jobs:
       - name: Checkout
         if: steps.token_check.outputs.configured == 'true'
         uses: actions/checkout@v6
+        timeout-minutes: 2
 
       - name: Install build dependencies
         if: steps.token_check.outputs.configured == 'true'
+        timeout-minutes: 3
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
@@ -76,6 +86,7 @@ jobs:
           # COVERITY_PROJECT in repo Actions vars if your project
           # was registered under a different name.
           COV_PROJECT: ${{ vars.COVERITY_PROJECT || 'alplabai/alp-sdk' }}
+        timeout-minutes: 5
         run: |
           # Coverity's documented form is POST with form-encoded body;
           # GET with query string fails auth.  -f makes curl exit
@@ -110,11 +121,13 @@ jobs:
 
       - name: Configure SDK (plain-CMake, baremetal stub)
         if: steps.token_check.outputs.configured == 'true'
+        timeout-minutes: 2
         run: |
           cmake -B build -S . -DALP_OS=baremetal
 
       - name: Capture build with Coverity
         if: steps.token_check.outputs.configured == 'true'
+        timeout-minutes: 3
         run: |
           cov-build --dir cov-int cmake --build build --parallel
 
@@ -128,6 +141,7 @@ jobs:
           COV_TOKEN: ${{ secrets.COVERITY_TOKEN }}
           COV_EMAIL: ${{ secrets.COVERITY_EMAIL }}
           COV_PROJECT: ${{ vars.COVERITY_PROJECT || 'alplabai/alp-sdk' }}
+        timeout-minutes: 2
         run: |
           # Same project-name source-of-truth as the download step.
           # The submit endpoint URL-encodes the project parameter
