@@ -307,9 +307,34 @@ static int cmd_companion_wifi_ap_stop(const struct shell *sh, size_t argc, char 
 	alp_status_t s = cc3501e_wifi_ap_stop(companion_cc3501e);
 
 	if (s != ALP_OK) {
-		shell_error(sh, "ap stop failed (%d)", (int)s);
+		/* #1553: against protocol v4 this is the EXPECTED outcome even for a
+		 * teardown that worked, the same way `ap start` above is (#1385) --
+		 * WIFI_AP_STOP has no acknowledgement the driver can confirm on, so
+		 * poll_by_repeat exhausts its window and returns ALP_ERR_TIMEOUT.
+		 *
+		 * BENCH-MEASURED 2026-08-18 on E1M-AEN801, observed from a second,
+		 * independent radio (the host's Intel AX200 via `netsh wlan show
+		 * networks`, validated against known APs first): with the link healthy
+		 * (`ver` -> protocol v4) and the soft-AP confirmed VISIBLE, this call
+		 * returned -4 and the SSID stopped being advertised ~45 s later. The
+		 * teardown happens; only the confirmation is missing.
+		 *
+		 * So "failed" was actively misleading -- an operator cannot tell a
+		 * teardown that did not happen from one that did, and the flat failure
+		 * pushed them toward the wrong conclusion. Say "unconfirmed", exactly
+		 * as `ap start` does. One measurement is not proof the status is
+		 * ALWAYS benign, though, so this stays an error return: it is
+		 * inconclusive, not success. */
+		shell_error(sh,
+		            "ap stop unconfirmed (%d) -- firmware v4 has no AP-stop acknowledgement "
+		            "(#1553, same gap as #1385); the teardown is bench-measured to happen "
+		            "anyway, confirm the SSID is gone out of band",
+		            (int)s);
 		return -EIO;
 	}
+	/* Unreachable against protocol v4 today, kept for the same reason the
+	 * matching branch in `ap start` is: it is the correct branch once a
+	 * firmware-side confirmation channel lands. */
 	shell_print(sh, "ap stopped");
 	return 0;
 }

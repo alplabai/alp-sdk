@@ -295,9 +295,26 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
  * floored internally to the radio down-window and the request is re-issued on a
  * bounded backoff until it lands, like @ref cc3501e_wifi_disconnect.
  *
+ * @warning Against CC3501E firmware protocol v4 this call does not observe an
+ *          acknowledgement it can confirm on, so it returns ALP_ERR_TIMEOUT
+ *          for a teardown that worked -- the same gap @ref
+ *          cc3501e_wifi_ap_start documents for WIFI_AP_START (#1385), tracked
+ *          for this opcode as #1553.  Unlike ap_start, the teardown itself is
+ *          bench-measured to TAKE EFFECT: on E1M-AEN801 (2026-08-18), with the
+ *          link healthy and the soft-AP confirmed visible from an independent
+ *          radio, this call returned ALP_ERR_TIMEOUT and the SSID stopped
+ *          being advertised ~45 s later.  Treat ALP_ERR_TIMEOUT as
+ *          INCONCLUSIVE rather than as failure: one measurement does not make
+ *          it a success code, and it still covers a busy bridge or a
+ *          transport fault during the radio-down window.  Confirm out of band
+ *          if it matters.
+ *
  * @param ctx  Initialised driver context.
- * @return ALP_OK once the firmware acknowledged the AP stop; ALP_ERR_TIMEOUT
- *         if it stayed busy for the whole down-window; mapped error otherwise.
+ * @return ALP_ERR_TIMEOUT for the expected outcome -- see the warning above:
+ *         not proof the teardown failed, and not proof it succeeded;
+ *         ALP_ERR_NOT_READY if @p ctx is NULL or not initialised; mapped error
+ *         otherwise.  ALP_OK requires a firmware acknowledgement that protocol
+ *         v4 does not send, so it is not currently reachable.
  */
 alp_status_t cc3501e_wifi_ap_stop(cc3501e_t *ctx);
 
