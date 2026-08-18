@@ -94,5 +94,9 @@ ZTEST(alp_inference, test_lifecycle_null_handle_safe)
 	zassert_equal(alp_inference_get_input(NULL, 0, &t), ALP_ERR_NOT_READY);
 	zassert_equal(alp_inference_get_output(NULL, 0, &t), ALP_ERR_NOT_READY);
 	zassert_equal(alp_inference_invoke(NULL), ALP_ERR_NOT_READY);
+
+	uint64_t us = 0u;
+	zassert_equal(alp_inference_last_invoke_latency_us(NULL, &us), ALP_ERR_NOT_READY);
+
 	alp_inference_close(NULL);
 }
