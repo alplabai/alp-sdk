@@ -66,7 +66,18 @@ struct alp_inference {
 	void                   *be_state;
 	uint8_t                 lifecycle;
 	uint32_t                active_ops;
-	bool                    in_use;
+	/* Last successful alp_inference_invoke()'s wall-clock duration, in
+	 * microseconds -- written by inference_yocto.c's dispatcher (it
+	 * brackets the per-backend invoke switch), never by a backend.
+	 * UINT64_MAX means "no successful invoke yet"; the sentinel is set
+	 * explicitly in alp_inference_open() below (pool_acquire()'s
+	 * claim-time memset only zeroes it). Same atomic-access discipline
+	 * as src/backends/inference/inference_ops.h's twin field: this is
+	 * an op-counted field (active_ops permits concurrent ops on one
+	 * handle -- it's a drain counter, not a mutex), so every access is
+	 * __atomic_store_n/__atomic_load_n, never a plain read/write. */
+	uint64_t last_invoke_latency_us;
+	bool     in_use;
 };
 
 /* The other half of the invariant the comment above describes: `be_state`

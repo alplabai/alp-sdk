@@ -1024,6 +1024,39 @@ ZTEST(cc3501e_host_driver, test_wifi_connect_bounds_status_attempts_on_wedged_tr
 	             slave.wifi_status_attempt_count);
 }
 
+/* #1481 regression: a HEALTHY poll (every WIFI_STATUS read returns ALP_OK,
+ * simply reporting CONNECTING) must debit only the CC3501E_WIFI_STATUS_POLL_GAP_MS
+ * (50 ms) it actually slept, not the CC3501E_REQ_TMO_MS (100 ms) worst-case
+ * attempt cost the ss != ALP_OK path reserves for a failed read that never
+ * happened here.  Before the fix, that 100 ms was debited on EVERY iteration
+ * regardless of ss, so a healthy 3-iterations-of-CONNECTING poll burned
+ * 3 * 150 ms = 450 ms of a caller's declared budget for only 3 * 50 ms =
+ * 150 ms of real elapsed time (alp_delay_ms is a no-op stub here, but the
+ * `remaining` accounting is exactly what a real caller's wall clock would
+ * see) -- collapsing timeout_ms to roughly 1/3 of what was asked for.
+ *
+ * slave.status_polls_before_terminal = 4u yields four CONNECTING reads
+ * total: one consumed by cc3501e_wifi_connect()'s own entry stale-
+ * association check (before the loop's `remaining` budget is even
+ * initialised, same fixture-order accounting
+ * test_wifi_connect_submits_exactly_once_1376 relies on), then three more
+ * inside the poll loop, before the fifth WIFI_STATUS read reports the
+ * fixture default CONNECTED and the call returns ALP_OK.  A timeout_ms of
+ * 320 ms comfortably covers the honest 3 * 50 ms = 150 ms the fixed loop
+ * actually spends, but is well under the 3 * 150 ms = 450 ms the pre-fix
+ * unconditional debit would have needed -- so this proves ALP_OK on the
+ * fix and would have proven a premature ALP_ERR_TIMEOUT on the bug. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_healthy_poll_not_over_debited_1481)
+{
+	slave.status_polls_before_terminal = 4u; /* CONNECTING x3 in-loop, then CONNECTED */
+	alp_status_t s                     = cc3501e_wifi_connect(&fw, "healthynet", 1u, "pw", 320u);
+	zassert_equal(s,
+	              ALP_OK,
+	              "a healthy CONNECTING poll must consume ~wall-clock time (150 ms), not "
+	              "~3x it (450 ms) against a 320 ms budget (got status %d)",
+	              s);
+}
+
 /* #1376/#1378: an association that genuinely FAILS (auth reject / no AP) must
  * be reported as a failure, not an OK -- and, as above, from exactly one
  * submit. */

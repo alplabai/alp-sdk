@@ -3,8 +3,8 @@
 `tan` is the Alp SDK's user-facing command line (ADR
 [0020](adr/0020-sdk-owns-build-execution.md)): it scaffolds and validates
 projects, renders configuration, diagnoses the host, builds and flashes every
-core, packages images and models, runs Renode, opens a serial console, and
-provides the inspection/debugging commands used by Alp IDE.
+core, packages images and models, opens a serial console, and provides the
+inspection/debugging commands used by Alp IDE.
 
 The current implementation is Python and is independently versioned in
 [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli). As of
@@ -146,7 +146,7 @@ Two front doors, two different jobs -- pick by what you're doing:
 | Scaffolding a project, validating `board.yaml`, compiling a model, checking your host, opening a serial console, explaining a template/generation target, decoding a fault, or running a native_sim/single-board loop | `tan init` / `tan new-som` / `tan validate` / `tan model` / `tan doctor` / `tan monitor` / `tan explain` / `tan faultdecode` / `tan run` |
 | Inspecting a board-derived config artefact without building | `tan generate --target <mode>`; see the target table below |
 | Inspecting an orchestrator-owned artefact without building (system manifest, build plan, Kconfig menu, IPC contract header, DTS reservations/partitions, storage mounts, TF-M sysbuild overlay) | `west alp-emit <mode>` from a west workspace |
-| Building, flashing, sizing, bundling, cleaning, or Renode-booting a project | `tan build` / `tan flash` / `tan size` / `tan image` / `tan clean` / `tan renode` -- see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) |
+| Building, flashing, sizing, bundling, or cleaning a project | `tan build` / `tan flash` / `tan size` / `tan image` / `tan clean` -- see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) |
 | Scripting the surviving west-centric maintenance commands | `tan migrate` / `tan lock` / `tan quality` (forwarders), or their direct `west alp-*` forms; `west alp-emit` remains the generated-artefact subset |
 
 Rules of thumb:
@@ -251,7 +251,7 @@ Omit `--sku` / `--soc-ref` / `--family` to be prompted interactively
 (requires a terminal; in a pipe or CI the command fails fast naming
 the missing flags).
 
-### `tan build` / `flash` / `size` / `image` / `clean` / `renode` -- build execution
+### `tan build` / `flash` / `size` / `image` / `clean` -- build execution
 
 Before ADR [0020](adr/0020-sdk-owns-build-execution.md) these were
 `alp build` / `alp flash` / `alp size` / `alp image` / `alp clean` /
@@ -260,8 +260,13 @@ Before ADR [0020](adr/0020-sdk-owns-build-execution.md) these were
 retired the SDK-side fan-out executor (`Orchestrator.fan_out()`,
 `_dispatch_slice()`, and the
 `west alp-{build,image,flash,clean,size,renode}` extensions).  The
-multi-slice build/flash/size/image/clean/renode surface moved to the
-standalone, public **`tan` CLI**:
+multi-slice build/flash/size/image/clean surface moved to the
+standalone, public **`tan` CLI**.  The sixth slot in those historical
+lists, `renode`, has no successor: it was retired outright rather than
+moved -- see [ADR 0022](adr/0022-python-executor-renode-retirement.md),
+Amendment 2, and "Verifying without a board" in
+[heterogeneous-builds.md](heterogeneous-builds.md) for what to do
+instead.
 
 ```bash
 tan build                          # materialise the plan + run every slice's build command (default)
@@ -273,7 +278,6 @@ tan flash                          # program every slice + helper MCU
 tan size --fail-over-budget        # footprint vs the SoM memory budget
 tan image                          # assemble a flashable bundle
 tan clean                          # remove build outputs
-tan renode                         # headless smoke boot in Renode
 ```
 
 Python Tan's relocated planner produces the machine-readable, write-free build
@@ -584,4 +588,4 @@ see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli).
   isn't enough.
 - [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) -- the
   standalone executor's own docs (`tan build` / `flash` / `size` /
-  `image` / `clean` / `renode`).
+  `image` / `clean`).
