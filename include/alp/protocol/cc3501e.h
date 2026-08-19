@@ -309,12 +309,24 @@ typedef enum {
  *     version (ALP_CC3501E_PROTOCOL_VERSION) for the host compatibility
  *     gate; the release version is surfaced only here (v2 firmware).
  *   - reset_cause: one of @ref alp_cc3501e_reset_cause_t.
- *   - role: one of @ref alp_cc3501e_role_t.
+ *   - role: one of @ref alp_cc3501e_role_t.  WI-FI ONLY on current
+ *     firmware -- ROLE_OFF, ROLE_WIFI_STA or ROLE_WIFI_AP.  BLE state is
+ *     not folded in, so ROLE_OFF here does NOT mean BLE is down.  Until
+ *     alp-sdk#1562 this byte was hardcoded ROLE_OFF and told you nothing.
  *   - uptime_ms: time since power-on / last reset.
- *   - free_heap_bytes: firmware-allocator free pool.
+ *   - free_heap_bytes: firmware-allocator free pool.  Between #1553 and
+ *     #1562 the firmware shipped the last Wi-Fi event ID in this field
+ *     instead, so a host reading it as heap saw a small integer (often 0)
+ *     and rendered an alarming "0 B free"; the event ID now lives in
+ *     reserved[0] and this field means what it says again.
  *   - last_error: last @ref alp_cc3501e_resp_t the firmware
  *     emitted on the wire; @ref ALP_CC3501E_RESP_OK if no error
- *     since last reset. */
+ *     since last reset.
+ *   - reserved[0]: low byte of the last Wi-Fi event ID the firmware's
+ *     event callback saw; 0 = none since reset (also what pre-#1562
+ *     firmware put here, so an old host reading 0 is not misled).  An
+ *     ap_start that leaves this at 0 never received a WLAN event at all.
+ *   - reserved[1..2]: still reserved, always 0. */
 typedef struct {
 	uint16_t fw_version;
 	uint8_t  reset_cause;
