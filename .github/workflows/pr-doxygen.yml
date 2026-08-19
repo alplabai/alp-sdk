@@ -21,15 +21,33 @@ name: pr-doxygen
 on:
   pull_request:
     branches: [main, dev]
-    paths:
+    # This list must cover docs/doxygen/Doxyfile's INPUT -- the gate reads
+    # every one of these, so a change to any of them can turn the build red.
+    # It previously listed only include/**, docs/doxygen/** and docs/adr/**,
+    # while INPUT already covered ALL of docs plus the root and component
+    # READMEs, so a docs/ci/ edit could (and did, #1585) leave dev red with
+    # nothing running to notice.  tests/scripts/test_doxygen_paths_cover_input.py
+    # pins the two together.
+    paths: &doxygen-inputs
       - 'include/**'
-      - 'docs/doxygen/**'
-      - 'docs/adr/**'
+      - 'docs/**'
+      - '!docs/superpowers/**'
+      - 'README.md'
+      - 'VERSIONS.md'
+      - 'CONTRIBUTING.md'
+      - 'TRADEMARKS.md'
+      - 'chips/README.md'
+      - 'vendors/*/README.md'
+      - 'firmware/cc3501e/README.md'
+      - 'keys/README.md'
+      - 'meta-alp-sdk/README.md'
+      - 'examples/README.md'
+      - 'metadata/library-profiles/README.md'
+      - 'zephyr/sysbuild/aen/README.md'
       - '.github/workflows/pr-doxygen.yml'
   push:
     branches: [main, dev]
-    paths:
-      - 'include/**'
+    paths: *doxygen-inputs
   workflow_dispatch:
 
 concurrency:
