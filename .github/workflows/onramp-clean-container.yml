@@ -654,8 +654,25 @@ jobs:
         timeout-minutes: 5
         run: |
           source .venv/bin/activate
-          west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
-              --install-dir "${GITHUB_WORKSPACE}/zephyr-sdk"
+          # #1549: same retry as pr-twister.yml's `west sdk install` step
+          # -- see there for why the command is safely re-runnable
+          # (tempdir download, sha256, shutil.move last; "already
+          # installed ... Using it." on a re-run) and why the git
+          # http.lowSpeed* guard does NOT apply to it: this one fetches
+          # with python-requests, not git, so a stall is bounded by this
+          # step's timeout-minutes, and the retry covers 5xx/reset.
+          for attempt in 1 2 3; do
+            [ "$attempt" = 1 ] || rm -rf "${GITHUB_WORKSPACE:?}/zephyr-sdk"
+            west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
+                --install-dir "${GITHUB_WORKSPACE}/zephyr-sdk" && break
+            rc=$?
+            if [ "$attempt" = 3 ]; then
+              echo "::error::west sdk install failed after 3 attempts (exit $rc)"
+              exit "$rc"
+            fi
+            echo "west sdk install failed (exit $rc); retry $attempt/3 in 15s" >&2
+            sleep 15
+          done
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
 
