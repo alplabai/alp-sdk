@@ -38,9 +38,9 @@ on:
       - 'TRADEMARKS.md'
       - 'chips/README.md'
       - 'vendors/*/README.md'
-      # Both bridge-firmware READMEs are in INPUT; the glob also covers a
-      # future firmware/<chip>/README.md, so the filter can only ever
-      # over-trigger (harmless) rather than leave the hard gate unreachable.
+      # All three firmware/*/README.md are in INPUT, so this glob matches it
+      # exactly today and keeps matching when a fourth is added -- the gate
+      # cannot go unreachable for a firmware README the way #1585 did.
       - 'firmware/*/README.md'
       - 'keys/README.md'
       - 'meta-alp-sdk/README.md'

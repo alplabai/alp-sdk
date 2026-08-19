@@ -1,3 +1,5 @@
+@page firmware_alp_stock_shim_index Alp stock shim firmware
+
 # alp-stock-shim
 
 Minimal Zephyr image for SoM preset M-core defaults that use
