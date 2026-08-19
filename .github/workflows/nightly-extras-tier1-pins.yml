@@ -127,6 +127,12 @@ jobs:
         timeout-minutes: 5
         run: |
           set -e
+          # #1549: see pr-twister.yml's `west init zephyr workspace` step
+          # for the full rationale and the measurement.  `west init -l .`
+          # is local and clones nothing, but the `west update` below is
+          # git-over-https and had no transport timeout at all.
+          git config --global http.lowSpeedLimit 1000
+          git config --global http.lowSpeedTime 30
           west init -l .
           # `--narrow --depth 1` bounds this to a shallow fetch of just
           # the pinned project tips (no history); `timeout-minutes: 20`
@@ -138,13 +144,28 @@ jobs:
           # `|| echo ... ; continue-on-error: true` is deliberate: it
           # lets the per-library "Verify pins populated content" step
           # report WHICH library failed to fetch, rather than dying
-          # here on the first bad project and hiding the rest.
-          west update \
-            --group-filter +extras-tier1 \
-            --narrow \
-            -o=--depth=1 \
-            zephyr $EXTRAS_TIER1_NAMES \
-            || echo "west update returned non-zero"
+          # here on the first bad project and hiding the rest.  #1549
+          # adds a retry AROUND that, and deliberately does NOT convert
+          # the final failure into a hard exit: this step's whole design
+          # is to let the verify step name the culprit, so attempt 3
+          # falls through to the same message and the same
+          # continue-on-error path as before.  `west init` stays outside
+          # the loop -- it refuses on an already-initialised workspace.
+          for attempt in 1 2 3; do
+            west update \
+              --group-filter +extras-tier1 \
+              --narrow \
+              -o=--depth=1 \
+              zephyr $EXTRAS_TIER1_NAMES \
+              && break
+            rc=$?
+            if [ "$attempt" = 3 ]; then
+              echo "west update returned non-zero"
+              break
+            fi
+            echo "west update failed (exit $rc); retry $attempt/3 in 15s" >&2
+            sleep 15
+          done
         continue-on-error: true
 
       # NB: no `working-directory: alp-sdk`.  `west init -l .` (run in
