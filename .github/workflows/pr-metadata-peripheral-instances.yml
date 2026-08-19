@@ -51,19 +51,19 @@ jobs:
     # each need their own timeout-minutes cap; their sum (6min) left no
     # headroom under the old 5-minute ceiling, which would fail
     # test_job_ceiling_exceeds_the_sum_of_its_step_timeouts.
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
-        timeout-minutes: 2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@v6
-        timeout-minutes: 2
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        timeout-minutes: 5
         with:
           python-version-file: alp-sdk/.python-version
 
@@ -87,9 +87,11 @@ jobs:
       # (dts/arm/renesas/rz/rzv/r9a09g056.dtsi) out of the whole Zephyr
       # tree, not a full west workspace/SDK/toolchain. Runs in seconds.
       - name: Sparse-checkout the RZ/V2N devicetree at the pinned tag
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         env:
           ZEPHYR_TAG: ${{ steps.pin.outputs.tag }}
-        timeout-minutes: 2
         run: |
           set -euo pipefail
           git clone --filter=blob:none --sparse --depth 1 \

@@ -144,19 +144,21 @@ jobs:
 
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
-        timeout-minutes: 3
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        timeout-minutes: 5
 
       - name: Set up Python
-        uses: actions/setup-python@v6
-        timeout-minutes: 2
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 
       - name: Install Python deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # model-io adds tflite + flatbuffers so the .alpmodel tensor-I/O
         # tests run here (they importorskip otherwise); cbor2 is a base dep.
-        timeout-minutes: 3
         run: pip install -e ".[dev,model-io]"
 
       # ---------------------------------------------------------
@@ -308,7 +310,7 @@ jobs:
     # budget test_job_ceiling_exceeds_the_sum_of_its_step_timeouts assigns
     # every uncapped `emit *` step (6 of them; only the flagged setup
     # steps above carry their own cap).
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     strategy:
       fail-fast: false
@@ -317,17 +319,19 @@ jobs:
 
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
-        timeout-minutes: 3
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        timeout-minutes: 5
 
       - name: Set up Python
-        uses: actions/setup-python@v6
-        timeout-minutes: 2
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 
       - name: Install Python deps
-        timeout-minutes: 3
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip install jsonschema pyyaml
 
       # Exercise every emit mode against the canonical template.

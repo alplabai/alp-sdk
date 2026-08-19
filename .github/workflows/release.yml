@@ -87,7 +87,7 @@ jobs:
     # enough (a handful of times a month) that the 3-run sample is thin.
     # 20min keeps headroom over both that floor and the sum of this job's
     # own capped + budgeted-uncapped step timeouts.
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: write  # required to create the GitHub Release
     outputs:
@@ -95,19 +95,21 @@ jobs:
       hashes: ${{ steps.hash.outputs.hashes }}
     steps:
       - name: Checkout (full history for CHANGELOG slice)
-        uses: actions/checkout@v6
-        timeout-minutes: 2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        timeout-minutes: 5
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v6
-        timeout-minutes: 2
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 
       - name: Install Python deps
-        timeout-minutes: 2
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip install pyyaml jsonschema
 
       - name: Parse tag + verify against metadata
@@ -286,7 +288,7 @@ jobs:
           echo "hashes=$HASH" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3
         timeout-minutes: 3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
@@ -320,6 +322,16 @@ jobs:
       actions: read       # needed to read the workflow trigger event
       id-token: write     # OIDC token for Sigstore signing
       contents: write     # write the attestation to the Release
+    # alp-sdk#1479: deliberately NOT SHA-pinned, unlike every other `uses:`
+    # in this repo. slsa-framework/slsa-github-generator's own README
+    # ("Referencing SLSA builders and generators") requires its builders
+    # and generators be referenced by tag as `@vX.Y.Z` so slsa-verifier can
+    # verify the ref of the trusted reusable workflow -- a hash pin is not
+    # supported (tracked upstream as slsa-verifier#12). The generator's
+    # `compile-generator` input also defaults to false here, meaning its
+    # binary-fetch step downloads a release asset at this ref, which MUST
+    # be a tag; a commit SHA breaks that fetch. Trust anchor for this one
+    # reference is the Sigstore-signed builder identity, not a SHA pin.
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: "${{ needs.build.outputs.hashes }}"

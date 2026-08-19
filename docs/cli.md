@@ -496,9 +496,16 @@ programming dependencies such as J-Link and Alif SETOOLS. Every failed or
 warning check includes a remediation hint; an unhealthy host exits 4.
 
 `--build` is retained for existing callers but no longer changes the checklist.
-In an interactive text-mode run, `--fix` may run the manifest's elevation-free
-install commands. It never runs `sudo`; `--ci`, `--non-interactive`, and JSON
-mode disable repairs and leave the commands as printed guidance.
+As of tan-cli `dev` (ahead of the tagged `v0.5.1` release -- ships in
+`v0.6.0-rc1`+): in an interactive text-mode run with a TTY, `--fix` may run
+the manifest's install commands. An install command that needs no elevation
+(macOS `brew`, Windows `winget`) runs for any caller. It never spawns the
+`sudo` program: a `sudo`-prefixed command (Linux `apt`/`dnf`) is refused
+with `doctor.fix-needs-sudo` and printed to run by hand for a non-root
+caller, and has its literal `sudo ` prefix stripped and the rest executed
+for a caller who is already root. Without a TTY on both stdin and stderr --
+and under `--ci`, `--non-interactive`, or JSON mode -- repairs are disabled
+and the commands are left as printed guidance.
 
 `PYTHONPATH=scripts python3 -m alp_cli doctor` is alp-sdk's separate reference
 preflight. It has its own checks, `--strict`/`--json` flags, and

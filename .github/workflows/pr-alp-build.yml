@@ -83,8 +83,8 @@ jobs:
 
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
-        timeout-minutes: 2
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
@@ -93,15 +93,17 @@ jobs:
       # toolchain version pin keeps the orchestrator behaviour
       # consistent across the metadata gate + this gate.
       - name: Set up Python
-        uses: actions/setup-python@v6
-        timeout-minutes: 2
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        timeout-minutes: 5
         with:
           # Repo is checked out under alp-sdk/ (path:), but setup-python (a
           # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
           python-version-file: alp-sdk/.python-version
 
       - name: Install Python deps
-        timeout-minutes: 3
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip install jsonschema pyyaml
 
       # Mirror pr-twister.yml's workspace pattern: Zephyr workspace
@@ -256,7 +258,7 @@ jobs:
 
       - name: Upload system-manifest artefact
         if: always() && steps.gate.outputs.present == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         timeout-minutes: 2
         with:
           name: system-manifest-${{ matrix.som }}-${{ matrix.scenario }}

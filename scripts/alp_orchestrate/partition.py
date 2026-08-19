@@ -8,9 +8,9 @@ with page alignment, and flags overlaps. An entry that can't resolve (unknown
 device / no size) becomes a blocked ResolvedPartition. Extracted from
 alp_orchestrate as the #285 partition seam.
 
-Depends only downward -- models, paths (METADATA_ROOT), memregion (_PAGE /
-_region_size_bytes), and alp_project.resolve_memory_map; nothing calls back into
-the package __init__.
+Depends only downward -- models (dataclasses, incl. the project's resolved
+metadata root), memregion (_PAGE / _region_size_bytes), and
+alp_project.resolve_memory_map; nothing calls back into the package __init__.
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from sentinels import is_tbd
 
 from .memregion import _PAGE, _region_size_bytes
 from .models import BoardProject, ResolvedPartition, StorageEntry
-from .paths import METADATA_ROOT
 
 
 def _known_flash_devices(
@@ -377,7 +376,7 @@ def resolve_storage_partitions(
     # entries are name-sorted for byte-stable allocation.
     for device_name in sorted(by_device.keys()):
         descriptor, block_reason = _resolve_flash_device(
-            device_name, project.som_preset, METADATA_ROOT)
+            device_name, project.som_preset, project.effective_metadata_root())
         if descriptor is None:
             for entry in by_device[device_name]:
                 resolved.append(_blocked_partition(
@@ -411,7 +410,8 @@ def resolve_storage_partitions(
         # a littlefs mount resolved to offset 0 of `mram_main` -- MCUboot --
         # with no offset_kib: declared and no status: blocked.
         reserved_spans, reserved_reason = _reserved_spans(
-            device_name, capacity_bytes, project.som_preset, METADATA_ROOT)
+            device_name, capacity_bytes, project.som_preset,
+            project.effective_metadata_root())
         reserved_names = {name for _, _, name in reserved_spans}
         allocated.extend(reserved_spans)
         if reserved_reason is not None and not is_ospi_device:

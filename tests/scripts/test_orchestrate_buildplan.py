@@ -15,6 +15,7 @@ Run locally:
 
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -926,7 +927,8 @@ def _write_multicore_fixture(tmp_path: Path) -> tuple[Path, Path]:
     e1m = meta / "e1m_modules"
     schemas = meta / "schemas"
     socs = meta / "socs" / "test" / "multicore"
-    for d in (e1m, schemas, socs):
+    registries = meta / "registries"
+    for d in (e1m, schemas, socs, registries):
         d.mkdir(parents=True)
 
     bc_schema = _json.loads((REPO / "metadata" / "schemas"
@@ -939,6 +941,14 @@ def _write_multicore_fixture(tmp_path: Path) -> tuple[Path, Path]:
     sku_prop["pattern"] = sku_prop["pattern"][:-2] + "|TST[0-9]{3})$"
     (schemas / "board.schema.json").write_text(
         _json.dumps(bc_schema), encoding="utf-8")
+    # `_slice_alp_conf` resolves the SoM-silicon Kconfig symbol against
+    # `project.effective_metadata_root()` (#1485) -- copy the real registry
+    # so this scratch root resolves for real instead of erroring on a
+    # missing file.
+    shutil.copy(REPO / "metadata" / "registries" / "silicon-kconfig.json",
+                registries / "silicon-kconfig.json")
+    shutil.copy(REPO / "metadata" / "registries" / "peripheral-kconfig.json",
+                registries / "peripheral-kconfig.json")
 
     (socs / "x1.json").write_text(
         _json.dumps(_MULTICORE_SOC_SPEC), encoding="utf-8")
