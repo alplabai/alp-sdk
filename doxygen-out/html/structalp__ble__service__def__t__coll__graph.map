@@ -1,8 +1,0 @@
-<map id="alp_ble_service_def_t" name="alp_ble_service_def_t">
-<area shape="rect" id="Node000001" title="GATT service definition: one UUID + an array of characteristics." alt="" coords="5,181,168,207"/>
-<area shape="rect" id="Node000002" href="$structalp__ble__uuid__t.html" title="128&#45;bit UUID (little&#45;endian byte order, BT&#45;SIG convention)." alt="" coords="29,5,145,31"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="85,45,81,80,80,119,87,181,82,181,75,119,75,79,79,44"/>
-<area shape="rect" id="Node000003" href="$structalp__ble__char__def__t.html" title="Single characteristic in a service definition." alt="" coords="176,93,320,119"/>
-<area shape="poly" id="edge3_Node000003_Node000002" title=" " alt="" coords="122,35,227,91,225,95,119,40"/>
-<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="215,128,110,183,107,179,213,123"/>
-</map>

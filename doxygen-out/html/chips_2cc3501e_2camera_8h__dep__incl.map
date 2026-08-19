@@ -1,7 +1,0 @@
-<map id="include/alp/chips/cc3501e/camera.h" name="include/alp/chips/cc3501e/camera.h">
-<area shape="rect" id="Node000001" title="CC3501E camera&#45;enable LDO host helper (opcodes 0x60/0x61)." alt="" coords="11,5,201,45"/>
-<area shape="rect" id="Node000002" href="$chips_2cc3501e_8h.html" title="Alif&#45;side host driver for the on&#45;module TI CC3501E." alt="" coords="5,93,207,119"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="109,59,109,93,103,93,103,59"/>
-<area shape="rect" id="Node000003" href="$ext_2cc3501e_2console_8h.html" title="CC3501E companion binder for the alp companion console command." alt="" coords="18,167,194,207"/>
-<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="109,132,109,167,103,167,103,132"/>
-</map>
