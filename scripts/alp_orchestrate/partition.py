@@ -508,13 +508,16 @@ def resolve_storage_partitions(
                     # that both resolves AND has a verified DT label.
                     alt_devices = [
                         d for d in _known_flash_devices(
-                            project.som_preset, METADATA_ROOT)
+                            project.som_preset,
+                            project.effective_metadata_root())
                         if d != device_name
                         and d not in reserved_names
                         and _has_real_dt_label(
-                            d, project.som_preset, METADATA_ROOT)
+                            d, project.som_preset,
+                            project.effective_metadata_root())
                         and _resolve_flash_device(
-                            d, project.som_preset, METADATA_ROOT)[0]
+                            d, project.som_preset,
+                            project.effective_metadata_root())[0]
                         is not None]
                     # Only lead with "pick an offset on <device>" when the
                     # device actually has free room outside its reserved

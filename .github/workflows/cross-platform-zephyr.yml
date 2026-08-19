@@ -34,15 +34,82 @@
 #     30441032872) whose per-STEP conclusions -- not the job
 #     conclusions the override forged -- were 24/24 clean.
 #
-#     NOTE: this workflow's jobs (python-smoke, loader-smoke) are not
-#     in dev's or main's required-status-check list (verified via
-#     `gh api repos/alplabai/alp-sdk/rulesets` -> `[]` and
+#     NOTE: this workflow's jobs are not in dev's or main's
+#     required-status-check list (verified via
 #     `.../branches/{dev,main}/protection/required_status_checks`,
-#     neither of which lists these six contexts), so a red run here
-#     is visible but does not block merge yet -- removing
-#     continue-on-error buys a real signal, not enforcement. Adding
-#     these six contexts (three OSes x two jobs) to branch protection
-#     is a separate follow-up requiring the maintainer's decision.
+#     neither of which lists any of the six real check-run names --
+#     `python-smoke (ubuntu-latest)`, `python-smoke (macos-latest)`,
+#     `python-smoke (windows-latest)`, `loader-smoke (ubuntu-latest)`,
+#     `loader-smoke (macos-latest)`, `loader-smoke (windows-latest)`,
+#     confirmed via `gh api .../actions/runs/<run>/jobs --jq
+#     '.jobs[].name'` against a completed run), so a red run here is
+#     visible but does not block merge yet -- removing
+#     continue-on-error buys a real signal, not enforcement.
+#
+#     Those six names are matrix-interpolated (`${{ matrix.os }}`) and
+#     therefore UNREQUIRABLE on their own: GitHub can only resolve the
+#     interpolation while the matrix job actually runs, and when it
+#     SKIPS (as `python-smoke`/`loader-smoke` now legitimately do --
+#     see the `detect` job below) GitHub reports under the literal,
+#     uninterpolated name `python-smoke (${{ matrix.os }})` instead,
+#     which never matches a required-context string built from the
+#     six real names above. Requiring any of the six directly
+#     reproduces the alp-sdk#1474 permanently-blocked-PR incident
+#     `pr-bootstrap-distro-install.yml`'s own `summary:` job comment
+#     documents (that file is where this pattern was proven; copied
+#     here, not reinvented). The fix applied below is the same one:
+#     a static-named `python-smoke · all` summary job that depends on
+#     the matrix and reports its aggregate result, fail-closed on any
+#     `skipped` result that doesn't match the one legitimate skip
+#     condition. THAT is the context a future promotion should
+#     require -- never the six raw matrix-interpolated names.
+#     `loader-smoke` gets the same `detect`-gating for cost parity but
+#     no summary job of its own: #1528 only asks about promoting
+#     `python-smoke`; a `loader-smoke · all` aggregator is left for
+#     whoever actually proposes requiring `loader-smoke` (this
+#     branch's own earlier commits already went further than #1528
+#     asked by capping `loader-smoke`'s `merge_group` matrix too --
+#     that stays, since it's a correctness fix for whichever job
+#     needs the cap, not a promotion).
+#
+#     Whether to eventually require all six underlying legs (three
+#     OSes x two jobs, surfaced only via a `loader-smoke · all`
+#     aggregator someone still has to add) or only the two
+#     ubuntu-latest ones, is a separate follow-up requiring the
+#     maintainer's decision (alp-sdk#1528 leaves this open). `dev`
+#     runs an active merge-queue ruleset ("dev merge queue", confirmed
+#     via `gh api repos/alplabai/alp-sdk/rulesets`), so before that
+#     promotion happens the workflow ALSO needs `merge_group` in its
+#     own trigger list -- otherwise a queued PR would wait on a check
+#     this workflow can never raise on a `merge_group` ref (#1415),
+#     exactly the trap `pr-twister.yml` and `pr-static-analysis.yml`
+#     already document for their own required contexts. Added below,
+#     but capped to the ubuntu-latest leg on `merge_group` (see the
+#     trigger comment) to avoid billing the full 3-OS matrix on every
+#     queue entry -- that cap PRESUMES the ubuntu-latest-only
+#     promotion. If the maintainer instead requires the macOS/Windows
+#     contexts too, this cap must be widened to run those legs on
+#     `merge_group` FIRST, or the queue will hang in AWAITING_CHECKS
+#     on the four contexts that can then never report on a queue ref
+#     -- the same #1415 trap, reintroduced by the cap itself. This cap
+#     has never actually been exercised by a `merge_group` run of this
+#     workflow (none exists yet in this repo's Actions history, and
+#     `grep -rn fromJSON .github/workflows/*.yml` shows no other
+#     precedent to cross-check against) -- do not read the reasoning
+#     above as proof it works, only as the intended behaviour. Its
+#     failure mode if wrong is fail-OPEN (the full 3-OS matrix bills
+#     on `merge_group` after all), not a hang -- the queue-hang class
+#     this whole trigger addition exists to avoid stays avoided either
+#     way, so a wrong cap costs money, not correctness.
+#
+#     What #1528 previously left unfixed -- `pull_request`/`push`
+#     `paths:`-filtering this workflow so a PR touching none of those
+#     paths never runs it at all, the same #1474 shape one level up --
+#     is fixed below too: the trigger itself is now unfiltered, and a
+#     cheap `detect` job (copied from `pr-bootstrap-distro-install.yml`,
+#     same rationale) decides whether the heavy matrix needs to run at
+#     all, with the `python-smoke · all` summary job treating a
+#     legitimate detect-caused skip as a pass.
 #
 #   - check_cross_platform.py: runs with --fail-on-warning on every
 #                               runner. The existing-doc cleanup this
@@ -68,47 +135,58 @@
 
 name: cross-platform-zephyr
 
+# The `pull_request`/`push` triggers are INTENTIONALLY unfiltered on
+# paths (issue #1528, MAJOR finding 4) -- a paths:-filtered trigger on a
+# workflow meant to eventually produce a required context leaves that
+# check permanently in the "expected" state on any PR that doesn't touch
+# a watched path, and GitHub then blocks the PR forever (not even
+# --admin clears it). `pr-bootstrap-distro-install.yml` hit exactly this
+# on alp-sdk#1474 before its #1473 fix -- see that file's own `summary:`
+# job comment. This workflow's jobs aren't required contexts yet, so it
+# hasn't hit that failure mode in practice, but shipping the promotion
+# without also fixing this would set the trap for whoever adds it later.
+# Copied the fix from that file rather than inventing one: a cheap
+# `detect` job (below, in `jobs:`) decides whether the heavy matrix
+# actually needs to run, and the `python-smoke · all` summary job (also
+# below) treats a legitimate detect-caused skip as a pass -- same shape,
+# same reasoning, same job names as `pr-bootstrap-distro-install.yml`'s
+# own `detect`/`summary` pair.
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'metadata/**'
-      - 'scripts/**'
-      - 'examples/**'
-      - 'include/**'
-      - 'firmware/**'
-      - 'zephyr/**'
-      - 'meta-alp-sdk/**'
-      - 'tests/scripts/**'
-      - 'docs/**/*.md'
-      - 'README.md'
-      # Every workflow, not just this one. This job is the only place
-      # `pytest tests/scripts/` runs, and that is where
-      # test_workflows_are_loadable.py lives -- so a PR that breaks a
-      # DIFFERENT workflow's YAML must still trigger it. Narrowing this
-      # back to a single filename is how two unparseable workflows
-      # reached `dev` unnoticed.
-      - '.github/workflows/**'
   push:
     branches: [main]
-    paths:
-      - 'metadata/**'
-      - 'scripts/**'
-      - 'examples/**'
-      - 'include/**'
-      - 'firmware/**'
-      - 'zephyr/**'
-      - 'meta-alp-sdk/**'
-      - 'tests/scripts/**'
-      - 'docs/**/*.md'
-      - 'README.md'
-      # Every workflow, not just this one. This job is the only place
-      # `pytest tests/scripts/` runs, and that is where
-      # test_workflows_are_loadable.py lives -- so a PR that breaks a
-      # DIFFERENT workflow's YAML must still trigger it. Narrowing this
-      # back to a single filename is how two unparseable workflows
-      # reached `dev` unnoticed.
-      - '.github/workflows/**'
+  # NOT yet load-bearing -- python-smoke/loader-smoke are not required
+  # contexts on `dev` or `main` today (see the NOTE above, alp-sdk#1528).
+  # Added ahead of that promotion anyway: `dev` runs an active merge-queue
+  # ruleset, and GitHub raises `merge_group` -- not `push` or
+  # `pull_request` -- for a queued entry. pr-twister.yml and
+  # pr-static-analysis.yml already needed this for their own required
+  # contexts (#1415); a future required-context here would hit the same
+  # AWAITING_CHECKS hang without it. Bare (no `paths:`): `merge_group`
+  # doesn't support the same path-filter semantics `pull_request`/`push`
+  # get above, and the `detect` job below is gated OFF on `merge_group`
+  # rather than trusted to resolve a merge-queue base/head pair correctly
+  # (that isn't something this repo has verified -- same call
+  # `pr-bootstrap-distro-install.yml`'s own `detect` job makes). `merge_group`
+  # also can't be scoped by matrix leg at the trigger level, so each
+  # matrix job below scopes its own `strategy.matrix.os` (a job-level
+  # `if:` can't do this -- `matrix` isn't in the context list
+  # `jobs.<job_id>.if` gets, enforced by scripts/check_workflow_expressions.py)
+  # to just `ubuntu-latest` on that event -- this PRESUMES the eventual
+  # required context ends up ubuntu-latest-only (alp-sdk#1528 leaves that
+  # open) -- since `merge_group` fires unconditionally on every `dev`
+  # merge-queue entry with no `paths:` to narrow it, and the other two
+  # legs would otherwise bill full matrix cost (macOS 10x, Windows 2x) on
+  # every queue entry while gating nothing. If the maintainer instead
+  # requires the macOS/Windows contexts, widen this cap to include those
+  # legs FIRST -- promoting them as required while they're capped out of
+  # `merge_group` reproduces the #1415 AWAITING_CHECKS hang this trigger
+  # exists to avoid. UNVERIFIED: no `merge_group` run of this workflow
+  # exists in this repo's Actions history yet, so this cap's runtime
+  # behaviour has never actually been observed -- its failure mode if
+  # wrong is fail-OPEN (bills the full 3-OS matrix), not a hang.
+  merge_group:
   workflow_dispatch:
 
 # Cancel in-flight runs on the same branch when a new commit lands.
@@ -119,12 +197,65 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------
+  # Cheap path detector -- NOT a required context itself, same shape as
+  # pr-bootstrap-distro-install.yml's own `detect` job (copied, not
+  # reinvented -- see that file's comment for the full rationale).
+  # Gated off on `merge_group` (see the trigger comment above); always
+  # runs fast on `pull_request`/`push`/`workflow_dispatch`. Its output
+  # gates the heavy matrix jobs below.
+  # ---------------------------------------------------------------
+  detect:
+    if: github.event_name != 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - name: Detect cross-platform-zephyr-relevant changes
+        id: filter
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad  # v3
+        timeout-minutes: 2
+        with:
+          filters: |
+            relevant:
+              - 'metadata/**'
+              - 'scripts/**'
+              - 'examples/**'
+              - 'include/**'
+              - 'firmware/**'
+              - 'zephyr/**'
+              - 'meta-alp-sdk/**'
+              - 'tests/scripts/**'
+              - 'docs/**/*.md'
+              - 'README.md'
+              # `pytest tests/scripts/` also runs in
+              # pr-metadata-validate.yml's `validate` job, but that
+              # workflow's `pull_request` `paths:` list has exactly one
+              # '.github/workflows/' entry -- its own file -- and its
+              # `push` `paths:` list has none at all, not even its own
+              # file. This is the only workflow where an edit to ANY
+              # workflow file reaches test_workflows_are_loadable.py,
+              # which lives under tests/scripts/ and is exercised by
+              # python-smoke's pytest step. Narrowing this back to a
+              # single filename is how two unparseable workflows reached
+              # `dev` unnoticed before.
+              - '.github/workflows/**'
+
+  # ---------------------------------------------------------------
   # Pure-Python smoke: metadata validation + cross-platform lint +
   # public/private classifier + pytest sweep.  Runs identically on
   # every host OS.
   # ---------------------------------------------------------------
   python-smoke:
     name: python-smoke
+    needs: detect
+    # Fail CLOSED, not open -- mirrors pr-bootstrap-distro-install.yml's
+    # `distro-install` job `if:` exactly (see that file's comment for the
+    # full reasoning): skip ONLY when `detect` genuinely ran, genuinely
+    # succeeded, AND genuinely found no watched path changed. Anything
+    # else (workflow_dispatch, a merge-queue entry, a `detect`
+    # non-success) runs the real job.
+    if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     runs-on: ${{ matrix.os }}
     # #1477: worst observed successful run 1068s/17.8min (windows-latest,
     # across 9 sampled runs) -- driven by the `pytest tests/scripts/`
@@ -140,7 +271,26 @@ jobs:
       # a second angle.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # merge_group has no paths: filter (see the trigger comment above), so
+        # cap it to the ubuntu-latest leg -- this PRESUMES the eventual
+        # required context ends up ubuntu-latest-only (alp-sdk#1528 leaves
+        # that open; widen this cap first if macOS/Windows get required
+        # instead, or the queue hangs on those contexts per #1415) --
+        # rather than billing the full macOS (10x)/Windows (2x) matrix
+        # cost on every dev merge-queue entry.
+        # The cap has to live here, not in a job-level `if:` -- `matrix` is
+        # not in the context list `jobs.<job_id>.if` gets (only `github`,
+        # `inputs`, `needs`, `vars`; enforced by
+        # scripts/check_workflow_expressions.py); `jobs.<job_id>.strategy`
+        # does get `github`, so the conditional selects the matrix values
+        # instead. Accepted cost: making `matrix.os` a dynamic expression
+        # here loses actionlint's matrix-value enumeration for this job
+        # (and loader-smoke's, below) -- a typo'd `matrix.os` comparison
+        # elsewhere in either job now type-checks as `any` instead of
+        # being caught against the enumerated ["ubuntu-latest",
+        # "macos-latest", "windows-latest"] set actionlint would otherwise
+        # know.
+        os: ${{ github.event_name == 'merge_group' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]') }}
 
     steps:
       - name: Checkout alp-sdk
@@ -303,6 +453,13 @@ jobs:
   # ---------------------------------------------------------------
   loader-smoke:
     name: loader-smoke
+    needs: detect
+    # Same fail-closed shape as python-smoke's `if:` above -- see that
+    # job's comment. No `loader-smoke · all` summary job exists (yet):
+    # #1528 only asks about promoting python-smoke; this gating exists
+    # for trigger-cost parity now that the workflow-level `paths:` filter
+    # is gone, not because loader-smoke is on a path to being required.
+    if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' || needs.detect.result != 'success' || needs.detect.outputs.relevant == 'true')
     runs-on: ${{ matrix.os }}
     # #1477: worst observed successful run 26s across 9 sampled runs.
     # Raised from the formula's 15min to 20min so the job ceiling stays
@@ -315,7 +472,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # merge_group has no paths: filter (see the trigger comment above), so
+        # cap it to the ubuntu-latest leg -- this PRESUMES the eventual
+        # required context ends up ubuntu-latest-only (alp-sdk#1528 leaves
+        # that open; widen this cap first if macOS/Windows get required
+        # instead, or the queue hangs on those contexts per #1415) --
+        # rather than billing the full macOS (10x)/Windows (2x) matrix
+        # cost on every dev merge-queue entry.
+        # The cap has to live here, not in a job-level `if:` -- `matrix` is
+        # not in the context list `jobs.<job_id>.if` gets (only `github`,
+        # `inputs`, `needs`, `vars`; enforced by
+        # scripts/check_workflow_expressions.py); `jobs.<job_id>.strategy`
+        # does get `github`, so the conditional selects the matrix values
+        # instead. Accepted cost: making `matrix.os` a dynamic expression
+        # here loses actionlint's matrix-value enumeration for this job
+        # (and python-smoke's, above) -- a typo'd `matrix.os` comparison
+        # elsewhere in either job now type-checks as `any` instead of
+        # being caught against the enumerated ["ubuntu-latest",
+        # "macos-latest", "windows-latest"] set actionlint would otherwise
+        # know.
+        os: ${{ github.event_name == 'merge_group' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]') }}
 
     steps:
       - name: Checkout alp-sdk
@@ -355,3 +531,58 @@ jobs:
 
       - name: emit yocto-conf
         run: python scripts/alp_project.py --input metadata/templates/board.yaml.example --emit yocto-conf
+
+  # ---------------------------------------------------------------
+  # Static-named summary gate -- THIS is the job a future promotion
+  # should require, never the six `python-smoke (${{ matrix.os }})` /
+  # `loader-smoke (${{ matrix.os }})` matrix-interpolated legs above.
+  # Copies pr-bootstrap-distro-install.yml's own `summary:` job pattern
+  # verbatim (see that file's comment for why a matrix-interpolated name
+  # is unrequirable and how #1474 proved it). `if: always()` + a
+  # literal, `${{ }}`-free name means this is always resolvable as a
+  # required status check, whether python-smoke ran, skipped, or failed.
+  #
+  # Covers python-smoke only: #1528 asks about promoting python-smoke,
+  # not loader-smoke (see the header NOTE's loader-smoke paragraph).
+  # ---------------------------------------------------------------
+  summary:
+    name: python-smoke · all
+    needs: [detect, python-smoke]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Verdict logic mirrors pr-bootstrap-distro-install.yml's own
+      # `summary` job step, adapted to this workflow's job/output names --
+      # same fail-closed reasoning: a bare `!= 'failure'` reading would
+      # treat 'skipped' as an automatic pass, but 'skipped' is only a
+      # legitimate pass under the one condition `detect` itself defines.
+      - name: Compute verdict from python-smoke's + detect's results
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DETECT_RESULT: ${{ needs.detect.result }}
+          DETECT_RELEVANT: ${{ needs.detect.outputs.relevant }}
+          MATRIX_RESULT: ${{ needs.python-smoke.result }}
+        run: |
+          set -euo pipefail
+          echo "event=${EVENT_NAME} detect.result=${DETECT_RESULT} detect.relevant=${DETECT_RELEVANT} python-smoke.result=${MATRIX_RESULT}"
+
+          case "${MATRIX_RESULT}" in
+            success)
+              echo "PASS: every python-smoke leg ran and succeeded"
+              exit 0
+              ;;
+            skipped)
+              if { [ "${EVENT_NAME}" = "pull_request" ] || [ "${EVENT_NAME}" = "push" ]; } \
+                 && [ "${DETECT_RESULT}" = "success" ] && [ "${DETECT_RELEVANT}" != "true" ]; then
+                echo "PASS: python-smoke legitimately skipped -- detect ran, succeeded, and found no watched path changed"
+                exit 0
+              fi
+              echo "::error::python-smoke reported 'skipped' but event=${EVENT_NAME} detect.result=${DETECT_RESULT} detect.relevant=${DETECT_RELEVANT} does not match the one legitimate-skip condition -- treating this as a broken gate, not a pass"
+              exit 1
+              ;;
+            *)
+              echo "::error::python-smoke concluded '${MATRIX_RESULT}' -- at least one leg did not run and pass"
+              exit 1
+              ;;
+          esac
