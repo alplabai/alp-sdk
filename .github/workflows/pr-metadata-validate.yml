@@ -69,6 +69,13 @@ on:
       - 'scripts/assemble_changelog.py'
       - 'scripts/check_changelog_fragments.py'
       - 'scripts/check_changelog_citations.py'
+      # check_no_committed_doxygen_output.py (#1573) reads OUTPUT_DIRECTORY out
+      # of the Doxyfile and sweeps what is tracked under it, so both are its
+      # inputs -- a gate absent from its own trigger is the #1585 defect class.
+      - 'docs/doxygen/Doxyfile'
+      - 'doxygen-out/**'
+      - 'scripts/check_no_committed_doxygen_output.py'
+      - 'scripts/check_doxyfile_single_source.py'
   push:
     branches: [main, dev]
     paths:
@@ -123,6 +130,13 @@ on:
       - 'scripts/assemble_changelog.py'
       - 'scripts/check_changelog_fragments.py'
       - 'scripts/check_changelog_citations.py'
+      # check_no_committed_doxygen_output.py (#1573) reads OUTPUT_DIRECTORY out
+      # of the Doxyfile and sweeps what is tracked under it, so both are its
+      # inputs -- a gate absent from its own trigger is the #1585 defect class.
+      - 'docs/doxygen/Doxyfile'
+      - 'doxygen-out/**'
+      - 'scripts/check_no_committed_doxygen_output.py'
+      - 'scripts/check_doxyfile_single_source.py'
   workflow_dispatch:
 
 concurrency:
