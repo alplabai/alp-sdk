@@ -4,6 +4,11 @@
 # Run apt-get under a WALL-CLOCK bound that is SHARED ACROSS EVERY INVOCATION IN
 # THE STEP, with a dpkg-safe retry.
 #
+# Cross-platform scope: CI-only. Bash + apt-get + dpkg, so Debian/Ubuntu
+# runners by nature -- it is NOT part of the Windows / WSL / macOS
+# developer-host surface. (This note must stay within the first 30 lines:
+# check_cross_platform.py's _bash_helper_has_note only reads that far.)
+#
 # WHY A BOUND AT ALL: `Acquire::http::Timeout` bounds an IDLE read, not a SLOW
 # one. Every byte that arrives resets the timer, so a mirror that trickles
 # defeats it forever, and apt has no minimum-transfer-rate option (no equivalent
@@ -33,9 +38,6 @@
 # dpkg safety: `timeout` can kill apt-get mid-unpack, leaving the database
 # half-configured or the lock held. Every retry runs `dpkg --configure -a`
 # first -- the standard recovery, a no-op when nothing was interrupted.
-#
-# Cross-platform scope: CI-only, Debian/Ubuntu runners by nature (apt-get,
-# dpkg). Not part of the developer-host surface.
 #
 # Usage:  scripts/ci/apt-bounded.sh update
 #         scripts/ci/apt-bounded.sh install -y --no-install-recommends foo bar
