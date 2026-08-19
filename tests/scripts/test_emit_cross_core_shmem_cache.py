@@ -45,8 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from alp_orchestrate import kconfig as K  # noqa: E402
 from alp_orchestrate.models import IpcEntry, Slice  # noqa: E402
-
-_MR = K.METADATA_ROOT
+from alp_orchestrate.paths import METADATA_ROOT as _MR  # noqa: E402
 
 
 def _project(ipc: list[IpcEntry]) -> types.SimpleNamespace:
@@ -142,7 +141,8 @@ def test_dedup_against_real_emit_inference_output():
     ipc = [IpcEntry(name="alp_shmem0", kind="raw_shmem",
                      endpoints=["m55_hp", "m55_he"], carve_out_kb=4)]
     project = types.SimpleNamespace(
-        soc_spec=soc_spec, som_preset=som, sku="E1M-AEN801", ipc=ipc)
+        soc_spec=soc_spec, som_preset=som, sku="E1M-AEN801", ipc=ipc,
+        effective_metadata_root=lambda: _MR)
     slice_ = Slice(core_id="m55_hp", os="zephyr", inference={"default_arena_kib": 256})
 
     inference_lines = K._emit_inference(project, slice_, som.get("silicon"))

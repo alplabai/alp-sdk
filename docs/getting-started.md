@@ -226,8 +226,15 @@ tan doctor --format json      # machine-readable
 
 It is HW-free (no build and no flash), so it is safe to run anytime. An
 unhealthy environment exits 4. `--build` remains accepted for compatibility
-with v0.4 callers but no longer changes the checklist. Interactive `--fix` can
-run elevation-free manifest remedies; it only prints commands that need sudo.
+with v0.4 callers but no longer changes the checklist. On tan-cli `dev`
+(ahead of the tagged `v0.5.1` release the installer above ships -- lands in
+`v0.6.0-rc1`+), interactive `--fix` (it needs a TTY on both stdin and
+stderr) can run manifest remedies: a remedy that needs no elevation (macOS
+`brew`, Windows `winget`) runs for any caller; a `sudo`-prefixed remedy
+(Linux `apt`/`dnf`) is refused with the command printed to run by hand for
+a non-root caller, and has the literal `sudo ` prefix stripped and the rest
+run for a caller who is already root; and without a TTY there are no
+repairs.
 
 Every `west build` needs Ninja, so install it before continuing if the report
 cannot find it:

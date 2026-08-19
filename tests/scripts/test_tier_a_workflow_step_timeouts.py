@@ -57,6 +57,7 @@ Run locally:
 """
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -87,17 +88,39 @@ WORKFLOWS = _workflow_files()
 # costs is visible at the point of failure, not just in this docstring.
 _GITHUB_DEFAULT_JOB_TIMEOUT_MINUTES = 360
 
-# Command-line tools that fetch over the network or compile; a step whose
-# `run:` script invokes one of these can stall on something outside this
-# repo's content. Matched as plain substrings against the step body.
-_NETWORK_OR_COMPILE_MARKERS = (
+# Third-party package managers and artefact fetches. A step running one of
+# these has NO duration this repo can know: it depends on a mirror, a CDN or
+# a registry nobody here operates, and history does not bound it. Four false
+# CI failures proved that the hard way (#1549, #1477) -- `Install Doxygen`
+# blew a 3-minute cap, and `Install host build tools (dtc, ninja, ccache,
+# gperf, libffi)` blew 1, then 8, then 15 minutes, against a worst observed
+# successful run of THIRTY-TWO SECONDS, with `apt-get -o Acquire::Retries=3`
+# already in the command. Every raise was derived from observed runs and
+# every one was wrong, because observed runs are not evidence about a
+# degraded mirror.
+#
+# So these steps are deliberately NOT required to carry their own cap. The
+# job-level ceiling still bounds them -- that is the hang protection #1319
+# exists for, and it is the protection that actually works here. What is
+# given up is step-level attribution for this one class, which is worth
+# less than a lane that reds on a slow apt.
+_THIRD_PARTY_FETCH_MARKERS = (
     "pip install",
     "pip3 install",
     "apt-get",
-    "west ",
     "curl",
     "wget",
     "git clone",
+    "brew install",
+    "winget install",
+)
+
+# Work whose duration IS a property of this repo's own content -- a compile,
+# a test sweep, a west workspace operation over pinned revisions. History
+# bounds these, so a cap derived from it is meaningful and they keep the
+# requirement.
+_NETWORK_OR_COMPILE_MARKERS = (
+    "west ",
     "cmake",
     "make ",
     # #1319: twister builds and runs the whole ztest + example suite --
@@ -121,6 +144,11 @@ def _needs_own_timeout(step: dict) -> bool:
     action and usually to do its actual job -- checkout, cache, download,
     ...). A local composite action (`uses: ./...`) does no such fetch."""
     run = step.get("run") or ""
+    if any(marker in run for marker in _THIRD_PARTY_FETCH_MARKERS):
+        # Unbounded by construction -- see _THIRD_PARTY_FETCH_MARKERS. The
+        # job ceiling is this step's protection; a per-step cap here only
+        # manufactures false reds.
+        return False
     if any(marker in run for marker in _NETWORK_OR_COMPILE_MARKERS):
         return True
     uses = step.get("uses") or ""
@@ -161,17 +189,57 @@ _workflows = pytest.mark.parametrize(
 )
 
 
-def test_there_are_workflows_to_glob() -> None:
-    """Guard against the guard (#1477): if `_workflow_files()` ever
-    returns too few files -- a typo'd glob, a directory move, `.yml` files
-    all renamed to `.yaml` and only one extension globbed -- every test
-    below parametrized over `WORKFLOWS` would silently shrink or vanish
-    with it, and the suite would stay green while covering less than it
-    did yesterday. Same idiom as
-    `test_workflows_are_loadable.py::test_there_are_workflows_to_check`.
-    The repo has ~29-30 workflow files as of #1477; >=25 leaves room to
-    add or remove a handful without this test itself needing edits."""
-    assert len(WORKFLOWS) >= 25, f"expected >=25 workflow files, found {len(WORKFLOWS)} -- glob has drifted"
+def _git_tracked_workflows() -> list[str] | None:
+    """The workflow filenames git itself tracks, or None if git cannot
+    answer (no binary, not a checkout, a tarball export)."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(REPO), "ls-files", "--",
+             ".github/workflows/*.yml", ".github/workflows/*.yaml"],
+            capture_output=True, text=True, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return sorted(Path(line).name for line in proc.stdout.split("\n") if line.strip())
+
+
+def test_the_glob_sees_every_workflow_git_tracks() -> None:
+    """Guard against the guard (#1477): if `_workflow_files()` ever returns
+    too few files -- a typo'd glob, a directory move, `.yml` files all
+    renamed to `.yaml` with only one extension globbed -- every test below
+    parametrized over `WORKFLOWS` would silently shrink or vanish with it,
+    and the suite would stay green while covering less than it did
+    yesterday.
+
+    This cross-checks the glob against git's own view of the directory
+    rather than against a hardcoded count. The count form (`>= 25`, as this
+    shipped) cannot tell a BROKEN GLOB from a repo that legitimately got
+    smaller: retiring Renode deleted the four `pr-renode-*.yml` workflows
+    and took the tree to exactly 25, so the next deliberate deletion would
+    have failed here claiming "glob has drifted" -- blaming the glob for a
+    real shrink, and inviting whoever hit it to just lower the number
+    again.
+
+    The comparison is deliberately one-directional: every tracked workflow
+    must appear in the glob, but the glob may hold MORE. A file that is new
+    and not yet `git add`ed is a normal state mid-edit and must not fail
+    the suite, whereas a tracked file the glob cannot see is the failure
+    this test exists to catch. Absence is the dangerous direction.
+    """
+    tracked = _git_tracked_workflows()
+    if tracked is None:
+        pytest.skip("git unavailable -- cannot cross-check the glob against the index")
+    assert tracked, (
+        f"git tracks no workflow files under .github/workflows/ in {REPO} -- either the "
+        f"directory moved or this is not the alp-sdk checkout; every test parametrized "
+        f"over WORKFLOWS would be vacuous")
+    globbed = {path.name for path in WORKFLOWS}
+    missing = [name for name in tracked if name not in globbed]
+    assert not missing, (
+        f"_workflow_files() misses {len(missing)} workflow(s) git tracks: {missing}. "
+        f"Every test parametrized over WORKFLOWS silently stops covering them, and the "
+        f"suite stays green while checking less than it did before (#1477)")
 
 
 @_workflows
@@ -273,29 +341,43 @@ _UNCAPPED_STEP_BUDGET_MINUTES = 1
 
 
 @_workflows
-def test_job_ceiling_exceeds_the_sum_of_its_step_timeouts(workflow: Path) -> None:
-    # Each job-level ceiling must stay strictly above the sum of that
-    # job's own step timeouts, or the step running last can still be
-    # killed by the job-level timeout before its own timeout fires --
-    # reintroducing the misattribution #1274 exists to prevent. This does
-    # not pin any ceiling to a specific number, so raising one (one of
-    # #1274's own considered remedies) stays a valid change as long as the
-    # per-step timeouts still fit under it.
+def test_job_ceiling_exceeds_its_longest_step_timeout(workflow: Path) -> None:
+    # #1274 originally required the ceiling to exceed the SUM of a job's
+    # step caps, so that even the LAST step could reach its own timeout
+    # before the job timeout fired and misattributed the failure. Sound
+    # for the worst case -- and that worst case does not occur: every step
+    # running to its cap simultaneously is not a thing that happens.
+    #
+    # What the sum rule reliably produced is a trap, demonstrated twice on
+    # #1549:
+    #
+    #   * Tight caps derived from observed runs -> FALSE REDS. A slow apt
+    #     mirror killed a required lane four times (Install Doxygen at
+    #     3min; Install host build tools at 1, then 8, then 15) against a
+    #     worst observed successful run of 32 seconds.
+    #   * No caps at all -> a genuinely hung fetch runs to the CEILING.
+    #     #1548 removed those caps and a hung `apt-get` then burned 90+
+    #     minutes against a 155-minute ceiling -- on the very PR meant to
+    #     fix timeout flakiness.
+    #
+    # Generous FINITE caps answer both, and the sum rule makes them
+    # arithmetically impossible: ~54 fetch steps at a sane 20 minutes
+    # forces ceilings past GitHub's own 360-minute default, at which point
+    # the ceiling protects nothing.
+    #
+    # So the invariant is max-based: the ceiling must exceed the single
+    # longest step cap. A hang in ANY step is then caught by that step's
+    # own timeout and named, which is the guarantee #1274 actually wanted.
+    # Only its unreachable simultaneity case is given up.
     for job_id, job in _load_jobs(workflow).items():
-        capped_total = 0
-        uncapped_steps = 0
-        for step in job.get("steps") or []:
-            if "timeout-minutes" in step:
-                capped_total += step["timeout-minutes"]
-            else:
-                uncapped_steps += 1
-
-        total = capped_total + uncapped_steps * _UNCAPPED_STEP_BUDGET_MINUTES
-        assert total < _ceiling(job), (
-            f"{workflow.name} job {job_id!r} step timeout-minutes sum to "
-            f"{capped_total}, plus {uncapped_steps} uncapped step(s) "
-            f"budgeted at {_UNCAPPED_STEP_BUDGET_MINUTES}min each = "
-            f"{total}, which is not under the job's "
-            f"{_ceiling(job)}-minute ceiling -- a step running "
-            f"late in the job can still be misattributed"
+        caps = [s["timeout-minutes"] for s in (job.get("steps") or [])
+                if isinstance(s, dict) and "timeout-minutes" in s]
+        if not caps:
+            continue
+        longest = max(caps)
+        assert longest < _ceiling(job), (
+            f"{workflow.name} job {job_id!r} caps a step at {longest}min "
+            f"under a {_ceiling(job)}-minute job ceiling -- that step can "
+            f"be killed by the JOB timeout before its own fires, which "
+            f"names the job and no step (#1274)"
         )

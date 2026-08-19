@@ -27,15 +27,21 @@ from _project_support import REPO, TEMPLATE, _run_loader, _write_board  # noqa: 
 class TestLoaderContract(unittest.TestCase):
     """Schema + preset resolution behaviour."""
 
-    def test_peripheral_kconfig_registry_is_shared(self) -> None:
-        """alp_project and alp_orchestrate consume one metadata registry."""
-        import alp_project
-        import alp_registries
-        from alp_orchestrate.slugs import _PERIPHERAL_KCONFIG as orchestrate_map
+    def test_peripheral_kconfig_registry_uart_maps_to_serial(self) -> None:
+        """`alp_registries.peripheral_kconfig()` resolves the `uart`
+        peripheral token to `SERIAL` against the real in-tree registry
+        (`metadata/registries/peripheral-kconfig.json`).
 
-        registry_map = alp_registries.peripheral_kconfig()
-        self.assertEqual(alp_project._PERIPHERAL_KCONFIG, registry_map)
-        self.assertEqual(orchestrate_map, registry_map)
+        #1485 deleted the frozen `_PERIPHERAL_KCONFIG` module constants
+        this test used to distinguish between (`alp_orchestrate/slugs.py`
+        and `alp_project_emit/__init__.py` each carried one, computed once
+        at import time, before any `--metadata-root` flag was parsed):
+        every caller now resolves through this one function, keyed on an
+        explicit `metadata_root` -- see `test_orchestrate_registries.py`
+        for the scratch-root threading check that exercises the override."""
+        import alp_registries
+
+        registry_map = alp_registries.peripheral_kconfig(alp_registries.METADATA_ROOT)
         self.assertEqual(registry_map["uart"], ("SERIAL",))
 
     def test_peripheral_kconfig_registry_covers_schema_enum(self) -> None:
@@ -50,7 +56,8 @@ class TestLoaderContract(unittest.TestCase):
             schema["$defs"]["core_entry"]["properties"]["peripherals"]
             ["items"]["enum"]
         )
-        self.assertEqual(set(alp_registries.peripheral_kconfig()), enum)
+        registry_map = alp_registries.peripheral_kconfig(alp_registries.METADATA_ROOT)
+        self.assertEqual(set(registry_map), enum)
 
     def test_peripheral_kconfig_registry_schema_is_gated(self) -> None:
         """validate_metadata rejects malformed peripheral registry data."""
