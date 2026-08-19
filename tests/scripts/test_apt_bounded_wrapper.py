@@ -64,7 +64,14 @@ def _why_the_wrapper_cannot_run_here() -> str:
 
 
 _CANNOT_RUN = _why_the_wrapper_cannot_run_here()
-needs_the_wrappers_own_tools = pytest.mark.skipif(
+
+# Module-level, NOT a per-test decorator. It was a decorator until #1604 added
+# three tests and every one of them forgot it -- an opt-in guard that only the
+# author's memory applies is a guard that eventually is not applied, and the
+# three reds landed on macos-latest and windows-latest where nothing could have
+# caught them locally. `pytestmark` makes the platform gate the file's default,
+# so a test added later is covered by writing nothing at all.
+pytestmark = pytest.mark.skipif(
     bool(_CANNOT_RUN),
     reason=f"scripts/ci/apt-bounded.sh cannot run here: {_CANNOT_RUN}",
 )
@@ -106,7 +113,6 @@ def test_the_wrapper_exists_and_is_executable() -> None:
     assert os.access(_WRAPPER, os.X_OK), f"{_WRAPPER} is not executable"
 
 
-@needs_the_wrappers_own_tools
 def test_a_step_whose_budget_is_spent_fails_loudly_rather_than_silently(
     tmp_path: Path,
 ) -> None:
@@ -138,7 +144,6 @@ def test_a_step_whose_budget_is_spent_fails_loudly_rather_than_silently(
     )
 
 
-@needs_the_wrappers_own_tools
 def test_the_deadline_is_shared_across_invocations_in_one_step(
     tmp_path: Path,
 ) -> None:
@@ -160,7 +165,6 @@ def test_the_deadline_is_shared_across_invocations_in_one_step(
     )
 
 
-@needs_the_wrappers_own_tools
 def test_a_different_step_gets_its_own_budget(tmp_path: Path) -> None:
     """Scoping is per step: one step's spent budget must not starve the next."""
     env_a = _env(tmp_path, step="step-a")
@@ -178,7 +182,6 @@ def test_a_different_step_gets_its_own_budget(tmp_path: Path) -> None:
     assert len(list(tmp_path.glob("apt-bounded.*.deadline"))) == 2
 
 
-@needs_the_wrappers_own_tools
 def test_a_real_apt_error_is_not_retried(tmp_path: Path) -> None:
     """Only timeout (124) and apt-transient (100) retry; a real error surfaces."""
     env = _env(tmp_path, step="step-err")
