@@ -38,7 +38,10 @@ on:
       - 'TRADEMARKS.md'
       - 'chips/README.md'
       - 'vendors/*/README.md'
-      - 'firmware/cc3501e/README.md'
+      # All three firmware/*/README.md are in INPUT, so this glob matches it
+      # exactly today and keeps matching when a fourth is added -- the gate
+      # cannot go unreachable for a firmware README the way #1585 did.
+      - 'firmware/*/README.md'
       - 'keys/README.md'
       - 'meta-alp-sdk/README.md'
       - 'examples/README.md'
