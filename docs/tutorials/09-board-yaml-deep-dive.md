@@ -440,34 +440,53 @@ Sets the SDK's log verbosity.  Maps to Zephyr's
 ```yaml
 storage:
   - { name: settings,        fs: littlefs, size_kib: 64,  mount: /lfs/settings,
-      flash_device: mram_main }
+      flash_device: <your SoM's flash device> }
   - { name: app_data,        fs: littlefs, size_kib: 128, mount: /lfs/app,
-      flash_device: mram_main }
+      flash_device: <your SoM's flash device> }
   - { name: mcuboot_scratch, fs: raw,      size_kib: 32,
-      flash_device: mram_main }
+      flash_device: <your SoM's flash device> }
 ```
 
 Each entry declares one fixed partition.  `flash_device:` resolves
 against either the SoM's `memory_map:` regions (auto-derived from
 the SoC variant when not overridden) or `on_module.ospi_memories:`
-keys (when the SoM ships with external OSPI flash).
+keys (when the SoM ships with external OSPI flash).  A `memory_map:`
+region marked `carveout: false` is a partition *inside* a flash-class
+node rather than a flash device of its own (on E1M-AEN301..801 that's
+`mcuboot`, `he_slot0`, `hp_slot0`, `reserved`, `storage`, and `atoc`,
+all living inside the `mram_storage` flash node) and is refused as a
+`flash_device:` target with a reason (#1484).
+
+> **No AEN SKU has a working `flash_device:` target today.** An
+> `on_module.ospi_memories:` key like `ospi0` resolves `status: ok`
+> without a verified Devicetree label (the label exists only in the
+> E1M-AEN801 board trees, and there it names a *disabled* OSPI
+> controller node, not an enabled flash device). `mram_main` resolves
+> as a flash *device* too (its Devicetree label defaults to the region
+> name, but the generated board tree only defines `mram_storage`, so
+> that label is unverified either), but every AEN preset's own
+> `carveout: false` sub-regions already tile all 5632 KiB of it, so
+> a `storage:` entry targeting it always projects `status: blocked` --
+> not `status: ok`. #1556 tracks validating the resolved `dt_label`
+> against the generated board tree.
 
 The orchestrator allocates partitions bottom-up within each device,
 **name-sorted, page-aligned to 4 KiB**, so addresses stay byte-stable
-across rebuilds -- the property OTA images depend on.  In the example
-above the resolver yields:
+across rebuilds -- the property OTA images depend on.  Given a
+`flash_device:` that DOES resolve to a verified Devicetree label
+(once #1556 lands), the resolver would yield for the example above:
 
-| Partition          | Offset | Size  | DT label        |
-|--------------------|--------|-------|-----------------|
-| `app_data`         |   0    | 128 K | `&mram_main`    |
-| `mcuboot_scratch`  | 128 K  |  32 K | `&mram_main`    |
-| `settings`         | 160 K  |  64 K | `&mram_main`    |
+| Partition          | Offset | Size  |
+|--------------------|--------|-------|
+| `app_data`         |   0    | 128 K |
+| `mcuboot_scratch`  | 128 K  |  32 K |
+| `settings`         | 160 K  |  64 K |
 
 (name-sorted, hence `app_data` before `mcuboot_scratch` before
-`settings`).  Override the allocator with `offset_kib: <N>` on any
-entry; the resolver checks page alignment + sibling overlap and
-projects collisions as `status: blocked` in the manifest with a
-clear reason.
+`settings`, each under `&<dt_label>`).  Override the allocator with
+`offset_kib: <N>` on any entry; the resolver checks page alignment +
+sibling overlap and projects collisions as `status: blocked` in the
+manifest with a clear reason.
 
 The build absorbs three outputs per project:
 
