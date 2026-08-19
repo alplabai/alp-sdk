@@ -107,14 +107,24 @@ fi
 
 echo "-- 4/4 WARM tool_settings --"
 python3 - "$DIR_OUT" "$REF_SET" <<'PY'
-import json,sys,os
+import json,sys,os,shutil
 out,ref=sys.argv[1],sys.argv[2]
+# The debug action_request is version-INDEPENDENT, so it is reused from REF_SET
+# rather than rebuilt -- but COPY it into DIR_OUT and reference the copy, so the
+# emitted set is SELF-CONTAINED.  Pointing the manifest straight at the REF_SET
+# path made DIR_OUT non-portable: handing the directory to whoever drives the
+# XDS110 yielded a tool_settings whose `debug` entry dangles on their box, and
+# because that file was not IN DIR_OUT a path-rewrite over the directory's
+# contents silently missed it.  (Hit for real when the signing box and the
+# programming box were different machines.)
+shutil.copy2(os.path.join(ref,"debug_action_request.sign.bin"),
+             os.path.join(out,"debug_action_request.sign.bin"))
 c={
   "tbl_container_programming": None,
   "programming_instructions": os.path.join(out,"programming_instructions_image.sign.bin"),
   "actions_req_paths": {
     "programming": os.path.join(out,"programming_action_request.sign.bin"),
-    "debug": os.path.join(ref,"debug_action_request.sign.bin"),
+    "debug": os.path.join(out,"debug_action_request.sign.bin"),
   },
   "primary_vendor_image": os.path.join(out,"primary_vendor_image.sign.bin"),
   "secondary_vendor_image": "",
@@ -124,6 +134,33 @@ c={
 json.dump({"programming_debug_and_ota_signed_components":c},
           open(os.path.join(out,"tool_settings.warm.json"),"w"),indent=2)
 print("  wrote",os.path.join(out,"tool_settings.warm.json"))
+PY
+
+# SELF-CONTAINMENT GATE.  The whole point of DIR_OUT is that it can be handed to
+# whoever drives the XDS110 -- often a different machine than the one holding the
+# signing keys.  Assert every path the emitted manifest references actually lives
+# inside DIR_OUT and exists, so a dangling or outside reference fails HERE rather
+# than as a confusing programmer error on the other box.
+python3 - "$DIR_OUT" <<'PY'
+import json,sys,os
+out=os.path.realpath(sys.argv[1])
+ts=os.path.join(out,"tool_settings.warm.json")
+c=json.load(open(ts))["programming_debug_and_ota_signed_components"]
+paths=[]
+for k,v in c.items():
+    if isinstance(v,str) and v: paths.append((k,v))
+    elif isinstance(v,dict):
+        paths += [("%s.%s"%(k,kk),vv) for kk,vv in v.items() if isinstance(vv,str) and vv]
+bad=[]
+for k,p in paths:
+    rp=os.path.realpath(p)
+    if not os.path.isfile(rp):            bad.append("%s -> MISSING %s"%(k,p))
+    elif os.path.commonpath([rp,out])!=out: bad.append("%s -> OUTSIDE DIR_OUT %s"%(k,p))
+if bad:
+    print("tool_settings.warm.json is NOT self-contained:", file=sys.stderr)
+    for b in bad: print("  "+b, file=sys.stderr)
+    sys.exit(6)
+print("  self-contained: %d referenced file(s), all inside %s"%(len(paths),out))
 PY
 
 echo "== DONE. Matched WARM flash-set at $DIR_OUT (v$VERSION) =="

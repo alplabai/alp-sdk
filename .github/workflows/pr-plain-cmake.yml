@@ -150,8 +150,8 @@ jobs:
         # HUNG fetch fails here and names this step (#1549).
         timeout-minutes: 20
         run: |
-          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure
         timeout-minutes: 5
@@ -195,8 +195,8 @@ jobs:
         # HUNG fetch fails here and names this step (#1549).
         timeout-minutes: 20
         run: |
-          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Build zcbor at the recipe's own pin (tag 0.9.1)
         # 20min: generous for a slow package mirror, finite so a
@@ -290,8 +290,8 @@ jobs:
         timeout-minutes: 20
         if: matrix.name == 'yocto'
         run: |
-          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure
         timeout-minutes: 5
@@ -373,8 +373,8 @@ jobs:
         # HUNG fetch fails here and names this step (#1549).
         timeout-minutes: 20
         run: |
-          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure + build + install alp-sdk
         timeout-minutes: 5

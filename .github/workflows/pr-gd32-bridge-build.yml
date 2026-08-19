@@ -67,8 +67,8 @@ jobs:
         # --no-install-recommends so we get the full libc + Specs
         # collection the linker needs for `-nostartfiles` builds.
         run: |
-          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y \
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y \
               gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
 
       - name: Configure (stub backend)
@@ -115,8 +115,8 @@ jobs:
         # --no-install-recommends so we get the full libc + Specs
         # collection the linker needs for `-nostartfiles` builds.
         run: |
-          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y \
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y \
               gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
 
       - name: Configure (gd32 backend)

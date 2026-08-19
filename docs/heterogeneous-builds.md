@@ -523,10 +523,9 @@ jumps straight to the right log on a failure.
 Renode-based simulation (`tan renode`) is retired — see
 [ADR 0022](adr/0022-python-executor-renode-retirement.md), **Amendment
 2**, which re-instated the retirement Amendment 1 had withdrawn and
-widened it. The `pr-renode-*` CI workflows are deleted; the
-`metadata/renode/` platform models and the `tests/renode/` fixtures are
-authorised for removal and go once the `tan-cli` side lands, which is
-also when the verb itself stops being registered.
+widened it. The `pr-renode-*` CI workflows are deleted, `tan-cli` no
+longer registers the verb, and the `metadata/renode/` platform models and
+the `tests/renode/` fixtures are deleted with them.
 alp-sdk ships no simulator of its own, and none is planned.
 
 **Verify on real hardware instead.** `tan build` + `tan flash`, then

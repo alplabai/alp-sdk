@@ -202,8 +202,8 @@ jobs:
         # #1477: worst observed successful run 38s across 30 sampled runs
         # -- the worst step in this job; still fits the 1min budget.
         run: |
-          apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
-          apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh update
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh install -y --no-install-recommends git curl ca-certificates
 
       # scripts/bootstrap.sh should refuse HERE (cmake/python3/ninja/xz/wget
       # still absent) with a curated per-tool install hint, not a bare
@@ -258,7 +258,7 @@ jobs:
         timeout-minutes: 20
         # #1477: worst observed successful run 14s across 30 sampled runs.
         run: |
-          apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
 
       - name: bootstrap.sh succeeds once every prerequisite is installed
@@ -543,8 +543,8 @@ jobs:
         # HUNG fetch fails here and names this step (#1549).
         timeout-minutes: 20
         run: |
-          apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
-          apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates
+          apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3  # apt-bounded:allow (pre-checkout -- scripts/ci/apt-bounded.sh isn't on disk yet, #1575)
+          apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates  # apt-bounded:allow (pre-checkout -- scripts/ci/apt-bounded.sh isn't on disk yet, #1575)
 
       - name: Checkout alp-sdk
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
@@ -574,7 +574,7 @@ jobs:
         timeout-minutes: 20
         # #1477: worst observed successful run 14s across 30 sampled runs.
         run: |
-          apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
 
       - name: Install tan-cli/dev (docs quickstart step 2)
@@ -658,8 +658,25 @@ jobs:
         timeout-minutes: 5
         run: |
           source .venv/bin/activate
-          west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
-              --install-dir "${GITHUB_WORKSPACE}/zephyr-sdk"
+          # #1549: same retry as pr-twister.yml's `west sdk install` step
+          # -- see there for why the command is safely re-runnable
+          # (tempdir download, sha256, shutil.move last; "already
+          # installed ... Using it." on a re-run) and why the git
+          # http.lowSpeed* guard does NOT apply to it: this one fetches
+          # with python-requests, not git, so a stall is bounded by this
+          # step's timeout-minutes, and the retry covers 5xx/reset.
+          for attempt in 1 2 3; do
+            [ "$attempt" = 1 ] || rm -rf "${GITHUB_WORKSPACE:?}/zephyr-sdk"
+            west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
+                --install-dir "${GITHUB_WORKSPACE}/zephyr-sdk" && break
+            rc=$?
+            if [ "$attempt" = 3 ]; then
+              echo "::error::west sdk install failed after 3 attempts (exit $rc)"
+              exit "$rc"
+            fi
+            echo "west sdk install failed (exit $rc); retry $attempt/3 in 15s" >&2
+            sleep 15
+          done
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
 
