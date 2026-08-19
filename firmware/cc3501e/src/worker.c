@@ -249,6 +249,23 @@ static void worker_execute(uint8_t cmd)
 		         : cc3501e_hw_wifi_connect_sta(ssid, c->ssid_len, psk, c->psk_len, c->security);
 		break;
 	}
+	case ALP_CC3501E_CMD_WIFI_AP_STOP:
+		/* Tears the soft-AP down; blocks while the radio goes down and the bridge
+		 * SPI re-syncs, exactly like BLE_ADV_STOP / BLE_DISABLE above -- so it is
+		 * worker-routed off the SPI ISR.  Argless.
+		 *
+		 * This case is the fix for alp-sdk#1563: handle_wifi_ap_stop() used to call
+		 * cc3501e_hw_wifi_ap_stop() INLINE in protocol_dispatch, i.e. in the SPI-ISR
+		 * context, which is the one thing the AP_START comment above says must not
+		 * happen ("a blocking wait in the ISR either hung the bridge or could not
+		 * pend at all").  Bench-measured on E1M-AEN801 (2026-08-18), that inline
+		 * call reproduced the whole symptom set: an ap-stop with NO AP running
+		 * returned OK (nothing to tear down, so it never blocked), an ap-stop with
+		 * an AP ACTUALLY RUNNING returned -4 every time (the reply could not be
+		 * framed while the ISR was blocked), and the transport was left wedged at
+		 * -5 for every later request until the board was reset. */
+		rv = cc3501e_hw_wifi_ap_stop();
+		break;
 	case ALP_CC3501E_CMD_SOCK_OPEN: {
 		/* job.req = alp_cc3501e_sock_open_t: family(0) | type(1) | protocol(2) |
 		 * reserved(3).  Reply DATA = alp_cc3501e_sock_handle_t: handle(LE16) |

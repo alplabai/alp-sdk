@@ -8,11 +8,12 @@ block (issue #1154).
 
 `metadata/socs/**.json` `peripherals:` is a COUNT map (`"i2c": 9`) -- fine
 for capability gating (`gen_soc_caps.py`'s `ALP_SOC_*_COUNT`) but useless to
-anything that wants to actually INSTANTIATE a peripheral: two consumers
-already hardcode per-instance addresses by hand
-(`metadata/renode/renesas_rzv2n.repl:61` for CPG/ICU, `:71` for RIIC8 /
-BRD_I2C). This generator makes that data mechanical instead of hand-copied,
-for the classes where a real, already-west-managed source carries it.
+anything that wants to actually INSTANTIATE a peripheral, which needs a
+real base address (and IRQ) per instance. Before this generator, every
+consumer that needed one hand-transcribed it out of the vendor devicetree
+into its own file -- a copy nothing re-derives and no gate re-checks. This
+generator makes that data mechanical instead of hand-copied, for the
+classes where a real, already-west-managed source carries it.
 
 Source of truth (RZ/V2N n44 only, today): the M33 board devicetree
 (`zephyr/boards/alp/e1m_v2n101_m33_sm/..._cm33.dts`) `#include`s Zephyr
@@ -73,11 +74,11 @@ no-inventing-values rule, no `clocks` field is emitted anywhere in
 `peripheral_instances`; this is a stronger absence than "phandle without
 a frequency mnemonic".
 
-**Not covered by this generator at all:** `metadata/renode/
-renesas_rzv2n.repl`'s hand-placed CPG/ICU window (0x40400000, the `intc`
-node, compatible `renesas,rz-intc-v2`) is deliberately left alone -- it
-is not a `peripherals:` key, and retiring the repl's hand-placement onto
-generated data is scoped as separate follow-up work, not this change.
+**Not covered by this generator at all:** the CPG/ICU window
+(0x40400000, the `intc` node, compatible `renesas,rz-intc-v2`) is out of
+scope -- it is not a `peripherals:` key, so there is no count for an
+instance list to stand in for, and nothing under `metadata/` derives from
+it today.
 
 **Number formatting.** `base` / `size` are hex STRINGS (`"0x44400400"`,
 lowercase, matching the DTSI's own `i2c@44400400` literal style) -- JSON

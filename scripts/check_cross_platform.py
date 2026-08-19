@@ -221,6 +221,11 @@ INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
     # a "Cross-platform scope:" header note.
     "tests/yocto/build_rpc_uio_bench_aarch64.sh",
     "tests/yocto/run_sanitized_rpc_tests.sh",
+    # CI-only apt-get retry wrapper -- every call site is an
+    # ubuntu-latest `run:` step (apt-get itself is Debian/Ubuntu-only,
+    # so there is no macOS/Windows equivalent to document beyond that).
+    # Carries a "Cross-platform scope:" header note.
+    "scripts/ci/apt-bounded.sh",
 })
 
 # Markdown files that, by their very topic, MUST mention Linux-only

@@ -3217,6 +3217,10 @@
       "script": "scripts/check_agents_md_generators.py"
     },
     {
+      "purpose": "Reject a raw `apt-get update`/`apt-get install` in a workflow step.",
+      "script": "scripts/check_apt_bounded.py"
+    },
+    {
       "purpose": "Refuse an Alif Ensemble (AEN) layout that leaves the top of the App MRAM window writable by the application, or that publishes a slot0 flash address disagreeing with `loader._resolve_slot0_load_address()` (#1482).",
       "script": "scripts/check_atoc_reservation.py"
     },
@@ -3443,6 +3447,10 @@
     {
       "purpose": "Prove every `libraries:`-selectable Zephyr module actually resolves in west.yml -- the alp-sdk-OWNED workspace (`west init -l alp-sdk`, what `tan bootstrap` and every customer runs), not the Zephyr-owned one pr-twister.yml happens to init from (`west init -m zephyr`) instead.",
       "script": "scripts/check_west_manifest_module_resolution.py"
+    },
+    {
+      "purpose": "Reject a job-level `if:` that references a GitHub Actions context it does not get.",
+      "script": "scripts/check_workflow_expressions.py"
     },
     {
       "purpose": "Guard: every scripts/ and firmware/ write_text() of a repo-tree text artifact passes newline=\"\".",
