@@ -159,7 +159,8 @@ def _make_som_only_project(tmp_path: Path, sku_yaml_content: str,
     e1m = meta / "e1m_modules"
     schemas = meta / "schemas"
     socs_v2n = meta / "socs" / "renesas" / "rzv2n"
-    for d in (e1m, schemas, socs_v2n):
+    registries = meta / "registries"
+    for d in (e1m, schemas, socs_v2n, registries):
         d.mkdir(parents=True)
 
     real_meta = REPO / "metadata"
@@ -183,6 +184,14 @@ def _make_som_only_project(tmp_path: Path, sku_yaml_content: str,
     # Copy the renesas n44 SoC JSON so silicon refs resolve in the temp root.
     shutil.copy(real_meta / "socs" / "renesas" / "rzv2n" / "n44.json",
                 socs_v2n / "n44.json")
+    # `_slice_alp_conf` resolves the SoM-silicon Kconfig symbol against
+    # `project.effective_metadata_root()` (#1485) -- copy the real registry
+    # so this scratch root resolves for real instead of erroring on a
+    # missing file.
+    shutil.copy(real_meta / "registries" / "silicon-kconfig.json",
+                registries / "silicon-kconfig.json")
+    shutil.copy(real_meta / "registries" / "peripheral-kconfig.json",
+                registries / "peripheral-kconfig.json")
 
     (e1m / f"{sku}.yaml").write_text(
         textwrap.dedent(sku_yaml_content).lstrip("\n"), encoding="utf-8")
@@ -367,6 +376,14 @@ def test_slice_alp_conf_deduplicate_som_vs_board(tmp_path: Path) -> None:
     socs_v2n.mkdir(parents=True, exist_ok=True)
     shutil.copy(real_meta / "socs" / "renesas" / "rzv2n" / "n44.json",
                 socs_v2n / "n44.json")
+    # `_slice_alp_conf` resolves the SoM-silicon Kconfig symbol against
+    # `project.effective_metadata_root()` (#1485) -- copy the real registry.
+    registries = meta / "registries"
+    registries.mkdir(parents=True, exist_ok=True)
+    shutil.copy(real_meta / "registries" / "silicon-kconfig.json",
+                registries / "silicon-kconfig.json")
+    shutil.copy(real_meta / "registries" / "peripheral-kconfig.json",
+                registries / "peripheral-kconfig.json")
 
     # SoM preset lists rv3028c7 as on-module.
     (e1m / "E1M-TST002.yaml").write_text(textwrap.dedent("""
@@ -501,7 +518,8 @@ def test_slice_alp_conf_real_v2n101(tmp_path: Path) -> None:
     e1m = meta / "e1m_modules"
     socs = meta / "socs" / "renesas" / "rzv2n"
     schemas = meta / "schemas"
-    for d in (e1m, socs, schemas):
+    registries = meta / "registries"
+    for d in (e1m, socs, schemas, registries):
         d.mkdir(parents=True)
 
     real_meta = REPO / "metadata"
@@ -515,6 +533,12 @@ def test_slice_alp_conf_real_v2n101(tmp_path: Path) -> None:
                 socs / "n44.json")
     shutil.copy(real_meta / "e1m_modules" / "E1M-V2N101.yaml",
                 e1m / "E1M-V2N101.yaml")
+    # `_slice_alp_conf` resolves the SoM-silicon Kconfig symbol against
+    # `project.effective_metadata_root()` (#1485) -- copy the real registry.
+    shutil.copy(real_meta / "registries" / "silicon-kconfig.json",
+                registries / "silicon-kconfig.json")
+    shutil.copy(real_meta / "registries" / "peripheral-kconfig.json",
+                registries / "peripheral-kconfig.json")
 
     board_path = tmp_path / "board.yaml"
     board_path.write_text(textwrap.dedent("""
@@ -593,7 +617,8 @@ def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:
     e1m = meta / "e1m_modules"
     socs_alif = meta / "socs" / "alif" / "ensemble"
     schemas = meta / "schemas"
-    for d in (e1m, socs_alif, schemas):
+    registries = meta / "registries"
+    for d in (e1m, socs_alif, schemas, registries):
         d.mkdir(parents=True)
 
     real_meta = REPO / "metadata"
@@ -610,6 +635,12 @@ def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:
             shutil.copy(soc_f, socs_alif / soc_f.name)
     shutil.copy(real_meta / "e1m_modules" / "E1M-AEN701.yaml",
                 e1m / "E1M-AEN701.yaml")
+    # `_slice_alp_conf` resolves the SoM-silicon Kconfig symbol against
+    # `project.effective_metadata_root()` (#1485) -- copy the real registry.
+    shutil.copy(real_meta / "registries" / "silicon-kconfig.json",
+                registries / "silicon-kconfig.json")
+    shutil.copy(real_meta / "registries" / "peripheral-kconfig.json",
+                registries / "peripheral-kconfig.json")
 
     board_path = tmp_path / "board.yaml"
     board_path.write_text(textwrap.dedent("""
@@ -747,7 +778,7 @@ cores:
 
 
 def test_slice_alp_conf_iot_tls_only_emits_network_base(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
 ) -> None:
     """issue #874 item 1: `iot.tls: true` alone (no `wifi:`/`mqtt:`) must
     still emit the networking base -- CONFIG_TLS_CREDENTIALS depends on
@@ -760,7 +791,7 @@ def test_slice_alp_conf_iot_tls_only_emits_network_base(
     docstring)."""
     import alp_orchestrate
 
-    meta = _synthetic_nx9101_root(tmp_path, monkeypatch)
+    meta = _synthetic_nx9101_root(tmp_path)
     body = """
 som:
   sku: E1M-NX9101
@@ -845,7 +876,7 @@ cores:
 
 
 def test_slice_alp_conf_iot_unknown_provider_uses_generic_zephyr(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
 ) -> None:
     """A SoM whose wireless provider is still TBD emits the generic Zephyr
     networking / MQTT / TLS / BLE gates rather than a false provider.
@@ -857,7 +888,7 @@ def test_slice_alp_conf_iot_unknown_provider_uses_generic_zephyr(
     what this test actually exercises, same as the real one's."""
     import alp_orchestrate
 
-    meta = _synthetic_nx9101_root(tmp_path, monkeypatch)
+    meta = _synthetic_nx9101_root(tmp_path)
     body = """
 som:
   sku: E1M-NX9101
