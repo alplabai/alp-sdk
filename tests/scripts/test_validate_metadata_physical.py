@@ -741,6 +741,14 @@ def test_peripheral_kconfig_malformed_on_disk_registry_fails_cleanly_via_subproc
     -- and `_check_peripheral_kconfig()`'s own top-level guard above --
     ever run.
 
+    NOTE (#1485): the import-time read described above is no longer how
+    this works. `peripheral_kconfig()` now takes a REQUIRED
+    `metadata_root` and is called with the project's own root, so the
+    registry is read when a caller asks for it rather than as an import
+    side effect. The guard being asserted here -- a clean `ValueError`
+    naming the file, not a raw `AttributeError` several frames away --
+    is unchanged and still worth pinning; only the moment it fires moved.
+
     An in-process monkeypatch (like the test above) can never reach that
     crash: it repoints `vm.PERIPHERAL_KCONFIG_REGISTRY` on an
     ALREADY-IMPORTED `validate_metadata` module, whose import already
@@ -758,8 +766,16 @@ def test_peripheral_kconfig_malformed_on_disk_registry_fails_cleanly_via_subproc
     """
     tmp_scripts = tmp_path / "scripts"
     shutil.copytree(REPO / "scripts", tmp_scripts)
+    # Copy the REAL metadata tree, then corrupt only the registry. Since
+    # #1485 threaded `metadata_root` through `peripheral_kconfig()`, the
+    # read happens when a caller passes a root -- not at import -- so the
+    # run now reaches `validate_metadata.py`'s own schema loads first. A
+    # scratch root holding nothing but the malformed registry dies on a
+    # missing `schemas/soc-spec-v1.schema.json` instead, which proves
+    # nothing about the guard under test.
+    shutil.copytree(REPO / "metadata", tmp_path / "metadata")
     registry = tmp_path / "metadata" / "registries" / "peripheral-kconfig.json"
-    registry.parent.mkdir(parents=True)
+    registry.parent.mkdir(parents=True, exist_ok=True)
     registry.write_text(json.dumps(
         {"schemaVersion": "peripheral-kconfig-v1", "peripherals": "not-an-object"}))
     r = subprocess.run(
@@ -769,10 +785,24 @@ def test_peripheral_kconfig_malformed_on_disk_registry_fails_cleanly_via_subproc
     assert r.returncode != 0, out
     assert "peripheral-kconfig.json" in out
     assert "peripherals" in out
-    # The whole point of `alp_registries.peripheral_kconfig()`'s guard: a
-    # clean, named `ValueError`, not a raw `AttributeError`/`KeyError`
-    # traceback several import-frames from anything this test wrote.
-    assert "ValueError" in out
+    # The whole point of `alp_registries.peripheral_kconfig()`'s guard: the
+    # failure is REPORTED, naming the file and the offending key, not a raw
+    # `AttributeError`/`KeyError` traceback several frames from anything
+    # this test wrote.
+    #
+    # #1485 improved the shape further. With `metadata_root` threaded, the
+    # read happens inside `validate_metadata.py`'s own guarded pass rather
+    # than as an import side effect, so a malformed registry now surfaces
+    # as an ordinary validation failure --
+    #   FAIL metadata/registries/peripheral-kconfig.json
+    #     · peripherals: 'not-an-object' is not of type 'object'
+    # -- instead of an uncaught `ValueError`. Asserting the traceback here
+    # would now be asserting the WORSE of the two behaviours, so pin the
+    # reported failure instead.
+    assert "FAIL" in out
+    assert "not of type 'object'" in out
+    assert "Traceback" not in out, (
+        "a malformed registry should be reported, not crash the run:\n" + out)
     assert "AttributeError" not in out
     assert "KeyError" not in out
 

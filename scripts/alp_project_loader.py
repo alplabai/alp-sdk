@@ -71,17 +71,19 @@ def _sku_form_factor(sku: str) -> str:
 # scripts/alp_orchestrate/ consume `silicon_to_kconfig()` so the
 # mapping has exactly one definition (the prior _SILICON_TO_KCONFIG dict
 # was duplicated across both files -- "duplicated truth is a bug").
-SILICON_KCONFIG_REGISTRY = METADATA_ROOT / "registries" / "silicon-kconfig.json"
 
 
-@functools.lru_cache(maxsize=1)
-def _load_silicon_kconfig() -> tuple[str, frozenset[str]]:
-    """Load (socSymbolPrefix, knownSilicon) from the versioned registry."""
-    data = json.loads(SILICON_KCONFIG_REGISTRY.read_text(encoding="utf-8"))
+@functools.lru_cache(maxsize=None)
+def _load_silicon_kconfig(metadata_root: Path) -> tuple[str, frozenset[str]]:
+    """Load (socSymbolPrefix, knownSilicon) from *metadata_root*'s versioned
+    registry. Cache is keyed on *metadata_root* so a second root in the
+    same process doesn't silently reuse the first root's table (#1485)."""
+    registry = Path(metadata_root) / "registries" / "silicon-kconfig.json"
+    data = json.loads(registry.read_text(encoding="utf-8"))
     return data["socSymbolPrefix"], frozenset(data["knownSilicon"])
 
 
-def silicon_to_kconfig(silicon: str | None) -> str | None:
+def silicon_to_kconfig(silicon: str | None, metadata_root: Path) -> str | None:
     """Return the Zephyr Kconfig symbol that selects *silicon*, or ``None``.
 
     The symbol is computed as ``socSymbolPrefix + ref.upper().replace(':','_')``;
@@ -89,10 +91,15 @@ def silicon_to_kconfig(silicon: str | None) -> str | None:
     returned for any ref not in the registry allowlist (so an accelerator
     such as ``deepx:dx:m1`` -- or an unknown ref -- emits no CONFIG line,
     matching the prior dict's ``.get()`` behaviour).
+
+    *metadata_root* is REQUIRED -- callers must pass the project's own
+    ``project.effective_metadata_root()``, never a module default: a
+    silent fall-through to the SDK's own in-tree registry regardless of a
+    project's `--metadata-root` override was #1485's exact defect.
     """
     if silicon is None:
         return None
-    prefix, known = _load_silicon_kconfig()
+    prefix, known = _load_silicon_kconfig(metadata_root)
     if silicon not in known:
         return None
     return prefix + silicon.upper().replace(":", "_")

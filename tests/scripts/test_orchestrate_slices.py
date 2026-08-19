@@ -159,7 +159,8 @@ def _make_som_only_project(tmp_path: Path, sku_yaml_content: str,
     e1m = meta / "e1m_modules"
     schemas = meta / "schemas"
     socs_v2n = meta / "socs" / "renesas" / "rzv2n"
-    for d in (e1m, schemas, socs_v2n):
+    registries = meta / "registries"
+    for d in (e1m, schemas, socs_v2n, registries):
         d.mkdir(parents=True)
 
     real_meta = REPO / "metadata"
@@ -183,6 +184,14 @@ def _make_som_only_project(tmp_path: Path, sku_yaml_content: str,
     # Copy the renesas n44 SoC JSON so silicon refs resolve in the temp root.
     shutil.copy(real_meta / "socs" / "renesas" / "rzv2n" / "n44.json",
                 socs_v2n / "n44.json")
+    # `_slice_alp_conf` resolves the SoM-silicon Kconfig symbol against
+    # `project.effective_metadata_root()` (#1485) -- copy the real registry
+    # so this scratch root resolves for real instead of erroring on a
+    # missing file.
+    shutil.copy(real_meta / "registries" / "silicon-kconfig.json",
+                registries / "silicon-kconfig.json")
+    shutil.copy(real_meta / "registries" / "peripheral-kconfig.json",
+                registries / "peripheral-kconfig.json")
 
     (e1m / f"{sku}.yaml").write_text(
         textwrap.dedent(sku_yaml_content).lstrip("\n"), encoding="utf-8")
@@ -262,6 +271,77 @@ def test_slice_alp_conf_emits_som_intrinsic_chips(tmp_path: Path) -> None:
     assert "CONFIG_I2C=y" in conf
 
 
+def test_slice_alp_conf_1487_chip_subsystems_no_gap(tmp_path: Path) -> None:
+    """Regression for issue #1487: every one of the ten chip slugs that
+    were missing a `_CHIP_SUBSYSTEMS` key (act8760/tps628640/pca9451a/
+    da9292/clk_5l35023b/pi3dbs12212/murata_lbee5hy2fy/deepx_dxm1/gd32_swd/
+    gd32g553) must turn on its declared subsystem, not just print its own
+    `=y` line.
+
+    This fixture's on_module: block deliberately carries ONLY the ten
+    formerly-missing slugs -- no rv3028c7 / optiga_trust_m / eeprom_24c128
+    / tmp112 (the table-listed I2C chips that masked the gap in-tree, per
+    the issue's own honest-scope note) -- so CONFIG_GPIO=y / CONFIG_I2C=y
+    / CONFIG_SPI=y have no other source to leak in from.  Reverting any of
+    the ten `_CHIP_SUBSYSTEMS` entries this fixture exercises makes this
+    test fail.
+    """
+    project = _make_som_only_project(
+        tmp_path,
+        """\
+            schema_version: 1
+            sku: E1M-TST001
+            family: renesas-rzv2n
+            silicon: renesas:rzv2n:n44
+            silicon_variant: R9A09G056N44GBG
+            on_module:
+              silicon:            renesas:rzv2n:n44
+              pmic_main:          act8760
+              pmic_secondary:     da9292
+              clock_generator:    clk_5l35023b
+              buck_converter:     tps628640
+              pmic_alt:           pca9451a
+              wifi_ble:           murata_lbee5hy2fy
+              supervisor_mcu:     gd32g553
+              npu:                deepx_dxm1
+              pcie_mux:           pi3dbs12212
+              debug_bridge:       gd32_swd
+            helper_firmware: []
+            topology:
+              a55_cluster:
+                app: alp-image-edge
+                machine: e1m-tst001-a55
+                toolchain: poky-glibc
+              m33_sm:
+                app: alp-stock-shim
+                board: alp_e1m_tst001_m33_sm
+                toolchain: arm-zephyr-eabi
+            default_hw_rev: r1
+            default_board: E1M-EVK
+        """,
+        _BOARD_WITH_SOM_ONLY,
+    )
+    m33_slice = project.cores["m33_sm"]
+    conf = _slice_alp_conf(project, m33_slice)
+
+    for chip in ("act8760", "da9292", "clk_5l35023b", "tps628640",
+                 "pca9451a", "murata_lbee5hy2fy", "gd32g553", "deepx_dxm1",
+                 "pi3dbs12212", "gd32_swd"):
+        assert f"CONFIG_ALP_SDK_CHIP_{chip.upper()}=y" in conf, (
+            f"missing chip line for {chip}")
+
+    # No other on-module entry in this fixture depends on GPIO/I2C/SPI, so
+    # these can only come from the ten chips above.
+    assert "CONFIG_GPIO=y" in conf, (
+        "GPIO dependency of pi3dbs12212/murata_lbee5hy2fy/deepx_dxm1/"
+        "gd32_swd not turned on -- _CHIP_SUBSYSTEMS gap regressed")
+    assert "CONFIG_I2C=y" in conf, (
+        "I2C dependency of act8760/tps628640/pca9451a/da9292/"
+        "clk_5l35023b not turned on -- _CHIP_SUBSYSTEMS gap regressed")
+    assert "CONFIG_SPI=y" in conf, (
+        "gd32g553's (SPI || I2C) dependency dropped the SPI side")
+
+
 def test_slice_alp_conf_deduplicate_som_vs_board(tmp_path: Path) -> None:
     """A chip listed in both on_module: and board populated: must appear
     exactly once in the emitted conf (no duplicate CONFIG lines)."""
@@ -296,6 +376,14 @@ def test_slice_alp_conf_deduplicate_som_vs_board(tmp_path: Path) -> None:
     socs_v2n.mkdir(parents=True, exist_ok=True)
     shutil.copy(real_meta / "socs" / "renesas" / "rzv2n" / "n44.json",
                 socs_v2n / "n44.json")
+    # `_slice_alp_conf` resolves the SoM-silicon Kconfig symbol against
+    # `project.effective_metadata_root()` (#1485) -- copy the real registry.
+    registries = meta / "registries"
+    registries.mkdir(parents=True, exist_ok=True)
+    shutil.copy(real_meta / "registries" / "silicon-kconfig.json",
+                registries / "silicon-kconfig.json")
+    shutil.copy(real_meta / "registries" / "peripheral-kconfig.json",
+                registries / "peripheral-kconfig.json")
 
     # SoM preset lists rv3028c7 as on-module.
     (e1m / "E1M-TST002.yaml").write_text(textwrap.dedent("""
@@ -430,7 +518,8 @@ def test_slice_alp_conf_real_v2n101(tmp_path: Path) -> None:
     e1m = meta / "e1m_modules"
     socs = meta / "socs" / "renesas" / "rzv2n"
     schemas = meta / "schemas"
-    for d in (e1m, socs, schemas):
+    registries = meta / "registries"
+    for d in (e1m, socs, schemas, registries):
         d.mkdir(parents=True)
 
     real_meta = REPO / "metadata"
@@ -444,6 +533,12 @@ def test_slice_alp_conf_real_v2n101(tmp_path: Path) -> None:
                 socs / "n44.json")
     shutil.copy(real_meta / "e1m_modules" / "E1M-V2N101.yaml",
                 e1m / "E1M-V2N101.yaml")
+    # `_slice_alp_conf` resolves the SoM-silicon Kconfig symbol against
+    # `project.effective_metadata_root()` (#1485) -- copy the real registry.
+    shutil.copy(real_meta / "registries" / "silicon-kconfig.json",
+                registries / "silicon-kconfig.json")
+    shutil.copy(real_meta / "registries" / "peripheral-kconfig.json",
+                registries / "peripheral-kconfig.json")
 
     board_path = tmp_path / "board.yaml"
     board_path.write_text(textwrap.dedent("""
@@ -522,7 +617,8 @@ def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:
     e1m = meta / "e1m_modules"
     socs_alif = meta / "socs" / "alif" / "ensemble"
     schemas = meta / "schemas"
-    for d in (e1m, socs_alif, schemas):
+    registries = meta / "registries"
+    for d in (e1m, socs_alif, schemas, registries):
         d.mkdir(parents=True)
 
     real_meta = REPO / "metadata"
@@ -539,6 +635,12 @@ def test_slice_alp_conf_real_aen701(tmp_path: Path) -> None:
             shutil.copy(soc_f, socs_alif / soc_f.name)
     shutil.copy(real_meta / "e1m_modules" / "E1M-AEN701.yaml",
                 e1m / "E1M-AEN701.yaml")
+    # `_slice_alp_conf` resolves the SoM-silicon Kconfig symbol against
+    # `project.effective_metadata_root()` (#1485) -- copy the real registry.
+    shutil.copy(real_meta / "registries" / "silicon-kconfig.json",
+                registries / "silicon-kconfig.json")
+    shutil.copy(real_meta / "registries" / "peripheral-kconfig.json",
+                registries / "peripheral-kconfig.json")
 
     board_path = tmp_path / "board.yaml"
     board_path.write_text(textwrap.dedent("""
@@ -676,7 +778,7 @@ cores:
 
 
 def test_slice_alp_conf_iot_tls_only_emits_network_base(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
 ) -> None:
     """issue #874 item 1: `iot.tls: true` alone (no `wifi:`/`mqtt:`) must
     still emit the networking base -- CONFIG_TLS_CREDENTIALS depends on
@@ -689,7 +791,7 @@ def test_slice_alp_conf_iot_tls_only_emits_network_base(
     docstring)."""
     import alp_orchestrate
 
-    meta = _synthetic_nx9101_root(tmp_path, monkeypatch)
+    meta = _synthetic_nx9101_root(tmp_path)
     body = """
 som:
   sku: E1M-NX9101
@@ -774,7 +876,7 @@ cores:
 
 
 def test_slice_alp_conf_iot_unknown_provider_uses_generic_zephyr(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
 ) -> None:
     """A SoM whose wireless provider is still TBD emits the generic Zephyr
     networking / MQTT / TLS / BLE gates rather than a false provider.
@@ -786,7 +888,7 @@ def test_slice_alp_conf_iot_unknown_provider_uses_generic_zephyr(
     what this test actually exercises, same as the real one's."""
     import alp_orchestrate
 
-    meta = _synthetic_nx9101_root(tmp_path, monkeypatch)
+    meta = _synthetic_nx9101_root(tmp_path)
     body = """
 som:
   sku: E1M-NX9101

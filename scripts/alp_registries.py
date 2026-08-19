@@ -11,38 +11,40 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
 
-PERIPHERAL_KCONFIG_REGISTRY = METADATA_ROOT / "registries" / "peripheral-kconfig.json"
 
-
-@functools.lru_cache(maxsize=1)
-def peripheral_kconfig() -> dict[str, tuple[str, ...]]:
+@functools.lru_cache(maxsize=None)
+def peripheral_kconfig(metadata_root: Path) -> dict[str, tuple[str, ...]]:
     """Return board.yaml peripheral tokens -> Zephyr Kconfig symbol bundles.
 
-    Both callers of this function (`alp_orchestrate/slugs.py`,
-    `alp_project_emit/__init__.py`) invoke it at IMPORT time, at module
-    scope -- reached the moment anything imports `alp_orchestrate` or
-    `alp_project_emit`, which includes `scripts/validate_metadata.py`
-    itself via `from alp_orchestrate.sdk_compat import ...` ->
-    `alp_orchestrate/__init__.py` -> `.loader` -> `alp_project` ->
-    `alp_project_emit`. That is well before
-    `validate_metadata.py::_check_peripheral_kconfig()`'s own schema pass
-    ever runs, so a malformed on-disk registry (bad JSON, a non-object top
-    level, or a `peripherals` value that isn't itself an object) used to
-    surface as a raw `JSONDecodeError`/`KeyError`/`AttributeError`
-    traceback several import-frames away from anything the caller wrote.
-    Raise a `ValueError` naming the real problem instead.
+    *metadata_root* is REQUIRED -- every caller must pass the project's own
+    ``project.effective_metadata_root()`` (or the SDK's own in-tree
+    ``METADATA_ROOT`` for a repo self-check). A module-level default here
+    is exactly the shape that let this registry silently ignore a project's
+    `--metadata-root` override (#1485); the cache is keyed on
+    *metadata_root* so a second root in the same process doesn't reuse the
+    first root's table.
+
+    The validation below is #1545's, re-rooted at *metadata_root*. Both
+    callers (`alp_orchestrate/slugs.py`, `alp_project_emit/__init__.py`)
+    reach this at import time, well before
+    `validate_metadata.py::_check_peripheral_kconfig()`'s own schema pass,
+    so a malformed on-disk registry used to surface as a raw
+    `JSONDecodeError`/`KeyError`/`AttributeError` several import-frames
+    away from anything the caller wrote. Raise a `ValueError` naming the
+    real problem instead.
     """
+    registry = Path(metadata_root) / "registries" / "peripheral-kconfig.json"
     try:
-        rel = PERIPHERAL_KCONFIG_REGISTRY.relative_to(REPO).as_posix()
+        rel = registry.relative_to(REPO).as_posix()
     except ValueError:
-        # A caller (e.g. a test) can repoint `PERIPHERAL_KCONFIG_REGISTRY`
-        # outside REPO via monkeypatch -- `relative_to()` on that raises
-        # its own confusing `ValueError: ... is not in the subpath of ...`
-        # before the try/except below even starts, masking whatever the
-        # caller actually did wrong. Fall back to the raw path string.
-        rel = str(PERIPHERAL_KCONFIG_REGISTRY)
+        # `metadata_root` legitimately points outside REPO (a scratch root
+        # under `--metadata-root`, or a test fixture) -- `relative_to()`
+        # raises its own confusing "is not in the subpath of" there, which
+        # would mask whatever the caller actually did wrong. Fall back to
+        # the raw path string.
+        rel = str(registry)
     try:
-        text = PERIPHERAL_KCONFIG_REGISTRY.read_text(encoding="utf-8")
+        text = registry.read_text(encoding="utf-8")
     except OSError as e:
         # A missing/unreadable file is not "invalid JSON" -- report the
         # real failure instead of mislabeling every OSError that way.
