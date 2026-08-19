@@ -94,8 +94,9 @@ cat "$prog_log"
 # Verify the FULL vendor image actually streamed.  NB: programming_report.txt's
 # primary_vendor_image_done bit is NOT a usable signal on this bench -- it reads 0 on
 # EVERY report, including the known-good REF_SET that brought Wi-Fi/BLE up.  The reliable
-# discriminator is the streamed byte count vs the vendor image size: full stream (~1.09 MB)
-# = written, ~1.3 KB = skipped.
+# discriminator is the streamed byte count vs the vendor image size: full stream (~1.09 MB
+# decimal = 1.04 MiB, i.e. what `ls -lh` shows -- both are the same 1094764 B, don't read
+# the MiB figure as a short write) = written, ~1.3 KB = skipped.
 vsize=$(stat -c%s "$PKG/primary_vendor_image.sign.bin" 2>/dev/null || echo 0)
 streamed=$(grep -oiE 'Writing binary size of[[:space:]]+[0-9]+' "$prog_log" | grep -oE '[0-9]+' | sort -rn | head -1)
 streamed=${streamed:-0}

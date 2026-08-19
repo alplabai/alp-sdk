@@ -17,6 +17,20 @@
       "ci": "pr-doc-drift.yml:doc-drift"
     },
     {
+      "id": "apt-bounded",
+      "description": "No .github/workflows/*.yml step calls apt-get update/install directly -- Acquire::http::Timeout bounds an idle read, not a trickling one, so it must go through scripts/ci/apt-bounded.sh's wall-clock retry wrapper (#1575).",
+      "runner": "check-script",
+      "script": "scripts/check_apt_bounded.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "atoc-reservation",
       "description": "Every AEN board .dts and every SoM preset memory_map reserves the top of the App MRAM window as an 'atoc' region -- SETOOLS top-anchors the ATOC boot table there (#1289) -- and every AEN board .dts with an m55_he/m55_hp role publishes a slot0 flash address that agrees with loader._resolve_slot0_load_address() (#1482).",
       "runner": "check-script",

@@ -194,17 +194,39 @@ def test_wget_does_not_suppress_the_failure_reason(wf):
 def test_the_four_steps_that_failed_on_2026_08_12_are_covered():
     """Pin the specific regressions, not just the general rule -- a rule with no
     named instance is easy to relax later without noticing what it protected."""
-    # These two are fixed by RETRYING the fetch.
-    for name, needle in {
-        "pr-tier-a-libraries.yml": "apt-get",
-        "pr-twister-aen.yml": "zephyr-sdk",
-    }.items():
-        wf = next((w for w in WORKFLOWS if w.name == name), None)
-        assert wf is not None, f"{name} not found"
-        hits = [line for _n, line in _fetch_lines(wf) if needle in line]
-        assert hits, f"{name}: no fetch line mentioning {needle!r}"
-        for line in hits:
-            assert _RETRY_RE.search(line), f"{name}: {needle} fetch still unretried: {line.strip()}"
+    # zephyr-sdk is fixed by RETRYING the fetch (Acquire::Retries-style flags
+    # on the curl/wget line itself).
+    name, needle = "pr-twister-aen.yml", "zephyr-sdk"
+    wf = next((w for w in WORKFLOWS if w.name == name), None)
+    assert wf is not None, f"{name} not found"
+    hits = [line for _n, line in _fetch_lines(wf) if needle in line]
+    assert hits, f"{name}: no fetch line mentioning {needle!r}"
+    for line in hits:
+        assert _RETRY_RE.search(line), f"{name}: {needle} fetch still unretried: {line.strip()}"
+
+    # apt-get's 1537s stall was fixed first by RETRYING (Acquire::Retries=3),
+    # then superseded by #1575: Acquire::http::Timeout bounds an idle read,
+    # not a trickling one, so every apt-get update/install call site now
+    # goes through scripts/ci/apt-bounded.sh (a wall-clock timeout + its own
+    # dpkg-safe retry loop) instead of a bare `apt-get -o Acquire::*` line --
+    # see scripts/check_apt_bounded.py, the gate that pins that call-site
+    # requirement across every workflow. Assert the STRONGER fix landed here
+    # rather than re-asserting the superseded Acquire::Retries shape, which
+    # #1575's sweep deliberately removed from this exact step.
+    wf = next((w for w in WORKFLOWS if w.name == "pr-tier-a-libraries.yml"), None)
+    assert wf is not None, "pr-tier-a-libraries.yml not found"
+    text = wf.read_text(encoding="utf-8")
+    assert "scripts/ci/apt-bounded.sh update" in text, (
+        "pr-tier-a-libraries.yml: host build tools install no longer calls "
+        "scripts/ci/apt-bounded.sh -- #1575's wall-clock-bounded retry regressed"
+    )
+    raw_apt_get = [
+        line for line in text.splitlines() if re.match(r"^\s*(sudo )?apt-get (update|install)\b", line)
+    ]
+    assert not raw_apt_get, (
+        "pr-tier-a-libraries.yml: a raw apt-get call reappeared -- "
+        f"scripts/check_apt_bounded.py should also have caught this: {raw_apt_get}"
+    )
 
     # yq is fixed by REMOVAL, which is stronger than retry: the step fetched a
     # 60 MB binary from GitHub releases and ran it under sudo, to evaluate one

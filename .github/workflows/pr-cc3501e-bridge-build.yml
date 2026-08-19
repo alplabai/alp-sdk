@@ -48,8 +48,8 @@ jobs:
         # HUNG fetch fails here and names this step (#1549).
         timeout-minutes: 20
         run: |
-          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y \
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y \
               gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
 
       - name: Configure (stub backend, default SPI transport)
