@@ -184,7 +184,7 @@ jobs:
           exit "${missing}"
 
       - name: Checkout alp-sdk
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         # #1477: worst observed successful run 4s across 30 sampled runs.
         timeout-minutes: 5
         with:
@@ -373,7 +373,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         # #1477: worst observed successful run 4s across 30 sampled runs.
         timeout-minutes: 5
         with:
@@ -547,7 +547,7 @@ jobs:
           apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates  # apt-bounded:allow (pre-checkout -- scripts/ci/apt-bounded.sh isn't on disk yet, #1575)
 
       - name: Checkout alp-sdk
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         timeout-minutes: 5
         with:
           persist-credentials: false
@@ -555,7 +555,7 @@ jobs:
           fetch-depth: 1
 
       - name: Checkout tan-cli Python port
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         timeout-minutes: 5
         with:
           persist-credentials: false
@@ -628,7 +628,7 @@ jobs:
           PY
 
       - name: Cache Zephyr SDK (arm-zephyr-eabi only)
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         id: zephyr-sdk-cache
         timeout-minutes: 15
         with:
