@@ -98,6 +98,17 @@ alp_cc3501e_resp_t handle_wifi_disconnect(const uint8_t *req,
 	return hw_to_resp(cc3501e_hw_wifi_disconnect());
 }
 
+/* WIFI_AP_STOP (0x15): no reply data.  Worker-routed (alp-sdk#1563): tearing the
+ * soft-AP down BLOCKS while the radio goes down and the bridge SPI re-syncs, and
+ * a blocking HAL body must never run in protocol_dispatch's SPI-ISR context --
+ * the same rule WIFI_AP_START, BLE_ADV_STOP and BLE_DISABLE already follow.
+ *
+ * This used to call cc3501e_hw_wifi_ap_stop() inline.  Bench-measured on
+ * E1M-AEN801 (2026-08-18) that reproduced three symptoms at once: ap-stop with
+ * NO AP running returned OK (it never blocked, so the reply framed normally),
+ * ap-stop with an AP ACTUALLY RUNNING returned ALP_ERR_TIMEOUT every time, and
+ * the transport was then wedged at ALP_ERR_IO for every subsequent request until
+ * the board was reset. */
 alp_cc3501e_resp_t handle_wifi_ap_stop(const uint8_t *req,
                                        size_t         req_len,
                                        uint8_t       *reply_data,
@@ -105,11 +116,8 @@ alp_cc3501e_resp_t handle_wifi_ap_stop(const uint8_t *req,
                                        size_t        *reply_data_len)
 {
 	(void)req;
-	(void)reply_data;
-	(void)reply_cap;
-	*reply_data_len = 0u;
-	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return hw_to_resp(cc3501e_hw_wifi_ap_stop());
+	return handle_worker_routed(
+	    ALP_CC3501E_CMD_WIFI_AP_STOP, 0u, req_len, reply_data, reply_cap, reply_data_len);
 }
 
 /* WIFI_GET_RSSI (0x16): reply data = signed RSSI in dBm (1 byte).
