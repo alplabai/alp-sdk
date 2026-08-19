@@ -172,10 +172,30 @@ jobs:
         working-directory: ${{ github.workspace }}
         timeout-minutes: 13
         run: |
+          # #1549: same git-over-https exposure as pr-twister.yml's
+          # `west init zephyr workspace` step, byte-identical commands --
+          # see that step for the full rationale and the black-hole
+          # measurement.  Short version: apt's Acquire::*::Timeout does
+          # not reach git, and git waits forever by default on a mirror
+          # that accepts a connection and never answers.
+          git config --global http.lowSpeedLimit 1000
+          git config --global http.lowSpeedTime 30
           mkdir -p zephyrproject
           cd zephyrproject
           west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.1 .
-          west update --narrow -o=--depth=1
+          # `west init` stays OUTSIDE the loop -- it refuses on an
+          # already-initialised workspace, so retrying it would fail
+          # attempt 2 at `init` instead of at whatever stalled.
+          for attempt in 1 2 3; do
+            west update --narrow -o=--depth=1 && break
+            rc=$?
+            if [ "$attempt" = 3 ]; then
+              echo "::error::west update failed after 3 attempts (exit $rc)"
+              exit "$rc"
+            fi
+            echo "west update failed (exit $rc); retry $attempt/3 in 15s" >&2
+            sleep 15
+          done
           west zephyr-export
 
       # #1274: actions/cache@ makes its own network round trip to the

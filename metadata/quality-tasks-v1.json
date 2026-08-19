@@ -795,6 +795,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "workflow-expressions",
+      "description": "Reject a jobs.<job_id>.if that references a context GitHub Actions does not expose there (e.g. matrix, steps) -- valid YAML but rejected by GitHub at workflow-load time on every event (#1528).",
+      "runner": "check-script",
+      "script": "scripts/check_workflow_expressions.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "write-text-newline",
       "description": "Every scripts/ and firmware/ write_text() of a repo-tree text artifact passes newline=\"\" (else Windows CRLF-rewrites it silently on write).",
       "runner": "check-script",
