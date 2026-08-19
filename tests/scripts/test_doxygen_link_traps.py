@@ -50,11 +50,19 @@ _DOXYFILE = _REPO_ROOT / "docs" / "doxygen" / "Doxyfile"
 _EXCLUDED_PARTS = ("superpowers",)
 
 # A source-file path followed by `::` and an identifier. Extensions are the
-# ones that have actually appeared in this trap; a bare `Foo::Bar` C++ scope is
+# ones that have actually appeared in this trap; a plain `Foo::Bar` C++ scope is
 # NOT matched, since that is a real Doxygen reference and often resolves.
+#
+# Backticks are deliberately NOT required. Measured against doxygen 1.9.8 (the
+# version `pr-doxygen.yml` installs from apt) on a probe page carrying both
+# forms -- each produced its own `explicit link request ... could not be
+# resolved`, so a guard that only looked inside code spans would miss half the
+# trap:
+#
+#   probe.md:3: error: explicit link request to 'gamma_sym' could not be resolved
+#   probe.md:5: error: explicit link request to 'delta_sym' could not be resolved
 _TRAP = re.compile(
-    r"`[^`\n]*?[A-Za-z0-9_./-]+\.(?:py|sh|c|h|cpp|yaml|yml|json)"
-    r"::[A-Za-z_][A-Za-z0-9_]*[^`\n]*?`"
+    r"[A-Za-z0-9_./-]+\.(?:py|sh|c|h|cpp|yaml|yml|json)::[A-Za-z_][A-Za-z0-9_]*"
 )
 
 
@@ -120,10 +128,15 @@ def test_the_sweep_catches_a_seeded_violation() -> None:
         "`python/tan/commands/flash_cmd.py::_flash_entry`'s own check.\n"
     )
     assert _traps_in(seeded, "seeded"), "the trap regex no longer matches #1489's own span"
+    # The un-backticked form errors too (measured, see _TRAP), so it must trip.
+    bare = "Called ahead of python/tan/commands/flash_cmd.py::_flash_entry here.\n"
+    assert _traps_in(bare, "bare"), "the un-backticked form is a trap too and must trip"
     # ...and the documented remedy must read as clean, or the error message
     # would be sending authors toward a fix this test still rejects.
     fixed = "Called ahead of `_flash_entry` in `python/tan/commands/flash_cmd.py`.\n"
     assert not _traps_in(fixed, "fixed")
+    # A plain C++ scope is a real Doxygen reference, not this trap.
+    assert not _traps_in("See `alp::Foo::bar` for the scope.\n", "cxx")
     # A fenced literal is legitimate -- Doxygen does not autolink inside one.
     fenced = "```sh\npytest tests/scripts/test_x.py::test_y\n```\n"
     assert not _traps_in(fenced, "fenced")
