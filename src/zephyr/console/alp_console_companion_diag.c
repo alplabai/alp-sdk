@@ -76,7 +76,7 @@ static int cmd_companion_diag_info(const struct shell *sh, size_t argc, char **a
 	}
 
 	alp_cc3501e_diag_info_t di = { 0 };
-	alp_status_t s = cc3501e_diag_info(companion_cc3501e, &di);
+	alp_status_t            s  = cc3501e_diag_info(companion_cc3501e, &di);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "diag info failed (%d)", (int)s);
@@ -112,7 +112,7 @@ static int cmd_companion_diag_stats(const struct shell *sh, size_t argc, char **
 		return -ENODEV;
 	}
 
-	uint32_t frames_ok = 0, frames_err = 0;
+	uint32_t     frames_ok = 0, frames_err = 0;
 	alp_status_t s = cc3501e_diag_stats(companion_cc3501e, &frames_ok, &frames_err);
 
 	if (s != ALP_OK) {
