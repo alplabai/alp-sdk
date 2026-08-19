@@ -48,12 +48,23 @@ APT_OPTS="-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire:
 
 # `timeout` returns 124 when it kills the child -- treated as a retryable slow
 # mirror, same as any other non-zero status here.
+#
+# The cap wraps the WHOLE attempt (update + install), not each command
+# separately. Capping them individually lets one attempt reach 2 x $per, so
+# $attempts attempts could exceed the job's own `timeout-minutes` and the job
+# would be killed mid-retry -- reintroducing the very failure this script exists
+# to prevent, just later. Measured on the first CI run of this script: a "240s
+# cap" attempt actually ran 5m10s.
 attempt_once() {
-	# shellcheck disable=SC2086  # APT_OPTS is a deliberate word-split option list
-	timeout "$per" sudo apt-get update $APT_OPTS || return 1
-	# shellcheck disable=SC2086
-	timeout "$per" sudo apt-get install $APT_OPTS -y $recommends "$@" || return 1
-	return 0
+	timeout "$per" sudo sh -c '
+		set -e
+		opts="$1"; shift
+		recommends="$1"; shift
+		# shellcheck disable=SC2086  # $opts is a deliberate word-split option list
+		apt-get update $opts
+		# shellcheck disable=SC2086
+		apt-get install $opts -y $recommends "$@"
+	' sh "$APT_OPTS" "$recommends" "$@"
 }
 
 i=1
