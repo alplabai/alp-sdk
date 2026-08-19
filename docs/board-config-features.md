@@ -231,14 +231,18 @@ See `docs/ota.md` + `docs/ota-device-contract.md` + ADR 0009.
 ```yaml
 storage:
   - { name: settings,        fs: littlefs, size_kib: 64,  mount: /lfs/settings,
-      flash_device: mram_main }
+      flash_device: <your SoM's flash device> }
   - { name: app_data,        fs: littlefs, size_kib: 128, mount: /lfs/app,
-      flash_device: mram_main }
+      flash_device: <your SoM's flash device> }
   - { name: mcuboot_scratch, fs: raw,      size_kib: 32,
-      flash_device: mram_main }
+      flash_device: <your SoM's flash device> }
   - { name: pinned_low,      fs: raw,      size_kib: 32,
-      flash_device: mram_main, offset_kib: 0 }    # explicit offset override
+      flash_device: <your SoM's flash device>, offset_kib: 0 }    # explicit offset override
 ```
+
+`<your SoM's flash device>` above is a placeholder, not a value to copy
+verbatim -- see below: no AEN SKU has a working `storage[].flash_device:`
+target today (#1556).
 
 Project-wide.  Each entry declares a fixed partition on the
 referenced flash device.  Partitions on the same device are
@@ -257,9 +261,47 @@ name-sort position -- `pinned_low` above sorts after `app_data` and
 1. `memory_map:` region names (e.g. `mram_main`, `ocram_low`) --
    either declared on the SoM or auto-derived from the SoC variant's
    `mram_mb` / `sram_banks_kb` (the same resolution `resolve_memory_map()`
-   does for IPC carve-outs).
+   does for IPC carve-outs).  Neither `mram_main` nor `ocram_low` resolves
+   to a working target today -- see the `dt_label:` caveat below.
 2. `on_module.ospi_memories:` keys (e.g. `ospi0`) -- external OSPI
-   flash declared on the SoM.
+   flash declared on the SoM.  This is the more misleading of the two:
+   `ospi0` matches a real controller node by name but resolves to a
+   disabled DT node -- see the `dt_label:` caveat below.
+
+A `memory_map:` region marked `carveout: false` is excluded from
+resolution (#1484): that flag also means the region is a partition
+*inside* a flash-class node -- on E1M-AEN301..801 that's `mcuboot`,
+`he_slot0`, `hp_slot0`, `reserved`, `storage`, and `atoc`, all living
+inside the `mram_storage` flash node -- not a flash device with a
+Devicetree label of its own. Naming one as `flash_device:` refuses
+with a reason instead of silently decorating a DT label that doesn't
+exist on the board.
+
+No AEN SKU has a working `storage[].flash_device:` target today. Both
+candidates the resolver will accept still resolve to an unverified DT
+label:
+
+* `mram_main` -- no AEN preset declares a `dt_label:` override for it, so
+  it falls back to a Devicetree label of `mram_main`, but the generated
+  board tree never defines that node, only `mram_storage` (`grep -rn
+  mram_main zephyr/` returns nothing). Even a verified label would not
+  help: `mram_main` is 100% tiled on all six AEN presets (`mcuboot` +
+  `he_slot0` + `hp_slot0` + `reserved` + `storage` + `atoc`, all
+  `carveout: false`, summing to exactly its own 5632 KiB capacity), so
+  a `storage:` entry targeting it always resolves `status: blocked`,
+  never `status: ok`, regardless of the label.
+* an `on_module.ospi_memories:` entry (e.g. `ospi0`) -- despite the name
+  matching a controller node 1:1 on paper, `ospi0` is the ONLY `ospi<n>`
+  label anywhere under `zephyr/`
+  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:503`), only the two
+  E1M-AEN801 board `.dts` files include it, and there it is the OSPI
+  CONTROLLER node (`status = "disabled"`, no flash-chip child) -- not an
+  enabled flash device. E1M-AEN301/501/701 have no board tree at all;
+  E1M-AEN401/601 have one with no `ospi0` node.
+
+#1556 tracks the fix for both: validating `dt_label` against the
+generated board tree (or requiring an explicit, verified `dt_label:`
+override) before either target is usable.
 
 The loader rejects typoed `flash_device:` references at parse time
 with the list of known devices for the project's SoM.  When the

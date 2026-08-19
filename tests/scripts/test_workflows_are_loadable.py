@@ -488,3 +488,123 @@ def test_exempt_slsa_ref_must_be_full_semver_tag() -> None:
             _uses_violation("release.yml", "provenance", "(reusable-workflow job)", f"{exempt_prefix}@{bad_ref}")
             is not None
         )
+
+
+# ---------------------------------------------------------------------------
+# `persist-credentials: false` on every `actions/checkout` step
+# ---------------------------------------------------------------------------
+#
+# #1544 swept all 42 `actions/checkout` steps to `persist-credentials:
+# false` -- the same one-shot-vs-invariant gap #1479 left for `uses:` SHA
+# pins before `test_workflow_uses_are_sha_pinned` above closed it. Without
+# a test, the next workflow (or the next step added to an existing one)
+# that calls `actions/checkout` without the `with:` block silently
+# reintroduces the default (`persist-credentials: true`), which writes an
+# `http.https://github.com/.extraheader` token into that job's
+# `.git/config` for the rest of the run even when nothing downstream needs
+# it.
+#
+# A job that comes to genuinely need the persisted credential (e.g. a
+# future step that pushes/tags/fetches against the checked-out repo using
+# the implicit `GITHUB_TOKEN`) should be added here with a comment naming
+# the step and why -- not have this test weakened or deleted.
+_PERSIST_CREDENTIALS_EXEMPT: set[tuple[str, str, str]] = set()
+
+
+def _checkout_steps(doc: object) -> list[tuple[str, str, dict]]:
+    """(job_id, step_name, step) for every `actions/checkout` step in
+    `doc`."""
+    out: list[tuple[str, str, dict]] = []
+    if not isinstance(doc, dict):
+        return out
+    jobs = doc.get("jobs")
+    if not isinstance(jobs, dict):
+        return out
+    for job_id, job in jobs.items():
+        if not isinstance(job, dict):
+            continue
+        steps = job.get("steps")
+        if not isinstance(steps, list):
+            continue
+        for idx, step in enumerate(steps):
+            if not isinstance(step, dict):
+                continue
+            uses = step.get("uses")
+            if not isinstance(uses, str) or uses.split("@", 1)[0] != "actions/checkout":
+                continue
+            step_name = str(step.get("name", f"step[{idx}]"))
+            out.append((str(job_id), step_name, step))
+    return out
+
+
+def _persist_credentials_violation(wf_name: str, job_id: str, step_name: str, step: dict) -> str | None:
+    """Return a violation message if a checkout step doesn't set
+    `persist-credentials: false`, else None. Split out of
+    `test_checkout_persists_no_credentials` so the exempt-set lookup and
+    the `with:` check can be unit-tested directly, without needing a
+    seeded workflow file on disk."""
+    if (wf_name, job_id, step_name) in _PERSIST_CREDENTIALS_EXEMPT:
+        return None
+    with_block = step.get("with")
+    persisted = with_block.get("persist-credentials") if isinstance(with_block, dict) else None
+    if persisted is False:
+        return None
+    return (
+        f"{wf_name}: job `{job_id}` step `{step_name}` checks out the repo without "
+        "`persist-credentials: false` -- the default leaves a GITHUB_TOKEN credential in "
+        "the checkout's .git/config for the rest of the job (alp-sdk#1544); add `with: "
+        "{persist-credentials: false}` unless the job genuinely needs the persisted "
+        "credential, in which case add `(workflow, job_id, step_name)` to "
+        "`_PERSIST_CREDENTIALS_EXEMPT` with a comment naming why"
+    )
+
+
+@pytest.mark.parametrize("wf", _workflow_files(), ids=lambda p: p.name)
+def test_checkout_persists_no_credentials(wf: Path) -> None:
+    """The check #1544's own sweep left undone: without this, the next
+    `actions/checkout` step added anywhere silently reintroduces the
+    default GITHUB_TOKEN persistence #1544 swept away -- the sweep was a
+    one-shot, not an invariant, until this test exists."""
+    doc = yaml.safe_load(wf.read_text(encoding="utf-8"))
+    violations = []
+    for job_id, step_name, step in _checkout_steps(doc):
+        violation = _persist_credentials_violation(wf.name, job_id, step_name, step)
+        if violation:
+            violations.append(violation)
+    assert not violations, "\n".join(violations)
+
+
+def test_persist_credentials_detector_catches_a_seeded_missing_setting() -> None:
+    """Guard against the guard: if `_checkout_steps` ever stopped walking
+    steps correctly, or the check were loosened, the test above would
+    report green over a workflow that still persists the checkout
+    token."""
+    unsafe_step = {"name": "Checkout", "uses": "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803"}
+    safe_step = {
+        "name": "Checkout (safe)",
+        "uses": "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803",
+        "with": {"persist-credentials": False},
+    }
+    seeded = {
+        "jobs": {
+            "build": {
+                "steps": [
+                    unsafe_step,
+                    safe_step,
+                    {"name": "Not a checkout", "uses": "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065"},
+                ]
+            }
+        }
+    }
+    steps = _checkout_steps(seeded)
+    assert ("build", "Checkout", unsafe_step) in steps
+    assert ("build", "Checkout (safe)", safe_step) in steps
+    assert len(steps) == 2
+
+    # End-to-end: a broad early-return added to `_persist_credentials_violation`
+    # (e.g. one that short-circuits before checking `with:`) would leave the
+    # assertions above green while the real gate passes over a workflow that
+    # still persists the checkout token. Call `_persist_credentials_violation`
+    # itself on the seeded data so that class of regression fails here too.
+    assert _persist_credentials_violation("seeded.yml", "build", "Checkout", unsafe_step) is not None
+    assert _persist_credentials_violation("seeded.yml", "build", "Checkout (safe)", safe_step) is None
