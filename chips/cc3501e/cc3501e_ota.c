@@ -53,7 +53,7 @@ alp_status_t cc3501e_ota_write(cc3501e_t     *ctx,
 	 * precisely what broke the 2026-06-19 per-chunk-flash attempt.  So this pushes
 	 * the frame once and lets the CALLER hold off on BUSY by polling header-only
 	 * OTA_STATUS until reserved[1] (flush_pending) clears -- see
-	 * cc3501e_ota_stream_image.  A caller driving raw chunks itself must do the
+	 * cc3501e_ota_update.  A caller driving raw chunks itself must do the
 	 * same; BUSY here means "retry this same chunk later", not "failed". */
 	return cc3501e_request(
 	    ctx, ALP_CC3501E_CMD_OTA_WRITE, buf, 4u + len, NULL, 0, NULL, timeout_ms);
