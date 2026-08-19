@@ -201,14 +201,18 @@ e1m_routes:
 # Devicetree label defaults to the region name when the SoM preset sets
 # no explicit `dt_label:` override, and that default is unverified
 # against the generated board `.dts` -- e.g. AEN's `mram_main` region
-# names its flash node `mram_storage`, not `mram_main`.  An
-# `on_module.ospi_memories:` key looks like it names a DT node 1:1
-# (`ospi0` etc.) but isn't verified either -- see
+# names its flash node `mram_storage`, not `mram_main`.  Since #1556 the
+# orchestrator REFUSES to resolve `status: ok` on that unverified
+# default -- a `storage:` entry against `mram_main` blocks with a
+# reason naming the gap instead of silently decorating a DT label that
+# doesn't exist.  An `on_module.ospi_memories:` key looks like it names
+# a DT node 1:1 (`ospi0` etc.) but isn't verified either, and is NOT
+# yet gated the same way (separate follow-up) -- see
 # docs/board-config-features.md for which SKUs even have the node, and
 # in what (disabled) state.  The orchestrator emits a partial DTS
 # overlay (the `partitions { ... }` node under `&<dt_label>`) plus the
 # matching Kconfig (FILE_SYSTEM_LITTLEFS / FAT_FILESYSTEM_ELM / ...)
-# once #1556 lands a verified target.
+# once a SoM preset declares a verified `dt_label:` override.
 #
 # storage:
 #   - { name: settings, size_kib: 64,  fs: littlefs, mount: /lfs/settings,
