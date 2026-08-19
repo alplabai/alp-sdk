@@ -74,8 +74,8 @@ jobs:
         timeout-minutes: 20
         if: steps.token_check.outputs.configured == 'true'
         run: |
-          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               build-essential cmake python3 wget
 
       - name: Download Coverity Build Tool
