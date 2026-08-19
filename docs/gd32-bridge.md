@@ -152,9 +152,9 @@ one is ever added*, and the schema requires it on every helper entry
 whether or not a `flash_method` exists.  It is `flash_policy:
 recovery_only`, not `update_channel`, that decides this entry's fate:
 `tan flash` declines it before it ever reaches the `flash_method`
-check (`python/tan/core/flash_plan.py::helper_flash_gate`, called
-ahead of `python/tan/commands/flash_cmd.py::_flash_entry`'s own
-`flash_method` check -- tan-cli#611) with:
+check (`helper_flash_gate` in `python/tan/core/flash_plan.py`, called
+ahead of `_flash_entry`'s own `flash_method` check in
+`python/tan/commands/flash_cmd.py` -- tan-cli#611) with:
 
 ```text
 flash: helper 'gd32_bridge' is programmed by Alp Lab in production
@@ -171,7 +171,7 @@ also skips without writing (same `_flash_entry` path, past the policy
 gate) -- so bricked-bridge recovery is still an out-of-`tan` SWD
 procedure today.  As measured against tan-cli tag `v0.6.0-rc1`, tan
 still ships the `swd_probe` backend
-(`python/tan/core/flash_plan.py::plan_swd_probe`); both `--recover`
+(`plan_swd_probe` in `python/tan/core/flash_plan.py`); both `--recover`
 (`python/tan/commands/flash_cmd.py`, the `recover` CLI option) and
 `ALP_FLASH_REQUIRE_DPIDR` (`python/tan/commands/flash_cmd.py`'s
 `REQUIRE_DPIDR_ENV`, documented at tan-cli `docs/setools.md`'s

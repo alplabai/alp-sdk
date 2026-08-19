@@ -38,7 +38,10 @@ on:
       - 'TRADEMARKS.md'
       - 'chips/README.md'
       - 'vendors/*/README.md'
-      - 'firmware/cc3501e/README.md'
+      # Both bridge-firmware READMEs are in INPUT; the glob also covers a
+      # future firmware/<chip>/README.md, so the filter can only ever
+      # over-trigger (harmless) rather than leave the hard gate unreachable.
+      - 'firmware/*/README.md'
       - 'keys/README.md'
       - 'meta-alp-sdk/README.md'
       - 'examples/README.md'
