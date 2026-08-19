@@ -1,3 +1,5 @@
+@page firmware_gd32_bridge_index GD32 bridge firmware
+
 # gd32-bridge
 
 Firmware that runs on the **GigaDevice GD32G553MEY7TR** supervisor

@@ -65,7 +65,8 @@ application-processor line).  Don't confuse the two.
   diff against the public FSP; lands when the maintainer
   has bandwidth.
 - 📋 **DA9292 + V2N PMIC pad-routing confirmation.**  The
-  bring-up sequence in `chips/da9292/da9292.c::da9292_v2n_m1_enable_deepx_rail`
+  bring-up sequence in `da9292_v2n_m1_enable_deepx_rail`
+  (`chips/da9292/da9292.c`)
   encodes the maintainer's reading of the V2N schematic +
   the AROVx OTP variant trap.  Renesas' AE has confirmed
   the schematic; the OTP confirmation is open.

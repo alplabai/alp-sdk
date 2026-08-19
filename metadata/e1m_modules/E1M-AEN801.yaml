@@ -284,8 +284,11 @@ helper_firmware:
     # Alp Lab-supplied binaries -- `flash_policy: recovery_only` states
     # that directly instead of leaving a tool to infer it from the
     # presence of an OTA channel -- the two are independent facts
-    # (#1357).  Behaviour is unchanged: this entry declares no
-    # `flash_method`, so there is nothing to decline.
+    # (#1357).  `tan flash` DOES decline this entry: `flash_policy:
+    # recovery_only` is checked ahead of any `flash_method` presence
+    # (`python/tan/core/flash_plan.py::helper_flash_gate`, tan-cli#611) --
+    # the same shape as `gd32_bridge` (see docs/gd32-bridge.md's "Who
+    # flashes it, and when" section).
     flash_policy:   recovery_only
     update_channel: alp_ota_spi_otp
 

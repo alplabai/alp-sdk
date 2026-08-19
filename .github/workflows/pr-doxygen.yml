@@ -38,7 +38,10 @@ on:
       - 'TRADEMARKS.md'
       - 'chips/README.md'
       - 'vendors/*/README.md'
-      - 'firmware/cc3501e/README.md'
+      # All three firmware/*/README.md are in INPUT, so this glob matches it
+      # exactly today and keeps matching when a fourth is added -- the gate
+      # cannot go unreachable for a firmware README the way #1585 did.
+      - 'firmware/*/README.md'
       - 'keys/README.md'
       - 'meta-alp-sdk/README.md'
       - 'examples/README.md'
@@ -62,7 +65,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
         timeout-minutes: 5
