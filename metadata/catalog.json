@@ -3217,6 +3217,10 @@
       "script": "scripts/check_agents_md_generators.py"
     },
     {
+      "purpose": "Reject a raw `apt-get update`/`apt-get install` in a workflow step.",
+      "script": "scripts/check_apt_bounded.py"
+    },
+    {
       "purpose": "Refuse an Alif Ensemble (AEN) layout that leaves the top of the App MRAM window writable by the application, or that publishes a slot0 flash address disagreeing with `loader._resolve_slot0_load_address()` (#1482).",
       "script": "scripts/check_atoc_reservation.py"
     },

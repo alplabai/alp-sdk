@@ -503,6 +503,9 @@ jobs:
       - name: "Gate — job-level if: stays within its allowed context list (#1528)"
         run: python3 scripts/check_workflow_expressions.py
 
+      - name: "Gate — apt-get update/install goes through scripts/ci/apt-bounded.sh (#1575)"
+        run: python3 scripts/check_apt_bounded.py
+
       - name: alp.lock in sync
         run: python3 scripts/west_commands/alp_lock.py --workspace . --check
 
