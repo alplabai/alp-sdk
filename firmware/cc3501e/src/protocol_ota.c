@@ -111,7 +111,13 @@ alp_cc3501e_resp_t handle_ota_status(const uint8_t *req,
 	/* reserved[0] carries the last swap-reboot rc (0 = none / success; non-zero =
 	 * the swap was refused, e.g. BL2 anti-rollback on a downgrade). */
 	reply_data[1] = (uint8_t)cc3501e_hw_ota_reboot_rc();
-	reply_data[2] = 0u;
+	/* reserved[1]: a window flush is queued or running (#1610).  While this is
+	 * non-zero the host MUST hold off payload-bearing WRITE frames and poll
+	 * header-only -- clocking payload into a slave whose DMA is torn down is
+	 * exactly what broke the 2026-06-19 per-chunk-flash attempt.  Additive into
+	 * an existing reserved byte, so no ALP_CC3501E_PROTOCOL_VERSION bump: a host
+	 * that predates it reads 0, which is what the old firmware always sent. */
+	reply_data[2] = cc3501e_hw_ota_flush_pending() ? 1u : 0u;
 	reply_data[3] = 0u;
 	put_le32(&reply_data[4], written);
 	put_le32(&reply_data[8], total);

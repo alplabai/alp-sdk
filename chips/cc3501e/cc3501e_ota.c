@@ -40,11 +40,23 @@ alp_status_t cc3501e_ota_write(cc3501e_t     *ctx,
 	buf[2] = (uint8_t)((offset >> 16) & 0xFFu);
 	buf[3] = (uint8_t)((offset >> 24) & 0xFFu);
 	memcpy(&buf[4], data, len);
-	/* The device stages each chunk synchronously into RAM (no flash until FINISH),
-	 * so a WRITE neither blocks nor disrupts the bridge -- a plain re-send poll is
-	 * safe + fast (the device is idempotent on the cursor).  ALL the OTA flash, and
-	 * thus the only bridge-DMA-disruption window, is FINISH. */
-	return poll_by_repeat(ctx, ALP_CC3501E_CMD_OTA_WRITE, buf, 4u + len, NULL, 0, NULL, timeout_ms);
+	/* SEND ONCE -- deliberately NOT poll_by_repeat (#1610).
+	 *
+	 * poll_by_repeat re-sends this whole 4+len payload every CC3501E_POLL_GAP_MS
+	 * until the device stops answering BUSY.  That was safe while WRITE never
+	 * touched flash: the old firmware staged the entire image in RAM and did all
+	 * its flashing at FINISH, so a WRITE could never coincide with a torn-down
+	 * bridge DMA.
+	 *
+	 * With windowed staging a WRITE *can* land exactly when the device is flushing
+	 * the window to flash, and clocking payload into a slave whose DMA is down is
+	 * precisely what broke the 2026-06-19 per-chunk-flash attempt.  So this pushes
+	 * the frame once and lets the CALLER hold off on BUSY by polling header-only
+	 * OTA_STATUS until reserved[1] (flush_pending) clears -- see
+	 * cc3501e_ota_stream_image.  A caller driving raw chunks itself must do the
+	 * same; BUSY here means "retry this same chunk later", not "failed". */
+	return cc3501e_request(
+	    ctx, ALP_CC3501E_CMD_OTA_WRITE, buf, 4u + len, NULL, 0, NULL, timeout_ms);
 }
 
 alp_status_t cc3501e_ota_finish(cc3501e_t *ctx, uint32_t timeout_ms)
@@ -82,6 +94,14 @@ alp_status_t cc3501e_ota_status(cc3501e_t *ctx, alp_cc3501e_ota_status_t *out, u
 	return ALP_OK;
 }
 
+/* Hold-off budget while the device flushes its staging window to flash (#1610).
+ * A flush is at most CC3501E_OTA_WINDOW/4096 psa_fwu_write calls plus bridge
+ * re-arms; 10 s is far beyond that and still finite, so a device that never
+ * clears flush_pending fails the stream instead of hanging it.  Polled at the
+ * same 50 ms cadence poll_by_repeat uses, but with HEADER-ONLY frames. */
+#define CC3501E_OTA_FLUSH_WAIT_MS 10000u
+#define CC3501E_OTA_FLUSH_POLL_MS 50u
+
 alp_status_t
 cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t timeout_ms)
 {
@@ -89,16 +109,16 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 
 	/* OTA_BEGIN's total_len is a wire LE32 (<alp/protocol/cc3501e.h>), so the
 	 * wire width is the only bound the HOST can know -- it is NOT the real
-	 * image maximum.  The device enforces a much smaller one of its own at
-	 * BEGIN (CC3501E_OTA_IMAGE_MAX, firmware/cc3501e/hal/ti/cc3501e_hw_ti_ota.c
-	 * -- 64 KiB in the TI HAL today, sized by the RAM buffer that stages the
-	 * whole image before FINISH), rejecting an oversize BEGIN with
-	 * ERR_INVAL before any image data is streamed.  That value is HAL-private
-	 * and unpublished on the wire, and a firmware rev that resizes the staging
-	 * buffer moves it, so the host deliberately does NOT duplicate it: a
-	 * hardcoded copy here would start falsely rejecting valid images the day
-	 * the buffer grows.  Enforce only what the wire itself constrains, and
-	 * leave the real limit to the device that owns it.
+	 * image maximum.  The device enforces its own at BEGIN
+	 * (CC3501E_OTA_IMAGE_MAX, firmware/cc3501e/hal/ti/cc3501e_hw_ti_ota.c),
+	 * rejecting an oversize BEGIN with ERR_INVAL before any image data is
+	 * streamed.  That value is HAL-private and unpublished on the wire, and it
+	 * MOVES -- it was the 64 KiB whole-image RAM buffer until #1610 replaced
+	 * that with a sliding window, after which it became a sanity bound with the
+	 * real ceiling being the vendor slot.  So the host deliberately does NOT
+	 * duplicate it: a hardcoded copy here would have started falsely rejecting
+	 * valid images the day the staging changed.  Enforce only what the wire
+	 * itself constrains, and leave the real limit to the device that owns it.
 	 *
 	 * Reject anything that would not round-trip BEFORE issuing BEGIN,
 	 * converting len to the wire width exactly ONCE (#732): every offset
@@ -125,6 +145,32 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 			n = chunk;
 		}
 		s = cc3501e_ota_write(ctx, (uint32_t)off, image + off, n, timeout_ms);
+		if (s == ALP_ERR_BUSY) {
+			/* The device queued a window flush and did NOT consume this chunk
+			 * (#1610).  Hold off ALL payload while its DMA is torn down and poll
+			 * header-only until reserved[1] (flush_pending) clears, then retry the
+			 * SAME chunk.  Re-sending payload across the blackout instead is the
+			 * 2026-06-19 failure mode this whole design exists to avoid.
+			 *
+			 * Bounded so a device that never clears the flag cannot hang the
+			 * stream: OTA_FLUSH_WAIT_MS is generous against a ~4-block flush but
+			 * finite. `off` is NOT advanced, so the retry is a plain re-send. */
+			uint32_t waited = 0u;
+			for (;;) {
+				alp_cc3501e_ota_status_t fs;
+				if (cc3501e_ota_status(ctx, &fs, timeout_ms) == ALP_OK &&
+				    fs.reserved[1] == 0u) {
+					break; /* flush done -- retry the chunk */
+				}
+				if (waited >= CC3501E_OTA_FLUSH_WAIT_MS) {
+					(void)cc3501e_ota_abort(ctx, timeout_ms);
+					return ALP_ERR_TIMEOUT;
+				}
+				alp_delay_ms(CC3501E_OTA_FLUSH_POLL_MS);
+				waited += CC3501E_OTA_FLUSH_POLL_MS;
+			}
+			continue; /* same off, same n */
+		}
 		if (s != ALP_OK) {
 			/* A lost reply can leave the host unsure whether the chunk landed.
 			 * OTA_WRITE is NOT idempotent (a re-sent already-written offset is

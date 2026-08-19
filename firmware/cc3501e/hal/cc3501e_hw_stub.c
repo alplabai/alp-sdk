@@ -400,6 +400,13 @@ int8_t cc3501e_hw_ota_reboot_rc(void)
 	return 0;
 }
 
+bool cc3501e_hw_ota_flush_pending(void)
+{
+	/* The stub stages nothing to flash, so no flush window ever exists and the
+	 * host is never asked to hold off. */
+	return false;
+}
+
 int cc3501e_hw_ota_status(uint8_t *state, uint32_t *bytes_written, uint32_t *total_len)
 {
 	if (state != 0) *state = 0u;

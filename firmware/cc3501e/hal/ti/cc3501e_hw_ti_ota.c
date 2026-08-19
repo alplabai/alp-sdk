@@ -19,8 +19,9 @@
  * is never on the SDK-free path.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
-#include <string.h> /* memcpy (OTA manifest buffering) */
+#include <string.h> /* memcpy + memmove (OTA window staging) */
 
 #include <ti/utils/FWU/psa_fwu.h> /* PSA Firmware Update: stream + install the vendor image */
 
@@ -40,39 +41,105 @@
 /* (which feeds the same psa_fwu_* sequence from an embedded array).      */
 /* Single session; bytes arrive sequentially (offset == cursor).         */
 
-/* RAM-STAGED OTA (silicon-critical, hardware-SS0/READY bridge): the psa_fwu_* flash
- * ops share the CC35 HIF/DMA with the bridge SPI slave, so EVERY flash op tears
- * the bridge DMA down (like a radio op) -- doing one per 256 B WRITE disrupted the
- * phased bridge + churned the link across the ~135-chunk stream, no reinit dance made
- * it reliable (silicon 2026-06-19).  So WRITES never touch flash: each chunk is a
- * synchronous RAM memcpy into image_buf (ISR-safe, no DMA disruption -> the bulk
- * transfer stays clean).  ALL the flash happens ONCE at FINISH (psa_fwu_start +
- * write the whole staged image + install), deferred to cc3501e_hw_ota_pump() on
- * the bring-up task with a single bridge re-arm after.  HOST_IRQ/async-event work
- * can revisit per-chunk flash + a smaller buffer.) */
-#define CC3501E_OTA_IMAGE_MAX (64u * 1024u) /* max staged image; begin rejects larger */
+/* WINDOW-STAGED OTA (silicon-critical, hardware-SS0/READY bridge).  The psa_fwu_*
+ * flash ops share the CC35 HIF/DMA with the bridge SPI slave, so EVERY flash op
+ * tears the bridge DMA down, like a radio op.
+ *
+ * v0.2 answered that by never flashing during WRITE: chunks were memcpy'd into a
+ * 64 KiB whole-image buffer and ALL the flash happened once at FINISH.  That made
+ * OTA reliable and also capped it at 64 KiB -- ~16x below the 1,089,100 B image
+ * the channel exists to deliver (#1610).  The two were the same decision, which
+ * is why raising the constant alone could never work.
+ *
+ * Now: WRITE still never flashes (ISR-safe memcpy, no DMA disruption), but into a
+ * SLIDING WINDOW.  When the window fills, WRITE queues OTA_OP_FLUSH and returns
+ * BUSY *without consuming the chunk*; the pump commits the window on the bring-up
+ * task using the exact burst shape FINISH has always used and that is
+ * silicon-proven at 31,428 B and 37,016 B.  FINISH flushes the tail, then
+ * finalize + install as before.
+ *
+ * WHAT THE 2026-06-19 PER-256 B ATTEMPT ACTUALLY GOT WRONG: not the flush size.
+ * psa_fwu_write is a direct XMEMWFF3_write with the SDK's SECTOR_SIZE == 4096, so
+ * the flash-op count is image_bytes/4096 no matter how the flushes are grouped.
+ * The difference is what the host clocks across the blackout -- that attempt kept
+ * re-sending payload-bearing WRITE frames into a torn-down slave.  So the host
+ * MUST send each WRITE once and then poll header-only until
+ * OTA_STATUS.reserved[1] (flush_pending) clears.  The host-side change is
+ * mandatory, not an optimisation; see chips/cc3501e/cc3501e_ota.c. */
+/* Largest image BEGIN will accept.  This used to be the RAM staging buffer's size
+ * (64 KiB), which capped OTA ~16x below the 1,089,100 B image the channel exists
+ * to deliver (#1610).  Staging whole was never merely unwise -- it is impossible:
+ * DRAM_NON_SECURE is 0x7f24f with ~3 KiB free and ALL RAM on the part sums to
+ * 753,659 B.  With windowed staging the RAM bound is gone, so this is now only a
+ * SANITY bound; the real ceiling is the vendor slot, enforced by psa_fwu_write
+ * failing mid-stream (a clean ERROR, not a silent truncation).  Deliberately NOT
+ * derived from a SysConfig slot constant: that value is generated and git-ignored,
+ * and a silently-wrong hardcode would reproduce this exact bug one flash-layout
+ * change later. */
+#define CC3501E_OTA_IMAGE_MAX (2u * 1024u * 1024u)
 /* FINISH flash block for the OTA-over-bridge path (distinct from the SELFTEST
  * installer's CC3501E_OTA_WRITE_CHUNK; a --ota-selftest build compiles both, so
  * they must not collide): big => few psa_fwu_write calls (each tears the bridge
  * DMA), short burst.  4096 is a multiple of the 256 B flash page. */
 #define CC3501E_OTA_FINISH_FLASH_BLOCK 4096u
 
+/* Sliding staging window (#1610).  Bytes accumulate here and are flushed to the
+ * slot whenever the window fills, instead of the whole image being held in RAM.
+ *
+ * SIZING IS A TUNING KNOB, NOT THE FIX.  psa_fwu_write does no internal
+ * buffering -- it is a direct XMEMWFF3_write, one flash op per call (SDK
+ * psa_fwu.c:924) -- and the SDK's SECTOR_SIZE is 4096, the same as
+ * CC3501E_OTA_FINISH_FLASH_BLOCK.  So the flash-op count is image_bytes/4096
+ * (~266 for a 1.09 MB image) WHATEVER window we choose; the window only decides
+ * how those ops are grouped into host hold-off episodes (16 KiB -> ~67 episodes
+ * of 4 writes).  Bigger = fewer, longer stalls and more .bss; smaller = more,
+ * shorter stalls.  What actually decides whether this survives is that the host
+ * clocks nothing but header-only polls across each episode (see the host note in
+ * ota_flush), which is the one thing the 2026-06-19 per-256 B attempt got wrong.
+ *
+ * 16 KiB also hands ~48 KiB of .bss back versus the old 64 KiB whole-image
+ * buffer, which matters on a part with ~3 KiB of DRAM_NON_SECURE free. */
+#define CC3501E_OTA_WINDOW (4u * CC3501E_OTA_FINISH_FLASH_BLOCK)
+
 #define OTA_OP_IDLE     0u
 #define OTA_OP_BEGIN    1u
-#define OTA_OP_FINISH   3u /* WRITE is synchronous (RAM memcpy) -- not a deferred op */
+#define OTA_OP_FINISH   3u
+#define OTA_OP_FLUSH    4u /* window full -> commit it to the slot, off the ISR */
 #define OTA_OP_INFLIGHT 2  /* op_rc sentinel: queued, not yet executed (!= any CC3501E_HW_*) */
 
 static struct {
 	uint8_t             state; /* alp_cc3501e_ota_state_t */
 	psa_fwu_component_t target;
 	uint32_t            total_len;
-	uint32_t            cursor; /* bytes staged into image_buf so far */
-	/* Deferred BEGIN/FINISH queue (ISR enqueues; ota_pump runs the flash). */
+	uint32_t            cursor; /* bytes ACCEPTED from the host so far           */
+	/* Deferred BEGIN/FINISH/FLUSH queue (ISR enqueues; ota_pump runs the flash). */
 	volatile uint8_t op;       /* OTA_OP_* currently queued/running */
 	volatile int8_t  op_rc;    /* OTA_OP_INFLIGHT while pending; else result */
 	uint32_t         op_total; /* BEGIN arg */
-	uint8_t          image_buf[CC3501E_OTA_IMAGE_MAX]; /* full image staged in RAM */
+	/* Windowed staging.  window_base is the ABSOLUTE image offset of window[0], so
+	 * window_base + window_used == cursor at all times.  flushed is the absolute
+	 * offset one past the last byte committed to the slot.
+	 *
+	 * `started` gates psa_fwu_start (which consumes the manifest -- the first
+	 * TI_FWU_MANIFEST_SIZE bytes -- exactly as TI's own OTA reference does).  It
+	 * MUST be cleared per session in ota_do_begin, including after a SUCCESSFUL
+	 * finish: leave it latched and the second OTA in one power cycle skips
+	 * psa_fwu_start entirely and writes into a slot that was never opened. */
+	uint32_t window_base;
+	uint32_t window_used;
+	uint32_t flushed;
+	bool     started;
+	uint8_t  window[CC3501E_OTA_WINDOW];
 } ota;
+
+/* The window must hold the whole manifest, because the first flush hands
+ * window[0..TI_FWU_MANIFEST_SIZE) to psa_fwu_start before writing any image
+ * bytes, and it must be a whole number of flash blocks so every mid-stream flush
+ * is block-aligned (only the final flush at FINISH may be partial). */
+_Static_assert(CC3501E_OTA_WINDOW >= (uint32_t)TI_FWU_MANIFEST_SIZE,
+               "OTA window must hold the manifest psa_fwu_start consumes");
+_Static_assert((CC3501E_OTA_WINDOW % CC3501E_OTA_FINISH_FLASH_BLOCK) == 0u,
+               "OTA window must be a whole number of flash blocks");
 
 /* Enqueue op @o (args already staged) and return BUSY: an op is in flight while
  * op_rc == OTA_OP_INFLIGHT.  The pump publishes the result + frees the slot
@@ -137,7 +204,91 @@ static int ota_do_begin(void)
 	ota.target    = target;
 	ota.total_len = ota.op_total;
 	ota.cursor    = 0u;
-	ota.state     = ALP_CC3501E_OTA_STATE_WRITING;
+	/* Reset EVERY per-session field, not just the pre-#1610 four.  A stale
+	 * `started`/`flushed` here is the difference between a clean second update and
+	 * one that writes into a slot psa_fwu_start never opened, at an offset carried
+	 * over from the previous image. */
+	ota.window_base = 0u;
+	ota.window_used = 0u;
+	ota.flushed     = 0u;
+	ota.started     = false;
+	ota.state       = ALP_CC3501E_OTA_STATE_WRITING;
+	return CC3501E_HW_OK;
+}
+
+/* Commit the block-aligned prefix of the window to the target slot.  This is the
+ * ONLY place OTA touches flash besides finalize, and it is a deliberate clone of
+ * the burst shape ota_do_finish has always used and that is silicon-proven at
+ * 31,428 B and 37,016 B: CC3501E_OTA_FINISH_FLASH_BLOCK writes with a bridge
+ * re-arm every 2nd block, on the bring-up task, never the SPI ISR.
+ *
+ * @p final is true only for the last flush (from FINISH), where a short trailing
+ * block is expected and allowed; mid-stream flushes commit whole blocks only and
+ * carry the remainder forward, so psa_fwu_write always sees a block-sized write
+ * except at the very end.
+ *
+ * HOST CONTRACT: the host must clock ONLY header-only polls while this runs.
+ * That is the single thing the 2026-06-19 per-256 B attempt got wrong -- it kept
+ * re-sending payload-bearing WRITE frames into a slave whose DMA was torn down.
+ * cc3501e_hw_ota_flush_pending() exists so the host can see this window and wait
+ * it out instead of guessing from BUSY. */
+static int ota_flush(bool final)
+{
+	if (!ota.started) {
+		if (ota.window_used < (uint32_t)TI_FWU_MANIFEST_SIZE) {
+			return CC3501E_HW_ERR_INVAL; /* cannot open the slot without a manifest */
+		}
+		/* Same walk-back-to-READY the FINISH path has always done, moved here
+		 * because the slot is now opened at the FIRST flush rather than at FINISH.
+		 * Each rc no-ops when N/A (see ota_do_finish's note). */
+		(void)psa_fwu_cancel(ota.target);
+		(void)psa_fwu_reject(PSA_ERROR_GENERIC_ERROR);
+		(void)psa_fwu_clean(ota.target);
+		if (psa_fwu_start(ota.target, ota.window, TI_FWU_MANIFEST_SIZE) != PSA_SUCCESS) {
+			return CC3501E_HW_ERR_IO;
+		}
+		ota.started = true;
+		/* psa_fwu_write REJECTS any offset below the manifest (SDK psa_fwu.c:919,
+		 * PSA_ERROR_INVALID_ARGUMENT), so image bytes start HERE.  Pre-#1610 this
+		 * anchor lived only in ota_do_finish's loop initialiser; losing it is why a
+		 * naive flush cursor starting at 0 fails on its very first write. */
+		ota.flushed = (uint32_t)TI_FWU_MANIFEST_SIZE;
+	}
+
+	const uint32_t end     = ota.window_base + ota.window_used; /* == ota.cursor */
+	uint32_t       n_ready = (end > ota.flushed) ? (end - ota.flushed) : 0u;
+	if (!final) {
+		n_ready &= ~(CC3501E_OTA_FINISH_FLASH_BLOCK - 1u); /* whole blocks only */
+	}
+	if (n_ready == 0u) return CC3501E_HW_OK;
+
+	uint32_t since_rearm = 0u;
+	uint32_t off         = ota.flushed;
+	const uint32_t stop  = ota.flushed + n_ready;
+	while (off < stop) {
+		uint32_t n = stop - off;
+		if (n > CC3501E_OTA_FINISH_FLASH_BLOCK) n = CC3501E_OTA_FINISH_FLASH_BLOCK;
+		if (psa_fwu_write(ota.target, off, &ota.window[off - ota.window_base], n) !=
+		    PSA_SUCCESS) {
+			return CC3501E_HW_ERR_IO;
+		}
+		off += n;
+		if (++since_rearm >= 2u) {
+			since_rearm = 0u;
+			bridge_transport_spi_hw_reinit();
+		}
+	}
+	ota.flushed = stop;
+
+	/* Carry any un-flushed tail to the front so the window is reusable.  memmove,
+	 * not memcpy: the regions overlap whenever the tail is longer than the gap. */
+	const uint32_t keep = end - ota.flushed;
+	if (keep != 0u) {
+		memmove(ota.window, &ota.window[ota.flushed - ota.window_base], keep);
+	}
+	ota.window_base = ota.flushed;
+	ota.window_used = keep;
+	bridge_transport_spi_hw_reinit(); /* clean boundary before the host resumes */
 	return CC3501E_HW_OK;
 }
 
@@ -150,42 +301,19 @@ static int ota_do_finish(void)
 	if (ota.cursor != ota.total_len || ota.total_len <= (uint32_t)TI_FWU_MANIFEST_SIZE) {
 		return CC3501E_HW_ERR_INVAL;
 	}
-	/* Force the target component's persistent flash flow-state to READY before
-	 * psa_fwu_start.  A prior failed/partial OTA leaves the flash flow-state stuck
-	 * (set inside psa_fwu_start / _install), and psa_fwu_start's own flow_check then
-	 * returns PSA_ERROR_BAD_STATE(-137) forever -- the RAM ComponentInfo.state can
-	 * still read READY, so this must NOT be gated on it (silicon 2026-06-19).  Walk
-	 * every stuck state back to READY (ignore each rc -- they no-op when N/A):
-	 *   cancel  WRITING/CANDIDATE -> FAILED
-	 *   reject  STAGED            -> FAILED   (an install that never swap-booted)
-	 *   clean   FAILED/UPDATED    -> READY
-	 * (STAGED is the common stuck case here: a finish reached psa_fwu_install but
-	 * the cold swap-reboot could not complete -- see project-cc3501e-firmware-bringup.) */
-	(void)psa_fwu_cancel(ota.target);
-	(void)psa_fwu_reject(PSA_ERROR_GENERIC_ERROR);
-	(void)psa_fwu_clean(ota.target);
-
-	if (psa_fwu_start(ota.target, ota.image_buf, TI_FWU_MANIFEST_SIZE) != PSA_SUCCESS) {
-		return CC3501E_HW_ERR_IO;
-	}
-	uint32_t since_rearm = 0u;
-	for (uint32_t off = (uint32_t)TI_FWU_MANIFEST_SIZE; off < ota.total_len;) {
-		uint32_t n = ota.total_len - off;
-		if (n > CC3501E_OTA_FINISH_FLASH_BLOCK) {
-			n = CC3501E_OTA_FINISH_FLASH_BLOCK;
-		}
-		if (psa_fwu_write(ota.target, off, &ota.image_buf[off], n) != PSA_SUCCESS) {
-			return CC3501E_HW_ERR_IO;
-		}
-		off += n;
-		/* Re-arm the bridge slave periodically across the flash burst so the host's
-		 * header-only FINISH poll keeps getting serviced (BUSY) instead of a long IO
-		 * blackout that would time out the host (silicon 2026-06-19). */
-		if (++since_rearm >= 2u) {
-			since_rearm = 0u;
-			bridge_transport_spi_hw_reinit();
-		}
-	}
+	/* NOTE: the walk-back-to-READY that used to sit here (cancel/reject/clean before
+	 * psa_fwu_start, silicon 2026-06-19) moved into ota_flush's first-flush branch,
+	 * because the slot is now opened at the FIRST flush rather than at FINISH.  It
+	 * still runs exactly once per session, in the same order, immediately before
+	 * psa_fwu_start -- see ota_flush.
+	 *
+	 * Commit whatever is still in the window (short trailing block allowed).  For a
+	 * small image this is the FIRST flush too, so it still opens the slot -- the
+	 * pre-#1610 single-burst behaviour is preserved exactly for images that never
+	 * filled the window, which is every image the bench has proven so far. */
+	const int fr = ota_flush(true);
+	if (fr != CC3501E_HW_OK) return fr;
+	if (ota.flushed != ota.total_len) return CC3501E_HW_ERR_IO; /* staged short */
 	psa_status_t pf = psa_fwu_finish(ota.target);
 	if (pf != PSA_SUCCESS && pf != PSA_SUCCESS_REBOOT) {
 		return CC3501E_HW_ERR_IO;
@@ -232,6 +360,9 @@ void cc3501e_hw_ota_pump(void)
 		break;
 	case OTA_OP_FINISH:
 		rc = ota_do_finish();
+		break;
+	case OTA_OP_FLUSH:
+		rc = ota_flush(false);
 		break;
 	default:
 		rc = CC3501E_HW_ERR_INVAL;
@@ -280,14 +411,36 @@ int cc3501e_hw_ota_write(uint32_t offset, const uint8_t *data, uint32_t len)
 	if (data == 0 || len == 0u || len > (uint32_t)ALP_CC3501E_OTA_MAX_CHUNK) {
 		return CC3501E_HW_ERR_INVAL;
 	}
+	/* A flush is running on the pump and OWNS the window -- never touch it from the
+	 * ISR concurrently.  Returning BUSY without consuming keeps the cursor honest,
+	 * so the host's re-send of this same chunk after the stall is a plain retry. */
+	if (ota.op_rc == OTA_OP_INFLIGHT) return CC3501E_HW_BUSY;
 	if ((uint64_t)offset + len <= ota.cursor) return CC3501E_HW_OK; /* chunk already staged */
 	if (offset != ota.cursor) return CC3501E_HW_ERR_INVAL;          /* out of order */
-	if ((uint64_t)offset + len > ota.total_len || (uint64_t)offset + len > CC3501E_OTA_IMAGE_MAX) {
-		return CC3501E_HW_ERR_INVAL; /* overruns the declared image / the RAM buffer */
+	if ((uint64_t)offset + len > ota.total_len) {
+		return CC3501E_HW_ERR_INVAL; /* overruns the declared image */
 	}
-	memcpy(&ota.image_buf[offset], data, len);
+	/* Window full for this chunk?  Queue the flush and return BUSY WITHOUT
+	 * consuming, so `cursor` keeps meaning "bytes accepted" and the idempotency
+	 * short-circuit above stays truthful: accepted bytes are either still in the
+	 * window or already committed to the slot, never lost in between. */
+	if (len > (uint32_t)CC3501E_OTA_WINDOW - ota.window_used) {
+		return ota_submit(OTA_OP_FLUSH);
+	}
+	memcpy(&ota.window[ota.window_used], data, len);
+	ota.window_used += len;
 	ota.cursor += len;
 	return CC3501E_HW_OK;
+}
+
+/* True while a window flush is queued or running, i.e. while the host must hold
+ * off payload-bearing frames and poll header-only.  Published through
+ * OTA_STATUS so the host WAITS on an explicit signal instead of inferring a
+ * stall from BUSY -- BUSY alone cannot distinguish "flushing" from "another op".
+ * Derived from the existing volatile op/op_rc pair, so no new shared state. */
+bool cc3501e_hw_ota_flush_pending(void)
+{
+	return ota.op == OTA_OP_FLUSH && ota.op_rc == OTA_OP_INFLIGHT;
 }
 
 int cc3501e_hw_ota_finish(void)
@@ -300,13 +453,28 @@ int cc3501e_hw_ota_finish(void)
 
 int cc3501e_hw_ota_abort(void)
 {
-	/* Discard the RAM-staged image.  No psa_fwu_cancel needed: FINISH is the only
-	 * thing that touches the slot, so an aborted session never opened one. */
-	ota.state     = ALP_CC3501E_OTA_STATE_IDLE;
-	ota.cursor    = 0u;
-	ota.total_len = 0u;
-	ota.op        = OTA_OP_IDLE;
-	ota.op_rc     = 0;
+	/* Pre-#1610 this said "an aborted session never opened one", because FINISH was
+	 * the only thing that touched the slot.  That is NO LONGER TRUE: the first
+	 * window flush calls psa_fwu_start, so a session aborted mid-stream can leave
+	 * the slot open in WRITING.
+	 *
+	 * Deliberately NOT made a deferred pump op that cancels the slot: that would
+	 * make ABORT able to return BUSY, a wire-semantics change on the one command a
+	 * host reaches for when things are already wrong.  Instead the RAM session is
+	 * reset here and the open slot is cleaned by ota_do_begin's walk-back on the
+	 * NEXT begin -- the same recovery that #611 hardened, which already handles a
+	 * slot left in WRITING/CANDIDATE/STAGED.  An abort while a flush is in flight
+	 * is refused rather than racing the pump for the window. */
+	if (ota.op_rc == OTA_OP_INFLIGHT) return CC3501E_HW_BUSY;
+	ota.state       = ALP_CC3501E_OTA_STATE_IDLE;
+	ota.cursor      = 0u;
+	ota.total_len   = 0u;
+	ota.window_base = 0u;
+	ota.window_used = 0u;
+	ota.flushed     = 0u;
+	ota.started     = false;
+	ota.op          = OTA_OP_IDLE;
+	ota.op_rc       = 0;
 	return CC3501E_HW_OK;
 }
 

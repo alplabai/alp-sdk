@@ -23,6 +23,7 @@
 #define CC3501E_BRIDGE_HAL_CC3501E_HW_H
 
 #include <stddef.h> /* size_t (cc3501e_hw_wifi_scan) */
+#include <stdbool.h>
 #include <stdint.h>
 
 /* Return codes.  0 = success; negatives are operation-independent
@@ -309,6 +310,13 @@ int cc3501e_hw_ota_promote(void);
  * means the swap was REFUSED (e.g. BL2 anti-rollback on a downgrade) -- lets the
  * host distinguish "refused" from "never fired".  Surfaced in OTA_STATUS. */
 int8_t cc3501e_hw_ota_reboot_rc(void);
+
+/* True while an OTA window flush is queued or running (#1610).  Published in
+ * OTA_STATUS.reserved[1] so the host can HOLD OFF payload-bearing WRITE frames
+ * and poll header-only across the flash blackout, instead of inferring a stall
+ * from BUSY (which cannot distinguish a flush from any other in-flight op).
+ * Backends that never flash mid-stream return false. */
+bool cc3501e_hw_ota_flush_pending(void);
 
 /* Report session progress: @p state = alp_cc3501e_ota_state_t, @p
  * bytes_written = bytes accepted so far, @p total_len = the BEGIN value.
