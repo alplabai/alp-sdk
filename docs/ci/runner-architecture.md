@@ -168,12 +168,12 @@ the value back through `process.env` instead of a shell variable:
 
 ```yaml
 # Wrong -- payload substituted into the script before Node parses it:
-uses: actions/github-script@v9
+uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9
 with:
   script: core.info("${{ github.event.pull_request.title }}")
 
 # Right:
-uses: actions/github-script@v9
+uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9
 env:
   PR_TITLE: ${{ github.event.pull_request.title }}
 with:
@@ -224,6 +224,35 @@ how much that check is worth:
   string that action receives rather than JavaScript it evals, so it is
   deliberately not checked; a composite action's own `run:` steps live
   outside `.github/workflows/` and are likewise unchecked.
+
+## Third-party action pinning
+
+Every `uses:` in `.github/workflows/` must resolve a 40-character commit
+SHA, not a mutable tag — a retagged or compromised upstream release must not
+change what a workflow executes without a new PR pinning it forward
+(alp-sdk#1479). Keep the tag as a trailing comment so a reviewer does not
+have to resolve the SHA back to a human-readable version by hand:
+
+```yaml
+uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+```
+
+**One deliberate exception:** `release.yml`'s `provenance` job, which calls
+`slsa-framework/slsa-github-generator`'s reusable workflow by tag
+(`@v2.1.0`), not by SHA. Upstream's own README ("Referencing SLSA builders
+and generators") requires its builders and generators be referenced as
+`@vX.Y.Z` so that `slsa-verifier` can verify the ref of the trusted
+reusable workflow — a hash pin is not supported yet (tracked upstream as
+`slsa-verifier#12`). That job's `compile-generator` input also defaults to
+false, so its binary-fetch step downloads a release asset at this ref,
+which must be a tag. The trust anchor for this one reference is the
+Sigstore-signed builder identity, not a SHA pin.
+
+`tests/scripts/test_workflows_are_loadable.py::%test_workflow_uses_are_sha_pinned`
+enforces the rule, with the SLSA generator call as its one documented
+exemption. `.github/dependabot.yml` bumping these pins, and
+`persist-credentials: false` on `actions/checkout` steps, are tracked as
+follow-on work in alp-sdk#1544, not yet done.
 
 ## Adding a new self-hosted job
 

@@ -74,14 +74,14 @@ jobs:
       # (fetch the action, then do its job) and can stall like any other
       # step here -- same reasoning as tier-a-library-build's caps below.
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         timeout-minutes: 5
         with:
           python-version-file: alp-sdk/.python-version
@@ -118,14 +118,14 @@ jobs:
       # `apt-get`/`pip`/`west` can -- same failure class as the run: steps
       # this job already caps.
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         timeout-minutes: 5
         with:
           python-version-file: alp-sdk/.python-version
@@ -183,7 +183,7 @@ jobs:
       # steps above. Worst successful run in 44 sampled runs was 62s;
       # 3min = 180s = 2.9x headroom.
       - name: Cache Zephyr modules
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5
         timeout-minutes: 5
         with:
           path: |
@@ -192,7 +192,7 @@ jobs:
           key: zephyr-v4.4.1-tier-a-${{ runner.os }}
 
       - name: Cache ccache objects
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5
         timeout-minutes: 5
         with:
           path: ${{ github.workspace }}/.ccache
@@ -279,14 +279,14 @@ jobs:
       # Python above -- a marketplace `uses:` step makes its own network
       # round trip and can stall.
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         timeout-minutes: 5
         with:
           python-version-file: alp-sdk/.python-version

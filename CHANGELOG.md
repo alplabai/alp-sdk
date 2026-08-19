@@ -285,18 +285,31 @@ guard compared a *parked* (`os: "off"`) sibling core's moot slot0 address
 against the live core's, refusing the working
 `examples/power-timing/power-managed-sensor` example; now scoped to
 `os == "zephyr"` on both roles, matching `_enforce_flow_d_preflight_pair`'s
-existing convention — and a real gap that is NOT fixed here: any AEN301/501/
-601/701 board.yaml that leaves its sibling core at the SoM's `alp-stock-shim`
-default (the common case) now correctly refuses, because none of those four
-SoM presets declares a disjoint `he_slot0`/`hp_slot0` `memory_map:` override
-the way `E1M-AEN801.yaml` does. `docs/portability-matrix.md`,
-`docs/portability.md`, `docs/v1.0-readiness.md`, `README.md`, and
-`docs/tutorials/04-cross-family-portability.md` are updated to reflect the 12
-newly-failing swap-test cells this causes (the emitted `alp.conf` itself is
-unaffected — the four SKUs still refuse at board-topology validation, before
-config emission). Populating a per-SoM memory map is a firmware-policy
-decision (slot sizing, per-core OTA support) this change does not make;
-tracked as a follow-up at #1445.
+existing convention — and a real gap #1295 did not close: any AEN301/501/
+601/701 board.yaml that left its sibling core at the SoM's `alp-stock-shim`
+default (the common case) would have refused, because the #1295 slice alone
+left none of those four SoM presets declaring a disjoint `he_slot0`/`hp_slot0`
+`memory_map:` override the way `E1M-AEN801.yaml` does — a state that never
+reached `dev`, since the #1445 slice of the same commit closed it. (E1M-AEN401
+never hit this refusal: at the time, the loader only called `_resolve_slot0_load_address`
+when `debug.jlink_flash_device` was truthy, and the E4 variant's explicit
+`null` is not truthy, so the resolver never ran for it. #1444/#1446 later
+changed that gate to test key presence instead of truthiness.) This gap and
+its fix landed together, in the same commit (`bd8be484`, PR #1447) — see
+"### Fixed — E1M-AEN301/401/501/601/701 declare disjoint M55 slot0 windows
+(#1445)" below, after which all five presets (AEN301/401/501/601/701)
+declare `he_slot0` at `0x80010000` and `hp_slot0` at `0x802b0000`, 2688 KiB
+each. `docs/portability-matrix.md` briefly recorded the 12 swap-test cells
+as failing after that commit landed — the emitted `alp.conf` was never
+affected, and the four SKUs never actually refused on `dev`, since #1445's
+memory_map overrides landed in the same commit — until #1452's sweep
+restored its 18-of-21 count. None of `docs/portability.md`,
+`docs/v1.0-readiness.md`, `README.md`, or
+`docs/tutorials/04-cross-family-portability.md` ever recorded the 12
+failing cells.
+Populating a per-SoM memory map is
+a firmware-policy decision (slot sizing, per-core OTA support) that the
+#1295 slice did not make; the #1445 slice of the same commit made it.
 
 ### Fixed — `executionPolicy.missingTool` stops pinning the outcome to PATH, and ADR-0020 says what "never PATH" means
 

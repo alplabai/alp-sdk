@@ -74,14 +74,14 @@ jobs:
       # with Zephyr + modules landing as siblings via bootstrap.sh's
       # `west init -l alp-sdk`.
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         timeout-minutes: 5
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         timeout-minutes: 5
         with:
           python-version-file: alp-sdk/.python-version
@@ -119,7 +119,7 @@ jobs:
           ' >> "$GITHUB_ENV"
 
       - name: Cache Zephyr workspace (modules + zephyr)
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5
         timeout-minutes: 5
         with:
           path: |
@@ -128,7 +128,7 @@ jobs:
           key: getting-started-aen801-zephyr-v4.4.1-${{ runner.os }}
 
       - name: Cache Zephyr SDK
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5
         timeout-minutes: 15
         with:
           path: zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}
