@@ -129,8 +129,7 @@ jobs:
         # HUNG fetch fails here and names this step (#1549).
         timeout-minutes: 20
         run: |
-          sudo apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends \
+          APT_NO_RECOMMENDS=1 .github/scripts/apt-install.sh \
               ninja-build gperf ccache dfu-util device-tree-compiler \
               python3-dev python3-pip python3-setuptools python3-wheel \
               libffi-dev libssl-dev xz-utils file make gcc gcc-multilib \
