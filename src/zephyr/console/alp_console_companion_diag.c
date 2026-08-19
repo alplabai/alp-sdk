@@ -95,6 +95,11 @@ static int cmd_companion_diag_info(const struct shell *sh, size_t argc, char **a
 	shell_print(sh, "uptime: %u ms", (unsigned int)di.uptime_ms);
 	shell_print(sh, "heap:   %u B free", (unsigned int)di.free_heap_bytes);
 	shell_print(sh, "lasterr:%u", di.last_error);
+	/* Last Wi-Fi event ID (reserved[0]).  Printed because it is the cheap
+	 * single-radio signal for #1562: 0 after an `ap start` means no WLAN event
+	 * ever fired, which separates "the radio never got going" from "it came up
+	 * and stopped" without needing a second radio to watch for the SSID. */
+	shell_print(sh, "wifievt:%u", di.reserved[0]);
 	return 0;
 }
 
