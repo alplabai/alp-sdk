@@ -52,6 +52,8 @@ jobs:
       # tree, so cloning the ~hundred-MB upstream archive is wasted
       # work in this job.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        with:
+          persist-credentials: false
         timeout-minutes: 3
 
       - name: Install arm-none-eabi toolchain
@@ -91,6 +93,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         timeout-minutes: 3
         with:
+          persist-credentials: false
           # Init only the gd32_firmware_library submodule; other
           # submodules (if any are added later) stay un-initialised
           # in this job to keep the checkout fast.
