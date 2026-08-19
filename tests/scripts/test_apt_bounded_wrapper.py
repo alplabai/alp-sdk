@@ -189,3 +189,84 @@ def test_a_real_apt_error_is_not_retried(tmp_path: Path) -> None:
         f"a non-transient exit must pass through unchanged, got {proc.returncode}"
     )
     assert "not retrying" in proc.stderr
+
+
+def _hanging_apt(tmp_path: Path) -> Path:
+    """apt-get that never returns, so `timeout` kills it with rc=124."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    apt = bindir / "apt-get"
+    apt.write_text("#!/bin/sh\nsleep 9999\n", encoding="utf-8")
+    apt.chmod(0o755)
+    sudo = bindir / "sudo"
+    sudo.write_text('#!/bin/sh\nexec "$@"\n', encoding="utf-8")
+    sudo.chmod(0o755)
+    return bindir
+
+
+def _run_hanging(tmp_path: Path, *, budget: str, slice_s: str, step: str):
+    env = dict(os.environ)
+    env["RUNNER_TEMP"] = str(tmp_path)
+    env["GITHUB_ACTION"] = step
+    env["APT_STEP_BUDGET"] = budget
+    env["APT_ATTEMPT_TIMEOUT"] = slice_s
+    env["APT_ATTEMPTS"] = "3"
+    env["PATH"] = f"{_hanging_apt(tmp_path)}:{env['PATH']}"
+    return subprocess.run(["bash", str(_WRAPPER), "update"], env=env,
+                          capture_output=True, text=True, timeout=180)
+
+
+def test_the_give_up_line_agrees_with_the_attempt_lines(tmp_path: Path) -> None:
+    """#1604: the two terminal messages used to contradict the progress lines.
+
+    The budget guard and the loop exit each printed their own summary and were
+    mutually exclusive: when the budget fell below the floor before the LAST
+    attempt, the guard fired and `all N attempts failed` became unreachable, so
+    a reader saw `attempt 3/3` followed by a give-up naming a different attempt
+    number and no total. Observed on #1570, run 32275153453.
+
+    Budget 30s with a 12s slice spends 24s on two attempts and leaves 6s, which
+    is under the 10s floor -- the exact shape that used to contradict itself.
+    """
+    proc = _run_hanging(tmp_path, budget="30", slice_s="12", step="short-budget")
+    err = proc.stderr
+
+    assert proc.returncode != 0, f"a hung apt must not report success:\n{err}"
+    assert "attempt 2/3" in err, f"expected the second attempt to announce itself:\n{err}"
+    assert "giving up after 2/3 attempt(s)" in err, (
+        f"the give-up line must state how many attempts actually RAN, and it must "
+        f"agree with the last 'attempt N/M' line:\n{err}"
+    )
+    # The contradictory phrasing must be gone entirely.
+    assert "before attempt" not in err, (
+        f"'before attempt N' named an attempt that never started and could follow "
+        f"a HIGHER attempt number:\n{err}"
+    )
+
+
+def test_exhausting_every_attempt_says_so(tmp_path: Path) -> None:
+    """The other exit path must produce the same shape of sentence."""
+    proc = _run_hanging(tmp_path, budget="40", slice_s="12", step="full-budget")
+    err = proc.stderr
+    assert "attempt 3/3" in err, err
+    assert "giving up after 3/3 attempt(s)" in err, (
+        f"all three ran, so the total must say 3/3:\n{err}"
+    )
+    assert "every attempt the budget allowed has failed" in err, err
+
+
+def test_an_invocation_that_never_ran_apt_says_zero_attempts(tmp_path: Path) -> None:
+    """The most important case to read correctly: apt-get never executed.
+
+    A second invocation in a step whose budget an earlier one consumed must say
+    0 attempts and still fail -- reporting success there would be a silent
+    green for a package that was never installed.
+    """
+    deadline = tmp_path / "apt-bounded.spent.deadline"
+    deadline.write_text(str(int(time.time()) - 1), encoding="utf-8")
+    proc = _run_hanging(tmp_path, budget="30", slice_s="12", step="spent")
+    err = proc.stderr
+    assert proc.returncode != 0, f"must not exit 0 having run nothing:\n{err}"
+    assert "giving up after 0/3 attempt(s)" in err, (
+        f"an invocation that ran no apt-get must say 0, not omit the count:\n{err}"
+    )
