@@ -262,14 +262,13 @@ static int ota_flush(bool final)
 	}
 	if (n_ready == 0u) return CC3501E_HW_OK;
 
-	uint32_t since_rearm = 0u;
-	uint32_t off         = ota.flushed;
-	const uint32_t stop  = ota.flushed + n_ready;
+	uint32_t       since_rearm = 0u;
+	uint32_t       off         = ota.flushed;
+	const uint32_t stop        = ota.flushed + n_ready;
 	while (off < stop) {
 		uint32_t n = stop - off;
 		if (n > CC3501E_OTA_FINISH_FLASH_BLOCK) n = CC3501E_OTA_FINISH_FLASH_BLOCK;
-		if (psa_fwu_write(ota.target, off, &ota.window[off - ota.window_base], n) !=
-		    PSA_SUCCESS) {
+		if (psa_fwu_write(ota.target, off, &ota.window[off - ota.window_base], n) != PSA_SUCCESS) {
 			return CC3501E_HW_ERR_IO;
 		}
 		off += n;

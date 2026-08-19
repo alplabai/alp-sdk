@@ -158,8 +158,7 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 			uint32_t waited = 0u;
 			for (;;) {
 				alp_cc3501e_ota_status_t fs;
-				if (cc3501e_ota_status(ctx, &fs, timeout_ms) == ALP_OK &&
-				    fs.reserved[1] == 0u) {
+				if (cc3501e_ota_status(ctx, &fs, timeout_ms) == ALP_OK && fs.reserved[1] == 0u) {
 					break; /* flush done -- retry the chunk */
 				}
 				if (waited >= CC3501E_OTA_FLUSH_WAIT_MS) {

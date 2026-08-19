@@ -247,11 +247,11 @@ attempts for at least 1 s after `WIFI_EN`/`nRESET` release.  The
 inter-chip SPI handshake's first PING-reply also serves as the
 "boot is complete, firmware is alive" signal.
 
-### Where the firmware actually lives (4 MB xSPI flash)
+### Where the firmware actually lives (8 MB xSPI flash)
 
 The CC3501E exposes an internal xSPI bus (datasheet pinout:
 `XSPI_D0..3`, `XSPI_CLK`, `XSPI_CS`).  The E1M-AEN module
-populates a **4 MB external xSPI flash** on that bus carrying:
+populates an **8 MB external xSPI flash** on that bus carrying:
 
 - BL2 (TI-signed 2nd-stage bootloader)
 - Application image (SimpleLink + Wi-Fi stack + BLE stack +
