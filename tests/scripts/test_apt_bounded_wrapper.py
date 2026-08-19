@@ -17,6 +17,7 @@ that matter, without needing a network or a real apt.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -25,6 +26,48 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WRAPPER = _REPO_ROOT / "scripts" / "ci" / "apt-bounded.sh"
+
+def _why_the_wrapper_cannot_run_here() -> str:
+    """Empty when this platform can execute the wrapper; else the reason.
+
+    `python-smoke` runs this suite on three platforms and the wrapper is a
+    Linux-CI artefact, so two of them could never have passed:
+
+    - `macos-latest` HAS bash but ships no `timeout` -- it is `gtimeout`, from
+      coreutils, not installed by default. Surfaced as rc=127, command not
+      found, on exactly the two tests that reach the timeout call.
+    - `windows-latest` failed all four with an empty stderr and no deadline
+      file. NOT for want of tools: Git for Windows puts both `bash.EXE` and a
+      real GNU `timeout.EXE` on PATH, so a `shutil.which` check finds them and
+      would run these anyway. What is missing is POSIX semantics -- the PATH
+      shims below are `#!/bin/sh` files made executable with `chmod`, and NTFS
+      has no executable bit for that to set.
+
+    So the platform test is deliberately BOTH: `os.name` for the semantics the
+    shims need, and `shutil.which` for the two binaries, because a Linux runner
+    that silently lost `timeout` should skip loudly rather than pass vacuously.
+    Neither half is redundant.
+
+    Nothing about the wrapper's real behaviour goes unchecked either way: it
+    only ever runs on `ubuntu-latest`, which is where apt exists at all and
+    where every workflow it guards runs.
+    """
+    if os.name != "posix":
+        return (
+            "not a POSIX platform -- the PATH shims are `#!/bin/sh` scripts and "
+            "rely on an executable bit this filesystem does not have"
+        )
+    missing = [tool for tool in ("bash", "timeout") if shutil.which(tool) is None]
+    if missing:
+        return " + ".join(missing) + " not installed"
+    return ""
+
+
+_CANNOT_RUN = _why_the_wrapper_cannot_run_here()
+needs_the_wrappers_own_tools = pytest.mark.skipif(
+    bool(_CANNOT_RUN),
+    reason=f"scripts/ci/apt-bounded.sh cannot run here: {_CANNOT_RUN}",
+)
 
 
 def _env(tmp_path: Path, *, step: str = "teststep") -> dict[str, str]:
@@ -63,6 +106,7 @@ def test_the_wrapper_exists_and_is_executable() -> None:
     assert os.access(_WRAPPER, os.X_OK), f"{_WRAPPER} is not executable"
 
 
+@needs_the_wrappers_own_tools
 def test_a_step_whose_budget_is_spent_fails_loudly_rather_than_silently(
     tmp_path: Path,
 ) -> None:
@@ -94,6 +138,7 @@ def test_a_step_whose_budget_is_spent_fails_loudly_rather_than_silently(
     )
 
 
+@needs_the_wrappers_own_tools
 def test_the_deadline_is_shared_across_invocations_in_one_step(
     tmp_path: Path,
 ) -> None:
@@ -115,6 +160,7 @@ def test_the_deadline_is_shared_across_invocations_in_one_step(
     )
 
 
+@needs_the_wrappers_own_tools
 def test_a_different_step_gets_its_own_budget(tmp_path: Path) -> None:
     """Scoping is per step: one step's spent budget must not starve the next."""
     env_a = _env(tmp_path, step="step-a")
@@ -132,6 +178,7 @@ def test_a_different_step_gets_its_own_budget(tmp_path: Path) -> None:
     assert len(list(tmp_path.glob("apt-bounded.*.deadline"))) == 2
 
 
+@needs_the_wrappers_own_tools
 def test_a_real_apt_error_is_not_retried(tmp_path: Path) -> None:
     """Only timeout (124) and apt-transient (100) retry; a real error surfaces."""
     env = _env(tmp_path, step="step-err")
