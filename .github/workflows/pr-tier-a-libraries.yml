@@ -74,7 +74,7 @@ jobs:
       # (fetch the action, then do its job) and can stall like any other
       # step here -- same reasoning as tier-a-library-build's caps below.
       - name: Checkout alp-sdk
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         timeout-minutes: 5
         with:
           persist-credentials: false
@@ -119,7 +119,7 @@ jobs:
       # `apt-get`/`pip`/`west` can -- same failure class as the run: steps
       # this job already caps.
       - name: Checkout alp-sdk
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         timeout-minutes: 5
         with:
           persist-credentials: false
@@ -301,7 +301,7 @@ jobs:
       # Python above -- a marketplace `uses:` step makes its own network
       # round trip and can stall.
       - name: Checkout alp-sdk
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         timeout-minutes: 5
         with:
           persist-credentials: false
