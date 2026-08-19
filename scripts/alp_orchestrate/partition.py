@@ -292,13 +292,55 @@ def _has_real_dt_label(
     override -- nothing does yet, so this currently returns `False` for
     every device on every SoM. That is the correct interim answer: it means
     `alt_devices` never recommends a target this resolver cannot verify,
-    rather than recommending one that merely LOOKS verified (alp-sdk#1556
-    tracks wiring up and verifying real per-region/per-instance DT labels).
+    rather than recommending one that merely LOOKS verified.
+
+    alp-sdk#1556: `resolve_storage_partitions()` now gates the PRIMARY
+    resolution on this same predicate for a `memory_map:`-sourced device
+    (not just the alt-device remedy) -- naming `flash_device: mram_main`
+    (or any other unverified `memory_map:` region) can no longer reach
+    `status: ok`; it blocks with a reason instead of fabricating a DT
+    label the board tree never defines. `on_module.ospi_memories:`
+    devices are NOT gated by that change (`is_ospi_device` in the
+    resolver still short-circuits this predicate to `True` for them) --
+    this function already returns `False` for every `ospi_memories:` key
+    (the loop below only ever matches a `memory_map:` region name), so
+    gating the primary path on it unconditionally would also block every
+    `ospi0`-targeting entry, including the ones the existing storage test
+    suite (`tests/scripts/test_orchestrate_storage*.py`) deliberately uses
+    as its "device-independent allocator mechanics" fixture. Verifying
+    `ospi_memories:` against its own real, per-instance DT label is a
+    separate gap this issue's repro does not cover (see this function's
+    own paragraph above) -- left as tracked follow-up, not silently
+    widened here.
     """
     for region in resolve_memory_map(som_preset, metadata_root):
         if region.get("name") == flash_device:
             return isinstance(region.get("dt_label"), str)
     return False
+
+
+def _verified_alt_devices(
+    exclude: str,
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+) -> list[str]:
+    """Every known flash device other than `exclude` that both resolves
+    (`_resolve_flash_device()`) and carries a verified Devicetree label
+    (`_has_real_dt_label()`) -- the only kind of device safe to name back
+    to a customer as a `flash_device:` alternative (#1484 / #1556: naming
+    one that merely LOOKS verified reproduces the exact defect either
+    issue closes). Used by `resolve_storage_partitions()`'s #1556
+    unverified-dt_label block; kept separate from the near-identical
+    filter already inlined in the overlap-block remedy below (that one
+    also excludes the SoM's own reserved region names, which don't apply
+    here) rather than risk a shared-helper refactor rippling into that
+    already-reviewed code path.
+    """
+    return sorted(
+        d for d in _known_flash_devices(som_preset, metadata_root)
+        if d != exclude
+        and _has_real_dt_label(d, som_preset, metadata_root)
+        and _resolve_flash_device(d, som_preset, metadata_root)[0] is not None)
 
 
 def _blocked_partition(
@@ -394,6 +436,25 @@ def resolve_storage_partitions(
         is_ospi_device = device_name in (
             (project.som_preset.get("on_module") or {}).get(
                 "ospi_memories") or {})
+        # #1556: `descriptor["dt_label"]` DEFAULTS to the device name
+        # whenever the SoM preset sets no explicit `dt_label:` override,
+        # and that default was never checked against the generated
+        # Zephyr board tree -- `flash_device: mram_main` resolved
+        # `status: ok` with a fabricated `dt_label` of `mram_main` even
+        # though the generated tree only defines `mram_storage`. Gate on
+        # the exact predicate #1484 already built for this
+        # (`_has_real_dt_label()`) so an entry can never reach
+        # `status: ok` on a `memory_map:` device whose label is
+        # unverified -- applied in `_place()` below, AFTER the
+        # overlap/overflow checks, so an entry that was already going to
+        # block for one of THOSE reasons keeps that reason (the SoM's
+        # own regions are the more actionable fact to report).
+        # `on_module.ospi_memories:` devices are deliberately exempted
+        # (see `_has_real_dt_label()`'s docstring) -- that key's
+        # verification gap is separate follow-up.
+        verified_dt_label = is_ospi_device or _has_real_dt_label(
+            device_name, project.som_preset,
+            project.effective_metadata_root())
         # Page-aligned high-water mark; sibling partitions allocate
         # bottom-up from offset 0.  Page = 4 KiB matches the IPC
         # carve-out allocator; storage erase blocks on every silicon
@@ -568,6 +629,37 @@ def resolve_storage_partitions(
                     f"storage entry '{entry.name}' {where} overlaps "
                     f"sibling partition '{overlap_with}' on device "
                     f"'{device_name}'")
+
+            if not verified_dt_label:
+                # #1556: this entry cleared every other check (page
+                # alignment, capacity, sibling/reserved overlap) and was
+                # about to resolve `status: ok` -- but `dt_label` is the
+                # device NAME, defaulted because no SoM preset declares
+                # an explicit `dt_label:` override for '{device_name}',
+                # and that default has never been checked against the
+                # generated board tree. Refuse rather than emit a
+                # `partitions { }` overlay under a label the board `.dts`
+                # may not define (`grep -rn '{dt_label}' zephyr/` is the
+                # check to run). Checked HERE, not earlier, so an entry
+                # that would ALSO overlap a reserved/sibling region still
+                # gets that more actionable reason instead.
+                alt = _verified_alt_devices(
+                    device_name, project.som_preset,
+                    project.effective_metadata_root())
+                remedy = (
+                    f"use a different flash_device: ({', '.join(alt)})"
+                    if alt else
+                    "no other flash_device: on this SoM both resolves "
+                    "and has a verified Devicetree label")
+                return 0, size_aligned, (
+                    f"storage entry '{entry.name}' would resolve on "
+                    f"flash device '{device_name}', but its Devicetree "
+                    f"label defaults to '{dt_label}' (the device name) "
+                    f"-- no SoM preset declares an explicit dt_label: "
+                    f"override for '{device_name}', so this default is "
+                    f"unverified against the generated board tree and "
+                    f"may decorate a `partitions {{ }}` child under a "
+                    f"node the board `.dts` never defines; {remedy}.")
 
             allocated.append((base_bytes, top_bytes, entry.name))
             return base_bytes, size_aligned, None
