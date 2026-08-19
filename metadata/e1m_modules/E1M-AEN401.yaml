@@ -191,7 +191,7 @@ pad_routes:
 helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e
-    firmware_path: firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin
+    firmware_path: firmware/cc3501e/prebuilt/cc3501e-v0.3.0.bin
     # CC3501E firmware is Alp-released, applied over the bridge SPI
     # programming OTP.  Alp Lab programs it in production; a customer
     # flash is permitted only to recover a bricked device, using
