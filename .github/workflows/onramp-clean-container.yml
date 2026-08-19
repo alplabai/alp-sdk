@@ -188,6 +188,7 @@ jobs:
         # #1477: worst observed successful run 4s across 30 sampled runs.
         timeout-minutes: 5
         with:
+          persist-credentials: false
           path: alp-sdk
           fetch-depth: 1
 
@@ -376,6 +377,7 @@ jobs:
         # #1477: worst observed successful run 4s across 30 sampled runs.
         timeout-minutes: 5
         with:
+          persist-credentials: false
           path: alp-sdk
           fetch-depth: 1
 
@@ -548,6 +550,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         timeout-minutes: 5
         with:
+          persist-credentials: false
           path: alp-sdk
           fetch-depth: 1
 
@@ -555,6 +558,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         timeout-minutes: 5
         with:
+          persist-credentials: false
           repository: alplabai/tan-cli
           ref: dev
           path: tan-cli

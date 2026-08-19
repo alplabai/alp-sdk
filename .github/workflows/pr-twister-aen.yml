@@ -136,6 +136,7 @@ jobs:
         # #1477: worst observed successful run 4s across 10 sampled runs.
         timeout-minutes: 5
         with:
+          persist-credentials: false
           path: alp-sdk
           fetch-depth: 1
 
