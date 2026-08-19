@@ -261,12 +261,13 @@ name-sort position -- `pinned_low` above sorts after `app_data` and
 1. `memory_map:` region names (e.g. `mram_main`, `ocram_low`) --
    either declared on the SoM or auto-derived from the SoC variant's
    `mram_mb` / `sram_banks_kb` (the same resolution `resolve_memory_map()`
-   does for IPC carve-outs).  Neither `mram_main` nor `ocram_low` resolves
-   to a working target today -- see the `dt_label:` caveat below.
+   does for IPC carve-outs). As of #1556, a region here can only reach
+   `status: ok` when it carries an EXPLICIT, verified `dt_label:`
+   override -- see the `dt_label:` caveat below.
 2. `on_module.ospi_memories:` keys (e.g. `ospi0`) -- external OSPI
-   flash declared on the SoM.  This is the more misleading of the two:
-   `ospi0` matches a real controller node by name but resolves to a
-   disabled DT node -- see the `dt_label:` caveat below.
+   flash declared on the SoM. This path is NOT yet gated the same way
+   (tracked as follow-up, not covered by #1556's fix) -- see the
+   `dt_label:` caveat below.
 
 A `memory_map:` region marked `carveout: false` is excluded from
 resolution (#1484): that flag also means the region is a partition
@@ -277,19 +278,25 @@ Devicetree label of its own. Naming one as `flash_device:` refuses
 with a reason instead of silently decorating a DT label that doesn't
 exist on the board.
 
-No AEN SKU has a working `storage[].flash_device:` target today. Both
-candidates the resolver will accept still resolve to an unverified DT
-label:
+No AEN SKU has a working `storage[].flash_device:` target today. Neither
+candidate the resolver will accept resolves to a verified DT label:
 
 * `mram_main` -- no AEN preset declares a `dt_label:` override for it, so
   it falls back to a Devicetree label of `mram_main`, but the generated
   board tree never defines that node, only `mram_storage` (`grep -rn
-  mram_main zephyr/` returns nothing). Even a verified label would not
-  help: `mram_main` is 100% tiled on all six AEN presets (`mcuboot` +
-  `he_slot0` + `hp_slot0` + `reserved` + `storage` + `atoc`, all
-  `carveout: false`, summing to exactly its own 5632 KiB capacity), so
-  a `storage:` entry targeting it always resolves `status: blocked`,
-  never `status: ok`, regardless of the label.
+  mram_main zephyr/` returns nothing). #1556: `resolve_storage_partitions()`
+  now refuses to emit `status: ok` for an entry on an unverified
+  `memory_map:` device -- a `storage:` entry targeting `mram_main` blocks
+  with a reason naming the unverified label, not just a fabricated
+  `dt_label`. (`mram_main` is ALSO 100% tiled on all six AEN presets --
+  `mcuboot` + `he_slot0` + `hp_slot0` + `reserved` + `storage` + `atoc`,
+  all `carveout: false`, summing to exactly its own 5632 KiB capacity --
+  so on a real preset an entry there blocks on capacity first; the
+  dt_label gate is what now ALSO stops it on a SoM/region shape that
+  isn't fully tiled, e.g. E1M-V2N101's `ddr_main`, which has room to
+  spare and pre-#1556 resolved `status: ok` with a fabricated
+  `dt_label: ddr_main` -- `grep -rn ddr_main zephyr/` also returns
+  nothing.)
 * an `on_module.ospi_memories:` entry (e.g. `ospi0`) -- despite the name
   matching a controller node 1:1 on paper, `ospi0` is the ONLY `ospi<n>`
   label anywhere under `zephyr/`
@@ -297,11 +304,9 @@ label:
   E1M-AEN801 board `.dts` files include it, and there it is the OSPI
   CONTROLLER node (`status = "disabled"`, no flash-chip child) -- not an
   enabled flash device. E1M-AEN301/501/701 have no board tree at all;
-  E1M-AEN401/601 have one with no `ospi0` node.
-
-#1556 tracks the fix for both: validating `dt_label` against the
-generated board tree (or requiring an explicit, verified `dt_label:`
-override) before either target is usable.
+  E1M-AEN401/601 have one with no `ospi0` node. #1556 does NOT gate this
+  path -- it still resolves `status: ok` with an unverified `dt_label`;
+  closing this gap the same way is separate follow-up.
 
 The loader rejects typoed `flash_device:` references at parse time
 with the list of known devices for the project's SoM.  When the
