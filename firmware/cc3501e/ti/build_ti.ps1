@@ -32,6 +32,12 @@ param(
     [string]$ToolboxDir   = "C:\ti\simplelink_wifi_toolbox_4.2.4\simplelink_wifi_toolbox_win_4_2_4",
     [string]$Transport    = "spi",  # spi | sdio
     [switch]$OtaSelftest,           # build the OTA-self-install validation updater (embeds cc3501e_ota_candidate.c, -DCC3501E_OTA_SELFTEST)
+    # #1610 bench validation: drive the WINDOWED OTA path (begin/write/flush/finish)
+    # locally from the bring-up task against the embedded candidate, because the
+    # console cannot stream OTA_WRITE and the streaming app needs hal_alif.  Also
+    # embeds cc3501e_ota_candidate.c.  Proves the flush mechanics, NOT the
+    # host/bridge contention -- see cc3501e_ota_window_selftest().
+    [switch]$OtaWindowSelftest,
     [switch]$WifiHostDriver,        # link the CC35xx Wi-Fi host driver (-DCC3501E_WIFI; enables GET_MAC / scan / connect bodies)
     [switch]$Ble                    # ALSO link Apache NimBLE + ble_interface (-DCC3501E_BLE; enables BLE enable/advertise). Implies -WifiHostDriver (shared HIF -> Wlan_Start first).
 )
@@ -115,6 +121,7 @@ $cflags += "-DCC3501E_BRIDGE_FW_VERSION_U16=$fwU16"
 
 $txdef = if ($Transport -eq 'sdio') { @('-DCC3501E_CONTROL_TRANSPORT_SDIO=1') } else { @() }
 if ($OtaSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_SELFTEST') }
+if ($OtaWindowSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_WINDOW_SELFTEST') }
 if ($WifiHostDriver) {
     # CC35xx Wi-Fi host driver: enables the real GET_MAC/scan/connect bodies (P0-5/P0-6).
     # The real OSI layer (osi_dpl.c, compiled below) provides osi_uSleep + the ~30-func OSI
@@ -236,12 +243,12 @@ $inc += @("-I$SdkDir\source\ti\drivers\net\wifi\wifi_host_driver\inc_adapt",
 # OTA-self-install validation updater: also embed the signed candidate vendor image
 # blob (the streamed OTA path is driven over the bridge instead; this is the
 # embedded-blob self-test that validates the swap mechanism without a host).
-if ($OtaSelftest) {
+if ($OtaSelftest -or $OtaWindowSelftest) {
     # cc3501e_ota_candidate.c is a signed firmware binary (bin2c C-array) -- an
     # internal-only artifact (alp-sdk #590); NOT committed to the public repo.
     # Stage it from alp-sdk-internal before an -OtaSelftest build.
     $cand = "$fw\hal\ti\cc3501e_ota_candidate.c"
-    if (-not (Test-Path $cand)) { throw "-OtaSelftest needs $cand -- stage it from alp-sdk-internal\firmware\cc3501e\hal\ti\ (see $fw\hal\ti\cc3501e_ota_candidate.README.md)" }
+    if (-not (Test-Path $cand)) { throw "-OtaSelftest/-OtaWindowSelftest needs $cand -- stage it from alp-sdk-internal\firmware\cc3501e\hal\ti\ (see $fw\hal\ti\cc3501e_ota_candidate.README.md)" }
     $sources += $cand
 }
 

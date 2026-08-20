@@ -140,6 +140,77 @@ void cc3501e_hw_init(void)
 	 * only run once the FreeRTOS scheduler is up.  See cc3501e_hw_tick(). */
 }
 
+#ifdef CC3501E_OTA_WINDOW_SELFTEST
+/* ===================================================================== */
+/* #1610 BENCH VALIDATION -- drive the WINDOWED OTA path locally.
+ *
+ * The windowed staging in cc3501e_hw_ti_ota.c can only be exercised by a host
+ * that streams OTA_WRITE frames, and the alp console exposes only
+ * begin/status/abort by design.  Building the one app that streams
+ * (examples/aen/aen-cc3501e-bringup -DCC3501E_OTA_REAL=ON) needs hal_alif,
+ * which is missing from the bench host's Zephyr workspace.
+ *
+ * So drive the SAME HAL entry points the SPI dispatcher would drive --
+ * cc3501e_hw_ota_begin / _write / _finish plus cc3501e_hw_ota_pump -- from the
+ * bring-up task, feeding the embedded signed candidate.  That exercises the
+ * real window fill, the deferred OTA_OP_FLUSH, psa_fwu_start-on-first-flush,
+ * the TI_FWU_MANIFEST_SIZE offset anchor, and psa_fwu_finish's own read-back
+ * version check.
+ *
+ * WHAT THIS DOES *NOT* COVER, and it is the half that failed in 2026-06-19:
+ * there is no host clocking the bridge during the flush blackouts, so this
+ * proves the FLUSH MECHANICS and the offset/state correctness, NOT the
+ * host/bridge contention.  Do not read a pass here as "OTA works over the
+ * bridge".  It is the arm-A de-risk, deliberately run first because it is the
+ * half that needs no Alif app.
+ *
+ * Observability: the CC3501E has NO UART wired to the XDS110 (measured -- zero
+ * bytes on both XDS110 UARTs across a cold boot), so results are read back over
+ * the bridge with `alp companion ota status`:
+ *   state: writing(1) + written == total  -> every window flush executed
+ *   state: staged(2)                      -> finish + install also succeeded
+ *   state: error(3)                       -> the cursor says how far it got
+ */
+extern const unsigned char cc3501e_ota_candidate[];
+extern const unsigned int  cc3501e_ota_candidate_len;
+
+static void cc3501e_ota_window_selftest(void)
+{
+	const uint8_t *img = (const uint8_t *)cc3501e_ota_candidate;
+	const uint32_t len = (uint32_t)cc3501e_ota_candidate_len;
+
+	/* BEGIN is deferred like every host-driven op: submit, then pump it. */
+	(void)cc3501e_hw_ota_begin(len);
+	cc3501e_hw_ota_pump();
+
+	/* Stream in the SAME 256 B page-aligned chunks the host uses, and honour
+	 * BUSY exactly as the corrected host does: a BUSY means the window filled
+	 * and a flush was queued WITHOUT consuming this chunk, so pump the flush and
+	 * retry the SAME offset.  Bounded so a stuck flush cannot spin forever. */
+	uint32_t off = 0u, guard = 0u;
+	while (off < len && guard < (len / 64u) + 4096u) {
+		uint32_t n  = len - off;
+		if (n > 256u) n = 256u;
+		const int rc = cc3501e_hw_ota_write(off, &img[off], n);
+		++guard;
+		if (rc == CC3501E_HW_BUSY) {
+			cc3501e_hw_ota_pump(); /* runs ota_flush on this task */
+			continue;              /* same off, same n */
+		}
+		if (rc != CC3501E_HW_OK) {
+			return; /* state/cursor left readable over the bridge */
+		}
+		off += n;
+	}
+	if (off != len) return; /* short -- leave the cursor for diagnosis */
+
+	/* FINISH: flush the tail, psa_fwu_finish (which READS THE IMAGE BACK and
+	 * version-checks it against the manifest), then psa_fwu_install. */
+	(void)cc3501e_hw_ota_finish();
+	cc3501e_hw_ota_pump();
+}
+#endif /* CC3501E_OTA_WINDOW_SELFTEST */
+
 #ifdef CC3501E_OTA_SELFTEST
 /* ===================================================================== */
 /* OTA update cycle (PSA-FWU) -- the supported path to install a CONFIRMED,
@@ -260,6 +331,11 @@ void cc3501e_hw_tick(void)
 		 * is a PLAIN build (no SELFTEST) that accept()s itself below on its
 		 * TRIAL boot -> permanent.  If install fails, fall through to accept. */
 		(void)cc3501e_ota_install(cc3501e_ota_candidate, cc3501e_ota_candidate_len);
+#endif
+#ifdef CC3501E_OTA_WINDOW_SELFTEST
+		/* #1610: one-shot, gated by the same fwu_accept_done latch, so it runs
+		 * once per boot and never re-stages behind the host's back. */
+		cc3501e_ota_window_selftest();
 #endif
 		if (psa_fwu_accept() == PSA_SUCCESS_REBOOT) {
 			psa_fwu_request_reboot(); /* finalize commit; device reboots, image now permanent */
