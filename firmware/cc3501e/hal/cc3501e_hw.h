@@ -342,4 +342,27 @@ uint8_t  cc3501e_hw_reset_cause(void);
 uint32_t cc3501e_hw_uptime_ms(void);
 uint32_t cc3501e_hw_free_heap_bytes(void);
 
+/* WI-FI role currently up, as an alp_cc3501e_role_t: ROLE_OFF, ROLE_WIFI_STA or
+ * ROLE_WIFI_AP.  GET_DIAG_INFO used to hardcode ROLE_OFF, which made the one
+ * field that could answer "is the soft-AP role still up?" useless -- the exact
+ * question alp-sdk#1562 is stuck on, where the AP starts, advertises and then
+ * stops with ap_start long since returned.  Reading it is non-disturbing: it
+ * reports the backend's own bookkeeping and issues no radio call.
+ *
+ * SCOPE: Wi-Fi only.  BLE state is NOT folded in, so ROLE_BLE_PERIPHERAL /
+ * ROLE_BLE_CENTRAL / ROLE_DUAL_WIFI_BLE are never returned even with BLE up --
+ * the NimBLE accessor sits behind CC3501E_BLE in another TU and the Wi-Fi-only
+ * build must keep compiling.  A host MUST NOT read ROLE_OFF here as "BLE is
+ * down". Widening this means giving the backends a shared role latch. */
+uint8_t cc3501e_hw_radio_role(void);
+
+/* ID of the last Wi-Fi event the backend's event callback saw, of any type;
+ * 0 means no WLAN event has fired since reset.  Surfaced via GET_DIAG_INFO's
+ * reserved[0].  Bench value (#1562): an ap_start that leaves this at 0 never
+ * got a WLAN event at all -- a far sharper signal than "the SSID did not appear
+ * on another radio", and it needs no second radio.  Declared here rather than
+ * hand-externed at its call site, which is how it spent a release impersonating
+ * the free_heap_bytes field. */
+uint32_t cc3501e_hw_wifi_last_event_id(void);
+
 #endif /* CC3501E_BRIDGE_HAL_CC3501E_HW_H */
