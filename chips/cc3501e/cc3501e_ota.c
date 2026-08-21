@@ -8,6 +8,7 @@
  */
 
 #include <string.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "cc3501e_internal.h"
@@ -145,7 +146,7 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 			n = chunk;
 		}
 		s = cc3501e_ota_write(ctx, (uint32_t)off, image + off, n, timeout_ms);
-		if (s == ALP_ERR_BUSY) {
+		if (s == ALP_ERR_BUSY || s == ALP_ERR_IO) {
 			/* The device queued a window flush and did NOT consume this chunk
 			 * (#1610).  Hold off ALL payload while its DMA is torn down and poll
 			 * header-only until reserved[1] (flush_pending) clears, then retry the
@@ -156,10 +157,22 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 			 * stream: OTA_FLUSH_WAIT_MS is generous against a ~4-block flush but
 			 * finite. `off` is NOT advanced, so the retry is a plain re-send. */
 			uint32_t waited = 0u;
+			bool     landed = false;
 			for (;;) {
 				alp_cc3501e_ota_status_t fs;
+				/* The STATUS read itself can fail here -- while the slave re-arms
+				 * its SPI the link is DOWN, so header-only polls return IO too.
+				 * That is the expected shape of a flush window, not an error:
+				 * keep polling until the device answers again. */
 				if (cc3501e_ota_status(ctx, &fs, timeout_ms) == ALP_OK && fs.reserved[1] == 0u) {
-					break; /* flush done -- retry the chunk */
+					/* Device is back. Did this chunk actually land before the
+					 * blackout swallowed its reply?  The cursor is authoritative:
+					 * WRITE is NOT idempotent for an already-passed offset, so
+					 * re-sending one the device already took is rejected as
+					 * out-of-order -- which is exactly how a lost reply used to
+					 * abort a perfectly healthy session. */
+					if (fs.bytes_written >= (uint32_t)(off + n)) landed = true;
+					break;
 				}
 				if (waited >= CC3501E_OTA_FLUSH_WAIT_MS) {
 					(void)cc3501e_ota_abort(ctx, timeout_ms);
@@ -168,7 +181,8 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 				alp_delay_ms(CC3501E_OTA_FLUSH_POLL_MS);
 				waited += CC3501E_OTA_FLUSH_POLL_MS;
 			}
-			continue; /* same off, same n */
+			if (landed) off += n; /* reply was lost, bytes are in -- move on */
+			continue;             /* else retry the SAME chunk */
 		}
 		if (s != ALP_OK) {
 			/* A lost reply can leave the host unsure whether the chunk landed.

@@ -50,6 +50,11 @@ __attribute__((weak)) void bridge_transport_spi_hw_reinit(void)
 {
 }
 
+__attribute__((weak)) bool bridge_transport_spi_is_dead(void)
+{
+	return false; /* no real SPI slave on this backend -- never dead */
+}
+
 /* Weak default for the bridge stand-down during a HIF-re-arbitrating radio op (BLE
  * enable).  The ti backend (hal/ti/transport_hw_ti_spi.c) overrides it with the real
  * SPI_transferCancel + SPI_close; no-op on any non-ti backend. */

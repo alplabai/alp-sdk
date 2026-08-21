@@ -367,6 +367,20 @@ void cc3501e_hw_tick(void)
 	}
 #endif
 
+	/* === Bridge SPI open-failure recovery (#1610) ===
+	 * The two self-heals below both key off counters (g_resync_count,
+	 * g_arm_fail_count) that can only move while the slave HAS a handle.  If every
+	 * SPI_open retry failed there is no handle at all: no transfers, no arm
+	 * attempts, both counters frozen, and the link is dead with nothing watching.
+	 *
+	 * That is what killed windowed OTA on silicon -- the shared DMA is briefly busy
+	 * after a psa_fwu flash burst, and re-arming after every window flush rolls that
+	 * dice ~67 times for a 1.09 MB image.  Losing once was permanent.  Retry here so
+	 * a busy-DMA open failure is a stall, not a death. */
+	if (bridge_transport_spi_is_dead()) {
+		bridge_transport_spi_hw_reinit();
+	}
+
 	/* === Bridge SPI FIFO-flush recovery (cold-framing self-heal) ===
 	 * The transport is hardware-SS0 framed (dwc-ssi drives SS0 per transfer), but a
 	 * cold first contact can still leave a 1-byte frame offset (RX FIFO residue from

@@ -306,6 +306,11 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 /* Open the bridge SPI0 slave (SPI_MODE_CALLBACK, DMA on the free ch12/13 per the
  * board file), fill the 0xA5 header-idle marker, and arm the first request
  * header.  Shared by init and reinit.  MUST run on the bring-up/worker task. */
+/* Set when every SPI_open retry failed, so the slave has no handle at all.
+ * cc3501e_hw_tick() polls this and re-attempts the open -- see the note in
+ * spi_open_and_arm().  Read cross-TU via bridge_transport_spi_is_dead(). */
+volatile uint32_t g_spi_open_failed;
+
 static void spi_open_and_arm(void)
 {
 	for (size_t i = 0u; i < sizeof(sync_idle); i++) {
@@ -320,23 +325,39 @@ static void spi_open_and_arm(void)
 	params.frameFormat         = SPI_POL0_PHA0; /* mode 0, per the host driver / chip manifest */
 	params.dataSize            = 8;
 
-	/* Retry SPI_open: right after a psa_fwu flash burst (OTA FINISH) the shared
-	 * DMA can be momentarily busy, so a single open intermittently returns NULL ->
-	 * the slave stays dead and the host's poll times out (the OTA-finish flakiness,
-	 * silicon 2026-06-19).  A few short-spaced retries make the re-arm reliable. */
-	for (int attempt = 0; attempt < 8; attempt++) {
+	/* Retry SPI_open: right after a psa_fwu flash burst the shared DMA can be
+	 * momentarily busy, so a single open intermittently returns NULL -> the slave
+	 * stays dead and the host's poll times out (the OTA-finish flakiness, silicon
+	 * 2026-06-19).
+	 *
+	 * The budget used to be 8 x 2 ms = 16 ms flat, which is enough for the ONE
+	 * burst OTA FINISH performs.  Windowed OTA (#1610) re-arms after EVERY window
+	 * flush -- ~67 times for a 1.09 MB image -- so 16 ms is rolled ~67 times, and
+	 * the first roll that loses killed the link permanently: measured on silicon,
+	 * the stream survives hundreds of seconds of flushes and then dies for good.
+	 * Back off progressively to ~100 ms total instead of a flat 16 ms. */
+	for (int attempt = 0; attempt < 12; attempt++) {
 		spi = SPI_open(CONFIG_SPI_0, &params);
 		if (spi != NULL) {
 			break;
 		}
-		ClockP_usleep(2000); /* 2 ms settle */
+		ClockP_usleep((uint32_t)(2000 + attempt * 1500)); /* 2 ms .. 18.5 ms */
 	}
 	g_spi_reopen_count++;
 	if (spi == NULL) {
-		/* No console this early; the host's PING simply never completes
-		 * and bring-up code reports the dead link. */
+		/* DEAD, and NOTHING else will notice.  This is the one failure the tick's
+		 * two self-heals cannot see: with no handle there are no transfers (so
+		 * g_resync_count never bumps) and no arm attempts (so g_arm_fail_count
+		 * never bumps), and the old code simply returned -- a permanent, silent
+		 * wedge recoverable only by a debug-probe reflash.
+		 *
+		 * Latch it so cc3501e_hw_tick() keeps retrying the open.  A busy DMA is
+		 * transient by nature; the only thing that made it terminal was never
+		 * trying again. */
+		g_spi_open_failed = 1u;
 		return;
 	}
+	g_spi_open_failed = 0u;
 
 	/* RETURN_PARTIAL is intentionally NOT enabled.  With hardware SS0 (the Alif master
 	 * drives the per-transfer chip-select) each phase's transfer completes on its byte
@@ -388,4 +409,12 @@ void bridge_transport_spi_hw_suspend(void)
 void bridge_transport_spi_hw_init(void)
 {
 	spi_open_and_arm();
+}
+
+/* True while the SPI slave has no handle (every SPI_open retry failed).  The
+ * tick's desync and arm-failure self-heals both rely on counters that only move
+ * when a handle exists, so this is the only signal for that state (#1610). */
+bool bridge_transport_spi_is_dead(void)
+{
+	return g_spi_open_failed != 0u;
 }

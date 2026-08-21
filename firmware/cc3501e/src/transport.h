@@ -55,6 +55,12 @@ void bridge_transport_sdio_hw_init(void);
  * backend (the weak default below). */
 void bridge_transport_spi_hw_reinit(void);
 
+/* True while the SPI slave has NO handle -- every SPI_open retry failed.  The
+ * tick's desync / arm-failure self-heals both key off counters that only move
+ * when a handle exists, so this is the only way that state is observable
+ * (#1610).  Weak-stubbed false on backends without a real SPI slave. */
+bool bridge_transport_spi_is_dead(void);
+
 /* Stand the bridge slave DOWN (cancel the armed transfer + SPI_close, releasing its
  * DMA) for the DURATION of a radio op that re-arbitrates the shared HIF DMA -- BLE
  * controller enable, where the NWP HIF handshake hangs if the bridge DMA contends.
