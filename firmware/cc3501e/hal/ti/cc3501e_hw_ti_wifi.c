@@ -79,6 +79,17 @@ static bool wifi_started;
  * worker / the bridge SPI re-open).  Shared by scan + connect so RoleUp runs once. */
 static bool wifi_sta_role_up;
 
+/* AP role-up latch, mirroring wifi_sta_role_up.  Set on a successful
+ * Wlan_RoleUp(AP), cleared on a successful Wlan_RoleDown(AP), and reported via
+ * cc3501e_hw_radio_role() -> GET_DIAG_INFO's `role` field.  This is firmware
+ * BOOKKEEPING, not a radio query: it says "we brought the AP role up and have
+ * not torn it down", which is precisely the claim #1562 needs to compare
+ * against an AP that has stopped advertising.  If the host ever observes
+ * role == WIFI_AP while a second radio sees no beacon, the NWP dropped the AP
+ * underneath us without the firmware asking -- a different fault from the
+ * firmware tearing it down, and the two are indistinguishable today. */
+static bool wifi_ap_role_up;
+
 /* ---- Worker <-> Wi-Fi-event rendezvous (WIFI_BLE_INTEGRATION.md) ----------
  * Async Wlan_* ops (Scan / Connect) complete on the host-driver thread via the
  * event cb, NOT on the worker thread that issued them.  The worker Clear()s the
@@ -188,6 +199,24 @@ uint32_t cc3501e_hw_wifi_last_event_id(void)
 	return wifi_cb_last_id;
 }
 
+/* Current WI-FI role for GET_DIAG_INFO (see cc3501e_hw.h).  Pure bookkeeping --
+ * no Wlan_Get, so this is safe to poll while a role is up.
+ *
+ * AP outranks STA in the single-value wire field: the AP role is the one a host
+ * polls about, and scan/connect leave wifi_sta_role_up latched for the process
+ * lifetime, so reporting STA would mask every AP.
+ *
+ * BLE is deliberately NOT folded in (no ROLE_BLE_* / ROLE_DUAL_WIFI_BLE here):
+ * cc3501e_nimble_host_is_enabled() lives behind CC3501E_BLE in a different TU,
+ * and reaching for it would make this Wi-Fi TU fail to build in the Wi-Fi-only
+ * configuration. The field's consumer (#1562) asks about the soft-AP. */
+uint8_t cc3501e_hw_radio_role(void)
+{
+	if (wifi_ap_role_up) return (uint8_t)ALP_CC3501E_ROLE_WIFI_AP;
+	if (wifi_sta_role_up) return (uint8_t)ALP_CC3501E_ROLE_WIFI_STA;
+	return (uint8_t)ALP_CC3501E_ROLE_OFF;
+}
+
 /* Defined below; boot_start pre-caches the STA role through it. */
 static int cc3501e_hw_wifi_ensure_sta_role(void);
 
@@ -291,6 +320,13 @@ void cc3501e_hw_wifi_boot_start(void)
 void cc3501e_hw_net_init(void)
 {
 	/* No lwIP linked in this build -- nothing to bring up. */
+}
+uint8_t cc3501e_hw_radio_role(void)
+{
+	/* No radio linked in this build -- no role can be up.  Same reason as
+	 * cc3501e_hw_wifi_last_event_id below: GET_DIAG_INFO reads it
+	 * unconditionally, so the non-Wi-Fi ti build must define it too. */
+	return (uint8_t)ALP_CC3501E_ROLE_OFF;
 }
 uint32_t cc3501e_hw_wifi_last_event_id(void)
 {
@@ -738,6 +774,31 @@ int cc3501e_hw_wifi_ap_start(const uint8_t *ssid,
 	memcpy(ssid_buf, ssid, ssid_len);
 	ssid_buf[ssid_len] = 0u;
 
+	/* Force ALWAYS-ACTIVE power mode BEFORE the role-up.  Wlan_Start leaves the
+	 * NWP in ELP (root-caused against the SDK 2026-06-22 -- see the identical
+	 * call in cc3501e_hw_ble_enable, which needs it because BLE-controller init
+	 * never completes from ELP).  Until now that was the ONLY
+	 * WLAN_SET_POWER_MANAGEMENT call in this HAL, so an AP started without BLE
+	 * ran with whatever mode Wlan_Start left behind.
+	 *
+	 * A soft-AP has to beacon continuously; it is the one role that cannot
+	 * tolerate the NWP dozing.  This is the leading hypothesis for #1562, where
+	 * the AP starts, advertises for ~100 s and then stops with ap_start long
+	 * since returned -- the instrumented run pinned the failure DOWNSTREAM of
+	 * Wlan_RoleUp (stage saturated at 7), which is where a power-mode death
+	 * lives and where the stage counter could no longer see.
+	 *
+	 * Deliberately scoped to the AP path, NOT lazy_start: always-active raises
+	 * idle draw for every radio user, and scan/connect are demonstrably fine
+	 * from ELP (scan returned 5 APs during the #1562 bench runs). Do not widen
+	 * this without measuring the power cost.
+	 *
+	 * Best-effort by design (return ignored, as in the BLE path): if the NWP
+	 * rejects the set, the AP should still come up -- just possibly with the
+	 * #1562 lifetime. A hard failure here would turn a degraded AP into no AP. */
+	WlanPowerManagement_e pm = POWER_MANAGEMENT_ALWAYS_ACTIVE_MODE; /* = 0 */
+	(void)Wlan_Set(WLAN_SET_POWER_MANAGEMENT, (void *)&pm);
+
 	RoleUpApCmd_t ap    = { 0 };
 	ap.ssid             = ssid_buf;
 	ap.channel          = 6u; /* common 2.4 GHz default */
@@ -747,6 +808,7 @@ int cc3501e_hw_wifi_ap_start(const uint8_t *ssid,
 	if (Wlan_RoleUp(WLAN_ROLE_AP, &ap, WLAN_WAIT_FOREVER) != 0) {
 		return CC3501E_HW_ERR_IO;
 	}
+	wifi_ap_role_up = true;
 	network_set_up(network_get_ap_if());
 	return CC3501E_HW_OK;
 }
@@ -759,6 +821,7 @@ int cc3501e_hw_wifi_ap_stop(void)
 	if (Wlan_RoleDown(WLAN_ROLE_AP, WLAN_WAIT_FOREVER) != 0) {
 		return CC3501E_HW_ERR_IO;
 	}
+	wifi_ap_role_up = false;
 	return CC3501E_HW_OK;
 }
 
