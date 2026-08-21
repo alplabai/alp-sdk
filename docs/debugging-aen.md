@@ -3,8 +3,9 @@
 How to attach a debugger to an E1M-AEN801 module, the traps that catch
 people the first time, and what J-Link is (and is not) for on this part.
 This doc covers **attaching/reading state** (§1–§2, §4), **flashing your
-own application image** (§3), and **reading its output** (§5–§6) — for
-bench bring-up walk-through see [`bring-up-aen.md`](bring-up-aen.md).
+own application image** (§3), **reading its output** (§5–§6), and **a
+board that boots nothing at all** (§7) — for bench bring-up walk-through
+see [`bring-up-aen.md`](bring-up-aen.md).
 
 ## 1. Attach a debugger: `west debug`
 
@@ -103,6 +104,10 @@ needs none of the flashing tooling discussed in those other docs.
 Symptom: some time after boot, J-Link reports `Failed to power up DAP`
 (or SETOOLS reports `Target did not respond`) even though the probe
 otherwise enumerates fine.
+
+If instead the DAP stays perfectly healthy and the cores simply never
+start — reads work, `VTOR` stays `0`, nothing boots — that is a
+different failure with a different fix; see §7.
 
 Cause: once the resident application returns from `main()` and enters an
 idle / low-power wait, one mechanism gates both channels — the Secure
@@ -255,3 +260,223 @@ prefixes, colours, runtime filtering and the log backends entirely
 `CONFIG_LOG_DEFAULT_LEVEL` still applies. If your output is missing but
 the banner *does* appear, you are past this section's failure and looking
 at ordinary log-level filtering instead.
+
+## 7. The Secure Enclave boots nothing at all — cores parked, VTOR 0
+
+§4 is the case where a *running* application takes the debug port away
+from you. This section is its opposite, and it is routinely mistaken for
+a dead Secure Enclave: the DAP is perfectly healthy, but nothing ever
+boots.
+
+**Symptom.** After every cold power cycle: SW-DP IDR reads `0x4C013477`,
+memory reads and writes work, the J-Link MRAM loader still programs and
+verifies — and yet `VTOR` stays `0`, the cores are parked, and the
+application console is silent. J-Link may also report `Could not find
+core in CoreSight setup`.
+
+**First prove your reads are real.** Read the same address twice. The
+§4 gated-DAP state returns *different values on successive reads of the
+same address* — floating reads that look like data. Two different values
+means the debug power domain is gated and you are in §4, not here.
+
+**Do not write anything to MRAM until you have done §7.2.** The
+diagnosis depends on the current contents of slot0, and a SETOOLS erase
+(`app-write-mram -e`) commits immediately and destroys that evidence.
+
+### 7.1. Three things that look like evidence and are not
+
+Each of these has sent someone down the "the Secure Enclave is damaged"
+path:
+
+- **"I restored my MRAM backup and verified it byte-identical."** An
+  immediate readback is not proof of a commit. Whether a J-Link write
+  persists depends on what is resident: with **no** bootloader to
+  chainload it, an application blob written without a separately staged,
+  signed `AppTocPackage.bin` reads back correctly through `verifybin`
+  and through a plain memory read, and then reverts on the next cold
+  power cycle (§3). On an Alp-Lab-provisioned module, where MCUboot is
+  the factory ATOC, the opposite is bench-proven: an `imgtool`-signed
+  image `loadbin`'d straight to slot0 is verified by MCUboot and
+  chainloaded, and survives cold power cycles — that is
+  [`aen-provisioning.md`](aen-provisioning.md) §0.5 Option B. **Either
+  way, the only proof of a commit is a cold power cycle followed by a
+  re-read** — a readback taken in the same session as the write
+  establishes nothing about what is actually in MRAM now.
+- **"I cannot read above `0x80580000`, so I cannot inspect the SE."**
+  That system area is SE-read-gated on a healthy part. Being unable to
+  read it is expected. Note that this cuts both ways: because it is
+  gated on good parts too, it carries no diagnostic weight in either
+  direction.
+- **"There is no SE banner on the application console."** There never
+  is, for two separate reasons. The boot output is split across two
+  ports — the SES header comes out on the **SEUART**, application output
+  on the application console — and the application console is only ever
+  driven by an application that was built with a console on it. A silent
+  application console is consistent with a healthy SE, a missing
+  application, *and* a perfectly good application that simply has no
+  UART console configured.
+
+  Before you read anything into a silent console, **confirm which port
+  you are actually on** — see §7.1.1.
+
+#### 7.1.1. Confirming you are on the application console
+
+Three independent things must all be true, and each has been wrong in
+the field:
+
+1. **The right UART for your carrier.** On the E1M carrier the HE
+   application console is **Alif UART5** — the E1M edge **"UART0"** — on
+   **P3_4 (`UART5_RX_A`) / P3_5 (`UART5_TX_A`)**, brought out on the
+   E1M-EVK as header **J17**. On an Alif Ensemble DevKit it is a
+   *different* UART: **UART2**, on **P1_0 / P1_1**. A tap placed by
+   DevKit habit on an E1M carrier is silent no matter how healthy the
+   board is.
+2. **The application actually routes its console there.** In the board
+   tree that means `zephyr,console = &uart5` (and `zephyr,shell-uart`),
+   with `CONFIG_UART_CONSOLE=y`. An application built for the RAM console
+   instead (`CONFIG_RAM_CONSOLE=y` with `CONFIG_UART_CONSOLE=n`) writes
+   nothing to any UART by design. If you maintain your own board port,
+   check this in *your* tree, not in ours.
+3. **The right line settings.** The application console is
+   **115200 8N1** (`current-speed = <115200>`). The SEUART is a
+   different rate entirely — **57600** on E8/E6/E4 — so the baud you are
+   using is itself a strong hint about which port you are on.
+
+Beware the reverse mix-up too: on a setup whose only USB serial adapter
+is the SE-UART's, *neither* application UART is wired out to USB, so a
+serial port that "just appeared over USB" may well be the SEUART rather
+than the application console.
+
+What a healthy application console prints on this SDK is the boot-identity
+banner from `src/zephyr/alp_banner.c`, in the shape:
+
+```
+Alp SDK <version>  |  E1M-AEN801  |  Alif Ensemble E8  |  (c) Alp Lab AB
+```
+
+If what you remember seeing on that port does not look like that, it did
+not come from this SDK, and identifying what produced it is worth doing
+before drawing conclusions from its absence.
+
+### 7.2. The read that discriminates
+
+This writes nothing, and it comes first.
+
+Before it, if the board has been through a long flashing session, power
+it **off for about 30 seconds** and back on. A tangled Secure Enclave
+that refuses maintenance (`Target did not respond`, MRAM writes timing
+out) has recovered from exactly that more than once; a brief cycle
+restores only the SE-UART handshake. It costs nothing and it changes no
+state.
+
+Then listen on the SEUART — **57600 8N1** for E8/E6/E4, **55000** for
+E7/E5/E3/E1 — and cold power-cycle the board during the capture. §2 of
+[`aen-provisioning.md`](aen-provisioning.md) has the listener script and
+the wiring rules (1.8 V logic level, crossed TX/RX, common ground); all
+three bite in ways that look like a dead board.
+
+| What the capture shows | Reads as | Next |
+|---|---|---|
+| SES header present (`SEROM v1.x.y`, `SES Ax v1.x.y`, `[SES] STOC DEVICE ok`, `[SES] LCS=1`) **and** `[SES] No ATOC` | the SE is alive and the application TOC is missing or invalid | reflash — §7.3 |
+| SES header present **and** `[SES] M55-HE booted from address 0x58000000`, with no `[SES] No ATOC` line | the SE is alive, found a valid ATOC and released the core — so the failure is *above* the SES | capture the application console too — §7.2.1 |
+| **no SES header at all**, at the correct baud, with the adapter proven good | the failure is below the SES; this is where a genuinely damaged SE state would land | §7.4 |
+| zero bytes | inconclusive — do not diagnose the board yet | jumper the adapter's own TXD↔RXD and confirm it echoes (a dead-RX adapter loops back through its own ground and never hears the board), then re-check 1.8 V, crossing and ground |
+
+#### 7.2.1. If the SES released the core, look at the application console
+
+There is a documented cause of `VTOR = 0x00000000` with a live debug
+port that has nothing to do with the Secure Enclave: **MCUboot refusing
+the image in slot0.** Every E1M-AEN module ships with dev-signed MCUboot
+as the factory ATOC, so a bad slot0 write leaves a perfectly valid ATOC
+and a healthy SE while nothing boots.
+
+The two signatures, both bench-observed, print on the **application**
+console:
+
+- `E: Unable to find bootable image` — a tampered or wrong signature.
+- `E: Bad image magic 0x20004c60` — a non-MCUboot image (a raw
+  `zephyr.bin` rather than a `zephyr.signed.bin`).
+
+Both leave the debug port alive — `Secure debug: enabled`, the core
+halts and single-steps through real instructions — which is exactly the
+picture §7 opens with. A bad slot0 write does not brick J-Link access.
+
+The fix is to re-sign and rewrite slot0 (`west flash`, or
+[`aen-provisioning.md`](aen-provisioning.md) §0.5 Option B with a
+`zephyr.signed.bin`), **not** the SETOOLS reflash in §7.3. See
+[`secure-boot.md`](secure-boot.md).
+
+If the application console is silent here too, then MCUboot itself is
+not running and you are back to the ATOC question.
+
+### Second probe
+
+Worth running either way:
+
+```bash
+./maintenance -opt devenquiry -c <your-serial-device>
+```
+
+(`maintenance` is an Alif SETOOLS binary, run from your SETOOLS
+directory. SETOOLS is license-gated by Alif and is not redistributed
+with this SDK.)
+
+`Device connected` proves the SES itself is up and talking, whatever the
+application side is doing. Silence here at the correct baud, alongside a
+missing SES header, is the combination that points below the SES.
+
+### 7.3. Recovering when the SES is alive
+
+The state to expect is a missing or invalid application TOC: the SES has
+nothing valid to boot, so it never releases the cores. That is the same
+state a factory-fresh board is in — §6 of
+[`aen-provisioning.md`](aen-provisioning.md) notes that `Could not find
+core in CoreSight setup` is *normal* before an application has been
+provisioned. It is a routine reflash, not damage.
+
+One way an already-working board arrives here is an interrupted SETOOLS
+write, because the two halves are not symmetric: `app-write-mram -e`
+commits immediately, while the program half commits **only on
+completion**. Interrupt the program between those two — a `^C`, a closed
+pipe, a `head` on the output, a reset landing mid-download — and slot0 is
+left erased with a healthy SE that has nothing to boot.
+
+Flash Alif's **stock blink** from the SETOOLS package first, before your
+own image — it separates "can the SE be written at all" from "is my
+application good". Write an **app-only** TOC and leave the factory
+DEVICE config alone; a mismatched DEVICE config is itself a documented
+crash cause. [`aen-provisioning.md`](aen-provisioning.md) §3–§5 has the
+`tools-config` / `app-gen-toc` / `app-write-mram` sequence and the
+app-only TOC JSON.
+
+Three things to hold to while doing it:
+
+- **Make sure the supply is solid before you start.** A sag mid-write is
+  the one thing here that can turn a recoverable state into a worse one.
+- **Let `app-write-mram` reach `100% ... Done`.** Do not pipe it into
+  anything that can close early, and do not abort it because it looks
+  stalled — `Waiting for Target..[RESET Platform]` is Hard-maintenance
+  waiting for you to power-cycle the board, not a hang.
+- **Confirm with a cold-cycle read, never with `verifybin` alone.** Read
+  back the first words at the slot0 address after a cold power cycle and
+  compare against the image you wrote.
+
+SETOOLS is license-gated by Alif and is not redistributed with this SDK;
+obtain it from Alif directly.
+
+### 7.4. When the SES header never appears
+
+If the SES header is absent at the correct baud with a proven-good
+adapter, and `devenquiry` is silent, the fault is on the Secure Enclave
+side rather than in the application TOC. This SDK has no recovery recipe
+for that state, and we will not invent one: SE-side recovery and the
+device lifecycle are Alif's domain, and the authoritative reference is
+the **Alif Security Toolkit User Guide** that ships in the SETOOLS
+package.
+
+Capture the SEUART output and any tool error codes verbatim before doing
+anything else, and take it to Alif support — or to us
+(<contact@alplab.ai>, or an issue on this repo) and we will take it
+there with you. Do not keep re-flashing in the hope that one write
+lands; repeated write attempts add wear and destroy the evidence that
+tells you what actually happened.
