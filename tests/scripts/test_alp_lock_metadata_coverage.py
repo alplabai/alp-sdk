@@ -94,9 +94,9 @@ def test_metadata_digest_catches_soc_spec_drift(tmp_path):
     socs.mkdir(parents=True)
     (socs / "e8.json").write_text('{"variant": "e8", "cores": 1}')
 
-    locked = alp_lock.build_lock(ws, rev_resolver=lambda r: "x")
-    assert alp_lock.verify_lock(locked, ws, rev_resolver=lambda r: "x") == []
+    locked = alp_lock.build_lock(ws)
+    assert alp_lock.verify_lock(locked, ws) == []
 
     (socs / "e8.json").write_text('{"variant": "e8", "cores": 2}')
-    drifts = alp_lock.verify_lock(locked, ws, rev_resolver=lambda r: "x")
+    drifts = alp_lock.verify_lock(locked, ws)
     assert any(d.path == "digests.metadata" for d in drifts), drifts
