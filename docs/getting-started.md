@@ -487,22 +487,23 @@ Each name resolves to a manifest under
 right wiring per OS (Zephyr `CONFIG_LVGL=y` in `alp.conf`, Yocto
 `IMAGE_INSTALL` for the A-cores, …) and refuses a library the target
 can't run, naming the failing constraint.  Check what's selected and
-whether it's compatible — run this from *your project's* directory
-(the one containing the `board.yaml` above), not from the SDK
-checkout: the `libraries` line only appears when `doctor` is run
-where it can find that `board.yaml`, and `PYTHONPATH` has to reach
-the checkout's `scripts/` from wherever that project lives:
+whether it's compatible with `tan doctor`, run from *your project's*
+directory (the one containing the `board.yaml` above) or pointed at it
+with `--project`:
 
 ```bash
 cd <your-project-dir>   # contains the board.yaml you just edited
-PYTHONPATH=<path-to-alp-sdk>/scripts python3 -m alp_cli doctor   # a "libraries" line reports tier + licence + fit
+tan doctor              # a "libraries" line reports tier + licence + fit
 ```
 
-`doctor`'s library check only handles the bare-string `libraries: [name,
-...]` form shown above today; the dict form (`- name: lvgl` / `cores:
-[...]`, also schema-valid and what several in-tree examples use) currently
-makes it abort with an uncaught error instead of reporting — a `doctor.py`
-fix, not a docs one, tracked separately.
+The line appears only for a project that selects at least one library;
+both declaration forms are covered (the bare-string `libraries: [name,
+...]` shown above and the `- name: lvgl` / `cores: [...]` dict form every
+in-tree example uses).  An incompatible or unknown selection is a WARN
+there, never a FAIL — `tan build` refuses it outright, which is the hard
+gate.  This check used to live in alp-sdk's own `python -m alp_cli
+doctor`, where it aborted with an uncaught error on the dict form; it
+moved to `tan` under ADR 0020 end-state B and the abort went with it.
 
 The curated set today: `lvgl`, `cmsis-dsp`, `cmsis-nn`, `nanopb`,
 `zcbor`, `modbus` (all Tier A), plus a growing Tier B (recipe-only) set

@@ -98,7 +98,7 @@ vice versa -- five names collide with an incompatible contract
 |---|---|---|
 | `generate` | `generate TEMPLATE_ID DEST [--dry-run] [--force] [--param name=value]` -- materialises a **catalog template** into a directory (`scripts/alp_cli/generate.py:67-90`) | `tan generate --target <mode>` (also `--all`, `--core`, `--output`, `--force`) -- emits a **board-derived config artefact**; no positional `TEMPLATE_ID`/`DEST` (see [`#tan-generate`](#tan-generate) below) |
 | `init` | `init NAME [--som] [--preset] [--peripherals]` -- positional project name (`scripts/alp_cli/init.py:76-90`) | `tan init` -- **options only**, no positional `NAME` (see "`tan init`" below) |
-| `doctor` | `doctor [--json] [--strict] [--no-color]` (`scripts/alp_cli/doctor.py:789-793`) | `tan doctor` (also `--format json`, `--build`) -- `--json` is spelled `--format json`; `--strict` has no `tan` equivalent (see "`tan doctor`" below) |
+| `doctor` | `doctor [--json] [--strict] [--no-color]` (`scripts/alp_cli/doctor.py:729-733`) | `tan doctor` (also `--format json`, `--build`) -- `--json` is spelled `--format json`; `--strict` has no `tan` equivalent (see "`tan doctor`" below) |
 | `explain` | `explain CODE [--json] [--no-color]` -- looks up an `ALP_ERR_*`/`ALP-Bxxx` **diagnostic code** (`scripts/alp_cli/explain.py:68-74`) | `tan explain [--template] [--target]` -- describes a **project/module template or generation target**; also takes an optional positional `[TEMPLATE]` (`python/tan/commands/explain_cmd.py`), but never a diagnostic `CODE` lookup (see "`tan explain`" below) |
 | `run` | `run [--board] [--flash]` -- one direct `west build` + optional flash, single image (`scripts/alp_cli/run.py:76-79`) | `tan run` (also `--flash`, `--core`) -- a **distinct command**, not an alias for `tan build`/`tan flash`: builds the full multi-slice plan, then for a `native_sim` target executes the produced binary, or for a hardware target (with `--flash`) flashes it (`python/tan/commands/run_cmd.py`) |
 
@@ -494,6 +494,13 @@ the SDK and `board.yaml`, the resolved west/Zephyr workspace and version pin,
 the effective Python floor, host prerequisites, Zephyr SDK availability, and
 programming dependencies such as J-Link and Alif SETOOLS. Every failed or
 warning check includes a remediation hint; an unhealthy host exits 4.
+
+For a project that selects at least one curated library (ADR 0018), a
+`libraries` row reports each selection's tier, licence, and whether it fits
+the resolved target — both the bare-string `libraries: [name, ...]` form and
+the `- name: lvgl` / `cores: [...]` dict form. An incompatible or unknown
+selection is a WARN there, never a FAIL; `tan build` is the hard gate on that
+same check.
 
 `--build` is retained for existing callers but no longer changes the checklist.
 As of tan-cli `dev` (ahead of the tagged `v0.5.1` release -- ships in

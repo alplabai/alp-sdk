@@ -8,7 +8,10 @@ Covers the four surfaces the feature adds:
   * the orchestrator emit (top-level ``libraries:`` -> Zephyr Kconfig /
     Yocto IMAGE_INSTALL; incompatible + unknown selections raise a clear
     ``OrchestratorError``; zero-diff when unused);
-  * the ``alp doctor`` libraries section.
+  * the reporting surface -- the tier / licence / fit facts any reporter
+    renders, asserted on the layer itself.  The CLI that renders them is
+    ``tan doctor`` (ADR 0020 end-state B), not this repo; see the section
+    comment above those cases.
 """
 
 import json
@@ -392,31 +395,63 @@ def test_emit_lvgl_yocto_image_install(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------
-# alp doctor
+# Reporting surface: tier + licence + fit, straight off the layer
+#
+# These three used to drive `alp_cli.doctor._check_libraries` -- the doctor
+# LINE, not the layer.  That check moved to `tan doctor` (`tan.core.
+# doctor_libraries`): under ADR 0020 end-state B `tan` is the whole user
+# command surface, so alp-sdk does not keep a second CLI reporting on its own
+# library layer.  What alp-sdk still owes any reporter is the DATA -- that
+# `tier`/`license` are present and readable, that a selection resolves, and
+# that an empty selection resolves to nothing -- so that is what these assert
+# now, with no CLI in the path.
+#
+# Driving the doctor line was in fact WORSE coverage of the layer, not
+# better: all three wrote the bare-string `libraries: [lvgl]` shape, which is
+# the one shape no shipped example uses.  Every in-tree example writes
+# `- {name: ..., cores: [...]}`, and against that shape the check under test
+# raised `OrchestratorError` straight out of `_all_checks()` -- exit 1, whole
+# command down -- because it labelled from the RAW document instead of the
+# loader's normalised names.  Three green tests over a check that worked on
+# no real project.  `test_library_report_covers_both_declaration_shapes`
+# below is that missing case, asserted where it belongs.
 # ---------------------------------------------------------------------
 
-def test_doctor_libraries_none_without_project(monkeypatch, tmp_path: Path) -> None:
-    from alp_cli import doctor
-    monkeypatch.chdir(tmp_path)  # no board.yaml here
-    assert doctor._check_libraries() is None
+def test_library_manifests_carry_the_tier_and_licence_a_report_renders() -> None:
+    """`lvgl (tier A, MIT)` -- the exact string a reporter builds -- is
+    assembled from manifest fields, so those fields must be present and
+    readable through the layer's own accessor rather than by reading YAML."""
+    manifest = liblayer.load_manifest("lvgl")
+    assert manifest["tier"] == "A"
+    assert manifest["license"] == "MIT"
 
 
-def test_doctor_libraries_reports_selection(monkeypatch, tmp_path: Path) -> None:
-    from alp_cli import doctor
-    _write_board(tmp_path, _V2N_LVGL)
-    monkeypatch.chdir(tmp_path)
-    result = doctor._check_libraries()
-    assert result is not None
-    assert result.status == doctor.PASS
-    assert "lvgl" in result.message
-    assert "tier A" in result.message and "MIT" in result.message
+def test_a_selected_library_resolves_with_its_manifest(tmp_path: Path) -> None:
+    project = load_board_yaml(_write_board(tmp_path, _V2N_LVGL))
+    resolved = liblayer.resolve_selection(project, REPO / "metadata")
+    assert [name for name, _ in resolved] == ["lvgl"]
+    assert resolved[0][1]["tier"] == "A"
+    assert resolved[0][1]["license"] == "MIT"
 
 
-def test_doctor_libraries_none_when_empty(monkeypatch, tmp_path: Path) -> None:
-    from alp_cli import doctor
-    _write_board(tmp_path, _V2N_NOLIB)
-    monkeypatch.chdir(tmp_path)
-    assert doctor._check_libraries() is None
+def test_a_project_selecting_nothing_resolves_to_nothing(tmp_path: Path) -> None:
+    project = load_board_yaml(_write_board(tmp_path, _V2N_NOLIB))
+    assert liblayer.resolve_selection(project, REPO / "metadata") == []
+
+
+def test_library_report_covers_both_declaration_shapes(tmp_path: Path) -> None:
+    """`scoped_names` is the only correct source of names for a reporter:
+    board.yaml declares a library EITHER as a bare string (project-wide) OR as
+    `{name, cores}` (core-scoped), and every shipped alp-sdk example uses the
+    second.  A reporter that reads the raw `libraries:` list gets a dict where
+    it expected a name."""
+    body = _V2N_NOLIB.replace(
+        "cores:", "libraries:\n  - name: lvgl\n    cores: [m33_sm]\ncores:"
+    )
+    project = load_board_yaml(_write_board(tmp_path, body))
+    assert liblayer.scoped_names(project) == ["lvgl"]
+    resolved = liblayer.resolve_selection(project, REPO / "metadata")
+    assert [name for name, _ in resolved] == ["lvgl"]
 
 
 # ---------------------------------------------------------------------

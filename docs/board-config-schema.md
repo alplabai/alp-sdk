@@ -542,13 +542,14 @@ Two curation tiers bound CI cost (ADR 0018):
   release.
 - **Tier B — recipe-only**: wiring + compatibility metadata are
   maintained and emitted, but the library is not built in alp-sdk CI.
-  `python -m alp_cli doctor` labels it.
+  `tan doctor` labels it.
 
-`python -m alp_cli doctor` reports the selected libraries for the
-project in scope (tier + licence + compatibility), reading the same
-manifests, so the CLI and alp-studio's library picker never disagree.
-(This is alp-sdk's own Python preflight, distinct from `tan doctor` --
-see [`docs/cli.md`](cli.md).)
+`tan doctor` reports the selected libraries for the project in scope
+(tier + licence + compatibility), reading the same manifests, so the CLI
+and alp-studio's library picker never disagree.  It lives in `tan`, not in
+alp-sdk's own `python -m alp_cli doctor`: under ADR 0020 end-state B `tan`
+is the user command surface, and a verdict about the customer's project is
+a user-facing one (see [`docs/cli.md`](cli.md)).
 
 Scoping a library to specific cores (`cores: [<id>]`) folds in what
 earlier schema drafts spelled as a separate per-core
