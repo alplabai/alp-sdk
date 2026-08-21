@@ -57,7 +57,7 @@ static int cmd_companion_ota_status(const struct shell *sh, size_t argc, char **
 	}
 
 	alp_cc3501e_ota_status_t st = { 0 };
-	alp_status_t s = cc3501e_ota_status(companion_cc3501e, &st, ALP_COMPANION_OTA_MS);
+	alp_status_t             s  = cc3501e_ota_status(companion_cc3501e, &st, ALP_COMPANION_OTA_MS);
 
 	if (s == ALP_ERR_NOT_READY) {
 		shell_warn(sh, "OTA not available (no PSA-FWU in this CC3501E image)");
@@ -70,6 +70,12 @@ static int cmd_companion_ota_status(const struct shell *sh, size_t argc, char **
 	shell_print(sh, "state:   %s (%u)", companion_ota_state_name(st.state), st.state);
 	shell_print(sh, "written: %u B", (unsigned int)st.bytes_written);
 	shell_print(sh, "total:   %u B", (unsigned int)st.total_len);
+	/* #1610 bench triage: reserved[2] names the psa_fwu_* call that failed the
+	 * last window flush (0 = none).  Printed only when non-zero so a healthy
+	 * session stays quiet. */
+	if (st.reserved[2] != 0u) {
+		shell_print(sh, "fault:   stage %u (see cc3501e_hw_ota_fault)", st.reserved[2]);
+	}
 	return 0;
 }
 

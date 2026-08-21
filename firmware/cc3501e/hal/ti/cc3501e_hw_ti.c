@@ -176,38 +176,54 @@ extern const unsigned int  cc3501e_ota_candidate_len;
 
 static void cc3501e_ota_window_selftest(void)
 {
-	const uint8_t *img = (const uint8_t *)cc3501e_ota_candidate;
-	const uint32_t len = (uint32_t)cc3501e_ota_candidate_len;
+	/* ONE STEP PER TICK.  The first cut ran the whole stream inside a single
+	 * cc3501e_hw_tick() call and wedged the bridge after 3 flushes with no host
+	 * traffic at all.  That is NOT how production behaves: there, each flush is
+	 * one pump invocation and the tick RETURNS between them, so the SPI slave
+	 * task, the DMA callbacks and the housekeeping self-heal all get to run.
+	 * Holding the task across the whole stream starves exactly those, so a
+	 * blocking harness cannot tell a real flush defect from its own starvation.
+	 * Model production instead: advance at most one chunk (or pump one queued
+	 * flush) per call, then return. */
+	static const uint8_t *img;
+	static uint32_t       len;
+	static uint32_t       off;
+	static uint8_t        phase; /* 0=begin 1=streaming 2=done */
 
-	/* BEGIN is deferred like every host-driven op: submit, then pump it. */
-	(void)cc3501e_hw_ota_begin(len);
-	cc3501e_hw_ota_pump();
-
-	/* Stream in the SAME 256 B page-aligned chunks the host uses, and honour
-	 * BUSY exactly as the corrected host does: a BUSY means the window filled
-	 * and a flush was queued WITHOUT consuming this chunk, so pump the flush and
-	 * retry the SAME offset.  Bounded so a stuck flush cannot spin forever. */
-	uint32_t off = 0u, guard = 0u;
-	while (off < len && guard < (len / 64u) + 4096u) {
-		uint32_t n  = len - off;
-		if (n > 256u) n = 256u;
-		const int rc = cc3501e_hw_ota_write(off, &img[off], n);
-		++guard;
-		if (rc == CC3501E_HW_BUSY) {
-			cc3501e_hw_ota_pump(); /* runs ota_flush on this task */
-			continue;              /* same off, same n */
+	if (phase == 0u) {
+		img = (const uint8_t *)cc3501e_ota_candidate;
+		len = (uint32_t)cc3501e_ota_candidate_len;
+#ifdef CC3501E_OTA_WINDOW_SELFTEST_BYTES
+		if ((uint32_t)CC3501E_OTA_WINDOW_SELFTEST_BYTES < len) {
+			len = (uint32_t)CC3501E_OTA_WINDOW_SELFTEST_BYTES;
 		}
-		if (rc != CC3501E_HW_OK) {
-			return; /* state/cursor left readable over the bridge */
-		}
-		off += n;
+#endif
+		off = 0u;
+		(void)cc3501e_hw_ota_begin(len);
+		phase = 1u;
+		return; /* the pump below runs ota_do_begin on the NEXT tick */
 	}
-	if (off != len) return; /* short -- leave the cursor for diagnosis */
+	if (phase != 1u) return;
 
-	/* FINISH: flush the tail, psa_fwu_finish (which READS THE IMAGE BACK and
-	 * version-checks it against the manifest), then psa_fwu_install. */
-	(void)cc3501e_hw_ota_finish();
-	cc3501e_hw_ota_pump();
+	/* A queued op (BEGIN or a window FLUSH) owns this tick: let the normal pump
+	 * call in cc3501e_hw_tick() run it and come back next time. */
+	if (cc3501e_hw_ota_flush_pending()) return;
+
+	uint32_t n = len - off;
+	if (n > 256u) n = 256u;
+	const int rc = cc3501e_hw_ota_write(off, &img[off], n);
+	if (rc == CC3501E_HW_BUSY) return; /* window full -> flush queued; retry later */
+	if (rc != CC3501E_HW_OK) {
+		phase = 2u; /* state/cursor left readable over the bridge */
+		return;
+	}
+	off += n;
+	if (off >= len) {
+#ifdef CC3501E_OTA_WINDOW_SELFTEST_FINISH
+		(void)cc3501e_hw_ota_finish();
+#endif
+		phase = 2u;
+	}
 }
 #endif /* CC3501E_OTA_WINDOW_SELFTEST */
 
@@ -332,16 +348,24 @@ void cc3501e_hw_tick(void)
 		 * TRIAL boot -> permanent.  If install fails, fall through to accept. */
 		(void)cc3501e_ota_install(cc3501e_ota_candidate, cc3501e_ota_candidate_len);
 #endif
-#ifdef CC3501E_OTA_WINDOW_SELFTEST
-		/* #1610: one-shot, gated by the same fwu_accept_done latch, so it runs
-		 * once per boot and never re-stages behind the host's back. */
-		cc3501e_ota_window_selftest();
-#endif
 		if (psa_fwu_accept() == PSA_SUCCESS_REBOOT) {
 			psa_fwu_request_reboot(); /* finalize commit; device reboots, image now permanent */
 		}
 		/* PSA_ERROR_BAD_STATE = nothing in trial (already permanent) -> continue. */
 	}
+
+#ifdef CC3501E_OTA_WINDOW_SELFTEST
+	/* #1610: run the windowed-OTA selftest ONCE, ~30 s after boot -- NOT during
+	 * bring-up.  ota_flush calls bridge_transport_spi_hw_reinit(), and tearing
+	 * the SPI slave down before it is fully up wedges it permanently: a 3-window
+	 * run from the first tick killed the bridge with no host traffic at all,
+	 * which is why the pre-existing cc3501e_ota_install selftest (which never
+	 * touches the bridge) can run there and this cannot.  Waiting also gives the
+	 * host time to be polling, which is the condition the flush must survive. */
+	if (cc3501e_hw_uptime_ms() > 30000u) {
+		cc3501e_ota_window_selftest(); /* self-latching; one step per tick */
+	}
+#endif
 
 	/* === Bridge SPI FIFO-flush recovery (cold-framing self-heal) ===
 	 * The transport is hardware-SS0 framed (dwc-ssi drives SS0 per transfer), but a

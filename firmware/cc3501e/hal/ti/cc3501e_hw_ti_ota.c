@@ -125,6 +125,15 @@ static struct {
 	 * MUST be cleared per session in ota_do_begin, including after a SUCCESSFUL
 	 * finish: leave it latched and the second OTA in one power cycle skips
 	 * psa_fwu_start entirely and writes into a slot that was never opened. */
+	/* Fault latch for bench triage (#1610).  The CC3501E has NO UART on the
+	 * XDS110, so a failed flush can only report itself over the bridge.
+	 * fail_stage: 1=psa_fwu_start 2=psa_fwu_write 3=psa_fwu_finish
+	 * 4=psa_fwu_install 5=window shorter than the manifest.
+	 * fail_psa: LOW BYTE of the psa_status_t -- enough to tell the candidates
+	 * apart (BAD_STATE -137 -> 0x77, INVALID_ARGUMENT -135 -> 0x79,
+	 * STORAGE_FAILURE -146 -> 0x6e, NOT_PERMITTED -133 -> 0x7b). */
+	uint8_t  fail_stage;
+	uint8_t  fail_psa;
 	uint32_t window_base;
 	uint32_t window_used;
 	uint32_t flushed;
@@ -212,6 +221,8 @@ static int ota_do_begin(void)
 	ota.window_used = 0u;
 	ota.flushed     = 0u;
 	ota.started     = false;
+	ota.fail_stage  = 0u;
+	ota.fail_psa    = 0u;
 	ota.state       = ALP_CC3501E_OTA_STATE_WRITING;
 	return CC3501E_HW_OK;
 }
@@ -236,6 +247,7 @@ static int ota_flush(bool final)
 {
 	if (!ota.started) {
 		if (ota.window_used < (uint32_t)TI_FWU_MANIFEST_SIZE) {
+			ota.fail_stage = 5u;
 			return CC3501E_HW_ERR_INVAL; /* cannot open the slot without a manifest */
 		}
 		/* Same walk-back-to-READY the FINISH path has always done, moved here
@@ -244,7 +256,10 @@ static int ota_flush(bool final)
 		(void)psa_fwu_cancel(ota.target);
 		(void)psa_fwu_reject(PSA_ERROR_GENERIC_ERROR);
 		(void)psa_fwu_clean(ota.target);
-		if (psa_fwu_start(ota.target, ota.window, TI_FWU_MANIFEST_SIZE) != PSA_SUCCESS) {
+		const psa_status_t ps = psa_fwu_start(ota.target, ota.window, TI_FWU_MANIFEST_SIZE);
+		if (ps != PSA_SUCCESS) {
+			ota.fail_stage = 1u;
+			ota.fail_psa   = (uint8_t)((uint32_t)ps & 0xFFu);
 			return CC3501E_HW_ERR_IO;
 		}
 		ota.started = true;
@@ -268,7 +283,11 @@ static int ota_flush(bool final)
 	while (off < stop) {
 		uint32_t n = stop - off;
 		if (n > CC3501E_OTA_FINISH_FLASH_BLOCK) n = CC3501E_OTA_FINISH_FLASH_BLOCK;
-		if (psa_fwu_write(ota.target, off, &ota.window[off - ota.window_base], n) != PSA_SUCCESS) {
+		const psa_status_t pw =
+		    psa_fwu_write(ota.target, off, &ota.window[off - ota.window_base], n);
+		if (pw != PSA_SUCCESS) {
+			ota.fail_stage = 2u;
+			ota.fail_psa   = (uint8_t)((uint32_t)pw & 0xFFu);
 			return CC3501E_HW_ERR_IO;
 		}
 		off += n;
@@ -315,12 +334,16 @@ static int ota_do_finish(void)
 	if (ota.flushed != ota.total_len) return CC3501E_HW_ERR_IO; /* staged short */
 	psa_status_t pf = psa_fwu_finish(ota.target);
 	if (pf != PSA_SUCCESS && pf != PSA_SUCCESS_REBOOT) {
+		ota.fail_stage = 3u;
+		ota.fail_psa   = (uint8_t)((uint32_t)pf & 0xFFu);
 		return CC3501E_HW_ERR_IO;
 	}
 	/* psa_fwu_install stages the swap and returns PSA_SUCCESS_REBOOT(1) -- a SUCCESS
 	 * code meaning "reboot to complete the swap", NOT an error. */
 	psa_status_t pi = psa_fwu_install(); /* CANDIDATE -> STAGED */
 	if (pi != PSA_SUCCESS && pi != PSA_SUCCESS_REBOOT) {
+		ota.fail_stage = 4u;
+		ota.fail_psa   = (uint8_t)((uint32_t)pi & 0xFFu);
 		return CC3501E_HW_ERR_IO;
 	}
 	ota.state = ALP_CC3501E_OTA_STATE_STAGED;
@@ -442,6 +465,13 @@ bool cc3501e_hw_ota_flush_pending(void)
 	return ota.op == OTA_OP_FLUSH && ota.op_rc == OTA_OP_INFLIGHT;
 }
 
+/* Bench triage (#1610): which psa_fwu_* call failed, and its status low byte. */
+void cc3501e_hw_ota_fault(uint8_t *stage, uint8_t *psa_lo)
+{
+	if (stage != 0) *stage = ota.fail_stage;
+	if (psa_lo != 0) *psa_lo = ota.fail_psa;
+}
+
 int cc3501e_hw_ota_finish(void)
 {
 	if (ota.state == ALP_CC3501E_OTA_STATE_STAGED) return CC3501E_HW_OK; /* already finished */
@@ -472,6 +502,8 @@ int cc3501e_hw_ota_abort(void)
 	ota.window_used = 0u;
 	ota.flushed     = 0u;
 	ota.started     = false;
+	ota.fail_stage  = 0u;
+	ota.fail_psa    = 0u;
 	ota.op          = OTA_OP_IDLE;
 	ota.op_rc       = 0;
 	return CC3501E_HW_OK;

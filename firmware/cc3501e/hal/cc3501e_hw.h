@@ -318,6 +318,12 @@ int8_t cc3501e_hw_ota_reboot_rc(void);
  * Backends that never flash mid-stream return false. */
 bool cc3501e_hw_ota_flush_pending(void);
 
+/* Bench triage (#1610): which psa_fwu_* call failed the last OTA flush and its
+ * psa_status_t low byte.  Exists because the CC3501E has no UART on the debug
+ * probe, so a failed flush can only report itself over the bridge.  Both zero
+ * when nothing has failed since the last BEGIN/ABORT. */
+void cc3501e_hw_ota_fault(uint8_t *stage, uint8_t *psa_lo);
+
 /* Report session progress: @p state = alp_cc3501e_ota_state_t, @p
  * bytes_written = bytes accepted so far, @p total_len = the BEGIN value.
  * Any out pointer may be NULL. */

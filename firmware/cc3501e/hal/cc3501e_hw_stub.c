@@ -407,6 +407,13 @@ bool cc3501e_hw_ota_flush_pending(void)
 	return false;
 }
 
+void cc3501e_hw_ota_fault(uint8_t *stage, uint8_t *psa_lo)
+{
+	/* The stub never reaches flash, so nothing can fault. */
+	if (stage != 0) *stage = 0u;
+	if (psa_lo != 0) *psa_lo = 0u;
+}
+
 int cc3501e_hw_ota_status(uint8_t *state, uint32_t *bytes_written, uint32_t *total_len)
 {
 	if (state != 0) *state = 0u;

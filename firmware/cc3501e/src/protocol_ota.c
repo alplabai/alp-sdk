@@ -118,7 +118,15 @@ alp_cc3501e_resp_t handle_ota_status(const uint8_t *req,
 	 * an existing reserved byte, so no ALP_CC3501E_PROTOCOL_VERSION bump: a host
 	 * that predates it reads 0, which is what the old firmware always sent. */
 	reply_data[2] = cc3501e_hw_ota_flush_pending() ? 1u : 0u;
-	reply_data[3] = 0u;
+	/* reserved[2]: which psa_fwu_* call failed the last flush (#1610 bench
+	 * triage; 0 = none).  The CC3501E has no UART on the debug probe, so this
+	 * is the only way a flush fault can name itself.  The matching
+	 * psa_status_t low byte rides GET_DIAG_INFO's reserved[1]. */
+	{
+		uint8_t fs = 0u;
+		cc3501e_hw_ota_fault(&fs, 0);
+		reply_data[3] = fs;
+	}
 	put_le32(&reply_data[4], written);
 	put_le32(&reply_data[8], total);
 	*reply_data_len = 12u;

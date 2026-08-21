@@ -97,7 +97,24 @@ alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
 	 * rendered an event ID as "heap: 0 B free" -- alarming, and false.  The event
 	 * ID keeps its diagnostic value at reserved[0] below, where it is not
 	 * impersonating a documented field. */
+#ifdef CC3501E_OTA_WINDOW_SELFTEST
+	/* BENCH PROBE BUILD ONLY (#1610).  The resident Alif console predates the
+	 * `fault:` / `otafault:` lines, and the CC3501E has no UART on the debug
+	 * probe, so the only way to read a flush fault on this bench is to put it
+	 * in a field the OLD console already prints.  Encodes
+	 * (fail_stage << 8) | fail_psa into the heap field: `heap: N B free` where
+	 * N>>8 is the stage and N&0xFF is the psa_status_t low byte.
+	 * NOT compiled into any shipping build -- guarded by the selftest define,
+	 * which is exactly the mistake (a DEBUG field left impersonating heap)
+	 * that #1612 had to undo.  It must never leave this build. */
+	{
+		uint8_t fs = 0u, pl = 0u;
+		cc3501e_hw_ota_fault(&fs, &pl);
+		put_le32(&reply_data[8], ((uint32_t)fs << 8) | (uint32_t)pl);
+	}
+#else
 	put_le32(&reply_data[8], cc3501e_hw_free_heap_bytes());
+#endif
 	reply_data[12] = g_last_error;
 	/* reserved[0]: last Wi-Fi event ID (0 = no WLAN event has ever fired).  Kept
 	 * because it earned its place on the bench -- an ap_start that leaves this at
@@ -105,8 +122,14 @@ alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
 	 * SSID did not appear on another radio" and needs no second radio. Additive
 	 * into a reserved byte: a host that does not know about it still reads 0,
 	 * which is what the old firmware put there. */
-	reply_data[13]  = (uint8_t)(cc3501e_hw_wifi_last_event_id() & 0xFFu);
-	reply_data[14]  = 0u;
+	reply_data[13] = (uint8_t)(cc3501e_hw_wifi_last_event_id() & 0xFFu);
+	/* reserved[1]: psa_status_t low byte of the last OTA flush fault (#1610).
+	 * Pairs with OTA_STATUS.reserved[2]'s stage; 0 when nothing failed. */
+	{
+		uint8_t pl = 0u;
+		cc3501e_hw_ota_fault(0, &pl);
+		reply_data[14] = pl;
+	}
 	reply_data[15]  = 0u;
 	*reply_data_len = 16u;
 	return ALP_CC3501E_RESP_OK;

@@ -38,6 +38,9 @@ param(
     # embeds cc3501e_ota_candidate.c.  Proves the flush mechanics, NOT the
     # host/bridge contention -- see cc3501e_ota_window_selftest().
     [switch]$OtaWindowSelftest,
+    # Cap the selftest stream (0 = whole image) and opt into FINISH/install.
+    [int]$OtaWindowBytes = 0,
+    [switch]$OtaWindowFinish,
     [switch]$WifiHostDriver,        # link the CC35xx Wi-Fi host driver (-DCC3501E_WIFI; enables GET_MAC / scan / connect bodies)
     [switch]$Ble                    # ALSO link Apache NimBLE + ble_interface (-DCC3501E_BLE; enables BLE enable/advertise). Implies -WifiHostDriver (shared HIF -> Wlan_Start first).
 )
@@ -122,6 +125,8 @@ $cflags += "-DCC3501E_BRIDGE_FW_VERSION_U16=$fwU16"
 $txdef = if ($Transport -eq 'sdio') { @('-DCC3501E_CONTROL_TRANSPORT_SDIO=1') } else { @() }
 if ($OtaSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_SELFTEST') }
 if ($OtaWindowSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_WINDOW_SELFTEST') }
+if ($OtaWindowBytes -gt 0) { $txdef = @($txdef) + @("-DCC3501E_OTA_WINDOW_SELFTEST_BYTES=$OtaWindowBytes") }
+if ($OtaWindowFinish) { $txdef = @($txdef) + @('-DCC3501E_OTA_WINDOW_SELFTEST_FINISH') }
 if ($WifiHostDriver) {
     # CC35xx Wi-Fi host driver: enables the real GET_MAC/scan/connect bodies (P0-5/P0-6).
     # The real OSI layer (osi_dpl.c, compiled below) provides osi_uSleep + the ~30-func OSI
