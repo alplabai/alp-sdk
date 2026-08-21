@@ -1,5 +1,0 @@
-<map id="include/alp/e1m_x_pinout.h" name="include/alp/e1m_x_pinout.h">
-<area shape="rect" id="Node000001" title="E1M&#45;X (45 x 65 mm) form&#45;factor instance IDs." alt="" coords="5,5,207,31"/>
-<area shape="rect" id="Node000002" href="$alp__e1m__x__evk__routes_8h.html" title=" " alt="" coords="12,79,200,119"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="109,44,109,79,103,79,103,44"/>
-</map>

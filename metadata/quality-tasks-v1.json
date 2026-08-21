@@ -337,6 +337,20 @@
       "ci": "pr-doxygen.yml:doxygen"
     },
     {
+      "id": "doxygen-output-untracked",
+      "description": "No tracked file lives under Doxygen's OUTPUT_DIRECTORY (docs/doxygen/Doxyfile) -- it is a generated build artifact, not source (#1573).",
+      "runner": "check-script",
+      "script": "scripts/check_no_committed_doxygen_output.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "driver-status-backing",
       "description": "driver_status declarations outside metadata/chips/*.yaml (mailbox.driver_status, on_module.{nor_flash,emmc}_driver_status, soc_peripheral_instances[].driver_status) are bound to a real zephyr/drivers/** artefact when they claim partial/complete (issue #1216).",
       "runner": "check-script",
