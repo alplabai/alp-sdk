@@ -147,7 +147,7 @@ release blob is version-pinned at `prebuilt/cc3501e-vX.Y.Z.bin`.
 validates that blob (relaying the image to the CC3501E over the
 inter-chip link) -- it is not a customer-facing utility, and lives
 in `alp-sdk-internal`, not this public tree.
-`prebuilt/` holds the signed release blob; `cc3501e-v0.2.0.bin` is the
+`prebuilt/` holds the signed release blob; `cc3501e-v0.3.0.bin` is the
 current one.
 
 ## Status
@@ -161,5 +161,5 @@ current one.
 | TI backend: SDIO-slave (`hal/ti/transport_hw_ti_sdio.c`) | 🟡 frame glue complete; the SDIO-**device** register bring-up needs SWRU626 §21 (no public SDK SDIO-device driver). Off the v0.1 critical path — SPI is the default. |
 | Next-rev hardening: HOST_IRQ / async events | 🔮 async-event delivery; command/reply framing already uses hardware SS0 + READY (see DESIGN.md "Next-rev hardening") |
 | `flash.py` real flashing | 🔮 moved to `alp-sdk-internal` (Alp-internal OTA-build tooling); blocked on TI's `cc3501e-flasher` CLI (not public yet); manual SWD/J-Link is the interim bench path |
-| `prebuilt/` populated | ✅ `cc3501e-v0.2.0.bin` signed + published 2026-07-09 (full bridge: META + Wi-Fi + BLE + sockets + OTA); see `prebuilt/CHANGELOG.md`. Proto v3 -- predates the v4 OTA_PROMOTE bump; rebuild before shipping. |
-| Wi-Fi / BLE / GPIO-proxy groups | ✅ implemented and silicon-validated (v0.8.0 on E1M-AEN801): Wi-Fi scan with security decode, real BLE scan (ble_gap_disc), GPIO proxy warm-boot, OTA-over-bridge staged (see [`docs/cc3501e-bridge.md`](../../docs/cc3501e-bridge.md)). |
+| `prebuilt/` populated | ✅ `cc3501e-v0.3.0.bin` signed (full bridge: META + Wi-Fi + BLE + sockets + OTA, proto v4 incl. `OTA_PROMOTE`); see `prebuilt/CHANGELOG.md`. |
+| Wi-Fi / BLE / GPIO-proxy groups | ✅ implemented and silicon-validated (alp-sdk v0.8.0 on E1M-AEN801): Wi-Fi scan with security decode, real BLE scan (ble_gap_disc), GPIO proxy warm-boot, OTA-over-bridge staged (see [`docs/cc3501e-bridge.md`](../../docs/cc3501e-bridge.md)). |
