@@ -476,3 +476,113 @@ def test_curated_workflow_manifest_read_deleted_fails(tmp_path, monkeypatch, cap
     assert rv == 1
     assert "pr-twister.yml" in err
     assert "no longer reads metadata/toolchains.json" in err
+
+
+# ---------------------------------------------------------------------
+# 5. tier/licence (issue #1603)
+# ---------------------------------------------------------------------
+
+
+def test_artifact_missing_tier_fails_schema(tmp_path, monkeypatch, capsys):
+    """Presence of `tier` is enforced by the schema (check 1), the same way
+    `sha256` already is -- proves the field is actually REQUIRED, not just
+    documented."""
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["zephyrSdk"]["artifacts"].__setitem__(
+            0, {k: v for k, v in d["zephyrSdk"]["artifacts"][0].items() if k != "tier"}
+        ),
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "schema:" in err
+
+
+def test_artifact_missing_licence_fails_schema(tmp_path, monkeypatch, capsys):
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["zephyrSdk"]["artifacts"].__setitem__(
+            0, {k: v for k, v in d["zephyrSdk"]["artifacts"][0].items() if k != "licence"}
+        ),
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "schema:" in err
+
+
+def test_artifact_bad_tier_value_fails_schema(tmp_path, monkeypatch, capsys):
+    """`tier` is a closed enum (A/B/C) -- a made-up tier must fail, not
+    silently pass through as a string."""
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["zephyrSdk"]["artifacts"].__setitem__(
+            0, {**d["zephyrSdk"]["artifacts"][0], "tier": "Z"}
+        ),
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "schema:" in err
+
+
+def test_tier_disagreement_across_host_rows_for_same_component_fails(tmp_path, monkeypatch, capsys):
+    """The exact drift `_check_artifact_provenance_consistency` exists for:
+    schema validation alone would happily accept a `minimal-sdk` row with
+    tier A on linux and tier B on windows -- both are individually valid
+    enum members. This is the regression only the new check catches."""
+    _scaffold(tmp_path)
+
+    def _mutate(d):
+        artifacts = d["zephyrSdk"]["artifacts"]
+        for i, row in enumerate(artifacts):
+            if row["component"] == "minimal-sdk" and row["host"] == "windows-x86_64":
+                artifacts[i] = {**row, "tier": "B"}
+
+    _edit_manifest(tmp_path, _mutate)
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "minimal-sdk" in err
+    assert "disagreeing tier" in err
+
+
+def test_licence_disagreement_across_host_rows_for_same_component_fails(tmp_path, monkeypatch, capsys):
+    _scaffold(tmp_path)
+
+    def _mutate(d):
+        artifacts = d["zephyrSdk"]["artifacts"]
+        for i, row in enumerate(artifacts):
+            if row["component"] == "arm-zephyr-eabi-toolchain" and row["host"] == "macos-aarch64":
+                artifacts[i] = {**row, "licence": "GPL-3.0-or-later"}
+
+    _edit_manifest(tmp_path, _mutate)
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "arm-zephyr-eabi-toolchain" in err
+    assert "disagreeing licence" in err
+
+
+def test_consistent_tier_and_licence_across_host_rows_passes():
+    """Direct unit test of the helper (not the whole gate) proving it
+    accepts the consistent real shape -- every row tier A, licence null."""
+    manifest = {
+        "zephyrSdk": {
+            "artifacts": [
+                {"host": "linux-x86_64", "component": "minimal-sdk", "tier": "A", "licence": None},
+                {"host": "windows-x86_64", "component": "minimal-sdk", "tier": "A", "licence": None},
+                {"host": "macos-aarch64", "component": "minimal-sdk", "tier": "A", "licence": None},
+            ]
+        }
+    }
+    assert gate._check_artifact_provenance_consistency(manifest) == []
