@@ -47,6 +47,15 @@ fails loudly when:
      elsewhere in the file, e.g. an unchanged `${ZEPHYR_SDK_URL}`
      reference, still looks untouched) is caught too. See
      `_check_still_reads_manifest`.
+  5. A `zephyrSdk.artifacts[]` row's `tier` or `licence` (issue #1603,
+     follow-on to #1574) disagrees with a sibling row for the SAME
+     `component` (e.g. `minimal-sdk` on linux-x86_64 says tier A but the
+     windows-x86_64 row for the same component says tier B) -- `tier`/
+     `licence` are per-row fields but `component` is the real artifact
+     identity, repeated once per `host`. Presence of both fields is
+     enforced by check 1 (the schema's `required` list); this is the
+     cross-row CONSISTENCY check schema validation cannot express. See
+     `_check_artifact_provenance_consistency`.
 
 Why check 3 looks like this (history): this gate originally scanned only
 TOOLCHAIN_WORKFLOWS -- then a curated, four-file list, with the stated
@@ -540,6 +549,45 @@ def _check_still_reads_manifest(path: Path) -> list[str]:
     ]
 
 
+def _check_artifact_provenance_consistency(manifest: dict) -> list[str]:
+    """Check 5 (module docstring, issue #1603): `tier`/`licence` are per-row
+    fields (schema `$defs.artifact`) but `component` is the real artifact
+    identity -- `minimal-sdk` and `arm-zephyr-eabi-toolchain` are each ONE
+    logical upstream artifact repeated across three `host` rows (issue
+    #1603's own field placement, chosen to avoid restructuring the existing
+    per-host `sizeBytes`/`sha256` shape rather than inventing a
+    component-keyed dict). Presence of `tier`/`licence` is already the
+    schema's job (`required` in `_load_manifest_and_schema`'s check 1); this
+    check catches the drift schema validation cannot: one row's `tier` or
+    `licence` edited without its sibling rows, which would silently let a
+    consent screen show a different tier or licence for the SAME upstream
+    artifact depending only on which host happened to build it. Mirrors the
+    two-directional drift bar `_check_artifact_provenance` in the sibling
+    `check_bootstrap_manifest.py` (issue #1574) holds `artifactProvenance`
+    to, adapted to this file's per-host-row shape instead of that file's
+    per-tool-key shape."""
+    problems: list[str] = []
+    by_component: dict[str, list[dict]] = {}
+    for artifact in manifest["zephyrSdk"]["artifacts"]:
+        by_component.setdefault(artifact["component"], []).append(artifact)
+    for component, rows in sorted(by_component.items()):
+        tiers = {row.get("tier") for row in rows}
+        licences = {row.get("licence") for row in rows}
+        if len(tiers) > 1:
+            problems.append(
+                f"component {component!r} has disagreeing tier values {sorted(tiers)} "
+                f"across its host rows -- one logical artifact must have one tier "
+                f"(ADR 0021 SS3, issue #1603)"
+            )
+        if len(licences) > 1:
+            problems.append(
+                f"component {component!r} has disagreeing licence values {sorted(licences, key=lambda v: (v is None, v))} "
+                f"across its host rows -- one logical artifact must have one licence "
+                f"(issue #1603)"
+            )
+    return problems
+
+
 def main() -> int:
     manifest, problems = _load_manifest_and_schema()
     if not manifest:
@@ -577,6 +625,8 @@ def main() -> int:
 
     for wf in TOOLCHAIN_WORKFLOWS:
         problems += _check_still_reads_manifest(wf)
+
+    problems += _check_artifact_provenance_consistency(manifest)
 
     if problems:
         print(f"FAIL toolchain lock drift (metadata/toolchains.json declares "
