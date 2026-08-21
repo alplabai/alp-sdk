@@ -71,16 +71,30 @@ if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo"; fi
 ACQ=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3)
 
 rc=0
+attempts_made=0
+
+# ONE terminal message, whichever way we stop.  #1604: previously the budget
+# guard and the loop-exit each printed their own summary, and they were mutually
+# exclusive -- when the budget ran below the floor before the LAST attempt, the
+# guard fired and "all N attempts failed" became unreachable, so a reader saw
+# "attempt 3/3" and then a give-up line that named a different attempt number
+# and no total. The wrapper exists so a degraded mirror gets a readable
+# diagnosis instead of an anonymous step-cap kill; a self-contradicting log
+# defeats that even when the exit code is right.
+give_up() {
+  # NEVER exit 0 here.  rc is 0 when the budget was consumed by an EARLIER
+  # invocation in this step, so exiting with it would report SUCCESS for an
+  # apt-get that never ran -- a silent failure worse than the hang this
+  # wrapper exists to bound.
+  [ "$rc" -eq 0 ] && rc=124
+  echo "apt-bounded: giving up after ${attempts_made}/${APT_ATTEMPTS} attempt(s) -- $1 (last rc=$rc)" >&2
+  exit "$rc"
+}
+
 for attempt in $(seq 1 "$APT_ATTEMPTS"); do
   remaining=$(( DEADLINE - $(_now) ))
   if [ "$remaining" -le 10 ]; then
-    echo "apt-bounded: step budget of ${APT_STEP_BUDGET}s exhausted before attempt ${attempt} -- giving up so the STEP cap does not fire anonymously (last rc=$rc)" >&2
-    # NEVER exit 0 here.  rc is 0 when the budget was consumed by an EARLIER
-    # invocation in this step, so `${rc:-124}` would report SUCCESS for an
-    # apt-get that never ran -- a silent failure worse than the hang this
-    # wrapper exists to bound.
-    [ "$rc" -eq 0 ] && rc=124
-    exit "$rc"
+    give_up "only ${remaining}s of the ${APT_STEP_BUDGET}s step budget remained, too little to start another attempt, so the STEP cap does not fire anonymously"
   fi
   # Never let one attempt eat the whole remaining budget when more are allowed.
   slice="$APT_ATTEMPT_TIMEOUT"
@@ -92,6 +106,7 @@ for attempt in $(seq 1 "$APT_ATTEMPTS"); do
   fi
 
   set +e
+  attempts_made=$(( attempts_made + 1 ))
   $SUDO timeout --signal=TERM --kill-after=30 "$slice" apt-get "${ACQ[@]}" "$@"
   rc=$?
   set -e
@@ -101,5 +116,4 @@ for attempt in $(seq 1 "$APT_ATTEMPTS"); do
     exit "$rc"
   fi
 done
-echo "apt-bounded: all ${APT_ATTEMPTS} attempts failed (last rc=$rc)" >&2
-exit "$rc"
+give_up "every attempt the budget allowed has failed"
