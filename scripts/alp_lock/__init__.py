@@ -10,9 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import re
-import subprocess
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import yaml
 
@@ -32,16 +31,7 @@ def _reject_local(value: str) -> str:
     return value
 
 
-def _default_rev(root: Path) -> Optional[str]:
-    try:
-        out = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
-                             capture_output=True, text=True, check=True)
-        return out.stdout.strip() or None
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
-
-
-def _sdk_identity(root: Path, rev_resolver: Callable[[Path], Optional[str]]) -> dict:
+def _sdk_identity(root: Path) -> dict:
     # Single source of truth: metadata/sdk_version.yaml. (scripts/alp_cli's
     # __version__ derives from this same file at import time -- reading it
     # directly avoids importing/exec-ing the CLI package just to get a string.)
@@ -52,7 +42,9 @@ def _sdk_identity(root: Path, rev_resolver: Callable[[Path], Optional[str]]) -> 
         # spurious --check drift -- fail loudly at generation instead.
         raise LockError("could not parse 'version:' from "
                         "metadata/sdk_version.yaml")
-    return {"version": _reject_local(m.group(1)), "revision": rev_resolver(root)}
+    # No `revision` here on purpose -- see the `sdk.revision` note above
+    # `_PROVENANCE_KEYS`.
+    return {"version": _reject_local(m.group(1))}
 
 
 def _west_projects(root: Path) -> dict:
@@ -174,8 +166,7 @@ def _digests(root: Path) -> dict:
     }
 
 
-def build_lock(workspace_root: Path, board_yaml: Optional[Path] = None, *,
-               rev_resolver: Callable[[Path], Optional[str]] = _default_rev) -> dict:
+def build_lock(workspace_root: Path, board_yaml: Optional[Path] = None) -> dict:
     """Collect the workspace's reproducible inputs into an alp-lock-v1 dict."""
     root = Path(workspace_root)
     board = None
@@ -192,7 +183,7 @@ def build_lock(workspace_root: Path, board_yaml: Optional[Path] = None, *,
     return {
         "lockVersion": 1,
         "generatedBy": "west alp-lock",
-        "sdk": _sdk_identity(root, rev_resolver),
+        "sdk": _sdk_identity(root),
         "west": _west_projects(root),
         "libraries": _libraries(root),
         "python": _python_hashes(root),
@@ -232,23 +223,43 @@ def _flatten(prefix: str, node: Any, out: dict) -> None:
         out[prefix] = node
 
 
-# Keys recorded for provenance/reproduction but NOT frozen-verified: a moved
-# value is not dependency drift.  `sdk.revision` is self-referential when the
-# lock lives in the repo whose HEAD it records -- committing the lock advances
-# HEAD past the value baked into it, so a frozen check would fail on every
-# subsequent commit.  It is kept in the lock (which SDK commit generated it)
-# but excluded from the drift set.  `sdk.version` + the west pins still lock the
-# SDK identity a consumer actually builds against.
+# Keys a lock may CARRY but that are never frozen-verified: a moved value is
+# not dependency drift.
+#
+# `sdk.revision` is the only member, and it is no longer EMITTED (#1615) -- it
+# is listed here so a lock generated before that change still verifies clean
+# against a build that omits it.
+#
+# It recorded the git HEAD of the repo the lock was generated in, which is
+# self-referential by construction: committing the lock advances HEAD past the
+# value baked into it, so the field was stale the instant it landed.  Under
+# squash-merge it was worse than stale -- it named the pre-squash tip of a
+# feature branch, a commit the squash discarded, so the value shipped on `dev`
+# was not on `dev`'s history at all.
+#
+# Its cost was paid by every concurrent branch: because it changed on every
+# commit, `alp.lock` was rewritten by essentially every merge, so any open PR
+# conflicted on it the moment an unrelated one landed -- on a file whose two
+# sides never actually disagreed.  It also churned the SBOM serial (a hash over
+# the whole lock) for builds that were otherwise byte-identical.
+#
+# There was no version of this that could have worked: any git HEAD written
+# into a file that is then committed is stale by construction.  The genuine
+# "which SDK commit produced this artifact" need is served by
+# `scripts/build_receipt.py` (`source.sdkRevision` / `source.sdkDirty`), which
+# resolves it against a real build instead of baking it into a tracked file.
+#
+# `sdk.version` plus the west project pins lock the SDK identity a consumer
+# actually builds against; that is what reproduction needs and it is unaffected.
 _PROVENANCE_KEYS = frozenset({"sdk.revision"})
 
 
 def verify_lock(committed: dict, workspace_root: Path,
-                board_yaml: Optional[Path] = None, *,
-                rev_resolver: Callable[[Path], Optional[str]] = _default_rev) -> list["Drift"]:
+                board_yaml: Optional[Path] = None) -> list["Drift"]:
     """Recompute the lock from the live workspace and return field-level drift
-    (empty == match).  Provenance-only keys (`_PROVENANCE_KEYS`, e.g.
-    `sdk.revision`) are recorded but never reported as drift.  Never writes."""
-    actual = build_lock(workspace_root, board_yaml, rev_resolver=rev_resolver)
+    (empty == match).  A pre-#1615 lock may still carry `sdk.revision`; that key
+    is never reported as drift (`_PROVENANCE_KEYS`).  Never writes."""
+    actual = build_lock(workspace_root, board_yaml)
     a, b = {}, {}
     _flatten("", committed, a)
     _flatten("", actual, b)

@@ -18,6 +18,15 @@ Measured 2026-08-12 across the open PRs: `alp.lock` conflicted on 3,
 `metadata/catalog.json` on 1 -- and they re-fire on every subsequent merge, so
 the cost is paid per PR per merge, not once.
 
+That `alp.lock` count is now historical.  It was inflated by `sdk.revision`,
+which recorded the repo's own HEAD and so changed on EVERY commit, putting
+`alp.lock` in the conflict set for any pair of branches whatsoever.  #1615
+retired the field, so `alp.lock` now conflicts only when two branches genuinely
+both touch its real inputs (`metadata/**`, `west.yml`,
+`metadata/libraries/*.yaml`, `scripts/requirements.txt`).  It stays in
+REGENERATORS below: that is exactly the case where recomputing over the merged
+tree is the right answer.  The other three files are unaffected by #1615.
+
 This is the same shape `changelog.d/` (#1395) removed for `CHANGELOG.md`, and
 the same remedy: stop hand-merging a file whose content is not in dispute.
 
