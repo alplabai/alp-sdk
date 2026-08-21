@@ -76,7 +76,7 @@
     "artifact": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["host", "component", "filename", "sizeBytes", "sha256"],
+      "required": ["host", "component", "filename", "sizeBytes", "sha256", "tier", "licence"],
       "properties": {
         "host": {
           "enum": ["linux-x86_64", "windows-x86_64", "macos-aarch64", "linux-aarch64"],
@@ -100,6 +100,15 @@
           "type": "string",
           "pattern": "^[0-9a-f]{64}$",
           "description": "Lowercase hex sha256 of the exact asset, from upstream's own published sha256.sum for this release -- copied verbatim, never computed or retyped by hand."
+        },
+        "tier": {
+          "type": "string",
+          "enum": ["A", "B", "C"],
+          "description": "ADR 0021 SS3's consent-screen tier (issue #1603, follow-on to #1574's metadata/bootstrap.json `artifactProvenance.*.tier`, same enum). A -- hermetic or signed-package-manager delivered, no elevation: install after one consent click. B -- needs elevation (drivers, udev rules, WSL2 enablement): prompt once, stay skippable. C -- licence-gated third party: never silently fetched, show the licence, then verify. Every row in this file is 'A' today -- the ADR 0021 SS3 table places the Zephyr SDK and arm-zephyr-eabi there explicitly -- because both components ship as sha256-verified hermetic archives fetched with no elevation; the enum stays open so a future artifact in this file (there is none today) is not forced into the wrong tier."
+        },
+        "licence": {
+          "type": ["string", "null"],
+          "description": "SPDX licence identifier for the artifact's primary licence, or null. null means the upstream project is genuinely multi-component (more than one licence covers different files/submodules of the same distributed archive) and cannot be honestly reduced to a single SPDX id without a file-level audit this repo has not performed -- an absent value, not a guessed one, per issue #1574's precedent (its own `xz`/`7zip` entries) and issue #1603's explicit instruction that a fabricated licence string on a consent screen is worse than an absent one. Both components in this file are null today: sdk-ng's own repository licence (Apache-2.0) covers its build scripts, not what the archives themselves contain -- `minimal-sdk` bundles openocd/qemu/bossa/gperf/dtc and `arm-zephyr-eabi-toolchain` bundles binutils-gdb/gcc/picolibc as separate upstream projects under their own licences (verified against sdk-ng's `.gitmodules` at the pinned v1.0.1 tag; see metadata/toolchains.json's `measuredFootprint.notes` for the full citation). A non-null value would be a real, verifiable fact about the named upstream project."
         }
       }
     }
