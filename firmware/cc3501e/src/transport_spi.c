@@ -62,6 +62,33 @@ __attribute__((weak)) void bridge_transport_spi_hw_suspend(void)
 {
 }
 
+/* Weak defaults for OTA update mode (see transport.h).  The stub / silicon-free
+ * host build has no persisted-flag RAM and no polled SPI, so it is ALWAYS in the
+ * normal mode; the ti backend (hal/ti/transport_hw_ti_spi.c) overrides all four
+ * with the real .TI.noinit-backed implementation.
+ *
+ * These are NOT optional: src/protocol_ota.c calls bridge_transport_spi_polled() /
+ * _request_polled_boot() / _clear_polled_boot() and src/protocol_diag.c calls
+ * _boot_mark(), and tests/zephyr/cc3501e_bridge_transport links those TUs with no
+ * hal/ti/ TU at all -- without these the suite does not link. */
+__attribute__((weak)) bool bridge_transport_spi_polled(void)
+{
+	return false; /* no persisted flag on this backend -- never update mode */
+}
+
+__attribute__((weak)) void bridge_transport_spi_request_polled_boot(void)
+{
+}
+
+__attribute__((weak)) void bridge_transport_spi_clear_polled_boot(void)
+{
+}
+
+__attribute__((weak)) uint8_t bridge_transport_spi_boot_mark(void)
+{
+	return 0u;
+}
+
 /* Receive-side staging buffer (filled byte-by-byte by the ISR). */
 static uint8_t spi_rx_buf[CC3501E_FRAME_MAX_BYTES];
 static size_t  spi_rx_len;
@@ -126,4 +153,10 @@ void transport_spi_init(void)
      * (hal/ti/transport_hw_ti_spi.c); the stub backend's weak no-op
      * keeps this hardware-free for host-side protocol tests. */
 	bridge_transport_spi_hw_init();
+}
+
+/* Weak default for backends without the TI polled phase machine. */
+__attribute__((weak)) uint8_t bridge_transport_spi_phase(void)
+{
+	return 0u;
 }

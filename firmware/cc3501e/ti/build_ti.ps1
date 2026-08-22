@@ -121,8 +121,42 @@ if ($fwverRaw -match '^([0-9]+)\.([0-9]+)\.([0-9]+)$') {
 }
 Write-Host "== fw_version marker: $fwverRaw -> $fwU16 (from firmware-version.txt) =="
 $cflags += "-DCC3501E_BRIDGE_FW_VERSION_U16=$fwU16"
+# --- OTA update mode: raise the driver's DMA threshold (ALWAYS, both modes) ---
+# SysConfig hard-emits `.minDmaTransferSize = 10` and exposes NO property to override
+# it.  SPIWFF3DMA's polling path is taken only when
+#   transferMode == SPI_MODE_BLOCKING && transaction->count < hwAttrs->minDmaTransferSize
+#   && returnPartial disabled && (mode == SPI_CONTROLLER || timeout == SPI_WAIT_FOREVER)
+# so at the stock 10 only the two 4-byte header phases would poll: every payload phase
+# would fall into the BLOCKING-but-DMA branch, which PRIMES a DMA transaction (the exact
+# thing update mode exists to avoid -- a DMA claim permanently wedges psa_fwu_start) and
+# then SemaphoreP_pend()s forever.  The floor is a whole frame:
+# ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD = 4 + 512 = 516 B.  NEVER trim this
+# toward ~300 -- 260 B is only TODAY's transfer size, because cc3501e_ota_update happens
+# to use a 256 B host chunk.
+#
+# Unconditional because it is provably inert in the normal DMA/callback mode: the gate
+# above short-circuits on its FIRST term (transferMode == SPI_MODE_BLOCKING), which a
+# callback-mode transfer never satisfies.  The bridge mode is a RUNTIME choice now (a
+# persisted flag consumed at boot), not a build switch, so one image must carry both.
+$cfg = Join-Path $out "ti_drivers_config.c"
+(Get-Content $cfg -Raw) -replace "\.minDmaTransferSize = 10,", ".minDmaTransferSize = 1024," | Set-Content $cfg -NoNewline
 
-$txdef = if ($Transport -eq 'sdio') { @('-DCC3501E_CONTROL_TRANSPORT_SDIO=1') } else { @() }
+# GPIO17 = the bridge READY / host-IRQ line (CC35 GPIO17 -> Alif P2_6, schematic net
+# CC3501_iRQ).  cc3501e_aen.syscfg DOCUMENTS it as "WIFI_SPI0.READY" but SysConfig has
+# no GPIO instance for it, so the generated table emits GPIOWFF3_DO_NOT_CONFIG: the pad
+# is never muxed to GPIO output and every GPIO_write(17, ...) is silently dropped.  On
+# silicon that reads back as a permanently LOW READY (host probe: rc=0 level=0), which
+# makes the host treat the line as unwired and fall back to fixed inter-phase delays --
+# the polled bridge then clocks a slave that has not re-armed, and because
+# spiPollingTransfer leaves the SPI IP enabled with the RX FIFO flushed only by
+# SPI_open, those bytes become a PERMANENT phase shift rather than lost data.
+# Configure it here for the same reason minDmaTransferSize is patched above: SysConfig
+# hard-emits the wrong value and exposes no property to override it.  Idles LOW =
+# "bridge busy", which is what the firmware's lazy ready_ensure_init() also asserts, so
+# the host holds off through boot until the first cc3501e_bridge_ready().
+(Get-Content $cfg -Raw) -replace "GPIOWFF3_DO_NOT_CONFIG, /\* GPIO17 \*/", "GPIO_CFG_OUTPUT_INTERNAL | GPIO_CFG_OUT_STR_LOW | GPIO_CFG_OUT_LOW, /* GPIO17 = bridge READY */" | Set-Content $cfg -NoNewline
+
+$txdef = @(if ($Transport -eq 'sdio') { '-DCC3501E_CONTROL_TRANSPORT_SDIO=1' })
 if ($OtaSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_SELFTEST') }
 if ($OtaWindowSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_WINDOW_SELFTEST') }
 if ($OtaWindowBytes -gt 0) { $txdef = @($txdef) + @("-DCC3501E_OTA_WINDOW_SELFTEST_BYTES=$OtaWindowBytes") }
@@ -345,6 +379,50 @@ $localCmd = "$out\cc3501e_vendor.cmd"
 # Use the connectivity cmd verbatim (512K DRAM + stack-in-TCM already correct); copy it
 # into $out so its relative #include of the toolbox stub resolves alongside it.
 Copy-Item $stockCmd $localCmd -Force
+
+# ...then patch in a .TI.noinit placement.  The stock connectivity cmd has NO rule for
+# it (its SECTIONS lists .reserved/.resetVecs/.cram/.text/.rodata/.binit/.cinit/
+# .TI.ramfunc/.data/.sysmem/.bss*/.stack/.ramVecs/... and nothing else), so the
+# update-mode boot flag (hal/ti/transport_hw_ti_spi.c's `.TI.noinit` g_persist) would be
+# assigned by DEFAULT rules -- first fitting range, FLASH_INT_VEC (RWX) at 0x14000000 --
+# i.e. FLASH: silently non-persistent and possibly overlapping .resetVecs.
+#
+# DRAM_NON_SECURE (0x28000DB0, len 0x0007F24F) already hosts .data/.bss/.sysmem, so it is
+# known-live memory that the C runtime does NOT scrub (--rom_model auto-init only touches
+# sections in the .cinit table; .TI.noinit is not one).  Verify in cc3501e-bridge.map that
+# g_persist resolves inside 0x28000DB0..0x2807FFFF and NOT at 0x14000000.
+#
+# If the bench ever proves DRAM is scrubbed across NVIC_SystemReset (watch the warm-boot
+# counter in GET_DIAG_INFO reserved[2] -- stuck at 1 = scrubbed), the fallback is
+# TCM_DRAM_NON_SECURE (0x20000000), which is alive the instant the core leaves cold reset
+# -- but that region also holds .stack, so re-check the map for an overlap first.
+#
+# (NOLOAD) IS LOAD-BEARING, not decoration.  Without it the TI linker emits a
+# `(.cinit..TI.noinit.load) [compression = zero_init]` record into __TI_cinit_table and
+# the C runtime ZEROES the struct on every single boot -- exactly like .bss -- so the
+# armed flag never survives to be read.  Verified by building it both ways and diffing
+# cc3501e-bridge.map's .cinit listing.  The section NAME alone does not exempt it.  This
+# is the same idiom the stock cmd already uses for .ramVecs, which likewise carries no
+# cinit record.  If you ever touch this line, re-grep the map for
+# ".cinit..TI.noinit.load" and make sure it is ABSENT.
+$cmdText = Get-Content $localCmd -Raw
+$noinit  = @"
+    /* Alp: OTA-update-mode boot flag (.TI.noinit) -- must survive NVIC_SystemReset.
+     * (NOLOAD) keeps it OUT of __TI_cinit_table so the C runtime never zeroes it. */
+    GROUP {
+        .TI.noinit: {} palign(4) (NOLOAD)
+    } > DRAM_NON_SECURE
+
+    /* System memory in DRAM */
+
+"@
+if ($cmdText -notmatch '\.TI\.noinit') {
+    $cmdText = $cmdText -replace '(?m)^[ \t]*/\* System memory in DRAM \*/[ \t]*\r?\n', $noinit
+    Set-Content $localCmd $cmdText -NoNewline
+}
+if ((Get-Content $localCmd -Raw) -notmatch '\.TI\.noinit') {
+    throw ".TI.noinit placement did not apply to $localCmd -- the stock linker.cmd changed shape. The update-mode boot flag would land in FLASH."
+}
 
 Write-Host "== Link =="
 if ($WifiHostDriver) {

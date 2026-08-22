@@ -7,6 +7,41 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — CC3501E OTA never completed: a misaligned staging buffer hung `psa_fwu_start`, and the polled bridge desynced on an 8-byte RX FIFO (Closes #1610)
+
+Streaming a firmware image to the CC3501E over the inter-chip SPI bridge never
+finished. Two independent defects, both now proven on silicon:
+
+**1. `ota.window` was misaligned, and `psa_fwu_start` hung on it.** The OTA
+staging buffer is the last member of the OTA state struct in
+`firmware/cc3501e/hal/ti/cc3501e_hw_ti_ota.c`, and the members ahead of it summed
+to an odd offset (41), so `window[]` sat at an address ≡ 1 (mod 4). `ota_flush()`
+passes that pointer straight to `psa_fwu_start()` for manifest verification — a
+crypto/DMA path — where a misaligned buffer does not fail, it **hangs**, and the
+device is never heard from again. The buffer is now
+`__attribute__((aligned(32)))` (32 rather than 4, because the same buffer also
+feeds `psa_fwu_write()`'s DMA path).
+
+Note for future debugging: an earlier bisect appeared to clear everything
+downstream of `psa_fwu_start`, because skipping it made the flush "complete in
+1 ms with the link alive". With the slot never opened, `psa_fwu_write()` was only
+returning early — it never demonstrated the buffer was usable. When a
+crypto/flash/DMA call hangs rather than returning an error, check pointer
+alignment before interrupts, XIP, bus contention, or task priorities.
+
+**2. The polled bridge desynced because the RX FIFO is 8 frames deep.**
+`SPIWFF3DMA`'s polling path counts `dataGet` reads rather than SCLK edges and
+runs with `RETURN_PARTIAL` disabled, so a chip-select deassert is invisible to
+it; any byte clocked while the slave is between transfers is not lost data but a
+permanent phase shift, and the RX-overrun interrupt is enabled only on the DMA
+path, so it is silent and never self-heals. `bridge_transport_spi_poll_service()`
+now resets the RX+TX FIFOs at the start of every frame, so each frame begins from
+a known-empty state.
+
+Measured on an E1M-AEN801 with a CC3501E: throughput went from ~32 B/s to
+~964 B/s, and a full OTA cycle now reaches `FINISH`, `finish -> 0` and `STAGED`.
+Throughput is still far below the link's capability and is tracked separately.
+
 ### Fixed — `pr-bootstrap-distro-install`'s three matrix legs could never serve as required status checks; added a static-named summary gate (Refs #1464)
 
 The matrix job's per-leg names (`distro install · debian-apt` etc.) are

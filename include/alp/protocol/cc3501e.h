@@ -53,10 +53,18 @@
 extern "C" {
 #endif
 
-/* v4 adds OTA_PROMOTE (0x46) -- request the swap-reboot for an already-committed
- * pending image.  Additive: a v3 host never sends it; v3 firmware rejects it with
- * RESP_ERR_INVALID, so the bump is a capability signal, not a break. */
-#define ALP_CC3501E_PROTOCOL_VERSION 4
+/* v5 adds OTA_UPDATE_MODE (0x47) -- ask the device to reboot into (or out of) the
+ * polled OTA update mode.  Additive in exactly the shape v4 was (v4 exists because
+ * OTA_PROMOTE 0x46 was added): a v4 host never sends it; v4 firmware rejects it
+ * with RESP_ERR_INVALID, so the bump is a capability signal, not a break.
+ *
+ * The bump IS required here.  The counter-precedent -- OTA_STATUS reserved[1]
+ * deliberately not bumping -- applies only to reusing a byte that already rode the
+ * wire; a new opcode is not that.  Note cc3501e_core.c's version gate fails on ANY
+ * difference and permanently clears ctx->initialised, so header, firmware and host
+ * driver ship together: a bench unit still on v4 firmware must be reflashed before
+ * a v5 host driver touches it. */
+#define ALP_CC3501E_PROTOCOL_VERSION 5
 
 /** Frame header in bytes, before the payload. */
 #define ALP_CC3501E_HEADER_BYTES 4
@@ -194,6 +202,31 @@ typedef enum {
 	 * one left pending by a bare reset that carried no swap request) -- the
 	 * unjam/promote path FINISH cannot re-reach once a slot is occupied. */
 	ALP_CC3501E_CMD_OTA_PROMOTE = 0x46, /* no payload; request swap of a pending image */
+
+	/* Enter / leave OTA UPDATE MODE.  req = mode(1) { 0 = the normal DMA/callback
+	 * bridge, 1 = the polled update mode }; reply = @ref alp_cc3501e_ota_update_mode_t.
+	 * 0x47 is the next free code in the OTA group (0x45 is STREAM_WRITE, 0x46 is
+	 * OTA_PROMOTE), is below ALP_CC3501E_CMD_RESERVED_VENDOR_BASE and can never
+	 * alias ALP_CC3501E_SYNC_IDLE.
+	 *
+	 * WHY IT EXISTS (E1M-AEN801 silicon, 2026-08-21): a SPI_MODE_CALLBACK (DMA)
+	 * SPI_open on the CC35 bridge slave PERMANENTLY prevents psa_fwu_start() and
+	 * psa_fwu_write() from returning.  SPI_close() does not undo the claim and
+	 * SPI_transferCancel() hangs the bridge.  So the device instead persists a flag
+	 * and WARM-REBOOTS; on that boot it opens the bridge SPI polled
+	 * (SPI_MODE_BLOCKING) and runs a loop that does nothing but service one frame at
+	 * a time and pump the OTA flush at frame boundaries.
+	 *
+	 * Send this BEFORE OTA_BEGIN.  The OTA session is RAM-only, so entering
+	 * mid-session throws away the write cursor and costs another full slot erase.
+	 * After a successful OTA_FINISH the device leaves update mode BY ITSELF, so the
+	 * swapped image comes up on the normal DMA bridge.  A cold WIFI_EN/nRESET cycle
+	 * always lands in normal mode -- that asymmetry is the only escape hatch.
+	 *
+	 * RESP_OK means QUEUED, not "update mode is live" -- the same property OTA_BEGIN
+	 * has.  A mode CHANGE reboots the device; a no-op mode request does not, and the
+	 * reply's mode byte is how the host tells those two apart. */
+	ALP_CC3501E_CMD_OTA_UPDATE_MODE = 0x47, /* req mode(1); reply update_mode_t */
 
 	/* Bulk-data stream sink (proto v2).  The host sends up to
 	 * ALP_CC3501E_MAX_PAYLOAD-header bytes per frame; the firmware receives +
@@ -947,6 +980,35 @@ typedef struct {
 	uint32_t bytes_written; /**< bytes accepted into the slot so far. */
 	uint32_t total_len;     /**< total declared at BEGIN. */
 } alp_cc3501e_ota_status_t;
+
+/** Reply payload of CMD_OTA_UPDATE_MODE: the mode the device is running RIGHT NOW
+ *  (so still 0 on the ack that merely QUEUES entry -- the device has not rebooted
+ *  yet).  The host confirms entry by re-issuing 0x47 until @ref mode matches what
+ *  it asked for.
+ *
+ *  FOUR BYTES ON PURPOSE.  A dead bus phase clocks back literal 0x00 for every byte
+ *  and 0x00 is also ALP_CC3501E_RESP_OK, so a status-only reply is byte-identical
+ *  to a link that died in the inter-phase gap.  0x47 is the sharpest instance of
+ *  that -- its whole job is to be the last frame before the link blacks out.
+ *
+ *  The mode byte defeats that alias, but ASYMMETRICALLY -- write the host confirm
+ *  loop to the asymmetry, do not assume a general structural defeat:
+ *    - mode == 1 (ENTERED update mode) IS proof.  A dead phase reads back 0x00, so
+ *      it can never forge the 1 the host is waiting for.
+ *    - mode == 0 (LEFT update mode) is NOT proof.  An all-zero dead phase is
+ *      byte-identical to a genuine "normal bridge, OTA idle" reply, so a host
+ *      polling for mode == 0 must corroborate before reporting success (a moving
+ *      GET_DIAG_INFO uptime_ms, or simply the next live command).
+ *
+ *  Either way this reply is 5 payload bytes (status + 4), while the all-zero
+ *  blacklist in chips/cc3501e/cc3501e_core.c fires only on resp_payload_len == 1 --
+ *  the bare-status shape OTA_PROMOTE has and could not escape.  Listing 0x47 there
+ *  would be dead code; do NOT add it. */
+typedef struct {
+	uint8_t mode;        /**< 0 = normal DMA bridge, 1 = polled OTA update mode. */
+	uint8_t ota_state;   /**< @ref alp_cc3501e_ota_state_t, as OTA_STATUS reports it. */
+	uint8_t reserved[2]; /**< MBZ; the additive-extension channel, as used twice above. */
+} alp_cc3501e_ota_update_mode_t;
 
 #ifdef __cplusplus
 } /* extern "C" */

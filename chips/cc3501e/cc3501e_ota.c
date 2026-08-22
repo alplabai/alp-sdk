@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * CC3501E OTA firmware update -- stream a new image over the bridge
- * (opcodes 0x40..0x44, 0x46).  See <alp/chips/cc3501e/ota.h> for the
- * public API.
+ * (opcodes 0x40..0x44, 0x46, 0x47).  See <alp/chips/cc3501e/ota.h> for
+ * the public API.
  */
 
 #include <string.h>
@@ -14,6 +14,53 @@
 #include "cc3501e_internal.h"
 #include "../../src/common/alp_checked_arith.h"
 
+/* An OTA op that touches flash tears the bridge DMA down -- the device re-opens
+ * and re-arms it at the end of cc3501e_hw_ota_pump -- so the reply to the very
+ * op that caused the blackout can be lost in transit.  BEGIN and FINISH are
+ * idempotent on the device (a repeat BEGIN while WRITING returns OK, and STATUS
+ * reports the resulting session state), so a lost reply is confirmed against
+ * OTA_STATUS rather than reported to the caller as a failure.
+ *
+ * Bench 2026-08-21: ota_do_begin walks BOTH slots through
+ * query+cancel+reject+clean (~2.3 s of flash work) before the bridge comes back.
+ * The SAME build returned `begin -> 0` on one run and `begin -> -1` on the next
+ * with no code change -- the only difference was whether the reply survived the
+ * blackout.  Streaming then never started, which is why a healthy link (20 soak
+ * PINGs, scan, BLE up) still produced a dead OTA. */
+/* BEGIN is the longest blackout in the session: psa_fwu_cancel/reject/clean +
+ * psa_fwu_start is a secondary-slot ERASE, measured at 22-41 s on silicon.
+ * 20 s could not cover it and reported ALP_ERR_TIMEOUT on a healthy device.
+ * As above, the budget is charged as an upper bound so the real floor is
+ * roughly WAIT_MS/5. */
+/* One ATTEMPT's worth of patience, not the whole erase.  The caller retries and
+ * can report device state between attempts -- far more useful than one opaque
+ * multi-minute block that prints nothing if it fails. */
+#define CC3501E_OTA_BLACKOUT_WAIT_MS 60000u
+/* Blind settle after a BEGIN that did not answer at once: the device is erasing
+ * the target slot and CANNOT answer anything until it finishes -- it serves the
+ * bridge from its SPI-slave ISR, and the flash op is what stops that ISR.
+ *
+ * SIZED FROM THE ACTUAL SLOT GEOMETRY, not guessed.  The generated flash map
+ * (firmware/cc3501e/build/ti/memcfg/ti_flash_map_config.c) gives
+ * vendor_image_slot_2_region_size = 0x002A2000 = 2,760,704 B, and the memory
+ * configurator gives flash_sector_size = 4096 -- so ONE slot clean is 674 sector
+ * erases on a PY25Q64LB.  At ~100-300 ms per sector that is ~67-200 s, and the
+ * bench has measured a BEGIN still unfinished at 181 s.  A 120 s budget gave up
+ * MID-ERASE, which leaves the slot dirty so the next BEGIN must erase all over
+ * again -- the impatience never converges.  Size for the worst case; a clean
+ * slot costs nothing because BEGIN then answers immediately and never gets
+ * here (ota_do_begin only erases when psa_fwu_query says the slot is not
+ * READY, mirroring TI's OTA_FWU_prepareSlot). */
+#define CC3501E_OTA_BEGIN_BLIND_MS   180000u
+#define CC3501E_OTA_BLACKOUT_POLL_MS 50u
+/* Per-poll frame cap.  cc3501e_ota_status BLOCKS for whatever timeout it is
+ * given, so charging only the sleep against the budget made a nominal 20 s wait
+ * run for up to 400 * timeout_ms (~8000 s at a 20 s caller timeout) -- observed
+ * as a BEGIN that never returned at all, silicon 2026-08-21. */
+#define CC3501E_OTA_BLACKOUT_POLL_TIMEOUT_MS 200u
+
+static alp_status_t ota_settled_as(cc3501e_t *ctx, uint8_t want, uint32_t timeout_ms);
+
 alp_status_t cc3501e_ota_begin(cc3501e_t *ctx, uint32_t total_len, uint32_t timeout_ms)
 {
 	uint8_t req[4];
@@ -21,8 +68,53 @@ alp_status_t cc3501e_ota_begin(cc3501e_t *ctx, uint32_t total_len, uint32_t time
 	req[1] = (uint8_t)((total_len >> 8) & 0xFFu);
 	req[2] = (uint8_t)((total_len >> 16) & 0xFFu);
 	req[3] = (uint8_t)((total_len >> 24) & 0xFFu);
-	return poll_by_repeat(
+	/* SEND ONCE, then GO SILENT.  poll_by_repeat re-clocked this payload-bearing
+	 * frame every 50 ms for the whole BEGIN blackout -- the same anti-pattern the
+	 * WRITE path was fixed for.  Worse, polling through a blackout CANNOT work:
+	 * the device answers from its SPI-slave ISR, and the flash op is precisely
+	 * what stops that ISR, so every frame clocked in that window is clocked into a
+	 * dead slave.  Silicon 2026-08-21 proved it -- BEGIN and the STATUS read that
+	 * chased it BOTH returned ALP_ERR_TIMEOUT (-4) after 81 s, with no device
+	 * field readable.  There is no in-band way to observe the device mid-erase;
+	 * the READY line is the only out-of-band signal and it is not HW-validated on
+	 * this bench.  So: one frame, then a blind settle sized to a slot erase, and
+	 * only then confirm against STATUS. */
+	const alp_status_t s = cc3501e_request(
 	    ctx, ALP_CC3501E_CMD_OTA_BEGIN, req, sizeof(req), NULL, 0, NULL, timeout_ms);
+	/* An ALP_OK reply means the device QUEUED the op, NOT that the session is
+	 * open: cc3501e_hw_ota_begin submits to the pump and answers immediately,
+	 * while ota_do_begin (slot query + any prepare) runs afterwards.  Returning
+	 * on that reply made the caller start WRITING while the device was still
+	 * preparing, so the very first chunk landed in a blackout and burned the whole
+	 * flush hold-off (silicon 2026-08-21: `OTA begin -> 0 (2 ms)` followed by ZERO
+	 * progress lines).  ALWAYS confirm the session really reached WRITING; only
+	 * blind-settle first when the reply itself was lost to a blackout. */
+	/* ALP_ERR_BUSY is NOT a lost reply -- it is the device ANSWERING.
+	 * cc3501e_hw_ota_begin() submits to the pump and ota_submit() returns
+	 * CC3501E_HW_BUSY, which the protocol layer maps to RESP_ERR_BUSY.  So a
+	 * healthy BEGIN on a CLEAN slot (ota_do_begin skips the erase when
+	 * psa_fwu_query says READY -- ~2 ms) still arrives here as -3.  Treating
+	 * that like a blackout cost a FLAT 180 s on EVERY OTA, measured identical
+	 * to the millisecond across three runs (`OTA begin -> 0 (180035 ms)`),
+	 * which is the host sleeping, not the device erasing.
+	 *
+	 * The device answered, so it is alive and pollable: go straight to the
+	 * confirmation poll.  Only fall back to the blind settle if the poll does
+	 * NOT settle -- that is the genuinely dirty slot, where the erase has since
+	 * taken the device deaf and there is no in-band way to watch it. */
+	if (s != ALP_OK && s != ALP_ERR_BUSY) {
+		alp_delay_ms(CC3501E_OTA_BEGIN_BLIND_MS);
+	}
+	if (ota_settled_as(ctx, ALP_CC3501E_OTA_STATE_WRITING, timeout_ms) == ALP_OK) {
+		return ALP_OK;
+	}
+	if (s == ALP_ERR_BUSY) {
+		alp_delay_ms(CC3501E_OTA_BEGIN_BLIND_MS);
+		if (ota_settled_as(ctx, ALP_CC3501E_OTA_STATE_WRITING, timeout_ms) == ALP_OK) {
+			return ALP_OK;
+		}
+	}
+	return (s == ALP_OK) ? ALP_ERR_TIMEOUT : s;
 }
 
 alp_status_t cc3501e_ota_write(cc3501e_t     *ctx,
@@ -62,7 +154,13 @@ alp_status_t cc3501e_ota_write(cc3501e_t     *ctx,
 
 alp_status_t cc3501e_ota_finish(cc3501e_t *ctx, uint32_t timeout_ms)
 {
-	return poll_by_repeat(ctx, ALP_CC3501E_CMD_OTA_FINISH, NULL, 0, NULL, 0, NULL, timeout_ms);
+	const alp_status_t s =
+	    poll_by_repeat(ctx, ALP_CC3501E_CMD_OTA_FINISH, NULL, 0, NULL, 0, NULL, timeout_ms);
+	if (s == ALP_OK) return ALP_OK;
+	if (ota_settled_as(ctx, ALP_CC3501E_OTA_STATE_STAGED, timeout_ms) == ALP_OK) {
+		return ALP_OK;
+	}
+	return s;
 }
 
 alp_status_t cc3501e_ota_abort(cc3501e_t *ctx, uint32_t timeout_ms)
@@ -73,6 +171,171 @@ alp_status_t cc3501e_ota_abort(cc3501e_t *ctx, uint32_t timeout_ms)
 alp_status_t cc3501e_ota_promote(cc3501e_t *ctx, uint32_t timeout_ms)
 {
 	return poll_by_repeat(ctx, ALP_CC3501E_CMD_OTA_PROMOTE, NULL, 0, NULL, 0, NULL, timeout_ms);
+}
+
+/* ---- OTA update mode (0x47) --------------------------------------------
+ *
+ * WHY this exists at all (silicon 2026-08-21, bisected on the bench): a
+ * SPI_MODE_CALLBACK (DMA) SPI_open() on the device PERMANENTLY prevents
+ * psa_fwu_start() and psa_fwu_write() from returning.  psa_fwu_start before
+ * transport_spi_init() returns; after a POLLED (SPI_MODE_BLOCKING) SPI_open the
+ * whole sequence still returns; after a callback/DMA SPI_open psa_fwu_start
+ * NEVER returns and the device is gone until a WIFI_EN/nRESET.  SPI_close()
+ * does not undo the claim, and SPI_transferCancel() hung the bridge twice.  So
+ * an OTA can only run on a boot whose bridge was opened POLLED -- which is what
+ * this opcode arms: the device persists a flag, warm-reboots, and comes back
+ * running nothing but "service one polled frame, then pump the OTA flush".
+ *
+ * The device leaves update mode by ITSELF after a successful FINISH (the swap
+ * reboot must land in the normal DMA bridge or the freshly-swapped firmware
+ * comes up deaf to the radio), so the enable=false direction exists only for a
+ * caller that wants to back out of a session it never finished. */
+
+/* Blind settle across the warm reboot: CLOCK NOTHING here.  On this CS-less
+ * 3-wire link there is no chip-select to recover framing on, so a byte clocked
+ * before the slave has armed is a PERMANENT 1-byte phase offset on the link
+ * (cc3501e_core.c's desync note), not merely a dropped frame.  Same budget
+ * cc3501e_hard_reset uses for a re-boot; do NOT shorten it on the strength of
+ * the firmware's hardware-SS0 comments -- the CS-less rule is the strictly
+ * stronger constraint and this code must hold on the units that lack the SS0
+ * bodge. */
+#define CC3501E_UPDATE_MODE_SETTLE_MS 3500u
+#define CC3501E_UPDATE_MODE_POLL_MS   250u
+/* Per-poll frame cap, charged against the caller's budget TOGETHER with the
+ * sleep.  Note what does NOT make a readback expensive: cc3501e_request()
+ * IGNORES its timeout_ms outright ("(void)timeout_ms; -- reserved for a future
+ * IRQ-driven wait", cc3501e_core.c), unlike poll_by_repeat() which really does
+ * re-issue for the whole budget.  What costs time is the READY gate: once
+ * g_ready_line_proven latches, EACH reply phase may wait
+ * CC3501E_READY_WAIT_US = 250000 us, so one 4-phase 0x47 readback can burn ~1 s
+ * of wall time on a bodged unit.  Charging only the sleep is exactly what turned
+ * a nominal 20 s BEGIN wait into ~8000 s (silicon 2026-08-21), so this cap is
+ * charged whether or not the frame really blocked -- an UPPER bound, as
+ * CC3501E_OTA_BLACKOUT_POLL_TIMEOUT_MS above is.
+ *
+ * CONSEQUENCE FOR CALLERS: the real confirm window is about
+ * timeout_ms * POLL_MS / (POLL_MS + this) ~= timeout_ms/6 -- at the bench's
+ * CC3501E_OTA_DEMO_TIMEOUT_MS 20000 that is ~3.4 s of polling after the 3.5 s
+ * settle, which covers a warm reboot with margin.  cc3501e_ota_update_mode's
+ * timeout_ms is therefore a WHOLE-OPERATION budget, not the per-frame budget the
+ * other cc3501e_ota_* entry points take; a caller that passes a per-frame value
+ * (100-200 ms) gets one or two polls and little else. */
+#define CC3501E_UPDATE_MODE_POLL_TIMEOUT_MS 1200u
+
+/* One 0x47 round trip; true ONLY when the device read back `want` as the mode it
+ * is running RIGHT NOW.  That readback -- not the ack -- is the whole confirm
+ * signal: cc3501e_hw_reset_cause() returns ALP_CC3501E_RESET_UNKNOWN
+ * unconditionally (hal/ti/cc3501e_hw_ti_log.c), so GET_DIAG_INFO's reset_cause
+ * byte is a hardcoded 0 and cannot tell a soft reboot from anything at all
+ * (uptime_ms is real and may corroborate, but must never be the gate).
+ *
+ * The mode byte is also what defeats the #1378 dead-phase alias: a payload phase
+ * that dies clocks literal 0x00 for every byte and 0x00 is ALSO RESP_OK, so a
+ * bare-OK reply is indistinguishable from a dead link.  That defence only works
+ * in the want=1 direction (0 != 1) -- which is the direction that matters, since
+ * this opcode's whole job is to be the last frame before a blackout. */
+static bool update_mode_reads_as(cc3501e_t *ctx, uint8_t want, uint32_t timeout_ms)
+{
+	uint8_t            reply[4] = { 0 };
+	size_t             got      = 0u;
+	const alp_status_t s        = cc3501e_request(
+	    ctx, ALP_CC3501E_CMD_OTA_UPDATE_MODE, &want, 1u, reply, sizeof(reply), &got, timeout_ms);
+	return s == ALP_OK && got >= 1u && reply[0] == want;
+}
+
+alp_status_t cc3501e_ota_update_mode(cc3501e_t *ctx, bool enable, uint32_t timeout_ms)
+{
+	/* Guarded HERE rather than left to cc3501e_request (which answers
+	 * ALP_ERR_NOT_READY for both conditions) because this function ACTS on a
+	 * failed readback: it would blind-settle 3.5 s and then run
+	 * cc3501e_hard_reset before reporting a misleading ALP_ERR_TIMEOUT.  Not a
+	 * hypothetical caller bug -- cc3501e_reset() CLEARS ctx->initialised when the
+	 * firmware's GET_VERSION disagrees with ALP_CC3501E_PROTOCOL_VERSION
+	 * (cc3501e_core.c), which is precisely the state a bench unit still running v4
+	 * firmware is in when the operator reaches for OTA to fix it.  That operator
+	 * must read NOT_READY, not a stalled TIMEOUT. */
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+
+	const uint8_t want = enable ? 1u : 0u;
+
+	/* SEND ONCE, then go silent -- the same rule (and the same reason) as
+	 * cc3501e_ota_begin: re-clocking a payload-bearing frame at a device that is
+	 * rebooting cannot work, because the thing that would answer is the thing
+	 * that is down.  Losing this ack to the reboot it triggers is the EXPECTED
+	 * outcome, not a failure, so the send's status is not reported.
+	 *
+	 * IDEMPOTENT BY CONTRACT: the firmware replies with the mode it is running
+	 * right now and reboots only when that differs from the request.  A reply
+	 * that already reads back `want` therefore proves no reboot was armed --
+	 * return at once instead of burning the settle on a device that never left.
+	 * (It is also why the confirm loop below may re-issue the same opcode.) */
+	if (update_mode_reads_as(ctx, want, timeout_ms)) {
+		cc3501e_set_peer_polled(enable); /* polled slave -> edge-gate READY */
+		return ALP_OK;
+	}
+
+	alp_delay_ms(CC3501E_UPDATE_MODE_SETTLE_MS);
+
+	/* Poll THROUGH failed reads -- a failing read IS the blackout, the same shape
+	 * ota_settled_as() polls through.  Re-issuing is also what recovers a FIRST
+	 * request the device never received: the mode still differs, so the device
+	 * arms its reboot then and the next readback confirms it.  Every re-issue
+	 * starts with a header phase, so a desync left by an earlier frame self-heals
+	 * on the next clean transaction (cc3501e_core.c reports IO and re-aligns
+	 * rather than byte-walking). */
+	const uint32_t poll_ms = (timeout_ms < CC3501E_UPDATE_MODE_POLL_TIMEOUT_MS)
+	                             ? timeout_ms
+	                             : CC3501E_UPDATE_MODE_POLL_TIMEOUT_MS;
+	uint32_t       waited  = 0u;
+	for (;;) {
+		if (update_mode_reads_as(ctx, want, poll_ms)) {
+			cc3501e_set_peer_polled(enable);
+			return ALP_OK;
+		}
+		if (waited >= timeout_ms) break;
+		alp_delay_ms(CC3501E_UPDATE_MODE_POLL_MS);
+		waited += CC3501E_UPDATE_MODE_POLL_MS + poll_ms;
+	}
+
+	/* Never came back in the requested mode.  Recover with the WARM reset, NOT
+	 * cc3501e_reset: its cold cycle re-triggers the Puya double-boot bug and can
+	 * leave ctx NOT_READY (see cc3501e_hard_reset).  Its status is ignored -- a
+	 * unit with no reset pin answers ALP_ERR_NOSUPPORT and the verdict reported
+	 * here is the timeout either way. */
+	(void)cc3501e_hard_reset(ctx);
+	return ALP_ERR_TIMEOUT;
+}
+
+/* Bail out of cc3501e_ota_update AFTER update mode was entered but BEFORE FINISH
+ * was issued, reporting @p s.
+ *
+ * Update mode is a radio-dead boot mode: nothing else runs, so the worker never
+ * drains and every Wi-Fi/BLE/GET_MAC command queues forever answering BUSY.
+ * Returning an error while leaving the device parked there makes the NEXT thing
+ * the application does -- a scan, a connect, the bringup soak -- fail for a
+ * reason that has nothing to do with what it is doing, which is exactly the kind
+ * of phantom this bench has already lost days to.  So every pre-FINISH failure
+ * exit takes the device back out.
+ *
+ * Best-effort by construction, and never WORSE than not trying: the status is
+ * discarded, and if the link is genuinely dead the enable=false readback hits the
+ * #1378 all-zero alias (a dead phase reads mode 0, which IS the mode being asked
+ * for) and returns OK having done nothing.  When the device is merely unhappy --
+ * a rejected image, a cursor mismatch, a slot that would not erase -- it is alive
+ * and answering, and this really does return it to the normal DMA bridge.  When
+ * it is unreachable, cc3501e_ota_update_mode's own exhaustion path runs
+ * cc3501e_hard_reset, and a reset ALWAYS lands in normal mode (the flag is RAM
+ * only and read-and-cleared at boot).
+ *
+ * Deliberately NOT used on the FINISH path.  A FINISH that acked arms the
+ * deferred swap reboot and the device leaves update mode by itself; a FINISH that
+ * merely failed to CONFIRM may still have armed it, and firing 0x47 (then
+ * possibly cc3501e_hard_reset) at a device mid slot-swap risks interrupting the
+ * swap.  Leave a post-FINISH device alone. */
+static alp_status_t ota_update_bail(cc3501e_t *ctx, alp_status_t s, uint32_t timeout_ms)
+{
+	(void)cc3501e_ota_update_mode(ctx, false, timeout_ms);
+	return s;
 }
 
 alp_status_t cc3501e_ota_status(cc3501e_t *ctx, alp_cc3501e_ota_status_t *out, uint32_t timeout_ms)
@@ -95,12 +358,45 @@ alp_status_t cc3501e_ota_status(cc3501e_t *ctx, alp_cc3501e_ota_status_t *out, u
 	return ALP_OK;
 }
 
+/* Poll OTA_STATUS until the session settles in `want`.  Returns ALP_OK on
+ * settle, ALP_ERR_IO if the device latched ERROR, ALP_ERR_TIMEOUT otherwise.
+ * A STATUS read that itself fails is expected here -- that IS the blackout --
+ * so keep polling until the deadline rather than bailing on the first error. */
+static alp_status_t ota_settled_as(cc3501e_t *ctx, uint8_t want, uint32_t timeout_ms)
+{
+	const uint32_t poll_ms = (timeout_ms < CC3501E_OTA_BLACKOUT_POLL_TIMEOUT_MS)
+	                             ? timeout_ms
+	                             : CC3501E_OTA_BLACKOUT_POLL_TIMEOUT_MS;
+	uint32_t       waited  = 0u;
+	for (;;) {
+		alp_cc3501e_ota_status_t st = { 0 };
+		if (cc3501e_ota_status(ctx, &st, poll_ms) == ALP_OK) {
+			if (st.state == want) return ALP_OK;
+			if (st.state == ALP_CC3501E_OTA_STATE_ERROR) return ALP_ERR_IO;
+		}
+		if (waited >= CC3501E_OTA_BLACKOUT_WAIT_MS) return ALP_ERR_TIMEOUT;
+		alp_delay_ms(CC3501E_OTA_BLACKOUT_POLL_MS);
+		/* Charge the poll frame too -- the budget must cover time spent BLOCKED
+		 * in the STATUS read, not just the sleep between reads. */
+		waited += CC3501E_OTA_BLACKOUT_POLL_MS + poll_ms;
+	}
+}
+
 /* Hold-off budget while the device flushes its staging window to flash (#1610).
  * A flush is at most CC3501E_OTA_WINDOW/4096 psa_fwu_write calls plus bridge
  * re-arms; 10 s is far beyond that and still finite, so a device that never
  * clears flush_pending fails the stream instead of hanging it.  Polled at the
  * same 50 ms cadence poll_by_repeat uses, but with HEADER-ONLY frames. */
-#define CC3501E_OTA_FLUSH_WAIT_MS 10000u
+/* 10 s covered a plain 4-block flush but NOT the first one, which also runs
+ * psa_fwu_start (secondary-slot prepare/erase).  Silicon 2026-08-21: still
+ * flushing after 60 s, device healthy and answering STATUS throughout. */
+/* NOTE the budget is charged as an UPPER BOUND (sleep + the full per-poll frame,
+ * even when the poll returns immediately), so the REAL floor is roughly
+ * WAIT_MS * POLL_MS / (POLL_MS + POLL_TIMEOUT_MS) ~= WAIT_MS/5.  Sized here so
+ * that floor still comfortably covers the first flush (psa_fwu_start + slot
+ * prepare).  The chips layer has no portable monotonic clock, hence the model
+ * rather than a timestamp; the bench example uses k_uptime_get directly. */
+#define CC3501E_OTA_FLUSH_WAIT_MS 600000u
 #define CC3501E_OTA_FLUSH_POLL_MS 50u
 
 alp_status_t
@@ -130,8 +426,17 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 		return ALP_ERR_INVAL;
 	}
 
-	alp_status_t s = cc3501e_ota_begin(ctx, total_len_u32, timeout_ms);
+	/* Enter OTA update mode FIRST -- before BEGIN, never mid-session.  The OTA
+	 * session is RAM-only, so entering it later throws away the write cursor and
+	 * forces a full re-BEGIN, i.e. another whole-slot erase (0x002A2000 =
+	 * 2,760,704 B = 674 sector erases, 22-181 s measured).  A hard failure here
+	 * is fatal on purpose: continuing in DMA/callback mode means psa_fwu_start
+	 * never returns and the device disappears mid-update. */
+	alp_status_t s = cc3501e_ota_update_mode(ctx, true, timeout_ms);
 	if (s != ALP_OK) return s;
+
+	s = cc3501e_ota_begin(ctx, total_len_u32, timeout_ms);
+	if (s != ALP_OK) return ota_update_bail(ctx, s, timeout_ms);
 
 	/* 256 B = the CC35 flash page / psa_fwu_write granularity (the validated
 	 * SELFTEST installer used CC3501E_OTA_WRITE_CHUNK 256).  Non-page-sized
@@ -176,7 +481,7 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 				}
 				if (waited >= CC3501E_OTA_FLUSH_WAIT_MS) {
 					(void)cc3501e_ota_abort(ctx, timeout_ms);
-					return ALP_ERR_TIMEOUT;
+					return ota_update_bail(ctx, ALP_ERR_TIMEOUT, timeout_ms);
 				}
 				alp_delay_ms(CC3501E_OTA_FLUSH_POLL_MS);
 				waited += CC3501E_OTA_FLUSH_POLL_MS;
@@ -202,7 +507,7 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 				/* chunk landed; the reply was lost -- proceed. */
 			} else {
 				(void)cc3501e_ota_abort(ctx, timeout_ms);
-				return s;
+				return ota_update_bail(ctx, s, timeout_ms);
 			}
 		}
 		off += n;

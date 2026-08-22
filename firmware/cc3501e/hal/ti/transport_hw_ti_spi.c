@@ -59,11 +59,55 @@
  * HOST_IRQ / async-event push delivery remains future work; solicited
  * command traffic uses the hardware-SS0 + READY path here.
  *
+ * ================= OTA UPDATE MODE (polled bridge) ==================
+ * A callback/DMA SPI_open PERMANENTLY prevents psa_fwu_start() and
+ * psa_fwu_write() from returning -- bench-proven on silicon 2026-08-21: the
+ * same sequence RETURNS at boot before any SPI_open, RETURNS after a POLLED
+ * (SPI_MODE_BLOCKING) SPI_open, and NEVER returns after a callback/DMA one.
+ * SPI_close() does not undo the claim, and SPI_transferCancel() does not return
+ * from the pump context (it hung the bridge twice).  Quiescing the re-arm,
+ * lowering the task priority, raising the stack, masking interrupts and
+ * disabling the radio were all tried and all refuted.  So the only way to run
+ * psa_fwu at all is to never open the slave in callback mode ON THAT BOOT.
+ *
+ * Update mode is therefore a BOOT MODE of this transport, not a new subsystem.
+ * A magic word in a .TI.noinit RAM struct is armed by protocol opcode 0x47 and
+ * consumed READ-AND-CLEAR on the next boot; bridge_transport_spi_polled() is
+ * the single predicate everything keys off, latched for the whole boot:
+ *   - spi_open_and_arm()  opens SPI_MODE_BLOCKING / SPI_WAIT_FOREVER,
+ *   - arm_transfer()      only RECORDS the phase (no DMA descriptor),
+ *   - poll_service()      executes it and owns READY end-to-end,
+ *   - reinit / release / suspend / quiesce  are NO-OPS (reinit's sole exception
+ *     is spi == NULL: no handle, so nothing can be blocked inside SPI_transfer,
+ *     and the tick's dead-slave re-open is update mode's only recovery).
+ *
+ * Those four no-ops are the root-cause fix, placed here rather than in each of
+ * the ~24 callers across cc3501e_hw_ti{,_ble,_wifi,_ota}.c and worker.c.  In
+ * update mode nothing was ever torn down, so re-rolling SPI_open's retry dice
+ * can only lose; closing the handle while a task is blocked inside a polled
+ * SPI_transfer is the exact deadlock that killed the dedicated poll task; and
+ * quiesce makes arm_transfer() silently DROP a recorded phase, desyncing the
+ * host mid-frame.
+ *
+ * ACCEPTED CONSEQUENCE: in update mode cc3501e_hw_tick()'s desync-burst and
+ * arm-failure self-heals still COUNT but never heal (only the dead-slave re-open
+ * still works, see above).  What used to make that fatal -- and no longer does --
+ * is spi_fifo_reset(): spiPollingTransfer ENABLES the SPI IP and never disables
+ * it again, and the driver flushes the FIFOs only inside SPI_open, so every byte
+ * the host clocked BETWEEN two polled transfers stayed latched and was counted
+ * against the NEXT phase, i.e. a PERMANENT byte-phase shift with no self-heal.
+ * poll_service() now resets both FIFOs at each frame boundary, so a deaf gap
+ * costs the host a retry instead of the link.  The host's remaining escape from
+ * a desync is a WIFI_EN/nRESET cold cycle, which always lands in NORMAL mode
+ * because the flag lives in RAM only.
+ * =====================================================================
+ *
  * CONFIG_SPI_0 is the SysConfig anchor for the inter-chip SPI instance,
  * resolved at bench-build time from the E1M-AEN board file.
  * =====================================================================
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -72,6 +116,18 @@
 #include <ti/drivers/SPI.h>
 #include <ti/drivers/spi/SPIWFF3DMA.h> /* SPIWFF3DMA_CMD_RETURN_PARTIAL_ENABLE -- CS-framed re-sync */
 #include <ti/drivers/dpl/ClockP.h>     /* ClockP_usleep -- settle between SPI re-open retries */
+
+/* Direct SPI register access, for the polled bridge's per-frame FIFO reset
+ * (spi_fifo_reset() below).  The driver's own flushFifos() is static, and the
+ * only public API that reaches it is SPI_transferCancel() -- which has hung this
+ * bridge twice and is banned on every path here.  DeviceFamily_CC35XX comes from
+ * ti/build_ti.ps1's -D flags, and this backend is CC35xx-only, so the concrete
+ * paths are spelled out rather than routed through
+ * DeviceFamily_constructPath() -- clang-format reads `inc/hw_spi.h` inside that
+ * macro as a division and reformats it into a broken header name. */
+#include <ti/devices/DeviceFamily.h>
+#include <ti/devices/cc35xx/inc/hw_spi.h>
+#include <ti/devices/cc35xx/inc/hw_types.h>
 
 #include "../../src/protocol.h"
 #include "../../src/transport.h"
@@ -134,6 +190,149 @@ volatile uint32_t g_spi_reopen_count;
  * already relies on. */
 volatile uint32_t g_arm_fail_count;
 
+/* ---------------- persisted OTA-update-mode boot flag ------------------ */
+
+/* Magic armed by ALP_CC3501E_CMD_OTA_UPDATE_MODE (0x47) and consumed on the
+ * next boot.  Arbitrary but recognisable; stored WITH its one's complement so a
+ * half-written or scrubbed struct can never read as "armed". */
+#define CC3501E_POLLED_BOOT_MAGIC 0x0A7AB007u
+
+/* Persisted across the device's OWN warm reset (NVIC_SystemReset = SYSRESETREQ),
+ * NOT across a host WIFI_EN/nRESET cold cycle -- that asymmetry IS the escape
+ * hatch: a wedged update-mode boot is always one cold cycle away from normal
+ * mode, and update mode has no other recovery (see the file header).
+ *
+ * WARNING: RAM retention across SYSRESETREQ is an ASSUMPTION on this silicon,
+ * not a code-proven fact.  ResetISR (ti/startup_ticlang_local.c) does not scrub
+ * RAM and --rom_model auto-init only touches sections listed in the .cinit
+ * table, but the CC35xx SES/boot ROM runs BEFORE ResetISR and its source is not
+ * in this repo.  Hence the magic + complement pair -- anything short of an exact
+ * match reads as NORMAL mode -- and hence bridge_transport_spi_boot_mark(),
+ * which is what actually PROVES retention on the bench (the chip has no UART on
+ * the debug probe, so GET_DIAG_INFO reserved[2] is the only channel).
+ *
+ * LINKER PLACEMENT IS A HARD PREREQUISITE.  The stock TI connectivity
+ * linker.cmd this build copies verbatim declares NO .TI.noinit output section,
+ * so without an added placement rule (`.TI.noinit : {} > DRAM_NON_SECURE`,
+ * origin 0x28000DB0) the TI linker falls back to default rules and lands this
+ * struct in the first fitting range -- FLASH_INT_VEC (RWX) at 0x14000000, i.e.
+ * flash.  persist_writable() below makes that outcome FAIL SAFE rather than
+ * fatal, but update mode is then silently dead: check the linker map puts
+ * g_persist inside 0x28000DB0..0x2807FFFF. */
+static struct {
+	uint32_t magic;
+	uint32_t magic_inv;
+	uint32_t boots;
+} g_persist __attribute__((section(".TI.noinit")));
+
+static bool g_polled;    /* this boot's mode, latched on first query */
+static bool g_boot_read; /* the read-and-clear has run */
+
+/* Guard the placement prerequisite above.  Every RAM range in the vendor
+ * linker.cmd starts at or above 0x20000000 (TCM_DRAM 0x20000000, DRAM
+ * 0x28000DB0); every flash/code range is below it (TCM_CRAM 0x00000000, CRAM
+ * 0x08000000, FLASH_INT_VEC 0x14000000).  Storing into a mis-placed struct
+ * would BusFault -> hard fault -> boot loop, which is a far worse failure than
+ * update mode simply never arming. */
+static bool persist_writable(void)
+{
+	return (uintptr_t)&g_persist >= 0x20000000u;
+}
+
+bool bridge_transport_spi_polled(void)
+{
+	if (!g_boot_read) {
+		g_boot_read = true;
+		if (!persist_writable()) {
+			return false; /* g_polled stays false; never touch the struct */
+		}
+		const bool valid = (g_persist.magic == ~g_persist.magic_inv);
+		if (!valid) {
+			/* RAM was scrubbed, or this is the first boot after a cold cycle --
+			 * restart the counter so a value stuck at 1 on the bench means
+			 * "scrubbed on every boot", unambiguously. */
+			g_persist.boots = 0u;
+		}
+		g_persist.boots++;
+		g_polled = valid && (g_persist.magic == CC3501E_POLLED_BOOT_MAGIC);
+		/* READ-AND-CLEAR.  A wedged update-mode boot must never repeat: without
+		 * this the device would boot into a deaf, self-heal-less loop forever. */
+		g_persist.magic     = 0u;
+		g_persist.magic_inv = ~0u;
+	}
+	return g_polled;
+}
+
+void bridge_transport_spi_request_polled_boot(void)
+{
+	if (!persist_writable()) {
+		return;
+	}
+	g_persist.magic     = CC3501E_POLLED_BOOT_MAGIC;
+	g_persist.magic_inv = ~CC3501E_POLLED_BOOT_MAGIC;
+}
+
+void bridge_transport_spi_clear_polled_boot(void)
+{
+	if (!persist_writable()) {
+		return;
+	}
+	g_persist.magic     = 0u;
+	g_persist.magic_inv = ~0u;
+}
+
+uint8_t bridge_transport_spi_boot_mark(void)
+{
+	if (!persist_writable()) {
+		/* Mis-placed struct: report a clean 0 rather than whatever bytes happen to
+		 * sit at that flash address, so the bench reads three DISTINCT signatures --
+		 * 0 = placement broken (or stub backend), counter stuck at 1 = RAM scrubbed
+		 * across the warm reset, counter incrementing = retention proven. */
+		return 0u;
+	}
+	return (uint8_t)((g_polled ? 0x80u : 0x00u) | (uint8_t)(g_persist.boots & 0x7Fu));
+}
+
+/* ----------------------------------------------------------------------- */
+
+/* Quiesce gate.  While set, on_transfer() must NOT re-arm: the OTA pump needs the
+ * slave to reach the SAME state boot has -- open handle, NO transfer armed, so no
+ * DMA channel held -- because psa_fwu_start() returns promptly at boot and never
+ * returns from the pump with a transfer armed.  SPI_close alone does not free an
+ * armed channel and SPI_transferCancel does not return here, so the only way to
+ * get there is to stop re-arming and let the in-flight transfer retire on its own
+ * (the host is already held off by cc3501e_bridge_busy()). */
+static volatile bool g_quiesce;
+
+void bridge_transport_spi_hw_quiesce(bool on)
+{
+	/* OTA update mode: quiesce is not merely useless here, it is HARMFUL.  The
+	 * update-mode loop is strictly sequential (nothing runs concurrently with the
+	 * flash op), and while quiesced arm_transfer() returns early -- so a phase
+	 * recorded at the end of a frame is silently DROPPED and the host desyncs
+	 * mid-frame, with no self-heal left to catch it. */
+	if (bridge_transport_spi_polled()) {
+		return;
+	}
+	g_quiesce = on;
+}
+
+/* Polled bridge (OTA update mode): the pending phase descriptor.  arm_transfer()
+ * only RECORDS it; bridge_transport_spi_poll_service() executes it with a
+ * BLOCKING SPI_transfer and then re-enters the very same phase machine.  Unused
+ * in normal (callback/DMA) mode.
+ *
+ * NB the mechanism is NOT "a polled open claims no DMA" -- SPIWFF3DMA_open calls
+ * initDMA() unconditionally, so a polled open still CONFIGURES the DMA.  What
+ * differs is that no DMA transaction is ever PRIMED (the driver's polling branch
+ * skips primeTransfer).  Empirically that is the difference psa_fwu cares about:
+ * psa_fwu_start/psa_fwu_write both return after a polled SPI_open and neither
+ * ever returns after a callback/DMA one (silicon 2026-08-21). */
+static void       *pend_rx;
+static const void *pend_tx;
+static size_t      pend_count;
+static bool        pend_valid;
+
 /* Arm one SS0-framed phase transfer.  For RX, tx is the 0xA5 marker (header) or
  * NULL (payload -> 0x00 default fill on MISO); for TX, rx is NULL (the host's
  * MOSI dummies are discarded).  Non-blocking in SPI_MODE_CALLBACK: the DMA
@@ -142,6 +341,25 @@ volatile uint32_t g_arm_fail_count;
 static void arm_transfer(void *rx, const void *tx, size_t count)
 {
 	static SPI_Transaction t; /* retained for the transfer's duration */
+	if (g_quiesce) {
+		/* Deliberately leave READY LOW: not armed means the host must not clock. */
+		return;
+	}
+	if (bridge_transport_spi_polled()) {
+		/* Polled/update mode: RECORD the phase; poll_service() executes it.
+		 *
+		 * Do NOT raise READY here.  Recording a phase is not arming it: in polled
+		 * mode the slave only starts listening when the service loop enters
+		 * SPI_transfer.  Raising READY at record time told the host "armed" while
+		 * the slave was still idle, so it clocked into nothing and every request
+		 * failed (-5) even though the bytes landed later -- measured at ~26 B/s.
+		 * The service loop raises it immediately before the blocking transfer. */
+		pend_rx    = rx;
+		pend_tx    = tx;
+		pend_count = count;
+		pend_valid = true;
+		return;
+	}
 	t.count = count;
 	t.txBuf = (void *)tx;
 	t.rxBuf = rx;
@@ -303,9 +521,124 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 	}
 }
 
-/* Open the bridge SPI0 slave (SPI_MODE_CALLBACK, DMA on the free ch12/13 per the
- * board file), fill the 0xA5 header-idle marker, and arm the first request
- * header.  Shared by init and reinit.  MUST run on the bring-up/worker task. */
+/* Reset the SPI RX **and** TX FIFOs.  POLLED MODE ONLY -- never call this with a
+ * transfer in flight (see the caller).
+ *
+ * THE ROOT CAUSE THIS EXISTS FOR (silicon 2026-08-21; do not re-derive):
+ * spiPollingTransfer() calls enableSPI() and NEVER disables the IP again, and the
+ * driver flushes the FIFOs only inside SPI_open().  So the slave keeps LATCHING
+ * host bytes while no polled transfer is running, and spiPollingTransfer counts
+ * dataGet() reads, not SCLK edges -- with RETURN_PARTIAL disabled (mandatory: it
+ * is one of the four terms that select the polling branch, SPIWFF3DMA.c:774) the
+ * SS0 deassert is invisible, so a stale FIFO byte satisfies the NEXT phase
+ * instantly and the device runs permanently ahead of the host.  Every gap between
+ * two polled transfers therefore costs a PERMANENT byte-phase shift, and the RX
+ * FIFO holds only 8 frames before it silently overruns (SPIWFF3DMA.h:84-86, :97;
+ * the RX-overrun IRQ that would flush is enabled ONLY in the DMA branch,
+ * SPIWFF3DMA.c:800-806, so nothing self-heals).
+ *
+ * Parking a task inside SPI_transfer does NOT fix this -- the flash pump preempts
+ * that task for the whole psa_fwu op (a slot erase measures 22-41 s here) and
+ * nothing on the psa_fwu path yields -- so the fix is to make the gap HARMLESS
+ * instead of trying to abolish it: start every frame from empty FIFOs.  A gap then
+ * costs the host one failed frame it already retries, not the link.
+ *
+ * The TX half matters too: a reply the host stopped clocking mid-phase leaves
+ * bytes in the TX FIFO that would otherwise prefix the next phase on MISO.
+ *
+ * Mirrors the driver's static flushFifos() (SPIWFF3DMA.c:1182): the IP must be
+ * DISABLED for FIFORST to take.  SPI_transfer -> spiPollingTransfer -> enableSPI()
+ * re-enables it (isSPIEnabled reads the register, SPIWFF3DMA.c:1586, so the driver
+ * cannot cache a stale "already on"). */
+static void spi_fifo_reset(void)
+{
+	if (spi == NULL) {
+		return;
+	}
+	const uint32_t base = ((const SPIWFF3DMA_HWAttrs *)spi->hwAttrs)->baseAddr;
+	HWREG(base + SPI_O_CTL1) &= ~SPI_CTL1_EN_ENABLE;
+	HWREG(base + SPI_O_CTL0) |= SPI_CTL0_FIFORST_RST_TRIG;
+	while ((HWREG(base + SPI_O_CTL0) & SPI_CTL0_FIFORST) == SPI_CTL0_FIFORST_RST_TRIG) {
+	}
+	/* Clear the sticky RX-overrun latch the blackout almost certainly set.  The
+	 * driver only ever clears it from its RX-overrun ISR, which the polling branch
+	 * never arms (SPIWFF3DMA.c:800-806 enables SPI_MIS_RXOVF_SET in the DMA branch
+	 * only), so without this it stays set for the rest of the boot and any future
+	 * unmask would fire on stale history. */
+	HWREG(base + SPI_O_ICLR) = SPI_MIS_RXOVF_SET;
+}
+
+/* Run ONE pending phase to completion.  SPI_transfer blocks until the host
+ * clocks it (peripherals only get the polling path with SPI_WAIT_FOREVER), so
+ * this must own its calling loop -- fine for an OTA build where nothing else
+ * runs.  Returns true if a phase completed, so the caller knows a frame boundary
+ * may have been reached and it is safe to run flash work with nothing in
+ * flight. */
+bool bridge_transport_spi_poll_service(void)
+{
+	if (spi == NULL || !pend_valid) {
+		return false;
+	}
+	/* FRAME BOUNDARY = the only safe reset point, and the only one that is needed.
+	 * Safe: no transfer is in flight here (arm_transfer only RECORDED the phase), so
+	 * no spiPollingTransfer rxCount is half-consumed.  Needed: the caller runs the
+	 * OTA pump between two calls of this function, and everything the host clocked
+	 * across that blackout is stale by definition -- discard it rather than let it
+	 * satisfy this frame's phases.  See spi_fifo_reset() for why that is fatal.
+	 *
+	 * NOT inside the per-phase loop below: the host's 200 us CC3501E_PHASE_SETTLE_US
+	 * covers the handful of instructions between two phases of the SAME frame, and a
+	 * reset there could eat a legitimately early byte instead. */
+	spi_fifo_reset();
+	/* Service the WHOLE frame, not one phase per call.  A request is four
+	 * SS0-framed phases (req header / [req payload] / reply header / reply
+	 * payload); returning to the caller between them let the host's per-request
+	 * timeout expire before the reply was clocked -- measured at ~23 B/s, with
+	 * the data still landing late (dev_cursor advanced while the host logged
+	 * write=-5).  Run phases back-to-back until the machine returns to the
+	 * request-header phase, i.e. a clean frame boundary, so flash work in the
+	 * caller still happens with nothing in flight. */
+	static SPI_Transaction t;
+	bool                   serviced = false;
+	for (unsigned guard = 0u; guard < 8u; ++guard) {
+		if (!pend_valid) {
+			break;
+		}
+		t.count    = pend_count;
+		t.txBuf    = (void *)pend_tx;
+		t.rxBuf    = pend_rx;
+		t.arg      = NULL;
+		pend_valid = false;
+		/* READY is owned SOLELY by this function in polled mode -- not by main.c at
+		 * boot and not by the OTA pump.  Known residual window: READY goes high
+		 * here, a few instructions BEFORE spiPollingTransfer re-enables the SPI IP,
+		 * so a very fast host can clock the first byte early.  Suspect this first if
+		 * the head byte of a phase reads wrong.  It cannot be closed from here (the
+		 * driver owns the enable) and the obvious alternative -- raise READY after
+		 * SPI_transfer returns -- is impossible: that call does not return until the
+		 * host has already clocked the whole phase. */
+		cc3501e_bridge_ready();
+		if (!SPI_transfer(spi, &t)) {
+			g_arm_fail_count++;
+			arm_request_header();
+			break;
+		}
+		serviced = true;
+		cc3501e_bridge_busy();
+		t.status = SPI_TRANSFER_COMPLETED;
+		on_transfer(spi, &t); /* phase machine; its arm_transfer() only records */
+		if (phase == PH_REQ_HEADER) {
+			break; /* frame complete -- safe point for flash work */
+		}
+	}
+	return serviced;
+}
+
+/* Open the bridge SPI0 slave -- SPI_MODE_CALLBACK with DMA on the free ch12/13
+ * (per the board file) in normal mode, SPI_MODE_BLOCKING / SPI_WAIT_FOREVER in OTA
+ * update mode; bridge_transport_spi_polled() picks, see below -- fill the 0xA5
+ * header-idle marker, and arm the first request header.  Shared by init and
+ * reinit.  MUST run on the bring-up/worker task. */
 /* Set when every SPI_open retry failed, so the slave has no handle at all.
  * cc3501e_hw_tick() polls this and re-attempts the open -- see the note in
  * spi_open_and_arm().  Read cross-TU via bridge_transport_spi_is_dead(). */
@@ -319,11 +652,29 @@ static void spi_open_and_arm(void)
 
 	SPI_Params params;
 	SPI_Params_init(&params);
-	params.mode                = SPI_PERIPHERAL;    /* CC35xx TI Drivers term for SPI slave */
-	params.transferMode        = SPI_MODE_CALLBACK; /* DMA on the free ch12/13 (see file header) */
-	params.transferCallbackFxn = on_transfer;
-	params.frameFormat         = SPI_POL0_PHA0; /* mode 0, per the host driver / chip manifest */
-	params.dataSize            = 8;
+	params.mode        = SPI_PERIPHERAL; /* CC35xx TI Drivers term for SPI slave */
+	params.frameFormat = SPI_POL0_PHA0;  /* mode 0, per the host driver / chip manifest */
+	params.dataSize    = 8;
+
+	if (bridge_transport_spi_polled()) {
+		/* OTA update mode.  SPIWFF3DMA takes its polling path only when
+		 * transferMode == SPI_MODE_BLOCKING, transaction->count <
+		 * hwAttrs->minDmaTransferSize, RETURN_PARTIAL is disabled (see below) and
+		 * -- as a PERIPHERAL -- transferTimeout is SPI_WAIT_FOREVER.  All four
+		 * terms must hold; WAIT_FOREVER means a polled transfer blocks until the
+		 * host clocks it, which is why only the dedicated update-mode loop may
+		 * drive this mode.  minDmaTransferSize is hard-emitted as 10 by SysConfig
+		 * with no property to override it, so ti/build_ti.ps1 patches the generated
+		 * ti_drivers_config.c to 1024 -- that ceiling must clear the largest frame
+		 * the protocol allows, ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD =
+		 * 4 + 512 = 516 B.  Never trim it toward the ~260 B that today's 256-byte
+		 * host OTA chunk happens to produce. */
+		params.transferMode    = SPI_MODE_BLOCKING;
+		params.transferTimeout = SPI_WAIT_FOREVER;
+	} else {
+		params.transferMode        = SPI_MODE_CALLBACK; /* DMA on the free ch12/13 */
+		params.transferCallbackFxn = on_transfer;
+	}
 
 	/* Retry SPI_open: right after a psa_fwu flash burst the shared DMA can be
 	 * momentarily busy, so a single open intermittently returns NULL -> the slave
@@ -370,6 +721,29 @@ static void spi_open_and_arm(void)
 	arm_request_header();
 }
 
+/* Release the slave and its DMA WITHOUT SPI_transferCancel.  The cancel has now
+ * hung the bridge twice on silicon (inside reinit, and inside suspend called from
+ * the OTA pump), so it is unusable on this path even with the host held off.
+ * SPI_close alone tears the peripheral down, which is what psa_fwu_start needs:
+ * called at BOOT with no slave armed it returns promptly (PSA_ERROR_BAD_STATE
+ * 0x77), called from the pump with a live SPI_MODE_CALLBACK transfer it never
+ * returns at all.  Pair this with bridge_transport_spi_hw_reinit() afterwards. */
+void bridge_transport_spi_hw_release(void)
+{
+	/* OTA update mode: NEVER close the handle.  This bare SPI_close is precisely
+	 * what closed the handle out from under a task blocked inside a polled
+	 * SPI_transfer and deadlocked the dedicated poll task.  Nothing needs
+	 * releasing anyway -- no DMA transaction is ever primed in polled mode. */
+	if (bridge_transport_spi_polled()) {
+		return;
+	}
+	if (spi != NULL) {
+		SPI_close(spi);
+		spi = NULL;
+	}
+	phase = PH_REQ_HEADER;
+}
+
 /* Re-open + re-arm the bridge slave after a radio op (boot Wlan_Start or a
  * worker Wlan_* body).  Called from the BRING-UP / worker task -- NEVER the SPI
  * callback -- and ONLY right after a radio op, when the radio's global DMA
@@ -378,9 +752,48 @@ static void spi_open_and_arm(void)
  * SPI_close + SPI_open is required: a flag the (now-dead) callback would have to
  * read can never be acted on.  After this the slave drives 0xA5 again and the
  * host's next poll lands cleanly. */
+/* #1610 diagnosis: which phase is the machine parked in?  In POLLED mode the FIRST
+ * OTA_WRITE lands (dev_cursor=256) and every later one fails, which is a phase
+ * machine that never returned to PH_REQ_HEADER after a payload frame -- not a
+ * timing race (a polled-scoped 5 ms settle applied and changed nothing).  Reported
+ * through OTA_STATUS reserved[2] so it is readable without a UART on the CC35. */
+uint8_t bridge_transport_spi_phase(void)
+{
+	return (uint8_t)phase;
+}
+
 void bridge_transport_spi_hw_reinit(void)
 {
+	/* OTA update mode with a LIVE handle: nothing was ever torn down, so there is
+	 * nothing to re-establish -- and re-rolling spi_open_and_arm()'s SPI_open retry
+	 * dice can only lose.  Worse, the SPI_close below would drop the handle under a
+	 * task blocked inside a polled SPI_transfer (the poll-task deadlock).  This one
+	 * guard covers every caller across cc3501e_hw_ti{,_ble,_wifi,_ota}.c and
+	 * worker.c.  NEVER re-add SPI_transferCancel here -- see the note below.
+	 *
+	 * spi == NULL is the ONE exception, and it must stay one: every SPI_open retry
+	 * failed, so there is no handle for anything to block inside and no transfer to
+	 * cut short -- SPI_close is skipped below and this degenerates to a plain
+	 * re-open.  That is cc3501e_hw_tick()'s dead-slave self-heal
+	 * (bridge_transport_spi_is_dead), and it is the only recovery update mode has:
+	 * blanket-guarding it would turn a transient busy-DMA open failure at boot into
+	 * a bricked update-mode boot, which is exactly the permanent wedge #1610 added
+	 * that self-heal to kill.  The tick's OTHER two self-heals (resync burst, arm
+	 * failure) only ever fire with a live handle, so they still no-op here. */
+	if (bridge_transport_spi_polled() && spi != NULL) {
+		return;
+	}
 	if (spi != NULL) {
+		/* NO SPI_transferCancel here.  I added one on audit advice ("closing a
+		 * live handle leaks the armed transfer's DMA") and it HUNG THE BRIDGE:
+		 * with a bisect that made ota_do_begin return immediately -- calling NO
+		 * psa_fwu function at all -- BEGIN still never returned and the CC35 went
+		 * unreachable until a WIFI_EN/nRESET cycle (silicon 2026-08-21).  The
+		 * suspend path can cancel safely because it runs BEFORE a radio op with
+		 * the host held off; here the host may be mid-transaction, and cancelling
+		 * an armed CALLBACK transfer from this context does not return.  The
+		 * theoretical DMA leak is the lesser evil, and spi_open_and_arm's retry
+		 * budget already covers a momentarily-busy channel. */
 		SPI_close(spi);
 		spi = NULL;
 	}
@@ -398,6 +811,13 @@ void bridge_transport_spi_hw_reinit(void)
  * (the host poll-retries on IO across the down-window). */
 void bridge_transport_spi_hw_suspend(void)
 {
+	/* OTA update mode: no radio op ever runs (the update-mode loop does nothing
+	 * but service the bridge and pump OTA), so there is nothing to stand down for
+	 * -- and both the SPI_transferCancel and the SPI_close below are calls proven
+	 * to hang or deadlock a polled slave. */
+	if (bridge_transport_spi_polled()) {
+		return;
+	}
 	if (spi != NULL) {
 		SPI_transferCancel(spi); /* cancel the in-flight phase transfer + its DMA */
 		SPI_close(spi);

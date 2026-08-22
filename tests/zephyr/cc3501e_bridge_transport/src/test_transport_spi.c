@@ -153,6 +153,58 @@ ZTEST(cc3501e_bridge_transport, test_ota_promote_with_payload_is_invalid)
 	    reply[4], ALP_CC3501E_RESP_ERR_INVALID, "OTA_PROMOTE with payload -> RESP_ERR_INVALID");
 }
 
+ZTEST(cc3501e_bridge_transport, test_ota_update_mode_reports_current_mode)
+{
+	/* OTA_UPDATE_MODE (0x47): req = mode(1); reply = mode(1) | ota_state(1) |
+	 * reserved(2).  Asking for the mode the device is ALREADY in is a no-op by
+	 * contract -- it must answer OK and arm no reboot, because the host confirms
+	 * entry by RE-ISSUING this opcode until the mode byte matches, and a
+	 * non-idempotent handler would reboot the device in a loop.
+	 *
+	 * The stub build links transport_spi.c's weak bridge_transport_spi_polled(),
+	 * which returns false, so mode 0 is the "already there" request here.
+	 *
+	 * The 4-byte reply is load-bearing, not decoration: a dead bus phase clocks
+	 * back literal 0x00 for every byte and 0x00 is ALSO ALP_CC3501E_RESP_OK, so a
+	 * bare-status reply to the one opcode whose job is to be the last frame before
+	 * a blackout would be byte-identical to a link that just died. */
+	const uint8_t op[] = { ALP_CC3501E_CMD_OTA_UPDATE_MODE, 0x00u, 0x01u, 0x00u, 0x00u };
+	uint8_t       reply[32];
+
+	transport_spi_init();
+	transaction(op, sizeof op);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 9u, "OTA_UPDATE_MODE reply is header + status + 4 data bytes");
+	assert_reply_header(reply, ALP_CC3501E_CMD_OTA_UPDATE_MODE, 5u);
+	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "no-op mode request -> OK");
+	zassert_equal(reply[5], 0x00u, "mode byte reports the NORMAL bridge on the stub");
+}
+
+ZTEST(cc3501e_bridge_transport, test_ota_update_mode_bad_request_is_invalid)
+{
+	/* Exactly one payload byte, value 0 or 1.  Everything else is a caller bug:
+	 * no payload, two payload bytes, and an out-of-range mode all -> INVALID. */
+	const uint8_t no_payload[] = { ALP_CC3501E_CMD_OTA_UPDATE_MODE, 0x00u, 0x00u, 0x00u };
+	const uint8_t two_bytes[]  = {
+		ALP_CC3501E_CMD_OTA_UPDATE_MODE, 0x00u, 0x02u, 0x00u, 0x00u, 0x00u
+	};
+	const uint8_t bad_mode[]    = { ALP_CC3501E_CMD_OTA_UPDATE_MODE, 0x00u, 0x01u, 0x00u, 0x02u };
+	const uint8_t *const reqs[] = { no_payload, two_bytes, bad_mode };
+	const size_t         lens[] = { sizeof no_payload, sizeof two_bytes, sizeof bad_mode };
+	uint8_t              reply[32];
+
+	transport_spi_init();
+	for (size_t i = 0; i < sizeof reqs / sizeof reqs[0]; i++) {
+		transaction(reqs[i], lens[i]);
+		size_t n = drain(reply, sizeof reply);
+		zassert_equal(n, 5u, "bad OTA_UPDATE_MODE reply is header + status");
+		assert_reply_header(reply, ALP_CC3501E_CMD_OTA_UPDATE_MODE, 1u);
+		zassert_equal(reply[4],
+		              ALP_CC3501E_RESP_ERR_INVALID,
+		              "malformed OTA_UPDATE_MODE -> RESP_ERR_INVALID");
+	}
+}
+
 ZTEST(cc3501e_bridge_transport, test_unknown_opcode_rejected)
 {
 	/* An opcode in the reserved vendor-extension range (>= 0x80) is never a

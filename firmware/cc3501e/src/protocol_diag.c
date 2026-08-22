@@ -14,6 +14,7 @@
 
 #include "protocol_internal.h"
 #include "event_ring.h"
+#include "transport.h"
 
 /* Firmware *release* version reported by GET_DIAG_INFO.fw_version (u16).
  *
@@ -130,7 +131,15 @@ alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
 		cc3501e_hw_ota_fault(0, &pl);
 		reply_data[14] = pl;
 	}
-	reply_data[15]  = 0u;
+	/* reserved[2]: OTA-update-mode boot mark -- bit7 = this boot is running the
+	 * polled update mode, bits[6:0] = warm-boot counter mod 128.  The CC3501E has
+	 * no UART on the debug probe, so this is the ONLY channel that can prove on the
+	 * bench that (a) the .TI.noinit magic SURVIVED NVIC_SystemReset (the counter
+	 * INCREMENTS across a warm reset; stuck at 1 means the SES/boot ROM scrubs RAM
+	 * and the whole update-mode design is dead) and (b) the device really entered
+	 * update mode.  Additive into an already-reserved byte, so it needs no
+	 * ALP_CC3501E_PROTOCOL_VERSION bump of its own (v5 is for opcode 0x47). */
+	reply_data[15]  = bridge_transport_spi_boot_mark();
 	*reply_data_len = 16u;
 	return ALP_CC3501E_RESP_OK;
 }

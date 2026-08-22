@@ -266,6 +266,9 @@ alp_cc3501e_resp_t protocol_dispatch(uint8_t        cmd,
 	case ALP_CC3501E_CMD_OTA_PROMOTE:
 		h = handle_ota_promote;
 		break;
+	case ALP_CC3501E_CMD_OTA_UPDATE_MODE:
+		h = handle_ota_update_mode;
+		break;
 	case ALP_CC3501E_CMD_STREAM_WRITE:
 		h = handle_stream_write;
 		break;

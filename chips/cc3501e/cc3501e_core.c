@@ -351,6 +351,19 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * to arm the next fixed-count transfer (request payload, reply payload) before
  * the host clocks it.  ~µs is enough; 200 µs is comfortably safe and negligible
  * vs the per-request budget.  The r2 bridge (CS + host-IRQ) removes the need. */
+/* 200 us suits the CALLBACK/DMA slave, which re-arms in its completion ISR.
+ * A POLLED slave (OTA update mode) only re-arms when its service loop next
+ * enters SPI_transfer, and READY stays HIGH for a moment after a transfer
+ * completes -- so the host could clock the request-PAYLOAD phase into a slave
+ * that was not listening yet.  Header-only frames (e.g. OTA_STATUS) have no
+ * such phase, which is exactly why STATUS kept working while every WRITE
+ * returned -5 (silicon 2026-08-21).  Widen it; the cost is a fixed per-phase
+ * delay only when READY is not already observed HIGH. */
+/* Back to 200 us.  Widening this to 2000 us to give a POLLED slave time to arm
+ * REGRESSED normal mode -- it applies to every phase, and update-mode ENTRY
+ * (which runs on the ordinary DMA bridge) then timed out at -4.  The polled
+ * request-PAYLOAD race is real but must be fixed on the DEVICE side, where it
+ * can be scoped to the polled path, not by slowing every host phase. */
 #define CC3501E_PHASE_SETTLE_US 200u
 
 /* READY gate for the r2 SS0 + host-IRQ bridge.  When ctx->ready_pin is
@@ -362,19 +375,97 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * ready_pin (CS-less r1 boards) or a line that never asserts falls back to the
  * fixed gap.  See project_cc3501e_link_topology. */
 
+/* Latched the first time READY is ever observed HIGH.  Until that happens -- and
+ * permanently on a board that never asserts it -- the gate keeps its historical
+ * behaviour (short burst, then the fixed gap), so an unwired line cannot stall
+ * every phase.  Once the line has proven itself wired AND driven, the gate
+ * becomes AUTHORITATIVE and waits for the slave to re-arm however long the
+ * device op takes.  That is the difference between surviving a flash blackout
+ * and clocking into a dead slave: a burst of 64 reads is ~microseconds, while a
+ * psa_fwu erase/write is orders of magnitude longer. */
+static bool g_ready_line_proven;
+
+/* Set while the peer is in OTA update mode (polled slave).  A polled slave only
+ * re-arms when its service loop next enters SPI_transfer, so READY is still HIGH
+ * for a moment AFTER a phase completes.  A LEVEL gate therefore returns
+ * immediately and the host clocks the next phase into a slave that is not
+ * listening -- which is why header-only frames (OTA_STATUS) worked while every
+ * payload-bearing OTA_WRITE returned -5 and the stream died at off=256 (silicon
+ * 2026-08-21).  With this set the gate waits for a LOW->HIGH EDGE instead, i.e.
+ * for the slave to actually drop and re-raise READY around its re-arm. */
+static bool g_peer_polled;
+
+void cc3501e_set_peer_polled(bool on)
+{
+	g_peer_polled = on;
+}
+
+/* Authoritative-wait budget once the line is proven.  This bounds ONE PHASE, and
+ * its only job is to not clock into a slave that has not re-armed -- a re-arm is
+ * microseconds.  It must NOT be sized to outlast a device-side flash blackout:
+ * waiting out a multi-minute psa_fwu erase is the CALLER's hold-off loop's job.
+ * Sizing this at 5 s was measured on silicon 2026-08-21 to make a single
+ * 4-phase cc3501e_ota_status cost up to 20 s while the caller's budget charged
+ * it 250 ms, turning a nominal 600 s BEGIN confirmation into a ~13 HOUR wait
+ * that read as "BEGIN never returns". */
+#define CC3501E_READY_WAIT_US 250000u
+#define CC3501E_READY_POLL_US 200u
+/* How long to wait for a polled peer to DROP ready before giving up on the
+ * edge and treating the line as level-only. */
+#define CC3501E_READY_EDGE_US 20000u
+
+/* A POLLED slave (OTA update mode) re-arms only when its service loop next enters
+ * SPI_transfer -- microseconds of processing, not an ISR -- so the host's fallback
+ * settle has to cover that.  200 us is right for the DMA slave and too short here:
+ * header-only frames survived while every payload-bearing OTA_WRITE lost its bytes
+ * and the stream died at off=256 (silicon 2026-08-21).  Widening the settle for
+ * EVERY peer regressed update-mode ENTRY to -4 (that handshake runs on the ordinary
+ * DMA bridge), so it is scoped to polled peers only.  Independent of READY, which
+ * is not readable on this bench (READY probe: rc=0 level=0). */
+/* WAS 5000u.  That value was sized against a symptom, not a cause: "every
+ * payload-bearing OTA_WRITE lost its bytes and the stream died at off=256" is
+ * exactly the polled RX-FIFO desync that spi_fifo_reset() (firmware
+ * transport_hw_ti_spi.c) now clears at the start of EVERY frame.  With the cause
+ * fixed, this gate is back to doing only its stated job -- covering the slave's
+ * re-arm, which this file's own comment describes as "microseconds".  At 5000us
+ * it cost 4 gates x 5 ms = 20 ms per frame, ~2 frames per 256 B chunk. */
+#define CC3501E_POLLED_SETTLE_US 200u
+
 static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 {
+	if (g_peer_polled && fallback_us < CC3501E_POLLED_SETTLE_US) {
+		fallback_us = CC3501E_POLLED_SETTLE_US;
+	}
 	if (ctx->ready_pin != NULL) {
-		/* Opportunistic: a bounded burst of cheap polls catches an already-armed
-		 * slave (fast READY assert) and short-cuts the wait.  If the line isn't
-		 * asserted -- a slow op, or an IRQ bodge not yet HW-validated (P2_6 reads
-		 * 0 on the current bench) -- fall through to the proven fixed gap.  So the
-		 * gate never stalls and never costs more than a short burst + the gap. */
-		bool level = false;
-		for (uint32_t i = 0; i < 64u; ++i) {
-			if (alp_gpio_read(ctx->ready_pin, &level) == ALP_OK && level) {
-				return;
+		bool           level     = false;
+		const uint32_t budget_us = g_ready_line_proven ? CC3501E_READY_WAIT_US : 0u;
+		uint32_t       waited_us = 0u;
+		if (g_peer_polled && g_ready_line_proven) {
+			/* Edge, not level: first wait for the slave to DROP ready (it is
+			 * finishing the previous phase), then fall through to the normal
+			 * wait-for-HIGH below, which now means "re-armed".  Bounded so a
+			 * peer that never drops it degrades to the old level behaviour. */
+			for (uint32_t low_us = 0u; low_us < CC3501E_READY_EDGE_US;
+			     low_us += CC3501E_READY_POLL_US) {
+				if (alp_gpio_read(ctx->ready_pin, &level) == ALP_OK && !level) {
+					break;
+				}
+				alp_delay_us(CC3501E_READY_POLL_US);
 			}
+		}
+		for (;;) {
+			/* Opportunistic burst: catches an already-armed slave with no delay. */
+			for (uint32_t i = 0; i < 64u; ++i) {
+				if (alp_gpio_read(ctx->ready_pin, &level) == ALP_OK && level) {
+					g_ready_line_proven = true;
+					return;
+				}
+			}
+			if (waited_us >= budget_us) {
+				break;
+			}
+			alp_delay_us(CC3501E_READY_POLL_US);
+			waited_us += CC3501E_READY_POLL_US;
 		}
 	}
 	alp_delay_us(fallback_us);
@@ -428,8 +519,13 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		 * dropped + the frame desyncs.  Header-only requests (PING / the argless worker
 		 * ops) have no payload phase so they were fine; payload requests (OTA_WRITE,
 		 * CONNECT, GPIO_WRITE) need this gap (root-caused on silicon 2026-06-19, where
-		 * OTA streaming timed out per-chunk without it). */
-		alp_delay_us(CC3501E_PHASE_SETTLE_US);
+		 * OTA streaming timed out per-chunk without it).
+		 *
+		 * This was the ONE phase still on a bare fixed delay while phases 1, 3 and 4
+		 * consult READY.  It is also the phase that clocks the most bytes (a 260 B
+		 * OTA_WRITE), so it is the worst one to send blind at a slave that has not
+		 * re-armed.  Gate it like the others; the delay stays as the fallback. */
+		cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE_US);
 		s = alp_spi_transceive(ctx->bus, tx_payload, ctx->rx_scratch, tx_len);
 		if (s != ALP_OK) goto out;
 	}
