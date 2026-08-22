@@ -3373,6 +3373,10 @@
       "script": "scripts/check_local_paths.py"
     },
     {
+      "purpose": "No tracked file may live under the Doxygen OUTPUT_DIRECTORY (#1573).",
+      "script": "scripts/check_no_committed_doxygen_output.py"
+    },
+    {
       "purpose": "Validate that every silicon pad referenced in the SoM peripheral maps is claimed by **exactly one** peripheral.",
       "script": "scripts/check_pin_conflicts.py"
     },

@@ -1,5 +1,0 @@
-<map id="alp_pid_t" name="alp_pid_t">
-<area shape="rect" id="Node000001" title="PID controller state." alt="" coords="28,93,109,119"/>
-<area shape="rect" id="Node000002" href="$structalp__pid__config__t.html" title="PID tuning + limits, supplied to alp_pid_init." alt="" coords="5,5,132,31"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="71,45,71,93,66,93,66,45"/>
-</map>

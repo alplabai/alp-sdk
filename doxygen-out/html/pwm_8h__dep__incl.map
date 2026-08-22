@@ -1,9 +1,0 @@
-<map id="include/alp/pwm.h" name="include/alp/pwm.h">
-<area shape="rect" id="Node000001" title="Alp SDK pulse&#45;width&#45;modulation abstraction." alt="" coords="245,5,387,31"/>
-<area shape="rect" id="Node000002" href="$a4988_8h.html" title="Allegro A4988 low&#45;cost bipolar stepper motor driver." alt="" coords="5,79,192,104"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="269,37,135,81,133,76,267,32"/>
-<area shape="rect" id="Node000003" href="$drv8825_8h.html" title="TI DRV8825 bipolar stepper motor driver." alt="" coords="216,79,416,104"/>
-<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="319,44,319,79,313,79,313,44"/>
-<area shape="rect" id="Node000004" href="$drv8833_8h.html" title="TI DRV8833 dual H&#45;bridge brushed&#45;DC motor driver." alt="" coords="440,79,640,104"/>
-<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="366,32,505,76,503,81,364,37"/>
-</map>

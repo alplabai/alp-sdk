@@ -1804,3 +1804,141 @@ def test_zephyr_python_min_version_leaf_is_gate_asserted_not_orphaned(tmp_path, 
     out = capsys.readouterr().out
     assert rv == 0, out
     assert "is not read by" not in out
+
+
+# ---------------------------------------------------------------------
+# 10. artifactProvenance (issue #1574, ADR 0021 §3 consent-screen facts):
+#     key-set lockstep with prerequisites.install, schema shape, and
+#     orphan-leaf exemption.
+# ---------------------------------------------------------------------
+
+
+def test_artifact_provenance_missing_entry_fails(tmp_path, monkeypatch, capsys):
+    """Drop the `git` provenance entry while prerequisites.install still
+    ships a `git` install command on every OS -- the consent screen would
+    silently have nothing to show for it; the gate must name it."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["artifactProvenance"].pop("git"))
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "missing entries for" in err
+    assert "'git'" in err
+
+
+def test_artifact_provenance_stale_entry_fails(tmp_path, monkeypatch, capsys):
+    """A provenance entry for a tool no prerequisites.install.* map names
+    an install command for anymore is stale, not merely extra -- the gate
+    must flag it so a removed prerequisite doesn't leave a dangling
+    consent-screen fact behind."""
+    _scaffold(tmp_path)
+
+    def _mutate(d):
+        d["artifactProvenance"]["bogus-retired-tool"] = {
+            "tier": "A", "source": "https://example.invalid/", "sizeBytes": None,
+            "licence": "MIT",
+        }
+
+    _edit_manifest(tmp_path, _mutate)
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "stale entries for" in err
+    assert "'bogus-retired-tool'" in err
+
+
+def test_artifact_provenance_valid_addition_passes(tmp_path, monkeypatch, capsys):
+    """The mirror-image mutation: add a new prerequisite consistently (an
+    install command on every OS AND a matching artifactProvenance entry) --
+    proves the check isn't just permanently red once touched, it tracks
+    real lockstep, not merely 'never changed'."""
+    _scaffold(tmp_path)
+
+    def _mutate(d):
+        for key in ("apt",):
+            d["prerequisites"]["install"]["linux"][key]["newtool"] = "sudo apt-get install -y newtool"
+        d["prerequisites"]["install"]["macos"]["newtool"] = "brew install newtool"
+        d["prerequisites"]["install"]["windows"]["newtool"] = "winget install -e --id New.Tool"
+        d["prerequisites"]["posix"].append("newtool")
+        d["prerequisites"]["macos"].append("newtool")
+        d["prerequisites"]["windows"].append("newtool")
+        d["artifactProvenance"]["newtool"] = {
+            "tier": "A", "source": "https://example.invalid/newtool", "sizeBytes": None,
+            "licence": "MIT",
+        }
+
+    _edit_manifest(tmp_path, _mutate)
+    # bootstrap.sh/.ps1 hardcode REQUIRED_BINS/$Prereqs and the PREREQ_HINT_*
+    # tables independently of artifactProvenance -- adding a prerequisite
+    # for real would also need those updated, which is out of scope for
+    # this test (it exercises _check_artifact_provenance in isolation).
+    _point_gate_at(tmp_path, monkeypatch)
+    problems = gate._check_artifact_provenance(
+        json.loads((tmp_path / "metadata/bootstrap.json").read_text(encoding="utf-8"))
+    )
+    assert problems == [], problems
+
+
+def test_artifact_provenance_missing_required_field_fails_schema(tmp_path, monkeypatch, capsys):
+    """Every entry needs tier/source/sizeBytes/licence at minimum (issue
+    #1574's own wording) -- dropping one must fail schema validation, not
+    silently validate a partial fact."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["artifactProvenance"]["git"].pop("tier"))
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "artifactProvenance" in err
+    assert "tier" in err
+
+
+def test_artifact_provenance_bad_tier_value_fails_schema(tmp_path, monkeypatch, capsys):
+    """`tier` is constrained to ADR 0021 §3's three tiers -- a made-up
+    value must fail, not silently pass through as a string."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["artifactProvenance"]["git"].__setitem__("tier", "D"))
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "artifactProvenance" in err
+
+
+def test_artifact_provenance_null_licence_and_size_are_valid(tmp_path, monkeypatch, capsys):
+    """null is an explicit, schema-legal representation for sizeBytes/
+    licence (issue #1574: an honest null beats a fabricated value) -- the
+    real corpus already carries null for xz/7zip licence and every
+    sizeBytes, and the baseline-passes tests already cover that; this
+    locks in that a FRESH null (not just the pre-existing ones) also
+    validates, so the schema's nullable union isn't accidentally narrowed
+    later to reject null again."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["artifactProvenance"]["wget"].__setitem__("licence", None))
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+
+
+def test_artifact_provenance_leaf_is_gate_asserted_not_orphaned(tmp_path, monkeypatch, capsys):
+    """`artifactProvenance.*` has no reader in bootstrap.sh/bootstrap.ps1 by
+    design (producer-only data for a future IDE/tan consumer) -- it must
+    NOT trip the generic per-leaf orphan scan the way an ordinary unread
+    leaf would."""
+    _scaffold(tmp_path)
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "is not read by" not in out
+
+
+def test_artifact_provenance_unknown_key_without_check_would_have_failed_known_keys(tmp_path, monkeypatch, capsys):
+    """Fixture-assumption guard: `artifactProvenance` is in KNOWN_KEYS (if
+    this ever drifts back out, `_check_known_keys` -- proven by the
+    pre-existing `test_unknown_top_level_key_fails_with_known_keys_guidance`
+    -- is what would catch it)."""
+    assert "artifactProvenance" in gate.KNOWN_KEYS

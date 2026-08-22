@@ -5,7 +5,7 @@
   "description": "Validates metadata/bootstrap.json -- the single source of truth for the Zephyr-workspace-assembly FACTS scripts/bootstrap.sh, scripts/bootstrap.ps1, and Python Tan read today (issue #917). Facts only; control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor -- this schema deliberately has no step/action shape. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, west.yml's zephyr revision, and each CI workflow's own Zephyr pin in lockstep (see that script's own module docstring for the full list of checks it runs).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["_comment", "schemaVersion", "zephyr", "venv", "prerequisites", "west", "pip", "verdict", "env", "nativeLibHints", "manualInstallHints"],
+  "required": ["_comment", "schemaVersion", "zephyr", "venv", "prerequisites", "artifactProvenance", "west", "pip", "verdict", "env", "nativeLibHints", "manualInstallHints"],
   "properties": {
     "_comment": {
       "type": "string",
@@ -93,6 +93,11 @@
           }
         }
       }
+    },
+    "artifactProvenance": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/artifactProvenanceEntry" },
+      "description": "ADR 0021 §3's one-consent-screen facts (issue #1574) -- itemising artifact / source / size / licence per tier, so the IDE can render that screen without a hardcoded downstream allowlist keyed on tool name (alplabai/alp-sdk-vscode#467 names that shortcut explicitly and forbids it: 'If the producer cannot express it yet, that is an upstream issue to file' -- this is that issue). Keyed by the SAME tool-name string `prerequisites.install` already uses across `install.linux.apt` / `install.linux.dnf` / `install.macos` / `install.windows` -- the union of those maps' keys, not a synthetic OS-independent id: `python3` (posix/macos) and `python` (windows) are the same upstream CPython project and so carry near-identical entries under two keys, the same choice `prerequisites.install` already made rather than inventing a canonical id this manifest has never had. scripts/check_bootstrap_manifest.py's `_check_artifact_provenance` asserts this key set stays exactly that union, so a tool added to any install.* map without a matching entry here (or a stale entry for a tool no install.* map still names) fails the gate instead of drifting silently -- the same bar `_check_install_commands` already holds `prerequisites.posix/macos/windows` to, one level further out. Every entry here today is tier A: every prerequisite this manifest ships an install command for is delivered by a signed, user-scope package manager (winget/apt/dnf/brew) -- no elevation, one consent click -- per the ADR 0021 §3 table's own footnote that delivery mechanism (package manager vs hermetic archive) and elevation are independent axes. No tier B (J-Link/WinUSB drivers, udev rules, WSL2 enablement) or tier C (DEEPX DX-M1, vendor NPU compilers) artifact is declared ANYWHERE in metadata/bootstrap.json yet -- neither exists as an install-command entry here today, so there is nothing yet to attach these facts to; adding one is a separate, larger change (a new install surface, not just new facts about an existing one) left to a follow-up issue, not invented here. The Zephyr SDK / `arm-zephyr-eabi` toolchain -- also tier A per the ADR table -- is DELIBERATELY NOT duplicated in here either: its source (`baseUrl`+`filename`) and sizeBytes already live, per-host, in metadata/toolchains.json's `zephyrSdk.artifacts[]` (the pinned-hermetic-archive case this key's own `sizeBytes`/`source` descriptions below contrast themselves against) -- restating them here would be a second copy of the same fact to drift, and that file's own tier/licence facts are left to a follow-up rather than bundled into this issue's file scope. This is producer-only data today: no script in this repo reads it yet (see `_PRODUCER_ONLY_LEAF_PREFIX` in the gate) -- forwarding it through `tan doctor --json` is deliberately left to a companion tan-cli issue, filed only once this shape has proven itself, not described here as a shape nothing downstream has verified yet."
     },
     "west": {
       "type": "object",
@@ -239,6 +244,32 @@
     }
   },
   "$defs": {
+    "artifactProvenanceEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tier", "source", "sizeBytes", "licence"],
+      "properties": {
+        "tier": {
+          "type": "string",
+          "enum": ["A", "B", "C"],
+          "description": "ADR 0021 §3's consent-screen tier. A -- hermetic or signed-package-manager delivered, no elevation: install after one consent click. B -- needs elevation (drivers, udev rules, WSL2 enablement): prompt once, stay skippable, and show the command that will run rather than only executing it. C -- licence-gated third party: never silently fetched, show the licence, then verify. A property of the ARTIFACT, not of any one consumer's opinion -- the reason issue #1574 exists is so an IDE never has to hardcode this per tool name."
+        },
+        "source": {
+          "type": "string",
+          "format": "uri",
+          "description": "The artifact's canonical upstream origin -- its project homepage or source repository -- NOT a per-version download URL. Every entry today is delivered by a signed, user-scope package manager (winget/apt/dnf/brew), which resolves its OWN download URL per host, architecture, and already-installed version, so no single fixed download URL exists to pin here the way metadata/toolchains.json's `baseUrl` does for the pinned, hermetic Zephyr SDK archives."
+        },
+        "sizeBytes": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Approximate download size in bytes, or null. null here is the honest answer, not an unresearched gap: every entry today is package-manager-resolved, and a package manager's own download size varies by host OS, CPU architecture, and whichever version is already cached or partially installed -- there is no single number that would be true across hosts. Contrast metadata/toolchains.json's `zephyrSdk.artifacts[].sizeBytes`, which IS a fixed, sha256-verified figure, because that artifact is a pinned hermetic archive fetched from one exact URL regardless of host."
+        },
+        "licence": {
+          "type": ["string", "null"],
+          "description": "SPDX licence identifier for the artifact's primary licence, or null. null means the upstream project's licensing is genuinely multi-component (more than one licence covers different files/modules of the same distributed artifact) and cannot be honestly reduced to a single SPDX id without a file-level audit this repo has not performed -- an absent value, not a guessed one, per issue #1574's own instruction that a fabricated licence string is worse than an absent one. A non-null value is a real, verifiable fact about the named upstream project."
+        }
+      }
+    },
     "nativeLibHint": {
       "type": "object",
       "additionalProperties": false,

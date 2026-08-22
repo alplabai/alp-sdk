@@ -1,5 +1,0 @@
-<map id="alp_mqtt_config_t" name="alp_mqtt_config_t">
-<area shape="rect" id="Node000001" title=" " alt="" coords="17,93,155,119"/>
-<area shape="rect" id="Node000002" href="$structalp__mqtt__tls__config__t.html" title="TLS parameters for an mqtts:// broker connection." alt="" coords="5,5,167,31"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="89,45,89,93,83,93,83,45"/>
-</map>

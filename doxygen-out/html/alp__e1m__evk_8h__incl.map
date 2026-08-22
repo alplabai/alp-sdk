@@ -1,8 +1,0 @@
-<map id="include/alp/boards/alp_e1m_evk.h" name="include/alp/boards/alp_e1m_evk.h">
-<area shape="rect" id="Node000001" title="Board&#45;feature names for the E1M EVK (UG&#45;E1M&#45;001)." alt="" coords="5,5,147,45"/>
-<area shape="rect" id="Node000002" href="$e1m__pinout_8h.html" title="Global, fixed pin/instance map derived from the E1M standard." alt="" coords="9,181,143,207"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="67,47,56,69,48,94,45,113,48,133,63,168,58,171,43,134,40,113,43,93,51,67,62,45"/>
-<area shape="rect" id="Node000003" href="$alp__e1m__evk__routes_8h.html" title=" " alt="" coords="58,93,209,133"/>
-<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="91,44,115,80,111,83,87,47"/>
-<area shape="poly" id="edge3_Node000003_Node000002" title=" " alt="" coords="122,135,95,172,91,168,117,132"/>
-</map>

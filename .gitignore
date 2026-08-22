@@ -93,6 +93,12 @@ Makefile
 # are source, not generated, and `west flash` needs them tracked.
 !zephyr/boards/**/board.cmake
 
+# Doxygen's OUTPUT_DIRECTORY (docs/doxygen/Doxyfile:23) -- a local `doxygen`
+# run writes ~1900 generated HTML files here. Build artifact, regenerable
+# via `doxygen docs/doxygen/Doxyfile`, never committed (#1573: a stale
+# committed snapshot drifted from source docs with nothing to catch it).
+doxygen-out/
+
 # Test results
 Testing/
 test_results/
