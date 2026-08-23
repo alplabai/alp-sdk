@@ -167,17 +167,21 @@ int cc3501e_hw_sock_recv(uint16_t  handle,
 	struct sockaddr_in from;
 	socklen_t          fromlen = sizeof(from);
 	memset(&from, 0, sizeof(from));
-	/* MSG_DONTWAIT, not the socket's SO_RCVTIMEO.  This runs on the worker, and
-	 * worker_run_pending() brackets every job with cc3501e_bridge_busy() ...
-	 * cc3501e_bridge_ready() -- READY is LOW for the whole job, so the host
-	 * cannot clock ANY frame while it runs, not just this one.  A blocking read
-	 * therefore blacks the entire bridge out for its timeout on every empty
-	 * poll, which is how one slow socket stalled PINGs and the OTA alongside it.
-	 * The wire contract is already poll-based (no data -> OK with 0 bytes, the
-	 * host re-issues CMD_SOCK_RECV), so returning immediately is the contract,
-	 * not a shortcut. */
-	const ssize_t n =
-	    lwip_recvfrom(fd, buf, want, MSG_DONTWAIT, (struct sockaddr *)&from, &fromlen);
+	/* BLOCKING, bounded by the socket's SO_RCVTIMEO (CC3501E_SOCK_RCVTIMEO_MS).
+	 *
+	 * MSG_DONTWAIT was tried here and is WRONG on this stack -- silicon-measured
+	 * 2026-08-24: with it, a 256 KiB HTTP body that the server demonstrably
+	 * delivered (two `GET /speed.bin HTTP/1.0` 200 hits logged from the device's
+	 * own IP) produced `NET recv -> 0 (0 B)` on EVERY call for 81 s, i.e. 0 B/s.
+	 * The non-blocking path returns EWOULDBLOCK before lwIP has moved anything
+	 * into the socket, so the host never drains the connection at all.  A short
+	 * blocking read does return data.
+	 *
+	 * The reason the timeout must stay SHORT is unchanged: this runs on the
+	 * worker, and worker_run_pending() holds READY LOW across the whole job, so
+	 * no bridge frame of ANY opcode is served while it waits.  That is why 4000
+	 * became 50 -- not why it should become zero. */
+	const ssize_t n = lwip_recvfrom(fd, buf, want, 0, (struct sockaddr *)&from, &fromlen);
 	if (n < 0) {
 		/* SO_RCVTIMEO expiry (EAGAIN / EWOULDBLOCK) is NOT an error at the wire: it
 		 * means "no data yet" -- report OK with 0 bytes so the host re-polls.  Any

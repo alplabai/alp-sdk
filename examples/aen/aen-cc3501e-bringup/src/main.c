@@ -704,7 +704,15 @@ static void cc3501e_demo_ota(cc3501e_t *fw)
 			alp_status_t             qs        = ALP_ERR_IO;
 			bool                     landed    = false;
 			const int64_t            t_hold    = k_uptime_get();
-			int64_t                  last_beat = -1;
+			/* 0, NOT -1.  At -1 the "every 30 s" test below is true on the FIRST
+			 * iteration of every hold-off, so a 55 ms hold printed a ~110-byte
+			 * heartbeat too.  Measured on silicon: 2244 of those lines, 645915 B of
+			 * console in one OTA = 56.1 s of blocking UART at 115200 against a 118 s
+			 * transfer -- HALF the wall time of the OTA was this example describing
+			 * itself.  Starting at 0 keeps the intent (a long wait still reports as it
+			 * goes, so a killed run yields its verdict) and costs nothing for the
+			 * short hold-offs that dominate a healthy stream. */
+			int64_t                  last_beat = 0;
 			for (;;) {
 				qs = cc3501e_ota_status(fw, &ps, 0u);
 				if (qs == ALP_OK) {
