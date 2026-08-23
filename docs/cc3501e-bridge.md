@@ -66,13 +66,31 @@ customers trade pin count against Wi-Fi throughput differently:
 | Transport | Role | CC3501E pins | Availability |
 |-----------|------|--------------|--------------|
 | **SPI0 slave** (CC35; Alif master = SPI1) | **DEFAULT** + always-available baseline/fallback | `GPIO_27/28/29` | Always |
-| **SDIO slave** | OPTIONAL, higher throughput for Wi-Fi data | `GPIO_3/4/5/6/10/11` | Only when the board dedicates the Alif SDIO to the CC3501E |
+| **SDIO slave** | future only -- NOT usable today | `GPIO_3/4/5/6/10/11` | **Never on current boards**: the 0 ohm links to the Alif are not populated |
 
-The catch: the Alif Ensemble has a **single SDIO controller**, shared at
-board level (mux resistors) with the micro-SD slot.  So SDIO is
-available to the CC3501E **only on boards without an SD card** — when an
-SD card is populated, SDIO is blocked and the link **must use SPI**.
-SPI is therefore always wired and always the fallback.
+**SDIO is NOT AVAILABLE on any board built to date, and the reason is
+hardware, not configuration.**  The six CC3501E SDIO lines
+(`metadata/e1m_modules/aen/inter-chip.tsv`: `GPIO_3/4/5/6/10/11` ->
+`SD_CLK`/`SD_CMD`/`SD_D0..D3` -> Alif `P13_0..P13_3`, `P14_0`, `P14_1`)
+reach the Alif only through **0 ohm links that are not populated**.  No
+firmware option, and no software SDIO implementation, can work around an
+open circuit -- and bit-banging elsewhere is not possible either, because
+those six Alif pins are the only place the CC3501E's SDIO can land.
+
+Two further constraints stack behind that, both of which still apply if
+the links are ever populated: the Alif Ensemble has a **single SDIO
+controller**, shared at board level (a 74LVC157 mux, `SDIO_MUX_EN` =
+`GPIO_26`, `SDIO_MUX_SEL` = `GPIO_30`) with the micro-SD slot -- so the
+CC3501E and an SD card can never use it at the same time, only
+time-share it -- and the Alif's single controller is committed to the SD
+card in the current product.
+
+The practical consequence: **SPI is the only host-control link**, its
+ceiling is the CC3501E slave's ~15 MHz (see below), and any throughput
+target above that must be met inside the SPI budget, not by switching
+transport.  The `sdio` value of `CC3501E_CONTROL_TRANSPORT` builds and is
+kept for a future board that populates the links; it is not a runtime
+choice on current hardware.
 
 The choice is a per-board integration decision: in a studio build it
 comes from the customer `board.yaml`; for a hand-built firmware it's the
