@@ -124,6 +124,64 @@ static alp_status_t _errno_to_alp(int err)
 
 ---
 
+> **IMPLEMENTED 2026-08-23 — branch `feat/1638-zephyr-errno-twin`, PR #1654, all
+> four tasks in one PR as four commits. The `-EAGAIN` decision held exactly as
+> written. Three other things did not.**
+>
+> **1. Batch A is NOT behaviour-neutral, and the plan says twice that it is.**
+> Measured arm-by-arm against the tree, **all 26 delegating sites widen.** The
+> 15 batch-A sites each gain `-ENODEV`/`-ENOENT`/`-ENXIO`,
+> `-ENOTTY`/`-EOPNOTSUPP`, `-ENOSPC`, `-ERANGE`, and several gain `-ENOMEM` —
+> every one of which previously fell to `ALP_ERR_IO`. Task 2's proposed commit
+> message ("No behaviour change: all 16 already produced exactly what the twin
+> produces") would have been false. The honest split is by AXIS, not by
+> neutrality: batch B's 11 are the ones that additionally start reporting a
+> **deadline** where they reported an I/O error.
+>
+> What IS true across all 27, and was verified rather than assumed before any
+> switch was deleted: **no site's existing arm conflicts with the twin.** The
+> single exception is `jpeg/alif_hantro.c`'s `-ENOBUFS`, which is why Task 4's
+> override table is load-bearing rather than cosmetic. So nothing narrows and no
+> arm changes answer; each site's change is purely additive.
+>
+> **2. The include path in Task 2 Step 1 would not compile.** The plan writes
+> `#include "common/alp_errno.h"`, which is the YOCTO spelling — those TUs are
+> reached from `src/`. Only `src/common` is on the Zephyr include path
+> (`zephyr/CMakeLists.txt:1273`, the single `zephyr_include_directories` for
+> `src/`), so every Zephyr backend and the new ztest must use
+> `#include "alp_errno.h"`. The header's own file comment now says so.
+>
+> **3. `uart` belongs in batch B, and the plan's own hedge was right.** It has
+> `-ETIMEDOUT` but no `-EAGAIN`, so it is a batch-B site by the letter of the
+> inventory; the plan listed it under A with a "check this one carefully" note.
+> Checked: it goes in B. `spi` and `storage/zephyr_flash.c` are the same shape
+> and the plan already had them in B.
+>
+> **Everything else in the plan's measurement was exactly right** and is worth
+> saying, because most of this campaign's figures have needed correcting: 28
+> `errno_to_alp` functions under `src/`, of which `can/yocto_drv.c:183` is the
+> POSIX one already delegating, leaving **27**; `-EAGAIN -> ALP_ERR_TIMEOUT` at
+> **16** and absent at **11**; `-ETIMEDOUT` present at **19**; the six
+> TIMEOUT-incapable classes document no `ALP_ERR_TIMEOUT` so there is no contract
+> breach there; and `storage/zephyr_littlefs.c` versus `include/alp/storage.h` is
+> the one genuine documented-contract violation.
+>
+> **Caller sweep result (Task 3 Step 1), recorded as an answer:** seven
+> `== ALP_ERR_IO` / `!= ALP_ERR_IO` hits across `src/`, `examples/` and `tests/`,
+> **none on a class this touches.** The closest is
+> `examples/aen/aen-i3c-regcheck/src/main.c`, whose PASS gate accepts
+> `ALP_ERR_IO` from `alp_i3c_write` — but that status comes from an explicit
+> `if (target == NULL) return ALP_ERR_IO;` in `i3c/zephyr_drv.c`'s `z_write`,
+> which never reaches the mapper. The rest are the GD32-bridge examples and two
+> `tests/yocto/` files, all POSIX-side.
+>
+> **Task 4 Step 2's expected grep result needs restating.** After the migration
+> `grep -rnE "static alp_status_t _?errno_to_alp\(int" src/` still returns **28**
+> hits, not two — the functions all survive as one-line delegations, which is the
+> point. The check that means something is that none of them contains a `switch`:
+> `for f in $(grep -rlE "^static alp_status_t _?errno_to_alp\(int" src/ --include=*.c); do grep -q "alp_status_from_" "$f" || echo "$f"; done`
+> must print nothing.
+
 ## Task 1: Decide `-EAGAIN`, then write the function
 
 **Files:**
