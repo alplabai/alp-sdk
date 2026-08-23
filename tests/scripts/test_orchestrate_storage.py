@@ -14,6 +14,8 @@ Run locally:
 
 from __future__ import annotations
 
+import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -22,7 +24,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _orchestrate_support import _write_board  # noqa: E402
+from _orchestrate_support import REPO, _write_board  # noqa: E402
 
 from alp_orchestrate import (                       # noqa: E402
     OrchestratorError,
@@ -124,6 +126,71 @@ def test_resolve_storage_partitions_unknown_flash_device(
     path = _write_board(tmp_path, body)
     with pytest.raises(OrchestratorError, match="not_a_real_region"):
         load_board_yaml(path)
+
+
+def test_flash_device_resolves_against_explicit_metadata_root(
+    tmp_path: Path,
+) -> None:
+    """#1485: `load_board_yaml(..., metadata_root=R)` must resolve
+    `storage[].flash_device` against R, not the in-tree `metadata/` the
+    module-global `METADATA_ROOT` pointed at pre-fix.
+
+    E1M-V2N101 derives its memory_map from the SoC JSON (no inline
+    override), so renaming a region there is visible through
+    `resolve_memory_map()` -- the exact path `loader.py:1030`'s
+    `_known_flash_devices()` call walks. A scratch root that renames
+    `ocram_low` -> `ocram_scratch`: a board declaring the OLD (in-tree
+    only) name must fail against the scratch root, and one declaring the
+    NEW (scratch-only) name must pass -- pre-fix both false-passed and
+    false-failed respectively because the check silently read the
+    repo's own `metadata/` regardless of `metadata_root`.
+    """
+    meta = tmp_path / "metadata"
+    shutil.copytree(REPO / "metadata", meta)
+    n44 = meta / "socs" / "renesas" / "rzv2n" / "n44.json"
+    spec = json.loads(n44.read_text(encoding="utf-8"))
+    renamed = False
+    for region in spec["memory_regions"]:
+        if region.get("name") == "ocram_low":
+            region["name"] = "ocram_scratch"
+            renamed = True
+    assert renamed, "n44.json no longer declares an 'ocram_low' region"
+    n44.write_text(json.dumps(spec, indent=2) + "\n",
+                    encoding="utf-8", newline="\n")
+
+    def _v2n_board(flash_device: str) -> str:
+        return f"""
+        name: test-v2n-metadata-root
+        som:
+          sku: E1M-V2N101
+          hw_rev: r1
+
+        cores:
+          m33_sm:
+            os: zephyr
+            app: ./m33
+
+        storage:
+          - {{ name: settings, size_kib: 64, fs: raw, flash_device: {flash_device} }}
+        """
+
+    # The scratch-only name resolves against the scratch root.
+    scratch_path = _write_board(
+        tmp_path, _v2n_board("ocram_scratch"), name="scratch.yaml")
+    load_board_yaml(scratch_path, metadata_root=meta)
+
+    # The in-tree-only name (pre-fix this silently passed, reading the
+    # repo's own metadata/ instead of the scratch root) must now fail.
+    stale_path = _write_board(
+        tmp_path, _v2n_board("ocram_low"), name="stale.yaml")
+    with pytest.raises(OrchestratorError, match="ocram_low"):
+        load_board_yaml(stale_path, metadata_root=meta)
+
+    # Unpatched: the in-tree name still resolves against the real
+    # in-tree metadata/ (default path unaffected, as the issue notes).
+    default_path = _write_board(
+        tmp_path, _v2n_board("ocram_low"), name="default.yaml")
+    load_board_yaml(default_path)
 
 
 def test_resolve_storage_partitions_duplicate_name(

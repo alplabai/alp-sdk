@@ -1,5 +1,0 @@
-<map id="alp_model_t" name="alp_model_t">
-<area shape="rect" id="Node000001" title="Parsed view of an .alpmodel (no heap; references the source buffer)." alt="" coords="28,93,131,119"/>
-<area shape="rect" id="Node000002" href="$structalp__model__target__t.html" title="One compiled&#45;blob target entry from the manifest." alt="" coords="5,5,153,31"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="82,45,82,93,77,93,77,45"/>
-</map>

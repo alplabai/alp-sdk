@@ -115,6 +115,145 @@ Runner environment (in `~/actions-runner/.env`):
 
 Run **ephemeral or containerized** (fresh per job) for defense-in-depth.
 
+## Untrusted-input handling in `run:` blocks
+
+GitHub Actions substitutes every `${{ }}` expression into a step's `run:`
+block **as source text, before the shell parses it** — not as a shell
+argument. If the expression's value is attacker-influencable and contains
+shell metacharacters (`$()`, backticks, `;`, `&`, `|` — all legal in, e.g., a
+git branch name per `git-check-ref-format`), that text executes as code on
+the runner. This is a template injection, not a shell-quoting bug, so
+quoting inside the `run:` script does not help — the payload is already
+part of the script by the time bash sees it (alp-sdk#1475).
+
+**Rule:** never splice one of the following contexts directly into a `run:`
+block via `${{ }}`. Route it through the step's `env:` block instead, and
+reference it as a quoted shell variable (`"$THE_VAR"`). This is the complete
+list — it is the `_ATTACKER_CONTEXTS` tuple in
+`tests/scripts/test_workflows_are_loadable.py`, and the two must stay
+identical:
+
+- `github.event.pull_request` (especially `.head.ref`, `.head.sha`,
+  `.title`, `.body`)
+- `github.event.issue`
+- `github.event.comment`
+- `github.event.review`
+- `github.event.head_commit`
+- `github.event.commits`
+- `github.event.inputs`
+- `github.event.workflow_run`
+- `github.head_ref`
+- `github.ref_name`
+- `github.ref`
+- `github.actor`
+
+Matching is substring containment, so each entry covers its whole subtree
+(`github.event.pull_request` covers `.head.ref`, and `github.ref` also
+covers `github.ref_name`/`.ref_type`/`.ref_protected`).
+
+```yaml
+# Wrong -- payload substituted into the script before bash parses it:
+run: echo "${{ github.event.pull_request.head.ref }}"
+
+# Right -- the value is only ever *data*:
+env:
+  HEAD_REF: ${{ github.event.pull_request.head.ref }}
+run: echo "$HEAD_REF"
+```
+
+`actions/github-script` is the same sink with a different interpreter: its
+`with: script:` body is JavaScript that GitHub substitutes `${{ }}` into
+before Node parses it. Same rule, same `env:` indirection — the script reads
+the value back through `process.env` instead of a shell variable:
+
+```yaml
+# Wrong -- payload substituted into the script before Node parses it:
+uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9
+with:
+  script: core.info("${{ github.event.pull_request.title }}")
+
+# Right:
+uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9
+env:
+  PR_TITLE: ${{ github.event.pull_request.title }}
+with:
+  script: core.info(process.env.PR_TITLE)
+```
+
+This has to be applied **per step**, not once per workflow: `${{ }}` is
+re-substituted independently into every `run:` block, so quoting a value at
+the step that first receives it does not protect a later step that reads it
+back out of `steps.<id>.outputs.*` and splices it again. Each consuming step
+needs its own `env:` indirection.
+
+A step output carries no trust of its own. `steps.<id>.outputs.*` is only as
+trustworthy as the expression that assigned it, so a `${{ }}` reference in a
+`run:` body must be judged on that **root**, not on the fact that it names a
+`steps.*` value. `release.yml` is the worked example: its `Parse tag + verify
+against metadata` step published `GITHUB_REF_NAME` verbatim as
+`steps.tag.outputs.tag`, validating
+only the part before the first `-`, and three later steps spliced that output
+into their `run:` source text. Nothing in those three bodies named a context
+at all.
+
+`tests/scripts/test_workflows_are_loadable.py` checks this: it fails if a
+`run:` block interpolates one of the contexts above directly. Three limits on
+how much that check is worth:
+
+- **It matches direct context references only.** The check is substring
+  containment against the text of each `${{ }}` expression, so it cannot see
+  a value that reaches a `run:` body transitively through
+  `steps.<id>.outputs.*` — the `release.yml` case above passed it green.
+  Tracing a step output back to its root is a **manual** step; do it by hand
+  whenever a `run:` body reads one, and do not treat a green run as having
+  done it for you. (Covering it mechanically needs data-flow analysis across
+  steps rather than substring matching, and the check does not attempt that.)
+- **It is advisory, not blocking.** On a workflow-only edit the sole job
+  running `pytest tests/scripts/` is `cross-platform-zephyr`'s
+  `python-smoke` (no other workflow's `paths:` filter matches
+  `.github/workflows/**`), and `python-smoke` is in neither branch's
+  required-status-check list. `main` requires exactly
+  `twister · native_sim/native/64` and `clang-format · diff-only`;
+  `dev` requires exactly `twister-shard 1/4`, `twister-shard 2/4`,
+  `twister-shard 3/4`, `twister-shard 4/4`, `clang-format · diff-only`
+  and `distro install · all`. A violation therefore posts a red,
+  non-required check; it does not block the merge.
+- **It covers the two direct source-text sinks, and nothing else.** `run:`
+  bodies and `actions/github-script` `with: script:` bodies (alp-sdk#1529)
+  are both walked. A `with: script:` on any *other* action is an input
+  string that action receives rather than JavaScript it evals, so it is
+  deliberately not checked; a composite action's own `run:` steps live
+  outside `.github/workflows/` and are likewise unchecked.
+
+## Third-party action pinning
+
+Every `uses:` in `.github/workflows/` must resolve a 40-character commit
+SHA, not a mutable tag — a retagged or compromised upstream release must not
+change what a workflow executes without a new PR pinning it forward
+(alp-sdk#1479). Keep the tag as a trailing comment so a reviewer does not
+have to resolve the SHA back to a human-readable version by hand:
+
+```yaml
+uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+```
+
+**One deliberate exception:** `release.yml`'s `provenance` job, which calls
+`slsa-framework/slsa-github-generator`'s reusable workflow by tag
+(`@v2.1.0`), not by SHA. Upstream's own README ("Referencing SLSA builders
+and generators") requires its builders and generators be referenced as
+`@vX.Y.Z` so that `slsa-verifier` can verify the ref of the trusted
+reusable workflow — a hash pin is not supported yet (tracked upstream as
+`slsa-verifier#12`). That job's `compile-generator` input also defaults to
+false, so its binary-fetch step downloads a release asset at this ref,
+which must be a tag. The trust anchor for this one reference is the
+Sigstore-signed builder identity, not a SHA pin.
+
+`tests/scripts/test_workflows_are_loadable.py::%test_workflow_uses_are_sha_pinned`
+enforces the rule, with the SLSA generator call as its one documented
+exemption. `.github/dependabot.yml` bumping these pins, and
+`persist-credentials: false` on `actions/checkout` steps, are tracked as
+follow-on work in alp-sdk#1544, not yet done.
+
 ## Adding a new self-hosted job
 
 Follow the same shape as bitbake: a GitHub-hosted bridge in `alp-sdk`

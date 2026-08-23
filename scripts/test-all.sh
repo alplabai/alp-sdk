@@ -19,7 +19,8 @@
 #   2. Plain-CMake / baremetal build (compile-only -- no tests yet)
 #   3. Zephyr twister (skipped if ZEPHYR_BASE is unset)
 #   4. clang-format diff vs HEAD~1 (skipped if no clang-format)
-#   5. shellcheck over scripts/*.sh (skipped if shellcheck isn't installed)
+#   5. shellcheck over every shipped *.sh (repo-wide `git ls-files
+#      '*.sh'`; skipped if that tool isn't installed)
 #   6. bash -n parse of every shipped *.sh under REAL bash 3.2.57 in a
 #      container (skipped, loudly, if podman/docker isn't on PATH --
 #      cross-platform-zephyr.yml's macos-latest leg still covers it)
@@ -331,6 +332,7 @@ stage_twister() {
     python3 "${ZEPHYR_BASE}/scripts/twister" \
         --testsuite-root "${REPO_ROOT}/tests/unit" \
         --testsuite-root "${REPO_ROOT}/tests/zephyr" \
+        --testsuite-root "${REPO_ROOT}/tests/console" \
         --testsuite-root "${REPO_ROOT}/examples" \
         -p native_sim/native/64 \
         --extra-args=CONFIG_COMPILER_WARNINGS_AS_ERRORS=y \
@@ -339,11 +341,15 @@ stage_twister() {
 }
 
 stage_shellcheck() {
-    # Static-lint the project shell scripts so a shell bug (an SC2164
+    # Static-lint EVERY shipped shell script so a shell bug (an SC2164
     # cd-without-guard, a `set -u` empty-array trap, a POSIX-portability
     # slip that only bites macOS's bash 3.2) is caught on Linux BEFORE it
     # reddens macOS/Windows python-smoke.  Resolve shellcheck on PATH or
-    # the no-root ~/.local/bin install.
+    # the no-root ~/.local/bin install.  NOTE: unlike
+    # pr-static-analysis.yml's CI mirror (pinned to the v0.10.0 upstream
+    # release tarball), this resolves whatever shellcheck version is
+    # already installed locally -- a version skew here can disagree with
+    # CI about what counts as clean; install v0.10.0 locally to match.
     local sc
     sc=$(command -v shellcheck 2>/dev/null || true)
     if [ -z "${sc}" ] && [ -x "${HOME}/.local/bin/shellcheck" ]; then
@@ -352,16 +358,51 @@ stage_shellcheck() {
     if [ -z "${sc}" ]; then
         return 99
     fi
+    # #1550: widened from a flat `scripts/*.sh` glob (which only reached
+    # scripts/ itself, one level deep) to a repo-wide `git ls-files '*.sh'`
+    # sweep -- matching stage_bash32_parse's existing repo-wide `*.sh`
+    # sweep below. Before this, two groups shipped unchecked: root
+    # scripts/*.sh had no CI coverage at all (only this local stage), and 8
+    # files entirely outside scripts/ (firmware/cc3501e/ti/*.sh,
+    # keys/generate_dev_key.sh,
+    # meta-alp-sdk/recipes-core/alp-system/files/alp-remoteproc-start.sh,
+    # tests/yocto/*.sh, tools/native-sim-container/entrypoint.sh) were
+    # linted nowhere at all, in CI or locally.
+    #
     # test-all.sh is the load-bearing local-CI wrapper (it runs in a macOS
-    # CI test, test_test_all_worktree.py), so lint it at warning level;
-    # lint the rest of scripts/*.sh at error level to avoid drowning in
-    # pre-existing style warnings.
+    # CI test, test_test_all_worktree.py), so lint it at warning level.
+    # scripts/bench/** keeps the -S warning -x bar #1527 set (SC1012, the
+    # #1478 stray-`\n` class, is warning-severity, so -S error alone would
+    # not have caught it; -x follows `source` so bench-env.sh's
+    # cross-file reads don't false-positive SC2034). Everything else --
+    # every other file `git ls-files '*.sh'` returns -- runs at -S error,
+    # matching this stage's own prior non-test-all.sh severity and
+    # onramp-clean-container.yml's scripts/bootstrap.sh step.
+    local -a all_files=()
+    local f
+    while IFS= read -r f; do
+        all_files+=("${f}")
+    done < <(git ls-files '*.sh')
+    # An empty file list must never read as "0 broken files == PASS" --
+    # that is a silent-empty-loop, the exact shape of gate this PR argues
+    # against, and stage_bash32_parse below guards the identical case.
+    if [ "${#all_files[@]}" -eq 0 ]; then
+        echo "stage_shellcheck: 'git ls-files *.sh' returned NO files -- refusing to report a silent pass."
+        return 1
+    fi
     local rc=0
-    "${sc}" -S warning scripts/test-all.sh || rc=1
-    local other
-    for other in scripts/*.sh; do
-        [ "${other}" = "scripts/test-all.sh" ] && continue
-        "${sc}" -S error "${other}" || rc=1
+    for f in "${all_files[@]}"; do
+        case "${f}" in
+        scripts/test-all.sh)
+            "${sc}" -S warning "${f}" || rc=1
+            ;;
+        scripts/bench/*)
+            "${sc}" -x -S warning "${f}" || rc=1
+            ;;
+        *)
+            "${sc}" -S error "${f}" || rc=1
+            ;;
+        esac
     done
     return "${rc}"
 }

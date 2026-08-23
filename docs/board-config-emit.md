@@ -31,8 +31,8 @@ materialises the generated
 per-slice configuration and system manifest, then dispatches the
 underlying Zephyr / Yocto / baremetal build steps for the enabled
 cores.  Companion `tan` verbs (`tan image`, `tan flash`, `tan clean`,
-`tan size`, and `tan renode`) consume the same build state for
-bundle, flash, sizing, and simulation workflows. The SDK's
+and `tan size`) consume the same build state for bundle, flash, and
+sizing workflows. The SDK's
 `alp_project.py`, `alp_orchestrate --emit ...`, and `west alp-emit` surfaces
 remain the reference implementations for parity, direct SDK maintenance, and
 west-centric artefact inspection.

@@ -18,6 +18,7 @@
 #include <zephyr/ztest.h>
 
 #include "alp/protocol/cc3501e.h"
+#include "cc3501e_hw.h" /* diag sources GET_DIAG_INFO must actually read (#1562) */
 #include "transport.h"
 #include "worker.h" /* worker_init -- the worker `job` is a static; reset it per test */
 
@@ -521,7 +522,29 @@ ZTEST(cc3501e_bridge_transport, test_get_diag_info)
 	              CC3501E_BRIDGE_FW_VERSION_U16,
 	              "fw_version = derived marker (firmware-version.txt 0.2.0 -> 0x0200)");
 	zassert_equal(reply[7], (uint8_t)ALP_CC3501E_RESET_POWER_ON, "stub reset cause = POWER_ON");
-	zassert_equal(reply[8], (uint8_t)ALP_CC3501E_ROLE_OFF, "role = OFF in v0.1 (no radio)");
+	/* Role now comes from cc3501e_hw_radio_role() instead of a hardcoded
+	 * ROLE_OFF (#1562).  The stub brings no radio up, so OFF is still the right
+	 * answer here -- but it is now the HAL's answer, not a literal.
+	 *
+	 * HONEST LIMIT: every stub diag getter returns 0 and ROLE_OFF is 0, so this
+	 * assertion CANNOT distinguish "reads the HAL" from "re-hardcoded to 0".
+	 * It pins the wire layout and the reply length; the discriminating check for
+	 * the role actually tracking the AP is the bench run on real silicon, where
+	 * an AP that is up must report ROLE_WIFI_AP (2). Do not read a green run
+	 * here as proof the field is live. */
+	zassert_equal(reply[8], (uint8_t)ALP_CC3501E_ROLE_OFF, "stub has no radio role up -> OFF");
+	/* free_heap_bytes must be the heap again, not the Wi-Fi event ID that
+	 * squatted here (#1562); the event ID moved to reserved[0] = reply[18]. */
+	/* Offsets: reply = header(4) + status(1) + struct, so struct byte i is at
+	 * reply[5+i].  free_heap_bytes is struct[8..11] -> reply[13..16]. */
+	const uint32_t heap = (uint32_t)reply[13] | ((uint32_t)reply[14] << 8) |
+	                      ((uint32_t)reply[15] << 16) | ((uint32_t)reply[16] << 24);
+	zassert_equal(heap, cc3501e_hw_free_heap_bytes(), "free_heap_bytes = the HAL's heap source");
+	zassert_equal(reply[18],
+	              (uint8_t)(cc3501e_hw_wifi_last_event_id() & 0xFFu),
+	              "reserved[0] = low byte of the last Wi-Fi event ID");
+	zassert_equal(reply[19], 0u, "reserved[1] still zero");
+	zassert_equal(reply[20], 0u, "reserved[2] still zero");
 }
 
 ZTEST(cc3501e_bridge_transport, test_power_policy_ok)

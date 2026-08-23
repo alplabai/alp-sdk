@@ -17,9 +17,8 @@ indistinguishable from a good one until someone tried to flash.
 
 `firmware_path` is OPTIONAL and its omission is meaningful: the schema's own
 description says the key should be left out entirely when no artefact exists
-yet, so `tan flash` gives its clean "has no output_artefact / firmware_path;
-can't flash" refusal instead of resolving a sentinel/`TBD` path. This gate
-therefore only checks a value that IS present -- it never requires the key.
+yet. This gate only checks a value that IS present -- it never requires the
+key.
 
 Run locally:
 
@@ -51,8 +50,7 @@ def find_problems(root: Path) -> list[str]:
             firmware_path = entry.get("firmware_path")
             if firmware_path is None:
                 # Deliberately absent -- schema-legal, and the point of the
-                # key: no artefact exists yet, so `tan flash` refuses cleanly
-                # instead of resolving a sentinel path. Not this gate's job.
+                # key: no artefact exists yet. Not this gate's job.
                 continue
             name = entry.get("name", "<unnamed>")
             resolved = (root / firmware_path).resolve()

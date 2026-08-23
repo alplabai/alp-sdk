@@ -53,13 +53,22 @@ jobs:
   doc-drift:
     name: doc-drift · symbols + index
     runs-on: ubuntu-latest
+    # #1477: worst observed successful run 13s across 3 sampled runs.
+    # Raised from the formula's 10min to 15min so the ceiling stays
+    # strictly above the sum of its capped steps plus the 1min/step
+    # budget for the 7 uncapped (pure-Python) doc-drift check steps below.
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 5
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 

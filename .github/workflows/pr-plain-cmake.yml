@@ -44,11 +44,17 @@ jobs:
   baremetal:
     name: plain-cmake · baremetal stub backend
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 3
       - name: Configure
+        timeout-minutes: 2
         run: cmake -B build/baremetal -S . -DALP_OS=baremetal
       - name: Build
+        timeout-minutes: 3
         run: cmake --build build/baremetal --parallel
 
   baremetal-aen:
@@ -61,11 +67,17 @@ jobs:
     # HAL link arrives in v0.2.x via cpackget AlifSemiconductor::Ensemble.
     name: plain-cmake · baremetal AEN (vendor scaffolding)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 3
       - name: Configure
+        timeout-minutes: 2
         run: cmake -B build/baremetal-aen -S . -DALP_OS=baremetal -DALP_SOM=aen
       - name: Build
+        timeout-minutes: 2
         run: cmake --build build/baremetal-aen --parallel
 
   baremetal-v2n:
@@ -77,11 +89,17 @@ jobs:
     # v0.4 alongside the V2N HIL bring-up.
     name: plain-cmake · baremetal V2N (vendor scaffolding)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 3
       - name: Configure
+        timeout-minutes: 2
         run: cmake -B build/baremetal-v2n -S . -DALP_OS=baremetal -DALP_SOM=v2n
       - name: Build
+        timeout-minutes: 3
         run: cmake --build build/baremetal-v2n --parallel
 
   consumer-add-subdirectory:
@@ -94,37 +112,52 @@ jobs:
     # CMake project that add_subdirectory()s alp-sdk the documented way.
     name: plain-cmake · add_subdirectory() consumer (#598)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       matrix:
         som: ["none", "aen"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 3
       - name: Configure
+        timeout-minutes: 2
         run: >
           cmake -B build/consumer-${{ matrix.som }}
           -S tests/cmake-consumer/add-subdirectory-smoke
           -DALP_OS=baremetal -DALP_SOM=${{ matrix.som }}
       - name: Build
+        timeout-minutes: 3
         run: cmake --build build/consumer-${{ matrix.som }} --parallel
 
   yocto:
     name: plain-cmake · yocto backend + tests
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 3
       # libmosquitto-dev unlocks the iot_yocto.c MQTT wrapper;
       # libasound2-dev unlocks the audio_yocto.c ALSA wrapper;
       # libssl-dev unlocks the security_yocto.c OpenSSL wrapper.
       # Without these the CMakeLists falls back to the NOSUPPORT
       # stubs and we'd lose coverage in CI.
       - name: Install Yocto-side runtime deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure
+        timeout-minutes: 5
         run: cmake -B build/yocto -S . -DALP_OS=yocto -DALP_BUILD_TESTS=ON
       - name: Build
+        timeout-minutes: 2
         run: cmake --build build/yocto --parallel
       # ctest exercises the inference dispatcher's NULL/INVAL paths,
       # the I2C/SPI/UART/GPIO wrappers' failure-path coverage, and
@@ -151,14 +184,24 @@ jobs:
     # replace.
     name: plain-cmake · yocto + zcbor (#1254)
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 3
       - name: Install Yocto-side runtime deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Build zcbor at the recipe's own pin (tag 0.9.1)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
           set -e
           git clone --depth 1 --branch 0.9.1 \
@@ -196,11 +239,13 @@ jobs:
               meta-alp-sdk/recipes-devtools/zcbor/files/zcbor_abi_pin.h \
               "$RUNNER_TEMP/zcbor-prefix/include/"
       - name: Configure
+        timeout-minutes: 2
         run: >
           cmake -B build/yocto-zcbor -S . -DALP_OS=yocto -DALP_BUILD_TESTS=ON
           -DALP_SDK_MODEL_ZCBOR_REQUIRED=ON
           -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/zcbor-prefix"
       - name: Build
+        timeout-minutes: 3
         run: cmake --build build/yocto-zcbor --parallel
       - name: Test (alp_test_alpmodel_onnx_cpu must run, not skip)
         run: |
@@ -221,6 +266,7 @@ jobs:
     # ALSA/OpenSSL) wired in, so the strict profile actually sees them.
     name: plain-cmake · strict-warnings (#634)
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -234,14 +280,21 @@ jobs:
           - name: yocto
             args: -DALP_OS=yocto -DALP_BUILD_TESTS=ON
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 3
       - name: Install Yocto-side runtime deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         if: matrix.name == 'yocto'
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure
+        timeout-minutes: 5
         run: >
           cmake -B build/strict-${{ matrix.name }} -S . ${{ matrix.args }}
           -DALP_SDK_STRICT_WARNINGS=ON -DALP_SDK_WERROR=ON
@@ -258,6 +311,7 @@ jobs:
       # this step's default `bash -e {0}` would abort the script on that
       # line before the ::error:: below could ever run).
       - name: Build (warning-free)
+        timeout-minutes: 3
         run: |
           cmake --build build/strict-${{ matrix.name }} --parallel 2>&1 | tee build.log
           build_rc=${PIPESTATUS[0]}
@@ -282,12 +336,18 @@ jobs:
     # as the source of truth for the portable surface).
     name: plain-cmake · link-completeness (#593)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 3
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 3
         with:
           python-version: '3.11'
       - name: Check
+        timeout-minutes: 3
         run: python3 scripts/check_plain_cmake_link_complete.py
 
   find-package-consumer:
@@ -302,14 +362,22 @@ jobs:
     # path instead of add_subdirectory()).
     name: plain-cmake · find_package() consumer (#607)
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 3
       - name: Install Yocto-side runtime deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure + build + install alp-sdk
+        timeout-minutes: 5
         run: |
           cmake -B build/install-review -S . -DALP_OS=yocto \
               -DALP_SDK_BUILD_SHARED=ON \
@@ -317,6 +385,7 @@ jobs:
           cmake --build build/install-review --parallel
           cmake --install build/install-review
       - name: Configure + build the find_package() consumer
+        timeout-minutes: 2
         run: |
           cmake -B build/consumer-findpkg \
               -S tests/cmake-consumer/find-package-smoke \

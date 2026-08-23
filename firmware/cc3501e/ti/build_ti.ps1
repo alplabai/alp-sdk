@@ -24,6 +24,12 @@ param(
     [string]$SdkDir       = "$env:USERPROFILE\Desktop\ti_simplelink_sdk\simplelink_wifi_sdk_10_10_01_08",
     [string]$TiclangRoot  = "C:\ti\ti-cgt-armllvm-5.1.1.LTS\ti-cgt-armllvm_5.1.1.LTS",
     [string]$SysconfigCli = "C:\ti\sysconfig-1.28.0\sysconfig_cli.bat",
+    # The SimpleLink Wi-Fi Toolbox install root (the dir holding .metadata\product.json).
+    # Needed for the MemoryConfigurator SysConfig step below -- that module ships in the
+    # TOOLBOX, not the SDK.  4.2.4 is the version the working prebuilt images were built
+    # with (firmware/cc3501e/prebuilt/CHANGELOG.md); the signing assets are a matched set
+    # against it, so don't bump this casually.
+    [string]$ToolboxDir   = "C:\ti\simplelink_wifi_toolbox_4.2.4\simplelink_wifi_toolbox_win_4_2_4",
     [string]$Transport    = "spi",  # spi | sdio
     [switch]$OtaSelftest,           # build the OTA-self-install validation updater (embeds cc3501e_ota_candidate.c, -DCC3501E_OTA_SELFTEST)
     [switch]$WifiHostDriver,        # link the CC35xx Wi-Fi host driver (-DCC3501E_WIFI; enables GET_MAC / scan / connect bodies)
@@ -55,6 +61,28 @@ $syscfgFile = if ($WifiHostDriver) { "$PSScriptRoot\cc3501e_aen_wifi.syscfg" } e
     --output $out $syscfgFile
 if ($LASTEXITCODE -ne 0) { throw "SysConfig failed" }
 
+Write-Host "== SysConfig: MemoryConfigurator -> flash map (memcfg) =="
+# Ports the step build_ti.sh has always had (its lines 82-90).  This script CONSUMED
+# $out\memcfg\ti_flash_map_config.c further down but never GENERATED it, so it only
+# ever built in a directory where some earlier run had left a memcfg\ behind -- a
+# fresh `git worktree add` checkout died with
+#   tiarmclang: error: no such file or directory: '...\build\ti\memcfg\ti_flash_map_config.c'
+#
+# Generate it, don't copy one forward from an old build dir: the flash map has to
+# match THIS SoM's cc35xx-conf.bin, and a stale map is exactly the kind of mismatch
+# that authenticates fine and then misbehaves.
+#
+# NB the TWO --product manifests.  The MemoryConfigurator module ships in the Wi-Fi
+# TOOLBOX, not the SDK, so passing only the SDK manifest (the obvious hand-run) fails
+# to resolve /ti/memoryconfig/MemoryConfigurator/Mem_cfg.  Mirrors the demo makefile.
+if (-not (Test-Path "$ToolboxDir\.metadata\product.json")) {
+    throw "MemoryConfigurator needs the Wi-Fi Toolbox: no .metadata\product.json under '$ToolboxDir'. Pass -ToolboxDir <install root>."
+}
+& $SysconfigCli --compiler ticlang `
+    --product "$SdkDir\.metadata\product.json" --product "$ToolboxDir\.metadata\product.json" `
+    --output "$out\memcfg" "$PSScriptRoot\cc3501e_mem.syscfg"
+if ($LASTEXITCODE -ne 0) { throw "SysConfig MemoryConfigurator failed" }
+
 $inc = @(
     "-I$fw\src", "-I$fw\hal", "-I$repo\include", "-I$out", "-I$out\memcfg",
     "-I$SdkDir\source", "-I$SdkDir\source\ti\utils\FWU\headers", "-I$SdkDir\kernel\freertos", "-I$SdkDir\source\ti\posix\ticlang",
@@ -63,6 +91,27 @@ $inc = @(
 $cflags = @('-c', '-mcpu=cortex-m33', '-mthumb', '-mfloat-abi=hard', '-mfpu=fpv5-sp-d16',
             '-DDeviceFamily_CC35XX', '-DCC35XX', '-DCC3501E_RTOS_FREERTOS', '-Oz',
             '-ffunction-sections', '-fdata-sections', '-Wall')
+
+# Derive the GET_DIAG_INFO.fw_version marker from firmware-version.txt (the SINGLE
+# source of truth), mirroring build_ti.sh:102-114, so this path stays in lockstep with
+# the CMake build and never drifts from the release version.  Pre-1.0 packing:
+# (MINOR<<8)|PATCH -> 0.2.1 = 0x0201.  This is the APP SemVer marker -- DISTINCT from
+# the GPE flash version in deploy_validate.sh (anti-rollback gate) and from
+# ALP_CC3501E_PROTOCOL_VERSION (the wire gate).
+#
+# Ported because this script did NOT pass it: images built here silently fell back to
+# protocol_diag.c's hardcoded 0x0200u, so `alp companion diag info` reported the OLD
+# version no matter what was flashed.  That is worse than cosmetic -- it makes
+# fw_version useless as a "did my flash land?" signal on the Windows path, which is
+# exactly when an operator reaches for it (bench-hit 2026-08-19 verifying #1563).
+$fwverRaw = (Get-Content "$fw\firmware-version.txt" -TotalCount 1).Trim()
+if ($fwverRaw -match '^([0-9]+)\.([0-9]+)\.([0-9]+)$') {
+    $fwU16 = '0x{0:x4}' -f ((([int]$Matches[2]) -shl 8) -bor ([int]$Matches[3]))
+} else {
+    throw "firmware-version.txt not SemVer major.minor.patch: '$fwverRaw'"
+}
+Write-Host "== fw_version marker: $fwverRaw -> $fwU16 (from firmware-version.txt) =="
+$cflags += "-DCC3501E_BRIDGE_FW_VERSION_U16=$fwU16"
 
 $txdef = if ($Transport -eq 'sdio') { @('-DCC3501E_CONTROL_TRANSPORT_SDIO=1') } else { @() }
 if ($OtaSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_SELFTEST') }

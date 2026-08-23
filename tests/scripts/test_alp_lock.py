@@ -47,11 +47,11 @@ def _fixture_ws(tmp_path):
 def test_build_lock_validates_and_is_deterministic(tmp_path):
     import alp_lock
     ws = _fixture_ws(tmp_path)
-    lock1 = alp_lock.build_lock(ws, rev_resolver=lambda r: "deadbeef")
-    lock2 = alp_lock.build_lock(ws, rev_resolver=lambda r: "deadbeef")
+    lock1 = alp_lock.build_lock(ws)
+    lock2 = alp_lock.build_lock(ws)
     jsonschema.validate(lock1, json.loads(SCHEMA.read_text()))
     assert lock1 == lock2
-    assert lock1["sdk"] == {"version": "9.9.9", "revision": "deadbeef"}
+    assert lock1["sdk"] == {"version": "9.9.9"}   # no `revision` (#1615)
     # sorted by name
     assert [p["name"] for p in lock1["west"]["projects"]] == ["cmsis", "hal_alif"]
     assert lock1["west"]["groupFilter"] == ["-optional"]
@@ -79,13 +79,13 @@ def test_collectors_route_leaves_through_guard(tmp_path):
     (ws / "metadata" / "libraries" / "aws-iot.yaml").write_text(
         "schema_version: 1\nname: aws-iot\nversion: v3.1.5\nlicense: /etc/secret\n")
     with pytest.raises(alp_lock.LockError):
-        alp_lock.build_lock(ws, rev_resolver=lambda r: "x")
+        alp_lock.build_lock(ws)
     # poison a west group
     ws2 = _fixture_ws(tmp_path / "b")
     (ws2 / "west.yml").write_text(
         "manifest:\n  projects:\n    - name: p\n      revision: r\n      groups: [/abs]\n")
     with pytest.raises(alp_lock.LockError):
-        alp_lock.build_lock(ws2, rev_resolver=lambda r: "x")
+        alp_lock.build_lock(ws2)
 
 
 def test_flatten_duplicate_names_do_not_mask_drift(tmp_path):
@@ -104,29 +104,51 @@ def test_flatten_duplicate_names_do_not_mask_drift(tmp_path):
 def test_verify_lock_detects_drift(tmp_path):
     import alp_lock
     ws = _fixture_ws(tmp_path)
-    locked = alp_lock.build_lock(ws, rev_resolver=lambda r: "v1")
-    assert alp_lock.verify_lock(locked, ws, rev_resolver=lambda r: "v1") == []
+    locked = alp_lock.build_lock(ws)
+    assert alp_lock.verify_lock(locked, ws) == []
     # mutate a west revision on disk
     (ws / "west.yml").write_text(
         (ws / "west.yml").read_text().replace("abc123", "9999999"))
-    drifts = alp_lock.verify_lock(locked, ws, rev_resolver=lambda r: "v1")
+    drifts = alp_lock.verify_lock(locked, ws)
     assert any(d.path == "west.projects[hal_alif].revision"
                and d.locked == "abc123" and d.actual == "9999999" for d in drifts)
 
 
-def test_verify_lock_ignores_sdk_revision(tmp_path):
-    """sdk.revision is provenance, not a frozen input: a moved HEAD alone is
-    not drift (else the SDK's own committed alp.lock would fail --check on
-    every subsequent commit). Real input drift still fails."""
+def test_build_lock_omits_sdk_revision(tmp_path):
+    """#1615: `sdk.revision` is no longer emitted, and the lock is byte-stable
+    across regenerations of an unchanged tree.
+
+    It recorded the HEAD of the repo the lock was generated in, so in alp-sdk's
+    own tree it changed on every commit -- which conflicted every concurrent PR
+    on a file whose two sides never disagreed -- while being stale the instant
+    it landed. The schema still ALLOWS the key (see the companion test), it is
+    just not written."""
     import alp_lock
     ws = _fixture_ws(tmp_path)
-    locked = alp_lock.build_lock(ws, rev_resolver=lambda r: "old_head")
-    # Only the SDK HEAD moved -> no drift.
-    assert alp_lock.verify_lock(locked, ws, rev_resolver=lambda r: "new_head") == []
-    # HEAD moved AND a real input drifted -> only the real input is reported.
+    lock = alp_lock.build_lock(ws)
+    assert "revision" not in lock["sdk"]
+    jsonschema.validate(lock, json.loads(SCHEMA.read_text()))
+    # The whole point: regenerating over an unchanged tree yields the identical
+    # document, so nothing churns between commits.
+    assert alp_lock.build_lock(ws) == lock
+
+
+def test_verify_lock_accepts_a_pre_1615_lock_carrying_sdk_revision(tmp_path):
+    """A lock generated BEFORE #1615 still verifies clean against a build that
+    omits the field -- `sdk.revision` stays in `_PROVENANCE_KEYS` precisely so
+    dropping it is not itself reported as drift. Real input drift still fails."""
+    import alp_lock
+    ws = _fixture_ws(tmp_path)
+    locked = alp_lock.build_lock(ws)
+    # Simulate the old generator: re-add the field the way it used to be written.
+    locked["sdk"]["revision"] = "old_head"
+    jsonschema.validate(locked, json.loads(SCHEMA.read_text()))
+    assert alp_lock.verify_lock(locked, ws) == []
+    # ...and a real input drifting is still reported, with the retired field
+    # neither masking it nor appearing alongside it.
     (ws / "west.yml").write_text(
         (ws / "west.yml").read_text().replace("abc123", "9999999"))
-    drifts = alp_lock.verify_lock(locked, ws, rev_resolver=lambda r: "new_head")
+    drifts = alp_lock.verify_lock(locked, ws)
     assert [d.path for d in drifts] == ["west.projects[hal_alif].revision"]
 
 

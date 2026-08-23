@@ -15,7 +15,7 @@ Everything tracks the PR gate (`.github/workflows/pr-twister.yml`) and the SDK's
 
 | Thing | Pin | Source of truth |
 | --- | --- | --- |
-| Zephyr | `v4.4.0` | `west.yml` `zephyr` revision / `pr-twister.yml --mr` |
+| Zephyr | derived from `west.yml` at build time | `west.yml` `zephyr` revision / `pr-twister.yml --mr` |
 | Ubuntu base | `24.04` | `pr-twister.yml` runs on `ubuntu-latest` |
 | Python | `3.12` | `.python-version` (via `pr-twister.yml` `setup-python`); image itself uses `ubuntu:24.04` system python |
 | Toolchain | host `gcc` (`ZEPHYR_TOOLCHAIN_VARIANT=host`) | `pr-twister.yml` `env:` |
@@ -26,19 +26,21 @@ host `gcc`, so the ~17 GB cross-toolchain bundle isn't needed — the same reaso
 pinned Zephyr workspace is baked into the image at build time (`west init` /
 `update --narrow --depth=1`), so each `run` is a pure compile with no network.
 
+`make build`/`make test`/`make shell` read the Zephyr revision straight out of
+`west.yml` and pass it as `--build-arg ZEPHYR_REV=...`, so the image always
+bakes whatever this checkout's `west.yml` pins — there is no copy to keep in
+sync by hand. The Containerfile's own `ARG ZEPHYR_REV` default exists only
+for a standalone `docker build`/`podman build` that bypasses the Makefile;
+`scripts/check_bootstrap_manifest.py` fails the PR if that default ever
+drifts from `west.yml` again (issue #1458).
+
 ## Quick start
 
+The Makefile is the supported entry point: it derives the pinned Zephyr
+revision from `west.yml` and passes it as `--build-arg`, adds the `-f
+Containerfile` flag `docker` needs (podman auto-detects `Containerfile`; `-f`
+is harmless there too), and handles the bind-mount + SELinux `:z` relabel.
 From the repo root:
-
-```sh
-# build the image (bakes the pinned Zephyr v4.4.0 workspace)
-podman build -t alp-native-sim tools/native-sim-container
-
-# run the full pr-twister suite against this checkout
-podman run --rm -v "$PWD":/work/alp-sdk:z alp-native-sim
-```
-
-Or use the Makefile, which handles the bind-mount + SELinux `:z` relabel for you:
 
 ```sh
 make -C tools/native-sim-container test      # build (if needed) + run the suite
@@ -46,8 +48,26 @@ make -C tools/native-sim-container shell     # interactive shell in the workspac
 make -C tools/native-sim-container clean     # remove the image
 ```
 
-`docker` works too — either pass `make CONTAINER_ENGINE=docker test` or swap
-`podman` for `docker` in the raw commands above.
+`docker` works too:
+
+```sh
+make -C tools/native-sim-container CONTAINER_ENGINE=docker test
+```
+
+### Raw engine commands
+
+Bypassing the Makefile works, but then `-f` is on you (`docker` needs it;
+`podman` doesn't), and the Zephyr pin comes from the Containerfile's own
+`ARG ZEPHYR_REV` default instead of a live `west.yml` read — see "Bumping the
+Zephyr pin" below.
+
+```sh
+podman build -t alp-native-sim -f tools/native-sim-container/Containerfile tools/native-sim-container
+docker build -t alp-native-sim -f tools/native-sim-container/Containerfile tools/native-sim-container
+
+# run the full pr-twister suite against this checkout
+podman run --rm -v "$PWD":/work/alp-sdk:z alp-native-sim
+```
 
 ## Running a narrower build
 
@@ -64,15 +84,38 @@ podman run --rm -v "$PWD":/work/alp-sdk:z alp-native-sim \
 
 ## Bumping the Zephyr pin
 
-When `west.yml` bumps the Zephyr revision, rebuild with the matching tag so the
-container and the gate stay in step:
+`west.yml` is **not** where you edit this — it is itself one of the sites
+[`scripts/check_bootstrap_manifest.py --fix`](../../scripts/check_bootstrap_manifest.py)
+rewrites, not a place to hand-edit. `metadata/bootstrap.json`'s
+`zephyr.version` is the actual single source of truth for the whole repo
+(issue #917); editing `west.yml` alone leaves it disagreeing with that file
+and fails the gate. See
+[`docs/zephyr-version-policy.md`](../../docs/zephyr-version-policy.md) for
+the full bump procedure. The short version, from the repo root:
 
 ```sh
-podman build --build-arg ZEPHYR_REV=v4.5.0 -t alp-native-sim tools/native-sim-container
+# 1. edit metadata/bootstrap.json's zephyr.version
+# 2. propagate it to west.yml, the CI workflow --mr/cache-key pins, the
+#    README badge, and this Containerfile's ARG ZEPHYR_REV default:
+python3 scripts/check_bootstrap_manifest.py --fix
+# 3. prove every pin agrees:
+python3 scripts/check_bootstrap_manifest.py
 ```
 
-Keep `ZEPHYR_REV`, `west.yml`'s `zephyr` revision, and `pr-twister.yml`'s `--mr`
-flag identical — that lockstep is the whole point of this container.
+`make build`/`make test`/`make shell` then pick up the new pin automatically
+on the next run — they read `west.yml` live, so there is nothing to edit in
+this directory itself.
+
+Building with a raw `docker`/`podman` command instead of the Makefile? Step
+2 above already rewrote the Containerfile's `ARG ZEPHYR_REV` default, so a
+standalone build already carries the right value; pass your own
+`--build-arg ZEPHYR_REV=<rev>` only if you want to override it.
+`scripts/check_bootstrap_manifest.py` (no `--fix`) fails the PR if that
+default and `metadata/bootstrap.json` ever disagree, so it can't drift
+silently the way it did before issue #1458.
+
+Keep `west.yml`'s `zephyr` revision and `pr-twister.yml`'s `--mr` flag
+identical — that lockstep is the whole point of this container.
 
 ## Layout
 

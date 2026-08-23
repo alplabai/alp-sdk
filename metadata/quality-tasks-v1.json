@@ -17,8 +17,22 @@
       "ci": "pr-doc-drift.yml:doc-drift"
     },
     {
+      "id": "apt-bounded",
+      "description": "No .github/workflows/*.yml step calls apt-get update/install directly -- Acquire::http::Timeout bounds an idle read, not a trickling one, so it must go through scripts/ci/apt-bounded.sh's wall-clock retry wrapper (#1575).",
+      "runner": "check-script",
+      "script": "scripts/check_apt_bounded.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "atoc-reservation",
-      "description": "Every AEN board .dts and every SoM preset memory_map reserves the top of the App MRAM window as an 'atoc' region -- SETOOLS top-anchors the ATOC boot table there (#1289).",
+      "description": "Every AEN board .dts and every SoM preset memory_map reserves the top of the App MRAM window as an 'atoc' region -- SETOOLS top-anchors the ATOC boot table there (#1289) -- and every AEN board .dts with an m55_he/m55_hp role publishes a slot0 flash address that agrees with loader._resolve_slot0_load_address() (#1482).",
       "runner": "check-script",
       "script": "scripts/check_atoc_reservation.py",
       "gate": true,
@@ -171,6 +185,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "chip-subsystems-parity",
+      "description": "_CHIP_SUBSYSTEMS <-> Kconfig depends-on parity gate -- fails when a chip's Zephyr subsystem dependency isn't mirrored from zephyr/kconfigs/chips.kconfig.",
+      "runner": "check-script",
+      "script": "scripts/check_chip_subsystems_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "cmake-chip-list-parity",
       "description": "Plain-CMake chip-list parity gate -- fails when ALP_SDK_CHIP_LIST drifts from the drivers under chips/<id>/.",
       "runner": "check-script",
@@ -307,6 +335,20 @@
       ],
       "output": "none",
       "ci": "pr-doxygen.yml:doxygen"
+    },
+    {
+      "id": "doxygen-output-untracked",
+      "description": "No tracked file lives under Doxygen's OUTPUT_DIRECTORY (docs/doxygen/Doxyfile) -- it is a generated build artifact, not source (#1573).",
+      "runner": "check-script",
+      "script": "scripts/check_no_committed_doxygen_output.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
     },
     {
       "id": "driver-status-backing",
@@ -771,6 +813,20 @@
       "description": "Prove every libraries:-selectable Zephyr module resolves to a reachable west.yml project in an alp-sdk-owned workspace, and that no name-allowlist entry is shadowed by a same-named top-level project (#1136).",
       "runner": "check-script",
       "script": "scripts/check_west_manifest_module_resolution.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "workflow-expressions",
+      "description": "Reject a jobs.<job_id>.if that references a context GitHub Actions does not expose there (e.g. matrix, steps) -- valid YAML but rejected by GitHub at workflow-load time on every event (#1528).",
+      "runner": "check-script",
+      "script": "scripts/check_workflow_expressions.py",
       "gate": true,
       "profiles": [
         "pr",

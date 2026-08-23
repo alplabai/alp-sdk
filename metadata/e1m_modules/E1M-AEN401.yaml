@@ -191,15 +191,18 @@ pad_routes:
 helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e
-    firmware_path: firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin
+    firmware_path: firmware/cc3501e/prebuilt/cc3501e-v0.3.0.bin
     # CC3501E firmware is Alp-released, applied over the bridge SPI
     # programming OTP.  Alp Lab programs it in production; a customer
     # flash is permitted only to recover a bricked device, using
     # Alp Lab-supplied binaries -- `flash_policy: recovery_only` states
     # that directly instead of leaving a tool to infer it from the
     # presence of an OTA channel -- the two are independent facts
-    # (#1357).  Behaviour is unchanged: this entry declares no
-    # `flash_method`, so there is nothing to decline.
+    # (#1357).  `tan flash` DOES decline this entry: `flash_policy:
+    # recovery_only` is checked ahead of any `flash_method` presence
+    # (`python/tan/core/flash_plan.py::helper_flash_gate`, tan-cli#611) --
+    # the same shape as `gd32_bridge` (see docs/gd32-bridge.md's "Who
+    # flashes it, and when" section).
     flash_policy:   recovery_only
     update_channel: alp_ota_spi_otp
 

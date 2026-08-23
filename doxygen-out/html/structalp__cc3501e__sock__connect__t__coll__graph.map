@@ -1,5 +1,0 @@
-<map id="alp_cc3501e_sock_connect_t" name="alp_cc3501e_sock_connect_t">
-<area shape="rect" id="Node000001" title="Payload of CMD_SOCK_CONNECT (opcode 0x21)." alt="" coords="5,93,216,119"/>
-<area shape="rect" id="Node000002" href="$structalp__cc3501e__sock__addr__t.html" title="Endpoint address shared by CMD_SOCK_CONNECT and the from&#45;address of a received datagram." alt="" coords="17,5,205,31"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="113,45,113,93,108,93,108,45"/>
-</map>

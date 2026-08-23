@@ -80,6 +80,14 @@ permissions: read-all
 jobs:
   build:
     runs-on: ubuntu-latest
+    # #1477: worst observed successful run 22s across 3 sampled release
+    # runs -- comfortably inside the formula's 10min floor, but this job
+    # makes several independent network round trips (pip install, the
+    # tarball's GitHub Release upload) and release.yml fires rarely
+    # enough (a handful of times a month) that the 3-run sample is thin.
+    # 20min keeps headroom over both that floor and the sum of this job's
+    # own capped + budgeted-uncapped step timeouts.
+    timeout-minutes: 30
     permissions:
       contents: write  # required to create the GitHub Release
     outputs:
@@ -87,16 +95,22 @@ jobs:
       hashes: ${{ steps.hash.outputs.hashes }}
     steps:
       - name: Checkout (full history for CHANGELOG slice)
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 
       - name: Install Python deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip install pyyaml jsonschema
 
       - name: Parse tag + verify against metadata
@@ -226,8 +240,18 @@ jobs:
 
       - name: Build source tarball
         id: archive
+        # TAG is the RAW pushed tag: `steps.tag.outputs.tag` is set from
+        # GITHUB_REF_NAME verbatim, and the core-version guard above only
+        # validates the part before the first `-` (`VERSION%%-*`), so the
+        # pre-release suffix reaches here unchecked.  git-check-ref-format
+        # permits `"`, `$`, backtick, `(`, `)` and `;` in a tag name, so a
+        # tag like `v0.6.0-$(id)` passes that guard and would be
+        # substituted into this block's SOURCE TEXT before bash parsed it.
+        # Route it through env: and read it as a quoted shell variable
+        # instead -- the value is then only ever data (#1475).
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          TAG="${{ steps.tag.outputs.tag }}"
           ARCHIVE="alp-sdk-${TAG}.tar.gz"
           git archive --format=tar --prefix="alp-sdk-${TAG}/" HEAD | gzip -n > "$ARCHIVE"
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
@@ -235,8 +259,15 @@ jobs:
           sha512sum "$ARCHIVE" > "$ARCHIVE.sha512"
 
       - name: Emit SBOM + build receipt
+        # Same raw tag, same treatment: a workflow expression is
+        # re-substituted into every run: block independently, so
+        # env-indirecting it in the step above does not protect this one
+        # (#1475).  Written without expression delimiters on purpose -- see
+        # the header note about empty expressions rejecting the whole file.
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          python3 scripts/gen_sbom.py --output "alp-sdk-${{ steps.tag.outputs.tag }}.cdx.json"
+          python3 scripts/gen_sbom.py --output "alp-sdk-${TAG}.cdx.json"
           # (receipt for a source release: the tarball is the sole image)
 
       - name: Emit base64-encoded digests for the provenance job
@@ -247,13 +278,19 @@ jobs:
         # produces one provenance subject; the tarball is the only
         # canonical release artefact (checksums + provenance bundle
         # are derived, not subjects in their own right).
+        #
+        # ARCHIVE is `alp-sdk-<raw tag>.tar.gz`, so it carries the same
+        # unvalidated pre-release suffix one step further; env-indirected
+        # for the same reason (#1475).
+        env:
+          ARCHIVE: ${{ steps.archive.outputs.archive }}
         run: |
-          ARCHIVE="${{ steps.archive.outputs.archive }}"
           HASH=$(sha256sum "$ARCHIVE" | base64 -w0)
           echo "hashes=$HASH" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3
+        timeout-minutes: 3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.tag }}
@@ -270,12 +307,32 @@ jobs:
   # above cannot tamper with the attestation -- the source of L3.
   # Bundle is uploaded to the GitHub Release the build job created
   # via `upload-assets: true`.
+  #
+  # #1477: this job carries no `timeout-minutes` -- GitHub's schema for a
+  # job that calls a reusable workflow (`uses:` with no `runs-on:`) does
+  # not accept that key; only the CALLED workflow's own jobs can declare
+  # one, and this generator is not ours to add it to. Worst observed
+  # total wall time across 3 sampled release runs was 95s, well inside
+  # the isolated runner's own limits, so this is a real schema
+  # constraint, not a gap being waved through --
+  # tests/scripts/test_tier_a_workflow_step_timeouts.py exempts exactly
+  # this job shape (`uses:` present, `runs-on:` absent).
   provenance:
     needs: [build]
     permissions:
       actions: read       # needed to read the workflow trigger event
       id-token: write     # OIDC token for Sigstore signing
       contents: write     # write the attestation to the Release
+    # alp-sdk#1479: deliberately NOT SHA-pinned, unlike every other `uses:`
+    # in this repo. slsa-framework/slsa-github-generator's own README
+    # ("Referencing SLSA builders and generators") requires its builders
+    # and generators be referenced by tag as `@vX.Y.Z` so slsa-verifier can
+    # verify the ref of the trusted reusable workflow -- a hash pin is not
+    # supported (tracked upstream as slsa-verifier#12). The generator's
+    # `compile-generator` input also defaults to false here, meaning its
+    # binary-fetch step downloads a release asset at this ref, which MUST
+    # be a tag; a commit SHA breaks that fetch. Trust anchor for this one
+    # reference is the Sigstore-signed builder identity, not a SHA pin.
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: "${{ needs.build.outputs.hashes }}"

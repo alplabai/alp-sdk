@@ -1,5 +1,0 @@
-<map id="alp_ble_char_def_t" name="alp_ble_char_def_t">
-<area shape="rect" id="Node000001" title="Single characteristic in a service definition." alt="" coords="5,93,149,119"/>
-<area shape="rect" id="Node000002" href="$structalp__ble__uuid__t.html" title="128&#45;bit UUID (little&#45;endian byte order, BT&#45;SIG convention)." alt="" coords="19,5,135,31"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="80,45,80,93,75,93,75,45"/>
-</map>

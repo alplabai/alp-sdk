@@ -226,8 +226,15 @@ tan doctor --format json      # machine-readable
 
 It is HW-free (no build and no flash), so it is safe to run anytime. An
 unhealthy environment exits 4. `--build` remains accepted for compatibility
-with v0.4 callers but no longer changes the checklist. Interactive `--fix` can
-run elevation-free manifest remedies; it only prints commands that need sudo.
+with v0.4 callers but no longer changes the checklist. On tan-cli `dev`
+(ahead of the tagged `v0.5.1` release the installer above ships -- lands in
+`v0.6.0-rc1`+), interactive `--fix` (it needs a TTY on both stdin and
+stderr) can run manifest remedies: a remedy that needs no elevation (macOS
+`brew`, Windows `winget`) runs for any caller; a `sudo`-prefixed remedy
+(Linux `apt`/`dnf`) is refused with the command printed to run by hand for
+a non-root caller, and has the literal `sudo ` prefix stripped and the rest
+run for a caller who is already root; and without a TTY there are no
+repairs.
 
 Every `west build` needs Ninja, so install it before continuing if the report
 cannot find it:
@@ -384,9 +391,10 @@ in-process planner. The SDK's `alp_orchestrate --emit build-plan` path is kept
 as its reference/parity producer:
 
 1. **Validates** the app's `board.yaml` (schema + SoM SKU preset +
-   board preset + `hw_rev` / SDK-version compatibility window +
-   `peripherals:` vs SoC caps) — the same check `tan validate` runs
-   standalone.
+   board preset + `hw_rev` / SDK-version compatibility window) — run
+   `tan validate` first for the full check, including the advisory
+   `peripherals:` vs SoC caps cross-check; `tan build` plans in-process
+   and never spawns the SDK validator.
 2. **Materialises** every generated artefact the plan carries,
    including the build-time hw_info header at
    `<build>/generated/alp_hw_info_build.h` so apps that include
@@ -613,7 +621,7 @@ default `west update` skips it.
 |----------|----------------------------------------------------|---------------------------------------------------------------------------------------------------------|
 | **Renesas (RZ/V)** | `hal_renesas` (in Zephyr's own west.yml)   | Nothing extra.  Our `name-allowlist` lets Zephyr import it; `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/` is what the V2N + V2N-M1 paths consume. |
 | **NXP (i.MX 9x)**  | `hal_nxp` (in Zephyr's own west.yml)       | Nothing extra.  `mcux/mcux-sdk-ng/devices/i.MX/i.MX93/` covers MIMX9301..9352 (E1M-NX9101 = MIMX9352).   |
-| **Alif (Ensemble)** | `hal_alif` (in our west.yml, from Alif's own GitHub) + upstream Zephyr `boards/alif/` | **Simpler than v3.7.**  HAL drivers come from `alifsemi/hal_alif v2.2.0` (Apache-2.0) which we pin as a top-level project — fetched on every `west update`.  Upstream Zephyr v4.4 also ships the stock Alif Ensemble board files under `boards/alif/` (`ensemble_e8_dk`, `ensemble_e1c_dk`, `balletto_b1_dk`) -- those target Alif's own EVKs, not the E1M board.  The AEN-specific board files (`alp_e1m_aen801_m55_he`, `alp_e1m_aen801_m55_hp`, `alp_e1m_aen401_m55_hp`, `alp_e1m_aen601_m55_hp`) ship in-tree at [`zephyr/boards/alp/`](../zephyr/boards/alp/) -- no separate overlay or repo needed.  Two Alif drivers (`alif_dave2d-driver`, `alif_image-processing-lib`) are vendor-licensed and sit in the `vendor-sdks` opt-in group; enable when you need DAVE2D / Helium image kernels.  See `docs/vendor-partnerships.md` §Alif for the migration history. |
+| **Alif (Ensemble)** | `hal_alif` (in our west.yml, from Alif's own GitHub) + upstream Zephyr `boards/alif/` | **Simpler than v3.7.**  HAL drivers come from `alifsemi/hal_alif v2.3.0` (Apache-2.0) which we pin as a top-level project — fetched on every `west update`.  Upstream Zephyr v4.4 also ships the stock Alif Ensemble board files under `boards/alif/` (`ensemble_e8_dk`, `ensemble_e1c_dk`, `balletto_b1_dk`) -- those target Alif's own EVKs, not the E1M board.  The AEN-specific board files (`alp_e1m_aen801_m55_he`, `alp_e1m_aen801_m55_hp`, `alp_e1m_aen401_m55_hp`, `alp_e1m_aen601_m55_hp`) ship in-tree at [`zephyr/boards/alp/`](../zephyr/boards/alp/) -- no separate overlay or repo needed.  Two Alif drivers (`alif_dave2d-driver`, `alif_image-processing-lib`) are vendor-licensed and sit in the `vendor-sdks` opt-in group; enable when you need DAVE2D / Helium image kernels.  See `docs/vendor-partnerships.md` §Alif for the migration history. |
 | **DEEPX (DX-M1)**  | Out of Zephyr scope (Linux-side runtime).  | The on-device NPU runs from a Linux PCIe driver, not a Zephyr backend.  `chips/deepx_dxm1/` is the **host-side** Zephyr code that brings up the M1 from the Renesas A55 cluster; `dx_rt` itself rides on Linux/Yocto.  See `examples/v2n/v2n-m1-deepx-inference/` and the customer-side integration notes in `docs/vendor-partnerships.md` §DEEPX. |
 
 ### Bare-metal / non-Zephyr customers
@@ -643,16 +651,24 @@ fetched when a customer opts in to the `vendor-sdks` group.
 ## Reproducing a build with alp.lock
 
 `west alp-lock` writes `alp.lock` — a deterministic, public-safe record of the
-workspace's SDK revision, west project pins, curated library versions, Python
+workspace's SDK version, west project pins, curated library versions, Python
 requirements, and metadata digests. Commit it. `west alp-lock --check` (run in
 CI) fails with a field-level diagnostic when any locked input drifts, so an old
 release can be rebuilt against its exact declared inputs. It contains no local
-paths or credentials. The recorded `sdk.revision` is **provenance** (which SDK
-commit generated the lock) and is not frozen-verified — committing the lock
-advances the repo's own HEAD past it, so `--check` reports it but never fails on
-it; `sdk.version` and the west pins lock the SDK identity you build against. It
-does not yet pin resolved commit SHAs or toolchain container identities (tracked
-follow-ups).
+paths or credentials.
+
+`sdk.version` and the west pins lock the SDK identity you build against. The
+lock no longer records an `sdk.revision` (#1615) — a git HEAD written into a
+file that is then committed is stale the moment it lands — and every remaining
+input is file-derived, so regenerating over an unchanged tree reproduces the
+document byte for byte. A lock generated before that change still verifies
+clean. For "which SDK commit produced *this artifact*", use the build receipt
+(`scripts/build_receipt.py`), whose `source.sdkRevision` and `source.sdkDirty`
+are resolved against a real build rather than baked into a committed file —
+worth reaching for between release tags, where many commits share one
+`sdk.version` and the lock's digests cover `metadata/**` but not `src/` or
+`include/`. The lock does not yet pin resolved commit SHAs or toolchain
+container identities (tracked follow-ups).
 
 Because `alp.lock` hashes `metadata/**` and pins the west/library/Python inputs,
 **re-run `west alp-lock` and commit the updated `alp.lock` in the same PR**
@@ -669,8 +685,11 @@ resolves the MPN to the silicon ref (`alif:ensemble:e8` for
 hand.  The validator also cross-checks every entry in
 `peripherals:` against the SoC's `metadata/socs/<vendor>/<family>/<part>.json`
 caps -- a board.yaml asking for `i2s` on a SoC that doesn't route
-I²S fails at `tan build` time with exit code 3, before any
-compile work (the same check runs standalone via `tan validate`).
+I²S is reported by `tan validate` as an `ALP-B010` **warning**
+(`scripts/validate_board_yaml.py` still exits 0; the check is advisory
+because SoC peripheral metadata is incomplete for some parts and some
+peripherals are board-side). `tan build` does not re-run this
+cross-check at all.
 
 At runtime, the documented caps drive the per-`*_open` validation:
 e.g. `alp_adc_open` with `resolution_bits = 16` on a 12-bit SoC

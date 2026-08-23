@@ -65,7 +65,8 @@ application-processor line).  Don't confuse the two.
   diff against the public FSP; lands when the maintainer
   has bandwidth.
 - 📋 **DA9292 + V2N PMIC pad-routing confirmation.**  The
-  bring-up sequence in `chips/da9292/da9292.c::da9292_v2n_m1_enable_deepx_rail`
+  bring-up sequence in `da9292_v2n_m1_enable_deepx_rail`
+  (`chips/da9292/da9292.c`)
   encodes the maintainer's reading of the V2N schematic +
   the AROVx OTP variant trap.  Renesas' AE has confirmed
   the schematic; the OTP confirmation is open.
@@ -100,8 +101,8 @@ matter for AEN builds.
 **Piece 1 -- HAL drivers (`hal_alif`)**: Apache-2.0,
 standalone, at
 [`github.com/alifsemi/hal_alif`](https://github.com/alifsemi/hal_alif).
-Latest release v2.2.0 (2026-03-27); steady release cadence
-(v2.1.0 Dec 2025, v2.0.0 Nov 2025).  Standard Zephyr-module
+We pin v2.3.0 (see `west.yml`); steady release cadence
+(v2.2.0 2026-03-27, v2.1.0 Dec 2025, v2.0.0 Nov 2025).  Standard Zephyr-module
 shape (`zephyr/module.yml` + `zephyr/Kconfig` + root
 `CMakeLists.txt`) -- structurally indistinguishable from
 `zephyrproject-rtos/hal_renesas` / `hal_nxp`.  Our `west.yml`

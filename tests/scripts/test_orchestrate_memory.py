@@ -138,7 +138,7 @@ def test_resolve_carve_outs_happy(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------
 
 
-def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path, monkeypatch) -> None:
+def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path) -> None:
     """When the SoM preset still carries TBD metadata (mailbox /
     memory_map), resolve_carve_outs MUST return a `status: blocked`
     entry rather than raise.  The manifest stays emit-able so CI can
@@ -157,7 +157,7 @@ def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path, monkeypatch) -> None:
     this being a claim about the real E1M-NX9101's buildability)."""
     import alp_orchestrate
 
-    meta = _synthetic_nx9101_root(tmp_path, monkeypatch)
+    meta = _synthetic_nx9101_root(tmp_path)
     path = _write_board(tmp_path, NX_TBD)
     project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
     resolved = resolve_carve_outs(project)
@@ -245,7 +245,7 @@ def test_resolve_carve_outs_deterministic(tmp_path: Path) -> None:
 
 
 def test_resolve_carve_outs_blocks_on_no_reserved_channel(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path,
 ) -> None:
     """Phase 3 strict mailbox-reservation check (spec §6.4), Phase 4
     blocked-entry semantics.
@@ -307,10 +307,11 @@ def test_resolve_carve_outs_blocks_on_no_reserved_channel(
         default_board: E1M-X-EVK
     """).lstrip("\n"), encoding="utf-8")
 
-    # Patch the orchestrator's METADATA_ROOT for this test.
-    monkeypatch.setattr(alp_orchestrate, "METADATA_ROOT", meta)
-    monkeypatch.setattr(alp_orchestrate, "BOARD_SCHEMA",
-                        schemas / "board.schema.json")
+    # `load_board_yaml(..., metadata_root=meta)` below is the only knob that
+    # matters -- every alp_orchestrate resolver reads
+    # `BoardProject.effective_metadata_root()`, not a module-level
+    # `METADATA_ROOT` global, so monkeypatching `alp_orchestrate.METADATA_ROOT`
+    # is inert (#1485).
 
     path = _write_board(tmp_path, V2N_HAPPY)
     project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)

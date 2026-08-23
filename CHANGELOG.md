@@ -7,6 +7,93 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `pr-bootstrap-distro-install`'s three matrix legs could never serve as required status checks; added a static-named summary gate (Refs #1464)
+
+The matrix job's per-leg names (`distro install · debian-apt` etc.) are
+matrix-interpolated, and GitHub can only resolve that interpolation while the
+matrix actually runs. When `detect` gates the matrix to SKIP — the normal
+case, since it only watches five bootstrap-manifest-relevant paths — GitHub
+reports the job under its literal, uninterpolated name instead
+(`distro install · ${{ matrix.name }}`), so a required context set to one of
+the three leg names never reports and the PR is blocked permanently.
+Reproduced on alp-sdk#1474 (a docs-only PR) and reverted off branch
+protection within minutes.
+
+Added `summary`, a non-matrix job with the literal name `distro install ·
+all`, `needs: [detect, distro-install]`, and `if: always()`, so it always
+reports whether the matrix ran, skipped, or failed. Its verdict logic
+independently re-derives the one condition under which a `skipped`
+`distro-install` result is legitimate (`pull_request` event, `detect` ran and
+succeeded, and found no bootstrap-manifest path touched) instead of trusting
+the word "skipped" at face value — so a future regression in
+`distro-install`'s own fail-closed `if:` (#1473) fails this gate too, rather
+than silently passing exactly when the machinery is broken.
+
+### Fixed — the documented `west update` cost was off by ~50x, and stale-version fallout from the v4.4.1/hal_alif-v2.3.0 bumps had drifted back into prose (#1459)
+
+`scripts/bootstrap.sh`/`.ps1` told a fresh-clone user that `west update`
+(shallow + narrow) costs `~30 MB` on a cold cache.  Measured on a live
+workspace produced by that exact command: `zephyr/` 287 MB / 35,954 files,
+`modules/` 1,213 MB / 20,847 files — **~1.5 GB**, of which `hal_nxp` alone is
+931.2 MB (62% of `modules/`).  And that's a *floor*: the measured workspace
+predated several `name-allowlist` additions (`littlefs`, `cmsis_6`,
+`mcuboot`, `tflite-micro`, `hal_ethos_u`, `zcbor`, `open-amp`, `libmetal`,
+`tf-psa-crypto`, `micro_ros_zephyr_module`).  Both scripts now say `~1.5 GB+`
+and name it explicitly as a floor rather than a fixed number the
+name-allowlist will keep invalidating.
+
+Also swept the residual fallout from two version bumps that never fully
+propagated into prose: `west.yml`'s own header comment still said
+"Currently v4.4.0" (twice) though the pin three lines below it has read
+`v4.4.1` since the last Zephyr patch bump; `docs/getting-started.md`,
+`docs/v1.0-readiness.md`, and `docs/vendor-partnerships.md` all still named
+`hal_alif v2.2.0` though `west.yml` pins `v2.3.0`; and `CONTRIBUTING.md`'s
+`ZEPHYR_BASE` pointed at `$PWD/../zephyrproject/zephyr`, a directory
+`bootstrap.sh` never creates (every other copy in the tree already says
+`$PWD/../zephyr`, matching the workspace layout `scripts/bootstrap.sh`
+actually builds).
+
+The other defect the source issue described — four inconsistent documented
+quickstarts — had already been resolved by earlier accuracy passes before
+this PR started (README's quickstart is a single git-clone + `tan bootstrap`
++ `tan init` path with no `west init -m` content left in it, and it links to
+`docs/getting-started.md` as the full walkthrough instead of restating one);
+verified against the issue's own cited commit rather than re-describing
+content that no longer matches the tree.
+
+### Fixed — `tools/native-sim-container`'s documented `docker` path could not build, and its Zephyr pin had silently drifted from `west.yml` (#1457, #1458)
+
+Two independent bugs in the hardware-free `native_sim` reproduction
+container, both found and reproduced the same day, neither caught by CI
+because nothing in `.github/workflows/` builds this image.
+
+**#1457:** the Makefile header advertises `make CONTAINER_ENGINE=docker
+test`, but the `build` recipe passed no `-f`. Podman auto-detects a build
+file named `Containerfile`; Docker/BuildKit does not — it looks for
+`Dockerfile`, finds none, and aborts (`failed to read dockerfile: open
+Dockerfile: no such file or directory`) before any layer runs. Fixed by
+adding `-f $(HERE)Containerfile` to the `build` recipe; verified an actual
+`make CONTAINER_ENGINE=docker build` now completes (and `make build` under
+podman still does too).
+
+**#1458:** `Containerfile:37` pinned `ARG ZEPHYR_REV=v4.4.0` while
+`west.yml` pins `v4.4.1` — a contributor reproducing a twister result
+locally was silently building against a different Zephyr than CI ran.
+Fixed at the root rather than gated in place: `tools/native-sim-container/
+Makefile`'s `build` target now derives the pinned revision LIVE from
+`west.yml` and passes it as `--build-arg`, so the primary (`make build`)
+path can never carry a second, hand-maintained copy again. The
+Containerfile's own `ARG ZEPHYR_REV` default still exists — only as a
+fallback for a standalone `docker build`/`podman build` that bypasses the
+Makefile — and `scripts/check_bootstrap_manifest.py` (the same gate that
+already keeps `west.yml`, the CI workflow `--mr`/cache-key pins, and the
+README Zephyr badge in lockstep with `metadata/bootstrap.json`) now covers
+that default too, so a future drift fails the PR instead of shipping
+silently. Not `check_toolchain_lock.py`: that gate's own docstring scopes
+itself to the *Zephyr SDK toolchain* release, deliberately leaving the
+*Zephyr revision* pin to `check_bootstrap_manifest.py` — this is that same
+territory, in a fifth file.
+
 ### Fixed — the zcbor recipe set both `SRCREV` and a URL `tag=`, so bitbake could not parse it and every A55 image build failed
 
 `meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb:90` pinned the revision
@@ -198,18 +285,31 @@ guard compared a *parked* (`os: "off"`) sibling core's moot slot0 address
 against the live core's, refusing the working
 `examples/power-timing/power-managed-sensor` example; now scoped to
 `os == "zephyr"` on both roles, matching `_enforce_flow_d_preflight_pair`'s
-existing convention — and a real gap that is NOT fixed here: any AEN301/501/
-601/701 board.yaml that leaves its sibling core at the SoM's `alp-stock-shim`
-default (the common case) now correctly refuses, because none of those four
-SoM presets declares a disjoint `he_slot0`/`hp_slot0` `memory_map:` override
-the way `E1M-AEN801.yaml` does. `docs/portability-matrix.md`,
-`docs/portability.md`, `docs/v1.0-readiness.md`, `README.md`, and
-`docs/tutorials/04-cross-family-portability.md` are updated to reflect the 12
-newly-failing swap-test cells this causes (the emitted `alp.conf` itself is
-unaffected — the four SKUs still refuse at board-topology validation, before
-config emission). Populating a per-SoM memory map is a firmware-policy
-decision (slot sizing, per-core OTA support) this change does not make;
-tracked as a follow-up at #1445.
+existing convention — and a real gap #1295 did not close: any AEN301/501/
+601/701 board.yaml that left its sibling core at the SoM's `alp-stock-shim`
+default (the common case) would have refused, because the #1295 slice alone
+left none of those four SoM presets declaring a disjoint `he_slot0`/`hp_slot0`
+`memory_map:` override the way `E1M-AEN801.yaml` does — a state that never
+reached `dev`, since the #1445 slice of the same commit closed it. (E1M-AEN401
+never hit this refusal: at the time, the loader only called `_resolve_slot0_load_address`
+when `debug.jlink_flash_device` was truthy, and the E4 variant's explicit
+`null` is not truthy, so the resolver never ran for it. #1444/#1446 later
+changed that gate to test key presence instead of truthiness.) This gap and
+its fix landed together, in the same commit (`bd8be484`, PR #1447) — see
+"### Fixed — E1M-AEN301/401/501/601/701 declare disjoint M55 slot0 windows
+(#1445)" below, after which all five presets (AEN301/401/501/601/701)
+declare `he_slot0` at `0x80010000` and `hp_slot0` at `0x802b0000`, 2688 KiB
+each. `docs/portability-matrix.md` briefly recorded the 12 swap-test cells
+as failing after that commit landed — the emitted `alp.conf` was never
+affected, and the four SKUs never actually refused on `dev`, since #1445's
+memory_map overrides landed in the same commit — until #1452's sweep
+restored its 18-of-21 count. None of `docs/portability.md`,
+`docs/v1.0-readiness.md`, `README.md`, or
+`docs/tutorials/04-cross-family-portability.md` ever recorded the 12
+failing cells.
+Populating a per-SoM memory map is
+a firmware-policy decision (slot sizing, per-core OTA support) that the
+#1295 slice did not make; the #1445 slice of the same commit made it.
 
 ### Fixed — `executionPolicy.missingTool` stops pinning the outcome to PATH, and ADR-0020 says what "never PATH" means
 
@@ -391,14 +491,17 @@ nesting is readable in the emit golden itself: that slice of
 `artifacts` block today — tan parses it into the slice record
 (`python/tan/core/build_plan.py:224`) and never reads it again — so the wrong
 spelling was a defect in the published contract, not an observed crash. It
-still matters, because the same un-nested spelling exists independently in a
-tan path that IS live: `tan renode` resolves its ELF from
-`system-manifest.yaml` via `core/renode_plan.py::zephyr_elf_from_manifest`,
-and a slice with no `output_artefact` falls back to
-`<build_dir>/zephyr/zephyr.elf` — calling that function directly with
-`build_dir: m55_he-zephyr` returns `build/m55_he-zephyr/zephyr/zephyr.elf`,
-the path west never writes. That fallback is tan's own defect and is NOT
-fixed here; this change removes the SDK-side spelling it agrees with.
+mattered when this entry was written because the same un-nested spelling
+existed independently in a tan path that was live then: `tan renode` resolved
+its ELF from `system-manifest.yaml` via
+`core/renode_plan.py::zephyr_elf_from_manifest`, and a slice with no
+`output_artefact` fell back to `<build_dir>/zephyr/zephyr.elf` — calling that
+function directly with `build_dir: m55_he-zephyr` returned
+`build/m55_he-zephyr/zephyr/zephyr.elf`, the path west never writes. That
+second copy was never fixed; it was deleted. `tan renode` and
+`core/renode_plan.py` are gone with the Renode retirement (ADR 0022,
+Amendment 2), later in this same v0.16.0 cycle. This change removes the
+SDK-side spelling it agreed with, which stands on its own.
 
 All six Zephyr paths move: `elf`, `map`, `bin`, `sizeReport` (`zephyr.stat`)
 and `symbols` (`zephyr.symbols`) now sit under `<buildDir>/build/zephyr/`, and
@@ -1361,8 +1464,13 @@ exited 1 correctly all along. Only the west wrappers lost it, and nothing about
 `return run(args)` looks wrong at the call site — it is the same idiom the
 `main()` three lines below uses. west's contract is the unusual half:
 `west.commands.CommandError(returncode)` is the mechanism, and a plain `return`
-is silently a no-op. `alp_emit.py` was the one wrapper already doing it right,
-via `log.die()`.
+is silently a no-op. `alp_emit.py` looked like the one wrapper already doing it
+right, via `log.die()`. **That reading was wrong and is corrected here (#1476):**
+`log.die()` covers only its two pre-flight checks (no workspace, missing
+`board.yaml`); the failure that matters — the child orchestrator's own non-zero
+exit — was the same bare `return subprocess.call(...)` fixed in the other three,
+so `west alp-emit build-plan > plan.json` wrote an empty file and exited 0 until
+#1476.
 
 All three now raise `CommandError(rc)`, with `CommandError` imported alongside
 `WestCommand` and mirrored in each file's existing no-west fallback shim so the

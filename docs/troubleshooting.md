@@ -249,6 +249,20 @@ minimal mode costs you, in
   `VDD_1V8` should all be at their CMI / strap targets within
   a few ms of `V_IN` rising.
 
+On an E1M-AEN module, rule the rails out first as above -- but if they
+are healthy *and* SWD is alive (SW-DP IDR reads `0x4C013477`, memory
+reads and writes work) while `VTOR` stays `0` and the cores never
+start, the supply is not your problem and the Secure Enclave is
+probably not damaged either.  That combination usually means the SES
+has nothing valid to boot -- either no valid application TOC, or MCUboot
+rejecting the image in slot0 (`E: Unable to find bootable image` /
+`E: Bad image magic`) -- which is a reflash rather than a dead module,
+and several of the observations that feel like evidence of a dead Secure
+Enclave are not evidence at all.  See
+[`debugging-aen.md` §7](debugging-aen.md#7-the-secure-enclave-boots-nothing-at-all--cores-parked-vtor-0),
+which also covers how to tell that case apart from a genuine SE-side
+fault with one passive SEUART capture.
+
 ### Ethernet PHY doesn't link
 
 * MDIO probe should read `PHYID1 == 0x001C` (Realtek OUI).  If it
@@ -313,7 +327,7 @@ file but a misconfigured global setting can override that.
 ## Where to file bugs
 
 * SDK metadata, schema, portable API, or reference-emitter bug: [`github.com/alplabai/alp-sdk/issues`](https://github.com/alplabai/alp-sdk/issues)
-* Tan planner, executor, or command bug: [`github.com/alplabai/tan-cli`](https://github.com/alplabai/tan-cli). Python Tan owns build/run/flash/size/image/clean/Renode and the relocated planner; only `migrate`, `lock`, and `quality` still forward to west.
+* Tan planner, executor, or command bug: [`github.com/alplabai/tan-cli`](https://github.com/alplabai/tan-cli). Python Tan owns build/run/flash/size/image/clean and the relocated planner; only `migrate`, `lock`, and `quality` still forward to west.
 * Chip driver bug: file against alp-sdk; include the `driver_status` from the
   chip's metadata yaml.
 

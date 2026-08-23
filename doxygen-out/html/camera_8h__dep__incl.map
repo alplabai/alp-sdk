@@ -1,7 +1,0 @@
-<map id="include/alp/camera.h" name="include/alp/camera.h">
-<area shape="rect" id="Node000001" title="Alp SDK camera abstraction." alt="" coords="88,5,247,31"/>
-<area shape="rect" id="Node000002" href="$ext_2alif_2camera_8h.html" title="Alif Ensemble VeriSilicon ISP Pico (vsi,isp&#45;pico) vendor&#45;specific surface." alt="" coords="5,79,148,119"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="145,42,100,81,97,76,142,38"/>
-<area shape="rect" id="Node000003" href="$ext_2renesas_2camera_8h.html" title="Renesas RZ/V2N N44 camera ISP vendor&#45;specific surface." alt="" coords="173,79,346,119"/>
-<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="193,38,239,76,235,81,190,42"/>
-</map>

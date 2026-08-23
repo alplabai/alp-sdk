@@ -25,15 +25,19 @@ def _write_board(tmp: Path, body: str, name: str = "board.yaml") -> Path:
     return path
 
 
-def _synthetic_nx9101_root(tmp_path: Path, monkeypatch) -> Path:
+def _synthetic_nx9101_root(tmp_path: Path) -> Path:
     """Build a scratch metadata root carrying a synthetic E1M-NX9101
     preset, isolated from the repo's real
-    `metadata/e1m_modules/imx93/hw-revisions.yaml`, and monkeypatch
-    `alp_orchestrate.METADATA_ROOT`/`BOARD_SCHEMA` onto it. Returns the
-    scratch metadata root (also pass it as `load_board_yaml(...,
-    metadata_root=...)`'s own argument -- the module patch alone isn't
-    enough because `load_board_yaml` takes `metadata_root` as an
-    explicit parameter).
+    `metadata/e1m_modules/imx93/hw-revisions.yaml`. Returns the scratch
+    metadata root -- pass it as `load_board_yaml(..., metadata_root=...)`'s
+    own argument, which is the ONLY knob that matters: every
+    `alp_orchestrate` resolver reads `BoardProject.effective_metadata_root()`
+    (set from that argument), not a module-level `METADATA_ROOT` global, so
+    monkeypatching `alp_orchestrate.METADATA_ROOT` is inert -- the
+    submodules (`loader`/`carveout`/`partition`/`kconfig`/...) import
+    `METADATA_ROOT` from `.paths` at their own module scope, a separate
+    binding a patch on the `alp_orchestrate` package object never touches
+    (#1485).
 
     Why: #1025's hw_rev-buildable gate refuses the REAL E1M-NX9101
     outright (its only hw_rev, imx93 r1, is `status: tbd`) before
@@ -53,7 +57,8 @@ def _synthetic_nx9101_root(tmp_path: Path, monkeypatch) -> Path:
     e1m = meta / "e1m_modules"
     socs = meta / "socs" / "nxp" / "imx9"
     schemas = meta / "schemas"
-    for d in (e1m, socs, schemas):
+    registries = meta / "registries"
+    for d in (e1m, socs, schemas, registries):
         d.mkdir(parents=True)
 
     real_meta = REPO / "metadata"
@@ -65,6 +70,24 @@ def _synthetic_nx9101_root(tmp_path: Path, monkeypatch) -> Path:
                 schemas / "soc-spec-v1.schema.json")
     shutil.copy(real_meta / "socs" / "nxp" / "imx9" / "imx93.json",
                 socs / "imx93.json")
+    # `_slice_alp_conf` resolves the SoM-silicon + peripheral Kconfig
+    # symbols against `project.effective_metadata_root()` too (#1485) --
+    # copy the real registries so this scratch root resolves for real.
+    shutil.copy(real_meta / "registries" / "silicon-kconfig.json",
+                registries / "silicon-kconfig.json")
+    shutil.copy(real_meta / "registries" / "peripheral-kconfig.json",
+                registries / "peripheral-kconfig.json")
+    # The ADR-0018 library layer resolves `libraries:` against
+    # `metadata_root` too (#1485) -- copy the real curated-library
+    # manifests + alias table so a test declaring `libraries: [mbedtls]`
+    # against this scratch root resolves for real instead of silently
+    # falling through to the SDK's own in-tree metadata/ (which is exactly
+    # the bug #1485 fixed: pre-fix, a scratch-root board.yaml with no
+    # `libraries/` directory here still validated, because the resolver
+    # never actually consulted `metadata_root` for library manifests).
+    shutil.copytree(real_meta / "libraries", meta / "libraries")
+    shutil.copy(real_meta / "library-aliases-v1.json",
+                meta / "library-aliases-v1.json")
 
     preset = e1m / "E1M-NX9101.yaml"
     preset.write_text(textwrap.dedent("""
@@ -93,10 +116,6 @@ def _synthetic_nx9101_root(tmp_path: Path, monkeypatch) -> Path:
         default_hw_rev: r1
     """).lstrip("\n"), encoding="utf-8")
 
-    import alp_orchestrate
-    monkeypatch.setattr(alp_orchestrate, "METADATA_ROOT", meta)
-    monkeypatch.setattr(alp_orchestrate, "BOARD_SCHEMA",
-                        schemas / "board.schema.json")
     return meta
 
 
