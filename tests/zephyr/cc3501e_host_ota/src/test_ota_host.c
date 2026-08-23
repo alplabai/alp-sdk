@@ -77,7 +77,8 @@ static struct {
 	 * cleanly with the flush clear and the cursor never moving. */
 	uint32_t busy_writes;
 	bool     write_always_busy;
-	uint8_t  flush_pending; /* published in OTA_STATUS reserved[1] */
+	uint8_t  flush_pending;    /* published in OTA_STATUS reserved[1] */
+	uint32_t flush_polls_left; /* STATUS polls before the flush completes */
 	uint32_t diag_uptime_ms;
 
 	uint8_t  ota_state;  /* alp_cc3501e_ota_state_t */
@@ -139,7 +140,12 @@ static void slave_dispatch(void)
 		if (slave.write_always_busy || slave.busy_writes > 0u) {
 			if (slave.busy_writes > 0u) {
 				slave.busy_writes--;
-				slave.flush_pending = (slave.busy_writes > 0u) ? 1u : 0u;
+				/* Queue the flush and let it complete over the host's STATUS
+				 * polls, NOT over further writes: the whole point of the
+				 * hold-off is that the host stops writing, so a model that only
+				 * advances on a write can never clear and would deadlock. */
+				slave.flush_pending    = 1u;
+				slave.flush_polls_left = 3u;
 			}
 			/* RESP_ERR_BUSY is what the firmware answers for "flush queued, this
 			 * chunk was NOT consumed" -- resp_to_status maps it to ALP_ERR_BUSY,
@@ -175,6 +181,12 @@ static void slave_dispatch(void)
 		break;
 	}
 	case ALP_CC3501E_CMD_OTA_STATUS: {
+		/* A queued flush finishes while the host polls header-only -- that is
+		 * the contract reserved[1] exists to express. */
+		if (slave.flush_polls_left > 0u && --slave.flush_polls_left == 0u) {
+			slave.flush_pending = 0u;
+			slave.busy_writes   = 0u; /* the retried chunk is now accepted */
+		}
 		/* status(1) + alp_cc3501e_ota_status_t on the wire (12 bytes):
 		 * state, reserved[3], bytes_written(LE32), total_len(LE32). */
 		slave.reply_pl[0]  = ALP_CC3501E_RESP_OK;
@@ -459,8 +471,7 @@ ZTEST(cc3501e_host_ota, test_update_survives_a_window_flush_holdoff)
 	for (size_t i = 0; i < sizeof blob; i++) {
 		blob[i] = (uint8_t)(i * 5u + 1u);
 	}
-	slave.busy_writes   = 3u; /* three BUSY answers, then the flush clears */
-	slave.flush_pending = 1u;
+	slave.busy_writes = 1u; /* one flush window mid-stream */
 
 	zassert_equal(cc3501e_ota_update(&fw, blob, sizeof blob, 200u), ALP_OK, "update -> OK");
 	zassert_equal(slave.image_len, (uint32_t)sizeof blob, "every byte streamed after the hold-off");
