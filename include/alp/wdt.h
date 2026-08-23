@@ -89,14 +89,25 @@ typedef struct {
  * must call @ref alp_wdt_feed before @c timeout_ms elapses or the
  * configured @c on_timeout action triggers.
  *
+ * @note A watchdog instance is **exclusive**: at most one handle may be
+ *       open on a given @c wdt_id at a time, and a second open returns
+ *       NULL with @ref ALP_ERR_BUSY until the owner calls
+ *       @ref alp_wdt_close.  @ref alp_wdt_close disables the whole
+ *       watchdog device, not one channel of it, so a shared instance
+ *       would let one subsystem's close silently remove another's
+ *       protection.  Two subsystems that both need a deadline must
+ *       either use two instances or share one handle.
+ *
  * @param[in] cfg  Configuration.  Must be non-NULL with non-zero
  *                 @c timeout_ms; @c wdt_id must be a valid watchdog
  *                 index on the active SoM (ALP_E1M_WDT0..1 or
  *                 ALP_E1M_X_WDT0..1).
  * @return Open handle on success;
  *         NULL if @p cfg is invalid, @c cfg->wdt_id is out of range,
- *         the underlying device isn't ready, or the SoC rejected the
- *         requested timeout (too long for the hardware).
+ *         another handle already owns @c cfg->wdt_id
+ *         (@ref ALP_ERR_BUSY), the underlying device isn't ready, or
+ *         the SoC rejected the requested timeout (too long for the
+ *         hardware).  Call @ref alp_last_error for the reason.
  */
 alp_wdt_t *alp_wdt_open(const alp_wdt_config_t *cfg);
 
