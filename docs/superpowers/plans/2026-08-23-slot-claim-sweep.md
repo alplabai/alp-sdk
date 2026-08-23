@@ -23,6 +23,66 @@
 
 ---
 
+> **IMPLEMENTED 2026-08-23 — branch `fix/1630-slot-claim-atomic-sweep`, one PR
+> carrying all three tasks. Read this block before the steps: the task ORDER and
+> the gate's DETECTION RULE both changed, and one hole the plan did not see was
+> closed.**
+>
+> **1. Tasks were done in the order 3 -> 1 -> 2, and that ordering is the point.**
+> The plan writes the sweep first and the gate last, which makes the gate green
+> from birth — never once demonstrated to detect anything. Written gate-first,
+> its own `test_real_tree_is_clean` **failed with exactly the nine real sites**,
+> which is the only evidence that the gate detects the defect it exists to
+> detect. After the sweep it passes. Recommend keeping this order for any future
+> gate in this campaign.
+>
+> **2. The gate matches the SET half, not the plan's test half.** The plan's
+> `_TEST` regex (`if\s*\(\s*!\s*...in_use...`) plus a 4-line window cannot see
+> `src/backends/inference/tflm.cpp` — that site guards a bare singleton with
+> `if (g_default_arena_in_use) { fail; }`, a **positive** test with no loop and
+> no subscript. That is the exact shape the plan's own Task 2 says every
+> array-shaped grep walked past, so shipping an array-shaped-negation gate would
+> have re-created the blind spot in CI.
+>
+> The shipped rule is one regex on any plain assignment of an `*in_use*` flag to
+> `true`. It is complete on its own, because `alp_slot_try_claim()` never
+> assigns the flag: a converted site has no such assignment. It needs no line
+> window, and it catches both shapes. Comments and string/char literals are
+> blanked (newline-preserving, so line numbers survive) before scanning —
+> `src/` carries eleven comment lines that quote the antipattern while
+> explaining why the code below no longer does it.
+>
+> **3. The workflow would never have run the gate.** `pr-metadata-validate.yml`
+> had NO `src/**` in either `on.pull_request.paths` or `on.push.paths` — only
+> `src/common/stub_backend.c` and `src/common/stub/**`. A PR adding a tenth
+> unlocked claim in `src/backends/` would not have triggered the workflow at
+> all, so registering the gate there without widening the trigger would have
+> shipped a gate that never fires. `src/**` added to both lists. The same hole
+> already applied to two gates hosted in that job: `check_stub_issues.py`
+> (sweeps `src/backends/**/*_stub.c`) and `check_sw_fallback_tags.py` (sweeps
+> `src/backends/**/sw_fallback.c`). Three gates, one trigger hole.
+>
+> **4. Task 1 Step 3's ztest was deliberately NOT written.** The plan concedes it
+> "passes today" and that "the real regression protection for this issue is Task
+> 3's gate". A test that cannot fail is not a test; the gate's own seeded-corpus
+> tests pin `alp_slot_try_claim`'s contract properly, and
+> `tests/unit/wdt_exclusivity/` (from #1637) exercises the helper end-to-end in a
+> test that *did* fail before its fix. `tests/unit/slot_claim_sweep/` was skipped.
+>
+> **5. Site list re-derived and confirmed — nine, at the plan's exact lines.**
+> The one citation that drifted is an allowlist entry, not a conversion site:
+> the CAN filter claim is `src/backends/can/yocto_drv.c:662`, not `:603`. All
+> four allowlist justifications were verified by reading the surrounding lock:
+> `src/zephyr/handles.c:29` inside `k_mutex_lock(&kind##_lock, K_FOREVER)`,
+> `src/yocto/peripheral_gpio.c:131` inside `pthread_mutex_lock(&g_irq.mu)`,
+> `src/backends/can/yocto_drv.c:662` inside `pthread_mutex_lock(&d->lock)`, and
+> `src/backends/can/testing_drv.c:346` a per-handle filter table.
+>
+> **6. `alp.lock` needs relocking, which the plan does not mention.** Adding the
+> registry entry moves `digests.metadata`, so `stage_alp_lock` fails until
+> `python3 scripts/west_commands/alp_lock.py --workspace .` is re-run and
+> committed. The plan's Step 9 covers `gen_catalog.py` but not this.
+
 ## Background: what `alp_slot_try_claim` actually is
 
 ```c

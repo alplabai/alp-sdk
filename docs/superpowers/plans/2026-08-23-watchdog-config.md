@@ -143,6 +143,72 @@ and it resets the debugger's target the moment you halt at a breakpoint.
 
 ## Task 1: One handle per watchdog instance
 
+> **IMPLEMENTED 2026-08-23 — branch `fix/1637-wdt-instance-exclusivity`, PR #1650.
+> Three things below were wrong; read this block before reading the steps.**
+>
+> **1. Step 2's test placement premise is false — it would have SKIPPED, exactly
+> like #1619's.** `tests/zephyr/peripheral/` builds with `CONFIG_WATCHDOG=y`
+> (`tests/zephyr/peripheral/prj.conf:23`), which links the priority-100
+> `zephyr_drv` (`zephyr/CMakeLists.txt:866-867`, `zephyr_library_sources_ifdef`).
+> That backend wins `alp_backend_select("wdt", ...)`, and `native_sim` has no
+> `alp-wdt0` DT alias, so `_devs[0]` is NULL and `z_open` returns
+> `ALP_ERR_NOT_READY` from **every** `alp_wdt_open()`. The plan's
+> `if (first == NULL) ztest_test_skip();` would fire on 100% of runs and prove
+> nothing. Same trap as #1619, different class.
+>
+> The fix: a NEW suite, `tests/unit/wdt_exclusivity/`, whose `prj.conf`
+> deliberately leaves `CONFIG_WATCHDOG` **off**. `sw_fallback` is then the only
+> linked wdt backend, its `sw_open()` always returns `ALP_OK`, and
+> `alp_wdt_open()` really succeeds under `native_sim`. The rule under test is
+> pure dispatcher code above the backend, so `sw_fallback` exercises it
+> faithfully. It could not go in `tests/unit/wdt_registry/`: that suite asserts
+> `alp_backend_count("wdt") == 2` and that `zephyr_drv` wins selection, both of
+> which a `CONFIG_WATCHDOG=n` image breaks.
+>
+> TDD receipt, both runs real: before the fix
+> `FAIL ... test_wdt_exclusivity.c:39: (second is not NULL)`; after,
+> `SUITE PASS - 100.00% [alp_wdt_exclusivity]: pass = 2, fail = 0, skip = 0`.
+>
+> **2. Step 4's two-scan mechanism has a hole, and was not used.** The plan's
+> "scan before `_alloc()`, scan again after, loser frees and reports
+> `ALP_ERR_BUSY`" cannot close the window it is aimed at. `_alloc()` claims the
+> slot and *then* `memset`s it, so between the claim and the dispatcher
+> publishing `wdt_id` the slot reads id `0`. Two openers of the same non-zero
+> id can each rescan inside the other's unpublished window, see nothing, and
+> both succeed — and an index tie-break does not help, because neither ever
+> observes the other.
+>
+> What shipped instead: **index the handle pool by `wdt_id`.** One slot per
+> watchdog INSTANCE rather than a free list, so the existing
+> `alp_slot_try_claim()` *is* the exclusivity check — a single compare-exchange,
+> no pool scan, no publish window, no tie-break, and no new struct field. This
+> is legitimate because exclusivity means `#handles == #instances` by
+> definition, and the portable ID space is exactly `{0, 1}`:
+> `ALP_E1M_WDT0`/`ALP_E1M_WDT1` are `0u`/`1u` (`include/alp/e1m_pinout.h:165-166`)
+> and `ALP_E1M_X_WDT0`/`ALP_E1M_X_WDT1` likewise
+> (`include/alp/e1m_x_pinout.h:194-195`). `CONFIG_ALP_SDK_MAX_WDT_HANDLES` is
+> **not a Kconfig symbol** — `grep -rn MAX_WDT_HANDLES --include=Kconfig*`
+> returns nothing; it is defined as `2` in `src/wdt_dispatch.c:29` and again in
+> `src/zephyr/handles.h:72`, so pool size and instance count were already the
+> same number.
+>
+> Consequence worth reviewing: `cfg->wdt_id` is now bounded by the **dispatcher**
+> (`ALP_ERR_INVAL`), not only by whichever backend was selected.
+> `src/backends/wdt/yocto_drv.c:153` previously passed any id straight into
+> `snprintf(path, ..., "/dev/watchdog%u", cfg->wdt_id)`.
+>
+> **3. Line citations drifted by 1-5.** `z_close` is
+> `src/backends/wdt/zephyr_drv.c:90-95`, not `:89-93` (the campaign index says
+> `:86-91`, also wrong). `alp_wdt_open`'s cfg validation is
+> `src/wdt_dispatch.c:54-61`. `wdt_ops.h` carries `wdt_id` at `:26` as well as
+> `channel_id`/`cfg` at `:27-28`, and all three backends set `st->wdt_id`
+> (`zephyr_drv.c:59`, `sw_fallback.c:26`, `yocto_drv.c:199`) — but only inside
+> `ops->open()`, i.e. after `_alloc()`, which is the second half of why the
+> two-scan design could not work.
+>
+> Not done here, still open: Tasks 2-4 below are untouched.
+
+
 **Files:** `src/wdt_dispatch.c`, `tests/zephyr/peripheral/src/wdt.c`.
 
 **Interfaces:** no API change. No new symbol. No ABI regen.
