@@ -631,6 +631,17 @@ bool bridge_transport_spi_poll_service(void)
 		if (!SPI_transfer(spi, &t)) {
 			g_arm_fail_count++;
 			arm_request_header();
+			/* DROP READY before leaving.  It was raised just above, and
+			 * arm_request_header() only RECORDS the phase in polled mode -- it
+			 * deliberately does not raise READY -- so breaking here left the line
+			 * HIGH with nothing armed.  That is exactly the lie this file's own
+			 * rule forbids: the slave advertises "clock away" while no transfer is
+			 * in flight, for at least the 1 ms tick in firmware/cc3501e/src/main.c,
+			 * and the host's bytes land in a slave that is not listening.  It
+			 * self-heals only because spi_fifo_reset() discards them on the next
+			 * frame, i.e. it costs one desynced frame every time -- and this branch
+			 * fires precisely when the shared DMA is busy just after a flush. */
+			cc3501e_bridge_busy();
 			break;
 		}
 		serviced = true;

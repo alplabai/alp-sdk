@@ -569,8 +569,37 @@ int cc3501e_hw_ota_begin(uint32_t total_len)
 	if (total_len <= (uint32_t)TI_FWU_MANIFEST_SIZE || total_len > CC3501E_OTA_IMAGE_MAX) {
 		return CC3501E_HW_ERR_INVAL; /* too small to hold a manifest, or larger than the RAM buffer */
 	}
-	if (ota.op_rc == OTA_OP_INFLIGHT) return CC3501E_HW_BUSY;             /* op running */
-	if (ota.state == ALP_CC3501E_OTA_STATE_WRITING) return CC3501E_HW_OK; /* already begun */
+	if (ota.op_rc == OTA_OP_INFLIGHT) return CC3501E_HW_BUSY; /* op running */
+	if (ota.state == ALP_CC3501E_OTA_STATE_WRITING) {
+		/* "Already begun" is only safe when it is THE SAME image, from the START.
+		 *
+		 * This used to answer OK unconditionally, which silently spliced images.
+		 * Any OTA whose abort never landed (the link was down at bail time, and
+		 * cc3501e_ota_update discards abort's status on every failure path) leaves
+		 * the device WRITING with a non-zero cursor.  The next BEGIN then took this
+		 * path: the new total_len was DISCARDED, the stale cursor kept, and the
+		 * host's confirm poll read WRITING within milliseconds -- indistinguishable
+		 * from a fresh session.  The write loop then walked new_image[0..cursor),
+		 * where every chunk hit the idempotency short-circuit below and returned OK
+		 * for bytes that were never staged.  The slot ended up
+		 * old[MANIFEST..cursor) + new[cursor..total), and ota_do_finish's
+		 * cursor == total_len and flushed == total_len checks BOTH pass -- so the
+		 * only thing standing between that and a promoted Frankenstein image was
+		 * TI's manifest hash catching our own state bug.
+		 *
+		 * It also contradicted the published contract in
+		 * include/alp/chips/cc3501e/ota.h, which says BEGIN arms the write cursor
+		 * at offset 0.
+		 *
+		 * So: forgive ONLY an exact re-BEGIN of an untouched session.  Anything
+		 * else is a new image and must be rejected rather than merged -- the host
+		 * aborts and re-begins, which is the path that really does reset the
+		 * session. */
+		if (total_len == ota.total_len && ota.cursor == 0u) {
+			return CC3501E_HW_OK;
+		}
+		return CC3501E_HW_ERR_INVAL;
+	}
 	if (ota.state == ALP_CC3501E_OTA_STATE_ERROR) {
 		/* The deferred begin (ota_do_begin, on the pump) FAILED -- e.g. the
 		 * psa_fwu vendor slots could not be resolved (query failed / ambiguous

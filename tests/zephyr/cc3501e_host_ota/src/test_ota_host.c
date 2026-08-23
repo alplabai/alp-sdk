@@ -351,6 +351,7 @@ static void reset_before(void *fixture)
 ZTEST(cc3501e_host_ota, test_begin_encodes_total_len_and_opens_session)
 {
 	const uint32_t total = 0x00012345u;
+	zassert_equal(cc3501e_ota_update_mode(&fw, true, 100u), ALP_OK, "enter update mode");
 	zassert_equal(cc3501e_ota_begin(&fw, total, 100u), ALP_OK, "BEGIN -> OK");
 
 	/* NOT slave.cmd -- cc3501e_ota_begin() always confirms via a trailing
@@ -367,6 +368,7 @@ ZTEST(cc3501e_host_ota, test_begin_encodes_total_len_and_opens_session)
  * chunk; the model advances its cursor when offset == cursor. */
 ZTEST(cc3501e_host_ota, test_write_encodes_offset_and_data)
 {
+	zassert_equal(cc3501e_ota_update_mode(&fw, true, 100u), ALP_OK, "enter update mode");
 	zassert_equal(cc3501e_ota_begin(&fw, 8u, 100u), ALP_OK, "BEGIN");
 
 	const uint8_t chunk0[4] = { 0xDE, 0xAD, 0xBE, 0xEF };
@@ -397,6 +399,7 @@ ZTEST(cc3501e_host_ota, test_write_oversize_chunk_rejected_by_host)
 /* FINISH only stages once every declared byte has been written. */
 ZTEST(cc3501e_host_ota, test_finish_requires_full_image_then_stages)
 {
+	zassert_equal(cc3501e_ota_update_mode(&fw, true, 100u), ALP_OK, "enter update mode");
 	zassert_equal(cc3501e_ota_begin(&fw, 8u, 100u), ALP_OK, "BEGIN 8 bytes");
 	const uint8_t four[4] = { 1, 2, 3, 4 };
 	zassert_equal(cc3501e_ota_write(&fw, 0u, four, sizeof four, 100u), ALP_OK, "WRITE @0");
@@ -414,6 +417,7 @@ ZTEST(cc3501e_host_ota, test_finish_requires_full_image_then_stages)
  * total_len back out of the reply payload it read. */
 ZTEST(cc3501e_host_ota, test_status_decodes_progress)
 {
+	zassert_equal(cc3501e_ota_update_mode(&fw, true, 100u), ALP_OK, "enter update mode");
 	zassert_equal(cc3501e_ota_begin(&fw, 16u, 100u), ALP_OK, "BEGIN 16 bytes");
 	const uint8_t six[6] = { 9, 8, 7, 6, 5, 4 };
 	zassert_equal(cc3501e_ota_write(&fw, 0u, six, sizeof six, 100u), ALP_OK, "WRITE 6 bytes");
@@ -435,6 +439,7 @@ ZTEST(cc3501e_host_ota, test_status_null_out_invalid)
 /* ABORT resets the session back to IDLE. */
 ZTEST(cc3501e_host_ota, test_abort_resets_session)
 {
+	zassert_equal(cc3501e_ota_update_mode(&fw, true, 100u), ALP_OK, "enter update mode");
 	zassert_equal(cc3501e_ota_begin(&fw, 8u, 100u), ALP_OK, "BEGIN");
 	zassert_equal(cc3501e_ota_abort(&fw, 100u), ALP_OK, "ABORT -> OK");
 	zassert_equal(slave.ota_state, ALP_CC3501E_OTA_STATE_IDLE, "session back to IDLE");

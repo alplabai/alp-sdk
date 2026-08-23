@@ -103,8 +103,20 @@ static int cmd_companion_ota_begin(const struct shell *sh, size_t argc, char **a
 		shell_error(sh, "usage: alp companion ota begin <total_len_bytes>");
 		return -EINVAL;
 	}
-	alp_status_t s =
-	    cc3501e_ota_begin(companion_cc3501e, (uint32_t)total_len, ALP_COMPANION_OTA_MS);
+	/* Enter update mode FIRST.  Opening a session runs psa_fwu_query and, on a
+	 * dirty slot, a full slot erase -- and those never return while the bridge is
+	 * open in callback/DMA mode, so this command used to WEDGE the device until a
+	 * WIFI_EN/nRESET cold cycle.  cc3501e_ota_begin now refuses that outright, so
+	 * without this the command would simply always fail. */
+	alp_status_t s = cc3501e_ota_update_mode(companion_cc3501e, true, ALP_COMPANION_OTA_MS);
+	if (s != ALP_OK) {
+		shell_error(sh,
+		            "could not enter OTA update mode (%d) -- the device reboots into a "
+		            "polled bridge for OTA; retry, or reset the companion",
+		            (int)s);
+		return -EIO;
+	}
+	s = cc3501e_ota_begin(companion_cc3501e, (uint32_t)total_len, ALP_COMPANION_OTA_MS);
 
 	if (s == ALP_ERR_NOT_READY) {
 		shell_warn(sh, "OTA not available (no PSA-FWU in this CC3501E image)");

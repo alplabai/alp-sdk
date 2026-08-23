@@ -63,6 +63,20 @@ static alp_status_t ota_settled_as(cc3501e_t *ctx, uint8_t want, uint32_t timeou
 
 alp_status_t cc3501e_ota_begin(cc3501e_t *ctx, uint32_t total_len, uint32_t timeout_ms)
 {
+	/* UPDATE MODE IS A PRECONDITION, not a nicety.  ota_do_begin runs
+	 * psa_fwu_query and, on a dirty slot, a 674-sector erase -- and a
+	 * callback/DMA SPI_open on the bridge PERMANENTLY prevents psa_fwu_start /
+	 * psa_fwu_write from returning (bench-proven; SPI_close does not undo the
+	 * claim).  So a BEGIN issued on the normal DMA bridge does not fail, it
+	 * WEDGES the device, recoverable only by a WIFI_EN/nRESET cold cycle.
+	 *
+	 * cc3501e_ota_update and the bring-up example both enter update mode first,
+	 * but this is a public entry point and `alp companion ota begin` called it
+	 * straight from the shell -- a one-line command that bricked the link until a
+	 * power cycle.  Refuse instead. */
+	if (!cc3501e_peer_is_polled()) {
+		return ALP_ERR_NOT_READY;
+	}
 	uint8_t req[4];
 	req[0] = (uint8_t)(total_len & 0xFFu);
 	req[1] = (uint8_t)((total_len >> 8) & 0xFFu);
@@ -170,8 +184,18 @@ alp_status_t cc3501e_ota_finish(cc3501e_t *ctx, uint32_t timeout_ms)
 	const alp_status_t s =
 	    poll_by_repeat(ctx, ALP_CC3501E_CMD_OTA_FINISH, NULL, 0, NULL, 0, NULL, timeout_ms);
 	if (s == ALP_OK) return ALP_OK;
-	if (ota_settled_as(ctx, ALP_CC3501E_OTA_STATE_STAGED, timeout_ms) == ALP_OK) {
+	/* Same discarded verdict that was fixed in cc3501e_ota_begin, left in its
+	 * sibling.  A device that latched OTA ERROR (a flush wrote nothing) answers
+	 * the next FINISH with RESP_ERR_INVALID, because its state is no longer
+	 * WRITING -- so this returned ALP_ERR_INVAL, telling the caller "you called
+	 * FINISH at the wrong time" for what was actually a failed flash write.
+	 * ota_settled_as already computes the right answer; keep it. */
+	const alp_status_t settled = ota_settled_as(ctx, ALP_CC3501E_OTA_STATE_STAGED, timeout_ms);
+	if (settled == ALP_OK) {
 		return ALP_OK;
+	}
+	if (settled == ALP_ERR_IO) {
+		return ALP_ERR_IO;
 	}
 	return s;
 }
@@ -507,15 +531,27 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 			 * Bounded so a device that never clears the flag cannot hang the
 			 * stream: OTA_FLUSH_WAIT_MS is generous against a ~4-block flush but
 			 * finite. `off` is NOT advanced, so the retry is a plain re-send. */
-			uint32_t waited = 0u;
-			bool     landed = false;
+			/* Cap the poll FRAME, and charge it.  cc3501e_ota_status is
+			 * poll_by_repeat, which really does re-issue for its whole budget --
+			 * and during a flush the device is inside psa_fwu_write and answers
+			 * nothing, so each iteration burned the caller's full timeout_ms (20 s
+			 * at the bench) while `waited` counted only the 50 ms sleep.  Exit then
+			 * needed 600000/50 = 12000 iterations, i.e. this "bounded" hold-off
+			 * could block for ~66 HOURS.  Same accounting ota_settled_as and
+			 * cc3501e_ota_update_mode already do, and what the comment on
+			 * CC3501E_OTA_FLUSH_WAIT_MS already claims happens here. */
+			const uint32_t fpoll_ms = (timeout_ms < CC3501E_OTA_BLACKOUT_POLL_TIMEOUT_MS)
+			                              ? timeout_ms
+			                              : CC3501E_OTA_BLACKOUT_POLL_TIMEOUT_MS;
+			uint32_t       waited   = 0u;
+			bool           landed   = false;
 			for (;;) {
 				alp_cc3501e_ota_status_t fs;
 				/* The STATUS read itself can fail here -- while the slave re-arms
 				 * its SPI the link is DOWN, so header-only polls return IO too.
 				 * That is the expected shape of a flush window, not an error:
 				 * keep polling until the device answers again. */
-				if (cc3501e_ota_status(ctx, &fs, timeout_ms) == ALP_OK && fs.reserved[1] == 0u) {
+				if (cc3501e_ota_status(ctx, &fs, fpoll_ms) == ALP_OK && fs.reserved[1] == 0u) {
 					/* A device that has latched ERROR (or dropped out of the
 					 * session entirely) will never take another chunk, so
 					 * breaking out to re-send would spin this loop forever --
@@ -540,7 +576,8 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 					return ota_update_bail(ctx, ALP_ERR_TIMEOUT, timeout_ms);
 				}
 				alp_delay_ms(CC3501E_OTA_FLUSH_POLL_MS);
-				waited += CC3501E_OTA_FLUSH_POLL_MS;
+				/* Charge the frame too, not just the sleep. */
+				waited += CC3501E_OTA_FLUSH_POLL_MS + fpoll_ms;
 			}
 			if (landed) {
 				off += n; /* reply was lost, bytes are in -- move on */
@@ -576,5 +613,15 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 		stall = 0u;
 	}
 
-	return cc3501e_ota_finish(ctx, timeout_ms);
+	/* The ONE exit that did not go through ota_update_bail.  A FINISH that fails
+	 * because the device latched ERROR staged nothing and armed no swap -- yet it
+	 * left the CC3501E parked in the radio-dead polled boot, where Wi-Fi, BLE and
+	 * GET_MAC queue forever and answer BUSY forever.  Every later scan/connect in
+	 * the application then failed for an unrelated reason.  Take the device back
+	 * out on that path, exactly as the bring-up example already does. */
+	const alp_status_t fs = cc3501e_ota_finish(ctx, timeout_ms);
+	if (fs == ALP_OK) {
+		return ALP_OK; /* a successful FINISH leaves update mode by itself */
+	}
+	return ota_update_bail(ctx, fs, timeout_ms);
 }

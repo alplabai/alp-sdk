@@ -395,6 +395,11 @@ static bool g_ready_line_proven;
  * for the slave to actually drop and re-raise READY around its re-arm. */
 static bool g_peer_polled;
 
+bool cc3501e_peer_is_polled(void)
+{
+	return g_peer_polled;
+}
+
 void cc3501e_set_peer_polled(bool on)
 {
 	g_peer_polled = on;

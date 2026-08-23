@@ -67,9 +67,13 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
  *
  * Call this BEFORE @ref cc3501e_ota_begin.  The OTA session is RAM-only, so
  * entering mid-session throws away the write cursor and forces a full re-BEGIN
- * (another slot erase, 22-181 s).  After a successful @ref cc3501e_ota_finish the
+ * (another slot erase, 22-181 s).  After a SUCCESSFUL @ref cc3501e_ota_finish the
  * device leaves update mode BY ITSELF -- do not call this with @p enable false
- * afterwards.  @ref cc3501e_ota_update already performs the entry for you.
+ * after one of those.  A FAILED finish (or any abandoned session) is the
+ * opposite case: the device stays parked in the radio-dead polled boot, so you
+ * MUST take it back out with @p enable false or every later Wi-Fi/BLE/GET_MAC
+ * call queues forever and answers BUSY forever.  @ref cc3501e_ota_update does
+ * both for you -- the entry, and the exit on every failure path.
  *
  * The host drives NO pin here -- entry is device-initiated.  Recovery when the
  * confirm poll exhausts its budget is @ref cc3501e_hard_reset (NOT
@@ -100,12 +104,26 @@ alp_status_t cc3501e_ota_update_mode(cc3501e_t *ctx, bool enable, uint32_t timeo
  * vendor slot and brings it to READY (PSA-FWU), arming the session's write
  * cursor at offset 0.
  *
+ * PRECONDITION: the device MUST already be in update mode (@ref
+ * cc3501e_ota_update_mode with @p enable true).  Opening a session runs
+ * psa_fwu_query and, on a dirty slot, a full slot erase -- and those calls never
+ * return while the bridge is open in callback/DMA mode, so a BEGIN on the normal
+ * bridge does not fail, it WEDGES the device until a WIFI_EN/nRESET cold cycle.
+ * This function refuses with @ref ALP_ERR_NOT_READY rather than let that happen.
+ * @ref cc3501e_ota_update handles the entry for you.
+ *
+ * A second BEGIN on a session that is already WRITING is accepted only when it
+ * declares the SAME @p total_len and nothing has been written yet; anything else
+ * is a different image and is rejected, because merging it would splice the two.
+ * Abort first, then begin again.
+ *
  * @param ctx         Initialised bridge handle.
  * @param total_len   Full signed GPE vendor-image size in bytes (manifest +
  *                    body) that the session will stream.
  * @param timeout_ms  Per-request poll-by-repeat budget.
- * @return ALP_OK once the session is open; otherwise the mapped error (e.g.
- *         ALP_ERR_BUSY if a session is already in flight).
+ * @retval ALP_OK           the session is open.
+ * @retval ALP_ERR_NOT_READY  the device is not in update mode (see above).
+ * @retval ALP_ERR_BUSY     a session is already in flight.
  */
 alp_status_t cc3501e_ota_begin(cc3501e_t *ctx, uint32_t total_len, uint32_t timeout_ms);
 
