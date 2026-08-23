@@ -507,6 +507,12 @@ static alp_status_t z_out_write(alp_audio_out_backend_state_t *state,
 	struct hw_out_be *be = (struct hw_out_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
 
+	/* Refuse more frames than the block negotiated at open() before
+	 * deriving a byte count from them.  alp_audio_out_write() checks only
+	 * buf != NULL and frames != 0, so without this the portable path
+	 * hands alp_i2s_write() an arbitrary length. */
+	if (frames > (size_t)state->cfg.frames_per_block) return ALP_ERR_OUT_OF_RANGE;
+
 	size_t bytes = frames * bytes_per_frame(&state->cfg);
 
 	/* Software volume.  Unity (0x0100) skips the loop -- common case
