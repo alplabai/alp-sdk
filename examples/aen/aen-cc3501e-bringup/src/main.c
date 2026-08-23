@@ -758,9 +758,13 @@ static void cc3501e_demo_ota(cc3501e_t *fw)
 				       have_ok ? (int)last_ok.state : -1,
 				       have_ok ? (int)last_ok.bytes_written : -1,
 				       have_ok ? (int)last_ok.reserved[1] : -1,
-				       /* stage = the device's own breadcrumb (STATUS reserved[2]):
-				        * 20 entered flush, 21 pre psa_fwu_start, 22 start returned,
-				        * 23 in psa_fwu_write, 24 write returned, 25 flush complete. */
+				       /* stage = the device's own breadcrumb (STATUS reserved[2]),
+				        * in TWO encodings -- see include/alp/protocol/cc3501e.h:
+				        *   1..0x3F  the psa_fwu_* call that failed the last flush
+				        *   0x40|p   no psa fault; low 6 bits = transport phase
+				        *   0xC0|p   same, and the bridge is running POLLED
+				        * so 64 / 192 on a healthy run is a phase report, NOT a
+				        * fault. */
 				       have_ok ? (int)last_ok.reserved[2] : -1,
 				       (unsigned)(k_uptime_get() - t_begin));
 			}
@@ -791,6 +795,18 @@ static void cc3501e_demo_ota(cc3501e_t *fw)
 		} else {
 			s = ALP_ERR_IO;
 		}
+	}
+
+	/* LEAVE UPDATE MODE on every path that did not reach FINISH.  A FINISH that
+	 * staged takes the device out by itself, but the ERROR-latch break, the
+	 * stall break and the short-stream exit above all fall through here with the
+	 * device still parked in the radio-dead polled boot -- where WIFI_SCAN,
+	 * BLE_ENABLE and GET_MAC queue forever and answer BUSY forever, because
+	 * nothing drains the worker on that boot.  The soak that follows this
+	 * function would then look permanently broken.  This example is the pattern
+	 * customers copy, so it has to model the exit, not just the entry. */
+	if (s != ALP_OK) {
+		(void)cc3501e_ota_update_mode(fw, false, CC3501E_OTA_DEMO_TIMEOUT_MS);
 	}
 
 	/* Read back the session state regardless of the update result -- this is

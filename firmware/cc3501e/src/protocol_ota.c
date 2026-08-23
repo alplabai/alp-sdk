@@ -141,10 +141,17 @@ alp_cc3501e_resp_t handle_ota_update_mode(const uint8_t *req,
 	*reply_data_len = 4u;
 
 	if (want != now) {
-		if (want) {
-			bridge_transport_spi_request_polled_boot();
-		} else {
-			bridge_transport_spi_clear_polled_boot();
+		/* Reset ONLY if the flag was really armed.  Resetting on a failed arm is a
+		 * reboot storm: the device comes back in the mode it was already in, the
+		 * host's confirm loop re-issues 0x47, and each re-issue arms another warm
+		 * reset -- about 14 of them across a 20 s budget.  RESP_ERR_STATE is the
+		 * right refusal: it is the protocol's deterministic terminal reject, so
+		 * poll_by_repeat stops instead of re-polling a device that will answer
+		 * the same way forever. */
+		const bool armed = want ? bridge_transport_spi_request_polled_boot()
+		                        : bridge_transport_spi_clear_polled_boot();
+		if (!armed) {
+			return ALP_CC3501E_RESP_ERR_STATE;
 		}
 		/* Deferred: fires from cc3501e_hw_tick() once this reply has drained. */
 		cc3501e_hw_request_reset();

@@ -70,11 +70,22 @@ static int cmd_companion_ota_status(const struct shell *sh, size_t argc, char **
 	shell_print(sh, "state:   %s (%u)", companion_ota_state_name(st.state), st.state);
 	shell_print(sh, "written: %u B", (unsigned int)st.bytes_written);
 	shell_print(sh, "total:   %u B", (unsigned int)st.total_len);
-	/* #1610 bench triage: reserved[2] names the psa_fwu_* call that failed the
-	 * last window flush (0 = none).  Printed only when non-zero so a healthy
-	 * session stays quiet. */
-	if (st.reserved[2] != 0u) {
+	/* #1610 bench triage.  reserved[2] carries TWO encodings, and treating it as
+	 * a bare fault code printed `fault: stage 64` on every healthy session:
+	 *   1..0x3F  the psa_fwu_* call that failed the last window flush
+	 *            (cc3501e_hw_ota_fault's fail_stage).
+	 *   0x40|p   no psa fault -- the low bits are the transport PHASE, and bit
+	 *   0xC0|p   0x80 says the bridge is in POLLED mode.  The firmware emits
+	 *            this shape whenever fail_stage is 0, i.e. on every good run
+	 *            (firmware/cc3501e/src/protocol_ota.c).
+	 * 0 means the device published neither. */
+	if (st.reserved[2] != 0u && st.reserved[2] < 0x40u) {
 		shell_print(sh, "fault:   stage %u (see cc3501e_hw_ota_fault)", st.reserved[2]);
+	} else if (st.reserved[2] != 0u) {
+		shell_print(sh,
+		            "bridge:  %s, phase %u",
+		            (st.reserved[2] & 0x80u) ? "polled" : "DMA",
+		            (unsigned int)(st.reserved[2] & 0x3Fu));
 	}
 	return 0;
 }

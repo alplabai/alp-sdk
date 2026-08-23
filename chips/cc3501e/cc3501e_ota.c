@@ -105,13 +105,26 @@ alp_status_t cc3501e_ota_begin(cc3501e_t *ctx, uint32_t total_len, uint32_t time
 	if (s != ALP_OK && s != ALP_ERR_BUSY) {
 		alp_delay_ms(CC3501E_OTA_BEGIN_BLIND_MS);
 	}
-	if (ota_settled_as(ctx, ALP_CC3501E_OTA_STATE_WRITING, timeout_ms) == ALP_OK) {
+	/* ota_settled_as() distinguishes "not there yet" (TIMEOUT) from "the device
+	 * latched OTA ERROR" (IO).  Discarding that told the caller ALP_ERR_BUSY --
+	 * "try again" -- for a session that had already failed, after first sleeping
+	 * CC3501E_OTA_BEGIN_BLIND_MS and polling a device known to be dead.  A
+	 * latched ERROR is terminal: report it. */
+	alp_status_t settled = ota_settled_as(ctx, ALP_CC3501E_OTA_STATE_WRITING, timeout_ms);
+	if (settled == ALP_OK) {
 		return ALP_OK;
+	}
+	if (settled == ALP_ERR_IO) {
+		return ALP_ERR_IO;
 	}
 	if (s == ALP_ERR_BUSY) {
 		alp_delay_ms(CC3501E_OTA_BEGIN_BLIND_MS);
-		if (ota_settled_as(ctx, ALP_CC3501E_OTA_STATE_WRITING, timeout_ms) == ALP_OK) {
+		settled = ota_settled_as(ctx, ALP_CC3501E_OTA_STATE_WRITING, timeout_ms);
+		if (settled == ALP_OK) {
 			return ALP_OK;
+		}
+		if (settled == ALP_ERR_IO) {
+			return ALP_ERR_IO;
 		}
 	}
 	return (s == ALP_OK) ? ALP_ERR_TIMEOUT : s;
@@ -240,7 +253,24 @@ static bool update_mode_reads_as(cc3501e_t *ctx, uint8_t want, uint32_t timeout_
 	size_t             got      = 0u;
 	const alp_status_t s        = cc3501e_request(
 	    ctx, ALP_CC3501E_CMD_OTA_UPDATE_MODE, &want, 1u, reply, sizeof(reply), &got, timeout_ms);
-	return s == ALP_OK && got >= 1u && reply[0] == want;
+	if (s != ALP_OK || got < 1u || reply[0] != want) {
+		return false;
+	}
+	if (want != 0u) {
+		return true; /* 0x00 cannot forge a 1 -- the readback IS the proof. */
+	}
+	/* want == 0 is the direction the mode byte CANNOT defend (see the comment
+	 * above): a dead payload phase clocks literal 0x00, which is byte-identical
+	 * to a genuine "normal bridge, OTA idle" reply, so reply[0] == 0 alone is
+	 * the absence of evidence, not evidence.  This function is what the public
+	 * ALP_OK of cc3501e_ota_update_mode(ctx, false, ...) rests on, and both
+	 * include/alp/protocol/cc3501e.h and docs/cc3501e-bridge.md instruct hosts
+	 * to corroborate here -- so corroborate: require a diag reply carrying a
+	 * NON-ZERO uptime_ms.  A dead phase reads uptime_ms as 0; a live device
+	 * that has run far enough to service this frame never does.  reset_cause is
+	 * deliberately NOT used: the HAL hardcodes it to 0. */
+	alp_cc3501e_diag_info_t info = { 0 };
+	return cc3501e_diag_info(ctx, &info) == ALP_OK && info.uptime_ms != 0u;
 }
 
 alp_status_t cc3501e_ota_update_mode(cc3501e_t *ctx, bool enable, uint32_t timeout_ms)
@@ -301,7 +331,13 @@ alp_status_t cc3501e_ota_update_mode(cc3501e_t *ctx, bool enable, uint32_t timeo
 	 * cc3501e_reset: its cold cycle re-triggers the Puya double-boot bug and can
 	 * leave ctx NOT_READY (see cc3501e_hard_reset).  Its status is ignored -- a
 	 * unit with no reset pin answers ALP_ERR_NOSUPPORT and the verdict reported
-	 * here is the timeout either way. */
+	 * here is the timeout either way.
+	 *
+	 * Clear the polled flag FIRST: the reset always lands the device in NORMAL
+	 * mode, so leaving it set would keep the host edge-gating READY against a
+	 * level-driving peer -- up to CC3501E_READY_EDGE_US of extra wait on every
+	 * phase, for the rest of the session. */
+	cc3501e_set_peer_polled(false);
 	(void)cc3501e_hard_reset(ctx);
 	return ALP_ERR_TIMEOUT;
 }
@@ -399,6 +435,15 @@ static alp_status_t ota_settled_as(cc3501e_t *ctx, uint8_t want, uint32_t timeou
 #define CC3501E_OTA_FLUSH_WAIT_MS 600000u
 #define CC3501E_OTA_FLUSH_POLL_MS 50u
 
+/* Consecutive hold-offs allowed that move the device cursor NOWHERE.  A flush
+ * window ends with the device taking the retried chunk, so a hold-off that
+ * clears (flush_pending == 0, state still WRITING) and still leaves
+ * bytes_written short is not a flush at all -- it is a link carrying
+ * header-only frames while dropping every payload one, which is exactly the
+ * shape of a desync.  Nothing on that path sleeps, so without this bound the
+ * retry spins at full speed forever and the caller hangs instead of failing. */
+#define CC3501E_OTA_STALL_MAX 8u
+
 alp_status_t
 cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t timeout_ms)
 {
@@ -445,6 +490,7 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 	 * (The final remainder chunk is < 256 B; psa_fwu accepts the partial tail,
 	 * as the selftest's last write did.) */
 	const size_t chunk = 256u;
+	uint32_t     stall = 0u; /* consecutive hold-offs with no cursor movement */
 	for (size_t off = 0u; off < len;) {
 		size_t n = len - off;
 		if (n > chunk) {
@@ -470,6 +516,16 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 				 * That is the expected shape of a flush window, not an error:
 				 * keep polling until the device answers again. */
 				if (cc3501e_ota_status(ctx, &fs, timeout_ms) == ALP_OK && fs.reserved[1] == 0u) {
+					/* A device that has latched ERROR (or dropped out of the
+					 * session entirely) will never take another chunk, so
+					 * breaking out to re-send would spin this loop forever --
+					 * nothing on the retry path sleeps.  Treat anything other
+					 * than WRITING as fatal, exactly as the lost-reply path at
+					 * the bottom of this function already does. */
+					if (fs.state != ALP_CC3501E_OTA_STATE_WRITING) {
+						(void)cc3501e_ota_abort(ctx, timeout_ms);
+						return ota_update_bail(ctx, ALP_ERR_IO, timeout_ms);
+					}
 					/* Device is back. Did this chunk actually land before the
 					 * blackout swallowed its reply?  The cursor is authoritative:
 					 * WRITE is NOT idempotent for an already-passed offset, so
@@ -486,8 +542,14 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 				alp_delay_ms(CC3501E_OTA_FLUSH_POLL_MS);
 				waited += CC3501E_OTA_FLUSH_POLL_MS;
 			}
-			if (landed) off += n; /* reply was lost, bytes are in -- move on */
-			continue;             /* else retry the SAME chunk */
+			if (landed) {
+				off += n; /* reply was lost, bytes are in -- move on */
+				stall = 0u;
+			} else if (++stall >= CC3501E_OTA_STALL_MAX) {
+				(void)cc3501e_ota_abort(ctx, timeout_ms);
+				return ota_update_bail(ctx, ALP_ERR_IO, timeout_ms);
+			}
+			continue; /* else retry the SAME chunk */
 		}
 		if (s != ALP_OK) {
 			/* A lost reply can leave the host unsure whether the chunk landed.
@@ -511,6 +573,7 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 			}
 		}
 		off += n;
+		stall = 0u;
 	}
 
 	return cc3501e_ota_finish(ctx, timeout_ms);

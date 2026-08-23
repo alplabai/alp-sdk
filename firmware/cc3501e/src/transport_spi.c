@@ -76,12 +76,14 @@ __attribute__((weak)) bool bridge_transport_spi_polled(void)
 	return false; /* no persisted flag on this backend -- never update mode */
 }
 
-__attribute__((weak)) void bridge_transport_spi_request_polled_boot(void)
+__attribute__((weak)) bool bridge_transport_spi_request_polled_boot(void)
 {
+	return false; /* no persisted flag on this backend -- nothing to arm */
 }
 
-__attribute__((weak)) void bridge_transport_spi_clear_polled_boot(void)
+__attribute__((weak)) bool bridge_transport_spi_clear_polled_boot(void)
 {
+	return false;
 }
 
 __attribute__((weak)) uint8_t bridge_transport_spi_boot_mark(void)

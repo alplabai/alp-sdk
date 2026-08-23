@@ -474,6 +474,24 @@ tick.  The payload's signed version must **exceed** the running primary —
 a downgrade is refused at install (`state` → 3/ERROR), a forward image is
 accepted.  `OTA_STATUS reserved[0]` carries the last swap-reboot rc
 (0 = success, non-zero = the swap was refused, e.g. anti-rollback).
+
+`OTA_STATUS reserved[1]` is **flush pending**, and every host that streams
+`OTA_WRITE` must read it.  Non-zero means the device has queued a
+staging-window flush to flash: it is about to tear down its bridge DMA and
+will not consume payload until the flag clears.  Clocking `OTA_WRITE` across
+that window desyncs the link permanently — the 2026-06-19 failure the
+windowed design exists to prevent.  Hold off **all** payload, poll this field
+with **header-only** `OTA_STATUS` frames until it reads 0, then re-send the
+same chunk.  Reconcile against `bytes_written` first: `OTA_WRITE` is not
+idempotent, so a chunk whose reply the blackout swallowed may already have
+landed, and re-sending it is rejected as out-of-order.
+
+`OTA_STATUS reserved[2]` is diagnostics in two encodings.  `1..0x3F` is the
+`psa_fwu_*` call that failed the last window flush.  `0x40|phase` (or
+`0xC0|phase` when the bridge is running polled) means *no* psa fault — the
+low six bits are the transport phase.  That second shape is what a **healthy**
+session reports, so a non-zero `reserved[2]` is not a fault on its own.
+
 Host-side
 
 ### OTA update mode (`0x47`, proto v5)

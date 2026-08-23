@@ -263,22 +263,32 @@ bool bridge_transport_spi_polled(void)
 	return g_polled;
 }
 
-void bridge_transport_spi_request_polled_boot(void)
+bool bridge_transport_spi_request_polled_boot(void)
 {
+	/* Reports whether the flag was actually ARMED.  It used to return void, so a
+	 * non-writable persist area (a mis-placed .TI.noinit, or a boot ROM that
+	 * scrubs the retained RAM) was a silent no-op -- while the caller went on to
+	 * reset anyway.  The device then came back in NORMAL mode, the host's confirm
+	 * loop re-issued 0x47, and every re-issue armed another warm reset: roughly
+	 * 14 resets across a 20 s budget, ending in a hard reset.  Retained RAM
+	 * surviving SYSRESETREQ is an ASSUMPTION on this silicon (see the header of
+	 * this file), not a proven fact, so the caller must be able to refuse. */
 	if (!persist_writable()) {
-		return;
+		return false;
 	}
 	g_persist.magic     = CC3501E_POLLED_BOOT_MAGIC;
 	g_persist.magic_inv = ~CC3501E_POLLED_BOOT_MAGIC;
+	return true;
 }
 
-void bridge_transport_spi_clear_polled_boot(void)
+bool bridge_transport_spi_clear_polled_boot(void)
 {
 	if (!persist_writable()) {
-		return;
+		return false;
 	}
 	g_persist.magic     = 0u;
 	g_persist.magic_inv = ~0u;
+	return true;
 }
 
 uint8_t bridge_transport_spi_boot_mark(void)

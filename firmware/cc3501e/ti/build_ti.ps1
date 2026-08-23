@@ -140,6 +140,13 @@ $cflags += "-DCC3501E_BRIDGE_FW_VERSION_U16=$fwU16"
 # persisted flag consumed at boot), not a build switch, so one image must carry both.
 $cfg = Join-Path $out "ti_drivers_config.c"
 (Get-Content $cfg -Raw) -replace "\.minDmaTransferSize = 10,", ".minDmaTransferSize = 1024," | Set-Content $cfg -NoNewline
+# VERIFY, do not assume.  A bare -replace that matches nothing leaves the stock value
+# and still exits 0: the image then builds fine and sends every polled payload phase
+# into the DMA branch -- the exact claim wedge update mode exists to avoid -- with no
+# build-time signal at all.  Same post-condition discipline as the .TI.noinit patch.
+if ((Get-Content $cfg -Raw) -notmatch "\.minDmaTransferSize = 1024,") {
+    throw "build_ti.ps1: minDmaTransferSize patch did not apply in $cfg (SysConfig output drifted). Polled payload phases would fall into the DMA branch and wedge psa_fwu."
+}
 
 # GPIO17 = the bridge READY / host-IRQ line (CC35 GPIO17 -> Alif P2_6, schematic net
 # CC3501_iRQ).  cc3501e_aen.syscfg DOCUMENTS it as "WIFI_SPI0.READY" but SysConfig has
@@ -155,6 +162,9 @@ $cfg = Join-Path $out "ti_drivers_config.c"
 # "bridge busy", which is what the firmware's lazy ready_ensure_init() also asserts, so
 # the host holds off through boot until the first cc3501e_bridge_ready().
 (Get-Content $cfg -Raw) -replace "GPIOWFF3_DO_NOT_CONFIG, /\* GPIO17 \*/", "GPIO_CFG_OUTPUT_INTERNAL | GPIO_CFG_OUT_STR_LOW | GPIO_CFG_OUT_LOW, /* GPIO17 = bridge READY */" | Set-Content $cfg -NoNewline
+if ((Get-Content $cfg -Raw) -notmatch "GPIO17 = bridge READY") {
+    throw "build_ti.ps1: GPIO17 READY patch did not apply in $cfg (SysConfig output drifted). READY would never be driven and the host would fall back to blind inter-phase delays."
+}
 
 $txdef = @(if ($Transport -eq 'sdio') { '-DCC3501E_CONTROL_TRANSPORT_SDIO=1' })
 if ($OtaSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_SELFTEST') }

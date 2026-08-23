@@ -105,7 +105,7 @@ bool bridge_transport_spi_polled(void);
  * WIFI_EN/nRESET cold cycle -- that asymmetry is the host's escape hatch.
  * Weak default: no-op.
  */
-void bridge_transport_spi_request_polled_boot(void);
+bool bridge_transport_spi_request_polled_boot(void);
 
 /**
  * @brief Disarm the persisted flag so the NEXT boot comes up in the normal
@@ -115,7 +115,7 @@ void bridge_transport_spi_request_polled_boot(void);
  * or the freshly-swapped firmware comes up deaf to the radio.  Weak default:
  * no-op.
  */
-void bridge_transport_spi_clear_polled_boot(void);
+bool bridge_transport_spi_clear_polled_boot(void);
 
 /**
  * @brief Bench proof channel for the update-mode boot flag, reported through

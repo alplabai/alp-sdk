@@ -975,7 +975,25 @@ typedef struct {
 	uint8_t state; /**< @ref alp_cc3501e_ota_state_t. */
 	/** reserved[0] = last swap-reboot rc: 0 = none requested / success (the device
 	 *  reboots on success and never reports it), non-zero = the swap was REFUSED
-	 *  (e.g. BL2 anti-rollback on a downgrade).  reserved[1..2] unused. */
+	 *  (e.g. BL2 anti-rollback on a downgrade).
+	 *
+	 *  reserved[1] = FLUSH PENDING (#1610), and reading it is MANDATORY for any
+	 *  host that streams OTA_WRITE.  Non-zero means the device has queued a
+	 *  staging-window flush to flash: it is about to tear down its bridge DMA and
+	 *  will not consume payload until the flag clears.  A host that keeps clocking
+	 *  OTA_WRITE across that window desyncs the link permanently.  The contract is
+	 *  to hold off ALL payload and poll THIS field with header-only OTA_STATUS
+	 *  frames until it reads 0, then re-send the same chunk -- and to reconcile
+	 *  against @ref bytes_written first, because OTA_WRITE is not idempotent and a
+	 *  chunk whose reply was swallowed by the blackout may already have landed.
+	 *
+	 *  reserved[2] = diagnostics, in TWO encodings:
+	 *    1..0x3F  the psa_fwu_* call that failed the last window flush.
+	 *    0x40|p   no psa fault; the low 6 bits are the transport PHASE, and bit
+	 *    0xC0|p   0x80 set means the bridge is running POLLED.  This is the shape
+	 *             a HEALTHY session reports, so do not treat a non-zero
+	 *             reserved[2] as a fault on its own.
+	 *    0        the device published neither. */
 	uint8_t  reserved[3];
 	uint32_t bytes_written; /**< bytes accepted into the slot so far. */
 	uint32_t total_len;     /**< total declared at BEGIN. */
