@@ -50,6 +50,19 @@ static struct {
 	uint16_t         req_len; /* declared request payload length         */
 	uint8_t          req_pl[ALP_CC3501E_MAX_PAYLOAD];
 
+	/* Sticky BEGIN witness.  cc3501e_ota_begin() (#1610) no longer trusts
+	 * OTA_BEGIN's own ack -- it ALWAYS confirms the session by polling
+	 * OTA_STATUS right after (ota_settled_as() in cc3501e_ota.c), because an
+	 * ALP_OK reply only means the device QUEUED the op, not that it reached
+	 * WRITING.  So by the time cc3501e_ota_begin() returns, `cmd`/`req_len`
+	 * above belong to that trailing STATUS poll, not BEGIN.  Capture BEGIN's
+	 * own opcode + payload length here, at the moment they are first known,
+	 * so a test can prove BEGIN reached the slave without depending on it
+	 * being the LAST request of the call -- do not re-add a "BEGIN is the
+	 * last opcode" assumption, it no longer holds. */
+	bool     begin_seen;
+	uint16_t begin_req_len;
+
 	/* Staged reply (built when the request completes, drained over phases 3+4). */
 	uint8_t  reply_pl[ALP_CC3501E_MAX_PAYLOAD]; /* status byte + data */
 	uint16_t reply_len;                         /* == 1 + data bytes */
@@ -156,6 +169,23 @@ static void slave_dispatch(void)
 		slave.reply_len    = 13u;
 		break;
 	}
+	case ALP_CC3501E_CMD_OTA_UPDATE_MODE: {
+		/* cc3501e_ota_update() (#1610) enters update mode BEFORE BEGIN on
+		 * every call, so cc3501e_ota_update_mode() must settle for the
+		 * WRITE-loop tests to ever reach BEGIN.  Model the device as
+		 * switching mode INSTANTLY (no warm-reboot round trip): echo the
+		 * requested mode straight back so the host's first readback
+		 * (update_mode_reads_as()) reads want == want and settles without
+		 * a poll.  No test exercises the multi-poll confirm / reboot path,
+		 * so that shape is deliberately not modelled. */
+		slave.reply_pl[0] = ALP_CC3501E_RESP_OK;
+		slave.reply_pl[1] = slave.req_pl[0]; /* mode == what was requested */
+		slave.reply_pl[2] = slave.ota_state;
+		slave.reply_pl[3] = 0u; /* reserved[0], MBZ */
+		slave.reply_pl[4] = 0u; /* reserved[1], MBZ */
+		slave.reply_len   = 5u;
+		break;
+	}
 	default:
 		stage_status(ALP_CC3501E_RESP_ERR_INVALID);
 		break;
@@ -180,6 +210,10 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 		/* [cmd | flags | payload_len(LE16)] */
 		slave.cmd     = tx[0];
 		slave.req_len = (uint16_t)tx[2] | ((uint16_t)tx[3] << 8);
+		if (slave.cmd == ALP_CC3501E_CMD_OTA_BEGIN) {
+			slave.begin_seen    = true;
+			slave.begin_req_len = slave.req_len;
+		}
 		if (rx != NULL) {
 			memset(rx, ALP_CC3501E_SYNC_IDLE, len);
 		}
@@ -263,8 +297,12 @@ ZTEST(cc3501e_host_ota, test_begin_encodes_total_len_and_opens_session)
 	const uint32_t total = 0x00012345u;
 	zassert_equal(cc3501e_ota_begin(&fw, total, 100u), ALP_OK, "BEGIN -> OK");
 
-	zassert_equal(slave.cmd, ALP_CC3501E_CMD_OTA_BEGIN, "opcode reached the slave");
-	zassert_equal(slave.req_len, 4u, "BEGIN payload is the 4-byte total_len");
+	/* NOT slave.cmd -- cc3501e_ota_begin() always confirms via a trailing
+	 * OTA_STATUS poll, so slave.cmd is OTA_STATUS by the time the call
+	 * returns.  begin_seen/begin_req_len are captured at BEGIN's own
+	 * request-header phase, before that trailing poll overwrites them. */
+	zassert_true(slave.begin_seen, "BEGIN opcode reached the slave");
+	zassert_equal(slave.begin_req_len, 4u, "BEGIN payload is the 4-byte total_len");
 	zassert_equal(slave.ota_total, total, "total_len decoded from the LE32 the host emitted");
 	zassert_equal(slave.ota_state, ALP_CC3501E_OTA_STATE_WRITING, "session is WRITING");
 }

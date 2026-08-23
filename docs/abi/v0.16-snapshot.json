@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-22",
+  "generated": "2026-08-23",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -2990,6 +2990,10 @@
         "cc3501e_ota_update": {
           "hash": "1df6029d27ff4e3f",
           "signature": "alp_status_t cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t timeout_ms);"
+        },
+        "cc3501e_ota_update_mode": {
+          "hash": "3ca19d3256214257",
+          "signature": "alp_status_t cc3501e_ota_update_mode(cc3501e_t *ctx, bool enable, uint32_t timeout_ms);"
         },
         "cc3501e_ota_write": {
           "hash": "864d474aa2153b8c",

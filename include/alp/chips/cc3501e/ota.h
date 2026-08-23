@@ -43,13 +43,53 @@ extern "C" {
  * @param ctx         Initialised bridge handle.
  * @param image       Signed GPE-format vendor image (manifest + body).
  * @param len         Image length in bytes (must exceed the manifest).
- * @param timeout_ms  Per-frame budget for each BEGIN / WRITE / FINISH request.
+ * @param timeout_ms  Per-frame budget for each BEGIN / WRITE / FINISH request --
+ *                    AND the whole-operation budget for the update-mode entry
+ *                    this call now performs first (@ref cc3501e_ota_update_mode).
+ *                    Roughly a sixth of it is spent polling for the reboot, after
+ *                    a fixed ~3.5 s settle, so a per-frame value under ~5 s buys
+ *                    only one or two confirm polls.  The bench uses 20000.
  * @return ALP_OK once FINISH is acked (the device reboots afterwards);
  *         otherwise the first failing step's status (caller may
  *         cc3501e_ota_abort() to reset the device session).
  */
 alp_status_t
 cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t timeout_ms);
+
+/**
+ * @brief Put the device into (or take it out of) OTA update mode.
+ *
+ * The device persists a flag and WARM-REBOOTS.  On that boot it never opens the
+ * bridge SPI in DMA/callback mode -- which is the only state in which
+ * psa_fwu_start() and psa_fwu_write() return at all (bench-proven, silicon
+ * 2026-08-21) -- and runs a dedicated loop that does nothing but service the
+ * polled bridge frame-by-frame and pump the OTA flush at frame boundaries.
+ *
+ * Call this BEFORE @ref cc3501e_ota_begin.  The OTA session is RAM-only, so
+ * entering mid-session throws away the write cursor and forces a full re-BEGIN
+ * (another slot erase, 22-181 s).  After a successful @ref cc3501e_ota_finish the
+ * device leaves update mode BY ITSELF -- do not call this with @p enable false
+ * afterwards.  @ref cc3501e_ota_update already performs the entry for you.
+ *
+ * The host drives NO pin here -- entry is device-initiated.  Recovery when the
+ * confirm poll exhausts its budget is @ref cc3501e_hard_reset (NOT
+ * @ref cc3501e_reset: the cold cycle re-triggers the Puya double-boot bug and can
+ * leave ctx NOT_READY); a reset of either kind always lands in the NORMAL mode.
+ *
+ * In update mode only PING / OTA_* / GET_DIAG_INFO / RESET are serviced.  Wi-Fi,
+ * BLE and GET_MAC queue forever and answer BUSY forever, because nothing drains
+ * the worker on that boot.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param enable      true to enter update mode; false to return to the normal bridge.
+ * @param timeout_ms  Whole-operation budget for the reboot + confirm readback.
+ * @retval ALP_OK           the device is confirmed running in the requested mode
+ *                          (or was already in it, in which case it did NOT reboot).
+ * @retval ALP_ERR_NOT_READY  @p ctx is NULL or not initialised.
+ * @retval ALP_ERR_TIMEOUT  it never came back in the requested mode; the device
+ *                          has been hard-reset.
+ */
+alp_status_t cc3501e_ota_update_mode(cc3501e_t *ctx, bool enable, uint32_t timeout_ms);
 
 /* Granular OTA controls (cc3501e_ota_update wraps these for the common path). */
 
