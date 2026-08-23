@@ -8,7 +8,7 @@
 #
 # Pin policy:
 #   - zephyr: the stable release the SDK is verified against.  Currently
-#     v4.4.0 (the same revision pr-twister.yml + the nightly AEN HIL
+#     v4.4.1 (the same revision pr-twister.yml + the nightly AEN HIL
 #     workflow exercise).  v0.5 bumped from v3.7.0 LTS to v4.4.0 to
 #     pick up mainline LVGL v9, upstream Alif Ensemble board files,
 #     and the I2S inclusive-language rename.  Bumps are deliberate,
@@ -29,7 +29,7 @@
 #     standard cmake/kconfig hookup).  We import it directly here
 #     as a top-level project at the latest tagged release.
 #
-#     IMPORTANT (current as of the v4.4.0 pin): upstream Zephyr v4.4
+#     IMPORTANT (current as of the v4.4.1 pin): upstream Zephyr v4.4
 #     DOES ship the stock Alif Ensemble board files under
 #     boards/alif/ -- ensemble_e8_dk (incl. our E8 part
 #     ae822fa0e5597ls0; targets rtss_he / rtss_hp), ensemble_e1c_dk,
@@ -185,7 +185,12 @@ manifest:
   #                    loudly at manifest time, and the build only
   #                    dies later on a missing
   #                    tensorflow/lite/micro/*.h header (#1076,
-  #                    surfaced by pr-twister-aen on aen-sim-vision).
+  #                    surfaced by pr-twister-aen; the example that
+  #                    surfaced it was the Renode-sim aen-sim-vision,
+  #                    since deleted -- see docs/adr/0022 Amendment 2
+  #                    -- but the five aen-npu-inference* apps still
+  #                    set CONFIG_TENSORFLOW_LITE_MICRO=y, so the
+  #                    allowlist entry stays load-bearing).
   #                    canopennode/chre/thrift/zephyr-lang-rust are
   #                    the group's other members but aren't
   #                    name-allowlisted, so this only pulls in

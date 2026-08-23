@@ -3217,7 +3217,11 @@
       "script": "scripts/check_agents_md_generators.py"
     },
     {
-      "purpose": "Refuse an Alif Ensemble (AEN) layout that leaves the top of the App MRAM window writable by the application.",
+      "purpose": "Reject a raw `apt-get update`/`apt-get install` in a workflow step.",
+      "script": "scripts/check_apt_bounded.py"
+    },
+    {
+      "purpose": "Refuse an Alif Ensemble (AEN) layout that leaves the top of the App MRAM window writable by the application, or that publishes a slot0 flash address disagreeing with `loader._resolve_slot0_load_address()` (#1482).",
       "script": "scripts/check_atoc_reservation.py"
     },
     {
@@ -3259,6 +3263,10 @@
     {
       "purpose": "Chip driver <-> manifest parity gate -- fails (exit 1) when a chip driver ships without its machine-readable metadata manifest, or a manifest ships with no driver, unless the mismatch is on an explicit allowlist.",
       "script": "scripts/check_chip_manifest_parity.py"
+    },
+    {
+      "purpose": "`_CHIP_SUBSYSTEMS` <-> Kconfig `depends on` parity gate -- fails (exit 1) when `_CHIP_SUBSYSTEMS` in `scripts/alp_project_emit/__init__.py` drifts from the `depends on` line of the matching `config ALP_SDK_CHIP_<NAME>` / `config ALP_SDK_BLOCK_<NAME>` block in `zephyr/kconfigs/chips.kconfig`.",
+      "script": "scripts/check_chip_subsystems_parity.py"
     },
     {
       "purpose": "Plain-CMake chip-list parity gate -- fails (exit 1) when the root `CMakeLists.txt` `ALP_SDK_CHIP_LIST` (the plain-CMake / Yocto `libalp_chips.a` archive, gated by `ALP_BUILD_CHIPS_ONLY`) drifts from the drivers that actually exist under `chips/<id>/`.",
@@ -3365,6 +3373,10 @@
       "script": "scripts/check_local_paths.py"
     },
     {
+      "purpose": "No tracked file may live under the Doxygen OUTPUT_DIRECTORY (#1573).",
+      "script": "scripts/check_no_committed_doxygen_output.py"
+    },
+    {
       "purpose": "Validate that every silicon pad referenced in the SoM peripheral maps is claimed by **exactly one** peripheral.",
       "script": "scripts/check_pin_conflicts.py"
     },
@@ -3439,6 +3451,10 @@
     {
       "purpose": "Prove every `libraries:`-selectable Zephyr module actually resolves in west.yml -- the alp-sdk-OWNED workspace (`west init -l alp-sdk`, what `tan bootstrap` and every customer runs), not the Zephyr-owned one pr-twister.yml happens to init from (`west init -m zephyr`) instead.",
       "script": "scripts/check_west_manifest_module_resolution.py"
+    },
+    {
+      "purpose": "Reject a job-level `if:` that references a GitHub Actions context it does not get.",
+      "script": "scripts/check_workflow_expressions.py"
     },
     {
       "purpose": "Guard: every scripts/ and firmware/ write_text() of a repo-tree text artifact passes newline=\"\".",
@@ -3696,6 +3712,7 @@
         "alp_inference_get_input",
         "alp_inference_get_output",
         "alp_inference_invoke",
+        "alp_inference_last_invoke_latency_us",
         "alp_inference_num_inputs",
         "alp_inference_num_outputs",
         "alp_inference_open",

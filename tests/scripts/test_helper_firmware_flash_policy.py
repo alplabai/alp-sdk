@@ -278,12 +278,11 @@ def test_v2n_v2m_gd32_entries_are_identical_across_the_four_skus():
 
 @pytest.mark.parametrize("sku", V2N_V2M_SKUS)
 def test_v2n_v2m_gd32_entry_declares_no_local_flash_path(sku):
-    """#1439: GD32 programming is separated out of `tan` entirely
+    """#1439: GD32 programming is separated out of tan's scope entirely
     (tan-cli#732), so the four E1M-X entries declare NO `flash_method`
-    and NO `flash_args`.  An SDK still emitting `flash_method:
-    swd_probe` to a `tan` whose backend is gone hits
-    `executionPolicy.unknownBackend`, which is `fail` -- a hard error,
-    not a skip -- so the absence is load-bearing, not tidiness."""
+    and NO `flash_args` -- tan does not flash this part, and no preset
+    names a local flash path for it, so the absence is load-bearing,
+    not tidiness."""
     entry = next(e for e in _helper_firmware(sku) if e["name"] == "gd32_bridge")
     assert "flash_method" not in entry, sorted(entry)
     assert "flash_args" not in entry, sorted(entry)

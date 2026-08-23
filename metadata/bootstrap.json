@@ -18,12 +18,21 @@
     "pythonMinVersion": "3.10",
     "install": {
       "linux": {
-        "git": "sudo apt-get install -y git",
-        "cmake": "sudo apt-get install -y cmake",
-        "python3": "sudo apt-get install -y python3",
-        "ninja": "sudo apt-get install -y ninja-build",
-        "xz": "sudo apt-get install -y xz-utils",
-        "wget": "sudo apt-get install -y wget"
+        "apt": {
+          "git": "sudo apt-get install -y git",
+          "cmake": "sudo apt-get install -y cmake",
+          "python3": "sudo apt-get install -y python3",
+          "ninja": "sudo apt-get install -y ninja-build",
+          "xz": "sudo apt-get install -y xz-utils",
+          "wget": "sudo apt-get install -y wget"
+        },
+        "dnf": {
+          "git": "sudo dnf install -y git",
+          "cmake": "sudo dnf install -y cmake",
+          "python3": "sudo dnf install -y python3",
+          "xz": "sudo dnf install -y xz",
+          "wget": "sudo dnf install -y wget"
+        }
       },
       "macos": {
         "git": "brew install git",
@@ -40,6 +49,56 @@
         "ninja": "winget install -e --id Ninja-build.Ninja",
         "7zip": "winget install -e --id 7zip.7zip"
       }
+    }
+  },
+  "artifactProvenance": {
+    "git": {
+      "tier": "A",
+      "source": "https://git-scm.com/",
+      "sizeBytes": null,
+      "licence": "GPL-2.0-only"
+    },
+    "cmake": {
+      "tier": "A",
+      "source": "https://cmake.org/",
+      "sizeBytes": null,
+      "licence": "BSD-3-Clause"
+    },
+    "ninja": {
+      "tier": "A",
+      "source": "https://ninja-build.org/",
+      "sizeBytes": null,
+      "licence": "Apache-2.0"
+    },
+    "python3": {
+      "tier": "A",
+      "source": "https://www.python.org/",
+      "sizeBytes": null,
+      "licence": "PSF-2.0"
+    },
+    "python": {
+      "tier": "A",
+      "source": "https://www.python.org/",
+      "sizeBytes": null,
+      "licence": "PSF-2.0"
+    },
+    "xz": {
+      "tier": "A",
+      "source": "https://tukaani.org/xz/",
+      "sizeBytes": null,
+      "licence": null
+    },
+    "wget": {
+      "tier": "A",
+      "source": "https://www.gnu.org/software/wget/",
+      "sizeBytes": null,
+      "licence": "GPL-3.0-or-later"
+    },
+    "7zip": {
+      "tier": "A",
+      "source": "https://www.7-zip.org/",
+      "sizeBytes": null,
+      "licence": null
     }
   },
   "west": {

@@ -171,7 +171,7 @@
         "sim_console": {
           "type": "boolean",
           "default": false,
-          "description": "Opt-in (issue #686): when true, emit CONFIG_RAM_CONSOLE=y for every HEADLESS core (a core the SoM topology marks `hw_console: false`, e.g. the RZ/V2N M33 system-manager) so the studio hardware simulator's `uart_socket` streams that core's boot/console output.  Cores that already have a UART console are unchanged, and absent/false emits nothing (no RAM cost on production images).  Studio sets this when producing a bundle destined for `RENODE_MODE=real` (alp-studio#74)."
+          "description": "Opt-in (issue #686): when true, emit CONFIG_RAM_CONSOLE=y for every HEADLESS core (a core the SoM topology marks `hw_console: false`, e.g. the RZ/V2N M33 system-manager) so the studio hardware simulator's `uart_socket` streams that core's boot/console output.  Cores that already have a UART console are unchanged, and absent/false emits nothing (no RAM cost on production images).  Studio sets this when producing a bundle destined for that simulator (alp-studio#74)."
         },
         "modules": {
           "type": "object",
@@ -196,7 +196,7 @@
           "size_kib":     { "type": "integer", "minimum": 4 },
           "fs":           { "type": "string", "enum": ["littlefs", "fat", "ext4", "raw"], "default": "raw", "description": "Filesystem to format the partition with.  `raw` leaves it unformatted (e.g. for image slots managed by MCUboot)." },
           "mount":        { "type": "string", "description": "Mount point at boot.  Optional; when omitted the partition isn't auto-mounted." },
-          "flash_device": { "type": "string", "description": "Region this partition lives in.  References the SoM preset's `memory_map:` name (`mram_main`, `ocram_low`, ...) or an `on_module.ospi_memories:` entry (`ospi0`, ...)." },
+          "flash_device": { "type": "string", "description": "Region this partition lives in.  References the SoM preset's `memory_map:` name (`mram_main`, `ocram_low`, ...) or an `on_module.ospi_memories:` entry (`ospi0`, ...).  A `memory_map:` region marked `carveout: false` is a partition INSIDE a flash-class node, not a flash device of its own, and is refused as a target (#1484).  No target resolves to a genuinely working Devicetree label today: a `memory_map:` region's label DEFAULTS to the region name when the SoM preset sets no explicit `dt_label:` override (neither `mram_main` nor `ocram_low` has that override), and as of alp-sdk#1556 the resolver refuses `status: ok` for that case -- it blocks with a reason instead of decorating the fabricated label.  An `on_module.ospi_memories:` key like `ospi0` is unverified against the generated board tree too, and is NOT yet gated the same way (separate follow-up) -- see `docs/board-config-features.md`'s \"Storage partitions (`storage:`)\" section." },
           "offset_kib":   { "type": "integer", "minimum": 0, "description": "Optional explicit offset (in KiB) within the flash device.  When omitted, the orchestrator allocates bottom-up from offset 0 in name-sorted order.  When supplied, must be page-aligned (4 KiB); the allocator surfaces overlaps via `status: blocked` on the resolved partition." }
         }
       }

@@ -94,17 +94,23 @@ storage:
 
 `mcuboot_primary` / `mcuboot_secondary` / `mcuboot_scratch` are named
 to illustrate a two-slot MCUboot layout, but they are `storage:`
-partitions (their own `&mram_main` node), NOT the board DT's
-`slot0_partition` / `slot1_partition` / `scratch_partition` labels
-MCUboot's flash-map actually reads -- MCUboot itself boots single-app
-on this SKU (see the `boot:` section above). Sizes sum to ~2.4 MiB
-(1024 + 1024 + 64 + 64 + 256 KiB), but on E1M-AEN801 there is no
-remainder to place them in: the SoM's own `memory_map:` regions
-already occupy the full 5632 KiB App MRAM window
-(`metadata/e1m_modules/E1M-AEN801.yaml`), so EVERY entry above emits
-`status: blocked` in the generated `dts-partitions.dtsi` (verify with
-`--emit dts-partitions`) -- this section demonstrates the `storage:`
-declarative shape only, not a working layout, on this SKU.
+partitions, NOT the board DT's `slot0_partition` / `slot1_partition`
+/ `scratch_partition` labels MCUboot's flash-map actually reads --
+MCUboot itself boots single-app on this SKU (see the `boot:` section
+above). Sizes sum to ~2.4 MiB (1024 + 1024 + 64 + 64 + 256 KiB), but
+on E1M-AEN801 there is no remainder to place them in: the SoM's own
+`memory_map:` regions already occupy the full 5632 KiB App MRAM
+window (`metadata/e1m_modules/E1M-AEN801.yaml`), so EVERY entry above
+emits `status: blocked` in the generated `dts-partitions.dtsi`
+(verify with `--emit dts-partitions`) for that reason alone.
+`mram_main` would ALSO not be a working `flash_device:` target even
+with free room: no AEN preset declares a `dt_label:` override for it,
+so it resolves to a Devicetree label of `mram_main`, but the
+generated board tree never defines that node -- only `mram_storage`
+(alp-sdk#1484; see `docs/board-config-features.md`'s "Storage
+partitions (`storage:`)" section). This section demonstrates
+the `storage:` declarative shape only, not a working layout, on this
+SKU.
 
 ### `cores.m55_hp.memory:` -- per-core memory tuning
 

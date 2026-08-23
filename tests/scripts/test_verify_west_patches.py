@@ -103,11 +103,58 @@ def _rmtree_clearing_readonly(path: Path) -> None:
     own mode does not govern unlinking it -- the containing directory's write
     permission does -- so the chmod really is inert there, which is precisely
     what the `dirs`-inclusive version was not.
+
+    Both loops below tolerate a file vanishing underneath them. Git runs
+    background maintenance (`gc.autoDetach`), which creates and then removes
+    `.git/objects/maintenance.lock`; `os.walk` can enumerate that lock and the
+    chmod land after git has already unlinked it, raising FileNotFoundError.
+    Measured on macos-latest (2026-08-19): `FileNotFoundError: .../ws/modules/
+    hal/alif/.git/objects/maintenance.lock` from this helper's chmod loop.
+    `shutil.rmtree` has the same window on the unlink, so the ENOENT retry
+    covers it too -- and only ENOENT, so a real PermissionError still surfaces.
     """
     for root, _dirs, files in os.walk(path):
         for name in files:
-            os.chmod(os.path.join(root, name), stat.S_IWRITE)
-    shutil.rmtree(path)
+            try:
+                os.chmod(os.path.join(root, name), stat.S_IWRITE)
+            except FileNotFoundError:
+                continue
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def test_rmtree_helper_tolerates_a_file_vanishing_mid_walk(tmp_path, monkeypatch):
+    """The helper must survive git's background maintenance deleting a lock.
+
+    Regression guard for the macos-latest failure on 2026-08-19:
+    `FileNotFoundError: .../.git/objects/maintenance.lock` raised from the chmod
+    loop, because `os.walk` enumerated a lock file that `git maintenance` then
+    unlinked before the chmod ran. Simulated deterministically here rather than
+    raced: the first chmod is made to raise FileNotFoundError, exactly as the
+    kernel would when the file is already gone.
+    """
+    victim = tmp_path / "gitdir"
+    (victim / "objects").mkdir(parents=True)
+    (victim / "objects" / "maintenance.lock").write_text("")
+    (victim / "objects" / "keep").write_text("x")
+
+    real_chmod = os.chmod
+    calls = {"n": 0}
+
+    def flaky_chmod(path, mode, *a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise FileNotFoundError(2, "No such file or directory", str(path))
+        return real_chmod(path, mode, *a, **kw)
+
+    monkeypatch.setattr(os, "chmod", flaky_chmod)
+
+    _rmtree_clearing_readonly(victim)
+
+    assert calls["n"] >= 1, "the chmod loop did not run, so nothing was exercised"
+    assert not victim.exists(), "the helper must still remove the tree"
 
 
 def _workspace(tmp_path: Path, module_content: str, *, module_name: str = "alif",

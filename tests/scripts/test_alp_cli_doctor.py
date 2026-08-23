@@ -184,11 +184,42 @@ def test_cmake_missing_hint_windows_sourced_from_bootstrap_manifest(monkeypatch)
 
 
 def test_cmake_missing_hint_linux_sourced_from_bootstrap_manifest(monkeypatch):
-    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
+    # cmake itself is absent, but apt-get resolves (a Debian/Ubuntu host) --
+    # issue #1464's PM-detection hop (_prereq_linux_pm) needs a REAL PM
+    # binary to distinguish this from "no known package manager at all";
+    # a blanket which()->None stub can no longer stand in for both.
+    monkeypatch.setattr(
+        doctor.shutil, "which",
+        lambda name: "/usr/bin/apt-get" if name == "apt-get" else None,
+    )
     monkeypatch.setattr(doctor.sys, "platform", "linux")
     result = doctor._check_cmake()
     assert result.status == doctor.FAIL
     assert result.hint == "Install it: sudo apt-get install -y cmake."
+
+
+def test_cmake_missing_hint_linux_dnf_sourced_from_bootstrap_manifest(monkeypatch):
+    """Same shape, dnf-family host (issue #1464): apt-get absent, dnf
+    present -- the hint must be the real dnf command, not the apt one."""
+    monkeypatch.setattr(
+        doctor.shutil, "which",
+        lambda name: "/usr/bin/dnf" if name == "dnf" else None,
+    )
+    monkeypatch.setattr(doctor.sys, "platform", "linux")
+    result = doctor._check_cmake()
+    assert result.status == doctor.FAIL
+    assert result.hint == "Install it: sudo dnf install -y cmake."
+
+
+def test_cmake_missing_hint_linux_no_known_pm_falls_back_to_generic(monkeypatch):
+    """Neither apt-get nor dnf resolves (e.g. Arch/Alpine -- this manifest
+    ships no install.linux.pacman entry at all, issue #1464) -- must degrade
+    to the generic, package-manager-agnostic hint, never guess."""
+    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
+    monkeypatch.setattr(doctor.sys, "platform", "linux")
+    result = doctor._check_cmake()
+    assert result.status == doctor.FAIL
+    assert result.hint == "Install cmake via your OS package manager."
 
 
 def test_cmake_missing_hint_macos_sourced_from_bootstrap_manifest(monkeypatch):
@@ -296,12 +327,29 @@ def test_ninja_missing_hint_windows_sourced_from_bootstrap_manifest(monkeypatch)
 def test_ninja_missing_hint_posix_has_real_command(monkeypatch):
     """ninja is one of prerequisites.posix's tracked tools (issue #971) --
     the hint must source the real apt/brew command from
-    metadata/bootstrap.json's prerequisites.install.linux, not fall back to
-    the generic pointer."""
-    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
+    metadata/bootstrap.json's prerequisites.install.linux.apt, not fall back
+    to the generic pointer."""
+    monkeypatch.setattr(
+        doctor.shutil, "which",
+        lambda name: "/usr/bin/apt-get" if name == "apt-get" else None,
+    )
     monkeypatch.setattr(doctor.sys, "platform", "linux")
     result = doctor._check_ninja()
     assert result.hint == "Install it: sudo apt-get install -y ninja-build."
+
+
+def test_ninja_missing_hint_linux_dnf_falls_back_to_generic(monkeypatch):
+    """dnf resolves, but install.linux.dnf carries no `ninja` key (issue
+    #1464 -- unshippable as one dnf-ecosystem-uniform command: Fedora's own
+    repos carry ninja-build, RHEL-derivatives don't without EPEL). Must
+    degrade to the generic hint, never a guessed dnf command."""
+    monkeypatch.setattr(
+        doctor.shutil, "which",
+        lambda name: "/usr/bin/dnf" if name == "dnf" else None,
+    )
+    monkeypatch.setattr(doctor.sys, "platform", "linux")
+    result = doctor._check_ninja()
+    assert result.hint == "Install ninja via your OS package manager."
 
 
 # -------- malformed metadata/bootstrap.json: must degrade, never crash -------

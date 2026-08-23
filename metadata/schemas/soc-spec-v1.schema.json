@@ -433,7 +433,7 @@
         "debug": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Debug-probe identity for this variant (#987), consumed by alp-sdk-vscode to generate a working cortex-debug launch.json without human input. Every key is optional -- an absent key is a published 'unknown', not a guess, and must be copied verbatim from the owning tool's own list or a working in-tree invocation; a plausible-looking guess fails at the probe rather than at validation.",
+          "description": "Debug-probe identity for this variant (#987), consumed by alp-sdk-vscode to generate a working cortex-debug launch.json without human input. Every key is optional -- an absent key is a published 'unknown', not a guess, and must be copied verbatim from the owning tool's own list or a working in-tree invocation; a plausible-looking guess fails at the probe rather than at validation. EXCEPTION: `jlink_flash_device` on an Alif Ensemble SoC is not optional -- see its own description below and scripts/validate_metadata.py::_check_soc_jlink_flash_device_declared.",
           "properties": {
             "pyocd_target": {
               "type": "string",

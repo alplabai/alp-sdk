@@ -12,7 +12,7 @@ reference.
 
 ## Workflows shipped
 
-`.github/workflows/` carries **28** workflow files as of this revision
+`.github/workflows/` carries **25** workflow files as of this revision
 (counted via `ls .github/workflows/*.yml .github/workflows/*.yaml
 2>/dev/null | wc -l`; recount before trusting this number, it moves
 every time a workflow is added or retired).  The table below is a
@@ -29,13 +29,14 @@ that replaced it).
 |--------------------------------------------------------------------------------|------------------|------------|------------------------------------------------------------------------------------------------|
 | [`pr-twister.yml`](../../.github/workflows/pr-twister.yml)                        | every PR + push  | active     | Runs on `ubuntu-latest` (no docker container) with `ZEPHYR_TOOLCHAIN_VARIANT=host` so native_sim uses the runner's stock gcc.  west init + west update (cached), twister against `tests/zephyr/**` + `examples/**` on `native_sim/native/64`.  PR fails if any ztest fails. |
 | [`pr-plain-cmake.yml`](../../.github/workflows/pr-plain-cmake.yml)                | PR + push (paths)| active     | Plain-CMake builds for `ALP_OS=baremetal`, `ALP_OS=baremetal -DALP_SOM={aen,v2n}`, and `ALP_OS=yocto` with `ALP_BUILD_TESTS=ON`.  Installs `libmosquitto-dev` + `libasound2-dev` + `libssl-dev` + `pkg-config` so the Yocto-side wrappers (MQTT, ALSA audio, OpenSSL security) compile + their ctest binaries run. |
-| [`pr-static-analysis.yml`](../../.github/workflows/pr-static-analysis.yml)        | PR + push        | active     | `clang-format-diff` on changed lines + `cppcheck` informational pass over `src/` + `chips/`.  Diff-only format check (`clang-format · diff-only` is one of `dev`'s required contexts). |
+| [`pr-static-analysis.yml`](../../.github/workflows/pr-static-analysis.yml)        | PR + push        | active     | `clang-format-diff` on changed lines + `shellcheck` over every shipped `*.sh` (repo-wide `git ls-files` sweep over `*.sh`, issue #1550; `-x -S warning` for `scripts/bench/**` and `scripts/test-all.sh`, `-S error` elsewhere), both in the `clang-format-diff` job so a shellcheck defect hard-blocks too (`clang-format · diff-only` is one of `dev`'s required contexts; a separate job's context is not) + `cppcheck` informational pass over `src/` + `chips/` in its own non-required job. |
 | [`pr-generated-files.yml`](../../.github/workflows/pr-generated-files.yml)        | PR + push (paths)| active     | Catches drift in `<alp/soc_caps.h>` (re-runs `scripts/gen_soc_caps.py`) and `docs/abi/*.json` (re-runs `scripts/abi_snapshot.py`).             |
 | [`pr-metadata-validate.yml`](../../.github/workflows/pr-metadata-validate.yml)    | PR + push (paths)| active     | Validates every `metadata/socs/**/*.json` against the schema via `scripts/validate_metadata.py` + smoke-tests `scripts/alp_project.py` against `metadata/templates/board.yaml.example`. |
 | [`pr-doxygen.yml`](../../.github/workflows/pr-doxygen.yml)                        | PR + push (paths)| active     | Generates Doxygen HTML from `include/alp/**`.  Runs with `FAIL_ON_WARNINGS=YES` — zero warnings required; PR fails on any warning. |
 | [`coverity.yml`](../../.github/workflows/coverity.yml)                            | weekly + manual  | active     | Coverity Scan submission against <https://scan.coverity.com/projects/alplabai-alp-sdk>.  Secrets (`COVERITY_TOKEN`, `COVERITY_EMAIL`) provisioned; project name in the `COVERITY_PROJECT` Actions variable.       |
 | [`pr-bitbake.yml`](../../.github/workflows/pr-bitbake.yml)                        | PR to `main` (paths) | active | Dispatch bridge to the private `alp-sdk-internal` repo's self-hosted Yocto runner — see [`runner-architecture.md`](runner-architecture.md). |
 | [`onramp-clean-container.yml`](../../.github/workflows/onramp-clean-container.yml)| PR (paths) + weekly + manual + `run-full-quickstart` label | active | Runs the documented first-install journey (`docs/getting-started.md` §1–4) inside a genuinely bare `ubuntu:24.04` container — no apt package this job doesn't itself install. `prereqs-and-bootstrap` (every relevant PR) proves `bash scripts/bootstrap.sh` refuses with actionable hints then succeeds. `full-quickstart-build` (weekly cron + `workflow_dispatch` — both inert until this file reaches the default branch — or a PR carrying the `run-full-quickstart` label) walks the rest: installs `tan`, `west sdk install`s the Zephyr SDK, `tan build --sdk-root` (plus a `tan init` scaffold and a build of it), and asserts a real `zephyr.elf` came out. See issue #949. |
+| [`pr-bootstrap-distro-install.yml`](../../.github/workflows/pr-bootstrap-distro-install.yml)| PR (paths) | active | Container-job proof for `metadata/bootstrap.json`'s `prerequisites.install.linux` (issue #1464): a 3-leg matrix (`debian:12`/apt, `fedora:42`/dnf, `rockylinux:9`/dnf) derives the install commands from the manifest at run time, actually runs them, and asserts every declared tool lands on `PATH` — the admission bar that keeps a guessed package name from ever shipping. |
 
 ## Workflows planned
 
@@ -75,9 +76,8 @@ result attached to the PR or release that needs it — see
   `--list-required-gate-scripts`).  It covers the GitHub-hosted,
   hardware-free PR gates; it does **not** cover the self-hosted/bitbake
   build (`pr-bitbake.yml`), the GD32 / CC3501E bridge-firmware builds,
-  the Renode simulation smoke workflows (`pr-renode-*.yml`), or the
-  AEN onramp quickstart container — those still need a push through
-  CI (or their own local invocation) to exercise.  See
+  or the AEN onramp quickstart container — those still need a push
+  through CI (or their own local invocation) to exercise.  See
   [`docs/testing.md`](../testing.md).  (The VS Code extension's
   build lives in [`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)
   since the 2026-05-12 split; its own CI runs there.)
@@ -119,3 +119,13 @@ Workflow filenames follow `{stage}-{target}.yml`:
 - `stage` is one of `pr` (per-PR), `nightly`, `release`.
 - `target` is the SoM family (`aen`, `v2n`, `v2n-m1`) or a global
   scope (`twister`, `doxygen`, `metadata-validate`).
+
+Every job needs a `timeout-minutes:` (#1477 -- GitHub's implicit
+360-minute runner default otherwise applies silently). Every job's ceiling
+must stay strictly above the sum of its own step-level `timeout-minutes:`
+plus 1 minute for each step that has none, or a step running late can
+still be killed by the job-level timeout before its own fires --
+`tests/scripts/test_tier_a_workflow_step_timeouts.py` enforces both, over
+every file under `.github/workflows/`. Derive each ceiling from real
+observed run durations (`gh api .../actions/runs/<id>/jobs`), not a guess;
+comment the derivation at the site for anything non-obvious.

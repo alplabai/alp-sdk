@@ -23,7 +23,6 @@ except ImportError:
 import json
 
 from alp_project_loader import (
-    METADATA_ROOT,
     _load_yaml,
     _sku_family,
     resolve_capabilities,
@@ -40,11 +39,17 @@ _SOC_FAMILY_TOKEN: dict[str, str] = {
 }
 
 
-def _library_alias_table() -> dict[str, str]:
+def _library_alias_table(metadata_root: Path) -> dict[str, str]:
     """Legacy per-core `libraries:` token -> canonical manifest name
     (metadata/library-aliases-v1.json).  Empty dict if the table is
-    absent (keeps callers robust)."""
-    path = METADATA_ROOT / "library-aliases-v1.json"
+    absent (keeps callers robust).
+
+    `metadata_root` is required, not defaulted, on purpose: a default of
+    `METADATA_ROOT` is exactly the shape that hid #1485's original defect
+    (an omitted argument silently resolving against the SDK's own in-tree
+    `metadata/` instead of raising).  Callers pass the project's
+    `effective_metadata_root()`."""
+    path = metadata_root / "library-aliases-v1.json"
     if not path.is_file():
         return {}
     doc = json.loads(path.read_text(encoding="utf-8"))
@@ -52,7 +57,9 @@ def _library_alias_table() -> dict[str, str]:
     return dict(aliases) if isinstance(aliases, dict) else {}
 
 
-def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
+def _emit_library_hw_backends(
+        libs: list[str], sku: str,
+        metadata_root: Path) -> list[str]:
     """Per-library HW-accelerator binding loader.
 
     For each enabled library whose canonical manifest (resolved via the
@@ -81,9 +88,15 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
       - `status: planned` / `status: stub` entries are retained as
         metadata for the roadmap but are not emitted as active build
         claims.
-    """
-    from pathlib import Path
 
+    `metadata_root` is required, not defaulted -- pass the project's
+    `effective_metadata_root()` (threaded from `load_board_yaml(...,
+    metadata_root=...)`) so every read below -- the SKU preset, the alias
+    table, and each library manifest -- resolves against the SAME tree the
+    rest of the project was validated against, instead of an omitted
+    argument silently falling back to the SDK's own in-tree metadata
+    (#1485).
+    """
     # An unrecognised SKU pattern (a synthetic/test-only SKU, or a real SKU
     # from a family this matcher doesn't know) resolves to "no HW backend
     # applies" rather than raising -- this is an OPTIONAL accelerator-wiring
@@ -100,7 +113,6 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
         return []
 
     out: list[str] = []
-    repo_root = Path(__file__).resolve().parent.parent.parent
 
     # Resolve the SKU's `silicon:` ref and merged capabilities (SoC JSON
     # defaults + SoM-level overrides) via resolve_capabilities().  This
@@ -108,13 +120,14 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
     # capabilities removed from SoM YAMLs (Task 3, slice 3b) continue to
     # resolve from the SoC JSON that sibling Agent D populated.
     silicon_ref: str | None = None
-    sku_path = repo_root / "metadata" / "e1m_modules" / f"{sku}.yaml"
+    sku_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
     sku_preset: dict[str, Any] = {}
     if sku_path.exists():
         sku_preset = _load_yaml(sku_path) or {}
         silicon_ref = sku_preset.get("silicon")
 
-    merged_caps: dict[str, Any] = resolve_capabilities(sku_preset, repo_root / "metadata")
+    merged_caps: dict[str, Any] = resolve_capabilities(
+        sku_preset, metadata_root)
 
     def _cap_truthy(name: str) -> bool:
         v = merged_caps.get(name)
@@ -136,7 +149,7 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
         except ValueError:
             return False
 
-    alias = _library_alias_table()
+    alias = _library_alias_table(metadata_root)
     # Canonical -> legacy token, so the annotation comment names the library
     # by its declared token regardless of whether the caller passed the legacy
     # spelling (schemaVersion 1 per-core lists) or the canonical name (the
@@ -151,7 +164,7 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
         # §6 -- replaces the retired metadata/library-profiles/ tree).
         canonical = alias.get(lib, lib)
         label = to_token.get(lib, lib)
-        manifest_path = repo_root / "metadata" / "libraries" / f"{canonical}.yaml"
+        manifest_path = metadata_root / "libraries" / f"{canonical}.yaml"
         if not manifest_path.exists():
             continue
         manifest = _load_yaml(manifest_path) or {}
@@ -233,9 +246,14 @@ _OTA_PROVIDER_WEST_MODULES: dict[str, str] = {
 }
 
 
-def _load_curated_library_manifest(lib: str) -> dict[str, Any] | None:
-    """Load a top-level ADR 0018 library manifest if one exists."""
-    path = METADATA_ROOT / "libraries" / f"{lib}.yaml"
+def _load_curated_library_manifest(
+        lib: str,
+        metadata_root: Path) -> dict[str, Any] | None:
+    """Load a top-level ADR 0018 library manifest if one exists.
+
+    `metadata_root` is required, not defaulted -- see `_library_alias_table`.
+    """
+    path = metadata_root / "libraries" / f"{lib}.yaml"
     if not path.is_file():
         return None
     doc = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -249,6 +267,7 @@ def _emit_west_libraries(
     *,
     v2_libraries: list[str] | None = None,
     v2_project_libraries: list[str] | None = None,
+    metadata_root: Path,
 ) -> str:
     """Emit a west.yml fragment that the customer's manifest can
     import to pin the Zephyr modules board.yaml's `libraries:` array
@@ -262,6 +281,11 @@ def _emit_west_libraries(
     curated library manifests; these may either import a Zephyr-owned module
     by name or emit a standalone west project pin from the manifest's
     `integration.zephyr.west` block.
+
+    `metadata_root` is required, not defaulted -- pass the project's
+    `effective_metadata_root()` so the alias table and every curated library
+    manifest resolve against the SAME tree `--metadata-root` validated the
+    rest of the project against (#1485).
     """
     del sku_preset, board_preset  # unused -- libraries are SoM-agnostic
     if v2_libraries is not None:
@@ -291,7 +315,7 @@ def _emit_west_libraries(
     # Normalise legacy per-core tokens (schemaVersion 1) to their canonical
     # manifest name so the west-module lookup resolves regardless of which
     # spelling the caller passed (v2 resolution already yields canonical).
-    alias = _library_alias_table()
+    alias = _library_alias_table(metadata_root)
     for lib in libs:
         mod = _LIBRARY_WEST_MODULES.get(alias.get(lib, lib))
         if mod is None:
@@ -300,7 +324,7 @@ def _emit_west_libraries(
             add_module(lib, mod)
 
     for lib in project_libs:
-        manifest = _load_curated_library_manifest(lib)
+        manifest = _load_curated_library_manifest(lib, metadata_root)
         zephyr = ((manifest or {}).get("integration") or {}).get("zephyr") or {}
         if not zephyr:
             continue

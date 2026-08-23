@@ -107,19 +107,30 @@ jobs:
   dispatch:
     name: "dispatch · tan parity"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Mint a short-lived App token (scoped to tan-cli)
         id: apptoken
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        timeout-minutes: 2
         with:
           app-id: ${{ secrets.ALP_CI_APP_ID }}
           private-key: ${{ secrets.ALP_CI_APP_PRIVATE_KEY }}
           owner: alplabai
           repositories: tan-cli
 
+      # SDK_REF/BRANCH_REF: this trigger is push-to-dev/main only (see the
+      # `on:` block above), so github.ref_name is always "dev" or "main"
+      # today -- but it is still the same construct as pr-bitbake.yml's fork
+      # injection (github.ref_name splices verbatim into this run: block's
+      # SOURCE TEXT via ${{ }}), and that trigger scope is a workflow-file
+      # fact, not an enforced guarantee. Routed through env + quoted shell
+      # variables for the same reason, at no cost.
       - name: Dispatch planner-change to tan-cli
         env:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+          SDK_REF: ${{ github.sha }}
+          BRANCH_REF: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           # Captured HERE, immediately before the dispatch call, not in the
@@ -138,8 +149,9 @@ jobs:
           #
           # NOTE (residual correlation gap, see dispatch-confirm.sh): the run
           # this creates on tan-cli carries tan-cli's own default-branch
-          # head_sha, not ${{ github.sha }} -- repository_dispatch does not
-          # let the sender's SHA travel into the receiver's run ref. So
+          # head_sha, not this workflow's github.sha (SDK_REF above) --
+          # repository_dispatch does not let the sender's SHA travel into
+          # the receiver's run ref. So
           # nothing in this repo can filter tan-cli's run list down to "the
           # run THIS dispatch caused" versus a concurrent alp-sdk push (or
           # any other repository_dispatch sender to tan-cli); dispatch-confirm.sh
@@ -147,11 +159,16 @@ jobs:
           # Closing that gap needs a tan-cli-side change (e.g. tan's
           # parity.yml naming its run from client_payload.sdk_ref so it's
           # visible in the run list) -- tracked as follow-up, not done here.
+          # -f (raw string), not -F: -F reinterprets its value after the
+          # shell hands it over (leading `@` reads a FILE, `{owner}`/
+          # `{repo}`/`{branch}` are substituted, bare true/false/null/
+          # integers become JSON non-strings) -- see pr-bitbake.yml's
+          # Dispatch step for the same reasoning.
           gh api repos/alplabai/tan-cli/dispatches \
             -f event_type=alp-sdk-planner-change \
-            -F "client_payload[sdk_ref]=${{ github.sha }}" \
-            -F "client_payload[branch]=${{ github.ref_name }}"
-          echo "::notice::dispatched alp-sdk-planner-change to tan-cli for ${{ github.sha }} (${{ github.ref_name }})"
+            -f "client_payload[sdk_ref]=$SDK_REF" \
+            -f "client_payload[branch]=$BRANCH_REF"
+          echo "::notice::dispatched alp-sdk-planner-change to tan-cli for $SDK_REF ($BRANCH_REF)"
 
       - name: Find this workflow's previous dispatch (self-calibration baseline)
         env:
@@ -211,8 +228,10 @@ jobs:
       # (exit 127), because the runner's workspace was empty. Sparse, because
       # the one file is all this job reads.
       - name: Check out the confirm script
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 2
         with:
+          persist-credentials: false
           fetch-depth: 1
           sparse-checkout: |
             scripts/dispatch-confirm.sh

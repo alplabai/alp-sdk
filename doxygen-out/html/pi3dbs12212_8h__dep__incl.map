@@ -1,5 +1,0 @@
-<map id="include/alp/chips/pi3dbs12212.h" name="include/alp/chips/pi3dbs12212.h">
-<area shape="rect" id="Node000001" title="Diodes Inc PI3DBS12212A 2:1 high&#45;speed differential mux." alt="" coords="5,5,236,31"/>
-<area shape="rect" id="Node000002" href="$deepx__dxm1_8h.html" title="DEEPX DX&#45;M1 NPU host&#45;side bring&#45;up sequencer (V2N&#45;M1 only)." alt="" coords="33,79,208,119"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="123,44,123,79,118,79,118,44"/>
-</map>

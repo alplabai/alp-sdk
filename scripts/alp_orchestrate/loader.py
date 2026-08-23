@@ -316,21 +316,29 @@ def _resolve_slot0_load_address(
     -- there is nothing here for a test to keep in sync by hand. Applies
     uniformly to EVERY role in the no-override case (not just `he`): the
     stock layout has exactly one slot0 window, and whichever M55 core a
-    SoM boots lands on it -- including `m55_hp` on the single-M55
-    E1M-AEN401/E1M-AEN601 boards, the case a role-keyed (`he`-only)
-    fallback would still refuse.
+    SoM boots lands on it -- including an `m55_hp` that boots alone, the
+    case a role-keyed (`he`-only) fallback would still refuse. (This
+    sentence used to call E1M-AEN401/E1M-AEN601 "single-M55"; both are
+    DUAL-M55 -- see the paragraph below -- and #1446 cites that wrong
+    clause as the justification for having put two cores' slot0 at one
+    address until #1445.)
 
     E1M-AEN401/E1M-AEN601 declare BOTH `m55_hp` and `m55_he` in
     `topology:` (only the HP board's Zephyr tree is generated today --
-    #999, a separate, tracked gap), and neither declares a `memory_map:`
-    override, so this returns the SAME default address for both roles.
-    That is not reachable today -- `_validate_topology_cores` only calls
-    this resolver when the SoC variant already publishes
-    `jlink_flash_device`, and no non-E1M-AEN801 AEN variant does yet -- but
-    nothing stops a future variant from publishing `jlink_flash_device`
-    without a disjoint-slot0 override, which would silently reintroduce
-    #1069's HE/HP collision in `flash_args`. Tracked, not silently
-    accepted: #1384.
+    #999, a separate, tracked gap), and since #1445 both also declare
+    per-role `he_slot0`/`hp_slot0` overrides in `memory_map:`
+    (metadata/e1m_modules/E1M-AEN401.yaml, E1M-AEN601.yaml), so this
+    resolves to DISJOINT addresses for the two roles, not the
+    no-override default above. The no-override branch is reachable only
+    by a FUTURE AEN variant that publishes `jlink_flash_device` without
+    also declaring a disjoint-slot0 override -- `_validate_topology_cores`
+    only calls this resolver once the SoC variant publishes
+    `jlink_flash_device`, and every AEN preset already declares the
+    override. (Do not read that as a list of the variants which publish
+    `jlink_flash_device`: E4 does not -- `metadata/socs/alif/ensemble/
+    e4.json` declares `"jlink_flash_device": null`, so AEN401 never
+    reaches this resolver -- while E3/E5/E7 do, for AEN301/AEN501/AEN701.) That residual risk is
+    tracked, not silently accepted: #1384.
     """
     if not core_id.startswith("m55_"):
         return None
@@ -796,6 +804,7 @@ def _validate_topology_cores(
     silicon: str,
     board_preset: dict[str, Any],
     board_name: Optional[str],
+    metadata_root: Path,
 ) -> tuple[dict[str, Slice], list[IpcEntry]]:
     """Stage 3 of the #673 Phase-1 `load_board_yaml` split: per-core
     topology resolution + OS/class enforcement, IPC endpoint
@@ -897,7 +906,7 @@ def _validate_topology_cores(
             slot0_load_address=slot0_load_address,
         )
         _enforce_flow_d_preflight_pair(slice_, variant_debug, sku)
-        _enforce_loader_rules(slice_)
+        _enforce_loader_rules(slice_, metadata_root)
         _enforce_os_matches_core_class(
             slice_, soc_core_type_by_id.get(core_id, ""))
         cores[core_id] = slice_
@@ -995,6 +1004,7 @@ def _resolve_storage(
     project: dict[str, Any],
     som_preset: dict[str, Any],
     sku: str,
+    metadata_root: Path,
 ) -> list[StorageEntry]:
     """Stage 4 of the #673 Phase-1 `load_board_yaml` split: storage
     partitions (board.yaml `storage:` block).  Parse into StorageEntry
@@ -1027,7 +1037,7 @@ def _resolve_storage(
 
     # Cross-field: known flash device set is memory_map names + ospi keys.
     if storage_entries:
-        known_devices = set(_known_flash_devices(som_preset, METADATA_ROOT))
+        known_devices = set(_known_flash_devices(som_preset, metadata_root))
         for entry in storage_entries:
             if entry.flash_device is None:
                 continue   # resolver will block it with a clear reason
@@ -1055,6 +1065,7 @@ def _validate_cross_fields(
     som_preset: dict[str, Any],
     sku: str,
     storage_entries: list[StorageEntry],
+    metadata_root: Path,
 ) -> dict[str, Any]:
     """Stage 5 of the #673 Phase-1 `load_board_yaml` split:
     `security.psa:` cross-field validation.  The schema is
@@ -1073,7 +1084,7 @@ def _validate_cross_fields(
     if psa:
         storage_name_set = {e.name for e in storage_entries}
         try:
-            mem_map = resolve_memory_map(som_preset, METADATA_ROOT)
+            mem_map = resolve_memory_map(som_preset, metadata_root)
         except Exception:                                # noqa: BLE001
             mem_map = []
         region_names = {
@@ -1250,12 +1261,12 @@ def load_board_yaml(path: Path, *,
 
     cores, ipc_entries = _validate_topology_cores(
         project, som_preset, soc_spec, sku, silicon, board_preset,
-        board_name)
+        board_name, metadata_root)
 
-    storage_entries = _resolve_storage(project, som_preset, sku)
+    storage_entries = _resolve_storage(project, som_preset, sku, metadata_root)
 
     security_block = _validate_cross_fields(
-        project, som_preset, sku, storage_entries)
+        project, som_preset, sku, storage_entries, metadata_root)
 
     out = BoardProject(
         sku=sku,
@@ -1276,6 +1287,7 @@ def load_board_yaml(path: Path, *,
         storage=storage_entries,
         security=security_block,
         raw=project,
+        metadata_root=metadata_root,
     )
 
     # Cross-field consistency pass (v0.6 P2.3).  Runs last so it can

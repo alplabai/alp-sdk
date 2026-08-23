@@ -477,7 +477,7 @@
         },
         "carveout": {
           "type": "boolean",
-          "description": "When explicitly false, this region is excluded from IPC carve-out allocation (scripts/alp_orchestrate/carveout.py resolve_carve_outs) even though it declares a real `base`.  For a flash-class region (e.g. an MRAM MCUboot/slot0/reserved/storage sub-region that must publish a base so the board generator can lay out its partition table) that base is NOT byte-addressable shared memory a raw_shmem/rpmsg carve-out can safely land in.  Defaults to true (eligible)."
+          "description": "When explicitly false, this region is excluded from IPC carve-out allocation (scripts/alp_orchestrate/carveout.py resolve_carve_outs) even though it declares a real `base`.  For a flash-class region (e.g. an MRAM MCUboot/slot0/reserved/storage sub-region that must publish a base so the board generator can lay out its partition table) that base is NOT byte-addressable shared memory a raw_shmem/rpmsg carve-out can safely land in.  Defaults to true (eligible).  Setting this false ALSO removes the region from `_known_flash_devices()` and refuses it as a board.yaml `storage[].flash_device:` target (#1484) -- a second, overloaded meaning; #1365 tracks giving carveout eligibility and flash-device eligibility their own, principled fields instead of sharing this flag."
         },
         "access_windows": {
           "type": "object",
@@ -509,7 +509,7 @@
         "dt_label": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9_]*$",
-          "description": "Optional Zephyr Devicetree label for this region.  Used by the storage emitter when board.yaml `storage:` entries reference this region as their `flash_device:`; the emitted overlay decorates `&<dt_label>` with a `partitions { ... }` child node.  Defaults to the region `name` when omitted."
+          "description": "Optional Zephyr Devicetree label for this region.  Used by the storage emitter when board.yaml `storage:` entries reference this region as their `flash_device:`; the emitted overlay decorates `&<dt_label>` with a `partitions { ... }` child node.  Defaults to the region `name` when omitted, which is only safe when the region name already IS its Devicetree label -- verify against the generated board `.dts` before relying on the default (AEN's `mram_main`, for example, names its flash node `mram_storage`, not `mram_main`).  Since alp-sdk#1556, `resolve_storage_partitions()` enforces this itself: a `storage:` entry cannot reach `status: ok` on a region that omits this field, so an unverified default now blocks with a reason instead of silently resolving.  A region with `carveout: false` is a partition INSIDE a flash-class node, not a flash device of its own, and is refused as a `flash_device:` target regardless of this field (#1484)."
         }
       }
     },
@@ -548,7 +548,7 @@
         "firmware_path": {
           "type": "string",
           "minLength": 1,
-          "description": "Repo-relative path to the prebuilt / shipped firmware image.  Omit this key entirely when no artefact exists yet (schema-legal -- only `name`, `chip` and `flash_policy` are required) so `tan flash` gives its clean refusal ('has no output_artefact / firmware_path; can't flash') instead of resolving a sentinel path."
+          "description": "Repo-relative path to the prebuilt / shipped firmware image.  Omit this key entirely when no artefact exists yet (schema-legal -- only `name`, `chip` and `flash_policy` are required)."
         },
         "flash_method": {
           "type": "string",

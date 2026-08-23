@@ -35,7 +35,7 @@ gating (see #874).
 
 from __future__ import annotations
 
-import json
+from pathlib import Path
 from typing import Any, Optional
 
 import yaml
@@ -45,15 +45,16 @@ from alp_project import (
     silicon_to_kconfig,
     som_unpopulated_capabilities,
 )
+from alp_registries import peripheral_kconfig
 from sentinels import is_tbd
 
 from . import libraries as _library_layer
+from .loader import _library_alias_table
 from .models import BoardProject, OrchestratorError, Slice
-from .paths import METADATA_ROOT, REPO
+from .paths import REPO
 from .partition import resolve_storage_partitions
 from .slugs import (
     _BLOCK_SLUGS,
-    _PERIPHERAL_KCONFIG,
     _board_define_slug,
     _slugs_from_helper_firmware,
     _slugs_from_on_module,
@@ -109,7 +110,8 @@ def _emit_extra_library_profile(
         soc_family_token = "nxp_imx9"
 
     # resolve_capabilities merges SoC-JSON defaults + SoM overrides.
-    capabilities = resolve_capabilities(project.som_preset, METADATA_ROOT)
+    capabilities = resolve_capabilities(
+        project.som_preset, project.effective_metadata_root())
 
     def _cap_truthy(cap_name: str) -> bool:
         v = capabilities.get(cap_name)
@@ -819,15 +821,18 @@ def _emit_chips(
     return lines, chip_subsystems, resolved_chip_state
 
 
-def _emit_subsystems(slice_: Slice, chip_subsystems: set[str]) -> list[str]:
+def _emit_subsystems(
+    project: BoardProject, slice_: Slice, chip_subsystems: set[str]
+) -> list[str]:
     """Zephyr subsystems required by the slice: union of (chip-driver-
     required subsystems, from `_emit_chips`) and (this core's
     `peripherals:` array, which adds to the union per spec §4.6).
     """
     lines: list[str] = []
+    periph_kconfig = peripheral_kconfig(project.effective_metadata_root())
     periph_subsystems: set[str] = set()
     for periph in slice_.peripherals or []:
-        periph_subsystems.update(_PERIPHERAL_KCONFIG.get(periph, ()))
+        periph_subsystems.update(periph_kconfig.get(periph, ()))
     all_subsystems = chip_subsystems | periph_subsystems
     if all_subsystems:
         lines.append(f"# Zephyr subsystems required on core "
@@ -838,19 +843,10 @@ def _emit_subsystems(slice_: Slice, chip_subsystems: set[str]) -> list[str]:
     return lines
 
 
-def _library_alias_table() -> dict[str, str]:
-    """Legacy per-core `libraries:` token -> canonical manifest name
-    (metadata/library-aliases-v1.json).  Empty dict if the table is absent."""
-    path = METADATA_ROOT / "library-aliases-v1.json"
-    if not path.is_file():
-        return {}
-    doc = json.loads(path.read_text(encoding="utf-8"))
-    aliases = doc.get("aliases")
-    return dict(aliases) if isinstance(aliases, dict) else {}
-
-
-def _per_core_library_kconfig(lib: str,
-                              manifest: Optional[dict] = None) -> Optional[list[str]]:
+def _per_core_library_kconfig(
+        lib: str,
+        manifest: Optional[dict],
+        metadata_root: Path) -> Optional[list[str]]:
     """Base-Kconfig lines for a per-core `libraries:` token, read from the
     library's ADR 0018 manifest (metadata/libraries/<canonical>.yaml) rather
     than a hand-maintained table (WS6-c #610 §6).
@@ -860,7 +856,9 @@ def _per_core_library_kconfig(lib: str,
     reads exactly what the layer validated instead of re-reading the file
     behind the layer's back (alplabai/tan-cli#555).  Omit it and the token is
     resolved to its canonical manifest through the
-    metadata/library-aliases-v1.json alias table and loaded here.
+    metadata/library-aliases-v1.json alias table (read from `metadata_root`,
+    the SAME tree `load_board_yaml(..., metadata_root=...)` resolved this
+    project against -- #1485) and loaded here.
 
     The emitted set is the union of the manifest's
     `integration.zephyr.kconfig` (the upstream module-enable line(s)) and its
@@ -875,9 +873,9 @@ def _per_core_library_kconfig(lib: str,
     """
     doc = manifest
     if doc is None:
-        alias = _library_alias_table()
+        alias = _library_alias_table(metadata_root)
         canonical = alias.get(lib, lib)
-        path = METADATA_ROOT / "libraries" / f"{canonical}.yaml"
+        path = metadata_root / "libraries" / f"{canonical}.yaml"
         if not path.is_file():
             return None
         doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -905,13 +903,15 @@ def _emit_libraries(
     # name -> validated manifest for every library in scope on this slice.
     resolved: dict[str, dict] = {}
     if slice_.os == "zephyr":
-        resolved = dict(_library_layer.resolve_selection(project, slice_=slice_))
+        resolved = dict(_library_layer.resolve_selection(
+            project, project.effective_metadata_root(), slice_=slice_))
 
     if slice_.libraries:
         lines.append(f"# Libraries declared on core "
                      f"`{slice_.core_id}`")
         for lib in sorted(slice_.libraries):
-            kcs = _per_core_library_kconfig(lib, resolved.get(lib))
+            kcs = _per_core_library_kconfig(
+                lib, resolved.get(lib), project.effective_metadata_root())
             if kcs is None:
                 lines.append(
                     f"# TODO: wire library '{lib}' once its v0.4 enable lands")
@@ -924,7 +924,8 @@ def _emit_libraries(
     # ADR 0018).  Emitted from the metadata/libraries/<name>.yaml manifests;
     # resolve_selection() has already rejected any incompatible selection.
     # Guard keeps a project with no `libraries:` byte-identical.
-    library_lines = _library_layer.zephyr_kconfig_lines(project, slice_)
+    library_lines = _library_layer.zephyr_kconfig_lines(
+        project, slice_, project.effective_metadata_root())
     if library_lines:
         lines.append("# Curated third-party libraries "
                      "(project `libraries:`, ADR 0018)")
@@ -991,7 +992,7 @@ def _slice_wants_inference(project: "BoardProject", slice_: Slice) -> bool:
     """
     if slice_.inference:
         return True
-    alias = _library_alias_table()
+    alias = _library_alias_table(project.effective_metadata_root())
     return any(alias.get(lib, lib) == "tflite-micro"
                for lib in _library_layer.scoped_names(project, slice_=slice_))
 
@@ -1048,7 +1049,8 @@ def _emit_inference(
     # resolve_capabilities merges SoC-JSON defaults with SoM overrides
     # so silicon-determined caps (ethos_u55_count, drp_ai, ...) resolve
     # even when removed from the SoM YAML (capability unification, slice 3b).
-    capabilities = resolve_capabilities(project.som_preset, METADATA_ROOT)
+    capabilities = resolve_capabilities(
+        project.som_preset, project.effective_metadata_root())
     inference_lines: list[str] = [
         # BACKEND_TFLM depends on TENSORFLOW_LITE_MICRO && CPP -- genuinely
         # external (upstream Zephyr / tflite-micro module) symbols, not
@@ -1825,7 +1827,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     which declare a ``raw_shmem`` ``ipc:`` entry) stay byte-identical.
     """
     silicon = project.som_preset.get("silicon")
-    kconfig = silicon_to_kconfig(silicon)
+    kconfig = silicon_to_kconfig(silicon, project.effective_metadata_root())
     diagnostics = project.diagnostics
 
     # Lazy-import alp_project tables — alp_project imports us, so a
@@ -1851,7 +1853,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     chip_lines, chip_subsystems, resolved_chip_state = _emit_chips(
         project, _CHIP_SUBSYSTEMS)
     lines.extend(chip_lines)
-    lines.extend(_emit_subsystems(slice_, chip_subsystems))
+    lines.extend(_emit_subsystems(project, slice_, chip_subsystems))
 
     iot_lines = _zephyr_iot_kconfig(project, slice_, resolved_chip_state)
     if iot_lines:
@@ -1875,7 +1877,8 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # SUPERSET of the project-wide form, gaining HELIUM/ADC_DMA/etc. that
     # `cores:` reads as narrowing, not widening).
     hw_backend_lines = _emit_library_hw_backends(
-        _library_layer.scoped_names(project, slice_=slice_), project.sku)
+        _library_layer.scoped_names(project, slice_=slice_), project.sku,
+        project.effective_metadata_root())
     if hw_backend_lines:
         lines.append("# §D.lib.loader -- per-library HW-accelerator "
                      "wiring (auto-emitted).")
@@ -1932,11 +1935,13 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
     # nothing, so `bitbake alp-image-edge` died on `Nothing RPROVIDES
     # 'lib-mbedtls'`.)  Guard keeps a project with no such libraries
     # byte-identical.
-    for name in _library_layer.yocto_unwireable(project, slice_):
+    for name in _library_layer.yocto_unwireable(
+            project, slice_, project.effective_metadata_root()):
         lines.append(f"# library `{name}`: manifest declares no "
                      f"`integration.yocto:` section -- nothing to add to "
                      f"IMAGE_INSTALL on core `{slice_.core_id}`.")
-    library_pkgs = _library_layer.yocto_image_install(project, slice_)
+    library_pkgs = _library_layer.yocto_image_install(
+        project, slice_, project.effective_metadata_root())
     if library_pkgs:
         joined = " ".join(library_pkgs)
         lines.append(f'IMAGE_INSTALL:append = " {joined}"')
@@ -1982,7 +1987,8 @@ def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
     """
     family = project.som_preset.get("family") or "unknown"
     # resolve_capabilities merges SoC-JSON defaults with SoM overrides.
-    capabilities = resolve_capabilities(project.som_preset, METADATA_ROOT)
+    capabilities = resolve_capabilities(
+        project.som_preset, project.effective_metadata_root())
     lines: list[str] = []
     lines.append("# Auto-generated by scripts/alp_orchestrate.py "
                  "-- pass to cmake.")
@@ -2013,6 +2019,7 @@ def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
     # Project-wide curated third-party libraries (top-level `libraries:`,
     # ADR 0018) with a baremetal integration section.  Guard keeps a project
     # with no such libraries byte-identical.
-    for arg in _library_layer.baremetal_cmake_args(project, slice_):
+    for arg in _library_layer.baremetal_cmake_args(
+            project, slice_, project.effective_metadata_root()):
         lines.append(arg)
     return "\n".join(lines) + "\n"

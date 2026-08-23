@@ -72,7 +72,6 @@ alp_cc3501e_resp_t handle_diag_get_stats(const uint8_t *req,
 /* GET_DIAG_INFO (0x04): reply data = the 16-byte packed diag struct:
  * fw_version(LE16) | reset_cause(1) | role(1) | uptime_ms(LE32) |
  * free_heap_bytes(LE32) | last_error(1) | reserved(3). */
-extern uint32_t    cc3501e_hw_wifi_last_event_id(void); /* DEBUG: last Wi-Fi event Id */
 alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
                                         size_t         req_len,
                                         uint8_t       *reply_data,
@@ -85,13 +84,28 @@ alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
 	if (reply_cap < 16u) return ALP_CC3501E_RESP_ERR_NO_MEM;
 	put_le16(&reply_data[0], (uint16_t)CC3501E_BRIDGE_FW_VERSION_U16);
 	reply_data[2] = cc3501e_hw_reset_cause();
-	reply_data[3] = (uint8_t)ALP_CC3501E_ROLE_OFF; /* v0.1: no radio role active */
+	/* Real Wi-Fi role (was hardcoded ROLE_OFF behind a stale "v0.1: no radio
+	 * role active" comment).  This is the field #1562 needs: with the AP role
+	 * latched here, a host polling GET_DIAG_INFO can tell "the firmware tore the
+	 * AP down" (role goes OFF) from "the NWP stopped beaconing while we still
+	 * believe the role is up" (role stays WIFI_AP, no beacon on a second radio).
+	 * Wi-Fi only -- see cc3501e_hw_radio_role()'s SCOPE note; BLE is not folded in. */
+	reply_data[3] = cc3501e_hw_radio_role();
 	put_le32(&reply_data[4], cc3501e_hw_uptime_ms());
-	put_le32(
-	    &reply_data[8],
-	    cc3501e_hw_wifi_last_event_id()); /* DEBUG: was free_heap; now the last Wi-Fi event Id */
-	reply_data[12]  = g_last_error;
-	reply_data[13]  = 0u;
+	/* Actual free heap again.  This field carried cc3501e_hw_wifi_last_event_id()
+	 * behind a "DEBUG: was free_heap" comment, so `alp companion diag info`
+	 * rendered an event ID as "heap: 0 B free" -- alarming, and false.  The event
+	 * ID keeps its diagnostic value at reserved[0] below, where it is not
+	 * impersonating a documented field. */
+	put_le32(&reply_data[8], cc3501e_hw_free_heap_bytes());
+	reply_data[12] = g_last_error;
+	/* reserved[0]: last Wi-Fi event ID (0 = no WLAN event has ever fired).  Kept
+	 * because it earned its place on the bench -- an ap_start that leaves this at
+	 * 0 never got a WLAN event at all, which is a far sharper signal than "the
+	 * SSID did not appear on another radio" and needs no second radio. Additive
+	 * into a reserved byte: a host that does not know about it still reads 0,
+	 * which is what the old firmware put there. */
+	reply_data[13]  = (uint8_t)(cc3501e_hw_wifi_last_event_id() & 0xFFu);
 	reply_data[14]  = 0u;
 	reply_data[15]  = 0u;
 	*reply_data_len = 16u;

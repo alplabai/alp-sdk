@@ -445,3 +445,11 @@ uint32_t cc3501e_hw_wifi_last_event_id(void)
 {
 	return 0u;
 }
+
+uint8_t cc3501e_hw_radio_role(void)
+{
+	/* The stub brings no radio up -- every wifi_ap_start / connect here returns
+	 * NOTIMPL -- so no role is ever up and ROLE_OFF is the honest answer, not a
+	 * placeholder. */
+	return (uint8_t)ALP_CC3501E_ROLE_OFF;
+}

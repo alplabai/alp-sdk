@@ -196,19 +196,38 @@ fi
 # above (this runs before python3 is confirmed present, so it can't read
 # metadata/bootstrap.json for the hint text either). A second hardcoded
 # copy, kept in lockstep with metadata/bootstrap.json's
-# prerequisites.install.linux / .macos by scripts/check_bootstrap_manifest.py.
-# Three PARALLEL arrays, not an associative array: bash 3.2 (the
-# macOS-shipped version) has no `declare -A` -- the same reason the
-# nativeLibHints print loop further down duplicates itself per OS instead of
-# using indirection. Matched up by POSITION, not by key.
+# prerequisites.install.linux.{apt,dnf} / .macos by
+# scripts/check_bootstrap_manifest.py. Four PARALLEL arrays (was three --
+# issue #1464 split the old single Linux array by PACKAGE MANAGER, not
+# distro), not an associative array: bash 3.2 (the macOS-shipped version)
+# has no `declare -A` -- the same reason the nativeLibHints print loop
+# further down duplicates itself per OS instead of using indirection.
+# Matched up by POSITION, not by key. PREREQ_HINT_DNF carries an EMPTY
+# STRING for a tool metadata/bootstrap.json's install.linux.dnf doesn't
+# declare (today: `ninja` -- Fedora's own repos carry `ninja-build`, but the
+# RHEL-derivative default repos, measured on rockylinux:9, carry it under no
+# name without EPEL, so this manifest ships no dnf.ninja rather than a
+# guessed one) -- the empty-hint branch below already falls back to the bare
+# tool name for that slot, the same host-neutral degrade a PM this script
+# doesn't even try to detect (pacman -- deliberately unshipped, see
+# metadata/schemas/bootstrap-v1.schema.json's install.linux description for
+# why) already gets.
 PREREQ_HINT_NAMES=(git cmake python3 ninja xz wget)
-PREREQ_HINT_LINUX=(
+PREREQ_HINT_APT=(
     "sudo apt-get install -y git"
     "sudo apt-get install -y cmake"
     "sudo apt-get install -y python3"
     "sudo apt-get install -y ninja-build"
     "sudo apt-get install -y xz-utils"
     "sudo apt-get install -y wget"
+)
+PREREQ_HINT_DNF=(
+    "sudo dnf install -y git"
+    "sudo dnf install -y cmake"
+    "sudo dnf install -y python3"
+    ""
+    "sudo dnf install -y xz"
+    "sudo dnf install -y wget"
 )
 PREREQ_HINT_MACOS=(
     "brew install git"
@@ -228,6 +247,21 @@ done
 if [ "${#MISSING[@]}" -gt 0 ]; then
     warn "Missing required tools:"
     UNAME_S="$(uname -s 2>/dev/null || echo unknown)"
+    # Package-manager detection (issue #1464) -- pure `command -v`, no
+    # python3 needed (still bootstrap-of-the-bootstrap safe). Keyed by PM,
+    # not distro: apt-get/dnf are each confirmable on an unknown host where
+    # a distro ID is fuzzy (derivatives, stripped containers). pacman is
+    # deliberately never probed here -- this manifest ships no
+    # install.linux.pacman entry, so detecting it would only ever resolve to
+    # an empty hint anyway; the bare tool name already prints in that case.
+    LINUX_PM=""
+    if [ "${UNAME_S}" != "Darwin" ]; then
+        if command -v apt-get >/dev/null 2>&1; then
+            LINUX_PM="apt"
+        elif command -v dnf >/dev/null 2>&1; then
+            LINUX_PM="dnf"
+        fi
+    fi
     for bin in "${MISSING[@]}"; do
         hint=""
         idx=0
@@ -235,7 +269,13 @@ if [ "${#MISSING[@]}" -gt 0 ]; then
             if [ "${name}" = "${bin}" ]; then
                 case "${UNAME_S}" in
                     Darwin) hint="${PREREQ_HINT_MACOS[$idx]}" ;;
-                    *)      hint="${PREREQ_HINT_LINUX[$idx]}" ;;
+                    *)
+                        case "${LINUX_PM}" in
+                            apt) hint="${PREREQ_HINT_APT[$idx]}" ;;
+                            dnf) hint="${PREREQ_HINT_DNF[$idx]}" ;;
+                            *)   hint="" ;;
+                        esac
+                        ;;
                 esac
                 break
             fi
@@ -601,7 +641,7 @@ if [ "${DO_WEST}" -eq 1 ]; then
         # fetched by `west update`. alp-sdk's self.west-commands then exposes the
         # alp-* extension commands in this workspace (#769).
         ( cd "${WORKSPACE_DIR}" && "${WEST}" "${WEST_INIT_ARGS[@]}" "${REPO_ROOT}" ) || die "west init -l failed"
-        info "Running 'west update' (shallow + narrow; ~30 MB on a cold cache)"
+        info "Running 'west update' (shallow + narrow; ~1.5 GB+ on a cold cache for zephyr/ + modules/, mostly vendor HALs -- this is a floor, not a ceiling; budget disk/bandwidth accordingly)"
         ( cd "${WORKSPACE_DIR}" && "${WEST}" "${WEST_UPDATE_ARGS[@]}" ) || die "west update failed"
         ( cd "${WORKSPACE_DIR}" && "${WEST}" "${WEST_EXPORT_ARGS[@]}" ) || true
     else
