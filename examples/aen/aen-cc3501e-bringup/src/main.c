@@ -228,6 +228,111 @@ static void cc3501e_dump_diag(cc3501e_t *fw)
  * CONNECT is wired but only attempted when CC3501E_WIFI_SSID is non-empty
  * (set at build time on the bench -- never hardcode credentials here).
  */
+/*
+ * Bench-only network probe: proves the associated link actually carries IP
+ * traffic, and measures end-to-end throughput (Wi-Fi + the SPI bridge, which
+ * is what a product actually sees).  Both targets are build-time settings so
+ * no address is baked into the public example; the step is skipped when
+ * CC3501E_SPEEDTEST_IP0 is 0.
+ */
+#ifndef CC3501E_SPEEDTEST_IP0
+#define CC3501E_SPEEDTEST_IP0 0u
+#define CC3501E_SPEEDTEST_IP1 0u
+#define CC3501E_SPEEDTEST_IP2 0u
+#define CC3501E_SPEEDTEST_IP3 0u
+#endif
+#ifndef CC3501E_SPEEDTEST_PORT
+#define CC3501E_SPEEDTEST_PORT 8080u
+#endif
+#ifndef CC3501E_SPEEDTEST_PATH
+#define CC3501E_SPEEDTEST_PATH "/speed.bin"
+#endif
+
+static void cc3501e_net_probe(cc3501e_t *fw)
+{
+	static uint8_t rx[512];
+
+	/* 1) Throughput -- drain a file from a local HTTP server over the link. */
+	if ((unsigned)CC3501E_SPEEDTEST_IP0 != 0u) {
+		uint16_t      h     = 0u;
+		const uint8_t ip[4] = { (uint8_t)CC3501E_SPEEDTEST_IP0,
+			                    (uint8_t)CC3501E_SPEEDTEST_IP1,
+			                    (uint8_t)CC3501E_SPEEDTEST_IP2,
+			                    (uint8_t)CC3501E_SPEEDTEST_IP3 };
+		if (cc3501e_sock_open(
+		        fw, ALP_CC3501E_SOCK_FAMILY_IPV4, ALP_CC3501E_SOCK_TYPE_STREAM, 0u, &h, 5000u) ==
+		        ALP_OK &&
+		    cc3501e_sock_connect(fw, h, ip, (uint16_t)CC3501E_SPEEDTEST_PORT, 10000u) == ALP_OK) {
+			static const char req[] = "GET " CC3501E_SPEEDTEST_PATH " HTTP/1.0\r\n\r\n";
+			size_t            sent  = 0u;
+			(void)cc3501e_sock_send(fw, h, (const uint8_t *)req, sizeof(req) - 1u, &sent, 10000u);
+			const int64_t t0     = k_uptime_get();
+			uint32_t      total  = 0u;
+			uint8_t       misses = 0u;
+			for (;;) {
+				size_t             got = 0u;
+				const alp_status_t rs  = cc3501e_sock_recv(fw, h, rx, sizeof(rx), &got, 2000u);
+				/* A gap is NOT end-of-stream.  cc3501e_sock_recv() polls the firmware
+				 * and returns non-OK when nothing is buffered YET, so breaking on the
+				 * first miss truncated every transfer that needed more than one frame
+				 * (a 600 B body stopped at 193 B).  Tolerate a bounded run of empty
+				 * reads before declaring the stream finished. */
+				if (misses == 0u && rs != ALP_OK) {
+					printf("[cc3501e-bringup] NET first-miss rc=%d after %u B\n",
+					       (int)rs,
+					       (unsigned)total);
+				}
+				if (rs != ALP_OK || got == 0u) {
+					if (++misses >= 40u) {
+						break;
+					}
+					continue;
+				}
+				misses = 0u;
+				total += (uint32_t)got;
+				if (total >= 262144u) {
+					break; /* 256 KiB is plenty for a rate */
+				}
+			}
+			const uint32_t ms = (uint32_t)(k_uptime_get() - t0);
+			printf("[cc3501e-bringup] NET THROUGHPUT %u B in %u ms = %u B/s\n",
+			       (unsigned)total,
+			       (unsigned)ms,
+			       (unsigned)((ms > 0u) ? ((uint64_t)total * 1000u / ms) : 0u));
+		}
+		(void)cc3501e_sock_close(fw, h, 5000u);
+	}
+	/* 2) Internet reachability -- 1.1.1.1:80, no DNS needed. */
+	{
+		uint16_t           h     = 0u;
+		const uint8_t      ip[4] = { 1u, 1u, 1u, 1u };
+		const alp_status_t os    = cc3501e_sock_open(
+		    fw, ALP_CC3501E_SOCK_FAMILY_IPV4, ALP_CC3501E_SOCK_TYPE_STREAM, 0u, &h, 5000u);
+		if (os != ALP_OK) {
+			printf("[cc3501e-bringup] NET open -> %d\n", (int)os);
+		} else {
+			const alp_status_t ks = cc3501e_sock_connect(fw, h, ip, 80u, 10000u);
+			printf("[cc3501e-bringup] NET connect 1.1.1.1:80 -> %d\n", (int)ks);
+			if (ks == ALP_OK) {
+				static const char req[] = "GET / HTTP/1.0\r\nHost: one.one.one.one\r\n\r\n";
+				size_t            sent  = 0u;
+				(void)cc3501e_sock_send(
+				    fw, h, (const uint8_t *)req, sizeof(req) - 1u, &sent, 10000u);
+				size_t             got = 0u;
+				const alp_status_t rs  = cc3501e_sock_recv(fw, h, rx, sizeof(rx), &got, 10000u);
+				if (rs == ALP_OK && got >= 12u) {
+					rx[11] = (uint8_t)0;
+					printf("[cc3501e-bringup] NET INTERNET OK -- %u B, reply starts: %s\n",
+					       (unsigned)got,
+					       (const char *)rx);
+				} else {
+					printf("[cc3501e-bringup] NET recv -> %d (%u B)\n", (int)rs, (unsigned)got);
+				}
+			}
+			(void)cc3501e_sock_close(fw, h, 5000u);
+		}
+	}
+}
 static void cc3501e_wifi_probe(cc3501e_t *fw)
 {
 	g_cc3501e_witness.phase = CC3501E_PHASE_WIFI;
@@ -747,6 +852,16 @@ static void cc3501e_demo_ota(cc3501e_t *fw)
 }
 #endif /* CC3501E_OTA_DEMO */
 
+/* The OTA-demo block above defines CC3501E_BENCH_RADIO_BEFORE_OTA, but the
+ * liveness soak references it unconditionally.  Without this default the
+ * example fails to compile in its DEFAULT configuration (every CC3501E_OTA_*
+ * option is OFF by default in CMakeLists.txt), which is exactly the
+ * configuration twister builds.  Default 1: bring the radio up normally.
+ */
+#ifndef CC3501E_BENCH_RADIO_BEFORE_OTA
+#define CC3501E_BENCH_RADIO_BEFORE_OTA 1
+#endif
+
 int main(void)
 {
 	printf("\n[cc3501e-bringup] E1M-AEN CC3501E Wi-Fi/BLE coprocessor bring-up\n");
@@ -1042,6 +1157,52 @@ int main(void)
 				printf("[cc3501e-bringup] soak BLE_ENABLE -> NOT_READY (no -Ble build)\n");
 			} else {
 				printf("[cc3501e-bringup] soak BLE_ENABLE -> %d\n", (int)bs);
+			}
+		}
+
+		/* After the SCAN lands, ASSOCIATE once -- only when credentials were given
+		 * at build time (never hardcoded; see CC3501E_WIFI_SSID above).
+		 *
+		 * This is the step the earlier refactor DEFERRED and never re-wired:
+		 * cc3501e_wifi_probe() was left as a bare (void) cast, so the whole
+		 * CONNECT/RSSI/IP path was dead code the compiler stripped -- Wi-Fi
+		 * association had never actually run from this example.  Gated on
+		 * scan_done so it runs on the proven-stable link like the SCAN and BLE
+		 * steps, and latched to ONE attempt (the link has been observed to wedge
+		 * after repeated connects). */
+		static bool conn_done = false;
+		if (CC3501E_WIFI_SSID[0] == '\0') {
+			conn_done = true; /* no credentials compiled in -- nothing to do */
+		}
+		if (!conn_done && scan_done && s == ALP_OK) {
+			/* BOUNDED RETRY, not one-shot.  WIFI_CONNECT is intermittent on this
+			 * silicon (observed alternating ALP_OK / ALP_ERR_IO across runs), but the
+			 * bridge SURVIVES a failed attempt -- PINGs keep returning 0 immediately
+			 * after -- so a retry is safe and does not reproduce the historical
+			 * "wedges after repeated connects" failure.  Bounded so an unreachable AP
+			 * cannot spin the soak forever. */
+			static uint8_t conn_tries = 0u;
+			if (++conn_tries >= 5u) {
+				conn_done = true;
+			}
+			const alp_status_t cs = cc3501e_wifi_connect(&fw,
+			                                             CC3501E_WIFI_SSID,
+			                                             (uint8_t)CC3501E_WIFI_SECURITY,
+			                                             CC3501E_WIFI_PASS,
+			                                             CC3501E_CONN_TIMEOUT_MS);
+			printf("[cc3501e-bringup] soak WIFI_CONNECT -> %d\n", (int)cs);
+			if (cs == ALP_OK) {
+				conn_done   = true;
+				int8_t rssi = 0;
+				if (cc3501e_wifi_rssi(&fw, &rssi) == ALP_OK) {
+					printf("[cc3501e-bringup] soak RSSI -> %d dBm\n", (int)rssi);
+				}
+				uint8_t ip[4] = { 0 };
+				if (cc3501e_wifi_get_ip(&fw, ip) == ALP_OK) {
+					printf(
+					    "[cc3501e-bringup] soak IP -> %u.%u.%u.%u\n", ip[0], ip[1], ip[2], ip[3]);
+				}
+				cc3501e_net_probe(&fw);
 			}
 		}
 
