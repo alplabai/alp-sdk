@@ -702,8 +702,27 @@ alp_status_t cc3501e_stream_write(cc3501e_t *ctx, const uint8_t *data, size_t le
 	return cc3501e_request(ctx, ALP_CC3501E_CMD_STREAM_WRITE, data, len, NULL, 0u, NULL, 200u);
 }
 
-/* Poll-by-repeat backoff: how long to wait between BUSY repeats. */
-#define CC3501E_POLL_GAP_MS 50u
+/* Poll-by-repeat backoff: how long to wait between BUSY repeats.
+ *
+ * This was a FLAT 50 ms, and it is the single biggest cost on every
+ * worker-routed op.  The firmware's worker model is submit-then-collect: the
+ * dispatch runs in the SPI callback (SWI/HWI context) and cannot call the radio
+ * or IP stacks, so handle_worker_routed_* ALWAYS answers RESP_ERR_BUSY to the
+ * submit and the host must come back for the result.  A flat gap therefore
+ * charges 50 ms to every such op no matter how fast the worker actually
+ * finished -- and most finish in well under a millisecond.  Measured on
+ * silicon: a 487 B CMD_SOCK_RECV (one frame is capped at
+ * MAX_PAYLOAD - recv_resp header - status = 487 B) costs two round trips plus
+ * one gap, i.e. ~50 ms, which is ~9.7 kB/s against a 14 MHz link.
+ *
+ * So START short and BACK OFF exponentially to the old ceiling.  The ceiling
+ * matters: cc3501e_ota_update's flush hold-off polls THROUGH a flash blackout,
+ * where the device answers from an ISR the flash op has stopped, so every frame
+ * clocked in that window goes into a dead slave.  Backing off to 50 ms keeps
+ * the blackout frame count essentially unchanged (a 600 s hold-off gains ~6
+ * extra frames in total) while collecting a ready result in ~1 ms. */
+#define CC3501E_POLL_GAP_MIN_MS 1u
+#define CC3501E_POLL_GAP_MS     50u
 
 alp_status_t poll_by_repeat(cc3501e_t        *ctx,
                             alp_cc3501e_cmd_t cmd,
@@ -725,7 +744,8 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 
 	/* Budget is coarse-grained in CC3501E_POLL_GAP_MS slices; always make at
 	 * least one attempt even with a zero timeout. */
-	uint32_t     remaining = (timeout_ms > 0u) ? timeout_ms : 1u;
+	uint32_t     remaining   = (timeout_ms > 0u) ? timeout_ms : 1u;
+	uint32_t     next_gap_ms = CC3501E_POLL_GAP_MIN_MS;
 	alp_status_t s;
 	for (;;) {
 		/* Sentinel + peek bracketed in the SAME lock hold as the request
@@ -773,8 +793,14 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 		if (remaining == 0u) {
 			return ALP_ERR_TIMEOUT;
 		}
-		uint32_t gap = (remaining < CC3501E_POLL_GAP_MS) ? remaining : CC3501E_POLL_GAP_MS;
+		uint32_t gap = (remaining < next_gap_ms) ? remaining : next_gap_ms;
 		alp_delay_ms(gap);
 		remaining -= gap;
+		/* Double until the ceiling: fast for a result that is already staged,
+		 * unchanged for a device that is genuinely away. */
+		if (next_gap_ms < CC3501E_POLL_GAP_MS) {
+			next_gap_ms =
+			    (next_gap_ms * 2u > CC3501E_POLL_GAP_MS) ? CC3501E_POLL_GAP_MS : next_gap_ms * 2u;
+		}
 	}
 }

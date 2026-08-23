@@ -53,13 +53,17 @@ extern size_t xPortGetFreeHeapSize(void);
  * silent/half-open peer: after this window lwip_recv returns EWOULDBLOCK, which
  * the recv body maps to "0 bytes available" (OK) per the non-blocking wire
  * contract.  The host re-issues CMD_SOCK_RECV to poll for more. */
-/* WAS 4000.  A blocking receive here stalls the WHOLE WORKER for its duration:
- * no other job -- and therefore no bridge frame -- is served while it waits, so a
- * 4 s empty read caps socket streaming at a fraction of a frame per second and
- * inverts against any host timeout shorter than 4 s (the host gives up before the
- * firmware can answer "0 bytes available").  The wire contract is already
- * poll-based: EWOULDBLOCK maps to OK/0 bytes and the host re-issues SOCK_RECV.
- * So keep the block SHORT and let the host set the real budget by polling. */
+/* WAS 4000.  A blocking receive stalls the WHOLE WORKER for its duration, and
+ * worker_run_pending() holds READY LOW across the whole job -- so no bridge
+ * frame of ANY opcode is served while it waits.  A 4 s empty read therefore
+ * blacked the bridge out for 4 s per poll, capping socket streaming at a
+ * fraction of a frame per second and inverting against any host timeout
+ * shorter than 4 s (the host gave up before the firmware could answer "0 bytes
+ * available").
+ *
+ * cc3501e_hw_sock_recv() now passes MSG_DONTWAIT and does not rely on this at
+ * all; it is kept as the socket's default so any OTHER blocking operation on
+ * the handle is bounded to something short rather than to lwIP's default. */
 #define CC3501E_SOCK_RCVTIMEO_MS 50
 
 int cc3501e_hw_sock_open(uint8_t family, uint8_t type, uint8_t protocol, uint16_t *handle_out)
@@ -163,7 +167,17 @@ int cc3501e_hw_sock_recv(uint16_t  handle,
 	struct sockaddr_in from;
 	socklen_t          fromlen = sizeof(from);
 	memset(&from, 0, sizeof(from));
-	const ssize_t n = lwip_recvfrom(fd, buf, want, 0, (struct sockaddr *)&from, &fromlen);
+	/* MSG_DONTWAIT, not the socket's SO_RCVTIMEO.  This runs on the worker, and
+	 * worker_run_pending() brackets every job with cc3501e_bridge_busy() ...
+	 * cc3501e_bridge_ready() -- READY is LOW for the whole job, so the host
+	 * cannot clock ANY frame while it runs, not just this one.  A blocking read
+	 * therefore blacks the entire bridge out for its timeout on every empty
+	 * poll, which is how one slow socket stalled PINGs and the OTA alongside it.
+	 * The wire contract is already poll-based (no data -> OK with 0 bytes, the
+	 * host re-issues CMD_SOCK_RECV), so returning immediately is the contract,
+	 * not a shortcut. */
+	const ssize_t n =
+	    lwip_recvfrom(fd, buf, want, MSG_DONTWAIT, (struct sockaddr *)&from, &fromlen);
 	if (n < 0) {
 		/* SO_RCVTIMEO expiry (EAGAIN / EWOULDBLOCK) is NOT an error at the wire: it
 		 * means "no data yet" -- report OK with 0 bytes so the host re-polls.  Any

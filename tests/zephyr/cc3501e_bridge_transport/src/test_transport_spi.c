@@ -381,6 +381,52 @@ ZTEST(cc3501e_bridge_transport, test_wifi_scan_start_not_ready)
 	    reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "re-issued SCAN_START on stub -> NOT_READY");
 }
 
+/* A finished job NOBODY comes back for must not wedge the single job slot.
+ *
+ * Only a poll carrying the SAME opcode collects a DONE/ERR and resets the slot
+ * (protocol.c).  A host that abandons one worker-routed op -- e.g. gives up on
+ * CMD_SOCK_RECV after its timeout -- and then issues ANY other worker-routed op
+ * used to strand the finished result: worker_poll() saw job_cmd != cmd with a
+ * terminal state, reported "other cmd busy", and nothing in the system could
+ * ever clear it.  Every later worker-routed opcode answered RESP_ERR_BUSY
+ * forever, which on silicon looks like the whole bridge wedging.
+ *
+ * Here SCAN_START is submitted and DELIBERATELY not collected (on the stub the
+ * worker runs it synchronously at submit, so the slot is terminal immediately),
+ * then GET_RSSI must still be able to run to completion. */
+ZTEST(cc3501e_bridge_transport, test_abandoned_job_does_not_wedge_the_slot)
+{
+	uint8_t reply[32];
+	transport_spi_init();
+	const uint8_t scan[] = { ALP_CC3501E_CMD_WIFI_SCAN_START, 0x00u, 0x00u, 0x00u };
+	const uint8_t rssi[] = { ALP_CC3501E_CMD_WIFI_GET_RSSI, 0x00u, 0x00u, 0x00u };
+
+	/* Submit SCAN and walk away -- its result is now orphaned in the slot. */
+	transaction(scan, sizeof scan);
+	size_t n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "SCAN submit reply = header + status");
+	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_BUSY, "SCAN submits -> BUSY");
+
+	/* A DIFFERENT opcode must get its own turn: first transaction discards the
+	 * orphan and submits, second collects.  Before the fix both answered BUSY. */
+	transaction(rssi, sizeof rssi);
+	n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "RSSI submit reply = header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_GET_RSSI, 1u);
+	zassert_equal(reply[4],
+	              ALP_CC3501E_RESP_ERR_BUSY,
+	              "the orphaned SCAN result is discarded and RSSI submits");
+
+	transaction(rssi, sizeof rssi);
+	n = drain(reply, sizeof reply);
+	zassert_equal(n, 5u, "RSSI collect reply = header + status");
+	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_GET_RSSI, 1u);
+	zassert_equal(reply[4],
+	              ALP_CC3501E_RESP_ERR_NOT_READY,
+	              "RSSI reaches its own result (NOT_READY on the radio-less stub) "
+	              "instead of being wedged on BUSY forever");
+}
+
 /* WIFI_GET_RSSI is worker-routed the same way (poll-by-repeat): submit -> BUSY,
  * re-issue -> the cached NOT_READY on the radio-less stub. */
 ZTEST(cc3501e_bridge_transport, test_wifi_get_rssi_not_ready)

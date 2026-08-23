@@ -447,11 +447,33 @@ worker_poll(uint8_t cmd, uint8_t *out, size_t out_cap, size_t *out_len, int8_t *
 	const enum worker_state st  = job.state;
 
 	/* No job, or a job for a DIFFERENT cmd: report IDLE so the caller can
-	 * submit (or, if a different job is mid-flight, treat it as busy). */
+	 * submit (or, if a different job is mid-flight, treat it as busy).
+	 *
+	 * TERMINAL RESULT FOR ANOTHER OPCODE = UNCLAIMABLE -- DISCARD IT.  Only a
+	 * poll carrying the SAME opcode collects a DONE/ERR and calls worker_reset()
+	 * (protocol.c), so a result nobody comes back for pinned the single job slot
+	 * FOREVER: from then on every other worker-routed opcode fell into the
+	 * "other cmd busy" arm below and answered RESP_ERR_BUSY, with nothing in the
+	 * system able to clear it short of a reset.  That is reachable in ordinary
+	 * use -- a host that gives up on CMD_SOCK_RECV after its timeout and then
+	 * issues any other worker-routed op strands the finished recv result and
+	 * wedges the bridge for everything else.
+	 *
+	 * A terminal state means the worker is NOT running, so the slot is free to
+	 * reuse: drop the orphaned result and report IDLE so the new opcode can
+	 * submit.  Only QUEUED/RUNNING is genuinely busy. */
 	if (st == WORKER_IDLE || job.job_cmd != cmd) {
-		const enum worker_state ret = (job.job_cmd != cmd && st != WORKER_IDLE)
-		                                  ? WORKER_RUNNING /* other cmd busy */
-		                                  : WORKER_IDLE;
+		enum worker_state ret = WORKER_IDLE;
+		if (job.job_cmd != cmd && st != WORKER_IDLE) {
+			if (st == WORKER_DONE || st == WORKER_ERR) {
+				job.state      = WORKER_IDLE;
+				job.job_cmd    = 0u;
+				job.result_len = 0u;
+				job.err        = 0;
+			} else {
+				ret = WORKER_RUNNING; /* other cmd genuinely in flight */
+			}
+		}
 		worker_critical_exit(key);
 		return ret;
 	}
