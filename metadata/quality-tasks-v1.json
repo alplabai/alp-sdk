@@ -645,6 +645,20 @@
       "ci": null
     },
     {
+      "id": "slot-claim-atomic",
+      "description": "Backend handle pools claim slots with alp_slot_try_claim(), not an unlocked check-then-set (issue #1630).",
+      "runner": "check-script",
+      "script": "scripts/check_slot_claim_atomic.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "som-bundle",
       "description": "Validate SoM-release bundle manifests against the public som-release-bundle-v1 schema contract.",
       "runner": "check-script",

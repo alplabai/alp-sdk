@@ -39,6 +39,7 @@
 #include <alp/storage.h>
 
 #include "alp_checked_arith.h"
+#include "alp_slot_claim.h"
 #include "storage_ops.h"
 
 typedef struct lfs_state {
@@ -58,9 +59,13 @@ static bool        _lfs_in_use[CONFIG_ALP_SDK_STORAGE_LITTLEFS_HANDLE_POOL];
 static lfs_state_t *_lfs_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_STORAGE_LITTLEFS_HANDLE_POOL; ++i) {
-		if (!_lfs_in_use[i]) {
+		/* Atomic claim (src/common/alp_slot_claim.h, issue #1115):
+		 * a compare-exchange, so exactly one concurrent opener wins the
+		 * slot.  in_use lives in a parallel array rather than inside the
+		 * slot struct, so the winner may zero the whole slot afterwards --
+		 * no offsetof form is needed here. */
+		if (alp_slot_try_claim(&_lfs_in_use[i])) {
 			memset(&_lfs_pool[i], 0, sizeof(_lfs_pool[i]));
-			_lfs_in_use[i] = true;
 			return &_lfs_pool[i];
 		}
 	}
@@ -71,7 +76,7 @@ static void _lfs_free(lfs_state_t *s)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_STORAGE_LITTLEFS_HANDLE_POOL; ++i) {
 		if (&_lfs_pool[i] == s) {
-			_lfs_in_use[i] = false;
+			alp_slot_release(&_lfs_in_use[i]);
 			return;
 		}
 	}

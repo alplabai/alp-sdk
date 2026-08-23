@@ -3401,6 +3401,10 @@
       "script": "scripts/check_sbom.py"
     },
     {
+      "purpose": "Reject the unlocked check-then-set slot claim (issue #1630).",
+      "script": "scripts/check_slot_claim_atomic.py"
+    },
+    {
       "purpose": "Validate SoM-release bundle manifests against the public metadata/schemas/som-release-bundle-v1.schema.json contract.",
       "script": "scripts/check_som_bundle.py"
     },
