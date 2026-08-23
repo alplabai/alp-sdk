@@ -374,10 +374,12 @@ static int ota_flush(bool final)
 	return CC3501E_HW_OK;
 }
 
-/* FINISH: commit the whole RAM-staged image to the target slot in ONE flash burst
- * (manifest = first TI_FWU_MANIFEST_SIZE bytes -> psa_fwu_start; the remainder in
- * CC3501E_OTA_FINISH_FLASH_BLOCK pages -> psa_fwu_write), finalize + install, then arm
- * the swap-reboot.  All the OTA flash (hence all bridge-DMA disruption) is here. */
+/* FINISH: flush whatever is still sitting in the window, then finalize + install
+ * and arm the swap-reboot.  Most of the image is ALREADY in the slot by now --
+ * the windowed design flushes as it streams (ota_flush), with the manifest going
+ * to psa_fwu_start on the first flush and every later block to psa_fwu_write in
+ * CC3501E_OTA_FINISH_FLASH_BLOCK pages.  This is no longer "all the OTA flash in
+ * one burst"; it is the tail plus the commit. */
 static int ota_do_finish(void)
 {
 	if (ota.cursor != ota.total_len || ota.total_len <= (uint32_t)TI_FWU_MANIFEST_SIZE) {
@@ -590,10 +592,16 @@ int cc3501e_hw_ota_begin(uint32_t total_len)
 	return ota_submit(OTA_OP_BEGIN);
 }
 
-/* OTA_WRITE: SYNCHRONOUS -- just stage the chunk into RAM (image_buf).  No flash
- * here (that all happens at FINISH), so this is ISR-safe + causes no bridge-DMA
- * disruption: the bulk transfer stays clean across all ~135 chunks.  Idempotent
- * on the cursor so a host re-send of an already-staged chunk is harmless. */
+/* OTA_WRITE: SYNCHRONOUS -- copy the chunk into the SLIDING WINDOW (ota.window),
+ * not into a whole-image RAM buffer.  image_buf is gone: staging the full 1.09 MB
+ * image never fit (#1610), so the window fills to CC3501E_OTA_WINDOW and the
+ * chunk that fills it submits a FLUSH instead of being consumed.
+ *
+ * So flash CAN happen mid-stream, and the host must cooperate: a submitted flush
+ * publishes flush_pending in OTA_STATUS reserved[1], and the host holds off ALL
+ * payload -- polling header-only -- until it clears, then re-sends the same
+ * chunk.  Idempotent on the cursor, so a re-send the device already took is
+ * harmless. */
 int cc3501e_hw_ota_write(uint32_t offset, const uint8_t *data, uint32_t len)
 {
 	if (ota.state != ALP_CC3501E_OTA_STATE_WRITING) return CC3501E_HW_ERR_INVAL;

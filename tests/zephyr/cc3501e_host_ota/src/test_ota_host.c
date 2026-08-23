@@ -68,6 +68,18 @@ static struct {
 	uint16_t reply_len;                         /* == 1 + data bytes */
 
 	/* OTA session state the model tracks, exactly like the firmware. */
+	/* #1610 window hold-off model.  The real firmware answers BUSY to an
+	 * OTA_WRITE that arrives while a staging-window flush is queued, and
+	 * publishes the flush in OTA_STATUS reserved[1]; the host must hold off all
+	 * payload and poll header-only until it clears.  busy_writes counts down
+	 * one such window; write_always_busy models the pathological case the host
+	 * must FAIL rather than spin on -- BUSY forever while STATUS answers
+	 * cleanly with the flush clear and the cursor never moving. */
+	uint32_t busy_writes;
+	bool     write_always_busy;
+	uint8_t  flush_pending; /* published in OTA_STATUS reserved[1] */
+	uint32_t diag_uptime_ms;
+
 	uint8_t  ota_state;  /* alp_cc3501e_ota_state_t */
 	uint32_t ota_total;  /* total_len from BEGIN     */
 	uint32_t ota_cursor; /* bytes accepted so far    */
@@ -83,8 +95,9 @@ static struct {
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
-	slave.phase     = PH_REQ_HDR;
-	slave.ota_state = ALP_CC3501E_OTA_STATE_IDLE;
+	slave.phase          = PH_REQ_HDR;
+	slave.ota_state      = ALP_CC3501E_OTA_STATE_IDLE;
+	slave.diag_uptime_ms = 12345u; /* non-zero: a LIVE link, not a dead phase */
 }
 
 static void stage_status(uint8_t st)
@@ -123,6 +136,17 @@ static void slave_dispatch(void)
 			stage_status(ALP_CC3501E_RESP_ERR_NOT_READY);
 			break;
 		}
+		if (slave.write_always_busy || slave.busy_writes > 0u) {
+			if (slave.busy_writes > 0u) {
+				slave.busy_writes--;
+				slave.flush_pending = (slave.busy_writes > 0u) ? 1u : 0u;
+			}
+			/* RESP_ERR_BUSY is what the firmware answers for "flush queued, this
+			 * chunk was NOT consumed" -- resp_to_status maps it to ALP_ERR_BUSY,
+			 * which is the hold-off trigger in cc3501e_ota_update. */
+			stage_status(ALP_CC3501E_RESP_ERR_BUSY);
+			break;
+		}
 		if (slave.ota_state != ALP_CC3501E_OTA_STATE_WRITING || offset != slave.ota_cursor) {
 			/* Out-of-order / no session -- reject, like the firmware. */
 			stage_status(ALP_CC3501E_RESP_ERR_INVALID);
@@ -156,7 +180,7 @@ static void slave_dispatch(void)
 		slave.reply_pl[0]  = ALP_CC3501E_RESP_OK;
 		slave.reply_pl[1]  = slave.ota_state;
 		slave.reply_pl[2]  = 0u;
-		slave.reply_pl[3]  = 0u;
+		slave.reply_pl[3]  = slave.flush_pending; /* reserved[1] = flush pending */
 		slave.reply_pl[4]  = 0u;
 		slave.reply_pl[5]  = (uint8_t)(slave.ota_cursor & 0xFFu);
 		slave.reply_pl[6]  = (uint8_t)((slave.ota_cursor >> 8) & 0xFFu);
@@ -167,6 +191,26 @@ static void slave_dispatch(void)
 		slave.reply_pl[11] = (uint8_t)((slave.ota_total >> 16) & 0xFFu);
 		slave.reply_pl[12] = (uint8_t)((slave.ota_total >> 24) & 0xFFu);
 		slave.reply_len    = 13u;
+		break;
+	}
+	case ALP_CC3501E_CMD_GET_DIAG_INFO: {
+		/* Needed since #1610: leaving update mode reads back mode == 0, which a
+		 * DEAD payload phase forges byte-for-byte (it clocks 0x00, and 0x00 is
+		 * also RESP_OK).  update_mode_reads_as() therefore corroborates the
+		 * want == 0 direction with a diag reply carrying a NON-ZERO uptime_ms.
+		 * Without this case the model would answer ERR_INVALID and every path
+		 * that leaves update mode (ota_update_bail) would fail to confirm.
+		 *
+		 * Reply = the 16-byte packed alp_cc3501e_diag_info_t:
+		 * fw_version(LE16) | reset_cause | role | uptime_ms(LE32) |
+		 * free_heap_bytes(LE32) | last_error | reserved(3). */
+		memset(slave.reply_pl, 0, 17u);
+		slave.reply_pl[0] = ALP_CC3501E_RESP_OK;
+		slave.reply_pl[5] = (uint8_t)(slave.diag_uptime_ms & 0xFFu);
+		slave.reply_pl[6] = (uint8_t)((slave.diag_uptime_ms >> 8) & 0xFFu);
+		slave.reply_pl[7] = (uint8_t)((slave.diag_uptime_ms >> 16) & 0xFFu);
+		slave.reply_pl[8] = (uint8_t)((slave.diag_uptime_ms >> 24) & 0xFFu);
+		slave.reply_len   = 17u; /* status byte + 16 */
 		break;
 	}
 	case ALP_CC3501E_CMD_OTA_UPDATE_MODE: {
@@ -400,6 +444,52 @@ ZTEST(cc3501e_host_ota, test_update_streams_full_blob_and_stages)
 	zassert_equal(slave.image_len, (uint32_t)sizeof blob, "every byte streamed");
 	zassert_mem_equal(slave.image, blob, sizeof blob, "reassembled image == source blob");
 	zassert_equal(slave.ota_state, ALP_CC3501E_OTA_STATE_STAGED, "ends STAGED");
+}
+
+/* #1610 hold-off, HAPPY path: the device answers BUSY for a whole window while
+ * it flushes, publishing flush_pending in OTA_STATUS reserved[1].  The host must
+ * hold off payload, poll header-only until the flag clears, re-send the SAME
+ * chunk, and finish the stream -- not abort on the first BUSY. */
+ZTEST(cc3501e_host_ota, test_update_survives_a_window_flush_holdoff)
+{
+	cc3501e_t fw;
+	zassert_equal(cc3501e_init(&fw, fake_bus), ALP_OK, "init");
+
+	uint8_t blob[600];
+	for (size_t i = 0; i < sizeof blob; i++) {
+		blob[i] = (uint8_t)(i * 5u + 1u);
+	}
+	slave.busy_writes   = 3u; /* three BUSY answers, then the flush clears */
+	slave.flush_pending = 1u;
+
+	zassert_equal(cc3501e_ota_update(&fw, blob, sizeof blob, 200u), ALP_OK, "update -> OK");
+	zassert_equal(slave.image_len, (uint32_t)sizeof blob, "every byte streamed after the hold-off");
+	zassert_mem_equal(slave.image, blob, sizeof blob, "no chunk lost or duplicated");
+	zassert_equal(slave.ota_state, ALP_CC3501E_OTA_STATE_STAGED, "ends STAGED");
+}
+
+/* #1610 hold-off, PATHOLOGICAL path -- the regression test for the spin.
+ *
+ * The device answers BUSY to every OTA_WRITE while OTA_STATUS keeps answering
+ * cleanly with flush_pending CLEAR and the cursor never moving.  That is what a
+ * link carrying header frames but dropping every payload one looks like.  The
+ * hold-off used to break out with landed=false and re-send immediately -- no
+ * delay, no counter, no deadline -- so the caller spun at full CPU forever.
+ * cc3501e_ota_update MUST return an error instead.  Against the unfixed driver
+ * this test does not fail, it HANGS. */
+ZTEST(cc3501e_host_ota, test_update_gives_up_when_the_device_never_takes_a_chunk)
+{
+	cc3501e_t fw;
+	zassert_equal(cc3501e_init(&fw, fake_bus), ALP_OK, "init");
+
+	uint8_t blob[600];
+	memset(blob, 0xA5, sizeof blob);
+	slave.write_always_busy = true;
+	slave.flush_pending     = 0u; /* STATUS says "no flush" -- so this is NOT a flush */
+
+	const alp_status_t s = cc3501e_ota_update(&fw, blob, sizeof blob, 50u);
+	zassert_not_equal(s, ALP_OK, "a device that never takes a chunk must not report success");
+	zassert_equal(slave.image_len, 0u, "and nothing was accepted");
 }
 
 /* cc3501e_ota_update rejects a NULL / empty image at the host boundary. */

@@ -71,6 +71,19 @@ __attribute__((weak)) void bridge_transport_spi_hw_suspend(void)
  * _request_polled_boot() / _clear_polled_boot() and src/protocol_diag.c calls
  * _boot_mark(), and tests/zephyr/cc3501e_bridge_transport links those TUs with no
  * hal/ti/ TU at all -- without these the suite does not link. */
+/* transport.h promises a weak default for all THREE of suspend/release/quiesce.
+ * Only _hw_suspend had one, so any non-ti translation unit that called release or
+ * quiesce failed to link.  Both are no-ops on a backend that never claims the
+ * bus, exactly as _hw_suspend above is. */
+__attribute__((weak)) void bridge_transport_spi_hw_release(void)
+{
+}
+
+__attribute__((weak)) void bridge_transport_spi_hw_quiesce(bool on)
+{
+	(void)on;
+}
+
 __attribute__((weak)) bool bridge_transport_spi_polled(void)
 {
 	return false; /* no persisted flag on this backend -- never update mode */
