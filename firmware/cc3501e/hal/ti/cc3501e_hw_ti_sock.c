@@ -53,7 +53,14 @@ extern size_t xPortGetFreeHeapSize(void);
  * silent/half-open peer: after this window lwip_recv returns EWOULDBLOCK, which
  * the recv body maps to "0 bytes available" (OK) per the non-blocking wire
  * contract.  The host re-issues CMD_SOCK_RECV to poll for more. */
-#define CC3501E_SOCK_RCVTIMEO_MS 4000
+/* WAS 4000.  A blocking receive here stalls the WHOLE WORKER for its duration:
+ * no other job -- and therefore no bridge frame -- is served while it waits, so a
+ * 4 s empty read caps socket streaming at a fraction of a frame per second and
+ * inverts against any host timeout shorter than 4 s (the host gives up before the
+ * firmware can answer "0 bytes available").  The wire contract is already
+ * poll-based: EWOULDBLOCK maps to OK/0 bytes and the host re-issues SOCK_RECV.
+ * So keep the block SHORT and let the host set the real budget by polling. */
+#define CC3501E_SOCK_RCVTIMEO_MS 50
 
 int cc3501e_hw_sock_open(uint8_t family, uint8_t type, uint8_t protocol, uint16_t *handle_out)
 {
