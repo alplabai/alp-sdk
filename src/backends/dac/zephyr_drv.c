@@ -32,6 +32,7 @@
 #include <alp/dac.h>
 #include <alp/peripheral.h>
 
+#include "alp_errno.h"
 #include "alp_slot_claim.h"
 #include "dac_ops.h"
 
@@ -115,19 +116,13 @@ static void _free_state(zephyr_dac_state_t *s)
 
 static alp_status_t errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * BEHAVIOUR CHANGE: this switch had no -EAGAIN and/or no -ETIMEDOUT
+	 * arm, so a driver-reported deadline surfaced as ALP_ERR_IO.  Callers
+	 * can now receive ALP_ERR_TIMEOUT here, and ALP_ERR_NOT_READY /
+	 * ALP_ERR_NOMEM / ALP_ERR_NOSUPPORT for the other arms the switch
+	 * lacked.  Every arm it DID carry agreed with the baseline. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 static alp_status_t z_write_mv(alp_dac_backend_state_t *st, uint16_t mv);
