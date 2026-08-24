@@ -24,6 +24,14 @@
  *     BRD_I²C lock held so a race with the bridge dispatcher
  *     during the init read cannot land between the I²C
  *     transactions that the init issues.
+ *   - alp_z_v2n_power_mgmt_init() finishes k_work_init() and sets
+ *     g_pwr.initialised BEFORE it arms the P65 interrupt or
+ *     registers the callback, so no edge can land on an
+ *     uninitialised k_work or get dropped by the work handler's
+ *     initialised guard.  Because P65 is edge-triggered, init also
+ *     samples the pin once the interrupt is live and submits the
+ *     work item directly if the line is already asserted -- an
+ *     already-high pin never generates a rising edge on its own.
  */
 
 #include "v2n_power_mgmt.h"
@@ -135,13 +143,13 @@ alp_status_t alp_z_v2n_power_mgmt_init(void)
 
 	rc = gpio_pin_configure_dt(&g_pwr_en_req, GPIO_INPUT);
 	if (rc != 0) return ALP_ERR_IO;
-	rc = gpio_pin_interrupt_configure_dt(&g_pwr_en_req, GPIO_INT_EDGE_RISING);
-	if (rc != 0) return ALP_ERR_IO;
 
-	gpio_init_callback(&g_pwr.cb, v2n_pwr_irq_handler, BIT(g_pwr_en_req.pin));
-	rc = gpio_add_callback(g_pwr_en_req.port, &g_pwr.cb);
-	if (rc != 0) return ALP_ERR_IO;
-
+	/* The work item and the DA9292 driver context must be fully
+     * usable BEFORE the interrupt is armed and the callback is
+     * registered below.  An edge landing between arming and here
+     * would either submit an uninitialised k_work (UB) or be
+     * silently dropped by the work handler's `initialised` guard --
+     * and P65 is edge-triggered, so a dropped edge never retries. */
 	k_work_init(&g_pwr.work, v2n_pwr_work_handler);
 
 	/* Run the DA9292 base init under the supervisor's I²C lock so
@@ -149,21 +157,52 @@ alp_status_t alp_z_v2n_power_mgmt_init(void)
      * with our register reads. */
 	alp_i2c_t   *i2c = NULL;
 	alp_status_t s   = alp_z_v2n_supervisor_brd_i2c_acquire(&i2c);
-	if (s != ALP_OK) {
-		gpio_remove_callback(g_pwr_en_req.port, &g_pwr.cb);
-		return s;
-	}
+	if (s != ALP_OK) return s;
 	s = da9292_init(&g_pwr.dev, i2c, DA9292_I2C_ADDR_V2N);
 	if (s == ALP_OK) {
 		s = da9292_v2n_base_init(&g_pwr.dev);
 	}
 	alp_z_v2n_supervisor_brd_i2c_release();
-	if (s != ALP_OK) {
-		gpio_remove_callback(g_pwr_en_req.port, &g_pwr.cb);
-		return s;
+	if (s != ALP_OK) return s;
+
+	/* Flip the gate before arming the interrupt so an edge landing
+     * the instant after gpio_add_callback() below is honoured
+     * instead of dropped by the work handler's early-return guard. */
+	g_pwr.initialised = true;
+
+	rc = gpio_pin_interrupt_configure_dt(&g_pwr_en_req, GPIO_INT_EDGE_RISING);
+	if (rc != 0) {
+		g_pwr.initialised = false;
+		return ALP_ERR_IO;
 	}
 
-	g_pwr.initialised = true;
+	gpio_init_callback(&g_pwr.cb, v2n_pwr_irq_handler, BIT(g_pwr_en_req.pin));
+	rc = gpio_add_callback(g_pwr_en_req.port, &g_pwr.cb);
+	if (rc != 0) {
+		(void)gpio_pin_interrupt_configure_dt(&g_pwr_en_req, GPIO_INT_DISABLE);
+		g_pwr.initialised = false;
+		return ALP_ERR_IO;
+	}
+
+	/* DEEPX_PWR_EN_REQ can already be asserted by the time we get
+     * here -- a rising-edge interrupt only fires on a 0->1
+     * transition, so if the line is already high the interrupt
+     * never fires and the rail never comes up.  Sample the current
+     * level now that the interrupt is live and kick the work item
+     * ourselves if it's already asserted.  This can race a genuine
+     * edge landing at the same instant and run the handler twice;
+     * every step in v2n_pwr_work_handler (programming CH2 to a
+     * setpoint it may already hold, enabling a channel that may
+     * already be enabled, driving P64 to a level it may already be
+     * at) is idempotent, so a duplicate run is harmless. */
+	const int level = gpio_pin_get_dt(&g_pwr_en_req);
+	if (level < 0) {
+		LOG_WRN("gpio_pin_get_dt(P65) failed (%d) -- relying on the edge IRQ only", level);
+	} else if (level > 0) {
+		LOG_INF("P65 already asserted at init -- kicking DEEPX bring-up directly");
+		k_work_submit(&g_pwr.work);
+	}
+
 	LOG_INF("V2N DEEPX rail-mgmt initialised -- waiting on P65 rising edge");
 	return ALP_OK;
 }
