@@ -12,14 +12,14 @@
  *   - E1M-X-V2N  (Renesas RZ/V2N, with optional DEEPX DX-M1)
  *
  * Pin/bus ROUTES (ALP_E1M_X_GPIO_IO<N> -> board feature, I2C/SPI/UART
- * bus roles, PWM channels) and the on-board INA236 addresses +
- * per-rail calibration constants are GENERATED from
- * `metadata/boards/e1m-x-evk.yaml`'s `e1m_routes:` and
- * `i2c_devices:` blocks into the companion header
+ * bus roles, PWM channels), the on-board sensor I2C addresses, and
+ * the INA236 addresses + per-rail calibration constants are all
+ * GENERATED from `metadata/boards/e1m-x-evk.yaml`'s `e1m_routes:`
+ * and `i2c_devices:` blocks into the companion header
  * `<alp/boards/alp_e1m_x_evk_routes.h>`, included below.  THIS
- * header carries the remaining hand-authored on-board chip I2C
- * addresses, mirroring `<alp/boards/alp_e1m_evk.h>` for the 35x35
- * EVK.
+ * header carries only hand-authored prose context (mirroring
+ * `<alp/boards/alp_e1m_evk.h>` for the 35x35 EVK) -- the macros
+ * themselves live in the generated header.
  *
  * On-board chips live on the sensor I2C bus
  * @ref XEVK_I2C_BUS_SENSORS (ALP_E1M_X_I2C0; Linux `i2c-0`).
@@ -41,8 +41,8 @@
 
 /* GENERATED board route bindings (XEVK_PIN_*, XEVK_*_BUS_*,
  * XEVK_UART_PORT_*, XEVK_PWM_*, XEVK_ARD_PWM*) and GENERATED
- * on-board I2C device facts (XEVK_I2C_ADDR_INA236_*,
- * XEVK_INA236_SHUNT_*_OHMS, XEVK_INA236_MAX_*_A).
+ * on-board I2C device facts (XEVK_I2C_ADDR_*, XEVK_INA236_SHUNT_*_OHMS,
+ * XEVK_INA236_MAX_*_A).
  * Source of truth: metadata/boards/e1m-x-evk.yaml
  * `e1m_routes:` and `i2c_devices:` blocks. Regenerate via:
  *     python scripts/gen_board_header.py
@@ -58,27 +58,20 @@ extern "C" {
 /* On-board sensor I2C addresses (bus = XEVK_I2C_BUS_SENSORS)          */
 /* ================================================================== */
 
-#define XEVK_I2C_ADDR_BMI323   0x68u /**< U-IMU BMI323 6-axis IMU (alternate IMU). */
-#define XEVK_I2C_ADDR_ICM42670 0x69u /**< Canonical primary IMU (ICM-42670). */
-#define XEVK_I2C_ADDR_BMP581   0x47u /**< BMP581 barometer (SDO->VIO; 0x46 if SDO->GND). */
-#define XEVK_I2C_ADDR_TCAL9538 0x72u /**< TCAL9538 I/O expander. */
-#define XEVK_I2C_ADDR_EEPROM   0x50u /**< Board ID EEPROM (24-series). */
+/* BMI323 (alternate IMU), ICM-42670 (canonical primary IMU), BMP581
+ * barometer, TCAL9538 I/O expander, and the board-ID EEPROM.
+ * XEVK_I2C_ADDR_BMI323, _ICM42670, _BMP581, _TCAL9538 and _EEPROM
+ * are defined in the generated routes header (#1636). */
 
 /* ================================================================== */
 /* INA236 high-side current-shunt monitors (one per power rail)       */
 /* ================================================================== */
 
-/* Five INA236 monitors on XEVK_I2C_BUS_SENSORS.  Ref-des + rail +
- * A0 strap per the board schematic (Current Measurement.SchDoc):
- *
- *   U21  INA236A  3V3   rail   A0 = GND  -> 0x40  (20 mOhm)
- *   U31  INA236A  1V8   rail   A0 = V+   -> 0x41  (20 mOhm)
- *   U32  INA236B  VCAM2 rail   A0 = GND  -> 0x48  (50 mOhm)
- *   U34  INA236B  VCAM3 rail   A0 = V+   -> 0x49  (50 mOhm)
- *   U30  INA236B  5V    rail   A0 = SDA  -> 0x4A  (20 mOhm)
- *
- * INA236A occupies 0x40..0x43, INA236B occupies 0x48..0x4B (same
- * A0 strap encoding), so all five share the one bus.
+/* Five INA236 monitors (U21/U31/U32/U34/U30) on XEVK_I2C_BUS_SENSORS.
+ * INA236A occupies 0x40..0x43, INA236B occupies 0x48..0x4B (same A0
+ * strap encoding), so all five share the one bus.  Ref-des, rail,
+ * A0 strap and address per device are in the generated routes header
+ * (from metadata/boards/e1m-x-evk.yaml's `i2c_devices:` block).
  *
  * NEXT-REVISION board notes (observed on current silicon, 2026-06;
  * NOT exposed as macros -- do not rely on them):

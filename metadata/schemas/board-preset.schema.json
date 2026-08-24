@@ -159,7 +159,7 @@
       "required": ["macro", "doc"],
       "description": "One board-repurposed pad exposed past the standard E1M pinout, addressed by `alp,pin-array` position rather than an E1M pad token.  No `e1m:` / index field -- the index is this entry's position in the containing `overlay_pins:` list, computed by the generator.",
       "properties": {
-        "macro": { "type": "string", "pattern": "^X?EVK_PIN_[A-Z0-9_]+$", "description": "C macro name emitted as `#define <macro> (EVK_PIN_OVERLAY_BASE + N)`, N = list position." },
+        "macro": { "type": "string", "pattern": "^EVK_PIN_[A-Z0-9_]+$", "description": "C macro name emitted as `#define <macro> (EVK_PIN_OVERLAY_BASE + N)`, N = list position.  `EVK_` only -- `_emit_overlay_pins()` hard-codes `EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT` (the 35x35 count) with no E1M-X branch, so an `XEVK_PIN_*` entry would emit a base macro from the wrong pinout's GPIO count. Widen this in lockstep with the generator if the 45x65 carrier ever needs its own overlay_pins:." },
         "doc":   { "type": "string", "description": "Doxygen @brief: which standard E1M pad was repurposed (E1M name + Alif pin) and what it now does on this board." }
       }
     }

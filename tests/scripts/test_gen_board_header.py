@@ -18,12 +18,15 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+import jsonschema
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "gen_board_header.py"
@@ -482,3 +485,24 @@ def test_main_rejects_identical_board_names(gen_module, tmp_path, monkeypatch):
 
     rc = gen_module.main()
     assert rc == 1
+
+
+def test_schema_rejects_xevk_overlay_pin_macro():
+    """#1636 review: `_emit_overlay_pins()` hard-codes
+    `EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT` (the 35x35 pinout's
+    count) with no E1M-X branch, so an `XEVK_PIN_*` entry in some
+    future board's `overlay_pins:` would emit a base macro built
+    from the WRONG carrier's GPIO count into a header that only
+    includes the E1M-X pinout, where ALP_E1M_GPIO_COUNT does not
+    exist.  The schema must refuse `XEVK_PIN_*` until the generator
+    grows a matching branch."""
+    schema = json.loads(
+        (REPO / "metadata" / "schemas" / "board-preset.schema.json").read_text()
+    )
+    validator = jsonschema.Draft202012Validator(schema)
+    doc = {
+        "name": "DEMO",
+        "overlay_pins": [{"macro": "XEVK_PIN_DEMO", "doc": "demo"}],
+    }
+    errors = list(validator.iter_errors(doc))
+    assert errors, "XEVK_PIN_* overlay_pins macro must fail schema validation"

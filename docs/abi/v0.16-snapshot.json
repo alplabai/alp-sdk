@@ -1226,28 +1226,7 @@
     },
     "alp/boards/alp_e1m_x_evk.h": {
       "functions": {},
-      "macros": {
-        "XEVK_I2C_ADDR_BMI323": {
-          "hash": "147256ab601db207",
-          "value": "0x68u"
-        },
-        "XEVK_I2C_ADDR_BMP581": {
-          "hash": "b976093422c5cdda",
-          "value": "0x47u"
-        },
-        "XEVK_I2C_ADDR_EEPROM": {
-          "hash": "76b65f6a82adb5b8",
-          "value": "0x50u"
-        },
-        "XEVK_I2C_ADDR_ICM42670": {
-          "hash": "6dec10e01fc58f24",
-          "value": "0x69u"
-        },
-        "XEVK_I2C_ADDR_TCAL9538": {
-          "hash": "bd0e087dfca18e44",
-          "value": "0x72u"
-        }
-      },
+      "macros": {},
       "typedefs": {},
       "variables": {}
     },
@@ -1374,6 +1353,22 @@
           "hash": "e49703788ec4f868",
           "value": "ALP_E1M_X_ENC0"
         },
+        "XEVK_I2C_ADDR_BMI323": {
+          "hash": "147256ab601db207",
+          "value": "0x68u"
+        },
+        "XEVK_I2C_ADDR_BMP581": {
+          "hash": "b976093422c5cdda",
+          "value": "0x47u"
+        },
+        "XEVK_I2C_ADDR_EEPROM": {
+          "hash": "76b65f6a82adb5b8",
+          "value": "0x50u"
+        },
+        "XEVK_I2C_ADDR_ICM42670": {
+          "hash": "6dec10e01fc58f24",
+          "value": "0x69u"
+        },
         "XEVK_I2C_ADDR_INA236_1V8": {
           "hash": "c2c588a9640f949e",
           "value": "0x41u"
@@ -1393,6 +1388,10 @@
         "XEVK_I2C_ADDR_INA236_VCAM3": {
           "hash": "8398c2143398040c",
           "value": "0x49u"
+        },
+        "XEVK_I2C_ADDR_TCAL9538": {
+          "hash": "bd0e087dfca18e44",
+          "value": "0x72u"
         },
         "XEVK_I2C_BUS_DSI_CSI0": {
           "hash": "73f48edc7f8a3a88",
