@@ -230,34 +230,27 @@ static void fir_apply(dsp_stage_t *stage, const float *in, size_t in_n, float *o
 	}
 #else
 	const uint16_t M = stage->u.fir.n_taps;
-	/* hist[j] = x[n-1-j], the last (M-1) ORIGINAL input samples, kept in
-	 * local scratch rather than re-read from in[]/out[].  Every real
-	 * call site runs this in-place (out == in): reading in[n-k] for
-	 * k >= 1 once out[n-k] has already been written on an earlier
-	 * iteration reads the filter's OWN OUTPUT, not the caller's input
-	 * -- issue #1629. */
-	float        hist[ALP_DSP_MAX_FIR_TAPS - 1u];
+	/* stage->u.fir.state[j] = x[n-1-j], the last (M-1) ORIGINAL input
+	 * samples, updated in place -- it's already sized
+	 * ALP_DSP_MAX_FIR_TAPS + FIR_CMSIS_BLOCK and zeroed at open, so no
+	 * local scratch copy is needed.  Every real call site runs this
+	 * in-place (out == in): reading in[n-k] for k >= 1 once out[n-k]
+	 * has already been written on an earlier iteration reads the
+	 * filter's OWN OUTPUT, not the caller's input -- issue #1629. */
 	const size_t hist_n = (M > 1u) ? (size_t)(M - 1u) : 0u;
-	for (size_t k = 0u; k < hist_n; k++) {
-		hist[k] = stage->u.fir.state[k];
-	}
 	for (size_t n = 0u; n < in_n; n++) {
 		const float x_n = in[n]; /* capture before out[n] can alias it */
 		float       acc = stage->u.fir.taps[0] * x_n;
 		for (uint16_t k = 1u; k < M; k++) {
-			acc += stage->u.fir.taps[k] * hist[k - 1u];
+			acc += stage->u.fir.taps[k] * stage->u.fir.state[k - 1u];
 		}
 		out[n] = acc;
 		for (size_t k = hist_n; k >= 2u; k--) {
-			hist[k - 1u] = hist[k - 2u];
+			stage->u.fir.state[k - 1u] = stage->u.fir.state[k - 2u];
 		}
 		if (hist_n > 0u) {
-			hist[0] = x_n;
+			stage->u.fir.state[0] = x_n;
 		}
-	}
-	/* Save the last M-1 ORIGINAL input samples as state for the next call. */
-	for (size_t k = 0u; k < hist_n; k++) {
-		stage->u.fir.state[k] = hist[k];
 	}
 #endif
 }
