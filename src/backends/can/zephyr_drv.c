@@ -218,6 +218,16 @@ static alp_status_t z_stop(alp_can_backend_state_t *st)
 static alp_status_t
 z_send(alp_can_backend_state_t *st, const alp_can_frame_t *frame, uint32_t timeout_ms)
 {
+	/* Belt-and-braces (#1631): src/can_dispatch.c already rejects an
+	 * fd-flagged frame on a handle not opened ALP_CAN_MODE_FD, but zf
+	 * below is sized by Zephyr's CAN_MAX_DLEN -- 8 bytes without
+	 * CONFIG_CAN_FD_MODE, 64 with it -- so bound the copy against the
+	 * actual destination regardless of what the dispatcher already
+	 * checked. */
+	if (frame->payload_len > sizeof(((struct can_frame *)0)->data)) {
+		return ALP_ERR_INVAL;
+	}
+
 	const struct device *dev = (const struct device *)st->dev;
 	struct can_frame     zf  = {
 		.id    = frame->id,

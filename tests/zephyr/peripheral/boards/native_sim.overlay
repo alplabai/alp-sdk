@@ -17,6 +17,11 @@
         alp-spi0  = &spi0_emul;
         alp-uart0 = &uart0;
         alp-uart1 = &uart1_emul;
+        /* #1631: alp-can0 -> the board's own can_loopback0 (status
+         * "okay" by default in native_sim.dts) so the CAN backend's
+         * z_send() bound-check test in src/can.c opens a REAL Zephyr
+         * CAN device instead of getting NULL from device_is_ready(). */
+        alp-can0  = &can_loopback0;
     };
 
     /* #626: alp_uart_read()'s timeout_ms == 0 / finite / partial-fill
