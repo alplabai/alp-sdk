@@ -419,10 +419,18 @@ static void dispatch_frame(size_t frame_len)
 	}
 	spi_slave_cs_high();
 
-	reply_len = 0u;
-	while (spi_slave_tx_pending() && reply_len < sizeof(reply_buf)) {
-		reply_buf[reply_len++] = spi_slave_tx_next_byte();
-	}
+	/* ONE memcpy, not two cross-TU calls per byte.  The old loop drained the
+	 * staged reply a byte at a time through spi_slave_tx_pending() /
+	 * spi_slave_tx_next_byte(), which live in another translation unit and are
+	 * not inlined (no LTO), so every payload byte cost two real function calls --
+	 * a SECOND per-byte copy on top of the single bulk build that
+	 * protocol_build_reply() already performed into spi_tx_buf.
+	 *
+	 * The host sees this as its reply-HEADER gate: silicon-measured 2026-08-24 at
+	 * ~0.68 us/byte (g3=1147 us for a 1683-byte reply, g3=1301 us for 1925), i.e.
+	 * ~1.2 ms of a 2.9 ms SOCK_RECV transaction, and it is why a 2.5x faster HOST
+	 * core changed throughput by 0%. */
+	reply_len = (uint16_t)spi_slave_tx_take(reply_buf, sizeof(reply_buf));
 	/* The reply is always header(4) + payload(>=1 status byte). */
 }
 

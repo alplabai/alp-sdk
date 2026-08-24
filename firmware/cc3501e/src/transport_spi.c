@@ -27,6 +27,7 @@
  * can feed the same seams directly.
  */
 
+#include <string.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -157,6 +158,21 @@ uint8_t spi_slave_tx_next_byte(void)
 bool spi_slave_tx_pending(void)
 {
 	return spi_tx_cursor < spi_tx_len;
+}
+
+size_t spi_slave_tx_take(uint8_t *dst, size_t cap)
+{
+	if (dst == NULL || cap == 0u) {
+		return 0u;
+	}
+	size_t n = (size_t)(spi_tx_len - spi_tx_cursor);
+
+	if (n > cap) {
+		n = cap;
+	}
+	memcpy(dst, &spi_tx_buf[spi_tx_cursor], n);
+	spi_tx_cursor += (uint16_t)n;
+	return n;
 }
 
 void transport_spi_init(void)

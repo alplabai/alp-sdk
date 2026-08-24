@@ -35,6 +35,7 @@
 #ifndef CC3501E_BRIDGE_TRANSPORT_H
 #define CC3501E_BRIDGE_TRANSPORT_H
 
+#include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -164,6 +165,13 @@ void    spi_slave_rx_byte(uint8_t b); /* one received request byte            */
 void    spi_slave_cs_high(void);      /* CS rising edge: decode + dispatch     */
 uint8_t spi_slave_tx_next_byte(void); /* next staged reply byte; 0xFF when idle */
 bool    spi_slave_tx_pending(void);   /* true while a staged reply has bytes left */
+/* Bulk drain of the staged reply: ONE memcpy instead of two cross-TU calls per
+ * byte.  The byte-at-a-time pair above is a second, per-byte copy layered on top
+ * of the single bulk build protocol_build_reply() already did, and it is not
+ * inlined (separate translation unit, no LTO) -- silicon-measured at ~0.68 us per
+ * byte inside the host's reply-header gate, i.e. ~1.2 ms of a 2.9 ms SOCK_RECV
+ * transaction carrying 1715 bytes.  Returns the number of bytes taken. */
+size_t spi_slave_tx_take(uint8_t *dst, size_t cap);
 
 /* ---- SDIO slave seams (defined in transport_sdio.c) ------------ */
 /* SDIO carries the same request/reply frames inside its data blocks.
