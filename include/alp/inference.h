@@ -210,9 +210,11 @@ typedef struct {
  *         ALP_ERR_NOT_IMPLEMENTED (registered backend has no open
  *         hook), ALP_ERR_NOSUPPORT (a pinned @c backend the selected
  *         backend can't serve, e.g. ETHOS_U pinned on a CPU-only
- *         build), ALP_ERR_NOMEM (handle-pool or arena allocation
- *         failure), or ALP_ERR_IO (backend's tensor-arena allocation
- *         failed).
+ *         build; a model with more input tensors than the backend can
+ *         stage; or a tensor dim too large for the uint16_t
+ *         @c shape[4] descriptor), ALP_ERR_NOMEM (handle-pool or arena
+ *         allocation failure), or ALP_ERR_IO (backend's tensor-arena
+ *         allocation failed).
  */
 alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg);
 

@@ -134,8 +134,31 @@ alp_inference_dtype_t dxrt_dtype_to_alp(dxrt::DataType t)
 	}
 }
 
+/** True if every dim of every tensor in @p tensors fits the descriptor's
+ *  uint16_t shape[4] -- called from open() so a model with an
+ *  unrepresentable dim fails to load instead of lying about its shape
+ *  on the first get_input()/get_output().  Mirrors inference_ort.cpp's
+ *  _gather_tensor_info() gate: a dim <= 0 (symbolic/dynamic) is never
+ *  rejected -- fill_tensor_descriptor() pins it to 1, same as ORT --
+ *  only a dim too large to fit is (#1645). */
+bool shapes_fit_descriptor(const dxrt::Tensors &tensors)
+{
+	for (const dxrt::Tensor &t : tensors) {
+		for (int64_t d : t.shape()) {
+			if (d > UINT16_MAX) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
 /** Fill an alp tensor descriptor from a dx_rt Tensor.  `data` points at
- *  the engine/SDK-owned buffer; the app must not free it. */
+ *  the engine/SDK-owned buffer; the app must not free it.  Every dim has
+ *  already been bound-checked by shapes_fit_descriptor() at open(), so
+ *  the cast below cannot truncate -- only the symbolic-dim pin (dim <= 0
+ *  -> 1) happens here, matching inference_ort.cpp's _gather_tensor_info().
+ */
 void fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t *out)
 {
 	out->data       = data;
@@ -146,7 +169,11 @@ void fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t 
 	const size_t                n     = shape.size();
 	out->rank                         = static_cast<uint8_t>((n <= 4) ? n : 4);
 	for (uint8_t i = 0; i < out->rank; ++i) {
-		out->shape[i] = static_cast<uint16_t>(shape[i]);
+		int64_t d = shape[i];
+		if (d <= 0) {
+			d = 1; /* symbolic/dynamic dim -- pin to single-sample. */
+		}
+		out->shape[i] = static_cast<uint16_t>(d);
 	}
 
 	/* dx_rt models carry per-task quant params internally and emit
@@ -191,10 +218,34 @@ extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h
 		st->inputs  = st->engine->GetInputs();
 		st->outputs = st->engine->GetOutputs();
 
+		if (st->inputs.size() > 1u) {
+			/* dx_rt's Run() takes ONE pointer to the concatenated inputs,
+             * but input_bufs holds a separate allocation per tensor --
+             * passing input_bufs[0].data() would have dx_rt read
+             * sum(size_in_bytes) past that allocation and DMA unrelated
+             * heap to the DX-M1 over PCIe (#1645).  Refuse at open,
+             * before a bad model can ever reach invoke(). */
+			delete st->engine;
+			delete st;
+			return ALP_ERR_NOSUPPORT;
+		}
+
+		if (!shapes_fit_descriptor(st->inputs) || !shapes_fit_descriptor(st->outputs)) {
+			/* A dim this large would silently truncate in get_input()'s /
+             * get_output()'s uint16_t shape[] descriptor -- reject the
+             * model here rather than lying about its shape on the first
+             * call (#1645, mirrors inference_ort.cpp's
+             * _gather_tensor_info() gate). */
+			delete st->engine;
+			delete st;
+			return ALP_ERR_NOSUPPORT;
+		}
+
 		/* Stage one SDK-owned buffer per input tensor.  The app writes
          * into these via get_input(); invoke() hands inputs[0].data() to
-         * Run().  (dx_rt concatenates multi-input models; the common
-         * V2N-M1 vision model is single-input.) */
+         * Run() -- the common V2N-M1 vision model is single-input, and
+         * multi-input models are refused above until the staging buffer
+         * is flattened into one contiguous blob. */
 		st->input_bufs.resize(st->inputs.size());
 		for (size_t i = 0; i < st->inputs.size(); ++i) {
 			st->input_bufs[i].resize(static_cast<size_t>(st->inputs[i].size_in_bytes()));
