@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Generate include/alp/boards/alp_<board>_routes.h from each
-metadata/boards/<name>.yaml `e1m_routes:` + `i2c_devices:` blocks.
+metadata/boards/<name>.yaml `e1m_routes:` + `i2c_devices:` +
+`overlay_pins:` blocks.
 
 The generated header mirrors the YAML `e1m_routes:` block into plain
 `#define EVK_* ALP_E1M_*` lines so hand-written firmware can keep using
@@ -13,12 +14,17 @@ of truth.  The YAML carries the connector-namespace pad names
 the C token.  The `i2c_devices:` block does the same for on-board I2C
 device addresses (EVK_I2C_ADDR_*) and INA236 shunt/max-current
 calibration (EVK_INA236_SHUNT_*_OHMS / EVK_INA236_MAX_*_A) -- these
-carry a literal hex/float value rather than an `ALP_E1M_*` token.
-Idempotent: running twice produces byte-identical output.
+carry a literal hex/float value rather than an `ALP_E1M_*` token.  The
+`overlay_pins:` block emits `EVK_PIN_OVERLAY_BASE + N` pad indices for
+boards that expose repurposed pads past the standard E1M pinout to an
+`alp,pin-array` devicetree overlay; N is the entry's position in the
+YAML list (an ordinal, not a hardware fact), computed via `enumerate()`
+rather than read from the YAML.  Idempotent: running twice produces
+byte-identical output.
 
 The remaining sections of `include/alp/boards/alp_<board>.h`
-(mux enums, overlay-pad indices, prose comments) stay hand-authored
-until follow-up slices lift them too.
+(mux enums, prose comments) stay hand-authored until follow-up slices
+lift them too.
 
 Run:
 
@@ -156,6 +162,38 @@ def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
     return out
 
 
+def _emit_overlay_pins(entries: list[dict[str, Any]]) -> list[str]:
+    """Emit `EVK_PIN_OVERLAY_BASE` + the board's overlay-extended
+    `alp,pin-array` pad indices (`overlay_pins:`).  Each macro is
+    `EVK_PIN_OVERLAY_BASE + N`, where N is the entry's position in
+    THIS list (0-based) -- an ordinal, not an independent hardware
+    fact, so it is computed here via `enumerate()` rather than read
+    from the YAML.  See zephyr/dts/bindings/alp,pin-array.yaml for
+    the array-index convention this mirrors."""
+    if not entries:
+        return []
+
+    out: list[str] = [
+        "/* ------------------------------------------------------------------ */",
+        "/* Overlay-extended pin-array indices (from `overlay_pins:`) */",
+        "/* ------------------------------------------------------------------ */",
+        "",
+        "#define EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT",
+        "",
+    ]
+    widest = max(len(e["macro"]) for e in entries)
+    for idx, entry in enumerate(entries):
+        macro = entry["macro"]
+        doc = entry.get("doc", "")
+        value = f"(EVK_PIN_OVERLAY_BASE + {idx}u)"
+        if doc:
+            out.append(f"#define {macro:<{widest}} {value}  /**< {doc} */")
+        else:
+            out.append(f"#define {macro:<{widest}} {value}")
+    out.append("")
+    return out
+
+
 def _emit_board_aliases(routes: dict[str, Any]) -> list[str]:
     """Emit portable BOARD_* aliases for every entry carrying a
     `board_alias:` (the e1m-spec §7.2 common roles).  Same BOARD_* name
@@ -210,12 +248,13 @@ def _emit_section(title: str, entries: list[dict[str, Any]]) -> list[str]:
 
 def emit_board(name: str, doc: dict[str, Any]) -> str | None:
     """Return the full text of the generated routes header for one board,
-    or `None` if the shared board YAML has neither an `e1m_routes:` nor
-    an `i2c_devices:` block.
+    or `None` if the shared board YAML has none of an `e1m_routes:`,
+    `i2c_devices:`, or `overlay_pins:` block.
     """
     routes = doc.get("e1m_routes")
     i2c_devices = doc.get("i2c_devices")
-    if not routes and not i2c_devices:
+    overlay_pins = doc.get("overlay_pins")
+    if not routes and not i2c_devices and not overlay_pins:
         return None
     routes = routes or {}
     slug = _board_slug(name)
@@ -263,6 +302,8 @@ def emit_board(name: str, doc: dict[str, Any]) -> str | None:
             lines.extend(_emit_section(section_title, entries))
 
     lines.extend(_emit_i2c_devices(doc.get("i2c_devices") or []))
+
+    lines.extend(_emit_overlay_pins(doc.get("overlay_pins") or []))
 
     lines.extend(_emit_board_aliases(routes))
 
