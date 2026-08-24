@@ -209,10 +209,10 @@ typedef struct {
  *
  * `alp_shmem_open()` documents that "cache coherency is the caller's
  * responsibility unless @c cacheable = false", but the SDK gives the caller
- * nothing to discharge that responsibility with: there is no clean, no
- * invalidate, and no barrier helper on the `<alp/*>` surface, and a
- * tree-wide sweep of `src/` finds no `sys_cache_data_*`, `arch_dcache_*` or
- * `SCB_CleanDCache`-class call anywhere -- every occurrence of the word
+ * nothing to discharge that responsibility with.  There is no clean, no
+ * invalidate and no barrier helper anywhere on the public `alp_` surface,
+ * and a tree-wide sweep of `src/` finds no `sys_cache_data_`, `arch_dcache_`
+ * or `SCB_CleanDCache`-class call at all: every occurrence of the word
  * "cache" under `src/` is a dispatch-ops pointer cache, not CPU data-cache
  * maintenance.  So `cacheable = false` is the only setting with defined
  * behaviour on a shared-memory path.
