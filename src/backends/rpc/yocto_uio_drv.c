@@ -755,7 +755,23 @@ static int uio_ept_cb(struct rpmsg_endpoint *ept, void *data, size_t len, uint32
 	 * worked).  Copy the frame out BYTE-WISE into an aligned local buffer
 	 * first, then parse + dispatch from normal cached memory. */
 	unsigned char local_frame[ALP_RPC_TX_FRAME_MAX];
-	size_t        frame_len = len < sizeof(local_frame) ? len : sizeof(local_frame);
+	if (len > sizeof(local_frame)) {
+		/* A peer frame larger than the negotiated maximum is a protocol
+		 * error, not something to silently truncate and dispatch as a
+		 * complete message (#1645) -- the pre-fix clip below fed
+		 * frame_parse() only the first ALP_RPC_TX_FRAME_MAX bytes,
+		 * which still looked like a well-formed (method, payload) pair
+		 * whenever the method name landed inside that prefix, so the
+		 * subscriber ran with a silently-shortened payload and no
+		 * error anywhere. */
+		fprintf(stderr,
+		        "alp_rpc: dropping oversized peer frame on %s (%zu > %zu)\n",
+		        ch->name,
+		        len,
+		        sizeof(local_frame));
+		goto epilogue;
+	}
+	size_t frame_len = len;
 	for (size_t i = 0; i < frame_len; ++i) {
 		local_frame[i] = ((const volatile unsigned char *)data)[i];
 	}
