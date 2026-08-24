@@ -1,0 +1,18 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake video device for the alp-sdk camera_video ztest (#1628).  Lives only
+# in this test.
+
+description: |
+  Advertises VIDEO_PIX_FMT_RGB24 (24 bpp -- a format Zephyr's
+  video_bits_per_pixel table can size) but, like some real sensor/bridge
+  drivers, never fills video_format.pitch in its set_format hook.  That is
+  the exact arrangement issue #1628 Part 2 depends on: the zephyr_video /
+  v2n_n44_isp backends must derive bytes-per-pixel from the negotiated
+  fourcc when pitch stays 0, not assume a flat 2 B/px.  Its enqueue hook
+  refuses any video_buffer smaller than width * height * 3, standing in for
+  the CSI-2/ISP DMA overrun an under-sized buffer would suffer on real
+  silicon.
+
+compatible: "alp,fake-video-pitch0"
