@@ -135,8 +135,10 @@ alp_inference_dtype_t dxrt_dtype_to_alp(dxrt::DataType t)
 }
 
 /** Fill an alp tensor descriptor from a dx_rt Tensor.  `data` points at
- *  the engine/SDK-owned buffer; the app must not free it. */
-void fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t *out)
+ *  the engine/SDK-owned buffer; the app must not free it.  Returns
+ *  ALP_ERR_NOSUPPORT if a dim would not fit the uint16_t shape[]
+ *  descriptor rather than silently truncating it (#1645). */
+alp_status_t fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t *out)
 {
 	out->data       = data;
 	out->size_bytes = static_cast<size_t>(t.size_in_bytes());
@@ -146,6 +148,12 @@ void fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t 
 	const size_t                n     = shape.size();
 	out->rank                         = static_cast<uint8_t>((n <= 4) ? n : 4);
 	for (uint8_t i = 0; i < out->rank; ++i) {
+		/* A dim this large would silently truncate below -- reject
+         * instead of lying to the caller, matching inference_ort.cpp's
+         * _gather_tensor_info() check (:374). */
+		if (shape[i] > UINT16_MAX) {
+			return ALP_ERR_NOSUPPORT;
+		}
 		out->shape[i] = static_cast<uint16_t>(shape[i]);
 	}
 
@@ -156,6 +164,7 @@ void fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t 
      * <alp/ext/deepx/inference.h> escape hatch. */
 	out->scale      = 1.0f;
 	out->zero_point = 0;
+	return ALP_OK;
 }
 
 } /* namespace */
@@ -191,10 +200,23 @@ extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h
 		st->inputs  = st->engine->GetInputs();
 		st->outputs = st->engine->GetOutputs();
 
+		if (st->inputs.size() > 1u) {
+			/* dx_rt's Run() takes ONE pointer to the concatenated inputs,
+             * but input_bufs holds a separate allocation per tensor --
+             * passing input_bufs[0].data() would have dx_rt read
+             * sum(size_in_bytes) past that allocation and DMA unrelated
+             * heap to the DX-M1 over PCIe (#1645).  Refuse at open,
+             * before a bad model can ever reach invoke(). */
+			delete st->engine;
+			delete st;
+			return ALP_ERR_NOSUPPORT;
+		}
+
 		/* Stage one SDK-owned buffer per input tensor.  The app writes
          * into these via get_input(); invoke() hands inputs[0].data() to
-         * Run().  (dx_rt concatenates multi-input models; the common
-         * V2N-M1 vision model is single-input.) */
+         * Run() -- the common V2N-M1 vision model is single-input, and
+         * multi-input models are refused above until the staging buffer
+         * is flattened into one contiguous blob. */
 		st->input_bufs.resize(st->inputs.size());
 		for (size_t i = 0; i < st->inputs.size(); ++i) {
 			st->input_bufs[i].resize(static_cast<size_t>(st->inputs[i].size_in_bytes()));
@@ -237,8 +259,7 @@ extern "C" alp_status_t alp_inference_deepx_get_input(struct alp_inference   *h_
 	}
 	/* Hand back the SDK-owned staging buffer, not the engine's internal
      * pointer -- the app fills this before invoke(). */
-	fill_tensor_descriptor(st->inputs[index], st->input_bufs[index].data(), out);
-	return ALP_OK;
+	return fill_tensor_descriptor(st->inputs[index], st->input_bufs[index].data(), out);
 }
 
 extern "C" alp_status_t alp_inference_deepx_get_output(struct alp_inference   *h_,
@@ -260,12 +281,10 @@ extern "C" alp_status_t alp_inference_deepx_get_output(struct alp_inference   *h
 	void *data = nullptr;
 	if (index < st->last_outputs.size() && st->last_outputs[index] != nullptr) {
 		data = st->last_outputs[index]->data();
-		fill_tensor_descriptor(*st->last_outputs[index], data, out);
-	} else {
-		data = st->outputs[index].data();
-		fill_tensor_descriptor(st->outputs[index], data, out);
+		return fill_tensor_descriptor(*st->last_outputs[index], data, out);
 	}
-	return ALP_OK;
+	data = st->outputs[index].data();
+	return fill_tensor_descriptor(st->outputs[index], data, out);
 }
 
 extern "C" alp_status_t alp_inference_deepx_invoke(struct alp_inference *h_)
