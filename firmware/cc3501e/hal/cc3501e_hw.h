@@ -227,6 +227,15 @@ int cc3501e_hw_sock_recv(uint16_t  handle,
  * afterwards and the firmware may reuse its value. */
 int cc3501e_hw_sock_close(uint16_t handle);
 
+/* ---- socket RX prefetch (bulk receive) ----------------------------------
+ * CMD_SOCK_RECV is served from a ring the TASK fills, so the dispatch (which
+ * runs in the SPI callback and cannot call lwIP) can answer synchronously --
+ * one bridge transaction per frame instead of a submit/collect pair. */
+void cc3501e_hw_sock_pump(void); /* task ctx: does the lwIP read */
+void cc3501e_hw_sock_prefetch(uint16_t handle, bool on);
+/* dispatch ctx: memcpy only.  >=0 = bytes taken, -1 = not the prefetched handle. */
+int cc3501e_hw_sock_recv_ring(uint16_t handle, uint8_t *buf, uint16_t cap, uint16_t *out_len);
+
 /* --------------------------------------------------------------- */
 /* BLE 5.4 (v0.3)                                                    */
 /* --------------------------------------------------------------- */

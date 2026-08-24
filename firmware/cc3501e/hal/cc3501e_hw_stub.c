@@ -250,6 +250,25 @@ int cc3501e_hw_sock_recv(uint16_t  handle,
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
+void cc3501e_hw_sock_pump(void)
+{
+}
+
+void cc3501e_hw_sock_prefetch(uint16_t handle, bool on)
+{
+	(void)handle;
+	(void)on;
+}
+
+int cc3501e_hw_sock_recv_ring(uint16_t handle, uint8_t *buf, uint16_t cap, uint16_t *out_len)
+{
+	(void)handle;
+	(void)buf;
+	(void)cap;
+	if (out_len != 0) *out_len = 0u;
+	return -1; /* no prefetch on the stub -- caller uses the worker path */
+}
+
 int cc3501e_hw_sock_close(uint16_t handle)
 {
 	(void)handle;

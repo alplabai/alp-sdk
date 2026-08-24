@@ -122,6 +122,9 @@ int cc3501e_hw_sock_connect(uint16_t handle, uint8_t family, uint16_t port, cons
 	if (lwip_connect(fd, (struct sockaddr *)&sa, sizeof(sa)) != 0) {
 		return CC3501E_HW_ERR_IO;
 	}
+	/* A connected STREAM socket is the bulk-receive case -- start prefetching so
+	 * CMD_SOCK_RECV can be answered synchronously from the dispatch. */
+	cc3501e_hw_sock_prefetch(handle, true);
 	return CC3501E_HW_OK;
 }
 
@@ -143,6 +146,109 @@ int cc3501e_hw_sock_send(uint16_t       handle,
 	}
 	if (sent_out != 0) *sent_out = (uint16_t)n;
 	return CC3501E_HW_OK;
+}
+
+/* ================= SOCKET RX PREFETCH RING =================
+ *
+ * WHY: protocol_dispatch() runs in the SPI transfer-complete callback (SWI/HWI
+ * context) and cannot call lwIP, so CMD_SOCK_RECV had to be worker-routed --
+ * handle_worker_routed_payload_reply always answers BUSY to the submit and the
+ * host must come back for the answer.  That is TWO bridge transactions plus a
+ * wait for the worker loop per frame, and it is the dominant per-frame cost of a
+ * socket stream.
+ *
+ * The OTA write path already solved this shape: cc3501e_hw_ota_write is
+ * SYNCHRONOUS because it only memcpy's into a staged window.  Do the same here.
+ * The TASK side (cc3501e_hw_tick -> cc3501e_hw_sock_pump) does the lwIP work and
+ * fills this ring; the DISPATCH side only memcpy's out of it, which is ISR-safe.
+ * CMD_SOCK_RECV then costs ONE transaction and no worker round trip.
+ *
+ * Single stream socket by design: this serves the bulk-receive case, and one
+ * ring keeps the ISR-vs-task handshake to a single producer and a single
+ * consumer (head written by the task only, tail by the dispatch only). */
+#define CC3501E_SOCK_RING_BYTES 4096u
+
+static struct {
+	uint8_t           buf[CC3501E_SOCK_RING_BYTES];
+	volatile uint32_t head;     /* task writes   */
+	volatile uint32_t tail;     /* dispatch reads */
+	volatile uint16_t fd_plus1; /* socket being prefetched, 0 = none */
+	volatile bool     peer_closed;
+} rx_ring;
+
+static uint32_t ring_used(void)
+{
+	return rx_ring.head - rx_ring.tail; /* free-running; unsigned wrap is correct */
+}
+
+/* TASK CONTEXT ONLY -- called from cc3501e_hw_tick().  Does the lwIP read. */
+void cc3501e_hw_sock_pump(void)
+{
+	const uint16_t h = rx_ring.fd_plus1;
+	if (h == 0u || rx_ring.peer_closed) {
+		return;
+	}
+	uint32_t used = ring_used();
+	if (used > CC3501E_SOCK_RING_BYTES - 512u) {
+		return; /* keep at least one max frame of headroom */
+	}
+	const uint32_t idx   = rx_ring.head % CC3501E_SOCK_RING_BYTES;
+	uint32_t       chunk = CC3501E_SOCK_RING_BYTES - idx; /* to the wrap only */
+	const uint32_t space = CC3501E_SOCK_RING_BYTES - used;
+	if (chunk > space) chunk = space;
+	const ssize_t n = lwip_recv((int)h - 1, &rx_ring.buf[idx], (size_t)chunk, 0);
+	if (n > 0) {
+		rx_ring.head += (uint32_t)n;
+	} else if (n == 0) {
+		rx_ring.peer_closed = true; /* orderly close */
+	}
+	/* n < 0 with EAGAIN/EWOULDBLOCK is just "nothing yet" -- try again next tick. */
+}
+
+/* Arm/disarm prefetch for a handle.  Called from the socket open/close paths. */
+void cc3501e_hw_sock_prefetch(uint16_t handle, bool on)
+{
+	if (on) {
+		rx_ring.head = rx_ring.tail = 0u;
+		rx_ring.peer_closed         = false;
+		rx_ring.fd_plus1            = handle;
+	} else if (rx_ring.fd_plus1 == handle) {
+		rx_ring.fd_plus1 = 0u;
+	}
+}
+
+/* DISPATCH CONTEXT (SWI/HWI) -- memcpy only, never lwIP.  Returns bytes taken,
+ * or -1 when this handle is not the prefetched one so the caller can fall back
+ * to the worker path. */
+int cc3501e_hw_sock_recv_ring(uint16_t handle, uint8_t *buf, uint16_t cap, uint16_t *out_len)
+{
+	if (out_len != 0) *out_len = 0u;
+	if (rx_ring.fd_plus1 != handle || handle == 0u || buf == 0) {
+		return -1;
+	}
+	uint32_t used = ring_used();
+	if (used == 0u) {
+		/* Armed but EMPTY -> report "not handled" so the caller falls through to
+		 * the worker path.  Answering OK with 0 bytes looked harmless but broke
+		 * single-shot callers: cc3501e_sock_recv goes through poll_by_repeat,
+		 * which treats ALP_OK as final, so one recv on a socket whose data had not
+		 * landed yet returned 0 bytes and gave up (measured: `NET recv -> 0 (0 B)`
+		 * on a connection that was about to deliver 389 B).  The fast path is an
+		 * OPTIMISATION for when data is already staged; it must never take a
+		 * request it cannot satisfy. */
+		return -1;
+	}
+	uint32_t       n     = (used < cap) ? used : cap;
+	const uint32_t idx   = rx_ring.tail % CC3501E_SOCK_RING_BYTES;
+	uint32_t       first = CC3501E_SOCK_RING_BYTES - idx;
+	if (first > n) first = n;
+	memcpy(buf, &rx_ring.buf[idx], first);
+	if (n > first) {
+		memcpy(&buf[first], &rx_ring.buf[0], n - first);
+	}
+	rx_ring.tail += n;
+	if (out_len != 0) *out_len = (uint16_t)n;
+	return (int)n;
 }
 
 int cc3501e_hw_sock_recv(uint16_t  handle,
@@ -208,6 +314,7 @@ int cc3501e_hw_sock_recv(uint16_t  handle,
 
 int cc3501e_hw_sock_close(uint16_t handle)
 {
+	cc3501e_hw_sock_prefetch(handle, false);
 	if (handle == 0u) {
 		return CC3501E_HW_ERR_INVAL;
 	}

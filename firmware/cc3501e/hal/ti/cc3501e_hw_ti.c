@@ -430,6 +430,10 @@ void cc3501e_hw_tick(void)
 		NVIC_SystemReset(); /* CMSIS: M33 system reset -- does not return */
 	}
 
+	/* Fill the socket RX ring on the TASK, so the dispatch can serve
+	 * CMD_SOCK_RECV with a memcpy instead of a worker round trip. */
+	cc3501e_hw_sock_pump();
+
 	/* Deferred OTA reboot: once the FINISH ack has clocked back (reply_drained),
 	 * request the PSA-FWU reboot so the cold BL2/MCUboot swaps the STAGED slot to
 	 * primary (TRIAL).  Same ack-before-reboot race fix as CMD_RESET above. */
