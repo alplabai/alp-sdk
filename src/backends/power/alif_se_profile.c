@@ -54,6 +54,29 @@
  * run_profile_t / off_profile_t and the aiPM enums (aipm.h). */
 #include <se_service.h>
 
+/* Alif SE aiPM DC-DC rail-voltage bounds.  Primary source:
+ * modules/hal/alif/se_services/include/aipm.h -- run_profile_t /
+ * off_profile_t's `dcdc_voltage` field comment ("DCDC output voltage
+ * 750-850mv"); also restated in docs/aen-se-services.md ("DCDC voltage
+ * 750-850 mV").  Single source for both alif_profile_set() call sites
+ * (RUN dcdc_voltage + STANDBY dcdc_voltage, #1626).
+ *
+ * Range only, not a step/quantization check: `dcdc_voltage` is a raw
+ * millivolt integer per its own field comment above, not the separate
+ * (and, in the vendored hal_alif tree, unreferenced anywhere)
+ * `dcdc_voltage_t` 25 mV-step ordinal enum (aipm.h).  se_service.c's
+ * se_service_set_run_cfg()/set_off_cfg() copy `pp->dcdc_voltage`
+ * straight into the outgoing mailbox packet with no quantization
+ * either direction -- so any value in [750, 850] mV is a legal,
+ * unrounded request as far as this client is concerned. */
+#define ALP_POWER_ALIF_DCDC_MV_MIN 750u
+#define ALP_POWER_ALIF_DCDC_MV_MAX 850u
+
+static inline bool alp_power_alif_dcdc_mv_valid(uint32_t mv)
+{
+	return mv >= ALP_POWER_ALIF_DCDC_MV_MIN && mv <= ALP_POWER_ALIF_DCDC_MV_MAX;
+}
+
 static alp_status_t se_rc_to_alp(int rc)
 {
 	if (rc == 0) {

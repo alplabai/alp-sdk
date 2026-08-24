@@ -220,7 +220,12 @@ typedef struct alp_power_profile_t {
 	uint32_t cpu_clk_hz;    /**< Core clock of the calling core's domain
 	                             in Hz.  RUN: the active CPU clock;
 	                             STANDBY: the standby-scaled clock. */
-	uint32_t rail_mv;       /**< Core DC-DC rail in millivolts. */
+	uint32_t rail_mv;       /**< Core DC-DC rail in millivolts.  Per-SoM
+	                             window (e.g. E8 / AEN801: 750-850 mV via
+	                             the SE aiPM DC-DC); a value outside that
+	                             window returns @ref ALP_ERR_INVAL from
+	                             @ref alp_power_profile_set without
+	                             touching the live operating point. */
 	uint32_t power_domains; /**< Implementation-defined bitmask of power
 	                             domains held on in this profile. */
 	uint32_t memory_blocks; /**< Implementation-defined bitmask of memory

@@ -61,22 +61,6 @@ typedef struct alp_power_profile_ops {
 	alp_status_t (*set)(alp_power_profile_id_t which, const alp_power_profile_t *profile);
 } alp_power_profile_ops_t;
 
-/* Alif SE aiPM DC-DC rail-voltage bounds (docs/aen-se-services.md: "DCDC
- * voltage 750-850 mV").  Single source for both alif_se_profile.c
- * alif_profile_set() call sites (RUN dcdc_voltage + STANDBY dcdc_voltage,
- * #1626) -- unlike a Kconfig-gated .c file, a header is compiled wherever
- * it's included, so this stays reachable by a native_sim unit test even
- * though alif_se_profile.c itself only builds on real Alif silicon
- * (CONFIG_ALP_SDK_POWER_PROFILE_ALIF_SE depends on HAS_ALIF_SE_SERVICES,
- * which depends on the SE-mailbox DT node). */
-#define ALP_POWER_ALIF_DCDC_MV_MIN 750u
-#define ALP_POWER_ALIF_DCDC_MV_MAX 850u
-
-static inline bool alp_power_alif_dcdc_mv_valid(uint32_t mv)
-{
-	return mv >= ALP_POWER_ALIF_DCDC_MV_MIN && mv <= ALP_POWER_ALIF_DCDC_MV_MAX;
-}
-
 /**
  * Handle struct layout.  Opaque to customers via the public
  * `typedef struct alp_power alp_power_t;` forward declaration in
