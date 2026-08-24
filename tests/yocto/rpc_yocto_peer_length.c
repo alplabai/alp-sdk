@@ -63,6 +63,25 @@ static void sleep_ms(long ms)
 	nanosleep(&ts, NULL);
 }
 
+/* Bounded poll-wait, mirroring rpc_uio_self_close.c's own wait_until():
+ * an inline `while (!flag) { sleep; ALP_ASSERT_TRUE(deadline); }` loop
+ * does NOT stop looping when that assert fails (ALP_ASSERT_TRUE is
+ * non-fatal, see test_assert.h), so a genuine regression that never
+ * sets `flag` spins forever instead of failing the test -- the exact
+ * shape a repro of #1645's finding 1 hit while this file's assertions
+ * were still inline. Returns false (never true) once `timeout_ms`
+ * elapses so every call site can fail cleanly via ALP_ASSERT_TRUE. */
+static bool wait_until(atomic_int *flag, int timeout_ms)
+{
+	int waited_ms = 0;
+
+	while (!atomic_load(flag)) {
+		sleep_ms(1);
+		if (++waited_ms >= timeout_ms) return false;
+	}
+	return true;
+}
+
 /* Mirrors rpc_yocto_self_close.c's make_test_channel(): `ept_fd`
  * stands in for the real /dev/rpmsgN chardev (a socketpair end). */
 static struct rpc_be *make_test_channel(int ept_fd)
@@ -119,11 +138,7 @@ static void stop_and_free_channel(struct rpc_be *ch)
 	atomic_store(&ch->rx_run, 0);
 	char poke = 0;
 	ALP_ASSERT_TRUE(write(ch->rx_wake_pipe[1], &poke, 1) >= 0);
-	int waited_ms = 0;
-	while (!atomic_load(&g_worker_done)) {
-		sleep_ms(1);
-		ALP_ASSERT_TRUE(++waited_ms < TEST_TIMEOUT_MS);
-	}
+	ALP_ASSERT_TRUE(wait_until(&g_worker_done, TEST_TIMEOUT_MS));
 	pthread_join(ch->rx_thread, NULL);
 	close(ch->rx_wake_pipe[0]);
 	close(ch->rx_wake_pipe[1]);
@@ -219,11 +234,51 @@ static void test_small_frame_still_dispatches(void)
 	ssize_t sent = send(sv[1], frame, (size_t)built, 0);
 	ALP_ASSERT_EQ_INT((int)sent, built);
 
-	int waited_ms = 0;
-	while (atomic_load(&g_cb_fired) == 0) {
-		sleep_ms(1);
-		ALP_ASSERT_TRUE(++waited_ms < TEST_TIMEOUT_MS);
-	}
+	ALP_ASSERT_TRUE(wait_until(&g_cb_fired, TEST_TIMEOUT_MS));
+	ALP_ASSERT_EQ_INT(atomic_load(&g_cb_fired), 1);
+	ALP_ASSERT_EQ_INT((int)g_cb_payload_len, (int)sizeof(payload));
+
+	stop_and_free_channel(ch);
+	close(sv[1]);
+}
+
+/* THE #1645 blocker (review finding 1): a frame of EXACTLY
+ * ALP_RPC_TX_FRAME_MAX bytes is LEGAL -- alp_rpc_frame_size()
+ * (rpc_ops.h) allows total == cap, not just total < cap -- so it must
+ * still dispatch. rpc_rx_main()'s original fix used `n == sizeof buf`
+ * as the oversized signal, which drops exactly this frame; the real
+ * buffer is now ALP_RPC_TX_FRAME_MAX + 1 bytes so a legal max-size
+ * frame reads as `n == ALP_RPC_TX_FRAME_MAX`, distinct from an
+ * oversized one. Mirrors rpc_uio_peer_length.c's
+ * test_frame_at_exact_max_still_dispatches(). */
+static void test_frame_at_exact_max_still_dispatches(void)
+{
+	atomic_store(&g_cb_fired, 0);
+	g_cb_payload_len = 0;
+
+	int sv[2];
+	ALP_ASSERT_EQ_INT(socketpair(AF_UNIX, SOCK_DGRAM, 0, sv), 0);
+
+	struct rpc_be          *ch = make_test_channel(sv[0]);
+	alp_rpc_backend_state_t st = { .be_data = ch, .ops = &_ops };
+	ch->owner                  = &st;
+
+	ALP_ASSERT_EQ_INT(y_subscribe(&st, "m", on_big_frame, ch), ALP_OK);
+	spawn_rx_thread(ch);
+
+	/* "m" + NUL = 2 bytes of header; pad the payload so the whole
+	 * frame lands exactly on ALP_RPC_TX_FRAME_MAX. */
+	static uint8_t payload[ALP_RPC_TX_FRAME_MAX - 2];
+	memset(payload, 0x11, sizeof(payload));
+
+	uint8_t frame[ALP_RPC_TX_FRAME_MAX];
+	int     built = frame_build(frame, sizeof(frame), "m", payload, sizeof(payload));
+	ALP_ASSERT_EQ_INT(built, (int)ALP_RPC_TX_FRAME_MAX);
+
+	ssize_t sent = send(sv[1], frame, (size_t)built, 0);
+	ALP_ASSERT_EQ_INT((int)sent, built);
+
+	ALP_ASSERT_TRUE(wait_until(&g_cb_fired, TEST_TIMEOUT_MS));
 	ALP_ASSERT_EQ_INT(atomic_load(&g_cb_fired), 1);
 	ALP_ASSERT_EQ_INT((int)g_cb_payload_len, (int)sizeof(payload));
 
@@ -235,5 +290,6 @@ int main(void)
 {
 	test_oversized_frame_is_dropped_not_truncated();
 	test_small_frame_still_dispatches();
+	test_frame_at_exact_max_still_dispatches();
 	ALP_TEST_SUMMARY();
 }

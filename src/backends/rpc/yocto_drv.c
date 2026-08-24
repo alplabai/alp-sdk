@@ -214,6 +214,13 @@ struct rpc_be {
      * same as the pre-redesign version of this flag. */
 	bool close_from_worker;
 
+	/* Set the first time rpc_rx_main() drops an oversized peer frame
+	 * (#1645) -- only rpc_rx_main()'s own thread ever touches this, so
+	 * no lock is needed. Caps the fprintf() to one line per channel: a
+	 * peer spraying oversized frames must not make the RX thread take
+	 * the stdio lock on every single frame. */
+	bool logged_oversized_drop;
+
 	/* Dispatcher-owned back-pointer (alp_rpc_backend_state_t::owner,
      * cached at y_open() time) -- see rpc_ops.h.  Used ONLY by
      * rpc_rx_main()'s epilogue to call alp_rpc_close_finalize(owner)
@@ -339,11 +346,30 @@ static void rpc_be_teardown(struct rpc_be *ch)
 	free(ch);
 }
 
+/* Reports an oversized-frame drop ONCE per channel (#1645) -- see
+ * struct rpc_be's logged_oversized_drop field. */
+static void log_dropped_oversized_frame(struct rpc_be *ch)
+{
+	if (ch->logged_oversized_drop) return;
+	ch->logged_oversized_drop = true;
+	fprintf(stderr,
+	        "alp_rpc: dropping oversized peer frame(s) on %s (> %d bytes); further drops on "
+	        "this channel are counted, not logged\n",
+	        ch->name,
+	        (int)ALP_RPC_TX_FRAME_MAX);
+}
+
 /* RX worker: poll() the endpoint fd; on inbound frame, parse + dispatch. */
 static void *rpc_rx_main(void *arg)
 {
 	struct rpc_be *ch = (struct rpc_be *)arg;
-	uint8_t        buf[ALP_RPC_TX_FRAME_MAX];
+	/* Sized ALP_RPC_TX_FRAME_MAX + 1 -- one byte bigger than the
+	 * negotiated max -- so a LEGAL max-size frame (alp_rpc_frame_size()
+	 * allows total == cap, i.e. == ALP_RPC_TX_FRAME_MAX exactly, see
+	 * rpc_ops.h) reads as `n == ALP_RPC_TX_FRAME_MAX` and is never
+	 * mistaken for oversized; only a frame that is GENUINELY longer
+	 * than the max fills this buffer to capacity. */
+	uint8_t buf[ALP_RPC_TX_FRAME_MAX + 1];
 
 	struct pollfd fds[2] = {
 		{ .fd = ch->ept_fd, .events = POLLIN },
@@ -369,19 +395,21 @@ static void *rpc_rx_main(void *arg)
 			break;
 		}
 
-		/* The rpmsg endpoint delivers message-at-a-time, so a read()
-		 * that exactly fills `buf` is the only signal available that
-		 * the peer's frame was at least buffer-sized and may have been
-		 * cut by read() itself -- the remainder then stays queued in
-		 * the endpoint and the NEXT read() returns that tail, silently
-		 * misaligning every following frame (#1645). Treat it as a
-		 * protocol error, same footing as a malformed frame, rather
-		 * than parsing a possibly-truncated message as complete. */
-		if ((size_t)n == sizeof buf) {
-			fprintf(stderr,
-			        "alp_rpc: dropping possibly-truncated peer frame on %s (read %zu bytes)\n",
-			        ch->name,
-			        sizeof buf);
+		/* The rpmsg char device (rpmsg_eptdev_read_iter()) copies
+		 * min(iov_iter_count, skb->len) into `buf` and then
+		 * UNCONDITIONALLY frees the skb -- any bytes past what fit are
+		 * DISCARDED, not queued for the next read(), so this is never a
+		 * framing-misalignment hazard. The hazard is silent truncation:
+		 * a frame genuinely longer than ALP_RPC_TX_FRAME_MAX gets cut to
+		 * that size and, whenever the method name lands inside the cut
+		 * prefix, still parses as a complete-looking (method, payload)
+		 * pair (#1645). `buf` is one byte bigger than the negotiated max
+		 * (see its declaration above) so filling it completely --
+		 * `n > ALP_RPC_TX_FRAME_MAX` -- is the exact, only signal
+		 * available that this happened: a LEGAL max-size frame reads as
+		 * `n == ALP_RPC_TX_FRAME_MAX` and must not be dropped here. */
+		if ((size_t)n > ALP_RPC_TX_FRAME_MAX) {
+			log_dropped_oversized_frame(ch);
 			continue;
 		}
 
