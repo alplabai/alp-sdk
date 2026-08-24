@@ -533,7 +533,29 @@ void worker_run_pending(void)
 		 * the weak transport hook: a no-op on the stub/native build (no radio,
 		 * no SPI slave), the real FIFO-flush + poll-loop re-arm on the ti
 		 * backend (hal/ti/transport_hw_ti_spi.c). */
-		bridge_transport_spi_hw_reinit();
+		/* SKIP for the socket DATA ops.  This re-init exists for RADIO ops: a
+		 * Wlan_* call kills the slave's DMA, so the link must be re-established
+		 * afterwards.  cc3501e_hw_sock_recv / _send are lwIP buffer operations
+		 * (lwip_recvfrom / lwip_send) and make no such call.
+		 *
+		 * Paying it anyway is not merely wasted time, it is destructive: the
+		 * cc3501e_bridge_busy() / cc3501e_bridge_ready() bracket around it is the
+		 * only thing telling the host "do not clock now", and READY is an OPEN
+		 * CONNECTION on this board (0 edges in 20000 samples), so the host ignores
+		 * it and clocks straight into a slave that is being closed and re-opened.
+		 *
+		 * Silicon-measured 2026-08-24 at a 256 B reply cap, same host image, only
+		 * this branch differing: WITH the skip a 262144 B stream runs at
+		 * ~25.4 kB/s with zero misses; WITHOUT it the same stream collapses to
+		 * 3-22 B/s.  (An earlier "this changes nothing" reading was wrong -- both
+		 * sides of that comparison had the skip.)
+		 *
+		 * Deliberately conservative: OPEN / CONNECT / CLOSE keep the re-init,
+		 * because connect in particular can drive the stack hard enough to touch
+		 * the HIF.  Only the two hot data ops are exempt. */
+		if (cmd != ALP_CC3501E_CMD_SOCK_RECV && cmd != ALP_CC3501E_CMD_SOCK_SEND) {
+			bridge_transport_spi_hw_reinit();
+		}
 
 		/* CONNECT / AP_START are FIRE-AND-FORGET at the worker level: their outcome
 		 * is mirrored into the HAL connection-status latch (read NON-blocking by
