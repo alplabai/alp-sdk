@@ -5,4 +5,5 @@ project(test_camera_video)
 target_sources(app PRIVATE
     src/main.c
     src/fake_video_pitch0.c
+    src/fake_video_jpeg.c
 )

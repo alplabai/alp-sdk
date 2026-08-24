@@ -18,6 +18,12 @@
  * a flat 2 B/px -- the fixture's enqueue hook refuses any video_buffer
  * smaller than width * height * 3 bytes for RGB888, reproducing the
  * CSI-2/ISP DMA overrun the old flat-2-B/px sizing would have caused.
+ *
+ * Part 3 (JPEG / compressed-format sizing, review follow-up): camera2
+ * (backed by this test's own alp,fake-video-jpeg0 fixture, which reports
+ * VIDEO_PIX_FMT_JPEG with pitch == 0) proves open() falls back to the
+ * flat w*h*2 heuristic bound for a fourcc video_bits_per_pixel() can't
+ * size at all, instead of hard-refusing with ALP_ERR_NOSUPPORT.
  */
 
 #include <zephyr/ztest.h>
@@ -62,6 +68,23 @@ ZTEST(camera_video, test_zephyr_video_pitch_zero_sizes_by_fourcc_not_flat_2bpp)
 
 	zassert_not_null(
 	    cam, "camera1 open failed -- buffer under-sized for RGB888? err=%d", alp_last_error());
+
+	alp_camera_close(cam);
+}
+
+ZTEST(camera_video, test_zephyr_video_jpeg_pitch_zero_falls_back_to_flat_heuristic)
+{
+	alp_camera_config_t cfg = ALP_CAMERA_CONFIG_DEFAULT(2);
+
+	/* ALP_PIXFMT_MONO_VLSB is the enum's zero value: _to_video_fourcc()
+	 * maps it to 0, so open() takes the readback branch and negotiates
+	 * nothing -- it just reads back camera2's already-JPEG default via
+	 * video_get_format(). */
+	cfg.format = ALP_PIXFMT_MONO_VLSB;
+
+	alp_camera_t *cam = alp_camera_open(&cfg);
+
+	zassert_not_null(cam, "camera2 (JPEG default, pitch==0) open failed: %d", alp_last_error());
 
 	alp_camera_close(cam);
 }
