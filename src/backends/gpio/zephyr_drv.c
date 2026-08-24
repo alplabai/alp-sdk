@@ -157,23 +157,43 @@ static void _isr_thunk(const struct device *port, struct gpio_callback *cb, gpio
 	}
 }
 
-static alp_status_t
-z_open(uint32_t pin_id, alp_gpio_backend_state_t *st, alp_capabilities_t *caps_out)
+/* The real open body.  `owner` is a parameter rather than a derivation
+ * because a delegating BACKEND passes a sidecar member as `st`, and
+ * CONTAINER_OF cannot tell that apart from a genuine handle -- `state` is
+ * the first member of struct alp_gpio, so the arithmetic is a no-op that
+ * silently reinterprets whatever it is given.  Issue #1618. */
+static alp_status_t z_open_delegated(uint32_t                  pin_id,
+                                     alp_gpio_backend_state_t *st,
+                                     struct alp_gpio          *owner,
+                                     alp_capabilities_t       *caps_out)
 {
 	struct gpio_dt_spec spec;
+	/* Not defensive: the ISR thunk dereferences this on every edge, so a
+	 * NULL owner must fail the open rather than arm an interrupt that
+	 * cannot be delivered. */
+	if (owner == NULL) return ALP_ERR_INVAL;
 	if (!alp_z_gpio_resolve(pin_id, &spec)) return ALP_ERR_INVAL;
 	if (!device_is_ready(spec.port)) return ALP_ERR_NOT_READY;
 
 	alp_z_gpio_side_t *s = _alloc_side();
 	if (s == NULL) return ALP_ERR_NOMEM;
 	s->spec  = spec;
-	s->owner = CONTAINER_OF(st, struct alp_gpio, state);
+	s->owner = owner;
 
 	st->dev         = (void *)spec.port;
 	st->pin_id      = pin_id;
 	st->be_data     = s;
 	caps_out->flags = 0u;
 	return ALP_OK;
+}
+
+static alp_status_t
+z_open(uint32_t pin_id, alp_gpio_backend_state_t *st, alp_capabilities_t *caps_out)
+{
+	/* The non-delegated path: `st` really is &handle->state, having come
+	 * straight from src/gpio_dispatch.c, so the container arithmetic is
+	 * valid HERE and only here. */
+	return z_open_delegated(pin_id, st, CONTAINER_OF(st, struct alp_gpio, state), caps_out);
 }
 
 static alp_status_t
@@ -256,13 +276,14 @@ static void z_close(alp_gpio_backend_state_t *st)
 }
 
 static const alp_gpio_ops_t _ops = {
-	.open        = z_open,
-	.configure   = z_configure,
-	.write       = z_write,
-	.read        = z_read,
-	.enable_irq  = z_irq_enable,
-	.disable_irq = z_irq_disable,
-	.close       = z_close,
+	.open           = z_open,
+	.open_delegated = z_open_delegated,
+	.configure      = z_configure,
+	.write          = z_write,
+	.read           = z_read,
+	.enable_irq     = z_irq_enable,
+	.disable_irq    = z_irq_disable,
+	.close          = z_close,
 };
 
 /* Delegation hook for the CC3501E GPIO proxy backend

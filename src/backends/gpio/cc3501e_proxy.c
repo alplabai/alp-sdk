@@ -31,6 +31,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <zephyr/sys/util.h> /* CONTAINER_OF */
+
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
 #include <alp/chips/cc3501e.h>
@@ -126,9 +128,31 @@ px_open(uint32_t pin_id, alp_gpio_backend_state_t *state, alp_capabilities_t *ca
 		return ALP_OK;
 	}
 
-	/* Not proxied (or no bridge attached): delegate to the platform driver. */
-	const alp_gpio_ops_t *z  = alp_z_gpio_ops();
-	alp_status_t          rc = z->open(pin_id, &s->inner, caps);
+	/* Not proxied (or no bridge attached): delegate to the platform driver.
+	 *
+	 * Use open_delegated, NOT open.  `&s->inner` is a member of this
+	 * backend's own sidecar, not the `state` member of a struct alp_gpio,
+	 * so the platform backend cannot recover the owning handle from it --
+	 * `state` is the FIRST member of struct alp_gpio, so a CONTAINER_OF
+	 * there is a no-op that yields `(struct alp_gpio *)&s->inner`, a
+	 * proxy_side_t reinterpreted as a much larger handle whose `cb` field
+	 * lands inside the NEXT _sides[] entry.  _isr_thunk then calls that
+	 * garbage function pointer in interrupt context (issue #1618).
+	 *
+	 * `state` here genuinely IS &outer->state -- the dispatcher passed it
+	 * -- so the container arithmetic is valid at THIS layer, and the owner
+	 * recovered from it is the real handle.
+	 *
+	 * The proxy cannot simply forward `state` in place of `&s->inner`:
+	 * both layers write state->be_data, and the platform backend would
+	 * clobber the proxy's own sidecar pointer. */
+	const alp_gpio_ops_t *z = alp_z_gpio_ops();
+	if (z->open_delegated == NULL) {
+		_free_side(s);
+		return ALP_ERR_NOSUPPORT;
+	}
+	struct alp_gpio *owner = CONTAINER_OF(state, struct alp_gpio, state);
+	alp_status_t     rc    = z->open_delegated(pin_id, &s->inner, owner, caps);
 	if (rc != ALP_OK) {
 		_free_side(s);
 		return rc;

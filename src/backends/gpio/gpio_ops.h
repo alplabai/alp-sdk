@@ -32,6 +32,19 @@ struct alp_gpio_ops {
 	alp_status_t (*open)(uint32_t                  pin_id,
 	                     alp_gpio_backend_state_t *state,
 	                     alp_capabilities_t       *caps_out);
+	/* Delegated open: used when the caller is another BACKEND (the CC3501E
+	 * proxy) whose sidecar holds the platform state, so `st` is NOT the
+	 * `state` member of a struct alp_gpio and the owner CANNOT be recovered
+	 * by CONTAINER_OF -- `state` is the first member of struct alp_gpio, so
+	 * that arithmetic silently "succeeds" and yields the sidecar
+	 * reinterpreted as a much larger handle (issue #1618).  `owner` is the
+	 * real portable handle whose cb/cb_user the ISR thunk must read.  NULL
+	 * when a backend cannot be delegated to; a delegating caller must then
+	 * refuse rather than fall back to open(). */
+	alp_status_t (*open_delegated)(uint32_t                  pin_id,
+	                               alp_gpio_backend_state_t *state,
+	                               struct alp_gpio          *owner,
+	                               alp_capabilities_t       *caps_out);
 	alp_status_t (*configure)(alp_gpio_backend_state_t *state,
 	                          alp_gpio_dir_t            dir,
 	                          alp_gpio_pull_t           pull);
