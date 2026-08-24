@@ -364,7 +364,17 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * (which runs on the ordinary DMA bridge) then timed out at -4.  The polled
  * request-PAYLOAD race is real but must be fixed on the DEVICE side, where it
  * can be scoped to the polled path, not by slowing every host phase. */
-#define CC3501E_PHASE_SETTLE_US 200u
+/* 40, measured -- was 200.  Profiling one socket frame on silicon showed the
+ * settles, not the wire, dominate: at 200 a frame was 1.53 ms against ~164 us of
+ * actual wire time for a 281 B reply.  Dropping to 40 took a 262144 B stream
+ * from 167 kB/s to 231 kB/s with the link healthy throughout.
+ *
+ * 20 is TOO LOW -- it gives 0 B/s.  And note the gate before the REPLY HEADER is
+ * deliberately NOT this constant: it is a hardcoded 200 us because it waits for
+ * the slave to DISPATCH and stage its reply, which is a different and much
+ * longer job than re-arming the next phase.  Folding it into this constant was
+ * tried and killed the link outright (PING -> -5). */
+#define CC3501E_PHASE_SETTLE_US 40u
 
 /* READY gate for the r2 SS0 + host-IRQ bridge.  When ctx->ready_pin is
  * populated (the CC35 GPIO17 -> Alif P2_6 line is wired + opened as an input),
