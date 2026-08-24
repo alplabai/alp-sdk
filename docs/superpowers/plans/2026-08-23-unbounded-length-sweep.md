@@ -12,6 +12,57 @@
 
 **Spec:** `docs/superpowers/plans/2026-08-23-post-audit-hardening-campaign.md` — read its **Global Constraints** and **Verification infrastructure** sections first.
 
+> **CITATIONS VERIFIED AGAINST THE TREE 2026-08-24, before any implementation.
+> One framing claim is WRONG, four line numbers drifted, and three sites the
+> plan does not cite were found in the same functions.**
+>
+> **1. The "only one of the six is memory-unsafe, and it is unreachable in a
+> default build" framing does not hold.** `src/backends/jpeg/alif_hantro.c` is
+> behind NO default-off gate: it is added unconditionally at
+> `zephyr/CMakeLists.txt:172` and registers at priority 100 for
+> `silicon_ref = "alif:ensemble:e8"`, so it is the **active** backend on
+> qualified E8 boards today — not a latent opt-in path like the DEEPX site. Its
+> defect has the same shape as the one the plan calls the sole memory-unsafe
+> case: an unchecked, caller-controlled length reaches a DMA master which then
+> reads past the intended buffer and streams the excess out. The plan's own Task
+> 1 prose says exactly this ("hardware reading memory the caller did not intend
+> to expose") while its summary table downgrades it to "wrong output, or a raw
+> pointer handed to an AXI master". The narrative and the count disagree; the
+> narrative is right.
+>
+> **2. `alif_hantro.c` does NOT row-0-alias on a zero stride, unlike its
+> sibling.** `:264` is exactly
+> `uint32_t in_stride = (req->y_stride != 0u) ? req->y_stride : req->width;` — a
+> zero stride is DEFAULTED to `width` there. The hazard is a non-zero but
+> UNDER-sized stride, used unchecked. Do not carry the sw_baseline mechanism
+> across to this file when writing the fix or the test.
+>
+> **3. Three sites the plan does not cite, all in the functions it does:**
+>
+> | site | what is there |
+> |---|---|
+> | `src/backends/jpeg/alif_hantro.c:287` | `.pitch = (req->y_stride != 0u) ? req->y_stride : req->width,` — a SECOND unguarded use of the same expression the plan cites once at `:264` |
+> | `src/backends/jpeg/alif_hantro.c:120-131` | `_is_dma_reachable()` validates only "not in TCM"; it never checks the length against the buffer's actual allocation. This is the real reason an oversized stride is not caught, and the plan never names the function |
+> | `src/backends/mqtt/zephyr_drv.c:238-250` | the `msg_cb == NULL` branch already drains the FULL `payload.len` correctly — the reference pattern for fixing `:259-265`, and proof the asymmetry is a real defect rather than an inferred one |
+>
+> **4. Line drift.** `src/jpeg_dispatch.c:89-91` -> **`:90-92`** (`:89` is
+> `alp_status_t rc;`). `src/backends/jpeg/sw_baseline.c:36-37` -> **`:35-36`**
+> (values 16384/16384 correct); the plan's `:34-37` code block is really
+> `:32-36`. `src/yocto/inference_deepx.cpp`'s struct comment `:93-97` ->
+> **`:94-98`** (`:93` is blank). Exact and unchanged: `alif_hantro.c:264`,
+> `rpc/yocto_uio_drv.c:757`, `rpc/yocto_drv.c:366`, `mqtt/zephyr_drv.c:260` and
+> `:268-271`, `inference_deepx.cpp:279`, `yocto/CMakeLists.txt:67`.
+>
+> **5. Everything else verified.** The public entry point really is
+> `alp_jpeg_encode` (`include/alp/jpeg.h:190`); a `y_stride` of 0 really does
+> reach `toojpeg_baseline.c:588`'s `yrow = y + (size_t)row * y_stride` and really
+> does return `ALP_OK`; `ALP_RPC_TX_FRAME_MAX` really is `1024`, defined at
+> `src/backends/rpc/yocto_drv.c:142`; the MQTT message really IS PUBACKed at
+> `:268-271` BEFORE the undrained remainder bites, which is what makes it
+> unrecoverable; `input_bufs` really is `std::vector<std::vector<uint8_t>>`
+> (`:98`) and `ALP_SDK_USE_DEEPX_DXM1` really defaults OFF, with the file added to
+> the build only inside `if(ALP_SDK_USE_DEEPX_DXM1)` at `:797`.
+
 ## Global Constraints
 
 - Base branch is `dev`. Verify with `git merge-base HEAD origin/dev`. Never `--base main`.
