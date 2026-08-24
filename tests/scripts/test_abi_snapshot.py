@@ -670,3 +670,57 @@ def test_real_tree_unconditional_board_header_edges_survive():
         if f'#include "{routes}"' not in src:
             continue  # header does not include its routes sibling on this branch
         assert routes in graph.get(owner, []), (owner, graph.get(owner))
+
+
+def test_include_graph_handles_a_pragma_once_header(tmp_path):
+    """`depth > guard_depth` must be keyed off the REAL include guard, not
+    a hard-coded 1.
+
+    A `#pragma once` header has no `#ifndef` wrapper, so its first `#if` is
+    depth 1 -- exactly the level a hard-coded rule treats as "the include
+    guard, still unconditional". That would let a conditional include count
+    as reachability again, which is the false-MOVED hole
+    _unconditional_includes() exists to close.
+    """
+    root = tmp_path / "alp"
+    root.mkdir()
+    (root / "facade.h").write_text(
+        "#pragma once\n"
+        '#include "alp/always.h"\n'
+        "#if defined(ALP_BOARD_A)\n"
+        '#include "alp/board_a.h"\n'
+        "#endif\n",
+        newline="",
+    )
+    for name in ("always.h", "board_a.h"):
+        (root / name).write_text("#define X 1\n", newline="")
+
+    graph = abi.build_include_graph(root)
+
+    assert graph["alp/facade.h"] == ["alp/always.h"], graph["alp/facade.h"]
+
+
+def test_include_graph_handles_a_top_level_if_above_the_guard(tmp_path):
+    """The other way the hard-coded depth breaks: a conditional ABOVE the
+    include guard pushes the guard itself to depth 2, so every real
+    conditional inside it lands at depth 3 and a `depth > 1` rule would
+    have excluded the header's UNCONDITIONAL includes instead -- a false
+    REMOVED rather than a false MOVED, but still wrong.
+    """
+    root = tmp_path / "alp"
+    root.mkdir()
+    (root / "facade.h").write_text(
+        "#if !defined(SOMETHING)\n"
+        "#ifndef ALP_FACADE_H\n"
+        "#define ALP_FACADE_H\n"
+        '#include "alp/always.h"\n'
+        "#endif\n"
+        "#endif\n",
+        newline="",
+    )
+    (root / "always.h").write_text("#define X 1\n", newline="")
+
+    graph = abi.build_include_graph(root)
+
+    # The guard is detected, so the include one level inside it still counts.
+    assert "alp/always.h" in graph["alp/facade.h"], graph["alp/facade.h"]

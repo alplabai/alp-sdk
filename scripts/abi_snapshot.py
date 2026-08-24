@@ -694,6 +694,12 @@ _INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"](?P<target>[^">]+)[>"]', re.MUL
 # never evaluated; see that function's docstring for why.
 _CPP_OPEN_RE  = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef)\b")
 _CPP_CLOSE_RE = re.compile(r"^\s*#\s*endif\b")
+# A classic `#ifndef FOO_H` / `#define FOO_H` include guard, i.e. the first
+# conditional in the file paired with an immediate #define of the same token.
+# Absent for a `#pragma once` header -- see _unconditional_includes().
+_GUARD_RE = re.compile(
+    r"^\s*#\s*ifndef\s+(?P<tok>\w+)\s*\n\s*#\s*define\s+(?P=tok)\b", re.MULTILINE
+)
 
 
 def _resolve_include(own_key: str, target: str) -> str:
@@ -718,6 +724,15 @@ def _resolve_include(own_key: str, target: str) -> str:
     base_dir = own_key.rsplit("/", 1)[0] if "/" in own_key else ""
     joined = f"{base_dir}/{target}" if base_dir else target
     return posixpath.normpath(joined)
+
+
+def _is_guard_open(lines: list[str], i: int, guard_tok: str) -> bool:
+    """True when `lines[i]` is the `#ifndef <guard_tok>` of the file's own
+    include guard -- i.e. immediately followed by `#define <guard_tok>`."""
+    if not re.match(rf"^\s*#\s*ifndef\s+{re.escape(guard_tok)}\s*$", lines[i]):
+        return False
+    nxt = lines[i + 1] if i + 1 < len(lines) else ""
+    return re.match(rf"^\s*#\s*define\s+{re.escape(guard_tok)}\b", nxt) is not None
 
 
 def _unconditional_includes(text: str) -> list[str]:
@@ -758,14 +773,30 @@ def _unconditional_includes(text: str) -> list[str]:
     """
     out: list[str] = []
     depth = 0
-    for line in text.splitlines():
+    # The file's own `#ifndef ALP_FOO_H` include guard wraps everything and
+    # is not a real conditional, so includes directly inside it still count.
+    # Detected rather than assumed to be depth 1: a header using `#pragma
+    # once`, or one with a top-level `#if` ABOVE its guard, would otherwise
+    # shift every real conditional down one level and silently re-open the
+    # false-MOVED hole this function exists to close.
+    guard_match = _GUARD_RE.search(text)
+    guard_tok = guard_match["tok"] if guard_match is not None else None
+    # Depth AT which the include guard sits, discovered while scanning
+    # rather than assumed: 0 for a `#pragma once` header (no guard), and
+    # not necessarily 1 for a guarded one either, since a header may open
+    # a top-level `#if` above its guard.
+    guard_depth = 0
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
         if _CPP_OPEN_RE.match(line):
             depth += 1
+            if guard_tok is not None and _is_guard_open(lines, i, guard_tok):
+                guard_depth = depth
             continue
         if _CPP_CLOSE_RE.match(line):
             depth = max(0, depth - 1)
             continue
-        if depth > 1:
+        if depth > guard_depth:
             continue
         m = _INCLUDE_RE.match(line)
         if m is not None:
