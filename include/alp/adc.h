@@ -316,6 +316,9 @@ alp_adc_stream_read_mv(alp_adc_stream_t *stream, uint16_t *mv, size_t cap, size_
  *
  * Issues the backend's stream-end so the DMA channel + ring buffer
  * are freed before the handle returns to the pool.  NULL is a no-op.
+ * Blocks until any in-flight @ref alp_adc_stream_read_mv on the same
+ * handle returns before tearing it down; idempotent (a second close
+ * is a no-op).
  *
  * @param[in] stream  Handle from @ref alp_adc_stream_open, or NULL.
  */
@@ -423,7 +426,9 @@ alp_adc_filter_read_mv(alp_adc_filter_t *filter, int16_t *out_mv, size_t cap, si
  * @brief Close a filter handle.  NULL is a no-op.
  *
  * Releases the internal stream slot + DSP chain.  After this call
- * @p filter is invalid.
+ * @p filter is invalid.  Blocks until any in-flight
+ * @ref alp_adc_filter_read_mv on the same handle returns before
+ * tearing it down; idempotent (a second close is a no-op).
  */
 void alp_adc_filter_close(alp_adc_filter_t *filter);
 
@@ -504,7 +509,12 @@ alp_adc_spectrum_t *alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg);
 alp_status_t
 alp_adc_spectrum_read_bins(alp_adc_spectrum_t *spec, float *bins, size_t cap, size_t *got);
 
-/** Close a spectrum handle.  NULL is a no-op. */
+/**
+ * @brief Close a spectrum handle.  NULL is a no-op.  Blocks until any
+ * in-flight @ref alp_adc_spectrum_read_bins on the same handle
+ * returns before tearing it down; idempotent (a second close is a
+ * no-op).
+ */
 void alp_adc_spectrum_close(alp_adc_spectrum_t *spec);
 
 #ifdef __cplusplus

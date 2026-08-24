@@ -110,6 +110,20 @@ static void bridge_stream_free_slot(uint8_t slot)
 /* software fallback (timer + ring buffer) lives on the wave-2 roadmap.    */
 /* ====================================================================== */
 
+/* Test-only synchronisation hook (default no-op; a single NULL-check
+ * branch in production) -- mirrors src/backends/rpc/zephyr_drv.c's
+ * g_rpc_recv_test_sync_hook, but non-static: tests/zephyr/
+ * adc_stream_close_race links the real built alp_sdk library rather
+ * than #including this .c file directly, so the hook needs external
+ * linkage to be reachable from that test TU. Lets the test pause
+ * alp_adc_stream_read_mv() here -- right after alp_handle_op_enter()
+ * has counted the op in, before the mv/cap checks and any bridge
+ * round-trip -- so it can drive alp_adc_stream_close()'s drain
+ * against a counted op made through the REAL public entry point
+ * instead of a hand-rolled alp_handle_op_enter() call. Runs outside
+ * any lock, so it is safe for it to block. */
+void (*alp_adc_stream_read_test_sync_hook)(void) = NULL;
+
 alp_adc_stream_t *alp_adc_stream_open(const alp_adc_stream_config_t *cfg)
 {
 	alp_z_clear_last_error();
@@ -194,6 +208,9 @@ alp_status_t alp_adc_stream_read_mv(alp_adc_stream_t *stream, uint16_t *mv, size
 	 * owner while this call was still blocked inside the bridge
 	 * transaction below. */
 	if (!alp_handle_op_enter(&stream->lifecycle, &stream->active_ops)) return ALP_ERR_NOT_READY;
+	if (alp_adc_stream_read_test_sync_hook != NULL) {
+		alp_adc_stream_read_test_sync_hook();
+	}
 
 	alp_status_t rc = ALP_OK;
 	if (mv == NULL) {

@@ -25,21 +25,24 @@
  *   manufactures a struct alp_adc_stream directly via the internal pool
  *   (alp_z_adc_stream_pool_acquire(), the same allocator
  *   alp_adc_stream_open() itself uses) with via_bridge=false, then races
- *   a synthetic op -- which counts itself in via the REAL
- *   alp_handle_op_enter()/alp_handle_op_leave() primitives from
- *   src/common/alp_slot_claim.h, the exact call alp_adc_stream_read_mv()
- *   makes at the top of its own body -- against the REAL, unmodified
- *   alp_adc_stream_close().  This exercises the actual fixed code (the
- *   struct's lifecycle/active_ops fields, the pool in
- *   src/zephyr/handles.c, and alp_adc_stream_close()'s
- *   alp_handle_begin_close_blocking() call) end to end; only the "op"
- *   itself (normally alp_adc_stream_read_mv()'s bridge round-trip) is a
- *   test double, standing in for a call this environment cannot make
- *   live.  alp_adc_stream_read_mv()/alp_adc_filter_read_mv()/
- *   alp_adc_spectrum_read_bins() calling alp_handle_op_enter() BEFORE
- *   touching any handle state is verified by inspection of the diff
- *   (op_enter is the first state-touching statement in each), not
- *   re-proven by this test.
+ *   the REAL, unmodified alp_adc_stream_read_mv() -- called with
+ *   cap=1 so it reaches the via_bridge==false / ALP_ERR_NOSUPPORT leg
+ *   instead of short-circuiting on cap==0 -- against the REAL,
+ *   unmodified alp_adc_stream_close().  A test-only synchronisation
+ *   hook, alp_adc_stream_read_test_sync_hook (declared in
+ *   src/zephyr/peripheral_adc.c, default no-op in production), lets
+ *   this test park the reader INSIDE alp_adc_stream_read_mv() right
+ *   after its own alp_handle_op_enter() call has counted the op in --
+ *   the same seam src/backends/rpc/zephyr_drv.c's
+ *   g_rpc_recv_test_sync_hook uses for the RPC backend's own race
+ *   test.  This exercises the actual fixed code (the struct's
+ *   lifecycle/active_ops fields, the pool in src/zephyr/handles.c,
+ *   alp_adc_stream_read_mv()'s own alp_handle_op_enter()/_leave()
+ *   calls, and alp_adc_stream_close()'s alp_handle_begin_close_blocking()
+ *   call) end to end through the REAL public entry points; only the
+ *   GD32-bridge round-trip itself (via_bridge == true) is untaken here
+ *   -- that leg needs real V2N/V2N-M1 hardware, per the paragraph
+ *   above.
  *
  * Deterministic interleave (not a natural-scheduling-race gamble -- see
  * the alp-lab:writing-race-safe-dispatch-handlers skill and issue
@@ -49,10 +52,10 @@
  *   1. Manufacture handle H (channel_id=3).  Pool capacity is 1
  *      (CONFIG_ALP_SDK_MAX_ADC_STREAM_HANDLES=1), so a reopen after H's
  *      close is *guaranteed* to hand back H's exact struct address.
- *   2. Thread READER calls alp_handle_op_enter(&H->lifecycle,
- *      &H->active_ops) (counts the op in, exactly as
- *      alp_adc_stream_read_mv() does), signals `reader_at_gate`, then
- *      blocks on `reader_may_proceed`.
+ *   2. Thread READER calls the REAL alp_adc_stream_read_mv(H, ...).
+ *      Inside it, right after its own alp_handle_op_enter() succeeds,
+ *      the test hook signals `reader_at_gate` and blocks on
+ *      `reader_may_proceed`.
  *   3. Once the main thread observes `reader_at_gate` (READER is
  *      DEFINITELY parked, not just "probably" after a sleep), it starts
  *      thread CLOSER: alp_adc_stream_close(H) followed immediately by a
@@ -87,6 +90,10 @@
 #include "alp_slot_claim.h"
 #include "handles.h"
 
+/* Declared (non-static, external linkage) in src/zephyr/peripheral_adc.c
+ * -- see this file's header comment. */
+extern void (*alp_adc_stream_read_test_sync_hook)(void);
+
 /* ---- fixture -------------------------------------------------------------- */
 
 static struct alp_adc_stream *g_h; /* handle under test */
@@ -101,11 +108,25 @@ static struct k_thread reader_thread_h;
 static struct k_sem    reader_done;
 static bool            g_op_entered;
 static uint32_t        g_captured_channel_id;
+static alp_status_t    g_read_rc;
 
 static K_THREAD_STACK_DEFINE(closer_stack, WORKER_STACK_SIZE);
 static struct k_thread        closer_thread_h;
 static struct k_sem           closer_done;
 static struct alp_adc_stream *g_reopened;
+
+/* Runs INSIDE alp_adc_stream_read_mv(), right after its own
+ * alp_handle_op_enter() has counted the op in. */
+static void reader_sync_hook(void)
+{
+	g_op_entered = true;
+	k_sem_give(&reader_at_gate);
+	k_sem_take(&reader_may_proceed, K_FOREVER);
+	/* Issue #1634's exact vulnerable dereference: read handle state
+	 * while still inside the counted op, after a long-blocked op
+	 * resumes. */
+	g_captured_channel_id = g_h->channel_id;
+}
 
 static void reader_entry(void *p1, void *p2, void *p3)
 {
@@ -113,17 +134,13 @@ static void reader_entry(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	/* Exactly what alp_adc_stream_read_mv() does before touching any
-	 * handle state -- see the file header's scope note. */
-	g_op_entered = alp_handle_op_enter(&g_h->lifecycle, &g_h->active_ops);
-	k_sem_give(&reader_at_gate);
-	if (g_op_entered) {
-		k_sem_take(&reader_may_proceed, K_FOREVER);
-		/* Issue #1634's exact vulnerable dereference: read handle
-		 * state after a long-blocked op resumes. */
-		g_captured_channel_id = g_h->channel_id;
-		alp_handle_op_leave(&g_h->active_ops);
-	}
+	/* Drives the REAL alp_adc_stream_read_mv() -- see the file
+	 * header's scope note. cap=1 (via_bridge=false on g_h) reaches
+	 * the NOSUPPORT leg rather than short-circuiting on cap==0;
+	 * reader_sync_hook() runs from inside it. */
+	uint16_t mv = 0;
+	size_t   got;
+	g_read_rc = alp_adc_stream_read_mv((alp_adc_stream_t *)g_h, &mv, 1, &got);
 	k_sem_give(&reader_done);
 }
 
@@ -159,6 +176,7 @@ ZTEST(alp_adc_stream_close_race, test_close_drains_in_flight_op_before_recycling
 	k_sem_init(&closer_done, 0, 1);
 	g_op_entered          = false;
 	g_captured_channel_id = 0xFFFFFFFFu; /* sentinel */
+	g_read_rc             = ALP_ERR_NOT_READY;
 	g_reopened            = NULL;
 
 	g_h = alp_z_adc_stream_pool_acquire();
@@ -168,6 +186,8 @@ ZTEST(alp_adc_stream_close_race, test_close_drains_in_flight_op_before_recycling
 	g_h->channel_id     = 3u;
 	g_h->sample_rate_hz = 1000u;
 	alp_lifecycle_set(&g_h->lifecycle, ALP_HANDLE_LC_OPEN);
+
+	alp_adc_stream_read_test_sync_hook = reader_sync_hook;
 
 	k_tid_t reader_tid = k_thread_create(&reader_thread_h,
 	                                     reader_stack,
@@ -214,6 +234,8 @@ ZTEST(alp_adc_stream_close_race, test_close_drains_in_flight_op_before_recycling
 	zassert_equal(
 	    k_thread_join(closer_tid, K_MSEC(2000)), 0, "CLOSER thread never finished joining");
 
+	alp_adc_stream_read_test_sync_hook = NULL;
+
 	zassert_not_null(g_reopened, "CLOSER's reopen failed");
 	zassert_equal_ptr(g_reopened,
 	                  g_h,
@@ -233,11 +255,16 @@ ZTEST(alp_adc_stream_close_race, test_close_drains_in_flight_op_before_recycling
 	              "close() recycled the slot to a new owner (channel_id=9) while this op was "
 	              "still in flight (issue #1634)",
 	              (unsigned)g_captured_channel_id);
+	zassert_equal(g_read_rc,
+	              ALP_ERR_NOSUPPORT,
+	              "alp_adc_stream_read_mv() returned %d (want ALP_ERR_NOSUPPORT -- the "
+	              "via_bridge=false leg it should have reached)",
+	              (int)g_read_rc);
+
+	/* Leave the single-slot pool empty at suite end -- otherwise the
+	 * "1-slot pool forces address identity" fixture would silently
+	 * break the moment a second test is added to this suite. */
+	alp_adc_stream_close(g_reopened);
 }
 
-static void reset_before(void *fixture)
-{
-	ARG_UNUSED(fixture);
-}
-
-ZTEST_SUITE(alp_adc_stream_close_race, NULL, NULL, reset_before, NULL, NULL);
+ZTEST_SUITE(alp_adc_stream_close_race, NULL, NULL, NULL, NULL, NULL);
