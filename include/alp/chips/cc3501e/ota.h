@@ -77,7 +77,7 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
  *
  * The host drives NO pin here -- entry is device-initiated.  Recovery when the
  * confirm poll exhausts its budget is @ref cc3501e_hard_reset (NOT
- * @ref cc3501e_reset: the cold cycle re-triggers the Puya double-boot bug and can
+ * @ref cc3501e_reset -- the cold cycle re-triggers the Puya double-boot bug and can
  * leave ctx NOT_READY); a reset of either kind always lands in the NORMAL mode.
  *
  * In update mode only PING / OTA_* / GET_DIAG_INFO / RESET are serviced.  Wi-Fi,
