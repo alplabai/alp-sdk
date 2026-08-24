@@ -198,8 +198,39 @@ typedef struct {
 	size_t      size;      /**< Required bytes; rounded up to MMU/MPU page. */
 	bool        cacheable; /**< false ⇒ allocate non-cacheable; required for
                                  the simple "core A writes, core B reads"
-                                 pattern. */
+                                 pattern.  Setting it true is currently
+                                 UNSUPPORTED in practice -- see the warning
+                                 below. */
 } alp_shmem_config_t;
+
+/**
+ * @warning **There is no cache-maintenance primitive in this SDK, so
+ *          `cacheable = true` has no safe usage today.**
+ *
+ * `alp_shmem_open()` documents that "cache coherency is the caller's
+ * responsibility unless @c cacheable = false", but the SDK gives the caller
+ * nothing to discharge that responsibility with: there is no clean, no
+ * invalidate, and no barrier helper on the `<alp/*>` surface, and a
+ * tree-wide sweep of `src/` finds no `sys_cache_data_*`, `arch_dcache_*` or
+ * `SCB_CleanDCache`-class call anywhere -- every occurrence of the word
+ * "cache" under `src/` is a dispatch-ops pointer cache, not CPU data-cache
+ * maintenance.  So `cacheable = false` is the only setting with defined
+ * behaviour on a shared-memory path.
+ *
+ * The same gap is wider than this one field.  Two AEN backends hand raw CPU
+ * pointers straight to DMA masters and perform no maintenance either --
+ * `src/backends/jpeg/alif_hantro.c` (the JPEG AXI master) and
+ * `src/backends/camera/alif_isp_pico.c`.  On a part where those masters are
+ * not coherent with the M55 D-cache, that is a correctness problem
+ * independent of anything this header offers.
+ *
+ * This is recorded rather than fixed on purpose.  Adding cache maintenance
+ * to a DMA path without measuring on real silicon trades a visible,
+ * documented gap for an intermittent corruption that reproduces once a
+ * week.  Closing it needs an owner, bench time on E1M-AEN801, and a
+ * measurement -- it is an architecture gap, not a sweep item.  Tracked as
+ * follow-up work off issue #1645.
+ */
 
 /**
  * @brief Default-initialize an @ref alp_shmem_config_t for region @p id.
@@ -226,7 +257,10 @@ typedef struct {
  *
  * Both cores opening the same @c name see the same physical bytes;
  * cache coherency is the caller's responsibility unless
- * @c cacheable = false.
+ * @c cacheable = false -- and the SDK currently offers the caller no
+ * primitive with which to discharge that responsibility, so
+ * @c cacheable = false is the only setting with defined behaviour.  See
+ * the warning above @ref alp_shmem_config_t.
  *
  * @param[in] cfg  Configuration.  Must be non-NULL with a non-empty name.
  * @return Open handle on success, or NULL if the region isn't declared
