@@ -236,6 +236,47 @@ backend's z_out_write so the portable path stops generating the request."
 
 ## Task 2: Stop passing a non-handle to the platform GPIO open
 
+> **IMPLEMENTED 2026-08-24 — branch `fix/1618-gpio-proxy-delegated-owner`,
+> draft PR #1656 (bench-gated). The plan's design decision, fix shape and test
+> strategy were all correct and are unchanged. Four notes.**
+>
+> **1. Step 4 asked which failure mode showed up: it is the CRASH branch.**
+> Pre-fix the whole image died — `alp_sdk.peripheral.cc3501e_proxy FAILED:
+> rc=-11` (SIGSEGV), the handler log stopping dead at
+> `START - test_gpio_proxy_delegated_cb_gets_real_handle`, and **110 later test
+> cases blocked** by the abort (`41 of 152 executed test cases passed`). So the
+> adjacent `_sides[]` slot held a non-NULL value that was called as a function
+> pointer, not a NULL that silently no-oped. Post-fix the scenario passes and
+> nothing is blocked.
+>
+> **2. Step 3 needs one more Kconfig than it lists.**
+> `CONFIG_ALP_SDK_GPIO_CC3501E_PROXY` is `depends on ALP_SDK && GPIO &&
+> ALP_SDK_CHIP_CC3501E` (`zephyr/kconfigs/peripherals-handles.kconfig:65-67`),
+> so `prj_cc3501e_proxy.conf` must also set `CONFIG_ALP_SDK_CHIP_CC3501E=y` or
+> the symbol never lands in `.config` and `zephyr_library_sources_ifdef` leaves
+> the proxy uncompiled — a scenario that builds and passes while testing
+> nothing.
+>
+> **3. `cc3501e_proxy.c` needs `#include <zephyr/sys/util.h>` for `CONTAINER_OF`.**
+> It did not include it before, because it had no container arithmetic of its own.
+>
+> **4. Step 9's audit result, recorded rather than left as an exercise.**
+> `grep -rn "CONTAINER_OF(st\|CONTAINER_OF(state" src/backends/` also hits
+> `pwm`, `can` and `i2s`, and **none is the same defect**: `alp_z_gpio_ops()`
+> (`gpio_ops.h`) is the ONLY backend-to-backend ops accessor in the tree and
+> `cc3501e_proxy.c` was its only caller, so no other backend is ever handed a
+> non-handle. The `gd32_bridge.c` backends register normally rather than
+> delegating into another backend's ops table. `z_close`'s
+> `s->owner->edge` read is fixed by the same change, since both paths now carry a
+> genuine owner. The class is closed, not just this instance.
+>
+> Line drift, all small: `px_open`'s delegation is `cc3501e_proxy.c:128-129`
+> (plan says `:130-131`), `proxy_side_t` is `:72-77` (`:73-78`), `z_open` is
+> `zephyr_drv.c:160-176` (`:163-180`), and `s->owner = CONTAINER_OF(...)` is
+> `:170` (`:174`). `_isr_thunk` at `:149-157` and `z_close`'s owner read at
+> `:250` were both exact.
+
+
 **Issue: #1618** (`release-blocker`, milestone `v0.17.0`)
 
 **Files:**
@@ -547,6 +588,60 @@ plain z_open now routes through the same body."
 ---
 
 ## Task 3: Stop leaving a stack context registered with the Bluetooth host
+
+> **IMPLEMENTED 2026-08-24 — branch `fix/1620-ble-gatt-ctx-lifetime`, draft PR
+> (bench-gated). The fix shape is exactly as planned. Two corrections and one
+> finding the plan does not cover.**
+>
+> **1. Step 3's skipped placeholder was not needed — there IS an existing test
+> harness, and the plan's own escape clause applies.** `tests/zephyr/ble_gatt_server/`
+> drives the SELECTED backend's real ops through `zephyr_ble_ops()`, and
+> `zephyr_drv.c` already carries a `CONFIG_ZTEST`-only seam
+> (`alp_ble_test_read_cb`, added under #480) — so the precedent for a test seam
+> in this exact file already exists. Two seams
+> (`alp_ble_test_gatt_read_inflight_guard` /
+> `..._write_inflight_guard`) claim a real pool connection, mark its slot in
+> flight, and run the real `z_gatt_read` / `z_gatt_write`.
+>
+> They pass a non-NULL **sentinel** `bt` that is never dereferenced, because the
+> guard returns before the op reaches the host. That is deliberate: if anyone
+> reorders the guard after `bt_gatt_read()`, the seams FAULT rather than quietly
+> passing. Suite result 6/6 pass, **0 skipped** — better than the plan's
+> `ztest_test_skip()` placeholder in `tests/zephyr/peripheral/`, which would have
+> proven nothing. The corruption half still needs the bench.
+>
+> **2. The guard must be checked BEFORE `c->bt`, not after.** The plan's Step 5
+> snippet keeps the existing `if (c == NULL || c->bt == NULL) return
+> ALP_ERR_NOT_READY;` line above the new `if (c->read_in_flight) return
+> ALP_ERR_BUSY;`. Split it: `c == NULL` first, then the in-flight guard, then
+> `c->bt == NULL`. The ordering is the whole safety argument — refusing before
+> anything is handed to the host is what makes it safe to leave a pool-owned ctx
+> live across a timeout — and it is also what lets the seams above use a sentinel.
+>
+> **3. NOT CLOSED by this fix, and the plan does not mention it:
+> `bt_gatt_write`'s `params.data` still points at the CALLER's buffer.** Moving
+> the ctx into the pool fixes `params` itself, not the payload it points at.
+> Zephyr copies `data` into the ATT PDU immediately for a short write, so that
+> case is safe; a **long** write (`len > ATT_MTU - 3`) is sent across later
+> prepare-write PDUs, i.e. after a timed-out `alp_ble_gatt_write` has already
+> returned. Bounding it means either copying the payload into the ctx (costing
+> `(ATT_MTU-3) x CONFIG_ALP_SDK_BLE_MAX_CONNS` bytes of BSS) or enforcing the
+> `<= ATT_MTU - 3` bound `include/alp/ble.h:322` already documents -- but the
+> implementation currently supports longer via Zephyr's long write, so enforcing
+> the documented bound would REMOVE working functionality. Left to a follow-up
+> with the hazard written into the code at the timeout branch, rather than
+> decided unilaterally.
+>
+> **4. Sibling audit (Step 9) result:** clean. `bt_gatt_notify` is synchronous
+> and holds no params across a wait, `bt_gatt_service_register` registers out of
+> `_gatt_svc_pool[]` which is already pool-owned, and this backend has no
+> discovery or subscribe path at all. `z_gatt_read` and `z_gatt_write` were the
+> only two sites of this shape.
+>
+> Line drift: `z_gatt_read` is `:706-752` (plan says `:725-742`), `z_gatt_write`
+> is `:755-792` (`:768-785`), the `bt_gatt_read` + `k_sem_take` pair is
+> `:738-742` (`:739-742`). The false comment at `:252-255` was exact.
+
 
 **Issue: #1620** (`release-blocker`, milestone `v0.17.0`)
 
