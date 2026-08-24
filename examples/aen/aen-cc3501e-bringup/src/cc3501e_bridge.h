@@ -48,14 +48,11 @@
  * ALIF_SPI_CLK is a frequency-only dummy in the dtsi with no divider control,
  * so there is no software knob for it here.
  *
- * NOT ADOPTED -- 25 MHz is silicon-UNSTABLE on this SoM.  The transfer desyncs
- * partway through a bulk read (NET first-miss at 116-149 kB) and no rx-delay
- * value clears it: rx-delay 0 fails outright, 2 passes 2 runs of 3, 4 fails
- * again, so the MISO capture is simply marginal at a 40 ns bit period over these
- * traces.  14.29 MHz (70 ns) is the validated rate.  Revisit with a scope on
- * MISO at 25 MHz before raising it.
+ * REQUIRES rx-delay = <2> on the SPI node (see the board overlay).  At a 40 ns
+ * bit period the MISO capture needs the delay; with rx-delay 0 the link fails
+ * outright, and 4 is too much.
  *
- * It would not have bought much anyway -- silicon-measured
+ * It does not raise throughput -- silicon-measured
  * 2026-08-24: 682 kB/s at 25 MHz vs 678 kB/s at 14.29 MHz on PIO, 704 vs 701 on
  * DMA, because wire time is only ~554 us of a ~2459 us transaction and the rest
  * is per-frame protocol cost on both ends.  It is worth taking anyway: each
@@ -63,11 +60,25 @@
  * handed back to everything else on the SoM.
  *
  * The 14.29 MHz predecessor was scope-confirmed at 14.20-14.26 MHz, which is
- * what validates the 200 MHz functional-clock figure the divider assumes.
- * RX_SAMPLE_DLY was tuned at 14.3 MHz; 25 MHz samples clean on
- * e1m-aen-evk-01 (soak ping_fail=0), but a board with longer traces should
- * re-check MISO capture before adopting it. */
-#define CC3501E_BRIDGE_SPI_FREQ_HZ 14000000u
+ * what validates the 200 MHz functional-clock figure the divider assumes.  A
+ * board with longer traces should re-check MISO capture before adopting 25 MHz.
+ *
+ * SEPARATE, PRE-EXISTING DEFECT (do not blame this clock for it): a bulk read
+ * intermittently desyncs partway through -- roughly 1 run in 2-3, at anywhere
+ * from 61 kB to 212 kB in -- and then never recovers for the caller's whole
+ * retry budget.  It reproduces at 14.29 MHz TOO, so it is not a clock artifact.
+ * Signature (host-side, request-header phase of CMD_SOCK_RECV 0x23): the
+ * slave's in-band idle marker reads [02 00 00 00] once and then [00 00 00 00]
+ * forever instead of A5 A5 A5 A5 -- i.e. the slave is stuck mid-reply on a
+ * transfer it armed earlier and never completed.  With
+ * SPI_TRANSFER_RETURN_PARTIAL deliberately off, a CS deassert does not complete
+ * it, and NEITHER slave self-heal fires (g_resync_count does not move -- the
+ * slave is not misframing; g_arm_fail_count does not move -- the arm succeeded).
+ * Clocking a full idle frame from the host to satisfy the outstanding count was
+ * tried and did NOT recover it.  The fix likely belongs on the slave: a
+ * stall watchdog that calls bridge_transport_spi_hw_reinit() when an armed
+ * transfer has not completed for N ms. */
+#define CC3501E_BRIDGE_SPI_FREQ_HZ 25000000u
 #endif
 
 /* CC3501E control pins on the Alif LP-GPIO island (NOT E1M edge pads):

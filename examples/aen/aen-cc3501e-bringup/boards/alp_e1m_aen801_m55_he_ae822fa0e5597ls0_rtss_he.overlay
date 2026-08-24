@@ -114,6 +114,10 @@
 		clock-frequency = <200000000>; /* real SSI functional clock (was mis-set 400M; proven via BAUDR scaling) */
 		dwc-ssi;
 		fifo-depth = <16>;
+		/* MISO capture delay in SSI clocks.  Needed at 25 MHz (40 ns bit period):
+		 * silicon-measured on e1m-aen-evk-01, rx-delay 0 fails outright and 4
+		 * fails too; 2 is the working point.  Harmless at 14.29 MHz. */
+		rx-delay = <2>;
 		pinctrl-0 = <&pinctrl_spi1>;
 		pinctrl-names = "default";
 		status = "okay";
