@@ -12,6 +12,118 @@
 
 **Spec:** `docs/superpowers/plans/2026-08-23-post-audit-hardening-campaign.md` — read its **Global Constraints** and **Verification infrastructure** sections first.
 
+> **DESIGN PASS DONE 2026-08-24 — VERDICT: BUILD IT DIFFERENTLY. The 14 fixes are
+> the value and should ship. The harness as designed can see ONE of its fourteen
+> targets, and the campaign index's "highest-leverage item" framing does not
+> survive contact with the tree.**
+>
+> **The structural fact this plan under-reads.** The harness can only compare
+> backends that co-link into one image. On `native_sim` that is exactly
+> `{zephyr_drv wildcard, sw_fallback}` per class — nothing else. Every other
+> sibling in the 14-site list is SoC- or OS-gated and can NEVER co-link with its
+> comparator: `pwm/gd32_bridge.c` and `adc/gd32_bridge.c` under
+> `CONFIG_ALP_SOC_RENESAS_RZV2N_N44` (`zephyr/CMakeLists.txt:1468-1469`,
+> `:1518-1519`), `adc/alif_e8.c`/`alif_e7.c` under the Ensemble configs
+> (`:1514-1517`), and **every `yocto_drv.c` sibling lives in a different
+> operating system's build entirely** and will never appear in a Zephyr ztest
+> image. Step 7's "skip-mark any row whose backends are not linked" therefore
+> resolves, on an actual tally, to skip-marking nearly the whole seed list.
+>
+> **The honest tally of what a native_sim harness can catch:**
+>
+> | reach | count | detail |
+> |---|---|---|
+> | parity-provable offline as designed | **1 of 14** | the uart empty-read (`sw_fallback.c:86` `ALP_OK` vs `zephyr_drv`'s timeout) — both wildcard, both in the image, priorities 100/0 |
+> | provable offline but as direct behaviour tests, not parity rows | ~4 | `storage_dispatch` read_only two-codes; PWM `zephyr_drv.c:113-114` returning two codes from one file; the storage erase-granule lie; the sw_fallback fix's own regression |
+> | not provable offline **at all** | 3 of 3 (family C) | timeout-convention drift is behaviourally unobservable in finite time — you cannot distinguish "waits forever" from "waits ~49.7 days", `audio`'s `int32_t` wrap needs a >INT32_MAX wait to witness, and `mqtt/yocto_drv.c` is not in a Zephyr image at all |
+> | bench- or other-target-only | ~6 | gd32_bridge (V2N), alif_e8/e7 guards, `ext/renesas/power.c`, the wdt channel leak (needs `wdt_setup` failure injection), the yocto halves of `allow_unsafe_write`/`allow_modeset`, tmu split, inference rank |
+>
+> **Highest-risk failure mode of the design as written:** the finished suite sits
+> green on `dev` with its flagship row one `prj.conf` drift away from a silent
+> skip and 13 of 14 targets skip-marked, and the team reads "parity suite green"
+> as "SoM-swap verified" — a stronger false assurance than having no suite at
+> all. That is the #1645 failure institutionalised from day one.
+>
+> **Family C has no test-shaped answer; it has a structural one.** The only
+> durable guard is one shared `alp_timeout_to_k_timeout()` helper — promote the
+> camera form at `src/backends/camera/zephyr_video.c:291` into a header, give it
+> a unit test, and convert the three sites to call it. This plan fixes the sites
+> but leaves the convention copy-pasted, so vendor N+1 re-diverges freely.
+>
+> **Do NOT land it red.** A knowingly-red gate collides with the repo's own
+> `test-all.sh --target dev`-green-before-PR rule, and the plan already hedges
+> into "draft PR or Kconfig-gate it", which concedes the point — a Kconfig-off
+> harness is, in the plan's own words, "a file, not a gate". The honesty property
+> (*written before the fixes, demonstrably detects*) is a property of **commit
+> order, not branch state**: one PR where commit 1 is the harness and commit 2+
+> are the fixes, CI green at the head, and the harness's red output from commit 1
+> pasted verbatim into the PR body. Detection proven, `dev` never carries a red
+> gate, no Kconfig machinery, and four PRs collapse to two.
+>
+> **Two hazards to fix if any of Task 1 is kept.** (a) `ztest_test_skip()` when
+> `n < 2` or when a backend will not open instance 0 means a `prj.conf`
+> regression that drops `CONFIG_SERIAL` silently converts the one real detection
+> into a skip — on `native_sim` the test should ASSERT the expected roster (uart
+> backends == {zephyr, sw_fallback}, both must open) and fail otherwise. Skips are
+> for rows; asserted rosters are for the platform you control. (b) Driving
+> `ops->open()` with a hand-zeroed state bypasses `base_caps` seeding, `probe`
+> refinement and slot lifecycle (`uart_dispatch.c:78-92`), so the harness can
+> drift from what a real open produces — each new row needs that checked.
+>
+> **The rejected backend-pin was rejected for a reason the tree does not
+> support** — but do not reopen it for this plan. The `CONFIG_ALP_SDK_TESTING`
+> doubles already override production selection (a priority-255 wildcard that
+> hijacks `alp_backend_select()` IS a selection seam, spelled as data), and the
+> repo has at least three `CONFIG_ZTEST` seams in production backend files:
+> `ble/zephyr_drv.c:311`, `update_log/sw_tier.c:386`, plus the two #1620 added. A
+> `#if defined(CONFIG_ZTEST)` pin in `src/backend.c` would be squarely inside
+> precedent. It still would not reach the cross-OS siblings, so it buys dispatcher
+> coverage (2 of 14) at the cost of a seam in the selection hot path — note it for
+> when the harness grows real, do not build it now.
+>
+> **`tests/zephyr/conformance/` needs no third image**, and this plan does not
+> actually ask for one: Step 5 adds `behavior_parity.c` to the `else()` branch,
+> i.e. the existing real-backend image absorbs it. That is right. One caveat the
+> plan misses: the CMake comments claim the sw_fallbacks are gated on
+> `CONFIG_ALP_SDK_*_SW_FALLBACK`, but the source lines link them
+> **unconditionally** (`zephyr/CMakeLists.txt:1426`, `:1435`, `:1444`, `:1457`,
+> `:1471`, `:1480`, `:1489`, `:653`, `:661`, `:671`). Good for the harness; also
+> means sw_fallback links into real-silicon images too, losing at priority 0 but
+> present. Worth its own small issue.
+>
+> **On sequencing, straight opinion.** "Benefit scales linearly with vendor
+> count" is the weakest sentence in the campaign index: vendor N+1's backend will
+> be SoC-gated exactly like `alif_e8.c` and `gd32_bridge.c` and will never
+> co-link with a comparator, so the registry-walk harness gains approximately
+> nothing per vendor. What actually scales is (a) a written status-per-condition
+> contract in the public headers — Task 3's decisions produce it as a byproduct,
+> so capture them in `@return` docs rather than leaving them in a PR body, (b)
+> the shared timeout helper, and (c) an eventual **same-test-source, per-target
+> build**: one expectation table compiled against the Zephyr backends on
+> native_sim and against the yocto backends as a host Linux build, asserting the
+> *contract* rather than a co-linked sibling. Note that this plan's
+> "compare to each other, never to a constant" principle is exactly what makes
+> the cross-OS case impossible — once Task 3 decides which sibling is right, the
+> contract is decided and asserting it is no longer encoding a guess. The
+> per-target shape needs the yocto backends buildable in CI (mock
+> mosquitto/ioctls); worth a 30-minute spike before writing that follow-up plan.
+>
+> **On #1637's dependency:** the coupling is merge-conflict coordination on
+> `wdt/zephyr_drv.c`'s `z_open`, not a hard dependency on the harness existing.
+> It does not justify building Task 1 as scoped.
+>
+> **What to cut:** the red landing (use commit ordering), the four-PR split (two
+> suffice), the skip-if-it-will-not-open pattern (assert the roster), and the
+> granule "non-zero and self-consistent" row — it passes on `erase_size = 1`, so
+> as drafted it is another test that structurally cannot fail; replace with a
+> functional erase-at-the-reported-granule check against `flash_sim`, or drop it.
+>
+> **Cheapest interim guard if even the small harness is deferred:** three plain
+> ZTESTs in the existing `main.c` image (uart empty-read status, storage read_only
+> one-code, pwm out-of-range one-code) plus the promoted timeout helper and its
+> unit test. Roughly 150 lines, no new scenario, no new image, and it pins every
+> offline-provable site the harness would have.
+
 ## Global Constraints
 
 - Base branch is `dev`. Verify with `git merge-base HEAD origin/dev`. Never `--base main`.

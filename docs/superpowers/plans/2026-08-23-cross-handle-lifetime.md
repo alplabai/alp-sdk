@@ -12,6 +12,135 @@
 
 **Spec:** `docs/superpowers/plans/2026-08-23-post-audit-hardening-campaign.md` — read its **Global Constraints** and **Verification infrastructure** sections first, particularly the `#629 / #756 / #1114 / #1115` prior-art table and the note that the two `begin_close` variants are **not** interchangeable.
 
+> **DESIGN PASS DONE 2026-08-24 — read before implementing. The invariant this
+> plan proposes is only HALF the rule, and the highest-risk item is that Task 2
+> as written leaves the exact bug it claims to close, behind a passing test.**
+>
+> **The invariant, in full, two arms.** *A slot may not return to its pool while
+> anything outside the handle can still reach it: before `alp_slot_release()`,
+> close must drain counted ops, sever every inbound reference (stop or deregister
+> each callback source, clear each sibling back-pointer), and only then release.*
+> *Where a callback source CANNOT be synchronously stopped — no cancel or
+> deregister API, or an ISR the closing context cannot mask — the slot's release
+> must instead be **deferred until the source's last possible delivery has
+> landed**, by parking the callback's landing site in slot-owned memory and
+> accounting the armed callback so the close drain waits for it.*
+>
+> This plan writes only the first arm. `src/i2c_regfile.c:218-228` generalises to
+> the class where a synchronous stop exists, and does NOT generalise to Zephyr's
+> GATT client — `bt_gatt_read`/`bt_gatt_write` have no cancel — which is exactly
+> the #1620 family. Shipping the one-arm text into `src/common/alp_slot_claim.h`
+> teaches the next dispatcher author a rule that is *unachievable* at the sites
+> where the bugs are worst, and they will improvise.
+>
+> - **Class A (stoppable source)** — i2c_regfile, the mbox registration, the
+>   counter alarm (#1627), the UART RX ringbuf, LVGL user-data. Order:
+>   drain, then stop, then clear back-pointers, then release.
+> - **Class B (unstoppable source)** — the GATT client ops (#1620), any host API
+>   with fire-and-forget completion. Ctx lives in the pool slot; an in-flight
+>   marker is set when the callback is armed and cleared only by its final
+>   delivery; release is gated on that marker.
+>
+> **No new helper.** The executable form of Class B needs none: *count the armed
+> callback in `active_ops`* — enter when armed, leave at final delivery — and the
+> existing `alp_handle_begin_close_blocking()` drain already waits for it. A
+> `alp_handle_quiesce(stop_fn, ctx)` wrapper would be an interface with a
+> different one-off implementation per site (an LVGL user-data clear, a
+> `mbox_register_callback(NULL)`, a pool walk) and could enforce nothing the call
+> site does not already have to write. The back-pointer half is unenforceable by
+> any counter — no counter can see `c->state.radio` — so that stays prose plus
+> the skill checklist row. Task 1's venue choice is right; only its text needs
+> the second arm.
+>
+> **A second reference implementation this plan missed.**
+> `alp_uart_rx_ringbuf_detach` (`src/backends/uart/zephyr_drv.c:306-323`) already
+> does stop-IRQ, deregister, clear-back-ref, release — and its `:318` guard
+> ("only clear if it still points at THIS handle") is a recycled-slot subtlety
+> the invariant text should absorb. Cite it alongside `i2c_regfile.c`.
+>
+> **Site-by-site, with three corrections:**
+>
+> 1. **`src/ble_dispatch.c` — both halves verified, but the plan walks the wrong
+>    number of teardown sites.** `_free_conn` really is reached only from `:536`
+>    and `:570`; `c->state.radio = h` at `:533`; radio close (`:284-326`) never
+>    touches `_conn_pool`. **HIGHEST-RISK ITEM IN THIS PLAN:** the radio is torn
+>    down in **two** places — `alp_ble_close`'s `CLOSE_NOW` path (`:321-325`) AND
+>    the deferred self-close inside `alp_ble_scan_start` (`:479-489`, the #756
+>    machinery). The plan adds the walk only to the former, so a close triggered
+>    from inside a scan callback — the exact reentrant path #756 was built for —
+>    still frees the radio at `:488` without walking the pool. Every conn dangles
+>    and the slots strand, i.e. the bug the task claims to close, now hidden
+>    behind a green test, because the ztest closes externally and passes. Factor
+>    the teardown into one static and call it from both.
+>
+>    **The plan's own deadlock hedge is wrong — do not follow it.** Walking
+>    *before* the radio's `begin_close` reopens the race it exists to close: an
+>    `alp_ble_connect` counted on the radio can allocate a fresh conn after the
+>    walk and before the CAS. The feared deadlock does not exist —
+>    `alp_ble_disconnect` drains only `conn->active_ops` (`:564`), which the
+>    closing thread holds no count on; worst case it blocks up to a GATT
+>    `timeout_ms`, which is the documented sleep-poll contract. Walk **after** the
+>    CAS (no new conns can be created for a CLOSING radio: `alp_ble_connect`'s
+>    `op_enter` at `:519` fails), **before** `h->state.ops->close`.
+>
+>    One honest nuance for the PR: the permanent-`ALP_ERR_NOMEM` half is true for
+>    an app that treats its conn handles as dead after radio close (the natural
+>    contract), but strictly `alp_ble_disconnect` on a stale conn still works,
+>    because `c->state.ops` was copied at `:532` and disconnect never dereferences
+>    the radio.
+>
+> 2. **`src/gui_lvgl.c` — right fix, wrong facts, unimplementable sketch.** The
+>    two `alp_gui_lvgl_attach` definitions at `:107`/`:157` are **not** an
+>    LVGL-version pair: the guard is `ALP_HAS_LVGL` real-bridge vs link-stub
+>    (`:155`'s `#else` returns `ALP_ERR_NOSUPPORT`). "Both arms" therefore means
+>    only that the stub arm needs a stub `alp_gui_lvgl_detach` so the symbol
+>    always links. The real gap: **the detach as sketched cannot be written** —
+>    attach stores neither the `lv_display_t *` nor the malloc'd buffer (`:123`,
+>    `:139`) anywhere reachable, so `alp_gui_lvgl_detach(void)` has nothing to
+>    look up. The fix must add a static (and then decide whether a second attach
+>    is rejected — today it silently creates a second display) or change the
+>    signature; a detach that only clears user-data leaks the display object and
+>    the buffer on every attach/detach cycle. Note also that
+>    `alp_display_close` cannot stop this source at all (dispatch does not know
+>    LVGL exists), so this site is Class A enforced as an **app-facing ordering
+>    contract** — detach-before-close, documented on both symbols — plus the
+>    non-optional NULL guard in `_flush_cb`. The SDK cannot make it
+>    self-enforcing.
+>
+> 3. **`src/backends/mproc/zephyr_drv.c:443` — plan is right as written.** The
+>    one-line `mbox_register_callback(be->dev, be->channel, NULL, NULL)` between
+>    disable and `_mbox_be_free` is Class A textbook, and the "defence in depth,
+>    do not overclaim" framing is correct for single-core Zephyr images.
+>
+> 4. **`src/zephyr/handles.c:29` — NOT REACHABLE, and the premise is false. Close
+>    it with a comment.** The macro's `(struct type){0}` cannot "wipe the slot's
+>    `lifecycle` and `active_ops`" because **neither pooled struct has those
+>    fields**: `struct alp_adc_stream` (`src/zephyr/handles.h:149-156`) and
+>    `struct alp_uart_rx_ringbuf` (`:91-96`) carry `in_use` plus plain data only.
+>    The real defect in those classes is #1634's — no lifecycle guard at all
+>    (e.g. `alp_uart_rx_ringbuf_pop` at `src/backends/uart/zephyr_drv.c:292` reads
+>    `rb->in_use` unguarded against a racing detach's `lwrb_free`). Once #1634
+>    adds `lifecycle`/`active_ops` and a drained close, `in_use == false` will
+>    imply zero in-flight ops and the re-own zeroing becomes provably safe.
+>    Deliverable here: a comment recording that, pointing at #1634. Do not
+>    convert the mutex claim to a CAS — #1630 allowlists it correctly.
+>
+> **Relationship to #1620.** Its shape (pool-resident ctx, per-conn in-flight flag
+> held across a timeout, cleared by the late callback, guard checked before
+> anything reaches the host) is neither a special case of drain-stop-release nor a
+> different invariant — it IS the Class B arm, and Task 1's header text should
+> cite it as the Class B reference exactly as `i2c_regfile.c` is cited for Class
+> A. Do not refactor either onto the other now. One unification worth a follow-up
+> **on #1620, not here**: if its in-flight flag were folded into
+> `conn->active_ops`, `alp_ble_disconnect`'s existing drain (`:564`) would wait
+> for the late callback with zero new machinery — valid only if Zephyr guarantees
+> pending GATT params complete (with error) on disconnect, which must be verified
+> against the host source first.
+>
+> **Caveat on this design pass:** the advisor's checkout predated #1620 landing,
+> so its Class-B reading of that fix came from a description rather than the
+> diff. Confirm against the merged PR before citing it in the header text.
+
 ## Global Constraints
 
 - Base branch is `dev`. Verify with `git merge-base HEAD origin/dev`. Never `--base main`.
