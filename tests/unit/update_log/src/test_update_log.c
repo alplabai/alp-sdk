@@ -11,7 +11,16 @@
 #include "../../../../src/update_log/store.h"
 #include "../../../../src/update_log/sha256.h"
 
-ZTEST_SUITE(alp_update_log, NULL, NULL, NULL, NULL, NULL);
+/* Suite-wide safety net (issue #1625 review): if a mid-test zassert aborts
+ * test_open_election_unequal_priority_no_livelock() before it releases the
+ * open-election gate, the low-priority worker would otherwise stay parked
+ * forever inside fake_hw_ready(), holding the update_log dispatcher's shared
+ * OPENING lock and wedging every later test's alp_update_log_open(). Give
+ * the gate and reset the fakes unconditionally after every test in this
+ * suite -- a no-op for every test that never touches the gate. */
+static void alp_update_log_after(void *fixture);
+
+ZTEST_SUITE(alp_update_log, NULL, NULL, NULL, alp_update_log_after, NULL);
 
 ZTEST(alp_update_log, test_entry_roundtrip)
 {
@@ -1096,8 +1105,14 @@ ZTEST(alp_update_log, test_concurrent_append_unequal_priority_no_livelock)
 	                0,
 	                K_NO_WAIT);
 
-	/* Bounded, not K_FOREVER: a livelocked cross-priority lock would hang
-	 * this join forever instead of failing fast. */
+	/* K_MSEC(2000), not K_FOREVER, though this does NOT make a livelock
+	 * fail fast: prj.conf leaves CONFIG_NATIVE_SIM_SLOWDOWN_TO_REAL_TIME
+	 * unset, so native_sim's simulated clock only advances while the CPU
+	 * idles -- a busy-spinning contender starves that clock too, so
+	 * k_thread_join()'s own timeout can never expire. The actual failure
+	 * signal on a livelock is twister's real-wall-clock per-config
+	 * timeout killing the whole test binary (rc=-9), which surfaces as
+	 * this config's remaining cases going "blocked" rather than pass/fail. */
 	zassert_equal(k_thread_join(&th_hi, K_MSEC(2000)),
 	              0,
 	              "higher-priority contender must complete -- a hang here is the "
@@ -1147,6 +1162,17 @@ static alp_status_t g_fake_hw_ready = ALP_ERR_NOSUPPORT;
 static bool g_ul_gate_hw_ready;
 K_SEM_DEFINE(g_ul_open_election_entered, 0, 1);
 K_SEM_DEFINE(g_ul_open_election_release, 0, 1);
+
+static void alp_update_log_after(void *fixture)
+{
+	(void)fixture;
+	/* Belt-and-suspenders release: harmless if nothing is parked (the
+	 * semaphore just saturates at its limit of 1), essential if the
+	 * open-election test above aborted mid-gate. */
+	k_sem_give(&g_ul_open_election_release);
+	g_ul_gate_hw_ready = false;
+	g_fake_hw_ready    = ALP_ERR_NOSUPPORT;
+}
 
 static alp_status_t fake_hw_ready(void)
 {
@@ -1248,10 +1274,16 @@ ZTEST(alp_update_log, test_selection_hard_error_surfaces)
  * initializer is genuinely parked -- not merely "probably" -- before the
  * contender thread is created, and the contender is then given a real
  * k_sleep() window (not a busy loop of its own) to actually run and enter
- * its wait loop before the initializer is released. Both joins are
- * BOUNDED, not K_FOREVER: a livelocked join must fail fast, not hang the
- * suite (mirrors test_concurrent_append_unequal_priority_no_livelock
- * above). */
+ * its wait loop before the initializer is released. Both joins use
+ * K_MSEC(2000), not K_FOREVER, matching
+ * test_concurrent_append_unequal_priority_no_livelock above -- but on a
+ * genuine livelock that bound does NOT expire early: native_sim's
+ * simulated clock only advances while the CPU idles (prj.conf leaves
+ * CONFIG_NATIVE_SIM_SLOWDOWN_TO_REAL_TIME unset), so a busy-spinning
+ * contender starves the clock the timeout itself needs. The real failure
+ * signal is twister's real-wall-clock per-config timeout killing the
+ * whole binary (rc=-9), reported as the rest of this config's cases
+ * going "blocked". */
 
 struct ul_open_worker_ctx {
 	alp_update_log_t *log;
@@ -1260,6 +1292,13 @@ struct ul_open_worker_ctx {
 #define UL_OPEN_STACK_SIZE 2048
 K_THREAD_STACK_DEFINE(g_ul_open_stack_lo, UL_OPEN_STACK_SIZE);
 K_THREAD_STACK_DEFINE(g_ul_open_stack_hi, UL_OPEN_STACK_SIZE);
+/* File-scope, not test-local (issue #1625 review): th_lo/th_hi back real
+ * kernel thread objects that can still be running (parked on the gate)
+ * after a mid-test zassert longjmps out of the ztest worker thread whose
+ * stack they would otherwise live on. A test-local struct there would let
+ * the next test's ztest worker reuse -- and corrupt -- that memory while
+ * this test's low-priority thread is still registered against it. */
+static struct k_thread g_ul_open_th_lo, g_ul_open_th_hi;
 
 static void ul_open_worker(void *p1, void *p2, void *p3)
 {
@@ -1279,9 +1318,8 @@ ZTEST(alp_update_log, test_open_election_unequal_priority_no_livelock)
 	struct ul_open_worker_ctx ctx_lo = { NULL };
 	struct ul_open_worker_ctx ctx_hi = { NULL };
 
-	struct k_thread th_lo, th_hi;
 	/* Numerically higher K_PRIO_PREEMPT() argument == LOWER priority. */
-	k_thread_create(&th_lo,
+	k_thread_create(&g_ul_open_th_lo,
 	                g_ul_open_stack_lo,
 	                UL_OPEN_STACK_SIZE,
 	                ul_open_worker,
@@ -1299,7 +1337,7 @@ ZTEST(alp_update_log, test_open_election_unequal_priority_no_livelock)
 	              0,
 	              "elected initializer never entered ops->ready()");
 
-	k_thread_create(&th_hi,
+	k_thread_create(&g_ul_open_th_hi,
 	                g_ul_open_stack_hi,
 	                UL_OPEN_STACK_SIZE,
 	                ul_open_worker,
@@ -1317,15 +1355,16 @@ ZTEST(alp_update_log, test_open_election_unequal_priority_no_livelock)
 
 	/* Release the elected initializer. Under the pre-fix busy spin, the
 	 * still-ready higher-priority contender never yields the core back to
-	 * it -- a hang, not a fast failure -- so this is caught by a BOUNDED
-	 * join rather than K_FOREVER. */
+	 * it -- the whole test binary hangs until twister's per-config
+	 * timeout kills it (see the K_MSEC(2000) joins below and their
+	 * comment for why that bound does not itself catch the hang). */
 	k_sem_give(&g_ul_open_election_release);
 
-	zassert_equal(k_thread_join(&th_hi, K_MSEC(2000)),
+	zassert_equal(k_thread_join(&g_ul_open_th_hi, K_MSEC(2000)),
 	              0,
 	              "higher-priority contender must complete -- a timeout here is the "
 	              "busy-spin livelock issue #1625 closes");
-	zassert_equal(k_thread_join(&th_lo, K_MSEC(2000)),
+	zassert_equal(k_thread_join(&g_ul_open_th_lo, K_MSEC(2000)),
 	              0,
 	              "elected initializer must complete and publish the singleton");
 
