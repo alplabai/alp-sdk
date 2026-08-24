@@ -81,7 +81,7 @@
 - Regenerating `soc_caps.h` changes public macros — that is an ABI change; regenerate the ABI snapshot too.
 - **Do not run `gen_soc_caps.py` concurrently with twister or pytest** — it flakes `ALP_SOC_REF_STR undeclared`. Serialise.
 - No AI attribution anywhere.
-- **`alp_e1m_evk.h:520`/`:550`** (`EVK_MB_ANA`/`EVK_ARD_A0` → `ALP_E1M_ADC0` contradicting the generated `ALP_E1M_ADC6`) is the same class but is **filed separately as #1622** and is Plan-1-adjacent work. Reference it; do not fix it here.
+- **`alp_e1m_evk.h:520`/`:550`** (`EVK_MB_ANA`/`EVK_ARD_A0` → `ALP_E1M_ADC0`) is filed separately as **#1622**. Reference it; do not fix it here — and note that it is **NOT the same class**. Verified 2026-08-24 against `metadata/boards/e1m-evk/netlists/E1M-EVK-2626-R2_pinmap.csv` (alp-sdk-internal): the hand-authored macros are **correct** and the generated side is **wrong**, the reverse of every other site in this plan. `CK_ANA` (mikroBUS socket `P7` pin 1) and the Arduino analog header `P4` pin 1 are the same net, reaching `ANA_S0` through `R52`, so both macros legitimately resolve to `ALP_E1M_ADC0` and the "mounting both forces a contention" comment is a literal description of the board. Three `adc:` entries in `metadata/boards/e1m-evk.yaml` do not match the netlist: `EVK_ADC_BOARD_ID` (`E1M_ADC0` — no BOARD_ID divider exists; the only `*ID*` nets are `USB0_30_ID`, `USB1_ID`, `USB2_ID`), `EVK_ADC_MB_AN` (`E1M_ADC6` — that pin is a **DAC0 loopback**: `R88` from `DAC0_OUT`, `R89` to `0V`), and `EVK_ADC_VBAT_SENSE` (`E1M_ADC7` — a **DAC1 loopback**: `R90` from `DAC1_OUT`, `R91` to `0V`; there is no `VBAT` net on the board at all). Correcting that renames or removes three public macros and is **blocked on a maintainer decision** — see the evidence comment on #1622.
 
 ---
 
@@ -416,4 +416,4 @@ Four PRs, all `--base dev`.
 
 **Bench:** none blocking. Task 1's rail check is opportunistic on an E1M-X EVK; Task 3 wants a real oversize-model load on E1M-AEN801 once the arena values are populated, but the unit test in Step 5 is the merge gate.
 
-**Related, filed separately:** #1622 (`EVK_MB_ANA`/`EVK_ARD_A0` mapping to `ALP_E1M_ADC0` against the generated `ALP_E1M_ADC6`) is the same class and is already tracked on its own.
+**Related, filed separately:** #1622 (`EVK_MB_ANA`/`EVK_ARD_A0` mapping to `ALP_E1M_ADC0`) is tracked on its own. It is **the inverse of this plan's class**: verified 2026-08-24 against the `E1M-EVK-2626-R2` pinmap, the hand-authored macros are correct and three `adc:` entries in the metadata are wrong (`EVK_ADC_BOARD_ID`, `EVK_ADC_MB_AN`, `EVK_ADC_VBAT_SENSE`). Do not "fix" it by regenerating over the hand-authored side. Blocked on a maintainer decision.

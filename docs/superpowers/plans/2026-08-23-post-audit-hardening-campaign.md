@@ -20,6 +20,72 @@ times" into "invariants a gate enforces once".
 
 ---
 
+## Campaign status — 2026-08-24
+
+Recorded here because the sub-plans describe intent, not what actually landed.
+
+**Merged to `dev`**
+
+| Issue | PR | Commit | Note |
+| --- | --- | --- | --- |
+| #1637 Task 1 | #1650 | `585eaf3fa` | Watchdog exclusivity. Issue stays OPEN — Tasks 2-4 unwritten. |
+| #1630 | #1653 | `17a1ec556` | Slot-claim sweep + `check_slot_claim_atomic.py` gate. Closed. |
+| (none) | #1661 | `c530e0df7` | ABI snapshot `MOVED` verdict — a header split was being read as 32 removed symbols. |
+
+**Queued:** #1660 (E1M-X EVK I2C block + E1M EVK overlay-pad indices).
+
+**In flight:** #1638 (PR #1654, rebased onto `dev`); the ten v0.17.0 branches
+#1621 #1623 #1624 #1625 #1626 #1627 #1628 #1629 #1631 #1634; and #1619, #1632, #1633.
+
+**Bench-gated drafts, cannot merge without silicon:** #1656 (for #1618),
+#1657 (for #1620), #1658 (for #1645).
+
+**Blocked on a maintainer decision — do NOT self-resolve**
+
+- **#1622** — the issue is written backwards. See the correction in
+  `2026-08-23-metadata-drift.md`: the hand-authored macros are right, three
+  `adc:` entries in `metadata/boards/e1m-evk.yaml` are wrong. Fixing it as
+  written corrects the wrong side.
+- **#1659** — `XEVK_I2C_ADDR_INA236_VCAM2` = `0x48u` collides with
+  `TAS2563_I2C_ADDR_BROADCAST` = `0x48u` on bus `E1M_X_I2C0`. Needs
+  `i2cdetect -y 0` plus an INA236 manufacturer-ID read at `0x48`.
+- **#1636 Task 3** — nine `inference_arena_sram_kib` values are a hardware call.
+- **#1635** scope, **#1644** two-arm rewrite.
+
+**Out of scope for v0.17.0:** #1635-#1648 are all milestone `Backlog`.
+
+### What this campaign taught, the hard way
+
+**A green gate is not evidence the change did what it claims.** Three distinct
+ways a test lied here:
+
+1. **It SKIPS.** #1637's first cut and #1619's test both called
+   `ztest_test_skip()` on the one platform CI runs, so they proved nothing while
+   reporting green. Read per-testcase status from `twister.json`, never the
+   summary line.
+2. **It PASSES with the bug present.** #1645 shipped two blockers behind a fully
+   green run because each test exercised the one arrangement where its bug could
+   not appear.
+3. **It PASSES with the fix REVERTED.** #1626's regression test did exactly this,
+   proven by deleting both validation hunks in a scratch tree and re-running.
+
+The countermeasure that actually works is **mutation-proof**: revert the fix in a
+scratch copy, re-run, and require the test to FAIL. It is now mandatory for every
+regression test in this campaign.
+
+**A gate that cannot be reached is not a gate.** #1621's new
+`check_delay_us_literal.py` was wired into a workflow whose paths filter listed
+`include/alp/chips/**` but not `chips/**` — so the one change class it exists to
+catch would never trigger it. Same shape as #1585, #1487, #1528. Adding a
+`check_*.py` means FOUR synchronised sites: the script,
+`metadata/quality-tasks-v1.json`, the workflow step, and
+`tests/scripts/test_check_<name>.py`.
+
+**Never dispatch two agents into the shared `/home/caner/alp-sdk` checkout.** One
+agent's `git checkout -b` landed underneath a running `test-all.sh` and silently
+invalidated the gate. Use worktree isolation, and stamp the branch at the start
+and end of any long gate run.
+
 ## Global Constraints
 
 Every task in every sub-plan inherits these. Values are verbatim.
