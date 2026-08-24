@@ -510,6 +510,32 @@ static int spi_dw_dma_transceive(const struct device *dev,
 		size_t chunk = (tx_words && rx_words) ?
 					MIN(tx_words, rx_words) : (tx_words ? tx_words : rx_words);
 
+		/* Keep each chunk a MULTIPLE of the default burst.
+		 *
+		 * spi_dw_dma_calculate_burst_length() shrinks the burst until it divides
+		 * the chunk exactly -- it has to, because the DW SSI raises its DMA
+		 * request on a FIFO watermark, so a final partial burst would never
+		 * request and the transfer would hang.  The consequence is brutal for an
+		 * ODD chunk: the burst collapses all the way to 1, i.e. ONE DMA
+		 * transaction per byte.  That is the measured 15723 us for a 512-byte
+		 * bridge payload (~55x its 286 us of wire time) that made the whole DMA
+		 * path look broken and got it disabled behind
+		 * CONFIG_SPI_DW_ALIF_DMA_MIN_LEN.
+		 *
+		 * Real bridge sizes hit it constantly -- reply payload is data_len + 1,
+		 * so about half of all frames are odd: 1723 -> burst 1, 487 -> burst 1.
+		 *
+		 * Splitting the aligned bulk from the short tail keeps the bulk at the
+		 * full burst and leaves at most (burst - 1) items for a final chunk,
+		 * which the loop handles on its next pass.  No hang, no per-byte DMA. */
+		{
+			const size_t dflt_burst = (info->fifo_depth * 1) / 2;
+
+			if (dflt_burst > 1u && chunk > dflt_burst && (chunk % dflt_burst) != 0u) {
+				chunk -= (chunk % dflt_burst);
+			}
+		}
+
 		if (chunk == 0) {
 			if (tx_len == 0 && txb) {
 				state->tx_idx++;
