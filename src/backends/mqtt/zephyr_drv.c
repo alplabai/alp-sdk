@@ -50,8 +50,11 @@
 #include "mqtt_ops.h"
 
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
+#include <zephyr/logging/log.h>
 #include <zephyr/net/mqtt.h>
 #include <zephyr/net/socket.h>
+
+LOG_MODULE_REGISTER(alp_mqtt, CONFIG_LOG_DEFAULT_LEVEL);
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -263,6 +266,26 @@ static void alp_mqtt_evt_cb(struct mqtt_client *client, const struct mqtt_evt *e
 			int n = mqtt_read_publish_payload(client, be->rx_buf + got, want - got);
 			if (n <= 0) break;
 			got += (size_t)n;
+		}
+
+		/* Drain anything beyond rx_buf: leaving remaining_payload > 0
+         * makes every later mqtt_input() return -EBUSY and the
+         * connection stops delivering permanently -- and if this is a
+         * QoS-1+ message, we are about to ack it below, so the broker
+         * will not resend either (#1645). Mirrors the msg_cb == NULL
+         * branch above, which already drains its own full payload. */
+		if (pub->message.payload.len > got) {
+			size_t  remaining = pub->message.payload.len - got;
+			uint8_t scratch[64];
+			while (remaining > 0) {
+				int n = mqtt_read_publish_payload(client, scratch, MIN(remaining, sizeof(scratch)));
+				if (n <= 0) break;
+				remaining -= (size_t)n;
+			}
+			LOG_WRN("mqtt: publish on \"%s\" truncated: delivered %zu of %zu bytes",
+			        be->topic_buf,
+			        got,
+			        pub->message.payload.len);
 		}
 
 		if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {

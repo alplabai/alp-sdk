@@ -369,6 +369,22 @@ static void *rpc_rx_main(void *arg)
 			break;
 		}
 
+		/* The rpmsg endpoint delivers message-at-a-time, so a read()
+		 * that exactly fills `buf` is the only signal available that
+		 * the peer's frame was at least buffer-sized and may have been
+		 * cut by read() itself -- the remainder then stays queued in
+		 * the endpoint and the NEXT read() returns that tail, silently
+		 * misaligning every following frame (#1645). Treat it as a
+		 * protocol error, same footing as a malformed frame, rather
+		 * than parsing a possibly-truncated message as complete. */
+		if ((size_t)n == sizeof buf) {
+			fprintf(stderr,
+			        "alp_rpc: dropping possibly-truncated peer frame on %s (read %zu bytes)\n",
+			        ch->name,
+			        sizeof buf);
+			continue;
+		}
+
 		const void *payload     = NULL;
 		size_t      payload_len = 0;
 		const char *method      = frame_parse(buf, (size_t)n, &payload, &payload_len);
