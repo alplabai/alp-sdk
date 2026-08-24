@@ -525,6 +525,9 @@ jobs:
       - name: "Gate — apt-get update/install goes through scripts/ci/apt-bounded.sh (#1575)"
         run: python3 scripts/check_apt_bounded.py
 
+      - name: "Gate — no fixed-literal alp_delay_us(N>=1000) under chips/ (#1621)"
+        run: python3 scripts/check_delay_us_literal.py
+
       - name: alp.lock in sync
         run: python3 scripts/west_commands/alp_lock.py --workspace . --check
 

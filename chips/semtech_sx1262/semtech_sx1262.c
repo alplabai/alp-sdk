@@ -32,7 +32,7 @@ alp_status_t semtech_sx1262_hw_reset(semtech_sx1262_t *dev)
 	alp_delay_us(200);
 	s = alp_gpio_write(dev->nreset, true);
 	if (s != ALP_OK) return s;
-	alp_delay_us(10000);
+	alp_delay_ms(10);
 	return ALP_OK;
 }
 
@@ -40,7 +40,7 @@ alp_status_t semtech_sx1262_wait_busy(semtech_sx1262_t *dev, uint32_t timeout_ms
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 	if (dev->busy == NULL) {
-		alp_delay_us(1000);
+		alp_delay_ms(1);
 		return ALP_OK;
 	}
 	uint32_t waited_ms = 0;
@@ -49,7 +49,7 @@ alp_status_t semtech_sx1262_wait_busy(semtech_sx1262_t *dev, uint32_t timeout_ms
 		alp_status_t s     = alp_gpio_read(dev->busy, &level);
 		if (s != ALP_OK) return s;
 		if (!level) return ALP_OK;
-		alp_delay_us(1000);
+		alp_delay_ms(1);
 		waited_ms++;
 	}
 	return ALP_ERR_TIMEOUT;

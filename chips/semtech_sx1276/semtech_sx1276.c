@@ -31,7 +31,7 @@ alp_status_t semtech_sx1276_hw_reset(semtech_sx1276_t *dev)
 	alp_delay_us(200);
 	s = alp_gpio_write(dev->nreset, true);
 	if (s != ALP_OK) return s;
-	alp_delay_us(5000);
+	alp_delay_ms(5);
 	return ALP_OK;
 }
 

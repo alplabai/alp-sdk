@@ -28,7 +28,7 @@ alp_status_t quectel_bg77_power_on(quectel_bg77_t *dev)
 	if (dev->pwrkey == NULL) return ALP_ERR_NOSUPPORT;
 	alp_status_t s = alp_gpio_write(dev->pwrkey, true);
 	if (s != ALP_OK) return s;
-	alp_delay_us(500000);
+	alp_delay_ms(500);
 	return alp_gpio_write(dev->pwrkey, false);
 }
 

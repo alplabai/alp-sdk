@@ -48,9 +48,9 @@ alp_status_t ra8875_init(ra8875_t *dev, alp_spi_t *spi, alp_gpio_t *reset)
 
 	if (reset != NULL) {
 		(void)alp_gpio_write(reset, false);
-		alp_delay_us(100000);
+		alp_delay_ms(100);
 		(void)alp_gpio_write(reset, true);
-		alp_delay_us(300000);
+		alp_delay_ms(300);
 	}
 
 	dev->initialised = true;

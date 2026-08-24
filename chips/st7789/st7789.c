@@ -59,17 +59,17 @@ alp_status_t st7789_init(st7789_t   *dev,
 
 	if (reset != NULL) {
 		(void)alp_gpio_write(reset, false);
-		alp_delay_us(20000);
+		alp_delay_ms(20);
 		(void)alp_gpio_write(reset, true);
-		alp_delay_us(150000);
+		alp_delay_ms(150);
 	}
 
 	alp_status_t s = st7789_cmd(dev, ST7789_CMD_SWRESET);
 	if (s != ALP_OK) return s;
-	alp_delay_us(150000);
+	alp_delay_ms(150);
 	s = st7789_cmd(dev, ST7789_CMD_SLPOUT);
 	if (s != ALP_OK) return s;
-	alp_delay_us(500000);
+	alp_delay_ms(500);
 
 	uint8_t colmod = 0x55; /* 16-bit/pixel RGB565 */
 	s              = st7789_cmd(dev, ST7789_CMD_COLMOD);

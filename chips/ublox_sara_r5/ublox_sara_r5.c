@@ -30,7 +30,7 @@ alp_status_t ublox_sara_r5_power_on(ublox_sara_r5_t *dev)
 	alp_status_t s = alp_gpio_write(dev->pwr_on, true);
 	if (s != ALP_OK) return s;
 	/* 1500 ms pulse per u-blox SARA-R5 HW integration guide. */
-	alp_delay_us(1500000);
+	alp_delay_ms(1500);
 	return alp_gpio_write(dev->pwr_on, false);
 }
 

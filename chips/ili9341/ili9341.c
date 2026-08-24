@@ -47,17 +47,17 @@ alp_status_t ili9341_init(ili9341_t *dev, alp_spi_t *spi, alp_gpio_t *dc, alp_gp
 
 	if (reset != NULL) {
 		(void)alp_gpio_write(reset, false);
-		alp_delay_us(20000);
+		alp_delay_ms(20);
 		(void)alp_gpio_write(reset, true);
-		alp_delay_us(150000);
+		alp_delay_ms(150);
 	}
 
 	alp_status_t s = ili9341_cmd(dev, ILI9341_CMD_SWRESET);
 	if (s != ALP_OK) return s;
-	alp_delay_us(150000);
+	alp_delay_ms(150);
 	s = ili9341_cmd(dev, ILI9341_CMD_SLPOUT);
 	if (s != ALP_OK) return s;
-	alp_delay_us(150000);
+	alp_delay_ms(150);
 
 	uint8_t pixfmt = 0x55; /* 16bpp RGB565 */
 	s              = ili9341_cmd(dev, ILI9341_CMD_PIXFMT);

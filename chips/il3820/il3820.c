@@ -34,7 +34,7 @@ alp_status_t il3820_wait_idle(il3820_t *dev, uint32_t timeout_ms)
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 	if (dev->busy == NULL) {
 		/* No busy pin — caller must use timing-based waits. */
-		alp_delay_us(100000);
+		alp_delay_ms(100);
 		return ALP_OK;
 	}
 	/* Poll BUSY (active high on most IL3820 modules). */
@@ -44,7 +44,7 @@ alp_status_t il3820_wait_idle(il3820_t *dev, uint32_t timeout_ms)
 		alp_status_t s     = alp_gpio_read(dev->busy, &level);
 		if (s != ALP_OK) return s;
 		if (!level) return ALP_OK;
-		alp_delay_us(10000);
+		alp_delay_ms(10);
 		waited_ms += 10;
 	}
 	return ALP_ERR_TIMEOUT;
@@ -56,10 +56,10 @@ alp_status_t il3820_hw_reset(il3820_t *dev)
 	if (dev->reset == NULL) return ALP_ERR_NOSUPPORT;
 	alp_status_t s = alp_gpio_write(dev->reset, false);
 	if (s != ALP_OK) return s;
-	alp_delay_us(10000);
+	alp_delay_ms(10);
 	s = alp_gpio_write(dev->reset, true);
 	if (s != ALP_OK) return s;
-	alp_delay_us(10000);
+	alp_delay_ms(10);
 	return ALP_OK;
 }
 

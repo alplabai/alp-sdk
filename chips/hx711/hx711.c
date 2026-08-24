@@ -35,7 +35,7 @@ alp_status_t hx711_wait_ready(hx711_t *dev, uint32_t timeout_ms)
 		alp_status_t s     = alp_gpio_read(dev->dout, &level);
 		if (s != ALP_OK) return s;
 		if (!level) return ALP_OK; /* DOUT low = chip ready. */
-		alp_delay_us(1000);
+		alp_delay_ms(1);
 		waited_ms++;
 	}
 	return ALP_ERR_TIMEOUT;

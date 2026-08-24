@@ -926,7 +926,7 @@ alp_status_t gd32g553_trng_read(gd32g553_t *ctx, uint8_t *dest, size_t len)
      * not a latency-critical surface. */
 	alp_status_t s = ALP_ERR_BUSY;
 	for (unsigned attempt = 0u; attempt < 4u && s == ALP_ERR_BUSY; ++attempt) {
-		if (attempt != 0u) alp_delay_us(2000u);
+		if (attempt != 0u) alp_delay_ms(2u);
 		s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_TRNG_READ, &req, 1u, dest, len);
 	}
 	return s;

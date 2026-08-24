@@ -47,17 +47,17 @@ alp_status_t ili9488_init(ili9488_t *dev, alp_spi_t *spi, alp_gpio_t *dc, alp_gp
 
 	if (reset != NULL) {
 		(void)alp_gpio_write(reset, false);
-		alp_delay_us(20000);
+		alp_delay_ms(20);
 		(void)alp_gpio_write(reset, true);
-		alp_delay_us(150000);
+		alp_delay_ms(150);
 	}
 
 	alp_status_t s = ili9488_cmd(dev, ILI9488_CMD_SWRESET);
 	if (s != ALP_OK) return s;
-	alp_delay_us(150000);
+	alp_delay_ms(150);
 	s = ili9488_cmd(dev, ILI9488_CMD_SLPOUT);
 	if (s != ALP_OK) return s;
-	alp_delay_us(150000);
+	alp_delay_ms(150);
 
 	uint8_t pixfmt = 0x55; /* 16bpp DPI + 16bpp DBI */
 	s              = ili9488_cmd(dev, ILI9488_CMD_PIXFMT);

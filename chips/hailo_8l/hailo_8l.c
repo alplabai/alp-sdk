@@ -18,7 +18,7 @@ alp_status_t hailo_8l_reset(hailo_8l_t *dev)
 	if (dev->resetb == NULL) return ALP_ERR_NOSUPPORT;
 	alp_status_t s = alp_gpio_write(dev->resetb, false);
 	if (s != ALP_OK) return s;
-	alp_delay_us(100000);
+	alp_delay_ms(100);
 	return alp_gpio_write(dev->resetb, true);
 }
 
