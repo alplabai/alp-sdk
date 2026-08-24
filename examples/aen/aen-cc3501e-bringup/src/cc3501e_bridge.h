@@ -34,16 +34,39 @@
 #define CC3501E_BRIDGE_SPI_BUS_ID 1u
 #endif
 #ifndef CC3501E_BRIDGE_SPI_FREQ_HZ
-/* ~14.3 MHz (BAUDR = 200 MHz SSI functional clock / 14, truncating):
- * SILICON-VALIDATED with the dwc-ssi RX_SAMPLE_DLY tuned (below).  Was 1 MHz
- * -- 8 MHz+ mis-sampled MISO over the on-SoM traces because spi_dw leaves
- * RX_SAMPLE_DLY=0; setting it to 6 shifts the MISO capture past the
- * round-trip so up to ~15 MHz (the CC35 slave max) samples clean cold + warm
- * = ~15x the old throughput.  Cold-boot + concurrent Wi-Fi/BLE validated on
- * e1m-aen-evk-01.  The ~14.3 MHz SCLK is derived from the divider
- * arithmetic, not measured -- a scope capture would settle it.  Payload
- * reliability is also covered by the inter-phase settle in cc3501e_request
- * (CC3501E_PHASE_SETTLE_US). */
+/* 25 MHz = 200 MHz SSI functional clock / 8.
+ *
+ * The CC3501E peripheral-mode maximum is 30 MHz, NOT the 15 MHz this comment
+ * claimed for most of the bring-up: datasheet SWRS343A section 6.14.2.3.3,
+ * `fsclk SPI clock frequency, Peripheral Mode, MAX 30 MHz` (Controller Mode is
+ * 40 MHz).  Every earlier ceiling argument here was built on the wrong number.
+ *
+ * 25 MHz is the fastest LEGAL step available: the DW SSI BAUDR divisor must be
+ * EVEN, so from 200 MHz the neighbours are /8 = 25 MHz and /6 = 33.3 MHz, and
+ * 33.3 is 11% over the part's maximum.  Reaching exactly 30 MHz would require
+ * retargeting the SSI functional clock itself (AE822 HWRM section 8.3.5) --
+ * ALIF_SPI_CLK is a frequency-only dummy in the dtsi with no divider control,
+ * so there is no software knob for it here.
+ *
+ * NOT ADOPTED -- 25 MHz is silicon-UNSTABLE on this SoM.  The transfer desyncs
+ * partway through a bulk read (NET first-miss at 116-149 kB) and no rx-delay
+ * value clears it: rx-delay 0 fails outright, 2 passes 2 runs of 3, 4 fails
+ * again, so the MISO capture is simply marginal at a 40 ns bit period over these
+ * traces.  14.29 MHz (70 ns) is the validated rate.  Revisit with a scope on
+ * MISO at 25 MHz before raising it.
+ *
+ * It would not have bought much anyway -- silicon-measured
+ * 2026-08-24: 682 kB/s at 25 MHz vs 678 kB/s at 14.29 MHz on PIO, 704 vs 701 on
+ * DMA, because wire time is only ~554 us of a ~2459 us transaction and the rest
+ * is per-frame protocol cost on both ends.  It is worth taking anyway: each
+ * transfer occupies the bus for ~44% less time, which is CPU and bus budget
+ * handed back to everything else on the SoM.
+ *
+ * The 14.29 MHz predecessor was scope-confirmed at 14.20-14.26 MHz, which is
+ * what validates the 200 MHz functional-clock figure the divider assumes.
+ * RX_SAMPLE_DLY was tuned at 14.3 MHz; 25 MHz samples clean on
+ * e1m-aen-evk-01 (soak ping_fail=0), but a board with longer traces should
+ * re-check MISO capture before adopting it. */
 #define CC3501E_BRIDGE_SPI_FREQ_HZ 14000000u
 #endif
 
