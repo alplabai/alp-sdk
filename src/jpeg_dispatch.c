@@ -55,9 +55,18 @@ static void _free(struct alp_jpeg *h)
  * v_stride only apply to the fully-planar layout with real chroma
  * planes (not @ref ALP_JPEG_SUBSAMPLE_400 mono, and not NV12, where
  * they are unused and must be NULL).
+ *
+ * The width-in-bytes assumption below (1 byte/sample) is only true for
+ * the two layouts this class currently ships; a @c format this function
+ * does not recognize is left unchecked here and refused by the backend
+ * itself (@ref ALP_ERR_NOSUPPORT) instead of silently under-checking a
+ * wider-than-1-byte-per-pixel layout by 2-4x (#1645 review).
  */
 static bool _req_strides_ok(const alp_jpeg_encode_req_t *req)
 {
+	if (req->format != ALP_PIXFMT_YUV420_PLANAR && req->format != ALP_PIXFMT_NV12) {
+		return true;
+	}
 	if (req->y_stride == 0u || req->y_stride < req->width) {
 		return false;
 	}
@@ -120,14 +129,15 @@ alp_status_t alp_jpeg_encode(alp_jpeg_t                  *h,
 		return ALP_ERR_NOT_READY;
 	}
 	alp_status_t rc;
-	if (req == NULL || out_buf == NULL || out_len == NULL || req->width == 0u ||
-	    req->height == 0u) {
+	if (req == NULL || out_buf == NULL || out_len == NULL || req->width < 8u || req->height < 8u) {
 		rc = ALP_ERR_INVAL;
-	} else if (req->width > h->cached_caps.max_width || req->height > h->cached_caps.max_height) {
+	} else if ((h->cached_caps.max_width != 0u && req->width > h->cached_caps.max_width) ||
+	           (h->cached_caps.max_height != 0u && req->height > h->cached_caps.max_height)) {
 		/* The backend's own advertised bound, never enforced before
 		 * (#1645) -- a caller could request a frame no encode path on
 		 * this handle was ever set up to size, e.g. sw_baseline's
-		 * 16384x16384. */
+		 * 16384x16384.  0 means "no limit advertised" (zephyr_stub's
+		 * zeroed caps), not "reject everything". */
 		rc = ALP_ERR_OUT_OF_RANGE;
 	} else if (!_req_strides_ok(req)) {
 		rc = ALP_ERR_INVAL;

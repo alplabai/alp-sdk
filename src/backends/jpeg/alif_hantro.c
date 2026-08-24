@@ -258,24 +258,23 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 		return ALP_ERR_NOSUPPORT;
 	}
 
-	/* Both the AXI-input stride derived below and the driver's .pitch
-	 * (see video_set_format() further down) come straight from
-	 * req->y_stride -- unlike sw_baseline, a stride of 0 is not the
-	 * hazard here (it is legitimately treated as "tightly packed" by
-	 * the ternaries below), an UNDER-sized stride is: it is not a wrong
-	 * picture, it is the Hantro AXI master reading memory the caller
-	 * did not intend to expose (#1645).  The dispatcher enforces the
-	 * same rule, but a backend handing a pointer to a DMA master
-	 * validates its own inputs rather than trusting every caller
-	 * reached it only through the portable API. */
-	if (req->y_stride != 0u && req->y_stride < req->width) {
+	/* An under-sized y_stride is not a wrong picture -- it is the Hantro
+	 * AXI master reading memory the caller did not intend to expose
+	 * (#1645).  A zero stride is rejected as part of the same rule (see
+	 * the y_stride doc in <alp/jpeg.h>): the dispatcher already refuses
+	 * it unconditionally, so req->y_stride >= req->width here also
+	 * covers 0 (req->width is never 0).  The dispatcher enforces this,
+	 * but a backend handing a pointer to a DMA master validates its own
+	 * inputs rather than trusting every caller reached it only through
+	 * the portable API. */
+	if (req->y_stride < req->width) {
 		return ALP_ERR_INVAL;
 	}
 
 	/* NV12: one Y plane immediately followed, at stride*height, by an
 	 * interleaved half-height UV plane -- see the struct doc on
 	 * alp_jpeg_encode_req_t. Total footprint = stride*height*3/2. */
-	uint32_t in_stride = (req->y_stride != 0u) ? req->y_stride : req->width;
+	uint32_t in_stride = req->y_stride;
 	size_t   in_len    = (size_t)in_stride * req->height * 3u / 2u;
 
 	if (!_is_dma_reachable(req->y_plane, in_len)) {
@@ -298,7 +297,7 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 		.pixelformat = VIDEO_PIX_FMT_NV12,
 		.width       = req->width,
 		.height      = req->height,
-		.pitch       = (req->y_stride != 0u) ? req->y_stride : req->width,
+		.pitch       = req->y_stride,
 	};
 	int err = video_set_format(st->dev, &fmt);
 	if (err != 0) {

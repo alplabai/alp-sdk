@@ -116,11 +116,18 @@ typedef struct {
 	alp_jpeg_subsample_t subsample;
 	uint8_t              quality; /**< 1..100. */
 	const void          *y_plane;
-	uint32_t             y_stride;
-	const void          *u_plane; /**< NULL when subsample is _400, or format is _NV12. */
-	uint32_t             u_stride;
-	const void          *v_plane; /**< NULL when subsample is _400, or format is _NV12. */
-	uint32_t             v_stride;
+	uint32_t             y_stride; /**< Bytes per row of @c y_plane.  Must be non-zero and
+	                                 *   >= @c width -- a zero or under-sized stride is
+	                                 *   rejected with @ref ALP_ERR_INVAL rather than
+	                                 *   silently aliasing every row to row 0 or reading
+	                                 *   across row boundaries (#1645). */
+	const void          *u_plane;  /**< NULL when subsample is _400, or format is _NV12. */
+	uint32_t             u_stride; /**< Bytes per row of @c u_plane.  Consulted (and must
+	                                 *   be non-zero and >= (@c width + 1) / 2) only when
+	                                 *   @c format is @ref ALP_PIXFMT_YUV420_PLANAR and
+	                                 *   @c subsample is not @ref ALP_JPEG_SUBSAMPLE_400. */
+	const void          *v_plane;  /**< NULL when subsample is _400, or format is _NV12. */
+	uint32_t             v_stride; /**< Same rule as @c u_stride. */
 } alp_jpeg_encode_req_t;
 
 /** Capabilities of an opened JPEG-encoder handle. */
@@ -154,9 +161,15 @@ alp_jpeg_t *alp_jpeg_open(const alp_jpeg_config_t *cfg);
  *
  * @param[in]  h         Handle from @ref alp_jpeg_open.
  * @param[in]  req       Frame + quality descriptor.  Must be non-NULL,
- *                       with non-zero @c width / @c height and a
- *                       @c format the opened backend's
- *                       @ref alp_jpeg_caps_t::pixfmt_mask advertises.
+ *                       with @c width / @c height in the documented
+ *                       8..16384 range and no larger than the opened
+ *                       backend's @ref alp_jpeg_caps_t::max_width /
+ *                       @c max_height (0 there means the backend
+ *                       advertises no limit), plane strides per the
+ *                       @c y_stride / @c u_stride / @c v_stride field
+ *                       docs above, and a @c format the opened
+ *                       backend's @ref alp_jpeg_caps_t::pixfmt_mask
+ *                       advertises.
  * @param[out] out_buf   Destination buffer for the encoded stream.
  * @param[in]  out_cap   Capacity of @p out_buf, in bytes.
  * @param[out] out_len   Receives the encoded length on success; on
@@ -178,7 +191,12 @@ alp_jpeg_t *alp_jpeg_open(const alp_jpeg_config_t *cfg);
  *
  * @return @ref ALP_OK on success, or one of:
  *         - @ref ALP_ERR_INVAL -- NULL @p h / @p req / @p out_buf /
- *           @p out_len, or a zero @c width / @c height.
+ *           @p out_len, @c width / @c height outside 8..16384, or a
+ *           plane stride that violates the @c y_stride / @c u_stride /
+ *           @c v_stride field docs on @ref alp_jpeg_encode_req_t.
+ *         - @ref ALP_ERR_OUT_OF_RANGE -- @c width / @c height exceeds
+ *           the opened backend's advertised @ref alp_jpeg_caps_t::max_width
+ *           / @c max_height (when non-zero).
  *         - @ref ALP_ERR_NOSUPPORT -- @c format or @c subsample the
  *           backend can't do, or (hardware backends only) a buffer that
  *           is not DMA-reachable -- see the @note above.
