@@ -195,6 +195,25 @@ ZTEST(alp_power_registry, test_renesas_vendor_ext_rejects_non_renesas_backend)
 	alp_power_close(h);
 }
 
+/* ---------- Alif SE DC-DC rail bound (#1626) ------------------------ */
+
+ZTEST(alp_power_registry, test_alif_dcdc_mv_bounds)
+{
+	/* alif_se_profile.c itself is gated behind HAS_ALIF_SE_SERVICES
+     * (a real Alif SE-mailbox DT node) and does not compile under
+     * native_sim -- see zephyr/kconfigs/vendor-alif-peripherals.kconfig.
+     * This exercises the pure bound helper both call sites
+     * (alif_profile_set() RUN + STANDBY) route through; the call
+     * sites themselves are reviewable by inspection only. */
+	zassert_true(alp_power_alif_dcdc_mv_valid(750u));
+	zassert_true(alp_power_alif_dcdc_mv_valid(825u));
+	zassert_true(alp_power_alif_dcdc_mv_valid(850u));
+	zassert_false(alp_power_alif_dcdc_mv_valid(749u));
+	zassert_false(alp_power_alif_dcdc_mv_valid(851u));
+	zassert_false(alp_power_alif_dcdc_mv_valid(80u));   /* .rail_mv = 80 typo */
+	zassert_false(alp_power_alif_dcdc_mv_valid(8000u)); /* the issue's mV/uV typo repro */
+}
+
 /* ---------- Registry inventory test -------------------------------- */
 
 ZTEST(alp_power_registry, test_backend_count_for_power)

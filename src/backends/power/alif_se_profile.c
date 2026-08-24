@@ -287,6 +287,9 @@ static alp_status_t alif_profile_set(alp_power_profile_id_t which, const alp_pow
 			return ALP_ERR_INVAL;
 		}
 		if (p->rail_mv != 0u) {
+			if (!alp_power_alif_dcdc_mv_valid(p->rail_mv)) {
+				return ALP_ERR_INVAL;
+			}
 			run.dcdc_voltage = p->rail_mv;
 		}
 		if (p->power_domains != 0u) {
@@ -315,6 +318,9 @@ static alp_status_t alif_profile_set(alp_power_profile_id_t which, const alp_pow
 		return se_rc_to_alp(rc);
 	}
 	if (p->rail_mv != 0u) {
+		if (!alp_power_alif_dcdc_mv_valid(p->rail_mv)) {
+			return ALP_ERR_INVAL;
+		}
 		off.dcdc_voltage = p->rail_mv;
 	}
 	if (p->power_domains != 0u) {
