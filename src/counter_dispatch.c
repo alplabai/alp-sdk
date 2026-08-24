@@ -150,6 +150,14 @@ alp_status_t alp_counter_set_alarm(alp_counter_t         *h,
 	h->state.alarm_cb   = cb;
 	h->state.alarm_user = user;
 	alp_status_t rc     = h->state.ops->set_alarm(&h->state, ticks_from_now, h);
+	if (rc != ALP_OK) {
+		/* Backend refused (e.g. ALP_ERR_BUSY) -- roll back so a
+		 * leaked driver-side alarm from a PRIOR handle can't reach
+		 * this one through a callback we installed but the backend
+		 * never actually armed. #1627 */
+		h->state.alarm_cb   = NULL;
+		h->state.alarm_user = NULL;
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }

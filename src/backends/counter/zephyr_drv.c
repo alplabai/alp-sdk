@@ -122,8 +122,19 @@ static void z_close(alp_counter_backend_state_t *st)
 	/* Cancel any armed channel-0 alarm before stopping/releasing the
 	 * slot -- counter_stop() does not guarantee installed alarms are
 	 * cancelled, so a stale alarm can otherwise fire into a recycled
-	 * handle after this closes. #1627 */
-	(void)z_cancel_alarm(st);
+	 * handle after this closes. #1627
+	 *
+	 * On the canonical alp_counter_stop() + alp_counter_close() teardown
+	 * order the counter is already stopped here, and at least the
+	 * native_sim backend's cancel_channel_alarm refuses (-ENOTSUP) on a
+	 * stopped counter without clearing the pending alarm. If the first
+	 * cancel attempt fails, briefly restart the counter so the cancel
+	 * can actually take effect, then leave it stopped as the caller left
+	 * it. */
+	if (z_cancel_alarm(st) != ALP_OK) {
+		(void)counter_start(dev);
+		(void)z_cancel_alarm(st);
+	}
 	(void)counter_stop(dev);
 }
 

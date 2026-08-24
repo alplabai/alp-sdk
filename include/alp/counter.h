@@ -166,8 +166,11 @@ alp_status_t alp_counter_us_to_ticks(alp_counter_t *counter, uint32_t us, uint32
 /**
  * @brief Schedule a one-shot callback @p ticks_from_now ticks ahead.
  *
- * Replaces any previously-scheduled alarm.  At most one alarm per
- * handle.
+ * At most one alarm per handle.  Replacement of an already-armed
+ * alarm on the SAME handle is backend-dependent: some backends
+ * replace it silently, others return ALP_ERR_BUSY (see below) -- call
+ * @ref alp_counter_cancel_alarm first if the target backend is
+ * unknown.
  *
  * @param[in] counter         Handle from @ref alp_counter_open.
  * @param[in] ticks_from_now  Delay in counter ticks.
@@ -202,6 +205,12 @@ alp_status_t alp_counter_cancel_alarm(alp_counter_t *counter);
 
 /**
  * @brief Stop the counter and release the handle.  NULL is a no-op.
+ *
+ * Any alarm armed via @ref alp_counter_set_alarm is cancelled as part
+ * of teardown -- callers do not need to call @ref
+ * alp_counter_cancel_alarm before close.  This is a best-effort
+ * backend operation: it is not guaranteed atomic with a callback that
+ * is already in flight when close() is called.
  *
  * @param[in] counter  Handle from @ref alp_counter_open, or NULL.
  */

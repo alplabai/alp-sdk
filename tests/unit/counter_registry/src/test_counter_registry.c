@@ -142,6 +142,34 @@ ZTEST(alp_counter_registry, test_zephyr_drv_close_cancels_channel_alarm)
 	alp_counter_close(hb);
 }
 
+ZTEST(alp_counter_registry, test_zephyr_drv_close_cancels_channel_alarm_after_stop)
+{
+	/* Same as test_zephyr_drv_close_cancels_channel_alarm, but handle A
+     * calls alp_counter_stop() before close() -- the canonical teardown
+     * order most callers write.  native_sim's ctr_cancel_alarm() refuses
+     * (-ENOTSUP) once the counter is stopped, so a close() that cancels
+     * only while the counter happens to still be running leaves
+     * is_alarm_pending[0] set on THIS ordering even though the other
+     * ordering above is clean. */
+	alp_counter_config_t cfg = ALP_COUNTER_CONFIG_DEFAULT(0);
+	alp_counter_t       *ha  = alp_counter_open(&cfg);
+	zassert_not_null(ha, "zephyr_drv counter0 must open on native_sim (see boards/ overlay)");
+	zassert_equal(alp_counter_start(ha), ALP_OK);
+	zassert_equal(alp_counter_set_alarm(ha, 1000000u, _alarm_cb_noop, NULL), ALP_OK);
+	zassert_equal(alp_counter_stop(ha), ALP_OK);
+	alp_counter_close(ha); /* alarm left armed on purpose, counter already stopped */
+
+	alp_counter_t *hb = alp_counter_open(&cfg);
+	zassert_not_null(hb);
+	zassert_equal(alp_counter_start(hb), ALP_OK);
+	zassert_equal(alp_counter_set_alarm(hb, 1000000u, _alarm_cb_noop, NULL),
+	              ALP_OK,
+	              "set_alarm on a freshly reopened handle must not fail -- a prior handle's "
+	              "stop()-then-close() left the driver's channel-0 alarm armed");
+
+	alp_counter_close(hb);
+}
+
 /* TODO(slice-4a-followup): bridge backend selection test.
  * When CONFIG_ALP_SDK_V2N_SUPERVISOR=y, alp_backend_select("counter",
  * "renesas:rzv2n:n44") should return vendor "renesas" priority 100
