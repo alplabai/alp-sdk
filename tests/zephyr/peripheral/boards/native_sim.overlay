@@ -19,8 +19,11 @@
         alp-uart1 = &uart1_emul;
         /* #1631: alp-can0 -> the board's own can_loopback0 (status
          * "okay" by default in native_sim.dts) so the CAN backend's
-         * z_send() bound-check test in src/can.c opens a REAL Zephyr
-         * CAN device instead of getting NULL from device_is_ready(). */
+         * z_send() bound-check test in
+         * tests/zephyr/peripheral/src/can.c opens a REAL Zephyr CAN
+         * device instead of the NULL that ALP_CAN_DEV_OR_NULL()
+         * yields (src/backends/can/zephyr_drv.c) when the alias is
+         * unset. */
         alp-can0  = &can_loopback0;
     };
 

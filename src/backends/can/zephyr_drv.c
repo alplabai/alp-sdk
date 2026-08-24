@@ -147,7 +147,15 @@ static void _rx_trampoline(const struct device *dev, struct can_frame *frame, vo
 		.brs         = (frame->flags & CAN_FRAME_BRS) != 0,
 		.payload_len = can_dlc_to_bytes(frame->dlc),
 	};
+	/* #1631 review: can_dlc_to_bytes() maps DLC 9..15 to 12..64, which
+	 * is legal on the wire for a classic frame -- bound the copy by
+	 * BOTH the destination (out.data, the alp frame, 64 bytes) and the
+	 * SOURCE (frame->data, Zephyr's CAN_MAX_DLEN -- 8 bytes without
+	 * CONFIG_CAN_FD_MODE, 64 with it). Clamping only against the
+	 * destination let a DLC 9..15 classic frame memcpy up to 56 bytes
+	 * past an 8-byte struct can_frame.data on a non-FD build. */
 	if (out.payload_len > sizeof out.data) out.payload_len = sizeof out.data;
+	if (out.payload_len > sizeof frame->data) out.payload_len = sizeof frame->data;
 	memcpy(out.data, frame->data, out.payload_len);
 	ctx->cb(&out, ctx->user);
 }
@@ -177,12 +185,23 @@ z_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 		return _errno_to_alp(err);
 	}
 
-	if (cfg->mode == ALP_CAN_MODE_FD && cfg->bitrate_data_hz > 0u) {
+	if (cfg->mode == ALP_CAN_MODE_FD) {
+		/* #1631 review: this arm must reject unconditionally when
+		 * CONFIG_CAN_FD_MODE=n, not only when bitrate_data_hz > 0 --
+		 * a caller with bitrate_data_hz == 0 previously fell through
+		 * to the `else` below and opened successfully in NORMAL
+		 * mode while cfg.mode stayed ALP_CAN_MODE_FD, contradicting
+		 * <alp/can.h>'s alp_can_open() contract ("CAN-FD requested
+		 * but CONFIG_CAN_FD_MODE=n" -> NULL) and leaving z_send()'s
+		 * bound check as the only guard against an fd-flagged frame
+		 * on that handle. */
 #if defined(CONFIG_CAN_FD_MODE)
-		err = can_set_bitrate_data(dev, cfg->bitrate_data_hz);
-		if (err != 0) {
-			_free_side(s);
-			return _errno_to_alp(err);
+		if (cfg->bitrate_data_hz > 0u) {
+			err = can_set_bitrate_data(dev, cfg->bitrate_data_hz);
+			if (err != 0) {
+				_free_side(s);
+				return _errno_to_alp(err);
+			}
 		}
 		err = can_set_mode(dev, CAN_MODE_FD | (cfg->loopback ? CAN_MODE_LOOPBACK : 0));
 #else

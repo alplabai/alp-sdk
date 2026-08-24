@@ -50,10 +50,11 @@ ZTEST(alp_peripheral, test_can_fd_frame_rejected_on_classic_handle)
 	memset(frame.data, 0x5A, sizeof(frame.data));
 
 	alp_status_t rc = alp_can_send(c, &frame, 100);
-	zassert_true(rc == ALP_ERR_NOSUPPORT || rc == ALP_ERR_INVAL,
-	             "fd-flagged 64-byte send on a classic-mode handle returned %d, not a clean "
-	             "rejection -- overflow risk in the backend's memcpy",
-	             (int)rc);
+	zassert_equal(rc,
+	              ALP_ERR_NOSUPPORT,
+	              "fd-flagged 64-byte send on a classic-mode handle returned %d, not "
+	              "ALP_ERR_NOSUPPORT from src/can_dispatch.c's mode guard",
+	              (int)rc);
 
 	alp_can_close(c);
 }
