@@ -84,12 +84,18 @@ br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabiliti
 	}
 	alp_z_v2n_supervisor_release();
 
+	/* cfg->period_ns == 0 means "use DT default" (include/alp/pwm.h) --
+	 * the canonical ALP_PWM_CONFIG_DEFAULT() value. The bridge has no
+	 * devicetree, so resolve it the way sw_fallback.c / yocto_drv.c do:
+	 * fall back to 1 kHz. */
+	const uint32_t period_ns = (cfg->period_ns != 0u) ? cfg->period_ns : 1000000u;
+
 	gd32_pwm_state_t *bs = _alloc_state();
 	if (bs == NULL) {
 		return ALP_ERR_NOMEM;
 	}
 	bs->channel_id = (uint8_t)cfg->channel_id;
-	bs->period_ns  = cfg->period_ns;
+	bs->period_ns  = period_ns;
 	bs->duty_ns    = 0u;
 
 	st->dev         = NULL; /* bridge sentinel */
@@ -102,7 +108,7 @@ br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabiliti
 	 * handle is zeroed by the dispatcher's _alloc(), so leaving this
 	 * unset makes every non-zero pulse_ns fail with ALP_ERR_INVAL
 	 * (issue #1624). */
-	CONTAINER_OF(st, struct alp_pwm, state)->period_ns = cfg->period_ns;
+	CONTAINER_OF(st, struct alp_pwm, state)->period_ns = period_ns;
 	return ALP_OK;
 }
 

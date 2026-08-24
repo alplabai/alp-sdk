@@ -70,13 +70,30 @@ ZTEST(pwm_gd32_bridge_period, test_br_open_writes_dispatcher_period_ns)
 	              "struct alp_pwm::period_ns not set by br_open() -- got %u, want %u",
 	              h.period_ns,
 	              cfg.period_ns);
+}
 
-	/* Mirror pwm_dispatch.c's exact alp_pwm_set_duty() bounds check
-	 * (src/pwm_dispatch.c:121) to tie this directly to the reported
-	 * symptom: a 50% duty request must not be rejected as out of range
-	 * against the handle's own configured period. */
-	const uint32_t pulse_ns = cfg.period_ns / 2u;
-	zassert_false(pulse_ns > h.period_ns,
-	              "alp_pwm_set_duty(%u) would incorrectly return ALP_ERR_INVAL",
-	              pulse_ns);
+ZTEST(pwm_gd32_bridge_period, test_br_open_resolves_default_period_ns)
+{
+	/* ALP_PWM_CONFIG_DEFAULT() (include/alp/pwm.h) yields period_ns == 0
+	 * ("0 = use DT default"). The bridge has no devicetree, so br_open()
+	 * must resolve 0 to a concrete period the way the sw_fallback /
+	 * yocto backends do (1 kHz), both in its own private state and in
+	 * the dispatcher-owned handle field -- otherwise a caller using the
+	 * canonical default config still gets period_ns == 0 and every
+	 * non-zero duty request still fails with ALP_ERR_INVAL. */
+	const alp_backend_t *be = alp_backend_select("pwm", "renesas:rzv2n:n44");
+	zassert_not_null(be);
+	const alp_pwm_ops_t *ops = (const alp_pwm_ops_t *)be->ops;
+
+	alp_pwm_config_t   cfg  = ALP_PWM_CONFIG_DEFAULT(1u);
+	struct alp_pwm     h    = { 0 };
+	alp_capabilities_t caps = { 0 };
+
+	const alp_status_t rc = ops->open(&cfg, &h.state, &caps);
+	zassert_equal(rc, ALP_OK, "br_open() should succeed with the acquire stub");
+
+	zassert_not_equal(h.period_ns,
+	                  0u,
+	                  "br_open() left the default config's period_ns at 0 -- "
+	                  "every non-zero alp_pwm_set_duty() would fail ALP_ERR_INVAL");
 }
