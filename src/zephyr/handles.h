@@ -147,12 +147,20 @@ struct alp_uart_rx_ringbuf {
 /* ------------------------------------------------------------------ */
 
 struct alp_adc_stream {
-	bool     in_use;
 	bool     via_bridge;
 	uint8_t  stream_id; /* backend slot index (0..1 on the V2N family) */
 	uint8_t  channel;   /* hardware channel id */
 	uint32_t channel_id;
 	uint32_t sample_rate_hz;
+
+	/* lifecycle/active_ops drive the generic open/op/close guard in
+	 * alp_slot_claim.h (issue #629 / #1634) -- placed before in_use so a
+	 * fresh acquire's whole-struct zero (handles.c's DEFINE_POOL) resets
+	 * both to LC_UNOPENED/0 along with every other field. Non-volatile:
+	 * the guard uses __atomic_* on them directly. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 
 /* ------------------------------------------------------------------ */
