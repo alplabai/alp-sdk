@@ -517,6 +517,40 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	encode_header(ctx->tx_scratch, cmd, ALP_CC3501E_FLAG_RESP_REQUIRED, (uint16_t)tx_len);
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
 	if (s != ALP_OK) goto out;
+
+	/* IN-BAND ARMED CHECK -- the software stand-in for the READY line.
+	 *
+	 * An armed slave drives ALP_CC3501E_SYNC_IDLE (0xA5) on MISO for the whole
+	 * request-header phase (arm_request_header -> arm_transfer(..., sync_idle,
+	 * ...)).  The host already clocks those 4 bytes; it just used to throw the
+	 * MISO data away and carry on into the payload phases regardless.
+	 *
+	 * That is what INDUCES the desync.  If the slave has not re-armed yet it is
+	 * not listening, so the header lands nowhere -- and then the host shoves up
+	 * to 512 payload bytes at a slave that is mid-arm, which shifts it and
+	 * corrupts every following frame until it happens to realign.
+	 *
+	 * Silicon-measured 2026-08-24 over one socket stream: with the marker
+	 * present, 438 transactions and only 28 header failures (93.6% good); with it
+	 * absent, 1808 transactions and 1808 failures -- 100%.  It is a perfect
+	 * predictor, and it is free.
+	 *
+	 * So: stop at the header.  Report the SAME ALP_ERR_IO the bad-header path
+	 * below already reports, so caller behaviour is unchanged -- this just
+	 * reaches that verdict one aligned 4-byte transfer earlier, without having
+	 * clocked payload into an unarmed slave.
+	 *
+	 * This matters because READY (CC35 GPIO17 -> Alif P2_6) is an OPEN CONNECTION
+	 * on the bench unit -- 0 edges in 20000 samples taken during live traffic --
+	 * so the fixed inter-phase settles are the only other interlock, and they
+	 * cannot be tightened (250 us desyncs the link outright). */
+	if (ctx->rx_scratch[0] != ALP_CC3501E_SYNC_IDLE ||
+	    ctx->rx_scratch[1] != ALP_CC3501E_SYNC_IDLE ||
+	    ctx->rx_scratch[2] != ALP_CC3501E_SYNC_IDLE ||
+	    ctx->rx_scratch[3] != ALP_CC3501E_SYNC_IDLE) {
+		s = ALP_ERR_IO;
+		goto out;
+	}
 	if (tx_len > 0) {
 		/* Inter-phase settle (CS-less lockstep): the slave arms the request-PAYLOAD
 		 * transfer in its SPI ISR only AFTER the header transfer completes.  Clocking
