@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 tests:
-  alp.unit.rv3028c7_status_ack:
+  alp.unit.rv3028c7_dispatch_ack:
     platform_allow:
       - native_sim
       - native_sim/native/64

@@ -11,7 +11,6 @@
 #include <stdint.h>
 
 #include "alp/chips/rv3028c7.h"
-#include "rv3028c7_status_ack.h"
 
 #define RV3028_REG_SECONDS   0x00
 #define RV3028_REG_MINUTES   0x01
@@ -106,6 +105,34 @@ static alp_status_t rv3028_write_reg(rv3028c7_t *ctx, uint8_t reg, uint8_t val)
 	return rv3028_write(ctx, reg, &val, 1);
 }
 
+/* Bounded so a source that keeps re-latching every pass can't spin
+ * rv3028c7_dispatch_irq() forever; anything still pending after the
+ * cap self-heals on the *next* dispatch call since INT stays
+ * asserted until STATUS truly reads 0 -- no event is lost, only
+ * possibly delayed by one extra dispatch. */
+#define RV3028_DISPATCH_MAX_PASSES 3u
+
+/* Acknowledge whatever is latched in STATUS right now and hand back
+ * anything that raced the acknowledge write in *status.
+ *
+ * STATUS is write-0-to-clear (RV-3028-C7 Application Manual v1.4,
+ * Table 9; comment above RV3028_STATUS_PORF): a byte write of 0x00
+ * clears every bit latched at the moment the write lands.  That is
+ * the one write mode this driver relies on -- it does NOT assume
+ * anything about what writing a 1 does to a bit that currently
+ * reads 0 (no App Manual table this driver cites settles that, and
+ * this driver will not guess at undocumented hardware behaviour,
+ * #1623).  A single 0x00 write can still race a flag that latches
+ * between the caller's STATUS read and this write landing; close
+ * that by re-reading STATUS immediately after and returning
+ * whatever came back set, instead of silently losing it. */
+static alp_status_t rv3028_status_ack(rv3028c7_t *ctx, uint8_t *status)
+{
+	alp_status_t s = rv3028_write_reg(ctx, RV3028_REG_STATUS, 0x00);
+	if (s != ALP_OK) return s;
+	return rv3028_read(ctx, RV3028_REG_STATUS, status, 1);
+}
+
 alp_status_t rv3028c7_init(rv3028c7_t *ctx, alp_i2c_t *bus)
 {
 	if (ctx == NULL || bus == NULL) return ALP_ERR_INVAL;
@@ -122,7 +149,12 @@ alp_status_t rv3028c7_init(rv3028c7_t *ctx, alp_i2c_t *bus)
      * init -- they can read it via rv3028_read_status() once the
      * v0.3.x diagnostic helpers land. */
 	if (status & RV3028_STATUS_PORF) {
-		s = rv3028_write_reg(ctx, RV3028_REG_STATUS, status & ~RV3028_STATUS_PORF);
+		/* No handler is registered yet at init time, so any bit
+         * rv3028_status_ack() reports as still-latched (raced the
+         * clear) has nowhere to dispatch to; the next
+         * rv3028c7_dispatch_irq() call picks it up fresh. */
+		uint8_t residual = 0;
+		s                = rv3028_status_ack(ctx, &residual);
 		if (s != ALP_OK) return s;
 	}
 
@@ -229,9 +261,16 @@ alp_status_t rv3028c7_alarm_check_and_clear(rv3028c7_t *ctx, bool *fired)
 	alp_status_t s      = rv3028_read(ctx, RV3028_REG_STATUS, &status, 1);
 	if (s != ALP_OK) return s;
 	*fired = (status & RV3028_STATUS_AF) != 0;
-	if (*fired) {
-		s = rv3028_write_reg(ctx, RV3028_REG_STATUS, status & ~RV3028_STATUS_AF);
-	}
+	if (status == 0) return ALP_OK;
+
+	/* Clear everything observed; if AF itself races the clear
+     * (fires again between the read above and the write landing),
+     * rv3028_status_ack() reports it back here and we don't miss
+     * it.  A raced bit is left latched in hardware rather than
+     * looping to re-drain it -- it self-heals on the next call. */
+	uint8_t residual = 0;
+	s                = rv3028_status_ack(ctx, &residual);
+	if (s == ALP_OK && (residual & RV3028_STATUS_AF) != 0) *fired = true;
 	return s;
 }
 
@@ -278,21 +317,24 @@ alp_status_t rv3028c7_dispatch_irq(rv3028c7_t *ctx, uint8_t *status_seen)
 	if (s != ALP_OK) return s;
 	if (status_seen != NULL) *status_seen = status;
 
-	if (status == 0) return ALP_OK;
+	/* Dispatch + acknowledge, looping (bounded) while the
+     * acknowledge keeps reporting bits that raced it -- a source
+     * that latches during an earlier handler's own I2C work (or
+     * during the acknowledge round trip itself) gets its own
+     * dispatch pass instead of being silently cleared unseen
+     * (#1623). */
+	uint8_t pending = status;
+	for (unsigned pass = 0; pending != 0 && pass < RV3028_DISPATCH_MAX_PASSES; ++pass) {
+		for (unsigned i = 0; i < RV3028C7_SRC_COUNT; ++i) {
+			if ((pending & src_tab[i].status_bit) == 0) continue;
+			rv3028c7_src_handler_t cb = (rv3028c7_src_handler_t)ctx->src_handler[i];
+			if (cb != NULL) cb(ctx, (rv3028c7_src_t)i, ctx->src_user[i]);
+		}
 
-	/* Dispatch handlers for each set source flag. */
-	for (unsigned i = 0; i < RV3028C7_SRC_COUNT; ++i) {
-		if ((status & src_tab[i].status_bit) == 0) continue;
-		rv3028c7_src_handler_t cb = (rv3028c7_src_handler_t)ctx->src_handler[i];
-		if (cb != NULL) cb(ctx, (rv3028c7_src_t)i, ctx->src_user[i]);
+		s = rv3028_status_ack(ctx, &pending);
+		if (s != ALP_OK) return s;
 	}
-
-	/* Acknowledge only the bits observed above.  A one-shot source
-     * (ALARM/EXT_EVENT/BSF) that latches between the read and this
-     * write has no "next event" to re-latch it, so writing back 0x00
-     * unconditionally would silently swallow it; rv3028c7_status_ack_value()
-     * clears only the bits this call actually dispatched. */
-	return rv3028_write_reg(ctx, RV3028_REG_STATUS, rv3028c7_status_ack_value(status));
+	return ALP_OK;
 }
 
 alp_status_t rv3028c7_set_int_enable(rv3028c7_t *ctx, rv3028c7_src_t src, bool enable)
