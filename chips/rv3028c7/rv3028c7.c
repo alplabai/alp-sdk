@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "alp/chips/rv3028c7.h"
+#include "rv3028c7_status_ack.h"
 
 #define RV3028_REG_SECONDS   0x00
 #define RV3028_REG_MINUTES   0x01
@@ -286,12 +287,12 @@ alp_status_t rv3028c7_dispatch_irq(rv3028c7_t *ctx, uint8_t *status_seen)
 		if (cb != NULL) cb(ctx, (rv3028c7_src_t)i, ctx->src_user[i]);
 	}
 
-	/* Write-back 0 to acknowledge every fired flag.  STATUS is
-     * write-0-to-clear; any flag that fires after our read will set
-     * itself again on the next event and trigger another INT, so the
-     * race between read and write is safe.  Bit 7 is reserved -- write
-     * 0. */
-	return rv3028_write_reg(ctx, RV3028_REG_STATUS, 0x00);
+	/* Acknowledge only the bits observed above.  A one-shot source
+     * (ALARM/EXT_EVENT/BSF) that latches between the read and this
+     * write has no "next event" to re-latch it, so writing back 0x00
+     * unconditionally would silently swallow it; rv3028c7_status_ack_value()
+     * clears only the bits this call actually dispatched. */
+	return rv3028_write_reg(ctx, RV3028_REG_STATUS, rv3028c7_status_ack_value(status));
 }
 
 alp_status_t rv3028c7_set_int_enable(rv3028c7_t *ctx, rv3028c7_src_t src, bool enable)
