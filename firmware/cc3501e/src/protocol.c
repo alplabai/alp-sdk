@@ -37,6 +37,7 @@
  * HAL backend; see docs/cc3501e-bridge.md "v0.x roadmap".
  */
 
+#include <string.h>
 #include "protocol_internal.h"
 
 /* Diagnostics state (firmware-side): last_error = the most recent non-OK
@@ -449,7 +450,35 @@ size_t protocol_build_reply(const uint8_t *req_frame,
 	/* Frame the reply: [cmd | flags=0 | payload_len(LE) | status | data].
      * flags = 0 -> solicited reply (async events set FLAG_ASYNC_EVENT in
      * v0.2+).  payload = status(1) + data. */
-	const uint16_t reply_payload          = (uint16_t)(1u + data_len);
+	/* Pad the reply payload up to a multiple of CC3501E_REPLY_PAD so the HOST's
+	 * DMA can move it as ONE burst-aligned chunk.
+	 *
+	 * The host's DW SSI raises its DMA request on a FIFO watermark, so its driver
+	 * has to shrink the burst until it divides the transfer exactly -- an ODD
+	 * length collapses the burst to 1, i.e. one DMA transaction per byte.  Even
+	 * with that handled by splitting off a tail chunk, an unaligned length still
+	 * costs a SECOND PL330 setup + semaphore round trip per transfer, which is
+	 * what kept DMA slower than PIO on this bridge.  Reply payload is
+	 * 1 + data_len, so without padding roughly half of all frames are odd.
+	 *
+	 * The pad bytes are never interpreted: every reply carries its own length
+	 * (SOCK_RECV has data_len inside alp_cc3501e_sock_recv_resp_t), so the host
+	 * reads payload_len purely to know how many bytes to clock.  Costs at most
+	 * CC3501E_REPLY_PAD-1 bytes of wire out of ~1.7 KB. */
+	uint16_t reply_payload = (uint16_t)(1u + data_len);
+	{
+		const uint16_t rem = (uint16_t)(reply_payload % CC3501E_REPLY_PAD);
+
+		if (rem != 0u) {
+			const uint16_t pad = (uint16_t)(CC3501E_REPLY_PAD - rem);
+
+			/* Only pad if it still fits the caller's frame buffer. */
+			if ((size_t)ALP_CC3501E_HEADER_BYTES + reply_payload + pad <= reply_cap) {
+				memset(&reply_frame[CC3501E_REPLY_STATUS_OFF + reply_payload], 0, pad);
+				reply_payload = (uint16_t)(reply_payload + pad);
+			}
+		}
+	}
 	reply_frame[0]                        = cmd_echo;
 	reply_frame[1]                        = 0u;
 	reply_frame[2]                        = (uint8_t)(reply_payload & 0xFFu);

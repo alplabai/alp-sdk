@@ -70,8 +70,13 @@
 
 /* Byte offsets within a reply frame: the status byte is the first
  * payload byte; reply DATA follows it. */
-#define CC3501E_REPLY_STATUS_OFF (ALP_CC3501E_HEADER_BYTES)      /* index 4 */
-#define CC3501E_REPLY_DATA_OFF   (ALP_CC3501E_HEADER_BYTES + 1u) /* index 5 */
+#define CC3501E_REPLY_STATUS_OFF (ALP_CC3501E_HEADER_BYTES) /* index 4 */
+
+/* Reply payloads are padded up to a multiple of this so the HOST can DMA them as
+ * one burst-aligned chunk (see protocol_build_reply).  8 = the host's default DW
+ * SSI burst, fifo_depth/2 with fifo_depth 16. */
+#define CC3501E_REPLY_PAD      8u
+#define CC3501E_REPLY_DATA_OFF (ALP_CC3501E_HEADER_BYTES + 1u) /* index 5 */
 
 /* --------------------------------------------------------------- */
 /* Dispatcher                                                        */
