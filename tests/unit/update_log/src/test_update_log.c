@@ -1137,8 +1137,23 @@ ZTEST(alp_update_log, test_concurrent_append_unequal_priority_no_livelock)
 
 static alp_status_t g_fake_hw_ready = ALP_ERR_NOSUPPORT;
 
+/* Optional deterministic rendezvous for the issue #1625 open-election race
+ * test below: when g_ul_gate_hw_ready is set, this call blocks the elected
+ * initializer squarely inside the OPENING window -- signalling
+ * g_ul_open_election_entered so the test can WAIT for that state instead of
+ * guessing at timing -- until the test explicitly lets it proceed. Mirrors
+ * td_put_slow_gc()'s g_gc_holder_entered pattern above. Every other test in
+ * this suite leaves g_ul_gate_hw_ready false, so this is a no-op for them. */
+static bool g_ul_gate_hw_ready;
+K_SEM_DEFINE(g_ul_open_election_entered, 0, 1);
+K_SEM_DEFINE(g_ul_open_election_release, 0, 1);
+
 static alp_status_t fake_hw_ready(void)
 {
+	if (g_ul_gate_hw_ready) {
+		k_sem_give(&g_ul_open_election_entered);
+		k_sem_take(&g_ul_open_election_release, K_FOREVER);
+	}
 	return g_fake_hw_ready;
 }
 static alp_status_t fake_hw_append(const alp_update_log_entry_t *e)
@@ -1215,6 +1230,114 @@ ZTEST(alp_update_log, test_selection_hard_error_surfaces)
 	zassert_is_null(log);
 	zassert_equal(alp_last_error(), ALP_ERR_IO);
 	g_fake_hw_ready = ALP_ERR_NOSUPPORT; /* restore for the rest of the suite */
+}
+
+/* --- Issue #1625: alp_update_log_open()'s OPENING/CLOSING election loop
+ * must sleep-poll, not busy-spin -- the same #1114 verdict already applied
+ * to the generic close drain (alp_slot_claim.c) and to ble_dispatch.c's
+ * open-time join scan. A LOWER-priority thread that wins the UNOPENED ->
+ * OPENING election and blocks inside _elect_backend()'s ops->ready() must
+ * not be starved forever by a HIGHER-priority thread that observes OPENING
+ * and spins without yielding: Zephyr's preemptive-priority scheduler never
+ * runs a strictly lower-priority thread while a higher-priority one stays
+ * ready, no matter how short the wait "should" be.
+ *
+ * Deterministic, not a timing guess (this campaign's #1114 lesson): the
+ * low-priority thread's rendezvous inside fake_hw_ready() (see
+ * g_ul_gate_hw_ready above) proves the lifecycle byte is OPENING and the
+ * initializer is genuinely parked -- not merely "probably" -- before the
+ * contender thread is created, and the contender is then given a real
+ * k_sleep() window (not a busy loop of its own) to actually run and enter
+ * its wait loop before the initializer is released. Both joins are
+ * BOUNDED, not K_FOREVER: a livelocked join must fail fast, not hang the
+ * suite (mirrors test_concurrent_append_unequal_priority_no_livelock
+ * above). */
+
+struct ul_open_worker_ctx {
+	alp_update_log_t *log;
+};
+
+#define UL_OPEN_STACK_SIZE 2048
+K_THREAD_STACK_DEFINE(g_ul_open_stack_lo, UL_OPEN_STACK_SIZE);
+K_THREAD_STACK_DEFINE(g_ul_open_stack_hi, UL_OPEN_STACK_SIZE);
+
+static void ul_open_worker(void *p1, void *p2, void *p3)
+{
+	(void)p2;
+	(void)p3;
+	struct ul_open_worker_ctx *ctx = (struct ul_open_worker_ctx *)p1;
+	ctx->log                       = alp_update_log_open();
+}
+
+ZTEST(alp_update_log, test_open_election_unequal_priority_no_livelock)
+{
+	g_fake_hw_ready    = ALP_OK; /* HW tier wins the ranked walk, drives ready() */
+	g_ul_gate_hw_ready = true;
+	k_sem_reset(&g_ul_open_election_entered);
+	k_sem_reset(&g_ul_open_election_release);
+
+	struct ul_open_worker_ctx ctx_lo = { NULL };
+	struct ul_open_worker_ctx ctx_hi = { NULL };
+
+	struct k_thread th_lo, th_hi;
+	/* Numerically higher K_PRIO_PREEMPT() argument == LOWER priority. */
+	k_thread_create(&th_lo,
+	                g_ul_open_stack_lo,
+	                UL_OPEN_STACK_SIZE,
+	                ul_open_worker,
+	                &ctx_lo,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(7),
+	                0,
+	                K_NO_WAIT);
+
+	/* Wait until the low-priority thread has provably won the election and
+	 * is blocked inside ops->ready() -- lifecycle == OPENING, guaranteed,
+	 * not assumed. */
+	zassert_equal(k_sem_take(&g_ul_open_election_entered, K_MSEC(2000)),
+	              0,
+	              "elected initializer never entered ops->ready()");
+
+	k_thread_create(&th_hi,
+	                g_ul_open_stack_hi,
+	                UL_OPEN_STACK_SIZE,
+	                ul_open_worker,
+	                &ctx_hi,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(1),
+	                0,
+	                K_NO_WAIT);
+
+	/* Give the higher-priority contender real CPU time to observe the
+	 * OPENING lifecycle byte and enter its wait loop while the initializer
+	 * is still deterministically parked on the gate above. */
+	k_sleep(K_MSEC(20));
+
+	/* Release the elected initializer. Under the pre-fix busy spin, the
+	 * still-ready higher-priority contender never yields the core back to
+	 * it -- a hang, not a fast failure -- so this is caught by a BOUNDED
+	 * join rather than K_FOREVER. */
+	k_sem_give(&g_ul_open_election_release);
+
+	zassert_equal(k_thread_join(&th_hi, K_MSEC(2000)),
+	              0,
+	              "higher-priority contender must complete -- a timeout here is the "
+	              "busy-spin livelock issue #1625 closes");
+	zassert_equal(k_thread_join(&th_lo, K_MSEC(2000)),
+	              0,
+	              "elected initializer must complete and publish the singleton");
+
+	zassert_not_null(ctx_lo.log);
+	zassert_equal((uintptr_t)ctx_lo.log,
+	              (uintptr_t)ctx_hi.log,
+	              "both callers must observe the same singleton");
+	zassert_equal(alp_update_log_assurance(ctx_lo.log), ALP_UPDATE_LOG_HW_ENFORCED);
+
+	alp_update_log_close(ctx_lo.log);
+	g_ul_gate_hw_ready = false;
+	g_fake_hw_ready    = ALP_ERR_NOSUPPORT; /* restore for the rest of the suite */
 }
 
 /* --- Task 5: public-surface smoke (dispatch + sw_tier backend). Keep LAST. --- */
