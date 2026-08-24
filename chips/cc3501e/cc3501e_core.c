@@ -428,6 +428,8 @@ void cc3501e_set_peer_polled(bool on)
 /* How long to wait for a polled peer to DROP ready before giving up on the
  * edge and treating the line as level-only. */
 #define CC3501E_READY_EDGE_US 20000u
+/* Tight spin for the READY drop; see cc3501e_reply_gate(). */
+#define CC3501E_READY_LOW_SPINS 64u
 
 /* A POLLED slave (OTA update mode) re-arms only when its service loop next enters
  * SPI_transfer -- microseconds of processing, not an ISR -- so the host's fallback
@@ -455,17 +457,25 @@ static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 		bool           level     = false;
 		const uint32_t budget_us = g_ready_line_proven ? CC3501E_READY_WAIT_US : 0u;
 		uint32_t       waited_us = 0u;
-		if (g_peer_polled && g_ready_line_proven) {
-			/* Edge, not level: first wait for the slave to DROP ready (it is
-			 * finishing the previous phase), then fall through to the normal
-			 * wait-for-HIGH below, which now means "re-armed".  Bounded so a
-			 * peer that never drops it degrades to the old level behaviour. */
-			for (uint32_t low_us = 0u; low_us < CC3501E_READY_EDGE_US;
-			     low_us += CC3501E_READY_POLL_US) {
+		if (g_ready_line_proven) {
+			/* Edge, not level -- and NOT only in polled mode.  The slave drops
+			 * READY in its transfer-complete ISR and raises it again once the
+			 * NEXT phase is armed.  Sampling the level alone races that drop and
+			 * returns on the STALE high, so the host clocks into an un-armed
+			 * slave.  Bench 2026-08-24: the moment P2_6 became readable the
+			 * level-only gate returned with zero delay and the link fell to
+			 * 21-32 good soak PINGs; with this edge wait the same build runs
+			 * ping_fail=0 over 441 PINGs.
+			 *
+			 * A fixed spin count, not a CC3501E_READY_POLL_US (200 us) ladder:
+			 * a slave that re-armed before we looked must cost ~nothing rather
+			 * than the full CC3501E_READY_EDGE_US bound.  The count is WALL-TIME
+			 * sensitive -- it was retuned to 160 when the same build ran on the
+			 * 400 MHz M55-HP, and 8 is too few even at 160 MHz. */
+			for (uint32_t i = 0; i < CC3501E_READY_LOW_SPINS; ++i) {
 				if (alp_gpio_read(ctx->ready_pin, &level) == ALP_OK && !level) {
 					break;
 				}
-				alp_delay_us(CC3501E_READY_POLL_US);
 			}
 		}
 		for (;;) {

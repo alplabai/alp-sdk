@@ -14,6 +14,11 @@
  * public E1M GPIO ID that application code opens.  Confirm the table against
  * the active board metadata before relying on it for a new hardware revision.
  *
+ * IO16 (EN_W_DIS2n) is also OMITTED: its CC3501E pin GPIO_17 is the bridge READY/
+ * host-IRQ line (CC35 GPIO17 -> Alif P2_6), which the firmware owns and reserves in
+ * gpio_pad_reserved().  Routing IO16 here claimed a pad every proxy command is
+ * refused on, so an alp_gpio_open(ALP_E1M_GPIO_IO16) looked wired and never worked.
+ *
  * IO17 (EN_W_DIS1n) is intentionally OMITTED: its CC3501E pin GPIO_16 is the bridge
  * SPI0 dummy-CS this rev, so it is not host-proxied (bench call: "GPIO16 is ok for now").
  */
@@ -30,7 +35,6 @@ const cc3501e_gpio_route_t cc3501e_gpio_routes[] = {
 	{ ALP_E1M_GPIO_IO11, 2u },  /* USB2_SELECT      <- GPIO_2  */
 	{ ALP_E1M_GPIO_IO13, 13u }, /* I2S_SELECT       <- GPIO_13 */
 	{ ALP_E1M_GPIO_IO15, 14u }, /* S_BMI323.INT1    <- GPIO_14 */
-	{ ALP_E1M_GPIO_IO16, 17u }, /* EN_W_DIS2n       <- GPIO_17 (open-drain W_DISABLE2) */
 	{ ALP_E1M_GPIO_IO18, 18u }, /* M2E_SDIO_WAKEn   <- GPIO_18 */
 	{ ALP_E1M_GPIO_IO19, 19u }, /* M2E_UART.WAKEn_L <- GPIO_19 */
 	{ ALP_E1M_GPIO_IO20, 26u }, /* MUX_EN           <- GPIO_26 */

@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-23",
+  "generated": "2026-08-24",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -11489,16 +11489,16 @@
           "value": "4"
         },
         "ALP_CC3501E_MAX_PAYLOAD": {
-          "hash": "420aff122ca4629c",
-          "value": "512"
+          "hash": "71b976aadafc70fa",
+          "value": "2048"
         },
         "ALP_CC3501E_OTA_MAX_CHUNK": {
           "hash": "e3084f25bfd8ee65",
           "value": "(ALP_CC3501E_MAX_PAYLOAD - 4u)"
         },
         "ALP_CC3501E_PROTOCOL_VERSION": {
-          "hash": "0900acb058d1da07",
-          "value": "5"
+          "hash": "f2147799322560cc",
+          "value": "6"
         },
         "ALP_CC3501E_SYNC_IDLE": {
           "hash": "1b62c9b80bf39ade",

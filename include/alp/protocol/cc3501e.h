@@ -64,7 +64,7 @@ extern "C" {
  * difference and permanently clears ctx->initialised, so header, firmware and host
  * driver ship together: a bench unit still on v4 firmware must be reflashed before
  * a v5 host driver touches it. */
-#define ALP_CC3501E_PROTOCOL_VERSION 5
+#define ALP_CC3501E_PROTOCOL_VERSION 6
 
 /** Frame header in bytes, before the payload. */
 #define ALP_CC3501E_HEADER_BYTES 4
@@ -72,7 +72,13 @@ extern "C" {
 /** Maximum payload size per frame.  Larger transactions must split
  *  across multiple frames using the FRAME_CONTINUATION flag (bit 2,
  *  reserved in v1; v2 will land alongside the BLE long-write path). */
-#define ALP_CC3501E_MAX_PAYLOAD 512
+/* v6 raised this from 512.  It is NOT a wire field, so a host and firmware that
+ * disagree would silently size their frame buffers differently and corrupt the
+ * link -- hence the PROTOCOL_VERSION bump above, which turns the mismatch into
+ * a clean GET_VERSION refusal.  Anything raising it further must also keep
+ * CONFIG_SPI_DW_ALIF_DMA_MIN_LEN above it (see the example prj.conf) and fit
+ * the CC3501E DRAM budget -- 4096 overflowed GROUP_8 at link time. */
+#define ALP_CC3501E_MAX_PAYLOAD 2048
 
 /** Flags bitfield. */
 #define ALP_CC3501E_FLAG_RESP_REQUIRED 0x01

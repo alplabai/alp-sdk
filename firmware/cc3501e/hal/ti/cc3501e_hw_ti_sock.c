@@ -64,7 +64,14 @@ extern size_t xPortGetFreeHeapSize(void);
  * cc3501e_hw_sock_recv() now passes MSG_DONTWAIT and does not rely on this at
  * all; it is kept as the socket's default so any OTHER blocking operation on
  * the handle is bounded to something short rather than to lwIP's default. */
-#define CC3501E_SOCK_RCVTIMEO_MS 50
+/* Blocking timeout on the prefetch socket.  cc3501e_hw_sock_pump() runs once
+ * per task tick, so EVERY momentarily-empty poll stalls the whole task for
+ * this long while the bridge keeps draining the ring -- which is why replies
+ * came back short.  Was 4000, then 50; 2 ms keeps the stall an order of
+ * magnitude below a bridge transaction.  Do NOT go to 0/MSG_DONTWAIT: that
+ * returned 0 bytes for 81 s on a connection the server had already fed
+ * 256 KiB (bench-measured, reverted). */
+#define CC3501E_SOCK_RCVTIMEO_MS 2
 
 int cc3501e_hw_sock_open(uint8_t family, uint8_t type, uint8_t protocol, uint16_t *handle_out)
 {
@@ -166,7 +173,9 @@ int cc3501e_hw_sock_send(uint16_t       handle,
  * Single stream socket by design: this serves the bulk-receive case, and one
  * ring keeps the ISR-vs-task handshake to a single producer and a single
  * consumer (head written by the task only, tail by the dispatch only). */
-#define CC3501E_SOCK_RING_BYTES 4096u
+#define CC3501E_SOCK_RING_BYTES 8192u
+/* Max lwip_recv() calls per pump tick; see cc3501e_hw_sock_pump(). */
+#define CC3501E_SOCK_PUMP_PASSES 8u
 
 static struct {
 	uint8_t           buf[CC3501E_SOCK_RING_BYTES];
@@ -188,21 +197,38 @@ void cc3501e_hw_sock_pump(void)
 	if (h == 0u || rx_ring.peer_closed) {
 		return;
 	}
-	uint32_t used = ring_used();
-	if (used > CC3501E_SOCK_RING_BYTES - 512u) {
-		return; /* keep at least one max frame of headroom */
+	/* Drain what lwIP already has, not one segment per tick.  The bridge takes up
+	 * to ALP_CC3501E_MAX_PAYLOAD per transaction while a single lwip_recv()
+	 * returns about one TCP segment, so a one-shot pump left the ring
+	 * under-filled and every reply came back short.  Safe only because
+	 * CC3501E_SOCK_RCVTIMEO_MS is small -- at the old 50 ms an extra pass cost
+	 * more than a transaction. */
+	for (uint32_t pass = 0u; pass < CC3501E_SOCK_PUMP_PASSES; ++pass) {
+		uint32_t used = ring_used();
+		if (used > CC3501E_SOCK_RING_BYTES - (uint32_t)ALP_CC3501E_MAX_PAYLOAD) {
+			return; /* keep at least one max frame of headroom */
+		}
+		const uint32_t idx   = rx_ring.head % CC3501E_SOCK_RING_BYTES;
+		uint32_t       chunk = CC3501E_SOCK_RING_BYTES - idx; /* to the wrap only */
+		const uint32_t space = CC3501E_SOCK_RING_BYTES - used;
+		if (chunk > space) chunk = space;
+		if (chunk == 0u) {
+			return;
+		}
+		const ssize_t n = lwip_recv((int)h - 1, &rx_ring.buf[idx], (size_t)chunk, 0);
+		if (n > 0) {
+			rx_ring.head += (uint32_t)n;
+			if ((uint32_t)n < chunk) {
+				return; /* socket drained -- don't spend a timeout on the next pass */
+			}
+			continue;
+		}
+		if (n == 0) {
+			rx_ring.peer_closed = true; /* orderly close */
+		}
+		/* n < 0 with EAGAIN/EWOULDBLOCK is just "nothing yet" -- next tick. */
+		return;
 	}
-	const uint32_t idx   = rx_ring.head % CC3501E_SOCK_RING_BYTES;
-	uint32_t       chunk = CC3501E_SOCK_RING_BYTES - idx; /* to the wrap only */
-	const uint32_t space = CC3501E_SOCK_RING_BYTES - used;
-	if (chunk > space) chunk = space;
-	const ssize_t n = lwip_recv((int)h - 1, &rx_ring.buf[idx], (size_t)chunk, 0);
-	if (n > 0) {
-		rx_ring.head += (uint32_t)n;
-	} else if (n == 0) {
-		rx_ring.peer_closed = true; /* orderly close */
-	}
-	/* n < 0 with EAGAIN/EWOULDBLOCK is just "nothing yet" -- try again next tick. */
 }
 
 /* Arm/disarm prefetch for a handle.  Called from the socket open/close paths. */

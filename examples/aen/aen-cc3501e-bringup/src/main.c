@@ -250,7 +250,11 @@ static void cc3501e_dump_diag(cc3501e_t *fw)
 
 static void cc3501e_net_probe(cc3501e_t *fw)
 {
-	static uint8_t rx[512];
+	/* Sized to ALP_CC3501E_MAX_PAYLOAD-class reads: the per-transaction cost of
+	 * the bridge is ~850 us regardless of size, so asking for 512 B when the
+	 * frame can carry ~2 KB throws away most of the link.  512 -> 2048 measured
+	 * 357 kB/s -> 421 kB/s on e1m-aen-evk-01. */
+	static uint8_t rx[2048];
 
 	/* 1) Throughput -- drain a file from a local HTTP server over the link. */
 	if ((unsigned)CC3501E_SPEEDTEST_IP0 != 0u) {

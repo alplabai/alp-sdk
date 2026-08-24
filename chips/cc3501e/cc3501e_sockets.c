@@ -127,36 +127,29 @@ alp_status_t cc3501e_sock_recv(cc3501e_t *ctx,
 	/* Bound the requested count so the reply (recv_resp header + data + status)
 	 * fits one frame. */
 	size_t want = cap;
-	/* CAP THE REPLY AT 256 DATA BYTES, not at what the frame could physically
-	 * hold (MAX_PAYLOAD - CC3501E_SOCK_RECV_RESP_HDR - 1 = 487).
+	/* Fill the frame: MAX_PAYLOAD - CC3501E_SOCK_RECV_RESP_HDR - 1 = 487 data
+	 * bytes.
 	 *
-	 * A large reply payload desyncs this bridge, and the failure is total rather
-	 * than occasional.  Silicon-measured 2026-08-24 on e1m-aen-evk-01, streaming
-	 * a 262144 B HTTP body the server demonstrably delivered:
+	 * This was pinned at 256 because larger replies desynced the bridge totally
+	 * -- silicon-measured 2026-08-24, streaming a 262144 B HTTP body the server
+	 * demonstrably delivered: cap 128 -> 12779 B/s, cap 256 -> 25480 B/s, cap
+	 * 400/486/487 -> 0 B/s with the socket layer left unusable.  The failure was
+	 * always a bad reply HEADER on the FOLLOWING transaction (hdr_bad=669,
+	 * xfer_fail=0, busy=0), which is why it looked like a hard size limit.
 	 *
-	 *   cap 128 (153 B payload) -> 262144 B in 20513 ms = 12779 B/s, no misses
-	 *   cap 256 (281 B payload) -> 262144 B in 10288 ms = 25480 B/s, no misses
-	 *   cap 400 (425 B payload) -> 0 B in 81791 ms = 0 B/s
-	 *   cap 486 / 487           -> 0 B, and the socket layer is left unusable
+	 * It was not a size limit.  That comment named the READY line as "the leading
+	 * remaining suspect", and it was right: READY (CC35 GPIO17 -> Alif P2_6) read
+	 * 0 only because the Alif pad's INPUT BUFFER was never enabled -- an
+	 * input-enable pinctrl group turns it on (see the board overlay).  With READY
+	 * actually readable and cc3501e_reply_gate() waiting for the drop-then-rise
+	 * EDGE, the host stops clocking into an un-armed slave and 487 works:
+	 * 262405 B in 883 ms = 297174 B/s, over a link running ping_fail=0.
 	 *
-	 * The failure mode is a bad reply HEADER on the following transaction, never
-	 * a failed transfer and never a BUSY from the device (measured: hdr_bad=669,
-	 * xfer_fail=0, busy=0, ok=1 -- roughly a thousand desynced transactions per
-	 * successful frame).  Throughput scales linearly with this cap while it
-	 * works, so the per-frame cost dominates and 256 is simply the largest size
-	 * measured to be reliable.
-	 *
-	 * What it is NOT: it is not an off-by-one at the 512-byte buffer limit (486
-	 * fails too), it is not slave arming latency (a bounded size-scaled settle
-	 * before the reply-payload phase does not help), and it is not the reply
-	 * phase's NULL rxBuf (giving SPIWFF3DMA a real RX sink does not help).  The
-	 * READY line, which is the interlock that would make the phase handshake
-	 * explicit rather than timed, reads low on this board -- that is the leading
-	 * remaining suspect and it is a hardware bring-up item.
-	 *
-	 * Raising this without re-measuring on silicon will silently return the
-	 * socket path to 0 B/s. */
-	const size_t want_max = 256u;
+	 * The cap therefore belongs to the frame, not to a magic number.  A board
+	 * with no readable READY line still falls back to fixed settle gaps, where
+	 * the old 256 limit would apply -- re-measure on silicon before trusting
+	 * this on such a board. */
+	const size_t want_max = (size_t)ALP_CC3501E_MAX_PAYLOAD - CC3501E_SOCK_RECV_RESP_HDR - 1u;
 	if (want > want_max) want = want_max;
 
 	/* SOCK_RECV (0x23) wire = alp_cc3501e_sock_recv_t { handle(LE16) | max_len(LE16) }. */

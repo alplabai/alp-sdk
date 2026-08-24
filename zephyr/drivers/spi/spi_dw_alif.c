@@ -814,6 +814,87 @@ static bool spi_dw_should_dma(const struct spi_dw_config *info,
 }
 #endif /* CONFIG_SPI_DW_ALIF_USE_DMA */
 
+/* Max push/pull iterations in the polled master loop before declaring a stall. */
+#define SPI_DW_POLL_GUARD 4000000u
+
+/* Batched polled transfer for the common 8-bit master case.
+ *
+ * The generic push_data()/pull_data() pair costs about FOUR peripheral MMIO
+ * accesses per byte: pull_data() re-reads RXFLR for every single word, and
+ * push_data() re-reads TXFLR+RXFLR on every call.  On this SoC a peripheral
+ * register access is ~45 cycles at 160 MHz, so that is ~180 cycles/byte = 1.12 us
+ * -- against 560 ns/byte of wire at 14.29 MHz.  Silicon-measured 1221 ns/byte,
+ * i.e. 46% duty, which is exactly the half-idle SCLK seen on a scope.
+ *
+ * A byte fundamentally costs ONE write_dr + ONE read_dr.  Hoisting the level
+ * reads out of the inner loops takes a level snapshot once per burst instead of
+ * once per byte, which is the difference between ~4 and ~2.2 accesses/byte.
+ *
+ * Returns false if this transfer is not eligible (caller falls back). */
+static bool spi_dw_poll_xfer_u8(const struct device *dev)
+{
+	const struct spi_dw_config *info = dev->config;
+	struct spi_dw_data         *spi  = dev->data;
+	struct spi_context         *ctx  = &spi->ctx;
+	uint32_t                    guard = 0u;
+
+	if (spi->dfs != 1) {
+		return false;
+	}
+
+	while (spi_context_tx_on(ctx) || spi_context_rx_on(ctx)) {
+		/* Drain a SNAPSHOT of the RX level -- the FIFO cannot grow while we
+		 * read it, and the outer loop picks up anything that lands meanwhile. */
+		uint32_t avail = read_rxflr(dev);
+
+		while (avail--) {
+			uint32_t data = read_dr(dev);
+
+			if (spi_context_rx_buf_on(ctx)) {
+				UNALIGNED_PUT(data, (uint8_t *)ctx->rx_buf);
+			}
+			spi_context_update_rx(ctx, 1, 1);
+			spi->fifo_diff--;
+		}
+
+		/* Refill against a single free-space snapshot. */
+		uint32_t txlvl = read_txflr(dev);
+		uint32_t room  = (info->fifo_depth > txlvl) ? (info->fifo_depth - txlvl) : 0u;
+
+		if (spi_context_rx_on(ctx)) {
+			const uint32_t rxlvl = read_rxflr(dev);
+
+			room = (room > rxlvl) ? (room - rxlvl) : 0u;
+		}
+
+		while (room--) {
+			uint32_t data;
+
+			if (spi_context_tx_buf_on(ctx)) {
+				data = UNALIGNED_GET((uint8_t *)ctx->tx_buf);
+			} else if (spi_context_rx_on(ctx)) {
+				if ((int)(ctx->rx_len - spi->fifo_diff) <= 0) {
+					break;
+				}
+				data = 0U;
+			} else if (spi_context_tx_on(ctx)) {
+				data = 0U;
+			} else {
+				break;
+			}
+			write_dr(dev, data);
+			spi_context_update_tx(ctx, 1, 1);
+			spi->fifo_diff++;
+		}
+
+		if (++guard > SPI_DW_POLL_GUARD) {
+			LOG_ERR("SPI %p polled transfer stalled", dev);
+			return false;
+		}
+	}
+	return true;
+}
+
 static int transceive(const struct device *dev,
 		      const struct spi_config *config,
 		      const struct spi_buf_set *tx_bufs,
@@ -950,6 +1031,26 @@ static int transceive(const struct device *dev,
 	}
 #endif
 
+	/* POLLED master path.  The ISR path takes an interrupt at every TXFTLR /
+	 * RXFTLR crossing -- with a 16-entry FIFO that is one ISR round trip per
+	 * ~8 bytes, and the FIFO drains in 16 x 560 ns = 9 us at 14.29 MHz, so the
+	 * shift clock STALLS waiting to be refilled.  Silicon-measured on the
+	 * CC3501E bridge: 1221 ns/byte against 560 ns/byte of wire = 46% duty, which
+	 * matches the ~50% idle SCLK seen on a scope.  Driving push/pull inline from
+	 * the calling thread removes the round trip entirely.
+	 *
+	 * Master + synchronous + non-DMA only: a slave cannot spin (it must wait for
+	 * a master that may never clock), async owes the caller a callback, and the
+	 * DMA path has its own completion. */
+	const bool polled = !spi_dw_is_slave(spi) && !asynchronous
+#ifdef CONFIG_SPI_DW_ALIF_USE_DMA
+	                    && !use_dma
+#endif
+	    ;
+	if (polled) {
+		reg_data = DW_SPI_IMR_MASK; /* no interrupts -- we drive it ourselves */
+	}
+
 	write_imr(dev, reg_data);
 
 	if (!spi_dw_is_slave(spi)) {
@@ -974,6 +1075,25 @@ static int transceive(const struct device *dev,
 		ret = spi_dw_dma_transceive(dev, tx_bufs, rx_bufs);
 	}
 #endif
+
+	if (polled) {
+		if (!spi_dw_poll_xfer_u8(dev)) {
+			/* Not 8-bit, or stalled -- fall back to the generic pair, bounded
+			 * so a wedged macrocell cannot hang the calling thread. */
+			uint32_t guard = 0u;
+
+			while (spi_context_tx_on(&spi->ctx) || spi_context_rx_on(&spi->ctx)) {
+				pull_data(dev);
+				push_data(dev);
+				if (++guard > SPI_DW_POLL_GUARD) {
+					LOG_ERR("SPI %p polled transfer stalled", dev);
+					ret = -ETIMEDOUT;
+					break;
+				}
+			}
+		}
+		completed(dev, ret);
+	}
 
 	if (!ret) {
 		ret = spi_context_wait_for_completion(&spi->ctx);
