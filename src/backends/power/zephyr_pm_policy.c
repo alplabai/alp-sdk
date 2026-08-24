@@ -75,6 +75,7 @@
 #include <alp/peripheral.h>
 #include <alp/power.h>
 
+#include "alp_slot_claim.h"
 #include "power_ops.h"
 
 /* Held-lock bookkeeping so close() / repeated request_sleep can
@@ -196,9 +197,13 @@ static bool       _lock_in_use[CONFIG_ALP_SDK_MAX_POWER_HANDLES];
 static pm_locks_t *_alloc_locks(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_POWER_HANDLES; ++i) {
-		if (!_lock_in_use[i]) {
-			_lock_pool[i]   = (pm_locks_t){ 0 };
-			_lock_in_use[i] = true;
+		/* Atomic claim (src/common/alp_slot_claim.h, issue #1115):
+		 * a compare-exchange, so exactly one concurrent opener wins the
+		 * slot.  in_use lives in a parallel array rather than inside the
+		 * slot struct, so the winner may zero the whole slot afterwards --
+		 * no offsetof form is needed here. */
+		if (alp_slot_try_claim(&_lock_in_use[i])) {
+			_lock_pool[i] = (pm_locks_t){ 0 };
 			return &_lock_pool[i];
 		}
 	}
@@ -209,7 +214,7 @@ static void _free_locks(pm_locks_t *l)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_POWER_HANDLES; ++i) {
 		if (&_lock_pool[i] == l) {
-			_lock_in_use[i] = false;
+			alp_slot_release(&_lock_in_use[i]);
 			return;
 		}
 	}

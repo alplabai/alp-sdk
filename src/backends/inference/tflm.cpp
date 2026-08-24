@@ -46,6 +46,14 @@ extern "C" {
 #include <alp/peripheral.h>
 }
 
+/* src/common/alp_slot_claim.h has no extern "C" guard of its own, and its
+ * out-of-line declarations (alp_slot_sleep_tick, the close-drain helpers)
+ * are compiled with C linkage in src/common/alp_slot_claim.c -- so the
+ * include is wrapped here rather than left to link by luck. */
+extern "C" {
+#include "alp_slot_claim.h"
+}
+
 #include "inference_ops.h"
 /* tflm_shared.h carries the extern "C" declarations of
  * alp_inference_tflm_ops + the variant helpers.  Including it here is
@@ -304,14 +312,21 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		delete st;
 		return ALP_ERR_INVAL;
 	} else {
-		if (g_default_arena_in_use) {
+		/* Atomic claim of the single shared default arena
+		 * (src/common/alp_slot_claim.h, issue #1115).  The plain
+		 * check-then-set this replaces let two interpreters opening
+		 * concurrently BOTH win the one arena and run inference over
+		 * each other's activations -- silent corruption, where one of
+		 * them should have got a clean ALP_ERR_NOMEM.  No loop and no
+		 * array subscript here, which is why every array-shaped grep
+		 * in #1115's remediation walked past this site. */
+		if (!alp_slot_try_claim(&g_default_arena_in_use)) {
 			delete st;
 			return ALP_ERR_NOMEM;
 		}
-		g_default_arena_in_use = true;
-		st->arena_buf          = g_default_arena;
-		st->arena_size         = kDefaultArenaBytes;
-		st->own_arena          = true;
+		st->arena_buf  = g_default_arena;
+		st->arena_size = kDefaultArenaBytes;
+		st->own_arena  = true;
 	}
 
 	register_default_ops(st->resolver);
@@ -319,14 +334,14 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 	st->interp = new (std::nothrow)
 	    tflite::MicroInterpreter(st->model, st->resolver, st->arena_buf, st->arena_size);
 	if (st->interp == nullptr) {
-		if (st->own_arena) g_default_arena_in_use = false;
+		if (st->own_arena) alp_slot_release(&g_default_arena_in_use);
 		delete st;
 		return ALP_ERR_NOMEM;
 	}
 
 	if (st->interp->AllocateTensors() != kTfLiteOk) {
 		delete st->interp;
-		if (st->own_arena) g_default_arena_in_use = false;
+		if (st->own_arena) alp_slot_release(&g_default_arena_in_use);
 		delete st;
 		return ALP_ERR_IO;
 	}
@@ -382,7 +397,7 @@ static void tflm_close(alp_inference_backend_state_t *state)
 	if (st == nullptr) return;
 
 	delete st->interp;
-	if (st->own_arena) g_default_arena_in_use = false;
+	if (st->own_arena) alp_slot_release(&g_default_arena_in_use);
 	delete st;
 	state->be_data = nullptr;
 }

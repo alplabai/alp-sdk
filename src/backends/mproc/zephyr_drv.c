@@ -55,6 +55,7 @@
 #include <alp/mproc.h>
 #include <alp/peripheral.h>
 
+#include "alp_slot_claim.h"
 #include "mproc_ops.h"
 
 #if defined(CONFIG_ALP_SDK_MPROC)
@@ -119,9 +120,13 @@ static bool            _hwsem_be_in_use[CONFIG_ALP_SDK_MAX_HWSEM_HANDLES];
 static struct shmem_be *_shmem_be_alloc(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_shmem_be_pool); ++i) {
-		if (!_shmem_be_in_use[i]) {
+		/* Atomic claim (src/common/alp_slot_claim.h, issue #1115):
+		 * a compare-exchange, so exactly one concurrent opener wins the
+		 * slot.  in_use lives in a parallel array rather than inside the
+		 * slot struct, so the winner may zero the whole slot afterwards --
+		 * no offsetof form is needed here. */
+		if (alp_slot_try_claim(&_shmem_be_in_use[i])) {
 			memset(&_shmem_be_pool[i], 0, sizeof(_shmem_be_pool[i]));
-			_shmem_be_in_use[i] = true;
 			return &_shmem_be_pool[i];
 		}
 	}
@@ -133,7 +138,7 @@ static void _shmem_be_free(struct shmem_be *p)
 	if (p == NULL) return;
 	for (size_t i = 0; i < ARRAY_SIZE(_shmem_be_pool); ++i) {
 		if (&_shmem_be_pool[i] == p) {
-			_shmem_be_in_use[i] = false;
+			alp_slot_release(&_shmem_be_in_use[i]);
 			return;
 		}
 	}
@@ -142,9 +147,13 @@ static void _shmem_be_free(struct shmem_be *p)
 static struct mbox_be *_mbox_be_alloc(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_mbox_be_pool); ++i) {
-		if (!_mbox_be_in_use[i]) {
+		/* Atomic claim (src/common/alp_slot_claim.h, issue #1115):
+		 * a compare-exchange, so exactly one concurrent opener wins the
+		 * slot.  in_use lives in a parallel array rather than inside the
+		 * slot struct, so the winner may zero the whole slot afterwards --
+		 * no offsetof form is needed here. */
+		if (alp_slot_try_claim(&_mbox_be_in_use[i])) {
 			memset(&_mbox_be_pool[i], 0, sizeof(_mbox_be_pool[i]));
-			_mbox_be_in_use[i] = true;
 			return &_mbox_be_pool[i];
 		}
 	}
@@ -156,7 +165,7 @@ static void _mbox_be_free(struct mbox_be *p)
 	if (p == NULL) return;
 	for (size_t i = 0; i < ARRAY_SIZE(_mbox_be_pool); ++i) {
 		if (&_mbox_be_pool[i] == p) {
-			_mbox_be_in_use[i] = false;
+			alp_slot_release(&_mbox_be_in_use[i]);
 			return;
 		}
 	}
@@ -165,9 +174,13 @@ static void _mbox_be_free(struct mbox_be *p)
 static struct hwsem_be *_hwsem_be_alloc(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_hwsem_be_pool); ++i) {
-		if (!_hwsem_be_in_use[i]) {
+		/* Atomic claim (src/common/alp_slot_claim.h, issue #1115):
+		 * a compare-exchange, so exactly one concurrent opener wins the
+		 * slot.  in_use lives in a parallel array rather than inside the
+		 * slot struct, so the winner may zero the whole slot afterwards --
+		 * no offsetof form is needed here. */
+		if (alp_slot_try_claim(&_hwsem_be_in_use[i])) {
 			memset(&_hwsem_be_pool[i], 0, sizeof(_hwsem_be_pool[i]));
-			_hwsem_be_in_use[i] = true;
 			return &_hwsem_be_pool[i];
 		}
 	}
@@ -179,7 +192,7 @@ static void _hwsem_be_free(struct hwsem_be *p)
 	if (p == NULL) return;
 	for (size_t i = 0; i < ARRAY_SIZE(_hwsem_be_pool); ++i) {
 		if (&_hwsem_be_pool[i] == p) {
-			_hwsem_be_in_use[i] = false;
+			alp_slot_release(&_hwsem_be_in_use[i]);
 			return;
 		}
 	}
