@@ -18,6 +18,7 @@ as CHANGED).
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -433,3 +434,158 @@ def test_real_line_continued_macros_now_captured_with_real_values():
         rec = snapshot["headers"][header]["macros"].get(name)
         assert rec is not None, f"{name} missing from {header}"
         assert rec["value"] == value, f"{name}: {rec['value']!r} != {value!r}"
+
+
+# ---------------------------------------------------------------------
+# MOVED detection: a header split (symbol relocated, value unchanged,
+# old header still #includes the new one) must not read as a real
+# removal.  See abi_snapshot.py's diff()/build_include_graph() docs.
+# ---------------------------------------------------------------------
+
+
+def _macro_snap(tmp_path, header_key: str, filename: str, define_line: str):
+    """Build a one-header snapshot fragment keyed by `header_key`
+    (an arbitrary label, same pattern as `_snap` above) from a header
+    file written to `tmp_path/filename` containing `define_line`."""
+    return {header_key: _extract_src(tmp_path, define_line, filename)}
+
+
+def test_diff_reports_moved_when_old_header_still_includes_new_one(tmp_path):
+    # `alp/board_routes.h` must pre-exist in BOTH snapshots -- like the
+    # real PR #1660 case, the destination header isn't new, it just
+    # gains the macro; a brand-new destination header is a different,
+    # unhandled shape (it reads as "ADDED header", which already skips
+    # per-symbol diffing for everything inside it -- out of scope here).
+    prev_headers = _macro_snap(
+        tmp_path, "alp/board.h", "prev_board.h", "#define FOO_MACRO 1\n"
+    )
+    prev_headers.update(
+        _macro_snap(tmp_path, "alp/board_routes.h", "prev_board_routes.h", "")
+    )
+    prev = {"headers": prev_headers}
+    curr_headers = _macro_snap(tmp_path, "alp/board.h", "curr_board_empty.h", "")
+    curr_headers.update(
+        _macro_snap(
+            tmp_path,
+            "alp/board_routes.h",
+            "curr_board_routes.h",
+            "#define FOO_MACRO 1\n",
+        )
+    )
+    curr = {"headers": curr_headers}
+    include_graph = {"alp/board.h": ["alp/board_routes.h"]}
+
+    msgs = abi.diff(prev, curr, include_graph=include_graph)
+
+    assert any(
+        m.startswith("MOVED   macro FOO_MACRO: alp/board.h -> alp/board_routes.h")
+        for m in msgs
+    ), msgs
+    assert not any(m.startswith("REMOVED") for m in msgs), msgs
+    assert not any(m.startswith("ADDED") for m in msgs), msgs
+    # Same exit-code rule main() applies: MOVED must not trip the gate.
+    assert not any(m.startswith(("REMOVED", "CHANGED")) for m in msgs)
+
+
+def test_diff_still_reports_removed_without_the_reachability_include(tmp_path):
+    """The test that matters: a same-name/same-value symbol reappearing
+    in another header is NOT a move unless the old header actually
+    still reaches the new one -- otherwise a real removal (old header
+    dropped it AND never gained a path to wherever it went) would
+    silently stop tripping the freeze gate."""
+    prev_headers = _macro_snap(
+        tmp_path, "alp/board.h", "prev_board2.h", "#define FOO_MACRO 1\n"
+    )
+    prev_headers.update(
+        _macro_snap(tmp_path, "alp/board_routes.h", "prev_board2_routes.h", "")
+    )
+    prev = {"headers": prev_headers}
+    curr_headers = _macro_snap(tmp_path, "alp/board.h", "curr_board2_empty.h", "")
+    curr_headers.update(
+        _macro_snap(
+            tmp_path,
+            "alp/board_routes.h",
+            "curr_board2_routes.h",
+            "#define FOO_MACRO 1\n",
+        )
+    )
+    curr = {"headers": curr_headers}
+
+    # No include_graph at all (defaults to {}): the old header does NOT
+    # reach the new one, so this must stay REMOVED + ADDED, not MOVED.
+    msgs = abi.diff(prev, curr)
+
+    assert "REMOVED macro alp/board.h::FOO_MACRO" in msgs, msgs
+    assert "ADDED   macro alp/board_routes.h::FOO_MACRO" in msgs, msgs
+    assert not any(m.startswith("MOVED") for m in msgs), msgs
+    assert any(m.startswith(("REMOVED", "CHANGED")) for m in msgs)  # gate would fire
+
+
+def test_diff_does_not_collapse_a_move_that_also_changed_value(tmp_path):
+    prev_headers = _macro_snap(
+        tmp_path, "alp/board.h", "prev_board3.h", "#define FOO_MACRO 1\n"
+    )
+    prev_headers.update(
+        _macro_snap(tmp_path, "alp/board_routes.h", "prev_board3_routes.h", "")
+    )
+    prev = {"headers": prev_headers}
+    curr_headers = _macro_snap(tmp_path, "alp/board.h", "curr_board3_empty.h", "")
+    curr_headers.update(
+        _macro_snap(
+            tmp_path,
+            "alp/board_routes.h",
+            "curr_board3_routes.h",
+            "#define FOO_MACRO 2\n",  # value changed -> different hash
+        )
+    )
+    curr = {"headers": curr_headers}
+    include_graph = {"alp/board.h": ["alp/board_routes.h"]}
+
+    msgs = abi.diff(prev, curr, include_graph=include_graph)
+
+    assert not any(m.startswith("MOVED") for m in msgs), msgs
+    assert "REMOVED macro alp/board.h::FOO_MACRO" in msgs, msgs
+    assert "ADDED   macro alp/board_routes.h::FOO_MACRO" in msgs, msgs
+
+
+def test_diff_reports_genuine_deletion_as_removed(tmp_path):
+    prev = {
+        "headers": _macro_snap(
+            tmp_path, "alp/board.h", "prev_board4.h", "#define FOO_MACRO 1\n"
+        )
+    }
+    curr = {
+        "headers": _macro_snap(tmp_path, "alp/board.h", "curr_board4_empty.h", "")
+    }
+    include_graph = {"alp/board.h": []}  # no candidate to move to at all
+
+    msgs = abi.diff(prev, curr, include_graph=include_graph)
+
+    assert msgs == ["REMOVED macro alp/board.h::FOO_MACRO"]
+
+
+def test_build_include_graph_finds_the_real_evk_routes_split_edge():
+    """`alp/boards/alp_e1m_evk.h` #includes its `_routes.h` sibling
+    today -- pins that `build_include_graph` reads that edge straight
+    off the real tree, one hop, by its canonical `alp/...` key.  (The
+    X-EVK sibling doesn't gain this edge until PR #1660 lands -- not
+    asserted here, that's the header change this script is neutral to.)"""
+    graph = abi.build_include_graph(abi.INCLUDE_ROOT)
+    assert "alp/boards/alp_e1m_evk_routes.h" in graph.get("alp/boards/alp_e1m_evk.h", [])
+
+
+def test_real_tree_reports_zero_removed_against_last_released_snapshot():
+    """The regression pin the maintainer asked for: on a plain checkout
+    (no header split applied), `--diff` against the last released
+    baseline must report exactly zero REMOVED lines, same as before
+    this change -- MOVED detection must never manufacture or absorb a
+    REMOVED that wasn't already there."""
+    baseline = REPO / "docs" / "abi" / "v0.15-snapshot.json"
+    prior = json.loads(baseline.read_text(encoding="utf-8"))
+    current = abi.build_snapshot("test", abi.INCLUDE_ROOT)
+    include_graph = abi.build_include_graph(abi.INCLUDE_ROOT)
+
+    msgs = abi.diff(prior, current, include_graph=include_graph)
+
+    removed = [m for m in msgs if m.startswith("REMOVED")]
+    assert removed == [], removed

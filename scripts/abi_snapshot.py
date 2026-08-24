@@ -41,6 +41,14 @@ list of an enum; reordering, adding, removing, or retyping any entry
 changes both the list AND the parent `hash` (the hash is a fingerprint
 of the *complete* normalised declaration, body included).
 
+`--diff` reports a symbol that disappeared from one header and
+reappeared under the same name/category/value in another as `MOVED`,
+not `REMOVED` + `ADDED` -- but only when the old header still
+`#include`s the new one in the CURRENT tree (see `build_include_graph`
+and `diff()`).  That reachability check reads today's headers off
+disk; it is intentionally NOT part of this file's persisted JSON
+schema, so `--output` keeps writing exactly what it always has.
+
 The parser is **deliberately simple** -- it walks the SDK's own
 declaration style, which is consistent across the headers (one decl per
 logical declaration, no macro-generated symbols, no template / generic
@@ -75,6 +83,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import posixpath
 import re
 import sys
 from pathlib import Path
@@ -669,10 +678,115 @@ def _field_diff(
     return msgs
 
 
-def diff(prev: dict[str, Any], curr: dict[str, Any]) -> list[str]:
+# ---------------------------------------------------------------------
+# MOVED detection: one-hop #include graph of the CURRENT tree
+# ---------------------------------------------------------------------
+
+# `#include "target"` / `#include <target>`, matched against
+# comment-stripped text (same as `_DEFINE_RE`'s sibling passes).  Not
+# restricted to `alp/`-rooted targets here -- `_resolve_include` below
+# decides what a bare relative target resolves to; this regex only
+# extracts the raw text between the quotes/angle-brackets.
+_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"](?P<target>[^">]+)[>"]', re.MULTILINE)
+
+
+def _resolve_include(own_key: str, target: str) -> str:
+    """Resolve one `#include` target to the canonical `alp/...` key
+    used as a `headers` dict key elsewhere in this module.
+
+    This codebase's public headers cross-reference EACH OTHER by a
+    full `alp/...`-rooted path (`#include "alp/boards/..._routes.h"`,
+    `#include <alp/adc.h>`) -- that string already IS the canonical
+    key, no resolution needed.  A same-directory relative include
+    (`#include "cap_instance.h"` in `alp/cap.h`) is resolved against
+    `own_key`'s own directory instead, the way the C preprocessor
+    would.  The result isn't checked against the real header set here
+    -- a system/vendor header (`#include <stdint.h>`, `#include
+    "lvgl.h"`) resolves to some string just as readily; the caller
+    (`build_include_graph`) doesn't care, since a resolved string that
+    matches no real header key simply never satisfies a later
+    membership check.
+    """
+    if target.startswith("alp/"):
+        return target
+    base_dir = own_key.rsplit("/", 1)[0] if "/" in own_key else ""
+    joined = f"{base_dir}/{target}" if base_dir else target
+    return posixpath.normpath(joined)
+
+
+def build_include_graph(include_root: Path) -> dict[str, list[str]]:
+    """One-hop `#include` edges between the headers this script walks,
+    read straight off today's disk -- the CURRENT tree, not anything
+    persisted in a snapshot.  Used only by `diff()`'s MOVED detection:
+    a symbol relocated from header A to header B is a real ABI break
+    UNLESS a consumer `#include`-ing A today still reaches B, and that
+    can only be answered by the live tree -- the OLD snapshot predates
+    the move, and the NEW one doesn't carry `#include` info in its
+    schema at all.  Keeping that info out of the persisted JSON is
+    deliberate: it means `--output` keeps writing exactly the same
+    bytes as before this feature, so `pr-generated-files.yml`'s
+    "generated files in sync" byte-diff gate against a committed
+    `docs/abi/*.json` is unaffected by adding this check.
+
+    # ponytail: one-hop only, not transitive.  Every real header split
+    # in this tree (dac.h out of adc.h in v0.8.0, the *_routes.h
+    # split) is a direct #include from the old file straight into the
+    # new one -- no intermediate header in between.  If a future split
+    # ever routes through one, upgrade this to a BFS over the same
+    # edge dict; diff()'s reachability check (`a_header in
+    # include_graph.get(r_header, [])`) is the only caller and would
+    # need to become a graph walk, not a rewrite.
+    """
+    graph: dict[str, list[str]] = {}
+    for path in sorted(include_root.rglob("*.h")):
+        rel = path.relative_to(include_root.parent).as_posix()
+        text = strip_comments(path.read_text(encoding="utf-8"))
+        edges = {_resolve_include(rel, m["target"]) for m in _INCLUDE_RE.finditer(text)}
+        graph[rel] = sorted(edges)
+    return graph
+
+
+def diff(
+    prev: dict[str, Any],
+    curr: dict[str, Any],
+    include_graph: dict[str, list[str]] | None = None,
+) -> list[str]:
+    """Per-symbol diff between two snapshots.
+
+    `include_graph` (see `build_include_graph`) is what lets a header
+    SPLIT read as `MOVED` instead of `REMOVED` + `ADDED`: when the same
+    symbol name disappears from header A and reappears in header B, in
+    the same category, with an IDENTICAL hash (value/signature
+    unchanged -- a move that ALSO changes the value is still reported
+    as a plain REMOVED + ADDED, never collapsed into MOVED), and A
+    still `#include`s B in the CURRENT tree, a consumer of A sees
+    exactly what it saw before.  `include_graph` defaults to `{}` (no
+    edges), so a caller that doesn't pass one -- every caller before
+    this feature existed -- gets the old REMOVED+ADDED behaviour,
+    unchanged.
+
+    `MOVED` must never satisfy `m.startswith(("REMOVED", "CHANGED"))`
+    (the exit-code check in `main()` below) and must never match the
+    freeze gate's `grep -q '^  REMOVED '`
+    (`.github/workflows/pr-generated-files.yml`) -- it is not a
+    removal.
+    """
+    if include_graph is None:
+        include_graph = {}
+
     msgs: list[str] = []
     prev_h = prev.get("headers", {})
     curr_h = curr.get("headers", {})
+
+    # Deferred instead of emitted inline: a REMOVED entry in header A
+    # may turn out to be a MOVED once matched against an ADDED entry in
+    # some other header B, so both lists are collected in full before
+    # either is turned into a message.  CHANGED (same header, same
+    # symbol, different hash) is unaffected by any of this and is
+    # still emitted directly, in the original per-header/per-category
+    # traversal order.
+    removed: list[tuple[str, str, str, str]] = []  # (header, category, sym, hash)
+    added: list[tuple[str, str, str, str]] = []
 
     for name in sorted(set(prev_h) | set(curr_h)):
         if name not in curr_h:
@@ -686,13 +800,42 @@ def diff(prev: dict[str, Any], curr: dict[str, Any]) -> list[str]:
             c = curr_h[name].get(category, {})
             for sym in sorted(set(p) | set(c)):
                 if sym not in c:
-                    msgs.append(f"REMOVED {category[:-1]} {name}::{sym}")
+                    removed.append((name, category, sym, p[sym]["hash"]))
                 elif sym not in p:
-                    msgs.append(f"ADDED   {category[:-1]} {name}::{sym}")
+                    added.append((name, category, sym, c[sym]["hash"]))
                 elif p[sym]["hash"] != c[sym]["hash"]:
                     msgs.append(f"CHANGED {category[:-1]} {name}::{sym}")
                     if category == "typedefs":
                         msgs.extend(_field_diff(name, sym, p[sym], c[sym]))
+
+    # Pair each REMOVED entry with an ADDED entry of the same
+    # category/symbol/hash where the OLD header still #includes the
+    # NEW one today.  Every hash-matching candidate is tried, not just
+    # the first: a same-name/same-value symbol that happens to reappear
+    # in some UNRELATED, unreachable header first must not shadow a
+    # later candidate that genuinely is reachable -- and must not get
+    # consumed either way, since it was never a real match.
+    unmatched_added = list(added)
+    for r_header, r_cat, r_sym, r_hash in removed:
+        match_idx = None
+        for i, (a_header, a_cat, a_sym, a_hash) in enumerate(unmatched_added):
+            if (
+                a_cat == r_cat
+                and a_sym == r_sym
+                and a_hash == r_hash
+                and a_header in include_graph.get(r_header, [])
+            ):
+                match_idx = i
+                break
+        if match_idx is not None:
+            a_header = unmatched_added.pop(match_idx)[0]
+            msgs.append(f"MOVED   {r_cat[:-1]} {r_sym}: {r_header} -> {a_header}")
+        else:
+            msgs.append(f"REMOVED {r_cat[:-1]} {r_header}::{r_sym}")
+
+    for a_header, a_cat, a_sym, _a_hash in unmatched_added:
+        msgs.append(f"ADDED   {a_cat[:-1]} {a_header}::{a_sym}")
+
     return msgs
 
 
@@ -860,7 +1003,7 @@ def main() -> int:
             # e.g. release.yml, has no `tee`/grep step to tell them apart).
             print(f"error: cannot parse {args.diff}: {exc}", file=sys.stderr)
             return 2
-        msgs = diff(prior, snapshot)
+        msgs = diff(prior, snapshot, include_graph=build_include_graph(INCLUDE_ROOT))
         if not msgs:
             print(f"ABI unchanged vs {args.diff}.")
             return 0
