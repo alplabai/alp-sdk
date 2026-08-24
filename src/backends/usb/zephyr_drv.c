@@ -34,6 +34,7 @@
 #include <alp/peripheral.h>
 #include <alp/usb.h>
 
+#include "alp_slot_claim.h"
 #include "usb_ops.h"
 
 #if defined(CONFIG_ALP_SDK_USB)
@@ -61,9 +62,13 @@ static bool              _be_pool_in_use[CONFIG_ALP_SDK_MAX_USB_DEV_HANDLES];
 static struct usb_dev_be *_be_alloc(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_be_pool); ++i) {
-		if (!_be_pool_in_use[i]) {
+		/* Atomic claim (src/common/alp_slot_claim.h, issue #1115):
+		 * a compare-exchange, so exactly one concurrent opener wins the
+		 * slot.  in_use lives in a parallel array rather than inside the
+		 * slot struct, so the winner may zero the whole slot afterwards --
+		 * no offsetof form is needed here. */
+		if (alp_slot_try_claim(&_be_pool_in_use[i])) {
 			memset(&_be_pool[i], 0, sizeof(_be_pool[i]));
-			_be_pool_in_use[i] = true;
 			return &_be_pool[i];
 		}
 	}
@@ -75,7 +80,7 @@ static void _be_free(struct usb_dev_be *p)
 	if (p == NULL) return;
 	for (size_t i = 0; i < ARRAY_SIZE(_be_pool); ++i) {
 		if (&_be_pool[i] == p) {
-			_be_pool_in_use[i] = false;
+			alp_slot_release(&_be_pool_in_use[i]);
 			return;
 		}
 	}

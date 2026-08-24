@@ -32,6 +32,7 @@
 #include <alp/dac.h>
 #include <alp/peripheral.h>
 
+#include "alp_slot_claim.h"
 #include "dac_ops.h"
 
 #if defined(CONFIG_DAC)
@@ -89,9 +90,13 @@ static bool               _state_in_use[CONFIG_ALP_SDK_MAX_DAC_HANDLES];
 static zephyr_dac_state_t *_alloc_state(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_state_pool); ++i) {
-		if (!_state_in_use[i]) {
-			_state_in_use[i] = true;
-			_state_pool[i]   = (zephyr_dac_state_t){ 0 };
+		/* Atomic claim (src/common/alp_slot_claim.h, issue #1115):
+		 * a compare-exchange, so exactly one concurrent opener wins the
+		 * slot.  in_use lives in a parallel array rather than inside the
+		 * slot struct, so the winner may zero the whole slot afterwards --
+		 * no offsetof form is needed here. */
+		if (alp_slot_try_claim(&_state_in_use[i])) {
+			_state_pool[i] = (zephyr_dac_state_t){ 0 };
 			return &_state_pool[i];
 		}
 	}
@@ -102,7 +107,7 @@ static void _free_state(zephyr_dac_state_t *s)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_state_pool); ++i) {
 		if (&_state_pool[i] == s) {
-			_state_in_use[i] = false;
+			alp_slot_release(&_state_in_use[i]);
 			return;
 		}
 	}

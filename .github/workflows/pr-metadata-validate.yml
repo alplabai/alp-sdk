@@ -41,6 +41,14 @@ on:
       - 'scripts/check_stub_symbol_matrix.py'
       - 'src/common/stub_backend.c'
       - 'src/common/stub/**'
+      # This job hosts three gates that sweep src/ wholesale --
+      # check_slot_claim_atomic.py (every handle pool),
+      # check_stub_issues.py (src/backends/**/*_stub.c) and
+      # check_sw_fallback_tags.py (src/backends/**/sw_fallback.c) -- so the
+      # trigger has to cover src/ or a PR that adds the exact defect they
+      # exist to catch never runs them (issue #1630).
+      - 'src/**'
+      - 'scripts/check_slot_claim_atomic.py'
       - 'scripts/lint_doc_yaml_fragments.py'
       - 'scripts/check_som_bundle.py'
       - 'scripts/check_chip_header_status.py'
@@ -103,6 +111,14 @@ on:
       - 'scripts/check_stub_symbol_matrix.py'
       - 'src/common/stub_backend.c'
       - 'src/common/stub/**'
+      # This job hosts three gates that sweep src/ wholesale --
+      # check_slot_claim_atomic.py (every handle pool),
+      # check_stub_issues.py (src/backends/**/*_stub.c) and
+      # check_sw_fallback_tags.py (src/backends/**/sw_fallback.c) -- so the
+      # trigger has to cover src/ or a PR that adds the exact defect they
+      # exist to catch never runs them (issue #1630).
+      - 'src/**'
+      - 'scripts/check_slot_claim_atomic.py'
       - 'scripts/lint_doc_yaml_fragments.py'
       - 'scripts/check_som_bundle.py'
       - 'scripts/check_chip_header_status.py'
@@ -443,6 +459,9 @@ jobs:
         run: python3 scripts/check_public_header_purity.py
       - name: Gate — no hard-coded home-directory paths in build/exec files
         run: python3 scripts/check_local_paths.py
+
+      - name: "Gate — handle pools claim slots atomically (#1630)"
+        run: python3 scripts/check_slot_claim_atomic.py
 
       - name: Gate — sw_fallback.c files carry Cost + Performance tags
         run: python3 scripts/check_sw_fallback_tags.py

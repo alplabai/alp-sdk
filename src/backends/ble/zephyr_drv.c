@@ -55,6 +55,7 @@
 #include <alp/cap_instance.h>
 #include <alp/peripheral.h>
 
+#include "alp_slot_claim.h"
 #include "ble_ops.h"
 
 #if defined(CONFIG_ALP_SDK_BLE)
@@ -112,9 +113,13 @@ static bool                _conn_be_in_use[CONFIG_ALP_SDK_BLE_MAX_CONNS];
 static struct ble_conn_be *_conn_be_alloc(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_conn_be_pool); ++i) {
-		if (!_conn_be_in_use[i]) {
+		/* Atomic claim (src/common/alp_slot_claim.h, issue #1115):
+		 * a compare-exchange, so exactly one concurrent opener wins the
+		 * slot.  in_use lives in a parallel array rather than inside the
+		 * slot struct, so the winner may zero the whole slot afterwards --
+		 * no offsetof form is needed here. */
+		if (alp_slot_try_claim(&_conn_be_in_use[i])) {
 			memset(&_conn_be_pool[i], 0, sizeof(_conn_be_pool[i]));
-			_conn_be_in_use[i] = true;
 			return &_conn_be_pool[i];
 		}
 	}
@@ -130,7 +135,7 @@ static void _conn_be_free(struct ble_conn_be *p)
 	}
 	for (size_t i = 0; i < ARRAY_SIZE(_conn_be_pool); ++i) {
 		if (&_conn_be_pool[i] == p) {
-			_conn_be_in_use[i] = false;
+			alp_slot_release(&_conn_be_in_use[i]);
 			return;
 		}
 	}
