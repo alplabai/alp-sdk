@@ -28,6 +28,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
 #include <alp/backend.h>
@@ -101,6 +102,44 @@ ZTEST(alp_counter_registry, test_backend_count_for_counter)
      * gd32_bridge is gated behind CONFIG_ALP_SDK_V2N_SUPERVISOR=y
      * which this prj.conf deliberately omits. */
 	zassert_equal(alp_backend_count("counter"), 2u);
+}
+
+/* ---------- close() cancels the driver alarm (#1627) ----------------- */
+
+static void _alarm_cb_noop(alp_counter_t *counter, uint32_t ticks, void *user)
+{
+	ARG_UNUSED(counter);
+	ARG_UNUSED(ticks);
+	ARG_UNUSED(user);
+}
+
+ZTEST(alp_counter_registry, test_zephyr_drv_close_cancels_channel_alarm)
+{
+	/* Handle A arms channel 0 and closes WITHOUT cancelling first --
+     * before the fix, z_close() only called counter_stop(), leaving
+     * the native-sim counter driver's is_alarm_pending[0] set. */
+	alp_counter_config_t cfg = ALP_COUNTER_CONFIG_DEFAULT(0);
+	alp_counter_t       *ha  = alp_counter_open(&cfg);
+	zassert_not_null(ha, "zephyr_drv counter0 must open on native_sim (see boards/ overlay)");
+	zassert_equal(alp_counter_start(ha), ALP_OK);
+	zassert_equal(alp_counter_set_alarm(ha, 1000000u, _alarm_cb_noop, NULL), ALP_OK);
+	alp_counter_close(ha); /* alarm left armed on purpose */
+
+	/* Handle B reopens the same device and arms channel 0 again.  If
+     * close() actually cancelled A's alarm, the native-sim driver's
+     * channel-0 slot is free and this succeeds; if it leaked, the
+     * driver's ctr_set_alarm() sees is_alarm_pending[0] still true and
+     * refuses with -EBUSY (ALP_ERR_BUSY) -- the issue's literal
+     * "second reachable outcome". */
+	alp_counter_t *hb = alp_counter_open(&cfg);
+	zassert_not_null(hb);
+	zassert_equal(alp_counter_start(hb), ALP_OK);
+	zassert_equal(alp_counter_set_alarm(hb, 1000000u, _alarm_cb_noop, NULL),
+	              ALP_OK,
+	              "set_alarm on a freshly reopened handle must not fail -- a prior handle's "
+	              "close() left the driver's channel-0 alarm armed");
+
+	alp_counter_close(hb);
 }
 
 /* TODO(slice-4a-followup): bridge backend selection test.

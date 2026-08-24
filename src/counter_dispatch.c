@@ -180,6 +180,12 @@ void alp_counter_close(alp_counter_t *h)
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}
+	/* Clear the alarm callback the trampoline dereferences (#1627) so
+	 * the NULL guard in _alarm_trampoline is armed for the window
+	 * between this close and the slot's next open, independent of
+	 * what any one backend's close() does. */
+	h->state.alarm_cb   = NULL;
+	h->state.alarm_user = NULL;
 	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(h);
 }

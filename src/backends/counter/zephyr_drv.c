@@ -119,6 +119,11 @@ static alp_status_t z_cancel_alarm(alp_counter_backend_state_t *st)
 static void z_close(alp_counter_backend_state_t *st)
 {
 	const struct device *dev = (const struct device *)st->dev;
+	/* Cancel any armed channel-0 alarm before stopping/releasing the
+	 * slot -- counter_stop() does not guarantee installed alarms are
+	 * cancelled, so a stale alarm can otherwise fire into a recycled
+	 * handle after this closes. #1627 */
+	(void)z_cancel_alarm(st);
 	(void)counter_stop(dev);
 }
 
