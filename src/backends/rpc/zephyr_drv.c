@@ -75,6 +75,20 @@
  *   - z_destroy(): trivial for this backend (a static pool slot, no
  *     heap, no fds) -- just releases the pool slot.  Called exactly
  *     once by the dispatcher, strictly after its own active-op drain.
+ *
+ * @par Subscribe-table lock (#1632)
+ * z_subscribe()/z_unsubscribe() (application thread) and
+ * rpc_ept_recv()'s async dispatch (ipc_service worker thread) all
+ * touch the same per-channel `subs[]` table; every access now takes
+ * `be->lock` -- the same spinlock the close protocol above already
+ * uses.  The dispatch side snapshots `cb`+`user` into locals under the
+ * lock and invokes the callback OUTSIDE it, since the callback may
+ * self-close (see rpc_ept_recv()'s own doc comment): holding the lock
+ * across the call would deadlock against z_shutdown()'s own
+ * `be->lock` use.  This closes the write/write and write/read races
+ * on the table itself; it does not, and cannot, guarantee a callback
+ * never fires after the matching alp_rpc_unsubscribe() has returned --
+ * see rpc_ept_recv()'s doc comment for that residual window.
  */
 
 #include <errno.h>
@@ -504,6 +518,18 @@ static void rpc_recv_leave(struct rpc_be *be)
  * exclusion is real, not incidental scheduling luck. */
 static void (*g_rpc_recv_test_sync_hook)(void) = NULL;
 
+/* Test-only synchronisation hook (default no-op) for #1632's async
+ * dispatch fix -- mirrors g_rpc_recv_test_sync_hook above.  Called
+ * from INSIDE rpc_ept_recv()'s subscribe-table critical section
+ * (below, right after `sub` is found, before cb+user are read into
+ * locals) so a test can wake a concurrent z_subscribe()/
+ * z_unsubscribe() attempt at the exact instant a torn read would
+ * otherwise be possible; that writer needs the SAME `be->lock` to
+ * proceed, so it can only actually run once this critical section has
+ * released it.  Non-blocking, same contract as
+ * g_rpc_recv_test_sync_hook. */
+static void (*g_rpc_dispatch_test_sync_hook)(void) = NULL;
+
 static void rpc_ept_recv(const void *data, size_t len, void *priv)
 {
 	struct rpc_be *be = (struct rpc_be *)priv;
@@ -557,14 +583,41 @@ static void rpc_ept_recv(const void *data, size_t len, void *priv)
 	}
 
 	{
-		/* Async dispatch via the per-method subscribe table. */
-		uint32_t        h   = fnv1a_32(method);
-		struct rpc_sub *sub = sub_find(be, method, h);
-		if (sub != NULL && sub->cb != NULL) {
+		/* Async dispatch via the per-method subscribe table (#1632).
+         * z_subscribe()/z_unsubscribe() mutate `sub->cb`/`sub->user`
+         * from the application thread with no lock of their own --
+         * reading them here without synchronisation would race those
+         * writers.  Snapshot cb+user into locals under `be->lock`,
+         * THEN release the lock before calling: holding the lock
+         * across the call itself would deadlock, since cb() MAY call
+         * alp_rpc_close() on THIS channel (self-close, see this
+         * function's doc comment and z_shutdown()'s from_worker
+         * detection) -- alp_rpc_close() -> z_shutdown() also takes
+         * `be->lock`.
+         *
+         * Residual window (documented, not closed by this fix): once
+         * the snapshot is taken and the lock released, a concurrent
+         * alp_rpc_unsubscribe() may complete before this cb() actually
+         * runs -- the callback can still fire once for a message that
+         * was already in flight when unsubscribe was called, exactly
+         * as if the unsubscribe had landed a moment later.  Callers
+         * that need a hard "no callback after unsubscribe returns"
+         * guarantee must serialise on their own (e.g. drop events by
+         * a flag the callback checks). */
+		uint32_t         h    = fnv1a_32(method);
+		k_spinlock_key_t skey = k_spin_lock(&be->lock);
+		struct rpc_sub  *sub  = sub_find(be, method, h);
+		if (g_rpc_dispatch_test_sync_hook != NULL) {
+			g_rpc_dispatch_test_sync_hook();
+		}
+		alp_rpc_method_cb_t cb   = (sub != NULL) ? sub->cb : NULL;
+		void               *user = (sub != NULL) ? sub->user : NULL;
+		k_spin_unlock(&be->lock, skey);
+		if (cb != NULL) {
 			/* GHSA-xhm8-7f87-93q5: cb() may call alp_rpc_close() on
              * THIS channel (self-close) -- see this function's doc
              * comment and z_shutdown()'s from_worker detection. */
-			sub->cb(payload, payload_len, sub->user);
+			cb(payload, payload_len, user);
 		}
 	}
 
@@ -700,17 +753,28 @@ z_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t
 	if (be == NULL || !be->in_use) {
 		return ALP_ERR_NOT_READY;
 	}
+	/* Subscribe table writer (#1632): rpc_ept_recv() reads this same
+     * table (snapshotting cb+user under `be->lock`, see that
+     * function) from the ipc_service worker thread with no lock of
+     * its own on the pre-fix path -- take `be->lock` here too so the
+     * two sides agree on a coherent view of the table.  Bounded, pure
+     * bookkeeping (a linear scan + a strncpy) -- safe to do under a
+     * spinlock. */
+	k_spinlock_key_t skey = k_spin_lock(&be->lock);
+
 	/* NULL cb == unsubscribe -- matches the documented behaviour. */
 	if (cb == NULL) {
 		uint32_t        h   = fnv1a_32(method);
 		struct rpc_sub *sub = sub_find(be, method, h);
 		if (sub == NULL) {
+			k_spin_unlock(&be->lock, skey);
 			return ALP_ERR_INVAL;
 		}
 		sub->cb          = NULL;
 		sub->user        = NULL;
 		sub->method[0]   = '\0';
 		sub->method_hash = 0u;
+		k_spin_unlock(&be->lock, skey);
 		return ALP_OK;
 	}
 	uint32_t h = fnv1a_32(method);
@@ -720,6 +784,7 @@ z_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t
 	if (sub == NULL) {
 		sub = sub_alloc(be);
 		if (sub == NULL) {
+			k_spin_unlock(&be->lock, skey);
 			LOG_WRN("rpc: subscribe table full on %s (cap=%d)",
 			        be->name,
 			        CONFIG_ALP_SDK_RPC_SUBS_PER_CHANNEL);
@@ -731,6 +796,7 @@ z_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t
 	}
 	sub->cb   = cb;
 	sub->user = user;
+	k_spin_unlock(&be->lock, skey);
 	return ALP_OK;
 #else
 	(void)st;
@@ -750,15 +816,21 @@ static alp_status_t z_unsubscribe(alp_rpc_backend_state_t *st, const char *metho
 	if (be == NULL || !be->in_use) {
 		return ALP_ERR_NOT_READY;
 	}
-	uint32_t        h   = fnv1a_32(method);
-	struct rpc_sub *sub = sub_find(be, method, h);
+	/* Subscribe table writer (#1632) -- see z_subscribe()'s matching
+     * comment: take `be->lock` so rpc_ept_recv()'s snapshot read
+     * can't observe a torn/in-progress write. */
+	k_spinlock_key_t skey = k_spin_lock(&be->lock);
+	uint32_t         h    = fnv1a_32(method);
+	struct rpc_sub  *sub  = sub_find(be, method, h);
 	if (sub == NULL) {
+		k_spin_unlock(&be->lock, skey);
 		return ALP_ERR_INVAL;
 	}
 	sub->cb          = NULL;
 	sub->user        = NULL;
 	sub->method[0]   = '\0';
 	sub->method_hash = 0u;
+	k_spin_unlock(&be->lock, skey);
 	return ALP_OK;
 #else
 	(void)st;
