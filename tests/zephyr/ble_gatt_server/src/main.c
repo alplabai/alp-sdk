@@ -38,6 +38,15 @@
  * offline-reproducible harness for the STOP-suppresses-completion bug. */
 extern alp_status_t alp_ble_test_read_cb(uint8_t err, const void *data, uint16_t length);
 
+/* White-box seams for the GATT client-op in-flight guard (issue #1620,
+ * CONFIG_ZTEST-only).  z_gatt_read/z_gatt_write cannot be driven end-to-end
+ * offline -- they call bt_gatt_read()/bt_gatt_write(), which dereference a
+ * live struct bt_conn that native_sim has no controller to produce.  These
+ * seams claim a real pool connection, mark its slot in flight, and run the
+ * real op, which must refuse BEFORE it reaches the Bluetooth host. */
+extern alp_status_t alp_ble_test_gatt_read_inflight_guard(void);
+extern alp_status_t alp_ble_test_gatt_write_inflight_guard(void);
+
 ZTEST_SUITE(alp_ble_gatt_server, NULL, NULL, NULL, NULL, NULL);
 
 static uint8_t find_attr_cb(const struct bt_gatt_attr *attr, uint16_t handle, void *user_data)
@@ -255,4 +264,35 @@ ZTEST(alp_ble_gatt_server, test_client_read_cb_att_error_maps_to_io)
 	zassert_equal(alp_ble_test_read_cb(BT_ATT_ERR_INVALID_HANDLE, NULL, 0),
 	              ALP_ERR_IO,
 	              "a peer-rejected read must surface as ALP_ERR_IO, not ALP_ERR_TIMEOUT");
+}
+
+/* ------------------------------------------------------------------ *
+ * Issue #1620: the GATT read/write contexts used to be automatic objects
+ * whose .params were handed to the Bluetooth host, with the timeout path
+ * returning WITHOUT cancelling -- which Zephyr offers no way to do.  A
+ * late ATT response then wrote through the dead frame and gave a
+ * semaphore in recycled memory, corrupting the kernel wait queue.
+ *
+ * The contexts are now owned by the connection pool, and a per-conn
+ * in-flight flag keeps the slot claimed until the callback fires.  The
+ * corruption half needs a real peer and is bench-gated; what IS provable
+ * offline is the guard -- and specifically that it refuses BEFORE the op
+ * touches the Bluetooth host, which is what makes the pool ctx safe to
+ * leave live across a timeout.
+ * ------------------------------------------------------------------ */
+
+ZTEST(alp_ble_gatt_server, test_gatt_read_refuses_while_a_read_is_in_flight)
+{
+	zassert_equal(alp_ble_test_gatt_read_inflight_guard(),
+	              ALP_ERR_BUSY,
+	              "a second read on a connection whose ctx is still owned by an "
+	              "outstanding ATT procedure must return ALP_ERR_BUSY, not reuse the slot");
+}
+
+ZTEST(alp_ble_gatt_server, test_gatt_write_refuses_while_a_write_is_in_flight)
+{
+	zassert_equal(alp_ble_test_gatt_write_inflight_guard(),
+	              ALP_ERR_BUSY,
+	              "a second write on a connection whose ctx is still owned by an "
+	              "outstanding ATT procedure must return ALP_ERR_BUSY, not reuse the slot");
 }

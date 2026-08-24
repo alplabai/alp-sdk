@@ -95,9 +95,54 @@ struct ble_radio_be {
 #endif
 };
 
+/* Synchronous client-side read/write (conn ops, below) block on this
+ * semaphore-backed context until the async bt_gatt_read()/bt_gatt_write()
+ * completion callback fires.
+ *
+ * These are POOL-owned -- embedded in struct ble_conn_be below -- and not
+ * automatic objects, which is what they used to be.  Issue #1620: a
+ * k_sem_take() with a FINITE K_MSEC(timeout_ms) does NOT keep a stack frame
+ * alive; it returns while the ATT procedure is still outstanding, and Zephyr
+ * offers no way to cancel bt_gatt_read()/bt_gatt_write().  When the peer's
+ * response finally arrived on the BT RX thread, the callback cast .params
+ * back to the returned-from frame, wrote through it, and gave a semaphore in
+ * recycled memory -- corrupting the kernel wait queue.  A slow or
+ * unresponsive peer is normal BLE, not an exotic fault.
+ *
+ * `owner` lets the callback clear the connection's in-flight flag when a
+ * late response finally lands, which is what makes the slot reusable again. */
+#if defined(CONFIG_ALP_SDK_BLE)
+struct ble_conn_be;
+
+struct ble_read_ctx {
+	struct bt_gatt_read_params params; /* MUST be first: cb casts params -> ctx */
+	struct k_sem               done;
+	alp_status_t               result;
+	uint8_t                   *out;
+	size_t                     out_cap;
+	size_t                    *out_len;
+	struct ble_conn_be        *owner;
+};
+
+struct ble_write_ctx {
+	struct bt_gatt_write_params params; /* MUST be first: cb casts params -> ctx */
+	struct k_sem                done;
+	alp_status_t                result;
+	struct ble_conn_be         *owner;
+};
+#endif /* CONFIG_ALP_SDK_BLE */
+
 struct ble_conn_be {
 #if defined(CONFIG_ALP_SDK_BLE)
-	struct bt_conn *bt;
+	struct bt_conn      *bt;
+	struct ble_read_ctx  read_ctx;
+	struct ble_write_ctx write_ctx;
+	/* Set while an ATT procedure still owns the matching ctx.  Stays set
+	 * across a timeout -- the host has not finished with the ctx just
+	 * because this side stopped waiting -- and is cleared by the
+	 * completion callback. */
+	bool read_in_flight;
+	bool write_in_flight;
 #else
 	int unused;
 #endif
@@ -249,24 +294,19 @@ static ssize_t ble_char_write(struct bt_conn            *conn,
 	return len;
 }
 
-/* Synchronous client-side read/write (conn ops, below) block on this
- * semaphore-backed context until the async bt_gatt_read()/bt_gatt_write()
- * completion callback fires -- the ctx must remain valid until then,
- * which the k_sem_take() call below guarantees for an on-stack instance. */
-struct ble_read_ctx {
-	struct bt_gatt_read_params params; /* MUST be first: cb casts params -> ctx */
-	struct k_sem               done;
-	alp_status_t               result;
-	uint8_t                   *out;
-	size_t                     out_cap;
-	size_t                    *out_len;
-};
+/* Hand the connection's ctx back to its slot.  Called from the completion
+ * callbacks ONLY -- the op wrapper must not clear the flag on its timeout
+ * path, because the ATT procedure is still outstanding there and the host
+ * still owns the ctx.  Issue #1620. */
+static void _read_release(struct ble_read_ctx *ctx)
+{
+	if (ctx->owner != NULL) ctx->owner->read_in_flight = false;
+}
 
-struct ble_write_ctx {
-	struct bt_gatt_write_params params; /* MUST be first: cb casts params -> ctx */
-	struct k_sem                done;
-	alp_status_t                result;
-};
+static void _write_release(struct ble_write_ctx *ctx)
+{
+	if (ctx->owner != NULL) ctx->owner->write_in_flight = false;
+}
 
 static uint8_t ble_read_cb(struct bt_conn             *conn,
                            uint8_t                     err,
@@ -286,11 +326,13 @@ static uint8_t ble_read_cb(struct bt_conn             *conn,
 		 * permission, ...). Surface as I/O; there is no ALP_ERR_*
 		 * finer-grained than that for a remote protocol error. */
 		ctx->result = ALP_ERR_IO;
+		_read_release(ctx);
 		k_sem_give(&ctx->done);
 		return BT_GATT_ITER_STOP;
 	}
 	if (data == NULL) {
 		/* Read procedure complete (no long-read continuation in v0.3). */
+		_read_release(ctx);
 		k_sem_give(&ctx->done);
 		return BT_GATT_ITER_STOP;
 	}
@@ -298,6 +340,7 @@ static uint8_t ble_read_cb(struct bt_conn             *conn,
 	memcpy(ctx->out, data, n);
 	if (ctx->out_len != NULL) *ctx->out_len = n;
 	ctx->result = ALP_OK;
+	_read_release(ctx);
 	/* gatt_read_rsp() only invokes the terminal func(..., NULL, 0)
 	 * completion when THIS data-bearing call returns
 	 * BT_GATT_ITER_CONTINUE; returning STOP (as we do -- v0.3 has no
@@ -342,6 +385,7 @@ static void ble_write_cb(struct bt_conn *conn, uint8_t err, struct bt_gatt_write
 	struct ble_write_ctx *ctx = (struct ble_write_ctx *)params;
 	(void)conn;
 	ctx->result = (err == 0) ? ALP_OK : ALP_ERR_IO;
+	_write_release(ctx);
 	k_sem_give(&ctx->done);
 }
 #endif /* CONFIG_ALP_SDK_BLE */
@@ -720,27 +764,44 @@ static alp_status_t z_gatt_read(alp_ble_conn_state_t *conn_st,
      * this file's header) so no live peer connection exists to drive
      * this end-to-end offline; needs a real two-device bench proof. */
 	struct ble_conn_be *c = (struct ble_conn_be *)conn_st->be_data;
-	if (c == NULL || c->bt == NULL) return ALP_ERR_NOT_READY;
+	if (c == NULL) return ALP_ERR_NOT_READY;
+	/* Checked BEFORE c->bt, and before anything is handed to the host: a
+	 * still-outstanding ATT procedure owns this connection's read ctx, so
+	 * reusing it would hand the host a struct it is already writing
+	 * through. */
+	if (c->read_in_flight) return ALP_ERR_BUSY;
+	if (c->bt == NULL) return ALP_ERR_NOT_READY;
 
-	struct ble_read_ctx ctx = {
-		.params =
-		    {
-		        .func         = ble_read_cb,
-		        .handle_count = 1,
-		        .single       = { .handle = handle, .offset = 0 },
-		    },
-		.out     = out,
-		.out_cap = out_cap,
-		.out_len = out_len,
-		.result  = ALP_ERR_TIMEOUT,
-	};
-	k_sem_init(&ctx.done, 0, 1);
+	struct ble_read_ctx *ctx = &c->read_ctx;
+	memset(ctx, 0, sizeof(*ctx));
+	ctx->params.func          = ble_read_cb;
+	ctx->params.handle_count  = 1;
+	ctx->params.single.handle = handle;
+	ctx->params.single.offset = 0;
+	ctx->out                  = out;
+	ctx->out_cap              = out_cap;
+	ctx->out_len              = out_len;
+	ctx->result               = ALP_ERR_TIMEOUT;
+	ctx->owner                = c;
+	k_sem_init(&ctx->done, 0, 1);
 
-	int err = bt_gatt_read(c->bt, &ctx.params);
-	if (err != 0) return errno_to_alp(err);
+	c->read_in_flight = true;
+	int err           = bt_gatt_read(c->bt, &ctx->params);
+	if (err != 0) {
+		/* Nothing was queued, so nothing owns the ctx -- release now. */
+		c->read_in_flight = false;
+		return errno_to_alp(err);
+	}
 
-	if (k_sem_take(&ctx.done, K_MSEC(timeout_ms)) != 0) return ALP_ERR_TIMEOUT;
-	return ctx.result;
+	if (k_sem_take(&ctx->done, K_MSEC(timeout_ms)) != 0) {
+		/* The ATT procedure is STILL outstanding and Zephyr cannot cancel
+		 * it.  Leave the ctx and the flag live: ble_read_cb still owns
+		 * them and clears the flag when the late response arrives.  This
+		 * is the whole point of the ctx being pool-owned (#1620) -- the
+		 * pre-fix code returned here and let the frame die. */
+		return ALP_ERR_TIMEOUT;
+	}
+	return ctx->result;
 #else
 	(void)conn_st;
 	(void)handle;
@@ -763,26 +824,45 @@ static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st,
      * correct against bt_gatt_write() but unreachable offline without a
      * live peer connection. */
 	struct ble_conn_be *c = (struct ble_conn_be *)conn_st->be_data;
-	if (c == NULL || c->bt == NULL) return ALP_ERR_NOT_READY;
+	if (c == NULL) return ALP_ERR_NOT_READY;
+	/* Same ordering as z_gatt_read: refuse before anything reaches the
+	 * host, because an outstanding ATT procedure still owns this
+	 * connection's write ctx. */
+	if (c->write_in_flight) return ALP_ERR_BUSY;
+	if (c->bt == NULL) return ALP_ERR_NOT_READY;
 
-	struct ble_write_ctx ctx = {
-		.params =
-		    {
-		        .func   = ble_write_cb,
-		        .handle = handle,
-		        .offset = 0,
-		        .data   = data,
-		        .length = (uint16_t)len,
-		    },
-		.result = ALP_ERR_TIMEOUT,
-	};
-	k_sem_init(&ctx.done, 0, 1);
+	struct ble_write_ctx *ctx = &c->write_ctx;
+	memset(ctx, 0, sizeof(*ctx));
+	ctx->params.func   = ble_write_cb;
+	ctx->params.handle = handle;
+	ctx->params.offset = 0;
+	ctx->params.data   = data;
+	ctx->params.length = (uint16_t)len;
+	ctx->result        = ALP_ERR_TIMEOUT;
+	ctx->owner         = c;
+	k_sem_init(&ctx->done, 0, 1);
 
-	int err = bt_gatt_write(c->bt, &ctx.params);
-	if (err != 0) return errno_to_alp(err);
+	c->write_in_flight = true;
+	int err            = bt_gatt_write(c->bt, &ctx->params);
+	if (err != 0) {
+		c->write_in_flight = false;
+		return errno_to_alp(err);
+	}
 
-	if (k_sem_take(&ctx.done, K_MSEC(timeout_ms)) != 0) return ALP_ERR_TIMEOUT;
-	return ctx.result;
+	if (k_sem_take(&ctx->done, K_MSEC(timeout_ms)) != 0) {
+		/* Outstanding and uncancellable -- see z_gatt_read.  NOTE the
+		 * residual hazard this fix does NOT close: params.data still
+		 * points at the CALLER's buffer.  Zephyr copies it into the ATT
+		 * PDU immediately for a short write, but a LONG write
+		 * (len > ATT_MTU - 3) is sent across later prepare-write PDUs,
+		 * i.e. after this function has returned.  Bounding that means
+		 * either copying the payload into this ctx or enforcing the
+		 * <= ATT_MTU - 3 bound <alp/ble.h> already documents -- the
+		 * latter would remove working long-write support, so it is left
+		 * to a follow-up rather than decided here. */
+		return ALP_ERR_TIMEOUT;
+	}
+	return ctx->result;
 #else
 	(void)conn_st;
 	(void)handle;
@@ -792,6 +872,54 @@ static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st,
 	return ALP_ERR_NOSUPPORT;
 #endif
 }
+
+#if defined(CONFIG_ALP_SDK_BLE) && defined(CONFIG_ZTEST)
+/* Test-only seams (issue #1620).  z_gatt_read/z_gatt_write cannot be driven
+ * end-to-end offline: they call bt_gatt_read()/bt_gatt_write(), which
+ * dereference a live struct bt_conn, and native_sim ships no BLE controller
+ * to produce one (see this file's header).  What IS reachable is the
+ * in-flight guard, and specifically that it refuses BEFORE the op hands
+ * anything to the Bluetooth host -- which is what makes it safe to leave a
+ * pool-owned ctx live across a timeout.
+ *
+ * `bt` is a non-NULL SENTINEL, never dereferenced: the guard returns first.
+ * If someone reorders the guard after bt_gatt_read(), these seams fault
+ * instead of quietly passing, which is the failure mode worth having. */
+#define ALP_BLE_TEST_CONN_SENTINEL ((struct bt_conn *)(uintptr_t)0x1)
+
+alp_status_t alp_ble_test_gatt_read_inflight_guard(void)
+{
+	struct ble_conn_be *c = _conn_be_alloc();
+	if (c == NULL) return ALP_ERR_NOMEM;
+	c->bt             = ALP_BLE_TEST_CONN_SENTINEL;
+	c->read_in_flight = true;
+
+	alp_ble_conn_state_t st = { .be_data = c };
+	alp_status_t         rc = z_gatt_read(&st, 1u, NULL, 0u, NULL, 10u);
+
+	c->read_in_flight = false;
+	c->bt             = NULL; /* before _conn_be_free: it would bt_conn_unref() */
+	_conn_be_free(c);
+	return rc;
+}
+
+alp_status_t alp_ble_test_gatt_write_inflight_guard(void)
+{
+	struct ble_conn_be *c = _conn_be_alloc();
+	if (c == NULL) return ALP_ERR_NOMEM;
+	c->bt              = ALP_BLE_TEST_CONN_SENTINEL;
+	c->write_in_flight = true;
+
+	alp_ble_conn_state_t st   = { .be_data = c };
+	static const uint8_t byte = 0xA5u;
+	alp_status_t         rc   = z_gatt_write(&st, 1u, &byte, sizeof(byte), 10u);
+
+	c->write_in_flight = false;
+	c->bt              = NULL;
+	_conn_be_free(c);
+	return rc;
+}
+#endif /* CONFIG_ALP_SDK_BLE && CONFIG_ZTEST */
 
 /* ------------------------------------------------------------------ */
 /* Registration                                                        */
