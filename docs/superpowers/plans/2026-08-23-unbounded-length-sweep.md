@@ -107,6 +107,95 @@ Write the PR bodies to say this. A reviewer told "six memory-corruption bugs" wh
 
 ---
 
+> **IMPLEMENTED 2026-08-24 — all four tasks, one integration branch
+> `fix/1645-unbounded-length-sweep`, draft PR #1658 (partly bench-gated).
+> Adversarial review found TWO BLOCKERS that a fully green `test-all.sh` run did
+> not. Read that part even if you skip the rest.**
+>
+> **The green gate proved nothing.** The first integration ran
+> `bash scripts/test-all.sh --target dev` to `twister PASS`, **1958 passed, 0
+> failed** — with both blockers present. Neither is exotic:
+>
+> 1. **The new max-dimension check bricked every encode on the stub backend.**
+>    `src/backends/jpeg/zephyr_stub.c` zero-fills its caps, so `req->width > 0`
+>    is true for every legal request and `alp_jpeg_encode()` returned
+>    `ALP_ERR_OUT_OF_RANGE` instead of the stub's documented
+>    `ALP_ERR_NOT_IMPLEMENTED`. The gate missed it because the default config has
+>    `CONFIG_ALP_SDK_JPEG_SW_BASELINE=y` so the stub never wins selection — but
+>    that Kconfig is an **opt-out** (`zephyr/kconfigs/jpeg.kconfig:7-9`), so it is
+>    reachable today. Treat a `0` maximum as "no limit advertised".
+> 2. **The MQTT drain broke on `-EAGAIN`, so it did not close the wedge it was
+>    written for.** `mqtt_read_publish_payload()` is
+>    `read_publish_payload(..., shall_block=false)` and returns `-EAGAIN`
+>    verbatim, while `internal.remaining_payload` is set from the **advertised**
+>    header length the instant the PUBLISH is decoded — before the payload bytes
+>    arrive. Any payload spanning more than one TCP segment, i.e. exactly the
+>    oversized ones, exits with `remaining > 0` and stays wedged at `-EBUSY`. The
+>    gate missed it because the test fixture pushed CONNACK + PUBLISH + PINGRESP
+>    in one burst, so the whole payload was already in the socket buffer and
+>    `-EAGAIN` never fired. **The test that was supposed to catch the bug passed
+>    while the bug was still there.**
+>
+> Anyone executing this plan should assume the same of their own first cut.
+>
+> **A third finding corrected a claim this plan makes.** Task 2 says
+> `yocto_drv.c` "lets `read()` truncate and leaves the tail queued, misaligning
+> every later frame". That mechanism is **false**:
+> `rpmsg_eptdev_read_iter()` copies `min(iov_iter_count, skb->len)` then calls
+> `kfree_skb(skb)` **unconditionally**, so the remainder is DISCARDED and framing
+> is never misaligned. The real defect is the same as the uio site — a truncated
+> payload delivered as complete. Do not repeat the misalignment claim.
+>
+> **Step 1's "reject rather than clip" needs an exact discriminator, not a
+> heuristic.** `n == sizeof buf` drops a **legal** maximum-size frame:
+> `alp_rpc_frame_size()` (`src/backends/rpc/rpc_ops.h:266-277`) rejects only
+> `payload_len > avail`, so `total == cap == ALP_RPC_TX_FRAME_MAX` is something
+> the peer's own `frame_build()` emits. Read into
+> `uint8_t buf[ALP_RPC_TX_FRAME_MAX + 1]` and test `n > ALP_RPC_TX_FRAME_MAX`.
+> That is the ONLY exact signal available — `read()` on a chardev takes no
+> `MSG_TRUNC`, `rpmsg_eptdev` implements no `FIONREAD`, and a second `read()`
+> returns the NEXT message rather than a tail.
+>
+> **Two API-contract gaps the plan does not mention, both required in the same
+> slice.** `include/alp/rpc.h` documented nothing about dropped frames — a drop
+> is invisible on the wire and surfaces to the peer only as its own
+> `ALP_ERR_TIMEOUT`. `include/alp/iot.h` documented nothing about `len` being
+> truncated to the backend buffer; declining to widen the `[ABI-STABLE]`
+> `alp_mqtt_msg_cb_t` is correct, which leaves the header as the only channel.
+> `include/alp/jpeg.h`'s three stride fields had **no Doxygen at all**.
+>
+> **Task 4's cache note carries its own trap.** Writing the public surface as
+> `<alp/*>` inside a block comment puts a `/*` in a comment; every alp-sdk
+> twister build sets `CONFIG_COMPILER_WARNINGS_AS_ERRORS=y`, so `-Werror=comment`
+> breaks every target including `<alp/mproc.h>`. Verify with
+> `gcc -fsyntax-only -Werror=comment -Iinclude -x c include/alp/mproc.h`.
+>
+> **Task 3 needs one more site than it lists.** Fixing the DEEPX narrowing cast
+> exposes the same antipattern elsewhere: `git grep -n 'shape\[i\] ='` over
+> `src/` returns exactly three sites — `inference_deepx.cpp`,
+> `inference_ort.cpp`, `src/backends/inference/tflm.cpp`. Only ORT guarded.
+> Validate at `open()` in both others, matching ORT's open-time gather, so
+> `alp_inference_get_input`/`_get_output` keep their documented status sets and
+> only `alp_inference_open()`'s existing `ALP_ERR_NOSUPPORT` sentence needs
+> widening. And guard `dim <= 0` as well as `dim > UINT16_MAX`: `shape[i]` is
+> `int64_t`, so a negative dim passes an upper-bound-only test and
+> `static_cast<uint16_t>(-1)` still reports `65535`.
+>
+> **Two test-harness traps found while verifying, both of which hide failure.**
+> `tests/yocto/` had three inline `while (!flag) { sleep; ALP_ASSERT_TRUE(deadline); }`
+> loops that never stop once the assert fails — the binary hangs instead of
+> reporting. And `CONFIG_ALP_SDK_MAX_JPEG_HANDLES` has **no Kconfig symbol at
+> all**, only an `#ifndef` fallback of `1` in `src/jpeg_dispatch.c`, so a ztest
+> that leaks its handle on an aborted `zassert` starves every later test in the
+> suite into a misleading `h is NULL`.
+>
+> **Line drift** (verified 2026-08-24): `src/jpeg_dispatch.c:89-91` -> `:90-92`;
+> `src/backends/jpeg/sw_baseline.c:36-37` -> `:35-36`;
+> `src/yocto/inference_deepx.cpp`'s struct comment `:93-97` -> `:94-98`. Exact:
+> `alif_hantro.c:264`, `rpc/yocto_uio_drv.c:757`, `rpc/yocto_drv.c:366`,
+> `mqtt/zephyr_drv.c:260` and `:268-271`, `inference_deepx.cpp:279`,
+> `yocto/CMakeLists.txt:67`.
+
 ## Task 1: JPEG — the caller's geometry is never checked
 
 **Files:** `src/jpeg_dispatch.c`, `src/backends/jpeg/vendor/toojpeg_baseline.c`, `src/backends/jpeg/alif_hantro.c`, `tests/zephyr/peripheral/src/jpeg_bounds.c` (create).
