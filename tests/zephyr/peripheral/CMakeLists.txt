@@ -28,4 +28,5 @@ target_sources(app PRIVATE
     src/can.c
     src/rtc.c
     src/wdt.c
+    src/jpeg_bounds.c
 )

@@ -258,6 +258,20 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 		return ALP_ERR_NOSUPPORT;
 	}
 
+	/* Both the AXI-input stride derived below and the driver's .pitch
+	 * (see video_set_format() further down) come straight from
+	 * req->y_stride -- unlike sw_baseline, a stride of 0 is not the
+	 * hazard here (it is legitimately treated as "tightly packed" by
+	 * the ternaries below), an UNDER-sized stride is: it is not a wrong
+	 * picture, it is the Hantro AXI master reading memory the caller
+	 * did not intend to expose (#1645).  The dispatcher enforces the
+	 * same rule, but a backend handing a pointer to a DMA master
+	 * validates its own inputs rather than trusting every caller
+	 * reached it only through the portable API. */
+	if (req->y_stride != 0u && req->y_stride < req->width) {
+		return ALP_ERR_INVAL;
+	}
+
 	/* NV12: one Y plane immediately followed, at stride*height, by an
 	 * interleaved half-height UV plane -- see the struct doc on
 	 * alp_jpeg_encode_req_t. Total footprint = stride*height*3/2. */
