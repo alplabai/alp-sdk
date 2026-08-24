@@ -25,13 +25,17 @@
  *     during the init read cannot land between the I²C
  *     transactions that the init issues.
  *   - alp_z_v2n_power_mgmt_init() finishes k_work_init() and sets
- *     g_pwr.initialised BEFORE it arms the P65 interrupt or
- *     registers the callback, so no edge can land on an
- *     uninitialised k_work or get dropped by the work handler's
- *     initialised guard.  Because P65 is edge-triggered, init also
- *     samples the pin once the interrupt is live and submits the
- *     work item directly if the line is already asserted -- an
- *     already-high pin never generates a rising edge on its own.
+ *     g_pwr.initialised BEFORE it registers the callback or arms
+ *     the P65 interrupt, so no edge can land on an uninitialised
+ *     k_work or get dropped by the work handler's initialised
+ *     guard.  It also registers the callback BEFORE arming the
+ *     interrupt -- the reverse order leaves a window where the GPIO
+ *     controller can deliver an edge to a callback list that
+ *     doesn't contain us yet, losing it with nothing to retry.
+ *     Because P65 is edge-triggered, init also samples the pin once
+ *     the interrupt is live and submits the work item directly if
+ *     the line is already asserted -- an already-high pin never
+ *     generates a rising edge on its own.
  */
 
 #include "v2n_power_mgmt.h"
@@ -145,11 +149,11 @@ alp_status_t alp_z_v2n_power_mgmt_init(void)
 	if (rc != 0) return ALP_ERR_IO;
 
 	/* The work item and the DA9292 driver context must be fully
-     * usable BEFORE the interrupt is armed and the callback is
-     * registered below.  An edge landing between arming and here
-     * would either submit an uninitialised k_work (UB) or be
-     * silently dropped by the work handler's `initialised` guard --
-     * and P65 is edge-triggered, so a dropped edge never retries. */
+     * usable BEFORE the callback is registered and the interrupt is
+     * armed below.  An edge landing before this point would either
+     * submit an uninitialised k_work (UB) or be silently dropped by
+     * the work handler's `initialised` guard -- and P65 is
+     * edge-triggered, so a dropped edge never retries. */
 	k_work_init(&g_pwr.work, v2n_pwr_work_handler);
 
 	/* Run the DA9292 base init under the supervisor's I²C lock so
@@ -165,21 +169,29 @@ alp_status_t alp_z_v2n_power_mgmt_init(void)
 	alp_z_v2n_supervisor_brd_i2c_release();
 	if (s != ALP_OK) return s;
 
-	/* Flip the gate before arming the interrupt so an edge landing
-     * the instant after gpio_add_callback() below is honoured
-     * instead of dropped by the work handler's early-return guard. */
+	/* Flip the gate before registering the callback so an edge
+     * landing the instant after the interrupt is armed below is
+     * honoured instead of dropped by the work handler's
+     * early-return guard. */
 	g_pwr.initialised = true;
 
-	rc = gpio_pin_interrupt_configure_dt(&g_pwr_en_req, GPIO_INT_EDGE_RISING);
+	/* Register the callback BEFORE arming the interrupt.  The
+     * reverse order (arm, then register) leaves a window where the
+     * GPIO controller can already deliver an edge to a callback list
+     * that doesn't contain us yet -- the edge is consumed and lost,
+     * with nothing to retry it.  Registering first means the
+     * handler is always in place before the first edge can ever be
+     * delivered. */
+	gpio_init_callback(&g_pwr.cb, v2n_pwr_irq_handler, BIT(g_pwr_en_req.pin));
+	rc = gpio_add_callback(g_pwr_en_req.port, &g_pwr.cb);
 	if (rc != 0) {
 		g_pwr.initialised = false;
 		return ALP_ERR_IO;
 	}
 
-	gpio_init_callback(&g_pwr.cb, v2n_pwr_irq_handler, BIT(g_pwr_en_req.pin));
-	rc = gpio_add_callback(g_pwr_en_req.port, &g_pwr.cb);
+	rc = gpio_pin_interrupt_configure_dt(&g_pwr_en_req, GPIO_INT_EDGE_RISING);
 	if (rc != 0) {
-		(void)gpio_pin_interrupt_configure_dt(&g_pwr_en_req, GPIO_INT_DISABLE);
+		gpio_remove_callback(g_pwr_en_req.port, &g_pwr.cb);
 		g_pwr.initialised = false;
 		return ALP_ERR_IO;
 	}
