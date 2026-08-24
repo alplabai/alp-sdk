@@ -12,12 +12,14 @@
  *   - E1M-X-V2N  (Renesas RZ/V2N, with optional DEEPX DX-M1)
  *
  * Pin/bus ROUTES (ALP_E1M_X_GPIO_IO<N> -> board feature, I2C/SPI/UART
- * bus roles, PWM channels) are generated from
- * `metadata/boards/e1m-x-evk.yaml` into the companion header
- * `<alp/boards/alp_e1m_x_evk_routes.h>` -- include that for pin
- * macros.  THIS header carries the hand-authored on-board chip
- * I2C addresses and the per-rail INA236 calibration constants,
- * mirroring `<alp/boards/alp_e1m_evk.h>` for the 35x35 EVK.
+ * bus roles, PWM channels) and the on-board INA236 addresses +
+ * per-rail calibration constants are GENERATED from
+ * `metadata/boards/e1m-x-evk.yaml`'s `e1m_routes:` and
+ * `i2c_devices:` blocks into the companion header
+ * `<alp/boards/alp_e1m_x_evk_routes.h>`, included below.  THIS
+ * header carries the remaining hand-authored on-board chip I2C
+ * addresses, mirroring `<alp/boards/alp_e1m_evk.h>` for the 35x35
+ * EVK.
  *
  * On-board chips live on the sensor I2C bus
  * @ref XEVK_I2C_BUS_SENSORS (ALP_E1M_X_I2C0; Linux `i2c-0`).
@@ -36,6 +38,17 @@
 
 #ifndef ALP_BOARDS_E1M_X_EVK_H
 #define ALP_BOARDS_E1M_X_EVK_H
+
+/* GENERATED board route bindings (XEVK_PIN_*, XEVK_*_BUS_*,
+ * XEVK_UART_PORT_*, XEVK_PWM_*, XEVK_ARD_PWM*) and GENERATED
+ * on-board I2C device facts (XEVK_I2C_ADDR_INA236_*,
+ * XEVK_INA236_SHUNT_*_OHMS, XEVK_INA236_MAX_*_A).
+ * Source of truth: metadata/boards/e1m-x-evk.yaml
+ * `e1m_routes:` and `i2c_devices:` blocks. Regenerate via:
+ *     python scripts/gen_board_header.py
+ * The prose blocks below describe the hardware those macros bind
+ * to; the macro values themselves come from the included header. */
+#include "alp/boards/alp_e1m_x_evk_routes.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -76,14 +89,10 @@ extern "C" {
  *     voltage register on current silicon (VBUS-sense wiring under
  *     investigation); their shunt/current path is unaffected.  5V
  *     (U30) reads correctly (~4.88 V / whole-board input current).
+ *
+ * XEVK_I2C_ADDR_INA236_3V3, _1V8, _VCAM2, _VCAM3 and _5V are
+ * defined in the generated routes header (#1636).
  */
-#define XEVK_I2C_ADDR_INA236_3V3 0x40u /**< U21 INA236A, +3V3 rail   (20 mOhm shunt, 4.0 A max). */
-#define XEVK_I2C_ADDR_INA236_1V8 0x41u /**< U31 INA236A, +1V8 rail   (20 mOhm shunt, 4.0 A max). */
-#define XEVK_I2C_ADDR_INA236_VCAM2 \
-	0x48u /**< U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). */
-#define XEVK_I2C_ADDR_INA236_VCAM3 \
-	0x49u                             /**< U34 INA236B, +VCAM3 rail (50 mOhm shunt, 1.6 A max). */
-#define XEVK_I2C_ADDR_INA236_5V 0x4Au /**< U30 INA236B, +5V rail    (20 mOhm shunt, 4.0 A max). */
 
 /* Per-rail shunt + max-current values for ina236_init().  Each
  * rail's shunt was picked to put its nominal max current near the
@@ -94,17 +103,10 @@ extern "C" {
  *               XEVK_I2C_ADDR_INA236_5V,
  *               XEVK_INA236_SHUNT_5V_OHMS,
  *               XEVK_INA236_MAX_5V_A,
- *               INA236_ADCRANGE_81MV); */
-#define XEVK_INA236_SHUNT_3V3_OHMS   0.020f
-#define XEVK_INA236_MAX_3V3_A        4.0f
-#define XEVK_INA236_SHUNT_1V8_OHMS   0.020f
-#define XEVK_INA236_MAX_1V8_A        4.0f
-#define XEVK_INA236_SHUNT_VCAM2_OHMS 0.050f
-#define XEVK_INA236_MAX_VCAM2_A      1.6f
-#define XEVK_INA236_SHUNT_VCAM3_OHMS 0.050f
-#define XEVK_INA236_MAX_VCAM3_A      1.6f
-#define XEVK_INA236_SHUNT_5V_OHMS    0.020f
-#define XEVK_INA236_MAX_5V_A         4.0f
+ *               INA236_ADCRANGE_81MV);
+ *
+ * XEVK_INA236_SHUNT_*_OHMS and XEVK_INA236_MAX_*_A (3V3, 1V8, VCAM2,
+ * VCAM3, 5V) are defined in the generated routes header (#1636). */
 
 #ifdef __cplusplus
 }

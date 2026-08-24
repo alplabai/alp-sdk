@@ -416,12 +416,18 @@ def test_previously_broken_public_structs_now_captured_with_fields():
 
 
 def test_real_line_continued_macros_now_captured_with_real_values():
-    """#794: these three public macros' values live on a continuation
-    line; the pre-fix parser recorded "" for every one of them."""
+    """#794: this public macro's value lives on a continuation line;
+    the pre-fix parser recorded "" for it.
+
+    Originally this also covered XEVK_I2C_ADDR_INA236_VCAM2 / _VCAM3 in
+    the hand-written `alp/boards/alp_e1m_x_evk.h` -- issue #1636 moved
+    that I2C block into generated `alp_e1m_x_evk_routes.h`, and the
+    generator never emits a continuation-line macro (single aligned
+    `#define` per entry), so those two no longer exercise this parser
+    path. TPS628640_CTRL_DEFAULT still does and remains the regression
+    guard for #794."""
     snapshot = abi.build_snapshot("test", abi.INCLUDE_ROOT)
     expected = {
-        ("alp/boards/alp_e1m_x_evk.h", "XEVK_I2C_ADDR_INA236_VCAM2"): "0x48u",
-        ("alp/boards/alp_e1m_x_evk.h", "XEVK_I2C_ADDR_INA236_VCAM3"): "0x49u",
         ("alp/chips/tps628640.h", "TPS628640_CTRL_DEFAULT"): (
             "(TPS628640_CTRL_FPWM_DURING_VID_CHANGE | "
             "TPS628640_CTRL_SOFTWARE_ENABLE | "

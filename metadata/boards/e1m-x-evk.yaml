@@ -246,6 +246,53 @@ e1m_routes:
         board_alias: BOARD_ENC_ROTARY,
         doc: "PEC12R-4222F rotary encoder: ENC0_X = A phase, ENC0_Y = B phase; push switch on XEVK_PIN_ENCODER_SW (E1M_X_GPIO_IO28).  ENC1-3 pads are broken out but unpopulated." }
 
+# Five INA236 high-side current-shunt monitors, all on
+# XEVK_I2C_BUS_SENSORS (E1M_X_I2C0).  Ref-des + rail + A0 strap per
+# the board schematic (Current Measurement.SchDoc); INA236A occupies
+# 0x40..0x43, INA236B occupies 0x48..0x4B (same A0 strap encoding),
+# so all five share the one bus.  Single source of truth for the
+# `XEVK_I2C_ADDR_INA236_*` / `XEVK_INA236_SHUNT_*` / `XEVK_INA236_MAX_*`
+# macros; `scripts/gen_board_header.py` reads this block and emits the
+# macros into `include/alp/boards/alp_e1m_x_evk_routes.h`. Do not
+# hand-edit the generated header (#1636).
+#
+# @par Verification status: [BENCH-CONFIRMED ADDRESSES] -- the I2C
+#      addresses + INA236 register semantics were confirmed on
+#      E1M-X-V2N silicon (chip-ID reads on i2c-0, 2026-06). The
+#      shunt/max-current pairs come from the board schematic; current/
+#      power end-to-end accuracy is pending the HiL sweep.
+#
+# NEXT-REVISION board notes (observed on current silicon, 2026-06; not
+# modeled here -- do not rely on them for firmware behaviour):
+#   - 0x42 / 0x43 also ACK as INA236 (mfg-ID "TI") although the
+#     schematic BOM lists only the five monitors below; treated as a
+#     board anomaly, to be resolved on the next respin.
+#   - The 3V3 (U21) and 1V8 (U31) monitors read ~0 V on the bus-
+#     voltage register on current silicon (VBUS-sense wiring under
+#     investigation); their shunt/current path is unaffected. 5V (U30)
+#     reads correctly (~4.88 V / whole-board input current).
+i2c_devices:
+  - { macro: XEVK_I2C_ADDR_INA236_3V3, part: ina236, designator: U21, address: "0x40",
+      doc: "U21 INA236A, +3V3 rail   (20 mOhm shunt, 4.0 A max).",
+      calibration: { shunt_macro: XEVK_INA236_SHUNT_3V3_OHMS, shunt_ohms: "0.020",
+                     max_macro: XEVK_INA236_MAX_3V3_A, max_current_a: "4.0" } }
+  - { macro: XEVK_I2C_ADDR_INA236_1V8, part: ina236, designator: U31, address: "0x41",
+      doc: "U31 INA236A, +1V8 rail   (20 mOhm shunt, 4.0 A max).",
+      calibration: { shunt_macro: XEVK_INA236_SHUNT_1V8_OHMS, shunt_ohms: "0.020",
+                     max_macro: XEVK_INA236_MAX_1V8_A, max_current_a: "4.0" } }
+  - { macro: XEVK_I2C_ADDR_INA236_VCAM2, part: ina236, designator: U32, address: "0x48",
+      doc: "U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max).",
+      calibration: { shunt_macro: XEVK_INA236_SHUNT_VCAM2_OHMS, shunt_ohms: "0.050",
+                     max_macro: XEVK_INA236_MAX_VCAM2_A, max_current_a: "1.6" } }
+  - { macro: XEVK_I2C_ADDR_INA236_VCAM3, part: ina236, designator: U34, address: "0x49",
+      doc: "U34 INA236B, +VCAM3 rail (50 mOhm shunt, 1.6 A max).",
+      calibration: { shunt_macro: XEVK_INA236_SHUNT_VCAM3_OHMS, shunt_ohms: "0.050",
+                     max_macro: XEVK_INA236_MAX_VCAM3_A, max_current_a: "1.6" } }
+  - { macro: XEVK_I2C_ADDR_INA236_5V, part: ina236, designator: U30, address: "0x4A",
+      doc: "U30 INA236B, +5V rail    (20 mOhm shunt, 4.0 A max).",
+      calibration: { shunt_macro: XEVK_INA236_SHUNT_5V_OHMS, shunt_ohms: "0.020",
+                     max_macro: XEVK_INA236_MAX_5V_A, max_current_a: "4.0" } }
+
 # Audio -- 2x TAS2563 boosted class-D smart-amp (U27/U28) on E1M_X_I2C0 +
 # E1M_X_I2S0.  Scripts that emit the Linux DT (rcar_sound + audio-graph-card)
 # read this block; device-instance facts here are mined from the board

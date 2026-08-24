@@ -293,70 +293,67 @@ typedef enum {
 /* needs to verify the overlay declares matching extra entries.       */
 /* ================================================================== */
 
-/** Base index for EVK overlay-extended `alp,pin-array` entries.  Sits
- *  just past the 52 standard entries so it never collides. */
-#define EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT
-
-/** AUDIO_CLK pad (E1M Z2 / Alif P9_6) repurposed as the I/O
- *  expander INT line on this EVK.  When the audio path is in
- *  use the IO expander interrupt is unavailable; firmware should
- *  poll the expander instead. */
-#define EVK_PIN_IO_EXP_INT (EVK_PIN_OVERLAY_BASE + 0u)
-
-/** SPI0_CS1 pad (E1M N1 / Alif P3_6) repurposed as the I/O
- *  expander reset line.  When SPI0 is used with two chip-selects
- *  this pin can't double as IO_EXP_RST -- the EVK assumes SPI0
- *  is in single-CS mode at most. */
-#define EVK_PIN_IO_EXP_RST (EVK_PIN_OVERLAY_BASE + 1u)
-
-/** SPI0_MISO pad (E1M L1 / Alif P5_0) repurposed as the audio
- *  amplifier fault output (open-drain input from the amp). */
-#define EVK_PIN_AMP_FAULT (EVK_PIN_OVERLAY_BASE + 2u)
-
-/** SPI0_CS0 pad (E1M M1 / Alif P5_2) repurposed as the audio
- *  amplifier enable input (active-high). */
-#define EVK_PIN_AMP_ENABLE (EVK_PIN_OVERLAY_BASE + 3u)
-
-/** I2S1_SDI pad (E1M AH6 / Alif P13_4) repurposed as the
- *  mikroBUS click INT pin.  Was earlier (mis)documented as
- *  CTP_INT; the user has since clarified that CTP_INT is on
- *  SPI1_CS1 (see EVK_PIN_CTP_INT below) and I2S1_SDI is
- *  the mikroBUS INT line. */
-#define EVK_PIN_MB_INT (EVK_PIN_OVERLAY_BASE + 4u)
-
-/* CTP_RST: capacitive touch panel reset rides ONLY the TCAL9538
+/* EVK_PIN_OVERLAY_BASE sits just past the 52 standard E1M pinout
+ * entries so it never collides with them.
+ *
+ * AUDIO_CLK pad (E1M Z2 / Alif P9_6) repurposed as the I/O
+ * expander INT line on this EVK.  When the audio path is in
+ * use the IO expander interrupt is unavailable; firmware should
+ * poll the expander instead. (EVK_PIN_IO_EXP_INT)
+ *
+ * SPI0_CS1 pad (E1M N1 / Alif P3_6) repurposed as the I/O
+ * expander reset line.  When SPI0 is used with two chip-selects
+ * this pin can't double as IO_EXP_RST -- the EVK assumes SPI0
+ * is in single-CS mode at most. (EVK_PIN_IO_EXP_RST)
+ *
+ * SPI0_MISO pad (E1M L1 / Alif P5_0) repurposed as the audio
+ * amplifier fault output (open-drain input from the amp).
+ * (EVK_PIN_AMP_FAULT)
+ *
+ * SPI0_CS0 pad (E1M M1 / Alif P5_2) repurposed as the audio
+ * amplifier enable input (active-high). (EVK_PIN_AMP_ENABLE)
+ *
+ * I2S1_SDI pad (E1M AH6 / Alif P13_4) repurposed as the
+ * mikroBUS click INT pin.  Was earlier (mis)documented as
+ * CTP_INT; the user has since clarified that CTP_INT is on
+ * SPI1_CS1 (see EVK_PIN_CTP_INT below) and I2S1_SDI is
+ * the mikroBUS INT line. (EVK_PIN_MB_INT)
+ *
+ * CTP_RST: capacitive touch panel reset rides ONLY the TCAL9538
  * I/O expander on this EVK (pin P3 -- see EVK_IOEXP_CTP_RST
  * below).  An earlier draft of these notes had CTP_RST = SPI1_CS0
  * too; that was a mis-label.  SPI1_CS0 is the Arduino UNO
- * header's CK_CS (chip select); see "Arduino UNO header" below. */
-
-/** SPI0_MOSI pad (E1M M2 / Alif P5_1) repurposed as Arduino
- *  CK_DIO4 (digital I/O 4 on the Arduino UNO header). */
-#define EVK_PIN_CK_DIO4 (EVK_PIN_OVERLAY_BASE + 5u)
-
-/** SPI0_SCLK pad (E1M N2) repurposed as Arduino CK_DIO3.
- *  NB: the Alif-side pad mapping for SPI0_SCLK is left blank in
- *  metadata/e1m_modules/aen/from-alif.tsv (user-supplied) and
- *  needs filling once the EVK schematic is cross-checked. */
-#define EVK_PIN_CK_DIO3 (EVK_PIN_OVERLAY_BASE + 6u)
-
-/** I2S1_WS pad (E1M AG7 / Alif P2_7) repurposed as Arduino CK_DIO2. */
-#define EVK_PIN_CK_DIO2 (EVK_PIN_OVERLAY_BASE + 7u)
-
-/** I2S1_SDO pad (E1M AG6 / Alif P13_5) repurposed as Arduino CK_DIO1. */
-#define EVK_PIN_CK_DIO1 (EVK_PIN_OVERLAY_BASE + 8u)
-
-/** I2S1_SCLK pad (E1M AH7 / Alif P2_6) repurposed as Arduino
- *  CK_RST (the Arduino UNO header's RESET signal -- shields can
- *  pulse it low to force a reboot). */
-#define EVK_PIN_CK_RST (EVK_PIN_OVERLAY_BASE + 9u)
-
-/** SPI1_CS1 pad (E1M AH8 -- CC3501E side, GPIO_15) repurposed as
- *  the capacitive touch panel interrupt input.  Routed through
- *  the on-module CC3501E -- firmware reads CTP touches by
- *  registering an interrupt callback on the CC3501E's GPIO_15
- *  via ALP_CC3501E_CMD_GPIO_SET_INTERRUPT. */
-#define EVK_PIN_CTP_INT (EVK_PIN_OVERLAY_BASE + 10u)
+ * header's CK_CS (chip select); see "Arduino UNO header" below.
+ *
+ * SPI0_MOSI pad (E1M M2 / Alif P5_1) repurposed as Arduino
+ * CK_DIO4 (digital I/O 4 on the Arduino UNO header). (EVK_PIN_CK_DIO4)
+ *
+ * SPI0_SCLK pad (E1M N2) repurposed as Arduino CK_DIO3.
+ * NB: the Alif-side pad mapping for SPI0_SCLK is left blank in
+ * metadata/e1m_modules/aen/from-alif.tsv (user-supplied) and
+ * needs filling once the EVK schematic is cross-checked. (EVK_PIN_CK_DIO3)
+ *
+ * I2S1_WS pad (E1M AG7 / Alif P2_7) repurposed as Arduino
+ * CK_DIO2. (EVK_PIN_CK_DIO2)
+ *
+ * I2S1_SDO pad (E1M AG6 / Alif P13_5) repurposed as Arduino
+ * CK_DIO1. (EVK_PIN_CK_DIO1)
+ *
+ * I2S1_SCLK pad (E1M AH7 / Alif P2_6) repurposed as Arduino
+ * CK_RST (the Arduino UNO header's RESET signal -- shields can
+ * pulse it low to force a reboot). (EVK_PIN_CK_RST)
+ *
+ * SPI1_CS1 pad (E1M AH8 -- CC3501E side, GPIO_15) repurposed as
+ * the capacitive touch panel interrupt input.  Routed through
+ * the on-module CC3501E -- firmware reads CTP touches by
+ * registering an interrupt callback on the CC3501E's GPIO_15
+ * via ALP_CC3501E_CMD_GPIO_SET_INTERRUPT. (EVK_PIN_CTP_INT)
+ *
+ * EVK_PIN_OVERLAY_BASE and the eleven EVK_PIN_* overlay-pad indices
+ * above are defined in the generated routes header -- N in
+ * `EVK_PIN_OVERLAY_BASE + N` is each entry's position in
+ * metadata/boards/e1m-evk.yaml's `overlay_pins:` list, not an
+ * independently hand-picked value (#1636). */
 
 /* I2S1 is fully consumed by the EVK -- all four I2S1 pads are
  * repurposed as GPIOs:
