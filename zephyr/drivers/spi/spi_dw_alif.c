@@ -327,6 +327,50 @@ static bool spi_dw_dma_has_more_data(const struct spi_dw_dma_state *state)
 /**
  * Setup RX DMA channel for current chunk
  */
+/* Reuse an already-built PL330 descriptor when only addresses/length differ.
+ *
+ * dma_config() on this PL330 constructs a microcode program; dma_reload() only
+ * rewrites source_address / dest_address / block_size on the descriptor already
+ * there (dma_pl330_alif.c: three field stores).  Every steady-state CC3501E
+ * bridge frame reprograms the SAME channel, direction, burst, width and buffers,
+ * so that rebuild was pure per-transfer overhead -- and it is why DMA measured
+ * SLOWER than PIO here despite moving identical bytes (113 kB/s vs 678 kB/s at
+ * ~1.7 KB payloads). */
+static bool spi_dw_dma_try_reload(const struct device           *dev,
+                                  uint32_t                       ch,
+                                  struct spi_dw_dma_shape       *shape,
+                                  const struct dma_config       *cfg,
+                                  const struct dma_block_config *blk)
+{
+	const struct spi_dw_config *info = dev->config;
+
+	if (!shape->valid || shape->burst != cfg->dest_burst_length ||
+	    shape->dfs != cfg->source_data_size || shape->dir != cfg->channel_direction ||
+	    shape->slot != cfg->dma_slot || shape->src_adj != blk->source_addr_adj ||
+	    shape->dst_adj != blk->dest_addr_adj) {
+		return false;
+	}
+
+	return dma_reload(info->dma_dev,
+	                  ch,
+	                  (uint32_t)blk->source_address,
+	                  (uint32_t)blk->dest_address,
+	                  blk->block_size) == 0;
+}
+
+static void spi_dw_dma_cache_shape(struct spi_dw_dma_shape       *shape,
+                                   const struct dma_config       *cfg,
+                                   const struct dma_block_config *blk)
+{
+	shape->valid   = true;
+	shape->burst   = cfg->dest_burst_length;
+	shape->dfs     = cfg->source_data_size;
+	shape->dir     = cfg->channel_direction;
+	shape->slot    = cfg->dma_slot;
+	shape->src_adj = blk->source_addr_adj;
+	shape->dst_adj = blk->dest_addr_adj;
+}
+
 static int spi_dw_dma_setup_rx_channel(const struct device *dev,
 				       struct dma_config *dma_cfg,
 				       struct dma_block_config *dma_block_cfg,
@@ -356,10 +400,17 @@ static int spi_dw_dma_setup_rx_channel(const struct device *dev,
 		DMA_ADDR_ADJ_NO_CHANGE : DMA_ADDR_ADJ_INCREMENT;
 	dma_block_cfg->source_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
 
-	ret = dma_config(info->dma_dev, info->dma_rx.ch, dma_cfg);
-	if (ret < 0) {
-		LOG_ERR("SPI:%p dma_config %p failed %d\n", dev, info->dma_dev, ret);
-		return ret;
+	struct spi_dw_data *spi_d = dev->data;
+
+	if (!spi_dw_dma_try_reload(
+	        dev, info->dma_rx.ch, &spi_d->dma_state.rx_shape, dma_cfg, dma_block_cfg)) {
+		ret = dma_config(info->dma_dev, info->dma_rx.ch, dma_cfg);
+		if (ret < 0) {
+			LOG_ERR("SPI:%p dma_config %p failed %d\n", dev, info->dma_dev, ret);
+			spi_d->dma_state.rx_shape.valid = false;
+			return ret;
+		}
+		spi_dw_dma_cache_shape(&spi_d->dma_state.rx_shape, dma_cfg, dma_block_cfg);
 	}
 
 	ret = dma_start(info->dma_dev, info->dma_rx.ch);
@@ -404,11 +455,17 @@ static int spi_dw_dma_setup_tx_channel(const struct device *dev,
 	dma_block_cfg->source_addr_adj = (tx_ptr == &dummy_tx) ?
 		DMA_ADDR_ADJ_NO_CHANGE : DMA_ADDR_ADJ_INCREMENT;
 
-	ret = dma_config(info->dma_dev, info->dma_tx.ch, dma_cfg);
+	struct spi_dw_data *spi_d = dev->data;
 
-	if (ret < 0) {
-		LOG_ERR("SPI:%p dma_config %p failed %d\n", dev, info->dma_dev, ret);
-		return ret;
+	if (!spi_dw_dma_try_reload(
+	        dev, info->dma_tx.ch, &spi_d->dma_state.tx_shape, dma_cfg, dma_block_cfg)) {
+		ret = dma_config(info->dma_dev, info->dma_tx.ch, dma_cfg);
+		if (ret < 0) {
+			LOG_ERR("SPI:%p dma_config %p failed %d\n", dev, info->dma_dev, ret);
+			spi_d->dma_state.tx_shape.valid = false;
+			return ret;
+		}
+		spi_dw_dma_cache_shape(&spi_d->dma_state.tx_shape, dma_cfg, dma_block_cfg);
 	}
 
 	ret = dma_start(info->dma_dev, info->dma_tx.ch);
