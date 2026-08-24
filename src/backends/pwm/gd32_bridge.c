@@ -27,6 +27,13 @@
 #include "v2n_supervisor.h"
 #include <alp/chips/gd32g553.h>
 
+/* CONTAINER_OF without <zephyr/sys/util.h>: guarded so a build that
+ * already has it (transitively, via Zephyr) keeps its own -- matches the
+ * guard sw_fallback.c/yocto_drv.c use for the same reason (issue #634). */
+#ifndef CONTAINER_OF
+#define CONTAINER_OF(ptr, type, member) ((type *)(void *)((char *)(ptr) - offsetof(type, member)))
+#endif
+
 typedef struct gd32_pwm_state {
 	uint8_t  channel_id;
 	uint32_t period_ns;
@@ -89,6 +96,13 @@ br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabiliti
 	st->channel_id  = cfg->channel_id;
 	st->be_data     = bs;
 	caps_out->flags = 0u; /* no HW dead-time/break advertised via bridge */
+
+	/* Dispatcher-owned field: pwm_dispatch.c's alp_pwm_set_duty() bounds-
+	 * checks pulse_ns against this before ever reaching set_duty(). The
+	 * handle is zeroed by the dispatcher's _alloc(), so leaving this
+	 * unset makes every non-zero pulse_ns fail with ALP_ERR_INVAL
+	 * (issue #1624). */
+	CONTAINER_OF(st, struct alp_pwm, state)->period_ns = cfg->period_ns;
 	return ALP_OK;
 }
 
