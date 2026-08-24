@@ -18,6 +18,7 @@ as CHANGED).
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -433,3 +434,293 @@ def test_real_line_continued_macros_now_captured_with_real_values():
         rec = snapshot["headers"][header]["macros"].get(name)
         assert rec is not None, f"{name} missing from {header}"
         assert rec["value"] == value, f"{name}: {rec['value']!r} != {value!r}"
+
+
+# ---------------------------------------------------------------------
+# MOVED detection: a header split (symbol relocated, value unchanged,
+# old header still #includes the new one) must not read as a real
+# removal.  See abi_snapshot.py's diff()/build_include_graph() docs.
+# ---------------------------------------------------------------------
+
+
+def _macro_snap(tmp_path, header_key: str, filename: str, define_line: str):
+    """Build a one-header snapshot fragment keyed by `header_key`
+    (an arbitrary label, same pattern as `_snap` above) from a header
+    file written to `tmp_path/filename` containing `define_line`."""
+    return {header_key: _extract_src(tmp_path, define_line, filename)}
+
+
+def test_diff_reports_moved_when_old_header_still_includes_new_one(tmp_path):
+    # `alp/board_routes.h` must pre-exist in BOTH snapshots -- like the
+    # real PR #1660 case, the destination header isn't new, it just
+    # gains the macro; a brand-new destination header is a different,
+    # unhandled shape (it reads as "ADDED header", which already skips
+    # per-symbol diffing for everything inside it -- out of scope here).
+    prev_headers = _macro_snap(
+        tmp_path, "alp/board.h", "prev_board.h", "#define FOO_MACRO 1\n"
+    )
+    prev_headers.update(
+        _macro_snap(tmp_path, "alp/board_routes.h", "prev_board_routes.h", "")
+    )
+    prev = {"headers": prev_headers}
+    curr_headers = _macro_snap(tmp_path, "alp/board.h", "curr_board_empty.h", "")
+    curr_headers.update(
+        _macro_snap(
+            tmp_path,
+            "alp/board_routes.h",
+            "curr_board_routes.h",
+            "#define FOO_MACRO 1\n",
+        )
+    )
+    curr = {"headers": curr_headers}
+    include_graph = {"alp/board.h": ["alp/board_routes.h"]}
+
+    msgs = abi.diff(prev, curr, include_graph=include_graph)
+
+    assert any(
+        m.startswith("MOVED   macro FOO_MACRO: alp/board.h -> alp/board_routes.h")
+        for m in msgs
+    ), msgs
+    assert not any(m.startswith("REMOVED") for m in msgs), msgs
+    assert not any(m.startswith("ADDED") for m in msgs), msgs
+    # Same exit-code rule main() applies: MOVED must not trip the gate.
+    assert not any(m.startswith(("REMOVED", "CHANGED")) for m in msgs)
+
+
+def test_diff_still_reports_removed_without_the_reachability_include(tmp_path):
+    """The test that matters: a same-name/same-value symbol reappearing
+    in another header is NOT a move unless the old header actually
+    still reaches the new one -- otherwise a real removal (old header
+    dropped it AND never gained a path to wherever it went) would
+    silently stop tripping the freeze gate."""
+    prev_headers = _macro_snap(
+        tmp_path, "alp/board.h", "prev_board2.h", "#define FOO_MACRO 1\n"
+    )
+    prev_headers.update(
+        _macro_snap(tmp_path, "alp/board_routes.h", "prev_board2_routes.h", "")
+    )
+    prev = {"headers": prev_headers}
+    curr_headers = _macro_snap(tmp_path, "alp/board.h", "curr_board2_empty.h", "")
+    curr_headers.update(
+        _macro_snap(
+            tmp_path,
+            "alp/board_routes.h",
+            "curr_board2_routes.h",
+            "#define FOO_MACRO 1\n",
+        )
+    )
+    curr = {"headers": curr_headers}
+
+    # No include_graph at all (defaults to {}): the old header does NOT
+    # reach the new one, so this must stay REMOVED + ADDED, not MOVED.
+    msgs = abi.diff(prev, curr)
+
+    assert "REMOVED macro alp/board.h::FOO_MACRO" in msgs, msgs
+    assert "ADDED   macro alp/board_routes.h::FOO_MACRO" in msgs, msgs
+    assert not any(m.startswith("MOVED") for m in msgs), msgs
+    assert any(m.startswith(("REMOVED", "CHANGED")) for m in msgs)  # gate would fire
+
+
+def test_diff_does_not_collapse_a_move_that_also_changed_value(tmp_path):
+    prev_headers = _macro_snap(
+        tmp_path, "alp/board.h", "prev_board3.h", "#define FOO_MACRO 1\n"
+    )
+    prev_headers.update(
+        _macro_snap(tmp_path, "alp/board_routes.h", "prev_board3_routes.h", "")
+    )
+    prev = {"headers": prev_headers}
+    curr_headers = _macro_snap(tmp_path, "alp/board.h", "curr_board3_empty.h", "")
+    curr_headers.update(
+        _macro_snap(
+            tmp_path,
+            "alp/board_routes.h",
+            "curr_board3_routes.h",
+            "#define FOO_MACRO 2\n",  # value changed -> different hash
+        )
+    )
+    curr = {"headers": curr_headers}
+    include_graph = {"alp/board.h": ["alp/board_routes.h"]}
+
+    msgs = abi.diff(prev, curr, include_graph=include_graph)
+
+    assert not any(m.startswith("MOVED") for m in msgs), msgs
+    assert "REMOVED macro alp/board.h::FOO_MACRO" in msgs, msgs
+    assert "ADDED   macro alp/board_routes.h::FOO_MACRO" in msgs, msgs
+
+
+def test_diff_reports_genuine_deletion_as_removed(tmp_path):
+    prev = {
+        "headers": _macro_snap(
+            tmp_path, "alp/board.h", "prev_board4.h", "#define FOO_MACRO 1\n"
+        )
+    }
+    curr = {
+        "headers": _macro_snap(tmp_path, "alp/board.h", "curr_board4_empty.h", "")
+    }
+    include_graph = {"alp/board.h": []}  # no candidate to move to at all
+
+    msgs = abi.diff(prev, curr, include_graph=include_graph)
+
+    assert msgs == ["REMOVED macro alp/board.h::FOO_MACRO"]
+
+
+def test_build_include_graph_finds_the_real_evk_routes_split_edge():
+    """`alp/boards/alp_e1m_evk.h` #includes its `_routes.h` sibling
+    today -- pins that `build_include_graph` reads that edge straight
+    off the real tree, one hop, by its canonical `alp/...` key.  (The
+    X-EVK sibling doesn't gain this edge until PR #1660 lands -- not
+    asserted here, that's the header change this script is neutral to.)"""
+    graph = abi.build_include_graph(abi.INCLUDE_ROOT)
+    assert "alp/boards/alp_e1m_evk_routes.h" in graph.get("alp/boards/alp_e1m_evk.h", [])
+
+
+def test_real_tree_reports_zero_removed_against_last_released_snapshot():
+    """The regression pin the maintainer asked for: on a plain checkout
+    (no header split applied), `--diff` against the last released
+    baseline must report exactly zero REMOVED lines, same as before
+    this change -- MOVED detection must never manufacture or absorb a
+    REMOVED that wasn't already there."""
+    baseline = REPO / "docs" / "abi" / "v0.15-snapshot.json"
+    prior = json.loads(baseline.read_text(encoding="utf-8"))
+    current = abi.build_snapshot("test", abi.INCLUDE_ROOT)
+    include_graph = abi.build_include_graph(abi.INCLUDE_ROOT)
+
+    msgs = abi.diff(prior, current, include_graph=include_graph)
+
+    removed = [m for m in msgs if m.startswith("REMOVED")]
+    assert removed == [], removed
+
+
+def test_include_graph_excludes_a_conditional_include(tmp_path):
+    """A parser differential, and the reason build_include_graph() has to
+    care about `#if` at all.
+
+    `build_include_graph()` decides reachability, and `diff()` downgrades
+    a REMOVED+ADDED pair to MOVED on the strength of it.  An include
+    sitting inside a conditional arm is one the real preprocessor may not
+    follow, so counting it claims a reachability that does not exist --
+    and turns a genuine ABI removal into a MOVED line the freeze gate
+    passes.
+
+    Shaped after the live case at include/alp/board.h, which picks
+    between two routes headers with mutually exclusive arms, so the test
+    pins the actual hazard rather than a bare `#ifdef`.
+    """
+    root = tmp_path / "alp"
+    root.mkdir()
+    (root / "facade.h").write_text(
+        "#ifndef ALP_FACADE_H\n"
+        "#define ALP_FACADE_H\n"
+        "#include \"alp/always.h\"\n"
+        "#if defined(ALP_BOARD_A)\n"
+        "#include \"alp/board_a.h\"\n"
+        "#elif defined(ALP_BOARD_B)\n"
+        "#include \"alp/board_b.h\"\n"
+        "#else\n"
+        "#error \"no board selected\"\n"
+        "#endif\n"
+        "#endif /* ALP_FACADE_H */\n",
+        newline="",
+    )
+    for name in ("always.h", "board_a.h", "board_b.h"):
+        (root / name).write_text("#define X 1\n", newline="")
+
+    graph = abi.build_include_graph(root)
+
+    assert graph["alp/facade.h"] == ["alp/always.h"], graph["alp/facade.h"]
+    assert "alp/board_a.h" not in graph["alp/facade.h"]
+    assert "alp/board_b.h" not in graph["alp/facade.h"]
+
+
+def test_real_tree_board_h_conditional_arms_are_not_reachability():
+    """The live instance of the case above.
+
+    include/alp/board.h selects between the two carriers' routes headers
+    with `#if defined(ALP_BOARD_E1M_X_EVK) / #elif defined(ALP_BOARD_E1M_EVK)
+    / #else #error`.  Counting either arm would let a symbol moved out of
+    board.h read as MOVED while every consumer building the OTHER board
+    really lost it.
+    """
+    graph = abi.build_include_graph(abi.INCLUDE_ROOT)
+
+    assert "alp/boards/alp_e1m_x_evk_routes.h" not in graph.get("alp/board.h", [])
+    assert "alp/boards/alp_e1m_evk_routes.h" not in graph.get("alp/board.h", [])
+
+
+def test_real_tree_unconditional_board_header_edges_survive():
+    """The other half: excluding conditional includes must NOT cost the
+    unconditional ones, or every genuine header split starts reporting
+    REMOVED again and the feature is pointless.
+
+    Guarded so it states the precondition rather than passing vacuously:
+    these edges only exist once the board headers actually include their
+    generated routes sibling.
+    """
+    graph = abi.build_include_graph(abi.INCLUDE_ROOT)
+
+    for owner, routes in (
+        ("alp/boards/alp_e1m_evk.h", "alp/boards/alp_e1m_evk_routes.h"),
+        ("alp/boards/alp_e1m_x_evk.h", "alp/boards/alp_e1m_x_evk_routes.h"),
+    ):
+        src = (abi.INCLUDE_ROOT.parent / owner).read_text(encoding="utf-8")
+        # Must be a real directive, not a prose mention: alp_e1m_x_evk.h's
+        # file comment names the routes header ("included below") on
+        # branches where the include itself does not exist yet, so a bare
+        # substring test would turn a legitimate skip into a failure.
+        if f'#include "{routes}"' not in src:
+            continue  # header does not include its routes sibling on this branch
+        assert routes in graph.get(owner, []), (owner, graph.get(owner))
+
+
+def test_include_graph_handles_a_pragma_once_header(tmp_path):
+    """`depth > guard_depth` must be keyed off the REAL include guard, not
+    a hard-coded 1.
+
+    A `#pragma once` header has no `#ifndef` wrapper, so its first `#if` is
+    depth 1 -- exactly the level a hard-coded rule treats as "the include
+    guard, still unconditional". That would let a conditional include count
+    as reachability again, which is the false-MOVED hole
+    _unconditional_includes() exists to close.
+    """
+    root = tmp_path / "alp"
+    root.mkdir()
+    (root / "facade.h").write_text(
+        "#pragma once\n"
+        '#include "alp/always.h"\n'
+        "#if defined(ALP_BOARD_A)\n"
+        '#include "alp/board_a.h"\n'
+        "#endif\n",
+        newline="",
+    )
+    for name in ("always.h", "board_a.h"):
+        (root / name).write_text("#define X 1\n", newline="")
+
+    graph = abi.build_include_graph(root)
+
+    assert graph["alp/facade.h"] == ["alp/always.h"], graph["alp/facade.h"]
+
+
+def test_include_graph_handles_a_top_level_if_above_the_guard(tmp_path):
+    """The other way the hard-coded depth breaks: a conditional ABOVE the
+    include guard pushes the guard itself to depth 2, so every real
+    conditional inside it lands at depth 3 and a `depth > 1` rule would
+    have excluded the header's UNCONDITIONAL includes instead -- a false
+    REMOVED rather than a false MOVED, but still wrong.
+    """
+    root = tmp_path / "alp"
+    root.mkdir()
+    (root / "facade.h").write_text(
+        "#if !defined(SOMETHING)\n"
+        "#ifndef ALP_FACADE_H\n"
+        "#define ALP_FACADE_H\n"
+        '#include "alp/always.h"\n'
+        "#endif\n"
+        "#endif\n",
+        newline="",
+    )
+    (root / "always.h").write_text("#define X 1\n", newline="")
+
+    graph = abi.build_include_graph(root)
+
+    # The guard is detected, so the include one level inside it still counts.
+    assert "alp/always.h" in graph["alp/facade.h"], graph["alp/facade.h"]

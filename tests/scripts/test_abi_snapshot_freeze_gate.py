@@ -819,6 +819,51 @@ def test_freeze_gate_fails_on_a_removed_symbol():
 
 
 @pytestmark_bash
+def test_freeze_gate_passes_on_a_moved_symbol():
+    """A relocated symbol must NOT fail the step.
+
+    This pins the coupling between `diff()`'s MOVED verdict and the
+    WORKFLOW's own `grep -q '^  REMOVED '` -- the unit tests in
+    test_abi_snapshot.py prove diff() emits MOVED, but only running the
+    real step proves the gate does not match it. A header split that
+    keeps every symbol reachable is allowed; see docs/abi/README.md.
+
+    Built from a real, currently-reachable relocation: a macro that lives
+    in a board header today is recorded in the baseline as having lived in
+    the hand-written parent that unconditionally includes it, so the
+    current tree reads as a move INTO the routes header.
+    """
+    baseline = REPO / "docs" / "abi" / "v99.97-snapshot.json"
+    curr = json.loads(
+        subprocess.run(
+            [sys.executable, "scripts/abi_snapshot.py", "--version", "v99.97"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    )
+    owner = "alp/boards/alp_e1m_evk.h"
+    routes = "alp/boards/alp_e1m_evk_routes.h"
+    moved_sym = next(iter(curr["headers"][routes]["macros"]))
+    # Baseline = today's tree with one macro relocated back to the parent
+    # header, i.e. exactly the shape a header split produces.
+    payload = json.loads(json.dumps(curr))
+    payload["headers"][owner]["macros"][moved_sym] = payload["headers"][routes][
+        "macros"
+    ].pop(moved_sym)
+
+    proc = _run_freeze_gate(baseline, payload)
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert f"MOVED   macro {moved_sym}: {owner} -> {routes}" in proc.stdout, proc.stdout
+    assert "::error::Public symbol(s) removed" not in proc.stdout
+    assert not any(
+        line.startswith("  REMOVED ") for line in proc.stdout.splitlines()
+    ), proc.stdout
+
+
+@pytestmark_bash
 def test_freeze_gate_passes_on_a_changed_only_diff():
     """A CHANGED entry (a real symbol, deliberately mis-hashed so it
     still exists but its recorded signature differs) must NOT fail the

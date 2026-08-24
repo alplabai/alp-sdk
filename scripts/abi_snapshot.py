@@ -41,6 +41,14 @@ list of an enum; reordering, adding, removing, or retyping any entry
 changes both the list AND the parent `hash` (the hash is a fingerprint
 of the *complete* normalised declaration, body included).
 
+`--diff` reports a symbol that disappeared from one header and
+reappeared under the same name/category/value in another as `MOVED`,
+not `REMOVED` + `ADDED` -- but only when the old header still
+`#include`s the new one in the CURRENT tree (see `build_include_graph`
+and `diff()`).  That reachability check reads today's headers off
+disk; it is intentionally NOT part of this file's persisted JSON
+schema, so `--output` keeps writing exactly what it always has.
+
 The parser is **deliberately simple** -- it walks the SDK's own
 declaration style, which is consistent across the headers (one decl per
 logical declaration, no macro-generated symbols, no template / generic
@@ -75,6 +83,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import posixpath
 import re
 import sys
 from pathlib import Path
@@ -669,10 +678,208 @@ def _field_diff(
     return msgs
 
 
-def diff(prev: dict[str, Any], curr: dict[str, Any]) -> list[str]:
+# ---------------------------------------------------------------------
+# MOVED detection: one-hop #include graph of the CURRENT tree
+# ---------------------------------------------------------------------
+
+# `#include "target"` / `#include <target>`, matched against
+# comment-stripped text (same as `_DEFINE_RE`'s sibling passes).  Not
+# restricted to `alp/`-rooted targets here -- `_resolve_include` below
+# decides what a bare relative target resolves to; this regex only
+# extracts the raw text between the quotes/angle-brackets.
+_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"](?P<target>[^">]+)[>"]', re.MULTILINE)
+
+# Preprocessor conditional boundaries, needed by _unconditional_includes()
+# below.  Only the directive keyword matters -- the CONDITION is deliberately
+# never evaluated; see that function's docstring for why.
+_CPP_OPEN_RE  = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef)\b")
+_CPP_CLOSE_RE = re.compile(r"^\s*#\s*endif\b")
+# A classic `#ifndef FOO_H` / `#define FOO_H` include guard, i.e. the first
+# conditional in the file paired with an immediate #define of the same token.
+# Absent for a `#pragma once` header -- see _unconditional_includes().
+_GUARD_RE = re.compile(
+    r"^\s*#\s*ifndef\s+(?P<tok>\w+)\s*\n\s*#\s*define\s+(?P=tok)\b", re.MULTILINE
+)
+
+
+def _resolve_include(own_key: str, target: str) -> str:
+    """Resolve one `#include` target to the canonical `alp/...` key
+    used as a `headers` dict key elsewhere in this module.
+
+    This codebase's public headers cross-reference EACH OTHER by a
+    full `alp/...`-rooted path (`#include "alp/boards/..._routes.h"`,
+    `#include <alp/adc.h>`) -- that string already IS the canonical
+    key, no resolution needed.  A same-directory relative include
+    (`#include "cap_instance.h"` in `alp/cap.h`) is resolved against
+    `own_key`'s own directory instead, the way the C preprocessor
+    would.  The result isn't checked against the real header set here
+    -- a system/vendor header (`#include <stdint.h>`, `#include
+    "lvgl.h"`) resolves to some string just as readily; the caller
+    (`build_include_graph`) doesn't care, since a resolved string that
+    matches no real header key simply never satisfies a later
+    membership check.
+    """
+    if target.startswith("alp/"):
+        return target
+    base_dir = own_key.rsplit("/", 1)[0] if "/" in own_key else ""
+    joined = f"{base_dir}/{target}" if base_dir else target
+    return posixpath.normpath(joined)
+
+
+def _is_guard_open(lines: list[str], i: int, guard_tok: str) -> bool:
+    """True when `lines[i]` is the `#ifndef <guard_tok>` of the file's own
+    include guard -- i.e. immediately followed by `#define <guard_tok>`."""
+    if not re.match(rf"^\s*#\s*ifndef\s+{re.escape(guard_tok)}\s*$", lines[i]):
+        return False
+    nxt = lines[i + 1] if i + 1 < len(lines) else ""
+    return re.match(rf"^\s*#\s*define\s+{re.escape(guard_tok)}\b", nxt) is not None
+
+
+def _unconditional_includes(text: str) -> list[str]:
+    """The `#include` targets a consumer of this header gets in EVERY
+    configuration -- i.e. those outside any `#if`/`#ifdef`/`#ifndef`.
+
+    Why this filter exists, because removing it silently breaks an ABI
+    gate: `build_include_graph()` feeds `diff()`'s MOVED detection, which
+    downgrades a REMOVED+ADDED pair to MOVED when the old header still
+    reaches the new one.  A naive scan records an edge for an include
+    sitting inside a conditional arm that the real preprocessor would
+    NOT follow -- claiming reachability that does not exist.  That turns
+    a genuine ABI removal into a `MOVED` line, which the freeze gate in
+    .github/workflows/pr-generated-files.yml passes, and the gate whose
+    whole job is catching a silently-dropped symbol reports it safe.
+
+    Live example, not hypothetical: include/alp/board.h selects between
+    `alp/boards/alp_e1m_x_evk_routes.h` and
+    `alp/boards/alp_e1m_evk_routes.h` with a mutually exclusive
+    `#if defined(ALP_BOARD_E1M_X_EVK) / #elif defined(ALP_BOARD_E1M_EVK)
+    / #else #error`.  Counting both arms would let a symbol moved out of
+    board.h into either routes header read as MOVED, while every
+    consumer building the OTHER board really has lost it.
+
+    The CONDITION is never evaluated, only its presence.  "Is this
+    include unconditional?" is answerable from the text; "is this arm
+    taken?" is not, and guessing would rebuild the same differential one
+    level up.  So a conditional include simply never counts as
+    reachability -- the symbol stays REMOVED.  That is the safe
+    direction: a false REMOVED is noise a human resolves, a false MOVED
+    is a silent ABI break.
+
+    Depth 1 is the file's own `#ifndef ALP_FOO_H` include guard, which
+    every header in this tree has and which is not a real conditional.
+
+    @param text  Header source with comments already stripped.
+    @return      Include targets that are outside every conditional arm.
+    """
+    out: list[str] = []
+    depth = 0
+    # The file's own `#ifndef ALP_FOO_H` include guard wraps everything and
+    # is not a real conditional, so includes directly inside it still count.
+    # Detected rather than assumed to be depth 1: a header using `#pragma
+    # once`, or one with a top-level `#if` ABOVE its guard, would otherwise
+    # shift every real conditional down one level and silently re-open the
+    # false-MOVED hole this function exists to close.
+    guard_match = _GUARD_RE.search(text)
+    guard_tok = guard_match["tok"] if guard_match is not None else None
+    # Depth AT which the include guard sits, discovered while scanning
+    # rather than assumed: 0 for a `#pragma once` header (no guard), and
+    # not necessarily 1 for a guarded one either, since a header may open
+    # a top-level `#if` above its guard.
+    guard_depth = 0
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if _CPP_OPEN_RE.match(line):
+            depth += 1
+            if guard_tok is not None and _is_guard_open(lines, i, guard_tok):
+                guard_depth = depth
+            continue
+        if _CPP_CLOSE_RE.match(line):
+            depth = max(0, depth - 1)
+            continue
+        if depth > guard_depth:
+            continue
+        m = _INCLUDE_RE.match(line)
+        if m is not None:
+            out.append(m["target"])
+    return out
+
+
+def build_include_graph(include_root: Path) -> dict[str, list[str]]:
+    """One-hop UNCONDITIONAL `#include` edges between the headers this
+    script walks, read straight off today's disk -- the CURRENT tree,
+    not anything persisted in a snapshot.  An include inside a
+    conditional arm is deliberately excluded and therefore never counts
+    as reachability; see _unconditional_includes() for why that is a
+    correctness requirement and not a simplification.  Used only by `diff()`'s MOVED detection:
+    a symbol relocated from header A to header B is a real ABI break
+    UNLESS a consumer `#include`-ing A today still reaches B, and that
+    can only be answered by the live tree -- the OLD snapshot predates
+    the move, and the NEW one doesn't carry `#include` info in its
+    schema at all.  Keeping that info out of the persisted JSON is
+    deliberate: it means `--output` keeps writing exactly the same
+    bytes as before this feature, so `pr-generated-files.yml`'s
+    "generated files in sync" byte-diff gate against a committed
+    `docs/abi/*.json` is unaffected by adding this check.
+
+    # ponytail: one-hop only, not transitive.  Every real header split
+    # in this tree (dac.h out of adc.h in v0.8.0, the *_routes.h
+    # split) is a direct #include from the old file straight into the
+    # new one -- no intermediate header in between.  If a future split
+    # ever routes through one, upgrade this to a BFS over the same
+    # edge dict; diff()'s reachability check (`a_header in
+    # include_graph.get(r_header, [])`) is the only caller and would
+    # need to become a graph walk, not a rewrite.
+    """
+    graph: dict[str, list[str]] = {}
+    for path in sorted(include_root.rglob("*.h")):
+        rel = path.relative_to(include_root.parent).as_posix()
+        text = strip_comments(path.read_text(encoding="utf-8"))
+        edges = {_resolve_include(rel, target) for target in _unconditional_includes(text)}
+        graph[rel] = sorted(edges)
+    return graph
+
+
+def diff(
+    prev: dict[str, Any],
+    curr: dict[str, Any],
+    include_graph: dict[str, list[str]] | None = None,
+) -> list[str]:
+    """Per-symbol diff between two snapshots.
+
+    `include_graph` (see `build_include_graph`) is what lets a header
+    SPLIT read as `MOVED` instead of `REMOVED` + `ADDED`: when the same
+    symbol name disappears from header A and reappears in header B, in
+    the same category, with an IDENTICAL hash (value/signature
+    unchanged -- a move that ALSO changes the value is still reported
+    as a plain REMOVED + ADDED, never collapsed into MOVED), and A
+    still `#include`s B in the CURRENT tree, a consumer of A sees
+    exactly what it saw before.  `include_graph` defaults to `{}` (no
+    edges), so a caller that doesn't pass one -- every caller before
+    this feature existed -- gets the old REMOVED+ADDED behaviour,
+    unchanged.
+
+    `MOVED` must never satisfy `m.startswith(("REMOVED", "CHANGED"))`
+    (the exit-code check in `main()` below) and must never match the
+    freeze gate's `grep -q '^  REMOVED '`
+    (`.github/workflows/pr-generated-files.yml`) -- it is not a
+    removal.
+    """
+    if include_graph is None:
+        include_graph = {}
+
     msgs: list[str] = []
     prev_h = prev.get("headers", {})
     curr_h = curr.get("headers", {})
+
+    # Deferred instead of emitted inline: a REMOVED entry in header A
+    # may turn out to be a MOVED once matched against an ADDED entry in
+    # some other header B, so both lists are collected in full before
+    # either is turned into a message.  CHANGED (same header, same
+    # symbol, different hash) is unaffected by any of this and is
+    # still emitted directly, in the original per-header/per-category
+    # traversal order.
+    removed: list[tuple[str, str, str, str]] = []  # (header, category, sym, hash)
+    added: list[tuple[str, str, str, str]] = []
 
     for name in sorted(set(prev_h) | set(curr_h)):
         if name not in curr_h:
@@ -686,13 +893,42 @@ def diff(prev: dict[str, Any], curr: dict[str, Any]) -> list[str]:
             c = curr_h[name].get(category, {})
             for sym in sorted(set(p) | set(c)):
                 if sym not in c:
-                    msgs.append(f"REMOVED {category[:-1]} {name}::{sym}")
+                    removed.append((name, category, sym, p[sym]["hash"]))
                 elif sym not in p:
-                    msgs.append(f"ADDED   {category[:-1]} {name}::{sym}")
+                    added.append((name, category, sym, c[sym]["hash"]))
                 elif p[sym]["hash"] != c[sym]["hash"]:
                     msgs.append(f"CHANGED {category[:-1]} {name}::{sym}")
                     if category == "typedefs":
                         msgs.extend(_field_diff(name, sym, p[sym], c[sym]))
+
+    # Pair each REMOVED entry with an ADDED entry of the same
+    # category/symbol/hash where the OLD header still #includes the
+    # NEW one today.  Every hash-matching candidate is tried, not just
+    # the first: a same-name/same-value symbol that happens to reappear
+    # in some UNRELATED, unreachable header first must not shadow a
+    # later candidate that genuinely is reachable -- and must not get
+    # consumed either way, since it was never a real match.
+    unmatched_added = list(added)
+    for r_header, r_cat, r_sym, r_hash in removed:
+        match_idx = None
+        for i, (a_header, a_cat, a_sym, a_hash) in enumerate(unmatched_added):
+            if (
+                a_cat == r_cat
+                and a_sym == r_sym
+                and a_hash == r_hash
+                and a_header in include_graph.get(r_header, [])
+            ):
+                match_idx = i
+                break
+        if match_idx is not None:
+            a_header = unmatched_added.pop(match_idx)[0]
+            msgs.append(f"MOVED   {r_cat[:-1]} {r_sym}: {r_header} -> {a_header}")
+        else:
+            msgs.append(f"REMOVED {r_cat[:-1]} {r_header}::{r_sym}")
+
+    for a_header, a_cat, a_sym, _a_hash in unmatched_added:
+        msgs.append(f"ADDED   {a_cat[:-1]} {a_header}::{a_sym}")
+
     return msgs
 
 
@@ -860,7 +1096,7 @@ def main() -> int:
             # e.g. release.yml, has no `tee`/grep step to tell them apart).
             print(f"error: cannot parse {args.diff}: {exc}", file=sys.stderr)
             return 2
-        msgs = diff(prior, snapshot)
+        msgs = diff(prior, snapshot, include_graph=build_include_graph(INCLUDE_ROOT))
         if not msgs:
             print(f"ABI unchanged vs {args.diff}.")
             return 0
