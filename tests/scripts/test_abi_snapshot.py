@@ -589,3 +589,84 @@ def test_real_tree_reports_zero_removed_against_last_released_snapshot():
 
     removed = [m for m in msgs if m.startswith("REMOVED")]
     assert removed == [], removed
+
+
+def test_include_graph_excludes_a_conditional_include(tmp_path):
+    """A parser differential, and the reason build_include_graph() has to
+    care about `#if` at all.
+
+    `build_include_graph()` decides reachability, and `diff()` downgrades
+    a REMOVED+ADDED pair to MOVED on the strength of it.  An include
+    sitting inside a conditional arm is one the real preprocessor may not
+    follow, so counting it claims a reachability that does not exist --
+    and turns a genuine ABI removal into a MOVED line the freeze gate
+    passes.
+
+    Shaped after the live case at include/alp/board.h, which picks
+    between two routes headers with mutually exclusive arms, so the test
+    pins the actual hazard rather than a bare `#ifdef`.
+    """
+    root = tmp_path / "alp"
+    root.mkdir()
+    (root / "facade.h").write_text(
+        "#ifndef ALP_FACADE_H\n"
+        "#define ALP_FACADE_H\n"
+        "#include \"alp/always.h\"\n"
+        "#if defined(ALP_BOARD_A)\n"
+        "#include \"alp/board_a.h\"\n"
+        "#elif defined(ALP_BOARD_B)\n"
+        "#include \"alp/board_b.h\"\n"
+        "#else\n"
+        "#error \"no board selected\"\n"
+        "#endif\n"
+        "#endif /* ALP_FACADE_H */\n",
+        newline="",
+    )
+    for name in ("always.h", "board_a.h", "board_b.h"):
+        (root / name).write_text("#define X 1\n", newline="")
+
+    graph = abi.build_include_graph(root)
+
+    assert graph["alp/facade.h"] == ["alp/always.h"], graph["alp/facade.h"]
+    assert "alp/board_a.h" not in graph["alp/facade.h"]
+    assert "alp/board_b.h" not in graph["alp/facade.h"]
+
+
+def test_real_tree_board_h_conditional_arms_are_not_reachability():
+    """The live instance of the case above.
+
+    include/alp/board.h selects between the two carriers' routes headers
+    with `#if defined(ALP_BOARD_E1M_X_EVK) / #elif defined(ALP_BOARD_E1M_EVK)
+    / #else #error`.  Counting either arm would let a symbol moved out of
+    board.h read as MOVED while every consumer building the OTHER board
+    really lost it.
+    """
+    graph = abi.build_include_graph(abi.INCLUDE_ROOT)
+
+    assert "alp/boards/alp_e1m_x_evk_routes.h" not in graph.get("alp/board.h", [])
+    assert "alp/boards/alp_e1m_evk_routes.h" not in graph.get("alp/board.h", [])
+
+
+def test_real_tree_unconditional_board_header_edges_survive():
+    """The other half: excluding conditional includes must NOT cost the
+    unconditional ones, or every genuine header split starts reporting
+    REMOVED again and the feature is pointless.
+
+    Guarded so it states the precondition rather than passing vacuously:
+    these edges only exist once the board headers actually include their
+    generated routes sibling.
+    """
+    graph = abi.build_include_graph(abi.INCLUDE_ROOT)
+
+    for owner, routes in (
+        ("alp/boards/alp_e1m_evk.h", "alp/boards/alp_e1m_evk_routes.h"),
+        ("alp/boards/alp_e1m_x_evk.h", "alp/boards/alp_e1m_x_evk_routes.h"),
+    ):
+        src = (abi.INCLUDE_ROOT.parent / owner).read_text(encoding="utf-8")
+        # Must be a real directive, not a prose mention: alp_e1m_x_evk.h's
+        # file comment names the routes header ("included below") on
+        # branches where the include itself does not exist yet, so a bare
+        # substring test would turn a legitimate skip into a failure.
+        if f'#include "{routes}"' not in src:
+            continue  # header does not include its routes sibling on this branch
+        assert routes in graph.get(owner, []), (owner, graph.get(owner))

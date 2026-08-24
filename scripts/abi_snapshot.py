@@ -689,6 +689,12 @@ def _field_diff(
 # extracts the raw text between the quotes/angle-brackets.
 _INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"](?P<target>[^">]+)[>"]', re.MULTILINE)
 
+# Preprocessor conditional boundaries, needed by _unconditional_includes()
+# below.  Only the directive keyword matters -- the CONDITION is deliberately
+# never evaluated; see that function's docstring for why.
+_CPP_OPEN_RE  = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef)\b")
+_CPP_CLOSE_RE = re.compile(r"^\s*#\s*endif\b")
+
 
 def _resolve_include(own_key: str, target: str) -> str:
     """Resolve one `#include` target to the canonical `alp/...` key
@@ -714,10 +720,66 @@ def _resolve_include(own_key: str, target: str) -> str:
     return posixpath.normpath(joined)
 
 
+def _unconditional_includes(text: str) -> list[str]:
+    """The `#include` targets a consumer of this header gets in EVERY
+    configuration -- i.e. those outside any `#if`/`#ifdef`/`#ifndef`.
+
+    Why this filter exists, because removing it silently breaks an ABI
+    gate: `build_include_graph()` feeds `diff()`'s MOVED detection, which
+    downgrades a REMOVED+ADDED pair to MOVED when the old header still
+    reaches the new one.  A naive scan records an edge for an include
+    sitting inside a conditional arm that the real preprocessor would
+    NOT follow -- claiming reachability that does not exist.  That turns
+    a genuine ABI removal into a `MOVED` line, which the freeze gate in
+    .github/workflows/pr-generated-files.yml passes, and the gate whose
+    whole job is catching a silently-dropped symbol reports it safe.
+
+    Live example, not hypothetical: include/alp/board.h selects between
+    `alp/boards/alp_e1m_x_evk_routes.h` and
+    `alp/boards/alp_e1m_evk_routes.h` with a mutually exclusive
+    `#if defined(ALP_BOARD_E1M_X_EVK) / #elif defined(ALP_BOARD_E1M_EVK)
+    / #else #error`.  Counting both arms would let a symbol moved out of
+    board.h into either routes header read as MOVED, while every
+    consumer building the OTHER board really has lost it.
+
+    The CONDITION is never evaluated, only its presence.  "Is this
+    include unconditional?" is answerable from the text; "is this arm
+    taken?" is not, and guessing would rebuild the same differential one
+    level up.  So a conditional include simply never counts as
+    reachability -- the symbol stays REMOVED.  That is the safe
+    direction: a false REMOVED is noise a human resolves, a false MOVED
+    is a silent ABI break.
+
+    Depth 1 is the file's own `#ifndef ALP_FOO_H` include guard, which
+    every header in this tree has and which is not a real conditional.
+
+    @param text  Header source with comments already stripped.
+    @return      Include targets that are outside every conditional arm.
+    """
+    out: list[str] = []
+    depth = 0
+    for line in text.splitlines():
+        if _CPP_OPEN_RE.match(line):
+            depth += 1
+            continue
+        if _CPP_CLOSE_RE.match(line):
+            depth = max(0, depth - 1)
+            continue
+        if depth > 1:
+            continue
+        m = _INCLUDE_RE.match(line)
+        if m is not None:
+            out.append(m["target"])
+    return out
+
+
 def build_include_graph(include_root: Path) -> dict[str, list[str]]:
-    """One-hop `#include` edges between the headers this script walks,
-    read straight off today's disk -- the CURRENT tree, not anything
-    persisted in a snapshot.  Used only by `diff()`'s MOVED detection:
+    """One-hop UNCONDITIONAL `#include` edges between the headers this
+    script walks, read straight off today's disk -- the CURRENT tree,
+    not anything persisted in a snapshot.  An include inside a
+    conditional arm is deliberately excluded and therefore never counts
+    as reachability; see _unconditional_includes() for why that is a
+    correctness requirement and not a simplification.  Used only by `diff()`'s MOVED detection:
     a symbol relocated from header A to header B is a real ABI break
     UNLESS a consumer `#include`-ing A today still reaches B, and that
     can only be answered by the live tree -- the OLD snapshot predates
@@ -741,7 +803,7 @@ def build_include_graph(include_root: Path) -> dict[str, list[str]]:
     for path in sorted(include_root.rglob("*.h")):
         rel = path.relative_to(include_root.parent).as_posix()
         text = strip_comments(path.read_text(encoding="utf-8"))
-        edges = {_resolve_include(rel, m["target"]) for m in _INCLUDE_RE.finditer(text)}
+        edges = {_resolve_include(rel, target) for target in _unconditional_includes(text)}
         graph[rel] = sorted(edges)
     return graph
 
