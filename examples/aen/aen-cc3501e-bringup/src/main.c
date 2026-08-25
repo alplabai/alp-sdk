@@ -396,11 +396,16 @@ static void cc3501e_net_probe(cc3501e_t *fw)
 			{ ALP_CC3501E_PP_BALANCED, "BALANCED" },
 		};
 
-		/* BENCH PROBE (#1679): a RESP_OK to POWER_POLICY only means QUEUED, so the
-		 * ack proves nothing about the radio.  Re-running the SAME speed fetch
-		 * under DEEP_SLEEP is the behavioural proof: an N-DTIM listen interval
-		 * queues downlink frames at the AP, so the rate MUST fall.  If it does
-		 * not, Wlan_Set never reached the radio. */
+		/* radio_ok is the field worth reading.  A RESP_OK to POWER_POLICY means
+		 * QUEUED, not APPLIED: the firmware defers both halves of the policy to its
+		 * task, because the vendor radio call and the Power-manager policy switch
+		 * are both illegal in the SPI-dispatch ISR that handles the opcode.  So the
+		 * status code alone cannot tell an applied policy from one the radio
+		 * rejected a moment later -- radio_ok reports the previous apply's outcome.
+		 *
+		 * KNOWN ISSUE (#1683): applying a preset while BLE is enabled can wedge the
+		 * bridge intermittently.  Do not combine power presets with BLE until that
+		 * is root-caused; Wi-Fi-only use is unaffected. */
 		for (size_t i = 0u; i < (sizeof(presets) / sizeof(presets[0])); ++i) {
 			const alp_cc3501e_power_policy_t pp = {
 				.policy = presets[i].policy,

@@ -134,6 +134,8 @@ alp_status_t cc3501e_init(cc3501e_t *ctx, alp_spi_t *bus);
  * its own -- callers that use it as a liveness probe (not a compat gate)
  * are unaffected by the refusal above.
  */
+alp_status_t cc3501e_reset(cc3501e_t *ctx);
+
 /**
  * @brief Cut the CC3501E's supply and leave it off (WIFI_EN low).
  *
@@ -173,8 +175,6 @@ alp_status_t cc3501e_init(cc3501e_t *ctx, alp_spi_t *bus);
  *         software cannot gate the rail.
  */
 alp_status_t cc3501e_power_off(cc3501e_t *ctx);
-
-alp_status_t cc3501e_reset(cc3501e_t *ctx);
 
 /**
  * @brief Warm hard reset: pulse nRESET with WIFI_EN kept asserted (rails stay up).

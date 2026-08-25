@@ -2822,6 +2822,10 @@
           "hash": "19d86d4f31421379",
           "signature": "alp_status_t cc3501e_init(cc3501e_t *ctx, alp_spi_t *bus);"
         },
+        "cc3501e_power_off": {
+          "hash": "b03252cb8a26bd20",
+          "signature": "alp_status_t cc3501e_power_off(cc3501e_t *ctx);"
+        },
         "cc3501e_request": {
           "hash": "4394de213fad8378",
           "signature": "alp_status_t cc3501e_request(cc3501e_t *ctx, alp_cc3501e_cmd_t cmd, const uint8_t *tx_payload, size_t tx_len, uint8_t *rx_buf, size_t rx_cap, size_t *rx_len, uint32_t timeout_ms);"
