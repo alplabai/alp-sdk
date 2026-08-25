@@ -134,6 +134,46 @@ alp_status_t cc3501e_init(cc3501e_t *ctx, alp_spi_t *bus);
  * its own -- callers that use it as a liveness probe (not a compat gate)
  * are unaffected by the refusal above.
  */
+/**
+ * @brief Cut the CC3501E's supply and leave it off (WIFI_EN low).
+ *
+ * The deepest power state available, and far below anything
+ * @ref cc3501e_power_policy can reach: WIFI_EN gates VPA (3.3 V) through the
+ * board's load switch, so this removes the companion's power rather than idling
+ * it.  Intended for LONG idle periods -- a node that uplinks once an hour or once
+ * a day spends almost all its life here, and at that duty cycle the sleep-state
+ * current is irrelevant next to simply having the chip off.
+ *
+ * Use @ref cc3501e_power_policy instead for short gaps: it keeps the association
+ * and wakes on the next SPI frame, where this costs a full cold boot.
+ *
+ * EXPLICIT ONLY.  The application on the host decides when the companion is not
+ * needed and calls this; nothing in the driver, and no power preset, ever powers
+ * the device down on its own.  A duty cycle is a product decision -- only the
+ * application knows when the next uplink is due and whether anything is in
+ * flight -- so it is never inferred from an idle timer down here.
+ *
+ * ALL DEVICE STATE IS LOST.  The Wi-Fi association, the BLE host, every open
+ * socket and any OTA session are gone; the secure boot chain re-runs from
+ * scratch on the way back up.  Bringing it back is @ref cc3501e_reset, which
+ * runs the cold-boot sequence (rail discharge, supply ramp, reset release, boot
+ * budget) and re-arms this context -- budget on the order of a second and a half,
+ * plus re-association.
+ *
+ * Until then every other call on @p ctx returns ALP_ERR_NOT_READY immediately,
+ * rather than clocking frames at an unpowered slave and burning a timeout each.
+ *
+ * @warning NEVER call this with an OTA in flight -- it destroys the partially
+ *          staged image, and the device cannot report that it happened.  The
+ *          caller owns that sequencing; the driver does not track it.
+ *
+ * @param ctx  Initialised bridge handle.
+ * @return ALP_OK once the supply is gated; ALP_ERR_INVAL if @p ctx is NULL;
+ *         ALP_ERR_NOT_PRESENT_ON_THIS_SOC on a board that ties WIFI_EN on, where
+ *         software cannot gate the rail.
+ */
+alp_status_t cc3501e_power_off(cc3501e_t *ctx);
+
 alp_status_t cc3501e_reset(cc3501e_t *ctx);
 
 /**

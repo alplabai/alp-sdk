@@ -336,6 +336,35 @@ static void cc3501e_net_probe(cc3501e_t *fw)
 			(void)cc3501e_sock_close(fw, h, 5000u);
 		}
 	}
+	{
+		/* --- Duty cycle: power the companion OFF between uplinks ---------------
+	 *
+	 * For a node that uplinks once an hour or once a day, this is where nearly
+	 * all the power is saved.  WIFI_EN gates VPA through the load switch, so the
+	 * companion draws essentially nothing -- far below any sleep state.  That is
+	 * the split: the presets above are for SHORT gaps, this is for long ones.
+	 *
+	 * EXPLICIT application decision.  Nothing in the driver powers the device
+	 * down on its own -- only the app knows when the next uplink is due and
+	 * whether anything is still in flight.
+	 *
+	 * The cost is a full cold boot on the way back, and every bit of device
+	 * state -- association, BLE host, open sockets -- is gone with it. */
+		const alp_status_t off = cc3501e_power_off(fw);
+		/* While off, calls fail FAST rather than clocking frames at a dead slave and
+	 * burning a timeout each -- that is the observable difference from a wedge. */
+		const alp_status_t gated = cc3501e_ping(fw);
+		const alp_status_t back  = cc3501e_reset(fw); /* the cold boot IS the wake */
+		const alp_status_t alive = cc3501e_ping(fw);
+
+		printf("[cc3501e-bringup] POWER OFF -> %d  while-off PING -> %d  "
+		       "reset -> %d  PING -> %d\n",
+		       (int)off,
+		       (int)gated,
+		       (int)back,
+		       (int)alive);
+	}
+
 	/* 3) Power policy -- walk the four presets and prove the bridge survives each.
 	 *
 	 * Each preset drives BOTH the CC3501E's MCU idle state and its Wi-Fi radio
@@ -385,11 +414,25 @@ static void cc3501e_net_probe(cc3501e_t *fw)
 			const alp_status_t ps  = cc3501e_power_policy(fw, &pp, &rok, 5000u);
 			const alp_status_t pg  = cc3501e_ping(fw);
 
-			printf("[cc3501e-bringup] POWER %-11s -> %d radio_ok=%d  bridge PING -> %d\n",
+			/* BLE is the OTHER radio, and it is up concurrently by this point.
+			 * Nothing in the power path addresses it -- the presets drive only the
+			 * WLAN_SET_* knobs -- but POWER_MANAGEMENT_ELP_MODE is a DEVICE-level
+			 * sleep authorisation, so the BLE controller can still be affected.
+			 * Advertising is a real radio operation, so it fails if the controller
+			 * went to sleep or wedged: that is the assertion worth making here. */
+			static const uint8_t adv[] = { 0x02u, 0x01u, 0x06u }; /* flags: LE general disc */
+			const alp_status_t   bs =
+			    cc3501e_ble_adv_start(fw, false, 100u, 150u, adv, sizeof(adv), 5000u);
+			const alp_status_t be = cc3501e_ble_adv_stop(fw, 5000u);
+
+			printf("[cc3501e-bringup] POWER %-11s -> %d radio_ok=%d  PING -> %d  "
+			       "BLE adv %d/%d\n",
 			       presets[i].name,
 			       (int)ps,
 			       (int)rok,
-			       (int)pg);
+			       (int)pg,
+			       (int)bs,
+			       (int)be);
 		}
 	}
 }
