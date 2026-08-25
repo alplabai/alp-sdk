@@ -24,9 +24,10 @@ on ADC) remain their own HIL-PLAN rows.
 | pwm_single_pulse | 0x26 | status OK (waveform = scope row) |
 | pwm_capture | 0x23/24/25 | begin/end OK; read OK or NOSUPPORT (no edges on bench) |
 | adc_read | 0x30 | 4 samples ≤ VREF |
-| adc_stream | 0x33/34/35 | **>0 samples after 50 ms @ 1 kHz — the stream-DMA DMAMUX regression test** |
-| dac | 0x50/0x51 | 1650 mV readback ± 16 mV; parked at 0 after |
-| qenc | 0x60/0x61 | reset → position reads exactly 0 |
+| adc_stream | 0x33/34/35 | two-read paced assertion: read 1 (after 50 ms @ 1 kHz) returns exactly the 32-sample cap; read 2, taken immediately after, returns 1–30 leftover samples — 32 again would mean free-running (rate ignored), 0 would mean a dead stream |
+| adc_stream_guard | 0x33/35 + 0x30 | while `adc_stream` owns a converter (ch0, ADC3), a single-shot `adc_read` on its sibling channel (ch1) must be refused (`ALP_ERR_IO`); a different converter's channel (ch4, ADC1) must still succeed; after `STREAM_END` the sibling read must succeed again (guard not sticky) |
+| dac | 0x50/0x51 | 600 mV readback ± 16 mV (jumper-safe under the 1.8 V rail — DAC0 sits jumpered straight to the ADC0 pad on the X-EVK Tier-B bench); parked at 0 after |
+| qenc | 0x60/0x61 | reset OK, read OK — no encoder is attached on the bench, so the A/B inputs float and the position value isn't asserted, only the reset/read round-trip |
 | counter | 0x70 | strictly increasing across 200 µs |
 | trng | 0x80 | two 16-byte pulls: non-constant + distinct |
 | tmu | 0x90 | sqrt(4)=2 ± 1e-3, sin(0)=0 ± 1e-3 |
@@ -67,7 +68,7 @@ quarantined entries.
 
 ## Reading the output
 
-Per cycle: `[hil-soak] cycle N | 19/19 PASS`.  Every 16 cycles a
+Per cycle: `[hil-soak] cycle N | 20/20 PASS`.  Every 16 cycles a
 cumulative per-test table prints, ending in a greppable verdict line:
 `SOAK-CLEAN` (zero failures everywhere) or `SOAK-DIRTY`.  Failures
 never halt the soak — they print one diagnosable line (test name +
