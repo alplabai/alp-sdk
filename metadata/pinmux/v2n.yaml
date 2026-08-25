@@ -5,8 +5,10 @@
 #
 # Structured, queryable projection of the pin-mux: each E1M edge pad ->
 # the silicon function/peripheral that backs it, and which on-module
-# silicon owns it.  The TSVs remain the single source; this file is gated
-# byte-in-sync.  Pad exclusivity is gated by scripts/check_pin_conflicts.py.
+# silicon owns it.  The TSVs are the source of those fields; this
+# file is gated byte-in-sync.  Pad exclusivity is gated by
+# scripts/check_pin_conflicts.py.
+# `core` is sourced separately from 'v2n/core-ownership.yaml'.
 schemaVersion: pinmux-capability-v1
 family: v2n
 display_name: "E1M-V2N (Renesas RZ/V2N + GD32 IO MCU)"

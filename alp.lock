@@ -1,6 +1,6 @@
 {
   "digests": {
-    "metadata": "sha256:2d68e80ad2cd263e45757f91f42852d284d8d35a4e7537ce8e48be1aa348aae3",
+    "metadata": "sha256:f5408405fa03d7485c923c0c469a6ee6c6c5763bd2ee5977c97fcc6dfc3e7b85",
     "schemas": "sha256:fb12ac3257b0f25b5e7f3016f6d325fd2900d308f2c912f6a5bdc02437432f53"
   },
   "generatedBy": "west alp-lock",
