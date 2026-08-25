@@ -125,6 +125,64 @@ static uint8_t pp_idle_ms_to_dtims(uint32_t idle_ms)
 	return (uint8_t)dtims;
 }
 
+/* Apply the CORE half of @p policy.  TASK CONTEXT ONLY.
+ *
+ * Power_setPolicy() swaps the function pointer the idle loop runs and
+ * Power_enablePolicy() re-arms it.  Those are configuration calls, not runtime
+ * ones: driving them from the SPI-dispatch ISR races the idle loop that may be
+ * executing the very policy being replaced.
+ *
+ * That race is issue #1683.  With BLE enabled, applying a preset intermittently
+ * wedged the whole device -- the policy call timed out and the bridge went to
+ * PING -> -5, unrecoverable without a reset, at a point that moved between runs.
+ * It is NOT the radio half: the wedge survived skipping every Wlan_Set() call.
+ * BLE does not cause it either, it just loads the shared HIF enough to lose the
+ * race reliably -- which is why a Wi-Fi-only build looked fine for so long.
+ *
+ * The constraint helpers were never the problem: they are balanced by
+ * pp_constraints_held, and Power_setConstraint/releaseConstraint are ISR-safe. */
+static void pp_apply_core(uint8_t policy)
+{
+	switch (policy) {
+	case ALP_CC3501E_PP_PERFORMANCE:
+		/* Lowest latency: forbid SLEEP and IDLE so the idle loop only ever
+		 * clock-gates via WFI (PowerWFF3_doWFI), which any peripheral IRQ --
+		 * the bridge SPI CS, a GPIO edge -- wakes immediately. */
+		pp_hold_constraint(PowerWFF3_DISALLOW_SLEEP);
+		pp_hold_constraint(PowerWFF3_DISALLOW_IDLE);
+		Power_setPolicy(PowerWFF3_doWFI);
+		Power_enablePolicy();
+		break;
+	case ALP_CC3501E_PP_BALANCED:
+		/* Default: let the aggressive sleep policy opportunistically IDLE/SLEEP
+		 * between events but keep no extra constraints -- the policy already
+		 * falls back to IDLE then WFI when SLEEP is inappropriate. */
+		pp_release_constraint(PowerWFF3_DISALLOW_SLEEP);
+		pp_release_constraint(PowerWFF3_DISALLOW_IDLE);
+		Power_setPolicy(PowerWFF3_sleepPolicy);
+		Power_enablePolicy();
+		break;
+	case ALP_CC3501E_PP_LOW_POWER:
+	case ALP_CC3501E_PP_DEEP_SLEEP:
+		/* Aggressive idle: drop all DISALLOW constraints so the sleep policy can
+		 * reach the deepest state its latency budget allows (PowerWFF3_SLEEP),
+		 * waking on the Power driver's hardwired sleep wake sources (RTC +
+		 * CSYSPWRUPREQ, configured inside Power_init / PowerWFF3_sleepPolicy) and
+		 * any still-clocked peripheral IRQ.  DEEP_SLEEP and LOW_POWER share the
+		 * same CORE state on this device -- WFF3 exposes a single SLEEP state
+		 * (PowerWFF3_SLEEP), not a separate deep-sleep tier.  They differ on the
+		 * RADIO: see pp_apply_radio(), where DEEP_SLEEP takes the N-DTIM long
+		 * sleep interval and LOW_POWER wakes every DTIM. */
+		pp_release_constraint(PowerWFF3_DISALLOW_SLEEP);
+		pp_release_constraint(PowerWFF3_DISALLOW_IDLE);
+		Power_setPolicy(PowerWFF3_sleepPolicy);
+		Power_enablePolicy();
+		break;
+	default:
+		return;
+	}
+}
+
 /* Apply the radio half of @p policy.  Best-effort: returns 0 when the radio is
  * not up yet (the caller latches and re-applies after role-up) and never fails
  * the whole policy call, so a host that sets power before Wi-Fi still gets the
@@ -191,6 +249,9 @@ void cc3501e_hw_power_service(void)
 	}
 	pp_radio_dirty = false;
 
+	/* Core FIRST, then radio -- both on this task, never in the ISR (#1683). */
+	pp_apply_core(pp_policy_latched);
+
 	const bool radio_up = (cc3501e_hw_radio_role() != ALP_CC3501E_ROLE_OFF);
 	const bool ok       = pp_apply_radio(pp_policy_latched, pp_idle_ms_latched);
 
@@ -211,45 +272,6 @@ int cc3501e_hw_set_power_policy(uint8_t policy, uint8_t wake_events, uint32_t id
 	 * ALP_CC3501E_WAKE_HOST_SPI for a low-power policy). */
 	if (wake_events == ALP_CC3501E_WAKE_NONE &&
 	    (policy == ALP_CC3501E_PP_LOW_POWER || policy == ALP_CC3501E_PP_DEEP_SLEEP)) {
-		return CC3501E_HW_ERR_INVAL;
-	}
-
-	switch (policy) {
-	case ALP_CC3501E_PP_PERFORMANCE:
-		/* Lowest latency: forbid SLEEP and IDLE so the idle loop only ever
-		 * clock-gates via WFI (PowerWFF3_doWFI), which any peripheral IRQ --
-		 * the bridge SPI CS, a GPIO edge -- wakes immediately. */
-		pp_hold_constraint(PowerWFF3_DISALLOW_SLEEP);
-		pp_hold_constraint(PowerWFF3_DISALLOW_IDLE);
-		Power_setPolicy(PowerWFF3_doWFI);
-		Power_enablePolicy();
-		break;
-	case ALP_CC3501E_PP_BALANCED:
-		/* Default: let the aggressive sleep policy opportunistically IDLE/SLEEP
-		 * between events but keep no extra constraints -- the policy already
-		 * falls back to IDLE then WFI when SLEEP is inappropriate. */
-		pp_release_constraint(PowerWFF3_DISALLOW_SLEEP);
-		pp_release_constraint(PowerWFF3_DISALLOW_IDLE);
-		Power_setPolicy(PowerWFF3_sleepPolicy);
-		Power_enablePolicy();
-		break;
-	case ALP_CC3501E_PP_LOW_POWER:
-	case ALP_CC3501E_PP_DEEP_SLEEP:
-		/* Aggressive idle: drop all DISALLOW constraints so the sleep policy can
-		 * reach the deepest state its latency budget allows (PowerWFF3_SLEEP),
-		 * waking on the Power driver's hardwired sleep wake sources (RTC +
-		 * CSYSPWRUPREQ, configured inside Power_init / PowerWFF3_sleepPolicy) and
-		 * any still-clocked peripheral IRQ.  DEEP_SLEEP and LOW_POWER share the
-		 * same CORE state on this device -- WFF3 exposes a single SLEEP state
-		 * (PowerWFF3_SLEEP), not a separate deep-sleep tier.  They differ on the
-		 * RADIO: see pp_apply_radio(), where DEEP_SLEEP takes the N-DTIM long
-		 * sleep interval and LOW_POWER wakes every DTIM. */
-		pp_release_constraint(PowerWFF3_DISALLOW_SLEEP);
-		pp_release_constraint(PowerWFF3_DISALLOW_IDLE);
-		Power_setPolicy(PowerWFF3_sleepPolicy);
-		Power_enablePolicy();
-		break;
-	default:
 		return CC3501E_HW_ERR_INVAL;
 	}
 
@@ -282,11 +304,11 @@ int cc3501e_hw_set_power_policy(uint8_t policy, uint8_t wake_events, uint32_t id
 	 * context, and Wlan_Set() is a blocking vendor radio call -- the same reason
 	 * handle_sock_recv() cannot call lwip_recv() and the worker seam exists at all.
 	 *
-	 * Calling it inline here does not merely fail: bench-measured on
-	 * e1m-aen-evk-01, every preset returned -4 AND the bridge itself went to
-	 * PING -> -5 on the later presets.  So the radio work is deferred to
-	 * cc3501e_hw_power_service(), which the bringup task drains via
-	 * cc3501e_hw_tick().
+	 * Neither half may run here.  Wlan_Set() is a blocking vendor radio call, and
+	 * Power_setPolicy()/Power_enablePolicy() race the idle loop (#1683).  Both are
+	 * deferred to cc3501e_hw_power_service(), which the bringup task drains via
+	 * cc3501e_hw_tick().  Bench-measured with either inline: every preset returned
+	 * -4 and the bridge itself went to PING -> -5.
 	 *
 	 * CONSEQUENCE FOR THE WIRE CONTRACT: a RESP_OK to POWER_POLICY means QUEUED,
 	 * not APPLIED -- the same semantic OTA_BEGIN turned out to have.  A host that
