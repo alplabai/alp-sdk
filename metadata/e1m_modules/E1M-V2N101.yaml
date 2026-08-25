@@ -258,9 +258,14 @@ pad_routes:
 
 # On-module helper MCUs whose firmware images the orchestrator
 # registers into the system manifest for Alp Lab's factory/production
-# flash flow -- NOT the customer's.  gd32_bridge below is programmed
-# by Alp Lab at the factory; customers get the bridge's command-frame
-# API (SPI + I2C, docs/gd32-bridge.md), not a way to reflash it.
+# flash flow -- NOT the customer's routine one.  gd32_bridge below is
+# programmed by Alp Lab at the factory; customers get the bridge's
+# command-frame API (SPI + I2C, docs/gd32-bridge.md) for normal
+# operation and update_channel: alp_ota_spi_bridge for field updates.
+# Local reflashing is recovery_only -- an out-of-tan SWD procedure with
+# Alp Lab-supplied binaries, for a bricked device only (see
+# docs/gd32-bridge.md's "Who flashes it, and when" section), not a
+# routine customer flash path.
 # These are NOT heterogeneous-compute peers (they don't appear in
 # `topology:`); they're independently-flashed supervisor MCUs.
 helper_firmware:
