@@ -892,5 +892,95 @@ def test_freeze_gate_passes_on_a_changed_only_diff():
     assert "CHANGED function alp/peripheral.h::alp_gpio_read" in proc.stdout
 
 
+# ---------------------------------------------------------------------
+# 6. issue #1622: an INTENTIONAL removal recorded in
+# docs/abi/removed-symbols.json must pass the REAL bash step, and a
+# removal that ISN'T recorded there must still fail it -- run through
+# the actual workflow step, not just abi_snapshot.py's diff() in
+# isolation, the same reasoning as test_freeze_gate_passes_on_a_moved_symbol.
+# ---------------------------------------------------------------------
+
+
+@pytestmark_bash
+def test_freeze_gate_passes_on_an_allowlisted_removal():
+    """A baseline that still has one of the three real #1622 macro
+    names, which the current tree genuinely no longer has, must pass
+    the step: `docs/abi/removed-symbols.json` explains it as ALLOWED,
+    not a bare REMOVED, so the step's own `grep -q '^  REMOVED '`
+    finds nothing to block on."""
+    baseline = REPO / "docs" / "abi" / "v99.96-snapshot.json"
+    curr = json.loads(
+        subprocess.run(
+            [sys.executable, "scripts/abi_snapshot.py", "--version", "v99.96"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    )
+    routes = "alp/boards/alp_e1m_evk_routes.h"
+    allowlisted_sym = "EVK_ADC_BOARD_ID"
+    assert allowlisted_sym not in curr["headers"][routes]["macros"], (
+        f"{allowlisted_sym} exists in the current tree -- pick a symbol "
+        "that's genuinely gone, or this test proves nothing"
+    )
+    # Baseline = today's tree PLUS the old, renamed-away macro -- exactly
+    # the shape a baseline frozen before #1622 landed would have.
+    payload = json.loads(json.dumps(curr))
+    payload["headers"][routes]["macros"][allowlisted_sym] = {
+        "value": "(E1M_ADC0)",
+        "hash": "0000000000000000",
+    }
+
+    proc = _run_freeze_gate(baseline, payload)
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (
+        f"ALLOWED macro {routes}::{allowlisted_sym} "
+        "(intentional removal, #1622 -> EVK_ADC_ARDUINO_A0)" in proc.stdout
+    ), proc.stdout
+    assert "::error::Public symbol(s) removed" not in proc.stdout
+    assert not any(
+        line.startswith("  REMOVED ") for line in proc.stdout.splitlines()
+    ), proc.stdout
+
+
+@pytestmark_bash
+def test_freeze_gate_still_fails_on_a_removal_the_allowlist_does_not_cover():
+    """MUTATION-PROOF at the integration level: a real, non-allowlisted
+    removal must still fail the step even though
+    `docs/abi/removed-symbols.json` is non-empty (has the three real
+    #1622 entries) -- a populated allowlist must never make the gate
+    vacuous for a symbol it doesn't name. Reuses the exact fabricated-
+    symbol shape `test_freeze_gate_fails_on_a_removed_symbol` already
+    pins; this variant's only point is proving a NON-EMPTY allowlist
+    doesn't change that outcome."""
+    baseline = REPO / "docs" / "abi" / "v99.95-snapshot.json"
+    payload = {
+        "version": "v99.95",
+        "generated": "1970-01-01",
+        "headers": {
+            "alp/peripheral.h": {
+                "functions": {
+                    "alp___freeze_gate_regression_test_only_2": {
+                        "signature": "void alp___freeze_gate_regression_test_only_2(void);",
+                        "hash": "0000000000000000",
+                    }
+                },
+                "typedefs": {},
+                "macros": {},
+                "variables": {},
+            }
+        },
+    }
+    proc = _run_freeze_gate(baseline, payload)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert (
+        "REMOVED function alp/peripheral.h::alp___freeze_gate_regression_test_only_2"
+        in proc.stdout
+    )
+    assert "::error::Public symbol(s) removed" in proc.stdout
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
