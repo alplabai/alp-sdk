@@ -31,6 +31,7 @@
 #include <alp/i2s.h>
 #include <alp/soc_caps.h>
 
+#include "alp_errno.h"
 #include "i2s_ops.h"
 #include "alp_slot_claim.h"
 
@@ -83,24 +84,11 @@ static void _free_side(alp_z_i2s_side_t *s)
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 static enum i2s_dir _to_dir(alp_i2s_dir_t d)

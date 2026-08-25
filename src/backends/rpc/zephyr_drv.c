@@ -89,6 +89,7 @@
 #include <alp/peripheral.h>
 #include <alp/rpc.h>
 
+#include "alp_errno.h"
 #include "alp_slot_claim.h"
 #include "rpc_ops.h"
 
@@ -300,26 +301,11 @@ static uint32_t fnv1a_32(const char *s)
 
 static alp_status_t errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN: /* fallthrough */
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP: /* fallthrough */
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	case -ENOMEM:
-		return ALP_ERR_NOMEM;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 static struct rpc_sub *sub_find(struct rpc_be *be, const char *method, uint32_t hash)
