@@ -36,6 +36,14 @@ byte-in-sync with the TSVs (so the structured table can never drift from
 the source).  Pad exclusivity is enforced separately by
 scripts/check_pin_conflicts.py.
 
+Families whose owning silicon is itself AMP (V2N: A55 Linux vs CM33
+Zephyr) can carry an optional `core` field per row, sourced from a small
+metadata/e1m_modules/<family>/core-ownership.yaml keyed by (peripheral,
+pad) rather than from the vendor TSVs -- core ownership is an Alp Lab
+policy fact, not vendor pinout data.  Only silicon-verified pads are
+attributed; an ownership entry that matches zero rows, or more than one,
+is a hard generator error.  See issue #1157.
+
 Usage:
 
     python3 scripts/gen_pinmux_capability.py            # regenerate in place
@@ -92,8 +100,31 @@ FAMILIES: dict[str, dict] = {
             {"file": "v2n/gd32-io-mcu-map.tsv", "owner": "gd32",
              "shape": "pad_first"},
         ],
+        # Renesas RZ/V2N is itself AMP (A55 Linux vs CM33 Zephyr); which
+        # core drives a given renesas-owned pad is an Alp Lab policy fact,
+        # not vendor pinout data, so it lives in its own small file rather
+        # than a TSV column -- see issue #1157.
+        "core_ownership": "v2n/core-ownership.yaml",
     },
 }
+
+
+def _load_core_ownership(spec: dict) -> dict[tuple[str, str], str]:
+    """Load the (peripheral, pad) -> core map for a family, if it has one."""
+    rel = spec.get("core_ownership")
+    if not rel:
+        return {}
+    doc = yaml.safe_load((MODULES / rel).read_text(encoding="utf-8"))
+    out: dict[tuple[str, str], str] = {}
+    for entry in doc["core_ownership"]:
+        key = (entry["peripheral"], entry["pad"])
+        if key in out:
+            raise SystemExit(
+                f"gen_pinmux_capability: {rel!r} lists {key!r} more than "
+                f"once -- (peripheral, pad) must be unique in the "
+                f"core-ownership file")
+        out[key] = entry["core"]
+    return out
 
 
 def _read_tsv_rows(path: Path) -> list[list[str]]:
@@ -126,6 +157,8 @@ def _pads_for_family(spec: dict) -> list[dict[str, str]]:
     on-module / inter-chip nets -- nothing is invented.
     """
     pads: list[dict[str, str]] = []
+    core_ownership = _load_core_ownership(spec)
+    matched: set[tuple[str, str]] = set()
     for src in spec["sources"]:
         path = MODULES / src["file"]
         shape = src.get("shape", "e1m_claim")
@@ -150,13 +183,32 @@ def _pads_for_family(spec: dict) -> list[dict[str, str]]:
                 raise SystemExit(
                     f"gen_pinmux_capability: malformed row in {src['file']!r}: "
                     f"{row!r} (expected 3 or 4 tab-separated columns)")
-            pads.append({
+            entry = {
                 "e1m_pad": e1m_pad,
                 "e1m_function": e1m_function,
                 "owner": src["owner"],
                 "silicon_peripheral": peripheral,
                 "silicon_pad": pad,
-            })
+            }
+            key = (peripheral, pad)
+            core = core_ownership.get(key)
+            if core is not None:
+                if key in matched:
+                    raise SystemExit(
+                        f"gen_pinmux_capability: core-ownership entry "
+                        f"{key!r} matches more than one row -- "
+                        f"(peripheral, pad) must be unique per attributed "
+                        f"row; fix {spec['core_ownership']!r}")
+                matched.add(key)
+                entry["core"] = core
+            pads.append(entry)
+
+    unmatched = set(core_ownership) - matched
+    if unmatched:
+        raise SystemExit(
+            f"gen_pinmux_capability: core-ownership entries matched no row: "
+            f"{sorted(unmatched)!r} -- fix {spec.get('core_ownership')!r} "
+            f"(peripheral, pad) must exactly match an emitted row")
     return pads
 
 
@@ -183,11 +235,14 @@ def _render(family: str, spec: dict, pads: list[dict[str, str]]) -> str:
         "pads:",
     ]
     for p in pads:
+        core_field = (f"core: {_yaml_quote(p['core'])}, " if "core" in p
+                     else "")
         lines.append(
             "  - { "
             f"e1m_pad: {_yaml_quote(p['e1m_pad'])}, "
             f"e1m_function: {_yaml_quote(p['e1m_function'])}, "
             f"owner: {_yaml_quote(p['owner'])}, "
+            f"{core_field}"
             f"silicon_peripheral: {_yaml_quote(p['silicon_peripheral'])}, "
             f"silicon_pad: {_yaml_quote(p['silicon_pad'])} "
             "}"

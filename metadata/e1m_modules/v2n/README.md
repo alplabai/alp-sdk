@@ -13,6 +13,7 @@ without the DEEPX DX-M1 NPU).
 | `gd32-io-mcu-map.tsv`             | `peripheral \t gd32_pad`                 |
 | `gd32-io-mcu-map.csv`             | `row, peripheral, gd32_pad`              |
 | `hw-revisions.yaml`               | Per-rev SDK-version compatibility window |
+| `core-ownership.yaml`             | `(peripheral, pad) -> core` for renesas rows whose AMP core (A55 Linux vs CM33 Zephyr) is silicon-verified; see [issue #1157](https://github.com/alplabai/alp-sdk/issues/1157) |
 
 ## Two MCUs on the module
 
