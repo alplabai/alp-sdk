@@ -18,6 +18,8 @@
 
 #include <ti/drivers/Power.h> /* Power_setConstraint/Policy (pulls PowerWFF3.h via DeviceFamily_CC35XX) */
 
+#include <wlan_if.h> /* Wlan_Set -- the RADIO half of the power policy */
+
 #include "alp/protocol/cc3501e.h"
 
 #include "../cc3501e_hw.h"
@@ -71,6 +73,112 @@ static void pp_release_constraint(uint8_t id)
 	}
 }
 
+/* ---- Radio power save -------------------------------------------------------
+ *
+ * The Power_setPolicy() work below only governs the WFF3 CORE.  On a Wi-Fi part
+ * the dominant term is the RADIO: an associated station that never enters power
+ * save keeps its receiver up continuously, which costs orders of magnitude more
+ * than anything the core's WFI/SLEEP state can save.  Nothing in this firmware
+ * ever called Wlan_Set(), so every policy -- including DEEP_SLEEP -- left the
+ * radio fully awake and the presets differed only in core state.
+ *
+ * Three independent knobs, all via Wlan_Set (see wlan_if.h):
+ *   WLAN_SET_POWER_SAVE       station PS mode (ACTIVE / AUTO / POWER_SAVE)
+ *   WLAN_SET_POWER_MANAGEMENT sleep authorisation (ALWAYS_ACTIVE / ELP)
+ *   WLAN_SET_LSI              long sleep interval -- wake every Nth DTIM
+ *
+ * LSI is what finally separates LOW_POWER from DEEP_SLEEP.  Before this the two
+ * presets were documented as sharing one reachable state because WFF3 exposes a
+ * single core SLEEP tier; on the radio side they are genuinely different.
+ *
+ * LATENCY IS THE TRADE.  Waking only every Nth DTIM means inbound frames queue
+ * at the AP until the next wake, so DEEP_SLEEP adds hundreds of ms of inbound
+ * latency and will cut throughput hard.  That is the point of the preset, and it
+ * is why BALANCED -- not a low-power mode -- stays the default. */
+
+/* Latched so a policy set BEFORE the radio exists still lands: Wlan_Set only
+ * works once a role is up, and the host may configure power at any time. */
+static uint8_t  pp_policy_latched = ALP_CC3501E_PP_BALANCED;
+static uint32_t pp_idle_ms_latched;
+
+/* Map idle_ms_before_sleep onto a DTIM count.  A DTIM period is typically ~100 ms
+ * (beacon 102.4 ms, DTIM 1); treat the host's idle budget as "how long may we
+ * stay asleep" and clamp to the field's uint8_t range.  This finally gives
+ * idle_ms_before_sleep a meaning -- it was previously accepted and discarded
+ * because PowerWFF3 has no idle-hysteresis setter. */
+static uint8_t pp_idle_ms_to_dtims(uint32_t idle_ms)
+{
+	uint32_t dtims = idle_ms / 100u;
+
+	if (dtims < 2u) {
+		dtims = 2u; /* N_DTIM below 2 is just DTIM */
+	}
+	if (dtims > 255u) {
+		dtims = 255u;
+	}
+	return (uint8_t)dtims;
+}
+
+/* Apply the radio half of @p policy.  Best-effort: returns 0 when the radio is
+ * not up yet (the caller latches and re-applies after role-up) and never fails
+ * the whole policy call, so a host that sets power before Wi-Fi still gets the
+ * core-side policy applied. */
+static void pp_apply_radio(uint8_t policy, uint32_t idle_ms)
+{
+	uint8_t               ps;
+	WlanPowerManagement_e pm;
+	bool                  want_lsi = false;
+
+	switch (policy) {
+	case ALP_CC3501E_PP_PERFORMANCE:
+		ps = (uint8_t)WLAN_STATION_ACTIVE_MODE;
+		pm = POWER_MANAGEMENT_ALWAYS_ACTIVE_MODE;
+		break;
+	case ALP_CC3501E_PP_BALANCED:
+		ps = (uint8_t)WLAN_STATION_AUTO_PS_MODE;
+		pm = POWER_MANAGEMENT_ELP_MODE;
+		break;
+	case ALP_CC3501E_PP_LOW_POWER:
+		/* Sleep between DTIMs but wake on EVERY one: still responsive to
+		 * downlink traffic within one beacon period. */
+		ps = (uint8_t)WLAN_STATION_POWER_SAVE_MODE;
+		pm = POWER_MANAGEMENT_ELP_MODE;
+		break;
+	case ALP_CC3501E_PP_DEEP_SLEEP:
+		ps       = (uint8_t)WLAN_STATION_POWER_SAVE_MODE;
+		pm       = POWER_MANAGEMENT_ELP_MODE;
+		want_lsi = true;
+		break;
+	default:
+		return;
+	}
+
+	(void)Wlan_Set(WLAN_SET_POWER_SAVE, &ps);
+	(void)Wlan_Set(WLAN_SET_POWER_MANAGEMENT, &pm);
+
+	if (want_lsi) {
+		WlanLongSleepInterval lsi = { 0 };
+
+		lsi.WakeUpEvent    = (uint8_t)WAKE_UP_EVENT_N_DTIM;
+		lsi.ListenInterval = pp_idle_ms_to_dtims(idle_ms);
+		(void)Wlan_Set(WLAN_SET_LSI, &lsi);
+	} else if (policy == ALP_CC3501E_PP_LOW_POWER) {
+		WlanLongSleepInterval lsi = { 0 };
+
+		lsi.WakeUpEvent    = (uint8_t)WAKE_UP_EVENT_DTIM;
+		lsi.ListenInterval = 1u;
+		(void)Wlan_Set(WLAN_SET_LSI, &lsi);
+	}
+}
+
+/* Re-apply the latched radio policy after a role comes up.  Called from the
+ * Wi-Fi path once Wlan_RoleUp(STA) succeeds -- without this a power policy set
+ * while the radio was down would be silently lost. */
+void cc3501e_hw_power_reapply_radio(void)
+{
+	pp_apply_radio(pp_policy_latched, pp_idle_ms_latched);
+}
+
 int cc3501e_hw_set_power_policy(uint8_t policy, uint8_t wake_events, uint32_t idle_ms_before_sleep)
 {
 	/* Validate per the header contract: an all-zero wake_events bitmap is only
@@ -109,8 +217,10 @@ int cc3501e_hw_set_power_policy(uint8_t policy, uint8_t wake_events, uint32_t id
 		 * waking on the Power driver's hardwired sleep wake sources (RTC +
 		 * CSYSPWRUPREQ, configured inside Power_init / PowerWFF3_sleepPolicy) and
 		 * any still-clocked peripheral IRQ.  DEEP_SLEEP and LOW_POWER share the
-		 * same reachable state on this device -- WFF3 exposes a single SLEEP
-		 * state (PowerWFF3_SLEEP), not a separate deep-sleep tier. */
+		 * same CORE state on this device -- WFF3 exposes a single SLEEP state
+		 * (PowerWFF3_SLEEP), not a separate deep-sleep tier.  They differ on the
+		 * RADIO: see pp_apply_radio(), where DEEP_SLEEP takes the N-DTIM long
+		 * sleep interval and LOW_POWER wakes every DTIM. */
 		pp_release_constraint(PowerWFF3_DISALLOW_SLEEP);
 		pp_release_constraint(PowerWFF3_DISALLOW_IDLE);
 		Power_setPolicy(PowerWFF3_sleepPolicy);
@@ -129,7 +239,9 @@ int cc3501e_hw_set_power_policy(uint8_t policy, uint8_t wake_events, uint32_t id
 	 * PowerWFF3.h exposes a Power_setWakeup()/configure-wake API (GPIO.h offers
 	 * only GPIO_CFG_SHUTDOWN_WAKE_*, a per-pin SHUTDOWN -- not SLEEP -- knob
 	 * applied at GPIO config time, not here). */
-	/* deferred: per-bit wake_events -> HW SLEEP wake mask -- no PowerWFF3 wake-source API. */
+	/* deferred: per-bit wake_events -> HW SLEEP wake mask -- no PowerWFF3 wake-source API.
+	 * (Still true for the CORE.  The RADIO's wake behaviour IS now configured,
+	 * via WLAN_SET_LSI's WakeUpEvent -- see pp_apply_radio().) */
 
 	/* idle_ms_before_sleep: PowerWFF3_sleepPolicy derives the sleep decision from
 	 * the time until the next scheduled ClockP event vs the SLEEP transition
@@ -137,8 +249,12 @@ int cc3501e_hw_set_power_policy(uint8_t policy, uint8_t wake_events, uint32_t id
 	 * default", which is exactly what running the stock policy does.  A nonzero
 	 * minimum-idle threshold cannot be programmed: PowerWFF3.h exposes no
 	 * idle-hysteresis setter, only the fixed latency constants. */
-	/* deferred: nonzero idle_ms_before_sleep threshold -- no PowerWFF3 idle-hysteresis setter. */
-	(void)idle_ms_before_sleep;
+	/* Core policy is set; now the radio -- the dominant term.  Latch first so a
+	 * policy set before Wlan_RoleUp() is re-applied by
+	 * cc3501e_hw_power_reapply_radio() once the STA role is up. */
+	pp_policy_latched  = policy;
+	pp_idle_ms_latched = idle_ms_before_sleep;
+	pp_apply_radio(policy, idle_ms_before_sleep);
 
 	return CC3501E_HW_OK;
 }
