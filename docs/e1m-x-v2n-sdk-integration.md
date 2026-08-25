@@ -28,7 +28,7 @@ into alp-sdk so a clean checkout reproduces a working board. Branch:
 |---|-----|-------|-------|
 | 1 | Carrier device tree | **Staged, HW-validated content** | `meta-alp-sdk/recipes-kernel/linux/` (layered `e1m-v2n-som.dtsi` → `e1m-x-evk.dtsi` → per-board `e1m-v2n101-x-evk.dts`/`e1m-v2m101-x-evk.dts`, plus 3 kernel-source patches 0001–0003, via `linux-renesas_%.bbappend`); machine confs updated |
 | 2 | Bootloader (alp DDR in BL2) | **Recipe + binary + DDR.c → alp-sdk-internal** | not in public alp-sdk (licensing) |
-| 3 | Metadata values | **Audio + board_id captured**; `ti,tas2563` DT nodes landed (playback only, pinmux conflict + control-line wiring pending -- see "Audio + board_id" below) | `metadata/boards/e1m-x-evk.yaml` |
+| 3 | Metadata values | **Audio + board_id captured**; `ti,tas2563` DT nodes landed (playback only, MCLK pin claim + control-line wiring pending -- see "Audio + board_id" below) | `metadata/boards/e1m-x-evk.yaml` |
 | 4 | Errata | **Done** | `docs/errata-e1m-x-v2n.md` |
 | 5 | Yocto build flow | **WSL-baked 2026-05-26** (core-image-minimal, bitbake-layers); full alp-image-edge pending | `meta-alp-sdk/README.md` |
 
@@ -66,15 +66,24 @@ SSI2 -> right amp) landed in the carrier `e1m-x-evk.dtsi` (issue #1171); the
 has a DT consumer. dtc-clean against the vendored linux-renesas source for
 both `e1m-v2n101-x-evk` and `e1m-v2m101-x-evk`; not bench-verified.
 
+The `ssi1_pins`/`ssi2_pins` vs `i2c6_pins`/`i2c7_pins` pad conflict (both
+groups claimed port 4, pins 4-7) is resolved: `&i2c6`/`&i2c7` are now
+`status = "disabled"` -- neither RIIC6 nor RIIC7 names a board net in
+`renesas-peripheral-map.tsv` or a bus in `e1m-x-evk.yaml`'s
+`carrier: buses:` list, while SSIU1/SSIU2 on those exact pins do; this also
+matches the RIIC3/6/7-off state already recorded above as HW-validated.
+
 Still pending:
-- **SSI1/SSI2 pinmux conflict** -- e1m-x-evk.dtsi's new `ssi1_pins`/
-  `ssi2_pins` claim the same four physical pins (port 4, pins 4-7) that the
-  existing `i2c6_pins`/`i2c7_pins` already claim with `&i2c6`/`&i2c7` both
-  `status = "okay"`. Neither i2c6 nor i2c7 appears in
-  `metadata/boards/e1m-x-evk.yaml`'s `carrier: buses:` list or in
-  `renesas-peripheral-map.tsv` under any RIIC6/RIIC7 name, while
-  SSIU1/SSIU2 on those exact pins do -- needs a schematic-backed call on
-  whether i2c6/i2c7 are dead/unpopulated before this ships to a board.
+- **MCLK pin claim** -- the TAS pair's MCLK comes from an off-chip
+  Renesas/IDT 5L35023B clock generator (`metadata/chips/clk_5l35023b.yaml`)
+  driving board net Audio_CLKB into SoC pad P10, gated by an
+  Audio_CLKB_OE GPIO on P67 -- not the SoC's own AUDIO_CLKOUT function
+  (which is P97, CM33-owned `GD32_SPI.CS0`, and must never be muxed from
+  Linux). `e1m-x-evk.dtsi` no longer claims P97, but does not yet claim P10
+  either: `metadata/pinmux/v2n.yaml` has no verified alternate-function
+  number for any Renesas pad on this SoM (`e1m_function: "TBD"`
+  everywhere), so the pinctrl group is a TODO pending the R9A09G056
+  pin-function table.
 - The `\SD_N` / `IRQ_N` amp control lines (on-board wiring, shared by both
   U27/U28) are not wired to `shutdown-gpios` / `interrupts`: board.yaml
   pins them to the I2S1 SDI/SDO pads but doesn't resolve which physical pad

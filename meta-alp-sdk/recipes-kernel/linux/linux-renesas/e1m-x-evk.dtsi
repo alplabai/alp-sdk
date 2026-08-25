@@ -14,8 +14,9 @@
  * TODO (carrier features to port once exercised on the bench):
  *   - Audio: TAS2563 smart-amp pair on I2C0 @0x4D/0x4E, SSIU1+SSIU2 (E1M-X
  *     I2S0) -> rcar_sound audio-graph: ported below (playback DATA path
- *     only -- see the `&rcar_sound` block for what's still open). See
- *     chips/tas2563 + issue #25, #1171.
+ *     only -- see the `&rcar_sound` block for what's still open, including
+ *     the still-unwired MCLK pin claim). See chips/tas2563 + issue #25,
+ *     #1171.
  *   - Display 1 (J6): ported -- rk055hdmipi4ma0 panel on dsi0 (see below).
  *     Display 2 (J28) is permanently unavailable: it requires DSI1 lane
  *     set, which the V2N/V2M family does not populate.
@@ -244,18 +245,21 @@
 	status = "okay";
 };
 
+/* Disabled: port 4 pins 4-7 (RIIC6_SDA6/SCL6, RIIC7_SDA7/SCL7) are the same
+ * four physical pads the TAS2563 SSIU1/SSIU2 audio path below claims as
+ * ssi1_pins/ssi2_pins. RIIC6/RIIC7 name no board net in
+ * metadata/e1m_modules/v2n/renesas-peripheral-map.tsv and no bus in
+ * metadata/boards/e1m-x-evk.yaml's `carrier: buses:` list -- unlike
+ * SSIU1/SSIU2, which appear in the TSV on these exact pads -- and this
+ * matches the RIIC3/6/7-off state docs/e1m-x-v2n-sdk-integration.md already
+ * records as HW-validated. i2c6/i2c7 were EVK-template scaffolding, not a
+ * populated bus; the audio path owns these pads. See issue #1171. */
 &i2c6 {
-	pinctrl-0 = <&i2c6_pins>;
-	pinctrl-names = "default";
-	clock-frequency = <400000>;
-	status = "okay";
+	status = "disabled";
 };
 
 &i2c7 {
-	pinctrl-0 = <&i2c7_pins>;
-	pinctrl-names = "default";
-	clock-frequency = <400000>;
-	status = "okay";
+	status = "disabled";
 };
 
 &i2c8 {
@@ -279,13 +283,34 @@
  * path) -- it needs a second, capture-direction endpoint per port with
  * an SRC/DVC assignment this pass does not attempt. */
 &rcar_sound {
-	pinctrl-0 = <&ssi1_pins &ssi2_pins &audio_clkout_pins>;
+	pinctrl-0 = <&ssi1_pins &ssi2_pins>;
 	pinctrl-names = "default";
 	status = "okay";
 
-	/* audio_clkout -> E1M-X AUDIO_CLK -> TAS MCLK, 256 x 48 kHz per
-	 * metadata/boards/e1m-x-evk.yaml `audio.mclk` (confirm against the
-	 * SoM ADG / clock-gen setup -- not bench-verified). */
+	/* MCLK for the TAS pair (256 x 48 kHz, metadata/boards/e1m-x-evk.yaml
+	 * `audio.mclk`) is generated off-chip: the Renesas/IDT 5L35023B clock
+	 * generator (metadata/chips/clk_5l35023b.yaml) drives board net
+	 * Audio_CLKB into SoC pad P10 (renesas-peripheral-map.tsv:3), gated by
+	 * a host-driven Audio_CLKB_OE GPIO on P67 (tsv:4) -- NOT the SoC's own
+	 * AUDIO_CLKOUT function. AUDIO_CLKOUT on this SoC is P97, which is
+	 * GD32_SPI.CS0 -- CM33-owned across the AMP split (see the port-9 AMP
+	 * rule below `usb-ovc-disable-hog`) -- so it must never be muxed from
+	 * Linux and was never the right pin for this carrier's clock design
+	 * regardless of ownership.
+	 *
+	 * P10/P11/P67 are NOT CM33-owned (metadata/pinmux/v2n.yaml: owner
+	 * "renesas" for all three), so this MCLK path is routable from Linux
+	 * in principle, but every pad in that file carries `e1m_function:
+	 * "TBD"` -- no verified R9A09G056 alternate-function number exists
+	 * in-repo for P10 (or the Audio_CLKB_OE GPIO on P67), and none of the
+	 * upstream/EVK reference dts this file otherwise borrows from wires
+	 * this carrier-specific external clock chip. No pinctrl group is
+	 * added here rather than invent a function number this repo's
+	 * no-inventing-values rule forbids (see E1M-V2N101.yaml). TODO:
+	 * confirm the SoC pin-function table for P10/P67, add an
+	 * audio_clkb_pins group + Audio_CLKB_OE enable-gpio, and add it back
+	 * to pinctrl-0 above. Until then clock-frequency below is descriptive
+	 * only (the expected external MCLK rate); no SoC pad claims it. */
 	#clock-cells = <0>;
 	clock-frequency = <12288000>;
 
@@ -418,17 +443,10 @@
 		bias-pull-up;
 	};
 
-	i2c6_pins: i2c6 {
-		pinmux = <RZV2N_PORT_PINMUX(4, 4, 1)>, /* I2C6_SDA */
-			 <RZV2N_PORT_PINMUX(4, 5, 1)>; /* I2C6_SCL */
-		bias-pull-up;
-	};
-
-	i2c7_pins: i2c7 {
-		pinmux = <RZV2N_PORT_PINMUX(4, 6, 1)>, /* I2C7_SDA */
-			 <RZV2N_PORT_PINMUX(4, 7, 1)>; /* I2C7_SCL */
-		bias-pull-up;
-	};
+	/* i2c6_pins/i2c7_pins (port 4, pins 4-7, RIIC6/RIIC7) intentionally
+	 * removed: those four pads are the TAS2563 SSIU1/SSIU2 audio path
+	 * (ssi1_pins/ssi2_pins below) on this carrier -- see the &i2c6/&i2c7
+	 * disable comment above and issue #1171. */
 
 	i2c8_pins: i2c8 {
 		pinmux = <RZV2N_PORT_PINMUX(0, 6, 1)>, /* I2C8_SDA */
@@ -496,22 +514,15 @@
 	 * bench-verified on this SoC pin-function table for port 4 pins 4-7
 	 * specifically.
 	 *
-	 * *** UNRESOLVED PIN-CLAIM CONFLICT, flagged not silently fixed ***
-	 * i2c6_pins / i2c7_pins below ALSO claim port 4 pins 4-7 (func 1,
-	 * RIIC6/RIIC7) and are already `status = "okay"` on &i2c6/&i2c7
-	 * above -- the exact same four physical SoC balls this group
-	 * pinmuxes to func 7. Neither i2c6 nor i2c7 appears in
-	 * metadata/boards/e1m-x-evk.yaml's `carrier: buses:` list (the
-	 * board.yaml-verified, netlist-derived bus set that E1M_X_I2C0/2/3
-	 * come from) or in renesas-peripheral-map.tsv under any RIIC6/RIIC7
-	 * name, while SSIU1/SSIU2 on these exact four pins DO appear there
-	 * -- so this looks like unverified EVK-template scaffolding on
-	 * i2c6/i2c7's side rather than an error in this group, but it is
-	 * NOT confirmed against the schematic either way. Both groups
-	 * cannot be live on real silicon: two peripherals cannot own one
-	 * pin. Resolve (most likely: drop/disable &i2c6 + &i2c7 and their
-	 * pinctrl, or confirm from the schematic that they're genuinely
-	 * unpopulated) before this lands on a board. */
+	 * RESOLVED pin-claim conflict: i2c6_pins/i2c7_pins used to claim
+	 * these same four pads (func 1, RIIC6/RIIC7) with &i2c6/&i2c7 both
+	 * `status = "okay"`. Neither i2c6 nor i2c7 names a board net in
+	 * renesas-peripheral-map.tsv or a bus in e1m-x-evk.yaml's
+	 * `carrier: buses:` list, while SSIU1/SSIU2 on these exact pads DO
+	 * appear in the TSV, and docs/e1m-x-v2n-sdk-integration.md already
+	 * records RIIC3/6/7-off as the HW-validated baseline -- i2c6/i2c7
+	 * were EVK-template scaffolding, not a populated bus. The audio path
+	 * now owns these pads; &i2c6/&i2c7 are disabled above (issue #1171). */
 	ssi1_pins: ssi1 {
 		pinmux = <RZV2N_PORT_PINMUX(4, 4, 7)>, /* SSI1_SCK */
 			 <RZV2N_PORT_PINMUX(4, 5, 7)>, /* SSI1_WS */
@@ -522,11 +533,15 @@
 		pinmux = <RZV2N_PORT_PINMUX(4, 7, 7)>; /* SSI2_SDATA */
 	};
 
-	/* AUDIO_CLKOUT -> E1M-X AUDIO_CLK -> TAS MCLK. Same SoC-package pin
-	 * (port 9, pin 7, func 8) as the RZ/V2N EVK reference dts's
-	 * sound_clk_pins entry -- fixed by the R9A09G056 pin-function table,
-	 * not carrier wiring, so it carries over unchanged. */
-	audio_clkout_pins: audio-clkout {
-		pinmux = <RZV2N_PORT_PINMUX(9, 7, 8)>; /* AUDIO_CLKOUT */
-	};
+	/* No audio-clock pinctrl group here. The RZ/V2N EVK reference dts's
+	 * sound_clk_pins (port 9, pin 7, func 8 = AUDIO_CLKOUT) does NOT
+	 * carry over to this carrier: P9.7 is GD32_SPI.CS0, CM33-owned across
+	 * the AMP split (see the port-9 AMP rule below `usb-ovc-disable-hog`)
+	 * -- Linux must never claim it -- and this carrier's MCLK design
+	 * doesn't use an SoC AUDIO_CLKOUT function anyway (see the comment on
+	 * `&rcar_sound` above: an off-chip 5L35023B drives Audio_CLKB into
+	 * P10). TODO: add an audio_clkb_pins group for P10 (+ an
+	 * Audio_CLKB_OE enable-gpio for P67) once the SoC pin-function table
+	 * confirms P10's alternate-function number -- not available in-repo
+	 * today (metadata/pinmux/v2n.yaml has `e1m_function: "TBD"` for it). */
 };
