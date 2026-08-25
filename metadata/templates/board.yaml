@@ -178,10 +178,20 @@ e1m_routes:
 # IDs are computed deterministically and emitted into the generated
 # <alp/system_ipc.h> header that both slices include.
 #
+# 256 KiB matches the multicore-rpmsg archetype's `rpmsg_carve_out_kb`
+# default (metadata/templates/catalog-v1.json), sized so a single
+# default-sized carve-out never exceeds half of the smallest region
+# shared by an [a55_cluster, m33_sm]-style endpoint pair among supported
+# SoMs -- RZ/V2N's `ocram_low` is 512 KiB total (metadata/socs/renesas/
+# rzv2n/n44.json), and `resolve_carve_outs()` (scripts/alp_orchestrate/
+# carveout.py) prefers it (non-cacheable, smaller-first) over the much
+# larger `ddr_main`/`mram_main` regions.  A default equal to the whole
+# region leaves nothing for a second IPC entry (#1613).
+#
 # ipc:
 #   - kind: rpmsg                # rpmsg | raw_shmem | mailbox_only
 #     endpoints: [a55_cluster, m33_sm]
-#     carve_out_kb: 512
+#     carve_out_kb: 256
 #     name: alp_default_rpmsg
 
 # -------------------------------------------------------------------
