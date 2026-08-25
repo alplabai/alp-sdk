@@ -64,8 +64,14 @@ on_module:
         - { chip: eeprom_24c128,    role: eeprom,                    address_7bit: "0x50" }
 
 memory:
-  dram_mbit:            32768                  # 32 Gbit LPDDR4X
-  flash_mbit:           32768                  # 32 Gbit eMMC 5.1
+  # #1230: bench readings on real silicon (8 GiB DRAM node,
+  # ~256 GB eMMC) contradicted these fields, but the eMMC reading
+  # was itself a red herring -- a lab unit fitted with a
+  # larger-than-production part. Maintainer ruling (issue #1230,
+  # comment) settled both against the SKU spec, not the bench
+  # measurement: 8 GB DRAM / 16 GB eMMC.
+  dram_mbit:            65536                  # 64 Gbit LPDDR4X
+  flash_mbit:           131072                 # 128 Gbit eMMC 5.1
 
 inference:
   preferred_backend:    deepx_dxm1             # DX-M1 NPU on-module

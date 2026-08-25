@@ -6,7 +6,7 @@
 
 | SKU            | Memory                                | Status     |
 |----------------|---------------------------------------|------------|
-| `E1M-V2M101`   | 32 Gbit LPDDR4X + 32 Gbit eMMC + DX-M1| production |
+| `E1M-V2M101`   | 64 Gbit LPDDR4X + 128 Gbit eMMC + DX-M1| production |
 | `E1M-V2M102`   | 64 Gbit LPDDR4X + 64 Gbit eMMC + DX-M1| production |
 
 ## What's different from V2N base
