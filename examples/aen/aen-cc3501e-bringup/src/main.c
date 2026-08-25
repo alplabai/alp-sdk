@@ -336,34 +336,6 @@ static void cc3501e_net_probe(cc3501e_t *fw)
 			(void)cc3501e_sock_close(fw, h, 5000u);
 		}
 	}
-	{
-		/* --- Duty cycle: power the companion OFF between uplinks ---------------
-	 *
-	 * For a node that uplinks once an hour or once a day, this is where nearly
-	 * all the power is saved.  WIFI_EN gates VPA through the load switch, so the
-	 * companion draws essentially nothing -- far below any sleep state.  That is
-	 * the split: the presets above are for SHORT gaps, this is for long ones.
-	 *
-	 * EXPLICIT application decision.  Nothing in the driver powers the device
-	 * down on its own -- only the app knows when the next uplink is due and
-	 * whether anything is still in flight.
-	 *
-	 * The cost is a full cold boot on the way back, and every bit of device
-	 * state -- association, BLE host, open sockets -- is gone with it. */
-		const alp_status_t off = cc3501e_power_off(fw);
-		/* While off, calls fail FAST rather than clocking frames at a dead slave and
-	 * burning a timeout each -- that is the observable difference from a wedge. */
-		const alp_status_t gated = cc3501e_ping(fw);
-		const alp_status_t back  = cc3501e_reset(fw); /* the cold boot IS the wake */
-		const alp_status_t alive = cc3501e_ping(fw);
-
-		printf("[cc3501e-bringup] POWER OFF -> %d  while-off PING -> %d  "
-		       "reset -> %d  PING -> %d\n",
-		       (int)off,
-		       (int)gated,
-		       (int)back,
-		       (int)alive);
-	}
 
 	/* 3) Power policy -- walk the four presets and prove the bridge survives each.
 	 *
@@ -403,9 +375,10 @@ static void cc3501e_net_probe(cc3501e_t *fw)
 		 * status code alone cannot tell an applied policy from one the radio
 		 * rejected a moment later -- radio_ok reports the previous apply's outcome.
 		 *
-		 * KNOWN ISSUE (#1683): applying a preset while BLE is enabled can wedge the
-		 * bridge intermittently.  Do not combine power presets with BLE until that
-		 * is root-caused; Wi-Fi-only use is unaffected. */
+		 * #1683: the bridge wedge under BLE + presets is fixed -- the N-DTIM long
+		 * sleep interval is withheld while BLE is enabled, so DEEP_SLEEP degrades to
+		 * LOW_POWER's radio behaviour there.  A residual intermittent BLE-op timeout
+		 * remains, with the bridge staying alive. */
 		for (size_t i = 0u; i < (sizeof(presets) / sizeof(presets[0])); ++i) {
 			const alp_cc3501e_power_policy_t pp = {
 				.policy = presets[i].policy,
@@ -439,6 +412,34 @@ static void cc3501e_net_probe(cc3501e_t *fw)
 			       (int)bs,
 			       (int)be);
 		}
+	}
+	{
+		/* --- Duty cycle: power the companion OFF between uplinks ---------------
+	 *
+	 * For a node that uplinks once an hour or once a day, this is where nearly
+	 * all the power is saved.  WIFI_EN gates VPA through the load switch, so the
+	 * companion draws essentially nothing -- far below any sleep state.  That is
+	 * the split: the presets above are for SHORT gaps, this is for long ones.
+	 *
+	 * EXPLICIT application decision.  Nothing in the driver powers the device
+	 * down on its own -- only the app knows when the next uplink is due and
+	 * whether anything is still in flight.
+	 *
+	 * The cost is a full cold boot on the way back, and every bit of device
+	 * state -- association, BLE host, open sockets -- is gone with it. */
+		const alp_status_t off = cc3501e_power_off(fw);
+		/* While off, calls fail FAST rather than clocking frames at a dead slave and
+	 * burning a timeout each -- that is the observable difference from a wedge. */
+		const alp_status_t gated = cc3501e_ping(fw);
+		const alp_status_t back  = cc3501e_reset(fw); /* the cold boot IS the wake */
+		const alp_status_t alive = cc3501e_ping(fw);
+
+		printf("[cc3501e-bringup] POWER OFF -> %d  while-off PING -> %d  "
+		       "reset -> %d  PING -> %d\n",
+		       (int)off,
+		       (int)gated,
+		       (int)back,
+		       (int)alive);
 	}
 }
 static void cc3501e_wifi_probe(cc3501e_t *fw)

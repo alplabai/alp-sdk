@@ -122,12 +122,12 @@ exactly how a broken radio apply went unnoticed on the bench.
 re-applied after `Wlan_RoleUp(STA)` succeeds; otherwise a policy set before Wi-Fi
 came up is dropped.
 
-> **Known issue ([#1683](https://github.com/alplabai/alp-sdk/issues/1683)):**
-> applying a preset while BLE is enabled can still wedge the bridge
-> intermittently. Moving both halves to the task reduced but did not eliminate
-> it; a control that advertises with no power policy is clean in every run, and
-> the wedge survives skipping every `Wlan_Set()` call. Do not combine power
-> presets with BLE until root-caused.
+> **[#1683](https://github.com/alplabai/alp-sdk/issues/1683):** the trigger was
+> `WAKE_UP_EVENT_N_DTIM` concurrent with an active BLE host — Wi-Fi and BLE share
+> the HIF, and sleeping through several DTIM periods starves BLE with it. The long
+> sleep interval is now withheld while BLE is enabled, and the bridge no longer
+> wedges. A residual intermittent BLE-op timeout remains (bridge stays alive), so
+> the issue is still open.
 
 ## Backends
 
