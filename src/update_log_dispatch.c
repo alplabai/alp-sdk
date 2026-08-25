@@ -97,7 +97,8 @@ alp_update_log_t *alp_update_log_open(void)
 		}
 		if (s == ALP_HANDLE_LC_UNOPENED) {
 			if (!alp_lifecycle_cas(&g_log.lifecycle, ALP_HANDLE_LC_UNOPENED, UL_LC_OPENING)) {
-				continue; /* lost the election; re-observe */
+				alp_slot_sleep_tick(); /* lost the election; re-observe (issue #1625) */
+				continue;
 			}
 			/* Elected initializer. */
 			alp_status_t rc = _elect_backend();
@@ -109,7 +110,11 @@ alp_update_log_t *alp_update_log_open(void)
 			alp_lifecycle_set(&g_log.lifecycle, ALP_HANDLE_LC_UNOPENED);
 			return NULL;
 		}
-		/* OPENING or CLOSING in flight: spin until it resolves, then loop. */
+		/* OPENING or CLOSING in flight: sleep a tick and re-observe (issue
+		 * #1625) -- a busy spin here never yields the core to a lower-
+		 * priority initializer/closer on Zephyr's preemptive scheduler,
+		 * per #1114's verdict (src/common/alp_slot_claim.h:152-163). */
+		alp_slot_sleep_tick();
 	}
 }
 
