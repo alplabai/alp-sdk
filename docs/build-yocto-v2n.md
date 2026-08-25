@@ -104,18 +104,26 @@ not the distro.
 
 ## 4. Deploy the rootfs
 
-The bootloader's `bootcmd` (rzv2n-dev config + the Alp 0002 patch)
-loads `Image` from the ext4 rootfs `/boot`, auto-detecting the boot
-medium **per boot**. Both the vendor `emmcload` (eMMC) and `sd2load`
-(microSD) envs load `boot/r9a09g056n44-dev.dtb` — a build that
-KERNEL_DEVICETREE never produces — so the Alp override re-loads the
-correct board dtb, `boot/e1m-v2n101-x-evk.dtb`, on both branches (see
-the 0002 patch comment): on eMMC with root = `/dev/mmcblk0p2` (SDHI0,
-alias `mmc0`); on microSD with root = `/dev/mmcblk1p2` (SDHI1, alias
-`mmc1` in `e1m-x-evk.dtsi`). `ALP_BOOT_DEVICE ?= "emmc"` names the
-provisioning default, not a build split. The kernel cmdline is
-rebuilt by the Alp override with `console=ttySC0,115200` pinned; dev
-builds keep `earlycon`.
+The bootloader's `bootcmd` (rzv2n-dev config + the Alp 0002+0003
+patches) loads `Image` from the ext4 rootfs `/boot`, auto-detecting the
+boot medium **per boot**. Both the vendor `emmcload` (eMMC) and
+`sd2load` (microSD) envs load `boot/r9a09g056n44-dev.dtb` — a build
+that KERNEL_DEVICETREE never produces — so the Alp override re-loads
+the correct board dtb on both branches (see the 0002/0003 patch
+comments): on eMMC with root = `/dev/mmcblk0p2` (SDHI0, alias `mmc0`);
+on microSD with root = `/dev/mmcblk1p2` (SDHI1, alias `mmc1` in
+`e1m-x-evk.dtsi`). On V2N101/V2N102 that dtb is
+`boot/e1m-v2n101-x-evk.dtb`; V2M101/V2M102 share the same u-boot
+binary/config but build `boot/e1m-v2m101-x-evk.dtb` instead, so 0003
+picks the filename **at boot**, from the on-module EEPROM manifest
+(`alpselectfdt` → `alp_fdtfile`, same manifest read the DEEPX bring-up
+uses) rather than a filename fixed at build time — see #1252. Both the
+`Image` and dtb `ext4load`s are now fatal (0003, #1302): a
+missing/mismatched file prints `ALP FATAL: ...` and stops at the
+U-Boot prompt instead of `booti`-ing stale RAM. `ALP_BOOT_DEVICE ?=
+"emmc"` names the provisioning default, not a build split. The kernel
+cmdline is rebuilt by the Alp override with `console=ttySC0,115200`
+pinned; dev builds keep `earlycon`.
 
 **Production boot variant:** set `ALP_PROD_BOOT = "1"` for
 release-bundle builds only — quiet cmdline (`quiet loglevel=4`, no

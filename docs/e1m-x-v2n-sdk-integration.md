@@ -69,8 +69,10 @@ control-line wiring on the current PCB rev.
 
 - The per-board `renesas/e1m-v2n101-x-evk.dts` / `e1m-v2m101-x-evk.dts`
   now compose up from the SoC + SoM + carrier dtsi (no longer patching the
-  rzv2n-evk dtb), but still require the production bootloader's bootcmd to
-  load the new per-product dtb filename. Coordinate with the bootloader landing.
+  rzv2n-evk dtb). The bootloader now loads the matching per-product dtb
+  filename at runtime, keyed off the on-module EEPROM manifest
+  (`meta-alp-sdk/recipes-bsp/u-boot/u-boot/0003-rzv2n-dev-select-fdtfile-fatal-image-and-dtb-load.patch`,
+  #1252) — rebuild-verified, not yet bench-verified.
 - V2M (DEEPX) SKUs reuse the same DT deltas via `e1m-v2m-deepx.dtsi` +
   the `e1m-v2m101-x-evk.dts` board target — to be exercised when those
   boards are on the bench.

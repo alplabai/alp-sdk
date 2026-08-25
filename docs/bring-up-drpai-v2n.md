@@ -333,8 +333,19 @@ already, via the `CONFIG_BOOTCOMMAND` override in
 > **Neither fix has booted a board.** `dev`'s version is code-complete and its
 > own CHANGELOG says so; a second, independent implementation exists unmerged
 > on `feat/1145-drpai-v2n-bringup` using per-MACHINE `CONFIG_ALP_FDT_FILE` /
-> `CONFIG_ALP_SD_ROOT` Kconfig strings, which would also close the V2M gap
-> `dev`'s hardcoded filename leaves open. See #1175 before relying on either.
+> `CONFIG_ALP_SD_ROOT` Kconfig strings. See #1175 before relying on either.
+>
+> **Update (#1252, #1302):** the V2M gap this note originally flagged --
+> `dev`'s `CONFIG_BOOTCOMMAND` hardcoding the V2N101 dtb on a shared V2N/V2M
+> u-boot binary -- is fixed on `dev`, via a *different* mechanism than
+> `feat/1145`'s per-MACHINE Kconfig strings: a new `alpselectfdt` U-Boot
+> command (`0003-rzv2n-dev-select-fdtfile-fatal-image-and-dtb-load.patch`)
+> reuses the on-module EEPROM manifest read the DEEPX bring-up already
+> performs to pick the dtb *at runtime*, and both the `Image` and dtb loads
+> are now fatal instead of `;`-chained. Code-complete and rebuild-verified
+> the same way as the rest of this section; not bench-verified. If
+> `feat/1145` still lands, reconcile the two dtb-selection mechanisms rather
+> than shipping both.
 
 > **Operational trap.** The manual FIP flow has no `merge_config.sh` step, so it
 > builds from the Kconfig defaults — the vendor values — and will boot the
