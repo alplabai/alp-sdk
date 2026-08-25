@@ -122,10 +122,19 @@ static alp_status_t rv3028_write_reg(rv3028c7_t *ctx, uint8_t reg, uint8_t val)
  * anything about what writing a 1 does to a bit that currently
  * reads 0 (no App Manual table this driver cites settles that, and
  * this driver will not guess at undocumented hardware behaviour,
- * #1623).  A single 0x00 write can still race a flag that latches
- * between the caller's STATUS read and this write landing; close
- * that by re-reading STATUS immediately after and returning
- * whatever came back set, instead of silently losing it. */
+ * #1623).
+ *
+ * The post-write re-read NARROWS the race; it does not close it.
+ * What it recovers is a flag that latches AFTER the 0x00 write has
+ * landed -- that bit is still set when we read back, so we return it
+ * instead of losing it.  A flag that latches BETWEEN the caller's
+ * STATUS read and the write landing is cleared by that write and
+ * does NOT appear in the re-read, so it is genuinely lost.  Closing
+ * that window needs a read-modify-write the part cannot offer
+ * atomically, so it is documented rather than papered over.  The
+ * previous code was strictly worse: it wrote `status & ~BIT`, i.e. a
+ * 1 into every other observed bit, which relies on write-1 semantics
+ * this driver deliberately does not assume. */
 static alp_status_t rv3028_status_ack(rv3028c7_t *ctx, uint8_t *status)
 {
 	alp_status_t s = rv3028_write_reg(ctx, RV3028_REG_STATUS, 0x00);
