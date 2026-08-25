@@ -2,7 +2,7 @@
 
 Status: Accepted, partially superseded (v0.4 delivery)
 Date: 2026-05-10
-Amended: 2026-05-11 (see "Amendment" section at the bottom)
+Amended: 2026-05-11, 2026-07-31, 2026-08-25 (see "Amendment" sections at the bottom)
 
 ## Context
 
@@ -100,6 +100,8 @@ Internally:
   secondary slot, swaps, reboots; on first boot the new image
   must call `boot_write_img_confirmed()` (wrapped behind
   `alp_ota_commit()`) or the bootloader reverts on next reset.
+  **This was the design intent; it is not what the AEN family
+  ships -- see the "Amendment (2026-08-25)" section at the bottom.**
 - **Linux backends (N93-Linux, V2N, V2N-M1)**: route through
   RAUC (industry-standard A/B-banking update framework for
   embedded Linux).  `apply()` invokes `rauc install`; the
@@ -273,6 +275,67 @@ alive, so a bad slot0 write does not brick J-Link access.  This is a
 and OTA remain untested and this is not an upgrade-path guarantee.
 See [`docs/aen-provisioning.md`](../aen-provisioning.md) §0.5 and
 [`docs/secure-boot.md`](../secure-boot.md).
+
+## Amendment (2026-08-25)
+
+**7. The AEN family ships single-slot; swap-with-revert is not enabled.**
+
+The "Secure OTA" decision above commits AEN-Zephyr to MCUboot's
+swap-with-revert dual-bank flow -- a secondary slot to write into, a
+swap, and a revert path if the new image never confirms.  Amendment 6
+(2026-07-31) already flagged this as untested; it is now known to be
+more than untested -- **the hardware configuration this SDK ships for
+the AEN family does not have the partitions swap-with-revert needs.**
+
+`1ad76193` (#1100, closing #1069, 2026-08-03) removed both
+`slot1_partition` and `scratch_partition` from AEN801's MRAM map on
+purpose, to fit the disjoint dual-core slot0 budget: the address that
+was slot1/OTA (`0x802b0000`) became the HP core's slot0, and the
+address that was scratch (`0x80550000`) became `reserved`.  #1445
+later applied the same disjoint-per-core-slot0 trade to every other
+dual-core AEN SoM, so this is not an AEN801 peculiarity.  The current
+map for the HE core (`zephyr/boards/alp/e1m_aen801_m55_he/
+alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.dts`, confirmed on
+`origin/dev`):
+
+```
+boot_partition     @ 0x0        64 KiB   label "mcuboot"
+slot0_partition    @ 0x10000  2688 KiB   label "image-0"
+reserved_partition @ 0x550000   64 KiB   label "reserved"
+storage_partition  @ 0x560000   96 KiB   label "storage"
+atoc_partition     @ 0x578000   32 KiB   label "atoc"
+```
+
+The HP core's DT (`alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.dts`)
+carries the same five partitions at the same sizes, only with its own
+`slot0_partition` at `0x2b0000` (the address that used to be slot1) --
+neither core's DT has a `slot1_partition` or `scratch_partition`.  Nor
+do `e1m_aen401_m55_hp` or `e1m_aen601_m55_hp` -- confirmed against
+`origin/dev`, `grep -rn 'slot1_partition\|scratch_partition'
+zephyr/boards/alp/` returns nothing tree-wide.  Every board directory
+under `zephyr/boards/alp/e1m_aen*` (`e1m_aen401_m55_hp`,
+`e1m_aen601_m55_hp`, `e1m_aen801_m55_he`, `e1m_aen801_m55_hp`) carries
+the same five-partition, no-slot1/no-scratch map.
+`zephyr/sysbuild/aen/sysbuild.conf` records the same trade in its own
+comments and sets `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP`;
+`examples/aen/aen-mcuboot-smoke/` carries an explicit "NO A/B YET"
+note.
+
+**What this means for the Decision section above:** swap-with-revert
+remains the design intent for the AEN-Zephyr backend in general, and
+nothing here reverses that intent.  But across the AEN family there
+is currently no secondary slot to swap into and no scratch area to
+swap through -- there is nothing to revert *to*.  A bad image on any
+AEN target is not automatically rolled back today.  OTA on the AEN
+family was deferred as part of the #1069/#1100 trade (later confirmed
+family-wide by #1445) and stays deferred until a slot budget (or a
+different delivery shape) is chosen -- tracked by #1066, which was
+re-scoped to block on this rather than fix it, since the mechanism
+can't be regression-tested with one slot.
+
+Whether to find AEN-family slot budget for OTA, ship it single-slot
+permanently, or revisit the partition trade some other way is a
+product decision this ADR does not make.
 
 ## See also
 

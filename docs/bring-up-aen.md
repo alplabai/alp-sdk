@@ -509,8 +509,11 @@ Once §6's runbook passes:
    [`zephyr/sysbuild/aen/sysbuild.conf`](../zephyr/sysbuild/aen/sysbuild.conf).
    Dev key under [`keys/`](../keys/); production key never
    leaves OPTIGA Trust M secure NVM.
-3. Flash the signed image with `west flash`; the MCUboot
-   secondary slot stays empty until OTA lands.
+3. Flash the signed image with `west flash`; the AEN family's
+   MRAM map has no secondary/scratch slot at all (see
+   [ADR-0006](adr/0006-secure-boot-secure-ota.md)'s 2026-08-25
+   amendment), so there is nothing to revert to and OTA stays
+   deferred until a slot budget is found.
 
 ## 8. Troubleshooting
 

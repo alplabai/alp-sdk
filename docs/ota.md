@@ -120,6 +120,16 @@ AEN's MCUboot scaffolding (see [`docs/secure-boot.md`](secure-boot.md))
 sets up the signed-image verification half.  The delivery half
 is open between two viable options:
 
+**Current AEN family hardware note:** the flash map below assumes a
+secondary (OTA) slot.  The AEN family's MRAM partition map does not
+have one -- `slot1_partition` and `scratch_partition` were removed by
+#1100 (AEN801) and #1445 (the rest of the family) to fit the disjoint
+dual-core slot0 budget (see
+[`zephyr/sysbuild/aen/sysbuild.conf`](../zephyr/sysbuild/aen/sysbuild.conf)
+and ADR-0006's 2026-08-25 amendment).  Both options below need that
+slot added back, or a different delivery shape, before OTA is possible
+on the AEN family.
+
 ### Option A — Mender Zephyr client (preferred)
 
 Mender's Zephyr support is upstream as the
