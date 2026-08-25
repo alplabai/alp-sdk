@@ -19,11 +19,35 @@
 
 #include "alp/protocol/cc3501e.h"
 #include "cc3501e_hw.h" /* diag sources GET_DIAG_INFO must actually read (#1562) */
+#include "protocol.h"   /* CC3501E_REPLY_PAD -- replies are burst-aligned */
 #include "transport.h"
 #include "worker.h" /* worker_init -- the worker `job` is a static; reset it per test */
 
 /* Replays one request CS transaction through the seams, the way the TI
  * HAL backend's ISR path does: reset staging, feed the bytes, decode. */
+/* Expected WIRE length of a reply carrying @p data_len bytes of data.
+ *
+ * protocol_build_reply() pads every reply payload up to a multiple of
+ * CC3501E_REPLY_PAD so the host's DW SSI can move it as ONE burst-aligned DMA
+ * chunk.  The pad bytes are never interpreted -- each reply carries its own
+ * length -- but they DO change the byte count these tests observe, so the
+ * expectations are expressed as "header + padded(status + data)" instead of a
+ * hardcoded number that silently encodes the pre-padding layout.
+ *
+ * Deriving it from CC3501E_REPLY_PAD rather than restating the arithmetic keeps
+ * the suite honest if the pad width is ever retuned: the padding landed without
+ * this helper and left every status-only expectation asserting 5 against a real
+ * 12, which reddened the whole suite. */
+static inline size_t reply_padded_payload(size_t payload)
+{
+	return ((payload + CC3501E_REPLY_PAD - 1u) / CC3501E_REPLY_PAD) * CC3501E_REPLY_PAD;
+}
+
+static inline size_t reply_wire(size_t data_len)
+{
+	return (size_t)ALP_CC3501E_HEADER_BYTES + reply_padded_payload(1u + data_len);
+}
+
 static void transaction(const uint8_t *bytes, size_t len)
 {
 	spi_slave_cs_low();
@@ -49,7 +73,12 @@ static void assert_reply_header(const uint8_t *r, uint8_t cmd, uint16_t payload_
 {
 	zassert_equal(r[0], cmd, "reply echoes the request cmd");
 	zassert_equal(r[1], 0x00u, "solicited reply: flags == 0");
-	zassert_equal((uint16_t)(r[2] | ((uint16_t)r[3] << 8)), payload_len, "reply payload_len");
+	/* The header declares the PADDED payload -- callers pass the logical length
+	 * (status + data) and the padding is accounted for here, so all 28 call
+	 * sites keep stating intent rather than restating the pad arithmetic. */
+	zassert_equal((uint16_t)(r[2] | ((uint16_t)r[3] << 8)),
+	              (uint16_t)reply_padded_payload(payload_len),
+	              "reply payload_len (padded to CC3501E_REPLY_PAD)");
 }
 
 ZTEST(cc3501e_bridge_transport, test_ping_ok)
@@ -62,7 +91,7 @@ ZTEST(cc3501e_bridge_transport, test_ping_ok)
 	size_t n = drain(reply, sizeof reply);
 
 	/* Reply = header(4) + status(1), no data. */
-	zassert_equal(n, 5u, "PING reply is header + status");
+	zassert_equal(n, reply_wire(0u), "PING reply is header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_PING, 1u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "PING -> RESP_OK");
 }
@@ -77,7 +106,7 @@ ZTEST(cc3501e_bridge_transport, test_get_version_returns_protocol_version)
 	size_t n = drain(reply, sizeof reply);
 
 	/* Reply = header(4) + status(1) + version(2, LE). */
-	zassert_equal(n, 7u, "GET_VERSION reply is header + status + u16");
+	zassert_equal(n, reply_wire(2u), "GET_VERSION reply is header + status + u16");
 	assert_reply_header(reply, ALP_CC3501E_CMD_GET_VERSION, 3u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "GET_VERSION -> RESP_OK");
 	const uint16_t version = (uint16_t)reply[5] | ((uint16_t)reply[6] << 8);
@@ -102,7 +131,7 @@ ZTEST(cc3501e_bridge_transport, test_get_mac_not_ready_on_stub)
 	 * NOT_READY rather than a fabricated MAC. */
 	transaction(gm, sizeof gm);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "first GET_MAC reply is header + status");
+	zassert_equal(n, reply_wire(0u), "first GET_MAC reply is header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_GET_MAC, 1u);
 	zassert_equal(reply[4],
 	              ALP_CC3501E_RESP_ERR_BUSY,
@@ -112,7 +141,7 @@ ZTEST(cc3501e_bridge_transport, test_get_mac_not_ready_on_stub)
 	 * result cached -> NOT_READY. */
 	transaction(gm, sizeof gm);
 	n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "GET_MAC error reply is header + status");
+	zassert_equal(n, reply_wire(0u), "GET_MAC error reply is header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_GET_MAC, 1u);
 	zassert_equal(
 	    reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "re-issued GET_MAC on stub -> NOT_READY");
@@ -131,7 +160,7 @@ ZTEST(cc3501e_bridge_transport, test_ota_promote_not_ready_on_stub)
 	transport_spi_init();
 	transaction(op, sizeof op);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "OTA_PROMOTE error reply is header + status");
+	zassert_equal(n, reply_wire(0u), "OTA_PROMOTE error reply is header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_OTA_PROMOTE, 1u);
 	zassert_equal(reply[4],
 	              ALP_CC3501E_RESP_ERR_NOT_READY,
@@ -147,7 +176,7 @@ ZTEST(cc3501e_bridge_transport, test_ota_promote_with_payload_is_invalid)
 	transport_spi_init();
 	transaction(op, sizeof op);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "bad-len OTA_PROMOTE reply is header + status");
+	zassert_equal(n, reply_wire(0u), "bad-len OTA_PROMOTE reply is header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_OTA_PROMOTE, 1u);
 	zassert_equal(
 	    reply[4], ALP_CC3501E_RESP_ERR_INVALID, "OTA_PROMOTE with payload -> RESP_ERR_INVALID");
@@ -174,7 +203,7 @@ ZTEST(cc3501e_bridge_transport, test_ota_update_mode_reports_current_mode)
 	transport_spi_init();
 	transaction(op, sizeof op);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 9u, "OTA_UPDATE_MODE reply is header + status + 4 data bytes");
+	zassert_equal(n, reply_wire(4u), "OTA_UPDATE_MODE reply is header + status + 4 data bytes");
 	assert_reply_header(reply, ALP_CC3501E_CMD_OTA_UPDATE_MODE, 5u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "no-op mode request -> OK");
 	zassert_equal(reply[5], 0x00u, "mode byte reports the NORMAL bridge on the stub");
@@ -197,7 +226,7 @@ ZTEST(cc3501e_bridge_transport, test_ota_update_mode_bad_request_is_invalid)
 	for (size_t i = 0; i < sizeof reqs / sizeof reqs[0]; i++) {
 		transaction(reqs[i], lens[i]);
 		size_t n = drain(reply, sizeof reply);
-		zassert_equal(n, 5u, "bad OTA_UPDATE_MODE reply is header + status");
+		zassert_equal(n, reply_wire(0u), "bad OTA_UPDATE_MODE reply is header + status");
 		assert_reply_header(reply, ALP_CC3501E_CMD_OTA_UPDATE_MODE, 1u);
 		zassert_equal(reply[4],
 		              ALP_CC3501E_RESP_ERR_INVALID,
@@ -217,7 +246,7 @@ ZTEST(cc3501e_bridge_transport, test_unknown_opcode_rejected)
 	transaction(op, sizeof op);
 	size_t n = drain(reply, sizeof reply);
 
-	zassert_equal(n, 5u, "unknown-opcode reply is header + status");
+	zassert_equal(n, reply_wire(0u), "unknown-opcode reply is header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_RESERVED_VENDOR_BASE, 1u);
 	zassert_equal(reply[4],
 	              ALP_CC3501E_RESP_ERR_INVALID,
@@ -235,7 +264,7 @@ ZTEST(cc3501e_bridge_transport, test_ping_with_payload_is_invalid)
 	transaction(ping_pl, sizeof ping_pl);
 	size_t n = drain(reply, sizeof reply);
 
-	zassert_equal(n, 5u, "reply is header + status");
+	zassert_equal(n, reply_wire(0u), "reply is header + status");
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_INVALID, "PING with payload -> INVALID");
 }
 
@@ -250,7 +279,7 @@ ZTEST(cc3501e_bridge_transport, test_bad_payload_len_is_protocol_error)
 	transaction(bad, sizeof bad);
 	size_t n = drain(reply, sizeof reply);
 
-	zassert_equal(n, 5u, "reply is header + status");
+	zassert_equal(n, reply_wire(0u), "reply is header + status");
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_PROTOCOL, "length mismatch -> PROTOCOL error");
 }
 
@@ -288,12 +317,12 @@ ZTEST(cc3501e_bridge_transport, test_new_request_replaces_staged_reply)
 
 	transaction(gv, sizeof gv);
 	size_t n = drain(buf, sizeof buf);
-	zassert_equal(n, 7u, "GET_VERSION reply staged");
+	zassert_equal(n, reply_wire(2u), "GET_VERSION reply staged");
 	zassert_equal(buf[0], ALP_CC3501E_CMD_GET_VERSION, "current reply, not the old PING");
 
 	transaction(NULL, 0u);
 	size_t n2 = drain(buf, sizeof buf);
-	zassert_equal(n2, 7u, "rewind re-arms the CURRENT reply");
+	zassert_equal(n2, reply_wire(2u), "rewind re-arms the CURRENT reply");
 	zassert_equal(buf[0], ALP_CC3501E_CMD_GET_VERSION, "still GET_VERSION after rewind");
 }
 
@@ -310,7 +339,7 @@ ZTEST(cc3501e_bridge_transport, test_gpio_write_then_read)
 	};
 	transaction(cfg, sizeof cfg);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "configure reply = header + status");
+	zassert_equal(n, reply_wire(0u), "configure reply = header + status");
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "GPIO_CONFIGURE -> OK");
 
 	const uint8_t wr[] = { ALP_CC3501E_CMD_GPIO_WRITE, 0x00u, 0x04u, 0x00u, 14u, 1u, 0x00u, 0x00u };
@@ -321,7 +350,7 @@ ZTEST(cc3501e_bridge_transport, test_gpio_write_then_read)
 	const uint8_t rd[] = { ALP_CC3501E_CMD_GPIO_READ, 0x00u, 0x01u, 0x00u, 14u };
 	transaction(rd, sizeof rd);
 	n = drain(reply, sizeof reply);
-	zassert_equal(n, 6u, "read reply = header + status + level");
+	zassert_equal(n, reply_wire(1u), "read reply = header + status + level");
 	assert_reply_header(reply, ALP_CC3501E_CMD_GPIO_READ, 2u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "GPIO_READ -> OK");
 	zassert_equal(reply[5], 1u, "GPIO_READ reflects the written level");
@@ -334,7 +363,7 @@ ZTEST(cc3501e_bridge_transport, test_cam_enable_ok)
 	const uint8_t cam[] = { ALP_CC3501E_CMD_CAM_ENABLE, 0x00u, 0x01u, 0x00u, 0u };
 	transaction(cam, sizeof cam);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "cam reply = header + status");
+	zassert_equal(n, reply_wire(0u), "cam reply = header + status");
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "CAM_ENABLE -> OK on stub");
 }
 
@@ -367,7 +396,7 @@ ZTEST(cc3501e_bridge_transport, test_wifi_scan_start_not_ready)
 
 	transaction(s, sizeof s);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "first scan reply = header + status");
+	zassert_equal(n, reply_wire(0u), "first scan reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_SCAN_START, 1u);
 	zassert_equal(reply[4],
 	              ALP_CC3501E_RESP_ERR_BUSY,
@@ -375,7 +404,7 @@ ZTEST(cc3501e_bridge_transport, test_wifi_scan_start_not_ready)
 
 	transaction(s, sizeof s);
 	n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "re-issued scan reply = header + status");
+	zassert_equal(n, reply_wire(0u), "re-issued scan reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_SCAN_START, 1u);
 	zassert_equal(
 	    reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "re-issued SCAN_START on stub -> NOT_READY");
@@ -404,14 +433,14 @@ ZTEST(cc3501e_bridge_transport, test_abandoned_job_does_not_wedge_the_slot)
 	/* Submit SCAN and walk away -- its result is now orphaned in the slot. */
 	transaction(scan, sizeof scan);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "SCAN submit reply = header + status");
+	zassert_equal(n, reply_wire(0u), "SCAN submit reply = header + status");
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_BUSY, "SCAN submits -> BUSY");
 
 	/* A DIFFERENT opcode must get its own turn: first transaction discards the
 	 * orphan and submits, second collects.  Before the fix both answered BUSY. */
 	transaction(rssi, sizeof rssi);
 	n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "RSSI submit reply = header + status");
+	zassert_equal(n, reply_wire(0u), "RSSI submit reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_GET_RSSI, 1u);
 	zassert_equal(reply[4],
 	              ALP_CC3501E_RESP_ERR_BUSY,
@@ -419,7 +448,7 @@ ZTEST(cc3501e_bridge_transport, test_abandoned_job_does_not_wedge_the_slot)
 
 	transaction(rssi, sizeof rssi);
 	n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "RSSI collect reply = header + status");
+	zassert_equal(n, reply_wire(0u), "RSSI collect reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_GET_RSSI, 1u);
 	zassert_equal(reply[4],
 	              ALP_CC3501E_RESP_ERR_NOT_READY,
@@ -437,7 +466,7 @@ ZTEST(cc3501e_bridge_transport, test_wifi_get_rssi_not_ready)
 
 	transaction(r, sizeof r);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "first rssi reply = header + status");
+	zassert_equal(n, reply_wire(0u), "first rssi reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_GET_RSSI, 1u);
 	zassert_equal(reply[4],
 	              ALP_CC3501E_RESP_ERR_BUSY,
@@ -445,7 +474,7 @@ ZTEST(cc3501e_bridge_transport, test_wifi_get_rssi_not_ready)
 
 	transaction(r, sizeof r);
 	n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "re-issued rssi reply = header + status");
+	zassert_equal(n, reply_wire(0u), "re-issued rssi reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_GET_RSSI, 1u);
 	zassert_equal(
 	    reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "re-issued GET_RSSI on stub -> NOT_READY");
@@ -482,7 +511,7 @@ ZTEST(cc3501e_bridge_transport, test_wifi_connect_sta_parses_then_not_ready)
 	 * re-issues and collects the cached result, which on the radio-less stub is NOT_READY. */
 	transaction(req, sizeof req);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "first connect reply = header + status");
+	zassert_equal(n, reply_wire(0u), "first connect reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_CONNECT_STA, 1u);
 	zassert_equal(reply[4],
 	              ALP_CC3501E_RESP_ERR_BUSY,
@@ -490,7 +519,7 @@ ZTEST(cc3501e_bridge_transport, test_wifi_connect_sta_parses_then_not_ready)
 
 	transaction(req, sizeof req);
 	n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "re-issued connect reply = header + status");
+	zassert_equal(n, reply_wire(0u), "re-issued connect reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_WIFI_CONNECT_STA, 1u);
 	zassert_equal(
 	    reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "re-issued CONNECT on stub -> NOT_READY");
@@ -524,7 +553,7 @@ ZTEST(cc3501e_bridge_transport, test_ble_enable_not_ready)
 
 	transaction(e, sizeof e);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "first BLE_ENABLE reply = header + status");
+	zassert_equal(n, reply_wire(0u), "first BLE_ENABLE reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_BLE_ENABLE, 1u);
 	zassert_equal(reply[4],
 	              ALP_CC3501E_RESP_ERR_BUSY,
@@ -532,7 +561,7 @@ ZTEST(cc3501e_bridge_transport, test_ble_enable_not_ready)
 
 	transaction(e, sizeof e);
 	n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "re-issued BLE_ENABLE reply = header + status");
+	zassert_equal(n, reply_wire(0u), "re-issued BLE_ENABLE reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_BLE_ENABLE, 1u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "no BLE host on stub -> NOT_READY");
 }
@@ -563,13 +592,13 @@ ZTEST(cc3501e_bridge_transport, test_ble_adv_start_parses_then_not_ready)
 	 * worker ran synchronously at submit -> NOT_READY (stub HAL has no radio). */
 	transaction(req, sizeof req);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "adv reply = header + status");
+	zassert_equal(n, reply_wire(0u), "adv reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_BLE_ADV_START, 1u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_BUSY, "well-formed adv submits the job -> BUSY");
 
 	transaction(req, sizeof req);
 	n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "re-issued adv reply = header + status");
+	zassert_equal(n, reply_wire(0u), "re-issued adv reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_BLE_ADV_START, 1u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "re-issued adv on stub -> NOT_READY");
 }
@@ -608,7 +637,7 @@ ZTEST(cc3501e_bridge_transport, test_get_diag_info)
 	const uint8_t d[] = { ALP_CC3501E_CMD_GET_DIAG_INFO, 0x00u, 0x00u, 0x00u };
 	transaction(d, sizeof d);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 4u + 1u + 16u, "diag reply = header + status + 16B struct");
+	zassert_equal(n, reply_wire(16u), "diag reply = header + status + 16B struct");
 	assert_reply_header(reply, ALP_CC3501E_CMD_GET_DIAG_INFO, 17u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "GET_DIAG_INFO -> OK");
 	const uint16_t fw = (uint16_t)reply[5] | ((uint16_t)reply[6] << 8);
@@ -680,7 +709,7 @@ ZTEST(cc3501e_bridge_transport, test_diag_get_stats_counts_frames)
 	const uint8_t s[] = { ALP_CC3501E_CMD_DIAG_GET_STATS, 0x00u, 0x00u, 0x00u };
 	transaction(s, sizeof s);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 4u + 1u + 8u, "stats reply = header + status + 8B");
+	zassert_equal(n, reply_wire(8u), "stats reply = header + status + 8B");
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "DIAG_GET_STATS -> OK");
 	const uint32_t frames_ok = (uint32_t)reply[5] | ((uint32_t)reply[6] << 8) |
 	                           ((uint32_t)reply[7] << 16) | ((uint32_t)reply[8] << 24);
@@ -713,7 +742,7 @@ ZTEST(cc3501e_bridge_transport, test_gpio_configure_write_read_roundtrip)
 	};
 	transaction(cfg, sizeof cfg);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "CONFIGURE reply = header + status");
+	zassert_equal(n, reply_wire(0u), "CONFIGURE reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_GPIO_CONFIGURE, 1u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "CONFIGURE -> OK");
 
@@ -727,7 +756,7 @@ ZTEST(cc3501e_bridge_transport, test_gpio_configure_write_read_roundtrip)
 	const uint8_t rd[] = { ALP_CC3501E_CMD_GPIO_READ, 0x00u, 0x01u, 0x00u, 13u };
 	transaction(rd, sizeof rd);
 	n = drain(reply, sizeof reply);
-	zassert_equal(n, 6u, "READ reply = header + status + level");
+	zassert_equal(n, reply_wire(1u), "READ reply = header + status + level");
 	assert_reply_header(reply, ALP_CC3501E_CMD_GPIO_READ, 2u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_OK, "READ -> OK");
 	zassert_equal(reply[5], 1u, "READ reflects the WRITE-high");
@@ -781,7 +810,7 @@ ZTEST(cc3501e_bridge_transport, test_ota_begin_not_ready)
 	};
 	transaction(b, sizeof b);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "ota begin reply = header + status");
+	zassert_equal(n, reply_wire(0u), "ota begin reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_OTA_BEGIN, 1u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "no PSA-FWU on stub -> NOT_READY");
 }
@@ -816,7 +845,7 @@ ZTEST(cc3501e_bridge_transport, test_ota_write_not_ready)
 		                  0xEFu };
 	transaction(w, sizeof w);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "ota write reply = header + status");
+	zassert_equal(n, reply_wire(0u), "ota write reply = header + status");
 	assert_reply_header(reply, ALP_CC3501E_CMD_OTA_WRITE, 1u);
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "no PSA-FWU on stub -> NOT_READY");
 }
@@ -841,7 +870,7 @@ ZTEST(cc3501e_bridge_transport, test_ota_finish_not_ready)
 	const uint8_t f[] = { ALP_CC3501E_CMD_OTA_FINISH, 0x00u, 0x00u, 0x00u };
 	transaction(f, sizeof f);
 	size_t n = drain(reply, sizeof reply);
-	zassert_equal(n, 5u, "ota finish reply = header + status");
+	zassert_equal(n, reply_wire(0u), "ota finish reply = header + status");
 	zassert_equal(reply[4], ALP_CC3501E_RESP_ERR_NOT_READY, "no session on stub -> NOT_READY");
 }
 
