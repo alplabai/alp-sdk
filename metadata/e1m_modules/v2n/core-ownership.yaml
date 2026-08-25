@@ -1,0 +1,42 @@
+# AMP core ownership for RZ/V2N pads (Alp Lab policy fact, not vendor
+# pinout data -- kept separate from renesas-peripheral-map.tsv on purpose;
+# see issue #1157).
+#
+# Each entry attributes ONE (peripheral, pad) row emitted from
+# metadata/e1m_modules/v2n/renesas-peripheral-map.tsv to the Cortex-A55
+# (Linux) or Cortex-M33 (Zephyr) core that actually drives it.  An entry
+# that matches zero rows, or more than one, is a hard generator error --
+# see scripts/gen_pinmux_capability.py.
+#
+# Only silicon-verified pads belong here.  Every row below has a citation.
+# Absence means "not attributed" -- never "shared" and never "a55 by
+# elimination" (an earlier attempt derived unlisted pads as a55-by-default
+# from the CM33 devicetree and got 5 pads wrong: pads a chip driver or
+# src/zephyr/v2n_power_mgmt.c claims at runtime via alp_gpio_* never
+# appear in the CM33 DT, so elimination silently mislabelled them a55).
+# Do not add an entry without a citation as solid as the ones below.
+core_ownership:
+  - peripheral: "GD32_SPI.MOSI"
+    pad: "P76"
+    core: "m33"
+    evidence: "alp_e1m_v2n101_m33_sm-pinctrl.dtsi:30 RZV_PINMUX(PORT_07, 6, 1)"
+  - peripheral: "GD32_SPI.MISO"
+    pad: "P77"
+    core: "m33"
+    evidence: "alp_e1m_v2n101_m33_sm-pinctrl.dtsi:31 RZV_PINMUX(PORT_07, 7, 1)"
+  - peripheral: "GD32_SPI.SCLK"
+    pad: "P96"
+    core: "m33"
+    evidence: "alp_e1m_v2n101_m33_sm-pinctrl.dtsi:32 RZV_PINMUX(PORT_09, 6, 2); also the docs/errata-e1m-x-v2n.md E3 P9.6/SCK7 collision"
+  - peripheral: "GD32_SPI.CS0"
+    pad: "P97"
+    core: "m33"
+    evidence: "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts:62 gpios = <&gpio9 7 GPIO_ACTIVE_LOW>, :93-94 names it the GD32 chip-select via cs-gpios"
+  - peripheral: "RIIC8_SCL8"
+    pad: "P07"
+    core: "m33"
+    evidence: "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts:114-115, plus meta-alp-sdk/recipes-kernel/linux/linux-renesas/0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-RIIC8-on.patch (silicon-validated 2026-06-03 on E1M-V2M101: Linux clk_disable_unused gating RIIC8 bus-faults the CM33 until power-cycle)"
+  - peripheral: "RIIC8_SDA8"
+    pad: "P06"
+    core: "m33"
+    evidence: "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts:114-115, same patch as RIIC8_SCL8"

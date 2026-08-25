@@ -117,8 +117,14 @@ spi0.spi.csnPin.$assign  = "GPIO16";  /* CS -> GPIO16 (only silicon-legal CS; pu
  * scan/connect cannot steal.  (Earlier pins on radio-used channels -- auto
  * ch11=HIF, then ch8/ch6=TEMP -- died the instant the radio re-pointed the shared
  * mux; a non-DMA polling path died too, preempted by the worker's Wlan_Start.
- * DMA on the FREE channels avoids both failure modes.)  NO minDmaTransferSize
- * override -> the driver uses DMA (SPI_MODE_CALLBACK) as intended. */
+ * DMA on the FREE channels avoids both failure modes.)
+ *
+ * SysConfig exposes no minDmaTransferSize property, so build_ti.ps1 patches the
+ * GENERATED ti_drivers_config.c to 1024 unconditionally (a whole 516 B frame must
+ * clear it for OTA update mode's polled slave).  That is inert here: the driver's
+ * polling gate short-circuits on transferMode == SPI_MODE_BLOCKING, which the normal
+ * callback/DMA bridge never is.  The bridge mode is a RUNTIME choice (a persisted
+ * boot flag), not a build switch -- these DMA channel pins serve the NORMAL mode. */
 spi0.spi.dmaRxChannel.$assign = "DMA_CH12";
 spi0.spi.dmaTxChannel.$assign = "DMA_CH13";
 

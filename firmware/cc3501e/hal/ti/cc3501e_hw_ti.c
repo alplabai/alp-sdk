@@ -140,6 +140,93 @@ void cc3501e_hw_init(void)
 	 * only run once the FreeRTOS scheduler is up.  See cc3501e_hw_tick(). */
 }
 
+#ifdef CC3501E_OTA_WINDOW_SELFTEST
+/* ===================================================================== */
+/* #1610 BENCH VALIDATION -- drive the WINDOWED OTA path locally.
+ *
+ * The windowed staging in cc3501e_hw_ti_ota.c can only be exercised by a host
+ * that streams OTA_WRITE frames, and the alp console exposes only
+ * begin/status/abort by design.  Building the one app that streams
+ * (examples/aen/aen-cc3501e-bringup -DCC3501E_OTA_REAL=ON) needs hal_alif,
+ * which is missing from the bench host's Zephyr workspace.
+ *
+ * So drive the SAME HAL entry points the SPI dispatcher would drive --
+ * cc3501e_hw_ota_begin / _write / _finish plus cc3501e_hw_ota_pump -- from the
+ * bring-up task, feeding the embedded signed candidate.  That exercises the
+ * real window fill, the deferred OTA_OP_FLUSH, psa_fwu_start-on-first-flush,
+ * the TI_FWU_MANIFEST_SIZE offset anchor, and psa_fwu_finish's own read-back
+ * version check.
+ *
+ * WHAT THIS DOES *NOT* COVER, and it is the half that failed in 2026-06-19:
+ * there is no host clocking the bridge during the flush blackouts, so this
+ * proves the FLUSH MECHANICS and the offset/state correctness, NOT the
+ * host/bridge contention.  Do not read a pass here as "OTA works over the
+ * bridge".  It is the arm-A de-risk, deliberately run first because it is the
+ * half that needs no Alif app.
+ *
+ * Observability: the CC3501E has NO UART wired to the XDS110 (measured -- zero
+ * bytes on both XDS110 UARTs across a cold boot), so results are read back over
+ * the bridge with `alp companion ota status`:
+ *   state: writing(1) + written == total  -> every window flush executed
+ *   state: staged(2)                      -> finish + install also succeeded
+ *   state: error(3)                       -> the cursor says how far it got
+ */
+extern const unsigned char cc3501e_ota_candidate[];
+extern const unsigned int  cc3501e_ota_candidate_len;
+
+static void cc3501e_ota_window_selftest(void)
+{
+	/* ONE STEP PER TICK.  The first cut ran the whole stream inside a single
+	 * cc3501e_hw_tick() call and wedged the bridge after 3 flushes with no host
+	 * traffic at all.  That is NOT how production behaves: there, each flush is
+	 * one pump invocation and the tick RETURNS between them, so the SPI slave
+	 * task, the DMA callbacks and the housekeeping self-heal all get to run.
+	 * Holding the task across the whole stream starves exactly those, so a
+	 * blocking harness cannot tell a real flush defect from its own starvation.
+	 * Model production instead: advance at most one chunk (or pump one queued
+	 * flush) per call, then return. */
+	static const uint8_t *img;
+	static uint32_t       len;
+	static uint32_t       off;
+	static uint8_t        phase; /* 0=begin 1=streaming 2=done */
+
+	if (phase == 0u) {
+		img = (const uint8_t *)cc3501e_ota_candidate;
+		len = (uint32_t)cc3501e_ota_candidate_len;
+#ifdef CC3501E_OTA_WINDOW_SELFTEST_BYTES
+		if ((uint32_t)CC3501E_OTA_WINDOW_SELFTEST_BYTES < len) {
+			len = (uint32_t)CC3501E_OTA_WINDOW_SELFTEST_BYTES;
+		}
+#endif
+		off = 0u;
+		(void)cc3501e_hw_ota_begin(len);
+		phase = 1u;
+		return; /* the pump below runs ota_do_begin on the NEXT tick */
+	}
+	if (phase != 1u) return;
+
+	/* A queued op (BEGIN or a window FLUSH) owns this tick: let the normal pump
+	 * call in cc3501e_hw_tick() run it and come back next time. */
+	if (cc3501e_hw_ota_flush_pending()) return;
+
+	uint32_t n = len - off;
+	if (n > 256u) n = 256u;
+	const int rc = cc3501e_hw_ota_write(off, &img[off], n);
+	if (rc == CC3501E_HW_BUSY) return; /* window full -> flush queued; retry later */
+	if (rc != CC3501E_HW_OK) {
+		phase = 2u; /* state/cursor left readable over the bridge */
+		return;
+	}
+	off += n;
+	if (off >= len) {
+#ifdef CC3501E_OTA_WINDOW_SELFTEST_FINISH
+		(void)cc3501e_hw_ota_finish();
+#endif
+		phase = 2u;
+	}
+}
+#endif /* CC3501E_OTA_WINDOW_SELFTEST */
+
 #ifdef CC3501E_OTA_SELFTEST
 /* ===================================================================== */
 /* OTA update cycle (PSA-FWU) -- the supported path to install a CONFIRMED,
@@ -267,6 +354,33 @@ void cc3501e_hw_tick(void)
 		/* PSA_ERROR_BAD_STATE = nothing in trial (already permanent) -> continue. */
 	}
 
+#ifdef CC3501E_OTA_WINDOW_SELFTEST
+	/* #1610: run the windowed-OTA selftest ONCE, ~30 s after boot -- NOT during
+	 * bring-up.  ota_flush calls bridge_transport_spi_hw_reinit(), and tearing
+	 * the SPI slave down before it is fully up wedges it permanently: a 3-window
+	 * run from the first tick killed the bridge with no host traffic at all,
+	 * which is why the pre-existing cc3501e_ota_install selftest (which never
+	 * touches the bridge) can run there and this cannot.  Waiting also gives the
+	 * host time to be polling, which is the condition the flush must survive. */
+	if (cc3501e_hw_uptime_ms() > 30000u) {
+		cc3501e_ota_window_selftest(); /* self-latching; one step per tick */
+	}
+#endif
+
+	/* === Bridge SPI open-failure recovery (#1610) ===
+	 * The two self-heals below both key off counters (g_resync_count,
+	 * g_arm_fail_count) that can only move while the slave HAS a handle.  If every
+	 * SPI_open retry failed there is no handle at all: no transfers, no arm
+	 * attempts, both counters frozen, and the link is dead with nothing watching.
+	 *
+	 * That is what killed windowed OTA on silicon -- the shared DMA is briefly busy
+	 * after a psa_fwu flash burst, and re-arming after every window flush rolls that
+	 * dice ~67 times for a 1.09 MB image.  Losing once was permanent.  Retry here so
+	 * a busy-DMA open failure is a stall, not a death. */
+	if (bridge_transport_spi_is_dead()) {
+		bridge_transport_spi_hw_reinit();
+	}
+
 	/* === Bridge SPI FIFO-flush recovery (cold-framing self-heal) ===
 	 * The transport is hardware-SS0 framed (dwc-ssi drives SS0 per transfer), but a
 	 * cold first contact can still leave a 1-byte frame offset (RX FIFO residue from
@@ -301,6 +415,14 @@ void cc3501e_hw_tick(void)
 		last_arm_fail = af;
 	}
 
+	/* === Bridge SPI reply-stall recovery ===
+	 * A transaction abandoned AFTER the slave armed its reply leaves that
+	 * transfer armed forever, and both self-heals above are blind to it (no
+	 * misframing, no failed arm).  Same reinit recovery. */
+	if (bridge_transport_spi_reply_stalled()) {
+		bridge_transport_spi_hw_reinit();
+	}
+
 	/* Deferred self-reset, gated on reply_drained so the CMD_RESET ack has
 	 * FULLY clocked to the host before the chip resets (audit
 	 * "reset-fires-before-ack-clocked": the reset previously raced the
@@ -315,6 +437,10 @@ void cc3501e_hw_tick(void)
 	if (reset_pending && reply_drained) {
 		NVIC_SystemReset(); /* CMSIS: M33 system reset -- does not return */
 	}
+
+	/* Fill the socket RX ring on the TASK, so the dispatch can serve
+	 * CMD_SOCK_RECV with a memcpy instead of a worker round trip. */
+	cc3501e_hw_sock_pump();
 
 	/* Deferred OTA reboot: once the FINISH ack has clocked back (reply_drained),
 	 * request the PSA-FWU reboot so the cold BL2/MCUboot swaps the STAGED slot to

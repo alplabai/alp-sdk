@@ -51,6 +51,26 @@
 			pinmux = <PIN_P14_4__SPI1_MISO_C>;
 			input-enable;
 		};
+
+		/*
+		 * P2_6 = the CC3501E READY/host-IRQ input (CC35 GPIO17).  Its mux default
+		 * IS GPIO, but on Alif the pad INPUT BUFFER is a PADCTRL bit that only
+		 * pinctrl sets -- gpio_dw drives direction in the controller and never
+		 * touches the pad, and snps,designware-gpio has no pinctrl-0 property of
+		 * its own.  Without this group the buffer stays off and
+		 * alp_gpio_read(P2_6) returns 0 forever no matter what the CC35 drives
+		 * (scope 2026-08-24: a clean 1.767 V line idling HIGH with narrow LOW
+		 * pulses), so the host silently fell back to fixed settle gaps.
+		 *
+		 * It lives HERE rather than in a standalone state applied at runtime
+		 * because P2_6's alternate function is SPI1_SCLK_A: a second pinctrl pass
+		 * after SPI1 is up killed the bridge on silicon.  In the SPI driver's
+		 * single init pass it is inert.
+		 */
+		group2 {
+			pinmux = <PIN_P2_6__GPIO>;
+			input-enable;
+		};
 	};
 };
 
@@ -94,6 +114,10 @@
 		clock-frequency = <200000000>; /* real SSI functional clock (was mis-set 400M; proven via BAUDR scaling) */
 		dwc-ssi;
 		fifo-depth = <16>;
+		/* MISO capture delay in SSI clocks.  Needed at 25 MHz (40 ns bit period):
+		 * silicon-measured on e1m-aen-evk-01, rx-delay 0 fails outright and 4
+		 * fails too; 2 is the working point.  Harmless at 14.29 MHz. */
+		rx-delay = <2>;
 		pinctrl-0 = <&pinctrl_spi1>;
 		pinctrl-names = "default";
 		status = "okay";
@@ -113,9 +137,10 @@
 
 /*
  * gpio2 for the host-IRQ/READY input (CC35 GPIO17 -> Alif P2_6, alp_pins[2]).
- * P2_6's reset-default mux is function 0 = GPIO (PIN_P2_6__GPIO), so no pinctrl
- * group is needed; gpio_dw defaults the pin to input, which the app confirms via
- * alp_gpio_configure(INPUT).  The READY line lets the host gate reply phases on
+ * P2_6's reset-default mux IS function 0 = GPIO (PIN_P2_6__GPIO), but the pad
+ * still needs an input-enable group to turn its INPUT BUFFER on -- that lives in
+ * pinctrl_spi1 group2 above.  gpio_dw defaults the pin to input, which the app
+ * confirms via alp_gpio_configure(INPUT).  The READY line lets the host gate reply phases on
  * the slave's actual re-arm instead of a fixed settle gap. */
 &gpio2 {
 	status = "okay";

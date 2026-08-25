@@ -92,14 +92,22 @@
 		reg = <0x48104000 0x1000>;
 		interrupts = <138 3>;          /* BENCH-TBD: SPI1 IRQ */
 		clocks = <&clockctrl ALIF_SPI_CLK>;
-		clock-frequency = <400000000>;
+		/* Real SSI functional clock (E8 HWRM).  Was mis-set to 400000000 here,
+		 * which is not a cosmetic error: spi_dw derives BAUDR =
+		 * clock-frequency / freq_hz, so a doubled input clock doubles the
+		 * divider and HALVES the real SCLK -- this node was running at
+		 * 500 kHz while asking for 1 MHz.  Proven via BAUDR scaling and
+		 * already corrected in the aen-cc3501e-* overlays. */
+		clock-frequency = <200000000>;
 		dwc-ssi;
 		fifo-depth = <16>;
-		/* RX sample delay (DWC_ssi RX_SAMPLE_DLY reg 0xF0, ssi_clk cycles @ 400MHz =
-		 * 2.5ns/cycle) -- recenter the master's MISO capture at higher SCLK.  CLOCK-
-		 * DEPENDENT: keep 0 (absent) at 1 MHz; raise only when CC3501E_BRIDGE_SPI_FREQ_HZ
-		 * is bumped to 8 MHz (try 2) / 15 MHz (sweep 2->4).  A nonzero rx-delay at the
-		 * 1 MHz cold first-contact was bench-implicated in an early-boot desync. */
+		/* NOTE: there is NO `rx-delay` devicetree property -- the spi_dw binding
+		 * does not define one, so writing it here would silently do nothing.  The
+		 * DWC_ssi RX sample delay (RX_SAMPLE_DLY, reg 0xF0, in ssi_clk cycles at
+		 * 200 MHz = 5 ns/cycle) recenters the master's MISO capture at higher SCLK
+		 * and is written from C -- see CC3501E_BRIDGE_RX_SAMPLE_DLY in
+		 * examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.c, where 6 is
+		 * silicon-tuned for ~14.3 MHz. */
 		pinctrl-0 = <&pinctrl_spi1>;
 		pinctrl-names = "default";
 		status = "okay";

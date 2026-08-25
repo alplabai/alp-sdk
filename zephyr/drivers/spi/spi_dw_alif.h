@@ -39,12 +39,28 @@ struct spi_dw_dma_ch {
 /**
  * DMA transfer state structure
  */
+/* Cached shape of a previously-programmed DMA channel.  dma_config() on the
+ * PL330 builds a microcode program and is by far the dominant per-transfer cost
+ * on short transfers; dma_reload() only rewrites source/dest/size on the already
+ * built descriptor.  When nothing but the addresses and length change -- which is
+ * every steady-state bridge frame, since the buffers are fixed -- reload is
+ * enough and dma_config() can be skipped entirely. */
+struct spi_dw_dma_shape {
+	bool     valid;
+	uint32_t burst;
+	uint32_t dfs;
+	uint32_t dir;
+	uint32_t slot;
+	uint32_t src_adj, dst_adj;
+};
+
 struct spi_dw_dma_state {
 	size_t tx_idx, rx_idx;
 	size_t tx_off, rx_off;
 	size_t tx_count, rx_count;
 	bool is_fullduplex;
 	bool is_tx_req, is_rx_req;
+	struct spi_dw_dma_shape rx_shape, tx_shape;
 };
 #endif /* CONFIG_SPI_DW_ALIF_USE_DMA */
 
