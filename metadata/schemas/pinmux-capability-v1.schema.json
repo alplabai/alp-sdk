@@ -32,6 +32,10 @@
             "enum": ["alif", "cc3501e", "renesas", "gd32"],
             "description": "On-module silicon that drives the pad.  Per-family legal values: aen -> alif | cc3501e; v2n -> renesas | gd32."
           },
+          "core": {
+            "enum": ["a55", "m33"],
+            "description": "Which AMP core on the `owner` silicon drives the pad, for owners whose silicon is itself multi-core (renesas: A55 Linux vs CM33 Zephyr).  Present ONLY for pads with silicon-verified evidence (devicetree pinctrl claim, runtime alp_gpio_* claim, or an in-tree errata/patch) -- absent means \"not attributed\", never \"shared\" or \"a55 by elimination\".  Sourced from metadata/e1m_modules/<family>/core-ownership.yaml, not invented by the generator."
+          },
           "silicon_peripheral": {
             "type": "string",
             "description": "Silicon peripheral/function backing the pad.  Empty when the pad is plain GPIO (no dedicated peripheral mux) -- faithful to the source TSV's empty cell."
