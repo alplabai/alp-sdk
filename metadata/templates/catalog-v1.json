@@ -280,7 +280,7 @@
         {
           "name": "rpmsg_carve_out_kb",
           "type": "integer",
-          "description": "Cross-core RPMsg shared-memory carve-out size, allocated from the SoM's mram_main region.",
+          "description": "Cross-core RPMsg shared-memory carve-out size, allocated from the SoM's mram_main region. Default kept well under the region's 5632 KiB (metadata/e1m_modules/E1M-AEN801.yaml) and under the 512 KiB ocram_low that resolve_carve_outs() (scripts/alp_orchestrate/carveout.py) resolves to on RZ/V2N/V2M boards using this same field -- see metadata/templates/board.yaml's ipc: comment (#1613).",
           "default": 256,
           "constraints": { "minimum": 16 }
         }
