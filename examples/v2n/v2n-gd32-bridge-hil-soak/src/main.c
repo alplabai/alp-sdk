@@ -693,46 +693,50 @@ static bool t_ota_get_state(soak_stat_t *st)
 /* Test table -- cycle order matters: PWM readbacks run before        */
 /* TIMER_SYNC briefly links their timers.                              */
 /*                                                                    */
-/* QUARANTINE: entries marked quarantined are SKIPPED (printed once at */
-/* boot).  The 2026-06-04 first-HiL pass quarantined SIX rows, all     */
-/* failing -5 (ALP_ERR_IO) "from cycle 1" -- but that diagnosis        */
-/* PREDATES the v0.2.1 reply re-read fix: back then a handler slower   */
-/* than the inter-transaction gap missed its first reply read, and the */
-/* slave's spent staging cursor made every re-read fail PERMANENTLY    */
-/* (the transport_spi.c rewind bug) -- indistinguishable from a broken */
-/* HAL body.  With the rewind + the host's staging-gap/backoff ladder  */
-/* in, slow handlers (TRNG conditioning, TMU CORDIC, armed OTA state)  */
-/* are expected to converge, so five rows are UN-QUARANTINED for       */
-/* re-test (2026-06-04 second pass).  Still quarantined:               */
-/*   - adc_stream    actively destructive failure mode: a failed       */
-/*                   STREAM_END leaves the 1 kHz circular DMA running  */
-/*                   on DMA0 forever, contending with the SPI slave's  */
-/*                   CH2/CH3 until the whole link rots; gets its own   */
-/*                   supervised pass once the rest is green (-5 from   */
-/*                   cycle 1 even with the DMAMUX .request fix in).    */
-/* If a re-tested row STILL fails at the new pacing, that is a REAL    */
-/* HAL defect -- re-quarantine it with a fresh per-row note.           */
+/* QUARANTINE HISTORY: entries marked quarantined are SKIPPED (printed */
+/* once at boot).  No row is quarantined today -- every entry below    */
+/* reads quarantined = false -- but six rows were, and the "why" is    */
+/* worth keeping so a future regression doesn't re-diagnose it blind.  */
 /*                                                                     */
-/* Second-pass outcome (2026-06-04, functional tier + this soak):      */
-/*   - pwm_capture / qenc / tmu / ota_get_state / trng: CLEAN.  The   */
-/*     -5s were the transport bug + the host's missing short-error     */
-/*     decode, except trng whose unit takes INTERMITTENT seed errors   */
-/*     and parks with the LATCHED flags set (TRNG_STAT = 0x48 =        */
-/*     ERRSTA + SEIF while current-status SECS reads clear; SWD-       */
-/*     captured).  Firmware now checks the latched flags, fails the    */
-/*     affected call fast (no reply-window overrun, no cascade) and    */
-/*     rebuilds on the next call -- the recovery is silicon-validated  */
-/*     (functional tier 26/26).  t_trng retries once to absorb a       */
-/*     fault-recover cycle landing mid-test.                           */
-/*   - adc_stream UN-QUARANTINED for the supervised third pass: its    */
-/*     "destructive poison" diagnosis also predates the transport +    */
-/*     masked-status fixes, and the DMA bandwidth story never held     */
-/*     (continuous-mode ADC at ~150 kSPS x 16-bit is ~300 KB/s on a    */
-/*     216 MHz AHB, with the SPI channels at higher arbitration        */
-/*     priority).  Firmware hardening landed first: stale-EOC clear    */
-/*     before the DMA request unmasks, defined dma_parameter_struct    */
-/*     init, boot-time ADC calibration.  If the link still rots, the   */
-/*     row goes back under quarantine with fresh register evidence.    */
+/* The 2026-06-04 first-HiL pass quarantined SIX rows, all failing -5  */
+/* (ALP_ERR_IO) from cycle 1: pwm_capture, adc_stream, qenc, tmu,      */
+/* ota_get_state, trng.  That diagnosis PREDATED two compounding       */
+/* host/transport bugs: a handler slower than the inter-transaction    */
+/* gap missed its first reply read, and the slave's spent staging      */
+/* cursor made every re-read fail PERMANENTLY (the transport_spi.c     */
+/* rewind bug); on top of that the host masked every error reply's     */
+/* true status behind the generic ALP_ERR_IO, so a real firmware fault */
+/* and a transport replay miss looked identical on this table.  Fixed  */
+/* the same day in 2e30b9d09 (rewind fix, short-ERROR-envelope decode, */
+/* TRNG latched-fault handling): pwm_capture / qenc / tmu /            */
+/* ota_get_state came back CLEAN -- their -5s were purely the          */
+/* transport bug plus the missing decode, nothing in the HAL body.     */
+/* trng also carried a REAL hardware condition underneath: the unit    */
+/* takes intermittent seed errors and parks with the LATCHED fault     */
+/* flags set (TRNG_STAT = 0x48 = ERRSTA + SEIF while current-status    */
+/* SECS reads clear; SWD-captured).  Firmware now checks the latched   */
+/* flags, fails the affected call fast (no reply-window overrun, no    */
+/* cascade) and rebuilds on the next call -- the recovery is silicon-  */
+/* validated (functional tier 26/26).  t_trng retries once to absorb a */
+/* fault-recover cycle landing mid-test.                               */
+/*                                                                     */
+/* adc_stream was NOT a transport artefact -- it had its own real,     */
+/* separate firmware defect, and its failure mode was genuinely        */
+/* destructive: a failed STREAM_END left the 1 kHz circular DMA        */
+/* running on DMA0 forever, contending with the SPI slave's CH2/CH3    */
+/* until the whole link rotted, so it stayed quarantined through the   */
+/* first fix pass rather than being re-tested blind.  Root cause       */
+/* (found by a three-way audit against GigaDevice's vendor SPL         */
+/* reference, fixed in ffdc66ee5): CTL1.DDM (the "request after last"  */
+/* bit) was never set, so circular DMA stalled by design after one     */
+/* run; DMA controls were programmed onto an already-enabled converter */
+/* instead of the vendor's config-then-enable order; and the           */
+/* RCU_DMAMUX clock was never explicitly enabled on the stream path    */
+/* (masked at boot by the SPI transport enabling it first).            */
+/*                                                                     */
+/* Validation: 253/253 across a 20-row HIL soak on fw v0.2.8 + v0.2.9  */
+/* (2026-06-06, docs/test-plan.md).  All six rows below now run        */
+/* active every cycle.                                                 */
 /* ------------------------------------------------------------------ */
 
 typedef bool (*soak_fn_t)(soak_stat_t *st);

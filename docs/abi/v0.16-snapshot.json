@@ -868,6 +868,10 @@
           "hash": "86d0a8bbfad74393",
           "value": "EVK_UART_PORT_DEBUG"
         },
+        "EVK_ADC_ARDUINO_A0": {
+          "hash": "b0a4d051fa4d578d",
+          "value": "ALP_E1M_ADC0"
+        },
         "EVK_ADC_ARDUINO_A1": {
           "hash": "54b243359260dbff",
           "value": "ALP_E1M_ADC1"
@@ -888,16 +892,12 @@
           "hash": "cd5b7872f3a2ff5b",
           "value": "ALP_E1M_ADC5"
         },
-        "EVK_ADC_BOARD_ID": {
-          "hash": "8aeebeb8f34773a9",
-          "value": "ALP_E1M_ADC0"
-        },
-        "EVK_ADC_MB_AN": {
-          "hash": "a48e11a10e00ad89",
+        "EVK_ADC_DAC0_LOOPBACK": {
+          "hash": "02b1a21136630392",
           "value": "ALP_E1M_ADC6"
         },
-        "EVK_ADC_VBAT_SENSE": {
-          "hash": "37f342624ba09f57",
+        "EVK_ADC_DAC1_LOOPBACK": {
+          "hash": "628e096ae48e2fe6",
           "value": "ALP_E1M_ADC7"
         },
         "EVK_ARD_PWM1": {
