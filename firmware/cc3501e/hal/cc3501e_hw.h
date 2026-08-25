@@ -348,6 +348,16 @@ int cc3501e_hw_ota_status(uint8_t *state, uint32_t *bytes_written, uint32_t *tot
  * what it can and returns OK. */
 int cc3501e_hw_set_power_policy(uint8_t policy, uint8_t wake_events, uint32_t idle_ms_before_sleep);
 
+/* Whether the LAST realised radio power-save apply succeeded.
+ *
+ * cc3501e_hw_set_power_policy() runs in SPI-DISPATCH (ISR) context, where the
+ * vendor radio call it needs is illegal, so the radio half is deferred to the
+ * task.  Its RESP_OK therefore means QUEUED, not APPLIED -- the same semantic
+ * OTA_BEGIN has.  This reports the outcome of the previous apply, so a host can
+ * tell "the policy was accepted" from "the radio actually took it".  Backends
+ * with no radio return true. */
+bool cc3501e_hw_power_radio_ok(void);
+
 /* Set firmware log verbosity (0 = off).  Firmware-side config -> OK. */
 int cc3501e_hw_set_log_level(uint8_t level);
 

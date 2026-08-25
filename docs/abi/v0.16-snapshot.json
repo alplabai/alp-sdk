@@ -3006,8 +3006,8 @@
     "alp/chips/cc3501e/power.h": {
       "functions": {
         "cc3501e_power_policy": {
-          "hash": "5fed7bfe53c7205e",
-          "signature": "alp_status_t cc3501e_power_policy(cc3501e_t *ctx, const alp_cc3501e_power_policy_t *policy, uint32_t timeout_ms);"
+          "hash": "370b902f063a87df",
+          "signature": "alp_status_t cc3501e_power_policy(cc3501e_t *ctx, const alp_cc3501e_power_policy_t *policy, bool *radio_ok_out, uint32_t timeout_ms);"
         }
       },
       "macros": {},

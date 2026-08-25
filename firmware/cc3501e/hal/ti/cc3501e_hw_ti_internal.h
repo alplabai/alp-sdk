@@ -60,4 +60,12 @@ bool bridge_transport_spi_reply_stalled(void);
  * before the role came up would otherwise be silently lost. */
 void cc3501e_hw_power_reapply_radio(void);
 
+/* Drain the latched radio power-save policy on the TASK.  Wlan_Set() is a blocking
+ * vendor call and MUST NOT run in the SPI-dispatch ISR -- doing so failed every
+ * preset and wedged the bridge on silicon.  Called from cc3501e_hw_tick(). */
+void cc3501e_hw_power_service(void);
+
+/* False when the last TASK-side radio apply failed while a role was up. */
+bool cc3501e_hw_power_radio_ok(void);
+
 #endif /* CC3501E_HAL_TI_CC3501E_HW_TI_INTERNAL_H */

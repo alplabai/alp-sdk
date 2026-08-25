@@ -336,6 +336,62 @@ static void cc3501e_net_probe(cc3501e_t *fw)
 			(void)cc3501e_sock_close(fw, h, 5000u);
 		}
 	}
+	/* 3) Power policy -- walk the four presets and prove the bridge survives each.
+	 *
+	 * Each preset drives BOTH the CC3501E's MCU idle state and its Wi-Fi radio
+	 * power save.  The radio is the dominant term: an associated station that
+	 * never enters power save keeps its receiver up continuously, which costs far
+	 * more than any core idle state saves.
+	 *
+	 * radio_ok is the field that matters.  POWER_POLICY's OK means QUEUED, not
+	 * APPLIED -- the firmware defers the radio half to its task, because the vendor
+	 * radio call is illegal in its SPI-dispatch ISR -- so the status code alone
+	 * cannot tell an applied policy from a silently rejected one.
+	 *
+	 * Measured on e1m-aen-evk-01: bulk throughput under DEEP_SLEEP tracks the
+	 * default (798000 vs 799383 B/s).  That is CORRECT -- 802.11 power save keeps
+	 * the station awake while downlink traffic is flowing and sleeps in the idle
+	 * gaps, so the saving shows up in idle current, not as a throughput cut.
+	 *
+	 * The PING after each policy is the point of the walk: a preset that wedged
+	 * the inter-chip link would be far worse than one that saved nothing.  The
+	 * device is left on BALANCED, which is the default. */
+	{
+		static const struct {
+			uint8_t     policy;
+			const char *name;
+		} presets[] = {
+			{ ALP_CC3501E_PP_PERFORMANCE, "PERFORMANCE" },
+			{ ALP_CC3501E_PP_LOW_POWER, "LOW_POWER" },
+			{ ALP_CC3501E_PP_DEEP_SLEEP, "DEEP_SLEEP" },
+			{ ALP_CC3501E_PP_BALANCED, "BALANCED" },
+		};
+
+		/* BENCH PROBE (#1679): a RESP_OK to POWER_POLICY only means QUEUED, so the
+		 * ack proves nothing about the radio.  Re-running the SAME speed fetch
+		 * under DEEP_SLEEP is the behavioural proof: an N-DTIM listen interval
+		 * queues downlink frames at the AP, so the rate MUST fall.  If it does
+		 * not, Wlan_Set never reached the radio. */
+		for (size_t i = 0u; i < (sizeof(presets) / sizeof(presets[0])); ++i) {
+			const alp_cc3501e_power_policy_t pp = {
+				.policy = presets[i].policy,
+				/* HOST_SPI must stay set: the firmware rejects a low-power
+				 * preset that declares NO wake source, since that would idle
+				 * the device with no way back. */
+				.wake_events          = ALP_CC3501E_WAKE_HOST_SPI,
+				.idle_ms_before_sleep = 300u, /* DEEP_SLEEP: wake ~every 3rd DTIM */
+			};
+			bool               rok = true;
+			const alp_status_t ps  = cc3501e_power_policy(fw, &pp, &rok, 5000u);
+			const alp_status_t pg  = cc3501e_ping(fw);
+
+			printf("[cc3501e-bringup] POWER %-11s -> %d radio_ok=%d  bridge PING -> %d\n",
+			       presets[i].name,
+			       (int)ps,
+			       (int)rok,
+			       (int)pg);
+		}
+	}
 }
 static void cc3501e_wifi_probe(cc3501e_t *fw)
 {

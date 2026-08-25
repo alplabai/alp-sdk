@@ -14,6 +14,7 @@
  * is never on the SDK-free path.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include <ti/drivers/Power.h> /* Power_setConstraint/Policy (pulls PowerWFF3.h via DeviceFamily_CC35XX) */
@@ -100,6 +101,11 @@ static void pp_release_constraint(uint8_t id)
  * works once a role is up, and the host may configure power at any time. */
 static uint8_t  pp_policy_latched = ALP_CC3501E_PP_BALANCED;
 static uint32_t pp_idle_ms_latched;
+/* Set by the SPI-dispatch ISR, consumed by the TASK -- see cc3501e_hw_power_service(). */
+static volatile bool pp_radio_dirty;
+/* Result of the last TASK-side apply, surfaced via cc3501e_hw_power_radio_ok()
+ * because POWER_POLICY has no async-result opcode of its own. */
+static volatile bool pp_radio_ok = true;
 
 /* Map idle_ms_before_sleep onto a DTIM count.  A DTIM period is typically ~100 ms
  * (beacon 102.4 ms, DTIM 1); treat the host's idle budget as "how long may we
@@ -123,7 +129,7 @@ static uint8_t pp_idle_ms_to_dtims(uint32_t idle_ms)
  * not up yet (the caller latches and re-applies after role-up) and never fails
  * the whole policy call, so a host that sets power before Wi-Fi still gets the
  * core-side policy applied. */
-static void pp_apply_radio(uint8_t policy, uint32_t idle_ms)
+static bool pp_apply_radio(uint8_t policy, uint32_t idle_ms)
 {
 	uint8_t               ps;
 	WlanPowerManagement_e pm;
@@ -150,25 +156,21 @@ static void pp_apply_radio(uint8_t policy, uint32_t idle_ms)
 		want_lsi = true;
 		break;
 	default:
-		return;
+		return false;
 	}
 
-	(void)Wlan_Set(WLAN_SET_POWER_SAVE, &ps);
-	(void)Wlan_Set(WLAN_SET_POWER_MANAGEMENT, &pm);
+	bool ok = (Wlan_Set(WLAN_SET_POWER_SAVE, &ps) >= 0);
 
-	if (want_lsi) {
+	ok = (Wlan_Set(WLAN_SET_POWER_MANAGEMENT, &pm) >= 0) && ok;
+
+	if (want_lsi || policy == ALP_CC3501E_PP_LOW_POWER) {
 		WlanLongSleepInterval lsi = { 0 };
 
-		lsi.WakeUpEvent    = (uint8_t)WAKE_UP_EVENT_N_DTIM;
-		lsi.ListenInterval = pp_idle_ms_to_dtims(idle_ms);
-		(void)Wlan_Set(WLAN_SET_LSI, &lsi);
-	} else if (policy == ALP_CC3501E_PP_LOW_POWER) {
-		WlanLongSleepInterval lsi = { 0 };
-
-		lsi.WakeUpEvent    = (uint8_t)WAKE_UP_EVENT_DTIM;
-		lsi.ListenInterval = 1u;
-		(void)Wlan_Set(WLAN_SET_LSI, &lsi);
+		lsi.WakeUpEvent    = want_lsi ? (uint8_t)WAKE_UP_EVENT_N_DTIM : (uint8_t)WAKE_UP_EVENT_DTIM;
+		lsi.ListenInterval = want_lsi ? pp_idle_ms_to_dtims(idle_ms) : 1u;
+		ok                 = (Wlan_Set(WLAN_SET_LSI, &lsi) >= 0) && ok;
 	}
+	return ok;
 }
 
 /* Re-apply the latched radio policy after a role comes up.  Called from the
@@ -176,7 +178,28 @@ static void pp_apply_radio(uint8_t policy, uint32_t idle_ms)
  * while the radio was down would be silently lost. */
 void cc3501e_hw_power_reapply_radio(void)
 {
-	pp_apply_radio(pp_policy_latched, pp_idle_ms_latched);
+	pp_radio_dirty = true;
+}
+
+/* TASK-context drain for the latched radio policy.  Called from cc3501e_hw_tick().
+ * Applying with no role up is not an error -- Wlan_Set legitimately refuses then,
+ * and the STA role-up path re-arms the dirty flag once the radio exists. */
+void cc3501e_hw_power_service(void)
+{
+	if (!pp_radio_dirty) {
+		return;
+	}
+	pp_radio_dirty = false;
+
+	const bool radio_up = (cc3501e_hw_radio_role() != ALP_CC3501E_ROLE_OFF);
+	const bool ok       = pp_apply_radio(pp_policy_latched, pp_idle_ms_latched);
+
+	pp_radio_ok = radio_up ? ok : true;
+}
+
+bool cc3501e_hw_power_radio_ok(void)
+{
+	return pp_radio_ok;
 }
 
 int cc3501e_hw_set_power_policy(uint8_t policy, uint8_t wake_events, uint32_t idle_ms_before_sleep)
@@ -254,7 +277,21 @@ int cc3501e_hw_set_power_policy(uint8_t policy, uint8_t wake_events, uint32_t id
 	 * cc3501e_hw_power_reapply_radio() once the STA role is up. */
 	pp_policy_latched  = policy;
 	pp_idle_ms_latched = idle_ms_before_sleep;
-	pp_apply_radio(policy, idle_ms_before_sleep);
+
+	/* Latch the radio half for the TASK.  This function runs in SPI-DISPATCH (ISR)
+	 * context, and Wlan_Set() is a blocking vendor radio call -- the same reason
+	 * handle_sock_recv() cannot call lwip_recv() and the worker seam exists at all.
+	 *
+	 * Calling it inline here does not merely fail: bench-measured on
+	 * e1m-aen-evk-01, every preset returned -4 AND the bridge itself went to
+	 * PING -> -5 on the later presets.  So the radio work is deferred to
+	 * cc3501e_hw_power_service(), which the bringup task drains via
+	 * cc3501e_hw_tick().
+	 *
+	 * CONSEQUENCE FOR THE WIRE CONTRACT: a RESP_OK to POWER_POLICY means QUEUED,
+	 * not APPLIED -- the same semantic OTA_BEGIN turned out to have.  A host that
+	 * needs the realised state polls it; see cc3501e_hw_power_radio_ok(). */
+	pp_radio_dirty = true;
 
 	return CC3501E_HW_OK;
 }
