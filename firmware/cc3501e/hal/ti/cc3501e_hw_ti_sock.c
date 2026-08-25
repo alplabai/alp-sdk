@@ -191,12 +191,63 @@ static uint32_t ring_used(void)
 }
 
 /* TASK CONTEXT ONLY -- called from cc3501e_hw_tick().  Does the lwIP read. */
+#ifdef CC3501E_RADIO_SPEEDTEST
+/* BENCH: radio-only throughput.  Drains the prefetch socket and DISCARDS the
+ * data, so the rate measured is what the RADIO delivers with the bridge
+ * completely out of the path.  Every other number in this bring-up measures the
+ * radio THROUGH the bridge and therefore cannot tell a radio limit from a bridge
+ * limit -- this one can.  Result is published in the GET_DIAG_INFO free_heap
+ * field as bytes/second. */
+volatile uint32_t g_radio_bps;
+
+static void radio_speedtest_pump(int fd)
+{
+	static uint8_t  sink[2048];
+	static uint32_t t0_ms, total;
+
+	for (uint32_t pass = 0u; pass < 16u; ++pass) {
+		const ssize_t n = lwip_recv(fd, sink, sizeof(sink), 0);
+
+		if (n <= 0) {
+			break;
+		}
+		/* Start the clock on the FIRST BYTE, not on socket-open: the gap between
+		 * arming the socket and the server's first segment is idle time that
+		 * would otherwise be averaged into the rate. */
+		if (t0_ms == 0u) {
+			t0_ms = cc3501e_hw_uptime_ms() | 1u;
+		}
+		total += (uint32_t)n;
+		if ((uint32_t)n < sizeof(sink)) {
+			break; /* socket drained -- don't spend a timeout on the next pass */
+		}
+	}
+	/* Publish a WINDOWED rate: once a window's worth of real data has landed,
+	 * report it and restart.  A cumulative average from socket-open decays toward
+	 * zero as soon as the transfer finishes and the socket goes idle, which is
+	 * what made the first attempt read 12 kB/s on a link doing far more. */
+	if (total >= 131072u && t0_ms != 0u) {
+		const uint32_t dt = cc3501e_hw_uptime_ms() - t0_ms;
+
+		if (dt > 0u) {
+			g_radio_bps = (uint32_t)(((uint64_t)total * 1000u) / dt);
+		}
+		total = 0u;
+		t0_ms = 0u;
+	}
+}
+#endif
+
 void cc3501e_hw_sock_pump(void)
 {
 	const uint16_t h = rx_ring.fd_plus1;
 	if (h == 0u || rx_ring.peer_closed) {
 		return;
 	}
+#ifdef CC3501E_RADIO_SPEEDTEST
+	radio_speedtest_pump((int)h - 1);
+	return; /* discard mode: never fill the ring */
+#endif
 	/* Drain what lwIP already has, not one segment per tick.  The bridge takes up
 	 * to ALP_CC3501E_MAX_PAYLOAD per transaction while a single lwip_recv()
 	 * returns about one TCP segment, so a one-shot pump left the ring

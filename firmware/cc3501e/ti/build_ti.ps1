@@ -167,6 +167,7 @@ if ((Get-Content $cfg -Raw) -notmatch "GPIO17 = bridge READY") {
 }
 
 $txdef = @(if ($Transport -eq 'sdio') { '-DCC3501E_CONTROL_TRANSPORT_SDIO=1' })
+if ($env:CC3501E_RADIO_SPEEDTEST) { $txdef = @($txdef) + @('-DCC3501E_RADIO_SPEEDTEST=1') }
 if ($OtaSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_SELFTEST') }
 if ($OtaWindowSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_WINDOW_SELFTEST') }
 if ($OtaWindowBytes -gt 0) { $txdef = @($txdef) + @("-DCC3501E_OTA_WINDOW_SELFTEST_BYTES=$OtaWindowBytes") }

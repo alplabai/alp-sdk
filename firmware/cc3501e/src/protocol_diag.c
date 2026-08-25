@@ -114,7 +114,15 @@ alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
 		put_le32(&reply_data[8], ((uint32_t)fs << 8) | (uint32_t)pl);
 	}
 #else
+#ifdef CC3501E_RADIO_SPEEDTEST
+	{ /* BENCH: radio-only bytes/sec in place of free_heap. */
+		extern volatile uint32_t g_radio_bps;
+
+		put_le32(&reply_data[8], g_radio_bps);
+	}
+#else
 	put_le32(&reply_data[8], cc3501e_hw_free_heap_bytes());
+#endif
 #endif
 	reply_data[12] = g_last_error;
 	/* reserved[0]: last Wi-Fi event ID (0 = no WLAN event has ever fired).  Kept
