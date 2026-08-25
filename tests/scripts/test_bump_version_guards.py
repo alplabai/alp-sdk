@@ -159,6 +159,54 @@ def test_slicing_with_only_readme_in_changelog_d_is_not_blocked(bv):
     assert "## [v0.16.0]" in bv.CHANGELOG.read_text(encoding="utf-8")
 
 
+def test_a_full_bump_regenerates_the_emit_goldens_too(bv, monkeypatch, capsys):
+    """#1461: build-plan's `sdkVersion` and a released scaffold's README
+    doc links both bake in metadata/sdk_version.yaml's version, so a bump
+    must refresh tests/fixtures/emit-snapshots/ the same way it already
+    refreshes the ABI snapshot and alp.lock -- not leave a human to
+    discover the drift the next time check_emit_snapshots.py runs.
+
+    Regression-proof: comment out the `regenerate_emit_snapshots(...)`
+    call in `main()` and this test fails (no recorded --update call).
+    """
+    bv.SDK_VERSION_YAML.write_text("version: 0.15.0\nstatus:  released\n", encoding="utf-8")
+    bv.CHANGELOG.write_text(
+        "# Changelog\n\n## [Unreleased] - v0.16.0 candidate\n\nbody\n", encoding="utf-8"
+    )
+    # main() also rewrites these three -- point them at scratch files so
+    # the test can't touch the real repo checkout.
+    version_h = bv.REPO / "version.h"
+    version_h.write_text(
+        "#define ALP_VERSION_MAJOR 0\n"
+        "#define ALP_VERSION_MINOR 15\n"
+        "#define ALP_VERSION_PATCH 0\n"
+        '#define ALP_VERSION_STRING "0.15.0"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(bv, "VERSION_H", version_h)
+    pyproject = bv.REPO / "pyproject.toml"
+    pyproject.write_text('[project]\nversion = "0.15.0"\n', encoding="utf-8")
+    monkeypatch.setattr(bv, "PYPROJECT", pyproject)
+    banner_c = bv.REPO / "alp_banner.c"
+    banner_c.write_text("/* Alp SDK 0.15.0 */\n", encoding="utf-8")
+    monkeypatch.setattr(bv, "BANNER_C", banner_c)
+    # regenerate_abi_snapshot() / regenerate_alp_lock() only print a
+    # REPO-relative path after the (mocked) subprocess call -- ABI_DIR was
+    # computed at import time against the real REPO, so it must move too.
+    monkeypatch.setattr(bv, "ABI_DIR", bv.REPO / "docs" / "abi")
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(bv.subprocess, "check_call", lambda cmd: calls.append(list(cmd)))
+    monkeypatch.setattr(sys, "argv", ["bump_version.py", "--to", "0.16.0"])
+
+    rc = bv.main()
+
+    assert rc == 0
+    emit_calls = [c for c in calls if str(bv.EMIT_SNAPSHOT_TOOL) in c]
+    assert len(emit_calls) == 1, f"expected exactly one --emit-goldens refresh, got: {calls}"
+    assert "--update" in emit_calls[0]
+
+
 def test_the_repo_changelog_has_exactly_one_heading_per_version():
     """The real CHANGELOG, not a fixture -- this is what release.yml slices."""
     import collections

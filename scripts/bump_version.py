@@ -56,6 +56,15 @@ What this touches:
                                        file's doc-comment (the code always
                                        prints the live ALP_VERSION_STRING);
                                        enforced by scripts/check_version_doc_sync.py.
+    tests/fixtures/emit-snapshots/  -- the `--emit` goldens (#1461):
+                                       build-plan's sdkVersion field reads
+                                       metadata/sdk_version.yaml directly, and
+                                       a released scaffold's README doc links
+                                       pin to v<version>, so both go stale on
+                                       every bump; regenerated the same way
+                                       `check_emit_snapshots.py --update`
+                                       already does by hand, enforced by
+                                       scripts/check_emit_snapshots.py.
 
 The README/docs current-state prose is de-versioned (single-source
 version derived from metadata/sdk_version.yaml), so bump touches no
@@ -90,6 +99,7 @@ BANNER_C = REPO / "src" / "zephyr" / "alp_banner.c"
 ABI_DIR = REPO / "docs" / "abi"
 ABI_SNAPSHOT_TOOL = REPO / "scripts" / "abi_snapshot.py"
 ALP_LOCK_TOOL = REPO / "scripts" / "west_commands" / "alp_lock.py"
+EMIT_SNAPSHOT_TOOL = REPO / "scripts" / "check_emit_snapshots.py"
 
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([\w.]+))?$")
 
@@ -288,6 +298,25 @@ def regenerate_alp_lock(dry_run: bool) -> None:
     print("  regenerated alp.lock (sdk.version + metadata digest)")
 
 
+def regenerate_emit_snapshots(dry_run: bool) -> None:
+    """Rewrite the `--emit` goldens under tests/fixtures/emit-snapshots/ (#1461).
+
+    Two paths carry the version into these goldens: build-plan's
+    `sdkVersion` field (read straight from metadata/sdk_version.yaml by
+    scripts/alp_orchestrate/buildplan.py::_sdk_version()) and a released
+    scaffold's README doc links (pinned to v<version> by
+    scripts/alp_template.py::_docs_ref() once status: released). Without
+    this, every version bump reds check_emit_snapshots.py until a human
+    runs `--update` by hand.
+    """
+    cmd = [sys.executable, str(EMIT_SNAPSHOT_TOOL), "--update"]
+    if dry_run:
+        print(f"  would run: {' '.join(cmd)}")
+        return
+    subprocess.check_call(cmd)
+    print("  regenerated tests/fixtures/emit-snapshots/ (--emit goldens)")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument("--to", required=True, help="Target version (SemVer, e.g. 1.0.0)")
@@ -306,6 +335,7 @@ def main() -> int:
     update_banner_c(args.to, args.dry_run)
     regenerate_abi_snapshot(args.to, args.dry_run)
     regenerate_alp_lock(args.dry_run)
+    regenerate_emit_snapshots(args.dry_run)
     print()
     print("Next steps:")
     print("  git diff --stat")
