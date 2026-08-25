@@ -436,9 +436,44 @@ static void dispatch_frame(size_t frame_len)
 
 /* SPI transfer-complete callback (driver SWI/HWI context).  Advances the
  * request-header -> request-payload -> reply-header -> reply-payload phases. */
+/* ---- Reply-phase stall watchdog ------------------------------------------
+ *
+ * A transaction the host abandons mid-way -- an error or timeout between phases
+ * AFTER the slave already armed its reply -- leaves that transfer armed forever.
+ * SPI_TRANSFER_RETURN_PARTIAL is deliberately OFF (it drops READY after the arm
+ * and stalls the host READY gate), so the CS deassert does NOT complete it, and
+ * the host's short retries only add bytes to the outstanding count.  Neither
+ * existing self-heal sees it: g_resync_count does not move (the slave is not
+ * misframing) and g_arm_fail_count does not move (the arm succeeded).  Bench
+ * signature: the host in-band marker reads [02 00 00 00] once then
+ * [00 00 00 00] forever, and a 256 kB read dies 61-212 kB in.
+ *
+ * Only REPLY phases are watched: PH_REQ_HEADER legitimately waits forever for
+ * the next request, so watching it would fire on every idle gap.  A reply is
+ * only ever armed immediately after a request arrived.
+ *
+ * The armed flag is a SEPARATE bool, not a sentinel packed into the timestamp.
+ * A previous attempt stamped `uptime | 1u` to mean "armed", which for any EVEN
+ * uptime makes the stamp LARGER than now -- the elapsed subtraction then
+ * underflows to ~4e9 and the watchdog fires on every single frame.  That reinit
+ * storm, not the threshold, is what collapsed throughput to 328-3098 B/s. */
+#define CC3501E_REPLY_STALL_MS 250u
+
+static volatile bool     reply_armed;
+static volatile uint32_t reply_armed_ms;
+
+bool bridge_transport_spi_reply_stalled(void)
+{
+	if (!reply_armed) {
+		return false;
+	}
+	return (uint32_t)(cc3501e_hw_uptime_ms() - reply_armed_ms) > CC3501E_REPLY_STALL_MS;
+}
+
 static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 {
 	(void)h;
+	reply_armed = false; /* a phase completed -> nothing outstanding */
 	/* A phase's transfer just ended -> the slave is momentarily NOT armed for the host's
 	 * next clock.  Drop READY so the host holds off until arm_transfer() re-raises it. */
 	cc3501e_bridge_busy();
@@ -501,6 +536,8 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 			 * deassert after the header would cut a single armed reply mid-frame.) */
 			phase = PH_REPLY_HEADER;
 			arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
+			reply_armed_ms = cc3501e_hw_uptime_ms();
+			reply_armed    = true;
 		} else {
 			phase = PH_REQ_PAYLOAD;
 			/* dummy_tx_zero (all-0x00) on MISO during payload (0xA5 marks the
@@ -515,6 +552,8 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 		/* Reply HEADER as its own SS0-framed transfer (see PH_REQ_HEADER). */
 		phase = PH_REPLY_HEADER;
 		arm_transfer(NULL, reply_buf, ALP_CC3501E_HEADER_BYTES);
+		reply_armed_ms = cc3501e_hw_uptime_ms();
+		reply_armed    = true;
 		break;
 
 	case PH_REPLY_HEADER:
@@ -524,6 +563,8 @@ static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 		phase = PH_REPLY_PAYLOAD;
 		arm_transfer(
 		    NULL, &reply_buf[ALP_CC3501E_HEADER_BYTES], reply_len - ALP_CC3501E_HEADER_BYTES);
+		reply_armed_ms = cc3501e_hw_uptime_ms();
+		reply_armed    = true;
 		break;
 
 	case PH_REPLY_PAYLOAD:

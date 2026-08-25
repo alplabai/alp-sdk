@@ -415,6 +415,14 @@ void cc3501e_hw_tick(void)
 		last_arm_fail = af;
 	}
 
+	/* === Bridge SPI reply-stall recovery ===
+	 * A transaction abandoned AFTER the slave armed its reply leaves that
+	 * transfer armed forever, and both self-heals above are blind to it (no
+	 * misframing, no failed arm).  Same reinit recovery. */
+	if (bridge_transport_spi_reply_stalled()) {
+		bridge_transport_spi_hw_reinit();
+	}
+
 	/* Deferred self-reset, gated on reply_drained so the CMD_RESET ack has
 	 * FULLY clocked to the host before the chip resets (audit
 	 * "reset-fires-before-ack-clocked": the reset previously raced the
