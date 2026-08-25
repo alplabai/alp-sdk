@@ -51,3 +51,8 @@ void cc3501e_hw_ota_pump(void);
 int cc3501e_hw_wifi_lazy_start(void);
 
 #endif /* CC3501E_HAL_TI_CC3501E_HW_TI_INTERNAL_H */
+
+/* True when a REPLY phase has been armed and un-completed past the stall
+ * budget -- the host abandoned a transaction after the slave armed its reply,
+ * which no other self-heal detects.  Polled by cc3501e_hw_tick(). */
+bool bridge_transport_spi_reply_stalled(void);

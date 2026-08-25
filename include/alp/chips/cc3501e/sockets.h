@@ -119,6 +119,18 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
  * @param recv_len_out  Receives the number of bytes written to @p buf (may be
  *                      NULL).
  * @param timeout_ms    Upper bound on the receive poll budget.
+ *
+ * @warning STACK COST.  This call places a full ALP_CC3501E_MAX_PAYLOAD reply
+ *          buffer (4096 B as of protocol v5) on the CALLER's stack, and
+ *          @ref cc3501e_sock_send does the same for its request.  A thread that
+ *          calls either needs a stack sized for it: the bring-up example had to
+ *          go from CONFIG_MAIN_STACK_SIZE 16384 to 32768 when MAX_PAYLOAD moved
+ *          2048 -> 4096, and a 4096-byte main stack -- the default in most of the
+ *          aen-cc3501e-* examples, none of which call the socket API -- overflows
+ *          on the first call.  The failure is abrupt and gives no hint at the
+ *          cause: `E: >>> ZEPHYR FATAL ERROR 2: Stack overflow on CPU 0` at the
+ *          call site.  Examples that do not use sockets are unaffected and do not
+ *          need the larger stack.
  * @return ALP_OK with @p recv_len_out set (possibly 0); ALP_ERR_NOT_READY on the
  *         stub build; mapped error otherwise.
  */

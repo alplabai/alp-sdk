@@ -23,6 +23,7 @@
 #define CC3501E_BRIDGE_HAL_CC3501E_HW_H
 
 #include <stddef.h> /* size_t (cc3501e_hw_wifi_scan) */
+#include <stdbool.h>
 #include <stdint.h>
 
 /* Return codes.  0 = success; negatives are operation-independent
@@ -226,6 +227,15 @@ int cc3501e_hw_sock_recv(uint16_t  handle,
  * afterwards and the firmware may reuse its value. */
 int cc3501e_hw_sock_close(uint16_t handle);
 
+/* ---- socket RX prefetch (bulk receive) ----------------------------------
+ * CMD_SOCK_RECV is served from a ring the TASK fills, so the dispatch (which
+ * runs in the SPI callback and cannot call lwIP) can answer synchronously --
+ * one bridge transaction per frame instead of a submit/collect pair. */
+void cc3501e_hw_sock_pump(void); /* task ctx: does the lwIP read */
+void cc3501e_hw_sock_prefetch(uint16_t handle, bool on);
+/* dispatch ctx: memcpy only.  >=0 = bytes taken, -1 = not the prefetched handle. */
+int cc3501e_hw_sock_recv_ring(uint16_t handle, uint8_t *buf, uint16_t cap, uint16_t *out_len);
+
 /* --------------------------------------------------------------- */
 /* BLE 5.4 (v0.3)                                                    */
 /* --------------------------------------------------------------- */
@@ -309,6 +319,19 @@ int cc3501e_hw_ota_promote(void);
  * means the swap was REFUSED (e.g. BL2 anti-rollback on a downgrade) -- lets the
  * host distinguish "refused" from "never fired".  Surfaced in OTA_STATUS. */
 int8_t cc3501e_hw_ota_reboot_rc(void);
+
+/* True while an OTA window flush is queued or running (#1610).  Published in
+ * OTA_STATUS.reserved[1] so the host can HOLD OFF payload-bearing WRITE frames
+ * and poll header-only across the flash blackout, instead of inferring a stall
+ * from BUSY (which cannot distinguish a flush from any other in-flight op).
+ * Backends that never flash mid-stream return false. */
+bool cc3501e_hw_ota_flush_pending(void);
+
+/* Bench triage (#1610): which psa_fwu_* call failed the last OTA flush and its
+ * psa_status_t low byte.  Exists because the CC3501E has no UART on the debug
+ * probe, so a failed flush can only report itself over the bridge.  Both zero
+ * when nothing has failed since the last BEGIN/ABORT. */
+void cc3501e_hw_ota_fault(uint8_t *stage, uint8_t *psa_lo);
 
 /* Report session progress: @p state = alp_cc3501e_ota_state_t, @p
  * bytes_written = bytes accepted so far, @p total_len = the BEGIN value.

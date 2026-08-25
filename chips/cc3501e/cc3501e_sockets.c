@@ -126,8 +126,30 @@ alp_status_t cc3501e_sock_recv(cc3501e_t *ctx,
 
 	/* Bound the requested count so the reply (recv_resp header + data + status)
 	 * fits one frame. */
-	size_t       want     = cap;
-	const size_t want_max = (size_t)(ALP_CC3501E_MAX_PAYLOAD - CC3501E_SOCK_RECV_RESP_HDR - 1u);
+	size_t want = cap;
+	/* Fill the frame: MAX_PAYLOAD - CC3501E_SOCK_RECV_RESP_HDR - 1 = 487 data
+	 * bytes.
+	 *
+	 * This was pinned at 256 because larger replies desynced the bridge totally
+	 * -- silicon-measured 2026-08-24, streaming a 262144 B HTTP body the server
+	 * demonstrably delivered: cap 128 -> 12779 B/s, cap 256 -> 25480 B/s, cap
+	 * 400/486/487 -> 0 B/s with the socket layer left unusable.  The failure was
+	 * always a bad reply HEADER on the FOLLOWING transaction (hdr_bad=669,
+	 * xfer_fail=0, busy=0), which is why it looked like a hard size limit.
+	 *
+	 * It was not a size limit.  That comment named the READY line as "the leading
+	 * remaining suspect", and it was right: READY (CC35 GPIO17 -> Alif P2_6) read
+	 * 0 only because the Alif pad's INPUT BUFFER was never enabled -- an
+	 * input-enable pinctrl group turns it on (see the board overlay).  With READY
+	 * actually readable and cc3501e_reply_gate() waiting for the drop-then-rise
+	 * EDGE, the host stops clocking into an un-armed slave and 487 works:
+	 * 262405 B in 883 ms = 297174 B/s, over a link running ping_fail=0.
+	 *
+	 * The cap therefore belongs to the frame, not to a magic number.  A board
+	 * with no readable READY line still falls back to fixed settle gaps, where
+	 * the old 256 limit would apply -- re-measure on silicon before trusting
+	 * this on such a board. */
+	const size_t want_max = (size_t)ALP_CC3501E_MAX_PAYLOAD - CC3501E_SOCK_RECV_RESP_HDR - 1u;
 	if (want > want_max) want = want_max;
 
 	/* SOCK_RECV (0x23) wire = alp_cc3501e_sock_recv_t { handle(LE16) | max_len(LE16) }. */

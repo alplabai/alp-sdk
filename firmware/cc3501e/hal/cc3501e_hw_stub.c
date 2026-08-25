@@ -250,6 +250,25 @@ int cc3501e_hw_sock_recv(uint16_t  handle,
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
+void cc3501e_hw_sock_pump(void)
+{
+}
+
+void cc3501e_hw_sock_prefetch(uint16_t handle, bool on)
+{
+	(void)handle;
+	(void)on;
+}
+
+int cc3501e_hw_sock_recv_ring(uint16_t handle, uint8_t *buf, uint16_t cap, uint16_t *out_len)
+{
+	(void)handle;
+	(void)buf;
+	(void)cap;
+	if (out_len != 0) *out_len = 0u;
+	return -1; /* no prefetch on the stub -- caller uses the worker path */
+}
+
 int cc3501e_hw_sock_close(uint16_t handle)
 {
 	(void)handle;
@@ -398,6 +417,20 @@ int cc3501e_hw_ota_promote(void)
 int8_t cc3501e_hw_ota_reboot_rc(void)
 {
 	return 0;
+}
+
+bool cc3501e_hw_ota_flush_pending(void)
+{
+	/* The stub stages nothing to flash, so no flush window ever exists and the
+	 * host is never asked to hold off. */
+	return false;
+}
+
+void cc3501e_hw_ota_fault(uint8_t *stage, uint8_t *psa_lo)
+{
+	/* The stub never reaches flash, so nothing can fault. */
+	if (stage != 0) *stage = 0u;
+	if (psa_lo != 0) *psa_lo = 0u;
 }
 
 int cc3501e_hw_ota_status(uint8_t *state, uint32_t *bytes_written, uint32_t *total_len)
