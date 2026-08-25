@@ -427,6 +427,41 @@ $noinit  = @"
     /* System memory in DRAM */
 
 "@
+# Alp: the SOCKET PREFETCH RING lives in TCM_DRAM, not DRAM.
+#
+# DRAM_NON_SECURE is FULL -- 0x7f24f capacity against 0x7f0a0 used, i.e. 431 bytes
+# spare, so the ring could not grow past 16 KB there (a 32 KB ring overflows
+# GROUP_8 by ~16 KB).  Ring size is the single biggest throughput lever measured on
+# this bridge: 8 KB -> 16 KB moved end-to-end HTTP from ~660 kB/s to ~730 kB/s,
+# because the pump only refills every 10 ms and a small ring runs dry between passes.
+#
+# TCM_DRAM_NON_SECURE (0x20000000, len 0x1FFFF with no PSRAM) holds only .stack
+# (0x2FF0), leaving ~116 KB unused -- and it is FASTER than DRAM.  The ring is
+# CPU-only memory (the pump memcpy's into it, the dispatch memcpy's out of it into
+# reply_buf); NO DMA engine ever addresses it, so it does not need to be in the
+# DMA-reachable DRAM bank the way the SPI/WiFi buffers do.
+#
+# The rule MUST precede the generic `.bss: {} > DRAM_NON_SECURE` group, or the
+# catch-all claims .bss.sock_ring first and the ring silently lands back in DRAM.
+# Verify in cc3501e-bridge.map that rx_ring resolves at 0x200xxxxx, NOT 0x28xxxxxx.
+$sockring = @"
+    /* Alp: socket prefetch ring in TCM (DRAM is full; TCM is faster and CPU-only). */
+    GROUP {
+        .bss.sock_ring: {} palign(8)
+    } > TCM_DRAM_NON_SECURE
+
+    /* Move entire BSS section (including COMMON symbols) to DRAM to save TCM space */
+
+"@
+if ($cmdText -notmatch '\.bss\.sock_ring') {
+    $cmdText = $cmdText -replace '(?m)^[ 	]*/\* Move entire BSS section \(including COMMON symbols\) to DRAM to save TCM space \*/[ 	]*?
+', $sockring
+}
+Set-Content $localCmd $cmdText -NoNewline
+if ((Get-Content $localCmd -Raw) -notmatch '\.bss\.sock_ring') {
+    throw "sock-ring TCM placement did not apply to $localCmd -- the stock linker.cmd changed shape. The ring would fall back to the FULL DRAM bank and the link would overflow."
+}
+
 if ($cmdText -notmatch '\.TI\.noinit') {
     $cmdText = $cmdText -replace '(?m)^[ \t]*/\* System memory in DRAM \*/[ \t]*\r?\n', $noinit
     Set-Content $localCmd $cmdText -NoNewline

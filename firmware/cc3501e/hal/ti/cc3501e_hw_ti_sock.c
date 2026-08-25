@@ -173,7 +173,18 @@ int cc3501e_hw_sock_send(uint16_t       handle,
  * Single stream socket by design: this serves the bulk-receive case, and one
  * ring keeps the ISR-vs-task handshake to a single producer and a single
  * consumer (head written by the task only, tail by the dispatch only). */
-#define CC3501E_SOCK_RING_BYTES 8192u
+/* Ring size is the LARGEST measured throughput lever on this bridge.  The pump can
+ * only refill from the TASK (lwip_recv cannot run in the SPI dispatch ISR) and the
+ * task ticks every 10 ms, so a small ring runs dry between passes -- and every miss
+ * costs the host a 1 ms poll_by_repeat backoff.  Measured end-to-end HTTP over the
+ * bridge: 8 KB = ~660 kB/s, 16 KB = ~730 kB/s, 64 KB = ~742 kB/s.
+ *
+ * Past 16 KB it does not fit in DRAM (that bank has 431 bytes spare, and a 32 KB
+ * ring overflows GROUP_8 by ~16 KB), so the ring is linked into TCM instead -- see
+ * the .bss.sock_ring placement in ti/build_ti.ps1.  TCM is safe here BECAUSE the
+ * ring is CPU-only memory: the pump memcpy's in, the dispatch memcpy's out into
+ * reply_buf, and no DMA engine ever addresses it. */
+#define CC3501E_SOCK_RING_BYTES 65536u
 /* Max lwip_recv() calls per pump tick; see cc3501e_hw_sock_pump(). */
 #define CC3501E_SOCK_PUMP_PASSES 8u
 
@@ -183,7 +194,7 @@ static struct {
 	volatile uint32_t tail;     /* dispatch reads */
 	volatile uint16_t fd_plus1; /* socket being prefetched, 0 = none */
 	volatile bool     peer_closed;
-} rx_ring;
+} rx_ring __attribute__((section(".bss.sock_ring")));
 
 static uint32_t ring_used(void)
 {
