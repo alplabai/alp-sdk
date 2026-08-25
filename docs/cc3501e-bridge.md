@@ -303,7 +303,7 @@ The firmware `#include`s the wire-protocol header **directly** (no
 mirror), so a protocol change moves both sides + the wire-vector tests
 in one commit.  The Alif-side client still refuses to talk to a firmware
 whose `ALP_CC3501E_CMD_GET_VERSION` reply doesn't match the compile-time
-`ALP_CC3501E_PROTOCOL_VERSION` (currently **5** — v5 added `OTA_UPDATE_MODE`).
+`ALP_CC3501E_PROTOCOL_VERSION` (currently **5** — v5 added `OTA_UPDATE_MODE` and raised `ALP_CC3501E_MAX_PAYLOAD` 512 → 4096).
 
 ## Firmware: pre-flashed by Alp; updated via OTA; customer-flashable only to recover a bricked device
 

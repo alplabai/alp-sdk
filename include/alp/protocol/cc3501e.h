@@ -63,8 +63,15 @@ extern "C" {
  * wire; a new opcode is not that.  Note cc3501e_core.c's version gate fails on ANY
  * difference and permanently clears ctx->initialised, so header, firmware and host
  * driver ship together: a bench unit still on v4 firmware must be reflashed before
- * a v5 host driver touches it. */
-#define ALP_CC3501E_PROTOCOL_VERSION 7
+ * a v5 host driver touches it.
+ *
+ * v5 ALSO carries ALP_CC3501E_MAX_PAYLOAD 512 -> 4096 (below).  That went through
+ * an intermediate 2048 while this work was in progress, which briefly numbered
+ * itself v6 and then v7 -- but v4 is the last RELEASED version (origin/dev and
+ * origin/main both define 4), so every change since is unreleased and collapses
+ * into ONE bump.  Do not re-derive a v6/v7 from the branch history: the wire
+ * contract customers will first see after v4 is this one, and it is v5. */
+#define ALP_CC3501E_PROTOCOL_VERSION 5
 
 /** Frame header in bytes, before the payload. */
 #define ALP_CC3501E_HEADER_BYTES 4
@@ -72,12 +79,18 @@ extern "C" {
 /** Maximum payload size per frame.  Larger transactions must split
  *  across multiple frames using the FRAME_CONTINUATION flag (bit 2,
  *  reserved in v1; v2 will land alongside the BLE long-write path). */
-/* v6 raised this from 512.  It is NOT a wire field, so a host and firmware that
+/* v5 raised this from 512.  It is NOT a wire field, so a host and firmware that
  * disagree would silently size their frame buffers differently and corrupt the
  * link -- hence the PROTOCOL_VERSION bump above, which turns the mismatch into
- * a clean GET_VERSION refusal.  Anything raising it further must also keep
- * CONFIG_SPI_DW_ALIF_DMA_MIN_LEN above it (see the example prj.conf) and fit
- * the CC3501E DRAM budget -- 4096 overflowed GROUP_8 at link time. */
+ * a clean GET_VERSION refusal.
+ *
+ * Anything raising it further must keep CONFIG_SPI_DW_ALIF_DMA_MIN_LEN ABOVE it
+ * (see the example prj.conf -- DMA on the payload phase wedges the CC3501E hard
+ * enough that the wedge survives host reboots), size the host's main stack for it
+ * (cc3501e_sock_recv keeps a MAX_PAYLOAD reply buffer on the STACK, so 2048 ->
+ * 4096 overflowed CONFIG_MAIN_STACK_SIZE 16384 outright), and fit the CC3501E
+ * DRAM budget.  8192 does NOT fit: it overflows GROUP_9 by 26153 bytes and would
+ * need ~26 KB relocated out of the DMA-reachable DRAM bank. */
 #define ALP_CC3501E_MAX_PAYLOAD 4096
 
 /** Flags bitfield. */
