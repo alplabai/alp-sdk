@@ -84,14 +84,14 @@ extern "C" {
 /* ADC channels (ALP_E1M_ADC<N> -> board-side signal) */
 /* ------------------------------------------------------------------ */
 
-#define EVK_ADC_BOARD_ID   ALP_E1M_ADC0  /**< Carrier-side BOARD_ID resistor divider (see docs/board-id.md). */
-#define EVK_ADC_ARDUINO_A1 ALP_E1M_ADC1  /**< Arduino UNO header A1 analog input. */
-#define EVK_ADC_ARDUINO_A2 ALP_E1M_ADC2  /**< Arduino UNO header A2 analog input. */
-#define EVK_ADC_ARDUINO_A3 ALP_E1M_ADC3  /**< Arduino UNO header A3 analog input. */
-#define EVK_ADC_ARDUINO_A4 ALP_E1M_ADC4  /**< Arduino UNO header A4 analog input (shared with I2C SDA on classic UNO boards). */
-#define EVK_ADC_ARDUINO_A5 ALP_E1M_ADC5  /**< Arduino UNO header A5 analog input (shared with I2C SCL on classic UNO boards). */
-#define EVK_ADC_MB_AN      ALP_E1M_ADC6  /**< mikroBUS click AN pin. */
-#define EVK_ADC_VBAT_SENSE ALP_E1M_ADC7  /**< Battery voltage divider (4:1 resistor scale) for power-monitor demos. */
+#define EVK_ADC_ARDUINO_A0    ALP_E1M_ADC0  /**< Arduino UNO header A0 analog input. SHARED with the mikroBUS click ANA pin (net CK_ANA reaches ARD.A0 through R52, R63 pulldown, C60 filter) -- see the Arduino-A0 / mikroBUS-ANA convenience macros in alp_e1m_evk.h. There is no BOARD_ID divider on this board; no BOARD_ID net exists in the EVK netlist. */
+#define EVK_ADC_ARDUINO_A1    ALP_E1M_ADC1  /**< Arduino UNO header A1 analog input. */
+#define EVK_ADC_ARDUINO_A2    ALP_E1M_ADC2  /**< Arduino UNO header A2 analog input. */
+#define EVK_ADC_ARDUINO_A3    ALP_E1M_ADC3  /**< Arduino UNO header A3 analog input. */
+#define EVK_ADC_ARDUINO_A4    ALP_E1M_ADC4  /**< Arduino UNO header A4 analog input (shared with I2C SDA on classic UNO boards). */
+#define EVK_ADC_ARDUINO_A5    ALP_E1M_ADC5  /**< Arduino UNO header A5 analog input (shared with I2C SCL on classic UNO boards). */
+#define EVK_ADC_DAC0_LOOPBACK ALP_E1M_ADC6  /**< DAC0 output loopback sense (net A6: R88 series from DAC0_OUT, R89 pulldown, C107 filter). NOT the mikroBUS AN pin -- mikroBUS ANA is shared with Arduino A0 on E1M_ADC0, see EVK_ADC_ARDUINO_A0. */
+#define EVK_ADC_DAC1_LOOPBACK ALP_E1M_ADC7  /**< DAC1 output loopback sense (net A7: R90 series from DAC1_OUT, R91 pulldown, C108 filter). There is no VBAT net anywhere in the EVK netlist -- this channel cannot be used for battery-voltage sensing. */
 
 /* ------------------------------------------------------------------ */
 /* DAC channels (ALP_E1M_DAC<N> -> board-side signal) */
