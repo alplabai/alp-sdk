@@ -264,6 +264,16 @@ and `hw_revisions` wholesale.  When `preset:` is set, top-level
 `name:`, `populated:`, `e1m_routes:` are forbidden -- the schema
 rejects mixing.
 
+A preset file may also carry `i2c_devices:` (on-board I2C device
+addresses, and for power-monitor chips their shunt/max-current
+calibration) and `overlay_pins:` (board-repurposed pads exposed
+past the standard E1M pinout to an `alp,pin-array` devicetree
+overlay).  These aren't part of the customer-facing `board.yaml`
+schema -- `scripts/gen_board_header.py` reads them straight from
+the preset YAML and emits their macros into the generated
+`alp_<preset>_routes.h` alongside the `e1m_routes:` ones.  See
+`metadata/boards/e1m-evk.yaml` for a worked example of both.
+
 `preset:` is a shortcut for the SDK's own demos; customer
 projects don't need it -- the inline form keeps your `board.yaml`
 self-contained and grep-able.

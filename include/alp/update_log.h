@@ -121,6 +121,9 @@ typedef struct alp_update_log alp_update_log_t;
 /**
  * @brief Open the device's update log.
  * @return Handle on success; NULL if no backend is present (sets last error).
+ * @note Thread context only. When another caller's first open is still in
+ *       flight, this call sleep-polls until it resolves -- calling from an
+ *       ISR is fatal on Zephyr.
  */
 alp_update_log_t *alp_update_log_open(void);
 
@@ -187,7 +190,10 @@ alp_update_log_get(alp_update_log_t *log, uint64_t seq, alp_update_log_entry_t *
 /** @brief Assurance level on this SoM. */
 alp_update_log_assurance_t alp_update_log_assurance(const alp_update_log_t *log);
 
-/** @brief Release the handle. */
+/**
+ * @brief Release the handle.
+ * @note Thread context only: sleep-polls while draining in-flight ops.
+ */
 void alp_update_log_close(alp_update_log_t *log);
 
 #ifdef __cplusplus

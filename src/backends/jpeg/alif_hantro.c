@@ -70,6 +70,7 @@
 #include <alp/jpeg.h>
 #include <alp/peripheral.h>
 
+#include "alp_errno.h"
 #include "jpeg_ops.h"
 #include "alp_slot_claim.h"
 
@@ -160,29 +161,22 @@ static void _free_state(alif_hantro_jpeg_state_t *st)
 	}
 }
 
+/* -ENOBUFS from the Hantro encoder means the caller's OUTPUT buffer was too
+ * small for the encoded frame -- an allocation-shaped failure specific to this
+ * backend, not a general allocation failure, so it has no arm in the shared
+ * baseline and is carried here instead.  The key is NEGATIVE: this table is
+ * matched in the Zephyr domain, unlike can/yocto_drv.c's positively-keyed
+ * POSIX one.  Issue #1638. */
+static const alp_errno_override_t _hantro_errno_overrides[] = {
+	{ -ENOBUFS, ALP_ERR_NOMEM },
+};
+
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOSPC:
-	case -ENOBUFS:
-		return ALP_ERR_NOMEM;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	return alp_status_from_zephyr_errno_ex(err,
+	                                       _hantro_errno_overrides,
+	                                       sizeof(_hantro_errno_overrides) /
+	                                           sizeof(_hantro_errno_overrides[0]));
 }
 
 static alp_status_t hantro_open(const alp_jpeg_config_t  *cfg,

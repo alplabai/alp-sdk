@@ -48,6 +48,7 @@
 #include <alp/i2s.h>
 #include <alp/peripheral.h>
 
+#include "alp_errno.h"
 #include "alp_slot_claim.h"
 #include "audio_ops.h"
 
@@ -119,26 +120,11 @@ static struct hw_out_be g_out_be_pool[CONFIG_ALP_SDK_MAX_AUDIO_OUT_HANDLES];
 
 static alp_status_t errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	case -ENOMEM:
-		return ALP_ERR_NOMEM;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 #endif /* CONFIG_ALP_SDK_AUDIO_IN */
@@ -506,6 +492,12 @@ static alp_status_t z_out_write(alp_audio_out_backend_state_t *state,
 #if defined(CONFIG_ALP_SDK_AUDIO_OUT)
 	struct hw_out_be *be = (struct hw_out_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
+
+	/* Refuse more frames than the block negotiated at open() before
+	 * deriving a byte count from them.  alp_audio_out_write() checks only
+	 * buf != NULL and frames != 0, so without this the portable path
+	 * hands alp_i2s_write() an arbitrary length. */
+	if (frames > (size_t)state->cfg.frames_per_block) return ALP_ERR_OUT_OF_RANGE;
 
 	size_t bytes = frames * bytes_per_frame(&state->cfg);
 

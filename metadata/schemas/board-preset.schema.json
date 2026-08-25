@@ -46,6 +46,11 @@
       "description": "On-board I2C device instances (chip address / strap facts, optionally with power-monitor calibration).  scripts/gen_board_header.py reads this block and emits `#define <macro> 0x..u` (+ per-entry `alias` + `calibration` shunt/max-current macros) into include/alp/boards/alp_<name>_routes.h.  Single source of truth for chip-instance addresses that used to be hand-authored in the board header.",
       "items": { "$ref": "#/$defs/i2c_device_entry" }
     },
+    "overlay_pins": {
+      "type": "array",
+      "description": "Board-repurposed pads exposed past the standard E1M pinout's 52 entries, for boards that expose them to an `alp,pin-array` devicetree overlay (see zephyr/dts/bindings/alp,pin-array.yaml).  Each entry gets `EVK_PIN_OVERLAY_BASE + N`, where N is the entry's position in THIS list (0-based) -- an ordinal, not an independent hardware fact, so it is never written by hand; scripts/gen_board_header.py computes it from list order via `enumerate()`.  Reordering entries changes every macro after the moved one, exactly like reordering the backing devicetree overlay's `gpios` phandle list would.",
+      "items": { "$ref": "#/$defs/overlay_pin_entry" }
+    },
     "defaults": {
       "type": "object",
       "additionalProperties": true,
@@ -128,11 +133,11 @@
       "required": ["macro", "address"],
       "description": "One on-board I2C device instance: schematic strap-selected address (+ optional current-monitor calibration).",
       "properties": {
-        "macro":       { "type": "string", "pattern": "^EVK_I2C_ADDR_[A-Z0-9_]+$", "description": "C macro name emitted as `#define <macro> <address>u`." },
+        "macro":       { "type": "string", "pattern": "^X?EVK_I2C_ADDR_[A-Z0-9_]+$", "description": "C macro name emitted as `#define <macro> <address>u`.  `EVK_` for the 35x35 E1M carrier, `XEVK_` for the 45x65 E1M-X carrier (same two-namespace convention as `E1M(_X)?_...` pad names)." },
         "part":        { "type": "string", "description": "Chip-driver key (bmi323, icm42670, bmp581, tcal9538, tca6408a, tas2563, ina236, ...) -- not a vendor MPN." },
         "designator":  { "type": "string", "pattern": "^U[0-9]+$", "description": "Schematic reference designator." },
         "address":     { "type": "string", "pattern": "^0x[0-9A-Fa-f]{2}$", "description": "7-bit I2C address, hex string." },
-        "alias":       { "type": "string", "pattern": "^EVK_I2C_ADDR_[A-Z0-9_]+$", "description": "Extra macro name emitted as `#define <alias> <macro>` (e.g. a shorter convenience name for a device populated in only one variant)." },
+        "alias":       { "type": "string", "pattern": "^X?EVK_I2C_ADDR_[A-Z0-9_]+$", "description": "Extra macro name emitted as `#define <alias> <macro>` (e.g. a shorter convenience name for a device populated in only one variant)." },
         "doc":         { "type": "string", "description": "One-line Doxygen @brief documenting the strap / collision / respin context." },
         "calibration": {
           "type": "object",
@@ -140,12 +145,22 @@
           "required": ["shunt_macro", "shunt_ohms", "max_macro", "max_current_a"],
           "description": "INA236-style current-monitor calibration for this instance.",
           "properties": {
-            "shunt_macro":   { "type": "string", "pattern": "^EVK_INA236_SHUNT_[A-Z0-9_]+_OHMS$" },
+            "shunt_macro":   { "type": "string", "pattern": "^X?EVK_INA236_SHUNT_[A-Z0-9_]+_OHMS$" },
             "shunt_ohms":    { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$", "description": "Shunt resistance in ohms, as a decimal string (preserves the exact digits emitted into the `f`-suffixed C float literal)." },
-            "max_macro":     { "type": "string", "pattern": "^EVK_INA236_MAX_[A-Z0-9_]+_A$" },
+            "max_macro":     { "type": "string", "pattern": "^X?EVK_INA236_MAX_[A-Z0-9_]+_A$" },
             "max_current_a": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$", "description": "Rail max current in amps, as a decimal string (see `shunt_ohms`)." }
           }
         }
+      }
+    },
+    "overlay_pin_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["macro", "doc"],
+      "description": "One board-repurposed pad exposed past the standard E1M pinout, addressed by `alp,pin-array` position rather than an E1M pad token.  No `e1m:` / index field -- the index is this entry's position in the containing `overlay_pins:` list, computed by the generator.",
+      "properties": {
+        "macro": { "type": "string", "pattern": "^EVK_PIN_[A-Z0-9_]+$", "description": "C macro name emitted as `#define <macro> (EVK_PIN_OVERLAY_BASE + N)`, N = list position.  `EVK_` only -- `_emit_overlay_pins()` hard-codes `EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT` (the 35x35 count) with no E1M-X branch, so an `XEVK_PIN_*` entry would emit a base macro from the wrong pinout's GPIO count. Widen this in lockstep with the generator if the 45x65 carrier ever needs its own overlay_pins:." },
+        "doc":   { "type": "string", "description": "Doxygen @brief: which standard E1M pad was repurposed (E1M name + Alif pin) and what it now does on this board." }
       }
     }
   }

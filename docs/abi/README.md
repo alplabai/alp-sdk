@@ -119,7 +119,37 @@ snapshot" step) -- diffs against the newest FROZEN snapshot on disk
 label), not the current snapshot, and blocks only on a `REMOVED`
 public symbol (a `CHANGED` entry still prints, but doesn't fail the
 step -- pre-1.0 a signature/field change is allowed by
-`docs/contribution.md`'s ABI policy either way). This used to compare
+`docs/contribution.md`'s ABI policy either way).
+
+There is a fourth verdict, `MOVED`, which the gate deliberately does
+NOT fire on. The diff keys every symbol as `header::symbol`, so
+relocating one between public headers -- a header split, or lifting a
+hand-written block into its generated `*_routes.h` sibling -- would
+otherwise read as `REMOVED` + `ADDED` and block the PR even though no
+consumer lost anything. `MOVED` is reported instead when ALL of:
+
+* the symbol name and category are unchanged,
+* its recorded hash (value for a macro, full signature for a function,
+  normalised body for a typedef) is unchanged, and
+* the OLD header still `#include`s the new one, so a translation unit
+  including the old header still sees the symbol.
+
+That last condition is reachability and it is proven from the current
+tree, not assumed -- without it the verdict would let a genuine removal
+pass. Two deliberate restrictions on how it is proven, both erring
+toward `REMOVED`:
+
+* **Unconditional includes only.** An `#include` inside an `#if` arm is
+  not counted, because the arm may not be taken -- `include/alp/board.h`
+  selects between the two carriers' routes headers with mutually
+  exclusive arms, and counting either would let a symbol moved out of it
+  read `MOVED` while every consumer building the other board really lost
+  it. The condition is never evaluated, only its presence.
+* **One hop only.** A symbol that moves to a header reachable only
+  transitively stays `REMOVED`.
+
+Both failure modes produce a false `REMOVED`, which is noise a human
+resolves at review; the opposite error would be a silent ABI break. This used to compare
 against a frozen `docs/abi/v0.1-snapshot.json` baseline via `git show
 v0.1:...`, gated on a `v0.1` git tag that has never existed and never
 will (v0.1 predates the `vX.Y.Z` release-tag convention -- see the (†)
