@@ -64,7 +64,9 @@ int cc3501e_hw_ble_enable(void)
 	 * the host retries, and the retry double-inits.  A clean boot never retries
 	 * (bridge stays synced), so it never hit this. */
 	if (cc3501e_nimble_host_is_enabled()) {
+		cc3501e_bridge_busy(); /* #1691: never reinit with the host free to clock */
 		bridge_transport_spi_hw_reinit();
+		cc3501e_bridge_ready();
 		return CC3501E_HW_OK;
 	}
 
@@ -82,7 +84,12 @@ int cc3501e_hw_ble_enable(void)
 	 * on a dead link and returns IO (the wifi-scan -> ble-enable -4).  On a clean
 	 * boot the bridge is already synced, so this reinit is a harmless no-op.  (When
 	 * Wi-Fi was just lazy-started above, lazy_start already reinit'd -- a second
-	 * reinit is still safe; the cost is one SPI re-open off the SPI ISR.) */
+	 * reinit is still safe; the cost is one SPI re-open off the SPI ISR.)
+	 *
+	 * Fenced from HERE (#1691): this pre-op resync is itself a teardown, so the
+	 * host must already be held off before it, not merely before the enable that
+	 * follows.  The bracket runs through to the ready() after nimble_host_start. */
+	cc3501e_bridge_busy();
 	bridge_transport_spi_hw_reinit();
 
 	/* nimble_host_start = BleIf_OpenTransport + BleIf_EnableBLE + NimBLE host.
@@ -103,8 +110,10 @@ int cc3501e_hw_ble_enable(void)
 	WlanPowerManagement_e pm = POWER_MANAGEMENT_ALWAYS_ACTIVE_MODE; /* = 0 */
 	(void)Wlan_Set(WLAN_SET_POWER_MANAGEMENT, (void *)&pm);
 
+	cc3501e_bridge_busy(); /* fence the host off across the radio op + reinit (#1691) */
 	const int rc = cc3501e_nimble_host_start();
 	bridge_transport_spi_hw_reinit();
+	cc3501e_bridge_ready();
 	if (rc != 0 || !cc3501e_nimble_host_is_enabled()) {
 		return CC3501E_HW_ERR_IO;
 	}
@@ -118,8 +127,10 @@ int cc3501e_hw_ble_enable(void)
  * no-op (see cc3501e_hw_ble_enable's idempotency). */
 int cc3501e_hw_ble_disable(void)
 {
+	cc3501e_bridge_busy(); /* fence the host off across the radio op + reinit (#1691) */
 	const int rc = cc3501e_nimble_host_disable();
 	bridge_transport_spi_hw_reinit();
+	cc3501e_bridge_ready();
 	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
 }
 
@@ -136,9 +147,23 @@ int cc3501e_hw_ble_adv_start(uint8_t        connectable,
 	if (!cc3501e_nimble_host_is_enabled()) {
 		return CC3501E_HW_ERR_NOTIMPL; /* BLE not enabled yet -> NOT_READY */
 	}
+	/* FENCE THE HOST OFF across the radio op AND the bridge reinit (#1691).
+	 *
+	 * bridge_transport_spi_hw_reinit() tears the SPI slave down and re-opens it.
+	 * Doing that with the host free to clock a frame is an unfenced teardown: the
+	 * host lands mid-window, the slave loses lockstep, and the link never
+	 * recovers -- PING -> -5 for the rest of the run.  Advertising does it TWICE
+	 * per start/stop cycle, so the race is hit within a handful of cycles:
+	 * bench-measured 3 of 5 runs wedged inside four cycles, at cycle 2, 3 and 4.
+	 *
+	 * The Wi-Fi and OTA paths never had this problem because they already bracket
+	 * their radio work this way (cc3501e_hw_wifi_boot_start, cc3501e_hw_ota_pump).
+	 * This file used the bracket ZERO times, which is the whole defect. */
+	cc3501e_bridge_busy();
 	const int rc = cc3501e_nimble_adv_config_and_start(
 	    connectable, interval_min_ms, interval_max_ms, adv_data, adv_data_len);
 	bridge_transport_spi_hw_reinit();
+	cc3501e_bridge_ready(); /* radio op done, slave re-armed -> host may clock */
 	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
 }
 
@@ -147,8 +172,11 @@ int cc3501e_hw_ble_adv_stop(void)
 	if (!cc3501e_nimble_host_is_enabled()) {
 		return CC3501E_HW_ERR_NOTIMPL;
 	}
+	/* Same fence as adv_start -- the stop path reinits the bridge too (#1691). */
+	cc3501e_bridge_busy();
 	const int rc = cc3501e_nimble_adv_stop();
 	bridge_transport_spi_hw_reinit();
+	cc3501e_bridge_ready();
 	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
 }
 
@@ -170,10 +198,12 @@ int cc3501e_hw_ble_scan(uint8_t *buf, size_t cap, size_t *out_len)
 	}
 
 	static cc3501e_nimble_scan_rec_t recs[24];
-	uint32_t                         n  = 0u;
-	const int                        rc = cc3501e_nimble_scan(
+	uint32_t                         n = 0u;
+	cc3501e_bridge_busy(); /* fence the host off across the radio op + reinit (#1691) */
+	const int rc = cc3501e_nimble_scan(
 	    recs, (uint32_t)(sizeof(recs) / sizeof(recs[0])), &n, CC3501E_BLE_SCAN_MS);
 	bridge_transport_spi_hw_reinit();
+	cc3501e_bridge_ready();
 	if (rc != 0) {
 		return CC3501E_HW_ERR_IO;
 	}
@@ -209,8 +239,10 @@ int cc3501e_hw_ble_scan_stop(void)
 	if (!cc3501e_nimble_host_is_enabled()) {
 		return CC3501E_HW_ERR_NOTIMPL; /* BLE not enabled yet -> NOT_READY */
 	}
+	cc3501e_bridge_busy(); /* fence the host off across the radio op + reinit (#1691) */
 	const int rc = cc3501e_nimble_scan_stop();
 	bridge_transport_spi_hw_reinit();
+	cc3501e_bridge_ready();
 	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
 }
 
@@ -225,8 +257,10 @@ int cc3501e_hw_ble_connect(uint8_t addr_type, const uint8_t addr[6])
 	if (!cc3501e_nimble_host_is_enabled()) {
 		return CC3501E_HW_ERR_NOTIMPL; /* BLE not enabled yet -> NOT_READY */
 	}
+	cc3501e_bridge_busy(); /* fence the host off across the radio op + reinit (#1691) */
 	const int rc = cc3501e_nimble_connect(addr_type, addr);
 	bridge_transport_spi_hw_reinit();
+	cc3501e_bridge_ready();
 	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
 }
 
@@ -238,8 +272,10 @@ int cc3501e_hw_ble_disconnect(void)
 	if (!cc3501e_nimble_host_is_enabled()) {
 		return CC3501E_HW_ERR_NOTIMPL;
 	}
+	cc3501e_bridge_busy(); /* fence the host off across the radio op + reinit (#1691) */
 	const int rc = cc3501e_nimble_disconnect();
 	bridge_transport_spi_hw_reinit();
+	cc3501e_bridge_ready();
 	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
 }
 
@@ -284,8 +320,10 @@ int cc3501e_hw_ble_gatt_notify(uint16_t handle, const uint8_t *data, uint16_t da
 	if (!cc3501e_nimble_host_is_enabled()) {
 		return CC3501E_HW_ERR_NOTIMPL;
 	}
+	cc3501e_bridge_busy(); /* fence the host off across the radio op + reinit (#1691) */
 	const int rc = cc3501e_nimble_gatt_notify(handle, data, data_len);
 	bridge_transport_spi_hw_reinit();
+	cc3501e_bridge_ready();
 	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
 }
 
@@ -301,8 +339,10 @@ int cc3501e_hw_ble_gatt_read(uint16_t handle, uint8_t *out, uint16_t cap, uint16
 	if (!cc3501e_nimble_host_is_enabled()) {
 		return CC3501E_HW_ERR_NOTIMPL;
 	}
+	cc3501e_bridge_busy(); /* fence the host off across the radio op + reinit (#1691) */
 	const int rc = cc3501e_nimble_gatt_read(handle, out, cap, out_len);
 	bridge_transport_spi_hw_reinit();
+	cc3501e_bridge_ready();
 	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
 }
 
@@ -316,8 +356,10 @@ int cc3501e_hw_ble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t dat
 	if (!cc3501e_nimble_host_is_enabled()) {
 		return CC3501E_HW_ERR_NOTIMPL;
 	}
+	cc3501e_bridge_busy(); /* fence the host off across the radio op + reinit (#1691) */
 	const int rc = cc3501e_nimble_gatt_write(handle, data, data_len);
 	bridge_transport_spi_hw_reinit();
+	cc3501e_bridge_ready();
 	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
 }
 #else  /* !CC3501E_BLE -- stub / Wi-Fi-only / silicon-free build */

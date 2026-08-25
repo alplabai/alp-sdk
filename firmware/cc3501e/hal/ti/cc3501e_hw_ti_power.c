@@ -21,40 +21,6 @@
 
 #include <wlan_if.h> /* Wlan_Set -- the RADIO half of the power policy */
 
-#ifdef CC3501E_BLE
-#include "cc3501e_nimble_host.h" /* cc3501e_nimble_host_is_enabled -- see pp_long_sleep_safe() */
-#endif
-
-/* Whether the N-DTIM LONG sleep interval may be programmed right now.
- *
- * It may not, while BLE is up.  Wi-Fi and BLE share this device's HIF, and
- * sleeping through several DTIM periods starves BLE with it: bench-measured on
- * e1m-aen-evk-01 with BLE enabled and advertising between presets, PERFORMANCE
- * and LOW_POWER are clean (BLE adv 0/0, PING 0) and the damage always starts at
- * DEEP_SLEEP or the step right after it -- one run lost the BLE op immediately
- * (`DEEP_SLEEP ... BLE adv -4/-4`), another lost the following BALANCED.  Once
- * lost, the bridge stays at PING -> -5 for the rest of the run.
- *
- * DEEP_SLEEP is the ONLY preset that programs WAKE_UP_EVENT_N_DTIM, and its
- * constraint work is a no-op (LOW_POWER already released them), so the long sleep
- * interval is the only thing that distinguishes it.
- *
- * This was suspected first and wrongly discarded: withholding the LSI back then
- * appeared to just move the wedge, but that run still carried the ISR-context and
- * policy-swap races since fixed.  With those gone the signal is clean.
- *
- * So DEEP_SLEEP keeps its power-save mode and ELP sleep authorisation but falls
- * back to waking every DTIM -- LOW_POWER's radio behaviour -- for as long as BLE
- * is enabled.  Wi-Fi-only builds and BLE-disabled runs get the full interval. */
-static bool pp_long_sleep_safe(void)
-{
-#ifdef CC3501E_BLE
-	return !cc3501e_nimble_host_is_enabled();
-#else
-	return true;
-#endif
-}
-
 #include "alp/protocol/cc3501e.h"
 
 #include "../cc3501e_hw.h"
@@ -264,16 +230,11 @@ static bool pp_apply_radio(uint8_t policy, uint32_t idle_ms)
 
 	ok = (Wlan_Set(WLAN_SET_POWER_MANAGEMENT, &pm) >= 0) && ok;
 
-	/* Withhold the multi-DTIM sleep while BLE is up -- see pp_long_sleep_safe().
-	 * The preset still gets POWER_SAVE_MODE + ELP; only the long interval is
-	 * downgraded, because that is what starves the shared HIF. */
-	const bool long_sleep = want_lsi && pp_long_sleep_safe();
-
 	if (want_lsi || policy == ALP_CC3501E_PP_LOW_POWER) {
 		WlanLongSleepInterval lsi = { 0 };
 
-		lsi.WakeUpEvent = long_sleep ? (uint8_t)WAKE_UP_EVENT_N_DTIM : (uint8_t)WAKE_UP_EVENT_DTIM;
-		lsi.ListenInterval = long_sleep ? pp_idle_ms_to_dtims(idle_ms) : 1u;
+		lsi.WakeUpEvent    = want_lsi ? (uint8_t)WAKE_UP_EVENT_N_DTIM : (uint8_t)WAKE_UP_EVENT_DTIM;
+		lsi.ListenInterval = want_lsi ? pp_idle_ms_to_dtims(idle_ms) : 1u;
 		ok                 = (Wlan_Set(WLAN_SET_LSI, &lsi) >= 0) && ok;
 	}
 	return ok;
