@@ -143,40 +143,49 @@ static uint8_t pp_idle_ms_to_dtims(uint32_t idle_ms)
  * pp_constraints_held, and Power_setConstraint/releaseConstraint are ISR-safe. */
 static void pp_apply_core(uint8_t policy)
 {
+	/* Enable the configured policy ONCE.  PowerWFF3_config already names
+	 * PowerWFF3_sleepPolicy as policyFxn, but nothing enables it at init, so
+	 * before the first POWER_POLICY the core never idled at all. */
+	static bool policy_enabled;
+
+	if (!policy_enabled) {
+		Power_enablePolicy();
+		policy_enabled = true;
+	}
+
+	/* CONSTRAINTS ONLY -- deliberately no Power_setPolicy() here.
+	 *
+	 * PowerWFF3_sleepPolicy already expresses all four presets on its own: it
+	 * "considers active constraints ... the first goal is to enter SLEEP; if that
+	 * is not appropriate ... the secondary goal is the IDLE state; if that is
+	 * disallowed ... the policy will fallback and simply invoke WFI"
+	 * (PowerWFF3.h).  Holding DISALLOW_SLEEP + DISALLOW_IDLE therefore gives
+	 * exactly what PowerWFF3_doWFI gives, with no policy swap.
+	 *
+	 * Swapping the policy function at runtime is what made #1683 intermittent.
+	 * Power_setPolicy() replaces the pointer the idle loop invokes, so it races
+	 * whatever the idle task is doing -- moving the call from the SPI-dispatch ISR
+	 * onto this task narrowed that window but could not close it, because the idle
+	 * loop is concurrent with EVERY task.  Not calling it at all closes it by
+	 * construction.  Power_setConstraint/releaseConstraint are safe to call
+	 * anytime and are the mechanism the policy is documented to read. */
 	switch (policy) {
 	case ALP_CC3501E_PP_PERFORMANCE:
-		/* Lowest latency: forbid SLEEP and IDLE so the idle loop only ever
-		 * clock-gates via WFI (PowerWFF3_doWFI), which any peripheral IRQ --
-		 * the bridge SPI CS, a GPIO edge -- wakes immediately. */
+		/* Lowest latency: forbid SLEEP and IDLE, so the policy falls all the way
+		 * back to WFI -- any peripheral IRQ (the bridge SPI CS, a GPIO edge)
+		 * wakes it immediately. */
 		pp_hold_constraint(PowerWFF3_DISALLOW_SLEEP);
 		pp_hold_constraint(PowerWFF3_DISALLOW_IDLE);
-		Power_setPolicy(PowerWFF3_doWFI);
-		Power_enablePolicy();
 		break;
 	case ALP_CC3501E_PP_BALANCED:
-		/* Default: let the aggressive sleep policy opportunistically IDLE/SLEEP
-		 * between events but keep no extra constraints -- the policy already
-		 * falls back to IDLE then WFI when SLEEP is inappropriate. */
-		pp_release_constraint(PowerWFF3_DISALLOW_SLEEP);
-		pp_release_constraint(PowerWFF3_DISALLOW_IDLE);
-		Power_setPolicy(PowerWFF3_sleepPolicy);
-		Power_enablePolicy();
-		break;
 	case ALP_CC3501E_PP_LOW_POWER:
 	case ALP_CC3501E_PP_DEEP_SLEEP:
-		/* Aggressive idle: drop all DISALLOW constraints so the sleep policy can
-		 * reach the deepest state its latency budget allows (PowerWFF3_SLEEP),
-		 * waking on the Power driver's hardwired sleep wake sources (RTC +
-		 * CSYSPWRUPREQ, configured inside Power_init / PowerWFF3_sleepPolicy) and
-		 * any still-clocked peripheral IRQ.  DEEP_SLEEP and LOW_POWER share the
-		 * same CORE state on this device -- WFF3 exposes a single SLEEP state
-		 * (PowerWFF3_SLEEP), not a separate deep-sleep tier.  They differ on the
-		 * RADIO: see pp_apply_radio(), where DEEP_SLEEP takes the N-DTIM long
-		 * sleep interval and LOW_POWER wakes every DTIM. */
+		/* Drop our DISALLOW constraints so the policy can reach the deepest state
+		 * its latency budget allows.  All three share the same CORE behaviour --
+		 * WFF3 exposes a single SLEEP state -- and differ on the RADIO, where
+		 * DEEP_SLEEP takes the N-DTIM long sleep interval (pp_apply_radio()). */
 		pp_release_constraint(PowerWFF3_DISALLOW_SLEEP);
 		pp_release_constraint(PowerWFF3_DISALLOW_IDLE);
-		Power_setPolicy(PowerWFF3_sleepPolicy);
-		Power_enablePolicy();
 		break;
 	default:
 		return;
