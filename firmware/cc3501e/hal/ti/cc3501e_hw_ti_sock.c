@@ -238,14 +238,75 @@ static void radio_speedtest_pump(int fd)
 }
 #endif
 
+#ifdef CC3501E_RADIO_SPEEDTEST
+/* UDP arm of the radio-only test: bind a socket and drain it, so the rate is the
+ * radio's UDP capability -- the figure the datasheet's "20Mbps (UDP)" refers to,
+ * and the one that decides whether a >1 MB/s target is reachable at all.  Needs
+ * no host request: a PC just blasts datagrams at the board's IP on this port. */
+#define CC3501E_RADIO_UDP_PORT 5001
+
+static void radio_speedtest_udp(void)
+{
+	static int      ufd = -1;
+	static uint8_t  usink[2048];
+	static uint32_t ut0, utotal;
+
+	if (ufd < 0) {
+		struct sockaddr_in a;
+
+		ufd = lwip_socket(AF_INET, SOCK_DGRAM, 0);
+		if (ufd < 0) {
+			return;
+		}
+		memset(&a, 0, sizeof(a));
+		a.sin_family      = AF_INET;
+		a.sin_port        = lwip_htons(CC3501E_RADIO_UDP_PORT);
+		a.sin_addr.s_addr = 0; /* INADDR_ANY */
+		if (lwip_bind(ufd, (struct sockaddr *)&a, sizeof(a)) != 0) {
+			lwip_close(ufd);
+			ufd = -1;
+			return;
+		}
+		{
+			struct timeval tv = { .tv_sec = 0, .tv_usec = 2000 };
+
+			(void)lwip_setsockopt(ufd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+		}
+	}
+	for (uint32_t pass = 0u; pass < 32u; ++pass) {
+		const ssize_t n = lwip_recv(ufd, usink, sizeof(usink), 0);
+
+		if (n <= 0) {
+			break;
+		}
+		if (ut0 == 0u) {
+			ut0 = cc3501e_hw_uptime_ms() | 1u;
+		}
+		utotal += (uint32_t)n;
+	}
+	if (utotal >= 131072u && ut0 != 0u) {
+		const uint32_t dt = cc3501e_hw_uptime_ms() - ut0;
+
+		if (dt > 0u) {
+			g_radio_bps = (uint32_t)(((uint64_t)utotal * 1000u) / dt);
+		}
+		utotal = 0u;
+		ut0    = 0u;
+	}
+}
+#endif
+
 void cc3501e_hw_sock_pump(void)
 {
+#ifdef CC3501E_RADIO_SPEEDTEST
+	radio_speedtest_udp(); /* runs whether or not the host armed a TCP socket */
+#endif
 	const uint16_t h = rx_ring.fd_plus1;
 	if (h == 0u || rx_ring.peer_closed) {
 		return;
 	}
 #ifdef CC3501E_RADIO_SPEEDTEST
-	radio_speedtest_pump((int)h - 1);
+	(void)radio_speedtest_pump;
 	return; /* discard mode: never fill the ring */
 #endif
 	/* Drain what lwIP already has, not one segment per tick.  The bridge takes up
