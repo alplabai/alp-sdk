@@ -71,7 +71,7 @@ different thing and they must not be conflated:
 | Version | Source of truth | Surfaced by | Gates |
 |---|---|---|---|
 | **App SemVer** | `firmware-version.txt` (e.g. `0.2.0`) | `GET_DIAG_INFO.fw_version` (u16) | firmware release identity — human-facing "what's running" |
-| **Wire protocol version** | `ALP_CC3501E_PROTOCOL_VERSION` in `<alp/protocol/cc3501e.h>` (currently `4`) | `GET_VERSION` (0x01) | host↔firmware wire compatibility (host refuses a mismatch — enforced by `cc3501e_reset()` in `chips/cc3501e/cc3501e_core.c`, which reads `GET_VERSION` once the cold boot completes and returns `ALP_ERR_VERSION` if the reply differs from the host's compile-time value; #1371) |
+| **Wire protocol version** | `ALP_CC3501E_PROTOCOL_VERSION` in `<alp/protocol/cc3501e.h>` (currently `5`) | `GET_VERSION` (0x01) | host↔firmware wire compatibility (host refuses a mismatch — enforced by `cc3501e_reset()` in `chips/cc3501e/cc3501e_core.c`, which reads `GET_VERSION` once the cold boot completes and returns `ALP_ERR_VERSION` if the reply differs from the host's compile-time value; #1371) |
 | **GPE flash/image version** | `--version` in `ti/deploy_validate.sh` (date-derived) | — (programmer only) | CC35 vendor-RoT anti-rollback (unit rejects `<=` the programmed value) |
 
 **App SemVer → `fw_version` marker.** The runtime u16 is *derived* from

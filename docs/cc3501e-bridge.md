@@ -66,13 +66,31 @@ customers trade pin count against Wi-Fi throughput differently:
 | Transport | Role | CC3501E pins | Availability |
 |-----------|------|--------------|--------------|
 | **SPI0 slave** (CC35; Alif master = SPI1) | **DEFAULT** + always-available baseline/fallback | `GPIO_27/28/29` | Always |
-| **SDIO slave** | OPTIONAL, higher throughput for Wi-Fi data | `GPIO_3/4/5/6/10/11` | Only when the board dedicates the Alif SDIO to the CC3501E |
+| **SDIO slave** | future only -- NOT usable today | `GPIO_3/4/5/6/10/11` | **Never on current boards**: the 0 ohm links to the Alif are not populated |
 
-The catch: the Alif Ensemble has a **single SDIO controller**, shared at
-board level (mux resistors) with the micro-SD slot.  So SDIO is
-available to the CC3501E **only on boards without an SD card** — when an
-SD card is populated, SDIO is blocked and the link **must use SPI**.
-SPI is therefore always wired and always the fallback.
+**SDIO is NOT AVAILABLE on any board built to date, and the reason is
+hardware, not configuration.**  The six CC3501E SDIO lines
+(`metadata/e1m_modules/aen/inter-chip.tsv`: `GPIO_3/4/5/6/10/11` ->
+`SD_CLK`/`SD_CMD`/`SD_D0..D3` -> Alif `P13_0..P13_3`, `P14_0`, `P14_1`)
+reach the Alif only through **0 ohm links that are not populated**.  No
+firmware option, and no software SDIO implementation, can work around an
+open circuit -- and bit-banging elsewhere is not possible either, because
+those six Alif pins are the only place the CC3501E's SDIO can land.
+
+Two further constraints stack behind that, both of which still apply if
+the links are ever populated: the Alif Ensemble has a **single SDIO
+controller**, shared at board level (a 74LVC157 mux, `SDIO_MUX_EN` =
+`GPIO_26`, `SDIO_MUX_SEL` = `GPIO_30`) with the micro-SD slot -- so the
+CC3501E and an SD card can never use it at the same time, only
+time-share it -- and the Alif's single controller is committed to the SD
+card in the current product.
+
+The practical consequence: **SPI is the only host-control link**, its
+ceiling is the CC3501E slave's ~15 MHz (see below), and any throughput
+target above that must be met inside the SPI budget, not by switching
+transport.  The `sdio` value of `CC3501E_CONTROL_TRANSPORT` builds and is
+kept for a future board that populates the links; it is not a runtime
+choice on current hardware.
 
 The choice is a per-board integration decision: in a studio build it
 comes from the customer `board.yaml`; for a hand-built firmware it's the
@@ -247,11 +265,11 @@ attempts for at least 1 s after `WIFI_EN`/`nRESET` release.  The
 inter-chip SPI handshake's first PING-reply also serves as the
 "boot is complete, firmware is alive" signal.
 
-### Where the firmware actually lives (4 MB xSPI flash)
+### Where the firmware actually lives (8 MB xSPI flash)
 
 The CC3501E exposes an internal xSPI bus (datasheet pinout:
 `XSPI_D0..3`, `XSPI_CLK`, `XSPI_CS`).  The E1M-AEN module
-populates a **4 MB external xSPI flash** on that bus carrying:
+populates an **8 MB external xSPI flash** on that bus carrying:
 
 - BL2 (TI-signed 2nd-stage bootloader)
 - Application image (SimpleLink + Wi-Fi stack + BLE stack +
@@ -285,7 +303,7 @@ The firmware `#include`s the wire-protocol header **directly** (no
 mirror), so a protocol change moves both sides + the wire-vector tests
 in one commit.  The Alif-side client still refuses to talk to a firmware
 whose `ALP_CC3501E_CMD_GET_VERSION` reply doesn't match the compile-time
-`ALP_CC3501E_PROTOCOL_VERSION`.
+`ALP_CC3501E_PROTOCOL_VERSION` (currently **5** — v5 added `OTA_UPDATE_MODE` and raised `ALP_CC3501E_MAX_PAYLOAD` 512 → 4096).
 
 ## Firmware: pre-flashed by Alp; updated via OTA; customer-flashable only to recover a bricked device
 
@@ -459,6 +477,7 @@ device installs + swap-boots it.  The wire contract lives in
 | `0x43` | `ALP_CC3501E_CMD_OTA_ABORT`  | none — cancel the session |
 | `0x44` | `ALP_CC3501E_CMD_OTA_STATUS` | reply `alp_cc3501e_ota_status_t` (state / bytes_written / total_len) |
 | `0x46` | `ALP_CC3501E_CMD_OTA_PROMOTE` | none — request the swap-reboot for an already-committed pending image (`0x45` is `STREAM_WRITE`) |
+| `0x47` | `ALP_CC3501E_CMD_OTA_UPDATE_MODE` | `mode(1)` — 0 = normal DMA/callback bridge, 1 = polled OTA update mode.  Reply `alp_cc3501e_ota_update_mode_t` = `mode(1) | ota_state(1) | reserved(2)` |
 
 The flow is strictly sequential — `BEGIN(total_len)` →
 `WRITE(offset, bytes)`* → `FINISH` — and each `WRITE`'s `offset` must
@@ -473,7 +492,83 @@ tick.  The payload's signed version must **exceed** the running primary —
 a downgrade is refused at install (`state` → 3/ERROR), a forward image is
 accepted.  `OTA_STATUS reserved[0]` carries the last swap-reboot rc
 (0 = success, non-zero = the swap was refused, e.g. anti-rollback).
+
+`OTA_STATUS reserved[1]` is **flush pending**, and every host that streams
+`OTA_WRITE` must read it.  Non-zero means the device has queued a
+staging-window flush to flash: it is about to tear down its bridge DMA and
+will not consume payload until the flag clears.  Clocking `OTA_WRITE` across
+that window desyncs the link permanently — the 2026-06-19 failure the
+windowed design exists to prevent.  Hold off **all** payload, poll this field
+with **header-only** `OTA_STATUS` frames until it reads 0, then re-send the
+same chunk.  Reconcile against `bytes_written` first: `OTA_WRITE` is not
+idempotent, so a chunk whose reply the blackout swallowed may already have
+landed, and re-sending it is rejected as out-of-order.
+
+`OTA_STATUS reserved[2]` is diagnostics in two encodings.  `1..0x3F` is the
+`psa_fwu_*` call that failed the last window flush.  `0x40|phase` (or
+`0xC0|phase` when the bridge is running polled) means *no* psa fault — the
+low six bits are the transport phase.  That second shape is what a **healthy**
+session reports, so a non-zero `reserved[2]` is not a fault on its own.
+
 Host-side
+
+### OTA update mode (`0x47`, proto v5)
+
+A callback/DMA `SPI_open()` on the bridge slave **permanently** prevents
+`psa_fwu_start()` and `psa_fwu_write()` from returning — bench-proven on
+silicon 2026-08-21 — and `SPI_close()` does not undo the claim.  So OTA runs
+in its own **boot mode**: `OTA_UPDATE_MODE` latches a flag in retained RAM and
+warm-reboots; on that boot the bridge slave is opened POLLED
+(`SPI_MODE_BLOCKING` / `SPI_WAIT_FOREVER`) and the device runs a loop that does
+nothing but service the bridge frame-by-frame and pump the OTA flush at frame
+boundaries.  One firmware image carries both modes — there is no build switch.
+
+Wire contract:
+
+* **Entry is device-initiated.**  The host drives **no pin**.
+* `RESP_OK` means **QUEUED**, not "update mode is live" — the same property
+  `OTA_BEGIN` has.  The reply's `mode` byte is the mode running *right now*, so
+  it still reads `0` on the entry ack.  Confirm by **re-issuing `0x47` until the
+  reply's `mode` matches**; the handler is idempotent and does not reboot for a
+  request that matches the current mode.
+* The 4-byte reply is not decoration.  A dead bus phase clocks back literal
+  `0x00` for every byte and `0x00` is also `ALP_CC3501E_RESP_OK`, so a bare-OK
+  reply to the one opcode whose job is to be the last frame before a blackout
+  would be byte-identical to a link that just died.  Note the asymmetry: only
+  `mode == 1` is real proof — an all-zero dead phase is indistinguishable from a
+  genuine "normal bridge, OTA idle" reply, so corroborate the **leave** poll
+  (e.g. `GET_DIAG_INFO`'s moving `uptime_ms`, or the next live command).
+* **Enter BEFORE `OTA_BEGIN`.**  The OTA session is RAM-only, so entering
+  mid-session throws the write cursor away and forces a full re-`BEGIN` — another
+  whole-slot erase (`0x002A2000` = 2,760,704 B = 674 sector erases, 22–181 s
+  measured).
+* In update mode only `PING` / `OTA_*` / `GET_DIAG_INFO` / `RESET` are serviced.
+  Worker-routed commands (Wi-Fi, BLE, `GET_MAC`) queue forever and answer BUSY
+  forever, because nothing drains the worker on that boot.
+* After a successful `OTA_FINISH` the device leaves update mode **by itself** —
+  the flag is cleared before the swap reboot is armed, so the freshly-swapped
+  image comes up on the normal DMA bridge rather than deaf to the radio.
+* A cold `WIFI_EN` / `nRESET` cycle **always** lands in normal mode: the flag
+  lives in RAM and is read-and-**cleared** at boot, so a wedged update-mode boot
+  can never become an update-mode boot loop.
+* **Bytes clocked outside a transfer are discarded, not absorbed.**  The polled
+  slave keeps latching host bytes while it is between transfers, and TI's polling
+  path counts FIFO reads rather than SCLK edges — so a stale byte used to satisfy
+  the *next* phase and left the device permanently one byte ahead of the host.
+  The firmware now resets the SPI RX+TX FIFOs at every frame boundary, so a
+  blackout (a window flush, or a whole-slot erase at `OTA_BEGIN`) costs the host
+  the frames it clocked into the gap and nothing more.  Those frames still fail —
+  the host must retry, which `poll_by_repeat` already does — and the tick's SPI
+  desync/arm-fail self-heals remain no-ops in update mode.
+
+`GET_DIAG_INFO reserved[2]` carries the proof channel — bit7 = this boot is
+update mode, bits[6:0] = warm-boot counter mod 128.  The counter incrementing
+across a warm reset is what proves the retained-RAM flag survived
+`NVIC_SystemReset`; stuck at 1 means the boot ROM scrubs that RAM.
+
+Host helper: `cc3501e_ota_update_mode(ctx, enable, timeout_ms)` — it sends once,
+blind-settles, then confirms by readback.  `cc3501e_ota_update()` already enters
+update mode as its first step.
 
 `OTA_PROMOTE` (proto v4) exists for one recovery case: a bare reset
 (e.g. the Puya cold-boot host-reset workaround) can leave an image
