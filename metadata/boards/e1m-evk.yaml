@@ -218,8 +218,8 @@ e1m_routes:
   # (`aliases { alp-adc0 = &adc12_0; };`).  Regenerate after editing:
   #   python3 scripts/alp_project.py --input <board.yaml> --emit dts-overlay
   adc:
-    - { e1m: E1M_ADC0, macro: EVK_ADC_BOARD_ID,
-        doc: "Carrier-side BOARD_ID resistor divider (see docs/board-id.md)." }
+    - { e1m: E1M_ADC0, macro: EVK_ADC_ARDUINO_A0,
+        doc: "Arduino UNO header A0 analog input. SHARED with the mikroBUS click ANA pin (net CK_ANA reaches ARD.A0 through R52, R63 pulldown, C60 filter) -- see the Arduino-A0 / mikroBUS-ANA convenience macros in alp_e1m_evk.h. There is no BOARD_ID divider on this board; no BOARD_ID net exists in the EVK netlist." }
     - { e1m: E1M_ADC1, macro: EVK_ADC_ARDUINO_A1,
         doc: "Arduino UNO header A1 analog input." }
     - { e1m: E1M_ADC2, macro: EVK_ADC_ARDUINO_A2,
@@ -230,10 +230,10 @@ e1m_routes:
         doc: "Arduino UNO header A4 analog input (shared with I2C SDA on classic UNO boards)." }
     - { e1m: E1M_ADC5, macro: EVK_ADC_ARDUINO_A5,
         doc: "Arduino UNO header A5 analog input (shared with I2C SCL on classic UNO boards)." }
-    - { e1m: E1M_ADC6, macro: EVK_ADC_MB_AN,
-        doc: "mikroBUS click AN pin." }
-    - { e1m: E1M_ADC7, macro: EVK_ADC_VBAT_SENSE,
-        doc: "Battery voltage divider (4:1 resistor scale) for power-monitor demos." }
+    - { e1m: E1M_ADC6, macro: EVK_ADC_DAC0_LOOPBACK,
+        doc: "DAC0 output loopback sense (net A6: R88 series from DAC0_OUT, R89 pulldown, C107 filter). NOT the mikroBUS AN pin -- mikroBUS ANA is shared with Arduino A0 on E1M_ADC0, see EVK_ADC_ARDUINO_A0." }
+    - { e1m: E1M_ADC7, macro: EVK_ADC_DAC1_LOOPBACK,
+        doc: "DAC1 output loopback sense (net A7: R90 series from DAC1_OUT, R91 pulldown, C108 filter). There is no VBAT net anywhere in the EVK netlist -- this channel cannot be used for battery-voltage sensing." }
   dac:
     - { e1m: E1M_DAC0, macro: EVK_DAC_ARDUINO_DAC0,
         board_alias: BOARD_DAC0,
