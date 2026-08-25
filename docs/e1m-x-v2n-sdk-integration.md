@@ -28,7 +28,7 @@ into alp-sdk so a clean checkout reproduces a working board. Branch:
 |---|-----|-------|-------|
 | 1 | Carrier device tree | **Staged, HW-validated content** | `meta-alp-sdk/recipes-kernel/linux/` (layered `e1m-v2n-som.dtsi` → `e1m-x-evk.dtsi` → per-board `e1m-v2n101-x-evk.dts`/`e1m-v2m101-x-evk.dts`, plus 3 kernel-source patches 0001–0003, via `linux-renesas_%.bbappend`); machine confs updated |
 | 2 | Bootloader (alp DDR in BL2) | **Recipe + binary + DDR.c → alp-sdk-internal** | not in public alp-sdk (licensing) |
-| 3 | Metadata values | **Audio + board_id captured**; `ti,tas2563` audio nodes + HW wiring pending | `metadata/boards/e1m-x-evk.yaml` |
+| 3 | Metadata values | **Audio + board_id captured**; `ti,tas2563` DT nodes landed (playback only, pinmux conflict + control-line wiring pending -- see "Audio + board_id" below) | `metadata/boards/e1m-x-evk.yaml` |
 | 4 | Errata | **Done** | `docs/errata-e1m-x-v2n.md` |
 | 5 | Yocto build flow | **WSL-baked 2026-05-26** (core-image-minimal, bitbake-layers); full alp-image-edge pending | `meta-alp-sdk/README.md` |
 
@@ -60,10 +60,27 @@ TAS2563 amps on `ALP_E1M_X_I2C0`, I2S on `ALP_E1M_X_I2S0`, the TMUX1574 path
 mux, the `\SD_N` / `IRQ_N` control lines on E1M IOs, and `board_id` on
 `ALP_E1M_X_ADC7`.
 
-Still pending: add the `ti,tas2563` codec nodes + audio-graph-card to
-the carrier `e1m-x-evk.dtsi` (the `CONFIG_SND_SOC_TAS2562=y` fragment is
-already staged as `linux-renesas/tas2563-audio.cfg`), plus the on-board
-control-line wiring on the current PCB rev.
+The `ti,tas2563` codec nodes + audio-graph playback path (SSI1 -> left amp,
+SSI2 -> right amp) landed in the carrier `e1m-x-evk.dtsi` (issue #1171); the
+`CONFIG_SND_SOC_TAS2562=y` fragment (`linux-renesas/tas2563-audio.cfg`) now
+has a DT consumer. dtc-clean against the vendored linux-renesas source for
+both `e1m-v2n101-x-evk` and `e1m-v2m101-x-evk`; not bench-verified.
+
+Still pending:
+- **SSI1/SSI2 pinmux conflict** -- e1m-x-evk.dtsi's new `ssi1_pins`/
+  `ssi2_pins` claim the same four physical pins (port 4, pins 4-7) that the
+  existing `i2c6_pins`/`i2c7_pins` already claim with `&i2c6`/`&i2c7` both
+  `status = "okay"`. Neither i2c6 nor i2c7 appears in
+  `metadata/boards/e1m-x-evk.yaml`'s `carrier: buses:` list or in
+  `renesas-peripheral-map.tsv` under any RIIC6/RIIC7 name, while
+  SSIU1/SSIU2 on those exact pins do -- needs a schematic-backed call on
+  whether i2c6/i2c7 are dead/unpopulated before this ships to a board.
+- The `\SD_N` / `IRQ_N` amp control lines (on-board wiring, shared by both
+  U27/U28) are not wired to `shutdown-gpios` / `interrupts`: board.yaml
+  pins them to the I2S1 SDI/SDO pads but doesn't resolve which physical pad
+  is SDI vs SDO.
+- IV-sense capture (chips/tas2563.h's SDOUT -> host I2S RX) is not wired;
+  only the playback DAI path landed.
 
 ## Follow-ups (not blockers)
 

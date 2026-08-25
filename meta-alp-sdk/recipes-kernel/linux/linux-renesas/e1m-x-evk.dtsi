@@ -12,8 +12,10 @@
  * STATUS: UNVALIDATED through dtc/bitbake.
  *
  * TODO (carrier features to port once exercised on the bench):
- *   - Audio: TAS2563 smart-amp pair on I2C0 @0x4D/0x4E, I2S0 -> SSI1
- *     (rcar_sound audio-graph). See chips/tas2563 + issue #25.
+ *   - Audio: TAS2563 smart-amp pair on I2C0 @0x4D/0x4E, SSIU1+SSIU2 (E1M-X
+ *     I2S0) -> rcar_sound audio-graph: ported below (playback DATA path
+ *     only -- see the `&rcar_sound` block for what's still open). See
+ *     chips/tas2563 + issue #25, #1171.
  *   - Display 1 (J6): ported -- rk055hdmipi4ma0 panel on dsi0 (see below).
  *     Display 2 (J28) is permanently unavailable: it requires DSI1 lane
  *     set, which the V2N/V2M family does not populate.
@@ -66,6 +68,15 @@
 		regulator-max-microvolt = <3300000>;
 		gpios-states = <0>;
 		states = <3300000 0>, <1800000 1>;
+	};
+
+	/* TAS2563 stereo pair (U27 left, U28 right) -- see the `&rcar_sound`
+	 * and `&i2c0` blocks below for the two DAI ports this graph joins. */
+	sound_card: sound {
+		compatible = "audio-graph-card";
+		label = "rsnd_e1m_x_evk";
+
+		dais = <&rsnd_port_amp_l &rsnd_port_amp_r>;
 	};
 };
 
@@ -174,12 +185,56 @@
 	status = "okay";
 };
 
+/* Also XEVK_I2C_BUS_SENSORS / BOARD_I2C_SENSORS: shared with the on-board
+ * INA236 current monitors (see metadata/boards/e1m-x-evk.yaml). The
+ * ti,tas2563 nodes below use their per-strap addresses (0x4D/0x4E) only --
+ * never TAS2563_I2C_ADDR_BROADCAST (0x48). That address collides with an
+ * INA236 on THIS bus (INA236 CONFIG @ reg 0x00 == TAS2563 PAGE-select @
+ * reg 0x00, broadcast-write MODE[2:0]=000 = INA236 power-down); see issue
+ * #1659. Nothing in this DT (or the mainline `ti,tas2562` ASoC driver, in
+ * its normal per-device addressing mode) drives 0x48 -- only alp-sdk's own
+ * chips/tas2563.c host-side driver exposes that constant, and it is not
+ * used by this Linux audio path. */
 &i2c0 {
 	pinctrl-0 = <&i2c0_pins>;
 	pinctrl-names = "default";
 	/* 100 kHz: on-module EEPROM bus on internal pull-ups (weak ~50k). */
 	clock-frequency = <100000>;
 	status = "okay";
+
+	tas2563_left: codec@4d {
+		compatible = "ti,tas2563";
+		reg = <0x4d>;
+		#sound-dai-cells = <0>;
+
+		/* Shared \SD_N (shutdown) / IRQ_N (fault) control lines are NOT
+		 * wired here: metadata/boards/e1m-x-evk.yaml's `audio:` block
+		 * pins them to the otherwise-unused I2S1 SDI/SDO pads (driven
+		 * as GPIO), but does not resolve which physical pad is SDI vs
+		 * SDO against the schematic -- getting that swap wrong drives
+		 * a control line into a live signal. TODO: confirm against the
+		 * schematic, then add shutdown-gpios + interrupts here and on
+		 * codec@4e below. Until then the amp's HW enable/fault state is
+		 * whatever the board's passive strapping leaves it in. */
+
+		port {
+			tas2563_left_endpoint: endpoint {
+				remote-endpoint = <&rsnd_endpoint_amp_l>;
+			};
+		};
+	};
+
+	tas2563_right: codec@4e {
+		compatible = "ti,tas2563";
+		reg = <0x4e>;
+		#sound-dai-cells = <0>;
+
+		port {
+			tas2563_right_endpoint: endpoint {
+				remote-endpoint = <&rsnd_endpoint_amp_r>;
+			};
+		};
+	};
 };
 
 &i2c1 {
@@ -208,6 +263,67 @@
 	pinctrl-names = "default";
 	clock-frequency = <400000>;
 	status = "okay";
+};
+
+/* TAS2563 pair on SSIU1+SSIU2 (E1M-X I2S0): the two SSI channels share
+ * BCK/WS and each carry an independent SDATA line (R-Car "SSI parallel
+ * mode" pairing -- see metadata/e1m_modules/E1M-V2N101.yaml's `i2s0`
+ * silicon_peripheral note), so this composes as two independent
+ * audio-graph ports on the one shared rcar_sound block: SSI1 -> left amp,
+ * SSI2 -> right amp. Playback-only, no SRC/DVC -- mirrors the RZ/V2N EVK
+ * reference dts's simpler HDMI port (rsnd_port1: `playback = <&ssi0>;`
+ * only) rather than its SRC/DVC-routed DA7212 port, since these are
+ * output-only smart amps on this pass.
+ *
+ * NOT wired here: IV-sense capture (chips/tas2563.h's SDOUT -> host RX
+ * path) -- it needs a second, capture-direction endpoint per port with
+ * an SRC/DVC assignment this pass does not attempt. */
+&rcar_sound {
+	pinctrl-0 = <&ssi1_pins &ssi2_pins &audio_clkout_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	/* audio_clkout -> E1M-X AUDIO_CLK -> TAS MCLK, 256 x 48 kHz per
+	 * metadata/boards/e1m-x-evk.yaml `audio.mclk` (confirm against the
+	 * SoM ADG / clock-gen setup -- not bench-verified). */
+	#clock-cells = <0>;
+	clock-frequency = <12288000>;
+
+	/* Multi DAI: one SSI channel per port below. */
+	#sound-dai-cells = <1>;
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		rsnd_port_amp_l: port@0 {
+			reg = <0>;
+			rsnd_endpoint_amp_l: endpoint {
+				remote-endpoint = <&tas2563_left_endpoint>;
+
+				dai-format = "i2s";
+				bitclock-master = <&rsnd_endpoint_amp_l>;
+				frame-master = <&rsnd_endpoint_amp_l>;
+				mclk-fs = <256>;
+
+				playback = <&ssi1>;
+			};
+		};
+
+		rsnd_port_amp_r: port@1 {
+			reg = <1>;
+			rsnd_endpoint_amp_r: endpoint {
+				remote-endpoint = <&tas2563_right_endpoint>;
+
+				dai-format = "i2s";
+				bitclock-master = <&rsnd_endpoint_amp_r>;
+				frame-master = <&rsnd_endpoint_amp_r>;
+				mclk-fs = <256>;
+
+				playback = <&ssi2>;
+			};
+		};
+	};
 };
 
 &scif {
@@ -369,5 +485,48 @@
 		gpios = <RZV2N_GPIO(B, 1) GPIO_ACTIVE_HIGH>;
 		input;
 		line-name = "usb_ovc_disable";
+	};
+
+	/* TAS2563 pair, SSIU1+SSIU2 (E1M-X I2S0). Pad names + P<port><pin>
+	 * from metadata/e1m_modules/v2n/renesas-peripheral-map.tsv:
+	 * SSIU1_SSI1_SCK P44, SSIU1_SSI1_WS P45, SSIU1_SSI1_SDATA P46,
+	 * SSIU2_SSI2_SDATA P47. Function number 7 is carried over from the
+	 * RZ/V2N EVK reference dts, where every SSIn pin (SSI0 on port 4,
+	 * SSI3/4 on ports 0/1) uses func 7 regardless of bank -- not
+	 * bench-verified on this SoC pin-function table for port 4 pins 4-7
+	 * specifically.
+	 *
+	 * *** UNRESOLVED PIN-CLAIM CONFLICT, flagged not silently fixed ***
+	 * i2c6_pins / i2c7_pins below ALSO claim port 4 pins 4-7 (func 1,
+	 * RIIC6/RIIC7) and are already `status = "okay"` on &i2c6/&i2c7
+	 * above -- the exact same four physical SoC balls this group
+	 * pinmuxes to func 7. Neither i2c6 nor i2c7 appears in
+	 * metadata/boards/e1m-x-evk.yaml's `carrier: buses:` list (the
+	 * board.yaml-verified, netlist-derived bus set that E1M_X_I2C0/2/3
+	 * come from) or in renesas-peripheral-map.tsv under any RIIC6/RIIC7
+	 * name, while SSIU1/SSIU2 on these exact four pins DO appear there
+	 * -- so this looks like unverified EVK-template scaffolding on
+	 * i2c6/i2c7's side rather than an error in this group, but it is
+	 * NOT confirmed against the schematic either way. Both groups
+	 * cannot be live on real silicon: two peripherals cannot own one
+	 * pin. Resolve (most likely: drop/disable &i2c6 + &i2c7 and their
+	 * pinctrl, or confirm from the schematic that they're genuinely
+	 * unpopulated) before this lands on a board. */
+	ssi1_pins: ssi1 {
+		pinmux = <RZV2N_PORT_PINMUX(4, 4, 7)>, /* SSI1_SCK */
+			 <RZV2N_PORT_PINMUX(4, 5, 7)>, /* SSI1_WS */
+			 <RZV2N_PORT_PINMUX(4, 6, 7)>; /* SSI1_SDATA */
+	};
+
+	ssi2_pins: ssi2 {
+		pinmux = <RZV2N_PORT_PINMUX(4, 7, 7)>; /* SSI2_SDATA */
+	};
+
+	/* AUDIO_CLKOUT -> E1M-X AUDIO_CLK -> TAS MCLK. Same SoC-package pin
+	 * (port 9, pin 7, func 8) as the RZ/V2N EVK reference dts's
+	 * sound_clk_pins entry -- fixed by the R9A09G056 pin-function table,
+	 * not carrier wiring, so it carries over unchanged. */
+	audio_clkout_pins: audio-clkout {
+		pinmux = <RZV2N_PORT_PINMUX(9, 7, 8)>; /* AUDIO_CLKOUT */
 	};
 };
