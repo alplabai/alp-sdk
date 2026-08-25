@@ -228,6 +228,115 @@ static void cc3501e_dump_diag(cc3501e_t *fw)
  * CONNECT is wired but only attempted when CC3501E_WIFI_SSID is non-empty
  * (set at build time on the bench -- never hardcode credentials here).
  */
+/*
+ * Bench-only network probe: proves the associated link actually carries IP
+ * traffic, and measures end-to-end throughput (Wi-Fi + the SPI bridge, which
+ * is what a product actually sees).  Both targets are build-time settings so
+ * no address is baked into the public example; the step is skipped when
+ * CC3501E_SPEEDTEST_IP0 is 0.
+ */
+#ifndef CC3501E_SPEEDTEST_IP0
+#define CC3501E_SPEEDTEST_IP0 0u
+#define CC3501E_SPEEDTEST_IP1 0u
+#define CC3501E_SPEEDTEST_IP2 0u
+#define CC3501E_SPEEDTEST_IP3 0u
+#endif
+#ifndef CC3501E_SPEEDTEST_PORT
+#define CC3501E_SPEEDTEST_PORT 8080u
+#endif
+#ifndef CC3501E_SPEEDTEST_PATH
+#define CC3501E_SPEEDTEST_PATH "/speed.bin"
+#endif
+
+static void cc3501e_net_probe(cc3501e_t *fw)
+{
+	/* Sized to ALP_CC3501E_MAX_PAYLOAD-class reads: the per-transaction cost of
+	 * the bridge is ~850 us regardless of size, so asking for 512 B when the
+	 * frame can carry ~2 KB throws away most of the link.  512 -> 2048 measured
+	 * 357 kB/s -> 421 kB/s on e1m-aen-evk-01. */
+	static uint8_t rx[4096];
+
+	/* 1) Throughput -- drain a file from a local HTTP server over the link. */
+	if ((unsigned)CC3501E_SPEEDTEST_IP0 != 0u) {
+		uint16_t      h     = 0u;
+		const uint8_t ip[4] = { (uint8_t)CC3501E_SPEEDTEST_IP0,
+			                    (uint8_t)CC3501E_SPEEDTEST_IP1,
+			                    (uint8_t)CC3501E_SPEEDTEST_IP2,
+			                    (uint8_t)CC3501E_SPEEDTEST_IP3 };
+		if (cc3501e_sock_open(
+		        fw, ALP_CC3501E_SOCK_FAMILY_IPV4, ALP_CC3501E_SOCK_TYPE_STREAM, 0u, &h, 5000u) ==
+		        ALP_OK &&
+		    cc3501e_sock_connect(fw, h, ip, (uint16_t)CC3501E_SPEEDTEST_PORT, 10000u) == ALP_OK) {
+			static const char req[] = "GET " CC3501E_SPEEDTEST_PATH " HTTP/1.0\r\n\r\n";
+			size_t            sent  = 0u;
+			(void)cc3501e_sock_send(fw, h, (const uint8_t *)req, sizeof(req) - 1u, &sent, 10000u);
+			const int64_t t0     = k_uptime_get();
+			uint32_t      total  = 0u;
+			uint8_t       misses = 0u;
+			for (;;) {
+				size_t             got = 0u;
+				const alp_status_t rs  = cc3501e_sock_recv(fw, h, rx, sizeof(rx), &got, 2000u);
+				/* A gap is NOT end-of-stream.  cc3501e_sock_recv() polls the firmware
+				 * and returns non-OK when nothing is buffered YET, so breaking on the
+				 * first miss truncated every transfer that needed more than one frame
+				 * (a 600 B body stopped at 193 B).  Tolerate a bounded run of empty
+				 * reads before declaring the stream finished. */
+				if (misses == 0u && rs != ALP_OK) {
+					printf("[cc3501e-bringup] NET first-miss rc=%d after %u B\n",
+					       (int)rs,
+					       (unsigned)total);
+				}
+				if (rs != ALP_OK || got == 0u) {
+					if (++misses >= 40u) {
+						break;
+					}
+					continue;
+				}
+				misses = 0u;
+				total += (uint32_t)got;
+				if (total >= 262144u) {
+					break; /* 256 KiB is plenty for a rate */
+				}
+			}
+			const uint32_t ms = (uint32_t)(k_uptime_get() - t0);
+			printf("[cc3501e-bringup] NET THROUGHPUT %u B in %u ms = %u B/s\n",
+			       (unsigned)total,
+			       (unsigned)ms,
+			       (unsigned)((ms > 0u) ? ((uint64_t)total * 1000u / ms) : 0u));
+		}
+		(void)cc3501e_sock_close(fw, h, 5000u);
+	}
+	/* 2) Internet reachability -- 1.1.1.1:80, no DNS needed. */
+	{
+		uint16_t           h     = 0u;
+		const uint8_t      ip[4] = { 1u, 1u, 1u, 1u };
+		const alp_status_t os    = cc3501e_sock_open(
+		    fw, ALP_CC3501E_SOCK_FAMILY_IPV4, ALP_CC3501E_SOCK_TYPE_STREAM, 0u, &h, 5000u);
+		if (os != ALP_OK) {
+			printf("[cc3501e-bringup] NET open -> %d\n", (int)os);
+		} else {
+			const alp_status_t ks = cc3501e_sock_connect(fw, h, ip, 80u, 10000u);
+			printf("[cc3501e-bringup] NET connect 1.1.1.1:80 -> %d\n", (int)ks);
+			if (ks == ALP_OK) {
+				static const char req[] = "GET / HTTP/1.0\r\nHost: one.one.one.one\r\n\r\n";
+				size_t            sent  = 0u;
+				(void)cc3501e_sock_send(
+				    fw, h, (const uint8_t *)req, sizeof(req) - 1u, &sent, 10000u);
+				size_t             got = 0u;
+				const alp_status_t rs  = cc3501e_sock_recv(fw, h, rx, sizeof(rx), &got, 10000u);
+				if (rs == ALP_OK && got >= 12u) {
+					rx[11] = (uint8_t)0;
+					printf("[cc3501e-bringup] NET INTERNET OK -- %u B, reply starts: %s\n",
+					       (unsigned)got,
+					       (const char *)rx);
+				} else {
+					printf("[cc3501e-bringup] NET recv -> %d (%u B)\n", (int)rs, (unsigned)got);
+				}
+			}
+			(void)cc3501e_sock_close(fw, h, 5000u);
+		}
+	}
+}
 static void cc3501e_wifi_probe(cc3501e_t *fw)
 {
 	g_cc3501e_witness.phase = CC3501E_PHASE_WIFI;
@@ -352,6 +461,71 @@ static void cc3501e_wifi_probe(cc3501e_t *fw)
  */
 #ifdef CC3501E_OTA_DEMO
 #define CC3501E_OTA_DEMO_TIMEOUT_MS 20000u
+/* #1610 BENCH: the streaming loop uses a SHORT per-request timeout so a dead
+ * link is reported in seconds instead of silently eating 20 s per chunk. */
+#define CC3501E_OTA_BENCH_TIMEOUT_MS 3000u
+/* The first window flush also runs psa_fwu_start (manifest + slot prep), which
+ * is far slower than a plain 4-block flush -- give it real room. */
+/* The FIRST flush also runs psa_fwu_start, which prepares/erases the secondary
+ * slot on the 8 MB QSPI part -- bench 2026-08-21 measured flush_pending still
+ * set after a full 60 s with dev_state=1 (WRITING) and the bridge still
+ * ANSWERING, i.e. healthy but slow.  Budget for the erase, not for a plain
+ * 4-block flush. */
+/* 600 s.  The FIRST flush is where psa_fwu_start consumes the manifest, and on
+ * TI's flow that call does slot preparation of its own -- so a session pays a
+ * prepare at BEGIN and AGAIN here (the manifest only arrives with the first
+ * 16 KiB, so it cannot be merged).  Silicon 2026-08-21: at 300 s the device
+ * still reported dev_state=1 (WRITING) dev_cursor=16384 flush=1 and answered
+ * STATUS in 16 ms -- alive and mid-flush, just not finished. */
+#define CC3501E_OTA_BENCH_FLUSH_WAIT_MS 600000u
+#define CC3501E_OTA_BENCH_FLUSH_POLL_MS \
+	1u /* was 50u: a 50 ms sleep per poll iteration, several per chunk, dominated the ~265 ms spent on each 256 B chunk (wire time ~0.14 ms) */
+/* Cap each STATUS frame so the hold-off budget above is REAL.  Charging only the
+ * sleep while cc3501e_ota_status blocked for CC3501E_OTA_BENCH_TIMEOUT_MS made
+ * the nominal 60 s hold-off run for up to ~1 h, which is why the 2026-08-21 run
+ * sat at off=16384 forever and printed nothing. */
+#define CC3501E_OTA_BENCH_FLUSH_POLL_TIMEOUT_MS 200u
+
+/* #1610 DISCRIMINATOR: set to 0 to run the OTA with NO preceding radio activity.
+ * Five hypotheses have been refuted on silicon (slow erase, HwiP masking of the
+ * erase walk, a 4 MB-vs-8 MB flash-map mismatch, priority inversion on
+ * XMEMWFF3's writeMutex, and stack overflow in the manifest crypto) -- BEGIN
+ * fails IDENTICALLY at 81 s, 181 s and 361 s every time, which rules out
+ * duration entirely.  The remaining structural difference between "works" and
+ * "hangs" is that WIFI_SCAN + BLE_ENABLE run immediately before the OTA and
+ * bring the Wi-Fi/NWP stack (which also touches flash) up first. */
+/* BACK ON.  This was set to 0 as a discriminator and left there; every flush
+ * test since has run with the NWP DOWN.  TI's ota_example calls psa_fwu_start
+ * from inside its network stack with Wi-Fi/TLS live, so if PSA-FWU delegates
+ * manifest verify or slot open to the NWP over HIF it would block forever
+ * with the radio off -- which is exactly the observed psa_fwu_start hang. */
+#define CC3501E_BENCH_RADIO_BEFORE_OTA \
+	1 /* RESOLVED 2026-08-22: the radio was NOT the cause.  psa_fwu_start hung
+	   because ota.window was MISALIGNED (struct offset 41 = address 1 mod 4, and
+	   the manifest pointer feeds a crypto/DMA path); with aligned(32) on that
+	   buffer the full 1095276 B OTA completes.  PSA-FWU does NOT delegate
+	   manifest verify to the NWP, so the radio runs before OTA as in production. */
+
+/* Progress print shared by the success and "landed late" paths -- the landed path
+ * used to skip it, punching holes in the 4 KiB ladder. */
+static void ota_progress(size_t off, size_t total, int64_t t_begin)
+{
+	if ((off % 4096u) < 256u) {
+		printf("[cc3501e-bringup] OTA progress %u/%u B t=%u ms\n",
+		       (unsigned)off,
+		       (unsigned)total,
+		       (unsigned)(k_uptime_get() - t_begin));
+	}
+}
+
+/* #1610 BENCH SIZE LADDER -- comment out for a full-size image.  Set BELOW
+ * CC3501E_OTA_WINDOW (16384) to do zero mid-stream flushes. */
+/* Truncated to 20480 = just PAST the first window flush (CC3501E_OTA_WINDOW
+ * 16384).  The polled bridge currently runs ~26 B/s, so a full 1,095,276 B
+ * image cannot finish in a bench window -- but 20 KiB can, and it exercises
+ * the exact boundary that killed every DMA build. */
+/* #define CC3501E_OTA_TRUNCATE_LEN 20480u */ /* FULL image */
+
 #ifdef CC3501E_OTA_PROMOTE
 /*
  * Promote (unjam) an already-committed pending image.  The over-bridge install
@@ -395,8 +569,20 @@ static void cc3501e_demo_ota(cc3501e_t *fw)
 	extern const unsigned char cc3501e_ota_candidate[];
 	extern const unsigned int  cc3501e_ota_candidate_len;
 	const uint8_t             *image      = cc3501e_ota_candidate;
-	const size_t               image_len  = (size_t)cc3501e_ota_candidate_len;
+	size_t                     image_len  = (size_t)cc3501e_ota_candidate_len;
 	const bool                 real_image = true;
+	/* #1610 BENCH SIZE LADDER.  CC3501E_OTA_WINDOW is 4*4096 = 16384, so an
+	 * image BELOW it performs zero mid-stream flushes and defers all flash work
+	 * to FINISH.  Truncating isolates "the mid-stream flush breaks the bridge"
+	 * from "any flash blackout breaks the bridge".  A truncated image cannot
+	 * pass psa_fwu_finish's verification -- a clean FINISH error is the EXPECTED
+	 * result here; the observable is whether the WRITEs land and the bridge
+	 * SURVIVES, not whether the update installs. */
+#ifdef CC3501E_OTA_TRUNCATE_LEN
+	if (image_len > (size_t)(CC3501E_OTA_TRUNCATE_LEN)) {
+		image_len = (size_t)(CC3501E_OTA_TRUNCATE_LEN);
+	}
+#endif
 #else
 	/* Illustrative inert blob (NOT a signed image -- see the note above). */
 	static uint8_t inert[1024];
@@ -408,11 +594,232 @@ static void cc3501e_demo_ota(cc3501e_t *fw)
 	const bool     real_image = false;
 #endif
 
-	printf("[cc3501e-bringup] OTA: streaming a %u B %s image via cc3501e_ota_update...\n",
+	printf("[cc3501e-bringup] OTA: streaming a %u B %s image (hand-driven begin/write/status, "
+	       "#1610 bench)...\n",
 	       (unsigned)image_len,
 	       real_image ? "SIGNED candidate" : "inert demo");
 
-	alp_status_t s = cc3501e_ota_update(fw, image, image_len, CC3501E_OTA_DEMO_TIMEOUT_MS);
+	/* #1610 BENCH: drive begin/write/status by hand instead of cc3501e_ota_update,
+	 * purely for visibility.  update() aborts the session on failure, which wipes
+	 * the cursor before it can be read -- so every failed run reported
+	 * state=0 written=0/0 and said nothing about WHERE it stopped.  Here the
+	 * cursor is logged as it advances and again at the exact failure point. */
+	/* Enter OTA UPDATE MODE FIRST -- before BEGIN, never mid-session.  A
+	 * callback/DMA SPI_open on the bridge slave PERMANENTLY prevents
+	 * psa_fwu_start/psa_fwu_write from returning (silicon 2026-08-21), so without
+	 * this the device disappears mid-update no matter what the host does.  The
+	 * hand-driven path below bypasses cc3501e_ota_update, which does this for its
+	 * callers -- so it has to be done explicitly here.  The device warm-reboots and
+	 * the confirm is a 0x47 readback, hence the whole-operation budget.
+	 *
+	 * Fatal on purpose: continuing in DMA mode cannot work, and a "the OTA hung"
+	 * report from that state costs a bench session to re-diagnose. */
+	const int64_t      t_mode = k_uptime_get();
+	const alp_status_t ms     = cc3501e_ota_update_mode(fw, true, CC3501E_OTA_DEMO_TIMEOUT_MS);
+	printf("[cc3501e-bringup] OTA update mode -> %d (%u ms)\n",
+	       (int)ms,
+	       (unsigned)(k_uptime_get() - t_mode));
+	if (ms != ALP_OK) {
+		printf("[cc3501e-bringup] OTA: NOT in update mode -- refusing to stream (psa_fwu "
+		       "would never return on the DMA bridge)\n");
+		return;
+	}
+
+	int64_t      t_begin = k_uptime_get();
+	alp_status_t s       = ALP_ERR_IO;
+	/* BEGIN can legitimately take minutes: if the target slot is not READY the
+	 * device erases it (TI's own example prints "erasing flash, please wait...").
+	 * Retry and print the DEVICE's own view between attempts -- state/cursor/flush
+	 * from OTA_STATUS -- so a slow erase is distinguishable from a dead link.
+	 * Without this the run printed NOTHING for the whole wait and every diagnosis
+	 * was a guess. */
+	for (unsigned attempt = 0u; attempt < 2u; ++attempt) {
+		s = cc3501e_ota_begin(fw, (uint32_t)image_len, CC3501E_OTA_DEMO_TIMEOUT_MS);
+		if (s == ALP_OK) break;
+		alp_cc3501e_ota_status_t bs = { 0 };
+		const alp_status_t       bq = cc3501e_ota_status(fw, &bs, 0u);
+		printf("[cc3501e-bringup] OTA begin attempt %u -> %d after %u ms; device: "
+		       "status=%d state=%d cursor=%d busy=%d\n",
+		       attempt,
+		       (int)s,
+		       (unsigned)(k_uptime_get() - t_begin),
+		       (int)bq,
+		       (bq == ALP_OK) ? (int)bs.state : -1,
+		       (bq == ALP_OK) ? (int)bs.bytes_written : -1,
+		       (bq == ALP_OK) ? (int)bs.reserved[1] : -1);
+	}
+	printf("[cc3501e-bringup] OTA begin -> %d (%u ms)\n",
+	       (int)s,
+	       (unsigned)(k_uptime_get() - t_begin));
+	/* #1610 SIDE-OF-THE-LINK PROBE.  Every failure so far assumed the CC35 died,
+	 * but a cold cycle resets BOTH ends so it cannot tell us which one.  The
+	 * durations are ALSO entirely explained by the HOST's own timers (361046 ms =
+	 * blind settle + confirm budget), i.e. the device contributes nothing -- it is
+	 * silent from the first moment, not slow.  So ask directly: after a failed
+	 * BEGIN, PING as-is, then do a HOST-ONLY resync (cc3501e_reset re-syncs the
+	 * link without touching WIFI_EN/nRESET), then PING again, then a hard reset.
+	 * PING recovering after a host-only step means the HOST's SPI desynced and the
+	 * CC35 was healthy all along -- a completely different bug from "the device
+	 * crashes in psa_fwu". */
+	if (s != ALP_OK) {
+		const alp_status_t p0 = cc3501e_ping(fw);
+		const alp_status_t r1 = cc3501e_reset(fw);
+		const alp_status_t p1 = cc3501e_ping(fw);
+		const alp_status_t r2 = cc3501e_hard_reset(fw);
+		const alp_status_t p2 = cc3501e_ping(fw);
+		printf("[cc3501e-bringup] OTA post-fail probe: ping=%d | reset=%d ping=%d | "
+		       "hard_reset=%d ping=%d\n",
+		       (int)p0,
+		       (int)r1,
+		       (int)p1,
+		       (int)r2,
+		       (int)p2);
+	}
+
+	if (s == ALP_OK) {
+		/* ALP_CC3501E_OTA_MAX_CHUNK = ALP_CC3501E_MAX_PAYLOAD(512) - 4 = 508, so 256
+		 * was sending half-empty frames and paying the per-frame gate cost twice as
+		 * often.  The device stages chunks in RAM and flushes on its own 4096 B block
+		 * boundary, so the host chunk does not need to be page-aligned. */
+		const size_t chunk = (size_t)ALP_CC3501E_OTA_MAX_CHUNK;
+		size_t       off   = 0u;
+		uint32_t     stall = 0u;
+		/* Last SUCCESSFUL status read.  Printing a status struct whose read FAILED
+		 * reports zeros as if they were device truth -- that is how an earlier run
+		 * was misread as "device idle" when STATUS had simply timed out. */
+		alp_cc3501e_ota_status_t last_ok = { 0 };
+		bool                     have_ok = false;
+		while (off < image_len) {
+			size_t n = image_len - off;
+			if (n > chunk) n = chunk;
+			const int64_t t_w     = k_uptime_get();
+			s                     = cc3501e_ota_write(fw, (uint32_t)off, image + off, n, 0u);
+			const int64_t t_w_end = k_uptime_get();
+			if (s == ALP_OK) {
+				off += n;
+				stall = 0u;
+				ota_progress(off, image_len, t_begin);
+				continue;
+			}
+			/* BUSY/IO = the device queued a window flush and did NOT consume this
+			 * chunk.  Hold off ALL payload and poll HEADER-ONLY until flush_pending
+			 * clears, then retry the SAME chunk (mirrors cc3501e_ota_update). */
+			alp_cc3501e_ota_status_t ps     = { 0 };
+			alp_status_t             qs     = ALP_ERR_IO;
+			bool                     landed = false;
+			const int64_t            t_hold = k_uptime_get();
+			/* 0, NOT -1.  At -1 the "every 30 s" test below is true on the FIRST
+			 * iteration of every hold-off, so a 55 ms hold printed a ~110-byte
+			 * heartbeat too.  Measured on silicon: 2244 of those lines, 645915 B of
+			 * console in one OTA = 56.1 s of blocking UART at 115200 against a 118 s
+			 * transfer -- HALF the wall time of the OTA was this example describing
+			 * itself.  Starting at 0 keeps the intent (a long wait still reports as it
+			 * goes, so a killed run yields its verdict) and costs nothing for the
+			 * short hold-offs that dominate a healthy stream. */
+			int64_t last_beat = 0;
+			for (;;) {
+				qs = cc3501e_ota_status(fw, &ps, 0u);
+				if (qs == ALP_OK) {
+					last_ok = ps;
+					have_ok = true;
+					if (ps.reserved[1] == 0u) {
+						if (ps.bytes_written >= (uint32_t)(off + n)) landed = true;
+						break;
+					}
+				}
+				/* Real clock, not a model of one: charging a fixed cost per iteration
+				 * made a nominal 60 s wait really ~12.5 s. */
+				const int64_t held_now = k_uptime_get() - t_hold;
+				/* HEARTBEAT.  Report the device's breadcrumb AS WE WAIT, not only at
+				 * the end: three runs were killed externally mid-hold-off and every
+				 * one lost its whole verdict because the data only printed on exit.
+				 * Print-as-you-go so a truncated run still yields the answer. */
+				if (held_now / 30000 != last_beat) {
+					last_beat = held_now / 30000;
+					printf("[cc3501e-bringup] OTA flush wait %u s: status=%d dev_state=%d "
+					       "cursor=%d flush=%d stage=%d\n",
+					       (unsigned)(held_now / 1000),
+					       (int)qs,
+					       have_ok ? (int)last_ok.state : -1,
+					       have_ok ? (int)last_ok.bytes_written : -1,
+					       have_ok ? (int)last_ok.reserved[1] : -1,
+					       have_ok ? (int)last_ok.reserved[2] : -1);
+				}
+				if (held_now >= (int64_t)CC3501E_OTA_BENCH_FLUSH_WAIT_MS) break;
+				k_msleep(CC3501E_OTA_BENCH_FLUSH_POLL_MS);
+			}
+			const unsigned held = (unsigned)(k_uptime_get() - t_hold);
+			if (landed) {
+				off += n;
+				stall = 0u;
+				ota_progress(off, image_len, t_begin);
+				continue;
+			}
+			/* stall == 0 here is the NORMAL window-flush boundary -- `landed` cannot be
+			 * true when the flush merely cleared without consuming this chunk, so
+			 * calling it a failure mislabels the healthy path.  Only a REPEAT is bad. */
+			if (stall == 0u) {
+				printf("[cc3501e-bringup] OTA window-flush hold-off off=%u write=%d (%u ms) "
+				       "status=%d held=%u ms dev_state=%d dev_cursor=%d flush=%d stage=%d "
+				       "t=%u ms\n",
+				       (unsigned)off,
+				       (int)s,
+				       (unsigned)(t_w_end - t_w),
+				       (int)qs,
+				       held,
+				       have_ok ? (int)last_ok.state : -1,
+				       have_ok ? (int)last_ok.bytes_written : -1,
+				       have_ok ? (int)last_ok.reserved[1] : -1,
+				       /* stage = the device's own breadcrumb (STATUS reserved[2]),
+				        * in TWO encodings -- see include/alp/protocol/cc3501e.h:
+				        *   1..0x3F  the psa_fwu_* call that failed the last flush
+				        *   0x40|p   no psa fault; low 6 bits = transport phase
+				        *   0xC0|p   same, and the bridge is running POLLED
+				        * so 64 / 192 on a healthy run is a phase report, NOT a
+				        * fault. */
+				       have_ok ? (int)last_ok.reserved[2] : -1,
+				       (unsigned)(k_uptime_get() - t_begin));
+			}
+			if (have_ok && last_ok.state == ALP_CC3501E_OTA_STATE_ERROR) {
+				printf("[cc3501e-bringup] OTA device latched ERROR at off=%u -- not retrying\n",
+				       (unsigned)off);
+				break;
+			}
+			if (++stall > 5u) {
+				printf("[cc3501e-bringup] OTA STOPPED at off=%u/%u write=%d status=%d "
+				       "dev_state=%d dev_cursor=%d flush=%d stage=%d (last_ok=%d)\n",
+				       (unsigned)off,
+				       (unsigned)image_len,
+				       (int)s,
+				       (int)qs,
+				       have_ok ? (int)last_ok.state : -1,
+				       have_ok ? (int)last_ok.bytes_written : -1,
+				       have_ok ? (int)last_ok.reserved[1] : -1,
+				       have_ok ? (int)last_ok.reserved[2] : -1,
+				       have_ok ? 1 : 0);
+				break;
+			}
+		}
+		if (off >= image_len) {
+			printf("[cc3501e-bringup] OTA all %u B accepted -- FINISH\n", (unsigned)image_len);
+			s = cc3501e_ota_finish(fw, CC3501E_OTA_DEMO_TIMEOUT_MS);
+			printf("[cc3501e-bringup] OTA finish -> %d\n", (int)s);
+		} else {
+			s = ALP_ERR_IO;
+		}
+	}
+
+	/* LEAVE UPDATE MODE on every path that did not reach FINISH.  A FINISH that
+	 * staged takes the device out by itself, but the ERROR-latch break, the
+	 * stall break and the short-stream exit above all fall through here with the
+	 * device still parked in the radio-dead polled boot -- where WIFI_SCAN,
+	 * BLE_ENABLE and GET_MAC queue forever and answer BUSY forever, because
+	 * nothing drains the worker on that boot.  The soak that follows this
+	 * function would then look permanently broken.  This example is the pattern
+	 * customers copy, so it has to model the exit, not just the entry. */
+	if (s != ALP_OK) {
+		(void)cc3501e_ota_update_mode(fw, false, CC3501E_OTA_DEMO_TIMEOUT_MS);
+	}
 
 	/* Read back the session state regardless of the update result -- this is
 	 * the field-diagnostic call (`alp companion ota status` uses the same). */
@@ -426,6 +833,21 @@ static void cc3501e_demo_ota(cc3501e_t *fw)
 		       (unsigned)st.bytes_written,
 		       (unsigned)st.total_len,
 		       (int)(int8_t)st.reserved[0]);
+	}
+	/* #1610: did the CC3501E RESET mid-stream?  A session that reads IDLE with
+	 * total_len=0 after a stream either never opened or was wiped by a reboot --
+	 * and only uptime can tell those apart.  Compare against the uptime printed at
+	 * bring-up: a small value here means the device restarted under us. */
+	{
+		alp_cc3501e_diag_info_t di2 = { 0 };
+		if (cc3501e_diag_info(fw, &di2) == ALP_OK) {
+			printf("[cc3501e-bringup] OTA post-diag: uptime=%u ms reset_cause=%u "
+			       "last_error=%u free_heap=%u\n",
+			       (unsigned)di2.uptime_ms,
+			       (unsigned)di2.reset_cause,
+			       (unsigned)di2.last_error,
+			       (unsigned)di2.free_heap_bytes);
+		}
 	}
 
 	if (s == ALP_OK) {
@@ -457,6 +879,16 @@ static void cc3501e_demo_ota(cc3501e_t *fw)
 	}
 }
 #endif /* CC3501E_OTA_DEMO */
+
+/* The OTA-demo block above defines CC3501E_BENCH_RADIO_BEFORE_OTA, but the
+ * liveness soak references it unconditionally.  Without this default the
+ * example fails to compile in its DEFAULT configuration (every CC3501E_OTA_*
+ * option is OFF by default in CMakeLists.txt), which is exactly the
+ * configuration twister builds.  Default 1: bring the radio up normally.
+ */
+#ifndef CC3501E_BENCH_RADIO_BEFORE_OTA
+#define CC3501E_BENCH_RADIO_BEFORE_OTA 1
+#endif
 
 int main(void)
 {
@@ -689,6 +1121,20 @@ int main(void)
 				g_cc3501e_witness.mac_lo = (uint32_t)mac[0] | ((uint32_t)mac[1] << 8) |
 				                           ((uint32_t)mac[2] << 16) | ((uint32_t)mac[3] << 24);
 				g_cc3501e_witness.mac_hi = (uint32_t)mac[4] | ((uint32_t)mac[5] << 8);
+				/* Is the READY line REAL?  Every "P2_6 reads 0" claim so far came
+				 * from a raw register poke at 0x49002050 bit6 taken from a doc,
+				 * never from the GPIO driver.  Read it the supported way while the
+				 * device is idle (main.c raises READY at boot): 1 = the CC35
+				 * GPIO17 -> P2_6 net works and the READY gate can be trusted;
+				 * 0 = the line really is dead here and polled update mode cannot
+				 * be timed. */
+				{
+					bool               rdy = false;
+					const alp_status_t rs  = (fw.ready_pin != NULL)
+					                             ? alp_gpio_read(fw.ready_pin, &rdy)
+					                             : ALP_ERR_NOSUPPORT;
+					printf("[cc3501e-bringup] READY probe: rc=%d level=%d\n", (int)rs, rdy ? 1 : 0);
+				}
 				printf("[cc3501e-bringup] soak GET_MAC ok %02x:%02x:%02x:%02x:%02x:%02x\n",
 				       mac[0],
 				       mac[1],
@@ -704,6 +1150,7 @@ int main(void)
 		 * = the bench AP was seen.  Gated like GET_MAC so it runs on the stable
 		 * link, not the cold first-contact window; retried until it lands. */
 		static bool scan_done = false;
+		if (!CC3501E_BENCH_RADIO_BEFORE_OTA) scan_done = true; /* #1610 discriminator */
 		if (!scan_done && g_cc3501e_witness.mac_ok == 1u && s == ALP_OK) {
 			static cc3501e_scan_record_t scan[CC3501E_SCAN_MAX_RECORDS];
 			size_t                       n = 0u;
@@ -725,6 +1172,7 @@ int main(void)
 		 * NimBLE host came up through the bridge.  Gated/retried like the scan so
 		 * it runs on the stable link.  (Firmware without -Ble -> NOT_READY.) */
 		static bool ble_done = false;
+		if (!CC3501E_BENCH_RADIO_BEFORE_OTA) ble_done = true; /* #1610 discriminator */
 		if (!ble_done && g_cc3501e_witness.mac_ok == 1u && s == ALP_OK) {
 			alp_status_t bs              = cc3501e_ble_enable(&fw, CC3501E_MAC_TIMEOUT_MS);
 			g_cc3501e_witness.ble_status = (uint32_t)bs;
@@ -737,6 +1185,52 @@ int main(void)
 				printf("[cc3501e-bringup] soak BLE_ENABLE -> NOT_READY (no -Ble build)\n");
 			} else {
 				printf("[cc3501e-bringup] soak BLE_ENABLE -> %d\n", (int)bs);
+			}
+		}
+
+		/* After the SCAN lands, ASSOCIATE once -- only when credentials were given
+		 * at build time (never hardcoded; see CC3501E_WIFI_SSID above).
+		 *
+		 * This is the step the earlier refactor DEFERRED and never re-wired:
+		 * cc3501e_wifi_probe() was left as a bare (void) cast, so the whole
+		 * CONNECT/RSSI/IP path was dead code the compiler stripped -- Wi-Fi
+		 * association had never actually run from this example.  Gated on
+		 * scan_done so it runs on the proven-stable link like the SCAN and BLE
+		 * steps, and latched to ONE attempt (the link has been observed to wedge
+		 * after repeated connects). */
+		static bool conn_done = false;
+		if (CC3501E_WIFI_SSID[0] == '\0') {
+			conn_done = true; /* no credentials compiled in -- nothing to do */
+		}
+		if (!conn_done && scan_done && s == ALP_OK) {
+			/* BOUNDED RETRY, not one-shot.  WIFI_CONNECT is intermittent on this
+			 * silicon (observed alternating ALP_OK / ALP_ERR_IO across runs), but the
+			 * bridge SURVIVES a failed attempt -- PINGs keep returning 0 immediately
+			 * after -- so a retry is safe and does not reproduce the historical
+			 * "wedges after repeated connects" failure.  Bounded so an unreachable AP
+			 * cannot spin the soak forever. */
+			static uint8_t conn_tries = 0u;
+			if (++conn_tries >= 5u) {
+				conn_done = true;
+			}
+			const alp_status_t cs = cc3501e_wifi_connect(&fw,
+			                                             CC3501E_WIFI_SSID,
+			                                             (uint8_t)CC3501E_WIFI_SECURITY,
+			                                             CC3501E_WIFI_PASS,
+			                                             CC3501E_CONN_TIMEOUT_MS);
+			printf("[cc3501e-bringup] soak WIFI_CONNECT -> %d\n", (int)cs);
+			if (cs == ALP_OK) {
+				conn_done   = true;
+				int8_t rssi = 0;
+				if (cc3501e_wifi_rssi(&fw, &rssi) == ALP_OK) {
+					printf("[cc3501e-bringup] soak RSSI -> %d dBm\n", (int)rssi);
+				}
+				uint8_t ip[4] = { 0 };
+				if (cc3501e_wifi_get_ip(&fw, ip) == ALP_OK) {
+					printf(
+					    "[cc3501e-bringup] soak IP -> %u.%u.%u.%u\n", ip[0], ip[1], ip[2], ip[3]);
+				}
+				cc3501e_net_probe(&fw);
 			}
 		}
 

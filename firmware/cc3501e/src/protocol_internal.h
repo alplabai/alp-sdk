@@ -402,6 +402,11 @@ alp_cc3501e_resp_t handle_ota_promote(const uint8_t *req,
                                       uint8_t       *reply_data,
                                       size_t         reply_cap,
                                       size_t        *reply_data_len);
+alp_cc3501e_resp_t handle_ota_update_mode(const uint8_t *req,
+                                          size_t         req_len,
+                                          uint8_t       *reply_data,
+                                          size_t         reply_cap,
+                                          size_t        *reply_data_len);
 alp_cc3501e_resp_t handle_ota_status(const uint8_t *req,
                                      size_t         req_len,
                                      uint8_t       *reply_data,

@@ -18,7 +18,10 @@
  * struct in the drain.
  */
 
+#include <string.h>
+
 #include "protocol_internal.h"
+#include "../hal/cc3501e_hw.h"
 
 /* SOCK_OPEN (0x20): req = alp_cc3501e_sock_open_t { family | type | protocol |
  * reserved } = 4 B.  Reply DATA = alp_cc3501e_sock_handle_t (4 B). */
@@ -86,6 +89,41 @@ alp_cc3501e_resp_t handle_sock_recv(const uint8_t *req,
 {
 	*reply_data_len = 0u;
 	if (req_len != sizeof(alp_cc3501e_sock_recv_t)) return ALP_CC3501E_RESP_ERR_INVALID;
+
+	/* FAST PATH: serve from the prefetch ring, synchronously.
+	 *
+	 * This runs in the SPI callback and must not call lwIP -- but it does not
+	 * need to: cc3501e_hw_sock_pump() has already done the lwIP read on the task
+	 * and left the bytes in a ring, so all that happens here is a memcpy.  Same
+	 * shape as cc3501e_hw_ota_write, which is synchronous for the same reason.
+	 *
+	 * That turns CMD_SOCK_RECV from a submit/collect PAIR -- worker routed, so
+	 * the first request always answers BUSY and the host must come back -- into
+	 * ONE bridge transaction with no worker round trip and no wait for the
+	 * worker loop to come round.  cc3501e_hw_sock_recv_ring returns -1 when this
+	 * handle is not the prefetched one, and then we fall through to the original
+	 * worker path unchanged. */
+	{
+		const uint16_t handle  = (uint16_t)((uint16_t)req[0] | ((uint16_t)req[1] << 8));
+		const uint16_t max_len = (uint16_t)((uint16_t)req[2] | ((uint16_t)req[3] << 8));
+		const size_t   hdr     = sizeof(alp_cc3501e_sock_recv_resp_t);
+		if (reply_cap > hdr) {
+			size_t room = reply_cap - hdr;
+			if (max_len != 0u && room > (size_t)max_len) room = (size_t)max_len;
+			uint16_t  got = 0u;
+			const int rc =
+			    cc3501e_hw_sock_recv_ring(handle, &reply_data[hdr], (uint16_t)room, &got);
+			if (rc >= 0) {
+				/* from[] is zeroed for STREAM sockets; data_len then the bytes. */
+				memset(reply_data, 0, hdr);
+				reply_data[sizeof(alp_cc3501e_sock_addr_t)]      = (uint8_t)(got & 0xFFu);
+				reply_data[sizeof(alp_cc3501e_sock_addr_t) + 1u] = (uint8_t)((got >> 8) & 0xFFu);
+				*reply_data_len                                  = hdr + (size_t)got;
+				return ALP_CC3501E_RESP_OK;
+			}
+		}
+	}
+
 	return handle_worker_routed_payload_reply(ALP_CC3501E_CMD_SOCK_RECV,
 	                                          req,
 	                                          req_len,

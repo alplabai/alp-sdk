@@ -32,6 +32,15 @@ param(
     [string]$ToolboxDir   = "C:\ti\simplelink_wifi_toolbox_4.2.4\simplelink_wifi_toolbox_win_4_2_4",
     [string]$Transport    = "spi",  # spi | sdio
     [switch]$OtaSelftest,           # build the OTA-self-install validation updater (embeds cc3501e_ota_candidate.c, -DCC3501E_OTA_SELFTEST)
+    # #1610 bench validation: drive the WINDOWED OTA path (begin/write/flush/finish)
+    # locally from the bring-up task against the embedded candidate, because the
+    # console cannot stream OTA_WRITE and the streaming app needs hal_alif.  Also
+    # embeds cc3501e_ota_candidate.c.  Proves the flush mechanics, NOT the
+    # host/bridge contention -- see cc3501e_ota_window_selftest().
+    [switch]$OtaWindowSelftest,
+    # Cap the selftest stream (0 = whole image) and opt into FINISH/install.
+    [int]$OtaWindowBytes = 0,
+    [switch]$OtaWindowFinish,
     [switch]$WifiHostDriver,        # link the CC35xx Wi-Fi host driver (-DCC3501E_WIFI; enables GET_MAC / scan / connect bodies)
     [switch]$Ble                    # ALSO link Apache NimBLE + ble_interface (-DCC3501E_BLE; enables BLE enable/advertise). Implies -WifiHostDriver (shared HIF -> Wlan_Start first).
 )
@@ -112,9 +121,57 @@ if ($fwverRaw -match '^([0-9]+)\.([0-9]+)\.([0-9]+)$') {
 }
 Write-Host "== fw_version marker: $fwverRaw -> $fwU16 (from firmware-version.txt) =="
 $cflags += "-DCC3501E_BRIDGE_FW_VERSION_U16=$fwU16"
+# --- OTA update mode: raise the driver's DMA threshold (ALWAYS, both modes) ---
+# SysConfig hard-emits `.minDmaTransferSize = 10` and exposes NO property to override
+# it.  SPIWFF3DMA's polling path is taken only when
+#   transferMode == SPI_MODE_BLOCKING && transaction->count < hwAttrs->minDmaTransferSize
+#   && returnPartial disabled && (mode == SPI_CONTROLLER || timeout == SPI_WAIT_FOREVER)
+# so at the stock 10 only the two 4-byte header phases would poll: every payload phase
+# would fall into the BLOCKING-but-DMA branch, which PRIMES a DMA transaction (the exact
+# thing update mode exists to avoid -- a DMA claim permanently wedges psa_fwu_start) and
+# then SemaphoreP_pend()s forever.  The floor is a whole frame:
+# ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD = 4 + 512 = 516 B.  NEVER trim this
+# toward ~300 -- 260 B is only TODAY's transfer size, because cc3501e_ota_update happens
+# to use a 256 B host chunk.
+#
+# Unconditional because it is provably inert in the normal DMA/callback mode: the gate
+# above short-circuits on its FIRST term (transferMode == SPI_MODE_BLOCKING), which a
+# callback-mode transfer never satisfies.  The bridge mode is a RUNTIME choice now (a
+# persisted flag consumed at boot), not a build switch, so one image must carry both.
+$cfg = Join-Path $out "ti_drivers_config.c"
+(Get-Content $cfg -Raw) -replace "\.minDmaTransferSize = 10,", ".minDmaTransferSize = 1024," | Set-Content $cfg -NoNewline
+# VERIFY, do not assume.  A bare -replace that matches nothing leaves the stock value
+# and still exits 0: the image then builds fine and sends every polled payload phase
+# into the DMA branch -- the exact claim wedge update mode exists to avoid -- with no
+# build-time signal at all.  Same post-condition discipline as the .TI.noinit patch.
+if ((Get-Content $cfg -Raw) -notmatch "\.minDmaTransferSize = 1024,") {
+    throw "build_ti.ps1: minDmaTransferSize patch did not apply in $cfg (SysConfig output drifted). Polled payload phases would fall into the DMA branch and wedge psa_fwu."
+}
 
-$txdef = if ($Transport -eq 'sdio') { @('-DCC3501E_CONTROL_TRANSPORT_SDIO=1') } else { @() }
+# GPIO17 = the bridge READY / host-IRQ line (CC35 GPIO17 -> Alif P2_6, schematic net
+# CC3501_iRQ).  cc3501e_aen.syscfg DOCUMENTS it as "WIFI_SPI0.READY" but SysConfig has
+# no GPIO instance for it, so the generated table emits GPIOWFF3_DO_NOT_CONFIG: the pad
+# is never muxed to GPIO output and every GPIO_write(17, ...) is silently dropped.  On
+# silicon that reads back as a permanently LOW READY (host probe: rc=0 level=0), which
+# makes the host treat the line as unwired and fall back to fixed inter-phase delays --
+# the polled bridge then clocks a slave that has not re-armed, and because
+# spiPollingTransfer leaves the SPI IP enabled with the RX FIFO flushed only by
+# SPI_open, those bytes become a PERMANENT phase shift rather than lost data.
+# Configure it here for the same reason minDmaTransferSize is patched above: SysConfig
+# hard-emits the wrong value and exposes no property to override it.  Idles LOW =
+# "bridge busy", which is what the firmware's lazy ready_ensure_init() also asserts, so
+# the host holds off through boot until the first cc3501e_bridge_ready().
+(Get-Content $cfg -Raw) -replace "GPIOWFF3_DO_NOT_CONFIG, /\* GPIO17 \*/", "GPIO_CFG_OUTPUT_INTERNAL | GPIO_CFG_OUT_STR_LOW | GPIO_CFG_OUT_LOW, /* GPIO17 = bridge READY */" | Set-Content $cfg -NoNewline
+if ((Get-Content $cfg -Raw) -notmatch "GPIO17 = bridge READY") {
+    throw "build_ti.ps1: GPIO17 READY patch did not apply in $cfg (SysConfig output drifted). READY would never be driven and the host would fall back to blind inter-phase delays."
+}
+
+$txdef = @(if ($Transport -eq 'sdio') { '-DCC3501E_CONTROL_TRANSPORT_SDIO=1' })
+if ($env:CC3501E_RADIO_SPEEDTEST) { $txdef = @($txdef) + @('-DCC3501E_RADIO_SPEEDTEST=1') }
 if ($OtaSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_SELFTEST') }
+if ($OtaWindowSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_WINDOW_SELFTEST') }
+if ($OtaWindowBytes -gt 0) { $txdef = @($txdef) + @("-DCC3501E_OTA_WINDOW_SELFTEST_BYTES=$OtaWindowBytes") }
+if ($OtaWindowFinish) { $txdef = @($txdef) + @('-DCC3501E_OTA_WINDOW_SELFTEST_FINISH') }
 if ($WifiHostDriver) {
     # CC35xx Wi-Fi host driver: enables the real GET_MAC/scan/connect bodies (P0-5/P0-6).
     # The real OSI layer (osi_dpl.c, compiled below) provides osi_uSleep + the ~30-func OSI
@@ -236,12 +293,12 @@ $inc += @("-I$SdkDir\source\ti\drivers\net\wifi\wifi_host_driver\inc_adapt",
 # OTA-self-install validation updater: also embed the signed candidate vendor image
 # blob (the streamed OTA path is driven over the bridge instead; this is the
 # embedded-blob self-test that validates the swap mechanism without a host).
-if ($OtaSelftest) {
+if ($OtaSelftest -or $OtaWindowSelftest) {
     # cc3501e_ota_candidate.c is a signed firmware binary (bin2c C-array) -- an
     # internal-only artifact (alp-sdk #590); NOT committed to the public repo.
     # Stage it from alp-sdk-internal before an -OtaSelftest build.
     $cand = "$fw\hal\ti\cc3501e_ota_candidate.c"
-    if (-not (Test-Path $cand)) { throw "-OtaSelftest needs $cand -- stage it from alp-sdk-internal\firmware\cc3501e\hal\ti\ (see $fw\hal\ti\cc3501e_ota_candidate.README.md)" }
+    if (-not (Test-Path $cand)) { throw "-OtaSelftest/-OtaWindowSelftest needs $cand -- stage it from alp-sdk-internal\firmware\cc3501e\hal\ti\ (see $fw\hal\ti\cc3501e_ota_candidate.README.md)" }
     $sources += $cand
 }
 
@@ -333,6 +390,85 @@ $localCmd = "$out\cc3501e_vendor.cmd"
 # Use the connectivity cmd verbatim (512K DRAM + stack-in-TCM already correct); copy it
 # into $out so its relative #include of the toolbox stub resolves alongside it.
 Copy-Item $stockCmd $localCmd -Force
+
+# ...then patch in a .TI.noinit placement.  The stock connectivity cmd has NO rule for
+# it (its SECTIONS lists .reserved/.resetVecs/.cram/.text/.rodata/.binit/.cinit/
+# .TI.ramfunc/.data/.sysmem/.bss*/.stack/.ramVecs/... and nothing else), so the
+# update-mode boot flag (hal/ti/transport_hw_ti_spi.c's `.TI.noinit` g_persist) would be
+# assigned by DEFAULT rules -- first fitting range, FLASH_INT_VEC (RWX) at 0x14000000 --
+# i.e. FLASH: silently non-persistent and possibly overlapping .resetVecs.
+#
+# DRAM_NON_SECURE (0x28000DB0, len 0x0007F24F) already hosts .data/.bss/.sysmem, so it is
+# known-live memory that the C runtime does NOT scrub (--rom_model auto-init only touches
+# sections in the .cinit table; .TI.noinit is not one).  Verify in cc3501e-bridge.map that
+# g_persist resolves inside 0x28000DB0..0x2807FFFF and NOT at 0x14000000.
+#
+# If the bench ever proves DRAM is scrubbed across NVIC_SystemReset (watch the warm-boot
+# counter in GET_DIAG_INFO reserved[2] -- stuck at 1 = scrubbed), the fallback is
+# TCM_DRAM_NON_SECURE (0x20000000), which is alive the instant the core leaves cold reset
+# -- but that region also holds .stack, so re-check the map for an overlap first.
+#
+# (NOLOAD) IS LOAD-BEARING, not decoration.  Without it the TI linker emits a
+# `(.cinit..TI.noinit.load) [compression = zero_init]` record into __TI_cinit_table and
+# the C runtime ZEROES the struct on every single boot -- exactly like .bss -- so the
+# armed flag never survives to be read.  Verified by building it both ways and diffing
+# cc3501e-bridge.map's .cinit listing.  The section NAME alone does not exempt it.  This
+# is the same idiom the stock cmd already uses for .ramVecs, which likewise carries no
+# cinit record.  If you ever touch this line, re-grep the map for
+# ".cinit..TI.noinit.load" and make sure it is ABSENT.
+$cmdText = Get-Content $localCmd -Raw
+$noinit  = @"
+    /* Alp: OTA-update-mode boot flag (.TI.noinit) -- must survive NVIC_SystemReset.
+     * (NOLOAD) keeps it OUT of __TI_cinit_table so the C runtime never zeroes it. */
+    GROUP {
+        .TI.noinit: {} palign(4) (NOLOAD)
+    } > DRAM_NON_SECURE
+
+    /* System memory in DRAM */
+
+"@
+# Alp: the SOCKET PREFETCH RING lives in TCM_DRAM, not DRAM.
+#
+# DRAM_NON_SECURE is FULL -- 0x7f24f capacity against 0x7f0a0 used, i.e. 431 bytes
+# spare, so the ring could not grow past 16 KB there (a 32 KB ring overflows
+# GROUP_8 by ~16 KB).  Ring size is the single biggest throughput lever measured on
+# this bridge: 8 KB -> 16 KB moved end-to-end HTTP from ~660 kB/s to ~730 kB/s,
+# because the pump only refills every 10 ms and a small ring runs dry between passes.
+#
+# TCM_DRAM_NON_SECURE (0x20000000, len 0x1FFFF with no PSRAM) holds only .stack
+# (0x2FF0), leaving ~116 KB unused -- and it is FASTER than DRAM.  The ring is
+# CPU-only memory (the pump memcpy's into it, the dispatch memcpy's out of it into
+# reply_buf); NO DMA engine ever addresses it, so it does not need to be in the
+# DMA-reachable DRAM bank the way the SPI/WiFi buffers do.
+#
+# The rule MUST precede the generic `.bss: {} > DRAM_NON_SECURE` group, or the
+# catch-all claims .bss.sock_ring first and the ring silently lands back in DRAM.
+# Verify in cc3501e-bridge.map that rx_ring resolves at 0x200xxxxx, NOT 0x28xxxxxx.
+$sockring = @"
+    /* Alp: socket prefetch ring in TCM (DRAM is full; TCM is faster and CPU-only). */
+    GROUP {
+        .bss.sock_ring: {} palign(8)
+    } > TCM_DRAM_NON_SECURE
+
+    /* Move entire BSS section (including COMMON symbols) to DRAM to save TCM space */
+
+"@
+if ($cmdText -notmatch '\.bss\.sock_ring') {
+    $cmdText = $cmdText -replace '(?m)^[ 	]*/\* Move entire BSS section \(including COMMON symbols\) to DRAM to save TCM space \*/[ 	]*?
+', $sockring
+}
+Set-Content $localCmd $cmdText -NoNewline
+if ((Get-Content $localCmd -Raw) -notmatch '\.bss\.sock_ring') {
+    throw "sock-ring TCM placement did not apply to $localCmd -- the stock linker.cmd changed shape. The ring would fall back to the FULL DRAM bank and the link would overflow."
+}
+
+if ($cmdText -notmatch '\.TI\.noinit') {
+    $cmdText = $cmdText -replace '(?m)^[ \t]*/\* System memory in DRAM \*/[ \t]*\r?\n', $noinit
+    Set-Content $localCmd $cmdText -NoNewline
+}
+if ((Get-Content $localCmd -Raw) -notmatch '\.TI\.noinit') {
+    throw ".TI.noinit placement did not apply to $localCmd -- the stock linker.cmd changed shape. The update-mode boot flag would land in FLASH."
+}
 
 Write-Host "== Link =="
 if ($WifiHostDriver) {

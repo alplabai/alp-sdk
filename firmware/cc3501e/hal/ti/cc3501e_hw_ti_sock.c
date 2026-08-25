@@ -53,7 +53,25 @@ extern size_t xPortGetFreeHeapSize(void);
  * silent/half-open peer: after this window lwip_recv returns EWOULDBLOCK, which
  * the recv body maps to "0 bytes available" (OK) per the non-blocking wire
  * contract.  The host re-issues CMD_SOCK_RECV to poll for more. */
-#define CC3501E_SOCK_RCVTIMEO_MS 4000
+/* WAS 4000.  A blocking receive stalls the WHOLE WORKER for its duration, and
+ * worker_run_pending() holds READY LOW across the whole job -- so no bridge
+ * frame of ANY opcode is served while it waits.  A 4 s empty read therefore
+ * blacked the bridge out for 4 s per poll, capping socket streaming at a
+ * fraction of a frame per second and inverting against any host timeout
+ * shorter than 4 s (the host gave up before the firmware could answer "0 bytes
+ * available").
+ *
+ * cc3501e_hw_sock_recv() now passes MSG_DONTWAIT and does not rely on this at
+ * all; it is kept as the socket's default so any OTHER blocking operation on
+ * the handle is bounded to something short rather than to lwIP's default. */
+/* Blocking timeout on the prefetch socket.  cc3501e_hw_sock_pump() runs once
+ * per task tick, so EVERY momentarily-empty poll stalls the whole task for
+ * this long while the bridge keeps draining the ring -- which is why replies
+ * came back short.  Was 4000, then 50; 2 ms keeps the stall an order of
+ * magnitude below a bridge transaction.  Do NOT go to 0/MSG_DONTWAIT: that
+ * returned 0 bytes for 81 s on a connection the server had already fed
+ * 256 KiB (bench-measured, reverted). */
+#define CC3501E_SOCK_RCVTIMEO_MS 2
 
 int cc3501e_hw_sock_open(uint8_t family, uint8_t type, uint8_t protocol, uint16_t *handle_out)
 {
@@ -111,6 +129,9 @@ int cc3501e_hw_sock_connect(uint16_t handle, uint8_t family, uint16_t port, cons
 	if (lwip_connect(fd, (struct sockaddr *)&sa, sizeof(sa)) != 0) {
 		return CC3501E_HW_ERR_IO;
 	}
+	/* A connected STREAM socket is the bulk-receive case -- start prefetching so
+	 * CMD_SOCK_RECV can be answered synchronously from the dispatch. */
+	cc3501e_hw_sock_prefetch(handle, true);
 	return CC3501E_HW_OK;
 }
 
@@ -132,6 +153,251 @@ int cc3501e_hw_sock_send(uint16_t       handle,
 	}
 	if (sent_out != 0) *sent_out = (uint16_t)n;
 	return CC3501E_HW_OK;
+}
+
+/* ================= SOCKET RX PREFETCH RING =================
+ *
+ * WHY: protocol_dispatch() runs in the SPI transfer-complete callback (SWI/HWI
+ * context) and cannot call lwIP, so CMD_SOCK_RECV had to be worker-routed --
+ * handle_worker_routed_payload_reply always answers BUSY to the submit and the
+ * host must come back for the answer.  That is TWO bridge transactions plus a
+ * wait for the worker loop per frame, and it is the dominant per-frame cost of a
+ * socket stream.
+ *
+ * The OTA write path already solved this shape: cc3501e_hw_ota_write is
+ * SYNCHRONOUS because it only memcpy's into a staged window.  Do the same here.
+ * The TASK side (cc3501e_hw_tick -> cc3501e_hw_sock_pump) does the lwIP work and
+ * fills this ring; the DISPATCH side only memcpy's out of it, which is ISR-safe.
+ * CMD_SOCK_RECV then costs ONE transaction and no worker round trip.
+ *
+ * Single stream socket by design: this serves the bulk-receive case, and one
+ * ring keeps the ISR-vs-task handshake to a single producer and a single
+ * consumer (head written by the task only, tail by the dispatch only). */
+/* Ring size is the LARGEST measured throughput lever on this bridge.  The pump can
+ * only refill from the TASK (lwip_recv cannot run in the SPI dispatch ISR) and the
+ * task ticks every 10 ms, so a small ring runs dry between passes -- and every miss
+ * costs the host a 1 ms poll_by_repeat backoff.  Measured end-to-end HTTP over the
+ * bridge: 8 KB = ~660 kB/s, 16 KB = ~730 kB/s, 64 KB = ~742 kB/s.
+ *
+ * Past 16 KB it does not fit in DRAM (that bank has 431 bytes spare, and a 32 KB
+ * ring overflows GROUP_8 by ~16 KB), so the ring is linked into TCM instead -- see
+ * the .bss.sock_ring placement in ti/build_ti.ps1.  TCM is safe here BECAUSE the
+ * ring is CPU-only memory: the pump memcpy's in, the dispatch memcpy's out into
+ * reply_buf, and no DMA engine ever addresses it. */
+#define CC3501E_SOCK_RING_BYTES 65536u
+/* Max lwip_recv() calls per pump tick; see cc3501e_hw_sock_pump(). */
+#define CC3501E_SOCK_PUMP_PASSES 8u
+
+static struct {
+	uint8_t           buf[CC3501E_SOCK_RING_BYTES];
+	volatile uint32_t head;     /* task writes   */
+	volatile uint32_t tail;     /* dispatch reads */
+	volatile uint16_t fd_plus1; /* socket being prefetched, 0 = none */
+	volatile bool     peer_closed;
+} rx_ring __attribute__((section(".bss.sock_ring")));
+
+static uint32_t ring_used(void)
+{
+	return rx_ring.head - rx_ring.tail; /* free-running; unsigned wrap is correct */
+}
+
+/* TASK CONTEXT ONLY -- called from cc3501e_hw_tick().  Does the lwIP read. */
+#ifdef CC3501E_RADIO_SPEEDTEST
+/* BENCH: radio-only throughput.  Drains the prefetch socket and DISCARDS the
+ * data, so the rate measured is what the RADIO delivers with the bridge
+ * completely out of the path.  Every other number in this bring-up measures the
+ * radio THROUGH the bridge and therefore cannot tell a radio limit from a bridge
+ * limit -- this one can.  Result is published in the GET_DIAG_INFO free_heap
+ * field as bytes/second. */
+volatile uint32_t g_radio_bps;
+
+static void radio_speedtest_pump(int fd)
+{
+	static uint8_t  sink[2048];
+	static uint32_t t0_ms, total;
+
+	for (uint32_t pass = 0u; pass < 16u; ++pass) {
+		const ssize_t n = lwip_recv(fd, sink, sizeof(sink), 0);
+
+		if (n <= 0) {
+			break;
+		}
+		/* Start the clock on the FIRST BYTE, not on socket-open: the gap between
+		 * arming the socket and the server's first segment is idle time that
+		 * would otherwise be averaged into the rate. */
+		if (t0_ms == 0u) {
+			t0_ms = cc3501e_hw_uptime_ms() | 1u;
+		}
+		total += (uint32_t)n;
+		if ((uint32_t)n < sizeof(sink)) {
+			break; /* socket drained -- don't spend a timeout on the next pass */
+		}
+	}
+	/* Publish a WINDOWED rate: once a window's worth of real data has landed,
+	 * report it and restart.  A cumulative average from socket-open decays toward
+	 * zero as soon as the transfer finishes and the socket goes idle, which is
+	 * what made the first attempt read 12 kB/s on a link doing far more. */
+	if (total >= 131072u && t0_ms != 0u) {
+		const uint32_t dt = cc3501e_hw_uptime_ms() - t0_ms;
+
+		if (dt > 0u) {
+			g_radio_bps = (uint32_t)(((uint64_t)total * 1000u) / dt);
+		}
+		total = 0u;
+		t0_ms = 0u;
+	}
+}
+#endif
+
+#ifdef CC3501E_RADIO_SPEEDTEST
+/* UDP arm of the radio-only test: bind a socket and drain it, so the rate is the
+ * radio's UDP capability -- the figure the datasheet's "20Mbps (UDP)" refers to,
+ * and the one that decides whether a >1 MB/s target is reachable at all.  Needs
+ * no host request: a PC just blasts datagrams at the board's IP on this port. */
+#define CC3501E_RADIO_UDP_PORT 5001
+
+static void radio_speedtest_udp(void)
+{
+	static int      ufd = -1;
+	static uint8_t  usink[2048];
+	static uint32_t ut0, utotal;
+
+	if (ufd < 0) {
+		struct sockaddr_in a;
+
+		ufd = lwip_socket(AF_INET, SOCK_DGRAM, 0);
+		if (ufd < 0) {
+			return;
+		}
+		memset(&a, 0, sizeof(a));
+		a.sin_family      = AF_INET;
+		a.sin_port        = lwip_htons(CC3501E_RADIO_UDP_PORT);
+		a.sin_addr.s_addr = 0; /* INADDR_ANY */
+		if (lwip_bind(ufd, (struct sockaddr *)&a, sizeof(a)) != 0) {
+			lwip_close(ufd);
+			ufd = -1;
+			return;
+		}
+		{
+			struct timeval tv = { .tv_sec = 0, .tv_usec = 2000 };
+
+			(void)lwip_setsockopt(ufd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+		}
+	}
+	for (uint32_t pass = 0u; pass < 32u; ++pass) {
+		const ssize_t n = lwip_recv(ufd, usink, sizeof(usink), 0);
+
+		if (n <= 0) {
+			break;
+		}
+		if (ut0 == 0u) {
+			ut0 = cc3501e_hw_uptime_ms() | 1u;
+		}
+		utotal += (uint32_t)n;
+	}
+	if (utotal >= 131072u && ut0 != 0u) {
+		const uint32_t dt = cc3501e_hw_uptime_ms() - ut0;
+
+		if (dt > 0u) {
+			g_radio_bps = (uint32_t)(((uint64_t)utotal * 1000u) / dt);
+		}
+		utotal = 0u;
+		ut0    = 0u;
+	}
+}
+#endif
+
+void cc3501e_hw_sock_pump(void)
+{
+#ifdef CC3501E_RADIO_SPEEDTEST
+	radio_speedtest_udp(); /* runs whether or not the host armed a TCP socket */
+#endif
+	const uint16_t h = rx_ring.fd_plus1;
+	if (h == 0u || rx_ring.peer_closed) {
+		return;
+	}
+#ifdef CC3501E_RADIO_SPEEDTEST
+	(void)radio_speedtest_pump;
+	return; /* discard mode: never fill the ring */
+#endif
+	/* Drain what lwIP already has, not one segment per tick.  The bridge takes up
+	 * to ALP_CC3501E_MAX_PAYLOAD per transaction while a single lwip_recv()
+	 * returns about one TCP segment, so a one-shot pump left the ring
+	 * under-filled and every reply came back short.  Safe only because
+	 * CC3501E_SOCK_RCVTIMEO_MS is small -- at the old 50 ms an extra pass cost
+	 * more than a transaction. */
+	for (uint32_t pass = 0u; pass < CC3501E_SOCK_PUMP_PASSES; ++pass) {
+		uint32_t used = ring_used();
+		if (used > CC3501E_SOCK_RING_BYTES - (uint32_t)ALP_CC3501E_MAX_PAYLOAD) {
+			return; /* keep at least one max frame of headroom */
+		}
+		const uint32_t idx   = rx_ring.head % CC3501E_SOCK_RING_BYTES;
+		uint32_t       chunk = CC3501E_SOCK_RING_BYTES - idx; /* to the wrap only */
+		const uint32_t space = CC3501E_SOCK_RING_BYTES - used;
+		if (chunk > space) chunk = space;
+		if (chunk == 0u) {
+			return;
+		}
+		const ssize_t n = lwip_recv((int)h - 1, &rx_ring.buf[idx], (size_t)chunk, 0);
+		if (n > 0) {
+			rx_ring.head += (uint32_t)n;
+			if ((uint32_t)n < chunk) {
+				return; /* socket drained -- don't spend a timeout on the next pass */
+			}
+			continue;
+		}
+		if (n == 0) {
+			rx_ring.peer_closed = true; /* orderly close */
+		}
+		/* n < 0 with EAGAIN/EWOULDBLOCK is just "nothing yet" -- next tick. */
+		return;
+	}
+}
+
+/* Arm/disarm prefetch for a handle.  Called from the socket open/close paths. */
+void cc3501e_hw_sock_prefetch(uint16_t handle, bool on)
+{
+	if (on) {
+		rx_ring.head = rx_ring.tail = 0u;
+		rx_ring.peer_closed         = false;
+		rx_ring.fd_plus1            = handle;
+	} else if (rx_ring.fd_plus1 == handle) {
+		rx_ring.fd_plus1 = 0u;
+	}
+}
+
+/* DISPATCH CONTEXT (SWI/HWI) -- memcpy only, never lwIP.  Returns bytes taken,
+ * or -1 when this handle is not the prefetched one so the caller can fall back
+ * to the worker path. */
+int cc3501e_hw_sock_recv_ring(uint16_t handle, uint8_t *buf, uint16_t cap, uint16_t *out_len)
+{
+	if (out_len != 0) *out_len = 0u;
+	if (rx_ring.fd_plus1 != handle || handle == 0u || buf == 0) {
+		return -1;
+	}
+	uint32_t used = ring_used();
+	if (used == 0u) {
+		/* Armed but EMPTY -> report "not handled" so the caller falls through to
+		 * the worker path.  Answering OK with 0 bytes looked harmless but broke
+		 * single-shot callers: cc3501e_sock_recv goes through poll_by_repeat,
+		 * which treats ALP_OK as final, so one recv on a socket whose data had not
+		 * landed yet returned 0 bytes and gave up (measured: `NET recv -> 0 (0 B)`
+		 * on a connection that was about to deliver 389 B).  The fast path is an
+		 * OPTIMISATION for when data is already staged; it must never take a
+		 * request it cannot satisfy. */
+		return -1;
+	}
+	uint32_t       n     = (used < cap) ? used : cap;
+	const uint32_t idx   = rx_ring.tail % CC3501E_SOCK_RING_BYTES;
+	uint32_t       first = CC3501E_SOCK_RING_BYTES - idx;
+	if (first > n) first = n;
+	memcpy(buf, &rx_ring.buf[idx], first);
+	if (n > first) {
+		memcpy(&buf[first], &rx_ring.buf[0], n - first);
+	}
+	rx_ring.tail += n;
+	if (out_len != 0) *out_len = (uint16_t)n;
+	return (int)n;
 }
 
 int cc3501e_hw_sock_recv(uint16_t  handle,
@@ -156,6 +422,20 @@ int cc3501e_hw_sock_recv(uint16_t  handle,
 	struct sockaddr_in from;
 	socklen_t          fromlen = sizeof(from);
 	memset(&from, 0, sizeof(from));
+	/* BLOCKING, bounded by the socket's SO_RCVTIMEO (CC3501E_SOCK_RCVTIMEO_MS).
+	 *
+	 * MSG_DONTWAIT was tried here and is WRONG on this stack -- silicon-measured
+	 * 2026-08-24: with it, a 256 KiB HTTP body that the server demonstrably
+	 * delivered (two `GET /speed.bin HTTP/1.0` 200 hits logged from the device's
+	 * own IP) produced `NET recv -> 0 (0 B)` on EVERY call for 81 s, i.e. 0 B/s.
+	 * The non-blocking path returns EWOULDBLOCK before lwIP has moved anything
+	 * into the socket, so the host never drains the connection at all.  A short
+	 * blocking read does return data.
+	 *
+	 * The reason the timeout must stay SHORT is unchanged: this runs on the
+	 * worker, and worker_run_pending() holds READY LOW across the whole job, so
+	 * no bridge frame of ANY opcode is served while it waits.  That is why 4000
+	 * became 50 -- not why it should become zero. */
 	const ssize_t n = lwip_recvfrom(fd, buf, want, 0, (struct sockaddr *)&from, &fromlen);
 	if (n < 0) {
 		/* SO_RCVTIMEO expiry (EAGAIN / EWOULDBLOCK) is NOT an error at the wire: it
@@ -183,6 +463,7 @@ int cc3501e_hw_sock_recv(uint16_t  handle,
 
 int cc3501e_hw_sock_close(uint16_t handle)
 {
+	cc3501e_hw_sock_prefetch(handle, false);
 	if (handle == 0u) {
 		return CC3501E_HW_ERR_INVAL;
 	}

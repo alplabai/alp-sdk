@@ -100,6 +100,11 @@ static int cmd_companion_diag_info(const struct shell *sh, size_t argc, char **a
 	 * ever fired, which separates "the radio never got going" from "it came up
 	 * and stopped" without needing a second radio to watch for the SSID. */
 	shell_print(sh, "wifievt:%u", di.reserved[0]);
+	/* #1610: psa_status_t low byte of the last OTA flush fault; pairs with
+	 * `ota status`'s stage.  Quiet when nothing failed. */
+	if (di.reserved[1] != 0u) {
+		shell_print(sh, "otafault:psa 0x%02x", di.reserved[1]);
+	}
 	return 0;
 }
 
