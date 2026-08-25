@@ -57,7 +57,12 @@ typedef struct {
 	struct k_mem_slab mem_slab;
 	uint8_t          *slab_buf;
 	size_t            slab_buf_bytes;
-	bool              in_use;
+	/* Negotiated slab block size.  z_write() bounds the caller's byte
+	 * count against this: without it a caller-supplied length was
+	 * memcpy'd into a fixed-size block, corrupting the neighbouring
+	 * slab block and the k_malloc heap. */
+	size_t block_bytes;
+	bool   in_use;
 } alp_z_i2s_side_t;
 
 static alp_z_i2s_side_t _sides[CONFIG_ALP_SDK_MAX_I2S_HANDLES];
@@ -141,6 +146,7 @@ z_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st, alp_capabilitie
 	size_t block_bytes =
 	    (size_t)cfg->block_frames * (size_t)cfg->channels * (size_t)((cfg->word_bits + 7u) / 8u);
 	s->slab_buf_bytes = block_bytes * 2u;
+	s->block_bytes    = block_bytes;
 	s->slab_buf       = k_malloc(s->slab_buf_bytes);
 	if (s->slab_buf == NULL) {
 		_free_side(s);
@@ -197,6 +203,10 @@ z_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes, uint32_t t
 	alp_z_i2s_side_t    *s   = (alp_z_i2s_side_t *)st->be_data;
 	const struct device *dev = (const struct device *)st->dev;
 	if (s == NULL || dev == NULL) return ALP_ERR_NOT_READY;
+	/* Bound the caller's length against the block negotiated at open()
+	 * BEFORE claiming a block: i2s_write() below would reject an oversize
+	 * length with -EINVAL, but only after the memcpy has already run. */
+	if (bytes > s->block_bytes) return ALP_ERR_OUT_OF_RANGE;
 
 	void *slab_block = NULL;
 	int   err        = k_mem_slab_alloc(&s->mem_slab, &slab_block, K_MSEC(timeout_ms));
