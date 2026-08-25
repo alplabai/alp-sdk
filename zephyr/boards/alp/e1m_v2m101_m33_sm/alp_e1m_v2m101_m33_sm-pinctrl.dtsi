@@ -33,11 +33,15 @@
 		};
 	};
 
-	/* BRD_I2C (RIIC8): on-module GD32G553 I2C slave @ 0x70 */
+	/* BRD_I2C (RIIC8): on-module GD32G553 I2C slave @ 0x70.
+	 * No external pull-ups on this carrier (see e1m-x-evk.dtsi's i2c8_pins
+	 * comment on the Linux side) -- enable the SoC internal pull-ups so
+	 * SCL/SDA idle high, matching the Linux carrier DT. */
 	i2c8_pins: i2c8 {
 		i2c8-pinmux {
 			pinmux = <RZV_PINMUX(PORT_00, 6, 1)>, /* SDA P06 */
 				 <RZV_PINMUX(PORT_00, 7, 1)>; /* SCL P07 */
+			bias-pull-up;
 		};
 	};
 };
