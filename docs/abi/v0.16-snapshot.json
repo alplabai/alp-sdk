@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-25",
+  "generated": "2026-08-26",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -2825,6 +2825,10 @@
         "cc3501e_power_off": {
           "hash": "b03252cb8a26bd20",
           "signature": "alp_status_t cc3501e_power_off(cc3501e_t *ctx);"
+        },
+        "cc3501e_recover": {
+          "hash": "f0b387d9f3f9d25b",
+          "signature": "alp_status_t cc3501e_recover(cc3501e_t *ctx);"
         },
         "cc3501e_request": {
           "hash": "4394de213fad8378",

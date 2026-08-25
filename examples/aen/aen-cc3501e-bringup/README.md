@@ -61,9 +61,9 @@ software GPIO CS is installed; the SPI driver drives SS0 from the controller.
    APPLIED, because the firmware defers the work to its task (neither the vendor
    radio call nor the Power-manager switch is legal in the SPI-dispatch ISR).
 
-   > **[#1683](https://github.com/alplabai/alp-sdk/issues/1683):** the bridge wedge
-   > under BLE + presets is fixed (the N-DTIM long sleep is withheld while BLE is
-   > up). A residual intermittent BLE-op timeout remains, with the bridge alive.
+   > **[#1691](https://github.com/alplabai/alp-sdk/issues/1691):** repeated BLE
+   > advertise/stop cycles can wedge the bridge (not power-related — it reproduces
+   > with no power policy). `cc3501e_recover()` clears it; step 8 above shows it.
 
    See [`docs/cc3501e-bridge.md`](../../../docs/cc3501e-bridge.md#power-management)
    for the full model, including why there is no deeper sleep tier and how waking

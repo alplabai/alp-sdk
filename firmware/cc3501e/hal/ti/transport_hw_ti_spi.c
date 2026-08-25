@@ -111,6 +111,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <ti/drivers/GPIO.h> /* GPIO_read -- READY level in the wedge snapshot */
 #include "ti_drivers_config.h"
 
 #include <ti/drivers/SPI.h>
@@ -223,6 +224,24 @@ static struct {
 	uint32_t magic;
 	uint32_t magic_inv;
 	uint32_t boots;
+#ifdef CC3501E_WEDGE_PROBE
+	/* BENCH PROBE ONLY (#1691).  A wedged bridge is unreachable in band, which is
+	 * why four rounds of guess-and-test failed to explain it.  A WARM reset
+	 * (nRESET only, rails up) was bench-proven to recover the wedge -- so the
+	 * firmware STATE is what is bad, and .TI.noinit survives that reset.  This
+	 * snapshot is refreshed every housekeeping tick; after the warm reset the host
+	 * reads back the LAST state the slave was in before it stopped answering.
+	 * Never compiled into a shipping build. */
+	uint32_t probe_ticks;   /* housekeeping ticks (masked on read -- ambiguous) */
+	uint32_t probe_quiet;   /* ticks since the LAST completed SPI transfer.  THIS is
+	                         * the discriminator: large => the task kept running while
+	                         * nothing arrived (slave alive, DMA not delivering);
+	                         * ~0 => the task stopped when the link did. */
+	uint32_t probe_resync;  /* g_resync_count at the last tick */
+	uint32_t probe_armfail; /* g_arm_fail_count at the last tick */
+	uint8_t  probe_phase;   /* enum spi_phase the slave was parked in */
+	uint8_t  probe_flags;   /* bit0 reply_armed, bit1 is_dead, bit2 polled */
+#endif
 } g_persist __attribute__((section(".TI.noinit")));
 
 static bool g_polled;    /* this boot's mode, latched on first query */
@@ -470,8 +489,15 @@ bool bridge_transport_spi_reply_stalled(void)
 	return (uint32_t)(cc3501e_hw_uptime_ms() - reply_armed_ms) > CC3501E_REPLY_STALL_MS;
 }
 
+#ifdef CC3501E_WEDGE_PROBE
+void bridge_transport_spi_probe_xfer(void); /* defined below; used here */
+#endif
+
 static void on_transfer(SPI_Handle h, SPI_Transaction *t)
 {
+#ifdef CC3501E_WEDGE_PROBE
+	bridge_transport_spi_probe_xfer(); /* #1691: a transfer landed -- reset the quiet counter */
+#endif
 	(void)h;
 	reply_armed = false; /* a phase completed -> nothing outstanding */
 	/* A phase's transfer just ended -> the slave is momentarily NOT armed for the host's
@@ -904,6 +930,62 @@ void bridge_transport_spi_hw_init(void)
 /* True while the SPI slave has no handle (every SPI_open retry failed).  The
  * tick's desync and arm-failure self-heals both rely on counters that only move
  * when a handle exists, so this is the only signal for that state (#1610). */
+#ifdef CC3501E_WEDGE_PROBE
+/* Called from the transfer-complete callback: the link is demonstrably alive. */
+void bridge_transport_spi_probe_xfer(void)
+{
+	if (persist_writable()) {
+		g_persist.probe_quiet = 0u;
+	}
+}
+#endif
+
+#ifdef CC3501E_WEDGE_PROBE
+/* Refresh the wedge snapshot.  Called from cc3501e_hw_tick() on the task, so a
+ * frozen probe_ticks in the read-back proves the TASK stopped running, while a
+ * still-advancing one proves the task lived and only the SPI slave was stuck --
+ * the single fact that separates the remaining hypotheses. */
+void bridge_transport_spi_probe_tick(void)
+{
+	if (!persist_writable()) {
+		return;
+	}
+	g_persist.probe_ticks++;
+	if (g_persist.probe_quiet < 0xFFFFu) {
+		g_persist.probe_quiet++;
+	}
+	g_persist.probe_resync  = g_resync_count;
+	g_persist.probe_armfail = g_arm_fail_count;
+	g_persist.probe_phase   = (uint8_t)phase;
+#ifndef CC3501E_READY_GPIO
+#define CC3501E_READY_GPIO 17u /* mirrors cc3501e_hw_ti_gpio.c -- CC35 GPIO17 -> Alif P2_6 */
+#endif
+	/* bit3 = the READY line's ACTUAL level.  cc3501e_bridge_busy()/ready() are raw
+	 * GPIO writes with no pairing guarantee, so a path that takes an early return
+	 * between them leaves READY LOW forever -- and the host's cc3501e_reply_gate()
+	 * then blocks until timeout on every request.  From both ends that is
+	 * indistinguishable from the slave being dead, which is why the snapshot above
+	 * shows a perfectly healthy idle slave. */
+	g_persist.probe_flags =
+	    (uint8_t)((reply_armed ? 1u : 0u) | (bridge_transport_spi_is_dead() ? 2u : 0u) |
+	              (g_polled ? 4u : 0u) | (GPIO_read(CC3501E_READY_GPIO) ? 8u : 0u));
+}
+
+/* Packed read-back for GET_DIAG_INFO: phase(4) | flags(4) | resync(8) | armfail(8)
+ * | ticks(8, low byte).  Survives the warm reset that recovers the wedge. */
+uint32_t bridge_transport_spi_probe_read(void)
+{
+	if (!persist_writable()) {
+		return 0u;
+	}
+	return ((uint32_t)(g_persist.probe_phase & 0x0Fu) << 28) |
+	       ((uint32_t)(g_persist.probe_flags & 0x0Fu) << 24) |
+	       ((uint32_t)(g_persist.probe_resync & 0xFFu) << 16) |
+	       ((uint32_t)(g_persist.probe_armfail & 0xFFu) << 8) |
+	       (uint32_t)(g_persist.probe_quiet > 0xFFu ? 0xFFu : g_persist.probe_quiet);
+}
+#endif
+
 bool bridge_transport_spi_is_dead(void)
 {
 	return g_spi_open_failed != 0u;

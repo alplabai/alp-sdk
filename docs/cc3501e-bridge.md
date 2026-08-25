@@ -465,12 +465,13 @@ idle-hysteresis threshold; the Power driver exposes no such setter.
 switch is legal, so both halves are deferred to the firmware's task. Read the
 reply's `radio_ok_out` to learn whether the *previous* apply was realised.
 
-> **Known issue ([#1683](https://github.com/alplabai/alp-sdk/issues/1683)):** applying a preset while BLE is enabled could wedge the bridge until a reset. That
-> wedge is fixed — the N-DTIM long sleep interval is withheld while BLE is up, so
-> `DEEP_SLEEP` degrades to `LOW_POWER`'s radio behaviour there. A residual
-> intermittent BLE-op timeout under power presets remains (one advertising call in
-> three bench runs), with the bridge staying alive; treat BLE + presets as usable
-> but not yet proven quiet.
+> **Known issue ([#1691](https://github.com/alplabai/alp-sdk/issues/1691)):**
+> repeated BLE advertise/stop cycles can wedge the bridge — requests time out,
+> then fail, and it does not self-heal. Firmware diagnostics across the fault show
+> the CC3501E healthy the whole time (slave armed, READY high, transfers still
+> completing, all error counters zero), so no firmware self-heal can detect it.
+> `cc3501e_recover()` is the escape hatch: a warm reset recovered every observed
+> wedge. Not power-related — it reproduces with no power policy applied at all.
 
 ### Long gaps: cut the supply (`cc3501e_power_off()`)
 

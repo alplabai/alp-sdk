@@ -441,6 +441,9 @@ void cc3501e_hw_tick(void)
 	/* Fill the socket RX ring on the TASK, so the dispatch can serve
 	 * CMD_SOCK_RECV with a memcpy instead of a worker round trip. */
 	cc3501e_hw_sock_pump();
+#ifdef CC3501E_WEDGE_PROBE
+	bridge_transport_spi_probe_tick(); /* #1691 wedge snapshot (bench builds only) */
+#endif
 	/* Apply any power policy the SPI-dispatch ISR latched: Wlan_Set() is a
 	 * blocking vendor radio call and belongs on the task, not in the ISR. */
 	cc3501e_hw_power_service();

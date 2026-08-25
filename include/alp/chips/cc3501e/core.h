@@ -177,6 +177,35 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx);
 alp_status_t cc3501e_power_off(cc3501e_t *ctx);
 
 /**
+ * @brief Recover a bridge that has stopped answering (warm reset, keeps rails up).
+ *
+ * The inter-chip link can enter a state where the CC3501E is healthy but no
+ * longer receives what the host clocks: requests time out (ALP_ERR_TIMEOUT) and
+ * then fail (ALP_ERR_IO) indefinitely. It does not self-heal.
+ *
+ * Firmware-side diagnostics taken across the fault (see #1691) show the slave
+ * armed and idle in its request-header phase with READY HIGH, its housekeeping
+ * task still running, and its resync / arm-failure counters at zero -- i.e. the
+ * firmware has no way to know anything is wrong. Only the host, which is getting
+ * no answers, can tell. Hence this call.
+ *
+ * Issues a warm reset (nRESET only, supply left up) and confirms the link with a
+ * PING; falls back to a full supply cycle if the warm reset does not take. On
+ * success the link is usable again -- but the device rebooted, so the Wi-Fi
+ * association, the BLE host and every open socket are gone and must be
+ * re-established.
+ *
+ * @warning NEVER call this with an OTA in flight -- resetting mid-update destroys
+ *          the partially staged image. Tearing down or re-opening the bridge
+ *          during a flash operation is what #1610 traced its hangs to.
+ *
+ * @param ctx  Initialised bridge handle.
+ * @return ALP_OK when the link answers again; ALP_ERR_INVAL if @p ctx is NULL;
+ *         otherwise the mapped error from the reset or the confirming PING.
+ */
+alp_status_t cc3501e_recover(cc3501e_t *ctx);
+
+/**
  * @brief Warm hard reset: pulse nRESET with WIFI_EN kept asserted (rails stay up).
  *
  * Re-boots the module WITHOUT a cold power cycle.  This is the "second boot" of the

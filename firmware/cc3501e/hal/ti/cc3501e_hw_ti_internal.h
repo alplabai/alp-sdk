@@ -65,6 +65,15 @@ void cc3501e_hw_power_reapply_radio(void);
  * preset and wedged the bridge on silicon.  Called from cc3501e_hw_tick(). */
 void cc3501e_hw_power_service(void);
 
+#ifdef CC3501E_WEDGE_PROBE
+/* BENCH PROBE (#1691): refresh / read the .TI.noinit wedge snapshot.  See
+ * transport_hw_ti_spi.c -- a warm reset recovers the wedge and preserves RAM, so
+ * this is how the slave's last state is recovered from an unreachable bridge. */
+void     bridge_transport_spi_probe_tick(void);
+void     bridge_transport_spi_probe_xfer(void);
+uint32_t bridge_transport_spi_probe_read(void);
+#endif
+
 /* False when the last TASK-side radio apply failed while a role was up. */
 bool cc3501e_hw_power_radio_ok(void);
 

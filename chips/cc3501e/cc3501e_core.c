@@ -58,6 +58,34 @@ alp_status_t cc3501e_init(cc3501e_t *ctx, alp_spi_t *bus)
 }
 
 /* See <alp/chips/cc3501e/core.h>. */
+alp_status_t cc3501e_recover(cc3501e_t *ctx)
+{
+	if (ctx == NULL) return ALP_ERR_INVAL;
+
+	/* A WARM reset -- nRESET only, rails up -- is what clears this state.
+	 * Bench-established on e1m-aen-evk-01 (#1691): every observed wedge recovered
+	 * with `warm-reset -> 0  PING -> 0`, and the .TI.noinit snapshot read back
+	 * afterwards showed the firmware had been perfectly healthy the whole time --
+	 * housekeeping ticks advancing, slave armed in PH_REQ_HEADER, READY HIGH, and
+	 * g_resync_count / g_arm_fail_count both zero.
+	 *
+	 * That is why no firmware self-heal fires: bridge_transport_spi_is_dead() only
+	 * reports a failed SPI_open, and the stall watchdog deliberately watches only
+	 * REPLY phases because PH_REQ_HEADER legitimately waits forever for the host.
+	 * The slave cannot tell "host idle" from "host clocking, I am not receiving".
+	 * The HOST can, which is why recovery lives here and not in the firmware. */
+	const alp_status_t rs = cc3501e_hard_reset(ctx);
+
+	if (rs != ALP_OK) {
+		/* nRESET alone did not take -- fall back to cutting the supply, which is
+		 * the heavier hammer and loses all device state. */
+		(void)cc3501e_power_off(ctx);
+		return cc3501e_reset(ctx);
+	}
+	return cc3501e_ping(ctx);
+}
+
+/* See <alp/chips/cc3501e/core.h>. */
 alp_status_t cc3501e_power_off(cc3501e_t *ctx)
 {
 	if (ctx == NULL) return ALP_ERR_INVAL;

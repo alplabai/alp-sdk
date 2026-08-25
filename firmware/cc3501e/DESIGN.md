@@ -122,12 +122,16 @@ exactly how a broken radio apply went unnoticed on the bench.
 re-applied after `Wlan_RoleUp(STA)` succeeds; otherwise a policy set before Wi-Fi
 came up is dropped.
 
-> **[#1683](https://github.com/alplabai/alp-sdk/issues/1683):** the trigger was
-> `WAKE_UP_EVENT_N_DTIM` concurrent with an active BLE host — Wi-Fi and BLE share
-> the HIF, and sleeping through several DTIM periods starves BLE with it. The long
-> sleep interval is now withheld while BLE is enabled, and the bridge no longer
-> wedges. A residual intermittent BLE-op timeout remains (bridge stays alive), so
-> the issue is still open.
+> **[#1691](https://github.com/alplabai/alp-sdk/issues/1691):** repeated BLE
+> advertise/stop cycles can wedge the bridge. It is NOT power-related — it
+> reproduces with no power policy applied. Diagnostics across the fault show the
+> slave armed and idle in `PH_REQ_HEADER`, READY HIGH, `g_resync_count` and
+> `g_arm_fail_count` both zero, and SPI transfers still completing, so no firmware
+> self-heal can see it: `bridge_transport_spi_is_dead()` only reports a failed
+> `SPI_open`, and the stall watchdog deliberately ignores `PH_REQ_HEADER`. Recovery
+> is host-side via `cc3501e_recover()` (warm reset), which cleared every observed
+> wedge. The `CC3501E_WEDGE_PROBE` build flag captures the state into `.TI.noinit`
+> for further investigation.
 
 ## Backends
 

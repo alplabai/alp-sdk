@@ -375,10 +375,9 @@ static void cc3501e_net_probe(cc3501e_t *fw)
 		 * status code alone cannot tell an applied policy from one the radio
 		 * rejected a moment later -- radio_ok reports the previous apply's outcome.
 		 *
-		 * #1683: the bridge wedge under BLE + presets is fixed -- the N-DTIM long
-		 * sleep interval is withheld while BLE is enabled, so DEEP_SLEEP degrades to
-		 * LOW_POWER's radio behaviour there.  A residual intermittent BLE-op timeout
-		 * remains, with the bridge staying alive. */
+		 * #1691: repeated BLE advertise/stop cycles can wedge the bridge -- not
+		 * power-related, it reproduces with no power policy applied at all.
+		 * cc3501e_recover() clears it. */
 		for (size_t i = 0u; i < (sizeof(presets) / sizeof(presets[0])); ++i) {
 			const alp_cc3501e_power_policy_t pp = {
 				.policy = presets[i].policy,
@@ -427,6 +426,23 @@ static void cc3501e_net_probe(cc3501e_t *fw)
 	 *
 	 * The cost is a full cold boot on the way back, and every bit of device
 	 * state -- association, BLE host, open sockets -- is gone with it. */
+		/* Recovering a bridge that has stopped answering.
+		 *
+		 * The link can enter a state where the CC3501E is healthy but the host gets
+		 * nothing: requests time out, then fail, indefinitely, and it does not
+		 * self-heal.  Firmware diagnostics taken across the fault (#1691) show the
+		 * slave armed and idle with READY HIGH, its housekeeping task running, its
+		 * resync and arm-failure counters at zero, and SPI transfers still
+		 * completing -- so the firmware has no way to know anything is wrong.  Only
+		 * the host, which is getting no answers, can tell.
+		 *
+		 * cc3501e_recover() is the escape hatch: a warm reset (nRESET only, rails
+		 * up) plus a confirming PING.  It recovered every wedge observed on the
+		 * bench.  NEVER call it with an OTA in flight -- see the header. */
+		const alp_status_t rec = cc3501e_recover(fw);
+
+		printf("[cc3501e-bringup] RECOVER -> %d\n", (int)rec);
+
 		const alp_status_t off = cc3501e_power_off(fw);
 		/* While off, calls fail FAST rather than clocking frames at a dead slave and
 	 * burning a timeout each -- that is the observable difference from a wedge. */
