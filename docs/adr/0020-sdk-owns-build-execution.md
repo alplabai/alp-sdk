@@ -8,6 +8,50 @@ Supersedes: [0014](0014-build-plan-emit-cli-contract.md) — its
 mechanism clause **and** its 84-87 consequence (`west alp-build` stays native).
 Pairs with RFC #837 (`alp` → `tan`).
 
+## Amendment (2026-08-26 — Amendment 7's cross-repo-trigger condition is now met)
+
+Corrects Amendment 7's third bullet (below, dated 2026-07-28: "**Cross-repo
+trigger — NOT done, and it is the one real gap.**") and the index row's
+matching present-tense clause in `docs/adr/README.md`. Both were accurate when
+written; the trigger shipped the same day, seven hours later.
+
+`.github/workflows/dispatch-tan-parity.yml` is the sender half: it fires a
+`repository_dispatch` (`event_type=alp-sdk-planner-change`) at
+`alplabai/tan-cli` on every push to `dev`/`main`, using a token minted at
+runtime from the org's GitHub App rather than the long-lived PAT Amendment 7's
+"cannot be built ... without a PAT/App secret" anticipated. Landed
+`6595d2a4` (2026-07-28, same day as the Amendment-7 commit `0c5cf608`). The
+receiver half is live in `tan-cli`: `parity.yml:69` and
+`planner-resync.yml:101`, both `types: [alp-sdk-planner-change]`.
+
+Re-running Amendment 7's grep today (`grep -rn repository_dispatch
+.github/workflows/*.yml`) no longer returns only the `pr-bitbake.yml` comment
+it cited — it also matches `dispatch-tan-parity.yml`, which carries the real
+trigger.
+
+One residual gap the workflow's own header documents and this correction
+does not close: `repository_dispatch` does not carry the sender's SHA into
+the receiver's run ref, so nothing in this repo can filter tan-cli's run list
+down to "the run this dispatch caused" versus a concurrent sender — recency
+plus `event=repository_dispatch` is the only correlation available
+(`dispatch-tan-parity.yml`'s own in-file NOTE, near its `dispatch-confirm.sh`
+step).
+
+## Amendment (2026-08-26 — PR alplabai/tan-cli#530 shipped in tan v0.6.0-rc1)
+
+Corrects the 2026-08-12 Amendment's closing paragraph (below): "**Not yet in
+a released `tan`.**" no longer holds. `alplabai/tan-cli#530` shipped in tan
+`v0.6.0-rc1` (tagged 2026-08-14; `TAN_VERSION` at `python/tan/version.py:49`),
+carried forward unchanged into the final `v0.6.0` (tagged 2026-08-24) — both
+are real, existing tags, not `dev`-branch-only. `python/tan/core/tool_lookup.py`'s
+`resolve_tool()` and `python/tan/commands/build/execute.py`'s `_spawn_step()`
+(the "`program` is always the RESOLVED absolute path (tan-cli#510)" docstring
+the paragraph below quotes) are both present at that tag.
+`build-plan-v1.schema.json:50`'s `missingTool` description, which cross-references
+this Amendment by date, now describes released behaviour rather than a
+both-ways hedge. The Amendment's five numbered technical claims and the
+Consequence paragraph are otherwise unaffected and stand.
+
 ## Amendment (2026-08-12 — what the Security clause's "never PATH" means)
 
 The *Consequences* → **Security** paragraph below reads "the executor confines

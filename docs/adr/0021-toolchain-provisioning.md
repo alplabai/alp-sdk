@@ -21,6 +21,33 @@ itself is now `tan doctor`'s job — a generic host-tools presence check
 function; this ADR's earlier text should not be read as pinning specific
 function names in the live tool.
 
+## Amendment (2026-08-26 — both 2026-08-07 blockers cleared at tan-cli v0.6.0-rc1)
+
+Corrects the 2026-08-07 Amendment's "Net effect" paragraph: both halves of
+the blocker it named are now closed, so the Lane-1 P1 env-injection half is
+no longer resolver-blocked.
+
+- **The resolver landed.** `python/tan/commands/build/toolchain.py`'s
+  `resolve_toolchain_root()` is the Python port of
+  `crate::toolchain::resolve_toolchain_root` (tan-cli#547) and is wired at
+  `python/tan/commands/build_cmd.py:1497` as `toolchain_root=toolchain.root`.
+  No live call site still passes `toolchain_root=None`; the only two
+  occurrences of that literal left in the tree are prose in
+  `build/toolchain.py`'s own module docstring and `doctor_cmd.py` narrating
+  the old, now-closed state.
+- **The `--materialise` demotion silence is also closed**, by tan-cli#565:
+  `_demoted_artefact_issues()` (`build_cmd.py:1406`) reports a demoted
+  artefact as an `Issue` in the envelope when `mode == _MODE_MATERIALISE`
+  (`build_cmd.py:1545-1549`), instead of the silent, policy-blind drop the
+  2026-08-07 Amendment's repro described.
+- **Shipped in tan-cli `v0.6.0-rc1`** (tagged 2026-08-14; `TAN_VERSION` at
+  `python/tan/version.py:49`), a real, existing tag.
+
+**Net effect on this ADR's Lane-1 P1 env-injection half.** No longer
+resolver-blocked or silence-blocked. Whether to move this ADR off
+`Proposed` is a decision on its remaining merits, not on either blocker
+named above.
+
 ## Amendment (2026-08-07 — a substitution-set token existing is not the same as it resolving; the Python executor line still hardcodes `toolchain_root=None`)
 
 Corrects the 2026-07-26 "drop `-DCMAKE_MAKE_PROGRAM`..." Amendment's read of
