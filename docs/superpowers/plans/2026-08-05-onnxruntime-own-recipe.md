@@ -1,6 +1,8 @@
 # ONNX Runtime Own-Recipe Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **STATUS — LANDED.** `meta-alp-sdk/recipes-devtools/onnxruntime/onnxruntime_1.28.0.bb` exists at the `v1.28.0` pin this plan chose. Kept for implementation-history context.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** Give the Cortex-A55 SoMs a real `ALP_INFERENCE_BACKEND_CPU` implementation by packaging **upstream** ONNX Runtime in `meta-alp-sdk` at a single version, enabled on `E1M-NX9101` first and extended to the E1M-X family once proven.
 

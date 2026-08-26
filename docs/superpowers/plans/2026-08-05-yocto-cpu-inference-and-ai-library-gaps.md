@@ -1,6 +1,8 @@
 # Yocto CPU Inference + AI Library Gaps Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **STATUS — LANDED.** All seven tasks shipped: `metadata/libraries/madgwick-ahrs.yaml` is SHA-pinned, `onnx` is in `scripts/alp_model/manifest.py`'s `VALID_BLOB_FORMATS`, `metadata/libraries/onnxruntime.yaml` declares 1.28.0, and `src/yocto/inference_ort.cpp` + `src/yocto/CMakeLists.txt` carry the ORT CPU backend. Kept for implementation-history context.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** Give the Cortex-A55 SoMs (E1M-V2N101/102, E1M-V2M101/102, E1M-NX9101) a real CPU inference path under Yocto by adding ONNX Runtime as the `ALP_INFERENCE_BACKEND_CPU` implementation, and close the two metadata-hygiene defects found alongside it.
 
