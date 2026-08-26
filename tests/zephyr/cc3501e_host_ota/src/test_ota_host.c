@@ -81,7 +81,11 @@ static struct {
 	uint32_t flush_polls_left; /* STATUS polls before the flush completes */
 	uint32_t diag_uptime_ms;
 
-	uint8_t  ota_state;  /* alp_cc3501e_ota_state_t */
+	uint8_t ota_state; /* alp_cc3501e_ota_state_t */
+	/* FLASH-derived pending image, OTA_STATUS byte [12] (#1123).  Distinct
+	 * from ota_state on purpose: the whole point of the field is that it
+	 * stays true when the RAM session does not. */
+	uint8_t  ota_pending;
 	uint32_t ota_total;  /* total_len from BEGIN     */
 	uint32_t ota_cursor; /* bytes accepted so far    */
 
@@ -168,6 +172,11 @@ static void slave_dispatch(void)
 		if (slave.ota_state == ALP_CC3501E_OTA_STATE_WRITING &&
 		    slave.ota_cursor == slave.ota_total) {
 			slave.ota_state = ALP_CC3501E_OTA_STATE_STAGED;
+			/* FINISH stages the image in FLASH and stops -- it no longer arms a
+			 * swap (#1123).  Model both halves: the RAM session goes STAGED and
+			 * the store now genuinely holds an installable image, which is what
+			 * a later PROMOTE is gated on. */
+			slave.ota_pending = ALP_CC3501E_OTA_PENDING_STAGED;
 			stage_status(ALP_CC3501E_RESP_OK);
 		} else {
 			stage_status(ALP_CC3501E_RESP_ERR_NOT_READY);
@@ -187,8 +196,9 @@ static void slave_dispatch(void)
 			slave.flush_pending = 0u;
 			slave.busy_writes   = 0u; /* the retried chunk is now accepted */
 		}
-		/* status(1) + alp_cc3501e_ota_status_t on the wire (12 bytes):
-		 * state, reserved[3], bytes_written(LE32), total_len(LE32). */
+		/* status(1) + alp_cc3501e_ota_status_t on the wire (16 bytes):
+		 * state, reserved[3], bytes_written(LE32), total_len(LE32),
+		 * pending(1), reserved2(3). */
 		slave.reply_pl[0]  = ALP_CC3501E_RESP_OK;
 		slave.reply_pl[1]  = slave.ota_state;
 		slave.reply_pl[2]  = 0u;
@@ -202,7 +212,13 @@ static void slave_dispatch(void)
 		slave.reply_pl[10] = (uint8_t)((slave.ota_total >> 8) & 0xFFu);
 		slave.reply_pl[11] = (uint8_t)((slave.ota_total >> 16) & 0xFFu);
 		slave.reply_pl[12] = (uint8_t)((slave.ota_total >> 24) & 0xFFu);
-		slave.reply_len    = 13u;
+		/* [13] = alp_cc3501e_ota_status_t::pending, appended after total_len
+		 * (payload byte 12; +1 here for the leading status byte). */
+		slave.reply_pl[13] = slave.ota_pending;
+		slave.reply_pl[14] = 0u;
+		slave.reply_pl[15] = 0u;
+		slave.reply_pl[16] = 0u;
+		slave.reply_len    = 17u;
 		break;
 	}
 	case ALP_CC3501E_CMD_GET_DIAG_INFO: {

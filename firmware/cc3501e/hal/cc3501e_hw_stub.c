@@ -419,6 +419,15 @@ int8_t cc3501e_hw_ota_reboot_rc(void)
 	return 0;
 }
 
+uint8_t cc3501e_hw_ota_pending(void)
+{
+	/* The stub has no image store to query.  NONE, not UNKNOWN: there genuinely
+	 * is no slot here, so "nothing pending" is the truthful answer rather than a
+	 * failure to look -- and it keeps the stub's OTA_STATUS reply deterministic
+	 * for the wire-vector tests. */
+	return (uint8_t)ALP_CC3501E_OTA_PENDING_NONE;
+}
+
 bool cc3501e_hw_ota_flush_pending(void)
 {
 	/* The stub stages nothing to flash, so no flush window ever exists and the

@@ -413,15 +413,24 @@ static int ota_do_finish(void)
 		return CC3501E_HW_ERR_IO;
 	}
 	ota.state = ALP_CC3501E_OTA_STATE_STAGED;
-	/* Arm the standard swap-reboot: the tick calls psa_fwu_request_reboot once the
-	 * FINISH ack has drained -> the device reboots, BL2 swaps the STAGED slot to
-	 * primary (TRIAL), the new image boots and self-accepts (cc3501e_hw_tick).  This
-	 * is the production OTA contract.  (On the current mis-activated bench unit the
-	 * swap-boot is gated by the vendor-SBL cold-boot issue -- see
-	 * project-cc3501e-ota-bridge-rootcause -- but the receive/stage/install pipeline
-	 * up to STAGED is silicon-validated.) */
-	reply_drained      = false;
-	ota_reboot_pending = true;
+	/* FINISH DOES NOT ARM THE SWAP-REBOOT (#1123).  It used to: the tick fired
+	 * psa_fwu_request_reboot() as soon as the FINISH ack drained, so the device
+	 * committed the image on its own and an ABORT arriving afterwards had nothing
+	 * it could revoke -- it could only race a reboot that was already armed.  Two
+	 * successive attempts to guard that window (an abort_requested flag, then a
+	 * generation counter) each closed it in one place and opened a worse one, and
+	 * both were rejected: an abort landing inside the pump's reinit window left
+	 * the slot STAGED with the swap armed while OTA_STATUS still read IDLE, i.e.
+	 * the device auto-rebooted into a cancelled image with no PROMOTE at all.
+	 *
+	 * The window is now removed rather than policed.  FINISH stages the image and
+	 * stops; PROMOTE (0x46) is the ONLY thing that arms a swap.  An abort after
+	 * FINISH therefore has nothing to race -- the image sits STAGED and inert
+	 * until a host deliberately promotes it, and OTA_STATUS's flash-derived
+	 * `pending` byte makes it visible in the meantime (see
+	 * cc3501e_hw_ota_pending), including across a reset that cleared the session.
+	 *
+	 * A host that wants the old one-shot behaviour issues FINISH then PROMOTE. */
 	return CC3501E_HW_OK;
 }
 
@@ -765,6 +774,55 @@ int cc3501e_hw_ota_promote(void)
 	reply_drained      = false;
 	ota_reboot_pending = true;
 	return CC3501E_HW_OK;
+}
+
+/* Map a PSA-FWU component state to the wire's pending-image code.  Anything not
+ * explicitly listed is UNKNOWN rather than NONE: "cannot tell" must never read
+ * back as "nothing pending", which is the reading that would let a host discard
+ * an image that is in fact installable. */
+static uint8_t ota_pending_from_psa(uint8_t psa_state)
+{
+	switch (psa_state) {
+	case PSA_FWU_READY:
+	case PSA_FWU_UPDATED:
+		return (uint8_t)ALP_CC3501E_OTA_PENDING_NONE;
+	case PSA_FWU_CANDIDATE:
+		return (uint8_t)ALP_CC3501E_OTA_PENDING_CANDIDATE;
+	case PSA_FWU_STAGED:
+		return (uint8_t)ALP_CC3501E_OTA_PENDING_STAGED;
+	case PSA_FWU_TRIAL:
+		return (uint8_t)ALP_CC3501E_OTA_PENDING_TRIAL;
+	case PSA_FWU_FAILED:
+		return (uint8_t)ALP_CC3501E_OTA_PENDING_FAILED;
+	default:
+		return (uint8_t)ALP_CC3501E_OTA_PENDING_UNKNOWN;
+	}
+}
+
+uint8_t cc3501e_hw_ota_pending(void)
+{
+	psa_fwu_component_info_t i1 = { 0 }, i2 = { 0 };
+
+	psa_fwu_init(); /* idempotent */
+	if (psa_fwu_query((psa_fwu_component_t)Vendor_Image_Slot_1, &i1) != PSA_SUCCESS ||
+	    psa_fwu_query((psa_fwu_component_t)Vendor_Image_Slot_2, &i2) != PSA_SUCCESS) {
+		return (uint8_t)ALP_CC3501E_OTA_PENDING_UNKNOWN;
+	}
+
+	/* Report the NON-PRIMARY slot -- the one an update targets and the one a
+	 * pending image occupies.  Mirrors ota_do_begin()'s target selection so the
+	 * byte describes the same slot a BEGIN would write.
+	 *
+	 * Ambiguous primary (both or neither) is UNKNOWN, deliberately: ota_do_begin
+	 * resolves that case by CLEANING both slots, which is a destructive recovery
+	 * and not something a status read may imply has happened. */
+	if (i1.impl.Primary && !i2.impl.Primary) {
+		return ota_pending_from_psa(i2.state);
+	}
+	if (i2.impl.Primary && !i1.impl.Primary) {
+		return ota_pending_from_psa(i1.state);
+	}
+	return (uint8_t)ALP_CC3501E_OTA_PENDING_UNKNOWN;
 }
 
 int cc3501e_hw_ota_status(uint8_t *state, uint32_t *bytes_written, uint32_t *total_len)

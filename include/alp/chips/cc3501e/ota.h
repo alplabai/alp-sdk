@@ -157,13 +157,23 @@ alp_status_t cc3501e_ota_write(cc3501e_t     *ctx,
  * @brief Finalize the session (OTA_FINISH, opcode 0x42).
  *
  * The device installs the fully-streamed image into its non-primary vendor
- * slot and arms the deferred swap reboot (the bridge link drops while the
- * device reboots and BL2/MCUboot swaps the slot to primary).
+ * slot, leaving it STAGED and INERT.
+ *
+ * @warning FINISH NO LONGER COMMITS. It used to arm the deferred swap-reboot
+ *          itself, so the device rebooted into the new image as soon as the
+ *          FINISH ack drained, and an @ref cc3501e_ota_abort arriving after it
+ *          had nothing left to revoke -- it could only race a reboot that was
+ *          already armed (#1123). @ref cc3501e_ota_promote is now the ONLY
+ *          thing that commits an image. A caller that wants the old one-shot
+ *          behaviour issues FINISH then PROMOTE; a caller that wants to decide
+ *          later can now do so, and can see the staged image in
+ *          @ref alp_cc3501e_ota_status_t::pending in the meantime -- including
+ *          after a reset that cleared the device's session.
  *
  * @param ctx         Initialised bridge handle.
  * @param timeout_ms  Per-request poll-by-repeat budget.
- * @return ALP_OK once FINISH is acked (reboot follows); otherwise the mapped
- *         error (e.g. an incomplete stream is rejected).
+ * @return ALP_OK once the image is staged -- NO reboot follows; otherwise the
+ *         mapped error (e.g. an incomplete stream is rejected).
  */
 alp_status_t cc3501e_ota_finish(cc3501e_t *ctx, uint32_t timeout_ms);
 
@@ -185,15 +195,30 @@ alp_status_t cc3501e_ota_abort(cc3501e_t *ctx, uint32_t timeout_ms);
  * for example one left pending by a bare reset that carried no swap request. A
  * committed STAGED image survives a reset while the device's RAM session state
  * resets to IDLE, so a fresh @ref cc3501e_ota_finish is unreachable (a new
- * session is rejected while a slot is occupied); this is the only path to
- * request the swap for such an image. The bridge link drops while the device
- * reboots and BL2/MCUboot swaps the pending slot to primary. If nothing is
- * pending the reboot is a clean no-op.
+ * session is rejected while a slot is occupied). Since #1123 it is also the
+ * ONLY path that commits ANY image: @ref cc3501e_ota_finish stages and stops.
+ * The bridge link drops while the device reboots and BL2/MCUboot swaps the
+ * pending slot to primary.
+ *
+ * CONFIRMED BEFORE IT COMMITS. This reads @ref alp_cc3501e_ota_status_t::pending
+ * first and only issues the promote when the image store actually reports a
+ * STAGED image. That matters because PROMOTE's only success reply is a bare
+ * RESP_OK, byte-identical to a dead bus phase, which the transport's alias
+ * check cannot reject without breaking promotion outright (#1696 gap 2). The
+ * store read is a guarantee the ack cannot forge: it reports what a swap would
+ * really install, not what the RAM session believes.
+ *
+ * "If nothing is pending the reboot is a clean no-op" is no longer the
+ * behaviour, and was never a good one -- it made an abandoned or aborted
+ * session's promote an unconditional success that armed a reboot anyway.
  *
  * @param ctx         Initialised bridge handle.
  * @param timeout_ms  Per-request poll-by-repeat budget.
- * @return ALP_OK once the promote is acked (reboot follows); otherwise the
- *         mapped error (e.g. ALP_ERR_NOT_READY on a non-OTA firmware build).
+ * @return ALP_OK once the promote is acked (reboot follows), or immediately if
+ *         the image is already TRIAL (the requested swap has happened);
+ *         ALP_ERR_NOT_READY if the store reports no installable image -- which
+ *         includes both "nothing pending" and "could not be determined", since
+ *         neither is consent to reboot; otherwise the mapped error.
  */
 alp_status_t cc3501e_ota_promote(cc3501e_t *ctx, uint32_t timeout_ms);
 
