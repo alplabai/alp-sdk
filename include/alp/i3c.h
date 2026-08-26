@@ -24,6 +24,7 @@
  *          no descriptor, so every op returns ALP_ERR_IO WITHOUT toggling a
  *          bus line.  That is indistinguishable from a NACK at this API, so
  *          if a soldered target answers nothing, check the devicetree first.
+ *
  *          Timing (SCL rate) is devicetree-owned, not a config field --
  *          the legal rate on a mixed I3C/I2C bus depends on the slowest
  *          device populated, which is a board fact, not a per-open() choice.
@@ -122,9 +123,14 @@ typedef struct {
  *         @ref alp_last_error set to:
  *           @ref ALP_ERR_INVAL (@p cfg is NULL; or @c bus_id out of range,
  *             >= the ACTIVE SoC's I3C count, ALP_SOC_I3C_COUNT -- not the
- *             form-factor count, which may be smaller);
+ *             form-factor count, which may be smaller; the Zephyr backend
+ *             additionally rejects @c bus_id >= its own DT-instance count
+ *             under CONFIG_ALP_SOC_NONE, where ALP_SOC_I3C_COUNT is
+ *             UINT16_MAX and the SoC-count gate above never rejects);
  *           @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC (no I3C backend resolves
- *             for the active SoM);
+ *             for the active SoM -- not reachable through any shipped
+ *             backend today, since sw_fallback registers silicon_ref
+ *             "*" and links into every build);
  *           @ref ALP_ERR_NOT_IMPLEMENTED (the selected backend declares
  *             no open op -- not reachable through any shipped backend
  *             today);
@@ -135,9 +141,12 @@ typedef struct {
  *             built WITHOUT CONFIG_I3C_CONTROLLER -- either CONFIG_I3C=n,
  *             or CONFIG_I3C=y with CONFIG_I3C_TARGET_ROLE_ONLY selected --
  *             no controller role compiled in, so every op including
- *             open() is unsupported.  This is the DEFAULT open() outcome
- *             on any Zephyr build that doesn't opt into CONFIG_I3C_DUAL_ROLE
- *             or CONFIG_I3C_CONTROLLER_ROLE_ONLY, not a corner case).
+ *             open() is unsupported.  CONFIG_I3C itself defaults to n, so
+ *             NOSUPPORT is the default outcome; once a board sets
+ *             CONFIG_I3C=y the controller role is on by default (the
+ *             I3C_MODE choice defaults to CONFIG_I3C_DUAL_ROLE), and
+ *             NOSUPPORT then requires explicitly selecting
+ *             CONFIG_I3C_TARGET_ROLE_ONLY).
  */
 alp_i3c_t *alp_i3c_open(const alp_i3c_config_t *cfg);
 
