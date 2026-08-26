@@ -90,6 +90,8 @@ alp_status_t alp_jpeg_encode(alp_jpeg_t                  *h,
 	if (req == NULL || out_buf == NULL || out_len == NULL || req->width == 0u ||
 	    req->height == 0u) {
 		rc = ALP_ERR_INVAL;
+	} else if (h->state.ops->encode == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
 	} else {
 		rc = h->state.ops->encode(&h->state, req, out_buf, out_cap, out_len);
 	}

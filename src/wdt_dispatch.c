@@ -117,7 +117,12 @@ alp_status_t alp_wdt_feed(alp_wdt_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->feed(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->feed == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->feed(&h->state);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -127,7 +132,12 @@ alp_status_t alp_wdt_disable(alp_wdt_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->disable(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->disable == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->disable(&h->state);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }

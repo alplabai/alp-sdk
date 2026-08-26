@@ -98,7 +98,14 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = (len == 0) ? ALP_OK : bus->state.ops->transceive(&bus->state, tx, rx, len);
+	alp_status_t rc;
+	if (len == 0) {
+		rc = ALP_OK;
+	} else if (bus->state.ops->transceive == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = bus->state.ops->transceive(&bus->state, tx, rx, len);
+	}
 	alp_handle_op_leave(&bus->active_ops);
 	return rc;
 }
@@ -225,6 +232,8 @@ alp_status_t alp_spi_target_transceive(alp_spi_target_t *bus,
 		 * alp_spi_transceive): a target cannot stage a zero-length
 		 * transfer for the external controller to clock. */
 		rc = ALP_ERR_INVAL;
+	} else if (bus->state.ops->target_transceive == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
 	} else {
 		rc = bus->state.ops->target_transceive(&bus->state, tx, rx, len, rx_len, timeout_ms);
 	}
@@ -243,6 +252,13 @@ alp_status_t alp_spi_target_close(alp_spi_target_t *tgt)
 		}
 		return ALP_OK; /* already closed / closing elsewhere */
 	}
+	/* No target_close == NULL guard here: alp_spi_target_open() already
+	 * rejects target_open/target_transceive/target_close as a set, so an
+	 * open target handle's target_close is guaranteed non-NULL.  A guard
+	 * on this path would be dead code whose only live effect is worse
+	 * than what it replaces -- the rc != ALP_OK branch below re-arms
+	 * LC_IDLE without releasing the slot, so a reachable NOSUPPORT here
+	 * would permanently leak a pool slot instead of crashing. */
 	alp_status_t rc = tgt->state.ops->target_close(&tgt->state);
 	if (rc != ALP_OK) {
 		/* Backend still owns a timed-out transfer (armed in the

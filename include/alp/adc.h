@@ -181,7 +181,7 @@ alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg);
  * @param[in]  adc      Handle from @ref alp_adc_open.
  * @param[out] raw_out  Receives the raw code.  Sign-extended on
  *                      ADCs with differential inputs.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_adc_read_raw(alp_adc_t *adc, int32_t *raw_out);
 
@@ -198,7 +198,7 @@ alp_status_t alp_adc_read_raw(alp_adc_t *adc, int32_t *raw_out);
  * @param[in]  adc     Handle from @ref alp_adc_open.
  * @param[out] uv_out  Receives the signed microvolt (µV) reading as
  *                     @c int32_t.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_adc_read_uv(alp_adc_t *adc, int32_t *uv_out);
 
