@@ -7,6 +7,30 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Fixed — the CC3501E TI build could ship a stale image after a failed build
+
+`build_ti.ps1` aborted **mid-compile** on a compiler *warning*: `tiarmclang`
+writes warnings to stderr, and under `$ErrorActionPreference = 'Stop'`
+PowerShell turns native stderr into a terminating `NativeCommandError`. With
+`-Ble`, a warning in a TI SDK source (`cc3xxxhif_ble_hci.c`) ended the build
+before the linker ran — while the script still printed `0 error(s)` from the
+compile summary.
+
+The build left the **previous** `cc3501e-bridge.out` in place, and that file is
+what the flash-image builder packages. Every subsequent flash therefore carried
+a stale image: the device reported the *old* `fw_version`, and firmware changes
+under test never ran on silicon while appearing to have been flashed.
+
+- Delete `cc3501e-bridge.{out,hex,bin}` **before** compiling, so a build that
+  dies cannot leave a flashable artifact behind (both `build_ti.ps1` and
+  `build_ti.sh`).
+- Stop treating a stderr warning as fatal in the compile loop; `$LASTEXITCODE`
+  was already checked per source and remains the real error signal.
+
+Verified on E1M-AEN801 silicon: with the fix, a `firmware-version.txt` bump to
+`0.3.1` reaches the device (`fw_version=0x0301`) — before it, the same flash
+still reported `0x0201`.
+
 ### Documented — recovering an Alif E8 whose Secure Enclave is stuck in Recovery
 
 `debugging-aen.md` §7.4 previously said the SDK had no recipe for an SE-side
