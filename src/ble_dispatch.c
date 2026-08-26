@@ -419,9 +419,13 @@ alp_status_t alp_ble_gatt_notify(alp_ble_t            *h,
 	 * never counted there) and recycles the conn slot beneath this call = UAF
 	 * (issue #629). Count h then conn; op_enter never blocks, so the fixed
 	 * h-before-conn order cannot deadlock. */
-	if (conn == NULL || !alp_handle_op_enter(&conn->lifecycle, &conn->active_ops)) {
+	if (conn == NULL) {
 		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_INVAL;
+	}
+	if (!alp_handle_op_enter(&conn->lifecycle, &conn->active_ops)) {
+		alp_handle_op_leave(&h->active_ops);
+		return ALP_ERR_NOT_READY;
 	}
 	alp_status_t rc;
 	if (payload == NULL && len > 0) {
