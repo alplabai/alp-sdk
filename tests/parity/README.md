@@ -14,8 +14,8 @@ every planner change.
 
 | Seam | Checks | Status |
 |---|---|---|
-| **1 — plan shape** | Does a live `--emit build-plan` still match a frozen, hand-verified oracle's command / env / appDir / skip-fail-decision *shape*, field for field, over the SoM matrix? Deliberately does NOT re-diff the materialised config-artefact content (alp.conf/local.conf/sysbuild-conf bytes) — see "Seam-1 scope" below. Toolchain-free; runs on any `ubuntu-latest` runner. | **Implemented here**: `seam1_field_diff.py` + `.github/workflows/parity.yml`'s `seam1-plan-shape` job. |
-| **2 — real build** | Materialise byte-check and an actual `west`/Zephyr build off the plan — the thing seam 1 can't catch (a plan that *looks* right but doesn't build). Renode boot was part of this seam's original design; Renode is now retired (ADR [0022](../../docs/adr/0022-python-executor-renode-retirement.md)), so this seam's remaining scope is the build/flash step, verified on real hardware, not a simulated boot. | **Follow-up, not seeded here.** Needs a Linux runner with the Zephyr SDK / toolchain installed (`west`, the AEN/E1M-X Zephyr modules). Placeholder `seam2` job in `.github/workflows/parity.yml` documents this — it does not run a fake check and does not report success for work it didn't do. |
+| **1 — plan shape** | Does a live `--emit build-plan` still match a frozen, hand-verified oracle's command / env / appDir / skip-fail-decision *shape*, field for field, over the SoM matrix? Deliberately does NOT re-diff the materialised config-artefact content (alp.conf/local.conf/sysbuild-conf bytes) — see "Seam-1 scope" below. Toolchain-free; runs on any `ubuntu-latest` runner. | **Implemented here**: `seam1_field_diff.py` + `.github/workflows/parity-seam1.yml`'s `seam1` job. |
+| **2 — real build** | Materialise byte-check and an actual `west`/Zephyr build off the plan — the thing seam 1 can't catch (a plan that *looks* right but doesn't build). Renode boot was part of this seam's original design; Renode is now retired (ADR [0022](../../docs/adr/0022-python-executor-renode-retirement.md)), so this seam's remaining scope is the build/flash step, verified on real hardware, not a simulated boot. | **Follow-up, not seeded here.** Needs a Linux runner with the Zephyr SDK / toolchain installed (`west`, the AEN/E1M-X Zephyr modules). alp-sdk has no placeholder job for this seam; tan-cli's own `.github/workflows/parity.yml` carries a placeholder `seam2` job that documents the same gap on its side — it does not run a fake check and does not report success for work it didn't do. |
 
 Yocto/A-core artefact parity is explicitly **out of scope** for both seams —
 no bitbake-capable runner infra exists, and bitbake output isn't
@@ -216,10 +216,18 @@ board's only diffs (if any) are the three allowed deltas above.
 
 ## CI wiring
 
-`.github/workflows/parity.yml` runs `seam1-plan-shape` on every pull request
-(against a pinned alp-sdk tag — see the workflow's `PINNED_SDK_TAG` comment)
-and on a `repository_dispatch` of type `alp-sdk-planner-change` (the
-cross-repo trigger ADR-0020's Amendment requires: alp-sdk CI fires this on
-every planner change so a drifting emit surfaces on the *alp-sdk* PR, not
-discovered later against a stale checkout). The dispatch payload's
-`client_payload.sdk_ref` picks the exact SDK ref under test.
+alp-sdk runs its own half of this gate as `.github/workflows/parity-seam1.yml`
+(job id `seam1`), path-filtered to `pull_request` and `push` (`dev`/`main`)
+touching `scripts/alp_orchestrate/**`, `metadata/**`, `examples/**/board.yaml`,
+or `tests/parity/**` — not on every pull request. It runs against this repo's
+own checkout, with no `PINNED_SDK_TAG` and no inbound `repository_dispatch`;
+alp-sdk is the trigger's **sender**, not its receiver.
+
+The pin and the inbound `repository_dispatch` belong to **tan-cli's**
+`.github/workflows/parity.yml` (job `seam1-plan-shape`), which alp-sdk drives
+via `.github/workflows/dispatch-tan-parity.yml`: whenever this repo's
+reference planner / contract surface moves, that workflow fires a
+`repository_dispatch` of type `alp-sdk-planner-change` at `alplabai/tan-cli`,
+with `client_payload.sdk_ref` picking the exact SDK ref tan-cli's parity gate
+should test — so a drifting emit surfaces on the *alp-sdk* PR, not discovered
+later against a stale checkout.
