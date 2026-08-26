@@ -7,6 +7,34 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Fixed — CC3501E async events reached only one consumer
+
+`cc3501e_t` carried a single async-event callback slot, and
+`cc3501e_set_event_callback()` overwrote it unconditionally. The Zephyr console
+companion registers its own callback on the shared context from its init path —
+after the application's `main()` has already registered — so it displaced the
+application's callback and drained every event into its own sink.
+
+Nothing reported the conflict: the firmware ring drained normally,
+`cc3501e_poll_events()` returned `ALP_OK`, and the application simply never saw
+an event. Confirmed on E1M-AEN801 silicon, where the firmware ring showed 16
+events queued and drained while the application's poll returned `ALP_OK` having
+received zero bytes.
+
+- `cc3501e_set_event_callback()` is replaced by
+  `cc3501e_add_event_callback()` / `cc3501e_remove_event_callback()`, and events
+  fan out to every registered subscriber. The console and an application are
+  both legitimate consumers of the same events.
+- Registration is idempotent per (callback, user) pair, so re-arming defensively
+  does not double-deliver.
+- Exhausting `CC3501E_EVENT_SUBSCRIBERS` (4) refuses the new registration with
+  `ALP_ERR_NOMEM` rather than displacing a working subscriber — the failure mode
+  this fixes was precisely a silent displacement.
+
+**Migration:** replace `cc3501e_set_event_callback(ctx, cb, user)` with
+`cc3501e_add_event_callback(ctx, cb, user)`; detach with
+`cc3501e_remove_event_callback(ctx, cb, user)` instead of passing `cb = NULL`.
+
 ### Documented — recovering an Alif E8 whose Secure Enclave is stuck in Recovery
 
 `debugging-aen.md` §7.4 previously said the SDK had no recipe for an SE-side
