@@ -126,9 +126,18 @@ px_open(uint32_t pin_id, alp_gpio_backend_state_t *state, alp_capabilities_t *ca
 		return ALP_OK;
 	}
 
-	/* Not proxied (or no bridge attached): delegate to the platform driver. */
-	const alp_gpio_ops_t *z  = alp_z_gpio_ops();
-	alp_status_t          rc = z->open(pin_id, &s->inner, caps);
+	/* Not proxied (or no bridge attached): delegate to the platform driver.
+	 *
+	 * Name the owning handle explicitly.  The platform backend needs it to
+	 * dispatch interrupts (the dispatcher stashes the callback on the handle,
+	 * and the ISR thunk calls it from there), and it cannot derive it here:
+	 * `&s->inner` is nested in this backend's per-handle sidecar, not in a
+	 * struct alp_gpio, so the CONTAINER_OF its own open() would apply lands
+	 * outside any handle and the thunk would call a bogus pointer from
+	 * interrupt context (issue #1618).  `state` IS &handle->state -- the
+	 * dispatcher passed it -- so it names the owner without this file needing
+	 * to know the handle layout. */
+	alp_status_t rc = alp_z_gpio_open_owned(pin_id, &s->inner, caps, state);
 	if (rc != ALP_OK) {
 		_free_side(s);
 		return rc;
