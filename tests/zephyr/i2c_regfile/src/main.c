@@ -76,12 +76,15 @@ ZTEST(alp_i2c_regfile, test_open_reserved_address_yields_inval)
 	zassert_equal(s, ALP_ERR_INVAL, "addr 0x78: got %d", (int)s);
 }
 
-ZTEST(alp_i2c_regfile, test_window_and_stats_null_handle_yield_inval)
+ZTEST(alp_i2c_regfile, test_window_and_stats_null_handle_yield_not_ready)
 {
 	alp_i2c_regfile_stats_t st;
 
-	zassert_equal(alp_i2c_regfile_set_write_window(NULL, 0u, 1u), ALP_ERR_INVAL, "window");
-	zassert_equal(alp_i2c_regfile_stats(NULL, &st), ALP_ERR_INVAL, "stats null rf");
+	/* NULL handle fails the op_enter gate, not a param check -- matches
+	 * the ALP_ERR_NOT_READY contract at every other op_enter site
+	 * (issue #1646). */
+	zassert_equal(alp_i2c_regfile_set_write_window(NULL, 0u, 1u), ALP_ERR_NOT_READY, "window");
+	zassert_equal(alp_i2c_regfile_stats(NULL, &st), ALP_ERR_NOT_READY, "stats null rf");
 }
 
 ZTEST(alp_i2c_regfile, test_close_null_is_noop)
@@ -211,9 +214,10 @@ ZTEST(alp_i2c_regfile, test_loopback_stats_count_traffic)
 	zassert_equal(st.writes_seen, 2u, "payload bytes only, got %u", st.writes_seen);
 	zassert_equal(st.reads_seen, 3u, "streamed bytes, got %u", st.reads_seen);
 
-	/* Stats on a closed handle degrade to INVAL, not stale data. */
+	/* Stats on a closed handle degrade to NOT_READY (op_enter sees the
+	 * handle is closed/closing), not stale data -- issue #1646. */
 	rf_loopback_end(rf, bus);
-	zassert_equal(alp_i2c_regfile_stats(rf, &st), ALP_ERR_INVAL, "closed handle");
+	zassert_equal(alp_i2c_regfile_stats(rf, &st), ALP_ERR_NOT_READY, "closed handle");
 }
 
 #else /* !CONFIG_I2C_TARGET */

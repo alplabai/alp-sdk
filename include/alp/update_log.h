@@ -131,7 +131,8 @@ alp_update_log_t *alp_update_log_open(void);
  * @brief Append one entry. @c seq is assigned by the engine.
  * @param log   The update log handle (from @ref alp_update_log_open).
  * @param entry Entry to append; every field except @c seq is caller-filled.
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT;
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT /
+ *         ALP_ERR_NOT_READY (NULL or closed @p log);
  *         ALP_ERR_NOMEM when the store is full (the log never wraps --
  *         existing entries stay intact and verifiable).
  */
@@ -158,7 +159,8 @@ alp_status_t alp_update_log_entry_from_boot_metadata(alp_update_log_entry_t *ent
  * @brief Append one entry sourced from authenticated boot metadata. [ABI-EXPERIMENTAL]
  * @param log       The update log handle (from @ref alp_update_log_open).
  * @param timestamp Best-effort epoch to store in the entry; 0 = unset.
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT;
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT /
+ *         ALP_ERR_NOT_READY (NULL or closed @p log);
  *         ALP_ERR_NOMEM when the store is full.
  *
  * This is the preferred update-audit path once a board wires a real
@@ -174,16 +176,25 @@ alp_status_t alp_update_log_append_boot(alp_update_log_t *log, uint64_t timestam
  * @param[out] verdict_out  Required.
  * @param[out] bad_seq_out  On CHAIN_BROKEN/TRUNCATED, the offending seq. May be NULL.
  * @return ALP_OK if the walk ran (inspect @p verdict_out for the result);
- *         ALP_ERR_IO if the store was unreadable.
+ *         ALP_ERR_IO if the store was unreadable; ALP_ERR_INVAL on NULL
+ *         @p log / @p verdict_out; ALP_ERR_NOT_READY on a closed @p log.
  */
 alp_status_t alp_update_log_verify(alp_update_log_t         *log,
                                    alp_update_log_verdict_t *verdict_out,
                                    uint64_t                 *bad_seq_out);
 
-/** @brief Number of entries. */
+/**
+ * @brief Number of entries.
+ * @return ALP_OK; ALP_ERR_INVAL on NULL @p log / @p count_out;
+ *         ALP_ERR_NOT_READY on a closed @p log.
+ */
 alp_status_t alp_update_log_count(alp_update_log_t *log, uint64_t *count_out);
 
-/** @brief Fetch the entry at @p seq. ALP_ERR_NOT_FOUND if absent. */
+/**
+ * @brief Fetch the entry at @p seq. ALP_ERR_NOT_FOUND if absent.
+ * @return ALP_OK; ALP_ERR_INVAL on NULL @p log / @p entry_out;
+ *         ALP_ERR_NOT_READY on a closed @p log.
+ */
 alp_status_t
 alp_update_log_get(alp_update_log_t *log, uint64_t seq, alp_update_log_entry_t *entry_out);
 
