@@ -32,8 +32,12 @@ CATCHES, only when the fragment opts in (see ANCHORS below):
 
 DOES NOT CATCH:
   * a citation into another repository (e.g. an alp-sdk fragment citing
-    `python/tan/...`). Those are reported as SKIPPED with a reason, never as a
-    silent pass.
+    `python/tan/...` or `python/tests/...`, both tan-cli). Any path rooted at
+    one of `_FOREIGN_PREFIXES`'s top-level directories is skipped, not just
+    the specific subpath in this example -- alp-sdk has no `python/`,
+    `crates/`, or `contract/` directory of its own, so the whole subtree is
+    unresolvable here regardless of which subpath is cited. Those are
+    reported as SKIPPED with a reason, never as a silent pass.
 
 ANCHORS -- how to make a citation checkable
 -------------------------------------------
@@ -87,9 +91,16 @@ _CITATION = re.compile(
 #: immediately following the citation.
 _ANCHOR = re.compile(r"""^\s*\(\s*["“`](?P<text>[^"”`]{4,120})["”`]""")
 
-#: Prefixes that belong to a different repository. Reported as SKIPPED with the
-#: reason, never silently passed.
-_FOREIGN_PREFIXES = ("python/tan/", "crates/", "contract/")
+#: Top-level directories that belong to a different repository, in full --
+#: not a hand-picked list of subpaths within them. alp-sdk has no `python/`,
+#: `crates/`, or `contract/` directory of its own (verified: `ls -d python
+#: crates contract` all fail here), so ANY path rooted at one of these is
+#: unresolvable in this tree regardless of which subpath is cited --
+#: `python/tan/...` and `python/tests/...` are equally foreign. An earlier
+#: version of this list matched only `python/tan/` and hard-failed the
+#: equally-foreign `python/tests/...` (alp-sdk#1522, alp-sdk#1525). Reported
+#: as SKIPPED with the reason, never silently passed.
+_FOREIGN_PREFIXES = ("python/", "crates/", "contract/")
 
 
 def _iter_fragments() -> list[Path]:
