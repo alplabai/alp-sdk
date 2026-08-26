@@ -97,8 +97,8 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `can-loopback`               | CAN(-FD) frame TX + self-reception via loopback mode.                    |
 | `qenc-readout`               | Quadrature-encoder pulse counter.                                        |
 | `drone-autopilot`            | Real-time PID flight controller -- IMU → cascaded PID → PWM ESCs; deterministic multi-rate loops. **(AEN; advanced -- don't fly)** |
-| `peripheral-io/alp-console`  | Shippable slot0 app: the `alp` interactive console on the SoM UART, wired to the on-module CC3501E Wi-Fi/BLE coprocessor + an RGB status LED. **(AEN)** |
-| `peripheral-io/usb-host-storage` | USB host role via `<alp/usb.h>`, enumerating an attached mass-storage device on the E1M-AEN401 Cortex-M55-HP. Compile-only skeleton; enumeration bench-gated. **(AEN)** |
+| `alp-console`                | Shippable slot0 app: the `alp` interactive console on the SoM UART, wired to the on-module CC3501E Wi-Fi/BLE coprocessor + an RGB status LED. **(AEN)** |
+| `usb-host-storage`           | USB host role via `<alp/usb.h>`, enumerating an attached mass-storage device on the E1M-AEN401 Cortex-M55-HP. Compile-only skeleton; enumeration bench-gated. **(AEN)** |
 
 ### Audio
 
@@ -108,9 +108,9 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `audio-loopback`            | PDM-in → I2S-out audio pass-through (low-latency).                          |
 | `audio-noise-suppression`   | Real-time denoise -- I2S mic → FFT → int8 CNN gain mask → I2S out. **(V2N)** |
 | `audio-wake-word`           | Always-on "Hey Alp" keyword spotting on the M55-HE core + Ethos-U55. **(AEN)** |
-| `audio/butterworth-lowpass` | Design a 2nd-order Butterworth low-pass biquad + run it through the `<alp/dsp.h>` IIR chain stage (CMSIS-DSP on-silicon, portable C under native_sim). |
-| `audio/acoustic-anomaly-wind-turbine` | Wind-turbine nacelle acoustic anomaly detector -- acoustic + rotor-speed + bearing-pass-frequency features; v0.6 paper-correct, HiL bench-gated. **(AEN)** |
-| `audio/acoustic-safety-events` | Always-listening safety/security node -- a MEMS mic classifies audible-band events into four types; v0.9 paper-correct, HiL bench-gated. **(AEN)** |
+| `butterworth-lowpass`       | Design a 2nd-order Butterworth low-pass biquad + run it through the `<alp/dsp.h>` IIR chain stage (CMSIS-DSP on-silicon, portable C under native_sim). |
+| `acoustic-anomaly-wind-turbine` | Wind-turbine nacelle acoustic anomaly detector -- acoustic + rotor-speed + bearing-pass-frequency features; v0.6 paper-correct, HiL bench-gated. **(AEN)** |
+| `acoustic-safety-events` | Always-listening safety/security node -- a MEMS mic classifies audible-band events into four types; v0.9 paper-correct, HiL bench-gated. **(AEN)** |
 
 ### Camera / Vision
 
@@ -127,12 +127,12 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `aen/edgeai-vision-aen`            | On-device vision inference with Ethos-U on an AEN SoM. **(AEN)**              |
 | `v2n/v2n-m1-deepx-inference`       | DEEPX DX-M1 NPU bring-up + a single inference through `<alp/inference.h>`. **(V2N-M1)** |
 | `v2n/v2n-m1-ros-perception`        | ROS 2 perception node -- detection on DEEPX, DRP-AI3 fallback on plain V2N. **(V2N / V2N-M1, Yocto)** |
-| `ai/cold-chain-monitor`            | Pharma/food cold-chain integrity monitor -- BME280 T/RH/P samples → anomaly classification; v0.9 paper-correct, HiL bench-gated. |
-| `ai/motor-current-signature`       | DC motor/load current-signature health monitor -- INA236 current sensing → 1D-CNN health classifier; v0.9 paper-correct, HiL bench-gated. |
-| `ai/multimodal-fusion-pdm`         | Multi-sensor motor-health monitor fusing vibration (ICM-42670) + current + acoustic (PDM mic); v0.9 paper-correct, HiL bench-gated. |
-| `ai/rail-predictive-maintenance`   | Rail-bogie predictive maintenance -- vibration + GNSS-position features → anomaly score; v0.6 paper-correct, HiL bench-gated. |
-| `ai/visual-defect-detection`       | Camera-fed surface-inspection station flagging manufacturing defects via an autoencoder; v0.9 paper-correct, HiL bench-gated. |
-| `ai/wearable-activity-fall`        | Wearable activity + fall detector -- motion features → two-stage classifier; v0.9 paper-correct, HiL bench-gated. |
+| `cold-chain-monitor`               | Pharma/food cold-chain integrity monitor -- BME280 T/RH/P samples → anomaly classification; v0.9 paper-correct, HiL bench-gated. |
+| `motor-current-signature`          | DC motor/load current-signature health monitor -- INA236 current sensing → 1D-CNN health classifier; v0.9 paper-correct, HiL bench-gated. |
+| `multimodal-fusion-pdm`            | Multi-sensor motor-health monitor fusing vibration (ICM-42670) + current + acoustic (PDM mic); v0.9 paper-correct, HiL bench-gated. |
+| `rail-predictive-maintenance`      | Rail-bogie predictive maintenance -- vibration + GNSS-position features → anomaly score; v0.6 paper-correct, HiL bench-gated. |
+| `visual-defect-detection`          | Camera-fed surface-inspection station flagging manufacturing defects via an autoencoder; v0.9 paper-correct, HiL bench-gated. |
+| `wearable-activity-fall`           | Wearable activity + fall detector -- motion features → two-stage classifier; v0.9 paper-correct, HiL bench-gated. |
 
 ### Connectivity / IoT
 
@@ -143,8 +143,8 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `iot-fleet-ota`          | Secure OTA firmware update with rollback; the v0.6 declarative `boot:` + `ota:` reference. |
 | `firmware-update-log`    | Portable update audit log -- software tamper-evident tier everywhere, TF-M secure-owner hardware tier where the secure backend is wired. |
 | `production-deployment`  | Field-product lifecycle flagship -- secure-boot + OTA + EEPROM provisioning + attestation in one `board.yaml`. |
-| `connectivity/modbus-server` | ADR 0018 `libraries: [modbus]` teaching example -- one Zephyr Modbus client + server in-process over the RAW_ADU backend, no UART/RS-485/CAN/TCP needed. **(V2N)** |
-| `connectivity/mqtt-telemetry` | Connected-device starting point -- bring up Wi-Fi, open an `mqtts://` MQTT client, publish telemetry on a cadence via the portable `<alp/iot.h>` surface. **(AEN)** |
+| `modbus-server`      | ADR 0018 `libraries: [modbus]` teaching example -- one Zephyr Modbus client + server in-process over the RAW_ADU backend, no UART/RS-485/CAN/TCP needed. **(V2N)** |
+| `mqtt-telemetry`     | Connected-device starting point -- bring up Wi-Fi, open an `mqtts://` MQTT client, publish telemetry on a cadence via the portable `<alp/iot.h>` surface. **(AEN)** |
 
 ### Display / GUI
 
@@ -156,7 +156,7 @@ Each needs a display panel wired per its `board.yaml`.
 | `lvgl-benchmark`      | Upstream `lv_demo_benchmark()` -- per-scene FPS; shows GPU2D/DMA2D accel on capable SoMs. |
 | `lvgl-music-player`   | Upstream `lv_demo_music()` UI paired with the SDK audio chain (I2S + WM8960 codec). **(AEN)** |
 | `drone-hud`           | Full drone telemetry HUD on a 240×320 TFT, fusing IMU + GNSS + battery via `madgwick_ahrs`. **(AEN)** |
-| `display/lvgl-dashboard-x-evk` | Minimal LVGL 9 dashboard on the E1M-X V2N MIPI-DSI panel (RK055HDMIPI4MA0, 720×1280@60 Hz) via plain Linux DRM/KMS -- any V2x SKU works, same PCB, same panel path. **(V2N)** |
+| `lvgl-dashboard-x-evk` | Minimal LVGL 9 dashboard on the E1M-X V2N MIPI-DSI panel (RK055HDMIPI4MA0, 720×1280@60 Hz) via plain Linux DRM/KMS -- any V2x SKU works, same PCB, same panel path. **(V2N)** |
 
 ### Power / Timing
 

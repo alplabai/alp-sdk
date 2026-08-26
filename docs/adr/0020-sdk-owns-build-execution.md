@@ -1,7 +1,8 @@
 # 0020. The SDK plans; a standalone `tan` CLI is the whole command surface (three repos, one executor)
 
-Status: Accepted — amended 2026-08-03 for the Python Tan port; the original
-Rust/plans-only mechanism below remains the historical Phase 1/4 record.
+Status: Accepted — amended 2026-08-03 for the Python Tan port, 2026-08-12,
+2026-08-26; the original Rust/plans-only mechanism below remains the
+historical Phase 1/4 record.
 Date: 2026-07-18 (Caner) · 2026-07-20 (Hakan co-sign, this commit)
 Deciders: alpCaner (alp-sdk), Hakan (alp-sdk-vscode)
 Supersedes: [0014](0014-build-plan-emit-cli-contract.md) — its
@@ -54,6 +55,17 @@ the paragraph below quotes) are both present at that tag.
 this Amendment by date, now describes released behaviour rather than a
 both-ways hedge. The Amendment's five numbered technical claims and the
 Consequence paragraph are otherwise unaffected and stand.
+
+## Amendment (2026-08-26 — `crates/` retired, not just frozen)
+
+The "Amendment (2026-08-03)" section below says "the old `crates/` tree is
+frozen at v0.4.1 as a behaviour oracle, not the active implementation." That
+was accurate on 2026-08-03; it stopped being accurate on 2026-08-10, when
+`tan-cli`'s `2883cdf4` ("retire the Rust oracle -- delete crates/ and the
+oracle-parity suite (#269) (#601)") deleted the tree outright —
+`git ls-tree origin/dev -- crates` on `tan-cli` is now empty. The paragraph
+below stays as the dated record of the frozen-not-deleted interim state;
+read "frozen" there as superseded by deletion, not as the current state.
 
 ## Amendment (2026-08-12 — what the Security clause's "never PATH" means)
 
@@ -117,7 +129,8 @@ boundary changed during the Python port:
 1. The current Tan development implementation is Python. Until v0.5 is cut,
    alp-sdk `dev` installs `tan-cli/dev` with Python 3.12+; from v0.5, release
    archives are PyInstaller freezes. The old `crates/` tree is frozen at v0.4.1
-   as a behaviour oracle, not the active implementation.
+   as a behaviour oracle, not the active implementation. **`crates/` was
+   subsequently deleted outright — see "Amendment (2026-08-26)" above.**
 2. Normal `tan build` no longer spawns alp-sdk's planner. Tan owns a relocated
    in-process planner and executor that read alp-sdk metadata, schemas, examples,
    and selected tooling contracts.

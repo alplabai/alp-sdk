@@ -181,9 +181,11 @@ examples: [`docs/portability.md`](docs/portability.md).
 | Family | Form factor | SKUs | Primary silicon | AI throughput | OS targets |
 |---|---|---|---|---|---|
 | **E1M-AEN** | E1M (35×35 mm) | `E1M-AEN301/401/501/601/701/801` | Alif Ensemble E3–E8 (Cortex-M55 + optional A32 + Ethos-U55, U85 on E4/E6/E8) | up to ~1024 GOPS | Zephyr · bare-metal |
-| **E1M-X V2N** | E1M-X (45×65 mm) | `E1M-V2N101/102` | Renesas RZ/V2N (4× A55 + M33 + DRP-AI3) | 4 TOPS | Yocto (A55) · Zephyr (M33 system manager) |
-| **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M101/102` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55) · Zephyr (M33 system manager) |
-| **E1M-i.MX93** | E1M (35×35 mm) | TBD | NXP i.MX 93 (2× A55 + M33 + Ethos-U65) | ~0.5 TOPS | Yocto + Zephyr |
+| **E1M-X V2N** | E1M-X (45×65 mm) | `E1M-V2N101` | Renesas RZ/V2N (4× A55 + M33 + DRP-AI3) | 4 TOPS | Yocto (A55) · Zephyr (M33 system manager) |
+| **E1M-X V2N** | E1M-X (45×65 mm) | `E1M-V2N102` | Renesas RZ/V2N (4× A55 + M33 + DRP-AI3) | 4 TOPS | Yocto (A55); Zephyr M33 tree not yet built |
+| **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M101` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55) · Zephyr (M33 system manager) |
+| **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M102` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55); Zephyr M33 tree not yet built |
+| **E1M-i.MX93** | E1M (35×35 mm) | TBD | NXP i.MX 93 (2× A55 + M33 + Ethos-U65) | ~0.5 TOPS | Yocto · Zephyr |
 
 All modules share the **E1M open-standard form factor** — pinout + mechanical
 spec in [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec) (pinned
