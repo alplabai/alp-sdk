@@ -77,7 +77,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from alp_project_loader import REPO, _load_yaml, _resolve_sku, resolve_soc_path
+from alp_project_loader import _load_yaml, _resolve_sku, resolve_soc_path
 from sentinels import is_tbd
 
 _COPYRIGHT_C = (
@@ -424,7 +424,7 @@ def _aen_family_display(soc_spec: dict[str, Any]) -> str:
     return f"Alif {family} {_aen_part(soc_spec)}"
 
 
-def _aen_peripherals_dtsi(soc_spec: dict[str, Any]) -> str:
+def _aen_peripherals_dtsi(soc_spec: dict[str, Any], metadata_root: Path) -> str:
     """The `#include <...>` path of THIS SoC's Zephyr peripherals overlay.
 
     Read from the SoC JSON's `zephyr_peripherals_dtsi`, never derived
@@ -443,6 +443,13 @@ def _aen_peripherals_dtsi(soc_spec: dict[str, Any]) -> str:
     Distinguishing the two only works for the E8: it is the one part
     alp-sdk ships an overlay for today, so it is the only ref where
     "the file already exists" is possible at all.
+
+    The overlay probe below reads from *metadata_root*'s own tree
+    (`metadata_root.parent / "zephyr" / ...`), never the running script's
+    own `REPO` -- `soc_spec` was loaded from `metadata_root`, so a caller
+    on a `--metadata-root` override (e.g. a customer's own metadata copy)
+    would otherwise have this SoC spec's vintage judged against a tree it
+    has nothing to do with, the #1485 override-ignoring class.
     """
     dtsi = soc_spec.get("zephyr_peripherals_dtsi")
     if dtsi and not is_tbd(dtsi):
@@ -450,15 +457,16 @@ def _aen_peripherals_dtsi(soc_spec: dict[str, Any]) -> str:
 
     known_overlay = "alif/ensemble_e8_peripherals.dtsi"
     if (soc_spec.get("ref") == "alif:ensemble:e8"
-            and (REPO / "zephyr" / "dts" / known_overlay).is_file()):
+            and (metadata_root.parent / "zephyr" / "dts"
+                 / known_overlay).is_file()):
         raise ZephyrBoardEmitError(
             "this alp-sdk predates the per-SoC peripherals-overlay "
             f"declaration (alp-sdk#1352): zephyr/dts/{known_overlay} is "
-            "present in this checkout but metadata/socs/alif/ensemble/"
-            "e8.json does not declare `zephyr_peripherals_dtsi` -- "
-            "upgrade alp-sdk to v0.16.0 or newer, which includes "
-            "alp-sdk#1352.  (If you are AUTHORING this SoC spec rather "
-            "than consuming a released alp-sdk, add "
+            "already present next to metadata/socs/alif/ensemble/e8.json, "
+            "which does not declare `zephyr_peripherals_dtsi` -- upgrade "
+            "alp-sdk to v0.16.0-rc1 or newer, which includes alp-sdk#1352. "
+            "(If you are AUTHORING this SoC spec rather than consuming a "
+            "released alp-sdk, add "
             f'`"zephyr_peripherals_dtsi": "{known_overlay}"` to '
             "metadata/socs/alif/ensemble/e8.json.)")
 
@@ -707,7 +715,7 @@ def _aen_missing_region_message(
             "complete disjoint-slot0 `memory_map:` but no `atoc` region, "
             "which is the shape of every alp-sdk checkout before that "
             "commit.  The AEN board emit needs a checkout that contains it "
-            "-- upgrade alp-sdk to v0.16.0 or newer, which includes "
+            "-- upgrade alp-sdk to v0.16.0-rc1 or newer, which includes "
             "alp-sdk#1289.  "
             "(If you are AUTHORING this preset rather than consuming a "
             "released alp-sdk, add the `atoc` region: the SE-owned band "
@@ -1083,6 +1091,7 @@ def _aen_kconfig_defconfig(dir_name: str, role: str, part: str) -> str:
 def _aen_dts(
     sku: str, core_id: str, soc_spec: dict[str, Any], variant: dict[str, Any],
     dir_name: str, basename: str, rx_row: dict[str, Any], tx_row: dict[str, Any],
+    metadata_root: Path,
     ethos_u: tuple[str, str] | None = None,
     memory_map: "list[dict[str, Any]] | None" = None,
 ) -> str:
@@ -1106,7 +1115,7 @@ def _aen_dts(
 
     part = _aen_part(soc_spec)
     family_display = _aen_family_display(soc_spec)
-    peripherals_dtsi = _aen_peripherals_dtsi(soc_spec)
+    peripherals_dtsi = _aen_peripherals_dtsi(soc_spec, metadata_root)
 
     total_kib = round(float(variant["mram_mb"]) * 1024)
     mram_base, partitions = _aen_flash_partitions(total_kib, role, memory_map)
@@ -1465,7 +1474,7 @@ def emit_zephyr_board(
             dir_name, role, _aen_part(soc_spec))
         files[f"{dir_name}/{basename}.dts"] = _aen_dts(
             sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row,
-            _aen_ethos_u(soc_spec), memory_map)
+            metadata_root, _aen_ethos_u(soc_spec), memory_map)
 
     # `_load_soc_spec()` above already raised ZephyrBoardEmitError if
     # `sku_preset["silicon"]` didn't resolve, so `soc_path` can't be None
