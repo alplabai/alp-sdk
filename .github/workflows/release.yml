@@ -269,11 +269,29 @@ jobs:
         run: |
           ARCHIVE="alp-sdk-${TAG}.tar.gz"
           TARFILE="alp-sdk-${TAG}.tar"
+          PREFIX_DIR="alp-sdk-${TAG}"
           # git archive only knows tracked files, and alp.lock isn't one
           # (#1576) -- build the tar from HEAD first, then append the
           # generated alp.lock under the same release prefix before gzip.
-          git archive --format=tar --prefix="alp-sdk-${TAG}/" -o "$TARFILE" HEAD
-          tar --append --file="$TARFILE" --transform="s,^,alp-sdk-${TAG}/," alp.lock
+          #
+          # Stage the file under a real "$PREFIX_DIR/alp.lock" path instead
+          # of `tar --transform` with a `,`-delimited sed expression: TAG is
+          # the raw pushed tag (see the comment above), and a `,` in it
+          # breaks the transform's delimiter (`tar: Unknown flag in
+          # transform expression`) -- staging sidesteps that entirely.  Pin
+          # mtime/owner/group/mode so the member is byte-reproducible: `tar
+          # --append` otherwise stamps the runner's wall-clock mtime and
+          # uid/gid/uname/gname, which CHANGELOG.md's "byte-reproducible
+          # source tarball (`gzip -n`)" promise (#610 §7) requires it not
+          # do.
+          git archive --format=tar --prefix="${PREFIX_DIR}/" -o "$TARFILE" HEAD
+          mkdir -p "$PREFIX_DIR"
+          cp alp.lock "$PREFIX_DIR/alp.lock"
+          tar --append --file="$TARFILE" \
+              --owner=root:0 --group=root:0 --mode=644 \
+              --mtime="@$(git log -1 --format=%ct HEAD)" \
+              "$PREFIX_DIR/alp.lock"
+          rm -rf "$PREFIX_DIR"
           gzip -n "$TARFILE"
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
           sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"

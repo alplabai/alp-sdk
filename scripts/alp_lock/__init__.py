@@ -5,6 +5,17 @@
 `build_lock` collects the reproducible, public-safe dependency + toolchain
 inputs of an Alp SDK workspace into a schema-validated dict; `verify_lock`
 recomputes and diffs.  No IO beyond reads.
+
+`west alp-lock --check` (#1576) does NOT call `verify_lock` -- alp.lock is no
+longer committed in this repo, so there is nothing in-tree to diff against;
+`--check` only proves the generator still produces a schema-valid lock.
+`verify_lock` remains the public entry point for a LOCK CONSUMER: given the
+`alp.lock` shipped inside a release tarball (or the SBOM), a downstream build
+can `build_lock`-recompute against its own checkout and `verify_lock` the two
+to detect drift from the locked inputs -- the same "reproduce this release"
+use case #610 was written for, just invoked by the consumer instead of by
+this repo's own CI. It is exercised in-tree by `test_alp_lock.py` and by
+`test_alp_lock_metadata_coverage.py`'s #1045 glob-coverage guard.
 """
 from __future__ import annotations
 

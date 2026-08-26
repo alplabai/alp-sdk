@@ -179,6 +179,31 @@ def test_cli_check_passes_with_no_lock_file_on_disk(tmp_path):
     assert not (ws / "alp.lock").exists()  # --check never writes
 
 
+def test_cli_check_fails_on_schema_invalid_lock(tmp_path, monkeypatch):
+    """`--check`'s jsonschema.ValidationError branch has no other coverage:
+    every other --check test exercises either the happy path or the
+    `_reject_local` LockError guard, never a lock that BUILDS successfully
+    but is schema-invalid (e.g. a generator regression that corrupts a
+    digest). Monkeypatch build_lock to return one, in-process (not via the
+    `_run_cli` subprocess -- there is no other way to hand the CLI a
+    malformed-but-buildable lock)."""
+    import importlib
+    import argparse
+    import alp_lock
+    cli = importlib.import_module("west_commands.alp_lock")
+    ws = _fixture_ws(tmp_path)
+    real_build_lock = alp_lock.build_lock  # cli.alp_lock IS this same module object
+
+    def _malformed(root, board=None):
+        lock = real_build_lock(root, board)
+        lock["digests"]["metadata"] = "not-a-sha256-digest"  # violates the schema pattern
+        return lock
+
+    monkeypatch.setattr(cli.alp_lock, "build_lock", _malformed)
+    args = argparse.Namespace(check=True, workspace=str(ws), board=None)
+    assert cli.run(args) == 1
+
+
 def test_cli_check_fails_on_local_path_leak(tmp_path):
     """The generator's own guard (`_reject_local`) is what `--check` now
     relies on to catch a broken/misconfigured input -- prove it still fires

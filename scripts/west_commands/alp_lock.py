@@ -100,7 +100,7 @@ def _add_args(parser) -> None:
 class AlpLock(WestCommand):
     def __init__(self) -> None:
         super().__init__("alp-lock",
-                         "Write or verify the project's alp.lock dependency lock",
+                         "Write, or self-check the generator of, alp.lock",
                          "\n".join(__doc__.splitlines()[2:]) if __doc__ else "")
 
     def do_add_parser(self, parser_adder):  # type: ignore[no-untyped-def]

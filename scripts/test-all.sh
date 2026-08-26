@@ -587,6 +587,11 @@ stage_alp_lock() {
     # tracked repo file, so a missing/renamed script means the gate itself
     # vanished and that must redden, not SKIP silently (same reasoning as
     # stage_generated_files above).
+    #
+    # alp_lock.py imports jsonschema at module scope for its draft 2020-12
+    # schema validation -- same missing/too-old-prerequisite trap as
+    # stage_metadata_validate and stage_doc_yaml_fragments above (#1396/#1423).
+    require_jsonschema_2020 stage_alp_lock || return 99
     python3 scripts/west_commands/alp_lock.py --workspace . --check || return 1
 }
 
@@ -1099,9 +1104,10 @@ else
 
     # alp.lock --check -- both the dev (fast) and main (release-grade)
     # profiles run this unconditionally, same as metadata-validate above.
-    # Runs after generated-files so the generator (which digests
-    # metadata/catalog.json + metadata/error-catalog.json, #1045) sees the
-    # post-regeneration bytes rather than a stale pre-regen tree.
+    # Placed after generated-files for narrative order only: `--check` no
+    # longer diffs against a committed lock (#1576), it schema-validates a
+    # freshly generated one, so this stage's verdict does not depend on
+    # running before or after generated-files regenerates its inputs.
     run_stage "alp-lock" stage_alp_lock
 
     # Main-only: the strict ABI-snapshot diff gate that pr-abi-snapshot.yml
