@@ -636,6 +636,29 @@ static void wifi_conn_set(uint8_t state, uint8_t fail_reason)
 	}
 }
 
+/* Clear the NWP's stale association after a FAILED connect (#1437).
+ *
+ * A failed Wlan_Connect leaves association state behind, so the NEXT connect --
+ * with a correct SSID and passphrase -- fails at the role-up kick with
+ * ALP_CC3501E_WIFI_FAIL_KICK.  Bench-confirmed on E1M-AEN801 r1, reproduced 2/2
+ * (#1435).  That was worked around host-side in #1436, but the invariant "a failed
+ * connect leaves the NWP ready for the next connect" is firmware-internal state
+ * hygiene and belongs here, so every host does not have to know.
+ *
+ * Deliberately NOT cc3501e_hw_wifi_disconnect(): that mirrors DISCONNECTED /
+ * FAIL_NONE into the status latch, which would erase the very fail_reason the host
+ * is about to read.  Callers invoke this BEFORE their wifi_conn_set(), so the
+ * failure latch is written last and wins.
+ *
+ * Best-effort: the association may already be gone, so a non-zero return is not
+ * itself a failure -- the caller's own error is what gets reported. */
+static void wifi_clear_stale_assoc(void)
+{
+	if (wifi_started) {
+		(void)Wlan_Disconnect(WLAN_ROLE_STA, NULL);
+	}
+}
+
 /* STA L3 bring-up: bounded DHCP-lease poll after the L2 connect event.
  * CC3501E_STA_DHCP_TRIES * CC3501E_STA_DHCP_POLL_US = 50 * 200 ms = 10 s budget
  * (the worker drain sleeps between tries so the tcpip thread runs DHCP). */
@@ -672,6 +695,7 @@ int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid,
 	                 (const char *)psk,
 	                 (char)psk_len,
 	                 0) != 0) {
+		wifi_clear_stale_assoc(); /* #1437: leave the NWP ready for the next connect */
 		wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK);
 		return CC3501E_HW_ERR_IO;
 	}
@@ -690,6 +714,7 @@ int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid,
 	if (osi_SyncObjWait(&wifi_event_sync, 30u * OSI_WAIT_FOR_SECOND) != OSI_OK) {
 		/* No connect event within the wait -- TERMINAL timeout (was masked as a
 		 * retryable IO that looped the host's poll-by-repeat -> -4). */
+		wifi_clear_stale_assoc(); /* #1437: leave the NWP ready for the next connect */
 		wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONN_FAILED,
 		              (uint8_t)ALP_CC3501E_WIFI_FAIL_TIMEOUT);
 		return CC3501E_HW_ERR_IO;
@@ -697,6 +722,7 @@ int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid,
 	if (wifi_last_status < 0) {
 		/* FW rejected the association/auth (WLAN_EVENT_CONNECT Status<0, or a
 		 * DISCONNECT/ASSOCIATION_REJECTED/AUTHENTICATION_REJECTED event) -- TERMINAL. */
+		wifi_clear_stale_assoc(); /* #1437: leave the NWP ready for the next connect */
 		wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONN_FAILED,
 		              (uint8_t)ALP_CC3501E_WIFI_FAIL_REJECTED);
 		return CC3501E_HW_ERR_IO;
@@ -829,6 +855,14 @@ int cc3501e_hw_wifi_ap_stop(void)
 	return CC3501E_HW_OK;
 }
 
+/* A received 802.11 signal is negative and above roughly -100 dBm.  Values at the
+ * int8 floor (-127/-128) are the NWP's "not measured yet" state, and 0 is the
+ * zero-init value; neither is a reading.  See cc3501e_hw_wifi_get_rssi (#1438). */
+static bool rssi_plausible(int8_t dbm)
+{
+	return dbm < 0 && dbm > -127;
+}
+
 int cc3501e_hw_wifi_get_rssi(int8_t *rssi_dbm_out)
 {
 	if (rssi_dbm_out == 0) {
@@ -842,7 +876,33 @@ int cc3501e_hw_wifi_get_rssi(int8_t *rssi_dbm_out)
 	if (Wlan_Get(WLAN_GET_RSSI, &r) != 0) {
 		return CC3501E_HW_ERR_IO;
 	}
-	*rssi_dbm_out = r.rssi_beacon;
+
+	/* VALIDATE before reporting (#1438).  rssi_beacon was passed through raw, so a
+	 * read taken before the NWP has measured a beacon -- which is exactly where the
+	 * `wifi connect` result line reads it, moments after association -- surfaced the
+	 * unmeasured floor as a real dBm figure: `rssi=-127 dBm` for an AP that a scan
+	 * minutes earlier put at -55, with `wifi status` reading -55 correctly a second
+	 * later.  A number that wrong is worse than no number, because it looks like a
+	 * measurement.
+	 *
+	 * No SDK constant names the floor, so bound it physically instead: a received
+	 * 802.11 signal is negative and above roughly -100 dBm, so anything at or below
+	 * -127 (the int8 floor region) or at/above 0 is not a measurement.  Zero is
+	 * rejected for the same reason #1376 rejected it on the host -- it is the
+	 * zero-init value and physically implausible.
+	 *
+	 * WlanBeaconRssi_t also carries rssi_data, the data-frame measurement, which is
+	 * populated on a link carrying traffic even when no beacon has been sampled yet.
+	 * Prefer the beacon reading, fall back to it, and only then report NOT_READY --
+	 * which the console already renders as `rssi=unavailable`. */
+	const int8_t beacon = r.rssi_beacon;
+	const int8_t data   = r.rssi_data;
+	const int8_t rssi   = rssi_plausible(beacon) ? beacon : data;
+
+	if (!rssi_plausible(rssi)) {
+		return CC3501E_HW_ERR_NOTIMPL; /* -> RESP_ERR_NOT_READY, "unavailable" */
+	}
+	*rssi_dbm_out = rssi;
 	return CC3501E_HW_OK;
 }
 

@@ -761,7 +761,8 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		 * cc3501e_wifi_connect() got, which firmware v4 cannot yet support
 		 * (cc3501e_hw_wifi_ap_start() never writes the g_wifi_conn latch that
 		 * WIFI_STATUS reads, so there is no independent AP channel to confirm
-		 * against).  Still open on #1385.
+		 * against).  Tracked in #1696 -- the wire is v5 now, so re-check whether
+		 * an AP-side latch can be added.  (#1385, cited here before, is CLOSED.)
 		 *
 		 * OTA_PROMOTE (0x46) is deliberately NOT on this list, despite being
 		 * the sharpest case named in #1378/#1385: handle_ota_promote()
@@ -775,7 +776,8 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		 * promotion outright.  Closing the alias for OTA_PROMOTE needs either
 		 * a wire-level CRC/canary (a protocol version bump touching host and
 		 * firmware) or host-side confirmation against OTA_STATUS (0x44) --
-		 * neither is a transport-layer change.  Still open on #1385. */
+		 * neither is a transport-layer change.  Tracked in #1696; weigh against
+		 * #1123, which is also OTA state confirmation.  (#1385 is CLOSED.) */
 		if (resp == ALP_CC3501E_RESP_OK && resp_payload_len == 1u &&
 		    (cmd == ALP_CC3501E_CMD_WIFI_CONNECT_STA || cmd == ALP_CC3501E_CMD_WIFI_AP_START)) {
 			s = ALP_ERR_IO;

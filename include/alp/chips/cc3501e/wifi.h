@@ -236,7 +236,7 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
  * @ref alp_cc3501e_wifi_connect_t header (ssid_len / psk_len / security)
  * followed by the inline SSID then the inline passphrase, packed with no
  * padding.  Unlike @ref cc3501e_wifi_connect this issues the submit exactly
- * ONCE and returns immediately (issue #1385): AP_START is fire-and-forget on
+ * ONCE and returns immediately (issue #1696): AP_START is fire-and-forget on
  * the firmware side (every submit is acked RESP_ERR_BUSY, and the job slot
  * that would carry a WORKER_DONE outcome is reset to IDLE before the host may
  * clock again), and unlike CONNECT_STA there is no independent status latch
@@ -259,7 +259,7 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
  *          request-lock timeout under a concurrent caller -- all
  *          indistinguishable from here.  A caller that treats ALP_ERR_TIMEOUT
  *          as proof of submission will not retry when it should; confirm the
- *          AP out of band and be prepared to retry until #1385 lands a
+ *          AP out of band and be prepared to retry until #1696 lands a
  *          firmware-side confirmation channel.  @ref ALP_ERR_INVAL and
  *          @ref ALP_ERR_NOT_READY, by contrast, ARE conclusive: both are
  *          local or synchronous rejects that mean nothing was submitted.
@@ -305,7 +305,7 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
  *            Tearing the AP down takes the bridge through the radio-down
  *            window and the acknowledgement is not observed across it, so the
  *            call cannot report on the outcome it was asked about (#1553; the
- *            same shape @ref cc3501e_wifi_ap_start documents under #1385).
+ *            same shape @ref cc3501e_wifi_ap_start documents under #1696).
  *
  *          So ALP_ERR_TIMEOUT here is INCONCLUSIVE, and it is precisely the
  *          case a caller cares about: not proof the teardown failed, not proof
