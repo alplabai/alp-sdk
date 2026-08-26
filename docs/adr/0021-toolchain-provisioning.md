@@ -6,6 +6,21 @@ correction, and the item-2 injection-set / dtc-gperf corrections.
 Date: 2026-07-25
 Deciders: alpCaner
 
+## Amendment (2026-08-26 — the dtc/gperf-consumer citation named a retired file)
+
+The dtc/gperf open-evidence Amendment below (2026-07-26) names its
+consumers as "`scripts/alp_cli/doctor.py`'s `_check_dtc` / `_check_gperf`
+hints and `metadata/bootstrap.json`'s `manualInstallHints.windows.note`."
+`scripts/alp_cli/doctor.py` is gone — alp-sdk#1367/#1368 deleted it along
+with the rest of the `alp_cli` command-line wrappers (ADR 0020's Amendment
+item 8). `metadata/bootstrap.json`'s `manualInstallHints.windows.note`
+still carries the corrected wording and is unaffected. The host-tool check
+itself is now `tan doctor`'s job — a generic host-tools presence check
+(`git`/`cmake`/`ninja`/`dtc`/`gperf`/`vendorToolchain`/...,
+`python/tan/commands/doctor_cmd.py` in `tan-cli`), not a `dtc`/`gperf`-named
+function; this ADR's earlier text should not be read as pinning specific
+function names in the live tool.
+
 ## Amendment (2026-08-07 — a substitution-set token existing is not the same as it resolving; the Python executor line still hardcodes `toolchain_root=None`)
 
 Corrects the 2026-07-26 "drop `-DCMAKE_MAKE_PROGRAM`..." Amendment's read of

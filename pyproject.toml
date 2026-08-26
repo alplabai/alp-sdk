@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "alp-sdk-cli"
 version = "0.16.0"
-description = "Command-line front-end for the Alp SDK"
+description = "Alp SDK internal/reference Python tooling: board.yaml validation, model build, and the alp-mcp server -- not a command surface (tan-cli is)"
 requires-python = ">=3.10"
 dependencies = [
     "PyYAML>=6.0",

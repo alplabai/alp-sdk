@@ -393,10 +393,10 @@ def render(
     `sku` (issue #864 Fable-review MINOR G): when given, materialises
     the SAME scaffold-adapted content `render_to_envelope(template_id,
     sku, ...)` returns (core/CMakeLists.txt/README.md adaptation, no
-    testcase.yaml) instead of a byte-for-byte copy -- so the SDK's two
-    customer-facing scaffold front doors, `alp generate`
-    (scripts/alp_cli/generate.py) and `alp emit scaffold`, never
-    disagree on what a materialised project looks like. `None` (the
+    testcase.yaml) instead of a byte-for-byte copy -- so tan-cli's
+    customer-facing scaffold front doors (`tan init`, `tan scaffold`) never
+    disagree with `west alp-emit scaffold`, the SDK-side emit this module
+    backs, on what a materialised project looks like. `None` (the
     default) keeps this a pure byte-for-byte copy of the example -- the
     contract `validate()`'s in-tree twister self-test relies on, and
     every existing caller (`alp_template.py render`, the synthetic-

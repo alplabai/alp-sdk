@@ -63,7 +63,9 @@ def _emit_choices(source: Path) -> set[str]:
 def real_emit_modes() -> set[str]:
     """The complete, de-duplicated `--emit` mode set the SDK actually
     exposes: alp_project.py's choices union alp_orchestrate's choices
-    (mirrors scripts/alp_cli/emit.py's EMIT_MODES construction)."""
+    (mirrored scripts/alp_cli/emit.py's EMIT_MODES construction until it
+    retired alongside the rest of the alp_cli command surface,
+    alp-sdk#1368)."""
     return _emit_choices(ALP_PROJECT) | _emit_choices(ALP_ORCHESTRATE_CLI)
 
 
