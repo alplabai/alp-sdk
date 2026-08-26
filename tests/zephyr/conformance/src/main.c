@@ -100,9 +100,11 @@
  *   positive or the failure-contract path -- with "silicon lacks it"
  *   (cap false) distinguished from "no instance on this build".
  *
- * Beyond the table, three ZTESTs cover the v0.9 non-class surfaces:
+ * Beyond the table, four ZTESTs cover the v0.9 non-class surfaces:
  * alp_init/alp_deinit lifecycle idempotency, the alp_uart_rx_ringbuf_*
- * contract (feature on or off), and I2C-target config validation.
+ * contract (feature on or off), I2C-target config validation, and the
+ * dispatcher ops-vtable guard-mutation proof (issue #1641: NULLing one
+ * op slot on an open handle must return ALP_ERR_NOSUPPORT, not crash).
  *
  * ADDING VENDOR N+1 (or a new class): add ONE conf_class_t row to
  * conf_classes[] below -- three tiny open adapters, the class's
@@ -132,7 +134,7 @@
  * below (issue #1641), which needs the real struct layout to NULL one
  * op slot on an already-open handle. See this test app's
  * CMakeLists.txt for the extra include path this requires. */
-#include "backends/uart/uart_ops.h"
+#include "uart/uart_ops.h"
 
 ZTEST_SUITE(alp_conformance, NULL, NULL, NULL, NULL, NULL);
 
@@ -1307,7 +1309,8 @@ ZTEST(alp_conformance, test_ops_vtable_null_slot_returns_nosupport)
 	if (port == NULL) {
 		TC_PRINT("conformance[ops_vtable_guard]: no UART instance 0 on this "
 		         "build; guard-mutation proof skipped\n");
-		return;
+		ztest_test_skip(); /* reports SKIP, not a silent PASS -- this is the
+		                     * only test proving the ops-vtable guard. */
 	}
 
 	/* Mutate a LOCAL copy of the ops table (write == NULL), then point

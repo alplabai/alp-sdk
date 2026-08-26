@@ -12,8 +12,10 @@ project(alp_sdk_conformance_test LANGUAGES C)
 # any particular backend's completeness -- is what stands between a
 # partial vendor port and a fault.  Those headers are internal (not
 # under include/), so this test app needs its own path to them; no other
-# alp-sdk consumer gets this include.
-target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../src)
+# alp-sdk consumer gets this include.  Scoped to src/backends (not all of
+# src/) so this app's include path never shadows a real Zephyr header
+# against a same-named future src/zephyr/<name>.h.
+target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../src/backends)
 
 # Single-file suite by design: the per-class conf_class_t table plus
 # the generic contract runners all live in src/main.c so the "add
