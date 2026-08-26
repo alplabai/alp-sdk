@@ -348,6 +348,21 @@ if ($Ble) {
     $sources += "$fw\hal\ti\cc3501e_nimble_host.c"
 }
 
+# A stale .out from a PREVIOUS build is FLASHABLE, so a build that dies before the
+# linker runs lets the packaging step silently ship the OLD image.  That cost hours
+# on 2026-08-26: tiarmclang writes warnings to stderr, and under
+# $ErrorActionPreference='Stop' PowerShell turns native stderr into a terminating
+# NativeCommandError -- so one warning in a TI SDK source (-Ble's cc3xxxhif_ble_hci.c)
+# aborted the build mid-compile.  Every flash after that carried a 35-minute-old
+# image, and the firmware change under test never actually ran on silicon.
+#
+# Two guards, because either alone still fails silently:
+#   1. Delete the artifacts FIRST, so a failed build cannot masquerade as a good one.
+#   2. Do not let a stderr WARNING abort the build -- the exit code is the real
+#      signal, and the $LASTEXITCODE check in the loop below already enforces it.
+Remove-Item -Force -ErrorAction SilentlyContinue "$out\cc3501e-bridge.out", "$out\cc3501e-bridge.hex", "$out\cc3501e-bridge.bin"
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 Write-Host "== Compile ($($sources.Count) sources) =="
 $objs = @()
 foreach ($s in $sources) {
@@ -356,6 +371,7 @@ foreach ($s in $sources) {
     if ($LASTEXITCODE -ne 0) { $cout | ForEach-Object { Write-Host "  $_" }; throw "compile failed: $s" }
     $objs += $o
 }
+$ErrorActionPreference = $prevEAP
 
 Write-Host "== Linker: VENDOR-APP map (network_terminal connectivity cmd, FLASH@0x14000000, DRAM 512K) =="
 # *** ROOT CAUSE (2026-06-17) + RAM CEILING (2026-06-18). ***  A CC35 VENDOR APP links
