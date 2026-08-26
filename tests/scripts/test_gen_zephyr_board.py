@@ -318,6 +318,12 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
         with _MutatedMetadata() as mm:
             mm.json_del(E8_SOC, "zephyr_peripherals_dtsi")
             mm.json_set(E8_SOC, "ref", "alif:ensemble:e9")
+            # Stage the E8 overlay too: in every real checkout it IS present
+            # beside metadata/, so this must be refused on `ref != e8` alone,
+            # not merely because no overlay happens to exist in this tmp
+            # tree -- without this, deleting the `ref` check leaves the
+            # suite green for the wrong reason (#1354 review round 2).
+            mm.stage_overlay("alif/ensemble_e8_peripherals.dtsi")
             with self.assertRaises(ZephyrBoardEmitError) as ctx:
                 emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
         self.assertIn("zephyr_peripherals_dtsi", str(ctx.exception))

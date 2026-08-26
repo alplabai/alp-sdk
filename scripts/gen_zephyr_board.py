@@ -456,19 +456,28 @@ def _aen_peripherals_dtsi(soc_spec: dict[str, Any], metadata_root: Path) -> str:
         return str(dtsi)
 
     known_overlay = "alif/ensemble_e8_peripherals.dtsi"
-    if (soc_spec.get("ref") == "alif:ensemble:e8"
-            and (metadata_root.parent / "zephyr" / "dts"
-                 / known_overlay).is_file()):
+    overlay_path = metadata_root.parent / "zephyr" / "dts" / known_overlay
+    if (soc_spec.get("ref") == "alif:ensemble:e8" and overlay_path.is_file()):
+        soc_path = resolve_soc_path(soc_spec.get("ref"), metadata_root)
+        # Same idiom `emit_zephyr_board` uses for `soc_json_rel` -- name the
+        # actual tree this SoC spec (and therefore this refusal) came from,
+        # not a hardcoded repo-relative guess (#1354 review round 2).
+        soc_json_rel = (
+            f"metadata/{soc_path.relative_to(metadata_root).as_posix()}"
+            if soc_path is not None
+            else "metadata/socs/alif/ensemble/e8.json")
         raise ZephyrBoardEmitError(
             "this alp-sdk predates the per-SoC peripherals-overlay "
-            f"declaration (alp-sdk#1352): zephyr/dts/{known_overlay} is "
-            "already present next to metadata/socs/alif/ensemble/e8.json, "
-            "which does not declare `zephyr_peripherals_dtsi` -- upgrade "
-            "alp-sdk to v0.16.0-rc1 or newer, which includes alp-sdk#1352. "
+            f"declaration (alp-sdk#1352): the alp-sdk tree at "
+            f"{metadata_root.parent} already has "
+            f"{overlay_path.relative_to(metadata_root.parent)} on disk, but "
+            f"{soc_json_rel} does not declare `zephyr_peripherals_dtsi` -- "
+            "upgrade alp-sdk to v0.16.0 or newer (the v0.16.0-rc1 "
+            "pre-release is the earliest tag that contains it). "
             "(If you are AUTHORING this SoC spec rather than consuming a "
             "released alp-sdk, add "
             f'`"zephyr_peripherals_dtsi": "{known_overlay}"` to '
-            "metadata/socs/alif/ensemble/e8.json.)")
+            f"{soc_json_rel}.)")
 
     raise ZephyrBoardEmitError(
         f"SoC spec {soc_spec.get('ref')} "
@@ -715,8 +724,8 @@ def _aen_missing_region_message(
             "complete disjoint-slot0 `memory_map:` but no `atoc` region, "
             "which is the shape of every alp-sdk checkout before that "
             "commit.  The AEN board emit needs a checkout that contains it "
-            "-- upgrade alp-sdk to v0.16.0-rc1 or newer, which includes "
-            "alp-sdk#1289.  "
+            "-- upgrade alp-sdk to v0.16.0 or newer (the v0.16.0-rc1 "
+            "pre-release is the earliest tag that contains it).  "
             "(If you are AUTHORING this preset rather than consuming a "
             "released alp-sdk, add the `atoc` region: the SE-owned band "
             "SETOOLS top-anchors the ATOC application table into, flush "
