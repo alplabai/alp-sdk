@@ -133,6 +133,12 @@ int cc3501e_hw_gpio_write(uint8_t pad, uint8_t level)
 
 static bool ready_inited;
 
+/* Last level this file drove.  The attention pulse below must only fire while the
+ * line is HIGH (bridge idle/armed); pulsing it during a BUSY window would tell the
+ * host "armed" in the middle of a radio or flash blackout, which is precisely the
+ * lie that desyncs the link. */
+static bool ready_level_high;
+
 static void ready_ensure_init(void)
 {
 	if (!ready_inited) {
@@ -147,13 +153,47 @@ void cc3501e_bridge_busy(void)
 {
 	ready_ensure_init();
 	GPIO_write(CC3501E_READY_GPIO, 0u); /* LOW = busy */
+	ready_level_high = false;
 }
 
 void cc3501e_bridge_ready(void)
 {
 	ready_ensure_init();
 	GPIO_write(CC3501E_READY_GPIO, 1u); /* HIGH = ready */
+	ready_level_high = true;
 }
+
+#if defined(CC3501E_ATTN_PULSE) && CC3501E_ATTN_PULSE
+/* Attention pulse for async events (#130).
+ *
+ * There is ONE slave->master wire, and it already means READY: HIGH = armed and
+ * idle, LOW = busy.  An event queued while the bridge is already idle produces no
+ * transition, so a host waiting on an edge would never learn about it -- which is
+ * why the host has had to poll GET_PENDING_EVENTS on a timer.
+ *
+ * Give it an edge without inventing a second meaning: drop the line and raise it
+ * again.  The host's attention ISR fires on the rising edge and schedules a drain;
+ * a host that does not use the interrupt sees a momentary BUSY->READY, which is a
+ * transition it already handles on every re-arm.
+ *
+ * ONLY while HIGH.  If the line is LOW the bridge is genuinely busy (radio op or
+ * flash blackout) and the host is deliberately held off -- raising it there would
+ * invite the host to clock into a dead slave.  The event simply waits; the next
+ * cc3501e_bridge_ready() at the end of that op supplies the rising edge anyway.
+ *
+ * Spurious drains are harmless by construction: GET_PENDING_EVENTS on an empty
+ * ring returns an empty list, so a host may drain on ANY rising edge -- including
+ * every ordinary re-arm -- without needing to tell attention from flow control.
+ * That is what makes one wire enough. */
+void cc3501e_bridge_attn_pulse(void)
+{
+	if (!ready_inited || !ready_level_high) {
+		return;
+	}
+	GPIO_write(CC3501E_READY_GPIO, 0u);
+	GPIO_write(CC3501E_READY_GPIO, 1u);
+}
+#endif /* CC3501E_ATTN_PULSE */
 
 int cc3501e_hw_gpio_read(uint8_t pad, uint8_t *level_out)
 {

@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "event_ring.h"
+#include "transport.h"
 #include "alp/protocol/cc3501e.h"
 
 /* Shared with src/worker.c: the ISR-vs-thread critical-section primitives.
@@ -69,6 +70,18 @@ int event_ring_push(uint8_t evt_opcode, const uint8_t *payload, uint8_t len)
 	ring.tail = (uint16_t)((ring.tail + 1u) % CC3501E_EVENT_RING_SLOTS);
 	ring.count++;
 	worker_critical_exit(key);
+
+	/* Tell a host that waits on an edge (#130).  OUTSIDE the critical section:
+	 * this is GPIO I/O, and the ring invariants are already published above --
+	 * a drain that races in between simply finds the event and returns it, which
+	 * is the correct outcome either way.
+	 *
+	 * No-op unless the backend drives the attention wire and was built with
+	 * CC3501E_ATTN_PULSE, so the default build and every non-TI backend are
+	 * unchanged.  It also self-suppresses while the line is LOW (bridge busy):
+	 * the event waits, and the cc3501e_bridge_ready() ending that op supplies
+	 * the rising edge anyway. */
+	cc3501e_bridge_attn_pulse();
 	return 1;
 }
 

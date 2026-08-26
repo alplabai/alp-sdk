@@ -153,6 +153,14 @@ uint8_t bridge_transport_spi_phase(void);
 void cc3501e_bridge_busy(void);
 void cc3501e_bridge_ready(void);
 
+/* Emit a rising edge on the READY/attention wire so a host waiting on an edge
+ * learns an async event was queued (#130).  No-op unless the backend drives the
+ * line AND was built with CC3501E_ATTN_PULSE.  Safe to call from a producer
+ * thread or an ISR: two GPIO writes, no locking, and it self-suppresses while
+ * the line is LOW (bridge busy) so it can never invite a host to clock into a
+ * dead slave. */
+void cc3501e_bridge_attn_pulse(void);
+
 /* ---- SPI slave seams (defined in transport_spi.c) -------------- */
 /* The HW backend (or a host test) drives one request transaction as
  * cs_low -> rx_byte* -> cs_high, then clocks the staged reply back via
