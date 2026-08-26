@@ -161,21 +161,34 @@ def _run_cli(ws, *args):
                     "--workspace", str(ws), *args],
                    capture_output=True, text=True, env=env)
 
-def test_cli_writes_then_check_passes(tmp_path):
+def test_cli_write_writes_a_schema_valid_lock_file(tmp_path):
     ws = _fixture_ws(tmp_path)
     r = _run_cli(ws)
     assert r.returncode == 0, r.stderr
     assert (ws / "alp.lock").is_file()
-    r2 = _run_cli(ws, "--check")
-    assert r2.returncode == 0, r2.stdout + r2.stderr
 
-def test_cli_check_fails_on_drift(tmp_path):
+
+def test_cli_check_passes_with_no_lock_file_on_disk(tmp_path):
+    """#1576: `--check` no longer diffs against a committed alp.lock -- it
+    generates one in memory and schema-validates it, so it must pass on a
+    workspace that has never written one."""
     ws = _fixture_ws(tmp_path)
-    assert _run_cli(ws).returncode == 0
-    (ws / "west.yml").write_text((ws / "west.yml").read_text().replace("abc123", "9999999"))
+    assert not (ws / "alp.lock").exists()
+    r = _run_cli(ws, "--check")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not (ws / "alp.lock").exists()  # --check never writes
+
+
+def test_cli_check_fails_on_local_path_leak(tmp_path):
+    """The generator's own guard (`_reject_local`) is what `--check` now
+    relies on to catch a broken/misconfigured input -- prove it still fires
+    through the CLI path, not just the library call."""
+    ws = _fixture_ws(tmp_path)
+    (ws / "metadata" / "libraries" / "aws-iot.yaml").write_text(
+        "schema_version: 1\nname: aws-iot\nversion: v3.1.5\nlicense: /etc/secret\n")
     r = _run_cli(ws, "--check")
     assert r.returncode == 1
-    assert "west.projects[hal_alif].revision" in (r.stdout + r.stderr)
+    assert "refusing to lock a local" in (r.stdout + r.stderr)
 
 
 def test_dir_digest_orders_by_posix_parts(tmp_path):

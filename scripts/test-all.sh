@@ -576,12 +576,17 @@ stage_metadata_validate() {
 }
 
 stage_alp_lock() {
-    # Mirrors pr-metadata-validate.yml's `alp.lock --check` step (#1045) --
-    # previously the ONLY place that check ran, so a locally-green branch
-    # could still redden CI on lock drift it never saw. No "script missing"
-    # skip: this is a tracked repo file, so a missing/renamed script means
-    # the gate itself vanished and that must redden, not SKIP silently
-    # (same reasoning as stage_generated_files above).
+    # Mirrors pr-metadata-validate.yml's `alp.lock --check` step (#1045).
+    # alp.lock is no longer committed (#1576 -- its `digests.metadata` is a
+    # single hash over the whole metadata/** tree, so any two PRs touching
+    # different metadata files conflicted on this one line by construction).
+    # `--check` therefore GENERATES a lock in memory and schema-validates it
+    # rather than diffing against a tracked copy; it still catches a broken
+    # generator (schema mismatch) and a local-path leak (`_reject_local`).
+    # No "script missing" skip: scripts/west_commands/alp_lock.py is a
+    # tracked repo file, so a missing/renamed script means the gate itself
+    # vanished and that must redden, not SKIP silently (same reasoning as
+    # stage_generated_files above).
     python3 scripts/west_commands/alp_lock.py --workspace . --check || return 1
 }
 
@@ -1094,10 +1099,9 @@ else
 
     # alp.lock --check -- both the dev (fast) and main (release-grade)
     # profiles run this unconditionally, same as metadata-validate above.
-    # MUST run after generated-files: that stage rewrites metadata/catalog.json
-    # and metadata/error-catalog.json in place, and both are now lock-covered
-    # (#1045) -- checking the lock first would pass on pre-regen bytes and
-    # leave a just-regenerated catalog unverified.
+    # Runs after generated-files so the generator (which digests
+    # metadata/catalog.json + metadata/error-catalog.json, #1045) sees the
+    # post-regeneration bytes rather than a stale pre-regen tree.
     run_stage "alp-lock" stage_alp_lock
 
     # Main-only: the strict ABI-snapshot diff gate that pr-abi-snapshot.yml

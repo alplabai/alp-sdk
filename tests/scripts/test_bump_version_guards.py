@@ -163,8 +163,8 @@ def test_a_full_bump_regenerates_the_emit_goldens_too(bv, monkeypatch, capsys):
     """#1461: build-plan's `sdkVersion` and a released scaffold's README
     doc links both bake in metadata/sdk_version.yaml's version, so a bump
     must refresh tests/fixtures/emit-snapshots/ the same way it already
-    refreshes the ABI snapshot and alp.lock -- not leave a human to
-    discover the drift the next time check_emit_snapshots.py runs.
+    refreshes the ABI snapshot -- not leave a human to discover the drift
+    the next time check_emit_snapshots.py runs.
 
     Regression-proof: comment out the `regenerate_emit_snapshots(...)`
     call in `main()` and this test fails (no recorded --update call).
@@ -190,9 +190,9 @@ def test_a_full_bump_regenerates_the_emit_goldens_too(bv, monkeypatch, capsys):
     banner_c = bv.REPO / "alp_banner.c"
     banner_c.write_text("/* Alp SDK 0.15.0 */\n", encoding="utf-8")
     monkeypatch.setattr(bv, "BANNER_C", banner_c)
-    # regenerate_abi_snapshot() / regenerate_alp_lock() only print a
-    # REPO-relative path after the (mocked) subprocess call -- ABI_DIR was
-    # computed at import time against the real REPO, so it must move too.
+    # regenerate_abi_snapshot() only prints a REPO-relative path after the
+    # (mocked) subprocess call -- ABI_DIR was computed at import time
+    # against the real REPO, so it must move too.
     monkeypatch.setattr(bv, "ABI_DIR", bv.REPO / "docs" / "abi")
 
     calls: list[list[str]] = []
