@@ -466,8 +466,34 @@ static int ota_do_finish(void)
  * from the ISR-dispatched status handler. */
 static void ota_pending_refresh(void);
 
+/* Cleared only by a reset -- the prime is per boot, matching the store it reads. */
+static bool ota_pending_primed;
+
 void cc3501e_hw_ota_pump(void)
 {
+	/* ONE-SHOT PRIME of the flash-derived pending byte.
+	 *
+	 * Refreshing only after a pump op is not enough, and the gap is exactly the
+	 * case PROMOTE exists for: an image left STAGED by a previous session
+	 * survives a reset, but the RAM session does not, so on the next boot NO op
+	 * runs and the cache would sit at UNKNOWN forever -- making the host refuse
+	 * to promote the very image it is being asked to promote.
+	 *
+	 * Runs here rather than at init because this is task context (hw_tick), not
+	 * the ISR, and it is bracketed like every other flash touch so the host is
+	 * held off while the store is read. */
+	if (!ota_pending_primed) {
+		ota_pending_primed = true;
+		cc3501e_bridge_busy();
+		ota_pending_refresh();
+		/* Same !polled rule as the op path below: in polled mode READY has one
+		 * owner (poll_service), and raising it here with nothing armed is the
+		 * lie that produced ~26 B/s. */
+		if (!bridge_transport_spi_polled()) {
+			cc3501e_bridge_ready();
+		}
+	}
+
 	if (ota.op_rc != OTA_OP_INFLIGHT) return; /* nothing queued */
 
 	/* OTA UPDATE MODE.  Silicon 2026-08-21: a SPI_MODE_CALLBACK (DMA) SPI_open()
