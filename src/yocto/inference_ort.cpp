@@ -592,6 +592,15 @@ extern "C" alp_status_t alp_inference_ort_open(struct alp_inference         *h_,
 		return ALP_OK;
 	} catch (...) {
 		if (st) {
+			/* Mirror the rc != ALP_OK path above and alp_inference_ort_close()
+             * below: release any OrtValues already created (input loop can
+             * throw after populating st->input_values, output loop after
+             * st->output_values) before the Env/Session/MemoryInfo trio --
+             * _release_values() tolerates a partially-populated or empty
+             * vector. Omitting this leaked every OrtValue created before
+             * the throw (#1494). */
+			_release_values(api, st->output_values);
+			_release_values(api, st->input_values);
 			if (st->cpu_mem_info != nullptr) {
 				api->ReleaseMemoryInfo(st->cpu_mem_info);
 			}

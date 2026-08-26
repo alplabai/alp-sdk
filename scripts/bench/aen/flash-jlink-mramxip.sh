@@ -106,17 +106,25 @@ esac
 # it as unattested, not bench-verified. Flashing the wrong board is the one
 # unrecoverable bench mistake, so this is a hard ABORT, not a warning --
 # read-only connect first, no writes happen until the ID is confirmed.
+#
+# AEN_DPIDR is DELIBERATELY re-pinned here rather than left to bench-env.sh's
+# overridable export: it is the POSITIVE match bench_jlink_assert_aen_dpidr
+# gates the MRAM write on, so an operator's stray or mistaken
+# `export AEN_DPIDR=...` must not be able to arm this gate against the wrong
+# value. Deleting this pin was tried during #1488 and reverted (27a4e756)
+# for exactly that reason -- do not delete it to silence a linter or to make
+# it "consistently overridable" with its sibling scripts.
+#
+# GD32_DPIDR is different: bench_jlink_assert_aen_dpidr (in the sourced
+# bench-env.sh) reads it only to NAME the wrong board in the abort message,
+# never to permit a write, so unlike AEN_DPIDR it carries no gate to weaken.
+# It is therefore taken from bench-env.sh's single, overridable export (as
+# flash-update-log-dual.sh:58-59 already prescribes) and NOT re-declared
+# here -- #1497: the prior local re-declaration silently discarded a real
+# operator override with no safety benefit; #1527's "do NOT delete this
+# pair" note overstated the AEN_DPIDR finding onto GD32_DPIDR too (scoped
+# back to the half it actually applies to, see 197e8264a).
 AEN_DPIDR="4C013477"
-# GD32_DPIDR IS read -- just not in THIS file. bench_jlink_assert_aen_dpidr,
-# defined in the sourced bench-env.sh (line ~165, `grep -qi "$GD32_DPIDR"
-# "$out"`), reads it to name the wrong board. Plain shellcheck can't see a
-# cross-file use like that, which is why CI and stage_shellcheck both
-# invoke shellcheck with -x (follow `source`) here -- with -x this line
-# correctly reports no SC2034. Kept as the documented wrong-board value
-# alongside AEN_DPIDR's pin -- #1527: do NOT delete this pair to silence
-# the linter, that weakened the wrong-board MRAM-write gate during #1488
-# and had to be reverted.
-GD32_DPIDR="0BE12477"
 cat > /tmp/flowd-mramxip-preflight.jlink <<EOF
 $SEL
 si SWD
