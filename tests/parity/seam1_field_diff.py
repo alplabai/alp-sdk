@@ -7,10 +7,11 @@ ADR-0020 (alp-sdk#855 amendment) requires a two-seam parity gate before the
 parity -- does a live `--emit build-plan` from the alp-sdk checkout under test
 still match the frozen oracle's command / env / appDir / skip-fail-decision
 shape, field for field? Seam 2 (materialise byte-check + a real build + a
-Renode smoke test) is a documented follow-up that needs a Linux toolchain
-runner -- see `tests/parity/README.md`; alp-sdk has no placeholder job for it
-(tan-cli's own `.github/workflows/parity.yml` carries a `seam2` placeholder
-documenting the same gap on its side).
+Renode smoke test) is not seeded in alp-sdk -- see `tests/parity/README.md`;
+alp-sdk has no job for it. It IS implemented on the tan-cli side: tan-cli's
+own `.github/workflows/parity.yml` `seam2` job runs `tan build --materialise`,
+a real `west`/Zephyr build through `tan build`, and a Renode boot smoke test
+against alp-sdk's pinned tag.
 
 Seam-1 deliberately does NOT compare the materialised config-artefact
 CONTENT (`slices[*].configArtefacts[*].contents` / `sharedArtefacts[*].
