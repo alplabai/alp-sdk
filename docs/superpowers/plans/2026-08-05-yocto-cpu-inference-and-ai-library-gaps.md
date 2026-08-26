@@ -1,6 +1,15 @@
 # Yocto CPU Inference + AI Library Gaps Implementation Plan
 
-> **STATUS — LANDED.** All seven tasks shipped: `metadata/libraries/madgwick-ahrs.yaml` is SHA-pinned, `onnx` is in `scripts/alp_model/manifest.py`'s `VALID_BLOB_FORMATS`, `metadata/libraries/onnxruntime.yaml` declares 1.28.0, and `src/yocto/inference_ort.cpp` + `src/yocto/CMakeLists.txt` carry the ORT CPU backend. Kept for implementation-history context.
+> **STATUS — LANDED (partial); Task 1 still open.** Tasks 2–7 shipped:
+> `onnx` is in `scripts/alp_model/manifest.py`'s `VALID_BLOB_FORMATS`,
+> `metadata/libraries/onnxruntime.yaml` declares 1.28.0, and
+> `src/yocto/inference_ort.cpp` + `src/yocto/CMakeLists.txt` carry the ORT
+> CPU backend. **Task 1 (pin `madgwick-ahrs` to a real SHA) did not land as
+> written**: `metadata/libraries/madgwick-ahrs.yaml`'s `version` and
+> `west.yml:476`'s `revision` both hold the mutable tag `v1.3.2`, not a SHA
+> — the upstream commit `015d68494274b479b5996bff2530ecbcfdc266f2` is
+> recorded only in a comment on each. Kept for implementation-history
+> context.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
