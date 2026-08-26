@@ -243,7 +243,7 @@ for the board-side C macros hand-written firmware uses
 entry binds an E1M-standard pad or peripheral instance
 (`ALP_E1M_GPIO_IO<N>`, `ALP_E1M_PWM<N>`, `ALP_E1M_I2C0/1` / `ALP_E1M_SPI0/1` /
 `ALP_E1M_UART0/1` / `ALP_E1M_I3C0`) to a board-side macro plus optional
-`doc:` / `active_low:` flags.
+`doc:` / `active_low:` / `pull:` / `debounce_ms:` / `board_alias:` flags.
 [`scripts/gen_board_header.py`](../scripts/gen_board_header.py)
 reads the block and emits `include/alp/boards/alp_<name>_routes.h`
 with one `#define <MACRO> ALP_E1M_<…>` line per entry.

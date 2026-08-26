@@ -1,0 +1,20 @@
+som:
+  sku: E1M-AEN801
+preset: e1m-evk
+cores:
+  m55_hp:
+    app: ./src
+    peripherals: []
+diagnostics:
+  log_level: info
+ota:
+  provider: hawkbit
+  server:
+    url: "https://hawkbit.example.com"
+    tls_ca_bundle: "certs/ca.pem"   # removed key; additionalProperties:
+                                    # false lives on `server`, not `ota` --
+                                    # regression fixture for the nested
+                                    # additionalProperties bug (the
+                                    # diagnostic used to name 'server' as
+                                    # the unknown key instead of
+                                    # 'tls_ca_bundle').

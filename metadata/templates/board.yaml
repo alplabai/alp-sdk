@@ -157,6 +157,9 @@ populated:
 #   - macro:      uppercase C-identifier the generator emits
 #   - doc:        optional one-line Doxygen `@brief` text
 #   - active_low: optional bool
+#   - pull:       optional "up" | "down" | "none" (default "none") -- PCB pull-resistor, documentation only
+#   - debounce_ms: optional integer -- HW debounce time constant, documentation only
+#   - board_alias: optional BOARD_<NAME> portable cross-EVK alias (e1m-spec STANDARD.md section 7.2)
 e1m_routes:
   gpio:
     - { e1m: E1M_GPIO_IO15, macro: PIN_BMI323_INT1,
