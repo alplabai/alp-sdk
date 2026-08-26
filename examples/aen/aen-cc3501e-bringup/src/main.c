@@ -336,6 +336,127 @@ static void cc3501e_net_probe(cc3501e_t *fw)
 			(void)cc3501e_sock_close(fw, h, 5000u);
 		}
 	}
+
+	/* 3) Power policy -- walk the four presets and prove the bridge survives each.
+	 *
+	 * Each preset drives BOTH the CC3501E's MCU idle state and its Wi-Fi radio
+	 * power save.  The radio is the dominant term: an associated station that
+	 * never enters power save keeps its receiver up continuously, which costs far
+	 * more than any core idle state saves.
+	 *
+	 * radio_ok is the field that matters.  POWER_POLICY's OK means QUEUED, not
+	 * APPLIED -- the firmware defers the radio half to its task, because the vendor
+	 * radio call is illegal in its SPI-dispatch ISR -- so the status code alone
+	 * cannot tell an applied policy from a silently rejected one.
+	 *
+	 * Measured on e1m-aen-evk-01: bulk throughput under DEEP_SLEEP tracks the
+	 * default (798000 vs 799383 B/s).  That is CORRECT -- 802.11 power save keeps
+	 * the station awake while downlink traffic is flowing and sleeps in the idle
+	 * gaps, so the saving shows up in idle current, not as a throughput cut.
+	 *
+	 * The PING after each policy is the point of the walk: a preset that wedged
+	 * the inter-chip link would be far worse than one that saved nothing.  The
+	 * device is left on BALANCED, which is the default. */
+	{
+		static const struct {
+			uint8_t     policy;
+			const char *name;
+		} presets[] = {
+			{ ALP_CC3501E_PP_PERFORMANCE, "PERFORMANCE" },
+			{ ALP_CC3501E_PP_LOW_POWER, "LOW_POWER" },
+			{ ALP_CC3501E_PP_DEEP_SLEEP, "DEEP_SLEEP" },
+			{ ALP_CC3501E_PP_BALANCED, "BALANCED" },
+		};
+
+		/* radio_ok is the field worth reading.  A RESP_OK to POWER_POLICY means
+		 * QUEUED, not APPLIED: the firmware defers both halves of the policy to its
+		 * task, because the vendor radio call and the Power-manager policy switch
+		 * are both illegal in the SPI-dispatch ISR that handles the opcode.  So the
+		 * status code alone cannot tell an applied policy from one the radio
+		 * rejected a moment later -- radio_ok reports the previous apply's outcome.
+		 *
+		 * #1691: repeated BLE advertise/stop cycles can wedge the bridge -- not
+		 * power-related, it reproduces with no power policy applied at all.
+		 * cc3501e_recover() clears it. */
+		for (size_t i = 0u; i < (sizeof(presets) / sizeof(presets[0])); ++i) {
+			const alp_cc3501e_power_policy_t pp = {
+				.policy = presets[i].policy,
+				/* HOST_SPI must stay set: the firmware rejects a low-power
+				 * preset that declares NO wake source, since that would idle
+				 * the device with no way back. */
+				.wake_events          = ALP_CC3501E_WAKE_HOST_SPI,
+				.idle_ms_before_sleep = 300u, /* DEEP_SLEEP: wake ~every 3rd DTIM */
+			};
+			bool               rok = true;
+			const alp_status_t ps  = cc3501e_power_policy(fw, &pp, &rok, 5000u);
+			const alp_status_t pg  = cc3501e_ping(fw);
+
+			/* BLE is the OTHER radio, and it is up concurrently by this point.
+			 * Nothing in the power path addresses it -- the presets drive only the
+			 * WLAN_SET_* knobs -- but POWER_MANAGEMENT_ELP_MODE is a DEVICE-level
+			 * sleep authorisation, so the BLE controller can still be affected.
+			 * Advertising is a real radio operation, so it fails if the controller
+			 * went to sleep or wedged: that is the assertion worth making here. */
+			static const uint8_t adv[] = { 0x02u, 0x01u, 0x06u }; /* flags: LE general disc */
+			const alp_status_t   bs =
+			    cc3501e_ble_adv_start(fw, false, 100u, 150u, adv, sizeof(adv), 5000u);
+			const alp_status_t be = cc3501e_ble_adv_stop(fw, 5000u);
+
+			printf("[cc3501e-bringup] POWER %-11s -> %d radio_ok=%d  PING -> %d  "
+			       "BLE adv %d/%d\n",
+			       presets[i].name,
+			       (int)ps,
+			       (int)rok,
+			       (int)pg,
+			       (int)bs,
+			       (int)be);
+		}
+	}
+	{
+		/* --- Duty cycle: power the companion OFF between uplinks ---------------
+	 *
+	 * For a node that uplinks once an hour or once a day, this is where nearly
+	 * all the power is saved.  WIFI_EN gates VPA through the load switch, so the
+	 * companion draws essentially nothing -- far below any sleep state.  That is
+	 * the split: the presets above are for SHORT gaps, this is for long ones.
+	 *
+	 * EXPLICIT application decision.  Nothing in the driver powers the device
+	 * down on its own -- only the app knows when the next uplink is due and
+	 * whether anything is still in flight.
+	 *
+	 * The cost is a full cold boot on the way back, and every bit of device
+	 * state -- association, BLE host, open sockets -- is gone with it. */
+		/* Recovering a bridge that has stopped answering.
+		 *
+		 * The link can enter a state where the CC3501E is healthy but the host gets
+		 * nothing: requests time out, then fail, indefinitely, and it does not
+		 * self-heal.  Firmware diagnostics taken across the fault (#1691) show the
+		 * slave armed and idle with READY HIGH, its housekeeping task running, its
+		 * resync and arm-failure counters at zero, and SPI transfers still
+		 * completing -- so the firmware has no way to know anything is wrong.  Only
+		 * the host, which is getting no answers, can tell.
+		 *
+		 * cc3501e_recover() is the escape hatch: a warm reset (nRESET only, rails
+		 * up) plus a confirming PING.  It recovered every wedge observed on the
+		 * bench.  NEVER call it with an OTA in flight -- see the header. */
+		const alp_status_t rec = cc3501e_recover(fw);
+
+		printf("[cc3501e-bringup] RECOVER -> %d\n", (int)rec);
+
+		const alp_status_t off = cc3501e_power_off(fw);
+		/* While off, calls fail FAST rather than clocking frames at a dead slave and
+	 * burning a timeout each -- that is the observable difference from a wedge. */
+		const alp_status_t gated = cc3501e_ping(fw);
+		const alp_status_t back  = cc3501e_reset(fw); /* the cold boot IS the wake */
+		const alp_status_t alive = cc3501e_ping(fw);
+
+		printf("[cc3501e-bringup] POWER OFF -> %d  while-off PING -> %d  "
+		       "reset -> %d  PING -> %d\n",
+		       (int)off,
+		       (int)gated,
+		       (int)back,
+		       (int)alive);
+	}
 }
 static void cc3501e_wifi_probe(cc3501e_t *fw)
 {

@@ -137,6 +137,75 @@ alp_status_t cc3501e_init(cc3501e_t *ctx, alp_spi_t *bus);
 alp_status_t cc3501e_reset(cc3501e_t *ctx);
 
 /**
+ * @brief Cut the CC3501E's supply and leave it off (WIFI_EN low).
+ *
+ * The deepest power state available, and far below anything
+ * @ref cc3501e_power_policy can reach: WIFI_EN gates VPA (3.3 V) through the
+ * board's load switch, so this removes the companion's power rather than idling
+ * it.  Intended for LONG idle periods -- a node that uplinks once an hour or once
+ * a day spends almost all its life here, and at that duty cycle the sleep-state
+ * current is irrelevant next to simply having the chip off.
+ *
+ * Use @ref cc3501e_power_policy instead for short gaps: it keeps the association
+ * and wakes on the next SPI frame, where this costs a full cold boot.
+ *
+ * EXPLICIT ONLY.  The application on the host decides when the companion is not
+ * needed and calls this; nothing in the driver, and no power preset, ever powers
+ * the device down on its own.  A duty cycle is a product decision -- only the
+ * application knows when the next uplink is due and whether anything is in
+ * flight -- so it is never inferred from an idle timer down here.
+ *
+ * ALL DEVICE STATE IS LOST.  The Wi-Fi association, the BLE host, every open
+ * socket and any OTA session are gone; the secure boot chain re-runs from
+ * scratch on the way back up.  Bringing it back is @ref cc3501e_reset, which
+ * runs the cold-boot sequence (rail discharge, supply ramp, reset release, boot
+ * budget) and re-arms this context -- budget on the order of a second and a half,
+ * plus re-association.
+ *
+ * Until then every other call on @p ctx returns ALP_ERR_NOT_READY immediately,
+ * rather than clocking frames at an unpowered slave and burning a timeout each.
+ *
+ * @warning NEVER call this with an OTA in flight -- it destroys the partially
+ *          staged image, and the device cannot report that it happened.  The
+ *          caller owns that sequencing; the driver does not track it.
+ *
+ * @param ctx  Initialised bridge handle.
+ * @return ALP_OK once the supply is gated; ALP_ERR_INVAL if @p ctx is NULL;
+ *         ALP_ERR_NOT_PRESENT_ON_THIS_SOC on a board that ties WIFI_EN on, where
+ *         software cannot gate the rail.
+ */
+alp_status_t cc3501e_power_off(cc3501e_t *ctx);
+
+/**
+ * @brief Recover a bridge that has stopped answering (warm reset, keeps rails up).
+ *
+ * The inter-chip link can enter a state where the CC3501E is healthy but no
+ * longer receives what the host clocks: requests time out (ALP_ERR_TIMEOUT) and
+ * then fail (ALP_ERR_IO) indefinitely. It does not self-heal.
+ *
+ * Firmware-side diagnostics taken across the fault (see #1691) show the slave
+ * armed and idle in its request-header phase with READY HIGH, its housekeeping
+ * task still running, and its resync / arm-failure counters at zero -- i.e. the
+ * firmware has no way to know anything is wrong. Only the host, which is getting
+ * no answers, can tell. Hence this call.
+ *
+ * Issues a warm reset (nRESET only, supply left up) and confirms the link with a
+ * PING; falls back to a full supply cycle if the warm reset does not take. On
+ * success the link is usable again -- but the device rebooted, so the Wi-Fi
+ * association, the BLE host and every open socket are gone and must be
+ * re-established.
+ *
+ * @warning NEVER call this with an OTA in flight -- resetting mid-update destroys
+ *          the partially staged image. Tearing down or re-opening the bridge
+ *          during a flash operation is what #1610 traced its hangs to.
+ *
+ * @param ctx  Initialised bridge handle.
+ * @return ALP_OK when the link answers again; ALP_ERR_INVAL if @p ctx is NULL;
+ *         otherwise the mapped error from the reset or the confirming PING.
+ */
+alp_status_t cc3501e_recover(cc3501e_t *ctx);
+
+/**
  * @brief Warm hard reset: pulse nRESET with WIFI_EN kept asserted (rails stay up).
  *
  * Re-boots the module WITHOUT a cold power cycle.  This is the "second boot" of the

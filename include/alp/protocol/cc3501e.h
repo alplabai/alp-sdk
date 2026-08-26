@@ -426,11 +426,27 @@ typedef struct {
 /** Coarse policy preset for @ref alp_cc3501e_power_policy_t::policy.
  *  Backends round to the closest firmware-supported policy; the
  *  realised policy is reported back via GET_DIAG_INFO if needed.
- *  Field-level meanings:
- *   - PERFORMANCE: no idle; lowest latency.
- *   - BALANCED: default -- idle between events.
- *   - LOW_POWER: aggressive idle; longer wake.
- *   - DEEP_SLEEP: radios off; wake-on-host only. */
+ *  Each preset drives BOTH halves of the device: the MCU core's idle state and
+ *  the Wi-Fi radio's power save.  The radio is the dominant term by far -- an
+ *  associated station that never enters power save keeps its receiver up
+ *  continuously, which costs far more than any core idle state saves.
+ *
+ *   - PERFORMANCE: core never sleeps (WFI only); radio always active.
+ *     Lowest latency, highest current.  Use while streaming.
+ *   - BALANCED: default -- core idles between events; radio in auto power save.
+ *   - LOW_POWER: core sleeps; radio in power save, waking every DTIM, so
+ *     downlink traffic is still picked up within one beacon period.
+ *   - DEEP_SLEEP: as LOW_POWER, but the radio takes a long sleep interval and
+ *     wakes only every Nth DTIM (N derived from
+ *     @ref alp_cc3501e_power_policy_t::idle_ms_before_sleep).
+ *
+ *  @warning DEEP_SLEEP does NOT turn the radios off, and the station stays
+ *  ASSOCIATED in every preset -- an earlier revision of this comment claimed
+ *  "radios off; wake-on-host only", which was never what the firmware did.
+ *  @warning LATENCY AND THROUGHPUT ARE THE TRADE.  Waking only every Nth DTIM
+ *  means inbound frames queue at the AP until the next wake, so DEEP_SLEEP adds
+ *  hundreds of ms of inbound latency and will cut bulk throughput hard.  That is
+ *  the preset working as intended; it is why BALANCED is the default. */
 typedef enum {
 	ALP_CC3501E_PP_PERFORMANCE = 0u,
 	ALP_CC3501E_PP_BALANCED    = 1u,
@@ -463,9 +479,16 @@ typedef enum {
  *  Field-level meanings:
  *   - policy: one of @ref alp_cc3501e_pp_preset_t.
  *   - wake_events: bitmap of @c ALP_CC3501E_WAKE_* values.
- *   - idle_ms_before_sleep: minimum idle time before entering the
- *     chosen policy's sleep mode.  0 = use firmware default for
- *     the policy. */
+ *   - idle_ms_before_sleep: how long the device may stay asleep between
+ *     radio wakes.  Under DEEP_SLEEP it selects the long sleep interval:
+ *     the firmware converts it to a DTIM count (a DTIM period is typically
+ *     ~100 ms) and wakes every Nth DTIM, clamped to [2, 255].  0 = use the
+ *     firmware default for the policy.
+ *
+ *     It does NOT set a core idle-hysteresis threshold: the MCU's sleep
+ *     policy derives that from the time to the next scheduled event, and the
+ *     vendor Power driver exposes no hysteresis setter.  Under the other three
+ *     presets this field is accepted and ignored. */
 typedef struct {
 	uint8_t  policy;
 	uint8_t  wake_events;

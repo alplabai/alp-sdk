@@ -39,7 +39,7 @@ software GPIO CS is installed; the SPI driver drives SS0 from the controller.
 ## What it does
 
 1. Opens `WIFI_EN` + `E_WIFI.NRST` GPIOs (output).
-2. Opens SPI1 (`bus_id = 1`, mode 0, 14 MHz request / ~14.3 MHz derived SCLK, hardware SS0) — Alif is master.
+2. Opens SPI1 (`bus_id = 1`, mode 0, 25 MHz `CC3501E_BRIDGE_SPI_FREQ_HZ`, hardware SS0) — Alif is master.
 3. `cc3501e_reset()` — sequences `WIFI_EN` + `nRESET` (TI SWRU626) and
    blocks ~905 ms for the boot budget.
 4. Retries `PING` until the coprocessor answers.
@@ -49,6 +49,25 @@ software GPIO CS is installed; the SPI driver drives SS0 from the controller.
    (expected — it still proves the request round-trips).
 7. Liveness soak: `PING` every 500 ms (+ `GET_VERSION` every 8th cycle) so
    the link stays continuously verifiable over J-Link.
+8. Power: cuts the supply with `cc3501e_power_off()`, shows that calls then fail
+   fast with `ALP_ERR_NOT_READY` rather than timing out, and wakes the device with
+   `cc3501e_reset()` — the long-idle duty cycle a once-an-hour node would use.
+9. Power presets: walks `PERFORMANCE` / `LOW_POWER` / `DEEP_SLEEP` / `BALANCED`,
+   printing each policy's status, the `radio_ok` flag and a `PING`, then leaves the
+   device on `BALANCED`. A `PING` after each preset is the point — a preset that
+   wedged the inter-chip link would be far worse than one that saved nothing.
+
+   `radio_ok` is the field to read: a `RESP_OK` to `POWER_POLICY` means QUEUED, not
+   APPLIED, because the firmware defers the work to its task (neither the vendor
+   radio call nor the Power-manager switch is legal in the SPI-dispatch ISR).
+
+   > **[#1691](https://github.com/alplabai/alp-sdk/issues/1691):** repeated BLE
+   > advertise/stop cycles can wedge the bridge (not power-related — it reproduces
+   > with no power policy). `cc3501e_recover()` clears it; step 8 above shows it.
+
+   See [`docs/cc3501e-bridge.md`](../../../docs/cc3501e-bridge.md#power-management)
+   for the full model, including why there is no deeper sleep tier and how waking
+   works.
 
 ## Build + flash (bench)
 

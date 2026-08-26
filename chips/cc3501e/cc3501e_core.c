@@ -57,9 +57,69 @@ alp_status_t cc3501e_init(cc3501e_t *ctx, alp_spi_t *bus)
 	return ALP_OK;
 }
 
+/* See <alp/chips/cc3501e/core.h>. */
+alp_status_t cc3501e_recover(cc3501e_t *ctx)
+{
+	if (ctx == NULL) return ALP_ERR_INVAL;
+
+	/* A WARM reset -- nRESET only, rails up -- is what clears this state.
+	 * Bench-established on e1m-aen-evk-01 (#1691): every observed wedge recovered
+	 * with `warm-reset -> 0  PING -> 0`, and the .TI.noinit snapshot read back
+	 * afterwards showed the firmware had been perfectly healthy the whole time --
+	 * housekeeping ticks advancing, slave armed in PH_REQ_HEADER, READY HIGH, and
+	 * g_resync_count / g_arm_fail_count both zero.
+	 *
+	 * That is why no firmware self-heal fires: bridge_transport_spi_is_dead() only
+	 * reports a failed SPI_open, and the stall watchdog deliberately watches only
+	 * REPLY phases because PH_REQ_HEADER legitimately waits forever for the host.
+	 * The slave cannot tell "host idle" from "host clocking, I am not receiving".
+	 * The HOST can, which is why recovery lives here and not in the firmware. */
+	const alp_status_t rs = cc3501e_hard_reset(ctx);
+
+	if (rs != ALP_OK) {
+		/* nRESET alone did not take -- fall back to cutting the supply, which is
+		 * the heavier hammer and loses all device state. */
+		(void)cc3501e_power_off(ctx);
+		return cc3501e_reset(ctx);
+	}
+	return cc3501e_ping(ctx);
+}
+
+/* See <alp/chips/cc3501e/core.h>. */
+alp_status_t cc3501e_power_off(cc3501e_t *ctx)
+{
+	if (ctx == NULL) return ALP_ERR_INVAL;
+	if (ctx->enable_pin == NULL) {
+		/* Board ties WIFI_EN on -- the supply cannot be gated from software here,
+		 * so say so rather than pretending the rail went down. */
+		return ALP_ERR_NOT_PRESENT_ON_THIS_SOC;
+	}
+
+	/* nRESET low BEFORE the supply so the CC3501E is held in reset while VPA
+	 * collapses, never left floating against a decaying rail. */
+	(void)alp_gpio_write(ctx->reset_pin, false);
+	(void)alp_gpio_write(ctx->enable_pin, false);
+
+	/* Every later call on this ctx now fails ALP_ERR_NOT_READY instead of
+	 * clocking frames at an unpowered slave and burning a full timeout each.
+	 * cc3501e_reset() is what brings it back -- it re-runs the cold-boot
+	 * sequence and re-arms this flag. */
+	ctx->initialised = false;
+	return ALP_OK;
+}
+
 alp_status_t cc3501e_reset(cc3501e_t *ctx)
 {
-	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	/* RECOVERY PRIMITIVE: deliberately does NOT require ctx->initialised.
+	 *
+	 * This is the only way back from a context marked down, and two paths mark one
+	 * down: cc3501e_power_off(), which gates the supply, and the GET_VERSION compat
+	 * gate below, which clears the flag on a mismatch.  Gating reset on that same
+	 * flag made BOTH states unrecoverable through the API -- bench-proven,
+	 * `POWER OFF -> 0 ... reset -> -2`.  The pin checks below are the real
+	 * precondition; a never-initialised context has NULL pins and still gets a
+	 * clean ALP_ERR_NOSUPPORT. */
+	if (ctx == NULL || ctx->bus == NULL) return ALP_ERR_NOT_READY;
 	if (ctx->reset_pin == NULL || ctx->enable_pin == NULL) {
 		/* The studio's pin allocator (or hand-written firmware
          * via alp_gpio_open) must populate enable_pin / reset_pin
@@ -122,6 +182,20 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	alp_status_t s = cc3501e_hard_reset(ctx);
 	if (s != ALP_OK) return s;
 
+	/* Re-arm BEFORE the version read, not after.
+	 *
+	 * The device is physically up at this point, and the compat gate below reads
+	 * it through cc3501e_get_version() -- which itself refuses on a context marked
+	 * down.  Setting the flag afterwards is therefore circular: a context downed by
+	 * cc3501e_power_off() (or by a previous version mismatch) could never verify,
+	 * so reset returned ALP_OK while every later call still failed
+	 * ALP_ERR_NOT_READY.  Bench-proven on a healthy device:
+	 * `POWER OFF -> 0  while-off PING -> -2  reset -> 0  PING -> -2`.
+	 *
+	 * The mismatch path below still clears it, so a genuine wire disagreement is
+	 * unchanged -- this only removes the deadlock on the way back up. */
+	ctx->initialised = true;
+
 	/* Wire-protocol compatibility gate (issue #1371): firmware/cc3501e/DESIGN.md
      * has always documented "host refuses a mismatch" for GET_VERSION, but
      * nothing ever compared the reply against ALP_CC3501E_PROTOCOL_VERSION --
@@ -152,6 +226,9 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	uint16_t     fw_version = 0u;
 	alp_status_t vs         = cc3501e_get_version(ctx, &fw_version);
 	if (vs != ALP_OK) {
+		/* Transport hiccup reading the version, not a version disagreement: leave
+		 * the context as it was and let the caller retry (the soaks treat
+		 * GET_VERSION as a liveness probe, not a compat gate). */
 		return ALP_OK;
 	}
 	if (fw_version != ALP_CC3501E_PROTOCOL_VERSION) {
@@ -163,12 +240,15 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 		ctx->initialised = false;
 		return ALP_ERR_VERSION;
 	}
+
 	return ALP_OK;
 }
 
 alp_status_t cc3501e_hard_reset(cc3501e_t *ctx)
 {
-	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	/* Recovery primitive like cc3501e_reset(): must work on a context marked down,
+	 * or there is no way back from a supply gate or a version mismatch. */
+	if (ctx == NULL || ctx->bus == NULL) return ALP_ERR_NOT_READY;
 	if (ctx->reset_pin == NULL) return ALP_ERR_NOSUPPORT;
 	/* Pulse nRESET while keeping WIFI_EN asserted so the module re-boots WITHOUT a
 	 * cold power cycle (a cold cycle would re-trigger the Puya-flash bug).  This is

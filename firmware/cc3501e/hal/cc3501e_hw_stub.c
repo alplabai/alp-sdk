@@ -453,6 +453,12 @@ int cc3501e_hw_set_power_policy(uint8_t policy, uint8_t wake_events, uint32_t id
 	return CC3501E_HW_OK;
 }
 
+/* No radio in the stub build, so nothing can fail to take the policy. */
+bool cc3501e_hw_power_radio_ok(void)
+{
+	return true;
+}
+
 int cc3501e_hw_set_log_level(uint8_t level)
 {
 	(void)level;

@@ -430,6 +430,92 @@ that ISOLATE all the downstream buses:
 
 The Alif's bring-up code then sequences enables once it's ready.
 
+## Power management
+
+Two mechanisms, for two very different idle lengths. Picking the wrong one is the
+usual mistake: the presets cannot approach an off chip, and powering off cannot be
+done for a gap of milliseconds.
+
+### Short gaps: power presets (`CMD_POWER_POLICY`, 0x62)
+
+`cc3501e_power_policy()` sets one of four presets. Each drives **both** halves of
+the device — the MCU's idle state and the Wi-Fi radio's power save. The radio is
+the dominant term: an associated station that never enters power save keeps its
+receiver up continuously, which costs far more than any core idle state saves.
+
+| preset | core | radio power save | sleep authorisation | listen interval |
+|---|---|---|---|---|
+| `PERFORMANCE` | WFI only (SLEEP + IDLE disallowed) | `ACTIVE_MODE` | `ALWAYS_ACTIVE_MODE` | — |
+| `BALANCED` (default) | opportunistic IDLE/SLEEP | `AUTO_PS_MODE` | `ELP_MODE` | — |
+| `LOW_POWER` | as BALANCED | `POWER_SAVE_MODE` | `ELP_MODE` | every DTIM |
+| `DEEP_SLEEP` | as BALANCED | `POWER_SAVE_MODE` | `ELP_MODE` | every Nth DTIM |
+
+`DEEP_SLEEP` does **not** turn the radios off, and the station stays *associated*
+in every preset. There is no deeper core tier to reach: the vendor Power driver
+exposes exactly one sleep state (`PowerWFF3_SLEEP`), and its `Power_shutdown()` is
+an unimplemented stub that returns `Power_SOK` without doing anything. The presets
+differ on the radio, not the core.
+
+`idle_ms_before_sleep` selects the long sleep interval under `DEEP_SLEEP` — the
+firmware converts it to a DTIM count clamped to `[2, 255]`. It does not set a core
+idle-hysteresis threshold; the Power driver exposes no such setter.
+
+**The ack means QUEUED, not APPLIED.** `handle_power_policy` runs in SPI-dispatch
+(ISR) context, where neither the vendor radio call nor the Power-manager policy
+switch is legal, so both halves are deferred to the firmware's task. Read the
+reply's `radio_ok_out` to learn whether the *previous* apply was realised.
+
+> **Known issue ([#1691](https://github.com/alplabai/alp-sdk/issues/1691)):**
+> repeated BLE advertise/stop cycles can wedge the bridge — requests time out,
+> then fail, and it does not self-heal. Firmware diagnostics across the fault show
+> the CC3501E healthy the whole time (slave armed, READY high, transfers still
+> completing, all error counters zero), so no firmware self-heal can detect it.
+> `cc3501e_recover()` is the escape hatch: a warm reset recovered every observed
+> wedge. Not power-related — it reproduces with no power policy applied at all.
+
+### Long gaps: cut the supply (`cc3501e_power_off()`)
+
+For a node that uplinks once an hour or once a day, the sleep-state current is
+irrelevant next to simply having the chip off. `WIFI_EN` gates VPA (3.3 V) through
+the board's load switch, so `cc3501e_power_off()` removes the companion's power
+rather than idling it — far below anything a preset reaches.
+
+This is deliberately **not** a fifth preset: `CMD_POWER_POLICY` travels over the
+very link the action kills, so powering down is a host-side GPIO action that lives
+next to `cc3501e_reset()`.
+
+It is **explicit only**. Nothing in the driver, and no preset, powers the device
+down on its own — a duty cycle is a product decision, and only the application
+knows when the next uplink is due and whether anything is in flight.
+
+The costs, none of them small:
+
+- **All device state is lost** — association, the BLE host, every open socket.
+- Waking is a full cold boot: `cc3501e_reset()` runs the rail discharge, supply
+  ramp, reset release and boot budget, then re-association is the caller's job.
+- While off, every call returns `ALP_ERR_NOT_READY` immediately rather than
+  clocking frames at an unpowered slave and burning a timeout each.
+
+> **Never call it with an OTA in flight** — it destroys the partially staged
+> image, and the device cannot report that it happened.
+
+### Waking
+
+There is no wake command, because there is nothing to send one to that is not
+already awake enough to receive it. For `PowerWFF3_SLEEP`, any still-clocked
+peripheral IRQ wakes the core, and the bridge SPI slave is one — **the host
+clocking a frame is the wake**. That is why a low-power preset must keep
+`ALP_CC3501E_WAKE_HOST_SPI` set; the firmware rejects one that declares no wake
+source, since it would idle with no way back.
+
+The rest of the `ALP_CC3501E_WAKE_*` bitmap is validation only. A per-source sleep
+wake mask has no SDK surface: the Power driver hardwires RTC + `CSYSPWRUPREQ`, and
+`GPIO_CFG_SHUTDOWN_WAKE_*` is a per-pin *shutdown* knob, not a sleep one.
+
+READY (`GPIO17` → `P2_6`) cannot wake the device — it is an output *from* the
+CC3501E telling the host its slave is armed. After `cc3501e_power_off()` the only
+way back is `cc3501e_reset()` driving `WIFI_EN`.
+
 ## Peripherals not proxied today
 
 Beyond the wire-protocol surfaces above (Wi-Fi, BLE, GPIO proxy, OTA), the

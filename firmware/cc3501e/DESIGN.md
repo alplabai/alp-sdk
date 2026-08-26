@@ -95,6 +95,44 @@ mutually exclusive with a micro-SD card (the Alif has one SDIO
 controller).  Both transports compile; `CC3501E_CONTROL_TRANSPORT`
 selects which `main()` starts.  See README.md.
 
+## Power policy: both halves run on the TASK, never in the dispatch ISR
+
+`handle_power_policy` (0x62) is reached from the SPI-dispatch ISR, and **neither**
+half of the policy may run there:
+
+- the radio half calls `Wlan_Set()`, a blocking vendor call -- the same reason
+  `handle_sock_recv()` cannot call `lwip_recv()` and the worker seam exists;
+- the core half calls `Power_setPolicy()` / `Power_enablePolicy()`, which swap and
+  re-arm the function pointer the idle loop runs, racing the idle loop that may be
+  executing the very policy being replaced.
+
+Running either inline did not merely fail: on silicon every preset returned `-4`
+and the bridge itself went to `PING -> -5`. Both are therefore latched by the ISR
+handler and drained by `cc3501e_hw_power_service()` from `cc3501e_hw_tick()`, core
+first then radio.
+
+**The wire consequence: a `RESP_OK` to `POWER_POLICY` means QUEUED, not APPLIED** --
+the same semantic `OTA_BEGIN` turned out to have. The reply carries one data byte
+reporting whether the *previous* radio apply was realised, surfaced to the host as
+`cc3501e_power_policy()`'s `radio_ok_out`. Without it a host cannot distinguish an
+accepted-and-applied policy from an accepted-and-silently-rejected one, which is
+exactly how a broken radio apply went unnoticed on the bench.
+
+`Wlan_Set()` is also rejected while the radio is down, so the latched policy is
+re-applied after `Wlan_RoleUp(STA)` succeeds; otherwise a policy set before Wi-Fi
+came up is dropped.
+
+> **[#1691](https://github.com/alplabai/alp-sdk/issues/1691):** repeated BLE
+> advertise/stop cycles can wedge the bridge. It is NOT power-related — it
+> reproduces with no power policy applied. Diagnostics across the fault show the
+> slave armed and idle in `PH_REQ_HEADER`, READY HIGH, `g_resync_count` and
+> `g_arm_fail_count` both zero, and SPI transfers still completing, so no firmware
+> self-heal can see it: `bridge_transport_spi_is_dead()` only reports a failed
+> `SPI_open`, and the stall watchdog deliberately ignores `PH_REQ_HEADER`. Recovery
+> is host-side via `cc3501e_recover()` (warm reset), which cleared every observed
+> wedge. The `CC3501E_WEDGE_PROBE` build flag captures the state into `.TI.noinit`
+> for further investigation.
+
 ## Backends
 
 - `stub` (`hal/cc3501e_hw_stub.c`): hardware-free; HW ops return

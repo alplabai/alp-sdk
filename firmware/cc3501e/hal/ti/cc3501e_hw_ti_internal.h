@@ -50,9 +50,31 @@ void cc3501e_hw_ota_pump(void);
  * CC3501E_HW_ERR_IO (see ../cc3501e_hw.h). */
 int cc3501e_hw_wifi_lazy_start(void);
 
-#endif /* CC3501E_HAL_TI_CC3501E_HW_TI_INTERNAL_H */
-
 /* True when a REPLY phase has been armed and un-completed past the stall
  * budget -- the host abandoned a transaction after the slave armed its reply,
  * which no other self-heal detects.  Polled by cc3501e_hw_tick(). */
 bool bridge_transport_spi_reply_stalled(void);
+
+/* Re-apply the latched radio power-save policy after Wlan_RoleUp(STA) succeeds.
+ * Wlan_Set() is rejected while the radio is down, so a POWER_POLICY the host set
+ * before the role came up would otherwise be silently lost. */
+void cc3501e_hw_power_reapply_radio(void);
+
+/* Drain the latched radio power-save policy on the TASK.  Wlan_Set() is a blocking
+ * vendor call and MUST NOT run in the SPI-dispatch ISR -- doing so failed every
+ * preset and wedged the bridge on silicon.  Called from cc3501e_hw_tick(). */
+void cc3501e_hw_power_service(void);
+
+#ifdef CC3501E_WEDGE_PROBE
+/* BENCH PROBE (#1691): refresh / read the .TI.noinit wedge snapshot.  See
+ * transport_hw_ti_spi.c -- a warm reset recovers the wedge and preserves RAM, so
+ * this is how the slave's last state is recovered from an unreachable bridge. */
+void     bridge_transport_spi_probe_tick(void);
+void     bridge_transport_spi_probe_xfer(void);
+uint32_t bridge_transport_spi_probe_read(void);
+#endif
+
+/* False when the last TASK-side radio apply failed while a role was up. */
+bool cc3501e_hw_power_radio_ok(void);
+
+#endif /* CC3501E_HAL_TI_CC3501E_HW_TI_INTERNAL_H */

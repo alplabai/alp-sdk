@@ -114,6 +114,18 @@ alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
 		put_le32(&reply_data[8], ((uint32_t)fs << 8) | (uint32_t)pl);
 	}
 #else
+#ifdef CC3501E_WEDGE_PROBE
+	/* BENCH PROBE BUILD ONLY (#1691).  Reports the slave's LAST state before the
+	 * bridge stopped answering, read back after the warm reset that recovers it.
+	 * Rides the heap field for the same reason the OTA probe does: the CC3501E has
+	 * no UART on the debug probe, so this is the only channel an old console can
+	 * already print.  Guarded, and must never leave a bench build. */
+	{
+		extern uint32_t bridge_transport_spi_probe_read(void);
+
+		put_le32(&reply_data[8], bridge_transport_spi_probe_read());
+	}
+#else
 #ifdef CC3501E_RADIO_SPEEDTEST
 	{ /* BENCH: radio-only bytes/sec in place of free_heap. */
 		extern volatile uint32_t g_radio_bps;
@@ -122,6 +134,7 @@ alp_cc3501e_resp_t handle_get_diag_info(const uint8_t *req,
 	}
 #else
 	put_le32(&reply_data[8], cc3501e_hw_free_heap_bytes());
+#endif
 #endif
 #endif
 	reply_data[12] = g_last_error;

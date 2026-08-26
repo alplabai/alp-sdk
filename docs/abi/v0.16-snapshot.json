@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-25",
+  "generated": "2026-08-26",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -2822,6 +2822,14 @@
           "hash": "19d86d4f31421379",
           "signature": "alp_status_t cc3501e_init(cc3501e_t *ctx, alp_spi_t *bus);"
         },
+        "cc3501e_power_off": {
+          "hash": "b03252cb8a26bd20",
+          "signature": "alp_status_t cc3501e_power_off(cc3501e_t *ctx);"
+        },
+        "cc3501e_recover": {
+          "hash": "f0b387d9f3f9d25b",
+          "signature": "alp_status_t cc3501e_recover(cc3501e_t *ctx);"
+        },
         "cc3501e_request": {
           "hash": "4394de213fad8378",
           "signature": "alp_status_t cc3501e_request(cc3501e_t *ctx, alp_cc3501e_cmd_t cmd, const uint8_t *tx_payload, size_t tx_len, uint8_t *rx_buf, size_t rx_cap, size_t *rx_len, uint32_t timeout_ms);"
@@ -3006,8 +3014,8 @@
     "alp/chips/cc3501e/power.h": {
       "functions": {
         "cc3501e_power_policy": {
-          "hash": "5fed7bfe53c7205e",
-          "signature": "alp_status_t cc3501e_power_policy(cc3501e_t *ctx, const alp_cc3501e_power_policy_t *policy, uint32_t timeout_ms);"
+          "hash": "370b902f063a87df",
+          "signature": "alp_status_t cc3501e_power_policy(cc3501e_t *ctx, const alp_cc3501e_power_policy_t *policy, bool *radio_ok_out, uint32_t timeout_ms);"
         }
       },
       "macros": {},

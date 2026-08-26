@@ -1635,7 +1635,7 @@ ZTEST(cc3501e_host_driver, test_power_policy_encodes_8_bytes)
 		.reserved             = 0u,
 		.idle_ms_before_sleep = 1000u, /* 0x000003E8 */
 	};
-	zassert_equal(cc3501e_power_policy(&fw, &pp, 100u), ALP_OK, "POWER_POLICY -> OK");
+	zassert_equal(cc3501e_power_policy(&fw, &pp, NULL, 100u), ALP_OK, "POWER_POLICY -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_POWER_POLICY, "opcode 0x62");
 	zassert_equal(slave.req_len, 8u, "hand-packed 8-byte wire");
 	zassert_equal(slave.req_pl[0], (uint8_t)ALP_CC3501E_PP_BALANCED, "policy");
@@ -1650,7 +1650,8 @@ ZTEST(cc3501e_host_driver, test_power_policy_encodes_8_bytes)
 
 ZTEST(cc3501e_host_driver, test_power_policy_null_invalid)
 {
-	zassert_equal(cc3501e_power_policy(&fw, NULL, 100u), ALP_ERR_INVAL, "NULL policy -> INVAL");
+	zassert_equal(
+	    cc3501e_power_policy(&fw, NULL, NULL, 100u), ALP_ERR_INVAL, "NULL policy -> INVAL");
 	zassert_equal(slave.cmd, 0u, "no transfer clocked");
 }
 

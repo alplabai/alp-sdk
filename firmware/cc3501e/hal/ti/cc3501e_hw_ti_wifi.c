@@ -473,6 +473,10 @@ static int cc3501e_hw_wifi_ensure_sta_role(void)
 		return CC3501E_HW_ERR_IO;
 	}
 	wifi_sta_role_up = true;
+	/* The radio only accepts a power-save configuration once a role is up, so a
+	 * POWER_POLICY the host set earlier was dropped on the floor.  Re-apply the
+	 * latched policy here -- see pp_apply_radio() in cc3501e_hw_ti_power.c. */
+	cc3501e_hw_power_reapply_radio();
 	return CC3501E_HW_OK;
 }
 

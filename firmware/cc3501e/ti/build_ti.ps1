@@ -168,6 +168,7 @@ if ((Get-Content $cfg -Raw) -notmatch "GPIO17 = bridge READY") {
 
 $txdef = @(if ($Transport -eq 'sdio') { '-DCC3501E_CONTROL_TRANSPORT_SDIO=1' })
 if ($env:CC3501E_RADIO_SPEEDTEST) { $txdef = @($txdef) + @('-DCC3501E_RADIO_SPEEDTEST=1') }
+if ($env:CC3501E_WEDGE_PROBE) { $txdef = @($txdef) + @('-DCC3501E_WEDGE_PROBE=1') }
 if ($OtaSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_SELFTEST') }
 if ($OtaWindowSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_WINDOW_SELFTEST') }
 if ($OtaWindowBytes -gt 0) { $txdef = @($txdef) + @("-DCC3501E_OTA_WINDOW_SELFTEST_BYTES=$OtaWindowBytes") }
@@ -450,12 +451,17 @@ $sockring = @"
         .bss.sock_ring: {} palign(8)
     } > TCM_DRAM_NON_SECURE
 
-    /* Move entire BSS section (including COMMON symbols) to DRAM to save TCM space */
-
 "@
 if ($cmdText -notmatch '\.bss\.sock_ring') {
-    $cmdText = $cmdText -replace '(?m)^[ 	]*/\* Move entire BSS section \(including COMMON symbols\) to DRAM to save TCM space \*/[ 	]*?
-', $sockring
+    # Plain string insert, NOT a regex.  The regex this replaces carried a literal
+    # TAB and a raw newline, because shell escaping mangled its \t and \r?\n when it
+    # was first written.  Whether it matched then depended on the copied
+    # linker.cmd's line endings: it matched in the worktree it was authored in and
+    # silently failed in the next one.  The post-condition below is the only reason
+    # that surfaced as a build failure rather than a ring quietly relinked into the
+    # full DRAM bank.
+    $anchor  = '/* Move entire BSS section (including COMMON symbols) to DRAM to save TCM space */'
+    $cmdText = $cmdText.Replace($anchor, $sockring + $anchor)
 }
 Set-Content $localCmd $cmdText -NoNewline
 if ((Get-Content $localCmd -Raw) -notmatch '\.bss\.sock_ring') {
