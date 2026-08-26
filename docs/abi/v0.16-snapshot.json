@@ -2909,6 +2909,10 @@
     },
     "alp/chips/cc3501e/events.h": {
       "functions": {
+        "cc3501e_attn_arm": {
+          "hash": "393adc04e8a83a43",
+          "signature": "void cc3501e_attn_arm(cc3501e_t *ctx, bool armed);"
+        },
         "cc3501e_deinit": {
           "hash": "8fc892d1d03fcca7",
           "signature": "void cc3501e_deinit(cc3501e_t *ctx);"

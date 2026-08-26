@@ -352,8 +352,37 @@ static bool cc3501e_lock_try(cc3501e_t *ctx)
  * yields the CPU on every OS backend, unlike alp_delay_us's busy-wait --
  * needed so a contending thread actually gets scheduled) until the
  * Kconfig-bounded budget elapses. */
+/* Attention-line arming hook (#130).  Weak no-op here; the companion console
+ * overrides it when CONFIG_ALP_SDK_CC3501E_EVENT_IRQ is on.
+ *
+ * The attention wire IS the READY wire, and READY is raised on every bridge
+ * re-arm -- so while the host is transacting, an edge means "a transaction just
+ * finished", not "an event is pending".  Draining on those edges livelocked the
+ * device on silicon (the app booted, entered its soak and went silent), and
+ * merely masking the line across each drain only bounded it: a seconds-long
+ * radio op still produced an edge whose drain contended with the op, turning
+ * WIFI_SCAN into a timeout.
+ *
+ * The host's own request lock is the exact boundary that disambiguates it.
+ * While the lock is HELD a transaction is in flight and every edge is flow
+ * control, so the interrupt is masked.  While it is FREE the host is idle,
+ * nothing is re-arming, and any rising edge can only be the firmware asking for
+ * attention.  No pulse-width qualification and no second wire needed -- the
+ * host's state supplies the missing bit. */
+__attribute__((weak)) void cc3501e_attn_set_armed(bool armed)
+{
+	(void)armed;
+}
+
+void cc3501e_attn_arm(cc3501e_t *ctx, bool armed)
+{
+	(void)ctx;
+	cc3501e_attn_set_armed(armed);
+}
+
 static alp_status_t cc3501e_lock_acquire(cc3501e_t *ctx)
 {
+	cc3501e_attn_set_armed(false); /* a transaction is starting -- see the hook */
 	if (cc3501e_lock_try(ctx)) return ALP_OK;
 	for (uint32_t waited_ms = 0u; waited_ms < CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS;
 	     waited_ms++) {
@@ -366,6 +395,12 @@ static alp_status_t cc3501e_lock_acquire(cc3501e_t *ctx)
 static void cc3501e_lock_release(cc3501e_t *ctx)
 {
 	__atomic_store_n(&ctx->request_lock, false, __ATOMIC_RELEASE);
+	/* Deliberately does NOT re-arm.  Releasing the lock means this REQUEST
+	 * finished, not that the host is idle: cc3501e_wifi_connect() submits and
+	 * then polls WIFI_STATUS, so the lock is free in the gaps of one operation.
+	 * Re-arming there put a drain in the middle of a radio op and hung the
+	 * device after WIFI_SCAN (bench 2026-08-26).  Only the application knows
+	 * when it is genuinely done -- it re-arms via cc3501e_attn_arm(). */
 }
 alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
 {

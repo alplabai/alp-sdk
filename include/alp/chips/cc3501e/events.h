@@ -23,6 +23,35 @@
 extern "C" {
 #endif
 
+/**
+ * @brief Arm or disarm interrupt-driven event attention (issue #130).
+ *
+ * Only meaningful with CONFIG_ALP_SDK_CC3501E_EVENT_IRQ; a no-op otherwise.
+ *
+ * The attention wire IS the READY wire, and READY is raised on every bridge
+ * re-arm -- so while the host is transacting, an edge means "a transaction just
+ * finished", not "an event is pending". Arming during host activity makes the
+ * scheduled drain transact, which raises READY again: the path feeds itself.
+ * Bench-measured, that livelocks the device.
+ *
+ * The driver therefore DISARMS on every request and never re-arms on its own:
+ * a released request lock means one request ended, not that the host is idle
+ * (cc3501e_wifi_connect() submits then polls, so the lock is free mid-operation).
+ * Only the application knows when it has genuinely stopped, so arming is its
+ * call.
+ *
+ * The intended use is sleep: arm as the host enters deep sleep, and any rising
+ * edge is then unambiguous -- nothing is re-arming, so it can only be the
+ * firmware asking for attention. That makes wake-on-event over this single wire
+ * correct without a second wire or a qualified pulse width. While the host is
+ * ACTIVE, use @ref cc3501e_poll_events instead; that path needs no attention pin.
+ *
+ * @param ctx    Initialised driver context (unused today; taken so a future
+ *               per-instance attention pin needs no API break).
+ * @param armed  true to enable the edge interrupt, false to mask it.
+ */
+void cc3501e_attn_arm(cc3501e_t *ctx, bool armed);
+
 /** Register or replace the async-event callback.  Pass cb=NULL to detach. */
 alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user);
 
