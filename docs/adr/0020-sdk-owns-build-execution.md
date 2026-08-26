@@ -18,8 +18,11 @@ written; the trigger shipped the same day, seven hours later.
 `.github/workflows/dispatch-tan-parity.yml` is the sender half: it fires a
 `repository_dispatch` (`event_type=alp-sdk-planner-change`) at
 `alplabai/tan-cli` on every push to `dev`/`main`, using a token minted at
-runtime from the org's GitHub App rather than the long-lived PAT Amendment 7's
-"cannot be built ... without a PAT/App secret" anticipated. Landed
+runtime from the org's GitHub App -- one of the two credential types
+Amendment 7's "cannot be built from either repo's CI without a PAT/App
+secret" already named. Item 7 was right about the credential; it was wrong
+that obtaining one made this a **maintainer action** -- the App token is
+minted automatically at workflow runtime, not provisioned by hand. Landed
 `6595d2a4` (2026-07-28, same day as the Amendment-7 commit `0c5cf608`). The
 receiver half is live in `tan-cli`: `parity.yml:69` and
 `planner-resync.yml:101`, both `types: [alp-sdk-planner-change]`.

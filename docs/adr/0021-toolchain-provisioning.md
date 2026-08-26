@@ -31,10 +31,15 @@ no longer resolver-blocked.
   `resolve_toolchain_root()` is the Python port of
   `crate::toolchain::resolve_toolchain_root` (tan-cli#547) and is wired at
   `python/tan/commands/build_cmd.py:1497` as `toolchain_root=toolchain.root`.
-  No live call site still passes `toolchain_root=None`; the only two
-  occurrences of that literal left in the tree are prose in
-  `build/toolchain.py`'s own module docstring and `doctor_cmd.py` narrating
-  the old, now-closed state.
+  No live call site in the shipped `python/tan/` package still passes
+  `toolchain_root=None`; the only two occurrences of that literal left in
+  `python/tan/` are prose in `build/toolchain.py`'s own module docstring
+  and `doctor_cmd.py` narrating the old, now-closed state. (`python/tests/`
+  carries the other 28 of the tree's 30 occurrences at `v0.6.0-rc1`,
+  several as live call sites, e.g. `test_build_token_substitution.py:38,60,80`
+  and `test_plan_tokens.py:53` — expected, since those tests exercise the
+  pre-resolver default explicitly; this claim is scoped to the shipped
+  package, not the test suite.)
 - **The `--materialise` demotion silence is also closed**, by tan-cli#565:
   `_demoted_artefact_issues()` (`build_cmd.py:1406`) reports a demoted
   artefact as an `Issue` in the envelope when `mode == _MODE_MATERIALISE`
