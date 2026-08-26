@@ -461,6 +461,11 @@ static int ota_do_finish(void)
  * survivable.  Nothing here may touch the bridge in polled mode: not the handle,
  * and no READY RAISE -- poll_service owns that line end-to-end there. */
 
+/* Defined below, next to the cache it maintains.  Declared here because the pump
+ * calls it: the refresh must happen inside the pump's bracketed flash window, not
+ * from the ISR-dispatched status handler. */
+static void ota_pending_refresh(void);
+
 void cc3501e_hw_ota_pump(void)
 {
 	if (ota.op_rc != OTA_OP_INFLIGHT) return; /* nothing queued */
@@ -559,6 +564,13 @@ void cc3501e_hw_ota_pump(void)
 	 * keep both no-ops even though today's single-task loop calls this between
 	 * frames.  The re-arm belongs to the caller's next
 	 * bridge_transport_spi_poll_service(), which owns the polled phase machine. */
+
+	/* Refresh the flash-derived pending byte HERE, inside the bracketed flash
+	 * window this pump already owns -- every op that can change the store
+	 * (BEGIN's slot walk-back, the flushes, FINISH's install) has just run, and
+	 * READY is still LOW so the host is not clocking.  This is the one place a
+	 * psa_fwu_query is safe. */
+	ota_pending_refresh();
 
 	ota.op    = OTA_OP_IDLE; /* free the slot -- result is observable via STATUS */
 	ota.op_rc = (int8_t)rc;  /* publish LAST: clears INFLIGHT so a new op can queue */
@@ -799,14 +811,31 @@ static uint8_t ota_pending_from_psa(uint8_t psa_state)
 	}
 }
 
-uint8_t cc3501e_hw_ota_pending(void)
+/* Cached so cc3501e_hw_ota_pending() is a plain RAM read.
+ *
+ * It MUST be: handle_ota_status() -- like every protocol handler -- is dispatched
+ * from the SPI ISR, and psa_fwu_query() reads the external image store over the
+ * HIF/DMA controller the bridge SPI shares.  Doing that in the ISR is the exact
+ * thing this driver's whole OTA design exists to avoid: worker.c brackets radio
+ * ops, cc3501e_hw_ota_pump() brackets flash ops, and both do so precisely because
+ * touching that controller behind the host's back desyncs the link.
+ *
+ * UNKNOWN until the first refresh, which is the honest starting value -- the
+ * store has not been read yet, and UNKNOWN makes the host refuse to promote
+ * rather than act on a value nobody looked up. */
+static volatile uint8_t ota_pending_cached = (uint8_t)ALP_CC3501E_OTA_PENDING_UNKNOWN;
+
+/* Read the store and update the cache.  Call ONLY from the pump -- never from a
+ * handler, i.e. never from the ISR. */
+static void ota_pending_refresh(void)
 {
 	psa_fwu_component_info_t i1 = { 0 }, i2 = { 0 };
 
 	psa_fwu_init(); /* idempotent */
 	if (psa_fwu_query((psa_fwu_component_t)Vendor_Image_Slot_1, &i1) != PSA_SUCCESS ||
 	    psa_fwu_query((psa_fwu_component_t)Vendor_Image_Slot_2, &i2) != PSA_SUCCESS) {
-		return (uint8_t)ALP_CC3501E_OTA_PENDING_UNKNOWN;
+		ota_pending_cached = (uint8_t)ALP_CC3501E_OTA_PENDING_UNKNOWN;
+		return;
 	}
 
 	/* Report the NON-PRIMARY slot -- the one an update targets and the one a
@@ -817,12 +846,17 @@ uint8_t cc3501e_hw_ota_pending(void)
 	 * resolves that case by CLEANING both slots, which is a destructive recovery
 	 * and not something a status read may imply has happened. */
 	if (i1.impl.Primary && !i2.impl.Primary) {
-		return ota_pending_from_psa(i2.state);
+		ota_pending_cached = ota_pending_from_psa(i2.state);
+	} else if (i2.impl.Primary && !i1.impl.Primary) {
+		ota_pending_cached = ota_pending_from_psa(i1.state);
+	} else {
+		ota_pending_cached = (uint8_t)ALP_CC3501E_OTA_PENDING_UNKNOWN;
 	}
-	if (i2.impl.Primary && !i1.impl.Primary) {
-		return ota_pending_from_psa(i1.state);
-	}
-	return (uint8_t)ALP_CC3501E_OTA_PENDING_UNKNOWN;
+}
+
+uint8_t cc3501e_hw_ota_pending(void)
+{
+	return ota_pending_cached; /* ISR-safe: plain RAM read, never touches flash */
 }
 
 int cc3501e_hw_ota_status(uint8_t *state, uint32_t *bytes_written, uint32_t *total_len)
