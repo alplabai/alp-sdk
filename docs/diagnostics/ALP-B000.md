@@ -20,11 +20,11 @@ mapping syntax), reported verbatim.
 
 ## Diagnose
 
-Read-only; validates the file without touching the build. Only the SDK's own
-CLI prints the full diagnostic frame with the `ALP-B000` code:
+Read-only; validates the file without touching the build. Only `tan
+validate` prints the full diagnostic frame with the `ALP-B000` code:
 
 ```sh
-python3 -m alp_cli validate board.yaml
+tan validate --board-yaml board.yaml
 ```
 
 The diagnostic carries the parser's own error text and always points at
@@ -91,7 +91,6 @@ duplicate key.
 ## Escalate
 
 If the file looks syntactically correct to you (renders fine in an online
-YAML linter) but `python3 -m alp_cli validate` still reports ALP-B000 -- or
-`tan validate` / `tan validate --offline` still fails to parse it -- open an
-issue with the (sanitized) `board.yaml` attached; that's a loader
-compatibility gap, not a config mistake.
+YAML linter) but `tan validate` / `tan validate --offline` still fails to
+parse it, open an issue with the (sanitized) `board.yaml` attached; that's a
+loader compatibility gap, not a config mistake.

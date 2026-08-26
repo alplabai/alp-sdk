@@ -69,7 +69,7 @@ does not import or spawn `scripts/alp_orchestrate/`. `tan generate` renders
 its supported targets from the relocated planner in process and uses the SDK
 subprocess only as an explicit or reported compatibility fallback.
 
-All of Tan's 32 verbs are native Python implementations, including `doctor`,
+Most of Tan's 32 verbs are native Python implementations, including `doctor`,
 `init`, `validate`, `generate`, `model`, `new-som`, `faultdecode`, `monitor`,
 `run`, `explain`, and the build/flash/image/simulation surface. Only
 `migrate`, `lock`, and `quality` still forward to the corresponding
@@ -86,8 +86,9 @@ wrappers (`main.py`, `validate.py`, `doctor.py`, `emit.py`, `explain.py`,
 `new_som.py`, `run.py`, and the `python -m alp_cli` entry point itself) were
 deleted once `tan` had ported every one of them and nothing else in-repo
 still called them (alp-sdk#1367, alp-sdk#1368). There is no `python -m
-alp_cli <verb>` front door left to run, and no `alp` console script was ever
-installed (`pyproject.toml` registers only `alp-mcp`).
+alp_cli <verb>` front door left to run, and no `alp` console script is
+installed (`pyproject.toml` registers only `alp-mcp`) -- the `alp`
+console-script was retired in v0.12.0.
 
 ## `tan` vs `west alp-*` -- which one do I use?
 

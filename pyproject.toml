@@ -22,7 +22,6 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-snapshot>=0.9",
-    "pytest-mock>=3.10",
 ]
 # Lightweight TFLite read/parse deps (tensor-I/O extraction + the hermetic
 # fixture generator) -- pure-Python, no compiler.  CI installs this so the

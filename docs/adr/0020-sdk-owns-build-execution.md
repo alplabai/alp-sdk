@@ -338,6 +338,22 @@ blocked until the remediation is met. Tracked in #855.
    pleasantry; when the two copies disagree, re-vendor and record it, and treat
    a new comparator allowance as evidence the sync was skipped.
 
+8. **(2026-08-26) Point 6's "11 non-build verbs all still survive in the
+   `alp_cli` package" is now false — alp-sdk#1367/#1368 deleted the rest of
+   the command-line wrappers.** `scripts/alp_cli/main.py`, `__main__.py`,
+   `validate.py`, `doctor.py`, `emit.py`, `faultdecode.py`, `generate.py`,
+   `init.py`, `model.py`, `monitor.py`, `new_som.py`, and `run.py` are gone;
+   there is no `python -m alp_cli <verb>` front door left to run at all, and
+   every one of the 11 verbs point 6 enumerated is now a native `tan`
+   implementation only (all present in `tan-cli` `v0.6.0`). Point 6's "8
+   non-verb modules" list is also stale: `__main__.py` and `main.py` are
+   among the deleted, not the survivors. What remains under
+   `scripts/alp_cli/` is six library modules with real non-CLI callers
+   (`__init__.py`, `diagnostic.py`, `diagnostic_format.py`, `validator.py`,
+   `_workspace.py`, `yaml_pos.py`) — not a command surface of any kind.
+   alp-sdk's own command surface is now, in full, what §Decision-2 always
+   named as the end state: zero user commands.
+
 ## Context
 
 ### The problem

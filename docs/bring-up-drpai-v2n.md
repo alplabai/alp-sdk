@@ -220,8 +220,13 @@ applies to the other `meta-rz-*` feature layers.
 
 ```sh
 export ALP_DRPAI_TVM_HOME=<rzv_drp-ai_tvm checkout>
-tan model build --board <path>/board.yaml
+tan model build --sdk-root <alp-sdk> --board <path>/board.yaml
 ```
+
+`tan` is a standalone binary — it must resolve an alp-sdk checkout before it
+can compile anything, and `--sdk-root` is how you bind one explicitly rather
+than relying on discovery (cwd-inside-the-checkout, a project pin, or a
+global default) picking the right one.
 
 `tan` is the whole command surface (ADR-0020 end-state B); `scripts/alp_cli`'s
 former `model` command (and the rest of its command-line wrappers) retired

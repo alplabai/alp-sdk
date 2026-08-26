@@ -37,7 +37,7 @@
 # Each stage prints `[stage] PASS` or `[stage] FAIL`.  A stage function
 # signals "prerequisite not available" (a missing tool, env var, or
 # importable module -- e.g. ZEPHYR_BASE unset, or a python3 that can't
-# `import natsort`/`pytest`/`pytest_mock`) by returning exit code 99;
+# `import natsort`/`pytest`) by returning exit code 99;
 # run_stage() turns that into `[stage] SKIP`, never `FAIL` -- a missing
 # prerequisite is not a defect in the tree.
 #
@@ -232,7 +232,7 @@ skip_stage() {
 # `import` check can catch.
 #
 # Probe the attribute, not the import -- the same shape
-# stage_pytest_scripts uses for pytest/pytest_mock.  Deliberately NOT
+# stage_pytest_scripts uses for pytest.  Deliberately NOT
 # fixed inside the 18 `scripts/*.py` files that call
 # `Draft202012Validator`: those are also run DIRECTLY by
 # pr-metadata-validate.yml and friends, where a 99 exit is a failing
@@ -626,18 +626,18 @@ stage_pytest_scripts() {
         return 99
     fi
     # python3 existing on PATH says nothing about whether IT has pytest:
-    # a system interpreter without pytest/pytest-mock made `python3 -m
-    # pytest` below exit 1 with "No module named pytest" -- a genuine
-    # module-not-found on a clean tree, previously reported as this
-    # stage FAILING rather than SKIPping for the missing prerequisite it
-    # actually is (alp-sdk#1396). pytest_mock is checked here too, not
-    # left to surface later as a wall of `fixture 'mocker' not found`
-    # errors from tests/scripts/test_alp_cli.py /
-    # test_alp_cli_emit.py -- both are the stage's real dependencies,
-    # so both gate entry the same way the ZEPHYR_BASE / natsort checks
-    # gate stage_twister above.
-    if ! python3 -c 'import pytest, pytest_mock' >/dev/null 2>&1; then
-        echo "stage_pytest_scripts: python3 ($(command -v python3)) cannot import pytest and/or pytest_mock. Activate the zephyrproject venv or: pip install pytest pytest-mock."
+    # a system interpreter without pytest made `python3 -m pytest` below
+    # exit 1 with "No module named pytest" -- a genuine module-not-found
+    # on a clean tree, previously reported as this stage FAILING rather
+    # than SKIPping for the missing prerequisite it actually is
+    # (alp-sdk#1396). pytest_mock used to be checked here too, gating
+    # entry the same way the ZEPHYR_BASE / natsort checks gate
+    # stage_twister above -- it was the stage's only pytest-mock
+    # consumer (test_alp_cli.py / test_alp_cli_emit.py), both retired by
+    # the alp_cli CLI-wrapper retirement (#1367/#1368); no test under
+    # tests/scripts/ uses the `mocker` fixture any more.
+    if ! python3 -c 'import pytest' >/dev/null 2>&1; then
+        echo "stage_pytest_scripts: python3 ($(command -v python3)) cannot import pytest. Activate the zephyrproject venv or: pip install pytest."
         return 99
     fi
     python3 -m pytest tests/scripts/ -q || return 1
