@@ -7,12 +7,14 @@ exactly the real `--emit` surface the SDK exposes.
 
 The registry (metadata/emit-registry-v1.json) is the single source of truth
 for every `--emit` mode across scripts/alp_project.py and
-scripts/alp_orchestrate/cli.py (re-exposed by scripts/alp_cli/emit.py /
-`west alp-emit`). Before this gate, that mode set was hand-mirrored in three
-places (alp_project.py's argparse choices + dispatch, alp_orchestrate's
-choices, and alp_cli/emit.py's two "Mirror ..." lists) with nothing catching
-drift. This gate parses the REAL `--emit` choices out of the two CLI source
-files (ast, not a hardcoded list -- so it can't itself drift) and fails if:
+scripts/alp_orchestrate/cli.py (re-exposed by `west alp-emit`; the former
+`scripts/alp_cli/emit.py` re-exposed the same set until it retired alongside
+the rest of the `alp_cli` command surface, alp-sdk#1368). Before this gate,
+that mode set was hand-mirrored in three places (alp_project.py's argparse
+choices + dispatch, alp_orchestrate's choices, and alp_cli/emit.py's two
+"Mirror ..." lists) with nothing catching drift. This gate parses the REAL
+`--emit` choices out of the two CLI source files (ast, not a hardcoded list
+-- so it can't itself drift) and fails if:
 
   - a mode is in the code but missing from the registry, or
   - a mode is in the registry but not in the code (a phantom entry).

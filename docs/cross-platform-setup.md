@@ -431,12 +431,12 @@ winget install -e --id oss-winget.gperf
 ```
 
 Neither `dtc` nor `gperf` is in `prerequisites.windows`, and
-`bootstrap.ps1` does not require them. The SDK-reference
-`python -m alp_cli doctor` checks are WARN-only: `edtlib` does the load-bearing devicetree
-parse in pure Python (a missing `dtc` never blocks a build), and plain
-kernel-mode apps build without `gperf`.  Install them if your build needs
-extra dts validation or kobject/userspace generation -- the Zephyr SDK's
-Windows bundle ships neither.
+`bootstrap.ps1` does not require them. `tan doctor`'s checks for both are
+WARN-only: `edtlib` does the load-bearing devicetree parse in pure Python (a
+missing `dtc` never blocks a build), and plain kernel-mode apps build without
+`gperf`.  Install them if your build needs extra dts validation or
+kobject/userspace generation -- the Zephyr SDK's Windows bundle ships
+neither.
 
 ### 4.2 Python deps
 

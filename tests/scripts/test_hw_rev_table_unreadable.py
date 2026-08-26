@@ -18,8 +18,9 @@ An ABSENT table stays benign and is pinned here too: an in-development
 family that ships no table has nothing to check against, and
 `tests/scripts/_orchestrate_support.py`'s NX9101 fixture depends on it.
 
-THREE independent readers open this one file, and all three fell open on
-at least two of the four unusable shapes.  Each has its own section below:
+TWO independent readers open this one file in alp-sdk today, and both fell
+open on at least two of the four unusable shapes.  Each has its own section
+below:
 
   1. `sdk_compat.load_family_table()` -- the three gates above.
   2. `alp_project_loader._hwrev_pad_route_overrides()` -- the
@@ -27,11 +28,17 @@ at least two of the four unusable shapes.  Each has its own section below:
      resolves its SoM data independently and carries its own copies of the
      #1025 gates.  Its `yaml.safe_load(...) or {}` fell open on an empty
      and on a truncated table.
-  3. `alp_cli.new_som._family_hw_revisions()` -- the scaffold-time
-     `--default-hw-rev` cross-check, which fell open widest of the three.
 
-All three now read through the one guarded reader, so they cannot disagree
-about whether a damaged table is fatal or about what the refusal says.
+Both now read through the one guarded reader, so they cannot disagree about
+whether a damaged table is fatal or about what the refusal says.
+
+A third reader, `alp_cli.new_som._family_hw_revisions()` -- the scaffold-time
+`--default-hw-rev` cross-check, which fell open widest of the three -- was
+covered here too until `scripts/alp_cli/new_som.py` retired alongside the
+rest of the alp_cli command surface (alp-sdk#1368). `tan new-som` is its
+sole surviving front door now (ADR-0020 end-state B); it ported the same
+guard natively (alplabai/tan-cli#563, `python/tan/commands/new_som_cmd.py`)
+with its own tan-cli test coverage, independent of this file.
 
 Run locally:
 
@@ -52,7 +59,6 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
-from alp_cli.new_som import _family_hw_revisions  # noqa: E402
 from alp_orchestrate import (  # noqa: E402
     OrchestratorError,
     SdkRevisionNotBuildable,
@@ -335,46 +341,3 @@ def test_reader_2_emit_refuses_at_exit_1_not_exit_0(tmp_path):
     assert "r99" not in proc.stdout      # nothing emitted for the bad rev
     assert "Traceback" not in proc.stderr
 
-
-# --------------------------------------------------------------------------
-# Reader 3: `alp new-som`'s scaffold-time cross-check
-#
-# The third independent reader of the same file, and the one that failed
-# open widest: it caught `yaml.YAMLError` AND read a non-mapping
-# `hw_revisions:` as "not resolvable", so three of the four unusable
-# shapes let `alp new-som --default-hw-rev <nonexistent>` write a SoM
-# preset naming a revision that does not exist, at exit 0.
-# --------------------------------------------------------------------------
-
-@pytest.mark.parametrize("content", [
-    _TAB_INDENTED,
-    "",
-    "just a bare scalar\n",
-    "family: aen\ndisplay_name: AEN\n",
-])
-def test_reader_3_new_som_cross_check_does_not_fail_open(tmp_path, content):
-    """`_family_hw_revisions` answers None only for "no table anywhere".
-
-    A damaged table under `output_root` must refuse -- and must NOT be
-    silently answered from the SDK checkout's own copy, which describes a
-    different tree.  `_fail` raises SystemExit.
-    """
-    meta = _metadata_copy(tmp_path)
-    _family_table(meta, "aen").write_text(content, encoding="utf-8")
-
-    with pytest.raises(SystemExit):
-        _family_hw_revisions("E1M-AEN801", tmp_path)
-
-
-def test_reader_3_intact_and_unmapped_families_are_unchanged(tmp_path):
-    """The two answers that must NOT move: an intact table still resolves
-    to (path, revs), and a SKU with no family-directory mapping is still
-    the benign None a brand-new family relies on."""
-    meta = _metadata_copy(tmp_path)
-    resolved = _family_hw_revisions("E1M-AEN801", tmp_path)
-    assert resolved is not None
-    path, revs = resolved
-    assert path == _family_table(meta, "aen")
-    assert "r1" in revs
-
-    assert _family_hw_revisions("E1M-ZZZ999", tmp_path) is None

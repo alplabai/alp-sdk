@@ -21,10 +21,11 @@ renderer's `-->  path:line:col`). Both exporters convert from that single
 
 `machine_json_for_board_yaml()` is the LIBRARY entry point: validate a
 board.yaml and get the machine document back, with no command wrapper in
-the way. Every consumer of this contract -- the schema gate, an LSP, a
-CI job -- calls it directly; `alp_cli.validate` is one more caller, not
-the only door in (ADR 0020 retires the `alp` command surface, and a
-published contract must not retire with it).
+the way. Every consumer of this contract -- the schema gate, an LSP --
+calls it directly. `alp_cli.validate` used to be one more caller of it,
+but that CLI wrapper itself retired once `tan validate` shipped a native
+port (ADR 0020 end-state B, alp-sdk#1368); this module and its published
+contract did not retire with it.
 """
 
 from __future__ import annotations
