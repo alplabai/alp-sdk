@@ -545,8 +545,10 @@ int bridge_hw_adc_dsp_chain_open(uint8_t *chain_id)
 		}
 	}
 	/* Pool exhaustion.  Protocol layer maps BRIDGE_HW_ERR_NOTIMPL to
-     * STATUS_NOSUPPORT today; a STATUS_NOMEM-equivalent would be
-     * more accurate but doesn't exist on the wire yet. */
+     * STATUS_NOSUPPORT (0x06) today.  STATUS_NOMEM (0x07) exists on
+     * the wire (18 reply_cap guards in protocol.c use it) -- what's
+     * missing is a NOMEM-equivalent BRIDGE_HW_ERR_* here in
+     * hal/bridge_hw.h for this path. */
 	return BRIDGE_HW_ERR_NOTIMPL;
 }
 

@@ -185,9 +185,11 @@ class returns `STATUS_NOSUPPORT`.  The host-side
 standalone API in `<alp/dsp.h>` ships working in v0.5.0 (runs the
 chain locally with CMSIS-DSP or the portable C fallback over
 in-RAM buffers), so application code can test against the same
-chain primitives today and pick up the bridge-offloaded runtime
-path once the FFT/FAC dispatch lands inside
-`bridge_hw_adc_stream_read()`.
+chain primitives and, since v0.9 (#496), run the same workload
+bridge-offloaded through the dispatch in
+`bridge_hw_adc_stream_read()`
+(`firmware/gd32-bridge/hal/gd32/adc_stream.c:253-279`) -- `<alp/dsp.h>`
+remains the in-RAM host-side alternative when no bridge is present.
 
 #### `CMD_ADC_DSP_CHAIN_OPEN` (`0x37`)
 
@@ -200,7 +202,12 @@ Allocates a fresh chain handle from the firmware's pool (size
 `GD32G553_BRIDGE_ADC_DSP_MAX_CHAINS`, default 4 chains).  The
 opaque `chain_id` is what the host passes to the subsequent
 STAGE_PUSH and CHAIN_BIND calls.  Exhausting the pool returns
-`STATUS_NOMEM`.  Chains auto-release when the bound stream's
+`STATUS_NOSUPPORT` (`0x06`) -- the firmware maps
+`BRIDGE_HW_ERR_NOTIMPL` there because `hal/bridge_hw.h` has no
+NOMEM-equivalent `BRIDGE_HW_ERR_*` for this path
+(`firmware/gd32-bridge/hal/gd32/adc_stream.c:546-550`).  A host must
+not read that `0x06` as "opcode unknown".  Chains auto-release when
+the bound stream's
 `CMD_ADC_STREAM_END` runs; there is no explicit `CHAIN_CLOSE` at
 v0.5.
 
@@ -1020,7 +1027,14 @@ the negotiated `STATUS_SEQ` reply stamp (§3.14, §4.1.1) and the
 additive `OTA_BEGIN` version triple (§10) — both backward-compatible
 by construction (un-negotiated framing and the 8-byte BEGIN are
 byte-identical to v0.6).  **v0.8** adds `SE_RESET` (0x41, §3.15) — a
-new opcode; older hosts simply never send it.
+new opcode; older hosts simply never send it.  **v0.9** (#496) lands
+the runtime FAC/FFT dispatch inside `bridge_hw_adc_stream_read()` for
+the ADC-stream DSP pipeline's already-existing `chain_open` /
+`stage_push` / `chain_bind` opcodes (§3.x) — a bound chain now
+actually filters or spectralizes the stream instead of the chain
+sitting unbound — and adds the new opcode `CMD_ADC_SPECTRUM_READ`
+(`0x3A`, §3.x) to pull the FFT terminal's spectrum; a v0.8 host that
+never binds a chain sees no behaviour change.
 
 ## 9. Reference vectors
 
