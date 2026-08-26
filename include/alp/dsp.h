@@ -259,7 +259,8 @@ alp_dsp_chain_t *alp_dsp_chain_open(const alp_dsp_stage_t *stages, size_t n_stag
  *                      (`<= min(in_n, out_cap)`).
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT (chain ends with
- *         FFT -- use @ref alp_dsp_chain_apply_bins instead).
+ *         FFT -- use @ref alp_dsp_chain_apply_bins instead) /
+ *         ALP_ERR_NOT_READY (NULL or closed @p chain).
  */
 alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain,
                                          const int16_t   *in_mv,
@@ -285,7 +286,8 @@ alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain,
  *                      (`<= min(in_n, out_cap)`).
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT (chain ends with
- *         FFT -- use @ref alp_dsp_chain_apply_bins_f32 instead).
+ *         FFT -- use @ref alp_dsp_chain_apply_bins_f32 instead) /
+ *         ALP_ERR_NOT_READY (NULL or closed @p chain).
  */
 alp_status_t alp_dsp_chain_apply_samples_f32(alp_dsp_chain_t *chain,
                                              const float     *in,
@@ -331,7 +333,8 @@ alp_status_t alp_dsp_chain_apply_samples_f32(alp_dsp_chain_t *chain,
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT (chain does not
  *         end with FFT) / ALP_ERR_OUT_OF_RANGE (in_n < n_points or
- *         out_cap < required).
+ *         out_cap < required) / ALP_ERR_NOT_READY (NULL or closed
+ *         @p chain).
  */
 alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain,
                                       const int16_t   *in_mv,
@@ -354,7 +357,8 @@ alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain,
  * @param[in]  out_cap   Capacity of @p out_bins (elements).
  * @param[out] got       Number of output elements written.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT / ALP_ERR_OUT_OF_RANGE.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT / ALP_ERR_OUT_OF_RANGE /
+ *         ALP_ERR_NOT_READY (NULL or closed @p chain).
  */
 alp_status_t alp_dsp_chain_apply_bins_f32(alp_dsp_chain_t *chain,
                                           const float     *in,
