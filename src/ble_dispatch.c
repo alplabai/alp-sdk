@@ -421,7 +421,7 @@ alp_status_t alp_ble_gatt_notify(alp_ble_t            *h,
 	 * h-before-conn order cannot deadlock. */
 	if (conn == NULL || !alp_handle_op_enter(&conn->lifecycle, &conn->active_ops)) {
 		alp_handle_op_leave(&h->active_ops);
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	alp_status_t rc;
 	if (payload == NULL && len > 0) {

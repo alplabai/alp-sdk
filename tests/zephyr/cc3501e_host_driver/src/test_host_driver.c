@@ -119,6 +119,11 @@ static bool g_scan_stage_ctx_b;
  * silicon finding: a dead bus phase reads back 0x00000000, which happens to
  * equal RESP_OK).  Cleared by slave_reset(). */
 static bool g_connect_submit_force_ok;
+/* Radio role GET_DIAG_INFO reports.  cc3501e_wifi_ap_start() confirms its
+ * submit against this field (#1696), so a test can drive the AP up by setting
+ * it to ALP_CC3501E_ROLE_WIFI_AP.  Defaults to STA = 'AP not up'. */
+static uint8_t g_diag_role = ALP_CC3501E_ROLE_WIFI_STA;
+
 /* FLASH-derived pending image reported in OTA_STATUS byte [12].
  * cc3501e_ota_promote() refuses to commit unless this says STAGED (#1123),
  * so it defaults to STAGED: the promote tests model a device that really
@@ -155,6 +160,8 @@ static void slave_reset(void)
 	slave.status_polls_before_terminal = 0u;
 	g_scan_stage_ctx_b                 = false;
 	g_connect_submit_force_ok          = false;
+	g_diag_role                        = ALP_CC3501E_ROLE_WIFI_STA;
+	g_ota_pending                      = ALP_CC3501E_OTA_PENDING_STAGED;
 	g_status_io_down_remaining         = 0u;
 	g_get_version_override_active      = false;
 	g_get_version_override_value       = 0u;
@@ -369,7 +376,7 @@ static void slave_dispatch(void)
 		d[0]          = 0x02u; /* fw_version = 0x0102 */
 		d[1]          = 0x01u;
 		d[2]          = ALP_CC3501E_RESET_POWER_ON;
-		d[3]          = ALP_CC3501E_ROLE_WIFI_STA;
+		d[3]          = g_diag_role;
 		d[4]          = 0xEFu; /* uptime = 0x00ABCDEF */
 		d[5]          = 0xCDu;
 		d[6]          = 0xABu;
@@ -1245,17 +1252,23 @@ ZTEST(cc3501e_host_driver, test_wifi_ap_start_encodes_like_connect)
 	 * the WORKER_DONE branch that would reply RESP_OK is wiped by
 	 * worker_run_pending()'s worker_reset() before the host may clock again --
 	 * so the opcode cannot synchronously succeed.  A retry loop around it is
-	 * therefore provably unwinnable, so cc3501e_wifi_ap_start() (#1385)
-	 * submits exactly ONCE and reports ALP_ERR_TIMEOUT immediately, instead of
-	 * poll_by_repeat()-ing an opcode that can never answer OK.  Restoring a
-	 * legitimate success path needs the submit-once-then-confirm restructure
-	 * cc3501e_wifi_connect() got, which has no independent AP channel to
-	 * confirm against in firmware v4. */
+	 * therefore provably unwinnable, so cc3501e_wifi_ap_start() submits exactly
+	 * ONCE.  Since #1696 it then CONFIRMS that submit against GET_DIAG_INFO's
+	 * radio role rather than reporting a blind timeout; g_diag_role is left at
+	 * ROLE_WIFI_STA here, so the AP never comes up and the confirmation poll
+	 * exhausts its budget -- which is what keeps ALP_ERR_TIMEOUT the expected
+	 * outcome for THIS test.  test_wifi_ap_start_confirms_via_diag_role_1696
+	 * covers the success direction. */
 	zassert_equal(cc3501e_wifi_ap_start(&fw, "AP", 0u, "", 100u),
 	              ALP_ERR_TIMEOUT,
-	              "AP_START's submit ack is BUSY, never a synchronous OK -- reported immediately "
-	              "as unconfirmed, not retried");
-	zassert_equal(slave.cmd, ALP_CC3501E_CMD_WIFI_AP_START, "opcode 0x14");
+	              "role never reaches ROLE_WIFI_AP -- the confirmation poll must exhaust "
+	              "timeout_ms rather than inventing a success");
+	/* NOT `slave.cmd`: the confirmation polls issue GET_DIAG_INFO after the
+	 * submit, so the LAST opcode the mock saw is no longer AP_START.  The
+	 * capture below is opcode-specific (the mock only fills
+	 * ap_start_last_req_* from the AP_START arm), so it proves 0x14 went out
+	 * without depending on it being the most recent frame. */
+	zassert_true(slave.ap_start_last_req_len > 0u, "AP_START (0x14) reached the wire");
 	zassert_equal(slave.ap_start_last_req_pl[0], 2u, "ssid_len");
 	zassert_equal(slave.ap_start_last_req_pl[1], 0u, "psk_len (open)");
 	zassert_mem_equal(&slave.ap_start_last_req_pl[4], "AP", 2u, "inline SSID");
@@ -1263,6 +1276,27 @@ ZTEST(cc3501e_host_driver, test_wifi_ap_start_encodes_like_connect)
 	              1u,
 	              "exactly one submit -- not the retry storm a poll-by-repeat wrapper would "
 	              "cause, each re-issue of which would submit a BRAND NEW AP RoleUp");
+}
+
+/* #1696: the success direction.  Before this, cc3501e_wifi_ap_start() had no
+ * reply it could frame as success and returned ALP_ERR_TIMEOUT even for an AP
+ * that came up perfectly.  The firmware does publish the outcome -- ap_start
+ * latches ROLE_WIFI_AP into the radio role, which GET_DIAG_INFO carries -- so
+ * the host confirms against that.
+ *
+ * Drive the mock's role to AP and the same call must now report ALP_OK, while
+ * STILL submitting exactly once (re-submitting would put a fresh Wlan_RoleUp on
+ * live radio hardware -- the #1376 storm). */
+ZTEST(cc3501e_host_driver, test_wifi_ap_start_confirms_via_diag_role_1696)
+{
+	g_diag_role = ALP_CC3501E_ROLE_WIFI_AP;
+
+	zassert_equal(cc3501e_wifi_ap_start(&fw, "AP", 0u, "", 1000u),
+	              ALP_OK,
+	              "GET_DIAG_INFO reporting ROLE_WIFI_AP is what makes the submit confirmable");
+	zassert_equal(slave.ap_start_submit_count,
+	              1u,
+	              "confirmation must poll a non-disturbing opcode, never re-submit AP_START");
 }
 
 /* #1385 at the transport layer, the direct analogue of

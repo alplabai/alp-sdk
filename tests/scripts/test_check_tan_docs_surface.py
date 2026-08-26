@@ -683,15 +683,18 @@ def test_empty_doc_tree_reports_broken_extraction(tmp_path):
 
 
 def test_forwarding_verb_flag_check_is_skipped_not_matched_by_generic_blurb(tmp_path):
-    """A FORWARDING verb's `--help` ends its `Usage:` line in `[ARGS]...`
-    and prints a generic "Arguments forwarded verbatim ..." blurb naming a
-    few EXAMPLE flags that belong to OTHER forwarding verbs, never its own.
-    docs/cli.md's tabulated flags for that verb must never be matched
-    against that blurb -- matching it is both noisy (fires regardless of
-    this verb's real flags) and unsafe (stays present even if this verb's
-    own forwarded flag support were dropped). The real, installed tan
-    confirms `new-som --sdk-root ... --dry-run` genuinely works
-    (alp-sdk#973-adjacent review); this check must not report it missing."""
+    """A FORWARDING verb's `--help` ends its `Usage:` line in `[ARGS...]`
+    (the current Python `tan`'s Typer/Click rendering of the catch-all; Clap's
+    frozen-Rust spelling `[ARGS]...` is covered separately, see
+    `_has_legacy_passthrough_args`) and prints a generic "Arguments forwarded
+    verbatim ..." blurb naming a few EXAMPLE flags that belong to OTHER
+    forwarding verbs, never its own. docs/cli.md's tabulated flags for that
+    verb must never be matched against that blurb -- matching it is both
+    noisy (fires regardless of this verb's real flags) and unsafe (stays
+    present even if this verb's own forwarded flag support were dropped).
+    `tan lock` is a real forwarding verb (tan-cli
+    `python/tan/commands/west_forward_cmd.py`); this check must not report
+    its docs/cli.md-tabulated flags missing."""
     doc_root = tmp_path / "repo"
     _write_docroot(doc_root)
     cli_md = doc_root / "docs" / "cli.md"
@@ -700,7 +703,7 @@ def test_forwarding_verb_flag_check_is_skipped_not_matched_by_generic_blurb(tmp_
         + textwrap.dedent(
             """
 
-            ### `tan new-som` -- scaffold a new SoM
+            ### `tan lock` -- refresh the dependency lockfile
 
             | Option | Meaning |
             |---|---|
@@ -711,7 +714,7 @@ def test_forwarding_verb_flag_check_is_skipped_not_matched_by_generic_blurb(tmp_
     )
     readme = doc_root / "README.md"
     readme.write_text(
-        readme.read_text(encoding="utf-8") + "\n`tan new-som` ports a SoM.\n",
+        readme.read_text(encoding="utf-8") + "\n`tan lock` refreshes the lockfile.\n",
         encoding="utf-8",
     )
 
@@ -731,9 +734,9 @@ def test_forwarding_verb_flag_check_is_skipped_not_matched_by_generic_blurb(tmp_
                 "validate": "Usage: tan validate [OPTIONS]\\n",
                 "run": "Usage: tan run [OPTIONS]\\n",
                 "doctor": "Usage: tan doctor [OPTIONS]\\n\\nOptions:\\n      --build\\n",
-                "new-som": (
-                    "Usage: tan new-som [OPTIONS] [ARGS]...\\n\\n"
-                    "Arguments:\\n  [ARGS]...\\n"
+                "lock": (
+                    "Usage: tan lock [OPTIONS] [ARGS...]\\n\\n"
+                    "Arguments:\\n  [ARGS...]\\n"
                     "          Arguments forwarded verbatim to the underlying command "
                     "(e.g. app path, `--core <id>`, `--sequential`, `-b <board>`)\\n"
                 ),
@@ -752,7 +755,7 @@ def test_forwarding_verb_flag_check_is_skipped_not_matched_by_generic_blurb(tmp_
 
     proc = _run(doc_root, bin_dir)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "new-som" in proc.stdout  # named by the OK line's skip note
+    assert "lock" in proc.stdout  # named by the OK line's skip note
     assert "--sku" not in proc.stdout + proc.stderr
 
 
@@ -1311,8 +1314,12 @@ _FLASH_HELP = (
     "Options:\n      --project <PATH>\n      --helper <NAME>\n"
 )
 _NEW_SOM_HELP = (
-    "Usage: tan new-som [OPTIONS] [ARGS]...\n\n"
-    "Arguments:\n  [ARGS]...\n"
+    "Usage: tan new-som [OPTIONS]\n\n"
+    "Options:\n      --sku <SKU>\n      --dry-run\n"
+)
+_LOCK_HELP = (
+    "Usage: tan lock [OPTIONS] [ARGS...]\n\n"
+    "Arguments:\n  [ARGS...]\n"
     "          Arguments forwarded verbatim to the underlying command\n"
 )
 
@@ -1542,6 +1549,23 @@ def test_typer_rich_help_usage_preserves_positional_contract():
     assert _mod._verb_accepts_positional(_mod._usage_line(_RICH_FLASH_HELP))
 
 
+def test_has_legacy_passthrough_args_accepts_both_grammars():
+    """Direct pin for `_has_legacy_passthrough_args`'s two accepted
+    spellings -- the frozen-Rust/Clap `[ARGS]...` and the current Python
+    `tan`'s Typer/Click `[ARGS...]`. The forwarding-verb fixtures elsewhere
+    in this file (`_LOCK_HELP` et al.) all now use the Typer spelling since
+    `tan lock` replaced `tan new-som` as the forwarding-verb example
+    (alp-sdk#1522); this is what still proves the Clap spelling this
+    function's own docstring promises to accept actually parses."""
+    assert _mod._has_legacy_passthrough_args(
+        "Usage: tan lock [OPTIONS] [ARGS]...\n\nArguments:\n  [ARGS]...\n"
+    )
+    assert _mod._has_legacy_passthrough_args(
+        "Usage: tan lock [OPTIONS] [ARGS...]\n\nArguments:\n  [ARGS...]\n"
+    )
+    assert not _mod._has_legacy_passthrough_args(_NEW_SOM_HELP)
+
+
 def test_typer_rich_help_drives_full_invocation_check():
     cache = {"build": _RICH_BUILD_HELP}
     assert (
@@ -1654,23 +1678,67 @@ def test_verb_with_a_real_positional_accepts_one(tmp_path):
 
 
 def test_forwarding_verb_shape_is_never_checked(tmp_path):
-    """A legacy Rust FORWARDING verb's `[ARGS]...` catch-all (see
-    `_has_legacy_passthrough_args`) means ANYTHING after it is legal by
-    design -- v0.4 `tan new-som` forwarded verbatim to the SDK CLI, whose own
-    flags (`--sku`, `--dry-run`, ...) never appeared in its own --help.
-    This must never be reported as an unrecognised-flag or stray-positional
-    problem."""
+    """A FORWARDING verb's `[ARGS...]` catch-all (Typer/Click's rendering,
+    see `_has_legacy_passthrough_args`) means ANYTHING after it is legal by
+    design -- `tan lock` forwards verbatim to the underlying command, whose
+    own flags never appear in `tan lock`'s own --help. This must never be
+    reported as an unrecognised-flag or stray-positional problem."""
     doc_root = tmp_path / "repo"
     _write_minimal_docroot(
         doc_root,
-        "# widget-blink\n\n```bash\ntan new-som --sku E1M-WIDGET99 somepath\n```\n",
+        "# widget-blink\n\n```bash\ntan lock --core m55 somepath\n```\n",
+    )
+    tan_bin = _write_shape_fake_tan(
+        tmp_path / "bin", {"build": _BUILD_HELP, "lock": _LOCK_HELP}
+    )
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_new_som_options_only_usage_is_not_treated_as_forwarding(tmp_path):
+    """`tan new-som` is a native `[OPTIONS]`-only verb, not a FORWARDING one
+    -- its real docs/cli.md-tabulated flags must be mechanically checked
+    against its own --help, not skipped as a forwarding blurb. `_NEW_SOM_HELP`
+    carries no `[ARGS]...`/`[ARGS...]` suffix at all, so
+    `_has_legacy_passthrough_args` returns False regardless of which spelling
+    it accepts -- this test does NOT pin that choice (see
+    `test_has_legacy_passthrough_args_accepts_both_grammars` for that); it
+    only proves an OPTIONS-only verb's tabulated flags are mechanically
+    checked, not skipped as forwarding."""
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    cli_md = doc_root / "docs" / "cli.md"
+    cli_md.write_text(
+        cli_md.read_text(encoding="utf-8")
+        + textwrap.dedent(
+            """
+
+            ### `tan new-som` -- scaffold a new SoM
+
+            | Option | Meaning |
+            |---|---|
+            | `--sku` | Target SoM SKU |
+            | `--dry-run` | Preview without writing |
+            | `--missing-flag` | Not really in --help |
+            """
+        ),
+        encoding="utf-8",
+    )
+    readme = doc_root / "README.md"
+    readme.write_text(
+        readme.read_text(encoding="utf-8") + "\n`tan new-som` ports a SoM.\n",
+        encoding="utf-8",
     )
     tan_bin = _write_shape_fake_tan(
         tmp_path / "bin", {"build": _BUILD_HELP, "new-som": _NEW_SOM_HELP}
     )
 
-    proc = _run(doc_root, tmp_path / "bin")
-    assert proc.returncode == 0, proc.stdout + proc.stderr
+    proc = _run(doc_root, tan_bin.parent)
+    # A flag docs/cli.md tabulates but --help never lists must be reported --
+    # proving new-som's flags are actually checked, not skipped as forwarding.
+    assert proc.returncode != 0
+    assert "--missing-flag" in proc.stdout + proc.stderr
 
 
 def test_sample_output_in_an_untagged_fence_is_not_treated_as_an_invocation(tmp_path):

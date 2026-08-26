@@ -471,7 +471,6 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 	 * bound a retry loop over.  It stays in the signature (ABI/API stable) so
 	 * a future firmware-side confirmation channel can reuse it exactly as
 	 * cc3501e_wifi_connect() uses its own timeout_ms, without an API break. */
-	(void)timeout_ms;
 	alp_status_t s = cc3501e_request(
 	    ctx, ALP_CC3501E_CMD_WIFI_AP_START, payload, off, NULL, 0, NULL, CC3501E_REQ_TMO_MS);
 	/* Only ALP_ERR_INVAL and ALP_ERR_NOT_READY are definite, conclusive
@@ -492,7 +491,59 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 	if (s == ALP_ERR_INVAL || s == ALP_ERR_NOT_READY) {
 		return s;
 	}
-	return ALP_ERR_TIMEOUT;
+
+	/* CONFIRM against an independent channel (#1696).
+	 *
+	 * The submit ack carries no information -- see the block above -- so the
+	 * outcome has to be read from somewhere the AP path actually writes.  It
+	 * does write one: cc3501e_hw_wifi_ap_start() sets `wifi_ap_role_up` on a
+	 * successful Wlan_RoleUp, cc3501e_hw_radio_role() turns that into
+	 * ROLE_WIFI_AP, and GET_DIAG_INFO publishes it as byte 3 of its reply
+	 * (firmware/cc3501e/src/protocol_diag.c).  That is exactly the
+	 * independent confirmation channel this wrapper was missing.
+	 *
+	 * The comment above used to say no such channel existed and that giving
+	 * AP_START one was a firmware change plus a protocol bump.  That was true
+	 * of firmware v4, which is what it was written against: the `role` field
+	 * arrived later (for #1562) and the wire is v5 now.  No firmware change
+	 * and no version bump are involved here -- only the host learning to read
+	 * a field the firmware has been publishing all along.
+	 *
+	 * cc3501e_diag_info() is explicitly non-disturbing (no side effects on
+	 * radio state), so polling it cannot perturb the AP being confirmed --
+	 * unlike re-submitting AP_START, which put a fresh Wlan_RoleUp on live
+	 * radio hardware every retry (the #1376 storm).  Still submit ONCE.
+	 *
+	 * Budget accounting mirrors cc3501e_wifi_connect(): debit the attempt's
+	 * declared worst case ONLY when the read itself failed.  Charging it on a
+	 * successful read too is the #1481 defect -- it triples a healthy poll's
+	 * per-iteration cost against the caller's timeout_ms. */
+	uint32_t remaining = timeout_ms;
+	for (;;) {
+		alp_cc3501e_diag_info_t di = { 0 };
+		const alp_status_t      ds = cc3501e_diag_info(ctx, &di);
+
+		if (ds == ALP_OK) {
+			if (di.role == (uint8_t)ALP_CC3501E_ROLE_WIFI_AP) {
+				return ALP_OK;
+			}
+			/* Role not up yet: the only wall-clock spend this iteration is
+			 * the poll gap slept below (#1481). */
+		} else {
+			/* One failed read is worth another pass, but charge its declared
+			 * worst case so `remaining` cannot ignore the failure path --
+			 * cc3501e_request() does not itself bound an attempt. */
+			uint32_t attempt_cost =
+			    (CC3501E_REQ_TMO_MS < remaining) ? CC3501E_REQ_TMO_MS : remaining;
+			remaining -= attempt_cost;
+		}
+		if (remaining == 0u) return ALP_ERR_TIMEOUT;
+		uint32_t gap = (remaining < CC3501E_WIFI_STATUS_POLL_GAP_MS)
+		                   ? remaining
+		                   : CC3501E_WIFI_STATUS_POLL_GAP_MS;
+		alp_delay_ms(gap);
+		remaining -= gap;
+	}
 }
 
 alp_status_t cc3501e_wifi_ap_stop(cc3501e_t *ctx)
