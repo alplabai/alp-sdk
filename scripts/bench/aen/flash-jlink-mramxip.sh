@@ -116,10 +116,13 @@ esac
 # it "consistently overridable" with its sibling scripts.
 #
 # GD32_DPIDR is different: bench_jlink_assert_aen_dpidr (in the sourced
-# bench-env.sh) reads it only to NAME the wrong board in the abort message,
-# never to permit a write, so unlike AEN_DPIDR it carries no gate to weaken.
-# It is therefore taken from bench-env.sh's single, overridable export (as
-# flash-update-log-dual.sh:58-59 already prescribes) and NOT re-declared
+# bench-env.sh) DOES abort on a GD32_DPIDR match (its own `return 4` path),
+# but redundantly -- the fail-closed positive AEN_DPIDR match right after it
+# aborts on the same transcript anyway (bench-env.sh's "DP-ID safety gate"
+# comment walks the case), just with a less specific message. So a wrong or
+# missing GD32_DPIDR still can't permit a write, and it is taken from
+# bench-env.sh's single, overridable export (as flash-update-log-dual.sh's
+# comment now also carves out) and NOT re-declared
 # here -- #1497: the prior local re-declaration silently discarded a real
 # operator override with no safety benefit; #1527's "do NOT delete this
 # pair" note overstated the AEN_DPIDR finding onto GD32_DPIDR too (scoped

@@ -351,7 +351,16 @@ alp_status_t _gather_tensor_info(const OrtApi  *api,
 		return ALP_ERR_INVAL;
 	}
 
-	std::vector<int64_t> dims(ndim);
+	std::vector<int64_t> dims;
+	try {
+		dims.resize(ndim);
+	} catch (...) {
+		/* allocation can throw before type_info is released -- near-
+		 * unreachable given the kMaxTensorRank (32) bound above, but
+		 * same leak class as the raw_name fix. */
+		api->ReleaseTypeInfo(type_info);
+		throw;
+	}
 	if (ndim > 0) {
 		rc = _ort_status_to_alp(api->GetDimensions(tensor_info, dims.data(), ndim));
 		if (rc != ALP_OK) {
@@ -399,7 +408,15 @@ alp_status_t _gather_tensor_info(const OrtApi  *api,
 	if (rc != ALP_OK) {
 		return rc;
 	}
-	out.name = raw_name;
+	/* std::string's operator= can throw std::bad_alloc; free raw_name
+	 * before propagating so the ORT-allocator-owned buffer isn't leaked
+	 * on that path (the caller's catch(...) has no handle to it). */
+	try {
+		out.name = raw_name;
+	} catch (...) {
+		alloc->Free(alloc, raw_name);
+		throw;
+	}
 	alloc->Free(alloc, raw_name);
 
 	out.dtype      = dtype;
@@ -445,6 +462,29 @@ void _release_values(const OrtApi *api, std::vector<OrtValue *> &values)
 		}
 	}
 	values.clear();
+}
+
+/** Release everything @p st owns: the input/output OrtValues, then the
+ *  Env/Session/MemoryInfo trio (session before env). NULL-safe throughout
+ *  so one definition is correct on every teardown path -- open()'s
+ *  rc != ALP_OK early-out, open()'s catch(...) (either or both value
+ *  vectors may still be empty there), and close(). Shared instead of
+ *  copy-pasted because #1494 was exactly this: the catch(...) copy had
+ *  drifted from the other two. Does not delete @p st or clear
+ *  h->be_state -- callers that own the pointer do that themselves. */
+static void _teardown(const OrtApi *api, OrtState *st)
+{
+	_release_values(api, st->output_values);
+	_release_values(api, st->input_values);
+	if (st->cpu_mem_info != nullptr) {
+		api->ReleaseMemoryInfo(st->cpu_mem_info);
+	}
+	if (st->session != nullptr) {
+		api->ReleaseSession(st->session);
+	}
+	if (st->env != nullptr) {
+		api->ReleaseEnv(st->env);
+	}
 }
 
 } /* namespace */
@@ -580,36 +620,22 @@ extern "C" alp_status_t alp_inference_ort_open(struct alp_inference         *h_,
 		}
 
 		if (rc != ALP_OK) {
-			_release_values(api, st->output_values);
-			_release_values(api, st->input_values);
-			api->ReleaseMemoryInfo(st->cpu_mem_info);
-			api->ReleaseSession(st->session);
-			api->ReleaseEnv(st->env);
+			_teardown(api, st.get());
 			return rc;
 		}
 
 		h->be_state = st.release();
 		return ALP_OK;
 	} catch (...) {
+		/* Mirror the rc != ALP_OK path above and alp_inference_ort_close()
+         * below via the shared _teardown(): release any OrtValues already
+         * created (input loop can throw after populating st->input_values,
+         * output loop after st->output_values) before the Env/Session/
+         * MemoryInfo trio. Omitting this leaked every OrtValue created
+         * before the throw (#1494); a hand-copied teardown here is what
+         * drifted out of sync with the other two in the first place. */
 		if (st) {
-			/* Mirror the rc != ALP_OK path above and alp_inference_ort_close()
-             * below: release any OrtValues already created (input loop can
-             * throw after populating st->input_values, output loop after
-             * st->output_values) before the Env/Session/MemoryInfo trio --
-             * _release_values() tolerates a partially-populated or empty
-             * vector. Omitting this leaked every OrtValue created before
-             * the throw (#1494). */
-			_release_values(api, st->output_values);
-			_release_values(api, st->input_values);
-			if (st->cpu_mem_info != nullptr) {
-				api->ReleaseMemoryInfo(st->cpu_mem_info);
-			}
-			if (st->session != nullptr) {
-				api->ReleaseSession(st->session);
-			}
-			if (st->env != nullptr) {
-				api->ReleaseEnv(st->env);
-			}
+			_teardown(api, st.get());
 		}
 		return ALP_ERR_NOMEM;
 	}
@@ -748,18 +774,7 @@ extern "C" void alp_inference_ort_close(struct alp_inference *h_)
 		}
 
 		const OrtApi *api = _ort_api();
-		_release_values(api, st->output_values);
-		_release_values(api, st->input_values);
-		if (st->cpu_mem_info != nullptr) {
-			api->ReleaseMemoryInfo(st->cpu_mem_info);
-		}
-		/* Release session THEN env, in that order. */
-		if (st->session != nullptr) {
-			api->ReleaseSession(st->session);
-		}
-		if (st->env != nullptr) {
-			api->ReleaseEnv(st->env);
-		}
+		_teardown(api, st);
 		delete st;
 		h->be_state = nullptr;
 	} catch (...) {

@@ -55,8 +55,16 @@ JLINK_ARGS=("$JLINK")
 # alplab-gw the AEN E8 and the V2N-M1 GD32 share a cloned OEM serial. Hard
 # ABORT, not a warning -- read-only connect first, no writes until confirmed.
 #
-# AEN_DPIDR/GD32_DPIDR come from bench-env.sh, which is the single source for
-# both IDs -- do not re-declare them here.
+# GD32_DPIDR comes from bench-env.sh's single, overridable export -- do not
+# re-declare it here; it only NAMES the wrong board in the abort message,
+# never gates a write. AEN_DPIDR is different and this script is NOT a
+# precedent for it: it is the POSITIVE match bench_jlink_assert_aen_dpidr
+# gates the write on, so an operator's stray `export AEN_DPIDR=...` must
+# not be able to arm the gate against the wrong value -- see
+# flash-jlink-mramxip.sh's "0b. SAFETY GATE" comment, which re-pins it
+# locally for exactly that reason. This script still takes AEN_DPIDR from
+# bench-env.sh's overridable export, same as GD32_DPIDR; that is a known,
+# tracked gap (see alp-sdk#1494 review), not a deliberate exception.
 cat > /tmp/firmware-update-log-dual-preflight.jlink <<EOF
 si SWD
 speed $JLINK_SPEED
