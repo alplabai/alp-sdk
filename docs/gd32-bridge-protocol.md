@@ -186,7 +186,7 @@ currently apply the same guard to FFT-terminal chains
 (`terminal_kind != 3u` in the busy check at
 `firmware/gd32-bridge/hal/gd32/adc_stream.c:675`), so two streams can
 both bind FFT chains against the single FFT block; tracked as
-[#1718](https://github.com/alplabai/alp-sdk/issues/1718).  The host-side
+[#1717](https://github.com/alplabai/alp-sdk/issues/1717).  The host-side
 standalone API in `<alp/dsp.h>` ships working in v0.5.0 (runs the
 chain locally with CMSIS-DSP or the portable C fallback over
 in-RAM buffers), so application code can test against the same
@@ -299,7 +299,7 @@ the chain's terminal stage:
 It returns `STATUS_NOSUPPORT` when the single FAC (FIR/IIR) hardware
 block is already serving another bound stream.  The equivalent guard
 for the single FFT block is not yet implemented -- see
-[#1718](https://github.com/alplabai/alp-sdk/issues/1718).
+[#1717](https://github.com/alplabai/alp-sdk/issues/1717).
 
 #### `CMD_ADC_SPECTRUM_READ` (`0x3A`)
 
