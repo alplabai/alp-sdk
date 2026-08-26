@@ -15,12 +15,12 @@ reads
 
 sends a user from a coded failure to an empty page instead of a diagnosis.
 
-Known gap (#1511 fix-up round): this gate, like scripts/gen_error_catalog.py,
-walks the docs/diagnostics/ALP-B*.md page set -- it does not walk the
-scripts/alp_cli/validator.py `code="ALP-B..."` emission sites, so a code
-that validator.py starts emitting without ever getting a page stays
-invisible to CI. A future gate that greps the emission sites and asserts
-each has a page would close that; tracked as #1569, not implemented yet.
+This gate, like scripts/gen_error_catalog.py, walks the docs/diagnostics/
+ALP-B*.md page set -- it does not walk the scripts/alp_cli/validator.py
+`code="ALP-B..."` emission sites, so a code that validator.py starts
+emitting without ever getting a page would stay invisible to this gate.
+scripts/check_diagnostic_emission_coverage.py closes that gap by walking
+the emission sites and asserting each has a page (#1569).
 
 This gate fails when a docs/diagnostics/ALP-B*.md page:
 

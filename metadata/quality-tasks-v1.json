@@ -249,6 +249,20 @@
       "ci": "cross-platform-zephyr.yml:python-smoke"
     },
     {
+      "id": "diagnostic-emission-coverage",
+      "description": "Every ALP-Bxxx code scripts/alp_cli/validator.py can emit must have a docs/diagnostics/ALP-Bxxx.md landing page (#1569).",
+      "runner": "check-script",
+      "script": "scripts/check_diagnostic_emission_coverage.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
       "id": "diagnostic-narratives",
       "description": "Reject a placeholder-only ALP-Bxxx diagnostic landing page under docs/diagnostics/ -- every page must carry a real narrative and a Fix/Resolution/Remedy section (#1207).",
       "runner": "check-script",

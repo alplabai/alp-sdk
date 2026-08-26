@@ -6,7 +6,9 @@
 # top-level docs/*.md isn't linked from the docs index, when a relative
 # doc-to-doc link is dead, when VERSIONS.md carries no row for the
 # released version, when an ALP-Bxxx diagnostic landing page is still a
-# placeholder, or when docs/board-id.md's alp_hw_info_eeprom_t struct
+# placeholder, when an ALP-Bxxx code scripts/alp_cli/validator.py can emit
+# has no docs/diagnostics/ALP-Bxxx.md page (#1569), or when
+# docs/board-id.md's alp_hw_info_eeprom_t struct
 # or scripts/program_eeprom.py's pack-format length constants disagree
 # with include/alp/hw_info.h (#1231), when AGENTS.md names an
 # ALP_E1M_*/ALP_E1M_X_* identifier or --emit choice the real generators
@@ -14,6 +16,7 @@
 # ADR count, or chip/library count disagrees with the tree (#1265).
 # Mirrors scripts/check_doc_drift.py + scripts/check_doc_links.py +
 # scripts/check_diagnostic_narratives.py +
+# scripts/check_diagnostic_emission_coverage.py +
 # scripts/check_version_doc_sync.py +
 # scripts/check_board_id_doc_parity.py +
 # scripts/check_agents_md_generators.py +
@@ -80,6 +83,9 @@ jobs:
 
       - name: Diagnostic landing pages (no placeholder-only ALP-B pages)
         run: python3 scripts/check_diagnostic_narratives.py
+
+      - name: Diagnostic emission coverage (every emitted ALP-B code has a doc page)
+        run: python3 scripts/check_diagnostic_emission_coverage.py
 
       - name: Version-doc sync (README labels + VERSIONS.md vs sdk_version.yaml)
         run: python3 scripts/check_version_doc_sync.py
