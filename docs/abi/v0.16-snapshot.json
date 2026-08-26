@@ -11753,6 +11753,19 @@
           "hash": "757dffdacb7659ed",
           "kind": "struct"
         },
+        "alp_cc3501e_ota_pending_t": {
+          "definition": "typedef enum { ALP_CC3501E_OTA_PENDING_NONE = 0u, ALP_CC3501E_OTA_PENDING_CANDIDATE = 1u, ALP_CC3501E_OTA_PENDING_STAGED = 2u, ALP_CC3501E_OTA_PENDING_TRIAL = 3u, ALP_CC3501E_OTA_PENDING_FAILED = 4u, ALP_CC3501E_OTA_PENDING_UNKNOWN = 0xFFu, } alp_cc3501e_ota_pending_t;",
+          "enumerators": [
+            "ALP_CC3501E_OTA_PENDING_NONE = 0u",
+            "ALP_CC3501E_OTA_PENDING_CANDIDATE = 1u",
+            "ALP_CC3501E_OTA_PENDING_STAGED = 2u",
+            "ALP_CC3501E_OTA_PENDING_TRIAL = 3u",
+            "ALP_CC3501E_OTA_PENDING_FAILED = 4u",
+            "ALP_CC3501E_OTA_PENDING_UNKNOWN = 0xFFu"
+          ],
+          "hash": "e5daef2569e78ab6",
+          "kind": "enum"
+        },
         "alp_cc3501e_ota_state_t": {
           "definition": "typedef enum { ALP_CC3501E_OTA_STATE_IDLE = 0u, ALP_CC3501E_OTA_STATE_WRITING = 1u, ALP_CC3501E_OTA_STATE_STAGED = 2u, ALP_CC3501E_OTA_STATE_ERROR = 3u, } alp_cc3501e_ota_state_t;",
           "enumerators": [
@@ -11765,14 +11778,16 @@
           "kind": "enum"
         },
         "alp_cc3501e_ota_status_t": {
-          "definition": "typedef struct { uint8_t state; uint8_t reserved[3]; uint32_t bytes_written; uint32_t total_len; } alp_cc3501e_ota_status_t;",
+          "definition": "typedef struct { uint8_t state; uint8_t reserved[3]; uint32_t bytes_written; uint32_t total_len; uint8_t pending; uint8_t reserved2[3]; } alp_cc3501e_ota_status_t;",
           "fields": [
             "uint8_t state",
             "uint8_t reserved[3]",
             "uint32_t bytes_written",
-            "uint32_t total_len"
+            "uint32_t total_len",
+            "uint8_t pending",
+            "uint8_t reserved2[3]"
           ],
-          "hash": "cd46411ee7ec5634",
+          "hash": "c4ed25873462a2d7",
           "kind": "struct"
         },
         "alp_cc3501e_ota_update_mode_t": {
