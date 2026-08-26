@@ -115,7 +115,12 @@ alp_status_t alp_dac_write_mv(alp_dac_t *h, uint16_t mv)
 	 * plain read here is a data race, and a racing close could free
 	 * the slot mid-op (issue #629). */
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) return ALP_ERR_NOT_READY;
-	alp_status_t rc = h->state.ops->write_mv(&h->state, mv);
+	alp_status_t rc;
+	if (h->state.ops->write_mv == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->write_mv(&h->state, mv);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -124,7 +129,12 @@ alp_status_t alp_dac_read_mv(alp_dac_t *h, uint16_t *mv_out)
 {
 	if (mv_out == NULL) return ALP_ERR_INVAL;
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) return ALP_ERR_NOT_READY;
-	alp_status_t rc = h->state.ops->read_mv(&h->state, mv_out);
+	alp_status_t rc;
+	if (h->state.ops->read_mv == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->read_mv(&h->state, mv_out);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }

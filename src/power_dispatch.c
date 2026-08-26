@@ -112,7 +112,12 @@ alp_status_t alp_power_configure_wake_source(alp_power_t *h, uint32_t wake_bitma
 		return ALP_ERR_NOT_READY;
 	}
 	h->state.wake_bitmap = wake_bitmap;
-	alp_status_t rc      = h->state.ops->configure_wake_source(&h->state, wake_bitmap);
+	alp_status_t rc;
+	if (h->state.ops->configure_wake_source == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->configure_wake_source(&h->state, wake_bitmap);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -142,7 +147,12 @@ alp_status_t alp_power_request_sleep(alp_power_t           *h,
 		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_INVAL;
 	}
-	alp_status_t rc = h->state.ops->request_sleep(&h->state, mode, wake_after_ms, info);
+	alp_status_t rc;
+	if (h->state.ops->request_sleep == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->request_sleep(&h->state, mode, wake_after_ms, info);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }

@@ -107,7 +107,12 @@ alp_status_t alp_display_get_caps(alp_display_t *h, alp_display_caps_t *out)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->get_caps(&h->state, out);
+	alp_status_t rc;
+	if (h->state.ops->get_caps == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->get_caps(&h->state, out);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -126,7 +131,12 @@ alp_status_t alp_display_blit(alp_display_t *h,
 		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_INVAL;
 	}
-	alp_status_t rc = h->state.ops->blit(&h->state, x, y, w, h_rect, pixels);
+	alp_status_t rc;
+	if (h->state.ops->blit == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->blit(&h->state, x, y, w, h_rect, pixels);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -136,7 +146,12 @@ alp_status_t alp_display_clear(alp_display_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->clear(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->clear == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->clear(&h->state);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
