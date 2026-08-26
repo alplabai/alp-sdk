@@ -182,6 +182,25 @@ hard gate.
 
 ### Merge method
 
+> **Current reality overrides the bullet below for anything merging
+> into `dev`.** A GitHub ruleset ("dev merge queue", ruleset id
+> `20781492`, live since 2026-08-13) routes every PR targeting `dev`
+> through a required merge queue pinned to `merge_method: SQUASH`.
+> An explicit `gh pr merge --merge` against a `dev`-targeting PR is
+> refused ("The merge strategy for dev is set by the merge queue").
+> This applies uniformly — feature/fix PRs *and* the `main` → `dev`
+> back-merge PR both land as a single squashed commit with no merge
+> parent back to the source branch, not the `--no-ff` merge commit
+> described below. For the back-merge specifically this defeats the
+> point of back-merging: a squashed commit records no ancestry, so
+> the *next* release's `dev`→`main` diff can re-propose the same
+> commits `main` already carries. Tracked, unresolved, in #1467 —
+> fixing it needs a repository-settings decision (change the
+> ruleset's `merge_method`, or grant a bypass actor for the
+> back-merge PR specifically); this doc will be updated once that
+> decision lands. `dev → main` (below) is unaffected — the ruleset's
+> `ref_name` condition targets `refs/heads/dev` only.
+
 - **Feature branch → `dev`**: **merge commit with `--no-ff`** by
   default.  The non-fast-forward merge keeps an auditable record of
   every integrated branch on `dev`.  One PR = one feature branch =
@@ -265,10 +284,14 @@ Repository Settings → Branches.  Documented here so an audit-trail
 exists; the live settings are the authoritative copy.
 
 Server-side branch protection is applied to `main` and `release/*`.
-`dev` is the shared integration branch: the PR + review + CI flow
-into `dev` is followed by convention (it's where work first lands
-and is integrated), and the `dev` → `main` promotion is itself a PR
-held to the full `main` gate set below.
+`dev` also carries server-side protection today (required status
+checks `twister-shard 1/4..4/4`, `clang-format · diff-only`,
+`distro install · all`, plus the merge-queue ruleset described in
+"Merge method" above, which forces `SQUASH` for every PR merging
+into `dev`) — narrower than `main`'s gate set (no required review
+count, no CODEOWNERS enforcement) but not a bare convention. The
+`dev` → `main` promotion is itself a PR held to the full `main` gate
+set below.
 
 ### `main`
 
