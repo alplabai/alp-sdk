@@ -229,5 +229,11 @@ via `.github/workflows/dispatch-tan-parity.yml`: whenever this repo's
 reference planner / contract surface moves, that workflow fires a
 `repository_dispatch` of type `alp-sdk-planner-change` at `alplabai/tan-cli`,
 with `client_payload.sdk_ref` picking the exact SDK ref tan-cli's parity gate
-should test — so a drifting emit surfaces on the *alp-sdk* PR, not discovered
-later against a stale checkout.
+should test. `dispatch-tan-parity.yml` triggers on `push` to `dev`/`main` (plus
+manual `workflow_dispatch`) only — it has no `pull_request` trigger, so it
+fires **after** a change merges, not on the alp-sdk PR itself. A drifting emit
+surfaces on the *alp-sdk PR* through `parity-seam1.yml`'s own `pull_request`
+trigger (the toolchain-free seam-1 check above); the post-merge dispatch's job
+is to keep tan-cli's pinned oracle/comparator from going stale against a ref
+that no longer exists, per tan-cli's `parity.yml` ("no cross-repo dispatch
+needed" for the alp-sdk-side PR check — see its own header comment).

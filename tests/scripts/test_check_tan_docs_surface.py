@@ -1549,6 +1549,23 @@ def test_typer_rich_help_usage_preserves_positional_contract():
     assert _mod._verb_accepts_positional(_mod._usage_line(_RICH_FLASH_HELP))
 
 
+def test_has_legacy_passthrough_args_accepts_both_grammars():
+    """Direct pin for `_has_legacy_passthrough_args`'s two accepted
+    spellings -- the frozen-Rust/Clap `[ARGS]...` and the current Python
+    `tan`'s Typer/Click `[ARGS...]`. The forwarding-verb fixtures elsewhere
+    in this file (`_LOCK_HELP` et al.) all now use the Typer spelling since
+    `tan lock` replaced `tan new-som` as the forwarding-verb example
+    (alp-sdk#1522); this is what still proves the Clap spelling this
+    function's own docstring promises to accept actually parses."""
+    assert _mod._has_legacy_passthrough_args(
+        "Usage: tan lock [OPTIONS] [ARGS]...\n\nArguments:\n  [ARGS]...\n"
+    )
+    assert _mod._has_legacy_passthrough_args(
+        "Usage: tan lock [OPTIONS] [ARGS...]\n\nArguments:\n  [ARGS...]\n"
+    )
+    assert not _mod._has_legacy_passthrough_args(_NEW_SOM_HELP)
+
+
 def test_typer_rich_help_drives_full_invocation_check():
     cache = {"build": _RICH_BUILD_HELP}
     assert (
@@ -1682,9 +1699,13 @@ def test_forwarding_verb_shape_is_never_checked(tmp_path):
 def test_new_som_options_only_usage_is_not_treated_as_forwarding(tmp_path):
     """`tan new-som` is a native `[OPTIONS]`-only verb, not a FORWARDING one
     -- its real docs/cli.md-tabulated flags must be mechanically checked
-    against its own --help, not skipped as a forwarding blurb. Regression
-    guard for the drift where `[ARGS]...`/`[ARGS...]` matching was ambiguous
-    enough to swallow verbs that never carry the catch-all at all."""
+    against its own --help, not skipped as a forwarding blurb. `_NEW_SOM_HELP`
+    carries no `[ARGS]...`/`[ARGS...]` suffix at all, so
+    `_has_legacy_passthrough_args` returns False regardless of which spelling
+    it accepts -- this test does NOT pin that choice (see
+    `test_has_legacy_passthrough_args_accepts_both_grammars` for that); it
+    only proves an OPTIONS-only verb's tabulated flags are mechanically
+    checked, not skipped as forwarding."""
     doc_root = tmp_path / "repo"
     _write_docroot(doc_root)
     cli_md = doc_root / "docs" / "cli.md"
