@@ -162,10 +162,19 @@ def _run_cli(ws, *args):
                    capture_output=True, text=True, env=env)
 
 def test_cli_write_writes_a_schema_valid_lock_file(tmp_path):
+    """#1576 review: the name promises schema validity, so assert it.
+
+    Previously this checked only rc==0 and is_file(), which would still
+    pass if the writer emitted a structurally invalid lock -- exactly the
+    regression the plain write path can introduce now that `--check` no
+    longer diffs against a committed copy.
+    """
     ws = _fixture_ws(tmp_path)
     r = _run_cli(ws)
     assert r.returncode == 0, r.stderr
-    assert (ws / "alp.lock").is_file()
+    written = ws / "alp.lock"
+    assert written.is_file()
+    jsonschema.validate(json.loads(written.read_text()), json.loads(SCHEMA.read_text()))
 
 
 def test_cli_check_passes_with_no_lock_file_on_disk(tmp_path):
