@@ -77,7 +77,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from alp_project_loader import _load_yaml, _resolve_sku, resolve_soc_path
+from alp_project_loader import REPO, _load_yaml, _resolve_sku, resolve_soc_path
 from sentinels import is_tbd
 
 _COPYRIGHT_C = (
@@ -435,20 +435,43 @@ def _aen_peripherals_dtsi(soc_spec: dict[str, Any]) -> str:
     today (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi`), so every
     other Ensemble part must add its own and declare it here rather than
     inherit the E8's.
+
+    `zephyr_peripherals_dtsi` (#1352) postdates the E8 overlay file
+    itself, so a checkout whose SoC JSON is missing the key while the
+    file it would have named is already on disk is a VINTAGE checkout,
+    not a genuinely unauthored part -- see the branch below (#1354).
+    Distinguishing the two only works for the E8: it is the one part
+    alp-sdk ships an overlay for today, so it is the only ref where
+    "the file already exists" is possible at all.
     """
     dtsi = soc_spec.get("zephyr_peripherals_dtsi")
-    if not dtsi or is_tbd(dtsi):
+    if dtsi and not is_tbd(dtsi):
+        return str(dtsi)
+
+    known_overlay = "alif/ensemble_e8_peripherals.dtsi"
+    if (soc_spec.get("ref") == "alif:ensemble:e8"
+            and (REPO / "zephyr" / "dts" / known_overlay).is_file()):
         raise ZephyrBoardEmitError(
-            f"SoC spec {soc_spec.get('ref')} "
-            f"({_aen_part(soc_spec)}) has no `zephyr_peripherals_dtsi` -- "
-            "the AEN board .dts must include this SoC's own peripherals "
-            "overlay, and alp-sdk ships one only for the E8 "
-            "(zephyr/dts/alif/ensemble_e8_peripherals.dtsi).  Add the "
-            "overlay under zephyr/dts/alif/ and declare it in the SoC "
-            "JSON before generating this board; do NOT fall back to "
-            "another part's file, whose peripheral and NPU node set is "
-            "different silicon")
-    return str(dtsi)
+            "this alp-sdk predates the per-SoC peripherals-overlay "
+            f"declaration (alp-sdk#1352): zephyr/dts/{known_overlay} is "
+            "present in this checkout but metadata/socs/alif/ensemble/"
+            "e8.json does not declare `zephyr_peripherals_dtsi` -- "
+            "upgrade alp-sdk to v0.16.0 or newer, which includes "
+            "alp-sdk#1352.  (If you are AUTHORING this SoC spec rather "
+            "than consuming a released alp-sdk, add "
+            f'`"zephyr_peripherals_dtsi": "{known_overlay}"` to '
+            "metadata/socs/alif/ensemble/e8.json.)")
+
+    raise ZephyrBoardEmitError(
+        f"SoC spec {soc_spec.get('ref')} "
+        f"({_aen_part(soc_spec)}) has no `zephyr_peripherals_dtsi` -- "
+        "the AEN board .dts must include this SoC's own peripherals "
+        "overlay, and alp-sdk ships one only for the E8 "
+        "(zephyr/dts/alif/ensemble_e8_peripherals.dtsi).  Add the "
+        "overlay under zephyr/dts/alif/ and declare it in the SoC "
+        "JSON before generating this board; do NOT fall back to "
+        "another part's file, whose peripheral and NPU node set is "
+        "different silicon")
 
 
 def _aen_require_disjoint_slot0(
@@ -684,7 +707,8 @@ def _aen_missing_region_message(
             "complete disjoint-slot0 `memory_map:` but no `atoc` region, "
             "which is the shape of every alp-sdk checkout before that "
             "commit.  The AEN board emit needs a checkout that contains it "
-            "-- upgrade alp-sdk to a release that includes alp-sdk#1289.  "
+            "-- upgrade alp-sdk to v0.16.0 or newer, which includes "
+            "alp-sdk#1289.  "
             "(If you are AUTHORING this preset rather than consuming a "
             "released alp-sdk, add the `atoc` region: the SE-owned band "
             "SETOOLS top-anchors the ATOC application table into, flush "
