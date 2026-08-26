@@ -98,7 +98,7 @@ struct spi_dw_data {
 	uint8_t dfs;	/* dfs in bytes: 1,2 or 4 */
 	uint8_t fifo_diff;	/* cannot be bigger than FIFO depth */
 	uint8_t dwc_ssi;	/* enable it for dwc ssi operation on AHB*/
-	uint8_t _unused;
+	uint8_t pack;	/* bytes packed per FIFO slot this transfer: 0, 2 or 4 */
 #ifdef CONFIG_SPI_DW_ALIF_USE_DMA
 	struct k_sem dma_sem;
 	int dma_cb_status;
@@ -282,6 +282,10 @@ static int reg_test_bit(uint8_t bit, mm_reg_t addr, uint32_t off)
 
 #define DW_SPI_CTRLR0_DFS_16(__bpw)	((__bpw) - 1)
 #define DW_SPI_CTRLR0_DFS_32(__bpw)	(((__bpw) - 1) << 16)
+/* DFS_32 occupies CTRLR0[20:16]; needed to CLEAR the field before setting it. */
+#define SPI_DW_CTRLR0_DFS_32_MASK	(0x1FU << 16)
+/* DFS_16 occupies CTRLR0[3:0]. */
+#define SPI_DW_CTRLR0_DFS_16_MASK	(0x0FU)
 
 /* 0x38 represents the bits 8, 16 and 32. Knowing that 24 is bits 8 and 16
  * These are the bits were when you divide by 8, you keep the result as it is.

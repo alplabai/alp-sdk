@@ -196,6 +196,43 @@ config SPI_DW_ALIF
 	  pure-Tier-1 end-state is one small upstream patch away (set SSI_IS_MST,
 	  CTRLR0[31], under CONFIG_SPI_DW_HSSI -- filed, non-blocking).
 
+config SPI_DW_ALIF_PACK32
+	bool "Pack byte-stream SPI transfers 4 bytes per FIFO slot"
+	default n
+	depends on SPI_DW_ALIF
+	help
+	  Performance option for large 8-bit byte-stream transfers on the polled
+	  master path.  The macrocell is programmed DFS=32 so one write_dr and one
+	  read_dr move FOUR bytes instead of one, cutting the dominant cost of the
+	  polled loop -- peripheral MMIO accesses, ~45 cycles each on this SoC --
+	  from ~2.2 per byte to ~0.55.
+
+	  The wire is BIT-IDENTICAL to the 8-bit case: DW SSI shifts each frame out
+	  MSB-first, so packing the four bytes big-endian (__REV) emits exactly the
+	  byte order an 8-bit transfer would.  The peer therefore cannot tell the
+	  difference, and this needs no agreement from the other end of the link.
+
+	  Applied only when every condition holds, else the transfer falls back to
+	  the normal 8-bit path: master (not slave), caller asked for 8-bit words,
+	  the controller supports 32-bit frames, the transfer is TX_RX with both
+	  buffers present (so CTRLR1/NDF frame counting is not involved), every
+	  buffer length is a multiple of 4, and the transfer is at least
+	  SPI_DW_ALIF_PACK32_MIN_LEN bytes.
+
+	  Does NOT change the meaning of a caller-requested 16/32-bit word size;
+	  bits_per_word stays a public contract about the wire, and this is purely
+	  an internal FIFO-packing optimisation for 8-bit streams.
+
+config SPI_DW_ALIF_PACK32_MIN_LEN
+	int "Minimum transfer length (bytes) to pack 4 bytes per FIFO slot"
+	default 64
+	depends on SPI_DW_ALIF_PACK32
+	help
+	  Shorter transfers keep the 8-bit path.  Switching frame size costs an
+	  SSIENR disable/enable plus a CTRLR0 rewrite, which is not worth paying
+	  for a handful of bytes -- and the bridge's 4-8 byte lockstep control
+	  frames are not where the time goes anyway.
+
 config SPI_DW_ALIF_USE_DMA
 	bool "Alif DWC_ssi SPI DMA code path"
 	default n

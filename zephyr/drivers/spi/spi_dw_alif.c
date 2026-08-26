@@ -48,6 +48,7 @@ LOG_MODULE_REGISTER(spi_dw_alif);
 
 #include <zephyr/sys/sys_io.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/sys/byteorder.h>
 
 #include <zephyr/pm/device.h>
 #include <zephyr/pm/policy.h>
@@ -978,6 +979,147 @@ static bool spi_dw_poll_xfer_u8(const struct device *dev)
 	return true;
 }
 
+#ifdef CONFIG_SPI_DW_ALIF_PACK32
+/* How many bytes this transfer can pack into one FIFO slot: 0 (not eligible),
+ * 2, or 4.
+ *
+ * The width is whatever frame size the node declares -- `max-xfer-size`, the
+ * macrocell's SSI_MAX_XFER_SIZE.  The binding defaults it to 16 and calls that
+ * "a conservative overridable default", so 2 is what we get until someone
+ * transcribes the real value from the TRM; a node that declares 32 doubles the
+ * saving with no code change.
+ *
+ * Every condition here keeps the change invisible to the caller and the peer.
+ * TX_RX with both buffers present is required so CTRLR1/NDF -- which counts
+ * FRAMES and would need rescaling -- is not part of the picture. */
+static uint8_t spi_dw_pack_width(const struct device *dev,
+				 const struct spi_buf_set *tx_bufs,
+				 const struct spi_buf_set *rx_bufs)
+{
+	const struct spi_dw_config *info = dev->config;
+	struct spi_dw_data         *spi  = dev->data;
+	size_t                      total = 0u;
+	uint8_t                     w;
+
+	if (spi_dw_is_slave(spi) || spi->dfs != 1) {
+		return 0u;
+	}
+	if (info->max_xfer_size == 32) {
+		w = 4u;
+	} else if (info->max_xfer_size == 16) {
+		w = 2u;
+	} else {
+		return 0u;
+	}
+
+	if (tx_bufs == NULL || tx_bufs->buffers == NULL ||
+	    rx_bufs == NULL || rx_bufs->buffers == NULL) {
+		return 0u;
+	}
+
+	for (size_t i = 0; i < tx_bufs->count; i++) {
+		if ((tx_bufs->buffers[i].len % w) != 0u) {
+			return 0u;
+		}
+		total += tx_bufs->buffers[i].len;
+	}
+	for (size_t i = 0; i < rx_bufs->count; i++) {
+		if ((rx_bufs->buffers[i].len % w) != 0u) {
+			return 0u;
+		}
+	}
+
+	return (total >= (size_t)CONFIG_SPI_DW_ALIF_PACK32_MIN_LEN) ? w : 0u;
+}
+
+/* Batched polled transfer moving `spi->pack` bytes per FIFO slot.
+ *
+ * Structurally identical to spi_dw_poll_xfer_u8() -- snapshot the level once
+ * per burst rather than once per word -- but each write_dr/read_dr now carries
+ * a 2- or 4-byte frame.  MMIO accesses are what the polled loop actually costs
+ * (~45 cycles each on this SoC), so this takes ~2.2 accesses/byte down to ~1.1
+ * at 16-bit frames and ~0.55 at 32-bit.  At 25 MHz the wire needs 320 ns/byte
+ * and the 8-bit loop spends roughly 620 ns of CPU on it -- the host, not the
+ * link, is the bottleneck.
+ *
+ * The byte order is the whole trick: the DR shifts out MSB-first, so writing
+ * the stream's next bytes big-endian into the frame emits exactly the byte
+ * order an 8-bit transfer would.  The wire is bit-identical and the peer cannot
+ * tell the difference.
+ *
+ * spi->dfs stays 1 and the context is advanced in BYTES (dfs 1, w frames), so
+ * all length bookkeeping outside this function is unchanged.  fifo_diff counts
+ * FIFO ENTRIES, and one entry is now w bytes. */
+static bool spi_dw_poll_xfer_packed(const struct device *dev)
+{
+	const struct spi_dw_config *info  = dev->config;
+	struct spi_dw_data         *spi   = dev->data;
+	struct spi_context         *ctx   = &spi->ctx;
+	const uint8_t               w     = spi->pack;
+	uint32_t                    guard = 0u;
+
+	while (spi_context_tx_on(ctx) || spi_context_rx_on(ctx)) {
+		uint32_t avail = read_rxflr(dev);
+
+		while (avail--) {
+			uint32_t data = read_dr(dev);
+
+			if (spi_context_rx_buf_on(ctx)) {
+				uint8_t *dst = (uint8_t *)ctx->rx_buf;
+
+				/* Big-endian unpack: first byte of the stream is the
+				 * frame's most significant byte. */
+				for (uint8_t b = 0; b < w; b++) {
+					dst[b] = (uint8_t)(data >> (8u * (w - 1u - b)));
+				}
+			}
+			spi_context_update_rx(ctx, 1, w);
+			spi->fifo_diff--;
+		}
+
+		uint32_t txlvl = read_txflr(dev);
+		uint32_t room  = (info->fifo_depth > txlvl) ? (info->fifo_depth - txlvl) : 0u;
+
+		if (spi_context_rx_on(ctx)) {
+			const uint32_t rxlvl = read_rxflr(dev);
+
+			room = (room > rxlvl) ? (room - rxlvl) : 0u;
+		}
+
+		while (room--) {
+			uint32_t data;
+
+			if (spi_context_tx_buf_on(ctx)) {
+				const uint8_t *src = (const uint8_t *)ctx->tx_buf;
+
+				data = 0u;
+				for (uint8_t b = 0; b < w; b++) {
+					data |= (uint32_t)src[b] << (8u * (w - 1u - b));
+				}
+			} else if (spi_context_rx_on(ctx)) {
+				if ((int)(ctx->rx_len - ((size_t)spi->fifo_diff * w)) <= 0) {
+					break;
+				}
+				data = 0U;
+			} else if (spi_context_tx_on(ctx)) {
+				data = 0U;
+			} else {
+				break;
+			}
+			write_dr(dev, data);
+			spi_context_update_tx(ctx, 1, w);
+			spi->fifo_diff++;
+		}
+
+		if (++guard > SPI_DW_POLL_GUARD) {
+			LOG_ERR("SPI %p packed transfer stalled", dev);
+			return false;
+		}
+	}
+	return true;
+}
+#endif /* CONFIG_SPI_DW_ALIF_PACK32 */
+
 static int transceive(const struct device *dev,
 		      const struct spi_config *config,
 		      const struct spi_buf_set *tx_bufs,
@@ -1068,6 +1210,23 @@ static int transceive(const struct device *dev,
 			reg_data &= ~DW_SPI_CTRLR0_SSTE;
 		}
 	}
+
+#ifdef CONFIG_SPI_DW_ALIF_PACK32
+	/* Decided here because this is the one window where SSIENR is already
+	 * clear -- the frame size cannot be changed with the controller enabled. */
+	spi->pack = spi_dw_pack_width(dev, tx_bufs, rx_bufs);
+	if (spi->pack != 0u) {
+		const uint8_t bits = (uint8_t)(spi->pack * 8u);
+
+		if (info->max_xfer_size == 32) {
+			reg_data &= ~SPI_DW_CTRLR0_DFS_32_MASK;
+			reg_data |= DW_SPI_CTRLR0_DFS_32(bits);
+		} else {
+			reg_data &= ~SPI_DW_CTRLR0_DFS_16_MASK;
+			reg_data |= DW_SPI_CTRLR0_DFS_16(bits);
+		}
+	}
+#endif
 
 	write_ctrlr0(dev, reg_data);
 
@@ -1160,6 +1319,18 @@ static int transceive(const struct device *dev,
 #endif
 
 	if (polled) {
+#ifdef CONFIG_SPI_DW_ALIF_PACK32
+		if (spi->pack != 0u) {
+			/* No fallback to the 8-bit loop from here: the macrocell is
+			 * programmed DFS=32 for this transfer, so re-running it a byte
+			 * at a time would clock the wrong frame size. */
+			if (!spi_dw_poll_xfer_packed(dev)) {
+				ret = -ETIMEDOUT;
+			}
+			completed(dev, ret);
+			goto packed_done;
+		}
+#endif
 		if (!spi_dw_poll_xfer_u8(dev)) {
 			/* Not 8-bit, or stalled -- fall back to the generic pair, bounded
 			 * so a wedged macrocell cannot hang the calling thread. */
@@ -1177,6 +1348,9 @@ static int transceive(const struct device *dev,
 		}
 		completed(dev, ret);
 	}
+#ifdef CONFIG_SPI_DW_ALIF_PACK32
+packed_done:
+#endif
 
 	if (!ret) {
 		ret = spi_context_wait_for_completion(&spi->ctx);
