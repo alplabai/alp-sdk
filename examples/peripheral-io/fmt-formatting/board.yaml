@@ -28,7 +28,7 @@ cores:
     # no Kconfig knob of its own; the loader emits a
     # documentation-only comment line in alp.conf for this entry
     # (emitted from the manifest's own integration.zephyr.kconfig array
-    # by scripts/alp_orchestrate/libraries.py:197 -- the per-library
+    # by scripts/alp_orchestrate/libraries.py:283 -- the per-library
     # _LIBRARY_KCONFIG dict this used to cite no longer exists).
 
 diagnostics:

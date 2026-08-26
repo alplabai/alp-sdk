@@ -99,7 +99,7 @@ make it selectable: `libraries:` in `metadata/schemas/board.schema.json`
 is an open `^[a-z][a-z0-9-]*$` pattern that resolves each entry to
 `metadata/libraries/<name>.yaml`, and the emitted CONFIG lines come
 from that manifest's own `integration.zephyr.kconfig` array via
-`scripts/alp_orchestrate/libraries.py:197`.
+`scripts/alp_orchestrate/libraries.py:283`.
 
 > Earlier revisions of this section told you to extend a `libraries:`
 > *enum* in `board.schema.json` and a `_LIBRARY_KCONFIG` map in

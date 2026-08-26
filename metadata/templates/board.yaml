@@ -157,7 +157,6 @@ populated:
 #   - macro:      uppercase C-identifier the generator emits
 #   - doc:        optional one-line Doxygen `@brief` text
 #   - active_low: optional bool
-#   - routes_via: optional SoM-side mediator note (e.g. `cc3501e`)
 e1m_routes:
   gpio:
     - { e1m: E1M_GPIO_IO15, macro: PIN_BMI323_INT1,

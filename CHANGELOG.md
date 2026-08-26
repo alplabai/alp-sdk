@@ -4136,8 +4136,8 @@ territory, in a fifth file.
 
 ### Fixed — the zcbor recipe set both `SRCREV` and a URL `tag=`, so bitbake could not parse it and every A55 image build failed
 
-`meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb:90` pinned the revision
-twice — `;tag=0.9.1` in `SRC_URI` and `SRCREV` on line 92. BitBake's git
+`meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb:102` pinned the revision
+twice — `;tag=0.9.1` in `SRC_URI` and `SRCREV` on line 104. BitBake's git
 fetcher refuses that outright, at PARSE time, before any task runs:
 
 ```
