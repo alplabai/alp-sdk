@@ -23,9 +23,10 @@
  *          DT children -- a physically present but DT-undeclared target has
  *          no descriptor, so every op returns ALP_ERR_IO WITHOUT toggling a
  *          bus line.  That is indistinguishable from a NACK at this API, so
- *          if a soldered target answers nothing, check the devicetree first.  Timing (SCL rate) is devicetree-owned, not a config field --
- * the legal rate on a mixed I3C/I2C bus depends on the slowest device
- * populated, which is a board fact, not a per-open() choice.
+ *          if a soldered target answers nothing, check the devicetree first.
+ *          Timing (SCL rate) is devicetree-owned, not a config field --
+ *          the legal rate on a mixed I3C/I2C bus depends on the slowest
+ *          device populated, which is a board fact, not a per-open() choice.
  *
  * Legacy I2C devices: a legacy (non-I3C) target sharing this bus is NOT
  * driven through this handle.  It rides the existing alp_i2c_* surface via
@@ -117,15 +118,26 @@ typedef struct {
  *
  * @param[in] cfg  Bus configuration.  Must be non-NULL.
  *
- * @return Open handle on success, or NULL on any of:
- *         - @p cfg is NULL
- *         - @c bus_id out of range (>= the ACTIVE SoC's I3C count,
- *           ALP_SOC_I3C_COUNT -- not the form-factor count, which may be
- *           smaller) or unresolvable on the active SoM
- *         - underlying controller not ready
- *         - handle pool exhausted
- *         with @ref alp_last_error set to ALP_ERR_INVAL / ALP_ERR_NOT_READY /
- *         ALP_ERR_NOT_PRESENT_ON_THIS_SOC / ALP_ERR_NOSUPPORT.
+ * @return Open handle on success, or NULL on failure with
+ *         @ref alp_last_error set to:
+ *           @ref ALP_ERR_INVAL (@p cfg is NULL; or @c bus_id out of range,
+ *             >= the ACTIVE SoC's I3C count, ALP_SOC_I3C_COUNT -- not the
+ *             form-factor count, which may be smaller);
+ *           @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC (no I3C backend resolves
+ *             for the active SoM);
+ *           @ref ALP_ERR_NOT_IMPLEMENTED (the selected backend declares
+ *             no open op -- not reachable through any shipped backend
+ *             today);
+ *           @ref ALP_ERR_NOT_READY (underlying controller not ready);
+ *           @ref ALP_ERR_NOMEM (the handle pool is exhausted --
+ *             CONFIG_ALP_SDK_MAX_I3C_HANDLES buses already open);
+ *           @ref ALP_ERR_NOSUPPORT (Zephyr backend only, and only when
+ *             built WITHOUT CONFIG_I3C_CONTROLLER -- either CONFIG_I3C=n,
+ *             or CONFIG_I3C=y with CONFIG_I3C_TARGET_ROLE_ONLY selected --
+ *             no controller role compiled in, so every op including
+ *             open() is unsupported.  This is the DEFAULT open() outcome
+ *             on any Zephyr build that doesn't opt into CONFIG_I3C_DUAL_ROLE
+ *             or CONFIG_I3C_CONTROLLER_ROLE_ONLY, not a corner case).
  */
 alp_i3c_t *alp_i3c_open(const alp_i3c_config_t *cfg);
 

@@ -106,14 +106,22 @@ typedef enum {
 	ALP_INFERENCE_MODEL_VELA       = 1, /**< Vela-compiled `.tflite`. */
 	ALP_INFERENCE_MODEL_DRPAI      = 2, /**< Renesas DRP-AI binary. */
 	ALP_INFERENCE_MODEL_DXNN       = 3, /**< DEEPX DXNN binary. */
-	ALP_INFERENCE_MODEL_EXECUTORCH = 4, /**< ExecuTorch program.  RESERVED --
-					     *   no adapter produces this format
-					     *   and no backend consumes it, so a
-					     *   blob claiming it is rejected with
-					     *   @ref ALP_ERR_INVAL -- the value
-					     *   is kept rather than removed to
-					     *   avoid renumbering; see issue
-					     *   #1260. */
+	ALP_INFERENCE_MODEL_EXECUTORCH = 4, /**< ExecuTorch program.  Write side is
+					     *   live: ExecutorchAdapter (issue #1260)
+					     *   produces this format from a .pte
+					     *   source.  No backend runtime consumes
+					     *   it yet.  Backend selection is
+					     *   silicon_ref+priority and never reads
+					     *   cfg->format, so the outcome depends on
+					     *   which backend wins: on a TFLM-linked
+					     *   build, alp_inference_open() falls
+					     *   through to the CPU/TFLM backend, whose
+					     *   flatbuffer verify rejects the raw .pte
+					     *   bytes, failing with @ref ALP_ERR_INVAL
+					     *   (not a deliberate format check); with no
+					     *   TFLM linked, sw_fallback (priority 0)
+					     *   wins instead and fails with @ref
+					     *   ALP_ERR_NOSUPPORT.  See issue #1260. */
 	ALP_INFERENCE_MODEL_ONNX       = 5  /**< Raw `.onnx` graph (ONNX Runtime CPU backend). */
 } alp_inference_model_format_t;
 
