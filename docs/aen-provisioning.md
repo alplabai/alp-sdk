@@ -261,7 +261,7 @@ core and full SWD debug is now available.
 | Scope shows `SEROM v1…` but the host reads **0 bytes** | No common **GND**, **3.3 V adapter** on a 1.8 V line, or you're on the **app UART** not the SEUART. |
 | `Target did not respond` (no scope signal either) | Wrong **baud** (57600 vs 55000), or the SES isn't in its ISP window — use **Hard-maintenance** (`maintenance` → Device Control → Hard maintenance mode) and power-cycle. |
 | Adapter loopback (TXD↔RXD jumper) echoes nothing | Dead/incompatible adapter — swap it (and ensure 1.8 V VCCIO). |
-| `app-write-mram` warns "device in SEROM Recovery mode" | No valid SES — recover the SES first (`maintenance` recovery), it's not a normal app-write. |
+| `app-write-mram` warns "device in SEROM Recovery mode" | No valid SES — recover the SES first, it's not a normal app-write. The ROM→MRAM Recovery procedure is in [`debugging-aen.md` §7.4](debugging-aen.md#74-the-se-is-in-recovery--serom-is-alive-seram-is-not). |
 | Image written but won't boot | ATOC built with the wrong **DEVICE** config for the part — re-run `tools-config` for the correct part and rebuild the ATOC (or write app-only, keeping the factory DEVICE config). |
 | J-Link `Could not find core in CoreSight setup` | Normal on a **fresh** board — the SES hasn't released the core. Provision an app first. On a board that *used* to boot, this is the same no-valid-ATOC state reached by an interrupted write — see [`debugging-aen.md` §7](debugging-aen.md#7-the-secure-enclave-boots-nothing-at-all--cores-parked-vtor-0). |
 | J-Link hangs on a firmware update on first connect (Flow D) | A version-mismatched probe forces a J-Link firmware update that **times out over a USB hub** — connect the probe to a **direct root USB port**. |

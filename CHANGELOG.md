@@ -7,6 +7,31 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Documented — recovering an Alif E8 whose Secure Enclave is stuck in Recovery
+
+`debugging-aen.md` §7.4 previously said the SDK had no recipe for an SE-side
+fault and would not invent one. One half of that state turns out to be
+routinely recoverable, and the recipe is now written down because we ran it on
+our own AE822 silicon: when the maintenance tool reports `Device connected in
+Recovery`, SEROM is alive with no valid SERAM to hand off to, and ROM → MRAM
+Recovery restores it.
+
+- §7.4 documents the state, its cause — an interrupted **System Package**
+  write, the Secure Enclave counterpart of the interrupted application write
+  already covered in §7.3 — the Recovery-only ROM menu, the ~4.5 minute write,
+  and the two reads that verify the part before the application is reflashed.
+- §7.4.3 covers the case where the tool cannot reach the target at all, where
+  a connect-under-reset over SWD supplies the reset SEUART is waiting for,
+  with the E8 SW-DP ID (`0x4C013477`) as the check that the probe is on the
+  right silicon.
+- §7.5 keeps the honest escalation path for the genuinely silent SE, which is
+  still Alif's domain.
+- The `aen-provisioning.md` troubleshooting row for the "device in SEROM
+  Recovery mode" warning now links the procedure instead of only naming it.
+
+Also recorded: `SE CLOCK: HFRC` is present on a **healthy** board — the SE runs
+on the RC oscillator by design, so it is not a fault signature on its own.
+
 ## [v0.16.0] - 2026-08-23
 
 ### Documented — the model & edge-AI lifecycle design record lands on `dev`, ahead of the code it plans (#933)

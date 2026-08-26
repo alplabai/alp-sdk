@@ -464,11 +464,118 @@ Three things to hold to while doing it:
 SETOOLS is license-gated by Alif and is not redistributed with this SDK;
 obtain it from Alif directly.
 
-### 7.4. When the SES header never appears
+### 7.4. The SE is in Recovery — SEROM is alive, SERAM is not
+
+A distinct state from §7.3, and a recoverable one. The tell is that the
+device answers, but answers as SEROM:
+
+```
+[INFO] Connecting to target...Device connected in Recovery
+```
+
+`getbanner` returns that line instead of an `SES <rev> v<version>` line,
+and a System Package update refuses to proceed:
+
+```
+Bootloader stage: SEROM
+[ERROR] Please use Recovery option from ROM menu in Maintenance Tool
+```
+
+`app-write-mram` reports the same condition as a "device in SEROM
+Recovery mode" warning — that warning is this state, and an application
+write cannot clear it.
+
+This is SEROM running with no valid SERAM to hand off to. The part is
+alive, reachable, and recoverable in software.
+
+**Cause.** An interrupted **System Package** write — the Secure Enclave
+half of the hazard §7.3 describes for the application half: a `^C`, a
+closed pipe (piping the tool's output into `head` or `less`), a `timeout`
+expiring, or a reset landing mid-write. The two halves differ in what
+they cost you: interrupting the application write leaves a healthy SE
+with nothing to boot, and costs a reflash. Interrupting the System
+Package write takes out SERAM itself and drops the part into Recovery.
+
+#### 7.4.1. Recovering: the ROM menu
+
+In Recovery the maintenance tool's top-level menu is **not** the menu a
+healthy board shows — there is no Device Control entry, and the option
+you need only exists here:
+
+```
+Available options:
+ 1 - ROM
+ 2 - Device Information
+ 3 - Utilities
+ 4 - Alt. Boot Octal SPI
+```
+
+Select `1 - ROM`, then `1 - MRAM Recovery`:
+
+```
+Available options:
+ 1 - MRAM Recovery
+ 2 - MRAM Recovery (No Reset)
+```
+
+The tool picks the System Package itself. It reads the part number and
+silicon revision over SEUART and selects the matching file — you do not
+choose between a `-dev` and a plain package, and the `rev-a0` / `rev-a1`
+in the filename is the **silicon** revision matched to the part, not a
+package version to pick the newest of.
+
+The write takes roughly four and a half minutes on an AE822, and ends
+with the SERAM offset record and a reset:
+
+```
+[INFO] recovery time:     269.79 seconds
+[INFO] Writing offset '<offset file>' to address 0x5ffff0
+[INFO] Target reset
+Recovery process finished. Please reload maintenance tool for verification
+```
+
+**Let it finish.** Do not pipe it into anything that can close early, and
+do not put a timeout shorter than about six minutes on it — that is
+precisely the mistake that produces the state you are recovering from,
+and doing it again here costs another recovery cycle rather than a
+reflash.
+
+#### 7.4.2. Verify before you reflash the application
+
+Two reads, both of which must come back clean:
+
+```sh
+maintenance -opt getbanner    # expect: SES <rev> v<version> <build date>
+maintenance -opt getclock     # expect: HFXTAL STARTED / PLL LOCKED
+```
+
+`getclock` should report `HFXTAL STARTED`, `PLL LOCKED`, and the M55-HP
+at its full rate. Note that `SE CLOCK: HFRC` appears on a **healthy**
+board — the SE runs on the RC oscillator by design, so it is not a fault
+signature on its own. The fault signature is `HFXTAL OFF` with `PLL OFF`.
+
+Only once both reads are clean, reflash your application per §7.3.
+
+#### 7.4.3. If the tool cannot reach the target at all
+
+If the maintenance tool never gets far enough to show a menu — `Target
+did not respond` to `COMMAND_START_ISP`, or `Waiting for
+Target..[RESET Platform]` that never advances — the SEUART channel is
+waiting on a reset it is not getting. Supply one over SWD: a
+connect-under-reset from your debug probe drives the reset the tool is
+waiting for, after which the menu comes up and the recovery above
+proceeds normally.
+
+Confirm the probe is on the part you think it is before you do this: the
+E8 answers SW-DP ID `0x4C013477`. If your probe reports a different DP
+ID, you are attached to different silicon — stop.
+
+### 7.5. When the SES never answers at all
 
 If the SES header is absent at the correct baud with a proven-good
-adapter, and `devenquiry` is silent, the fault is on the Secure Enclave
-side rather than in the application TOC. This SDK has no recovery recipe
+adapter, `devenquiry` is silent, **and** the maintenance tool does not
+report `Device connected in Recovery` either, the fault is on the Secure
+Enclave side and below the recovery path in §7.4. This SDK has no recipe
 for that state, and we will not invent one: SE-side recovery and the
 device lifecycle are Alif's domain, and the authoritative reference is
 the **Alif Security Toolkit User Guide** that ships in the SETOOLS
