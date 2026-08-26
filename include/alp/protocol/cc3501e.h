@@ -1039,7 +1039,44 @@ typedef struct {
 	uint8_t  reserved[3];
 	uint32_t bytes_written; /**< bytes accepted into the slot so far. */
 	uint32_t total_len;     /**< total declared at BEGIN. */
+	/** FLASH-DERIVED pending-image state (@ref alp_cc3501e_ota_pending_t).
+	 *
+	 *  Every other field here is RAM-derived: @ref state is the firmware's
+	 *  session variable, which a bare reset clears to IDLE while the flash slot
+	 *  still holds a fully staged image.  That is what made a promotion
+	 *  impossible to confirm and an abandoned image invisible.  This byte is
+	 *  read back from the image store itself (psa_fwu_query on the non-primary
+	 *  slot), so it survives a reset and answers the only question that
+	 *  matters after one: is there an image waiting to be swapped in?
+	 *
+	 *  APPENDED, not inserted -- bytes 0..11 keep the offsets they already had.
+	 *  Rides the SAME v5 bump as the rest of the unreleased wire changes (v4 is
+	 *  the last released version, see ALP_CC3501E_PROTOCOL_VERSION) -- it does
+	 *  NOT get a v6 of its own. */
+	uint8_t pending;
+	uint8_t reserved2[3]; /**< zero; reserved. */
 } alp_cc3501e_ota_status_t;
+
+/** Flash-derived pending-image state, reported in
+ *  @ref alp_cc3501e_ota_status_t::pending.
+ *
+ *  Mapped from the PSA-FWU component state of the NON-PRIMARY vendor image
+ *  slot, i.e. the slot an update targets.  Read from the store, not from RAM,
+ *  so it is valid across a reset that cleared the session. */
+typedef enum {
+	/** No image waiting: the slot is READY (erased/clean) or already UPDATED. */
+	ALP_CC3501E_OTA_PENDING_NONE = 0u,
+	/** Partially written -- a session opened the slot but never finished it. */
+	ALP_CC3501E_OTA_PENDING_CANDIDATE = 1u,
+	/** Fully staged and installable.  A PROMOTE will swap THIS image in. */
+	ALP_CC3501E_OTA_PENDING_STAGED = 2u,
+	/** Swapped in and running on trial, awaiting self-accept. */
+	ALP_CC3501E_OTA_PENDING_TRIAL = 3u,
+	/** The store rejected it (e.g. BL2 anti-rollback refused the swap). */
+	ALP_CC3501E_OTA_PENDING_FAILED = 4u,
+	/** The store could not be queried -- treat as "cannot confirm", not "none". */
+	ALP_CC3501E_OTA_PENDING_UNKNOWN = 0xFFu,
+} alp_cc3501e_ota_pending_t;
 
 /** Reply payload of CMD_OTA_UPDATE_MODE: the mode the device is running RIGHT NOW
  *  (so still 0 on the ack that merely QUEUES entry -- the device has not rebooted

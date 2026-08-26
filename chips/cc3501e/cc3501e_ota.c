@@ -207,7 +207,37 @@ alp_status_t cc3501e_ota_abort(cc3501e_t *ctx, uint32_t timeout_ms)
 
 alp_status_t cc3501e_ota_promote(cc3501e_t *ctx, uint32_t timeout_ms)
 {
-	return poll_by_repeat(ctx, ALP_CC3501E_CMD_OTA_PROMOTE, NULL, 0, NULL, 0, NULL, timeout_ms);
+	/* CONFIRM WHAT IS ABOUT TO BE COMMITTED, before asking for it (#1696 gap 2).
+	 *
+	 * OTA_PROMOTE's only success reply is a bare RESP_OK, which is byte-identical
+	 * to a dead bus phase -- the transport's alias check cannot protect this
+	 * opcode without breaking promotion outright, which is why it was left
+	 * unguarded.  The guard has to come from somewhere the ack cannot forge.
+	 *
+	 * OTA_STATUS's `pending` byte is that somewhere: it is read back from the
+	 * image store, so it reports what a swap would ACTUALLY install rather than
+	 * what the RAM session thinks happened.  Requiring STAGED first turns a
+	 * promote from "the device said OK" into "an installable image is really
+	 * there and that is what will be swapped in".
+	 *
+	 * Refusing on NONE is the substance of #1123's other half: a session that was
+	 * aborted, or whose FINISH never completed, leaves nothing installable, and
+	 * promoting it used to be an unconditional OK that armed a reboot anyway.
+	 * UNKNOWN is refused too -- "cannot tell" is not consent to reboot. */
+	alp_cc3501e_ota_status_t st = { 0 };
+	const alp_status_t       ss = cc3501e_ota_status(ctx, &st, timeout_ms);
+
+	if (ss != ALP_OK) return ss;
+	if (st.pending == (uint8_t)ALP_CC3501E_OTA_PENDING_STAGED) {
+		return poll_by_repeat(ctx, ALP_CC3501E_CMD_OTA_PROMOTE, NULL, 0, NULL, 0, NULL, timeout_ms);
+	}
+	if (st.pending == (uint8_t)ALP_CC3501E_OTA_PENDING_TRIAL) {
+		/* Already swapped in and running on trial -- the promote the caller is
+		 * asking for has happened.  Report success rather than rebooting a
+		 * device that is mid-trial. */
+		return ALP_OK;
+	}
+	return ALP_ERR_NOT_READY;
 }
 
 /* ---- OTA update mode (0x47) --------------------------------------------
@@ -401,12 +431,22 @@ static alp_status_t ota_update_bail(cc3501e_t *ctx, alp_status_t s, uint32_t tim
 alp_status_t cc3501e_ota_status(cc3501e_t *ctx, alp_cc3501e_ota_status_t *out, uint32_t timeout_ms)
 {
 	if (out == NULL) return ALP_ERR_INVAL;
-	uint8_t      reply[12] = { 0 };
+	uint8_t      reply[16] = { 0 };
 	size_t       got       = 0;
 	alp_status_t s         = poll_by_repeat(
 	    ctx, ALP_CC3501E_CMD_OTA_STATUS, NULL, 0, reply, sizeof(reply), &got, timeout_ms);
 	if (s != ALP_OK) return s;
-	if (got < sizeof(reply)) return ALP_ERR_IO;
+	/* Accept the 12-byte v5 reply that predates the appended `pending` field.
+	 *
+	 * The field rides the same v5 bump as the rest of the unreleased wire work,
+	 * so the protocol-version gate CANNOT distinguish firmware that sends 12
+	 * bytes from firmware that sends 16 -- both answer 5.  Hard-failing a short
+	 * reply would turn a half-flashed bench pair into an opaque ALP_ERR_IO on
+	 * every status read.  Degrade instead: report the 12 bytes that are present
+	 * and mark `pending` UNKNOWN, which is the SAFE direction -- UNKNOWN makes
+	 * cc3501e_ota_promote() refuse to commit rather than reboot on a value it
+	 * never actually received. */
+	if (got < 12u) return ALP_ERR_IO;
 	out->state         = reply[0];
 	out->reserved[0]   = reply[1];
 	out->reserved[1]   = reply[2];
@@ -415,6 +455,17 @@ alp_status_t cc3501e_ota_status(cc3501e_t *ctx, alp_cc3501e_ota_status_t *out, u
 	                     ((uint32_t)reply[6] << 16) | ((uint32_t)reply[7] << 24);
 	out->total_len = (uint32_t)reply[8] | ((uint32_t)reply[9] << 8) | ((uint32_t)reply[10] << 16) |
 	                 ((uint32_t)reply[11] << 24);
+	/* Flash-derived, unlike every field above it -- see the field's doc in
+	 * <alp/protocol/cc3501e.h>.  This is the one value here that survives a
+	 * reset that cleared the device's session. */
+	if (got >= 16u) {
+		out->pending      = reply[12];
+		out->reserved2[0] = reply[13];
+		out->reserved2[1] = reply[14];
+		out->reserved2[2] = reply[15];
+	} else {
+		out->pending = (uint8_t)ALP_CC3501E_OTA_PENDING_UNKNOWN;
+	}
 	return ALP_OK;
 }
 

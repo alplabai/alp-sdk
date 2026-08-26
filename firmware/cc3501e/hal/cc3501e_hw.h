@@ -320,6 +320,19 @@ int cc3501e_hw_ota_promote(void);
  * host distinguish "refused" from "never fired".  Surfaced in OTA_STATUS. */
 int8_t cc3501e_hw_ota_reboot_rc(void);
 
+/* Flash-derived pending-image state of the slot an update targets, as an
+ * alp_cc3501e_ota_pending_t.  Read from the image store (psa_fwu_query on the
+ * NON-PRIMARY vendor slot), NOT from the RAM session -- so it stays correct
+ * across a reset that cleared the session, which is exactly the case where the
+ * RAM state reads IDLE while a fully staged image is still sitting in flash.
+ *
+ * This is what makes PROMOTE confirmable and an abandoned image visible, now
+ * that FINISH no longer arms a swap on its own (#1123).  Returns
+ * ALP_CC3501E_OTA_PENDING_UNKNOWN if the store cannot be queried or the primary
+ * slot is ambiguous -- never NONE, because "cannot tell" must not read as
+ * "nothing pending". */
+uint8_t cc3501e_hw_ota_pending(void);
+
 /* True while an OTA window flush is queued or running (#1610).  Published in
  * OTA_STATUS.reserved[1] so the host can HOLD OFF payload-bearing WRITE frames
  * and poll header-only across the flash blackout, instead of inferring a stall

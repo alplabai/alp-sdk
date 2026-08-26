@@ -160,7 +160,9 @@ alp_cc3501e_resp_t handle_ota_update_mode(const uint8_t *req,
 }
 
 /* OTA_STATUS (0x44): reply = alp_cc3501e_ota_status_t
- * { state(1) | reserved(3) | bytes_written(LE32) | total_len(LE32) }. */
+ * { state(1) | reserved(3) | bytes_written(LE32) | total_len(LE32) |
+ *   pending(1) | reserved2(3) }.  pending is APPENDED, so bytes 0..11 keep the
+ * offsets they already had. */
 alp_cc3501e_resp_t handle_ota_status(const uint8_t *req,
                                      size_t         req_len,
                                      uint8_t       *reply_data,
@@ -170,7 +172,7 @@ alp_cc3501e_resp_t handle_ota_status(const uint8_t *req,
 	(void)req;
 	*reply_data_len = 0u;
 	if (req_len != 0u) return ALP_CC3501E_RESP_ERR_INVALID;
-	if (reply_cap < 12u) return ALP_CC3501E_RESP_ERR_NO_MEM;
+	if (reply_cap < 16u) return ALP_CC3501E_RESP_ERR_NO_MEM;
 	uint8_t   state   = 0u;
 	uint32_t  written = 0u;
 	uint32_t  total   = 0u;
@@ -209,6 +211,16 @@ alp_cc3501e_resp_t handle_ota_status(const uint8_t *req,
 	}
 	put_le32(&reply_data[4], written);
 	put_le32(&reply_data[8], total);
-	*reply_data_len = 12u;
+	/* [12] FLASH-DERIVED pending image (#1123/#1696).  Every field above is
+	 * RAM-derived -- `state` is the session variable, which a bare reset clears
+	 * to IDLE while the slot still holds a staged image.  This byte is read back
+	 * from the store, so it answers the question that actually matters after a
+	 * reset: is an image waiting to be swapped in?  It is what makes PROMOTE
+	 * confirmable, now that FINISH no longer arms a swap by itself. */
+	reply_data[12]  = cc3501e_hw_ota_pending();
+	reply_data[13]  = 0u;
+	reply_data[14]  = 0u;
+	reply_data[15]  = 0u;
+	*reply_data_len = 16u;
 	return ALP_CC3501E_RESP_OK;
 }

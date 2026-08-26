@@ -124,6 +124,12 @@ static bool g_connect_submit_force_ok;
  * it to ALP_CC3501E_ROLE_WIFI_AP.  Defaults to STA = 'AP not up'. */
 static uint8_t g_diag_role = ALP_CC3501E_ROLE_WIFI_STA;
 
+/* FLASH-derived pending image reported in OTA_STATUS byte [12].
+ * cc3501e_ota_promote() refuses to commit unless this says STAGED (#1123),
+ * so it defaults to STAGED: the promote tests model a device that really
+ * does have an installable image waiting. */
+static uint8_t g_ota_pending = ALP_CC3501E_OTA_PENDING_STAGED;
+
 /* #1377 mutant control: while > 0, a whole WIFI_STATUS transaction's REQUEST
  * HEADER phase fails outright (as if the shared bridge transport itself were
  * down, e.g. a radio op in flight) -- decremented per attempt, letting a
@@ -155,6 +161,7 @@ static void slave_reset(void)
 	g_scan_stage_ctx_b                 = false;
 	g_connect_submit_force_ok          = false;
 	g_diag_role                        = ALP_CC3501E_ROLE_WIFI_STA;
+	g_ota_pending                      = ALP_CC3501E_OTA_PENDING_STAGED;
 	g_status_io_down_remaining         = 0u;
 	g_get_version_override_active      = false;
 	g_get_version_override_value       = 0u;
@@ -308,6 +315,18 @@ static void slave_dispatch(void)
 		/* Argless / write-only ops: success is the bare OK status. */
 		stage_status(ALP_CC3501E_RESP_OK);
 		break;
+
+	case ALP_CC3501E_CMD_OTA_STATUS: {
+		/* 16 bytes: state(1) | reserved(3) | bytes_written(LE32) |
+		 * total_len(LE32) | pending(1) | reserved2(3).  Only `pending` matters
+		 * to the promote path -- it is the flash-derived byte the commit is
+		 * gated on, and the one an ack cannot forge. */
+		uint8_t d[16] = { 0 };
+		d[0]          = ALP_CC3501E_OTA_STATE_STAGED;
+		d[12]         = g_ota_pending;
+		stage_reply(ALP_CC3501E_RESP_OK, d, 16u);
+		break;
+	}
 
 	case ALP_CC3501E_CMD_WIFI_CONNECT_STA:
 		/* Fire-and-forget submit model (#1376/#1377/#1378): snapshot the
@@ -1342,19 +1361,48 @@ ZTEST(cc3501e_host_driver, test_wifi_ap_start_ignores_dead_phase_ok_alias_1385)
 }
 
 /* #1385 fence in the OPPOSITE direction: OTA_PROMOTE (0x46) must stay OFF the
- * per-opcode reject list.  handle_ota_promote() returns
- * hw_to_resp(cc3501e_hw_ota_promote()), and cc3501e_hw_ota_promote() arms the
- * deferred swap-reboot then returns CC3501E_HW_OK unconditionally -- a bare
- * RESP_OK is that opcode's ONLY success reply, so extending the dead-phase
- * check to it (as #1385's title invites) would make cc3501e_ota_promote()
- * always return ALP_ERR_IO and break firmware promotion outright.  This test
- * fails the moment someone adds ALP_CC3501E_CMD_OTA_PROMOTE to that list. */
+ * per-opcode dead-phase reject list.  A bare RESP_OK is that opcode's ONLY
+ * success reply, so extending the alias check to it (as #1385's title invites)
+ * would make cc3501e_ota_promote() always return ALP_ERR_IO and break firmware
+ * promotion outright.  This test fails the moment someone adds
+ * ALP_CC3501E_CMD_OTA_PROMOTE to that list.
+ *
+ * The bare ack is no longer trusted on its own, though -- since #1123 the
+ * promote is gated on OTA_STATUS's flash-derived `pending` byte, which the mock
+ * reports as STAGED here.  That is the guarantee the ack could never provide,
+ * and it is why the alias check does not need to cover this opcode. */
 ZTEST(cc3501e_host_driver, test_ota_promote_bare_ok_still_accepted_1385)
 {
 	zassert_equal(cc3501e_ota_promote(&fw, 100u),
 	              ALP_OK,
-	              "OTA_PROMOTE's bare RESP_OK is legitimate and must not be rejected");
-	zassert_equal(slave.cmd, ALP_CC3501E_CMD_OTA_PROMOTE, "opcode 0x46");
+	              "a STAGED pending image plus the bare RESP_OK is a legitimate promote");
+	zassert_equal(slave.cmd, ALP_CC3501E_CMD_OTA_PROMOTE, "opcode 0x46 was the last frame");
+}
+
+/* #1123: the commit must be refused when the image store has nothing
+ * installable.  Before this, promote was an unconditional OK that armed a
+ * swap-reboot regardless -- so an aborted or abandoned session's promote
+ * "succeeded" and rebooted the device for nothing. */
+ZTEST(cc3501e_host_driver, test_ota_promote_refused_when_nothing_pending_1123)
+{
+	g_ota_pending = ALP_CC3501E_OTA_PENDING_NONE;
+	zassert_equal(cc3501e_ota_promote(&fw, 100u),
+	              ALP_ERR_NOT_READY,
+	              "no installable image -> refuse to commit, do not reboot");
+	zassert_not_equal(slave.cmd,
+	                  ALP_CC3501E_CMD_OTA_PROMOTE,
+	                  "the promote must never reach the wire when nothing is pending");
+}
+
+/* UNKNOWN is refused too: 'the store could not be queried' is not consent to
+ * reboot.  Reading it as 'nothing pending' would be equally wrong in the other
+ * direction -- it must not silently discard an image that may be installable. */
+ZTEST(cc3501e_host_driver, test_ota_promote_refused_when_pending_unknown_1123)
+{
+	g_ota_pending = ALP_CC3501E_OTA_PENDING_UNKNOWN;
+	zassert_equal(cc3501e_ota_promote(&fw, 100u),
+	              ALP_ERR_NOT_READY,
+	              "cannot-determine must refuse, not commit");
 }
 
 ZTEST(cc3501e_host_driver, test_wifi_disconnect_and_ap_stop_argless)
