@@ -1,6 +1,6 @@
 # ONNX Runtime Own-Recipe Implementation Plan
 
-> **STATUS — LANDED.** `meta-alp-sdk/recipes-devtools/onnxruntime/onnxruntime_1.28.0.bb` exists at the `v1.28.0` pin this plan chose. Kept for implementation-history context.
+> **STATUS — LANDED (partial).** `meta-alp-sdk/recipes-devtools/onnxruntime/onnxruntime_1.28.0.bb` exists at the `v1.28.0` pin this plan chose, and the `inference_ort.cpp` backend + dispatcher wiring landed behind `ALP_SDK_USE_ORT_CPU` (PR #1263). The plan's in-scope `E1M-NX9101` enablement did not land: the option defaults **OFF** everywhere and no board/metadata turns it on for `E1M-NX9101`. Kept for implementation-history context.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
