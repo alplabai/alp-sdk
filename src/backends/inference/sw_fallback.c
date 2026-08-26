@@ -4,8 +4,8 @@
  * Software inference fallback.  Stateless stub for native_sim
  * builds and any host without TFLM linked in.
  *
- * Every op besides open / close returns ALP_ERR_NOSUPPORT.  Apps
- * that link this backend should never reach get_input / invoke
+ * Every op, including open, returns ALP_ERR_NOSUPPORT (close is a
+ * no-op).  Apps that link this backend should never reach get_input / invoke
  * on a real silicon build -- tflm (priority 50) wins on any
  * silicon_ref, and the Ethos-U backends (ethos_u_aen at 100 on
  * AEN, ethos_u_n93 at 100 on N93) win on theirs.  DRP-AI / DX-M1
