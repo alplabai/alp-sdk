@@ -541,6 +541,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "i2c-address-uniqueness",
+      "description": "No two declared I2C devices claim the same 7-bit address on the same bus, across metadata/e1m_modules/*.yaml and metadata/boards/*.yaml (issue #1675).",
+      "runner": "check-script",
+      "script": "scripts/check_i2c_address_uniqueness.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "i2c-bus-doc-consistency",
       "description": "Doc/example prose naming an on-module I2C part next to a bus name must agree with metadata/e1m_modules/*.yaml's on_module.i2c_devices.",
       "runner": "check-script",
