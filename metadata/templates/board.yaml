@@ -67,9 +67,14 @@ som:
 #
 #   os:          zephyr | yocto | baremetal | off
 #   app:         path to the app source directory for this core
-#                  - zephyr   -> dir with prj.conf or CMakeLists.txt
-#                  - baremetal-> dir with CMakeLists.txt
-#                  - yocto    -> recipe directory OR `image:` instead
+#                  - zephyr   -> a self-contained app dir with its own
+#                                CMakeLists.txt, OR a sources-only dir
+#                                (e.g. ./src) whose PARENT dir has the
+#                                CMakeLists.txt -- falls back to the
+#                                parent automatically when it does
+#                  - baremetal-> dir with CMakeLists.txt -- no fallback
+#                  - yocto    -> source dir paired with `recipe:`, OR
+#                                `image:` instead of `app:`
 #   image:       Yocto image recipe name (e.g. alp-image-edge)
 #   peripherals: Zephyr peripheral subsystems / Yocto packages
 #                  needed by this slice (per-core, not project-wide)
