@@ -253,6 +253,19 @@ class _MutatedMetadata:
         spec.pop(key, None)
         path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
 
+    def stage_overlay(self, relpath: str) -> None:
+        """Place a file at `self.root.parent / "zephyr" / "dts" / relpath`.
+
+        `_aen_peripherals_dtsi()`'s vintage probe looks next to
+        *metadata_root* (`self.root`), not at the real repo checkout
+        (#1354) -- a test exercising that branch has to stage the overlay
+        in THIS tmp tree, not rely on alp-sdk's own `zephyr/` directory.
+        """
+        path = self.root.parent / "zephyr" / "dts" / relpath
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("/* test double, not a real overlay */\n",
+                         encoding="utf-8")
+
 
 class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
     """Every SKU, part designator, pin name and base address in a generated
@@ -295,13 +308,71 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
 
     def test_soc_without_a_peripherals_overlay_is_refused(self) -> None:
         """A non-E8 Ensemble part must not silently inherit the E8's
-        overlay: the E8 declares `ethosu85`, an E3 has 2x U55 and no U85."""
+        overlay: the E8 declares `ethosu85`, an E3 has 2x U55 and no U85.
+
+        `ref` is mutated off `alif:ensemble:e8` too so this exercises the
+        genuine authoring-gap message -- with `ref` left at E8 this is the
+        VINTAGE shape instead, covered by
+        `test_e8_missing_the_key_names_the_alp_sdk_vintage_not_the_som`
+        below (#1354)."""
+        with _MutatedMetadata() as mm:
+            mm.json_del(E8_SOC, "zephyr_peripherals_dtsi")
+            mm.json_set(E8_SOC, "ref", "alif:ensemble:e9")
+            # Stage the E8 overlay too: in every real checkout it IS present
+            # beside metadata/, so this must be refused on `ref != e8` alone,
+            # not merely because no overlay happens to exist in this tmp
+            # tree -- without this, deleting the `ref` check leaves the
+            # suite green for the wrong reason (#1354 review round 2).
+            mm.stage_overlay("alif/ensemble_e8_peripherals.dtsi")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        self.assertIn("zephyr_peripherals_dtsi", str(ctx.exception))
+        self.assertIn("alif:ensemble:e9", str(ctx.exception))
+
+    def test_e8_missing_the_key_names_the_alp_sdk_vintage_not_the_som(self) -> None:
+        """#1352 added `zephyr_peripherals_dtsi` after the E8 overlay file
+        (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi`) already shipped, so
+        every real checkout that has the field also has the file -- the old
+        message ("Add the overlay ... before generating this board") told an
+        E8 user on an old-but-real checkout to hand-author a 64+ KiB file
+        that was already sitting in their own tree (#1354).
+
+        The overlay is staged in THIS tmp tree (`mm.stage_overlay`), not
+        read off alp-sdk's own `zephyr/` directory -- the probe judges the
+        *metadata_root*'s tree, so a bare `json_del` here (with no overlay
+        anywhere under `mm.root.parent`) must NOT be enough to trip the
+        vintage branch; see
+        `test_e8_missing_the_key_and_no_overlay_gets_the_authoring_message`
+        below for that half."""
+        with _MutatedMetadata() as mm:
+            mm.json_del(E8_SOC, "zephyr_peripherals_dtsi")
+            mm.stage_overlay("alif/ensemble_e8_peripherals.dtsi")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        message = str(ctx.exception)
+        self.assertIn(
+            "this alp-sdk predates the per-SoC peripherals-overlay "
+            "declaration", message)
+        self.assertIn("alp-sdk#1352", message)
+        self.assertIn("upgrade alp-sdk", message)
+        self.assertIn("v0.16.0-rc1", message)
+        self.assertNotIn("Add the overlay under zephyr/dts/alif/", message)
+
+    def test_e8_missing_the_key_and_no_overlay_gets_the_authoring_message(
+            self) -> None:
+        """Same missing key as above, but with no overlay staged anywhere
+        under `mm.root.parent` -- the `.is_file()` half of the vintage
+        guard must still gate on it, not fire on `ref` alone.  Mutating
+        that half away (`if soc_spec.get("ref") == "alif:ensemble:e8":`)
+        left this branch's test suite fully green before this test existed
+        (#1354 review)."""
         with _MutatedMetadata() as mm:
             mm.json_del(E8_SOC, "zephyr_peripherals_dtsi")
             with self.assertRaises(ZephyrBoardEmitError) as ctx:
                 emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
-        self.assertIn("zephyr_peripherals_dtsi", str(ctx.exception))
-        self.assertIn("alif:ensemble:e8", str(ctx.exception))
+        message = str(ctx.exception)
+        self.assertIn("Add the overlay under zephyr/dts/alif/", message)
+        self.assertNotIn("this alp-sdk predates", message)
 
     def test_console_pads_in_the_defconfig_come_from_the_pinmux(self) -> None:
         """The `_defconfig` console comment used to hardcode the AEN801
@@ -343,6 +414,7 @@ class TestAenMemoryMapValidation(unittest.TestCase):
         self.assertIn("this alp-sdk predates the SE-owned ATOC reservation", message)
         self.assertIn("alp-sdk#1289", message)
         self.assertIn("upgrade alp-sdk", message)
+        self.assertIn("v0.16.0", message)
 
     def test_missing_non_atoc_region_still_reads_as_an_authoring_gap(self) -> None:
         with _MutatedMetadata() as mm:

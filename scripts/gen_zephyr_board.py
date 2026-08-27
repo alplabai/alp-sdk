@@ -424,7 +424,7 @@ def _aen_family_display(soc_spec: dict[str, Any]) -> str:
     return f"Alif {family} {_aen_part(soc_spec)}"
 
 
-def _aen_peripherals_dtsi(soc_spec: dict[str, Any]) -> str:
+def _aen_peripherals_dtsi(soc_spec: dict[str, Any], metadata_root: Path) -> str:
     """The `#include <...>` path of THIS SoC's Zephyr peripherals overlay.
 
     Read from the SoC JSON's `zephyr_peripherals_dtsi`, never derived
@@ -435,20 +435,60 @@ def _aen_peripherals_dtsi(soc_spec: dict[str, Any]) -> str:
     today (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi`), so every
     other Ensemble part must add its own and declare it here rather than
     inherit the E8's.
+
+    `zephyr_peripherals_dtsi` (#1352) postdates the E8 overlay file
+    itself, so a checkout whose SoC JSON is missing the key while the
+    file it would have named is already on disk is a VINTAGE checkout,
+    not a genuinely unauthored part -- see the branch below (#1354).
+    Distinguishing the two only works for the E8: it is the one part
+    alp-sdk ships an overlay for today, so it is the only ref where
+    "the file already exists" is possible at all.
+
+    The overlay probe below reads from *metadata_root*'s own tree
+    (`metadata_root.parent / "zephyr" / ...`), never the running script's
+    own `REPO` -- `soc_spec` was loaded from `metadata_root`, so a caller
+    on a `--metadata-root` override (e.g. a customer's own metadata copy)
+    would otherwise have this SoC spec's vintage judged against a tree it
+    has nothing to do with, the #1485 override-ignoring class.
     """
     dtsi = soc_spec.get("zephyr_peripherals_dtsi")
-    if not dtsi or is_tbd(dtsi):
+    if dtsi and not is_tbd(dtsi):
+        return str(dtsi)
+
+    known_overlay = "alif/ensemble_e8_peripherals.dtsi"
+    overlay_path = metadata_root.parent / "zephyr" / "dts" / known_overlay
+    if (soc_spec.get("ref") == "alif:ensemble:e8" and overlay_path.is_file()):
+        soc_path = resolve_soc_path(soc_spec.get("ref"), metadata_root)
+        # Same idiom `emit_zephyr_board` uses for `soc_json_rel` -- name the
+        # actual tree this SoC spec (and therefore this refusal) came from,
+        # not a hardcoded repo-relative guess (#1354 review round 2).
+        soc_json_rel = (
+            f"metadata/{soc_path.relative_to(metadata_root).as_posix()}"
+            if soc_path is not None
+            else "metadata/socs/alif/ensemble/e8.json")
         raise ZephyrBoardEmitError(
-            f"SoC spec {soc_spec.get('ref')} "
-            f"({_aen_part(soc_spec)}) has no `zephyr_peripherals_dtsi` -- "
-            "the AEN board .dts must include this SoC's own peripherals "
-            "overlay, and alp-sdk ships one only for the E8 "
-            "(zephyr/dts/alif/ensemble_e8_peripherals.dtsi).  Add the "
-            "overlay under zephyr/dts/alif/ and declare it in the SoC "
-            "JSON before generating this board; do NOT fall back to "
-            "another part's file, whose peripheral and NPU node set is "
-            "different silicon")
-    return str(dtsi)
+            "this alp-sdk predates the per-SoC peripherals-overlay "
+            f"declaration (alp-sdk#1352): the alp-sdk tree at "
+            f"{metadata_root.parent} already has "
+            f"{overlay_path.relative_to(metadata_root.parent)} on disk, but "
+            f"{soc_json_rel} does not declare `zephyr_peripherals_dtsi` -- "
+            "upgrade alp-sdk to v0.16.0 or newer (the v0.16.0-rc1 "
+            "pre-release is the earliest tag that contains it). "
+            "(If you are AUTHORING this SoC spec rather than consuming a "
+            "released alp-sdk, add "
+            f'`"zephyr_peripherals_dtsi": "{known_overlay}"` to '
+            f"{soc_json_rel}.)")
+
+    raise ZephyrBoardEmitError(
+        f"SoC spec {soc_spec.get('ref')} "
+        f"({_aen_part(soc_spec)}) has no `zephyr_peripherals_dtsi` -- "
+        "the AEN board .dts must include this SoC's own peripherals "
+        "overlay, and alp-sdk ships one only for the E8 "
+        "(zephyr/dts/alif/ensemble_e8_peripherals.dtsi).  Add the "
+        "overlay under zephyr/dts/alif/ and declare it in the SoC "
+        "JSON before generating this board; do NOT fall back to "
+        "another part's file, whose peripheral and NPU node set is "
+        "different silicon")
 
 
 def _aen_require_disjoint_slot0(
@@ -684,7 +724,8 @@ def _aen_missing_region_message(
             "complete disjoint-slot0 `memory_map:` but no `atoc` region, "
             "which is the shape of every alp-sdk checkout before that "
             "commit.  The AEN board emit needs a checkout that contains it "
-            "-- upgrade alp-sdk to a release that includes alp-sdk#1289.  "
+            "-- upgrade alp-sdk to v0.16.0 or newer (the v0.16.0-rc1 "
+            "pre-release is the earliest tag that contains it).  "
             "(If you are AUTHORING this preset rather than consuming a "
             "released alp-sdk, add the `atoc` region: the SE-owned band "
             "SETOOLS top-anchors the ATOC application table into, flush "
@@ -1059,6 +1100,7 @@ def _aen_kconfig_defconfig(dir_name: str, role: str, part: str) -> str:
 def _aen_dts(
     sku: str, core_id: str, soc_spec: dict[str, Any], variant: dict[str, Any],
     dir_name: str, basename: str, rx_row: dict[str, Any], tx_row: dict[str, Any],
+    metadata_root: Path,
     ethos_u: tuple[str, str] | None = None,
     memory_map: "list[dict[str, Any]] | None" = None,
 ) -> str:
@@ -1082,7 +1124,7 @@ def _aen_dts(
 
     part = _aen_part(soc_spec)
     family_display = _aen_family_display(soc_spec)
-    peripherals_dtsi = _aen_peripherals_dtsi(soc_spec)
+    peripherals_dtsi = _aen_peripherals_dtsi(soc_spec, metadata_root)
 
     total_kib = round(float(variant["mram_mb"]) * 1024)
     mram_base, partitions = _aen_flash_partitions(total_kib, role, memory_map)
@@ -1441,7 +1483,7 @@ def emit_zephyr_board(
             dir_name, role, _aen_part(soc_spec))
         files[f"{dir_name}/{basename}.dts"] = _aen_dts(
             sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row,
-            _aen_ethos_u(soc_spec), memory_map)
+            metadata_root, _aen_ethos_u(soc_spec), memory_map)
 
     # `_load_soc_spec()` above already raised ZephyrBoardEmitError if
     # `sku_preset["silicon"]` didn't resolve, so `soc_path` can't be None

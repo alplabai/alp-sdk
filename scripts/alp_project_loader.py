@@ -188,7 +188,8 @@ def _resolve_sku(sku: str, metadata_root: Path) -> dict[str, Any]:
     preset_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
     if not preset_path.is_file():
         sys.exit(
-            f"alp_project: no preset for SKU {sku} at {preset_path.relative_to(REPO)} "
+            f"alp_project: no preset for SKU {sku} at "
+            f"{preset_path.relative_to(REPO) if preset_path.is_relative_to(REPO) else preset_path} "
             f"(remaining SKUs land alongside the user-supplied HW config writeup)"
         )
     return _load_yaml(preset_path)
