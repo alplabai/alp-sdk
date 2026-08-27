@@ -378,7 +378,6 @@ foreach ($s in $sources) {
     if ($LASTEXITCODE -ne 0) { $cout | ForEach-Object { Write-Host "  $_" }; throw "compile failed: $s" }
     $objs += $o
 }
-$ErrorActionPreference = $prevEAP
 
 Write-Host "== Linker: VENDOR-APP map (network_terminal connectivity cmd, FLASH@0x14000000, DRAM 512K) =="
 # *** ROOT CAUSE (2026-06-17) + RAM CEILING (2026-06-18). ***  A CC35 VENDOR APP links
@@ -562,6 +561,18 @@ $lout = & $tc @link 2>&1
 if ($LASTEXITCODE -ne 0) { $lout | ForEach-Object { Write-Host "  $_" }; throw "link failed" }
 
 & "$TiclangRoot\bin\tiarmobjcopy.exe" -O ihex   "$out\cc3501e-bridge.out" "$out\cc3501e-bridge.hex"
+if ($LASTEXITCODE -ne 0) { throw "objcopy (hex) failed" }
 & "$TiclangRoot\bin\tiarmobjcopy.exe" -O binary "$out\cc3501e-bridge.out" "$out\cc3501e-bridge.bin"
+if ($LASTEXITCODE -ne 0) { throw "objcopy (bin) failed" }
 & "$TiclangRoot\bin\tiarmsize.exe" "$out\cc3501e-bridge.out"
+if ($LASTEXITCODE -ne 0) { throw "tiarmsize failed" }
+
+# The stderr window closes only HERE.  It previously closed right after the
+# compile loop, which left the LINK exposed to the same NativeCommandError the
+# window exists for: tiarmclang wrote to stderr at the link step, PowerShell
+# aborted the script, and -- because the artifacts are deleted up front -- the
+# build produced no .out at all rather than a stale one.  Every native tool
+# above writes progress or warnings to stderr, and each one's exit code is now
+# checked explicitly, so the exit code stays the failure signal.
+$ErrorActionPreference = $prevEAP
 Write-Host "== Done: $out\cc3501e-bridge.{out,hex,bin} =="
