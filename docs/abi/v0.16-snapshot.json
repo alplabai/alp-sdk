@@ -10064,15 +10064,15 @@
           "kind": "enum"
         },
         "alp_gpu2d_format_t": {
-          "definition": "typedef enum { ALP_GPU2D_FMT_ARGB8888 = 0, ALP_GPU2D_FMT_RGB565 = 1, ALP_GPU2D_FMT_A8 = 2, ALP_GPU2D_FMT_RGB888 = 3, ALP_GPU2D_FMT_RGBA8888 = 4, } alp_gpu2d_format_t;",
+          "definition": "typedef enum { ALP_GPU2D_FMT_A8 = 0, ALP_GPU2D_FMT_RGB565 = 1, ALP_GPU2D_FMT_RGB888 = 2, ALP_GPU2D_FMT_ARGB8888 = 3, ALP_GPU2D_FMT_RGBA8888 = 4, } alp_gpu2d_format_t;",
           "enumerators": [
-            "ALP_GPU2D_FMT_ARGB8888 = 0",
+            "ALP_GPU2D_FMT_A8 = 0",
             "ALP_GPU2D_FMT_RGB565 = 1",
-            "ALP_GPU2D_FMT_A8 = 2",
-            "ALP_GPU2D_FMT_RGB888 = 3",
+            "ALP_GPU2D_FMT_RGB888 = 2",
+            "ALP_GPU2D_FMT_ARGB8888 = 3",
             "ALP_GPU2D_FMT_RGBA8888 = 4"
           ],
-          "hash": "52e3d44a34b039d8",
+          "hash": "5500a08eebc19f4b",
           "kind": "enum"
         },
         "alp_gpu2d_surface_t": {
