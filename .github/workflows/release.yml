@@ -30,8 +30,16 @@
 #         alp.lock.
 #      h. Emit the tarball's base64-encoded SHA-256 digest for the
 #         provenance generator (consumed via `outputs.hashes`).
-#      i. Create the GitHub Release with the CHANGELOG slice as the
-#         body and the tarball + checksums + SBOM as artefacts.
+#      i. Create the GitHub Release with the CHANGELOG slice as a
+#         DRAFT body (truncated + warned if it would exceed GitHub's
+#         125,000-char release-body limit -- see the slice step
+#         below) and the tarball + checksums + SBOM as artefacts.
+#         A maintainer replaces the draft with a lean, hand-written
+#         summary immediately after -- see docs/release-policy.md
+#         steps 7-8 and alp-lab:cutting-a-release. The CHANGELOG
+#         stays the exhaustive record; this step's body is a
+#         starting point, never the final published prose
+#         (alp-sdk#1492).
 #
 #   2. `provenance` job (calls the slsa-framework reusable workflow):
 #      a. Runs inside an isolated, ephemeral GitHub-hosted runner
@@ -243,7 +251,85 @@ jobs:
                   f"notes under that heading before tagging."
               )
 
-          print(prefix + body)
+          # GitHub's release body has a hard 125,000-char cap. The
+          # softprops/action-gh-release step below enforces it by
+          # silently substring()-ing the body to 124,999 chars right
+          # before the API call -- no warning, no log line, and the
+          # cut lands wherever the char count happens to fall, mid-word
+          # or mid-code-fence. A full CHANGELOG section already exceeds
+          # this routinely (v0.16.0-rc1's slice was 255,413 chars)
+          # because this step's output is a DRAFT body, replaced by
+          # hand with a lean summary right after the Release page
+          # exists (docs/release-policy.md steps 7-8).
+          #
+          # Truncate at the last complete "### " CHANGELOG entry
+          # boundary below the limit -- but only when that boundary (a)
+          # keeps at least half the budget's worth of real content and
+          # (b) does not land inside an open ``` fence, which would cut
+          # mid-fence and swallow the truncation note itself inside the
+          # unclosed block. When neither holds -- e.g. the first entry
+          # alone already overruns the budget, so the only boundary
+          # below it is the one at the very start of the body -- fail
+          # the job instead of publishing a near-empty body: a
+          # maintainer writes the release notes by hand for that tag
+          # (`alp-lab:cutting-a-release` skill step 0) rather than have
+          # this step guess (alp-sdk#1492).
+          GITHUB_BODY_MAX = 125000
+          full_body = prefix + body
+          if len(full_body) >= GITHUB_BODY_MAX:
+              budget = GITHUB_BODY_MAX - 500  # headroom for the ~280-char note below
+
+              # Scan "### " entry boundaries and ``` fence markers together,
+              # in document order, so a boundary is only accepted while no
+              # fence is left open at that point. "### \S" (not bare
+              # "### ") also excludes a wrapped continuation line like
+              # "###   more text" that starts with the same four
+              # characters but is not a real heading.
+              fence_open = False
+              cut = -1
+              for m in re.finditer(r"\n(```|### \S)", full_body[:budget]):
+                  if m.group(1) == "```":
+                      fence_open = not fence_open
+                  elif not fence_open:
+                      cut = m.start()
+
+              if cut == -1 or cut < budget // 2:
+                  fail(
+                      f"CHANGELOG slice is {len(full_body)} chars -- over "
+                      f"GitHub's {GITHUB_BODY_MAX}-char release-body limit, "
+                      f"and no safe CHANGELOG entry boundary was found "
+                      f"below the limit to truncate at (the first entry "
+                      f"alone may already be oversized, or every '### ' "
+                      f"boundary sits inside a fenced code block). "
+                      f"Truncating anyway would publish a body with little "
+                      f"or no real content. Write a hand-crafted release "
+                      f"body for this tag instead and point body_path at "
+                      f"it (`alp-lab:cutting-a-release` skill step 0), or "
+                      f"split the oversized CHANGELOG entry before tagging."
+                  )
+
+              truncated_body = (
+                  full_body[:cut].rstrip()
+                  + "\n\n> ... truncated: the full CHANGELOG.md section for "
+                  "this release is over GitHub's 125,000-char release-body "
+                  "limit. See CHANGELOG.md for the rest. This is a draft "
+                  "body -- it should already have been replaced with a "
+                  "lean, hand-written summary (docs/release-policy.md "
+                  "step 8)."
+              )
+              print(
+                  f"::warning::CHANGELOG slice is {len(full_body)} chars -- "
+                  f"over GitHub's {GITHUB_BODY_MAX}-char release-body limit. "
+                  f"Truncated the DRAFT body to {len(truncated_body)} chars "
+                  f"at a CHANGELOG entry boundary instead of letting the "
+                  f"platform cut it mid-word. This is a draft -- replace "
+                  f"it with a lean hand-written summary now that the "
+                  f"Release page exists (docs/release-policy.md step 8).",
+                  file=sys.stderr,
+              )
+              full_body = truncated_body
+
+          print(full_body)
           PY
 
       - name: Generate alp.lock
