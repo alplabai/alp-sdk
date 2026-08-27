@@ -38,7 +38,7 @@ Bad / costs: ...
 | ADR  | Title                                                       | Status   |
 |------|-------------------------------------------------------------|----------|
 | [0001](0001-wrapper-on-top-of-zephyr.md) | Why Alp SDK wraps Zephyr (and why the wrapper stays thin) | Accepted |
-| [0002](0002-error-mechanism.md)          | `alp_last_error()` + compile-time SoC capability validation | Accepted |
+| [0002](0002-error-mechanism.md)          | `alp_last_error()` + compile-time SoC capability validation | Accepted — amended 2026-08-27 to record the `ALP_ERR_NOT_READY`/`ALP_ERR_INVAL` convention measured across the dispatch layer and correct a scope misreading; the decision itself unchanged |
 | [0003](0003-peripheral-coverage.md)      | Wrap 12 peripheral classes at v0.2, not just I2C/SPI/GPIO/UART | Accepted — partially superseded by 0023 (Ethernet-into-`<alp/iot.h>` row only; 0023 itself is Proposed) |
 | [0004](0004-e1m-portability-bound.md)    | E1M-spec instance counts as the portability bound | Accepted |
 | [0005](0005-alp-sdk-vs-alp-studio-boundary.md) | alp-sdk vs alp-studio repo boundary (dual-use acid test) | Accepted |

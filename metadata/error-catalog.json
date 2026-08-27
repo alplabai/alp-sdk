@@ -146,7 +146,7 @@
       "code": "ALP_ERR_NOT_READY",
       "doc": "include/alp/peripheral.h",
       "kind": "api-error",
-      "summary": "Peripheral not initialised."
+      "summary": "The handle is not in a state to perform this operation."
     },
     "ALP_ERR_NO_BACKEND": {
       "code": "ALP_ERR_NO_BACKEND",
