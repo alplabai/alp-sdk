@@ -17,9 +17,9 @@ This is the same defect class #1585 / #1487 / #1528 / #1621 already named
 for other trees: a real invariant existed in metadata long before anything
 enforced it in CI.
 
-**What it scans.**  Three declared-device shapes exist in the tree today,
-and this gate reads all three rather than assuming the newest one is the
-only one:
+**What it scans.**  Three BUS-CLAIM shapes under ``metadata/`` declare a
+device on a named bus, and this gate reads all three rather than assuming
+the newest one is the only one:
 
   * ``metadata/e1m_modules/*.yaml``'s ``on_module.i2c_devices.<bus>.devices[]``
     -- a dict keyed by bus name, each device a ``{chip, role, address_7bit,
@@ -64,6 +64,25 @@ convention.
 Run locally:
 
     python3 scripts/check_i2c_address_uniqueness.py
+**What it deliberately does NOT scan, and why.**
+
+  * ``metadata/chips/*.yaml`` instance tables (e.g.
+    ``metadata/chips/tps628640.yaml``'s rows, ``metadata/chips/tmp112.yaml``)
+    carry an ``addr_7bit`` alongside a free-text ``scope:`` string rather
+    than a machine-readable bus key, so a claim there cannot be attributed
+    to a bus without parsing prose. Excluded for the same reason #1659 is:
+    the gate refuses to guess which bus a claim belongs to.
+  * ``examples/**/board.yaml``'s ``hw_info.eeprom.{bus,addr_7bit}`` is a
+    further address-declaring shape, outside the ``metadata/`` tree this
+    gate walks.
+  * **Cross-file joins are not performed.** A carrier's flat ``i2c_devices:``
+    and a mounted SoM preset's ``e1m_i2c*`` bus can be the SAME physical bus
+    (``XEVK_I2C_BUS_SENSORS`` is ``ALP_E1M_X_I2C0`` --
+    ``include/alp/boards/alp_e1m_x_evk_routes.h``), but the two live in
+    different files and the gate compares within a file only. It therefore
+    cannot see a collision that only exists once a particular SoM is mounted
+    on a particular carrier. Widening it to that would need a declared
+    SoM<->carrier bus mapping that does not exist in the tree today.
 """
 
 from __future__ import annotations
@@ -78,15 +97,15 @@ import yaml
 # (repo-relative file, bus id, "0xNN" 7-bit address) -> why this collision is
 # real hardware ambiguity, not a bug in the gate. Each entry must name the
 # tracking issue -- see the module docstring.
-ALLOWLIST: dict[tuple[str, str, str], tuple[frozenset[str], str]] = {
+ALLOWLIST: dict[tuple[str, str, str], tuple[tuple[str, ...], str]] = {
     (
         "metadata/e1m_modules/E1M-V2M101.yaml",
         "brd_i2c",
         "0x48",
-    ): (frozenset({
+    ): ((
         "chip=tmp112 role=temp_sensor",
         "chip=tps628640 role=deepx_lpddr_0v85",
-    }), (
+    ), (
         "#1163 open, unresolved. TMP112's own ADD0 strap range is "
         "0x48..0x4B (metadata/e1m_modules/E1M-V2M101.yaml:51) and TPS628640 "
         "also claims 0x48 for deepx_lpddr_0v85 "
@@ -98,10 +117,10 @@ ALLOWLIST: dict[tuple[str, str, str], tuple[frozenset[str], str]] = {
         "metadata/e1m_modules/E1M-V2M102.yaml",
         "brd_i2c",
         "0x48",
-    ): (frozenset({
+    ): ((
         "chip=tmp112 role=temp_sensor",
         "chip=tps628640 role=deepx_lpddr_0v85",
-    }), (
+    ), (
         "#1163 open, unresolved -- V2M102 carries the identical DEEPX "
         "LPDDR + TMP112 population as V2M101 (see that entry above) and "
         "the identical open question: TMP112 at "
@@ -121,9 +140,17 @@ def _addr_int(raw: Any) -> int | None:
     or None if it isn't parseable -- an unparseable address is a different
     validator's problem (schema validation), not this gate's."""
     try:
-        return int(str(raw), 0)
+        addr = int(str(raw), 0)
     except (TypeError, ValueError):
         return None
+    # A 7-bit address cannot exceed 0x77. The schema's pattern allows up to
+    # 0xFF, so a device entered in 8-bit write-address form (0xD0 for the
+    # 5L35023B, the form its own chip YAML quotes) would compare unequal to
+    # the real 0x68 claimant and silently never collide. Treat it as
+    # unparseable rather than as a distinct address.
+    if addr < 0 or addr > 0x77:
+        return None
+    return addr
 
 
 def _addr_label(addr: int) -> str:
@@ -235,7 +262,13 @@ def find_problems(root: Path) -> list[str]:
                 # device added later at the same address is a NEW collision
                 # and must still fail, or the entry silently widens into a
                 # blanket exemption for the very defect this gate catches.
-                if excused and excused[0] == frozenset(labels):
+                # Compare a MULTISET, not a set: two devices can legitimately
+                # carry the same chip= / role= label (a schema-legal duplicate
+                # row -- `devices` has no uniqueItems), and a set collapses
+                # them, so a THIRD claimant whose label matches one already
+                # excused slipped through silently. That is the same hole the
+                # per-address allowlist exists to avoid, one level down.
+                if excused and excused[0] == tuple(sorted(labels)):
                     continue
                 problems.append(
                     f"{rel}: bus '{bus}' address {addr_label} is claimed by "

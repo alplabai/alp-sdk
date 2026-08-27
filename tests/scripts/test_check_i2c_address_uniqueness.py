@@ -230,7 +230,7 @@ def test_allowlist_does_not_excuse_a_new_claimant(tmp_path, monkeypatch):
 
     monkeypatch.setitem(
         mod.ALLOWLIST, (rel, "brd_i2c", "0x48"),
-        (frozenset({"chip=aaa role=one", "chip=bbb role=two"}), "test entry"),
+        (("chip=aaa role=one", "chip=bbb role=two"), "test entry"),
     )
 
     write("")
@@ -240,4 +240,46 @@ def test_allowlist_does_not_excuse_a_new_claimant(tmp_path, monkeypatch):
     problems = find_problems(tmp_path)
     assert len(problems) == 1, problems
     assert "role=three" in problems[0]
+    assert "3 devices" in problems[0]
+
+
+def test_allowlist_does_not_excuse_a_duplicate_label_claimant(tmp_path, monkeypatch):
+    """The excused set is a MULTISET, not a set.
+
+    `devices` has no `uniqueItems`, so two rows may legitimately carry the same
+    chip=/role= label. Comparing as a frozenset collapsed them, and a THIRD
+    claimant whose label matched one already excused was accepted silently at
+    an allowlisted address -- the same hole the per-address allowlist exists to
+    avoid, one level down. Caught in review of the first fix.
+    """
+    import check_i2c_address_uniqueness as mod
+
+    rel = "metadata/e1m_modules/E1M-DUP.yaml"
+    src = tmp_path / rel
+    src.parent.mkdir(parents=True, exist_ok=True)
+
+    def write(rows: str) -> None:
+        src.write_text(
+            "on_module:\n"
+            "  i2c_devices:\n"
+            "    brd_i2c:\n"
+            "      devices:\n" + rows,
+            encoding="utf-8",
+        )
+
+    a = '        - { chip: aaa, role: one, address_7bit: "0x48" }\n'
+    b = '        - { chip: bbb, role: two, address_7bit: "0x48" }\n'
+
+    monkeypatch.setitem(
+        mod.ALLOWLIST, (rel, "brd_i2c", "0x48"),
+        (("chip=aaa role=one", "chip=bbb role=two"), "test entry"),
+    )
+
+    write(a + b)
+    assert find_problems(tmp_path) == [], "the excused pair must stay silent"
+
+    # a third row DUPLICATING an excused label must still be reported
+    write(a + a + b)
+    problems = find_problems(tmp_path)
+    assert len(problems) == 1, problems
     assert "3 devices" in problems[0]
