@@ -130,10 +130,10 @@ The cut happens on `main`, and only after `dev` has been promoted to
    provenance attestation (`alp-sdk-v<N>.tar.gz.intoto.jsonl`).
    If the slice would exceed GitHub's 125,000-char release-body
    limit, the workflow truncates it itself at the last complete
-   CHANGELOG entry boundary below the limit and logs a
-   `::warning::` with the original and truncated lengths -- rather
-   than letting `softprops/action-gh-release` cut it silently
-   mid-word, which is what it does by default. When no entry
+   CHANGELOG entry boundary below the limit and logs a GitHub
+   Actions warning annotation with the original and truncated
+   lengths -- rather than letting `softprops/action-gh-release`
+   cut it silently mid-word, which is what it does by default. When no entry
    boundary below the limit keeps a real majority of the body (the
    first entry alone is already oversized) or every candidate
    boundary sits inside an open code fence, the step fails instead
