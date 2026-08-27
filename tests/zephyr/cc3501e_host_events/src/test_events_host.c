@@ -48,6 +48,11 @@ static struct {
 	uint8_t  reply_pl[ALP_CC3501E_MAX_PAYLOAD]; /* status byte + data */
 	uint16_t reply_len;
 
+	/* #1740: when set, pad every reply up to an 8-byte multiple with zeros,
+	 * exactly as the firmware's protocol_build_reply() does for DMA burst
+	 * alignment -- including folding the pad INTO the declared reply_len. */
+	bool pad_replies;
+
 	/* Event ring the model drains on GET_PENDING_EVENTS. */
 	struct model_evt evt[32];
 	size_t           evt_head;
@@ -73,6 +78,8 @@ static void model_queue_evt(uint8_t opcode, const uint8_t *payload, uint8_t len)
 
 /* Drain the model ring into the reply DATA, packing WHOLE entries only (the
  * firmware never splits a payload across replies). */
+static void model_apply_reply_padding(void);
+
 static void slave_dispatch(void)
 {
 	if (slave.cmd == ALP_CC3501E_CMD_GET_PENDING_EVENTS) {
@@ -92,11 +99,30 @@ static void slave_dispatch(void)
 			slave.evt_count--;
 		}
 		slave.reply_len = (uint16_t)off;
+		if (slave.pad_replies) {
+			model_apply_reply_padding();
+		}
 		return;
 	}
 	/* Any other opcode: a bare OK status (the tests only drive events). */
 	slave.reply_pl[0] = ALP_CC3501E_RESP_OK;
 	slave.reply_len   = 1u;
+}
+
+/* #1740: mirror protocol_build_reply()'s CC3501E_REPLY_PAD alignment. */
+#define MODEL_REPLY_PAD 8u
+static void model_apply_reply_padding(void)
+{
+	const uint16_t rem = (uint16_t)(slave.reply_len % MODEL_REPLY_PAD);
+	if (rem == 0u) {
+		return;
+	}
+	const uint16_t pad = (uint16_t)(MODEL_REPLY_PAD - rem);
+	if ((size_t)slave.reply_len + pad > sizeof(slave.reply_pl)) {
+		return;
+	}
+	memset(&slave.reply_pl[slave.reply_len], 0, pad);
+	slave.reply_len = (uint16_t)(slave.reply_len + pad);
 }
 
 /* ---- test doubles for the alp_* seams the host driver links against -------- */
@@ -302,6 +328,39 @@ static void reentrant_cb(uint8_t opcode, const uint8_t *payload, size_t len, voi
 	reentrant_poll_calls++;
 	/* Re-enter from inside the callback -- must not alias evt_buf. */
 	reentrant_poll_rc = cc3501e_poll_events(&fw);
+}
+
+/* #1740: an EMPTY ring still returns a PADDED reply -- the firmware pads to an
+ * 8-byte multiple for DMA burst alignment and folds the pad into the declared
+ * payload length, so the host receives 7 zero bytes of DATA (measured on an
+ * AEN801: "[evtdbg] got=7 raw=00 00 00 00").  Walked naively those are three
+ * {opcode 0, len 0} entries -- ~5.8 phantom events/second on an idle bench,
+ * fanned out to every subscriber.  0x00 is not a defined ALP_CC3501E_EVT_*
+ * opcode, so it must terminate the walk. */
+ZTEST(cc3501e_host_events, test_padded_empty_reply_dispatches_nothing_1740)
+{
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb, NULL), ALP_OK, "set cb");
+	slave.pad_replies = true;
+
+	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "poll -> OK");
+	zassert_equal(slave.reply_len, 8u, "firmware padded the bare-OK reply to 8 B");
+	zassert_equal(cap_count, 0u, "padding must NOT be decoded as events");
+}
+
+/* #1740 companion: a REAL entry followed by padding still dispatches exactly
+ * once.  Padding is appended after the data, so the guard must stop at the pad
+ * without swallowing the entry that precedes it. */
+ZTEST(cc3501e_host_events, test_real_event_then_padding_dispatches_once_1740)
+{
+	zassert_equal(cc3501e_add_event_callback(&fw, capture_cb, NULL), ALP_OK, "set cb");
+	slave.pad_replies = true;
+	model_queue_evt(ALP_CC3501E_EVT_WIFI_CONNECTED, NULL, 0u);
+
+	zassert_equal(cc3501e_poll_events(&fw), ALP_OK, "poll -> OK");
+	zassert_equal(slave.reply_len, 8u, "status + 1 entry (2 B) padded up to 8 B");
+	zassert_equal(cap_count, 1u, "exactly one real event, pad ignored");
+	zassert_equal(cap[0].opcode, ALP_CC3501E_EVT_WIFI_CONNECTED, "the real opcode");
+	zassert_equal(cap[0].len, 0u, "no payload");
 }
 
 ZTEST(cc3501e_host_events, test_poll_reentrant_from_callback_is_rejected_740)

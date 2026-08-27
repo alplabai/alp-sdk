@@ -108,6 +108,31 @@ alp_status_t cc3501e_poll_events(cc3501e_t *ctx)
 	while (off + ALP_CC3501E_EVENT_HDR_BYTES <= got) {
 		const uint8_t opcode = evt_buf[off];
 		const uint8_t len    = evt_buf[off + 1u];
+		/* End of list.  0x00 is not a defined ALP_CC3501E_EVT_* opcode, and a
+		 * reply is zero-padded up to a CC3501E_REPLY_PAD (8 B) multiple for DMA
+		 * burst alignment (firmware protocol.c, #1610/#1655) with the pad folded
+		 * INTO the declared payload length -- so the host cannot distinguish pad
+		 * from entries by length alone.  That is harmless for a self-delimiting
+		 * payload (SOCK_RECV carries its own data_len) but this list has neither
+		 * a count nor a terminator, so an EMPTY ring arrived here as 7 zero bytes
+		 * and was walked as three {opcode 0, len 0} entries -- ~5.8 phantom
+		 * events/second on an idle AEN801 bench, fanned out to every subscriber
+		 * (#1740).  Treat a zero opcode as the padding it is and stop.
+		 */
+		if (opcode == 0u) {
+			break;
+		}
+		/* End of list.  0x00 is not a defined ALP_CC3501E_EVT_* opcode, and a
+		 * reply is zero-padded up to a CC3501E_REPLY_PAD (8 B) multiple for DMA
+		 * burst alignment (firmware protocol.c, #1610/#1655) with the pad folded
+		 * INTO the declared payload length -- so the host cannot distinguish pad
+		 * from entries by length alone.  That is harmless for a self-delimiting
+		 * payload (SOCK_RECV carries its own data_len) but this list has neither
+		 * a count nor a terminator, so an EMPTY ring arrived here as 7 zero bytes
+		 * and was walked as three {opcode 0, len 0} entries -- ~5.8 phantom
+		 * events/second on an idle AEN801 bench, fanned out to every subscriber
+		 * (#1740).  Treat a zero opcode as the padding it is and stop.
+		 */
 		if (off + ALP_CC3501E_EVENT_HDR_BYTES + (size_t)len > got) {
 			break; /* truncated trailing entry -- stop cleanly */
 		}
