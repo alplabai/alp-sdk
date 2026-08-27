@@ -3357,6 +3357,10 @@
       "script": "scripts/check_helper_firmware_path.py"
     },
     {
+      "purpose": "Reject two declared I2C devices claiming the same 7-bit address on the same bus (issue #1675).",
+      "script": "scripts/check_i2c_address_uniqueness.py"
+    },
+    {
       "purpose": "CI gate: doc/example prose that names a known on-module I2C part next to an I2C bus name must agree with that part's bus in the owning SoM preset's `on_module.i2c_devices:` block. #1270 added this block to `metadata/e1m_modules/E1M-AEN801.yaml` and its five AEN siblings (`E1M-V2N101.yaml` / `E1M-V2M101.yaml` already carried one); this gate is the cross-check #1270 asked for, reading across every SoM preset -- not AEN's alone -- mirroring what check_pin_conflicts.py does for silicon pads.",
       "script": "scripts/check_i2c_bus_doc_consistency.py"
     },
