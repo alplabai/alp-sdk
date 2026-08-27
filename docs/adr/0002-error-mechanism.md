@@ -8,7 +8,8 @@ Date: 2026-05-10
 
 ## Amendment (2026-08-27 — record the ALP_ERR_NOT_READY / ALP_ERR_INVAL convention measured across the dispatch layer; correct a scope misreading)
 
-Issue #1646: ~115 sites across 29 files in `src/*_dispatch.c` do
+Issue #1646: ~115 sites across 29 files (27 `src/*_dispatch.c` plus
+`src/i2c_regfile.c` and `src/yocto/inference_yocto.c`) do
 `if (h == NULL || !alp_handle_op_enter(...)) return ALP_ERR_NOT_READY;` for
 a NULL primary handle. Read against this ADR's "programmer error"
 parenthetical below, that looked like the code violating the ADR. It is
@@ -16,14 +17,20 @@ not — see the scope correction first.
 
 **Scope correction.** This ADR's subject is open-time diagnosis:
 `alp_last_error()` plus compile-time SoC capability validation, both
-scoped to `alp_*_open()`. The "programmer error" parenthetical in the
-Decision section (`bus_id` out of range, line 18; and the `ALP_ERR_INVAL`
-mention, lines 55-56) contrasts three *open()*-time codes —
-`ALP_ERR_OUT_OF_RANGE` vs `ALP_ERR_INVAL` (programmer error) vs
-`ALP_ERR_NOSUPPORT` (Zephyr `-ENOTSUP`) — it does not define
-`ALP_ERR_INVAL` for the whole public API. Inside that scope (`open()`)
-the code honours the contrast fully. The ~115 non-open sites above are
-simply outside what this ADR ever governed.
+scoped to `alp_*_open()`. The "programmer error" parenthetical spans two
+sections, not one: the Context section's list item "`bus_id` out of range
+(programmer error)", and the Decision section's closing sentence "A new
+status code, `ALP_ERR_OUT_OF_RANGE` (= -8), distinguishes 'config exceeds
+hardware caps' from `ALP_ERR_INVAL` (programmer error) and
+`ALP_ERR_NOSUPPORT` (Zephyr returned `-ENOTSUP`)." Together they contrast
+three *open()*-time codes — `ALP_ERR_OUT_OF_RANGE` vs `ALP_ERR_INVAL`
+(programmer error) vs `ALP_ERR_NOSUPPORT` (Zephyr `-ENOTSUP`) — they do not
+define `ALP_ERR_INVAL` for the whole public API. Inside that scope
+(`open()`) the code honours the contrast fully. The ~115 non-open sites
+above are simply outside what this ADR ever governed. (Quoted rather than
+line-cited: this amendment's own insertion already shifted every line
+number below it once — a line-number citation into a document that gets
+amended is a trap that recurs on the next amendment too.)
 
 **The convention, measured from the dispatch layer** (not part of this
 ADR's original decision; recorded here because #1646 asked where it's
@@ -36,7 +43,7 @@ written down):
   as the primary handle. The one worked example of that last case in the
   whole dispatch layer is `src/ble_dispatch.c`'s `alp_ble_gatt_notify`: its
   secondary `conn` argument (lines 422-424) returns `ALP_ERR_NOT_READY`,
-  not `ALP_ERR_INVAL`, when NULL — the `:415-419` comment says why:
+  not `ALP_ERR_INVAL`, when NULL — the `:416-421` comment says why:
   `gatt_notify` dereferences `conn->state`, so a racing
   `alp_ble_disconnect(conn)` has to be blocked exactly as a racing close on
   `h` would be (issue #629's UAF fix), which makes a NULL `conn`
@@ -58,22 +65,58 @@ written down):
 - **`ALP_ERR_NOSUPPORT`** — a capability the backend or silicon lacks,
   including a valid form-factor identity this SoM does not populate.
 
-**Three grandfathered outliers — named, not changed.** These predate the
-convention above; nothing consumes the distinction they diverge from, and
-one is an explicit ABI commitment, so none of the three are being
-changed:
+**Grandfathered per-site outliers — named, not changed.** These predate the
+convention above and return `ALP_ERR_INVAL`, not `ALP_ERR_NOT_READY`, for a
+NULL primary handle, ahead of any op-enter/closed-handle check. Two of the
+three families are pinned by tests, which argues *for* grandfathering them
+rather than against — the earlier claim that "nothing consumes the
+distinction" was wrong; the corrected reason still supports the same
+conclusion:
 
-- `src/adc_dispatch.c:127-131` — a NULL handle returns `ALP_ERR_INVAL`, not
-  `ALP_ERR_NOT_READY`. The in-code comment says why: "Preserve the
+- **adc** — `src/adc_dispatch.c:127-131` (`alp_adc_read_raw`) and `:152-154`
+  (`alp_adc_read_uv`). The in-code comment on the first: "Preserve the
   original contract: a NULL handle OR NULL out-param is ALP_ERR_INVAL (not
-  NOT_READY)." — an explicit v0.1 ABI-preservation decision, not an
-  oversight.
-- `src/jpeg_dispatch.c:104` — `alp_jpeg_capabilities`'s `h == NULL` returns
-  `ALP_ERR_INVAL`.
-- `src/update_log_dispatch.c` (lines 123, 148, 169, 179, 190) — diverges
-  the other way: `log == NULL` returns `ALP_ERR_INVAL` at all 5 call
-  sites, ahead of the op-enter/closed-handle check that would otherwise
-  produce `ALP_ERR_NOT_READY`.
+  NOT_READY)." — an explicit decision to preserve the original contract,
+  not an oversight. Pinned by
+  `tests/unit/adc_registry/src/test_adc_registry.c:122-132`
+  (`test_read_raw_inval_on_null_handle`, `test_read_uv_inval_on_null_handle`).
+  The same NULL-check shape recurs in the vendor-extension entry points
+  `src/backends/adc/alif_e7.c:234` and `alif_e8.c:256`
+  (`alp_alif_adc_set_trigger_source`).
+- **jpeg** — `src/jpeg_dispatch.c:104` (`alp_jpeg_capabilities`'s
+  `h == NULL`), with the same check in its build-stub twin
+  `src/common/stub/stub_jpeg.c:38`. Pinned by
+  `tests/unit/jpeg_registry/src/test_jpeg_registry.c:34`.
+- **update_log** — `src/update_log_dispatch.c` (lines 123, 148, 169, 179,
+  190): `log == NULL` returns `ALP_ERR_INVAL` at all 5 call sites, ahead of
+  the op-enter/closed-handle check that would otherwise produce
+  `ALP_ERR_NOT_READY`. This diverges the *same* way adc and jpeg do (NULL
+  jumps ahead of the guard); no test pins it. A closed non-NULL handle
+  still returns `ALP_ERR_NOT_READY` here — the "INVAL even on a closed
+  handle" behaviour some earlier draft attributed to `update_log` actually
+  belongs to the Yocto backend divergence below.
+- **Other `alp_<vendor>_*` ext entry points** doing the same NULL-primary-
+  handle → `ALP_ERR_INVAL` check, untested: `src/backends/ext/alif/camera.c`
+  (`:70,100,126`), `ext/alif/storage.c` (`:33,46`),
+  `ext/deepx/inference.c` (`:46,60,71`), `ext/nxp/storage.c` (`:38,52`),
+  `ext/renesas/camera.c` (`:64,103,137`), `ext/renesas/inference.c`
+  (`:51,66,79`), `ext/renesas/power.c` (`:45`).
+
+**Yocto backend divergence — known, unresolved (not a grandfathered
+outlier).** This one is not a handful of one-off call sites; it is an
+entire backend answering the documented `ALP_ERR_NOT_READY`-on-a-closed-
+handle contract differently from every Zephyr dispatcher.
+`src/yocto/peripheral_{gpio,i2c,spi,uart}.c` gate every op on
+`pin/bus/port == NULL || !...->in_use` and return `ALP_ERR_INVAL` for
+*both* a NULL handle *and* a closed (non-NULL, `in_use == false`) one:
+`peripheral_gpio.c:238,257,277,470,516`, `peripheral_i2c.c:171,190,214`,
+`peripheral_spi.c:180,207,225`, `peripheral_uart.c:290,400`. Concretely,
+`alp_gpio_write(closed_pin, ...)` returns `ALP_ERR_NOT_READY` built for
+Zephyr and `ALP_ERR_INVAL` built for Yocto — the same public symbol
+answering differently depending which backend it was built against,
+undocumented until now. No test pins either side of this one. Recorded
+here as a known, unresolved divergence; this amendment does not change or
+resolve it.
 
 **Gap: signex unverified.** No signex checkout exists on the host this
 amendment was written from — searched `/home`, `/opt`, `/srv`, `/mnt`,
@@ -90,7 +133,7 @@ operation."
 
 See also: issue #1646; `src/ble_dispatch.c`'s `alp_ble_gatt_read` (the
 primary-handle `ALP_ERR_NOT_READY` case, line 586) and
-`alp_ble_gatt_notify` (both halves, lines 407-435) as the worked examples.
+`alp_ble_gatt_notify` (both halves, lines 407-437) as the worked examples.
 
 ## Context
 
