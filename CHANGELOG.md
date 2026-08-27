@@ -5651,7 +5651,7 @@ outcome. Neither of that poll's error exits — the terminal
 `remaining == 0u` return — cleared anything before returning, so the failed
 association's state stayed live inside the NWP. The *next* `WIFI_CONNECT_STA`
 then failed at its own `Wlan_Connect` kick, `ALP_CC3501E_WIFI_FAIL_KICK` --
-`include/alp/protocol/cc3501e.h:447` ("STA role-up / Wlan_Connect kick failed")
+`include/alp/protocol/cc3501e.h:534` ("STA role-up / Wlan_Connect kick failed")
 -- even for a correct SSID and passphrase that had connected seconds earlier.
 
 Root-caused on real silicon, E1M-AEN801 r1, one boot, single variable,
@@ -5674,10 +5674,10 @@ for it — the naming throughout this fix is "clear the stale association", not
 **Where that clear runs also changed.** The first round of this fix ran it from
 inside the two failure exits, and a review plus a second bench pass proved that
 shape too broad: `cc3501e_hw_wifi_disconnect()` does `wifi_conn_set(DISCONNECTED,
-FAIL_NONE)`, `firmware/cc3501e/hal/ti/cc3501e_hw_ti_wifi.c:715`
+FAIL_NONE)`, `firmware/cc3501e/hal/ti/cc3501e_hw_ti_wifi.c:781`
 ("wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_DISCONNECTED, (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE);"),
 so clearing on the way OUT of a failed connect erased the `state: failed` /
-`fail: N` diagnostic, `src/zephyr/console/alp_console_companion_wifi.c:348`
+`fail: N` diagnostic, `src/zephyr/console/alp_console_companion_wifi.c:416`
 ("(unsigned int)st.fail_reason);"), that was the ONLY host-visible way to tell
 `FAIL_KICK` (3) from `FAIL_REJECTED` (2) — both map to `ALP_ERR_IO`. It could
 also run from the poll-exhaustion exit against a latch that had never actually
@@ -9453,13 +9453,13 @@ nothing. The Alif MHUv2, HWSEM, ADC, PDM and comparator drivers keep their own
   source package
   (`meta-rz-features/meta-rz-codecs/.../0001-Add-OpenCVA-and-Codec-for-V2N.patch`,
   quoted in the 0002 patch comment). The SD branch also rooted at
-  `/dev/mmcblk2p2`; `e1m-x-evk.dtsi:88-89` names the carrier microSD
+  `/dev/mmcblk2p2`; `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi:88-89` names the carrier microSD
   `/dev/mmcblk1p2` (SDHI1, alias `mmc1`) — no third MMC controller
   exists on this SoM. Both fixed; the eMMC branch's root (`mmc0` →
   `mmcblk0p2`) was already correct. V2N101 and V2N102 currently build
   the *same* dtb filename (`e1m-v2n101-x-evk.dtb`) — not via inheritance;
   V2N102's own conf **hardcodes** this filename at
-  `e1m-v2n102-a55.conf:36`, alongside a TODO to create a V2N102-specific
+  `meta-alp-sdk/conf/machine/e1m-v2n102-a55.conf:36`, alongside a TODO to create a V2N102-specific
   dts once its DDR map is confirmed and a note that this bootcmd must
   change in lockstep if that TODO ever lands — so the hardcoded name in
   the patch covers both SKUs today but is a real tripwire, not a
@@ -10512,7 +10512,7 @@ returns `None` for both. `alp_cli/validator.py::_load_soc_caps` still
 soft-fails to `None` and still roots at its injected `soc_dir`: rebuilding it
 as `resolve_soc_path(ref, soc_dir.parent)` is exact only while every caller
 passes a directory literally named `socs`, and a test now injects one that
-is not. `new_som.py:154` keeps its `_SOC_REF_RE` guard, which is strictly
+is not. `alp_cli/new_som.py:154` keeps its `_SOC_REF_RE` guard, which is strictly
 narrower than an arity check (it also demands lowercase slugs), so
 `Alif:ensemble:e8` still prefills empty rather than `Alif`.
 
@@ -11474,7 +11474,7 @@ disclaiming it. The two changes are sequential, not contradictory: the docs
 were made honest first, and this makes them honest in the other direction.
 
 The exposure was real. `grep -rn 'min_sdk_version\|max_sdk_version' scripts/`
-returned nothing, and `alp_project_loader.py:35`'s `SDK_VERSION_FILE` was
+returned nothing, and `scripts/alp_project_loader.py:35`'s `SDK_VERSION_FILE` was
 referenced nowhere else in its own file, so a customer whose upgraded SDK no
 longer supported their board revision got a normal, successful emit and
 firmware built against the wrong hardware assumptions, silently — while the
@@ -13811,7 +13811,7 @@ overlay wiring the customer's path silently drops.
   *pinned* Zephyr's `share/sysbuild/**/Kconfig*`. It resolves that oracle from
   `$ZEPHYR_BASE` / the west topdir and `pytest.skip`s when neither exists. No job
   satisfied the precondition: the only two running `tests/scripts/`
-  (`cross-platform-zephyr.yml:156`, `pr-metadata-validate.yml:385`) are
+  (`.github/workflows/cross-platform-zephyr.yml:156`, `.github/workflows/pr-metadata-validate.yml:385`) are
   pure-Python checkouts with zero `west init` / `ZEPHYR_BASE`, while the jobs
   that DO carry a workspace (`pr-twister.yml`, `pr-tier-a-libraries.yml`,
   `nightly-aen-hil.yml`) never ran `tests/scripts/`. So the gate shipped, skipped

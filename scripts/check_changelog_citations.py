@@ -103,6 +103,41 @@ _ANCHOR = re.compile(r"""^\s*\(\s*["“`](?P<text>[^"”`]{4,120})["”`]""")
 _FOREIGN_PREFIXES = ("python/", "crates/", "contract/")
 
 
+#: `CHANGELOG.md` is scanned too, not just `changelog.d/` fragments -- a citation
+#: used to stop being checked the moment its fragment was folded in at release
+#: time, which is exactly when it starts to rot (alp-sdk#1715; alp-sdk#1498 was
+#: the symptom).  But the two halves of that file have different contracts and
+#: must NOT be graded the same way:
+#:
+#:   * `[Unreleased]` describes the CURRENT tree.  A citation there must resolve,
+#:     same as a fragment -- ERROR.
+#:   * A released section is a HISTORICAL RECORD of a tree that no longer exists.
+#:     Some of its citations are unfixable by construction, and "fixing" them
+#:     would falsify what shipped.  Measured on dev: `alp_cli/new_som.py:154`
+#:     (deleted with the alp_cli retirement, #1367/#1368), `docs/Overview.md`
+#:     (deleted), and `docs/abi/README.md:157`, whose anchor "no final `v0.15.0`
+#:     tag exists yet" was correctly removed once v0.15.0 GA shipped.  Those are
+#:     reported as WARNINGS -- visible, never silently passed, never blocking.
+#:
+#: Grading released history as errors would make this gate unlandable without
+#: rewriting shipped release notes to suit today's tree, which is the opposite of
+#: what a changelog is for.
+CHANGELOG = REPO / "CHANGELOG.md"
+
+
+def _split_changelog(text: str) -> tuple[str, str]:
+    """Return (unreleased_part, released_part) of CHANGELOG.md.
+
+    The split is the SECOND `## [` heading: the first is `[Unreleased]`, and
+    everything from the next one on has shipped.  A file with no released
+    section yet yields an empty tail.
+    """
+    heads = [m.start() for m in re.finditer(r"^## \[", text, re.MULTILINE)]
+    if len(heads) < 2:
+        return text, ""
+    return text[:heads[1]], text[heads[1]:]
+
+
 def _iter_fragments() -> list[Path]:
     if not FRAGMENT_DIR.is_dir():
         return []
@@ -202,12 +237,33 @@ def main() -> int:
         total_checked += checked
         total_anchored += anchored
 
+    # CHANGELOG.md: [Unreleased] is graded like a fragment; released history is
+    # reported as warnings only (see CHANGELOG's comment above).
+    all_warnings: list[str] = []
+    if CHANGELOG.is_file():
+        head, tail = _split_changelog(
+            CHANGELOG.read_text(encoding="utf-8", errors="replace"))
+        errs, skips, checked, anchored = _check_one(CHANGELOG, head)
+        all_errors += errs
+        all_skips += skips
+        total_checked += checked
+        total_anchored += anchored
+        if tail:
+            werrs, wskips, wchecked, wanchored = _check_one(CHANGELOG, tail)
+            all_warnings += werrs
+            all_skips += wskips
+            total_checked += wchecked
+            total_anchored += wanchored
+
+    for w in all_warnings:
+        print(f"  WARN (released history, not blocking) {w}")
+
     for s in all_skips:
         print(f"  SKIP {s}")
 
     if all_errors:
         print(f"\ncheck-changelog-citations: {len(all_errors)} broken "
-              f"citation(s) across {len(fragments)} fragment(s):",
+              f"citation(s) across {len(fragments)} fragment(s) + CHANGELOG.md:",
               file=sys.stderr)
         for e in all_errors:
             print(f"  {e}", file=sys.stderr)
@@ -219,7 +275,7 @@ def main() -> int:
 
     unanchored = total_checked - total_anchored
     print(f"check-changelog-citations: OK -- {total_checked} citation(s) "
-          f"resolved across {len(fragments)} fragment(s) "
+          f"resolved across {len(fragments)} fragment(s) + CHANGELOG.md "
           f"({total_anchored} anchored and text-verified, {unanchored} "
           f"range-checked only"
           + (f", {len(all_skips)} skipped" if all_skips else "") + ").")
