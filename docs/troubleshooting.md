@@ -157,7 +157,7 @@ success.  Decode tips:
 |-------------------------|--------------------------------------------------------------------|-------------------------------------------------------|
 | `ALP_OK` (0)            | Success.                                                           | —                                                     |
 | `ALP_ERR_INVAL` (-1)    | Invalid argument (NULL pointer, out-of-range value).               | Function args + caller's input validation.            |
-| `ALP_ERR_NOT_READY` (-2)| Peripheral not initialised or chip not ACKing.                     | Was `_open` / `_init` called?  Bus / address correct? |
+| `ALP_ERR_NOT_READY` (-2)| The handle is not in a state to perform this operation.            | Was `_open` / `_init` called?  Bus / address correct? |
 | `ALP_ERR_BUSY` (-3)     | Peripheral busy.                                                   | Concurrent access?  DMA still running?                |
 | `ALP_ERR_TIMEOUT` (-4)  | Transfer timed out.                                                | Slave not responding -- physical wiring?              |
 | `ALP_ERR_IO` (-5)       | Bus / line error.                                                  | CRC mismatch (GD32 bridge), I2C NACK, SPI mode wrong. |

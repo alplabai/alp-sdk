@@ -67,9 +67,14 @@ som:
 #
 #   os:          zephyr | yocto | baremetal | off
 #   app:         path to the app source directory for this core
-#                  - zephyr   -> dir with prj.conf or CMakeLists.txt
-#                  - baremetal-> dir with CMakeLists.txt
-#                  - yocto    -> recipe directory OR `image:` instead
+#                  - zephyr   -> a self-contained app dir with its own
+#                                CMakeLists.txt, OR a sources-only dir
+#                                (e.g. ./src) whose PARENT dir has the
+#                                CMakeLists.txt -- falls back to the
+#                                parent automatically when it does
+#                  - baremetal-> dir with CMakeLists.txt -- no fallback
+#                  - yocto    -> source dir paired with `recipe:`, OR
+#                                `image:` instead of `app:`
 #   image:       Yocto image recipe name (e.g. alp-image-edge)
 #   peripherals: Zephyr peripheral subsystems / Yocto packages
 #                  needed by this slice (per-core, not project-wide)
@@ -157,7 +162,9 @@ populated:
 #   - macro:      uppercase C-identifier the generator emits
 #   - doc:        optional one-line Doxygen `@brief` text
 #   - active_low: optional bool
-#   - routes_via: optional SoM-side mediator note (e.g. `cc3501e`)
+#   - pull:       optional "up" | "down" | "none" (default "none") -- PCB pull-resistor, documentation only
+#   - debounce_ms: optional integer -- HW debounce time constant, documentation only
+#   - board_alias: optional BOARD_<NAME> portable cross-EVK alias (e1m-spec STANDARD.md section 7.2)
 e1m_routes:
   gpio:
     - { e1m: E1M_GPIO_IO15, macro: PIN_BMI323_INT1,

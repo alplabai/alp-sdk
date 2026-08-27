@@ -623,15 +623,21 @@ def _schema_error_to_diagnostic(
         )
 
     if err.validator == "additionalProperties":
-        if abs_path:
-            bad_key = abs_path[-1]
-        else:
-            # jsonschema reports additionalProperties errors at the parent level;
-            # the offending key is embedded in the message text.
-            import re as _re
-            _m = _re.search(r"'([^']+)'", err.message)
-            bad_key = _m.group(1) if _m else "?"
-        if parent and "__keys__" in parent and bad_key in parent["__keys__"]:
+        # jsonschema reports additionalProperties errors AT the object that
+        # rejected the extra key: `abs_path` is that object's OWN path, not
+        # the offending key's -- so the offending key is only ever
+        # recoverable from the message text, never from `abs_path[-1]`.
+        # (Nested case: a `server:` block with `additionalProperties:
+        # false` rejecting `tls_ca_bundle` reports `abs_path ==
+        # ["ota", "server"]`; `abs_path[-1]` is `"server"`, the block
+        # itself, not the unknown key -- which used to surface as the
+        # misleading "unknown key 'server'".)
+        import re as _re
+        _m = _re.search(r"'([^']+)'", err.message)
+        bad_key = _m.group(1) if _m else "?"
+        offending = _walk(data, abs_path) if abs_path else data
+        if offending and "__keys__" in offending and bad_key in offending["__keys__"]:
+            parent = offending
             line, col = node_position(parent, bad_key, target="key")
             span = len(str(bad_key))
         allowed = list(err.schema.get("properties", {}).keys())

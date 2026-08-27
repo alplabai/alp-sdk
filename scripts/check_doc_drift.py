@@ -311,6 +311,14 @@ _MATRIX_TOTAL_QUOTING_DOCS = (
 _STATED_SLASH_FRACTION_RE = re.compile(r"(?<![\d/])(\d+)\s*/\s*(\d+)(?![\d/])")
 _STATED_OF_FRACTION_RE = re.compile(r"(\d+)\s+of\s+(\d+)")
 
+# The example/preset-adoption count docs/board-config-schema.md hand-quotes
+# ("100 do today -- 75 on `e1m-evk`, 25 on `e1m-x-evk`") -- checked live
+# against examples/**/board.yaml's `preset:` field so it can't re-rot the
+# way 66/46/20 did before it.
+_EXAMPLE_PRESET_COUNT_RE = re.compile(
+    r"\((\d+) do today — (\d+) on `e1m-evk`, (\d+) on `e1m-x-evk`\)"
+)
+
 
 def collect_known_symbols(root: pathlib.Path) -> set[str]:
     """Return every ALP_*/alp_* token that appears in ANY of the SDK's
@@ -612,6 +620,48 @@ def find_matrix_total_drift(root: pathlib.Path) -> list[tuple[str, int, str, str
     return drift
 
 
+def find_example_preset_count_drift(root: pathlib.Path) -> list[tuple[str, int, str, str]]:
+    """Return a stale hand-quoted example/preset-adoption count.
+
+    docs/board-config-schema.md hand-quotes how many `examples/**/board.yaml`
+    files exist and how many use each preset ("100 do today -- 75 on
+    `e1m-evk`, 25 on `e1m-x-evk`"). Recompute the real counts by walking the
+    tree and comparing `preset:` values, instead of trusting the prose to
+    stay in sync -- the same drift this line has already suffered twice
+    (66/46/20, then 100/75/25).
+    """
+    doc_path = root / "docs" / "board-config-schema.md"
+    examples_dir = root / "examples"
+    if not doc_path.is_file() or not examples_dir.is_dir():
+        return []
+
+    board_yamls = sorted(examples_dir.glob("**/board.yaml"))
+    evk = x_evk = 0
+    for p in board_yamls:
+        m = re.search(r"(?m)^preset:\s*(\S+)",
+                       p.read_text(encoding="utf-8", errors="replace"))
+        if not m:
+            continue
+        if m.group(1) == "e1m-evk":
+            evk += 1
+        elif m.group(1) == "e1m-x-evk":
+            x_evk += 1
+    actual = (len(board_yamls), evk, x_evk)
+
+    text = doc_path.read_text(encoding="utf-8", errors="replace")
+    drift: list[tuple[str, int, str, str]] = []
+    for m in _EXAMPLE_PRESET_COUNT_RE.finditer(text):
+        stated = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        if stated != actual:
+            line_no = text.count("\n", 0, m.start()) + 1
+            drift.append((
+                "docs/board-config-schema.md", line_no, m.group(0),
+                f"({actual[0]} do today — {actual[1]} on `e1m-evk`, "
+                f"{actual[2]} on `e1m-x-evk`)",
+            ))
+    return drift
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -632,6 +682,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     stale_cc3501e = find_cc3501e_bridge_stale_claims(root)
     e1m_x_pinout_gaps = find_e1m_x_pinout_guidance_gaps(root)
     matrix_total_drift = find_matrix_total_drift(root)
+    example_preset_count_drift = find_example_preset_count_drift(root)
 
     if dead:
         print("Dead SDK-symbol references "
@@ -664,18 +715,27 @@ def main(argv: Optional[list[str]] = None) -> int:
         for rel, line_no, matched, expected in matrix_total_drift:
             print(f"  {rel}:{line_no}  \"{matched}\" -- matrix says {expected}",
                   file=sys.stderr)
+    if example_preset_count_drift:
+        print("Example/preset-adoption count quoted in prose doesn't match "
+              "examples/**/board.yaml's preset: fields:", file=sys.stderr)
+        for rel, line_no, matched, expected in example_preset_count_drift:
+            print(f"  {rel}:{line_no}  \"{matched}\" -- tree says {expected}",
+                  file=sys.stderr)
 
-    if dead or gaps or stale_cc3501e or e1m_x_pinout_gaps or matrix_total_drift:
+    if (dead or gaps or stale_cc3501e or e1m_x_pinout_gaps
+            or matrix_total_drift or example_preset_count_drift):
         print(f"\ndoc-drift: {len(dead)} dead ref(s), {len(gaps)} index "
               f"gap(s), {len(stale_cc3501e)} stale CC3501E bridge "
               f"claim(s), {len(e1m_x_pinout_gaps)} E1M-X pinout "
               f"guidance gap(s), {len(matrix_total_drift)} stale matrix "
-              f"total(s) -- failing.", file=sys.stderr)
+              f"total(s), {len(example_preset_count_drift)} stale example "
+              f"preset count(s) -- failing.", file=sys.stderr)
         return 1
 
     print("doc-drift: OK (no dead symbol refs, docs index complete, "
           "CC3501E bridge wording current, E1M-X pinout guidance current, "
-          "portability-matrix totals in sync).")
+          "portability-matrix totals in sync, example preset count in "
+          "sync).")
     return 0
 
 
