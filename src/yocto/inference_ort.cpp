@@ -119,6 +119,7 @@ extern "C" {
 }
 
 #include "inference_handle_internal.h"
+#include "inference_tensor_shape.h"
 
 namespace
 {
@@ -643,23 +644,15 @@ alp_inference_ort_get_input(struct alp_inference *h_, size_t index, alp_inferenc
 
 		const OrtTensorInfo &info = st->in_info[index];
 		/* shape[] holds 4 entries; a rank > 4 tensor is sized correctly via
-         * size_bytes but its descriptor's shape[] is truncated to the first 4
-         * dims (uint8_t rank field mirrors that truncation).  Every dim
-         * that reaches here has already been bounds-checked against
-         * UINT16_MAX in _gather_tensor_info(), so the cast below never
-         * truncates. */
-		const size_t rank = (info.shape.size() > 4) ? 4 : info.shape.size();
+         * size_bytes, but shape[] itself cannot represent it -- refuse
+         * rather than truncate (issue #1729). */
+		if (!alp_inference_shape::fill_fixed_shape(info.shape.data(), info.shape.size(), out)) {
+			return ALP_ERR_NOSUPPORT;
+		}
 
 		out->data       = st->input_bufs[index].data();
 		out->size_bytes = info.size_bytes;
 		out->dtype      = _ort_dtype_to_alp(info.dtype);
-		out->rank       = static_cast<uint8_t>(rank);
-		for (size_t i = 0; i < rank; ++i) {
-			out->shape[i] = static_cast<uint16_t>(info.shape[i]);
-		}
-		for (size_t i = rank; i < 4; ++i) {
-			out->shape[i] = 0;
-		}
 		out->scale      = 1.0f;
 		out->zero_point = 0;
 		return ALP_OK;
@@ -682,18 +675,14 @@ alp_inference_ort_get_output(struct alp_inference *h_, size_t index, alp_inferen
 		}
 
 		const OrtTensorInfo &info = st->out_info[index];
-		const size_t         rank = (info.shape.size() > 4) ? 4 : info.shape.size();
+		/* Same rank > 4 refusal as get_input() above (issue #1729). */
+		if (!alp_inference_shape::fill_fixed_shape(info.shape.data(), info.shape.size(), out)) {
+			return ALP_ERR_NOSUPPORT;
+		}
 
 		out->data       = st->output_bufs[index].data();
 		out->size_bytes = info.size_bytes;
 		out->dtype      = _ort_dtype_to_alp(info.dtype);
-		out->rank       = static_cast<uint8_t>(rank);
-		for (size_t i = 0; i < rank; ++i) {
-			out->shape[i] = static_cast<uint16_t>(info.shape[i]);
-		}
-		for (size_t i = rank; i < 4; ++i) {
-			out->shape[i] = 0;
-		}
 		out->scale      = 1.0f;
 		out->zero_point = 0;
 		return ALP_OK;
