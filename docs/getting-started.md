@@ -91,7 +91,7 @@ tan build --project examples/peripheral-io/gpio-button-led --sdk-root "$PWD"
 # this cross-compiles for the example's real SoM (E1M-AEN801) -- it
 # needs the Zephyr SDK toolchain pinned in metadata/toolchains.json;
 # flash it and open a serial monitor to see output like:
-#   [gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
+#   [gpio] init button=BOARD_PIN_ENCODER_SW, led=BOARD_PIN_LED_RED
 #   ...
 #   [gpio] done
 ```
@@ -414,7 +414,7 @@ output like this (exact ordering/timing may vary):
 
 ```
 *** Booting Zephyr OS build v4.4.1 ***
-[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
+[gpio] init button=BOARD_PIN_ENCODER_SW, led=BOARD_PIN_LED_RED
 [gpio] led=0 status=0
 [gpio] led=1 status=0
 [gpio] led=0 status=0
@@ -759,8 +759,8 @@ Key tasks (Command Palette → **Tasks: Run Task**):
   `cmake-args`, `yocto-conf`, `dts-overlay`, `hw-info-h`,
   `west-libraries`).
 - **Per-peripheral examples**: [`examples/`](../examples/README.md)
-  -- 11 minimal apps, one per `<alp/*.h>` class, each driven by a
-  matching `board.yaml`.
+  -- 50+ example apps covering the `<alp/*.h>` peripheral classes,
+  each driven by a matching `board.yaml`.
 - **End-to-end reference apps**:
   [`examples/aen/edgeai-vision-aen/`](../examples/aen/edgeai-vision-aen/)
   (camera → Ethos-U inference → display) and

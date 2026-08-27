@@ -1,8 +1,8 @@
 # Firmware engineer quickstart
 
-This guide takes a firmware engineer from "I have an E1M-X module
-on the bench" to a working application built against the SDK.  It
-sits **alongside** the general [`docs/getting-started.md`](getting-started.md)
+This guide takes a firmware engineer from "I have an E1M or E1M-X
+module on the bench" to a working application built against the
+SDK.  It sits **alongside** the general [`docs/getting-started.md`](getting-started.md)
 walkthrough (which covers workspace setup + the gpio-button-led
 example end-to-end); this doc focuses on the choices and patterns
 that matter when you're targeting a specific SoM and writing
@@ -10,8 +10,8 @@ real firmware.
 
 ## Who this is for
 
-You're writing Zephyr or bare-metal C against an E1M-X System-on-
-Module (AEN, V2N, V2N-M1, or N93 family) and you want:
+You're writing Zephyr or bare-metal C against an E1M or E1M-X
+System-on-Module (AEN, V2N, V2N-M1, or N93 family) and you want:
 
 * A clear picture of what the SDK gives you per-SoM.
 * Idiomatic patterns for the on-module chips (PMICs, RTC, Wi-Fi/BT

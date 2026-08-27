@@ -59,11 +59,11 @@ deltas (verify when the HW config writeup lands):
 
 ## Targeted SoM SKUs
 
-| SoM SKU       | Backing silicon                                          | Module metadata `soc_ref` |
+| SoM SKU       | Backing silicon                                          | Module metadata `silicon` |
 |---------------|----------------------------------------------------------|---------------------------|
 | `E1M-V2N101`  | Renesas `R9A09G056N44GBG#AC0`                            | `renesas:rzv2n:n44`       |
 | `E1M-V2N102`  | Renesas `R9A09G056N44GBG#AC0` (different memory tier)    | `renesas:rzv2n:n44`       |
-| `E1M-V2M101`  | Renesas `R9A09G056N44GBG#AC0` + DEEPX `DX-M1`            | `renesas:rzv2n:n44` + `deepx:dx:m1` |
+| `E1M-V2M101`  | Renesas `R9A09G056N44GBG#AC0` + DEEPX `DX-M1`            | `renesas:rzv2n:n44` (+ `npu: deepx_dxm1`) |
 | `E1M-V2M102`  | Same, alt memory tier                                    | same                      |
 
 ## What this means for the SDK

@@ -1,11 +1,45 @@
 # 0015. CC3501E bridge firmware is embedded in alp-sdk
 
-Status: Accepted
+Status: Accepted — see **Amendment** below (2026-08-27): the Context
+table's gd32-bridge "prebuilt blob" precedent names a path that has never
+existed.  The decision below is unchanged.
 Date: 2026-06-13
 
 Supersedes the "separate `alplabai/cc3501e-firmware` repo" stance
 previously described in `docs/cc3501e-bridge.md` ("Two-repo split") and
 the original `firmware/cc3501e/README.md` bootstrap doc.
+
+## Amendment (2026-08-27 — the gd32-bridge half of the prebuilt-blob precedent names a path that does not exist)
+
+The Context table's "99% never rebuild it" row below reads "true for
+gd32-bridge too; the prebuilt blob ships from `firmware/<bridge>/prebuilt/`
+in alp-sdk **regardless of where source lives**".  Only the cc3501e half of
+that is true of the tree.
+
+- `firmware/cc3501e/prebuilt/` exists and ships exactly what the Decision
+  promises: `cc3501e-v0.2.0.bin`, `cc3501e-v0.3.0.bin` and
+  `cc3501e-v0.4.0.bin`, each with a `.sha256` and a `.sig`, plus a
+  `CHANGELOG.md`.
+- `firmware/gd32-bridge/prebuilt/` has never existed.  That tree ships
+  source, `firmware-version.txt` and its own toolchain; the consumer builds
+  the binary:
+
+  ```bash
+  cd firmware/gd32-bridge
+  cmake -B build -DCMAKE_TOOLCHAIN_FILE=toolchain/arm-none-eabi.cmake
+  cmake --build build
+  ```
+
+  Committing no gd32 blob was deliberate --
+  `docs/superpowers/specs/2026-06-01-gd32-flash-release-design.md` states
+  "**No committed prebuilt blob**", and `docs/v0.6-tbd-and-assumptions.md`
+  still lists `firmware/gd32-bridge/prebuilt/` as a *future* path, to be
+  filled "once Alp Lab cuts a released, signed gd32-bridge binary".
+
+The decision does not turn on this: gd32-bridge is still the in-alp-sdk
+helper-MCU-bridge precedent, with its own toolchain, its own version axis
+and its build outside the Zephyr gate.  Only that row's "ships from
+`firmware/<bridge>/prebuilt/`" clause should be read as cc3501e-only.
 
 ## Context
 

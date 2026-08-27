@@ -3,8 +3,9 @@
 Reference applications for the E1M-AEN family (lead part: Alif
 Ensemble E8 -- dual-M55 + Ethos-U85/U55 NPUs, on-module ISP /
 camera path, GPU2D).  Build any of these against an E1M-AEN SoM
-populated on the E1M-EVK board; the per-example `board.yaml`
-carries the exact SKU + board.
+populated on the E1M-EVK board; where an example ships a
+per-example `board.yaml` (9 of the 66 directories here), that
+file carries the exact SKU + board.
 
 Apps tagged **bench** are on-silicon RAM-run validations read over SWD via the
 RAM console; **regcheck/staging** apps prove a driver binds + programs its

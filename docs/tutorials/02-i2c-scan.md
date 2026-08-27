@@ -8,9 +8,10 @@
      metadata/e1m_modules/E1M-V2N101.yaml `i2c_devices:` (`brd_i2c:` vs
      `e1m_i2c0:`) for the V2N SoM-level parts.  The closing
      `metadata/e1m_modules/<SKU>.yaml`'s `i2c_devices:` pointer names the
-     AEN family's real per-chip source, since E1M-AEN801.yaml has no
-     `i2c_devices:` block.  The V2N port instructions are re-verified
-     against a real `scripts/alp_project.py --emit zephyr-conf` run: a
+     AEN family's real per-chip source, via E1M-AEN801.yaml's own
+     `i2c_devices:` block (`brd_i2c:` vs `e1m_i2c0:`).  The V2N port
+     instructions are re-verified against a real
+     `scripts/alp_project.py --emit zephyr-conf` run: a
      `som.sku`-only swap of the i2c-scanner's board.yaml fails closed at
      each of preset/pins/cores (ALP-B007, then an unknown-pad error, then
      an unknown-core-id error) until all three are updated together. -->
@@ -66,20 +67,25 @@ int main(void) {
 ## Expected output on E1M-AEN801 + E1M-EVK
 
 `BOARD_I2C_SENSORS` is one shared bus, so the scan ACKs more than just
-the on-module chips -- the E1M-EVK carrier populates thirteen more
+the on-module chip -- the E1M-EVK carrier populates thirteen more
 devices on the same `ALP_E1M_I2C0` (`metadata/boards/e1m-evk.yaml`
 `i2c_devices:`).  Expect the full set below, not just the on-module
-four, or the troubleshooting step at the bottom of this page will send
+one, or the troubleshooting step at the bottom of this page will send
 you chasing a part that was never on this bus to begin with.
 
-On-module (E1M-AEN801 `on_module:` block + `metadata/chips/*.yaml`):
+On-module (E1M-AEN801 `i2c_devices:` `e1m_i2c0:` block):
 
 ```
-0x30 ACK   -- OPTIGA Trust M (secure element)
-0x48 ACK   -- TMP112 (temperature sensor)
 0x50 ACK   -- 24C128 EEPROM
-0x52 ACK   -- RV-3028-C7 RTC
 ```
+
+The SoM's three other I²C parts -- OPTIGA Trust M (`0x30`), TMP112
+(`0x48`) and RV-3028-C7 (`0x52`) -- do NOT ACK here.  They sit on
+`brd_i2c`, a separate slave-only LPI2C0 housekeeping bus the M55 cannot
+master (`metadata/e1m_modules/E1M-AEN801.yaml` `i2c_devices:`
+`brd_i2c:`; `docs/bring-up-aen.md` §5.1).  A `0x48` in a scan of this
+bus is U32 INA236B (+V_CAM0 rail) on PRE-RESPIN carriers, not the
+TMP112.
 
 E1M-EVK board-populated (`metadata/boards/e1m-evk.yaml` `i2c_devices:`):
 
