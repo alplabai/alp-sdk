@@ -69,3 +69,23 @@ if __name__ == "__main__":
     test_python_tan_citation_still_skipped()
     test_nonexistent_in_tree_path_still_hard_fails()
     print("OK")
+
+
+def test_dotfile_path_citation_is_matched():
+    """alp-sdk#1715: the citation regex required the first path character to be
+    alphanumeric or `_`, so a leading dot meant `.github/workflows/x.yml:12`
+    never matched AT ALL -- such a citation was silently unchecked rather than
+    reported. Several already shipped in `CHANGELOG.md` that way. Rewriting a
+    bare `x.yml:12` to its real repo-relative `.github/...` path would
+    otherwise have REMOVED it from the gate's view."""
+    mod = _load()
+    text = "see `.github/workflows/cross-platform-zephyr.yml:449` for the step"
+    hits = [m.group("path") for m in mod._CITATION.finditer(text)]
+    assert hits == [".github/workflows/cross-platform-zephyr.yml"]
+
+
+def test_plain_path_citation_still_matched():
+    mod = _load()
+    text = "see `scripts/alp_project_loader.py:37` for the constant"
+    hits = [m.group("path") for m in mod._CITATION.finditer(text)]
+    assert hits == ["scripts/alp_project_loader.py"]

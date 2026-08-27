@@ -83,7 +83,7 @@ FRAGMENT_DIR = REPO / "changelog.d"
 
 #: `path/to/file.ext:123` or `path/to/file.ext:123-456`, inside backticks.
 _CITATION = re.compile(
-    r"`(?P<path>[A-Za-z0-9_][A-Za-z0-9_/.+-]*\.(?:c|h|cpp|hpp|py|sh|ya?ml|md|json|bb|bbappend|cmake|txt|dts|dtsi|overlay|conf))"
+    r"`(?P<path>\.?[A-Za-z0-9_][A-Za-z0-9_/.+-]*\.(?:c|h|cpp|hpp|py|sh|ya?ml|md|json|bb|bbappend|cmake|txt|dts|dtsi|overlay|conf))"
     r":(?P<start>\d+)(?:-(?P<end>\d+))?`"
 )
 
