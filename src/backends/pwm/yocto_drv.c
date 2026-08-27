@@ -64,6 +64,7 @@
 
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
+#include <alp/e1m_pinout.h>
 #include <alp/peripheral.h>
 #include <alp/pwm.h>
 
@@ -160,10 +161,14 @@ static alp_status_t (*g_pwm_test_sysfs_read_hook)(const char *path,
  * terminates.  A missing/unreadable attribute maps errno -> alp via the
  * shared @ref alp_status_from_posix_errno baseline; used only for the
  * `npwm` out-of-range probe in y_open() (#1635) today.
+ *
+ * @param buf_sz  Size of @p buf.  Must be >= 1 -- a 0 would underflow to
+ *                `(size_t)-1` in the `buf_sz - 1` read length below.
  */
 static alp_status_t _sysfs_read(const char *path, char *buf, size_t buf_sz)
 {
 	if (g_pwm_test_sysfs_read_hook != NULL) return g_pwm_test_sysfs_read_hook(path, buf, buf_sz);
+	if (buf_sz == 0u) return ALP_ERR_INVAL;
 
 	int fd = open(path, O_RDONLY | O_CLOEXEC);
 	if (fd < 0) return alp_status_from_posix_errno(errno);
@@ -253,8 +258,12 @@ y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilitie
 	 * file-header "Channel-id mapping" note) -- an index outside that
 	 * space isn't a possible PWM instance on ANY silicon, so it's a
 	 * malformed caller argument, not a hardware limit (mirrors
-	 * zephyr_drv.c:108's ARRAY_SIZE(_specs) check). */
-	if (cfg->channel_id >= 8u) return ALP_ERR_INVAL;
+	 * zephyr_drv.c:108's ARRAY_SIZE(_specs) check).  ALP_E1M_PWM_COUNT
+	 * and ALP_E1M_X_PWM_COUNT are both 8u (e1m_pinout.h / e1m_x_pinout.h);
+	 * this backend is form-factor-generic (silicon_ref "*"), so either
+	 * would do -- pick ALP_E1M_PWM_COUNT to source the bound from a
+	 * header instead of a bare literal. */
+	if (cfg->channel_id >= ALP_E1M_PWM_COUNT) return ALP_ERR_INVAL;
 
 	y_pwm_data_t *d = (y_pwm_data_t *)malloc(sizeof(*d));
 	if (d == NULL) return ALP_ERR_NOMEM;

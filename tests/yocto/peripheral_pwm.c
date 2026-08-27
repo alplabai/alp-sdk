@@ -46,6 +46,7 @@
 static char         g_call_paths[MAX_CALLS][128];
 static char         g_call_vals[MAX_CALLS][16];
 static int          g_call_count;
+static int          g_read_count;    /* # of fake_sysfs_read calls */
 static alp_status_t g_export_result; /* what the "export" write returns */
 static bool         g_fail_period;   /* force the "period" write to fail */
 
@@ -72,6 +73,7 @@ static alp_status_t fake_sysfs_write(const char *path, const char *val)
  * supports, or a read failure when g_npwm < 0. */
 static alp_status_t fake_sysfs_read(const char *path, char *buf, size_t buf_sz)
 {
+	++g_read_count;
 	if (strstr(path, "/npwm") == NULL) return ALP_ERR_NOT_READY;
 	if (g_npwm < 0) return ALP_ERR_NOT_READY;
 	(void)snprintf(buf, buf_sz, "%d", g_npwm);
@@ -115,6 +117,7 @@ static bool saw_configure_write(void)
 static void reset_fixture(void)
 {
 	g_call_count                = 0;
+	g_read_count                = 0;
 	g_export_result             = ALP_OK;
 	g_fail_period               = false;
 	g_npwm                      = -1; /* no npwm info -- check skipped, mirrors "chip absent" */
@@ -266,6 +269,7 @@ static void test_channel_id_beyond_abi_space_returns_inval(void)
 
 	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
 	ALP_ASSERT_EQ_INT(g_call_count, 0); /* no sysfs write attempted */
+	ALP_ASSERT_EQ_INT(g_read_count, 0); /* no sysfs read attempted either */
 }
 
 /* Regression for #1635: a well-formed channel_id (0..7) the pwmchip's
@@ -293,16 +297,45 @@ static void test_channel_id_beyond_chip_npwm_returns_out_of_range(void)
 }
 
 /* A channel within npwm's reported range still opens normally -- the
- * npwm probe must not false-positive on the valid case. */
+ * npwm probe must not false-positive on the valid case.  Uses the last
+ * valid index (npwm - 1 = 3 for a 4-channel chip), not 0, so an
+ * off-by-one in the `channel_id >= npwm` guard (e.g. `channel_id + 1 >=
+ * npwm`, which would wrongly reject channel 3) is actually exercised. */
 static void test_channel_id_within_chip_npwm_still_opens(void)
 {
 	reset_fixture();
-	g_npwm = 4;
+	g_npwm = 4; /* this pwmchip exposes channels 0..3 */
+
+	struct alp_pwm   h;
+	alp_pwm_config_t cfg = {
+		.channel_id = 3u, /* last valid index (npwm - 1) */
+		.period_ns  = 1000000u,
+		.polarity   = ALP_PWM_POLARITY_NORMAL,
+	};
+	memset(&h, 0, sizeof(h));
+	alp_capabilities_t caps = { 0 };
+	alp_status_t       rc   = y_open(&cfg, &h.state, &caps);
+
+	ALP_ASSERT_EQ_INT(rc, ALP_OK);
+	y_close(&h.state);
+}
+
+/* Regression for #1635: a failed npwm read (chip not present, ENOENT)
+ * is NOT treated as out-of-range -- y_open() falls through to the
+ * export write, and that write's own result (mapped from the real
+ * ENOENT/ENODEV/ENXIO family to ALP_ERR_NOT_READY per
+ * alp_status_from_posix_errno) is what the caller sees. */
+static void test_npwm_read_failure_surfaces_not_ready_from_export(void)
+{
+	reset_fixture();
+	g_npwm          = -1; /* npwm read fails -- chip not present */
+	g_export_result = ALP_ERR_NOT_READY;
 
 	struct alp_pwm           h;
 	alp_pwm_backend_state_t *st;
-	alp_status_t             rc = open_handle(&h, &st); /* channel_id = 0 */
-	ALP_ASSERT_EQ_INT(rc, ALP_OK);
+	alp_status_t             rc = open_handle(&h, &st);
+
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOT_READY);
 }
 
 int main(void)
@@ -316,6 +349,7 @@ int main(void)
 	test_channel_id_beyond_abi_space_returns_inval();
 	test_channel_id_beyond_chip_npwm_returns_out_of_range();
 	test_channel_id_within_chip_npwm_still_opens();
+	test_npwm_read_failure_surfaces_not_ready_from_export();
 
 	ALP_TEST_SUMMARY();
 }

@@ -123,6 +123,10 @@ typedef struct {
  *           `npwm`)
  *         - @ref ALP_ERR_NOT_READY — underlying device not ready or the
  *           devicetree alias is unset
+ *         - @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC — no PWM backend is
+ *           registered for the active SoC
+ *         - @ref ALP_ERR_NOT_IMPLEMENTED — the selected backend has no
+ *           `open` handler
  *         - @ref ALP_ERR_NOMEM — handle pool exhausted
  *         - a backend-mapped error if the hardware rejected the period
  */

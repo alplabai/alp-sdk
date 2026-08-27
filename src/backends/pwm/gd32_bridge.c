@@ -19,6 +19,7 @@
 
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
+#include <alp/e1m_x_pinout.h>
 #include <alp/peripheral.h>
 #include <alp/pwm.h>
 
@@ -69,13 +70,15 @@ br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabiliti
      * apart from a malformed index, so a single ALP_ERR_INVAL is the
      * complete (not collapsed) answer here (#1635).  The two-tier
      * contract still holds for THIS backend overall: the real hardware
-     * ceiling -- a period/duty the GD32 timer can't represent (16-bit
-     * ARR at 216 MHz CK_TIMER, ~303 us longest period, see
-     * docs/gd32-bridge-protocol.md §3.8) -- surfaces as
-     * ALP_ERR_OUT_OF_RANGE from br_set_duty()/br_set_period() via the
-     * firmware's own STATUS_OUT_OF_RANGE (wire 0x08, see
-     * gd32g553.c:status_from_wire()), not from this channel_id check. */
-	if (cfg->channel_id >= 8u) {
+     * floor -- a period the GD32 timer can't represent at its 1 us
+     * prescaled tick (period_us == 0, i.e. under 1 us; under 2 us
+     * center-aligned -- firmware/gd32-bridge/hal/gd32/pwm.c:142,164) --
+     * surfaces as ALP_ERR_OUT_OF_RANGE from br_set_duty()/br_set_period()
+     * via the firmware's own STATUS_OUT_OF_RANGE (wire 0x08, see
+     * gd32g553.c:status_from_wire()), not from this channel_id check.
+     * The other end of the range (a period past the 16-bit ARR, > 65.536
+     * ms) is currently silently clamped instead of rejected -- #1730. */
+	if (cfg->channel_id >= ALP_E1M_X_PWM_COUNT) {
 		return ALP_ERR_INVAL;
 	}
 	/* Probe the supervisor up-front: with no SPI/I2C bus configured
