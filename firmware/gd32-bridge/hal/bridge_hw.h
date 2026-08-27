@@ -325,8 +325,10 @@ int bridge_hw_power_mode_set(uint8_t mode, uint32_t wake_bitmap, uint32_t wake_a
 
 /* Allocate a fresh DSP-chain handle from the firmware's pool.  The
  * pool is sized firmware-side; exhaustion returns
- * BRIDGE_HW_ERR_NOTIMPL on the stub path (real builds return a
- * NOMEM-equivalent that the protocol layer maps to STATUS_NOMEM).
+ * BRIDGE_HW_ERR_NOTIMPL, which the protocol layer maps to
+ * STATUS_NOSUPPORT (0x06) -- there is no NOMEM-equivalent
+ * BRIDGE_HW_ERR_* here yet, so a full pool cannot report
+ * STATUS_NOMEM (0x07).
  * Returned @p chain_id is opaque to the protocol layer and host. */
 int bridge_hw_adc_dsp_chain_open(uint8_t *chain_id);
 

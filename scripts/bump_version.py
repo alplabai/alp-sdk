@@ -44,9 +44,6 @@ What this touches:
     metadata/sdk_version.yaml       -- the declared version.
     CHANGELOG.md                    -- slice [Unreleased] into the new version section.
     docs/abi/v<MAJOR.MINOR>-snapshot.json  -- regenerated.
-    alp.lock                        -- sdk.version + metadata digest, regenerated
-                                       so the "alp.lock in sync" gate passes on the
-                                       release commit.
     include/alp/version.h           -- ALP_VERSION_MAJOR/MINOR/PATCH +
                                        ALP_VERSION_STRING macros;
                                        enforced by scripts/check_version_doc_sync.py.
@@ -98,7 +95,6 @@ PYPROJECT = REPO / "pyproject.toml"
 BANNER_C = REPO / "src" / "zephyr" / "alp_banner.c"
 ABI_DIR = REPO / "docs" / "abi"
 ABI_SNAPSHOT_TOOL = REPO / "scripts" / "abi_snapshot.py"
-ALP_LOCK_TOOL = REPO / "scripts" / "west_commands" / "alp_lock.py"
 EMIT_SNAPSHOT_TOOL = REPO / "scripts" / "check_emit_snapshots.py"
 
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([\w.]+))?$")
@@ -285,19 +281,6 @@ def regenerate_abi_snapshot(new_version: str, dry_run: bool) -> None:
     print(f"  regenerated {snapshot_path.relative_to(REPO)}")
 
 
-def regenerate_alp_lock(dry_run: bool) -> None:
-    """Rewrite alp.lock so its sdk.version (and the metadata digest) track the
-    bump.  Without this the "alp.lock in sync" gate fails on the release commit
-    (sdk.version stays at the old version while sdk_version.yaml moves).
-    """
-    cmd = [sys.executable, str(ALP_LOCK_TOOL), "--workspace", str(REPO)]
-    if dry_run:
-        print(f"  would run: {' '.join(cmd)}")
-        return
-    subprocess.check_call(cmd)
-    print("  regenerated alp.lock (sdk.version + metadata digest)")
-
-
 def regenerate_emit_snapshots(dry_run: bool) -> None:
     """Rewrite the `--emit` goldens under tests/fixtures/emit-snapshots/ (#1461).
 
@@ -334,7 +317,6 @@ def main() -> int:
     update_pyproject(args.to, args.dry_run)
     update_banner_c(args.to, args.dry_run)
     regenerate_abi_snapshot(args.to, args.dry_run)
-    regenerate_alp_lock(args.dry_run)
     regenerate_emit_snapshots(args.dry_run)
     print()
     print("Next steps:")

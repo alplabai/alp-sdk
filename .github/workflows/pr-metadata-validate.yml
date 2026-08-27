@@ -72,7 +72,6 @@ on:
       - 'scripts/alp_cli/__init__.py'
       - 'scripts/alp_lock/**'
       - 'scripts/west_commands/alp_lock.py'
-      - 'alp.lock'
       - 'changelog.d/**'
       - 'scripts/assemble_changelog.py'
       - 'scripts/check_changelog_fragments.py'
@@ -141,7 +140,6 @@ on:
       - 'scripts/alp_cli/__init__.py'
       - 'scripts/alp_lock/**'
       - 'scripts/west_commands/alp_lock.py'
-      - 'alp.lock'
       - 'changelog.d/**'
       - 'scripts/assemble_changelog.py'
       - 'scripts/check_changelog_fragments.py'
@@ -544,7 +542,13 @@ jobs:
       - name: "Gate — apt-get update/install goes through scripts/ci/apt-bounded.sh (#1575)"
         run: python3 scripts/check_apt_bounded.py
 
-      - name: alp.lock in sync
+      - name: alp.lock generator self-check
+        # alp.lock is generated on demand, not committed (#1576): its
+        # `digests.metadata` is a single hash over the whole metadata/**
+        # tree, so any two PRs touching different metadata files rewrote
+        # the same line from different bases and conflicted by
+        # construction. `--check` builds a lock in memory and
+        # schema-validates it instead of diffing against a tracked copy.
         run: python3 scripts/west_commands/alp_lock.py --workspace . --check
 
       # Validate every HiL smoke spec under tests/hil/ parses against
