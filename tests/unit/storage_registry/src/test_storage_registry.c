@@ -257,6 +257,37 @@ ZTEST(alp_storage_registry, test_otfad_window_alignment_validation)
 	zassert_equal(alp_nxp_storage_otfad_set_window(&h, 0u, 0u, 1024u), ALP_ERR_NOSUPPORT);
 }
 
+/* ---------- (j) read-only handle: write() and erase() agree ------------- */
+
+ZTEST(alp_storage_registry, test_read_only_handle_write_and_erase_agree)
+{
+	/* #1635: a read-only handle used to answer write() with
+     * ALP_ERR_NOT_READY and erase() with ALP_ERR_INVAL for the exact
+     * same cause (state.read_only).  Both must now surface
+     * ALP_ERR_NOT_READY -- it's a handle STATE, not a malformed
+     * argument, matching the alp_handle_op_enter() convention settled
+     * by the #1646 cluster (PR #1713). Guards a regression back to
+     * ALP_ERR_INVAL on the erase path. */
+	alp_storage_config_t cfg = {
+		.kind        = ALP_STORAGE_KIND_QSPI_FLASH,
+		.instance_id = 0u,
+		.freq_hz     = 0u,
+		.read_only   = true,
+	};
+	alp_storage_t *h = alp_storage_open(&cfg);
+	zassert_not_null(h);
+
+	uint8_t payload[4] = { 0 };
+	zassert_equal(alp_storage_write(h, 0u, payload, sizeof(payload)),
+	              ALP_ERR_NOT_READY,
+	              "write() on a read_only handle must be ALP_ERR_NOT_READY");
+	zassert_equal(alp_storage_erase(h, 0u, sizeof(payload)),
+	              ALP_ERR_NOT_READY,
+	              "erase() on a read_only handle must be ALP_ERR_NOT_READY, not ALP_ERR_INVAL");
+
+	alp_storage_close(h);
+}
+
 /* ---------- (i) overflow-safe range helper for fixed-capacity backends -- */
 
 ZTEST(alp_storage_registry, test_range_in_capacity_accepts_valid)
