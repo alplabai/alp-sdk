@@ -75,6 +75,8 @@ extern "C" {
 #include "inference_handle_internal.h"
 }
 
+#include "inference_tensor_shape.h"
+
 /* The dispatcher's `struct alp_inference` comes from the shared internal
  * header (issue #1257).  This file used to hand-mirror the layout and cast
  * to the mirror; the mirror had a DIFFERENT field order and only worked
@@ -135,19 +137,21 @@ alp_inference_dtype_t dxrt_dtype_to_alp(dxrt::DataType t)
 }
 
 /** Fill an alp tensor descriptor from a dx_rt Tensor.  `data` points at
- *  the engine/SDK-owned buffer; the app must not free it. */
-void fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t *out)
+ *  the engine/SDK-owned buffer; the app must not free it.
+ *
+ *  @return false, leaving @p out untouched, when @p t's real rank exceeds
+ *          the fixed shape[4] descriptor -- the caller must return
+ *          ALP_ERR_NOSUPPORT instead of a truncated shape (issue #1729). */
+bool fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t *out)
 {
+	const std::vector<int64_t> &shape = t.shape();
+	if (!alp_inference_shape::fill_fixed_shape(shape.data(), shape.size(), out)) {
+		return false;
+	}
+
 	out->data       = data;
 	out->size_bytes = static_cast<size_t>(t.size_in_bytes());
 	out->dtype      = dxrt_dtype_to_alp(t.type());
-
-	const std::vector<int64_t> &shape = t.shape();
-	const size_t                n     = shape.size();
-	out->rank                         = static_cast<uint8_t>((n <= 4) ? n : 4);
-	for (uint8_t i = 0; i < out->rank; ++i) {
-		out->shape[i] = static_cast<uint16_t>(shape[i]);
-	}
 
 	/* dx_rt models carry per-task quant params internally and emit
      * already-dequantized FLOAT outputs for the common case; the public
@@ -156,6 +160,7 @@ void fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t 
      * <alp/ext/deepx/inference.h> escape hatch. */
 	out->scale      = 1.0f;
 	out->zero_point = 0;
+	return true;
 }
 
 } /* namespace */
@@ -237,7 +242,9 @@ extern "C" alp_status_t alp_inference_deepx_get_input(struct alp_inference   *h_
 	}
 	/* Hand back the SDK-owned staging buffer, not the engine's internal
      * pointer -- the app fills this before invoke(). */
-	fill_tensor_descriptor(st->inputs[index], st->input_bufs[index].data(), out);
+	if (!fill_tensor_descriptor(st->inputs[index], st->input_bufs[index].data(), out)) {
+		return ALP_ERR_NOSUPPORT; /* real rank > 4 -- see #1729 */
+	}
 	return ALP_OK;
 }
 
@@ -258,12 +265,16 @@ extern "C" alp_status_t alp_inference_deepx_get_output(struct alp_inference   *h
      * engine-owned result buffer; before any invoke the descriptor's
      * data() is the engine's zero-initialised output area. */
 	void *data = nullptr;
+	bool  ok;
 	if (index < st->last_outputs.size() && st->last_outputs[index] != nullptr) {
 		data = st->last_outputs[index]->data();
-		fill_tensor_descriptor(*st->last_outputs[index], data, out);
+		ok   = fill_tensor_descriptor(*st->last_outputs[index], data, out);
 	} else {
 		data = st->outputs[index].data();
-		fill_tensor_descriptor(st->outputs[index], data, out);
+		ok   = fill_tensor_descriptor(st->outputs[index], data, out);
+	}
+	if (!ok) {
+		return ALP_ERR_NOSUPPORT; /* real rank > 4 -- see #1729 */
 	}
 	return ALP_OK;
 }
