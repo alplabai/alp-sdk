@@ -103,6 +103,41 @@ _ANCHOR = re.compile(r"""^\s*\(\s*["“`](?P<text>[^"”`]{4,120})["”`]""")
 _FOREIGN_PREFIXES = ("python/", "crates/", "contract/")
 
 
+#: `CHANGELOG.md` is checked too, but NOT uniformly (alp-sdk#1715). A citation
+#: was previously verified only while it sat in a `changelog.d/` fragment and
+#: stopped being checked the moment that fragment was folded into
+#: `CHANGELOG.md` at release time -- precisely when it starts to rot. Scanning
+#: the released file closes that hole, but it cannot carry the same verdict:
+#:
+#:   * The `[Unreleased]` section is content still being written for a release
+#:     that has not shipped. A citation there is cheap to fix and SHOULD be
+#:     correct against `HEAD`, so it HARD-FAILS exactly like a fragment.
+#:   * Everything below it is the shipped historical record. Those entries
+#:     describe the tree as it stood at THAT release; ordinary refactoring moves
+#:     the lines they cite, through no fault of the entry. Hard-failing them
+#:     would redden this gate for every unrelated PR that moves a cited line,
+#:     and "fixing" one by re-pointing it at today's code silently changes what
+#:     the entry historically claimed. They are reported as WARNINGS: visible,
+#:     actionable, and never blocking.
+CHANGELOG = REPO / "CHANGELOG.md"
+
+#: The `[Unreleased]` section: its heading through to the next `## [` heading.
+_UNRELEASED = re.compile(r"^## \[Unreleased\].*?(?=^## \[)", re.S | re.M)
+
+
+def _split_changelog(text: str) -> tuple[str, str]:
+    """Split `CHANGELOG.md` into (unreleased section, shipped history).
+
+    A `CHANGELOG.md` with no `[Unreleased]` heading is treated as entirely
+    historical -- the conservative reading, since the alternative would
+    hard-fail the whole shipped record.
+    """
+    m = _UNRELEASED.search(text)
+    if not m:
+        return "", text
+    return m.group(0), text[:m.start()] + text[m.end():]
+
+
 def _iter_fragments() -> list[Path]:
     if not FRAGMENT_DIR.is_dir():
         return []
@@ -185,10 +220,14 @@ def main() -> int:
     args = ap.parse_args()
 
     fragments = _iter_fragments()
-    if not fragments:
-        print("check-changelog-citations: no changelog.d/ fragments -- nothing "
-              "to check. This is not a pass; it means the directory is empty.")
+    if not fragments and not CHANGELOG.is_file():
+        print("check-changelog-citations: no changelog.d/ fragments and no "
+              "CHANGELOG.md -- nothing to check. This is not a pass; it means "
+              "there is nothing here to read.")
         return 0
+    if not fragments:
+        print("check-changelog-citations: no changelog.d/ fragments -- "
+              "checking CHANGELOG.md only.")
 
     all_errors: list[str] = []
     all_skips: list[str] = []
@@ -202,12 +241,31 @@ def main() -> int:
         total_checked += checked
         total_anchored += anchored
 
+    # CHANGELOG.md: `[Unreleased]` hard-fails, shipped history warns. See the
+    # comment above CHANGELOG for why the two halves cannot share a verdict.
+    changelog_warnings: list[str] = []
+    if CHANGELOG.is_file():
+        unreleased, history = _split_changelog(
+            CHANGELOG.read_text(encoding="utf-8", errors="replace"))
+        errs, skips, checked, anchored = _check_one(CHANGELOG, unreleased)
+        all_errors += errs
+        all_skips += skips
+        total_checked += checked
+        total_anchored += anchored
+        warns, wskips, wchecked, wanchored = _check_one(CHANGELOG, history)
+        changelog_warnings += warns
+        all_skips += wskips
+        total_checked += wchecked
+        total_anchored += wanchored
+
     for s in all_skips:
         print(f"  SKIP {s}")
 
     if all_errors:
         print(f"\ncheck-changelog-citations: {len(all_errors)} broken "
-              f"citation(s) across {len(fragments)} fragment(s):",
+              f"citation(s) across {len(fragments)} fragment(s)"
+              + (" + CHANGELOG.md's [Unreleased] section"
+                 if CHANGELOG.is_file() else "") + ":",
               file=sys.stderr)
         for e in all_errors:
             print(f"  {e}", file=sys.stderr)
@@ -217,9 +275,19 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
+    if changelog_warnings:
+        print(f"\ncheck-changelog-citations: {len(changelog_warnings)} stale "
+              f"citation(s) in CHANGELOG.md's shipped history (WARNING, not a "
+              f"failure -- those entries describe the tree as it stood at their "
+              f"release):")
+        for w in changelog_warnings:
+            print(f"  WARN {w}")
+
     unanchored = total_checked - total_anchored
+    scanned = f"{len(fragments)} fragment(s)" + (
+        " + CHANGELOG.md" if CHANGELOG.is_file() else "")
     print(f"check-changelog-citations: OK -- {total_checked} citation(s) "
-          f"resolved across {len(fragments)} fragment(s) "
+          f"resolved across {scanned} "
           f"({total_anchored} anchored and text-verified, {unanchored} "
           f"range-checked only"
           + (f", {len(all_skips)} skipped" if all_skips else "") + ").")

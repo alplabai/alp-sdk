@@ -89,3 +89,50 @@ def test_plain_path_citation_still_matched():
     text = "see `scripts/alp_project_loader.py:37` for the constant"
     hits = [m.group("path") for m in mod._CITATION.finditer(text)]
     assert hits == ["scripts/alp_project_loader.py"]
+
+
+_UNREL = "## [Unreleased] - v9.9.9 candidate\n\nnew text\n\n"
+_HIST = "## [v9.9.8] - 2026-01-01\n\nold text\n"
+
+
+def test_split_changelog_separates_unreleased_from_history():
+    mod = _load()
+    unreleased, history = mod._split_changelog(
+        "# Changelog\n\n" + _UNREL + _HIST)
+    assert "new text" in unreleased and "old text" not in unreleased
+    assert "old text" in history and "new text" not in history
+
+
+def test_split_changelog_without_unreleased_is_all_history():
+    """Conservative: no `[Unreleased]` heading must not make the whole shipped
+    record hard-fail."""
+    mod = _load()
+    unreleased, history = mod._split_changelog("# Changelog\n\n" + _HIST)
+    assert unreleased == ""
+    assert "old text" in history
+
+
+def test_unreleased_citation_hard_fails_history_only_warns(tmp_path, capsys,
+                                                           monkeypatch):
+    """alp-sdk#1715: `[Unreleased]` is still-being-written and must fail like a
+    fragment; shipped history describes the tree at ITS release, so a line that
+    has since moved is a WARNING -- otherwise every unrelated refactor reddens
+    this gate on historical prose."""
+    mod = _load()
+    dead = "`does/not/exist/anywhere.py:12`"
+
+    # broken citation in the shipped history -> warning, rc 0
+    cl = tmp_path / "CHANGELOG.md"
+    cl.write_text("# Changelog\n\n" + _UNREL
+                  + "## [v9.9.8] - 2026-01-01\n\n" + dead + "\n",
+                  encoding="utf-8")
+    monkeypatch.setattr(mod, "CHANGELOG", cl)
+    monkeypatch.setattr(mod, "_iter_fragments", lambda: [])
+    monkeypatch.setattr(mod.sys, "argv", ["check_changelog_citations.py"])
+    assert mod.main() == 0
+    assert "WARN" in capsys.readouterr().out
+
+    # same citation inside [Unreleased] -> hard failure
+    cl.write_text("# Changelog\n\n## [Unreleased] - v9.9.9 candidate\n\n"
+                  + dead + "\n\n" + _HIST, encoding="utf-8")
+    assert mod.main() == 1
