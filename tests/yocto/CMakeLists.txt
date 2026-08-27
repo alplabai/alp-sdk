@@ -1004,6 +1004,32 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
              COMMAND alp_test_ble_dispatch_self_close)
     set_tests_properties(alp_test_ble_dispatch_self_close PROPERTIES TIMEOUT 30)
 
+    # issue #1697: alp_ble_close() must sweep _conn_pool before freeing the
+    # radio, or a conn slot outlives the radio its state.radio back-points to.
+    # Same #include-the-.c-file / no-alp::sdk-link technique and the same
+    # sources as alp_test_ble_dispatch_self_close above; a black-box test is
+    # impossible because native_sim has no BLE controller, so alp_ble_open()
+    # returns NULL (see the test's own header comment).
+    add_executable(alp_test_ble_dispatch_conn_pool_orphan
+        ${CMAKE_CURRENT_SOURCE_DIR}/ble_dispatch_conn_pool_orphan.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backend.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/dispatch_last_error_shim.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/ble/sw_fallback.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+    )
+    target_link_libraries(alp_test_ble_dispatch_conn_pool_orphan PRIVATE Threads::Threads)
+    target_include_directories(alp_test_ble_dispatch_conn_pool_orphan PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_ble_dispatch_conn_pool_orphan PRIVATE c_std_99)
+    add_test(NAME alp_test_ble_dispatch_conn_pool_orphan
+             COMMAND alp_test_ble_dispatch_conn_pool_orphan)
+    set_tests_properties(alp_test_ble_dispatch_conn_pool_orphan PROPERTIES TIMEOUT 30)
+
     # Yocto SocketCAN backend RX-thread self-close (yocto_drv.c's
     # y_shutdown()/y_destroy() split).  #includes the real backend .c
     # file directly (see the test's own header comment) -- deliberately

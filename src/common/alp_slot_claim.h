@@ -44,6 +44,30 @@ static inline bool alp_slot_try_claim(bool *in_use)
 }
 
 /**
+ * @brief Whether a pool slot is currently claimed.
+ *
+ * Acquire-load counterpart to @ref alp_slot_try_claim -- pairs with
+ * @ref alp_slot_release's release-store, so a caller that observes the
+ * flag set also sees every field the claimer wrote before publishing it.
+ *
+ * For SWEEPING a pool (issue #1697: tearing down a radio's surviving
+ * connections at close), not for claiming: it reports a moment-in-time
+ * observation, so a slot may be freed by another thread the instant after
+ * it returns true.  Callers must therefore be safe against acting on a
+ * slot that has since been released -- the teardown ops in this tree are,
+ * because each re-checks with its own compare-exchange and no-ops on a
+ * lost race.  Never use this to gate a claim; use
+ * @ref alp_slot_try_claim, which is atomic.
+ *
+ * @param[in] in_use  The slot's in-use flag.
+ * @return true when the slot was claimed at the moment of the load.
+ */
+static inline bool alp_slot_is_claimed(const bool *in_use)
+{
+	return __atomic_load_n(in_use, __ATOMIC_ACQUIRE);
+}
+
+/**
  * @brief Return a slot to its pool.
  *
  * Release-store so every field written while the slot was held is

@@ -318,6 +318,35 @@ void alp_ble_close(alp_ble_t *h)
 	if (mode == ALP_HANDLE_CLOSE_DEFERRED) {
 		return;
 	}
+	/* Issue #1697: tear down this radio's surviving connections BEFORE the
+	 * controller goes away.  alp_ble_connect() stores a raw back-pointer
+	 * (`c->state.radio = h`), so a conn slot left in_use here outlives the
+	 * radio it points at, and the next _alloc_radio() recycles that slot
+	 * under it.  Reachable on the shipping Zephyr backend with a plain
+	 * open -> connect -> close -> reopen.
+	 *
+	 * Force-disconnect rather than refusing the close: every other
+	 * alp_*_close() in this tree returns void, so there is no channel to
+	 * report a refusal, and diverging here would be an API change (the two
+	 * options are spelled out in #1697).
+	 *
+	 * alp_ble_disconnect() IS this pool's teardown op, so call it rather
+	 * than open-coding the sequence -- it already does the #629 sleep-poll
+	 * drain, the backend disconnect, the lifecycle reset and _free_conn(),
+	 * and returns ALP_ERR_NOT_READY on a lost CAS when another thread is
+	 * already tearing that same conn down.  Its status is deliberately
+	 * discarded: close() is infallible by contract, and a peer link that is
+	 * already gone is exactly the state we want.
+	 *
+	 * Ordering: after the drain above (no new connect can be admitted past
+	 * it) and before ops->close(), because the backend disconnect needs a
+	 * live controller. */
+	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_BLE_CONN_HANDLES; ++i) {
+		struct alp_ble_conn *c = &_conn_pool[i];
+		if (alp_slot_is_claimed(&c->in_use) && c->state.radio == h) {
+			(void)alp_ble_disconnect(c);
+		}
+	}
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}
