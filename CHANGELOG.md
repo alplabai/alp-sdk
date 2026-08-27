@@ -37,6 +37,36 @@ line back.
 Measured with the console timer poll raised to 60 s so only an edge could
 deliver: **86 of 86 pulses delivered**, `RESULT PASS: cc3501e link stable over 20
 soak PINGs (ping_fail=0)`.
+### Added — 16-bit FIFO packing on the Alif DW-SSI polled path (+25% bridge throughput)
+
+The polled SPI path moved one byte per FIFO slot. MMIO accesses are what that
+loop actually costs (~45 cycles each on this SoC), so at 25 MHz the wire needs
+320 ns/byte while the 8-bit loop spends roughly 620 ns of CPU on it — the host,
+not the link, was the bottleneck.
+
+`CONFIG_SPI_DW_ALIF_PACK32` (default `n`) packs 2 bytes per FIFO slot on eligible
+bulk transfers. The DR shifts MSB-first, so writing the stream's next bytes
+big-endian into a 16-bit frame puts exactly the same bits on the wire as two
+8-bit frames — the peer cannot tell the difference, and no firmware change is
+needed on the other end.
+
+Measured on E1M-AEN801 (`e1m-aen-evk-01`), 512 x 4092 B framed and ACKed over the
+CC3501E bridge: **912 KB/s -> 1139 KB/s**, reproducible to within 30 us across
+runs, with `RESULT PASS: cc3501e link stable over 20 soak PINGs (ping_fail=0)`.
+
+Also fixed, and the reason the option was unusable: the frame size is programmed
+by a read-modify-write of the **live** CTRLR0, and `spi_dw_configure()` returns
+early when the `spi_config` is unchanged — which it is for every transfer on a
+bridge that reuses one config. A DFS written for a packed transfer therefore
+persisted, and the next small transfer ran the 8-bit loop against a 16-bit frame
+size. That is not a subtle degradation: it produced zero successful PINGs from
+boot. The frame size is now programmed on both paths, restoring `dfs * 8` when a
+transfer is not packed.
+
+`max-xfer-size = <32>` (4 bytes/slot) was probed on the bench and does **not**
+work on this instance — zero successful PINGs — so the binding default of 16
+stands. Whether that is the macrocell's real `SSI_MAX_XFER_SIZE` or a defect in
+the 32-bit path is unresolved; the TRM value has not been transcribed.
 
 ### Fixed — CC3501E async events reached only one consumer
 
