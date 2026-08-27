@@ -75,6 +75,23 @@ target_compile_features(alp_test_inference_dispatcher PRIVATE c_std_99)
 add_test(NAME alp_test_inference_dispatcher
          COMMAND alp_test_inference_dispatcher)
 
+# Regression for issue #1635: src/yocto/drpai_deploy_shapes.h, the
+# hand-rolled deploy.json (TVM graph-runtime JSON) parser backing the
+# Renesas DRP-AI inference backend, split out of inference_drpai.cpp
+# into its own header specifically so it has ZERO dependency on
+# MeraDrpRuntimeWrapper.h / <linux/drpai.h> / the RUHMI DRP-AI TVM
+# sysroot -- see the test's own header comment. Deliberately NOT linked
+# against alp::sdk: the header pulls in nothing from the SDK.
+add_executable(alp_test_inference_drpai_deploy_shapes
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_drpai_deploy_shapes.cpp
+)
+target_include_directories(alp_test_inference_drpai_deploy_shapes PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+add_test(NAME alp_test_inference_drpai_deploy_shapes
+         COMMAND alp_test_inference_drpai_deploy_shapes)
+
 # alp_inference_last_invoke_latency_us() end-to-end regression: the last-
 # successful-invoke-latency accessor added alongside <alp/inference.h>'s
 # model-perf-capture support. #includes src/yocto/inference_yocto.c
