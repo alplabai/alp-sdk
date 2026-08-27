@@ -41,6 +41,7 @@
 #include <alp/soc_caps.h>
 
 #include "adc_ops.h"
+#include "adc_oversampling.h"
 #include "alp_slot_claim.h"
 
 /* DT alias table.  Each alp-adcN alias resolves to an adc_dt_spec;
@@ -161,7 +162,16 @@ alif_e8_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capab
 	    (cfg->resolution_bits != 0) ? cfg->resolution_bits : (uint8_t)spec->resolution;
 	/* HW oversampling reaches us via the portable config field (Zephyr's
      * adc_sequence.oversampling already abstracts this).  Vendor-ext
-     * for oversampling would be redundant -- it's promoted to portable. */
+     * for oversampling would be redundant -- it's promoted to portable.
+     *
+     * adc_sequence.oversampling is a log2 EXPONENT; the portable field is
+     * a RATIO -- see adc_oversampling.h for why a non-power-of-two ratio
+     * must be refused here rather than silently rounded by
+     * __builtin_ctz() below. */
+	if (!alp_adc_oversampling_ratio_ok(cfg->oversampling_ratio)) {
+		_free_state(s);
+		return ALP_ERR_NOSUPPORT;
+	}
 	s->oversample_ratio = (cfg->oversampling_ratio > 1u) ? cfg->oversampling_ratio : 1u;
 
 	int err = adc_channel_setup_dt(spec);

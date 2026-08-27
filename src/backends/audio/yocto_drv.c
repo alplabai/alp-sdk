@@ -76,6 +76,7 @@
 #include <alp/peripheral.h>
 
 #include "audio_ops.h"
+#include "audio_volume_guard.h"
 
 /* Per-handle backend data: the open ALSA PCM handle plus the derived
  * frame geometry.  Boxed onto the heap so the void* be_data slot in the
@@ -285,10 +286,24 @@ static alp_status_t configure_pcm(snd_pcm_t *pcm, const alp_audio_config_t *cfg)
 	unsigned int rate = cfg->sample_rate_hz;
 	rc                = snd_pcm_hw_params_set_rate_near(pcm, hw, &rate, NULL);
 	if (rc < 0) return alsa_to_alp(rc);
+	if (rate != cfg->sample_rate_hz) {
+		fprintf(stderr,
+		        "alp_audio: rate %u Hz unsupported, device negotiated %u Hz\n",
+		        cfg->sample_rate_hz,
+		        rate);
+		return ALP_ERR_NOSUPPORT;
+	}
 
 	snd_pcm_uframes_t period = cfg->frames_per_block;
 	rc                       = snd_pcm_hw_params_set_period_size_near(pcm, hw, &period, NULL);
 	if (rc < 0) return alsa_to_alp(rc);
+	if (period != (snd_pcm_uframes_t)cfg->frames_per_block) {
+		fprintf(stderr,
+		        "alp_audio: period %u frames unsupported, device negotiated %lu frames\n",
+		        (unsigned)cfg->frames_per_block,
+		        (unsigned long)period);
+		return ALP_ERR_NOSUPPORT;
+	}
 
 	/* Buffer = 4 periods.  Generous enough to absorb scheduling
      * jitter without bloating RAM; apps that need different sizing
@@ -537,9 +552,11 @@ static alp_status_t y_out_stop(alp_audio_out_backend_state_t *state)
 
 /* Apply the per-handle linear volume scale in place.  Operates on the
  * caller's pcm bytes.  When volume == 255 the scale is identity and
- * the loop short-circuits.  Performed only on S16_LE for v0.4 prep;
- * other formats pass through unmodified (a software scaler for S24
- * + S32 lands when the inference / codec paths exercise them). */
+ * the loop short-circuits.  Performed only on S16_LE for v0.4 prep; the
+ * format != S16_LE branch below is now unreachable for a non-unity
+ * volume because @ref y_out_set_volume refuses that combination up
+ * front (a software scaler for S24 + S32 is separate follow-up work,
+ * not implemented here). */
 static void apply_software_volume(alp_audio_format_t format,
                                   uint8_t            channels,
                                   uint8_t            volume,
@@ -719,10 +736,18 @@ static alp_status_t y_out_write(alp_audio_out_backend_state_t *state,
 	                                     snd_pcm_writei);
 }
 
-/** @brief Record the 0..255 linear volume on the dispatcher out state. */
+/** @brief Record the 0..255 linear volume on the dispatcher out state.
+ *
+ *  @ref apply_software_volume only scales S16_LE (#632); a non-unity
+ *  request on any other open format can never actually be applied, so it
+ *  is refused HERE, at the entry point the caller can see, rather than
+ *  silently dropped deeper in the write path. 255 (full scale, a no-op
+ *  on every format) always succeeds. */
 static alp_status_t y_out_set_volume(alp_audio_out_backend_state_t *state, uint8_t vol)
 {
 	if (state->be_data == NULL) return ALP_ERR_NOT_READY;
+	y_audio_data_t *d = (y_audio_data_t *)state->be_data;
+	if (!alp_audio_volume_settable(d->format, vol)) return ALP_ERR_NOSUPPORT;
 	state->volume = vol;
 	return ALP_OK;
 }
