@@ -385,10 +385,23 @@ __attribute__((weak)) void cc3501e_attn_set_armed(bool armed)
  * while the firmware kept pulsing and events sat in the ring (#130). */
 static volatile bool cc3501e_attn_desired;
 
+/* The transport layer may hold an internal back-off that suppresses re-arming
+ * (it cannot tell an attention pulse from ordinary flow control).  An EXPLICIT
+ * application arm must not be swallowed by it -- bench 2026-08-27: one
+ * boot-time edge latched the back-off, the application's later
+ * cc3501e_attn_arm(true) returned without arming, and the line stayed masked for
+ * the whole window (ISR frozen at 1, arm calls counted but ineffective). */
+__attribute__((weak)) void cc3501e_attn_clear_backoff(void)
+{
+}
+
 void cc3501e_attn_arm(cc3501e_t *ctx, bool armed)
 {
 	(void)ctx;
 	cc3501e_attn_desired = armed;
+	if (armed) {
+		cc3501e_attn_clear_backoff();
+	}
 	cc3501e_attn_set_armed(armed);
 }
 

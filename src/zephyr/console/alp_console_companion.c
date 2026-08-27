@@ -255,6 +255,14 @@ static void companion_attn_rearm_fn(struct k_work *work)
 }
 static K_WORK_DELAYABLE_DEFINE(companion_attn_rearm_work, companion_attn_rearm_fn);
 
+/* An explicit application arm overrides the back-off: drop the latch and cancel
+ * the pending delayed re-arm so the arm below actually reaches the controller. */
+void cc3501e_attn_clear_backoff(void)
+{
+	companion_attn_backoff = false;
+	(void)k_work_cancel_delayable(&companion_attn_rearm_work);
+}
+
 static void companion_event_work_fn(struct k_work *work)
 {
 	ARG_UNUSED(work);
