@@ -64,31 +64,33 @@ void cc3501e_attn_arm(cc3501e_t *ctx, bool armed);
  */
 void cc3501e_attn_rearm_if_desired(cc3501e_t *ctx);
 
-*@brief Subscribe to async events                     from this companion.**
-     Events fan out to EVERY registered               subscriber,
-    because a context legitimately *has more than one consumer
-    : the                                             SDK's Zephyr console companion registers its *own callback on the shared context and
-          polls                                       it,
-      and the application wants *the same events.This replaces an earlier single -
-          callback slot in which the *last registration silently          won-- the
-              console registers from its init                             path,
-      *after @c main() has set the application's callback, so the application *received nothing
-       while every call still reported ALP_OK(issue #1723)
-           .**Registration is idempotent per(@p cb, @p user) pair
-    : registering the same *pair twice leaves one subscription,
-      so a caller that re - arms defensively does * not start receiving each event twice.*
-                                *@param ctx Initialised driver context.*
-                                @param cb Callback to invoke once per queued event.Must not be NULL
-                                -- *
-                                use @ref cc3501e_remove_event_callback to unsubscribe.*
-                                @param user Opaque pointer passed back to @p cb; also part of the identity
+/**
+ * @brief Subscribe to async events from this companion.
+ *
+ * Events fan out to EVERY registered subscriber, because a context legitimately
+ * has more than one consumer: the SDK's Zephyr console companion registers its
+ * own callback on the shared context and polls it, and the application wants
+ * the same events. This replaces an earlier single-callback slot in which the
+ * last registration silently won -- the console registers from its init path,
+ * after @c main() has set the application's callback, so the application
+ * received nothing while every call still reported ALP_OK (issue #1723).
+ *
+ * Registration is idempotent per (@p cb, @p user) pair: registering the same
+ * pair twice leaves one subscription, so a caller that re-arms defensively does
+ * not start receiving each event twice.
+ *
+ * @param ctx   Initialised driver context.
+ * @param cb    Callback to invoke once per queued event. Must not be NULL --
+ *              use @ref cc3501e_remove_event_callback to unsubscribe.
+ * @param user  Opaque pointer passed back to @p cb; also part of the identity
  *              of the subscription for removal.
  * @return ALP_OK on success (including a duplicate registration);
-*ALP_ERR_NOT_READY if @p ctx                                     is not initialised;
-ALP_ERR_INVAL if *@p cb is                                       NULL;
-ALP_ERR_NOMEM when all *@ref CC3501E_EVENT_SUBSCRIBERS slots are taken-- the registration is *
-        REFUSED rather than displacing an existing               subscriber.              */
-    alp_status_t cc3501e_add_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user);
+ *         ALP_ERR_NOT_READY if @p ctx is not initialised; ALP_ERR_INVAL if
+ *         @p cb is NULL; ALP_ERR_NOMEM when all
+ *         @ref CC3501E_EVENT_SUBSCRIBERS slots are taken -- the registration is
+ *         REFUSED rather than displacing an existing subscriber.
+ */
+alp_status_t cc3501e_add_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user);
 
 /**
  * @brief Unsubscribe a callback previously added with

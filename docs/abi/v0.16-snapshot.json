@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-26",
+  "generated": "2026-08-27",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -2913,15 +2913,17 @@
     },
     "alp/chips/cc3501e/events.h": {
       "functions": {
-<<<<<<< HEAD
-        "cc3501e_attn_arm": {
-          "hash": "393adc04e8a83a43",
-          "signature": "void cc3501e_attn_arm(cc3501e_t *ctx, bool armed);"
-=======
         "cc3501e_add_event_callback": {
           "hash": "4e429a0854c2709c",
           "signature": "alp_status_t cc3501e_add_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user);"
->>>>>>> origin/dev
+        },
+        "cc3501e_attn_arm": {
+          "hash": "393adc04e8a83a43",
+          "signature": "void cc3501e_attn_arm(cc3501e_t *ctx, bool armed);"
+        },
+        "cc3501e_attn_rearm_if_desired": {
+          "hash": "385a7042ffb3a1d4",
+          "signature": "void cc3501e_attn_rearm_if_desired(cc3501e_t *ctx);"
         },
         "cc3501e_deinit": {
           "hash": "8fc892d1d03fcca7",
