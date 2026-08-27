@@ -392,10 +392,10 @@ tan validate --offline --format sarif --board-yaml path/to/board.yaml
 ```
 
 `--offline` runs Tan's bundled structural checks without resolving an SDK.
-Without `--offline`, Python Tan currently reports that the SDK-backed rich
-validator subprocess is not yet ported (exit 2); use the direct SDK reference
-command below when you need schema, preset, capability, and orchestrator
-consistency checks during this transition.
+Without `--offline`, Tan resolves the SDK checkout and spawns
+`<sdk-root>/scripts/validate_board_yaml.py` itself (tan-cli#376) for the
+schema, preset, capability, and orchestrator consistency pass, reporting its
+verdict in Tan's own envelope.
 
 `--format` selects the rendering:
 
@@ -414,10 +414,10 @@ consistency checks during this transition.
 `json`/`diagnostic-v1`/`sarif` print only the structured document to stdout, no
 interleaved human prose.
 
-The full SDK reference validator remains:
+The same validator can also be run directly, without Tan:
 
 ```bash
-python3 scripts/validate_board_yaml.py --board-yaml path/to/board.yaml
+python3 scripts/validate_board_yaml.py --input path/to/board.yaml
 ```
 
 It runs the rich validator plus the reference orchestrator consistency pass.

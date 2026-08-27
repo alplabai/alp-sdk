@@ -70,7 +70,7 @@ byte; their numeric encoding is:
 | `0x80` | `TRNG_READ`           | `len:u8` (1..32)                                   | `random_bytes[len]`                                |
 | `0x90` | `TMU_COMPUTE`         | `function:u8 format:u8 reserved:u16 in_a:u32 in_b:u32` | `result:u32`                                  |
 | `0x36` | `ADC_STREAM_CONFIGURE_DSP` | _(reserved tombstone -- see §3.x)_             | _(empty; returns `STATUS_NOSUPPORT` permanently -- use `CMD_ADC_DSP_CHAIN_*` instead)_ |
-| `0x3A` | `ADC_SPECTRUM_READ`   | `stream_id:u8 bin_offset:u16 max_bins:u8`          | `seq:u32 total_bins:u16 got:u8 bins[max_bins]:f32` (see §3.x -- FFT-terminal chains; `STATUS_NOSUPPORT` if not FFT-bound, `STATUS_BUSY` before first frame) |
+| `0x3A` | `ADC_SPECTRUM_READ` (v0.9) | `stream_id:u8 bin_offset:u16 max_bins:u8`          | `seq:u32 total_bins:u16 got:u8 bins[max_bins]:f32` (see §3.x -- FFT-terminal chains; `STATUS_NOSUPPORT` if not FFT-bound, `STATUS_BUSY` before first frame) |
 | `0x23` | `PWM_CAPTURE_BEGIN`   | `channel:u8 edge:u8`                                  | _empty_ (see §3.y -- reconfigures the pad as input-capture) |
 | `0x24` | `PWM_CAPTURE_READ`    | `channel:u8`                                          | `period_ns:u32 pulse_ns:u32` (see §3.y -- returns `STATUS_NOSUPPORT` ("ring empty") until an edge lands; no edges land on this V2N HW rev pending a pad-routing rework) |
 | `0x25` | `PWM_CAPTURE_END`     | `channel:u8`                                          | _empty_                                            |
@@ -179,15 +179,22 @@ base-level pump.  What a bound chain does to the reads:
 * **FFT terminal:** `CMD_ADC_STREAM_READ` returns `STATUS_NOSUPPORT`;
   the spectrum is pulled with `CMD_ADC_SPECTRUM_READ` (`0x3A`).
 
-One FAC and one FFT block exist, so at most one filter stream and one
-FFT stream may be bound at a time; a second `chain_bind` of the same
-class returns `STATUS_NOSUPPORT`.  The host-side
+One FAC and one FFT block exist.  A second `chain_bind` of a FIR/IIR
+(FAC-terminal) chain while the FAC is already serving another bound
+stream returns `STATUS_NOSUPPORT` -- but the firmware does not
+currently apply the same guard to FFT-terminal chains
+(`terminal_kind != 3u` in the busy check at
+`firmware/gd32-bridge/hal/gd32/adc_stream.c:675`), so two streams can
+both bind FFT chains against the single FFT block; tracked as
+[#1717](https://github.com/alplabai/alp-sdk/issues/1717).  The host-side
 standalone API in `<alp/dsp.h>` ships working in v0.5.0 (runs the
 chain locally with CMSIS-DSP or the portable C fallback over
 in-RAM buffers), so application code can test against the same
-chain primitives today and pick up the bridge-offloaded runtime
-path once the FFT/FAC dispatch lands inside
-`bridge_hw_adc_stream_read()`.
+chain primitives and, since v0.9 (#496), run the same workload
+bridge-offloaded through the dispatch in
+`bridge_hw_adc_stream_read()`
+(`firmware/gd32-bridge/hal/gd32/adc_stream.c:253-279`) -- `<alp/dsp.h>`
+remains the in-RAM host-side alternative when no bridge is present.
 
 #### `CMD_ADC_DSP_CHAIN_OPEN` (`0x37`)
 
@@ -200,7 +207,12 @@ Allocates a fresh chain handle from the firmware's pool (size
 `GD32G553_BRIDGE_ADC_DSP_MAX_CHAINS`, default 4 chains).  The
 opaque `chain_id` is what the host passes to the subsequent
 STAGE_PUSH and CHAIN_BIND calls.  Exhausting the pool returns
-`STATUS_NOMEM`.  Chains auto-release when the bound stream's
+`STATUS_NOSUPPORT` (`0x06`) -- the firmware maps
+`BRIDGE_HW_ERR_NOTIMPL` there because `hal/bridge_hw.h` has no
+NOMEM-equivalent `BRIDGE_HW_ERR_*` for this path
+(`firmware/gd32-bridge/hal/gd32/adc_stream.c:547-552`).  A host must
+not read that `0x06` as "opcode unknown".  Chains auto-release when
+the bound stream's
 `CMD_ADC_STREAM_END` runs; there is no explicit `CHAIN_CLOSE` at
 v0.5.
 
@@ -284,8 +296,10 @@ the chain's terminal stage:
 * the chain violates the ordering rules from `<alp/dsp.h>` (FFT
   must be terminal; WINDOW must immediately precede FFT).
 
-It returns `STATUS_NOSUPPORT` when the single FAC (FIR/IIR) or FFT
-hardware block is already serving another bound stream.
+It returns `STATUS_NOSUPPORT` when the single FAC (FIR/IIR) hardware
+block is already serving another bound stream.  The equivalent guard
+for the single FFT block is not yet implemented -- see
+[#1717](https://github.com/alplabai/alp-sdk/issues/1717).
 
 #### `CMD_ADC_SPECTRUM_READ` (`0x3A`)
 
@@ -951,7 +965,7 @@ byte is naturally unsigned and human-readable on a logic analyser:
 | `0x03`        | `ALP_ERR_BUSY`          | Firmware busy servicing a long-running operation.      |
 | `0x04`        | `ALP_ERR_TIMEOUT`       | Sub-bus operation timed out (e.g. ADC/timer peripheral).|
 | `0x05`        | `ALP_ERR_IO`            | CRC failure or transport-layer error.                  |
-| `0x06`        | `ALP_ERR_NOSUPPORT`     | Opcode unknown to this firmware build.                 |
+| `0x06`        | `ALP_ERR_NOSUPPORT`     | Opcode unknown to this firmware build, or a request the firmware understands but cannot service (e.g. DSP chain-pool exhaustion — see §3.x). |
 | `0x07`        | `ALP_ERR_NOMEM`         | Reserved.                                              |
 | `0x08`        | `ALP_ERR_OUT_OF_RANGE`  | Parameter beyond hardware capability (e.g. PWM freq).  |
 | `0x80`        | _(I2C: no pending cmd)_ | I2C read before any write on this START — see §5.      |
@@ -1020,7 +1034,14 @@ the negotiated `STATUS_SEQ` reply stamp (§3.14, §4.1.1) and the
 additive `OTA_BEGIN` version triple (§10) — both backward-compatible
 by construction (un-negotiated framing and the 8-byte BEGIN are
 byte-identical to v0.6).  **v0.8** adds `SE_RESET` (0x41, §3.15) — a
-new opcode; older hosts simply never send it.
+new opcode; older hosts simply never send it.  **v0.9** (#496) lands
+the runtime FAC/FFT dispatch inside `bridge_hw_adc_stream_read()` for
+the ADC-stream DSP pipeline's already-existing `chain_open` /
+`stage_push` / `chain_bind` opcodes (§3.x) — a bound chain now
+actually filters or spectralizes the stream instead of the chain
+sitting unbound — and adds the new opcode `CMD_ADC_SPECTRUM_READ`
+(`0x3A`, §3.x) to pull the FFT terminal's spectrum; a v0.8 host that
+never binds a chain sees no behaviour change.
 
 ## 9. Reference vectors
 
