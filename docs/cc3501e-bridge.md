@@ -390,7 +390,7 @@ it is not monotonic over a part's lifetime.
 > `prebuilt/CHANGELOG.md` (0.3.0) states a GPE `major >= 1` fails BL2
 > secure-boot with `AUTH_ERROR`, and `regen_flashset.sh` uses `MAJOR=0`.
 > `ti/package_cc3501e_prod.ps1` and `ti/validate_gpio_bench.ps1` instead
-> default to `1.0.0.0` and comment that major **must** be `>= 1` (for a bench
+> default to a `major = 1` stamp and comment that major **must** be `>= 1` (for a bench
 > unit poisoned to `0.9.0.7`). These cannot both hold. Releases here use
 > `major = 0`, which is what the shipped artifacts and the bench flash-sets
 > actually use; resolve the contradiction on silicon before relying on the

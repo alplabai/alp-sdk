@@ -87,13 +87,18 @@ openssl dgst -sha256 -verify <VALIDATION_public.pem> \
     -signature prebuilt/cc3501e-v0.4.0.bin.sig prebuilt/cc3501e-v0.4.0.bin
 sha256sum -c <<<"$(cat prebuilt/cc3501e-v0.4.0.bin.sha256)  prebuilt/cc3501e-v0.4.0.bin"
 
-# 2. Drop it into the flash-set as the primary vendor image, and remove any
-#    stale pre-flattened image -- a leftover *.flashready.bin is used in
-#    preference to the file you just copied.
+# 2. Use a flash-set whose signed programming_instructions was generated at
+#    THIS artifact's stamp (0.4.0.0) -- see the warning below.  An existing
+#    flash-set built at another version will NOT do; regenerate it:
+#      VERSION=0.4.0.0 ti/regen_flashset.sh
+#
+# 3. Drop the blob in as the primary vendor image, and remove any stale
+#    pre-flattened image -- a leftover *.flashready.bin is used in preference
+#    to the file you just copied.
 cp prebuilt/cc3501e-v0.4.0.bin <flashset>/primary_vendor_image.sign.bin
 rm -f <flashset>/*.flashready.bin
 
-# 3. Program over XDS110/SWD (~18 s).
+# 4. Program over XDS110/SWD (~18 s).
 programmer -i XDS110 -param1 <PROBE_SN> programming --tool_settings <flashset>/tool_settings.warm.windows.json
 ```
 

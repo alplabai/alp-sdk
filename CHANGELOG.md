@@ -36,8 +36,8 @@ payload.
   `0.149.63.0` floor already burned into the bench unit).
 - Flagged an unresolved contradiction: `prebuilt/CHANGELOG.md` and
   `regen_flashset.sh` require GPE `major = 0`, while
-  `ti/package_cc3501e_prod.ps1` and `ti/validate_gpio_bench.ps1` default to
-  `1.0.0.0` and comment that major must be `>= 1`. Releases use `major = 0`;
+  `ti/package_cc3501e_prod.ps1` and `ti/validate_gpio_bench.ps1` default to a
+  `major = 1` stamp and comment that major must be `>= 1`. Releases use `major = 0`;
   the `>= 1` path is unverified and left untouched rather than guessed at.
 
 ### Fixed — the CC3501E attention line was masked by the first edge and never re-armed
