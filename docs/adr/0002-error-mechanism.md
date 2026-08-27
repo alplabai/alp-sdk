@@ -1,7 +1,96 @@
 # 0002. `alp_last_error()` + compile-time SoC capability validation
 
-Status: Accepted
+Status: Accepted — see **Amendment** below (2026-08-27): records the
+`ALP_ERR_NOT_READY` / `ALP_ERR_INVAL` convention measured across the
+dispatch layer and corrects a scope misreading of the "programmer error"
+parenthetical. The decision below is otherwise unchanged.
 Date: 2026-05-10
+
+## Amendment (2026-08-27 — record the ALP_ERR_NOT_READY / ALP_ERR_INVAL convention measured across the dispatch layer; correct a scope misreading)
+
+Issue #1646: ~115 sites across 29 files in `src/*_dispatch.c` do
+`if (h == NULL || !alp_handle_op_enter(...)) return ALP_ERR_NOT_READY;` for
+a NULL primary handle. Read against this ADR's "programmer error"
+parenthetical below, that looked like the code violating the ADR. It is
+not — see the scope correction first.
+
+**Scope correction.** This ADR's subject is open-time diagnosis:
+`alp_last_error()` plus compile-time SoC capability validation, both
+scoped to `alp_*_open()`. The "programmer error" parenthetical in the
+Decision section (`bus_id` out of range, line 18; and the `ALP_ERR_INVAL`
+mention, lines 55-56) contrasts three *open()*-time codes —
+`ALP_ERR_OUT_OF_RANGE` vs `ALP_ERR_INVAL` (programmer error) vs
+`ALP_ERR_NOSUPPORT` (Zephyr `-ENOTSUP`) — it does not define
+`ALP_ERR_INVAL` for the whole public API. Inside that scope (`open()`)
+the code honours the contrast fully. The ~115 non-open sites above are
+simply outside what this ADR ever governed.
+
+**The convention, measured from the dispatch layer** (not part of this
+ADR's original decision; recorded here because #1646 asked where it's
+written down):
+
+- **`ALP_ERR_NOT_READY`** — the handle is not in a state to perform this
+  operation. Covers a NULL primary handle (definitionally indistinguishable
+  from one closed concurrently), a closed handle, and any handle-shaped
+  argument threaded through the same `alp_handle_op_enter` lifecycle guard
+  as the primary handle. The one worked example of that last case in the
+  whole dispatch layer is `src/ble_dispatch.c`'s `alp_ble_gatt_notify`: its
+  secondary `conn` argument (lines 422-424) returns `ALP_ERR_NOT_READY`,
+  not `ALP_ERR_INVAL`, when NULL — the `:415-419` comment says why:
+  `gatt_notify` dereferences `conn->state`, so a racing
+  `alp_ble_disconnect(conn)` has to be blocked exactly as a racing close on
+  `h` would be (issue #629's UAF fix), which makes a NULL `conn`
+  indistinguishable from a concurrently-closed one, same as a NULL primary
+  handle. This is the *only* dual-lifecycle-guarded call site found across
+  the 29-file/115-site surface — it is the rule's sole direct evidence, not
+  a widely repeated pattern.
+
+- **`ALP_ERR_INVAL`** — a malformed argument that is *not* under a
+  lifecycle guard: a NULL `cfg` at open time, or a NULL output buffer with
+  a non-zero length. `include/alp/peripheral.h:1010-1011` already states
+  both halves in one doc comment (`ALP_ERR_NOT_READY if @p rb is NULL or
+  detached. ALP_ERR_INVAL if @p out is NULL with @p max_len > 0.`), and
+  `alp_ble_gatt_notify` draws the same line internally: its
+  `payload == NULL && len > 0` check returns `ALP_ERR_INVAL` two lines
+  below the `conn` check that returns `ALP_ERR_NOT_READY` — one function,
+  two arguments, two codes, for the stated reason.
+
+- **`ALP_ERR_NOSUPPORT`** — a capability the backend or silicon lacks,
+  including a valid form-factor identity this SoM does not populate.
+
+**Three grandfathered outliers — named, not changed.** These predate the
+convention above; nothing consumes the distinction they diverge from, and
+one is an explicit ABI commitment, so none of the three are being
+changed:
+
+- `src/adc_dispatch.c:127-131` — a NULL handle returns `ALP_ERR_INVAL`, not
+  `ALP_ERR_NOT_READY`. The in-code comment says why: "Preserve the
+  original contract: a NULL handle OR NULL out-param is ALP_ERR_INVAL (not
+  NOT_READY)." — an explicit v0.1 ABI-preservation decision, not an
+  oversight.
+- `src/jpeg_dispatch.c:104` — `alp_jpeg_capabilities`'s `h == NULL` returns
+  `ALP_ERR_INVAL`.
+- `src/update_log_dispatch.c` (lines 123, 148, 169, 179, 190) — diverges
+  the other way: `log == NULL` returns `ALP_ERR_INVAL` at all 5 call
+  sites, ahead of the op-enter/closed-handle check that would otherwise
+  produce `ALP_ERR_NOT_READY`.
+
+**Gap: signex unverified.** No signex checkout exists on the host this
+amendment was written from — searched `/home`, `/opt`, `/srv`, `/mnt`,
+`/data`, and a full-depth `*signex*` filename search; only this repo's own
+plugin skill docs matched, not a signex repository. If a signex checkout
+elsewhere renders or branches on these SDK status codes, this convention
+is unverified against that consumer.
+
+`metadata/error-catalog.json`'s `ALP_ERR_NOT_READY` summary is updated
+alongside this amendment, from "Peripheral not initialised." (too narrow
+— a closed handle or a read-only handle mid-operation is "not ready" but
+was never uninitialised) to "The handle is not in a state to perform this
+operation."
+
+See also: issue #1646; `src/ble_dispatch.c`'s `alp_ble_gatt_read` (the
+primary-handle `ALP_ERR_NOT_READY` case, line 586) and
+`alp_ble_gatt_notify` (both halves, lines 407-435) as the worked examples.
 
 ## Context
 
