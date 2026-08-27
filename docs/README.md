@@ -203,7 +203,7 @@ into the topic-specific docs.
 
 - [v1.0-readiness.md](v1.0-readiness.md) — a 2026-05-14 execution-plan
   snapshot toward the v1.0.0 tag.  Not maintained current past the
-  session that wrote it (the SDK has since shipped through v0.15.0) —
+  session that wrote it (the SDK has since shipped through v0.16.0) —
   cross-check any status claim against `VERSIONS.md` and
   `CHANGELOG.md`, which are.
 - [v0.6-tbd-and-assumptions.md](v0.6-tbd-and-assumptions.md) —

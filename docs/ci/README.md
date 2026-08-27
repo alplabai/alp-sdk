@@ -65,7 +65,7 @@ result attached to the PR or release that needs it — see
   stable ABI fingerprint from `include/alp/**`.  Re-run by
   `pr-generated-files.yml` to catch drift; gates `include/alp/**`
   diffs against `docs/abi/v<MINOR>-snapshot.json` — the snapshot for the
-  version `metadata/sdk_version.yaml` declares (`v0.15-snapshot.json`
+  version `metadata/sdk_version.yaml` declares (`v0.16-snapshot.json`
   today) — after v1.0.
 - [`scripts/bootstrap.sh`](../../scripts/bootstrap.sh) — fresh-clone
   developer setup (west workspace + Python deps + apt hints).
