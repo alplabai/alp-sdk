@@ -426,6 +426,23 @@ ZTEST(alp_peripheral, test_v2n_supervisor_qenc_open_not_ready_without_buses)
      * NOT_READY back to NULL. */
 }
 
+ZTEST(alp_peripheral, test_v2n_supervisor_qenc_open_out_of_range_id_rejected)
+{
+	/* Regression for alp-sdk#1635: br_open used to store
+     * cfg->encoder_id with no bound of its own, then narrow it to
+     * uint8_t before handing it to the chip driver's own bound check
+     * -- so encoder_id=256 aliased to channel 0 and opened fine.  The
+     * bound now runs in br_open before the supervisor acquire, so
+     * (like counter_high_id_rejected above) this doesn't depend on
+     * bus config and does stamp last_error. */
+	alp_qenc_t *q = alp_qenc_open(&(alp_qenc_config_t){
+	    .encoder_id     = 256u,
+	    .pulses_per_rev = 24u,
+	});
+	zassert_is_null(q);
+	zassert_equal(alp_last_error(), ALP_ERR_INVAL, "expected INVAL, got %d", (int)alp_last_error());
+}
+
 ZTEST(alp_peripheral, test_v2n_supervisor_counter_open_not_ready_without_buses)
 {
 	alp_counter_t *c = alp_counter_open(&(alp_counter_config_t){
