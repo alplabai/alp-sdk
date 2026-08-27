@@ -66,6 +66,12 @@ __attribute__((weak)) void cc3501e_bridge_ready(void)
 {
 }
 
+/* Weak no-op: only the TI backend drives the attention wire, and only when built
+ * with CC3501E_ATTN_PULSE.  Every other backend (stub, native_sim) links this. */
+__attribute__((weak)) void cc3501e_bridge_attn_pulse(void)
+{
+}
+
 /* The single in-flight job + its cached result.  `volatile`: written by
  * the drain (worker_run_pending / synchronous worker_submit), read by the
  * SPI ISR (worker_poll). */

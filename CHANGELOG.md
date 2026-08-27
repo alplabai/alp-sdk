@@ -7,6 +7,36 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Fixed — the CC3501E attention line was masked by the first edge and never re-armed
+
+Interrupt-driven async-event delivery (`CONFIG_ALP_SDK_CC3501E_EVENT_IRQ`) never
+delivered. The attention ISR masks the line and delegated re-arming to the
+request lock, but `cc3501e_lock_acquire()` only ever masks and
+`cc3501e_lock_release()` deliberately does not re-arm — re-arming there
+unconditionally had dropped an event drain into the middle of a radio operation
+and hung the device after `WIFI_SCAN`. So the **first** edge masked the line
+permanently.
+
+Instrumented on E1M-AEN801: the ISR frozen at exactly **1** across a 40 s armed
+window, while the firmware's pulse counter climbed to 86 with zero skips and
+arming returned 0. Firmware, wiring and arming were all fine; nothing put the
+line back.
+
+- `cc3501e_attn_arm()` now records the application's intent, and
+  `cc3501e_lock_release()` re-arms only inside that window — ordinary traffic
+  still never re-arms, so the `WIFI_SCAN` hang stays fixed. New public
+  `cc3501e_attn_rearm_if_desired()`.
+- The event drain backs off 50 ms before re-arming when it delivered nothing.
+  The wire is shared with READY flow control, so a transaction end is
+  indistinguishable from an attention pulse and the drain's own trailing READY
+  rise re-triggers the path: 11888 ISRs for 86 real events without the backoff,
+  220 with it, and no events lost either way.
+- The firmware attention pulse holds LOW long enough to be sampled; two
+  back-to-back `GPIO_write()` calls left it under the host pad synchroniser.
+
+Measured with the console timer poll raised to 60 s so only an edge could
+deliver: **86 of 86 pulses delivered**, `RESULT PASS: cc3501e link stable over 20
+soak PINGs (ping_fail=0)`.
 ### Fixed — the CC3501E TI build still aborted at the LINK step
 
 #1722 stopped a compiler *warning* on stderr from aborting `build_ti.ps1`, but it

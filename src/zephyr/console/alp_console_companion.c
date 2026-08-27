@@ -129,8 +129,12 @@ static int cmd_companion_ping(const struct shell *sh, size_t argc, char **argv)
  * drive another request (e.g. reading a status register in response to an
  * event) without self-deadlocking.  Print-only -- printk goes to the active
  * console backend, so it is safe off the shell thread. */
+static volatile uint32_t companion_evt_seen;
+static volatile bool     companion_attn_backoff;
+
 static void companion_event_cb(uint8_t opcode, const uint8_t *payload, size_t len, void *user)
 {
+	companion_evt_seen++;
 	ARG_UNUSED(payload);
 	ARG_UNUSED(user);
 	switch (opcode) {
@@ -219,10 +223,68 @@ K_THREAD_DEFINE(companion_event_tid, 1024, companion_event_thread, NULL, NULL, N
 static const struct gpio_dt_spec companion_attn = GPIO_DT_SPEC_GET(DT_ALIAS(cc3501e_attn), gpios);
 static struct gpio_callback      companion_attn_cb_data;
 
+/* Strong override of the driver's weak hook: the bridge is idle exactly when its
+ * request lock is free, and that is the only window in which a rising edge on
+ * this wire can mean "event pending" rather than "a transaction just re-armed".
+ * cc3501e_core.c calls this around every request. */
+void cc3501e_attn_set_armed(bool armed)
+{
+	if (!device_is_ready(companion_attn.port)) {
+		return;
+	}
+	/* While backing off, refuse to ARM.  The wire is shared with READY flow
+	 * control, so a transaction end is indistinguishable from an attention
+	 * pulse; re-arming on each one lets the drain's own trailing READY rise
+	 * re-trigger this path.  Measured: 11888 ISRs for 86 real events. */
+	if (armed && companion_attn_backoff) {
+		return;
+	}
+	(void)gpio_pin_interrupt_configure_dt(&companion_attn,
+	                                      armed ? GPIO_INT_EDGE_TO_ACTIVE : GPIO_INT_DISABLE);
+}
+
+/* Long enough to break the self-feeding chain, short enough that a real event
+ * behind a spurious one is not held up meaningfully. */
+#define ALP_COMPANION_ATTN_BACKOFF_MS 50
+
+static void companion_attn_rearm_fn(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	companion_attn_backoff = false;
+	cc3501e_attn_rearm_if_desired(companion_cc3501e);
+}
+static K_WORK_DELAYABLE_DEFINE(companion_attn_rearm_work, companion_attn_rearm_fn);
+
+/* An explicit application arm overrides the back-off: drop the latch and cancel
+ * the pending delayed re-arm so the arm below actually reaches the controller. */
+void cc3501e_attn_clear_backoff(void)
+{
+	companion_attn_backoff = false;
+	(void)k_work_cancel_delayable(&companion_attn_rearm_work);
+}
+
 static void companion_event_work_fn(struct k_work *work)
 {
 	ARG_UNUSED(work);
+	const uint32_t seen_before = companion_evt_seen;
+
 	companion_drain_events();
+
+	/* RE-ARM HERE.  The requests inside the drain only MASK the line
+	 * (cc3501e_lock_acquire); nothing re-armed it, so the FIRST edge masked it
+	 * permanently -- bench-measured as the ISR frozen at 1 across a 40 s armed
+	 * window (#130).
+	 *
+	 * An EMPTY drain means that edge was flow control, not attention: back off
+	 * so the chain (edge -> drain -> READY rise -> edge) breaks.  A drain that
+	 * DID deliver re-arms immediately, keeping real events fast. */
+	if (companion_evt_seen == seen_before) {
+		companion_attn_backoff = true;
+		k_work_reschedule(&companion_attn_rearm_work, K_MSEC(ALP_COMPANION_ATTN_BACKOFF_MS));
+		return;
+	}
+	companion_attn_backoff = false;
+	cc3501e_attn_rearm_if_desired(companion_cc3501e);
 }
 static K_WORK_DEFINE(companion_event_work, companion_event_work_fn);
 
@@ -231,8 +293,31 @@ static void companion_attn_isr(const struct device *port, struct gpio_callback *
 	ARG_UNUSED(port);
 	ARG_UNUSED(cb);
 	ARG_UNUSED(pins);
-	/* Defer the SPI drain to a workqueue -- never do bridge I/O in the ISR. */
+
+	/* MASK THE LINE BEFORE SCHEDULING, re-armed by the work item once the drain
+	 * is done.  Without this the path livelocks the device (bench 2026-08-26:
+	 * the app boots, registers, enters its soak and goes silent forever,
+	 * reproducibly).
+	 *
+	 * The wire is shared with READY flow control, which is raised on EVERY
+	 * bridge re-arm -- so the edge does not mean "event pending", it means
+	 * "a transaction just finished".  The drain scheduled here does its OWN
+	 * bridge I/O, which raises READY again, which re-enters this ISR: the path
+	 * feeds itself, and it contends with the application's traffic while doing
+	 * it.  "An empty ring answers with an empty list" does not save it -- the
+	 * cost is the transaction, not the answer.
+	 *
+	 * Masking bounds it to ONE drain per re-arm instead of an unbounded chain.
+	 * It does NOT make the edge meaningful: a genuinely idle-time-only
+	 * attention signal still needs the line qualified (a distinguishable pulse
+	 * width, a second wire, or arming this only while the host has no request
+	 * in flight). See #130. */
+	(void)gpio_pin_interrupt_configure_dt(&companion_attn, GPIO_INT_DISABLE);
 	k_work_submit(&companion_event_work);
+	/* Re-arming is the request lock's job (cc3501e_attn_set_armed), not this
+	 * ISR's: the drain about to run will mask and re-arm around each of its own
+	 * requests, and leaving it masked until the bridge is genuinely idle is what
+	 * stops an active link from re-triggering this path. */
 }
 
 static int companion_event_irq_init(void)

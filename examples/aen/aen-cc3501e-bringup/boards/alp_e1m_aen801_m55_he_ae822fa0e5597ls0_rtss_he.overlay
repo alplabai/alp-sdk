@@ -201,6 +201,36 @@
 	aliases {
 		/* bus_id 1 in alp_spi_open() -> this controller. */
 		alp-spi1 = &cc3501e_spi;
+
+		/*
+		 * Attention line for CONFIG_ALP_SDK_CC3501E_EVENT_IRQ (#130): the
+		 * companion console's edge ISR schedules a GET_PENDING_EVENTS drain
+		 * instead of waiting for the ~500 ms timer poll.
+		 *
+		 * SAME PIN as alp_pins[2] above, deliberately.  There is one
+		 * slave->master wire and it already carries READY flow control; the
+		 * firmware (built with CC3501E_ATTN_PULSE) gives it an edge when an
+		 * event is queued while the bridge is idle.  Draining on ANY rising
+		 * edge is safe -- an empty ring answers with an empty list -- so the
+		 * host never has to tell attention from an ordinary re-arm.
+		 *
+		 * BODGE-GATED: this net is a rev-1 wire, absent on the stock EVK,
+		 * which is why CONFIG_ALP_SDK_CC3501E_EVENT_IRQ stays default-off.
+		 * The alias existing does nothing on its own.
+		 */
+		cc3501e-attn = &cc3501e_attn;
+	};
+
+	/* Node the cc3501e-attn alias points at; `gpios` is what
+	 * GPIO_DT_SPEC_GET(DT_ALIAS(cc3501e_attn), gpios) reads. */
+	/* NO compatible: GPIO_DT_SPEC_GET() only needs the `gpios` phandle-array.
+	 * Declaring "alp,pin-array" here made a SECOND node of that compatible and
+	 * broke the SDK's pin-array resolution outright -- bridge bring-up failed
+	 * with err=-1 ("SPI bus 1 / WIFI_EN+nRESET absent?") because alp_pins no
+	 * longer resolved. Bench-caught 2026-08-26. */
+	cc3501e_attn: cc3501e-attn {
+		compatible = "alp,cc3501e-attn";
+		gpios = <&gpio2 6 GPIO_ACTIVE_HIGH>;
 	};
 
 	/*

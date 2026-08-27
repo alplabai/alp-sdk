@@ -31,6 +31,12 @@ param(
     # against it, so don't bump this casually.
     [string]$ToolboxDir   = "C:\ti\simplelink_wifi_toolbox_4.2.4\simplelink_wifi_toolbox_win_4_2_4",
     [string]$Transport    = "spi",  # spi | sdio
+    # #130: emit a rising edge on the READY/attention wire when an async event is
+    # queued, so a host on CONFIG_ALP_SDK_CC3501E_EVENT_IRQ learns of it without
+    # waiting for its timer poll.  Default OFF: the wire is a rev-1 bodge absent
+    # on the stock EVK, and the pulse is a (brief) extra transition on the line
+    # every host uses for flow control.
+    [switch]$AttnPulse,
     [switch]$OtaSelftest,           # build the OTA-self-install validation updater (embeds cc3501e_ota_candidate.c, -DCC3501E_OTA_SELFTEST)
     # #1610 bench validation: drive the WINDOWED OTA path (begin/write/flush/finish)
     # locally from the bring-up task against the embedded candidate, because the
@@ -169,6 +175,7 @@ if ((Get-Content $cfg -Raw) -notmatch "GPIO17 = bridge READY") {
 $txdef = @(if ($Transport -eq 'sdio') { '-DCC3501E_CONTROL_TRANSPORT_SDIO=1' })
 if ($env:CC3501E_RADIO_SPEEDTEST) { $txdef = @($txdef) + @('-DCC3501E_RADIO_SPEEDTEST=1') }
 if ($env:CC3501E_WEDGE_PROBE) { $txdef = @($txdef) + @('-DCC3501E_WEDGE_PROBE=1') }
+if ($AttnPulse) { $txdef = @($txdef) + @('-DCC3501E_ATTN_PULSE=1') }
 if ($OtaSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_SELFTEST') }
 if ($OtaWindowSelftest) { $txdef = @($txdef) + @('-DCC3501E_OTA_WINDOW_SELFTEST') }
 if ($OtaWindowBytes -gt 0) { $txdef = @($txdef) + @("-DCC3501E_OTA_WINDOW_SELFTEST_BYTES=$OtaWindowBytes") }
