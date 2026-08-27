@@ -123,7 +123,8 @@ ZTEST(alp_display, test_slot_epoch_changes_across_reuse_1698)
 	 * rather than assume it, so this test still means something if the
 	 * allocator ever stops reusing the slot. */
 	zassert_equal(first, second, "expected the pool to hand back the same slot");
-	zassert_not_equal(first_epoch, second_epoch,
+	zassert_not_equal(first_epoch,
+	                  second_epoch,
 	                  "epoch must change across reuse, else a stale holder "
 	                  "cannot detect the new owner");
 
