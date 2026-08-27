@@ -283,3 +283,22 @@ def test_allowlist_does_not_excuse_a_duplicate_label_claimant(tmp_path, monkeypa
     problems = find_problems(tmp_path)
     assert len(problems) == 1, problems
     assert "3 devices" in problems[0]
+
+
+def test_partial_audio_codec_entry_is_reported_not_skipped(tmp_path):
+    """`audio:` is a wholly open object in board-preset.schema.json and this
+    gate is its only reader, so a renamed key drifts unnoticed. A codec that
+    declares an address but no bus used to be dropped by a bare `continue` --
+    silently removing a real claimant from the comparison."""
+    board = tmp_path / "metadata" / "boards" / "b.yaml"
+    board.parent.mkdir(parents=True, exist_ok=True)
+    board.write_text(
+        "audio:\n"
+        "  codecs:\n"
+        '    - { chip: bogus, i2c_address: "0x4D" }\n',
+        encoding="utf-8",
+    )
+    problems = find_problems(tmp_path)
+    assert len(problems) == 1, problems
+    assert "no i2c_bus" in problems[0]
+    assert "NOT compared" in problems[0]

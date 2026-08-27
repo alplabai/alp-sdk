@@ -203,15 +203,33 @@ def _board_flat_claims(data: dict[str, Any]) -> dict[str, list[_Claim]]:
     return claims
 
 
-def _board_audio_claims(data: dict[str, Any]) -> dict[str, list[_Claim]]:
-    """audio.codecs[] -- metadata/boards/*.yaml, i2c_bus/i2c_address keys."""
+def _board_audio_claims(data: dict[str, Any], rel: str,
+                        malformed: list[str]) -> dict[str, list[_Claim]]:
+    """audio.codecs[] -- metadata/boards/*.yaml, i2c_bus/i2c_address keys.
+
+    Appends to @p malformed for a partially-declared codec (see below)."""
     claims: dict[str, list[_Claim]] = {}
     for dev in ((data.get("audio") or {}).get("codecs")) or []:
         if dev.get("assembled") is False:
             continue
         bus = dev.get("i2c_bus")
         addr = _addr_int(dev.get("i2c_address"))
+        # `audio:` is a wholly open object in board-preset.schema.json
+        # (additionalProperties: true, no inner shape) and this gate is its
+        # only reader in scripts/, so a renamed key drifts unnoticed in both
+        # directions. A codec that declares an address but no bus -- or a bus
+        # but no parseable address -- is therefore reported, not skipped:
+        # silently dropping it is how a real claimant disappears from the
+        # comparison and the gate goes green on a collision it never saw.
+        if bus is None and addr is None:
+            continue
         if bus is None or addr is None:
+            malformed.append(
+                f"{rel}: audio.codecs entry {dev!r} declares "
+                f"{'an address but no i2c_bus' if bus is None else 'a bus but no parseable i2c_address'}"
+                f" -- it is NOT compared for collisions. Give it both keys, or "
+                f"drop the partial one."
+            )
             continue
         label = f"chip={dev.get('chip', '?')} designator={dev.get('designator', '?')}"
         claims.setdefault(bus, []).append(_Claim(addr, label))
@@ -231,6 +249,7 @@ def find_problems(root: Path) -> list[str]:
     declared bus, across every metadata/e1m_modules and metadata/boards
     YAML -- empty when every declared address is unique on its bus."""
     problems: list[str] = []
+    malformed: list[str] = []
 
     files: list[tuple[Path, dict[str, list[_Claim]]]] = []
     modules_dir = root / "metadata" / "e1m_modules"
@@ -243,8 +262,13 @@ def find_problems(root: Path) -> list[str]:
         for path in sorted(boards_dir.glob("*.yaml")):
             data = _load_yaml(path)
             files.append(
-                (path, _merge(_board_flat_claims(data), _board_audio_claims(data)))
+                (path, _merge(_board_flat_claims(data),
+                              _board_audio_claims(
+                                  data, path.relative_to(root).as_posix(),
+                                  malformed)))
             )
+
+    problems.extend(malformed)
 
     for path, by_bus in files:
         rel = path.relative_to(root).as_posix()
@@ -293,7 +317,11 @@ def main() -> int:
     for p in problems:
         print(p, file=sys.stderr)
     if problems:
-        print(f"\n{len(problems)} I2C address collision(s) found.", file=sys.stderr)
+        # "problem" covers two classes: an address claimed twice, and a
+        # partially-declared entry that could not be compared at all.
+        # Calling both "collisions" would misreport the second.
+        print(f"\n{len(problems)} I2C address problem(s) found "
+              f"(collisions and/or uncomparable entries).", file=sys.stderr)
         return 1
     return 0
 
