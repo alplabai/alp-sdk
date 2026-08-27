@@ -15,7 +15,7 @@
 #     cleanly -- LD --gc-sections drops the unused ones.  This mirrors the
 #     SDK's established per-core cmsis_dsp enable (the manifest's own
 #     `integration.zephyr.kconfig` array, transcribed by
-#     scripts/alp_orchestrate/libraries.py:197 `zephyr_kconfig_lines`;
+#     scripts/alp_orchestrate/libraries.py:321 `zephyr_kconfig_lines`;
 #     a prior version of this note cited `_LIBRARY_KCONFIG` in
 #     scripts/alp_project.py, which no longer contains that symbol).
 #   * licence Apache-2.0  (modules/lib/cmsis-dsp/Include/arm_math.h:

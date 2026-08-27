@@ -287,7 +287,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["provider"],
-      "description": "Optional OTA configuration.  Project-wide (one device = one OTA orchestration).  See docs/ota.md for the device contract.  Yocto path: Mender; Zephyr path: deferred until the SDK lands its in-tree OTA client (Mender MCU client or Hawkbit, decision pending per ADR 0009).",
+      "description": "Optional OTA configuration.  Project-wide (one device = one OTA orchestration).  See docs/ota.md for the device contract.  Yocto path: Mender; Zephyr path: deferred until the SDK lands its in-tree OTA client (Mender MCU client or Hawkbit, decision pending per ADR 0009).  `server.tls_ca_bundle` was removed (no legacy shim -- no active customers): no emitter ever read it -- the Hawkbit path derives TLS solely from `url`'s scheme (`CONFIG_HAWKBIT_USE_TLS`) with no sec-tag/CA registration, and the Mender path emits no CA variable -- so the field promised a pinned trust anchor the SDK didn't deliver, the same defect class `boot.anti_rollback` was removed for.",
       "properties": {
         "provider": {
           "type": "string",
@@ -307,9 +307,8 @@
           "additionalProperties": false,
           "required": ["url"],
           "properties": {
-            "url":           { "type": "string", "format": "uri", "description": "Deployment server URL (Mender / Hawkbit)." },
-            "tenant":        { "type": "string", "description": "Multi-tenancy token / tenant name." },
-            "tls_ca_bundle": { "type": "string", "description": "Optional pinned CA bundle for production.  Path relative to project root." }
+            "url":    { "type": "string", "format": "uri", "description": "Deployment server URL (Mender / Hawkbit)." },
+            "tenant": { "type": "string", "description": "Multi-tenancy token / tenant name." }
           }
         },
         "rollback": {
