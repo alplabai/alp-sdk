@@ -7,6 +7,27 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Fixed — the CC3501E TI build still aborted at the LINK step
+
+#1722 stopped a compiler *warning* on stderr from aborting `build_ti.ps1`, but it
+closed the stderr-tolerant window immediately after the compile loop. The linker,
+`tiarmobjcopy` and `tiarmsize` all run after that point and all write to stderr,
+so the same `NativeCommandError` could still abort the script — just later.
+
+Observed while building with `-Ble -AttnSelftest`: the script printed
+`== Link ==`, then died on a `NativeCommandError` from `tiarmclang` at the link
+invocation. #1722's other half worked exactly as intended — the artifacts are
+deleted up front, so the build left **no** `cc3501e-bridge.out` rather than a
+stale flashable one — but the failure was still reported as a PowerShell
+exception rather than as the build error it was.
+
+- The stderr window now closes only after the last native tool.
+- `tiarmobjcopy` (hex and bin) and `tiarmsize` gained explicit `$LASTEXITCODE`
+  checks, so widening the window cannot hide a genuine failure; the link step
+  already had one.
+
+With this, the same build surfaced its real error — `unresolved symbols remain`
+naming the two missing symbols — instead of a PowerShell stack trace.
 ### Added — 16-bit FIFO packing on the Alif DW-SSI polled path (+25% bridge throughput)
 
 The polled SPI path moved one byte per FIFO slot. MMIO accesses are what that
