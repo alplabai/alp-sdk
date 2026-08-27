@@ -417,7 +417,7 @@ def _pinned_zephyr_sysbuild_kconfig_symbols() -> Optional[set[str]]:
     to a stale pin, e.g. v3.7.0 while the repo pins v4.4.0).
 
     Resolution order: `$ZEPHYR_BASE` (the workspace convention every
-    `west` command + `scripts/alp_cli/doctor.py` use), falling back to
+    `west` command + `tan doctor` use), falling back to
     the west-workspace topdir's conventional `zephyr/` project
     directory (`scripts/bootstrap.sh` does `west init -l <alp-sdk>`,
     so alp-sdk's parent is the topdir and `<topdir>/zephyr` is the

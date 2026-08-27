@@ -4,8 +4,8 @@
 Reject a placeholder-only ALP-Bxxx diagnostic landing page (issue #1207).
 
 metadata/error-catalog.json exports every docs/diagnostics/ALP-B*.md page as
-the `doc:` destination for a stable diagnostic code -- `python -m alp_cli
-explain`, the IDE, and CI all link a coded failure straight to that file
+the `doc:` destination for a stable diagnostic code -- `tan explain --code`,
+the IDE, and CI all link a coded failure straight to that file
 (scripts/gen_error_catalog.py globs the same docs/diagnostics/ALP-B*.md set
 the catalog is built from, so "referenced by the catalog" and "exists under
 docs/diagnostics/" are the same set by construction).  A page that still

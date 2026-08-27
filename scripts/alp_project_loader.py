@@ -244,13 +244,6 @@ def split_silicon_ref(silicon: str | None) -> tuple[str, str, str] | None:
     want the slugs themselves, use this and root it their own way. Either
     way there is ONE place that knows a `silicon:` ref is three
     colon-separated parts.
-
-    Note the one remaining independent encoding of that fact:
-    `alp_cli/new_som.py::_SOC_REF_RE` (`^[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]+$`)
-    validates the arity up front for its own `--soc-ref` flag, and would
-    also need widening if the format ever grows a 4th part. It is a CLI
-    input validator rather than a resolution site, so it is deliberately
-    not folded in here -- but it is the other thing to change.
     """
     if not silicon:
         return None
@@ -283,13 +276,15 @@ def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
     each behind a thin wrapper that preserves that site's original
     exception type or soft-fail shape.
 
-    Issue #1096 closed out the remaining hand-rolled copies. The two that
-    root at a metadata root now call this helper (`alp_model/targets.py`,
-    `alp_cli/new_som.py`'s preset-path site); the rest root elsewhere and
-    call `split_silicon_ref()` directly, including the three slug-extraction
-    sites in `alp_cli/new_som.py` that #1096 originally scoped out -- they
-    were the same three-part split, so leaving them would have left the
-    drift the issue exists to close.
+    Issue #1096 closed out the remaining hand-rolled copies. The one that
+    roots at a metadata root now calls this helper (`alp_model/targets.py`;
+    `alp_cli/new_som.py` held a second preset-path site until that module
+    retired, alp-sdk#1367/#1368); the rest root elsewhere and call
+    `split_silicon_ref()` directly -- that set used to include three
+    slug-extraction sites in `alp_cli/new_som.py` that #1096 originally
+    scoped out because they were the same three-part split, so leaving them
+    would have left the drift the issue exists to close; those sites are
+    gone with the module now.
 
     There is no remaining `silicon.split(":")` outside this module; a
     regression test pins that.

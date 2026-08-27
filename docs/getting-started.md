@@ -488,14 +488,12 @@ right wiring per OS (Zephyr `CONFIG_LVGL=y` in `alp.conf`, Yocto
 `IMAGE_INSTALL` for the A-cores, …) and refuses a library the target
 can't run, naming the failing constraint.  Check what's selected and
 whether it's compatible — run this from *your project's* directory
-(the one containing the `board.yaml` above), not from the SDK
-checkout: the `libraries` line only appears when `doctor` is run
-where it can find that `board.yaml`, and `PYTHONPATH` has to reach
-the checkout's `scripts/` from wherever that project lives:
+(the one containing the `board.yaml` above): the `libraries` line only
+appears when `doctor` is run where it can find that `board.yaml`:
 
 ```bash
 cd <your-project-dir>   # contains the board.yaml you just edited
-PYTHONPATH=<path-to-alp-sdk>/scripts python3 -m alp_cli doctor   # a "libraries" line reports tier + licence + fit
+tan doctor               # a "libraries" line reports tier + licence + fit
 ```
 
 `doctor`'s library check only handles the bare-string `libraries: [name,

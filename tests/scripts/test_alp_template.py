@@ -1384,9 +1384,9 @@ def test_alp_sdk_root_required_block_checks_both_d_and_env_and_prefers_d():
 
 
 # --------------------------------------------------------------------------
-# render(..., sku=...) / default_sku() -- `alp generate`'s other scaffold
-# front door now agrees with `alp emit scaffold` (issue #864 Fable-review
-# MINOR G)
+# render(..., sku=...) / default_sku() -- tan-cli's scaffold front doors
+# (`tan init`, `tan scaffold`) now agree with `west alp-emit scaffold`
+# (issue #864 Fable-review MINOR G)
 # --------------------------------------------------------------------------
 
 def test_default_sku_is_the_examples_own_som_sku():

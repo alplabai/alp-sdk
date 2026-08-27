@@ -220,45 +220,42 @@ applies to the other `meta-rz-*` feature layers.
 
 ```sh
 export ALP_DRPAI_TVM_HOME=<rzv_drp-ai_tvm checkout>
-cd <alp-sdk>/scripts && python3 -m alp_cli model build --board <path>/board.yaml
+tan model build --sdk-root <alp-sdk> --board <path>/board.yaml
 ```
 
-Run it as `python3 -m alp_cli`, not `alp`. There is no `alp` console-script
-to install: `pyproject.toml`'s `[project.scripts]` declares only `alp-mcp`,
-and its comment states the reason — "standalone Python Tan is the user-facing
-command surface (ADR-0020). The `alp_cli` package remains an SDK-internal
-reference and parity CLI for direct maintenance, never a user-installed `alp`
-binary." The module form works from `scripts/` (or with `scripts/` on
-`PYTHONPATH`); `python3 -m alp_model` does not, because `alp_model` is a
-package with no `__main__`.
+`tan` is a standalone binary — it must resolve an alp-sdk checkout before it
+can compile anything, and `--sdk-root` is how you bind one explicitly rather
+than relying on discovery (cwd-inside-the-checkout, a project pin, or a
+global default) picking the right one.
+
+`tan` is the whole command surface (ADR-0020 end-state B); `scripts/alp_cli`'s
+former `model` command (and the rest of its command-line wrappers) retired
+once `tan model` shipped a native port (alp-sdk#1368). There is no `alp`
+console script, and no `python -m alp_cli <verb>` front door either any
+more.
 
 There is no `--target`/`--product` flag and no positional `<model.onnx>`
-argument (`python3 -m alp_model` isn't runnable either — `alp_model` is a
-package, not a script). `python3 -m alp_cli model build` compiles every `models:` entry
-declared in `board.yaml` for every backend the SoM resolves to
-(`scripts/alp_cli/model.py`); `PRODUCT` for DRP-AI comes from
-`models[].compile.drpai.product` (falling back to `accel_config`, then
-`"V2N"`), not a CLI flag.
+argument. `tan model build` compiles every `models:` entry declared in
+`board.yaml` for every backend the SoM resolves to; `PRODUCT` for DRP-AI
+comes from `models[].compile.drpai.product` (falling back to
+`accel_config`, then `"V2N"`), not a CLI flag.
 
 **`board.yaml`'s schema does not describe this config yet — use
-`python3 -m alp_cli model build` above anyway; it does not run schema validation.**
+`tan model build` above anyway; it does not run schema validation.**
 `metadata/schemas/board.schema.json`'s `models[].compile.drpai` block only
 declares a `spec:` key (`additionalProperties: false`, `required: ["spec"]`)
 — a leftover from a design where an external spec file carried the model
 geometry. `scripts/alp_model/adapters/drpai.py` never reads `spec`; it reads
 `input_shape`, `input_name`, `images` and `product` straight out of the
-`compile.drpai` block, so `python3 -m alp_cli validate` rejects a `board.yaml` written this
-way. That does not block the command in step 5 above: `python3 -m alp_cli model build`
-(`scripts/alp_cli/model.py::%build_cmd`) reads `board.yaml` with a plain
-`yaml.safe_load` and never calls the schema validator itself — only the
-separate `python3 -m alp_cli validate` command does — so `compile.drpai.input_shape` /
-`input_name` / `images` / `product` reach the adapter unchanged through the
-documented CLI today, exactly as
-`tests/scripts/test_alp_cli_model.py::%test_alp_model_build_only_resolves_path_valued_drpai_opts`
-exercises end-to-end through `python3 -m alp_cli model build` itself, not by calling
-`build_model()` directly. Until the schema is reconciled with what the
-adapter actually reads, `python3 -m alp_cli validate` cannot be used against a
-`board.yaml` with a `compile.drpai` block; `python3 -m alp_cli model build` can.
+`compile.drpai` block, so `tan validate` rejects a `board.yaml` written this
+way. That does not block the command in step 5 above: `tan model build`
+reads `board.yaml` with a plain `yaml.safe_load` and never calls the schema
+validator itself — only the separate `tan validate` command does — so
+`compile.drpai.input_shape` / `input_name` / `images` / `product` reach the
+adapter unchanged through the documented CLI today. Until the schema is
+reconciled with what the adapter actually reads, `tan validate` cannot be
+used against a `board.yaml` with a `compile.drpai` block; `tan model build`
+can.
 
 `scripts/alp_model/adapters/drpai.py` drives
 `$ALP_DRPAI_TVM_HOME/tutorials/compile_onnx_model_quant.py` with `PRODUCT` in the

@@ -2,11 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Compatibility CLI for the shared board.yaml validator.
 
-`alp validate` is the canonical diagnostic-rich entry point.  This script stays
-as the historical pre-flight command used by west wrappers, MCP tooling, and
-docs.  It deliberately calls the same validator and then the orchestrator loader
-so schema/xref/compat diagnostics and hard cross-field consistency errors match
-the build preflight.
+`tan validate` is the canonical diagnostic-rich entry point, and spawns this
+script as its non-`--offline` subprocess (`tan-cli` `VALIDATOR_SCRIPT`).  This
+script also stays as the historical pre-flight command used by west wrappers,
+MCP tooling, and docs.  It deliberately calls the same validator and then the
+orchestrator loader so schema/xref/compat diagnostics and hard cross-field
+consistency errors match the build preflight.
 """
 
 from __future__ import annotations
