@@ -145,13 +145,16 @@ z_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capabilitie
 	if (cfg->resolution_bits != 0 && cfg->resolution_bits > spec->resolution) {
 		return ALP_ERR_OUT_OF_RANGE;
 	}
-	/* This generic backend serves whatever Zephyr ADC driver the board
-	 * wires up -- unlike alif_e7.c / alif_e8.c (which honour the ratio
-	 * via a known-good __builtin_ctz() log2 mapping on a driver this
-	 * SDK already benches), there's no single vendor contract here to
-	 * trust that mapping against. Refuse oversampling outright rather
-	 * than silently dropping the field (the previous `.oversampling = 0`
-	 * below) or guessing at hardware this backend hasn't proven. */
+	/* No ADC backend in this tree can honour a hardware oversampling
+	 * ratio today: alif_e7.c / alif_e8.c refuse any ratio > 1 too, because
+	 * their vendored Alif driver rejects every non-zero
+	 * adc_sequence.oversampling outright (no power-of-two carve-out).
+	 * This generic backend serves whatever Zephyr ADC driver the board
+	 * wires up, with no single vendor contract to validate a log2
+	 * mapping against even if one existed. Refuse oversampling outright
+	 * rather than silently dropping the field (the previous
+	 * `.oversampling = 0` below) or guessing at hardware this backend
+	 * hasn't proven. */
 	if (cfg->oversampling_ratio > 1u) {
 		return ALP_ERR_NOSUPPORT;
 	}

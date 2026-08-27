@@ -32,7 +32,6 @@
 #include <alp/soc_caps.h>
 
 #include "adc_ops.h"
-#include "adc_oversampling.h"
 #include "alp_slot_claim.h"
 
 /* DT alias table.  Each alp-adcN alias resolves to an adc_dt_spec;
@@ -147,19 +146,19 @@ alif_e7_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capab
 	s->channel_id = cfg->channel_id;
 	s->resolution_bits =
 	    (cfg->resolution_bits != 0) ? cfg->resolution_bits : (uint8_t)spec->resolution;
-	/* HW oversampling reaches us via the portable config field (Zephyr's
-     * adc_sequence.oversampling already abstracts this).  Vendor-ext
-     * for oversampling would be redundant -- it's promoted to portable.
-     *
-     * adc_sequence.oversampling is a log2 EXPONENT; the portable field is
-     * a RATIO -- see adc_oversampling.h for why a non-power-of-two ratio
-     * must be refused here rather than silently rounded by
-     * __builtin_ctz() below. */
-	if (!alp_adc_oversampling_ratio_ok(cfg->oversampling_ratio)) {
+	/* MUST refuse any ratio > 1: the Alif adc_alif driver rejects every
+     * non-zero adc_sequence.oversampling outright, power-of-two or not --
+     * zephyr/drivers/adc/adc_alif.c:779 is `if (sequence->oversampling !=
+     * 0U) { ... return -ENOTSUP; }`, with no power-of-two carve-out.  A
+     * ratio that passed the old power-of-two-only guard here still got
+     * written to adc_sequence.oversampling below and every subsequent
+     * adc_read() still faulted ALP_ERR_IO (issue #1648) -- refuse it here,
+     * at open(), instead. */
+	if (cfg->oversampling_ratio > 1u) {
 		_free_state(s);
 		return ALP_ERR_NOSUPPORT;
 	}
-	s->oversample_ratio = (cfg->oversampling_ratio > 1u) ? cfg->oversampling_ratio : 1u;
+	s->oversample_ratio = 1u;
 
 	int err = adc_channel_setup_dt(spec);
 	if (err != 0) {
@@ -230,8 +229,7 @@ ALP_BACKEND_REGISTER(adc,
                      {
                          .silicon_ref = "alif:ensemble:e7",
                          .vendor      = "alif",
-                         .base_caps   = (uint32_t)(ALP_INSTANCE_CAP_HW_OVERSAMPLE |
-                                                   ALP_INSTANCE_CAP_HW_TRIGGER),
+                         .base_caps   = (uint32_t)ALP_INSTANCE_CAP_HW_TRIGGER,
                          .priority    = 100,
                          .ops         = &alif_e7_ops,
                          .probe       = NULL,

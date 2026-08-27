@@ -294,15 +294,23 @@ static alp_status_t configure_pcm(snd_pcm_t *pcm, const alp_audio_config_t *cfg)
 		return ALP_ERR_NOSUPPORT;
 	}
 
+	/* frames_per_block is a buffering hint (see <alp/audio.h>), not a
+     * contract -- snd_pcm_readi/writei accept any frame count per call, so
+     * a dmix-backed `default` device negotiating its own fixed period
+     * (commonly 1024 frames) does not make a smaller requested block size
+     * unusable, only unlikely to be honoured exactly.  Failing open() over
+     * a mismatch here regressed ALP_AUDIO_CONFIG_DEFAULT's 256-frame
+     * request against exactly that dmix default (#1648 tier-1 review).
+     * Adopt whatever ALSA actually negotiated for buffer sizing below
+     * instead. */
 	snd_pcm_uframes_t period = cfg->frames_per_block;
 	rc                       = snd_pcm_hw_params_set_period_size_near(pcm, hw, &period, NULL);
 	if (rc < 0) return alsa_to_alp(rc);
 	if (period != (snd_pcm_uframes_t)cfg->frames_per_block) {
 		fprintf(stderr,
-		        "alp_audio: period %u frames unsupported, device negotiated %lu frames\n",
+		        "alp_audio: period %u frames requested, device negotiated %lu frames\n",
 		        (unsigned)cfg->frames_per_block,
 		        (unsigned long)period);
-		return ALP_ERR_NOSUPPORT;
 	}
 
 	/* Buffer = 4 periods.  Generous enough to absorb scheduling

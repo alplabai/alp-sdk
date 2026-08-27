@@ -52,3 +52,19 @@ ZTEST(adc_oversampling, test_non_powers_of_two_refused)
 		              ratios[i]);
 	}
 }
+
+/* Powers of two above the documented 1..256 ceiling must be refused too --
+ * without an upper bound, 512/1024/... pass the bare power-of-two test
+ * (`ratio & (ratio - 1) == 0`) despite sitting above every ratio
+ * <alp/adc.h> documents as supported.
+ */
+ZTEST(adc_oversampling, test_powers_of_two_above_ceiling_refused)
+{
+	static const uint16_t ratios[] = { 512u, 1024u, 32768u };
+
+	for (size_t i = 0; i < ARRAY_SIZE(ratios); ++i) {
+		zassert_false(alp_adc_oversampling_ratio_ok(ratios[i]),
+		              "%u is a power of two but above the 256 ceiling and must be refused",
+		              ratios[i]);
+	}
+}
