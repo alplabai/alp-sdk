@@ -47,9 +47,14 @@ class Report:
         `all()` over an empty sequence is `True`, so before tan-cli#721 a
         profile that selected no check-script task at all returned 0 and
         printed `0/0 passed` + `complete.` -- indistinguishable by `$?` from a
-        verified clean run. `quick` selects exactly zero today (measured
+        verified clean run. `quick` selected exactly zero back then (measured
         against `metadata/quality-tasks-v1.json`: quick 0, pr 55, full 58,
-        release 55), so that was every `--profile quick` invocation.
+        release 55), so that was every `--profile quick` invocation -- the gap
+        `selected_nothing()` closed. #1463 populated `quick` (36 tasks today,
+        see the registry's own root `description` for the membership bar), so
+        this branch is now reachable only if a future edit strips it back to
+        empty -- the check stays because that regression is exactly the shape
+        this method exists to catch.
 
         `selected_nothing()` is kept separate from a gate failure because the
         two are different facts and get different exit codes -- see `main()`.

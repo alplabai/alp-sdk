@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Single source of truth for the SDK's quality tasks: which check_*.py gates exist, whether each is a hard CI gate or informational, and which profiles (quick/pr/full/release) run it. check_quality_registry.py keeps it == scripts/check_*.py on disk. Additive-only within schemaVersion 1.",
+  "description": "Single source of truth for the SDK's quality tasks: which check_*.py gates exist, whether each is a hard CI gate or informational, and which profiles (quick/pr/full/release) run it. check_quality_registry.py keeps it == scripts/check_*.py on disk. Additive-only within schemaVersion 1. `quick` membership criterion (#1463, measured against the `pr` set): pure-Python (no `subprocess` call of any kind -- not even `git`), no build/toolchain dependency, and a median wall-clock time comfortably under half a second on the real alp-sdk tree. A gate that shells out or walks the whole example/doc tree belongs in `pr` (or `full`) only, even if it happens to run fast today -- add `quick` only once you've measured it against this bar, not by assuming a short script qualifies.",
   "tasks": [
     {
       "id": "agents-md-generators",
@@ -9,6 +9,7 @@
       "script": "scripts/check_agents_md_generators.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -23,6 +24,7 @@
       "script": "scripts/check_apt_bounded.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -51,6 +53,7 @@
       "script": "scripts/check_board_id_doc_parity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -79,6 +82,7 @@
       "script": "scripts/check_board_target_tree_parity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -121,6 +125,7 @@
       "script": "scripts/check_build_receipt.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -135,6 +140,7 @@
       "script": "scripts/check_changelog_fragments.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -163,6 +169,7 @@
       "script": "scripts/check_chip_header_status.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -177,6 +184,7 @@
       "script": "scripts/check_chip_manifest_parity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -191,6 +199,7 @@
       "script": "scripts/check_chip_subsystems_parity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -205,6 +214,7 @@
       "script": "scripts/check_cmake_chip_list_parity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -245,6 +255,7 @@
       "script": "scripts/check_diagnostic_narratives.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -259,6 +270,7 @@
       "script": "scripts/check_diagnostic_schema.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -273,6 +285,7 @@
       "script": "scripts/check_doc_drift.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -287,6 +300,7 @@
       "script": "scripts/check_doc_inventory.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -315,6 +329,7 @@
       "script": "scripts/check_doxyfile_single_source.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -329,6 +344,7 @@
       "script": "scripts/check_doxygen_coverage.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -357,6 +373,7 @@
       "script": "scripts/check_driver_status_backing.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -371,6 +388,7 @@
       "script": "scripts/check_e1m_pinout.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -385,6 +403,7 @@
       "script": "scripts/check_e1m_route_capability.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -413,6 +432,7 @@
       "script": "scripts/check_emit_registry.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -469,6 +489,7 @@
       "script": "scripts/check_example_sdk_root.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -497,6 +518,7 @@
       "script": "scripts/check_helper_firmware_path.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -525,6 +547,7 @@
       "script": "scripts/check_inference_backend_parity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -539,6 +562,7 @@
       "script": "scripts/check_library_pin_parity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -581,6 +605,7 @@
       "script": "scripts/check_pin_conflicts.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -609,6 +634,7 @@
       "script": "scripts/check_public_header_purity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -637,6 +663,7 @@
       "script": "scripts/check_sbom.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -651,6 +678,7 @@
       "script": "scripts/check_slot_claim_atomic.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -665,6 +693,7 @@
       "script": "scripts/check_som_bundle.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -679,6 +708,7 @@
       "script": "scripts/check_som_topology_parity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -693,6 +723,7 @@
       "script": "scripts/check_stub_issues.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -721,6 +752,7 @@
       "script": "scripts/check_sw_fallback_tags.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -801,6 +833,7 @@
       "script": "scripts/check_vendor_ext_tags.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -815,6 +848,7 @@
       "script": "scripts/check_version_doc_sync.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -829,6 +863,7 @@
       "script": "scripts/check_west_manifest_module_resolution.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -843,6 +878,7 @@
       "script": "scripts/check_workflow_expressions.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
