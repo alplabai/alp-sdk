@@ -3281,6 +3281,10 @@
       "script": "scripts/check_cross_platform.py"
     },
     {
+      "purpose": "Assert every ALP-Bxxx code scripts/alp_cli/validator.py can emit has a docs/diagnostics/ALP-Bxxx.md landing page (issue #1569).",
+      "script": "scripts/check_diagnostic_emission_coverage.py"
+    },
+    {
       "purpose": "Reject a placeholder-only ALP-Bxxx diagnostic landing page (issue #1207).",
       "script": "scripts/check_diagnostic_narratives.py"
     },

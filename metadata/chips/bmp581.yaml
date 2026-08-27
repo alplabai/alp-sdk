@@ -18,8 +18,8 @@ i2c:
     # SDO = 1'b1." -- BST-BMP581-DS004-13 s5.6.  NOTE: the driver's on-board
     # SDO strap selects the address, NOT the CSB pin (CSB is the separate
     # SPI/I2C protocol-select strap, tied to VDDIO for I2C/I3C mode).
-    - { addr_7bit: 0x46, scope: "SDO = GND (default, on-board barometer on the E1M/E1M-X EVKs)" }
-    - { addr_7bit: 0x47, scope: "SDO = VDDIO" }
+    - { addr_7bit: 0x46, scope: "SDO = GND (not populated on the E1M/E1M-X EVKs)" }
+    - { addr_7bit: 0x47, scope: "SDO = VDDIO (default, on-board barometer on the E1M/E1M-X EVKs -- metadata/boards/e1m-evk.yaml + e1m-x-evk.yaml i2c_devices:)" }
   address_strap_range: "0x46..0x47 (SDO strap)"
   max_clock_hz:   1000000         # I2C Fast-mode-plus (Fm+) per datasheet features list.
 

@@ -44,8 +44,8 @@ is `preview`.
 To keep the focus on the transport, this template publishes a
 **synthetic metric** (device uptime). Swap
 `read_telemetry_value()` for a real sensor read -- e.g. compose it
-with the [`sensor` template](../../peripheral-io/i2c-master/) (TMP112
-over `<alp/chips/tmp112.h>`) -- and the publish path is unchanged.
+with the [`sensor` template](../../peripheral-io/i2c-master/) (BMP581
+over `<alp/chips/bmp581.h>`) -- and the publish path is unchanged.
 
 ## Build
 

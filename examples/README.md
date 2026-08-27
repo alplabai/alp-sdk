@@ -81,7 +81,7 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `blink`                      | Toggle the RGB-red LED pad as plain GPIO -- start here, before anything else. |
 | `gpio-button-led`            | GPIO open + configure (input + output); button + LED via the `button_led` block. |
 | `i2c-scanner`                | Walk an I2C bus + report every device that ACKs.                         |
-| `i2c-master`                 | Read a known I2C device (TMP112) at a known address.                     |
+| `i2c-master`                 | Read a known I2C device (BMP581) at a known address.                     |
 | `i2c-slave`                  | I2C target (slave) mode -- register-file pattern over `alp_i2c_target_open` callbacks. |
 | `i2c-device-hub`             | Read every populated IC on the EVK sensor/power bus through its real chip driver -- one bus, many devices. |
 | `spi-master`                 | Discrete SPI master -- write / transceive / read patterns.                |
