@@ -42,15 +42,28 @@ static struct alp_display *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_DISPLAY_HANDLES; ++i) {
 		/* Atomic claim: only the winner of the flag flip may touch the
-		 * slot's other fields (in_use is the struct's last member, so
-		 * zero everything before it -- incl. lifecycle/active_ops,
-		 * parking a fresh slot at LC_UNOPENED). Issue #629. */
+		 * slot's other fields.  Zero everything BEFORE in_use -- incl.
+		 * lifecycle/active_ops, parking a fresh slot at LC_UNOPENED
+		 * (issue #629).  `epoch` sits after in_use precisely so this
+		 * memset does not touch it: it must survive the claim to be a
+		 * generation counter at all (issue #1698). */
 		if (alp_slot_try_claim(&_pool[i].in_use)) {
 			memset(&_pool[i], 0, offsetof(struct alp_display, in_use));
+			/* Publish a new generation for this slot's new owner. Wraps
+			 * at 2^32 claims, which needs a close/open pair every
+			 * microsecond for over an hour to reach -- and a wrap only
+			 * risks a stale holder matching, i.e. back to the old
+			 * behaviour, never worse. */
+			_pool[i].epoch++;
 			return &_pool[i];
 		}
 	}
 	return NULL;
+}
+
+uint32_t alp_display_slot_epoch(const alp_display_t *h)
+{
+	return (h != NULL) ? h->epoch : 0u;
 }
 
 static void _free(struct alp_display *h)
