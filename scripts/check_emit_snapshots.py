@@ -221,7 +221,9 @@ def _normalize_provenance(text: str) -> str:
 # RESOLVES in this checkout, else `main`.  Tag resolution is a property of the
 # CHECKOUT, not of the code -- a full clone with tags fetched emits
 # `blob/v0.16.0/docs/...` while CI's shallow, tagless clone emits
-# `blob/main/docs/...` from the very same commit.  So this one segment can
+# `blob/main/docs/...` from the very same commit.  Both URL shapes the
+# scaffolded READMEs emit carry the ref: `blob/<ref>/` for a file link and
+# `tree/<ref>/` for a sibling-example directory link.  So this one segment can
 # never be byte-stable across the hosts that write vs. check the goldens
 # (issues #1686, #1738), for the same reason `sdkCommit` above can't.  It also
 # moves at every release even on one host, which would make these goldens a
@@ -229,7 +231,7 @@ def _normalize_provenance(text: str) -> str:
 # path it points at -- stays real, so a doc that moves or disappears still
 # fails the gate.
 _DOCS_REF_RE = re.compile(
-    r"(https://github\.com/alplabai/alp-sdk/blob/)"
+    r"(https://github\.com/alplabai/alp-sdk/(?:blob|tree)/)"
     r"(?:main|v\d+\.\d+\.\d+(?:-rc\d+)?)"
     r"(/)"
 )

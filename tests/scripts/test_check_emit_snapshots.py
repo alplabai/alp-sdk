@@ -110,3 +110,17 @@ def test_normalize_docs_ref_leaves_other_repos_alone():
     text = "https://github.com/other/repo/blob/main/a.md"
     assert mod._normalize_host_paths(
         text, "/home/ci/alp-sdk", "/usr/bin/python3") == text
+
+
+def test_normalize_docs_ref_covers_tree_urls():
+    """Scaffolded READMEs link sibling EXAMPLES as `tree/<ref>/...`, not just
+    docs as `blob/<ref>/...` -- sensor-v2n101 carries three of them, and a
+    blob-only pattern left that golden red in a tagless clone (#1738)."""
+    mod = _load()
+    args = ("/home/ci/alp-sdk", "/usr/bin/python3")
+    base = ("https://github.com/alplabai/alp-sdk/tree/{}"
+            "/examples/peripheral-io/i2c-scanner")
+    assert (mod._normalize_host_paths(base.format("main"), *args)
+            == mod._normalize_host_paths(base.format("v0.16.0"), *args))
+    assert "tree/<DOCS_REF>/examples/peripheral-io/i2c-scanner" in \
+        mod._normalize_host_paths(base.format("v0.16.0"), *args)
