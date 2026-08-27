@@ -93,9 +93,11 @@ signals:
 # core clock; this part has NO separate timer PLL -- a long-standing
 # "240 MHz timer clock" claim here was invented and is corrected as
 # of fw v0.2.4); firmware fixes the prescaler at 216:1 so the counter
-# ticks at 1 MHz -- effective LSB 1 us, not the raw 4.63 ns core-clock
-# LSB; maximum period is the 16-bit ARR's 65.536 ms, not ~303 us (that
-# figure is the unprescaled ceiling and doesn't apply to CMD_PWM_SET).
+# ticks at 1 MHz -- effective LSB 1 us edge-aligned / 2 us
+# center-aligned, not the raw 4.63 ns core-clock LSB; maximum period
+# is the 16-bit ARR's 65.536 ms edge-aligned / 131.070 ms
+# center-aligned, not ~303 us (that figure is the unprescaled
+# ceiling and doesn't apply to CMD_PWM_SET).
 # Firmware translates caller `period_ns` /
 # `duty_ns` from CMD_PWM_SET into the timer's CAR / CHnCV register
 # pair and reports the register-derived actual via CMD_PWM_GET.
@@ -114,10 +116,12 @@ pwm_routing:
     Both TIMER0 and TIMER7 are 16-bit advanced-control timers with
     dead-time generation, complementary output, and break-input
     support.  Firmware fixes the prescaler at 216:1 (216 MHz CK_TIMER
-    -> 1 MHz tick), giving a 1 us effective LSB and a 65.536 ms
-    longest single-counter period (the 16-bit ARR's full count); the
-    raw 4.63 ns / ~303 us figures are the unprescaled core-clock
-    numbers and do not apply to CMD_PWM_SET.  Channel ordering matches the
+    -> 1 MHz tick), giving a 1 us effective LSB edge-aligned (2 us
+    center-aligned) and a longest single-counter period of 65.536 ms
+    edge-aligned / 131.070 ms center-aligned (the 16-bit ARR's full
+    count, doubled when center-aligned); the raw 4.63 ns / ~303 us
+    figures are the unprescaled core-clock numbers and do not apply
+    to CMD_PWM_SET.  Channel ordering matches the
     GD32G553 datasheet -- note that on TIMER0, MCH2 (not MCH1) maps
     to E1M PWM1 on V2N pad PB1; firmware honours the datasheet
     layout.

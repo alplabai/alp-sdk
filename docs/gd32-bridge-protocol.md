@@ -463,12 +463,14 @@ On V2N every E1M PWM channel maps to a TIMER0 / TIMER7 channel
 Both timers are 16-bit advanced timers running at the 216 MHz
 CK_TIMER (= CK_APB at DIV1 = the core clock; this part has no
 separate timer PLL), but the firmware fixes the prescaler at 216:1
-so the counter ticks at 1 MHz -- the achievable resolution is 1 us,
+so the counter ticks at 1 MHz -- the achievable resolution is 1 us
+edge-aligned / 2 us center-aligned (see the alignment note below),
 not the raw 4.63 ns core-clock LSB, and the longest single-counter
-period is the 16-bit ARR's 65.536 ms, not ~303 us (that figure is
-the unprescaled core-clock ceiling and does not apply to
-`CMD_PWM_SET`; an over-long period is currently clamped rather than
-rejected -- see #1730).  `CMD_PWM_GET` reads the live
+period is the 16-bit ARR's 65.536 ms edge-aligned / 131.070 ms
+center-aligned, not ~303 us (that figure is the unprescaled
+core-clock ceiling and does not apply to `CMD_PWM_SET`; an
+over-long period is currently clamped rather than rejected -- see
+#1730).  `CMD_PWM_GET` reads the live
 timer registers (auto-reload + compare) and converts ticks back to
 nanoseconds -- it reports what the pad is actually generating, never
 an echo of the request.  Two consequences of the hardware truth:

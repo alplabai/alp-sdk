@@ -257,7 +257,7 @@ ZTEST(alp_storage_registry, test_otfad_window_alignment_validation)
 	zassert_equal(alp_nxp_storage_otfad_set_window(&h, 0u, 0u, 1024u), ALP_ERR_NOSUPPORT);
 }
 
-/* ---------- (j) read-only handle: write() and erase() agree ------------- */
+/* ---------- (i) read-only handle: write() and erase() agree ------------- */
 
 ZTEST(alp_storage_registry, test_read_only_handle_write_and_erase_agree)
 {
@@ -288,7 +288,7 @@ ZTEST(alp_storage_registry, test_read_only_handle_write_and_erase_agree)
 	alp_storage_close(h);
 }
 
-/* ---------- (i) overflow-safe range helper for fixed-capacity backends -- */
+/* ---------- (j) overflow-safe range helper for fixed-capacity backends -- */
 
 ZTEST(alp_storage_registry, test_range_in_capacity_accepts_valid)
 {

@@ -76,8 +76,11 @@ br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabiliti
      * surfaces as ALP_ERR_OUT_OF_RANGE from br_set_duty()/br_set_period()
      * via the firmware's own STATUS_OUT_OF_RANGE (wire 0x08, see
      * gd32g553.c:status_from_wire()), not from this channel_id check.
-     * The other end of the range (a period past the 16-bit ARR, > 65.536
-     * ms) is currently silently clamped instead of rejected -- #1730. */
+     * The other end of the range (a period past the 16-bit ARR --
+     * > 65.536 ms edge-aligned, > 131.070 ms center-aligned, since
+     * the center-aligned path halves the commanded period before
+     * the same ARR clamp -- firmware/gd32-bridge/hal/gd32/pwm.c:157,165)
+     * is currently silently clamped instead of rejected -- #1730. */
 	if (cfg->channel_id >= ALP_E1M_X_PWM_COUNT) {
 		return ALP_ERR_INVAL;
 	}

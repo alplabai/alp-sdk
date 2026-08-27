@@ -64,7 +64,7 @@
 
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
-#include <alp/e1m_pinout.h>
+#include <alp/e1m_x_pinout.h>
 #include <alp/peripheral.h>
 #include <alp/pwm.h>
 
@@ -167,8 +167,8 @@ static alp_status_t (*g_pwm_test_sysfs_read_hook)(const char *path,
  */
 static alp_status_t _sysfs_read(const char *path, char *buf, size_t buf_sz)
 {
-	if (g_pwm_test_sysfs_read_hook != NULL) return g_pwm_test_sysfs_read_hook(path, buf, buf_sz);
 	if (buf_sz == 0u) return ALP_ERR_INVAL;
+	if (g_pwm_test_sysfs_read_hook != NULL) return g_pwm_test_sysfs_read_hook(path, buf, buf_sz);
 
 	int fd = open(path, O_RDONLY | O_CLOEXEC);
 	if (fd < 0) return alp_status_from_posix_errno(errno);
@@ -261,9 +261,11 @@ y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilitie
 	 * zephyr_drv.c:108's ARRAY_SIZE(_specs) check).  ALP_E1M_PWM_COUNT
 	 * and ALP_E1M_X_PWM_COUNT are both 8u (e1m_pinout.h / e1m_x_pinout.h);
 	 * this backend is form-factor-generic (silicon_ref "*"), so either
-	 * would do -- pick ALP_E1M_PWM_COUNT to source the bound from a
-	 * header instead of a bare literal. */
-	if (cfg->channel_id >= ALP_E1M_PWM_COUNT) return ALP_ERR_INVAL;
+	 * would do -- pick ALP_E1M_X_PWM_COUNT to agree with the E1M-X
+	 * `pwm/gd32_bridge.c` sibling backend (the only form factor this
+	 * Yocto/A55 backend actually runs on today) on which header is
+	 * authoritative, instead of each backend picking its own. */
+	if (cfg->channel_id >= ALP_E1M_X_PWM_COUNT) return ALP_ERR_INVAL;
 
 	y_pwm_data_t *d = (y_pwm_data_t *)malloc(sizeof(*d));
 	if (d == NULL) return ALP_ERR_NOMEM;
