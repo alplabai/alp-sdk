@@ -215,6 +215,31 @@ def _normalize_provenance(text: str) -> str:
     return _SDK_COMMIT_RE.sub(r'\1"<SDK_COMMIT>"', text)
 
 
+# The scaffolded README's doc links pin to a GitHub ref chosen at emit time by
+# `scripts/alp_template.py::_docs_ref()`: `v<version>` when
+# `metadata/sdk_version.yaml` says `status: released` AND that tag actually
+# RESOLVES in this checkout, else `main`.  Tag resolution is a property of the
+# CHECKOUT, not of the code -- a full clone with tags fetched emits
+# `blob/v0.16.0/docs/...` while CI's shallow, tagless clone emits
+# `blob/main/docs/...` from the very same commit.  So this one segment can
+# never be byte-stable across the hosts that write vs. check the goldens
+# (issues #1686, #1738), for the same reason `sdkCommit` above can't.  It also
+# moves at every release even on one host, which would make these goldens a
+# recurring red.  Reduce the ref to a token; the rest of each link -- the doc
+# path it points at -- stays real, so a doc that moves or disappears still
+# fails the gate.
+_DOCS_REF_RE = re.compile(
+    r"(https://github\.com/alplabai/alp-sdk/blob/)"
+    r"(?:main|v\d+\.\d+\.\d+(?:-rc\d+)?)"
+    r"(/)"
+)
+
+
+def _normalize_docs_ref(text: str) -> str:
+    """Replace the emit-time GitHub ref in scaffolded doc links with a token."""
+    return _DOCS_REF_RE.sub(r"\1<DOCS_REF>\2", text)
+
+
 def _normalize_host_paths(text: str, repo: str, python: str) -> str:
     """Replace host-specific SDK and Python paths with stable tokens.
 
@@ -233,6 +258,7 @@ def _normalize_host_paths(text: str, repo: str, python: str) -> str:
     text = _normalize_path(text, repo, "<SDK_ROOT>")
     text = _normalize_path(text, python, "<PYTHON_EXECUTABLE>")
     text = _normalize_provenance(text)
+    text = _normalize_docs_ref(text)
     return _normalize_token_tails(text)
 
 

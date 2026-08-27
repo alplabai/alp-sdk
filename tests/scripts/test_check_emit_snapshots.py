@@ -69,3 +69,44 @@ def test_normalize_windows_json_escaped_python_executable():
     out = mod._normalize_host_paths(text, "C:\\repo\\alp-sdk", python)
     assert "C:\\\\Users" not in out
     assert "-DPython3_EXECUTABLE=<PYTHON_EXECUTABLE>" in out
+
+
+def test_normalize_docs_ref_released_tag():
+    mod = _load()
+    text = ("[`docs/cross-platform-setup.md`](https://github.com/alplabai/"
+            "alp-sdk/blob/v0.16.0/docs/cross-platform-setup.md)")
+    out = mod._normalize_host_paths(text, "/home/ci/alp-sdk", "/usr/bin/python3")
+    assert "blob/v0.16.0/" not in out
+    assert "blob/<DOCS_REF>/docs/cross-platform-setup.md" in out
+
+
+def test_normalize_docs_ref_main_and_tag_agree():
+    """A tags-fetched checkout emits `v<version>`, CI's tagless clone emits
+    `main`, from the same commit (#1686/#1738).  Both must normalise to the
+    same bytes or the golden can only ever be green on one of them."""
+    mod = _load()
+    base = "https://github.com/alplabai/alp-sdk/blob/{}/docs/a.md"
+    args = ("/home/ci/alp-sdk", "/usr/bin/python3")
+    assert (mod._normalize_host_paths(base.format("main"), *args)
+            == mod._normalize_host_paths(base.format("v0.16.0"), *args))
+    # and it must keep holding at the NEXT release, not just this one
+    assert (mod._normalize_host_paths(base.format("v0.17.0"), *args)
+            == mod._normalize_host_paths(base.format("main"), *args))
+
+
+def test_normalize_docs_ref_keeps_the_doc_path_real():
+    """Only the ref segment is tokenised -- a doc that moves still fails."""
+    mod = _load()
+    args = ("/home/ci/alp-sdk", "/usr/bin/python3")
+    moved = mod._normalize_host_paths(
+        "https://github.com/alplabai/alp-sdk/blob/main/docs/moved.md", *args)
+    orig = mod._normalize_host_paths(
+        "https://github.com/alplabai/alp-sdk/blob/main/docs/a.md", *args)
+    assert moved != orig
+
+
+def test_normalize_docs_ref_leaves_other_repos_alone():
+    mod = _load()
+    text = "https://github.com/other/repo/blob/main/a.md"
+    assert mod._normalize_host_paths(
+        text, "/home/ci/alp-sdk", "/usr/bin/python3") == text
