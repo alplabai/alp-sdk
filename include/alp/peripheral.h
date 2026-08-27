@@ -59,7 +59,7 @@ typedef enum {
 typedef enum {
 	ALP_OK               = 0,
 	ALP_ERR_INVAL        = -1, /**< Invalid argument. */
-	ALP_ERR_NOT_READY    = -2, /**< Peripheral not initialised. */
+	ALP_ERR_NOT_READY    = -2, /**< The handle is not in a state to perform this operation. */
 	ALP_ERR_BUSY         = -3, /**< Peripheral busy. */
 	ALP_ERR_TIMEOUT      = -4, /**< Transfer timed out. */
 	ALP_ERR_IO           = -5, /**< Bus / line error. */
