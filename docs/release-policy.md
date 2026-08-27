@@ -119,7 +119,10 @@ The cut happens on `main`, and only after `dev` has been promoted to
    `## [v<N>] - YYYY-MM-DD`.
 6. Tag: `git tag -s v<N>` (signed).
 7. Push tag; the release workflow auto-creates the GitHub Release
-   with the CHANGELOG slice as the body and the source tarball
+   with a **draft** body -- the raw `CHANGELOG.md` slice for the
+   version, which is exhaustive by construction (a full release
+   cycle's `[Unreleased]` section runs tens to hundreds of
+   thousands of characters) -- and the source tarball
    (`alp-sdk-v<N>.tar.gz`) plus three sidecar files as artefacts:
    SHA-256 + SHA-512 checksums, and a SLSA v1.0 Build **Level 3**
    provenance attestation (`alp-sdk-v<N>.tar.gz.intoto.jsonl`).
@@ -132,6 +135,21 @@ The cut happens on `main`, and only after `dev` has been promoted to
    the command checks the Sigstore signature, the workflow
    identity (`slsa-framework/slsa-github-generator`), the source
    repo, and the artefact digest all match in a single check.
+   If the slice would exceed GitHub's 125,000-char release-body
+   limit, the workflow truncates it itself at the last complete
+   CHANGELOG entry boundary and logs a `::warning::` -- rather than
+   letting `softprops/action-gh-release` cut it silently mid-word,
+   which is what it does by default (alp-sdk#1492).
+8. Replace the draft body with a lean, hand-written summary as
+   soon as the Release page exists -- write it *before* the tag
+   push (it costs nothing once step 4's CHANGELOG content is
+   final) and apply it with
+   `gh release edit v<N> --notes-file <lean.md>`. Format is the
+   shared house style: see `alp-lab:writing-release-notes` and
+   the `alp-lab:cutting-a-release` skill's step 0/9. `CHANGELOG.md`
+   stays the exhaustive record; the Release page is a summary, and
+   the raw auto-slice from step 7 is never the body a reader is
+   meant to see for long.
 
 A patch release skips steps 1-2 (the verification ledger doesn't
 move; ABI doesn't change) but still updates `sdk_version.yaml`

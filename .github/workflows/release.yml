@@ -30,8 +30,16 @@
 #         alp.lock.
 #      h. Emit the tarball's base64-encoded SHA-256 digest for the
 #         provenance generator (consumed via `outputs.hashes`).
-#      i. Create the GitHub Release with the CHANGELOG slice as the
-#         body and the tarball + checksums + SBOM as artefacts.
+#      i. Create the GitHub Release with the CHANGELOG slice as a
+#         DRAFT body (truncated + warned if it would exceed GitHub's
+#         125,000-char release-body limit -- see the slice step
+#         below) and the tarball + checksums + SBOM as artefacts.
+#         A maintainer replaces the draft with a lean, hand-written
+#         summary immediately after -- see docs/release-policy.md
+#         steps 7-8 and alp-lab:cutting-a-release. The CHANGELOG
+#         stays the exhaustive record; this step's body is a
+#         starting point, never the final published prose
+#         (alp-sdk#1492).
 #
 #   2. `provenance` job (calls the slsa-framework reusable workflow):
 #      a. Runs inside an isolated, ephemeral GitHub-hosted runner
@@ -243,7 +251,47 @@ jobs:
                   f"notes under that heading before tagging."
               )
 
-          print(prefix + body)
+          # GitHub's release body has a hard 125,000-char cap. The
+          # softprops/action-gh-release step below enforces it by
+          # silently substring()-ing the body to 124,999 chars right
+          # before the API call -- no warning, no log line, and the
+          # cut lands wherever the char count happens to fall, mid-word
+          # or mid-code-fence. A full CHANGELOG section already exceeds
+          # this routinely (v0.16.0-rc1's slice was 255,413 chars)
+          # because this step's output is a DRAFT body, replaced by
+          # hand with a lean summary right after the Release page
+          # exists (docs/release-policy.md steps 7-8) -- but nothing
+          # should hand the platform an oversized draft silently.
+          # Truncate on the last complete CHANGELOG entry boundary
+          # below the limit instead, and say so loudly (alp-sdk#1492).
+          GITHUB_BODY_MAX = 125000
+          full_body = prefix + body
+          if len(full_body) >= GITHUB_BODY_MAX:
+              budget = GITHUB_BODY_MAX - 1000  # headroom for the note below
+              cut = full_body.rfind("\n### ", 0, budget)
+              if cut == -1:
+                  cut = budget
+              print(
+                  f"::warning::CHANGELOG slice is {len(full_body)} chars -- "
+                  f"over GitHub's {GITHUB_BODY_MAX}-char release-body limit. "
+                  f"Truncated the DRAFT body at a CHANGELOG entry boundary "
+                  f"instead of letting the platform cut it mid-word. This "
+                  f"is a draft -- replace it with a lean hand-written "
+                  f"summary now that the Release page exists "
+                  f"(docs/release-policy.md step 8).",
+                  file=sys.stderr,
+              )
+              full_body = (
+                  full_body[:cut].rstrip()
+                  + "\n\n> ... truncated: the full CHANGELOG.md section for "
+                  "this release is over GitHub's 125,000-char release-body "
+                  "limit. See CHANGELOG.md for the rest. This is a draft "
+                  "body -- it should already have been replaced with a "
+                  "lean, hand-written summary (docs/release-policy.md "
+                  "step 8)."
+              )
+
+          print(full_body)
           PY
 
       - name: Generate alp.lock
