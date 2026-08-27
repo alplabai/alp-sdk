@@ -69,8 +69,8 @@ static int cmd_companion_ver(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	uint16_t ver = 0;
-	alp_status_t s = cc3501e_get_version(companion_cc3501e, &ver);
+	uint16_t     ver = 0;
+	alp_status_t s   = cc3501e_get_version(companion_cc3501e, &ver);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "get_version failed (%d)", (int)s);
@@ -177,7 +177,11 @@ static void companion_drain_events(void)
 	}
 	k_mutex_lock(&companion_events_lock, K_FOREVER);
 	if (!companion_event_cb_set) {
-		(void)cc3501e_set_event_callback(companion_cc3501e, companion_event_cb, NULL);
+		/* ADD, never replace (issue #1723): this runs after the application's
+		 * main() has registered its own callback, and the old single-slot
+		 * registration overwrote it -- the console then consumed every event
+		 * and the application silently received none. */
+		(void)cc3501e_add_event_callback(companion_cc3501e, companion_event_cb, NULL);
 		companion_event_cb_set = true;
 	}
 	(void)cc3501e_poll_events(companion_cc3501e);
@@ -270,7 +274,7 @@ static int cmd_companion_bench(const struct shell *sh, size_t argc, char **argv)
 	}
 	uint16_t     ver   = 0;
 	unsigned int fails = 0;
-	int64_t t0 = k_uptime_get();
+	int64_t      t0    = k_uptime_get();
 	for (unsigned long i = 0; i < n; i++) {
 		if (cc3501e_get_version(companion_cc3501e, &ver) != ALP_OK) {
 			fails++;

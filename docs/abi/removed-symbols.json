@@ -27,6 +27,15 @@
       "issue": 1622,
       "reason": "There is no VBAT net on the E1M-EVK -- ANA_S7 is a DAC1 output loopback sense (R90/R91/C108); reading it as a battery voltage would silently misreport a DAC output as VBAT.",
       "replacement": "EVK_ADC_DAC1_LOOPBACK"
+    },
+    {
+      "header": "alp/chips/cc3501e/events.h",
+      "category": "function",
+      "symbol": "cc3501e_set_event_callback",
+      "release": "v0.17.0",
+      "issue": 1723,
+      "reason": "A single callback slot per context made registration silently destructive: the Zephyr console companion registers on the shared context from its init path, AFTER the application's main() has registered, so it displaced the application's callback and consumed every async event while cc3501e_poll_events() kept returning ALP_OK. Replaced by add/remove so events fan out to every subscriber; keeping a set-style entry point would preserve the exact 'last registration silently wins' semantics the fix exists to remove.",
+      "replacement": "cc3501e_add_event_callback"
     }
   ]
 }

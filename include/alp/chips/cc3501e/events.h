@@ -23,8 +23,50 @@
 extern "C" {
 #endif
 
-/** Register or replace the async-event callback.  Pass cb=NULL to detach. */
-alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user);
+/**
+ * @brief Subscribe to async events from this companion.
+ *
+ * Events fan out to EVERY registered subscriber, because a context legitimately
+ * has more than one consumer: the SDK's Zephyr console companion registers its
+ * own callback on the shared context and polls it, and the application wants
+ * the same events. This replaces an earlier single-callback slot in which the
+ * last registration silently won -- the console registers from its init path,
+ * after @c main() has set the application's callback, so the application
+ * received nothing while every call still reported ALP_OK (issue #1723).
+ *
+ * Registration is idempotent per (@p cb, @p user) pair: registering the same
+ * pair twice leaves one subscription, so a caller that re-arms defensively does
+ * not start receiving each event twice.
+ *
+ * @param ctx   Initialised driver context.
+ * @param cb    Callback to invoke once per queued event. Must not be NULL --
+ *              use @ref cc3501e_remove_event_callback to unsubscribe.
+ * @param user  Opaque pointer passed back to @p cb; also part of the identity
+ *              of the subscription for removal.
+ * @return ALP_OK on success (including a duplicate registration);
+ *         ALP_ERR_NOT_READY if @p ctx is not initialised; ALP_ERR_INVAL if
+ *         @p cb is NULL; ALP_ERR_NOMEM when all
+ *         @ref CC3501E_EVENT_SUBSCRIBERS slots are taken -- the registration is
+ *         REFUSED rather than displacing an existing subscriber.
+ */
+alp_status_t cc3501e_add_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user);
+
+/**
+ * @brief Unsubscribe a callback previously added with
+ *        @ref cc3501e_add_event_callback.
+ *
+ * The (@p cb, @p user) pair must match the registration exactly. A callback may
+ * remove itself from inside a dispatch; the in-progress fan-out still completes
+ * for the remaining subscribers of that event.
+ *
+ * @param ctx   Initialised driver context.
+ * @param cb    The callback to remove.
+ * @param user  The @c user pointer it was registered with.
+ * @return ALP_OK if it was removed; ALP_ERR_NOT_READY if @p ctx is not
+ *         initialised; ALP_ERR_INVAL if @p cb is NULL; ALP_ERR_NOT_FOUND if
+ *         that pair was not subscribed.
+ */
+alp_status_t cc3501e_remove_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user);
 
 /**
  * @brief Poll the firmware for queued async events and dispatch them to the
@@ -35,9 +77,10 @@ alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, v
  * EVK, so there is no interrupt to push events -- the host POLLS instead.  Each
  * call sends one GET_PENDING_EVENTS request, decodes the packed reply (a list of
  * @ref alp_cc3501e_event_entry_t { evt_opcode | len | payload[len] }), and
- * invokes the @ref cc3501e_set_event_callback callback once per queued event
- * (with the EVT_* opcode + its payload).  The firmware drains the ring as it
- * replies, so each event is delivered exactly once.
+ * invokes EVERY callback registered with @ref cc3501e_add_event_callback once
+ * per queued event (with the EVT_* opcode + its payload).  The firmware drains
+ * the ring as it replies, so each event is read off the wire exactly once and
+ * then fanned out to all subscribers.
  *
  * Call it periodically (e.g. from a low-rate app thread; the SDK console runs a
  * ~500 ms poll when a companion is registered).  A no-op returning ALP_OK when

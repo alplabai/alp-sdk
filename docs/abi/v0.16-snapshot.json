@@ -2847,7 +2847,12 @@
           "signature": "alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms);"
         }
       },
-      "macros": {},
+      "macros": {
+        "CC3501E_EVENT_SUBSCRIBERS": {
+          "hash": "00515043b2f6006c",
+          "value": "4"
+        }
+      },
       "typedefs": {
         "cc3501e_event_cb_t": {
           "definition": "typedef void (*cc3501e_event_cb_t)(uint8_t cmd, const uint8_t *payload, size_t len, void *user);",
@@ -2855,15 +2860,14 @@
           "kind": "fnptr"
         },
         "cc3501e_t": {
-          "definition": "typedef struct cc3501e { bool initialised; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; cc3501e_event_cb_t event_cb; void *event_user; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool request_lock; } cc3501e_t;",
+          "definition": "typedef struct cc3501e { bool initialised; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool request_lock; } cc3501e_t;",
           "fields": [
             "bool initialised",
             "alp_spi_t *bus",
             "alp_gpio_t *enable_pin",
             "alp_gpio_t *reset_pin",
             "alp_gpio_t *ready_pin",
-            "cc3501e_event_cb_t event_cb",
-            "void *event_user",
+            "struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]",
             "uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]",
             "uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]",
             "uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]",
@@ -2874,7 +2878,7 @@
             "bool evt_busy",
             "bool request_lock"
           ],
-          "hash": "41bef4a1f9e78117",
+          "hash": "367b25dc4369d286",
           "kind": "struct"
         }
       },
@@ -2909,6 +2913,10 @@
     },
     "alp/chips/cc3501e/events.h": {
       "functions": {
+        "cc3501e_add_event_callback": {
+          "hash": "4e429a0854c2709c",
+          "signature": "alp_status_t cc3501e_add_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user);"
+        },
         "cc3501e_deinit": {
           "hash": "8fc892d1d03fcca7",
           "signature": "void cc3501e_deinit(cc3501e_t *ctx);"
@@ -2917,9 +2925,9 @@
           "hash": "35e4744e8763489f",
           "signature": "alp_status_t cc3501e_poll_events(cc3501e_t *ctx);"
         },
-        "cc3501e_set_event_callback": {
-          "hash": "518c5cd8722d69fc",
-          "signature": "alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user);"
+        "cc3501e_remove_event_callback": {
+          "hash": "dfca206a0e354086",
+          "signature": "alp_status_t cc3501e_remove_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user);"
         }
       },
       "macros": {},
