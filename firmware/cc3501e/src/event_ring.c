@@ -59,7 +59,18 @@ int event_ring_push(uint8_t evt_opcode, const uint8_t *payload, uint8_t len)
 	const unsigned long key = worker_critical_enter();
 	if (ring.count >= CC3501E_EVENT_RING_SLOTS) {
 		worker_critical_exit(key);
-		return 0; /* full -- drop; the host re-reads the latest state on its next poll */
+		/* FULL -- drop the event, but STILL raise attention (#130).  Pulsing only
+		 * on a successful push makes a full ring unrecoverable on an idle host:
+		 * the ring fills, every later push is dropped, so no pulse is emitted, so
+		 * no edge arrives, so nothing drains it, so it stays full.  Bench
+		 * 2026-08-27: exactly 16 boot-time Wi-Fi events filled the 16-slot ring
+		 * and the firmware never pulsed again -- which read as "the tick stopped
+		 * running" even though a tick counter proved it was running at ~100/s.
+		 *
+		 * A full ring is precisely when the host most needs to be told to drain,
+		 * so this is the one drop that must not be silent. */
+		cc3501e_bridge_attn_pulse();
+		return 0;
 	}
 	struct event_slot *s = &ring.slot[ring.tail];
 	s->evt_opcode        = evt_opcode;
