@@ -29,6 +29,13 @@
  *      build time via ALP_YOCTO_PWM_CHIP so an integration can pin the
  *      class to a non-zero pwmchip without a code change.
  *
+ * @par Out-of-range status split (#1635)
+ *      A channel_id outside the ABI's 0..7 space (@ref ALP_ERR_INVAL)
+ *      isn't a possible PWM instance on ANY silicon, but a well-formed
+ *      index the target pwmchip doesn't actually populate is a hardware
+ *      fact, not a caller bug (@ref ALP_ERR_OUT_OF_RANGE) -- see y_open()
+ *      for how it's told apart via the chip's own `npwm` sysfs attribute.
+ *
  * @par Status
  *      REAL implementation.  Yocto-link + on-target run BENCH-UNVERIFIED
  *      (no sysroot / no real /sys/class/pwm device nodes in this CI
@@ -137,6 +144,39 @@ static alp_status_t _sysfs_write(const char *path, const char *val)
 	return ALP_OK;
 }
 
+/* Test-only sysfs-read interception (default NULL: real file I/O via
+ * open()+read()+close()).  Mirrors g_pwm_test_sysfs_write_hook above so
+ * a test can script a chip's reported `npwm` without a real pwmchip
+ * sysfs node.  Not part of any public header; only
+ * tests/yocto/peripheral_pwm.c sets it. */
+static alp_status_t (*g_pwm_test_sysfs_read_hook)(const char *path,
+                                                  char       *buf,
+                                                  size_t      buf_sz) = NULL;
+
+/**
+ * @brief Read a sysfs attribute into @p buf (best-effort, NUL-terminated).
+ *
+ * Opens @p path read-only, reads up to @p buf_sz - 1 bytes, and NUL-
+ * terminates.  A missing/unreadable attribute maps errno -> alp via the
+ * shared @ref alp_status_from_posix_errno baseline; used only for the
+ * `npwm` out-of-range probe in y_open() (#1635) today.
+ */
+static alp_status_t _sysfs_read(const char *path, char *buf, size_t buf_sz)
+{
+	if (g_pwm_test_sysfs_read_hook != NULL) return g_pwm_test_sysfs_read_hook(path, buf, buf_sz);
+
+	int fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0) return alp_status_from_posix_errno(errno);
+
+	ssize_t n = read(fd, buf, buf_sz - 1);
+	int     e = errno;
+	close(fd);
+
+	if (n < 0) return alp_status_from_posix_errno(e);
+	buf[n] = '\0';
+	return ALP_OK;
+}
+
 /**
  * @brief Write a decimal nanosecond value to a per-channel attribute.
  *
@@ -209,7 +249,12 @@ static void _unexport_if_owned(const y_pwm_data_t *d)
 static alp_status_t
 y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilities_t *caps_out)
 {
-	if (cfg->channel_id >= 8u) return ALP_ERR_OUT_OF_RANGE;
+	/* alp_pwm reserves channel_id 0..7 for every form factor (see the
+	 * file-header "Channel-id mapping" note) -- an index outside that
+	 * space isn't a possible PWM instance on ANY silicon, so it's a
+	 * malformed caller argument, not a hardware limit (mirrors
+	 * zephyr_drv.c:108's ARRAY_SIZE(_specs) check). */
+	if (cfg->channel_id >= 8u) return ALP_ERR_INVAL;
 
 	y_pwm_data_t *d = (y_pwm_data_t *)malloc(sizeof(*d));
 	if (d == NULL) return ALP_ERR_NOMEM;
@@ -221,6 +266,31 @@ y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilitie
 	if (n < 0 || (size_t)n >= sizeof(chipdir)) {
 		free(d);
 		return ALP_ERR_INVAL;
+	}
+
+	/* channel_id is well-formed in the ABI's 0..7 space, but whether
+	 * THIS pwmchip actually has that many channels is a hardware fact
+	 * this backend can't know at compile time -- silicon_ref is "*",
+	 * so unlike zephyr_drv.c's ALP_SOC_PWM_COUNT (a Kconfig-selected,
+	 * per-SoC constant) there is no static ceiling here tighter than 8.
+	 * The generic sysfs PWM ABI publishes the real count as
+	 * pwmchip<chip>/npwm (Documentation/ABI/testing/sysfs-class-pwm);
+	 * read it and refuse a channel the chip itself says it doesn't
+	 * have.  A read failure (chip not present yet, etc.) is NOT treated
+	 * as out-of-range here -- that case already surfaces as
+	 * ALP_ERR_NOT_READY from the export write below. */
+	char npwm_path[64];
+	n = snprintf(npwm_path, sizeof(npwm_path), "%s/npwm", chipdir);
+	if (n > 0 && (size_t)n < sizeof(npwm_path)) {
+		char npwm_buf[16];
+		if (_sysfs_read(npwm_path, npwm_buf, sizeof(npwm_buf)) == ALP_OK) {
+			char         *end  = NULL;
+			unsigned long npwm = strtoul(npwm_buf, &end, 10);
+			if (end != npwm_buf && npwm > 0 && cfg->channel_id >= npwm) {
+				free(d);
+				return ALP_ERR_OUT_OF_RANGE;
+			}
+		}
 	}
 
 	n = snprintf(d->dir, sizeof(d->dir), "%s/pwm%d", chipdir, d->channel);

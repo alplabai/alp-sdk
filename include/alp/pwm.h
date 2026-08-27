@@ -112,12 +112,19 @@ typedef struct {
  *                 be less than the selected form factor's PWM count
  *                 (@ref ALP_E1M_PWM_COUNT or @ref ALP_E1M_X_PWM_COUNT)
  *                 and resolvable to a ready Zephyr pwm device.
- * @return Open handle on success, or NULL on any of:
- *         - @p cfg is NULL
- *         - @c channel_id out of range or alias unset
- *         - underlying device not ready
- *         - handle pool exhausted
- *         - hardware rejected the period
+ * @return Open handle on success, or NULL with @ref alp_last_error set to:
+ *         - @ref ALP_ERR_INVAL — @p cfg is NULL, or @c channel_id doesn't
+ *           fit the form factor's PWM channel-id space at all (a
+ *           malformed argument, not a hardware limit)
+ *         - @ref ALP_ERR_OUT_OF_RANGE — @c channel_id is a well-formed
+ *           index, but the active SoC/target doesn't populate that many
+ *           PWM instances (e.g. fewer physical channels than the form
+ *           factor reserves, or a Yocto pwmchip that reports a smaller
+ *           `npwm`)
+ *         - @ref ALP_ERR_NOT_READY — underlying device not ready or the
+ *           devicetree alias is unset
+ *         - @ref ALP_ERR_NOMEM — handle pool exhausted
+ *         - a backend-mapped error if the hardware rejected the period
  */
 alp_pwm_t *alp_pwm_open(const alp_pwm_config_t *cfg);
 
