@@ -16,13 +16,21 @@
 #         pre-release tag (`vX.Y.Z-rcN`) is cut before the final
 #         heading exists, so it falls back to `## [Unreleased]`
 #         instead -- clearly labelled, never a silent stub.
-#      d. Build a source tarball (no binaries -- the SDK is a source
-#         release).
-#      e. Generate SHA-256 + SHA-512 checksums.
-#      f. Emit an SBOM + build receipt (`*.cdx.json`).
-#      g. Emit the tarball's base64-encoded SHA-256 digest for the
+#      d. Generate alp.lock.  It isn't committed (#1576 -- its
+#         `digests.metadata` is a single hash over the whole
+#         metadata/** tree, so any two PRs touching different
+#         metadata files conflicted on that one line by
+#         construction), so a non-git consumer of the tarball still
+#         needs one -- it is folded into the tarball in the next
+#         step so the tamper-check property survives outside git.
+#      e. Build a source tarball (no binaries -- the SDK is a source
+#         release), including the generated alp.lock.
+#      f. Generate SHA-256 + SHA-512 checksums.
+#      g. Emit an SBOM + build receipt (`*.cdx.json`) from that
+#         alp.lock.
+#      h. Emit the tarball's base64-encoded SHA-256 digest for the
 #         provenance generator (consumed via `outputs.hashes`).
-#      h. Create the GitHub Release with the CHANGELOG slice as the
+#      i. Create the GitHub Release with the CHANGELOG slice as the
 #         body and the tarball + checksums + SBOM as artefacts.
 #
 #   2. `provenance` job (calls the slsa-framework reusable workflow):
@@ -238,6 +246,13 @@ jobs:
           print(prefix + body)
           PY
 
+      - name: Generate alp.lock
+        # Not committed (#1576) -- generated here so it can be folded into
+        # the tarball below (a non-git consumer of the source release still
+        # gets the tamper-check property) and read by gen_sbom.py further
+        # down. Pure function of tracked files already in this checkout.
+        run: python3 scripts/west_commands/alp_lock.py --workspace .
+
       - name: Build source tarball
         id: archive
         # TAG is the RAW pushed tag: `steps.tag.outputs.tag` is set from
@@ -253,7 +268,31 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           ARCHIVE="alp-sdk-${TAG}.tar.gz"
-          git archive --format=tar --prefix="alp-sdk-${TAG}/" HEAD | gzip -n > "$ARCHIVE"
+          TARFILE="alp-sdk-${TAG}.tar"
+          PREFIX_DIR="alp-sdk-${TAG}"
+          # git archive only knows tracked files, and alp.lock isn't one
+          # (#1576) -- build the tar from HEAD first, then append the
+          # generated alp.lock under the same release prefix before gzip.
+          #
+          # Stage the file under a real "$PREFIX_DIR/alp.lock" path instead
+          # of `tar --transform` with a `,`-delimited sed expression: TAG is
+          # the raw pushed tag (see the comment above), and a `,` in it
+          # breaks the transform's delimiter (`tar: Unknown flag in
+          # transform expression`) -- staging sidesteps that entirely.  Pin
+          # mtime/owner/group/mode so the member is byte-reproducible: `tar
+          # --append` otherwise stamps the runner's wall-clock mtime and
+          # uid/gid/uname/gname, which CHANGELOG.md's "byte-reproducible
+          # source tarball (`gzip -n`)" promise (#610 §7) requires it not
+          # do.
+          git archive --format=tar --prefix="${PREFIX_DIR}/" -o "$TARFILE" HEAD
+          mkdir -p "$PREFIX_DIR"
+          cp alp.lock "$PREFIX_DIR/alp.lock"
+          tar --append --file="$TARFILE" \
+              --owner=root:0 --group=root:0 --mode=644 \
+              --mtime="@$(git log -1 --format=%ct HEAD)" \
+              "$PREFIX_DIR/alp.lock"
+          rm -rf "$PREFIX_DIR"
+          gzip -n "$TARFILE"
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
           sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
           sha512sum "$ARCHIVE" > "$ARCHIVE.sha512"

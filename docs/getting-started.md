@@ -650,10 +650,25 @@ fetched when a customer opts in to the `vendor-sdks` group.
 
 `west alp-lock` writes `alp.lock` — a deterministic, public-safe record of the
 workspace's SDK version, west project pins, curated library versions, Python
-requirements, and metadata digests. Commit it. `west alp-lock --check` (run in
-CI) fails with a field-level diagnostic when any locked input drifts, so an old
-release can be rebuilt against its exact declared inputs. It contains no local
-paths or credentials.
+requirements, and metadata digests. It contains no local paths or credentials.
+
+**It is generated on demand, not committed (#1576).** `digests.metadata` is a
+single hash over the whole `metadata/**` tree, so two PRs touching *different*
+metadata files rewrote that one digest line from different bases and
+conflicted on it by construction — the whole-tree hash carries no information
+about which file changed, only that something did, so it couldn't tell two
+non-conflicting edits apart. `build_lock` is a pure function of tracked files
+(`scripts/alp_lock/__init__.py`), so any consumer can regenerate the identical
+document from whichever commit they need it for. CI enforces that the
+generator itself keeps working — `west alp-lock --check` now builds a lock in
+memory and schema-validates it (nonzero on a broken generator or a
+local/abs-path leak) rather than diffing against a tracked copy, because
+there is no tracked copy to diff against.
+
+A tagged **release still ships one**: `.github/workflows/release.yml`
+generates `alp.lock` before packaging the source tarball and folds it into
+the archive, so a consumer with only the tarball — not a git checkout — still
+gets it without running the generator themselves.
 
 `sdk.version` and the west pins lock the SDK identity you build against. The
 lock no longer records an `sdk.revision` (#1615) — a git HEAD written into a
@@ -668,10 +683,10 @@ worth reaching for between release tags, where many commits share one
 `include/`. The lock does not yet pin resolved commit SHAs or toolchain
 container identities (tracked follow-ups).
 
-Because `alp.lock` hashes `metadata/**` and pins the west/library/Python inputs,
-**re-run `west alp-lock` and commit the updated `alp.lock` in the same PR**
-whenever you touch `west.yml`, `metadata/**`, `scripts/requirements.txt`, or
-`scripts/alp_cli/__init__.py` — otherwise the `alp.lock in sync` CI check reds.
+To inspect a lock locally — e.g. to see what a release tarball would carry —
+run `west alp-lock` (or `python3 scripts/west_commands/alp_lock.py
+--workspace .`); it writes `./alp.lock`, which `.gitignore` keeps out of any
+commit.
 
 ## 9. SoC capability validation
 
