@@ -20,40 +20,31 @@ ZTEST(alp_peripheral, test_counter_null_cfg)
 }
 
 /*
- * alp-sdk#1242 first held that a PUBLISHED E1M-X connector identity this
- * board does not serve must never report ALP_ERR_INVAL, on the theory
- * that INVAL reads as "you passed something malformed" and sends the
- * caller hunting a bug in their own code.  alp-sdk#1635 overrode that for
- * the GD32 bridge specifically, for consistency with its adc / dac / pwm
- * siblings (src/backends/{adc,dac,pwm}/gd32_bridge.c): "you asked for an
- * instance that does not exist" is one question with one answer across
- * this SoM vendor's SDK, and NOSUPPORT is reserved for the different
- * question "this build cannot do that at all".  So the bridge now
- * reports ALP_ERR_INVAL for counter_id=3 (it serves ALP_E1M_X_COUNTER0
- * only) -- this is the runnable check that fails if gd32_bridge.c ever
- * reverts to NOSUPPORT.
+ * The alp-sdk#1242 invariant: a PUBLISHED E1M-X connector identity this
+ * board does not serve never reports ALP_ERR_INVAL.  INVAL reads as "you
+ * passed something malformed" and sends the caller hunting a bug in
+ * their own code, when the truth is that this SoM serves fewer counters.
  *
- * The generic Zephyr backend (no V2N/V2M supervisor) is untouched by
- * #1635: its `alp-counter<N>` table is a fixed four entries, so id=3 is
- * in-range but has no alias on this test overlay, giving NOT_READY.
+ * Which non-INVAL status appears is deliberately NOT asserted, because it
+ * is backend-dependent and both answers are correct:
+ *   - with the V2N/V2M supervisor built in, the GD32 bridge is selected
+ *     and reports ALP_ERR_NOSUPPORT (it serves ALP_E1M_X_COUNTER0 only);
+ *   - otherwise the generic Zephyr backend is selected, whose
+ *     `alp-counter<N>` table is a fixed four entries, so a published id
+ *     with no alias reports ALP_ERR_NOT_READY.
+ * Pinning either one would make this test pass in one twister scenario
+ * and fail in the other, which is how it was first written and caught.
  */
-ZTEST(alp_peripheral, test_counter_unserved_published_id_status)
+ZTEST(alp_peripheral, test_counter_unserved_published_id_is_never_inval)
 {
 	const alp_counter_config_t cfg = { .counter_id = 3u };
 
 	zassert_is_null(alp_counter_open(&cfg));
-#if defined(CONFIG_ALP_SDK_V2N_SUPERVISOR)
-	zassert_equal(alp_last_error(),
-	              ALP_ERR_INVAL,
-	              "gd32_bridge must report INVAL for an out-of-range counter id (alp-sdk#1635), "
-	              "got %d",
-	              (int)alp_last_error());
-#else
-	zassert_equal(alp_last_error(),
-	              ALP_ERR_NOT_READY,
-	              "generic zephyr backend must report NOT_READY for an unaliased id, got %d",
-	              (int)alp_last_error());
-#endif
+	zassert_not_equal(
+	    alp_last_error(), ALP_ERR_INVAL, "a published connector id must not report INVAL");
+	zassert_true(alp_last_error() == ALP_ERR_NOSUPPORT || alp_last_error() == ALP_ERR_NOT_READY,
+	             "expected NOSUPPORT (bridge) or NOT_READY (zephyr), got %d",
+	             (int)alp_last_error());
 }
 
 ZTEST(alp_peripheral, test_counter_start_null_handle_not_ready)

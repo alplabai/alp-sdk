@@ -597,18 +597,16 @@ only `counter_id 0` (`src/backends/counter/gd32_bridge.c:33`) even
 though `include/alp/e1m_x_pinout.h:162-165` publishes
 `ALP_E1M_X_COUNTER0..3` — one counter instance, not four, on V2N/V2M
 today. `ALP_E1M_X_COUNTER1..3` are still valid E1M-X connector
-identities (a different SoM may serve all four); `alp_counter_open()`
-on them returns `ALP_ERR_INVAL`, matching the `adc` / `dac` / `pwm`
-gd32-bridge siblings, which have always returned `INVAL` for the same
-out-of-range condition (issue #1635) — one SoM vendor SDK gives one
-answer to "you asked for an instance that does not exist". The served
-count is discoverable only *after* `ALP_E1M_X_COUNTER0` opens
-successfully, via `alp_counter_capabilities()->channel_count` on that
-handle -- and that open itself needs the GD32 supervisor bus
-configured, so on a build where COUNTER0 cannot open, the served count
-cannot be queried at all (issue #1242). Every call also crosses the
-SPI/I2C bridge transport under a shared supervisor mutex, adding
-bridge-hop latency that a same-die peripheral would not have.
+identities (a different SoM may serve all four), so
+`alp_counter_open()` on them returns `ALP_ERR_NOSUPPORT`, not
+`ALP_ERR_INVAL`. The served count is discoverable only *after*
+`ALP_E1M_X_COUNTER0` opens successfully, via
+`alp_counter_capabilities()->channel_count` on that handle -- and that
+open itself needs the GD32 supervisor bus configured, so on a build
+where COUNTER0 cannot open, the served count cannot be queried at all
+(issue #1242). Every call also crosses the SPI/I2C bridge transport
+under a shared supervisor mutex, adding bridge-hop latency that a
+same-die peripheral would not have.
 
 ---
 
