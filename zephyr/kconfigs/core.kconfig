@@ -128,6 +128,24 @@ config ALP_SDK_CONSOLE
 	  API, a memory peek, a clock dump, and a companion-chip bridge.
 	  Read-only verbs only unless ALP_SDK_CONSOLE_UNSAFE is also set.
 
+# The `alp` console runs every command on the Zephyr shell thread, including the
+# companion-bridge verbs, which descend shell -> cc3501e_request() -> the SPI
+# transport and then format the result back through shell_print().  Zephyr's
+# 2048-byte SHELL_STACK_SIZE default is not enough headroom for that chain:
+# measured on an E1M-AEN801 with CONFIG_THREAD_ANALYZER, `alp companion ver`
+# alone peaks the shell thread at 1044/2048 (50 %), and a `sock tcp-get`
+# attempt at 1156/2048 (56 %) -- leaving under 900 bytes for the receive loop's
+# own formatting.  With data actually flowing, that overflowed and halted the
+# system (#1743: "Stack overflow ... ZEPHYR FATAL ERROR 2 ... Halting system",
+# on thread shell_uart).
+#
+# 4096 restores roughly 2.9 KB of headroom over the measured peak.  It costs
+# 2 KB of RAM, ~0.8 % of the AEN801's 256 KB, and only on builds that opt into
+# the console at all.  `configdefault` raises the default without preventing an
+# application from choosing its own value.
+configdefault SHELL_STACK_SIZE
+	default 4096 if ALP_SDK_CONSOLE
+
 config ALP_SDK_CONSOLE_UNSAFE
 	bool "Allow write / destructive `alp` console commands"
 	depends on ALP_SDK_CONSOLE
