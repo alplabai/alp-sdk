@@ -65,7 +65,14 @@ z_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilitie
 	if (channel_id < 0) return _errno_to_alp(channel_id);
 	st->channel_id = channel_id;
 	int err        = wdt_setup(dev, 0);
-	if (err != 0) return _errno_to_alp(err);
+	if (err != 0) {
+		/* wdt_install_timeout above already programmed a channel on
+         * dev; a bail-out that skips this leaks it on retry.  Mirror
+         * the Yocto sibling's post-open teardown (_disarm_and_close,
+         * #760) instead of leaving the channel installed. */
+		(void)wdt_disable(dev);
+		return _errno_to_alp(err);
+	}
 	caps_out->flags = 0u;
 	return ALP_OK;
 }
