@@ -22,15 +22,16 @@ static alp_status_t br_open(const alp_counter_config_t  *cfg,
 	/* include/alp/e1m_x_pinout.h publishes COUNTER0..3 as E1M-X
 	 * connector identities -- a form-factor bound, not a per-SoM
 	 * promise (alp-sdk#1242) -- and the V2N/V2M bridge serves only
-	 * id 0.  NOSUPPORT (not INVAL) matches this backend's own
-	 * alp_counter_us_to_ticks / alp_counter_set_alarm convention for a
-	 * bridge limitation ("this SoM doesn't serve that"), rather than
-	 * "you passed a bad argument".  caps_out->channel_count below
-	 * (same field src/backends/adc/gd32_bridge.c populates) publishes
-	 * the served count via alp_counter_capabilities() so a customer
-	 * can discover it after opening COUNTER0, before hitting this on
-	 * COUNTER1..3. */
-	if (cfg->counter_id >= GD32G553_BRIDGE_COUNTER_CHANNELS) return ALP_ERR_NOSUPPORT;
+	 * id 0.  INVAL (not NOSUPPORT) matches the adc / dac / pwm
+	 * gd32-bridge siblings: "you asked for an instance that does not
+	 * exist" is one question with one answer across this SoM vendor's
+	 * SDK, and NOSUPPORT is reserved for "this build cannot do that at
+	 * all" -- a different question (alp-sdk#1635).  caps_out->channel_count
+	 * below (same field src/backends/adc/gd32_bridge.c populates)
+	 * publishes the served count via alp_counter_capabilities() so a
+	 * customer can discover it after opening COUNTER0, before hitting
+	 * this on COUNTER1..3. */
+	if (cfg->counter_id >= GD32G553_BRIDGE_COUNTER_CHANNELS) return ALP_ERR_INVAL;
 	gd32g553_t  *ctx = NULL;
 	alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
 	if (s != ALP_OK) return s;
