@@ -184,7 +184,6 @@ in their README.
 | `connectivity/jsmn-json-parse`         | jsmn    | Tokenize an embedded JSON config into a typed struct.               |
 | `connectivity/nanopb-encode-decode`    | nanopb  | Protobuf message encode → buffer → decode round-trip.               |
 | `connectivity/coap-client-get`         | libcoap | Build a CoAP GET PDU + parse a response PDU with the real API.      |
-| `connectivity/mqtt-sn-publish`         | coremqtt_sn | Serialize + parse an MQTT-SN PUBLISH (buffer round-trip).       |
 | `connectivity/websocket-frame`         | libwebsockets | RFC 6455 masked text-frame encode/decode round-trip.         |
 | `audio/minimp3-decode`                 | minimp3 | Decode an embedded MP3 blob → PCM; print sample count + RMS.        |
 | `display/u8g2-oled-draw`               | u8g2    | Render text/frame/box to a RAM framebuffer; ASCII-dump it.         |
