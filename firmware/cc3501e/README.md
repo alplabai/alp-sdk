@@ -73,6 +73,49 @@ starts.
 
 The current E1M-AEN rev (FIB v0.0.207, validated on E1M-AEN801) wires SPI with **hardware SS0 chip-select** (Alif `P14_7` = `SPI1_SS0_C`), per-phase READY gating, and deterministic framing per protocol phase (not fixed-count lockstep). See [`docs/cc3501e-bridge.md` § Current rev](../../docs/cc3501e-bridge.md) for the validated link topology.
 
+## Getting firmware onto a CC3501E
+
+**Use the prebuilt blob.**  Building from source needs TI ticlang 5.1.1, the
+SimpleLink Wi-Fi SDK 10.10.01.08, SysConfig 1.28.0 and the Wi-Fi toolbox 4.2.4
+installed and on the right paths -- a long toolchain to require of anyone who
+just wants a working companion.  The signed blob in `prebuilt/` is the same
+image, already built and signed:
+
+```sh
+# 1. Verify what you are about to flash (never skip this).
+openssl dgst -sha256 -verify <VALIDATION_public.pem> \
+    -signature prebuilt/cc3501e-v0.4.0.bin.sig prebuilt/cc3501e-v0.4.0.bin
+sha256sum -c <<<"$(cat prebuilt/cc3501e-v0.4.0.bin.sha256)  prebuilt/cc3501e-v0.4.0.bin"
+
+# 2. Drop it into the flash-set as the primary vendor image, and remove any
+#    stale pre-flattened image -- a leftover *.flashready.bin is used in
+#    preference to the file you just copied.
+cp prebuilt/cc3501e-v0.4.0.bin <flashset>/primary_vendor_image.sign.bin
+rm -f <flashset>/*.flashready.bin
+
+# 3. Program over XDS110/SWD (~18 s).
+programmer -i XDS110 -param1 <PROBE_SN> programming --tool_settings <flashset>/tool_settings.warm.windows.json
+```
+
+**The image `--version` must match the version stamped into the signed
+`programming_instructions` in that flash-set.**  If it does not, the programmer
+reports success and the device silently keeps the old image -- the single most
+expensive trap on this part.  `programming_instructions` is built from
+`--version` plus the flash-discovery configs, so it must be regenerated at the
+*same* `--version` as the vendor image (`ti/regen_flashset.sh`).
+
+Verify the flash took by asking the device, not by trusting the programmer:
+`GET_VERSION` must answer wire protocol **5**, and `GET_DIAG_INFO` must report
+`fw_version=0x0400`.
+
+Three distinct version numbers are in play here and they are **not**
+interchangeable -- app SemVer (`0.4.0`), wire protocol (`5`), and the GPE
+anti-rollback stamp (`0.4.0.0`).  `prebuilt/CHANGELOG.md` has the table and the
+anti-rollback rules; read them before flashing a part that has been used for
+OTA testing, because its floor may already be above this artifact's stamp.
+
+Build from source only when you are changing the firmware -- see below.
+
 ## Build
 
 The CMake build runs **outside** the Zephyr build (the Alif side's
@@ -147,8 +190,10 @@ release blob is version-pinned at `prebuilt/cc3501e-vX.Y.Z.bin`.
 validates that blob (relaying the image to the CC3501E over the
 inter-chip link) -- it is not a customer-facing utility, and lives
 in `alp-sdk-internal`, not this public tree.
-`prebuilt/` holds the signed release blob; `cc3501e-v0.3.0.bin` is the
-current one.
+`prebuilt/` holds the signed release blob; `cc3501e-v0.4.0.bin` is the
+current one (wire protocol 5).  `cc3501e-v0.3.0.bin` is kept for
+traceability but answers protocol **4**, so a host built from this tree
+refuses it.
 
 ## Status
 
@@ -161,5 +206,5 @@ current one.
 | TI backend: SDIO-slave (`hal/ti/transport_hw_ti_sdio.c`) | 🟡 frame glue complete; the SDIO-**device** register bring-up needs SWRU626 §21 (no public SDK SDIO-device driver). Off the v0.1 critical path — SPI is the default. |
 | Next-rev hardening: HOST_IRQ / async events | 🔮 async-event delivery; command/reply framing already uses hardware SS0 + READY (see DESIGN.md "Next-rev hardening") |
 | `flash.py` real flashing | 🔮 moved to `alp-sdk-internal` (Alp-internal OTA-build tooling); blocked on TI's `cc3501e-flasher` CLI (not public yet); manual SWD/J-Link is the interim bench path |
-| `prebuilt/` populated | ✅ `cc3501e-v0.3.0.bin` signed (full bridge: META + Wi-Fi + BLE + sockets + OTA, proto v4 incl. `OTA_PROMOTE`); see `prebuilt/CHANGELOG.md`. |
+| `prebuilt/` populated | ✅ `cc3501e-v0.4.0.bin` signed (full bridge: META + Wi-Fi + BLE + sockets + OTA, proto v5 incl. `OTA_UPDATE_MODE`); see `prebuilt/CHANGELOG.md`. |
 | Wi-Fi / BLE / GPIO-proxy groups | ✅ implemented and silicon-validated (alp-sdk v0.8.0 on E1M-AEN801): Wi-Fi scan with security decode, real BLE scan (ble_gap_disc), GPIO proxy warm-boot, OTA-over-bridge staged (see [`docs/cc3501e-bridge.md`](../../docs/cc3501e-bridge.md)). |

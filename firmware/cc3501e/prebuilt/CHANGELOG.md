@@ -7,6 +7,70 @@ named `cc3501e-vX.Y.Z.bin` (matching `firmware/cc3501e/firmware-version.txt`).
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0]
+
+Built with the `ti` backend (TI `ticlang` 5.1.1 + SimpleLink Wi-Fi SDK
+10.10.01.08 + SysConfig 1.28.0 + Wi-Fi toolbox 4.2.4) via
+`firmware/cc3501e/ti/build_ti.ps1 -Ble`.
+
+- `cc3501e-v0.4.0.bin`         -- signed firmware image (full shipped stack)
+- `cc3501e-v0.4.0.bin.sig`     -- detached **ECDSA-P256/SHA-256** signature
+  (the VALIDATION vendor key -- a bench-grade artifact, not production-key;
+  verify with `openssl dgst -sha256 -verify <pub> -signature
+  cc3501e-v0.4.0.bin.sig cc3501e-v0.4.0.bin`)
+- `cc3501e-v0.4.0.bin.sha256`  -- integrity manifest (`a73e0555841e90522eaa4c007445a4f08331092842267be200fd0c895ed4881a`)
+
+**THREE version numbers, and they are not interchangeable.** Conflating them
+has cost bench time repeatedly, so this release records all three:
+
+| Number | Value | What it gates |
+|---|---|---|
+| App SemVer (`firmware-version.txt`) | **0.4.0** | the `fw_version` marker the bridge reports in `DIAG` (`0x0400`) |
+| Wire protocol (`ALP_CC3501E_PROTOCOL_VERSION`) | **5** | `GET_VERSION`; a host on another version is refused outright |
+| GPE image `--version` (this artifact's stamp) | **0.4.0.0** | the vendor-RoT **anti-rollback** floor burned into the part |
+
+**Wire protocol 4 -> 5.** Adds `OTA_UPDATE_MODE` (opcode `0x47`): asks the
+device to reboot into (or out of) update mode. A host built from this tree
+expects **5** and will refuse the previous `cc3501e-v0.3.0.bin`, which answers
+**4** -- upgrading host and companion is not optional across this boundary.
+
+Also in this release, relative to 0.3.0:
+
+- OTA over the bridge: 1373 s -> 8 s, and 16 defects fixed including a silent
+  image splice (#1610, #1655).
+- `PROMOTE` is now the sole OTA commit, confirmed from flash (#1123, #1714).
+- Async events fan out to every subscriber instead of a single callback that
+  one consumer could steal (#1724), and get an attention edge on the READY
+  wire (#130, #1721).
+- `WIFI_AP_START` has a real success path (#1696, #1709); a failed connect no
+  longer leaves a stale association, and RSSI is validated (#1703).
+- The Wi-Fi radio is driven from the power presets, on the task, with the
+  result actually reported (#1681).
+- The TI build no longer ships a stale image after a failed build (#1722,
+  #1726) -- this one silently invalidated earlier bench results, because a
+  build that died mid-compile left the *previous* `.out` flashable.
+
+**Anti-rollback -- read this before flashing:**
+
+- This artifact is stamped **`0.4.0.0`**, derived from the app SemVer with
+  `major = 0`. A GPE major `>= 1` fails BL2 secure-boot with `AUTH_ERROR`.
+- The stamp must be **monotonically >=** anything ever flashed on that part.
+  A part whose floor is already higher (any unit used for OTA testing) will
+  **refuse this artifact**: re-wrap the same `.out` at a legal stamp rather
+  than assuming the binary is bad. Only the stamp differs.
+- **The `--version` you build with must match the version stamped into the
+  signed `programming_instructions`** in the flash-set, or the programmer
+  reports success and the device silently keeps the old image.
+- A rollback attempt streams clean and then refuses to boot. That reads as a
+  dead part; it is not -- it is the anti-rollback gate doing its job.
+
+**Do not derive a stamp from `regen_flashset.sh`'s epoch scheme for a
+release.** `0.$(((e>>16)&255)).$(((e>>8)&255)).$((e&255))` wraps its high byte
+every ~194 days, so it is *not* monotonic over a part's life: run today it
+yields `0.144.51.196`, which is **below** a floor of `0.149.63.0` already
+burned into this bench's unit. It is fine for same-day bench iteration, which
+is all it claims; it is not a release scheme.
+
 ## [0.3.0]
 
 Built on the bench with the `ti` backend (TI `ticlang` 5.1.1 +

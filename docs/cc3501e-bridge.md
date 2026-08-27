@@ -355,17 +355,46 @@ for the v0.1 scope + wire-reply contract.
 
 ## Versioning
 
-Three independent version axes (same model as the GD32 bridge) — track
-them separately:
+Four independent version axes — track them separately.  Conflating the
+first three with the fourth has repeatedly cost bench time:
 
 | Axis | Where | Bumps when |
 |------|-------|-----------|
 | **Firmware release** | `firmware/cc3501e/firmware-version.txt` (semver) | each firmware release — names the tag + the `cc3501e-vX.Y.Z.bin` prebuilt blob; the device reports it as `fw_version` via `GET_VERSION` / `GET_DIAG_INFO` |
 | **Wire protocol** | `ALP_CC3501E_PROTOCOL_VERSION` (`<alp/protocol/cc3501e.h>`) + `firmware/cc3501e/protocol-version.txt` | the wire format changes; the host refuses a mismatched version |
 | **Build / signature** | the signed binary's `.sha256` in `prebuilt/` | every build — pins the exact image |
+| **GPE anti-rollback stamp** | the `--version` the image is signed with (4-part, `major = 0`) | every flashed image — burned **irreversibly** into the part as a monotonic floor; it is *not* the SemVer |
 
 The firmware version moves on its own cadence — a release can ship
 without a protocol bump, and vice-versa.
+
+Current release: SemVer **0.4.0**, wire protocol **5**, stamped **`0.4.0.0`**
+(`firmware/cc3501e/prebuilt/cc3501e-v0.4.0.bin`).
+
+Two rules the stamp adds, both of which read as a dead part when broken:
+
+- **A stamp below the part's burned floor is refused.** The image streams
+  clean, the programmer reports success, and the device keeps the old image
+  (or refuses to boot). A unit used for OTA testing may already sit above a
+  release artifact's stamp — re-wrap the same `.out` at a legal stamp; the
+  binary is not bad.
+- **The stamp must match the version in the signed `programming_instructions`**
+  of the flash-set being programmed, because that file is generated from
+  `--version`. Regenerate both together (`firmware/cc3501e/ti/regen_flashset.sh`).
+
+`regen_flashset.sh`'s epoch-derived default is fine for same-day bench
+iteration and **not** a release scheme: its high byte wraps every ~194 days, so
+it is not monotonic over a part's lifetime.
+
+> **Unresolved contradiction — do not trust either claim blindly.**
+> `prebuilt/CHANGELOG.md` (0.3.0) states a GPE `major >= 1` fails BL2
+> secure-boot with `AUTH_ERROR`, and `regen_flashset.sh` uses `MAJOR=0`.
+> `ti/package_cc3501e_prod.ps1` and `ti/validate_gpio_bench.ps1` instead
+> default to `1.0.0.0` and comment that major **must** be `>= 1` (for a bench
+> unit poisoned to `0.9.0.7`). These cannot both hold. Releases here use
+> `major = 0`, which is what the shipped artifacts and the bench flash-sets
+> actually use; resolve the contradiction on silicon before relying on the
+> `>= 1` path.
 
 ## Firmware-side GPIO behaviour contract
 
