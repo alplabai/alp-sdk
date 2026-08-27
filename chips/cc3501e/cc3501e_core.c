@@ -374,10 +374,30 @@ __attribute__((weak)) void cc3501e_attn_set_armed(bool armed)
 	(void)armed;
 }
 
+/* STICKY application intent.  The ISR masks the line and every request masks it
+ * again, so something must put it back -- and lock_release() must not do it
+ * unconditionally (re-arming there drops a drain into the middle of a radio op
+ * and hung the device after WIFI_SCAN).  The application's LAST
+ * cc3501e_attn_arm() call is the authority.
+ *
+ * Without this the line is masked by the FIRST edge and never re-armed: bench
+ * 2026-08-26 measured the ISR frozen at exactly 1 across a 40 s armed window
+ * while the firmware kept pulsing and events sat in the ring (#130). */
+static volatile bool cc3501e_attn_desired;
+
 void cc3501e_attn_arm(cc3501e_t *ctx, bool armed)
 {
 	(void)ctx;
+	cc3501e_attn_desired = armed;
 	cc3501e_attn_set_armed(armed);
+}
+
+void cc3501e_attn_rearm_if_desired(cc3501e_t *ctx)
+{
+	(void)ctx;
+	if (cc3501e_attn_desired) {
+		cc3501e_attn_set_armed(true);
+	}
 }
 
 static alp_status_t cc3501e_lock_acquire(cc3501e_t *ctx)
@@ -401,6 +421,10 @@ static void cc3501e_lock_release(cc3501e_t *ctx)
 	 * Re-arming there put a drain in the middle of a radio op and hung the
 	 * device after WIFI_SCAN (bench 2026-08-26).  Only the application knows
 	 * when it is genuinely done -- it re-arms via cc3501e_attn_arm(). */
+	/* Re-arm ONLY inside an explicit cc3501e_attn_arm(ctx, true) window.
+	 * During ordinary traffic the application has not armed, so this is a
+	 * no-op and the WIFI_SCAN hang the comment above describes stays fixed. */
+	cc3501e_attn_rearm_if_desired(ctx);
 }
 alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
 {

@@ -185,12 +185,30 @@ void cc3501e_bridge_ready(void)
  * ring returns an empty list, so a host may drain on ANY rising edge -- including
  * every ordinary re-arm -- without needing to tell attention from flow control.
  * That is what makes one wire enough. */
+/* ~2-4 us of LOW at the CC35 core clock -- comfortably wider than the host pad
+ * synchroniser, far too short to look like a busy/flow-control drop. */
+#ifndef CC3501E_ATTN_PULSE_LOW_SPINS
+#define CC3501E_ATTN_PULSE_LOW_SPINS 300u
+#endif
+
 void cc3501e_bridge_attn_pulse(void)
 {
 	if (!ready_inited || !ready_level_high) {
 		return;
 	}
+	/* The LOW phase must be wide enough for the host to SEE.  Two back-to-back
+	 * GPIO_write() calls give a LOW of tens of nanoseconds; the Alif pad has an
+	 * input synchroniser ahead of its edge detector, so a glitch that narrow is
+	 * never sampled and no rising edge is generated.
+	 *
+	 * A bounded spin rather than ClockP_usleep(): this runs from the ring-push
+	 * path, which can be reached from an ISR, where a DPL sleep is not safe.
+	 * The caller already checked the line is idle-HIGH, so a few microseconds
+	 * LOW cannot be mistaken for flow control. */
 	GPIO_write(CC3501E_READY_GPIO, 0u);
+	for (volatile uint32_t spin = 0u; spin < CC3501E_ATTN_PULSE_LOW_SPINS; spin++) {
+		__asm__ volatile("nop");
+	}
 	GPIO_write(CC3501E_READY_GPIO, 1u);
 }
 #endif /* CC3501E_ATTN_PULSE */

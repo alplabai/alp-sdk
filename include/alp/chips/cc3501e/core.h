@@ -37,17 +37,41 @@ typedef struct cc3501e cc3501e_t;
  *  in `<alp/protocol/cc3501e.h>`. */
 typedef void (*cc3501e_event_cb_t)(uint8_t cmd, const uint8_t *payload, size_t len, void *user);
 
+/** Maximum simultaneous async-event subscribers per context (issue #1723).
+ *  Sized for the in-tree consumers -- the Zephyr console companion plus an
+ *  application -- with headroom; @ref cc3501e_add_event_callback reports
+ *  @ref ALP_ERR_NOMEM rather than silently dropping one past this. */
+#define CC3501E_EVENT_SUBSCRIBERS 4
+
 struct cc3501e {
-	bool               initialised;
-	alp_spi_t         *bus;        /**< SPI1 to the CC3501E (Alif master). */
-	alp_gpio_t        *enable_pin; /**< WIFI.EN (P15_5).  May be NULL on boards that tie it on. */
-	alp_gpio_t        *reset_pin;  /**< E_WIFI.NRST (P15_1_FLEX). */
-	alp_gpio_t        *ready_pin;  /**< OPTIONAL host-IRQ/READY in (CC35 GPIO17 -> Alif P2_6):
+	bool        initialised;
+	alp_spi_t  *bus;        /**< SPI1 to the CC3501E (Alif master). */
+	alp_gpio_t *enable_pin; /**< WIFI.EN (P15_5).  May be NULL on boards that tie it on. */
+	alp_gpio_t *reset_pin;  /**< E_WIFI.NRST (P15_1_FLEX). */
+	alp_gpio_t *ready_pin;  /**< OPTIONAL host-IRQ/READY in (CC35 GPIO17 -> Alif P2_6):
 	                                *   HIGH when the SPI slave is armed+idle.  When populated,
 	                                *   cc3501e_request() waits on it before each reply phase
 	                                *   instead of a fixed settle gap.  NULL = legacy fixed gap. */
-	cc3501e_event_cb_t event_cb;
-	void              *event_user;
+	/* Async-event SUBSCRIBERS (issue #1723), not one callback slot.
+	 *
+	 * This used to be a single { event_cb, event_user } pair, and the last
+	 * registration won -- silently.  The Zephyr console companion registers
+	 * its own callback on the shared ctx from its init path and polls every
+	 * ~500 ms, so it OVERWROTE the application's callback after main() had
+	 * already set it: the firmware ring drained normally,
+	 * cc3501e_poll_events() returned ALP_OK, and every event went to the
+	 * console's sink while the application received nothing -- with no error
+	 * and no way to detect it.
+	 *
+	 * The console and the application are both legitimate consumers of the
+	 * same events, so events now fan out to EVERY registered subscriber.  A
+	 * small fixed array rather than a list or an allocation: subscribers are
+	 * a handful of long-lived registrations, and this keeps registration
+	 * usable from an init path that has nowhere useful to report a failure. */
+	struct {
+		cc3501e_event_cb_t cb;
+		void              *user;
+	} event_subs[CC3501E_EVENT_SUBSCRIBERS];
 	/* Framing scratch for cc3501e_request() (#740 scope note): these were
 	 * ALREADY per-instance fields before this change (never the
 	 * function-local `static` pattern the scan/event buffers below used

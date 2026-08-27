@@ -129,8 +129,12 @@ static int cmd_companion_ping(const struct shell *sh, size_t argc, char **argv)
  * drive another request (e.g. reading a status register in response to an
  * event) without self-deadlocking.  Print-only -- printk goes to the active
  * console backend, so it is safe off the shell thread. */
+static volatile uint32_t companion_evt_seen;
+static volatile bool     companion_attn_backoff;
+
 static void companion_event_cb(uint8_t opcode, const uint8_t *payload, size_t len, void *user)
 {
+	companion_evt_seen++;
 	ARG_UNUSED(payload);
 	ARG_UNUSED(user);
 	switch (opcode) {
@@ -177,7 +181,11 @@ static void companion_drain_events(void)
 	}
 	k_mutex_lock(&companion_events_lock, K_FOREVER);
 	if (!companion_event_cb_set) {
-		(void)cc3501e_set_event_callback(companion_cc3501e, companion_event_cb, NULL);
+		/* ADD, never replace (issue #1723): this runs after the application's
+		 * main() has registered its own callback, and the old single-slot
+		 * registration overwrote it -- the console then consumed every event
+		 * and the application silently received none. */
+		(void)cc3501e_add_event_callback(companion_cc3501e, companion_event_cb, NULL);
 		companion_event_cb_set = true;
 	}
 	(void)cc3501e_poll_events(companion_cc3501e);
@@ -224,16 +232,51 @@ void cc3501e_attn_set_armed(bool armed)
 	if (!device_is_ready(companion_attn.port)) {
 		return;
 	}
+	/* While backing off, refuse to ARM.  The wire is shared with READY flow
+	 * control, so a transaction end is indistinguishable from an attention
+	 * pulse; re-arming on each one lets the drain's own trailing READY rise
+	 * re-trigger this path.  Measured: 11888 ISRs for 86 real events. */
+	if (armed && companion_attn_backoff) {
+		return;
+	}
 	(void)gpio_pin_interrupt_configure_dt(&companion_attn,
 	                                      armed ? GPIO_INT_EDGE_TO_ACTIVE : GPIO_INT_DISABLE);
 }
 
+/* Long enough to break the self-feeding chain, short enough that a real event
+ * behind a spurious one is not held up meaningfully. */
+#define ALP_COMPANION_ATTN_BACKOFF_MS 50
+
+static void companion_attn_rearm_fn(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	companion_attn_backoff = false;
+	cc3501e_attn_rearm_if_desired(companion_cc3501e);
+}
+static K_WORK_DELAYABLE_DEFINE(companion_attn_rearm_work, companion_attn_rearm_fn);
+
 static void companion_event_work_fn(struct k_work *work)
 {
 	ARG_UNUSED(work);
-	/* The drain itself transacts, so cc3501e_attn_set_armed() masks and re-arms
-	 * around each request inside it -- nothing to do here. */
+	const uint32_t seen_before = companion_evt_seen;
+
 	companion_drain_events();
+
+	/* RE-ARM HERE.  The requests inside the drain only MASK the line
+	 * (cc3501e_lock_acquire); nothing re-armed it, so the FIRST edge masked it
+	 * permanently -- bench-measured as the ISR frozen at 1 across a 40 s armed
+	 * window (#130).
+	 *
+	 * An EMPTY drain means that edge was flow control, not attention: back off
+	 * so the chain (edge -> drain -> READY rise -> edge) breaks.  A drain that
+	 * DID deliver re-arms immediately, keeping real events fast. */
+	if (companion_evt_seen == seen_before) {
+		companion_attn_backoff = true;
+		k_work_reschedule(&companion_attn_rearm_work, K_MSEC(ALP_COMPANION_ATTN_BACKOFF_MS));
+		return;
+	}
+	companion_attn_backoff = false;
+	cc3501e_attn_rearm_if_desired(companion_cc3501e);
 }
 static K_WORK_DEFINE(companion_event_work, companion_event_work_fn);
 

@@ -205,6 +205,12 @@ if [ "$BLE" = 1 ]; then
             "$fw/hal/ti/cc3501e_nimble_host.c")
 fi
 
+# A stale .out from a PREVIOUS build is FLASHABLE: if this build dies before the
+# linker runs, packaging would silently ship the OLD image and the change under
+# test never reaches silicon.  Delete the artifacts first so a failed build
+# cannot masquerade as a good one (see the same guard in build_ti.ps1).
+rm -f "$out/cc3501e-bridge.out" "$out/cc3501e-bridge.hex" "$out/cc3501e-bridge.bin"
+
 echo "== Compile (${#sources[@]} sources) =="
 objs=()
 for s in "${sources[@]}"; do

@@ -174,7 +174,7 @@ typedef enum {
  * ALP_CC3501E_CMD_GPIO_SET_INTERRUPT and propagates the wake event
  * up to Alif over the inter-chip SPI1.  Apps that want to surface
  * either as a system wake source must subscribe via the CC3501E
- * event callback (alp/chips/cc3501e.h's cc3501e_set_event_callback).
+ * event callback (alp/chips/cc3501e.h's cc3501e_add_event_callback).
  *
  * EVK_PIN_M2E_UART_WAKE (= ALP_E1M_GPIO_IO19) and EVK_PIN_M2E_SDIO_WAKE
  * (= ALP_E1M_GPIO_IO18) are defined in the generated routes header. */
