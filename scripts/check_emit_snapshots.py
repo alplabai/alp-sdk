@@ -215,14 +215,14 @@ _SDK_COMMIT_RE = re.compile(r'("sdkCommit":\s*)("[0-9a-f]+"|null)')
 # The tag-resolution half makes the emitted bytes depend on the CHECKOUT, not
 # the commit: a clone that fetched origin's tags emits `blob/v0.16.0/`, while a
 # shallow / `--no-tags` / tarball checkout of the very same commit emits
-# `blob/main/`.  That is the machine-specific class this module already
-# tokenises (SDK root, Python executable, sdkCommit), and leaving it real made
+# `blob/main/` (same for the `tree/` form used for directory links).  That
+# is the machine-specific class this module already
 # the gate unwinnable: the goldens were written from a tagless checkout, so
 # every tagged checkout failed four scaffold snapshots with no code change in
 # sight (alp-sdk#1738).  Tokenise it so the goldens pin the LINK SHAPE -- what
 # this gate is actually for -- instead of re-drifting at every release tag.
 _DOCS_REF_RE = re.compile(
-    r"(https://github\.com/alplabai/alp-sdk/blob/)"
+    r"(https://github\.com/alplabai/alp-sdk/(?:blob|tree)/)"
     r"(main|v\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)(/)")
 
 
