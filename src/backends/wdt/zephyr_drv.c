@@ -67,10 +67,14 @@ z_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilitie
 	int err        = wdt_setup(dev, 0);
 	if (err != 0) {
 		/* wdt_install_timeout above already programmed a channel on
-         * dev; a bail-out that skips this leaks it on retry.  Mirror
-         * the Yocto sibling's post-open teardown (_disarm_and_close,
-         * #760) instead of leaving the channel installed. */
-		(void)wdt_disable(dev);
+		 * dev; a bail-out that skips this leaks it on retry.  Left
+		 * open: wdt_disable() is not the fix -- it is device-wide
+		 * (uninstalls every channel, not just this one) and is a
+		 * no-op on nrfx/renesas_rz/gd32-fwdgt in exactly this
+		 * pre-setup state (-EFAULT/-EPERM), while on wdt_counter it
+		 * would stop the shared counter backing every installed
+		 * channel without clearing any bookkeeping.  Needs a
+		 * per-driver-class fix, not a device-wide disable. */
 		return _errno_to_alp(err);
 	}
 	caps_out->flags = 0u;

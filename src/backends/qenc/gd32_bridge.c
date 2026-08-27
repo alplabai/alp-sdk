@@ -9,6 +9,7 @@
 
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
+#include <alp/chips/gd32g553.h>
 #include <alp/counter.h>
 #include <alp/peripheral.h>
 
