@@ -136,7 +136,6 @@ reports before a build.
 | `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-stream` | B | `v3.2.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `coremqtt-sn` | B | `v1.0.1` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -162,7 +161,7 @@ reports before a build.
 | `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-**248 / 252 (library × SKU) cells compatible (4 incompatible, 0 n/a).**
+**241 / 245 (library × SKU) cells compatible (4 incompatible, 0 n/a).**
 
 ### E1M-X family (Cortex-A55 + Cortex-M33)
 
@@ -179,7 +178,6 @@ reports before a build.
 | `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-stream` | B | `v3.2.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `coremqtt-sn` | B | `v1.0.1` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ |
@@ -205,7 +203,7 @@ reports before a build.
 | `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 
-**144 / 144 (library × SKU) cells compatible.**
+**140 / 140 (library × SKU) cells compatible.**
 
 Legend: ✅ `requires:` satisfied and wireable on the SoM · ❌ incompatible (the named `requires:` constraint fails) · — not applicable (no `integration:` for any OS this SoM runs).
 <!-- END GENERATED: gen_portability_matrix_libraries -->

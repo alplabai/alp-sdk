@@ -1094,41 +1094,6 @@
           "models": false,
           "peripherals": false
         },
-        "name": "mqtt-sn-publish",
-        "osSet": [
-          "yocto",
-          "zephyr"
-        ],
-        "path": "examples/connectivity/mqtt-sn-publish",
-        "som": "E1M-AEN801",
-        "summary": "coreMQTT-SN teaching example. Encodes an MQTT-SN PUBLISH packet into a buffer, then parses it back out of the same buffer and asserts the topic id, message id, QoS, retain flag, and payload all survive the round trip. No socket, no gateway, no live transport -- this is the unit-test shape you'd run before wiring the encoder to a real UDP/ BLE/UART MQTT-SN link."
-      },
-      {
-        "board": "e1m-evk",
-        "coreCount": 3,
-        "cores": [
-          {
-            "app": "alp-image-edge",
-            "id": "a32_cluster",
-            "os": "yocto"
-          },
-          {
-            "app": "alp-stock-shim",
-            "id": "m55_he",
-            "os": "zephyr"
-          },
-          {
-            "app": "./src",
-            "id": "m55_hp",
-            "os": "zephyr"
-          }
-        ],
-        "declares": {
-          "chips": false,
-          "ipc": false,
-          "models": false,
-          "peripherals": false
-        },
         "name": "mqtt-telemetry",
         "osSet": [
           "yocto",
