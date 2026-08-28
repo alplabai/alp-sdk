@@ -140,6 +140,14 @@ The rest of this document is that path.
   V9.46+ DLL. *Optional* if you only
   use the SETOOLS/SE-UART path (Flow A).
 
+> **Check the module's SERAM version before you provision it.** The SE
+> firmware image (SERAM) and the services library this SDK links are
+> versioned together, and Alif documents an **API break between SERAM v106
+> and v109** on E8 parts. A module below v109 needs a System Package update
+> over this same SE-UART before its application can use the SE at all --
+> see [`aen-se-services.md`](aen-se-services.md) §0.1 for the pairing rule
+> and how to read the running version.
+
 ## 2. Wire the SE-UART — the part everyone gets wrong
 
 The SES maintenance UART (**SEUART**) is **not** the application console. On

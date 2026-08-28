@@ -53,6 +53,68 @@ Every `se_service_*` call bounds its wait internally (returns `0` / `-EAGAIN`
 (timeout, retry) / `-EBUSY` (SE busy) / a positive SE error code), so a call
 never hangs — if the SE is unreachable you get a bounded error, not a lockup.
 
+### 0.1 Version pairing — the SERAM image and the services library must match
+
+The SE firmware image is called **SERAM**. It is the thing
+`se_service_get_se_revision()` reports (`SES A0 v1.110.0 Mar 4 2026`), and it is
+independent of your application: it is programmed into the module, not built
+from this SDK. The **services library** is the client half — the hal_alif
+`se_services/zephyr/src/se_service.c` this SDK links, whose upstream is Alif's
+SETOOLS release of the same number.
+
+**These two are versioned together and are not independently upgradable.** Alif
+Semiconductor, 2026-08-28, on an E8 (AE822) module:
+
+> there is an API break between SERAM v106 and v109 for E8 devices. v106 is a
+> really early version for E8 platform, and you definitely need to update SERAM
+> on your HWs to a newer version (v110 is recommended). It works ok with also
+> with services library v109. General guideline is that you should always use a
+> matching SERAM and services library.
+
+| SERAM on the module | Services library | Supported |
+| --- | --- | --- |
+| **v110** | v110 | **Yes** — Alif's recommendation, and the E1M-AEN801 reference baseline |
+| v109 | v109 | Yes |
+| **v106** | v109 / v110 | **No** — straddles the API break; v106 is, in Alif's words, "a really early version for E8" |
+| any | any other number | No — Alif's general guideline is to match them |
+
+Alif name these versions by the middle number of the SES string: SES
+`1.110.0` is SERAM **v110**, `1.106.2` is **v106**. That mapping is our
+reading of their reply, not something they spelled out — if you are quoting a
+version back to Alif, quote the full string.
+
+**Check what a module is running before you debug anything else**, over the
+already-safe read-only path of §1:
+
+```c
+uint8_t rev[80];
+se_service_get_se_revision(rev);   /* "SES A0 v1.110.0 Mar 4 2026" */
+```
+
+A module below v109 must have its SERAM updated — a **System Package update**
+over the SE-UART with SETOOLS. Changing the application cannot fix a mismatched
+pair; it can only move the symptom.
+
+**Symptom seen on a mismatched pair.** On a customer AE822 running SERAM
+**1.106.2** (Jul 14 2025) against a services library from SETOOLS **1.109**, the
+*first* Secure Enclave service request stops **HFXTAL** and unlocks the **PLL**:
+the M55-HP drops from **400 MHz** to **76.8 MHz** and stays there. It reproduced
+through `SERVICE_CRYPTOCELL_GET_RND` (reached from a DHCP client's randomness
+source) but is not RNG-specific — shifting application code by `0x100` changes
+the outcome, which points at the first-request path rather than at the service.
+The healthy E1M-AEN801 reference board, on matched v1.110.0 / SETOOLS 1.110.00,
+does not reproduce it (#1700).
+
+Alif has not stated whether the break *causes* this particular fault, so treat
+the mismatch as the first thing to clear, not as a closed root cause. Clear it
+before spending time on the application: it is an unsupported pairing either way.
+
+> **Open question — which SERAM floor does this SDK's pin require?** alp-sdk
+> pins `hal_alif v2.3.0` (`west.yml`), which supplies the services library.
+> Alif has not published a SERAM ↔ hal_alif mapping, so the safe module baseline
+> is **v110**, matching the version they recommend and the one the reference
+> board runs.
+
 ## 1. Read-only services — safe, zero-risk
 
 These never change device state. All confirmed `rc=0` on the E8 bench (#197):
@@ -60,7 +122,7 @@ These never change device state. All confirmed `rc=0` on the E8 bench (#197):
 | Service | Returns | E8 bench value |
 | --- | --- | --- |
 | `se_service_heartbeat()` | liveness | rc=0 |
-| `se_service_get_se_revision(u8 buf[80])` | SES firmware string | `SES A0 v1.106.2 Jul 14 2025` |
+| `se_service_get_se_revision(u8 buf[80])` | SERAM (SE firmware) version string | `SES A0 v1.110.0 Mar 4 2026` — was `SES A0 v1.106.2 Jul 14 2025` before the bench System Package update; see §0.1 |
 | `se_service_get_toc_number(u32*)` | TOC entry count | 5 |
 | `se_service_get_toc_version(u32*)` | TOC version | `0x016a0200` |
 | `se_service_get_device_part_number(u32*)` | part id | `0x000002a0` |
