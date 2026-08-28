@@ -60,9 +60,11 @@ alp_cc3501e_resp_t handle_gpio_read(const uint8_t *req,
 	return st;
 }
 
-/* GPIO_SET_INTERRUPT (0x53): arm/disable an edge IRQ on a proxied pad.  The
- * async EVT_GPIO_INTERRUPT delivery needs the next-rev host-IRQ line; this
- * rev accepts the config (event delivery lands with r2 -- see DESIGN.md). */
+/* GPIO_SET_INTERRUPT (0x53): arm/disable an edge IRQ on a proxied pad.  The HW
+ * arming is real; what is missing is the PRODUCER.  The slave->master attention
+ * transport shipped in #130 / alp-sdk#1721 (an edge on the shared READY wire),
+ * so EVT_GPIO_INTERRUPT delivery no longer waits on hardware -- gpio_irq_cb()
+ * simply never calls event_ring_push().  See DESIGN.md. */
 alp_cc3501e_resp_t handle_gpio_set_interrupt(const uint8_t *req,
                                              size_t         req_len,
                                              uint8_t       *reply_data,

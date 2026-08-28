@@ -19,9 +19,10 @@
  * stops completing and MISO goes silent -- bench-proven, and it happens
  * REGARDLESS of which DMA channel the bridge is pinned to (we tried ch11,
  * ch8/6, and the FREE ch12/13; all die the same way).  READY gates
- * command/reply phases once the slave is re-armed, but there is not yet a
- * HOST_IRQ async-event line for the CC35 to initiate traffic, so the bridge
- * simply cannot be serviced WHILE a radio op runs.
+ * command/reply phases once the slave is re-armed.  The CC35 can raise an
+ * attention EDGE on that same wire (#130) to ask the host to drain events, but
+ * it still cannot clock a transfer itself, so the bridge simply cannot be
+ * serviced WHILE a radio op runs.
  *
  * The architecture that works WITH this constraint (submit -> radio-op
  * [bridge down] -> recover -> poll):
@@ -56,8 +57,10 @@
  *
  * The completed request frame is replayed through the byte seams, so
  * framing/dispatch (and the host test) are identical to the stub path.
- * HOST_IRQ / async-event push delivery remains future work; solicited
- * command traffic uses the hardware-SS0 + READY path here.
+ * Solicited command traffic uses the hardware-SS0 + READY path here.  Async
+ * events are signalled by pulsing an attention edge on the READY wire (#130,
+ * alp-sdk#1721) -- build-time opt-in via -DCC3501E_ATTN_PULSE; the host then
+ * drains them through this same solicited path.
  *
  * ================= OTA UPDATE MODE (polled bridge) ==================
  * A callback/DMA SPI_open PERMANENTLY prevents psa_fwu_start() and

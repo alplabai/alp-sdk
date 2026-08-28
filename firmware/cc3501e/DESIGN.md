@@ -149,33 +149,72 @@ came up is dropped.
     bring-up is the one SWRU626 §21 bench item (no public SDK SDIO-device
     driver) — off the v0.1 critical path.
 
-## Next-rev hardening: host IRQ / async events
+## Async events: the attention edge (shipped), and a dedicated HOST_IRQ (future)
 
-Hardware CS is already part of the current E1M-AEN bridge: Alif
-`SPI1_SS0_C` frames each protocol phase.  The remaining board-level
-hardening is a **host IRQ / DATA_READY** line for unsolicited events.
-SPI and SDIO are mutually-exclusive control transports, so a future SPI
-mode can reuse an SDIO-capable CC3501E pad when SDIO is not active:
+The Alif is SPI master, so the CC3501E can never initiate a transfer, yet the
+protocol defines async events (`EVT_WIFI_*`, `EVT_BLE_*`,
+`EVT_GPIO_INTERRUPT`) with 5-10 ms latency budgets
+(docs/cc3501e-bridge.md).  Polling cannot meet those budgets without
+hammering the bus.
+
+### What shipped (#130, alp-sdk#1721 -- 2026-08-27)
+
+Rather than wait for a board rev, the slave->master attention path was
+**multiplexed onto the existing READY wire** (CC35 `GPIO17` -> Alif `P2_6`,
+the rev-1 bodge line).  The firmware pulses that line when it queues an
+event (`cc3501e_bridge_attn_pulse()`, called from `event_ring_push()`); the
+host arms an edge interrupt with `cc3501e_attn_arm()` and drains on the
+edge.  Validated on silicon: the host application saw 135 of 135 firmware
+pushes across a 40 s armed window with the console timer poll set to 60 s,
+so no timer delivery was possible.
+
+Three properties of the shared wire are load-bearing, not incidental:
+
+- **Sticky arm intent.**  The ISR masks the line and the request lock
+  re-arms it, but ONLY inside an explicit `cc3501e_attn_arm(ctx, true)`
+  window.  Unconditional re-arming in `lock_release()` hangs the device
+  after `WIFI_SCAN`.
+- **Empty-drain backoff (50 ms).**  The wire also carries READY flow
+  control, so a transaction end is indistinguishable from an attention
+  pulse and a drain's own trailing READY rise re-triggers the ISR.  A drain
+  that delivered zero events backs off; one that delivered events re-arms
+  immediately.  Without it: 11888 ISRs for 86 events.  With it: 220, with
+  nothing lost.
+- **A full ring must still pulse.**  `event_ring_push()` raises attention on
+  a DROPPED push too.  Pulsing only on success is unrecoverable on an idle
+  host: 16 boot-time Wi-Fi events fill `CC3501E_EVENT_RING_SLOTS`, after
+  which no pulse means no drain means still full.
+
+### Two limits to know before relying on it
+
+- **The pulse is a build-time opt-in.**  `build_ti.ps1 -AttnPulse` sets
+  `-DCC3501E_ATTN_PULSE=1`; it is **default OFF** because the wire is a
+  rev-1 bodge absent on the stock EVK, and the pulse is an extra transition
+  on the line every host uses for flow control.  `package_cc3501e_prod.ps1`
+  does not pass it.  A build without the flag links a no-op stub, so a host
+  that arms attention never gets an edge and falls back to its timer poll.
+- **Only Wi-Fi events have a producer.**  `EVT_WIFI_CONNECTED` and
+  `EVT_WIFI_DISCONNECTED` are pushed into the ring; `EVT_GPIO_INTERRUPT`
+  and the BLE events are not pushed by anything today.  The transport is
+  not the blocker for those -- an `event_ring_push()` call at the producer
+  is.
+
+### Still future: a dedicated HOST_IRQ line
+
+Sharing the wire with flow control is what forces the empty-drain backoff
+above.  A future board rev can give attention its own pad.  SPI and SDIO
+are mutually-exclusive control transports, so a future SPI mode can reuse
+an SDIO-capable CC3501E pad when SDIO is not active:
 
 | CC3501E pin | SDIO mode | SPI mode (future) |
 |-------------|-----------|-------------------|
 | `GPIO3`     | SDIO.CLK  | **HOST_IRQ** -> Alif `P7_0` (E1M `IO0`) |
 
-The Alif is SPI master, so the CC3501E can never initiate, yet the
-protocol defines async events (`EVT_WIFI_*`, `EVT_BLE_*`,
-`EVT_GPIO_INTERRUPT`) with 5-10 ms latency budgets
-(docs/cc3501e-bridge.md).  Polling cannot meet those budgets without
-hammering the bus; a host-IRQ line is the standard SPI-coprocessor
-solution and lets the host sleep until an event is ready.
-
-The IRQ pad (`GPIO3` -> `P7_0`) consumes E1M `IO0` **only in SPI mode**;
-in SDIO mode that pin is the SDIO clock and `IO0` is unaffected (this is
-a per-transport pinmux, configured at build time alongside
-`CC3501E_CONTROL_TRANSPORT`).  When the IRQ line lands, the firmware
-raises it when an async event is ready and the host drains that event
-with the existing four-phase request path.  Boot-safe: active-high with
-an Alif pull-down; firmware drives it low early and the Alif arms the
-interrupt only after the boot budget.
+That pad consumes E1M `IO0` **only in SPI mode**; in SDIO mode the pin is
+the SDIO clock and `IO0` is unaffected (a per-transport pinmux, configured
+at build time alongside `CC3501E_CONTROL_TRANSPORT`).  Boot-safe:
+active-high with an Alif pull-down; firmware drives it low early and the
+Alif arms the interrupt only after the boot budget.
 
 ## Bench bring-up open items (AEN801)
 
@@ -186,9 +225,12 @@ firmware redesigns:
 1. **SysConfig anchor.** The `ti` build needs a board file defining
    `CONFIG_SPI_0` (the inter-chip SPI on CC3501E GPIO_27/28/29 plus the
    CC35-side CSN resource paired with Alif hardware SS0).
-2. **Host IRQ / async events.** Add the board line and host event-drain
-   path when the async-event work starts; command/reply traffic already
-   uses hardware SS0 + READY.
+2. **Async-event producers.** The attention transport shipped (#130,
+   alp-sdk#1721) on the shared READY wire; what is missing is producers.
+   Only `EVT_WIFI_CONNECTED` / `EVT_WIFI_DISCONNECTED` reach
+   `event_ring_push()`.  `EVT_GPIO_INTERRUPT` and the BLE events need a
+   push at the source, not new hardware.  A dedicated HOST_IRQ pad is a
+   separate, later board-rev item.
 3. **SDIO-device.** Implement the §21 register bring-up in
    `transport_hw_ti_sdio.c` if/when SDIO is needed (SPI is the default).
 4. **Flashing.** The CC3501E is Alp-OTA-updated (`update_channel:

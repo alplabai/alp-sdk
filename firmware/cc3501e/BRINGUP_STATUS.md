@@ -6,13 +6,15 @@ Copyright 2026 Alp Lab AB
 # CC3501E bridge bring-up status
 
 Status of the Alif Ensemble E8 (M55-HE) <-> CC3501E (CC35X1E) SPI bridge on
-the E1M-AEN801 bench. Updated 2026-07-08.
+the E1M-AEN801 bench. Updated 2026-08-28.
 
 This is the consolidated on-silicon record for the **link / Wi-Fi / BLE**
 pillars. The authoritative topology is the hardware-framed SPI bridge described
 in [`docs/cc3501e-bridge.md`](../../docs/cc3501e-bridge.md): Alif `SPI1_SS0_C`
-frames every protocol phase and READY gates reply phases. HOST_IRQ / async
-event delivery remains future work.
+frames every protocol phase and READY gates reply phases. Async events ride an
+attention edge on that same READY wire (#130, alp-sdk#1721) -- shipped and
+silicon-validated, build-time opt-in, and with Wi-Fi connect/disconnect as its
+only producers so far (see § 4).
 
 ## TL;DR - pillar status
 
@@ -20,12 +22,61 @@ event delivery remains future work.
 |---|---|---|
 | **Inter-chip link** (PING / GET_VERSION / GET_MAC / RESET) | PASS, cold + warm | Hardware SS0 + READY framing is bench-validated on E1M-AEN801; `ver` remains responsive after radio ops. |
 | **Wi-Fi GET_MAC / scan / RSSI** | PASS | Real scan records with security decode validated through the bridge. |
-| **Wi-Fi connect-STA / soft-AP / sockets** | PASS for async STA connect; socket APIs shipped | Async connect survives the bridge; keep credentialed socket soak in production validation. |
-| **BLE** (enable / advertise / scan / connect + GATT scaffolding) | PASS for enable + real scan | NimBLE enable and `ble_gap_disc` scan validated with real advertisers; full runtime GATT/event parity remains v1.0 work. |
+| **Wi-Fi connect-STA** | PASS | Async connect survives the bridge; re-confirmed 2026-08-28 on fw 0.4.0 (`state: connected`, `rssi=-35 dBm`, DHCP lease). Association is INTERMITTENT in practice -- several attempts returned `wifi connect ... timed out` or `-5` and needed a cold cycle. |
+| **Sockets** | **FAIL - does not connect** | `sock tcp-get` cannot open a TCP connection to ANY destination on fw 0.4.0 / protocol 5: LAN targets return `-1` (`ALP_ERR_INVAL`), public ones `-4` (`ALP_ERR_TIMEOUT`), while the same targets fetch fine from the host on the same LAN. `sock_open` succeeds (`handle=1`); the firmware emits no new error (`lasterr` stays `2` = `RESP_ERR_BUSY`), so the failure is host-side or a worker that never completes the connect job. **alp-sdk#1746 -- do not treat sockets as shipped.** |
+| **Soft-AP** | Partial / unresolved | Advertises and keeps advertising well past the ~100 s of alp-sdk#1562 (cache-proof measurement, 2026-08-28), but a client could not ASSOCIATE to it across 181 s while it was confirmed still beaconing. One client only; needs a second radio to confirm. `ap start` also returns `-4 unconfirmed` -- there is no AP status latch (alp-sdk#1385), so AP state must be checked out of band. |
+| **BLE** (enable / advertise / scan / connect + GATT scaffolding) | PASS for enable + real scan (re-confirmed 2026-08-28: 9-15 real advertisers) | NimBLE enable and `ble_gap_disc` scan validated with real advertisers; full runtime GATT/event parity remains v1.0 work. |
 | **CAM enables** | PASS | `which` 0 -> GPIO_1 (LDO0), 1 -> GPIO_0 (LDO1); mapping fixed from U4 pins 54/55. |
 | **GPIO proxy** + camera enables | PASS | Firmware HAL, host API, portable proxy, ztests, and warm-boot GPIO example are validated. |
 | **Cold-boot** | Host-workable | Puya 64 Mbit flash workaround is host hard-reset after every power-cycle. |
 | **OTA over SPI** | PASS - full cycle | BEGIN -> WRITE(RAM-stage) -> FINISH(one flash burst -> `psa_fwu_install` -> STAGED) -> swap is silicon-validated. **#493 criterion 1 CLOSED 2026-07-10**: the full cold-swap cycle is proven on E8 (see §5). Forward-version candidates only - the CC35 refuses a version rollback. |
+
+## 0.5 Current state (2026-08-28)
+
+**Shipping version.** App SemVer **0.4.0** (`fw_version=0x0400` over `GET_DIAG_INFO`),
+wire protocol **5**, prebuilt `prebuilt/cc3501e-v0.4.0.bin` GPE-stamped `0.4.0.0`.
+Verified on E1M-AEN801: `GET_VERSION -> protocol v5 (host expects v5) -- match`,
+20/20 soak PINGs, `GET_MAC ok 44:3e:8a:10:b6:9e`, `WIFI_SCAN ok -> 6 AP(s)`.
+
+**Three version numbers, not interchangeable** -- app SemVer (`0.4.0`), wire protocol
+(`5`), and the GPE anti-rollback stamp (`0.4.0.0`) burned irreversibly into the part.
+Conflating them has repeatedly cost bench time; see `prebuilt/CHANGELOG.md`.
+
+### Fixed since the last revision
+
+- **Phantom async events (alp-sdk#1740).** An empty event ring produced ~5.8
+  `opcode 0x00, len 0` events/second forever. Reply padding is folded into the
+  declared payload length, so an empty ring arrived as 7 zero bytes and was walked
+  as three entries. The host walk now stops at a zero opcode. **Any new
+  variable-length reply payload must be self-delimiting**, or it hits the same trap.
+- **Shell stack overflow (alp-sdk#1743).** `sock tcp-get` overflowed the 2 KB Zephyr
+  shell stack and halted the board; `CONFIG_SHELL_STACK_SIZE` is now 4096 when the
+  `alp` console is enabled.
+
+### Open, with measurements
+
+- **Sockets do not connect (alp-sdk#1746).** See the TL;DR row. This is the single
+  biggest gap: the socket surface is documented and shipped but non-functional.
+- **One BLE scan costs exactly 100 frame errors (alp-sdk#1754).** `frames ok=15 err=0`
+  -> one `ble scan` -> `err=100`, then frozen at 100 while `ok` keeps climbing. The
+  counter is a plain `uint32_t` with no saturation, so 100 is a real count -- a bounded
+  loop somewhere, source not yet found.
+- **Throughput (alp-sdk#1677) is unmeasurable** until sockets work; there is no way to
+  move bulk data over the bridge today. Round-trip latency is healthy:
+  `200 GET_VERSION ops in 120 ms = 600 us/op, 1666 ops/s, fails=0`.
+
+### Bench facts worth knowing before debugging
+
+- **A wedged bridge needs a LONG power-off.** After heavy use the link can refuse
+  everything with `-5`, including `alp companion reset` itself (an in-band reset over
+  a wedged link cannot work). A **7-8 s** cold cycle does NOT clear it; **20 s does**,
+  immediately. Do not conclude the part is dead before trying that.
+- **The wedge does not reproduce under control.** 6/6 connect->status->disconnect
+  cycles and 6/6 with a `sock tcp-get` interleaved both ran clean from a cold boot.
+  Treat "wedges after N connects" as unproven.
+- **Interactive `alp companion` verbs need the right app.** `aen-cc3501e-bringup` never
+  calls `alp_console_companion_set()`, so every companion command answers `companion not
+  registered`. Use `examples/peripheral-io/alp-console` (alp-sdk).
 
 ## 1. Inter-chip link
 
@@ -74,9 +125,10 @@ The 512 KB DRAM linker fix removed the old false "needs PSRAM" conclusion.
 Wi-Fi + BLE coexist in the CC3501E image, NimBLE enable is validated, and real
 BLE scan records are observed through the bridge.
 
-Remaining BLE work is API completeness, not the bridge link: HOST_IRQ-backed
-async event delivery and full runtime GATT/event parity belong to the v1.0
-workstream.
+Remaining BLE work is API completeness, not the bridge link. The attention
+transport for async events shipped (#130, alp-sdk#1721), but nothing pushes BLE
+events into the ring yet, so BLE async delivery plus full runtime GATT/event
+parity belong to the v1.0 workstream.
 
 ## 4. Bridge / radio coexistence
 
@@ -88,8 +140,20 @@ the SPI slave. The production model is:
 3. Re-open and re-arm the bridge SPI after the radio operation.
 4. Let the host poll/retry across `ALP_ERR_IO` / BUSY until the result is ready.
 
-READY gates per-phase traffic once the SPI slave is armed. It is not a
-replacement for HOST_IRQ async-event push delivery.
+READY gates per-phase traffic once the SPI slave is armed. Since #130 /
+alp-sdk#1721 the same wire also carries the async-event attention edge -- the
+firmware pulses it when it queues an event and the host drains on the edge.
+Sharing one wire for both is why the drain needs a 50 ms empty-drain backoff: a
+transaction end is indistinguishable from an attention pulse, and without the
+backoff 86 events cost 11888 ISRs instead of 220.
+
+Two limits apply before relying on it. The pulse is a **build-time opt-in**
+(`build_ti.ps1 -AttnPulse`, `-DCC3501E_ATTN_PULSE=1`), default OFF because the
+wire is a rev-1 bodge absent on the stock EVK and `package_cc3501e_prod.ps1`
+does not pass it -- a build without the flag links a no-op stub and the host
+falls back to its timer poll. And only `EVT_WIFI_CONNECTED` /
+`EVT_WIFI_DISCONNECTED` call `event_ring_push()`; `EVT_GPIO_INTERRUPT` and the
+BLE events have no producer, so they still never arrive.
 
 ## 5. Cold-boot
 
@@ -301,10 +365,13 @@ rollback, which earlier bench runs misread as a dead secure element.
 
 ## 8. Open items / next
 
-1. **HOST_IRQ / async events** - add the board line and host event-drain path for
-   BLE/Wi-Fi/GPIO unsolicited events.
+1. **Async-event producers** - the transport shipped (#130, alp-sdk#1721); the
+   gap is producers. `EVT_GPIO_INTERRUPT` (`gpio_irq_cb()` only clears the edge)
+   and the BLE events never call `event_ring_push()`. This is a push at the
+   source, not new hardware. Separately, confirm whether the shipped
+   `cc3501e-v0.4.0.bin` was built with `-AttnPulse` -- the flag is default OFF.
 2. **Full runtime GATT/event parity** - finish the v1.0 portable BLE event
-   surface once HOST_IRQ exists.
+   surface; the attention transport it needs already exists.
 3. **Credentialed socket soak** - run against a lab network during production
    validation.
 4. **OTA cold swap-boot** - repeat final swap validation on a correctly
