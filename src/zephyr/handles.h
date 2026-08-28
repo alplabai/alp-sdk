@@ -89,10 +89,25 @@ extern "C" {
 #include <lwrb/lwrb.h>
 
 struct alp_uart_rx_ringbuf {
-	bool                 in_use;
 	const struct device *dev;  /* mirror of port->state.dev for ISR use */
 	struct alp_uart     *port; /* back-ref for detach */
 	lwrb_t               rb;
+
+	/* lifecycle/active_ops drive the generic open/op/close guard in
+	 * src/common/alp_slot_claim.h (issue #1634).  Without them a
+	 * detach() could lwrb_free() and re-attach this same struct address
+	 * while a pop() was mid-read, handing the reader another owner's
+	 * bytes.
+	 *
+	 * Placed before in_use, matching struct alp_adc_stream and every
+	 * other guarded handle in this file, so the claim-side zeroing
+	 * convention resets both on a fresh claim.  This pool's allocator in
+	 * handles.c zeroes the whole struct under its mutex -- a superset --
+	 * so the ordering costs nothing and keeps the layout rule uniform.
+	 * Non-volatile: the guard uses __atomic_* on them directly. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 #endif
 

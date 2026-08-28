@@ -26,6 +26,7 @@
 #include <alp/soc_caps.h>
 
 #include "alp_errno.h"
+#include "alp_slot_claim.h"
 #include "uart_ops.h"
 
 #define ALP_UART_DEV_OR_NULL(idx) \
@@ -209,6 +210,19 @@ static void z_close(alp_uart_backend_state_t *st)
 
 #include "../../zephyr/handles.h"
 
+/* Test-only synchronisation hook (default no-op; a single NULL-check
+ * branch in production) -- mirrors src/backends/rpc/zephyr_drv.c's
+ * g_rpc_recv_test_sync_hook, but non-static: tests/zephyr/
+ * uart_rx_ringbuf_close_race links the real built alp_sdk library
+ * rather than #including this .c file directly, so the hook needs
+ * external linkage to be reachable from that test TU.  Lets the test
+ * pause alp_uart_rx_ringbuf_pop() right after alp_handle_op_enter()
+ * has counted the op in, before the actual lwrb_read(), so it can
+ * drive alp_uart_rx_ringbuf_detach()'s drain against a counted op made
+ * through the REAL public entry point.  Runs outside any lock, so it
+ * is safe for it to block.  Issue #1634. */
+void (*alp_uart_rx_ringbuf_pop_test_sync_hook)(void) = NULL;
+
 /* IRQ-context drain: pull bytes out of the controller FIFO into the
  * caller's LwRB.  Single-producer / single-consumer holds because
  * Zephyr serialises the UART IRQ callback against itself and the
@@ -273,6 +287,10 @@ alp_uart_rx_ringbuf_attach(alp_uart_t *port, uint8_t *backing, size_t backing_si
 	}
 	uart_irq_rx_enable(dev);
 	port->state.rx_ringbuf = s;
+	/* Publish OPEN only after every field above is populated, so a
+	 * concurrent pop/count/detach racing this attach sees a fully-
+	 * initialised handle the instant it observes LC_OPEN.  Issue #1634. */
+	alp_lifecycle_set(&s->lifecycle, ALP_HANDLE_LC_OPEN);
 	return s;
 }
 
@@ -280,23 +298,54 @@ alp_status_t
 alp_uart_rx_ringbuf_pop(alp_uart_rx_ringbuf_t *rb, uint8_t *out, size_t max_len, size_t *got)
 {
 	if (got != NULL) *got = 0;
-	if (rb == NULL || !rb->in_use) return ALP_ERR_NOT_READY;
-	if (out == NULL && max_len > 0) return ALP_ERR_INVAL;
-	if (max_len == 0) return ALP_OK;
-	size_t n = lwrb_read(&rb->rb, out, max_len);
-	if (got != NULL) *got = n;
-	return ALP_OK;
+	if (rb == NULL) return ALP_ERR_NOT_READY;
+	/* Count this op in before touching the ring: a racing detach() that
+	 * has already begun cannot recycle the slot until this op leaves.
+	 * Issue #1634 -- was a bare `!rb->in_use` read, so a detach()
+	 * mid-pop could free and reassign the same struct address
+	 * (lwrb_free plus a fresh attach()'s lwrb_init) while this call was
+	 * still reading out of it, delivering another owner's bytes. */
+	if (!alp_handle_op_enter(&rb->lifecycle, &rb->active_ops)) return ALP_ERR_NOT_READY;
+	if (alp_uart_rx_ringbuf_pop_test_sync_hook != NULL) {
+		alp_uart_rx_ringbuf_pop_test_sync_hook();
+	}
+
+	alp_status_t rc = ALP_OK;
+	if (out == NULL && max_len > 0) {
+		rc = ALP_ERR_INVAL;
+	} else if (max_len > 0) {
+		size_t n = lwrb_read(&rb->rb, out, max_len);
+		if (got != NULL) *got = n;
+	}
+	alp_handle_op_leave(&rb->active_ops);
+	return rc;
 }
 
 size_t alp_uart_rx_ringbuf_count(const alp_uart_rx_ringbuf_t *rb)
 {
-	if (rb == NULL || !rb->in_use) return 0;
-	return lwrb_get_full(&rb->rb);
+	if (rb == NULL) return 0;
+	/* rb is logically const to the caller, but lifecycle/active_ops are
+	 * atomic bookkeeping mutated even through a read-only handle (the
+	 * same rationale as a mutex embedded in a const struct) -- mirrors
+	 * pop()'s guard so count() cannot race a concurrent detach() either.
+	 * Issue #1634. */
+	struct alp_uart_rx_ringbuf *mrb = (struct alp_uart_rx_ringbuf *)rb;
+	if (!alp_handle_op_enter(&mrb->lifecycle, &mrb->active_ops)) return 0;
+	size_t n = lwrb_get_full(&mrb->rb);
+	alp_handle_op_leave(&mrb->active_ops);
+	return n;
 }
 
 void alp_uart_rx_ringbuf_detach(alp_uart_rx_ringbuf_t *rb)
 {
-	if (rb == NULL || !rb->in_use) return;
+	if (rb == NULL) return;
+	/* begin_close CASes OPEN->CLOSING then sleep-polls until every op
+	 * that entered before the CAS has left.  alp_uart_rx_ringbuf_pop()
+	 * runs on the consumer thread only (see <alp/peripheral.h>'s
+	 * documented contract), but nothing restricts detach()/close() to
+	 * that thread, so the drain still matters.  Idempotent: a second or
+	 * never-attached detach no-ops.  Issue #1634. */
+	if (!alp_handle_begin_close_blocking(&rb->lifecycle, &rb->active_ops)) return;
 	if (rb->dev != NULL) {
 		uart_irq_rx_disable(rb->dev);
 		(void)uart_irq_callback_user_data_set(rb->dev, NULL, NULL);
@@ -310,6 +359,10 @@ void alp_uart_rx_ringbuf_detach(alp_uart_rx_ringbuf_t *rb)
 		rb->port->state.rx_ringbuf = NULL;
 	}
 	lwrb_free(&rb->rb);
+	/* Back to UNOPENED before the slot returns to the pool, so a later
+	 * op on a stale pointer is refused by op_enter rather than seeing a
+	 * lingering CLOSING/OPEN state.  Issue #1634. */
+	alp_lifecycle_set(&rb->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	alp_z_uart_rx_ringbuf_pool_release(rb);
 }
 
