@@ -204,6 +204,7 @@ INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
     # scripts.  Each carries a "Cross-platform scope:" header note.
     # bench-env.sh is sourced (no shebang) so it isn't flagged.
     "scripts/bench/aen/build.sh",
+    "scripts/bench/aen/erase-storage.sh",
     "scripts/bench/aen/flash-jlink.sh",
     "scripts/bench/aen/flash-jlink-mramxip.sh",
     "scripts/bench/aen/flash-jlink-hp.sh",

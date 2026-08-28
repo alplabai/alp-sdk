@@ -274,6 +274,73 @@ core and full SWD debug is now available.
 | J-Link `Could not find core in CoreSight setup` | Normal on a **fresh** board — the SES hasn't released the core. Provision an app first. On a board that *used* to boot, this is the same no-valid-ATOC state reached by an interrupted write — see [`debugging-aen.md` §7](debugging-aen.md#7-the-secure-enclave-boots-nothing-at-all--cores-parked-vtor-0). |
 | J-Link hangs on a firmware update on first connect (Flow D) | A version-mismatched probe forces a J-Link firmware update that **times out over a USB hub** — connect the probe to a **direct root USB port**. |
 
+## 7. Before the SoM ships — erase the customer storage window
+
+This section is for **whoever provisions a module**, not for a customer
+bringing one up. It is the last step of manufacturing, after §4/§5 have put a
+working image on the part.
+
+**Why.** alp-sdk#1334 measured, on real E8 silicon, roughly 110 KiB of a
+**stale previously-flashed Zephyr application image** sitting in the customer
+storage window. It is not live data — the region was erased and the board
+cold-cycled to `[SES] ATOC ok` / `RESULT PASS`, with the ATOC band verified
+byte-identical throughout — but shipping it means a customer who dumps the
+part sees another application's shell strings, and the customer's **first NVS
+write silently destroys bytes that look meaningful**. A SoM should leave
+provisioning with that window in its erased state (alp-sdk#1430).
+
+**The erased value on this MRAM is `0x00`, not `0xFF`.** That is measured, not
+assumed — from the running application's own flash parameters,
+`write_block_size=16 erase_value=0x00` (alp-sdk#1430). Anything that asks "is
+this window erased?" compares against `0x00`. Filling it with `0xFF` leaves it
+looking *programmed*, not erased.
+
+**The window.** Its authoritative definition is the `memory_map:` block in
+[`metadata/e1m_modules/E1M-AEN801.yaml`](../metadata/e1m_modules/E1M-AEN801.yaml)
+— today the `storage` region at `0x80560000`, 96 KiB, ending at `0x80578000`.
+Do not copy that address into a runbook: read it from the preset each time.
+The size moved once already (128 KiB → 96 + 32 KiB) when the SE-owned `atoc`
+band was carved out of it.
+
+> **DATA LOSS, and a brick risk one byte away.** The erase is irreversible —
+> there is no backup of what is in the window. And the region immediately
+> above it, `atoc` at `0x80578000`, is **SE-owned**: SETOOLS top-anchors the
+> signed ATOC at the top of the App MRAM window and grows it *downward*, so it
+> is live data with no fixed address. An overshoot past `0x80578000` corrupts
+> the ATOC and the board comes back as **`No ATOC`**, needing a full
+> re-provision over the SE-UART (§4). Confirm you are on an `E1M-AEN801` (E8)
+> before writing zeros to any MRAM address — the bench has three J-Link probes
+> and two of them share OEM serial `603000869`.
+
+**How.** Use the helper, which derives the window from the preset, refuses to
+run unless it ends exactly where `atoc` begins, checks the SW-DP IDR is the
+AEN E8's `0x4C013477` before writing anything, and byte-verifies the result:
+
+```sh
+scripts/bench/aen/erase-storage.sh --dry-run   # prints the window + script, touches nothing
+scripts/bench/aen/erase-storage.sh             # the real thing (destructive)
+```
+
+Note that a J-Link **`erase` does not clear MRAM** on this part, so the erase
+is a `loadbin` of a zero-filled file through the part-number device profile
+(`AE822FA0E5597LS0_M55_HE`) — the same mechanism Flow D uses to write MRAM.
+The zero file is also the `verifybin` reference, so "erased" is a byte-compare
+rather than a claim. The script does **not** reset or boot the board; when it
+exits 0, cold power-cycle by hand and re-run the §2 listener. The ATOC band
+was not touched, so the banner must still show your image booting — **not**
+`No ATOC`.
+
+If you would rather stay on the SETOOLS/SE-UART path (Flow A) instead of SWD,
+the equivalent is `app-write-mram -c <your-serial-device> -e "<base> <size>"`;
+that costs you the probe-identity gate the helper performs, so check the part
+with `tools-config` (§3) first.
+
+> **`[UNVERIFIED-ON-BENCH]`** — the *finding* is bench-measured (#1334), but
+> this erase step has **not** been run through `erase-storage.sh` on a module.
+> A first run still owes: the J-Link transcript with `verify successful`, and
+> the post-erase cold power-cycle showing the SE still boots the ATOC. Do not
+> mark a SoM as erased on the strength of this section alone.
+
 ## See also
 
 - [`bring-up-aen.md`](bring-up-aen.md) — per-subsystem bench runbook (rails,

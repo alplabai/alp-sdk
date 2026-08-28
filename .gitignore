@@ -174,3 +174,7 @@ oe-workdir
 # `python3 scripts/west_commands/alp_lock.py`; the release tarball still
 # ships one (.github/workflows/release.yml).
 /alp.lock
+
+# Cygwin/MSYS crash dumps -- the Bash tool drops these in the repo root and
+# they have been swept into three separate commits by `git add -A`.
+*.stackdump

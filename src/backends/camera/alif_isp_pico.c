@@ -12,10 +12,11 @@
  * drive AE / AWB / AF + the picture-tuning offsets through the same vtable.
  *
  * Mirrors src/backends/camera/v2n_n44_isp.c (the V2N N44 ISP backend): same
- * stub-vs-real split, but talks the UPSTREAM v4.4 video API (the v2n backend
- * still uses the pre-v4.4 endpoint-id helpers; this one uses the ported API:
+ * stub-vs-real split, and both now talk the UPSTREAM v4.4 video API --
  * video_get_caps(dev, &caps) with caps.type, video_set_format(dev, &fmt),
- * video_buffer_alloc(size, K_NO_WAIT), video_stream_start(dev, type)).
+ * video_buffer_alloc(size, K_NO_WAIT), video_stream_start(dev, type).  This
+ * file was the first to use it, which is why it reads as the reference; the
+ * v2n backend and the portable zephyr_video.c were ported to match.
  *
  * Why a separate backend rather than a Kconfig switch on the portable one:
  *   1. The ISP-Pico is an Alif Ensemble m2m video device (vsi,isp-pico, driven

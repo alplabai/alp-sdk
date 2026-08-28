@@ -125,3 +125,24 @@ def test_core_ownership_entry_matching_two_rows_is_a_hard_error(tmp_path, monkey
     spec = gpc.FAMILIES["v2n"]
     with pytest.raises(SystemExit, match="matches more than one row"):
         gpc._pads_for_family(spec)
+
+
+def test_core_on_a_gd32_owned_row_is_rejected_by_the_schema(tmp_path, monkeypatch):
+    """Each of the four `GD32_SPI.*` peripheral names appears TWICE in the
+    v2n table -- once on the CM33-driven RZ/V2N pad and once on the GD32's
+    own pad at the other end of the same link -- so an ownership entry keyed
+    to the wrong end still matches exactly one row and clears every
+    generator guard above.  The schema's `core` -> `owner: "renesas"` rule
+    is what catches it, so the generator refuses to WRITE the table rather
+    than emitting one that reads authoritative and is wrong about the GD32's
+    own pads (issue #1157, 2026-08-12 comment)."""
+    modules = _write_core_ownership(tmp_path, [
+        {"peripheral": "GD32_SPI.SCLK", "pad": "PA9", "core": "m33"},
+    ])
+    monkeypatch.setattr(gpc, "MODULES", modules)
+    spec = gpc.FAMILIES["v2n"]
+    pads = gpc._pads_for_family(spec)  # matches one row: no generator error
+    mislabelled = next(p for p in pads if p["silicon_pad"] == "PA9")
+    assert mislabelled["owner"] == "gd32" and mislabelled["core"] == "m33"
+    with pytest.raises(SystemExit, match="fails schema"):
+        gpc._validate(gpc._render("v2n", spec, pads), "v2n")

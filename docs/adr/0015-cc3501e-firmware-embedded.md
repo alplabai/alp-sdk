@@ -1,8 +1,11 @@
 # 0015. CC3501E bridge firmware is embedded in alp-sdk
 
-Status: Accepted — see **Amendment** below (2026-08-27): the Context
-table's gd32-bridge "prebuilt blob" precedent names a path that has never
-existed.  The decision below is unchanged.
+Status: **Superseded by [0031](0031-bridge-firmware-lives-in-its-own-repositories.md)**
+(2026-08-28) — both bridge firmwares now live in their own repositories.
+The single-sourced wire contract this ADR existed to protect is KEPT by
+0031, not discarded: neither firmware mirrors the protocol header.  See
+also the **Amendment** below (2026-08-27): the Context table's
+gd32-bridge "prebuilt blob" precedent names a path that has never existed.
 Date: 2026-06-13
 
 Supersedes the "separate `alplabai/cc3501e-firmware` repo" stance

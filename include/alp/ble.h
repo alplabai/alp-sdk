@@ -304,7 +304,19 @@ alp_status_t alp_ble_disconnect(alp_ble_conn_t *conn);
  * @param[in]  out_cap     Buffer capacity in bytes.
  * @param[out] out_len     Receives the byte count read.  May be NULL.
  * @param[in]  timeout_ms  Max wait.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT / ALP_ERR_IO.
+ *
+ * @note A timeout does NOT cancel the ATT procedure -- Zephyr offers no way to
+ *       do so.  The procedure keeps a slot until the peer answers or the link
+ *       drops, so @ref ALP_ERR_TIMEOUT means "not answered in time", not
+ *       "abandoned".  A caller that must bound resource use should treat a
+ *       timeout as a reason to close the connection, not to retry immediately.
+ *       Passing @p timeout_ms of 0 is the pathological case: every such call
+ *       consumes a slot until its peer replies.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT /
+ *         ALP_ERR_IO / ALP_ERR_BUSY (every concurrent-procedure slot is held by
+ *         a still-outstanding read or write, including ones that already timed
+ *         out; retry once one completes).
  */
 alp_status_t alp_ble_gatt_read(alp_ble_conn_t       *conn,
                                alp_ble_attr_handle_t handle,
@@ -321,7 +333,18 @@ alp_status_t alp_ble_gatt_read(alp_ble_conn_t       *conn,
  * @param[in] data        Source bytes.
  * @param[in] len         Length, ≤ ATT_MTU − 3.
  * @param[in] timeout_ms  Max wait.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT / ALP_ERR_IO.
+ *
+ * @note Same non-cancellable timeout semantics as @ref alp_ble_gatt_read -- see
+ *       its note.  In addition, the BT host may re-read @p data after this call
+ *       returns: a long write (offset set, or @p len above ATT_MTU-1) is sent as
+ *       a prepare-write sequence, and an encryption-change retry re-encodes the
+ *       request even for a short write.  @p data must therefore stay valid until
+ *       the procedure completes, which a timeout does not guarantee.
+ *
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT /
+ *         ALP_ERR_IO / ALP_ERR_BUSY (every concurrent-procedure slot is held by
+ *         a still-outstanding read or write, including ones that already timed
+ *         out; retry once one completes).
  */
 alp_status_t alp_ble_gatt_write(alp_ble_conn_t       *conn,
                                 alp_ble_attr_handle_t handle,

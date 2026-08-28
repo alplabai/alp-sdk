@@ -45,10 +45,17 @@ extern "C" {
 /**
  * @brief Initialise the DEEPX rail-bringup auxiliary.
  *
- * Configures P64 + P65 from devicetree, attaches the rising-edge
- * IRQ on P65, runs a `da9292_v2n_base_init` against the supervisor's
- * BRD_I²C handle so the DA9292 driver context is ready to receive
- * the eventual rail-up sequence.
+ * Configures P64 + P65 from devicetree, runs a `da9292_v2n_base_init`
+ * against the supervisor's BRD_I²C handle so the DA9292 driver
+ * context is ready to receive the eventual rail-up sequence, and only
+ * then attaches the rising-edge IRQ on P65 -- P65 is a one-shot edge
+ * from the A55, so nothing may be armed before the handler it feeds
+ * is able to service it.
+ *
+ * Immediately after arming, P65 is level-sampled once; if the A55 is
+ * already holding it high (a CM33 restart under a running A55), the
+ * rail-up work is submitted from here rather than waiting for an edge
+ * that has already been and gone.
  *
  * Idempotent across reinit (multiple SYS_INIT hooks on the same
  * build are not expected, but defensive coding here keeps the

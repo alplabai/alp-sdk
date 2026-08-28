@@ -3182,6 +3182,10 @@
       "script": "scripts/check_agents_md_generators.py"
     },
     {
+      "purpose": "Cross-core pad-claim gate for the AMP RZ/V2N SoM (issue #1142).",
+      "script": "scripts/check_amp_pad_claims.py"
+    },
+    {
       "purpose": "Reject a raw `apt-get update`/`apt-get install` in a workflow step.",
       "script": "scripts/check_apt_bounded.py"
     },
