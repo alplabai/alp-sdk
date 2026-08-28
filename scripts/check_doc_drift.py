@@ -126,6 +126,16 @@ _ALLOWLIST: set[str] = {
     # Real identifier; *.dtsi is deliberately outside the harvested surfaces
     # (harvest scans meta-alp-sdk *.conf/*.bb/*.bbappend/*.inc only).
     "ALP_CA55_1P8GHZ",
+    # U-Boot Kconfig string selecting the board dtb basename for
+    # CONFIG_BOOTCOMMAND (#1252), named by bring-up-drpai-v2n.md's deploy
+    # section.  Real identifier, but it is DEFINED in
+    # meta-alp-sdk/recipes-bsp/u-boot/u-boot/0002-rzv2n-dev-ALP-E1M-production-boot.patch
+    # and set in fdtfile-v2m.cfg -- a *.patch and a *.cfg, neither of which
+    # is a harvested surface (meta-alp-sdk harvest scans *.conf/*.bb/
+    # *.bbappend/*.inc only).  The one .bbappend that does mention it spells
+    # it CONFIG_-prefixed, which _BARE_SYMBOL_RE deliberately does not strip
+    # during harvest.  Same shape as ALP_CA55_1P8GHZ above.
+    "ALP_E1M_FDTFILE",
     # docs/porting-new-som.md's worked example walks through porting a
     # HYPOTHETICAL 7th AEN-family SKU, E1M-AEN901 (see its Sec 3) -- these
     # Zephyr board targets are deliberately illustrative and never land in
@@ -149,11 +159,6 @@ _ALLOWLIST: set[str] = {
     # OLD per-file config looked like before board.yaml replaced it.
     "ALP_SDK_USE_LWRB",
     "ALP_SDK_USE_NANOPB",
-    # docs/bring-up-drpai-v2n.md names the per-MACHINE Kconfig strings an
-    # independent, still-unmerged fix on `feat/1145-drpai-v2n-bringup` uses
-    # (see #1175) -- real on that branch, not yet on this one.
-    "ALP_FDT_FILE",
-    "ALP_SD_ROOT",
     # docs/board-config-features.md's PSA-attestation section names the
     # exact Kconfig line and driver-path comment
     # scripts/alp_orchestrate/secure.py emits for `attestation_root:

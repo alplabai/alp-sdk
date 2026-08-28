@@ -8,15 +8,32 @@
  * Trust M's wire protocol is multi-layer: an I2C data-link layer
  * with PRESET / GET frames, an info-pack layer that carries
  * sequence numbers + CRC16, then APDUs at the top.  Implementing
- * the full stack here would duplicate Infineon's Host Library
- * (~5 KLOC).  The right architectural answer is to vendor the
- * upstream library as a Zephyr module + register its PSA driver
- * with MbedTLS so <alp/security.h>'s wrapper picks up hardware
- * acceleration transparently.  That work tracks as v0.3.x.
+ * the full stack here would duplicate Infineon's Host Library, so
+ * this driver deliberately does not.
+ *
+ * That library is github.com/Infineon/optiga-trust-m, MIT, and it
+ * does ship a Zephyr PAL (extras/pal/zephyr/).  What it does NOT
+ * ship is a Zephyr *module*: at release-v5.8.1 the tree has no
+ * zephyr/module.yml and no library-level CMakeLists, so a plain
+ * west project pin would be inert for exactly the reason
+ * vendors/u8g2/README.md describes.  Consuming it therefore means
+ * vendored source (src/ + include/ are 19,777 lines) plus module
+ * glue alp-sdk writes itself -- not a one-line manifest entry.
+ * Two hardware facts gate that work as much as the vendoring does:
+ * the PAL resolves its bus through DT_ALIAS(optiga_i2c), which no
+ * alp-sdk board declares, and its optional reset support wants
+ * DT_ALIAS(optiga_reset) as a SoC GPIO -- but on V2N/V2M SE_RST is
+ * not wired to the SoC at all.  It hangs off the GD32 supervisor
+ * (PC13), reachable only via gd32g553_se_reset().  See #1164.
  *
  * For v0.3 we ship:
  *   - I2C address probe via a 4-byte read of the I2C_STATE register
- *     at 0x82.
+ *     at 0x82.  The register numbers below and that 4-byte length
+ *     match upstream's own physical layer
+ *     (src/comms/ifx_i2c/ifx_i2c_physical_layer.c: PL_REG_DATA 0x80,
+ *     PL_REG_DATA_REG_LEN 0x81, PL_REG_I2C_STATE 0x82,
+ *     PL_REG_LEN_I2C_STATE 4U), so the probe stays correct when the
+ *     real transport lands on top of it.
  *   - Argument validation for the future product-info and raw-APDU
  *     entry points.
  *

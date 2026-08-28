@@ -327,11 +327,18 @@ already, via the `CONFIG_BOOTCOMMAND` override in
   `mmcblk0` and microSD is always `mmcblk1`; the vendor env's
   `alp_root=/dev/mmcblk2p2` names a device that cannot exist.
 
-> **Neither fix has booted a board.** `dev`'s version is code-complete and its
-> own CHANGELOG says so; a second, independent implementation exists unmerged
-> on `feat/1145-drpai-v2n-bringup` using per-MACHINE `CONFIG_ALP_FDT_FILE` /
-> `CONFIG_ALP_SD_ROOT` Kconfig strings, which would also close the V2M gap
-> `dev`'s hardcoded filename leaves open. See #1175 before relying on either.
+> **Neither fix has booted a board.** #1175 is closed and `dev` carries the fix
+> (#1182, with the eMMC half completed in #1186), but it was settled by
+> inspection of the patch, not by a boot. The second, independent
+> implementation once carried on `feat/1145-drpai-v2n-bringup` -- per-MACHINE
+> Kconfig strings for the dtb filename and the SD root -- was deliberately
+> **not** landed: two mechanisms both setting the boot dtb is worse than
+> either (reasons recorded on #1175 and #1238). Its one advantage, the V2M
+> gap, has since been closed in-tree by a different mechanism --
+> `CONFIG_ALP_E1M_FDTFILE`, defaulting to the V2N basename and overridden per
+> MACHINE by `meta-alp-sdk/recipes-bsp/u-boot/u-boot/fdtfile-v2m.cfg` (#1252,
+> itself bench-gated). Treat that branch as recoverable history, not a live
+> option.
 
 > **Operational trap.** The manual FIP flow has no `merge_config.sh` step, so it
 > builds from the Kconfig defaults — the vendor values — and will boot the

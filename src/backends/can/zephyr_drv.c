@@ -205,12 +205,41 @@ static alp_status_t
 z_send(alp_can_backend_state_t *st, const alp_can_frame_t *frame, uint32_t timeout_ms)
 {
 	const struct device *dev = (const struct device *)st->dev;
-	struct can_frame     zf  = {
-		.id    = frame->id,
-		.dlc   = can_bytes_to_dlc(frame->payload_len),
-		.flags = (frame->ext_id ? CAN_FRAME_IDE : 0) | (frame->rtr ? CAN_FRAME_RTR : 0) |
-		         (frame->fd ? CAN_FRAME_FDF : 0) | (frame->brs ? CAN_FRAME_BRS : 0),
-	};
+	struct can_frame     zf  = { 0 };
+
+	/* Zephyr sizes can_frame.data[] as CAN_MAX_DLEN -- 8 without
+	 * CONFIG_CAN_FD_MODE, 64 with it.  src/can_dispatch.c can only
+	 * bound payload_len by the PORTABLE frame's own 64-byte maximum;
+	 * it has no view of the Kconfig this backend was compiled
+	 * against, so an fd-flagged 64-byte frame reaches here intact and
+	 * on a classic build the memcpy below would run 56 bytes past zf
+	 * into z_send's own stack frame.  Both lines are therefore drawn
+	 * here, before a single byte is copied -- the same two checks
+	 * y_send() makes in src/backends/can/yocto_drv.c.
+	 *
+	 * An FD frame needs BOTH a build that can carry one and a handle
+	 * opened for it: a controller left in CAN_MODE_NORMAL cannot put
+	 * FDF on the wire, and z_open() falls through to normal mode when
+	 * ALP_CAN_MODE_FD is asked for with bitrate_data_hz == 0, so the
+	 * caller's config snapshot is the only honest record of what this
+	 * bus is actually running.  Bound the copy by sizeof zf.data
+	 * rather than by CAN_MAX_DLEN so the guard tracks the destination
+	 * object itself, matching _rx_trampoline() above. */
+	if (frame->fd) {
+		const struct alp_can *h = CONTAINER_OF(st, struct alp_can, state);
+		if (!IS_ENABLED(CONFIG_CAN_FD_MODE) || h->cfg.mode != ALP_CAN_MODE_FD) {
+			return ALP_ERR_NOSUPPORT;
+		}
+	}
+	if ((size_t)frame->payload_len >
+	    (frame->fd ? sizeof zf.data : (size_t)ALP_CAN_MAX_PAYLOAD_BYTES_CLASSIC)) {
+		return ALP_ERR_INVAL;
+	}
+
+	zf.id    = frame->id;
+	zf.dlc   = can_bytes_to_dlc(frame->payload_len);
+	zf.flags = (frame->ext_id ? CAN_FRAME_IDE : 0) | (frame->rtr ? CAN_FRAME_RTR : 0) |
+	           (frame->fd ? CAN_FRAME_FDF : 0) | (frame->brs ? CAN_FRAME_BRS : 0);
 	memcpy(zf.data, frame->data, frame->payload_len);
 	return _errno_to_alp(can_send(dev, &zf, K_MSEC(timeout_ms), NULL, NULL));
 }

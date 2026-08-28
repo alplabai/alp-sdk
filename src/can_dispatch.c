@@ -162,6 +162,24 @@ alp_status_t alp_can_send(alp_can_t *can, const alp_can_frame_t *frame, uint32_t
 		rc = ALP_ERR_INVAL;
 	} else if (!frame->fd && frame->payload_len > ALP_CAN_MAX_PAYLOAD_BYTES_CLASSIC) {
 		rc = ALP_ERR_INVAL;
+	} else if (frame->fd && can->cfg.mode != ALP_CAN_MODE_FD) {
+		/* An FD-flagged frame on a handle opened CLASSIC.  The two length
+		 * arms above cannot catch this: 64 is not > ALP_CAN_MAX_PAYLOAD_BYTES_FD,
+		 * and the classic arm is skipped precisely because frame->fd is set,
+		 * so a {fd = true, payload_len = 64} frame passed BOTH and reached the
+		 * backend.  There it is a real overflow rather than a wrong answer --
+		 * Zephyr sizes struct can_frame.data at CAN_MAX_DLEN, which is 8
+		 * without CONFIG_CAN_FD_MODE, and src/backends/can/zephyr_drv.c copies
+		 * payload_len bytes into an on-stack instance of it.
+		 *
+		 * Refused here, once, rather than in each backend: the portable
+		 * contract is that a handle carries the mode it was opened with, so
+		 * a frame contradicting that mode is invalid before any backend is
+		 * consulted.  zephyr_drv.c keeps its own guard as well -- it is the
+		 * one that must survive a mis-configured open (mode = FD accepted at
+		 * open time while the controller fell back to classic), which this
+		 * check cannot see. */
+		rc = ALP_ERR_NOSUPPORT;
 	} else if (can->state.ops->send == NULL) {
 		rc = ALP_ERR_NOSUPPORT;
 	} else {
