@@ -712,6 +712,22 @@ def test_scaffold_readme_rewrites_sibling_example_links_too():
             "/examples/peripheral-io/i2c-scanner") in readme
 
 
+def test_scaffold_readme_cold_chain_models_link_survives_scaffolding():
+    """Issues #1688/#1749: cold-chain-monitor's README deliberately links
+    `../cold-chain-monitor/models/README.md` -- climbing out of the
+    example dir and back in -- because `_RELATIVE_LINK_RE` only matches
+    `../`-prefixed links and `models/README.md` is a CHILD of the example
+    dir, not a sibling. A future edit that "tidies" the link to the more
+    natural `](models/README.md)` would stop matching the rewriter
+    entirely and ship a dangling relative link in every scaffold; assert
+    on the EMITTED output, not the source text, so this catches that."""
+    envelope = dict(alp_template.render_to_envelope("edge-ai", "E1M-AEN801"))
+    readme = envelope["README.md"]
+    ref = alp_template._docs_ref(alp_template.REPO)
+    assert (f"https://github.com/alplabai/alp-sdk/blob/{ref}"
+            "/examples/ai/cold-chain-monitor/models/README.md") in readme
+
+
 def test_scaffold_readme_extra_zephyr_modules_uses_alp_sdk_root_not_pwd():
     """issue #864 Fable-review MAJOR B: `$(pwd)` only equals the alp-sdk
     checkout root when building IN-TREE; a copied-out scaffold's cwd is
