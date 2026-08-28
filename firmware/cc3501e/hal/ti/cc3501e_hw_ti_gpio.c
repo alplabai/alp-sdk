@@ -71,11 +71,12 @@ static bool gpio_pad_ok(uint8_t pad)
 	return (pad <= GPIO_pinUpperBound) && !gpio_pad_reserved(pad);
 }
 
-/* GPIO interrupt handler.  Async EVT_GPIO_INTERRUPT delivery to the host needs a
- * slave->master attention path: the rev-1 host-IRQ wire (CC35 GPIO17 -> Alif P2_6)
- * is currently dedicated to bridge READY/flow-control, not yet multiplexed for
- * async GPIO-event delivery, so this only clears the pending edge for now; the HW
- * arming (cc3501e_hw_gpio_set_interrupt) itself is real. */
+/* GPIO interrupt handler.  This only clears the pending edge -- the host never
+ * learns the pad moved.  That is a MISSING PRODUCER, not missing hardware: #130 /
+ * alp-sdk#1721 multiplexed the slave->master attention pulse onto the rev-1 READY
+ * wire (CC35 GPIO17 -> Alif P2_6), so delivering EVT_GPIO_INTERRUPT is an
+ * event_ring_push() call here (which pulses attention on its own).  The HW arming
+ * in cc3501e_hw_gpio_set_interrupt() is already real. */
 static void gpio_irq_cb(uint_least8_t index)
 {
 	GPIO_clearInt(index);

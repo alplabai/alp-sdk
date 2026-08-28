@@ -40,8 +40,14 @@ Also in this release, relative to 0.3.0:
   image splice (#1610, #1655).
 - `PROMOTE` is now the sole OTA commit, confirmed from flash (#1123, #1714).
 - Async events fan out to every subscriber instead of a single callback that
-  one consumer could steal (#1724), and get an attention edge on the READY
-  wire (#130, #1721).
+  one consumer could steal (#1724). The slave->master attention edge on the
+  READY wire also landed (#130, #1721) -- but the firmware half is a
+  **build-time opt-in** (`build_ti.ps1 -AttnPulse`, `-DCC3501E_ATTN_PULSE=1`),
+  default OFF because the wire is a rev-1 bodge absent on the stock EVK, and
+  `package_cc3501e_prod.ps1` does not pass it. Whether THIS artifact carries
+  the pulse is unverified; assume it does not until an edge is observed on
+  silicon, in which case a host that arms attention falls back to its timer
+  poll. The host-side fan-out is unconditional either way.
 - `WIFI_AP_START` has a real success path (#1696, #1709); a failed connect no
   longer leaves a stale association, and RSSI is validated (#1703).
 - The Wi-Fi radio is driven from the power presets, on the task, with the

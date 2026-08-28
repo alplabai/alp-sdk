@@ -56,8 +56,10 @@
  * has not re-armed yet.  The Alif-side driver (chips/cc3501e/cc3501e.c)
  * implements the matching sequence + reads the status byte; the TI SPI-slave
  * backend (hal/ti/transport_hw_ti_spi.c) implements the slave side.  Both are
- * reconciled to this header (the spec) and bench-validated on AEN801.  See
- * DESIGN.md for the remaining HOST_IRQ / async-event hardening.
+ * reconciled to this header (the spec) and bench-validated on AEN801.
+ * Async events ride an attention edge on that same READY wire (#130,
+ * alp-sdk#1721); see DESIGN.md for its two limits and for the dedicated
+ * HOST_IRQ pad that is still a future board rev.
  */
 
 /* Maximum reply DATA bytes a handler may emit (after the status byte).
