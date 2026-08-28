@@ -22,9 +22,17 @@
  * Stub vs real split (commit body documents the boundary):
  *   - The sensor pipeline (open / start / stop / capture / release /
  *     close) routes through Zephyr's video API verbatim -- those
- *     functions are NOT stubs.  When the V2N N44 SoC port wires
- *     its MIPI CSI-2 IP up to drivers/video/, these calls go to
- *     real silicon for free.
+ *     functions are NOT stubs.  They resolve a device ONLY through
+ *     the alp-camera0..3 DT aliases below, so they reach silicon
+ *     exactly when a V2N board or overlay points one of those
+ *     aliases at a real drivers/video/ device -- and not one step
+ *     sooner.  No V2N board or overlay in this repo defines one
+ *     today, so isp_open() below fails its _devs[] NULL check and
+ *     alp_camera_open() on V2N hands back NULL with last_error =
+ *     ALP_ERR_NOT_READY.  An earlier revision of this comment said
+ *     the calls would go to real silicon "for free" once the SoC
+ *     port landed; that undersold the gap by five separate missing
+ *     facts -- see the DATA-GATED block below.
  *   - configure_isp() validates the input, latches the config into
  *     backend state, and returns ALP_OK -- the actual register
  *     poke (toggling the AE / AWB / AF enable bits in the N44 ISP
@@ -38,9 +46,53 @@
  *     routes through this backend's latched state today and grows
  *     real MMIO writes when the N44 port lands.
  *
- * Sensor and ISP register-map work here is blocked on the Renesas RZ/V2N
- * ISP register map (see the "actual register poke" TBD above); no open
- * tracking issue exists yet for that follow-up.
+ * DATA-GATED -- what an alp-cameraN alias on V2N Zephyr still needs, and
+ * why none of it can be written from this tree.  Tracked by alp-sdk #1149;
+ * every claim below was checked against the pinned Zephyr v4.4.1 and the
+ * hal_renesas revision that pin imports, not recalled:
+ *   1. A CSI-2 receiver DRIVER.  Zephyr v4.4.1's drivers/video/ ships no
+ *      Renesas RZ/V receiver at all -- video_renesas_ra_ceu.c is the
+ *      RA-family parallel CEU, and dts/bindings/video/ carries CSI-2
+ *      receiver bindings only for NXP (nxp,mipi-csi2rx.yaml).  There is
+ *      no upstream binding to point a node at, so ADR 0017's
+ *      consume-upstream rung has nothing to consume yet.
+ *   2. Its reg base.  dts/arm/renesas/rz/rzv/r9a09g056.dtsi declares no
+ *      csi2 / cru / isp node; hal_renesas's rzv2n bsp_slave_address.h
+ *      carries no CRU entry; and metadata/socs/renesas/rzv2n/n44.json's
+ *      peripheral_instances block covers i2c / uart / gpt / gtm only, so
+ *      the board generator has no base to emit either.  Source for the
+ *      real value: the RZ/V2N Hardware User's Manual r01uh1003ej, CRU +
+ *      MIPI CSI-2 register chapters (the Renesas BSP reference dts also
+ *      carries it -- neither ships in this repo).
+ *   3. Its CM33 interrupt, which is NOT a datasheet constant here.
+ *      hal_renesas's rzv2n bsp_irq_id.h lists CRU0_CSI2_LINK_INT_IRQSELn
+ *      = 494 and CRU1_CSI2_LINK_INT_IRQSELn = 500 in IRQSELn_Type -- the
+ *      IRQSEL multiplexer's SELECTOR numbers.  IRQn_Type, the enum that
+ *      actually feeds a DT `interrupts` cell, holds no CRU vector at all;
+ *      it ends at SEL126_IRQn = 479.  So the cell is a free choice of one
+ *      SELn vector PLUS an IRQSEL programming step that no code in this
+ *      tree performs.  Contrast the mbox1 node in
+ *      zephyr/boards/alp/e1m_v2n101_m33_sm/, whose `interrupts = <293 2>`
+ *      came straight out of IRQn_Type as MHU_MSG5_NS_IRQn.
+ *   4. The sensor part.  A CSI-2 sensor node needs a real compatible, CCI
+ *      address, lane count and link frequency.  The E1M-X carrier exposes
+ *      bare CAM0 / CAM1 connectors: metadata/boards/e1m-x-evk.yaml sets
+ *      `ov5640: false` and names no sensor anywhere.  The part is a
+ *      product decision, not a value to be looked up.
+ *   5. The carrier routing.  Which of the E1M-X edge connector's four
+ *      CSI instances (metadata/e1m/pinout-x-v1.json, CSI0..CSI3, ten pins
+ *      each) lands on which of this SoC's two CRUs, and which of the
+ *      GD32-owned CAM_EN_LDO0..3 rails
+ *      (metadata/e1m_modules/v2n/gd32-io-mcu-map.csv: PC3 / PE8 / PE7 /
+ *      PE10) powers which connector.  metadata/pinmux/v2n.yaml carries no
+ *      CSI lane row at all -- these are carrier-schematic facts, not
+ *      public metadata.
+ *
+ * Guessing any of 2-5 produces a devicetree that builds clean and binds to
+ * nothing, which then reads as reviewed.  Leave it unwritten.
+ *
+ * The configure_isp register poke above is blocked on the same manual's
+ * ISP chapter, and rides the same issue.
  */
 
 #include <errno.h>

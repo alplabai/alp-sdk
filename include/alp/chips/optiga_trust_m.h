@@ -15,8 +15,15 @@
  *
  * Hardware security IC providing ECC-256/384/521, RSA-1k/2k,
  * AES-128/192/256, SHA-256, TRNG, and 10 KB user NVM with secure
- * key/object storage.  On the E1M-AEN module the chip sits on
- * Alif's LPI2C bus alongside the TMP112 + RV-3028-C7 RTC.
+ * key/object storage.
+ *
+ * Populated on E1M-X V2N / V2M at 0x30 on BRD_I2C, with the RZ/V2N as
+ * bus master (`metadata/e1m_modules/E1M-V2N101.yaml`) -- that is the
+ * target this driver is written for.  E1M-AEN carries the same
+ * footprint but is not a usable target today: the part is DNI on the
+ * current bench batch, and AEN's BRD_I2C is LPI2C0, a bus the Alif
+ * silicon can only be a *slave* on, so the M55 cannot master it to
+ * reach the chip at all (see `docs/bring-up-aen.md` section 5.1).
  *
  * Default I2C address: **0x30** (7-bit, configurable via
  * provisioning).
@@ -30,11 +37,13 @@
  *
  * The full APDU command set -- key generation, TLS handshake handler,
  * ECDSA, AES wrapping, SHA, secure NVM read/write -- lands only after
- * Infineon's **OPTIGA Trust M Host Library** is integrated as a Zephyr
- * module.  At that point the cleanest architectural fit is registering
- * OPTIGA's PSA driver with `<alp/security.h>`'s MbedTLS PSA wrapper, so
- * apps that call alp_aead_open / etc. pick up hardware acceleration
- * transparently.
+ * Infineon's **OPTIGA Trust M Host Library** is integrated.  Upstream
+ * publishes no Zephyr module for it, so that integration is a vendoring
+ * decision plus in-tree build glue rather than a manifest pin; the
+ * evidence and the open questions are recorded on issue #1164.  Once it
+ * is in, the cleanest architectural fit is registering OPTIGA's PSA
+ * driver with `<alp/security.h>`'s MbedTLS PSA wrapper, so apps that
+ * call alp_aead_open / etc. pick up hardware acceleration transparently.
  */
 
 #ifndef ALP_CHIPS_OPTIGA_TRUST_M_H
