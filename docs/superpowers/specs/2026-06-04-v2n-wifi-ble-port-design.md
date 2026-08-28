@@ -131,7 +131,7 @@ them. DT patches stay in the established carrier bbappend series.
 
 ## 7. alp-sdk changes
 
-- `firmware/gd32-bridge/`: pad-map bits 18/19 + boot power-on sequence +
+- `gd32-bridge-firmware:`: pad-map bits 18/19 + boot power-on sequence +
   `PROTOCOL_VERSION` minor bump (via the protocol-extension workflow,
   HIL-validated before merge). Done on a separate worktree branch; merged
   against the concurrent LCD-session bridge work when that lands.

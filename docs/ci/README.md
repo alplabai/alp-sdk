@@ -12,7 +12,7 @@ reference.
 
 ## Workflows shipped
 
-`.github/workflows/` carries **25** workflow files as of this revision
+`.github/workflows/` carries **23** workflow files as of this revision
 (counted via `ls .github/workflows/*.yml .github/workflows/*.yaml
 2>/dev/null | wc -l`; recount before trusting this number, it moves
 every time a workflow is added or retired).  The table below is a

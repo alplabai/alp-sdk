@@ -82,7 +82,7 @@ ADR (see ADR 0020's own Amendment):
   (`docs/bring-up-v2n.md`) or bridge recovery
   (`docs/tutorials/07-recovering-a-bricked-bridge.md`); building the
   **CC3501E bridge firmware's silicon-free stub target**
-  (`firmware/cc3501e/README.md`) -- its *production* image builds with TI
+  (`cc3501e-bridge-firmware:README.md`) -- its *production* image builds with TI
   `ticlang`, not this toolchain; and hand-writing **bare-metal firmware
   for a real M-class core** (`ALP_OS=baremetal`, no Zephyr) -- the SDK
   ships no cross-compiled bare-metal build recipe today, so this path is

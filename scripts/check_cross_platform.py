@@ -86,7 +86,7 @@ Scope:
   Walks docs/, scripts/, examples/, tests/ -- the customer-facing
   + contributor-facing surfaces.  Skips build/, .git/, vendors/,
   node_modules/, .claude/, build outputs, and intentionally-Linux-
-  side helper dirs (e.g. firmware/gd32-bridge/, meta-alp-sdk/ --
+  side helper dirs (e.g. meta-alp-sdk/ --
   the Linux-only Yocto layer).
 
   Markdown files (.md) get all 5 pattern checks.
@@ -145,7 +145,7 @@ REPO = Path(__file__).resolve().parent.parent
 
 # Directories we never scan.  vendors/ is upstream code (Apache /
 # BSD / MIT mix, not ours to police); build/ is generated; .claude/
-# is agent worktrees; firmware/gd32-bridge/ and meta-alp-sdk/ are
+# is agent worktrees; meta-alp-sdk/ is
 # intentionally Linux-side helpers per the ADR 0012 §8 carve-out;
 # docs/superpowers/specs/ carries pre-cleanup design docs that
 # intentionally show the "before" state; docs/superpowers/plans/
@@ -163,7 +163,6 @@ DEFAULT_EXCLUDES: tuple[str, ...] = (
     "vendors",
     "docs/superpowers/specs",
     "docs/superpowers/plans",
-    "firmware/gd32-bridge",
     "meta-alp-sdk",
 )
 

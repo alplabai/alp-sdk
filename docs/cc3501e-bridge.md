@@ -97,7 +97,7 @@ comes from the customer `board.yaml`; for a hand-built firmware it's the
 `CC3501E_CONTROL_TRANSPORT` CMake option (default `spi`).  Either way the
 firmware brings up exactly one control transport, and both feed the same
 command dispatcher — see
-[`firmware/cc3501e/`](../firmware/cc3501e/) (`transport_spi.c` /
+[`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware) (`transport_spi.c` /
 `transport_sdio.c`).
 
 ### Current rev: hardware-CS SPI (SS0 + per-phase READY)
@@ -153,7 +153,7 @@ budgets above: the Alif is SPI master, so the CC3501E cannot initiate, and
 a host-IRQ is the standard SPI-coprocessor way to deliver those events
 without polling the bus.  It is an optional optimization on top of the
 working HW-CS transport, not a prerequisite for it.  See
-`firmware/cc3501e/DESIGN.md` "Next-rev hardening".
+`cc3501e-bridge-firmware:DESIGN.md` "Next-rev hardening".
 
 #### Bench-validated: HW-CS bridge survives radio ops + concurrent Wi-Fi/BLE (2026-06-24)
 
@@ -273,7 +273,7 @@ populates an **8 MB external xSPI flash** on that bus carrying:
 
 - BL2 (TI-signed 2nd-stage bootloader)
 - Application image (SimpleLink + Wi-Fi stack + BLE stack +
-  the embedded `firmware/cc3501e/` SPI/SDIO-slave parser)
+  the embedded `cc3501e-bridge-firmware:` SPI/SDIO-slave parser)
 - Filesystem region (TI SimpleLink file system for certs,
   service-pack, profile data)
 
@@ -286,8 +286,8 @@ not through any strap-pin recovery mode (there isn't one).
 ## Where the firmware lives (embedded in alp-sdk)
 
 The firmware that runs on the CC3501E lives **in this repo** at
-[`firmware/cc3501e/`](../firmware/cc3501e/) -- exactly as the
-[`gd32-bridge`](../firmware/gd32-bridge/) firmware does.  Both are the
+[`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware) -- exactly as the
+[`gd32-bridge`](https://github.com/alplabai/gd32-bridge-firmware) firmware does.  Both are the
 same class of artifact (an on-SoM helper-MCU bridge: custom binary
 protocol, host driver in alp-sdk, prebuilt blob shipped in alp-sdk, its
 own toolchain + version axis), so they are maintained the same way.  The
@@ -297,7 +297,7 @@ repo" plan was dropped -- is [ADR 0015](adr/0015-cc3501e-firmware-embedded.md).
 | Side | Lives in | Owns |
 |------|----------|------|
 | Host | `chips/cc3501e/` + `include/alp/protocol/cc3501e.h` | Alif-side SPI/SDIO client; `<alp/iot.h>` / `<alp/ble.h>` route-through. |
-| Device | `firmware/cc3501e/` | Firmware on the CC3501E: SPI/SDIO-slave parser + TI SimpleLink Wi-Fi/AP + BLE 5.4 + GPIO proxy + camera-enable drivers. |
+| Device | `cc3501e-bridge-firmware:` | Firmware on the CC3501E: SPI/SDIO-slave parser + TI SimpleLink Wi-Fi/AP + BLE 5.4 + GPIO proxy + camera-enable drivers. |
 
 The firmware `#include`s the wire-protocol header **directly** (no
 mirror), so a protocol change moves both sides + the wire-vector tests
@@ -320,20 +320,20 @@ bricked device, using Alp Lab-supplied binaries — it is not a routine
 customer flash target.  The OTA channel is a separate fact and does not
 itself make a helper un-flashable (the GD32 bridge has both a channel
 and a recovery-only flash path).  The version-pinned prebuilt blob at
-`firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin` is that OTA payload's
+`cc3501e-bridge-firmware:prebuilt/cc3501e-vX.Y.Z.bin` is that OTA payload's
 provenance and also the binary a recovery flash uses.
 
 Rebuilding or customizing the firmware is **optional and open** — the
 bridge firmware source is Alp's (public, like the GD32 bridge), in-tree
-at [`firmware/cc3501e/`](../firmware/cc3501e/), built on TI's
+at [`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware), built on TI's
 **BSD-3-licensed** SimpleLink Wi-Fi SDK.  The in-tree firmware:
 
 1. Vendors TI's **BSD-3-licensed** SimpleLink CC33xx SDK as an optional
-   git submodule under `firmware/cc3501e/vendor/simplelink-cc33xx/` —
+   git submodule under `cc3501e-bridge-firmware:vendor/simplelink-cc33xx/` —
    only the bench `ti` build pulls it; not recursed by default.  Same
    shape as the GD32 GigaDevice library.
 2. Builds with TI Code Composer Studio or the open `ticlang` toolchain
-   (`firmware/cc3501e/toolchain/ticlang.cmake`).
+   (`cc3501e-bridge-firmware:toolchain/ticlang.cmake`).
 3. `#include`s this repo's `include/alp/protocol/cc3501e.h` **directly**
    — no mirrored copy, so the two sides cannot drift.
 4. Wires commands into TI's SimpleLink Wi-Fi APIs (`sl_*`) and the BLE
@@ -341,7 +341,7 @@ at [`firmware/cc3501e/`](../firmware/cc3501e/), built on TI's
 5. Drives `GPIO_0`, `GPIO_1` (camera enables) and the GPIO-proxy pads
    (`GPIO_2`, `GPIO_13..30` per `from-cc3501e.tsv`) — v0.4.
 6. Tags releases `vX.Y.Z`; the signed binary lands at
-   `firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin`, the payload Alp ships
+   `cc3501e-bridge-firmware:prebuilt/cc3501e-vX.Y.Z.bin`, the payload Alp ships
    as the OTA update over the bridge SPI — not a customer rebuild-and-flash
    target.
 7. `flash.py` is Alp's internal release/bench tool that produces and
@@ -349,8 +349,8 @@ at [`firmware/cc3501e/`](../firmware/cc3501e/), built on TI's
    customer-facing utility and lives in `alp-sdk-internal`, not this
    public tree.
 
-See [`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) for the
-build + tree layout and `firmware/cc3501e/DESIGN.md`
+See [`cc3501e-bridge-firmware:README.md`](https://github.com/alplabai/cc3501e-bridge-firmware#readme) for the
+build + tree layout and `cc3501e-bridge-firmware:DESIGN.md`
 for the v0.1 scope + wire-reply contract.
 
 ## Versioning
@@ -360,8 +360,8 @@ first three with the fourth has repeatedly cost bench time:
 
 | Axis | Where | Bumps when |
 |------|-------|-----------|
-| **Firmware release** | `firmware/cc3501e/firmware-version.txt` (semver) | each firmware release — names the tag + the `cc3501e-vX.Y.Z.bin` prebuilt blob; the device reports it as `fw_version` via `GET_VERSION` / `GET_DIAG_INFO` |
-| **Wire protocol** | `ALP_CC3501E_PROTOCOL_VERSION` (`<alp/protocol/cc3501e.h>`) + `firmware/cc3501e/protocol-version.txt` | the wire format changes; the host refuses a mismatched version |
+| **Firmware release** | `cc3501e-bridge-firmware:firmware-version.txt` (semver) | each firmware release — names the tag + the `cc3501e-vX.Y.Z.bin` prebuilt blob; the device reports it as `fw_version` via `GET_VERSION` / `GET_DIAG_INFO` |
+| **Wire protocol** | `ALP_CC3501E_PROTOCOL_VERSION` (`<alp/protocol/cc3501e.h>`) + `cc3501e-bridge-firmware:protocol-version.txt` | the wire format changes; the host refuses a mismatched version |
 | **Build / signature** | the signed binary's `.sha256` in `prebuilt/` | every build — pins the exact image |
 | **GPE anti-rollback stamp** | the `--version` the image is signed with (4-part, `major = 0`) | every flashed image — burned **irreversibly** into the part as a monotonic floor; it is *not* the SemVer |
 
@@ -369,7 +369,7 @@ The firmware version moves on its own cadence — a release can ship
 without a protocol bump, and vice-versa.
 
 Current release: SemVer **0.4.0**, wire protocol **5**, stamped **`0.4.0.0`**
-(`firmware/cc3501e/prebuilt/cc3501e-v0.4.0.bin`).
+(`cc3501e-bridge-firmware:prebuilt/cc3501e-v0.4.0.bin`).
 
 Two rules the stamp adds, both of which read as a dead part when broken:
 
@@ -380,7 +380,7 @@ Two rules the stamp adds, both of which read as a dead part when broken:
   binary is not bad.
 - **The stamp must match the version in the signed `programming_instructions`**
   of the flash-set being programmed, because that file is generated from
-  `--version`. Regenerate both together (`firmware/cc3501e/ti/regen_flashset.sh`).
+  `--version`. Regenerate both together (`cc3501e-bridge-firmware:ti/regen_flashset.sh`).
 
 `regen_flashset.sh`'s epoch-derived default is fine for same-day bench
 iteration and **not** a release scheme: its high byte wraps every ~194 days, so
@@ -713,12 +713,12 @@ server is a separate repo.
 | Wire protocol v1 frozen                          | `include/alp/protocol/cc3501e.h` ✅ |
 | Alif-side SPI client (`chips/cc3501e/`)          | ✅ landed in alp-sdk              |
 | `<alp/iot.h>` / `<alp/ble.h>` route via CC3501E  | ✅ landed: exact AEN backend selects the CC3501E route; bench-validated open/scan on E1M-AEN801 |
-| Firmware tree (embedded)                         | `firmware/cc3501e/` ✅ (per [ADR 0015](adr/0015-cc3501e-firmware-embedded.md)) |
-| Bring-up firmware (PING + GET_VERSION + GET_MAC + RESET) | `firmware/cc3501e/` v0.1 ✅ **silicon-validated** (E1M-AEN801 EVK bench) |
-| Wi-Fi station mode                               | `firmware/cc3501e/` v0.2 ✅ shipped (scan / STA connect / AP / RSSI / IP); scan + async STA connect **silicon-validated** |
-| BLE peripheral + advertise                       | `firmware/cc3501e/` v0.3 ✅ shipped (GAP advertise / scan / connect + GATT); NimBLE enable + scan **silicon-validated** |
-| GPIO proxy + camera-enable                       | `firmware/cc3501e/` v0.4 ✅ shipped + **silicon-validated** (`examples/aen/aen-cc3501e-gpio`, warm-boot harness pass=8 fail=0) |
-| OTA over the bridge (§ "OTA" above)              | `firmware/cc3501e/` ✅ shipped; **silicon-validated through install/STAGED** (cold swap-boot needs a cold-bootable unit — see [`cc3501e-production.md`](cc3501e-production.md)) |
+| Firmware tree (embedded)                         | `cc3501e-bridge-firmware:` ✅ (per [ADR 0015](adr/0015-cc3501e-firmware-embedded.md)) |
+| Bring-up firmware (PING + GET_VERSION + GET_MAC + RESET) | `cc3501e-bridge-firmware:` v0.1 ✅ **silicon-validated** (E1M-AEN801 EVK bench) |
+| Wi-Fi station mode                               | `cc3501e-bridge-firmware:` v0.2 ✅ shipped (scan / STA connect / AP / RSSI / IP); scan + async STA connect **silicon-validated** |
+| BLE peripheral + advertise                       | `cc3501e-bridge-firmware:` v0.3 ✅ shipped (GAP advertise / scan / connect + GATT); NimBLE enable + scan **silicon-validated** |
+| GPIO proxy + camera-enable                       | `cc3501e-bridge-firmware:` v0.4 ✅ shipped + **silicon-validated** (`examples/aen/aen-cc3501e-gpio`, warm-boot harness pass=8 fail=0) |
+| OTA over the bridge (§ "OTA" above)              | `cc3501e-bridge-firmware:` ✅ shipped; **silicon-validated through install/STAGED** (cold swap-boot needs a cold-bootable unit — see [`cc3501e-production.md`](cc3501e-production.md)) |
 | Full feature parity with `<alp/iot.h>` /
   `<alp/ble.h>`                                    | Remaining v1.0 work: HOST_IRQ async-event delivery and full runtime GATT/event parity |
 

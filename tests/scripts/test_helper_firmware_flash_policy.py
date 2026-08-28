@@ -6,7 +6,7 @@ axes -- how a helper's image is written locally, how it is updated in the
 field, and who may perform the local write.  The schema used to encode
 `update_channel` XOR `flash_method`, which cannot describe the GD32
 bridge: that part ships with a real OTA path over the bridge link
-(protocol v0.6 Path A, `firmware/gd32-bridge/src/ota.c`) AND a
+(protocol v0.6 Path A, `gd32-bridge-firmware:src/ota.c`) AND a
 recovery-only SWD flash for a bricked board.
 
 These tests pin the schema half.  `tests/scripts/test_orchestrate_manifest.py`

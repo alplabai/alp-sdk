@@ -247,7 +247,6 @@ _CC3501E_BRIDGE_SCAN_SUFFIXES = {
 
 _CC3501E_BRIDGE_SCAN_GLOBS = (
     "docs/cc3501e*.md",
-    "firmware/cc3501e/**/*",
     "examples/aen/aen-cc3501e-*/**/*",
     "examples/aen/aen-usb-firstlight/**/*",
     "examples/peripheral-io/alp-console/**/*",

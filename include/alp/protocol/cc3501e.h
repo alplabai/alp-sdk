@@ -9,7 +9,7 @@
  *        TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor.
  *
  * The CC3501E ships its own Cortex-M MCU and runs ALP-authored
- * firmware that lives in this repo at `firmware/cc3501e/` (embedded,
+ * firmware that lives in this repo at `cc3501e-bridge-firmware:` (embedded,
  * like the gd32-bridge -- see ADR 0015).  The firmware exposes Wi-Fi +
  * BLE control to the Alif over the inter-chip link (SPI default, SDIO
  * optional) -- Alif is master, CC3501E is slave.  This header is the
@@ -926,7 +926,7 @@ typedef struct {
 
 /* (A) Directly-serialized command payloads -- struct-punned on both   */
 /*     sides (chips/cc3501e/cc3501e.c hands &struct to the SPI DMA;    */
-/*     firmware/cc3501e/src/protocol.c casts the wire buffer to T*).   */
+/*     cc3501e-bridge-firmware:src/protocol.c casts the wire buffer to T*).   */
 _Static_assert(sizeof(alp_cc3501e_gpio_configure_t) == 4u,
                "gpio_configure wire header must stay 4 bytes / padding-free");
 _Static_assert(offsetof(alp_cc3501e_gpio_configure_t, cc3501e_gpio) == 0u, "gpio_configure @0");

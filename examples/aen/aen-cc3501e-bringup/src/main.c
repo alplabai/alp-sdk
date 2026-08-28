@@ -7,7 +7,7 @@
  *
  * This is the *Alif (host) side* of the inter-chip bring-up; its peer is
  * the ALP-authored firmware that runs on the CC3501E's own Cortex-M33
- * (firmware/cc3501e/, embedded in this repo per ADR 0015 -- like the
+ * (cc3501e-bridge-firmware:, embedded in this repo per ADR 0015 -- like the
  * gd32-bridge).  It is the AEN sibling of
  * examples/v2n/v2n-gd32-bridge-ping: same shape (open the link, retry
  * until the coprocessor answers, then soak so the link stays
@@ -36,7 +36,7 @@
  * P14_7 and a READY input on P2_6.  Each protocol phase is framed by SS0;
  * READY tells the host when the slave has re-armed for the next phase.  The
  * framing lives in the host driver (chips/cc3501e/cc3501e.c) and its mirror
- * on the firmware side (firmware/cc3501e/hal/ti/transport_hw_ti_spi.c).
+ * on the firmware side (cc3501e-bridge-firmware:hal/ti/transport_hw_ti_spi.c).
  * This app just opens the bus and calls the driver.
  *
  * This file is ~50 % comment by design: examples are documentation for
@@ -551,7 +551,7 @@ static void cc3501e_wifi_probe(cc3501e_t *fw)
  *
  * WHAT A REAL DEPLOYMENT PASSES: `image` must be a genuine SIGNED GPE vendor
  * image (manifest + body) built for the CC3501E -- the same artefact
- * firmware/cc3501e/ produces.  This demo has TWO payload modes:
+ * cc3501e-bridge-firmware: produces.  This demo has TWO payload modes:
  *
  *   default            -- a small INERT pattern.  It exercises the host
  *                         encode/stream/framing path end-to-end but is NOT a
@@ -569,7 +569,7 @@ static void cc3501e_wifi_probe(cc3501e_t *fw)
  *                         monotonic anti-rollback.)  Requires the CMake side to
  *                         compile the candidate source -- see CMakeLists.txt.
  *
- * BENCH REALITY (see firmware/cc3501e/BRINGUP_STATUS.md §5): the FULL cycle is
+ * BENCH REALITY (see cc3501e-bridge-firmware:BRINGUP_STATUS.md §5): the FULL cycle is
  * silicon-proven on the E1M-AEN801 EVK (2026-07-10) -- stream -> STAGED -> the
  * firmware's own swap-reboot (the bridge drops, then returns) -> the swapped
  * image self-accepts and PERSISTS across a true cold POR.  The swap is driven

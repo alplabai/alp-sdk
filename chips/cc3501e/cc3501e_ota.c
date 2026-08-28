@@ -41,7 +41,7 @@
  * bridge from its SPI-slave ISR, and the flash op is what stops that ISR.
  *
  * SIZED FROM THE ACTUAL SLOT GEOMETRY, not guessed.  The generated flash map
- * (firmware/cc3501e/build/ti/memcfg/ti_flash_map_config.c) gives
+ * (cc3501e-bridge-firmware:build/ti/memcfg/ti_flash_map_config.c) gives
  * vendor_image_slot_2_region_size = 0x002A2000 = 2,760,704 B, and the memory
  * configurator gives flash_sector_size = 4096 -- so ONE slot clean is 674 sector
  * erases on a PY25Q64LB.  At ~100-300 ms per sector that is ~67-200 s, and the
@@ -527,7 +527,7 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 	/* OTA_BEGIN's total_len is a wire LE32 (<alp/protocol/cc3501e.h>), so the
 	 * wire width is the only bound the HOST can know -- it is NOT the real
 	 * image maximum.  The device enforces its own at BEGIN
-	 * (CC3501E_OTA_IMAGE_MAX, firmware/cc3501e/hal/ti/cc3501e_hw_ti_ota.c),
+	 * (CC3501E_OTA_IMAGE_MAX, cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti_ota.c),
 	 * rejecting an oversize BEGIN with ERR_INVAL before any image data is
 	 * streamed.  That value is HAL-private and unpublished on the wire, and it
 	 * MOVES -- it was the 64 KiB whole-image RAM buffer until #1610 replaced

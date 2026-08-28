@@ -302,7 +302,7 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 	 * RESP_ERR_BUSY, the drain runs the seconds-long body off THIS exchange,
 	 * and the outcome is mirrored into the non-blocking WIFI_STATUS latch --
 	 * the host never collects DONE/ERR through this job slot (see
-	 * firmware/cc3501e/src/worker.c's worker_run_pending() comment).  The old
+	 * cc3501e-bridge-firmware:src/worker.c's worker_run_pending() comment).  The old
 	 * contract poll_by_repeat()'d this opcode on the wire-level BUSY/IO
 	 * retry rule; every 50 ms retry that landed on the now-IDLE slot (freed
 	 * the instant the drain finished, BEFORE the READY re-arm) submitted a
@@ -481,7 +481,7 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 	 * squashes to ALP_ERR_TIMEOUT, and NOT all of them mean "submitted": the
 	 * expected RESP_ERR_BUSY submit ack and the rejected dead-phase alias did
 	 * reach the wire, but a RESP_ERR_BUSY bounce off an in-flight worker job
-	 * (cmd never queued, firmware/cc3501e/src/protocol.c's QUEUED/RUNNING
+	 * (cmd never queued, cc3501e-bridge-firmware:src/protocol.c's QUEUED/RUNNING
 	 * default: case), a transport IO fault during the radio-down window, and
 	 * cc3501e_request()'s own ALP_ERR_BUSY when cc3501e_lock_acquire() times
 	 * out under a concurrent caller all mean NOTHING was submitted -- and read
@@ -499,7 +499,7 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 	 * does write one: cc3501e_hw_wifi_ap_start() sets `wifi_ap_role_up` on a
 	 * successful Wlan_RoleUp, cc3501e_hw_radio_role() turns that into
 	 * ROLE_WIFI_AP, and GET_DIAG_INFO publishes it as byte 3 of its reply
-	 * (firmware/cc3501e/src/protocol_diag.c).  That is exactly the
+	 * (cc3501e-bridge-firmware:src/protocol_diag.c).  That is exactly the
 	 * independent confirmation channel this wrapper was missing.
 	 *
 	 * The comment above used to say no such channel existed and that giving

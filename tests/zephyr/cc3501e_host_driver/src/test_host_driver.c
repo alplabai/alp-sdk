@@ -18,7 +18,7 @@
  * wire format from <alp/protocol/cc3501e.h>.
  *
  * Wire framing mirrors <alp/protocol/cc3501e.h> and the firmware transport
- * (firmware/cc3501e/hal/ti/transport_hw_ti_spi.c): a 4-byte LE header
+ * (cc3501e-bridge-firmware:hal/ti/transport_hw_ti_spi.c): a 4-byte LE header
  * [cmd | flags | payload_len(LE16)] then payload; the reply header echoes
  * the request cmd and declares the reply payload length; the reply
  * payload's first byte is the response status (ALP_CC3501E_RESP_*).

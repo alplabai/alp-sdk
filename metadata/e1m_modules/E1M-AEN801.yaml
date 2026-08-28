@@ -277,7 +277,15 @@ pad_routes:
 helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e
-    firmware_path: firmware/cc3501e/prebuilt/cc3501e-v0.4.0.bin
+    # firmware_path is deliberately OMITTED: the CC3501E firmware and its
+    # signed artefacts moved to alplabai/cc3501e-bridge-firmware (ADR 0031),
+    # so there is no repo-relative file to point at.  Obtain the image from
+    # that repo's prebuilt/ directory, and verify it against the .sha256 and
+    # .sig shipped beside it before flashing.  The schema and
+    # scripts/check_helper_firmware_path.py both treat an absent key as
+    # meaningful rather than missing -- a stale path that no longer resolves
+    # would be worse, because it stays indistinguishable from a good one
+    # until someone tries to flash it.
     # CC3501E firmware is Alp-released, applied over the bridge SPI
     # programming OTP.  Alp Lab programs it in production; a customer
     # flash is permitted only to recover a bricked device, using

@@ -55,7 +55,7 @@ endif()
 if(CC3501E_OTA_REAL)
     target_compile_definitions(app PRIVATE CC3501E_OTA_REAL)
     target_sources(app PRIVATE
-        ${ALP_SDK_ROOT}/firmware/cc3501e/hal/ti/cc3501e_ota_candidate.c)
+        ${ALP_SDK_ROOT}/cc3501e-bridge-firmware:hal/ti/cc3501e_ota_candidate.c)
 endif()
 if(CC3501E_OTA_PROMOTE)
     target_compile_definitions(app PRIVATE CC3501E_OTA_PROMOTE)

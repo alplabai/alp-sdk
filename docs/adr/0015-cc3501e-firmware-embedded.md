@@ -10,7 +10,7 @@ Date: 2026-06-13
 
 Supersedes the "separate `alplabai/cc3501e-firmware` repo" stance
 previously described in `docs/cc3501e-bridge.md` ("Two-repo split") and
-the original `firmware/cc3501e/README.md` bootstrap doc.
+the original `cc3501e-bridge-firmware:README.md` bootstrap doc.
 
 ## Amendment (2026-08-27 — the gd32-bridge half of the prebuilt-blob precedent names a path that does not exist)
 
@@ -19,11 +19,11 @@ gd32-bridge too; the prebuilt blob ships from `firmware/<bridge>/prebuilt/`
 in alp-sdk **regardless of where source lives**".  Only the cc3501e half of
 that is true of the tree.
 
-- `firmware/cc3501e/prebuilt/` exists and ships exactly what the Decision
+- `cc3501e-bridge-firmware:prebuilt/` exists and ships exactly what the Decision
   promises: `cc3501e-v0.2.0.bin`, `cc3501e-v0.3.0.bin` and
   `cc3501e-v0.4.0.bin`, each with a `.sha256` and a `.sig`, plus a
   `CHANGELOG.md`.
-- `firmware/gd32-bridge/prebuilt/` has never existed.  That tree ships
+- `gd32-bridge-firmware:prebuilt/` has never existed.  That tree ships
   source, `firmware-version.txt` and its own toolchain; the consumer builds
   the binary:
 
@@ -36,7 +36,7 @@ that is true of the tree.
   Committing no gd32 blob was deliberate --
   `docs/superpowers/specs/2026-06-01-gd32-flash-release-design.md` states
   "**No committed prebuilt blob**", and `docs/v0.6-tbd-and-assumptions.md`
-  still lists `firmware/gd32-bridge/prebuilt/` as a *future* path, to be
+  still lists `gd32-bridge-firmware:prebuilt/` as a *future* path, to be
   filled "once Alp Lab cuts a released, signed gd32-bridge binary".
 
 The decision does not turn on this: gd32-bridge is still the in-alp-sdk
@@ -59,11 +59,11 @@ cadence, different audience (most consumers never rebuild it), different
 toolchain (`ticlang`).
 
 That reasoning does not survive contact with our own precedent.  The
-[`gd32-bridge`](../../firmware/gd32-bridge/) firmware is the **same
+[`gd32-bridge`](https://github.com/alplabai/gd32-bridge-firmware) firmware is the **same
 class of artifact** -- an on-SoM helper-MCU bridge: custom binary
 protocol over SPI/I2C, host driver in alp-sdk, prebuilt blob shipped in
 alp-sdk, its own toolchain, its own version axis -- and it lives
-**inside** alp-sdk at `firmware/gd32-bridge/`.  Every "separate"
+**inside** alp-sdk at `gd32-bridge-firmware:`.  Every "separate"
 argument is already answered there:
 
 | "Separate" argument | What gd32-bridge does |
@@ -83,7 +83,7 @@ bridge"), which resolves to **alp-sdk**.
 ## Decision
 
 The CC3501E bridge firmware lives **in alp-sdk**, at
-`firmware/cc3501e/`, exactly as `firmware/gd32-bridge/` does.
+`cc3501e-bridge-firmware:`, exactly as `gd32-bridge-firmware:` does.
 
 - The firmware `#include`s the canonical
   `include/alp/protocol/cc3501e.h` **directly** -- no mirrored header,
@@ -94,7 +94,7 @@ The CC3501E bridge firmware lives **in alp-sdk**, at
   builds the silicon-free `stub` backend; the production `ti` backend
   (TI `ticlang` + the SimpleLink CC33xx SDK as an optional submodule) is
   built on the bench and is never on the per-PR critical path.
-- The prebuilt, signed binary ships from `firmware/cc3501e/prebuilt/`
+- The prebuilt, signed binary ships from `cc3501e-bridge-firmware:prebuilt/`
   for consumers who only flash.
 
 ## Alternatives
@@ -120,7 +120,7 @@ is).
 
 **Bad / costs:**
 - The TI SimpleLink SDK rides as an optional, non-default submodule
-  under `firmware/cc3501e/vendor/` (not recursed by default; only the
+  under `cc3501e-bridge-firmware:vendor/` (not recursed by default; only the
   bench `ti` build needs it).
 - alp-sdk gains a second non-Zephyr CI job (the cc3501e stub build),
   mirroring the gd32-bridge one.
@@ -129,7 +129,7 @@ is).
 
 - [`docs/cc3501e-bridge.md`](../cc3501e-bridge.md) -- bridge architecture
   + selectable transport + the (now embedded) firmware layout.
-- [`firmware/cc3501e/README.md`](../../firmware/cc3501e/README.md),
-  `firmware/cc3501e/DESIGN.md`.
+- [`cc3501e-bridge-firmware:README.md`](https://github.com/alplabai/cc3501e-bridge-firmware#readme),
+  `cc3501e-bridge-firmware:DESIGN.md`.
 - [ADR 0005](0005-alp-sdk-vs-alp-studio-boundary.md) -- the
   alp-sdk/alp-studio boundary (distinct from this firmware-home question).

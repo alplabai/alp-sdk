@@ -3,7 +3,7 @@
 > **Scope.** This document is the **wire** specification for the
 > Renesas RZ/V2N ⇄ GD32G553MEY7TR bridge on the E1M-X V2N / V2N-M1
 > SoMs.  Both sides — the host driver under
-> `chips/gd32g553/` and the GD32-side firmware under `firmware/gd32-bridge/` —
+> `chips/gd32g553/` and the GD32-side firmware under `gd32-bridge-firmware:` —
 > implement what is described here.  Bit, byte and timing decisions
 > live in this file; the host-side public API is documented under
 > `<alp/chips/gd32g553.h>`.
@@ -184,7 +184,7 @@ One FAC and one FFT block exist.  A second `chain_bind` of a FIR/IIR
 stream returns `STATUS_NOSUPPORT` -- but the firmware does not
 currently apply the same guard to FFT-terminal chains
 (`terminal_kind != 3u` in the busy check at
-`firmware/gd32-bridge/hal/gd32/adc_stream.c:675`), so two streams can
+`gd32-bridge-firmware:hal/gd32/adc_stream.c:675`), so two streams can
 both bind FFT chains against the single FFT block; tracked as
 [#1717](https://github.com/alplabai/alp-sdk/issues/1717).  The host-side
 standalone API in `<alp/dsp.h>` ships working in v0.5.0 (runs the
@@ -193,7 +193,7 @@ in-RAM buffers), so application code can test against the same
 chain primitives and, since v0.9 (#496), run the same workload
 bridge-offloaded through the dispatch in
 `bridge_hw_adc_stream_read()`
-(`firmware/gd32-bridge/hal/gd32/adc_stream.c:253-279`) -- `<alp/dsp.h>`
+(`gd32-bridge-firmware:hal/gd32/adc_stream.c:253-279`) -- `<alp/dsp.h>`
 remains the in-RAM host-side alternative when no bridge is present.
 
 #### `CMD_ADC_DSP_CHAIN_OPEN` (`0x37`)
@@ -210,7 +210,7 @@ STAGE_PUSH and CHAIN_BIND calls.  Exhausting the pool returns
 `STATUS_NOSUPPORT` (`0x06`) -- the firmware maps
 `BRIDGE_HW_ERR_NOTIMPL` there because `hal/bridge_hw.h` has no
 NOMEM-equivalent `BRIDGE_HW_ERR_*` for this path
-(`firmware/gd32-bridge/hal/gd32/adc_stream.c:547-552`).  A host must
+(`gd32-bridge-firmware:hal/gd32/adc_stream.c:547-552`).  A host must
 not read that `0x06` as "opcode unknown".  Chains auto-release when
 the bound stream's
 `CMD_ADC_STREAM_END` runs; there is no explicit `CHAIN_CLOSE` at
@@ -331,7 +331,7 @@ indefinitely; host code SHOULD NOT call it.
 
 `mask` selects which GD32 pads the host wants to read or write.  The
 mask is a **logical** index space owned by the GD32 firmware — the
-bit-to-pad mapping is documented in `firmware/gd32-bridge/README.md` and
+bit-to-pad mapping is documented in `gd32-bridge-firmware:README.md` and
 mirrored in the host driver header.  The host MUST NOT assume that
 bit `n` corresponds to GD32 pad `Pxn`.
 
@@ -697,7 +697,7 @@ host side rather than spinning per-op round-trips.
 `COUNTER_READ` exposes one GD32 hardware counter whose tick rate is
 firmware-defined.  The bridge does not yet advertise the tick
 frequency on the wire; callers needing wall-clock conversion must
-either (a) consult `firmware/gd32-bridge/README.md` for the firmware's
+either (a) consult `gd32-bridge-firmware:README.md` for the firmware's
 current tick configuration, or (b) wait for the v0.3 protocol
 revision which will add `COUNTER_GET_FREQ`.  The SDK's portable
 `alp_counter_us_to_ticks` returns `ALP_ERR_NOSUPPORT` on V2N until
@@ -937,7 +937,7 @@ The CRC of an I2C transaction covers `CMD | PAYLOAD` on write and
 matching the convention used by most smart-battery / SMBus PEC
 protocols.  The polynomial and parameters are the same as SPI
 (CRC-16/CCITT-FALSE), so both transports share one
-verification routine in `firmware/gd32-bridge/src/protocol.c`.
+verification routine in `gd32-bridge-firmware:src/protocol.c`.
 
 ### 5.2 Slave-address overlap
 
@@ -1054,11 +1054,11 @@ universally-cited CRC-16/CCITT-FALSE result over the ASCII string
 The per-opcode wire vectors (SPI `PING` round-trip, I2C `PING`
 round-trip, `GET_VERSION` reply for the firmware's declared
 version) are generated at firmware build time and stored in
-`firmware/gd32-bridge/tests/protocol_vectors.txt` by
-`firmware/gd32-bridge/tests/gen_protocol_vectors.py`.  No test
+`gd32-bridge-firmware:tests/protocol_vectors.txt` by
+`gd32-bridge-firmware:tests/gen_protocol_vectors.py`.  No test
 currently consumes this file: `tests/zephyr/chips/src/test_gd32_bridge.c`
 is a NULL-arg / NOT_READY smoke test with zero references to
-`protocol_vectors`, and `firmware/gd32-bridge/tests/` holds only the
+`protocol_vectors`, and `gd32-bridge-firmware:tests/` holds only the
 generator script and the generated `.txt`.  A host<->firmware
 divergence test built on these vectors remains an open gap, not
 existing coverage.
@@ -1087,7 +1087,7 @@ normal upgrade path).**
   no extra wiring beyond what is already in place.
 
 Wire contract (host mirrors in `<alp/chips/gd32g553.h>`,
-firmware in `firmware/gd32-bridge/src/ota.c`):
+firmware in `gd32-bridge-firmware:src/ota.c`):
 
 | Op | Name | Request payload | Reply payload |
 |------|------|----------------|---------------|
@@ -1170,8 +1170,8 @@ header.
 ## See also
 
 * `<alp/chips/gd32g553.h>` — host-side public API.
-* `firmware/gd32-bridge/README.md` — firmware-tree overview.
+* `gd32-bridge-firmware:README.md` — firmware-tree overview.
 * `chips/gd32g553/gd32g553.c` — Renesas-side driver.
-* `firmware/gd32-bridge/src/protocol.c` — shared command-handler table.
+* `gd32-bridge-firmware:src/protocol.c` — shared command-handler table.
 * `metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv` — GD32 pad
   allocation.

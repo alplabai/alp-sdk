@@ -11,7 +11,7 @@ the carrier console. It is the AEN analog of
 GD32 supervisor bring-up) — same shape, different coprocessor.
 
 The CC3501E peer firmware is ALP-authored and lives in this repo at
-[`firmware/cc3501e/`](../../../firmware/cc3501e) (embedded, per ADR 0015 —
+[`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware) (embedded, per ADR 0015 —
 like the gd32-bridge).
 
 ## Why this app is the gating step
@@ -75,7 +75,7 @@ Two J-Links: one on the Alif, one on the CC3501E.
 
 ```sh
 # 1. Build + flash the CC3501E peer firmware first (see firmware/cc3501e):
-#    powershell firmware/cc3501e/ti/build_ti.ps1   (after repinning the
+#    powershell cc3501e-bridge-firmware:ti/build_ti.ps1   (after repinning the
 #    SysConfig board file to the AEN GPIO_27/28/29 inter-chip pins)
 #    -> flash cc3501e-bridge.hex over the CC3501E J-Link.
 #    NOTE: the CC3501E reads VTref=0V until this app powers it, so flash it

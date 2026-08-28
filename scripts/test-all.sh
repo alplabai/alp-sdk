@@ -363,7 +363,7 @@ stage_shellcheck() {
     # sweep -- matching stage_bash32_parse's existing repo-wide `*.sh`
     # sweep below. Before this, two groups shipped unchecked: root
     # scripts/*.sh had no CI coverage at all (only this local stage), and 8
-    # files entirely outside scripts/ (firmware/cc3501e/ti/*.sh,
+    # files entirely outside scripts/ (
     # keys/generate_dev_key.sh,
     # meta-alp-sdk/recipes-core/alp-system/files/alp-remoteproc-start.sh,
     # tests/yocto/*.sh, tools/native-sim-container/entrypoint.sh) were
@@ -755,12 +755,11 @@ stage_required_gate_scripts() {
 
     # gd32-bridge protocol vectors must not drift from the generator
     # (mirrors the pr-metadata-validate.yml gd32-bridge step).
-    if [ -f firmware/gd32-bridge/tests/gen_protocol_vectors.py ]; then
-        ran=1
-        echo "--- gd32-bridge protocol vectors --check ---"
-        python3 firmware/gd32-bridge/tests/gen_protocol_vectors.py --check \
-            || failed=1
-    fi
+    # The GD32 wire vectors moved with the firmware (ADR 0031).  Their
+    # regeneration check now runs in alplabai/gd32-bridge-firmware's own CI,
+    # against the same generator -- see that repo's .github/workflows/ci.yml.
+    # Nothing to do here; the host-side consumers of those vectors are still
+    # covered by tests/zephyr/chips/gd32g553/.
 
     if [ "${ran}" -eq 0 ]; then
         return 99

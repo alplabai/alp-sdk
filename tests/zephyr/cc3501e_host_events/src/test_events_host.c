@@ -32,7 +32,7 @@ enum slave_phase {
 	PH_REPLY_PL,    /* host reads the reply payload (status+data) */
 };
 
-/* A queued event in the model (mirrors firmware/cc3501e/src/event_ring.c). */
+/* A queued event in the model (mirrors cc3501e-bridge-firmware:src/event_ring.c). */
 struct model_evt {
 	uint8_t opcode;
 	uint8_t len;
