@@ -40,23 +40,28 @@ def _minimal_record() -> dict:
 
 
 def _no_paragraph_break_between(text: str, start_marker: str, end_marker: str) -> bool:
-    """True iff CommonMark would render the span from `start_marker` to
-    `end_marker` as a single block -- i.e. neither a blank line nor a
-    column-0 HTML block opener (`<...`, e.g. `<!--`) sits between them.
-    Per the CommonMark spec, HTML blocks types 1-6 (a `<!--` comment is
-    type 2) CAN interrupt a paragraph exactly like a blank line can; a
-    stray one at column 0 is how issue #1794 silently split a sentence
-    into two `<p>` tags. `markdown_it` is not a declared project
-    dependency (not in pyproject.toml/scripts/requirements.txt, so not
-    installed by the CI `pip install -e ".[dev,model-compile]"` step
-    that runs `pytest tests/scripts/`) -- this stdlib-only check pins
-    the same fact without adding one."""
+    """True iff the span from `start_marker` to `end_marker` has no blank
+    line and no HTML-block opener (`<...`, optionally indented 0-3 spaces
+    per CommonMark's rule for HTML blocks types 1-6 -- a `<!--` comment is
+    type 2) between them. This is a targeted proxy for the #1794 defect
+    shape, NOT a general CommonMark block-boundary oracle: it does not
+    detect the other paragraph-interrupting constructs (ATX headings,
+    thematic breaks, fenced code, block quotes, list markers, setext
+    underlines) -- those are out of scope here. A stray HTML-block opener
+    at column 0-3 is how issue #1794 silently split a sentence into two
+    `<p>` tags; a 4-space indent is an indented code block and does NOT
+    interrupt a paragraph, so it must NOT trip this check. `markdown_it`
+    is not a declared project dependency (not in
+    pyproject.toml/scripts/requirements.txt, so not installed by the CI
+    `pip install -e ".[dev,model-compile]"` step that runs `pytest
+    tests/scripts/`) -- this stdlib-only check pins the same fact without
+    adding one."""
     start = text.index(start_marker)
     end = text.index(end_marker, start)
     between = text[start + len(start_marker):end]
     if "\n\n" in between:
         return False
-    return not any(line.startswith("<") for line in between.split("\n"))
+    return not any(re.match(r" {0,3}<", line) for line in between.split("\n"))
 
 
 # --------------------------------------------------------------------------
@@ -753,7 +758,7 @@ def test_scaffold_readme_cold_chain_models_link_survives_scaffolding():
     assert (f"https://github.com/alplabai/alp-sdk/blob/{ref}"
             "/examples/ai/cold-chain-monitor/models/README.md") in readme
     assert _no_paragraph_break_between(
-        readme, "No model is shipped", "models/README.md")
+        readme, "No model is shipped", "[`models/README.md`](")
 
 
 def test_scaffold_readme_mqtt_native_sim_conf_link_survives_scaffolding():
@@ -777,7 +782,7 @@ def test_scaffold_readme_mqtt_native_sim_conf_link_survives_scaffolding():
     assert (f"https://github.com/alplabai/alp-sdk/blob/{ref}"
             "/examples/connectivity/mqtt-telemetry/native_sim.conf") in readme
     assert _no_paragraph_break_between(
-        readme, "turns mbedtls off (see", "native_sim.conf")
+        readme, "turns mbedtls off (see", "[`native_sim.conf`](")
 
 
 def test_scaffold_readme_extra_zephyr_modules_uses_alp_sdk_root_not_pwd():

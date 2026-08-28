@@ -57,8 +57,8 @@ over `<alp/chips/bmp581.h>`) -- and the publish path is unchanged.
 ```bash
 # Standalone, native_sim (no radio; framing-only, mbedtls off):
 # native_sim.conf ships only in the alp-sdk tree, not in this
-# scaffold -- build this leg from an alp-sdk checkout, or copy
-# native_sim.conf in first (see the link above).
+# scaffold -- copy it in first (see the link above) before
+# running this leg.
 west build -b native_sim/native/64 examples/connectivity/mqtt-telemetry \
     -- -DEXTRA_ZEPHYR_MODULES=$(pwd) -DEXTRA_CONF_FILE=native_sim.conf
 west build -t run
