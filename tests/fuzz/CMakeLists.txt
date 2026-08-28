@@ -10,6 +10,21 @@
 # enabled alongside the fuzzer runtime to catch overflow / UB the
 # harness might otherwise let pass.
 
+# Where the GD32 bridge firmware sources live (#1370).  Defaults to the
+# in-tree copy, so this is a no-op today; after the firmware moves to its own
+# repository, set this to the checked-out firmware tree (e.g. a west project
+# sibling of alp-sdk) and no other line in this file changes:
+#
+#   cmake -DALP_GD32_BRIDGE_FIRMWARE_DIR=/path/to/gd32-bridge-firmware ...
+#
+# The gd32_bridge_frame harness is deliberately staying in alp-sdk after the
+# split: it fuzzes a parser fed by peer-supplied data, and its cross-impl CRC
+# check is only meaningful while it links the REAL firmware `protocol.c`.
+set(ALP_GD32_BRIDGE_FIRMWARE_DIR
+    "${CMAKE_SOURCE_DIR}/firmware/gd32-bridge"
+    CACHE PATH
+    "Root of the GD32 bridge firmware tree the gd32_bridge_frame fuzz harness links")
+
 if(NOT TARGET alp_sdk)
     message(FATAL_ERROR
         "tests/fuzz/CMakeLists.txt expects the alp_sdk target to be defined "
@@ -65,12 +80,40 @@ target_include_directories(alp_fuzz_update_log_entry PRIVATE
 # against the firmware-side `crc16_ccitt_false` symbol on every
 # iteration -- silent divergence between the two impls becomes a
 # fuzz failure.
+# The firmware sources are reached through ALP_GD32_BRIDGE_FIRMWARE_DIR rather
+# than a hardcoded in-tree path (#1370).  The GD32 bridge firmware is moving to
+# its own repository -- it is product firmware programmed on Alp Lab's line, not
+# SDK material -- but THIS fuzz target stays in alp-sdk, because it guards a
+# parser that consumes peer-supplied data and the cross-impl CRC check above
+# only works while it links the real `protocol.c`.
+#
+# Today the default resolves to the in-tree copy, so this is a no-op.  After the
+# extraction, point it at the checked-out firmware repo (a west project sibling
+# of alp-sdk) and nothing else here changes.
+if(NOT EXISTS "${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/protocol.c")
+    message(FATAL_ERROR
+        "gd32_bridge_frame fuzz harness: no protocol.c under "
+        "ALP_GD32_BRIDGE_FIRMWARE_DIR=${ALP_GD32_BRIDGE_FIRMWARE_DIR}.
+"
+        "After the #1370 extraction the GD32 bridge firmware lives in its own "
+        "repository -- point this at the checked-out tree. Failing loudly "
+        "rather than silently dropping a harness that guards a parser fed by "
+        "peer-supplied data.")
+endif()
+
 target_sources(alp_fuzz_gd32_bridge_frame PRIVATE
-    ${CMAKE_SOURCE_DIR}/firmware/gd32-bridge/src/protocol.c
-    ${CMAKE_SOURCE_DIR}/firmware/gd32-bridge/src/bootloader/bootloader.c
-    ${CMAKE_SOURCE_DIR}/firmware/gd32-bridge/hal/bridge_hw_stub.c
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/protocol.c
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/bootloader/bootloader.c
+    # ota.c supplies ota_dispatch(), which bootloader.c calls at
+    # bootloader.c:22.  Without it the harness does not LINK -- it had been
+    # failing with `undefined reference to ota_dispatch` on dev, silently,
+    # because ALP_BUILD_FUZZ is opt-in and nothing built it.  With OTA off
+    # (the default) ota_dispatch() just returns STATUS_NOSUPPORT, so this
+    # adds no behaviour, only the missing definition.
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/ota.c
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/hal/bridge_hw_stub.c
 )
 target_include_directories(alp_fuzz_gd32_bridge_frame PRIVATE
-    ${CMAKE_SOURCE_DIR}/firmware/gd32-bridge/src
-    ${CMAKE_SOURCE_DIR}/firmware/gd32-bridge/hal
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/hal
 )

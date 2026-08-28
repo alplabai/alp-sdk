@@ -5,7 +5,13 @@ project(test_gd32_bridge_transport)
 
 # Link the REAL firmware transport + dispatcher (stub HAL backend), so the
 # CS-framing seams under test are the production code paths, not a mock.
-set(BRIDGE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../firmware/gd32-bridge)
+# #1370: the GD32 bridge firmware is moving to its own repository.  Honour an
+# ALP_GD32_BRIDGE_FIRMWARE_DIR override so this test follows it there; the
+# default is the in-tree copy, so this is a no-op today.
+if(NOT DEFINED ALP_GD32_BRIDGE_FIRMWARE_DIR)
+    set(ALP_GD32_BRIDGE_FIRMWARE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../firmware/gd32-bridge)
+endif()
+set(BRIDGE_DIR ${ALP_GD32_BRIDGE_FIRMWARE_DIR})
 
 target_sources(app PRIVATE
     src/test_transport_spi.c
