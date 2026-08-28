@@ -54,10 +54,11 @@ The DEEPX DX-M1 NPU is populated on `E1M-V2M101`/`E1M-V2M102` -- not on
 
 ## Model
 
-No model is shipped (stub + deterministic classifier/fallback). See
 <!-- The ../cold-chain-monitor/ detour is deliberate: the scaffold
      rewriter's _RELATIVE_LINK_RE only matches `../`-prefixed links, and
      models/ is a child of this dir, not a sibling -- don't "fix" this. -->
+
+No model is shipped (stub + deterministic classifier/fallback). See
 [`models/README.md`](../cold-chain-monitor/models/README.md) for the
 autoencoder training recipe.
 
