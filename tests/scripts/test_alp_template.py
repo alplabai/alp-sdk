@@ -728,6 +728,22 @@ def test_scaffold_readme_cold_chain_models_link_survives_scaffolding():
             "/examples/ai/cold-chain-monitor/models/README.md") in readme
 
 
+def test_scaffold_readme_mqtt_native_sim_conf_link_survives_scaffolding():
+    """Issue #1794: mqtt-telemetry's README deliberately links
+    `../mqtt-telemetry/native_sim.conf` -- climbing out of the example
+    dir and back in -- because `_RELATIVE_LINK_RE` only matches
+    `../`-prefixed links and `native_sim.conf` is a CHILD of the example
+    dir, not a sibling. A future edit that "tidies" the link to the more
+    natural `](native_sim.conf)` would stop matching the rewriter
+    entirely and ship a dangling relative link in every scaffold; assert
+    on the EMITTED output, not the source text, so this catches that."""
+    envelope = dict(alp_template.render_to_envelope("iot", "E1M-AEN801"))
+    readme = envelope["README.md"]
+    ref = alp_template._docs_ref(alp_template.REPO)
+    assert (f"https://github.com/alplabai/alp-sdk/blob/{ref}"
+            "/examples/connectivity/mqtt-telemetry/native_sim.conf") in readme
+
+
 def test_scaffold_readme_extra_zephyr_modules_uses_alp_sdk_root_not_pwd():
     """issue #864 Fable-review MAJOR B: `$(pwd)` only equals the alp-sdk
     checkout root when building IN-TREE; a copied-out scaffold's cwd is

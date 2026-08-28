@@ -35,7 +35,11 @@ today**. Zephyr v4.4's mbedtls 3.6 has an `ssl_misc.h`
 include-order bug (`unknown type name 'mbedtls_error_pair_t'`); full
 `tf-psa-crypto` wiring is a v0.6 work item. On real AEN silicon the
 build follows the TF-M stack and is unaffected; the native_sim leg
-turns mbedtls off (see [`native_sim.conf`](native_sim.conf)) so the
+turns mbedtls off (see
+<!-- The ../mqtt-telemetry/ detour is deliberate: the scaffold
+     rewriter's _RELATIVE_LINK_RE only matches `../`-prefixed links, and
+     native_sim.conf is a child of this dir, not a sibling -- don't "fix" this. -->
+[`native_sim.conf`](../mqtt-telemetry/native_sim.conf)) so the
 framing path still builds and runs. This is why the catalog record
 is `preview`.
 
@@ -48,6 +52,10 @@ with the [`sensor` template](../../peripheral-io/i2c-master/) (BMP581
 over `<alp/chips/bmp581.h>`) -- and the publish path is unchanged.
 
 ## Build
+
+In the alp-sdk tree, the native_sim leg builds against the in-tree
+`native_sim.conf` (not part of this template's scaffold envelope) and
+runs with:
 
 ```bash
 # Standalone, native_sim (no radio; framing-only, mbedtls off):
