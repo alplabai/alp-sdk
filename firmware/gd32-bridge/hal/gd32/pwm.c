@@ -150,11 +150,18 @@ int bridge_hw_pwm_set(uint8_t channel, uint32_t period_ns, uint32_t duty_ns)
 	 * runs 0->ARR->0 -> period == 2*ARR ticks and high-time ==
 	 * 2*compare ticks (compare on the up-ramp + compare on the
 	 * down-ramp), so both ARR and compare are the commanded value
-	 * halved.  ARR must fit in 16 bits either way; clamp on over-range
-	 * so the timer never gets an invalid reload. */
+	 * halved.  ARR must fit in 16 bits either way; a period beyond
+	 * what the 216:1-prescaled 16-bit counter can express is a
+	 * capability gap (the silicon cannot represent it at all, not a
+	 * malformed argument) -- refuse it (BRIDGE_HW_ERR_NOTIMPL, wire
+	 * STATUS_NOSUPPORT) instead of silently clamping to
+	 * PWM_TIMER_ARR_MAX+1 (65.536 ms) while still reporting
+	 * BRIDGE_HW_OK, which left the pad running at a period the caller
+	 * never asked for and the host caching the unprogrammed value
+	 * (issue #1730). */
 	uint32_t arr, cmp;
 	if (pwm_align_mode[pwm_timer_index(ch->periph)] == 0u) {
-		if (period_us > PWM_TIMER_ARR_MAX + 1u) period_us = PWM_TIMER_ARR_MAX + 1u;
+		if (period_us > PWM_TIMER_ARR_MAX + 1u) return BRIDGE_HW_ERR_NOTIMPL;
 		if (duty_us > period_us) duty_us = period_us;
 		arr = period_us - 1u;
 		cmp = duty_us;
@@ -162,7 +169,7 @@ int bridge_hw_pwm_set(uint8_t channel, uint32_t period_ns, uint32_t duty_ns)
 		uint32_t half_period = period_us / 2u;
 		uint32_t half_duty   = duty_us / 2u;
 		if (half_period == 0u) return BRIDGE_HW_ERR_RANGE; /* period < 2 us */
-		if (half_period > PWM_TIMER_ARR_MAX) half_period = PWM_TIMER_ARR_MAX;
+		if (half_period > PWM_TIMER_ARR_MAX) return BRIDGE_HW_ERR_NOTIMPL;
 		if (half_duty > half_period) half_duty = half_period;
 		arr = half_period;
 		cmp = half_duty;

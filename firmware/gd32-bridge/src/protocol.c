@@ -194,6 +194,11 @@ static gd32_bridge_status_t handle_pwm_set(const uint8_t *req,
 	const int rv = bridge_hw_pwm_set(channel, period_ns, duty_ns);
 	if (rv == BRIDGE_HW_ERR_RANGE) return STATUS_OUT_OF_RANGE;
 	if (rv == BRIDGE_HW_ERR_INVAL) return STATUS_INVAL;
+	/* Issue #1730: a period beyond what the prescaled 16-bit counter can
+	 * express is BRIDGE_HW_ERR_NOTIMPL from the gd32/ HAL body -- map it
+	 * to STATUS_NOSUPPORT like every other handler in this file, rather
+	 * than falling through to the generic STATUS_IO below. */
+	if (rv == BRIDGE_HW_ERR_NOTIMPL) return STATUS_NOSUPPORT;
 	if (rv < 0) return STATUS_IO;
 	*reply_len = 0u;
 	return STATUS_OK;
