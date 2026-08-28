@@ -6,7 +6,7 @@ CI gate: every `helper_firmware[].firmware_path` in every
 file on disk.
 
 Issue #1372: `firmware_path` is a repo-relative path shipped in six AEN
-presets (pointing at `firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin`) and
+presets (pointing at a prebuilt companion image) and
 nothing anywhere validated that it resolves -- not the schema (`minLength: 1`
 only, no `format`/existence constraint), not `scripts/alp_cli/validator.py`
 (shape-only), not `scripts/alp_orchestrate/manifest.py` (projects the value

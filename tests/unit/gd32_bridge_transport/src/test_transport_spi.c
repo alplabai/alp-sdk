@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Unit tests for the gd32-bridge SPI-slave transport seams
- * (firmware/gd32-bridge/src/transport_spi.c) -- the CS-framed staging
+ * (gd32-bridge-firmware:src/transport_spi.c) -- the CS-framed staging
  * layer between the byte-level HAL and protocol_dispatch().
  *
  * The regression that motivates this suite (silicon, 2026-06-04): the

@@ -142,7 +142,7 @@ GD32-only scoping:
   the E1M-X V2N / V2N-M1 GD32 bridge firmware (`docs/gd32-bridge.md`,
   `docs/bring-up-v2n.md`, `docs/tutorials/07-recovering-a-bricked-bridge.md`);
   building the CC3501E bridge firmware's silicon-free stub target
-  (`firmware/cc3501e/README.md`, `firmware/cc3501e/toolchain/arm-none-eabi.cmake`
+  (`cc3501e-bridge-firmware:README.md`, `cc3501e-bridge-firmware:toolchain/arm-none-eabi.cmake`
   -- the CC3501E's *production* image builds with TI `ticlang`, not this
   toolchain); and hand-written bare-metal firmware targeting a real
   M-class core (`ALP_OS=baremetal`, no Zephyr).

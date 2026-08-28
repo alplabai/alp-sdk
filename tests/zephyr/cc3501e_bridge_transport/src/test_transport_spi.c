@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Unit tests for the cc3501e-bridge SPI-slave transport seams
- * (firmware/cc3501e/src/transport_spi.c) + the shared framing/dispatch
- * (firmware/cc3501e/src/protocol.c), exercised against the silicon-free
+ * (cc3501e-bridge-firmware:src/transport_spi.c) + the shared framing/dispatch
+ * (cc3501e-bridge-firmware:src/protocol.c), exercised against the silicon-free
  * stub HAL backend.  These are the PRODUCTION code paths, not a mock --
  * the same protocol_build_reply() the SDIO transport uses.
  *

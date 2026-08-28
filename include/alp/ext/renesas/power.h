@@ -68,7 +68,7 @@ typedef uint8_t alp_renesas_power_supervisor_mode_t;
  *   - 2  = deep-sleep   (mirrors @ref ALP_POWER_MODE_DEEP_SLEEP)
  *   - 3  = standby      (mirrors @ref ALP_POWER_MODE_STANDBY)
  *   - 4+ = supervisor-firmware extension space; check
- *          `firmware/gd32-bridge/src/protocol.h` against the
+ *          `gd32-bridge-firmware:src/protocol.h` against the
  *          firmware build the bridge is currently running.  TBD
  *          values are silently rejected on the firmware side
  *          with STATUS_NOSUPPORT.

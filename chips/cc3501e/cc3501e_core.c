@@ -19,7 +19,7 @@
  * alp_gpio_*; until then reset() returns NOSUPPORT cleanly.
  *
  * Wire framing matches the embedded firmware
- * (firmware/cc3501e/hal/ti/transport_hw_ti_spi.c): the current E1M-AEN
+ * (cc3501e-bridge-firmware:hal/ti/transport_hw_ti_spi.c): the current E1M-AEN
  * rev wires only SCLK/MOSI/MISO (no CS, no host IRQ -- both arrive next
  * rev), so a request/reply is clocked as four deterministic fixed-count
  * transfers in lockstep (request header, request payload, reply header,
@@ -196,7 +196,7 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	 * unchanged -- this only removes the deadlock on the way back up. */
 	ctx->initialised = true;
 
-	/* Wire-protocol compatibility gate (issue #1371): firmware/cc3501e/DESIGN.md
+	/* Wire-protocol compatibility gate (issue #1371): cc3501e-bridge-firmware:DESIGN.md
      * has always documented "host refuses a mismatch" for GET_VERSION, but
      * nothing ever compared the reply against ALP_CC3501E_PROTOCOL_VERSION --
      * mirrors the GD32 bridge's major-version gate (gd32g553_init(),
@@ -671,7 +671,7 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
      * -- no CS, no host IRQ; CS + IRQ arrive next rev).  Each transfer's
      * length is derived from a header already exchanged, so master + slave
      * stay in lockstep without a CS edge.  Matches the firmware SPI-slave
-     * state machine in firmware/cc3501e/hal/ti/transport_hw_ti_spi.c.
+     * state machine in cc3501e-bridge-firmware:hal/ti/transport_hw_ti_spi.c.
      *
      *   1. send request header (4)        3. read reply header (4)
      *   2. send request payload (tx_len)  4. read reply payload (status+data)
@@ -808,7 +808,7 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		 *
 		 * WIFI_CONNECT_STA (0x12) -- #1378.  Its firmware handler
 		 * (handle_worker_routed_payload's WORKER_IDLE case,
-		 * firmware/cc3501e/src/protocol.c) UNCONDITIONALLY acks a fresh
+		 * cc3501e-bridge-firmware:src/protocol.c) UNCONDITIONALLY acks a fresh
 		 * submit with RESP_ERR_BUSY.  Rejecting the alias here avoids handing
 		 * the caller a false "submitted", which is exactly the #1376
 		 * false-connect mechanism.  cc3501e_wifi_connect() no longer trusts
@@ -819,7 +819,7 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		 * WIFI_AP_START (0x14) -- #1385.  Same handler, same unconditional
 		 * BUSY submit ack, AND the ONE path that could otherwise return a
 		 * bare RESP_OK for this opcode is unreachable to the host: the drain
-		 * (firmware/cc3501e/src/worker.c's worker_run_pending()) calls
+		 * (cc3501e-bridge-firmware:src/worker.c's worker_run_pending()) calls
 		 * worker_reset() for exactly CONNECT_STA and AP_START *before*
 		 * cc3501e_bridge_ready() re-arms the link, so the WORKER_DONE branch
 		 * that would reply RESP_OK is wiped while the host is still held off
@@ -838,7 +838,7 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		 *
 		 * OTA_PROMOTE (0x46) is deliberately NOT on this list, despite being
 		 * the sharpest case named in #1378/#1385: handle_ota_promote()
-		 * (firmware/cc3501e/src/protocol_ota.c) returns
+		 * (cc3501e-bridge-firmware:src/protocol_ota.c) returns
 		 * hw_to_resp(cc3501e_hw_ota_promote()), and the TI HAL's
 		 * cc3501e_hw_ota_promote() (hal/ti/cc3501e_hw_ti_ota.c) arms the
 		 * deferred swap-reboot and returns CC3501E_HW_OK UNCONDITIONALLY --

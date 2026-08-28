@@ -378,7 +378,7 @@ top of the per-subsystem checks.
 4. **CC3501E PING / GET_VERSION.**  Bring the on-module Wi-Fi/BLE
    coprocessor to life over the inter-chip SPI1 bus.  Issue the
    two META-group opcodes from the bridge host driver (see the
-   wire frame in `firmware/cc3501e/DESIGN.md`):
+   wire frame in `cc3501e-bridge-firmware:DESIGN.md`):
    `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`).
    A standalone host-side helper for the M55 side is **TBD**
    (only the device firmware ships today), so drive it from app
@@ -388,7 +388,7 @@ top of the per-subsystem checks.
      signal.
    * `GET_VERSION` must return the firmware's wire-protocol
      version; cross-check it against
-     `firmware/cc3501e/prebuilt/CHANGELOG.md`.
+     `cc3501e-bridge-firmware:prebuilt/CHANGELOG.md`.
 
    No `RESP_OK` usually means the CC3501E hasn't been flashed yet
    (`helper_firmware[].firmware_path` is still TBD in the SKU

@@ -198,10 +198,10 @@ them the Zephyr-on-M default:
   bridge recovery
   ([`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)).
 - Building the **CC3501E bridge firmware's silicon-free stub target**
-  ([`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) "Build")
+  ([`cc3501e-bridge-firmware:README.md`](https://github.com/alplabai/cc3501e-bridge-firmware#readme) "Build")
   -- the CC3501E's *production* image builds with TI's `ticlang`, not
   this toolchain
-  ([`firmware/cc3501e/toolchain/arm-none-eabi.cmake`](../firmware/cc3501e/toolchain/arm-none-eabi.cmake));
+  ([`cc3501e-bridge-firmware:toolchain/arm-none-eabi.cmake`](https://github.com/alplabai/cc3501e-bridge-firmware));
   only the stub / CI-compile-smoke target needs `arm-none-eabi-gcc`.
 - Hand-writing **bare-metal firmware for a real M-class core**
   (`ALP_OS=baremetal`, no Zephyr -- see [`docs/architecture.md`](architecture.md)
@@ -309,7 +309,7 @@ the Zephyr-on-M default:
   ([`docs/bring-up-v2n.md`](bring-up-v2n.md)) or bridge recovery
   ([`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)).
 - Building the **CC3501E bridge firmware's silicon-free stub target**
-  ([`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) "Build")
+  ([`cc3501e-bridge-firmware:README.md`](https://github.com/alplabai/cc3501e-bridge-firmware#readme) "Build")
   -- the CC3501E's *production* image builds with TI's `ticlang`, not
   this toolchain; only the stub / CI-compile-smoke target needs
   `arm-none-eabi-gcc`.
@@ -461,7 +461,7 @@ paths, none of them the Zephyr-on-M default:
   ([`docs/bring-up-v2n.md`](bring-up-v2n.md)) or bridge recovery
   ([`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)).
 - Building the **CC3501E bridge firmware's silicon-free stub target**
-  ([`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) "Build")
+  ([`cc3501e-bridge-firmware:README.md`](https://github.com/alplabai/cc3501e-bridge-firmware#readme) "Build")
   -- the CC3501E's *production* image builds with TI's `ticlang`, not
   this toolchain; only the stub / CI-compile-smoke target needs
   `arm-none-eabi-gcc`.

@@ -34,7 +34,7 @@ In scope:
 - Public API surfaces under `include/alp/` and their backend
   implementations (`src/`)
 - Chip drivers (`chips/`) and vendor bindings (`vendors/`)
-- On-module MCU firmware (`firmware/cc3501e/`, `firmware/gd32-bridge/`)
+- On-module MCU firmware (`cc3501e-bridge-firmware:`, `gd32-bridge-firmware:`)
   including the bridge wire protocol and its A/B OTA path
 - Secure-boot / OTA configuration emitted from `board.yaml`
   (MCUboot, Mender, TF-M / PSA)

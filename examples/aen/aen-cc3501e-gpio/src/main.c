@@ -7,7 +7,7 @@
  * Alif Ensemble E8 host (M55-HE), over the inter-chip SPI bridge.
  *
  * This is the *Alif (host) side*; its peer is the ALP-authored firmware
- * that runs on the CC3501E's own Cortex-M33 (firmware/cc3501e/, embedded
+ * that runs on the CC3501E's own Cortex-M33 (cc3501e-bridge-firmware:, embedded
  * per ADR 0015 -- like the gd32-bridge).  It is the sibling of
  * examples/aen/aen-cc3501e-bringup: it brings the bridge up the SAME way
  * (one call to cc3501e_bridge_bringup()), then exercises a different slice

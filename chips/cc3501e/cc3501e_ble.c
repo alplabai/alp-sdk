@@ -6,7 +6,7 @@
  * <alp/chips/cc3501e/ble.h> for the public API.
  *
  * Thin wrappers over cc3501e_request matching the firmware BLE
- * handlers (firmware/cc3501e/src/protocol.c handle_ble_*).  WIRE GAP:
+ * handlers (cc3501e-bridge-firmware:src/protocol.c handle_ble_*).  WIRE GAP:
  * the protocol header carries the BLE opcodes + alp_cc3501e_ble_adv_
  * start_t, but has NO payload struct for CONNECT (0x36) or the four
  * GATT ops (0x38..0x3B); those layouts are defined only by the

@@ -8,7 +8,7 @@ drives several E1M IO pads and the camera-LDO enables off its own GPIOs; the hos
 procedure exercises that path with the host example `examples/aen/aen-cc3501e-gpio`
 and asserts a machine-checkable serial contract.
 
-The turnkey harness is `firmware/cc3501e/ti/validate_gpio_bench.ps1`: it builds +
+The turnkey harness is `cc3501e-bridge-firmware:ti/validate_gpio_bench.ps1`: it builds +
 warm-flashes the CC3501E firmware, builds + flashes the host example, captures the
 host console, and exits `0` only on an all-pass summary.
 
@@ -62,7 +62,7 @@ had these reversed is wrong.)
 - An **activated** CC3501E bench unit on the SoM (warm path; cold-boot fuse caveat
   above), reachable over an XDS110 probe, and an Alif J-Link for the host.
 - The TI build toolchain for the CC3501E firmware (ticlang + the SimpleLink CC35xx
-  SDK + SysConfig) — same install `firmware/cc3501e/ti/build_ti.ps1` uses.
+  SDK + SysConfig) — same install `cc3501e-bridge-firmware:ti/build_ti.ps1` uses.
 - The SimpleLink Wi-Fi toolbox (`simplelink-wifi-toolbox.exe`) for the FIB/sign/
   program steps, plus the bench **Alp VALIDATION** signing key + module, the
   `cc35xx-conf.bin` memory config, and a `tool_settings.json` that references
@@ -78,7 +78,7 @@ had these reversed is wrong.)
 
 The harness performs these in order; you can also run them by hand.
 
-1. **Build the CC3501E firmware** — `firmware/cc3501e/ti/build_ti.ps1` (default
+1. **Build the CC3501E firmware** — `cc3501e-bridge-firmware:ti/build_ti.ps1` (default
    radio-free bridge build; the GPIO proxy + camera enables are in the default
    build, no Wi-Fi/BLE link needed to exercise them).
 2. **Warm-flash the CC3501E** — FIB-wrap the ELF as a versioned GPE vendor image,
@@ -99,7 +99,7 @@ The harness performs these in order; you can also run them by hand.
 Example invocation (override every path — nothing is hardcoded to a user dir):
 
 ```
-firmware/cc3501e/ti/validate_gpio_bench.ps1 `
+cc3501e-bridge-firmware:ti/validate_gpio_bench.ps1 `
     -ToolboxExe     <simplelink-wifi-toolbox.exe> `
     -PublicKey      <validation-pubkey.pem> `
     -SigningModule  <sign.py> `

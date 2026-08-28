@@ -114,9 +114,9 @@ comment says `adc_stream` was un-quarantined "for the supervised
 third pass," with a clause to re-quarantine it if the link still
 rots (`examples/v2n/v2n-gd32-bridge-hil-soak/src/main.c:727-735`).
 Of the six, the firmware v0.2.3–v0.2.9 campaign (shipping firmware
-is v0.2.11, `firmware/gd32-bridge/firmware-version.txt`) names four
+is v0.2.11, `gd32-bridge-firmware:firmware-version.txt`) names four
 as cleared — `pwm_capture`, `adc_stream`, `qenc`, `tmu`
-(`firmware/gd32-bridge/README.md:75-78`). `trng` is separate and
+(`gd32-bridge-firmware:README.md:75-78`). `trng` is separate and
 weaker than "cleared": its unit still takes intermittent seed
 errors and parks with latched flags set; firmware now detects that
 state, fails the affected call fast, and rebuilds on the next call —
@@ -131,7 +131,7 @@ its first reply window
 
 Genuinely still open, and this ADR does not claim otherwise: not an
 open defect class, but an unsoaked firmware delta.
-`firmware/gd32-bridge/README.md`'s Status block still names an "ADC
+`gd32-bridge-firmware:README.md`'s Status block still names an "ADC
 DSP-chain runtime dispatch...degrades to error statuses" gap, but
 that block is pinned at v0.2.7 vintage and is stale as a description
 of current state — shipping firmware is v0.2.11, which added ADC DSP

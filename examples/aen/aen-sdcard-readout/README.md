@@ -46,12 +46,12 @@ cleanly. No card enumerates because the SD slot is not reachable on this bench:
 > *both on the CC3501E*. Reaching the card needs all of:
 > 1. **A CC3501E GPIO-proxy write that routes the mux** — the coprocessor firmware
 >    *does* implement the opcode: `CMD_GPIO_WRITE` 0x51 dispatches to
->    `handle_gpio_write` in `firmware/cc3501e/src/protocol.c` (firmware `0.4.0`,
+>    `handle_gpio_write` in `cc3501e-bridge-firmware:src/protocol.c` (firmware `0.4.0`,
 >    protocol version `5`), and `ALP_E1M_GPIO_IO20` → raw CC35 `GPIO_26` (`MUX_EN`)
 >    is in the proxy route table. What is missing is a *caller*, not firmware.
 > 2. **The inter-chip SPI1 link brought up in this app** — the link itself is
 >    bench-validated (`include/alp/chips/cc3501e.h` is marked `[BENCH-VERIFIED]`,
->    and the GPIO proxy is PASS in `firmware/cc3501e/BRINGUP_STATUS.md`), but this
+>    and the GPIO proxy is PASS in `cc3501e-bridge-firmware:BRINGUP_STATUS.md`), but this
 >    example never calls `cc3501e_bridge_bringup()`, so no `GPIO_WRITE` reaches the
 >    mux. See [`aen-cc3501e-gpio`](../aen-cc3501e-gpio/) for the proxy path.
 > 3. **SD pad route + DMA translate:** this overlay wires the **D** route (CLK=P4_1,
