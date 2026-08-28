@@ -282,8 +282,9 @@ alp_status_t alp_gpio_configure(alp_gpio_t *pin, alp_gpio_dir_t dir, alp_gpio_pu
  * @param[in] pin    Handle from @ref alp_gpio_open.
  * @param[in] level  true = drive high, false = drive low.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY (pin not
- *         configured as output) / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY (NULL or closed
+ *         @p pin; also a pin not configured as output, on backends
+ *         that report that case this way) / ALP_ERR_IO.
  */
 alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level);
 

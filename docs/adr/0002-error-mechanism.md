@@ -102,21 +102,27 @@ conclusion:
   `ext/renesas/camera.c` (`:64,103,137`), `ext/renesas/inference.c`
   (`:51,66,79`), `ext/renesas/power.c` (`:45`).
 
-**Yocto backend divergence — known, unresolved (not a grandfathered
-outlier).** This one is not a handful of one-off call sites; it is an
-entire backend answering the documented `ALP_ERR_NOT_READY`-on-a-closed-
-handle contract differently from every Zephyr dispatcher.
-`src/yocto/peripheral_{gpio,i2c,spi,uart}.c` gate every op on
-`pin/bus/port == NULL || !...->in_use` and return `ALP_ERR_INVAL` for
-*both* a NULL handle *and* a closed (non-NULL, `in_use == false`) one:
-`peripheral_gpio.c:238,257,277,470,516`, `peripheral_i2c.c:171,190,214`,
-`peripheral_spi.c:180,207,225`, `peripheral_uart.c:290,400`. Concretely,
-`alp_gpio_write(closed_pin, ...)` returns `ALP_ERR_NOT_READY` built for
-Zephyr and `ALP_ERR_INVAL` built for Yocto — the same public symbol
-answering differently depending which backend it was built against,
-undocumented until now. No test pins either side of this one. Recorded
-here as a known, unresolved divergence; this amendment does not change or
-resolve it.
+**Yocto backend divergence — GPIO resolved (#1734), i2c/spi/uart still
+unresolved (not a grandfathered outlier).** This is not a handful of
+one-off call sites; it was an entire backend answering the documented
+`ALP_ERR_NOT_READY`-on-a-closed-handle contract differently from every
+Zephyr dispatcher. `src/yocto/peripheral_{gpio,i2c,spi,uart}.c` each gate
+every op on `pin/bus/port == NULL || !...->in_use`. Issue #1734 brought
+`peripheral_gpio.c` into agreement with the Zephyr convention: `pin ==
+NULL || !pin->in_use` now returns `ALP_ERR_NOT_READY`, split apart from
+any malformed-argument check fused into the same condition (a NULL
+`level` out-param on read, a NULL `cb` on IRQ enable), which still
+returns `ALP_ERR_INVAL` once the handle itself is known good. Pinned by
+`tests/yocto/peripheral_gpio.c` and
+`tests/yocto/peripheral_gpio_closed_pin_status.c`.
+
+`peripheral_i2c.c:171,190,214`, `peripheral_spi.c:180,207,225`, and
+`peripheral_uart.c:290,400` still return `ALP_ERR_INVAL` for *both* a NULL
+handle *and* a closed (non-NULL, `in_use == false`) one — the same
+public-symbol divergence #1734 fixed for GPIO, left open here as a
+separate, larger change (three more families, no test coverage on either
+side yet). Recorded as a known, unresolved divergence for those three;
+this amendment does not change or resolve them.
 
 **Gap: signex unverified.** No signex checkout exists on the host this
 amendment was written from — searched `/home`, `/opt`, `/srv`, `/mnt`,
