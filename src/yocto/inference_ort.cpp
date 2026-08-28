@@ -592,6 +592,8 @@ extern "C" alp_status_t alp_inference_ort_open(struct alp_inference         *h_,
 		return ALP_OK;
 	} catch (...) {
 		if (st) {
+			_release_values(api, st->output_values);
+			_release_values(api, st->input_values);
 			if (st->cpu_mem_info != nullptr) {
 				api->ReleaseMemoryInfo(st->cpu_mem_info);
 			}
