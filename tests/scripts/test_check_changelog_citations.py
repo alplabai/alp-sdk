@@ -120,3 +120,21 @@ def test_released_history_citation_is_not_graded_as_an_error():
     assert head_errs == [], "the unreleased half cites nothing and must be clean"
     assert len(tail_errs) == 1, "the released half's dead citation is still detected"
     assert "new_som.py" in tail_errs[0]
+
+
+def test_dotfile_path_citation_is_matched():
+    """alp-sdk#1755: the path group began `[A-Za-z0-9_]`, so a leading dot meant
+    `.github/workflows/x.yml:12` never matched AT ALL -- silently unchecked
+    rather than reported. Rewriting a bare `x.yml:12` to its real repo-relative
+    `.github/...` path would otherwise REMOVE it from the gate's view."""
+    mod = _load()
+    text = "see `.github/workflows/cross-platform-zephyr.yml:449` for the step"
+    hits = [m.group("path") for m in mod._CITATION.finditer(text)]
+    assert hits == [".github/workflows/cross-platform-zephyr.yml"]
+
+
+def test_plain_path_citation_still_matched():
+    mod = _load()
+    text = "see `scripts/alp_project_loader.py:37` for the constant"
+    hits = [m.group("path") for m in mod._CITATION.finditer(text)]
+    assert hits == ["scripts/alp_project_loader.py"]
