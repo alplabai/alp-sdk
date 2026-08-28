@@ -12,8 +12,32 @@
  * STATUS: UNVALIDATED through dtc/bitbake.
  *
  * TODO (carrier features to port once exercised on the bench):
- *   - Audio: TAS2563 smart-amp pair on I2C0 @0x4D/0x4E, I2S0 -> SSI1
- *     (rcar_sound audio-graph). See chips/tas2563 + issue #25.
+ *   - Audio: TAS2563 smart-amp pair on I2C0 @0x4D/0x4E, fed from I2S0
+ *     through the TMUX1574 path-mux.  Carrier-side facts (addresses,
+ *     channel, mux + shutdown/fault GPIOs, MCLK) are in
+ *     metadata/boards/e1m-x-evk.yaml's `audio:` block.
+ *
+ *     DATA-GATED, not just unwritten.  The SoC side needs four values
+ *     this repo does not carry: which SSI/SSIU node the linux-renesas
+ *     6.1.141-cip43 r9a09g056 dtsi exposes and under which label, its
+ *     binding (an earlier note here said `rcar_sound` -- that is an
+ *     R-Car binding and is UNVERIFIED for this SoC), the PFC function
+ *     for the SSIU pads (metadata/pinmux/v2n.yaml still carries
+ *     e1m_pad/e1m_function "TBD" on every SSIU row), and the real MCLK
+ *     source + rate.  Do not guess any of them.
+ *
+ *     Kernel config: the mainline ASoC `tas2562` driver covers the
+ *     TAS2563 and the BSP defconfig leaves it off, so the codec nodes
+ *     land together with a one-line `CONFIG_SND_SOC_TAS2562=y` .cfg
+ *     fragment -- not before.  A `tas2563-audio.cfg` used to ship ahead
+ *     of the nodes; it was removed (#1171) because a codec driver with
+ *     no DT consumer cannot bind.  Landing that node is also the point
+ *     where I2C-address ownership has to be decided: the kernel codec
+ *     would claim 0x4D/0x4E away from the SDK's own userspace
+ *     chips/tas2563 driver, which reaches them over alp_i2c_*.
+ *
+ *     See chips/tas2563 + issues #25 (codec), #655 (DT/pinctrl
+ *     generation from the SoM layer), #1171.
  *   - Display 1 (J6): ported -- rk055hdmipi4ma0 panel on dsi0 (see below).
  *     Display 2 (J28) is permanently unavailable: it requires DSI1 lane
  *     set, which the V2N/V2M family does not populate.

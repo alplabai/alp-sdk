@@ -54,6 +54,7 @@ on:
       - 'scripts/check_chip_header_status.py'
       - 'scripts/check_i2c_address_uniqueness.py'
       - 'scripts/check_e1m_pinout.py'
+      - 'scripts/check_amp_pad_claims.py'
       - 'scripts/sync_e1m_spec.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
@@ -124,6 +125,7 @@ on:
       - 'scripts/check_chip_header_status.py'
       - 'scripts/check_i2c_address_uniqueness.py'
       - 'scripts/check_e1m_pinout.py'
+      - 'scripts/check_amp_pad_claims.py'
       - 'scripts/sync_e1m_spec.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
@@ -211,6 +213,14 @@ jobs:
       # accidentally claim the same silicon pad on a SoM pinout.
       - name: Check pin conflicts in every SoM peripheral map
         run: python3 scripts/check_pin_conflicts.py
+
+      # #1142: the A55's pad claims live in the Linux devicetree under
+      # meta-alp-sdk/, the CM33's in metadata/pinmux/v2n.yaml's `core`
+      # field (#1157), and neither side could see the other -- which is
+      # how the usb20 OVC gpio-hog silently clobbered the CM33's live
+      # SCK7 mux on P9.6 (errata E3) until a bench session found it.
+      - name: Check no Linux DT pad claim lands on a CM33-owned pad
+        run: python3 scripts/check_amp_pad_claims.py
 
       # Cross-checks every non-TBD E1M pad/function claimed by a SoM
       # pin-mux table against the vendored e1m-spec standard snapshot

@@ -18,6 +18,20 @@
       "ci": "pr-doc-drift.yml:doc-drift"
     },
     {
+      "id": "amp-pad-claims",
+      "description": "No Linux devicetree pad claim (RZV2N_GPIO / RZV2N_PORT_PINMUX under meta-alp-sdk/recipes-kernel/linux/) lands on an RZ/V2N pad metadata/pinmux/v2n.yaml attributes to the CM33 -- the errata E3 P9.6/SCK7 clobber class (#1142).",
+      "runner": "check-script",
+      "script": "scripts/check_amp_pad_claims.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "apt-bounded",
       "description": "No .github/workflows/*.yml step calls apt-get update/install directly -- Acquire::http::Timeout bounds an idle read, not a trickling one, so it must go through scripts/ci/apt-bounded.sh's wall-clock retry wrapper (#1575).",
       "runner": "check-script",
