@@ -1,0 +1,118 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Builds every libFuzzer harness in tests/fuzz/ and gives each a short
+# smoke run.
+#
+# WHY THIS EXISTS: `ALP_BUILD_FUZZ` is opt-in and, until this workflow,
+# NO CI job configured it -- so nothing compiled the ten harnesses under
+# tests/fuzz/.  A harness nothing builds is a harness nothing runs, and
+# it rots silently: `alp_fuzz_gd32_bridge_frame` had been failing to
+# link on dev with `undefined reference to ota_dispatch` (its
+# CMakeLists omitted the ota.c that defines it) with no signal anywhere
+# (#1370).  Every one of these harnesses fuzzes a parser fed by
+# untrusted input -- BLE advertising reports, MQTT frames, a TLS
+# handshake, OPTIGA APDUs, SWD packets, the inter-core mproc frame, the
+# CC3501E and GD32 bridge wire frames, the EEPROM manifest and the
+# update log.  Losing the build is losing the coverage.
+#
+# SCOPE: this is a BUILD + SMOKE gate, deliberately not a fuzzing
+# campaign.  Each target gets a few seconds so the job stays a PR gate.
+# Its job is to catch "does not compile", "does not link" and "crashes
+# on the first input" -- the failure modes that silently disable a
+# harness.  Long-running corpus work belongs in a scheduled job, not
+# here.
+
+name: pr-fuzz-build
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'tests/fuzz/**'
+      - 'src/**'
+      - 'chips/**'
+      - 'firmware/**'
+      - 'include/alp/**'
+      - '.github/workflows/pr-fuzz-build.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'tests/fuzz/**'
+      - 'src/**'
+      - 'chips/**'
+      - 'firmware/**'
+      - 'include/alp/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz-build:
+    name: fuzz · build + smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 3
+
+      - name: Install clang
+        # libFuzzer is clang-only: tests/fuzz/CMakeLists.txt returns
+        # early (with a warning, not an error) under any other
+        # compiler, which is exactly how this whole directory went
+        # unbuilt.  Failing to install clang here must fail the job,
+        # not silently skip the harnesses.
+        timeout-minutes: 20
+        run: |
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y clang
+          clang --version
+
+      - name: Configure with ALP_BUILD_FUZZ=ON
+        timeout-minutes: 5
+        run: |
+          cmake -B build/fuzz -S . \
+            -DALP_BUILD_FUZZ=ON \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++
+
+      - name: Assert the harnesses were actually configured
+        # The clang guard above returns EARLY rather than erroring, so a
+        # mis-detected compiler would produce a green job that built
+        # nothing.  Refuse that outcome explicitly.
+        run: |
+          n=$(cmake --build build/fuzz --target help 2>/dev/null | grep -c '^\.\.\. alp_fuzz_' || true)
+          echo "fuzz targets configured: $n"
+          if [ "$n" -lt 1 ]; then
+            echo "::error::ALP_BUILD_FUZZ=ON produced no alp_fuzz_* targets -- tests/fuzz/ was skipped, not built." >&2
+            exit 1
+          fi
+
+      - name: Build every fuzz harness
+        timeout-minutes: 15
+        run: cmake --build build/fuzz --parallel
+
+      - name: Smoke-run each harness
+        # -runs bounds the work; -error_exitcode makes a crash fail the
+        # job rather than being buried in the log.
+        timeout-minutes: 10
+        run: |
+          set -eu
+          found=0
+          for f in build/fuzz/tests/fuzz/alp_fuzz_*; do
+            [ -x "$f" ] || continue
+            found=$((found + 1))
+            echo "--- $(basename "$f")"
+            "$f" -runs=2000 -max_total_time=10 -error_exitcode=77
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "::error::no alp_fuzz_* binaries were produced" >&2
+            exit 1
+          fi
+          echo "smoke-ran $found harness(es)"
