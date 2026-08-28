@@ -56,7 +56,9 @@ never hangs — if the SE is unreachable you get a bounded error, not a lockup.
 ### 0.1 Version pairing — the SERAM image and the services library must match
 
 The SE firmware image is called **SERAM**. It is the thing
-`se_service_get_se_revision()` reports (`SES A0 v1.110.0 Mar 4 2026`), and it is
+`se_service_get_se_revision()` reports (`SES A0 v1.110.0 Mar 4 2026`) — hal_alif
+documents that call as "Retrieve SERAM version banner"
+(`se_services/include/services_lib_protocol.h`) — and it is
 independent of your application: it is programmed into the module, not built
 from this SDK. The **services library** is the client half — the hal_alif
 `se_services/zephyr/src/se_service.c` this SDK links, whose upstream is Alif's
@@ -105,15 +107,26 @@ the outcome, which points at the first-request path rather than at the service.
 The healthy E1M-AEN801 reference board, on matched v1.110.0 / SETOOLS 1.110.00,
 does not reproduce it (#1700).
 
-Alif has not stated whether the break *causes* this particular fault, so treat
-the mismatch as the first thing to clear, not as a closed root cause. Clear it
-before spending time on the application: it is an unsupported pairing either way.
+Whether the break *causes* that particular fault is the wrong question to wait
+on. **Across an API break any behaviour is permissible** — a clean error, a
+wrong answer, or hardware left in a state neither side intended. Nothing you
+measure on a mismatched pair is evidence about anything, a workaround built on
+one is not safe to ship even when it appears to work, and the next mismatched
+module can fail differently. Fix the pairing first; triage after.
+
+**Alp Lab's position: E1M-AEN tracks Alif's latest released SERAM**, currently
+**v110**, with the services library re-pinned alongside it — see
+[ADR 0030](adr/0030-aen-seram-tracks-alif-latest-as-a-matched-pair.md). If you
+run an E1M-AEN module below that floor, update it; do not wait for a symptom.
 
 > **Open question — which SERAM floor does this SDK's pin require?** alp-sdk
-> pins `hal_alif v2.3.0` (`west.yml`), which supplies the services library.
-> Alif has not published a SERAM ↔ hal_alif mapping, so the safe module baseline
-> is **v110**, matching the version they recommend and the one the reference
-> board runs.
+> pins `hal_alif v2.3.0` (`west.yml`), the newest `hal_alif` release, which
+> supplies the services library. You cannot read the answer off the pin: that
+> library versions itself independently of SETOOLS — `services_lib_protocol.h`
+> declares `SE_SERVICES_VERSION_STRING "0.50.10"`, which is not a number
+> comparable to SERAM v106/v109/v110. Only Alif can supply the mapping, so the
+> module baseline is **v110** on the strength of their recommendation and the
+> reference board, not on a published correspondence.
 
 ## 1. Read-only services — safe, zero-risk
 
