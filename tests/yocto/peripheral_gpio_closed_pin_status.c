@@ -69,8 +69,7 @@ static void test_read_on_closed_pin_returns_not_ready(void)
 
 static void test_irq_enable_on_closed_pin_returns_not_ready(void)
 {
-	alp_status_t rc =
-		alp_gpio_irq_enable(closed_pin(), ALP_GPIO_EDGE_RISING, noop_cb, (void *)0);
+	alp_status_t rc = alp_gpio_irq_enable(closed_pin(), ALP_GPIO_EDGE_RISING, noop_cb, (void *)0);
 	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOT_READY);
 }
 
