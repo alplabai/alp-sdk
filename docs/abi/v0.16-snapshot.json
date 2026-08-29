@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-27",
+  "generated": "2026-08-29",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -2860,7 +2860,7 @@
           "kind": "fnptr"
         },
         "cc3501e_t": {
-          "definition": "typedef struct cc3501e { bool initialised; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool request_lock; } cc3501e_t;",
+          "definition": "typedef struct cc3501e { bool initialised; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t sock_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool sock_busy; bool request_lock; } cc3501e_t;",
           "fields": [
             "bool initialised",
             "alp_spi_t *bus",
@@ -2873,12 +2873,14 @@
             "uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]",
             "uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]",
             "uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]",
+            "uint8_t sock_buf[ALP_CC3501E_MAX_PAYLOAD]",
             "bool wifi_scan_busy",
             "bool ble_scan_busy",
             "bool evt_busy",
+            "bool sock_busy",
             "bool request_lock"
           ],
-          "hash": "367b25dc4369d286",
+          "hash": "f6228ff90dd54979",
           "kind": "struct"
         }
       },
