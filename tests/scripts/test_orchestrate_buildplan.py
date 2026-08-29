@@ -910,11 +910,18 @@ cores:
 """
 
 
-def _write_multicore_fixture(tmp_path: Path) -> tuple[Path, Path]:
+def _write_multicore_fixture(
+    tmp_path: Path, board_body: str = _MULTICORE_BOARD,
+) -> tuple[Path, Path]:
     """Synthetic 4-core SoM/SoC project: 3 buildable cores (mixed
     zephyr + yocto backends) whose dict-insertion order is NOT sorted
     by core_id, plus one `os: off` core.  Returns `(board_yaml,
     metadata_root)`.
+
+    `board_body` defaults to `_MULTICORE_BOARD`; pass a different
+    board.yaml body to exercise a `cores.<id>.toolchain` override
+    (issue #964) against the same synthetic SoM/SoC without duplicating
+    the scratch-metadata-root setup below.
 
     The SoM preset / SoC spec are never schema-validated by
     `load_board_yaml` (only board.yaml is) -- see `loader._resolve_board`
@@ -956,7 +963,7 @@ def _write_multicore_fixture(tmp_path: Path) -> tuple[Path, Path]:
         _MULTICORE_SOM_PRESET, encoding="utf-8")
 
     board_path = tmp_path / "board.yaml"
-    board_path.write_text(_MULTICORE_BOARD, encoding="utf-8")
+    board_path.write_text(board_body, encoding="utf-8")
     return board_path, meta
 
 
@@ -1093,3 +1100,81 @@ def test_emit_build_plan_publishes_execution_policy(tmp_path: Path) -> None:
         "missingTool":    "skip",
         "nullCommand":    "skip",
     }
+
+
+# ---------------------------------------------------------------------
+# Issue #964 -- board.yaml `cores.<core>.toolchain` override.
+# ---------------------------------------------------------------------
+
+_MULTICORE_BOARD_TOOLCHAIN_OVERRIDE = """\
+som:
+  sku: E1M-TST002
+  hw_rev: r1
+cores:
+  delta_off:
+    os: 'off'
+  alpha_zephyr:
+    toolchain: llvm
+"""
+
+
+def test_emit_build_plan_toolchain_override_flows_to_slice(
+    tmp_path: Path,
+) -> None:
+    """A `cores.<core>.toolchain` override (issue #964) replaces the SoM
+    preset's `topology.<core>.toolchain` default in the emitted
+    build-plan's `slices[].toolchain` -- `id`/`targetTriple`/`compiler`
+    all derive from the override, exactly as they already derive from
+    the SoM-preset default (`_slice_toolchain`, unchanged by this
+    feature). The sibling `bravo_zephyr` core, which does NOT override
+    `toolchain:`, still resolves the SoM preset's `arm-zephyr-eabi`
+    default -- proving the override is per-core, not global."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    path, meta = _write_multicore_fixture(
+        tmp_path, board_body=_MULTICORE_BOARD_TOOLCHAIN_OVERRIDE)
+    project = load_board_yaml(path, metadata_root=meta)
+    plan = _json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=Path("build")))
+
+    alpha = next(s for s in plan["slices"] if s["coreId"] == "alpha_zephyr")
+    assert alpha["toolchain"] == {
+        "targetTriple": "llvm",
+        "compiler":     "llvm-gcc",
+        "sysroot":      None,
+        "id":           "llvm",
+    }
+
+    bravo = next(s for s in plan["slices"] if s["coreId"] == "bravo_zephyr")
+    assert bravo["toolchain"] == {
+        "targetTriple": "arm-zephyr-eabi",
+        "compiler":     "arm-zephyr-eabi-gcc",
+        "sysroot":      None,
+        "id":           "arm-zephyr-eabi",
+    }
+
+
+def test_emit_build_plan_no_toolchain_override_keeps_todays_default(
+    tmp_path: Path,
+) -> None:
+    """A board.yaml that never sets `cores.<core>.toolchain` (today's
+    common case -- the `_MULTICORE_BOARD` fixture every other test in
+    this module drives) resolves EVERY slice's toolchain purely from the
+    SoM preset's `topology.<core>.toolchain` default, byte-identical to
+    the pre-#964 behaviour. Absent means unchanged -- the additive-field
+    contract this feature is built to."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    path, meta = _write_multicore_fixture(tmp_path)
+    project = load_board_yaml(path, metadata_root=meta)
+    plan = _json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=Path("build")))
+
+    alpha = next(s for s in plan["slices"] if s["coreId"] == "alpha_zephyr")
+    bravo = next(s for s in plan["slices"] if s["coreId"] == "bravo_zephyr")
+    zulu = next(s for s in plan["slices"] if s["coreId"] == "zulu_yocto")
+    assert alpha["toolchain"]["id"] == "arm-zephyr-eabi"
+    assert bravo["toolchain"]["id"] == "arm-zephyr-eabi"
+    assert zulu["toolchain"]["id"] == "poky-glibc"

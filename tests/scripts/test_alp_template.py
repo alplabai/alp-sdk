@@ -199,6 +199,63 @@ def test_minimal_has_no_declared_parameters_so_it_is_a_pure_copy():
 
 
 # --------------------------------------------------------------------------
+# find_template_by_cores() -- the --cores scaffold selector (issue #1652)
+# --------------------------------------------------------------------------
+
+def test_find_template_by_cores_selects_multicore_mailbox():
+    rec = alp_template.find_template_by_cores(
+        _catalog(), {"m55_hp": "zephyr", "m55_he": "zephyr"})
+    assert rec["id"] == "multicore-mailbox"
+
+
+def test_find_template_by_cores_selects_multicore_rpmsg():
+    rec = alp_template.find_template_by_cores(
+        _catalog(), {"a32_cluster": "yocto", "m55_hp": "zephyr"})
+    assert rec["id"] == "multicore-rpmsg"
+
+
+def test_find_template_by_cores_topology_order_does_not_matter():
+    """dict equality, not list equality -- {a: 1, b: 2} == {b: 2, a: 1}."""
+    rec = alp_template.find_template_by_cores(
+        _catalog(), {"m55_hp": "zephyr", "a32_cluster": "yocto"})
+    assert rec["id"] == "multicore-rpmsg"
+
+
+def test_find_template_by_cores_no_match_names_known_topologies():
+    with pytest.raises(alp_template.TemplateNotFoundError) as exc:
+        alp_template.find_template_by_cores(
+            _catalog(), {"m55_hp": "zephyr", "m55_he": "yocto"})
+    # `multicore-mailbox`'s real topology (m55_hp+m55_he, both zephyr)
+    # is in the "known" list, so a wizard can see what IS on offer.
+    assert "m55_he" in str(exc.value)
+    assert "zephyr" in str(exc.value)
+
+
+def test_find_template_by_cores_ambiguous_topology_names_candidates():
+    """`{"m55_hp": "zephyr"}` alone matches every single-M55-core AEN
+    template (minimal/peripheral/sensor/diagnostics/iot) -- an
+    AmbiguousCoresError naming them all, not a silent pick of one."""
+    with pytest.raises(alp_template.AmbiguousCoresError) as exc:
+        alp_template.find_template_by_cores(_catalog(), {"m55_hp": "zephyr"})
+    assert "minimal" in str(exc.value)
+    assert "peripheral" in str(exc.value)
+
+
+def test_scaffold_via_cores_matches_scaffold_via_template():
+    """The two selectors are alternative INPUTS to the same render
+    path -- --cores must never diverge from what --template already
+    produces for the template it resolves to (issue #1652's fallback-
+    unchanged requirement)."""
+    rec = alp_template.find_template_by_cores(
+        _catalog(), {"m55_hp": "zephyr", "m55_he": "zephyr"})
+    assert rec["id"] == "multicore-mailbox"
+    via_cores = alp_template.render_to_envelope(rec["id"], "E1M-AEN801")
+    via_template = alp_template.render_to_envelope(
+        "multicore-mailbox", "E1M-AEN801")
+    assert via_cores == via_template
+
+
+# --------------------------------------------------------------------------
 # Parameter substitution -- synthetic fixture.
 #
 # No parameter in the SHIPPED catalog declares a substitution target
