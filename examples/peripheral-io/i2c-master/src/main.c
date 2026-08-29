@@ -14,8 +14,9 @@
  * E1M and E1M-X EVK, strapped to 7-bit address 0x47 (SDO -> VDDIO)
  * on both -- see metadata/boards/e1m-evk.yaml and
  * metadata/boards/e1m-x-evk.yaml `i2c_devices:`.  On a brand-new
- * bring-up you may want to run examples/peripheral-io/i2c-scanner
- * first to confirm which address ACKs.
+ * bring-up you may want to build and run the alp-sdk repo's
+ * examples/peripheral-io/i2c-scanner example first to confirm which
+ * address ACKs -- it isn't part of this scaffolded project.
  *
  * (#1269: this example used to target the TMP112 temperature
  * sensor, but TMP112 lives on BRD_I2C, not on BOARD_I2C_SENSORS --
@@ -105,7 +106,7 @@ int main(void)
      * (NACK on probe) up-front.  If init fails the example exits
      * cleanly -- maybe the chip isn't populated, maybe the address
      * is wrong, maybe the bus is held low by another device.
-     * i2c-scanner can confirm which devices ACK. */
+     * examples/peripheral-io/i2c-scanner can confirm which devices ACK. */
 	bmp581_t     sensor;
 	alp_status_t s = bmp581_init(&sensor, bus, BMP581_ADDR_7BIT);
 	if (s != ALP_OK) {
@@ -115,8 +116,9 @@ int main(void)
          *                     (the bus floats high without them).
          *   * ALP_ERR_INVAL -- bad argument (NULL ctx or NULL bus).
          *
-         * Use i2c-scanner to enumerate what IS on this bus before
-         * chasing a BMP581 that may not be populated. */
+         * Use the alp-sdk repo's examples/peripheral-io/i2c-scanner
+         * example to enumerate what IS on this bus before chasing a
+         * BMP581 that may not be populated. */
 		printf("[i2c-master] bmp581_init @ 0x%02x -> %d "
 		       "(populated? right address?)\n",
 		       BMP581_ADDR_7BIT,
