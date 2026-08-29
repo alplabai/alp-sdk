@@ -7,6 +7,39 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Fixed — CC3501E socket send/recv put 4 KB buffers on the caller's stack
+
+`cc3501e_sock_send()` and `cc3501e_sock_recv()` each declared
+`uint8_t x[ALP_CC3501E_MAX_PAYLOAD]` — a 4096-byte array — as a local. The Zephyr
+shell thread is `CONFIG_SHELL_STACK_SIZE=2048`, so any shell caller that reached
+those frames overflowed the stack. Observed on E1M-AEN801 as a hard fault from
+`alp companion sock tcp-get`:
+
+```
+E: ***** USAGE FAULT *****
+E:   Stack overflow (context area not valid)
+```
+
+Both buffers now use per-context scratch (`ctx->sock_buf`) guarded by
+`ctx->sock_busy` — the pattern issue #740 established for `wifi_scan_buf` /
+`ble_scan_buf` / `evt_buf`, which the socket path was missed by.
+
+It looks intermittent but is not: the 4 KB frames are only allocated once a
+socket connect **succeeds**, so runs whose connects failed early never entered
+the frames and never faulted. Reaching the defect is what varies; any successful
+`tcp-get` from the shell overflows deterministically.
+
+Same reentrancy caveat as #740 — `sock_busy` catches same-call-stack reentrancy,
+not two genuinely concurrent callers on one ctx. `struct cc3501e` gains
+`sock_buf` and `sock_busy`, so the v0.16 ABI snapshot is regenerated (additive;
+no symbol removed).
+
+**Not yet verified on silicon**: proving it needs a *successful* `tcp-get`, and
+the Alif console app could not be rebuilt (its Zephyr configuration is generated
+by `scripts/alp_orchestrate.py` and three attempts to reconstruct that
+environment failed at kconfig). This is a fix by inspection with a named
+mechanism, not a bench-proven one.
+
 ### Fixed — the CC3501E attention line was masked by the first edge and never re-armed
 
 Interrupt-driven async-event delivery (`CONFIG_ALP_SDK_CC3501E_EVENT_IRQ`) never
