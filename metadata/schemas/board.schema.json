@@ -603,6 +603,10 @@
           "type": "string",
           "description": "Yocto bitbake recipe name that packages this core's `app:` source directory (e.g. `alp-lvgl-dashboard`).  Required for an app-only `os: yocto` slice (`app:` set, no `image:`) -- without it the slice has no valid bitbake target and the emitted plan carries `command: null` plus a `yocto-recipe-missing` warning rather than an invalid `bitbake <path>` command."
         },
+        "toolchain": {
+          "type": "string",
+          "description": "Override this slice's toolchain identifier (issue #964), replacing the SoM preset's `topology.<core_id>.toolchain` default (e.g. `arm-zephyr-eabi` for Zephyr, `poky-glibc` for Yocto). Optional -- omit to keep the derived default; every existing board.yaml keeps its current compiler unchanged. Free-form string, passed through verbatim to `--emit build-plan`'s `slices[].toolchain.id` and `system-manifest.yaml`'s `slices[].toolchain` (the same field the SoM-derived default already populates) -- e.g. `llvm` for a Zephyr slice built with the LLVM toolchain variant. For `os: zephyr`, this value ALSO derives `targetTriple`/`compiler` (`<toolchain>`/`<toolchain>-gcc`) in the emitted build-plan the same way the SoM default does; a non-GCC-triple-shaped override (like `llvm`) still populates `id` correctly but the derived `compiler` name will not be meaningful -- resolving that (a vendor-toolchain path, an enum vs. free-form value set) is an open follow-up, not solved by this field."
+        },
         "peripherals": {
           "type": "array",
           "uniqueItems": true,
