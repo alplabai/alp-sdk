@@ -155,6 +155,7 @@ alp_status_t alp_z_gpio_open_owned(uint32_t                  pin_id,
                                    alp_capabilities_t       *caps_out,
                                    alp_gpio_backend_state_t *owner_state)
 {
+	(void)caps_out;
 	struct gpio_dt_spec spec;
 	if (!alp_z_gpio_resolve(pin_id, &spec)) return ALP_ERR_INVAL;
 	if (!device_is_ready(spec.port)) return ALP_ERR_NOT_READY;
