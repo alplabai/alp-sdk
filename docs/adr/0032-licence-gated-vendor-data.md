@@ -27,11 +27,13 @@ never passes through it.
 **The root `NOTICE` already says the opposite, in public.** Its "Vendor BSPs and
 SDK binaries" paragraph reads, verbatim:
 
-> Silicon-vendor BSPs and SDK binaries (Alif Ensemble, Renesas RZ/V2N, NXP
-> i.MX93, DEEPX DX-M1) are NOT redistributed in this repository. They are
-> obtained directly from the vendor under the vendor's own license. The
-> vendors/<name>/ directories here contain only Alp Lab's own integration
-> shims (Apache-2.0) plus instructions; see each vendors/<name>/README.md.
+```text
+Silicon-vendor BSPs and SDK binaries (Alif Ensemble, Renesas RZ/V2N, NXP
+i.MX93, DEEPX DX-M1) are NOT redistributed in this repository. They are
+obtained directly from the vendor under the vendor's own license. The
+vendors/<name>/ directories here contain only Alp Lab's own integration
+shims (Apache-2.0) plus instructions; see each vendors/<name>/README.md.
+```
 
 Vendoring an Alif file contradicts that sentence. So the work is not "create a
 `LICENSES/` directory" — it is **amending a licence representation this
