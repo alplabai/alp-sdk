@@ -86,15 +86,23 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 
 	/* SOCK_SEND (0x22) wire = alp_cc3501e_sock_send_t (8 B) + inline data; reply
 	 * DATA = uint16_t LE queued-byte count. */
-	uint8_t p[ALP_CC3501E_MAX_PAYLOAD];
-	p[0] = (uint8_t)(handle & 0xFFu);
-	p[1] = (uint8_t)((handle >> 8) & 0xFFu);
-	p[2] = 0u; /* flags (MORE bit unused here) */
-	p[3] = 0u;
-	p[4] = (uint8_t)(len & 0xFFu);
-	p[5] = (uint8_t)((len >> 8) & 0xFFu);
-	p[6] = 0u;
-	p[7] = 0u;
+	/* Per-context scratch, NOT a 4 KB stack frame.  This was
+	 * `uint8_t p[ALP_CC3501E_MAX_PAYLOAD]` -- 4096 bytes on the caller's stack.
+	 * The Zephyr shell thread is CONFIG_SHELL_STACK_SIZE=2048, so
+	 * `alp companion sock tcp-get` overflowed it deterministically and the
+	 * application took a USAGE FAULT.  Issue #740 moved the scan/event decode
+	 * buffers off the stack for this exact reason; the socket path was missed. */
+	if (ctx->sock_busy) return ALP_ERR_BUSY;
+	ctx->sock_busy = true;
+	uint8_t *p     = ctx->sock_buf;
+	p[0]           = (uint8_t)(handle & 0xFFu);
+	p[1]           = (uint8_t)((handle >> 8) & 0xFFu);
+	p[2]           = 0u; /* flags (MORE bit unused here) */
+	p[3]           = 0u;
+	p[4]           = (uint8_t)(len & 0xFFu);
+	p[5]           = (uint8_t)((len >> 8) & 0xFFu);
+	p[6]           = 0u;
+	p[7]           = 0u;
 	if (len > 0u) memcpy(&p[CC3501E_SOCK_SEND_HDR], data, len);
 
 	uint8_t      reply[2] = { 0 };
@@ -107,6 +115,7 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 	                                       sizeof(reply),
 	                                       &got,
 	                                       timeout_ms);
+	ctx->sock_busy        = false;
 	if (s != ALP_OK) return s;
 	if (sent_out != NULL && got >= 2u) {
 		*sent_out = (size_t)((uint16_t)reply[0] | ((uint16_t)reply[1] << 8));
@@ -158,10 +167,21 @@ alp_status_t cc3501e_sock_recv(cc3501e_t *ctx,
 		             (uint8_t)(want & 0xFFu),
 		             (uint8_t)((want >> 8) & 0xFFu) };
 
-	uint8_t      reply[ALP_CC3501E_MAX_PAYLOAD];
-	size_t       got = 0;
-	alp_status_t s   = poll_by_repeat(
-	    ctx, ALP_CC3501E_CMD_SOCK_RECV, p, sizeof(p), reply, sizeof(reply), &got, timeout_ms);
+	/* Per-context scratch, NOT a 4 KB stack frame -- see the note in
+	 * cc3501e_sock_send() above and cc3501e_t's sock_buf comment. */
+	if (ctx->sock_busy) return ALP_ERR_BUSY;
+	ctx->sock_busy     = true;
+	uint8_t     *reply = ctx->sock_buf;
+	size_t       got   = 0;
+	alp_status_t s     = poll_by_repeat(ctx,
+	                                    ALP_CC3501E_CMD_SOCK_RECV,
+	                                    p,
+	                                    sizeof(p),
+	                                    reply,
+	                                    sizeof(ctx->sock_buf),
+	                                    &got,
+	                                    timeout_ms);
+	ctx->sock_busy     = false;
 	if (s != ALP_OK) return s;
 	if (got < CC3501E_SOCK_RECV_RESP_HDR) return ALP_ERR_IO; /* short reply header */
 

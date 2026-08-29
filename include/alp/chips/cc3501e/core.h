@@ -112,9 +112,22 @@ struct cc3501e {
 	uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD];
 	uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD];
 	uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD];
+	/* Socket send/recv staging.  cc3501e_sockets.c used to declare
+	 * `uint8_t p[ALP_CC3501E_MAX_PAYLOAD]` (send) and
+	 * `uint8_t reply[ALP_CC3501E_MAX_PAYLOAD]` (recv) as LOCALS -- 4 KB stack
+	 * frames each.  The Zephyr shell thread is CONFIG_SHELL_STACK_SIZE=2048, so
+	 * `alp companion sock tcp-get` overflowed it deterministically and the app
+	 * took a USAGE FAULT ("Stack overflow (context area not valid)").
+	 *
+	 * Issue #740 already moved the scan/event decode buffers off the stack for
+	 * exactly this reason; the socket path was missed by that sweep.  Same
+	 * pattern, same caveat: sock_busy catches same-call-stack reentrancy, not
+	 * two truly concurrent callers on one ctx. */
+	uint8_t sock_buf[ALP_CC3501E_MAX_PAYLOAD];
 	bool    wifi_scan_busy;
 	bool    ble_scan_busy;
 	bool    evt_busy;
+	bool    sock_busy;
 	/* Transport-transaction lock (issue #1116): serialises the whole
 	 * cc3501e_request() 4-phase exchange (and therefore tx_scratch /
 	 * rx_scratch above) across every caller sharing this ctx -- the
