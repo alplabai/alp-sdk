@@ -67,6 +67,7 @@ static void _free_state(gd32_bridge_state_t *s)
 static alp_status_t
 gd32_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	/* E1M reserves 2 DAC channels (ALP_E1M_DAC_COUNT); the bridge
      * routes DAC0/DAC1 to the GD32's PA4 / PA6 pads. */
 	if (cfg->channel_id >= 2u) {
@@ -92,10 +93,9 @@ gd32_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st, alp_capabili
 	bs->channel = (uint8_t)cfg->channel_id;
 	bs->last_mv = cfg->initial_mv;
 
-	st->dev         = NULL; /* bridge sentinel */
-	st->channel_id  = cfg->channel_id;
-	st->be_data     = bs;
-	caps_out->flags = 0u;
+	st->dev        = NULL; /* bridge sentinel */
+	st->channel_id = cfg->channel_id;
+	st->be_data    = bs;
 	return ALP_OK;
 }
 

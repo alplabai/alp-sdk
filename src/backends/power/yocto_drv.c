@@ -184,10 +184,11 @@ static alp_status_t _program_wakealarm(uint32_t wake_after_ms)
 
 static alp_status_t y_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	(void)state;
 	/* The generic sysfs sleep ABI has no queryable capability surface
-     * beyond presence, so caps stay 0 -- same as the RTC/WDT backends. */
-	if (caps_out != NULL) caps_out->flags = 0u;
+     * beyond presence -- caps_out is left untouched (not reported),
+     * same as the RTC/WDT backends. */
 	return ALP_OK;
 }
 

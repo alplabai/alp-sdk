@@ -46,11 +46,11 @@ static size_t  _count = 0u; /* bytes currently buffered */
 static alp_status_t
 sw_open(const alp_uart_config_t *cfg, alp_uart_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	(void)cfg;
-	st->dev         = NULL;
-	st->port_id     = 0u;
-	st->be_data     = NULL;
-	caps_out->flags = 0u;
+	st->dev     = NULL;
+	st->port_id = 0u;
+	st->be_data = NULL;
 	/* Reset the circular buffer state on each open */
 	_head  = 0u;
 	_tail  = 0u;

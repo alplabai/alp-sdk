@@ -46,13 +46,13 @@ static alp_status_t _errno_to_alp(int err)
 static alp_status_t
 z_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (rtc_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (rtc_id >= ALP_SOC_RTC_COUNT) return ALP_ERR_OUT_OF_RANGE;
 	const struct device *dev = _devs[rtc_id];
 	if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
-	st->dev         = (void *)dev;
-	st->rtc_id      = rtc_id;
-	caps_out->flags = 0u;
+	st->dev    = (void *)dev;
+	st->rtc_id = rtc_id;
 	return ALP_OK;
 }
 

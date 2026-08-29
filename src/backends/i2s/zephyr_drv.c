@@ -131,6 +131,7 @@ static i2s_fmt_t _to_fmt(alp_i2s_format_t f)
 static alp_status_t
 z_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (cfg->bus_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (cfg->bus_id >= ALP_SOC_I2S_COUNT) return ALP_ERR_OUT_OF_RANGE;
 	const struct device *dev = _devs[cfg->bus_id];
@@ -176,10 +177,9 @@ z_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st, alp_capabilitie
 		return _errno_to_alp(err);
 	}
 
-	st->dev         = (void *)dev;
-	st->bus_id      = cfg->bus_id;
-	st->be_data     = s;
-	caps_out->flags = 0u;
+	st->dev     = (void *)dev;
+	st->bus_id  = cfg->bus_id;
+	st->be_data = s;
 	return ALP_OK;
 }
 

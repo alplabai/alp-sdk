@@ -328,6 +328,7 @@ static void on_disconnect(struct mosquitto *mosq, void *obj, int rc)
 static alp_status_t
 y_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *state, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	/* The dispatcher has already validated cfg / broker_uri /
 	 * client_id non-NULL. */
 	if (!g_mosq_lib_init_done) {
@@ -373,8 +374,7 @@ y_open(const alp_mqtt_config_t *cfg, alp_mqtt_backend_state_t *state, alp_capabi
 	mosquitto_connect_callback_set(be->mosq, on_connect);
 	mosquitto_disconnect_callback_set(be->mosq, on_disconnect);
 
-	state->be_data  = be;
-	caps_out->flags = 0u;
+	state->be_data = be;
 	return ALP_OK;
 }
 

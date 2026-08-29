@@ -228,6 +228,7 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
                               alp_inference_backend_state_t *state,
                               alp_capabilities_t            *caps_out)
 {
+	(void)caps_out;
 	/* Pinned-backend gate (the dispatcher contract in
 	 * src/inference_dispatch.c: a pinned open the serving backend
 	 * cannot honour returns NOSUPPORT).  This vtable serves the CPU
@@ -346,9 +347,8 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		return ALP_ERR_IO;
 	}
 
-	state->be_data  = st;
-	state->dev      = nullptr;
-	caps_out->flags = 0u; /* per-instance flags layered by NPU backends */
+	state->be_data = st;
+	state->dev     = nullptr;
 	return ALP_OK;
 }
 

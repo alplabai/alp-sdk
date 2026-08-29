@@ -81,6 +81,7 @@ static void _free_state(gd32_pwm_state_t *s)
 static alp_status_t
 br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	/* E1M spec reserves 8 PWM channels; all map to GD32 timers.
      * Mirror the adc bridge + the peripheral suite contract: an
      * out-of-range channel is INVAL (not OUT_OF_RANGE). */
@@ -123,10 +124,9 @@ br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabiliti
 	bs->period_ns  = h->period_ns;
 	bs->duty_ns    = 0u;
 
-	st->dev         = NULL; /* bridge sentinel */
-	st->channel_id  = cfg->channel_id;
-	st->be_data     = bs;
-	caps_out->flags = 0u; /* no HW dead-time/break advertised via bridge */
+	st->dev        = NULL; /* bridge sentinel */
+	st->channel_id = cfg->channel_id;
+	st->be_data    = bs;
 	return ALP_OK;
 }
 

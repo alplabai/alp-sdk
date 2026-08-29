@@ -265,7 +265,7 @@ alp_ble_t *alp_ble_open(void)
 	}
 	h->backend              = be;
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	alp_status_t       rc   = ops->open(&h->state, &caps);
 	if (rc != ALP_OK) {
 		_free_radio(h);

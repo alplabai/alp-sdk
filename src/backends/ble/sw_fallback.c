@@ -39,8 +39,8 @@
 
 static alp_status_t sw_open(alp_ble_radio_state_t *st, alp_capabilities_t *caps_out)
 {
-	st->be_data     = NULL;
-	caps_out->flags = 0u;
+	(void)caps_out;
+	st->be_data = NULL;
 	return ALP_OK;
 }
 

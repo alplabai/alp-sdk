@@ -247,8 +247,7 @@ static alp_status_t sw_open(alp_gpu2d_backend_state_t *state, alp_capabilities_t
 {
 	state->be_data = NULL;
 	if (caps_out != NULL) {
-		caps_out->flags               = 0u; /* CPU path: no DMA */
-		caps_out->max_sample_rate     = 0u;
+		caps_out->max_rate_hz         = 0u;
 		caps_out->max_resolution_bits = 0u;
 		caps_out->channel_count       = 0u;
 	}

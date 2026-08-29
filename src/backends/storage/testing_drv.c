@@ -277,15 +277,15 @@ static alp_status_t t_open(const alp_storage_config_t  *cfg,
                            alp_storage_backend_state_t *st,
                            alp_capabilities_t          *caps_out)
 {
+	(void)caps_out;
 	alp_testing_storage_slot_t *slot = alp_testing_instance_table_touch(table(), cfg->instance_id);
 	if (slot == NULL) return ALP_ERR_NOMEM;
 
 	/* kind / read_only / instance_id are already stamped onto `st` by
 	 * the dispatcher (src/storage_dispatch.c) before this op runs --
 	 * mirrors zephyr_flash.c's z_open() / sw_fallback.c's sw_open(). */
-	st->dev         = NULL;
-	st->be_data     = slot;
-	caps_out->flags = 0u;
+	st->dev     = NULL;
+	st->be_data = slot;
 	return ALP_OK;
 }
 

@@ -167,10 +167,9 @@ alp_status_t alp_z_gpio_open_owned(uint32_t                  pin_id,
 	 * alp_z_gpio_open_owned()'s contract in gpio_ops.h and issue #1618. */
 	s->owner = (owner_state != NULL) ? CONTAINER_OF(owner_state, struct alp_gpio, state) : NULL;
 
-	st->dev         = (void *)spec.port;
-	st->pin_id      = pin_id;
-	st->be_data     = s;
-	caps_out->flags = 0u;
+	st->dev     = (void *)spec.port;
+	st->pin_id  = pin_id;
+	st->be_data = s;
 	return ALP_OK;
 }
 

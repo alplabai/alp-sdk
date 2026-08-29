@@ -320,6 +320,7 @@ static alp_status_t y_in_open(const alp_audio_config_t     *cfg,
                               alp_audio_in_backend_state_t *state,
                               alp_capabilities_t           *caps_out)
 {
+	(void)caps_out;
 	if (cfg == NULL) return ALP_ERR_INVAL;
 	if (format_bytes(cfg->format) == 0) return ALP_ERR_INVAL;
 
@@ -348,8 +349,7 @@ static alp_status_t y_in_open(const alp_audio_config_t     *cfg,
 	d->format           = cfg->format;
 	d->frames_per_block = cfg->frames_per_block;
 
-	state->be_data  = d;
-	caps_out->flags = 0u;
+	state->be_data = d;
 	return ALP_OK;
 }
 
@@ -453,6 +453,7 @@ static alp_status_t y_out_open(const alp_audio_config_t      *cfg,
                                alp_audio_out_backend_state_t *state,
                                alp_capabilities_t            *caps_out)
 {
+	(void)caps_out;
 	if (cfg == NULL) return ALP_ERR_INVAL;
 	if (format_bytes(cfg->format) == 0) return ALP_ERR_INVAL;
 
@@ -506,9 +507,8 @@ static alp_status_t y_out_open(const alp_audio_config_t      *cfg,
 	}
 	d->scratch_frames = cfg->frames_per_block;
 
-	state->volume   = 255u; /* full volume by default */
-	state->be_data  = d;
-	caps_out->flags = 0u;
+	state->volume  = 255u; /* full volume by default */
+	state->be_data = d;
 	return ALP_OK;
 }
 

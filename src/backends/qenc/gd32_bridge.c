@@ -18,6 +18,7 @@
 static alp_status_t
 br_open(const alp_qenc_config_t *cfg, alp_qenc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	/* Probe the supervisor up front so open() surfaces bus failures
      * instead of deferring them to the first read. */
 	gd32g553_t  *ctx = NULL;
@@ -27,7 +28,6 @@ br_open(const alp_qenc_config_t *cfg, alp_qenc_backend_state_t *st, alp_capabili
 	st->dev           = NULL; /* bridge sentinel */
 	st->encoder_id    = cfg->encoder_id;
 	st->last_position = 0;
-	caps_out->flags   = 0u;
 	return ALP_OK;
 }
 

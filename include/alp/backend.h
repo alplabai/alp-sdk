@@ -50,7 +50,8 @@ extern "C" {
 typedef struct alp_backend {
 	const char *silicon_ref;
 	const char *vendor;
-	uint32_t    base_caps;
+	uint32_t    base_caps;        /* seeds alp_capabilities_t.flags (universal bits) */
+	uint32_t    base_class_flags; /* seeds alp_capabilities_t.class_flags (class-owned bits) */
 	uint8_t     priority;
 	const void *ops;
 	int (*probe)(uint32_t instance_id, uint32_t *refined_caps);

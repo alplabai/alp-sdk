@@ -112,7 +112,7 @@ gd32_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capabili
 	st->resolution_bits = 16u;
 
 	caps_out->max_resolution_bits = 12u; /* the SoC actually delivers 12-bit */
-	caps_out->max_sample_rate     = 0u;  /* not advertised at v0.7 */
+	caps_out->max_rate_hz         = 0u;  /* not advertised at v0.7 */
 	caps_out->channel_count       = 8u;
 	return ALP_OK;
 }

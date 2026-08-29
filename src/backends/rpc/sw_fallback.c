@@ -47,9 +47,9 @@
 static alp_status_t
 sw_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	(void)cfg;
-	st->be_data     = NULL;
-	caps_out->flags = 0u;
+	st->be_data = NULL;
 	return ALP_OK;
 }
 

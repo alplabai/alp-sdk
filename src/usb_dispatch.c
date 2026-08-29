@@ -108,7 +108,7 @@ alp_usb_dev_t *alp_usb_device_open(const alp_usb_device_config_t *cfg)
 	h->backend              = be;
 	h->state.ops            = ops;
 	h->state.cfg            = *cfg;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	alp_status_t       rc   = ops->dev_open(cfg, &h->state, &caps);
 	if (rc != ALP_OK) {
 		_free_dev(h);
@@ -225,7 +225,7 @@ alp_usb_host_t *alp_usb_host_open(void)
 	}
 	h->backend              = be;
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	alp_status_t       rc   = ops->host_open(&h->state, &caps);
 	if (rc != ALP_OK) {
 		_free_host(h);

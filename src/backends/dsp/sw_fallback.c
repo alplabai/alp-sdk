@@ -520,11 +520,10 @@ static alp_status_t sw_open(const alp_dsp_stage_t   *stages,
 	}
 
 	/* Already atomically claimed true by acquire_be_slot() -- nothing
-	 * further to publish here. */
+	 * further to publish here.  caps_out left untouched: this backend
+	 * has nothing to report (Wave 1, #1640). */
+	(void)caps_out;
 	state->be_data = be;
-	if (caps_out != NULL) {
-		caps_out->flags = 0u;
-	}
 	return ALP_OK;
 }
 

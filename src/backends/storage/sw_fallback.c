@@ -35,10 +35,10 @@ static alp_status_t sw_open(const alp_storage_config_t  *cfg,
                             alp_storage_backend_state_t *st,
                             alp_capabilities_t          *caps_out)
 {
+	(void)caps_out;
 	(void)cfg;
-	st->dev         = NULL;
-	st->be_data     = NULL;
-	caps_out->flags = 0u;
+	st->dev     = NULL;
+	st->be_data = NULL;
 	return ALP_OK;
 }
 

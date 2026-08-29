@@ -18,7 +18,8 @@ int demo_open(demo_handle_t *h, uint32_t instance_id)
 	}
 	h->backend                  = be;
 	h->caps.flags               = be->base_caps;
-	h->caps.max_sample_rate     = 0u;
+	h->caps.class_flags         = be->base_class_flags;
+	h->caps.max_rate_hz         = 0u;
 	h->caps.max_resolution_bits = 0u;
 	h->caps.channel_count       = 1u;
 	if (be->probe != NULL) {
