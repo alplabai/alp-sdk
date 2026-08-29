@@ -150,6 +150,12 @@ class PathEscapeError(TemplateError):
     followed), not by pattern-matching for `..`."""
 
 
+class AmbiguousCoresError(TemplateError):
+    """`find_template_by_cores()`'s `cores` topology matches more than
+    one catalog record -- naming the candidates rather than guessing
+    which one the caller meant (use `--template` to disambiguate)."""
+
+
 @dataclasses.dataclass(frozen=True)
 class RenderPlan:
     """What render() would do -- returned for BOTH the dry-run preview
@@ -191,6 +197,49 @@ def find_template(doc: dict[str, Any], template_id: str) -> dict[str, Any]:
     known = ", ".join(sorted(t["id"] for t in doc.get("templates", [])))
     raise TemplateNotFoundError(
         f"no template {template_id!r} in catalog (known: {known})")
+
+
+def find_template_by_cores(
+    doc: dict[str, Any], cores: dict[str, str],
+) -> dict[str, Any]:
+    """Select the catalog record whose `cores:` topology (core id ->
+    os) is EXACTLY `cores` -- issue #1652's `--cores` scaffold input.
+
+    This is a SELECTOR over the catalog's existing templates, not a
+    generic skeleton renderer: an IDE wizard names the core/OS
+    topology it wants (e.g. `{"m55_hp": "zephyr", "m55_he":
+    "zephyr"}`) instead of naming a template id, and gets back
+    whichever already-gated example matches -- never an arbitrary,
+    never-built combination. See the issue's recorded decision: the
+    scaffold's value to a customer is that the generated app builds on
+    their SoM, which only holds for a topology this SDK already ships
+    and twister-gates.
+
+    No exact match -> TemplateNotFoundError naming the topologies that
+    ARE on offer. More than one exact match -> AmbiguousCoresError
+    naming the candidate ids (use --template to disambiguate; this can
+    happen when two templates share a core/OS shape but differ in
+    what they actually do, e.g. an RPMsg demo vs a compute-offload
+    demo on the same SoM).
+    """
+    def _topology(rec: dict[str, Any]) -> dict[str, str]:
+        return {c["id"]: c["os"] for c in rec.get("cores", [])}
+
+    matches = [rec for rec in doc.get("templates", [])
+               if _topology(rec) == cores]
+    if not matches:
+        known = sorted(
+            {tuple(sorted(_topology(rec).items()))
+             for rec in doc.get("templates", [])})
+        raise TemplateNotFoundError(
+            f"no template with cores topology {cores!r} in catalog "
+            f"(known topologies: {known})")
+    if len(matches) > 1:
+        ids = sorted(rec["id"] for rec in matches)
+        raise AmbiguousCoresError(
+            f"cores topology {cores!r} matches multiple templates "
+            f"{ids} -- use --template to disambiguate")
+    return matches[0]
 
 
 def _coerce(spec: dict[str, Any], raw: Any) -> Any:
