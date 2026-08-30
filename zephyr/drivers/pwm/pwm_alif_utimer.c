@@ -60,6 +60,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/drivers/pwm.h>
+#include <zephyr/sys/sys_io.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -87,143 +88,178 @@ LOG_MODULE_REGISTER(pwm_alif_utimer, CONFIG_PWM_LOG_LEVEL);
 /* UTIMER driver-output indices: 0 = channel A (COMPARE_A / driver A),
  * 1 = channel B (COMPARE_B / driver B).  The pwm child node's first DT cell
  * `channel` carries this directly. */
-#define UTIMER_DRIVER_A 0U
-#define UTIMER_DRIVER_B 1U
+#define UTIMER_DRIVER_A    0U
+#define UTIMER_DRIVER_B    1U
 #define UTIMER_NUM_DRIVERS 2U
 
 struct pwm_alif_config {
-    /* Timer block base (the parent utimer node's reg[0]); mapped via the
+	/* Timer block base (the parent utimer node's reg[0]); mapped via the
 	 * MMIO machinery so a virtual address is available on MMU targets. */
-    DEVICE_MMIO_ROM;
-    /* Global UTIMER block base (parent reg[1], reg-names "global"); the
+	DEVICE_MMIO_ROM;
+	/* Global UTIMER block base (parent reg[1], reg-names "global"); the
 	 * GLB_* HAL ops operate on this address.  On the M55 cores the UTIMER
 	 * window is identity-mapped, so the raw physical base is also the
 	 * address the HAL pokes; we carry it as a plain uintptr_t. */
-    uintptr_t                        global_base;
-    uint32_t                         clock_freq;
-    uint8_t                          timer_id;
-    const struct pinctrl_dev_config *pcfg;
+	uintptr_t                        global_base;
+	uint32_t                         clock_freq;
+	uint8_t                          timer_id;
+	const struct pinctrl_dev_config *pcfg;
 };
 
 struct pwm_alif_data {
-    DEVICE_MMIO_RAM;
+	DEVICE_MMIO_RAM;
 };
 
 static int pwm_alif_get_cycles_per_sec(const struct device *dev, uint32_t channel, uint64_t *cycles)
 {
-    const struct pwm_alif_config *config = dev->config;
+	const struct pwm_alif_config *config = dev->config;
 
-    ARG_UNUSED(channel);
+	ARG_UNUSED(channel);
 
-    *cycles = (uint64_t)config->clock_freq;
-    return 0;
+	*cycles = (uint64_t)config->clock_freq;
+	return 0;
 }
 
-static int pwm_alif_set_cycles(const struct device *dev, uint32_t channel, uint32_t period_cycles,
-                               uint32_t pulse_cycles, pwm_flags_t flags)
+static int pwm_alif_set_cycles(const struct device *dev,
+                               uint32_t             channel,
+                               uint32_t             period_cycles,
+                               uint32_t             pulse_cycles,
+                               pwm_flags_t          flags)
 {
-    const struct pwm_alif_config *config = dev->config;
-    /* The hal_alif UTIMER API takes raw 32-bit register bases; the UTIMER
+	const struct pwm_alif_config *config = dev->config;
+	/* The hal_alif UTIMER API takes raw 32-bit register bases; the UTIMER
 	 * window is within the 32-bit address space on the M55 cores. */
-    uint32_t timer_base = (uint32_t)DEVICE_MMIO_GET(dev);
-    uint32_t glb_base   = (uint32_t)config->global_base;
-    uint8_t  driver;
-    uint32_t drv_cfg;
+	uint32_t timer_base = (uint32_t)DEVICE_MMIO_GET(dev);
+	uint32_t glb_base   = (uint32_t)config->global_base;
+	uint8_t  driver;
+	uint32_t drv_cfg;
 
-    if (channel >= UTIMER_NUM_DRIVERS) {
-        return -EINVAL;
-    }
-    driver = (uint8_t)channel;
+	if (channel >= UTIMER_NUM_DRIVERS) {
+		return -EINVAL;
+	}
+	driver = (uint8_t)channel;
 
-    /* The UTIMER reload register is the period; the compare register is the
+	/* The UTIMER reload register is the period; the compare register is the
 	 * edge where the output flips.  A 0..period up-counter with the driver
 	 * starting LOW and flipping HIGH at the compare match would invert the
 	 * intended duty (high time = period - pulse).  We instead start the
 	 * cycle HIGH and drop LOW at the compare match, so compare = pulse gives
 	 * a HIGH time of `pulse` cycles.  PWM_POLARITY_INVERTED swaps the start
 	 * and match levels. */
-    const bool inverted = (flags & PWM_POLARITY_INVERTED) != 0;
+	const bool inverted = (flags & PWM_POLARITY_INVERTED) != 0;
 
-    /* Stop + re-program: the buffered reload/compare write is latched on the
+	/* Stop + re-program: the buffered reload/compare write is latched on the
 	 * next cycle boundary, but a clean stop keeps the first cycle correct on
 	 * a live frequency change. */
-    alif_utimer_stop_counter(glb_base, config->timer_id);
+	alif_utimer_stop_counter(glb_base, config->timer_id);
 
-    /* Ensure the per-timer clock + up-counter (sawtooth) direction. */
-    alif_utimer_enable_timer_clock(glb_base, config->timer_id);
-    alif_utimer_set_up_counter(timer_base);
-    alif_utimer_enable_soft_counter_ctrl(timer_base);
+	/* Ensure the per-timer clock + up-counter (sawtooth) direction. */
+	alif_utimer_enable_timer_clock(glb_base, config->timer_id);
+	alif_utimer_set_up_counter(timer_base);
+	alif_utimer_enable_soft_counter_ctrl(timer_base);
 
-    /* Full-off: pulse == 0 -> drive output to the inactive level and leave
+	/* Full-off: pulse == 0 -> drive output to the inactive level and leave
 	 * the counter stopped.  Disable the driver output so the pad sits at the
 	 * disable level. */
-    if (pulse_cycles == 0U) {
-        alif_utimer_disable_driver(timer_base, driver);
-		/* GLB_DRIVER_OEN is a GLOBAL (not per-timer) register -- pass glb_base,
-	 * not timer_base, or the OEN clear lands at the wrong address and the pad
-	 * keeps driving. */
-		alif_utimer_disable_driver_output(glb_base, driver, config->timer_id);
+	if (pulse_cycles == 0U) {
+		alif_utimer_disable_driver(timer_base, driver);
+
+		/*
+		 * Open-coded instead of alif_utimer_disable_driver_output(), which is
+		 * broken in the vendor HAL: it writes the bit INDEX as a bit MASK --
+		 *
+		 *     REG(UTIMER_GLB_DRIVER_OEN(reg_base)) |= ((timer_id * 2) + driver);
+		 *
+		 * where its own enable twin two lines below shifts correctly.  HWRM
+		 * 13.2.6.3.5 UTIMER_GLB_DRIVER_OEN: "1-0 DRIVER_OEN_0 ... Channel 0
+		 * active low output enable controls for driver A and B.  B is the upper
+		 * bit, A is the lower bit." -- two bits per channel across all 16
+		 * channels in one GLOBAL register, so the bit is timer_id * 2 + driver.
+		 *
+		 * For E1M PWM6 = UT3_T1_C (timer_id 3, driver 1) the HAL ORed 3*2+1 = 7
+		 * = 0b111, output-disabling UTIMER0 driver A, UTIMER0 driver B and
+		 * UTIMER1 driver A -- any other PWM channel driving on those goes dark
+		 * -- while never setting bit 7, the UT3 driver-B bit it meant to
+		 * (#1828).  The register is active-LOW output enable, so disabling is a
+		 * SET of that one bit.
+		 */
+		sys_set_bit(UTIMER_GLB_DRIVER_OEN(glb_base),
+		            ((uint32_t)config->timer_id * 2U) + (uint32_t)driver);
 		return 0;
-    }
+	}
 
-    /* Program period (reload) and duty (compare). */
-    alif_utimer_set_counter_reload_value(timer_base, period_cycles);
+	/* Program period (reload) and duty (compare). */
+	alif_utimer_set_counter_reload_value(timer_base, period_cycles);
 
-    /* Full-on: pulse >= period -> hold the active level for the whole cycle.
+	/*
+     * Re-zero the counter.  HWRM 13.2.5.1's up-timer setup sequence is explicit:
+     * "1. Set the pointer value to UTIMERn_CNTR_PTR = 250. ... 2. Enable timer
+     * counter ... 3. Initialize the timer counter to 0 by writing the
+     * UTIMERn_CNTR = 0x0."  Step 3 was missing from this driver entirely, so a
+     * LIVE period change left CNTR wherever it happened to be: dropping from
+     * 1 kHz to 100 kHz at 100 MHz sets CNTR_PTR to 1000 while CNTR is still
+     * around 90000, already past the reset point, so the up-counter had to
+     * climb to 0xFFFFFFFF before it could wrap -- about 43 seconds of a dead
+     * pad (#1829).  13.2.6.3.32 requires this write happen while the counter is
+     * stopped, which the stop/start bracket around this block already provides.
+     */
+	alif_utimer_set_counter_value(timer_base, 0U);
+
+	/* Full-on: pulse >= period -> hold the active level for the whole cycle.
 	 * Clamp the compare to the period so the match never fires mid-cycle. */
-    if (pulse_cycles >= period_cycles) {
-        alif_utimer_set_compare_value(timer_base, driver, period_cycles);
-    } else {
-        alif_utimer_set_compare_value(timer_base, driver, pulse_cycles);
-    }
+	if (pulse_cycles >= period_cycles) {
+		alif_utimer_set_compare_value(timer_base, driver, period_cycles);
+	} else {
+		alif_utimer_set_compare_value(timer_base, driver, pulse_cycles);
+	}
 
-    /*
+	/*
 	 * Drive-output configuration (COMPARE_CTRL_A/B).  Bits per utimer.h:
 	 *   - START_VAL: level held at cycle start (counter == 0).
 	 *   - *_AT_COMP_MATCH: level taken when the counter hits COMPARE.
 	 * Normal polarity: start HIGH, go LOW at the compare match -> HIGH for
 	 * `pulse` cycles.  Inverted polarity: start LOW, go HIGH at the match.
 	 */
-    if (inverted) {
-        drv_cfg = COMPARE_CTRL_DRV_START_VAL_LOW | COMPARE_CTRL_DRV_HIGH_AT_COMP_MATCH |
-                  COMPARE_CTRL_DRV_LOW_AT_CYCLE_END | COMPARE_CTRL_DRV_DRIVER_EN |
-                  COMPARE_CTRL_DRV_COMPARE_EN;
-    } else {
-        drv_cfg = COMPARE_CTRL_DRV_START_VAL_HIGH | COMPARE_CTRL_DRV_LOW_AT_COMP_MATCH |
-                  COMPARE_CTRL_DRV_HIGH_AT_CYCLE_END | COMPARE_CTRL_DRV_DRIVER_EN |
-                  COMPARE_CTRL_DRV_COMPARE_EN;
-    }
-    alif_utimer_config_driver_output(timer_base, driver, drv_cfg);
+	if (inverted) {
+		drv_cfg = COMPARE_CTRL_DRV_START_VAL_LOW | COMPARE_CTRL_DRV_HIGH_AT_COMP_MATCH |
+		          COMPARE_CTRL_DRV_LOW_AT_CYCLE_END | COMPARE_CTRL_DRV_DRIVER_EN |
+		          COMPARE_CTRL_DRV_COMPARE_EN;
+	} else {
+		drv_cfg = COMPARE_CTRL_DRV_START_VAL_HIGH | COMPARE_CTRL_DRV_LOW_AT_COMP_MATCH |
+		          COMPARE_CTRL_DRV_HIGH_AT_CYCLE_END | COMPARE_CTRL_DRV_DRIVER_EN |
+		          COMPARE_CTRL_DRV_COMPARE_EN;
+	}
+	alif_utimer_config_driver_output(timer_base, driver, drv_cfg);
 
-    alif_utimer_enable_compare_match(timer_base, driver);
-    alif_utimer_enable_driver(timer_base, driver);
-    alif_utimer_enable_driver_output(glb_base, driver, config->timer_id);
+	alif_utimer_enable_compare_match(timer_base, driver);
+	alif_utimer_enable_driver(timer_base, driver);
+	alif_utimer_enable_driver_output(glb_base, driver, config->timer_id);
 
-    /* Arm the counter and start it from the global control block. */
-    alif_utimer_enable_counter(timer_base);
-    alif_utimer_start_counter(glb_base, config->timer_id);
+	/* Arm the counter and start it from the global control block. */
+	alif_utimer_enable_counter(timer_base);
+	alif_utimer_start_counter(glb_base, config->timer_id);
 
-    return 0;
+	return 0;
 }
 
 static DEVICE_API(pwm, pwm_alif_driver_api) = {
-    .set_cycles         = pwm_alif_set_cycles,
-    .get_cycles_per_sec = pwm_alif_get_cycles_per_sec,
+	.set_cycles         = pwm_alif_set_cycles,
+	.get_cycles_per_sec = pwm_alif_get_cycles_per_sec,
 };
 
 static int pwm_alif_init(const struct device *dev)
 {
-    const struct pwm_alif_config *config = dev->config;
-    int                           err;
+	const struct pwm_alif_config *config = dev->config;
+	int                           err;
 
-    DEVICE_MMIO_MAP(dev, K_MEM_CACHE_NONE);
+	DEVICE_MMIO_MAP(dev, K_MEM_CACHE_NONE);
 
-    err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT);
-    if (err != 0) {
-        return err;
-    }
+	err = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT);
+	if (err != 0) {
+		return err;
+	}
 
-    return 0;
+	return 0;
 }
 
 /*
@@ -231,18 +267,23 @@ static int pwm_alif_init(const struct device *dev)
  * the PARENT utimer node.  DEVICE_MMIO_ROM_INIT wants a node with a reg, so we
  * point the MMIO machinery + the global base + timer-id at the parent.
  */
-#define PWM_DEVICE_INIT(inst)                                                                      \
-    PINCTRL_DT_INST_DEFINE(inst);                                                                  \
-    static struct pwm_alif_data         pwm_alif_data_##inst;                                      \
-    static const struct pwm_alif_config pwm_alif_config_##inst = {                                 \
-        DEVICE_MMIO_ROM_INIT(DT_INST_PARENT(inst)),                                                \
-        .global_base = DT_REG_ADDR_BY_IDX(DT_INST_PARENT(inst), 1),                                \
-        .clock_freq  = DT_PROP_OR(DT_INST_PARENT(inst), clock_frequency, UTIMER_DEFAULT_CLK_HZ),   \
-        .timer_id    = DT_PROP(DT_INST_PARENT(inst), timer_id),                                    \
-        .pcfg        = PINCTRL_DT_INST_DEV_CONFIG_GET(inst),                                       \
-    };                                                                                             \
-    DEVICE_DT_INST_DEFINE(inst, pwm_alif_init, NULL, &pwm_alif_data_##inst,                        \
-                          &pwm_alif_config_##inst, POST_KERNEL, CONFIG_PWM_INIT_PRIORITY,          \
-                          &pwm_alif_driver_api);
+#define PWM_DEVICE_INIT(inst) \
+	PINCTRL_DT_INST_DEFINE(inst); \
+	static struct pwm_alif_data         pwm_alif_data_##inst; \
+	static const struct pwm_alif_config pwm_alif_config_##inst = { \
+		DEVICE_MMIO_ROM_INIT(DT_INST_PARENT(inst)), \
+		.global_base = DT_REG_ADDR_BY_IDX(DT_INST_PARENT(inst), 1), \
+		.clock_freq  = DT_PROP_OR(DT_INST_PARENT(inst), clock_frequency, UTIMER_DEFAULT_CLK_HZ), \
+		.timer_id    = DT_PROP(DT_INST_PARENT(inst), timer_id), \
+		.pcfg        = PINCTRL_DT_INST_DEV_CONFIG_GET(inst), \
+	}; \
+	DEVICE_DT_INST_DEFINE(inst, \
+	                      pwm_alif_init, \
+	                      NULL, \
+	                      &pwm_alif_data_##inst, \
+	                      &pwm_alif_config_##inst, \
+	                      POST_KERNEL, \
+	                      CONFIG_PWM_INIT_PRIORITY, \
+	                      &pwm_alif_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(PWM_DEVICE_INIT)

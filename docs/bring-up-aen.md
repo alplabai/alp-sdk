@@ -187,27 +187,47 @@ SoM preset at `metadata/e1m_modules/<SKU>.yaml` automatically).
 Run these in order; each one exercises a different on-module
 or on-board subsystem.
 
-### 5.1 On-module I2C: EEPROM (I2C2) vs BRD_I2C (LPI2C0) housekeeping
+### 5.1 On-module I2C: EEPROM (I2C2) vs BRD_I2C housekeeping
 
 **Two separate buses -- don't assume a single shared bus.** The
 EEPROM manifest is bridge/DNP-selected onto its own **SoC I2C2**
 (`P5_6 SCL_C` / `P5_7 SDA_C`); the EVK carrier's sensor + IO-expander
 + INA236 parts share that same **I2C2** bus (`metadata/boards/e1m-evk.yaml`
 `buses:` `E1M_I2C0` -> `EVK_I2C_BUS_SENSORS`). Only the on-module
-housekeeping trio (OPTIGA / RTC / TMP112) is on the separate, shared,
-slave-only **BRD_I2C** (**LPI2C0**, `P7_4`/`P7_5`) -- the silicon can
-only be a slave on that bus, so an external master must never be
-clipped onto it, and the M55 reaches it only via SE services (see
-§5.2), not a direct `i2cdetect`. Scan **I2C2 only** from a built
-`i2c-scanner` example or via the console; the BRD_I2C trio isn't
-scannable from the host:
+housekeeping trio (OPTIGA / RTC / TMP112) is on the separate
+**BRD_I2C**, which the M55 cannot reach. Scan **I2C2 only** from a
+built `i2c-scanner` example or via the console; the BRD_I2C trio isn't
+scannable from the host.
+
+> **Corrected 2026-08-30 (#1848).** This used to say BRD_I2C was
+> "**LPI2C0**, `P7_4`/`P7_5`". Both halves are wrong for the R2 module.
+> The netlist puts `BRD_I2C_SCL` on ball B3 = **`P7_1`** and
+> `BRD_I2C_SDA` on ball B8 = **`P7_0`**, while the datasheet's LPI2C0
+> pads are `P7_4`/`P7_5` -- which on this module carry different nets
+> entirely. `P7_0`/`P7_1` have **no documented I2C alternate function**
+> (datasheet gives only `UT8_T0_B` / `LPUT0_T0_A` / `GPIO7_0` and the
+> `_T1_`/`GPIO7_1` equivalents), and the `SCP0_A` / `SCP1_A` names the
+> netlist gives them appear in neither the datasheet nor the HWRM.
+>
+> So the bus is real and the M55 still cannot master it -- but **not**
+> for the reason previously given, and "the M55 reaches it via SE
+> services" is not supported either: the pinned hal_alif SE services
+> expose no I2C service at all. What drives those pads is an open
+> question with Alif (#1848), and it is what blocks using the on-module
+> `rv3028c7` as the accurate time source Alif's own RTC errata
+> workaround calls for (#1814).
+>
+> Unrelated but corrected in the same pass: `LPI2C1` **is** master-capable
+> (HWRM: "Two Low-Power I2C modules (LPI2C0 slave-only and LPI2C1
+> master-only) in the RTSS-HE"), so the RTSS-HE is not slave-only on I2C
+> in general.
 
 | Slave | 7-bit addr | What | Bus | Where |
 |-------|------------|------|-----|-------|
 | 24C128 | `0x50` | EEPROM (manifest) | I2C2 | SoM |
-| OPTIGA TM | `0x30` | Secure element | BRD_I2C (LPI2C0) | SoM — **DNI on this bench batch** |
-| RV-3028-C7 | `0x52` | RTC | BRD_I2C (LPI2C0) | SoM |
-| TMP112 | `0x48` | Thermometer | BRD_I2C (LPI2C0) | SoM |
+| OPTIGA TM | `0x30` | Secure element | BRD_I2C (P7_0/P7_1) | SoM — **DNI on this bench batch** |
+| RV-3028-C7 | `0x52` | RTC | BRD_I2C (P7_0/P7_1) | SoM |
+| TMP112 | `0x48` | Thermometer | BRD_I2C (P7_0/P7_1) | SoM |
 | TCAL9538 | `0x72` | GPIO expander (U35 main) | I2C2 | EVK carrier |
 | TCAL9538 | `0x71` | GPIO expander (U37, PCIe) | I2C2 | EVK carrier |
 | INA236 | `0x40`..`0x42`, `0x49`..`0x4B` | Power monitor (6x) | I2C2 | EVK carrier |

@@ -12,6 +12,22 @@ silicon_variant: AE512F80F55D5LS         # see metadata/socs/alif/ensemble/e5.js
 display_name: "E1M-AEN501 (Alif Ensemble E5 -- 1x A32 + 2x M55 + 2x Ethos-U55, preliminary)"
 
 on_module:
+  # POR_N / ER004: the module carries NO reset or brownout supervisor.  The
+  # E1M-AEN-2626-R2 netlist routes the SoC POR_N only to a pull-up and to the
+  # E1M edge connector, so satisfying the supervisor requirement is the
+  # CARRIER's job, not the module's.
+  #
+  # This is a hardware-damage requirement, not a robustness nicety.  Errata
+  # AERR0012 v2.0 ER004 applies to every E4/E6/E8 revision with no fix
+  # planned: "the voltage on the VDD_MAIN and VDD_BUCK pins must never drop
+  # below 1.65V once 1.65V is reached.  If this cannot be guaranteed, an
+  # external reset supervisor device must be used to drive (active low) the
+  # Ensemble system reset pin, POR_N" -- and, if it is not, "there is
+  # potential to damage the Ensemble SoC rendering it non-functional".
+  # Datasheet ADTS0013 v1.2 5.2.1 has since made it normative: "An external
+  # brownout supervisor must be connected to VDD_MAIN/VDD_BUCK.  The brownout
+  # supervisor must assert before voltage input to the chip falls below
+  # 1.65V."  (#1810)
   silicon:              alif:ensemble:e5       # 1x Cortex-A32 @ 800 + 2x M55 + Ethos-U55
   wifi_ble:             cc3501e
   secure_element:       optiga_trust_m
@@ -47,12 +63,18 @@ on_module:
     chip_select:    1
 
   i2c_devices:
-    # Tier-3 SE-mediated housekeeping bus (ADR 0017:74-79): the SoC can only
-    # be a slave on the Alif LPI2C0 (hardcoded address 0x40, TRM §3.17.4), so
-    # the Secure Enclave masters it, not on-module silicon -- `bus_master` is
-    # omitted per the schema's `i2c_bus.bus_master` description. Addresses
-    # per docs/bring-up-aen.md §5.1's bench-verified table; pad names per
-    # examples/aen/aen-secure-element-sign/README.md:14-15.
+    # Tier-3 housekeeping bus, NOT reachable from the application core --
+    # `bus_master` is omitted per the schema's `i2c_bus.bus_master`
+    # description because what drives it is not documented.
+    #
+    # This comment used to say the bus was LPI2C0 and that "the SoC can only be
+    # a slave on it (hardcoded address 0x40), so the Secure Enclave masters it".
+    # Wrong on the premise (#1848): the R2 netlist puts BRD_I2C_SCL on P7_1 and
+    # BRD_I2C_SDA on P7_0, while the datasheet's LPI2C0 pads are P7_4/P7_5 --
+    # which carry different nets on this module.  P7_0/P7_1 have no documented
+    # I2C alternate function at all, and the pinned hal_alif SE services expose
+    # no I2C service to route through.  The conclusion (the M55 cannot reach
+    # this trio) still holds; the reason is an open question with Alif.
     brd_i2c:
       devices:
         - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }

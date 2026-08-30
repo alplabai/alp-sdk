@@ -85,22 +85,43 @@ static int counter_alif_lptimer_start(const struct device *dev)
 	struct counter_alif_lptimer_data         *data  = dev->data;
 	uint32_t                                  cbase = ch_base(cfg);
 	uint32_t                                  ctrl;
+	unsigned int                              key;
 
 	if (data->running) {
 		return -EALREADY;
 	}
 
-	/* Free-running mode: MODE bit CLEAR (Alif DFP lptimer.h
+	/*
+	 * Free-running mode: MODE bit CLEAR (Alif DFP lptimer.h
 	 * set_mode_freerunning clears LPTIMER_CTRL_MODE), load 0xFFFFFFFF
-	 * (Alif DFP lptimer.h load_max_count), then set ENABLE. */
+	 * (Alif DFP lptimer.h load_max_count), then set ENABLE.
+	 *
+	 * ENABLE must be CLEARED first.  HWRM 13.1.4.4, the NOTE under Figure
+	 * 13-5: "Before programming the timer mode or the load count value, the
+	 * timer must be disabled in order to avoid potential synchronization
+	 * issues.  This ensures that any information on these signals is always
+	 * communicated to the timer while it is inactive and they are stable
+	 * whenever the timer is enabled."
+	 *
+	 * This is reachable, not theoretical: cancel_alarm() used to leave the
+	 * hardware enabled in user-defined mode while clearing data->running, so
+	 * set_alarm() -> cancel_alarm() -> start() sailed past the -EALREADY guard
+	 * above and wrote MODE and LOADCOUNT into a live timer across an
+	 * asynchronous clock-domain boundary (#1829).  set_alarm() below already
+	 * did this correctly; start() now mirrors it.
+	 */
+	key = irq_lock();
+
 	ctrl = sys_read32(cbase + LPTIMER_CH_CONTROLREG);
-	ctrl &= ~LPTIMER_CTRL_MODE;
+	ctrl &= ~(LPTIMER_CTRL_ENABLE | LPTIMER_CTRL_MODE);
 	sys_write32(ctrl, cbase + LPTIMER_CH_CONTROLREG);
 
 	sys_write32(LPTIMER_LOAD_MAX, cbase + LPTIMER_CH_LOADCOUNT);
 
 	ctrl |= LPTIMER_CTRL_ENABLE;
 	sys_write32(ctrl, cbase + LPTIMER_CH_CONTROLREG);
+
+	irq_unlock(key);
 
 	data->running = true;
 	LOG_DBG("%p LPTIMER ch%u started (free-run)", dev, cfg->channel);
@@ -128,21 +149,39 @@ static int counter_alif_lptimer_get_value(const struct device *dev, uint32_t *ti
 {
 	const struct counter_alif_lptimer_config *cfg = dev->config;
 
+	const struct counter_alif_lptimer_data *data = dev->data;
+
 	/* CURRENTVAL is the live (decrementing) count (Alif DFP lptimer.h
-	 * get_count reads CURRENTVAL). */
+	 * get_count reads CURRENTVAL).  HWRM 13.1.4.5: "A 0 is always read back
+	 * when the timer is not enabled." -- so a caller that stops the counter and
+	 * reads it used to get a plausible-looking 0 with a success return.  Say
+	 * -EIO instead of handing back a number that means nothing (#1829).
+	 *
+	 * (The manual contradicts itself on the idle value: 13.1.5.3.2 lists the
+	 * CURRENTVALUE reset value as 0x8000_0000.  Either way it is not a count.) */
+	if (!data->running) {
+		return -EIO;
+	}
+
 	*ticks = sys_read32(ch_base(cfg) + LPTIMER_CH_CURRENTVAL);
 	return 0;
 }
 
 /*
  * Required Zephyr counter-class op: counter_get_top_value() calls this with NO
- * NULL guard, so it MUST be present.  The LPTIMER free-running reload value is
- * 0xFFFFFFFF (Alif DFP lptimer.h load_max_count), so the top is UINT32_MAX.
+ * NULL guard, so it MUST be present.
+ *
+ * Free-running, the reload value is 0xFFFFFFFF (Alif DFP lptimer.h
+ * load_max_count) so the top is UINT32_MAX -- but set_alarm() reprograms
+ * LOADCOUNT, which IS the wrap point in user-defined mode (HWRM 13.1.4.6).
+ * Returning UINT32_MAX unconditionally misled every caller doing wrap
+ * arithmetic once an alarm was armed, so report the live reload value (#1829).
  */
 static uint32_t counter_alif_lptimer_get_top_value(const struct device *dev)
 {
-	ARG_UNUSED(dev);
-	return UINT32_MAX;
+	const struct counter_alif_lptimer_config *cfg = dev->config;
+
+	return sys_read32(ch_base(cfg) + LPTIMER_CH_LOADCOUNT);
 }
 
 static int counter_alif_lptimer_set_alarm(const struct device            *dev,
@@ -173,6 +212,24 @@ static int counter_alif_lptimer_set_alarm(const struct device            *dev,
 		return -EBUSY;
 	}
 
+	/*
+	 * HWRM 13.1.4.7: "When PWM is disabled (TIMER_PWM bit = 0x0), the low and
+	 * high periods of the timer toggle output are the same and are equal to:
+	 * (LPTIMERn_LOADCOUNT + 1) x LPTIMERn_CLK clock period."  Table 13-5 fixes
+	 * the toggle output as changing state on every reload and 13.1.4.3 puts the
+	 * interrupt on that same reload, so the alarm interval is LOADCOUNT + 1
+	 * clocks -- and the driver used to program LOADCOUNT = ticks.
+	 *
+	 * At clock-frequency = 32768 with ticks = 1 that fired at 2/32768 s =
+	 * 61.0 us instead of 30.5 us, a 100% error.  The relative error is
+	 * 1/ticks, so it hid at long delays and was grossly wrong at short ones
+	 * (#1829).  ticks == 0 has no representation at all.
+	 */
+	if (alarm_cfg->ticks == 0U) {
+		LOG_ERR("alarm ticks must be >= 1 (LOADCOUNT + 1 clocks per HWRM 13.1.4.7)");
+		return -EINVAL;
+	}
+
 	/* Program user-defined mode (MODE bit SET -> reload the user LOADCOUNT on
 	 * underflow, Alif DFP lptimer.h set_mode_userdefined) and load the
 	 * requested down-count so underflow fires after `ticks` clocks. */
@@ -186,7 +243,7 @@ static int counter_alif_lptimer_set_alarm(const struct device            *dev,
 	ctrl &= ~LPTIMER_CTRL_INT_MASK;
 	sys_write32(ctrl, cbase + LPTIMER_CH_CONTROLREG);
 
-	sys_write32(alarm_cfg->ticks, cbase + LPTIMER_CH_LOADCOUNT);
+	sys_write32(alarm_cfg->ticks - 1U, cbase + LPTIMER_CH_LOADCOUNT);
 
 	data->alarm_cb  = alarm_cfg->callback;
 	data->user_data = alarm_cfg->user_data;
@@ -205,16 +262,35 @@ static int counter_alif_lptimer_cancel_alarm(const struct device *dev, uint8_t c
 	struct counter_alif_lptimer_data         *data  = dev->data;
 	uint32_t                                  cbase = ch_base(cfg);
 	uint32_t                                  ctrl;
+	unsigned int                              key;
 
 	if (chan_id != 0) {
 		LOG_ERR("invalid channel id %u", chan_id);
 		return -ENOTSUP;
 	}
 
-	/* Mask the channel interrupt (set MASK bit, Alif DFP lptimer.h
-	 * mask_interrupt). */
+	/*
+	 * Mask the channel interrupt (set MASK bit, Alif DFP lptimer.h
+	 * mask_interrupt) AND clear ENABLE.
+	 *
+	 * Masking alone gates the IRQ line, not the counter: HWRM 13.1.4.3.3, and
+	 * 13.1.4.6 says that in user-defined count mode the timer on reaching zero
+	 * "loads the current value of the LPTIMERn_LOADCOUNT register" and keeps
+	 * going.  So the old cancel left the timer cycling forever on the LF clock
+	 * in the always-on VBAT domain while data->running reported false -- and
+	 * that live-but-"stopped" state was the precondition for the start()
+	 * defect above (#1829).  Clearing ENABLE also clears active interrupts per
+	 * 13.1.4.3.1.
+	 *
+	 * The read-modify-write is under irq_lock because the ISR touches the same
+	 * register; HWRM 13.1.1 NOTE also requires software to serialise access to
+	 * the single-master LP peripherals.
+	 */
+	key = irq_lock();
+
 	ctrl = sys_read32(cbase + LPTIMER_CH_CONTROLREG);
 	ctrl |= LPTIMER_CTRL_INT_MASK;
+	ctrl &= ~LPTIMER_CTRL_ENABLE;
 	sys_write32(ctrl, cbase + LPTIMER_CH_CONTROLREG);
 
 	data->alarm_cb  = NULL;
@@ -222,6 +298,8 @@ static int counter_alif_lptimer_cancel_alarm(const struct device *dev, uint8_t c
 	/* set_alarm() set data->running; clear it so a later start() is not
 	 * rejected as -EALREADY after the alarm is cancelled. */
 	data->running = false;
+
+	irq_unlock(key);
 	return 0;
 }
 
