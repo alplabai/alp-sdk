@@ -212,6 +212,30 @@ It probes the SES and reports e.g. `Target part# AE822FA0E5597LS0 matches
 default E8`. If it can't reach the SES, fix §2 first (auto-detect needs the
 **send** direction working too, not just receive).
 
+**Which `app-device-config.json` this uses.** SETOOLS 1.110.00 ships no
+AE822-specific device config — the stock `build/config/app-device-config.json`
+declares `"device": "AE722F80F55D5AS"`, an **E7** part, not our
+`AE822FA0E5597LS0`. Two facts are bench-established and one is deliberately
+still open (alp-sdk#1701):
+
+- **`device` is very likely toolchain metadata, not silicon-relevant.** The SE
+  reports the correct part identity from OTP (`ALIF_PN = AE822FA0E5597LS0`)
+  regardless of which part the config file names.
+- **The HFXO trim fields match our AE822.** Our healthy board's own clock
+  register readback (`XO_REG1` → `xtal_cap:8 gm_pfet:16 gm_nfet:16`) agrees
+  with the stock file's `HFXO_CAP_CTRL`/`HFXO_PFET_GM_CTRL`/`HFXO_NFET_GM_CTRL`.
+- **The rest of the file — notably its `firewall` block — is unverified for
+  AE822.** SETOOLS' *other* stock config (`app-device-config-1c.json`, a third
+  part) ships a *different* `HFXO_CAP_CTRL` and an empty `firewall` block, so
+  these fields are demonstrably part-specific in general; the E7 file's
+  firewall region set has not been bench-validated against AE822 and must not
+  be assumed safe from the two bullets above.
+
+Until alp-sdk#1701 resolves (an open escalation to Alif — see #1700, item 3):
+use the stock `app-device-config.json` unmodified, as the reference board
+does. Do not hand-edit its `device` field, and do not treat any part of the
+file beyond the two confirmed bullets above as AE822-qualified.
+
 ## 4. Build the ATOC + write it
 
 Use the stock blink first to validate the path end-to-end before your own
