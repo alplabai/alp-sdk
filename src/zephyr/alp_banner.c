@@ -20,10 +20,10 @@
  *   3. CONFIG_BOARD: the raw Zephyr board target -- last-resort fallback.
  *
  * When the live manifest read (path 1) succeeds, this file also compares
- * its hw_rev against CONFIG_ALP_SDK_SOM_HW_REV -- the revision this
- * firmware's pad-routing tables were compiled for -- and warns loudly on
- * a disagreement; see alp_check_hw_rev_match() below for why that is a
- * warning, not a refused boot, by default (issue #1853).
+ * its hw_rev against CONFIG_ALP_SDK_SOM_HW_REV -- the hw_rev this
+ * firmware BUILD resolved -- and warns loudly on a disagreement; see
+ * alp_check_hw_rev_match() below for why that is a warning, not a
+ * refused boot, by default (issue #1853).
  *
  * The SoC column + the system summary come from the SoC spec JSON (cores /
  * npus / total SRAM+MRAM), pre-formatted into CONFIG_ALP_SDK_SOC_* by
@@ -44,7 +44,7 @@
 #include <alp/version.h> /* ALP_VERSION_STRING -- the single SDK-version source */
 
 #if defined(CONFIG_ALP_SDK_HW_INFO)
-#include <alp/hw_info.h> /* alp_hw_info_read(), alp_hw_info_t, ALP_OK */
+#include <alp/hw_info.h>      /* alp_hw_info_read(), alp_hw_info_t, ALP_OK */
 #include "hw_info_manifest.h" /* alp_hw_info_build_hw_rev_mismatch() -- internal, issue #1853 */
 #endif
 
@@ -100,14 +100,26 @@ static void alp_print_sysinfo(void)
 
 #if defined(CONFIG_ALP_SDK_HW_INFO)
 /*
- * Boot-time hw_rev mismatch check (issue #1853).  The SDK compiles pad
- * routing (E1M_* -> which chip, which pin) for CONFIG_ALP_SDK_SOM_HW_REV;
- * the EEPROM manifest just read above is the module's actual revision.
- * On the AEN family alone, three pads (IO8/IO10/IO21) resolve to a
- * DIFFERENT chip depending on which one is right -- a silent mismatch
- * means an app can be built to drive a CC3501E GPIO proxy for a pin that
- * is physically a direct Alif GPIO (or vice-versa), with the intended
- * pin never touched and no diagnostic anywhere.
+ * Boot-time hw_rev mismatch check (issue #1853).  CONFIG_ALP_SDK_SOM_HW_REV
+ * is the hw_rev this firmware BUILD resolved (board.yaml `som.hw_rev`,
+ * falling back to the SKU preset's `default_hw_rev`); the EEPROM manifest
+ * just read above is the module's ACTUAL revision.  Nothing in this
+ * firmware image derives a pad-routing table from that build-time value --
+ * the SoM preset's `pad_routes`/`pad_route_overrides` data is read only by
+ * scripts/alp_project_emit/bom_netlist.py, for the debug/BOM
+ * `--emit composed-route-table` / `--emit carrier-netlist` surfaces, not
+ * by any header/C table/DT overlay this build produces.
+ *
+ * The real-world risk this check warns about is downstream of that gap:
+ * on the AEN family, three E1M pads (IO8/IO10/IO21) physically sit on a
+ * DIFFERENT chip depending on hw_rev, and application code that hardcodes
+ * a pin-to-chip map for one revision (see #1859 --
+ * examples/aen/aen-cc3501e-gpio/src/cc3501e_gpio_routes.c hardcodes the r2
+ * map with no IO21 entry, same table duplicated in aen-cc3501e-bringup and
+ * aen-cc3501e-companion-tour) silently targets the wrong chip on the other
+ * revision, with no diagnostic anywhere.  This check cannot fix that
+ * hardcoded table; it can only tell the developer their firmware and their
+ * board disagree.
  *
  * Severity, chosen deliberately:
  *   - A loud warning is the FLOOR, always on: this is real -- silently
@@ -122,17 +134,23 @@ static void alp_print_sysinfo(void)
  *     worse failure mode than a possibly-wrong pin.  A production build
  *     that wants to fail closed instead opts in via
  *     CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL.
+ *   - This check lives entirely inside the boot banner (compiled only
+ *     under CONFIG_ALP_SDK_BANNER); a build that turns the banner off for
+ *     footprint gets neither the warning nor CONFIG_ALP_SDK_HW_REV_
+ *     MISMATCH_FATAL.  Known limitation, not fixed here -- see the
+ *     Kconfig help.
  *   - What this does NOT do: refuse to DISPATCH only the specific pads
  *     whose route actually differs between hw_revs (the issue's
- *     "stronger guard").  That needs a build-time-emitted table of which
- *     E1M_* pads are hw_rev-ambiguous for this SKU (derived from the SoM
- *     preset's `pad_route_overrides`, scripts/alp_project_loader.py) plus
- *     every peripheral-class dispatcher (gpio/spi/i2c/...) consulting it
- *     -- a cross-cutting change touching the dispatch layer for every
- *     class that can carry an E1M pad, not a boot-banner-sized unit.
- *     CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL is the coarse mitigation
- *     available today: it halts before any pad is ever dispatched,
- *     covering the whole app rather than just the ambiguous pads.
+ *     "stronger guard").  No dispatcher consults any pad-route table
+ *     today, so there is nothing to retrofit -- the real missing piece
+ *     is #1859: generate a per-hw_rev `cc3501e_gpio_routes[]` from the
+ *     composed route table (replacing the three hand-written, r2-only
+ *     copies above) plus one hw_rev guard in the GPIO proxy.  GPIO-only,
+ *     much smaller than a dispatch-layer change, and out of scope for
+ *     this boot-banner fix.  CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL is the
+ *     coarse mitigation available today: it halts before any pad is
+ *     ever dispatched, covering the whole app rather than just the
+ *     ambiguous pads.
  */
 static void alp_check_hw_rev_match(const alp_hw_info_t *info)
 {

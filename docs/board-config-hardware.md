@@ -42,9 +42,13 @@ for this hardware" two ways:
   see below.  Separately (issue #1853), the SDK's own boot banner
   (`CONFIG_ALP_SDK_BANNER`, on by default) now does a narrower version
   of this automatically: it compares the live manifest's `hw_rev`
-  against `CONFIG_ALP_SDK_SOM_HW_REV` (the revision the firmware's
-  E1M-pad routing was compiled for -- some pads route to a different
-  chip depending on `hw_rev`, e.g. the AEN family's IO8/IO10/IO21) and
+  against `CONFIG_ALP_SDK_SOM_HW_REV` (the hw_rev this firmware build
+  resolved -- nothing in the compiled firmware derives a pad-routing
+  table from it; some E1M pads physically route to a different chip
+  depending on `hw_rev`, e.g. the AEN family's IO8/IO10/IO21, and
+  application code that hardcodes a pin-to-chip map is what can
+  actually mis-target one -- see
+  [#1859](https://github.com/alplabai/alp-sdk/issues/1859)) and
   prints a loud warning on a disagreement, without refusing to boot; a
   factory-fresh module's NOT_PROVISIONED read never reaches this check.
   A production build that would rather halt than risk driving a pad on

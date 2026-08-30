@@ -163,10 +163,11 @@ ZTEST(alp_hw_info, test_classify_null_args_return_inval)
 
 ZTEST(alp_hw_info, test_build_hw_rev_mismatch_detects_disagreement)
 {
-	/* The bug scenario verbatim: module manifest says r1 (bench-reported
-     * E1M-AEN801 r1), firmware compiled for r2 (the SKU preset's
-     * default_hw_rev) -- three E1M pads dispatch to a different chip
-     * between the two. */
+	/* Same SHAPE of disagreement as the bug report (module manifest
+     * hw_rev r1, firmware built for r2 -- on the AEN family that is
+     * three E1M pads dispatching to a different chip).  Uses the
+     * shared v2n fixture above, not an AEN-specific manifest: this is
+     * a pure string compare, so the family/SKU is irrelevant to it. */
 	alp_hw_info_eeprom_t m;
 	make_valid_manifest(&m); /* hw_rev "r1" */
 	alp_hw_info_t info;

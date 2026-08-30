@@ -210,12 +210,14 @@ bool alp_hw_info_build_hw_rev_mismatch(const alp_hw_info_t *info, const char *bu
 	if (info->som_hw_rev[0] == '\0') return false; /* nothing read -- not a mismatch to report */
 	/* Bounded by the manifest field's own size (ALP_HW_INFO_HW_REV_LEN),
      * same convention as copy_field()/alp_hw_info_assert_matches_build()
-     * above -- deliberately NOT alp_hw_info_assert_matches_build() itself:
-     * that entry point returns NOSUPPORT outright whenever this BUILD has
-     * no EEPROM wired (ALP_HW_INFO_EEPROM_ENABLED == 0), which would read
-     * as "mismatch" here even when the two strings agree.  This compare is
-     * pure and unconditional -- correct on any info a caller (production
-     * code or a native_sim test) has already populated, EEPROM-enabled
-     * build or not. */
+     * above -- deliberately NOT a call through
+     * alp_hw_info_assert_matches_build() itself: that entry point's real
+     * compare body is compiled out (ALP_HW_INFO_EEPROM_ENABLED == 0) on
+     * any build with no EEPROM wired, so a native_sim test built without
+     * that Kconfig chain could never reach it.  (The one real caller, the
+     * boot banner, only gets here after alp_hw_info_read() == ALP_OK,
+     * which itself requires EEPROM_ENABLED == 1 -- so the two entry
+     * points behave identically in production; this one is just
+     * independently testable without a real EEPROM.) */
 	return strncmp(info->som_hw_rev, built_hw_rev, sizeof(info->som_hw_rev)) != 0;
 }
