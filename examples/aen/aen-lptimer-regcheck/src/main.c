@@ -207,8 +207,7 @@ int main(void)
 		 * (the CONTROLREG/LOADCOUNT writes have to cross into the 32768 Hz
 		 * clock domain), which swamps a single 30.5 us tick at the short end.
 		 */
-		printk("  ticks=%-5u LOADCOUNT=%u (expect %u)
-		       ",
+		printk("  ticks=%-5u LOADCOUNT=%u (expect %u)\n",
 		       alarm_ticks[i],
 		       counter_get_top_value(lptimer),
 		       alarm_ticks[i] - 1U);
