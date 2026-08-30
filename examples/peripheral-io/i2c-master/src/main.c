@@ -21,10 +21,11 @@
  * (#1269: this example used to target the TMP112 temperature
  * sensor, but TMP112 lives on BRD_I2C, not on BOARD_I2C_SENSORS --
  * opening BOARD_I2C_SENSORS and probing for TMP112 NACKs on real
- * hardware.  On the E1M-AEN family BRD_I2C is additionally the
- * slave-only Alif LPI2C0 -- ADR 0017 -- so the SoC can't master it
- * at all; see examples/v2n/v2n-temp-sensor for the V2N-only
- * BRD_I2C/TMP112 pattern.)
+ * hardware.  BRD_I2C is a separate controller instance regardless
+ * (on E1M-AEN801 it is SoC I2C0, function C -- #1848), so simply
+ * repointing the bus_id would still not reach a TMP112 there; see
+ * examples/v2n/v2n-temp-sensor for the V2N-only BRD_I2C/TMP112
+ * pattern.)
  *
  * What success looks like (real hardware):
  *

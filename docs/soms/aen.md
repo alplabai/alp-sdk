@@ -22,11 +22,18 @@ tier (cores + NPU count + memory).
 |-------------------------|----------------------------|------------------|-----------------------------------------|
 | Application SoC         | Alif Ensemble E3..E8       | --               | (vendor HAL)                            |
 | Wi-Fi 6 + BLE 5.4       | TI CC3501E                 | inter-chip SPI1 + SDIO | App APIs: [`<alp/iot.h>`](../../include/alp/iot.h), [`<alp/ble.h>`](../../include/alp/ble.h); diagnostics: [`<alp/chips/cc3501e.h>`](../../include/alp/chips/cc3501e.h) |
-| Secure element          | Infineon OPTIGA Trust M    | LPI2C            | [`<alp/chips/optiga_trust_m.h>`](../../include/alp/chips/optiga_trust_m.h) |
-| RTC                     | Micro Crystal RV-3028-C7   | LPI2C            | [`<alp/chips/rv3028c7.h>`](../../include/alp/chips/rv3028c7.h) |
-| Temperature sensor      | TI TMP112                  | LPI2C            | [`<alp/chips/tmp112.h>`](../../include/alp/chips/tmp112.h) |
-| EEPROM (SoM manifest)   | Onsemi N24S128             | SoC I2C2 (bridge/DNP-selected, NOT LPI2C0) | [`<alp/chips/eeprom_24c128.h>`](../../include/alp/chips/eeprom_24c128.h) |
+| Secure element          | Infineon OPTIGA Trust M    | BRD_I2C†          | [`<alp/chips/optiga_trust_m.h>`](../../include/alp/chips/optiga_trust_m.h) |
+| RTC                     | Micro Crystal RV-3028-C7   | BRD_I2C†          | [`<alp/chips/rv3028c7.h>`](../../include/alp/chips/rv3028c7.h) |
+| Temperature sensor      | TI TMP112                  | BRD_I2C†          | [`<alp/chips/tmp112.h>`](../../include/alp/chips/tmp112.h) |
+| EEPROM (SoM manifest)   | Onsemi N24S128             | SoC I2C2 (bridge/DNP-selected, a separate bus from BRD_I2C) | [`<alp/chips/eeprom_24c128.h>`](../../include/alp/chips/eeprom_24c128.h) |
 | Ethernet PHY            | TI DP83825 (exact order code TBD) | RMII      | none -- see [`metadata/chips/dp83825.yaml`](../../metadata/chips/dp83825.yaml) |
+
+† On the **E1M-AEN801**, BRD_I2C is SoC I2C0 (function C, `P7_0`/`P7_1`),
+master-capable, wired in the AEN801 board files (#1848) -- corrected from
+an earlier belief that it was the slave-only Alif LPI2C0.  That routing is
+R2-sourced (`E1M-AEN-2626-R2` netlist) and not yet confirmed on an actual
+unit.  The other AEN SKUs still carry the pre-#1848 LPI2C0 assumption in
+their own preset files pending the same netlist evidence.
 
 Memory + per-SKU specifics: [`metadata/e1m_modules/E1M-AEN<NNN>.yaml`](../../metadata/e1m_modules/).
 

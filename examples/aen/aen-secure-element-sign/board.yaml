@@ -2,8 +2,8 @@
 # aen-secure-element-sign example.
 #
 # OPTIGA Trust M probe-only sanity on the E1M-AEN (Alif Ensemble) SoM.
-# The Trust M is on BRD_I2C -- the
-# on-module LP-island I2C (LPI2C0) -- owned by the M55-HE subsystem,
+# The Trust M is on BRD_I2C -- SoC I2C0, function C (CORRECTED #1848; was
+# believed to be the slave-only LPI2C0) -- reached from the M55-HE board file,
 # so the app core is m55_he.  Everything else goes through the
 # SoM-portable <alp/*> API, so this stays the AEN sibling of
 # examples/v2n/v2n-secure-element-sign while keeping AEN-specific bench
@@ -14,9 +14,9 @@ som:
 
 preset: e1m-evk            # The Alp E1M-EVK carrier preset.
 
-# Single-OS app: the M55-HE core (LP domain) owns BRD_I2C / LPI2C0,
-# which carries the OPTIGA Trust M (0x30).  The A32 cluster defaults
-# to Linux on the A-cores, so opt out explicitly.
+# Single-OS app: the m55_he board file wires BRD_I2C (I2C0, #1848), which
+# carries the OPTIGA Trust M (0x30).  The A32 cluster defaults to Linux on
+# the A-cores, so opt out explicitly.
 cores:
   a32_cluster:
     os: "off"

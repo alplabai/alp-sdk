@@ -25,9 +25,11 @@
  * 5632 KiB App MRAM with boot, storage and the NPU MRAM-model
  * budget -- see zephyr/sysbuild/aen/README.md for the sizing rationale.
  *
- * Inter-core IPC (the APSS<->RTSS-HP MHUv2 doorbell pair) + the on-module
- * peripheral buses (GPIO / I2C / SPI / Ethernet) are added alongside the
- * alp-sdk Alif peripheral drivers; this base wires boot + console only.
+ * Inter-core IPC (the APSS<->RTSS-HP MHUv2 doorbell pair)
+ * is added alongside the alp-sdk Alif peripheral drivers.  This base
+ * wires boot + console + BRD_I2C (#1848); the remaining on-module
+ * peripheral buses (GPIO / SPI / Ethernet) are added alongside their
+ * own drivers.
  */
 
 /dts-v1/;
@@ -187,6 +189,22 @@
 	pinctrl-0 = <&pinctrl_uart5>;
 	pinctrl-names = "default";
 	current-speed = <115200>;
+};
+
+/* BRD_I2C: on-module housekeeping bus (RV-3028-C7 RTC / OPTIGA Trust M /
+ * TMP112) over SoC I2C0 -- see the pinctrl_i2c0 group comment for the
+ * routing citation + the R2-sourced/on-unit-probe caveat (#1848). */
+&i2c0 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c0>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+};
+
+/ {
+	aliases {
+		alp-i2c0 = &i2c0;
+	};
 };
 
 /* Arm Ethos-U NPU: enable the ethosu85 node declared in the SoC peripherals dtsi (see ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN). */

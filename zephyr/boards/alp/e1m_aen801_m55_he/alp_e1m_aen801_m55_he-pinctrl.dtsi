@@ -12,8 +12,9 @@
  * Confirmed against the SoM netlist + metadata/e1m_modules/aen/from-alif.tsv
  * (rows F2 = UART0_TX = UART5_TX_A/P3_5, G2 = UART0_RX = UART5_RX_A/P3_4).
  *
- * GPIO / I2C / SPI / Ethernet pin groups are added alongside their drivers
- * (the alp-sdk Alif peripheral drivers); only the console is wired here.
+ * GPIO / SPI / Ethernet pin groups are added alongside their drivers
+ * (the alp-sdk Alif peripheral drivers); the console + BRD_I2C are wired
+ * here already.
  */
 
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
@@ -27,6 +28,27 @@
 
 		group1 {
 			pinmux = <PIN_P3_5__UART5_TX_A>;
+		};
+	};
+
+	/*
+	 * BRD_I2C (SoC I2C0, function C) -- on-module housekeeping bus:
+	 * RV-3028-C7 RTC (0x52), OPTIGA Trust M secure element (0x30),
+	 * TMP112 temperature sensor (0x48).  I2C0_SCL_C = P7_1, I2C0_SDA_C
+	 * = P7_0 (ADTS0013 v1.2 Table 3-16); corroborated by the
+	 * E1M-AEN-2626-R2 netlist (BRD_I2C_SCL/SDA on balls B3/B8).  Pad
+	 * config copied verbatim from the bench-validated I2C2/EEPROM group
+	 * (examples/aen/aen-eeprom-manifest's overlay -- same silicon, same
+	 * DesignWare I2C IP, same Alif reference DSC=2 encoding).  This
+	 * group itself is R2-SOURCED, NOT ON-UNIT-VERIFIED -- the bench
+	 * module on hand is r1 and alp-sdk-internal holds no R1 netlist
+	 * (#1848).  Do NOT "correct" bias-pull-down to bias-pull-up.
+	 */
+	pinctrl_i2c0: pinctrl_i2c0 {
+		group0 {
+			pinmux = <PIN_P7_1__I2C0_SCL_C>, <PIN_P7_0__I2C0_SDA_C>;
+			input-enable;
+			bias-pull-down;
 		};
 	};
 };

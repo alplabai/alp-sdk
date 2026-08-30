@@ -54,13 +54,21 @@ on_module:
     chip_select:    1
 
   i2c_devices:
-    # Tier-3 SE-mediated housekeeping bus (ADR 0017:74-79): the SoC can only
-    # be a slave on the Alif LPI2C0 (hardcoded address 0x40, TRM §3.17.4), so
-    # the Secure Enclave masters it, not on-module silicon -- `bus_master` is
-    # omitted per the schema's `i2c_bus.bus_master` description. Addresses
-    # per docs/bring-up-aen.md §5.1's bench-verified table; pad names per
-    # examples/aen/aen-secure-element-sign/README.md:14-15.
+    # CORRECTED #1848 (ADR 0017 amended 2026-08-30 -- this bus was believed
+    # to be the slave-only Alif LPI2C0, hardcoded address 0x40, TRM §3.17.4;
+    # it is not). BRD_I2C is SoC I2C0 function C: I2C0_SDA_C = P7_0, I2C0_SCL_C
+    # = P7_1 (ADTS0013 v1.2 Table 3-16 + the per-pin alternate-function grid),
+    # corroborated by the E1M-AEN-2626-R2 netlist (BRD_I2C_SDA/SCL on balls
+    # B8/B3, landing on this same trio). I2C0 is master-or-slave capable
+    # (HWRM §15.4.1), so the Alif SoC masters this bus directly -- Tier-1
+    # upstream i2c_dw, no Secure Enclave mediation. Addresses per
+    # docs/bring-up-aen.md §5.1; pad names per
+    # examples/aen/aen-secure-element-sign/README.md.
+    # R2-SOURCED, NOT ON-UNIT-VERIFIED: alp-sdk-internal holds no R1 netlist
+    # and the only bench unit on hand is r1 -- probe P7_0/P7_1 before calling
+    # this confirmed on that module.
     brd_i2c:
+      bus_master: alif-ensemble
       devices:
         - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }
         - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30" }

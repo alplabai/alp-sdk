@@ -878,7 +878,7 @@ def _uart_node_label(row: dict[str, Any]) -> str:
 
 def _aen_pinctrl_dtsi(
     role: str, sku_display: str, rx_row: dict[str, Any], tx_row: dict[str, Any],
-    family_display: str,
+    family_display: str, has_brd_i2c: bool = False,
 ) -> str:
     other_role = "he" if role == "hp" else "hp"
     rx_macro, tx_macro = _pin_macro(rx_row), _pin_macro(tx_row)
@@ -899,6 +899,51 @@ def _aen_pinctrl_dtsi(
             f"{rx_row['silicon_peripheral']}/{rx_row['silicon_pad']}).\n"
         )
 
+    trailer = (
+        " * GPIO / SPI / Ethernet pin groups are added alongside their drivers\n"
+        " * (the alp-sdk Alif peripheral drivers); the console + BRD_I2C are wired\n"
+        " * here already.\n"
+        if has_brd_i2c else
+        " * GPIO / I2C / SPI / Ethernet pin groups are added alongside their drivers\n"
+        " * (the alp-sdk Alif peripheral drivers); only the console is wired here.\n"
+    )
+
+    # BRD_I2C (SoC I2C0, function C): the on-module housekeeping bus carrying
+    # RV-3028-C7 / OPTIGA Trust M / TMP112 (#1848).  I2C0_SCL_C = P7_1,
+    # I2C0_SDA_C = P7_0 -- ADTS0013 v1.2 Table 3-16, corroborated by the
+    # E1M-AEN-2626-R2 netlist (BRD_I2C_SCL/SDA on balls B3/B8).  The group
+    # shape (SCL then SDA, input-enable + bias-pull-down) is copied verbatim
+    # from the bench-validated I2C2/EEPROM group
+    # (examples/aen/aen-eeprom-manifest's overlay) -- same silicon, same
+    # DesignWare I2C IP, same Alif reference DSC=2 pad encoding; the group
+    # itself is NOT yet bench-validated for BRD_I2C (R2-sourced, needs an
+    # on-unit probe -- the bench unit on hand is r1).  do NOT "correct"
+    # bias-pull-down to bias-pull-up.
+    brd_i2c_block = (
+        "\n"
+        "\t/*\n"
+        "\t * BRD_I2C (SoC I2C0, function C) -- on-module housekeeping bus:\n"
+        "\t * RV-3028-C7 RTC (0x52), OPTIGA Trust M secure element (0x30),\n"
+        "\t * TMP112 temperature sensor (0x48).  I2C0_SCL_C = P7_1, I2C0_SDA_C\n"
+        "\t * = P7_0 (ADTS0013 v1.2 Table 3-16); corroborated by the\n"
+        "\t * E1M-AEN-2626-R2 netlist (BRD_I2C_SCL/SDA on balls B3/B8).  Pad\n"
+        "\t * config copied verbatim from the bench-validated I2C2/EEPROM group\n"
+        "\t * (examples/aen/aen-eeprom-manifest's overlay -- same silicon, same\n"
+        "\t * DesignWare I2C IP, same Alif reference DSC=2 encoding).  This\n"
+        "\t * group itself is R2-SOURCED, NOT ON-UNIT-VERIFIED -- the bench\n"
+        "\t * module on hand is r1 and alp-sdk-internal holds no R1 netlist\n"
+        "\t * (#1848).  Do NOT \"correct\" bias-pull-down to bias-pull-up.\n"
+        "\t */\n"
+        "\tpinctrl_i2c0: pinctrl_i2c0 {\n"
+        "\t\tgroup0 {\n"
+        "\t\t\tpinmux = <PIN_P7_1__I2C0_SCL_C>, <PIN_P7_0__I2C0_SDA_C>;\n"
+        "\t\t\tinput-enable;\n"
+        "\t\t\tbias-pull-down;\n"
+        "\t\t};\n"
+        "\t};\n"
+        if has_brd_i2c else ""
+    )
+
     return (
         _COPYRIGHT_C +
         " *\n"
@@ -910,8 +955,7 @@ def _aen_pinctrl_dtsi(
         " * the AEN module PCB; the Alp E1M-EVK carrier wires its USB-UART console to it.\n"
         + confirm_block +
         " *\n"
-        " * GPIO / I2C / SPI / Ethernet pin groups are added alongside their drivers\n"
-        " * (the alp-sdk Alif peripheral drivers); only the console is wired here.\n"
+        + trailer +
         " */\n"
         "\n"
         "#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>\n"
@@ -927,6 +971,7 @@ def _aen_pinctrl_dtsi(
         f"\t\t\tpinmux = <{tx_macro}>;\n"
         "\t\t};\n"
         "\t};\n"
+        + brd_i2c_block +
         "};\n"
     )
 
@@ -1103,6 +1148,7 @@ def _aen_dts(
     metadata_root: Path,
     ethos_u: tuple[str, str] | None = None,
     memory_map: "list[dict[str, Any]] | None" = None,
+    has_brd_i2c: bool = False,
 ) -> str:
     role = core_id.split("_")[-1]                     # "hp" / "he"
     role_u = role.upper()
@@ -1171,12 +1217,23 @@ def _aen_dts(
             " * partitions MRAM between the two cores at the system-integration layer",
             " * (sysbuild); see docs/heterogeneous-builds.md.",
         ]
+    lines += [" *", f" * Inter-core IPC (the APSS<->RTSS-{role_u} MHUv2 doorbell pair)"]
+    if has_brd_i2c:
+        lines += [
+            " * is added alongside the alp-sdk Alif peripheral drivers.  This base",
+            " * wires boot + console + BRD_I2C (#1848); the remaining on-module",
+            " * peripheral buses (GPIO / SPI / Ethernet) are added alongside their",
+            " * own drivers.",
+            " */",
+        ]
+    else:
+        lines += [
+            " * + the on-module peripheral buses (GPIO / I2C / SPI / Ethernet) are added",
+            " * alongside the alp-sdk Alif peripheral drivers; this base wires boot +",
+            " * console only.",
+            " */",
+        ]
     lines += [
-        " *",
-        f" * Inter-core IPC (the APSS<->RTSS-{role_u} MHUv2 doorbell pair) + the on-module",
-        " * peripheral buses (GPIO / I2C / SPI / Ethernet) are added alongside the",
-        " * alp-sdk Alif peripheral drivers; this base wires boot + console only.",
-        " */",
         "",
         "/dts-v1/;",
         "",
@@ -1399,6 +1456,33 @@ def _aen_dts(
         "",
     ]
 
+    if has_brd_i2c:
+        # BRD_I2C (#1848): the on-module housekeeping bus (RV-3028-C7 /
+        # OPTIGA Trust M / TMP112) is SoC I2C0 -- master-or-slave capable
+        # (HWRM §15.4.1), not the slave-only LPI2C0 this board previously
+        # assumed.  100 kHz: the on-module bus has no fast-mode margin unless
+        # external pull-ups are stuffed (same rationale as the I2C2/EEPROM
+        # bus).  R2-sourced pin routing -- see the pinctrl group's comment
+        # for the on-unit-probe caveat.
+        lines += [
+            "/* BRD_I2C: on-module housekeeping bus (RV-3028-C7 RTC / OPTIGA Trust M /",
+            " * TMP112) over SoC I2C0 -- see the pinctrl_i2c0 group comment for the",
+            " * routing citation + the R2-sourced/on-unit-probe caveat (#1848). */",
+            "&i2c0 {",
+            '\tstatus = "okay";',
+            "\tpinctrl-0 = <&pinctrl_i2c0>;",
+            '\tpinctrl-names = "default";',
+            "\tclock-frequency = <I2C_BITRATE_STANDARD>;",
+            "};",
+            "",
+            "/ {",
+            "\taliases {",
+            "\t\talp-i2c0 = &i2c0;",
+            "\t};",
+            "};",
+            "",
+        ]
+
     if ethos_u is not None:
         _accel, node = ethos_u
         # Enable the Arm Ethos-U NPU node this SoC carries.  The full node
@@ -1475,15 +1559,22 @@ def emit_zephyr_board(
         slot0_region = _aen_role_slot0_map(memory_map, role)
         slot0_base = (slot0_region["base"] if slot0_region
                       else _AEN_MRAM_BASE + _AEN_MCUBOOT_KIB * 1024)
+        # BRD_I2C (#1848): only emit the pinctrl group + &i2c0 enable + alias
+        # when the SoM preset has confirmed I2C0 masters this bus
+        # (`bus_master:` set on `on_module.i2c_devices.brd_i2c`) -- today only
+        # E1M-AEN801.yaml; the other AEN presets still omit it (no netlist
+        # evidence for their routing), so they keep generating unchanged.
+        brd_i2c = ((sku_preset.get("on_module") or {}).get("i2c_devices") or {}).get("brd_i2c") or {}
+        has_brd_i2c = bool(brd_i2c.get("bus_master"))
         files[f"{dir_name}/{dir_name}-pinctrl.dtsi"] = _aen_pinctrl_dtsi(
-            role, sku, rx_row, tx_row, _aen_family_display(soc_spec))
+            role, sku, rx_row, tx_row, _aen_family_display(soc_spec), has_brd_i2c)
         files[f"{dir_name}/{basename}_defconfig"] = _aen_defconfig(
             uart_node, rx_row, tx_row, slot0_base)
         files[f"{dir_name}/Kconfig.defconfig"] = _aen_kconfig_defconfig(
             dir_name, role, _aen_part(soc_spec))
         files[f"{dir_name}/{basename}.dts"] = _aen_dts(
             sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row,
-            metadata_root, _aen_ethos_u(soc_spec), memory_map)
+            metadata_root, _aen_ethos_u(soc_spec), memory_map, has_brd_i2c)
 
     # `_load_soc_spec()` above already raised ZephyrBoardEmitError if
     # `sku_preset["silicon"]` didn't resolve, so `soc_path` can't be None

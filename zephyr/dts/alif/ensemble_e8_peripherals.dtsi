@@ -24,8 +24,10 @@
  * (snps,designware-* -- Tier-1 upstream-native); Ethernet (alif,ethernet glue
  * over the upstream eth_dwmac core -- Tier-1.5) + UTIMER PWM/counter
  * (alif,utimer over the Apache-2.0 hal_alif lib -- Tier-1.5); SPI0
- * (alif,dwc-ssi-spi -- Tier-2 interim).  The slave-only LPI2C0 housekeeping
- * trio (RTC/TMP/OPTIGA) is Tier-3 SE -- NO node here (see the LPI2C0 note).
+ * (alif,dwc-ssi-spi -- Tier-2 interim).  On the E1M-AEN801 i2c0 doubles as
+ * BRD_I2C, the on-module RTC/TMP112/OPTIGA housekeeping bus -- Tier-1
+ * upstream-native, NOT Tier-3 SE-mediated (ADR 0017 amended 2026-08-30; see
+ * the i2c0 node's own comment + the LPI2C0 note below).
  * The non-UART peripheral clock IDs upstream's alif-ensemble-clocks.h omits are
  * supplied, re-encoded for the upstream clockctrl, by the alp-sdk -ext header
  * included below.
@@ -257,16 +259,21 @@
 	};
 
 	/*
-	 * LPI2C0 (0x43009000, the on-module "BRD_I2C" housekeeping bus on P7_4/P7_5,
-	 * carrying OPTIGA / RV-3028 / TMP112) is DELIBERATELY NOT declared here.
-	 * Per the TRM (§3.17.4) LPI2C0 is SLAVE-ONLY (the SoC is a slave at the
-	 * hardcoded address 0x40); the M55 cannot master it, so an alp-sdk I2C
-	 * master node would be a dead end.  That trio is ADR 0017 Tier-3: the
-	 * Secure Enclave masters the bus and the reads are surfaced through Alif SE
-	 * services as a portable board-info/manifest API (tasks #16/#17).  The
-	 * removed alif,lpi2c driver was the master-TX-only dead end.
-	 * A next-rev board moves the housekeeping bus to a master-capable I2C
-	 * (LPI2C0 -> I2C0 on P7_0/P7_1 -- task #11).
+	 * LPI2C0 (0x43009000, P7_4/P7_5) is DELIBERATELY NOT declared here.  It is
+	 * genuinely SLAVE-ONLY (TRM §3.17.4: the SoC is a slave at the hardcoded
+	 * address 0x40), so an alp-sdk I2C master node would be a dead end -- the
+	 * removed alif,lpi2c driver was that master-TX-only dead end (#1848).
+	 *
+	 * CORRECTED (#1848, ADR 0017 amended 2026-08-30): LPI2C0 was believed to
+	 * be the on-module "BRD_I2C" housekeeping bus (OPTIGA / RV-3028-C7 /
+	 * TMP112).  It is not.  BRD_I2C is SoC I2C0 function C, P7_0 (SDA) /
+	 * P7_1 (SCL) -- ADTS0013 v1.2 Table 3-16 + the per-pin alternate-function
+	 * grid, corroborated by the E1M-AEN-2626-R2 netlist (BRD_I2C_SDA/SCL on
+	 * balls B8/B3).  I2C0 is master-or-slave capable (HWRM §15.4.1), so the
+	 * trio is reachable as an ordinary Tier-1 upstream i2c_dw master -- see
+	 * the i2c0 node below -- not Tier-3 SE-mediated.  R2-SOURCED: the bench
+	 * E1M-AEN801 unit is r1 and alp-sdk-internal holds no R1 netlist, so this
+	 * routing needs an on-unit probe before it is verified there too.
 	 */
 
 	/*
@@ -729,22 +736,25 @@
 	};
 
 	/*
-	 * Synopsys DesignWare I2C (DW_apb_i2c) -- the customer-facing EDGE I2C
-	 * master buses on the E1M connector.  Bound by UPSTREAM Zephyr v4.4 i2c_dw
-	 * (compatible "snps,designware-i2c"): full controller-mode read + write +
-	 * repeated-START -- the master capability the slave-only LPI2C0 lacks.
-	 * i2c_dw consumes only reg / interrupts / clock-frequency (= the I2C BUS
-	 * speed, NOT an input clock); it does NOT read a `clocks` phandle and calls
-	 * no clock_control op, so no clock-id is needed.  reg/IRQ (132/133) + the
-	 * spike-filter tuning transcribed from the Apache-2.0 zephyr_alif fork
-	 * e1.dtsi.  A board enables an instance (status="okay") + supplies pinctrl-0
-	 * + the alp-i2cN alias.  ADR 0017 Tier-1 (upstream-native), BENCH-UNVERIFIED.
+	 * Synopsys DesignWare I2C (DW_apb_i2c).  Bound by UPSTREAM Zephyr v4.4
+	 * i2c_dw (compatible "snps,designware-i2c"): full controller-mode read +
+	 * write + repeated-START -- the master capability the slave-only LPI2C0
+	 * lacks.  i2c_dw consumes only reg / interrupts / clock-frequency (= the
+	 * I2C BUS speed, NOT an input clock); it does NOT read a `clocks` phandle
+	 * and calls no clock_control op, so no clock-id is needed.  reg/IRQ
+	 * (132/133) + the spike-filter tuning transcribed from the Apache-2.0
+	 * zephyr_alif fork e1.dtsi.  A board enables an instance (status="okay")
+	 * + supplies pinctrl-0 + the alp-i2cN alias.  ADR 0017 Tier-1
+	 * (upstream-native), BENCH-UNVERIFIED.
 	 *
-	 * NOTE: i2c0/i2c1 reach EDGE pads.  The on-module 24C128 EEPROM is on i2c2
-	 * below (bridge/DNP-selected, P5_6/P5_7).  The on-module RTC/TMP112/OPTIGA
-	 * sit on the slave-only LPI2C0 (P7_4/P7_5) this rev and are NOT reachable as
-	 * an I2C master -- they are Tier-3 (Alif SE services); see the LPI2C0 note
-	 * above + task #11 (next-rev move to a master-capable I2C).
+	 * NOTE: i2c1 reaches an EDGE pad pair on the E1M connector.  The on-module
+	 * 24C128 EEPROM is on i2c2 below (bridge/DNP-selected, P5_6/P5_7).  i2c0
+	 * reaches no E1M edge pad on this SoM -- on the E1M-AEN801 its function-C
+	 * pins (P7_0/P7_1) are the on-module "BRD_I2C" housekeeping bus (RTC/
+	 * TMP112/OPTIGA), NOT previously-believed slave-only LPI2C0 (#1848, ADR
+	 * 0017 amended 2026-08-30 -- see the LPI2C0 note above).  R2-sourced;
+	 * needs an on-unit probe on the r1 bench module before it's bench-verified
+	 * there.
 	 */
 	i2c0: i2c@49010000 {
 		compatible = "snps,designware-i2c";

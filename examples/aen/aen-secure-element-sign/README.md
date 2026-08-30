@@ -11,13 +11,16 @@ This is the **E1M-AEN (Alif Ensemble) sibling** of
 The `src/` is intentionally parallel -- everything goes through the SoM-portable
 `<alp/*>` API — so the only AEN-specific facts are:
 
-- **BRD_I2C is the Alif LPI2C0** (the LP-island I2C, `P7_4 SCL_A` /
-  `P7_5 SDA_A`), surfaced as portable bus 0, carrying the Trust M at
-  `0x30` alongside the RTC + TMP112. (The EEPROM is on a separate bus,
-  SoC I2C2 -- see `docs/bring-up-aen.md` §5.1.)
-- BRD_I2C lives in the low-power domain, so it is owned by the
-  **M55-HE** subsystem — hence `board.yaml`'s app core is `m55_he`
-  and the board target is `…/rtss_he`.
+- **BRD_I2C is SoC I2C0, function C** (`P7_1 I2C0_SCL_C` / `P7_0 I2C0_SDA_C`)
+  -- corrected in #1848; earlier docs believed it was the slave-only Alif
+  LPI2C0. It is surfaced as portable bus 0 (`alp-i2c0`, wired in the
+  E1M-AEN801 board files), carrying the Trust M at `0x30` alongside the RTC +
+  TMP112.
+  (A different, separate bus carries the EEPROM -- SoC I2C2, see
+  `docs/bring-up-aen.md` §5.1.)
+- `board.yaml`'s app core is `m55_he` (board target `…/rtss_he`) to match
+  this example's existing bench flow; both per-core AEN801 board files wire
+  the same I2C0 controller, so `m55_hp` reaches it too.
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
@@ -25,11 +28,13 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
 west flash
 ```
 
-> **Bench note:** running on hardware needs the AEN board's BRD_I2C
-> (LPI2C0) enabled + mapped to portable bus 0 (the alp-sdk Alif LPI2C
-> driver bring-up). Until that lands, the example builds (CI builds it
-> under `native_sim`) but `alp_i2c_open(bus_id=0)` will not find the
-> chip on a board that hasn't wired LPI2C0 yet.
+> **Bench note:** the E1M-AEN801 board files wire BRD_I2C (I2C0) to portable
+> bus 0 (#1848), so `alp_i2c_open(bus_id=0)` now reaches the physical bus.
+> That routing is **R2-sourced and not yet on-unit-verified**: it comes from
+> the E1M-AEN-2626-R2 netlist + `ADTS0013`, `alp-sdk-internal` holds no R1
+> netlist, and the only bench unit on hand is an r1 module -- probe
+> `P7_0`/`P7_1` before treating a probe result here as confirming the wiring
+> itself, not just the chip response.
 >
 > **The current E1M-AEN801 bench batch does not populate the OPTIGA**
 > (DNI), so this example has nothing to talk to on those boards — it is
@@ -60,7 +65,7 @@ west flash
 ## Expected output (current AEN bench gates)
 
 ```
-[se] RESULT SKIP: alp_i2c_open failed: -2 (BRD_I2C/LPI2C0 not ready on this bench)
+[se] RESULT SKIP: alp_i2c_open failed: -2 (BRD_I2C not ready on this bench)
 ```
 
 or, once BRD_I2C opens but the assembly is OPTIGA-DNI:

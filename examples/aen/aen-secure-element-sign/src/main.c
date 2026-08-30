@@ -6,15 +6,20 @@
  * probe-only contract on the E1M-AEN (Alif Ensemble) SoM.
  *
  * On the E1M-AEN the Trust M sits on **BRD_I2C** -- the on-module
- * housekeeping bus (the Alif LPI2C0 / "LP-island" I2C, P7_4 SCL_A /
- * P7_5 SDA_A) -- at 7-bit address 0x30, alongside the RTC + TMP112.
- * (The EEPROM is on a separate bus, SoC I2C2 -- see
- * docs/bring-up-aen.md §5.1.)  Because BRD_I2C lives in the low-power
- * domain it is owned by the **M55-HE** subsystem (hence this
- * example's board target is rtss_he).  The chip and the sign flow
- * are identical to the V2N variant -- everything goes through the
- * SoM-portable <alp/...> API, so the only AEN-specific facts are
- * the bus + the owning core.
+ * housekeeping bus (SoC I2C0, function C, P7_1 SCL / P7_0 SDA --
+ * CORRECTED #1848, earlier revisions of this file believed it was the
+ * slave-only Alif LPI2C0) -- at 7-bit address 0x30, alongside the RTC +
+ * TMP112.
+ * (A different, separate bus carries the EEPROM -- SoC I2C2, see
+ * docs/bring-up-aen.md §5.1.)  This example's board target is rtss_he
+ * (M55-HE), matching the E1M-AEN801 board file that wires BRD_I2C.  The
+ * chip and the sign flow are identical to the V2N variant -- everything
+ * goes through the SoM-portable <alp/...> API, so the only AEN-specific
+ * facts are the bus + the owning core.
+ *
+ * The BRD_I2C routing above is R2-sourced (E1M-AEN-2626-R2 netlist +
+ * ADTS0013); alp-sdk-internal holds no R1 netlist, and the bench unit on
+ * hand is r1, so it still needs an on-unit probe.
  *
  * The in-tree v0.3 driver probes the Trust M I2C_STATE register only.
  * Product-info and raw-APDU helpers are declared for the planned host
@@ -34,23 +39,23 @@ int main(void)
 
 	/* BRD_I2C carries the Trust M alongside the RTC + TMP112 (the
      * EEPROM is on a separate bus, SoC I2C2 -- see docs/bring-up-aen.md
-     * §5.1).  On the E1M-AEN this is the Alif LPI2C0 (the LP-island I2C),
-     * surfaced as portable bus 0.  400 kHz is the standard Trust M bus
-     * rate; the chip supports up to 1 MHz Fast-mode+ if the rest of
-     * the bus does too. */
+     * §5.1).  On the E1M-AEN this is SoC I2C0 (#1848), surfaced as
+     * portable bus 0 by the E1M-AEN801 board file.  400 kHz is the
+     * standard Trust M bus rate; the chip supports up to 1 MHz
+     * Fast-mode+ if the rest of the bus does too. */
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
 	    .bus_id     = 0u,
 	    .bitrate_hz = 400000u,
 	});
 	if (bus == NULL) {
-		/* NOT_READY vs anything else matters here: NOT_READY means "the LPI2C0
+		/* NOT_READY vs anything else matters here: NOT_READY means "the BRD_I2C
 		 * backend isn't wired up on this build/board" -- an environment gap,
 		 * not a driver bug -- so it's a SKIP. Any other code means the open
 		 * itself is broken and should fail the run. */
 		const alp_status_t last = alp_last_error();
 		if (last == ALP_ERR_NOT_READY) {
 			printk("[se] RESULT SKIP: alp_i2c_open failed: %d "
-			       "(BRD_I2C/LPI2C0 not ready on this bench)\n",
+			       "(BRD_I2C not ready on this bench)\n",
 			       (int)last);
 		} else {
 			printk("[se] RESULT FAIL: alp_i2c_open failed: %d\n", (int)last);
