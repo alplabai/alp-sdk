@@ -60,6 +60,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/drivers/pwm.h>
+#include <zephyr/sys/sys_io.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -162,10 +163,28 @@ static int pwm_alif_set_cycles(const struct device *dev,
 	 * disable level. */
 	if (pulse_cycles == 0U) {
 		alif_utimer_disable_driver(timer_base, driver);
-		/* GLB_DRIVER_OEN is a GLOBAL (not per-timer) register -- pass glb_base,
-	 * not timer_base, or the OEN clear lands at the wrong address and the pad
-	 * keeps driving. */
-		alif_utimer_disable_driver_output(glb_base, driver, config->timer_id);
+
+		/*
+		 * Open-coded instead of alif_utimer_disable_driver_output(), which is
+		 * broken in the vendor HAL: it writes the bit INDEX as a bit MASK --
+		 *
+		 *     REG(UTIMER_GLB_DRIVER_OEN(reg_base)) |= ((timer_id * 2) + driver);
+		 *
+		 * where its own enable twin two lines below shifts correctly.  HWRM
+		 * 13.2.6.3.5 UTIMER_GLB_DRIVER_OEN: "1-0 DRIVER_OEN_0 ... Channel 0
+		 * active low output enable controls for driver A and B.  B is the upper
+		 * bit, A is the lower bit." -- two bits per channel across all 16
+		 * channels in one GLOBAL register, so the bit is timer_id * 2 + driver.
+		 *
+		 * For E1M PWM6 = UT3_T1_C (timer_id 3, driver 1) the HAL ORed 3*2+1 = 7
+		 * = 0b111, output-disabling UTIMER0 driver A, UTIMER0 driver B and
+		 * UTIMER1 driver A -- any other PWM channel driving on those goes dark
+		 * -- while never setting bit 7, the UT3 driver-B bit it meant to
+		 * (#1828).  The register is active-LOW output enable, so disabling is a
+		 * SET of that one bit.
+		 */
+		sys_set_bit(UTIMER_GLB_DRIVER_OEN(glb_base),
+		            ((uint32_t)config->timer_id * 2U) + (uint32_t)driver);
 		return 0;
 	}
 
