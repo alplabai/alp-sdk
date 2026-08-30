@@ -82,7 +82,7 @@ not once for the family.
 | Board | SEROM | SES / SERAM | LCS | Meets the v110 floor? | Captured |
 |---|---|---|---|---|---|
 | Off-labgrid Windows bench unit (`AE822FA0E5597LS0`, XDS110 `L50015YR`) | `v1.105.65 0x000002A0` | `SES A0 v1.110.0 Mar  4 2026`, SERAM0/SERAM1 `1.110.0` | `1` (DM) | **Yes** | 2026-08-30 |
-| labgrid place `e1m-aen-evk-01` (alplab-gw) | TBD | TBD | TBD | **Unverified** | — |
+| The second AEN bench board (on the internal board farm) | TBD | TBD | TBD | **Unverified** | — |
 
 The capture is the SES boot header on the SE-UART at 57600 8N1 — it streams on
 every reset, no app or SE service call needed:

@@ -8,12 +8,24 @@
  * (disk_access_init / disk_access_ioctl) on the "SD" disk.
  *
  * EVK ROUTING NOTE: on the E1M EVK the microSD sits on the SDIO bus behind a
- * 74LVC157 mux whose ENABLE (IO20) and SELECT (IO21) are BOTH on the CC3501E
- * side and must be driven over the inter-chip SPI bridge
- * (ALP_CC3501E_CMD_GPIO_WRITE).  Until that bridge routes the mux to the SD
- * slot, NO card is reachable from the Alif side -- so this example validates the
- * SDHC controller/driver bring-up (device builds + inits), and card init is
- * expected to fail with "no card".  See the README.
+ * 74LVC157 mux with an ENABLE (E1M IO20) and a SELECT (E1M IO21).
+ *
+ * CORRECTED for board rev 2626-R2 (#912).  This comment used to say both pins
+ * were "on the CC3501E side and must be driven over the inter-chip SPI
+ * bridge".  On R2 that is wrong about both of them, and the second half is the
+ * one that matters:
+ *
+ *   - IO20 IS CC3501E-side -- metadata/e1m_modules/aen/from-cc3501e.tsv maps it
+ *     to GPIO_26, so it is drivable today through the GPIO proxy.
+ *   - IO21 is NOT.  hw-revisions.yaml records for r2: "IO21 unrouted (was
+ *     CC3501E GPIO30)" -- GPIO_30 moved to IO8 and IO21 was left OPEN on the
+ *     module.  It reaches neither the CC3501E nor the Alif SoC, so the mux
+ *     SELECT cannot be driven from software on this board revision at all.
+ *
+ * So the card stays unreachable on R2, but the blocker is a module pad that no
+ * longer goes anywhere -- not a bridge feature waiting to be written.  This
+ * example therefore validates SDHC controller/driver bring-up (device builds +
+ * inits) and card init is expected to fail with "no card".  See the README.
  *
  * PASS gate: disk_access_init returns 0 and the card geometry reads back (a card
  * was actually reachable + enumerated).  A clean controller bring-up where the

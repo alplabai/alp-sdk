@@ -51,8 +51,13 @@
  * while the real failure (a crash before the RESULT line) went unreported.
  * This app instead states the SKIP explicitly: "no XiP slave in DT;
  * SOC_FEAT_OSPI_HAS_XIP_SER=0 on AE822".  A live XiP read stays additionally
- * unverifiable regardless (no octal-NOR/HyperBus part populated this
- * hardware batch) but is not the reason for the skip.
+ * unverifiable regardless -- but NOT for the reason this comment used to
+ * give.  It said "no octal-NOR/HyperBus part populated this hardware batch",
+ * and that is false on board rev 2626-R2: the module netlist carries a
+ * Macronix MX25UM25645GXDI00 (256 Mbit octal NOR, SPI Octal I/O DTR) wired to
+ * OSPI0_D0..D7 / SCLK / SS1 / RXDS, marked populated (DNP = 0).  A live XiP
+ * read is blocked by the DT and the silicon feature bit, not by an empty
+ * footprint (#915).
  *
  * This example has caught three real, distinct silicon/build bugs on a board
  * with nothing on the OSPI bus (the clock-gate fault, the MPU Device-mapping
