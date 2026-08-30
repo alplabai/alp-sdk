@@ -967,7 +967,7 @@
 		driver_instance = "ADC_INSTANCE_ADC12_0";
 		adc_channel_scan = "SINGLE_CHANNEL_SCAN";
 		adc_conversion_mode = "SINGLE_SHOT_CONVERSION";
-		pga_gain = "ADC_PGA_GAIN_0_DB";
+		pga_gain = "ADC_PGA_GAIN_4_DB"; /* ADC12 code 0x0, the reset value */
 		status = "disabled";
 	};
 
@@ -997,7 +997,7 @@
 		driver_instance = "ADC_INSTANCE_ADC12_1";
 		adc_channel_scan = "SINGLE_CHANNEL_SCAN";
 		adc_conversion_mode = "SINGLE_SHOT_CONVERSION";
-		pga_gain = "ADC_PGA_GAIN_0_DB";
+		pga_gain = "ADC_PGA_GAIN_4_DB"; /* ADC12 code 0x0, the reset value */
 		status = "disabled";
 	};
 
@@ -1027,7 +1027,7 @@
 		driver_instance = "ADC_INSTANCE_ADC12_2";
 		adc_channel_scan = "SINGLE_CHANNEL_SCAN";
 		adc_conversion_mode = "SINGLE_SHOT_CONVERSION";
-		pga_gain = "ADC_PGA_GAIN_0_DB";
+		pga_gain = "ADC_PGA_GAIN_4_DB"; /* ADC12 code 0x0, the reset value */
 		status = "disabled";
 	};
 
@@ -1057,7 +1057,7 @@
 		driver_instance = "ADC_INSTANCE_ADC24_0";
 		adc_channel_scan = "SINGLE_CHANNEL_SCAN";
 		adc_conversion_mode = "SINGLE_SHOT_CONVERSION";
-		pga_gain = "ADC_PGA_GAIN_0_DB";
+		pga_gain = "ADC_PGA_GAIN_12_DB"; /* ADC24 code 0x2, the reset value; 0x0 is "Do not use" */
 		status = "disabled";
 	};
 

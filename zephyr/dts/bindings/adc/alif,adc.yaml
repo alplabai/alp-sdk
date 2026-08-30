@@ -145,13 +145,36 @@ properties:
 
   pga_gain:
     type: string
-    default: "ADC_PGA_GAIN_0_DB"
-    description: select the gain for the Peripheral in differential mode
+    default: "ADC_PGA_GAIN_12_DB"
+    description: |
+      PGA gain applied when a channel is configured differential.
+
+      ADC12 and ADC24 have DIFFERENT gain ladders and they are not
+      interchangeable (HWRM 8.3.6.3.10):
+
+        ADC12 (ADCn_PGA_GAIN, bits 3-1):  4, 8, 12, 16, 20 dB
+                                          "Other values should not be used."
+        ADC24 (ADC24_PGA_GAIN, bits 19-17): 6, 12, 18, 24, 30, 36, 42 dB
+                                          (code 0x0 is "Do not use")
+
+      This enum is the union of the two.  The driver maps the label to the code
+      for the instance it is on and returns -EINVAL from adc_channel_setup() if
+      the requested gain does not exist on that ADC class.
+
+      This used to ship the ADC24 ladder only, with the enum INDEX written into
+      whichever field the instance selected, so "ADC_PGA_GAIN_24_DB" on an ADC12
+      instance became 0b100 = 12 dB -- a factor of four in amplitude, silently.
+      The old default "ADC_PGA_GAIN_0_DB" is gone: there is no 0 dB code on
+      either ladder, and it encoded ADC24's documented "Do not use".
+      12 dB is the new default because it is the one gain both classes have.
     enum:
-      -  "ADC_PGA_GAIN_0_DB"
+      -  "ADC_PGA_GAIN_4_DB"
       -  "ADC_PGA_GAIN_6_DB"
+      -  "ADC_PGA_GAIN_8_DB"
       -  "ADC_PGA_GAIN_12_DB"
+      -  "ADC_PGA_GAIN_16_DB"
       -  "ADC_PGA_GAIN_18_DB"
+      -  "ADC_PGA_GAIN_20_DB"
       -  "ADC_PGA_GAIN_24_DB"
       -  "ADC_PGA_GAIN_30_DB"
       -  "ADC_PGA_GAIN_36_DB"
