@@ -257,6 +257,19 @@ Recorded so they are not re-litigated:
   depend on it, or tan must fall back to the current parse when the flag is
   absent. Order matters: land the SDK flag first, then release, then switch
   tan, then delete tan's regexes.
+- **A constraint none of the three changes may break: scaffold's seam must stay
+  the rendered envelope.** `scaffold` is the one mode consumed as a
+  byte-for-byte vendored snapshot rather than re-rendered — tan checks the
+  captured output into `tan-cli/python/tan/templates/vendored/`, whose
+  `MANIFEST.md:1-8` states it is "`alp-sdk --emit scaffold` output, captured
+  byte-for-byte ... so `tan init`/`tan scaffold` can read it without ever
+  shelling the SDK". That works because the SDK hands over finished bytes from
+  `render_to_envelope` (`scripts/alp_template.py:1452-1471`). If scaffold ever
+  follows the other nineteen modes into the "relocated renderer" pattern, the
+  consumer has to port occurrence-checked regex surgery and per-SKU pin-rename
+  derivation into its own process — which is a second parity apparatus, of
+  exactly the kind ADR 0026 exists to retire. Keep the envelope.
+
 - **Adjacent, and larger than this spec:** `scripts/alp_orchestrate/` is not
   only a planner. `SdkRevisionUnknown` / `SdkRevisionNotBuildable` /
   `SdkRevisionUnsupported` come from `alp_orchestrate.models` and are raised at
@@ -278,6 +291,26 @@ Recorded so they are not re-litigated:
    with its own schema, or an additive block on an existing one?
 3. Is the `_fix_link` base-URL extraction in scope now, or deferred? It is the
    smallest item and the least urgent.
+4. `metadata/schemas/hw-revisions-v1.schema.json` is the only schema of the 27
+   under `metadata/schemas/` with top-level `additionalProperties: true`. Its
+   description ("Per-SoM-family hardware-revision compatibility table") gives no
+   rationale for the exception. Is the open door deliberate — because a vendor's
+   revision table carries fields the schema cannot enumerate ahead of time — or
+   is it an oversight? The difference is whether a typo in a new SoM family's
+   revision entry is caught or silently accepted, which matters because that
+   table is the input to the SDK-version compatibility window. Not in scope
+   here; it needs its own decision and probably its own issue.
+5. `scripts/alp_template.py` declares an opt-in
+   `substitute: {"file": ..., "literal": ...}` mapping on a parameter spec
+   (`:88`, `:261`, `:270`), and **no template in
+   `metadata/templates/catalog-v1.json` uses it** — the usage count is zero.
+   The adversarial review flagged exactly this shape as the embryo of an inner
+   platform: the next template that needs a condition grows it a condition
+   field, then ordering semantics, and eventually it is an untyped language
+   interpreted once per consumer. Two honest options: delete the hook until a
+   real caller exists, or keep it and record in the catalog schema that it is
+   frozen at literal-replace and will not grow. Doing neither is how it grows by
+   accident.
 
 ## Evidence
 
