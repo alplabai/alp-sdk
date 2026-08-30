@@ -60,7 +60,7 @@ inherits that voice.
    exists, described as "Default runtime for this core.  Customer's board.yaml
    `cores.<id>.os` overrides", and `loader.py:555` already prefers it:
    `os=str(entry.get("os") or _default_os_from_core_type(soc_core_type))`. All
-   **26** `topology.<core>` entries across the twelve
+   **26** per-core `topology` entries across the twelve
    `metadata/e1m_modules/*.yaml` presets omit it, and `$defs.topology_entry` has
    `required: []`, so that preference has never once been exercised. The
    fall-back is the mechanism.
