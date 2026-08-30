@@ -100,14 +100,25 @@ ZTEST(alp_power_registry, test_power_open_and_close)
 ZTEST(alp_power_registry, test_power_configure_wake_source)
 {
 	/* configure_wake_source mirrors the bitmap into the dispatcher
-     * state without touching hardware on the pm_policy backend. */
+     * state without touching hardware on the pm_policy backend.  On a
+     * build without CONFIG_ALP_SDK_POWER_PM_POLICY (e.g. native_sim,
+     * which selects no HAS_PM) the wildcard zephyr_stub backend wins
+     * instead; per #1812/#1813 it reports zero armable wake sources
+     * and rejects a non-empty bitmap with ALP_ERR_NOSUPPORT at this
+     * call, so branch like the selector tests above. */
 	alp_power_t *h = alp_power_open();
 	zassert_not_null(h);
-	zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC), ALP_OK);
-	zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_GPIO),
-	              ALP_OK);
-	/* The empty bitmap is legal at the configure call -- the INVAL
-     * guard fires only at request_sleep() time. */
+	if (IS_ENABLED(CONFIG_ALP_SDK_POWER_PM_POLICY)) {
+		zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC), ALP_OK);
+		zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_GPIO),
+		              ALP_OK);
+	} else {
+		zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC), ALP_ERR_NOSUPPORT);
+		zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_GPIO),
+		              ALP_ERR_NOSUPPORT);
+	}
+	/* The empty bitmap is legal at the configure call on every backend
+     * -- the INVAL guard fires only at request_sleep() time. */
 	zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_NONE), ALP_OK);
 	alp_power_close(h);
 }
@@ -160,6 +171,37 @@ ZTEST(alp_power_registry, test_power_request_sleep_with_timer_wakes)
 ZTEST(alp_power_registry, test_power_capabilities_returns_null_for_null_handle)
 {
 	zassert_is_null(alp_power_capabilities(NULL));
+}
+
+ZTEST(alp_power_registry, test_power_wake_capabilities_zero_for_null_handle)
+{
+	/* #1813: dedicated accessor, separate storage from
+     * alp_power_capabilities()'s alp_capabilities_t::flags -- NULL
+     * reports 0, matching every other NULL-handle query on this
+     * class. */
+	zassert_equal(alp_power_wake_capabilities(NULL), 0u);
+}
+
+ZTEST(alp_power_registry, test_power_wake_capabilities_matches_active_backend)
+{
+	/* On this test build (CONFIG_ALP_SDK_POWER_PM_POLICY=y, see the
+     * file header) the pm_policy backend wins and reports the four
+     * sources it delegates to; the wake_caps report and the
+     * configure_wake_source acceptance/rejection surface must agree. */
+	alp_power_t *h = alp_power_open();
+	zassert_not_null(h);
+
+	uint32_t caps = alp_power_wake_capabilities(h);
+	if (IS_ENABLED(CONFIG_ALP_SDK_POWER_PM_POLICY)) {
+		zassert_equal(caps,
+		              (uint32_t)(ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_GPIO | ALP_POWER_WAKE_UART_RX |
+		                         ALP_POWER_WAKE_TIMER));
+		zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_USB), ALP_ERR_NOSUPPORT);
+	} else {
+		zassert_equal(caps, 0u);
+		zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC), ALP_ERR_NOSUPPORT);
+	}
+	alp_power_close(h);
 }
 
 /* ---------- Vendor-ext bypass test --------------------------------- */

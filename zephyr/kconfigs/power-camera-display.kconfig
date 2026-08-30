@@ -52,7 +52,7 @@ config ALP_SDK_POWER
 	  priority-0 "*" wildcard fallback: open() returns a valid
 	  handle so application setup code keeps linking/running
 	  unchanged, but this backend can arm zero real wake sources
-	  (alp_power_capabilities() reports flags == 0), so
+	  (alp_power_wake_capabilities() reports 0), so the dispatcher's
 	  configure_wake_source() rejects any non-empty bitmap with
 	  ALP_ERR_NOSUPPORT at configuration time rather than only at
 	  the eventual sleep call (issue #1812); request_sleep() (and

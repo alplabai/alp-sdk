@@ -30,6 +30,10 @@
  *      | ALP_POWER_MODE_SLEEP      | "freeze"  (S2idle)      |
  *      | ALP_POWER_MODE_DEEP_SLEEP | "standby" (power-on suspend) |
  *      | ALP_POWER_MODE_STANDBY    | "mem"     (suspend-to-RAM)   |
+ *      | ALP_POWER_MODE_STOP       | "mem" (round-down: the generic |
+ *      |                           | sysfs ABI has nothing deeper;  |
+ *      |                           | realised_mode reports STANDBY, |
+ *      |                           | not STOP -- #1813 review)      |
  *
  *      Monotonic depth match against the kernel's own monotonic sleep
  *      ladder (freeze < standby < mem), mirroring the "deeper = lower
@@ -52,6 +56,17 @@
  *      thread for the duration of the sleep -- that is how the ABI
  *      works, the write() syscall does not return until resume -- so
  *      slept_ms is measured directly around that write.
+ *
+ *      The portable @c ALP_POWER_WAKE_* bitmap has NO matching sysfs
+ *      knob -- the generic sleep ABI wakes on whatever the kernel's
+ *      own wakeup-source devices are, entirely outside this backend's
+ *      control, and only the RTC path above is actually driven by it.
+ *      y_open() therefore reports wake_caps_out = 0 (#1812/#1813): a
+ *      caller asking for e.g. ALP_POWER_WAKE_GPIO gets
+ *      ALP_ERR_NOSUPPORT from alp_power_configure_wake_source() at
+ *      the dispatcher, rather than ALP_OK for a bit this backend
+ *      cannot actually arm.  A wake_after_ms-only request (bitmap
+ *      empty) is unaffected -- the RTC wakealarm above still arms.
  *
  * @par Status
  *      REAL implementation.  BENCH-UNVERIFIED (no target in this CI
@@ -138,6 +153,14 @@ static const char *_state_token(alp_power_mode_t mode)
 	case ALP_POWER_MODE_DEEP_SLEEP:
 		return "standby";
 	case ALP_POWER_MODE_STANDBY:
+	case ALP_POWER_MODE_STOP:
+		/* The generic sysfs ABI has nothing deeper than "mem" --
+	     * STOP rounds DOWN to it, same target as STANDBY.  Explicit
+	     * case, not the default below: falling through to default
+	     * would round STOP to "freeze", the SHALLOWEST state, while
+	     * still reporting STOP as realised (#1813 review).
+	     * y_request_sleep separately reports realised_mode as
+	     * STANDBY, not STOP -- see _realised_mode below. */
 		return "mem";
 	default:
 		/* ALP_POWER_MODE_RUN is rejected by the dispatcher before this
@@ -146,6 +169,15 @@ static const char *_state_token(alp_power_mode_t mode)
 	     * undefined token. */
 		return "freeze";
 	}
+}
+
+/* What alp_power_wake_info_t::realised_mode reports for a given
+ * REQUESTED mode, mirroring _state_token's round-down above: every
+ * mode maps to itself except STOP, which this backend can only
+ * realise as STANDBY (both write "mem"). */
+static alp_power_mode_t _realised_mode(alp_power_mode_t requested)
+{
+	return (requested == ALP_POWER_MODE_STOP) ? ALP_POWER_MODE_STANDBY : requested;
 }
 
 /* Test-only "now" hook so a test can pin the epoch instead of racing
@@ -182,23 +214,30 @@ static alp_status_t _program_wakealarm(uint32_t wake_after_ms)
 	return _sysfs_write(ALP_YOCTO_POWER_WAKEALARM_PATH, buf);
 }
 
-static alp_status_t y_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out)
+static alp_status_t
+y_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out, uint32_t *wake_caps_out)
 {
 	(void)state;
 	/* The generic sysfs sleep ABI has no queryable capability surface
      * beyond presence, so caps stay 0 -- same as the RTC/WDT backends. */
 	if (caps_out != NULL) caps_out->flags = 0u;
+	/* wake_caps_out = 0: the bitmap has no matching sysfs knob (see
+     * the file-header "Wake handling" note) -- the dispatcher enforces
+     * this against every alp_power_configure_wake_source() call
+     * (#1812/#1813), so ALP_POWER_WAKE_NONE is the only bitmap that
+     * ever reaches y_configure_wake_source below. */
+	if (wake_caps_out != NULL) *wake_caps_out = 0u;
 	return ALP_OK;
 }
 
 static alp_status_t y_configure_wake_source(alp_power_backend_state_t *state, uint32_t wake_bitmap)
 {
-	/* The dispatcher already mirrors the bitmap into state->wake_bitmap
-     * for its own INVAL guard.  The kernel sysfs sleep ABI has no
-     * per-source enable knob beyond the wakealarm this backend
-     * programs at request_sleep() time when wake_after_ms > 0, so
-     * there is nothing further to configure here -- matches the
-     * zephyr_stub / zephyr_pm_policy backends' treatment of this op. */
+	/* Only ALP_POWER_WAKE_NONE can reach here -- the dispatcher already
+     * rejected anything else against wake_caps == 0 (see y_open).
+     * The kernel sysfs sleep ABI has no per-source enable knob beyond
+     * the wakealarm this backend programs at request_sleep() time
+     * when wake_after_ms > 0, so there is nothing further to
+     * configure here. */
 	(void)state;
 	(void)wake_bitmap;
 	return ALP_OK;
@@ -225,8 +264,10 @@ static alp_status_t y_request_sleep(alp_power_backend_state_t *state,
 
 	if (info != NULL) {
 		/* On a failed state write no sleep happened -- report RUN, not the
-		 * requested mode (mirror the wake_source guard below). */
-		info->realised_mode = (rc == ALP_OK) ? mode : ALP_POWER_MODE_RUN;
+		 * requested mode (mirror the wake_source guard below). On success,
+		 * report what was actually realised (STOP rounds down to STANDBY
+		 * -- see _realised_mode / _state_token, #1813 review). */
+		info->realised_mode = (rc == ALP_OK) ? _realised_mode(mode) : ALP_POWER_MODE_RUN;
 		info->wake_source =
 		    (rc == ALP_OK && wake_after_ms > 0u) ? (uint32_t)ALP_POWER_WAKE_RTC : 0u;
 		int64_t ms     = (int64_t)(after.tv_sec - before.tv_sec) * 1000 +

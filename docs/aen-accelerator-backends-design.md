@@ -312,11 +312,11 @@ not `select HAS_PM`, so `CONFIG_PM` is unreachable on a stock AEN
 build and `zephyr_pm_policy.c`'s own compile gate
 (`ALP_SDK_POWER_PM_POLICY depends on PM`) never fires there.
 `src/backends/power/zephyr_stub.c` (`"*"`, priority 0) is therefore
-the backend that actually wins on AEN today; per #1813 it now refuses
-a wake-source bitmap it can never honour at
+the backend that actually wins on AEN today; per #1813 the dispatcher
+now refuses a wake-source bitmap it can never honour at
 `alp_power_configure_wake_source()` time (reported via
-`alp_power_capabilities()`) instead of accepting it and failing only
-at `request_sleep()`.
+`alp_power_wake_capabilities()`) instead of accepting it and failing
+only at `request_sleep()`.
 **Real backend:** an `alif_aipm` power backend registered against
 `alif:ensemble:e3`…`e8` at priority **101** (above the wildcard
 policy), landing with the Alif aiPM / PMIC-sequencer HAL.

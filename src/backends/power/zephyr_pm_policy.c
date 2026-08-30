@@ -34,6 +34,11 @@
  *   ALP_POWER_MODE_SLEEP       -> PM_STATE_SUSPEND_TO_IDLE
  *   ALP_POWER_MODE_DEEP_SLEEP  -> PM_STATE_STANDBY
  *   ALP_POWER_MODE_STANDBY     -> PM_STATE_SUSPEND_TO_RAM
+ *   ALP_POWER_MODE_STOP        -> PM_STATE_SUSPEND_TO_RAM (round-down:
+ *                                 this generic backend has nothing
+ *                                 deeper; realised_mode reports
+ *                                 STANDBY, not STOP -- see
+ *                                 _realised_mode, #1813)
  *
  * The exact wall-clock latency + retained-state guarantees depend
  * on the active SoC's pm_state table (DT-defined `cpu-power-states`
@@ -47,12 +52,18 @@
  * layer: Zephyr's pm_policy doesn't take a wake-source mask.  The
  * actual wake-source enablement happens at the per-vendor HAL
  * level (RTC alarm via the configured alp_rtc_*; GPIO IRQ via
- * alp_gpio_*; UART RX via the LPUART driver).  When the caller
+ * alp_gpio_*; UART RX via the LPUART driver; a free-running
+ * counter/timer match).  z_open() reports exactly those four bits
+ * (RTC / GPIO / UART_RX / TIMER) via wake_caps_out -- NOT USB or
+ * ETH_LINK or the newer COMPARATOR / BROWNOUT bits, since this
+ * generic layer has no vendor-neutral way to arm those; the
+ * dispatcher enforces that report against every
+ * alp_power_configure_wake_source() call (#1813).  When the caller
  * passes @p wake_after_ms > 0 we register a Zephyr k_timer to
- * guarantee the wake, which covers the most common case (RTC
- * timed wake).  GPIO / UART / USB wakes rely on the caller having
- * configured the matching IRQ source before calling sleep -- the
- * setup of those bits is the caller's responsibility.
+ * guarantee the wake, which covers the most common case (RTC timed
+ * wake).  GPIO / UART wakes rely on the caller having configured the
+ * matching IRQ source before calling sleep -- the setup of those
+ * bits is the caller's responsibility.
  *
  * Yocto / Linux path
  * ------------------
@@ -99,12 +110,35 @@ static enum pm_state _to_pm_state(alp_power_mode_t mode)
 	case ALP_POWER_MODE_DEEP_SLEEP:
 		return PM_STATE_STANDBY;
 	case ALP_POWER_MODE_STANDBY:
+	case ALP_POWER_MODE_STOP:
+		/* This generic "*" backend has nothing deeper than
+         * PM_STATE_SUSPEND_TO_RAM to offer -- STOP rounds DOWN to it
+         * (the monotonic-mode contract <alp/power.h> documents).
+         * Explicit case, not the default below: falling through to
+         * default would round STOP to the SHALLOWEST state instead
+         * of the deepest, silently entering SUSPEND_TO_IDLE while
+         * telling the caller STOP was realised (#1813 review).
+         * z_request_sleep separately reports realised_mode as
+         * STANDBY, not STOP, so the caller is never told this
+         * backend reached a depth it never proved -- see
+         * _realised_mode below. */
 		return PM_STATE_SUSPEND_TO_RAM;
 	/* ALP_POWER_MODE_RUN is filtered by the dispatcher; only the
-     * three sleep modes reach the backend. */
+     * sleep modes above reach the backend. */
 	default:
 		return PM_STATE_SUSPEND_TO_IDLE;
 	}
+}
+
+/* What alp_power_wake_info_t::realised_mode reports for a given
+ * REQUESTED mode, given the round-down _to_pm_state performs above.
+ * Every mode maps to itself except STOP, which this backend can only
+ * realise as STANDBY (both target PM_STATE_SUSPEND_TO_RAM) -- so the
+ * caller learns the true depth reached, never the deeper one asked
+ * for (#1813 review: "a two-orders-of-magnitude power lie"). */
+static alp_power_mode_t _realised_mode(alp_power_mode_t requested)
+{
+	return (requested == ALP_POWER_MODE_STOP) ? ALP_POWER_MODE_STANDBY : requested;
 }
 
 /* On entry: caller wants the system to be free to descend into
@@ -235,7 +269,8 @@ static void _timer_expiry(struct k_timer *t)
 
 static K_TIMER_DEFINE(_wake_timer, _timer_expiry, NULL);
 
-static alp_status_t z_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out)
+static alp_status_t
+z_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out, uint32_t *wake_caps_out)
 {
 	pm_locks_t *l = _alloc_locks();
 	if (l == NULL) {
@@ -247,16 +282,32 @@ static alp_status_t z_open(alp_power_backend_state_t *state, alp_capabilities_t 
          * leaves the base_caps from the registry entry intact. */
 		(void)caps_out;
 	}
+	/* This layer only PARKS on a semaphore until wake -- the actual
+     * arming is the matching peripheral driver's job (alp_rtc_*,
+     * alp_gpio_*, the LPUART RX path, a free-running counter/timer).
+     * RTC / GPIO / UART_RX / TIMER are the four sources this generic
+     * "*" backend has always documented delegating to (see the file
+     * header); USB / ETH_LINK / COMPARATOR / BROWNOUT are not -- this
+     * layer has no generic knowledge those wake a given SoC from the
+     * pm_state it enters, so it does not claim them (#1813: the
+     * dispatcher now enforces this report against every
+     * configure_wake_source() call). */
+	if (wake_caps_out != NULL) {
+		*wake_caps_out = ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_GPIO | ALP_POWER_WAKE_UART_RX |
+		                 ALP_POWER_WAKE_TIMER;
+	}
 	return ALP_OK;
 }
 
 static alp_status_t z_configure_wake_source(alp_power_backend_state_t *state, uint32_t wake_bitmap)
 {
-	/* Bitmap is mirrored by the dispatcher in state->wake_bitmap;
-     * the per-source IRQ enablement is owned by the matching
-     * peripheral driver (alp_rtc_*, alp_gpio_*).  This backend
-     * only consumes the bitmap to decide whether to register a
-     * k_timer-only wake at request_sleep() time. */
+	/* Bitmap is mirrored by the dispatcher in state->wake_bitmap
+     * (only once accepted -- the dispatcher already validated it
+     * against the wake_caps z_open reported above, #1813); the
+     * per-source IRQ enablement is owned by the matching peripheral
+     * driver (alp_rtc_*, alp_gpio_*).  This backend only consumes the
+     * bitmap to decide whether to register a k_timer-only wake at
+     * request_sleep() time. */
 	(void)state;
 	(void)wake_bitmap;
 	return ALP_OK;
@@ -299,7 +350,7 @@ static alp_status_t z_request_sleep(alp_power_backend_state_t *state,
 	_hold_all_locks(l);
 
 	if (info != NULL) {
-		info->realised_mode = mode;
+		info->realised_mode = _realised_mode(mode);
 		/* Wake-source attribution is best-effort: if the caller
          * passed wake_after_ms > 0 and we returned because of the
          * timer, report RTC; otherwise zero (unknown).  Richer

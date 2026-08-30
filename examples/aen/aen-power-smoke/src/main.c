@@ -80,24 +80,29 @@
  *
  * Portable <alp/power.h> probe (issues #1812 / #1813)
  * ----------------------------------------------------
- * Before the WFI/SysTick proof below, main() also runs the exact repro
- * from #1812: alp_power_open() + alp_power_configure_wake_source() +
- * (when that succeeds) alp_power_request_sleep() -- the portable API a
- * customer would actually reach for, which no AEN example called before
- * this.  With CONFIG_PM unset (this file's whole reason for existing,
- * above), src/backends/power/zephyr_pm_policy.c never compiles in --
- * its Kconfig depends on PM -- so the wildcard
+ * AFTER the WFI/SysTick proof below has already printed its own
+ * RESULT line, main() also runs the exact repro from #1812:
+ * alp_power_open() + alp_power_configure_wake_source() + (when that
+ * succeeds) alp_power_request_sleep() -- the portable API a customer
+ * would actually reach for, which no AEN example called before this.
+ * Deliberately LAST: once a real alif_aipm backend lands (#1812's
+ * "Proposed resolution"), a successful DEEP_SLEEP request here means
+ * the SE reboots the core, so anything after this call would never
+ * run -- running the probe first would cost the WFI proof its own
+ * RESULT line.  With CONFIG_PM unset (this file's whole reason for
+ * existing, above), src/backends/power/zephyr_pm_policy.c never
+ * compiles in -- its Kconfig depends on PM -- so the wildcard
  * src/backends/power/zephyr_stub.c wins backend selection at priority
  * 0.  As of #1813 that stub is HONEST about what it can't do:
- * alp_power_capabilities() reports zero armable wake sources, and
- * alp_power_configure_wake_source() refuses a real bitmap right there,
- * at configuration time, instead of accepting it and only failing
- * later at alp_power_request_sleep() (the #1812 bug).  This is a
- * teaching moment as much as the WFI proof: check the capability,
- * check the return, and fall back to a baseline you know works (here,
- * the arch-level WFI loop below) rather than trusting a portable call
- * that silently did nothing.  It logs but never gates PASS/FAIL --
- * the beacon/heartbeat contract below is unchanged.
+ * alp_power_wake_capabilities() reports zero armable wake sources,
+ * and alp_power_configure_wake_source() refuses a real bitmap right
+ * there, at configuration time, instead of accepting it and only
+ * failing later at alp_power_request_sleep() (the #1812 bug).  This
+ * is a teaching moment as much as the WFI proof: check the
+ * capability, check the return, and fall back to a baseline you know
+ * works (the arch-level WFI loop above) rather than trusting a
+ * portable call that silently did nothing.  It logs but never gates
+ * PASS/FAIL -- the beacon/heartbeat contract above is unchanged.
  *
  * Console is the RAM buffer 'ram_console_buf' (see prj.conf); the bench app
  * UART is not wired to USB.  BENCH-VALIDATION app -- not a customer teaching
@@ -158,12 +163,12 @@ static void power_probe(void)
 		return;
 	}
 
-	const alp_capabilities_t *caps = alp_power_capabilities(pm);
+	uint32_t wake_caps = alp_power_wake_capabilities(pm);
 
-	printk("power: alp_power_capabilities()->flags=0x%08x (armable "
+	printk("power: alp_power_wake_capabilities()=0x%08x (armable "
 	       "ALP_POWER_WAKE_* bits; 0 == none on this CONFIG_PM-free "
 	       "build)\n",
-	       (caps != NULL) ? caps->flags : 0u);
+	       wake_caps);
 
 	alp_status_t cfg_rc = alp_power_configure_wake_source(pm, ALP_POWER_WAKE_RTC);
 
@@ -208,8 +213,6 @@ int main(void)
 
 	printk("\n=== AEN801 Stage-A low-power smoke "
 	       "(k_timer wake -> WFI, SysTick) ===\n");
-
-	power_probe();
 
 	t_start = k_uptime_get();
 	t_prev  = t_start;
@@ -281,5 +284,15 @@ int main(void)
 	       t_start,
 	       t_now,
 	       (uint32_t)SRAM0_BEACON[2]);
+
+	/* Runs AFTER the WFI/SysTick proof + its RESULT line has already
+	 * printed and the beacon is final -- not before it.  Once a real
+	 * alif_aipm backend lands (#1812's "Proposed resolution"),
+	 * alp_power_request_sleep(DEEP_SLEEP) succeeding here means the SE
+	 * has actually rebooted the core, which would make everything
+	 * below this call unreachable; probing first would have cost the
+	 * WFI proof its own RESULT line. */
+	power_probe();
+
 	return 0;
 }

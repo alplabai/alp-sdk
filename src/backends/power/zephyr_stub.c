@@ -10,17 +10,17 @@
  *
  * Behaviour differs from the Camera / Display / GPU2D stubs:
  * stub_open returns ALP_OK so the dispatcher hands the caller a
- * real handle, and stub_open reports zero wake-source capability
- * (caps_out->flags stays 0, its default -- this backend can arm
- * nothing).  Per the reported-capability + error contract settled
- * in #1813, stub_configure_wake_source therefore rejects any
- * non-empty bitmap with ALP_ERR_NOSUPPORT right there -- at
- * configuration time, not after a sleep that could never wake
- * (#1812).  Only ALP_POWER_WAKE_NONE (nothing to arm) is honoured.
- * request_sleep is the final backstop for a caller that ignores
- * configure_wake_source's return (e.g. a wake_after_ms-only,
- * bitmap-free request): it always returns ALP_ERR_NOSUPPORT too,
- * since this backend can never actually sleep.
+ * real handle, and reports *wake_caps_out = 0 (this backend can arm
+ * zero real wake sources).  The dispatcher (src/power_dispatch.c)
+ * enforces the reported-capability + error contract centrally against
+ * that value -- ANY non-empty bitmap is refused with ALP_ERR_NOSUPPORT
+ * at alp_power_configure_wake_source() time, before this backend's own
+ * op even runs, so setup code that ignores wake_caps finds out at
+ * configuration time rather than after a sleep that could never wake
+ * (#1812).  request_sleep is the final backstop for a caller that
+ * skips configure_wake_source entirely (e.g. a wake_after_ms-only
+ * request): it always returns ALP_ERR_NOSUPPORT too, since this
+ * backend can never actually sleep.
  *
  * Real backends already exist and out-rank this wildcard at higher
  * priority on the silicon_refs they claim: src/backends/power/
@@ -48,20 +48,21 @@
 
 #include "power_ops.h"
 
-static alp_status_t stub_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out)
+static alp_status_t
+stub_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out, uint32_t *wake_caps_out)
 {
 	(void)state;
+	(void)caps_out; /* no alp_instance_cap_t bits apply to power */
 	/* Successful open is required so the dispatcher hands the caller
      * a handle; alp_power_open always returns a valid pointer.  The
      * real "this feature isn't implemented" surface is at
      * configure_wake_source / request_sleep below.
      *
-     * flags = 0: this backend can arm zero real wake sources.  Set
-     * explicitly (matching the base_caps registration below, which
-     * is also 0) so alp_power_capabilities() documents that honestly
-     * rather than relying on an implicit default (#1813). */
-	if (caps_out != NULL) {
-		caps_out->flags = 0u;
+     * wake_caps_out = 0: this backend can arm zero real wake sources.
+     * The dispatcher enforces that centrally against every
+     * configure_wake_source() call (#1813). */
+	if (wake_caps_out != NULL) {
+		*wake_caps_out = 0u;
 	}
 	return ALP_OK;
 }
@@ -69,17 +70,11 @@ static alp_status_t stub_open(alp_power_backend_state_t *state, alp_capabilities
 static alp_status_t stub_configure_wake_source(alp_power_backend_state_t *state,
                                                uint32_t                   wake_bitmap)
 {
+	/* The dispatcher already rejected any bitmap outside wake_caps
+     * (0 for this backend, see stub_open) before this op runs -- only
+     * ALP_POWER_WAKE_NONE can reach here, which is trivially OK. */
 	(void)state;
-	/* This backend can never honour a real wake source (see stub_open's
-     * flags = 0) -- request_sleep can never succeed regardless of
-     * which bits are requested, so refuse a non-empty bitmap HERE,
-     * at configuration time, instead of letting setup code appear to
-     * succeed and only failing later at the sleep call (#1812).
-     * ALP_POWER_WAKE_NONE (0) is trivially honoured -- there is
-     * nothing to arm, matching alp_power_capabilities()->flags == 0. */
-	if (wake_bitmap != ALP_POWER_WAKE_NONE) {
-		return ALP_ERR_NOSUPPORT;
-	}
+	(void)wake_bitmap;
 	return ALP_OK;
 }
 
@@ -97,9 +92,10 @@ static alp_status_t stub_request_sleep(alp_power_backend_state_t *state,
 	}
 	/* No real PM backend on this build: report NOSUPPORT (matching the
      * <alp/power.h> portable contract), not NOT_IMPLEMENTED.  open()
-     * still succeeds so setup code links/runs; configure_wake_source
-     * already caught a non-empty bitmap above, so this is the
-     * backstop for a wake_after_ms-only (bitmap-free) request. */
+     * still succeeds so setup code links/runs; the dispatcher already
+     * rejects a non-empty wake bitmap before this point (see
+     * stub_open), so this is the backstop for a wake_after_ms-only
+     * (bitmap-free) request. */
 	return ALP_ERR_NOSUPPORT;
 }
 

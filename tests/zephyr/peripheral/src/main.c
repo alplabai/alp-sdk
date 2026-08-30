@@ -168,15 +168,14 @@ ZTEST(alp_peripheral, test_power_configure_wake_source_unsupported_bits_rejected
 {
 	/* #1812 / #1813: the stub backend active on this native_sim build
      * (no CONFIG_PM) can arm zero real wake sources -- reflected in
-     * alp_power_capabilities()->flags -- so a non-empty bitmap is now
+     * alp_power_wake_capabilities() -- so a non-empty bitmap is now
      * rejected HERE, at configuration time, instead of silently
      * accepted and only failing later at request_sleep(). */
 	alp_power_t *p = alp_power_open();
 	zassert_not_null(p, NULL);
 
-	const alp_capabilities_t *caps = alp_power_capabilities(p);
-	zassert_not_null(caps, NULL);
-	zassert_equal(caps->flags, 0u, "stub backend must report zero armable wake bits");
+	zassert_equal(
+	    alp_power_wake_capabilities(p), 0u, "stub backend must report zero armable wake bits");
 
 	alp_status_t s = alp_power_configure_wake_source(p, ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_GPIO);
 	zassert_equal(s, ALP_ERR_NOSUPPORT, "got %d", (int)s);

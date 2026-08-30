@@ -10,9 +10,11 @@
  * The E1M standard reserves five logical power modes -- RUN,
  * SLEEP, DEEP_SLEEP, STANDBY, and STOP -- mapped per SoC by the
  * backend.  STOP is the deepest rung (e.g. the Alif Ensemble E8's
- * STOP_0..STOP_5 ladder, Table 5-5: 900 nA floor up to a few µA
- * depending on what is retained); @ref alp_power_configure_retention
- * says what to keep before entering it.  Apps select a mode via
+ * STOP_0..STOP_5 ladder, Table 5-5: a ~900 nA floor at STOP_5 with
+ * nothing retained, up through low-uA STOP_1..4 levels depending on
+ * what is retained -- e.g. STOP_2 retains the 4 KB Utility SRAM at
+ * ~1.1 uA); @ref alp_power_configure_retention says what to keep
+ * before entering it.  Apps select a mode via
  * @ref alp_power_request_sleep after declaring which sources may
  * wake the SoC via @ref alp_power_configure_wake_source.  On wakeup
  * the function returns with the realised mode + the wake source
@@ -58,9 +60,12 @@
  *      @c ALP_POWER_MODE_STOP, the retention descriptor
  *      (@ref alp_power_configure_retention / @ref alp_power_retain_t),
  *      the @c ALP_POWER_WAKE_COMPARATOR / @c ALP_POWER_WAKE_BROWNOUT
- *      wake bits, and replaces the old "unsupported bits are silently
- *      ignored" wake-source contract with a reported-capability +
- *      error contract (see @ref alp_power_configure_wake_source).
+ *      wake bits, @ref alp_power_wake_capabilities (a dedicated
+ *      accessor, not an overload of @ref alp_power_capabilities's
+ *      shared @c alp_capabilities_t::flags), and replaces the old
+ *      "unsupported bits are silently ignored" wake-source contract
+ *      with a reported-capability + error contract (see
+ *      @ref alp_power_configure_wake_source).
  *      See docs/abi-markers.md for the convention.
  */
 
@@ -89,20 +94,27 @@ typedef enum {
 	                                     @ref alp_power_configure_retention to say what of
 	                                     the rest to keep; backends without a distinct STOP
 	                                     state round down to their deepest supported mode
-	                                     (documented monotonic-mode contract below). */
+	                                     and report it honestly in
+	                                     @ref alp_power_wake_info_t::realised_mode (the
+	                                     monotonic-mode contract documented above). */
 } alp_power_mode_t;
 
 /** Wake-source bitmap.  OR together to enable multiple sources.
  *
  *  Contract (settled in #1813 -- previously these bits were silently
  *  dropped when unsupported, which let a caller sleep on a source
- *  that could never fire): @ref alp_power_capabilities on the opened
- *  handle reports, via its @c flags field, exactly the subset of
- *  these bits the active backend can arm.  @ref
- *  alp_power_configure_wake_source returns @ref ALP_ERR_NOSUPPORT
- *  for a bitmap containing any bit outside that set, instead of
- *  ALP_OK -- a caller finds out at configuration time, not after a
- *  sleep that never wakes. */
+ *  that could never fire): @ref alp_power_wake_capabilities on the
+ *  opened handle reports exactly the subset of these bits the active
+ *  backend can arm.  @ref alp_power_configure_wake_source returns
+ *  @ref ALP_ERR_NOSUPPORT for a bitmap containing any bit outside
+ *  that set, instead of ALP_OK -- a caller finds out at configuration
+ *  time, not after a sleep that never wakes.  (Deliberately a
+ *  separate accessor from @ref alp_power_capabilities: that one's
+ *  @c flags field is the cross-class @c alp_instance_cap_t bitmap
+ *  every peripheral class shares -- e.g. @c ALP_INSTANCE_CAP_DMA is
+ *  bit 0, the same numeric value as @c ALP_POWER_WAKE_RTC below --
+ *  so wake-arm capability gets its own uint32_t rather than aliasing
+ *  that one.) */
 #define ALP_POWER_WAKE_NONE     0x00000000u
 #define ALP_POWER_WAKE_RTC      0x00000001u /**< RTC alarm / periodic tick. */
 #define ALP_POWER_WAKE_GPIO     0x00000002u /**< Configured GPIO IRQ line. */
@@ -151,8 +163,8 @@ alp_power_t *alp_power_open(void);
  * Rejects at THIS call, not at @ref alp_power_request_sleep, any
  * bitmap containing a bit the backend cannot arm -- see the
  * capability + error contract documented on the @c ALP_POWER_WAKE_*
- * bitmap above.  Query @ref alp_power_capabilities first to build a
- * bitmap that is guaranteed to be accepted.
+ * bitmap above.  Query @ref alp_power_wake_capabilities first to
+ * build a bitmap that is guaranteed to be accepted.
  *
  * @param[in] handle       Handle from @ref alp_power_open.
  * @param[in] wake_bitmap  Bitmap of @c ALP_POWER_WAKE_* macros.
@@ -160,7 +172,7 @@ alp_power_t *alp_power_open(void);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_NOSUPPORT (the bitmap requests at least one wake
  *         source the backend cannot arm -- see
- *         @ref alp_power_capabilities).
+ *         @ref alp_power_wake_capabilities).
  */
 alp_status_t alp_power_configure_wake_source(alp_power_t *handle, uint32_t wake_bitmap);
 
@@ -168,17 +180,20 @@ alp_status_t alp_power_configure_wake_source(alp_power_t *handle, uint32_t wake_
  *  cheapest first.  Deliberately named regions rather than a raw
  *  vendor bitmask (#1813) -- e.g. the Alif E8's
  *  `SERVICES_power_mem_retention_config` bitmask maps @ref
- *  ALP_POWER_RETAIN_UTILITY onto its 4 KB Utility SRAM bit (the
- *  ~900 nA STOP floor, Table 5-5) and @ref ALP_POWER_RETAIN_TCM
- *  onto its TCM retention bits sized to @ref
- *  alp_power_retain_t::retain_kb. */
+ *  ALP_POWER_RETAIN_UTILITY onto its 4 KB Utility SRAM bit (STOP_2,
+ *  1.1 uA typ. per Table 5-5 -- NOT the ladder's 900 nA floor, which
+ *  is STOP_5 retaining nothing) and @ref ALP_POWER_RETAIN_TCM onto
+ *  its TCM retention bits, rounded UP to the backend's own retention
+ *  granularity and sized by @ref alp_power_retain_t::retain_kb. */
 typedef enum {
-	ALP_POWER_RETAIN_NONE    = 0, /**< No RAM retained beyond the mandatory boot state. */
+	ALP_POWER_RETAIN_NONE    = 0, /**< No RAM retained beyond the mandatory boot state
+	                                    (E8: STOP_5, ~900 nA typ., no wake sources). */
 	ALP_POWER_RETAIN_UTILITY = 1, /**< Smallest SoC-guaranteed retained block (e.g. E8's
-	                                    4 KB Utility SRAM). */
+	                                    4 KB Utility SRAM, STOP_2, ~1.1 uA typ.). */
 	ALP_POWER_RETAIN_TCM     = 2, /**< @ref alp_power_retain_t::retain_kb KiB of
 	                                    tightly-coupled memory; the backend rounds UP to
-	                                    its own retention granularity. */
+	                                    its own retention granularity (never NOSUPPORT
+	                                    for a size that doesn't land exactly). */
 	ALP_POWER_RETAIN_FULL    = 3, /**< Every RAM block the requested mode supports
 	                                    retaining. */
 } alp_power_retain_level_t;
@@ -202,11 +217,17 @@ typedef struct {
  * @param[in] handle  Handle from @ref alp_power_open.
  * @param[in] retain  Requested footprint.  NULL is @ref ALP_ERR_INVAL.
  *
- * @return ALP_OK / ALP_ERR_INVAL (NULL @p retain, or an out-of-range
- *         @c level) / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT (the
- *         backend cannot realise this footprint for the mode that
- *         follows -- e.g. @ref ALP_POWER_RETAIN_TCM with a
- *         @c retain_kb the hardware's granularity can't hit exactly).
+ * @return ALP_OK / ALP_ERR_INVAL (NULL @p retain; an out-of-range
+ *         @c level; or @c level == @ref ALP_POWER_RETAIN_TCM with
+ *         @c retain_kb == 0, which is not a valid spelling of "retain
+ *         nothing" -- use @ref ALP_POWER_RETAIN_NONE for that) /
+ *         ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT (the backend has no
+ *         way to realise this footprint AT ALL -- e.g. it doesn't
+ *         implement @ref ALP_POWER_RETAIN_TCM, or @c retain_kb
+ *         exceeds the SoC's available TCM).  A @c retain_kb that
+ *         simply doesn't land on the backend's retention granularity
+ *         is never NOSUPPORT -- the backend rounds it UP instead (see
+ *         @ref ALP_POWER_RETAIN_TCM above).
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      New in v0.17 (#1813) -- retention descriptor.
@@ -260,20 +281,43 @@ alp_status_t alp_power_request_sleep(alp_power_t           *handle,
 void alp_power_close(alp_power_t *handle);
 
 /**
- * @brief Query the capabilities of an opened power handle.
+ * @brief Query the generic per-instance capabilities of an opened
+ *        power handle (the @c alp_instance_cap_t bitmap every
+ *        peripheral class shares -- DMA / HW_OVERSAMPLE / etc.).
  *
- * For the power class, @c flags is a bitmap of the @c ALP_POWER_WAKE_*
- * bits the active backend can actually arm -- this is the
- * "reported-capability" half of the wake-source contract documented
- * on the @c ALP_POWER_WAKE_* bitmap above (#1813); a bit absent here
- * always makes @ref alp_power_configure_wake_source reject a bitmap
- * containing it.  Zero means the backend cannot arm any wake source
- * (e.g. no real power backend is linked for this build).
+ * The power class has no such capabilities today (no DMA / hardware
+ * trigger / oversample concept applies to a sleep-mode handle), so
+ * @c flags is always 0 here; it is NOT where wake-source capability
+ * lives -- see @ref alp_power_wake_capabilities for that (#1813).
  *
  * @param handle  Handle from @ref alp_power_open, or NULL.
  * @return Pointer valid for the handle's lifetime; NULL if @p handle is NULL.
  */
 const alp_capabilities_t *alp_power_capabilities(const alp_power_t *handle);
+
+/**
+ * @brief Query which @c ALP_POWER_WAKE_* bits the active backend can
+ *        actually arm.
+ *
+ * The "reported-capability" half of the wake-source contract
+ * documented on the @c ALP_POWER_WAKE_* bitmap above (#1813): a bit
+ * absent here always makes @ref alp_power_configure_wake_source
+ * reject a bitmap containing it with @ref ALP_ERR_NOSUPPORT.  Zero
+ * means the backend cannot arm any wake source (e.g. no real power
+ * backend is linked for this build).  Deliberately a dedicated
+ * accessor rather than a field on @ref alp_power_capabilities's
+ * shared @c alp_capabilities_t -- that struct's @c flags is the
+ * cross-class @c alp_instance_cap_t bitmap, whose bit values collide
+ * numerically with @c ALP_POWER_WAKE_* (e.g. @c ALP_INSTANCE_CAP_DMA
+ * == @c ALP_POWER_WAKE_RTC == bit 0).
+ *
+ * @param handle  Handle from @ref alp_power_open, or NULL.
+ * @return Bitmap of @c ALP_POWER_WAKE_* macros; 0 if @p handle is NULL.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      New in v0.17 (#1813).
+ */
+uint32_t alp_power_wake_capabilities(const alp_power_t *handle);
 
 /* ------------------------------------------------------------------ */
 /* Operating-point profiles                                            */

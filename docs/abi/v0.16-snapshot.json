@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-29",
+  "generated": "2026-08-30",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -11392,6 +11392,10 @@
           "hash": "8f0eaa7bd51f8d72",
           "signature": "void alp_power_close(alp_power_t *handle);"
         },
+        "alp_power_configure_retention": {
+          "hash": "2e5f7b7d3bb9e222",
+          "signature": "alp_status_t alp_power_configure_retention(alp_power_t *handle, const alp_power_retain_t *retain);"
+        },
         "alp_power_configure_wake_source": {
           "hash": "d42b698bee57d079",
           "signature": "alp_status_t alp_power_configure_wake_source(alp_power_t *handle, uint32_t wake_bitmap);"
@@ -11411,9 +11415,21 @@
         "alp_power_request_sleep": {
           "hash": "6df7bca8e77d8254",
           "signature": "alp_status_t alp_power_request_sleep(alp_power_t *handle, alp_power_mode_t mode, uint32_t wake_after_ms, alp_power_wake_info_t *info);"
+        },
+        "alp_power_wake_capabilities": {
+          "hash": "1c840b5bd52b487e",
+          "signature": "uint32_t alp_power_wake_capabilities(const alp_power_t *handle);"
         }
       },
       "macros": {
+        "ALP_POWER_WAKE_BROWNOUT": {
+          "hash": "f600ca1a81faae9d",
+          "value": "0x00000080u"
+        },
+        "ALP_POWER_WAKE_COMPARATOR": {
+          "hash": "6064e7fe6545929d",
+          "value": "0x00000040u"
+        },
         "ALP_POWER_WAKE_ETH_LINK": {
           "hash": "410c5a53de215113",
           "value": "0x00000020u"
@@ -11445,14 +11461,15 @@
       },
       "typedefs": {
         "alp_power_mode_t": {
-          "definition": "typedef enum { ALP_POWER_MODE_RUN = 0, ALP_POWER_MODE_SLEEP = 1, ALP_POWER_MODE_DEEP_SLEEP = 2, ALP_POWER_MODE_STANDBY = 3, } alp_power_mode_t;",
+          "definition": "typedef enum { ALP_POWER_MODE_RUN = 0, ALP_POWER_MODE_SLEEP = 1, ALP_POWER_MODE_DEEP_SLEEP = 2, ALP_POWER_MODE_STANDBY = 3, ALP_POWER_MODE_STOP = 4, } alp_power_mode_t;",
           "enumerators": [
             "ALP_POWER_MODE_RUN = 0",
             "ALP_POWER_MODE_SLEEP = 1",
             "ALP_POWER_MODE_DEEP_SLEEP = 2",
-            "ALP_POWER_MODE_STANDBY = 3"
+            "ALP_POWER_MODE_STANDBY = 3",
+            "ALP_POWER_MODE_STOP = 4"
           ],
-          "hash": "b043f8579fd9fb3b",
+          "hash": "2f1b8ecce85f49a9",
           "kind": "enum"
         },
         "alp_power_profile_id_t": {
@@ -11475,6 +11492,26 @@
             "uint32_t io_mv"
           ],
           "hash": "7beccd806cf1c2f1",
+          "kind": "struct"
+        },
+        "alp_power_retain_level_t": {
+          "definition": "typedef enum { ALP_POWER_RETAIN_NONE = 0, ALP_POWER_RETAIN_UTILITY = 1, ALP_POWER_RETAIN_TCM = 2, ALP_POWER_RETAIN_FULL = 3, } alp_power_retain_level_t;",
+          "enumerators": [
+            "ALP_POWER_RETAIN_NONE = 0",
+            "ALP_POWER_RETAIN_UTILITY = 1",
+            "ALP_POWER_RETAIN_TCM = 2",
+            "ALP_POWER_RETAIN_FULL = 3"
+          ],
+          "hash": "5e7702176f7cf2e2",
+          "kind": "enum"
+        },
+        "alp_power_retain_t": {
+          "definition": "typedef struct { alp_power_retain_level_t level; uint32_t retain_kb; } alp_power_retain_t;",
+          "fields": [
+            "alp_power_retain_level_t level",
+            "uint32_t retain_kb"
+          ],
+          "hash": "7a38babd99c71d54",
           "kind": "struct"
         },
         "alp_power_t": {
