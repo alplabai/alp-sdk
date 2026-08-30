@@ -51,13 +51,23 @@
  * while the real failure (a crash before the RESULT line) went unreported.
  * This app instead states the SKIP explicitly: "no XiP slave in DT;
  * SOC_FEAT_OSPI_HAS_XIP_SER=0 on AE822".  A live XiP read stays additionally
- * unverifiable regardless -- but NOT for the reason this comment used to
- * give.  It said "no octal-NOR/HyperBus part populated this hardware batch",
- * and that is false on board rev 2626-R2: the module netlist carries a
- * Macronix MX25UM25645GXDI00 (256 Mbit octal NOR, SPI Octal I/O DTR) wired to
- * OSPI0_D0..D7 / SCLK / SS1 / RXDS, marked populated (DNP = 0).  A live XiP
- * read is blocked by the DT and the silicon feature bit, not by an empty
- * footprint (#915).
+ * unverifiable regardless, and the reason has TWO layers that must not be
+ * collapsed into one (#915):
+ *
+ *   - As DESIGNED on board rev 2626-R2, the OSPI memory is not a hole in the
+ *     schematic: the module netlist carries a Macronix MX25UM25645GXDI00
+ *     (256 Mbit octal NOR, SPI Octal I/O DTR) wired to OSPI0_D0..D7 / SCLK /
+ *     SS1 / RXDS, and its BOM line is marked populated (DNP = 0).
+ *   - As ASSEMBLED, the bench unit has NO OSPI memory fitted (maintainer,
+ *     2026-08-30).  DNP = 0 is a build-intent field; it does not promise that
+ *     any particular physical module was stuffed with the part.
+ *
+ * So on THIS board a live XiP read is blocked by an empty footprint, exactly
+ * as the original comment said, and no amount of DT or driver work will make
+ * the XiP step pass here.  The design-level fact only means a future
+ * fully-stuffed module would not need a board respin to run it.  Do not read
+ * the BOM as evidence about the unit on your desk -- confirm the part is
+ * physically there before treating an OSPI failure as a software defect.
  *
  * This example has caught three real, distinct silicon/build bugs on a board
  * with nothing on the OSPI bus (the clock-gate fault, the MPU Device-mapping
