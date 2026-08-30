@@ -19,6 +19,12 @@
  *   2. CONFIG_ALP_SDK_SOM_SKU: the build-time SoM SKU (board.yaml `som.sku`).
  *   3. CONFIG_BOARD: the raw Zephyr board target -- last-resort fallback.
  *
+ * When the live manifest read (path 1) succeeds, this file also compares
+ * its hw_rev against CONFIG_ALP_SDK_SOM_HW_REV -- the revision this
+ * firmware's pad-routing tables were compiled for -- and warns loudly on
+ * a disagreement; see alp_check_hw_rev_match() below for why that is a
+ * warning, not a refused boot, by default (issue #1853).
+ *
  * The SoC column + the system summary come from the SoC spec JSON (cores /
  * npus / total SRAM+MRAM), pre-formatted into CONFIG_ALP_SDK_SOC_* by
  * scripts/alp_orchestrate.py.  Builds without those (e.g. apps not built
@@ -39,6 +45,7 @@
 
 #if defined(CONFIG_ALP_SDK_HW_INFO)
 #include <alp/hw_info.h> /* alp_hw_info_read(), alp_hw_info_t, ALP_OK */
+#include "hw_info_manifest.h" /* alp_hw_info_build_hw_rev_mismatch() -- internal, issue #1853 */
 #endif
 
 /* Append the SoC display name (when known) + the manufacturer, then end the
@@ -91,6 +98,59 @@ static void alp_print_sysinfo(void)
 	printk("\n");
 }
 
+#if defined(CONFIG_ALP_SDK_HW_INFO)
+/*
+ * Boot-time hw_rev mismatch check (issue #1853).  The SDK compiles pad
+ * routing (E1M_* -> which chip, which pin) for CONFIG_ALP_SDK_SOM_HW_REV;
+ * the EEPROM manifest just read above is the module's actual revision.
+ * On the AEN family alone, three pads (IO8/IO10/IO21) resolve to a
+ * DIFFERENT chip depending on which one is right -- a silent mismatch
+ * means an app can be built to drive a CC3501E GPIO proxy for a pin that
+ * is physically a direct Alif GPIO (or vice-versa), with the intended
+ * pin never touched and no diagnostic anywhere.
+ *
+ * Severity, chosen deliberately:
+ *   - A loud warning is the FLOOR, always on: this is real -- silently
+ *     driving the wrong chip is the exact defect class that has already
+ *     produced multiple wrong bench conclusions (see the issue).
+ *   - Refusing to boot is NOT the default: alp_hw_info_read() already
+ *     routed a NOT_PROVISIONED / unreadable manifest away from this
+ *     function entirely (this only runs on ALP_OK), so a factory-fresh
+ *     module never trips it -- but a mismatch can also be entirely
+ *     benign (a dev board relabelled, a board.yaml that hasn't caught up
+ *     yet), and bricking a developer's board over a revision string is a
+ *     worse failure mode than a possibly-wrong pin.  A production build
+ *     that wants to fail closed instead opts in via
+ *     CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL.
+ *   - What this does NOT do: refuse to DISPATCH only the specific pads
+ *     whose route actually differs between hw_revs (the issue's
+ *     "stronger guard").  That needs a build-time-emitted table of which
+ *     E1M_* pads are hw_rev-ambiguous for this SKU (derived from the SoM
+ *     preset's `pad_route_overrides`, scripts/alp_project_loader.py) plus
+ *     every peripheral-class dispatcher (gpio/spi/i2c/...) consulting it
+ *     -- a cross-cutting change touching the dispatch layer for every
+ *     class that can carry an E1M pad, not a boot-banner-sized unit.
+ *     CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL is the coarse mitigation
+ *     available today: it halts before any pad is ever dispatched,
+ *     covering the whole app rather than just the ambiguous pads.
+ */
+static void alp_check_hw_rev_match(const alp_hw_info_t *info)
+{
+	if (!alp_hw_info_build_hw_rev_mismatch(info, CONFIG_ALP_SDK_SOM_HW_REV)) {
+		return;
+	}
+	printk("Alp SDK: WARNING hw_rev mismatch -- built for '%s', module reports '%s'.\n",
+	       CONFIG_ALP_SDK_SOM_HW_REV,
+	       info->som_hw_rev);
+	printk("  Pad routing can differ by hw_rev (docs/board-config-hardware.md);"
+	       " a pin may be driven on the wrong chip.\n");
+#if defined(CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL)
+	printk("  CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL=y -- halting.\n");
+	k_panic();
+#endif
+}
+#endif /* CONFIG_ALP_SDK_HW_INFO */
+
 static int alp_sdk_banner(void)
 {
 #if defined(CONFIG_ALP_SDK_HW_INFO)
@@ -105,6 +165,7 @@ static int alp_sdk_banner(void)
 		printk("Alp SDK %s  |  %s %s", ALP_VERSION_STRING, info.som_sku, info.som_hw_rev);
 		alp_print_soc_and_eol();
 		alp_print_sysinfo();
+		alp_check_hw_rev_match(&info);
 		return 0;
 	}
 #endif

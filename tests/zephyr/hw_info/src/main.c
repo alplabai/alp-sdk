@@ -150,3 +150,58 @@ ZTEST(alp_hw_info, test_classify_null_args_return_inval)
 	zassert_equal(alp_hw_info_classify_manifest(NULL, &info), ALP_ERR_INVAL);
 	zassert_equal(alp_hw_info_classify_manifest(&m, NULL), ALP_ERR_INVAL);
 }
+
+/* ---- alp_hw_info_build_hw_rev_mismatch: the boot-banner check (#1853) ----
+ *
+ * KNOWN-BAD PROOF: this function did not exist before #1853 (the issue's
+ * whole complaint is that nothing anywhere compared the live manifest
+ * against the compiled hw_rev -- `grep -rn alp_hw_info_verify --include=*.c
+ * examples/ tests/ src/` returned zero call sites).  A test file that
+ * referenced it would have failed to LINK on pre-fix `origin/dev`; these
+ * cases are the fix's own proof the comparison now fires.
+ */
+
+ZTEST(alp_hw_info, test_build_hw_rev_mismatch_detects_disagreement)
+{
+	/* The bug scenario verbatim: module manifest says r1 (bench-reported
+     * E1M-AEN801 r1), firmware compiled for r2 (the SKU preset's
+     * default_hw_rev) -- three E1M pads dispatch to a different chip
+     * between the two. */
+	alp_hw_info_eeprom_t m;
+	make_valid_manifest(&m); /* hw_rev "r1" */
+	alp_hw_info_t info;
+	memset(&info, 0, sizeof(info));
+	zassert_equal(alp_hw_info_classify_manifest(&m, &info), ALP_OK);
+
+	zassert_true(alp_hw_info_build_hw_rev_mismatch(&info, "r2"));
+}
+
+ZTEST(alp_hw_info, test_build_hw_rev_mismatch_false_on_agreement)
+{
+	alp_hw_info_eeprom_t m;
+	make_valid_manifest(&m); /* hw_rev "r1" */
+	alp_hw_info_t info;
+	memset(&info, 0, sizeof(info));
+	zassert_equal(alp_hw_info_classify_manifest(&m, &info), ALP_OK);
+
+	zassert_false(alp_hw_info_build_hw_rev_mismatch(&info, "r1"));
+}
+
+ZTEST(alp_hw_info, test_build_hw_rev_mismatch_false_when_nothing_to_compare)
+{
+	alp_hw_info_eeprom_t m;
+	make_valid_manifest(&m);
+	alp_hw_info_t info;
+	memset(&info, 0, sizeof(info));
+	zassert_equal(alp_hw_info_classify_manifest(&m, &info), ALP_OK);
+
+	/* Empty/NULL built_hw_rev means "built without alp_orchestrate.py" --
+     * never a mismatch, not even against a populated live manifest. */
+	zassert_false(alp_hw_info_build_hw_rev_mismatch(&info, ""));
+	zassert_false(alp_hw_info_build_hw_rev_mismatch(&info, NULL));
+
+	/* NULL info (e.g. alp_hw_info_read() never succeeded) -- also never
+     * a mismatch; the caller's ALP_OK gate is what decides whether this
+     * runs at all. */
+	zassert_false(alp_hw_info_build_hw_rev_mismatch(NULL, "r2"));
+}

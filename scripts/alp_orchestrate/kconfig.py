@@ -576,6 +576,14 @@ def _emit_som_caps(
                 "CONFIG_ALP_SDK_HW_INFO_EEPROM_OFFSET="
                 f"{hw_info_eeprom['offset']}")
         lines.append("")
+        # Build-time hw_rev the pad-routing tables above were composed
+        # for (`_hwrev_pad_route_overrides` in alp_project_loader.py) --
+        # lets the boot banner warn when the LIVE EEPROM manifest this
+        # bus reads back disagrees (issue #1853).  Only meaningful when
+        # an EEPROM is actually wired, hence scoped inside this `if`.
+        if project.hw_rev:
+            lines.append(f'CONFIG_ALP_SDK_SOM_HW_REV="{project.hw_rev}"')
+            lines.append("")
 
     if kconfig:
         lines.append(f"# SoM silicon ({silicon} via {project.sku})")
