@@ -383,16 +383,25 @@ out:
  * @param unit Address to erase FLASH_MRAM_ERASE_UNIT bytes.
  *             The erase value is defined by FLASH_MRAM_ERASE_VALUE.
  */
-static void mram_unit_erase(const uint32_t unit)
+static int mram_unit_erase(const uint32_t unit)
 {
 	const off_t unit_addr = (unit * FLASH_MRAM_ERASE_UNIT);
 	uint32_t i;
 
 	for (i = unit_addr; i < (unit_addr + FLASH_MRAM_ERASE_UNIT);
 	    i += FLASH_MRAM_PROG_UNIT) {
-		/* Erase 16 bytes of MRAM data */
-		mram_erase_16bytes(MRAM_FLASH(i));
+		/* Erase 16 bytes of MRAM data.  The return is propagated for the
+		 * same reason the write path's is (#1824): a caller told the erase
+		 * succeeded when the hardware refused it is how a bootloader comes
+		 * to believe it cleared a trailer it did not (#1066). */
+		int ret = mram_erase_16bytes(MRAM_FLASH(i));
+
+		if (ret != 0) {
+			return ret;
+		}
 	}
+
+	return 0;
 }
 
 /**
@@ -412,6 +421,7 @@ static int flash_mram_erase(const struct device *dev, off_t offset,
 	struct mram_flash_data *dev_data = dev->data;
 	uint32_t mram_unit_start;
 	uint32_t i;
+	int                     ret = 0;
 
 	if (!flash_mram_range_is_valid(offset, len, FLASH_MRAM_FLASH_SIZE)) {
 		LOG_ERR("mram_erase: Invalid range offset: %ld len :%d\n",
@@ -431,11 +441,14 @@ static int flash_mram_erase(const struct device *dev, off_t offset,
 		return -EACCES;
 	}
 	for (i = 0 ; i < len / FLASH_MRAM_ERASE_UNIT ; ++i) {
-		mram_unit_erase(mram_unit_start + i);
+		ret = mram_unit_erase(mram_unit_start + i);
+		if (ret != 0) {
+			break;
+		}
 	}
 	k_sem_give(&dev_data->lock);
 
-	return 0;
+	return ret;
 }
 
 #ifdef CONFIG_FLASH_PAGE_LAYOUT
