@@ -8,12 +8,30 @@
  * (disk_access_init / disk_access_ioctl) on the "SD" disk.
  *
  * EVK ROUTING NOTE: on the E1M EVK the microSD sits on the SDIO bus behind a
- * 74LVC157 mux whose ENABLE (IO20) and SELECT (IO21) are BOTH on the CC3501E
- * side and must be driven over the inter-chip SPI bridge
- * (ALP_CC3501E_CMD_GPIO_WRITE).  Until that bridge routes the mux to the SD
- * slot, NO card is reachable from the Alif side -- so this example validates the
- * SDHC controller/driver bring-up (device builds + inits), and card init is
- * expected to fail with "no card".  See the README.
+ * 74LVC157 mux with an ENABLE (E1M IO20) and a SELECT (E1M IO21).
+ *
+ * WHERE THOSE TWO PINS GO IS REVISION-DEPENDENT (#912).  Do not hard-code
+ * either answer -- metadata/e1m_modules/aen/hw-revisions.yaml is the machine
+ * source and the SDK already applies the per-rev delta for you:
+ *
+ *   - IO20 is CC3501E-side on both revisions (from-cc3501e.tsv maps it to
+ *     GPIO_26), so the mux ENABLE is drivable through the GPIO proxy either way.
+ *   - IO21 is the one that moves.  On **r1** it reaches CC3501E GPIO_30
+ *     (`pad_route_overrides`: "r1: CC3501E GPIO_30 (r2 unrouted)"), so the mux
+ *     SELECT IS drivable over the bridge.  On **r2** GPIO_30 was re-routed to
+ *     IO8 and IO21 was left OPEN on the module -- it reaches neither chip, so
+ *     on r2 the SELECT cannot be driven from software at all.
+ *
+ * Either way no card is reachable from the Alif side today, but the REASON
+ * differs, and so does the fix: on r1 it is bridge/proxy work, on r2 it is a
+ * module pad that goes nowhere.  Read the running module's revision rather
+ * than assuming -- `alp board` prints it from the EEPROM manifest, which
+ * hw_info_zephyr.c treats as the single authoritative source.  (The bench
+ * module at the time of writing reports `E1M-AEN801 r1`, serial 2617-0001.)
+ *
+ * This example therefore validates SDHC controller/driver bring-up (device
+ * builds + inits) and card init is expected to fail with "no card".  See the
+ * README.
  *
  * PASS gate: disk_access_init returns 0 and the card geometry reads back (a card
  * was actually reachable + enumerated).  A clean controller bring-up where the

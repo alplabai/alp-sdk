@@ -47,9 +47,21 @@ def _tsv_gpio_routes() -> dict[str, int]:
         rows = (line for line in f if not line.startswith("#"))
         for row in csv.DictReader(rows, delimiter="\t"):
             e1m_match = re.fullmatch(r"IO(\d+)", row["e1m_function"])
-            gpio_match = re.fullmatch(r"GPIO_?(\d+)", row["cc3501e_function"])
-            if e1m_match and gpio_match:
-                routes[f"E1M_GPIO_IO{e1m_match.group(1)}"] = int(gpio_match.group(1))
+            if not e1m_match:
+                continue
+            # A raw-GPIO row is 3 columns and carries the pad in
+            # cc3501e_function; a row whose pad is claimed by a named
+            # peripheral is 4 columns, with the claim in cc3501e_function and
+            # the pad in cc3501e_pad.  IO16 and IO17 took the second shape when
+            # the bridge's READY and SPI CSN claims were recorded (#1808), so
+            # read the pad from whichever column actually holds one instead of
+            # assuming the 3-column layout.
+            for cell in (row["cc3501e_function"], row["cc3501e_pad"]):
+                gpio_match = re.fullmatch(r"GPIO_?(\d+)", cell or "")
+                if gpio_match:
+                    routes[f"E1M_GPIO_IO{e1m_match.group(1)}"] = int(
+                        gpio_match.group(1))
+                    break
     return routes
 
 
