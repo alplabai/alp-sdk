@@ -8258,7 +8258,7 @@ The exact order code is **left `TBD`, deliberately**: the sources in this
 tree disagree on precision (the CHANGELOG's own `metadata/e1m_modules/aen/CHANGELOG.md:16`
 says "TI DP83825", the devicetree says `DP83825I`), and the devicetree's own
 label self-flags as an unverified "fork reference" one
-(`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-354`). The MDIO
+(`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:548-555`). The MDIO
 `PHYID1+PHYID2` bench readback (`id=2000a140`,
 `examples/aen/aen-ethernet-link/README.md:39`) confirms the DP83825 die/OUI
 identity but not the temperature/package order-code suffix, so it cannot

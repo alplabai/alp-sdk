@@ -228,4 +228,76 @@
 	ALIF_CLK_CFG(M55HE_CFG, HE_CLK_ENA, 14U, 1U, 0U, 0U, 0U,               \
 		     ALIF_PARENT_CLK_SYST_HCLK)
 
+/* LPUART (M55-HE local domain, lpuart@43008000) peripheral clock gate: bit 0
+ * (UART_CKEN) of RTSS_HE_LPPERI_CKEN (offset 0x1C) in the AON block (base
+ * 0x1A604000, the same "aon" reg region the clockctrl node already maps).
+ * Sourced from the AE822 HWRM (AHRM0012NDA v0.3) section 8.3.6.3.7
+ * RTSS_HE_LPPERI_CKEN Register (bit 0 UART_CKEN, "Enable clock for LPUART")
+ * and the LPUART clocks table ("LPUART PCLK -- RTSS_HE_CLK -- LPUART APB
+ * interface clock").  This is a DIFFERENT register from the M55HE_CFG
+ * HE_CLK_ENA block the other M55-HE-local LP peripherals below gate through --
+ * LPUART's enable bit lives in AON, not M55HE_CFG.
+ *
+ * parent_clk is NOT a harmless filler -- it is presently WRONG, and enabling
+ * `&lpuart` without also fixing this will garble the baud rate.  The three
+ * ALIF_PARENT_CLK_* options are all fixed SYST_{ACLK,HCLK,PCLK} clocks
+ * (100/200/400 MHz `fixed-clock` DT nodes); none of them IS RTSS_HE_CLK, the
+ * real LPUART PCLK source, which the HWRM (§8.3.2.3.3 PLL_CLK_SEL Register)
+ * documents as SELECTABLE at boot (oscillator or PLL, via
+ * PLL_CLK_SEL/ESCLK_SEL) -- there is no single correct Hz to hard-code here,
+ * so PCLK (100 MHz fixed) is used only because alif_get_clock_freq()'s
+ * switch has no other case and clock_control_get_rate() must return
+ * something.  Concretely: uart_ns16550.c's init only takes this get_rate()
+ * path (and only THEN calls clock_control_on(), actually enabling the
+ * UART_CKEN gate above) when the node carries NO `clock-frequency` -- which
+ * `lpuart` does not, deliberately matching uart0..7's convention -- so the
+ * very first board to flip `&lpuart` to "okay" gets a garbled baud rate
+ * (100 MHz where RTSS_HE_CLK belongs).  Adding a literal `clock-frequency`
+ * instead is NOT a fix: since it is RTSS_HE_CLK-derived and board/DVFS-
+ * selectable, any number written here would be a guess, AND
+ * uart_ns16550.c's init SKIPS clock_control_on() entirely when
+ * `clock-frequency` is present, so that route would leave the UART_CKEN
+ * gate never enabled (dead, not just mis-clocked).  Resolving this for real
+ * needs either a genuine RTSS_HE_CLK-aware parent case in
+ * clock_control_alif.c (fed by whatever fixed rate the enabling board's own
+ * clock-tree setup lands on) or a per-board `clock-frequency` override
+ * paired with separately guaranteeing the UART_CKEN gate gets set some
+ * other way -- TBD, not invented here.  HE-core only.  vendor-ext,
+ * BENCH-UNVERIFIED, BENCH-BLOCKED (do not enable `&lpuart` until this is
+ * resolved). */
+#define ALIF_RTSS_HE_LPPERI_CKEN_REG 0x1CU /* AON base 0x1A604000 */
+#define ALIF_LPUART_CLK                                                         \
+	ALIF_CLK_CFG(AON, RTSS_HE_LPPERI_CKEN, 0U, 1U, 0U, 0U, 0U,              \
+		     ALIF_PARENT_CLK_SYST_PCLK)
+
+/* LPCPI (M55-HE local domain, lpcam@43003000) peripheral clock gate: bit 12
+ * (CPI_CKEN) of HE_CLK_ENA in M55HE_CFG (base 0x43007000) -- the same
+ * register ALIF_LPSPI_CLK / ALIF_LPI3C_CLK above gate through.  Sourced from
+ * the AE822 HWRM section 8.3.9.3.5 HE_CLK_ENA Register, bit 12 CPI_CKEN
+ * ("Enable clock for LPCPI").  parent_clk is a filler: the alif,cam driver
+ * (video_alif.c) only clock_control_on()s this id, never get_rate()s it, so
+ * the parent is unused.  NOTE this is a REAL register gate, unlike the
+ * main-domain cam node's ALIF_CPI_CLK, which is the register-less
+ * ALIF_CLK(2U) dummy (module 0x0, en_mask 0 -- touches no register at all,
+ * per that id's own definition above) standing in for a camera clock ID the
+ * upstream encoding does not yet have.  HE-core only.  vendor-ext,
+ * BENCH-UNVERIFIED. */
+#define ALIF_LPCPI_CLK                                                          \
+	ALIF_CLK_CFG(M55HE_CFG, HE_CLK_ENA, 12U, 1U, 0U, 0U, 0U,                \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+
+/* LPI2S (M55-HE local domain, lpi2s@43001000) functional clock: bit 12
+ * (CLK_ENA) of HE_I2S_CTRL (offset 0x14) in M55HE_CFG, with a 1-bit
+ * clock-source field at bit 16 (CLK_SEL; src=0 selects the 76.8 MHz
+ * reference, matching the ALIF_I2Sx_76M8_CLK pattern above -- the *_AUDIO
+ * variant src=1 is not re-authored here).  Sourced from the AE822 HWRM
+ * section 8.3.9.3.6 HE_I2S_CTRL Register.  parent_clk is a filler, same
+ * reasoning as ALIF_I2S0_76M8_CLK (i2s_dw.c uses set_rate, not get_rate, and
+ * our upstream clockctrl has no .set_rate).  HE-core only.  vendor-ext,
+ * BENCH-UNVERIFIED. */
+#define ALIF_HE_I2S_CTRL_REG 0x14U /* M55HE_CFG base 0x43007000 */
+#define ALIF_LPI2S_76M8_CLK                                                     \
+	ALIF_CLK_CFG(M55HE_CFG, HE_I2S_CTRL, 12U, 1U, 0U, 1U, 16U,              \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+
 #endif /* ALP_DT_BINDINGS_CLOCK_ALIF_ENSEMBLE_CLOCKS_EXT_H_ */
