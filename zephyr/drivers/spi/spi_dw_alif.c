@@ -126,8 +126,23 @@ static void completed(const struct device *dev, int error)
 	}
 
 out:
-	/* need to give time for FIFOs to drain before issuing more commands */
-	while (test_bit_sr_busy(dev)) {
+	/* need to give time for FIFOs to drain before issuing more commands.
+	 *
+	 * Bounded: this runs on EVERY transfer, PIO and DMA, in thread context, so
+	 * a wedged macrocell used to hang the calling thread outright.  The other
+	 * polled loops in this file already carry SPI_DW_POLL_GUARD; this one was
+	 * missed (#1819).  There is nothing useful to return from here -- the
+	 * transfer is already being completed -- so log and carry on tearing down
+	 * rather than spin. */
+	{
+		uint32_t guard = 0;
+
+		while (test_bit_sr_busy(dev)) {
+			if (++guard > SPI_DW_POLL_GUARD) {
+				LOG_ERR("SR[BUSY] never cleared; tearing down anyway");
+				break;
+			}
+		}
 	}
 
 	/* Disabling interrupts */
@@ -488,7 +503,20 @@ static int spi_dw_dma_wait_completion(const struct device *dev,
 		SPI_DW_DMA_FULL_DUPLEX : 1;
 
 	for (uint8_t i = 0; i < expected_completions; i++) {
-		k_sem_take(&spi->dma_sem, K_FOREVER);
+		/*
+		 * Bounded, not K_FOREVER: this is where every stall on the DMA path
+		 * used to terminate -- a dropped completion callback (see
+		 * spi_dw_dma_cleanup()) left the caller's thread blocked for the life
+		 * of the image with no way to report it (#1819).  A timeout turns
+		 * that into an -ETIMEDOUT the caller can act on.
+		 */
+		if (k_sem_take(&spi->dma_sem, K_MSEC(CONFIG_SPI_DW_ALIF_DMA_TIMEOUT_MS)) != 0) {
+			LOG_ERR("DMA completion %u/%u timed out after %d ms",
+			        i + 1U,
+			        expected_completions,
+			        CONFIG_SPI_DW_ALIF_DMA_TIMEOUT_MS);
+			return -ETIMEDOUT;
+		}
 
 		/* Check for IRQ error first, then DMA error */
 		if (spi->ctx.sync_status < 0) {
@@ -516,6 +544,25 @@ static void spi_dw_dma_cleanup(const struct device *dev, int error)
 		if (info->dma_tx.enabled) {
 			dma_stop(info->dma_dev, info->dma_tx.ch);
 		}
+
+		/*
+		 * dma_stop() tears down the event-router callback mapping --
+		 * dma_alif_evtrtr_stop() clears channel_map[ch].in_use and
+		 * orig_callback on success, and dma_pl330_transfer_stop() returns 0
+		 * whether it killed a running channel or found it already idle, so
+		 * this always happens.  dma_config() is the ONLY place that mapping
+		 * is re-registered.
+		 *
+		 * The descriptor-reuse cache used to survive that: the next transfer
+		 * with a matching shape took the dma_reload() fast path, skipped
+		 * dma_config(), and its completion hit the "Callback for unmapped
+		 * physical channel" branch in evtrtr_callback_wrapper() -- which
+		 * returns WITHOUT k_sem_give().  The caller then blocked in
+		 * spi_dw_dma_wait_completion() forever.  One DMA error wedged the
+		 * driver for good (#1819).
+		 */
+		spi->dma_state.rx_shape.valid = false;
+		spi->dma_state.tx_shape.valid = false;
 	}
 
 	completed(dev, error);
@@ -551,6 +598,12 @@ static int spi_dw_dma_transceive(const struct device *dev,
 	if (!spi_dw_is_slave(spi) && (!tx_bufs || !tx_bufs->buffers)) {
 		write_dr(dev, 0x0);
 	}
+
+	/* ctx.sync_status latches the last error from spi_dw_isr() and from
+	 * completed() in cleanup, and spi_dw_dma_wait_completion() returns it --
+	 * but nothing cleared it, so a transfer that got past a previous failure
+	 * reported that failure's status instead of its own (#1819). */
+	spi->ctx.sync_status = 0;
 
 	/* Main transfer loop */
 	while (spi_dw_dma_has_more_data(state)) {
