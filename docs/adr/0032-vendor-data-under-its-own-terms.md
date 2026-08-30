@@ -59,7 +59,7 @@ different kind of sign-off.
 The vendor terms themselves are permissive enough to make the question live
 rather than academic. Alif's `License.txt` in
 [`alifsemi/alif_ensemble-cmsis-dfp`](https://github.com/alifsemi/alif_ensemble-cmsis-dfp)
-permits redistribution in source and binary form provided condition 1 is met
+permits redistribution in source and binary form provided conditions 1-5 are met
 (retain the copyright notice, the full condition list and the disclaimers).
 Condition 4 restricts the field of use to Alif silicon, and condition 5 forbids
 subjecting the software to a copyleft licence. Apache-2.0 is not copyleft, so
@@ -95,14 +95,8 @@ vendor, the exact upstream repository and commit the bytes came from, and the
 field-of-use restriction. The root `NOTICE` gains an entry naming the component
 and its licence.
 
-**This is convention, not enforcement, and that is a known cost.** Nothing in
-`scripts/` or `.github/workflows/` reads `NOTICE` today, which is how the seven
-missing entries above accumulated unnoticed. Closing that needs a
-`check_notice_vendors.py` asserting every vendored subtree with a licence file
-has a `NOTICE` entry, landed across the four sites `adding-a-ci-gate` requires.
-Until it exists, Decision 3 is enforced by review alone. The
-licence attaches to the subtree, not to a metadata key — which is why no schema
-change is required to carry it.
+The licence attaches to the subtree, not to a metadata key — which is why no
+schema change is required to carry it.
 
 **3. The root `LICENSE` stops implying whole-tree coverage, in the same change
 as the first file that needs the carve-out.** `NOTICE`'s "Vendor BSPs and SDK
@@ -113,6 +107,14 @@ be redistributed under the vendor's own terms where the vendor permits it. The
 amendment never lands ahead of the file it describes — a `NOTICE` that
 describes an empty directory is a false statement in the same way the current
 one would be after a silent vendoring.
+
+**This is convention, not enforcement, and that is a known cost.** Nothing in
+`scripts/` or `.github/workflows/` reads `NOTICE` today, which is how the seven
+missing entries recorded under Alternatives accumulated unnoticed. Closing that
+needs a `check_notice_vendors.py` asserting every vendored subtree with a
+licence file has a `NOTICE` entry, landed across the four sites
+`adding-a-ci-gate` requires. Until it exists, this decision is enforced by
+review alone.
 
 This ADR records the **mechanism**, not an authorisation. Whether Alp Lab
 redistributes any particular vendor's files under that vendor's terms remains a
