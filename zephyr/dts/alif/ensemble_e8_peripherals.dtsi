@@ -31,6 +31,13 @@
  * The non-UART peripheral clock IDs upstream's alif-ensemble-clocks.h omits are
  * supplied, re-encoded for the upstream clockctrl, by the alp-sdk -ext header
  * included below.
+ *
+ * Also populated: the M55-HE-local low-power peripheral bank (lpuart, lpi2c1,
+ * lpspi0/1, lpi2s, lppdm, lpcam/LPCPI, lptimer0..3, lpcmp0, plus the existing
+ * lpi3c0/rtc0/lpgpio) and the DMA/event-router infrastructure (dma0 + evtrtr0,
+ * promoted here from per-example overlay copies; dma2 + its new evtrtr2
+ * sibling) -- see each node's own comment for sourcing (alp-sdk issues
+ * #1815/#1816/#1817).
  */
 
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
@@ -259,21 +266,208 @@
 	};
 
 	/*
-	 * LPI2C0 (0x43009000, P7_4/P7_5) is DELIBERATELY NOT declared here.  It is
-	 * genuinely SLAVE-ONLY (TRM §3.17.4: the SoC is a slave at the hardcoded
-	 * address 0x40), so an alp-sdk I2C master node would be a dead end -- the
-	 * removed alif,lpi2c driver was that master-TX-only dead end (#1848).
+	 * Low-power peripheral bank (M55-HE local domain, AE822 HWRM
+	 * AHRM0012NDA v0.3 Table 10-5 Low Power Peripherals Memory Map, base
+	 * 0x4300_0000) -- the wake-source / survivor set the datasheet
+	 * (Alif_E8_Datasheet_v1.2, Table 3-3 footnote / Table 3-4) names: "If
+	 * RTSS-HE is powered down, then the LPI3C, LPUTIMER, LPI2C1, LPCPI,
+	 * LPI2S, LPPDM, and LPSPI0/1 in the same subsystem are also powered
+	 * down" -- i.e. these are exactly what keeps running while the HP
+	 * region, the NPUs and the main peripheral domain are off.  Every
+	 * reg/IRQ below is transcribed from the HWRM: Table 10-5 for
+	 * addresses, and the M55-HE local "Interrupt Input / Interrupt
+	 * Number" table (M55HE_IRQS[45..58]) for IRQs -- the SAME table that
+	 * already sources this file's existing lpi3c0 (50), rtc0/LPRTC (58)
+	 * and lptimer0 (60) IRQs, so these numbers are cross-checked against
+	 * three already-verified entries, not read cold.  Every node here is
+	 * status="disabled", matching every other block in this file; a board
+	 * enables the instances its firmware image uses.  vendor-ext,
+	 * BENCH-UNVERIFIED.
+	 */
+
+	/*
+	 * LPUART -- HWRM: "All information related to UART in this section
+	 * also applies to LPUART, unless stated otherwise" -- reachable with
+	 * the SAME upstream "ns16550" driver as uart0..7 (Zephyr's
+	 * ensemble_common.dtsi) -- Tier-1 upstream-native, no vendored code.
+	 * reg 0x4300_8000/0x1000 (Table 10-5); IRQ 45 (M55HE_IRQS[45]
+	 * LPUART_IRQ).  The clock gate is a DIFFERENT register from the
+	 * M55-HE-local peripherals below: RTSS_HE_LPPERI_CKEN bit 0
+	 * (UART_CKEN) in the AON block, not M55HE_CFG HE_CLK_ENA -- see
+	 * ALIF_LPUART_CLK's own comment.  A STANDBY-mode wake source (Table
+	 * 3-4).
+	 */
+	lpuart: uart@43008000 {
+		compatible = "ns16550";
+		reg = <0x43008000 0x1000>;
+		clocks = <&clockctrl ALIF_LPUART_CLK>;
+		interrupts = <45 3>;
+		reg-shift = <2>;
+		current-speed = <115200>;
+		status = "disabled";
+	};
+
+	/*
+	 * LPI2C1 -- MASTER-ONLY (HWRM I2C Overview: "Two Low-Power I2C
+	 * modules (LPI2C0 slave-only and LPI2C1 master-only)... The I2C and
+	 * LPI2C1 modules support the following main features" -- i.e. LPI2C1
+	 * shares the regular I2C feature set, unlike the LPI2C0 SE-slave dead
+	 * end the note below excludes).  Reachable with the SAME upstream
+	 * "snps,designware-i2c" driver as i2c0/i2c1/i2c2 above -- Tier-1
+	 * upstream-native.  reg 0x4300_5000/0x1000 (Table 10-5); IRQ 51
+	 * (M55HE_IRQS[51] LPI2C1_IRQ).  No `clocks`: i2c_dw, like
+	 * i2c0/i2c1/i2c2 above, consumes no clocks phandle -- even though a
+	 * real software gate exists for this one (HE_CLK_ENA bit 13
+	 * I2C_CKEN, reset 0, same register ALIF_LPSPI_CLK/ALIF_LPI3C_CLK use),
+	 * left unmodelled/unwired for the same reason the main-domain i2c0/1/2
+	 * gates are: the driver never asks for one.  Left undone, same class
+	 * as the LPSPI0/LPSPI1 `HE_CLK_ENA[SPI_MODE]` gap noted below.
+	 */
+	lpi2c1: i2c@43005000 {
+		compatible = "snps,designware-i2c";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x43005000 0x1000>;
+		interrupts = <51 3>;
+		clock-frequency = <I2C_BITRATE_STANDARD>;
+		fs-spike-len = <5>;
+		hs-spike-len = <1>;
+		status = "disabled";
+	};
+
+	/*
+	 * LPSPI0 (master) / LPSPI1 (slave) -- HWRM SPI Overview: "Up to two
+	 * Low-Power SPI modules (LPSPI0 and LPSPI1) in the RTSS-HE, sharing
+	 * device pins and thus forming a single LPSPI channel... Master mode
+	 * only for LPSPI0, and Slave mode only for LPSPI1."  Both are the SAME
+	 * DWC_ssi IP as spi0 above (compatible "alif,dwc-ssi-spi", dwc-ssi
+	 * layout) -- Tier-2 interim, matching spi0's tier.  reg 0x4300_0000 /
+	 * 0x4300_4000 (Table 10-5); BOTH share ONE physical IRQ line, 46
+	 * (M55HE_IRQS[46] LPSPI_IRQ, "LPSPI0/1 interrupt request") -- not a
+	 * typo, the silicon really ORs the two.  Mode selection between the
+	 * pair is HE_CLK_ENA[SPI_MODE] (bit 15, a DIFFERENT bit from the
+	 * SPI_CKEN gate ALIF_LPSPI_CLK already encodes) -- no DT property
+	 * models it yet; an enabling board overlay needs that bit set
+	 * correctly for whichever of the two it turns on, which is
+	 * driver-level follow-up, not blocked by this disabled node.
+	 */
+	lpspi0: spi@43000000 {
+		compatible = "alif,dwc-ssi-spi";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x43000000 0x1000>;
+		interrupts = <46 3>;
+		clocks = <&clockctrl ALIF_LPSPI_CLK>;
+		dwc-ssi;
+		fifo-depth = <16>;
+		status = "disabled";
+	};
+
+	lpspi1: spi@43004000 {
+		compatible = "alif,dwc-ssi-spi";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x43004000 0x1000>;
+		interrupts = <46 3>;
+		clocks = <&clockctrl ALIF_LPSPI_CLK>;
+		dwc-ssi;
+		fifo-depth = <16>;
+		status = "disabled";
+	};
+
+	/*
+	 * LPI2S -- reg 0x4300_1000/0x1000 (Table 10-5); IRQ 48
+	 * (M55HE_IRQS[48] LPI2S_IRQ).  Same compatible as the main-domain i2s3
+	 * node (examples/aen/aen-i2s-amp-alif overlay): "snps,designware-i2s"
+	 * over the alp-sdk zephyr/drivers/i2s/i2s_dw.c driver.  Clock is
+	 * ALIF_LPI2S_76M8_CLK (HE_I2S_CTRL bit 12 CLK_ENA + bit 16 CLK_SEL),
+	 * mirroring the main-domain ALIF_I2Sx_76M8_CLK pattern.  No pinctrl-0:
+	 * an enabling board overlay supplies the pad group.
+	 */
+	lpi2s: i2s@43001000 {
+		compatible = "snps,designware-i2s";
+		reg = <0x43001000 0x1000>;
+		interrupts = <48 3>;
+		clocks = <&clockctrl ALIF_LPI2S_76M8_CLK>;
+		status = "disabled";
+	};
+
+	/*
+	 * LPPDM -- the driver + Kconfig already exist (alif,alif-pdm,
+	 * zephyr/drivers/audio/alif_pdm.c) and are already proven on the
+	 * main-domain pdm@4902d000 node (examples/aen/aen-pdm-mic-alif
+	 * overlay, which uses the SAME driver and cites this exact address in
+	 * its own "NOT the LPPDM lppdm@43002000" comment) -- only the LP
+	 * instance's node was missing.  reg 0x4300_2000/0x1000 (Table 10-5);
+	 * clock ALIF_LPPDM_76M8_CLK (already defined -- HE_CLK_ENA bit 8
+	 * PDM_CKEN + bit 9 PDM_CKSEL -- unused by any node until now).
+	 * interrupts: ONE line, 49 (M55HE_IRQS[49] LPPDM_IRQ) -- the HWRM
+	 * documents this as an OR of three internal sources (LPPDM_WARN_IRQ
+	 * level, LPPDM_ERROR_IRQ edge, LPPDM_AUDIO_DET_IRQ edge), unlike the
+	 * main-domain pdm node's THREE discrete IRQ lines (145/146/147) with
+	 * matching interrupt-names "warning_intr"/"error_intr"/
+	 * "audio_det_intr".  Only one line is given here since that is what
+	 * LPPDM's silicon actually has; whether alif_pdm.c's IRQ_CONNECT count
+	 * needs adjusting before this node can be enabled is driver-level
+	 * follow-up, not modelled by this disabled node.
+	 */
+	lppdm: pdm@43002000 {
+		compatible = "alif,alif-pdm";
+		reg = <0x43002000 0x1000>;
+		interrupts = <49 3>;
+		clocks = <&clockctrl ALIF_LPPDM_76M8_CLK>;
+		fifo_watermark = <5>;
+		bypass_iir_filter = <1>;
+		status = "disabled";
+	};
+
+	/*
+	 * LPCPI -- the low-power camera-parallel-interface instance the
+	 * alif,cam binding's `lp-cam` property already anticipates
+	 * ("Signifies if the current CPI IP is LPCPI or normal CPI").  Same
+	 * driver as the main-domain `cam` node below (alif,cam /
+	 * video_alif.c) -- Tier-2 interim, matching cam's tier.  reg
+	 * 0x4300_3000/0x1000 (Table 10-5); the LPCPI IRQ is named LPCAM_IRQ in
+	 * the HWRM's M55-HE local IRQ table, number 54 (M55HE_IRQS[54]).
+	 * Clock ALIF_LPCPI_CLK (HE_CLK_ENA bit 12 CPI_CKEN).  No pinctrl-0,
+	 * matching cam: an enabling board overlay supplies the parallel-data
+	 * pad group.
+	 */
+	lpcam: cam@43003000 {
+		compatible = "alif,cam";
+		reg = <0x43003000 0x1000>;
+		interrupts = <54 3>;
+		clocks = <&clockctrl ALIF_LPCPI_CLK>;
+		clock-names = "cam_clk";
+		lp-cam;
+		status = "disabled";
+	};
+
+	/*
+	 * LPI2C0 (0x43009000, the on-module "BRD_I2C" housekeeping bus on P7_4/P7_5,
+	 * carrying OPTIGA / RV-3028 / TMP112) is DELIBERATELY NOT declared here.
+	 * Per the TRM (§3.17.4) LPI2C0 is SLAVE-ONLY (the SoC is a slave at the
+	 * hardcoded address 0x40); the M55 cannot master it, so an alp-sdk I2C
+	 * master node would be a dead end.  The removed alif,lpi2c driver was that
+	 * master-TX-only dead end.
 	 *
-	 * CORRECTED (#1848, ADR 0017 amended 2026-08-30): LPI2C0 was believed to
-	 * be the on-module "BRD_I2C" housekeeping bus (OPTIGA / RV-3028-C7 /
-	 * TMP112).  It is not.  BRD_I2C is SoC I2C0 function C, P7_0 (SDA) /
-	 * P7_1 (SCL) -- ADTS0013 v1.2 Table 3-16 + the per-pin alternate-function
-	 * grid, corroborated by the E1M-AEN-2626-R2 netlist (BRD_I2C_SDA/SCL on
-	 * balls B8/B3).  I2C0 is master-or-slave capable (HWRM §15.4.1), so the
-	 * trio is reachable as an ordinary Tier-1 upstream i2c_dw master -- see
-	 * the i2c0 node below -- not Tier-3 SE-mediated.  R2-SOURCED: the bench
-	 * E1M-AEN801 unit is r1 and no R1 netlist is available, so this
-	 * routing needs an on-unit probe before it is verified there too.
+	 * CORRECTED (#1848, ADR 0017 amended 2026-08-30): the on-module BRD_I2C
+	 * housekeeping trio (OPTIGA / RV-3028-C7 / TMP112) is NOT on LPI2C0, and no
+	 * "next-rev board" is needed to move it.  BRD_I2C is SoC I2C0 function C --
+	 * P7_0 (SDA) / P7_1 (SCL), per ADTS0013 v1.2 Table 3-16 and the per-pin
+	 * alternate-function grid, corroborated by the E1M-AEN-2626-R2 netlist
+	 * (BRD_I2C_SDA/SCL on balls B8/B3).  I2C0 is master-or-slave capable
+	 * (HWRM §15.4.1), so the trio is an ordinary upstream i2c_dw master target,
+	 * not ADR 0017 Tier-3 SE-mediated.
+	 *
+	 * NOT YET USABLE, and not for a software reason: BRD_I2C has no pull-up to
+	 * any rail on 2626-R2 (the two 0 ohm jumpers that would bridge it into the
+	 * pulled-up segment are DNP), and the Alif documents disagree on whether
+	 * that is fatal -- the datasheet calls I2C0_SCL_C an open-drain output
+	 * requiring an external pull-up, while the HWRM Pn_i note says I2C on these
+	 * ports works with the push-pull default.  R2-SOURCED: the bench
+	 * E1M-AEN801 unit is r1 and no R1 netlist is available, so this needs an
+	 * on-unit probe before it is trusted anywhere.
 	 */
 
 	/*
@@ -594,6 +788,116 @@
 		channel = <0>;
 		clock-source = <0>;       /* 0 = 32 kHz VBAT LF source */
 		clock-frequency = <32768>;
+	};
+
+	/*
+	 * LPTIMER channels 1..3 -- the three sibling down-counters lptimer0's
+	 * own comment above already documents ("to use another channel, set
+	 * `channel` + its matching `interrupts`: ch1=61, ch2=62, ch3=63").
+	 * `reg` is IDENTICAL to lptimer0's on every node below -- 0x42001000/
+	 * 0xC0, the one block base -- and that is not a shortcut: the driver
+	 * (counter_alif_lptimer.c, ch_base()) computes each channel's real
+	 * register window at RUNTIME as `DT_INST_REG_ADDR(inst) + channel *
+	 * LPTIMER_CHANNEL_STRIDE` (STRIDE = 0x14, counter_alif_lptimer.h),
+	 * i.e. it ALREADY adds the per-channel offset itself from `channel`;
+	 * `reg` is meant to stay at the block base for every channel node, not
+	 * to be repointed per channel.  The stride itself IS real and
+	 * documented -- HWRM Table 13-8 gives every LPTIMER register offset as
+	 * "0x0 + (n x 0x14)" through "0x10 + (n x 0x14)", footnoted "n = 0 to
+	 * 3, LPTIMER module index" -- so channel 1/2/3's real register windows
+	 * are 0x42001014/0x42001028/0x4200103c, and THAT is what the
+	 * unit-address below names (for humans/dtc node identity only, not as
+	 * a `reg` override): Zephyr's edtlib requires a hex unit-address, and
+	 * dtc requires unique node names, so "lptimer0..3" need distinct
+	 * "lptimer@..." names or they collide as the same
+	 * "lptimer@42001000".  Because the unit-address (the real per-channel
+	 * window) does not match `reg` (the block base, correctly), dtc's
+	 * simple_bus_reg check fires -- observed directly in a west build of
+	 * this dtsi ("Warning (simple_bus_reg): /soc/lptimer@...: simple-bus
+	 * unit address format error, expected 42001000"); non-fatal, expected,
+	 * and left as-is rather than hidden.
+	 */
+	lptimer1: lptimer@42001014 {
+		compatible = "alif,lptimer";
+		reg = <0x42001000 0xc0>;
+		interrupts = <61 3>;
+		channel = <1>;
+		clock-source = <0>;       /* 0 = 32 kHz VBAT LF source */
+		clock-frequency = <32768>;
+		status = "disabled";
+	};
+
+	lptimer2: lptimer@42001028 {
+		compatible = "alif,lptimer";
+		reg = <0x42001000 0xc0>;
+		interrupts = <62 3>;
+		channel = <2>;
+		clock-source = <0>;       /* 0 = 32 kHz VBAT LF source */
+		clock-frequency = <32768>;
+		status = "disabled";
+	};
+
+	lptimer3: lptimer@4200103c {
+		compatible = "alif,lptimer";
+		reg = <0x42001000 0xc0>;
+		interrupts = <63 3>;
+		channel = <3>;
+		clock-source = <0>;       /* 0 = 32 kHz VBAT LF source */
+		clock-frequency = <32768>;
+		status = "disabled";
+	};
+
+	/*
+	 * LPCMP -- the Alif Ensemble Low-Power Comparator, a SINGLE instance
+	 * in the VBAT/AON always-on island alongside LPRTC/LPTIMER/LPGPIO
+	 * above -- a distinct, materially simpler IP from the four HSCMP
+	 * instances (cmp0 below), so it does NOT reuse the alif,cmp binding;
+	 * see zephyr/dts/bindings/comparator/alif,lpcmp.yaml for why (NO
+	 * DRIVER exists for it yet -- issue #1817).  reg 0x4200_3000/0x1000
+	 * (HWRM Table 10-4 Low Power VBAT Peripherals Memory Map); IRQ 56
+	 * (M55HE_IRQS[56] LPCMP_IRQ, HWRM Table 19-25).  No `clocks`: HWRM
+	 * Table 19-24 "LPCMP Clocks" names a single CLK32K (LFXO/LFRC-sourced)
+	 * functional clock, gated by "LPCOMP_CLK32K_EN bit in the
+	 * VBAT_ANA_REG1" per that table's own footnote -- a REAL software
+	 * gate, just not the HE_CLK_ENA block the M55-HE-local peripherals
+	 * above use, and not a register this dtsi's `clockctrl` node currently
+	 * maps (VBAT_ANA_REG1 lives in the "ANA" block, HWRM Table 19-30, base
+	 * 0x1A60A000 -- a DIFFERENT physical window from clockctrl's existing
+	 * "vbat" reg region at 0x1A609000).  So the conclusion (no `clocks`
+	 * phandle here) still holds; there is simply no gate to model until
+	 * `clockctrl`/its driver grow an ANA-block case.  A STANDBY/STOP wake
+	 * source (Datasheet Table 3-4).
+	 */
+	lpcmp0: cmp@42003000 {
+		compatible = "alif,lpcmp";
+		reg = <0x42003000 0x1000>;
+		interrupts = <56 3>;
+		status = "disabled";
+	};
+
+	/*
+	 * BOD -- Brown-Out Detect, the programmable-threshold VDD_MAIN supply
+	 * monitor.  The "BOD circuit monitors..." quote is Datasheet §3.7.4
+	 * Power Supply Supervisors (NOT HWRM -- the HWRM covers this at
+	 * §8.1.5 Power Supply Supervisors instead; it has no §3.7.4 at all).
+	 * NO DRIVER exists for it yet -- see
+	 * zephyr/dts/bindings/misc/alif,bod.yaml (issue #1817).  reg is the
+	 * shared BOR_BOD block, 0x4200_4000/0x1000 (HWRM Table 10-4 + Table
+	 * 19-32 BOR_BOD Modules); BOR (outright reset) is a separate concern
+	 * and is NOT modelled by this node.  IRQ 100 (HWRM Table 8-5:
+	 * `M55HE_IRQS[100]` BOD_IRQ -- NOT [99], a pdftotext column artifact
+	 * in a different, jumbled interrupt-number table).  A STANDBY/STOP
+	 * wake source (Datasheet §3.7.4 / Table 3-5 Power Supply Supervisory
+	 * Functions) and a DMA request source: HWRM Table 8-6 gives the actual
+	 * request number, `BOD_DMA_REQ` = `DMA2_REQ[7]` (Datasheet Table 3-5
+	 * only says a DMA request exists, not which number) -- the DMA wiring
+	 * is alp-sdk issue #1815's territory, not modelled here.
+	 */
+	bod0: bod@42004000 {
+		compatible = "alif,bod";
+		reg = <0x42004000 0x1000>;
+		interrupts = <100 3>;
+		status = "disabled";
 	};
 
 	/*
@@ -948,6 +1252,15 @@
 	 * ADR 0017 Tier-2 (fork-driver copy; hal_alif has no ADC class driver) --
 	 * INTERIM, retires onto the fork once the nodes are repointed +
 	 * bench-verified.  BENCH-UNVERIFIED.
+	 *
+	 * ON-DIE TEMPERATURE SENSOR (issue #1817): the HWRM (section 19.5
+	 * TSENS Overview) states the sensor has NO register block of its own
+	 * -- "The TSENS is connected internally to input channel 6 of ADC120
+	 * and ADC122" -- so there is no separate devicetree node to add; it is
+	 * reachable today as adc12_0 or adc12_2 channel 6 through the
+	 * existing io-channels mechanism (#io-channel-cells below).  Exposing
+	 * it as a named alp-sdk temperature reading (vs. raw ADC counts) is
+	 * application/backend work, not a devicetree gap -- left undone here.
 	 */
 	adc12_0: adc@49020000 {
 		compatible = "alif,adc";
@@ -1433,6 +1746,94 @@
 		 * core-local TCM alias is NOT reachable).
 		 */
 		microcode = <0x0>;
+		status = "disabled";
+	};
+
+	/*
+	 * EVTRTR2 -- the event router (DMA multiplexer) paired 1:1 with dma2
+	 * above, per the AE822 HWRM §3.13.4 EVTRTR Overview: "EVTRTR2,
+	 * dedicated to DMA2 controller and LPUTIMER."  Like dma2, it sits at a
+	 * core-LOCAL register window (0x400E_2000, HWRM Table 10-8 M55-HE
+	 * Local Memory Map) that the RTSS-HP core reaches at the SAME offset
+	 * as its own local event router, EVTRTR1 (HWRM Table 10-7 M55-HP Local
+	 * Memory Map: 0x400E_2000 too) -- exactly the dma2/"DMA1" aliasing
+	 * dma2's own comment above already documents.  So this ONE node,
+	 * `evtrtr2`, is what EVTRTR1 resolves to when this shared dtsi is
+	 * built for the alp_e1m_aen801_m55_hp board; no separate evtrtr1 node
+	 * is declared (it would collide with this one at the DT level, not
+	 * extend it).
+	 *
+	 * dma-groups = 2: HWRM Table 12-31 "DMA2 (M55-HE) Requests Mapping" --
+	 * "DMA requests to DMA2 controller are routed via 2-to-1 multiplexers
+	 * as shown in Table 12-31. The selection of group 0-1 can be done
+	 * independently for each DMA request via the corresponding
+	 * EVTRTR2_DMA_CTRLn[SEL] field" -- i.e. TWO groups (0 and 1), not the
+	 * aen-cc3501e-bringup overlay's SPI1-routing-comment prose ("1 group,
+	 * for LP peripherals") this used to cite instead; that overlay comment
+	 * describes evtrtr0's SYSTOP routing, not evtrtr2, and was the wrong
+	 * source.  Peripheral request numbers on DMA2_REQ[n] for the LP bank
+	 * above, cross-checked against Table 12-31 by row via two independent
+	 * anchors (BOD_DMA_REQ at request 7, matching HWRM Table 8-6's
+	 * `DMA2_REQ[7]`; LPGPIO_2..7_DMA_REQ at requests 26..31), for a future
+	 * enabling board overlay to wire via `dmas`/`dma-names` (not done on
+	 * any node here -- matching the existing precedent that `dmas` wiring
+	 * is overlay-level, e.g. cc3501e_spi's dmas in the aen-cc3501e-bringup
+	 * overlay, not SoC-dtsi-level): DMA2_REQ[12]/[13] LPSPI RX/TX (Group
+	 * 0), DMA2_REQ[10] ADC24_DONE0 (Group 0; NOT [4] -- Table 12-31's
+	 * request 4 is ADC120_DONE0_DMA_REQ, the main-domain 12-bit ADC).
+	 * Disabled by default, matching dma2; an enabling board overlay flips
+	 * both on together.
+	 */
+	evtrtr2: event-router@400e2000 {
+		compatible = "alif,dma-event-router";
+		reg = <0x400E2000 0x100>;
+		dma-controller = <&dma2>;
+		channels = <32>;
+		dma-groups = <2>;
+		#dma-cells = <2>;
+		status = "disabled";
+	};
+
+	/*
+	 * DMA0 + EVTRTR0 -- the GLOBAL, cross-core PL330 (32MB Shared
+	 * Peripherals window, HWRM Table 10-6) and its event router, promoted
+	 * here from per-example overlay copies (alp-sdk issue #1815: "one
+	 * consumer" -- the CC3501E bridge SPI1 -- had to redeclare this pair
+	 * in FIVE examples, `examples/aen/aen-cc3501e-bringup`,
+	 * `aen-usb-firstlight`, `aen-cc3501e-gatt-register`,
+	 * `aen-cc3501e-companion-tour`, `aen-cc3501e-ble-gatt`, which is why no
+	 * second consumer existed).  Content is UNCHANGED from those overlays
+	 * (bench-exercised there, not re-derived): compatible "alif,dma-pl330"
+	 * (the vendored, IRQ-driven driver -- a DIFFERENT compatible from
+	 * dma2's upstream polling "arm,dma-pl330" above, because DMA0 is a
+	 * cross-core, IRQ-driven controller, not core-local), reg
+	 * 0x4908_0000 (DMA0_SEC_BASE), IRQs 299..306 the 8 channel-done lines
+	 * + 331 abort (AE822 DFP rtss_he), and evtrtr0 at 0x4903_5000/0x100
+	 * with dma-groups=4 (the SYSTOP router's 4 ACK_TYPE groups).  Disabled
+	 * by default like every other block in this file; the five overlays
+	 * above now just flip `&dma0`/`&evtrtr0` to status="okay" instead of
+	 * redeclaring the nodes.
+	 */
+	dma0: dma@49080000 {
+		compatible = "alif,dma-pl330";
+		reg = <0x49080000 0x1000>;
+		#dma-cells = <2>;
+		dma-channels = <8>;
+		interrupt-parent = <&nvic>;
+		interrupts = <299 3>, <300 3>, <301 3>, <302 3>, <303 3>,
+			     <304 3>, <305 3>, <306 3>, <331 3>;
+		interrupt-names = "channel0", "channel1", "channel2", "channel3",
+				  "channel4", "channel5", "channel6", "channel7", "abort";
+		status = "disabled";
+	};
+
+	evtrtr0: event-router@49035000 {
+		compatible = "alif,dma-event-router";
+		reg = <0x49035000 0x100>;
+		dma-controller = <&dma0>;
+		channels = <32>;
+		dma-groups = <4>;  /* SYSTOP router: 4 ACK_TYPE groups (0-3) */
+		#dma-cells = <2>;
 		status = "disabled";
 	};
 
