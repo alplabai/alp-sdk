@@ -63,6 +63,190 @@ below:
 > expressing it as data requires inventing an **interpreter** for that data,
 > it is mechanism and belongs in code.
 
+## "Policy metadata" is two different things wearing one name
+
+Added after review, because the phrase this work has been carried out under —
+"policy metadata" — conflates a hardware fact with a decision, and the
+conflation is already in the tree, not only in the vocabulary.
+
+### The category
+
+`metadata/chips/`, `metadata/socs/`, `metadata/e1m_modules/`,
+`metadata/boards/`, `metadata/pinmux/` and `metadata/blocks/` are **hardware
+truth**: they change when a datasheet or a schematic changes, and no decision of
+ours can make them say otherwise.
+
+These, also under `metadata/`, are not:
+
+| File | What it actually records, in its own words |
+|---|---|
+| `metadata/emit-registry-v1.json` | "Single source of truth for every `--emit` mode the SDK exposes across `scripts/alp_project.py` and `scripts/alp_orchestrate/`" |
+| `metadata/quality-tasks-v1.json` | "…which `check_*.py` gates exist, whether each is a hard CI gate or informational, and which profiles…" |
+| `metadata/toolchains.json` | the Zephyr SDK pin and a measured footprint |
+| `metadata/bootstrap.json` | `zephyr`, `venv`, `prerequisites`, `artifactProvenance` |
+| `metadata/library-aliases-v1.json` | legacy-token to current-name alias table |
+| `metadata/registries/` | `peripheral-kconfig.json`, `silicon-kconfig.json`, `tier-a-library-ci.json` |
+
+Every row is a **decision**: it changes when we decide differently, not when the
+silicon does. `quality-tasks-v1.json` is already a decision table in the exact
+sense this section is about — "hard gate or informational" is policy, schema-
+backed, under `metadata/`.
+
+So the objection "this is not metadata" is correct about the *category* and
+wrong if it is taken to mean the artefact cannot live under `metadata/`. The
+directory is already a transport for both kinds, and transport is a real reason:
+tan reads `metadata/` live for all 19 REIMPL emit modes, so anything placed
+there crosses the seam with no new mechanism. What the distinction must change
+is **naming and schema framing** — a decision file says "SDK policy, versioned,
+changes by decision"; a SoC file says "silicon fact, changes when the datasheet
+does" — not the path.
+
+### The consequence for ADR-0026
+
+`docs/adr/0026-tan-owns-the-planner-outright.md` clause 2 keeps `metadata/`,
+`metadata/schemas/`, examples and the tooling contracts in alp-sdk because
+"Those are hardware truth and stay in the repo that owns the hardware. The
+planner is not hardware truth; it is a consumer of it."
+
+That justification does not describe half of the directory it justifies, and
+clause 2 is load-bearing: it decides what stays in alp-sdk when the planner
+leaves. The decision itself still looks right — a tooling contract belongs with
+the tool that publishes it — but the *stated reason* covers only the hardware
+half, so the other half currently stays for a reason nobody has written down.
+Worth an amendment sentence; not a reversal.
+
+## What a rule looks like when it becomes data — and why most should not
+
+### Prong (b) first: the usual answer is that no rule crosses at all
+
+The test above is ordered, and the ordering is the point. Reaching for a table
+is reaching for prong (c). Before that, (b) asks whether the SDK can evaluate
+the rule and ship the **outcome**, and for the class-to-runtime mapping the
+answer is yes — so the right artefact is not a decision table at all, it is a
+decided **field**.
+
+The evidence that this is not hypothetical: `som-preset-v1.schema.json` already
+declares the field. `$defs/topology_entry/properties/os` carries the description
+"Default runtime for this core.  Customer's board.yaml `cores.<id>.os`
+overrides." And `scripts/alp_orchestrate/loader.py:555` already prefers it:
+
+```python
+os=str(entry.get("os") or _default_os_from_core_type(soc_core_type)),
+```
+
+**Measured: all 26 `topology.<core>` entries across the twelve
+`metadata/e1m_modules/*.yaml` presets omit `os`.** The schema's
+`$defs.topology_entry` has `required: []`, so every one of them validates. That
+means `loader.py:555` takes the right-hand branch **100% of the time** — the
+prefix rule is not a fallback in practice, it *is* the mechanism, and the field
+built to carry the decision has never been used.
+
+So the change is small, and it is not a new file:
+
+- Populate `os` on all 26 preset topology entries.
+- Make it `required` in `$defs.topology_entry`, so a new SoM family cannot omit
+  it. Absence becomes a validation failure — the totality guarantee Problem 2
+  wanted, obtained without a 28th schema.
+- Keep the prefix rule as a **producer-side gate only**, asserting the declared
+  field agrees with the core class. This spec's own non-goals already bless
+  exactly that: "A gate restating a schema rule is not drift. Deliberate
+  redundancy is what a gate is for. Only a *producer* restating a rule is
+  drift."
+
+Then no consumer applies a rule in any language. Python, Rust and TypeScript
+each read a field. There is no matching semantics to reimplement, no case
+folding, no fall-through — the portability problem is dissolved rather than
+adjudicated.
+
+While there: `som-preset-v1.schema.json` re-types the `os` value set a fourth
+time (`["yocto", "zephyr", "baremetal", "off"]`) instead of referencing
+`board.schema.json`, and narrows it a fifth time at
+`/allOf[0]/if/properties/topology/additionalProperties/properties/os` to
+`["zephyr", "baremetal"]`. `topology.py:49`'s `_core_os_choices` already derives
+rather than re-types; the schema should too.
+
+### Prong (c): the shape for the residue
+
+Some rule genuinely will depend on consumer-side state the SDK cannot see —
+`_EXECUTION_POLICY`'s `missingTool` is the existing example, and it crosses
+correctly today. For that residue, and only for it, the schema must impose all
+of the following. Each one removes a degree of freedom that a second
+implementation could otherwise resolve differently:
+
+1. **Exact values only — no prefix, no glob, no regex anywhere in the
+   contract.** Matching semantics are the thing another language reimplements
+   wrong. A regex is an interpreter, which the corollary above already forbids.
+2. **Closed codomain, derived and not re-typed.** The outcome enum references
+   the one schema that owns those values, gated so the two cannot drift.
+3. **Required, `additionalProperties: false`, and a `schemaVersion`.** Absence
+   must fail validation, never fall through to a default.
+4. **No `default` or catch-all entry.** A default is precisely the thing that
+   silently absorbs the case nobody thought about.
+5. **Totality and non-overlap proved by a gate, not by ordering.** No
+   "first match wins". Ordering is a hidden rule, and a hidden rule is what the
+   second implementation gets wrong — #320 recurring as #485 is that story. Once
+   a gate proves the table total and non-overlapping over a domain enumerated
+   from *existing* metadata, order carries no meaning and cannot be got wrong.
+6. **Normative miss semantics stated in the schema description**: an
+   unresolvable input yields *unresolved*, never a guessed value.
+
+Over-engineering, rejected explicitly: priority or ordering fields; per-entry
+effectivity or version ranges; conditions or predicates of any kind; and any
+specification of case folding — require canonical lowercase in the data and gate
+it instead, because a locale-dependent fold (Turkish dotless `i` against ASCII
+`i`) is a real divergence vector, eliminated by never folding rather than by
+specifying how to fold.
+
+### What this does not fix, stated plainly
+
+It ends **mapping** drift, not all drift. The two implementations have already
+diverged in the code *around* the lookup, and no schema reaches that:
+
+```
+alp-sdk  _default_os_from_core_type('')  ->  'off'
+alp-sdk  _allowed_os_for_core('')        ->  ['baremetal', 'off']
+alp-sdk  _default_os_from_core_type(5)   ->  AttributeError: 'int' object has no attribute 'lower'
+
+tan      allowed_os_for_core('')         ->  []
+tan      allowed_os_for_core(5)          ->  []
+```
+
+tan guards at `tan-cli/python/tan/core/os_class.py:127-128`
+(`if not isinstance(core_type, str) or not core_type: return []`, per
+tan-cli#914 / tan-cli#957) and its docstring rejects the other answer by name —
+"the identical `["baremetal", "off"]` plausible-but-wrong guess this docstring
+already rejects for the empty-string case".
+`scripts/alp_orchestrate/topology.py:96-101` has no such guard. tan took the
+fix; alp-sdk did not. This is live today, and it is in the one direction the
+freshness gate cannot see, because tan's copy sits outside `tan/planner/` and
+outside `HAND_PORT_SOURCES`. Only having one implementation removes that class,
+which is ADR-0026's argument, not a schema's.
+
+### Sequencing — this question is downstream of ADR-0026 sections C and D
+
+Where this artefact lives depends on an unresolved decision. ADR-0026's
+amendment section C (who answers the configure-time CMake call) and section D
+(who owns rendered-artefact bytes) determine whether both repos still need this
+answer at all. If they land on "tan owns the renderers and alp-sdk's emitters
+die", the honest end state is one function in one repo, and a schema, a gate, a
+required field and a migration would be ceremony added in the middle of a
+programme whose whole purpose is removing ceremony. **Answering the shape before
+C and D is answering out of order.** What is safe now regardless: populate the
+26 fields, since a preset stating its own core's runtime is correct under every
+outcome.
+
+### A correction to this document's own arithmetic
+
+An earlier count in this work claimed that 18 entries fall through
+`_default_os_from_core_type`'s `anything else -> off` arm. They do not. Those 18
+(`ethos-u55` x12, `ethos-u85` x3, `ethos-u65` x1, `drp-ai` x1, `deepx-dx-m1` x1)
+are `npus[]` entries, and `core_os_topology` builds its domain from
+`soc_spec["cores"]` only (`topology.py:115-117`). Every `cores[].type` in all
+nine SoC files is `cortex-a*` or `cortex-m*` — `cortex-m55` x13, `cortex-a32`
+x4, `cortex-a55` x2, `cortex-m33` x2. The fall-through arm's live domain is the
+unresolved-sentinel case and nothing else, which is why the defect it carries is
+the miss-semantics divergence above rather than a silent mis-build.
+
 ## Problem 1 — `tan validate` parses the SDK's stderr with regexes
 
 ### What is there today
@@ -198,22 +382,37 @@ ADR-0026 cites by name: `PINNED_HASHES` only ever looks inside
 
 ### Proposed change
 
-Move the mapping into metadata as a table, and have both sides read it rather
-than restate it. Concretely:
+**Revised after review — the first draft reached for the wrong prong of its own
+test.** It proposed a declared core-class → default-runtime table in
+`metadata/`, schema-backed, read by both sides, with a gate asserting exactly
+one entry per core class. That is prong (c) — making the *rule* cross — and
+prong (b) is answerable first: the SDK can evaluate this rule and ship the
+outcome, so nothing needs to cross as a rule at all.
 
-- A declared core-class → default-runtime table in metadata, schema-backed,
-  with each entry carrying the class prefix it matches and the runtime it
-  implies.
-- `scripts/alp_orchestrate/topology.py` reads the table instead of branching on
-  string prefixes in Python.
-- tan reads the same table. Because the table lives in alp-sdk's `metadata/`,
-  which tan already reads live for all 19 REIMPL modes, this needs no new
-  transport.
-- A gate asserts every core class present in SoC metadata has exactly one
-  entry, so a new SoM family cannot silently fall through to a default.
+Ship the decided value instead, in the field that already exists for it:
 
-Against the rule: this is a lookup, not an algorithm. Expressing it as data
-requires no interpreter. It passes.
+- Populate `os` on all 26 `topology.<core>` entries across the twelve
+  `metadata/e1m_modules/*.yaml` presets. `som-preset-v1.schema.json`
+  `$defs/topology_entry/properties/os` already declares it — "Default runtime
+  for this core.  Customer's board.yaml `cores.<id>.os` overrides." — and
+  `scripts/alp_orchestrate/loader.py:555` already prefers it over the rule.
+  Every one of the 26 omits it today, so that preference has never once been
+  exercised.
+- Make `os` `required` in `$defs.topology_entry` (it is `required: []` today),
+  so a new SoM family fails validation rather than falling through.
+- Keep the class rule as a **producer-side gate only**, asserting the declared
+  field agrees with the core class — deliberate redundancy in a gate, which
+  this spec's non-goals already permit.
+- No new file, no 28th schema, no transport question: tan reads
+  `metadata/e1m_modules/` live already.
+
+Against the rule: prong (b) is satisfied, so prongs (a) and (c) never arise.
+Consumers read a field; nobody applies a mapping; there is no matching
+semantics for a second language to reimplement.
+
+See "What a rule looks like when it becomes data — and why most should not"
+above for the general form, the constraints that apply to the genuine prong-(c)
+residue, and the live alp-sdk/tan divergence this does **not** fix.
 
 ### Explicitly not proposed
 
@@ -442,8 +641,17 @@ Recorded so they are not re-litigated:
    `validate_board_yaml.py` needs to emit (severity, code, hint, doc URL,
    source location), or does it need additive fields? To be answered by reading
    the schema before implementation, not assumed.
-2. Where should the core-class → runtime table live — a new `metadata/` file
-   with its own schema, or an additive block on an existing one?
+2. ~~Where should the core-class → runtime table live — a new `metadata/` file
+   with its own schema, or an additive block on an existing one?~~
+   **Answered: neither — there should be no table.** The question presupposed
+   prong (c). Prong (b) resolves it first: ship the decided `os` value on the
+   26 existing `som-preset-v1` `topology.<core>` entries, make the field
+   `required`, and keep the class rule as a producer-side gate. See the revised
+   Problem 2 proposal and the "What a rule looks like when it becomes data"
+   section. One thing stays open behind it, and it is a **sequencing**
+   dependency rather than a design one: ADR-0026 amendment sections C and D
+   decide whether both repos still need this answer at all, so the schema
+   change waits on them. Populating the 26 fields does not.
 3. Is the `_fix_link` base-URL extraction in scope now, or deferred? It is the
    smallest item and the least urgent.
 4. `metadata/schemas/hw-revisions-v1.schema.json` is the only schema of the 27
