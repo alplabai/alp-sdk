@@ -959,7 +959,7 @@
 		comparator_threshold_b = <0x01>;
 		comparator_threshold_comparison = "ABOVE_THRESHOLD_A_AND_B";
 		sample-width = <16>;
-		clock_div = <2>;
+		clock_div = <16>; /* lowest ADC_CLK reachable, ~9.8 MHz; datasheet max is 5000 kHz -- see #1823 */
 		avg_sample_num = <256>;
 		shift_n_bits = <8>;
 		shift_direction = "RIGHT_SHIFT";
@@ -989,7 +989,7 @@
 		comparator_threshold_b = <0x01>;
 		comparator_threshold_comparison = "ABOVE_THRESHOLD_A_AND_B";
 		sample-width = <16>;
-		clock_div = <2>;
+		clock_div = <16>; /* lowest ADC_CLK reachable, ~9.8 MHz; datasheet max is 5000 kHz -- see #1823 */
 		avg_sample_num = <256>;
 		shift_n_bits = <8>;
 		shift_direction = "RIGHT_SHIFT";
@@ -1019,7 +1019,7 @@
 		comparator_threshold_b = <0x01>;
 		comparator_threshold_comparison = "ABOVE_THRESHOLD_A_AND_B";
 		sample-width = <16>;
-		clock_div = <2>;
+		clock_div = <16>; /* lowest ADC_CLK reachable, ~9.8 MHz; datasheet max is 5000 kHz -- see #1823 */
 		avg_sample_num = <256>;
 		shift_n_bits = <8>;
 		shift_direction = "RIGHT_SHIFT";
@@ -1048,7 +1048,7 @@
 		comparator_threshold_a = <0x01>;
 		comparator_threshold_b = <0x01>;
 		comparator_threshold_comparison = "ABOVE_THRESHOLD_A_AND_B";
-		clock_div = <2>;
+		clock_div = <16>; /* lowest ADC_CLK reachable, ~9.8 MHz; datasheet max is 5000 kHz -- see #1823 */
 		avg_sample_num = <256>;
 		shift_n_bits = <8>;
 		shift_direction = "RIGHT_SHIFT";

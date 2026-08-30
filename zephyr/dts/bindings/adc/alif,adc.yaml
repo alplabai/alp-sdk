@@ -74,8 +74,25 @@ properties:
 
   clock_div:
     type: int
-    default: 2
-    description: Clock divisor applied to the input clock
+    default: 16
+    description: |
+      Clock divisor applied to ADC_CLK (ADC_CLK_DIVISOR, HWRM 19.1.5.3.4).
+
+      ADC_CLK is sourced from PERIPH_CLK (HWRM Table 19-2) with no prescaler and
+      no source select -- ADC_CTRL (HWRM 8.3.5.3.7) carries clock ENABLES only.
+      PERIPH_CLK measures ~156.5 MHz on AE822 A0, i.e. the 160 MHz PLL clock
+      (bench 2026-08-30, see #1823).
+
+      Datasheet ADTS0013 v1.2 gives "fs Operational speed ... 312 ... 5000 kHz"
+      for ADC12.  With a divisor range of 2..16 the lowest reachable ADC_CLK is
+      ~9.8 MHz, so there is NO in-spec setting on this silicon.  16 is the
+      closest available and cuts the overrun from ~16x to ~2x.
+
+      Divide-by-32 was tried on the bench and does not work: HWRM's "Others:
+      Reserved" is real -- the conversion never completes and adc_read() never
+      returns -- so the range stops at 16.  #1823 stays open as a vendor
+      question.
+
     enum: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
   avg_sample_num:
