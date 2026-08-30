@@ -270,6 +270,8 @@ pad_routes:
       doc: "CC3501E GPIO_19." }
   - { e1m: E1M_GPIO_IO20, dispatch: cc3501e, dispatch_pin: 26,
       doc: "CC3501E GPIO_26." }
+  - { e1m: E1M_GPIO_IO21, dispatch: unrouted,
+      doc: "Physically open on board 2626-R2 (no CC3501E or Alif termination); r1 routed it to CC3501E GPIO_30 -- see aen/hw-revisions.yaml pad_route_overrides (#1854)." }
 
 # On-module helper MCUs.  CC3501E (TI Wi-Fi 6 + BLE 5.4) is wired
 # on the AEN module; firmware is embedded in alp-sdk at

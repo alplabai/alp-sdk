@@ -73,9 +73,13 @@ config ALP_SDK_GPIO_CC3501E_PROXY
 	  in the board's cc3501e_gpio_routes[] table, routes alp_gpio_open()
 	  through the inter-chip bridge (chips/cc3501e); every other pin_id
 	  delegates to the platform GPIO driver, so the Alif's own pins are
-	  unaffected.  Enable on AEN boards that populate the route table from
-	  the SoM pad map; with the shipped weak EMPTY table (and until
-	  alp_gpio_cc3501e_attach() is called) every pin delegates -- a no-op.
+	  unaffected -- except a pin_id listed in the board's
+	  cc3501e_gpio_unrouted[] list, which is refused with
+	  ALP_ERR_NOSUPPORT (a pad physically open on this hardware revision,
+	  e.g. AEN r2's IO21; #1854).  Enable on AEN boards that populate the
+	  route table from the SoM pad map; with the shipped weak EMPTY
+	  tables (and until alp_gpio_cc3501e_attach() is called) every pin
+	  delegates -- a no-op.
 
 config ALP_SDK_MAX_PWM_HANDLES
 	int "Maximum concurrent alp_pwm_t handles"
