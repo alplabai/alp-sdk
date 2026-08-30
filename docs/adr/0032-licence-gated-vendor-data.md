@@ -6,6 +6,17 @@ Deciders: alpCaner
 
 ## Context
 
+**Terminology, because this repo already uses the phrase the other way.**
+Everywhere else, "licence-gated" means *we do not redistribute it; obtain it
+from the vendor* -- `docs/ci/HW-IN-LOOP.md:12` ("SETOOLS is license-gated and
+must not be redistributed"), `docs/getting-started.md:147`,
+`docs/adr/0021-toolchain-provisioning.md:428`. **In this ADR it means the
+opposite**: vendor data that the vendor *does* permit us to redistribute, but
+under its own terms rather than the repo's Apache-2.0. That inversion is
+unfortunate and the title is a candidate for renaming before this is accepted
+(ADRs here are append-only, so the filename is permanent once landed).
+
+
 [#948](https://github.com/alplabai/alp-sdk/issues/948) wants the Alif Ensemble
 SVD files in tree so `cortex-debug` can populate its Cortex Peripherals view.
 The issue thread converged on a six-item acceptance list whose first item is
@@ -13,7 +24,7 @@ The issue thread converged on a six-item acceptance list whose first item is
 `license.enum`". Working through it against the tree, two things do not hold.
 
 **The allowlist is the wrong gate.** `library-v1.schema.json` `license.enum`
-governs `metadata/libraries/*.yaml` — the 35 curated libraries a project pulls
+governs `metadata/libraries/*.yaml` — the 35 library manifests under `metadata/libraries/` a project pulls
 in through a `libraries:` selection. Its own description states what it is for:
 a GPL-family or proprietary licence is rejected "so a copyleft surprise cannot
 ride in through a `libraries:` selection (ADR 0018 non-goal)". An SVD is not
@@ -68,11 +79,24 @@ so its `LicenseRef-Memfault` question stands on its own merits and still needs
 the legal review 0018 requires.
 
 **2. Licence-gated vendor data is carried in a segregated subtree under its own
-terms.** When such data lands, it lands as: the data in its own directory, the
+terms.** The subtree is `metadata/svd/<vendor>/` for vendor register
+descriptions (per #948), and `vendors/<name>/` for vendored source. That choice
+is load-bearing, not cosmetic: `scripts/check_public_private.py:76-82` lists
+`vendors` in `DEFAULT_EXCLUDES`, so a `vendors/` subtree is never scanned for
+SoM/lab-IP leaks, while `metadata/` is a default scan root (`:60-73`) and *is*
+scanned. Vendor SVDs are dense register and pad detail, so they belong on the
+scanned side. When such data lands, it lands as: the data in its own directory, the
 vendor's **unmodified** licence file beside it, and a README recording the
 vendor, the exact upstream repository and commit the bytes came from, and the
 field-of-use restriction. The root `NOTICE` gains an entry naming the component
-and its licence, the way every third-party component there already does. The
+and its licence.
+
+**This is convention, not enforcement, and that is a known cost.** Nothing in
+`scripts/` or `.github/workflows/` reads `NOTICE` today, which is how the seven
+missing entries above accumulated unnoticed. Closing that needs a
+`check_notice_vendors.py` asserting every vendored subtree with a licence file
+has a `NOTICE` entry, landed across the four sites `adding-a-ci-gate` requires.
+Until it exists, Decision 3 is enforced by review alone. The
 licence attaches to the subtree, not to a metadata key — which is why no schema
 change is required to carry it.
 
@@ -111,12 +135,18 @@ maintainer decision per vendor, and nothing here is legal advice.
   on the bench, so the one acceptance criterion that matters could not be
   demonstrated from it.
 - **Adopt full REUSE compliance.** The tidy answer, and the one a licence
-  scanner would prefer. Rejected for now: the repository has a single root
-  `LICENSE` plus `NOTICE`, and REUSE would require SPDX headers or `.license`
-  sidecars across the whole tree, not just the vendored subtree. The cost is
-  repo-wide and immediate; the benefit is tooling nobody here runs. The
-  segregated-subtree + `NOTICE` pattern is already in use for every existing
-  third-party component and does not have to be invented.
+  scanner would prefer. Rejected for now: the benefit is tooling nobody here
+  runs. (The cost is smaller than it first appears -- 587 of the 612 `.c`/`.h`/
+  `.py` files under `src/`, `include/` and `scripts/` already carry
+  `SPDX-License-Identifier` -- so the honest reason is the absent consumer, not
+  the effort.) The **subtree + licence file + README** half of the pattern below
+  is already in use for every existing third-party component. The `NOTICE` half
+  is **not**: of the 14 directories under `vendors/`, seven vendored-source
+  components have no `NOTICE` entry at all (`catch2`, `doctest`, `etl`, `fmt`,
+  `jsmn`, `minimp3`, `u8g2`; `vendors/etl/` alone is 363 tracked headers).
+  `deepx-dxm1` and `nxp-imx93` have no by-name entry either but are covered by
+  the "Vendor BSPs and SDK binaries" paragraph. So Decision 3 is repairing an
+  existing drift, not merely continuing a practice.
 
 ## Consequences
 
@@ -149,4 +179,12 @@ Bad / costs:
 Extends [0018](0018-curated-third-party-libraries.md) rather than superseding
 it: 0018 decided what may enter the curated-library set and on what licence
 terms, and this ADR decides where everything *else* with third-party terms
-goes. It supersedes nothing.
+goes.
+
+It does not supersede 0018, but it does **narrow one clause**. 0018's non-goals
+(`0018:146-148`) include "redistributing licence-gated SDKs or binaries
+(manifests may *reference* a vendor download the customer performs -- same rule
+as BSPs)". That non-goal covers material the vendor does not permit us to
+redistribute, which remains out of scope and unchanged. This ADR covers vendor
+data that *is* redistributable under its own terms -- a case 0018 did not
+address either way.
