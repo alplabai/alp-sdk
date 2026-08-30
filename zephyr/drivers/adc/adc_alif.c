@@ -197,6 +197,16 @@ enum ADC_INSTANCE {
 /****Shift bit macro****/
 #define ADC_SHIFT_BIT          (16)
 #define ADC_SEQUENCER_INIT_Pos (12)
+/* ADC_SEQUENCER_CTRL bit 16 MODE, HWRM 19.1.5.3.11: "0x0: Sequencer loops over
+ * all 9 analog inputs, while skipping masked inputs ... 0x1: Sequencer is fixed
+ * at SEQUENCER_INIT field value."  Bits 8-0 are MASKED, so writing the mode
+ * selector at bit 0 masked analog input 0 instead (#1822). */
+#define ADC_SEQUENCER_MODE_Pos (16)
+#define ADC_SEQUENCER_MODE_Msk (1U << ADC_SEQUENCER_MODE_Pos)
+/* Analog inputs the sequencer walks: nine for ADC12, the lower four for ADC24
+ * (HWRM 19.1.5.3.11, MODE and MASKED descriptions). */
+#define ADC12_SEQ_INPUTS (9U)
+#define ADC24_SEQ_INPUTS (4U)
 
 /****Sequencer Macros****/
 #define ADC_SEQUENCER_MSK_BIT (0x01)
@@ -264,14 +274,24 @@ enum ADC_INSTANCE {
 #define ADC_PERIPH_ADC24_OUTPUT_RATE_Msk (0x7 << ADC_PERIPH_ADC24_OUTPUT_RATE_Pos)
 #define ADC_PERIPH_ADC24_PGA_EN          (1U << 0)
 #define ADC_PERIPH_ADC24_PGA_GAIN_Pos    (1)
-#define ADC_PERIPH_ADC24_PGA_GAIN_Msk    (0x7 << ADC_PERIPH_ADC24_OUTPUT_RATE_Pos)
+/* Was (0x7 << ADC_PERIPH_ADC24_OUTPUT_RATE_Pos): a mask for the field at bit 1
+ * that actually covered bits 15-13, i.e. ADC24_OUTPUT_RATE (reset 0x4).
+ * enable_adc_pga_gain() clears with this mask, so the first differential
+ * channel setup wiped the output rate to 000 = 1 kS/s and a node configured
+ * for 16 kS/s ran 16x slow, silently (#1822). */
+#define ADC_PERIPH_ADC24_PGA_GAIN_Msk    (0x7 << ADC_PERIPH_ADC24_PGA_GAIN_Pos)
 #define ADC_PERIPH_ADC24_BIAS_Pos        (20)
 #define ADC_PERIPH_ADC24_BIAS_Msk        (0x7 << ADC_PERIPH_ADC24_BIAS_Pos)
 #else
 /* PMU_PERIPH field definitions */
 #define PMU_PERIPH_ADC1_PGA_EN           (1U << 0)
 #define PMU_PERIPH_ADC1_PGA_GAIN_Pos     (1)
-#define PMU_PERIPH_ADC1_PGA_GAIN_Msk     (0x7)
+/* HWRM 8.3.6.3.10 gives "3-1 ADC1_PGA_GAIN", so the mask is 0xE, not 0x7 --
+ * the sibling ADC2 (0xE0) and ADC3 (0xE00) masks are already right.  With 0x7,
+ * gain bit 3 never cleared, so reconfiguring adc12_0 from 0b100 (12 dB) to
+ * 0b001 (8 dB) left 0b101 = 16 dB.  Cold boot is clean (reset 0x0), so this
+ * only showed up on reconfiguration (#1822). */
+#define PMU_PERIPH_ADC1_PGA_GAIN_Msk     (0xE)
 #define PMU_PERIPH_ADC2_PGA_EN           (1U << 4)
 #define PMU_PERIPH_ADC2_PGA_GAIN_Pos     (5)
 #define PMU_PERIPH_ADC2_PGA_GAIN_Msk     (0xE0)
@@ -290,10 +310,67 @@ enum ADC_INSTANCE {
 
 #define COMP_REG2_OFFSET (0X04)
 
+/* ADC_SHIFT_CONTROL (HWRM 19.1.5.3.9) defines "3-0 SHIFT_CONTROL"; bits 15-4
+ * are RESERVED, so an unmasked DT value of 16 or more spilled into them. */
+#define ADC_SHIFT_CONTROL_Msk (0xFU)
+
+/*
+ * PGA gain codes.  The two ladders are DIFFERENT and are not interchangeable
+ * (HWRM 8.3.6.3.10):
+ *
+ *   ADC12 (ADCn_PGA_GAIN, bits 3-1):  000: 4 dB  001: 8 dB  100: 12 dB
+ *                                     101: 16 dB 110: 20 dB
+ *                                     "Other values should not be used."
+ *   ADC24 (ADC24_PGA_GAIN, bits 19-17): 0x0: Do not use  0x1: 6 dB  0x2: 12 dB
+ *                                     0x3: 18 dB 0x4: 24 dB 0x5: 30 dB
+ *                                     0x6: 36 dB 0x7: 42 dB
+ *
+ * The binding used to ship ONE ladder -- the ADC24 one -- and the driver wrote
+ * the DT enum index straight into whichever field the instance selected.  On an
+ * ADC12 instance "ADC_PGA_GAIN_24_DB" became 0b100, which is 12 dB: a factor of
+ * four in amplitude, silently.  Both tables below are indexed by the binding's
+ * pga_gain enum, and ADC_PGA_GAIN_NA marks a gain that instance cannot produce
+ * (#1822).
+ */
+#define ADC_PGA_GAIN_NA (0xFFU)
+
+/* Binding order: 4, 6, 8, 12, 16, 18, 20, 24, 30, 36, 42 dB. */
+static const uint8_t adc12_pga_gain_code[] = {
+	0x0U,            /*  4 dB */
+	ADC_PGA_GAIN_NA, /*  6 dB -- ADC24 only */
+	0x1U,            /*  8 dB */
+	0x4U,            /* 12 dB */
+	0x5U,            /* 16 dB */
+	ADC_PGA_GAIN_NA, /* 18 dB -- ADC24 only */
+	0x6U,            /* 20 dB */
+	ADC_PGA_GAIN_NA, /* 24 dB -- ADC24 only */
+	ADC_PGA_GAIN_NA, /* 30 dB -- ADC24 only */
+	ADC_PGA_GAIN_NA, /* 36 dB -- ADC24 only */
+	ADC_PGA_GAIN_NA, /* 42 dB -- ADC24 only */
+};
+
+static const uint8_t adc24_pga_gain_code[] = {
+	ADC_PGA_GAIN_NA, /*  4 dB -- ADC12 only */
+	0x1U,            /*  6 dB */
+	ADC_PGA_GAIN_NA, /*  8 dB -- ADC12 only */
+	0x2U,            /* 12 dB */
+	ADC_PGA_GAIN_NA, /* 16 dB -- ADC12 only */
+	0x3U,            /* 18 dB */
+	ADC_PGA_GAIN_NA, /* 20 dB -- ADC12 only */
+	0x4U,            /* 24 dB */
+	0x5U,            /* 30 dB */
+	0x6U,            /* 36 dB */
+	0x7U,            /* 42 dB */
+};
+
 /* channels limit */
 #define ADC24_MAX_DIFFERENTIAL_CHANNEL   (0x03)
 #define ADC12_MAX_DIFFERENTIAL_CHANNEL   (0x02)
-#define ADC12_MAX_CHANNELS               (0X08)
+/* HWRM 19.1.1 gives ADC12 six external inputs plus TSENS, and 19.1.4.2 step 8's
+ * worked example (MASKED = 9b110111100, leaving bits 0, 1 and 6 unmasked for
+ * IN0, IN1 and TSENS) pins TSENS at index 6.  Inputs 7 and 8 do not exist on
+ * ADC12, so 0x08 accepted two channel IDs the part does not have (#1822). */
+#define ADC12_MAX_CHANNELS (0X06)
 
 /**
  * enum _ADC_SCAN_MODE.
@@ -419,7 +496,9 @@ static inline void adc_set_n_shift_bit(uintptr_t adc, uint32_t shift_number,
 	uint32_t data;
 
 	data = sys_read32(adc + ADC_SHIFT_CONTROL);
-	data = (shift_number | shift_left_right_control << 16);
+	/* HWRM 19.1.5.3.9 defines "3-0 SHIFT_CONTROL" with 15-4 RESERVED, so mask
+	 * the DT value rather than letting 16 or more spill into them (#1822). */
+	data = ((shift_number & ADC_SHIFT_CONTROL_Msk) | shift_left_right_control << 16);
 	sys_write32(data, adc + ADC_SHIFT_CONTROL);
 }
 
@@ -438,18 +517,32 @@ static inline void adc_set_comparator_ctrl_bit(uintptr_t adc, uint32_t arg)
 	sys_write32((arg << 16), adc + ADC_CONTROL);
 }
 
+/*
+ * ADC_INTERRUPT_MASK (offset 0x14, HWRM 19.1.5.3.6) is active-HIGH with reset
+ * 0x1 on every bit: 3 CMPB, 2 CMPA, 1 DONE1, 0 DONE0, each "Mask for <x>
+ * interrupt".  So enabling means clearing bits and disabling means setting
+ * them, and both helpers must be read-modify-write so one caller does not
+ * silently re-enable another's masked source.
+ *
+ * adc_mask_interrupt() used to be byte-identical to adc_unmask_interrupt() --
+ * it read the register into a dead store and then wrote the same
+ * (~arg) & 0xF ENABLE expression.  Both DONE handlers call it to stop the
+ * conversion once channels_count is reached, so in continuous mode the source
+ * stayed live: every further DONE0 before disable_adc() re-entered at index 0
+ * and overwrote results the caller had already been handed (#1822).
+ */
 static inline void adc_unmask_interrupt(uintptr_t adc, uint8_t arg)
 {
-	sys_write32(((~arg) & 0xF), adc + ADC_INTERRUPT_MASK);
+	uint32_t data = sys_read32(adc + ADC_INTERRUPT_MASK);
+
+	sys_write32(data & ~((uint32_t)arg & 0xFU), adc + ADC_INTERRUPT_MASK);
 }
 
 static inline void adc_mask_interrupt(uintptr_t adc, uint8_t arg)
 {
-	uint32_t data;
+	uint32_t data = sys_read32(adc + ADC_INTERRUPT_MASK);
 
-	data = sys_read32(adc + ADC_INTERRUPT_MASK);
-	data = (~arg) & 0xF;
-	sys_write32(data, adc + ADC_INTERRUPT_MASK);
+	sys_write32(data | ((uint32_t)arg & 0xFU), adc + ADC_INTERRUPT_MASK);
 }
 
 static inline void adc_sequencer_msk_ch_control(uintptr_t adc, uint32_t mask_channel)
@@ -479,7 +572,8 @@ static inline void adc_set_ch_scan_mode(const struct device *dev)
 	uint32_t data;
 
 	data = sys_read32(regs + ADC_SEQUENCER_CTRL);
-	data |= config->scan_mode;
+	data &= ~ADC_SEQUENCER_MODE_Msk;
+	data |= ((uint32_t)config->scan_mode << ADC_SEQUENCER_MODE_Pos) & ADC_SEQUENCER_MODE_Msk;
 	sys_write32(data, regs + ADC_SEQUENCER_CTRL);
 }
 
@@ -551,14 +645,54 @@ void adc_analog_config(const struct device *dev)
 #endif
 }
 
+/*
+ * The analog input whose result has just landed.
+ *
+ * ADC_SEL (HWRM 19.1.5.3.13, field 3-0 SAMPLE_REG_NUM) "Indicates the current
+ * ADC_SAMPLE_REG_n number TO BE LOADED with an ADC result" -- it names the
+ * NEXT register, not the one that just completed.  Reading buffer[i] from
+ * ADC_SAMPLE_REG_[ADC_SEL] therefore returned the reset value on the first lap
+ * and a full-lap-stale value afterwards, and the last input of a sequence was
+ * never read out at all.  A single-channel read hid it, because in fixed mode
+ * next and current coincide (#1822).
+ *
+ * In fixed mode (MODE = 1) ADC_SEL is the completed input.  In looping mode,
+ * step back to the previous UNMASKED input.
+ */
+static uint8_t adc_completed_input(uintptr_t regs, uint8_t num_inputs)
+{
+	uint32_t seq  = sys_read32(regs + ADC_SEQUENCER_CTRL);
+	uint8_t  next = (uint8_t)(sys_read32(regs + ADC_SEL) & 0xFU);
+	uint32_t masked;
+	uint8_t  ch;
+
+	if (seq & ADC_SEQUENCER_MODE_Msk) {
+		return next;
+	}
+
+	masked = seq & ADC_MSK_ALL_CHANNELS;
+	ch     = next;
+	for (uint8_t i = 0; i < num_inputs; i++) {
+		ch = (ch == 0U) ? (uint8_t)(num_inputs - 1U) : (uint8_t)(ch - 1U);
+		if ((masked & BIT(ch)) == 0U) {
+			return ch;
+		}
+	}
+
+	/* Every input masked: nothing could have converted.  Report ADC_SEL so
+	 * the read stays in range rather than indexing off the register block. */
+	return next;
+}
+
 void adc_done0_irq_handler(const struct device *dev)
 {
 	uint32_t channel_sample_reg;
 	uintptr_t regs = DEVICE_MMIO_NAMED_GET(dev, adc_reg);
 	uint32_t sample_reg = (regs + ADC_SAMPLE_REG_0);
-	uint8_t channel = sys_read32(regs + ADC_SEL);
 	struct adc_alif_data *data = dev->data;
 	const struct adc_config *config = dev->config;
+	uint8_t                  channel    = adc_completed_input(
+	    regs, (config->drv_inst == ADC_INSTANCE_ADC24_0) ? ADC24_SEQ_INPUTS : ADC12_SEQ_INPUTS);
 
 	/* Clearing the done0 IRQ*/
 	sys_write32(ADC_INTR_DONE0_CLEAR, regs + ADC_INTERRUPT);
@@ -585,9 +719,10 @@ void adc_done1_irq_handler(const struct device *dev)
 	uint32_t channel_sample_reg;
 	uintptr_t regs = DEVICE_MMIO_NAMED_GET(dev, adc_reg);
 	uintptr_t sample_reg = (regs + ADC_SAMPLE_REG_0);
-	uint8_t channel = sys_read32(regs + ADC_SEL);
 	struct adc_alif_data *data = dev->data;
 	const struct adc_config *config = dev->config;
+	uint8_t                  channel    = adc_completed_input(
+	    regs, (config->drv_inst == ADC_INSTANCE_ADC24_0) ? ADC24_SEQ_INPUTS : ADC12_SEQ_INPUTS);
 
 	/* Clearing the done1 IRQ*/
 	sys_write32(ADC_INTR_DONE1_CLEAR, regs + ADC_INTERRUPT);
@@ -968,7 +1103,23 @@ static int adc_channel_select(const struct device *dev, const struct adc_channel
 	}
 
 	if (channel_cf->differential) {
-		enable_adc_pga_gain(dev, config->drv_inst, config->pga_gain);
+		const uint8_t *ladder =
+		    (config->drv_inst == ADC_INSTANCE_ADC24_0) ? adc24_pga_gain_code : adc12_pga_gain_code;
+		uint8_t code;
+
+		if (config->pga_gain >= ARRAY_SIZE(adc12_pga_gain_code)) {
+			return -EINVAL;
+		}
+
+		code = ladder[config->pga_gain];
+		if (code == ADC_PGA_GAIN_NA) {
+			/* The requested dB exists on the other ADC class, not this
+			 * one; writing the index anyway would silently deliver a
+			 * different gain (#1822). */
+			return -EINVAL;
+		}
+
+		enable_adc_pga_gain(dev, config->drv_inst, code);
 	}
 
 	if (config->drv_inst == ADC_INSTANCE_ADC24_0) {
@@ -1086,70 +1237,87 @@ struct adc_driver_api alif_adc_api = {
 
 #define ADC24_BIAS(inst) UTIL_CAT(ADC24_BIAS_GAIN_, DT_INST_ENUM_IDX_OR(inst, adc24_bias, 0))
 
-#define ADC_ALIF_INIT(inst)                                                                        \
-	static void adc_config_func_##inst(const struct device *dev);                              \
-	IF_ENABLED(DT_INST_NODE_HAS_PROP(inst, pinctrl_0), (PINCTRL_DT_INST_DEFINE(inst)));        \
-	const struct adc_config config_##inst = {                                                  \
-		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(comp_reg, DT_DRV_INST(inst)),                   \
-		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(analog_reg, DT_DRV_INST(inst)),                 \
-		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(adc_reg, DT_DRV_INST(inst)),                    \
-		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(aon_regs, DT_DRV_INST(inst)),                   \
-		IF_ENABLED(CONFIG_ANALOG_ALIASING,					           \
-		(DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(adc_vref, DT_DRV_INST(inst)),))	           \
-		.irq_config_func = adc_config_func_##inst,                                         \
-		.sample_width = COND_CODE_0(DT_INST_ENUM_IDX(inst, driver_instance), (BIT(16)),    \
-					    (DT_INST_ENUM_IDX(inst, sample_width))),               \
-		.clock_div = DT_INST_PROP(inst, clock_div),                                        \
-		.shift_n_bits = DT_INST_PROP(inst, shift_n_bits),                                  \
-		.shift_direction = DT_INST_ENUM_IDX(inst, shift_direction),                        \
-		.comparator_bias = COND_CODE_0(DT_INST_ENUM_IDX(inst, driver_instance), (0),       \
-					       (DT_INST_ENUM_IDX(inst, comparator_bias))),         \
-		.avg_sample_num = DT_INST_PROP(inst, avg_sample_num),                              \
-		.drv_inst = DT_INST_ENUM_IDX(inst, driver_instance),                               \
-		.pga_enable = DT_INST_PROP(inst, pga_enable),                                      \
-		.pga_gain = DT_INST_ENUM_IDX(inst, pga_gain),                                      \
-		.scan_mode = DT_INST_ENUM_IDX(inst, adc_channel_scan),                             \
-		.conv_mode = DT_INST_ENUM_IDX(inst, adc_conversion_mode),                          \
-		.comparator_threshold_a = DT_INST_PROP(inst, comparator_threshold_a),              \
-		.comparator_threshold_b = DT_INST_PROP(inst, comparator_threshold_b),              \
-		.comparator_threshold_comparison =                                                 \
-			DT_INST_ENUM_IDX(inst, comparator_threshold_comparison),                   \
-		.adc24_output_rate = COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, adc24_output_rate),   \
-						(DT_INST_ENUM_IDX(inst, adc24_output_rate)),       \
-						(0)),                                              \
-		.adc24_bias = ADC24_BIAS(inst),                                                    \
-		IF_ENABLED(DT_INST_NODE_HAS_PROP(inst, pinctrl_0),                                 \
-				(.pcfg = PINCTRL_DT_DEV_CONFIG_GET(DT_DRV_INST(inst)),))};         \
-	struct adc_alif_data data_##inst = {                                                            \
-		ADC_CONTEXT_INIT_LOCK(data_##inst, ctx),                                           \
-		ADC_CONTEXT_INIT_SYNC(data_##inst, ctx),                                           \
-		ADC_CONTEXT_INIT_TIMER(data_##inst, ctx),                                          \
-		.interrupts = DT_INST_PROP(inst, interrupt_en),                                    \
-	};                                                                                         \
-	DEVICE_DT_INST_DEFINE(inst, adc_init, NULL, &data_##inst, &config_##inst, POST_KERNEL,     \
-			      CONFIG_ADC_INIT_PRIORITY, &alif_adc_api);                            \
-                                                                                                   \
-	static void adc_config_func_##inst(const struct device *dev)                               \
-	{                                                                                          \
-		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(inst, done0, irq),                                 \
-			    DT_INST_IRQ_BY_NAME(inst, done0, priority),                            \
-			    adc_done0_irq_handler, DEVICE_DT_INST_GET(inst), 0);                   \
-                                                                                                   \
-		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(inst, done1, irq),                                 \
-			    DT_INST_IRQ_BY_NAME(inst, done1, priority),                            \
-			    adc_done1_irq_handler, DEVICE_DT_INST_GET(inst), 0);                   \
-                                                                                                   \
-		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(inst, comp_a, irq),                                \
-			    DT_INST_IRQ_BY_NAME(inst, comp_a, priority),                           \
-			    adc_cmpa_irq_handler, DEVICE_DT_INST_GET(inst), 0);                    \
-		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(inst, comp_b, irq),                                \
-			    DT_INST_IRQ_BY_NAME(inst, comp_b, priority),                           \
-			    adc_cmpb_irq_handler, DEVICE_DT_INST_GET(inst), 0);                    \
-                                                                                                   \
-		irq_enable(DT_INST_IRQ_BY_NAME(inst, done0, irq));                                 \
-		irq_enable(DT_INST_IRQ_BY_NAME(inst, done1, irq));                                 \
-		irq_enable(DT_INST_IRQ_BY_NAME(inst, comp_a, irq));                                \
-		irq_enable(DT_INST_IRQ_BY_NAME(inst, comp_b, irq));                                \
+#define ADC_ALIF_INIT(inst) \
+	static void adc_config_func_##inst(const struct device *dev); \
+	IF_ENABLED(DT_INST_NODE_HAS_PROP(inst, pinctrl_0), (PINCTRL_DT_INST_DEFINE(inst))); \
+	const struct adc_config config_##inst = { \
+		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(comp_reg, DT_DRV_INST(inst)), \
+		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(analog_reg, DT_DRV_INST(inst)), \
+		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(adc_reg, DT_DRV_INST(inst)), \
+		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(aon_regs, DT_DRV_INST(inst)), \
+		IF_ENABLED(CONFIG_ANALOG_ALIASING, \
+		           (DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(adc_vref, DT_DRV_INST(inst)), )) \
+		    .irq_config_func    = adc_config_func_##inst, \
+		.sample_width           = COND_CODE_0(DT_INST_ENUM_IDX(inst, driver_instance), \
+		                                      (BIT(16)), \
+		                                      (DT_INST_PROP(inst, sample_width))), \
+		.clock_div              = DT_INST_PROP(inst, clock_div), \
+		.shift_n_bits           = DT_INST_PROP(inst, shift_n_bits), \
+		.shift_direction        = DT_INST_ENUM_IDX(inst, shift_direction), \
+		.comparator_bias        = COND_CODE_0(DT_INST_ENUM_IDX(inst, driver_instance), \
+		                                      (0), \
+		                                      (DT_INST_ENUM_IDX(inst, comparator_bias))), \
+		.avg_sample_num         = DT_INST_PROP(inst, avg_sample_num), \
+		.drv_inst               = DT_INST_ENUM_IDX(inst, driver_instance), \
+		.pga_enable             = DT_INST_PROP(inst, pga_enable), \
+		.pga_gain               = DT_INST_ENUM_IDX(inst, pga_gain), \
+		.scan_mode              = DT_INST_ENUM_IDX(inst, adc_channel_scan), \
+		.conv_mode              = DT_INST_ENUM_IDX(inst, adc_conversion_mode), \
+		.comparator_threshold_a = DT_INST_PROP(inst, comparator_threshold_a), \
+		.comparator_threshold_b = DT_INST_PROP(inst, comparator_threshold_b), \
+		.comparator_threshold_comparison = \
+		    DT_INST_ENUM_IDX(inst, comparator_threshold_comparison), \
+		.adc24_output_rate = COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, adc24_output_rate), \
+		                                 (DT_INST_ENUM_IDX(inst, adc24_output_rate)), \
+		                                 (0)), \
+		.adc24_bias        = ADC24_BIAS(inst), \
+		IF_ENABLED(DT_INST_NODE_HAS_PROP(inst, pinctrl_0), \
+		           (.pcfg = PINCTRL_DT_DEV_CONFIG_GET(DT_DRV_INST(inst)), )) \
+	}; \
+	struct adc_alif_data data_##inst = { \
+		ADC_CONTEXT_INIT_LOCK(data_##inst, ctx), \
+		ADC_CONTEXT_INIT_SYNC(data_##inst, ctx), \
+		ADC_CONTEXT_INIT_TIMER(data_##inst, ctx), \
+		.interrupts = DT_INST_PROP(inst, interrupt_en), \
+	}; \
+	DEVICE_DT_INST_DEFINE(inst, \
+	                      adc_init, \
+	                      NULL, \
+	                      &data_##inst, \
+	                      &config_##inst, \
+	                      POST_KERNEL, \
+	                      CONFIG_ADC_INIT_PRIORITY, \
+	                      &alif_adc_api); \
+\
+	static void adc_config_func_##inst(const struct device *dev) \
+	{ \
+		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(inst, done0, irq), \
+		            DT_INST_IRQ_BY_NAME(inst, done0, priority), \
+		            adc_done0_irq_handler, \
+		            DEVICE_DT_INST_GET(inst), \
+		            0); \
+\
+		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(inst, done1, irq), \
+		            DT_INST_IRQ_BY_NAME(inst, done1, priority), \
+		            adc_done1_irq_handler, \
+		            DEVICE_DT_INST_GET(inst), \
+		            0); \
+\
+		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(inst, comp_a, irq), \
+		            DT_INST_IRQ_BY_NAME(inst, comp_a, priority), \
+		            adc_cmpa_irq_handler, \
+		            DEVICE_DT_INST_GET(inst), \
+		            0); \
+		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(inst, comp_b, irq), \
+		            DT_INST_IRQ_BY_NAME(inst, comp_b, priority), \
+		            adc_cmpb_irq_handler, \
+		            DEVICE_DT_INST_GET(inst), \
+		            0); \
+\
+		irq_enable(DT_INST_IRQ_BY_NAME(inst, done0, irq)); \
+		irq_enable(DT_INST_IRQ_BY_NAME(inst, done1, irq)); \
+		irq_enable(DT_INST_IRQ_BY_NAME(inst, comp_a, irq)); \
+		irq_enable(DT_INST_IRQ_BY_NAME(inst, comp_b, irq)); \
 	}
 
 DT_INST_FOREACH_STATUS_OKAY(ADC_ALIF_INIT)
