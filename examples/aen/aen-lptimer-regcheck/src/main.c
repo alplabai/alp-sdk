@@ -200,6 +200,19 @@ int main(void)
 			continue;
 		}
 
+		/* The register witness, read while the alarm is armed: LOADCOUNT IS
+		 * the reload value, so it must read ticks - 1 (HWRM 13.1.4.7 makes the
+		 * period LOADCOUNT + 1 clocks).  This is the decisive check -- the
+		 * wall-clock number below carries a fixed ~0.7 ms of arm overhead
+		 * (the CONTROLREG/LOADCOUNT writes have to cross into the 32768 Hz
+		 * clock domain), which swamps a single 30.5 us tick at the short end.
+		 */
+		printk("  ticks=%-5u LOADCOUNT=%u (expect %u)
+		       ",
+		       alarm_ticks[i],
+		       counter_get_top_value(lptimer),
+		       alarm_ticks[i] - 1U);
+
 		/* Longest row is 1024/32768 s = 31.25 ms; 200 ms is slack, not a
 		 * measurement window (the timestamp is taken in the callback). */
 		for (int spins = 0; spins < 200 && !alarm_fired; spins++) {
