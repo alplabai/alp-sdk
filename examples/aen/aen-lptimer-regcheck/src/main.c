@@ -56,6 +56,35 @@
  * the counter_alif_lptimer driver binds it directly. */
 #define COUNTER_NODE DT_NODELABEL(lptimer0)
 
+/*
+ * Alarm-latency probe (#1829).
+ *
+ * HWRM 13.1.4.7 makes the LPTIMER toggle period "(LPTIMERn_LOADCOUNT + 1) x
+ * LPTIMERn_CLK clock period", and 13.1.4.3 puts the interrupt on the same
+ * reload -- so an alarm of N ticks needs LOADCOUNT = N - 1.  The driver used to
+ * program LOADCOUNT = N, firing one tick late: at 32768 Hz a 1-tick alarm took
+ * 61.0 us instead of 30.5 us, a 100% error that shrinks as 1/N and so hid
+ * entirely at long delays.
+ *
+ * Each row below prints the measured interval next to the ideal N/32768 s.  On
+ * the broken driver every row reads one tick (30.5 us) long.
+ */
+static const uint32_t alarm_ticks[] = { 1U, 2U, 4U, 64U, 1024U };
+
+static volatile uint32_t alarm_fired_cyc;
+static volatile bool     alarm_fired;
+
+static void alarm_cb(const struct device *dev, uint8_t chan, uint32_t ticks, void *user)
+{
+	ARG_UNUSED(dev);
+	ARG_UNUSED(chan);
+	ARG_UNUSED(ticks);
+	ARG_UNUSED(user);
+
+	alarm_fired_cyc = k_cycle_get_32();
+	alarm_fired     = true;
+}
+
 /* Dwell between the two counter reads.  The LPTIMER ticks at 32768 Hz, so
  * ~100 ms moves it by ~3277 ticks -- comfortably nonzero for an advance check,
  * and far from a 32-bit wrap (~36 hours at 32768 Hz). */
@@ -143,6 +172,50 @@ int main(void)
 		       "clock source (TIMER_CLKSEL 0x1A609004); see the overlay note\n",
 		       v1,
 		       v2);
+	}
+
+	/*
+	 * Alarm latency, one row per requested tick count (#1829).  Reported in ns
+	 * beside the ideal interval; the driver is correct when measured ~= ideal
+	 * and one LPTIMER tick (30518 ns at 32768 Hz) long when it is not.
+	 */
+	printk("-- alarm latency (#1829) --\n");
+
+	for (size_t i = 0; i < ARRAY_SIZE(alarm_ticks); i++) {
+		struct counter_alarm_cfg acfg = {
+			.callback  = alarm_cb,
+			.ticks     = alarm_ticks[i],
+			.user_data = NULL,
+			.flags     = 0,
+		};
+		uint32_t t0;
+		int      rc;
+
+		alarm_fired = false;
+
+		t0 = k_cycle_get_32();
+		rc = counter_set_channel_alarm(lptimer, 0, &acfg);
+		if (rc != 0) {
+			printk("  ticks=%-5u set_channel_alarm rc=%d\n", alarm_ticks[i], rc);
+			continue;
+		}
+
+		/* Longest row is 1024/32768 s = 31.25 ms; 200 ms is slack, not a
+		 * measurement window (the timestamp is taken in the callback). */
+		for (int spins = 0; spins < 200 && !alarm_fired; spins++) {
+			k_msleep(1);
+		}
+
+		if (!alarm_fired) {
+			printk("  ticks=%-5u NO CALLBACK within 200 ms\n", alarm_ticks[i]);
+			(void)counter_cancel_channel_alarm(lptimer, 0);
+			continue;
+		}
+
+		printk("  ticks=%-5u measured %8u ns   ideal %8u ns\n",
+		       alarm_ticks[i],
+		       (unsigned)k_cyc_to_ns_floor64(alarm_fired_cyc - t0),
+		       (unsigned)(((uint64_t)alarm_ticks[i] * 1000000000ULL) / 32768ULL));
 	}
 
 	/* Leave the counter running + park; CURRENTVAL stays live for the J-Link
