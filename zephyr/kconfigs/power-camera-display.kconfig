@@ -50,11 +50,15 @@ config ALP_SDK_POWER
 
 	  src/backends/power/zephyr_stub.c is the always-present,
 	  priority-0 "*" wildcard fallback: open() returns a valid
-	  handle and configure_wake_source() succeeds silently so
-	  application setup code keeps linking/running unchanged, but
-	  request_sleep() (and both power_profile ops, when no higher-
-	  priority profile backend is linked) return ALP_ERR_NOSUPPORT.
-	  The dispatcher still enforces the INVAL pre-checks (RUN-mode,
+	  handle so application setup code keeps linking/running
+	  unchanged, but this backend can arm zero real wake sources
+	  (alp_power_wake_capabilities() reports 0), so the dispatcher's
+	  configure_wake_source() rejects any non-empty bitmap with
+	  ALP_ERR_NOSUPPORT at configuration time rather than only at
+	  the eventual sleep call (issue #1812); request_sleep() (and
+	  both power_profile ops, when no higher-priority profile
+	  backend is linked) return ALP_ERR_NOSUPPORT too.  The
+	  dispatcher still enforces the INVAL pre-checks (RUN-mode,
 	  invalid enum, no-wake-source-and-no-timer) ahead of the
 	  backend call.
 
