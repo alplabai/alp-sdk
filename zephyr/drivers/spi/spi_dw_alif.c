@@ -443,9 +443,10 @@ static int spi_dw_dma_setup_rx_channel(const struct device *dev,
 	 * RX: clean+invalidate the destination BEFORE the transfer.  Cleaning
 	 * first matters because a dirty line evicted mid-DMA would overwrite bytes
 	 * the controller had already delivered; invalidating means the post-DMA
-	 * read misses to memory.  spi_dw_dma_wait_completion() invalidates again
-	 * after completion to drop anything speculative prefetch pulled in during
-	 * the transfer window.
+	 * read misses to memory.  The transfer loop invalidates this buffer again
+	 * once the transfer completes, to drop anything speculative prefetch
+	 * pulled in during the transfer window -- see the post-completion
+	 * invalidate after spi_dw_dma_wait_completion().
 	 */
 	if (rx_ptr != &dummy_rx) {
 		sys_cache_data_flush_and_invd_range(rx_ptr, chunk * spi_d->dfs);
@@ -725,6 +726,18 @@ static int spi_dw_dma_transceive(const struct device *dev,
 		ret = spi_dw_dma_wait_completion(dev, state);
 		if (ret < 0) {
 			goto dma_out;
+		}
+
+		/* RX: invalidate the destination AFTER the controller has written it.
+		 * The pre-transfer clean+invalidate in spi_dw_dma_setup_rx_channel()
+		 * is not sufficient on its own: the CPU may speculatively prefetch
+		 * this buffer during the transfer window, and any line pulled in then
+		 * holds pre-DMA bytes.  Without this the caller can read stale data
+		 * back from a completed transfer, which is a silent wrong-data bug
+		 * rather than a visible failure (#1830).
+		 */
+		if (state->is_rx_req && rx_ptr != (void *)&dummy_rx) {
+			sys_cache_data_invd_range(rx_ptr, chunk * spi->dfs);
 		}
 
 		state->tx_off += chunk * spi->dfs;
