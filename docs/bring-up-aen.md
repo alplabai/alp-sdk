@@ -195,15 +195,48 @@ EEPROM manifest is bridge/DNP-selected onto its own **SoC I2C2**
 + INA236 parts share that same **I2C2** bus (`metadata/boards/e1m-evk.yaml`
 `buses:` `E1M_I2C0` -> `EVK_I2C_BUS_SENSORS`). The on-module housekeeping
 trio (OPTIGA / RTC / TMP112) is on the separate, shared **BRD_I2C**
-(**SoC I2C0, function C**, `P7_0` SDA / `P7_1` SCL) -- CORRECTED #1848:
-earlier revisions of this doc put BRD_I2C on the slave-only Alif LPI2C0
-(`P7_4`/`P7_5`); it is not. I2C0 is master-or-slave capable (HWRM
-§15.4.1), so the M55 masters BRD_I2C directly like any other on-module
-bus, and it is scannable from the board files' `alp-i2c0` alias. **Do
-not blind-scan it anyway**: OPTIGA Trust M lives on it at `0x30`, and a
-scan is a real bus transaction against a secure element, not a free
-operation -- probe known addresses only. Scan **I2C2** freely from a
-built `i2c-scanner` example or via the console.
+(**SoC I2C0, function C**, `P7_0` SDA / `P7_1` SCL).
+
+> **Corrected 2026-08-30 (#1848).** This used to say BRD_I2C was
+> "**LPI2C0**, `P7_4`/`P7_5`" -- wrong on both halves. The netlist puts
+> `BRD_I2C_SCL` on ball B3 = **`P7_1`** and `BRD_I2C_SDA` on ball B8 =
+> **`P7_0`**; the datasheet's LPI2C0 pads are `P7_4`/`P7_5`, which carry
+> different nets on this module. `ADTS0013` v1.2 Table 3-16 gives
+> `P7_0`/`P7_1` the alternate function `I2C0_SDA_C`/`I2C0_SCL_C`, confirmed
+> a second time in the per-pin alternate-function grid -- **not**
+> undocumented, and **not** LPI2C0. I2C0 is master-or-slave capable (HWRM
+> section 15.4.1), unlike LPI2C0, so the M55 can master BRD_I2C directly;
+> "the M55 reaches it via SE services" was never true either -- the
+> pinned hal_alif SE services expose no I2C service at all.
+>
+> **That is necessary, not sufficient.** `BRD_I2C` has no pull-up to any
+> rail on the R2 design -- the jumpers that would bridge it into the
+> pulled-up I2C2 segment (`R93`/`R94`) are DNP, unlike the ones I2C2 itself
+> uses (`R95`/`R96`, stuffed). Whether that leaves a working bus is an
+> unresolved document conflict: the datasheet calls `I2C0_SCL_C`/
+> `I2C0_SDA_C` open-drain, requiring an external pull-up, while the HWRM's
+> per-pin note for these ports says I2C "is operating properly with the
+> push-pull (default) driver type" and that open-drain "must not be
+> selected for I2C". Mastering this bus needs either `R93`/`R94` stuffed
+> (a board rework) or the push-pull reading to be the correct one -- not
+> settled on paper. See `examples/aen/aen-secure-element-sign`'s board
+> overlay, which wires the pads with no internal bias pending a bench
+> answer, and blocks using the on-module `rv3028c7` as the accurate time
+> source Alif's own RTC errata workaround calls for (#1814).
+>
+> Unrelated but corrected in the same pass: `LPI2C1` **is** master-capable
+> (HWRM: "Two Low-Power I2C modules (LPI2C0 slave-only and LPI2C1
+> master-only) in the RTSS-HE"), so the RTSS-HE is not slave-only on I2C
+> in general.
+
+`alp_i2c_open()` reaches BRD_I2C at portable bus **2**
+(`aen-secure-element-sign`'s own board overlay aliases `alp-i2c2 = &i2c0`
+-- bus 0 and 1 are already the E1M edge I2C buses, so BRD_I2C could not
+reuse either without silently repointing other examples at a bus carrying
+a secure element). **Do not blind-scan it**: OPTIGA Trust M lives on it at
+`0x30`, and a scan is a real bus transaction against a secure element, not
+a free operation -- probe known addresses only. Scan **I2C2** freely from
+a built `i2c-scanner` example or via the console.
 
 The BRD_I2C routing above is **R2-sourced**: it comes from the
 E1M-AEN-2626-R2 netlist + `ADTS0013`; no R1 netlist is available, and the
@@ -236,8 +269,9 @@ current bench module is r1 (`alp board` -> `E1M-AEN801 r1`) -- probe
 > E1M-AEN801 SoM design (`on_module`); the absence is a current-batch
 > population fact (like the un-stuffed OSPI memories). Skip §5.2 on these
 > boards. Note the evidence is the population record, **not** a scan miss --
-> OPTIGA sits on BRD_I2C, which is reachable from the M55 (§5.1), but
-> deliberately not blind-scanned here (a scan is a real transaction against a
+> OPTIGA sits on BRD_I2C, whose electrical readiness is still an open
+> question (see the pull-up caveat in §5.1), and which is deliberately not
+> blind-scanned here regardless (a scan is a real transaction against a
 > secure element); the driver's targeted `optiga_trust_m_init` probe is the
 > evidence to trust instead.
 
@@ -260,7 +294,8 @@ The AEN secure-element example
 ([`examples/aen/aen-secure-element-sign`](../examples/aen/aen-secure-element-sign))
 exercises the OPTIGA Trust M over the portable `<alp/*>` API on
 BRD_I2C.  (It is the AEN sibling of the V2N variant -- identical
-`src/`, AEN `board.yaml` with `m55_he` as the BRD_I2C owner.)
+`src/`; the AEN `board.yaml` targets `m55_he`, whose own overlay wires
+BRD_I2C to portable bus 2.)
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-secure-element-sign

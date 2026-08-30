@@ -12,6 +12,22 @@ silicon_variant: AE612FA0E5597LS0        # see metadata/socs/alif/ensemble/e6.js
 display_name: "E1M-AEN601 (Alif Ensemble E6 -- 1x A32 + 2x M55 + 3x Ethos-U, preliminary)"
 
 on_module:
+  # POR_N / ER004: the module carries NO reset or brownout supervisor.  The
+  # E1M-AEN-2626-R2 netlist routes the SoC POR_N only to a pull-up and to the
+  # E1M edge connector, so satisfying the supervisor requirement is the
+  # CARRIER's job, not the module's.
+  #
+  # This is a hardware-damage requirement, not a robustness nicety.  Errata
+  # AERR0012 v2.0 ER004 applies to every E4/E6/E8 revision with no fix
+  # planned: "the voltage on the VDD_MAIN and VDD_BUCK pins must never drop
+  # below 1.65V once 1.65V is reached.  If this cannot be guaranteed, an
+  # external reset supervisor device must be used to drive (active low) the
+  # Ensemble system reset pin, POR_N" -- and, if it is not, "there is
+  # potential to damage the Ensemble SoC rendering it non-functional".
+  # Datasheet ADTS0013 v1.2 5.2.1 has since made it normative: "An external
+  # brownout supervisor must be connected to VDD_MAIN/VDD_BUCK.  The brownout
+  # supervisor must assert before voltage input to the chip falls below
+  # 1.65V."  (#1810)
   silicon:              alif:ensemble:e6       # 1x A32, 2x Cortex-M55, 2x U55 + 1x U85
   wifi_ble:             cc3501e
   secure_element:       optiga_trust_m
@@ -54,8 +70,13 @@ on_module:
     # OMITTED here pending a per-part check that this silicon variant's
     # datasheet backs I2C0_SCL_C/I2C0_SDA_C on the same pads (E1M-AEN801 is
     # the only one confirmed against ADTS0013 + a netlist so far) --
-    # holding this back is deliberate, not an unreviewed leftover. Addresses
-    # per docs/bring-up-aen.md §5.1's bench-verified table; pad names per
+    # holding this back is deliberate, not an unreviewed leftover.
+    #
+    # Even on E1M-AEN801 this is the intended master, not a working bus:
+    # the shared netlist shows no pull-up path on BRD_I2C, and the
+    # datasheet/HWRM disagree on whether that is fatal -- see
+    # docs/bring-up-aen.md §5.1. Addresses per docs/bring-up-aen.md
+    # §5.1's bench-verified table; pad names per
     # examples/aen/aen-secure-element-sign/README.md.
     brd_i2c:
       devices:
