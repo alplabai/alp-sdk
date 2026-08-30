@@ -112,7 +112,7 @@ static inline void crc_alif_write(const struct crc_alif_config *cfg, uint32_t of
  * silicon that BusFaults: bench run 2026-08-30 halted in the fault handler with
  * the stacked PC inside crc_alif_update()'s byte-feed loop and R0 = 0x48107000
  * (the CRC base).  Every 8- and 16-bit algorithm went through that store, so
- * the whole narrow-CRC path was unreachable on hardware.
+ * the whole narrow-CRC path was unreachable on hardware (#1847).
  */
 static inline void crc_alif_write8(const struct crc_alif_config *cfg, uint32_t off, uint8_t val)
 {
