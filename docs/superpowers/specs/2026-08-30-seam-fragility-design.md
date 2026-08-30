@@ -300,17 +300,44 @@ Recorded so they are not re-litigated:
    revision entry is caught or silently accepted, which matters because that
    table is the input to the SDK-version compatibility window. Not in scope
    here; it needs its own decision and probably its own issue.
-5. `scripts/alp_template.py` declares an opt-in
-   `substitute: {"file": ..., "literal": ...}` mapping on a parameter spec
-   (`:88`, `:261`, `:270`), and **no template in
-   `metadata/templates/catalog-v1.json` uses it** — the usage count is zero.
-   The adversarial review flagged exactly this shape as the embryo of an inner
-   platform: the next template that needs a condition grows it a condition
-   field, then ordering semantics, and eventually it is an untyped language
-   interpreted once per consumer. Two honest options: delete the hook until a
-   real caller exists, or keep it and record in the catalog schema that it is
-   frozen at literal-replace and will not grow. Doing neither is how it grows by
-   accident.
+## Decided during review — the unused `substitute` hook stays, because the schema already locks the door
+
+`scripts/alp_template.py` declares an opt-in
+`substitute: {"file": ..., "literal": ...}` mapping on a parameter spec (`:88`,
+`:261`, `:270`), and no template in `metadata/templates/catalog-v1.json` uses
+it — the usage count is zero. The adversarial review flagged this shape as the
+embryo of an inner platform: the next template that needs a condition grows it a
+condition field, then ordering semantics, and eventually it is an untyped
+language interpreted once per consumer.
+
+**Correcting how this was first framed here:** the earlier draft posed it as a
+choice between deleting the hook and "recording in the catalog schema that it is
+frozen", as though the enforcement were missing. It is not.
+`metadata/schemas/template-catalog-v1.schema.json`'s `$defs.parameter` carries
+`additionalProperties: false` with properties exactly
+`constraints`, `default`, `description`, `name`, `type` — `substitute` is not
+among them. The schema does not freeze the key; it **rejects** it. The
+implementation's own docstring says so (`scripts/alp_template.py:261-263`: "the
+schema forbids it -- additionalProperties: false"), and the hook is reachable
+only from a synthetic test fixture.
+
+That changes the verdict rather than weakening it. The inner-platform risk is
+already contained by construction: nobody can grow the hook through the catalog
+without first amending the schema, which is an explicit, reviewable decision
+point rather than an accident. So:
+
+- The hook **stays**. It is a tested extension point whose door is locked in the
+  layer that validates customer-facing data.
+- The lock **stays**. `$defs.parameter` keeps `additionalProperties: false`, and
+  `substitute` stays out of its `properties`.
+- The only work this decision implies is one sentence of prose in
+  `$defs.parameter`'s description recording that the omission is deliberate —
+  that `substitute` is implemented in `alp_template.py`, intentionally not
+  admitted here, and that admitting it is a separate decision. Without that
+  note, the next reader finds an implemented feature the schema silently
+  refuses and reasonably assumes it is a bug.
+
+Not implemented in this spec; it belongs to the implementation plan.
 
 ## Evidence
 
