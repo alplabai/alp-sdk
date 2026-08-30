@@ -30,6 +30,38 @@ tier (cores + NPU count + memory).
 
 Memory + per-SKU specifics: [`metadata/e1m_modules/E1M-AEN<NNN>.yaml`](../../metadata/e1m_modules/).
 
+## Carrier requirement: an external brownout supervisor on POR_N
+
+**The module carries no reset or brownout supervisor, and omitting one on the
+carrier can permanently damage the SoC.**
+
+Errata `AERR0012` v2.0 `ER004` applies to every Ensemble E4/E6/E8 revision with
+no fix planned:
+
+> During this 10ms period, the power supply voltage must rise monotonically, and
+> the voltage on the VDD_MAIN and VDD_BUCK pins must never drop below 1.65V once
+> 1.65V is reached. If this cannot be guaranteed, an external reset supervisor
+> device must be used to drive (active low) the Ensemble system reset pin,
+> POR_N, to an active state while the power supply voltage is below 1.65V.
+
+> If the voltage profile outlined in the description above is not met, and an
+> external reset supervisor device is not used, there is potential to damage the
+> Ensemble SoC rendering it non-functional.
+
+Datasheet `ADTS0013` v1.2 §5.2.1 has since promoted this from an erratum to a
+normative operating condition:
+
+> An external brownout supervisor must be connected to VDD_MAIN/VDD_BUCK. The
+> brownout supervisor must assert before voltage input to the chip falls below
+> 1.65V. Care (that is, sufficient decoupling) must be taken to ensure that
+> supply noise/transients do not spuriously trigger resets.
+
+On the `E1M-AEN-2626-R2` module, `POR_N` is pulled up on-module and brought out
+to the E1M edge connector; nothing on the module drives it. So the supervisor,
+and the decoupling that keeps it from tripping spuriously, belong to the
+carrier design. The E1M-EVK is a development carrier -- do not infer from it
+that a product carrier can skip this.
+
 ## CC3501E coprocessor
 
 The AEN module's Wi-Fi 6 + BLE 5.4 ride a dedicated TI CC3501E

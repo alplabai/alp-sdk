@@ -26,6 +26,22 @@ display_name: "E1M-AEN701 (Alif Ensemble E7)"
 # chip-driver names in chips/<part>/ so the loader can flip the
 # corresponding CONFIG_ALP_SDK_CHIP_<NAME>=y at build time.
 on_module:
+  # POR_N / ER004: the module carries NO reset or brownout supervisor.  The
+  # E1M-AEN-2626-R2 netlist routes the SoC POR_N only to a pull-up and to the
+  # E1M edge connector, so satisfying the supervisor requirement is the
+  # CARRIER's job, not the module's.
+  #
+  # This is a hardware-damage requirement, not a robustness nicety.  Errata
+  # AERR0012 v2.0 ER004 applies to every E4/E6/E8 revision with no fix
+  # planned: "the voltage on the VDD_MAIN and VDD_BUCK pins must never drop
+  # below 1.65V once 1.65V is reached.  If this cannot be guaranteed, an
+  # external reset supervisor device must be used to drive (active low) the
+  # Ensemble system reset pin, POR_N" -- and, if it is not, "there is
+  # potential to damage the Ensemble SoC rendering it non-functional".
+  # Datasheet ADTS0013 v1.2 5.2.1 has since made it normative: "An external
+  # brownout supervisor must be connected to VDD_MAIN/VDD_BUCK.  The brownout
+  # supervisor must assert before voltage input to the chip falls below
+  # 1.65V."  (#1810)
   silicon:              alif:ensemble:e7    # 2x Cortex-A32 + 2x Cortex-M55 + 1x Ethos-U55
   wifi_ble:             cc3501e             # TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor
   secure_element:       optiga_trust_m      # Infineon SLS32AIA010
