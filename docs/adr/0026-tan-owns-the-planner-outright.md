@@ -97,8 +97,9 @@ Collectively they are the interest payment on the duplication.
    producer. What must NOT be dropped in the same motion:
    - the **metadata/schema** contract checks — tan still consumes alp-sdk
      metadata, so that seam is real and needs a gate;
-   - the frozen `crates/` oracle axis, until `crates/` is deleted on its own
-     schedule (tan-cli#409 already tracks freezing the live-only cases first);
+   - ~~the frozen `crates/` oracle axis, until `crates/` is deleted on its own
+     schedule~~ — **struck 2026-08-30 (see §E)**: tan-cli has no top-level
+     `crates/` as of `b9aa697`, so this bullet guards nothing;
    - `build-plan-v1` shape checks against the frozen oracle.
 5. The three pin sites and `DELIBERATE_EDITS` disappear with the axis they
    serve.
@@ -171,8 +172,10 @@ library. Measured on `dev` at `00627b88`:
   `alp_orchestrate.libraries`.
 - `metadata/emit-registry-v1.json` names
   `scripts/alp_orchestrate/{kconfig,manifest,headers,topology,secure,buildplan,kconfig_symbols}.py`
-  as the `owner.module` for roughly seventeen emit modes.
-- At least seven gate scripts import it, including
+  as the `owner.module` for twelve of the twenty emit modes (the other
+eight belong to `scripts/alp_project_emit/*`, `scripts/gen_zephyr_board.py`
+and `scripts/alp_template.py`).
+- Sixteen gate scripts import it, including
   `scripts/check_zephyr_conf_parity.py`, `scripts/check_system_manifest.py`,
   `scripts/check_emit_registry.py` and `scripts/check_build_plan.py`.
 
@@ -187,11 +190,20 @@ those two differ by every example build.
 ### B. The deletion would remove a hardware-safety gate, not just a planner
 
 `SdkRevisionUnknown`, `SdkRevisionNotBuildable` and `SdkRevisionUnsupported`
-come from `alp_orchestrate.models`. They are raised at
-`scripts/alp_project_loader.py:436-457` and imported by
-`scripts/validate_board_yaml.py:21`, `scripts/gen_catalog.py:93,340,353-359`
-and the gate scripts above. That chain is the SDK's refusal to build a hardware
-revision it does not support — the mechanism that declines a `status: tbd`
+come from `alp_orchestrate.models` (`:30`, `:41`, `:56`). They are raised
+inside the directory step 3 proposed to delete, at
+`scripts/alp_orchestrate/loader.py:653,660` (unknown), `:702,709` (not
+buildable) and `:749` (unsupported), and all three run on every emit because
+`load_board_yaml` calls the checks at `.../loader.py:1238-1260`. They are
+imported from outside the directory by `scripts/validate_board_yaml.py:21` and
+`scripts/gen_catalog.py:93,340,353-359`; sixteen `scripts/check_*.py` import
+`alp_orchestrate`, and six of them reach this refusal by calling
+`load_board_yaml`. (`scripts/alp_project_loader.py:436-457` raises
+`SdkRevisionUnknown` and `SdkRevisionNotBuildable` too, but that is the
+secondary `composed-route-table` pad-override path, not the build path.)
+
+That chain is the SDK's refusal to build a hardware revision it does not
+support — the mechanism that declines a `status: tbd`
 revision rather than producing an image for it.
 
 Two consequences the Migration section does not state:
