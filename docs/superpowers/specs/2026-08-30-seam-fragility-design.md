@@ -120,10 +120,22 @@ Worth an amendment sentence; not a reversal.
 ### Prong (b) first: the usual answer is that no rule crosses at all
 
 The test above is ordered, and the ordering is the point. Reaching for a table
-is reaching for prong (c). Before that, (b) asks whether the SDK can evaluate
-the rule and ship the **outcome**, and for the class-to-runtime mapping the
-answer is yes — so the right artefact is not a decision table at all, it is a
-decided **field**.
+is reaching for prong (c). Before that, (b) asks whether the **outcome** can be
+recorded once instead of the rule being applied over and over — and for the
+class-to-runtime mapping it can, so the right artefact is not a decision table
+at all, it is a decided **field**.
+
+**A wording correction, because the first version of this paragraph blurred two
+different mechanisms.** Prong (b) is usually read as "the SDK evaluates the rule
+at emit time and stamps the result into the artefact", which is what
+`_EXECUTION_POLICY` does. That is *not* what is proposed here. Here the decision
+is **authored** into the SoM preset by a human and read back; the SDK evaluates
+nothing on the build path, and the class rule survives only as a producer-side
+CI assertion. Both shapes satisfy (b) — the rule stops being any consumer's
+problem — but only the second removes evaluation altogether, which is the actual
+answer to "why is the SDK applying this rule at all". Today it applies it
+because the field was made optional and 26 of 26 presets left it blank, so the
+fallback became the mechanism.
 
 The evidence that this is not hypothetical: `som-preset-v1.schema.json` already
 declares the field. `$defs/topology_entry/properties/os` carries the description
@@ -169,9 +181,33 @@ rather than re-types; the schema should too.
 
 Some rule genuinely will depend on consumer-side state the SDK cannot see —
 `_EXECUTION_POLICY`'s `missingTool` is the existing example, and it crosses
-correctly today. For that residue, and only for it, the schema must impose all
-of the following. Each one removes a degree of freedom that a second
-implementation could otherwise resolve differently:
+correctly today.
+
+**The governing decision for that residue is now
+[ADR 0033](../../adr/0033-support-policy-is-declared-data-with-one-normative-evaluator.md)**
+(Proposed): alp-sdk declares support policy as data, and exactly **one**
+normative evaluator turns a declared policy into a verdict — consumers call it
+or carry a hash-pinned audited port, never a prose re-derivation. That evaluator
+stays in alp-sdk `scripts/`, because 251 configure-time `CMakeLists.txt`
+invocations and the four `west alp-*` commands reach `load_board_yaml` with no
+tan in the process; an evaluator they cannot reach would silently drop the
+refusal from every plain `west build`. One evaluator is also what keeps this
+compatible with the non-goals below: "no embeddable policy engine" and "no pure
+data plus N interpreters" both stand unchanged, since the harm those name is
+*two* interpreters.
+
+ADR 0033 also settles a framing this spec was carrying loosely: a refusal that
+enforces a **support decision** must say so rather than assert a hardware limit.
+The class refusal at `scripts/alp_orchestrate/validate.py:270-282`, reached from
+`loader.py:910`, tells the customer its runtime "is determined by the core
+class" — but upstream Zephyr at the pinned v4.4.1 ships
+`arch/arm/core/cortex_a_r/`, so Zephyr on Cortex-A is a combination alp-sdk
+*chose* not to support, not one the silicon forbids. Rewritten for customers in
+`docs/board-config-schema.md`.
+
+For that residue, and only for it, the schema must impose all of the following.
+Each one removes a degree of freedom that a second implementation could
+otherwise resolve differently:
 
 1. **Exact values only — no prefix, no glob, no regex anywhere in the
    contract.** Matching semantics are the thing another language reimplements
