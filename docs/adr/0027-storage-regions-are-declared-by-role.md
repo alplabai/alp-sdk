@@ -149,6 +149,17 @@ not just the fault.
    duplication 0026 describes: without 0026, clause 3 is two implementations
    of the same refusal.**
 
+   **Accepted is not executed (noted 2026-08-30).** 0026 moved to `Accepted`
+   with an amendment on 2026-08-30, so the condition in this clause now reads
+   as met — but its migration has not run. Until 0026's replacement step 5
+   deletes the plan producer, alp-sdk still owns the emitters and still
+   allocates partitions, so **the port is still required**: skipping it now
+   would leave clause 3's reserved-band refusal implemented on one side only,
+   diverging a hardware refusal across two live producers. That is the exact
+   class 0026 exists to close, and 0026's own amendment §G orders the split and
+   the repoint *before* any deletion for the same reason. Re-read this clause
+   when 0026's step 5 lands; not before.
+
 ## Alternatives considered
 
 - **Keep `flash_device:` as the only mechanism and document the swap cost.**
