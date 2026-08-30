@@ -203,18 +203,35 @@ never actually wired to.
 
 **Effect on this ADR's tiering.** For the E1M-AEN801, the RTC/OPTIGA/TMP112
 trio is **Tier 1 (upstream-native)**: ordinary upstream `i2c_dw` over the
-already-Tier-1 `i2c0` node, the same as the edge I2C buses, needing only a
-pinctrl group + a board enable — no SE mediation, no portable
-board-info/manifest API detour. See `zephyr/dts/alif/ensemble_e8_peripherals.dtsi`
-(the `i2c0` node and its LPI2C0-note comment) and
-`metadata/e1m_modules/E1M-AEN801.yaml` (`on_module.i2c_devices.brd_i2c`) for
-the corrected routing.
+already-Tier-1 `i2c0` node, the same as the edge I2C buses — no SE
+mediation, no portable board-info/manifest API detour needed to reach it.
+See `zephyr/dts/alif/ensemble_e8_peripherals.dtsi` (the `i2c0` node and its
+LPI2C0-note comment) and `metadata/e1m_modules/E1M-AEN801.yaml`
+(`on_module.i2c_devices.brd_i2c`) for the corrected routing.
+
+Getting a working bus needs more than "a pinctrl group + a board enable",
+and two open facts bound it, not just the R2-vs-r1 netlist gap above:
+
+- **No confirmed pull-up.** The R2 components CSV shows this net's pull-up
+  jumpers (R93/R94) DNP -- unlike the I2C2/EEPROM bus, whose own pull-up
+  path (R95/R96 into carrier resistors) IS stuffed. Whether that's a live
+  problem depends on an unresolved document conflict: the datasheet marks
+  `I2C0_SCL_C`/`I2C0_SDA_C` open-drain, requiring an external pull-up, while
+  the HWRM's per-pin note for these ports says I2C "is operating properly
+  with the push-pull (default) driver type" and that open-drain "must not
+  be selected for I2C". Tri-state-high-phase-with-no-pull-up is a dead bus;
+  push-pull makes the missing pull-up moot. Not resolved by paper alone --
+  see `examples/aen/aen-secure-element-sign`'s board overlay, which wires
+  the bus with NO internal bias pending a bench answer.
+- **OPTIGA (IC1) is DNI** on the current bench population, independent of
+  the bus question -- already documented in `docs/bring-up-aen.md`
+  §5.1/§5.2 and unaffected by this amendment.
 
 **What this amendment does not claim.** It is scoped to the E1M-AEN801's
 BRD_I2C only — it does not revisit LPI2C0 itself (still genuinely slave-only;
 the retired master-TX driver is still correctly retired), and it does not
 reopen Tier 3 in general (a device genuinely behind the SE still belongs
 there). It also does not claim bench verification: the routing evidence is
-the E1M-AEN-2626-R2 netlist, `alp-sdk-internal` holds no R1 netlist, and the
-only bench unit on hand is an r1 module — the physical bus needs an on-unit
+the E1M-AEN-2626-R2 netlist -- no R1 netlist is available, and the only
+bench unit on hand is an r1 module — the physical bus needs an on-unit
 probe before this routing is more than paper-correct for that unit.

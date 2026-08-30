@@ -30,7 +30,7 @@ on_module:
   wifi_ble:             cc3501e             # TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor
   secure_element:       optiga_trust_m      # Infineon SLS32AIA010
   rtc_external:         rv3028c7            # Micro Crystal ultra-low-power RTC
-  temperature_sensor:   tmp112              # TI TMP112 on the slave-only LPI2C0 (Tier-3 SE; ADR 0017)
+  temperature_sensor:   tmp112              # TI TMP112 on BRD_I2C -- routing not yet per-part confirmed (#1848)
   eeprom:               eeprom_24c128       # Onsemi N24S128C4DYT3G (128-Kbit I2C)
   # Same on-module PHY as every AEN SKU: metadata/e1m_modules/aen/CHANGELOG.md:13-16
   # records ONE shared PCB (r1) across E3..E8 that includes "TI DP83825
@@ -64,12 +64,16 @@ on_module:
     chip_select:    1
 
   i2c_devices:
-    # Tier-3 SE-mediated housekeeping bus (ADR 0017:74-79): the SoC can only
-    # be a slave on the Alif LPI2C0 (hardcoded address 0x40, TRM §3.17.4), so
-    # the Secure Enclave masters it, not on-module silicon -- `bus_master` is
-    # omitted per the schema's `i2c_bus.bus_master` description. Addresses
+    # HELD, NOT the disproven LPI2C0 claim (#1848, ADR 0017 amended
+    # 2026-08-30): E1M-AEN801 shares this SoM PCB and its BRD_I2C is SoC
+    # I2C0 (function C), master-capable, not the slave-only Alif LPI2C0
+    # this comment used to assert for the whole family. `bus_master` stays
+    # OMITTED here pending a per-part check that this silicon variant's
+    # datasheet backs I2C0_SCL_C/I2C0_SDA_C on the same pads (E1M-AEN801 is
+    # the only one confirmed against ADTS0013 + a netlist so far) --
+    # holding this back is deliberate, not an unreviewed leftover. Addresses
     # per docs/bring-up-aen.md §5.1's bench-verified table; pad names per
-    # examples/aen/aen-secure-element-sign/README.md:14-15.
+    # examples/aen/aen-secure-element-sign/README.md.
     brd_i2c:
       devices:
         - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }

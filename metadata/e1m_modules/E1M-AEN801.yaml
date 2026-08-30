@@ -64,7 +64,7 @@ on_module:
     # upstream i2c_dw, no Secure Enclave mediation. Addresses per
     # docs/bring-up-aen.md §5.1; pad names per
     # examples/aen/aen-secure-element-sign/README.md.
-    # R2-SOURCED, NOT ON-UNIT-VERIFIED: alp-sdk-internal holds no R1 netlist
+    # R2-SOURCED, NOT ON-UNIT-VERIFIED: no R1 netlist is available
     # and the only bench unit on hand is r1 -- probe P7_0/P7_1 before calling
     # this confirmed on that module.
     brd_i2c:

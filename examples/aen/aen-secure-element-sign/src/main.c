@@ -12,14 +12,17 @@
  * TMP112.
  * (A different, separate bus carries the EEPROM -- SoC I2C2, see
  * docs/bring-up-aen.md §5.1.)  This example's board target is rtss_he
- * (M55-HE), matching the E1M-AEN801 board file that wires BRD_I2C.  The
- * chip and the sign flow are identical to the V2N variant -- everything
- * goes through the SoM-portable <alp/...> API, so the only AEN-specific
- * facts are the bus + the owning core.
+ * (M55-HE); this example's own overlay wires BRD_I2C (portable bus 2 --
+ * 0 and 1 are already the E1M edge I2C buses).  The chip and the sign
+ * flow are identical to the V2N variant -- everything goes through the
+ * SoM-portable <alp/...> API, so the only AEN-specific facts are the
+ * bus + the owning core.
  *
  * The BRD_I2C routing above is R2-sourced (E1M-AEN-2626-R2 netlist +
- * ADTS0013); alp-sdk-internal holds no R1 netlist, and the bench unit on
- * hand is r1, so it still needs an on-unit probe.
+ * ADTS0013); no R1 netlist is available, and the bench unit on hand is
+ * r1, so it still needs an on-unit probe.  It is also open-drain with NO
+ * confirmed external pull-up (see the board overlay's pinctrl comment) --
+ * do not add bias-pull-down.
  *
  * The in-tree v0.3 driver probes the Trust M I2C_STATE register only.
  * Product-info and raw-APDU helpers are declared for the planned host
@@ -40,12 +43,13 @@ int main(void)
 	/* BRD_I2C carries the Trust M alongside the RTC + TMP112 (the
      * EEPROM is on a separate bus, SoC I2C2 -- see docs/bring-up-aen.md
      * §5.1).  On the E1M-AEN this is SoC I2C0 (#1848), surfaced as
-     * portable bus 0 by the E1M-AEN801 board file.  400 kHz is the
-     * standard Trust M bus rate; the chip supports up to 1 MHz
-     * Fast-mode+ if the rest of the bus does too. */
+     * portable bus 2 by this example's own board overlay (0 and 1 are
+     * already the E1M edge I2C buses).  100 kHz, matching the board DT:
+     * BRD_I2C has no confirmed external pull-up, so there is no fast-mode
+     * margin here -- do not raise this past standard-mode. */
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = 0u,
-	    .bitrate_hz = 400000u,
+	    .bus_id     = 2u,
+	    .bitrate_hz = 100000u,
 	});
 	if (bus == NULL) {
 		/* NOT_READY vs anything else matters here: NOT_READY means "the BRD_I2C

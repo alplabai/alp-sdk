@@ -206,10 +206,9 @@ operation -- probe known addresses only. Scan **I2C2** freely from a
 built `i2c-scanner` example or via the console.
 
 The BRD_I2C routing above is **R2-sourced**: it comes from the
-E1M-AEN-2626-R2 netlist + `ADTS0013`, `alp-sdk-internal` holds no R1
-netlist, and the current bench module is r1 (`alp board` -> `E1M-AEN801
-r1`) -- probe `P7_0`/`P7_1` on the actual unit before treating this as
-bench-verified.
+E1M-AEN-2626-R2 netlist + `ADTS0013`; no R1 netlist is available, and the
+current bench module is r1 (`alp board` -> `E1M-AEN801 r1`) -- probe
+`P7_0`/`P7_1` on the actual unit before treating this as bench-verified.
 
 | Slave | 7-bit addr | What | Bus | Where |
 |-------|------------|------|-----|-------|

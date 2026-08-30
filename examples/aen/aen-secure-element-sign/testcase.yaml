@@ -5,7 +5,7 @@ sample:
   description: |
     Probe the OPTIGA Trust M secure element on the E1M-AEN
     (Alif Ensemble) SoM via the SoM-portable <alp/*> API, over
-    the on-module BRD_I2C (SoC I2C0) wired in the M55-HE board file.
+    the on-module BRD_I2C (SoC I2C0) wired in this example's own overlay.
     The current driver exposes product-info/raw-APDU as NOSUPPORT stubs.
 
 tests:

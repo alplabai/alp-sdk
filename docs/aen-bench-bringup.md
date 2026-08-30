@@ -522,7 +522,7 @@ secure-boot verification — always write both consistent blobs.
   P7_0/P7_1) on the E1M-AEN801 -- no future respin needed, Tier-1 upstream
   `i2c_dw` -- per the E1M-AEN-2626-R2 netlist + `ADTS0013` v1.2 Table 3-16.
   R2-sourced; the bench module on hand is r1, so this still needs an on-unit
-  probe (`alp-sdk-internal` holds no R1 netlist).
+  probe (no R1 netlist is available).
 - **SPI needs the SoC master-mode select set (not just CTRLR0).** The Ensemble
   wraps the DWC_ssi macrocell behind a SoC master/slave select in
   `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`: bit n = SSI*n* master-mode, bit 8+n =

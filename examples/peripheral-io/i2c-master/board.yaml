@@ -40,7 +40,7 @@ cores:
 # i2c_devices: and metadata/boards/e1m-x-evk.yaml i2c_devices:, neither
 # of which lists a TMP112 on the sensor bus this example opens. BRD_I2C
 # is a SEPARATE controller instance from BOARD_I2C_SENSORS regardless
-# (E1M-AEN801's BRD_I2C is SoC I2C0, function C -- #1848), so simply
+# (on the E1M-AEN family, BRD_I2C is SoC I2C0, function C -- #1848), so
 # repointing the bus_id would still not reach a TMP112 there. BMP581 is
 # the part that is actually on BOARD_I2C_SENSORS on both supported
 # boards, at the same address (0x47) on each -- see

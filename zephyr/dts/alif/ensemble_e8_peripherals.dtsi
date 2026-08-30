@@ -272,7 +272,7 @@
 	 * balls B8/B3).  I2C0 is master-or-slave capable (HWRM §15.4.1), so the
 	 * trio is reachable as an ordinary Tier-1 upstream i2c_dw master -- see
 	 * the i2c0 node below -- not Tier-3 SE-mediated.  R2-SOURCED: the bench
-	 * E1M-AEN801 unit is r1 and alp-sdk-internal holds no R1 netlist, so this
+	 * E1M-AEN801 unit is r1 and no R1 netlist is available, so this
 	 * routing needs an on-unit probe before it is verified there too.
 	 */
 
