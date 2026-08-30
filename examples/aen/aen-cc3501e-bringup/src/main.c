@@ -1026,8 +1026,12 @@ int main(void)
 	 * a console-less bench read sees where it got to.
 	 */
 	g_cc3501e_witness.phase = CC3501E_PHASE_GPIO;
-	cc3501e_t    fw;
-	alp_status_t s                 = cc3501e_bridge_bringup(&fw);
+	/* STATIC, not a stack local: sizeof(cc3501e_t) is ~32 KB and
+	 * CONFIG_MAIN_STACK_SIZE is 32768, so as a local the prologue crosses
+	 * PSPLIM and the M55 raises STKOF -> UsageFault at main+4, before the
+	 * console exists. Bench-proven: as a local this image never boots. */
+	static cc3501e_t fw;
+	alp_status_t     s             = cc3501e_bridge_bringup(&fw);
 	g_cc3501e_witness.reset_status = (uint32_t)s;
 	g_cc3501e_witness.phase        = CC3501E_PHASE_RESET;
 	if (s == ALP_ERR_NOT_PRESENT_ON_THIS_SOC) {
@@ -1048,6 +1052,47 @@ int main(void)
 	printf("[cc3501e-bringup] cc3501e bridge bring-up -> %d%s\n",
 	       (int)s,
 	       (s == ALP_ERR_NOSUPPORT) ? " (control pins not bound?)" : "");
+
+	/* ---- SPI1 PASSTHROUGH EXERCISE (#83) --------------------------------
+	 * Drives the 0x55/0x56/0x57 opcodes straight through the chip driver with no
+	 * console involvement, so the passthrough is provable on silicon without
+	 * alp_console_companion_set() -- which no shipped example calls.
+	 *
+	 * Proves: CONFIGURE is accepted and reports the peer's max_xfer, TRANSFER
+	 * clocks the requested count and returns rx, CS_HOLD spans two transfers,
+	 * RELEASE is idempotent.
+	 * Does NOT prove a peripheral replied: nothing is known to be wired to
+	 * SPI1_CS0 (E1M pad AH9 -> CC3501E GPIO_31), so rx is the bus idle level. */
+	if (s == ALP_OK) {
+		uint32_t     actual_hz = 0u;
+		uint16_t     max_xfer  = 0u;
+		alp_status_t sp        = cc3501e_spi1_configure(
+		    &fw, 1000000u, 0u, ALP_CC3501E_SPI1_CS0, &actual_hz, &max_xfer, 2000u);
+		printf("SPI1: configure -> %d (actual_hz=%u max_xfer=%u)\n",
+		       (int)sp,
+		       (unsigned)actual_hz,
+		       (unsigned)max_xfer);
+		if (sp == ALP_OK) {
+			static const uint8_t cmd_rdid[4] = { 0x9Fu, 0x00u, 0x00u, 0x00u };
+			static uint8_t       rx[4];
+			sp = cc3501e_spi1_transfer(&fw, cmd_rdid, rx, 4u, 0x00u, false, 2000u);
+			printf("SPI1: xfer(9F000000) -> %d  rx=%02X %02X %02X %02X\n",
+			       (int)sp,
+			       rx[0],
+			       rx[1],
+			       rx[2],
+			       rx[3]);
+			static const uint8_t cmd_rdsr[1] = { 0x05u };
+			static uint8_t       sr[1];
+			sp = cc3501e_spi1_transfer(&fw, cmd_rdsr, NULL, 1u, 0x00u, true, 2000u);
+			printf("SPI1: xfer(05) cs_hold -> %d\n", (int)sp);
+			sp = cc3501e_spi1_transfer(&fw, NULL, sr, 1u, 0xFFu, false, 2000u);
+			printf("SPI1: read-under-hold -> %d  sr=%02X\n", (int)sp, sr[0]);
+		}
+		printf("SPI1: release -> %d\n", (int)cc3501e_spi1_release(&fw, 2000u));
+		printf("SPI1: release again (idempotent) -> %d\n", (int)cc3501e_spi1_release(&fw, 2000u));
+		printf("RESULT SPI1: passthrough exercised\n");
+	}
 
 	/*
 	 * Step 4 -- retry PING until the coprocessor answers.

@@ -146,6 +146,13 @@ static bool     g_get_version_override_active; /* stage a specific reply value b
 static uint16_t g_get_version_override_value;
 static uint32_t g_get_version_io_down_remaining; /* fail the transaction outright, N times */
 
+/* SPI1 TRANSFER mutant control: when true, the reply echoes seq+1 instead of
+ * the request's real seq -- models a desynced/stale reply (the firmware
+ * answering some OTHER request) so a test can prove cc3501e_spi1_transfer()
+ * treats a seq mismatch as ALP_ERR_IO rather than handing back another
+ * transaction's RX bytes.  Cleared by slave_reset(). */
+static bool g_spi1_reply_bad_seq;
+
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
@@ -166,6 +173,7 @@ static void slave_reset(void)
 	g_get_version_override_active      = false;
 	g_get_version_override_value       = 0u;
 	g_get_version_io_down_remaining    = 0u;
+	g_spi1_reply_bad_seq               = false;
 }
 
 static void stage_status(uint8_t st)
@@ -495,6 +503,58 @@ static void slave_dispatch(void)
 		stage_reply(ALP_CC3501E_RESP_OK, &lvl, 1u);
 		break;
 	}
+	case ALP_CC3501E_CMD_SPI1_CONFIGURE: {
+		/* reply DATA = alp_cc3501e_spi1_config_resp_t { freq_hz(LE32) |
+		 * max_xfer(LE16) | bits_per_word | reserved }.  Reports the request
+		 * back as the "actual" rate (no divider to quantise here) and this
+		 * family's real chunk cap, exactly what CONFIGURE hands a real host. */
+		const uint32_t freq_hz = (uint32_t)slave.req_pl[0] | ((uint32_t)slave.req_pl[1] << 8) |
+		                         ((uint32_t)slave.req_pl[2] << 16) |
+		                         ((uint32_t)slave.req_pl[3] << 24);
+		const uint8_t  d[8]    = {
+			(uint8_t)(freq_hz & 0xFFu),
+			(uint8_t)((freq_hz >> 8) & 0xFFu),
+			(uint8_t)((freq_hz >> 16) & 0xFFu),
+			(uint8_t)((freq_hz >> 24) & 0xFFu),
+			(uint8_t)(ALP_CC3501E_SPI1_MAX_XFER & 0xFFu),
+			(uint8_t)((ALP_CC3501E_SPI1_MAX_XFER >> 8) & 0xFFu),
+			slave.req_pl[5], /* bits_per_word echoed back */
+			0u,
+		};
+		stage_reply(ALP_CC3501E_RESP_OK, d, 8u);
+		break;
+	}
+	case ALP_CC3501E_CMD_SPI1_TRANSFER: {
+		/* Software model of the real stub HAL (hal/cc3501e_hw_stub.c in the
+		 * firmware repo): a wire loop, MOSI tied straight to MISO, so a test
+		 * that clocks bytes out gets those same bytes back.  Self-delimiting
+		 * on the request's own len/flags/seq, same as the real firmware. */
+		const uint16_t len     = (uint16_t)slave.req_pl[0] | ((uint16_t)slave.req_pl[1] << 8);
+		const uint8_t  flags   = slave.req_pl[2];
+		const uint8_t  seq     = slave.req_pl[3];
+		const uint8_t  tx_fill = slave.req_pl[4];
+		const bool     no_rx   = (flags & ALP_CC3501E_SPI1_XFER_NO_RX) != 0u;
+		const bool     no_tx   = (flags & ALP_CC3501E_SPI1_XFER_NO_TX) != 0u;
+		uint8_t        d[4u + ALP_CC3501E_SPI1_MAX_XFER];
+
+		d[0] = no_rx ? 0u : (uint8_t)(len & 0xFFu);
+		d[1] = no_rx ? 0u : (uint8_t)((len >> 8) & 0xFFu);
+		d[2] = (uint8_t)(flags & ALP_CC3501E_SPI1_XFER_CS_HOLD); /* echo of requested CS_HOLD */
+		d[3] = g_spi1_reply_bad_seq ? (uint8_t)(seq + 1u) : seq; /* #g_spi1_reply_bad_seq mutant */
+		if (!no_rx) {
+			if (!no_tx) {
+				memcpy(&d[4], &slave.req_pl[8], len);
+			} else {
+				memset(&d[4], tx_fill, len);
+			}
+		}
+		stage_reply(ALP_CC3501E_RESP_OK, d, (uint16_t)(4u + (no_rx ? 0u : len)));
+		break;
+	}
+	case ALP_CC3501E_CMD_SPI1_RELEASE:
+		/* Argless escape hatch: bare OK, same as the real firmware. */
+		stage_status(ALP_CC3501E_RESP_OK);
+		break;
 	default:
 		stage_status(ALP_CC3501E_RESP_ERR_INVALID);
 		break;
@@ -1773,6 +1833,123 @@ ZTEST(cc3501e_host_driver, test_punned_payload_layout_733)
 	 * header is 7 -- which is exactly why cc3501e_ble_adv_start hand-packs
 	 * it (see test_ble_adv_start_encodes_7byte_header) instead of memcpy. */
 	zassert_equal(sizeof(alp_cc3501e_ble_adv_start_t), 8u, "ble_adv_start struct = 8, wire = 7");
+}
+
+/* ==================== SPI1 HOST PASSTHROUGH (0x55..0x57) =================== */
+
+ZTEST(cc3501e_host_driver, test_spi1_transfer_before_configure_is_not_ready)
+{
+	/* SESSION gate (the collision this closes): a freshly cc3501e_init()'d ctx
+	 * must refuse TRANSFER locally -- never touching the wire -- until a real
+	 * CONFIGURE has succeeded in THIS session.  See spi1_configured's comment
+	 * in include/alp/chips/cc3501e/core.h. */
+	const uint8_t tx[4] = { 0xDEu, 0xADu, 0xBEu, 0xEFu };
+	uint8_t       rx[4] = { 0 };
+	zassert_equal(cc3501e_spi1_transfer(&fw, tx, rx, 4u, 0u, false, 100u),
+	              ALP_ERR_NOT_READY,
+	              "TRANSFER before any CONFIGURE in this session -> NOT_READY");
+	zassert_equal(slave.cmd, 0u, "rejected locally, never clocked the bus");
+}
+
+ZTEST(cc3501e_host_driver, test_spi1_configure_encodes_request_and_decodes_reply)
+{
+	uint32_t actual_freq_hz = 0u;
+	uint16_t max_xfer       = 0u;
+	zassert_equal(cc3501e_spi1_configure(
+	                  &fw, 10000000u, 0u, ALP_CC3501E_SPI1_CS0, &actual_freq_hz, &max_xfer, 100u),
+	              ALP_OK,
+	              "CONFIGURE -> OK");
+	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SPI1_CONFIGURE, "opcode 0x55");
+	zassert_equal(slave.req_len, 8u, "payload = alp_cc3501e_spi1_configure_t (8 B)");
+	zassert_equal(slave.req_pl[0], 0x80u, "freq_hz byte0");
+	zassert_equal(slave.req_pl[1], 0x96u, "freq_hz byte1");
+	zassert_equal(slave.req_pl[2], 0x98u, "freq_hz byte2");
+	zassert_equal(slave.req_pl[3], 0x00u, "freq_hz byte3 (10000000 = 0x00989680 LE)");
+	zassert_equal(slave.req_pl[4], 0x00u, "mode");
+	zassert_equal(slave.req_pl[5], 0x08u, "bits_per_word is pinned at 8, not a caller parameter");
+	zassert_equal(slave.req_pl[6], (uint8_t)ALP_CC3501E_SPI1_CS0, "cs");
+	zassert_equal(actual_freq_hz, 10000000u, "decoded actual SCK");
+	zassert_equal(max_xfer, (uint16_t)ALP_CC3501E_SPI1_MAX_XFER, "decoded peer chunk cap");
+}
+
+ZTEST(cc3501e_host_driver, test_spi1_transfer_encodes_request_matches_protocol_vector)
+{
+	/* tests/protocol_vectors.txt (firmware repo): spi1_transfer_request =
+	 * 56000C000400000100000000DEADBEEF -- header {56 00 0C 00}, payload
+	 * {04 00 | 00 | 01 | 00 | 00 00 00 | DE AD BE EF}.  seq 1 is what the
+	 * FIRST TRANSFER on a freshly cc3501e_init()'d ctx always carries. */
+	zassert_equal(
+	    cc3501e_spi1_configure(&fw, 10000000u, 0u, ALP_CC3501E_SPI1_CS0, NULL, NULL, 100u),
+	    ALP_OK,
+	    "CONFIGURE -> OK");
+
+	const uint8_t tx[4] = { 0xDEu, 0xADu, 0xBEu, 0xEFu };
+	uint8_t       rx[4] = { 0 };
+	zassert_equal(
+	    cc3501e_spi1_transfer(&fw, tx, rx, 4u, 0u, false, 100u), ALP_OK, "TRANSFER -> OK");
+	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SPI1_TRANSFER, "opcode 0x56");
+	zassert_equal(slave.req_len, 12u, "8-byte header + 4 inline TX bytes");
+	const uint8_t want[12] = {
+		0x04u, 0x00u,               /* len LE16 = 4              */
+		0x00u,                      /* flags = 0 (single-shot)   */
+		0x01u,                      /* seq = 1, first transfer   */
+		0x00u,                      /* tx_fill (ignored, tx set) */
+		0x00u, 0x00u, 0x00u,        /* reserved                  */
+		0xDEu, 0xADu, 0xBEu, 0xEFu, /* tx, packed inline         */
+	};
+	zassert_mem_equal(
+	    slave.req_pl, want, sizeof(want), "emitted bytes match spi1_transfer_request");
+	zassert_mem_equal(rx, tx, sizeof(tx), "the loopback model echoes MOSI onto MISO");
+}
+
+ZTEST(cc3501e_host_driver, test_spi1_transfer_no_tx_and_no_rx_flags)
+{
+	zassert_equal(cc3501e_spi1_configure(&fw, 1000000u, 0u, ALP_CC3501E_SPI1_CS0, NULL, NULL, 100u),
+	              ALP_OK,
+	              "CONFIGURE -> OK");
+
+	/* NO_TX: tx == NULL clocks tx_fill instead -- the model loops the fill
+	 * byte back on rx so a decode proves the fill was what actually clocked,
+	 * not leftover buffer content. */
+	uint8_t rx[3] = { 0 };
+	zassert_equal(
+	    cc3501e_spi1_transfer(&fw, NULL, rx, 3u, 0xA5u, false, 100u), ALP_OK, "NO_TX -> OK");
+	zassert_equal(slave.req_pl[2], (uint8_t)ALP_CC3501E_SPI1_XFER_NO_TX, "flags = NO_TX only");
+	zassert_equal(slave.req_len, 8u, "NO_TX carries no inline TX bytes");
+	zassert_equal(rx[0], 0xA5u, "rx[0] = the fill byte");
+	zassert_equal(rx[1], 0xA5u, "rx[1] = the fill byte");
+	zassert_equal(rx[2], 0xA5u, "rx[2] = the fill byte");
+
+	/* NO_RX: rx == NULL discards MISO -- ALP_OK, the caller's own buffer never
+	 * touched, and the request still carries its inline TX bytes. */
+	const uint8_t tx[2] = { 0x11u, 0x22u };
+	zassert_equal(cc3501e_spi1_transfer(&fw, tx, NULL, 2u, 0u, false, 100u), ALP_OK, "NO_RX -> OK");
+	zassert_equal(slave.req_pl[2], (uint8_t)ALP_CC3501E_SPI1_XFER_NO_RX, "flags = NO_RX only");
+	zassert_equal(slave.req_len, 10u, "8-byte header + 2 inline TX bytes");
+}
+
+ZTEST(cc3501e_host_driver, test_spi1_transfer_seq_mismatch_reply_is_io)
+{
+	zassert_equal(cc3501e_spi1_configure(&fw, 1000000u, 0u, ALP_CC3501E_SPI1_CS0, NULL, NULL, 100u),
+	              ALP_OK,
+	              "CONFIGURE -> OK");
+	g_spi1_reply_bad_seq = true;
+
+	/* A reply that echoes a DIFFERENT seq than this transfer's is the answer
+	 * to some OTHER request (the firmware's cache, or a desynced read) --
+	 * spi1_take_rx() must report the desync, not hand back those bytes. */
+	const uint8_t tx[2] = { 0xAAu, 0xBBu };
+	uint8_t       rx[2] = { 0 };
+	zassert_equal(cc3501e_spi1_transfer(&fw, tx, rx, 2u, 0u, false, 100u),
+	              ALP_ERR_IO,
+	              "a reply echoing the wrong seq is a desync, not this transfer's answer");
+}
+
+ZTEST(cc3501e_host_driver, test_spi1_release_argless)
+{
+	zassert_equal(cc3501e_spi1_release(&fw, 100u), ALP_OK, "RELEASE -> OK");
+	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SPI1_RELEASE, "opcode 0x57");
+	zassert_equal(slave.req_len, 0u, "RELEASE carries no request payload");
 }
 
 ZTEST_SUITE(cc3501e_host_driver, NULL, NULL, reset_before, NULL, NULL);

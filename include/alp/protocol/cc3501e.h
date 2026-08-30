@@ -71,7 +71,46 @@ extern "C" {
  * origin/main both define 4), so every change since is unreleased and collapses
  * into ONE bump.  Do not re-derive a v6/v7 from the branch history: the wire
  * contract customers will first see after v4 is this one, and it is v5. */
-#define ALP_CC3501E_PROTOCOL_VERSION 5
+
+/* v6 adds the SPI1 HOST-PASSTHROUGH family (0x55..0x57 -- CONFIGURE / TRANSFER /
+ * RELEASE).  The E1M connector's SPI1 lands on the CC3501E, not on the Alif
+ * (E1M-AEN-2626-R2 netlist: AG10 SCK -> CC35 GPIO_32, AG9 MOSI -> GPIO_33, AG8
+ * MISO -> GPIO_34, AH9 CS0 -> GPIO_31, AH8 CS1 -> GPIO_15), so the only way the
+ * host reaches that bus at all is for the CC35 to act as CONTROLLER and relay
+ * the bytes.  NOT the inter-chip bridge -- that is CC35 SPI0 (GPIO_27/28/29 +
+ * GPIO16) and nothing in this family may touch those pads.
+ *
+ * NOTHING GATES THIS BUMP, which is why it is argued rather than assumed.
+ * tests/gen_protocol_vectors.py's version read-back, the "protocol version
+ * parity" CI job and protocol_meta.c's _Static_assert all check only that this
+ * number AGREES with protocol-version.txt and CC3501E_FW_IMPLEMENTS_PROTOCOL.
+ * None of the three can see a new opcode, so adding 0x55..0x57 and leaving the
+ * version at 5 would have stayed green.
+ *
+ * Bump anyway, because on the wire these opcodes are ADDITIVE and that is
+ * exactly the problem: v5 firmware falls through its dispatch default and
+ * answers RESP_ERR_INVALID, which the host maps to ALP_ERR_INVAL -- which is
+ * indistinguishable from "you sent a bad mode byte".  Under the bump,
+ * cc3501e_core.c's GET_VERSION gate refuses the link outright and permanently
+ * clears ctx->initialised, so "this firmware has no SPI1 passthrough" is
+ * reported ONCE, at attach, instead of masquerading as an argument error on
+ * every transfer.
+ *
+ * AND IT IS 6, NOT A COLLAPSE INTO 5.  The v5 note above records the escape
+ * hatch that let unreleased changes fold into a single bump; that hatch is now
+ * CLOSED.  v5 has SHIPPED: prebuilt/cc3501e-v0.5.0.bin is a signed release image
+ * carrying it, BRINGUP_STATUS.md records GET_VERSION -> protocol v5 verified on
+ * E1M-AEN801 silicon, and docs/full-erase-and-flash.md documents v5 as the
+ * expected bench answer.  v5 is the contract customers and bench units already
+ * hold, so the next one is 6.  Do not re-collapse into 5.
+ *
+ * Three sites move in ONE change or the build breaks: this define,
+ * cc3501e-bridge-firmware:protocol-version.txt, and that repo's
+ * src/protocol_meta.c CC3501E_FW_IMPLEMENTS_PROTOCOL.  And, as at v4 -> v5, the
+ * host gate fails on ANY difference, so header, firmware image and host driver
+ * ship together and every bench unit still on v5 is reflashed before a v6 host
+ * driver touches it. */
+#define ALP_CC3501E_PROTOCOL_VERSION 6
 
 /** Frame header in bytes, before the payload. */
 #define ALP_CC3501E_HEADER_BYTES 4
@@ -130,7 +169,7 @@ extern "C" {
  *   0x10..0x2F  Wi-Fi
  *   0x30..0x3F  BLE
  *   0x40..0x4F  OTA
- *   0x50..0x5F  GPIO proxy
+ *   0x50..0x5F  GPIO proxy (0x50..0x54) + SPI1 host passthrough (0x55..0x57)
  *   0x60..0x6F  power / camera-enable
  *   0x70..0x7F  diagnostics
  *   0x80..0xFF  reserved (vendor extensions)
@@ -264,6 +303,28 @@ typedef enum {
 	ALP_CC3501E_CMD_GPIO_READ          = 0x52,
 	ALP_CC3501E_CMD_GPIO_SET_INTERRUPT = 0x53,
 	ALP_CC3501E_EVT_GPIO_INTERRUPT     = 0x54, /* async */
+
+	/* SPI1 host passthrough (proto v6).  The E1M connector's SPI1 lands on the
+	 * CC3501E, not on the Alif, so the CC35 is the CONTROLLER here and relays the
+	 * host's transfers byte-for-byte.  NOT the inter-chip bridge -- that is SPI0.
+	 * Payload formats and the chunking contract are further down, under "SPI1
+	 * host-passthrough payload formats".
+	 *
+	 * 0x55 is the first free code in the group: 0x54 is already
+	 * EVT_GPIO_INTERRUPT above, because commands and async events share one
+	 * opcode space (cf. EVT_WIFI_* 0x18..0x1A, EVT_BLE_* 0x3C..0x3F).  0x58..0x5F
+	 * stay free.
+	 *
+	 * All three are WORKER-ROUTED on the firmware side.  The GPIO ops above run
+	 * inline in the inter-chip ISR because they are register pokes; a polled
+	 * 4088-byte controller transfer is ~800 us at 10 MHz and would stall the SPI0
+	 * slave's re-arm -- the exact wedge signature this bridge spent months
+	 * chasing.  Consequence for the host: SPI1 shares the single worker slot with
+	 * Wi-Fi and BLE, so a scan in flight makes a transfer answer RESP_ERR_BUSY
+	 * until it drains, and the standard poll-by-repeat path handles it. */
+	ALP_CC3501E_CMD_SPI1_CONFIGURE = 0x55, /* req spi1_configure_t; reply config_resp_t */
+	ALP_CC3501E_CMD_SPI1_TRANSFER  = 0x56, /* req spi1_transfer_t + tx; reply resp + rx  */
+	ALP_CC3501E_CMD_SPI1_RELEASE   = 0x57, /* req none; reply none                       */
 
 	/* Power / camera enables.  CC3501E drives the camera-LDO
      * enable pins (CAM_EN_LDO0/1) per the inter-chip TSV. */
@@ -899,6 +960,228 @@ typedef struct {
 } alp_cc3501e_gpio_event_t;
 
 /* ------------------------------------------------------------------ */
+/* SPI1 host-passthrough payload formats (proto v6)                   */
+/*                                                                    */
+/* The E1M connector's SPI1 is wired to the CC3501E, NOT to the Alif  */
+/* (E1M-AEN-2626-R2 netlist: AG10 SCK -> CC35 GPIO_32, AG9 MOSI ->    */
+/* GPIO_33, AG8 MISO -> GPIO_34, AH9 CS0 -> GPIO_31, AH8 CS1 ->       */
+/* GPIO_15).  These opcodes let the host drive that bus by relay: the */
+/* CC3501E is the SPI CONTROLLER and the host supplies the bytes.     */
+/*                                                                    */
+/* SEPARATE AND UNTOUCHABLE: the inter-chip bridge itself is CC35     */
+/* SPI0 (GPIO_27/28/29 + GPIO16), configured as a SLAVE.  Nothing     */
+/* here may reconfigure those pads.                                   */
+/*                                                                    */
+/* These are category (B) WIRE-SCHEMA structs (see the guard block    */
+/* below): they carry fields wider than uint8_t, so BOTH sides encode */
+/* and decode them field-by-field with explicit little-endian byte    */
+/* access -- never memcpy, never a pointer-cast onto the wire buffer, */
+/* exactly like alp_cc3501e_sock_send_t.  The sizes are pinned below  */
+/* because the firmware uses sizeof(T) as the expected header length. */
+/* ------------------------------------------------------------------ */
+
+/** Chip-select selector for @ref alp_cc3501e_spi1_configure_t::cs.
+ *  BOTH selects are SOFTWARE-driven GPIOs on the CC3501E side: the
+ *  SPIWFF3DMA driver carries exactly one hardware csnSel per SPI_Config
+ *  entry, so one instance cannot hardware-frame two selects, and
+ *  SPIWFF3DMA_CMD_SET_CSN_PIN re-muxes a new pad with the OLD csnPinMux
+ *  (GPIO31 needs mux 4, GPIO15 needs mux 16 -- it would apply the wrong
+ *  function).  The instance therefore runs "Three Pin" and the firmware
+ *  drives the pad around the transfer.  Consequence for callers: CS
+ *  edges are scheduler-timed, not clock-edge-exact.  A peripheral that
+ *  demands sub-microsecond CS-to-first-clock setup will not work here.
+ *  Field-level meanings:
+ *   - CS0: CC3501E GPIO_31, connector E1 AH9, net WIFI_SPI1.CS0.
+ *   - CS1: CC3501E GPIO_15, connector E1 AH8, net WIFI_SPI1.CS1. */
+typedef enum {
+	ALP_CC3501E_SPI1_CS0 = 0u,
+	ALP_CC3501E_SPI1_CS1 = 1u,
+} alp_cc3501e_spi1_cs_t;
+
+/** Leave CS ASSERTED after this chunk completes, so the next
+ *  CMD_SPI1_TRANSFER continues the SAME device transaction (command +
+ *  response, page program + status poll).  Clear it on the LAST chunk to
+ *  release CS.  flags == 0 is therefore the cheap single-shot: assert,
+ *  clock, deassert, one transaction, no extra opcode.  Reused in the REPLY
+ *  flags byte as an ECHO of the request's own CS_HOLD bit, not an
+ *  independent hardware readback -- set there when the request asked to
+ *  hold CS. */
+#define ALP_CC3501E_SPI1_XFER_CS_HOLD 0x01u
+
+/** Discard MISO: the firmware clocks the transfer and replies with
+ *  len 0.  Removes ~4 KB from the wire for write-only traffic (flash
+ *  page program, display refresh).  A board without the READY pad's
+ *  input-enable pinctrl group has no working READY line at all (chips/
+ *  cc3501e/cc3501e_sockets.c, silicon-measured 2026-08-24), so
+ *  per-transaction latency dominates there -- dropping a whole direction
+ *  is worth a flag bit regardless. */
+#define ALP_CC3501E_SPI1_XFER_NO_RX 0x02u
+
+/** No inline TX bytes follow the header: the firmware clocks @c len
+ *  copies of @ref alp_cc3501e_spi1_transfer_t::tx_fill instead.  Removes
+ *  ~4 KB from the wire for read-only traffic (flash read, sensor FIFO
+ *  drain).  Setting NO_TX and NO_RX together is legal and clocks @c len
+ *  fill bytes with the reply discarded. */
+#define ALP_CC3501E_SPI1_XFER_NO_TX 0x04u
+
+/** Maximum data bytes one CMD_SPI1_TRANSFER may carry, each direction.
+ *
+ *  Derivation -- this is the SMALLEST of four independent ceilings, and
+ *  it saturates two of them exactly:
+ *
+ *    request payload  = sizeof(alp_cc3501e_spi1_transfer_t) + len
+ *                     = 8 + len <= ALP_CC3501E_MAX_PAYLOAD (4096)
+ *                     -> len <= 4088                          <-- BINDING
+ *    reply payload    = roundup8(1 status
+ *                              + sizeof(alp_cc3501e_spi1_transfer_resp_t)
+ *                              + len)
+ *                     = roundup8(5 + len) <= 4096
+ *                     -> len <= 4091
+ *    reply DATA cap   = CC3501E_FRAME_MAX_BYTES - CC3501E_REPLY_DATA_OFF
+ *                     = 4100 - 5 = 4095;  4 + len <= 4095
+ *                     -> len <= 4091
+ *    worker job req[] = ALP_CC3501E_MAX_PAYLOAD (4096) holds 8 + len
+ *                     -> len <= 4088                          <-- BINDING
+ *    worker result[]  = 4096 holds 4 + len -> len <= 4092
+ *
+ *  min(4088, 4091, 4091, 4088, 4092) = 4088 = 8 * 511.
+ *
+ *  At len == 4088 the request payload is EXACTLY 4096 and the padded
+ *  reply payload is EXACTLY 4096 (data 4092, +1 status = 4093, +3 pad).
+ *  Both saturate deliberately; the _Static_asserts below turn any future
+ *  header widening into a build failure rather than a wire truncation.
+ *
+ *  CHUNKING: SPI1_TRANSFER rides the SAME bridge link (SPI0) every other
+ *  opcode does, and that link's REPLY phases are READY-gated only on a
+ *  board with the READY pad's input-enable pinctrl group populated --
+ *  without it there is no working READY line at all and the host falls
+ *  back to fixed settle gaps.  With the group populated, chips/cc3501e/
+ *  cc3501e_sockets.c silicon-measured (2026-08-24) 297174 B/s on this
+ *  same link at a 487-byte reply chunk; this family's chunks are far
+ *  larger (up to 4088 B), so a per-chunk throughput number specific to
+ *  SPI1_TRANSFER has not been separately measured.  Either way, ALWAYS
+ *  chunk at max_xfer.  Never chunk at the far-end device's page size:
+ *  hold CS with CS_HOLD and let a 4088-byte chunk straddle page
+ *  boundaries, because 64 page-sized chunks cost 64 round trips where
+ *  one costs one.  A short chunk belongs only at the tail of a transfer.
+ *  The CONFIGURE reply echoes this value so a host chunks to whatever
+ *  the peer firmware actually accepts. */
+#define ALP_CC3501E_SPI1_MAX_XFER 4088u
+
+/** Payload of CMD_SPI1_CONFIGURE (opcode 0x55).  Acquires the SPI1
+ *  controller and pins the bus parameters until the next CONFIGURE or
+ *  RELEASE.  Idempotent: re-issuing it re-opens with new parameters.  The
+ *  reply DATA is an @ref alp_cc3501e_spi1_config_resp_t.
+ *
+ *  There is no separate ACQUIRE opcode because you cannot use the bus
+ *  without configuring it, and on a link with no attention line every
+ *  extra opcode is a whole round trip that buys nothing.
+ *
+ *  Rejected with ALP_CC3501E_RESP_ERR_STATE while CS is still held by an
+ *  unfinished CS_HOLD chain -- a terminal reject, not a retryable busy;
+ *  finish the chain or send CMD_SPI1_RELEASE first.  A failed SPI_open
+ *  answers ALP_CC3501E_RESP_ERR_RADIO, which on this family means
+ *  BUS-level open failure and nothing RF: it is the one case here where a
+ *  retry can genuinely land (a prior handle not yet closed), which is why
+ *  it maps to the host's retried status instead of inventing a fourth
+ *  error family.
+ *  Field-level meanings:
+ *   - freq_hz: requested SCK in Hz.  The divider rounds; the reply
+ *     reports what the hardware actually produced.
+ *   - mode: 0..3, (CPOL << 1) | CPHA.  Anything else -> ERR_INVALID.
+ *   - bits_per_word: 8 is the only value v6 firmware accepts.  The field
+ *     rides the wire so a later firmware can widen it without another
+ *     opcode; the reply echoes the accepted value.  When it exceeds 8,
+ *     transfer len stays in BYTES and must be a multiple of the word
+ *     size.
+ *   - cs: one of @ref alp_cc3501e_spi1_cs_t. */
+typedef struct {
+	uint32_t freq_hz;
+	uint8_t  mode;
+	uint8_t  bits_per_word;
+	uint8_t  cs;
+	uint8_t  reserved;
+} alp_cc3501e_spi1_configure_t;
+
+/** Reply DATA of CMD_SPI1_CONFIGURE.
+ *  Field-level meanings:
+ *   - freq_hz: ACTUAL SCK the divider produced, Hz.  A real clock
+ *     divides; the host must read this back rather than assume it got
+ *     the rate it asked for.
+ *   - max_xfer: this firmware's @ref ALP_CC3501E_SPI1_MAX_XFER, so a host
+ *     chunks to what the peer accepts without another version bump.
+ *   - bits_per_word: the accepted value. */
+typedef struct {
+	uint32_t freq_hz;
+	uint16_t max_xfer;
+	uint8_t  bits_per_word;
+	uint8_t  reserved;
+} alp_cc3501e_spi1_config_resp_t;
+
+/** Payload of CMD_SPI1_TRANSFER (opcode 0x56).  One full-duplex chunk.
+ *  The TX bytes follow this header packed inline (no padding) UNLESS
+ *  NO_TX is set, in which case no bytes follow.  The firmware validates
+ *  the payload length EXACTLY (== , not <=): NO_TX -> payload ==
+ *  sizeof(*this); else payload == sizeof(*this) + len.  The reply DATA is
+ *  an @ref alp_cc3501e_spi1_transfer_resp_t followed inline by the RX
+ *  bytes.
+ *
+ *  CS assertion is under explicit host control through one flag bit,
+ *  which is why this family has no CS opcode of its own: flags == 0 is
+ *  assert-clock-deassert, CS_HOLD keeps CS down for the next chunk, and a
+ *  len == 0 transfer with flags == 0 is a standalone CS deassert.
+ *
+ *  A refused or short transfer answers ALP_CC3501E_RESP_ERR_STATE, not
+ *  ERR_RADIO.  A local controller refusing a transfer is deterministic,
+ *  and ERR_STATE is the code the host already treats as a terminal reject
+ *  -- mapping it to the retried status would re-burn the poll budget to
+ *  reach the same answer and surface as a misleading ALP_ERR_TIMEOUT.
+ *  Field-level meanings:
+ *   - len: bytes to clock, and the RX byte count unless NO_RX.  Range
+ *     0..ALP_CC3501E_SPI1_MAX_XFER.
+ *   - flags: ALP_CC3501E_SPI1_XFER_*.  Undefined bits (3..7) MUST be
+ *     zero; the firmware rejects a frame that sets one, so a later flag
+ *     cannot be silently ignored by old firmware.
+ *   - seq: host transaction counter, incremented per LOGICAL transfer.
+ *     DUPLICATE SUPPRESSION, and it is not optional: this bus will drive
+ *     flash.  The firmware keeps the last completed (seq, result); a
+ *     TRANSFER whose seq matches the cached one returns the cached reply
+ *     WITHOUT re-clocking the bus.  Without it the host's ALP_ERR_IO
+ *     retry (a desynced request phase) would re-clock a page program --
+ *     a double write, not a lost read.  Any other seq starts a new
+ *     transfer and drops the cache.  Do not reuse a seq across a
+ *     CONFIGURE.
+ *   - tx_fill: byte clocked out on MOSI when NO_TX is set. */
+typedef struct {
+	uint16_t len;
+	uint8_t  flags;
+	uint8_t  seq;
+	uint8_t  tx_fill;
+	uint8_t  reserved[3];
+	/* uint8_t tx[len];   -- packed inline, no padding; absent when NO_TX */
+} alp_cc3501e_spi1_transfer_t;
+
+/** Reply DATA header for CMD_SPI1_TRANSFER (precedes the received bytes,
+ *  which follow inline with no padding).
+ *  Field-level meanings:
+ *   - len: RX bytes that follow.  0 when the request set NO_RX.  This
+ *     field is what makes the reply SELF-DELIMITING, which the frame
+ *     contract REQUIRES of any new variable-length reply: the declared
+ *     payload_len includes the zero pad, so a bare packed list with no
+ *     count is indistinguishable from padding -- that is what made an
+ *     empty GET_PENDING_EVENTS ring read as ~5.8 phantom events/sec
+ *     (alp-sdk#1740).
+ *   - flags: ALP_CC3501E_SPI1_XFER_CS_HOLD set when CS is still asserted.
+ *   - seq: echoes the request's seq, so the host can prove it read the
+ *     answer to ITS request and not a stale cached one. */
+typedef struct {
+	uint16_t len;
+	uint8_t  flags;
+	uint8_t  seq;
+	/* uint8_t rx[len];   -- packed inline, no padding */
+} alp_cc3501e_spi1_transfer_resp_t;
+
+/* ------------------------------------------------------------------ */
 /* Wire-layout guards (#733)                                          */
 /*                                                                    */
 /* Two categories of struct live in this header:                     */
@@ -971,6 +1254,37 @@ _Static_assert(sizeof(alp_cc3501e_sock_recv_t) == 4u, "sock_recv wire length");
 _Static_assert(sizeof(alp_cc3501e_sock_recv_resp_t) == 24u, "sock_recv_resp wire header length");
 _Static_assert(sizeof(alp_cc3501e_sock_close_t) == 4u, "sock_close wire length");
 _Static_assert(sizeof(alp_cc3501e_sock_addr_t) == 20u, "sock_addr wire length");
+
+/* (B) SPI1 host passthrough -- same deal as the socket ops: the firmware uses
+ *     sizeof(T) as the expected header length and both sides byte-parse the
+ *     wider fields, so pin the sizes AND the offsets a hand-rolled LE codec
+ *     reads from. */
+_Static_assert(sizeof(alp_cc3501e_spi1_configure_t) == 8u, "spi1_configure wire length");
+_Static_assert(offsetof(alp_cc3501e_spi1_configure_t, mode) == 4u, "spi1_configure.mode @4");
+_Static_assert(offsetof(alp_cc3501e_spi1_configure_t, cs) == 6u, "spi1_configure.cs @6");
+
+_Static_assert(sizeof(alp_cc3501e_spi1_config_resp_t) == 8u, "spi1_config_resp wire length");
+_Static_assert(offsetof(alp_cc3501e_spi1_config_resp_t, max_xfer) == 4u,
+               "spi1_config_resp.max_xfer @4");
+
+_Static_assert(sizeof(alp_cc3501e_spi1_transfer_t) == 8u, "spi1_transfer wire header length");
+_Static_assert(offsetof(alp_cc3501e_spi1_transfer_t, flags) == 2u, "spi1_transfer.flags @2");
+_Static_assert(offsetof(alp_cc3501e_spi1_transfer_t, tx_fill) == 4u, "spi1_transfer.tx_fill @4");
+
+_Static_assert(sizeof(alp_cc3501e_spi1_transfer_resp_t) == 4u, "spi1_transfer_resp wire length");
+
+/* The chunk bound is arithmetic, not a taste call: pin it so widening a header
+ * truncates the BUILD instead of the wire.  MAX_XFER saturates the request
+ * payload with ZERO headroom on purpose -- adding one field to
+ * alp_cc3501e_spi1_transfer_t without lowering MAX_XFER overflows the frame, and
+ * these two asserts exist precisely to make that a compile error.  Do not delete
+ * them to "fix" that build failure; lower MAX_XFER instead. */
+_Static_assert(sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER ==
+                   ALP_CC3501E_MAX_PAYLOAD,
+               "spi1 chunk must exactly saturate the request payload");
+_Static_assert(1u + sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER <=
+                   ALP_CC3501E_MAX_PAYLOAD,
+               "spi1 reply (status + header + rx, before pad) must fit the reply payload");
 
 /* The canonical 7-byte-wire / 8-byte-struct case the issue calls out
  * (#733): alp_cc3501e_ble_adv_start_t is hand-packed to 7 bytes on both
@@ -1050,9 +1364,10 @@ typedef struct {
 	 *  matters after one: is there an image waiting to be swapped in?
 	 *
 	 *  APPENDED, not inserted -- bytes 0..11 keep the offsets they already had.
-	 *  Rides the SAME v5 bump as the rest of the unreleased wire changes (v4 is
-	 *  the last released version, see ALP_CC3501E_PROTOCOL_VERSION) -- it does
-	 *  NOT get a v6 of its own. */
+	 *  Rode the SAME v5 bump as the rest of the changes unreleased at the time
+	 *  (v4 was then the last released version, see ALP_CC3501E_PROTOCOL_VERSION)
+	 *  -- it did NOT get a bump of its own.  This field is v5, NOT v6; v6 is the
+	 *  SPI1 passthrough family and has nothing to do with it. */
 	uint8_t pending;
 	uint8_t reserved2[3]; /**< zero; reserved. */
 } alp_cc3501e_ota_status_t;
