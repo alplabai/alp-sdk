@@ -102,6 +102,23 @@ static inline void crc_alif_write(const struct crc_alif_config *cfg, uint32_t of
 	sys_write32(val, cfg->base + off);
 }
 
+/*
+ * CRC_DATA_IN_8_n is a range of BYTE-wide registers -- HWRM 15.2.5.3.5 gives
+ * the offset as "0x20 + (n x 0x1)", n = 0 to 63, field "7-0 CRC_DATA_IN_8", and
+ * states outright: "Data written in this register is for 8-bit and 16-bit
+ * calculations, but only 8-bits can be written per beat."
+ *
+ * A 32-bit store to 0x20 is four of those registers in one beat.  On AE822 A0
+ * silicon that BusFaults: bench run 2026-08-30 halted in the fault handler with
+ * the stacked PC inside crc_alif_update()'s byte-feed loop and R0 = 0x48107000
+ * (the CRC base).  Every 8- and 16-bit algorithm went through that store, so
+ * the whole narrow-CRC path was unreachable on hardware.
+ */
+static inline void crc_alif_write8(const struct crc_alif_config *cfg, uint32_t off, uint8_t val)
+{
+	sys_write8(val, cfg->base + off);
+}
+
 static inline uint32_t crc_alif_read(const struct crc_alif_config *cfg, uint32_t off)
 {
 	return sys_read32(cfg->base + off);
@@ -312,7 +329,13 @@ crc_alif_update(const struct device *dev, struct crc_ctx *ctx, const void *buffe
 
 		if ((bufsize % 4U) != 0U) {
 			/*
-			 * The 32-bit engine only consumes whole words.  begin()
+			 * The 32-bit engine only consumes whole words.  The
+			 * byte-feed range cannot take the 1-3 byte tail either:
+			 * HWRM 15.2.5.3.5 scopes CRC_DATA_IN_8_n to "8-bit and
+			 * 16-bit calculations", and 15.2.5.3.6 scopes
+			 * CRC_DATA_IN_32_n to "32-bit calculations" -- they are
+			 * not interchangeable, so -ENOTSUP is the honest answer
+			 * rather than a silently wrong CRC (#1832).  begin()
 			 * holds data->lock until finish(); a caller that bails on
 			 * this error would never call finish(), so release the
 			 * engine here (give + reset state) instead of deadlocking
@@ -333,7 +356,7 @@ crc_alif_update(const struct device *dev, struct crc_ctx *ctx, const void *buffe
 		const uint8_t *p = buffer;
 
 		for (size_t i = 0; i < bufsize; i++) {
-			crc_alif_write(cfg, CRC_DATA_IN_8BIT_OFFSET, p[i]);
+			crc_alif_write8(cfg, CRC_DATA_IN_8BIT_OFFSET, p[i]);
 		}
 	}
 
