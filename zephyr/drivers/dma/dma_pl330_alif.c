@@ -320,8 +320,19 @@ static uint32_t dma_pl330_gen_copy_op(struct dma_pl330_ch_internal *ch_dat,
 		 * Waiting-For-Peripheral, or (with the event router completing the
 		 * handshake, the reset default) the router re-pulses, the DMAC
 		 * free-runs bursts into the 16-entry TX FIFO, SPI_ISR[TXOIS] fires and
-		 * the caller sees -EIO.  That is the shape of the open OTA_WRITE -> -5
-		 * (#1818).  PERIPHERAL_TO_MEMORY is unaffected: it uses src_id
+		 * the caller sees -EIO.
+		 *
+		 * BENCH, 2026-08-30, E1M-AEN801: this is NOT the cause of the open
+		 * OTA_WRITE -> -5.  Three images differing only in this operand and
+		 * the two DMA changes beside it (event-router ACK_TYPE, SPI cache
+		 * maintenance) were run at CONFIG_SPI_DW_ALIF_DMA_MIN_LEN=64 with
+		 * 64/256/1024/2048-byte host->bridge payloads; all three timed out
+		 * identically on the first transfer and desynced the link.  The
+		 * operand is still wrong and is still fixed here -- src_id is
+		 * provably 0 on this path -- but a further DMA defect keeps the
+		 * MIN_LEN=8192 workaround load-bearing (#1818).
+		 *
+		 * PERIPHERAL_TO_MEMORY is unaffected: it uses src_id
 		 * throughout and closes with a plain DMAST carrying no peripheral
 		 * operand.
 		 */
