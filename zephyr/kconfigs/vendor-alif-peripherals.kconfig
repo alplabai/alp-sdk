@@ -255,6 +255,25 @@ config SPI_DW_ALIF_DMA_MIN_LEN
 	  control frames (e.g. the CC3501E bridge's 4-8 byte lockstep transfers)
 	  thus keep working on PIO while large continuous streams use DMA.
 
+config SPI_DW_ALIF_DMA_TIMEOUT_MS
+	int "Timeout (ms) waiting for a SPI DMA completion callback"
+	default 1000
+	depends on SPI_DW_ALIF_USE_DMA
+	help
+	  How long spi_dw_dma_wait_completion() waits for each DMA completion
+	  before giving up with -ETIMEDOUT.
+
+	  This used to be K_FOREVER, which is where every stall on the DMA path
+	  terminated: one DMA error tore down the event-router callback mapping
+	  while the descriptor-shape cache stayed valid, the next matching transfer
+	  skipped the dma_config() that would have re-registered it, and its
+	  completion was discarded as "unmapped" -- so the caller's thread blocked
+	  for the life of the image with no way to report it (#1819).
+
+	  The default is generous: even a full CONFIG_SPI_DW_ALIF_DMA_MIN_LEN-bounded
+	  streaming transfer completes in single-digit milliseconds, so 1000 ms only
+	  ever fires on a genuine fault.
+
 # ----------------------------------------------------------------------------
 # Secure-Enclave (SE) SERVICE transport -- Arm MHUv2 IPM driver + hal_alif client
 # ----------------------------------------------------------------------------

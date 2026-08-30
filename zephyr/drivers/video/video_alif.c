@@ -346,6 +346,15 @@ static int alif_cam_set_csi(const struct device *dev, uint32_t fourcc)
 		}
 	}
 
+	/* No break taken means i == ARRAY_SIZE, and both uses below then read one
+	 * past the end of the table -- writing whatever follows it into
+	 * CAM_CSI_CMCFG[MODE] and CAM_CFG[DATA_MODE].  Reachable for any fourcc
+	 * mapping to a CSI data type the table lacks (#1825). */
+	if (i == ARRAY_SIZE(data_mode_settings)) {
+		LOG_ERR("CSI data type 0x%02x has no CPI colour-mode entry", tmp);
+		return -ENOTSUP;
+	}
+
 	sys_write32(data_mode_settings[i].col_mode, regs + CAM_CSI_CMCFG);
 
 	switch (tmp) {
@@ -756,6 +765,33 @@ static int alif_cam_enqueue(const struct device *dev, struct video_buffer *buf)
 	}
 
 	to_read = data->current_format.pitch * data->current_format.height;
+
+	/*
+	 * The frame has to FIT.  pitch and height come either from the caller's
+	 * struct video_format via alif_cam_set_fmt() or from the SENSOR via
+	 * video_get_format(), and the buffer address then goes straight to
+	 * CAM_FRAME_ADDR for the AXI master to DMA into.  The hardware imposes no
+	 * bound of its own -- HWRM 17.1.4.10.1: "The CPI controller hardware can
+	 * handle the AXI write crossing the 4KB boundary of AXI address space.
+	 * Thus, there is no limitation on software to allocate the memory space for
+	 * buffering the image data."
+	 *
+	 * So a 320x240x2 = 153600-byte pool with a sensor reporting 1280x720 had
+	 * 1843200 bytes written starting at the pool block, over whatever the
+	 * linker placed after it in SRAM0.  Alignment was validated here and size
+	 * was not, while the LOG_DBG below printed both next to each other without
+	 * comparing them (#1825).
+	 */
+	if (to_read > buf->size) {
+		LOG_ERR("Frame %ux%u needs %u bytes, buffer holds %u -- refusing to DMA "
+		        "past the end",
+		        data->current_format.pitch,
+		        data->current_format.height,
+		        to_read,
+		        buf->size);
+		return -ENOBUFS;
+	}
+
 	buf->bytesused = to_read;
 
 	k_fifo_put(&data->fifo_in, buf);
@@ -763,6 +799,11 @@ static int alif_cam_enqueue(const struct device *dev, struct video_buffer *buf)
 	LOG_DBG("Enqueued buffer: Addr - 0x%x, size - %d, bytesused - %d",
 		(uint32_t)buf->buffer, buf->size, buf->bytesused);
 
+	/* Clean+invalidate BEFORE the DMA so no dirty line is written back over the
+	 * incoming frame.  The matching post-DMA invalidate is in
+	 * alif_cam_dequeue(), without which speculative prefetch during the capture
+	 * window can repopulate lines the DMA then overwrites in memory and the
+	 * application reads stale pixels (#1825). */
 	(void)sys_cache_data_flush_and_invd_range(buf->buffer, buf->size);
 
 	return 0;
@@ -788,6 +829,17 @@ static int alif_cam_dequeue(const struct device *dev, struct video_buffer **buf,
 	if (!(*buf)) {
 		return -EAGAIN;
 	}
+
+	/*
+	 * Invalidate what the CPI AXI master just wrote.  The enqueue path already
+	 * cleans the buffer before the transfer; nothing invalidated it afterwards,
+	 * so with CONFIG_DCACHE=y and no nocache placement the application could
+	 * read cache lines that speculative prefetch had pulled in during the
+	 * capture window -- stale pixels, no error (#1825).
+	 * (eth_dwmac_alif_ensemble.c enforces the same requirement with a
+	 * BUILD_ASSERT; this driver had no equivalent.)
+	 */
+	(void)sys_cache_data_invd_range((*buf)->buffer, (*buf)->bytesused);
 
 	LOG_DBG("Dequeued buffer: Addr - 0x%08x, size - %d, bytesused - %d",
 		(uint32_t)(*buf)->buffer, (*buf)->size, (*buf)->bytesused);

@@ -959,7 +959,7 @@
 		comparator_threshold_b = <0x01>;
 		comparator_threshold_comparison = "ABOVE_THRESHOLD_A_AND_B";
 		sample-width = <16>;
-		clock_div = <2>;
+		clock_div = <16>; /* lowest ADC_CLK reachable, ~9.8 MHz; datasheet max is 5000 kHz -- see #1823 */
 		avg_sample_num = <256>;
 		shift_n_bits = <8>;
 		shift_direction = "RIGHT_SHIFT";
@@ -967,7 +967,7 @@
 		driver_instance = "ADC_INSTANCE_ADC12_0";
 		adc_channel_scan = "SINGLE_CHANNEL_SCAN";
 		adc_conversion_mode = "SINGLE_SHOT_CONVERSION";
-		pga_gain = "ADC_PGA_GAIN_0_DB";
+		pga_gain = "ADC_PGA_GAIN_4_DB"; /* ADC12 code 0x0, the reset value */
 		status = "disabled";
 	};
 
@@ -989,7 +989,7 @@
 		comparator_threshold_b = <0x01>;
 		comparator_threshold_comparison = "ABOVE_THRESHOLD_A_AND_B";
 		sample-width = <16>;
-		clock_div = <2>;
+		clock_div = <16>; /* lowest ADC_CLK reachable, ~9.8 MHz; datasheet max is 5000 kHz -- see #1823 */
 		avg_sample_num = <256>;
 		shift_n_bits = <8>;
 		shift_direction = "RIGHT_SHIFT";
@@ -997,7 +997,7 @@
 		driver_instance = "ADC_INSTANCE_ADC12_1";
 		adc_channel_scan = "SINGLE_CHANNEL_SCAN";
 		adc_conversion_mode = "SINGLE_SHOT_CONVERSION";
-		pga_gain = "ADC_PGA_GAIN_0_DB";
+		pga_gain = "ADC_PGA_GAIN_4_DB"; /* ADC12 code 0x0, the reset value */
 		status = "disabled";
 	};
 
@@ -1019,7 +1019,7 @@
 		comparator_threshold_b = <0x01>;
 		comparator_threshold_comparison = "ABOVE_THRESHOLD_A_AND_B";
 		sample-width = <16>;
-		clock_div = <2>;
+		clock_div = <16>; /* lowest ADC_CLK reachable, ~9.8 MHz; datasheet max is 5000 kHz -- see #1823 */
 		avg_sample_num = <256>;
 		shift_n_bits = <8>;
 		shift_direction = "RIGHT_SHIFT";
@@ -1027,7 +1027,7 @@
 		driver_instance = "ADC_INSTANCE_ADC12_2";
 		adc_channel_scan = "SINGLE_CHANNEL_SCAN";
 		adc_conversion_mode = "SINGLE_SHOT_CONVERSION";
-		pga_gain = "ADC_PGA_GAIN_0_DB";
+		pga_gain = "ADC_PGA_GAIN_4_DB"; /* ADC12 code 0x0, the reset value */
 		status = "disabled";
 	};
 
@@ -1048,7 +1048,7 @@
 		comparator_threshold_a = <0x01>;
 		comparator_threshold_b = <0x01>;
 		comparator_threshold_comparison = "ABOVE_THRESHOLD_A_AND_B";
-		clock_div = <2>;
+		clock_div = <16>; /* lowest ADC_CLK reachable, ~9.8 MHz; datasheet max is 5000 kHz -- see #1823 */
 		avg_sample_num = <256>;
 		shift_n_bits = <8>;
 		shift_direction = "RIGHT_SHIFT";
@@ -1057,7 +1057,7 @@
 		driver_instance = "ADC_INSTANCE_ADC24_0";
 		adc_channel_scan = "SINGLE_CHANNEL_SCAN";
 		adc_conversion_mode = "SINGLE_SHOT_CONVERSION";
-		pga_gain = "ADC_PGA_GAIN_0_DB";
+		pga_gain = "ADC_PGA_GAIN_12_DB"; /* ADC24 code 0x2, the reset value; 0x0 is "Do not use" */
 		status = "disabled";
 	};
 

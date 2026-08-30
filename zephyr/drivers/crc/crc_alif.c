@@ -102,6 +102,23 @@ static inline void crc_alif_write(const struct crc_alif_config *cfg, uint32_t of
 	sys_write32(val, cfg->base + off);
 }
 
+/*
+ * CRC_DATA_IN_8_n is a range of BYTE-wide registers -- HWRM 15.2.5.3.5 gives
+ * the offset as "0x20 + (n x 0x1)", n = 0 to 63, field "7-0 CRC_DATA_IN_8", and
+ * states outright: "Data written in this register is for 8-bit and 16-bit
+ * calculations, but only 8-bits can be written per beat."
+ *
+ * A 32-bit store to 0x20 is four of those registers in one beat.  On AE822 A0
+ * silicon that BusFaults: bench run 2026-08-30 halted in the fault handler with
+ * the stacked PC inside crc_alif_update()'s byte-feed loop and R0 = 0x48107000
+ * (the CRC base).  Every 8- and 16-bit algorithm went through that store, so
+ * the whole narrow-CRC path was unreachable on hardware (#1847).
+ */
+static inline void crc_alif_write8(const struct crc_alif_config *cfg, uint32_t off, uint8_t val)
+{
+	sys_write8(val, cfg->base + off);
+}
+
 static inline uint32_t crc_alif_read(const struct crc_alif_config *cfg, uint32_t off)
 {
 	return sys_read32(cfg->base + off);
@@ -154,6 +171,30 @@ static int crc_alif_select_algo(const struct crc_ctx *ctx, uint32_t *ctrl)
 	}
 }
 
+/*
+ * Width of the accumulator for a given algorithm, as a mask.
+ *
+ * HWRM 15.2.4 step 3 says only WHERE the result sits: "For 8-bit accumulations
+ * the result is in the lowest 8-bits of the CRC_OUT register.  For 16-bit
+ * accumulations the result is in the lowest 16-bits."  It does NOT promise the
+ * bits above that read back as zero, and upstream crc_verify() compares the
+ * stored value as a full uint32_t (zephyr/drivers/crc.h, crc_result_t), so an
+ * unmasked store makes a CORRECT CRC-8 or CRC-16 fail against the correct
+ * expected value with -EPERM.  Mask at every store site instead (#1832).
+ */
+static uint32_t crc_alif_result_mask(const struct crc_ctx *ctx)
+{
+	switch (ctx->type) {
+	case CRC8_CCITT:
+		return 0xFFU;
+	case CRC16:
+	case CRC16_CCITT:
+		return 0xFFFFU;
+	default:
+		return 0xFFFFFFFFU;
+	}
+}
+
 static int crc_alif_begin(const struct device *dev, struct crc_ctx *ctx)
 {
 	const struct crc_alif_config *cfg  = dev->config;
@@ -202,7 +243,18 @@ static int crc_alif_begin(const struct device *dev, struct crc_ctx *ctx)
 	 *   reach the zlib reference.
 	 */
 	if (ctx->reversed & CRC_FLAG_REVERSE_INPUT) {
-		ctrl |= CRC_CTRL_BYTE_SWAP | CRC_CTRL_BIT_SWAP;
+		ctrl |= CRC_CTRL_BIT_SWAP;
+
+		/*
+		 * HWRM 15.2.5.3.1 bit 7 BYTE_SWAP: "Swap the bytes within each
+		 * word (16-bit and 32-bit calculations only)."  Setting it for
+		 * CRC8_CCITT (ALGO_SIZE 0x0) is a no-op in the engine, but it
+		 * makes the control word describe an operation that is not
+		 * happening, so keep it off for the byte-wide algorithm (#1832).
+		 */
+		if (ctx->type != CRC8_CCITT) {
+			ctrl |= CRC_CTRL_BYTE_SWAP;
+		}
 	}
 	if (ctx->reversed & CRC_FLAG_REVERSE_OUTPUT) {
 		ctrl |= CRC_CTRL_REFLECT;
@@ -277,7 +329,13 @@ crc_alif_update(const struct device *dev, struct crc_ctx *ctx, const void *buffe
 
 		if ((bufsize % 4U) != 0U) {
 			/*
-			 * The 32-bit engine only consumes whole words.  begin()
+			 * The 32-bit engine only consumes whole words.  The
+			 * byte-feed range cannot take the 1-3 byte tail either:
+			 * HWRM 15.2.5.3.5 scopes CRC_DATA_IN_8_n to "8-bit and
+			 * 16-bit calculations", and 15.2.5.3.6 scopes
+			 * CRC_DATA_IN_32_n to "32-bit calculations" -- they are
+			 * not interchangeable, so -ENOTSUP is the honest answer
+			 * rather than a silently wrong CRC (#1832).  begin()
 			 * holds data->lock until finish(); a caller that bails on
 			 * this error would never call finish(), so release the
 			 * engine here (give + reset state) instead of deadlocking
@@ -298,14 +356,14 @@ crc_alif_update(const struct device *dev, struct crc_ctx *ctx, const void *buffe
 		const uint8_t *p = buffer;
 
 		for (size_t i = 0; i < bufsize; i++) {
-			crc_alif_write(cfg, CRC_DATA_IN_8BIT_OFFSET, p[i]);
+			crc_alif_write8(cfg, CRC_DATA_IN_8BIT_OFFSET, p[i]);
 		}
 	}
 
 	/* Latch the running accumulator after each chunk so a caller doing
 	 * crc_update() then crc_verify() (without crc_finish()) still sees the
 	 * current value; crc_finish() re-reads it. */
-	ctx->result = crc_alif_read(cfg, CRC_OUT_OFFSET);
+	ctx->result = crc_alif_read(cfg, CRC_OUT_OFFSET) & crc_alif_result_mask(ctx);
 
 	return 0;
 }
@@ -323,7 +381,7 @@ static int crc_alif_finish(const struct device *dev, struct crc_ctx *ctx)
 		return -EINVAL;
 	}
 
-	ctx->result = crc_alif_read(cfg, CRC_OUT_OFFSET);
+	ctx->result = crc_alif_read(cfg, CRC_OUT_OFFSET) & crc_alif_result_mask(ctx);
 	ctx->state  = CRC_STATE_IDLE;
 
 	k_sem_give(&data->lock);
