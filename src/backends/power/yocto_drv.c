@@ -57,16 +57,28 @@
  *      works, the write() syscall does not return until resume -- so
  *      slept_ms is measured directly around that write.
  *
- *      The portable @c ALP_POWER_WAKE_* bitmap has NO matching sysfs
- *      knob -- the generic sleep ABI wakes on whatever the kernel's
- *      own wakeup-source devices are, entirely outside this backend's
- *      control, and only the RTC path above is actually driven by it.
- *      y_open() therefore reports wake_caps_out = 0 (#1812/#1813): a
+ *      The portable @c ALP_POWER_WAKE_* bitmap otherwise has NO
+ *      matching sysfs knob -- the generic sleep ABI wakes on whatever
+ *      the kernel's own wakeup-source devices are, entirely outside
+ *      this backend's control.  y_open() reports wake_caps_out =
+ *      ALP_POWER_WAKE_RTC ONLY (#1812/#1813 review): the RTC
+ *      wakealarm above is the one bit this backend genuinely arms.  A
  *      caller asking for e.g. ALP_POWER_WAKE_GPIO gets
  *      ALP_ERR_NOSUPPORT from alp_power_configure_wake_source() at
  *      the dispatcher, rather than ALP_OK for a bit this backend
  *      cannot actually arm.  A wake_after_ms-only request (bitmap
- *      empty) is unaffected -- the RTC wakealarm above still arms.
+ *      empty) is unaffected -- the RTC wakealarm above still arms
+ *      regardless of the configured bitmap.
+ *
+ *      CAVEAT the bitmap does NOT capture: y_request_sleep only
+ *      programs the wakealarm when @p wake_after_ms > 0 -- configuring
+ *      ALP_POWER_WAKE_RTC with @p wake_after_ms == 0 arms nothing
+ *      here (the write then blocks on whatever the kernel's OWN
+ *      already-enabled wakeup sources do, unrelated to this bitmap).
+ *      The dispatcher's own INVAL guard only catches bitmap == 0 &&
+ *      wake_after_ms == 0, not this combination, so that case is not
+ *      refused -- callers wanting a GUARANTEED wake must pass
+ *      wake_after_ms > 0.
  *
  * @par Status
  *      REAL implementation.  BENCH-UNVERIFIED (no target in this CI
@@ -221,23 +233,25 @@ y_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out, uint32_t 
 	/* The generic sysfs sleep ABI has no queryable capability surface
      * beyond presence, so caps stay 0 -- same as the RTC/WDT backends. */
 	if (caps_out != NULL) caps_out->flags = 0u;
-	/* wake_caps_out = 0: the bitmap has no matching sysfs knob (see
-     * the file-header "Wake handling" note) -- the dispatcher enforces
-     * this against every alp_power_configure_wake_source() call
-     * (#1812/#1813), so ALP_POWER_WAKE_NONE is the only bitmap that
-     * ever reaches y_configure_wake_source below. */
-	if (wake_caps_out != NULL) *wake_caps_out = 0u;
+	/* wake_caps_out = ALP_POWER_WAKE_RTC ONLY: the RTC wakealarm this
+     * file programs (see _program_wakealarm / the file-header "Wake
+     * handling" note) is the one bit this backend genuinely arms.
+     * The dispatcher enforces this against every
+     * alp_power_configure_wake_source() call (#1812/#1813), so only
+     * ALP_POWER_WAKE_NONE or ALP_POWER_WAKE_RTC ever reach
+     * y_configure_wake_source below. */
+	if (wake_caps_out != NULL) *wake_caps_out = ALP_POWER_WAKE_RTC;
 	return ALP_OK;
 }
 
 static alp_status_t y_configure_wake_source(alp_power_backend_state_t *state, uint32_t wake_bitmap)
 {
-	/* Only ALP_POWER_WAKE_NONE can reach here -- the dispatcher already
-     * rejected anything else against wake_caps == 0 (see y_open).
-     * The kernel sysfs sleep ABI has no per-source enable knob beyond
-     * the wakealarm this backend programs at request_sleep() time
-     * when wake_after_ms > 0, so there is nothing further to
-     * configure here. */
+	/* Only ALP_POWER_WAKE_NONE / ALP_POWER_WAKE_RTC can reach here --
+     * the dispatcher already rejected anything else against wake_caps
+     * (see y_open).  Nothing to configure even for RTC: the wakealarm
+     * is armed lazily by y_request_sleep, and only when
+     * wake_after_ms > 0 (see the file-header CAVEAT) -- not by this
+     * bitmap. */
 	(void)state;
 	(void)wake_bitmap;
 	return ALP_OK;

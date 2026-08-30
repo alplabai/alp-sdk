@@ -62,6 +62,16 @@ struct alp_power_ops {
 	                     alp_capabilities_t        *caps_out,
 	                     uint32_t                  *wake_caps_out);
 	alp_status_t (*configure_wake_source)(alp_power_backend_state_t *state, uint32_t wake_bitmap);
+	/** @p retain is the request THIS call is deciding; @c state->retain
+	 *  is NOT yet updated to it -- the dispatcher mirrors @p retain
+	 *  into @c state->retain only after this op returns @ref ALP_OK
+	 *  (same ordering as @c state->wake_bitmap for
+	 *  @c configure_wake_source, documented at its call site in
+	 *  zephyr_pm_policy.c's z_configure_wake_source).  An implementer
+	 *  that needs "what was previously accepted" reads @c state->retain
+	 *  BEFORE using @p retain for "what's being requested now" --
+	 *  reading @c state->retain expecting it to already hold @p retain
+	 *  is the trap. */
 	alp_status_t (*configure_retention)(alp_power_backend_state_t *state,
 	                                    const alp_power_retain_t  *retain);
 	alp_status_t (*request_sleep)(alp_power_backend_state_t *state,

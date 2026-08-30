@@ -48,22 +48,26 @@
  *
  * Wake-source handling
  * --------------------
- * The portable bitmap @c ALP_POWER_WAKE_* is informational at this
- * layer: Zephyr's pm_policy doesn't take a wake-source mask.  The
- * actual wake-source enablement happens at the per-vendor HAL
- * level (RTC alarm via the configured alp_rtc_*; GPIO IRQ via
- * alp_gpio_*; UART RX via the LPUART driver; a free-running
- * counter/timer match).  z_open() reports exactly those four bits
- * (RTC / GPIO / UART_RX / TIMER) via wake_caps_out -- NOT USB or
- * ETH_LINK or the newer COMPARATOR / BROWNOUT bits, since this
- * generic layer has no vendor-neutral way to arm those; the
- * dispatcher enforces that report against every
- * alp_power_configure_wake_source() call (#1813).  When the caller
- * passes @p wake_after_ms > 0 we register a Zephyr k_timer to
- * guarantee the wake, which covers the most common case (RTC timed
- * wake).  GPIO / UART wakes rely on the caller having configured the
- * matching IRQ source before calling sleep -- the setup of those
- * bits is the caller's responsibility.
+ * This layer's ONLY actual wake mechanism is its own Zephyr k_timer
+ * (_wake_timer / _timer_expiry below): _wake_sem has exactly one
+ * giver in this file, armed only when @p wake_after_ms > 0.  There is
+ * NO out-of-band signaller wired to RTC alarms, GPIO IRQs, or UART RX
+ * -- a caller can configure @c alp_rtc_* / @c alp_gpio_* however it
+ * likes, but nothing here ever learns about it or gives @c _wake_sem
+ * on its account, so z_request_sleep would park on K_FOREVER forever.
+ * An earlier draft advertised @c ALP_POWER_WAKE_RTC / @c _GPIO /
+ * @c _UART_RX here on the theory that the caller's own setup would
+ * cover them; review caught that this backend never actually wakes
+ * on them -- the exact #1812 shape, reincarnated on a second backend.
+ * z_open() therefore reports ONLY @c ALP_POWER_WAKE_TIMER via
+ * wake_caps_out (the dispatcher enforces that against every
+ * alp_power_configure_wake_source() call, #1813), and z_request_sleep
+ * refuses @p wake_after_ms == 0 outright with @ref ALP_ERR_NOSUPPORT
+ * rather than trust the bitmap alone -- belt and suspenders, since a
+ * caller can still configure @c ALP_POWER_WAKE_TIMER and pass
+ * wake_after_ms == 0 by mistake (the dispatcher's own INVAL guard
+ * only catches bitmap == 0 && wake_after_ms == 0, not a non-empty
+ * bitmap paired with wake_after_ms == 0).
  *
  * Yocto / Linux path
  * ------------------
@@ -254,11 +258,12 @@ static void _free_locks(pm_locks_t *l)
 	}
 }
 
-/* Sleep-completion semaphore.  k_timer expiry signals it; the
- * idle thread also signals on an OOB wake (e.g. GPIO IRQ that
- * runs a wake handler).  Single-instance is fine because the
- * dispatcher serialises sleep requests through its one-slot
- * handle pool by default. */
+/* Sleep-completion semaphore.  _timer_expiry (k_timer expiry) is its
+ * ONLY giver in this file -- there is no OOB signaller for a GPIO /
+ * UART_RX / RTC-alarm wake, so a request with wake_after_ms == 0 has
+ * nothing that will ever give this (see z_request_sleep's guard).
+ * Single-instance is fine because the dispatcher serialises sleep
+ * requests through its one-slot handle pool by default. */
 static K_SEM_DEFINE(_wake_sem, 0, 1);
 
 static void _timer_expiry(struct k_timer *t)
@@ -282,32 +287,28 @@ z_open(alp_power_backend_state_t *state, alp_capabilities_t *caps_out, uint32_t 
          * leaves the base_caps from the registry entry intact. */
 		(void)caps_out;
 	}
-	/* This layer only PARKS on a semaphore until wake -- the actual
-     * arming is the matching peripheral driver's job (alp_rtc_*,
-     * alp_gpio_*, the LPUART RX path, a free-running counter/timer).
-     * RTC / GPIO / UART_RX / TIMER are the four sources this generic
-     * "*" backend has always documented delegating to (see the file
-     * header); USB / ETH_LINK / COMPARATOR / BROWNOUT are not -- this
-     * layer has no generic knowledge those wake a given SoC from the
-     * pm_state it enters, so it does not claim them (#1813: the
-     * dispatcher now enforces this report against every
-     * configure_wake_source() call). */
+	/* This layer PARKS on _wake_sem until wake, and _timer_expiry (the
+     * k_timer this file owns) is its ONLY giver -- report ONLY
+     * ALP_POWER_WAKE_TIMER (real: wake_after_ms > 0 arms it and it
+     * always fires).  RTC / GPIO / UART_RX / USB / ETH_LINK /
+     * COMPARATOR / BROWNOUT are all claimed nowhere in this file: a
+     * caller configuring alp_rtc_* / alp_gpio_* itself does not wire
+     * that peripheral's IRQ to _wake_sem, so advertising those bits
+     * would be exactly the #1812 lie on a second backend (caught in
+     * review -- see the file header). */
 	if (wake_caps_out != NULL) {
-		*wake_caps_out = ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_GPIO | ALP_POWER_WAKE_UART_RX |
-		                 ALP_POWER_WAKE_TIMER;
+		*wake_caps_out = ALP_POWER_WAKE_TIMER;
 	}
 	return ALP_OK;
 }
 
 static alp_status_t z_configure_wake_source(alp_power_backend_state_t *state, uint32_t wake_bitmap)
 {
-	/* Bitmap is mirrored by the dispatcher in state->wake_bitmap
-     * (only once accepted -- the dispatcher already validated it
-     * against the wake_caps z_open reported above, #1813); the
-     * per-source IRQ enablement is owned by the matching peripheral
-     * driver (alp_rtc_*, alp_gpio_*).  This backend only consumes the
-     * bitmap to decide whether to register a k_timer-only wake at
-     * request_sleep() time. */
+	/* Only ALP_POWER_WAKE_TIMER can reach here -- the dispatcher
+     * already rejected anything else against the wake_caps z_open
+     * reported above (#1813).  Nothing to configure: the k_timer is
+     * armed unconditionally by z_request_sleep whenever
+     * wake_after_ms > 0, independent of this bitmap. */
 	(void)state;
 	(void)wake_bitmap;
 	return ALP_OK;
@@ -323,27 +324,37 @@ static alp_status_t z_request_sleep(alp_power_backend_state_t *state,
 		return ALP_ERR_NOT_READY;
 	}
 
+	/* _wake_sem's ONLY giver is _timer_expiry, armed below only when
+     * wake_after_ms > 0 -- refuse outright rather than park on
+     * K_FOREVER with nothing that will ever wake us.  Belt-and-
+     * suspenders against z_open only advertising ALP_POWER_WAKE_TIMER:
+     * the dispatcher's own INVAL guard catches bitmap == 0 &&
+     * wake_after_ms == 0, but not a caller who configured
+     * ALP_POWER_WAKE_TIMER and then passed wake_after_ms == 0 anyway. */
+	if (wake_after_ms == 0u) {
+		if (info != NULL) {
+			info->realised_mode = ALP_POWER_MODE_RUN;
+			info->wake_source   = 0u;
+			info->slept_ms      = 0u;
+		}
+		return ALP_ERR_NOSUPPORT;
+	}
+
 	/* Allow the policy to descend at most as far as `mode`. */
 	_adjust_locks_for_request(l, mode);
 
-	/* Set up the timer wake if requested.  zero-len timer is
-     * legal here -- a non-timer wake source must already have
-     * been armed by the caller's pre-sleep setup. */
+	/* Arm the timer wake -- the only wake source this backend has;
+     * see the file header + z_open. */
 	k_sem_reset(&_wake_sem);
-	if (wake_after_ms > 0u) {
-		k_timer_start(&_wake_timer, K_MSEC(wake_after_ms), K_NO_WAIT);
-	}
+	k_timer_start(&_wake_timer, K_MSEC(wake_after_ms), K_NO_WAIT);
 
-	/* Park until the timer expires (or an OOB wake handler signals
-     * us).  The actual descent into the requested pm_state happens
-     * inside the idle thread while this take blocks. */
+	/* Park until the timer expires.  The actual descent into the
+     * requested pm_state happens inside the idle thread while this
+     * take blocks. */
 	int64_t before = k_uptime_get();
-	int     err =
-	    k_sem_take(&_wake_sem, (wake_after_ms > 0u) ? K_MSEC(wake_after_ms + 100u) : K_FOREVER);
-	int64_t after = k_uptime_get();
-	if (wake_after_ms > 0u) {
-		k_timer_stop(&_wake_timer);
-	}
+	int     err    = k_sem_take(&_wake_sem, K_MSEC(wake_after_ms + 100u));
+	int64_t after  = k_uptime_get();
+	k_timer_stop(&_wake_timer);
 
 	/* Re-hold every lock so the system stays ACTIVE until the next
      * explicit request_sleep. */
@@ -351,13 +362,8 @@ static alp_status_t z_request_sleep(alp_power_backend_state_t *state,
 
 	if (info != NULL) {
 		info->realised_mode = _realised_mode(mode);
-		/* Wake-source attribution is best-effort: if the caller
-         * passed wake_after_ms > 0 and we returned because of the
-         * timer, report RTC; otherwise zero (unknown).  Richer
-         * attribution requires per-source wake handlers writing a
-         * tagged value into shared state -- deferred. */
-		info->wake_source = (wake_after_ms > 0u && err == 0) ? (uint32_t)ALP_POWER_WAKE_RTC : 0u;
-		info->slept_ms    = (uint32_t)((after > before) ? (after - before) : 0);
+		info->wake_source   = (err == 0) ? (uint32_t)ALP_POWER_WAKE_TIMER : 0u;
+		info->slept_ms      = (uint32_t)((after > before) ? (after - before) : 0);
 	}
 
 	if (err != 0 && err != -EAGAIN) {

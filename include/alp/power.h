@@ -186,8 +186,14 @@ alp_status_t alp_power_configure_wake_source(alp_power_t *handle, uint32_t wake_
  *  its TCM retention bits, rounded UP to the backend's own retention
  *  granularity and sized by @ref alp_power_retain_t::retain_kb. */
 typedef enum {
-	ALP_POWER_RETAIN_NONE    = 0, /**< No RAM retained beyond the mandatory boot state
-	                                    (E8: STOP_5, ~900 nA typ., no wake sources). */
+	ALP_POWER_RETAIN_NONE    = 0, /**< No RAM retained beyond the mandatory boot state.
+	                                    (E8: STOP_5, ~900 nA typ., is this floor ONLY
+	                                    with no wake source armed; pair with a real wake
+	                                    source and the actual floor is STOP_4 (~1000 nA,
+	                                    LPRTC/LFXO) or STOP_3 (~1050 nA, LPTIMER/BOD/
+	                                    LPCMP/LPGPIO) per Table 5-5, 11-17% above the
+	                                    STOP_5 number -- size a battery off the mode the
+	                                    wake source you actually configured maps to.) */
 	ALP_POWER_RETAIN_UTILITY = 1, /**< Smallest SoC-guaranteed retained block (e.g. E8's
 	                                    4 KB Utility SRAM, STOP_2, ~1.1 uA typ.). */
 	ALP_POWER_RETAIN_TCM     = 2, /**< @ref alp_power_retain_t::retain_kb KiB of

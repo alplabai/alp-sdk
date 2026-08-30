@@ -84,9 +84,14 @@ static alp_status_t stub_request_sleep(alp_power_backend_state_t *state,
                                        alp_power_wake_info_t     *info)
 {
 	(void)state;
+	(void)mode;
 	(void)wake_after_ms;
+	/* realised_mode = RUN, never the requested mode: this call always
+     * fails, so nothing was realised (matches yocto_drv.c's y_request_sleep
+     * on its own failure path -- the three backends now agree, #1813
+     * review). */
 	if (info != NULL) {
-		info->realised_mode = mode;
+		info->realised_mode = ALP_POWER_MODE_RUN;
 		info->wake_source   = 0u;
 		info->slept_ms      = 0u;
 	}
