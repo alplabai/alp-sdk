@@ -8,10 +8,27 @@
 # build option, both claims are on the same silicon pads with no
 # arbitration and no build-time check: that build needs the UART2 stub
 # moved to pads the SDIO bus does not use (#1808).
+# SPI data pads CORRECTED 2026-08-30 (#1807).  This file used to pair
+# Alif MOSI with CC3501E GPIO_28 and MISO with GPIO_29, which is
+# backwards: the CC35xx fixes SPI0_PICO (peripheral data IN) on GPIO_29
+# and SPI0_POCI (peripheral data OUT) on GPIO_28 -- GPIO_28 is not a
+# legal PICO assignment -- so as written the master's output landed on
+# the slave's output pin and neither data direction had a driver.
+#
+# The BOARD is not wrong and needs NO rework.  The E1M-AEN-2626-R2
+# module netlist (alp-sdk-internal) routes Alif P14_5 (SPI1_MOSI_C)
+# through series resistor R62 to CC3501E GPIO_29, and P14_4
+# (SPI1_MISO_C) through R48 to GPIO_28 -- i.e. exactly the pairing the
+# silicon requires and exactly what cc3501e-bridge-firmware assigns
+# (picoPin = GPIO29, pociPin = GPIO28).  Only this table was wrong.
+#
+# The HARDWARE NOTE in the firmware's ti/cc3501e_aen.syscfg, which calls
+# this a SoM rev bug needing a cross-wire rework, is stale for R2 and
+# should be read against that netlist before it is believed.
 signal	cc3501e_role	cc3501e_pad	alif_role	alif_pad
 SPI1_SCLK	SPI0_SCK / GPIO_27 (CC35 SPI0 slave)	GPIO_27	SPI1.SCK (master)	P14_6
-SPI1_MOSI	SPI0_MOSI / GPIO_28 (CC35 SPI0 slave)	GPIO_28	SPI1.MOSI (master)	P14_5
-SPI1_MISO	SPI0_MISO / GPIO_29 (CC35 SPI0 slave)	GPIO_29	SPI1.MISO (master)	P14_4
+SPI1_MOSI	SPI0_PICO / GPIO_29 (CC35 SPI0 slave data IN)	GPIO_29	SPI1.MOSI (master)	P14_5
+SPI1_MISO	SPI0_POCI / GPIO_28 (CC35 SPI0 slave data OUT)	GPIO_28	SPI1.MISO (master)	P14_4
 SDIO_D0	SDIO.D0 / GPIO_5 (also CONFIG_UART2_0 TX in the bridge syscfg)	GPIO_5	SD_D0	P13_0
 SDIO_D1	SDIO.D1 / GPIO_6 (also CONFIG_UART2_0 RX in the bridge syscfg)	GPIO_6	SD_D1	P13_1
 SDIO_D2	SDIO.D2 / GPIO_11	GPIO_11	SD_D2	P13_2
