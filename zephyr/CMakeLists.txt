@@ -195,6 +195,7 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE_CMD_COMPANION
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_diag.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_ota.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_sock.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_spi.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_gpio.c)
 
 
@@ -1066,6 +1067,7 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_CC3501E
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_sockets.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_ble.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_gpio.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_spi.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_camera.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_power.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_ota.c

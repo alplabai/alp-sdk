@@ -128,6 +128,46 @@ struct cc3501e {
 	bool    ble_scan_busy;
 	bool    evt_busy;
 	bool    sock_busy;
+
+	/* SPI1 host-passthrough staging (proto v6, opcodes 0x55..0x57).  Same rule
+	 * as sock_buf above, for the same reason: one TRANSFER chunk is
+	 * ALP_CC3501E_SPI1_MAX_XFER (4088) data bytes plus its header, so a local
+	 * would be a 4 KB frame on a CONFIG_SHELL_STACK_SIZE=2048 thread.
+	 *
+	 * TWO buffers, not one: poll_by_repeat() re-issues the request payload from
+	 * this exact memory on every retry WHILE writing the reply into rx_buf, so
+	 * the two must not alias -- sharing one would corrupt the frame being
+	 * re-sent, and this is the retry path that exists to avoid re-clocking a
+	 * flash write.  spi1_busy makes same-ctx reentrancy an explicit
+	 * ALP_ERR_BUSY rather than silent aliasing (same caveat as sock_busy: it
+	 * catches a reentrant call stack, not two truly concurrent callers).
+	 *
+	 * spi1_seq is the wire duplicate-suppression counter, owned by the driver
+	 * rather than the caller so a transport-level retry of a page program comes
+	 * back from the firmware's cache instead of clocking the write twice.
+	 *
+	 * spi1_configured is SESSION binding, not bus state: the firmware's
+	 * g_configured latch and cached (seq, result) are file statics that
+	 * survive an Alif reboot, while cc3501e_init() only memsets THIS side --
+	 * so a fresh ctx's first TRANSFER is always seq 1, which can collide with
+	 * a previous session's cached seq-1 DONE result and hand back stale RX
+	 * bytes as ALP_OK with the bus never re-clocked.  Requiring a CONFIGURE
+	 * in the CURRENT session before any TRANSFER closes that: CONFIGURE polls
+	 * the firmware's SPI1_CONFIGURE opcode, and worker_poll()'s orphan-discard
+	 * arm drops any stale cached SPI1_TRANSFER result the moment a DIFFERENT
+	 * opcode polls, before this ctx can ever reach the collision.
+	 *
+	 * Cost: 8192 bytes of context (measured, 24696 -> 32888, GCC host build),
+	 * carried by every board whether or not it drives the connector's SPI1.
+	 * Accepted for now -- the context is one long-lived allocation per module,
+	 * and the alternative (a Kconfig that compiles the buffers out) makes
+	 * sizeof(cc3501e_t) config-dependent, which is the worse trade until a
+	 * board actually runs short. */
+	uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER];
+	uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER];
+	bool    spi1_busy;
+	bool    spi1_configured;
+	uint8_t spi1_seq;
 	/* Transport-transaction lock (issue #1116): serialises the whole
 	 * cc3501e_request() 4-phase exchange (and therefore tx_scratch /
 	 * rx_scratch above) across every caller sharing this ctx -- the
@@ -356,6 +396,149 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
                              size_t            rx_cap,
                              size_t           *rx_len,
                              uint32_t          timeout_ms);
+
+/* ------------------------------------------------------------------ */
+/* SPI1 host passthrough (proto v6, opcodes 0x55..0x57).               */
+/*                                                                    */
+/* The E1M connector's SPI1 lands on the CC3501E, NOT on the Alif      */
+/* (E1M-AEN-2626-R2 netlist: AG10 SCK -> CC35 GPIO_32, AG9 MOSI ->     */
+/* GPIO_33, AG8 MISO -> GPIO_34, AH9 CS0 -> GPIO_31, AH8 CS1 ->        */
+/* GPIO_15).  A device on that bus is therefore reached by RELAY: the  */
+/* CC3501E is the SPI controller and these three calls hand it the     */
+/* bytes.  Nothing here touches the inter-chip bridge itself -- that   */
+/* is a different CC35 instance (SPI0, GPIO_27/28/29 + GPIO16).        */
+/*                                                                    */
+/* Shape of a transaction:                                            */
+/*                                                                    */
+/* @code                                                              */
+/*   uint16_t max_xfer = 0;                                           */
+/*   cc3501e_spi1_configure(&fw, 10000000, 0, ALP_CC3501E_SPI1_CS0,    */
+/*                          NULL, &max_xfer, 1000);                   */
+/*   cc3501e_spi1_transfer(&fw, cmd, NULL, 4, 0, true, 1000);  // hold */
+/*   cc3501e_spi1_transfer(&fw, NULL, page, 256, 0xFF, false, 1000);   */
+/*   cc3501e_spi1_release(&fw, 1000);                                 */
+/* @endcode                                                           */
+/*                                                                    */
+/* CHUNKING: chunk at @p max_xfer from the CONFIGURE reply, never at   */
+/* the far-end device's page size.  A board without the READY pad's    */
+/* input-enable pinctrl group has no working READY line (chips/        */
+/* cc3501e/cc3501e_sockets.c, silicon-measured 2026-08-24) and falls   */
+/* back to fixed settle gaps, where per-transaction latency dominates  */
+/* -- hold CS and let one big chunk straddle page boundaries, because  */
+/* 64 page-sized chunks cost 64 round trips where one costs one.       */
+/* Short chunks belong only at the tail, on any board.                 */
+/*                                                                    */
+/* CS TIMING: both selects are software-driven GPIOs on the CC3501E    */
+/* side, so CS edges are scheduler-timed, not clock-edge-exact.  A     */
+/* peripheral that demands sub-microsecond CS-to-first-clock setup     */
+/* will not work over this path, and no protocol change fixes that.    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Acquire the CC3501E's SPI1 controller and pin the bus parameters
+ *        (SPI1_CONFIGURE, 0x55).
+ *
+ * Idempotent: re-issuing it re-opens the controller with new parameters.  The
+ * settings hold until the next configure or @ref cc3501e_spi1_release.
+ *
+ * Word size is fixed at 8 bits -- the only value v6 firmware accepts -- so it
+ * is not a parameter here; the field exists on the wire for a later firmware.
+ *
+ * @param ctx                 Initialised bridge handle.
+ * @param freq_hz             REQUESTED SCK in Hz.  The divider rounds.
+ * @param mode                SPI mode 0..3, i.e. (CPOL << 1) | CPHA.
+ * @param cs                  Which software chip-select to drive
+ *                            (@ref ALP_CC3501E_SPI1_CS0 = GPIO_31 / E1 AH9,
+ *                            @ref ALP_CC3501E_SPI1_CS1 = GPIO_15 / E1 AH8).
+ * @param actual_freq_hz_out  Optional; receives the SCK the divider ACTUALLY
+ *                            produced.  Read it rather than assume the request
+ *                            was met -- a real clock divides.
+ * @param max_xfer_out        Optional; receives the peer firmware's per-chunk
+ *                            byte limit.  Chunk to this, not to a constant.
+ * @param timeout_ms          Caller budget (worker-routed, so poll-by-repeat).
+ * @return ALP_OK on success; ALP_ERR_INVAL on a bad @p mode / @p cs or a
+ *         payload the firmware refused; ALP_ERR_BUSY when CS is still held by
+ *         an unfinished CS_HOLD chain (finish it, or release first) -- this is
+ *         a terminal reject, not a retryable busy; ALP_ERR_IO if the
+ *         controller could not be opened; ALP_ERR_NOT_READY on a firmware
+ *         build without the passthrough.
+ */
+alp_status_t cc3501e_spi1_configure(cc3501e_t            *ctx,
+                                    uint32_t              freq_hz,
+                                    uint8_t               mode,
+                                    alp_cc3501e_spi1_cs_t cs,
+                                    uint32_t             *actual_freq_hz_out,
+                                    uint16_t             *max_xfer_out,
+                                    uint32_t              timeout_ms);
+
+/**
+ * @brief Clock one full-duplex chunk on the CC3501E's SPI1 (SPI1_TRANSFER, 0x56).
+ *
+ * A NULL buffer drops that direction from the wire: @p tx NULL clocks @p len
+ * copies of @p tx_fill (flash read, FIFO drain), @p rx NULL discards MISO
+ * (page program, display refresh).  Each drop removes up to 4 KB from a link
+ * where per-transaction latency, not bandwidth, is what this bus costs --
+ * worth more here than it looks on a board without the READY pad's
+ * input-enable pinctrl group, which has no working READY line at all
+ * (chips/cc3501e/cc3501e_sockets.c, silicon-measured 2026-08-24).
+ *
+ * CS is under explicit caller control: @p cs_hold false is the cheap
+ * single-shot (assert, clock, deassert); @p cs_hold true leaves CS asserted so
+ * the next call continues the SAME device transaction.  Clear it on the last
+ * chunk.  @p len 0 with @p cs_hold false is a pure CS deassert, which is why
+ * this family needs no separate chip-select opcode.
+ *
+ * @warning RETRY SEMANTICS, because this bus will drive flash.  The driver
+ *          stamps each transfer with a sequence byte, so the TRANSPORT-level
+ *          retries inside this call (firmware busy, bridge momentarily down)
+ *          come back from the firmware's cached result and never re-clock the
+ *          device.  A CALLER-level retry after ALP_ERR_TIMEOUT is a NEW
+ *          transfer and WILL clock the device again -- for a page program that
+ *          is a second write, not a repeated read.  Read status back and decide
+ *          rather than blindly re-issuing.
+ *
+ * @param ctx         Initialised bridge handle, already configured.
+ * @param tx          Bytes to clock out, or NULL to clock @p tx_fill instead.
+ * @param rx          Receives exactly @p len bytes on ALP_OK, or NULL to
+ *                    discard MISO.
+ * @param len         Bytes to clock, 0..@c ALP_CC3501E_SPI1_MAX_XFER (chunk at
+ *                    the max_xfer the peer reported, see above).
+ * @param tx_fill     Byte clocked out when @p tx is NULL.
+ * @param cs_hold     Leave CS asserted after this chunk.
+ * @param timeout_ms  Caller budget (worker-routed, so poll-by-repeat).
+ * @return ALP_OK with @p rx filled; ALP_ERR_INVAL if @p len exceeds the chunk
+ *         limit or the firmware refused the frame; ALP_ERR_NOT_READY if no
+ *         configure has succeeded (or the firmware lacks the passthrough);
+ *         ALP_ERR_BUSY either because the controller refused the transfer (a
+ *         terminal reject -- deterministic, retrying will not fix it) or
+ *         because another call on this @p ctx is mid-transfer; ALP_ERR_IO on a
+ *         short or mismatched reply (link desync); ALP_ERR_TIMEOUT if the
+ *         firmware worker never produced a result inside the budget -- note a
+ *         long Wi-Fi scan shares that single worker slot.
+ */
+alp_status_t cc3501e_spi1_transfer(cc3501e_t     *ctx,
+                                   const uint8_t *tx,
+                                   uint8_t       *rx,
+                                   uint16_t       len,
+                                   uint8_t        tx_fill,
+                                   bool           cs_hold,
+                                   uint32_t       timeout_ms);
+
+/**
+ * @brief Deassert CS, close the SPI1 controller, free the bus
+ *        (SPI1_RELEASE, 0x57).
+ *
+ * The escape hatch, so it has no preconditions and cannot fail on state:
+ * calling it with nothing open returns ALP_OK.  A host that lost track of a
+ * CS_HOLD chain (a timeout mid-chain, a restarted application) always has this
+ * one call back to a known-free bus.
+ *
+ * @param ctx         Initialised bridge handle.
+ * @param timeout_ms  Caller budget (worker-routed, so poll-by-repeat).
+ * @return ALP_OK once the bus is free; ALP_ERR_INVAL on a NULL @p ctx;
+ *         otherwise the mapped transport error.
+ */
+alp_status_t cc3501e_spi1_release(cc3501e_t *ctx, uint32_t timeout_ms);
 
 #ifdef __cplusplus
 } /* extern "C" */

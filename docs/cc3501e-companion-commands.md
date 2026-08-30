@@ -114,6 +114,31 @@ The socket primitives underneath `tcp-get` — `open`, `connect`, `send`,
 `recv`, `close` — are available from firmware as the `cc3501e_sock_*` API
 (the console exposes only the composed `tcp-get` helper).
 
+## `alp companion spi1`
+
+The E1M connector's SPI1 pins land on the CC3501E, not the Alif — a carrier
+device on that bus is reached by **relay**: the CC3501E is the SPI
+controller and these verbs hand it the bytes over the inter-chip bridge (see
+[`cc3501e-bridge.md`](cc3501e-bridge.md)). CONFIGURE must succeed once per
+console session before TRANSFER; a session that skips it gets `NOT_READY`
+without anything touching the wire.
+
+| Command | What it does |
+|---|---|
+| `spi1 configure <freq_hz> <mode 0..3> <cs 0\|1>` | Acquire the SPI1 controller; print the reply's SCK and per-chunk cap. |
+| `spi1 xfer <hexbytes> [hold] [norx]` | Full-duplex chunk: clock the given bytes, print the RX bytes (`hold` leaves CS asserted, `norx` discards MISO). |
+| `spi1 read <len> [hold] [<fill>]` | The NO_TX half: clock `len` copies of `fill` (default `0xFF`) out, print what came back. |
+| `spi1 release` | Deassert CS, close SPI1, free the bus — the escape hatch, never fails. |
+
+`spi1 configure`'s printed SCK can read `sck unknown actual (...)` rather
+than a Hz value: the TI backend has no clock-divider read-back yet, so it
+reports the honest "not measured" answer instead of echoing the request as
+if it were a silicon measurement.
+
+The `cc3501e_spi1_configure` / `_transfer` / `_release` API underneath these
+verbs is documented in
+[`<alp/chips/cc3501e/core.h>`](../include/alp/chips/cc3501e/core.h).
+
 ---
 
 ## Host-driver-only surfaces (no console command)

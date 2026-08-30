@@ -547,8 +547,9 @@ way back is `cc3501e_reset()` driving `WIFI_EN`.
 
 ## Peripherals not proxied today
 
-Beyond the wire-protocol surfaces above (Wi-Fi, BLE, GPIO proxy, OTA), the
-CC3501E exposes several on-chip peripherals that are **not** reachable
+Beyond the wire-protocol surfaces above (Wi-Fi, BLE, GPIO proxy, SPI1
+passthrough, OTA — see below), the CC3501E exposes several on-chip
+peripherals that are **not** reachable
 through `<alp/protocol/cc3501e.h>` and have no host-visible surface. None
 of these has an allocated opcode group; if a future board variant needs
 one, add it under the reserved `0x80..0xFF` range.
@@ -706,6 +707,43 @@ host obtains the image via the device-side Mender contract
 ([`docs/ota-device-contract.md`](ota-device-contract.md)); the OTA
 server is a separate repo.
 
+## SPI1 host passthrough
+
+The E1M connector's SPI1 pins (AG10 SCK / AG9 MOSI / AG8 MISO / AH9 CS0 /
+AH8 CS1) land on the CC3501E, **not** the Alif — a carrier device on that
+bus is unreachable except by relay: the CC3501E is the SPI CONTROLLER, and
+these opcodes (proto v6, group `0x55..0x57`) hand it the host's bytes. This
+is a *second*, unrelated SPI instance from the inter-chip bridge link above
+(SPI0) — nothing here touches the bridge.
+
+| Opcode | Command | Payload |
+|--------|---------|---------|
+| `0x55` | `ALP_CC3501E_CMD_SPI1_CONFIGURE` | `alp_cc3501e_spi1_configure_t` (`freq_hz` LE32, `mode`, `bits_per_word`, `cs`) |
+| `0x56` | `ALP_CC3501E_CMD_SPI1_TRANSFER`  | `alp_cc3501e_spi1_transfer_t` (`len` LE16, `flags`, `seq`, `tx_fill`) + inline TX |
+| `0x57` | `ALP_CC3501E_CMD_SPI1_RELEASE`   | none |
+
+All three are worker-routed (a polled multi-KB transfer would stall the
+bridge slave's re-arm from inside its own ISR — the same wedge class every
+other worker-routed family exists to avoid), and re-init is skipped on
+these opcodes specifically because they drive a separate controller and
+make no `Wlan_*` call — the bridge slave's DMA was never touched.
+
+TRANSFER's `seq` byte is a wire-level duplicate-suppression counter: the
+firmware caches the last completed `(seq, result)` and replays it for a
+matching seq instead of re-clocking the bus, which is what makes the host's
+ordinary transport-level `ALP_ERR_IO` retry safe on a bus that can drive
+flash. The host driver additionally requires a CONFIGURE to have succeeded
+in the *current* session before it will send a TRANSFER — the firmware's
+`g_configured` latch and cached result are file statics that outlive an
+Alif reboot, so a freshly initialised host context is forced through a real
+round trip (which discards any stale cache from a session the firmware
+outlived) rather than risk its first TRANSFER colliding with one.
+
+Console: `alp companion spi1 configure|xfer|read|release` — see
+[`cc3501e-companion-commands.md`](cc3501e-companion-commands.md#alp-companion-spi1).
+Host API: `cc3501e_spi1_configure/_transfer/_release()` in
+[`<alp/chips/cc3501e/core.h>`](../include/alp/chips/cc3501e/core.h).
+
 ## v0.x roadmap
 
 | Step                                             | Where it lands                          |
@@ -719,6 +757,7 @@ server is a separate repo.
 | BLE peripheral + advertise                       | `cc3501e-bridge-firmware:` v0.3 ✅ shipped (GAP advertise / scan / connect + GATT); NimBLE enable + scan **silicon-validated** |
 | GPIO proxy + camera-enable                       | `cc3501e-bridge-firmware:` v0.4 ✅ shipped + **silicon-validated** (`examples/aen/aen-cc3501e-gpio`, warm-boot harness pass=8 fail=0) |
 | OTA over the bridge (§ "OTA" above)              | `cc3501e-bridge-firmware:` ✅ shipped; **silicon-validated through install/STAGED** (cold swap-boot needs a cold-bootable unit — see [`cc3501e-production.md`](cc3501e-production.md)) |
+| SPI1 host passthrough (§ "SPI1 host passthrough" above) | `cc3501e-bridge-firmware:` v0.5 ✅ shipped (configure / transfer / release); not yet silicon-validated |
 | Full feature parity with `<alp/iot.h>` /
   `<alp/ble.h>`                                    | Remaining v1.0 work: HOST_IRQ async-event delivery and full runtime GATT/event parity |
 
