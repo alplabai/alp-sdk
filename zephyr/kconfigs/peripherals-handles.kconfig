@@ -171,3 +171,28 @@ config ALP_SDK_STORAGE_SW_FALLBACK
 	  ALP_ERR_NOSUPPORT.  For native_sim build / test only --
 	  production firmware MUST NOT rely on this since no real
 	  device is driven.
+
+config ALP_SDK_STORAGE_ALIF_SECAES
+	bool "Alif SE-service transport for <alp/ext/alif/storage.h> OSPI SecAES key provisioning"
+	depends on ALP_SDK && HAS_ALIF_SE_SERVICES
+	default y
+	help
+	  Compiles the real body of alp_alif_storage_secaes_key_provision()
+	  in src/backends/ext/alif/storage.c (issue #224).  It builds an
+	  ospi_write_key_svc_t request packet
+	  (SERVICE_APPLICATION_OSPI_WRITE_KEY_ID,
+	  OSPI_WRITE_EXTERNAL_KEY_OSPI0) and hands it to the public
+	  hal_alif se_service_send_request() transport -- the same generic
+	  SE-packet seam src/backends/security/se_cryptocell.c rides for
+	  its CryptoCell AES/SHA/AEAD packets.
+
+	  UNVERIFIED ON SILICON: no bench unit reachable at implementation
+	  time has an OSPI SecAES-relevant part populated (R2 BOM only;
+	  see the file header).  With this OFF, or on a build with no
+	  hal_alif SE client linked, key provisioning returns
+	  ALP_ERR_NOSUPPORT.
+
+	  alp_alif_storage_secaes_get_status() is unaffected by this
+	  option -- it stays ALP_ERR_NOSUPPORT unconditionally, because
+	  Alif has not published an SE service that reads the OSPI SecAES
+	  engine's status back.

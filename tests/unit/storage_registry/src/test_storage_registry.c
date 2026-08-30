@@ -13,6 +13,10 @@
  *   (g) vendor-ext gating: non-Alif handle -> NOT_PRESENT_ON_THIS_SOC
  *       from the Alif SecAES surface; non-NXP handle from the NXP
  *       OTFAD surface
+ *   (h) OTFAD window-bounds validation reaches the body
+ *   (i) overflow-safe range helper for fixed-capacity backends
+ *   (j) SecAES key / key_bytes validation reaches the body, and
+ *       NOSUPPORT on a build with no SE transport linked (issue #224)
  *
  * Backends visible on this test build:
  *   sw_fallback   (priority 0,   "*" wildcard)
@@ -282,4 +286,43 @@ ZTEST(alp_storage_registry, test_range_in_capacity_rejects_wrapped_and_uint64_ma
 	zassert_false(alp_storage_range_in_capacity(UINT64_MAX, 0u, 4096u));
 	/* Oversized erase length just past capacity boundary. */
 	zassert_false(alp_storage_range_in_capacity(0u, UINT64_MAX, 4096u));
+}
+
+/* ---------- (j) SecAES key-bytes validation reaches the body (issue #224) */
+
+ZTEST(alp_storage_registry, test_secaes_key_provision_validation)
+{
+	/* Synthesise a handle that LOOKS Alif (so the body's vendor-gate
+     * passes) and then exercise the key / key_bytes checks.  This
+     * test build has no HAS_ALIF_SE_SERVICES (no MHUv2 / SE-service
+     * DT node on native_sim), so CONFIG_ALP_SDK_STORAGE_ALIF_SECAES
+     * is off and the last case below hits the NOSUPPORT fallback,
+     * not a real SE round-trip. */
+	static const alp_backend_t fake_alif_backend = {
+		.silicon_ref = "alif:ensemble:e8",
+		.vendor      = "alif",
+		.base_caps   = 0u,
+		.priority    = 100,
+		.ops         = NULL,
+		.probe       = NULL,
+	};
+	struct alp_storage h;
+	memset(&h, 0, sizeof(h));
+	h.in_use  = true;
+	h.backend = &fake_alif_backend;
+
+	static const uint8_t key16[16] = { 0 };
+
+	/* NULL key -> INVAL. */
+	zassert_equal(alp_alif_storage_secaes_key_provision(&h, NULL, 16u), ALP_ERR_INVAL);
+	/* Wrong widths -> INVAL.  The OSPI write-key SE service is fixed
+     * at AES-128 (services_lib_api.h OSPI_KEY_LENGTH_BYTES == 16) --
+     * unlike the portable alp_storage_configure_inline_aes surface,
+     * 24 / 32 are not accepted here. */
+	zassert_equal(alp_alif_storage_secaes_key_provision(&h, key16, 0u), ALP_ERR_INVAL);
+	zassert_equal(alp_alif_storage_secaes_key_provision(&h, key16, 24u), ALP_ERR_INVAL);
+	zassert_equal(alp_alif_storage_secaes_key_provision(&h, key16, 32u), ALP_ERR_INVAL);
+	/* Valid key + width -> NOSUPPORT on this build (no SE transport
+     * linked). */
+	zassert_equal(alp_alif_storage_secaes_key_provision(&h, key16, 16u), ALP_ERR_NOSUPPORT);
 }
