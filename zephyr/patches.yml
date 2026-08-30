@@ -15,6 +15,35 @@ patches:
       for the slot vector address, but slot0 is in MRAM at 0x80000000 -> garbage
       jump -> reboot loop. Derive the slot base from the alif,mram controller reg.
       Bench-proven on E1M-AEN801 (E8): SES->MCUboot->slot0->app RESULT PASS.
+  - path: mcuboot/0002-loader-clear-scratch-trailer-on-degenerate-copy-size-zero.patch
+    sha256sum: 06aacc68510dd476102300490b94297c5ee264ea552d59fc66e5ff69fb8efbe8
+    module: mcuboot
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      boot_swap_image() (loader.c) hands copy_size to swap_run() unconditionally.
+      With the scratch algorithm, copy_size == 0 makes find_last_sector_idx()
+      (swap_scratch.c) return -1, so swap_run()'s loop body -- and with it the
+      only call site of boot_swap_sectors(), which is where the scratch-trailer
+      erase lives -- never runs. On a flash device whose erase value is 0x00
+      (Alif Ensemble on-die MRAM, drivers/flash/flash_mram_alif.c
+      FLASH_MRAM_ERASE_VALUE), that erase value is bit-for-bit identical to a
+      genuine swap_size of 0, so a stale trailer field reads back as
+      copy_size == 0 (instead of the obviously-invalid 0xffffffff a 0xFF-erase
+      device would show) while the scratch magic still reads GOOD -- MCUboot
+      then resumes the same no-op swap on every subsequent boot, forever
+      (#1066). Guard copy_size == 0 at the call site: clear the scratch
+      trailer directly instead of resuming a swap that can never complete.
+      No-op for the common case (a real swap-in-progress trailer never
+      carries copy_size == 0); scoped to MCUBOOT_SWAP_USING_SCRATCH, so
+      move/offset builds are unaffected. NOT bench-verified -- the AEN801
+      board DT carries no scratch/slot1 partition as of #1100/#1445 (OTA
+      deferred), so the scratch-swap path this patches is not currently
+      reachable on any alp-sdk board; this closes the defect ahead of a
+      secondary slot being reintroduced. Upstream to mcu-tools/mcuboot then
+      drop.
   - path: zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch
     sha256sum: dd363a007acddc263e9168f4c75ac2b4bafd5a8ee438ce655b5f63a0398f2a76
     module: zephyr
