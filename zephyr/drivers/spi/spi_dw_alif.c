@@ -47,6 +47,7 @@ LOG_MODULE_REGISTER(spi_dw_alif);
 #include <zephyr/pm/device.h>
 
 #include <zephyr/sys/sys_io.h>
+#include <zephyr/cache.h>
 #include <zephyr/sys/util.h>
 
 #include <zephyr/pm/device.h>
@@ -428,6 +429,25 @@ static int spi_dw_dma_setup_rx_channel(const struct device *dev,
 		spi_dw_dma_cache_shape(&spi_d->dma_state.rx_shape, dma_cfg, dma_block_cfg);
 	}
 
+	/*
+	 * The PL330 is programmed non-cacheable and non-snooping:
+	 * dma_pl330_config_channel() writes CC_CCTRL_MODIFIABLE_VALUE = 0x2 into
+	 * both cache-control fields of DMA_CCRn, i.e. AxCACHE = 0b0010, Normal
+	 * non-cacheable non-bufferable (HWRM 12.2.4.3.15).  So it neither snoops
+	 * nor allocates and software maintenance is mandatory for any buffer in
+	 * cacheable memory -- and this driver did none at all (#1830).
+	 *
+	 * RX: clean+invalidate the destination BEFORE the transfer.  Cleaning
+	 * first matters because a dirty line evicted mid-DMA would overwrite bytes
+	 * the controller had already delivered; invalidating means the post-DMA
+	 * read misses to memory.  spi_dw_dma_wait_completion() invalidates again
+	 * after completion to drop anything speculative prefetch pulled in during
+	 * the transfer window.
+	 */
+	if (rx_ptr != &dummy_rx) {
+		sys_cache_data_flush_and_invd_range(rx_ptr, chunk * spi_d->dfs);
+	}
+
 	ret = dma_start(info->dma_dev, info->dma_rx.ch);
 	if (ret < 0) {
 		LOG_ERR("SPI:%p dma_start %p failed %d\n", dev, info->dma_dev, ret);
@@ -481,6 +501,13 @@ static int spi_dw_dma_setup_tx_channel(const struct device *dev,
 			return ret;
 		}
 		spi_dw_dma_cache_shape(&spi_d->dma_state.tx_shape, dma_cfg, dma_block_cfg);
+	}
+
+	/* TX: clean the source so the non-snooping DMAC reads what the CPU wrote,
+	 * rather than whatever was in SRAM before the dirty lines were evicted
+	 * (#1830).  See the RX path above for the AxCACHE citation. */
+	if (tx_ptr != &dummy_tx) {
+		sys_cache_data_flush_range((void *)tx_ptr, chunk * spi_d->dfs);
 	}
 
 	ret = dma_start(info->dma_dev, info->dma_tx.ch);
