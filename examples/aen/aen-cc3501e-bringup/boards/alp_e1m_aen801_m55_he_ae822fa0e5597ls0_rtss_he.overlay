@@ -156,32 +156,17 @@
  * is SYSTOP (already on -- the app drives SPI1/GPIO in the same region); its
  * PL330 boot-manager security latch (CLKCTRL_PER_MST) is in dma_alif_boot_latch.c.
  * The fork PL330 driver statically allocates the per-channel ucode + remaps it via
- * local_to_global(), so no external `microcode` prop is needed.  IRQs 299..306 =
- * the 8 DMA0 channel-done lines, 331 = abort (AE822 DFP rtss_he).
+ * local_to_global(), so no external `microcode` prop is needed.
+ *
+ * dma0 + evtrtr0 are now declared in ensemble_e8_peripherals.dtsi (disabled
+ * by default, alp-sdk issue #1815); this overlay only enables them.
  */
-&soc {
-	dma0: dma@49080000 {
-		compatible = "alif,dma-pl330";
-		reg = <0x49080000 0x1000>;
-		#dma-cells = <2>;
-		dma-channels = <8>;
-		interrupt-parent = <&nvic>;
-		interrupts = <299 3>, <300 3>, <301 3>, <302 3>, <303 3>,
-			     <304 3>, <305 3>, <306 3>, <331 3>;
-		interrupt-names = "channel0", "channel1", "channel2", "channel3",
-				  "channel4", "channel5", "channel6", "channel7", "abort";
-		status = "okay";
-	};
+&dma0 {
+	status = "okay";
+};
 
-	evtrtr0: event-router@49035000 {
-		compatible = "alif,dma-event-router";
-		reg = <0x49035000 0x100>;
-		dma-controller = <&dma0>;
-		channels = <32>;
-		dma-groups = <4>;  /* SYSTOP router: 4 ACK_TYPE groups (0-3); SPI1 uses group 2 */
-		#dma-cells = <2>;
-		status = "okay";
-	};
+&evtrtr0 {
+	status = "okay";
 };
 
 /*

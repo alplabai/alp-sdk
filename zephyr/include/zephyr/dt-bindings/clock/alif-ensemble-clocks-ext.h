@@ -228,4 +228,47 @@
 	ALIF_CLK_CFG(M55HE_CFG, HE_CLK_ENA, 14U, 1U, 0U, 0U, 0U,               \
 		     ALIF_PARENT_CLK_SYST_HCLK)
 
+/* LPUART (M55-HE local domain, lpuart@43008000) peripheral clock gate: bit 0
+ * (UART_CKEN) of RTSS_HE_LPPERI_CKEN (offset 0x1C) in the AON block (base
+ * 0x1A604000, the same "aon" reg region the clockctrl node already maps).
+ * Sourced from the AE822 HWRM (AHRM0012NDA v0.3) section 8.3.6.3.7
+ * RTSS_HE_LPPERI_CKEN Register (bit 0 UART_CKEN, "Enable clock for LPUART")
+ * and the LPUART clocks table ("LPUART PCLK -- RTSS_HE_CLK -- LPUART APB
+ * interface clock").  This is a DIFFERENT register from the M55HE_CFG
+ * HE_CLK_ENA block the other M55-HE-local LP peripherals below gate through --
+ * LPUART's enable bit lives in AON, not M55HE_CFG.  parent_clk is a filler:
+ * the upstream ns16550 driver only clock_control_on()s / optionally
+ * get_rate()s this id; PCLK is the nearest ALIF_PARENT_CLK_* to "LPUART APB
+ * interface clock".  HE-core only.  vendor-ext, BENCH-UNVERIFIED. */
+#define ALIF_RTSS_HE_LPPERI_CKEN_REG 0x1CU /* AON base 0x1A604000 */
+#define ALIF_LPUART_CLK                                                         \
+	ALIF_CLK_CFG(AON, RTSS_HE_LPPERI_CKEN, 0U, 1U, 0U, 0U, 0U,              \
+		     ALIF_PARENT_CLK_SYST_PCLK)
+
+/* LPCPI (M55-HE local domain, lpcam@43003000) peripheral clock gate: bit 12
+ * (CPI_CKEN) of HE_CLK_ENA in M55HE_CFG (base 0x43007000) -- the same
+ * register ALIF_LPSPI_CLK / ALIF_LPI3C_CLK above gate through.  Sourced from
+ * the AE822 HWRM section 8.3.9.3.5 HE_CLK_ENA Register, bit 12 CPI_CKEN
+ * ("Enable clock for LPCPI").  parent_clk is a filler: the alif,cam driver
+ * (video_alif.c) only clock_control_on()s this id, matching the ALIF_CPI_CLK
+ * dummy used for the main-domain cam node.  HE-core only.  vendor-ext,
+ * BENCH-UNVERIFIED. */
+#define ALIF_LPCPI_CLK                                                          \
+	ALIF_CLK_CFG(M55HE_CFG, HE_CLK_ENA, 12U, 1U, 0U, 0U, 0U,                \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+
+/* LPI2S (M55-HE local domain, lpi2s@43001000) functional clock: bit 12
+ * (CLK_ENA) of HE_I2S_CTRL (offset 0x14) in M55HE_CFG, with a 1-bit
+ * clock-source field at bit 16 (CLK_SEL; src=0 selects the 76.8 MHz
+ * reference, matching the ALIF_I2Sx_76M8_CLK pattern above -- the *_AUDIO
+ * variant src=1 is not re-authored here).  Sourced from the AE822 HWRM
+ * section 8.3.9.3.6 HE_I2S_CTRL Register.  parent_clk is a filler, same
+ * reasoning as ALIF_I2S0_76M8_CLK (i2s_dw.c uses set_rate, not get_rate, and
+ * our upstream clockctrl has no .set_rate).  HE-core only.  vendor-ext,
+ * BENCH-UNVERIFIED. */
+#define ALIF_HE_I2S_CTRL_REG 0x14U /* M55HE_CFG base 0x43007000 */
+#define ALIF_LPI2S_76M8_CLK                                                     \
+	ALIF_CLK_CFG(M55HE_CFG, HE_I2S_CTRL, 12U, 1U, 0U, 1U, 16U,              \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+
 #endif /* ALP_DT_BINDINGS_CLOCK_ALIF_ENSEMBLE_CLOCKS_EXT_H_ */
