@@ -83,8 +83,7 @@ withdrawn. #383 is unaffected — memfault-firmware-sdk *is* a curated library,
 so its `LicenseRef-Memfault` question stands on its own merits and still needs
 the legal review 0018 requires.
 
-**2. Licence-gated vendor data is carried in a segregated subtree under its own
-terms.** The subtree is `metadata/svd/<vendor>/` for vendor register
+**2. Vendor data under its own terms is carried in a segregated subtree.** The subtree is `metadata/svd/<vendor>/` for vendor register
 descriptions (per #948), and `vendors/<name>/` for vendored source. That choice
 is load-bearing, not cosmetic: `scripts/check_public_private.py:76-82` lists
 `vendors` in `DEFAULT_EXCLUDES`, so a `vendors/` subtree is never scanned for
