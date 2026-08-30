@@ -19,10 +19,14 @@
 # are in the VBAT/AON low-power island alongside LPRTC/LPTIMER/LPGPIO (this
 # dtsi's rtc0 / lptimer0 nodes), which is why -- like those two -- this binding
 # carries no `clocks` property: HWRM Table 19-24 "LPCMP Clocks" names a single
-# CLK32K functional clock sourced from LFXO, not a software-gated block clock
-# the way the M55-HE-local LP peripherals in HE_CLK_ENA are.  A future driver
-# author should model that as a fixed-rate clock, not an
-# ALIF_CLK_CFG()-encoded gate.
+# CLK32K (LFXO/LFRC) functional clock, gated by "LPCOMP_CLK32K_EN bit in the
+# VBAT_ANA_REG1" per that table's own footnote -- a REAL software gate, just
+# not the HE_CLK_ENA block the M55-HE-local LP peripherals use, and not a
+# register `clockctrl` currently maps (VBAT_ANA_REG1 is in the "ANA" block,
+# HWRM Table 19-30, base 0x1A60A000, distinct from clockctrl's existing
+# "vbat" region at 0x1A609000).  A future driver author should model that as
+# an ALIF_CLK_CFG()-encoded gate once clockctrl maps the ANA block, not as a
+# fixed-rate clock.
 #
 # Example (LPCMP at 0x42003000):
 #
@@ -37,7 +41,7 @@ description: |
   Alif Ensemble Low-Power Comparator (LPCMP) -- a single low-power,
   rail-to-rail analog comparator with a selectable internal or external
   reference, in the VBAT/AON always-on domain.  A STANDBY/STOP wake source
-  (HWRM Table 3-4).
+  (Datasheet Table 3-4).
 
   vendor-ext, BENCH-UNVERIFIED -- authored from the AE822 HWRM memory map and
   interrupt tables; NO DRIVER binds this compatible yet (see the file header

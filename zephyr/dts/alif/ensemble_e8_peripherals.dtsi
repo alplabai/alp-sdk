@@ -314,7 +314,12 @@
 	 * "snps,designware-i2c" driver as i2c0/i2c1/i2c2 above -- Tier-1
 	 * upstream-native.  reg 0x4300_5000/0x1000 (Table 10-5); IRQ 51
 	 * (M55HE_IRQS[51] LPI2C1_IRQ).  No `clocks`: i2c_dw, like
-	 * i2c0/i2c1/i2c2 above, consumes no clocks phandle.
+	 * i2c0/i2c1/i2c2 above, consumes no clocks phandle -- even though a
+	 * real software gate exists for this one (HE_CLK_ENA bit 13
+	 * I2C_CKEN, reset 0, same register ALIF_LPSPI_CLK/ALIF_LPI3C_CLK use),
+	 * left unmodelled/unwired for the same reason the main-domain i2c0/1/2
+	 * gates are: the driver never asks for one.  Left undone, same class
+	 * as the LPSPI0/LPSPI1 `HE_CLK_ENA[SPI_MODE]` gap noted below.
 	 */
 	lpi2c1: i2c@43005000 {
 		compatible = "snps,designware-i2c";
@@ -773,44 +778,57 @@
 	 * LPTIMER channels 1..3 -- the three sibling down-counters lptimer0's
 	 * own comment above already documents ("to use another channel, set
 	 * `channel` + its matching `interrupts`: ch1=61, ch2=62, ch3=63").
-	 * Same reg block (the four channels live in the one 0xC0 window),
-	 * same clock-source/clock-frequency; only `channel` and `interrupts`
-	 * differ per node, exactly as lptimer0 does for channel 0.  The
-	 * trailing hex digit of the unit-address is NOT a real per-channel
-	 * register sub-offset (the HWRM documents only the one 0xC0 block
-	 * base, not a per-channel stride within it) -- reg is identical to
-	 * lptimer0's real, sourced 0x42001000/0xC0 window on every node
-	 * below.  The suffix exists only so each node's NAME is unique:
-	 * Zephyr's edtlib requires a hex unit-address (a `,N` DTS-idiom
-	 * suffix parses as non-hex and is rejected), and dtc requires unique
-	 * node names -- "lptimer0..3" would otherwise all render as the
-	 * identical name "lptimer@42001000".
+	 * `reg` is IDENTICAL to lptimer0's on every node below -- 0x42001000/
+	 * 0xC0, the one block base -- and that is not a shortcut: the driver
+	 * (counter_alif_lptimer.c, ch_base()) computes each channel's real
+	 * register window at RUNTIME as `DT_INST_REG_ADDR(inst) + channel *
+	 * LPTIMER_CHANNEL_STRIDE` (STRIDE = 0x14, counter_alif_lptimer.h),
+	 * i.e. it ALREADY adds the per-channel offset itself from `channel`;
+	 * `reg` is meant to stay at the block base for every channel node, not
+	 * to be repointed per channel.  The stride itself IS real and
+	 * documented -- HWRM Table 13-8 gives every LPTIMER register offset as
+	 * "0x0 + (n x 0x14)" through "0x10 + (n x 0x14)", footnoted "n = 0 to
+	 * 3, LPTIMER module index" -- so channel 1/2/3's real register windows
+	 * are 0x42001014/0x42001028/0x4200103c, and THAT is what the
+	 * unit-address below names (for humans/dtc node identity only, not as
+	 * a `reg` override): Zephyr's edtlib requires a hex unit-address, and
+	 * dtc requires unique node names, so "lptimer0..3" need distinct
+	 * "lptimer@..." names or they collide as the same
+	 * "lptimer@42001000".  Because the unit-address (the real per-channel
+	 * window) does not match `reg` (the block base, correctly), dtc's
+	 * simple_bus_reg check fires -- observed directly in a west build of
+	 * this dtsi ("Warning (simple_bus_reg): /soc/lptimer@...: simple-bus
+	 * unit address format error, expected 42001000"); non-fatal, expected,
+	 * and left as-is rather than hidden.
 	 */
-	lptimer1: lptimer@42001001 {
+	lptimer1: lptimer@42001014 {
 		compatible = "alif,lptimer";
 		reg = <0x42001000 0xc0>;
 		interrupts = <61 3>;
 		channel = <1>;
 		clock-source = <0>;       /* 0 = 32 kHz VBAT LF source */
 		clock-frequency = <32768>;
+		status = "disabled";
 	};
 
-	lptimer2: lptimer@42001002 {
+	lptimer2: lptimer@42001028 {
 		compatible = "alif,lptimer";
 		reg = <0x42001000 0xc0>;
 		interrupts = <62 3>;
 		channel = <2>;
 		clock-source = <0>;       /* 0 = 32 kHz VBAT LF source */
 		clock-frequency = <32768>;
+		status = "disabled";
 	};
 
-	lptimer3: lptimer@42001003 {
+	lptimer3: lptimer@4200103c {
 		compatible = "alif,lptimer";
 		reg = <0x42001000 0xc0>;
 		interrupts = <63 3>;
 		channel = <3>;
 		clock-source = <0>;       /* 0 = 32 kHz VBAT LF source */
 		clock-frequency = <32768>;
+		status = "disabled";
 	};
 
 	/*
@@ -821,11 +839,18 @@
 	 * see zephyr/dts/bindings/comparator/alif,lpcmp.yaml for why (NO
 	 * DRIVER exists for it yet -- issue #1817).  reg 0x4200_3000/0x1000
 	 * (HWRM Table 10-4 Low Power VBAT Peripherals Memory Map); IRQ 56
-	 * (M55HE_IRQS[56] LPCMP_IRQ).  No `clocks`, matching lprtc0/lptimer0
-	 * above: HWRM Table 19-24 "LPCMP Clocks" names a single CLK32K
-	 * (LFXO-sourced) functional clock, not a software-gated block clock
-	 * the way the M55-HE-local peripherals in HE_CLK_ENA are.  A
-	 * STANDBY/STOP wake source (Table 3-4).
+	 * (M55HE_IRQS[56] LPCMP_IRQ, HWRM Table 19-25).  No `clocks`: HWRM
+	 * Table 19-24 "LPCMP Clocks" names a single CLK32K (LFXO/LFRC-sourced)
+	 * functional clock, gated by "LPCOMP_CLK32K_EN bit in the
+	 * VBAT_ANA_REG1" per that table's own footnote -- a REAL software
+	 * gate, just not the HE_CLK_ENA block the M55-HE-local peripherals
+	 * above use, and not a register this dtsi's `clockctrl` node currently
+	 * maps (VBAT_ANA_REG1 lives in the "ANA" block, HWRM Table 19-30, base
+	 * 0x1A60A000 -- a DIFFERENT physical window from clockctrl's existing
+	 * "vbat" reg region at 0x1A609000).  So the conclusion (no `clocks`
+	 * phandle here) still holds; there is simply no gate to model until
+	 * `clockctrl`/its driver grow an ANA-block case.  A STANDBY/STOP wake
+	 * source (Datasheet Table 3-4).
 	 */
 	lpcmp0: cmp@42003000 {
 		compatible = "alif,lpcmp";
@@ -836,14 +861,21 @@
 
 	/*
 	 * BOD -- Brown-Out Detect, the programmable-threshold VDD_MAIN supply
-	 * monitor (HWRM section 3.7.4 Power Supply Supervisors).  NO DRIVER
-	 * exists for it yet -- see zephyr/dts/bindings/misc/alif,bod.yaml
-	 * (issue #1817).  reg is the shared BOR_BOD block, 0x4200_4000/0x1000
-	 * (HWRM Table 10-4 + Table 19-32 BOR_BOD Modules); BOR (outright
-	 * reset) is a separate concern and is NOT modelled by this node.  IRQ
-	 * 100 (M55HE_IRQS[99] BOD_IRQ).  A STANDBY/STOP wake source and a DMA
-	 * request source (BOD_DMA_REQ, HWRM Table 3-5) -- the DMA wiring is
-	 * alp-sdk issue #1815's territory, not modelled here.
+	 * monitor.  The "BOD circuit monitors..." quote is Datasheet §3.7.4
+	 * Power Supply Supervisors (NOT HWRM -- the HWRM covers this at
+	 * §8.1.5 Power Supply Supervisors instead; it has no §3.7.4 at all).
+	 * NO DRIVER exists for it yet -- see
+	 * zephyr/dts/bindings/misc/alif,bod.yaml (issue #1817).  reg is the
+	 * shared BOR_BOD block, 0x4200_4000/0x1000 (HWRM Table 10-4 + Table
+	 * 19-32 BOR_BOD Modules); BOR (outright reset) is a separate concern
+	 * and is NOT modelled by this node.  IRQ 100 (HWRM Table 8-5:
+	 * `M55HE_IRQS[100]` BOD_IRQ -- NOT [99], a pdftotext column artifact
+	 * in a different, jumbled interrupt-number table).  A STANDBY/STOP
+	 * wake source (Datasheet §3.7.4 / Table 3-5 Power Supply Supervisory
+	 * Functions) and a DMA request source: HWRM Table 8-6 gives the actual
+	 * request number, `BOD_DMA_REQ` = `DMA2_REQ[7]` (Datasheet Table 3-5
+	 * only says a DMA request exists, not which number) -- the DMA wiring
+	 * is alp-sdk issue #1815's territory, not modelled here.
 	 */
 	bod0: bod@42004000 {
 		compatible = "alif,bod";
@@ -1712,25 +1744,33 @@
 	 * is declared (it would collide with this one at the DT level, not
 	 * extend it).
 	 *
-	 * dma-groups = 1: unlike the GLOBAL evtrtr0 below (4 groups, SYSTOP
-	 * peripherals), this LOCAL router serves only the LP peripheral bank
-	 * above -- confirmed by the aen-cc3501e-bringup overlay's own SPI1
-	 * routing comment ("NOT the M55-HE-local DMA2/evtrtr2 (1 group, for LP
-	 * peripherals)").  Peripheral request numbers on DMA2_REQ[n] for that
-	 * bank (HWRM DMA Requests tables), for a future enabling board
-	 * overlay to wire via `dmas`/`dma-names` (not done on any node here --
-	 * matching the existing precedent that `dmas` wiring is overlay-level,
-	 * e.g. cc3501e_spi's dmas in the aen-cc3501e-bringup overlay, not
-	 * SoC-dtsi-level): DMA2_REQ[12]/[13] LPSPI RX/TX, DMA2_REQ[4]
-	 * ADC24_DONE0.  Disabled by default, matching dma2; an enabling board
-	 * overlay flips both on together.
+	 * dma-groups = 2: HWRM Table 12-31 "DMA2 (M55-HE) Requests Mapping" --
+	 * "DMA requests to DMA2 controller are routed via 2-to-1 multiplexers
+	 * as shown in Table 12-31. The selection of group 0-1 can be done
+	 * independently for each DMA request via the corresponding
+	 * EVTRTR2_DMA_CTRLn[SEL] field" -- i.e. TWO groups (0 and 1), not the
+	 * aen-cc3501e-bringup overlay's SPI1-routing-comment prose ("1 group,
+	 * for LP peripherals") this used to cite instead; that overlay comment
+	 * describes evtrtr0's SYSTOP routing, not evtrtr2, and was the wrong
+	 * source.  Peripheral request numbers on DMA2_REQ[n] for the LP bank
+	 * above, cross-checked against Table 12-31 by row via two independent
+	 * anchors (BOD_DMA_REQ at request 7, matching HWRM Table 8-6's
+	 * `DMA2_REQ[7]`; LPGPIO_2..7_DMA_REQ at requests 26..31), for a future
+	 * enabling board overlay to wire via `dmas`/`dma-names` (not done on
+	 * any node here -- matching the existing precedent that `dmas` wiring
+	 * is overlay-level, e.g. cc3501e_spi's dmas in the aen-cc3501e-bringup
+	 * overlay, not SoC-dtsi-level): DMA2_REQ[12]/[13] LPSPI RX/TX (Group
+	 * 0), DMA2_REQ[10] ADC24_DONE0 (Group 0; NOT [4] -- Table 12-31's
+	 * request 4 is ADC120_DONE0_DMA_REQ, the main-domain 12-bit ADC).
+	 * Disabled by default, matching dma2; an enabling board overlay flips
+	 * both on together.
 	 */
 	evtrtr2: event-router@400e2000 {
 		compatible = "alif,dma-event-router";
 		reg = <0x400E2000 0x100>;
 		dma-controller = <&dma2>;
 		channels = <32>;
-		dma-groups = <1>;
+		dma-groups = <2>;
 		#dma-cells = <2>;
 		status = "disabled";
 	};

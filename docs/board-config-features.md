@@ -300,7 +300,7 @@ candidate the resolver will accept resolves to a verified DT label:
 * an `on_module.ospi_memories:` entry (e.g. `ospi0`) -- despite the name
   matching a controller node 1:1 on paper, `ospi0` is the ONLY `ospi<n>`
   label anywhere under `zephyr/`
-  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:503`), only the two
+  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:688`), only the two
   E1M-AEN801 board `.dts` files include it, and there it is the OSPI
   CONTROLLER node (`status = "disabled"`, no flash-chip child) -- not an
   enabled flash device. E1M-AEN301/501/701 have no board tree at all;

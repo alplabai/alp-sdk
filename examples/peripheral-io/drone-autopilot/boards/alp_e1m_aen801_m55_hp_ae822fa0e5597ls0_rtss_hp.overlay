@@ -64,7 +64,7 @@
  *   E1M_PWM3 = UT10_T0_A (utimer10, driver A / channel 0) -> P2_4
  *
  * utimer10/pwm10 and utimer11/pwm11 are already instantiated (disabled) for
- * both M55 cores in zephyr/dts/alif/ensemble_e8_peripherals.dtsi:678-712; this
+ * both M55 cores in zephyr/dts/alif/ensemble_e8_peripherals.dtsi:990-1024; this
  * overlay enables them and points each pinctrl group at its pad. The `pwms`
  * cell period below is informational -- autopilot.c:145 passes an explicit
  * `.period_ns = 2500000` (400 Hz) and the backend prefers it
