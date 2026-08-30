@@ -329,14 +329,17 @@ swap through -- there is nothing to revert *to*.  A bad image on any
 AEN target is not automatically rolled back today.  OTA on the AEN
 family was deferred as part of the #1069/#1100 trade (later confirmed
 family-wide by #1445) and stays deferred until a slot budget (or a
-different delivery shape) is chosen -- tracked by #1066.  #1066 also
-root-caused why a swapped board on this MRAM would have re-swapped
-forever: the scratch magic is never cleared when MCUboot's own
-`copy_size == 0` degenerates its scratch-algorithm loop into a no-op.
-A fix is carried in `zephyr/patches.yml` (see the `mcuboot/0002-...`
-entry there), but it is **not bench-verified**: no AEN board has a
-scratch/slot1 partition to exercise it against.  Re-enabling OTA still
-needs a slot budget chosen and the swap path proven on real silicon
+different delivery shape) is chosen -- tracked by #1066.  #1066 root-
+caused why a swapped board on this MRAM would have re-swapped forever
+(the scratch magic is never cleared when MCUboot's own `copy_size == 0`
+degenerates its scratch-algorithm loop into a no-op) and carries a fix
+in `zephyr/patches.yml` (`mcuboot/0002-bootutil_misc-...`), regression-
+tested on the mcuboot host simulator (`mcuboot/0003-sim-...`) but **not
+bench-verified on AEN silicon**: no AEN board has a scratch/slot1
+partition to exercise it against.  #1066's second finding -- a clean,
+valid PERM upgrade request that produced no swap at all -- was never
+root-caused and stays open.  Re-enabling OTA still needs a slot budget
+chosen and the whole swap path (both findings) proven on real silicon
 before the "with revert" claim can be restored here.
 
 Whether to find AEN-family slot budget for OTA, ship it single-slot

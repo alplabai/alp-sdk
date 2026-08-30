@@ -15,35 +15,90 @@ patches:
       for the slot vector address, but slot0 is in MRAM at 0x80000000 -> garbage
       jump -> reboot loop. Derive the slot base from the alif,mram controller reg.
       Bench-proven on E1M-AEN801 (E8): SES->MCUboot->slot0->app RESULT PASS.
-  - path: mcuboot/0002-loader-clear-scratch-trailer-on-degenerate-copy-size-zero.patch
-    sha256sum: 06aacc68510dd476102300490b94297c5ee264ea552d59fc66e5ff69fb8efbe8
+  - path: mcuboot/0002-bootutil_misc-reject-erased-swap_size-trailer.patch
+    sha256sum: 680fe768f8bd8fc401b3962aae7c483c64cce1ae5efc76f63580dbfc3c41ef6f
     module: mcuboot
     author: Alp Lab AB
     email: contact@alplab.ai
-    date: 2026-08-30
+    date: 2026-08-31
     upstreamable: true
     comments: |
-      boot_swap_image() (loader.c) hands copy_size to swap_run() unconditionally.
-      With the scratch algorithm, copy_size == 0 makes find_last_sector_idx()
-      (swap_scratch.c) return -1, so swap_run()'s loop body -- and with it the
-      only call site of boot_swap_sectors(), which is where the scratch-trailer
-      erase lives -- never runs. On a flash device whose erase value is 0x00
-      (Alif Ensemble on-die MRAM, drivers/flash/flash_mram_alif.c
-      FLASH_MRAM_ERASE_VALUE), that erase value is bit-for-bit identical to a
-      genuine swap_size of 0, so a stale trailer field reads back as
-      copy_size == 0 (instead of the obviously-invalid 0xffffffff a 0xFF-erase
-      device would show) while the scratch magic still reads GOOD -- MCUboot
-      then resumes the same no-op swap on every subsequent boot, forever
-      (#1066). Guard copy_size == 0 at the call site: clear the scratch
-      trailer directly instead of resuming a swap that can never complete.
-      No-op for the common case (a real swap-in-progress trailer never
-      carries copy_size == 0); scoped to MCUBOOT_SWAP_USING_SCRATCH, so
-      move/offset builds are unaffected. NOT bench-verified -- the AEN801
-      board DT carries no scratch/slot1 partition as of #1100/#1445 (OTA
-      deferred), so the scratch-swap path this patches is not currently
-      reachable on any alp-sdk board; this closes the defect ahead of a
-      secondary slot being reintroduced. Upstream to mcu-tools/mcuboot then
-      drop.
+      boot_read_swap_size() (bootutil_misc.c) is a raw, unchecked
+      flash_area_read() with no erased-value check. Both its callers --
+      loader.c's boot_swap_image() resume branch, and swap_scratch.c's
+      boot_read_image_header()/find_swap_count() -- only reach it once a
+      GOOD magic has already established a swap trailer is present, so a
+      real swap always carries a nonzero swap_size there. On a flash
+      device whose erase value is 0x00 (Alif Ensemble on-die MRAM,
+      drivers/flash/flash_mram_alif.c FLASH_MRAM_ERASE_VALUE), that erase
+      value is bit-for-bit identical to a genuine swap_size of 0 --
+      unlike the obviously-invalid 0xffffffff a 0xFF-erase device would
+      read back for the same not-really-written field -- so a stale or
+      torn-written swap_size reads back as 0 instead of as clearly
+      erased. copy_size/swap_size == 0 then silently degenerates BOTH
+      call sites: find_last_sector_idx() returns -1 (the scratch-trailer
+      erase inside boot_swap_sectors() never runs, so a swapped board's
+      scratch magic is never cleared and it resumes the same no-op swap
+      forever), and find_swap_count() returns 0 (boot_read_image_header()
+      then substitutes the WRONG slot's header) (#1066).
+
+      Fixes the shared choke point instead of either call site: an
+      erased-value swap_size field now makes boot_read_swap_size() itself
+      return BOOT_EBADSTATUS (via bootutil_buffer_is_erased(), the same
+      helper boot_read_flag() already uses for image_ok/copy_done), and
+      both callers already fail safely on that with no further change --
+      loader.c's existing `assert(rc == 0)` propagates up to
+      boot_read_image_headers() failing, which declines the swap outright
+      (BOOT_SWAP_TYPE_NONE, primary left untouched, BOOT_LOG_WRN'd)
+      instead of proceeding on a 0; swap_scratch.c already turns any
+      nonzero return here into BOOT_EFLASH before ever computing
+      find_swap_count()'s wrong-slot substitution. An earlier version of
+      this patch instead guarded copy_size == 0 at the loader.c call site
+      alone and force-cleared the scratch trailer there -- REJECTED on
+      review (#1066): that guard could destroy an in-flight swap's only
+      surviving sector copy and then report success, and left the
+      find_swap_count() sibling uncovered. This version touches no flash
+      on the failure path and closes both call sites at once.
+
+      Regression-verified on the mcuboot host simulator (companion
+      0003-sim-... patch): pre-fix, the exact scenario this closes
+      SIGSEGVs inside boot_read_image_header()'s wrong-slot substitution;
+      post-fix, 26/26 simulator cases pass, including the new one, across
+      every device/alignment/erased_val {0x00, 0xff} combination. NOT
+      bench-verified on AEN silicon -- the AEN801 board DT carries no
+      scratch/slot1 partition as of #1100/#1445 (OTA deferred), so the
+      scratch-swap path this patches is not currently reachable on any
+      alp-sdk board; this closes the mechanism ahead of a secondary slot
+      being reintroduced, not the still-open second #1066 finding (a
+      clean, valid PERM request that produced no swap at all, never
+      root-caused). Upstream to mcu-tools/mcuboot then drop.
+  - path: mcuboot/0003-sim-swap-size-erased-collision-regression-test.patch
+    sha256sum: 63db24252651d1aacd9e70fed3ee376225073ed655f059d5608cf052507779cc
+    module: mcuboot
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-08-31
+    upstreamable: true
+    comments: |
+      Companion to 0002-bootutil_misc-reject-erased-swap_size-trailer.patch:
+      adds swap_size_erased_collision to the mcuboot host simulator
+      (sim/, cargo + a C compiler, no embedded toolchain) reproducing the
+      erase-value collision that patch closes. bootutil's own flash writes
+      are call-atomic in the simulator, so the collision cannot be produced
+      by interrupting boot_go() alone; the test force-writes the swap_size
+      field (via a new corrupt_swap_size_field() C helper that locates the
+      real offset through boot_swap_info_off(), never a hand-computed one)
+      on top of a genuinely-interrupted, resumable in-progress swap, then
+      asserts the primary slot is never left BOTH stamped complete
+      (magic GOOD, copy_done SET, image_ok SET) AND holding neither the
+      original image nor a complete upgrade.
+
+      Not wired into alp-sdk's own CI -- that needs a Rust + C toolchain
+      plus the ext/mbedtls submodule provisioned for the vendored mcuboot
+      checkout, a separate out-of-scope change. Reproduce manually: `cd
+      bootloader/mcuboot/sim && cargo test --release --test core --
+      swap_size_erased_collision`. Upstream to mcu-tools/mcuboot then
+      drop alongside 0002.
   - path: zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch
     sha256sum: dd363a007acddc263e9168f4c75ac2b4bafd5a8ee438ce655b5f63a0398f2a76
     module: zephyr
