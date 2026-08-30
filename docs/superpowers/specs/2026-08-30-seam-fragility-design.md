@@ -87,10 +87,26 @@ is the single place in the seam where the interface is prose.
 
 Add a structured output mode to the SDK validator and have tan consume it:
 
-- `scripts/validate_board_yaml.py` gains `--format json`, emitting a document
-  that validates against the **existing**
-  `metadata/schemas/diagnostic-v1.schema.json`. No new schema is invented; the
-  repo already has the versioned machine-diagnostics document type.
+- The exporter **already exists**: `scripts/alp_cli/diagnostic_format.py:109`,
+  `machine_json_for_board_yaml()`, whose docstring describes it as
+  "byte-identical to what `--format json` prints, but with no CLI in the call
+  chain -- so a consumer ... binds to the exporter rather than to a command
+  wrapper that ADR 0020 retires". So the work is not writing an exporter; it is
+  deciding what door it gets.
+- **This is not purely additive, and the spec should not claim it is.** Giving
+  `scripts/validate_board_yaml.py` a `--format json` flag re-adds an SDK command
+  wrapper that ADR 0020 end-state B deliberately removed (alp-sdk#1368). That
+  reversal may well be right, but it has to be argued rather than slipped in.
+  The alternative is for tan to bind the library door directly.
+- **A new representation IS needed for half the output.** `diagnostic_format.py:122-125`
+  states that only diagnostics are exported and that the `load_board_yaml`
+  cross-field check is "a SEPARATE contract with no diagnostic-v1
+  representation". That layer is `validate_board_yaml.py:80-91` -- the
+  `FAIL sdk-compat:` / `FAIL consistency:` lines exiting 3/4/5, which tan
+  recovers via `_FAIL_WARN_RE`. Those are the hardware-safety refusals in
+  Risks below, so "no new schema is invented" is false precisely where it
+  matters most. This answers Open question 1: **no**, `diagnostic-v1` does not
+  cover them today.
 - The human-readable output is unchanged and remains the default. This is
   additive; no existing invocation changes behaviour.
 - `tan validate` / `tan diff` switch to `--format json` and drop the regexes.
@@ -109,7 +125,7 @@ Harden tan's regexes. This moves the failure later, not away: the coupling to
 prose remains, and a hardened regex fails in a more confusing way than a
 loose one.
 
-## Problem 2 — the class→runtime decision exists twice, and no schema states it
+## Problem 2 — the class→runtime decision exists twice, and no schema enforces it
 
 ### What is there today
 
@@ -123,10 +139,15 @@ Two independent copies of the same rule:
   `cortex-m` → zephyr.
 
 An important correction to an earlier reading of this: `topology.py:64-70`'s
-`_load_board_os_enum` already reads the `os` enum from `board.schema.json`, so
+`_core_os_choices` already reads the `os` enum from `board.schema.json`, so
 the *enum* is not duplicated. What is duplicated is the **class-determined
 mapping** — which runtime a core class implies when the user has not chosen.
-No schema states that mapping. It is not user-selectable, and any second
+`metadata/schemas/board.schema.json`'s `$defs.core_entry.properties.os`
+description does state the mapping in prose -- "The OS runtime is DERIVED from
+the core's silicon class and is not selectable: Cortex-M -> Zephyr (RTOS),
+Cortex-A -> Yocto (Linux)" -- but nothing expresses it in a machine-readable
+form, and the same description says the cross-file check "is enforced in the
+`alp_orchestrate` package ... since JSON Schema cannot see the SoC spec". It is not user-selectable, and any second
 implementation must reproduce it exactly to be correct.
 
 ### Why it is fragile
@@ -227,15 +248,15 @@ Recorded so they are not re-litigated:
   `python/tan/commands/build_cmd.py:1034,1330,1349,1467` plus
   `python/tan/commands/build/execute.py:32,141,890,1232` route skip/fail
   through it.
-- **`_fix_link`'s regexes stay.** `scripts/alp_template.py:1213` and
-  `:1395-1404`. The decisions (which core, which pins, which SKU) are already
+- **`_fix_link`'s regexes stay.** `scripts/alp_template.py:1262` and
+  `:1444-1453`. The decisions (which core, which pins, which SKU) are already
   metadata-derived; the regexes are the application step, and each `subn`
   asserts its occurrence count and hard-errors on 0 or more than 1. Replacing
   them with `{{sku}}` holes would break the property that canonical examples
   are real, buildable, CI-tested projects — you would carry a real example and
   a templated twin, and they would drift. The one policy nugget worth
   extracting is the *target*: the base URL and the `v<version>`-else-`main`
-  fallback around `scripts/alp_template.py:1275`. That is a small catalog
+  fallback around `scripts/alp_template.py:1324`. That is a small catalog
   field, and it is in scope only if it can be done without touching the
   rewrite machinery.
 - **No embeddable policy engine.** CUE, Rego, Starlark or WASM are
@@ -264,7 +285,7 @@ Recorded so they are not re-litigated:
   `MANIFEST.md:1-8` states it is "`alp-sdk --emit scaffold` output, captured
   byte-for-byte ... so `tan init`/`tan scaffold` can read it without ever
   shelling the SDK". That works because the SDK hands over finished bytes from
-  `render_to_envelope` (`scripts/alp_template.py:1452-1471`). If scaffold ever
+  `render_to_envelope` (`scripts/alp_template.py:1501-1520`). If scaffold ever
   follows the other nineteen modes into the "relocated renderer" pattern, the
   consumer has to port occurrence-checked regex surgery and per-SKU pin-rename
   derivation into its own process — which is a second parity apparatus, of
@@ -273,9 +294,12 @@ Recorded so they are not re-litigated:
 - **Adjacent, and larger than this spec:** `scripts/alp_orchestrate/` is not
   only a planner. `SdkRevisionUnknown` / `SdkRevisionNotBuildable` /
   `SdkRevisionUnsupported` come from `alp_orchestrate.models` and are raised at
-  `scripts/alp_project_loader.py:436-457`, imported by
+  `scripts/alp_orchestrate/loader.py:653,660` (unknown), `:702,709` (not
+  buildable) and `:749` (unsupported), reached from `load_board_yaml` at
+  `.../loader.py:1238-1260` on every emit, imported by
   `scripts/validate_board_yaml.py:21`,
-  `scripts/gen_catalog.py:93,340,353-359` and seven `check_*.py` gates. That is
+  `scripts/gen_catalog.py:93,340,353-359`; sixteen `check_*.py` scripts import
+  `alp_orchestrate` and six reach this refusal via `load_board_yaml`. That is
   the SDK's refuse-to-build-unbuildable-silicon enforcement, and
   `validate_board_yaml.py` is the very script tan spawns on its default
   validate path. Nothing in this spec removes it; it is recorded here because
@@ -317,7 +341,7 @@ frozen", as though the enforcement were missing. It is not.
 `additionalProperties: false` with properties exactly
 `constraints`, `default`, `description`, `name`, `type` — `substitute` is not
 among them. The schema does not freeze the key; it **rejects** it. The
-implementation's own docstring says so (`scripts/alp_template.py:261-263`: "the
+implementation's own docstring says so (`scripts/alp_template.py:311-313`: "the
 schema forbids it -- additionalProperties: false"), and the hook is reachable
 only from a synthetic test fixture.
 
@@ -343,4 +367,5 @@ Not implemented in this spec; it belongs to the implementation plan.
 
 Every file:line in this document was read during the survey, the adversarial
 review, or the cross-repo audit on 2026-08-30, against `alp-sdk` at
-`origin/dev` = `00627b88` and `tan-cli` at `b9aa697`.
+`origin/dev` = `bc6974d35` (citations rebased from the `00627b88` merge-base)
+and `tan-cli` at `b9aa697`.
