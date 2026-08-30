@@ -1,4 +1,4 @@
-# Closing three fragile points in the alp-sdk ↔ tan seam
+# Closing four fragile points in the alp-sdk ↔ tan seam
 
 Date: 2026-08-30
 Status: Draft — for maintainer review
@@ -8,12 +8,17 @@ Scope owner: alpCaner
 
 A survey of the SDK↔CLI seam, an adversarial review of it, and a
 mode-by-mode audit across both repos produced one uncomfortable result: the
-seam is not what its documentation implies, and three specific places in it
+seam is not what its documentation implies, and four specific places in it
 break on changes that no schema and no gate can see.
 
-This spec covers only those three. It deliberately does **not** decide
+Three of the four were in the first draft. Problem 4 — `build-plan-v1`'s key
+names crossing three repos with no cross-repo gate — was found in review of
+that draft and added here; the review's own verdict was that it is "the same
+class as Problem 1", and it is.
+
+This spec covers only those four. It deliberately does **not** decide
 planner ownership; the ADR-0026 acceptance and its amendment are a separate
-document, because the three fixes here hold their value whichever way that
+document, because the four fixes here hold their value whichever way that
 decision goes.
 
 ## What the seam actually is (measured, 2026-08-30)
@@ -71,9 +76,28 @@ validator: `VALIDATOR_SCRIPT = ("scripts", "validate_board_yaml.py")` at
 It then recovers structure by **parsing that subprocess's stderr text** —
 `_RICH_HEADER_RE`, `_ARROW_RE`, `_BLOCK_SEE_RE` and friends at
 `tan-cli/python/tan/commands/validate_cmd.py:397-448` — to extract severity,
-the `ALP-Bxxx` code, the hint and the `doc:` URL. The comment at `:437-441`
-states the message body is passthrough, "taken from the validator's own
-output rather than rebuilt from the code".
+the `ALP-Bxxx` code, the hint and the `doc:` URL.
+
+**Correcting an attribution made in the first draft of this section.** It cited
+the comment at `:437-441` as stating that the message body is passthrough. That
+comment belongs to `_BLOCK_SEE_RE` (`:442`) and scopes "taken from the
+validator's own output rather than rebuilt from the code" to the **doc URL**
+only, for a stated reason: alp-sdk's `_doc_url` honours `ALP_DIAG_BASE_URL`, so
+synthesising the path on tan's side would contradict the child whenever that
+variable is set. The message body is a different field — the third capture group
+of `_RICH_HEADER_RE` (`:408`) — and no comment describes it as passthrough. The
+fragility claim survives the correction; the citation did not.
+
+**tan does not merely parse the prose for display — it rebuilds alp-sdk's own
+diagnostic document out of the parse.** `_diagnostic_v1_document`
+(`tan-cli/python/tan/commands/validate_cmd.py:944`) assembles a `diagnostic-v1`
+payload from the regex findings, stamps alp-sdk's `schemaVersion`, and emits it
+at `:1154` for `--format diagnostic-v1`; its own docstring says it is "mirroring
+`scripts/alp_cli/diagnostic_format.py:to_machine_json`'s shape". So the round
+trip today is: alp-sdk builds a structured document, renders it to prose, and tan
+regex-parses the prose back into that same schema — while alp-sdk holds an
+exporter producing the document directly. That is the sharpest statement of this
+problem, and the first draft did not make it.
 
 ### Why it is fragile
 
@@ -125,15 +149,18 @@ Harden tan's regexes. This moves the failure later, not away: the coupling to
 prose remains, and a hardened regex fails in a more confusing way than a
 loose one.
 
-## Problem 2 — the class→runtime decision exists twice, and no schema enforces it
+## Problem 2 — the class→runtime decision exists three times, and no schema enforces it
 
 ### What is there today
 
-Two independent copies of the same rule:
+Three copies of the same `cortex-a` / `cortex-m` prefix branch, not two:
 
 - `alp-sdk/scripts/alp_orchestrate/topology.py:28-43` —
   `_default_os_from_core_type`, also reached from
   `scripts/alp_orchestrate/loader.py:535-555`.
+- `alp-sdk/scripts/alp_orchestrate/topology.py:80-87` — `_runtime_class`, the
+  same prefix test a second time in the same file, mapping to `linux` / `rtos`
+  instead of to runtime names. Different codomain, identical rule.
 - `tan-cli/python/tan/core/os_class.py:48-52,79-81` —
   `CLASS_RUNTIMES = ("yocto", "zephyr")`, `cortex-a` → yocto,
   `cortex-m` → zephyr.
@@ -155,6 +182,19 @@ implementation must reproduce it exactly to be correct.
 This is the rule the parity apparatus pays for. It is a closed lookup with a
 handful of entries, it is not consumer-state-dependent, and it is invisible to
 every gate that validates the schemas.
+
+**What the freshness gate does and does not cover** — the first draft omitted
+this, and it cuts both ways. An **alp-sdk-side** edit *is* caught:
+`tan-cli/python/tests/gates/test_planner_relocation_freshness.py` pins the
+SHA-256 of every upstream `scripts/alp_orchestrate/*.py`, `topology.py`
+included, and `dispatch-tan-parity.yml` fires at tan on every alp-sdk push. A
+**tan-side** edit alone is caught by nothing: tan's copy lives at
+`python/tan/core/os_class.py`, *outside* `tan/planner/`, and it is absent from
+`HAND_PORT_SOURCES` (`:993-1006`) — that gate's second audit, the one covering
+hand-ported files outside the hashed tree. The exposure is one-directional, in
+the direction the gate cannot see. That is tan-cli#279 exactly, the precedent
+ADR-0026 cites by name: `PINNED_HASHES` only ever looks inside
+`scripts/alp_orchestrate/`.
 
 ### Proposed change
 
@@ -201,6 +241,21 @@ Consumption in tan is split:
 - `tan validate` does **not** consult the catalog at all; it takes the message
   body from parsed stderr (Problem 1).
 
+**And alp-sdk itself never reads it back.** Every in-repo reference is a
+producer or a drift gate: `scripts/gen_error_catalog.py:45` writes it,
+`scripts/check_diagnostic_narratives.py:6` and
+`tests/scripts/test_gen_error_catalog.py:18` check it against its sources, and
+`.github/workflows/pr-generated-files.yml:283,302` plus
+`scripts/test-all.sh:964,987,995` regenerate-and-diff it.
+`scripts/alp_cli/explain.py`, which would have been the in-repo consumer, no
+longer exists. So the heading undersells it: this is not a half-consumed in-repo
+artefact but a **pure cross-repo export with exactly one consumer, in another
+repo**, and there is no error-catalog schema among the 27 under
+`metadata/schemas/`. That is a stronger argument for schema-gating than
+"half-consumed" makes — the only thing standing between a shape change and a
+broken `tan explain` is a regenerate-and-diff of the producer, which passes by
+construction precisely when the producer is what changed.
+
 ### Why it matters, and what is deliberately *not* changing
 
 The adversarial review's verdict is adopted here: the catalog — code, meaning,
@@ -225,6 +280,82 @@ Harden the generated file into an actual contract:
   catalog gains its second real consumer, which is what makes the contract
   worth having.
 
+## Problem 4 — `build-plan-v1`'s key names are a three-repo contract with no cross-repo gate
+
+Added after review. This is the same class as Problem 1 — a contract carried by
+convention rather than by a mechanism — and it was missing from the first draft.
+
+### What is there today
+
+`metadata/schemas/build-plan-v1.schema.json:8` fixes the top-level `required`
+list at eight names:
+
+```json
+["schemaVersion", "generatedBy", "boardYaml", "sku", "buildRoot", "slices", "sharedArtefacts", "warnings"]
+```
+
+Two other repos restate that list **verbatim**, as source, rather than deriving
+it:
+
+- `tan-cli/python/tan/core/build_plan.py:24-27` — `_REQUIRED_TOP`, the same
+  eight strings in the same order; `:40` — `_REQUIRED_STR_TOP` repeats four of
+  them; `:582` reads `raw["boardYaml"]` positionally into `BuildPlan`.
+- `alp-sdk-vscode/src/ideHub/messages.ts` — `interface BuildPlanData`, the same
+  eight keys as TypeScript fields (`origin/main` `00d5e6ff` `:262-271`;
+  `origin/dev` `6101634f` `:472-481`).
+
+The schema's own description already states the rule, in prose: "camelCase keys
+form a CLI-consumer contract, not in-repo YAML. Stability: schemaVersion 1 is
+locked with tan-cli; bump it and record the change in CHANGELOG before a
+breaking change."
+
+### Why it is fragile
+
+Rename `boardYaml` in a single alp-sdk PR and every gate stays green.
+`scripts/check_build_plan.py:40` loads its validator from
+`metadata/schemas/build-plan-v1.schema.json` — **the very file the PR just
+edited** — so it validates the new plan against the new schema and passes. The
+gate cannot see a rename by construction; it has no fixed point to compare
+against.
+
+The two consumers then fail differently, and the worse one fails quietly:
+
+- tan raises `build.plan-invalid` — loud, at least.
+- alp-sdk-vscode's `BuildPlanData` is a TypeScript *interface*, erased at
+  runtime. The field is simply `undefined`. No error, no diagnostic; the panel
+  renders a plan with a blank board path.
+
+This is Problem 2's shape one layer up: the rule is stated in a description and
+restated in three implementations, and nothing derives it from one place.
+
+### Proposed change
+
+Treat `build-plan-v1`'s key names as ABI, using the mechanism this repo already
+runs for the C ABI (`scripts/abi_snapshot.py` + `docs/abi/`, enforced by
+`check · generated files in sync`):
+
+- Snapshot the schema-derived key set — top-level plus each `$defs` object — to
+  a generated file.
+- A gate diffs the live schema's key set against that snapshot. A rename is
+  therefore a two-file commit: the schema *and* the snapshot. That makes the
+  break an explicit, reviewable decision instead of an invisible one, which is
+  the whole property `check_build_plan.py` cannot provide while it reads the
+  schema under test.
+- State in the same gate's failure text what the schema description already
+  says: a key rename is a `schemaVersion` bump, not an edit to version 1.
+
+Against the rule: nothing here crosses the seam as policy — the key names *are*
+the seam's vocabulary. It qualifies for the same reason Problem 2 does. The
+contract is restated in three places instead of derived from one, and no
+mechanism notices when the restatements stop agreeing.
+
+### Explicitly not proposed
+
+Generating tan's `_REQUIRED_TOP` and vscode's `BuildPlanData` from the schema.
+That is a codegen step in two more repos to remove a duplication a snapshot gate
+already detects, and it would put an alp-sdk build dependency into both
+consumers. Detection is the missing property here, not derivation.
+
 ## Non-goals
 
 Recorded so they are not re-litigated:
@@ -234,7 +365,7 @@ Recorded so they are not re-litigated:
   external consumer must agree with a CI suppression list; a central
   exceptions file is a dumping ground.
 - **A gate restating a schema rule is not drift.** Deliberate redundancy is
-  what a gate is for. Only a *producer* restating a rule is drift. The 63
+  what a gate is for. Only a *producer* restating a rule is drift. The 67
   `check_*.py` scripts are not a cleanup target.
 - **`_ALLOWED_TYPES` stays.** `scripts/check_emit_kconfig_contract.py:49`
   restates Kconfig's own type system, an upstream Zephyr fact. A gate that
@@ -323,7 +454,8 @@ Recorded so they are not re-litigated:
    is it an oversight? The difference is whether a typo in a new SoM family's
    revision entry is caught or silently accepted, which matters because that
    table is the input to the SDK-version compatibility window. Not in scope
-   here; it needs its own decision and probably its own issue.
+   here; it needs its own decision. Refs
+   [#1850](https://github.com/alplabai/alp-sdk/issues/1850), opened for it.
 ## Decided during review — the unused `substitute` hook stays, because the schema already locks the door
 
 `scripts/alp_template.py` declares an opt-in
@@ -369,3 +501,12 @@ Every file:line in this document was read during the survey, the adversarial
 review, or the cross-repo audit on 2026-08-30, against `alp-sdk` at
 `origin/dev` = `bc6974d35` (citations rebased from the `00627b88` merge-base)
 and `tan-cli` at `b9aa697`.
+
+Problem 4 and the review corrections above were verified on 2026-08-30 against
+`alp-sdk` at `origin/dev` = `ed91fde0`, `tan-cli` at `b9aa697`, and
+`alp-sdk-vscode` at `origin/main` = `00d5e6ff` and `origin/dev` = `6101634f`.
+The `alp-sdk-vscode` half of Problem 4 was flagged strong-but-unconfirmed in
+review because the reviewer's local checkout sat on a feature branch; it is
+confirmed here on both of that repo's shared branches, and the consumer is
+`src/ideHub/messages.ts`, not `src/ideHub/buildPlanPanel.ts` — that file exists
+but contains no `boardYaml` reference.
