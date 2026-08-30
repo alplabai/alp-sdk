@@ -1,4 +1,4 @@
-# 0032. Licence-gated vendor data is carried in a segregated subtree under its own terms, not admitted to the curated-library allowlist
+# 0032. Vendor data carried under its own non-Apache terms lives in a segregated subtree, not the curated-library allowlist
 
 Status: Proposed
 Date: 2026-08-30
@@ -10,11 +10,16 @@ Deciders: alpCaner
 Everywhere else, "licence-gated" means *we do not redistribute it; obtain it
 from the vendor* -- `docs/ci/HW-IN-LOOP.md:12` ("SETOOLS is license-gated and
 must not be redistributed"), `docs/getting-started.md:147`,
-`docs/adr/0021-toolchain-provisioning.md:428`. **In this ADR it means the
-opposite**: vendor data that the vendor *does* permit us to redistribute, but
-under its own terms rather than the repo's Apache-2.0. That inversion is
-unfortunate and the title is a candidate for renaming before this is accepted
-(ADRs here are append-only, so the filename is permanent once landed).
+`docs/adr/0021-toolchain-provisioning.md:428`. This ADR is about the
+**opposite** case: vendor data that the vendor *does* permit us to
+redistribute, but under its own terms rather than the repo's Apache-2.0.
+
+Rather than invert an established term, that case is named **vendor data under
+its own terms** throughout — in the title, the filename and the index row. The
+rename happened before this landed, deliberately: ADRs here are append-only
+(`docs/adr/README.md:10-12`), so a filename carrying the inverted sense would
+have been permanent. "Licence-gated" keeps its existing meaning everywhere,
+including in this document.
 
 
 [#948](https://github.com/alplabai/alp-sdk/issues/948) wants the Alif Ensemble
@@ -134,6 +139,24 @@ maintainer decision per vendor, and nothing here is legal advice.
   the parts this SDK models — including `AE822FA0E5597LS0`, the E1M-AEN801 part
   on the bench, so the one acceptance criterion that matters could not be
   demonstrated from it.
+- **Do not redistribute at all; resolve a customer-supplied path.**
+  `variants[].debug.svd` as a bare relative path resolved repo-directory-first
+  then `ALP_SVD_DIR`, modelled on the `SETOOLS_DIR` pattern this repo already
+  uses for genuinely licence-gated vendor tooling. Not rejected on merit: it
+  needs no licence work at all, half of it has already shipped as
+  `tan debug-config --svd`, and it is the fallback if the per-vendor
+  redistribution decision goes the other way. It is also what defines the
+  **absence semantics** an implementer needs and this ADR would otherwise leave
+  unstated: when the subtree is absent and nothing resolves, the consumer omits
+  `svdFile` rather than failing the session — an unresolvable SVD costs only the
+  peripheral view.
+- **Put the bytes in `alp-sdk-internal`.** `docs/ci/runner-architecture.md:113`
+  records that repo as the existing home for material that cannot be public.
+  Rejected for this case specifically: the Alif terms permit public
+  redistribution, so moving the files private would withhold from customers
+  something the vendor allows them to have, and would leave the public SDK
+  unable to populate the peripheral view out of the box — the entire point of
+  #948.
 - **Adopt full REUSE compliance.** The tidy answer, and the one a licence
   scanner would prefer. Rejected for now: the benefit is tooling nobody here
   runs. (The cost is smaller than it first appears -- 587 of the 612 `.c`/`.h`/
@@ -143,7 +166,7 @@ maintainer decision per vendor, and nothing here is legal advice.
   is already in use for every existing third-party component. The `NOTICE` half
   is **not**: of the 14 directories under `vendors/`, seven vendored-source
   components have no `NOTICE` entry at all (`catch2`, `doctest`, `etl`, `fmt`,
-  `jsmn`, `minimp3`, `u8g2`; `vendors/etl/` alone is 363 tracked headers).
+  `jsmn`, `minimp3`, `u8g2`; `vendors/etl/` alone is 363 tracked files, 361 of them headers).
   `deepx-dxm1` and `nxp-imx93` have no by-name entry either but are covered by
   the "Vendor BSPs and SDK binaries" paragraph. So Decision 3 is repairing an
   existing drift, not merely continuing a practice.
