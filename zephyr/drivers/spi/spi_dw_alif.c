@@ -37,6 +37,9 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(spi_dw_alif);
 
+/* Max push/pull iterations in the polled master loop before declaring a stall. */
+#define SPI_DW_POLL_GUARD 4000000u
+
 #include <errno.h>
 
 #include <zephyr/kernel.h>
@@ -976,9 +979,6 @@ static bool spi_dw_should_dma(const struct spi_dw_config *info,
 	return len >= (size_t)CONFIG_SPI_DW_ALIF_DMA_MIN_LEN;
 }
 #endif /* CONFIG_SPI_DW_ALIF_USE_DMA */
-
-/* Max push/pull iterations in the polled master loop before declaring a stall. */
-#define SPI_DW_POLL_GUARD 4000000u
 
 /* Batched polled transfer for the common 8-bit master case.
  *
