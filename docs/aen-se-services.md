@@ -314,8 +314,10 @@ memset(&pkt, 0, sizeof(pkt));
 pkt.header.hdr_service_id = SERVICE_APPLICATION_OSPI_WRITE_KEY_ID;
 pkt.send_command          = OSPI_WRITE_EXTERNAL_KEY_OSPI0; /* R2 BOM: OSPI0 only */
 memcpy((void *)pkt.send_key, key, sizeof(pkt.send_key));   /* fixed 16 B -- AES-128 only */
+pkt.resp_error_code       = UINT32_MAX;                    /* sentinel -- see below */
 int rc = se_service_send_request((uint32_t *)&pkt, (uint32_t)sizeof(pkt));
-/* rc==0 && pkt.resp_error_code == OSPI_WRITE_KEY_SUCCESS => the SE wrote the key */
+/* rc==0 && pkt.header.hdr_error_code == SERVICES_REQ_SUCCESS
+ *       && pkt.resp_error_code == OSPI_WRITE_KEY_SUCCESS => the SE wrote the key */
 ```
 
 `se_service_send_request()` is the same public seam
@@ -328,6 +330,32 @@ a DMA address like the CryptoCell key fields) -- it is the one place the SDK
 holds the key in clear, and the caller (`alp_alif_storage_secaes_key_provision`)
 wipes the whole packet with a compiler barrier immediately after the call
 returns, success or failure.
+
+**Both verdict fields are checked, not just one.** `send_msg_to_se()` (hal_alif
+`se_service.c`) returns `rc==0` as soon as *any* response frame arrives over
+the mailbox -- it never itself inspects `header.hdr_error_code` or
+`resp_error_code`, and no `se_service_*` wrapper in hal_alif does either. A
+first cut of this backend checked only `resp_error_code != OSPI_WRITE_KEY_SUCCESS`,
+which is a **false-`ALP_OK` bug**: `OSPI_WRITE_KEY_SUCCESS` is `0x0`, and the
+packet is `memset` to 0 before the send, so an SE that answers with a
+transport-layer NACK (e.g. `SERVICES_RESP_UNKNOWN_COMMAND` if this firmware
+simply doesn't implement service 105 at all) and never touches
+`resp_error_code` would read back indistinguishable from success. The fix
+pre-seeds `resp_error_code` to a non-success sentinel (`UINT32_MAX`) before
+the send and checks `header.hdr_error_code != SERVICES_REQ_SUCCESS` as well
+-- so a provisioning tool cannot report success while the OSPI AES slot was
+never keyed.
+
+**The call blocks -- for up to ~35 s -- and is bracketed against a
+concurrent close.** `se_service_send_request()`'s `se_service_ensure_ready()`
++ `svc_mutex` each carry hal_alif's 15 s `MUTEX_TIMEOUT`, plus a 10 s
+`SERVICE_TIMEOUT`. `alp_alif_storage_secaes_key_provision()` /
+`_get_status()` both enter via `alp_handle_op_enter()` before touching the
+handle and leave via `alp_handle_op_leave()` on every exit path (issue #629's
+open/op/close guard, `src/common/alp_slot_claim.h`) -- the same pairing
+`alp_storage_close()` drains on, so a close racing an in-flight provision
+call blocks until it returns instead of freeing/recycling the handle out
+from under it.
 
 **Key width is fixed at 16 bytes (AES-128).** `OSPI_KEY_LENGTH_BYTES` in
 `services_lib_api.h` and `ospi_write_key_svc_t.send_key`'s array size both
@@ -348,6 +376,16 @@ for this call specifically (`AUGD0014` is Alif-confidential; the passages
 above are paraphrased, not quoted). §0.1's general SES **v110** floor
 (ADR 0030) is what this SDK tracks; the bench unit's `SES A0 v1.110.0`
 already exceeds both it and `AUGD0014`'s own v1.109.0 doc revision.
+
+**Gated `CONFIG_ALP_SDK_STORAGE_ALIF_SECAES`, default OFF.** About eight
+in-tree AEN examples already set `CONFIG_HAS_ALIF_SE_SERVICES=y`
+(`aen-aipm-read`, `aen-alp-rpc`, `aen-dualcore-doorbell`/`-ipc`/`-master`/
+`-he-master`, `aen-rpc-pingpong`, `aen-se-service-*`), which would otherwise
+turn this real SE transaction on by default for all of them. Unlike
+`CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM` (default ON *because* that
+path bench-PASSED, `docs/aen-bench-bringup.md`), this gate stays OFF until
+the round-trip below is proven; flip the default in the same change that
+adds a bench PASS row.
 
 **UNVERIFIED ON SILICON.** No bench unit reachable at implementation time has
 an OSPI SecAES-relevant part populated -- the bench module is board rev r1

@@ -24,12 +24,12 @@
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      alp_alif_storage_secaes_key_provision() has a real body
  *      (issue #224) over the hal_alif SE-service transport, gated on
- *      @c CONFIG_ALP_SDK_STORAGE_ALIF_SECAES -- UNVERIFIED ON
- *      SILICON: no bench unit reachable at implementation time has
- *      an OSPI SecAES-relevant part populated.
- *      alp_alif_storage_secaes_get_status() still returns
- *      @ref ALP_ERR_NOSUPPORT -- Alif has not published an SE
- *      service that reads the engine's status back.  Promotes to
+ *      @c CONFIG_ALP_SDK_STORAGE_ALIF_SECAES -- default OFF, since
+ *      UNVERIFIED ON SILICON: no bench unit reachable at
+ *      implementation time has an OSPI SecAES-relevant part
+ *      populated.  alp_alif_storage_secaes_get_status() still
+ *      returns @ref ALP_ERR_NOSUPPORT -- Alif has not published an
+ *      SE service that reads the engine's status back.  Promotes to
  *      [ABI-STABLE] when three vendor families ship extensions.
  */
 
@@ -60,37 +60,38 @@ typedef enum {
 /**
  * @brief Provision an inline-AES key for the OSPI SecAES engine.
  *
- * @par Supported silicon: alif:ensemble:e4, alif:ensemble:e6, alif:ensemble:e8
+ * @par Supported silicon: alif:ensemble:e8 -- e4 / e6 expose the same
+ *      AES_CONTROL_LD_KEY fabric but whether their SE firmware
+ *      implements this service is untried, not unsupported.
  *
  * Binds the supplied key into a hardware slot.  After the call
  * returns the host RAM no longer holds the key -- callers may
- * (and should) zeroise the source buffer.  The cipher mode +
- * IV / tweak passed via @ref alp_storage_configure_inline_aes
- * are honoured by the same hardware slot.
+ * (and should) zeroise the source buffer.  The cipher mode + IV /
+ * tweak passed via @ref alp_storage_configure_inline_aes are
+ * honoured by the same hardware slot.  Blocks up to ~35 s for the
+ * SE round-trip (a concurrent @ref alp_storage_close waits for it).
  *
  * @param[in] s       Storage handle from @ref alp_storage_open
  *                    opened against Alif silicon.
  * @param[in] key     Key bytes.  Must be non-NULL.
- * @param[in] key_bytes  Must be 16 -- AES-128 is the only width the
- *                    OSPI SecAES write-key SE service accepts
- *                    (Alif AUGD0014 "SE Host Services API" v1.109.0
- *                    `SERVICES_application_ospi_write_key`;
- *                    hal_alif's `OSPI_KEY_LENGTH_BYTES` is fixed at
- *                    16).  The portable, still-unimplemented
+ * @param[in] key_bytes  Must be 16 -- the only width AES-128 the SE
+ *                    write-key service accepts.  See
+ *                    src/backends/ext/alif/storage.c for the vendor
+ *                    citation; the portable, still-unimplemented
  *                    @ref alp_storage_configure_inline_aes surface is
- *                    a separate call and does take 16/24/32.
+ *                    a separate call taking 16/24/32.
  *
  * @return  @ref ALP_OK on success.
  *          @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC if s was opened on
  *               non-Alif silicon.
  *          @ref ALP_ERR_INVAL on NULL key or key_bytes != 16.
- *          @ref ALP_ERR_NOSUPPORT if this build has no hal_alif SE
- *               service client linked (@c CONFIG_ALP_SDK_STORAGE_ALIF_SECAES
- *               off).
- *          @ref ALP_ERR_NOT_READY if the SE is busy or the transport
- *               timed out -- safe to retry.
- *          @ref ALP_ERR_IO on a transport failure or an SE-reported
- *               key-load fault (bus error, OTP read failure).
+ *          @ref ALP_ERR_NOSUPPORT if no hal_alif SE client is linked
+ *               (@c CONFIG_ALP_SDK_STORAGE_ALIF_SECAES off).
+ *          @ref ALP_ERR_NOT_READY if @p s is closed/closing, the SE
+ *               is busy, or the transport timed out -- retry-safe.
+ *          @ref ALP_ERR_IO on a transport failure, an SE-reported
+ *               key-load fault, or a transport-layer NACK (this SE
+ *               firmware may not implement the service).
  */
 alp_status_t
 alp_alif_storage_secaes_key_provision(alp_storage_t *s, const uint8_t *key, uint8_t key_bytes);
@@ -113,10 +114,12 @@ alp_alif_storage_secaes_key_provision(alp_storage_t *s, const uint8_t *key, uint
  *
  * @return  @ref ALP_OK / @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC /
  *          @ref ALP_ERR_INVAL (NULL status_out) /
- *          @ref ALP_ERR_NOSUPPORT always, today -- Alif has not
- *               published an SE service that reads the OSPI SecAES
- *               engine's status back (unlike key provisioning, this
- *               is not a "vendor pack missing" gap; see
+ *          @ref ALP_ERR_NOT_READY if @p s is closed/closing (a
+ *               concurrent @ref alp_storage_close won the race) /
+ *          @ref ALP_ERR_NOSUPPORT always otherwise, today -- Alif has
+ *               not published an SE service that reads the OSPI
+ *               SecAES engine's status back (unlike key provisioning,
+ *               this is not a "vendor pack missing" gap; see
  *               src/backends/ext/alif/storage.c).
  */
 alp_status_t alp_alif_storage_secaes_get_status(alp_storage_t *s, uint32_t *status_out);

@@ -17,6 +17,9 @@
  *   (i) overflow-safe range helper for fixed-capacity backends
  *   (j) SecAES key / key_bytes validation reaches the body, and
  *       NOSUPPORT on a build with no SE transport linked (issue #224)
+ *   (k) SecAES calls gate on the open/op/close lifecycle -- a
+ *       closed/never-opened handle -> NOT_READY before the vendor
+ *       check runs
  *
  * Backends visible on this test build:
  *   sw_fallback   (priority 0,   "*" wildcard)
@@ -42,6 +45,7 @@
 #include <alp/storage.h>
 
 #include "../../../../src/backends/storage/storage_ops.h"
+#include "../../../../src/common/alp_slot_claim.h"
 
 ZTEST_SUITE(alp_storage_registry, NULL, NULL, NULL, NULL, NULL);
 
@@ -219,6 +223,12 @@ ZTEST(alp_storage_registry, test_vendor_ext_gates_non_matching_backends)
 	memset(&h, 0, sizeof(h));
 	h.in_use  = true;
 	h.backend = be;
+	/* The Alif SecAES calls now gate on the open/op/close guard (issue
+     * #629, src/common/alp_slot_claim.h) before touching the handle --
+     * a lifecycle left at 0 (ALP_HANDLE_LC_UNOPENED) reads as
+     * closed/never-opened and short-circuits to ALP_ERR_NOT_READY
+     * before the vendor check runs. */
+	h.lifecycle = ALP_HANDLE_LC_OPEN;
 
 	zassert_equal(alp_alif_storage_secaes_key_provision(&h, key16, 16u),
 	              ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
@@ -308,8 +318,9 @@ ZTEST(alp_storage_registry, test_secaes_key_provision_validation)
 	};
 	struct alp_storage h;
 	memset(&h, 0, sizeof(h));
-	h.in_use  = true;
-	h.backend = &fake_alif_backend;
+	h.in_use    = true;
+	h.backend   = &fake_alif_backend;
+	h.lifecycle = ALP_HANDLE_LC_OPEN; /* see the (g) test above */
 
 	static const uint8_t key16[16] = { 0 };
 
@@ -325,4 +336,32 @@ ZTEST(alp_storage_registry, test_secaes_key_provision_validation)
 	/* Valid key + width -> NOSUPPORT on this build (no SE transport
      * linked). */
 	zassert_equal(alp_alif_storage_secaes_key_provision(&h, key16, 16u), ALP_ERR_NOSUPPORT);
+}
+
+/* ---------- (k) closed/never-opened handle -> NOT_READY before the vendor
+ * check runs (issue #629's op_enter gate, added to the SecAES calls
+ * alongside issue #224) ---------------------------------------------- */
+
+ZTEST(alp_storage_registry, test_secaes_calls_gate_on_open_lifecycle)
+{
+	static const alp_backend_t fake_alif_backend = {
+		.silicon_ref = "alif:ensemble:e8",
+		.vendor      = "alif",
+		.base_caps   = 0u,
+		.priority    = 100,
+		.ops         = NULL,
+		.probe       = NULL,
+	};
+	struct alp_storage h;
+	memset(&h, 0, sizeof(h));
+	h.in_use  = true;
+	h.backend = &fake_alif_backend;
+	/* h.lifecycle left at 0 (ALP_HANDLE_LC_UNOPENED) -- alp_handle_op_enter()
+     * must refuse before _is_alif_backend() ever runs. */
+
+	static const uint8_t key16[16]  = { 0 };
+	uint32_t             status_out = 0u;
+
+	zassert_equal(alp_alif_storage_secaes_key_provision(&h, key16, 16u), ALP_ERR_NOT_READY);
+	zassert_equal(alp_alif_storage_secaes_get_status(&h, &status_out), ALP_ERR_NOT_READY);
 }

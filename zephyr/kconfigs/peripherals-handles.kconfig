@@ -175,7 +175,7 @@ config ALP_SDK_STORAGE_SW_FALLBACK
 config ALP_SDK_STORAGE_ALIF_SECAES
 	bool "Alif SE-service transport for <alp/ext/alif/storage.h> OSPI SecAES key provisioning"
 	depends on ALP_SDK && HAS_ALIF_SE_SERVICES
-	default y
+	default n
 	help
 	  Compiles the real body of alp_alif_storage_secaes_key_provision()
 	  in src/backends/ext/alif/storage.c (issue #224).  It builds an
@@ -186,9 +186,17 @@ config ALP_SDK_STORAGE_ALIF_SECAES
 	  SE-packet seam src/backends/security/se_cryptocell.c rides for
 	  its CryptoCell AES/SHA/AEAD packets.
 
-	  UNVERIFIED ON SILICON: no bench unit reachable at implementation
-	  time has an OSPI SecAES-relevant part populated (R2 BOM only;
-	  see the file header).  With this OFF, or on a build with no
+	  Default OFF, unlike CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM
+	  (which defaults ON because that path bench-PASSED,
+	  docs/aen-bench-bringup.md): this one is UNVERIFIED ON SILICON --
+	  no bench unit reachable at implementation time has an OSPI
+	  SecAES-relevant part populated (R2 BOM only; see the file
+	  header).  About eight in-tree AEN examples set
+	  CONFIG_HAS_ALIF_SE_SERVICES=y (aen-aipm-read, aen-alp-rpc,
+	  aen-dualcore-doorbell/-ipc/-master/-he-master, aen-rpc-pingpong,
+	  aen-se-service-*), so this stays an opt-in gate -- flipping the
+	  default to y belongs in the same change that adds a bench PASS
+	  row for the round-trip.  With this OFF, or on a build with no
 	  hal_alif SE client linked, key provisioning returns
 	  ALP_ERR_NOSUPPORT.
 
