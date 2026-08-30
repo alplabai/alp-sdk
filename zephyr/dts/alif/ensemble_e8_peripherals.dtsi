@@ -776,13 +776,17 @@
 	 * Same reg block (the four channels live in the one 0xC0 window),
 	 * same clock-source/clock-frequency; only `channel` and `interrupts`
 	 * differ per node, exactly as lptimer0 does for channel 0.  The
-	 * `,N` unit-address suffix is NOT a real sub-address -- reg is
-	 * identical to lptimer0's -- it is the standard DTS idiom for several
-	 * logical nodes sharing one physical base (cf. `flash@0,0`-style CS
-	 * instances); dtc requires node names to be unique and "lptimer0..3"
-	 * all otherwise render as the same "lptimer@42001000" node name.
+	 * trailing hex digit of the unit-address is NOT a real per-channel
+	 * register sub-offset (the HWRM documents only the one 0xC0 block
+	 * base, not a per-channel stride within it) -- reg is identical to
+	 * lptimer0's real, sourced 0x42001000/0xC0 window on every node
+	 * below.  The suffix exists only so each node's NAME is unique:
+	 * Zephyr's edtlib requires a hex unit-address (a `,N` DTS-idiom
+	 * suffix parses as non-hex and is rejected), and dtc requires unique
+	 * node names -- "lptimer0..3" would otherwise all render as the
+	 * identical name "lptimer@42001000".
 	 */
-	lptimer1: lptimer@42001000,1 {
+	lptimer1: lptimer@42001001 {
 		compatible = "alif,lptimer";
 		reg = <0x42001000 0xc0>;
 		interrupts = <61 3>;
@@ -791,7 +795,7 @@
 		clock-frequency = <32768>;
 	};
 
-	lptimer2: lptimer@42001000,2 {
+	lptimer2: lptimer@42001002 {
 		compatible = "alif,lptimer";
 		reg = <0x42001000 0xc0>;
 		interrupts = <62 3>;
@@ -800,7 +804,7 @@
 		clock-frequency = <32768>;
 	};
 
-	lptimer3: lptimer@42001000,3 {
+	lptimer3: lptimer@42001003 {
 		compatible = "alif,lptimer";
 		reg = <0x42001000 0xc0>;
 		interrupts = <63 3>;
