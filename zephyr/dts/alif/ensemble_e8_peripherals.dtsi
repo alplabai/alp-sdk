@@ -775,9 +775,14 @@
 	 * `channel` + its matching `interrupts`: ch1=61, ch2=62, ch3=63").
 	 * Same reg block (the four channels live in the one 0xC0 window),
 	 * same clock-source/clock-frequency; only `channel` and `interrupts`
-	 * differ per node, exactly as lptimer0 does for channel 0.
+	 * differ per node, exactly as lptimer0 does for channel 0.  The
+	 * `,N` unit-address suffix is NOT a real sub-address -- reg is
+	 * identical to lptimer0's -- it is the standard DTS idiom for several
+	 * logical nodes sharing one physical base (cf. `flash@0,0`-style CS
+	 * instances); dtc requires node names to be unique and "lptimer0..3"
+	 * all otherwise render as the same "lptimer@42001000" node name.
 	 */
-	lptimer1: lptimer@42001000 {
+	lptimer1: lptimer@42001000,1 {
 		compatible = "alif,lptimer";
 		reg = <0x42001000 0xc0>;
 		interrupts = <61 3>;
@@ -786,7 +791,7 @@
 		clock-frequency = <32768>;
 	};
 
-	lptimer2: lptimer@42001000 {
+	lptimer2: lptimer@42001000,2 {
 		compatible = "alif,lptimer";
 		reg = <0x42001000 0xc0>;
 		interrupts = <62 3>;
@@ -795,7 +800,7 @@
 		clock-frequency = <32768>;
 	};
 
-	lptimer3: lptimer@42001000 {
+	lptimer3: lptimer@42001000,3 {
 		compatible = "alif,lptimer";
 		reg = <0x42001000 0xc0>;
 		interrupts = <63 3>;
