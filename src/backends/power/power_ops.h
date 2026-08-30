@@ -29,18 +29,28 @@
 typedef struct alp_power_ops alp_power_ops_t;
 
 /** Backend-owned per-handle state.  The dispatcher mirrors the
- *  configured wake_bitmap here so backends that don't keep their own
- *  copy can read it back at request_sleep() time. */
+ *  configured wake_bitmap / retain descriptor here so backends that
+ *  don't keep their own copy can read them back at request_sleep()
+ *  time. */
 typedef struct alp_power_backend_state {
 	uint32_t               wake_bitmap;
+	alp_power_retain_t     retain;
 	void                  *be_data;
 	const alp_power_ops_t *ops;
 } alp_power_backend_state_t;
 
-/** Vtable each power backend implements. */
+/** Vtable each power backend implements.
+ *
+ *  @c configure_retention is OPTIONAL (NULL is a valid vtable entry,
+ *  #1813) -- a backend with nothing to say about retention leaves it
+ *  unset; the dispatcher then accepts only @ref ALP_POWER_RETAIN_NONE
+ *  (a no-op) and returns @ref ALP_ERR_NOSUPPORT for any other level,
+ *  matching the reported-capability + error contract. */
 struct alp_power_ops {
 	alp_status_t (*open)(alp_power_backend_state_t *state, alp_capabilities_t *caps_out);
 	alp_status_t (*configure_wake_source)(alp_power_backend_state_t *state, uint32_t wake_bitmap);
+	alp_status_t (*configure_retention)(alp_power_backend_state_t *state,
+	                                    const alp_power_retain_t  *retain);
 	alp_status_t (*request_sleep)(alp_power_backend_state_t *state,
 	                              alp_power_mode_t           mode,
 	                              uint32_t                   wake_after_ms,

@@ -78,12 +78,35 @@
  * &subsys_off, all status=disabled by default), and the pm_state_set IWIC hook
  * (fork power.c:432).  See this front's report for the full node list.
  *
+ * Portable <alp/power.h> probe (issues #1812 / #1813)
+ * ----------------------------------------------------
+ * Before the WFI/SysTick proof below, main() also runs the exact repro
+ * from #1812: alp_power_open() + alp_power_configure_wake_source() +
+ * (when that succeeds) alp_power_request_sleep() -- the portable API a
+ * customer would actually reach for, which no AEN example called before
+ * this.  With CONFIG_PM unset (this file's whole reason for existing,
+ * above), src/backends/power/zephyr_pm_policy.c never compiles in --
+ * its Kconfig depends on PM -- so the wildcard
+ * src/backends/power/zephyr_stub.c wins backend selection at priority
+ * 0.  As of #1813 that stub is HONEST about what it can't do:
+ * alp_power_capabilities() reports zero armable wake sources, and
+ * alp_power_configure_wake_source() refuses a real bitmap right there,
+ * at configuration time, instead of accepting it and only failing
+ * later at alp_power_request_sleep() (the #1812 bug).  This is a
+ * teaching moment as much as the WFI proof: check the capability,
+ * check the return, and fall back to a baseline you know works (here,
+ * the arch-level WFI loop below) rather than trusting a portable call
+ * that silently did nothing.  It logs but never gates PASS/FAIL --
+ * the beacon/heartbeat contract below is unchanged.
+ *
  * Console is the RAM buffer 'ram_console_buf' (see prj.conf); the bench app
  * UART is not wired to USB.  BENCH-VALIDATION app -- not a customer teaching
  * example.
  */
 
 #include <zephyr/kernel.h>
+
+#include <alp/power.h>
 
 /* Cortex-M System Control Block CPUID, by absolute address (no CMSIS header). */
 #define SCB_CPUID (*(volatile uint32_t *)0xE000ED00U)
@@ -120,6 +143,56 @@ static void wake_timer_fn(struct k_timer *t)
 /* Periodic wake source: expiry gives wake_sem (see wake_timer_fn). */
 static K_TIMER_DEFINE(wake_timer, wake_timer_fn, NULL);
 
+/*
+ * Run the portable <alp/power.h> repro from #1812 and log what happened.
+ * Informational only -- never touches the beacon or PASS/FAIL result; see
+ * the file-header section above for why this exists on Stage-A specifically.
+ */
+static void power_probe(void)
+{
+	alp_power_t *pm = alp_power_open();
+
+	if (pm == NULL) {
+		printk("power: alp_power_open() failed (unexpected -- the "
+		       "wildcard stub backend always hands back a handle)\n");
+		return;
+	}
+
+	const alp_capabilities_t *caps = alp_power_capabilities(pm);
+
+	printk("power: alp_power_capabilities()->flags=0x%08x (armable "
+	       "ALP_POWER_WAKE_* bits; 0 == none on this CONFIG_PM-free "
+	       "build)\n",
+	       (caps != NULL) ? caps->flags : 0u);
+
+	alp_status_t cfg_rc = alp_power_configure_wake_source(pm, ALP_POWER_WAKE_RTC);
+
+	if (cfg_rc != ALP_OK) {
+		/* Expected on this build: the stub can arm nothing, so it
+		 * refuses the bitmap right here instead of lying (#1813). */
+		printk("power: alp_power_configure_wake_source(RTC) -> %d "
+		       "(ALP_ERR_NOSUPPORT expected -- no real PM backend "
+		       "links without CONFIG_PM)\n",
+		       (int)cfg_rc);
+		alp_power_close(pm);
+		return;
+	}
+
+	/* Only reachable once a real AEN power backend is linked (#1812's
+	 * "Proposed resolution") -- exercise the full sleep round-trip. */
+	alp_power_wake_info_t info = { 0 };
+	alp_status_t          sleep_rc =
+	    alp_power_request_sleep(pm, ALP_POWER_MODE_DEEP_SLEEP, WAKE_TICK_MS, &info);
+
+	printk("power: alp_power_request_sleep(DEEP_SLEEP) -> %d "
+	       "(realised_mode=%d wake_source=0x%x slept_ms=%u)\n",
+	       (int)sleep_rc,
+	       (int)info.realised_mode,
+	       info.wake_source,
+	       info.slept_ms);
+	alp_power_close(pm);
+}
+
 int main(void)
 {
 	uint32_t cpuid = SCB_CPUID;
@@ -135,6 +208,8 @@ int main(void)
 
 	printk("\n=== AEN801 Stage-A low-power smoke "
 	       "(k_timer wake -> WFI, SysTick) ===\n");
+
+	power_probe();
 
 	t_start = k_uptime_get();
 	t_prev  = t_start;

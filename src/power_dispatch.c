@@ -122,6 +122,31 @@ alp_status_t alp_power_configure_wake_source(alp_power_t *h, uint32_t wake_bitma
 	return rc;
 }
 
+alp_status_t alp_power_configure_retention(alp_power_t *h, const alp_power_retain_t *retain)
+{
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (retain == NULL || retain->level > ALP_POWER_RETAIN_FULL) {
+		alp_handle_op_leave(&h->active_ops);
+		return ALP_ERR_INVAL;
+	}
+	h->state.retain = *retain;
+	alp_status_t rc;
+	if (h->state.ops->configure_retention != NULL) {
+		rc = h->state.ops->configure_retention(&h->state, retain);
+	} else {
+		/* No backend opinion on retention: NONE is a no-op (accept),
+		 * anything else asks for a footprint the backend never
+		 * promised -- report it rather than silently ignoring it
+		 * (the same reported-capability + error contract as the
+		 * wake-source bitmap, #1813). */
+		rc = (retain->level == ALP_POWER_RETAIN_NONE) ? ALP_OK : ALP_ERR_NOSUPPORT;
+	}
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
+}
+
 alp_status_t alp_power_request_sleep(alp_power_t           *h,
                                      alp_power_mode_t       mode,
                                      uint32_t               wake_after_ms,
@@ -137,7 +162,7 @@ alp_status_t alp_power_request_sleep(alp_power_t           *h,
 		return ALP_ERR_INVAL;
 	}
 	if (mode != ALP_POWER_MODE_SLEEP && mode != ALP_POWER_MODE_DEEP_SLEEP &&
-	    mode != ALP_POWER_MODE_STANDBY) {
+	    mode != ALP_POWER_MODE_STANDBY && mode != ALP_POWER_MODE_STOP) {
 		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_INVAL;
 	}
