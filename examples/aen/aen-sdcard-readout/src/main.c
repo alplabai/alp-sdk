@@ -10,22 +10,28 @@
  * EVK ROUTING NOTE: on the E1M EVK the microSD sits on the SDIO bus behind a
  * 74LVC157 mux with an ENABLE (E1M IO20) and a SELECT (E1M IO21).
  *
- * CORRECTED for board rev 2626-R2 (#912).  This comment used to say both pins
- * were "on the CC3501E side and must be driven over the inter-chip SPI
- * bridge".  On R2 that is wrong about both of them, and the second half is the
- * one that matters:
+ * WHERE THOSE TWO PINS GO IS REVISION-DEPENDENT (#912).  Do not hard-code
+ * either answer -- metadata/e1m_modules/aen/hw-revisions.yaml is the machine
+ * source and the SDK already applies the per-rev delta for you:
  *
- *   - IO20 IS CC3501E-side -- metadata/e1m_modules/aen/from-cc3501e.tsv maps it
- *     to GPIO_26, so it is drivable today through the GPIO proxy.
- *   - IO21 is NOT.  hw-revisions.yaml records for r2: "IO21 unrouted (was
- *     CC3501E GPIO30)" -- GPIO_30 moved to IO8 and IO21 was left OPEN on the
- *     module.  It reaches neither the CC3501E nor the Alif SoC, so the mux
- *     SELECT cannot be driven from software on this board revision at all.
+ *   - IO20 is CC3501E-side on both revisions (from-cc3501e.tsv maps it to
+ *     GPIO_26), so the mux ENABLE is drivable through the GPIO proxy either way.
+ *   - IO21 is the one that moves.  On **r1** it reaches CC3501E GPIO_30
+ *     (`pad_route_overrides`: "r1: CC3501E GPIO_30 (r2 unrouted)"), so the mux
+ *     SELECT IS drivable over the bridge.  On **r2** GPIO_30 was re-routed to
+ *     IO8 and IO21 was left OPEN on the module -- it reaches neither chip, so
+ *     on r2 the SELECT cannot be driven from software at all.
  *
- * So the card stays unreachable on R2, but the blocker is a module pad that no
- * longer goes anywhere -- not a bridge feature waiting to be written.  This
- * example therefore validates SDHC controller/driver bring-up (device builds +
- * inits) and card init is expected to fail with "no card".  See the README.
+ * Either way no card is reachable from the Alif side today, but the REASON
+ * differs, and so does the fix: on r1 it is bridge/proxy work, on r2 it is a
+ * module pad that goes nowhere.  Read the running module's revision rather
+ * than assuming -- `alp board` prints it from the EEPROM manifest, which
+ * hw_info_zephyr.c treats as the single authoritative source.  (The bench
+ * module at the time of writing reports `E1M-AEN801 r1`, serial 2617-0001.)
+ *
+ * This example therefore validates SDHC controller/driver bring-up (device
+ * builds + inits) and card init is expected to fail with "no card".  See the
+ * README.
  *
  * PASS gate: disk_access_init returns 0 and the card geometry reads back (a card
  * was actually reachable + enumerated).  A clean controller bring-up where the

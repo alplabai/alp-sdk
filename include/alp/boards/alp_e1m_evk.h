@@ -123,15 +123,23 @@ typedef enum {
  * Same shape as the SDIO mux: a 74LVC157 quad 2:1 picks which
  * device drives the SoM's single I2S0 bus.  Control pins:
  *
- *   /E (active-low enable) = E1M IO8   -- CC3501E side (GPIO_30) on rev R2
- *   S  (select)            = E1M IO13  -- CC3501E side (GPIO13)
+ *   /E (active-low enable) = E1M IO8   -- REVISION-DEPENDENT, see below
+ *   S  (select)            = E1M IO13  -- CC3501E side (GPIO13), both revisions
  *
- * NOTE: the enable line moved.  This said "Alif side (P7.1)", which is r1
- * routing.  metadata/e1m_modules/aen/hw-revisions.yaml records the r2 change --
- * "IO8 -> WIFI_GPIO30 ... (both now CC3501E)" -- and
- * metadata/e1m_modules/aen/from-cc3501e.tsv, which tracks R2, maps IO8 to
- * GPIO30.  On R2 BOTH mux control pins are CC3501E-side, so both go through the
- * GPIO proxy rather than one being a direct Alif GPIO (#913).
+ * NOTE: the enable line MOVED between board revisions, so neither answer is
+ * unconditionally true (#913).  Per
+ * metadata/e1m_modules/aen/hw-revisions.yaml:
+ *
+ *   - **r1**: IO8 is a direct Alif GPIO (P7.1).  One mux pin is SoC-direct and
+ *     the other goes through the CC3501E GPIO proxy.
+ *   - **r2**: "IO8 -> WIFI_GPIO30 ... (both now CC3501E)", and
+ *     from-cc3501e.tsv (which tracks R2) maps IO8 to GPIO_30.  BOTH mux
+ *     control pins are then CC3501E-side and both go through the proxy.
+ *
+ * Take the revision from the module, not from this comment: `alp board` prints
+ * it out of the EEPROM manifest.  Portable code should not branch on it by
+ * hand -- open the pin by its E1M_* id and let the SDK apply the per-rev
+ * `pad_route_overrides`.
  *
  * IMPORTANT: the two control pins live on DIFFERENT chips on
  * this EVK -- I2S_EN is driven from Alif via alp_gpio_*, but
