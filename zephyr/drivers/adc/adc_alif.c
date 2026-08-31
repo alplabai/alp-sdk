@@ -1193,6 +1193,34 @@ static int adc_init(const struct device *dev)
 	/* set Sample width value for ADC12/24 */
 	adc_set_sample_width(regs, config->sample_width);
 
+	/*
+	 * SILICON CAVEAT (#1823): ADC_CLK is out of spec on E8, and no legal
+	 * divisor brings it in.  HWRM Table 19-2 sources ADC_CLK from
+	 * PERIPH_CLK, and 19.1.5.3.4 ADC_CLK_DIVISOR accepts only 0x2..0x10
+	 * (divide by 2..16).  PERIPH_CLK is bench-measured at ~156.5 MHz on
+	 * AE822 -- twice independently: from ADC conversion timing over 2000
+	 * reads, and from the SE's own boot line "[SES] SE frequency is
+	 * 78.31 MHz", exactly half.  So even the maximum divisor 16 gives
+	 * ~9.8 MHz against the ADTS0013 v1.2 maximum of 5000 kHz.
+	 *
+	 * Consequence for a caller: the SAR gets roughly half the settling
+	 * time the part is characterised for, so the datasheet ENOB and
+	 * linearity figures do NOT apply to these readings.  Conversions
+	 * still complete -- this is an accuracy caveat, not a failure -- but
+	 * it is invisible without this line, and silently trusting an
+	 * out-of-spec reading is worse than knowing it is one.
+	 *
+	 * Warn rather than clamp or refuse: there is no in-spec setting to
+	 * clamp TO, and refusing would break every working ADC caller for a
+	 * limitation the hardware cannot avoid.  Resolving it needs Alif --
+	 * either a PERIPH_CLK prescaler not in AHRM0012NDA v0.3, or a divisor
+	 * above 16 with a constraint the manual omits.
+	 */
+	LOG_WRN("%s: ADC_CLK is out of spec -- PERIPH_CLK/%u exceeds the "
+		"ADTS0013 v1.2 maximum of 5000 kHz; datasheet ENOB and "
+		"linearity figures do not apply (#1823)",
+		dev->name, config->clock_div);
+
 	/* set the clock divisor */
 	adc_set_clk_div(regs, config->clock_div);
 
