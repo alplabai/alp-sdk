@@ -209,10 +209,20 @@ int main(void)
 	 * POST_KERNEL init already took slot 0, so this call takes slot 1 --
 	 * both succeed against the fixed two-slot table.
 	 */
+	/*
+	 * core_clk: DT_PROP(OSPI_NODE, clock_frequency), NOT a `bus-speed`
+	 * fallback -- see flash_ospi_alif.c:30-80. A fallback here wrote
+	 * OSPI_BAUDR = core_clk / bus_speed = 1, and HWRM AHRM0012NDA v0.3
+	 * S16.1.5.3.5 defines OSPI_BAUDR[SCKDV] = 0 as "OSPI_SCLK is
+	 * disabled" -- a dead bus, not an overclock. The node always sets
+	 * `clock-frequency` now, so this app mirrors the driver's plain
+	 * DT_PROP() instead of quietly re-growing the same fallback one file
+	 * over from the fix.
+	 */
 	HAL_OSPI_Handle_T app_handle = -1;
 	struct ospi_init  app_cfg    = {
 		.bus_speed       = DT_PROP(OSPI_NODE, bus_speed),
-		.core_clk        = DT_PROP_OR(OSPI_NODE, clock_frequency, DT_PROP(OSPI_NODE, bus_speed)),
+		.core_clk        = DT_PROP(OSPI_NODE, clock_frequency),
 		.cs_pin          = DT_PROP(OSPI_NODE, cs_pin),
 		.rx_ds_delay     = DT_PROP(OSPI_NODE, rx_ds_delay),
 		.ddr_drive_edge  = DT_PROP(OSPI_NODE, ddr_drive_edge),

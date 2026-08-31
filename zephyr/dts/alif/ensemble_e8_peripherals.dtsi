@@ -718,7 +718,11 @@
 	 * 0x0 as "400 MHz (SYST_ACLK)" (AHRM0012NDA v0.3).  This driver never
 	 * programs SEL_OSPI_CLK, so 400 MHz is correct only for as long as the
 	 * boot stage leaves that mux at its documented silicon reset value --
-	 * see flash_ospi_alif.c:30-61 for what that leaves unaddressed.
+	 * see flash_ospi_alif.c:30-80 for what that leaves unaddressed.  Without
+	 * this property the driver used to fall back to `bus-speed`, which wrote
+	 * OSPI_BAUDR = 1 and left OSPI_BAUDR[SCKDV] all zero -- OSPI_SCLK
+	 * disabled, a dead bus, not the overclock an earlier revision of this
+	 * fix claimed (HWRM S16.1.5.3.5; see flash_ospi_alif.c:30-80).
 	 *
 	 * HW-BLOCKED, BUILD-ONLY this batch: no octal-NOR/HyperBus part is
 	 * populated on the E1M-AEN801, so this proves the node BINDS + the
