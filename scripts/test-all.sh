@@ -881,6 +881,7 @@ stage_generated_files() {
     # some of its artifacts is not a drift check.
     require_jsonschema_2020 stage_generated_files || return 99
     local gens=(gen_soc_caps gen_status_strings gen_board_header
+                gen_cc3501e_gpio_routes
                 gen_pinmux_capability gen_support_matrix
                 gen_portability_matrix gen_catalog gen_error_catalog
                 gen_verification_status)
@@ -965,6 +966,7 @@ stage_generated_files() {
         metadata/socs/renesas/rzv2n/n44.json \
         docs/portability-matrix.md docs/peripheral-support-matrix.md \
         docs/verification-status.md \
+        examples/aen \
         docs/diagnostics 2>/dev/null; then
         echo "git add -N failed -- an expected generated path is missing from the tree"
         return 1
@@ -988,6 +990,7 @@ stage_generated_files() {
             metadata/socs/renesas/rzv2n/n44.json \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
+            examples/aen \
             docs/diagnostics 2>/dev/null; then
         echo "generated files are OUT OF SYNC -- regenerated in place; git add + commit:"
         git --no-pager diff --stat -- \
@@ -996,6 +999,7 @@ stage_generated_files() {
             metadata/socs/renesas/rzv2n/n44.json \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
+            examples/aen \
             docs/diagnostics 2>/dev/null | tail -20
         return 1
     fi
