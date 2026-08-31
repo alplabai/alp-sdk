@@ -120,12 +120,18 @@ Two mechanical notes:
 - The check lives in the loader, not the schema, because it is
   cross-file: `board.yaml` `os:` against the SoC `cores[].type`.
 - An **unclassified** core type (empty, or matching neither prefix)
-  currently makes the refusal reject *both* real runtimes, because the
-  "other class's OS" set becomes `{yocto, zephyr}`; the error then reads
-  `(unclassified)`.  Tracked as
-  [#1852](https://github.com/alplabai/alp-sdk/issues/1852) — tan already
-  treats an unresolved core type as unresolved rather than guessing, and
-  alp-sdk does not.
+  makes the refusal reject *both* real runtimes, because the "other
+  class's OS" set becomes `{yocto, zephyr}`; the error then reads
+  `(unclassified)`.  That is **deliberate, and it is what tan does too** —
+  `cross_class_os` carries no guard in either implementation, and
+  declining both runtimes for a core whose class nobody established is the
+  conservative answer on a refusal path.
+  [#1852](https://github.com/alplabai/alp-sdk/issues/1852) is a
+  *different* half of the same area and does not change this behaviour:
+  what diverged was the **advertised** `allowed_os` set, which offered
+  `["baremetal", "off"]` for such a core where tan offered `[]`, and a
+  non-string `cores[].type`, which raised `AttributeError` instead of
+  resolving to the unresolved sentinel.  Corrected in #1888.
 
 Custom SoMs ported via
 [`docs/porting-new-som.md`](porting-new-som.md) inherit all of this as

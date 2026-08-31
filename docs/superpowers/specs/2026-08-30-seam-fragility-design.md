@@ -253,10 +253,19 @@ tan-cli#914 / tan-cli#957) and its docstring rejects the other answer by name �
 "the identical `["baremetal", "off"]` plausible-but-wrong guess this docstring
 already rejects for the empty-string case".
 `scripts/alp_orchestrate/topology.py:96-101` has no such guard. tan took the
-fix; alp-sdk did not. This is live today, and it is in the one direction the
-freshness gate cannot see, because tan's copy sits outside `tan/planner/` and
-outside `HAND_PORT_SOURCES`. Only having one implementation removes that class,
-which is ADR-0026's argument, not a schema's.
+fix; alp-sdk did not. It is in the one direction the freshness gate cannot see,
+because tan's copy sits outside `tan/planner/` and outside `HAND_PORT_SOURCES`.
+Only having one implementation removes that class, which is ADR-0026's
+argument, not a schema's.
+
+**Status, so this paragraph does not rot into a false claim.** The instance is
+filed as [#1852](https://github.com/alplabai/alp-sdk/issues/1852) and fixed in
+#1888, which found the divergence wider than filed: the bare
+`(core_type or "").lower()` idiom was in three functions, not two, and
+`core_os_topology`'s `soc_types` comprehension passed a non-string `type`
+straight into the emitted `core_type` field as well as into the crash. Closing
+one instance does not close the class — that is this paragraph's point, and the
+next instance will arrive the same way until there is one implementation.
 
 ### Sequencing — this question is downstream of ADR-0026 sections C and D
 
