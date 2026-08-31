@@ -331,6 +331,27 @@ carries a `CAM_MUX_PI3WVR626` MIPI CSI 2:1 mux (selected via
 `EVK_PIN_CAM_MUX_SEL`), but no camera-mux truth table is published
 yet -- treat the wiring as TBD until the carrier camera doc lands.
 
+
+**Bench-settled 2026-08-31** on the r1 module (`E1M-AEN801`, serial `2617-0001`),
+`i2c0` at 100 kHz, read-only `i2c_write_read` of register `0x00`:
+
+| pad bias | result on `0x48` (TMP112), `0x52` (RV-3028-C7), `0x30` (OPTIGA) |
+|---|---|
+| High-Z, no bias | `rc=-116` (`-ETIMEDOUT`) with `E: User Abort on i2c@49010000` |
+| same build + internal pull-up (~50 kΩ) | `rc=-5` (`-EIO`), no abort |
+
+A bias-only edit changing the error class proves the pinctrl is correct and the
+controller reaches the wire, and that the net has **no usable pull-up**. It also
+settles the open-drain question against the HWRM's push-pull note: had these pads
+driven push-pull, the High-Z run would have worked. The I2C IP tri-states for the
+high phase, so an **external pull-up is required**. Nothing ACKed under the internal
+pull-up either, which is expected — ~50 kΩ is far too weak for 100 kHz rise time.
+
+**So this bus is not usable as built.** It needs `R93`/`R94` stuffed — bridging
+BRD_I2C into the segment the carrier already pulls up via `R137`/`R144` — or
+dedicated pull-ups on the net. That is a board change, not a firmware one, which is
+why #1814 stays open.
+
 ## 6. Bench-day bring-up runbook (first physical SoM)
 
 When the first physical AEN SoM lands on the bench, run this

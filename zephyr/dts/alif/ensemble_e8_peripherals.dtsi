@@ -468,6 +468,24 @@
 	 * ports works with the push-pull default.  R2-SOURCED: the bench
 	 * E1M-AEN801 unit is r1 and no R1 netlist is available, so this needs an
 	 * on-unit probe before it is trusted anywhere.
+	 * BENCH-SETTLED 2026-08-31 on the r1 module (E1M-AEN801, serial 2617-0001),
+	 * i2c0 at 100 kHz, i2c_write_read of register 0x00, read-only:
+	 *
+	 *   pads High-Z          -> rc=-116 (-ETIMEDOUT) + "E: User Abort on i2c@49010000"
+	 *                           on 0x48 (TMP112), 0x52 (RV-3028-C7) and 0x30 (OPTIGA)
+	 *   same build + pull-up -> rc=-5 (-EIO), no User Abort
+	 *
+	 * The change in error class from a bias-only edit proves the pinctrl is right and
+	 * the controller reaches the wire, and that the net has no usable pull-up.  It
+	 * also settles the open-drain question against the HWRM note: if these pads drove
+	 * push-pull the High-Z run would have worked, so the I2C IP tri-states for the
+	 * high phase and an EXTERNAL PULL-UP IS REQUIRED.  The internal ~50 kOhm is far
+	 * too weak for 100 kHz rise time, which is why nothing ACKed in the second run.
+	 *
+	 * CONSEQUENCE: this bus is NOT usable as built.  It needs R93/R94 stuffed (which
+	 * bridges BRD_I2C into the segment the carrier already pulls up via R137/R144) or
+	 * dedicated pull-ups fitted.  That is a board change, not a firmware one.
+
 	 */
 
 	/*
