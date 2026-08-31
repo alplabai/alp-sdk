@@ -156,8 +156,18 @@ not once for the family.
 
 | Board | SEROM | SES / SERAM | LCS | Meets the v110 floor? | Captured |
 |---|---|---|---|---|---|
-| Off-labgrid Windows bench unit (`AE822FA0E5597LS0`, XDS110 `L50015YR`) | `v1.105.65 0x000002A0` | `SES A0 v1.110.0 Mar  4 2026`, SERAM0/SERAM1 `1.110.0` | `1` (DM) | **Yes** | 2026-08-30 |
-| The second AEN bench board (on the internal board farm) | TBD | TBD | TBD | **Unverified** | — |
+| The AEN bench unit (`AE822FA0E5597LS0`, module rev **r1**, serial `2617-0001`) | `v1.105.65 0x000002A0` | `SES A0 v1.110.0 Mar  4 2026`, SERAM0/SERAM1 `1.110.0` | `1` (DM) | **Yes** | 2026-08-30, re-confirmed 2026-08-31 |
+
+**There is only one AEN board.** This table used to carry a second row for "the
+second AEN bench board (on the internal board farm)", marked `TBD` /
+**Unverified**, and #1797 existed largely because of it. That row described
+hardware that does not exist. The board-farm place `e1m-aen-evk-01` is a stale
+definition: every resource on it reports `avail: False` with `port: None` and
+`path: None`, the exporter host has no `/dev/ttyUSB*` at all, and the exporter's
+own udev match rules name `ID_SERIAL_SHORT` `BG01028C` and `BG04503B` — the same
+two FTDI adapters this bench enumerates as its SE-UART and app-console ports. One
+board, moved off the farm. Retire or re-point that place if the board ever goes
+back.
 
 The capture is the SES boot header on the SE-UART at 57600 8N1 — it streams on
 every reset, no app or SE service call needed:
