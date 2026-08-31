@@ -72,7 +72,7 @@ LINUX_DT_DIR = Path("meta-alp-sdk") / "recipes-kernel" / "linux"
 # BRD_I2C / RIIC8 is genuinely dual-master in this tree, and both masters
 # are deliberate and shipped:
 #   * CM33: zephyr/boards/alp/e1m_v2n101_m33_sm/
-#     alp_e1m_v2n101_m33_sm-pinctrl.dtsi:37-42 muxes P06/P07, and
+#     alp_e1m_v2n101_m33_sm-pinctrl.dtsi:37-56 muxes P06/P07, and
 #     ..._r9a09g056n48gbg_cm33.dts:114-118 enables &i2c8 (the DA9292 PMIC
 #     at 0x1E and the GD32 supervisor both answer there).
 #   * A55: meta-alp-sdk/recipes-kernel/linux/linux-renesas/

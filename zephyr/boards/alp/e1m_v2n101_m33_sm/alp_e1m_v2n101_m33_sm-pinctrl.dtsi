@@ -38,6 +38,20 @@
 		i2c8-pinmux {
 			pinmux = <RZV_PINMUX(PORT_00, 6, 1)>, /* SDA P06 */
 				 <RZV_PINMUX(PORT_00, 7, 1)>; /* SCL P07 */
+			/*
+			 * No external pull-ups on this bus; enable the SoC's
+			 * internal pull-ups so SCL/SDA idle high. Those are
+			 * weak (~50 kOhm, the same strength Linux derates its
+			 * i2c0 for), and this bus stays at 400 kHz here, matching
+			 * Linux's own &i2c8 -- unverified whether the weak
+			 * pull-ups meet 400 kHz rise time on this bus; a rise-time
+			 * failure at bench, not just a clean build, is the real
+			 * check. meta-alp-sdk/recipes-kernel/linux/linux-renesas/
+			 * e1m-x-evk.dtsi already enables bias-pull-up on
+			 * i2c8_pins (and on i2c0_pins/i2c1_pins/i2c6_pins/
+			 * i2c7_pins) for the same reason.
+			 */
+			bias-pull-up;
 		};
 	};
 };
