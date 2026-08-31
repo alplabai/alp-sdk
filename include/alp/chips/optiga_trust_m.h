@@ -19,11 +19,12 @@
  *
  * Populated on E1M-X V2N / V2M at 0x30 on BRD_I2C, with the RZ/V2N as
  * bus master (`metadata/e1m_modules/E1M-V2N101.yaml`) -- that is the
- * target this driver is written for.  E1M-AEN carries the same
- * footprint but is not a usable target today: the part is DNI on the
- * current bench batch, and AEN's BRD_I2C is LPI2C0, a bus the Alif
- * silicon can only be a *slave* on, so the M55 cannot master it to
- * reach the chip at all (see `docs/bring-up-aen.md` section 5.1).
+ * target this driver is written for.  E1M-AEN801 carries the same
+ * footprint on its own BRD_I2C (SoC I2C0, Alif as bus master -- #1848,
+ * corrected from an earlier belief that this bus was the slave-only
+ * LPI2C0), but is not a usable target on the current bench batch: the
+ * part is DNI there (see `docs/bring-up-aen.md` section 5.1;
+ * `examples/aen/aen-secure-element-sign` exercises this driver on AEN).
  *
  * Default I2C address: **0x30** (7-bit, configurable via
  * provisioning).

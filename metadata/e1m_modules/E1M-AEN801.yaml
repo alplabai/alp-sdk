@@ -70,19 +70,33 @@ on_module:
     chip_select:    1
 
   i2c_devices:
-    # Tier-3 housekeeping bus, NOT reachable from the application core --
-    # `bus_master` is omitted per the schema's `i2c_bus.bus_master`
-    # description because what drives it is not documented.
+    # CORRECTED #1848 (ADR 0017 amended 2026-08-30 -- this bus was believed
+    # to be the slave-only Alif LPI2C0, hardcoded address 0x40, TRM §3.17.4;
+    # it is not). BRD_I2C is SoC I2C0 function C: I2C0_SDA_C = P7_0, I2C0_SCL_C
+    # = P7_1 (ADTS0013 v1.2 Table 3-16 + the per-pin alternate-function grid),
+    # corroborated by the E1M-AEN-2626-R2 netlist (BRD_I2C_SDA/SCL on balls
+    # B8/B3, landing on this same trio). I2C0 is master-or-slave capable
+    # (HWRM §15.4.1) -- the Alif SoC is the intended master (Tier-1 upstream
+    # i2c_dw, no Secure Enclave mediation), NOT LPI2C1 or any hal_alif SE
+    # service (the pinned SE services expose no I2C transaction at all).
     #
-    # This comment used to say the bus was LPI2C0 and that "the SoC can only be
-    # a slave on it (hardcoded address 0x40), so the Secure Enclave masters it".
-    # Wrong on the premise (#1848): the R2 netlist puts BRD_I2C_SCL on P7_1 and
-    # BRD_I2C_SDA on P7_0, while the datasheet's LPI2C0 pads are P7_4/P7_5 --
-    # which carry different nets on this module.  P7_0/P7_1 have no documented
-    # I2C alternate function at all, and the pinned hal_alif SE services expose
-    # no I2C service to route through.  The conclusion (the M55 cannot reach
-    # this trio) still holds; the reason is an open question with Alif.
+    # `bus_master` below records the INTENDED master, not a working bus:
+    # the R2 netlist shows no pull-up path to any rail on BRD_I2C (the
+    # bridging jumpers R93/R94 are DNP, unlike I2C2's stuffed R95/R96), and
+    # the datasheet (open-drain, needs an external pull-up) and the HWRM
+    # (push-pull is the correct I2C driver type on these pins) disagree on
+    # whether that is fatal. Mastering this bus for real needs R93/R94
+    # stuffed or the push-pull reading to hold -- unresolved on paper; see
+    # docs/bring-up-aen.md §5.1 and examples/aen/aen-secure-element-sign's
+    # board overlay (which wires no internal bias pending a bench answer).
+    #
+    # Addresses per docs/bring-up-aen.md §5.1; pad names per
+    # examples/aen/aen-secure-element-sign/README.md.
+    # R2-SOURCED, NOT ON-UNIT-VERIFIED: no R1 netlist is available
+    # and the only bench unit on hand is r1 -- probe P7_0/P7_1 before calling
+    # this confirmed on that module.
     brd_i2c:
+      bus_master: alif-ensemble
       devices:
         - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }
         - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30" }

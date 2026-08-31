@@ -587,9 +587,9 @@ one, add it under the reserved `0x80..0xFF` range.
 - **Timers / PWM** — 8 GPT/PWM channels. Not routed to any external pad
   on E1M-AEN; the Alif has its own timer/PWM surface via `<alp/pwm.h>`.
 - **I2C** — 2 on-chip I2C controllers. Not proxied: the E1M-AEN module's
-  I2C devices (OPTIGA Trust M, RV-3028-C7, TMP112 on the Alif's
-  slave-only LPI2C0; EEPROM N24S128 on the Alif's separate SoC I2C2;
-  see `docs/soms/aen.md`) hang off the Alif's own I2C controllers, not
+  I2C devices (OPTIGA Trust M, RV-3028-C7, TMP112 on the Alif's SoC I2C0
+  BRD_I2C bus; EEPROM N24S128 on the Alif's separate SoC I2C2; see
+  `docs/soms/aen.md`) hang off the Alif's own I2C controllers, not
   the CC3501E's.
 
 ## OTA
