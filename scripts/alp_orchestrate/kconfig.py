@@ -577,6 +577,20 @@ def _emit_som_caps(
                 f"{hw_info_eeprom['offset']}")
         lines.append("")
 
+    # Build-time hw_rev this project resolved -- lets the boot banner warn
+    # when the LIVE EEPROM manifest disagrees (issue #1853).  Emitted
+    # unconditionally (not scoped to the `hw_info_eeprom` block above): a
+    # SKU with no on_module.eeprom today (e.g. E1M-NX9101) still gets the
+    # symbol, so it isn't silently dropped if that SKU gains an EEPROM
+    # later, and it stays harmless meanwhile (alp_hw_info_read() never
+    # returns ALP_OK without a bus, so the banner's compare never runs).
+    # Same `hw_rev or ... or "unknown"` fallback chain as
+    # alp_project_emit/hw_info.py's `_emit_hw_info_h` (project.hw_rev is
+    # already `som.hw_rev or default_hw_rev`; add the same "unknown"
+    # floor here so the two resolvers can't disagree on the empty case).
+    lines.append(f'CONFIG_ALP_SDK_SOM_HW_REV="{project.hw_rev or "unknown"}"')
+    lines.append("")
+
     if kconfig:
         lines.append(f"# SoM silicon ({silicon} via {project.sku})")
         lines.append(f"CONFIG_{kconfig}=y")
