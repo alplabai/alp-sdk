@@ -280,7 +280,7 @@ i2c_devices:
   - { macro: EVK_I2C_ADDR_TAS2563_LOW, part: tas2563, designator: U27, address: "0x4D",
       doc: "U27 smart amp (AD0 = 10k to GND)." }
   - { macro: EVK_I2C_ADDR_TAS2563_HIGH, part: tas2563, designator: U28, address: "0x4E",
-      doc: "U28 smart amp (AD0 = 10k to VDD). The TAS2563 broadcast address (0x48) was occupied on PRE-RESPIN boards by U32 INA236B (+V_CAM0 rail); the U32 re-strap to 0x4B from the next batch freed it -- firmware that supports both board revisions must still issue two targeted unit-address writes rather than a 0x48 broadcast." }
+      doc: "U28 smart amp (AD0 = 10k to VDD). The TAS2563 broadcast address (0x48) was occupied on PRE-RESPIN boards by U32 INA236B (+V_CAM0 rail); the U32 re-strap to 0x4B from the next batch freed 0x48 at the hardware level. That does not make it usable from the SDK: the chips/tas2563 driver has no write-only path and tas2563_init() rejects 0x48 on every board revision, so firmware must unconditionally issue two targeted unit-address writes rather than a 0x48 broadcast." }
   - { macro: EVK_I2C_ADDR_INA236_3V3, part: ina236, designator: U21, address: "0x40",
       doc: "U21 INA236A, +3V3 rail (20 mOhm shunt, 4.0 A max). A0 = GND.",
       calibration: { shunt_macro: EVK_INA236_SHUNT_3V3_OHMS, shunt_ohms: "0.020",

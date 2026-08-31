@@ -41,7 +41,9 @@
  *   AD0/SPICLK = 10k to GND -> 0x4D
  *   AD0/SPICLK = 10k to VDD -> 0x4E
  *   AD0/SPICLK = VDD       -> 0x4F
- *   Global broadcast        -> 0x48
+ *   Global broadcast        -> 0x48 (write-only; not a valid
+ *                                    tas2563_init() target -- see
+ *                                    TAS2563_I2C_ADDR_BROADCAST)
  */
 
 #ifndef ALP_CHIPS_TAS2563_H
@@ -60,7 +62,10 @@ extern "C" {
 #define TAS2563_I2C_ADDR_GND_PULL   0x4Du
 #define TAS2563_I2C_ADDR_VDD_PULL   0x4Eu
 #define TAS2563_I2C_ADDR_VDD_DIRECT 0x4Fu
-#define TAS2563_I2C_ADDR_BROADCAST  0x48u
+/** Global broadcast address (Table 7-3).  Write-only on the part, and
+ *  this driver has no write-only path -- tas2563_init() rejects it.
+ *  Kept for a future write-only broadcast op to target. */
+#define TAS2563_I2C_ADDR_BROADCAST 0x48u
 
 /** Operating-mode enum mapped onto the chip's MODE_CTRL register. */
 typedef enum {
@@ -83,12 +88,25 @@ typedef struct {
  *
  * @param[out] ctx       Driver context (output; populated on success).
  * @param[in]  bus       Open I2C bus handle the amp sits on.
- * @param[in]  addr_7bit 7-bit I2C address (one of the
- *                       TAS2563_I2C_ADDR_* constants).
+ * @param[in]  addr_7bit 7-bit I2C address -- one of the four
+ *                       AD0/SPICLK strap constants
+ *                       (TAS2563_I2C_ADDR_GND_DIRECT/GND_PULL/
+ *                       VDD_PULL/VDD_DIRECT).
+ *                       TAS2563_I2C_ADDR_BROADCAST is rejected: it
+ *                       is write-only and this driver has no
+ *                       write-only path.
  * @param[in]  sd_n      Open GPIO handle bound to AMP.ENABLE.  May
  *                       be NULL if the caller drives SD_N
  *                       elsewhere (or if the pin is tied permanently
  *                       to V+).
+ *
+ * @return ALP_OK on a successful probe.
+ * @retval ALP_ERR_INVAL     ctx or bus is NULL, or addr_7bit is not
+ *                           one of the four strap constants.
+ * @retval ALP_ERR_NOT_READY The I2C connectivity probe failed.
+ *
+ * sd_n configure/write failures pass their own status straight
+ * through instead of being folded into ALP_ERR_NOT_READY.
  */
 alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp_gpio_t *sd_n);
 

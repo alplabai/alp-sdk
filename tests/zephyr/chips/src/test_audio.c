@@ -78,9 +78,10 @@ ZTEST(alp_chips, test_tas2563_calls_reject_uninitialised)
 	zassert_equal(tas2563_set_hw_enable(&ctx, true), ALP_ERR_NOT_READY);
 }
 
-/* #739: every documented strap address (Table 7-3) must be accepted;
- * anything else -- including the two out-of-range/UB-adjacent boundary
- * probes 0x80 and 0xFF -- must be rejected before any bus access. */
+/* #739: the four AD0/SPICLK strap addresses (Table 7-3) must be
+ * accepted; anything else -- including the write-only broadcast
+ * address and the two out-of-range/UB-adjacent boundary probes 0x80
+ * and 0xFF -- must be rejected before any bus access. */
 ZTEST(alp_chips, test_tas2563_init_validates_address_strap_range)
 {
 	tas2563_t ctx;
@@ -95,13 +96,15 @@ ZTEST(alp_chips, test_tas2563_init_validates_address_strap_range)
 	});
 	zassert_not_null(bus);
 
-	/* Every strap-documented address is accepted by the range check
-	 * (the driver may still fail NOT_READY past that point on
-	 * native_sim with no real amp on the bus -- only the validation
-	 * gate is under test here). */
+	/* Every strap address (the four AD0/SPICLK options) is accepted by
+	 * the range check (the driver may still fail NOT_READY past that
+	 * point on native_sim with no real amp on the bus -- only the
+	 * validation gate is under test here). */
 	const uint8_t valid[] = {
-		TAS2563_I2C_ADDR_GND_DIRECT, TAS2563_I2C_ADDR_GND_PULL,  TAS2563_I2C_ADDR_VDD_PULL,
-		TAS2563_I2C_ADDR_VDD_DIRECT, TAS2563_I2C_ADDR_BROADCAST,
+		TAS2563_I2C_ADDR_GND_DIRECT,
+		TAS2563_I2C_ADDR_GND_PULL,
+		TAS2563_I2C_ADDR_VDD_PULL,
+		TAS2563_I2C_ADDR_VDD_DIRECT,
 	};
 	for (size_t i = 0; i < ARRAY_SIZE(valid); ++i) {
 		alp_status_t s = tas2563_init(&ctx, bus, valid[i], NULL);
@@ -118,6 +121,16 @@ ZTEST(alp_chips, test_tas2563_init_validates_address_strap_range)
 		              "addr 0x%02x must be rejected",
 		              invalid[i]);
 	}
+
+	/* TAS2563_I2C_ADDR_BROADCAST is a real Table 7-3 address, but it
+	 * is write-only and this driver has no write-only path -- every
+	 * entry point probes or read-modify-writes a register.  Gets its
+	 * own assertion message so a future reader who re-adds it to
+	 * valid[] sees why it was rejected. */
+	zassert_equal(tas2563_init(&ctx, bus, TAS2563_I2C_ADDR_BROADCAST, NULL),
+	              ALP_ERR_INVAL,
+	              "broadcast addr 0x%02x is write-only; this driver has no write-only path",
+	              TAS2563_I2C_ADDR_BROADCAST);
 
 	alp_i2c_close(bus);
 }

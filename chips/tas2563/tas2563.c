@@ -35,15 +35,16 @@ static alp_status_t select_page(tas2563_t *ctx, uint8_t page)
 	return reg_write(ctx, TAS2563_REG_PAGE, page);
 }
 
-/* Table 7-3: only five 7-bit addresses are wired -- the four
- * AD0/SPICLK strap options plus the global broadcast address.
- * Anything else (including an out-of-range/8-bit-encoded value)
- * cannot correspond to a real strap and is rejected before any bus
- * access. */
+/* Table 7-3: the four AD0/SPICLK strap options are the only addresses
+ * this driver will target.  TAS2563_I2C_ADDR_BROADCAST is a real
+ * datasheet address, but it is write-only, and every entry point
+ * below either probes or read-modify-writes a register -- there is
+ * no write-only path this driver could send to it, so it is rejected
+ * alongside anything else (including an out-of-range/8-bit-encoded
+ * value) that cannot correspond to a real strap. */
 static bool addr_is_valid(uint8_t addr)
 {
-	return addr == TAS2563_I2C_ADDR_BROADCAST ||
-	       (addr >= TAS2563_I2C_ADDR_GND_DIRECT && addr <= TAS2563_I2C_ADDR_VDD_DIRECT);
+	return addr >= TAS2563_I2C_ADDR_GND_DIRECT && addr <= TAS2563_I2C_ADDR_VDD_DIRECT;
 }
 
 alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp_gpio_t *sd_n)
