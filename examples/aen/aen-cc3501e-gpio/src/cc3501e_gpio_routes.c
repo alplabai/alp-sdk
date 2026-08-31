@@ -16,6 +16,17 @@
  *
  * IO17 (EN_W_DIS1n) is intentionally OMITTED: its CC3501E pin GPIO_16 is the bridge
  * SPI0 dummy-CS this rev, so it is not host-proxied (bench call: "GPIO16 is ok for now").
+ *
+ * cc3501e_gpio_unrouted[] is DELIBERATELY left at the WEAK empty default
+ * (src/backends/gpio/cc3501e_proxy.c) rather than populated with IO21: the
+ * bench module this example targets is r1 (`alp board` -> E1M-AEN801 r1),
+ * where IO21 IS routed to CC3501E GPIO_30 -- only r2 leaves it open. The
+ * SoM metadata's `dispatch: unrouted` on r2 (issue #1854) is revision-
+ * specific and this table is not yet revision-aware (#1859); populate it
+ * from the composed route table once that lands, and only once a strong
+ * override of this WEAK array is verified to actually survive compilation
+ * (issue #1860: it was constant-folded away and dropped from the ELF
+ * under -Os on the real target).
  */
 
 #include <stddef.h>
