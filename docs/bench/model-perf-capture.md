@@ -2,8 +2,9 @@
 # Capturing a tier-2 model-perf point
 
 How to add one bench-measured performance point to
-`metadata/model_perf/` once the [three blockers below](#blockers-read-this-before-you-spend-bench-time)
-clear. Written **before** any bench time is spent on tier 2
+`metadata/model_perf/` once the three blockers listed below (see
+"Blockers -- read this before you spend bench time") clear. Written
+**before** any bench time is spent on tier 2
 (docs/superpowers/specs/2026-07-24-edge-ai-lifecycle-roadmap.md
 sub-project 1), so a first capture campaign follows a recipe instead
 of improvising one against the schema.
