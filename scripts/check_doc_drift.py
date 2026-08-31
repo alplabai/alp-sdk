@@ -40,7 +40,7 @@ Five independent checks:
 
       Scanned surfaces (customer-facing only):
         README.md, docs/*.md (top-level), docs/tutorials/**,
-        docs/soms/**, docs/boards/**, vendors/**/*.md
+        docs/soms/**, docs/boards/**, docs/bench/**, vendors/**/*.md
       Deliberately NOT scanned:
         * historical / generated / internal: CHANGELOG.md,
           docs/superpowers/**, docs/abi/**, docs/adr/**
@@ -223,7 +223,7 @@ _BARE_SYMBOL_RE = re.compile(r"\b(ALP_[A-Z0-9_]+|alp_[a-z0-9_]+)\b")
 _BOARD_YML_NAME_RE = re.compile(r"^\s*name:\s*(\S+)", re.MULTILINE)
 
 # docs/ subdirectories scanned recursively for dead symbols.
-_DOC_SUBDIRS = ("tutorials", "soms", "boards")
+_DOC_SUBDIRS = ("tutorials", "soms", "boards", "bench")
 
 # Top-level docs/*.md that are forward-looking design / proposal docs:
 # they document APIs that don't exist yet *by intent*, so they are

@@ -8,7 +8,10 @@
 # `metadata/e1m_modules/E1M-AEN801.yaml` and
 # `metadata/socs/alif/ensemble/e8.json`), so this fixture proves the
 # checks accept a genuine SKU/target/hw_rev combination, not just a
-# self-consistent synthetic one.
+# self-consistent synthetic one. hw_rev is `r1` -- the only E1M-AEN801
+# bench unit actually on hand per `metadata/e1m_modules/E1M-AEN801.yaml`'s
+# BRD_I2C comment -- so this illustrative body can't be mistaken for a
+# real capture off a board that doesn't exist on the bench.
 #
 # `tests/scripts/test_model_perf_metadata.py` loads this as the base body
 # and writes it (at a freshly-computed identity-hash path -- see that
@@ -19,7 +22,7 @@
 
 schema_version: 1
 sku: E1M-AEN801
-hw_rev: r2
+hw_rev: r1
 
 model:
   name: person_detect_int8_v1
@@ -30,6 +33,7 @@ target:
   backend: ethos_u
   accel_config: ethos-u55-256
   core: m55_hp
+  compiler_version: "vela 4.1.0"
 
 vela:
   system_config: Ethos_U55_High_End_Embedded

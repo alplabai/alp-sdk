@@ -54,11 +54,15 @@ doesn't discover it mid-bench.
 ## What a point is keyed on
 
 A perf point's identity is the full **measurement** — SoM SKU, hw_rev,
-compile target (backend + accel_config + core), the exact source-model
-bytes, and the vela profile when one applies — not the model alone and
-not the SoM alone. Two captures that share a model but differ in any
-of those fields are two different measurements and get two different
-files; see `metadata/model_perf/README.md` and
+compile target (backend + accel_config + core + the exact compiler
+build, `target.compiler_version`), the exact source-model bytes, and
+the vela profile when one applies — not the model alone and not the
+SoM alone. `compiler_version` is part of this identity because a
+compiler upgrade alone (e.g. vela 4.1.0 → 5.x) can move
+`arena_bytes`/`latency_ms` with every other field unchanged. Two
+captures that share a model but differ in any of those fields are two
+different measurements and get two different files; see
+`metadata/model_perf/README.md` and
 `metadata/schemas/model-perf-v1.schema.json` for the full contract.
 
 ## Recipe
@@ -69,18 +73,38 @@ files; see `metadata/model_perf/README.md` and
    get the exact `(backend, accel_config, core)` triples that SKU
    resolves. A perf point naming anything else fails
    `scripts/validate_metadata.py`'s target cross-check.
-2. **Compile for that target.**
+2. **Compile for that target, and record the exact compiler build into
+   `target.compiler_version`** — part of the measurement identity (see
+   above), so it must be the compiler that ACTUALLY produced this
+   point, not a version typed from memory.
    - `ethos_u`: run `vela <model>.tflite --accelerator-config
      <accel_config> --system-config <profile> --memory-mode <mode>
      --output-dir <out>` — pass BOTH profile flags explicitly (see
-     blocker 1); never rely on vela's own default.
+     blocker 1); never rely on vela's own default. Record `vela
+     --version` (or the installed `ethos-u-vela` package version) as
+     `vela X.Y.Z`, the same string `scripts/alp_model/adapters/ethos_u.py`'s
+     `_vela_version()` writes into the `.alpmodel` manifest.
    - Other backends: use that backend's own compile step (`dxcom` /
      the DRP-AI toolchain / `.alpmodel` build via
-     `scripts/alp_model/build.py`).
-3. **Read `req_sram_kib` / `arena_bytes`** from the compiler's own
-   report (vela's `<stem>_summary_*.csv`, or the `.alpmodel` manifest
-   `Target.arena` / `Target.requires.sram_kib` if building through
-   `alp_model.build`) — do not hand-estimate either value.
+     `scripts/alp_model/build.py`), and record ITS version, or
+     `passthrough` for a backend with no real compile step (`cpu`).
+3. **Read `arena_bytes` in raw bytes** from the compiler's own report
+   (vela's `<stem>_summary_*.csv` SRAM-used/arena column, or the
+   `.alpmodel` manifest `Target.arena` if building through
+   `alp_model.build`) — do not hand-estimate it. **Then compute
+   `req_sram_kib` yourself as `ceil(arena_bytes / 1024)`, rounding UP to
+   the next whole KiB.** `scripts/validate_metadata.py` requires
+   `req_sram_kib * 1024 >= arena_bytes` — the declared KiB budget must
+   actually COVER the byte figure — and a **floored** KiB value almost
+   never does: 393000 B floor-divides to 383 KiB, but `383 * 1024 =
+   392192 < 393000` is **REJECTED**; `ceil` gives 384 KiB, `384 * 1024 =
+   393216 >= 393000` is accepted. Do NOT copy a KiB figure verbatim from
+   somewhere else without checking its rounding direction first — vela's
+   own summary CSV and the `.alpmodel` manifest's
+   `Target.requires.sram_kib` both floor-divide
+   (`scripts/alp_model/adapters/ethos_u.py`'s `_parse_vela_summary()`
+   does `sram_bytes // 1024`), so pasting either straight into
+   `perf.req_sram_kib` reproduces this exact rejection on real data.
 4. **Flash + run the timed harness** (once it exists — blocker 3) on
    the real SoM, ≥ 30 back-to-back inferences after any warm-up runs
    are discarded, and compute `mean` / `p50` / `p95` / `stdev` /
@@ -105,7 +129,10 @@ files; see `metadata/model_perf/README.md` and
   `_check_model_perf_semantics()` (SKU existence, target/core
   resolution, hw_rev family membership, the vela-profile requirement,
   the SRAM/latency sanity checks, the run-count floor, the `_fixture`
-  refusal).
+  refusal) and `_collect_model_perf_files()` (the exact
+  `<SKU>/<hash>.yaml` two-level tree shape, enforced BEFORE any of the
+  above runs — a misplaced file fails loudly instead of never being
+  opened).
 - Test coverage for every rule above: `tests/scripts/test_model_perf_metadata.py`.
 - Consumer: `tan model check`'s tiered resolution
   (precomputed → exact-if-toolchain → static) reads these points to

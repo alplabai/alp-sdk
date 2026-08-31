@@ -39,7 +39,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from alp_project_loader import _sku_family, resolve_soc_path  # noqa: E402
 from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
-from alp_model.targets import resolve_targets, _npu_backend  # noqa: E402
+from alp_model.targets import resolve_targets, _npu_backend, _accel_config  # noqa: E402
 from strict_loaders import strict_json_loads, strict_yaml_load  # noqa: E402
 
 # Power/ground nets are allowed as pin signals without a signals[] entry.
@@ -1429,6 +1429,62 @@ def _check_board_targets(som_files) -> list:
 
 _MODEL_PERF_FIXTURE_MARKER = "_fixture"
 _MODEL_PERF_LATENCY_RUN_FLOOR = 30
+_MODEL_PERF_ALLOWED_ROOT_FILES = {"README.md"}
+
+
+def _collect_model_perf_files(root: Path) -> tuple[list[Path], list[tuple[str, list[str]]]]:
+    """Collect metadata/model_perf/<SKU>/<hash>.yaml -- and FAIL loudly on
+    anything that doesn't fit that exact two-level shape, instead of
+    silently skipping it (issue #1520 review, PR #1884).
+
+    The one-level `MODEL_PERF.glob("*/*.yaml")` this replaces never opens a
+    point placed one directory too deep (`<SKU>/_fixture/<hash>.yaml` --
+    the precise evasion the `_MODEL_PERF_FIXTURE_MARKER` refusal below
+    exists to catch), a `.yml` sibling, or a stray file dropped directly
+    under `root` -- none of those reach the schema or semantic pass, so
+    the gate prints a clean `0 failure(s)` for a file nobody looked at.
+
+    Walks the whole tree with `rglob("*")` and classifies every FILE it
+    finds (directories are structure, not data):
+      * `root/README.md` is the tree's own doc -- the one root-level file
+        allowed, silently skipped;
+      * `root/<dir>/<name>.yaml` (exactly two path segments below `root`,
+        `.yaml` -- not `.yml` -- suffix) is a real candidate, returned for
+        the schema + semantic passes to validate;
+      * anything else -- a stray root-level file, a nested-one-level-too-
+        deep file, a non-`.yaml` sibling -- is a structural violation and
+        comes back as a FAILURE, shaped like every other check's failure
+        list, not a silent skip.
+    """
+    candidates: list[Path] = []
+    failures: list[tuple[str, list[str]]] = []
+    if not root.is_dir():
+        return candidates, failures
+    for path in sorted(root.rglob("*")):
+        if path.is_dir():
+            continue
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        parts = path.relative_to(root).parts
+        if len(parts) == 1 and path.name in _MODEL_PERF_ALLOWED_ROOT_FILES:
+            continue  # the tree's own doc, not a data file
+        if len(parts) != 2:
+            failures.append((rel, [
+                f"sits {len(parts)} path segment(s) below metadata/model_perf/ "
+                f"-- a real point is exactly <SKU>/<hash>.yaml (2 segments); "
+                f"a file this shallow or this deep is never opened by the "
+                f"schema/semantic passes and validates nothing"]))
+            continue
+        if path.suffix != ".yaml":
+            failures.append((rel, [
+                f"extension `{path.suffix}` is not `.yaml` -- collection "
+                f"only looks for *.yaml, so this file is silently invisible "
+                f"to every check below"]))
+            continue
+        candidates.append(path)
+    return candidates, failures
 
 
 def _model_perf_identity_hash(doc) -> str:
@@ -1437,13 +1493,30 @@ def _model_perf_identity_hash(doc) -> str:
     `metadata/schemas/model-perf-v1.schema.json` both point back at.
 
     Deliberately keyed on the full measurement context (SoM SKU + hw_rev +
-    compile target + the exact source-model bytes + the vela profile when one
-    applies) rather than on the model alone or the SoM alone: two points that
-    share a model but differ in backend/accel_config/core/vela profile are
+    compile target, including the exact compiler build + the exact
+    source-model bytes + the vela profile when one applies) rather than on
+    the model alone or the SoM alone: two points that share a model but
+    differ in backend/accel_config/core/compiler_version/vela profile are
     different measurements and must not collide on one path.  Changing ANY
     identity field must produce a different hash, so a stale filename can
     never silently point at an edited body -- `_check_model_perf_semantics()`
     below is what enforces that the on-disk filename actually matches this.
+
+    `target.compiler_version` (e.g. `vela 4.1.0`) is in this key because a
+    compiler upgrade alone -- no other identity field changing -- can move
+    `arena_bytes`/`latency_ms`: a point captured under vela 4.1.0 and the
+    same point re-captured under vela 5.x would otherwise hash identically
+    and the second capture would silently overwrite the first at the same
+    filename (issue #1520 review, PR #1884).  Two fields the same review
+    raised are DELIBERATELY left out of this key for now: vela's
+    `--optimise`/`--arena-cache-size` flags and the core/NPU clock. Neither
+    has a machine-source field anywhere in this repo today (unlike
+    compiler_version, which already lives on the `.alpmodel` manifest's
+    `Target.compiler_version` and `scripts/alp_model/adapters/ethos_u.py`'s
+    `_vela_version()`) -- adding them here would mean inventing new capture
+    plumbing this contract doesn't build, and an identity field nothing
+    writes is worse than no field: it can never be verified, only trusted.
+    Revisit once a capture path actually records them.
     """
     target = _as_dict(doc.get("target")) if isinstance(doc, dict) else {}
     model = _as_dict(doc.get("model")) if isinstance(doc, dict) else {}
@@ -1455,6 +1528,7 @@ def _model_perf_identity_hash(doc) -> str:
         str(target.get("backend", "")),
         str(target.get("accel_config", "")),
         str(target.get("core", "")),
+        str(target.get("compiler_version", "")),
         str(model.get("src_sha", "")),
         str(vela.get("system_config", "")),
         str(vela.get("memory_mode", "")),
@@ -1513,8 +1587,7 @@ def _model_perf_target_context(sku: str):
             backend = _npu_backend(str(npu.get("type", "")), str(npu.get("subtype", "")))
             if backend is None:
                 continue
-            accel = (f"{npu.get('type', '')}-{npu.get('mac_per_cycle', '')}"
-                     if backend == "ethos_u" else "")
+            accel = _accel_config(npu, backend)
             paired[(backend, accel)] = pc
 
     return target_pairs, core_ids, paired
@@ -1525,12 +1598,13 @@ def _check_model_perf_semantics(model_perf_files) -> list:
     Schema shape pass can't express (issue #1520): the path reproduces the
     body; the SKU exists; the (backend, accel_config) pair and the core are
     ones the SKU actually resolves; hw_rev is in the family table; an
-    ethos_u point records its vela profile; req_sram_kib covers arena_bytes;
-    p95 is not below the mean; the run-count floor; capture.date parses; the
+    ethos_u point records its vela profile and a non-ethos_u point carries
+    none; req_sram_kib covers arena_bytes; p95 is not below the mean and
+    p50 is not above p95; the run-count floor; capture.date parses; the
     published tree cannot absorb a `_fixture`.  Returns a failure list
     shaped like `_check_files()`.
     """
-    failures: list[tuple[Path, list[str]]] = []
+    failures: list[tuple[str, list[str]]] = []  # (rel-path str, msgs), not Path -- see below
     for path in model_perf_files:
         try:
             rel = path.relative_to(REPO).as_posix()
@@ -1670,6 +1744,16 @@ def _check_model_perf_semantics(model_perf_files) -> list:
                     msgs.append("vela.system_config: missing/empty")
                 if not vela.get("memory_mode"):
                     msgs.append("vela.memory_mode: missing/empty")
+        elif isinstance(vela, dict):
+            # A `vela:` block on a non-ethos_u point is meaningless (no vela
+            # compile happened) and hashes into the identity for nothing --
+            # a stray copy-paste from an ethos_u point silently produces a
+            # different hash for what is otherwise the same measurement
+            # (issue #1520 review, PR #1884).
+            msgs.append(
+                f"target.backend is `{backend}`, not `ethos_u`, but `vela:` "
+                f"is present -- vela only runs for an ethos_u target; drop "
+                f"this block (it plays no part in a {backend} compile)")
 
         # req_sram_kib covers arena_bytes.
         req_sram_kib = perf.get("req_sram_kib")
@@ -1683,17 +1767,30 @@ def _check_model_perf_semantics(model_perf_files) -> list:
                     f"SRAM budget doesn't cover the compiler-reported arena "
                     f"it's supposed to hold")
 
-        # p95 is not below the mean; the run-count floor.
+        # p95 is not below the mean; p50 is not above p95; the run-count floor.
         latency = perf.get("latency_ms")
         if isinstance(latency, dict):
-            mean, p95, runs = latency.get("mean"), latency.get("p95"), latency.get("runs")
-            if (isinstance(mean, (int, float)) and not isinstance(mean, bool)
-                    and isinstance(p95, (int, float)) and not isinstance(p95, bool)
-                    and p95 < mean):
+            def _num(v):
+                return isinstance(v, (int, float)) and not isinstance(v, bool)
+            mean, p50, p95, runs = (latency.get("mean"), latency.get("p50"),
+                                     latency.get("p95"), latency.get("runs"))
+            if _num(mean) and _num(p95) and p95 < mean:
                 msgs.append(
                     f"perf.latency_ms.p95 ({p95}) is below "
                     f"perf.latency_ms.mean ({mean}) -- a p95 below the mean "
                     f"of the same sample is not a valid percentile (mean/"
+                    f"p50/p95 swapped, or a stale value left over from a "
+                    f"re-run)")
+            if _num(p50) and _num(p95) and p95 < p50:
+                # p50 <= p95 always holds for any real sample (a percentile
+                # function is non-decreasing) -- unlike mean-vs-p50, which a
+                # right-skewed latency tail can legitimately invert, so that
+                # relationship is deliberately NOT enforced here (issue
+                # #1520 review, PR #1884).
+                msgs.append(
+                    f"perf.latency_ms.p50 ({p50}) is above "
+                    f"perf.latency_ms.p95 ({p95}) -- the 50th percentile of "
+                    f"a sample can never exceed its 95th percentile (mean/"
                     f"p50/p95 swapped, or a stale value left over from a "
                     f"re-run)")
             if isinstance(runs, int) and not isinstance(runs, bool) and runs < _MODEL_PERF_LATENCY_RUN_FLOOR:
@@ -1839,10 +1936,16 @@ def main() -> int:
     if MODEL_PERF_SCHEMA.is_file():
         model_perf_schema = json.loads(MODEL_PERF_SCHEMA.read_text(encoding="utf-8"))
         model_perf_validator = jsonschema.Draft202012Validator(model_perf_schema)
-        model_perf_files = sorted(MODEL_PERF.glob("*/*.yaml"))
-        if model_perf_files:
+        model_perf_files, model_perf_collector_failures = _collect_model_perf_files(MODEL_PERF)
+        if model_perf_files or model_perf_collector_failures:
             print()
-            model_perf_failures = _check_files(
+        for rel, msgs in model_perf_collector_failures:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+        model_perf_failures += model_perf_collector_failures
+        if model_perf_files:
+            model_perf_failures += _check_files(
                 "YAML", model_perf_files, model_perf_validator,
                 lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "sku",

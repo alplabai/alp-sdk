@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/model-perf-v1.schema.json",
   "title": "ALP tier-2 model-perf point (metadata/model_perf/<SKU>/<hash>.yaml) v1",
-  "description": "One bench-measured performance point for the tier-2 edge-AI fit/perf lifecycle (docs/superpowers/specs/2026-07-24-edge-ai-lifecycle-roadmap.md sub-project 1). A point records exact fit/SRAM/latency for one MEASUREMENT -- a specific model, compiled for a specific (SKU, hw_rev, backend, accel_config, core) target, optionally under a specific vela profile -- captured on real Alp Lab bench silicon. It is deliberately keyed on that full measurement identity rather than on the model alone or the SoM alone: two points that share a model but differ in backend, accel_config, core, or vela profile are two different measurements and must not collide on one path. `scripts/validate_metadata.py` enforces the identity: the containing directory must equal `sku`, and the filename must equal a content hash of (sku, hw_rev, target.backend, target.accel_config, target.core, model.src_sha, vela.system_config, vela.memory_mode) -- see that script's `_model_perf_identity_hash()`, the single source of the hash recipe. `metadata/model_perf/` ships empty (issue #1520 lands the contract only): a perf point comes off real silicon or it does not exist, and a `_fixture`-named path anywhere in the published tree is refused outright -- test fixtures live under `tests/fixtures/model_perf/`.",
+  "description": "One bench-measured performance point for the tier-2 edge-AI fit/perf lifecycle (docs/superpowers/specs/2026-07-24-edge-ai-lifecycle-roadmap.md sub-project 1). A point records exact fit/SRAM/latency for one MEASUREMENT -- a specific model, compiled by a specific compiler build for a specific (SKU, hw_rev, backend, accel_config, core) target, optionally under a specific vela profile -- captured on real Alp Lab bench silicon. It is deliberately keyed on that full measurement identity rather than on the model alone or the SoM alone: two points that share a model but differ in backend, accel_config, core, compiler_version, or vela profile are two different measurements and must not collide on one path (a compiler upgrade alone can move arena_bytes/latency_ms for otherwise-identical everything else -- issue #1520 review). `scripts/validate_metadata.py` enforces the identity: the containing directory must equal `sku`, and the filename must equal a content hash of (sku, hw_rev, target.backend, target.accel_config, target.core, target.compiler_version, model.src_sha, vela.system_config, vela.memory_mode) -- see that script's `_model_perf_identity_hash()`, the single source of the hash recipe. `metadata/model_perf/` ships empty (issue #1520 lands the contract only): a perf point comes off real silicon or it does not exist, and a `_fixture`-named path anywhere in the published tree is refused outright -- test fixtures live under `tests/fixtures/model_perf/`.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "sku", "hw_rev", "model", "target", "perf", "capture"],
@@ -46,7 +46,7 @@
     "target": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["backend", "accel_config", "core"],
+      "required": ["backend", "accel_config", "core", "compiler_version"],
       "properties": {
         "backend": {
           "type": "string",
@@ -61,6 +61,11 @@
           "type": "string",
           "pattern": "^[a-z][a-z0-9_]*$",
           "description": "The SoM `topology:` role (e.g. `m55_hp`, `a32_cluster`) that issued this measurement -- the core running the inference call, whether or not it also owns the NPU doing the compute. scripts/validate_metadata.py cross-checks this against the SKU's actual topology, and against `npus[].paired_core` for the subset of NPUs the SoC JSON pins to one core."
+        },
+        "compiler_version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The exact compiler build that produced this measurement, same vocabulary as the `.alpmodel` manifest's `Target.compiler_version` (scripts/alp_model/manifest.py) -- e.g. `vela 4.1.0` for an `ethos_u` point (scripts/alp_model/adapters/ethos_u.py's `_vela_version()`), or `passthrough` for a backend with no real compile step. Required and non-empty here (stricter than the manifest field, which tolerates `\"\"` for unknown) because this value is part of the measurement identity: a vela upgrade alone can move `arena_bytes`/`latency_ms` for byte-identical everything else, and an unrecorded compiler version would let a re-capture under a newer compiler silently overwrite the old point at the same filename (issue #1520 review). Included in `_model_perf_identity_hash()`; deliberately the ONLY new identity field this contract adds for now -- see that function's docstring for what was considered and left out (vela `--optimise`, `--arena-cache-size`, NPU/core clock)."
         }
       }
     },
@@ -90,7 +95,7 @@
         "req_sram_kib": {
           "type": "integer",
           "minimum": 0,
-          "description": "SRAM the target actually needed, in KiB. Today this counts the compiled activation arena alone -- the same accounting as the `.alpmodel` manifest's `Target.requires.sram_kib` -- and does NOT yet include the model's const/weight region where that region is SRAM- rather than MRAM/flash-resident on a given backend (open question, issue #1520). scripts/validate_metadata.py requires this value to at least cover `arena_bytes`."
+          "description": "SRAM the target actually needed, in KiB, rounded UP to the next whole KiB (`ceil(arena_bytes / 1024)`) -- NOT the same floor-divided accounting as the `.alpmodel` manifest's `Target.requires.sram_kib` (scripts/alp_model/adapters/ethos_u.py's `_parse_vela_summary()` does `sram_bytes // 1024`); pasting that manifest field or vela's own summary-CSV KiB column in here verbatim under-reports the budget and fails the check below on real data (issue #1520 review, PR #1884; see docs/bench/model-perf-capture.md's recipe step 3). Today this counts the compiled activation arena alone and does NOT yet include the model's const/weight region where that region is SRAM- rather than MRAM/flash-resident on a given backend (open question, issue #1520). scripts/validate_metadata.py requires `req_sram_kib * 1024 >= arena_bytes` -- this value must actually cover `arena_bytes`."
         },
         "arena_bytes": {
           "type": "integer",

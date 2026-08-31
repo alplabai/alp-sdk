@@ -18,12 +18,12 @@ metadata/model_perf/<SKU>/<hash>.yaml
 One file per **measurement** — not per model and not per SoM. The
 containing directory is the SoM SKU (e.g. `E1M-AEN801`); the filename
 is a content hash of the point's full measurement identity (SKU,
-hw_rev, compile target, the exact source-model bytes, and the vela
-profile when one applies) — see `scripts/validate_metadata.py`'s
-`_model_perf_identity_hash()`, the single source of that recipe. Two
-points that share a model but differ in backend, accel_config, core,
-or vela profile are two different measurements and must not collide
-on one path.
+hw_rev, compile target including the exact compiler build, the exact
+source-model bytes, and the vela profile when one applies) — see
+`scripts/validate_metadata.py`'s `_model_perf_identity_hash()`, the
+single source of that recipe. Two points that share a model but differ
+in backend, accel_config, core, compiler_version, or vela profile are
+two different measurements and must not collide on one path.
 
 Schema: [`metadata/schemas/model-perf-v1.schema.json`](../schemas/model-perf-v1.schema.json).
 Semantic cross-checks (the ones a schema alone can't express — SKU
