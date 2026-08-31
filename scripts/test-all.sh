@@ -966,9 +966,7 @@ stage_generated_files() {
         metadata/socs/renesas/rzv2n/n44.json \
         docs/portability-matrix.md docs/peripheral-support-matrix.md \
         docs/verification-status.md \
-        examples/aen/aen-cc3501e-bringup/src/cc3501e_gpio_routes.c \
-        examples/aen/aen-cc3501e-companion-tour/src/cc3501e_gpio_routes.c \
-        examples/aen/aen-cc3501e-gpio/src/cc3501e_gpio_routes.c \
+        examples/aen \
         docs/diagnostics 2>/dev/null; then
         echo "git add -N failed -- an expected generated path is missing from the tree"
         return 1
@@ -992,9 +990,7 @@ stage_generated_files() {
             metadata/socs/renesas/rzv2n/n44.json \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
-            examples/aen/aen-cc3501e-bringup/src/cc3501e_gpio_routes.c \
-            examples/aen/aen-cc3501e-companion-tour/src/cc3501e_gpio_routes.c \
-            examples/aen/aen-cc3501e-gpio/src/cc3501e_gpio_routes.c \
+            examples/aen \
             docs/diagnostics 2>/dev/null; then
         echo "generated files are OUT OF SYNC -- regenerated in place; git add + commit:"
         git --no-pager diff --stat -- \
@@ -1003,9 +999,7 @@ stage_generated_files() {
             metadata/socs/renesas/rzv2n/n44.json \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
-            examples/aen/aen-cc3501e-bringup/src/cc3501e_gpio_routes.c \
-            examples/aen/aen-cc3501e-companion-tour/src/cc3501e_gpio_routes.c \
-            examples/aen/aen-cc3501e-gpio/src/cc3501e_gpio_routes.c \
+            examples/aen \
             docs/diagnostics 2>/dev/null | tail -20
         return 1
     fi

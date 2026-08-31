@@ -24,12 +24,13 @@ the table from that JSON -- so a board.yaml that declares `som.hw_rev:
 r1` gets the r1 map automatically, and the three examples can never drift
 against each other or against metadata again.
 
-A composed row whose target CC3501E pad is bridge-reserved (the
-transport's own SPI0 + console pads, or the bridge's own READY/CS lines)
-is excluded here, at GENERATION time -- i.e. a build-time failure mode
-for the SDK maintainer regenerating this file, not a runtime
-ALP_ERR_INVAL from cc3501e_gpio_configure() on a device.  See
-RESERVED_CC3501E_PADS below.
+A composed row whose target CC3501E pad is bridge-reserved (a row whose
+`from-cc3501e.tsv` peripheral column names a bridge claim -- BRIDGE_READY,
+BRIDGE_SPI_CSN -- rather than a bare GPIOxx pad) is excluded here, at
+GENERATION time -- i.e. a build-time failure mode for the SDK maintainer
+regenerating this file, not a runtime ALP_ERR_INVAL from
+cc3501e_gpio_configure() on a device.  See RESERVED_CC3501E_PADS below;
+each excluded row is printed, not silently dropped.
 
 Run:
 
@@ -42,6 +43,7 @@ hw-revisions metadata, then fails if the working tree diff is non-empty.
 
 from __future__ import annotations
 
+import csv
 import json
 import re
 import shutil
@@ -52,17 +54,48 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = REPO / "examples" / "aen"
 ALP_PROJECT = REPO / "scripts" / "alp_project.py"
+FROM_CC3501E_TSV = REPO / "metadata" / "e1m_modules" / "aen" / "from-cc3501e.tsv"
 
-# Mirrors firmware/cc3501e/hal/ti/cc3501e_hw_ti_gpio.c gpio_pad_reserved():
-# the bridge's own inter-chip SPI0 (CSN=16, SCLK=27, POCI=28, PICO=29), its
-# UART2 console glue (TX=5, RX=6), the pads not bonded on this device
-# (7/8/9), and GPIO_17 -- the bridge READY/host-IRQ line (E1M IO16).  A
-# pad_routes / hw-revisions entry that targets one of these can never
-# actually be proxied: the firmware refuses it at runtime.  The generator
-# drops it here instead, as ONE rule applied to every row, rather than the
-# hand-picked per-instance omission that caused #1859 (IO17 -- GPIO_16 --
-# was correctly left out by hand, but IO16 -- GPIO_17 -- was not).
-RESERVED_CC3501E_PADS = frozenset({5, 6, 7, 8, 9, 16, 17, 27, 28, 29})
+_TSV_IO_RE = re.compile(r"IO\d+")
+_PLAIN_GPIO_RE = re.compile(r"GPIO_?(\d+)")
+
+
+def _reserved_pads_from_tsv() -> frozenset[int]:
+    """CC3501E GPIO indices reserved from the host GPIO proxy, derived from
+    FROM_CC3501E_TSV rather than hand-typed against
+    cc3501e-bridge-firmware's hal/ti/cc3501e_hw_ti_gpio.c
+    gpio_pad_reserved() -- that firmware lives in a SEPARATE repo
+    (alplabai/cc3501e-bridge-firmware; moved out of alp-sdk by #1370/#1805),
+    so a literal copied from it here could drift with no way to detect it.
+
+    A TSV row whose `e1m_function` is an E1M IOxx pad and whose
+    `cc3501e_function` is a NAMED claim (`BRIDGE_READY`, `BRIDGE_SPI_CSN`
+    -- #1808's peripheral-column convention) rather than a bare `GPIOxx`
+    pad name marks that pad's raw index (in `cc3501e_pad`) reserved.  This
+    only captures pads reachable via an E1M IOxx pad_routes entry in the
+    first place (the bridge's own inter-chip SPI0 pads never are, since
+    they surface in the TSV as `SPI1_*` rows, not `IOxx` ones) --
+    test_aen_som_gpio_pad_routes_match_tsv_source already enforces that
+    every SoM's `pad_routes:` IOxx entry matches this TSV, so a pad_routes
+    entry can never target an unlisted pad without that gate catching it
+    first.
+    """
+    reserved: set[int] = set()
+    with FROM_CC3501E_TSV.open(newline="", encoding="utf-8") as f:
+        rows = (line for line in f if not line.startswith("#"))
+        for row in csv.DictReader(rows, delimiter="\t"):
+            if not _TSV_IO_RE.fullmatch(row.get("e1m_function") or ""):
+                continue
+            func = row.get("cc3501e_function") or ""
+            if _PLAIN_GPIO_RE.fullmatch(func):
+                continue  # unclaimed -- an ordinary proxyable pad
+            m = _PLAIN_GPIO_RE.fullmatch(row.get("cc3501e_pad") or "")
+            if m:
+                reserved.add(int(m.group(1)))
+    return frozenset(reserved)
+
+
+RESERVED_CC3501E_PADS = _reserved_pads_from_tsv()
 
 _E1M_GPIO_RE = re.compile(r"E1M_GPIO_IO\d+")
 
@@ -113,18 +146,38 @@ def _proxy_rows(composed: dict) -> list[tuple[str, int, str]]:
             continue
         pin = row.get("dispatch_pin")
         if pin is None:
-            continue
+            # Unlike E1M_SPI1 (excluded above by the IOxx regex, and
+            # legitimately pin-less), a GPIO row that reaches here with
+            # dispatch: cc3501e and no dispatch_pin is always a metadata
+            # defect (typo'd dispatch, a pad_route_overrides entry missing
+            # its pin, ...) -- fail loudly instead of silently delegating
+            # the pad to the platform driver (#1859 review).
+            sys.exit(
+                f"gen_cc3501e_gpio_routes: {e1m} has dispatch: cc3501e but no "
+                f"dispatch_pin (hw_rev={composed.get('hw_rev')}) -- fix its "
+                f"pad_routes / pad_route_overrides entry"
+            )
         pin = int(pin)
         if pin in RESERVED_CC3501E_PADS:
+            # Not silent: #1859's whole point is that a reserved-pad route
+            # must be visible, not discovered at cc3501e_gpio_configure()
+            # runtime.  Always dropped (the firmware refuses it), never a
+            # build failure -- IO16/IO17 are a permanent physical fact of
+            # this SoM family, not a transient metadata bug.
+            print(f"  dropping {e1m} -> CC3501E GPIO_{pin} (bridge-reserved pad)")
             continue
-        doc = row.get("board_doc") or row.get("som_doc") or ""
+        doc = (row.get("board_doc") or row.get("som_doc") or "").replace(
+            "*/", "* /").replace("\n", " ")
         rows.append((e1m, pin, doc))
 
-    # Defensive: the filter above is the single place that decides "never
-    # proxy a reserved pad".  Assert it actually held, so a future edit to
-    # this function that breaks the filter fails HERE (generation time)
-    # instead of at cc3501e_gpio_configure() on a device (#1859).
-    assert all(pin not in RESERVED_CC3501E_PADS for _, pin, _ in rows)
+    # Defensive, not compiled out under -O (unlike `assert`): the filter
+    # above is the single place that decides "never proxy a reserved pad".
+    # Re-check it actually held, so a future edit that breaks the filter
+    # fails HERE (generation time) instead of at cc3501e_gpio_configure()
+    # on a device (#1859).
+    if any(pin in RESERVED_CC3501E_PADS for _, pin, _ in rows):
+        sys.exit("gen_cc3501e_gpio_routes: internal error -- a reserved pad "
+                  "survived the filter")
     return rows
 
 
@@ -201,7 +254,25 @@ def _clang_format_exe() -> str:
 
 
 def _clang_format(path: Path, exe: str) -> None:
-    subprocess.run([exe, "-i", "--style=file", str(path)], check=True)
+    # file:<path>, not bare "file": bare "file" makes clang-format search
+    # upward from `path`'s OWN directory for a .clang-format, which finds
+    # nothing (falling back to the LLVM default style) when `path` is
+    # redirected outside the repo tree -- e.g. by a test's _out_path_for()
+    # monkeypatch into a tmp dir.  Pinning the repo's own file makes
+    # formatting identical regardless of where the caller points output.
+    subprocess.run(
+        [exe, "-i", f"--style=file:{REPO / '.clang-format'}", str(path)], check=True
+    )
+
+
+def _out_path_for(app_dir: Path) -> Path:
+    """Where <app_dir>'s route table is written.  A single indirection
+    point (not a per-app inline expression in main()) so a test can
+    monkeypatch it to write into a tmp dir instead of the tracked
+    examples/ tree -- gen_board_header.py's OUT_DIR does the same job for
+    its single shared output root; this generator has one output root per
+    app instead, hence a function rather than a constant."""
+    return app_dir / "src" / "cc3501e_gpio_routes.c"
 
 
 def main() -> int:
@@ -218,15 +289,15 @@ def main() -> int:
         composed = _composed_routes(board_yaml)
         rows = _proxy_rows(composed)
         out_text = _emit(app_dir.name, composed["hw_rev"], rows)
-        out_path = app_dir / "src" / "cc3501e_gpio_routes.c"
+        out_path = _out_path_for(app_dir)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         # newline="": force LF regardless of host OS (.gitattributes pins
         # *.c to LF; Path.write_text()'s default text-mode translation
         # would otherwise emit CRLF on Windows, matching gen_soc_caps.py's
         # OUT.write_text(..., newline="") for the same reason).
         out_path.write_text(out_text, encoding="utf-8", newline="")
         _clang_format(out_path, exe)
-        print(f"wrote {out_path.relative_to(REPO)} ({len(rows)} routes, "
-              f"hw_rev={composed['hw_rev']})")
+        print(f"wrote {out_path} ({len(rows)} routes, hw_rev={composed['hw_rev']})")
 
     return 0
 

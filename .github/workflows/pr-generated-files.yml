@@ -302,9 +302,7 @@ jobs:
                         docs/peripheral-support-matrix.md \
                         docs/portability-matrix.md \
                         docs/verification-status.md \
-                        examples/aen/aen-cc3501e-bringup/src/cc3501e_gpio_routes.c \
-                        examples/aen/aen-cc3501e-companion-tour/src/cc3501e_gpio_routes.c \
-                        examples/aen/aen-cc3501e-gpio/src/cc3501e_gpio_routes.c
+                        examples/aen
           # No line-mask here: abi_snapshot.py's own write-skip guard
           # (above) is what keeps a no-op rerun from touching the
           # "generated" line at all, so this diff sees zero lines
@@ -324,9 +322,7 @@ jobs:
                      docs/peripheral-support-matrix.md \
                      docs/portability-matrix.md \
                      docs/verification-status.md \
-                     examples/aen/aen-cc3501e-bringup/src/cc3501e_gpio_routes.c \
-                     examples/aen/aen-cc3501e-companion-tour/src/cc3501e_gpio_routes.c \
-                     examples/aen/aen-cc3501e-gpio/src/cc3501e_gpio_routes.c; then
+                     examples/aen; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
             echo "::error::  python3 scripts/gen_status_strings.py"

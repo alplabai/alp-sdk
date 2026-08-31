@@ -39,6 +39,11 @@
 #include "gpio_ops.h"
 #include "alp_slot_claim.h"
 
+#if defined(CONFIG_ALP_SDK_HW_INFO)
+#include <alp/hw_info.h>      /* alp_hw_info_read(), alp_hw_info_t, ALP_OK */
+#include "hw_info_manifest.h" /* alp_hw_info_build_hw_rev_mismatch() -- internal, issue #1859 */
+#endif
+
 /* GPIO is fast (no worker / no radio bring-up) in the CC3501E firmware, but the
  * bridge link is briefly down if a radio op overlaps; the per-request helper
  * retries on transient IO inside this budget. */
@@ -65,10 +70,32 @@
  * also delegate (no bridge to talk to yet). */
 static cc3501e_t *g_bridge_ctx;
 
+#if defined(CONFIG_ALP_SDK_HW_INFO)
+/* Cached ONCE in alp_gpio_cc3501e_attach() (not re-read per alp_gpio_open(),
+ * which would put an EEPROM I2C transaction on every proxied pin open).
+ * True when the live module's hw_rev disagrees with CONFIG_ALP_SDK_SOM_HW_REV
+ * -- the rev this build's cc3501e_gpio_routes[] table was generated for
+ * (scripts/gen_cc3501e_gpio_routes.py, issue #1859).  Mirrors #1853's boot
+ * banner check (src/zephyr/alp_banner.c); this is the "stronger guard" that
+ * fix deferred: the AEN family moves IO8/IO10/IO21 between the Alif and the
+ * CC3501E across hw_rev, so a route table compiled for the wrong revision
+ * would otherwise silently drive a different physical pin than the caller
+ * asked for.  Stays false (never refuses) when the manifest can't be read
+ * (NOT_PROVISIONED / no EEPROM bus wired / NOSUPPORT) -- same floor as the
+ * banner check: a factory-fresh or EEPROM-less module never trips this. */
+static bool g_hw_rev_mismatch;
+#endif
+
 alp_status_t alp_gpio_cc3501e_attach(cc3501e_t *ctx)
 {
 	if (ctx == NULL) return ALP_ERR_INVAL;
 	g_bridge_ctx = ctx;
+#if defined(CONFIG_ALP_SDK_HW_INFO)
+	alp_hw_info_t info;
+	if (alp_hw_info_read(&info) == ALP_OK) {
+		g_hw_rev_mismatch = alp_hw_info_build_hw_rev_mismatch(&info, CONFIG_ALP_SDK_SOM_HW_REV);
+	}
+#endif
 	return ALP_OK;
 }
 
@@ -105,9 +132,17 @@ static void _free_side(proxy_side_t *s)
 }
 
 /* Look up a portable pin_id in the board route table.  Returns true + the raw
- * CC3501E GPIO index when the pin is proxied. */
+ * CC3501E GPIO index when the pin is proxied.  Returns false unconditionally
+ * on a detected hw_rev mismatch (issue #1859): px_open()'s caller then
+ * delegates to the platform driver instead of driving the wrong physical
+ * chip, the same fallback an un-populated route table already gets. */
 static bool route_lookup(uint32_t pin_id, uint8_t *raw_out)
 {
+#if defined(CONFIG_ALP_SDK_HW_INFO)
+	if (g_hw_rev_mismatch) {
+		return false;
+	}
+#endif
 	for (size_t i = 0; i < cc3501e_gpio_route_count; ++i) {
 		if (cc3501e_gpio_routes[i].pin_id == pin_id) {
 			*raw_out = cc3501e_gpio_routes[i].cc35_gpio;
