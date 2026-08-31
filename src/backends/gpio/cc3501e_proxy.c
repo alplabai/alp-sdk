@@ -11,7 +11,12 @@
  * routes a pin_id listed in the board's cc3501e_gpio_routes[] table over the
  * inter-chip bridge (chips/cc3501e -> cc3501e_gpio_*), and DELEGATES every
  * other pin_id to the platform (Zephyr) GPIO driver so the Alif's own pins
- * (WIFI_EN / nRESET / LEDs / ...) keep working unchanged.
+ * (WIFI_EN / nRESET / LEDs / ...) keep working unchanged -- EXCEPT a pin_id
+ * listed in the board's cc3501e_gpio_unrouted[] list, which is refused
+ * outright with ALP_ERR_NOSUPPORT: that list names E1M pads that are
+ * physically open on the running hardware revision (reach neither the
+ * CC3501E nor the Alif SoC, e.g. AEN r2's IO21), so delegating them would
+ * silently open and drive a pin that goes nowhere (issue #1854).
  *
  * Because gpio uses one backend per SoC (alp_backend_select picks by
  * silicon_ref + priority), this proxy registers at a HIGHER priority than the
@@ -65,6 +70,13 @@
  * (issue #1860).  Moving the weak default out means this TU only ever sees
  * an `extern` declaration, so route_lookup() below always compiles a real
  * load + call through the linked symbol, strong or weak. */
+
+/* WEAK empty unrouted list: a board overrides these two symbols (filled from
+ * the SoM pad map's `dispatch: unrouted` entries, e.g. AEN r2's IO21 -- issue
+ * #1854) to name pin_ids that are physically open on this hardware revision.
+ * Checked in px_open() BEFORE the route/delegate decision below, so it is the
+ * single chokepoint every alp_gpio_open() call on this target passes through
+ * -- not just the boards that happen to populate cc3501e_gpio_routes[]. */
 
 /* Live bridge handle, set by alp_gpio_cc3501e_attach().  NULL => proxied pins
  * also delegate (no bridge to talk to yet). */
@@ -152,9 +164,25 @@ static bool route_lookup(uint32_t pin_id, uint8_t *raw_out)
 	return false;
 }
 
+/* Look up a portable pin_id in the board's unrouted list (issue #1854). */
+static bool is_unrouted(uint32_t pin_id)
+{
+	for (size_t i = 0; i < cc3501e_gpio_unrouted_count; ++i) {
+		if (cc3501e_gpio_unrouted[i] == pin_id) return true;
+	}
+	return false;
+}
+
 static alp_status_t
 px_open(uint32_t pin_id, alp_gpio_backend_state_t *state, alp_capabilities_t *caps)
 {
+	/* Refuse a pin the board has named as physically open on this hardware
+	 * revision BEFORE the route/delegate decision below -- this is every
+	 * alp_gpio_open() call's single path through the AEN GPIO proxy, so
+	 * checking here (not in one example / one caller) covers every app
+	 * (issue #1854). */
+	if (is_unrouted(pin_id)) return ALP_ERR_NOSUPPORT;
+
 	proxy_side_t *s = _alloc_side();
 	if (s == NULL) return ALP_ERR_NOMEM;
 

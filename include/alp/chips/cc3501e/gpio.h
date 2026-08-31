@@ -136,6 +136,19 @@ extern const cc3501e_gpio_route_t cc3501e_gpio_routes[];
 extern const size_t               cc3501e_gpio_route_count;
 
 /**
+ * Board-provided list of portable pin_ids that are UNROUTED on this
+ * hardware revision -- physically open E1M pads that reach neither the
+ * CC3501E nor the Alif SoC (e.g. AEN r2's E1M_GPIO_IO21, SoM preset
+ * `pad_routes: [{ e1m: E1M_GPIO_IO21, dispatch: unrouted }]`).
+ * alp_gpio_open() on a listed pin_id returns @ref ALP_ERR_NOSUPPORT
+ * instead of silently delegating to the platform GPIO driver and
+ * driving a pin that goes nowhere (#1854).  WEAK empty default in the
+ * proxy backend: an un-mapped build treats every pin as routed/direct
+ * (no behaviour change until populated from the SoM pad map). */
+extern const uint32_t cc3501e_gpio_unrouted[];
+extern const size_t   cc3501e_gpio_unrouted_count;
+
+/**
  * @brief Attach the live bridge handle to the GPIO proxy backend.
  *
  * Call once after cc3501e_init().  Without it (or with an empty route table)

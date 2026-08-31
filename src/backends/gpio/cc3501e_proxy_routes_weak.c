@@ -36,3 +36,14 @@
 
 __attribute__((weak)) const cc3501e_gpio_route_t cc3501e_gpio_routes[]    = { 0 };
 __attribute__((weak)) const size_t               cc3501e_gpio_route_count = 0u;
+
+/*
+ * Same reasoning as the route table above, for the unrouted list added by
+ * #1854: defining a weak `const` array in the SAME translation unit that
+ * reads it lets the compiler fold the count to 0 at -Os and drop the check
+ * entirely, so a board's strong override becomes dead code (#1860).  It
+ * lives here for exactly that reason -- do not move it back beside its
+ * reader.
+ */
+__attribute__((weak)) const uint32_t cc3501e_gpio_unrouted[]     = { 0 };
+__attribute__((weak)) const size_t   cc3501e_gpio_unrouted_count = 0u;
