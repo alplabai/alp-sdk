@@ -32,6 +32,8 @@ target_sources(app PRIVATE src/main.c)
 # init the example + applications use. Copyable template -- see cc3501e_bridge.h.
 target_sources(app PRIVATE src/cc3501e_bridge.c)
 # E1M-AEN GPIO-proxy route table: strong override of the proxy backend's weak
-# cc3501e_gpio_routes[] (E1M IO pin_id -> raw CC3501E GPIO). Built unconditionally;
-# only consulted when CONFIG_ALP_SDK_GPIO_CC3501E_PROXY is enabled (prj.conf).
+# cc3501e_gpio_routes[] (E1M IO pin_id -> raw CC3501E GPIO). Auto-generated
+# by scripts/gen_cc3501e_gpio_routes.py -- do not edit by hand, regenerate.
+# Built unconditionally; only consulted when CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
+# is enabled (prj.conf).
 target_sources(app PRIVATE src/cc3501e_gpio_routes.c)

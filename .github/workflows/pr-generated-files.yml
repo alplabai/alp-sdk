@@ -21,6 +21,16 @@
 #     `e1m_routes:` blocks and emits
 #     include/alp/boards/alp_<board>_routes.h.
 #
+#   - AEN SoM / hw-revisions metadata edits that didn't trigger a
+#     regeneration of the CC3501E GPIO proxy's board route tables.
+#     scripts/gen_cc3501e_gpio_routes.py resolves each AEN example's
+#     board.yaml through `alp_project.py --emit composed-route-table`
+#     (metadata/e1m_modules/E1M-AEN801.yaml `pad_routes:` + the selected
+#     hw_rev's metadata/e1m_modules/aen/hw-revisions.yaml overrides) and
+#     emits <example>/src/cc3501e_gpio_routes.c; a committed copy that
+#     doesn't match is asking reviewers to accept a stale, or
+#     bridge-reserved-pad, route (issue #1859).
+#
 #   - Public-header additions/removals that didn't bump the ABI
 #     snapshot at docs/abi/v<N>-snapshot.json.  The snapshot's
 #     fingerprint diff is the cheapest way to spot accidental
@@ -54,6 +64,7 @@ on:
       - 'scripts/gen_support_matrix.py'
       - 'scripts/gen_catalog.py'
       - 'scripts/gen_error_catalog.py'
+      - 'scripts/gen_cc3501e_gpio_routes.py'
       # The portability matrix re-runs the som.sku swap-test through
       # scripts/alp_project.py + the alp_orchestrate/ package, so any
       # emit-pipeline change can move its generated block.
@@ -158,6 +169,13 @@ jobs:
       # gate below flag any drift.
       - name: Regenerate board routes headers from board YAMLs
         run: python3 scripts/gen_board_header.py
+
+      # CC3501E GPIO proxy route tables: examples/aen/<app>/src/cc3501e_gpio_routes.c
+      # is projected from the AEN SoM's pad_routes + hw-revisions overrides by
+      # scripts/gen_cc3501e_gpio_routes.py (issue #1859).  Needs clang-format
+      # (installed above) to match the committed formatting.
+      - name: Regenerate CC3501E GPIO proxy route tables from metadata
+        run: python3 scripts/gen_cc3501e_gpio_routes.py
 
       - name: Regenerate pin-mux capability tables from the pinout TSVs
         run: python3 scripts/gen_pinmux_capability.py
@@ -283,7 +301,10 @@ jobs:
                         metadata/error-catalog.json \
                         docs/peripheral-support-matrix.md \
                         docs/portability-matrix.md \
-                        docs/verification-status.md
+                        docs/verification-status.md \
+                        examples/aen/aen-cc3501e-bringup/src/cc3501e_gpio_routes.c \
+                        examples/aen/aen-cc3501e-companion-tour/src/cc3501e_gpio_routes.c \
+                        examples/aen/aen-cc3501e-gpio/src/cc3501e_gpio_routes.c
           # No line-mask here: abi_snapshot.py's own write-skip guard
           # (above) is what keeps a no-op rerun from touching the
           # "generated" line at all, so this diff sees zero lines
@@ -302,11 +323,15 @@ jobs:
                      metadata/error-catalog.json \
                      docs/peripheral-support-matrix.md \
                      docs/portability-matrix.md \
-                     docs/verification-status.md; then
+                     docs/verification-status.md \
+                     examples/aen/aen-cc3501e-bringup/src/cc3501e_gpio_routes.c \
+                     examples/aen/aen-cc3501e-companion-tour/src/cc3501e_gpio_routes.c \
+                     examples/aen/aen-cc3501e-gpio/src/cc3501e_gpio_routes.c; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
             echo "::error::  python3 scripts/gen_status_strings.py"
             echo "::error::  python3 scripts/gen_board_header.py"
+            echo "::error::  python3 scripts/gen_cc3501e_gpio_routes.py"
             echo "::error::  python3 scripts/gen_pinmux_capability.py"
             echo "::error::  python3 scripts/gen_support_matrix.py"
             echo "::error::  python3 scripts/gen_portability_matrix.py"

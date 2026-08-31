@@ -100,7 +100,14 @@ def test_aen_som_gpio_pad_routes_match_tsv_source(sku):
 
 @pytest.mark.parametrize("path", EXAMPLE_ROUTE_TABLES)
 def test_example_route_tables_match_som_metadata_subset(path):
+    # IO16 (-> GPIO_17, bridge READY/host-IRQ) and IO17 (-> GPIO_16, bridge
+    # SPI0 CS) both terminate on a CC3501E pad the bridge firmware's
+    # gpio_pad_reserved() refuses -- see scripts/gen_cc3501e_gpio_routes.py
+    # RESERVED_CC3501E_PADS.  Before #1859 the hand-written tables only
+    # excluded IO17 by hand and missed IO16; the generator excludes both
+    # systematically, so both are popped from the expected set here too.
     expected = _tsv_gpio_routes()
+    expected.pop("E1M_GPIO_IO16")
     expected.pop("E1M_GPIO_IO17")
 
     assert _example_gpio_routes(path) == expected
