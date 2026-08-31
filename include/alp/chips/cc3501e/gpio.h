@@ -120,7 +120,9 @@ typedef struct {
 	uint8_t  cc35_gpio; /**< raw CC3501E GPIO index the bridge drives. */
 } cc3501e_gpio_route_t;
 
-/** Board-provided route table (WEAK empty default in the proxy backend).
+/** Board-provided route table (WEAK empty default in its own TU,
+ *  src/backends/gpio/cc3501e_proxy_routes_weak.c -- deliberately NOT in the
+ *  proxy backend that reads it; see that file for why, issue #1860).
  *  Populate from the SoM pad map to enable proxied IOs. */
 extern const cc3501e_gpio_route_t cc3501e_gpio_routes[];
 extern const size_t               cc3501e_gpio_route_count;

@@ -48,11 +48,18 @@
 #define CONFIG_ALP_SDK_MAX_GPIO_HANDLES 16
 #endif
 
-/* WEAK empty route table: a board that wants proxied IOs overrides these two
- * symbols (filled from the SoM pad map).  Default = nothing routed = every pin
- * delegates to the platform driver. */
-__attribute__((weak)) const cc3501e_gpio_route_t cc3501e_gpio_routes[]    = { 0 };
-__attribute__((weak)) const size_t               cc3501e_gpio_route_count = 0u;
+/* Board-provided route table: a board that wants proxied IOs overrides
+ * cc3501e_gpio_routes[] / cc3501e_gpio_route_count (filled from the SoM pad
+ * map); default = nothing routed = every pin delegates to the platform
+ * driver.  <alp/chips/cc3501e/gpio.h> (pulled in above) declares both
+ * `extern`; the WEAK empty default now lives in its OWN translation unit,
+ * cc3501e_proxy_routes_weak.c -- NOT here.  Defining a weak `const` in the
+ * same TU that reads it let the compiler see its own zero initializer and
+ * fold cc3501e_gpio_route_count to 0 at -Os, silently eliminating the loop
+ * below and making a board's strong override in another TU dead code
+ * (issue #1860).  Moving the weak default out means this TU only ever sees
+ * an `extern` declaration, so route_lookup() below always compiles a real
+ * load + call through the linked symbol, strong or weak. */
 
 /* Live bridge handle, set by alp_gpio_cc3501e_attach().  NULL => proxied pins
  * also delegate (no bridge to talk to yet). */
