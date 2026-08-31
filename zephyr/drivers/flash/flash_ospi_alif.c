@@ -484,8 +484,8 @@ static int ospi_alif_init(const struct device *dev)
 		     "OSPI_BAUDR[SCKDV] all zero -- OSPI_SCLK disabled (HWRM S16.1.5.3.5)");     \
 	BUILD_ASSERT(OSPI_ALIF_SCLK_DIV(inst) % 2 == 0,                                          \
 		     "ospi" STRINGIFY(inst) ": clock-frequency / bus-speed is odd -- "           \
-		     "OSPI_BAUDR[SCKDV]'s reserved bit 0 truncates it, so the actual SCLK "      \
-		     "silently undershoots bus-speed");                                          \
+		     "OSPI_BAUDR[SCKDV]'s reserved bit 0 rounds the divider DOWN, so SCLK "      \
+		     "silently OVERSHOOTS bus-speed");                                          \
 	BUILD_ASSERT(DT_INST_PROP(inst, clock_frequency) /                                       \
 				     (OSPI_ALIF_SCLK_DIV(inst) & ~1 ? OSPI_ALIF_SCLK_DIV(inst) & ~1 : 1) <= \
 			     200000000,                                                           \
