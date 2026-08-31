@@ -411,7 +411,10 @@ Required for M.2 E-key `W_DISABLE1` (CC3501E `GPIO_16` ↔ E1M
 E1M `IO16`, Bluetooth disable).  The current firmware also uses
 these raw CC3501E pins for the bridge (`GPIO16` as SPI0 CS and
 `GPIO17` as READY/host-IRQ), so the SoM metadata records the
-physical wiring while example-local proxy tables omit IO17.
+physical wiring while the generated example proxy tables
+(`scripts/gen_cc3501e_gpio_routes.py`) omit both `IO16` and `IO17`
+(#1859 -- an earlier hand-maintained revision of these tables omitted
+only `IO17`).
 
 **On this board revision the bridge wins, and both pads are refused.**
 `hal/ti/cc3501e_hw_ti_gpio.c` `gpio_pad_reserved()` rejects pads 16 and

@@ -1453,8 +1453,12 @@ zephyr_library_sources_ifdef(CONFIG_GPIO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/zephyr_drv.c)
 # CC3501E GPIO proxy: routes proxied IOs through the inter-chip bridge,
 # delegates the rest to zephyr_drv.  AEN-only (CONFIG_ALP_SDK_GPIO_CC3501E_PROXY).
+# cc3501e_proxy_routes_weak.c is the WEAK empty route-table default, split
+# into its own TU so cc3501e_proxy.c never sees a same-TU `const` definition
+# to constant-fold a board's strong override away at -Os (issue #1860).
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/cc3501e_proxy.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/cc3501e_proxy.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/cc3501e_proxy_routes_weak.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/sw_fallback.c)
 # PWM class dispatcher + backends.
