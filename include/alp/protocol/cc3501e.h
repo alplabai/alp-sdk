@@ -110,7 +110,33 @@ extern "C" {
  * host gate fails on ANY difference, so header, firmware image and host driver
  * ship together and every bench unit still on v5 is reflashed before a v6 host
  * driver touches it. */
-#define ALP_CC3501E_PROTOCOL_VERSION 6
+/* v7 repurposes CMD_SOCK_SEND's alp_cc3501e_sock_send_t::reserved (offset 3,
+ * always written 0 through v6) as a retry seq -- SAME offset SPI1 already uses
+ * for its own seq (protocol_spi.c), and NOT a layout change: the byte was
+ * already on the wire, only its meaning changes.  Root cause (alp-sdk#1746,
+ * diagnosed in cc3501e-bridge-firmware#88): the worker-routed socket opcodes
+ * had no request identity, so poll_by_repeat() re-sending the SAME frame on a
+ * BUSY/IO retry was indistinguishable, firmware-side, from a brand-new
+ * request -- once the worker finished a send and freed its job slot, the
+ * host's next byte-identical poll got read as a NEW request and the payload
+ * was TRANSMITTED AGAIN.  A single lost/misframed RESP_OK reply then meant a
+ * send could re-execute silently while the host, still polling, burned its
+ * whole budget and reported a timeout on an operation that had already
+ * succeeded (possibly more than once).
+ *
+ * THE BUMP IS SEMANTIC, NOT STRUCTURAL, AND IS STILL REQUIRED.  An OLD (v6)
+ * host always writes reserved = 0.  A NEW firmware that read byte 3 as a seq
+ * WITHOUT the version gate would see seq == 0 on every request from that old
+ * host and could serve its cached reply for a genuinely new send -- silently
+ * dropping it.  The GET_VERSION gate in cc3501e_core.c refuses the link
+ * outright on any mismatch, which is what stops a v7 firmware from ever
+ * misreading a v6 host's always-zero byte as a real retry.
+ *
+ * SOCK_RECV is NOT touched.  alp_cc3501e_sock_recv_t is { handle | max_len }
+ * with no spare byte -- giving it request identity would be an actual layout
+ * change, out of scope here; see cc3501e-bridge-firmware#88 for why it was
+ * deliberately left for its own change. */
+#define ALP_CC3501E_PROTOCOL_VERSION 7
 
 /** Frame header in bytes, before the payload. */
 #define ALP_CC3501E_HEADER_BYTES 4
@@ -719,11 +745,21 @@ typedef struct {
  *  Field-level meanings:
  *   - handle: socket from CMD_SOCK_OPEN.
  *   - flags: send flags (bit 0 = MORE; further bits reserved 0).
+ *   - seq: retry identity (proto v7).  The host assigns a per-context
+ *     free-running counter ONCE per logical send and holds it constant
+ *     across every poll_by_repeat() retry of that same call (see
+ *     cc3501e_sock_send()).  The firmware caches the (seq, reply) of the
+ *     last completed send and serves it back on a matching seq instead of
+ *     re-submitting -- without this, a retry that lands after the worker
+ *     already finished is indistinguishable from a new request and
+ *     re-transmits the payload (alp-sdk#1746, cc3501e-bridge-firmware#88).
+ *     Through v6 this byte was always written 0 and carried no meaning;
+ *     the field keeps its wire offset, only the semantics changed.
  *   - data_len: number of payload bytes that follow inline. */
 typedef struct {
 	uint16_t handle;
 	uint8_t  flags;
-	uint8_t  reserved;
+	uint8_t  seq; /**< v7+; always 0 through v6 (was `reserved`) -- see above. */
 	uint16_t data_len;
 	uint16_t reserved2;
 	/* uint8_t data[data_len];   -- packed inline, no padding */

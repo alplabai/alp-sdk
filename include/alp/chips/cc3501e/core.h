@@ -128,6 +128,19 @@ struct cc3501e {
 	bool    ble_scan_busy;
 	bool    evt_busy;
 	bool    sock_busy;
+	/* CMD_SOCK_SEND retry seq (proto v7, alp-sdk#1746 / cc3501e-bridge-firmware#88).
+	 * Same free-running-counter shape as spi1_seq below, owned by the driver so a
+	 * transport-level retry (poll_by_repeat re-issuing the identical frame on BUSY
+	 * or IO) comes back from the firmware's cached reply instead of re-submitting
+	 * -- and for CMD_SOCK_SEND, re-submitting means re-TRANSMITTING the payload,
+	 * not just re-clocking a read.  cc3501e_sock_send() assigns it ONCE, before
+	 * the poll_by_repeat() call, so it stays constant across that call's retries;
+	 * see the assignment site for why that constancy is what makes the fix work.
+	 * uint8_t: wraps 255 -> 0 (defined unsigned overflow) after 256 sends, which
+	 * cannot collide with the firmware's single-entry cache -- it only ever holds
+	 * the immediately-preceding completed send's seq, never one from 256 sends
+	 * back. */
+	uint8_t sock_send_seq;
 
 	/* SPI1 host-passthrough staging (proto v6, opcodes 0x55..0x57).  Same rule
 	 * as sock_buf above, for the same reason: one TRANSFER chunk is
