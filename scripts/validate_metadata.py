@@ -16,6 +16,8 @@ every PR that touches metadata/.
 
 from __future__ import annotations
 
+import datetime
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -37,6 +39,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from alp_project_loader import _sku_family, resolve_soc_path  # noqa: E402
 from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
+from alp_model.targets import resolve_targets, _npu_backend  # noqa: E402
 from strict_loaders import strict_json_loads, strict_yaml_load  # noqa: E402
 
 # Power/ground nets are allowed as pin signals without a signals[] entry.
@@ -97,6 +100,8 @@ CHIP_SCHEMA = REPO / "metadata" / "schemas" / "chip-v1.schema.json"
 CHIPS = REPO / "metadata" / "chips"
 BLOCK_SCHEMA = REPO / "metadata" / "schemas" / "block-v1.schema.json"
 BLOCKS = REPO / "metadata" / "blocks"
+MODEL_PERF_SCHEMA = REPO / "metadata" / "schemas" / "model-perf-v1.schema.json"
+MODEL_PERF = REPO / "metadata" / "model_perf"
 # Generated Zephyr board trees (one dir per <board>; each carries a twister
 # .yaml whose `identifier:` is the fully-qualified <board>/<soc>/<cpucluster>
 # triple `west build -b` resolves).  Ground truth for the board-target check.
@@ -1422,6 +1427,304 @@ def _check_board_targets(som_files) -> list:
     return failures
 
 
+_MODEL_PERF_FIXTURE_MARKER = "_fixture"
+_MODEL_PERF_LATENCY_RUN_FLOOR = 30
+
+
+def _model_perf_identity_hash(doc) -> str:
+    """16-hex-char content hash of a model-perf point's MEASUREMENT identity
+    (issue #1520) -- the single source `docs/bench/model-perf-capture.md` and
+    `metadata/schemas/model-perf-v1.schema.json` both point back at.
+
+    Deliberately keyed on the full measurement context (SoM SKU + hw_rev +
+    compile target + the exact source-model bytes + the vela profile when one
+    applies) rather than on the model alone or the SoM alone: two points that
+    share a model but differ in backend/accel_config/core/vela profile are
+    different measurements and must not collide on one path.  Changing ANY
+    identity field must produce a different hash, so a stale filename can
+    never silently point at an edited body -- `_check_model_perf_semantics()`
+    below is what enforces that the on-disk filename actually matches this.
+    """
+    target = _as_dict(doc.get("target")) if isinstance(doc, dict) else {}
+    model = _as_dict(doc.get("model")) if isinstance(doc, dict) else {}
+    vela = doc.get("vela") if isinstance(doc, dict) else None
+    vela = vela if isinstance(vela, dict) else {}
+    parts = [
+        str(doc.get("sku", "")) if isinstance(doc, dict) else "",
+        str(doc.get("hw_rev", "")) if isinstance(doc, dict) else "",
+        str(target.get("backend", "")),
+        str(target.get("accel_config", "")),
+        str(target.get("core", "")),
+        str(model.get("src_sha", "")),
+        str(vela.get("system_config", "")),
+        str(vela.get("memory_mode", "")),
+    ]
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _model_perf_target_context(sku: str):
+    """(target_pairs, core_ids, paired_core_by_target) for a SKU, or None
+    when the SKU itself can't be resolved (the caller already reports that
+    separately as "SKU exists").
+
+    target_pairs -- the (backend, accel_config) pairs
+    `alp_model.targets.resolve_targets()` actually resolves for this SKU --
+    the SAME resolver `alp model check` uses, so a perf point can't name a
+    target the tiered resolution could never route a compile to.
+
+    core_ids -- the SoM preset's `topology:` role keys (e.g. `m55_hp`,
+    `a32_cluster`) -- the core-name vocabulary for this SKU.
+
+    paired_core_by_target -- for the subset of the HOST SoC's `npus[]`
+    entries that pin a `paired_core`, the one core id that (backend,
+    accel_config) target is allowed to name.  An NPU entry with no
+    `paired_core` (accessible from more than one core, or not yet known)
+    imposes no stricter constraint than "any topology core id" here --
+    `accel_config`'s one-line format mirrors `targets.py::_soc_targets()`,
+    the only other place this string is built, deliberately kept in sync by
+    hand rather than by extending that function's return shape for one
+    caller.
+    """
+    preset_path = SOM_PRESETS / f"{sku}.yaml"
+    try:
+        specs = resolve_targets(sku, metadata_root=SOM_PRESETS.parent)
+        preset = strict_yaml_load(preset_path.read_text(encoding="utf-8"), source=preset_path)
+    except Exception:
+        return None
+    if not isinstance(preset, dict):
+        return None
+
+    target_pairs = {(s.backend, s.accel_config) for s in specs}
+    topology = preset.get("topology")
+    core_ids = set(topology.keys()) if isinstance(topology, dict) else set()
+
+    paired: dict[tuple[str, str], str] = {}
+    silicon = str(preset.get("silicon", ""))
+    soc_path = resolve_soc_path(silicon, SOM_PRESETS.parent)
+    if soc_path is not None and soc_path.is_file():
+        try:
+            soc = json.loads(soc_path.read_text(encoding="utf-8"))
+        except Exception:
+            soc = {}
+        for npu in _dict_entries(soc.get("npus") if isinstance(soc, dict) else None):
+            pc = npu.get("paired_core")
+            if not isinstance(pc, str) or not pc:
+                continue
+            backend = _npu_backend(str(npu.get("type", "")), str(npu.get("subtype", "")))
+            if backend is None:
+                continue
+            accel = (f"{npu.get('type', '')}-{npu.get('mac_per_cycle', '')}"
+                     if backend == "ethos_u" else "")
+            paired[(backend, accel)] = pc
+
+    return target_pairs, core_ids, paired
+
+
+def _check_model_perf_semantics(model_perf_files) -> list:
+    """metadata/model_perf/<SKU>/<hash>.yaml semantic cross-checks a JSON
+    Schema shape pass can't express (issue #1520): the path reproduces the
+    body; the SKU exists; the (backend, accel_config) pair and the core are
+    ones the SKU actually resolves; hw_rev is in the family table; an
+    ethos_u point records its vela profile; req_sram_kib covers arena_bytes;
+    p95 is not below the mean; the run-count floor; capture.date parses; the
+    published tree cannot absorb a `_fixture`.  Returns a failure list
+    shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in model_perf_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        msgs: list[str] = []
+
+        # The published tree cannot absorb a `_fixture` -- checked on the
+        # PATH alone, before the body is even parsed: a test/dev fixture
+        # checked in here is wrong regardless of whether its body validates.
+        # Scoped to the two path components that are actually PART of the
+        # published-tree naming -- the SKU directory and the identity-hash
+        # filename -- rather than the full absolute path: an ancestor
+        # directory (a developer's checkout path, a CI workspace) can
+        # coincidentally contain this substring with nothing to do with the
+        # tree's own content, which a whole-path scan would misreport.
+        if (_MODEL_PERF_FIXTURE_MARKER in path.parent.name
+                or _MODEL_PERF_FIXTURE_MARKER in path.name):
+            msgs.append(
+                f"path contains `{_MODEL_PERF_FIXTURE_MARKER}` -- a fixture "
+                f"belongs under tests/fixtures/model_perf/, never in the "
+                f"published metadata/model_perf/ tree")
+
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            doc = None  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            if msgs:
+                print(f"FAIL {rel}")
+                for m in msgs:
+                    print(f"  · {m}")
+                failures.append((rel, msgs))
+            continue
+
+        sku = doc.get("sku")
+        hw_rev = doc.get("hw_rev")
+        target = _as_dict(doc.get("target"))
+        model = _as_dict(doc.get("model"))
+        vela = doc.get("vela")
+        perf = _as_dict(doc.get("perf"))
+        capture = _as_dict(doc.get("capture"))
+        backend = target.get("backend")
+        accel_config = target.get("accel_config", "")
+        core = target.get("core")
+
+        # The path reproduces the body: the containing directory IS the SKU,
+        # and the filename IS the measurement-identity hash of this body.
+        if isinstance(sku, str) and sku:
+            if path.parent.name != sku:
+                msgs.append(
+                    f"path directory `{path.parent.name}` != body `sku: "
+                    f"{sku}` -- the containing directory is the SKU, not an "
+                    f"independently-chosen label")
+            expected_stem = _model_perf_identity_hash(doc)
+            if path.stem != expected_stem:
+                msgs.append(
+                    f"filename `{path.stem}` doesn't reproduce this body's "
+                    f"measurement-identity hash (`{expected_stem}`) -- "
+                    f"sku/hw_rev/target/model.src_sha/vela changed without "
+                    f"renaming the file, or two different measurements "
+                    f"collided on one path")
+
+        # The SKU exists.
+        som_ctx = None
+        if not isinstance(sku, str) or not sku:
+            msgs.append("sku: missing/not a string")
+        elif not (SOM_PRESETS / f"{sku}.yaml").is_file():
+            msgs.append(f"sku `{sku}`: no metadata/e1m_modules/{sku}.yaml preset")
+        else:
+            som_ctx = _model_perf_target_context(sku)
+
+        # The (backend, accel_config) pair and the core are ones the SKU
+        # actually resolves.
+        if som_ctx is not None:
+            target_pairs, core_ids, paired = som_ctx
+            key = (backend, accel_config)
+            if key not in target_pairs:
+                msgs.append(
+                    f"target: (backend={backend!r}, accel_config="
+                    f"{accel_config!r}) is not a target `{sku}` actually "
+                    f"resolves (alp_model.targets.resolve_targets) -- valid: "
+                    f"{sorted(target_pairs)}")
+            if not isinstance(core, str) or not core:
+                msgs.append("target.core: missing/not a string")
+            elif core_ids and core not in core_ids:
+                msgs.append(
+                    f"target.core `{core}` is not a `topology:` role of "
+                    f"`{sku}` -- valid: {sorted(core_ids)}")
+            required_core = paired.get(key)
+            if required_core is not None and core != required_core:
+                msgs.append(
+                    f"target.core `{core}` != `{required_core}`, the core "
+                    f"this SoC JSON pins (backend={backend!r}, accel_config="
+                    f"{accel_config!r}) to via npus[].paired_core")
+
+        # hw_rev is in the family table.
+        if not isinstance(hw_rev, str) or not hw_rev:
+            msgs.append("hw_rev: missing/not a string")
+        elif isinstance(sku, str) and sku:
+            try:
+                family = _sku_family(sku)
+            except ValueError:
+                family = None
+            if family is not None:
+                hwrev_path = SOM_PRESETS / family / "hw-revisions.yaml"
+                if not hwrev_path.is_file():
+                    msgs.append(
+                        f"hw_rev `{hw_rev}`: no metadata/e1m_modules/"
+                        f"{family}/hw-revisions.yaml family table to check "
+                        f"against")
+                else:
+                    try:
+                        table = strict_yaml_load(
+                            hwrev_path.read_text(encoding="utf-8"), source=hwrev_path)
+                    except Exception:
+                        table = None
+                    revs = _as_dict(table.get("hw_revisions")) if isinstance(table, dict) else {}
+                    if hw_rev not in revs:
+                        msgs.append(
+                            f"hw_rev `{hw_rev}` is not a key in "
+                            f"metadata/e1m_modules/{family}/hw-revisions.yaml "
+                            f"hw_revisions: -- valid: {sorted(revs)}")
+
+        # An ethos_u point records its vela profile.
+        if backend == "ethos_u":
+            if not isinstance(vela, dict):
+                msgs.append(
+                    "target.backend is `ethos_u` but `vela:` is missing -- "
+                    "vela silently falls back to its OWN built-in default "
+                    "(Ethos_U85_SYS_DRAM_Mid / Dedicated_Sram_384KB, a "
+                    "DRAM-backed profile) when --system-config/--memory-mode "
+                    "aren't passed; record whichever profile this capture "
+                    "actually used")
+            else:
+                if not vela.get("system_config"):
+                    msgs.append("vela.system_config: missing/empty")
+                if not vela.get("memory_mode"):
+                    msgs.append("vela.memory_mode: missing/empty")
+
+        # req_sram_kib covers arena_bytes.
+        req_sram_kib = perf.get("req_sram_kib")
+        arena_bytes = perf.get("arena_bytes")
+        if isinstance(req_sram_kib, int) and isinstance(arena_bytes, int):
+            if req_sram_kib * 1024 < arena_bytes:
+                msgs.append(
+                    f"perf.req_sram_kib ({req_sram_kib} KiB = "
+                    f"{req_sram_kib * 1024} B) is smaller than "
+                    f"perf.arena_bytes ({arena_bytes} B) -- the declared "
+                    f"SRAM budget doesn't cover the compiler-reported arena "
+                    f"it's supposed to hold")
+
+        # p95 is not below the mean; the run-count floor.
+        latency = perf.get("latency_ms")
+        if isinstance(latency, dict):
+            mean, p95, runs = latency.get("mean"), latency.get("p95"), latency.get("runs")
+            if (isinstance(mean, (int, float)) and not isinstance(mean, bool)
+                    and isinstance(p95, (int, float)) and not isinstance(p95, bool)
+                    and p95 < mean):
+                msgs.append(
+                    f"perf.latency_ms.p95 ({p95}) is below "
+                    f"perf.latency_ms.mean ({mean}) -- a p95 below the mean "
+                    f"of the same sample is not a valid percentile (mean/"
+                    f"p50/p95 swapped, or a stale value left over from a "
+                    f"re-run)")
+            if isinstance(runs, int) and not isinstance(runs, bool) and runs < _MODEL_PERF_LATENCY_RUN_FLOOR:
+                msgs.append(
+                    f"perf.latency_ms.runs ({runs}) is below the floor of "
+                    f"{_MODEL_PERF_LATENCY_RUN_FLOOR} -- a p95 over fewer "
+                    f"runs is noise, not a percentile")
+
+        # capture.date parses.
+        date = capture.get("date")
+        if not isinstance(date, str):
+            msgs.append("capture.date: missing/not a string")
+        else:
+            try:
+                datetime.date.fromisoformat(date)
+            except ValueError:
+                msgs.append(
+                    f"capture.date `{date}` does not parse as an ISO-8601 "
+                    f"date (YYYY-MM-DD)")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}  (sku={sku}, target={backend}/"
+                  f"{accel_config or 'cpu'}/{core})")
+    return failures
+
+
 def main() -> int:
     # SoC files (JSON) against soc-spec v1.
     soc_schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
@@ -1526,6 +1829,26 @@ def main() -> int:
             )
             block_failures += _check_block_realizations(block_files, chip_files)
 
+    # Tier-2 model-perf points (YAML) against model-perf v1 (#1520).
+    # metadata/model_perf/ ships EMPTY today -- a perf point comes off real
+    # silicon or it does not exist (docs/bench/model-perf-capture.md) -- so
+    # this section exists to gate the FIRST bench capture from day one,
+    # rather than being bolted on after the tree already has content in it.
+    model_perf_failures: list = []
+    model_perf_files: list = []
+    if MODEL_PERF_SCHEMA.is_file():
+        model_perf_schema = json.loads(MODEL_PERF_SCHEMA.read_text(encoding="utf-8"))
+        model_perf_validator = jsonschema.Draft202012Validator(model_perf_schema)
+        model_perf_files = sorted(MODEL_PERF.glob("*/*.yaml"))
+        if model_perf_files:
+            print()
+            model_perf_failures = _check_files(
+                "YAML", model_perf_files, model_perf_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "sku",
+            )
+            model_perf_failures += _check_model_perf_semantics(model_perf_files)
+
     # Library manifests (YAML) against library v1 (ADR 0018).
     library_failures: list = []
     library_semantic_failures: list = []
@@ -1579,7 +1902,7 @@ def main() -> int:
     print()
     total_failures = (len(soc_failures) + len(som_failures)
                       + len(hwrev_failures) + len(board_failures) + len(chip_failures)
-                      + len(block_failures)
+                      + len(block_failures) + len(model_perf_failures)
                       + len(library_failures) + len(library_semantic_failures)
                       + len(board_target_failures)
                       + len(restriction_failures)
@@ -1592,6 +1915,7 @@ def main() -> int:
           f"{len(hwrev_files)} hw-revisions file(s) + "
           f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
           f"{len(block_files)} block file(s) + "
+          f"{len(model_perf_files)} model-perf point(s) + "
           f"{len(library_files)} library manifest(s) + Kconfig registries + "
           f"tier-a-library-ci registry "
           f"checked, {total_failures} failure(s)")
