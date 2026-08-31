@@ -11,6 +11,16 @@
  * issues the SAME frame while the firmware reports RESP_ERR_BUSY (op
  * in flight) or the bridge reads IO (down mid-op), until it resolves.
  * v1 IPv4-only; addresses are 4 octets in network order.
+ *
+ * CMD_SOCK_SEND carries a retry seq (proto v7) in what used to be an
+ * always-zero reserved byte, because a re-issued poll is otherwise
+ * indistinguishable from a brand-new request: once the firmware's worker
+ * completes a send and frees its job slot, the host's next byte-identical
+ * poll reads as a NEW request and the payload is transmitted AGAIN
+ * (alp-sdk#1746, root-caused in cc3501e-bridge-firmware#88).  See
+ * cc3501e_sock_send()'s seq assignment below for the host half; the
+ * firmware caches (seq, reply) and serves a matching retry without
+ * re-submitting.
  */
 
 #include <string.h>
@@ -18,7 +28,7 @@
 
 #include "cc3501e_internal.h"
 
-/* Wire header size of alp_cc3501e_sock_send_t (handle | flags | reserved |
+/* Wire header size of alp_cc3501e_sock_send_t (handle | flags | seq |
  * data_len | reserved2), and of the alp_cc3501e_sock_recv_resp_t reply header
  * (from sock_addr(20) | data_len | reserved).  Fixed by the protocol header. */
 #define CC3501E_SOCK_SEND_HDR      8u
@@ -98,11 +108,27 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 	p[0]           = (uint8_t)(handle & 0xFFu);
 	p[1]           = (uint8_t)((handle >> 8) & 0xFFu);
 	p[2]           = 0u; /* flags (MORE bit unused here) */
-	p[3]           = 0u;
-	p[4]           = (uint8_t)(len & 0xFFu);
-	p[5]           = (uint8_t)((len >> 8) & 0xFFu);
-	p[6]           = 0u;
-	p[7]           = 0u;
+	/* p[3] is alp_cc3501e_sock_send_t.seq (formerly reserved, always 0 through
+	 * v6) -- a retry seq (proto v7, alp-sdk#1746 / cc3501e-bridge-firmware#88).
+	 * poll_by_repeat() re-sends THIS EXACT buffer on every BUSY/IO retry, so
+	 * assigning the seq ONCE here, before the call, is what makes it constant
+	 * across every retry of one logical send -- that constancy is the whole
+	 * mechanism: the firmware serves its cached reply for a repeated seq
+	 * instead of re-submitting (and re-transmitting) the payload.
+	 * Pre-increment, exactly like spi1_seq above: a fresh ctx's first send is
+	 * seq 1, and the counter free-runs from there.
+	 *
+	 * WRAP: sock_send_seq is a uint8_t, so it wraps 255 -> 0 after 256 sends
+	 * (defined unsigned overflow, not UB).  That cannot collide with the
+	 * firmware's cache: the cache is a SINGLE entry holding only the
+	 * immediately-preceding completed send's seq, never anything from 256
+	 * sends ago, so a wrapped-around repeat is never mistaken for a retry of
+	 * an old send. */
+	p[3] = ++ctx->sock_send_seq;
+	p[4] = (uint8_t)(len & 0xFFu);
+	p[5] = (uint8_t)((len >> 8) & 0xFFu);
+	p[6] = 0u;
+	p[7] = 0u;
 	if (len > 0u) memcpy(&p[CC3501E_SOCK_SEND_HDR], data, len);
 
 	uint8_t      reply[2] = { 0 };
