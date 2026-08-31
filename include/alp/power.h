@@ -109,7 +109,7 @@ typedef enum {
  *  @ref ALP_ERR_NOSUPPORT for a bitmap containing any bit outside
  *  that set, instead of ALP_OK -- a caller finds out at configuration
  *  time, not after a sleep that never wakes.  (Deliberately a
- *  separate accessor from @ref alp_power_capabilities: that one's
+ *  separate accessor from @ref alp_power_capabilities -- that one's
  *  @c flags field is the cross-class @c alp_instance_cap_t bitmap
  *  every peripheral class shares -- e.g. @c ALP_INSTANCE_CAP_DMA is
  *  bit 0, the same numeric value as @c ALP_POWER_WAKE_RTC below --
