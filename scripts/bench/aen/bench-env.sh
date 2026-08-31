@@ -288,8 +288,11 @@ bench_jlink_assert_connected() {
 	#
 	# It contains none of the strings above, so this function returned 0 on it.
 	# Only the sibling DPIDR gate caught that run, and the read-back-only paths
-	# (reread.sh, the post-flash console dumps) have no DPIDR gate after them --
-	# there this function is the sole check.
+	# (the post-flash console dumps, e.g. flash-jlink.sh step 4 and
+	# flash-run.sh's Flow A read) have no DPIDR gate on the READ ITSELF --
+	# they rely on an earlier preflight DPIDR check in the same script run, so
+	# for the read's own transcript this function is the sole check. (reread.sh
+	# used to be in this list too; alp-sdk#813 gave it its own preflight.)
 	#
 	# The marker is the `J-Link>` command prompt: JLinkExe echoes it for every
 	# CommanderScript line it executes, so its presence proves the script ran at
