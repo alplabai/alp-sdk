@@ -140,6 +140,42 @@ static void _free_conn(struct alp_ble_conn *h)
 	alp_slot_release(&h->in_use);
 }
 
+/* Issue #1697 (and its #1644 self-close-path gap): tear down every surviving
+ * connection on radio `h` BEFORE the controller goes away. alp_ble_connect()
+ * stores a raw back-pointer (`c->state.radio = h`), so a conn slot left
+ * in_use here outlives the radio it points at, and the next _alloc_radio()
+ * recycles that slot under it.
+ *
+ * Force-disconnect rather than refusing the close: every other
+ * alp_*_close() in this tree returns void, so there is no channel to report
+ * a refusal, and diverging here would be an API change (the two options are
+ * spelled out in #1697).
+ *
+ * alp_ble_disconnect() IS this pool's teardown op, so call it rather than
+ * open-coding the sequence -- it already does the #629 sleep-poll drain,
+ * the backend disconnect, the lifecycle reset and _free_conn(), and returns
+ * ALP_ERR_NOT_READY on a lost CAS when another thread is already tearing
+ * that same conn down. Its status is deliberately discarded: close() is
+ * infallible by contract, and a peer link that is already gone is exactly
+ * the state we want.
+ *
+ * Ordering (both call sites): call this AFTER the op drain (no new connect
+ * can be admitted past it) and BEFORE ops->close(), because the backend
+ * disconnect needs a live controller. Factored out of alp_ble_close() so
+ * the external-close and self-close (alp_ble_scan_start()'s deferred-close
+ * branch) paths cannot drift apart again -- #1644 was exactly that drift:
+ * #1697 added this walk to alp_ble_close() only, leaving the self-close
+ * path with dangling conn->state.radio back-pointers. */
+static void _disconnect_radio_conns(struct alp_ble *h)
+{
+	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_BLE_CONN_HANDLES; ++i) {
+		struct alp_ble_conn *c = &_conn_pool[i];
+		if (alp_slot_is_claimed(&c->in_use) && c->state.radio == h) {
+			(void)alp_ble_disconnect(c);
+		}
+	}
+}
+
 /* ================================================================== */
 /* Radio-side dispatch                                                 */
 /* ================================================================== */
@@ -318,35 +354,13 @@ void alp_ble_close(alp_ble_t *h)
 	if (mode == ALP_HANDLE_CLOSE_DEFERRED) {
 		return;
 	}
-	/* Issue #1697: tear down this radio's surviving connections BEFORE the
-	 * controller goes away.  alp_ble_connect() stores a raw back-pointer
-	 * (`c->state.radio = h`), so a conn slot left in_use here outlives the
-	 * radio it points at, and the next _alloc_radio() recycles that slot
-	 * under it.  Reachable on the shipping Zephyr backend with a plain
-	 * open -> connect -> close -> reopen.
-	 *
-	 * Force-disconnect rather than refusing the close: every other
-	 * alp_*_close() in this tree returns void, so there is no channel to
-	 * report a refusal, and diverging here would be an API change (the two
-	 * options are spelled out in #1697).
-	 *
-	 * alp_ble_disconnect() IS this pool's teardown op, so call it rather
-	 * than open-coding the sequence -- it already does the #629 sleep-poll
-	 * drain, the backend disconnect, the lifecycle reset and _free_conn(),
-	 * and returns ALP_ERR_NOT_READY on a lost CAS when another thread is
-	 * already tearing that same conn down.  Its status is deliberately
-	 * discarded: close() is infallible by contract, and a peer link that is
-	 * already gone is exactly the state we want.
-	 *
-	 * Ordering: after the drain above (no new connect can be admitted past
-	 * it) and before ops->close(), because the backend disconnect needs a
-	 * live controller. */
-	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_BLE_CONN_HANDLES; ++i) {
-		struct alp_ble_conn *c = &_conn_pool[i];
-		if (alp_slot_is_claimed(&c->in_use) && c->state.radio == h) {
-			(void)alp_ble_disconnect(c);
-		}
-	}
+	/* Issue #1697/#1644: tear down this radio's surviving connections
+	 * BEFORE the controller goes away -- see _disconnect_radio_conns()'s
+	 * doc comment for the full rationale and the ordering contract (after
+	 * the drain above, before ops->close() below). Factored into a shared
+	 * helper so this external-close path and alp_ble_scan_start()'s
+	 * deferred self-close path cannot drift apart again. */
+	_disconnect_radio_conns(h);
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}
@@ -510,6 +524,12 @@ alp_status_t alp_ble_scan_start(alp_ble_t *h, bool active, alp_ble_scan_cb_t cb,
 		 * thread the unique owner of this handle's close -- safe to
 		 * drain (any OTHER concurrent op) and tear down now. */
 		alp_handle_drain_blocking(&h->active_ops);
+		/* #1644: this deferred self-close path used to skip the conn-pool
+		 * walk entirely, leaving every c->state.radio back-pointer
+		 * dangling at a recycled radio slot once _free_radio() below
+		 * ran. Same ordering contract as alp_ble_close(): after the
+		 * drain, before ops->close() -- see _disconnect_radio_conns(). */
+		_disconnect_radio_conns(h);
 		if (h->state.ops != NULL && h->state.ops->close != NULL) {
 			h->state.ops->close(&h->state);
 		}
