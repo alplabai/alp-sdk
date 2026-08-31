@@ -20,7 +20,7 @@ import datetime
 import hashlib
 import json
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import jsonschema
 
@@ -749,6 +749,120 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
             for m in msgs:
                 print(f"  · {m}")
             failures.append((rel, msgs))
+    return failures
+
+
+#: Where ADR 0032 puts vendored register descriptions. A `debug.svd` value
+#: under this prefix ASSERTS the repository carries the file, so
+#: `_check_soc_debug_svd_shape` holds it to that; any other value is the
+#: customer-supplied `ALP_SVD_DIR` case, which no gate here can see.
+_VENDORED_SVD_ROOT = PurePosixPath("metadata/svd")
+
+
+def _check_soc_debug_svd_shape(soc_files) -> list:
+    """`variants[].debug.svd` must be a BARE RELATIVE PATH, and must exist
+    only when it resolves inside the repository (#948).
+
+    The key names the CMSIS-SVD file cortex-debug passes as `svdFile`, and
+    it resolves in two places: the repository directory first, then
+    `ALP_SVD_DIR` -- the same shape `SETOOLS_DIR` already has for genuinely
+    licence-gated vendor tooling.  That split is why this gate cannot be a
+    single rule, and why getting it wrong in either direction is worse than
+    not having it:
+
+      * SHAPE is always checkable, and is what actually protects a
+        consumer.  An absolute path bakes one machine's layout into
+        published metadata; a `..` escapes whichever root resolved it, so a
+        value that looks repo-relative can reach outside the checkout; a
+        URL is not a path at all and a consumer would hand it to the
+        debugger verbatim.  All three are refused regardless of where the
+        file would come from.
+      * EXISTENCE is checkable ONLY for a path that resolves inside the
+        repo.  A value satisfied through `ALP_SVD_DIR` names a file on the
+        customer's machine, which this gate cannot see and must not call
+        missing -- that would fail a correctly-configured project on any
+        build host without the vendor SDK installed.
+
+    No SoC declares `svd` today, deliberately: ADR 0032 records the
+    mechanism for carrying vendor data under its own terms, not an
+    authorisation to carry any particular vendor's, so whether Alif's SVDs
+    are redistributed here is still a maintainer decision.  The gate ships
+    ahead of the data on purpose -- the first value to land is then checked
+    by an already-reviewed rule instead of arriving with its own.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in soc_files:
+        try:
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue  # non-object top level; schema pass already flags it
+        variants = _dict_entries(doc.get("variants"))
+        if not variants:
+            continue
+        rel = path.relative_to(REPO).as_posix()
+        msgs: list[str] = []
+
+        for i, v in enumerate(variants):
+            debug = v.get("debug")
+            if not isinstance(debug, dict) or "svd" not in debug:
+                continue  # absent is a published "unknown", not a defect
+            where = f"variants[{i}] ({v.get('order_code', '<no order_code>')})"
+            svd = debug.get("svd")
+            if not isinstance(svd, str) or not svd:
+                # The schema's `type`/`minLength` says this too; repeat it so
+                # the rest of this loop cannot raise on a bad value when the
+                # schema pass has not run first.
+                msgs.append(f"{where}: `debug.svd` must be a non-empty string")
+                continue
+            if "://" in svd:
+                msgs.append(
+                    f"{where}: `debug.svd` is a URL ({svd!r}); it must be a "
+                    "bare relative path -- a consumer passes this straight to "
+                    "the debugger as `svdFile`, which cannot fetch one")
+                continue
+            if PurePosixPath(svd).is_absolute() or (len(svd) > 1 and svd[1] == ":"):
+                msgs.append(
+                    f"{where}: `debug.svd` is an absolute path ({svd!r}); it "
+                    "must be relative, or this published metadata carries one "
+                    "machine's layout")
+                continue
+            if ".." in PurePosixPath(svd).parts:
+                msgs.append(
+                    f"{where}: `debug.svd` contains `..` ({svd!r}); a relative "
+                    "path that escapes its own root defeats the "
+                    "repo-then-ALP_SVD_DIR resolution order")
+                continue
+            # Existence, but only for a value that CLAIMS to be in-repo.
+            #
+            # The two cases cannot be told apart from the string itself --
+            # a path that is simply absent looks identical to one meant for
+            # ALP_SVD_DIR -- so the discriminator is the declared
+            # convention, not the filesystem: ADR 0032 puts vendored
+            # register descriptions under `metadata/svd/<vendor>/`. A value
+            # under that prefix asserts the repo carries the file and must
+            # be held to it; anything else is the customer-supplied case
+            # this gate cannot see and must not fail.
+            #
+            # An earlier draft keyed this on "does the parent directory
+            # exist", which inverted the check: a value naming a subtree
+            # nobody had created yet -- exactly the first mistake a
+            # vendoring PR would make -- passed silently.
+            if PurePosixPath(svd).parts[:2] == (_VENDORED_SVD_ROOT.parts):
+                if not (REPO / svd).is_file():
+                    msgs.append(
+                        f"{where}: `debug.svd` claims the repository carries "
+                        f"the file ({svd!r}, under {_VENDORED_SVD_ROOT}/) but "
+                        "it is not present -- either add it in the segregated "
+                        "subtree ADR 0032 describes, with the vendor's "
+                        "unmodified licence file beside it, or move the value "
+                        "out of that prefix so it resolves through ALP_SVD_DIR")
+
+        if msgs:
+            failures.append((Path(rel), msgs))
     return failures
 
 
@@ -1841,6 +1955,9 @@ def main() -> int:
     soc_failures += _check_soc_debug_probe_identity(soc_files)
     # #1295: every Alif Ensemble variant must declare debug.jlink_flash_device (string or null) -- never omit it.
     soc_failures += _check_soc_jlink_flash_device_declared(soc_files)
+    # #948: `debug.svd` is a bare relative path; it exists only when it
+    # resolves inside the repo (the ALP_SVD_DIR case is user-local).
+    soc_failures += _check_soc_debug_svd_shape(soc_files)
     # #1444: Alp Lab modules are BGA only -- no Alif Ensemble variant may declare a WLCSP package.
     soc_failures += _check_soc_no_wlcsp_variants(soc_files)
 
