@@ -120,10 +120,33 @@ typedef struct {
 	uint8_t  cc35_gpio; /**< raw CC3501E GPIO index the bridge drives. */
 } cc3501e_gpio_route_t;
 
-/** Board-provided route table (WEAK empty default in the proxy backend).
- *  Populate from the SoM pad map to enable proxied IOs. */
+/** Board-provided route table (WEAK empty default in its own TU,
+ *  src/backends/gpio/cc3501e_proxy_routes_weak.c -- deliberately NOT in the
+ *  proxy backend that reads it; see that file for why, issue #1860).
+ *  Populate from the SoM pad map to enable proxied IOs (AEN examples do
+ *  this via `scripts/gen_cc3501e_gpio_routes.py`, generated from
+ *  metadata -- an out-of-tree board hand-writing this table instead
+ *  MUST NOT target CC3501E GPIO pads 5, 6, 7, 8, 9, 16, 17, 27, 28 or 29:
+ *  the bridge firmware's own inter-chip SPI0 (16/27/28/29), its UART2
+ *  console (5/6), pads not bonded on this device (7/8/9), and the
+ *  READY/host-IRQ line (17) are all reserved and refused at runtime by
+ *  the firmware's gpio_pad_reserved() -- see docs/cc3501e-bridge.md's
+ *  "Firmware-side GPIO behaviour contract" section). */
 extern const cc3501e_gpio_route_t cc3501e_gpio_routes[];
 extern const size_t               cc3501e_gpio_route_count;
+
+/**
+ * Board-provided list of portable pin_ids that are UNROUTED on this
+ * hardware revision -- physically open E1M pads that reach neither the
+ * CC3501E nor the Alif SoC (e.g. AEN r2's E1M_GPIO_IO21, SoM preset
+ * `pad_routes: [{ e1m: E1M_GPIO_IO21, dispatch: unrouted }]`).
+ * alp_gpio_open() on a listed pin_id returns @ref ALP_ERR_NOSUPPORT
+ * instead of silently delegating to the platform GPIO driver and
+ * driving a pin that goes nowhere (#1854).  WEAK empty default in the
+ * proxy backend: an un-mapped build treats every pin as routed/direct
+ * (no behaviour change until populated from the SoM pad map). */
+extern const uint32_t cc3501e_gpio_unrouted[];
+extern const size_t   cc3501e_gpio_unrouted_count;
 
 /**
  * @brief Attach the live bridge handle to the GPIO proxy backend.

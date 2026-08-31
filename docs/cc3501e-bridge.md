@@ -411,7 +411,23 @@ Required for M.2 E-key `W_DISABLE1` (CC3501E `GPIO_16` ↔ E1M
 E1M `IO16`, Bluetooth disable).  The current firmware also uses
 these raw CC3501E pins for the bridge (`GPIO16` as SPI0 CS and
 `GPIO17` as READY/host-IRQ), so the SoM metadata records the
-physical wiring while example-local proxy tables omit IO17.  Per
+physical wiring while the generated example proxy tables
+(`scripts/gen_cc3501e_gpio_routes.py`) omit both `IO16` and `IO17`
+(#1859 -- an earlier hand-maintained revision of these tables omitted
+only `IO17`).
+
+**On this board revision the bridge wins, and both pads are refused.**
+`hal/ti/cc3501e_hw_ti_gpio.c` `gpio_pad_reserved()` rejects pads 16 and
+17 from the GPIO proxy outright, so `alp_gpio_*` on E1M `IO16` or `IO17`
+returns an error rather than driving anything -- and that is the correct
+behaviour, since driving either would tear the inter-chip link down
+mid-transfer.  `metadata/e1m_modules/aen/from-cc3501e.tsv` now names the
+claim in the peripheral column (`BRIDGE_READY`, `BRIDGE_SPI_CSN`) so the
+generated pinmux capability carries it too; the open-drain contract below
+applies to the W_DISABLE role only if a future revision moves the bridge
+lines off these pads (#1808).
+
+Per
 the M.2 spec the W_DISABLE lines are open-drain active-low: write 0
 to assert, write 1 (or
 Hi-Z / release) to deassert.  Firmware must:
@@ -571,9 +587,9 @@ one, add it under the reserved `0x80..0xFF` range.
 - **Timers / PWM** — 8 GPT/PWM channels. Not routed to any external pad
   on E1M-AEN; the Alif has its own timer/PWM surface via `<alp/pwm.h>`.
 - **I2C** — 2 on-chip I2C controllers. Not proxied: the E1M-AEN module's
-  I2C devices (OPTIGA Trust M, RV-3028-C7, TMP112 on the Alif's
-  slave-only LPI2C0; EEPROM N24S128 on the Alif's separate SoC I2C2;
-  see `docs/soms/aen.md`) hang off the Alif's own I2C controllers, not
+  I2C devices (OPTIGA Trust M, RV-3028-C7, TMP112 on the Alif's SoC I2C0
+  BRD_I2C bus; EEPROM N24S128 on the Alif's separate SoC I2C2; see
+  `docs/soms/aen.md`) hang off the Alif's own I2C controllers, not
   the CC3501E's.
 
 ## OTA

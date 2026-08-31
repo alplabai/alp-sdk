@@ -20,6 +20,22 @@ silicon_variant: AE822FA0E5597LS0        # see metadata/socs/alif/ensemble/e8.js
 display_name: "E1M-AEN801 (Alif Ensemble E8 -- 2x A32 + 2x M55 + 3x Ethos-U, preliminary)"
 
 on_module:
+  # POR_N / ER004: the module carries NO reset or brownout supervisor.  The
+  # E1M-AEN-2626-R2 netlist routes the SoC POR_N only to a pull-up and to the
+  # E1M edge connector, so satisfying the supervisor requirement is the
+  # CARRIER's job, not the module's.
+  #
+  # This is a hardware-damage requirement, not a robustness nicety.  Errata
+  # AERR0012 v2.0 ER004 applies to every E4/E6/E8 revision with no fix
+  # planned: "the voltage on the VDD_MAIN and VDD_BUCK pins must never drop
+  # below 1.65V once 1.65V is reached.  If this cannot be guaranteed, an
+  # external reset supervisor device must be used to drive (active low) the
+  # Ensemble system reset pin, POR_N" -- and, if it is not, "there is
+  # potential to damage the Ensemble SoC rendering it non-functional".
+  # Datasheet ADTS0013 v1.2 5.2.1 has since made it normative: "An external
+  # brownout supervisor must be connected to VDD_MAIN/VDD_BUCK.  The brownout
+  # supervisor must assert before voltage input to the chip falls below
+  # 1.65V."  (#1810)
   silicon:              alif:ensemble:e8       # 2x A32, 2x Cortex-M55, 2x U55 + 1x U85
   wifi_ble:             cc3501e
   secure_element:       optiga_trust_m
@@ -54,13 +70,33 @@ on_module:
     chip_select:    1
 
   i2c_devices:
-    # Tier-3 SE-mediated housekeeping bus (ADR 0017:74-79): the SoC can only
-    # be a slave on the Alif LPI2C0 (hardcoded address 0x40, TRM §3.17.4), so
-    # the Secure Enclave masters it, not on-module silicon -- `bus_master` is
-    # omitted per the schema's `i2c_bus.bus_master` description. Addresses
-    # per docs/bring-up-aen.md §5.1's bench-verified table; pad names per
-    # examples/aen/aen-secure-element-sign/README.md:14-15.
+    # CORRECTED #1848 (ADR 0017 amended 2026-08-30 -- this bus was believed
+    # to be the slave-only Alif LPI2C0, hardcoded address 0x40, TRM §3.17.4;
+    # it is not). BRD_I2C is SoC I2C0 function C: I2C0_SDA_C = P7_0, I2C0_SCL_C
+    # = P7_1 (ADTS0013 v1.2 Table 3-16 + the per-pin alternate-function grid),
+    # corroborated by the E1M-AEN-2626-R2 netlist (BRD_I2C_SDA/SCL on balls
+    # B8/B3, landing on this same trio). I2C0 is master-or-slave capable
+    # (HWRM §15.4.1) -- the Alif SoC is the intended master (Tier-1 upstream
+    # i2c_dw, no Secure Enclave mediation), NOT LPI2C1 or any hal_alif SE
+    # service (the pinned SE services expose no I2C transaction at all).
+    #
+    # `bus_master` below records the INTENDED master, not a working bus:
+    # the R2 netlist shows no pull-up path to any rail on BRD_I2C (the
+    # bridging jumpers R93/R94 are DNP, unlike I2C2's stuffed R95/R96), and
+    # the datasheet (open-drain, needs an external pull-up) and the HWRM
+    # (push-pull is the correct I2C driver type on these pins) disagree on
+    # whether that is fatal. Mastering this bus for real needs R93/R94
+    # stuffed or the push-pull reading to hold -- unresolved on paper; see
+    # docs/bring-up-aen.md §5.1 and examples/aen/aen-secure-element-sign's
+    # board overlay (which wires no internal bias pending a bench answer).
+    #
+    # Addresses per docs/bring-up-aen.md §5.1; pad names per
+    # examples/aen/aen-secure-element-sign/README.md.
+    # R2-SOURCED, NOT ON-UNIT-VERIFIED: no R1 netlist is available
+    # and the only bench unit on hand is r1 -- probe P7_0/P7_1 before calling
+    # this confirmed on that module.
     brd_i2c:
+      bus_master: alif-ensemble
       devices:
         - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }
         - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30" }
@@ -270,6 +306,8 @@ pad_routes:
       doc: "CC3501E GPIO_19." }
   - { e1m: E1M_GPIO_IO20, dispatch: cc3501e, dispatch_pin: 26,
       doc: "CC3501E GPIO_26." }
+  - { e1m: E1M_GPIO_IO21, dispatch: unrouted,
+      doc: "Physically open on board 2626-R2 (no CC3501E or Alif termination); r1 routed it to CC3501E GPIO_30 -- see aen/hw-revisions.yaml pad_route_overrides (#1854)." }
 
 # On-module helper MCUs.  CC3501E (TI Wi-Fi 6 + BLE 5.4) is wired
 # on the AEN module; firmware is embedded in alp-sdk at

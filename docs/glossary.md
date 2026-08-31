@@ -57,8 +57,11 @@ cross-core `ipc:`, `boot:` (MCUboot), `ota:` (Mender), `storage:`,
 `scripts/validate_board_yaml.py` against
 `metadata/schemas/board.schema.json`.
 
-**BRD_I2C** -- Board-management I²C bus on V2N + V2N-M1.  Hosts
-the PMICs, RTC, OPTIGA, supervisor MCU slave interface.
+**BRD_I2C** -- Board-management I²C bus.  On V2N + V2N-M1 it hosts
+the PMICs, RTC, OPTIGA, supervisor MCU slave interface (Renesas RIIC8
+master).  On the E1M-AEN801 it hosts the RTC/OPTIGA/TMP112 trio over
+SoC I2C0 (function C, `P7_0`/`P7_1` -- #1848; R2-sourced, not yet
+on-unit-verified -- see `docs/bring-up-aen.md` §5.1).
 
 **Bridge (GD32)** -- The V2N module's on-module supervisor MCU
 (GD32G553) reachable over a hybrid SPI + I2C transport.  See

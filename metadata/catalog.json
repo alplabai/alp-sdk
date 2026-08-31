@@ -3812,11 +3812,13 @@
       "functions": [
         "alp_power_capabilities",
         "alp_power_close",
+        "alp_power_configure_retention",
         "alp_power_configure_wake_source",
         "alp_power_open",
         "alp_power_profile_get",
         "alp_power_profile_set",
-        "alp_power_request_sleep"
+        "alp_power_request_sleep",
+        "alp_power_wake_capabilities"
       ],
       "header": "include/alp/power.h"
     },

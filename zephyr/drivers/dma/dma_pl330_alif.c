@@ -302,8 +302,41 @@ static uint32_t dma_pl330_gen_copy_op(struct dma_pl330_ch_internal *ch_dat,
 				dma_exec_addr + offset);
 		}
 		offset = offset + 1;
-		dma_pl330_gen_op(OP_DMA_STP(req_type), dma_exec_addr + offset,
-				((ch_dat->src_id) << 3));
+		/*
+		 * dst_id, NOT src_id.  On MEMORY_TO_PERIPHERAL the peripheral is the
+		 * DESTINATION: dma_pl330_config_channel() assigns exactly one
+		 * identifier per direction, so src_id is never written on this path
+		 * and the memset in dma_pl330_configure() leaves it 0.  Every DMASTP
+		 * therefore acknowledged peripheral request interface 0 -- which HWRM
+		 * Table 12-29 DMA0 Requests Mapping assigns to UT0_T0_DMA_REQ, not to
+		 * the peripheral actually transferring.
+		 *
+		 * The two instructions above in this same branch already use dst_id;
+		 * only the store did not.  HWRM 15.8.4.4.1 makes the acknowledgement
+		 * what retires the request -- "Upon reception of the DMA_TX_ACK/
+		 * DMA_RX_ACK signal ... the SPI de-asserts the DMA_TX_REQ/DMA_RX_REQ
+		 * burst request signal" -- so acking the wrong interface left the real
+		 * request unretired: either the channel parks in
+		 * Waiting-For-Peripheral, or (with the event router completing the
+		 * handshake, the reset default) the router re-pulses, the DMAC
+		 * free-runs bursts into the 16-entry TX FIFO, SPI_ISR[TXOIS] fires and
+		 * the caller sees -EIO.
+		 *
+		 * BENCH, 2026-08-30, E1M-AEN801: this is NOT the cause of the open
+		 * OTA_WRITE -> -5.  Three images differing only in this operand and
+		 * the two DMA changes beside it (event-router ACK_TYPE, SPI cache
+		 * maintenance) were run at CONFIG_SPI_DW_ALIF_DMA_MIN_LEN=64 with
+		 * 64/256/1024/2048-byte host->bridge payloads; all three timed out
+		 * identically on the first transfer and desynced the link.  The
+		 * operand is still wrong and is still fixed here -- src_id is
+		 * provably 0 on this path -- but a further DMA defect keeps the
+		 * MIN_LEN=8192 workaround load-bearing (#1818).
+		 *
+		 * PERIPHERAL_TO_MEMORY is unaffected: it uses src_id
+		 * throughout and closes with a plain DMAST carrying no peripheral
+		 * operand.
+		 */
+		dma_pl330_gen_op(OP_DMA_STP(req_type), dma_exec_addr + offset, ((ch_dat->dst_id) << 3));
 		offset = offset + 2;
 	} else {
 		sys_write8(OP_DMA_LD(DMA_LDST_REQ_TYPE_FORCE),

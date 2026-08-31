@@ -383,7 +383,7 @@
       "board_category": "gpio",
       "board_macro": "EVK_PIN_SDIO_MUX_SEL",
       "board_role": null,
-      "dispatch": "direct",
+      "dispatch": "unrouted",
       "endpoints": [
         {
           "kind": "e1m",
@@ -392,9 +392,14 @@
         {
           "kind": "board-macro",
           "ref": "EVK_PIN_SDIO_MUX_SEL"
+        },
+        {
+          "kind": "som-dispatch",
+          "ref": "unrouted"
         }
       ],
-      "board_doc": "SDIO 74LVC157 S; 0 = M.2 E-key SDIO, 1 = microSD slot."
+      "board_doc": "SDIO 74LVC157 S; 0 = M.2 E-key SDIO, 1 = microSD slot.",
+      "som_doc": "Physically open on board 2626-R2 (no CC3501E or Alif termination); r1 routed it to CC3501E GPIO_30 -- see aen/hw-revisions.yaml pad_route_overrides (#1854)."
     },
     {
       "net_id": "EVK_PIN_PCIE_MUX_PD",

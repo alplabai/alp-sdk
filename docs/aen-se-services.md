@@ -147,6 +147,49 @@ These never change device state. All confirmed `rc=0` on the E8 bench (#197):
 `se_service_get_last_set_run_cfg()` returns the cached run profile without an SE
 round-trip (faster).
 
+### SERAM version, per physical board (#1797)
+
+ADR 0030 sets the supported SERAM floor for E1M-AEN at **v110**, and says a
+board below it "is updated before it is trusted to produce evidence". There is
+more than one AEN board in play, so the version has to be recorded per board,
+not once for the family.
+
+| Board | SEROM | SES / SERAM | LCS | Meets the v110 floor? | Captured |
+|---|---|---|---|---|---|
+| Off-labgrid Windows bench unit (`AE822FA0E5597LS0`, XDS110 `L50015YR`) | `v1.105.65 0x000002A0` | `SES A0 v1.110.0 Mar  4 2026`, SERAM0/SERAM1 `1.110.0` | `1` (DM) | **Yes** | 2026-08-30 |
+| The second AEN bench board (on the internal board farm) | TBD | TBD | TBD | **Unverified** | — |
+
+The capture is the SES boot header on the SE-UART at 57600 8N1 — it streams on
+every reset, no app or SE service call needed:
+
+```
+SEROM v1.105.65 0x000002A0
+SES A0 v1.110.0 Mar  4 2026 19:05:34
+[SES] SERAM bank 0x0 is valid and booted
+[SES] LCS=1
+| * SERAM0 |  CM0+  | ---------- | 0x000000C0 | ...  |    64528 |    1.110.0| ------ |
+|   SERAM1 |  CM0+  | ---------- | 0x00020AC0 | ...  |    64528 |    1.110.0| ------ |
+```
+
+That is the cheapest way to answer "is this board above the floor" for any AEN
+unit: power-cycle it with the SE-UART open and read the first two lines.
+
+**Two other facts fall out of the same header and are worth keeping here.**
+
+`[SES] No LF XTAL` — this unit has no low-frequency crystal detected, so the
+LPRTC runs from the internal LFRC rather than the 32 kHz LFXO. That compounds
+the RTC errata recorded in `src/backends/rtc/lprtc_calendar_shim.c`: AERR0012
+ER002 describes the LFXO-to-LFRC fallback as a transient during POR_N, but on a
+board with no LF XTAL at all it is the steady state. Treat LPRTC calendar
+accuracy on this unit as LFRC-grade (Alif quote ~5% offset from LFXO) at all
+times, not only across a reset. See #1814.
+
+`[SES] SE frequency is 78.31 MHz` — an independent corroboration of the ADC
+clock measurement in #1823, which derived `ADC_CLK` at `clock_div = 2` as
+~78.3 MHz and therefore `PERIPH_CLK` ~156.5 MHz. The SE reporting 78.31 MHz for
+itself lands on the same divide-by-two of the same ~156.6 MHz source, from a
+completely different path.
+
 **Lifecycle-state (LCS) legend:** `0x0` CM (chip mfr) · `0x1` **DM** (device
 mfr, the maker-provisioned state) · `0x5` SE (secure-enabled) · `0x7` RMA.
 

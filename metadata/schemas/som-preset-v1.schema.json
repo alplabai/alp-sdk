@@ -246,7 +246,7 @@
     },
     "pad_routes": {
       "type": "array",
-      "description": "E1M pads / peripheral instances that route through a SoM-side mediator chip (e.g., CC3501E coprocessor on AEN, GD32G553 IO MCU on V2N). Pads NOT listed here are assumed to route directly to the main silicon's GPIO / peripheral. The SDK loader composes this list with the board's `e1m_routes:` block at codegen time: when an E1M pad appears in both blocks, the board supplies the role (e.g., `bmi323_int1`) and the SoM supplies the dispatch path (e.g., CC3501E GPIO 14).",
+      "description": "E1M pads / peripheral instances whose dispatch is worth recording explicitly: routed through a SoM-side mediator chip (e.g., CC3501E coprocessor on AEN, GD32G553 IO MCU on V2N), or -- via `dispatch: unrouted` -- physically open on this revision (reaches neither a mediator nor the main silicon). Pads NOT listed here are assumed to route directly to the main silicon's GPIO / peripheral -- that default is only ever `direct`; a pad that goes nowhere MUST carry an explicit `unrouted` entry rather than falling out of the list silently (#1854). The SDK loader composes this list with the board's `e1m_routes:` block at codegen time: when an E1M pad appears in both blocks, the board supplies the role (e.g., `bmi323_int1`) and the SoM supplies the dispatch path (e.g., CC3501E GPIO 14).",
       "items": { "$ref": "#/$defs/pad_route_entry" }
     },
     "soc_peripheral_instances": {
@@ -618,21 +618,33 @@
         },
         "dispatch": {
           "type": "string",
-          "enum": ["cc3501e", "gd32_bridge", "direct", "TBD"],
-          "description": "SoM-side mediator the pad routes through. `direct` is the default for pads not in the list; an explicit `direct` entry is allowed for clarity. `TBD` marks pads whose routing is pending the user's HW-config writeup (per the no-inventing-values rule)."
+          "enum": ["cc3501e", "gd32_bridge", "direct", "unrouted", "TBD"],
+          "description": "SoM-side mediator the pad routes through. `direct` is the default for pads not in the list; an explicit `direct` entry is allowed for clarity. `unrouted` marks a pad that is physically open on this hardware revision -- it reaches neither a mediator nor the main silicon's GPIO / peripheral -- and MUST be listed here explicitly; there is no implicit `unrouted` default (an absent entry always means `direct`). The SDK's GPIO dispatch path refuses to open an `unrouted` pad with ALP_ERR_NOSUPPORT instead of silently driving a pin that goes nowhere (#1854). `TBD` marks pads whose routing is pending the user's HW-config writeup (per the no-inventing-values rule)."
         },
         "dispatch_pin": {
           "oneOf": [
             { "type": "integer", "minimum": 0 },
             { "type": "string", "pattern": "^[A-Za-z0-9_./]+$" }
           ],
-          "description": "Mediator-local pin or bus identifier. Forms: integer (CC3501E GPIO index, e.g. `14`); single pad name (`\"PA11\"` for a GD32 port pad); bus pin (`\"SPI1.MISO\"`); or a slash-joined pair for multi-pin peripherals (`\"PA0/PB3\"` for a quadrature encoder's X/Y pads)."
+          "description": "Mediator-local pin or bus identifier. Forms: integer (CC3501E GPIO index, e.g. `14`); single pad name (`\"PA11\"` for a GD32 port pad); bus pin (`\"SPI1.MISO\"`); or a slash-joined pair for multi-pin peripherals (`\"PA0/PB3\"` for a quadrature encoder's X/Y pads). Meaningless for `dispatch: unrouted` (there is no mediator pin to name); omit it there."
         },
         "doc": {
           "type": "string",
-          "description": "One-line free-form note (matches the e1m_routes entry shape on the board side)."
+          "description": "One-line free-form note (matches the e1m_routes entry shape on the board side). Required for `dispatch: unrouted` -- the whole point of that state is to record WHY the pad is dead (e.g. which revision/pin it moved from)."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "dispatch": { "const": "unrouted" } },
+            "required": ["dispatch"]
+          },
+          "then": {
+            "required": ["doc"],
+            "properties": { "doc": { "minLength": 1 } }
+          }
+        }
+      ]
     },
     "i2c_bus": {
       "type": "object",

@@ -4,12 +4,74 @@
  *
  * aen-secure-element-sign overlay for the E1M-AEN801 (Ensemble E8,
  * M55-HE) RAM-run.  Retarget ROM to ITCM so Flow C can load and run
- * this image without writing MRAM.
+ * this image without writing MRAM, and wire BRD_I2C (#1848).
  */
+
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
 
 / {
 	chosen {
 		zephyr,flash = &itcm;
 		/delete-property/ zephyr,code-partition;
+	};
+};
+
+/*
+ * BRD_I2C (SoC I2C0, function C) -- on-module housekeeping bus: RV-3028-C7
+ * RTC (0x52), OPTIGA Trust M secure element (0x30), TMP112 temperature
+ * sensor (0x48).  I2C0_SCL_C = P7_1, I2C0_SDA_C = P7_0 (ADTS0013 v1.2 Table
+ * 3-16); corroborated by the E1M-AEN-2626-R2 netlist (BRD_I2C_SCL/SDA on
+ * balls B3/B8).  R2-SOURCED, NOT ON-UNIT-VERIFIED -- the bench module on
+ * hand is r1 and no R1 netlist is available (#1848).
+ *
+ * NO internal pull (deliberately -- do not add bias-pull-down): the R2
+ * components CSV shows the BRD_I2C pull-up jumpers (R93/R94) DNP -- this
+ * net has NO external pull-up, unlike the I2C2/EEPROM bus this pinctrl
+ * shape was otherwise copied from (whose pull-up jumpers R95/R96 ARE
+ * stuffed, feeding carrier resistors R137/R144 to +VIO).  A pull-DOWN here
+ * would park both lines low through the pad's ~50 kOhm Rpd and make the
+ * bus look permanently busy.  There is also an unresolved document
+ * conflict this bench needs to settle before adding any bias: the
+ * datasheet's per-pin table marks I2C0_SCL_C/I2C0_SDA_C "open-drain output
+ * driver, requires external pull-up", while the HWRM's per-pin note for
+ * these ports says I2C "is operating properly with the push-pull (default)
+ * driver type" and that open-drain "must not be selected for I2C". If the
+ * IP tri-states for the high phase, no pull-up means a dead bus; if it
+ * drives push-pull, the missing pull-up is by design either way. High-Z
+ * (no bias-pull-*) is the safe default until a bench probe (scope on
+ * P7_0/P7_1, or a controlled bias-pull-up trial) resolves which reading is
+ * right -- see the ADR 0017 amendment.
+ *
+ * P7_0/P7_1 carry no E1M edge route, so this pad claim lives only in prose
+ * (here + the dtsi + the ADR amendment) -- `check_pin_conflicts.py` reads
+ * `metadata/e1m_modules/aen/*.tsv` only and does not see it; its PASS is not
+ * evidence this pair is exclusively claimed.
+ */
+&pinctrl {
+	pinctrl_i2c0: pinctrl_i2c0 {
+		group0 {
+			pinmux = <PIN_P7_1__I2C0_SCL_C>, <PIN_P7_0__I2C0_SDA_C>;
+			input-enable;
+		};
+	};
+};
+
+&i2c0 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c0>;
+	pinctrl-names = "default";
+	/* 100 kHz: no fast-mode margin without a confirmed pull-up (see above). */
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+};
+
+/ {
+	aliases {
+		/* Bus index 2: 0 and 1 are already the E1M edge buses
+		 * (ALP_E1M_I2C0 / ALP_E1M_I2C1, e.g. BOARD_I2C_SENSORS /
+		 * EVK_I2C_BUS_DSI_CSI) -- BRD_I2C has no E1M route of its own,
+		 * so it takes the next free portable index instead of one
+		 * already claimed by an edge bus (#1848). */
+		alp-i2c2 = &i2c0;
 	};
 };
