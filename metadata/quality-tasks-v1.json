@@ -555,10 +555,10 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
-      "id": "i2c-address-uniqueness",
-      "description": "No two declared I2C devices claim the same 7-bit address on the same bus, across metadata/e1m_modules/*.yaml and metadata/boards/*.yaml (issue #1675).",
+      "id": "i2c-address-collisions",
+      "description": "No two chips claim the same 7-bit I2C address on the same bus, across metadata/e1m_modules/*.yaml, metadata/boards/*.yaml, and each claimed chip's broadcast address from metadata/chips/*.yaml (issue #1845, extends #1675).",
       "runner": "check-script",
-      "script": "scripts/check_i2c_address_uniqueness.py",
+      "script": "scripts/check_i2c_address_collisions.py",
       "gate": true,
       "profiles": [
         "pr",
