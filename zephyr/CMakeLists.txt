@@ -206,8 +206,12 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE_CMD_COMPANION
 # <alp/storage.h> ABI always link cleanly; each backend gates on its
 # own Kconfig so builds that don't enable a path don't pay its code
 # size.  Vendor-ext bodies under src/backends/ext/{alif,nxp}/storage.c
-# compile unconditionally -- they only emit NOSUPPORT + parameter
-# validation today, so they pull zero vendor dependencies.
+# compile unconditionally -- the NXP OTFAD surface still only emits
+# NOSUPPORT + parameter validation (zero vendor dependencies), and the
+# Alif SecAES key-provision body (issue #224) internally #ifdefs its
+# one vendor include (<se_service.h>) behind
+# CONFIG_ALP_SDK_STORAGE_ALIF_SECAES, so both files still link on every
+# board regardless of which vendor Kconfig is on.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/storage_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/alif/storage.c
