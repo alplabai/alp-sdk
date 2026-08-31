@@ -138,6 +138,10 @@ into the topic-specific docs.
 - [recommended-libraries.md](recommended-libraries.md) — curated
   third-party libraries (integrated / recommended / deferred) for
   what the SDK deliberately leaves out of `<alp/...>`.
+- [bench/model-perf-capture.md](bench/model-perf-capture.md) — recipe
+  for a tier-2 bench-measured model-perf point
+  (`metadata/model_perf/<SKU>/<hash>.yaml`); the contract ships in
+  #1520, `metadata/model_perf/` stays empty until a real capture runs.
 
 ## Security & release
 
