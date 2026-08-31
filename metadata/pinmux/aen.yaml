@@ -103,8 +103,8 @@ pads:
   - { e1m_pad: "AH34", e1m_function: "IO9", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO12" }
   - { e1m_pad: "E3", e1m_function: "IO13", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO13" }
   - { e1m_pad: "F3", e1m_function: "IO15", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO14" }
-  - { e1m_pad: "G3", e1m_function: "IO16", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO17" }
-  - { e1m_pad: "H3", e1m_function: "IO17", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO16" }
+  - { e1m_pad: "G3", e1m_function: "IO16", owner: "cc3501e", silicon_peripheral: "BRIDGE_READY", silicon_pad: "GPIO17" }
+  - { e1m_pad: "H3", e1m_function: "IO17", owner: "cc3501e", silicon_peripheral: "BRIDGE_SPI_CSN", silicon_pad: "GPIO16" }
   - { e1m_pad: "I3", e1m_function: "IO18", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO18" }
   - { e1m_pad: "J3", e1m_function: "IO19", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO19" }
   - { e1m_pad: "K3", e1m_function: "IO20", owner: "cc3501e", silicon_peripheral: "", silicon_pad: "GPIO26" }

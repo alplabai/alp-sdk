@@ -212,6 +212,30 @@ It probes the SES and reports e.g. `Target part# AE822FA0E5597LS0 matches
 default E8`. If it can't reach the SES, fix §2 first (auto-detect needs the
 **send** direction working too, not just receive).
 
+**Which `app-device-config.json` this uses.** SETOOLS 1.110.00 ships no
+AE822-specific device config — the stock `build/config/app-device-config.json`
+declares `"device": "AE722F80F55D5AS"`, an **E7** part, not our
+`AE822FA0E5597LS0`. Two facts are bench-established and one is deliberately
+still open (alp-sdk#1701):
+
+- **`device` is very likely toolchain metadata, not silicon-relevant.** The SE
+  reports the correct part identity from OTP (`ALIF_PN = AE822FA0E5597LS0`)
+  regardless of which part the config file names.
+- **The HFXO trim fields match our AE822.** Our healthy board's own clock
+  register readback (`XO_REG1` → `xtal_cap:8 gm_pfet:16 gm_nfet:16`) agrees
+  with the stock file's `HFXO_CAP_CTRL`/`HFXO_PFET_GM_CTRL`/`HFXO_NFET_GM_CTRL`.
+- **The rest of the file — notably its `firewall` block — is unverified for
+  AE822.** SETOOLS' *other* stock config (`app-device-config-1c.json`, a third
+  part) ships a *different* `HFXO_CAP_CTRL` and an empty `firewall` block, so
+  these fields are demonstrably part-specific in general; the E7 file's
+  firewall region set has not been bench-validated against AE822 and must not
+  be assumed safe from the two bullets above.
+
+Until alp-sdk#1701 resolves (an open escalation to Alif — see #1700, item 3):
+use the stock `app-device-config.json` unmodified, as the reference board
+does. Do not hand-edit its `device` field, and do not treat any part of the
+file beyond the two confirmed bullets above as AE822-qualified.
+
 ## 4. Build the ATOC + write it
 
 Use the stock blink first to validate the path end-to-end before your own
@@ -335,11 +359,44 @@ the equivalent is `app-write-mram -c <your-serial-device> -e "<base> <size>"`;
 that costs you the probe-identity gate the helper performs, so check the part
 with `tools-config` (§3) first.
 
-> **`[UNVERIFIED-ON-BENCH]`** — the *finding* is bench-measured (#1334), but
-> this erase step has **not** been run through `erase-storage.sh` on a module.
-> A first run still owes: the J-Link transcript with `verify successful`, and
-> the post-erase cold power-cycle showing the SE still boots the ATOC. Do not
-> mark a SoM as erased on the strength of this section alone.
+**`[BENCH-VERIFIED 2026-08-30]`** — first real run of `erase-storage.sh` on a
+module (off-labgrid E1M-AEN801, `AE822FA0E5597LS0`, J-Link `000821005680`).
+Both things a first run owed are below.
+
+The erase itself, with the byte-compare that makes "erased" a measurement
+rather than a claim:
+
+```
+>>> customer storage window: 0x80560000 .. 0x80578000 (96 KiB, exclusive of atoc at 0x80578000)
+>>> DPIDR gate OK: probe confirmed AEN E8 (0x4C013477)
+J-Link: Flash download: Total: 0.527s (... Program & Verify: 0.464s ...)
+J-Link>verifybin ...\aen-storage-erased.bin 0x80560000
+Verify successful.
+erased: 0x80560000 .. 0x80578000 verified all-0x00
+```
+
+Then a 20 s cold power cycle, reading the SES boot header on the SE-UART. The
+ATOC band was not touched and still boots the application:
+
+```
+[SES] ATOC DEVICE ok
+[SES] STOC ok
+[SES] ATOC ok
+[SES] LCS=1
+|   ALP-HE | M55-HE | 0x80010000 | 0x8057EA50 | ---------- | 0x80010000 |   121588 |      1.0.0| u VB   |
+```
+
+`u VB` on the `ALP-HE` row is the point: **V**erified and **B**ooted after the
+erase, so wiping the customer window did not disturb the signed boot chain.
+
+> **One host caveat, fixed in the same change.** Before this run the script
+> could not erase anything on a Windows bench host: it handed the J-Link an
+> MSYS path (`/tmp/aen-storage-erased.bin`) that `JLink.exe` cannot open, and
+> the run ended in `Failed to open file.` / `ERROR: Could not open file.` The
+> verify gate behaved correctly — no `verify successful`, so it reported NOT
+> erased rather than claiming success — but the erase silently never happened.
+> `erase-storage.sh` now converts the path with `cygpath -w` where a converter
+> exists. Same trap as `ti/regen_flashset.sh` in the firmware repo.
 
 ## See also
 

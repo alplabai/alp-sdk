@@ -131,8 +131,23 @@ printf '>>> customer storage window: %s .. 0x%X (%s KiB, exclusive of atoc at %s
 #    claim.
 ZEROS=/tmp/aen-storage-erased.bin
 head -c "$SIZE" /dev/zero > "$ZEROS"
+
+# The path handed to the J-Link CommanderScript has to be one the J-Link BINARY
+# can open, which is not always the one this shell sees.  On a Windows bench
+# host (Git Bash / MSYS driving JLink.exe, a native Windows binary) "/tmp/..."
+# is meaningless to the callee and the run dies with
+#     Failed to open file.
+#     ERROR: Could not open file.
+# -- the same trap ti/regen_flashset.sh hit.  The verify gate below catches it
+# and correctly reports NOT erased, but the erase never happens.  Convert when a
+# converter exists; on Linux cygpath is absent and $ZEROS is already right.
+ZEROS_FOR_JLINK="$ZEROS"
+if command -v cygpath >/dev/null 2>&1; then
+	ZEROS_FOR_JLINK="$(cygpath -w "$ZEROS")"
+fi
+
 printf '    erased pattern: %s (%s B of 0x00 -- NOT 0xFF)\n' \
-	"$ZEROS" "$(wc -c < "$ZEROS" | tr -d ' ')" >&2
+	"$ZEROS_FOR_JLINK" "$(wc -c < "$ZEROS" | tr -d ' ')" >&2
 
 # 3. SAFETY GATE -- prove the AEN E8 answered BEFORE any write (hazard 5).
 #    Read-only connect with the generic device, same gate as flash-jlink.sh.
@@ -164,8 +179,8 @@ si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_FLASH
 connect
-loadbin $ZEROS $BASE
-verifybin $ZEROS $BASE
+loadbin $ZEROS_FOR_JLINK $BASE
+verifybin $ZEROS_FOR_JLINK $BASE
 exit
 EOF
 

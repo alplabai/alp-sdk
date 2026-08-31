@@ -147,6 +147,59 @@ These never change device state. All confirmed `rc=0` on the E8 bench (#197):
 `se_service_get_last_set_run_cfg()` returns the cached run profile without an SE
 round-trip (faster).
 
+### SERAM version, per physical board (#1797)
+
+ADR 0030 sets the supported SERAM floor for E1M-AEN at **v110**, and says a
+board below it "is updated before it is trusted to produce evidence". There is
+more than one AEN board in play, so the version has to be recorded per board,
+not once for the family.
+
+| Board | SEROM | SES / SERAM | LCS | Meets the v110 floor? | Captured |
+|---|---|---|---|---|---|
+| The AEN bench unit (`AE822FA0E5597LS0`, module rev **r1**, serial `2617-0001`) | `v1.105.65 0x000002A0` | `SES A0 v1.110.0 Mar  4 2026`, SERAM0/SERAM1 `1.110.0` | `1` (DM) | **Yes** | 2026-08-30, re-confirmed 2026-08-31 |
+
+**There is only one AEN board.** This table used to carry a second row for "the
+second AEN bench board (on the internal board farm)", marked `TBD` /
+**Unverified**, and #1797 existed largely because of it. That row described
+hardware that does not exist. The board-farm place `e1m-aen-evk-01` is a stale
+definition: every resource on it reports `avail: False` with `port: None` and
+`path: None`, the exporter host has no `/dev/ttyUSB*` at all, and the exporter's
+own udev match rules name `ID_SERIAL_SHORT` `BG01028C` and `BG04503B` — the same
+two FTDI adapters this bench enumerates as its SE-UART and app-console ports. One
+board, moved off the farm. Retire or re-point that place if the board ever goes
+back.
+
+The capture is the SES boot header on the SE-UART at 57600 8N1 — it streams on
+every reset, no app or SE service call needed:
+
+```
+SEROM v1.105.65 0x000002A0
+SES A0 v1.110.0 Mar  4 2026 19:05:34
+[SES] SERAM bank 0x0 is valid and booted
+[SES] LCS=1
+| * SERAM0 |  CM0+  | ---------- | 0x000000C0 | ...  |    64528 |    1.110.0| ------ |
+|   SERAM1 |  CM0+  | ---------- | 0x00020AC0 | ...  |    64528 |    1.110.0| ------ |
+```
+
+That is the cheapest way to answer "is this board above the floor" for any AEN
+unit: power-cycle it with the SE-UART open and read the first two lines.
+
+**Two other facts fall out of the same header and are worth keeping here.**
+
+`[SES] No LF XTAL` — this unit has no low-frequency crystal detected, so the
+LPRTC runs from the internal LFRC rather than the 32 kHz LFXO. That compounds
+the RTC errata recorded in `src/backends/rtc/lprtc_calendar_shim.c`: AERR0012
+ER002 describes the LFXO-to-LFRC fallback as a transient during POR_N, but on a
+board with no LF XTAL at all it is the steady state. Treat LPRTC calendar
+accuracy on this unit as LFRC-grade (Alif quote ~5% offset from LFXO) at all
+times, not only across a reset. See #1814.
+
+`[SES] SE frequency is 78.31 MHz` — an independent corroboration of the ADC
+clock measurement in #1823, which derived `ADC_CLK` at `clock_div = 2` as
+~78.3 MHz and therefore `PERIPH_CLK` ~156.5 MHz. The SE reporting 78.31 MHz for
+itself lands on the same divide-by-two of the same ~156.6 MHz source, from a
+completely different path.
+
 **Lifecycle-state (LCS) legend:** `0x0` CM (chip mfr) · `0x1` **DM** (device
 mfr, the maker-provisioned state) · `0x5` SE (secure-enabled) · `0x7` RMA.
 
@@ -283,6 +336,119 @@ re-syncs), `se_service_boot_reset_soc` / `boot_reset_cpu` (reset),
 `se_service_system_set_services_debug` (changes the SE debug posture). All change
 state; none are needed for the read-only characterisation.
 
+### 2.5 `SERVICE_APPLICATION_OSPI_WRITE_KEY_ID` (service 105) — OSPI SecAES key provisioning
+
+Issue #224: this was deferred as "blocked on the vendor HAL pack" -- wrongly.
+The E8 HWRM's `AES_CONTROL` description makes `AES_CONTROL_LD_KEY` (hal_alif
+`drivers/ospi/include/ospi.h`) the bit the **SE** arms once it has written the
+key; the host never pokes raw key bytes into an OSPI register (no code in
+`drivers/ospi/src/ospi.c` ever touches that bit -- it isn't the host's job).
+The host-side entry Alif publish for this is `AUGD0014` "SE Host Services
+API" v1.109.0's `SERVICES_application_ospi_write_key(handle, command, key,
+error_code)`, with `OSPI_WRITE_OTP_KEY_OSPI0/1` and
+`OSPI_WRITE_EXTERNAL_KEY_OSPI0/1` command codes
+(`se_services/include/services_lib_api.h`).
+
+That symbol's *body* is not compiled anywhere in the Apache-2.0 hal_alif
+module pinned by this SDK (v2.3.0) -- `se_services/` ships only
+`se_service.c`, and every low-level `SERVICES_*` prototype in
+`services_lib_api.h` (pinmux, pad control, uart_write, ospi_write_key, dmpu,
+verify_image, ...) is declared, never defined, there; only the higher
+`se_service_*` wrappers get bodies. So `src/backends/ext/alif/storage.c`
+does not call that symbol -- it builds the identical wire packet
+(`ospi_write_key_svc_t`, `services_lib_protocol.h`;
+`SERVICE_APPLICATION_OSPI_WRITE_KEY_ID`, `services_lib_ids.h`) by hand and
+hands it to the *public* generic transport hal_alif does export for exactly
+this shape of caller:
+
+```c
+ospi_write_key_svc_t pkt;
+memset(&pkt, 0, sizeof(pkt));
+pkt.header.hdr_service_id = SERVICE_APPLICATION_OSPI_WRITE_KEY_ID;
+pkt.send_command          = OSPI_WRITE_EXTERNAL_KEY_OSPI0; /* R2 BOM: OSPI0 only */
+memcpy((void *)pkt.send_key, key, sizeof(pkt.send_key));   /* fixed 16 B -- AES-128 only */
+pkt.resp_error_code       = UINT32_MAX;                    /* sentinel -- see below */
+int rc = se_service_send_request((uint32_t *)&pkt, (uint32_t)sizeof(pkt));
+/* rc==0 && pkt.header.hdr_error_code == SERVICES_REQ_SUCCESS
+ *       && pkt.resp_error_code == OSPI_WRITE_KEY_SUCCESS => the SE wrote the key */
+```
+
+`se_service_send_request()` is the same public seam
+`src/backends/security/se_cryptocell.c` rides for its CryptoCell AES/SHA/AEAD
+packets (added by
+`zephyr/patches/hal_alif/0002-se-service-add-public-send-request.patch`),
+over the identical MHUv2 mailbox this doc's §1 read-only path is bench-proven
+on. `pkt.send_key` is an **inline** 16-byte field in the request packet (not
+a DMA address like the CryptoCell key fields) -- it is the one place the SDK
+holds the key in clear, and the caller (`alp_alif_storage_secaes_key_provision`)
+wipes the whole packet with a compiler barrier immediately after the call
+returns, success or failure.
+
+**Both verdict fields are checked, not just one.** `send_msg_to_se()` (hal_alif
+`se_service.c`) returns `rc==0` as soon as *any* response frame arrives over
+the mailbox -- it never itself inspects `header.hdr_error_code` or
+`resp_error_code`, and no `se_service_*` wrapper in hal_alif does either. A
+first cut of this backend checked only `resp_error_code != OSPI_WRITE_KEY_SUCCESS`,
+which is a **false-`ALP_OK` bug**: `OSPI_WRITE_KEY_SUCCESS` is `0x0`, and the
+packet is `memset` to 0 before the send, so an SE that answers with a
+transport-layer NACK (e.g. `SERVICES_RESP_UNKNOWN_COMMAND` if this firmware
+simply doesn't implement service 105 at all) and never touches
+`resp_error_code` would read back indistinguishable from success. The fix
+pre-seeds `resp_error_code` to a non-success sentinel (`UINT32_MAX`) before
+the send and checks `header.hdr_error_code != SERVICES_REQ_SUCCESS` as well
+-- so a provisioning tool cannot report success while the OSPI AES slot was
+never keyed.
+
+**The call blocks -- for up to ~35 s -- and is bracketed against a
+concurrent close.** `se_service_send_request()`'s `se_service_ensure_ready()`
++ `svc_mutex` each carry hal_alif's 15 s `MUTEX_TIMEOUT`, plus a 10 s
+`SERVICE_TIMEOUT`. `alp_alif_storage_secaes_key_provision()` /
+`_get_status()` both enter via `alp_handle_op_enter()` before touching the
+handle and leave via `alp_handle_op_leave()` on every exit path (issue #629's
+open/op/close guard, `src/common/alp_slot_claim.h`) -- the same pairing
+`alp_storage_close()` drains on, so a close racing an in-flight provision
+call blocks until it returns instead of freeing/recycling the handle out
+from under it.
+
+**Key width is fixed at 16 bytes (AES-128).** `OSPI_KEY_LENGTH_BYTES` in
+`services_lib_api.h` and `ospi_write_key_svc_t.send_key`'s array size both
+say 16 -- there is no 192/256-bit OSPI SecAES key option in this service,
+unlike the portable (still-unimplemented) `alp_storage_configure_inline_aes`
+surface.
+
+**No status read-back exists.** Alif has not published an SE service that
+reads the OSPI SecAES engine's ARMED/ENGAGED/error state back --
+`alp_alif_storage_secaes_get_status()` stays `ALP_ERR_NOSUPPORT`
+unconditionally. The host-side `ospi_aes_regs` register block is the SE's
+own domain for the `LD_KEY` sequence; reading it from the host without a
+vendor-confirmed sequence would repeat the exact "guess the register timing"
+mistake issue #224 was reopened to avoid.
+
+**SES version.** No document available here states a per-service SES floor
+for this call specifically (`AUGD0014` is Alif-confidential; the passages
+above are paraphrased, not quoted). §0.1's general SES **v110** floor
+(ADR 0030) is what this SDK tracks; the bench unit's `SES A0 v1.110.0`
+already exceeds both it and `AUGD0014`'s own v1.109.0 doc revision.
+
+**Gated `CONFIG_ALP_SDK_STORAGE_ALIF_SECAES`, default OFF.** About eight
+in-tree AEN examples already set `CONFIG_HAS_ALIF_SE_SERVICES=y`
+(`aen-aipm-read`, `aen-alp-rpc`, `aen-dualcore-doorbell`/`-ipc`/`-master`/
+`-he-master`, `aen-rpc-pingpong`, `aen-se-service-*`), which would otherwise
+turn this real SE transaction on by default for all of them. Unlike
+`CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM` (default ON *because* that
+path bench-PASSED, `docs/aen-bench-bringup.md`), this gate stays OFF until
+the round-trip below is proven; flip the default in the same change that
+adds a bench PASS row.
+
+**UNVERIFIED ON SILICON.** No bench unit reachable at implementation time has
+an OSPI SecAES-relevant part populated -- the bench module is board rev r1
+(EEPROM manifest "E1M-AEN801 r1", serial `2617-0001`); the Macronix
+`MX25UM25645GXDI00` this targets is populated (`DNP = 0`) only on the R2 BOM
+(#915). The transport half of this call reuses the identical
+`se_service_send_request()` path already bench-proven for SE CryptoCell
+(`aen-se-crypto`: SHA-256 + AES-128-GCM MATCH); the OSPI write-key
+round-trip itself has not been run against real SE firmware.
+
 ## 3. Recovery (a bad STOC / collapsed rail)
 
 - **Collapsed rail (bad `set_run_cfg`/divider):** physically power-cycle the
@@ -303,6 +469,7 @@ state; none are needed for the read-only characterisation.
 | §2.1 `set_run_cfg` (real change) | No — needs power-cycle recovery on hand; idempotent re-assert is a cache no-op |
 | §2.2 `boot_cpu` (peer-core release) | **Yes** for HP-master → HE-peer with plain `["load"]`; HE-master → HP-peer needs `["load","boot","deferred"]` — a plain `["load"]` entry locks the HP peer up (see §2.2) |
 | §2.3 `update_stoc` | No — sacrificial board + proven SETOOLS recovery required first |
+| §2.5 `ospi_write_key` (OSPI SecAES key provisioning) | No — every bench unit reachable here is board rev r1 with no OSPI SecAES-relevant part populated; the code path is real (`CONFIG_ALP_SDK_STORAGE_ALIF_SECAES`) but its silicon round-trip is unverified |
 
 See `examples/aen/aen-se-service-info` (vendor-scoped transport + LCS regcheck)
 and `aen-se-service-query` (the read-only surface via the portable `alp_*`

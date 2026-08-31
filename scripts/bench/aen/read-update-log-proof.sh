@@ -41,6 +41,24 @@ JLINK="$(bench_jlink_exe)" || exit $?
 JLINK_ARGS=("$JLINK")
 [ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 
+# SAFETY GATE (alp-sdk#813) -- confirm the AEN E8 answered BEFORE the mem32
+# reads below (both here and the SWD MRAM-fallback read further down this
+# script share this one probe session). This bench has two probes sharing
+# OEM serial 603000869, one of them on the GD32 bridge on a DIFFERENT board
+# (V2N-M1); JLinkExe selects by serial only, so JLINK_SN alone cannot prove
+# which board answered -- see bench-env.sh. Read-only connect first.
+cat > /tmp/firmware-update-log-preflight.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_READ
+connect
+exit
+EOF
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-preflight.jlink \
+	> /tmp/firmware-update-log-preflight.out 2>&1 || true
+bench_jlink_assert_connected /tmp/firmware-update-log-preflight.out "update-log preflight" || exit 7
+bench_jlink_assert_aen_dpidr /tmp/firmware-update-log-preflight.out "update-log preflight" || exit 4
+
 cat > /tmp/firmware-update-log-dual-read.jlink <<EOF
 device $JLINK_DEVICE_READ
 si SWD

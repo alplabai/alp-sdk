@@ -309,7 +309,7 @@ The EEPROM-side hw_info reader isn't configured.  Set
 id carrying the on-module 24C128.  On V2N / V2N-M1 this is the bus
 matching `ALP_E1M_I2C0` (Renesas RIIC0, `P31`/`P30`); on AEN it's
 SoC I2C2 (DesignWare `i2c_dw`, `P5_6`/`P5_7`, bridge/DNP-selected --
-NOT the slave-only LPI2C0 / BRD_I2C).
+NOT BRD_I2C, a separate bus (SoC I2C0 on the E1M-AEN801 -- #1848)).
 
 ## CI / tooling issues
 

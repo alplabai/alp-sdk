@@ -652,6 +652,22 @@ alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg);
  * @param[out] rx   Receive buffer.  May be NULL to discard MISO.
  * @param[in]  len  Transfer length in bytes.
  *
+ * DMA and the data cache: @p tx and @p rx may live in ordinary cacheable
+ * memory -- a caller does not have to allocate them out of TCM or a
+ * non-cacheable region.  Where a backend moves the data over a DMA master
+ * that does not snoop the CPU cache, the driver owns the maintenance: it
+ * cleans @p tx before the transfer and invalidates @p rx after it.  (On
+ * AEN the PL330 is programmed AxCACHE = 0b0010 -- Normal non-cacheable,
+ * non-bufferable -- so it neither snoops nor allocates; see #1830.)
+ *
+ * The one thing that is the caller's job is granularity.  Cache
+ * maintenance operates on whole cache lines, so a partially-covered line
+ * is invalidated in full: if @p rx shares a cache line with other live
+ * data, a CPU write to that neighbour during the transfer window can be
+ * discarded by the post-transfer invalidate.  Give a DMA-sized @p rx
+ * buffer its own cache line(s).  This does not apply to @p tx, which is
+ * only ever cleaned, never invalidated.
+ *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */

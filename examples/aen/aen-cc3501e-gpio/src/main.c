@@ -215,9 +215,18 @@ int main(void)
 	 * the GPIO proxy backend (so a portable alp_gpio_open(ALP_E1M_GPIO_IO13)
 	 * would route over the bridge), and runs the power + reset sequence
 	 * (TI SWRU626 + the Puya cold-boot hard-reset).  Leaves WIFI_EN HIGH.
+	 *
+	 * STATIC, not a stack local (#1868): sizeof(cc3501e_t) is ~32 KB
+	 * (measured -- rx_scratch/tx_scratch/wifi_scan_buf/ble_scan_buf/
+	 * evt_buf/sock_buf/spi1_{tx,rx}_buf are each sized off the v5
+	 * ALP_CC3501E_MAX_PAYLOAD=4096) against CONFIG_MAIN_STACK_SIZE=4096,
+	 * so as a local the prologue's frame reservation alone crosses
+	 * PSPLIM and the M55 raises a UsageFault at main() entry -- before
+	 * even this function's first printf runs.  Same fix, same reason,
+	 * as aen-cc3501e-bringup's `fw`.
 	 */
-	cc3501e_t    fw;
-	alp_status_t s = cc3501e_bridge_bringup(&fw);
+	static cc3501e_t fw;
+	alp_status_t     s = cc3501e_bridge_bringup(&fw);
 	if (s == ALP_ERR_NOT_PRESENT_ON_THIS_SOC) {
 		/* The backend authority itself says the SPI bus / control pins are
 		 * absent (wrong board overlay) -- a bench/board limitation, not a

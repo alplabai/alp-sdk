@@ -1,4 +1,32 @@
 # aen-rtc-regcheck -- LPRTC (snps,dw-apb-rtc) counter readout
+> **Silicon caveat -- read before trusting elapsed time on AEN.**
+>
+> Errata `AERR0012` v2.0 leaves no Ensemble revision without an RTC accuracy
+> quirk, and this path runs on the SoC's internal LPRTC:
+>
+> - **ER001** (Rev **A0**, the bench silicon, fixed in A1): *"A Power On Reset
+>   event (assertion of the POR_N pin or wake from STOP mode) will reset the RTC
+>   (Real Time Counter) clock pre-scaler divider ... the RTC will revert to clock
+>   at the default rate of 32KHz ... the accuracy of the real time count will
+>   have already been lost."*
+> - **ER002** (Rev **A1**, no fix planned): the RTC clock source drops from the
+>   32 kHz LFXO to the ~5 %-accurate LFRC for as long as POR_N is asserted --
+>   *"it would take a 20 second assertion of POR_N to impose a 1 second loss of
+>   RTC accuracy."*
+>
+> So: the calendar keeps counting across a reset, but the elapsed time it
+> reports across one is not accurate on either revision. Re-set the time from an
+> external source after any POR if accuracy matters.
+>
+> **Alif's own workaround for ER002 is "use an external real-time clock source",
+> and the SoM does carry one -- an `rv3028c7` at 7-bit `0x52` -- but it is NOT
+> reachable from the M55 today.** It sits on the module's `BRD_I2C`
+> housekeeping bus, which no application-core I2C controller drives, and the
+> Alif SE services expose no I2C service to route through (`se_service.h` and
+> `services_lib_ids.h` in the pinned hal_alif carry none; the only I2C token in
+> that tree is an EWIC wake-source bit). Using it needs a transport that does
+> not exist yet -- see alp-sdk#1814.
+
 
 On-silicon validation for the **E1M-AEN801** (Alif Ensemble E8, M55-HE),
 via the bench RAM-run + RAM-console flow.

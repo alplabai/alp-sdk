@@ -80,12 +80,14 @@ On-module (E1M-AEN801 `i2c_devices:` `e1m_i2c0:` block):
 ```
 
 The SoM's three other I²C parts -- OPTIGA Trust M (`0x30`), TMP112
-(`0x48`) and RV-3028-C7 (`0x52`) -- do NOT ACK here.  They sit on
-`brd_i2c`, a separate slave-only LPI2C0 housekeeping bus the M55 cannot
-master (`metadata/e1m_modules/E1M-AEN801.yaml` `i2c_devices:`
-`brd_i2c:`; `docs/bring-up-aen.md` §5.1).  A `0x48` in a scan of this
-bus is U32 INA236B (+V_CAM0 rail) on PRE-RESPIN carriers, not the
-TMP112.
+(`0x48`) and RV-3028-C7 (`0x52`) -- do NOT ACK here.  They sit on a
+separate bus, `brd_i2c` (SoC I2C0, not this bus), not exercised by this
+tutorial's scan (`metadata/e1m_modules/E1M-AEN801.yaml` `i2c_devices:`
+`brd_i2c:`; `docs/bring-up-aen.md` §5.1, which also carries the OPTIGA
+scan caveat -- don't blind-scan that bus; see
+`examples/aen/aen-secure-element-sign` for a dedicated, targeted BRD_I2C
+probe instead).  A `0x48` in a scan of this bus is U32 INA236B (+V_CAM0
+rail) on PRE-RESPIN carriers, not the TMP112.
 
 E1M-EVK board-populated (`metadata/boards/e1m-evk.yaml` `i2c_devices:`):
 

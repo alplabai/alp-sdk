@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-29",
+  "generated": "2026-08-31",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -2872,7 +2872,7 @@
           "kind": "fnptr"
         },
         "cc3501e_t": {
-          "definition": "typedef struct cc3501e { bool initialised; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t sock_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool sock_busy; uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER]; uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER]; bool spi1_busy; bool spi1_configured; uint8_t spi1_seq; bool request_lock; } cc3501e_t;",
+          "definition": "typedef struct cc3501e { bool initialised; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t sock_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool sock_busy; uint8_t sock_send_seq; uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER]; uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER]; bool spi1_busy; bool spi1_configured; uint8_t spi1_seq; bool request_lock; } cc3501e_t;",
           "fields": [
             "bool initialised",
             "alp_spi_t *bus",
@@ -2890,6 +2890,7 @@
             "bool ble_scan_busy",
             "bool evt_busy",
             "bool sock_busy",
+            "uint8_t sock_send_seq",
             "uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER]",
             "uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER]",
             "bool spi1_busy",
@@ -2897,7 +2898,7 @@
             "uint8_t spi1_seq",
             "bool request_lock"
           ],
-          "hash": "6fe4aa1f1fb6ed1e",
+          "hash": "3078f868223fb318",
           "kind": "struct"
         }
       },
@@ -3004,6 +3005,14 @@
         "cc3501e_gpio_routes": {
           "declaration": "extern const cc3501e_gpio_route_t cc3501e_gpio_routes[];",
           "hash": "c61aaa4e1b18713e"
+        },
+        "cc3501e_gpio_unrouted": {
+          "declaration": "extern const uint32_t cc3501e_gpio_unrouted[];",
+          "hash": "24ad77e0fb2ff416"
+        },
+        "cc3501e_gpio_unrouted_count": {
+          "declaration": "extern const size_t cc3501e_gpio_unrouted_count;",
+          "hash": "a9e4ea51a64e98e6"
         }
       }
     },
@@ -11392,6 +11401,10 @@
           "hash": "8f0eaa7bd51f8d72",
           "signature": "void alp_power_close(alp_power_t *handle);"
         },
+        "alp_power_configure_retention": {
+          "hash": "2e5f7b7d3bb9e222",
+          "signature": "alp_status_t alp_power_configure_retention(alp_power_t *handle, const alp_power_retain_t *retain);"
+        },
         "alp_power_configure_wake_source": {
           "hash": "d42b698bee57d079",
           "signature": "alp_status_t alp_power_configure_wake_source(alp_power_t *handle, uint32_t wake_bitmap);"
@@ -11411,9 +11424,21 @@
         "alp_power_request_sleep": {
           "hash": "6df7bca8e77d8254",
           "signature": "alp_status_t alp_power_request_sleep(alp_power_t *handle, alp_power_mode_t mode, uint32_t wake_after_ms, alp_power_wake_info_t *info);"
+        },
+        "alp_power_wake_capabilities": {
+          "hash": "1c840b5bd52b487e",
+          "signature": "uint32_t alp_power_wake_capabilities(const alp_power_t *handle);"
         }
       },
       "macros": {
+        "ALP_POWER_WAKE_BROWNOUT": {
+          "hash": "f600ca1a81faae9d",
+          "value": "0x00000080u"
+        },
+        "ALP_POWER_WAKE_COMPARATOR": {
+          "hash": "6064e7fe6545929d",
+          "value": "0x00000040u"
+        },
         "ALP_POWER_WAKE_ETH_LINK": {
           "hash": "410c5a53de215113",
           "value": "0x00000020u"
@@ -11445,14 +11470,15 @@
       },
       "typedefs": {
         "alp_power_mode_t": {
-          "definition": "typedef enum { ALP_POWER_MODE_RUN = 0, ALP_POWER_MODE_SLEEP = 1, ALP_POWER_MODE_DEEP_SLEEP = 2, ALP_POWER_MODE_STANDBY = 3, } alp_power_mode_t;",
+          "definition": "typedef enum { ALP_POWER_MODE_RUN = 0, ALP_POWER_MODE_SLEEP = 1, ALP_POWER_MODE_DEEP_SLEEP = 2, ALP_POWER_MODE_STANDBY = 3, ALP_POWER_MODE_STOP = 4, } alp_power_mode_t;",
           "enumerators": [
             "ALP_POWER_MODE_RUN = 0",
             "ALP_POWER_MODE_SLEEP = 1",
             "ALP_POWER_MODE_DEEP_SLEEP = 2",
-            "ALP_POWER_MODE_STANDBY = 3"
+            "ALP_POWER_MODE_STANDBY = 3",
+            "ALP_POWER_MODE_STOP = 4"
           ],
-          "hash": "b043f8579fd9fb3b",
+          "hash": "2f1b8ecce85f49a9",
           "kind": "enum"
         },
         "alp_power_profile_id_t": {
@@ -11475,6 +11501,26 @@
             "uint32_t io_mv"
           ],
           "hash": "7beccd806cf1c2f1",
+          "kind": "struct"
+        },
+        "alp_power_retain_level_t": {
+          "definition": "typedef enum { ALP_POWER_RETAIN_NONE = 0, ALP_POWER_RETAIN_UTILITY = 1, ALP_POWER_RETAIN_TCM = 2, ALP_POWER_RETAIN_FULL = 3, } alp_power_retain_level_t;",
+          "enumerators": [
+            "ALP_POWER_RETAIN_NONE = 0",
+            "ALP_POWER_RETAIN_UTILITY = 1",
+            "ALP_POWER_RETAIN_TCM = 2",
+            "ALP_POWER_RETAIN_FULL = 3"
+          ],
+          "hash": "5e7702176f7cf2e2",
+          "kind": "enum"
+        },
+        "alp_power_retain_t": {
+          "definition": "typedef struct { alp_power_retain_level_t level; uint32_t retain_kb; } alp_power_retain_t;",
+          "fields": [
+            "alp_power_retain_level_t level",
+            "uint32_t retain_kb"
+          ],
+          "hash": "7a38babd99c71d54",
           "kind": "struct"
         },
         "alp_power_t": {
@@ -11539,8 +11585,8 @@
           "value": "(ALP_CC3501E_MAX_PAYLOAD - 4u)"
         },
         "ALP_CC3501E_PROTOCOL_VERSION": {
-          "hash": "f2147799322560cc",
-          "value": "6"
+          "hash": "e7345c07ec590d35",
+          "value": "7"
         },
         "ALP_CC3501E_SPI1_MAX_XFER": {
           "hash": "23d881a20f05388a",
@@ -12021,15 +12067,15 @@
           "kind": "struct"
         },
         "alp_cc3501e_sock_send_t": {
-          "definition": "typedef struct { uint16_t handle; uint8_t flags; uint8_t reserved; uint16_t data_len; uint16_t reserved2; } alp_cc3501e_sock_send_t;",
+          "definition": "typedef struct { uint16_t handle; uint8_t flags; uint8_t seq; uint16_t data_len; uint16_t reserved2; } alp_cc3501e_sock_send_t;",
           "fields": [
             "uint16_t handle",
             "uint8_t flags",
-            "uint8_t reserved",
+            "uint8_t seq",
             "uint16_t data_len",
             "uint16_t reserved2"
           ],
-          "hash": "b8f14bef05363591",
+          "hash": "46159df017b983bf",
           "kind": "struct"
         },
         "alp_cc3501e_sock_type_t": {

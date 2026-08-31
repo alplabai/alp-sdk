@@ -40,6 +40,37 @@
  * Separate TBD, tracked in the receipt.
  */
 
+/*
+ * SILICON CAVEAT (#1814) -- the LPRTC's accuracy across a reset is errata-bound
+ * on every Ensemble revision, and this shim is the AEN calendar path.
+ *
+ * AERR0012 v2.0 ER001 (Rev A0, the bench silicon; fixed in A1): "A Power On
+ * Reset event (assertion of the POR_N pin or wake from STOP mode) will reset
+ * the RTC (Real Time Counter) clock pre-scaler divider ... the RTC will revert
+ * to clock at the default rate of 32KHz ... the accuracy of the real time count
+ * will have already been lost."  Re-programming the divider afterwards does not
+ * recover the lost time.
+ *
+ * AERR0012 v2.0 ER002 (Rev A1, no fix planned): while POR_N is asserted the RTC
+ * clock source falls back from the 32 kHz LFXO to the ~5%-accurate LFRC --
+ * "it would take a 20 second assertion of POR_N to impose a 1 second loss of
+ * RTC accuracy."
+ *
+ * The counter keeps running; it is the ELAPSED time across a reset that is
+ * untrustworthy.  A caller that needs accuracy must re-set the time from an
+ * external source after any POR.
+ *
+ * Alif's stated ER002 workaround is "use an external real-time clock source",
+ * and the E1M-AEN801 carries one -- an rv3028c7 at 7-bit 0x52, with a working
+ * driver at chips/rv3028c7/rv3028c7.c.  It is deliberately NOT used here: the
+ * part sits on the module's BRD_I2C housekeeping bus, which no application-core
+ * I2C controller drives, and the pinned hal_alif SE services expose no I2C
+ * service to route a transaction through (se_service.h and services_lib_ids.h
+ * carry none; the only I2C token in that tree is an EWIC wake-source bit).
+ * Switching the AEN calendar to it is blocked on that transport, not on a
+ * devicetree line.
+ */
+
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
