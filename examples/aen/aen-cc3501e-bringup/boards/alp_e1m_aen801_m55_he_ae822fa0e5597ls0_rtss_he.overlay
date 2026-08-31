@@ -24,11 +24,20 @@
  * SPI1 IRQ number (upstream Zephyr declares no SPI node, so it is not in
  * the build tree) -- confirm it against the AE822 TRM before relying on
  * the interrupt-driven path on silicon.
+ *
+ * Also enables i2c2 (P5_6 SCL_C / P5_7 SDA_C) + the `alp-i2c0` alias -- the
+ * on-module EEPROM manifest bus alp_hw_info_read() opens as bus_id 0.
+ * Without it the manifest read structurally cannot succeed and the banner
+ * falls back to the raw board target instead of the SoM identity; see #1870.
+ * Same pinctrl (input-enable + bias-pull-down) as
+ * examples/peripheral-io/alp-console's bench-validated overlay -- do NOT
+ * "correct" the pull direction.
  */
 
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/dma/alif_dma_event_router.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
 
 &pinctrl {
 	/*
@@ -70,6 +79,18 @@
 		group2 {
 			pinmux = <PIN_P2_6__GPIO>;
 			input-enable;
+		};
+	};
+
+	/* I2C2 master (EEPROM manifest bus): SCL P5_6 / SDA P5_7 (_C).  Same
+	 * pad config as alp-console's bench-validated overlay -- input-enable
+	 * for ACK-detect, bias-pull-down (the pad DSC value Alif's reference
+	 * uses; the bus is pulled up on the carrier via R95/R96). */
+	pinctrl_i2c2: pinctrl_i2c2 {
+		group0 {
+			pinmux = <PIN_P5_6__I2C2_SCL_C>, <PIN_P5_7__I2C2_SDA_C>;
+			input-enable;
+			bias-pull-down;
 		};
 	};
 };
@@ -182,10 +203,18 @@
 	dma-names = "txdma", "rxdma";
 };
 
+&i2c2 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_STANDARD>;   /* 100 kHz */
+};
+
 / {
 	aliases {
 		/* bus_id 1 in alp_spi_open() -> this controller. */
 		alp-spi1 = &cc3501e_spi;
+		alp-i2c0 = &i2c2;   /* bus 0 for alp_hw_info_read() -> EEPROM manifest */
 
 		/*
 		 * Attention line for CONFIG_ALP_SDK_CC3501E_EVENT_IRQ (#130): the
