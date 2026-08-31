@@ -710,8 +710,19 @@
 	 * the upstream clock encoding this repo uses -- see
 	 * alif-ensemble-clocks-ext.h and the fork-vs-upstream clock-id-encoding
 	 * gotcha); the driver takes its core clock as a plain uint32 from
-	 * `clock-frequency` (falling back to `bus-speed`), not a clock-controller
-	 * phandle.
+	 * `clock-frequency`, not a clock-controller phandle.
+	 *
+	 * clock-frequency = 400 MHz: HWRM Table 16-2 sources HEXSPI0's internal
+	 * core clock (OSPI0_CLK) from "SYST_ACLK or 266M_CLK", selected by
+	 * MISC_CLK_CTRL[SEL_OSPI_CLK]; HWRM 8.3.2.3.7 gives that bit's reset value
+	 * 0x0 as "400 MHz (SYST_ACLK)" (AHRM0012NDA v0.3).  This driver never
+	 * programs SEL_OSPI_CLK, so 400 MHz is correct only for as long as the
+	 * boot stage leaves that mux at its documented silicon reset value --
+	 * see flash_ospi_alif.c:30-80 for what that leaves unaddressed.  Without
+	 * this property the driver used to fall back to `bus-speed`, which wrote
+	 * OSPI_BAUDR = 1 and left OSPI_BAUDR[SCKDV] all zero -- OSPI_SCLK
+	 * disabled, a dead bus, not the overclock an earlier revision of this
+	 * fix claimed (HWRM S16.1.5.3.5; see flash_ospi_alif.c:30-80).
 	 *
 	 * HW-BLOCKED, BUILD-ONLY this batch: no octal-NOR/HyperBus part is
 	 * populated on the E1M-AEN801, so this proves the node BINDS + the
@@ -725,6 +736,7 @@
 		interrupts = <96 3>;
 		aes-reg = <0x83001000 0x100>;
 		bus-speed = <100000000>;
+		clock-frequency = <400000000>;
 		cs-pin = <0>;
 		ddr-drive-edge = <1>;
 		rx-ds-delay = <11>;
