@@ -527,10 +527,21 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * longer job than re-arming the next phase.  Folding it into this constant was
  * tried and killed the link outright (PING -> -5). */
 /* 250 us, not 40.  This is the blind fallback gap cc3501e_reply_gate() uses
- * when READY is unusable -- and on E1M-AEN801 board rev 2626-R2 it always is:
- * READY is CC3501E GPIO_17 -> Alif P2_6, and P2_6 is SPI1_SCLK_A, so enabling
- * its input buffer degrades the very link it is meant to gate.  g_ready_line_
- * proven therefore stays false and every phase falls back to this constant.
+ * when READY is unusable -- and on the measured unit it always is: READY is
+ * CC3501E GPIO_17 -> Alif P2_6, and P2_6 is SPI1_SCLK_A, so enabling its input
+ * buffer degrades the very link it is meant to gate.  g_ready_line_proven
+ * therefore stays false and every phase falls back to this constant.
+ *
+ * REVISION SCOPE.  This comment used to say "on E1M-AEN801 board rev 2626-R2
+ * it always is", while the bench line five paragraphs down names serial
+ * 2617-0001 -- which is board rev r1, not R2.  The measurement was never taken
+ * on an R2 module; no R2 module exists on this bench.  What is NOT revision-
+ * specific is the conflict itself: P2_6 carrying SPI1_SCLK_A is an Alif pad
+ * function, true of the silicon regardless of how any module is built.  So the
+ * gate falls back to this constant on ANY board that routes READY to P2_6 and
+ * drives SPI1 -- which covers r1 as measured, and R2 unless its netlist moves
+ * READY, which has not been checked.  Read the module's own revision before
+ * assuming either way.
  *
  * At 40 us the request-PAYLOAD phase intermittently out-ran the slave's
  * re-arm: the header transfer declared N bytes, the payload transfer landed
@@ -539,8 +550,8 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * to the caller as `send failed (-1)` on a transfer the peer had in fact
  * received in full (alp-sdk#1746, cc3501e-bridge-firmware#90).
  *
- * Bench-measured on E1M-AEN801 serial 2617-0001, protocol 7, bare accept()
- * listener, 10 consecutive `alp companion sock tcp-get`:
+ * Bench-measured on E1M-AEN801 serial 2617-0001 (board rev r1), protocol 7,
+ * bare accept() listener, 10 consecutive `alp companion sock tcp-get`:
  *     40 us  -> 6/10 end-to-end, 4/10 `send failed (-1)`
  *    250 us  -> 10/10 end-to-end, 0 failures
  *
