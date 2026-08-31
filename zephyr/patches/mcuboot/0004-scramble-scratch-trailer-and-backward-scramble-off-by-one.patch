@@ -33,10 +33,15 @@ one:
     scratch area: nothing outside the trailer has been written to
     scratch at this point in STATE_0, so scrambling the rest would cost
     flash endurance (an MRAM write-cycle budget) for no benefit. On a
-    device that DOES require an explicit erase this still degrades to
-    exactly the boot_erase_region() call it replaces (see
-    boot_scramble_region()'s own device_requires_erase() branch), so
-    this is additive for that class of device, not a behaviour change.
+    device that DOES require an explicit erase, boot_scramble_region()'s
+    own device_requires_erase() branch routes this to boot_erase_region()
+    scoped to the trailer's own offset/size and backwards -- narrower and
+    a different direction than the plain forward, whole-scratch-area
+    erase this replaces, not identical to it. That narrowing is safe: the
+    unconditional first scratch erase a few lines earlier in this same
+    STATE_0 block already covers everything below the trailer, so this
+    change does not leave any byte of the scratch area unerased on that
+    class of device either.
 
     The FIRST scratch erase a few lines earlier in the same STATE_0
     block ("erasing scratch area", unconditional every sector) is
@@ -92,7 +97,7 @@ diff --git a/boot/bootutil/src/bootutil_area.c b/boot/bootutil/src/bootutil_area
 index 3bd6bb0..34fc4b8 100644
 --- a/boot/bootutil/src/bootutil_area.c
 +++ b/boot/bootutil/src/bootutil_area.c
-@@ -326,26 +326,57 @@ boot_scramble_region(const struct flash_area *fa, uint32_t off, uint32_t size, b
+@@ -326,26 +326,63 @@ boot_scramble_region(const struct flash_area *fa, uint32_t off, uint32_t size, b
          BOOT_LOG_DBG("boot_scramble_region: start offset %" PRIu32 ", "
                       "end offset %" PRIu32, off, end_offset);
  
@@ -122,7 +127,13 @@ index 3bd6bb0..34fc4b8 100644
 +             * mirroring boot_erase_region()'s own post-op break for this
 +             * same backwards boundary a few lines above -- that function
 +             * never had this bug because its `while (true)` always runs
-+             * the body before testing for the boundary.
++             * the body before testing for the boundary. The comparison
++             * stays `>=`, not `==`: off and end_offset are both write-block
++             * aligned for every caller today so the two are equivalent on
++             * reachable shapes, but `>=` cannot walk below the requested
++             * range if a future caller ever passes an off/size whose sum
++             * is not write_block-aligned, where `==` would skip past
++             * end_offset and keep decrementing.
 +             */
 +            while (true) {
 +                /* Write over the area to scramble data that is there */
@@ -140,8 +151,8 @@ index 3bd6bb0..34fc4b8 100644
 -            if (backwards) {
 -                if (end_offset >= off) {
 -                    /* Reached the first offset in range and already scrambled it */
-+                if (off == end_offset) {
-+                    /* Reached the first offset in range and just scrambled it */
++                if (end_offset >= off) {
++                    /* Reached the first offset in range and already scrambled it */
                      break;
                  }
  
@@ -187,7 +198,7 @@ index 59b64ad..09f34f6 100644
          BOOT_LOG_DBG("erasing scratch area");
          rc = boot_erase_region(fap_scratch, 0, flash_area_get_size(fap_scratch), false);
          assert(rc == 0);
-@@ -769,9 +781,33 @@ boot_swap_sectors(int idx, uint32_t sz, struct boot_loader_state *state,
+@@ -769,9 +781,38 @@ boot_swap_sectors(int idx, uint32_t sz, struct boot_loader_state *state,
                  rc = swap_status_init(state, fap_primary_slot, bs);
                  assert(rc == 0);
  
@@ -213,12 +224,17 @@ index 59b64ad..09f34f6 100644
 +                 * than the whole scratch area: nothing outside the
 +                 * trailer has been written to scratch at this point, so
 +                 * scrambling the rest would cost flash endurance for no
-+                 * benefit. On a device that does require an explicit
-+                 * erase this still degrades to exactly the
-+                 * boot_erase_region() call it replaces (see
-+                 * boot_scramble_region()'s own device_requires_erase()
-+                 * branch), so this is a pure widening, not a behaviour
-+                 * change, for that class of device.
++                 * benefit. On a device that DOES require an explicit
++                 * erase, boot_scramble_region()'s own
++                 * device_requires_erase() branch routes this to
++                 * boot_erase_region() scoped to the trailer's own
++                 * offset/size and backwards -- narrower, and a
++                 * different direction, than the plain forward,
++                 * whole-scratch-area erase this replaces, not
++                 * identical to it. That narrowing is safe: the
++                 * unconditional first scratch erase a few lines above
++                 * ("erasing scratch area") already covers everything
++                 * below the trailer on that class of device too.
 +                 */
 +                rc = swap_scramble_trailer_sectors(state, fap_scratch);
                  assert(rc == 0);

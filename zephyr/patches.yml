@@ -16,7 +16,7 @@ patches:
       jump -> reboot loop. Derive the slot base from the alif,mram controller reg.
       Bench-proven on E1M-AEN801 (E8): SES->MCUboot->slot0->app RESULT PASS.
   - path: mcuboot/0002-bootutil_misc-reject-erased-swap_size-trailer.patch
-    sha256sum: 680fe768f8bd8fc401b3962aae7c483c64cce1ae5efc76f63580dbfc3c41ef6f
+    sha256sum: f4fac0ff7b843bcf9708fdec5da858464885f93de88ee3e28d832304d06927b4
     module: mcuboot
     author: Alp Lab AB
     email: contact@alplab.ai
@@ -64,35 +64,25 @@ patches:
       0003-sim-... patch): pre-fix, the exact scenario this closes
       SIGSEGVs inside boot_read_image_header()'s wrong-slot substitution;
       post-fix, 26/26 simulator cases pass, including the new one, across
-      every device/alignment/erased_val {0x00, 0xff} combination. NOT
-      bench-verified on AEN silicon -- the AEN801 board DT carries no
+      every device/alignment/erased_val {0x00, 0xff} combination -- but
+      only the device_requires_erase() == true axis: this measurement
+      predates 0005's build.rs change, so MCUBOOT_SUPPORT_DEV_WITHOUT_ERASE
+      was not yet defined anywhere under sim/ and device_requires_erase(fa)
+      expanded to a literal `true` in every one of these 26 runs, meaning
+      neither boot_erase_region()'s "device without erase" branch nor
+      boot_scramble_region()'s whole-overwrite branch was exercised by
+      this count; see 0005's own entry for the coverage that closes that
+      gap. NOT bench-verified on AEN silicon -- the AEN801 board DT carries no
       scratch/slot1 partition as of #1100/#1445 (OTA deferred), so the
       scratch-swap path this patches is not currently reachable on any
       alp-sdk board; this closes the mechanism ahead of a secondary slot
       being reintroduced, not the still-open second #1066 finding (a
       clean, valid PERM request that produced no swap at all, never
-      root-caused). Upstream to mcu-tools/mcuboot then drop.
-
-      CORRECTION (2026-08-31): an earlier version of this comment also
-      claimed the erased-value collision explained #1066's OTHER,
-      self-perpetuating re-swap finding -- "the scratch-trailer erase
-      inside boot_swap_sectors() never runs, so a swapped board's
-      scratch magic is never cleared and it resumes the same no-op swap
-      forever". That causal chain cannot happen organically:
-      swap_status_init() (swap_misc.c) writes swap_size before magic
-      within the same call, so a GOOD scratch magic implies a
-      genuinely-written, nonzero swap_size -- the state the claim
-      requires (GOOD magic AND an erased swap_size) never arises from an
-      interrupted swap, which is exactly why the companion 0003
-      regression test below has to force-write the field rather than
-      reproduce the collision by interruption alone. This patch's own
-      contribution -- the find_swap_count() wrong-slot-header crash,
-      reproduced on the simulator and closed at the shared choke point
-      above -- was never in question and stays exactly as fixed. The
-      real re-swap mechanism is unrelated to swap_size: a documented
-      no-op erase call on a device that does not require an explicit
-      erase before rewrite. See
+      root-caused). The find_last_sector_idx() degeneration above is
+      NOT the mechanism behind #1066's self-perpetuating re-swap loop --
+      that trace is unrelated to swap_size and is fixed separately; see
       0004-scramble-scratch-trailer-and-backward-scramble-off-by-one.patch.
+      Upstream to mcu-tools/mcuboot then drop.
   - path: mcuboot/0003-sim-swap-size-erased-collision-regression-test.patch
     sha256sum: 63db24252651d1aacd9e70fed3ee376225073ed655f059d5608cf052507779cc
     module: mcuboot
@@ -121,7 +111,7 @@ patches:
       swap_size_erased_collision`. Upstream to mcu-tools/mcuboot then
       drop alongside 0002.
   - path: mcuboot/0004-scramble-scratch-trailer-and-backward-scramble-off-by-one.patch
-    sha256sum: 5b7ef33ee79bf50eafd6a0e9e9dc835507e8af5e80082d21a8e851a0f90637fe
+    sha256sum: e00cc36858f2aa6c3b5adffe4dbc84113d7e8572bc448676a03c230989e39942
     module: mcuboot
     author: Alp Lab AB
     email: contact@alplab.ai
@@ -130,7 +120,7 @@ patches:
     comments: |
       #1066's real self-perpetuating re-swap mechanism -- distinct from,
       and NOT explained by, 0002's erased-swap_size crash (see 0002's
-      own CORRECTION above). Two independent bugs, both in bootutil:
+      own entry above). Two independent bugs, both in bootutil:
 
       (i) swap_scratch.c's boot_swap_sectors() writes a full temporary
       trailer to the scratch area (magic included, via
@@ -163,8 +153,14 @@ patches:
       that dropped block is the trailer's first status entry -- exactly
       what could let a stale non-0x00 status byte survive a scramble
       meant to remove it. Fixed by giving the backwards case its own
-      loop that writes first and checks the boundary after, mirroring
-      boot_erase_region()'s own post-op break for the same boundary.
+      loop that writes first and checks the boundary (`end_offset >=
+      off`, the same comparison the pristine shared loop already used,
+      not a narrower `==`) after, mirroring boot_erase_region()'s own
+      post-op break for the same boundary. `>=` and `==` agree on every
+      shape a real caller passes today -- off/size always sums to the
+      flash area's own size, write-block-aligned -- but `>=` cannot walk
+      below the requested range if a future caller ever breaks that
+      alignment, where `==` would keep decrementing past end_offset.
 
       Not bench-verified on AEN silicon, and cannot be from this tree
       today: #1100 and #1445 removed the AEN family's scratch/slot1
@@ -178,13 +174,20 @@ patches:
       here.
 
       Regression-verified on the mcuboot host simulator (companion
-      0005-sim-... patch): pre-fix, the new regression test fails on
-      the very first device/align/erased_val combination it tries;
-      post-fix, 27/27 simulator cases pass (26 pre-existing plus this
-      one), across every device/alignment/erased_val {0x00, 0xff}
+      0005-sim-... patch, which covers BOTH fixes, not just (i)):
+      scratch_trailer_cleared_after_swap runs a real end-to-end swap and
+      covers fix (i); scramble_region_backwards_boundary calls
+      boot_scramble_region() directly and covers fix (ii) -- needed
+      because every real caller's off/size shape (the same shape (i)'s
+      own test exercises) cannot tell "wrote the boundary block" apart
+      from "silently dropped it": with fix (i) applied but fix (ii)'s
+      bootutil_area.c hunk alone reverted, 27 passed and only the new
+      direct test failed. With both fixes applied: `cargo test --release
+      --test core` -- 28 passed, 0 failed (26 pre-existing plus these
+      two), across every device/alignment/erased_val {0x00, 0xff}
       combination. Upstream to mcu-tools/mcuboot then drop.
   - path: mcuboot/0005-sim-scratch-trailer-no-erase-device-regression-test.patch
-    sha256sum: 20ca594680fac4130d74b236ee63424c8daa91cf4b78f5566466b08249a0e003
+    sha256sum: 28b177d39c560fa18016409e4b758ad8265b4170342aae401291c50234c476ad
     module: mcuboot
     author: Alp Lab AB
     email: contact@alplab.ai
@@ -192,14 +195,24 @@ patches:
     upstreamable: true
     comments: |
       Companion to
-      0004-scramble-scratch-trailer-and-backward-scramble-off-by-one.patch:
-      adds scratch_trailer_cleared_after_swap to the mcuboot host
-      simulator, which runs a real, uninterrupted, permanent upgrade to
-      completion on a flash device that does not require an explicit
-      erase before rewrite, and asserts the scratch area's temporary
-      trailer never reads back with a GOOD magic afterwards.
+      0004-scramble-scratch-trailer-and-backward-scramble-off-by-one.patch,
+      covering BOTH of its independent fixes, not just (i):
+      scratch_trailer_cleared_after_swap runs a real, uninterrupted,
+      permanent upgrade to completion on a flash device that does not
+      require an explicit erase before rewrite, and asserts the scratch
+      area's temporary trailer never reads back with a GOOD magic
+      afterwards (fix (i)). scramble_region_backwards_boundary calls
+      boot_scramble_region()'s backwards branch directly over an
+      arbitrary sub-range and asserts the write-block boundary at the
+      low end of that range was written and nothing below it was
+      touched (fix (ii)) -- needed because every real bootutil caller's
+      off/size shape (the same shape the first test exercises end to
+      end) cannot distinguish "wrote the boundary block" from "silently
+      dropped it": reverting just fix (ii)'s bootutil_area.c hunk left
+      scratch_trailer_cleared_after_swap, and every other pre-existing
+      test, still passing -- only the new direct test failed.
 
-      Needed two new, additive pieces of sim plumbing, both defaulting
+      Needed three new, additive pieces of sim plumbing, all defaulting
       to today's behaviour for every existing test: (1)
       device_requires_erase(fa) (bootutil_area.h) is gated on
       MCUBOOT_SUPPORT_DEV_WITHOUT_ERASE/_WITH_ERASE, and the sim's own
@@ -220,12 +233,17 @@ patches:
       all 26 combinations with make_image()). Added
       ImagesBuilder::make_image_undersized(), a small self-contained
       maker using ImageSize::Given(4096) instead, touching no other
-      maker or test.
+      maker or test. (3) boot_scramble_region() itself has no
+      Rust-callable surface -- added invoke_scramble_region_backwards_
+      probe() (csupport/run.c), exposed as
+      c::scramble_region_backwards_probe(), following the existing
+      invoke_boot_go()/boot_go() extern-and-wrapper pattern.
 
       Not wired into alp-sdk's own CI, for the same reason 0003 is not.
       Reproduce manually: `cd bootloader/mcuboot/sim && cargo test
-      --release --test core -- scratch_trailer_cleared_after_swap`.
-      Upstream to mcu-tools/mcuboot then drop alongside 0004.
+      --release --test core -- scratch_trailer_cleared_after_swap` and
+      `... --test core -- scramble_region_backwards_boundary`. Upstream
+      to mcu-tools/mcuboot then drop alongside 0004.
   - path: zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch
     sha256sum: dd363a007acddc263e9168f4c75ac2b4bafd5a8ee438ce655b5f63a0398f2a76
     module: zephyr
