@@ -27,14 +27,38 @@
  * which exercises alif_hal_ospi_initialize() directly from application code
  * as an independent compile+link+reachability proof.
  *
- * core_clk: the binding's `clock-frequency` property has no documented
- * default and this batch does not set it on the ospi0 node (per the alp-sdk
- * pending-hw-configs policy: the true OSPI core-clock source is a
- * silicon-determined HW fact that must come from the Alif Ensemble E8 TRM,
- * not be invented).  Falls back to the node's `bus-speed` (a real,
- * DFP/fork-sourced value, 100 MHz) as a clearly-marked placeholder -- wrong
- * only in that it may not match the true core-clock divider input; it does
- * not change what gets programmed into the controller from the other fields.
+ * core_clk: PREVIOUSLY a placeholder that fell back to the node's `bus-speed`
+ * (100 MHz) when `clock-frequency` was unset -- WRONG, and hazardous: this
+ * value feeds alif_hal_ospi_initialize()'s SCLK-divider derivation
+ * (divider ~= core_clk / bus_speed), so feeding it core_clk == bus_speed
+ * yields the minimum divider, i.e. SCLK programmed at or near the full core
+ * clock. If the true core clock is higher than bus-speed, that is a
+ * controller programmed to overclock whatever external device is on the
+ * bus -- silently, on a fallback that looked like a degraded feature but
+ * was not one. Fixed here: the true OSPI core-clock source is NOT an
+ * unavailable HW fact -- HWRM Table 16-2 sources HEXSPI0's internal core
+ * clock (OSPI0_CLK) from "SYST_ACLK or 266M_CLK", selected by
+ * MISC_CLK_CTRL[SEL_OSPI_CLK]; HWRM 8.3.2.3.7 gives that bit's reset value
+ * 0x0 as "400 MHz (SYST_ACLK)" (AHRM0012NDA v0.3). The ospi0 node now
+ * declares `clock-frequency = <400000000>` (see
+ * zephyr/dts/alif/ensemble_e8_peripherals.dtsi) and the fallback to
+ * `bus-speed` below is REMOVED -- a board/SoM that omits `clock-frequency`
+ * on its ospi0 node now fails to build instead of silently programming a
+ * wrong divider; a wrong core_clk is a device-overclock, not a degraded
+ * feature, so a build error is the correct failure mode.
+ *
+ * WHAT REMAINS UNADDRESSED: this driver still does not program
+ * MISC_CLK_CTRL[SEL_OSPI_CLK] itself, so 400 MHz is correct only for as
+ * long as whatever boot stage runs before it (ROM/SE) leaves that mux at
+ * its documented silicon reset value. HWRM 8.3.2.3.7 also documents a 0x1
+ * selection (266 MHz from 266M_CLK/PLL, additionally gated on
+ * CLK_ENA[CLK266M]) -- if a future boot stage or SoM selects that path,
+ * this driver's 400 MHz would again be wrong. Making the value
+ * unconditionally correct means the driver programming SEL_OSPI_CLK itself
+ * and deriving core_clk from the selection it just made -- a distinct
+ * change that touches a shared system clock-mux register (MISC_CLK_CTRL is
+ * not OSPI-instance-scoped) and needs bench confirmation of its placement
+ * relative to the OSPI0 clock-enable sequence above; not done here.
  * ======================================================================
  *
  * ====== OSPI0 clock-enable (CLKCTL_PER_SLV->OSPI_CTRL) -- FIXES A
@@ -427,7 +451,7 @@ static int ospi_alif_init(const struct device *dev)
 		.base_regs       = (uint32_t *)DT_INST_REG_ADDR(inst),                                   \
 		.aes_regs        = (uint32_t *)DT_INST_PROP_BY_IDX(inst, aes_reg, 0),                    \
 		.bus_speed       = DT_INST_PROP(inst, bus_speed),                                        \
-		.core_clk        = DT_INST_PROP_OR(inst, clock_frequency, DT_INST_PROP(inst, bus_speed)),\
+		.core_clk        = DT_INST_PROP(inst, clock_frequency),                                  \
 		.cs_pin          = DT_INST_PROP(inst, cs_pin),                                           \
 		.rx_ds_delay     = DT_INST_PROP(inst, rx_ds_delay),                                       \
 		.ddr_drive_edge  = DT_INST_PROP(inst, ddr_drive_edge),                                    \
