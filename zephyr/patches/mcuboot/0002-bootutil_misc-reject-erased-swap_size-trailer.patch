@@ -22,11 +22,12 @@ copy_size == 0 degenerates swap_scratch.c's algorithm silently:
 
   * find_last_sector_idx(state, 0) returns -1 immediately (its break
     condition is trivially satisfied at 0 >= 0 && 0 >= 0 && 0 == 0), so
-    swap_run()'s loop -- the only call site of boot_swap_sectors(), where
-    the scratch-trailer erase lives -- never runs.  A swapped board's
-    scratch magic is then never cleared, and boot_status_source() keeps
-    selecting BOOT_STATUS_SOURCE_SCRATCH on every following boot: the
-    device resumes the same no-op swap forever.
+    swap_run()'s loop -- the only call site of boot_swap_sectors() --
+    never executes: a swap that should resume instead silently does
+    nothing for this image.  (This is NOT the mechanism behind #1066's
+    self-perpetuating re-swap loop -- that trace is unrelated to
+    swap_size and is fixed separately; see
+    0004-scramble-scratch-trailer-and-backward-scramble-off-by-one.patch.)
 
   * find_swap_count(state, 0) (called from boot_read_image_header(),
     earlier in the boot flow) also returns 0 for the same reason, which
