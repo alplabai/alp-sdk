@@ -84,12 +84,14 @@ ZTEST(alp_chips, test_tas2563_calls_reject_uninitialised)
  *
  * #1846: TAS2563_I2C_ADDR_BROADCAST (0x48) moved from valid[] to
  * invalid[] -- it is a real datasheet address but not a single,
- * individually-addressable chip, and this context reads a register
- * (REVID) as part of init.  Accepting it let init's probe -- and
- * every later read_revision()/set_mode() call -- silently land on
- * whatever else is strapped to 0x48 on the bus (a real EVK
- * pre-respin had an INA236 there); see test_tas2563_init_rejects_
- * broadcast_address below for the dedicated regression. */
+ * individually-addressable chip, and init's own probe both reads AND
+ * writes through ctx->addr (select_page() writes the page register
+ * before the REVID read).  Accepting it let init -- and every later
+ * read_revision()/set_mode() call, all gated only on ctx->initialised,
+ * never re-checking the address -- silently land on whatever else is
+ * strapped to 0x48 on the bus (a real EVK pre-respin had an INA236
+ * there); see test_tas2563_init_rejects_broadcast_address below for
+ * the dedicated regression. */
 ZTEST(alp_chips, test_tas2563_init_validates_address_strap_range)
 {
 	tas2563_t ctx;
@@ -153,10 +155,10 @@ ZTEST(alp_chips, test_tas2563_init_rejects_broadcast_address)
 
 	zassert_equal(tas2563_init(&ctx, bus, TAS2563_I2C_ADDR_BROADCAST, NULL),
 	              ALP_ERR_INVAL,
-	              "init must refuse the write-only broadcast address (#1846): every op "
-	              "this driver exposes but set_hw_enable() reads a register through "
-	              "ctx->addr, which a device sharing 0x48 (e.g. an INA236) would answer "
-	              "instead of the amp");
+	              "init must refuse the write-only broadcast address (#1846): 0x48 does "
+	              "not pin down one physical chip, and every op this driver exposes but "
+	              "set_hw_enable() both reads and writes through ctx->addr, which a "
+	              "device sharing 0x48 (e.g. an INA236) would answer instead of the amp");
 
 	alp_i2c_close(bus);
 }

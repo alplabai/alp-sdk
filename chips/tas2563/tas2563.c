@@ -36,18 +36,28 @@ static alp_status_t select_page(tas2563_t *ctx, uint8_t page)
 }
 
 /* Table 7-3: only the four AD0/SPICLK strap options identify a real,
- * individually-addressable chip.  TAS2563_I2C_ADDR_BROADCAST (0x48)
- * is deliberately excluded here -- every public entry point below
- * that touches the bus (init's REVID probe, read_revision,
- * set_mode's read-modify-write) performs a register READ through
- * ctx->addr, and a read issued to a write-only global-call address
- * is not a single-chip probe: on a bus where an unrelated device
- * happens to be strapped to 0x48 (e.g. an INA236 current monitor,
- * #1846) it silently reads/writes that device's registers instead.
- * A future group-write helper that only ever WRITEs (e.g. a
- * synchronized MODE_CTRL broadcast across a stereo pair) is free to
- * accept TAS2563_I2C_ADDR_BROADCAST on its own -- this per-instance,
- * read-capable context must not. */
+ * individually-addressable chip.  TAS2563_I2C_ADDR_BROADCAST (0x48) is
+ * deliberately excluded here -- not because these ops only read (they
+ * don't: select_page(), called by every function below, WRITEs the page
+ * register first, and set_mode() ends on a write too), but because 0x48
+ * does not pin down exactly one physical chip the way a strap address
+ * does.  Whatever answers a transaction at 0x48 -- every TAS2563 on the
+ * bus, an unrelated device strapped there by coincidence (a real EVK
+ * pre-respin had an INA236 there, #1846), or nothing -- is undefined
+ * from this per-instance context's point of view, for a write as much
+ * as for a read.
+ *
+ * This is the ONLY place addr is validated: tas2563_init() calls it
+ * before ctx->addr is ever assigned (below), and every other
+ * bus-touching function (read_revision, set_mode) gates on
+ * ctx->initialised rather than re-checking the address -- that flag is
+ * set true only after this check has already passed, so excluding 0x48
+ * here is sufficient for the whole life of the context.
+ *
+ * A future group-write helper that targets every chip on the bus at
+ * once BY DESIGN (e.g. a synchronized MODE_CTRL broadcast across a
+ * stereo pair) is free to accept TAS2563_I2C_ADDR_BROADCAST on its own
+ * terms -- this per-instance, single-chip context must not. */
 static bool addr_is_valid(uint8_t addr)
 {
 	return addr >= TAS2563_I2C_ADDR_GND_DIRECT && addr <= TAS2563_I2C_ADDR_VDD_DIRECT;

@@ -64,12 +64,15 @@ extern "C" {
 #define TAS2563_I2C_ADDR_VDD_DIRECT 0x4Fu
 /** Global broadcast/general-call address (write-only per the
  *  datasheet).  Documented for reference only -- tas2563_init()
- *  rejects it with ALP_ERR_INVAL.  Every op this driver exposes
- *  besides set_hw_enable() reads a register through ctx->addr, and a
- *  read to the broadcast address is not a valid single-chip probe;
- *  worse, some boards strap an unrelated device (e.g. an INA236) to
- *  this same address, so a broadcast "probe" can silently hit that
- *  device's registers instead (#1846). */
+ *  rejects it with ALP_ERR_INVAL.  0x48 does not pin down exactly one
+ *  physical chip the way a strap address does, and every bus-touching
+ *  op this driver exposes (init, read_revision, set_mode) both reads
+ *  AND writes through ctx->addr -- select_page() writes the page
+ *  register first on every one of them.  Whatever answers at 0x48
+ *  (every TAS2563 on the bus, an unrelated device strapped there by
+ *  coincidence -- e.g. an INA236 on a real EVK pre-respin, #1846 --
+ *  or nothing) is undefined for a per-instance context, regardless of
+ *  direction. */
 #define TAS2563_I2C_ADDR_BROADCAST 0x48u
 
 /** Operating-mode enum mapped onto the chip's MODE_CTRL register. */
@@ -97,10 +100,13 @@ typedef struct {
  *                       chip (TAS2563_I2C_ADDR_GND_DIRECT ..
  *                       TAS2563_I2C_ADDR_VDD_DIRECT).
  *                       TAS2563_I2C_ADDR_BROADCAST is rejected --
- *                       this context reads a register as part of
- *                       init and on every subsequent call, and a
- *                       read has no valid meaning on the write-only
- *                       broadcast address (#1846).
+ *                       validated here, once, before ctx->addr is
+ *                       ever assigned; every later call trusts
+ *                       ctx->initialised instead of re-checking the
+ *                       address.  0x48 does not identify a single
+ *                       chip, and this context both reads and writes
+ *                       through ctx->addr, so neither direction is
+ *                       safe there (#1846).
  * @param[in]  sd_n      Open GPIO handle bound to AMP.ENABLE.  May
  *                       be NULL if the caller drives SD_N
  *                       elsewhere (or if the pin is tied permanently
