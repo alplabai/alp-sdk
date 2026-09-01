@@ -32,7 +32,7 @@ ledger is the one to trust.
 
 ## Summary
 
-86 silicon/HIL-gated ledger rows parsed across 7 sections.  A row can carry more than one glyph
+105 silicon/HIL-gated ledger rows parsed across 9 sections.  A row can carry more than one glyph
 (e.g. half a feature done, half pending), so glyph counts can
 exceed the row count.  This total EXCLUDES two kinds of row that
 would otherwise inflate it: the rows under "CI-only / tooling rows (no HIL gate)"
@@ -43,9 +43,9 @@ duplicated from the v0.4 section already counted above).
 
 | Glyph | Meaning | Count |
 |---|---|---|
-| `⏳` | untested | 39 |
-| `🟡` | partial | 37 |
-| `✅` | verified | 11 |
+| `⏳` | untested | 35 |
+| `🟡` | partial | 46 |
+| `✅` | verified | 25 |
 | `❌` | failing | 1 |
 | `n/a` | n/a | 0 |
 
@@ -120,9 +120,39 @@ You should **NOT** ship production firmware against a family with no
 this ledger, **i.MX 93** and **V2M/DEEPX** carry no `✅ verified` row --
 their register addresses, timing values, and init sequences have not
 been silicon-validated.  (**V2N** and **AEN801/E8** do carry `✅`
-rows -- see the v0.6.0 and CI-only sections plus the AEN rows above --
+rows -- see the v0.6.0 and v0.8.0 sections plus the AEN rows above --
 but a family having *some* `✅` rows does not mean every row for it is
 `✅`; check the specific row you depend on.)
+
+## Ledger scope (issue #1893)
+
+This ledger previously stopped at a "v0.9.0 candidate" section while the
+SDK had already tagged five releases past it.  This pass adds the two
+releases whose bench evidence was missing outright -- **v0.7.0** and
+**v0.8.0**, the latter carrying the E1M-AEN801 first-full-bench-bring-up
+result that had lived only in `CHANGELOG.md` -- retitles the
+"v0.9.0 candidate" section to **v0.9.0** (it tagged 2026-07-06, it is not
+a candidate any more), and reconciles the v0.1.0 AEN I²C/SPI/UART/GPIO
+rows against the v0.8.0 evidence (see those rows above).
+
+It does **not** attempt a full per-release re-audit of **v0.10.0 through
+v0.16.0**, plus the in-flight **v0.17.0** (`metadata/sdk_version.yaml`
+reports `version: 0.16.0`, `status: released`; `CHANGELOG.md`'s
+`[Unreleased] - v0.17.0 candidate` section is the next one out) -- nine
+releases, each with a `CHANGELOG.md` section running from a few hundred
+to several thousand lines, the large majority of it code/build/doc
+changes with no new HIL claim to ledger.  Where a genuinely new silicon
+result landed inside that span for a row that already exists above (for
+example the peer-core boot row's 2026-08-01 HE-master→HP-peer date, or
+the CC3501E request-identity row's `v0.17` gate), that row's own Evidence
+column already carries it -- new evidence for an EXISTING row is folded
+in in place, not by adding a version section per release.  What is
+**not** done here: walking every `CHANGELOG.md` entry in v0.9.0-v0.16.0
+checking whether it silently extends or invalidates a row that is not
+already flagged.  Treat any row whose Evidence predates a version in
+that range as current only as far as its own Evidence line says --
+cross-check `CHANGELOG.md` for that feature before relying on it to gate
+a release.  Tracked as remaining scope on issue #1893.
 
 ---
 
@@ -130,10 +160,10 @@ but a family having *some* `✅` rows does not mean every row for it is
 
 | Feature | Module / file | Status | What "verified" means | Evidence | Gates |
 |---|---|---|---|---|---|
-| AEN-Zephyr I²C real backend | `src/backends/i2c/zephyr_drv.c` | ⏳ untested | LSM6DSO WHOAMI = 0x6C read back on real E1M EVK via a manual bench run | manual bench run per `docs/ci/HW-IN-LOOP.md`, first captured result | v0.1 |
-| AEN-Zephyr SPI real backend | `src/backends/spi/zephyr_drv.c` | ⏳ untested | SPI flash JEDEC-ID (0x9F READID) returns expected bytes on real EVK | manual bench run per `docs/ci/HW-IN-LOOP.md` | v0.1 |
-| AEN-Zephyr UART real backend | `src/backends/uart/zephyr_drv.c` | ⏳ untested | Loopback 1 KiB at 115200 8N1, zero byte loss | manual bench run per `docs/ci/HW-IN-LOOP.md` | v0.1 |
-| AEN-Zephyr GPIO real backend | `src/backends/gpio/zephyr_drv.c` | ⏳ untested | Button press observed via IRQ; LED toggle visible on EVK | manual bench run per `docs/ci/HW-IN-LOOP.md` | v0.1 |
+| AEN-Zephyr I²C real backend | `src/backends/i2c/zephyr_drv.c` | 🟡 underlying mechanism bench-proven, portable-backend dispatch untested | LSM6DSO WHOAMI = 0x6C read back on real E1M EVK via a manual bench run | The `i2c2` controller itself is bench-proven on real E1M-AEN801 (E8) silicon — `examples/aen/aen-i2c2-eeprom-regcheck` drives the raw Zephyr `i2c_transfer()` API directly (not `alp_i2c_open()`) and enumerates a 24C128 EEPROM at `0x50` plus 12 devices total (`CHANGELOG.md` [v0.8.0] "Peripheral matrix — 15/17 aen-\* apps PASS", 2026-06-24; see the v0.8.0 section below). This is a controller-enumeration result on a different device than the LSM6DSO WHOAMI originally scoped, and the ALP SDK's own `zephyr_drv.c` I²C backend has not itself been separately exercised on real hardware | v0.1 |
+| AEN-Zephyr SPI real backend | `src/backends/spi/zephyr_drv.c` | 🟡 underlying mechanism bench-proven, portable-backend dispatch untested | SPI flash JEDEC-ID (0x9F READID) returns expected bytes on real EVK | The `spi0` controller itself is bench-proven on real E1M-AEN801 (E8) silicon — `examples/aen/aen-spi-regcheck` drives the raw Zephyr `spi_transceive()` API directly (not `alp_spi_open()`) and completes a DWC_ssi loopback (`CHANGELOG.md` [v0.8.0] "Peripheral matrix", 2026-06-24; see the v0.8.0 section below). No JEDEC-ID read against real flash was part of this pass, and the ALP SDK's own `zephyr_drv.c` SPI backend has not itself been separately exercised on real hardware | v0.1 |
+| AEN-Zephyr UART real backend | `src/backends/uart/zephyr_drv.c` | 🟡 underlying mechanism bench-proven, portable-backend dispatch untested | Loopback 1 KiB at 115200 8N1, zero byte loss | The `uart3` controller itself is bench-proven on real E1M-AEN801 (E8) silicon — `examples/aen/aen-uart-ns16550-loopback` drives the raw Zephyr `uart_poll_out()`/`uart_poll_in()` API directly (not `alp_uart_open()`) and byte-compares a loopback (`CHANGELOG.md` [v0.8.0] "Peripheral matrix", 2026-06-24; see the v0.8.0 section below). The exact byte count/baud in this pass were not itemised, and the ALP SDK's own `zephyr_drv.c` UART backend has not itself been separately exercised on real hardware | v0.1 |
+| AEN-Zephyr GPIO real backend | `src/backends/gpio/zephyr_drv.c` | 🟡 underlying mechanism bench-proven, portable-backend dispatch untested | Button press observed via IRQ; LED toggle visible on EVK | The `gpio_dw` controller itself is bench-proven on real E1M-AEN801 (E8) silicon — `examples/aen/aen-gpio-bench` drives the raw Zephyr `gpio_pin_configure()`/`gpio_pin_set()` API directly (not `alp_gpio_open()`) and confirms the full P8_0 pad path (`CHANGELOG.md` [v0.8.0] "Peripheral matrix", 2026-06-24; see the v0.8.0 section below) — that example's own header notes this proves the mux/DDR/DR path, not that the pad electrically moved. No button-IRQ/LED-visible scenario was part of this pass, and the ALP SDK's own `zephyr_drv.c` GPIO backend has not itself been separately exercised on real hardware | v0.1 |
 | `<alp/soc_caps.h>` generation pipeline | `scripts/gen_soc_caps.py` | ⏳ untested | Generated header round-trips against tracked-in-repo reference snapshot | `pr-generated-files.yml` | v0.1 |
 | ABI snapshot diff tool | `scripts/abi_snapshot.py` | ⏳ untested | Catches a deliberately injected breaking signature change | Manual diff test, recorded | v0.1 |
 
@@ -265,7 +295,56 @@ matching CHANGELOG `[v0.6.0]` entries.
 | CM33↔GD32 SCI7 SPI bidirectional link | `zephyr/drivers/spi/` RSCI path | ✅ verified | Sustained request/reply traffic, both transports, zero CRC errors in soak | merges `9f3e600`, `7845ad7`, `b5c941c` | v0.6 |
 | SCI7 DMA fast path | `zephyr/drivers/spi/spi_renesas_rz_sci_b.c` DMAC-B path | ❌ failing | DMA-driven transactions sustain the soak | Survives full init incl. v0.7 negotiation, then TX requests stop post-settle (issue #84; vendor ticket drafted); gate stays default-off | v0.7 |
 
-## v0.9.0 candidate — portable-surface consistency batch (2026-07)
+## v0.7.0 — Yocto productionization, provisioning, SoM-release signing
+
+Mostly Yocto/BSP/build/metadata infrastructure (production image +
+hardening, U-Boot production boot, SoM-release bundle signing +
+provenance verification, `provision_som.py` scaffolding, the
+`system-manifest` IDE/tool contract).  None of it is a new HIL-gated
+behavioural claim by itself -- it is covered where relevant by the
+CI-only section below or by the existing rows its output feeds.  Two
+BRD_I2C chip register-map corrections landed against the datasheet, not
+yet against silicon:
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| DA9292 `PMC_STATUS_00` bit decode | `chips/da9292/da9292.c` | 🟡 partial | Bit assignments match the datasheet's own table (not yet cross-checked on a live bus) | Verified against Renesas DA9292 Datasheet Rev 2.2 (R16DS0518EJ0220) Table 14, p.36-37 -- the existing decode confirmed correct, no code change (`CHANGELOG.md` [v0.7.0], 2026-06-07); on-silicon exercise via `examples/v2n/v2n-brd-i2c-bringup` is separate, still-pending work | v0.3.x |
+| ACT8760 register map + VSET accessors | `chips/act8760/act8760.c` | 🟡 partial | Register table matches the vendor workbook + datasheet; `act8760_rail_get_vset`/`_set_vset` are real read-modify-write, not stubs | Re-derived cell-by-cell against `AA82BZ_RegisterMap_Users_Rev1P1` + ACT88760 Datasheet Rev C, 2026-06-06 (`CHANGELOG.md` [v0.7.0]); `driver_status` moved `stub`→`partial`; on-silicon exercise not yet run | v0.3.x |
+
+## v0.8.0 — E1M-AEN801 (Alif Ensemble E8) first full bench bring-up
+
+First full bench bring-up of the `E1M-AEN801` (Alif Ensemble E8,
+Cortex-M55-HE) on real silicon (alplab-gw), flashed over the new Flow D
+(J-Link direct MRAM burn, part-number device profile
+`AE822FA0E5597LS0_M55_HE`).  Moved out of `CHANGELOG.md` into a
+structured ledger row per issue #1893.  **Every row below is a
+raw-Zephyr-driver / register-level regcheck example** (`gpio_pin_set()`,
+`i2c_transfer()`, `spi_transceive()`, `uart_poll_out()`,
+`pwm_set_cycles()`, ...) run directly against the Zephyr driver, **not**
+through the ALP SDK's own portable `alp_*_open()` backends -- see the
+reconciled v0.1.0 I²C/SPI/UART/GPIO rows above for that distinction.
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| AEN801 peripheral matrix — GPIO | `examples/aen/aen-gpio-bench` (`gpio_dw`) | ✅ verified | Full P8_0 pad path: mux request accepted, DDR/DR read back what was written (does not itself prove the pad electrically moved) | `CHANGELOG.md` [v0.8.0] "Peripheral matrix — 15/17 aen-\* apps PASS", real E8 silicon, alplab-gw, 2026-06-24 | v0.8 |
+| AEN801 peripheral matrix — UART | `examples/aen/aen-uart-ns16550-loopback` | ✅ verified | `uart3` (ns16550) TX/RX loopback byte-compares clean | same | v0.8 |
+| AEN801 peripheral matrix — PWM | `examples/aen/aen-pwm-utimer-pwmleds` (UTIMER3) | ✅ verified | `pwm_set_cycles` on UTIMER3/pwm3 register-readback verified | same | v0.8 |
+| AEN801 peripheral matrix — SPI | `examples/aen/aen-spi-regcheck` (DWC_ssi) | ✅ verified | `spi0` loopback via `spi_transceive()` completes clean | same | v0.8 |
+| AEN801 peripheral matrix — Counter | `examples/aen/aen-counter-utimer-regcheck` (utimer0) | ✅ verified | utimer0-backed counter exercised on real silicon | same | v0.8 |
+| AEN801 peripheral matrix — I²C + EEPROM | `examples/aen/aen-i2c2-eeprom-regcheck` | ✅ verified | `i2c2` enumerates a 24C128 EEPROM at `0x50`; 12 devices detected total on the bus | same | v0.8 |
+| AEN801 peripheral matrix — WDT | `examples/aen/aen-wdt-feed` (CMSDK) | ✅ verified | CMSDK watchdog feed/reset path exercised | same | v0.8 |
+| AEN801 peripheral matrix — ADC | `examples/aen/aen-adc-regcheck` (`adc_alif`) | ✅ verified | Single-shot ADC conversion completes | same | v0.8 |
+| AEN801 peripheral matrix — DAC | `examples/aen/aen-dac-regcheck` (`dac_alif`) | ✅ verified | DAC output holds the commanded code (regcheck-level; the VREF correction is a separate row below) | same | v0.8 |
+| AEN801 peripheral matrix — camera stack (bind only) | `examples/aen/aen-camera-regcheck` (cam/csi/dphy/arx3a0) | 🟡 partial | Nodes BIND and `device_is_ready`; live capture is **hardware-gated** -- no sensor populated on this bench unit | same | v0.8 |
+| AEN801 peripheral matrix — Ethos-U85 / Ethos-U55-HE ID | NPU ID registers | ✅ verified | Ethos-U85 ID `0x20007001`; Ethos-U55-HE ID `0x10104201` | same | v0.8 |
+| AEN801 peripheral matrix — NPU inference (tiny fixture) | TFLM + Ethos-U85, direct `ethosu_invoke` | ✅ verified | A tiny TFLM+Ethos-U85 fixture runs to completion (the full `person_detect` model result is the separate, already-listed v0.3.0 row above) | same | v0.8 |
+| AEN801 peripheral matrix — PDM mics | `examples/aen/aen-pdm-mic-alif` | ✅ verified | Live varying PCM captured (real audio, not a static pattern) | same | v0.8 |
+| AEN801 peripheral matrix — I2S TX | `examples/aen/aen-i2s-amp-alif` (i2s3) | ✅ verified | i2s3 clocks a tone out at the 76.8 MHz audio clock (no amp/mux wired -- audible output is separately still-pending) | same | v0.8 |
+| AEN801 peripheral matrix — QEnc | quadrature counter | 🟡 partial | Driver reads clean but the count stays static -- **hardware-gated**: no physical encoder is attached to spin it, not a code/Flow-D bug | same | v0.8 |
+| AEN801 peripheral matrix — SD card | DWC SDHC | 🟡 partial | DWC SDHC controller initialises but the card is unreachable -- **hardware-gated**: the EVK's SDIO 74LVC157 mux (EN=IO20, SEL=IO21, both CC3501E-side) is not routed with a card inserted on this bench unit | same | v0.8 |
+| AEN Ethernet (dp83825 PHY + `eth_dwmac_alif_ensemble` MAC glue) | `zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c` + `metadata/chips/dp83825.yaml` | ✅ verified | DHCP lease acquired and confirmed server-side (dnsmasq lease + ARP REACHABLE); root cause of the earlier no-link was DMA-visible buffers placed in DTCM instead of SRAM0 | `examples/aen/aen-ethernet-link`, RESULT PASS, real E8 silicon, 2026-06-24 (`CHANGELOG.md` [v0.8.0]); managed-MDIO PHY address corrected `@1`→`@0` against a live MDIO scan (`CHANGELOG.md` [v0.16.0], #1244) | v0.8 |
+
+## v0.9.0 — portable-surface consistency batch (tagged 2026-07-06)
 
 The 2026-07 CX batch (PRs #319..#335): `<alp/version.h>`, the SE-backed
 SoC-identity / power-profile / core-boot surfaces, I²C/SPI target
