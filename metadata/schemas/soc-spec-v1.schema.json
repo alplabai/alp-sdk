@@ -119,7 +119,7 @@
     "inference_arena_sram_kib": {
       "type": "integer",
       "minimum": 0,
-      "description": "Usable SRAM budget (KiB) for an NPU tensor arena on this SoC. The .alpmodel loader admits a blob only if its requires.sram_kib <= this budget. 0 = unknown/unbounded (fit-check skips). This is integration/partition-dependent silicon data; author per-SoC before production."
+      "description": "Usable SRAM budget (KiB) for an NPU tensor arena on this SoC. The .alpmodel loader admits a blob only if its requires.sram_kib <= this budget. 0 = unknown/unbounded (fit-check skips, and alp_model_select_result_t::arena_fit_unverified is set on the winning selection so the skip is not silent -- see src/backends/inference/alp_model_select.h). This is NOT a datasheet constant: it is an integration/partition decision (how much on-die SRAM this SKU's firmware reserves for the NPU tensor arena vs. everything else), which is why every real SoC in this repo carries 0 today (issue #1731) -- author per-SoC only when that partition decision is actually made, never a plausible-looking guess."
     },
     "tcm_kb": {
       "type": "integer",

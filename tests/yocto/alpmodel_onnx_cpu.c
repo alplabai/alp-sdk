@@ -65,12 +65,15 @@ static void test_onnx_target_selects_cpu_backend(void)
 	 * available regardless of soc_ref/avail_silicon -- see
 	 * alp_model_select.c's _silicon_available(). arena_sram_kib=0 means
 	 * "unknown budget", which always fits (the manifest's own
-	 * requires.sram_kib is 0 here too). */
+	 * requires.sram_kib is 0 here too) -- and, per #1731, the win is
+	 * flagged r.arena_fit_unverified rather than looking like a real
+	 * fit check ran. */
 	alp_model_select_env_t    env = { .preferred_backend = ALP_INFERENCE_BACKEND_AUTO };
 	alp_model_select_result_t r   = { 0 };
 	ALP_ASSERT_EQ_INT(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_OK);
 	ALP_ASSERT_EQ_INT(r.backend, ALP_INFERENCE_BACKEND_CPU);
 	ALP_ASSERT_EQ_INT(r.target_index, 0u);
+	ALP_ASSERT_TRUE(r.arena_fit_unverified);
 }
 
 int main(void)

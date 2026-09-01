@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/npu-ops-v1.schema.json",
+  "title": "ALP per-NPU op-support table v1",
+  "description": "One file per SUPPORT-TABLE IDENTITY, not per backend. A backend can publish more than one distinct table (Vela publishes exactly two TFLite tables -- Ethos-U85, and Ethos-U55/U65 -- invariant to --accelerator-config), so the file is keyed by (toolchain, toolchain_version, variant) under metadata/npu_ops/<backend_family>/<variant>@<toolchain>-<toolchain_version>.json, e.g. metadata/npu_ops/ethos_u/u85@vela-5.1.0.json. This is SCREENING data ('stance': 'screening'): it filters ops the compiler is documented/proven NOT to accept; it never certifies that a present op will actually compile (shape/quantization/graph-structure constraints this list can't express still apply). A backend with NO file under its directory is an intentional absence (e.g. metadata/npu_ops/ has no deepx/ directory -- dxcom publishes no op-support table) and MUST be treated by any consumer as 'undetermined', never as 'no ops supported'.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["applies_to", "op_namespace", "authority", "stance", "provenance", "supported_ops"],
+  "properties": {
+    "_generated": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Present ONLY on authority=tool-generated tables: an AUTO-GENERATED / DO-NOT-EDIT banner naming the regenerating script. Absent on authority=vendor-manual tables, which are intentionally hand-transcribed (there is no tool to regenerate them from)."
+    },
+    "applies_to": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["variant", "products", "toolchain", "toolchain_version"],
+      "properties": {
+        "variant": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "Short table-identity slug. MUST equal the filename stem before '@' (e.g. 'u85', 'u55-u65', 'onnx-i8')."
+        },
+        "products": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "The NPU/product identifiers this table governs, e.g. ['ethos-u85'], ['ethos-u55', 'ethos-u65'], ['v2n', 'v2h']."
+        },
+        "toolchain": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "Short toolchain name. MUST equal the filename segment between '@' and the trailing '-<toolchain_version>' (e.g. 'vela', 'translator')."
+        },
+        "toolchain_version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "MUST equal the filename's trailing version segment (e.g. '5.1.0', '1.12')."
+        },
+        "precision": {
+          "type": "string",
+          "description": "Optional: the quantization/precision this table's compile path assumes (e.g. 'int8'), when the toolchain has more than one and this table only speaks for one of them."
+        },
+        "pins": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Optional: other toolchain-internal version/config pins this table's accuracy depends on and that alp-sdk's adapter does not override (e.g. DRP-AI's {\"drp_compiler_version\": \"100\"}). A table is only valid evidence for a compile that used these same pins."
+        }
+      }
+    },
+    "op_namespace": {
+      "type": "string",
+      "enum": ["tflite", "onnx"],
+      "description": "Vocabulary `supported_ops` is spelled in. MUST match the backend adapter's `accepts(src_format)` for this table's backend family: ethos_u -> tflite, drpai -> onnx. Comparing a model's ops against a list in the other vocabulary matches nothing and yields a categorically wrong no-fit verdict."
+    },
+    "authority": {
+      "type": "string",
+      "enum": ["tool-generated", "vendor-manual"],
+      "description": "'tool-generated': produced by running the real compiler and parsing its own report (e.g. `vela --supported-ops-report`) -- reproducible by a scripts/gen_*.py script, never hand-edited. 'vendor-manual': transcribed from a vendor reference manual because the toolchain itself publishes no machine-readable report."
+    },
+    "stance": {
+      "type": "string",
+      "enum": ["screening"],
+      "description": "This data SCREENS candidate ops; it never CERTIFIES a model will compile. An op present here can still fail to fuse/schedule on real hardware for reasons this list can't express (shape/quantization/graph-structure constraints); an op absent is a conservative negative, not a proof of unsupportability. There is currently exactly one stance value -- the enum exists so a future certifying data asset (e.g. a real bench-probed accept set) is a distinguishable, not-yet-invented kind, not a silent redefinition of this one."
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "tool_version", "content_hash"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The exact reproducing command (tool-generated, e.g. 'vela --supported-ops-report, table ... (column 1)') or the doc id + section + table name (vendor-manual). Never vendor prose -- a citation, not a copy."
+        },
+        "tool_version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The compiler/translator version this table was read from, e.g. 'vela 5.1.0', 'DRP-AI Translator i8 v1.12'."
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+:[0-9a-f]+$",
+          "description": "'<algorithm>:<hex digest>' of the exact regenerated report (tool-generated) or the cited vendor document (vendor-manual), so drift in the upstream artifact is detectable without redistributing it."
+        },
+        "note": {
+          "type": "string",
+          "description": "Free-text grounding: invariance evidence, corrections made against a literal transcription (with justification), or caveats on what this table can/cannot certify."
+        },
+        "count_expected": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optional self-check: the op count this table is expected to carry (e.g. from a vendor doc's own stated total). Cross-checked against len(supported_ops) by validate_metadata.py when present."
+        }
+      }
+    },
+    "supported_ops": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_]+$",
+        "description": "An operator identifier spelled in `op_namespace`'s vocabulary: TFLite builtins are UPPER_SNAKE (e.g. 'CONV_2D'); ONNX operators are CamelCase (e.g. 'Conv'). The pattern admits both -- it does not itself enforce which."
+      }
+    }
+  }
+}

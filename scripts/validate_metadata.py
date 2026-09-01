@@ -101,6 +101,8 @@ CHIP_SCHEMA = REPO / "metadata" / "schemas" / "chip-v1.schema.json"
 CHIPS = REPO / "metadata" / "chips"
 BLOCK_SCHEMA = REPO / "metadata" / "schemas" / "block-v1.schema.json"
 BLOCKS = REPO / "metadata" / "blocks"
+NPU_OPS_SCHEMA = REPO / "metadata" / "schemas" / "npu-ops-v1.schema.json"
+NPU_OPS = REPO / "metadata" / "npu_ops"
 MODEL_PERF_SCHEMA = REPO / "metadata" / "schemas" / "model-perf-v1.schema.json"
 MODEL_PERF = REPO / "metadata" / "model_perf"
 # Generated Zephyr board trees (one dir per <board>; each carries a twister
@@ -1207,6 +1209,149 @@ def _check_block_realizations(block_files, chip_files) -> list:
     return failures
 
 
+#: Backend-FAMILY (the directory under metadata/npu_ops/) -> the source
+#: format its compiler ingests.  A family with no entry here is unknown
+#: territory for this cross-check (nothing to compare against), not a
+#: failure -- new families are free to be added; this dict just doesn't yet
+#: know their ingest format.
+_NPU_OPS_EXPECTED_NAMESPACE_BY_FAMILY = {"ethos_u": "tflite", "drpai": "onnx"}
+
+
+def _check_npu_ops_semantics(npu_ops_files) -> list:
+    """Cross-checks on `metadata/npu_ops/<backend_family>/*.json` beyond pure
+    schema validation (issue #1801; the data asset itself lands with #1470).
+
+    One file per SUPPORT-TABLE IDENTITY under a per-backend-family
+    subdirectory: `metadata/npu_ops/<family>/<variant>@<toolchain>-
+    <toolchain_version>.json`.  The schema enforces per-file shape, but not
+    facts that only exist relative to the file's PATH (its parent directory
+    + its own filename):
+
+      1. `applies_to.variant` + `applies_to.toolchain` +
+         `applies_to.toolchain_version` must reproduce the filename exactly
+         (`<variant>@<toolchain>-<toolchain_version>.json`).  Without this, a
+         file could claim one identity in its path and another inside its own
+         body, and a future consumer resolving a table by path alone would
+         silently load metadata that disagrees with what it asked for.
+      2. `op_namespace` must match the backend FAMILY's compiler ingest
+         format -- the `ethos_u/` directory is TFLite (Vela), the `drpai/`
+         directory is ONNX (DRP-AI Translator) -- mirroring each adapter's
+         `accepts(src_format)`.  Scoring a model's ops against a list in the
+         wrong vocabulary matches nothing and yields a categorically wrong
+         no-fit verdict.
+      3. `provenance.count_expected`, when present, must equal
+         `len(supported_ops)` -- it exists specifically so a transcription
+         that silently drops or duplicates an op is caught mechanically
+         rather than trusted on review alone.
+      4. Every entry in `supported_ops` must itself be spelled in the
+         vocabulary `op_namespace` declares -- TFLite builtins are
+         UPPER_SNAKE (`CONV_2D`), ONNX operators are CamelCase or a short
+         all-caps acronym and never contain an underscore (`Conv`, `LRN`).
+         Check (2) above only catches a table in the wrong FILE (`onnx`
+         table under `ethos_u/`); this catches a table with the wrong
+         `op_namespace` LABEL for its own contents, which the schema's own
+         `supported_ops[].pattern` admits both spellings for and so can't
+         tell apart on its own.
+      5. `authority: tool-generated` must carry a `_generated` DO-NOT-EDIT
+         banner; `authority: vendor-manual` must NOT -- there is no script
+         to regenerate a hand-transcribed table from, so the banner would
+         be misleading there.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[str, list[str]]] = []
+    for path in npu_ops_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()  # out-of-tree (e.g. a test fixture); report as-is
+        try:
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+
+        msgs: list[str] = []
+        family = path.parent.name
+        applies_to = _as_dict(doc.get("applies_to"))
+
+        variant = applies_to.get("variant")
+        toolchain = applies_to.get("toolchain")
+        toolchain_version = applies_to.get("toolchain_version")
+        if isinstance(variant, str) and isinstance(toolchain, str) and isinstance(toolchain_version, str):
+            expected_stem = f"{variant}@{toolchain}-{toolchain_version}"
+            if path.stem != expected_stem:
+                msgs.append(
+                    f"applies_to (variant={variant!r}, toolchain={toolchain!r}, "
+                    f"toolchain_version={toolchain_version!r}) implies filename "
+                    f"`{expected_stem}.json`, but this file is `{path.name}` -- "
+                    f"a consumer resolving this table by path would load metadata "
+                    f"that disagrees with what it asked for")
+
+        namespace = doc.get("op_namespace")
+        expected = _NPU_OPS_EXPECTED_NAMESPACE_BY_FAMILY.get(family)
+        if expected is not None and namespace != expected:
+            msgs.append(
+                f"op_namespace: `{namespace}` but the `{family}/` directory's "
+                f"backend ingests `{expected}` -- see the matching adapter's "
+                f"accepts(src_format)")
+
+        # Spelling-vs-namespace (docstring item 4): TFLite builtins are
+        # UPPER_SNAKE; ONNX operators are CamelCase or a short all-caps
+        # acronym (`LRN`, `GRU`, `LSTM`) and never contain an underscore.
+        # `op == op.upper()` is NOT the discriminator here -- it would
+        # reject those legitimate all-caps ONNX acronyms as if they were
+        # TFLite spellings. An underscore is what TFLite-style multi-word
+        # names carry that ONNX names never do, so that is what a
+        # wrong-vocabulary onnx table (`CONV_2D` instead of `Conv`) trips.
+        ops = doc.get("supported_ops")
+        if isinstance(ops, list):
+            if namespace == "tflite":
+                bad_ops = [op for op in ops
+                          if not (isinstance(op, str) and op == op.upper())]
+            elif namespace == "onnx":
+                bad_ops = [op for op in ops if isinstance(op, str) and "_" in op]
+            else:
+                bad_ops = []
+            if bad_ops:
+                msgs.append(
+                    f"op_namespace: `{namespace}` but supported_ops contains "
+                    f"{len(bad_ops)} op(s) spelled in the wrong vocabulary: "
+                    f"{bad_ops} -- TFLite builtins are UPPER_SNAKE, ONNX "
+                    f"operators are CamelCase or a short all-caps acronym "
+                    f"with no underscore")
+
+        authority = doc.get("authority")
+        has_banner = isinstance(doc.get("_generated"), str)
+        if authority == "tool-generated" and not has_banner:
+            msgs.append(
+                "authority: tool-generated but no `_generated` DO-NOT-EDIT "
+                "banner -- a machine-reproducible table should self-identify "
+                "so a hand-edit is recognisable as wrong on sight")
+        if authority == "vendor-manual" and has_banner:
+            msgs.append(
+                "authority: vendor-manual but carries a `_generated` "
+                "DO-NOT-EDIT banner -- there is no script to regenerate a "
+                "hand-transcribed table from, so the banner is misleading")
+
+        provenance = _as_dict(doc.get("provenance"))
+        count_expected = provenance.get("count_expected")
+        if (isinstance(count_expected, int) and not isinstance(count_expected, bool)
+                and isinstance(ops, list) and len(ops) != count_expected):
+            msgs.append(
+                f"provenance.count_expected={count_expected} but supported_ops "
+                f"has {len(ops)} entries -- a dropped/duplicated op vs. the "
+                f"cited source, or a stale count_expected")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
 def _check_library_semantics(library_files) -> list:
     """Cross-checks on library manifests beyond pure schema validation (ADR 0018).
 
@@ -2096,6 +2241,30 @@ def main() -> int:
             )
             block_failures += _check_block_realizations(block_files, chip_files)
 
+    # Per-NPU op-support tables (the static-analyzer data asset, #1801; the
+    # data itself lands separately with #1470).  One file per SUPPORT-TABLE
+    # IDENTITY under a per-backend-family subdirectory (metadata/npu_ops/
+    # <family>/<variant>@<toolchain>-<toolchain_version>.json) -- glob with
+    # `**` so this ALSO catches a file sitting directly under
+    # metadata/npu_ops/ instead of silently matching nothing.  A family
+    # directory (or the whole tree) can be legitimately absent -- e.g. no
+    # deepx/ directory, because dxcom publishes no op-support table; see
+    # _check_npu_ops_semantics -- so an empty glob is not itself a failure.
+    npu_ops_failures: list = []
+    npu_ops_files: list = []
+    if NPU_OPS_SCHEMA.is_file():
+        npu_ops_schema = json.loads(NPU_OPS_SCHEMA.read_text(encoding="utf-8"))
+        npu_ops_validator = jsonschema.Draft202012Validator(npu_ops_schema)
+        npu_ops_files = sorted(NPU_OPS.glob("**/*.json"))
+        if npu_ops_files:
+            print()
+            npu_ops_failures = _check_files(
+                "JSON", npu_ops_files, npu_ops_validator,
+                lambda p: strict_json_loads(p.read_text(encoding="utf-8"), source=p),
+                "op_namespace",
+            )
+            npu_ops_failures += _check_npu_ops_semantics(npu_ops_files)
+
     # Tier-2 model-perf points (YAML) against model-perf v1 (#1520).
     # metadata/model_perf/ ships EMPTY today -- a perf point comes off real
     # silicon or it does not exist (docs/bench/model-perf-capture.md) -- so
@@ -2181,7 +2350,7 @@ def main() -> int:
     print()
     total_failures = (len(soc_failures) + len(som_failures)
                       + len(hwrev_failures) + len(board_failures) + len(chip_failures)
-                      + len(block_failures) + len(model_perf_failures)
+                      + len(block_failures) + len(npu_ops_failures) + len(model_perf_failures)
                       + len(library_failures) + len(library_semantic_failures)
                       + len(board_target_failures)
                       + len(restriction_failures)
@@ -2195,6 +2364,7 @@ def main() -> int:
           f"{len(hwrev_files)} hw-revisions file(s) + "
           f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
           f"{len(block_files)} block file(s) + "
+          f"{len(npu_ops_files)} npu-ops file(s) + "
           f"{len(model_perf_files)} model-perf point(s) + "
           f"{len(library_files)} library manifest(s) + Kconfig registries + "
           f"tier-a-library-ci registry "
