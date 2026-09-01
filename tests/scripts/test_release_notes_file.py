@@ -122,8 +122,8 @@ def test_final_tag_with_no_notes_file_fails_the_job(tmp_path):
         "a final tag with no committed release-notes file must fail the "
         f"release, not fall back to the CHANGELOG draft: {proc.stdout + proc.stderr}"
     )
-    assert "::error::" in proc.stderr
-    assert "docs/release-notes/v1.2.3.md" in proc.stderr
+    assert "::error::" in proc.stdout
+    assert "docs/release-notes/v1.2.3.md" in proc.stdout
     assert _release_notes(tmp_path) == "STALE CHANGELOG DRAFT -- must be overwritten", (
         "release_notes.md must be untouched on failure"
     )
@@ -136,7 +136,7 @@ def test_final_tag_with_empty_notes_file_fails_the_job(tmp_path):
         "an empty committed notes file is a forgotten step, not an "
         f"absent one -- must fail: {proc.stdout + proc.stderr}"
     )
-    assert "::error::" in proc.stderr
+    assert "::error::" in proc.stdout
     assert _release_notes(tmp_path) == "STALE CHANGELOG DRAFT -- must be overwritten"
 
 
