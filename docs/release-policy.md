@@ -164,6 +164,43 @@ A patch release skips steps 1-2 (the verification ledger doesn't
 move; ABI doesn't change) but still updates `sdk_version.yaml`
 + CHANGELOG slice.
 
+### Pre-release (rc) cuts
+
+A release candidate is a two-step variant of the procedure above, so a
+build made from an rc checkout identifies itself as one instead of as
+its eventual GA version (#1902):
+
+1. **Cut the rc.** `python3 scripts/bump_version.py --to <X.Y.Z-rcN>`
+   (SemVer 2.0.0 pre-release syntax, e.g. `0.16.0-rc1` -- not a bespoke
+   flag). This writes the FULL suffixed string to both
+   `metadata/sdk_version.yaml`'s `version:` and
+   `include/alp/version.h`'s `ALP_VERSION_STRING`
+   (`ALP_VERSION_MAJOR`/`MINOR`/`PATCH` stay the plain core integers).
+   Unlike a GA bump, **step 4-5 above (fold + slice CHANGELOG) is
+   skipped** -- `bump_version.py` no-ops the slice for a suffixed
+   `--to` target, because an rc has no GA CHANGELOG section of its own
+   yet and `release.yml`'s "Verify + slice CHANGELOG" step falls back
+   to `## [Unreleased]` for a pre-release tag instead of failing.
+   `## [Unreleased]` stays open. Tag `git tag -s v<X.Y.Z-rcN>` and push
+   as usual.
+2. **Bump back to bare `X.Y.Z` before the GA tag.**
+   `python3 scripts/bump_version.py --to <X.Y.Z>` (no suffix) -- this
+   is the step that does the real CHANGELOG fold + slice (step 4-5),
+   and it is **required**, not optional: `release.yml` now refuses a
+   GA tag (one with no suffix of its own) whose
+   `metadata/sdk_version.yaml` still declares a leftover pre-release
+   suffix, to stop a forgotten final bump from shipping a GA build
+   that silently self-reports as an rc -- #1902 in the other
+   direction. Only after this bump does the normal GA tag (`v<N>`)
+   go out.
+
+Cutting a second rc (`-rc2`, `-rc3`, ...) against a still-open window
+repeats step 1 with the next `-rcN`; `release.yml` also refuses a
+pre-release tag whose own suffix disagrees with a pre-release
+`metadata/sdk_version.yaml` (a `v0.16.0-rc2` tag built against a
+forgotten `version: 0.16.0-rc1` fails loudly instead of the build
+self-reporting as rc1).
+
 ## Security backports
 
 Critical CVEs land via `release/v1.0` even after a newer LTS
