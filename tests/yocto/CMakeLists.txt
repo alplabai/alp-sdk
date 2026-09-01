@@ -128,6 +128,36 @@ target_compile_features(alp_test_inference_deepx_regression PRIVATE cxx_std_17)
 add_test(NAME alp_test_inference_deepx_regression
          COMMAND alp_test_inference_deepx_regression)
 
+# Compile + regression coverage for src/yocto/inference_drpai.cpp (issue
+# #1747, closing the gap for the last of the three: ORT/DEEPX above, now
+# DRP-AI).  Same fake-vendor-header technique as the two targets above --
+# the EdgeCortix MERA2 / DRP-AI TVM runtime is Renesas/EdgeCortix
+# account-gated, so this is NOT linked through alp::sdk /
+# ALP_SDK_USE_DRPAI_V2N.  Compiles against tests/yocto/fakes/drpai/, a
+# clean-room stand-in for MeraDrpRuntimeWrapper.h plus a fake
+# linux/drpai.h for the DRP-AI driver uapi struct/ioctl this file also
+# needs (real vendor-recipe-only, same "not on a stock CI runner"
+# reason).  See inference_drpai_regression.cpp's own header comment for
+# what these tests do and do not reach.  Linux-only, like the file it
+# tests (<fcntl.h>/<sys/ioctl.h>/<linux/drpai.h>/<unistd.h> are hard
+# #includes, matching inference_drpai.cpp's own real-build posture) --
+# no platform guard here beyond the one this whole `yocto` leg already
+# implies (issue #1747's CI gate runs on ubuntu-latest).
+add_executable(alp_test_inference_drpai_regression
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_drpai_regression.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/inference_drpai.cpp
+)
+target_include_directories(alp_test_inference_drpai_regression PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/drpai
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto
+)
+target_compile_features(alp_test_inference_drpai_regression PRIVATE cxx_std_17)
+
+add_test(NAME alp_test_inference_drpai_regression
+         COMMAND alp_test_inference_drpai_regression)
+
 # alp_inference_last_invoke_latency_us() end-to-end regression: the last-
 # successful-invoke-latency accessor added alongside <alp/inference.h>'s
 # model-perf-capture support. #includes src/yocto/inference_yocto.c
