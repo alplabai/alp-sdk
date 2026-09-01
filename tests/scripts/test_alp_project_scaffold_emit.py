@@ -150,8 +150,8 @@ def test_scaffold_via_cores_selects_multicore_rpmsg():
     assert proc.returncode == 0, proc.stderr
     envelope = json.loads(proc.stdout)
     assert {item["path"] for item in envelope} == {
-        "board.yaml", "README.md",
-        "linux/CMakeLists.txt",
+        "board.yaml", "CMakeLists.txt", "README.md",
+        "linux/CMakeLists.txt", "linux/src/main.c",
         "m55_hp/CMakeLists.txt", "m55_hp/prj.conf", "m55_hp/src/main.c",
     }
 
