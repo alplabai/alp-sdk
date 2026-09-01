@@ -353,14 +353,13 @@
         "required": ["type"]
       },
       "then": {
-        "required": ["mac_per_cycle"],
-        "description": "Every ethos-u* NPU must declare mac_per_cycle -- the emit's accelerator sizing (scripts/alp_orchestrate/kconfig.py) and target derivation (scripts/alp_model/targets.py) both read npus[].mac_per_cycle directly for this backend; an absent value either raises KeyError (targets.py) or falls through to a silent 256-MAC default (kconfig.py) instead of failing at the metadata source (#1849)."
+        "required": ["mac_per_cycle"]
       },
       "properties": {
         "type":            { "type": "string", "description": "e.g. ethos-u55, ethos-u85, drp-ai3, dx-m1." },
         "subtype":         { "type": "string", "description": "e.g. high-perf (NPU-HP), high-efficiency (NPU-HE), generative (NPU-HG)." },
         "paired_core":     { "type": "string", "description": "`cores[].id` of the CPU core this NPU instance is wired to (Alif: the High-Efficiency M55 drives the 128-MAC high-efficiency Ethos-U55, the High-Performance M55 the 256-MAC high-perf one). Lets the build emit size the accelerator per target core instead of assuming the SoC's most-capable instance. Omit for a shared / non-core-paired NPU (e.g. the E8 U85 on the HG subsystem)." },
-        "mac_per_cycle":   { "type": "integer" },
+        "mac_per_cycle":   { "type": "integer", "description": "Required for every ethos-u* NPU -- the emit's accelerator sizing (scripts/alp_orchestrate/kconfig.py) and target derivation (scripts/alp_model/targets.py) both read npus[].mac_per_cycle directly for this backend; an absent value either raises KeyError (targets.py) or falls through to a silent 256-MAC default (kconfig.py) instead of failing at the metadata source (#1849)." },
         "freq_mhz":        { "type": "integer" },
         "gops":            { "type": "number", "description": "Giga ops per second.  Provide either gops or tops (= gops × 1000)." },
         "tops":            { "type": "number", "description": "Tera ops per second.  Provide either gops or tops." },
