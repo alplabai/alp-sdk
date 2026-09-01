@@ -1103,8 +1103,18 @@ def _emit_inference(
     for c in (project.soc_spec.get("cores") or []):
         if c.get("id") != slice_.core_id:
             continue
-        vec = (c.get("vector_extension") or "").lower()
-        ctype = (c.get("type") or "").lower()
+        # Same `isinstance`-or-unresolved treatment topology.py adopted for
+        # this exact field (#1852 review): `(x or "").lower()` raises
+        # AttributeError on a truthy non-string, so a schema-invalid
+        # `--metadata-root` aborted `--emit kconfig` with a bare traceback
+        # instead of a diagnostic.  `vector_extension` is guarded alongside
+        # `type` because it is the same idiom on the same object, is declared
+        # `"type": "string"` by the same `$defs/core`, and this is its only
+        # read in the tree -- fixing one line and not the one above it is the
+        # partial scope this review caught the first time.
+        vec = c["vector_extension"].lower() \
+            if isinstance(c.get("vector_extension"), str) else ""
+        ctype = c["type"].lower() if isinstance(c.get("type"), str) else ""
         if vec == "neon" or ctype.startswith("cortex-a"):
             tflm_kernel_kc = "CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_NEON=y"
         elif vec == "helium":
