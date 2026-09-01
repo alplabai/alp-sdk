@@ -1,3 +1,5 @@
+@page docs_release_notes_index Release notes
+
 # `docs/release-notes/` — one file per released version
 
 Add the release's GitHub Release body as a **new file in this directory**,
