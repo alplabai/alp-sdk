@@ -75,6 +75,59 @@ target_compile_features(alp_test_inference_dispatcher PRIVATE c_std_99)
 add_test(NAME alp_test_inference_dispatcher
          COMMAND alp_test_inference_dispatcher)
 
+# Regression coverage for src/yocto/inference_ort.cpp's open() path: the
+# tensor-rank refusal (issue #1729) split into two separate ceilings
+# (hostile/corrupt ndim vs. a well-formed model this 4-slot descriptor
+# can't represent), and the OrtValue release path on open()'s throw path
+# (issue #1494).  Compiles inference_ort.cpp directly -- NOT through
+# alp::sdk / ALP_SDK_USE_ORT_CPU, which probes for a real onnxruntime
+# install the way src/yocto/CMakeLists.txt's own block does (issue #1747:
+# no PR gate builds this backend for that reason) -- against
+# tests/yocto/fakes/onnxruntime/, a clean-room stand-in vendor header (see
+# that file's own comment) that gives the test full control over the "ORT"
+# surface, so inference_ort.cpp's OWN C++ logic is exercised
+# deterministically without any real ONNX Runtime install.  See
+# inference_ort_regression.cpp's header comment for the full design.
+add_executable(alp_test_inference_ort_regression
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_ort_regression.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/inference_ort.cpp
+)
+target_include_directories(alp_test_inference_ort_regression PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/onnxruntime
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto
+)
+target_compile_features(alp_test_inference_ort_regression PRIVATE cxx_std_17)
+
+add_test(NAME alp_test_inference_ort_regression
+         COMMAND alp_test_inference_ort_regression)
+
+# Regression coverage for src/yocto/inference_deepx.cpp's tensor-rank
+# guards (issue #1729): the open()-time refusal (all_tensor_ranks_fit(),
+# validates the DECLARED GetInputs()/GetOutputs() metadata) AND the
+# separate LIVE post-Run() guard in get_output() that the open()-time
+# check alone does not cover.  Same fake-vendor-header technique as
+# alp_test_inference_ort_regression above -- dx_rt is proprietary (DEEPX
+# EULA), so this is NOT linked through alp::sdk / ALP_SDK_USE_DEEPX_DXM1
+# for the same issue #1747 reason.  See tests/yocto/fakes/dxrt/datatype.h
+# and inference_deepx_regression.cpp's own header comment for the full
+# design.
+add_executable(alp_test_inference_deepx_regression
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_deepx_regression.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/inference_deepx.cpp
+)
+target_include_directories(alp_test_inference_deepx_regression PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto
+)
+target_compile_features(alp_test_inference_deepx_regression PRIVATE cxx_std_17)
+
+add_test(NAME alp_test_inference_deepx_regression
+         COMMAND alp_test_inference_deepx_regression)
+
 # alp_inference_last_invoke_latency_us() end-to-end regression: the last-
 # successful-invoke-latency accessor added alongside <alp/inference.h>'s
 # model-perf-capture support. #includes src/yocto/inference_yocto.c
