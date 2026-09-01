@@ -2872,7 +2872,7 @@
           "kind": "fnptr"
         },
         "cc3501e_t": {
-          "definition": "typedef struct cc3501e { bool initialised; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t sock_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool sock_busy; uint8_t sock_send_seq; uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER]; uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER]; bool spi1_busy; bool spi1_configured; uint8_t spi1_seq; bool request_lock; } cc3501e_t;",
+          "definition": "typedef struct cc3501e { bool initialised; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t sock_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool sock_busy; uint8_t sock_send_seq; uint8_t req_seq; uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER]; uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER]; bool spi1_busy; bool spi1_configured; uint8_t spi1_seq; bool request_lock; } cc3501e_t;",
           "fields": [
             "bool initialised",
             "alp_spi_t *bus",
@@ -2891,6 +2891,7 @@
             "bool evt_busy",
             "bool sock_busy",
             "uint8_t sock_send_seq",
+            "uint8_t req_seq",
             "uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER]",
             "uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER]",
             "bool spi1_busy",
@@ -2898,7 +2899,7 @@
             "uint8_t spi1_seq",
             "bool request_lock"
           ],
-          "hash": "3078f868223fb318",
+          "hash": "03f0e8c1e17d5f20",
           "kind": "struct"
         }
       },
@@ -2915,8 +2916,8 @@
           "signature": "alp_status_t cc3501e_diag_log_level(cc3501e_t *ctx, uint8_t level);"
         },
         "cc3501e_diag_stats": {
-          "hash": "30c7ddce134198ac",
-          "signature": "alp_status_t cc3501e_diag_stats(cc3501e_t *ctx, uint32_t *frames_ok, uint32_t *frames_err);"
+          "hash": "019df5c53326784e",
+          "signature": "alp_status_t cc3501e_diag_stats(cc3501e_t *ctx, cc3501e_diag_stats_t *out);"
         },
         "cc3501e_ping": {
           "hash": "4ea2638cf2f6d61d",
@@ -2928,7 +2929,20 @@
         }
       },
       "macros": {},
-      "typedefs": {},
+      "typedefs": {
+        "cc3501e_diag_stats_t": {
+          "definition": "typedef struct { uint32_t frames_ok; uint32_t frames_err; uint32_t worker_execs; uint32_t retry_latch_hits; bool has_worker_counters; } cc3501e_diag_stats_t;",
+          "fields": [
+            "uint32_t frames_ok",
+            "uint32_t frames_err",
+            "uint32_t worker_execs",
+            "uint32_t retry_latch_hits",
+            "bool has_worker_counters"
+          ],
+          "hash": "c2df282faa5069f5",
+          "kind": "struct"
+        }
+      },
       "variables": {}
     },
     "alp/chips/cc3501e/events.h": {
@@ -11568,6 +11582,14 @@
           "hash": "4551b2598c2b567a",
           "value": "0x04"
         },
+        "ALP_CC3501E_FLAG_REQ_SEQ_BITS": {
+          "hash": "2bbf5f5dea44be2f",
+          "value": "0xF8u"
+        },
+        "ALP_CC3501E_FLAG_REQ_SEQ_SHIFT": {
+          "hash": "bf704f9511189e63",
+          "value": "3u"
+        },
         "ALP_CC3501E_FLAG_RESP_REQUIRED": {
           "hash": "aece244f672e9e33",
           "value": "0x01"
@@ -11585,8 +11607,20 @@
           "value": "(ALP_CC3501E_MAX_PAYLOAD - 4u)"
         },
         "ALP_CC3501E_PROTOCOL_VERSION": {
-          "hash": "e7345c07ec590d35",
-          "value": "7"
+          "hash": "8b70842617f16dd9",
+          "value": "8"
+        },
+        "ALP_CC3501E_REQ_SEQ_LAST": {
+          "hash": "7d52e8185ae5e8b7",
+          "value": "31u"
+        },
+        "ALP_CC3501E_REQ_SEQ_MASK": {
+          "hash": "e5ee4744b8b85322",
+          "value": "0x1Fu"
+        },
+        "ALP_CC3501E_REQ_SEQ_NONE": {
+          "hash": "fafe93c51ebdfab2",
+          "value": "0u"
         },
         "ALP_CC3501E_SPI1_MAX_XFER": {
           "hash": "23d881a20f05388a",

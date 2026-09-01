@@ -135,8 +135,23 @@ extern "C" {
  * SOCK_RECV is NOT touched.  alp_cc3501e_sock_recv_t is { handle | max_len }
  * with no spare byte -- giving it request identity would be an actual layout
  * change, out of scope here; see cc3501e-bridge-firmware#88 for why it was
- * deliberately left for its own change. */
-#define ALP_CC3501E_PROTOCOL_VERSION 7
+ * deliberately left for its own change.
+ *
+ * v8 generalises that request identity to EVERY worker-routed opcode.  The
+ * SOCK_SEND fix above needed a spare byte inside one request struct and so
+ * could only ever cover one opcode; the other 25 worker-routed opcodes still
+ * had no identity at all, and a lost reply on any of them re-executed the
+ * operation (cc3501e-bridge-firmware#102).  v8 puts the seq in the FRAME
+ * HEADER instead -- flags bits 3..7, unused through v7 -- so it costs zero
+ * wire bytes and needs no per-opcode struct change.  See
+ * ALP_CC3501E_FLAG_REQ_SEQ_SHIFT below.
+ *
+ * SOCK_SEND keeps its own 8-bit struct seq and is deliberately EXEMPT from the
+ * header-seq mechanism: 8 bits of identity is strictly stronger than 5, and
+ * that path is the bench-validated one.  SOCK_RECV is exempt for the same
+ * reason it was left out of v7 -- it consumes stream state, so a header-seq
+ * match is not sufficient evidence that two frames are the same logical read. */
+#define ALP_CC3501E_PROTOCOL_VERSION 8
 
 /** Frame header in bytes, before the payload. */
 #define ALP_CC3501E_HEADER_BYTES 4
@@ -165,6 +180,41 @@ extern "C" {
  *  Hosts MUST treat this bit as zero on v1; v2 firmware will set
  *  it on intermediate frames of a multi-frame BLE-write transaction. */
 #define ALP_CC3501E_FLAG_CONTINUATION 0x04
+
+/** Bit position of the v8 request retry seq inside the flags byte.
+ *
+ *  Flags bits 3..7 (`0x08`-`0x80`) carry a 5-bit retry seq identifying one
+ *  LOGICAL request, so the firmware can tell "the host is re-asking for the
+ *  result of the operation I already ran" from "the host wants this operation
+ *  run again".  Without it, the host's poll-by-repeat -- which re-sends a
+ *  byte-identical frame while the worker is busy -- is indistinguishable from
+ *  a fresh request, and a reply lost in transit makes the firmware re-execute
+ *  (cc3501e-bridge-firmware#102).
+ *
+ *  Bits 0..2 keep their v1 meanings; bits 3..7 read zero on every host up to
+ *  and including v7, which is why this needed no wire-format change.
+ *  @see ALP_CC3501E_REQ_SEQ_NONE for why zero is not a usable seq. */
+#define ALP_CC3501E_FLAG_REQ_SEQ_SHIFT 3u
+
+/** Mask of the retry-seq VALUE, after shifting down by
+ *  @ref ALP_CC3501E_FLAG_REQ_SEQ_SHIFT -- i.e. 5 bits, 0..31. */
+#define ALP_CC3501E_REQ_SEQ_MASK 0x1Fu
+
+/** Mask of the retry-seq bits IN PLACE within the flags byte. */
+#define ALP_CC3501E_FLAG_REQ_SEQ_BITS 0xF8u
+
+/** Seq value reserved to mean "this request carries no identity".
+ *
+ *  A v7-and-earlier host leaves the whole flags byte's upper bits clear, so
+ *  every one of its frames would otherwise look like the same seq and could be
+ *  answered from a cached reply for an operation the host never asked twice.
+ *  Reserving zero makes that case explicit and un-cacheable in BOTH
+ *  directions; the usable seq space is 1..@ref ALP_CC3501E_REQ_SEQ_LAST. */
+#define ALP_CC3501E_REQ_SEQ_NONE 0u
+
+/** Highest usable retry seq (the space is 1..31; 0 is
+ *  @ref ALP_CC3501E_REQ_SEQ_NONE). */
+#define ALP_CC3501E_REQ_SEQ_LAST 31u
 
 /** Marker for the first opcode in the vendor-extension reserved range.
  *  Opcodes >= this value are NOT used by the v1 protocol and are

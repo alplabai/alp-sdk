@@ -7,6 +7,56 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Changed — CC3501E wire protocol 7 to 8: request identity for every worker-routed opcode
+
+**HELD: needs `cc3501e-bridge-firmware` v0.6.0 (protocol 8) to be released and a
+bench run before this ships.** A protocol-8 host refuses a protocol-7 firmware
+outright (`cc3501e_reset()` returns `ALP_ERR_VERSION` on a `GET_VERSION`
+mismatch), so merging this before that firmware release would break the
+companion link on every unit currently flashed with v0.5.1.
+
+Protocol v7 gave `SOCK_SEND` a retry seq so a lost reply could not make the
+host's poll-by-repeat look like a new request and re-transmit the payload. That
+fix could only ever cover one opcode, because it spent a spare byte that
+happened to exist inside one request struct; the other 25 worker-routed opcodes
+still had no request identity at all, and a lost reply on any of them
+re-executed the operation
+(`alplabai/cc3501e-bridge-firmware#102`).
+
+- **The seq moved to the frame header.** Flags bits 3..7 (`0x08`-`0x80`, unused
+  through v7) carry a 5-bit retry seq, so every worker-routed opcode is covered
+  at zero wire cost and with no per-opcode struct change.
+  `poll_by_repeat()` allocates one seq per LOGICAL command and re-sends it
+  unchanged on every retry of that command — that constancy is the whole
+  mechanism. `cc3501e_request()`, the single-shot path with no retry loop, sends
+  the reserved `ALP_CC3501E_REQ_SEQ_NONE` (0) instead, so a frame that is not a
+  repeat of anything can never be answered from the firmware's latch. A pre-v8
+  host leaves those bits clear, which is why 0 had to be reserved: without it,
+  every one of its frames of a given opcode would look like the same seq.
+- **`DIAG_GET_STATS` grew additively, 8 to 16 bytes.** `cc3501e_diag_stats()`
+  now fills a `cc3501e_diag_stats_t` — a struct rather than out-params,
+  because the reply has now changed shape twice — carrying `worker_execs` and
+  `retry_latch_hits` beside the two frame counters. Those two are what
+  distinguish "the retry was absorbed" from "the operation ran twice", i.e. the
+  only way to observe the fix above on hardware. A v7 firmware answers only the
+  first two counters; `has_worker_counters` then reports the other two as
+  ABSENT rather than as a measured zero, and `alp companion diag stats` says so
+  in words — a bench run told "retry_latch_hits = 0" by firmware that never
+  counted them would record a pass for a mechanism that was not running.
+
+`SOCK_SEND` keeps its own 8-bit struct seq and is exempt from the header-seq
+mechanism on both sides (8 bits of identity is strictly stronger than 5, and
+that path is the bench-validated one); `SOCK_RECV` is exempt because it consumes
+stream state, so a header-seq match is not evidence that two frames are the same
+logical read.
+
+Verified in `tests/zephyr/cc3501e_host_driver` against the software slave model,
+78/78 cases, each new assertion mutation-proven: re-allocating the seq per
+attempt instead of per command, making the single-shot path claim a real seq,
+and hard-coding `has_worker_counters` true each fail exactly one test and no
+others. Not verified on silicon — the AEN801 bench unit is hardware-dead
+(#1883).
+
 ### Fixed — thirteen Alif E8 driver defects found against the HWRM, four proven on silicon
 
 A read-only review of the Alif E8 drivers against `AHRM0012NDA` v0.3, datasheet

@@ -142,6 +142,30 @@ struct cc3501e {
 	 * back. */
 	uint8_t sock_send_seq;
 
+	/* Generic request retry seq (proto v8, cc3501e-bridge-firmware#102).
+	 *
+	 * sock_send_seq above covers ONE opcode, because v7 could only spend a
+	 * spare byte that happened to exist inside alp_cc3501e_sock_send_t.  v8
+	 * puts a 5-bit seq in the frame header's flags byte instead, so every
+	 * worker-routed opcode gets the same protection at zero wire cost.
+	 *
+	 * poll_by_repeat() allocates ONE value here per LOGICAL command and
+	 * re-sends it unchanged on every BUSY/IO retry of that command; the
+	 * constancy across retries is the whole mechanism, exactly as for
+	 * sock_send_seq.  cc3501e_request() -- the single-shot path, no retry
+	 * loop -- sends ALP_CC3501E_REQ_SEQ_NONE instead, so a frame with no
+	 * retry semantics can never be answered from the firmware's latch.
+	 *
+	 * WRAP: the space is 1..ALP_CC3501E_REQ_SEQ_LAST (31), skipping 0, so
+	 * this wraps every 31 commands rather than every 256.  That is far
+	 * tighter than sock_send_seq's, and it is a real residual: the firmware
+	 * latch is a single entry, so a stale hit needs the same opcode, the
+	 * same seq, AND no intervening worker-routed completion to overwrite the
+	 * entry -- roughly 31 intervening non-worker-routed commands, which is
+	 * seconds of ordinary idle rather than something exotic.  Stated, not
+	 * hidden; see the s_retry_latch comment in the firmware's protocol.c. */
+	uint8_t req_seq;
+
 	/* SPI1 host-passthrough staging (proto v6, opcodes 0x55..0x57).  Same rule
 	 * as sock_buf above, for the same reason: one TRANSFER chunk is
 	 * ALP_CC3501E_SPI1_MAX_XFER (4088) data bytes plus its header, so a local

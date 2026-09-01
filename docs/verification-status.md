@@ -32,7 +32,7 @@ ledger is the one to trust.
 
 ## Summary
 
-85 silicon/HIL-gated ledger rows parsed across 7 sections.  A row can carry more than one glyph
+86 silicon/HIL-gated ledger rows parsed across 7 sections.  A row can carry more than one glyph
 (e.g. half a feature done, half pending), so glyph counts can
 exceed the row count.  This total EXCLUDES two kinds of row that
 would otherwise inflate it: the rows under "CI-only / tooling rows (no HIL gate)"
@@ -44,7 +44,7 @@ duplicated from the v0.4 section already counted above).
 | Glyph | Meaning | Count |
 |---|---|---|
 | `⏳` | untested | 39 |
-| `🟡` | partial | 36 |
+| `🟡` | partial | 37 |
 | `✅` | verified | 11 |
 | `❌` | failing | 1 |
 | `n/a` | n/a | 0 |
@@ -150,6 +150,7 @@ but a family having *some* `✅` rows does not mean every row for it is
 | `<alp/wdt.h>` AEN-Zephyr | `src/backends/wdt/zephyr_drv.c` | ⏳ untested | Watchdog reset observed when feed thread is starved | HIL | v0.2 |
 | Real CC3501E Wi-Fi/BLE dispatch on AEN-Zephyr | `src/backends/wifi/cc3501e.c + src/backends/ble/cc3501e.c` | ⏳ untested | `alp_wifi_open()` selects the CC3501E provider and `alp_ble_open()` + scan complete on real AEN silicon | HIL via `aen-cc3501e-companion-tour` `PORTABLE_WIRELESS:` lines | v0.9 |
 | CC3501E companion OTA (bridge-streamed, cold-swap) | `chips/cc3501e/cc3501e_ota.c` + `cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti.c` | ✅ verified | A forward-signed vendor image streamed over the bridge reaches `state=2` STAGED, the CC35's own `psa_fwu_request_reboot()` swaps it, and the swapped image self-accepts and persists across a true cold POR (no rollback) | Bench-proven on the E1M-AEN801 EVK, 2026-07-10 (`docs/cc3501e-production.md` §OTA; `cc3501e-bridge-firmware:BRINGUP_STATUS.md` §5) | v0.9 |
+| CC3501E request identity (wire protocol v8) | `chips/cc3501e/cc3501e_core.c` (`poll_by_repeat` seq allocation) + `cc3501e-bridge-firmware:src/protocol.c` (retry latch) | 🟡 partial | One logical command re-sends ONE seq across every retry, a new command allocates a different one, and the single-shot path sends the reserved seq 0; on hardware, a dropped reply then shows `worker_execs` +1 and `retry_latch_hits` +1 instead of `worker_execs` +2 | native_sim (`tests/zephyr/cc3501e_host_driver`, 4 cases, each mutation-proven against the software slave model); **HIL pending** -- needs firmware v0.6.0 (protocol 8) and a working AEN801 (#1883 -- the bench unit is hardware-dead) | v0.17 |
 | EdgeAI vision reference app | `examples/aen/edgeai-vision-aen/` | ⏳ untested | ≥10 fps inference on real E1M EVK | HIL | v0.2 |
 
 ## v0.3.0 — IoT app, multi-proc, board.yaml
