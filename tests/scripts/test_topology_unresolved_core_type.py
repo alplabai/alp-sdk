@@ -39,6 +39,7 @@ from alp_orchestrate.topology import (  # noqa: E402
     _allowed_os_for_core,
     _cross_class_os,
     _default_os_from_core_type,
+    _runtime_class,
 )
 
 METADATA_ROOT = REPO / "metadata"
@@ -58,6 +59,62 @@ def test_default_os_never_raises_on_an_unresolved_type(core_type) -> None:
     schema-invalid `--metadata-root` can reach.
     """
     assert _default_os_from_core_type(core_type) == "off"
+
+
+@pytest.mark.parametrize("core_type", UNRESOLVED)
+def test_emit_kconfig_never_raises_on_an_unresolved_type(core_type) -> None:
+    """The fifth site, found by the review's antipattern grep (#1888).
+
+    `--emit os-topology` was fixed here while `--emit kconfig` kept the same
+    `(c.get("type") or "").lower()` idiom at `alp_orchestrate/kconfig.py`,
+    reading the SAME `cores[].type` on the SAME schema-invalid precondition --
+    so the crash this module exists to close stayed live on the other emit.
+    `vector_extension` is covered too: it is the identical idiom one line
+    above, is declared `"type": "string"` by the same `$defs/core`, and that
+    line is its only read in the tree.
+
+    The assertion is the REF default rather than merely "does not raise": an
+    unresolved type must fall through to the scalar-safe kernel, never be
+    guessed into NEON.
+    """
+    json = pytest.importorskip("json")
+    yaml = pytest.importorskip("yaml")
+    import types
+
+    from alp_orchestrate import kconfig as K
+    from alp_orchestrate.models import Slice
+
+    soc = json.loads(
+        (METADATA_ROOT / "socs" / "alif" / "ensemble" / "e3.json").read_text())
+    som = yaml.safe_load(
+        (METADATA_ROOT / "e1m_modules" / "E1M-AEN301.yaml").read_text())
+    for c in soc["cores"]:
+        if c["id"] == "m55_he":
+            c["type"] = core_type
+            c["vector_extension"] = core_type
+    proj = types.SimpleNamespace(
+        soc_spec=soc, som_preset=som, sku="E1M-AEN301",
+        effective_metadata_root=lambda: METADATA_ROOT)
+    slice_ = Slice(core_id="m55_he", os="zephyr",
+                   inference={"default_arena_kib": 256})
+
+    lines = K._emit_inference(proj, slice_, som.get("silicon"))
+    assert "CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_REF=y" in lines, lines
+
+
+@pytest.mark.parametrize("core_type", UNRESOLVED)
+def test_runtime_class_never_raises_on_an_unresolved_type(core_type) -> None:
+    """The third row of this PR's divergence table, which nothing pinned.
+
+    Added on review (#1888): every other assertion in this module and in
+    `test_emit_os_topology.py` reaches `_runtime_class` THROUGH
+    `core_os_topology`, which has already normalised the value to `""` -- so
+    reverting the `isinstance` guard in `_runtime_class` alone left the suite
+    byte-identically green. The branch is unreachable by construction today,
+    which is exactly why it needs a test rather than a reader: this asserts
+    the helper's own contract, independent of who calls it.
+    """
+    assert _runtime_class(core_type) == "other"
 
 
 @pytest.mark.parametrize("core_type", UNRESOLVED)
