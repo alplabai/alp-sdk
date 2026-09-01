@@ -100,7 +100,12 @@ SDK_VERSION_YAML = REPO / "metadata" / "sdk_version.yaml"
 ABI_DIR = REPO / "docs" / "abi"
 REMOVED_SYMBOLS_PATH = ABI_DIR / "removed-symbols.json"
 
-_SDK_VERSION_RE = re.compile(r"^version:\s*(\d+)\.(\d+)\.(\d+)\s*$", re.MULTILINE)
+# Trailing `(?:-[\w.]+)?` tolerates (and ignores) a SemVer pre-release
+# suffix (`0.16.0-rc1`, #1902) -- snapshots are keyed MAJOR.MINOR only, so
+# an rc's own suffix is irrelevant here; without it this regex's `\s*$`
+# anchor rejected the whole line and current_snapshot_version() below
+# silently returned None ("can't verify") for the entire rc window.
+_SDK_VERSION_RE = re.compile(r"^version:\s*(\d+)\.(\d+)\.(\d+)(?:-[\w.]+)?\s*$", re.MULTILINE)
 
 # ---------------------------------------------------------------------
 # Tokenisation helpers

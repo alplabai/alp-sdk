@@ -5,7 +5,15 @@
 # Steps (now split across two jobs for SLSA L3):
 #
 #   1. `build` job:
-#      a. Verify the tag matches `metadata/sdk_version.yaml`.
+#      a. Verify the tag matches `metadata/sdk_version.yaml`.  Compares
+#         CORE versions on both sides (#1902): `metadata/sdk_version.yaml`'s
+#         `version:` may itself carry a pre-release suffix during an rc
+#         window (`scripts/bump_version.py --to X.Y.Z-rcN` writes it
+#         verbatim, matching SemVer's own prerelease syntax so a build made
+#         from that checkout identifies itself as an rc instead of as its
+#         eventual GA version) or stay the bare core version the way a GA
+#         bump always does -- either form must match the TAG's core
+#         version, suffix or no suffix on either side.
 #      b. Verify the ABI snapshot at docs/abi/v<N>-snapshot.json
 #         exists.
 #      c. Verify CHANGELOG.md has a matching `## [v<N>] - YYYY-MM-DD`
@@ -141,10 +149,29 @@ jobs:
           echo "core_version=$CORE_VERSION" >> "$GITHUB_OUTPUT"
           echo "is_prerelease=$([ "$VERSION" = "$CORE_VERSION" ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
 
-          # Verify metadata/sdk_version.yaml matches.
+          # Verify metadata/sdk_version.yaml matches. `version:` may itself
+          # carry a pre-release suffix during an rc window (#1902, e.g.
+          # `0.16.0-rc1` for the commit tagged `v0.16.0-rc1` --
+          # scripts/bump_version.py writes it verbatim) or stay the bare
+          # core version the way a GA bump always does -- strip DECLARED's
+          # own suffix the same way the tag's was stripped above so both
+          # forms compare against the tag's core version consistently.
           DECLARED=$(python3 -c "import yaml; print(yaml.safe_load(open('metadata/sdk_version.yaml'))['version'])")
-          if [ "$DECLARED" != "$CORE_VERSION" ]; then
+          DECLARED_CORE="${DECLARED%%-*}"
+          if [ "$DECLARED_CORE" != "$CORE_VERSION" ]; then
             echo "::error::Tag core version $CORE_VERSION doesn't match metadata/sdk_version.yaml ($DECLARED)"
+            exit 1
+          fi
+          # A GA tag (no suffix of its own) must not ship a build still
+          # declaring an rc suffix -- that would silently reintroduce
+          # #1902 in the other direction (a GA build reporting itself as
+          # an rc). Catches a forgotten final `--to X.Y.Z` bump after the
+          # last rc; a pre-release tag has no such constraint (DECLARED
+          # may legitimately still be a bare core version if the operator
+          # never re-bumped for this particular rc -- back-compatible with
+          # the pre-#1902 workflow).
+          if [ "$VERSION" = "$CORE_VERSION" ] && [ "$DECLARED" != "$CORE_VERSION" ]; then
+            echo "::error::Tag $TAG is a GA release, but metadata/sdk_version.yaml still declares a pre-release version ($DECLARED) -- bump it to the bare $CORE_VERSION before tagging GA."
             exit 1
           fi
 
