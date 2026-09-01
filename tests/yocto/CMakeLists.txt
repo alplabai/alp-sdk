@@ -562,6 +562,36 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_i2c
              COMMAND alp_test_peripheral_i2c)
 
+    # Closed-bus status-code regression for issue #1834: every op on a
+    # NULL-or-closed `bus` must return ALP_ERR_NOT_READY, matching every
+    # Zephyr dispatcher and ADR-0002's 2026-08-27 amendment, instead of
+    # the ALP_ERR_INVAL this backend used to return for both cases.
+    # peripheral_i2c_closed_status.c #includes the real
+    # src/yocto/peripheral_i2c.c directly (same technique as
+    # alp_test_peripheral_gpio_irq_rollback below) to reach
+    # pool_acquire()/pool_release() and build a genuinely closed,
+    # non-NULL handle without a real /dev/i2c-N.  Deliberately NOT
+    # linked against alp::sdk -- same ODR rationale as
+    # alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_peripheral_i2c_closed_status
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i2c_closed_status.c
+        # alp_i2c_open() (compiled in as part of the #include-the-.c-file
+        # technique, even though this test never calls it) references
+        # alp_internal_set_last_error(); pull in its one canonical
+        # definition so the link is self-contained without alp::sdk.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    )
+    target_include_directories(alp_test_peripheral_i2c_closed_status PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_i2c_closed_status PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_i2c_closed_status
+             COMMAND alp_test_peripheral_i2c_closed_status)
+
     add_executable(alp_test_peripheral_spi
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_spi.c
     )
@@ -574,6 +604,29 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_spi
              COMMAND alp_test_peripheral_spi)
 
+    # Closed-bus status-code regression for issue #1834: same rationale
+    # as alp_test_peripheral_i2c_closed_status above, for the SPI
+    # backend.  peripheral_spi_closed_status.c #includes the real
+    # src/yocto/peripheral_spi.c directly to reach
+    # pool_acquire()/pool_release() and build a genuinely closed,
+    # non-NULL handle without a real /dev/spidevN.M.  Deliberately NOT
+    # linked against alp::sdk -- same ODR rationale as
+    # alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_peripheral_spi_closed_status
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_spi_closed_status.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    )
+    target_include_directories(alp_test_peripheral_spi_closed_status PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_spi_closed_status PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_spi_closed_status
+             COMMAND alp_test_peripheral_spi_closed_status)
+
     add_executable(alp_test_peripheral_uart
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart.c
     )
@@ -585,6 +638,29 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     add_test(NAME alp_test_peripheral_uart
              COMMAND alp_test_peripheral_uart)
+
+    # Closed-port status-code regression for issue #1834: same
+    # rationale as alp_test_peripheral_i2c_closed_status above, for the
+    # UART backend.  peripheral_uart_closed_status.c #includes the real
+    # src/yocto/peripheral_uart.c directly to reach
+    # pool_acquire()/pool_release() and build a genuinely closed,
+    # non-NULL handle without a real /dev/tty*.  Deliberately NOT
+    # linked against alp::sdk -- same ODR rationale as
+    # alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_peripheral_uart_closed_status
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart_closed_status.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    )
+    target_include_directories(alp_test_peripheral_uart_closed_status PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_uart_closed_status PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_uart_closed_status
+             COMMAND alp_test_peripheral_uart_closed_status)
 
     add_executable(alp_test_peripheral_gpio
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio.c

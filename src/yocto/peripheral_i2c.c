@@ -168,7 +168,15 @@ alp_i2c_t *alp_i2c_open(const alp_i2c_config_t *cfg)
 
 alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, size_t len)
 {
-	if (bus == NULL || !bus->in_use || (data == NULL && len > 0)) {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1834, same shape as
+	 * #1734's GPIO fix).  A malformed @p data/@p len pairing is a
+	 * separate condition -- ALP_ERR_INVAL, checked only once the
+	 * handle itself is known good. */
+	if (bus == NULL || !bus->in_use) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (data == NULL && len > 0) {
 		return ALP_ERR_INVAL;
 	}
 	alp_status_t rc = ensure_slave(bus, addr);
@@ -187,7 +195,14 @@ alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, si
 
 alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t len)
 {
-	if (bus == NULL || !bus->in_use || (data == NULL && len > 0)) {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1834).  A malformed
+	 * @p data/@p len pairing is a separate condition -- ALP_ERR_INVAL,
+	 * checked only once the handle itself is known good. */
+	if (bus == NULL || !bus->in_use) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (data == NULL && len > 0) {
 		return ALP_ERR_INVAL;
 	}
 	alp_status_t rc = ensure_slave(bus, addr);
@@ -211,8 +226,10 @@ alp_status_t alp_i2c_write_read(alp_i2c_t     *bus,
                                 uint8_t       *rdata,
                                 size_t         rlen)
 {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1834). */
 	if (bus == NULL || !bus->in_use) {
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	if ((wdata == NULL && wlen > 0) || (rdata == NULL && rlen > 0)) {
 		return ALP_ERR_INVAL;
