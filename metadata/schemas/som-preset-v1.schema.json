@@ -708,6 +708,10 @@
         "notes": {
           "type": "string",
           "description": "Free-form note (rare in the public form -- design rationale belongs in the private metadata repo)."
+        },
+        "broadcast_address": {
+          "type": "boolean",
+          "description": "True when `address_7bit` is a broadcast / global-call address multiple devices on this bus legitimately answer BY DESIGN (e.g. the TAS2563 family's 0x48 global-call write-only address, metadata/chips/tas2563.yaml). Excludes this entry from scripts/validate_metadata.py's duplicate-(bus,address_7bit) collision check (#1845). Do NOT set this to silence a real strap conflict between two unrelated devices -- document a real conflict via `notes:` instead and fix the strap."
         }
       }
     }

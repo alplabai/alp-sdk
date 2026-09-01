@@ -19,6 +19,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -325,6 +326,79 @@ def _check_som_peripheral_instance_uniqueness(som_files) -> list:
     return failures
 
 
+def _check_som_i2c_address_collisions(som_files) -> list:
+    """Reject two on-module I2C devices sharing (bus, address_7bit).
+
+    `on_module.i2c_devices.<bus>.devices[]` records the schematic
+    strap-selected address per on-module device.  Two chips answering the
+    same address on the same bus is a real silicon defect, not an
+    editorial nit: #1163 (TMP112 vs the DEEPX LPDDR buck, both at 0x48)
+    and #1659 (an INA236 vs the TAS2563 broadcast address, also 0x48) are
+    real prior instances (#1845).  JSON Schema has no way to express
+    "unique across sibling array entries by a derived key", so enforce it
+    here.
+
+    An entry does NOT count as a fixed, collision-checkable address when:
+      * `address_7bit` is the literal `"TBD"` -- pending the HW-config
+        writeup, not yet a real value;
+      * `address_7bit` is the literal `"configurable"` -- picked by the
+        chip's own firmware (e.g. the GD32 supervisor MCU), not a
+        hardware-fixed strap two devices could physically contend over;
+      * `assembled: false` -- DNI, physically absent from the bus;
+      * `broadcast_address: true` -- a broadcast/global-call address
+        legitimately shared by design (e.g. TAS2563's 0x48, see
+        metadata/chips/tas2563.yaml). Do not reach for this opt-out to
+        silence a real strap conflict.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in som_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        buses = _as_dict(_as_dict(doc.get("on_module")).get("i2c_devices"))
+
+        msgs: list[str] = []
+        checked = 0
+        for bus_name, bus in sorted(buses.items()):
+            if not isinstance(bus, dict):
+                continue
+            seen: dict[int, list[dict]] = {}
+            for dev in _dict_entries(bus.get("devices")):
+                if dev.get("assembled") is False or dev.get("broadcast_address") is True:
+                    continue
+                addr = dev.get("address_7bit")
+                if not isinstance(addr, str) or not re.fullmatch(r"0x[0-9A-Fa-f]{1,2}", addr):
+                    continue  # "TBD" / "configurable" / malformed -- not a fixed address
+                checked += 1
+                seen.setdefault(int(addr, 16), []).append(dev)
+            for addr_int, devs in sorted(seen.items()):
+                if len(devs) < 2:
+                    continue
+                names = ", ".join(f"{d.get('chip')}/{d.get('role')}" for d in devs)
+                msgs.append(
+                    f"on_module.i2c_devices.{bus_name}: {names} all declare "
+                    f"address_7bit=0x{addr_int:02X} on the same bus -- two "
+                    f"devices cannot share a fixed I2C address (#1845); set "
+                    f"broadcast_address: true only if this is a real "
+                    f"broadcast/global-call address")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}  (i2c_devices: {checked} address(es) checked, "
+                  f"no collisions)")
+    return failures
+
+
 def _check_som_slot0_address_resolved(som_files) -> list:
     """Refuse a `memory_map:` region that names an MRAM slot0 path but
     carries no resolved address (tan-cli#353).
@@ -512,6 +586,99 @@ def _check_peripheral_kconfig() -> list:
     else:
         n = len(_as_dict(data.get("peripherals")))
         print(f"OK   {rel}  (peripherals={n})")
+    return failures
+
+
+def _check_board_i2c_address_collisions(board_files) -> list:
+    """Reject two on-board I2C device instances sharing an address.
+
+    A board preset declares on-board I2C devices two ways, checked
+    separately here because each carries its own bus scope:
+
+      * `i2c_devices[]` -- ONE array per file; every entry sits on the
+        single implicit on-board I2C bus documented in-file (e.g.
+        e1m-evk.yaml: "all on ALP_E1M_I2C0, the sensor bus"). The schema
+        has no per-entry bus field because the board only has the one.
+      * `audio.codecs[]` -- each entry names its own `i2c_bus` explicitly
+        (a board can carry more than one audio-adjacent bus).
+
+    Two chips answering the same address on the same bus is a real
+    silicon defect, not an editorial nit: #1163 (TMP112 vs the DEEPX
+    LPDDR buck, both at 0x48) and #1659 (an INA236 vs the TAS2563
+    broadcast address, also 0x48) are real prior instances (#1845). JSON
+    Schema has no way to express "unique across sibling array entries by
+    a derived key", so enforce it here. An entry with
+    `broadcast_address: true` is skipped: a broadcast/global-call address
+    is legitimately shared by design (e.g. TAS2563's 0x48, see
+    metadata/chips/tas2563.yaml) -- do not reach for that opt-out to
+    silence a real strap conflict.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in board_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+
+        msgs: list[str] = []
+        checked = 0
+
+        # i2c_devices[] -- one implicit on-board bus per file.
+        seen: dict[int, list[dict]] = {}
+        for dev in _dict_entries(doc.get("i2c_devices")):
+            if dev.get("broadcast_address") is True:
+                continue
+            addr = dev.get("address")
+            if not isinstance(addr, str) or not re.fullmatch(r"0x[0-9A-Fa-f]{2}", addr):
+                continue
+            checked += 1
+            seen.setdefault(int(addr, 16), []).append(dev)
+        for addr_int, devs in sorted(seen.items()):
+            if len(devs) < 2:
+                continue
+            names = ", ".join(f"{d.get('part')}/{d.get('designator')}" for d in devs)
+            msgs.append(
+                f"i2c_devices: {names} all declare address=0x{addr_int:02X} "
+                f"on the board's on-board I2C bus -- two devices cannot "
+                f"share a fixed I2C address (#1845); set "
+                f"broadcast_address: true only if this is a real "
+                f"broadcast/global-call address")
+
+        # audio.codecs[] -- each entry names its own bus.
+        seen_by_bus: dict[tuple[str, int], list[dict]] = {}
+        for dev in _dict_entries(_as_dict(doc.get("audio")).get("codecs")):
+            if dev.get("broadcast_address") is True:
+                continue
+            bus = dev.get("i2c_bus")
+            addr = dev.get("i2c_address")
+            if not isinstance(bus, str) or not isinstance(addr, str):
+                continue
+            if not re.fullmatch(r"0x[0-9A-Fa-f]{1,2}", addr):
+                continue
+            checked += 1
+            seen_by_bus.setdefault((bus, int(addr, 16)), []).append(dev)
+        for (bus, addr_int), devs in sorted(seen_by_bus.items()):
+            if len(devs) < 2:
+                continue
+            names = ", ".join(f"{d.get('chip')}/{d.get('designator')}" for d in devs)
+            msgs.append(
+                f"audio.codecs: {names} all declare i2c_address=0x{addr_int:02X} "
+                f"on {bus} -- two devices cannot share a fixed I2C address "
+                f"(#1845); set broadcast_address: true only if this is a "
+                f"real broadcast/global-call address")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}  (i2c address(es): {checked} checked, no collisions)")
     return failures
 
 
@@ -1892,6 +2059,9 @@ def main() -> int:
                 lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "name",
             )
+            # #1845: two chips declaring the same (bus, address) reaches
+            # silicon as two devices answering one address.
+            board_failures += _check_board_i2c_address_collisions(board_files)
 
     # Chip manifests (YAML) against chip-v1 schema.
     chip_failures: list = []
@@ -1993,6 +2163,12 @@ def main() -> int:
         print()
         slot0_address_failures = _check_som_slot0_address_resolved(som_files)
 
+    # SoM `on_module.i2c_devices.<bus>.devices[]` (bus, address_7bit) uniqueness (#1845).
+    i2c_collision_failures: list = []
+    if som_files:
+        print()
+        i2c_collision_failures = _check_som_i2c_address_collisions(som_files)
+
     # Silicon -> Kconfig registry + socs/ correspondence.
     print()
     silicon_kconfig_failures = _check_silicon_kconfig()
@@ -2011,6 +2187,7 @@ def main() -> int:
                       + len(restriction_failures)
                       + len(instance_uniqueness_failures)
                       + len(slot0_address_failures)
+                      + len(i2c_collision_failures)
                       + len(silicon_kconfig_failures)
                       + len(peripheral_kconfig_failures)
                       + len(tier_a_library_ci_failures))
