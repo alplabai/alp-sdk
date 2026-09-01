@@ -105,6 +105,14 @@ Codified in `.github/workflows/release.yml` + `scripts/bump_version.py`.
 The cut happens on `main`, and only after `dev` has been promoted to
 `main` through the release gate (bench / hardware / CI passed):
 
+0. Write the release body: `docs/release-notes/v<N>.md` (see
+   [`docs/release-notes/README.md`](release-notes/README.md) for the
+   format, and -- importantly -- how to correctly compute "what
+   changed since the last release" when drafting it; the naive
+   `git log`/`git diff` between `dev` and `main` gets this wrong, see
+   the "Back-merge `main` -> `dev`" section below). Land it on `main`
+   in the same PR as steps 1-5. `release.yml` reads this file directly
+   as the Release body for a final (non-`-rcN`) tag -- see step 7.
 1. Validate the verification ledger -- every row in
    `docs/test-plan.md` for the target version must be `✅` or `n/a`.
 2. Regenerate `docs/abi/v<N>-snapshot.json` for the target
@@ -119,27 +127,28 @@ The cut happens on `main`, and only after `dev` has been promoted to
    `## [v<N>] - YYYY-MM-DD`.
 6. Tag: `git tag -s v<N>` (signed).
 7. Push tag; the release workflow auto-creates the GitHub Release,
-   **published immediately** (not draft) with an auto-generated
-   body that a maintainer replaces as soon as the Release page
-   exists (step 8) -- the raw `CHANGELOG.md` slice for the
-   version, which is exhaustive by construction (a full release
-   cycle's `[Unreleased]` section runs tens to hundreds of
-   thousands of characters) -- and the source tarball
+   **published immediately** (not draft), with the tarball
    (`alp-sdk-v<N>.tar.gz`) plus three sidecar files as artefacts:
    SHA-256 + SHA-512 checksums, and a SLSA v1.0 Build **Level 3**
    provenance attestation (`alp-sdk-v<N>.tar.gz.intoto.jsonl`).
-   If the slice would exceed GitHub's 125,000-char release-body
-   limit, the workflow truncates it itself at the last complete
-   CHANGELOG entry boundary below the limit and logs a GitHub
-   Actions warning annotation with the original and truncated
-   lengths -- rather than letting `softprops/action-gh-release`
-   cut it silently mid-word, which is what it does by default. When no entry
-   boundary below the limit keeps a real majority of the body (the
-   first entry alone is already oversized) or every candidate
+   The Release **body** is step 0's `docs/release-notes/v<N>.md`,
+   read verbatim -- for a final tag, missing that file fails the
+   release outright rather than publishing a stub (mechanised,
+   alp-sdk#1728; there is no longer a post-tag hand-edit step).
+   A pre-release (`-rcN`) tag is cut before that file necessarily
+   exists, so it falls back to the raw `CHANGELOG.md` slice for the
+   version instead -- exhaustive by construction (a full release
+   cycle's `[Unreleased]` section runs tens to hundreds of thousands
+   of characters). If that fallback slice would exceed GitHub's
+   125,000-char release-body limit, the workflow truncates it itself
+   at the last complete CHANGELOG entry boundary below the limit and
+   logs a GitHub Actions warning annotation with the original and
+   truncated lengths -- rather than letting `softprops/action-gh-release`
+   cut it silently mid-word, which is what it does by default. When no
+   entry boundary below the limit keeps a real majority of the body
+   (the first entry alone is already oversized) or every candidate
    boundary sits inside an open code fence, the step fails instead
-   of publishing a near-empty or fence-broken body; write the
-   release notes by hand for that tag (`alp-lab:cutting-a-release`
-   skill step 0) instead (alp-sdk#1492).
+   of publishing a near-empty or fence-broken body (alp-sdk#1492).
    The attestation is produced by the
    `slsa-framework/slsa-github-generator` reusable workflow
    running in an isolated, ephemeral GitHub-hosted runner that
@@ -149,20 +158,53 @@ The cut happens on `main`, and only after `dev` has been promoted to
    the command checks the Sigstore signature, the workflow
    identity (`slsa-framework/slsa-github-generator`), the source
    repo, and the artefact digest all match in a single check.
-8. Replace the draft body with a lean, hand-written summary as
-   soon as the Release page exists -- write it *before* the tag
-   push (it costs nothing once step 4's CHANGELOG content is
-   final) and apply it with
-   `gh release edit v<N> --notes-file <lean.md>`. Format is the
-   shared house style: see `alp-lab:writing-release-notes` and
-   the `alp-lab:cutting-a-release` skill's step 0/9. `CHANGELOG.md`
-   stays the exhaustive record; the Release page is a summary, and
-   the raw auto-slice from step 7 is never the body a reader is
-   meant to see for long.
 
 A patch release skips steps 1-2 (the verification ledger doesn't
-move; ABI doesn't change) but still updates `sdk_version.yaml`
-+ CHANGELOG slice.
+move; ABI doesn't change) but still writes step 0's release-notes
+file and updates `sdk_version.yaml` + CHANGELOG slice.
+
+## Back-merge `main` -> `dev`
+
+Immediately after the tag, `main` must be merged back into `dev` (a
+`sync/main-to-dev-v<N>` PR) so `dev`'s `metadata/sdk_version.yaml` --
+the single source `alp_cli._version()` reads -- doesn't stay stale at
+the pre-release number for the whole next cycle.
+
+**This PR is always squash-merged, and that is not a bug to fix by
+forcing a real merge commit.** `dev` carries an active branch-ruleset
+merge queue (`gh api repos/alplabai/alp-sdk/rulesets` -> "dev merge
+queue") whose `merge_method` is `SQUASH`, unconditionally, for
+*everything* that merges into `dev` -- the back-merge PR included,
+`--no-ff` request or not; server-side, not a PR-time choice. Confirmed
+against the two most recent back-merges: the v0.15.0 one (#1299, cut
+before the ruleset existed) is a real two-parent merge commit; the
+v0.16.0 one (#1651, cut after) is a single-parent squash commit,
+carrying the identical class of change.
+
+The consequence: **`main` is never an ancestor of `dev` after a
+back-merge, and neither is the tag that triggered it**
+(`git merge-base --is-ancestor v0.16.0 origin/dev` returns false as of
+this writing). Do not compute a release's "what changed since last
+time" against `dev`, and do not rely on `git merge-base main dev` for
+anything -- that merge-base sits at whatever commit the two branches
+last shared *real* ancestry at, a point that predates every release
+cut since, so a diff from it re-lists every release's contents as if
+unreleased. Compute the release-notes diff on `main`'s own tag-to-tag
+history instead (`git log v<PREV>..v<N>`, run once `dev`
+has been promoted to `main` for the cut in progress): that range stays
+intact, because `dev` -> `main` promotion is a real `--no-ff` merge --
+only merges *into* `dev` hit the merge queue. Do NOT add
+`--first-parent`: on `main` the first-parent chain is just the
+promotion merges themselves (3 commits between v0.15.0 and v0.16.0);
+the release's real work hangs off their *second* parents, so
+`--first-parent` drops it (162 commits without it, for that same
+range). This is a two-dot range, not the same thing as the
+Release page's own footer link (`compare/v<PREV>...v<N>`, a three-dot
+merge-base comparison) -- step 0's `docs/release-notes/v<N>.md` still
+draws on this two-dot range, not that link; see
+[`docs/release-notes/README.md`](release-notes/README.md) and
+[ADR-0029](adr/0029-cross-repo-pins-are-typed-lock-entries-with-a-property-gate.md)
+(observation 9 / clause 4) for the fuller record.
 
 ### Pre-release (rc) cuts
 

@@ -19,38 +19,46 @@
 #         DECLARED (both directions of #1902).
 #      b. Verify the ABI snapshot at docs/abi/v<N>-snapshot.json
 #         exists.
-#      c. Verify CHANGELOG.md has a matching `## [v<N>] - YYYY-MM-DD`
-#         section and slice it for the release notes -- a missing
-#         heading, or one present but with an empty body (e.g. the
-#         section is still under `## [Unreleased]`), FAILS the
-#         release rather than publishing an empty/stub body.  A
-#         pre-release tag (`vX.Y.Z-rcN`) is cut before the final
-#         heading exists, so it falls back to `## [Unreleased]`
-#         instead -- clearly labelled, never a silent stub.
-#      d. Generate alp.lock.  It isn't committed (#1576 -- its
+#      c. PRE-RELEASE TAG ONLY: verify CHANGELOG.md has a `##
+#         [Unreleased]` section with a non-empty body and slice it
+#         for the release notes -- an rc is cut before the final `##
+#         [v<N>] - YYYY-MM-DD` heading exists, so this is the only
+#         draft body available yet.  A missing/empty section FAILS
+#         the release rather than publishing an empty/stub body.
+#         Skipped entirely for a final tag: its body always comes
+#         from (d) instead, so computing a slice here would only add
+#         a spurious failure mode (an oversized/unsliceable section
+#         hard-failing a release whose real body is already correct).
+#      d. Prefer `docs/release-notes/v<N>.md` for the release body
+#         (#1728 -- mechanises cutting-a-release's step 0): a FINAL
+#         tag always uses it and FAILS the release if it's missing or
+#         empty; a pre-release tag uses it too when already
+#         committed, else keeps the CHANGELOG-slice draft from (c).
+#         See docs/release-notes/README.md.
+#      e. Generate alp.lock.  It isn't committed (#1576 -- its
 #         `digests.metadata` is a single hash over the whole
 #         metadata/** tree, so any two PRs touching different
 #         metadata files conflicted on that one line by
 #         construction), so a non-git consumer of the tarball still
 #         needs one -- it is folded into the tarball in the next
 #         step so the tamper-check property survives outside git.
-#      e. Build a source tarball (no binaries -- the SDK is a source
+#      f. Build a source tarball (no binaries -- the SDK is a source
 #         release), including the generated alp.lock.
-#      f. Generate SHA-256 + SHA-512 checksums.
-#      g. Emit an SBOM + build receipt (`*.cdx.json`) from that
+#      g. Generate SHA-256 + SHA-512 checksums.
+#      h. Emit an SBOM + build receipt (`*.cdx.json`) from that
 #         alp.lock.
-#      h. Emit the tarball's base64-encoded SHA-256 digest for the
+#      i. Emit the tarball's base64-encoded SHA-256 digest for the
 #         provenance generator (consumed via `outputs.hashes`).
-#      i. Create the GitHub Release with the CHANGELOG slice as a
-#         DRAFT body (truncated + warned if it would exceed GitHub's
-#         125,000-char release-body limit -- see the slice step
-#         below) and the tarball + checksums + SBOM as artefacts.
-#         A maintainer replaces the draft with a lean, hand-written
-#         summary immediately after -- see docs/release-policy.md
-#         steps 7-8 and alp-lab:cutting-a-release. The CHANGELOG
-#         stays the exhaustive record; this step's body is a
-#         starting point, never the final published prose
-#         (alp-sdk#1492).
+#      j. Create the GitHub Release with the body from (d) --
+#         truncated + warned if the (c)-fallback path is what's
+#         publishing and it would exceed GitHub's 125,000-char
+#         release-body limit, see the slice step below -- and the
+#         tarball + checksums + SBOM as artefacts.  For a final tag
+#         with the release-notes file, this is the last step that
+#         touches the body -- no post-tag hand-edit
+#         (`gh release edit`) any more.  The CHANGELOG stays the
+#         exhaustive record; a bare CHANGELOG-slice draft is never
+#         the final published prose for a final tag (alp-sdk#1492).
 #
 #   2. `provenance` job (calls the slsa-framework reusable workflow):
 #      a. Runs inside an isolated, ephemeral GitHub-hosted runner
@@ -204,6 +212,20 @@ jobs:
 
       - name: Verify + slice CHANGELOG section for the release notes
         id: changelog
+        # Only runs for a pre-release tag. A final tag's release body
+        # always comes from docs/release-notes/v<N>.md (the next step,
+        # `id: release_notes`) -- this step's output is either
+        # overwritten by that step's `cp` or never read at all, so
+        # running it for a final tag buys nothing but a spurious extra
+        # failure mode: an oversized/unsliceable CHANGELOG section
+        # would hard-fail the job here even though the notes file
+        # already has the correct, published body, discarding a
+        # perfectly good release_notes.md and telling the operator to
+        # "point body_path at" the exact file the job died before ever
+        # reading. A pre-release tag has no notes file yet by
+        # construction (cut before it exists), so it still needs this
+        # step's `## [Unreleased]` fallback.
+        if: steps.tag.outputs.is_prerelease == 'true'
         run: |
           VERSION="${{ steps.tag.outputs.core_version }}"
           IS_PRERELEASE="${{ steps.tag.outputs.is_prerelease }}"
@@ -303,7 +325,7 @@ jobs:
           # this routinely (v0.16.0-rc1's slice was 255,413 chars)
           # because this step's output is a DRAFT body, replaced by
           # hand with a lean summary right after the Release page
-          # exists (docs/release-policy.md steps 7-8).
+          # exists (docs/release-policy.md step 7).
           #
           # Truncate at the last complete "### " CHANGELOG entry
           # boundary below the limit -- but only when that boundary (a)
@@ -358,7 +380,7 @@ jobs:
                   "limit. See CHANGELOG.md for the rest. This is a draft "
                   "body -- it should already have been replaced with a "
                   "lean, hand-written summary (docs/release-policy.md "
-                  "step 8)."
+                  "step 7)."
               )
               print(
                   f"::warning::CHANGELOG slice is {len(full_body)} chars -- "
@@ -367,13 +389,67 @@ jobs:
                   f"at a CHANGELOG entry boundary instead of letting the "
                   f"platform cut it mid-word. This is a draft -- replace "
                   f"it with a lean hand-written summary now that the "
-                  f"Release page exists (docs/release-policy.md step 8).",
+                  f"Release page exists (docs/release-policy.md step 7).",
                   file=sys.stderr,
               )
               full_body = truncated_body
 
           print(full_body)
           PY
+
+      - name: Prefer the committed release-notes file for the release body
+        id: release_notes
+        # #1728: mechanises cutting-a-release's step 0. The CHANGELOG-slice
+        # step above is always a DRAFT for a final tag -- exhaustive by
+        # construction (a full [Unreleased] section runs tens to hundreds of
+        # thousands of characters, alp-sdk#1492) -- and used to require a
+        # maintainer to paste a lean summary in by hand right after the
+        # Release page appeared: `gh release edit v<N> --notes-file
+        # <lean.md>`, the old docs/release-policy.md step 8. That summary is
+        # now a file committed to the repo BEFORE the tag is pushed
+        # (docs/release-notes/v<CORE_VERSION>.md -- see
+        # docs/release-notes/README.md for the format and how to draft it),
+        # landing through the normal dev -> main flow alongside the bump
+        # commit, so this step picks it up automatically instead: no
+        # post-tag hand-edit step, and no window where the public Release
+        # page shows the raw CHANGELOG dump.
+        #
+        # A FINAL tag with no release-notes file fails the release, the same
+        # fail-loud-not-stub posture as the CHANGELOG-slice step above -- a
+        # missing lean body is exactly the gap that used to leave a
+        # six-figure-character CHANGELOG draft as the published body until a
+        # human noticed (alp-sdk#1492). A pre-release (`-rcN`) tag is exempt:
+        # it is cut before the file necessarily exists (same reasoning as
+        # the CHANGELOG-slice step's `## [Unreleased]` fallback above), so
+        # it keeps the draft body computed there.
+        #
+        # VERSION here is interpolated the same way the CHANGELOG step above
+        # does it: it's the VALIDATED core version (the "Parse tag" step
+        # already checked it matches metadata/sdk_version.yaml), not the raw
+        # pushed tag, so it carries none of the shell-metacharacter risk that
+        # makes TAG/ARCHIVE go through env: indirection elsewhere in this
+        # file (#1475).
+        run: |
+          VERSION="${{ steps.tag.outputs.core_version }}"
+          IS_PRERELEASE="${{ steps.tag.outputs.is_prerelease }}"
+          NOTES="docs/release-notes/v${VERSION}.md"
+
+          if [ -f "$NOTES" ]; then
+            # `-s` alone only catches a true zero-byte file -- a file
+            # containing just whitespace/blank lines passes `-s` (it has
+            # bytes) and would publish a blank Release body. Strip all
+            # whitespace and check what's left instead.
+            if [ -z "$(tr -d '[:space:]' < "$NOTES")" ]; then
+              echo "::error::$NOTES exists but is empty -- write the release body before tagging (see docs/release-notes/README.md)."
+              exit 1
+            fi
+            cp "$NOTES" release_notes.md
+          elif [ "$IS_PRERELEASE" != "true" ]; then
+            echo "::error::Missing $NOTES -- write the release-notes file before tagging (see docs/release-notes/README.md), then cut a new tag. The CHANGELOG slice is never the published body for a final release (alp-sdk#1492)."
+            exit 1
+          fi
+          # else: pre-release tag with no notes file yet -- keep the
+          # CHANGELOG-slice draft written by the previous step untouched.
 
       - name: Generate alp.lock
         # Not committed (#1576) -- generated here so it can be folded into
