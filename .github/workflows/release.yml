@@ -392,7 +392,11 @@ jobs:
           NOTES="docs/release-notes/v${VERSION}.md"
 
           if [ -f "$NOTES" ]; then
-            if [ ! -s "$NOTES" ]; then
+            # `-s` alone only catches a true zero-byte file -- a file
+            # containing just whitespace/blank lines passes `-s` (it has
+            # bytes) and would publish a blank Release body. Strip all
+            # whitespace and check what's left instead.
+            if [ -z "$(tr -d '[:space:]' < "$NOTES")" ]; then
               echo "::error::$NOTES exists but is empty -- write the release body before tagging (see docs/release-notes/README.md)."
               exit 1
             fi

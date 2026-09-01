@@ -21,11 +21,13 @@ regression in the real step (not a copy of it) turns them red:
      `release_notes.md` is left untouched.
   3. A final tag with an EMPTY notes file: same fail-loud behaviour --
      an empty committed file is not "no file yet", it's a forgotten step.
-  4. A pre-release (`-rcN`) tag with no notes file yet (the exact
+  4. A final tag with a WHITESPACE-ONLY notes file: same fail-loud
+     behaviour -- nonzero size alone isn't real content.
+  5. A pre-release (`-rcN`) tag with no notes file yet (the exact
      scenario an rc is always cut in): falls back to whatever the
      changelog-slice step already wrote to `release_notes.md`,
      untouched, exit 0.
-  5. A pre-release tag WITH a notes file already committed: still
+  6. A pre-release tag WITH a notes file already committed: still
      prefers it over the CHANGELOG draft (the file, once written, is
      always more accurate than a slice).
 
@@ -135,6 +137,20 @@ def test_final_tag_with_empty_notes_file_fails_the_job(tmp_path):
     assert proc.returncode != 0, (
         "an empty committed notes file is a forgotten step, not an "
         f"absent one -- must fail: {proc.stdout + proc.stderr}"
+    )
+    assert "::error::" in proc.stdout
+    assert _release_notes(tmp_path) == "STALE CHANGELOG DRAFT -- must be overwritten"
+
+
+@pytestmark_bash
+def test_final_tag_with_whitespace_only_notes_file_fails_the_job(tmp_path):
+    """A committed file that is nothing but blank lines has nonzero size
+    (`-s` alone would pass it through) but is still a forgotten step --
+    must fail the same as a truly empty file, not publish a blank body."""
+    proc = _run_release_notes_step(tmp_path, "1.2.3", False, notes_content="\n\n   \n")
+    assert proc.returncode != 0, (
+        "a whitespace-only committed notes file must fail, not publish a "
+        f"blank release body: {proc.stdout + proc.stderr}"
     )
     assert "::error::" in proc.stdout
     assert _release_notes(tmp_path) == "STALE CHANGELOG DRAFT -- must be overwritten"
