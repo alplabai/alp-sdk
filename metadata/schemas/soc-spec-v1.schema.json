@@ -348,11 +348,20 @@
         { "required": ["gops"] },
         { "required": ["tops"] }
       ],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "pattern": "^ethos-u" } },
+            "required": ["type"]
+          },
+          "then": { "required": ["mac_per_cycle"] }
+        }
+      ],
       "properties": {
         "type":            { "type": "string", "description": "e.g. ethos-u55, ethos-u85, drp-ai3, dx-m1." },
         "subtype":         { "type": "string", "description": "e.g. high-perf (NPU-HP), high-efficiency (NPU-HE), generative (NPU-HG)." },
         "paired_core":     { "type": "string", "description": "`cores[].id` of the CPU core this NPU instance is wired to (Alif: the High-Efficiency M55 drives the 128-MAC high-efficiency Ethos-U55, the High-Performance M55 the 256-MAC high-perf one). Lets the build emit size the accelerator per target core instead of assuming the SoC's most-capable instance. Omit for a shared / non-core-paired NPU (e.g. the E8 U85 on the HG subsystem)." },
-        "mac_per_cycle":   { "type": "integer" },
+        "mac_per_cycle":   { "type": "integer", "description": "MACs per cycle for this NPU instance.  REQUIRED on every `ethos-u*` entry, enforced by the `allOf` above: a consumer builds the vela `--accelerator-config` string as `<type>-<mac_per_cycle>` (e.g. `ethos-u55-256`), and there is no honest partial value to fall back to -- an entry that omits it is silently unmappable rather than wrong-but-usable, so the refusal belongs at authoring time.  Optional on non-Ethos accelerators (drp-ai, dx-m1), which are not compiled through vela." },
         "freq_mhz":        { "type": "integer" },
         "gops":            { "type": "number", "description": "Giga ops per second.  Provide either gops or tops (= gops × 1000)." },
         "tops":            { "type": "number", "description": "Tera ops per second.  Provide either gops or tops." },
