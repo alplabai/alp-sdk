@@ -8,21 +8,22 @@
 #      a. Verify the tag matches `metadata/sdk_version.yaml`.
 #      b. Verify the ABI snapshot at docs/abi/v<N>-snapshot.json
 #         exists.
-#      c. Verify CHANGELOG.md has a matching `## [v<N>] - YYYY-MM-DD`
-#         section and slice it for the release notes -- a missing
-#         heading, or one present but with an empty body (e.g. the
-#         section is still under `## [Unreleased]`), FAILS the
-#         release rather than publishing an empty/stub body.  A
-#         pre-release tag (`vX.Y.Z-rcN`) is cut before the final
-#         heading exists, so it falls back to `## [Unreleased]`
-#         instead -- clearly labelled, never a silent stub.
-#      d. Prefer `docs/release-notes/v<N>.md` over that CHANGELOG
-#         slice for a FINAL tag, when the file is committed (#1728 --
-#         mechanises cutting-a-release's step 0).  A final tag with
-#         no such file FAILS the release, same posture as (c); a
-#         pre-release tag keeps the CHANGELOG-slice draft from (c),
-#         since it's cut before the file necessarily exists.  See
-#         docs/release-notes/README.md.
+#      c. PRE-RELEASE TAG ONLY: verify CHANGELOG.md has a `##
+#         [Unreleased]` section with a non-empty body and slice it
+#         for the release notes -- an rc is cut before the final `##
+#         [v<N>] - YYYY-MM-DD` heading exists, so this is the only
+#         draft body available yet.  A missing/empty section FAILS
+#         the release rather than publishing an empty/stub body.
+#         Skipped entirely for a final tag: its body always comes
+#         from (d) instead, so computing a slice here would only add
+#         a spurious failure mode (an oversized/unsliceable section
+#         hard-failing a release whose real body is already correct).
+#      d. Prefer `docs/release-notes/v<N>.md` for the release body
+#         (#1728 -- mechanises cutting-a-release's step 0): a FINAL
+#         tag always uses it and FAILS the release if it's missing or
+#         empty; a pre-release tag uses it too when already
+#         committed, else keeps the CHANGELOG-slice draft from (c).
+#         See docs/release-notes/README.md.
 #      e. Generate alp.lock.  It isn't committed (#1576 -- its
 #         `digests.metadata` is a single hash over the whole
 #         metadata/** tree, so any two PRs touching different
@@ -168,6 +169,20 @@ jobs:
 
       - name: Verify + slice CHANGELOG section for the release notes
         id: changelog
+        # Only runs for a pre-release tag. A final tag's release body
+        # always comes from docs/release-notes/v<N>.md (the next step,
+        # `id: release_notes`) -- this step's output is either
+        # overwritten by that step's `cp` or never read at all, so
+        # running it for a final tag buys nothing but a spurious extra
+        # failure mode: an oversized/unsliceable CHANGELOG section
+        # would hard-fail the job here even though the notes file
+        # already has the correct, published body, discarding a
+        # perfectly good release_notes.md and telling the operator to
+        # "point body_path at" the exact file the job died before ever
+        # reading. A pre-release tag has no notes file yet by
+        # construction (cut before it exists), so it still needs this
+        # step's `## [Unreleased]` fallback.
+        if: steps.tag.outputs.is_prerelease == 'true'
         run: |
           VERSION="${{ steps.tag.outputs.core_version }}"
           IS_PRERELEASE="${{ steps.tag.outputs.is_prerelease }}"
@@ -267,7 +282,7 @@ jobs:
           # this routinely (v0.16.0-rc1's slice was 255,413 chars)
           # because this step's output is a DRAFT body, replaced by
           # hand with a lean summary right after the Release page
-          # exists (docs/release-policy.md steps 7-8).
+          # exists (docs/release-policy.md step 7).
           #
           # Truncate at the last complete "### " CHANGELOG entry
           # boundary below the limit -- but only when that boundary (a)
@@ -322,7 +337,7 @@ jobs:
                   "limit. See CHANGELOG.md for the rest. This is a draft "
                   "body -- it should already have been replaced with a "
                   "lean, hand-written summary (docs/release-policy.md "
-                  "step 8)."
+                  "step 7)."
               )
               print(
                   f"::warning::CHANGELOG slice is {len(full_body)} chars -- "
@@ -331,7 +346,7 @@ jobs:
                   f"at a CHANGELOG entry boundary instead of letting the "
                   f"platform cut it mid-word. This is a draft -- replace "
                   f"it with a lean hand-written summary now that the "
-                  f"Release page exists (docs/release-policy.md step 8).",
+                  f"Release page exists (docs/release-policy.md step 7).",
                   file=sys.stderr,
               )
               full_body = truncated_body
