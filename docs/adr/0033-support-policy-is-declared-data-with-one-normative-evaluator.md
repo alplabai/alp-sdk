@@ -47,12 +47,17 @@ inherits that voice.
    `topology.py:28-43` (`_default_os_from_core_type`), `topology.py:80-87`
    (`_runtime_class`, the same prefix test with a `linux`/`rtos` codomain), and
    `tan-cli/python/tan/core/os_class.py`. On an unresolved core type the two
-   repos disagree today: alp-sdk `_allowed_os_for_core("")` returns
-   `["baremetal", "off"]` and `_default_os_from_core_type(5)` raises
-   `AttributeError: 'int' object has no attribute 'lower'`; tan returns `[]` for
-   both, guarded at `python/tan/core/os_class.py:127-128` per tan-cli#914 /
-   tan-cli#957. tan took that fix and alp-sdk did not
-   ([#1852](https://github.com/alplabai/alp-sdk/issues/1852)). Through
+   repos DID disagree, and the repair is what makes the point rather than
+   softening it: alp-sdk `_allowed_os_for_core("")` returned
+   `["baremetal", "off"]` and `_default_os_from_core_type(5)` raised
+   `AttributeError: 'int' object has no attribute 'lower'`, where tan returned
+   `[]` for both, guarded at `python/tan/core/os_class.py:127-128` per
+   tan-cli#914 / tan-cli#957. tan took that fix and alp-sdk did not, for as long
+   as it took someone to notice
+   ([#1852](https://github.com/alplabai/alp-sdk/issues/1852), closed by #1888,
+   merged 2026-09-01 as `f5c7ff5b`). The divergence was real, ran undetected,
+   and was closed by hand -- which is the argument for one implementation, not
+   against it. Through
    `_cross_class_os` this reaches the refusal: an unclassified core has *both*
    real runtimes refused, and the error reads `(unclassified)`.
 3. **The field built to carry the decision is unused.**
@@ -60,10 +65,13 @@ inherits that voice.
    exists, described as "Default runtime for this core.  Customer's board.yaml
    `cores.<id>.os` overrides", and `loader.py:555` already prefers it:
    `os=str(entry.get("os") or _default_os_from_core_type(soc_core_type))`. All
-   **26** per-core `topology` entries across the twelve
+   **26** per-core `topology` entries across the eleven
    `metadata/e1m_modules/*.yaml` presets omit it, and `$defs.topology_entry` has
-   `required: []`, so that preference has never once been exercised. The
-   fall-back is the mechanism.
+   `required: []`, so the preset half of that preference has never once been
+   exercised -- a customer's own `board.yaml cores.<id>.os` still reaches it
+   through the merge at `loader.py:165-179`, and 53 in-tree `board.yaml` files
+   use it. For any core a customer does not name, the fall-back is the
+   mechanism.
 4. **"Policy metadata" names two different things.** `metadata/chips/`,
    `metadata/socs/`, `metadata/e1m_modules/`, `metadata/boards/`,
    `metadata/pinmux/` and `metadata/blocks/` are hardware truth -- they change
@@ -95,11 +103,17 @@ it under audit; they do not re-derive it from prose.**
    answer -- clause 2.
 
 2. **One normative evaluator, and it lives in alp-sdk `scripts/`.** It is
-   importable with no tan in the process and no Zephyr on the path, because 251
+   importable with no tan in the process and no Zephyr on the path, because 96
    `CMakeLists.txt` files reach `load_board_yaml` through
    `${ALP_SDK_ROOT}/scripts/alp_project.py --emit zephyr-conf --core <id>` at
    cmake-configure time, and the four `west alp-*` commands
    (`alp-lock`, `alp-migrate`, `alp-quality`, `alp-emit`) are alp-sdk Python.
+   Counted at `2e7da3ea` as
+   `grep -rl --include=CMakeLists.txt -e '--emit zephyr-conf'` = 96 files, 96
+   occurrences; 125 of the tree's 285 `CMakeLists.txt` files invoke
+   `alp_project.py` at all. An earlier draft of this clause said 251, which no
+   measurement reproduces -- the figure is load-bearing for this clause and for
+   the alternative rejected below, so it is stated with its command.
    An evaluator those paths cannot reach is not an option.
 
 3. **Consumers call it or port it under a hash-pinned audit.** No consumer
@@ -158,7 +172,7 @@ ADR-0026 measures does not reopen one layer down. The category confusion under
 **west compatibility is preserved, and that is why clause 2 is written the way
 it is.** Today the refusal fires on a plain `west build` with tan nowhere in the
 loop, via `loader.py:910`. Keeping the evaluator in alp-sdk `scripts/` means
-that path keeps its refusal unchanged, all 251 configure-time invocations keep
+that path keeps its refusal unchanged, all 96 configure-time invocations keep
 working, and `west alp-emit` / `alp-lock` / `alp-migrate` / `alp-quality` are
 unaffected. The alternative where alp-sdk stops evaluating entirely was rejected
 precisely because it would silently drop the refusal for every user building
@@ -169,7 +183,7 @@ Clause 3 puts a call or a pinned port on every consumer, and for tan that means
 either depending on an alp-sdk module -- re-introducing a boundary ADR-0020
 worked to remove -- or carrying a pinned port. Neither is free, and clause 4's
 size limit is what keeps the second option honest. Clause 6's field population
-spreads a decision across twelve preset files, so a future change to the policy
+spreads a decision across eleven preset files, so a future change to the policy
 edits 26 rows plus its gate rather than one function, and a half-finished edit
 validates green with only the gate holding it.
 
@@ -197,7 +211,7 @@ and does not wait.
   `python/tan/planner/` and outside `HAND_PORT_SOURCES`.
 - **The SDK declares only, and stops evaluating; the CLI refuses.** Rejected on
   the west measurement above: the refusal would vanish from every plain
-  `west build`, which is 251 configure-time call sites with no tan in the
+  `west build`, which is 96 configure-time call sites with no tan in the
   process. Attractive on paper -- one evaluator, cleanly on the consumer side --
   and untenable given who actually calls the loader.
 - **The SDK declares, and both sides run their own decision engine.** Rejected:

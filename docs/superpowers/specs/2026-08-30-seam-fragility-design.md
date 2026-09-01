@@ -146,12 +146,21 @@ overrides." And `scripts/alp_orchestrate/loader.py:555` already prefers it:
 os=str(entry.get("os") or _default_os_from_core_type(soc_core_type)),
 ```
 
-**Measured: all 26 `topology.<core>` entries across the twelve
+**Measured: all 26 `topology.<core>` entries across the eleven
 `metadata/e1m_modules/*.yaml` presets omit `os`.** The schema's
-`$defs.topology_entry` has `required: []`, so every one of them validates. That
-means `loader.py:555` takes the right-hand branch **100% of the time** — the
-prefix rule is not a fallback in practice, it *is* the mechanism, and the field
-built to carry the decision has never been used.
+`$defs.topology_entry` has `required: []`, so every one of them validates.
+
+Be precise about which half is unused, because the imprecise version invites a
+deletion that would break 53 projects. `entry` at `loader.py:555` is not the
+preset entry — it is the merged dict from `_resolve_topology_for_core`
+(`scripts/alp_orchestrate/loader.py:165-179`), where a customer's own
+`board.yaml cores.<id>.os` is layered over the preset's `topology.<id>`. **53
+in-tree `board.yaml` files set `cores.<id>.os`** (56 occurrences: 54 `"off"`,
+2 `zephyr`), e.g. `examples/aen/aen-analog-validate/board.yaml:27`, and every
+one of those takes the LEFT branch. So the left-hand branch is exercised
+constantly by customers; it is the **preset** field that has never been
+populated, which is what makes the prefix rule the de-facto mechanism for any
+core a customer does not name.
 
 So the change is small, and it is not a new file:
 
@@ -188,7 +197,7 @@ correctly today.
 (Proposed): alp-sdk declares support policy as data, and exactly **one**
 normative evaluator turns a declared policy into a verdict — consumers call it
 or carry a hash-pinned audited port, never a prose re-derivation. That evaluator
-stays in alp-sdk `scripts/`, because 251 configure-time `CMakeLists.txt`
+stays in alp-sdk `scripts/`, because 96 configure-time `CMakeLists.txt`
 invocations and the four `west alp-*` commands reach `load_board_yaml` with no
 tan in the process; an evaluator they cannot reach would silently drop the
 refusal from every plain `west build`. One evaluator is also what keeps this
@@ -252,15 +261,19 @@ tan guards at `tan-cli/python/tan/core/os_class.py:127-128`
 tan-cli#914 / tan-cli#957) and its docstring rejects the other answer by name —
 "the identical `["baremetal", "off"]` plausible-but-wrong guess this docstring
 already rejects for the empty-string case".
-`scripts/alp_orchestrate/topology.py:96-101` has no such guard. tan took the
-fix; alp-sdk did not. It is in the one direction the freshness gate cannot see,
+`scripts/alp_orchestrate/topology.py:96-101` had no such guard. tan took the
+fix; alp-sdk did not. It was in the one direction the freshness gate cannot see,
 because tan's copy sits outside `tan/planner/` and outside `HAND_PORT_SOURCES`.
 Only having one implementation removes that class, which is ADR-0026's
 argument, not a schema's.
 
-**Status, so this paragraph does not rot into a false claim.** The instance is
-filed as [#1852](https://github.com/alplabai/alp-sdk/issues/1852) and fixed in
-#1888, which found the divergence wider than filed: the bare
+**Status, so this paragraph does not rot into a false claim.** The instance was
+filed as [#1852](https://github.com/alplabai/alp-sdk/issues/1852) and is fixed
+on `dev`: #1888 merged 2026-09-01 as `f5c7ff5b`, and
+`scripts/alp_orchestrate/topology.py` now carries three
+`isinstance(core_type, str)` guards with no bare
+`(core_type or "").lower()` left in code. It found the divergence wider than
+filed: the bare
 `(core_type or "").lower()` idiom was in three functions, not two, and
 `core_os_topology`'s `soc_types` comprehension passed a non-string `type`
 straight into the emitted `core_type` field as well as into the crash. Closing
@@ -356,10 +369,10 @@ Add a structured output mode to the SDK validator and have tan consume it:
   cross-field check is "a SEPARATE contract with no diagnostic-v1
   representation". That layer is `validate_board_yaml.py:80-91` -- the
   `FAIL sdk-compat:` / `FAIL consistency:` lines exiting 3/4/5, which tan
-  recovers via `_FAIL_WARN_RE`. Those are the hardware-safety refusals in
-  Risks below, so "no new schema is invented" is false precisely where it
-  matters most. This answers Open question 1: **no**, `diagnostic-v1` does not
-  cover them today.
+  recovers via `_FAIL_WARN_RE`. Those are the SDK's refusals to build an
+  unsupported hardware revision, in Risks below, so "no new schema is
+  invented" is false precisely where it matters most. This answers Open
+  question 1: **no**, `diagnostic-v1` does not cover them today.
 - The human-readable output is unchanged and remains the default. This is
   additive; no existing invocation changes behaviour.
 - `tan validate` / `tan diff` switch to `--format json` and drop the regexes.
@@ -436,7 +449,7 @@ outcome, so nothing needs to cross as a rule at all.
 
 Ship the decided value instead, in the field that already exists for it:
 
-- Populate `os` on all 26 `topology.<core>` entries across the twelve
+- Populate `os` on all 26 `topology.<core>` entries across the eleven
   `metadata/e1m_modules/*.yaml` presets. `som-preset-v1.schema.json`
   `$defs/topology_entry/properties/os` already declares it — "Default runtime
   for this core.  Customer's board.yaml `cores.<id>.os` overrides." — and
@@ -646,8 +659,9 @@ Recorded so they are not re-litigated:
 ## Risks
 
 - **Problem 2 touches the loader.** `scripts/alp_orchestrate/topology.py` is
-  reached from `loader.py`, which is also where the hardware-safety gate lives
-  (see below). The change must not alter which revisions are refused.
+  reached from `loader.py`, which is also where the SDK's refusal to build an
+  unsupported hardware revision lives (see below). The change must not alter
+  which revisions are refused.
 - **Problem 1 changes a spawned interface.** tan pins an SDK commit; the
   `--format json` flag must land in alp-sdk and be released before tan can
   depend on it, or tan must fall back to the current parse when the flag is

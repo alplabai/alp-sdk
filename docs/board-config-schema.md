@@ -131,7 +131,8 @@ Two mechanical notes:
   what diverged was the **advertised** `allowed_os` set, which offered
   `["baremetal", "off"]` for such a core where tan offered `[]`, and a
   non-string `cores[].type`, which raised `AttributeError` instead of
-  resolving to the unresolved sentinel.  Corrected in #1888.
+  resolving to the unresolved sentinel.  Both were corrected in #1888,
+  merged 2026-09-01.
 
 Custom SoMs ported via
 [`docs/porting-new-som.md`](porting-new-som.md) inherit all of this as
