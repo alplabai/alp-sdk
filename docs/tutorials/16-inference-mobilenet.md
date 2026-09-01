@@ -385,6 +385,14 @@ provisioned.
 - **`alp_inference_open` returns NULL with NOSUPPORT** -- the
   selected backend isn't compiled in.  Check `board.yaml` and
   the generated `alp.conf`.
+- **`alp_inference_open` returns NULL with NOSUPPORT on the ONNX
+  Runtime (V2N/V2M CPU floor) or DEEPX DX-M1 backend specifically**
+  -- one of the model's tensors has rank > 4.  `alp_inference_tensor_t`'s
+  `shape` field has exactly 4 slots; a model that needs more dims is
+  refused outright rather than opened with a shape silently truncated
+  to the first 4 (issue #1729).  There is no workaround at the SDK
+  level -- reshape/squeeze the model upstream (e.g. drop a size-1 axis)
+  so every tensor fits in 4 dims.
 - **Open succeeds but `_invoke` returns ALP_ERR_NOMEM** --
   arena too small for the model.  Bump `arena_bytes`; check
   Vela's output for the required value.
