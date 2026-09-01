@@ -13,7 +13,10 @@
 #         from that checkout identifies itself as an rc instead of as its
 #         eventual GA version) or stay the bare core version the way a GA
 #         bump always does -- either form must match the TAG's core
-#         version, suffix or no suffix on either side.
+#         version, suffix or no suffix on either side.  Also refuses a GA
+#         tag whose metadata still carries a leftover rc suffix, and a
+#         pre-release tag whose own suffix disagrees with a pre-release
+#         DECLARED (both directions of #1902).
 #      b. Verify the ABI snapshot at docs/abi/v<N>-snapshot.json
 #         exists.
 #      c. Verify CHANGELOG.md has a matching `## [v<N>] - YYYY-MM-DD`
@@ -172,6 +175,19 @@ jobs:
           # the pre-#1902 workflow).
           if [ "$VERSION" = "$CORE_VERSION" ] && [ "$DECLARED" != "$CORE_VERSION" ]; then
             echo "::error::Tag $TAG is a GA release, but metadata/sdk_version.yaml still declares a pre-release version ($DECLARED) -- bump it to the bare $CORE_VERSION before tagging GA."
+            exit 1
+          fi
+          # The other direction of the same defect: a pre-release tag whose
+          # own suffix disagrees with a pre-release DECLARED still passed
+          # both checks above (core-only compares), so `v0.16.0-rc2` tagged
+          # against a metadata `version: 0.16.0-rc1` build silently
+          # self-reported as rc1 -- #1902 surviving in the pre-release
+          # direction. DECLARED may still legitimately be a bare core
+          # version here (the "never re-bumped for this rc" back-compat
+          # case above); this only fires once BOTH sides carry a suffix and
+          # they differ.
+          if [ "$VERSION" != "$CORE_VERSION" ] && [ "$DECLARED" != "$DECLARED_CORE" ] && [ "$DECLARED" != "$VERSION" ]; then
+            echo "::error::Tag $TAG is a pre-release, but metadata/sdk_version.yaml declares a different pre-release version ($DECLARED) -- bump it to $VERSION before tagging."
             exit 1
           fi
 
