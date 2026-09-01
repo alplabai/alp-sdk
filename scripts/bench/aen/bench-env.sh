@@ -24,10 +24,13 @@
 # originals lived outside the repo with absolute /home paths; this
 # layer is the single place those values come from.
 #
-# EXCEPTION: AEN_DPIDR / GD32_DPIDR / V2N_CM33_DPIDR (below, "DP-ID safety
-# gate") are silicon-fixed identity constants for the wrong-board MRAM-write
-# interlock, not host-specific config -- they are deliberately NOT
-# environment-overridable, unlike everything else in this file.
+# EXCEPTION: AEN_DPIDR (below, "DP-ID safety gate") is a silicon-fixed,
+# bench-verified identity constant for the wrong-board MRAM-write interlock,
+# not host-specific config -- it is deliberately NOT environment-overridable,
+# unlike everything else in this file. GD32_DPIDR and V2N_CM33_DPIDR sit in
+# the same gate but keep the normal override (alp-sdk#1716 scoped the
+# closure to AEN_DPIDR only; GD32_DPIDR is also not bench-verified, see the
+# gate's own comment).
 
 # --------------------------------------------------------------------
 # Workspace + Zephyr
@@ -169,28 +172,36 @@ export JLINK_SN="${JLINK_SN:-${JLINK_SERIAL:-}}"
 # settled V2N_CM33_DPIDR.  Note there is currently no J-Link path to the
 # GD32 on this bench (2026-08-07), which is why it is still open.
 #
-# NOT operator-overridable (alp-sdk#1716) -- unlike every other value in
-# this file, these three are NOT host-specific config.  A DPIDR is fixed by
-# the debug-port silicon of the part it names; it does not vary by bench,
-# operator, or checkout the way SE_UART / BENCH_ROOT / JLINK_SN legitimately
-# do.  The `${VAR:-default}` shape used everywhere else in this file lets a
-# pre-exported value win, which is exactly backwards for a wrong-board
-# interlock: `export AEN_DPIDR=<whatever the wrong board answers>` before
-# running any helper below would make bench_jlink_assert_aen_dpidr() accept
-# that board silently, on 5 of its 6 call sites -- flash-jlink.sh,
-# flash-jlink-hp.sh, flash-update-log-dual.sh,
-# flash-update-log-firewall-probe.sh and ram-run.sh all resolve these three
-# from here alone. (flash-jlink-mramxip.sh was already closed -- it
-# re-assigns AEN_DPIDR/GD32_DPIDR unconditionally right before the gate,
-# see its "0b. SAFETY GATE" comment and #1527.) Assign unconditionally, not
-# via a caller-visible default, so the same defense-in-depth applies at
-# every call site with one change instead of five. If a future part
-# genuinely needs a different expected DPIDR, that is a new named constant
-# for that part's own helper, not a way to override these.
+# NOT operator-overridable (alp-sdk#1716) -- AEN_DPIDR ONLY. The issue
+# scoped this narrowly: "I lean (a), scoped to AEN_DPIDR only ... Note
+# GD32_DPIDR should keep its override -- bench-env.sh:148 records that
+# 0x0BE12477 is not bench-verified." A pre-exported AEN_DPIDR winning here
+# is exactly backwards for a wrong-board interlock: `export
+# AEN_DPIDR=<whatever the wrong board answers>` before running any helper
+# below would make bench_jlink_assert_aen_dpidr() accept that board
+# silently, on 5 of its 6 call sites -- flash-jlink.sh, flash-jlink-hp.sh,
+# flash-update-log-dual.sh, flash-update-log-firewall-probe.sh and
+# ram-run.sh all resolve it from here alone. AEN_DPIDR is bench-verified
+# (see above), so there is no legitimate reason for it to differ from the
+# real AEN E8 constant; assign it unconditionally, not via a
+# caller-visible default, so the same defense-in-depth applies at every
+# call site with one change instead of five.
+#
+# GD32_DPIDR and V2N_CM33_DPIDR keep the `${VAR:-default}` shape used
+# everywhere else in this file -- they are deliberately left
+# operator-overridable, NOT closed. GD32_DPIDR in particular is NOT
+# bench-verified (see above): nobody has measured a real GD32 with a probe
+# attached, so hard-closing it would risk blocking a legitimate future
+# recovery against whatever a real GD32 actually answers -- the opposite
+# of a safety improvement. V2N_CM33_DPIDR is left open alongside it per
+# the same "AEN_DPIDR only" scoping in the issue, even though it is itself
+# bench-verified (see above). If a future part genuinely needs a
+# different expected DPIDR, that is a new named constant for that part's
+# own helper, not a way to override AEN_DPIDR.
 AEN_DPIDR="4C013477"
-GD32_DPIDR="0BE12477"
-V2N_CM33_DPIDR="6BA02477"
-export AEN_DPIDR GD32_DPIDR V2N_CM33_DPIDR
+export AEN_DPIDR
+export GD32_DPIDR="${GD32_DPIDR:-0BE12477}"
+export V2N_CM33_DPIDR="${V2N_CM33_DPIDR:-6BA02477}"
 
 # bench_jlink_assert_aen_dpidr <preflight-output-file> <context>
 # Abort unless the connect transcript proves the AEN E8 answered.
