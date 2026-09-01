@@ -35,15 +35,22 @@ static alp_status_t select_page(tas2563_t *ctx, uint8_t page)
 	return reg_write(ctx, TAS2563_REG_PAGE, page);
 }
 
-/* Table 7-3: only five 7-bit addresses are wired -- the four
- * AD0/SPICLK strap options plus the global broadcast address.
- * Anything else (including an out-of-range/8-bit-encoded value)
- * cannot correspond to a real strap and is rejected before any bus
- * access. */
+/* Table 7-3: only the four AD0/SPICLK strap options identify a real,
+ * individually-addressable chip.  TAS2563_I2C_ADDR_BROADCAST (0x48)
+ * is deliberately excluded here -- every public entry point below
+ * that touches the bus (init's REVID probe, read_revision,
+ * set_mode's read-modify-write) performs a register READ through
+ * ctx->addr, and a read issued to a write-only global-call address
+ * is not a single-chip probe: on a bus where an unrelated device
+ * happens to be strapped to 0x48 (e.g. an INA236 current monitor,
+ * #1846) it silently reads/writes that device's registers instead.
+ * A future group-write helper that only ever WRITEs (e.g. a
+ * synchronized MODE_CTRL broadcast across a stereo pair) is free to
+ * accept TAS2563_I2C_ADDR_BROADCAST on its own -- this per-instance,
+ * read-capable context must not. */
 static bool addr_is_valid(uint8_t addr)
 {
-	return addr == TAS2563_I2C_ADDR_BROADCAST ||
-	       (addr >= TAS2563_I2C_ADDR_GND_DIRECT && addr <= TAS2563_I2C_ADDR_VDD_DIRECT);
+	return addr >= TAS2563_I2C_ADDR_GND_DIRECT && addr <= TAS2563_I2C_ADDR_VDD_DIRECT;
 }
 
 alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp_gpio_t *sd_n)

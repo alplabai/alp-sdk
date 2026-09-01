@@ -41,7 +41,9 @@
  *   AD0/SPICLK = 10k to GND -> 0x4D
  *   AD0/SPICLK = 10k to VDD -> 0x4E
  *   AD0/SPICLK = VDD       -> 0x4F
- *   Global broadcast        -> 0x48
+ *   Global broadcast        -> 0x48 (write-only; see
+ *                                    TAS2563_I2C_ADDR_BROADCAST --
+ *                                    NOT accepted by tas2563_init(), #1846)
  */
 
 #ifndef ALP_CHIPS_TAS2563_H
@@ -60,7 +62,15 @@ extern "C" {
 #define TAS2563_I2C_ADDR_GND_PULL   0x4Du
 #define TAS2563_I2C_ADDR_VDD_PULL   0x4Eu
 #define TAS2563_I2C_ADDR_VDD_DIRECT 0x4Fu
-#define TAS2563_I2C_ADDR_BROADCAST  0x48u
+/** Global broadcast/general-call address (write-only per the
+ *  datasheet).  Documented for reference only -- tas2563_init()
+ *  rejects it with ALP_ERR_INVAL.  Every op this driver exposes
+ *  besides set_hw_enable() reads a register through ctx->addr, and a
+ *  read to the broadcast address is not a valid single-chip probe;
+ *  worse, some boards strap an unrelated device (e.g. an INA236) to
+ *  this same address, so a broadcast "probe" can silently hit that
+ *  device's registers instead (#1846). */
+#define TAS2563_I2C_ADDR_BROADCAST 0x48u
 
 /** Operating-mode enum mapped onto the chip's MODE_CTRL register. */
 typedef enum {
@@ -83,8 +93,14 @@ typedef struct {
  *
  * @param[out] ctx       Driver context (output; populated on success).
  * @param[in]  bus       Open I2C bus handle the amp sits on.
- * @param[in]  addr_7bit 7-bit I2C address (one of the
- *                       TAS2563_I2C_ADDR_* constants).
+ * @param[in]  addr_7bit 7-bit I2C address of a single strap-selected
+ *                       chip (TAS2563_I2C_ADDR_GND_DIRECT ..
+ *                       TAS2563_I2C_ADDR_VDD_DIRECT).
+ *                       TAS2563_I2C_ADDR_BROADCAST is rejected --
+ *                       this context reads a register as part of
+ *                       init and on every subsequent call, and a
+ *                       read has no valid meaning on the write-only
+ *                       broadcast address (#1846).
  * @param[in]  sd_n      Open GPIO handle bound to AMP.ENABLE.  May
  *                       be NULL if the caller drives SD_N
  *                       elsewhere (or if the pin is tied permanently
