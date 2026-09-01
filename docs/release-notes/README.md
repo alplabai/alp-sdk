@@ -67,12 +67,17 @@ number); this file is the summary a reader sees first.
 ## Computing "what changed since the last release" -- read this before drafting
 
 **Diff `main`'s own tag history, never `dev`, and never `git merge-base
-main dev`.** The footer's `compare/v<PREV>...v<N>` link above is doing
-exactly this: it is a tag-to-tag comparison, computed once `dev` has
-been promoted to `main` for the cut in progress (`git log
-v<PREV>..v<N> --first-parent`, run on `main`). That chain is always
-intact, because `dev` -> `main` promotion is a real `--no-ff` merge
-commit -- it never goes through `dev`'s merge queue.
+main dev`.** Compute it as `git log v<PREV>..v<N>`, run on `main` once
+`dev` has been promoted to `main` for the cut in progress -- NOT the
+footer's `compare/v<PREV>...v<N>` link above, which is GitHub's
+three-dot merge-base comparison, a different computation. That range
+is always intact, because `dev` -> `main` promotion is a real `--no-ff`
+merge commit -- it never goes through `dev`'s merge queue. Do NOT add
+`--first-parent`: on `main` the first-parent chain is only the
+promotion merges themselves (3 commits between v0.15.0 and v0.16.0);
+the release's real work hangs off their *second* parents, so
+`--first-parent` drops it (162 commits without it, for that same
+range).
 
 The opposite direction is broken by design and will silently re-list
 work a prior release already shipped: the mandatory post-tag back-merge

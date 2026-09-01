@@ -190,13 +190,18 @@ anything -- that merge-base sits at whatever commit the two branches
 last shared *real* ancestry at, a point that predates every release
 cut since, so a diff from it re-lists every release's contents as if
 unreleased. Compute the release-notes diff on `main`'s own tag-to-tag
-history instead (`git log v<PREV>..v<N> --first-parent`, run once `dev`
-has been promoted to `main` for the cut in progress): that chain stays
+history instead (`git log v<PREV>..v<N>`, run once `dev`
+has been promoted to `main` for the cut in progress): that range stays
 intact, because `dev` -> `main` promotion is a real `--no-ff` merge --
-only merges *into* `dev` hit the merge queue. This is exactly what the
-Release page's own footer link already does
-(`compare/v<PREV>...v<N>`), so step 0's `docs/release-notes/v<N>.md`
-uses the same comparison; see
+only merges *into* `dev` hit the merge queue. Do NOT add
+`--first-parent`: on `main` the first-parent chain is just the
+promotion merges themselves (3 commits between v0.15.0 and v0.16.0);
+the release's real work hangs off their *second* parents, so
+`--first-parent` drops it (162 commits without it, for that same
+range). This is a two-dot range, not the same thing as the
+Release page's own footer link (`compare/v<PREV>...v<N>`, a three-dot
+merge-base comparison) -- step 0's `docs/release-notes/v<N>.md` still
+draws on this two-dot range, not that link; see
 [`docs/release-notes/README.md`](release-notes/README.md) and
 [ADR-0029](adr/0029-cross-repo-pins-are-typed-lock-entries-with-a-property-gate.md)
 (observation 9 / clause 4) for the fuller record.
