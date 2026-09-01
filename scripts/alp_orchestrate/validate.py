@@ -306,9 +306,33 @@ def _enforce_loader_rules(slice_: Slice, metadata_root: Path) -> None:
         # no third, bare-metal-flavoured stock default anywhere in the
         # tree. Left unchecked, `not slice_.app` is always False here --
         # the inherited token is truthy -- so this whole branch never
-        # fires for a preset-backed core, and the app-less slice sails
-        # through validate only to `orchestrator._slice_command` return
-        # None (no command) and get skipped, silently, at build time.
+        # fires for a preset-backed core.
+        #
+        # It is NOT a quiet skip, though: reran the exact #1889 fixture
+        # (`m55_he: os: baremetal`, no `app:`, under `preset: e1m-evk`)
+        # through `emit_build_plan` on the pre-fix parent commit
+        # (1c3c8e46) and confirmed `orchestrator._slice_command` does
+        # NOT return None here -- `slice_.app` is truthy, so the
+        # baremetal branch's `if not slice_.app: return None` guard
+        # never triggers either. Instead `_resolve_app_path` resolves
+        # `alp-stock-shim` to the real `${SDK_ROOT}/firmware/alp-stock-shim`
+        # directory (the Cortex-M shim's own zephyr app) and the branch
+        # emits a genuine, non-null `cmake -S
+        # ${SDK_ROOT}/firmware/alp-stock-shim -B .` configure command plus
+        # a `cmake --build .` postCommand -- a wrong-target build, not a
+        # skip. Running that emitted configure line for real dies loudly
+        # inside the shim's own `find_package(Zephyr REQUIRED)`
+        # (CMakeLists.txt calls it) with `CMake Error: BOARD is not being
+        # defined`, because a bare `cmake` invocation carries none of the
+        # `west build -b <board>` context Zephyr's CMake package needs.
+        # The Cortex-A / `alp-image-edge` shape fails the same way for a
+        # different reason: `_resolve_app_path` has no special case for
+        # it, so it resolves to the literal, nonexistent
+        # `${PROJECT_ROOT}/alp-image-edge` directory and the configure
+        # dies on "source directory does not exist" instead. Either way
+        # the slice reaches the executor with a real command and fails
+        # there -- confusingly, on the wrong target -- rather than being
+        # carried as `command: null` and silently dropped.
         if slice_.app in (STOCK_SHIM_APP, STOCK_IMAGE_APP):
             other_os = "zephyr" if slice_.app == STOCK_SHIM_APP else "yocto"
             raise OrchestratorError(
