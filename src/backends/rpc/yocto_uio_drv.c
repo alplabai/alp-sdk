@@ -512,6 +512,14 @@ struct rpc_be {
 	atomic_int      cb_active;   /* drain count -- external y_shutdown() waits for 0 */
 	bool            close_from_worker;
 
+	/* Set the first time uio_ept_cb() drops an oversized peer frame
+	 * (#1645) -- uio_ept_cb() runs on libmetal's single shared IRQ
+	 * thread, never concurrently with itself for this channel, so no
+	 * lock is needed. Caps the fprintf() to one line per channel: a
+	 * peer spraying oversized frames must not make that shared thread
+	 * take the stdio lock on every single frame. */
+	bool logged_oversized_drop;
+
 	void *owner;
 };
 
@@ -731,6 +739,20 @@ static void rpc_recv_leave(struct rpc_be *ch)
 	atomic_fetch_sub(&ch->cb_active, 1);
 }
 
+/* Reports an oversized-frame drop ONCE per channel (#1645) -- see
+ * struct rpc_be's logged_oversized_drop field. */
+static void log_dropped_oversized_frame(struct rpc_be *ch, size_t len)
+{
+	if (ch->logged_oversized_drop) return;
+	ch->logged_oversized_drop = true;
+	fprintf(stderr,
+	        "alp_rpc: dropping oversized peer frame(s) on %s (%zu > %zu); further drops on "
+	        "this channel are counted, not logged\n",
+	        ch->name,
+	        len,
+	        (size_t)ALP_RPC_TX_FRAME_MAX);
+}
+
 /* rpmsg endpoint rx callback -- invoked synchronously by
  * remoteproc_get_notification() -> rproc_virtio_notified() ->
  * virtqueue_notification() from INSIDE uio_rproc_notify_isr() below,
@@ -755,7 +777,19 @@ static int uio_ept_cb(struct rpmsg_endpoint *ept, void *data, size_t len, uint32
 	 * worked).  Copy the frame out BYTE-WISE into an aligned local buffer
 	 * first, then parse + dispatch from normal cached memory. */
 	unsigned char local_frame[ALP_RPC_TX_FRAME_MAX];
-	size_t        frame_len = len < sizeof(local_frame) ? len : sizeof(local_frame);
+	if (len > sizeof(local_frame)) {
+		/* A peer frame larger than the negotiated maximum is a protocol
+		 * error, not something to silently truncate and dispatch as a
+		 * complete message (#1645) -- the pre-fix clip below fed
+		 * frame_parse() only the first ALP_RPC_TX_FRAME_MAX bytes,
+		 * which still looked like a well-formed (method, payload) pair
+		 * whenever the method name landed inside that prefix, so the
+		 * subscriber ran with a silently-shortened payload and no
+		 * error anywhere. */
+		log_dropped_oversized_frame(ch, len);
+		goto epilogue;
+	}
+	size_t frame_len = len;
 	for (size_t i = 0; i < frame_len; ++i) {
 		local_frame[i] = ((const volatile unsigned char *)data)[i];
 	}

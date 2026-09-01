@@ -174,6 +174,37 @@ void register_default_ops(tflite::MicroMutableOpResolver<32> &r)
 #endif
 }
 
+/** True if every dim of every input/output tensor TFLM has allocated
+ *  fits the descriptor's uint16_t shape[4] -- called from tflm_open()
+ *  right after AllocateTensors() so a model with an unrepresentable dim
+ *  fails to load instead of silently truncating it into the shape[]
+ *  descriptor on the first get_input()/get_output() (#1645, same
+ *  bug-class as inference_ort.cpp's _gather_tensor_info() gate and
+ *  inference_deepx.cpp's shapes_fit_descriptor()).  TFLM tensors are
+ *  always fully static once allocated -- unlike ORT/dx_rt there is no
+ *  symbolic/dynamic-dim case to pin, so a dim outside [0, UINT16_MAX] is
+ *  simply rejected. */
+bool tensor_shapes_fit_descriptor(tflite::MicroInterpreter *interp)
+{
+	for (size_t i = 0; i < interp->inputs_size(); ++i) {
+		const TfLiteIntArray *dims = interp->input(i)->dims;
+		for (int d = 0; d < dims->size; ++d) {
+			if (dims->data[d] < 0 || dims->data[d] > UINT16_MAX) {
+				return false;
+			}
+		}
+	}
+	for (size_t i = 0; i < interp->outputs_size(); ++i) {
+		const TfLiteIntArray *dims = interp->output(i)->dims;
+		for (int d = 0; d < dims->size; ++d) {
+			if (dims->data[d] < 0 || dims->data[d] > UINT16_MAX) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
 void fill_tensor_descriptor(const TfLiteTensor *t, alp_inference_tensor_t *out)
 {
 	out->data       = t->data.raw;
@@ -344,6 +375,13 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		if (st->own_arena) alp_slot_release(&g_default_arena_in_use);
 		delete st;
 		return ALP_ERR_IO;
+	}
+
+	if (!tensor_shapes_fit_descriptor(st->interp)) {
+		delete st->interp;
+		if (st->own_arena) g_default_arena_in_use = false;
+		delete st;
+		return ALP_ERR_NOSUPPORT;
 	}
 
 	state->be_data  = st;

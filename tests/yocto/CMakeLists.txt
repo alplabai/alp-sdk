@@ -438,6 +438,30 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_rpc_yocto_open_fail
              COMMAND alp_test_rpc_yocto_open_fail)
 
+    # #1645: rpc_rx_main() must drop a peer frame that filled the whole
+    # read() buffer (the only truncation signal a message-at-a-time
+    # rpmsg endpoint gives) instead of parsing it as a complete,
+    # silently-shortened message.  Same #include-the-.c-file /
+    # no-alp::sdk-link technique as alp_test_rpc_yocto_self_close above
+    # -- see rpc_yocto_peer_length.c's own header comment.
+    add_executable(alp_test_rpc_yocto_peer_length
+        ${CMAKE_CURRENT_SOURCE_DIR}/rpc_yocto_peer_length.c
+    )
+    target_link_libraries(alp_test_rpc_yocto_peer_length PRIVATE Threads::Threads)
+    target_include_directories(alp_test_rpc_yocto_peer_length PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/rpc
+    )
+    target_compile_definitions(alp_test_rpc_yocto_peer_length PRIVATE
+        ALP_SDK_HAVE_OPENAMP_USERLAND=1
+    )
+    target_compile_features(alp_test_rpc_yocto_peer_length PRIVATE c_std_99)
+
+    add_test(NAME alp_test_rpc_yocto_peer_length
+             COMMAND alp_test_rpc_yocto_peer_length)
+
     # GHSA-xhm8-7f87-93q5 defect 2: the dispatcher-level counterpart of
     # the test above.  rpc_yocto_self_close.c drives the BACKEND's
     # file-local struct rpc_be / y_close() / rpc_rx_main() directly;
@@ -533,13 +557,41 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
         add_test(NAME alp_test_rpc_uio_self_close
                  COMMAND alp_test_rpc_uio_self_close)
+
+        # #1645: uio_ept_cb() must reject a peer frame longer than
+        # ALP_RPC_TX_FRAME_MAX instead of clipping + dispatching it.
+        # Same open-amp/libmetal gate as alp_test_rpc_uio_self_close
+        # above -- see rpc_uio_peer_length.c's own header comment for
+        # why this test is skipped (not a false pass) when that gate
+        # is closed, and where the fix's control flow is instead
+        # proven via its libmetal-free sibling (2b,
+        # rpc_yocto_peer_length.c).
+        add_executable(alp_test_rpc_uio_peer_length
+            ${CMAKE_CURRENT_SOURCE_DIR}/rpc_uio_peer_length.c
+        )
+        target_link_libraries(alp_test_rpc_uio_peer_length PRIVATE
+            Threads::Threads PkgConfig::OPENAMP_USER_TEST)
+        target_include_directories(alp_test_rpc_uio_peer_length PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/rpc
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+        )
+        target_compile_definitions(alp_test_rpc_uio_peer_length PRIVATE
+            ALP_SDK_HAVE_OPENAMP_USERLAND=1
+        )
+        target_compile_features(alp_test_rpc_uio_peer_length PRIVATE c_std_99)
+
+        add_test(NAME alp_test_rpc_uio_peer_length
+                 COMMAND alp_test_rpc_uio_peer_length)
     else()
         message(STATUS
             "alp-sdk yocto: open-amp/libmetal not found via pkg-config; "
-            "alp_test_rpc_uio_self_close skipped.  Cross-compiling for "
-            "V2N (this backend's whole point) needs a sysroot/prefix "
-            "that carries them -- see src/backends/rpc/yocto_uio_drv.c's "
-            "own STATUS note.")
+            "alp_test_rpc_uio_self_close + alp_test_rpc_uio_peer_length "
+            "skipped.  Cross-compiling for V2N (this backend's whole "
+            "point) needs a sysroot/prefix that carries them -- see "
+            "src/backends/rpc/yocto_uio_drv.c's own STATUS note.")
     endif()
 endif()
 
