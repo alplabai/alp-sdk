@@ -41,7 +41,9 @@
  *   AD0/SPICLK = 10k to GND -> 0x4D
  *   AD0/SPICLK = 10k to VDD -> 0x4E
  *   AD0/SPICLK = VDD       -> 0x4F
- *   Global broadcast        -> 0x48
+ *   Global broadcast        -> 0x48 (write-only; see
+ *                                    TAS2563_I2C_ADDR_BROADCAST --
+ *                                    NOT accepted by tas2563_init(), #1846)
  */
 
 #ifndef ALP_CHIPS_TAS2563_H
@@ -60,7 +62,18 @@ extern "C" {
 #define TAS2563_I2C_ADDR_GND_PULL   0x4Du
 #define TAS2563_I2C_ADDR_VDD_PULL   0x4Eu
 #define TAS2563_I2C_ADDR_VDD_DIRECT 0x4Fu
-#define TAS2563_I2C_ADDR_BROADCAST  0x48u
+/** Global broadcast/general-call address (write-only per the
+ *  datasheet).  Documented for reference only -- tas2563_init()
+ *  rejects it with ALP_ERR_INVAL.  0x48 does not pin down exactly one
+ *  physical chip the way a strap address does, and every bus-touching
+ *  op this driver exposes (init, read_revision, set_mode) both reads
+ *  AND writes through ctx->addr -- select_page() writes the page
+ *  register first on every one of them.  Whatever answers at 0x48
+ *  (every TAS2563 on the bus, an unrelated device strapped there by
+ *  coincidence -- e.g. an INA236 on a real EVK pre-respin, #1846 --
+ *  or nothing) is undefined for a per-instance context, regardless of
+ *  direction. */
+#define TAS2563_I2C_ADDR_BROADCAST 0x48u
 
 /** Operating-mode enum mapped onto the chip's MODE_CTRL register. */
 typedef enum {
@@ -83,8 +96,17 @@ typedef struct {
  *
  * @param[out] ctx       Driver context (output; populated on success).
  * @param[in]  bus       Open I2C bus handle the amp sits on.
- * @param[in]  addr_7bit 7-bit I2C address (one of the
- *                       TAS2563_I2C_ADDR_* constants).
+ * @param[in]  addr_7bit 7-bit I2C address of a single strap-selected
+ *                       chip (TAS2563_I2C_ADDR_GND_DIRECT ..
+ *                       TAS2563_I2C_ADDR_VDD_DIRECT).
+ *                       TAS2563_I2C_ADDR_BROADCAST is rejected --
+ *                       validated here, once, before ctx->addr is
+ *                       ever assigned; every later call trusts
+ *                       ctx->initialised instead of re-checking the
+ *                       address.  0x48 does not identify a single
+ *                       chip, and this context both reads and writes
+ *                       through ctx->addr, so neither direction is
+ *                       safe there (#1846).
  * @param[in]  sd_n      Open GPIO handle bound to AMP.ENABLE.  May
  *                       be NULL if the caller drives SD_N
  *                       elsewhere (or if the pin is tied permanently
