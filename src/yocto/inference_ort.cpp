@@ -77,14 +77,18 @@
  *   validated before it reaches this file.  ORT itself does not check the
  *   declared shape against how much real tensor data follows, so
  *   _gather_tensor_info() is the trust boundary for that data: it bounds
- *   ndim, checks every accumulation for overflow, and rejects a shape
- *   whose element count would overflow size_t or blow a policy cap on
- *   total tensor bytes, rather than handing back a wrapped/undersized
- *   size_bytes alongside a shape[]/rank that still claims the original
- *   (huge) dimensions.  It also refuses (ALP_ERR_NOSUPPORT) any tensor
- *   whose real rank exceeds 4: alp_inference_tensor_t's shape[] has exactly
- *   4 slots, and this backend used to silently truncate a longer shape to
- *   the first 4 dims in get_input()/get_output() instead of saying so --
+ *   ndim -- against TWO SEPARATE ceilings, not one (kHostileTensorRankCeiling
+ *   vs. kMaxTensorRank below): a corrupt/hostile ndim (ALP_ERR_INVAL) is a
+ *   different condition from a well-formed model whose rank this 4-slot
+ *   descriptor simply cannot represent (ALP_ERR_NOSUPPORT) -- checks every
+ *   accumulation for overflow, and rejects a shape whose element count
+ *   would overflow size_t or blow a policy cap on total tensor bytes,
+ *   rather than handing back a wrapped/undersized size_bytes alongside a
+ *   shape[]/rank that still claims the original (huge) dimensions.  It also
+ *   refuses (ALP_ERR_NOSUPPORT) any tensor whose real rank exceeds 4:
+ *   alp_inference_tensor_t's shape[] has exactly 4 slots, and this backend
+ *   used to silently truncate a longer shape to the first 4 dims in
+ *   get_input()/get_output() instead of saying so --
  *   the caller read back a shape that no longer matched the model, with no
  *   signal anything was wrong (issue #1729).
  *
@@ -291,15 +295,27 @@ struct OrtTensorInfo {
                                           * _gather_tensor_info() */
 };
 
+/* Hostile/corrupt-input ceiling -- NOT the same concern as kMaxTensorRank
+ * below.  A real ONNX model's tensors run to a handful of dims; this exists
+ * only to reject a corrupt/hostile ndim before it drives an oversized
+ * std::vector<int64_t> allocation a few lines down in _gather_tensor_info(),
+ * not to constrain any legitimate model -- INVAL, the same "malformed input"
+ * verdict _ort_errorcode_to_status() gives ORT_INVALID_GRAPH.  A rank this
+ * large is implausible for ANY real graph, representable or not, so it is
+ * screened out before the representable-rank question below is even asked. */
+constexpr size_t kHostileTensorRankCeiling = 32;
+
 /* Hard ceiling on a tensor's rank: the portable alp_inference_tensor_t
  * descriptor (include/alp/inference.h) carries a FIXED shape[4] / uint8_t
  * rank pair -- there is no wire format here to widen, unlike kMaxTensorBytes
  * below, which is this backend's own policy choice. A tensor whose real rank
- * exceeds 4 is refused outright at open() (see the kMaxTensorRank check in
- * _gather_tensor_info() below) rather than silently reported as a truncated
- * 4-dim shape that no longer matches the model (issue #1729: a caller
- * trusting that truncated shape gets confidently wrong tensor geometry, not
- * a truncated-but-honest one -- worse than a refusal). */
+ * exceeds 4 -- but is still under kHostileTensorRankCeiling above, i.e. a
+ * well-formed model this API just has no slot for -- is refused outright at
+ * open() (see the kMaxTensorRank check in _gather_tensor_info() below)
+ * rather than silently reported as a truncated 4-dim shape that no longer
+ * matches the model (issue #1729: a caller trusting that truncated shape
+ * gets confidently wrong tensor geometry, not a truncated-but-honest one --
+ * worse than a refusal). */
 constexpr size_t kMaxTensorRank = 4;
 
 /* Policy ceiling on one tensor's SDK-owned buffer.  This backend targets
@@ -356,14 +372,24 @@ alp_status_t _gather_tensor_info(const OrtApi  *api,
 		api->ReleaseTypeInfo(type_info);
 		return rc;
 	}
+	if (ndim > kHostileTensorRankCeiling) {
+		/* Different concern from the kMaxTensorRank check below: this ndim
+		 * is implausible for ANY real model (corrupt/hostile input), and
+		 * is rejected here -- before it drives an oversized
+		 * std::vector<int64_t> allocation just below -- rather than
+		 * refused as merely "unrepresentable". */
+		api->ReleaseTypeInfo(type_info);
+		return ALP_ERR_INVAL;
+	}
 	if (ndim > kMaxTensorRank) {
 		/* Rank > 4 cannot be represented by alp_inference_tensor_t's
 		 * fixed shape[4] -- refuse the model rather than let
 		 * get_input()/get_output() hand back a shape[] silently
 		 * truncated to the first 4 dims (issue #1729). NOSUPPORT, not
-		 * INVAL: the model itself is well-formed, it is this portable
-		 * descriptor that has no slot for its rank -- same "API can't
-		 * represent it" sense ALP_ERR_NOSUPPORT already carries for
+		 * INVAL: the model itself is well-formed (ndim already passed the
+		 * hostile-ceiling check above), it is this portable descriptor
+		 * that has no slot for its rank -- same "API can't represent it"
+		 * sense ALP_ERR_NOSUPPORT already carries for
 		 * ORT_NOT_IMPLEMENTED/ORT_EP_FAIL above. */
 		api->ReleaseTypeInfo(type_info);
 		return ALP_ERR_NOSUPPORT;

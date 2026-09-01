@@ -218,8 +218,8 @@ typedef struct {
  *         ALP_ERR_NOT_IMPLEMENTED (registered backend has no open
  *         hook), ALP_ERR_NOSUPPORT (a pinned @c backend the selected
  *         backend can't serve, e.g. ETHOS_U pinned on a CPU-only
- *         build; OR, on the ONNX Runtime / DEEPX DX-M1 backends, any
- *         model tensor whose rank exceeds 4 -- @ref
+ *         build; OR, on the ONNX Runtime / DEEPX DX-M1 / TFLM backends,
+ *         any model tensor whose rank exceeds 4 -- @ref
  *         alp_inference_tensor_t's @c shape has exactly 4 slots, and
  *         a model that doesn't fit is refused rather than opened with
  *         a silently-truncated shape), ALP_ERR_NOMEM (handle-pool or
