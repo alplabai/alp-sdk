@@ -41,23 +41,21 @@ on_module:
       devices:
         - { chip: rv3028c7,         role: rtc,                       address_7bit: "0x52" }
         - { chip: optiga_trust_m,   role: secure_element,            address_7bit: "0x30" }
-        # ADD0 strap TBD (#1163, #1845): the chip-default 0x48 (ADD0->GND,
-        # metadata/chips/tmp112.yaml -- itself documented "default on
-        # E1M-AEN + E1M-V2N", NOT E1M-V2M) collides on this V2M SoM with
-        # the DEEPX DX-M1 LPDDR buck (tps628640/deepx_lpddr_0v85) below,
-        # also fixed at 0x48 per its own per-rail strap plan. One of the
-        # two must be re-strapped on the real V2M schematic; which one,
-        # and to what address in the chip's 0x48..0x4B strap range, is
-        # not yet known here -- do not guess it. TBD until the maintainer
-        # confirms the real V2M PCB strap. 0x40 stays out of consideration:
-        # it is outside the chip's physically possible 0x48..0x4B range.
-        - { chip: tmp112,           role: temp_sensor,               address_7bit: "TBD" }
+        - { chip: tmp112,           role: temp_sensor,               address_7bit: "0x48" }
         - { chip: clk_5l35023b,     role: clock_generator,           address_7bit: "0x68" }
         - { chip: gd32g553,         role: supervisor_mcu_i2c_slave,  address_7bit: "0x70" }
         - { chip: act8760,          role: pmic_main_page0,           address_7bit: "0x25" }
         - { chip: act8760,          role: pmic_main_page1,           address_7bit: "0x26" }
         - { chip: da9292,           role: pmic_secondary,            address_7bit: "0x1E" }
-        - { chip: tps628640,        role: deepx_lpddr_0v85,          address_7bit: "0x48" }
+        # Address UNRESOLVED (#1163, #1845).  The chip-default 0x48 collides
+        # with the on-module tmp112 on this bus.  The unknown is recorded HERE,
+        # on the DEEPX buck, because that part is V2M-only: E1M-V2N101/102
+        # declare the same tmp112 at 0x48 on the same bus, and all four SKUs
+        # share one PCB, so the tmp112 ADD0 strap is a single physical net --
+        # blanking it on the V2M pair alone would make the tree answer the same
+        # hardware question two different ways.  Which part is re-strapped on
+        # the real V2M schematic, and to what, is not known here: do not guess.
+        - { chip: tps628640,        role: deepx_lpddr_0v85,          address_7bit: "TBD" }
         - { chip: tps628640,        role: deepx_ddr5_vdd,            address_7bit: "0x44" }
         - { chip: tps628640,        role: deepx_ddr5_vddq,           address_7bit: "0x4F" }
         - { chip: tps628640,        role: lpddr4x_0v6,               address_7bit: "0x4D", assembled: optional }
