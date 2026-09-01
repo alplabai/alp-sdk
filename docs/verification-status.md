@@ -32,20 +32,24 @@ ledger is the one to trust.
 
 ## Summary
 
-105 silicon/HIL-gated ledger rows parsed across 9 sections.  A row can carry more than one glyph
+88 silicon/HIL-gated ledger rows parsed across 8 sections.  A row can carry more than one glyph
 (e.g. half a feature done, half pending), so glyph counts can
-exceed the row count.  This total EXCLUDES two kinds of row that
+exceed the row count.  This total EXCLUDES three kinds of row that
 would otherwise inflate it: the rows under "CI-only / tooling rows (no HIL gate)"
 below (its own `✅` means "green CI workflow", a different claim
 than the Legend's `✅` below -- so it gets its own table, tallied
-separately), and the rows under a heading starting with "v0.4 prep" (test-plan.md's own intro there says they are
+separately); the rows under "v0.8.0 — E1M-AEN801 (Alif Ensemble E8) first full bench bring-up"
+(that section's own intro says every row is a raw-Zephyr-driver
+regcheck that never touches the portable `alp_*_open()` surface --
+same reasoning, own table, tallied separately); and the rows under
+a heading starting with "v0.4 prep" (test-plan.md's own intro there says they are
 duplicated from the v0.4 section already counted above).
 
 | Glyph | Meaning | Count |
 |---|---|---|
 | `⏳` | untested | 35 |
-| `🟡` | partial | 46 |
-| `✅` | verified | 25 |
+| `🟡` | partial | 43 |
+| `✅` | verified | 11 |
 | `❌` | failing | 1 |
 | `n/a` | n/a | 0 |
 
@@ -58,6 +62,18 @@ Tracked here so the page is complete, but never pooled into the Summary above --
 | `⏳` | untested | 0 |
 | `🟡` | partial | 0 |
 | `✅` | verified | 9 |
+| `❌` | failing | 0 |
+| `n/a` | n/a | 0 |
+
+### "v0.8.0 — E1M-AEN801 (Alif Ensemble E8) first full bench bring-up" -- counted separately
+
+Tracked here so the page is complete, but never pooled into the Summary above -- see the note there.  Every row in this section exercises a raw Zephyr driver directly (`gpio_pin_set()`, `i2c_transfer()`, `spi_transceive()`, ...), never the ALP SDK's own portable `alp_*_open()` backend, so a `✅` here is not yet a portable-surface verification.
+
+| Glyph | Meaning | Count |
+|---|---|---|
+| `⏳` | untested | 0 |
+| `🟡` | partial | 3 |
+| `✅` | verified | 14 |
 | `❌` | failing | 0 |
 | `n/a` | n/a | 0 |
 
@@ -126,14 +142,20 @@ but a family having *some* `✅` rows does not mean every row for it is
 
 ## Ledger scope (issue #1893)
 
-This ledger previously stopped at a "v0.9.0 candidate" section while the
-SDK had already tagged five releases past it.  This pass adds the two
-releases whose bench evidence was missing outright -- **v0.7.0** and
-**v0.8.0**, the latter carrying the E1M-AEN801 first-full-bench-bring-up
-result that had lived only in `CHANGELOG.md` -- retitles the
-"v0.9.0 candidate" section to **v0.9.0** (it tagged 2026-07-06, it is not
-a candidate any more), and reconciles the v0.1.0 AEN I²C/SPI/UART/GPIO
-rows against the v0.8.0 evidence (see those rows above).
+This is a **partial backfill of issue #1893, not a fix for it** -- issue
+#1893 stays open.  This ledger previously stopped at a "v0.9.0 candidate"
+section while the SDK had already tagged five releases past it.  This
+pass adds the two releases whose bench evidence was missing outright --
+**v0.7.0** and **v0.8.0**, the latter carrying the E1M-AEN801
+first-full-bench-bring-up result as a structured ledger table (citing
+the authoritative `docs/aen-bench-bringup.md`, not just `CHANGELOG.md`'s
+summary of the same session) -- retitles the "v0.9.0 candidate" section
+to **v0.9.0** (it tagged 2026-07-06, it is not a candidate any more), and
+reconciles the v0.1.0 AEN I²C/SPI/UART/GPIO rows against the v0.8.0
+evidence (see those rows above).  After this pass the ledger's newest
+section is still **v0.9.0** while `metadata/sdk_version.yaml` reports
+**0.16.0** -- seven tagged releases (v0.10.0-v0.16.0) plus the in-flight
+v0.17.0 remain un-audited; see below.
 
 It does **not** attempt a full per-release re-audit of **v0.10.0 through
 v0.16.0**, plus the in-flight **v0.17.0** (`metadata/sdk_version.yaml`
@@ -316,8 +338,10 @@ yet against silicon:
 First full bench bring-up of the `E1M-AEN801` (Alif Ensemble E8,
 Cortex-M55-HE) on real silicon (alplab-gw), flashed over the new Flow D
 (J-Link direct MRAM burn, part-number device profile
-`AE822FA0E5597LS0_M55_HE`).  Moved out of `CHANGELOG.md` into a
-structured ledger row per issue #1893.  **Every row below is a
+`AE822FA0E5597LS0_M55_HE`).  Captured here as a structured ledger row
+per issue #1893, citing `docs/aen-bench-bringup.md` -- the authoritative
+record of this session (not `CHANGELOG.md`, whose `[v0.8.0]` entry is a
+summary of the same bench run, not its original source).  **Every row below is a
 raw-Zephyr-driver / register-level regcheck example** (`gpio_pin_set()`,
 `i2c_transfer()`, `spi_transceive()`, `uart_poll_out()`,
 `pwm_set_cycles()`, ...) run directly against the Zephyr driver, **not**
@@ -326,8 +350,8 @@ reconciled v0.1.0 I²C/SPI/UART/GPIO rows above for that distinction.
 
 | Feature | Module / file | Status | What "verified" means | Evidence | Gates |
 |---|---|---|---|---|---|
-| AEN801 peripheral matrix — GPIO | `examples/aen/aen-gpio-bench` (`gpio_dw`) | ✅ verified | Full P8_0 pad path: mux request accepted, DDR/DR read back what was written (does not itself prove the pad electrically moved) | `CHANGELOG.md` [v0.8.0] "Peripheral matrix — 15/17 aen-\* apps PASS", real E8 silicon, alplab-gw, 2026-06-24 | v0.8 |
-| AEN801 peripheral matrix — UART | `examples/aen/aen-uart-ns16550-loopback` | ✅ verified | `uart3` (ns16550) TX/RX loopback byte-compares clean | same | v0.8 |
+| AEN801 peripheral matrix — GPIO | `examples/aen/aen-gpio-bench` (`gpio_dw`) | ✅ verified | Full P8_0 pad path proven at pad level, not just DDR/DR controller-register readback: an infinite-loop `blink` confirmed blinking by eye, with `EXT_PORTA` following `SWPORTA_DR` 12/12 while it ran | `docs/aen-bench-bringup.md` §1 GPIO row -- the original DDR/DR+`EXT_PORTA` PASS criterion could never independently fail (`EXT_PORTA` mirrors `SWPORTA_DR` for an output-direction pin, Synopsys DW_apb_gpio databook) and proved nothing beyond the controller-register path; a same-day `GPIO_CTRL_CKEN` theory for an earlier "dark pad" was refuted on the bench, and this pad-level optical re-proof superseded it, 2026-07-27, real E8 silicon, alplab-gw | v0.8 |
+| AEN801 peripheral matrix — UART | `examples/aen/aen-uart-ns16550-loopback` | ✅ verified | `uart3` (ns16550) TX/RX loopback byte-compares clean | `docs/aen-bench-bringup.md` §1 "What is validated on silicon" table, real E8 silicon, alplab-gw, 2026-06-24 | v0.8 |
 | AEN801 peripheral matrix — PWM | `examples/aen/aen-pwm-utimer-pwmleds` (UTIMER3) | ✅ verified | `pwm_set_cycles` on UTIMER3/pwm3 register-readback verified | same | v0.8 |
 | AEN801 peripheral matrix — SPI | `examples/aen/aen-spi-regcheck` (DWC_ssi) | ✅ verified | `spi0` loopback via `spi_transceive()` completes clean | same | v0.8 |
 | AEN801 peripheral matrix — Counter | `examples/aen/aen-counter-utimer-regcheck` (utimer0) | ✅ verified | utimer0-backed counter exercised on real silicon | same | v0.8 |
@@ -342,7 +366,7 @@ reconciled v0.1.0 I²C/SPI/UART/GPIO rows above for that distinction.
 | AEN801 peripheral matrix — I2S TX | `examples/aen/aen-i2s-amp-alif` (i2s3) | ✅ verified | i2s3 clocks a tone out at the 76.8 MHz audio clock (no amp/mux wired -- audible output is separately still-pending) | same | v0.8 |
 | AEN801 peripheral matrix — QEnc | quadrature counter | 🟡 partial | Driver reads clean but the count stays static -- **hardware-gated**: no physical encoder is attached to spin it, not a code/Flow-D bug | same | v0.8 |
 | AEN801 peripheral matrix — SD card | DWC SDHC | 🟡 partial | DWC SDHC controller initialises but the card is unreachable -- **hardware-gated**: the EVK's SDIO 74LVC157 mux (EN=IO20, SEL=IO21, both CC3501E-side) is not routed with a card inserted on this bench unit | same | v0.8 |
-| AEN Ethernet (dp83825 PHY + `eth_dwmac_alif_ensemble` MAC glue) | `zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c` + `metadata/chips/dp83825.yaml` | ✅ verified | DHCP lease acquired and confirmed server-side (dnsmasq lease + ARP REACHABLE); root cause of the earlier no-link was DMA-visible buffers placed in DTCM instead of SRAM0 | `examples/aen/aen-ethernet-link`, RESULT PASS, real E8 silicon, 2026-06-24 (`CHANGELOG.md` [v0.8.0]); managed-MDIO PHY address corrected `@1`→`@0` against a live MDIO scan (`CHANGELOG.md` [v0.16.0], #1244) | v0.8 |
+| AEN Ethernet (dp83825 PHY + `eth_dwmac_alif_ensemble` MAC glue) | `zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c` + `metadata/chips/dp83825.yaml` | ✅ verified | DHCP lease acquired and confirmed server-side (dnsmasq lease + ARP REACHABLE); root cause of the earlier no-link was DMA-visible buffers placed in DTCM instead of SRAM0 | `docs/aen-bench-bringup.md` §1 Ethernet row, `examples/aen/aen-ethernet-link` RESULT PASS, real E8 silicon, 2026-06-24; managed-MDIO PHY address corrected `@1`→`@0` against a live MDIO scan (`CHANGELOG.md` [v0.16.0], #1244) | v0.8 |
 
 ## v0.9.0 — portable-surface consistency batch (tagged 2026-07-06)
 

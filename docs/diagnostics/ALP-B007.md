@@ -51,10 +51,11 @@ No `(for example: ...)` clause is appended to the hint when this checkout
 ships no preset hosting that family at all -- that's the signal an inline
 board (see Fix) is the only option, not a missing preset name.
 
-To see every preset's declared families directly (read-only):
+List every preset this checkout actually ships (read-only), then open
+one to check its `hosts_som_families:` list directly:
 
 ```sh
-grep -l hosts_som_families metadata/boards/*.yaml | xargs grep -A1 hosts_som_families
+ls metadata/boards/*.yaml
 ```
 
 ## Fix
