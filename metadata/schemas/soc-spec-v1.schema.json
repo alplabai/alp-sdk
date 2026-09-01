@@ -348,6 +348,14 @@
         { "required": ["gops"] },
         { "required": ["tops"] }
       ],
+      "if": {
+        "properties": { "type": { "pattern": "^ethos-u" } },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["mac_per_cycle"],
+        "description": "Every ethos-u* NPU must declare mac_per_cycle -- the emit's accelerator sizing (scripts/alp_orchestrate/kconfig.py) and target derivation (scripts/alp_model/targets.py) both read npus[].mac_per_cycle directly for this backend; an absent value either raises KeyError (targets.py) or falls through to a silent 256-MAC default (kconfig.py) instead of failing at the metadata source (#1849)."
+      },
       "properties": {
         "type":            { "type": "string", "description": "e.g. ethos-u55, ethos-u85, drp-ai3, dx-m1." },
         "subtype":         { "type": "string", "description": "e.g. high-perf (NPU-HP), high-efficiency (NPU-HE), generative (NPU-HG)." },
