@@ -93,6 +93,20 @@ uint8_t rev[80];
 se_service_get_se_revision(rev);   /* "SES A0 v1.110.0 Mar 4 2026" */
 ```
 
+**The SDK now runs this check for you, automatically, on the portable path.**
+`src/backends/soc_info/alif_se.c` parses the SERAM number out of every
+`alp_soc_info_read()` / `alp_soc_secure_fw_ping()` revision read and logs one
+`LOG_WRN` the first time it sees a version below the v110 floor, naming ADR-0030
+and this issue. **This is a diagnostic, not a fix** — it cannot re-establish a
+clock the SE itself dropped (see the "no workaround is safe to ship" reasoning
+above; the same reasoning rules out attempting one here), so it only turns a
+silent 76.8 MHz stall into an actionable log line. It also only fires on THIS
+backend's own read path — whichever `se_service_*` call an application happens
+to issue first (the customer's #1700 trigger was `SERVICE_CRYPTOCELL_GET_RND`,
+not a soc-info read) is not intercepted. Call `se_service_get_se_revision()` (or
+`alp_soc_info_read()`) explicitly as the first diagnostic step regardless of
+whether the warning has fired.
+
 A module below v109 must have its SERAM updated — a **System Package update**
 over the SE-UART with SETOOLS. Changing the application cannot fix a mismatched
 pair; it can only move the symptom.
