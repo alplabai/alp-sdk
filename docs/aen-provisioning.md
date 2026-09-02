@@ -215,26 +215,56 @@ default E8`. If it can't reach the SES, fix §2 first (auto-detect needs the
 **Which `app-device-config.json` this uses.** SETOOLS 1.110.00 ships no
 AE822-specific device config — the stock `build/config/app-device-config.json`
 declares `"device": "AE722F80F55D5AS"`, an **E7** part, not our
-`AE822FA0E5597LS0`. Two facts are bench-established and one is deliberately
-still open (alp-sdk#1701):
+`AE822FA0E5597LS0`. A maintainer relayed the following from Alif, second-hand:
+it was **not** posted to alp-sdk#1700 or alp-sdk#1701, and as of this writing
+(2026-09-02) it appears nowhere else in this repo either. Treat it as an
+uncorroborated vendor statement, not a settled repo fact, until it lands on
+the issue thread with a citable source:
 
-- **`device` is very likely toolchain metadata, not silicon-relevant.** The SE
-  reports the correct part identity from OTP (`ALIF_PN = AE822FA0E5597LS0`)
-  regardless of which part the config file names.
-- **The HFXO trim fields match our AE822.** Our healthy board's own clock
-  register readback (`XO_REG1` → `xtal_cap:8 gm_pfet:16 gm_nfet:16`) agrees
-  with the stock file's `HFXO_CAP_CTRL`/`HFXO_PFET_GM_CTRL`/`HFXO_NFET_GM_CTRL`.
-- **The rest of the file — notably its `firewall` block — is unverified for
-  AE822.** SETOOLS' *other* stock config (`app-device-config-1c.json`, a third
-  part) ships a *different* `HFXO_CAP_CTRL` and an empty `firewall` block, so
-  these fields are demonstrably part-specific in general; the E7 file's
-  firewall region set has not been bench-validated against AE822 and must not
-  be assumed safe from the two bullets above.
+> The provided app-device-config.json works with either E7 or E8. The part
+> number field is just a text field for your own usage. The important thing
+> to note is the part number selected when you execute tools-config, as that
+> is what app-gen-toc and app-write-mram use.
 
-Until alp-sdk#1701 resolves (an open escalation to Alif — see #1700, item 3):
-use the stock `app-device-config.json` unmodified, as the reference board
-does. Do not hand-edit its `device` field, and do not treat any part of the
-file beyond the two confirmed bullets above as AE822-qualified.
+What follows separates what the bench already established independently
+from what rests on the relay alone:
+
+- **`device` is very likely cosmetic, not silicon-relevant** —
+  bench-established on its own: the SE reports the correct part identity from
+  OTP (`ALIF_PN = AE822FA0E5597LS0`) regardless of which part the config file
+  names. The relay agrees but isn't needed to support this bullet.
+- **The HFXO trim fields already matched our AE822** independently: the
+  reference board's own clock register readback (`XO_REG1` →
+  `xtal_cap:8 gm_pfet:16 gm_nfet:16`) agrees with the stock file's
+  `HFXO_CAP_CTRL`/`HFXO_PFET_GM_CTRL`/`HFXO_NFET_GM_CTRL`.
+- **The relay says what actually binds the ATOC to a part is the
+  `tools-config -a` step above, not this file** —
+  `app-gen-toc`/`app-write-mram` key off the part `tools-config` selected,
+  not the `device` string. This rests on the relayed statement alone; it is
+  not independently bench-verified here.
+
+Use the stock `app-device-config.json` unmodified for this boot/identity
+path, as the reference board does, and do not hand-edit its `device` field.
+**That does not generalize to every field or every flow.** This repo already
+ships a firewall-policy-sensitive path that treats the file's content beyond
+`device` as board-specific and non-interchangeable:
+`examples/connectivity/firmware-update-log`'s hardware-firewall proof
+(`scripts/bench/aen/flash-update-log-firewall-probe.sh`,
+`ALP_AEN_INCLUDE_DEVICE_CONFIG=yes` / `ALP_AEN_DEVICE_CONFIG_JSON`) warns
+that swapping in a generic device config there "can remove the very
+firewall rule you are trying to prove," and requires a board-specific config
+instead of the stock file. So: the `device` string is cosmetic for identity;
+the file's `firewall` block is not established as interchangeable, and the
+shipped firewall-proof flow already treats it as the opposite. Don't read
+"the part-number field doesn't matter" as "any stock device config is safe
+wherever firewall enforcement matters" — it isn't. `app-device-config.json`
+also remains a licensed SETOOLS deliverable carrying Alif-owned configuration
+beyond the `device` string, so alp-sdk does not ship or hand-produce a copy
+of it regardless.
+
+alp-sdk#1701 stays **open**: this section records the relayed guidance as
+current best-known practice, not a settled answer — close the loop by
+getting Alif's statement onto the issue thread.
 
 ## 4. Build the ATOC + write it
 

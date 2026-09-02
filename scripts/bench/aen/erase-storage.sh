@@ -17,11 +17,13 @@
 # destroys bytes that look meaningful. #1334 closed on the measurement; #1430
 # is the standing "erase before ship" step it left behind.
 #
-# [BENCH-GATED / UNVERIFIED-ON-BENCH] This script has NEVER been run against a
-# module. Everything below is assembled from facts already established in this
-# repo (cited inline); the run itself, its transcript, and the post-erase cold
-# power-cycle are still owed. Do not record a SoM as erased on the strength of
-# this file.
+# [BENCH-VERIFIED 2026-08-30] Run once against a real module (off-labgrid
+# E1M-AEN801, `AE822FA0E5597LS0`, J-Link `000821005680`): the window
+# 0x80560000 .. 0x80578000 verified all-0x00, and a cold power-cycle showed
+# `u VB` on the `ALP-HE` boot row, so the ATOC band was undisturbed by the
+# erase. Transcript in docs/aen-provisioning.md section 7. One bench run is
+# not a standing guarantee for a different module -- the DPIDR gate and
+# verifybin below still run, and must still pass, on every unit.
 #
 # ---------------------------------------------------------------------------
 # HAZARDS -- read before running
@@ -63,9 +65,9 @@
 # Address-range note: `loadbin` into MRAM is bench-established at 0x80010000
 # (docs/aen-provisioning.md section 0.5 Option B) and at the ATOC package
 # address near the top of the window (docs/aen-bench-bringup.md, the "Burning:"
-# address) -- i.e. below and above this range -- but the storage window itself
-# has NOT been written this way on the bench. That is part of what the first
-# run has to prove.
+# address) -- i.e. below and above this range -- and the storage window
+# itself was written this way and byte-verified on 2026-08-30 (see the
+# [BENCH-VERIFIED] note above).
 #
 # Exit codes (aligned with the sibling Flow D helpers):
 #   0  window written and byte-verified as erased
