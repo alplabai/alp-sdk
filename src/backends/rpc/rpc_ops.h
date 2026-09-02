@@ -294,8 +294,9 @@ void alp_rpc_close_finalize(void *owner);
  * detection has decided the channel is closing -- gate it the same
  * way the backend already gates its `received` callback (e.g.
  * zephyr_drv.c's rpc_recv_enter()/rpc_worker_leave() bracket around
- * rpc_ept_unbound()/rpc_ept_error() too), so `owner` is guaranteed to
- * still reference a live, not-yet-recycled alp_rpc_channel_t.
+ * rpc_ept_bound()/rpc_ept_unbound()/rpc_ept_error() too), so `owner`
+ * is guaranteed to still reference a live, not-yet-recycled
+ * alp_rpc_channel_t.
  *
  * @param[in] owner  alp_rpc_backend_state_t::owner (opaque to the
  *                    backend).  NULL is a silent no-op.

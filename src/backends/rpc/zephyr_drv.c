@@ -40,21 +40,22 @@
  * (replacing the old single z_close()) implement:
  *
  *   - z_shutdown(): a sticky `closing` flag guarded by a k_spinlock
- *     (ipc_service's `received` callback may run close to interrupt
- *     priority, so this can't be a blocking mutex) that z_call()
- *     rechecks both before staging and is woken from, replacing a
- *     one-shot cancel.  Self-close detection ANDs two things, both
- *     read under the same spinlock: `recv_active` (true only while
- *     THIS channel's OWN rpc_ept_recv() is genuinely on some thread's
- *     call stack right now -- set/cleared by rpc_ept_recv() itself)
- *     AND the CURRENT thread matching `recv_thread` (the thread
- *     presently running that recv).  Checking `recv_active` is what
- *     closes the defect-3 hole a bare thread-identity compare had:
- *     `recv_thread` is never cleared, and every channel shares the
- *     SAME single ipc_service worker thread (BENCH-UNVERIFIED
- *     assumption: exactly one such thread ever invokes a given
- *     endpoint's `received` callback, never concurrently, never from
- *     ISR context -- see rpc_ept_recv()'s own comment), so a bare
+ *     (ipc_service's `received` and `bound` callbacks may run close to
+ *     interrupt priority, so this can't be a blocking mutex) that
+ *     z_call() rechecks both before staging and is woken from,
+ *     replacing a one-shot cancel.  Self-close detection ANDs two
+ *     things, both read under the same spinlock: `recv_active` (true
+ *     only while THIS channel's OWN rpc_ept_recv() is genuinely on
+ *     some thread's call stack right now -- set/cleared by
+ *     rpc_ept_recv() itself) AND the CURRENT thread matching
+ *     `recv_thread` (the thread presently running that recv).
+ *     Checking `recv_active` is what closes the defect-3 hole a bare
+ *     thread-identity compare had: `recv_thread` is never cleared,
+ *     and every channel shares the SAME single ipc_service worker
+ *     thread (BENCH-UNVERIFIED assumption: exactly one such thread
+ *     ever invokes a given endpoint's `received` OR `bound` callback,
+ *     never concurrently, never from ISR context -- see
+ *     rpc_ept_recv()'s own comment and rpc_ept_bound()'s), so a bare
  *     `k_current_get() == recv_thread` misfired for a CROSS-channel
  *     close (channel A's callback closing channel B) -- it saw B's
  *     STALE `recv_thread` (set the last time B ever received
@@ -71,7 +72,15 @@
  *     see rpc_ept_recv()'s own comment) to reach 0 before returning
  *     DONE, because ipc_service_deregister_endpoint()'s return does
  *     not, by itself, clearly guarantee no recv is still in flight
- *     (also BENCH-UNVERIFIED).
+ *     (also BENCH-UNVERIFIED).  `bound` shares this same
+ *     rpc_recv_enter()/rpc_worker_leave() bracket (see rpc_ept_bound()
+ *     below) and, on the pinned RPMsg static-vrings backend (see this
+ *     file's "Link liveness" section below), is the ONLY ipc_service
+ *     callback that actually fires on real silicon -- `unbound`/`error`
+ *     are wired and tested but structurally unreachable there -- so an
+ *     app that closes its own channel from its link callback reaches
+ *     OpenAMP's ept_cb reentrantly from inside `bound` on a path this
+ *     repo has never benched.
  *   - z_destroy(): trivial for this backend (a static pool slot, no
  *     heap, no fds) -- just releases the pool slot.  Called exactly
  *     once by the dispatcher, strictly after its own active-op drain.

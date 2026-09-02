@@ -275,9 +275,16 @@ typedef enum {
  *                    @ref alp_rpc_set_link_callback.
  *
  * @warning Runs on whatever context the backend's own transport-level
- *          bind/unbind/error signal fires from -- an RX worker
- *          thread, not the caller's thread (mirrors
- *          @ref alp_rpc_msg_cb_t's context warning).  Keep the body
+ *          bind/unbind/error signal fires from.  For most transitions
+ *          that is an RX worker thread, not the caller's thread
+ *          (mirrors @ref alp_rpc_msg_cb_t's context warning) -- except
+ *          src/backends/rpc/yocto_drv.c's initial UP notification,
+ *          which fires synchronously on the CALLER's own thread,
+ *          inside @ref alp_rpc_open, strictly before that backend's RX
+ *          worker is spawned (harmless only because no
+ *          @ref alp_rpc_link_cb_t can be registered yet at that point --
+ *          @ref alp_rpc_set_link_callback is always called after
+ *          @ref alp_rpc_open returns).  Keep the body
  *          short and non-blocking.  Calling @ref alp_rpc_close on
  *          THIS SAME channel from inside this callback is supported,
  *          exactly like a subscribe callback closing its own channel

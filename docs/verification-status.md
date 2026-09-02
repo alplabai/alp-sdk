@@ -32,7 +32,7 @@ ledger is the one to trust.
 
 ## Summary
 
-88 silicon/HIL-gated ledger rows parsed across 8 sections.  A row can carry more than one glyph
+89 silicon/HIL-gated ledger rows parsed across 9 sections.  A row can carry more than one glyph
 (e.g. half a feature done, half pending), so glyph counts can
 exceed the row count.  This total EXCLUDES three kinds of row that
 would otherwise inflate it: the rows under "CI-only / tooling rows (no HIL gate)"
@@ -48,7 +48,7 @@ duplicated from the v0.4 section already counted above).
 | Glyph | Meaning | Count |
 |---|---|---|
 | `⏳` | untested | 35 |
-| `🟡` | partial | 43 |
+| `🟡` | partial | 44 |
 | `✅` | verified | 11 |
 | `❌` | failing | 1 |
 | `n/a` | n/a | 0 |
@@ -391,6 +391,15 @@ silicon-facing row is bench-gated as usual.
 | Peer-core boot (`alp_mproc_boot_core`) | `src/backends/mproc/alif_se_boot.c` (`mproc_boot` class, `silicon_ref="alif:ensemble:e8"`) | ✅ verified | A peer M55 is released at a valid entry and its firmware handshakes back (the AEN dual-core examples) | Bench-proven on real E1M-AEN801 (E8) silicon, both directions: HP-master→HE-peer (2026-06-17, re-confirmed 2026-08-01) and HE-master→HP-peer via the `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC` path (2026-08-01) -- 16/16 RPMsg ping/pong round-trips in `examples/aen/aen-rpc-pingpong` (`docs/aen-bench-bringup.md` § Flow A — Dual-core deferred-TOC boot). `ALP_CORE_SELF` rejection covered on native_sim. Note: this is the boot/release call only -- the SDK's own `alp_mbox_*` mailbox wrapper (`<alp/mproc.h>` real impl row, v0.3 above) is a separate, still-unproven claim; the pingpong example talks over Zephyr's `ipc_service`/RPMsg directly, not `alp_mbox_send` | v0.9 |
 | `alp_dac_capabilities()` | `src/dac_dispatch.c` + backends | 🟡 partial | Caps reported on an opened handle match the silicon (resolution, channel count) on a real target | Live capabilities row in the conformance suite on native_sim | v0.9 |
 | `alp_wdt_open(const alp_wdt_config_t *)` single-arg + ADC `_mv` read renames | `include/alp/wdt.h` / `include/alp/adc.h` + all in-tree callers | 🟡 partial | Pre-1.0 signature migration: no stale two-arg / unsuffixed callers anywhere in tree; behaviour unchanged | Conformance suite adopted the new signatures (`eec8868d`); grep-clean tree; ABI snapshot regenerated | v0.9 |
+
+## v0.17.0 candidate — RPC link liveness (2026-09)
+
+`<alp/rpc.h>` link-liveness signal (issue #1643): a far core resetting or
+crashing used to be invisible to `alp_rpc_send()`.
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| RPC link liveness (`alp_rpc_set_link_callback` / `alp_rpc_link_state`, `alp_rpc_send`/a NEW `alp_rpc_call` reject into a `LOST` link) | `include/alp/rpc.h` + `src/rpc_dispatch.c` + `src/backends/rpc/{zephyr_drv,yocto_drv,sw_fallback}.c` + `src/common/stub/stub_rpc.c` | 🟡 partial | `ALP_RPC_LINK_UP` is observed on every wired backend once its channel opens/binds.  `ALP_RPC_LINK_LOST` is observed only on the Linux/A-class chardev backend (`yocto_drv.c`) in this revision -- **neither SoM family issue #1643 names can produce a LOST today**: AEN is an all-Zephyr M55↔M55 pair (structurally blocked, see below), and V2N's A55 selects the still-unwired `yocto_uio_drv.c` over `yocto_drv.c` on its `silicon_ref`.  See `include/alp/rpc.h`'s `@par Link liveness` block for the full per-backend breakdown.  Once observed (any backend), `alp_rpc_send()` and a NEW `alp_rpc_call()` fail `ALP_ERR_NOT_READY` instead of silently accepting | Dispatcher-level contract (`_rpc_op_enter`/`_rpc_op_leave` gating, `alp_rpc_notify_link()`'s DOWN/UP→LOST invariant + invoking the registered callback, `alp_rpc_send()`/`alp_rpc_call()`'s LOST-rejects-early paths) covered on native_sim in `tests/unit/rpc_registry/src/test_rpc_registry.c`.  The Zephyr backend's `rpc_ept_bound`/`rpc_ept_unbound`/`rpc_ept_error` wiring, including the `closing`-gate reuse via `rpc_recv_enter()`/`rpc_worker_leave()` (now bracketing all three, not just the latter two), covered on native_sim in `tests/unit/rpc_zephyr_backend/src/test_rpc_zephyr_backend.c` (scenario 5) against a hand-driven `struct rpc_be`, not a real `ipc_service` transport.  **Confirmed by static analysis against the pinned Zephyr v4.4.1 tree, not needs-silicon**: the RPMsg static-vrings backend `CONFIG_ALP_SDK_RPC` selects invokes only `bound`/`received`, never `unbound`/`error` -- so which of the two a genuine far-core reset would drive is moot; neither is reachable on Zephyr in this revision.  `needs-silicon` (for the one backend that does implement LOST): whether `yocto_drv.c`'s rx thread reports LOST within a bounded time against a real Linux peer's chardev EOF has not been driven on hardware | v0.17 |
 
 ## CI-only / tooling rows (no HIL gate)
 
