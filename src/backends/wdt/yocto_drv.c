@@ -150,14 +150,12 @@ static void _disarm_and_close(int fd, bool attempt_magic_close)
  * @ref _disarm_and_close before releasing the fd (#760) so a failed
  * open never abandons an armed, unfeedable watchdog.
  */
-static alp_status_t y_open(const alp_wdt_config_t  *cfg,
-                           alp_wdt_backend_state_t *st,
-                           alp_capabilities_t      *caps_out,
-                           struct alp_wdt          *owner)
+static alp_status_t
+y_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
-	(void)owner; /* No ISR trampoline on this backend -- WDIOC has no
-                   * expiry-notification ioctl, so INTERRUPT_ONLY is
-                   * rejected below before there is anything to wire up. */
+	/* No ISR trampoline on this backend -- WDIOC has no
+	 * expiry-notification ioctl, so INTERRUPT_ONLY is rejected below
+	 * before there is anything to wire up. */
 	if (cfg->on_timeout == ALP_WDT_INTERRUPT_ONLY) {
 		/* The Linux watchdog ABI has no reset-scope / interrupt-only
 		 * knob (fixed by the kernel driver + device tree -- see the

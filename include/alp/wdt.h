@@ -32,16 +32,19 @@
  *
  * @par ABI status: [ABI-STABLE]
  *      v0.2.  v0.9.0: wdt_id moved into alp_wdt_config_t so alp_wdt_open(const alp_wdt_config_t *) matches every other config-taking open (pre-1.0 signature change).
- *      v0.17.0 (#1637): alp_wdt_close() no longer implicitly calls the
+ *      v0.17.0 (#1637): alp_wdt_open() now enforces one live handle per
+ *      wdt_id (before this, two subsystems could each open the same
+ *      instance).  alp_wdt_close() no longer implicitly calls the
  *      equivalent of alp_wdt_disable() on the Zephyr backend -- closing
- *      one handle used to disarm the WHOLE watchdog device (Zephyr has
- *      no per-channel disable), so a second handle on a different
- *      channel of the same device silently lost its protection.  Close
- *      now only releases the handle; call alp_wdt_disable() explicitly
- *      first for a best-effort SoC-wide disable.  alp_wdt_config_t
- *      additively gains on_expire + user so ALP_WDT_INTERRUPT_ONLY has
- *      a way to actually notify the app (previously accepted and
- *      silently inert on Zephyr; the Yocto backend now rejects it with
+ *      one of those handles used to disarm the WHOLE watchdog device
+ *      (Zephyr's wdt_* driver class has no per-channel disable), so a
+ *      second subsystem holding the same wdt_id silently lost its
+ *      protection with no error on either side.  Close now only
+ *      releases the handle; call alp_wdt_disable() explicitly first for
+ *      a best-effort SoC-wide disable.  alp_wdt_config_t additively
+ *      gains on_expire + user so ALP_WDT_INTERRUPT_ONLY has a way to
+ *      actually notify the app (previously accepted and silently inert
+ *      on Zephyr; the Yocto backend now rejects it with
  *      ALP_ERR_NOSUPPORT instead of silently ignoring it, matching the
  *      Linux watchdog ABI's real capability). Pre-1.0, additive.
  *      See docs/abi-markers.md for the convention.
@@ -73,11 +76,31 @@ typedef struct alp_wdt alp_wdt_t;
 /**
  * @brief Watchdog expiry notification.
  *
- * Fires when the deadline is missed under @ref ALP_WDT_INTERRUPT_ONLY.
- * Runs in ISR context on the Zephyr backend -- keep the body short; do
- * not block, allocate, or take a mutex.  Never fires under
- * @ref ALP_WDT_RESET_SOC / @ref ALP_WDT_RESET_CPU (the reset pre-empts
- * the CPU before any callback could run).
+ * Fires when the deadline is missed under @ref ALP_WDT_INTERRUPT_ONLY,
+ * IF the underlying driver actually delivers it -- keep the body short
+ * regardless; do not block, allocate, or take a mutex.  Never fires
+ * under @ref ALP_WDT_RESET_SOC / @ref ALP_WDT_RESET_CPU (the reset
+ * pre-empts the CPU before any callback could run).
+ *
+ * @warning Delivery is driver-dependent, not an SDK guarantee.  The
+ *          Zephyr `wdt_*` driver class only promises to call back
+ *          "when the watchdog expires" -- how, and whether at all, is
+ *          per-driver.  On the CMSDK APB watchdog (the E1M-AEN801's
+ *          `alp-wdt0`), the callback is wired from the SoC's NMI
+ *          handler and reached only under `CONFIG_RUNTIME_NMI`, which
+ *          defaults `n` and is NOT emitted by the SDK's own
+ *          `board.yaml` -> Kconfig mapping -- an app that wants
+ *          @c on_expire to fire on that target must select
+ *          `CONFIG_RUNTIME_NMI=y` itself (see
+ *          `examples/aen/aen-wdt-feed/prj.conf`).  When it does fire
+ *          there, it runs from the NMI handler, not a plain ISR --
+ *          treat it as at least as restrictive as ISR context (no
+ *          `k_sem_give` / `k_msgq_put` / `LOG_*` assumptions beyond
+ *          what the target's NMI entry actually permits).  A driver
+ *          that never calls back at all is silent, not an error --
+ *          @ref alp_wdt_open still returns a valid handle, because the
+ *          SDK cannot detect at open time whether a given Zephyr WDT
+ *          driver honours the callback.
  *
  * @param[in] wdt   The handle whose deadline fired.
  * @param[in] user  The @c user pointer from @ref alp_wdt_config_t.
@@ -152,7 +175,11 @@ typedef struct {
  *             wdt_id; on the Zephyr backend a residual internal
  *             reclaim can also surface this if a non-SDK Zephyr
  *             consumer, e.g. CONFIG_TASK_WDT, still holds the same
- *             underlying device);
+ *             underlying device.  A watchdog that refuses to disarm
+ *             at all once armed -- Zephyr's own watchdog.h: "not all
+ *             watchdogs can be restarted after they are disabled" --
+ *             surfaces that reclaim's own failure code here instead,
+ *             not BUSY);
  *           @ref ALP_ERR_NOT_READY (the underlying device isn't
  *             ready);
  *           @ref ALP_ERR_NOSUPPORT (the backend cannot honour
@@ -205,14 +232,30 @@ alp_status_t alp_wdt_disable(alp_wdt_t *wdt);
  *     running -- Zephyr also has no per-channel *uninstall* -- so a
  *     caller that stops feeding after close() still gets @ref
  *     ALP_WDT_RESET_SOC / @ref ALP_WDT_RESET_CPU (the hardware reset
- *     needs no live handle to fire).  @ref ALP_WDT_INTERRUPT_ONLY is
- *     the exception: close() unregisters the ISR trampoline's owner
- *     before returning, so a deadline that fires after close() finds
- *     no owner and delivers @b nothing -- no reset (the mode never
- *     arms one) and no @c on_expire call.  A caller for whom that
- *     silent post-close window is unacceptable must call @ref
- *     alp_wdt_disable before close(), or keep feeding until it no
- *     longer needs the deadline.
+ *     needs no live handle to fire).  @ref ALP_WDT_INTERRUPT_ONLY asks
+ *     the driver for no reset at all (`WDT_FLAG_RESET_NONE`); close()
+ *     additionally unregisters the ISR trampoline's owner before
+ *     returning, so a deadline that fires after close() no longer
+ *     calls @c on_expire (no owner to resolve to).  Whether the
+ *     watchdog itself stays quiet too is driver-dependent: some
+ *     in-tree Zephyr WDT drivers honour `WDT_FLAG_RESET_NONE`; others
+ *     do not and arm a reset regardless of the requested mode -- e.g.
+ *     the CMSDK APB watchdog the E1M-AEN801's `alp-wdt0` uses stores
+ *     the flags but never reads them back, and always programs a
+ *     reset-enabled timeout.  This SDK does not paper over that: it
+ *     forwards the request the Zephyr WDT API defines and cannot make
+ *     a driver honour a flag it ignores.  A caller for whom the
+ *     post-close window (silent @c on_expire loss, and on
+ *     flag-ignoring hardware, a possible reset) is unacceptable must
+ *     call @ref alp_wdt_disable before close(), or keep feeding until
+ *     it no longer needs the deadline.  Separately: a *later*
+ *     @ref alp_wdt_open on the same @c wdt_id that reclaims a stale
+ *     `wdt_setup()` (see its own @ref ALP_ERR_BUSY entry) can disarm
+ *     this handle's still-running post-close timeout as a side effect
+ *     of that reclaim -- if the reclaim's own re-install then fails,
+ *     that protection is not restored; the failed @ref alp_wdt_open
+ *     call's return does not distinguish this from a reclaim attempt
+ *     that never touched the device.
  *   - Yocto: closes this handle's own `/dev/watchdogN`, attempting a
  *     best-effort disarm (`WDIOS_DISABLECARD`, plus the magic-close
  *     write if the driver advertised it) first -- scoped to this

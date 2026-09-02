@@ -109,11 +109,7 @@ alp_wdt_t *alp_wdt_open(const alp_wdt_config_t *cfg)
 		(void)be->probe(cfg->wdt_id, &refined);
 		caps.flags = refined;
 	}
-	/* h is passed through as the owner back-ref: the Zephyr backend's
-	 * ISR trampoline needs it to reach cfg.on_expire/cfg.user, because
-	 * Zephyr's wdt_callback_t (unlike counter's counter_alarm_cfg or
-	 * RTC's) carries no user_data cookie of its own (#1637). */
-	alp_status_t rc = ops->open(cfg, &h->state, &caps, h);
+	alp_status_t rc = ops->open(cfg, &h->state, &caps);
 	if (rc != ALP_OK) {
 		_free(h);
 		alp_z_set_last_error(rc);

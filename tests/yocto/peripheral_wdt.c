@@ -150,7 +150,7 @@ static void test_malloc_failure_disarms_and_closes_fd(void)
 	alp_capabilities_t      caps = { 0 };
 	alp_wdt_config_t        cfg  = default_cfg(5000u);
 
-	alp_status_t rc = y_open(&cfg, &st, &caps, NULL);
+	alp_status_t rc = y_open(&cfg, &st, &caps);
 	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOMEM);
 	ALP_ASSERT_EQ_INT(g_disarm_call_count, 1);
 	ALP_ASSERT_TRUE(!g_disarm_last_magic); /* GETSUPPORT never ran -- unknown, not attempted */
@@ -169,7 +169,7 @@ static void test_settimeout_hard_failure_disarms(void)
 	alp_capabilities_t      caps = { 0 };
 	alp_wdt_config_t        cfg  = default_cfg(5000u);
 
-	alp_status_t rc = y_open(&cfg, &st, &caps, NULL);
+	alp_status_t rc = y_open(&cfg, &st, &caps);
 	ALP_ASSERT_TRUE(rc != ALP_OK); /* EBADF on the pre-closed fd, not tolerated */
 	ALP_ASSERT_EQ_INT(g_disarm_call_count, 1);
 	ALP_ASSERT_TRUE(!g_disarm_last_magic);
@@ -184,7 +184,7 @@ static void test_timeout_ms_uint32_max_does_not_overflow(void)
 	alp_capabilities_t      caps = { 0 };
 	alp_wdt_config_t        cfg  = default_cfg(UINT32_MAX);
 
-	alp_status_t rc = y_open(&cfg, &st, &caps, NULL);
+	alp_status_t rc = y_open(&cfg, &st, &caps);
 	ALP_ASSERT_EQ_INT(rc, ALP_OK);
 	/* ceil(UINT32_MAX / 1000) = 4294968 (~49.7 days); the pre-fix
      * `(timeout_ms + 999u) / 1000u` wraps uint32_t and programs 1. */
@@ -202,7 +202,7 @@ static void test_close_attempts_magic_write_when_supported(void)
 	alp_capabilities_t      caps = { 0 };
 	alp_wdt_config_t        cfg  = default_cfg(1000u);
 
-	alp_status_t rc = y_open(&cfg, &st, &caps, NULL);
+	alp_status_t rc = y_open(&cfg, &st, &caps);
 	ALP_ASSERT_EQ_INT(rc, ALP_OK);
 
 	/* GETSUPPORT failed (ENOTTY on a pipe) so magic_close is false
@@ -235,7 +235,7 @@ static void test_interrupt_only_rejected_before_any_syscall(void)
 		                             .timeout_ms = 1000u,
 		                             .on_timeout = ALP_WDT_INTERRUPT_ONLY };
 
-	alp_status_t rc = y_open(&cfg, &st, &caps, NULL);
+	alp_status_t rc = y_open(&cfg, &st, &caps);
 	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOSUPPORT);
 	ALP_ASSERT_EQ_INT(g_last_open_fd, -1); /* the wired hook never ran */
 }

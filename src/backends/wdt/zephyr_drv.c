@@ -83,12 +83,20 @@ static void _expiry_trampoline(const struct device *dev, int channel_id)
 	}
 }
 
-static alp_status_t z_open(const alp_wdt_config_t  *cfg,
-                           alp_wdt_backend_state_t *st,
-                           alp_capabilities_t      *caps_out,
-                           struct alp_wdt          *owner)
+static alp_status_t
+z_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
 {
-	const uint32_t wdt_id = cfg->wdt_id;
+	/* The owner back-ref the ISR trampoline needs (Zephyr's
+	 * wdt_callback_t carries no user_data cookie of its own, unlike
+	 * counter_alarm_cfg's) is recovered with CONTAINER_OF instead of
+	 * being threaded through the vtable: the dispatcher always calls
+	 * ops->open(cfg, &h->state, ...) with st == &h->state and `state`
+	 * is struct alp_wdt's first member (wdt_ops.h), and no wdt backend
+	 * delegates the way the CC3501E GPIO proxy does (gpio_ops.h), so
+	 * that recovery is always correct here -- no per-backend owner
+	 * plumbing needed (#1637). */
+	struct alp_wdt *owner  = CONTAINER_OF(st, struct alp_wdt, state);
+	const uint32_t  wdt_id = cfg->wdt_id;
 	if (wdt_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (wdt_id >= ALP_SOC_WDT_COUNT) return ALP_ERR_OUT_OF_RANGE;
 	const struct device *dev = _devs[wdt_id];
@@ -115,15 +123,41 @@ static alp_status_t z_open(const alp_wdt_config_t  *cfg,
 		 * refuses a second install otherwise (no per-channel
 		 * uninstall to undo just the old one).  Reclaim the device
 		 * with one wdt_disable() + retry rather than leaving this
-		 * wdt_id permanently un-reopenable.  Safe for the SDK's own
-		 * handles by construction (exclusivity already rules out a
-		 * live sibling); a non-SDK Zephyr consumer sharing this exact
+		 * wdt_id un-reopenable.  Safe for the SDK's own handles by
+		 * construction (exclusivity already rules out a live
+		 * sibling); a non-SDK Zephyr consumer sharing this exact
 		 * device (e.g. CONFIG_TASK_WDT) is the one case this can
 		 * still disarm -- the same residual exposure the old
 		 * unconditional close()-time wdt_disable() carried, just now
 		 * triggered only on an actual reopen instead of on every
-		 * close (#1637). */
-		(void)wdt_disable(dev);
+		 * close (#1637).
+		 *
+		 * wdt_disable()'s own status is checked, not discarded: not
+		 * every watchdog CAN be disabled once armed (Zephyr's
+		 * watchdog.h: "not all watchdogs can be restarted after they
+		 * are disabled").  A driver that refuses (e.g. -EPERM) leaves
+		 * the device exactly as armed as before, so retrying install
+		 * would just re-fail -EBUSY against a device we already know
+		 * is still armed -- return disable_rc itself instead, which
+		 * names the real reason reclaim didn't happen rather than
+		 * repeating the stale first -EBUSY (that stale repeat is the
+		 * case wdt.h's ALP_ERR_BUSY doc below still describes: a
+		 * live non-SDK consumer, not a disable refusal).
+		 *
+		 * When disable_rc IS 0, the retry below can still fail
+		 * (wdt_install_timeout() or the wdt_setup() call further
+		 * down) -- Zephyr's WDT API has no way to undo a successful
+		 * disable or restore the timeout it replaced, so a caller
+		 * that had relied on this wdt_id's post-close armed state
+		 * (wdt.h's alp_wdt_close() doc) loses that protection on this
+		 * failure path with no dedicated status of its own.  Callers
+		 * for whom that residual gap matters should not depend on the
+		 * post-close armed state surviving a later open() attempt on
+		 * the same wdt_id. */
+		int disable_rc = wdt_disable(dev);
+		if (disable_rc != 0) {
+			return _errno_to_alp(disable_rc);
+		}
 		channel_id = wdt_install_timeout(dev, &zcfg);
 	}
 	if (channel_id < 0) return _errno_to_alp(channel_id);
@@ -169,8 +203,16 @@ static void z_close(alp_wdt_backend_state_t *st)
 	 * device as a whole (#1637).  A caller that wants a best-effort
 	 * SoC-wide disable calls alp_wdt_disable() explicitly before
 	 * close() -- see its ALP_ERR_NOSUPPORT contract.  Leaving the
-	 * device armed here does not strand this wdt_id: z_open()'s own
-	 * -EBUSY handling above reclaims it on the next open.
+	 * device armed here does not strand this wdt_id on hardware that
+	 * can actually be disabled: z_open()'s own -EBUSY handling above
+	 * reclaims it on the next open.  On a watchdog that refuses
+	 * wdt_disable() once armed (Zephyr watchdog.h: "not all watchdogs
+	 * can be restarted after they are disabled"), that reclaim itself
+	 * fails and surfaces the driver's own status instead of retrying
+	 * -- see z_open()'s comment -- and this wdt_id genuinely stays
+	 * un-reopenable until reset, a hardware limit, not something this
+	 * SDK can work around without a Zephyr WDT API this class of
+	 * device doesn't offer.
 	 *
 	 * Unregister the ISR trampoline so a timeout that fires after this
 	 * point cannot resolve to this (about-to-be-freed) owner -- see the
