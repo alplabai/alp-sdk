@@ -2,34 +2,26 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * #1818 follow-up: spi_dw_dma_setup_tx_channel() used to write two DIFFERENT
- * values for what should be one hardware fact -- DMATDLR got the raw
- * half-FIFO default (dw_spi_txftlr_dflt) unconditionally, while the PL330
- * dma_cfg burst length got spi_dw_dma_calculate_burst_length()'s possibly
- * SMALLER result. spi_dw_dma_burst_for_chunk() (spi_dw_alif_dma_burst.h) now
- * computes the one value both writes use.
+ * Host-testable coverage for spi_dw_dma_calculate_burst_length() /
+ * spi_dw_dma_burst_for_chunk() (spi_dw_alif_dma_burst.h) -- the PL330
+ * dma_cfg burst length spi_dw_dma_setup_tx_channel() / _rx_channel() compute
+ * for a transfer chunk. The burst must divide the chunk evenly, or a final
+ * partial burst never crosses the DW_SSI FIFO watermark and the transfer
+ * hangs.
  *
- * "old_watermark" below is literally what spi_dw_alif.c wrote into DMATDLR
- * before the fix: the unreduced default, full stop. This suite asserts that
- * for realistic inputs -- a dummy-TX (RX-only) transfer, and the exact tail
- * shape ALP_CC3501E_OTA_MAX_CHUNK (4092) leaves after the bulk/tail split in
- * spi_dw_dma_transceive() (4092 % 8 = 4, so the final chunk is 4 items) --
- * old_watermark() disagrees with the burst length actually programmed into
- * the DMA engine, while spi_dw_dma_burst_for_chunk() cannot, by construction.
+ * This is dma_cfg's burst length only -- NOT necessarily what is written
+ * into the DW_SSI watermark register (DMATDLR/DMARDLR); see
+ * spi_dw_alif_dma_burst.h's file header for why the two are allowed to
+ * differ, and NOTE that a dummy-TX chunk is never reached by an RX-only
+ * transfer (spi_dw_dma_setup_tx_channel() is simply not called for one) --
+ * it is reached only when a supplied tx_buf_set's current buffer has
+ * `buf == NULL`, or its buffers are exhausted while RX continues.
  */
 #include <zephyr/ztest.h>
 
 #include "spi_dw_alif_dma_burst.h"
 
 ZTEST_SUITE(spi_dw_alif_dma_burst, NULL, NULL, NULL, NULL, NULL);
-
-/* What spi_dw_dma_setup_tx_channel() wrote into DMATDLR before #1818's
- * follow-up fix: the raw default, ignoring chunk/dummy entirely.
- */
-static uint32_t old_watermark(uint32_t default_burst)
-{
-	return default_burst;
-}
 
 /* A round chunk (multiple of the default burst) never triggers a reduction,
  * so the pure calculator returns the default unchanged.
@@ -72,33 +64,16 @@ ZTEST(spi_dw_alif_dma_burst, test_ota_max_chunk_tail_reduces_burst)
 
 	zassert_equal(ota_tail_chunk, 4, "test's own arithmetic sanity check");
 	zassert_equal(burst, 4, "a 4-item tail must reduce the burst from 8 to 4");
-
-	/* This is the regression: the OLD code wrote old_watermark(default_burst)
-	 * into DMATDLR regardless of chunk, which disagrees with the burst the
-	 * DMA engine was actually told to move. */
-	zassert_not_equal(old_watermark(default_burst),
-	                  burst,
-	                  "pre-fix DMATDLR value (%u) must NOT match the real burst (%u) here "
-	                  "-- that mismatch is exactly what #1818's follow-up fixes",
-	                  old_watermark(default_burst),
-	                  burst);
 }
 
-/* The dummy-TX case (an RX-only transfer's placeholder source) always moves
- * exactly 1 item per burst, regardless of chunk -- and regardless of how
- * large the default burst is.
+/* A dummy placeholder direction always moves exactly 1 item per burst,
+ * regardless of chunk or default burst.
  */
 ZTEST(spi_dw_alif_dma_burst, test_dummy_forces_burst_of_one)
 {
 	uint32_t burst = spi_dw_dma_burst_for_chunk(8, 4096, true);
 
 	zassert_equal(burst, 1, "a dummy TX/RX placeholder must always move 1 item per burst");
-
-	/* Same regression shape as the OTA tail case: the OLD code wrote the raw
-	 * default into DMATDLR even for a dummy transfer. */
-	zassert_not_equal(old_watermark(8),
-	                  burst,
-	                  "pre-fix DMATDLR value (8) must NOT match the dummy-forced burst (1)");
 }
 
 /* spi_dw_dma_burst_for_chunk() must route non-dummy calls through the same

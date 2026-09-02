@@ -6,23 +6,29 @@
  * DMA burst-length computation for the vendored Alif DWC_ssi SPI driver
  * (spi_dw_alif.c). Split into its own tiny, dependency-free header
  * (stddef.h/stdint.h/stdbool.h only) so tests/unit/spi_dw_alif_dma_burst can
- * exercise the exact value spi_dw_dma_setup_tx_channel() /
- * spi_dw_dma_setup_rx_channel() program into BOTH the DW_SSI DMA watermark
- * register (DMATDLR / DMARDLR) and the PL330 dma_cfg burst length, without
- * pulling in DEVICE_MMIO or a devicetree-instantiated SPI instance.
+ * exercise the burst-length reduction on the host, without pulling in
+ * DEVICE_MMIO or a devicetree-instantiated SPI instance.
  *
- * #1818 follow-up (CONFIG_SPI_DW_ALIF_DMA_MIN_LEN staying load-bearing): the
- * TX side used to compute these as TWO INDEPENDENT values -- DMATDLR got the
- * raw half-FIFO default unconditionally, while dma_cfg's burst length got a
- * possibly SMALLER value for a dummy-TX (RX-only) transfer or a chunk that
- * does not divide the default burst evenly (ALP_CC3501E_OTA_MAX_CHUNK=4092
- * is exactly that shape: 4092 % 8 != 0). Routing both writes through one
- * function makes them the same value BY CONSTRUCTION, matching the RX side,
- * which already computed burstlen once and reused it for both. NOT shown to
- * be the #1818 cause on its own -- see the long comment at the TX call site
- * in spi_dw_alif.c for why -- but a genuine self-consistency defect
- * regardless: the register programmed must match what the DMA engine was
- * actually configured to move.
+ * spi_dw_dma_burst_for_chunk() is the burst length each direction's setup
+ * function hands the PL330 dma_cfg -- the actual burst size the DMA engine
+ * executes, which must divide the chunk evenly or a final partial burst
+ * never crosses the FIFO watermark and the transfer hangs.
+ *
+ * It is NOT the value every caller writes into the DW_SSI watermark register
+ * (DMATDLR / DMARDLR). DMATDLR/DMARDLR is a LOW WATERMARK -- e.g. the TX
+ * request asserts once the TX FIFO holds <= DMATDLR entries -- not a burst
+ * count, and the only hardware constraint tying the two together is
+ * watermark + burst <= fifo_depth. A #1818 follow-up briefly programmed the
+ * reduced burst into DMATDLR on the assumption the two had to match (down to
+ * DMATDLR=1 for a dummy-TX chunk); that was reverted once review established
+ * the watermark/burst distinction above -- forcing the PL330 to refill in
+ * much smaller increments against a DW_apb_ssi master that gates SCLK on TX
+ * underrun is an unproven behavioural change with no bench evidence either
+ * way. See the CONFIG_SPI_DW_ALIF_DMA_MIN_LEN comment in
+ * examples/aen/aen-cc3501e-bringup/prj.conf for the open question review
+ * could not settle from source: whether the controller honours a
+ * watermark-register write at all while SSIENR=1, which is the state
+ * spi_dw_dma_setup_tx_channel() / _rx_channel() always find it in.
  */
 #ifndef ZEPHYR_DRIVERS_SPI_SPI_DW_ALIF_DMA_BURST_H_
 #define ZEPHYR_DRIVERS_SPI_SPI_DW_ALIF_DMA_BURST_H_
@@ -59,19 +65,26 @@ static inline uint32_t spi_dw_dma_calculate_burst_length(uint32_t default_burst,
 }
 
 /**
- * @brief The ONE burst length a DMA channel setup must program into both its
- * DW_SSI watermark register and the PL330 dma_cfg, so the two can never
- * diverge.
+ * @brief The burst length to program into the PL330 dma_cfg source/dest
+ * burst length fields for this chunk/direction.
+ *
+ * This is NOT necessarily the value that belongs in the DW_SSI watermark
+ * register (DMATDLR/DMARDLR) too -- see this file's header comment. In
+ * particular the RX caller (spi_dw_dma_setup_rx_channel()) programs
+ * @c burstlen @c - @c 1 into DMARDLR, never @c burstlen itself.
  *
  * @param default_burst Preferred burst length (fifo_depth / 2).
  * @param chunk Number of items in this transfer; ignored when @p is_dummy
  *              is true.
- * @param is_dummy True for a placeholder direction (spi_dw_dma_transceive()'s
- *                  dummy_tx for an RX-only transfer, or dummy_rx for a
- *                  TX-only one), which always moves exactly 1 item per burst
+ * @param is_dummy True for a placeholder direction: dummy_tx, reached only
+ *                  when the current TX buffer's `buf` is NULL or the TX
+ *                  buffers are exhausted while RX continues (an RX-only
+ *                  transfer never reaches it -- spi_dw_dma_setup_tx_channel()
+ *                  is then not called at all); or dummy_rx, the mirrored
+ *                  RX-side case. Always moves exactly 1 item per burst
  *                  regardless of chunk.
- * @return The burst length to write, unreduced, into the watermark register
- *         and into dma_cfg's source/dest burst length fields.
+ * @return The burst length to write, unreduced, into dma_cfg's source/dest
+ *         burst length fields.
  */
 static inline uint32_t spi_dw_dma_burst_for_chunk(uint32_t default_burst, size_t chunk,
 						   bool is_dummy)

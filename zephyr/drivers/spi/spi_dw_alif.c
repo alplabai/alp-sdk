@@ -321,15 +321,6 @@ static void spi_dw_dma_enable_channels(const struct device *dev,
 	set_bit_ssienr(dev);
 }
 
-/*
- * spi_dw_dma_calculate_burst_length() / spi_dw_dma_burst_for_chunk() now live
- * in spi_dw_alif_dma_burst.h (#1818 follow-up) -- dependency-free so
- * tests/unit/spi_dw_alif_dma_burst can exercise them on the host, and shared
- * between the RX and TX setup paths below so the burst length each writes
- * into its DMA watermark register can never diverge from what it hands the
- * PL330 dma_cfg. See the header for the full rationale.
- */
-
 /**
  * Check if there's more data to transfer
  */
@@ -464,33 +455,22 @@ static int spi_dw_dma_setup_tx_channel(const struct device *dev,
 	int ret;
 
 	/*
-	 * Compute the burst length BEFORE programming DMATDLR, and program the
-	 * SAME value into both -- this is what spi_dw_dma_setup_rx_channel()
-	 * already does for DMARDLR (burstlen computed first, then
-	 * write_dmardlr(dev, burstlen - 1)).  This function used to write
-	 * dw_spi_txftlr_dflt (the unreduced half-FIFO default) into DMATDLR
-	 * unconditionally, then separately compute a possibly SMALLER
-	 * burst_length for the PL330 dma_cfg below -- so DMATDLR and the
-	 * DMASTP burst count the PL330 actually executes could disagree.  Two
-	 * real callers hit this: the dummy-TX case (RX-only transfer, burst
-	 * forced to 1) and any tail chunk spi_dw_dma_transceive()'s bulk/tail
-	 * split leaves that does not divide dw_spi_txftlr_dflt evenly --
-	 * ALP_CC3501E_OTA_MAX_CHUNK (4092) % 8 != 0 is exactly that shape.
-	 *
-	 * Traced while investigating #1818 (CONFIG_SPI_DW_ALIF_DMA_MIN_LEN=8192
-	 * staying load-bearing).  NOT shown to be that issue's cause: burst_length
-	 * can only shrink relative to dw_spi_txftlr_dflt, never grow past the FIFO
-	 * room DMATDLR implies, so this mismatch cannot itself starve or overrun
-	 * the TX FIFO; and the bench probe that reproduced #1818 (64/256/1024/2048 B,
-	 * all exact multiples of the default burst of 8) never exercises the
-	 * reduced-burst branch this fixes.  It is fixed on its own correctness
-	 * merits -- the register programmed must match what the DMA engine was
-	 * actually configured to move -- not as a claimed fix for #1818.  See the
+	 * DMATDLR gets the raw, unreduced half-FIFO default, deliberately NOT
+	 * burst_length below.  DMATDLR is a low watermark (dma_tx_req asserts
+	 * once the TX FIFO holds <= DMATDLR entries), not a burst count -- the
+	 * only hardware constraint is DMATDLR + burst <= fifo_depth, which the
+	 * unreduced default already satisfies for every burst this function can
+	 * compute.  A #1818 follow-up briefly programmed burst_length into
+	 * DMATDLR instead, on the assumption the two had to match; that was
+	 * reverted on review for lack of bench evidence.  See
+	 * spi_dw_alif_dma_burst.h for the full rationale and the
 	 * CONFIG_SPI_DW_ALIF_DMA_MIN_LEN comment in
-	 * examples/aen/aen-cc3501e-bringup/prj.conf for what remains unknown there.
+	 * examples/aen/aen-cc3501e-bringup/prj.conf for the open question this
+	 * left behind.
 	 */
+	write_dmatdlr(dev, dw_spi_txftlr_dflt);
+
 	burst_length = spi_dw_dma_burst_for_chunk(dw_spi_txftlr_dflt, chunk, tx_ptr == &dummy_tx);
-	write_dmatdlr(dev, burst_length);
 	dma_cfg->source_burst_length = burst_length;
 	dma_cfg->dest_burst_length = burst_length;
 

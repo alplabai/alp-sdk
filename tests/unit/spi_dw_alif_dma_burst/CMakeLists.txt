@@ -12,8 +12,9 @@ project(test_spi_dw_alif_dma_burst)
 #
 # KNOWN GAP, same shape as tests/unit/dma_pl330_sg_validate's: this proves the
 # header functions themselves are correct, not that spi_dw_alif.c still calls
-# them for BOTH the DMATDLR/DMARDLR write and the dma_cfg burst length -- a
-# mutation reverting either call site back to the raw default is invisible
+# them for the dma_cfg burst length on both directions (and for DMARDLR on
+# RX -- TX's DMATDLR is deliberately NOT this value; see
+# spi_dw_alif_dma_burst.h) -- a mutation reverting a call site is invisible
 # here. spi_dw_alif.c is not buildable under native_sim in this environment
 # (vendored Alif DWC_ssi register layer, hal_alif-adjacent), so closing that
 # gap needs an AEN-target twister build, which is not part of any CI gate
