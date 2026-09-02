@@ -179,6 +179,16 @@ _ALLOWLIST: set[str] = {
     # this repo's headers/Kconfig/generators; drop the entry if
     # docs/gd32-bridge.md ever stops naming it.
     "ALP_FLASH_REQUIRE_DPIDR",
+    # docs/aen-provisioning.md's app-device-config.json section names these
+    # two bench env vars (scripts/bench/aen/flash-update-log-firewall-probe.sh,
+    # scripts/bench/aen/flash-update-log-dual.sh) to bound the doc's guidance
+    # against the firewall-policy carve-out those scripts already encode.
+    # Real identifiers, but *.sh under scripts/bench/ is deliberately outside
+    # the harvested surfaces (collect_known_symbols() scans headers/Kconfig/
+    # generators/vendor CMakeLists/board.yml only). Same shape as
+    # ALP_FLASH_REQUIRE_DPIDR above.
+    "ALP_AEN_INCLUDE_DEVICE_CONFIG",
+    "ALP_AEN_DEVICE_CONFIG_JSON",
 }
 
 # Identifier shapes we treat as SDK symbols.  The optional `CONFIG_`
