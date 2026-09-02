@@ -51,8 +51,11 @@
 #include "mqtt_ops.h"
 
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
+#include <zephyr/logging/log.h>
 #include <zephyr/net/mqtt.h>
 #include <zephyr/net/socket.h>
+
+LOG_MODULE_REGISTER(alp_iot_mqtt_zephyr, CONFIG_LOG_DEFAULT_LEVEL);
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -268,6 +271,16 @@ static void alp_mqtt_evt_cb(struct mqtt_client *client, const struct mqtt_evt *e
 		 * wire; drain it (same helper as the msg_cb == NULL branch above)
 		 * BEFORE the PUBACK below, so the broker isn't told delivery
 		 * succeeded while the connection is left wedged (issue #1645). */
+		if (got < pub->message.payload.len) {
+			/* alp_mqtt_msg_cb_t (<alp/iot.h>) has no channel to report a
+			 * truncated delivery to the caller -- got below is silently
+			 * short.  Log it so the drop is at least visible; widening
+			 * the callback signature is a public-API change out of scope
+			 * for this fix. */
+			LOG_WRN("mqtt: payload %u B truncated to rx_buf's %u B",
+			        (unsigned)pub->message.payload.len,
+			        (unsigned)got);
+		}
 		mqtt_drain_remaining(client, pub->message.payload.len - got);
 
 		if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {

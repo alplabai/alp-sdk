@@ -204,6 +204,14 @@ static alp_status_t hantro_open(const alp_jpeg_config_t  *cfg,
 	struct video_caps vcaps = { .type = VIDEO_BUF_TYPE_INPUT };
 	int               err   = video_get_caps(dev, &vcaps);
 
+	/* If video_get_caps() fails or reports no format, max_w/max_h stay at
+	 * UINT16_MAX -- the ceiling of their own uint16_t type, not a real
+	 * silicon bound. This is NOT the same as the 0 sentinel
+	 * src/jpeg_dispatch.c's alp_jpeg_encode() treats as "no bound
+	 * advertised" (that path skips the OUT_OF_RANGE check entirely so a
+	 * NOT_IMPLEMENTED-only stub still gets reached); here the dispatcher's
+	 * check still runs, it just never rejects anything, because no
+	 * uint16_t width/height can exceed UINT16_MAX in the first place. */
 	uint16_t max_w = UINT16_MAX;
 	uint16_t max_h = UINT16_MAX;
 	if (err == 0 && vcaps.format_caps != NULL && vcaps.format_caps[0].pixelformat != 0u) {
@@ -266,7 +274,17 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 	 * checks unchanged, so in_len below can still exceed the buffer the
 	 * caller actually owns -- neither the dispatcher nor _is_dma_reachable()
 	 * below has a buffer-length parameter to check it against; both only
-	 * ever see a pointer + the fields the caller chose to describe it with. */
+	 * ever see a pointer + the fields the caller chose to describe it with.
+	 *
+	 * `in_len`'s `size_t` multiply is also not a wrap-proof width on every
+	 * target: on a build where size_t is 32 bits (this backend's own M55
+	 * target), a large enough in_stride/height combination wraps in_len to
+	 * a SMALL value, which then makes _is_dma_reachable() pass on a short
+	 * range even though the HW transfer below is NOT programmed from
+	 * in_len -- video_set_format() gets the un-wrapped .width/.height/
+	 * .pitch directly, and the VC9000E's own DMA master walks the real,
+	 * un-wrapped span those describe. _is_dma_reachable() therefore only
+	 * ever catches a TCM-placement mistake, never an oversized stride. */
 	uint32_t in_stride = req->y_stride;
 	size_t   in_len    = (size_t)in_stride * req->height * 3u / 2u;
 

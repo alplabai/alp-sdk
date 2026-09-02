@@ -83,7 +83,7 @@ conclusion:
   The same NULL-check shape recurs in the vendor-extension entry points
   `src/backends/adc/alif_e7.c:234` and `alif_e8.c:256`
   (`alp_alif_adc_set_trigger_source`).
-- **jpeg** — `src/jpeg_dispatch.c:104` (`alp_jpeg_capabilities`'s
+- **jpeg** — `src/jpeg_dispatch.c:146` (`alp_jpeg_capabilities`'s
   `h == NULL`), with the same check in its build-stub twin
   `src/common/stub/stub_jpeg.c:38`. Pinned by
   `tests/unit/jpeg_registry/src/test_jpeg_registry.c:34`.
