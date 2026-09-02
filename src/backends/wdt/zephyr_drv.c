@@ -141,8 +141,8 @@ z_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilitie
 		 * is still armed -- return disable_rc itself instead, which
 		 * names the real reason reclaim didn't happen rather than
 		 * repeating the stale first -EBUSY (that stale repeat is the
-		 * case wdt.h's ALP_ERR_BUSY doc below still describes: a
-		 * live non-SDK consumer, not a disable refusal).
+		 * case alp_wdt_open()'s own ALP_ERR_BUSY doc in wdt.h still
+		 * describes: a live non-SDK consumer, not a disable refusal).
 		 *
 		 * When disable_rc IS 0, the retry below can still fail
 		 * (wdt_install_timeout() or the wdt_setup() call further
