@@ -161,10 +161,16 @@ alp_jpeg_t *alp_jpeg_open(const alp_jpeg_config_t *cfg);
  *                       @c y_stride / @c u_stride / @c v_stride each
  *                       either 0 (a "tightly packed" sentinel -- the
  *                       dispatcher fills in @c width / @c width/2) or no
- *                       smaller than the row it describes.  Every length a
- *                       backend derives from these fields (plane strides,
- *                       DMA span) inherits this bound before the backend
- *                       ever sees the request (issue #1645).
+ *                       smaller than the row it describes.  @c width and
+ *                       @c height are bounded against the backend's
+ *                       advertised max (issue #1645); an explicit nonzero
+ *                       stride is only floor-checked against the row it
+ *                       claims to describe, never capped, so it remains the
+ *                       CALLER's responsibility that @c y_plane / @c u_plane
+ *                       / @c v_plane are each large enough for
+ *                       stride * height -- neither the dispatcher nor a
+ *                       backend is handed a buffer-length to check a larger
+ *                       stride against.
  * @param[out] out_buf   Destination buffer for the encoded stream.
  * @param[in]  out_cap   Capacity of @p out_buf, in bytes.
  * @param[out] out_len   Receives the encoded length on success; on

@@ -95,12 +95,24 @@ alp_status_t alp_jpeg_encode(alp_jpeg_t                  *h,
 		rc = ALP_ERR_INVAL;
 	} else if (h->state.ops->encode == NULL) {
 		rc = ALP_ERR_NOSUPPORT;
-	} else if (req->width > h->cached_caps.max_width || req->height > h->cached_caps.max_height) {
-		/* Every length a backend derives below (plane strides, DMA span)
-		 * multiplies width/height -- capping them here to the backend's
-		 * own advertised limit is what keeps those derived lengths
-		 * bounded before any backend touches a memcpy or a DMA master
-		 * with them (issue #1645). */
+	} else if ((h->cached_caps.max_width != 0u && req->width > h->cached_caps.max_width) ||
+	           (h->cached_caps.max_height != 0u && req->height > h->cached_caps.max_height)) {
+		/* Caps width/height to the backend's own advertised limit before
+		 * any backend derives a length from them (issue #1645). A backend
+		 * that advertises 0/0 (the NOT_IMPLEMENTED stub, zephyr_stub.c --
+		 * it has no real bound to advertise) is exempt from this check so
+		 * its encode() is still reached and returns its documented
+		 * ALP_ERR_NOT_IMPLEMENTED, instead of every request being rejected
+		 * here with ALP_ERR_OUT_OF_RANGE first.
+		 *
+		 * This bounds width/height and, transitively, the IMPLICIT stride
+		 * (the zero-stride sentinel normalized below to width / width/2).
+		 * It does NOT bound an explicit, caller-supplied y_stride/
+		 * u_stride/v_stride -- those are only floor-checked (>= the row
+		 * they claim to describe) just below, never capped, because
+		 * nothing here is handed the caller's real buffer length to check
+		 * a larger stride against. See the @note on alp_jpeg_encode() in
+		 * <alp/jpeg.h>. */
 		rc = ALP_ERR_OUT_OF_RANGE;
 	} else if ((req->y_stride != 0u && req->y_stride < req->width) ||
 	           (chroma_active && ((req->u_stride != 0u && req->u_stride < chroma_min) ||

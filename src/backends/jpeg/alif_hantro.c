@@ -257,12 +257,17 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 	 * alp_jpeg_encode_req_t. Total footprint = stride*height*3/2.
 	 *
 	 * req->y_stride/width/height reach here only after src/jpeg_dispatch.c's
-	 * alp_jpeg_encode() has already rejected a nonzero stride smaller than
-	 * width and capped width/height to this backend's own advertised
-	 * max_width/max_height (issue #1645) -- in_len below is therefore a
-	 * range the caller demonstrably owns, not an unbounded caller-supplied
-	 * value handed straight to _is_dma_reachable(). */
-	uint32_t in_stride = (req->y_stride != 0u) ? req->y_stride : req->width;
+	 * alp_jpeg_encode() has rejected a nonzero stride smaller than width and
+	 * capped width/height to this backend's own advertised max_width/
+	 * max_height (issue #1645), and has already normalized a zero stride to
+	 * width -- req->y_stride here is therefore always nonzero. That bounds
+	 * width/height and gives stride a FLOOR, not a ceiling: an explicit
+	 * y_stride larger than the caller's real y_plane allocation passes both
+	 * checks unchanged, so in_len below can still exceed the buffer the
+	 * caller actually owns -- neither the dispatcher nor _is_dma_reachable()
+	 * below has a buffer-length parameter to check it against; both only
+	 * ever see a pointer + the fields the caller chose to describe it with. */
+	uint32_t in_stride = req->y_stride;
 	size_t   in_len    = (size_t)in_stride * req->height * 3u / 2u;
 
 	if (!_is_dma_reachable(req->y_plane, in_len)) {

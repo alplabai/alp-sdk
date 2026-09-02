@@ -348,7 +348,14 @@ static void rpc_be_teardown(struct rpc_be *ch)
 static void *rpc_rx_main(void *arg)
 {
 	struct rpc_be *ch = (struct rpc_be *)arg;
-	uint8_t        buf[ALP_RPC_TX_FRAME_MAX];
+	/* +1: a read() that fills exactly ALP_RPC_TX_FRAME_MAX bytes must stay
+	 * distinguishable from one that overflowed it. A read()-sized buffer
+	 * can never report more than its own size, so sizing buf to the wire
+	 * limit made a legitimate max-size frame indistinguishable from a
+	 * truncated larger one -- every real ALP_RPC_TX_FRAME_MAX-byte frame
+	 * was being dropped (issue #1645 regression). Sizing one byte past the
+	 * limit lets n > ALP_RPC_TX_FRAME_MAX alone mean "oversized". */
+	uint8_t buf[ALP_RPC_TX_FRAME_MAX + 1];
 
 	struct pollfd fds[2] = {
 		{ .fd = ch->ept_fd, .events = POLLIN },
@@ -373,23 +380,20 @@ static void *rpc_rx_main(void *arg)
 			if (n < 0 && errno == EINTR) continue;
 			break;
 		}
-		if ((size_t)n == sizeof buf) {
-			/* read() on this chardev can never report more than
-			 * sizeof(buf) bytes even when the peer's actual rpmsg
-			 * message was longer -- an exactly-full read is
-			 * indistinguishable from a genuine ALP_RPC_TX_FRAME_MAX-byte
-			 * frame from here, so a short read really is indistinguishable
-			 * from a complete one.  Treat it as a possible truncation and
-			 * drop it rather than dispatch a frame that may be a
-			 * silently-cut prefix (issue #1645). */
+		if ((size_t)n > ALP_RPC_TX_FRAME_MAX) {
+			/* buf is ALP_RPC_TX_FRAME_MAX+1 bytes, so n can only exceed
+			 * ALP_RPC_TX_FRAME_MAX here if the peer's real rpmsg message
+			 * was actually longer than the wire limit -- a legitimate
+			 * exactly-ALP_RPC_TX_FRAME_MAX-byte frame reads n ==
+			 * ALP_RPC_TX_FRAME_MAX and falls through to frame_parse()
+			 * below instead of being dropped (issue #1645 regression). */
 			ch->rx_oversized_drops++;
 			fprintf(stderr,
-			        "alp_rpc: dropping possibly-truncated %zd-byte inbound frame on "
-			        "channel '%s' (buffer is exactly %zu bytes -- can't tell if the "
-			        "peer's message was longer); %u frame(s) dropped so far\n",
+			        "alp_rpc: dropping oversized %zd-byte inbound frame on channel "
+			        "'%s' (max %d bytes); %u frame(s) dropped so far\n",
 			        n,
 			        ch->name,
-			        sizeof buf,
+			        ALP_RPC_TX_FRAME_MAX,
 			        ch->rx_oversized_drops);
 			continue;
 		}
