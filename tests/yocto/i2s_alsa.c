@@ -36,8 +36,8 @@ static void test_open_null_cfg_returns_null(void)
 static void test_open_zero_channels_returns_null(void)
 {
 	alp_i2s_config_t cfg = ALP_I2S_CONFIG_DEFAULT(0);
-	cfg.channels          = 0;
-	alp_i2s_t *h          = alp_i2s_open(&cfg);
+	cfg.channels         = 0;
+	alp_i2s_t *h         = alp_i2s_open(&cfg);
 	ALP_ASSERT_NULL(h);
 	ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_INVAL);
 }
@@ -48,8 +48,8 @@ static void test_open_too_many_channels_returns_null(void)
      * stereo-only assumption baked into the public header, but
      * y_open() itself refuses > 2. */
 	alp_i2s_config_t cfg = ALP_I2S_CONFIG_DEFAULT(0);
-	cfg.channels          = 3;
-	alp_i2s_t *h          = alp_i2s_open(&cfg);
+	cfg.channels         = 3;
+	alp_i2s_t *h         = alp_i2s_open(&cfg);
 	ALP_ASSERT_NULL(h);
 	ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_INVAL);
 }
@@ -57,8 +57,8 @@ static void test_open_too_many_channels_returns_null(void)
 static void test_open_zero_sample_rate_returns_null(void)
 {
 	alp_i2s_config_t cfg = ALP_I2S_CONFIG_DEFAULT(0);
-	cfg.sample_rate_hz    = 0;
-	alp_i2s_t *h          = alp_i2s_open(&cfg);
+	cfg.sample_rate_hz   = 0;
+	alp_i2s_t *h         = alp_i2s_open(&cfg);
 	ALP_ASSERT_NULL(h);
 	ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_INVAL);
 }
@@ -66,8 +66,8 @@ static void test_open_zero_sample_rate_returns_null(void)
 static void test_open_zero_block_frames_returns_null(void)
 {
 	alp_i2s_config_t cfg = ALP_I2S_CONFIG_DEFAULT(0);
-	cfg.block_frames      = 0;
-	alp_i2s_t *h          = alp_i2s_open(&cfg);
+	cfg.block_frames     = 0;
+	alp_i2s_t *h         = alp_i2s_open(&cfg);
 	ALP_ASSERT_NULL(h);
 	ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_INVAL);
 }
@@ -78,8 +78,8 @@ static void test_open_non_i2s_format_returns_nosupport(void)
      * other wire format is a DAI-link property (see yocto_drv.c's
      * y_open() doc comment). */
 	alp_i2s_config_t cfg = ALP_I2S_CONFIG_DEFAULT(0);
-	cfg.format             = ALP_I2S_FMT_LEFT_JUSTIFIED;
-	alp_i2s_t *h            = alp_i2s_open(&cfg);
+	cfg.format           = ALP_I2S_FMT_LEFT_JUSTIFIED;
+	alp_i2s_t *h         = alp_i2s_open(&cfg);
 	ALP_ASSERT_NULL(h);
 	ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_NOSUPPORT);
 }
@@ -87,8 +87,8 @@ static void test_open_non_i2s_format_returns_nosupport(void)
 static void test_open_full_duplex_returns_nosupport(void)
 {
 	alp_i2s_config_t cfg = ALP_I2S_CONFIG_DEFAULT(0);
-	cfg.direction          = ALP_I2S_DIR_BOTH;
-	alp_i2s_t *h            = alp_i2s_open(&cfg);
+	cfg.direction        = ALP_I2S_DIR_BOTH;
+	alp_i2s_t *h         = alp_i2s_open(&cfg);
 	ALP_ASSERT_NULL(h);
 	ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_NOSUPPORT);
 }
@@ -100,7 +100,7 @@ static void test_open_unreachable_device_refuses(void)
      * only assert "open refused", same tolerance as the sibling audio
      * test, so this passes on any deviceless host. */
 	alp_i2s_config_t cfg = ALP_I2S_CONFIG_DEFAULT(999);
-	alp_i2s_t *h          = alp_i2s_open(&cfg);
+	alp_i2s_t       *h   = alp_i2s_open(&cfg);
 	ALP_ASSERT_NULL(h);
 	ALP_ASSERT_TRUE(alp_last_error() != ALP_OK);
 }
