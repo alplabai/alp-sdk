@@ -74,6 +74,7 @@ LOG_MODULE_REGISTER(spi_dw_alif);
 
 #ifdef CONFIG_SPI_DW_ALIF_USE_DMA
 #include <zephyr/drivers/dma.h>
+#include "spi_dw_alif_dma_burst.h"
 #define SPI_DW_DMA_FULL_DUPLEX 2
 #define SPI_DW_DMA_SEMAPHORE_COUNT SPI_DW_DMA_FULL_DUPLEX
 #endif
@@ -320,20 +321,14 @@ static void spi_dw_dma_enable_channels(const struct device *dev,
 	set_bit_ssienr(dev);
 }
 
-/**
- * Calculate optimal burst length that divides evenly into chunk size
+/*
+ * spi_dw_dma_calculate_burst_length() / spi_dw_dma_burst_for_chunk() now live
+ * in spi_dw_alif_dma_burst.h (#1818 follow-up) -- dependency-free so
+ * tests/unit/spi_dw_alif_dma_burst can exercise them on the host, and shared
+ * between the RX and TX setup paths below so the burst length each writes
+ * into its DMA watermark register can never diverge from what it hands the
+ * PL330 dma_cfg. See the header for the full rationale.
  */
-static uint32_t spi_dw_dma_calculate_burst_length(uint32_t default_burst, size_t chunk)
-{
-	uint32_t burst_length = default_burst ? default_burst : 1;
-
-	/* Adjust burst length to be a factor of chunk size */
-	while (chunk % burst_length) {
-		burst_length--;
-	}
-
-	return burst_length;
-}
 
 /**
  * Check if there's more data to transfer
@@ -397,16 +392,9 @@ static int spi_dw_dma_setup_rx_channel(const struct device *dev,
 {
 	const struct spi_dw_config *info = dev->config;
 	static uint32_t dummy_rx;
-	uint32_t burstlen;
+	uint32_t dw_spi_rxftlr_dflt = (info->fifo_depth * 1) / 2;
+	uint32_t burstlen = spi_dw_dma_burst_for_chunk(dw_spi_rxftlr_dflt, chunk, rx_ptr == &dummy_rx);
 	int ret;
-
-	if (rx_ptr == &dummy_rx) {
-		burstlen = 1;
-	} else {
-		uint32_t dw_spi_rxftlr_dflt = (info->fifo_depth * 1) / 2;
-
-		burstlen = spi_dw_dma_calculate_burst_length(dw_spi_rxftlr_dflt, chunk);
-	}
 
 	write_dmardlr(dev, burstlen - 1);
 	dma_cfg->dest_burst_length = burstlen;
@@ -475,18 +463,39 @@ static int spi_dw_dma_setup_tx_channel(const struct device *dev,
 	uint32_t burst_length;
 	int ret;
 
-	write_dmatdlr(dev, dw_spi_txftlr_dflt);
+	/*
+	 * Compute the burst length BEFORE programming DMATDLR, and program the
+	 * SAME value into both -- this is what spi_dw_dma_setup_rx_channel()
+	 * already does for DMARDLR (burstlen computed first, then
+	 * write_dmardlr(dev, burstlen - 1)).  This function used to write
+	 * dw_spi_txftlr_dflt (the unreduced half-FIFO default) into DMATDLR
+	 * unconditionally, then separately compute a possibly SMALLER
+	 * burst_length for the PL330 dma_cfg below -- so DMATDLR and the
+	 * DMASTP burst count the PL330 actually executes could disagree.  Two
+	 * real callers hit this: the dummy-TX case (RX-only transfer, burst
+	 * forced to 1) and any tail chunk spi_dw_dma_transceive()'s bulk/tail
+	 * split leaves that does not divide dw_spi_txftlr_dflt evenly --
+	 * ALP_CC3501E_OTA_MAX_CHUNK (4092) % 8 != 0 is exactly that shape.
+	 *
+	 * Traced while investigating #1818 (CONFIG_SPI_DW_ALIF_DMA_MIN_LEN=8192
+	 * staying load-bearing).  NOT shown to be that issue's cause: burst_length
+	 * can only shrink relative to dw_spi_txftlr_dflt, never grow past the FIFO
+	 * room DMATDLR implies, so this mismatch cannot itself starve or overrun
+	 * the TX FIFO; and the bench probe that reproduced #1818 (64/256/1024/2048 B,
+	 * all exact multiples of the default burst of 8) never exercises the
+	 * reduced-burst branch this fixes.  It is fixed on its own correctness
+	 * merits -- the register programmed must match what the DMA engine was
+	 * actually configured to move -- not as a claimed fix for #1818.  See the
+	 * CONFIG_SPI_DW_ALIF_DMA_MIN_LEN comment in
+	 * examples/aen/aen-cc3501e-bringup/prj.conf for what remains unknown there.
+	 */
+	burst_length = spi_dw_dma_burst_for_chunk(dw_spi_txftlr_dflt, chunk, tx_ptr == &dummy_tx);
+	write_dmatdlr(dev, burst_length);
+	dma_cfg->source_burst_length = burst_length;
+	dma_cfg->dest_burst_length = burst_length;
+
 	dma_cfg->channel_direction = MEMORY_TO_PERIPHERAL;
 	dma_cfg->dma_slot = info->dma_tx.periph;
-
-	if (tx_ptr == &dummy_tx) {
-		dma_cfg->source_burst_length = dma_cfg->dest_burst_length = 1;
-	} else {
-		burst_length = spi_dw_dma_calculate_burst_length(dw_spi_txftlr_dflt, chunk);
-
-		dma_cfg->source_burst_length = burst_length;
-		dma_cfg->dest_burst_length = burst_length;
-	}
 
 	dma_block_cfg->source_address = (uintptr_t)tx_ptr;
 	dma_block_cfg->dest_address = (mm_reg_t)DEVICE_MMIO_GET(dev) + DW_SPI_REG_DR;
