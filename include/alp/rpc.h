@@ -84,7 +84,7 @@
  * comment).
  *
  * @b Coverage differs by backend in this revision -- read this before
- * relying on @ref ALP_RPC_LINK_LOST:
+ * relying on @ref ALP_RPC_LINK_LOST --
  *   - Linux/A-class chardev backend (`src/backends/rpc/yocto_drv.c`):
  *     reports both @ref ALP_RPC_LINK_UP (chardev open) and
  *     @ref ALP_RPC_LINK_LOST (its rx thread's poll()/read() failing).
