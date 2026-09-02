@@ -50,9 +50,21 @@ comment. ATOC corruption can leave the part unbootable.
 
 What protects that band today is three coincidences — hand-authored
 `carveout: false` on six regions, `mram_main`'s TBD base, and #1331's
-reserved-span seeding. A does not change the allocator, so it removes none of
-them. What it does is make the **authored data unable to rot**: after A, a new
-SoM whose author forgets a flag fails a check instead of shipping.
+reserved-span seeding — **plus one real gate, which an earlier draft of this
+plan missed.** `scripts/check_atoc_reservation.py` (#1482, #1289) already runs
+blocking in CI from `.github/workflows/pr-metadata-validate.yml:525` over
+exactly these six presets: `_check_preset()` globs every
+`metadata/e1m_modules/*.yaml`, derives `window_top = max(base + size)` over the
+integer-base regions, and FAILS unless the smallest region owning that top is
+named `atoc`. Its docstring cites the same bench event quoted above. That is
+not a coincidence, and it already delivers part of the outcome A is sold on.
+
+The honest statement is therefore narrower: the window TOP is gated; what is
+not gated is the **class** of every other region in the map — whether a row is
+flash or RAM survives only as the hand-authored `carveout` flag and a prose
+comment. A does not change the allocator, so it removes none of the three
+coincidences. What it does is make the **authored data unable to rot**: after
+A, a new SoM whose author forgets a flag fails a check instead of shipping.
 
 ## The ordering hazard — read before writing any code
 
@@ -118,6 +130,14 @@ Placeholders below: `AUTH` is the field name, `auth-values` the enum.
 - On AEN801 the six flagged regions tile `[0x80000000, 0x80580000)` exactly:
   64 + 2688 + 2688 + 64 + 96 + 32 = 5632 KiB, which is both `mram_main`'s
   `size_kib` and `variants[].mram_mb: 5.5`.
+- `scripts/check_atoc_reservation.py` is **already a blocking gate over the
+  same six presets**, and it already enforces a `memory_map:` geometric
+  invariant: the region owning the derived window top must be named `atoc`
+  (`_check_preset()`; the extent is DERIVED per preset, never hardcoded, per its
+  own docstring). It runs from `.github/workflows/pr-metadata-validate.yml:525`
+  and is triggered by `metadata/**`. It is **not** in `scripts/test-all.sh`.
+  Steps 4b and 4c below must say whether they extend this file or justify a
+  second script owning the same 42 rows — see step 4.
 - `scripts/validate_metadata.py` is **already a gate** and already carries a
   `memory_map:` cross-field check (`_check_som_slot0_address_resolved`). It runs
   in CI from `.github/workflows/pr-metadata-validate.yml:206`,
@@ -137,8 +157,28 @@ Each step is independently reviewable and leaves the tree green.
 
 - `metadata/schemas/soc-spec-v1.schema.json` `$defs/variant` gains an
   **optional** aperture base property beside `mram_mb`.
+- **The base is NOT six hand-authored copies of `0x80000000`.** That constant is
+  already single-sourced and already enforced:
+  `scripts/gen_zephyr_board.py:389` declares `_AEN_MRAM_BASE = 0x80000000` and
+  documents it as "Family-wide, not per-part" (upstream Zephyr declares
+  `mram: flash@80000000` in every Ensemble SoC dtsi);
+  `scripts/gen_zephyr_board.py:797` REFUSES a preset whose mcuboot base
+  disagrees; and `scripts/check_atoc_reservation.py:96` and
+  `scripts/alp_orchestrate/loader.py:350` both import it. Only the LENGTH varies
+  by variant, and that already comes from `mram_mb`. Authoring the base six
+  times at variant granularity would give one hardware fact a second declared
+  source — the duplicated-truth class this repo treats as a bug, and precisely
+  the drift the Risks section warns about, since a wrong aperture base
+  "silently reclassifies every region in that SKU".
+
+  So: declare it **once** — either at SoC level (`soc-spec-v1` already carries
+  top-level `soc_flash_mb` / `memory_regions`) or by deriving it from the
+  preset's mcuboot anchor — and make step 1's exit condition include a
+  cross-check against `_AEN_MRAM_BASE`, so the two sources cannot drift even if
+  a later change gives the field per-variant granularity.
 - `metadata/socs/alif/ensemble/e3.json`, `e4.json`, `e5.json`, `e6.json`,
-  `e7.json`, `e8.json` — set it on the variant each AEN preset names.
+  `e7.json`, `e8.json` — annotate the variant each AEN preset names, with the
+  value derived as above rather than retyped.
 - The aperture's length comes from that variant's existing `mram_mb`; do not add
   a second length field.
 
@@ -206,8 +246,22 @@ presets with no `memory_map:`.
   **unresolved**, and unresolved is never silently "not flash". Skip it and say
   so; do not guess.
 
+**Which file owns these, given `check_atoc_reservation.py` already exists.**
+4a is authored-data completeness across every preset that declares a
+`memory_map:`, which is `validate_metadata.py`'s existing job and sits beside
+`_check_som_slot0_address_resolved` — it goes there. 4b and 4c are geometric
+invariants over the same 42 rows and the same derived window that
+`check_atoc_reservation.py:_check_preset()` already walks, so they **extend that
+file** rather than opening a second script over the same data. Putting a second
+memory-geometry check in a different script would give one safety-critical band
+two owners, which is the failure this plan exists to remove one level up. The
+aperture extent 4b anchors on must come from the same derivation
+`check_atoc_reservation.py` documents as "never hardcoded", not from a second
+declaration.
+
 *Exit condition:* each check fails on a hand-made bad fixture and passes on the
-tree.
+tree, and `python3 scripts/check_atoc_reservation.py` stays green on all six
+presets after 4b/4c land in it.
 
 ### 5. Tests
 
@@ -235,6 +289,8 @@ a later refactor from turning "unknown" into "not flash".
 
 ```sh
 python3 scripts/validate_metadata.py
+python3 scripts/check_atoc_reservation.py
+python3 scripts/check_emit_snapshots.py
 python3 -m pytest tests/scripts/test_validate_metadata_memory_authority.py \
                   tests/scripts/test_validate_metadata_aperture_tiling.py \
                   tests/scripts/test_validate_metadata_class_disagreement.py -q
@@ -242,8 +298,22 @@ python3 scripts/gen_catalog.py && git diff --exit-code metadata/catalog.json
 bash scripts/test-all.sh --target dev
 ```
 
-`test-all.sh --target dev` is the gate set a PR against `dev` is graded on and is
-the one that must be green before opening. Note `python-smoke` also runs on
+**`test-all.sh --target dev` is NOT the full graded set for this change**, and an
+earlier draft of this block said it was. `grep -nE
+'check_atoc_reservation|check_emit_snapshots' scripts/test-all.sh` returns
+nothing, while both run as blocking steps in
+`.github/workflows/pr-metadata-validate.yml` (`:391` emit snapshots, `:525` atoc
+reservation) on a workflow triggered by `metadata/**` — the exact paths steps 1
+and 3 edit. The two omissions matter in opposite directions:
+`check_emit_snapshots.py` is the ONLY local proof of this plan's central safety
+claim that "A changes no emitted artefact" (`memory_map` is read by
+`scripts/alp_orchestrate/{headers,memregion,secure}.py`, so a moved snapshot
+would pass every other command listed here), and `check_atoc_reservation.py`
+validates the very 42 rows step 3 rewrites. Both are now run locally instead of
+discovered in CI after the push.
+
+`test-all.sh --target dev` remains the broad local set that must be green before
+opening. Note `python-smoke` also runs on
 macOS and Windows in CI and cannot be reproduced on a Linux host; a
 macOS-only or Windows-only red on a change that touches only Python and YAML is
 a real platform bug, not a base-baseline flake.
