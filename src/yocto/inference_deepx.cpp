@@ -230,10 +230,31 @@ extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h
 			return ALP_ERR_NOSUPPORT;
 		}
 
+		if (st->inputs.size() > 1) {
+			/* invoke() hands dx_rt's Run() a SINGLE pointer --
+			 * st->input_bufs[0].data() -- which dx_rt treats as the base
+			 * of one contiguous blob concatenating every input tensor
+			 * (see the DeepxState::input_bufs doc above). This backend
+			 * stages each input in its OWN separate std::vector
+			 * allocation instead, so for any model with more than one
+			 * input dx_rt would read past input_bufs[0]'s real size and
+			 * DMA whatever unrelated heap memory follows it over PCIe to
+			 * the DX-M1 (issue #1645). Refuse rather than mis-run until a
+			 * real concatenating staging buffer lands -- this path is
+			 * gated behind ALP_SDK_USE_DEEPX_DXM1 (default OFF) and
+			 * bench-unverified either way, so getting it wrong here would
+			 * be read as a hardware/model problem on first DEEPX
+			 * bring-up. */
+			delete st->engine;
+			delete st;
+			return ALP_ERR_NOSUPPORT;
+		}
+
 		/* Stage one SDK-owned buffer per input tensor.  The app writes
          * into these via get_input(); invoke() hands inputs[0].data() to
          * Run().  (dx_rt concatenates multi-input models; the common
-         * V2N-M1 vision model is single-input.) */
+         * V2N-M1 vision model is single-input -- multi-input is refused
+         * above until a real concatenating staging buffer lands.) */
 		st->input_bufs.resize(st->inputs.size());
 		for (size_t i = 0; i < st->inputs.size(); ++i) {
 			st->input_bufs[i].resize(static_cast<size_t>(st->inputs[i].size_in_bytes()));

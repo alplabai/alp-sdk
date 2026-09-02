@@ -176,6 +176,11 @@ struct rpc_be {
 
 	uint8_t tx_scratch[ALP_RPC_TX_FRAME_MAX];
 
+	/* Count of inbound reads rpc_rx_main() dropped because they exactly
+	 * filled `buf` (issue #1645) -- written only from that channel's own
+	 * dedicated rx_thread, so a plain counter needs no lock. */
+	uint32_t rx_oversized_drops;
+
 	/* Synchronous-call slot.  Single-element by design -- tx_mutex
      * serialises alp_rpc_call invocations on this channel so only one
      * response can ever be in flight here.
@@ -367,6 +372,26 @@ static void *rpc_rx_main(void *arg)
 		if (n <= 0) {
 			if (n < 0 && errno == EINTR) continue;
 			break;
+		}
+		if ((size_t)n == sizeof buf) {
+			/* read() on this chardev can never report more than
+			 * sizeof(buf) bytes even when the peer's actual rpmsg
+			 * message was longer -- an exactly-full read is
+			 * indistinguishable from a genuine ALP_RPC_TX_FRAME_MAX-byte
+			 * frame from here, so a short read really is indistinguishable
+			 * from a complete one.  Treat it as a possible truncation and
+			 * drop it rather than dispatch a frame that may be a
+			 * silently-cut prefix (issue #1645). */
+			ch->rx_oversized_drops++;
+			fprintf(stderr,
+			        "alp_rpc: dropping possibly-truncated %zd-byte inbound frame on "
+			        "channel '%s' (buffer is exactly %zu bytes -- can't tell if the "
+			        "peer's message was longer); %u frame(s) dropped so far\n",
+			        n,
+			        ch->name,
+			        sizeof buf,
+			        ch->rx_oversized_drops);
+			continue;
 		}
 
 		const void *payload     = NULL;

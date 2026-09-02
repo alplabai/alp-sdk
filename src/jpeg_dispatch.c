@@ -87,13 +87,43 @@ alp_status_t alp_jpeg_encode(alp_jpeg_t                  *h,
 		return ALP_ERR_NOT_READY;
 	}
 	alp_status_t rc;
+	bool         chroma_active = req != NULL && req->format == ALP_PIXFMT_YUV420_PLANAR &&
+	                             req->subsample != ALP_JPEG_SUBSAMPLE_400;
+	uint32_t     chroma_min    = (req != NULL) ? (req->width + 1u) / 2u : 0u;
 	if (req == NULL || out_buf == NULL || out_len == NULL || req->width == 0u ||
 	    req->height == 0u) {
 		rc = ALP_ERR_INVAL;
 	} else if (h->state.ops->encode == NULL) {
 		rc = ALP_ERR_NOSUPPORT;
+	} else if (req->width > h->cached_caps.max_width || req->height > h->cached_caps.max_height) {
+		/* Every length a backend derives below (plane strides, DMA span)
+		 * multiplies width/height -- capping them here to the backend's
+		 * own advertised limit is what keeps those derived lengths
+		 * bounded before any backend touches a memcpy or a DMA master
+		 * with them (issue #1645). */
+		rc = ALP_ERR_OUT_OF_RANGE;
+	} else if ((req->y_stride != 0u && req->y_stride < req->width) ||
+	           (chroma_active && ((req->u_stride != 0u && req->u_stride < chroma_min) ||
+	                              (req->v_stride != 0u && req->v_stride < chroma_min)))) {
+		/* A nonzero stride smaller than the row it claims to describe
+		 * does not describe a buffer the caller could actually own --
+		 * reject before any backend indexes with it (issue #1645). Zero
+		 * stays a valid "tightly packed" sentinel, normalized below. */
+		rc = ALP_ERR_INVAL;
 	} else {
-		rc = h->state.ops->encode(&h->state, req, out_buf, out_cap, out_len);
+		/* Normalize the zero-stride ("tightly packed, no row padding")
+		 * sentinel to an explicit value ONCE, here, so every backend
+		 * downstream -- sw_baseline's toojpeg encoder AND alif_hantro's
+		 * DMA-span derivation -- sees the same non-zero stride for the
+		 * same request instead of each reimplementing (or, per
+		 * sw_baseline before this fix, never implementing) the default. */
+		alp_jpeg_encode_req_t norm = *req;
+		norm.y_stride              = (req->y_stride != 0u) ? req->y_stride : req->width;
+		if (chroma_active) {
+			norm.u_stride = (req->u_stride != 0u) ? req->u_stride : chroma_min;
+			norm.v_stride = (req->v_stride != 0u) ? req->v_stride : chroma_min;
+		}
+		rc = h->state.ops->encode(&h->state, &norm, out_buf, out_cap, out_len);
 	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;

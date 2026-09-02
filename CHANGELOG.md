@@ -7,6 +7,88 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Fixed — six caller- or peer-supplied lengths reached a memcpy or a DMA master with no bound (#1645)
+
+A standing-code audit of `src/` + `include/alp/` found six sites where a
+length that came from the caller or from the far side of a link reached a
+copy or a hardware DMA master unchecked against the destination it actually
+described. Two more sites in the same class are tracked separately (#1619,
+and the CAN `payload_len` site) and are not restated here.
+
+- **`src/jpeg_dispatch.c`** now rejects, before either JPEG backend ever
+  sees the request: a nonzero `y_stride`/`u_stride`/`v_stride` smaller than
+  the row it claims to describe (`ALP_ERR_INVAL`), and `width`/`height`
+  beyond the opened backend's own advertised `max_width`/`max_height`
+  (`ALP_ERR_OUT_OF_RANGE`) — previously unenforced, so a caller-chosen
+  width/height had no upper bound before the length derived from it (a
+  plane stride, or `alif_hantro.c`'s DMA span) reached a backend. A zero
+  stride stays a valid "tightly packed" sentinel; the dispatcher now
+  normalizes it to `width` (`width`/2 for chroma) **once**, in the one
+  place both backends' encode paths route through, instead of leaving each
+  backend to reimplement the default — `sw_baseline.c`'s vendored TooJpeg
+  encoder never did, so `y_stride == 0` used to alias every output row onto
+  row 0 (`ALP_OK`, silently wrong image, not a crash).
+- **`src/backends/jpeg/alif_hantro.c`** derives the Hantro DMA engine's
+  input span from that same now-bounded `width`/stride before asking
+  `_is_dma_reachable()` whether the range is safe to program into the AXI
+  master's registers — `_is_dma_reachable()` itself only checks the range
+  against the core-local TCM windows, never against the caller's real
+  allocation, so an unbounded stride/width previously made that check pass
+  on a range the caller did not own. The duplicate `pitch = (y_stride != 0
+  ...) ? ... : width` at the `video_set_format()` call site now reuses the
+  one `in_stride` computed above instead of re-deriving it, so the two can
+  no longer diverge.
+- **`src/backends/rpc/yocto_uio_drv.c`** (`uio_ept_cb()`) and
+  **`src/backends/rpc/yocto_drv.c`** (`rpc_rx_main()`) used to silently clip
+  an inbound rpmsg frame larger than `ALP_RPC_TX_FRAME_MAX` (1024 B) and
+  dispatch the truncated prefix as a complete message — `alp_rpc_call()`
+  returned `ALP_OK` with a partial response and no signal anything was
+  dropped. Both now drop the frame and surface it: a per-channel
+  `rx_oversized_drops` counter plus an `stderr` log line, instead of a
+  guessed-at partial parse. The chardev path (`yocto_drv.c`) has no direct
+  length field to compare against — `read()` can never report more than
+  `sizeof(buf)` even when the peer's real message was longer — so it
+  treats an exactly-full read as a possible truncation and drops it too.
+- **`src/backends/mqtt/zephyr_drv.c`**'s `MQTT_EVT_PUBLISH` handler read a
+  broker payload larger than `rx_buf` up to `rx_buf`'s capacity and then
+  sent the QoS-1 PUBACK without draining the remainder off the wire.
+  Zephyr's `mqtt_client::internal.remaining_payload` never reached 0, so
+  every subsequent `mqtt_input()` returned `-EBUSY` — one oversized publish
+  permanently wedged the connection, *after* the broker had already been
+  told delivery succeeded and would not retry. A new `mqtt_drain_remaining()`
+  helper (shared with the existing `msg_cb == NULL` branch, which already
+  drained correctly) now reads and discards the excess before the PUBACK.
+- **`src/yocto/inference_deepx.cpp`**'s `alp_inference_deepx_invoke()` hands
+  dx_rt's `Run()` a single pointer, `input_bufs[0].data()`, which dx_rt
+  treats as the base of one contiguous blob concatenating every input
+  tensor. This backend stages each input in its own *separate*
+  `std::vector` allocation, so any model declaring more than one input
+  would have made dx_rt read past `input_bufs[0]`'s real allocation and DMA
+  whatever unrelated heap memory follows it over PCIe to the DX-M1.
+  `alp_inference_deepx_open()` now refuses (`ALP_ERR_NOSUPPORT`) any model
+  with more than one declared input until a real concatenating staging
+  buffer exists, rather than mis-run on first multi-input DEEPX bring-up.
+
+`include/alp/jpeg.h`'s `alp_jpeg_encode()` doc comment is updated for the
+new `ALP_ERR_OUT_OF_RANGE` return and the expanded `ALP_ERR_INVAL` case.
+New regression coverage: `tests/unit/jpeg_registry` (native_sim ztest) locks
+down the max-dimension reject, the undersized-stride reject, and — by
+comparing an implicit (`y_stride == 0`) encode byte-for-byte against an
+explicit-stride encode of the same distinguishing-content frame — that the
+zero-stride sentinel now normalizes instead of aliasing every row onto row
+0; `tests/yocto/inference_deepx_regression.cpp` (built against the existing
+clean-room dx_rt fake, no real DEEPX hardware) locks down the multi-input
+open() refusal and confirms a single-input model is unaffected.
+
+**Bench-gated:** the `alif_hantro.c` and `inference_deepx.cpp` fixes cannot
+be verified end-to-end without E1M-AEN801 (Alif E8, Hantro JPEG) and
+E1M-V2M101/102 (DEEPX DX-M1 over PCIe) silicon respectively — both are
+reviewed by inspection and, for DEEPX, against the fake-dx_rt regression
+harness, not proven on real hardware. The jpeg-dispatcher, rpc and mqtt
+fixes are logic reviewed and compiled (`gcc`/`g++ -Wall -Wextra`, real
+macro-gated code paths, not the NOSUPPORT stub arm) outside `native_sim`;
+the jpeg-dispatcher fix additionally has the ztest coverage above.
+
 ### Changed — CC3501E wire protocol 7 to 8: request identity for every worker-routed opcode
 
 **HELD: needs `cc3501e-bridge-firmware` v0.6.0 (protocol 8) to be released and a

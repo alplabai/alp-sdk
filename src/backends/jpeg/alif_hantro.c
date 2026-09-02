@@ -254,7 +254,14 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 
 	/* NV12: one Y plane immediately followed, at stride*height, by an
 	 * interleaved half-height UV plane -- see the struct doc on
-	 * alp_jpeg_encode_req_t. Total footprint = stride*height*3/2. */
+	 * alp_jpeg_encode_req_t. Total footprint = stride*height*3/2.
+	 *
+	 * req->y_stride/width/height reach here only after src/jpeg_dispatch.c's
+	 * alp_jpeg_encode() has already rejected a nonzero stride smaller than
+	 * width and capped width/height to this backend's own advertised
+	 * max_width/max_height (issue #1645) -- in_len below is therefore a
+	 * range the caller demonstrably owns, not an unbounded caller-supplied
+	 * value handed straight to _is_dma_reachable(). */
 	uint32_t in_stride = (req->y_stride != 0u) ? req->y_stride : req->width;
 	size_t   in_len    = (size_t)in_stride * req->height * 3u / 2u;
 
@@ -278,7 +285,11 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 		.pixelformat = VIDEO_PIX_FMT_NV12,
 		.width       = req->width,
 		.height      = req->height,
-		.pitch       = (req->y_stride != 0u) ? req->y_stride : req->width,
+		/* Reuse the same in_stride computed above -- was a second,
+		 * independently-evaluated copy of the identical ternary
+		 * (issue #1645); one value now feeds both the DMA-span
+		 * derivation and the HW pitch register. */
+		.pitch = in_stride,
 	};
 	int err = video_set_format(st->dev, &fmt);
 	if (err != 0) {
