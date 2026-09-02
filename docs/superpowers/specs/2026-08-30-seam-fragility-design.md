@@ -315,15 +315,23 @@ Recorded so they are not re-litigated:
    with its own schema, or an additive block on an existing one?
 3. Is the `_fix_link` base-URL extraction in scope now, or deferred? It is the
    smallest item and the least urgent.
-4. `metadata/schemas/hw-revisions-v1.schema.json` is the only schema of the 27
-   under `metadata/schemas/` with top-level `additionalProperties: true`. Its
-   description ("Per-SoM-family hardware-revision compatibility table") gives no
-   rationale for the exception. Is the open door deliberate — because a vendor's
-   revision table carries fields the schema cannot enumerate ahead of time — or
-   is it an oversight? The difference is whether a typo in a new SoM family's
-   revision entry is caught or silently accepted, which matters because that
-   table is the input to the SDK-version compatibility window. Not in scope
-   here; it needs its own decision and probably its own issue.
+4. ~~`metadata/schemas/hw-revisions-v1.schema.json` is the only schema of the 27
+   under `metadata/schemas/` with top-level `additionalProperties: true`.~~
+   **Answered, and two facts in the question were wrong.** Corrected in place
+   rather than left standing, because this spec is the in-tree source #1850 was
+   written from and the next reader would hit the same wrong count.
+
+   * **The count is 28, not 27** (`ls metadata/schemas/*.json | wc -l`).
+   * **The door was narrower than "caught or silently accepted" implies.**
+     `$defs.hw_rev_entry` was already `additionalProperties: false` and
+     `hw_revisions` already constrains its keys with
+     `propertyNames: {"pattern": "^r[0-9]+$"}`, so a typo *inside* a revision
+     entry — the case the question worried about — was always refused. Only a
+     stray key at the top level was admitted.
+   * **The root is now closed** (#1887, closing
+     [#1850](https://github.com/alplabai/alp-sdk/issues/1850)), and it was
+     genuinely the last one: after that change all 28 schemas carry
+     `additionalProperties: false` at their root.
 ## Decided during review — the unused `substitute` hook stays, because the schema already locks the door
 
 `scripts/alp_template.py` declares an opt-in
