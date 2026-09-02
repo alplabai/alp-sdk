@@ -7,6 +7,41 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Fixed — wdt: close() no longer disarms the whole watchdog device, and ALP_WDT_INTERRUPT_ONLY can now notify the app
+
+Two live gaps in `<alp/wdt.h>`'s Zephyr backend, both safety-relevant (#1637).
+
+- **`alp_wdt_close()` used to disable the whole watchdog device.** Zephyr's
+  `wdt_*` driver class has no per-channel disable, so `z_close()` calling
+  `wdt_disable(dev)` disarmed every channel installed on that device, not
+  just the closing handle's own. Combined with the dispatcher exclusivity
+  fix from #1650 (one live handle per `wdt_id`), that made close() the last
+  place a shared device's protection could still be silently pulled out
+  from under a sibling channel. `alp_wdt_close()` now only releases the
+  handle; its Doxygen spells out what it does and does not disarm per
+  backend, and an explicit `alp_wdt_disable()` call is what a caller wants
+  for a best-effort SoC-wide disable before closing.
+- **`ALP_WDT_INTERRUPT_ONLY` was unreachable.** The Zephyr backend selected
+  `WDT_FLAG_RESET_NONE` with a hardcoded `.callback = NULL`, so the timeout
+  fired into nothing — no reset and no notification, strictly worse than
+  not offering the mode. `alp_wdt_config_t` gains `on_expire` + `user`;
+  `alp_wdt_open()` now rejects INTERRUPT_ONLY with `ALP_ERR_INVAL` when
+  `on_expire` is NULL, and the Zephyr backend wires a real ISR trampoline
+  (Zephyr's `wdt_callback_t` carries no user-data cookie, unlike
+  `counter_alarm_cfg`'s, so open() registers `(dev, channel_id) -> owner`
+  in a small backend-local table and close() clears it). The Yocto backend
+  now returns `ALP_ERR_NOSUPPORT` for INTERRUPT_ONLY instead of silently
+  accepting a mode the Linux watchdog ABI has no ioctl to deliver.
+
+**Needs-silicon, not verified on a bench this change.** Validated locally
+via `tests/zephyr/peripheral/src/wdt.c` (the new INTERRUPT_ONLY-without-
+callback rejection, dispatcher-level, backend-independent) and
+`tests/unit/wdt_exclusivity/src/test_wdt_exclusivity.c` (INTERRUPT_ONLY
+with a real callback still opens under `sw_fallback`). Whether the Zephyr
+ISR trampoline actually fires, and how wide the close-vs-latched-interrupt
+race window is on real hardware, needs an E1M-AEN801 or E1M-V2N101 bench
+run — `native_sim` cannot arm a real watchdog device.
+
 ### Changed — CC3501E wire protocol 7 to 8: request identity for every worker-routed opcode
 
 **HELD: needs `cc3501e-bridge-firmware` v0.6.0 (protocol 8) to be released and a

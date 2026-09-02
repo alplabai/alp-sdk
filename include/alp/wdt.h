@@ -32,6 +32,18 @@
  *
  * @par ABI status: [ABI-STABLE]
  *      v0.2.  v0.9.0: wdt_id moved into alp_wdt_config_t so alp_wdt_open(const alp_wdt_config_t *) matches every other config-taking open (pre-1.0 signature change).
+ *      v0.17.0 (#1637): alp_wdt_close() no longer implicitly calls the
+ *      equivalent of alp_wdt_disable() on the Zephyr backend -- closing
+ *      one handle used to disarm the WHOLE watchdog device (Zephyr has
+ *      no per-channel disable), so a second handle on a different
+ *      channel of the same device silently lost its protection.  Close
+ *      now only releases the handle; call alp_wdt_disable() explicitly
+ *      first for a best-effort SoC-wide disable.  alp_wdt_config_t
+ *      additively gains on_expire + user so ALP_WDT_INTERRUPT_ONLY has
+ *      a way to actually notify the app (previously accepted and
+ *      silently inert on Zephyr; the Yocto backend now rejects it with
+ *      ALP_ERR_NOSUPPORT instead of silently ignoring it, matching the
+ *      Linux watchdog ABI's real capability). Pre-1.0, additive.
  *      See docs/abi-markers.md for the convention.
  */
 
@@ -58,11 +70,33 @@ typedef enum {
 /** Opaque watchdog handle.  Allocate via @ref alp_wdt_open. */
 typedef struct alp_wdt alp_wdt_t;
 
+/**
+ * @brief Watchdog expiry notification.
+ *
+ * Fires when the deadline is missed under @ref ALP_WDT_INTERRUPT_ONLY.
+ * Runs in ISR context on the Zephyr backend -- keep the body short; do
+ * not block, allocate, or take a mutex.  Never fires under
+ * @ref ALP_WDT_RESET_SOC / @ref ALP_WDT_RESET_CPU (the reset pre-empts
+ * the CPU before any callback could run).
+ *
+ * @param[in] wdt   The handle whose deadline fired.
+ * @param[in] user  The @c user pointer from @ref alp_wdt_config_t.
+ */
+typedef void (*alp_wdt_expiry_cb_t)(alp_wdt_t *wdt, void *user);
+
 /** Configuration passed to @ref alp_wdt_open. */
 typedef struct {
 	uint32_t wdt_id;     /**< Form-factor WDT instance ID: ALP_E1M_WDT0..1 or ALP_E1M_X_WDT0..1. */
 	uint32_t timeout_ms; /**< Feed deadline in milliseconds; must be non-zero. */
 	alp_wdt_action_t on_timeout; /**< Action when the deadline is missed. */
+	/** Required when @c on_timeout == @ref ALP_WDT_INTERRUPT_ONLY;
+	 *  ignored for the reset actions.  @ref alp_wdt_open fails with
+	 *  @ref ALP_ERR_INVAL if INTERRUPT_ONLY is requested with this
+	 *  NULL -- an interrupt-only watchdog nobody can observe neither
+	 *  resets the SoC nor notifies anyone, which is worse than not
+	 *  offering the mode. */
+	alp_wdt_expiry_cb_t on_expire;
+	void               *user; /**< Forwarded to @c on_expire; otherwise unused. */
 } alp_wdt_config_t;
 
 /**
@@ -92,22 +126,34 @@ typedef struct {
  * @note A watchdog instance is **exclusive**: at most one handle may be
  *       open on a given @c wdt_id at a time, and a second open returns
  *       NULL with @ref ALP_ERR_BUSY until the owner calls
- *       @ref alp_wdt_close.  @ref alp_wdt_close disables the whole
- *       watchdog device, not one channel of it, so a shared instance
- *       would let one subsystem's close silently remove another's
- *       protection.  Two subsystems that both need a deadline must
+ *       @ref alp_wdt_close.  This one-owner-per-instance rule is what
+ *       actually protects a shared device: Zephyr's `wdt_*` driver
+ *       class has no per-channel disable, so without it one
+ *       subsystem's close could disarm a channel it does not own --
+ *       see @ref alp_wdt_close's own doc for what close does and does
+ *       not disarm.  Two subsystems that both need a deadline must
  *       either use two instances or share one handle.
  *
  * @param[in] cfg  Configuration.  Must be non-NULL with non-zero
  *                 @c timeout_ms; @c wdt_id must be a valid watchdog
  *                 index on the active SoM (ALP_E1M_WDT0..1 or
- *                 ALP_E1M_X_WDT0..1).
+ *                 ALP_E1M_X_WDT0..1); @c on_expire must be non-NULL
+ *                 when @c on_timeout == @ref ALP_WDT_INTERRUPT_ONLY.
  * @return Open handle on success;
- *         NULL if @p cfg is invalid, @c cfg->wdt_id is out of range,
- *         another handle already owns @c cfg->wdt_id
- *         (@ref ALP_ERR_BUSY), the underlying device isn't ready, or
- *         the SoC rejected the requested timeout (too long for the
- *         hardware).  Call @ref alp_last_error for the reason.
+ *         NULL with @ref alp_last_error set to:
+ *           @ref ALP_ERR_INVAL (NULL @p cfg; zero @c timeout_ms;
+ *             @c wdt_id out of range; or INTERRUPT_ONLY requested with
+ *             @c on_expire NULL);
+ *           @ref ALP_ERR_BUSY (another handle already owns
+ *             @c cfg->wdt_id);
+ *           @ref ALP_ERR_NOT_READY (the underlying device isn't
+ *             ready);
+ *           @ref ALP_ERR_NOSUPPORT (the backend cannot honour
+ *             @c on_timeout -- e.g. the Yocto backend rejects
+ *             INTERRUPT_ONLY, which the Linux watchdog ABI has no way
+ *             to deliver);
+ *           or another backend-reported code if the SoC rejected the
+ *           requested timeout (too long for the hardware).
  */
 alp_wdt_t *alp_wdt_open(const alp_wdt_config_t *cfg);
 
@@ -136,7 +182,33 @@ alp_status_t alp_wdt_feed(alp_wdt_t *wdt);
  */
 alp_status_t alp_wdt_disable(alp_wdt_t *wdt);
 
-/** @brief Best-effort disable, then release the handle.  NULL is a no-op. */
+/**
+ * @brief Release the handle.  NULL is a no-op.
+ *
+ * @par What this does NOT do
+ * This does **not** disable the watchdog.  Earlier revisions had the
+ * Zephyr backend call the equivalent of @ref alp_wdt_disable
+ * internally on close; that meant closing ONE handle could silently
+ * disarm hardware another handle still depended on, because Zephyr's
+ * `wdt_*` driver class has no per-channel disable -- disabling "this
+ * channel" always meant disabling the whole device.  Call
+ * @ref alp_wdt_disable explicitly BEFORE close() if a best-effort,
+ * SoC-wide disable is genuinely what the caller wants; its documented
+ * @ref ALP_ERR_NOSUPPORT return tells you when the hardware can't
+ * honour that.
+ *
+ * @par Backend-specific behaviour
+ *   - Zephyr: releases the handle only.  The installed timeout keeps
+ *     running -- Zephyr also has no per-channel *uninstall* -- so a
+ *     caller that stops feeding after close() still gets the
+ *     configured @c on_timeout action.
+ *   - Yocto: closes this handle's own `/dev/watchdogN`, attempting a
+ *     best-effort disarm (`WDIOS_DISABLECARD`, plus the magic-close
+ *     write if the driver advertised it) first -- scoped to this
+ *     handle's own device node, never another handle's.
+ *
+ * @param[in] wdt  Handle from @ref alp_wdt_open, or NULL.
+ */
 void alp_wdt_close(alp_wdt_t *wdt);
 
 /**

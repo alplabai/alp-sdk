@@ -19,9 +19,18 @@
 
 #include "wdt_ops.h"
 
-static alp_status_t
-sw_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
+static alp_status_t sw_open(const alp_wdt_config_t  *cfg,
+                            alp_wdt_backend_state_t *st,
+                            alp_capabilities_t      *caps_out,
+                            struct alp_wdt          *owner)
 {
+	(void)owner; /* No timer, no ISR -- on_expire is accepted (the
+                   * dispatcher already required it non-NULL for
+                   * INTERRUPT_ONLY) but never invoked.  Matches this
+                   * backend's documented "never actually resets
+                   * anything" contract: apps that depend on the
+                   * watchdog action, including a notification, MUST
+                   * NOT rely on this backend in production. */
 	st->dev         = NULL;
 	st->wdt_id      = cfg->wdt_id;
 	st->channel_id  = 0;

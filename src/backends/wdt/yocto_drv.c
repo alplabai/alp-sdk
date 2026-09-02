@@ -14,10 +14,14 @@
  * physical watchdog backs /dev/watchdogN and what its reset action is.
  *
  * On the alp_wdt_action_t mapping: the Linux watchdog ABI exposes NO
- * knob for reset-scope (SoC vs core) or interrupt-only mode -- that is
- * fixed by the kernel driver + device-tree.  cfg.on_timeout is
- * therefore informational only on Linux; we honour timeout_ms (the one
- * field the ABI lets us set) and leave the action to the platform.
+ * knob for reset-scope (SoC vs core) -- that is fixed by the kernel
+ * driver + device-tree, so ALP_WDT_RESET_SOC / ALP_WDT_RESET_CPU are
+ * both informational only on Linux; we honour timeout_ms (the one
+ * field the ABI lets us set) and leave the reset scope to the
+ * platform.  ALP_WDT_INTERRUPT_ONLY is different: the ABI has no
+ * expiry-notification ioctl at all, so cfg.on_expire could never fire
+ * here, and y_open() rejects it with ALP_ERR_NOSUPPORT rather than
+ * silently accepting a mode this backend cannot deliver (#1637).
  */
 
 #if defined(__linux__)
@@ -146,9 +150,22 @@ static void _disarm_and_close(int fd, bool attempt_magic_close)
  * @ref _disarm_and_close before releasing the fd (#760) so a failed
  * open never abandons an armed, unfeedable watchdog.
  */
-static alp_status_t
-y_open(const alp_wdt_config_t *cfg, alp_wdt_backend_state_t *st, alp_capabilities_t *caps_out)
+static alp_status_t y_open(const alp_wdt_config_t  *cfg,
+                           alp_wdt_backend_state_t *st,
+                           alp_capabilities_t      *caps_out,
+                           struct alp_wdt          *owner)
 {
+	(void)owner; /* No ISR trampoline on this backend -- WDIOC has no
+                   * expiry-notification ioctl, so INTERRUPT_ONLY is
+                   * rejected below before there is anything to wire up. */
+	if (cfg->on_timeout == ALP_WDT_INTERRUPT_ONLY) {
+		/* The Linux watchdog ABI has no reset-scope / interrupt-only
+		 * knob (fixed by the kernel driver + device tree -- see the
+		 * file comment above) and no expiry-notification ioctl either,
+		 * so cfg->on_expire could never fire on this backend.  Reject
+		 * rather than silently accept-and-ignore the mode (#1637). */
+		return ALP_ERR_NOSUPPORT;
+	}
 	char path[32];
 	int  n = snprintf(path, sizeof(path), "/dev/watchdog%u", (unsigned)cfg->wdt_id);
 	if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;

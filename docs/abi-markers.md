@@ -61,7 +61,7 @@ the PR for experimental symbols.
 | `i2s.h`               | `[ABI-STABLE]`     | v0.2.                                                              |
 | `can.h`               | `[ABI-STABLE]`     | v0.2.                                                              |
 | `rtc.h`               | `[ABI-STABLE]`     | v0.2.                                                              |
-| `wdt.h`               | `[ABI-STABLE]`     | v0.2.  v0.9.0: `wdt_id` moved into `alp_wdt_config_t` so `alp_wdt_open(const alp_wdt_config_t *)` matches every other config-taking open (pre-1.0 signature change). |
+| `wdt.h`               | `[ABI-STABLE]`     | v0.2.  v0.9.0: `wdt_id` moved into `alp_wdt_config_t` so `alp_wdt_open(const alp_wdt_config_t *)` matches every other config-taking open (pre-1.0 signature change).  v0.17.0 (#1637): `alp_wdt_config_t` additively gains `on_expire` + `user` so `ALP_WDT_INTERRUPT_ONLY` can notify the app instead of silently doing nothing; `alp_wdt_open` gains a new `ALP_ERR_INVAL` case (INTERRUPT_ONLY with no `on_expire`) and the Yocto backend now returns `ALP_ERR_NOSUPPORT` for INTERRUPT_ONLY instead of silently accepting it.  `alp_wdt_close` no longer implicitly disables the watchdog on the Zephyr backend -- that used to disarm the whole device, not just the closing handle's channel. Pre-1.0, additive/behavioural, no signature break. |
 | `audio.h`             | `[ABI-STABLE]`     | v0.2 decl + v0.3 impl; PDM-in / I²S-out shape stable.             |
 | `iot.h`               | `[ABI-STABLE]`     | v0.2-v0.4; Wi-Fi station + MQTT (TLS) signatures stable.          |
 | `security.h`          | `[ABI-STABLE]`     | v0.3 MbedTLS PSA Crypto wrapper.                                  |

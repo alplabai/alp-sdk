@@ -34,10 +34,16 @@ struct alp_wdt_ops {
 	/* Open the watchdog.  cfg is the customer's config (carries the
 	 * instance id in cfg->wdt_id); state is preallocated by the
 	 * dispatcher; caps_out is filled with the (possibly probe-refined)
-	 * instance capabilities. */
+	 * instance capabilities; owner is the dispatcher's pool slot this
+	 * state lives inside of, for a backend that needs an ISR-reachable
+	 * back-ref to cfg.on_expire/cfg.user (the Zephyr backend's
+	 * trampoline table -- Zephyr's wdt_callback_t carries no user_data
+	 * cookie, unlike counter_alarm_cfg's, #1637).  Backends that don't
+	 * need it (Yocto, sw_fallback) ignore it. */
 	alp_status_t (*open)(const alp_wdt_config_t  *cfg,
 	                     alp_wdt_backend_state_t *state,
-	                     alp_capabilities_t      *caps_out);
+	                     alp_capabilities_t      *caps_out,
+	                     struct alp_wdt          *owner);
 	alp_status_t (*feed)(alp_wdt_backend_state_t *state);
 	alp_status_t (*disable)(alp_wdt_backend_state_t *state);
 	void (*close)(alp_wdt_backend_state_t *state);
