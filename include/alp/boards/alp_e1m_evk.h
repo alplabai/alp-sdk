@@ -597,10 +597,14 @@ typedef enum {
  * The TAS2563 also has a hardware broadcast page-write convention at
  * 0x48.  On PRE-RESPIN boards that address was occupied by U32
  * INA236B (+V_CAM0 rail), so the broadcast was unusable; U32 was
- * re-strapped A0=SCL -> 0x4B from the next batch, which frees 0x48.
- * Firmware that must work on both board revisions still has to issue
- * two targeted unit-address writes back-to-back rather than relying
- * on a 0x48 broadcast.
+ * re-strapped A0=SCL -> 0x4B from the next batch, which frees 0x48
+ * at the hardware level on respun boards.  That does not make 0x48
+ * usable from the SDK, though: 0x48 does not pin down one physical
+ * chip the way a strap address does, for a write any more than for
+ * a read, and tas2563_init() rejects TAS2563_I2C_ADDR_BROADCAST on
+ * every board revision, respun or not, so firmware unconditionally
+ * has to issue two targeted unit-address writes back-to-back rather
+ * than a 0x48 broadcast.
  *
  * EVK_I2C_ADDR_TAS2563_LOW and EVK_I2C_ADDR_TAS2563_HIGH are defined
  * in the generated routes header. */
@@ -625,10 +629,13 @@ typedef enum {
  * Confirmed against the EVK schematic strap labels.  The three
  * B-bank addresses actually in use (0x49 / 0x4A / 0x4B) collide with
  * nothing: not the TAS2563 unit addresses (0x4D / 0x4E), and not its
- * broadcast address (0x48), which the U32 re-strap freed.  On
- * PRE-RESPIN boards U32 sat at 0x48 and did shadow that broadcast --
- * see the TAS2563 block above for the two-write workaround that
- * remains necessary if you support both revisions.
+ * broadcast address (0x48), which the U32 re-strap freed at the
+ * hardware level.  On PRE-RESPIN boards U32 sat at 0x48 and did
+ * shadow that broadcast -- see the TAS2563 block above: the SDK
+ * cannot use 0x48 on either revision anyway (0x48 doesn't pin down
+ * one physical chip, regardless of direction), so the two-write
+ * workaround is unconditional, not conditional on which revision
+ * you support.
  *
  * EVK_I2C_ADDR_INA236_3V3, _1V8, _VIO, _VCAM0, _VCAM1 and _5V are
  * defined in the generated routes header. */

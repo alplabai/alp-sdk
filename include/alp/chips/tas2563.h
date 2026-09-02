@@ -111,6 +111,14 @@ typedef struct {
  *                       be NULL if the caller drives SD_N
  *                       elsewhere (or if the pin is tied permanently
  *                       to V+).
+ *
+ * @return ALP_OK on a successful probe.
+ * @retval ALP_ERR_INVAL     ctx or bus is NULL, or addr_7bit is not
+ *                           one of the four strap constants.
+ * @retval ALP_ERR_NOT_READY The I2C connectivity probe failed.
+ *
+ * sd_n configure/write failures pass their own status straight
+ * through instead of being folded into ALP_ERR_NOT_READY.
  */
 alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp_gpio_t *sd_n);
 
