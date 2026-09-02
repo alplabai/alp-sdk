@@ -507,7 +507,7 @@ producer or a drift gate: `scripts/gen_error_catalog.py:45` writes it,
 `scripts/alp_cli/explain.py`, which would have been the in-repo consumer, no
 longer exists. So the heading undersells it: this is not a half-consumed in-repo
 artefact but a **pure cross-repo export with exactly one consumer, in another
-repo**, and there is no error-catalog schema among the 27 under
+repo**, and there is no error-catalog schema among the 28 under
 `metadata/schemas/`. That is a stronger argument for schema-gating than
 "half-consumed" makes — the only thing standing between a shape change and a
 broken `tan explain` is a regenerate-and-diff of the producer, which passes by
@@ -713,7 +713,7 @@ Recorded so they are not re-litigated:
    change waits on them. Populating the 26 fields does not.
 3. Is the `_fix_link` base-URL extraction in scope now, or deferred? It is the
    smallest item and the least urgent.
-4. `metadata/schemas/hw-revisions-v1.schema.json` is the only schema of the 27
+4. `metadata/schemas/hw-revisions-v1.schema.json` is the only schema of the 28
    under `metadata/schemas/` with top-level `additionalProperties: true`. Its
    description ("Per-SoM-family hardware-revision compatibility table") gives no
    rationale for the exception. Is the open door deliberate — because a vendor's
