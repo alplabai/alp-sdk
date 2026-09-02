@@ -109,13 +109,15 @@
  *      by hand.
  *
  *   5. test_bound_notifies_link_up / test_unbound_notifies_link_lost_*
- *      / test_error_notifies_link_lost (issue #1643) -- rpc_ept_bound()
- *      / rpc_ept_unbound() / rpc_ept_error() drive the dispatcher's
- *      alp_rpc_notify_link() (a new test-local double, mirroring
- *      alp_rpc_close_finalize()'s), and the unbound/error paths bail
- *      without notifying once `closing` is already set -- the same
- *      rpc_recv_enter() gate `received` already used, reused via the
- *      new rpc_worker_leave() epilogue helper rather than duplicated.
+ *      / test_error_notifies_link_lost / test_*_after_closing_does_not_notify
+ *      (issue #1643) -- rpc_ept_bound() / rpc_ept_unbound() /
+ *      rpc_ept_error() drive the dispatcher's alp_rpc_notify_link() (a
+ *      new test-local double, mirroring alp_rpc_close_finalize()'s),
+ *      and ALL THREE (bound included -- a regression test, since
+ *      bound() originally ran unbracketed) bail without notifying once
+ *      `closing` is already set -- the same rpc_recv_enter() gate
+ *      `received` already used, reused via the new rpc_worker_leave()
+ *      epilogue helper rather than duplicated.
  */
 
 /* Faked purely at the preprocessor level -- no real Kconfig ALP_SDK_RPC
@@ -763,6 +765,17 @@ ZTEST(alp_rpc_zephyr_backend, test_unbound_notifies_link_lost_and_clears_ept_bou
 	be.ept_bound = true;
 	atomic_clear(&g_notify_calls);
 	g_notify_owner = NULL;
+	/* ztest does not run suites in declaration order (and does not
+     * reset file-scope test doubles between cases) -- reset this one
+     * too, not just g_notify_calls above, so this test's assertion on
+     * it doesn't depend on run order.  Regression: adding a case
+     * elsewhere in this file shifted the order enough that
+     * test_defect3_cross_channel_close_takes_external_path's own
+     * atomic_inc() (which deliberately leaves g_finalize_calls == 1 on
+     * exit -- see that test) started running BEFORE this one and made
+     * the un-reset zassert below fail spuriously. */
+	atomic_clear(&g_finalize_calls);
+	g_finalize_owner = NULL;
 
 	rpc_ept_unbound(&be);
 
@@ -806,6 +819,24 @@ ZTEST(alp_rpc_zephyr_backend, test_error_notifies_link_lost)
 	zassert_equal(atomic_get(&g_notify_calls), 1, "error must notify link state exactly once");
 	zassert_equal(g_notify_owner, &be);
 	zassert_equal(g_notify_last_state, ALP_RPC_LINK_LOST);
+}
+
+ZTEST(alp_rpc_zephyr_backend, test_bound_after_closing_does_not_notify)
+{
+	/* Regression: rpc_ept_bound() used to run unbracketed (no
+     * rpc_recv_enter()/rpc_worker_leave() gate), unlike unbound()/
+     * error() above -- see this file's own header comment for the
+     * self-close-misclassification + recycle-race it caused.  bound()
+     * must now respect the SAME `closing` gate. */
+	struct rpc_be be;
+	init_test_channel(&be, "bound_closing");
+	be.owner   = &be;
+	be.closing = true;
+	atomic_clear(&g_notify_calls);
+
+	rpc_ept_bound(&be);
+
+	zassert_equal(atomic_get(&g_notify_calls), 0, "bound after closing must not notify");
 }
 
 ZTEST(alp_rpc_zephyr_backend, test_error_after_closing_does_not_notify)

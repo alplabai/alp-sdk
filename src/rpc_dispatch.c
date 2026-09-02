@@ -437,7 +437,28 @@ void alp_rpc_notify_link(void *owner, alp_rpc_link_state_t state)
 	if (ch == NULL) {
 		return;
 	}
-	__atomic_store_n(&ch->link_state, (int)state, __ATOMIC_RELEASE);
+	if (state == ALP_RPC_LINK_LOST) {
+		/* include/alp/rpc.h's documented invariant: ALP_RPC_LINK_LOST
+         * is reachable only from ALP_RPC_LINK_UP -- a link that never
+         * bound stays DOWN.  CAS instead of an unconditional store so
+         * an out-of-order LOST (e.g. a backend's own UP notify racing
+         * behind a LOST its rx thread already reported -- see
+         * src/backends/rpc/yocto_drv.c's y_open() ordering fix) can
+         * never permanently promote a channel that hasn't actually
+         * bound yet, and a redundant LOST-while-already-LOST doesn't
+         * double-fire the app's callback. */
+		int expected = (int)ALP_RPC_LINK_UP;
+		if (!__atomic_compare_exchange_n(&ch->link_state,
+		                                 &expected,
+		                                 (int)state,
+		                                 false,
+		                                 __ATOMIC_RELEASE,
+		                                 __ATOMIC_RELAXED)) {
+			return; /* not currently UP -- not a real transition */
+		}
+	} else {
+		__atomic_store_n(&ch->link_state, (int)state, __ATOMIC_RELEASE);
+	}
 	/* RELAXED: never torn, no further ordering needed here -- see
      * struct alp_rpc_channel's doc comment in rpc_ops.h. */
 	alp_rpc_link_cb_t cb   = __atomic_load_n(&ch->link_cb, __ATOMIC_RELAXED);
@@ -488,15 +509,17 @@ alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, siz
 		return ALP_ERR_NOT_READY;
 	}
 	alp_status_t rc;
-	if (__atomic_load_n(&ch->link_state, __ATOMIC_ACQUIRE) == (int)ALP_RPC_LINK_LOST) {
-		/* issue #1643: don't accept into a link the backend has
-         * already told us is dead -- see this function's amended
-         * @return doc in include/alp/rpc.h. */
-		rc = ALP_ERR_NOT_READY;
-	} else if (method == NULL || method[0] == '\0') {
+	if (method == NULL || method[0] == '\0') {
 		rc = ALP_ERR_INVAL;
 	} else if (payload == NULL && len > 0) {
 		rc = ALP_ERR_INVAL;
+	} else if (__atomic_load_n(&ch->link_state, __ATOMIC_ACQUIRE) == (int)ALP_RPC_LINK_LOST) {
+		/* issue #1643: don't accept into a link the backend has
+         * already told us is dead -- see this function's amended
+         * @return doc in include/alp/rpc.h.  Checked AFTER argument
+         * validation so a caller unit-testing its own arg handling
+         * sees the same ALP_ERR_INVAL regardless of link state. */
+		rc = ALP_ERR_NOT_READY;
 	} else if (ch->state.ops == NULL || ch->state.ops->send == NULL) {
 		rc = ALP_ERR_NOT_IMPLEMENTED;
 	} else {
@@ -524,6 +547,15 @@ alp_status_t alp_rpc_call(alp_rpc_channel_t *ch,
 		rc = ALP_ERR_INVAL;
 	} else if (resp != NULL && resp_len == NULL) {
 		rc = ALP_ERR_INVAL;
+	} else if (__atomic_load_n(&ch->link_state, __ATOMIC_ACQUIRE) == (int)ALP_RPC_LINK_LOST) {
+		/* issue #1643 follow-up: reject a NEW call at entry once the
+         * link is known LOST -- the same one-line gate alp_rpc_send()
+         * already has, above ops->call, touching no wait/synchronisation
+         * primitive.  Does NOT wake a call already in flight when the
+         * link is lost -- that call keeps its own timeout_ms defense;
+         * see this function's doc comment in include/alp/rpc.h for why
+         * (GHSA-xhm8-7f87-93q5 close-protocol handle-lifetime rules). */
+		rc = ALP_ERR_NOT_READY;
 	} else if (ch->state.ops == NULL || ch->state.ops->call == NULL) {
 		rc = ALP_ERR_NOT_IMPLEMENTED;
 	} else {

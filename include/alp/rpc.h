@@ -79,9 +79,32 @@
  * expose the RPMsg peer-bind state (@ref alp_rpc_link_state_t); once
  * a channel has observed @ref ALP_RPC_LINK_LOST, @ref alp_rpc_send
  * fails with @ref ALP_ERR_NOT_READY instead of accepting into the
- * dead queue.  @ref alp_rpc_call is unaffected by this change -- it
- * already has its own `timeout_ms` defense and is not woken early by
- * a link-loss notification in this revision.
+ * dead queue, and a NEW @ref alp_rpc_call is rejected the same way at
+ * entry (an already in-flight call is unaffected -- see its own doc
+ * comment).
+ *
+ * @b Coverage differs by backend in this revision -- read this before
+ * relying on @ref ALP_RPC_LINK_LOST:
+ *   - Linux/A-class chardev backend (`src/backends/rpc/yocto_drv.c`):
+ *     reports both @ref ALP_RPC_LINK_UP (chardev open) and
+ *     @ref ALP_RPC_LINK_LOST (its rx thread's poll()/read() failing).
+ *   - Zephyr/M-class backend (`src/backends/rpc/zephyr_drv.c`):
+ *     reliably reports @ref ALP_RPC_LINK_UP (`ipc_service`'s `bound`
+ *     callback), but the pinned Zephyr v4.4.1 `ipc_service` RPMsg
+ *     static-vrings backend never invokes the `unbound`/`error`
+ *     callbacks this code wires -- so @ref ALP_RPC_LINK_LOST is
+ *     currently NOT observable on Zephyr; a far-core reset there
+ *     stays silently reported as UP.  See that file's own `@par Link
+ *     liveness` comment for the confirmation and what would flip it.
+ *   - RZ/V2N's userspace-virtio backend
+ *     (`src/backends/rpc/yocto_uio_drv.c`) -- the backend that wins on
+ *     every V2N `silicon_ref` -- is not wired for link liveness at
+ *     all yet, so V2N reports UP only, same as Zephyr today.
+ *
+ * A caller that needs @ref ALP_RPC_LINK_LOST reliably in THIS revision
+ * has it only via a Linux/A-class peer running the plain chardev
+ * backend -- not on Zephyr, and not on V2N's own A55 (which selects
+ * the unwired UIO backend).
  *
  * @par ABI status: [ABI-STABLE]
  *      v0.6 framed RPC surface.  Adding optional fields to
@@ -90,12 +113,13 @@
  *      convention.  v0.17 adds @ref alp_rpc_link_state_t,
  *      @ref alp_rpc_link_cb_t, @ref alp_rpc_set_link_callback, and
  *      @ref alp_rpc_link_state -- purely additive (minor bump).  The
- *      one BEHAVIOUR change on the existing surface is documented on
- *      @ref alp_rpc_send below: it already documented
- *      @ref ALP_ERR_NOT_READY as a valid return, and v0.17 widens the
- *      condition that produces it (link @ref ALP_RPC_LINK_LOST, not
- *      only a NULL/closed @c ch) rather than adding a new return
- *      value -- see the CHANGELOG entry for this issue.
+ *      BEHAVIOUR changes on the existing surface are documented on
+ *      @ref alp_rpc_send and @ref alp_rpc_call below: both already
+ *      documented @ref ALP_ERR_NOT_READY as a valid return, and v0.17
+ *      widens the condition that produces it (link
+ *      @ref ALP_RPC_LINK_LOST, not only a NULL/closed @c ch) rather
+ *      than adding a new return value -- see the CHANGELOG entry for
+ *      this issue.
  */
 
 #ifndef ALP_RPC_H
@@ -491,7 +515,12 @@ alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, siz
  * @param[in]     timeout_ms  Max wait in milliseconds.  Use
  *                            @c UINT32_MAX for unbounded wait.
  * @return  - @ref ALP_OK          on success
- *          - @ref ALP_ERR_NOT_READY @c ch is NULL or closed
+ *          - @ref ALP_ERR_NOT_READY @c ch is NULL or closed, OR (issue
+ *                                    #1643, checked at entry only) the
+ *                                    channel's link has already
+ *                                    observed @ref ALP_RPC_LINK_LOST --
+ *                                    see @ref alp_rpc_link_state and
+ *                                    the note below
  *          - @ref ALP_ERR_INVAL   @c method invalid, or
  *                                  @c resp != NULL with
  *                                  @c resp_len == NULL
@@ -507,6 +536,12 @@ alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, siz
  * @note Concurrent calls on the same channel from multiple threads
  *       are serialised by the SDK; the second caller blocks until
  *       the first call returns or times out.
+ * @note A link-loss notification does NOT unblock a call already in
+ *       flight -- only a NEW call, rejected at entry, sees the LOST
+ *       gate; an in-flight call keeps running out its own
+ *       @p timeout_ms.  Waking it early would cross the
+ *       GHSA-xhm8-7f87-93q5 close-protocol's handle-lifetime rules and
+ *       is out of scope for issue #1643.
  */
 alp_status_t alp_rpc_call(alp_rpc_channel_t *ch,
                           const char        *method,

@@ -659,3 +659,91 @@ ZTEST(alp_rpc_registry, test_send_rejected_once_link_lost)
 	zassert_equal(ALP_ERR_NOT_READY, alp_rpc_send(&ch, "m", NULL, 0));
 	zassert_false(_fake_send_reached, "backend send must not be reached once link is LOST");
 }
+
+ZTEST(alp_rpc_registry, test_send_invalid_args_win_over_lost_link)
+{
+	/* Argument validation must take precedence over the LOST gate --
+     * regression for the reviewer-confirmed ordering bug (issue #1643
+     * follow-up).  include/alp/rpc.h documents ALP_ERR_INVAL for a bad
+     * method/payload independently of link state; a caller
+     * unit-testing its own arg handling must see the SAME code
+     * regardless of whether the link happens to be LOST. */
+	struct alp_rpc_channel ch = _make_fake_link_channel();
+	ch.state.owner            = &ch;
+	_fake_send_reached        = false;
+
+	alp_rpc_notify_link(ch.state.owner, ALP_RPC_LINK_UP);
+	alp_rpc_notify_link(ch.state.owner, ALP_RPC_LINK_LOST);
+
+	zassert_equal(ALP_ERR_INVAL, alp_rpc_send(&ch, NULL, NULL, 0));
+	zassert_false(_fake_send_reached, "backend send must not be reached on a bad method either");
+}
+
+ZTEST(alp_rpc_registry, test_call_rejected_once_link_lost)
+{
+	/* alp_rpc_call() gains the same entry-only LOST gate alp_rpc_send()
+     * already has (issue #1643 follow-up): a NEW call is rejected
+     * before ever reaching the backend once the link is known LOST.
+     * (An ALREADY in-flight call is untouched by this gate -- see
+     * alp_rpc_call()'s own doc comment in include/alp/rpc.h; that case
+     * is out of scope here and covered by the call's own timeout_ms
+     * defense.) */
+	_fake_call_reached        = false;
+	struct alp_rpc_channel ch = _make_fake_channel();
+	ch.state.owner            = &ch;
+
+	alp_rpc_notify_link(ch.state.owner, ALP_RPC_LINK_UP);
+	alp_rpc_notify_link(ch.state.owner, ALP_RPC_LINK_LOST);
+
+	zassert_equal(ALP_ERR_NOT_READY, alp_rpc_call(&ch, "m", NULL, 0, NULL, NULL, 0));
+	zassert_false(_fake_call_reached, "backend call must not be reached once link is LOST");
+}
+
+ZTEST(alp_rpc_registry, test_notify_link_lost_from_down_is_rejected)
+{
+	/* include/alp/rpc.h's documented invariant: ALP_RPC_LINK_LOST is
+     * reachable only from ALP_RPC_LINK_UP -- a link that never bound
+     * stays DOWN.  Regression for the unconditional-store bug (issue
+     * #1643 follow-up): notifying LOST on a channel that never saw UP
+     * must be a silent no-op (no callback fired), not a permanent
+     * DOWN -> LOST promotion. */
+	struct alp_rpc_channel ch = _make_fake_link_channel();
+	ch.state.owner            = &ch;
+	g_link_cb_calls           = 0;
+
+	int marker = 9;
+	zassert_equal(ALP_OK, alp_rpc_set_link_callback(&ch, _link_cb_recorder, &marker));
+
+	alp_rpc_notify_link(ch.state.owner, ALP_RPC_LINK_LOST);
+
+	zassert_equal(
+	    0, g_link_cb_calls, "a rejected DOWN -> LOST promotion must not fire the callback");
+
+	alp_rpc_link_state_t s;
+	zassert_equal(ALP_OK, alp_rpc_link_state(&ch, &s));
+	zassert_equal(
+	    ALP_RPC_LINK_DOWN, s, "DOWN must stay DOWN, never LOST, without an observed UP first");
+}
+
+ZTEST(alp_rpc_registry, test_notify_link_lost_from_up_is_accepted)
+{
+	/* Positive control for the CAS above: the documented UP -> LOST
+     * transition still works and still fires the callback exactly
+     * once. */
+	struct alp_rpc_channel ch = _make_fake_link_channel();
+	ch.state.owner            = &ch;
+	g_link_cb_calls           = 0;
+
+	int marker = 11;
+	zassert_equal(ALP_OK, alp_rpc_set_link_callback(&ch, _link_cb_recorder, &marker));
+
+	alp_rpc_notify_link(ch.state.owner, ALP_RPC_LINK_UP);
+	alp_rpc_notify_link(ch.state.owner, ALP_RPC_LINK_LOST);
+
+	zassert_equal(2, g_link_cb_calls);
+	zassert_equal(ALP_RPC_LINK_LOST, g_link_cb_last_state);
+
+	alp_rpc_link_state_t s;
+	zassert_equal(ALP_OK, alp_rpc_link_state(&ch, &s));
+	zassert_equal(ALP_RPC_LINK_LOST, s);
+}

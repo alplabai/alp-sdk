@@ -93,24 +93,33 @@
  * y_open() reports ALP_RPC_LINK_UP (rpc_ops.h's alp_rpc_notify_link())
  * once /dev/rpmsg<N> is open -- the kernel only creates that chardev
  * after the remote firmware's name-service announce, so reaching that
- * point already means bound.  rpc_rx_main()'s read()-returned-EOF/
- * error path (the existing "kernel dropped this endpoint" branch, NOT
- * the wake-pipe close-side branch) reports ALP_RPC_LINK_LOST -- the
- * far core reset or its remoteproc firmware stopped.  Deliberately
- * does not touch the close protocol above: no new gate, no self-close
- * detection added for this one notify call, since a read() failure is
- * never reachable from inside a subscriber callback (only from the rx
- * thread's own poll loop) and ch->ept_fd is never closed while this
- * thread is still running (rpc_be_teardown() runs only from
- * y_destroy(), strictly after this thread has returned) -- so `ch`
- * stays valid for the notify unconditionally.
+ * point already means bound.  Reported strictly BEFORE pthread_create()
+ * spawns the RX worker below: that ordering (not the earlier revision's
+ * "notify after thread start") is load-bearing -- see y_open()'s own
+ * comment for the clobber it closes.  rpc_rx_main()'s poll()-failure
+ * and read()-returned-EOF/error paths (the existing "kernel dropped
+ * this endpoint" branches, NOT the wake-pipe close-side branch) both
+ * report ALP_RPC_LINK_LOST -- either one ends this thread's ability to
+ * ever receive again, so both must report the same link state, whether
+ * the far core actually reset or this side merely lost its poll().
+ * Deliberately does not touch the close protocol above: no new gate,
+ * no self-close detection added for this notify call, since neither
+ * failure path is ever reachable from inside a subscriber callback
+ * (only from the rx thread's own poll loop) and ch->ept_fd is never
+ * closed while this thread is still running (rpc_be_teardown() runs
+ * only from y_destroy(), strictly after this thread has returned) --
+ * so `ch` stays valid for the notify unconditionally.
  * src/backends/rpc/yocto_uio_drv.c (RZ/V2N's userspace-virtio path)
  * is NOT wired for link liveness in this revision -- its
  * remoteproc/virtio teardown shape doesn't have this file's
  * poll()+read() EOF signal, and mutating that backend's own delicate
  * close protocol without V2N silicon to verify against was judged
  * too risky for this change; tracked as follow-up work for issue
- * #1643 rather than guessed at here.
+ * #1643 rather than guessed at here.  Combined with the Zephyr
+ * backend's structural gap (see src/backends/rpc/zephyr_drv.c's own
+ * `@par Link liveness` comment), this is currently the ONLY path that
+ * can report a genuine ALP_RPC_LINK_LOST for the V2N CM33 target --
+ * V2N's A55 side needs yocto_uio_drv.c wired, not this file.
  *
  * Linking: src/yocto/CMakeLists.txt gates this file behind
  * find_package(Threads) + pkg_check_modules(libmetal librpmsg) and
@@ -377,6 +386,13 @@ static void *rpc_rx_main(void *arg)
 		int rc = poll(fds, 2, -1);
 		if (rc < 0) {
 			if (errno == EINTR) continue;
+			/* A genuine poll() failure ends this thread's ability to
+             * ever receive again, exactly like the read()-EOF/error
+             * branch below -- report the same LINK_LOST instead of
+             * silently leaving link_state at UP forever (issue #1643
+             * follow-up: both branches end the same thread, so both
+             * must report the same link state). */
+			alp_rpc_notify_link(ch->owner, ALP_RPC_LINK_LOST);
 			break;
 		}
 		if (fds[1].revents & POLLIN) {
@@ -767,6 +783,20 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 		return ALP_ERR_NOT_READY;
 	}
 
+	/* issue #1643 follow-up: the kernel only creates /dev/rpmsg<N> once
+     * the remote firmware's name-service announce for this endpoint has
+     * already arrived -- reaching here means the link is genuinely
+     * bound.  Report it now, strictly BEFORE pthread_create() below
+     * starts the RX worker: that thread's very first poll()/read() can
+     * observe an already-dead peer and report LOST immediately, and if
+     * this UP notify ran afterward (the original ordering) it could
+     * clobber that LOST right back to UP -- reintroducing the exact
+     * bug #1643 exists to fix.  Harmless if a later stage in this
+     * function still fails: `ch` is never published via
+     * rpc_be_data_store() in that case, so no caller-visible channel
+     * ever observes the notify. */
+	alp_rpc_notify_link(st->owner, ALP_RPC_LINK_UP);
+
 	int pipe_rc = rpc_be_open_test_should_fail(RPC_BE_OPEN_STAGE_PIPE) ? (errno = EMFILE, -1)
 	                                                                   : pipe(ch->rx_wake_pipe);
 	if (pipe_rc < 0) {
@@ -786,11 +816,6 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	}
 
 	rpc_be_data_store(st, ch);
-	/* issue #1643: the kernel only creates /dev/rpmsg<N> once the
-     * remote firmware's name-service announce for this endpoint has
-     * already arrived -- reaching here means the link is genuinely
-     * bound, so report it before returning the handle to the caller. */
-	alp_rpc_notify_link(st->owner, ALP_RPC_LINK_UP);
 	return ALP_OK;
 }
 

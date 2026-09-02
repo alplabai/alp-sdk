@@ -89,10 +89,33 @@
  * `closing` is set (no notify racing a torn-down `owner`) and (b)
  * correctly defers this channel's close if the app's link callback
  * reacts by closing its own channel from inside the notify, exactly
- * like a subscriber callback already could.  BENCH-UNVERIFIED: which
- * of `unbound` vs `error` (or both) fires for a genuine far-core reset
- * has not been confirmed against real V2N/AEN silicon -- see this
- * issue's `needs-silicon` label.
+ * like a subscriber callback already could.
+ *
+ * CONFIRMED against the pinned Zephyr v4.4.1 tree (see west.yml),
+ * not merely BENCH-UNVERIFIED: the only backend CONFIG_ALP_SDK_RPC
+ * permits (`depends on IPC_SERVICE_BACKEND_RPMSG && OPENAMP`,
+ * zephyr/kconfigs/mproc-rpc-usb.kconfig) is
+ * subsys/ipc/ipc_service/backends/ipc_rpmsg_static_vrings.c, whose
+ * `received`/`bound` invocations (`ept->cb->received`/`bound`) are the
+ * ONLY `ept->cb->*` calls it makes -- it never calls `cb->unbound` or
+ * `cb->error`.  Those two are invoked only by the ICMsg backend family
+ * (subsys/ipc/ipc_service/lib/icmsg.c), which this Kconfig does not
+ * select.  So in THIS revision, on Zephyr, ALP_RPC_LINK_UP is
+ * reliably reported but ALP_RPC_LINK_LOST is NOT observable through
+ * ipc_service at all: rpc_ept_unbound()/rpc_ept_error() are wired,
+ * tested (see tests/unit/rpc_zephyr_backend), and correct, but
+ * structurally unreachable under the pinned RPMsg static-vrings
+ * backend.  Kept rather than deleted -- this is forward-compatible
+ * dead code, not legacy: it goes live the day either upstream
+ * Zephyr's RPMsg backend starts propagating its ns-unbind, or a
+ * future backend swap (e.g. ICMsg) lands.  Until then, the only
+ * backend that can report a genuine ALP_RPC_LINK_LOST is
+ * src/backends/rpc/yocto_drv.c's rx-thread read()-EOF/error path
+ * (Linux/A-class cores) -- see include/alp/rpc.h's `@par Link
+ * liveness` block for the customer-facing version of this same
+ * caveat, and this issue's `needs-silicon` label for what genuinely
+ * still needs a bench (which of `unbound` vs `error` a REAL far-core
+ * reset would drive is moot until one of them is reachable at all).
  */
 
 #include <errno.h>
@@ -405,22 +428,6 @@ frame_build(uint8_t *out, size_t cap, const char *method, const void *payload, s
 /* ipc_service callbacks                                               */
 /* ------------------------------------------------------------------ */
 
-static void rpc_ept_bound(void *priv)
-{
-	struct rpc_be *be = (struct rpc_be *)priv;
-	if (be != NULL) {
-		be->ept_bound = true;
-		LOG_DBG("rpc: endpoint bound name=%s", be->name);
-		/* issue #1643: the transport's own bind signal is the link-up
-         * event.  Not bracketed by rpc_recv_enter()/rpc_worker_leave()
-         * -- unlike unbound/error below, bound() cannot plausibly race
-         * a self-close (no callback the app could close from has run
-         * yet on this channel), and be->owner is already stamped by
-         * z_open() before ipc_service_register_endpoint() is called. */
-		alp_rpc_notify_link(be->owner, ALP_RPC_LINK_UP);
-	}
-}
-
 /**
  * @brief Enter rpc_ept_recv(): check `closing` and count this recv in
  *        ONE spinlock critical section (GHSA-xhm8-7f87-93q5 defect 2).
@@ -489,6 +496,40 @@ static void rpc_worker_leave(struct rpc_be *be)
 		(void)ipc_service_deregister_endpoint(&be->ept);
 		alp_rpc_close_finalize(be->owner);
 	}
+}
+
+/**
+ * @brief ipc_service `bound` callback (issue #1643): the endpoint bound
+ *        to the peer -- the link-up event.
+ *
+ * Bracketed by rpc_recv_enter()/rpc_worker_leave(), exactly like
+ * rpc_ept_unbound()/rpc_ept_error() below.  bound() is NOT exempt from
+ * that gate: alp_rpc_notify_link() invokes the app's registered
+ * alp_rpc_link_cb_t synchronously (rpc_ops.h), and that callback may
+ * call alp_rpc_close() on THIS channel (see alp_rpc_link_cb_t's doc
+ * comment in include/alp/rpc.h) -- the same self-close
+ * rpc_ept_recv()'s bracket already handles for `received`.  An
+ * unbracketed bound() would let z_shutdown() misclassify that self-close
+ * as EXTERNAL (its detection reads `recv_active`, which only
+ * rpc_recv_enter() sets) and call ipc_service_deregister_endpoint()
+ * reentrantly from inside ipc_service's own `bound` callback -- and
+ * would leave `bound` uncounted in cb_active, letting a concurrent
+ * external close drain/destroy/free the slot while this callback is
+ * still using it.
+ */
+static void rpc_ept_bound(void *priv)
+{
+	struct rpc_be *be = (struct rpc_be *)priv;
+	if (be == NULL || !be->in_use) {
+		return;
+	}
+	if (!rpc_recv_enter(be)) {
+		return;
+	}
+	be->ept_bound = true;
+	LOG_DBG("rpc: endpoint bound name=%s", be->name);
+	alp_rpc_notify_link(be->owner, ALP_RPC_LINK_UP);
+	rpc_worker_leave(be);
 }
 
 /**
