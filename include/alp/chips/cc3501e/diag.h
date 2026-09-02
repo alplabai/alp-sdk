@@ -74,20 +74,52 @@ alp_status_t cc3501e_soft_reset(cc3501e_t *ctx);
 alp_status_t cc3501e_diag_info(cc3501e_t *ctx, alp_cc3501e_diag_info_t *out);
 
 /**
+ * @brief Decoded DIAG_GET_STATS (0x70) counters.
+ *
+ * A struct rather than out-params because the reply GREW: protocol v7 answered
+ * two little-endian 32-bit counters (8 bytes), v8 answers four (16 bytes), and
+ * a fixed argument list would have had to change shape again next time.  The
+ * protocol header defines the opcode but no reply struct, so this type lives
+ * here rather than in `<alp/protocol/cc3501e.h>`.
+ *
+ * @see cc3501e_diag_stats
+ */
+typedef struct {
+	uint32_t frames_ok;  /**< Frames the firmware answered with RESP_OK. */
+	uint32_t frames_err; /**< Frames the firmware answered with a non-OK status. */
+	/** Worker-body executions -- every HAL body on either dispatch path.
+	 *  Zero and meaningless unless @c has_worker_counters is true. */
+	uint32_t worker_execs;
+	/** Requests answered from the firmware's retry latch instead of being
+	 *  re-executed.  Zero and meaningless unless @c has_worker_counters is
+	 *  true.  Together with @c worker_execs this is what distinguishes "the
+	 *  retry was absorbed" from "the operation ran twice", which is the whole
+	 *  point of the v8 request identity. */
+	uint32_t retry_latch_hits;
+	/** True when the firmware answered the full 16-byte v8 reply, so
+	 *  @c worker_execs / @c retry_latch_hits carry real values.  False against
+	 *  v7-and-earlier firmware, which answers only the first two counters --
+	 *  reported rather than silently zero-filled, because "0 retries" and "this
+	 *  firmware cannot tell you" are different answers and only one of them
+	 *  means a test passed. */
+	bool has_worker_counters;
+} cc3501e_diag_stats_t;
+
+/**
  * @brief Read the firmware frame counters (DIAG_GET_STATS, opcode 0x70).
  *
- * The reply data is two little-endian 32-bit counters: frames the firmware
- * answered OK, and frames it answered with a non-OK status.  The protocol
- * header defines the opcode but NO reply struct for these, so they come back
- * through out-params rather than a typedef.
+ * Accepts BOTH reply lengths.  A v8 firmware answers four counters; a v7
+ * firmware answers the first two, in which case @c worker_execs and
+ * @c retry_latch_hits are zeroed and @c has_worker_counters is false.  A reply
+ * shorter than the first two counters is a link fault, not an old firmware,
+ * and is reported as @ref ALP_ERR_IO.
  *
- * @param ctx         Initialised driver context.
- * @param frames_ok   Receives the count of OK-answered frames.
- * @param frames_err  Receives the count of error-answered frames.
- * @return ALP_OK with both counters filled; ALP_ERR_INVAL if either out-param
- *         is NULL; ALP_ERR_IO on a short reply; otherwise the mapped error.
+ * @param ctx  Initialised driver context.
+ * @param out  Receives the decoded counters on success.
+ * @return ALP_OK with @p out filled; ALP_ERR_INVAL on a NULL @p out;
+ *         ALP_ERR_IO on a short reply; otherwise the mapped error.
  */
-alp_status_t cc3501e_diag_stats(cc3501e_t *ctx, uint32_t *frames_ok, uint32_t *frames_err);
+alp_status_t cc3501e_diag_stats(cc3501e_t *ctx, cc3501e_diag_stats_t *out);
 
 /**
  * @brief Set the firmware log verbosity (DIAG_LOG_LEVEL, opcode 0x71).

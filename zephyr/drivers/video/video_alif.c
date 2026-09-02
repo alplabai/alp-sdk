@@ -94,6 +94,9 @@ size_t fourcc_to_plane_size(uint32_t fourcc, uint8_t plane_id, size_t buffer_siz
 	case VIDEO_PIX_FMT_YUYV:
 	case VIDEO_PIX_FMT_VYUY:
 	case VIDEO_PIX_FMT_UYVY:
+	case VIDEO_PIX_FMT_RGB565:
+	case VIDEO_PIX_FMT_RGB24:
+	case VIDEO_PIX_FMT_BGR24:
 		if (plane_id == 0) {
 			return buffer_size;
 		} else {
@@ -182,6 +185,9 @@ int fourcc_to_numplanes(uint32_t fourcc)
 	case VIDEO_PIX_FMT_YVYU:
 	case VIDEO_PIX_FMT_VYUY:
 	case VIDEO_PIX_FMT_UYVY:
+	case VIDEO_PIX_FMT_RGB565:
+	case VIDEO_PIX_FMT_RGB24:
+	case VIDEO_PIX_FMT_BGR24:
 		return 1;
 	case VIDEO_PIX_FMT_NV12:
 	case VIDEO_PIX_FMT_NV21:
@@ -288,7 +294,36 @@ static inline void hw_cam_start_video_capture(const struct device *dev)
 
 static int32_t fourcc_to_csi_data_type(uint32_t fourcc)
 {
-	/* TODO: Add support for RGB formats. */
+	/*
+	 * RGB formats: data_mode_settings[] (video_alif.h) carries all five
+	 * CSI2_DT_RGB* entries, but only the ones below have a matching Zephyr
+	 * v4.4.1 fourcc with an IDENTICAL bit layout -- mapped here by bit
+	 * width/packing, never by name similarity:
+	 *   - CSI2_DT_RGB565 (16 bpp)  <- VIDEO_PIX_FMT_RGB565.
+	 *   - CSI2_DT_RGB888 (24 bpp, no pad -- see the table's bits_per_pixel
+	 *     field, NOT its CPI_COLOR_MODE_CONFIG_IPI48_XRGB888 name, which is
+	 *     the HW's internal 48-bit-IPI-datapath label, not a 32-bit pixel)
+	 *     <- VIDEO_PIX_FMT_RGB24 / VIDEO_PIX_FMT_BGR24 (24 bpp, no pad).
+	 *     The CSI-2 data-type field encodes bit depth only, not channel
+	 *     order -- exactly like CSI2_DT_RAW8 above already covering all
+	 *     four BGGR8/GBRG8/GRBG8/RGGB8 Bayer orders under one DT -- so
+	 *     both 24 bpp fourccs are accepted here.
+	 * Deliberately NOT mapped (no matching Zephyr v4.4.1 fourcc, or a
+	 * layout mismatch that would misconfigure the IPI bit width):
+	 *   - CSI2_DT_RGB444 (12 bpp), CSI2_DT_RGB555 (15 bpp), CSI2_DT_RGB666
+	 *     (18 bpp): Zephyr v4.4.1 <zephyr/drivers/video.h> defines no
+	 *     packed fourcc at these widths.
+	 *   - VIDEO_PIX_FMT_RGB565X (16 bpp, big-endian byte order): the
+	 *     table's RGB565 entry documents little-endian only; nothing here
+	 *     confirms the CPI IPI packs big-endian, so mapping it would risk
+	 *     a silent byte-swap.
+	 *   - VIDEO_PIX_FMT_{A,X}RGB32/{A,X}BGR32/RGBA32/RGBX32/BGRA32/BGRX32
+	 *     (32 bpp, alpha or padding byte): CSI2_DT_RGB888 is 24 bpp per
+	 *     the table; a 32-bit fourcc would misconfigure the IPI bit width
+	 *     and corrupt every captured frame's alignment.
+	 * Bench-unverified either way (#226) -- no sensor is wired on this
+	 * hardware batch to confirm any of the above against silicon.
+	 */
 	switch (fourcc) {
 	case VIDEO_PIX_FMT_Y6P:
 		return CSI2_DT_RAW6;
@@ -310,6 +345,9 @@ static int32_t fourcc_to_csi_data_type(uint32_t fourcc)
 		return CSI2_DT_RAW16;
 	case VIDEO_PIX_FMT_RGB565:
 		return CSI2_DT_RGB565;
+	case VIDEO_PIX_FMT_RGB24:
+	case VIDEO_PIX_FMT_BGR24:
+		return CSI2_DT_RGB888;
 	}
 	return -ENOTSUP;
 }

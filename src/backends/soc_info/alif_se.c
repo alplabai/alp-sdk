@@ -26,12 +26,28 @@
  * hangs.  A per-field failure does not abort the read: later fields
  * are still attempted and the FIRST failure is reported, per the
  * soc_info_ops contract ("already-filled fields stay valid").
+ *
+ * DIAGNOSTIC, NOT A FIX (issue #1700 / ADR-0030): a customer AE822
+ * running SERAM v106 against a services-library from SETOOLS v109
+ * lost HFXTAL + PLL lock on its FIRST SE service request -- M55-HP
+ * fell from 400 MHz to 76.8 MHz and stayed there.  Alif confirmed a
+ * real API break below v109 for E8 and named v110 as the floor; across
+ * a break of that kind any SE behaviour is possible, so this backend
+ * cannot safely re-establish a clock the SE itself dropped without
+ * knowing what the mismatched pair actually did.  What it CAN do is
+ * turn that silent stall into a logged, actionable warning the first
+ * time it reads the running SERAM version below the floor -- see
+ * alif_se_warn_if_seram_below_floor() and docs/aen-se-services.md
+ * section 0.1.
  */
 
+#include <ctype.h>
 #include <errno.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 
 #include <alp/backend.h>
@@ -46,6 +62,79 @@
  * get_device_revision_data_t (services_lib_api.h) and
  * VERSION_RESPONSE_LENGTH (services_lib_protocol.h). */
 #include <se_service.h>
+
+LOG_MODULE_REGISTER(alp_soc_info_alif_se, CONFIG_LOG_DEFAULT_LEVEL);
+
+/* ADR-0030's floor: E1M-AEN modules must run a SERAM (SE firmware) image
+ * that MATCHES the services library this SDK links -- currently
+ * hal_alif v2.3.0 -- and that pair's floor is v110, Alif's own
+ * recommendation and the version this SDK's reference board runs.  Not a
+ * hardware register: a policy number this SDK owns (docs/adr/0030-aen-
+ * seram-tracks-alif-latest-as-a-matched-pair.md), re-stated here so the
+ * check below has something to compare against. */
+#define ALIF_SE_SERAM_FLOOR 110u
+
+static bool alif_se_seram_floor_warned;
+
+/* Alif name a SERAM release by the MIDDLE field of the banner
+ * se_service_get_se_revision() returns -- "SES A0 v1.110.0 Mar 4 2026"
+ * is SERAM v110, "SES A0 v1.106.2 Jul 14 2025" is v106 (bench captures,
+ * docs/aen-se-services.md section 0.1).  This is a free-form vendor
+ * banner, not a documented wire format: on any shape this does not
+ * recognise, return false and stay silent rather than risk a false
+ * warning off a guessed parse. */
+static bool alif_se_seram_from_banner(const char *rev, uint32_t *seram_out)
+{
+	const char *v = strchr(rev, 'v');
+
+	if (v == NULL) {
+		return false;
+	}
+
+	const char *dot = strchr(v, '.');
+
+	if (dot == NULL || !isdigit((unsigned char)dot[1])) {
+		return false;
+	}
+
+	uint32_t    seram = 0u;
+	const char *p     = dot + 1;
+
+	while (isdigit((unsigned char)*p)) {
+		seram = (seram * 10u) + (uint32_t)(*p - '0');
+		p++;
+	}
+
+	*seram_out = seram;
+	return true;
+}
+
+/* Fires at most once per boot (a customer polling alp_soc_info_read()
+ * should get one warning, not a flood).  Purely diagnostic: never
+ * touches the SE, never retries, never blocks -- see the file header
+ * for why this backend does not attempt to re-establish the clock
+ * itself. */
+static void alif_se_warn_if_seram_below_floor(const char *rev)
+{
+	uint32_t seram;
+
+	if (alif_se_seram_floor_warned) {
+		return;
+	}
+	if (!alif_se_seram_from_banner(rev, &seram) || seram >= ALIF_SE_SERAM_FLOOR) {
+		return;
+	}
+
+	alif_se_seram_floor_warned = true;
+	LOG_WRN("SE firmware (SERAM) reports \"%s\" -- below the v%u floor this SDK "
+	        "requires (ADR-0030). A mismatched SERAM/services-library pair is "
+	        "untriageable: Alif documented an API break below v109 for E8 that "
+	        "can drop HFXTAL/PLL on the FIRST SE service request (alp-sdk#1700). "
+	        "Update SERAM over the SE-UART before debugging anything else -- see "
+	        "docs/aen-se-services.md section 0.1.",
+	        rev,
+	        ALIF_SE_SERAM_FLOOR);
+}
 
 /* se_service_* return 0 on success, a negative errno for the
  * transport (-EAGAIN timeout, -EBUSY SE busy, -EINVAL bad arg), or a
@@ -90,6 +179,7 @@ static alp_status_t alif_se_read(alp_soc_info_t *out)
 
 		memcpy(out->secure_fw_version, rev, n);
 		out->secure_fw_version[n] = '\0';
+		alif_se_warn_if_seram_below_floor(out->secure_fw_version);
 	}
 
 	/* SoC part-number code. */

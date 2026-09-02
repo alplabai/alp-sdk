@@ -105,6 +105,15 @@ static struct {
 	 * still counts them) but no #1435 test drives that many. */
 	uint8_t  cmd_log[16];
 	uint32_t cmd_log_count;
+
+	/* Request FLAGS byte of every request-header phase clocked, in order
+	 * (proto v8): bits 3..7 carry the retry seq, and the property under test
+	 * is that it stays CONSTANT across the retries of one logical command and
+	 * CHANGES between commands.  slave.cmd cannot show either -- it holds one
+	 * opcode with no attempt history -- and cmd_log holds opcodes, not flags.
+	 * Same capacity + drop-past-capacity rule as cmd_log above. */
+	uint8_t  flags_log[16];
+	uint32_t flags_log_count;
 } slave;
 
 /* Set by test_wifi_scan_buf_is_per_context_740 / test_ble_scan_buf_is_per_context_740
@@ -153,6 +162,11 @@ static uint32_t g_get_version_io_down_remaining; /* fail the transaction outrigh
  * transaction's RX bytes.  Cleared by slave_reset(). */
 static bool g_spi1_reply_bad_seq;
 
+/* Stage the 16-byte protocol-v8 DIAG_GET_STATS reply instead of the 8-byte v7
+ * one.  Cleared by slave_reset(), so the default across the suite is the OLD
+ * firmware -- the compatibility direction that would otherwise go untested. */
+static bool g_diag_stats_v8;
+
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
@@ -174,6 +188,7 @@ static void slave_reset(void)
 	g_get_version_override_value       = 0u;
 	g_get_version_io_down_remaining    = 0u;
 	g_spi1_reply_bad_seq               = false;
+	g_diag_stats_v8                    = false;
 }
 
 static void stage_status(uint8_t st)
@@ -398,9 +413,14 @@ static void slave_dispatch(void)
 		break;
 	}
 	case ALP_CC3501E_CMD_DIAG_GET_STATS: {
-		uint8_t s[8] = { 0x44, 0x33, 0x22, 0x11,   /* frames_ok  = 0x11223344 */
-			             0x05, 0x00, 0x00, 0x00 }; /* frames_err = 0x00000005 */
-		stage_reply(ALP_CC3501E_RESP_OK, s, 8u);
+		/* v7 answers 8 bytes, v8 answers 16 -- ADDITIVELY, same first two
+		 * counters.  Default to the v7 shape so every pre-existing test keeps
+		 * exercising the old-firmware path; g_diag_stats_v8 opts in. */
+		uint8_t s[16] = { 0x44, 0x33, 0x22, 0x11,   /* frames_ok        = 0x11223344 */
+			              0x05, 0x00, 0x00, 0x00,   /* frames_err       = 0x00000005 */
+			              0x07, 0x00, 0x00, 0x00,   /* worker_execs     = 0x00000007 */
+			              0x03, 0x00, 0x00, 0x00 }; /* retry_latch_hits = 0x00000003 */
+		stage_reply(ALP_CC3501E_RESP_OK, s, g_diag_stats_v8 ? 16u : 8u);
 		break;
 	}
 	case ALP_CC3501E_CMD_WIFI_GET_RSSI: {
@@ -593,6 +613,10 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 			slave.cmd_log[slave.cmd_log_count] = slave.cmd;
 		}
 		slave.cmd_log_count++;
+		if (slave.flags_log_count < sizeof(slave.flags_log)) {
+			slave.flags_log[slave.flags_log_count] = tx[1];
+		}
+		slave.flags_log_count++;
 		slave.req_len = (uint16_t)tx[2] | ((uint16_t)tx[3] << 8);
 		if (rx != NULL) {
 			memset(rx, ALP_CC3501E_SYNC_IDLE, len);
@@ -789,11 +813,99 @@ ZTEST(cc3501e_host_driver, test_diag_info_null_out_invalid)
 
 ZTEST(cc3501e_host_driver, test_diag_stats_decodes_two_le32)
 {
-	uint32_t ok = 0u, err = 0u;
-	zassert_equal(cc3501e_diag_stats(&fw, &ok, &err), ALP_OK, "DIAG_GET_STATS -> OK");
+	cc3501e_diag_stats_t st;
+	memset(&st, 0xA5, sizeof(st));
+	zassert_equal(cc3501e_diag_stats(&fw, &st), ALP_OK, "DIAG_GET_STATS -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_DIAG_GET_STATS, "opcode 0x70");
-	zassert_equal(ok, 0x11223344u, "frames_ok LE32");
-	zassert_equal(err, 0x00000005u, "frames_err LE32");
+	zassert_equal(st.frames_ok, 0x11223344u, "frames_ok LE32");
+	zassert_equal(st.frames_err, 0x00000005u, "frames_err LE32");
+}
+
+/* A v7 firmware answers only the first two counters.  The two v8 counters must
+ * then report as ABSENT, not as a measured zero -- a bench run that reads
+ * "retry_latch_hits = 0" off firmware that never counted them would record a
+ * pass for a mechanism that was not running. */
+ZTEST(cc3501e_host_driver, test_diag_stats_short_v7_reply_reports_counters_absent)
+{
+	cc3501e_diag_stats_t st;
+	memset(&st, 0xA5, sizeof(st));
+	zassert_equal(cc3501e_diag_stats(&fw, &st), ALP_OK, "8-byte reply is not a fault");
+	zassert_false(st.has_worker_counters, "v7 firmware does not report the worker counters");
+	zassert_equal(st.worker_execs, 0u, "absent counters read zero, flagged by has_*");
+	zassert_equal(st.retry_latch_hits, 0u, "absent counters read zero, flagged by has_*");
+	zassert_equal(st.frames_ok, 0x11223344u, "the two v7 counters still decode");
+}
+
+ZTEST(cc3501e_host_driver, test_diag_stats_v8_reply_decodes_worker_counters)
+{
+	g_diag_stats_v8 = true;
+	cc3501e_diag_stats_t st;
+	memset(&st, 0xA5, sizeof(st));
+	zassert_equal(cc3501e_diag_stats(&fw, &st), ALP_OK, "16-byte reply -> OK");
+	zassert_true(st.has_worker_counters, "v8 firmware reports the worker counters");
+	zassert_equal(st.frames_ok, 0x11223344u, "frames_ok LE32");
+	zassert_equal(st.frames_err, 0x00000005u, "frames_err LE32");
+	zassert_equal(st.worker_execs, 0x00000007u, "worker_execs LE32 at offset 8");
+	zassert_equal(st.retry_latch_hits, 0x00000003u, "retry_latch_hits LE32 at offset 12");
+}
+
+/* ---- proto v8 request identity (cc3501e-bridge-firmware#102) --------------
+ *
+ * The firmware can only absorb a retry if the retry is RECOGNISABLE, which
+ * means the seq in flags bits 3..7 is identical across every attempt of one
+ * logical command.  These assert the wire property directly off the captured
+ * header bytes, because that is the contract the firmware reads -- not the
+ * host-side counter that produced it. */
+
+static uint8_t seq_of(uint8_t flags)
+{
+	return (uint8_t)((flags >> ALP_CC3501E_FLAG_REQ_SEQ_SHIFT) & ALP_CC3501E_REQ_SEQ_MASK);
+}
+
+ZTEST(cc3501e_host_driver, test_retry_seq_is_constant_across_one_commands_retries)
+{
+	slave.rssi_busy_polls_remaining = 3u; /* 3 BUSY acks, then the value */
+	int8_t rssi                     = 0;
+	zassert_equal(cc3501e_wifi_rssi(&fw, &rssi), ALP_OK, "GET_RSSI -> OK after riding out BUSY");
+	zassert_true(slave.flags_log_count >= 4u, "3 BUSY attempts + the collect were clocked");
+
+	const uint8_t seq = seq_of(slave.flags_log[0]);
+	zassert_not_equal(seq,
+	                  ALP_CC3501E_REQ_SEQ_NONE,
+	                  "a retryable command must carry a real seq, not the reserved 0");
+	for (uint32_t i = 1u; i < slave.flags_log_count && i < ARRAY_SIZE(slave.flags_log); i++) {
+		zassert_equal(seq_of(slave.flags_log[i]),
+		              seq,
+		              "every retry of ONE logical command re-sends the SAME seq");
+	}
+}
+
+ZTEST(cc3501e_host_driver, test_each_logical_command_gets_a_different_seq)
+{
+	int8_t rssi = 0;
+	zassert_equal(cc3501e_wifi_rssi(&fw, &rssi), ALP_OK, "first command");
+	const uint8_t  first       = seq_of(slave.flags_log[0]);
+	const uint32_t after_first = slave.flags_log_count;
+	zassert_equal(cc3501e_wifi_rssi(&fw, &rssi), ALP_OK, "second command");
+	zassert_true(slave.flags_log_count > after_first, "the second command clocked a header");
+	zassert_not_equal(seq_of(slave.flags_log[after_first]),
+	                  first,
+	                  "a NEW logical command must not reuse the previous command's seq, or the "
+	                  "firmware would serve it the previous command's cached reply");
+}
+
+/* The single-shot path has no retry loop, so nothing it sends is ever a repeat
+ * of anything -- it must therefore be un-latchable.  Seq 0 says exactly that. */
+ZTEST(cc3501e_host_driver, test_single_shot_request_sends_the_reserved_seq_none)
+{
+	cc3501e_diag_stats_t st;
+	zassert_equal(cc3501e_diag_stats(&fw, &st), ALP_OK, "DIAG_GET_STATS -> OK");
+	zassert_true(slave.flags_log_count >= 1u, "a header was clocked");
+	zassert_equal(seq_of(slave.flags_log[0]),
+	              ALP_CC3501E_REQ_SEQ_NONE,
+	              "cc3501e_request() is single-shot -- it must not claim an identity");
+	zassert_true((slave.flags_log[0] & ALP_CC3501E_FLAG_RESP_REQUIRED) != 0u,
+	             "the v1 flag bits are untouched by the seq");
 }
 
 ZTEST(cc3501e_host_driver, test_diag_log_level_encodes_level_byte)
