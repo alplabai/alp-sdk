@@ -187,12 +187,15 @@ unit: power-cycle it with the SE-UART open and read the first two lines.
 **Two other facts fall out of the same header and are worth keeping here.**
 
 `[SES] No LF XTAL` — this unit has no low-frequency crystal detected, so the
-LPRTC runs from the internal LFRC rather than the 32 kHz LFXO. That compounds
-the RTC errata recorded in `src/backends/rtc/lprtc_calendar_shim.c`: AERR0012
-ER002 describes the LFXO-to-LFRC fallback as a transient during POR_N, but on a
-board with no LF XTAL at all it is the steady state. Treat LPRTC calendar
-accuracy on this unit as LFRC-grade (Alif quote ~5% offset from LFXO) at all
-times, not only across a reset. See #1814.
+LPRTC runs from the internal LFRC rather than the 32 kHz LFXO, and it does so
+**permanently**, not only while POR_N is asserted. That compounds the RTC
+errata recorded in `src/backends/rtc/lprtc_calendar_shim.c`: AERR0012 ER002
+describes the LFXO-to-LFRC fallback as a transient during POR_N, but on a
+board with no LF XTAL at all it is the steady state, present on every boot —
+not a transient startup condition and not a warning that clears itself. Treat
+LPRTC calendar accuracy on this unit as LFRC-grade at all times, not only
+across a reset: Alif quotes ~5% offset from LFXO, which is roughly **72
+minutes of drift per day** of continuous operation. See #1814.
 
 `[SES] SE frequency is 78.31 MHz` — an independent corroboration of the ADC
 clock measurement in #1823, which derived `ADC_CLK` at `clock_div = 2` as
