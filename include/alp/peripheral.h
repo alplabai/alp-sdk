@@ -870,20 +870,36 @@ typedef enum {
 	ALP_UART_PARITY_ODD  = 2
 } alp_uart_parity_t;
 
+/**
+ * @brief Hardware/software line flow control for @ref alp_uart_config_t.
+ *
+ * A backend that cannot honour a non-@ref ALP_UART_FLOW_NONE value
+ * returns @ref ALP_ERR_NOSUPPORT from @ref alp_uart_open -- it never
+ * accepts the request and silently drops it (issue #1639): a caller
+ * that asked for flow control and got @ref ALP_OK has it.
+ */
+typedef enum {
+	ALP_UART_FLOW_NONE     = 0, /**< No flow control (default). */
+	ALP_UART_FLOW_RTS_CTS  = 1, /**< 4-wire hardware flow control. */
+	ALP_UART_FLOW_XON_XOFF = 2  /**< In-band software framing; many drivers reject. */
+} alp_uart_flow_t;
+
 typedef struct {
 	uint32_t          port_id;
 	uint32_t          baudrate;
 	uint8_t           data_bits; /**< Usually 8. */
 	uint8_t           stop_bits; /**< 1 or 2. */
 	alp_uart_parity_t parity;
+	alp_uart_flow_t   flow_control; /**< Default @ref ALP_UART_FLOW_NONE. */
 } alp_uart_config_t;
 
 /**
  * @brief Default-initialize an @ref alp_uart_config_t for port @p id.
  *
- * Identity from @p id; canonical defaults = 115200 8N1:
+ * Identity from @p id; canonical defaults = 115200 8N1, no flow control:
  * @c baudrate = 115200, @c data_bits = 8, @c stop_bits = 1,
- * @c parity = @ref ALP_UART_PARITY_NONE.
+ * @c parity = @ref ALP_UART_PARITY_NONE,
+ * @c flow_control = @ref ALP_UART_FLOW_NONE.
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer
@@ -891,16 +907,21 @@ typedef struct {
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_UART_CONFIG_DEFAULT(id) \
-	((alp_uart_config_t){ .port_id   = (id), \
-	                      .baudrate  = 115200u, \
-	                      .data_bits = 8u, \
-	                      .stop_bits = 1u, \
-	                      .parity    = ALP_UART_PARITY_NONE })
+	((alp_uart_config_t){ .port_id      = (id), \
+	                      .baudrate     = 115200u, \
+	                      .data_bits    = 8u, \
+	                      .stop_bits    = 1u, \
+	                      .parity       = ALP_UART_PARITY_NONE, \
+	                      .flow_control = ALP_UART_FLOW_NONE })
 
 /**
  * @brief Acquire a UART port handle.
  *
- * @param[in] cfg  Port configuration.  Must be non-NULL.
+ * @param[in] cfg  Port configuration.  Must be non-NULL.  A non-@ref
+ *                 ALP_UART_FLOW_NONE @c flow_control the backend
+ *                 cannot honour fails the whole open with @ref
+ *                 ALP_ERR_NOSUPPORT rather than silently dropping it
+ *                 and configuring the line with no flow control.
  *
  * @return Open handle on success; NULL with @ref alp_last_error
  *         set to @ref ALP_ERR_INVAL / @ref ALP_ERR_NOT_READY /

@@ -40,6 +40,25 @@ ZTEST(alp_peripheral, test_uart_invalid_port_returns_null)
 	zassert_is_null(u, "out-of-range port_id must yield NULL");
 }
 
+/* #1639: ALP_UART_FLOW_XON_XOFF has no Zephyr uart_config.flow_ctrl
+ * equivalent (NONE / RTS_CTS / DTR_DSR / RS485 only) -- the backend
+ * refuses it up front, before ever calling uart_configure(), so this
+ * is deterministic on native_sim regardless of what the emulated
+ * driver would otherwise accept. */
+ZTEST(alp_peripheral, test_uart_open_rejects_xon_xoff_flow_control)
+{
+	alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
+	    .port_id      = 0,
+	    .baudrate     = 115200,
+	    .data_bits    = 8,
+	    .stop_bits    = 1,
+	    .parity       = ALP_UART_PARITY_NONE,
+	    .flow_control = ALP_UART_FLOW_XON_XOFF,
+	});
+	zassert_is_null(u, "XON/XOFF has no Zephyr flow_ctrl mapping");
+	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT, NULL);
+}
+
 /* ------------------------------------------------------------------ */
 /* #626: alp_uart_read() timeout_ms contract.                          */
 /*                                                                     */

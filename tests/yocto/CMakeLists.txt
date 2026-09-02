@@ -745,6 +745,26 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_uart_closed_status
              COMMAND alp_test_peripheral_uart_closed_status)
 
+    # Flow-control bit-mapping regression for issue #1639.
+    # peripheral_uart_flow_control.c #includes the real
+    # src/yocto/peripheral_uart.c directly to reach the file-local, pure
+    # apply_flow_control() helper -- same ODR rationale (and NOT linked
+    # against alp::sdk) as alp_test_peripheral_uart_closed_status above.
+    add_executable(alp_test_peripheral_uart_flow_control
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart_flow_control.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    )
+    target_include_directories(alp_test_peripheral_uart_flow_control PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_uart_flow_control PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_uart_flow_control
+             COMMAND alp_test_peripheral_uart_flow_control)
+
     add_executable(alp_test_peripheral_gpio
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio.c
     )

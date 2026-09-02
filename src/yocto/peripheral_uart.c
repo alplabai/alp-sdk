@@ -161,6 +161,34 @@ static speed_t baud_to_termios(uint32_t baud)
 	}
 }
 
+/* Maps alp_uart_flow_t -> termios bits on `tio`.  Unlike Zephyr's
+ * uart_config.flow_ctrl (NONE / RTS_CTS / DTR_DSR / RS485 only), termios
+ * has a real mapping for BOTH alp_uart_flow_t values: CRTSCTS for 4-wire
+ * hardware flow control, IXON|IXOFF for in-band software (XON/XOFF)
+ * framing.  cfmakeraw() already clears IXON/IXOFF before this runs, so
+ * every arm still states its bits explicitly rather than relying on that
+ * reset.  Returns false for an unrecognised enumerator, leaving `tio`
+ * untouched; the caller maps that to ALP_ERR_INVAL. */
+static bool apply_flow_control(alp_uart_flow_t flow, struct termios *tio)
+{
+	switch (flow) {
+	case ALP_UART_FLOW_NONE:
+		tio->c_cflag &= ~(tcflag_t)CRTSCTS;
+		tio->c_iflag &= ~(tcflag_t)(IXON | IXOFF);
+		return true;
+	case ALP_UART_FLOW_RTS_CTS:
+		tio->c_cflag |= CRTSCTS;
+		tio->c_iflag &= ~(tcflag_t)(IXON | IXOFF);
+		return true;
+	case ALP_UART_FLOW_XON_XOFF:
+		tio->c_cflag &= ~(tcflag_t)CRTSCTS;
+		tio->c_iflag |= IXON | IXOFF;
+		return true;
+	default:
+		return false;
+	}
+}
+
 alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
 {
 	if (cfg == NULL) {
@@ -243,6 +271,17 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
 		tio.c_cflag |= PARENB | PARODD;
 		break;
 	default:
+		alp_internal_set_last_error(ALP_ERR_INVAL);
+		(void)close(fd);
+		return NULL;
+	}
+
+	/* Flow control (issue #1639).  A config that is accepted but not
+     * honoured is a bug -- apply_flow_control() is pure (no fd), so it
+     * is unit-tested directly against a scratch termios struct in
+     * tests/yocto/peripheral_uart_flow_control.c without needing a
+     * real /dev/tty*. */
+	if (!apply_flow_control(cfg->flow_control, &tio)) {
 		alp_internal_set_last_error(ALP_ERR_INVAL);
 		(void)close(fd);
 		return NULL;

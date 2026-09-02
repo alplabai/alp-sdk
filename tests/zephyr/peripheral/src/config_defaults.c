@@ -56,6 +56,7 @@ ZTEST(alp_peripheral, test_uart_config_default)
 	zassert_equal(cfg.data_bits, 8u, NULL);
 	zassert_equal(cfg.stop_bits, 1u, NULL);
 	zassert_equal(cfg.parity, ALP_UART_PARITY_NONE, NULL);
+	zassert_equal(cfg.flow_control, ALP_UART_FLOW_NONE, "no flow control by default");
 }
 
 ZTEST(alp_peripheral, test_pwm_config_default)
