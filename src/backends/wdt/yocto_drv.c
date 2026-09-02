@@ -254,8 +254,9 @@ static alp_status_t y_disable(alp_wdt_backend_state_t *st)
 /**
  * @brief Best-effort disarm, then close the chardev and free state.
  *
- * Honours the alp_wdt_close contract ("best-effort disable, then
- * release").  Tries WDIOS_DISABLECARD first; if the driver advertised
+ * Matches alp_wdt_close's Yocto-specific contract: best-effort disarm
+ * scoped to this handle's own `/dev/watchdogN`, never another
+ * handle's.  Tries WDIOS_DISABLECARD first; if the driver advertised
  * magic-close, writes the 'V' character before close() so a
  * non-NOWAYOUT kernel stops the timer instead of letting it keep
  * counting after the fd is gone.

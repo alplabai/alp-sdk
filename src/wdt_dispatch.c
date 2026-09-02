@@ -27,13 +27,16 @@ ALP_BACKEND_ANCHOR(wdt);
 
 /* The pool is indexed by wdt_id: one slot per watchdog INSTANCE, not
  * one per caller.  The watchdog is the class where a second handle on
- * the same instance is itself the defect -- the backend close path
- * disables the whole DEVICE rather than the handle's channel
- * (src/backends/wdt/zephyr_drv.c z_close calls wdt_disable(dev) with
- * the error (void)-cast away), so two subsystems each holding
- * ALP_E1M_WDT0 means the first one to close silently removes the
- * other's protection, with no error on any path.  Indexing by id makes
- * the existing atomic slot claim BE the exclusivity check: one
+ * the same instance is itself the defect: before #1637, the backend
+ * close path disabled the whole DEVICE rather than the handle's
+ * channel (src/backends/wdt/zephyr_drv.c z_close used to call
+ * wdt_disable(dev) with the error (void)-cast away), so two
+ * subsystems each holding ALP_E1M_WDT0 meant the first one to close
+ * silently removed the other's protection, with no error on any path.
+ * z_close() no longer calls wdt_disable(dev) at all -- see its own
+ * comment for what closing does and does not disarm now -- so it is
+ * indexing by id, below, that actually prevents this class of defect:
+ * making the existing atomic slot claim BE the exclusivity check, one
  * compare-exchange, no scan of the pool, and no TOCTOU window between
  * "is this instance taken?" and "take it".  Issue #1637.
  *

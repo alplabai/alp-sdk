@@ -105,6 +105,27 @@ static alp_status_t z_open(const alp_wdt_config_t  *cfg,
 		                                                                   : WDT_FLAG_RESET_SOC),
 	};
 	int channel_id = wdt_install_timeout(dev, &zcfg);
+	if (channel_id == -EBUSY) {
+		/* The dispatcher's per-wdt_id exclusivity (src/wdt_dispatch.c,
+		 * #1650) already refused this call if another live alp_wdt_t
+		 * handle owns wdt_id, so -EBUSY here can only mean the device
+		 * itself is still wdt_setup() from an EARLIER handle that
+		 * closed without an explicit alp_wdt_disable() first --
+		 * wdt_install_timeout() "must be used before wdt_setup()" and
+		 * refuses a second install otherwise (no per-channel
+		 * uninstall to undo just the old one).  Reclaim the device
+		 * with one wdt_disable() + retry rather than leaving this
+		 * wdt_id permanently un-reopenable.  Safe for the SDK's own
+		 * handles by construction (exclusivity already rules out a
+		 * live sibling); a non-SDK Zephyr consumer sharing this exact
+		 * device (e.g. CONFIG_TASK_WDT) is the one case this can
+		 * still disarm -- the same residual exposure the old
+		 * unconditional close()-time wdt_disable() carried, just now
+		 * triggered only on an actual reopen instead of on every
+		 * close (#1637). */
+		(void)wdt_disable(dev);
+		channel_id = wdt_install_timeout(dev, &zcfg);
+	}
 	if (channel_id < 0) return _errno_to_alp(channel_id);
 	st->channel_id = channel_id;
 	int err        = wdt_setup(dev, 0);
@@ -138,14 +159,18 @@ static void z_close(alp_wdt_backend_state_t *st)
 {
 	/* Does NOT call wdt_disable(dev): that disarms the WHOLE device,
 	 * not just this handle's channel -- Zephyr's wdt_* driver class has
-	 * no per-channel disable.  A second handle on a different channel
-	 * of the same device would silently lose its protection the moment
-	 * this handle closed (#1637).  The dispatcher's per-wdt_id
-	 * exclusivity (src/wdt_dispatch.c, #1650) is what actually prevents
-	 * two owners of ONE channel; disabling here was never this handle's
-	 * decision to make for the device as a whole.  A caller that wants
-	 * a best-effort SoC-wide disable calls alp_wdt_disable() explicitly
-	 * before close() -- see its ALP_ERR_NOSUPPORT contract.
+	 * no per-channel disable.  The dispatcher's per-wdt_id exclusivity
+	 * (src/wdt_dispatch.c, #1650) already rules out a second alp_wdt_t
+	 * handle on this same device, so the reachable risk this guards
+	 * against is a non-SDK Zephyr consumer sharing the device (e.g.
+	 * CONFIG_TASK_WDT installing its own channel) -- disabling here
+	 * would silently pull that consumer's protection out from under
+	 * it, which was never this handle's decision to make for the
+	 * device as a whole (#1637).  A caller that wants a best-effort
+	 * SoC-wide disable calls alp_wdt_disable() explicitly before
+	 * close() -- see its ALP_ERR_NOSUPPORT contract.  Leaving the
+	 * device armed here does not strand this wdt_id: z_open()'s own
+	 * -EBUSY handling above reclaims it on the next open.
 	 *
 	 * Unregister the ISR trampoline so a timeout that fires after this
 	 * point cannot resolve to this (about-to-be-freed) owner -- see the

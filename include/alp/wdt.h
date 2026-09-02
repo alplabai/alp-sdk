@@ -141,11 +141,18 @@ typedef struct {
  *                 when @c on_timeout == @ref ALP_WDT_INTERRUPT_ONLY.
  * @return Open handle on success;
  *         NULL with @ref alp_last_error set to:
- *           @ref ALP_ERR_INVAL (NULL @p cfg; zero @c timeout_ms;
- *             @c wdt_id out of range; or INTERRUPT_ONLY requested with
- *             @c on_expire NULL);
+ *           @ref ALP_ERR_INVAL (NULL @p cfg; zero @c timeout_ms; or
+ *             INTERRUPT_ONLY requested with @c on_expire NULL);
+ *           @ref ALP_ERR_OUT_OF_RANGE (@c wdt_id is a valid C index
+ *             for the pool but exceeds the SoC's actual watchdog
+ *             count, e.g. @c ALP_SOC_WDT_COUNT == 1);
  *           @ref ALP_ERR_BUSY (another handle already owns
- *             @c cfg->wdt_id);
+ *             @c cfg->wdt_id -- checked before any backend runs, so
+ *             this can never race a concurrent open on the same
+ *             wdt_id; on the Zephyr backend a residual internal
+ *             reclaim can also surface this if a non-SDK Zephyr
+ *             consumer, e.g. CONFIG_TASK_WDT, still holds the same
+ *             underlying device);
  *           @ref ALP_ERR_NOT_READY (the underlying device isn't
  *             ready);
  *           @ref ALP_ERR_NOSUPPORT (the backend cannot honour
@@ -186,22 +193,26 @@ alp_status_t alp_wdt_disable(alp_wdt_t *wdt);
  * @brief Release the handle.  NULL is a no-op.
  *
  * @par What this does NOT do
- * This does **not** disable the watchdog.  Earlier revisions had the
- * Zephyr backend call the equivalent of @ref alp_wdt_disable
- * internally on close; that meant closing ONE handle could silently
- * disarm hardware another handle still depended on, because Zephyr's
- * `wdt_*` driver class has no per-channel disable -- disabling "this
- * channel" always meant disabling the whole device.  Call
- * @ref alp_wdt_disable explicitly BEFORE close() if a best-effort,
- * SoC-wide disable is genuinely what the caller wants; its documented
- * @ref ALP_ERR_NOSUPPORT return tells you when the hardware can't
- * honour that.
+ * This does **not** disable the watchdog (see docs/abi-markers.md for
+ * the v0.17.0 behaviour-change note on why).  Call @ref alp_wdt_disable
+ * explicitly BEFORE close() if a best-effort, SoC-wide disable is
+ * genuinely what the caller wants; its documented @ref
+ * ALP_ERR_NOSUPPORT return tells you when the hardware can't honour
+ * that.
  *
  * @par Backend-specific behaviour
  *   - Zephyr: releases the handle only.  The installed timeout keeps
  *     running -- Zephyr also has no per-channel *uninstall* -- so a
- *     caller that stops feeding after close() still gets the
- *     configured @c on_timeout action.
+ *     caller that stops feeding after close() still gets @ref
+ *     ALP_WDT_RESET_SOC / @ref ALP_WDT_RESET_CPU (the hardware reset
+ *     needs no live handle to fire).  @ref ALP_WDT_INTERRUPT_ONLY is
+ *     the exception: close() unregisters the ISR trampoline's owner
+ *     before returning, so a deadline that fires after close() finds
+ *     no owner and delivers @b nothing -- no reset (the mode never
+ *     arms one) and no @c on_expire call.  A caller for whom that
+ *     silent post-close window is unacceptable must call @ref
+ *     alp_wdt_disable before close(), or keep feeding until it no
+ *     longer needs the deadline.
  *   - Yocto: closes this handle's own `/dev/watchdogN`, attempting a
  *     best-effort disarm (`WDIOS_DISABLECARD`, plus the magic-close
  *     write if the driver advertised it) first -- scoped to this
