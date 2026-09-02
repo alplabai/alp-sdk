@@ -215,26 +215,37 @@ default E8`. If it can't reach the SES, fix §2 first (auto-detect needs the
 **Which `app-device-config.json` this uses.** SETOOLS 1.110.00 ships no
 AE822-specific device config — the stock `build/config/app-device-config.json`
 declares `"device": "AE722F80F55D5AS"`, an **E7** part, not our
-`AE822FA0E5597LS0`. Two facts are bench-established and one is deliberately
-still open (alp-sdk#1701):
+`AE822FA0E5597LS0`. Alif answered the open question directly (alp-sdk#1701):
 
-- **`device` is very likely toolchain metadata, not silicon-relevant.** The SE
-  reports the correct part identity from OTP (`ALIF_PN = AE822FA0E5597LS0`)
-  regardless of which part the config file names.
-- **The HFXO trim fields match our AE822.** Our healthy board's own clock
-  register readback (`XO_REG1` → `xtal_cap:8 gm_pfet:16 gm_nfet:16`) agrees
-  with the stock file's `HFXO_CAP_CTRL`/`HFXO_PFET_GM_CTRL`/`HFXO_NFET_GM_CTRL`.
-- **The rest of the file — notably its `firewall` block — is unverified for
-  AE822.** SETOOLS' *other* stock config (`app-device-config-1c.json`, a third
-  part) ships a *different* `HFXO_CAP_CTRL` and an empty `firewall` block, so
-  these fields are demonstrably part-specific in general; the E7 file's
-  firewall region set has not been bench-validated against AE822 and must not
-  be assumed safe from the two bullets above.
+> The provided app-device-config.json works with either E7 or E8. The part
+> number field is just a text field for your own usage. The important thing
+> to note is the part number selected when you execute tools-config, as that
+> is what app-gen-toc and app-write-mram use.
 
-Until alp-sdk#1701 resolves (an open escalation to Alif — see #1700, item 3):
-use the stock `app-device-config.json` unmodified, as the reference board
-does. Do not hand-edit its `device` field, and do not treat any part of the
-file beyond the two confirmed bullets above as AE822-qualified.
+That confirms what the bench evidence could previously only infer:
+
+- **`device` is cosmetic, not silicon-relevant** — matching the SE reporting
+  the correct part identity from OTP (`ALIF_PN = AE822FA0E5597LS0`) regardless
+  of which part the config file names.
+- **The HFXO trim fields already matched our AE822** independently: the
+  reference board's own clock register readback (`XO_REG1` →
+  `xtal_cap:8 gm_pfet:16 gm_nfet:16`) agrees with the stock file's
+  `HFXO_CAP_CTRL`/`HFXO_PFET_GM_CTRL`/`HFXO_NFET_GM_CTRL`.
+- **What actually binds the ATOC to your part is the `tools-config -a` step
+  above, not this file** — `app-gen-toc`/`app-write-mram` key off the part
+  `tools-config` selected, per Alif, not the `device` string.
+
+Use the stock `app-device-config.json` unmodified, as the reference board
+does. Do not hand-edit its `device` field, and do not qualify or ship an
+AE822-specific copy: Alif's answer is a functional guarantee ("works with
+either E7 or E8"), not a field-by-field spec, so it settles *whether* to use
+the file as-is without certifying every individual field (e.g. the
+`firewall` block) in isolation. `app-device-config.json` is also a SETOOLS
+deliverable carrying Alif-owned configuration beyond the `device` string, so
+alp-sdk does not ship or hand-produce a copy of it regardless.
+
+This closes alp-sdk#1701: no AE822-specific device config exists, and Alif
+confirmed none is needed.
 
 ## 4. Build the ATOC + write it
 
