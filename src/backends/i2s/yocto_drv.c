@@ -163,7 +163,9 @@ _configure_pcm(snd_pcm_t *pcm, const alp_i2s_config_t *cfg, snd_pcm_format_t fmt
          * the nearest rate the DAI actually supports instead of failing,
          * so a silent accept here would break that contract: every frame
          * would stream at the wrong speed with alp_i2s_open() reporting
-         * success (#1648 tier 1, mirrors the audio yocto_drv.c fix). */
+         * success (#1648 tier 1). The sibling audio/yocto_drv.c has the
+         * identical set_rate_near-discards-&rate shape and is not yet
+         * fixed -- that's a separate, still-open change (PR #1790). */
 		fprintf(stderr,
 		        "alp_i2s: rate %u Hz unsupported, device negotiated %u Hz\n",
 		        cfg->sample_rate_hz,
@@ -178,13 +180,13 @@ _configure_pcm(snd_pcm_t *pcm, const alp_i2s_config_t *cfg, snd_pcm_format_t fmt
 	if (rc < 0) return _alsa_to_alp(rc);
 	/* Unlike rate, a period mismatch is not refused: snd_pcm_writei/readi
      * accept any frame count per call regardless of the negotiated period
-     * (y_write/y_read below already loop to handle that), and a `default`
-     * device commonly negotiates its own fixed period (e.g. a dmix
-     * plugin) regardless of what block_frames asks for. Refusing here
-     * would fail ALP_I2S_CONFIG_DEFAULT's 256-frame request against
-     * exactly that kind of device -- the same over-eager-refusal failure
-     * mode the audio backend's period check hit and reverted (#1648
-     * tier-1 review). Adopt whatever ALSA negotiates for buffer sizing
+     * (y_write below already loops to handle that; y_read reports
+     * whatever count snd_pcm_readi() actually returns via bytes_out, per
+     * its own doc comment -- it does not loop), and a `default` device
+     * commonly negotiates its own fixed period (e.g. a dmix plugin)
+     * regardless of what block_frames asks for. Refusing here would fail
+     * ALP_I2S_CONFIG_DEFAULT's 256-frame request against exactly that
+     * kind of device. Adopt whatever ALSA negotiates for buffer sizing
      * below and only log the mismatch. */
 	if (period != (snd_pcm_uframes_t)cfg->block_frames) {
 		fprintf(stderr,
