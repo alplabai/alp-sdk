@@ -144,10 +144,15 @@ z_open(const alp_uart_config_t *cfg, alp_uart_backend_state_t *st, alp_capabilit
 		/* uart_configure() reporting success does not mean the
 		 * driver acted on flow_ctrl -- nothing in the Zephyr UART
 		 * API requires a driver to reject a value it merely stores
-		 * and never applies (uart_emul, which this suite's own
-		 * ztest runs against, is exactly such a driver).  Read the
-		 * config back and confirm RTS/CTS actually landed before
-		 * trusting the open (issue #1639). */
+		 * without applying it to real hardware.  uart_emul is NOT
+		 * such a driver: its own .config_get mirrors back whatever
+		 * .configure stored (drivers/serial/uart_emul.c), so this
+		 * readback can never catch it -- see this suite's
+		 * test_uart_open_rts_cts_reaches_the_driver_on_uart1, which
+		 * asserts the opposite (an honoured request must NOT be
+		 * false-rejected here).  The guard exists for a controller
+		 * whose .config_get reports real hardware state independent
+		 * of what was merely requested (issue #1639). */
 		struct uart_config back;
 		int                gerr = uart_config_get(dev, &back);
 		if (gerr == 0 && back.flow_ctrl != flow_ctrl) {

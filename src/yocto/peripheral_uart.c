@@ -165,10 +165,11 @@ static speed_t baud_to_termios(uint32_t baud)
  * uart_config.flow_ctrl (NONE / RTS_CTS / DTR_DSR / RS485 only), termios
  * has a real mapping for BOTH alp_uart_flow_t values: CRTSCTS for 4-wire
  * hardware flow control, IXON|IXOFF for in-band software (XON/XOFF)
- * framing.  cfmakeraw() already clears IXON/IXOFF before this runs, so
- * every arm still states its bits explicitly rather than relying on that
- * reset.  Returns false for an unrecognised enumerator, leaving `tio`
- * untouched; the caller maps that to ALP_ERR_INVAL. */
+ * framing.  cfmakeraw() clears IXON but NOT IXOFF before this runs (glibc:
+ * only IXON is in its c_iflag reset mask), so every arm still states both
+ * bits explicitly rather than relying on that reset.  Returns false for an
+ * unrecognised enumerator, leaving `tio` untouched; the caller maps that
+ * to ALP_ERR_INVAL. */
 static bool apply_flow_control(alp_uart_flow_t flow, struct termios *tio)
 {
 	switch (flow) {

@@ -22,6 +22,16 @@
  * without the alias must still compile this file. */
 #define HAVE_UART1_NODE DT_NODE_HAS_STATUS(DT_ALIAS(alp_uart1), okay)
 
+/* alp-uart0 is mandatory on every target this suite builds for, but
+ * WHICH driver backs it is not: native_sim's uart0 is
+ * "zephyr,native-pty-uart" (drivers/serial/uart_native_pty.c), which
+ * implements neither .configure nor .config_get -- forcing
+ * uart_configure() to -ENOSYS regardless of what was asked for. A real
+ * board's uart0 (e.g. the in-tree AEN overlay's alp-uart0 = &uart0, a
+ * real Alif UART) implements both, so that -ENOSYS premise does not
+ * generalise off native_sim. */
+#define HAVE_NATIVE_PTY_UART0 DT_NODE_HAS_COMPAT(DT_ALIAS(alp_uart0), zephyr_native_pty_uart)
+
 ZTEST(alp_peripheral, test_uart_open_close_roundtrip)
 {
 	alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
@@ -66,7 +76,11 @@ ZTEST(alp_peripheral, test_uart_open_rejects_xon_xoff_flow_control)
  * "controller can't attempt runtime configuration at all" arm of
  * z_open() without any fake ops table.  A caller that asked for real
  * flow control must still be refused here rather than silently getting
- * ALP_OK for devicetree-only params the driver never saw. */
+ * ALP_OK for devicetree-only params the driver never saw.  Gated on
+ * HAVE_NATIVE_PTY_UART0 -- see its definition above -- because the
+ * -ENOSYS premise is specific to that driver, not to port_id=0 in
+ * general. */
+#if HAVE_NATIVE_PTY_UART0
 ZTEST(alp_peripheral, test_uart_open_rejects_rts_cts_when_controller_cannot_configure)
 {
 	alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
@@ -80,6 +94,7 @@ ZTEST(alp_peripheral, test_uart_open_rejects_rts_cts_when_controller_cannot_conf
 	zassert_is_null(u, "uart0 cannot configure flow control at runtime");
 	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT, NULL);
 }
+#endif /* HAVE_NATIVE_PTY_UART0 */
 
 /* ------------------------------------------------------------------ */
 /* #626: alp_uart_read() timeout_ms contract.                          */

@@ -875,12 +875,23 @@ typedef enum {
  *
  * On a real UART port, a backend that cannot honour a non-@ref
  * ALP_UART_FLOW_NONE value returns @ref ALP_ERR_NOSUPPORT from @ref
- * alp_uart_open -- it never accepts the request and silently drops it
- * (issue #1639): a caller that asked for flow control on real hardware
- * and got @ref ALP_OK has it.  This guarantee governs backends that
- * drive an actual line (Zephyr driver, Yocto tty, vendor CMSIS); it
- * does not extend to the test doubles under @c CONFIG_ALP_SDK_TESTING_UART
- * or @c CONFIG_ALP_SDK_UART_SW_FALLBACK, which are not real ports and
+ * alp_uart_open instead of silently accepting the request and dropping
+ * it (issue #1639).  This is a guarantee about the backend's own
+ * configuration layer: where the driver exposes a way to read its
+ * applied setting back (Zephyr's @c uart_config_get, Linux @c
+ * tcgetattr), a request that was accepted but not actually applied is
+ * caught and turned into @ref ALP_ERR_NOSUPPORT; where it does not (no
+ * @c config_get, or the CMSIS-Driver @c Control call itself refusing
+ * the mode), @ref ALP_OK trusts the driver's own success return with
+ * nothing further to check locally.  It does NOT cover the physical
+ * wiring: on a board whose devicetree overlay/pinmux does not route
+ * RTS/CTS to this UART node, @ref alp_uart_open can still return @ref
+ * ALP_OK for @ref ALP_UART_FLOW_RTS_CTS with no flow control on the
+ * line, because per-SoM RTS/CTS pad routing is not yet emitted (see
+ * issue #1639's changelog).  This governs backends that drive an
+ * actual line (Zephyr driver, Yocto tty, vendor CMSIS); it does not
+ * extend to the test doubles under @c CONFIG_ALP_SDK_TESTING_UART or
+ * @c CONFIG_ALP_SDK_UART_SW_FALLBACK, which are not real ports and
  * document their own always-succeeds contract.
  */
 typedef enum {

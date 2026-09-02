@@ -13,6 +13,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "alp_internal.h"
+
 #include "Driver_USART.h"
 
 extern ARM_DRIVER_USART        Driver_USART0;
@@ -88,6 +90,7 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
     default:
         (void)d->PowerControl(ARM_POWER_OFF);
         (void)d->Uninitialize();
+        alp_internal_set_last_error(ALP_ERR_NOSUPPORT);
         return NULL;
     }
 
@@ -96,9 +99,20 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
     mode |= parity_bits;
     mode |= stop_bits;
     mode |= flow_bits;
-    if (d->Control(mode, cfg->baudrate) != ARM_DRIVER_OK) return NULL;
+    int32_t ctrl_st = d->Control(mode, cfg->baudrate);
+    if (ctrl_st != ARM_DRIVER_OK) {
+        /* Reached for e.g. ARM_DRIVER_ERROR_UNSUPPORTED when this
+         * silicon's CMSIS-Driver instance can't honour RTS/CTS --
+         * alif_to_alp() maps that to ALP_ERR_NOSUPPORT, matching the
+         * contract in <alp/peripheral.h>. */
+        (void)d->PowerControl(ARM_POWER_OFF);
+        (void)d->Uninitialize();
+        alp_internal_set_last_error(alif_to_alp(ctrl_st));
+        return NULL;
+    }
     (void)d->Control(ARM_USART_CONTROL_TX, 1);
     (void)d->Control(ARM_USART_CONTROL_RX, 1);
+    alp_internal_set_last_error(ALP_OK);
     return (alp_uart_t *)d;
 }
 
