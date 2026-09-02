@@ -13,10 +13,17 @@
 >   32 kHz LFXO to the ~5 %-accurate LFRC for as long as POR_N is asserted --
 >   *"it would take a 20 second assertion of POR_N to impose a 1 second loss of
 >   RTC accuracy."*
+> - **Bench fact, beyond the errata text:** the AEN bench module reports
+>   `[SES] No LF XTAL` on every SE boot -- it has no 32 kHz LFXO fitted at all,
+>   so on this module ER002's LFXO->LFRC fallback is **not** confined to the
+>   POR_N window: LFRC is this module's permanent LPRTC clock source. See
+>   `docs/aen-se-services.md`.
 >
-> So: the calendar keeps counting across a reset, but the elapsed time it
-> reports across one is not accurate on either revision. Re-set the time from an
-> external source after any POR if accuracy matters.
+> So: on this module the calendar never runs at LFXO accuracy, reset or not --
+> it drifts continuously at LFRC's ~5 % offset from LFXO, roughly **72 minutes
+> per day**. That is the steady state here, not a transient startup condition
+> or a warning that clears itself; re-sync from an external source
+> periodically, not only after a POR, if wall-clock accuracy matters.
 >
 > **Alif's own workaround for ER002 is "use an external real-time clock source",
 > and the SoM does carry one -- an `rv3028c7` at 7-bit `0x52` -- but it is NOT

@@ -56,9 +56,22 @@
  * "it would take a 20 second assertion of POR_N to impose a 1 second loss of
  * RTC accuracy."
  *
- * The counter keeps running; it is the ELAPSED time across a reset that is
- * untrustworthy.  A caller that needs accuracy must re-set the time from an
- * external source after any POR.
+ * BENCH FACT (goes beyond the errata text above, and beyond POR_N entirely):
+ * the AEN bench module (E1M-AEN801 r1, serial 2617-0001) reports "[SES] No LF
+ * XTAL" on every SE boot (bench-captured 2026-08-30, re-confirmed 2026-08-31;
+ * see docs/aen-se-services.md, "SERAM version, per physical board") -- this
+ * board has no 32 kHz LFXO fitted at all.  ER002's LFXO->LFRC fallback is NOT
+ * confined to a POR_N assertion window on this module: LFRC is the LPRTC's
+ * clock source PERMANENTLY, on every boot, whether or not POR_N is currently
+ * asserted.  The calendar therefore drifts continuously at LFRC's ~5% offset
+ * from LFXO -- roughly 72 minutes per day -- for as long as this shim runs,
+ * not only across a reset.  This is the steady state on this module, not a
+ * transient startup condition or a warning that self-corrects.
+ *
+ * The counter keeps running; both the ELAPSED time across a reset AND the
+ * ongoing wall-clock drift described above are untrustworthy.  A caller that
+ * needs accuracy must periodically re-set the time from an external source --
+ * not just once, after a POR.
  *
  * Alif's stated ER002 workaround is "use an external real-time clock source",
  * and the E1M-AEN801 carries one -- an rv3028c7 at 7-bit 0x52, with a working
