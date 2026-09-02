@@ -309,6 +309,30 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
 		(void)close(fd);
 		return NULL;
 	}
+
+	if (cfg->flow_control != ALP_UART_FLOW_NONE) {
+		/* tcsetattr() reports success as soon as the driver applies
+         * ANY of the requested changes -- POSIX does not require it
+         * to reject flow-control bits a tty cannot honour (e.g. a
+         * USB-serial adapter with RTS/CTS not wired), and some tty
+         * drivers clear CRTSCTS inside set_termios() while the ioctl
+         * still returns 0.  Read the line discipline back and
+         * confirm the bits actually landed before trusting the open
+         * (issue #1639). */
+		struct termios back;
+		if (tcgetattr(fd, &back) < 0) {
+			alp_internal_set_last_error(alp_status_from_posix_errno(errno));
+			(void)close(fd);
+			return NULL;
+		}
+		if ((back.c_cflag & CRTSCTS) != (tio.c_cflag & CRTSCTS) ||
+		    (back.c_iflag & (IXON | IXOFF)) != (tio.c_iflag & (IXON | IXOFF))) {
+			alp_internal_set_last_error(ALP_ERR_NOSUPPORT);
+			(void)close(fd);
+			return NULL;
+		}
+	}
+
 	/* Drain anything that arrived during configuration so the
      * first alp_uart_read returns fresh-after-open bytes only. */
 	(void)tcflush(fd, TCIOFLUSH);

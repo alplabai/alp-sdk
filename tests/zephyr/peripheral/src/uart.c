@@ -11,6 +11,7 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/serial/uart_emul.h>
+#include <zephyr/drivers/uart.h>
 #include <zephyr/ztest.h>
 
 #include "alp/peripheral.h"
@@ -56,6 +57,27 @@ ZTEST(alp_peripheral, test_uart_open_rejects_xon_xoff_flow_control)
 	    .flow_control = ALP_UART_FLOW_XON_XOFF,
 	});
 	zassert_is_null(u, "XON/XOFF has no Zephyr flow_ctrl mapping");
+	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT, NULL);
+}
+
+/* #1639 (review follow-up): native_sim's uart0 (zephyr,native-pty-uart)
+ * implements neither .configure nor .config_get, so uart_configure()
+ * on port_id=0 always returns -ENOSYS -- deterministically forcing the
+ * "controller can't attempt runtime configuration at all" arm of
+ * z_open() without any fake ops table.  A caller that asked for real
+ * flow control must still be refused here rather than silently getting
+ * ALP_OK for devicetree-only params the driver never saw. */
+ZTEST(alp_peripheral, test_uart_open_rejects_rts_cts_when_controller_cannot_configure)
+{
+	alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
+	    .port_id      = 0,
+	    .baudrate     = 115200,
+	    .data_bits    = 8,
+	    .stop_bits    = 1,
+	    .parity       = ALP_UART_PARITY_NONE,
+	    .flow_control = ALP_UART_FLOW_RTS_CTS,
+	});
+	zassert_is_null(u, "uart0 cannot configure flow control at runtime");
 	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT, NULL);
 }
 
@@ -185,6 +207,36 @@ ZTEST(alp_peripheral, test_uart_read_partial_arrival_then_deadline_returns_ok)
 	alp_status_t s      = alp_uart_read(u, buf, sizeof(buf), 60);
 	zassert_equal(s, ALP_OK, "partial read at deadline must be ALP_OK, got %d", (int)s);
 	zassert_equal(buf[0], sent);
+
+	alp_uart_close(u);
+}
+
+/* #1639 (review follow-up): uart_emul's .configure stores whatever it
+ * is given and always returns 0 (drivers/serial/uart_emul.c) -- exactly
+ * the "reports success but a driver could ignore the field" shape the
+ * z_open() post-configure uart_config_get() readback exists to catch.
+ * Because uart_emul's .config_get faithfully mirrors what was stored,
+ * this asserts the OTHER half of that guard: a driver that DOES honour
+ * RTS/CTS must not be false-rejected, and the value that reaches the
+ * driver really is UART_CFG_FLOW_CTRL_RTS_CTS, not just whatever
+ * alp_uart_open() returned. */
+ZTEST(alp_peripheral, test_uart_open_rts_cts_reaches_the_driver_on_uart1)
+{
+	alp_uart_t *u = alp_uart_open(&(alp_uart_config_t){
+	    .port_id      = 1,
+	    .baudrate     = 115200,
+	    .data_bits    = 8,
+	    .stop_bits    = 1,
+	    .parity       = ALP_UART_PARITY_NONE,
+	    .flow_control = ALP_UART_FLOW_RTS_CTS,
+	});
+	zassert_not_null(u, "uart_emul honours flow_ctrl, open should succeed");
+
+	struct uart_config back = { 0 };
+	zassert_equal(uart_config_get(_uart1_emul_dev, &back), 0);
+	zassert_equal(back.flow_ctrl,
+	              UART_CFG_FLOW_CTRL_RTS_CTS,
+	              "ALP_UART_FLOW_RTS_CTS must reach the driver as RTS_CTS");
 
 	alp_uart_close(u);
 }

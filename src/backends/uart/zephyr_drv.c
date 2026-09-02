@@ -75,11 +75,11 @@ static enum uart_config_stop_bits _to_zephyr_stop_bits(uint8_t bits)
 }
 
 /* Maps alp_uart_flow_t -> Zephyr's uart_config.flow_ctrl.  Returns false for
- * ALP_UART_FLOW_XON_XOFF: Zephyr's enum uart_config_flow_ctrl carries only
+ * ALP_UART_FLOW_XON_XOFF: Zephyr's enum uart_config_flow_control carries only
  * NONE / RTS_CTS / DTR_DSR / RS485, no in-band-software equivalent -- the
  * caller (z_open) turns a false return into ALP_ERR_NOSUPPORT rather than
  * silently opening with flow control off (issue #1639). */
-static bool _to_zephyr_flow_ctrl(alp_uart_flow_t flow, enum uart_config_flow_ctrl *out)
+static bool _to_zephyr_flow_ctrl(alp_uart_flow_t flow, enum uart_config_flow_control *out)
 {
 	switch (flow) {
 	case ALP_UART_FLOW_NONE:
@@ -112,7 +112,7 @@ z_open(const alp_uart_config_t *cfg, alp_uart_backend_state_t *st, alp_capabilit
 	const struct device *dev = _devs[cfg->port_id];
 	if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
 
-	enum uart_config_flow_ctrl flow_ctrl;
+	enum uart_config_flow_control flow_ctrl;
 	if (!_to_zephyr_flow_ctrl(cfg->flow_control, &flow_ctrl)) {
 		/* ALP_UART_FLOW_XON_XOFF has no Zephyr equivalent -- refuse
 		 * up front instead of configuring NONE and returning ALP_OK
@@ -140,6 +140,23 @@ z_open(const alp_uart_config_t *cfg, alp_uart_backend_state_t *st, alp_capabilit
 		}
 	} else if (err != 0) {
 		return _errno_to_alp(err);
+	} else if (cfg->flow_control != ALP_UART_FLOW_NONE) {
+		/* uart_configure() reporting success does not mean the
+		 * driver acted on flow_ctrl -- nothing in the Zephyr UART
+		 * API requires a driver to reject a value it merely stores
+		 * and never applies (uart_emul, which this suite's own
+		 * ztest runs against, is exactly such a driver).  Read the
+		 * config back and confirm RTS/CTS actually landed before
+		 * trusting the open (issue #1639). */
+		struct uart_config back;
+		int                gerr = uart_config_get(dev, &back);
+		if (gerr == 0 && back.flow_ctrl != flow_ctrl) {
+			return ALP_ERR_NOSUPPORT;
+		}
+		/* gerr != 0: the driver can't report its current config --
+		 * nothing left to check locally, so trust uart_configure()'s
+		 * ALP_OK the same way the ENOSYS/ENOTSUP branch above trusts
+		 * the devicetree-provided params. */
 	}
 
 	st->dev         = (void *)dev;

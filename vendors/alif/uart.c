@@ -70,11 +70,32 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
     }
     uint32_t stop_bits = (cfg->stop_bits == 2) ? ARM_USART_STOP_BITS_2 : ARM_USART_STOP_BITS_1;
     uint32_t data_bits = (cfg->data_bits == 7) ? ARM_USART_DATA_BITS_7 : ARM_USART_DATA_BITS_8;
-    uint32_t mode      = ARM_USART_MODE_ASYNCHRONOUS;
+
+    /* flow_control (issue #1639): this used to be hardcoded to
+     * ARM_USART_FLOW_CONTROL_NONE regardless of cfg->flow_control,
+     * silently dropping a caller's RTS/CTS request while still
+     * returning a valid handle.  CMSIS-Driver USART has no in-band
+     * XON/XOFF mode, so that request is refused up front instead of
+     * being configured as NONE. */
+    uint32_t flow_bits;
+    switch (cfg->flow_control) {
+    case ALP_UART_FLOW_NONE:
+        flow_bits = ARM_USART_FLOW_CONTROL_NONE;
+        break;
+    case ALP_UART_FLOW_RTS_CTS:
+        flow_bits = ARM_USART_FLOW_CONTROL_RTS_CTS;
+        break;
+    default:
+        (void)d->PowerControl(ARM_POWER_OFF);
+        (void)d->Uninitialize();
+        return NULL;
+    }
+
+    uint32_t mode = ARM_USART_MODE_ASYNCHRONOUS;
     mode |= data_bits;
     mode |= parity_bits;
     mode |= stop_bits;
-    mode |= ARM_USART_FLOW_CONTROL_NONE;
+    mode |= flow_bits;
     if (d->Control(mode, cfg->baudrate) != ARM_DRIVER_OK) return NULL;
     (void)d->Control(ARM_USART_CONTROL_TX, 1);
     (void)d->Control(ARM_USART_CONTROL_RX, 1);

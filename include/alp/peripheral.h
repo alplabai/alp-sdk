@@ -873,10 +873,15 @@ typedef enum {
 /**
  * @brief Hardware/software line flow control for @ref alp_uart_config_t.
  *
- * A backend that cannot honour a non-@ref ALP_UART_FLOW_NONE value
- * returns @ref ALP_ERR_NOSUPPORT from @ref alp_uart_open -- it never
- * accepts the request and silently drops it (issue #1639): a caller
- * that asked for flow control and got @ref ALP_OK has it.
+ * On a real UART port, a backend that cannot honour a non-@ref
+ * ALP_UART_FLOW_NONE value returns @ref ALP_ERR_NOSUPPORT from @ref
+ * alp_uart_open -- it never accepts the request and silently drops it
+ * (issue #1639): a caller that asked for flow control on real hardware
+ * and got @ref ALP_OK has it.  This guarantee governs backends that
+ * drive an actual line (Zephyr driver, Yocto tty, vendor CMSIS); it
+ * does not extend to the test doubles under @c CONFIG_ALP_SDK_TESTING_UART
+ * or @c CONFIG_ALP_SDK_UART_SW_FALLBACK, which are not real ports and
+ * document their own always-succeeds contract.
  */
 typedef enum {
 	ALP_UART_FLOW_NONE     = 0, /**< No flow control (default). */
