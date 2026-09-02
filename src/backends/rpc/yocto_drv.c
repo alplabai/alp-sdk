@@ -89,6 +89,29 @@
  *       free `ch` while an op still holds it" guarantee, from ABOVE
  *       this file).
  *
+ * @par Link liveness (issue #1643)
+ * y_open() reports ALP_RPC_LINK_UP (rpc_ops.h's alp_rpc_notify_link())
+ * once /dev/rpmsg<N> is open -- the kernel only creates that chardev
+ * after the remote firmware's name-service announce, so reaching that
+ * point already means bound.  rpc_rx_main()'s read()-returned-EOF/
+ * error path (the existing "kernel dropped this endpoint" branch, NOT
+ * the wake-pipe close-side branch) reports ALP_RPC_LINK_LOST -- the
+ * far core reset or its remoteproc firmware stopped.  Deliberately
+ * does not touch the close protocol above: no new gate, no self-close
+ * detection added for this one notify call, since a read() failure is
+ * never reachable from inside a subscriber callback (only from the rx
+ * thread's own poll loop) and ch->ept_fd is never closed while this
+ * thread is still running (rpc_be_teardown() runs only from
+ * y_destroy(), strictly after this thread has returned) -- so `ch`
+ * stays valid for the notify unconditionally.
+ * src/backends/rpc/yocto_uio_drv.c (RZ/V2N's userspace-virtio path)
+ * is NOT wired for link liveness in this revision -- its
+ * remoteproc/virtio teardown shape doesn't have this file's
+ * poll()+read() EOF signal, and mutating that backend's own delicate
+ * close protocol without V2N silicon to verify against was judged
+ * too risky for this change; tracked as follow-up work for issue
+ * #1643 rather than guessed at here.
+ *
  * Linking: src/yocto/CMakeLists.txt gates this file behind
  * find_package(Threads) + pkg_check_modules(libmetal librpmsg) and
  * the ALP_SDK_HAVE_OPENAMP_USERLAND define.  When the host doesn't
@@ -366,6 +389,16 @@ static void *rpc_rx_main(void *arg)
 		ssize_t n = read(ch->ept_fd, buf, sizeof buf);
 		if (n <= 0) {
 			if (n < 0 && errno == EINTR) continue;
+			/* n == 0 (EOF) or a real read error: the kernel dropped
+             * this endpoint out from under us -- the far core reset or
+             * its remoteproc firmware stopped (issue #1643).  Not a
+             * close-side event: fds[1] (the wake pipe) was already
+             * checked above and would have taken that branch instead,
+             * so this thread's own y_shutdown() has not run yet.
+             * ch->owner stays valid for the rest of this function --
+             * y_destroy() only runs, via the dispatcher's own drain,
+             * strictly after this thread has returned (below). */
+			alp_rpc_notify_link(ch->owner, ALP_RPC_LINK_LOST);
 			break;
 		}
 
@@ -753,6 +786,11 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	}
 
 	rpc_be_data_store(st, ch);
+	/* issue #1643: the kernel only creates /dev/rpmsg<N> once the
+     * remote firmware's name-service announce for this endpoint has
+     * already arrived -- reaching here means the link is genuinely
+     * bound, so report it before returning the handle to the caller. */
+	alp_rpc_notify_link(st->owner, ALP_RPC_LINK_UP);
 	return ALP_OK;
 }
 

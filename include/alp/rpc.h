@@ -61,17 +61,41 @@
  *
  * @par Backends.
  *   - Zephyr / M-class side: `subsys/ipc/ipc_service` with the
- *     `rpmsg` backend (`src/zephyr/rpc_zephyr.c`).
+ *     `rpmsg` backend (`src/backends/rpc/zephyr_drv.c`).
  *   - Linux / A-class side:  libmetal + librpmsg user-space chardev
- *     access to `/dev/rpmsg*` (`src/yocto/rpc_yocto.c`).
- *   - Bare-metal builds get a NOSUPPORT stub via the existing
- *     `src/common/stub_backend.c` mechanism (out of scope here).
+ *     access to `/dev/rpmsg*` (`src/backends/rpc/yocto_drv.c`), or
+ *     userspace OpenAMP/libmetal over UIO on SoCs without the
+ *     mainline `rpmsg_char` glue (`src/backends/rpc/yocto_uio_drv.c`).
+ *   - Bare-metal / trimmed-image builds get a NOSUPPORT stub via
+ *     `src/common/stub/stub_rpc.c` (native_sim without a real
+ *     OpenAMP transport instead gets the SW fallback,
+ *     `src/backends/rpc/sw_fallback.c`).
+ *
+ * @par Link liveness (issue #1643).
+ * The far core resetting or crashing used to be invisible: nothing
+ * surfaced the transport's own bind/unbind signal, so
+ * @ref alp_rpc_send kept returning @ref ALP_OK into a dead vring
+ * forever.  @ref alp_rpc_set_link_callback / @ref alp_rpc_link_state
+ * expose the RPMsg peer-bind state (@ref alp_rpc_link_state_t); once
+ * a channel has observed @ref ALP_RPC_LINK_LOST, @ref alp_rpc_send
+ * fails with @ref ALP_ERR_NOT_READY instead of accepting into the
+ * dead queue.  @ref alp_rpc_call is unaffected by this change -- it
+ * already has its own `timeout_ms` defense and is not woken early by
+ * a link-loss notification in this revision.
  *
  * @par ABI status: [ABI-STABLE]
  *      v0.6 framed RPC surface.  Adding optional fields to
  *      `alp_rpc_config_t` is permitted; reshaping the callback
  *      signatures is not.  See docs/abi-markers.md for the
- *      convention.
+ *      convention.  v0.17 adds @ref alp_rpc_link_state_t,
+ *      @ref alp_rpc_link_cb_t, @ref alp_rpc_set_link_callback, and
+ *      @ref alp_rpc_link_state -- purely additive (minor bump).  The
+ *      one BEHAVIOUR change on the existing surface is documented on
+ *      @ref alp_rpc_send below: it already documented
+ *      @ref ALP_ERR_NOT_READY as a valid return, and v0.17 widens the
+ *      condition that produces it (link @ref ALP_RPC_LINK_LOST, not
+ *      only a NULL/closed @c ch) rather than adding a new return
+ *      value -- see the CHANGELOG entry for this issue.
  */
 
 #ifndef ALP_RPC_H
@@ -201,6 +225,45 @@ typedef void (*alp_rpc_msg_cb_t)(const char *method, const void *payload, size_t
  */
 typedef void (*alp_rpc_method_cb_t)(const void *payload, size_t len, void *user);
 
+/**
+ * @brief Observed state of the RPMsg link to the peer endpoint
+ *        (issue #1643).
+ *
+ * Reported by @ref alp_rpc_link_state and delivered to a registered
+ * @ref alp_rpc_link_cb_t.  Every channel starts @ref ALP_RPC_LINK_DOWN
+ * and moves to @ref ALP_RPC_LINK_UP once the backend's own bind
+ * signal fires; @ref ALP_RPC_LINK_LOST is reachable only from UP (a
+ * link that never bound stays DOWN, it does not become LOST).  Not
+ * every backend can observe every transition -- see each function's
+ * own doc comment.
+ */
+typedef enum {
+	ALP_RPC_LINK_DOWN = 0, /**< Not yet bound to the peer. */
+	ALP_RPC_LINK_UP   = 1, /**< Peer endpoint bound; traffic flows. */
+	ALP_RPC_LINK_LOST = 2  /**< Peer went away after being UP. */
+} alp_rpc_link_state_t;
+
+/**
+ * @brief Link-liveness transition callback (issue #1643).
+ *
+ * @param[in] state  The new link state.
+ * @param[in] user   The @c user pointer registered with
+ *                    @ref alp_rpc_set_link_callback.
+ *
+ * @warning Runs on whatever context the backend's own transport-level
+ *          bind/unbind/error signal fires from -- an RX worker
+ *          thread, not the caller's thread (mirrors
+ *          @ref alp_rpc_msg_cb_t's context warning).  Keep the body
+ *          short and non-blocking.  Calling @ref alp_rpc_close on
+ *          THIS SAME channel from inside this callback is supported,
+ *          exactly like a subscribe callback closing its own channel
+ *          (see @ref alp_rpc_close's concurrent-close contract);
+ *          calling it on a DIFFERENT channel from inside this
+ *          callback is not evaluated against that contract and should
+ *          be avoided.
+ */
+typedef void (*alp_rpc_link_cb_t)(alp_rpc_link_state_t state, void *user);
+
 /* ------------------------------------------------------------------ */
 /* Lifecycle                                                           */
 /* ------------------------------------------------------------------ */
@@ -242,7 +305,8 @@ alp_rpc_channel_t *alp_rpc_open(const alp_rpc_config_t *cfg);
  * @par Concurrent-close contract (GHSA-xhm8-7f87-93q5)
  * Calling this concurrently from two threads on the SAME still-open
  * @p ch -- including a subscriber callback (see @ref alp_rpc_method_cb_t)
- * closing its own channel from inside the callback while another thread
+ * or a link-state callback (see @ref alp_rpc_link_cb_t) closing its
+ * own channel from inside the callback while another thread
  * closes it too -- is supported and race-free: exactly one caller
  * performs the teardown, the other is a safe no-op, and neither
  * blocks/crashes/double-frees.
@@ -322,6 +386,48 @@ alp_rpc_subscribe(alp_rpc_channel_t *ch, const char *method, alp_rpc_method_cb_t
 alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method);
 
 /* ------------------------------------------------------------------ */
+/* Link liveness (issue #1643)                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * @brief Register (or clear) the link-liveness callback for a channel.
+ *
+ * Replaces any prior registration.  Does not fire the callback with
+ * the channel's CURRENT state at registration time -- only future
+ * transitions invoke it; call @ref alp_rpc_link_state first if the
+ * state at registration time matters.
+ *
+ * @param[in] ch    Channel handle.
+ * @param[in] cb    Callback invoked on every link-state transition.
+ *                  NULL clears the registration.
+ * @param[in] user  Opaque pointer forwarded to @p cb.
+ * @return  - @ref ALP_OK          on success
+ *          - @ref ALP_ERR_NOT_READY @c ch is NULL or closed
+ *          - @ref ALP_ERR_NOSUPPORT backend doesn't implement link-state
+ *                                    reporting (the bare-metal stub)
+ *
+ * @note Concurrent @ref alp_rpc_set_link_callback calls on the SAME
+ *       channel race each other for which registration a link event
+ *       observes -- register once, right after @ref alp_rpc_open,
+ *       before relying on link events, rather than re-registering
+ *       from multiple threads.
+ */
+alp_status_t alp_rpc_set_link_callback(alp_rpc_channel_t *ch, alp_rpc_link_cb_t cb, void *user);
+
+/**
+ * @brief Read the channel's last-observed link state.
+ *
+ * @param[in]  ch         Channel handle.
+ * @param[out] out_state  Receives the current @ref alp_rpc_link_state_t.
+ * @return  - @ref ALP_OK          on success
+ *          - @ref ALP_ERR_NOT_READY @c ch is NULL or closed
+ *          - @ref ALP_ERR_INVAL   @c out_state is NULL
+ *          - @ref ALP_ERR_NOSUPPORT backend doesn't implement link-state
+ *                                    reporting (the bare-metal stub)
+ */
+alp_status_t alp_rpc_link_state(alp_rpc_channel_t *ch, alp_rpc_link_state_t *out_state);
+
+/* ------------------------------------------------------------------ */
 /* Send + call                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -339,7 +445,17 @@ alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method);
  * @param[in] len      Payload length in bytes (excludes the method
  *                     header).
  * @return  - @ref ALP_OK          on success
- *          - @ref ALP_ERR_NOT_READY @c ch is NULL or closed
+ *          - @ref ALP_ERR_NOT_READY @c ch is NULL or closed, OR the
+ *                                    channel's link has observed
+ *                                    @ref ALP_RPC_LINK_LOST (issue
+ *                                    #1643) -- the peer went away
+ *                                    since binding; this is the SAME
+ *                                    return value the header already
+ *                                    documented for a closed channel,
+ *                                    now also covering a known-dead
+ *                                    link instead of silently
+ *                                    accepting into it (see
+ *                                    @ref alp_rpc_link_state)
  *          - @ref ALP_ERR_INVAL   @c method invalid or
  *                                  @c payload == NULL with @c len > 0
  *          - @ref ALP_ERR_NOMEM   TX buffer pool exhausted; retry

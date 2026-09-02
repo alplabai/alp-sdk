@@ -75,6 +75,24 @@
  *   - z_destroy(): trivial for this backend (a static pool slot, no
  *     heap, no fds) -- just releases the pool slot.  Called exactly
  *     once by the dispatcher, strictly after its own active-op drain.
+ *
+ * @par Link liveness (issue #1643)
+ * ipc_service exposes `bound` / `unbound` / `received` / `error`
+ * endpoint callbacks; this file used to wire only `bound` +
+ * `received` and threw the disconnect signal away.  `rpc_ept_bound()`
+ * now also calls the dispatcher's alp_rpc_notify_link() (rpc_ops.h)
+ * with ALP_RPC_LINK_UP; the new rpc_ept_unbound() / rpc_ept_error()
+ * report ALP_RPC_LINK_LOST, bracketed by the SAME
+ * rpc_recv_enter()/rpc_worker_leave() pair (factored out of
+ * rpc_ept_recv()'s own epilogue) that already brackets `received` --
+ * so an unbound/error notify (a) never fires once this channel's own
+ * `closing` is set (no notify racing a torn-down `owner`) and (b)
+ * correctly defers this channel's close if the app's link callback
+ * reacts by closing its own channel from inside the notify, exactly
+ * like a subscriber callback already could.  BENCH-UNVERIFIED: which
+ * of `unbound` vs `error` (or both) fires for a genuine far-core reset
+ * has not been confirmed against real V2N/AEN silicon -- see this
+ * issue's `needs-silicon` label.
  */
 
 #include <errno.h>
@@ -393,6 +411,13 @@ static void rpc_ept_bound(void *priv)
 	if (be != NULL) {
 		be->ept_bound = true;
 		LOG_DBG("rpc: endpoint bound name=%s", be->name);
+		/* issue #1643: the transport's own bind signal is the link-up
+         * event.  Not bracketed by rpc_recv_enter()/rpc_worker_leave()
+         * -- unlike unbound/error below, bound() cannot plausibly race
+         * a self-close (no callback the app could close from has run
+         * yet on this channel), and be->owner is already stamped by
+         * z_open() before ipc_service_register_endpoint() is called. */
+		alp_rpc_notify_link(be->owner, ALP_RPC_LINK_UP);
 	}
 }
 
@@ -443,6 +468,27 @@ static void rpc_recv_leave(struct rpc_be *be)
 	be->recv_active      = false;
 	k_spin_unlock(&be->lock, key);
 	atomic_dec(&be->cb_active);
+}
+
+/**
+ * @brief Shared epilogue for every callback bracketed by
+ *        rpc_recv_enter()/this function: `received`, and (issue
+ *        #1643) `unbound`/`error`.
+ *
+ * Reads `close_from_worker` into a local BEFORE rpc_recv_leave()
+ * decrements `cb_active` -- see rpc_ept_recv()'s own epilogue comment
+ * for why that ordering matters (GHSA-xhm8-7f87-93q5 follow-up); this
+ * is the exact same sequence, factored out so rpc_ept_unbound() /
+ * rpc_ept_error() below share it instead of re-deriving it.
+ */
+static void rpc_worker_leave(struct rpc_be *be)
+{
+	bool close_from_worker = be->close_from_worker;
+	rpc_recv_leave(be);
+	if (close_from_worker) {
+		(void)ipc_service_deregister_endpoint(&be->ept);
+		alp_rpc_close_finalize(be->owner);
+	}
 }
 
 /**
@@ -593,35 +639,79 @@ epilogue:
      * ipc_service_deregister_endpoint() reentrantly from within its
      * own `received` callback.
      *
-     * Read `close_from_worker` into a local BEFORE rpc_recv_leave()
-     * decrements `cb_active` -- i.e. while this recv is still counted
-     * (GHSA-xhm8-7f87-93q5 follow-up). Reading the field AFTER the
-     * decrement is a formal C11 data race: once `cb_active` hits 0 an
-     * external z_shutdown() elsewhere is free to finish its drain,
-     * return DONE, and let the dispatcher call z_destroy()/_be_free()
-     * -- and a subsequent z_open() reusing the freed pool slot would
-     * memset() straight over this same field while this thread is
-     * still reading it. Value-benign under the single-worker
-     * ipc_service model this backend assumes (see this file's header
-     * comment) -- the pending epilogue IS the only recv-dispatching
-     * thread, so no NEW recv on this same channel can race it -- but
-     * not provably race-free in the C11 sense, unlike yocto_drv.c's
-     * atomic close_from_worker. Capturing the value while `cb_active`
-     * still protects `be` closes the gap without needing atomics: the
-     * value cannot change between this read and rpc_recv_leave() (it
-     * is set, at most once, earlier on this SAME thread's call stack,
-     * by the self-close z_shutdown() nested inside the callback
-     * above), so this is a pure reorder, not a behaviour change --
-     * DONE vs DEFERRED and the exactly-once finalize() call are
-     * unaffected. */
-	{
-		bool close_from_worker = be->close_from_worker;
-		rpc_recv_leave(be);
-		if (close_from_worker) {
-			(void)ipc_service_deregister_endpoint(&be->ept);
-			alp_rpc_close_finalize(be->owner);
-		}
+     * rpc_worker_leave() reads `close_from_worker` into a local BEFORE
+     * rpc_recv_leave() decrements `cb_active` -- i.e. while this recv
+     * is still counted (GHSA-xhm8-7f87-93q5 follow-up). Reading the
+     * field AFTER the decrement is a formal C11 data race: once
+     * `cb_active` hits 0 an external z_shutdown() elsewhere is free to
+     * finish its drain, return DONE, and let the dispatcher call
+     * z_destroy()/_be_free() -- and a subsequent z_open() reusing the
+     * freed pool slot would memset() straight over this same field
+     * while this thread is still reading it. Value-benign under the
+     * single-worker ipc_service model this backend assumes (see this
+     * file's header comment) -- the pending epilogue IS the only
+     * recv-dispatching thread, so no NEW recv on this same channel can
+     * race it -- but not provably race-free in the C11 sense, unlike
+     * yocto_drv.c's atomic close_from_worker. Capturing the value
+     * while `cb_active` still protects `be` closes the gap without
+     * needing atomics: the value cannot change between this read and
+     * rpc_recv_leave() (it is set, at most once, earlier on this SAME
+     * thread's call stack, by the self-close z_shutdown() nested
+     * inside the callback above), so this is a pure reorder, not a
+     * behaviour change -- DONE vs DEFERRED and the exactly-once
+     * finalize() call are unaffected. */
+	rpc_worker_leave(be);
+}
+
+/**
+ * @brief ipc_service `unbound` callback (issue #1643): the peer
+ *        endpoint went away -- the far core reset or its firmware
+ *        tore the endpoint down.
+ *
+ * Bracketed by rpc_recv_enter()/rpc_worker_leave(), exactly like
+ * rpc_ept_recv() above: bails immediately if this channel is already
+ * `closing` (an in-flight external close already owns the teardown --
+ * no new notify may fire once that has started, so `owner` stays a
+ * live, not-yet-recycled alp_rpc_channel_t for the notify below), and
+ * the same self-close detection applies if the app's registered
+ * @ref alp_rpc_link_cb_t reacts by calling alp_rpc_close() on this
+ * same channel from inside alp_rpc_notify_link()'s synchronous
+ * callback invocation.
+ */
+static void rpc_ept_unbound(void *priv)
+{
+	struct rpc_be *be = (struct rpc_be *)priv;
+	if (be == NULL || !be->in_use) {
+		return;
 	}
+	if (!rpc_recv_enter(be)) {
+		return;
+	}
+	be->ept_bound = false;
+	LOG_WRN("rpc: endpoint unbound name=%s (peer link lost)", be->name);
+	alp_rpc_notify_link(be->owner, ALP_RPC_LINK_LOST);
+	rpc_worker_leave(be);
+}
+
+/**
+ * @brief ipc_service `error` callback (issue #1643): the transport
+ *        reported a fault on this endpoint.  Treated as link-lost --
+ *        see rpc_ept_unbound()'s doc comment for the concurrency
+ *        discipline, which this function shares.
+ */
+static void rpc_ept_error(const char *message, void *priv)
+{
+	struct rpc_be *be = (struct rpc_be *)priv;
+	if (be == NULL || !be->in_use) {
+		return;
+	}
+	if (!rpc_recv_enter(be)) {
+		return;
+	}
+	be->ept_bound = false;
+	LOG_ERR("rpc: endpoint error name=%s: %s", be->name, message != NULL ? message : "?");
+	alp_rpc_notify_link(be->owner, ALP_RPC_LINK_LOST);
+	rpc_worker_leave(be);
 }
 
 #endif /* CONFIG_ALP_SDK_RPC */
@@ -682,7 +772,9 @@ z_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 
 	be->ept_cfg.name        = be->name;
 	be->ept_cfg.cb.bound    = rpc_ept_bound;
+	be->ept_cfg.cb.unbound  = rpc_ept_unbound; /* issue #1643 */
 	be->ept_cfg.cb.received = rpc_ept_recv;
+	be->ept_cfg.cb.error    = rpc_ept_error; /* issue #1643 */
 	be->ept_cfg.priv        = be;
 
 	rc = ipc_service_register_endpoint(be->ipc_dev, &be->ept, &be->ept_cfg);

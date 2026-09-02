@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-31",
+  "generated": "2026-09-02",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -12360,6 +12360,10 @@
           "hash": "dcf59935692075e0",
           "signature": "void alp_rpc_close(alp_rpc_channel_t *ch);"
         },
+        "alp_rpc_link_state": {
+          "hash": "f96f3c1c9156a39a",
+          "signature": "alp_status_t alp_rpc_link_state(alp_rpc_channel_t *ch, alp_rpc_link_state_t *out_state);"
+        },
         "alp_rpc_open": {
           "hash": "1e0d36d7b43c476d",
           "signature": "alp_rpc_channel_t * alp_rpc_open(const alp_rpc_config_t *cfg);"
@@ -12367,6 +12371,10 @@
         "alp_rpc_send": {
           "hash": "c85e5a8d173ec7dc",
           "signature": "alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, size_t len);"
+        },
+        "alp_rpc_set_link_callback": {
+          "hash": "5de2375a11820ea7",
+          "signature": "alp_status_t alp_rpc_set_link_callback(alp_rpc_channel_t *ch, alp_rpc_link_cb_t cb, void *user);"
         },
         "alp_rpc_subscribe": {
           "hash": "d0eb3f7a68d621cf",
@@ -12408,6 +12416,21 @@
           ],
           "hash": "bc14a9238bc4dab0",
           "kind": "struct"
+        },
+        "alp_rpc_link_cb_t": {
+          "definition": "typedef void (*alp_rpc_link_cb_t)(alp_rpc_link_state_t state, void *user);",
+          "hash": "95307895fe7e238a",
+          "kind": "fnptr"
+        },
+        "alp_rpc_link_state_t": {
+          "definition": "typedef enum { ALP_RPC_LINK_DOWN = 0, ALP_RPC_LINK_UP = 1, ALP_RPC_LINK_LOST = 2 } alp_rpc_link_state_t;",
+          "enumerators": [
+            "ALP_RPC_LINK_DOWN = 0",
+            "ALP_RPC_LINK_UP = 1",
+            "ALP_RPC_LINK_LOST = 2"
+          ],
+          "hash": "b9a1cd09b69aad43",
+          "kind": "enum"
         },
         "alp_rpc_method_cb_t": {
           "definition": "typedef void (*alp_rpc_method_cb_t)(const void *payload, size_t len, void *user);",

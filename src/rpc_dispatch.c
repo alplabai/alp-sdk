@@ -428,6 +428,56 @@ alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method)
 }
 
 /* ================================================================== */
+/* Link liveness (issue #1643)                                         */
+/* ================================================================== */
+
+void alp_rpc_notify_link(void *owner, alp_rpc_link_state_t state)
+{
+	struct alp_rpc_channel *ch = (struct alp_rpc_channel *)owner;
+	if (ch == NULL) {
+		return;
+	}
+	__atomic_store_n(&ch->link_state, (int)state, __ATOMIC_RELEASE);
+	/* RELAXED: never torn, no further ordering needed here -- see
+     * struct alp_rpc_channel's doc comment in rpc_ops.h. */
+	alp_rpc_link_cb_t cb   = __atomic_load_n(&ch->link_cb, __ATOMIC_RELAXED);
+	void             *user = __atomic_load_n(&ch->link_user, __ATOMIC_RELAXED);
+	if (cb != NULL) {
+		cb(state, user);
+	}
+}
+
+alp_status_t alp_rpc_set_link_callback(alp_rpc_channel_t *ch, alp_rpc_link_cb_t cb, void *user)
+{
+	if (ch == NULL || !_rpc_op_enter(ch)) {
+		return ALP_ERR_NOT_READY;
+	}
+	/* RELAXED, user before cb: see struct alp_rpc_channel's doc
+     * comment in rpc_ops.h for the accepted looseness this order
+     * doesn't fully close, and why it's fine. */
+	__atomic_store_n(&ch->link_user, user, __ATOMIC_RELAXED);
+	__atomic_store_n(&ch->link_cb, cb, __ATOMIC_RELAXED);
+	_rpc_op_leave(ch);
+	return ALP_OK;
+}
+
+alp_status_t alp_rpc_link_state(alp_rpc_channel_t *ch, alp_rpc_link_state_t *out_state)
+{
+	if (ch == NULL || !_rpc_op_enter(ch)) {
+		return ALP_ERR_NOT_READY;
+	}
+	alp_status_t rc;
+	if (out_state == NULL) {
+		rc = ALP_ERR_INVAL;
+	} else {
+		*out_state = (alp_rpc_link_state_t)__atomic_load_n(&ch->link_state, __ATOMIC_ACQUIRE);
+		rc         = ALP_OK;
+	}
+	_rpc_op_leave(ch);
+	return rc;
+}
+
+/* ================================================================== */
 /* Send + call                                                         */
 /* ================================================================== */
 
@@ -438,7 +488,12 @@ alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, siz
 		return ALP_ERR_NOT_READY;
 	}
 	alp_status_t rc;
-	if (method == NULL || method[0] == '\0') {
+	if (__atomic_load_n(&ch->link_state, __ATOMIC_ACQUIRE) == (int)ALP_RPC_LINK_LOST) {
+		/* issue #1643: don't accept into a link the backend has
+         * already told us is dead -- see this function's amended
+         * @return doc in include/alp/rpc.h. */
+		rc = ALP_ERR_NOT_READY;
+	} else if (method == NULL || method[0] == '\0') {
 		rc = ALP_ERR_INVAL;
 	} else if (payload == NULL && len > 0) {
 		rc = ALP_ERR_INVAL;

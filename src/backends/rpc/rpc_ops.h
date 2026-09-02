@@ -211,6 +211,31 @@ struct alp_rpc_channel {
 	const alp_backend_t    *backend;
 	alp_capabilities_t      cached_caps;
 
+	/* Link-liveness state (issue #1643).  Dispatcher-owned, NOT
+	 * gated through `chan_word`/_rpc_op_enter() -- a backend reports a
+	 * transition (see @ref alp_rpc_notify_link below) from its own
+	 * bind/unbind/error callback context, which for a self-close needs
+	 * to run inside the SAME reentrancy-safe window the backend
+	 * already brackets its `received` callback with (so the link
+	 * callback may itself call alp_rpc_close() on this channel, same
+	 * as a subscriber callback) -- routing it through the dispatcher's
+	 * own op-count would double-count against that window instead of
+	 * reusing it.  `link_state` uses ACQUIRE/RELEASE: alp_rpc_send()
+	 * (src/rpc_dispatch.c) gates real behaviour on it (rejecting into
+	 * a known-LOST link), so a writer's transition must become visible
+	 * to a reader promptly.  `link_cb`/`link_user` are plain (RELAXED)
+	 * atomics: never torn, but a alp_rpc_set_link_callback() racing a
+	 * live notification may pair a fresh cb with a stale user pointer
+	 * (or vice versa) for at most one event -- a deliberately accepted
+	 * looseness, not a memory-safety issue (see
+	 * alp_rpc_set_link_callback()'s doc comment in include/alp/rpc.h).
+	 * All three fields sit above `in_use` so a fresh slot claim's
+	 * memset(..., offsetof(..., in_use)) zeroes them back to
+	 * ALP_RPC_LINK_DOWN / no callback, same as chan_word. */
+	alp_rpc_link_cb_t link_cb;
+	void             *link_user;
+	int               link_state; /* alp_rpc_link_state_t, via __atomic_* */
+
 	/* `chan_word` (see the ALP_RPC_CHAN_* macros above) replaces the
 	 * pre-redesign `lifecycle` byte + `active_ops` u32 pair -- every
 	 * op in src/rpc_dispatch.c gates through it via _rpc_op_enter()/
@@ -247,6 +272,36 @@ struct alp_rpc_channel {
  *                    alp_rpc_channel_t*).  NULL is a silent no-op.
  */
 void alp_rpc_close_finalize(void *owner);
+
+/**
+ * @brief Report an RPMsg link-liveness transition (issue #1643).
+ *
+ * Called by a backend from its own bound/unbound/error callback
+ * context (see e.g. src/backends/rpc/zephyr_drv.c's rpc_ept_bound() /
+ * rpc_ept_unbound() / rpc_ept_error(), or
+ * src/backends/rpc/yocto_drv.c's y_open() / rpc_rx_main()) with the
+ * SAME `owner` opaque pointer cached in
+ * alp_rpc_backend_state_t::owner at open() time -- mirrors
+ * @ref alp_rpc_close_finalize's calling convention.  Updates the
+ * channel's recorded link_state and, if a callback is registered via
+ * @ref alp_rpc_set_link_callback, invokes it synchronously on the
+ * caller's own thread -- so this call inherits whatever context
+ * restriction the backend's own notify path is already documented
+ * under (see @ref alp_rpc_link_cb_t's Doxygen in include/alp/rpc.h:
+ * do not block).
+ *
+ * A backend MUST NOT call this once its own shutdown()/self-close
+ * detection has decided the channel is closing -- gate it the same
+ * way the backend already gates its `received` callback (e.g.
+ * zephyr_drv.c's rpc_recv_enter()/rpc_worker_leave() bracket around
+ * rpc_ept_unbound()/rpc_ept_error() too), so `owner` is guaranteed to
+ * still reference a live, not-yet-recycled alp_rpc_channel_t.
+ *
+ * @param[in] owner  alp_rpc_backend_state_t::owner (opaque to the
+ *                    backend).  NULL is a silent no-op.
+ * @param[in] state  New link state.
+ */
+void alp_rpc_notify_link(void *owner, alp_rpc_link_state_t state);
 
 /* ------------------------------------------------------------------ */
 /* Shared frame-size helper                                            */
