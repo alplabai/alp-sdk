@@ -41,10 +41,11 @@
  * Infineon's **OPTIGA Trust M Host Library** is integrated.  Upstream
  * publishes no Zephyr module for it, so that integration is a vendoring
  * decision plus in-tree build glue rather than a manifest pin; the
- * evidence and the open questions are recorded on issue #1164, including
- * why a minimal in-tree APDU implementation was costed and deferred
- * rather than chosen as the cheaper path
- * (chips/optiga_trust_m/optiga_trust_m.c top-of-file comment).  Once it
+ * evidence and the open questions -- including why a minimal in-tree APDU
+ * implementation was costed and deferred rather than chosen as the cheaper
+ * path -- are recorded in this driver's own top-of-file comment
+ * (chips/optiga_trust_m/optiga_trust_m.c); see #1164 for the tracking issue,
+ * still open pending a maintainer decision on which path to take.  Once it
  * is in, the cleanest architectural fit is registering OPTIGA's PSA
  * driver with `<alp/security.h>`'s MbedTLS PSA wrapper, so apps that
  * call alp_aead_open / etc. pick up hardware acceleration transparently.
