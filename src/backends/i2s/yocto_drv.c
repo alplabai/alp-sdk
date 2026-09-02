@@ -17,15 +17,15 @@
  *     bus_id == 0 -> "default"        (the per-user ALSA default;
  *                                      honours /etc/asound.conf)
  *     bus_id == N -> "hw:<N-1>,0"     (card N-1, device 0)
- * This mirrors src/yocto/audio_yocto.c's resolve_device_name() so the
+ * This mirrors src/backends/audio/yocto_drv.c's resolve_device_name() so the
  * audio and raw-I²S surfaces share one numbering convention.
  *
  * STATUS: real implementation; Yocto-link + on-target run BENCH-UNVERIFIED
  * (no sysroot / no real I²S DAI device node available in this tree).
  *
  * CMake-gated behind pkg_check_modules(ALSA libasound) exactly like
- * audio_yocto.c -- when libasound is absent the class stays on the stub
- * and this TU is not compiled.
+ * src/backends/audio/yocto_drv.c -- when libasound is absent the class
+ * stays on the stub and this TU is not compiled.
  */
 
 #if defined(__linux__)
@@ -132,7 +132,7 @@ static int _resolve_device_name(uint32_t bus_id, char *out, size_t cap)
 
 /* Apply hw params (access / format / channels / rate / period) to a
  * freshly-opened PCM handle from the alp_i2s config.  Mirrors the
- * configure_pcm() flow in audio_yocto.c.  Returns ALP_OK, or
+ * configure_pcm() flow in src/backends/audio/yocto_drv.c.  Returns ALP_OK, or
  * ALP_ERR_NOSUPPORT when the DAI can't honour the requested sample
  * rate (see the rate-mismatch check below), or another alp_status_t
  * on failure. */
@@ -297,7 +297,7 @@ y_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st, alp_capabilitie
  * additionally kicks the DAI so frames start accumulating; a PLAYBACK
  * stream auto-starts on the first writei once the buffer threshold is
  * reached, so an explicit start there is unnecessary (and mirrors
- * audio_yocto.c's out path).
+ * src/backends/audio/yocto_drv.c's out path).
  */
 static alp_status_t y_start(alp_i2s_backend_state_t *st)
 {
