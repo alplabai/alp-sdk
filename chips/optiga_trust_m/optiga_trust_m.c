@@ -26,6 +26,48 @@
  * not wired to the SoC at all.  It hangs off the GD32 supervisor
  * (PC13), reachable only via gd32g553_se_reset().  See #1164.
  *
+ * The 19,777-line figure and the no-zephyr/module.yml fact above were
+ * re-verified independently (upstream release-v5.8.1 cloned fresh and
+ * walked with `find src include -name '*.c' -o -name '*.h' | xargs
+ * wc -l`, plus a tree listing for `zephyr/` and `module.yml`), not just
+ * carried forward from this comment's own earlier wording.  Both hold.
+ *
+ * #1164 also asks whether a minimal in-tree APDU implementation --
+ * just the handful of commands this SDK needs -- beats vendoring the
+ * host library.  It doesn't, and not by a small margin.  Upstream's own
+ * comms stack sizes the transport this driver would have to
+ * hand-derive from the wire spec instead of reusing:
+ * ifx_i2c_data_link_layer.c (608 lines) implements an 11-state
+ * retry/resend/ack/nack machine (DL_STATE_TX/RX/ACK/RESEND/NACK/ERROR/
+ * RX_DF/RX_CF/...) plus a CRC16 over every frame;
+ * ifx_i2c_presentation_layer.c (1086 lines) adds the
+ * OpenApplication/CloseApplication session handshake Trust M requires
+ * before any command APDU runs; ifx_i2c_transport_layer.c (479 lines)
+ * chains APDUs across frames.
+ * That is 3300+ lines of framed, stateful, CRC-checked retry protocol
+ * at minimum -- not "a handful of commands" -- written blind against a
+ * security element with no silicon in reach to run it against even
+ * once.  A wrong CRC polynomial, a wrong sequence-toggle bit, or a
+ * mishandled retry transition is silent until it corrupts a real
+ * command to a real key-storage part, and nothing in this repo can
+ * catch that without a bench.  That's the real cost of "minimal
+ * in-tree," and it's not desk-safe to ship as anything other than
+ * NOSUPPORT without a way to verify it.
+ *
+ * This is this driver's own call, made on the cost above -- not
+ * something #1164's comment thread (2026-08-30) already decided.  That
+ * thread says the opposite on feasibility ("writing the APDU transport
+ * layer itself is desk work") and leaves speculative-vs-wait open
+ * ("Worth deciding whether to write it speculatively or wait, since an
+ * unverified security-chip driver is not much better than a stub").
+ *
+ * Anything that changes send_apdu()/read_product_info() away from
+ * NOSUPPORT must move these four assertions in the same change, or the
+ * chips suite goes red on the first run: tests/zephyr/chips/src/
+ * test_security.c:88,105; examples/v2n/v2n-secure-element-sign/src/
+ * main.c:51,69; examples/aen/aen-secure-element-sign/src/main.c:102,119
+ * (both example READMEs document the NOSUPPORT line as the PASS case).
+ *
  * For v0.3 we ship:
  *   - I2C address probe via a 4-byte read of the I2C_STATE register
  *     at 0x82.  The register numbers below and that 4-byte length
