@@ -114,7 +114,7 @@ fw 0.6.0  (wire 3.1)
 
 `scripts/check_protocol_version_policy.py` fails when
 `ALP_CC3501E_PROTOCOL_MAJOR`.`MINOR` has no matching row in the
-[Version ledger](#version-ledger) below (the machine-readable one this gate
+**Version ledger** section below (the machine-readable one this gate
 actually parses -- not the prose table under Context, which is the historical
 analysis, not the source of truth), and when the ledger's newest row disagrees
 with the header. A row marked `MAJOR` must carry a "an old host would be
@@ -129,7 +129,7 @@ justification puts the friction where the decision is.
 
 Machine-readable, one row per released wire version -- `scripts/
 check_protocol_version_policy.py` parses the single fenced block below, never
-the prose table under [Context](#context) above (free-form, for humans). Row
+the prose table under Context above (free-form, for humans). Row
 format: `MAJOR.MINOR = MAJOR|MINOR = justification`.
 
 A row marked `MAJOR` must state that an existing host would be **misread**;
