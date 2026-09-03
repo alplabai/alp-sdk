@@ -265,11 +265,42 @@ def _coerce(spec: dict[str, Any], raw: Any) -> Any:
 
 
 def _check_constraints(template_id: str, spec: dict[str, Any], value: Any) -> None:
+    """Enforce `spec["constraints"]` against the already-coerced @value.
+
+    #1916: `minimum`/`maximum` are only well-typed against `type: integer`.
+    `$defs/parameter.type` is exactly string/integer/boolean/enum, none of
+    the other three compares against an `int` bound, and the schema does
+    NOT cross-reference `type` against `constraints` at all -- so a
+    schema-VALID record pairing `type: string` with `constraints.minimum:
+    5` used to reach `"a" < 5` and raise a bare `TypeError` past every
+    `except TemplateError` a caller declares, on a document nothing
+    upstream refused. Gate on the DECLARED type, not on `isinstance(value,
+    int)`: `bool` is an `int` subclass, so the isinstance form would let
+    the boolean case through. `boolean` is refused deliberately even though
+    `bool < int` never raises -- a bound that cannot crash still is not one
+    that means anything on a boolean knob. A schema addition of a fifth,
+    numeric `type` would need a matching line here.
+
+    `constraints.enum` one line below is the SAME inapplicability class --
+    the schema forces `enum` items to strings, so a `type: integer`
+    parameter can never satisfy one, and the resulting error blames the
+    value rather than the inapplicable bound. It is LEFT OPEN on purpose:
+    it fails loudly instead of crashing, and tan-cli's sibling
+    `_check_constraints` (tan-cli#1087, PR tan-cli#1123 -- the reference
+    this guard matches) leaves it open too. Closing it on one side only
+    would re-open the cross-repo divergence #1916 exists to end.
+    """
     constraints = spec.get("constraints") or {}
     if "enum" in constraints and value not in constraints["enum"]:
         raise ParameterError(
             f"{template_id}: {spec['name']}={value!r} not in "
             f"{constraints['enum']}")
+    for bound in ("minimum", "maximum"):
+        if bound in constraints and spec["type"] != "integer":
+            raise ParameterError(
+                f"{template_id}: {spec['name']}={value!r} is type "
+                f"{spec['type']!r}; constraints.{bound} "
+                f"({constraints[bound]!r}) only applies to type 'integer'")
     if "minimum" in constraints and value < constraints["minimum"]:
         raise ParameterError(
             f"{template_id}: {spec['name']}={value!r} < minimum "

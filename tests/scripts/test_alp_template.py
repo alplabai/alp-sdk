@@ -199,6 +199,118 @@ def test_minimal_has_no_declared_parameters_so_it_is_a_pure_copy():
 
 
 # --------------------------------------------------------------------------
+# #1916 -- `constraints.minimum`/`maximum` on a non-`integer` parameter.
+#
+# `$defs/parameter` in metadata/schemas/template-catalog-v1.schema.json does
+# not cross-reference `constraints` against `type` at all: `type` is exactly
+# one of string/integer/boolean/enum, `minimum`/`maximum` are plain
+# `"type": "integer"` bounds, and nothing couples the two. So a `type:
+# string` parameter carrying `constraints.minimum: 5` is SCHEMA-VALID, and
+# reached `value < constraints["minimum"]` as `"a" < 5` -- a bare
+# `TypeError` past every `except TemplateError` a caller declares, on a
+# document nothing upstream refused. tan-cli closed the same defect in its
+# own copy (tan-cli#1087, PR tan-cli#1123); this closes the divergence.
+#
+# `constraints.enum` is the SAME inapplicability class (the schema forces
+# `enum` items to strings, so an `integer` parameter can never satisfy one)
+# and is DELIBERATELY LEFT OPEN here, matching tan-cli: it fails loudly with
+# a value-blaming `ParameterError`, not a crash. Closing it here and not
+# there would re-open the divergence in the other direction.
+# --------------------------------------------------------------------------
+
+_NONINT_BOUND_CASES = [
+    ("string", "a", "minimum", 5),
+    ("string", "a", "maximum", 5),
+    ("enum", "a", "minimum", 5),
+    ("enum", "a", "maximum", 5),
+    ("boolean", False, "minimum", 0),
+    ("boolean", False, "maximum", 0),
+]
+
+
+def _parameter_validator():
+    """A Draft 2020-12 validator over `$defs/parameter` alone, resolved out
+    of the real shipped schema -- so these tests assert against the document
+    the repo actually ships, not a restatement of it."""
+    import jsonschema
+
+    schema = json.loads(
+        (REPO / "metadata" / "schemas" / "template-catalog-v1.schema.json")
+        .read_text(encoding="utf-8"))
+    subschema = dict(schema["$defs"]["parameter"])
+    subschema["$defs"] = schema["$defs"]
+    jsonschema.Draft202012Validator.check_schema(subschema)
+    return jsonschema.Draft202012Validator(subschema)
+
+
+@pytest.mark.parametrize(
+    ("ptype", "default", "bound", "bound_value"), _NONINT_BOUND_CASES)
+def test_a_numeric_bound_on_a_nonint_parameter_is_schema_valid(
+        ptype, default, bound, bound_value):
+    """The premise of #1916: the schema does NOT refuse these records, so
+    the guard below is the only thing standing between a user and a bare
+    traceback. If a future schema revision DOES cross-reference `type`
+    against `constraints`, this test goes red and the guard's docstring
+    needs revisiting -- it is not redundant with the guard, it is what
+    makes the guard necessary."""
+    record = {"name": "knob", "type": ptype, "description": "fixture",
+              "default": default, "constraints": {bound: bound_value}}
+    assert list(_parameter_validator().iter_errors(record)) == []
+
+
+@pytest.mark.parametrize(
+    ("ptype", "default", "bound", "bound_value"), _NONINT_BOUND_CASES)
+def test_a_numeric_bound_on_a_nonint_parameter_raises_a_curated_error(
+        ptype, default, bound, bound_value):
+    """#1916. A `ParameterError` naming the parameter, its declared type
+    and the inapplicable bound -- never a bare `TypeError`, and never a
+    silent pass. `boolean` is refused on purpose even though `bool < int`
+    never raises: a bound that cannot crash still is not one that means
+    anything on a boolean knob."""
+    spec = {"name": "knob", "type": ptype, "description": "fixture",
+            "default": default, "constraints": {bound: bound_value}}
+
+    with pytest.raises(alp_template.ParameterError) as excinfo:
+        alp_template._check_constraints("fixture-tpl", spec, default)
+
+    message = str(excinfo.value)
+    assert "fixture-tpl" in message
+    assert repr(ptype) in message
+    assert f"constraints.{bound}" in message
+
+
+def test_a_numeric_bound_on_an_integer_parameter_is_still_enforced():
+    """The guard must not swallow the bound it was added to protect: on
+    `type: integer` -- the one type it applies to -- comparison still
+    happens, in both directions."""
+    spec = {"name": "knob", "type": "integer", "description": "fixture",
+            "default": 5, "constraints": {"minimum": 5, "maximum": 9}}
+
+    alp_template._check_constraints("fixture-tpl", spec, 7)  # in range
+
+    with pytest.raises(alp_template.ParameterError, match="< minimum 5"):
+        alp_template._check_constraints("fixture-tpl", spec, 4)
+    with pytest.raises(alp_template.ParameterError, match="> maximum 9"):
+        alp_template._check_constraints("fixture-tpl", spec, 10)
+
+
+def test_no_shipped_catalog_parameter_carries_an_inapplicable_bound():
+    """The shipped catalog is clean today, so #1916's guard is a no-op for
+    every real template -- this fix changes no user-visible behaviour on
+    metadata/templates/catalog-v1.json. Locks that in: a future catalog
+    edit that pairs a numeric bound with a non-integer knob fails HERE,
+    with the offender named, rather than at a user's `alp generate`."""
+    offenders = [
+        (record["id"], spec["name"], spec["type"], bound)
+        for record in _catalog()["templates"]
+        for spec in record.get("parameters", [])
+        for bound in ("minimum", "maximum")
+        if bound in (spec.get("constraints") or {}) and spec["type"] != "integer"
+    ]
+    assert offenders == []
+
+
+# --------------------------------------------------------------------------
 # find_template_by_cores() -- the --cores scaffold selector (issue #1652)
 # --------------------------------------------------------------------------
 
@@ -266,7 +378,7 @@ def test_scaffold_via_cores_matches_scaffold_via_template():
 # touching the real repo) to exercise the `substitute` codepath itself.
 # --------------------------------------------------------------------------
 
-def _write_fixture_catalog(root: Path) -> Path:
+def _write_fixture_catalog(root: Path, parameters: list | None = None) -> Path:
     example_rel = "examples/fixture/knob-app"
     example_dir = root / example_rel
     (example_dir / "src").mkdir(parents=True)
@@ -303,7 +415,7 @@ def _write_fixture_catalog(root: Path) -> Path:
                     "user_owned": ["board.yaml", "src/main.c"],
                     "generated": [],
                 },
-                "parameters": [
+                "parameters": parameters if parameters is not None else [
                     {
                         "name": "knob",
                         "type": "integer",
@@ -353,6 +465,25 @@ def test_parameter_substitution_is_noop_when_value_equals_default(tmp_path):
 
     assert (dest / "board.yaml").read_text(encoding="utf-8") == "knob: 42\nother: unrelated\n"
     assert result.substitutions == ()
+
+
+def test_render_refuses_an_inapplicable_bound_instead_of_crashing(tmp_path):
+    """#1916 end-to-end: the guard is on the path a user reaches, not just
+    reachable by a direct `_check_constraints` call. `render()` raises
+    `ParameterError` -- a `TemplateError`, which both callers of this module
+    already catch -- where it used to let a bare `TypeError` escape."""
+    catalog_path = _write_fixture_catalog(tmp_path, parameters=[
+        {"name": "knob", "type": "string", "description": "fixture knob",
+         "default": "a", "constraints": {"minimum": 5}},
+    ])
+
+    with pytest.raises(alp_template.ParameterError) as excinfo:
+        alp_template.render(
+            "knob-app", tmp_path / "rendered",
+            catalog_path=catalog_path, base_dir=tmp_path, dry_run=True)
+
+    assert "only applies to type 'integer'" in str(excinfo.value)
+    assert isinstance(excinfo.value, alp_template.TemplateError)
 
 
 def test_no_shipped_template_declares_a_substitution_target():
