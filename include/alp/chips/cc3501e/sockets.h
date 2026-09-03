@@ -25,15 +25,18 @@
  * queue, carrying a ready-to-use handle:
  *
  * @code
- * // once, at startup: AP up, then a listening socket
- * cc3501e_wifi_ap_start(ctx, "my-device", "secret", ALP_CC3501E_WIFI_SEC_WPA2);
+ * // once, at startup: AP up, then a listening socket.  The security byte is
+ * // 1 = WPA2-PSK (see alp_cc3501e_wifi_connect_t::security), and it comes
+ * // BEFORE the passphrase.
+ * cc3501e_wifi_ap_start(ctx, "my-device", 1u, "secret", 10000);
  * cc3501e_sock_open(ctx, ALP_CC3501E_SOCK_FAMILY_IPV4,
  *                   ALP_CC3501E_SOCK_TYPE_STREAM, 0, &srv, 5000);
  * cc3501e_sock_bind(ctx, srv, NULL, 80, 5000);   // NULL ip = every interface
  * cc3501e_sock_listen(ctx, srv, 4, 5000);
  *
- * // in the event callback, for each accepted connection
- * void on_event(uint8_t opcode, const uint8_t *payload, uint8_t len, void *user)
+ * // in the event callback, for each accepted connection.  The signature is
+ * // cc3501e_event_cb_t -- note @c size_t len, not uint8_t.
+ * void on_event(uint8_t opcode, const uint8_t *payload, size_t len, void *user)
  * {
  *         alp_cc3501e_sock_accepted_evt_t ev;
  *         if (opcode != ALP_CC3501E_EVT_SOCK_ACCEPTED) return;
@@ -148,14 +151,21 @@ alp_status_t cc3501e_sock_bind(cc3501e_t    *ctx,
  * does NOT block waiting for a connection, and there is no accept counterpart.
  * Worker-routed poll-by-repeat.
  *
+ * The firmware tracks a fixed number of listening sockets (4 in the current
+ * build). Asking for one past that is a PERMANENT refusal, not a transient:
+ * it surfaces as @c ALP_ERR_BUSY, which this driver treats as terminal and
+ * does not retry — close a listener you no longer serve before opening
+ * another.
+ *
  * @param ctx         Initialised driver context.
  * @param handle      Bound STREAM socket (@ref cc3501e_sock_open then
  *                    @ref cc3501e_sock_bind).
  * @param backlog     Maximum queued, not-yet-accepted connections; 0 asks the
  *                    firmware for its default.
  * @param timeout_ms  Upper bound on the poll-by-repeat budget.
- * @return ALP_OK once listening; ALP_ERR_NOT_READY on the stub build; mapped
- *         error otherwise.
+ * @return ALP_OK once listening; ALP_ERR_BUSY if the firmware has no free
+ *         listening slot (terminal — see above, do not retry);
+ *         ALP_ERR_NOT_READY on the stub build; mapped error otherwise.
  */
 alp_status_t
 cc3501e_sock_listen(cc3501e_t *ctx, uint16_t handle, uint8_t backlog, uint32_t timeout_ms);

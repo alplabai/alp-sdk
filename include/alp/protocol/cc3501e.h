@@ -575,6 +575,17 @@ typedef struct {
 /** Fixed per-event header size on the wire (evt_opcode + len). */
 #define ALP_CC3501E_EVENT_HDR_BYTES 2u
 
+/** Largest payload a single queued async event can carry.
+ *
+ *  This is a HARD CAP, not a hint: the firmware's event ring
+ *  (cc3501e-bridge-firmware `src/event_ring.h`, which sizes its slots from
+ *  this constant) CLAMPS a longer payload in `event_ring_push()` rather than
+ *  rejecting it, so an oversized EVT_* struct is silently truncated on the
+ *  wire. Any new event payload must `_Static_assert` its `sizeof` against
+ *  this — see @ref alp_cc3501e_sock_accepted_evt_t, which is carried in a
+ *  compact IPv4 form for exactly this reason. */
+#define ALP_CC3501E_EVENT_PAYLOAD_MAX 16u
+
 /** One entry in a CMD_GET_PENDING_EVENTS (0x05) reply.  The reply DATA (the
  *  bytes after the frame's status byte) is a packed list of ZERO OR MORE
  *  entries, each laid out on the wire with NO padding as:
@@ -1459,13 +1470,15 @@ _Static_assert(sizeof(alp_cc3501e_sock_addr_t) == 20u, "sock_addr wire length");
 _Static_assert(sizeof(alp_cc3501e_sock_bind_t) == 24u, "sock_bind wire length");
 _Static_assert(sizeof(alp_cc3501e_sock_listen_t) == 4u, "sock_listen wire length");
 /* The accepted-connection event rides the firmware event ring, whose per-entry
- * payload is capped at 16 bytes (cc3501e-bridge-firmware src/event_ring.h
- * CC3501E_EVENT_PAYLOAD_MAX).  A payload over that cap is CLAMPED by
- * event_ring_push(), i.e. silently truncated on the wire, so pin the size here
- * rather than discover it as a short peer address on the bench. */
+ * payload is capped at @ref ALP_CC3501E_EVENT_PAYLOAD_MAX.  A payload over that
+ * cap is CLAMPED by event_ring_push(), i.e. silently truncated on the wire, so
+ * pin the size here rather than discover it as a short peer address on the
+ * bench.  The second assert tests the CAP SYMBOL, not a repeated literal: the
+ * firmware sizes its ring slots from the same constant, so resizing the ring
+ * moves both sides together instead of leaving this pinning a stale 16. */
 _Static_assert(sizeof(alp_cc3501e_sock_accepted_evt_t) == 12u, "sock_accepted event length");
-_Static_assert(sizeof(alp_cc3501e_sock_accepted_evt_t) <= 16u,
-               "sock_accepted must fit CC3501E_EVENT_PAYLOAD_MAX");
+_Static_assert(sizeof(alp_cc3501e_sock_accepted_evt_t) <= ALP_CC3501E_EVENT_PAYLOAD_MAX,
+               "sock_accepted must fit ALP_CC3501E_EVENT_PAYLOAD_MAX");
 _Static_assert(offsetof(alp_cc3501e_sock_accepted_evt_t, peer_addr) == 8u,
                "sock_accepted.peer_addr @8");
 

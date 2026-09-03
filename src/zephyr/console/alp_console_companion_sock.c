@@ -199,6 +199,10 @@ out_close:
  */
 static struct k_msgq companion_accept_q;
 static uint16_t      companion_accept_slots[8];
+/* Accepted connections the callback could not queue.  Written from the event
+ * thread, read by the serve loop when it finishes -- a plain counter is enough
+ * for a report that is only printed after the callback is unregistered. */
+static unsigned companion_accept_drops;
 
 static void companion_serve_event_cb(uint8_t opcode, const uint8_t *payload, size_t len, void *user)
 {
@@ -213,9 +217,12 @@ static void companion_serve_event_cb(uint8_t opcode, const uint8_t *payload, siz
 	}
 	/* Queue-full drops the handle, which LEAKS a firmware socket -- the firmware
 	 * hands ownership over with this event and never closes it itself.  Eight
-	 * slots is deep for a console demo, and dropping silently would be the worse
-	 * failure, so the serve loop reports the drop count when it finishes. */
+	 * slots is deep for a console demo, and a silent drop would be the worse
+	 * failure, so count it; the serve loop reports the total when it finishes.
+	 * Closing it HERE is not an option: this runs on the event thread, and
+	 * cc3501e_sock_close() is a poll-by-repeat bridge transaction. */
 	if (k_msgq_put(&companion_accept_q, &ev.handle, K_NO_WAIT) != 0) {
+		companion_accept_drops++;
 		return;
 	}
 }
@@ -325,6 +332,7 @@ static int cmd_companion_sock_serve(const struct shell *sh, size_t argc, char **
 	            (char *)companion_accept_slots,
 	            sizeof(companion_accept_slots[0]),
 	            ARRAY_SIZE(companion_accept_slots));
+	companion_accept_drops = 0u; /* per-run, like the served count */
 
 	uint16_t     srv = 0;
 	alp_status_t s   = cc3501e_sock_open(companion_cc3501e,
@@ -381,7 +389,31 @@ static int cmd_companion_sock_serve(const struct shell *sh, size_t argc, char **
 		served++;
 	}
 	(void)cc3501e_remove_event_callback(companion_cc3501e, companion_serve_event_cb, NULL);
+
+	/* Close what the loop never got to.  The host OWNS every accepted handle,
+	 * so a connection that landed after the last k_msgq_get -- or that was
+	 * still queued when the deadline passed -- is a firmware socket nothing
+	 * would ever release, which is precisely the leak this command's own
+	 * documentation warns callers about.  Drain AFTER unregistering the
+	 * callback, so nothing new can be queued behind us. */
+	unsigned closed = 0;
+	uint16_t leftover;
+	while (k_msgq_get(&companion_accept_q, &leftover, K_NO_WAIT) == 0) {
+		(void)cc3501e_sock_close(companion_cc3501e, leftover, ALP_COMPANION_SOCK_OP_MS);
+		closed++;
+	}
 	shell_print(sh, "served %u connection(s)", served);
+	if (closed > 0u) {
+		shell_print(sh, "closed %u unserved connection(s)", closed);
+	}
+	if (companion_accept_drops > 0u) {
+		/* These were never queued, so their handles are unknown here and the
+		 * firmware sockets stay allocated until the next companion reset. */
+		shell_warn(sh,
+		           "dropped %u accepted connection(s): queue full, their firmware "
+		           "sockets are leaked until the companion resets",
+		           companion_accept_drops);
+	}
 
 out_close:
 	(void)cc3501e_sock_close(companion_cc3501e, srv, ALP_COMPANION_SOCK_OP_MS);
