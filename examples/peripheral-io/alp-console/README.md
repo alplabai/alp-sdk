@@ -98,12 +98,22 @@ The `opcode 0x2c` line is the inbound connection arriving as an async
 blocked for the whole window (Zephyr's shell has no cancellation hook, so ctrl-c
 does not cut it short).
 
-> **Known limitation, not caused by the listening path:** back-to-back **client**
-> socket operations in AP mode are unreliable on current bridge firmware — the
-> first `sock tcp-get` succeeds and the next one fails (`-1` / `-4`), and a third
-> can leave the link needing a cold boot. Reproduced identically on the
-> pre-v9 firmware with no listening socket in play, so serving and fetching in
-> the same session is the case to avoid for now.
+> **Known limitation, not caused by the listening path:** socket operations in
+> AP mode are unreliable on current bridge firmware when they race radio
+> activity. Two shapes measured on an E1M-AEN801:
+>
+> - Back-to-back **client** ops: the first `sock tcp-get` succeeds and the next
+>   fails (`-1` / `-4`); a third can leave the link needing a cold boot.
+>   Reproduced identically on the pre-v9 firmware with **no listening socket in
+>   play**, so it is not from the serving path.
+> - `bind`/`listen` issued **while a client is still associating** timed out
+>   (`listen failed (-4)`) and wedged the link. Running the same command after
+>   the client had a lease worked 5/5.
+>
+> Both are tracked as cc3501e-bridge-firmware#106. Practical advice until it is
+> fixed: bring the AP up, let clients associate, *then* start serving — and do
+> not mix serving with `tcp-get` in one session. A wedged link needs a 20 s
+> power-off; a shorter cycle does not clear it.
 
 ### RGB status LED
 
