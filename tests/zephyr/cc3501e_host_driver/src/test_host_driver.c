@@ -327,6 +327,12 @@ static void slave_dispatch(void)
 	case ALP_CC3501E_CMD_DIAG_LOG_LEVEL:
 	case ALP_CC3501E_CMD_SOCK_CONNECT:
 	case ALP_CC3501E_CMD_SOCK_CLOSE:
+	/* BIND / LISTEN (protocol v9) reply with the bare status too: neither
+	 * carries reply data, and there is no ACCEPT opcode to model -- an inbound
+	 * connection arrives as an EVT_SOCK_ACCEPTED entry on the event queue,
+	 * which the cc3501e_host_events suite covers. */
+	case ALP_CC3501E_CMD_SOCK_BIND:
+	case ALP_CC3501E_CMD_SOCK_LISTEN:
 	/* OTA_PROMOTE (0x46) belongs in THIS bucket, not with the worker-routed
 	 * submits below: handle_ota_promote() returns
 	 * hw_to_resp(cc3501e_hw_ota_promote()), and the TI HAL's
@@ -954,7 +960,7 @@ ZTEST(cc3501e_host_driver, test_wifi_rssi_retries_worker_busy_1377)
 ZTEST(cc3501e_host_driver, test_wifi_get_ip_byte_order)
 {
 	uint8_t ip[4] = { 0 };
-	zassert_equal(cc3501e_wifi_get_ip(&fw, ip), ALP_OK, "GET_IP -> OK");
+	zassert_equal(cc3501e_wifi_get_ip(&fw, ALP_CC3501E_WIFI_IFACE_STA, ip), ALP_OK, "GET_IP -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_WIFI_GET_IP, "opcode 0x17");
 	zassert_equal(ip[0], 192, "ip[0]");
 	zassert_equal(ip[1], 168, "ip[1]");
@@ -1667,6 +1673,80 @@ ZTEST(cc3501e_host_driver, test_sock_close_encodes_handle)
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SOCK_CLOSE, "opcode 0x24");
 	zassert_equal(slave.req_pl[0], 0x34u, "handle lo");
 	zassert_equal(slave.req_pl[1], 0x12u, "handle hi");
+}
+
+/* BIND packs the SOCK_CONNECT layout with the LOCAL endpoint, so the two parse
+ * identically firmware-side.  A NULL ip is INADDR_ANY -- the addr field must
+ * come out all-zero, NOT uninitialised stack, because that is what a server on
+ * the soft-AP binds. */
+ZTEST(cc3501e_host_driver, test_sock_bind_null_ip_is_inaddr_any)
+{
+	static const uint8_t zeros[16] = { 0 };
+
+	zassert_equal(cc3501e_sock_bind(&fw, 0x1234u, NULL, 80u, 100u), ALP_OK, "BIND -> OK");
+	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SOCK_BIND, "opcode 0x25");
+	zassert_equal(slave.req_len, 24u, "bind payload is 24 bytes, same as connect");
+	zassert_equal(slave.req_pl[0], 0x34u, "handle lo");
+	zassert_equal(slave.req_pl[1], 0x12u, "handle hi");
+	zassert_equal(slave.req_pl[4], (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4, "local.family");
+	zassert_equal(slave.req_pl[6], 80u, "local.port lo (host order on the wire)");
+	zassert_equal(slave.req_pl[7], 0u, "local.port hi");
+	zassert_mem_equal(&slave.req_pl[8], zeros, 16u, "local.addr all-zero = INADDR_ANY");
+}
+
+ZTEST(cc3501e_host_driver, test_sock_bind_explicit_ip_encodes_octets)
+{
+	const uint8_t ip[4] = { 10, 0, 0, 3 };
+
+	zassert_equal(cc3501e_sock_bind(&fw, 0x0001u, ip, 8080u, 100u), ALP_OK, "BIND -> OK");
+	zassert_equal(slave.req_pl[6], (uint8_t)(8080u & 0xFFu), "local.port lo");
+	zassert_equal(slave.req_pl[7], (uint8_t)(8080u >> 8), "local.port hi");
+	zassert_mem_equal(&slave.req_pl[8], ip, 4u, "local.addr[0..3] = the IPv4 octets");
+}
+
+ZTEST(cc3501e_host_driver, test_sock_listen_encodes_backlog)
+{
+	zassert_equal(cc3501e_sock_listen(&fw, 0x1234u, 4u, 100u), ALP_OK, "LISTEN -> OK");
+	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SOCK_LISTEN, "opcode 0x26");
+	zassert_equal(slave.req_len, 4u, "listen payload = {handle(LE16), backlog, rsvd}");
+	zassert_equal(slave.req_pl[0], 0x34u, "handle lo");
+	zassert_equal(slave.req_pl[1], 0x12u, "handle hi");
+	zassert_equal(slave.req_pl[2], 4u, "backlog");
+	zassert_equal(slave.req_pl[3], 0u, "reserved stays 0");
+}
+
+/* The accepted-connection event decoder.  It exists so a callback never casts
+ * its payload pointer, which aims into the driver's event buffer at whatever
+ * offset the entry landed on and so carries no alignment guarantee. */
+ZTEST(cc3501e_host_driver, test_sock_accepted_decode_fields)
+{
+	/* listen_handle=1 | handle=2 | peer_port=54321 (0xD431) | family=IPV4 |
+	 * rsvd | peer_addr = 192.168.1.14 (network order, MSB first). */
+	const uint8_t wire[12] = { 0x01, 0x00, 0x02, 0x00, 0x31, 0xD4, 0x00, 0x00, 192, 168, 1, 14 };
+	alp_cc3501e_sock_accepted_evt_t ev = { 0 };
+
+	zassert_equal(cc3501e_sock_accepted_decode(wire, sizeof(wire), &ev), ALP_OK, "decode -> OK");
+	zassert_equal(ev.listen_handle, 1u, "listen_handle");
+	zassert_equal(ev.handle, 2u, "handle");
+	zassert_equal(ev.peer_port, 54321u, "peer_port (host order)");
+	zassert_equal(ev.peer_family, (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4, "peer_family");
+	zassert_mem_equal(ev.peer_addr, &wire[8], 4u, "peer_addr copied verbatim");
+}
+
+ZTEST(cc3501e_host_driver, test_sock_accepted_decode_rejects_short_and_null)
+{
+	const uint8_t                   wire[11] = { 0 };
+	alp_cc3501e_sock_accepted_evt_t ev       = { 0 };
+
+	/* A truncated entry must be REJECTED, not decoded from whatever follows:
+	 * the handle it would invent is a firmware socket the host would then try
+	 * to recv on and close. */
+	zassert_equal(cc3501e_sock_accepted_decode(wire, sizeof(wire), &ev),
+	              ALP_ERR_INVAL,
+	              "11 bytes is short -> INVAL");
+	zassert_equal(ev.handle, 0u, "out left untouched on a short payload");
+	zassert_equal(cc3501e_sock_accepted_decode(NULL, 12u, &ev), ALP_ERR_INVAL, "NULL payload");
+	zassert_equal(cc3501e_sock_accepted_decode(wire, 12u, NULL), ALP_ERR_INVAL, "NULL out");
 }
 
 /* ================================ BLE ====================================== */

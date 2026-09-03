@@ -2,7 +2,7 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * CC3501E TCP/UDP socket host helpers (opcodes 0x20..0x24).  See
+ * CC3501E TCP/UDP socket host helpers (opcodes 0x20..0x26).  See
  * <alp/chips/cc3501e/sockets.h> for the public API.
  *
  * Each wraps cc3501e_request over the packed wire structs in
@@ -81,6 +81,42 @@ alp_status_t cc3501e_sock_connect(cc3501e_t    *ctx,
 	memcpy(&p[8], ip, 4); /* peer.addr[0..3]; addr[4..15] stay zero (IPv4) */
 	return poll_by_repeat(
 	    ctx, ALP_CC3501E_CMD_SOCK_CONNECT, p, sizeof(p), NULL, 0, NULL, timeout_ms);
+}
+
+alp_status_t cc3501e_sock_bind(cc3501e_t    *ctx,
+                               uint16_t      handle,
+                               const uint8_t ip[4],
+                               uint16_t      port,
+                               uint32_t      timeout_ms)
+{
+	/* SOCK_BIND (0x25) wire = alp_cc3501e_sock_bind_t: handle(LE16) |
+	 * reserved(2) | local sock_addr { family | reserved | port(LE16) | addr[16] }
+	 * -- byte-for-byte the SOCK_CONNECT layout, only the endpoint's meaning
+	 * differs.  ip == NULL means INADDR_ANY (bind every interface), which is
+	 * what a server on the soft-AP wants: the AP address only exists once the
+	 * role is up, and binding it explicitly would race the role-up. */
+	uint8_t p[24];
+	memset(p, 0, sizeof(p));
+	p[0] = (uint8_t)(handle & 0xFFu);
+	p[1] = (uint8_t)((handle >> 8) & 0xFFu);
+	p[4] = (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4; /* local.family */
+	p[6] = (uint8_t)(port & 0xFFu);               /* local.port (LE16, host order) */
+	p[7] = (uint8_t)((port >> 8) & 0xFFu);
+	if (ip != NULL) memcpy(&p[8], ip, 4); /* local.addr[0..3]; [4..15] stay zero */
+	return poll_by_repeat(ctx, ALP_CC3501E_CMD_SOCK_BIND, p, sizeof(p), NULL, 0, NULL, timeout_ms);
+}
+
+alp_status_t
+cc3501e_sock_listen(cc3501e_t *ctx, uint16_t handle, uint8_t backlog, uint32_t timeout_ms)
+{
+	/* SOCK_LISTEN (0x26) wire = alp_cc3501e_sock_listen_t { handle(LE16) |
+	 * backlog | reserved }.  There is no accept call to pair with this: each
+	 * inbound connection is delivered as an EVT_SOCK_ACCEPTED entry on the
+	 * polled event queue (cc3501e_poll_events), carrying a ready-to-use handle.
+	 * See <alp/chips/cc3501e/sockets.h> for the serve loop that implies. */
+	uint8_t p[4] = { (uint8_t)(handle & 0xFFu), (uint8_t)((handle >> 8) & 0xFFu), backlog, 0u };
+	return poll_by_repeat(
+	    ctx, ALP_CC3501E_CMD_SOCK_LISTEN, p, sizeof(p), NULL, 0, NULL, timeout_ms);
 }
 
 alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
@@ -220,6 +256,24 @@ alp_status_t cc3501e_sock_recv(cc3501e_t *ctx,
 	size_t copy = (data_len > cap) ? cap : data_len;
 	if (copy > 0u) memcpy(buf, &reply[CC3501E_SOCK_RECV_RESP_HDR], copy);
 	if (recv_len_out != NULL) *recv_len_out = copy;
+	return ALP_OK;
+}
+
+alp_status_t cc3501e_sock_accepted_decode(const uint8_t                   *payload,
+                                          size_t                           len,
+                                          alp_cc3501e_sock_accepted_evt_t *out)
+{
+	if (payload == NULL || out == NULL) return ALP_ERR_INVAL;
+	if (len < sizeof(*out)) return ALP_ERR_INVAL; /* truncated entry -- out stays untouched */
+	/* Field-by-field off the packed wire bytes, NOT a struct copy: the callback's
+	 * payload pointer aims into the driver's event buffer at whatever offset this
+	 * entry landed on, so it carries no alignment guarantee at all. */
+	out->listen_handle = (uint16_t)payload[0] | ((uint16_t)payload[1] << 8);
+	out->handle        = (uint16_t)payload[2] | ((uint16_t)payload[3] << 8);
+	out->peer_port     = (uint16_t)payload[4] | ((uint16_t)payload[5] << 8);
+	out->peer_family   = payload[6];
+	out->reserved      = payload[7];
+	memcpy(out->peer_addr, &payload[8], sizeof(out->peer_addr));
 	return ALP_OK;
 }
 

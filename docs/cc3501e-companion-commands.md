@@ -109,10 +109,29 @@ immediately, with no independent AP-status channel to confirm against
 | Command | What it does |
 |---|---|
 | `sock tcp-get <ip> <port> <path>` | Open a TCP socket, issue an HTTP/1.0 `GET`, and print the reply. |
+| `sock serve <port> [seconds]` | Bind and listen on `<port>`, then answer each inbound HTTP request for `[seconds]` (default 60). |
 
-The socket primitives underneath `tcp-get` — `open`, `connect`, `send`,
-`recv`, `close` — are available from firmware as the `cc3501e_sock_*` API
-(the console exposes only the composed `tcp-get` helper).
+The socket primitives underneath these — `open`, `connect`, `bind`, `listen`,
+`send`, `recv`, `close` — are available from firmware as the `cc3501e_sock_*`
+API (the console exposes only the two composed helpers).
+
+`sock serve` is the **serving** direction, added in wire protocol v9: it is how
+a product with no Ethernet PHY puts a web console on the module's own soft-AP.
+Bring the AP up first (`wifi ap <ssid> <pass>`), then run `serve`; it prints the
+AP-side address to aim a client at. There is no `accept` command and no
+accept opcode on the wire — `accept()` blocks, and this bridge is strict
+request/reply lockstep, so an inbound connection is delivered as an
+`EVT_SOCK_ACCEPTED` event on the polled event queue instead, carrying a handle
+the host then uses with the ordinary `recv` / `send` / `close`.
+
+Two things to expect from `serve`:
+
+- **The shell is blocked for the whole window.** Zephyr's shell has no
+  cancellation hook a running command can poll, so ctrl-c does not cut it
+  short; pick a `[seconds]` you are willing to wait out.
+- **The host owns every accepted handle.** The firmware never closes one on the
+  host's behalf, so a serve loop that forgets `cc3501e_sock_close` leaks
+  firmware sockets until the IP stack runs out.
 
 ## `alp companion spi1`
 
