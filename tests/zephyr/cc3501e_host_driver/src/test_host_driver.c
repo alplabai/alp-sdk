@@ -1722,9 +1722,8 @@ ZTEST(cc3501e_host_driver, test_sock_accepted_decode_fields)
 {
 	/* listen_handle=1 | handle=2 | peer_port=54321 (0xD431) | family=IPV4 |
 	 * rsvd | peer_addr = 192.168.1.14 (network order, MSB first). */
-	const uint8_t                   wire[12] = { 0x01, 0x00, 0x02, 0x00, 0x31, 0xD4,
-		                                         0x00, 0x00, 192,  168,  1,    14 };
-	alp_cc3501e_sock_accepted_evt_t ev       = { 0 };
+	const uint8_t wire[12] = { 0x01, 0x00, 0x02, 0x00, 0x31, 0xD4, 0x00, 0x00, 192, 168, 1, 14 };
+	alp_cc3501e_sock_accepted_evt_t ev = { 0 };
 
 	zassert_equal(cc3501e_sock_accepted_decode(wire, sizeof(wire), &ev), ALP_OK, "decode -> OK");
 	zassert_equal(ev.listen_handle, 1u, "listen_handle");
