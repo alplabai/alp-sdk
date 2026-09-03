@@ -308,6 +308,54 @@ def test_deepx_compile_raises_when_no_dxnn_produced(tmp_path, monkeypatch):
         DeepxAdapter().compile(src, accel_config="", out_dir=tmp_path, opts={"config": str(cfg)})
 
 
+def test_dxcom_version_fallback_keeps_the_vendor_token(monkeypatch):
+    # #1923: the failure path used to return 'dxcom' while the success path
+    # returns 'DX-COM <ver>'. compiler_version is part of a perf point's
+    # measurement identity, so the renamed vendor filed probe-failure
+    # measurements under a vendor no success-path point ever uses -- they
+    # could never match, instead of merely lacking the version digits.
+    from alp_model.adapters.deepx import _dxcom_version
+
+    def raises(cmd, capture_output, text, timeout):
+        raise OSError("dxcom not on PATH")
+
+    monkeypatch.setattr("alp_model.adapters.deepx.subprocess.run", raises)
+    assert _dxcom_version() == "DX-COM"
+
+    def unparseable(cmd, capture_output, text, timeout):
+        class _V:
+            returncode = 0
+            stdout = "some banner with no version at all"
+            stderr = ""
+        return _V()
+
+    monkeypatch.setattr("alp_model.adapters.deepx.subprocess.run", unparseable)
+    assert _dxcom_version() == "DX-COM"
+
+
+def test_every_adapter_version_fallback_shares_its_success_vendor_token(monkeypatch):
+    # The invariant #1923 broke, stated once for the two probe-based adapters:
+    # whatever the probe fails on, the vendor token must survive -- only the
+    # digits are unknown. ethos_u ('vela X.Y.Z' / 'vela') already held it;
+    # deepx was the outlier.
+    from importlib.metadata import PackageNotFoundError
+
+    from alp_model.adapters.deepx import _dxcom_version
+    from alp_model.adapters.ethos_u import _vela_version
+
+    def raises(cmd, capture_output, text, timeout):
+        raise OSError("not on PATH")
+
+    monkeypatch.setattr("alp_model.adapters.deepx.subprocess.run", raises)
+    assert _dxcom_version().split()[0] == "DX-COM 2.3.0".split()[0]
+
+    def no_pkg(_name):
+        raise PackageNotFoundError("ethos-u-vela")
+
+    monkeypatch.setattr("alp_model.adapters.ethos_u.version", no_pkg)
+    assert _vela_version().split()[0] == "vela 4.1.0".split()[0]
+
+
 @pytest.mark.skipif(shutil.which("dxcom") is None, reason="dxcom (dx-com wheel) not installed")
 def test_deepx_real_dxcom_version_smoke():
     # Against the REAL installed dx-com wheel (e.g. a WSL venv): the adapter's

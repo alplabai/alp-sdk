@@ -36,13 +36,24 @@ _DXCOM_TIMEOUT_S = 1800
 
 
 def _dxcom_version() -> str:
-    """Best-effort compiler version, e.g. 'DX-COM 2.3.0'; 'dxcom' on failure."""
+    """Best-effort compiler version, e.g. 'DX-COM 2.3.0'; 'DX-COM' on failure.
+
+    The failure token keeps the success path's vendor prefix on purpose.
+    `compiler_version` is part of a perf point's measurement identity, so a
+    fallback that renamed the vendor -- the old 'dxcom' -- filed a
+    probe-failure measurement under a vendor no success-path point ever
+    uses, and the point was silently unmatchable rather than merely missing
+    its version digits. Both sibling adapters already keep the prefix
+    across this same boundary: ethos_u returns 'vela X.Y.Z' / 'vela',
+    drpai 'drp-ai_tvm X.Y' / 'drp-ai_tvm'. Only the digits are unknown
+    when the probe fails, never the vendor.
+    """
     try:
         proc = subprocess.run(["dxcom", "-v"], capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError):
-        return "dxcom"
+        return "DX-COM"
     m = re.search(r"DX-COM[^\d]*(\d+\.\d+\.\d+)", proc.stdout + proc.stderr)
-    return f"DX-COM {m.group(1)}" if m else "dxcom"
+    return f"DX-COM {m.group(1)}" if m else "DX-COM"
 
 
 class DeepxAdapter(CompilerAdapter):
