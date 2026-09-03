@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-31",
+  "generated": "2026-09-03",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -3082,6 +3082,14 @@
     },
     "alp/chips/cc3501e/sockets.h": {
       "functions": {
+        "cc3501e_sock_accepted_decode": {
+          "hash": "84f8620db63c1759",
+          "signature": "alp_status_t cc3501e_sock_accepted_decode(const uint8_t *payload, size_t len, alp_cc3501e_sock_accepted_evt_t *out);"
+        },
+        "cc3501e_sock_bind": {
+          "hash": "6a7f0fb7d0f49cb6",
+          "signature": "alp_status_t cc3501e_sock_bind(cc3501e_t *ctx, uint16_t handle, const uint8_t ip[4], uint16_t port, uint32_t timeout_ms);"
+        },
         "cc3501e_sock_close": {
           "hash": "c1a5ae4afc683c47",
           "signature": "alp_status_t cc3501e_sock_close(cc3501e_t *ctx, uint16_t handle, uint32_t timeout_ms);"
@@ -3089,6 +3097,10 @@
         "cc3501e_sock_connect": {
           "hash": "b8dc905c51cef122",
           "signature": "alp_status_t cc3501e_sock_connect(cc3501e_t *ctx, uint16_t handle, const uint8_t ip[4], uint16_t port, uint32_t timeout_ms);"
+        },
+        "cc3501e_sock_listen": {
+          "hash": "b84c8453efb650ba",
+          "signature": "alp_status_t cc3501e_sock_listen(cc3501e_t *ctx, uint16_t handle, uint8_t backlog, uint32_t timeout_ms);"
         },
         "cc3501e_sock_open": {
           "hash": "ed2f790c98ba85e3",
@@ -3130,8 +3142,8 @@
           "signature": "alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);"
         },
         "cc3501e_wifi_get_ip": {
-          "hash": "b463b4a2535b3d65",
-          "signature": "alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4]);"
+          "hash": "4734c2bb8f7219be",
+          "signature": "alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t iface, uint8_t ip[4]);"
         },
         "cc3501e_wifi_get_mac": {
           "hash": "1ef1861f63ff8c55",
@@ -11607,8 +11619,8 @@
           "value": "(ALP_CC3501E_MAX_PAYLOAD - 4u)"
         },
         "ALP_CC3501E_PROTOCOL_VERSION": {
-          "hash": "8b70842617f16dd9",
-          "value": "8"
+          "hash": "e938746fa6bd69ff",
+          "value": "9"
         },
         "ALP_CC3501E_REQ_SEQ_LAST": {
           "hash": "7d52e8185ae5e8b7",
@@ -11716,7 +11728,7 @@
           "kind": "struct"
         },
         "alp_cc3501e_cmd_t": {
-          "definition": "typedef enum { ALP_CC3501E_CMD_PING = 0x00, ALP_CC3501E_CMD_GET_VERSION = 0x01, ALP_CC3501E_CMD_RESET = 0x02, ALP_CC3501E_CMD_GET_MAC = 0x03, ALP_CC3501E_CMD_GET_DIAG_INFO = 0x04, ALP_CC3501E_CMD_GET_PENDING_EVENTS = 0x05, ALP_CC3501E_CMD_WIFI_SCAN_START = 0x10, ALP_CC3501E_CMD_WIFI_SCAN_STOP = 0x11, ALP_CC3501E_CMD_WIFI_CONNECT_STA = 0x12, ALP_CC3501E_CMD_WIFI_DISCONNECT = 0x13, ALP_CC3501E_CMD_WIFI_AP_START = 0x14, ALP_CC3501E_CMD_WIFI_AP_STOP = 0x15, ALP_CC3501E_CMD_WIFI_GET_RSSI = 0x16, ALP_CC3501E_CMD_WIFI_GET_IP = 0x17, ALP_CC3501E_EVT_WIFI_SCAN_RESULT = 0x18, ALP_CC3501E_EVT_WIFI_CONNECTED = 0x19, ALP_CC3501E_EVT_WIFI_DISCONNECTED = 0x1A, ALP_CC3501E_CMD_WIFI_STATUS = 0x1B, ALP_CC3501E_CMD_SOCK_OPEN = 0x20, ALP_CC3501E_CMD_SOCK_CONNECT = 0x21, ALP_CC3501E_CMD_SOCK_SEND = 0x22, ALP_CC3501E_CMD_SOCK_RECV = 0x23, ALP_CC3501E_CMD_SOCK_CLOSE = 0x24, ALP_CC3501E_CMD_BLE_ENABLE = 0x30, ALP_CC3501E_CMD_BLE_DISABLE = 0x31, ALP_CC3501E_CMD_BLE_ADV_START = 0x32, ALP_CC3501E_CMD_BLE_ADV_STOP = 0x33, ALP_CC3501E_CMD_BLE_SCAN_START = 0x34, ALP_CC3501E_CMD_BLE_SCAN_STOP = 0x35, ALP_CC3501E_CMD_BLE_CONNECT = 0x36, ALP_CC3501E_CMD_BLE_DISCONNECT = 0x37, ALP_CC3501E_CMD_BLE_GATT_REGISTER = 0x38, ALP_CC3501E_CMD_BLE_GATT_NOTIFY = 0x39, ALP_CC3501E_CMD_BLE_GATT_READ = 0x3A, ALP_CC3501E_CMD_BLE_GATT_WRITE = 0x3B, ALP_CC3501E_EVT_BLE_ADV_REPORT = 0x3C, ALP_CC3501E_EVT_BLE_CONNECTED = 0x3D, ALP_CC3501E_EVT_BLE_DISCONNECTED = 0x3E, ALP_CC3501E_EVT_BLE_GATT_WRITE_REQ = 0x3F, ALP_CC3501E_CMD_OTA_BEGIN = 0x40, ALP_CC3501E_CMD_OTA_WRITE = 0x41, ALP_CC3501E_CMD_OTA_FINISH = 0x42, ALP_CC3501E_CMD_OTA_ABORT = 0x43, ALP_CC3501E_CMD_OTA_STATUS = 0x44, ALP_CC3501E_CMD_OTA_PROMOTE = 0x46, ALP_CC3501E_CMD_OTA_UPDATE_MODE = 0x47, ALP_CC3501E_CMD_STREAM_WRITE = 0x45, ALP_CC3501E_CMD_GPIO_CONFIGURE = 0x50, ALP_CC3501E_CMD_GPIO_WRITE = 0x51, ALP_CC3501E_CMD_GPIO_READ = 0x52, ALP_CC3501E_CMD_GPIO_SET_INTERRUPT = 0x53, ALP_CC3501E_EVT_GPIO_INTERRUPT = 0x54, ALP_CC3501E_CMD_SPI1_CONFIGURE = 0x55, ALP_CC3501E_CMD_SPI1_TRANSFER = 0x56, ALP_CC3501E_CMD_SPI1_RELEASE = 0x57, ALP_CC3501E_CMD_CAM_ENABLE = 0x60, ALP_CC3501E_CMD_CAM_DISABLE = 0x61, ALP_CC3501E_CMD_POWER_POLICY = 0x62, ALP_CC3501E_CMD_DIAG_GET_STATS = 0x70, ALP_CC3501E_CMD_DIAG_LOG_LEVEL = 0x71, } alp_cc3501e_cmd_t;",
+          "definition": "typedef enum { ALP_CC3501E_CMD_PING = 0x00, ALP_CC3501E_CMD_GET_VERSION = 0x01, ALP_CC3501E_CMD_RESET = 0x02, ALP_CC3501E_CMD_GET_MAC = 0x03, ALP_CC3501E_CMD_GET_DIAG_INFO = 0x04, ALP_CC3501E_CMD_GET_PENDING_EVENTS = 0x05, ALP_CC3501E_CMD_WIFI_SCAN_START = 0x10, ALP_CC3501E_CMD_WIFI_SCAN_STOP = 0x11, ALP_CC3501E_CMD_WIFI_CONNECT_STA = 0x12, ALP_CC3501E_CMD_WIFI_DISCONNECT = 0x13, ALP_CC3501E_CMD_WIFI_AP_START = 0x14, ALP_CC3501E_CMD_WIFI_AP_STOP = 0x15, ALP_CC3501E_CMD_WIFI_GET_RSSI = 0x16, ALP_CC3501E_CMD_WIFI_GET_IP = 0x17, ALP_CC3501E_EVT_WIFI_SCAN_RESULT = 0x18, ALP_CC3501E_EVT_WIFI_CONNECTED = 0x19, ALP_CC3501E_EVT_WIFI_DISCONNECTED = 0x1A, ALP_CC3501E_CMD_WIFI_STATUS = 0x1B, ALP_CC3501E_CMD_SOCK_OPEN = 0x20, ALP_CC3501E_CMD_SOCK_CONNECT = 0x21, ALP_CC3501E_CMD_SOCK_SEND = 0x22, ALP_CC3501E_CMD_SOCK_RECV = 0x23, ALP_CC3501E_CMD_SOCK_CLOSE = 0x24, ALP_CC3501E_CMD_SOCK_BIND = 0x25, ALP_CC3501E_CMD_SOCK_LISTEN = 0x26, ALP_CC3501E_EVT_SOCK_ACCEPTED = 0x2C, ALP_CC3501E_CMD_BLE_ENABLE = 0x30, ALP_CC3501E_CMD_BLE_DISABLE = 0x31, ALP_CC3501E_CMD_BLE_ADV_START = 0x32, ALP_CC3501E_CMD_BLE_ADV_STOP = 0x33, ALP_CC3501E_CMD_BLE_SCAN_START = 0x34, ALP_CC3501E_CMD_BLE_SCAN_STOP = 0x35, ALP_CC3501E_CMD_BLE_CONNECT = 0x36, ALP_CC3501E_CMD_BLE_DISCONNECT = 0x37, ALP_CC3501E_CMD_BLE_GATT_REGISTER = 0x38, ALP_CC3501E_CMD_BLE_GATT_NOTIFY = 0x39, ALP_CC3501E_CMD_BLE_GATT_READ = 0x3A, ALP_CC3501E_CMD_BLE_GATT_WRITE = 0x3B, ALP_CC3501E_EVT_BLE_ADV_REPORT = 0x3C, ALP_CC3501E_EVT_BLE_CONNECTED = 0x3D, ALP_CC3501E_EVT_BLE_DISCONNECTED = 0x3E, ALP_CC3501E_EVT_BLE_GATT_WRITE_REQ = 0x3F, ALP_CC3501E_CMD_OTA_BEGIN = 0x40, ALP_CC3501E_CMD_OTA_WRITE = 0x41, ALP_CC3501E_CMD_OTA_FINISH = 0x42, ALP_CC3501E_CMD_OTA_ABORT = 0x43, ALP_CC3501E_CMD_OTA_STATUS = 0x44, ALP_CC3501E_CMD_OTA_PROMOTE = 0x46, ALP_CC3501E_CMD_OTA_UPDATE_MODE = 0x47, ALP_CC3501E_CMD_STREAM_WRITE = 0x45, ALP_CC3501E_CMD_GPIO_CONFIGURE = 0x50, ALP_CC3501E_CMD_GPIO_WRITE = 0x51, ALP_CC3501E_CMD_GPIO_READ = 0x52, ALP_CC3501E_CMD_GPIO_SET_INTERRUPT = 0x53, ALP_CC3501E_EVT_GPIO_INTERRUPT = 0x54, ALP_CC3501E_CMD_SPI1_CONFIGURE = 0x55, ALP_CC3501E_CMD_SPI1_TRANSFER = 0x56, ALP_CC3501E_CMD_SPI1_RELEASE = 0x57, ALP_CC3501E_CMD_CAM_ENABLE = 0x60, ALP_CC3501E_CMD_CAM_DISABLE = 0x61, ALP_CC3501E_CMD_POWER_POLICY = 0x62, ALP_CC3501E_CMD_DIAG_GET_STATS = 0x70, ALP_CC3501E_CMD_DIAG_LOG_LEVEL = 0x71, } alp_cc3501e_cmd_t;",
           "enumerators": [
             "ALP_CC3501E_CMD_PING = 0x00",
             "ALP_CC3501E_CMD_GET_VERSION = 0x01",
@@ -11741,6 +11753,9 @@
             "ALP_CC3501E_CMD_SOCK_SEND = 0x22",
             "ALP_CC3501E_CMD_SOCK_RECV = 0x23",
             "ALP_CC3501E_CMD_SOCK_CLOSE = 0x24",
+            "ALP_CC3501E_CMD_SOCK_BIND = 0x25",
+            "ALP_CC3501E_CMD_SOCK_LISTEN = 0x26",
+            "ALP_CC3501E_EVT_SOCK_ACCEPTED = 0x2C",
             "ALP_CC3501E_CMD_BLE_ENABLE = 0x30",
             "ALP_CC3501E_CMD_BLE_DISABLE = 0x31",
             "ALP_CC3501E_CMD_BLE_ADV_START = 0x32",
@@ -11779,7 +11794,7 @@
             "ALP_CC3501E_CMD_DIAG_GET_STATS = 0x70",
             "ALP_CC3501E_CMD_DIAG_LOG_LEVEL = 0x71"
           ],
-          "hash": "cf3285d3d49f017a",
+          "hash": "ff6d6f6105fd9a99",
           "kind": "enum"
         },
         "alp_cc3501e_diag_info_t": {
@@ -12022,6 +12037,19 @@
           "hash": "b9fc005f57ee0870",
           "kind": "struct"
         },
+        "alp_cc3501e_sock_accepted_evt_t": {
+          "definition": "typedef struct { uint16_t listen_handle; uint16_t handle; uint16_t peer_port; uint8_t peer_family; uint8_t reserved; uint8_t peer_addr[4]; } alp_cc3501e_sock_accepted_evt_t;",
+          "fields": [
+            "uint16_t listen_handle",
+            "uint16_t handle",
+            "uint16_t peer_port",
+            "uint8_t peer_family",
+            "uint8_t reserved",
+            "uint8_t peer_addr[4]"
+          ],
+          "hash": "138d90ef0c512671",
+          "kind": "struct"
+        },
         "alp_cc3501e_sock_addr_t": {
           "definition": "typedef struct { uint8_t family; uint8_t reserved; uint16_t port; uint8_t addr[16]; } alp_cc3501e_sock_addr_t;",
           "fields": [
@@ -12031,6 +12059,16 @@
             "uint8_t addr[16]"
           ],
           "hash": "57a1f6f4bd61728f",
+          "kind": "struct"
+        },
+        "alp_cc3501e_sock_bind_t": {
+          "definition": "typedef struct { uint16_t handle; uint16_t reserved; alp_cc3501e_sock_addr_t local; } alp_cc3501e_sock_bind_t;",
+          "fields": [
+            "uint16_t handle",
+            "uint16_t reserved",
+            "alp_cc3501e_sock_addr_t local"
+          ],
+          "hash": "af4e6a8a780c800b",
           "kind": "struct"
         },
         "alp_cc3501e_sock_close_t": {
@@ -12068,6 +12106,16 @@
             "uint8_t reserved[2]"
           ],
           "hash": "f9495ee7903d09fb",
+          "kind": "struct"
+        },
+        "alp_cc3501e_sock_listen_t": {
+          "definition": "typedef struct { uint16_t handle; uint8_t backlog; uint8_t reserved; } alp_cc3501e_sock_listen_t;",
+          "fields": [
+            "uint16_t handle",
+            "uint8_t backlog",
+            "uint8_t reserved"
+          ],
+          "hash": "d9f9ce3f1e9291c0",
           "kind": "struct"
         },
         "alp_cc3501e_sock_open_t": {
@@ -12206,6 +12254,15 @@
             "ALP_CC3501E_WIFI_FAIL_KICK = 3u"
           ],
           "hash": "1238a23f71ec45a4",
+          "kind": "enum"
+        },
+        "alp_cc3501e_wifi_iface_t": {
+          "definition": "typedef enum { ALP_CC3501E_WIFI_IFACE_STA = 0u, ALP_CC3501E_WIFI_IFACE_AP = 1u, } alp_cc3501e_wifi_iface_t;",
+          "enumerators": [
+            "ALP_CC3501E_WIFI_IFACE_STA = 0u",
+            "ALP_CC3501E_WIFI_IFACE_AP = 1u"
+          ],
+          "hash": "330feaa9ca004851",
           "kind": "enum"
         },
         "alp_cc3501e_wifi_status_t": {
