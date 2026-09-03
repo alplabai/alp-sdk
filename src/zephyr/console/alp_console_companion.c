@@ -93,8 +93,16 @@ static int cmd_companion_ver(const struct shell *sh, size_t argc, char **argv)
 
 	alp_cc3501e_diag_info_t diag = { 0 };
 	if (cc3501e_diag_info(companion_cc3501e, &diag) == ALP_OK) {
-		/* fw_version packs (MINOR << 8) | PATCH for a 0.x release -- see the
-		 * marker derivation in the firmware's CMake and ti/build_ti.ps1. */
+		/* fw_version packs (MINOR << 8) | PATCH and does NOT carry the major at
+		 * all -- the firmware's CMake calls it "pre-1.0 packing" and derives it
+		 * from firmware-version.txt that way.  The leading "0." below is
+		 * therefore hardcoded because the wire genuinely does not transmit it.
+		 *
+		 * THAT MAKES THIS LINE WRONG THE DAY firmware-version.txt REACHES 1.0.0:
+		 * a 1.2.3 firmware would print "fw 0.2.3".  Fixing it needs the wire
+		 * field widened (a MINOR-class change under ADR 0033, since a host that
+		 * ignores the extra byte keeps working), not a change here -- so this
+		 * comment is the warning for whoever bumps that major. */
 		shell_print(sh,
 		            "fw 0.%u.%u  (wire %u.%u)",
 		            (unsigned int)((diag.fw_version >> 8) & 0xFFu),
