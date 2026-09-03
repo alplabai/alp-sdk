@@ -76,7 +76,49 @@ static int cmd_companion_ver(const struct shell *sh, size_t argc, char **argv)
 		shell_error(sh, "get_version failed (%d)", (int)s);
 		return -EIO;
 	}
-	shell_print(sh, "CC3501E protocol v%u", (unsigned int)ver);
+	/* Report the RELEASE version first and the wire version second (ADR 0033).
+	 *
+	 * This line is where the raw wire number leaked into customer-facing
+	 * conversations: it printed "CC3501E protocol v9", so release notes and
+	 * support threads quoted the wire integer as if it were the thing to match,
+	 * when the number a customer can actually act on is the firmware SemVer
+	 * from firmware-version.txt.  The wire version is a contract between this
+	 * host library and the firmware -- worth showing, not worth leading with.
+	 *
+	 * GET_DIAG_INFO carries the release version; if it is unavailable (older
+	 * firmware, or a transport hiccup) fall back to printing the wire version
+	 * alone rather than inventing a release number. */
+	const unsigned int wire_major = (unsigned int)ALP_CC3501E_PROTOCOL_VERSION_MAJOR(ver);
+	const unsigned int wire_minor = (unsigned int)ALP_CC3501E_PROTOCOL_VERSION_MINOR(ver);
+
+	alp_cc3501e_diag_info_t diag = { 0 };
+	if (cc3501e_diag_info(companion_cc3501e, &diag) == ALP_OK) {
+		/* fw_version packs (MINOR << 8) | PATCH for a 0.x release -- see the
+		 * marker derivation in the firmware's CMake and ti/build_ti.ps1. */
+		shell_print(sh,
+		            "fw 0.%u.%u  (wire %u.%u)",
+		            (unsigned int)((diag.fw_version >> 8) & 0xFFu),
+		            (unsigned int)(diag.fw_version & 0xFFu),
+		            wire_major,
+		            wire_minor);
+	} else {
+		shell_print(sh, "wire %u.%u  (release version unavailable)", wire_major, wire_minor);
+	}
+
+	if (wire_major == 0u) {
+		/* Cannot happen against a firmware this host will talk to -- cc3501e_reset
+		 * refuses major 0 -- but `ver` is also used as a bare liveness probe on a
+		 * context that never passed the gate, so say what it means rather than
+		 * printing "wire 0.9" and leaving the reader to guess. */
+		shell_warn(sh,
+		           "this firmware predates the MAJOR.MINOR scheme (raw protocol %u)",
+		           (unsigned int)ver);
+	}
+
+	uint32_t caps = 0u;
+	if (cc3501e_get_capabilities(companion_cc3501e, &caps) == ALP_OK) {
+		shell_print(sh, "caps 0x%08x", (unsigned int)caps);
+	}
 	return 0;
 #endif
 }
