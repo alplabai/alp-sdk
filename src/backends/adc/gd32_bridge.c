@@ -31,6 +31,7 @@
 #include <alp/peripheral.h>
 
 #include "adc_ops.h"
+#include "adc_oversampling.h"
 #include "alp_slot_claim.h"
 
 /* Internal SDK headers — NOT customer-facing.  Provide:
@@ -78,6 +79,18 @@ gd32_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capabili
      * exactly that many in gd32-io-mcu-map.tsv. */
 	if (cfg->channel_id >= 8u) {
 		return ALP_ERR_INVAL;
+	}
+
+	/* <alp/adc.h>'s oversampling_ratio doc promises a non-power-of-two
+     * ratio is refused with ALP_ERR_NOSUPPORT at alp_adc_open -- but the
+     * GD32 firmware's gd32_adc_configure() floors a non-power-of-two
+     * ratio to the largest power of two <= it instead of refusing
+     * (documented at docs/gd32-bridge-protocol.md:540), which would
+     * silently round e.g. a requested 6x down to 4x with no error
+     * anywhere.  Refuse it portably here, before it ever reaches the
+     * bridge (#1648 tier-1 review). */
+	if (!alp_adc_oversampling_ratio_ok(cfg->oversampling_ratio)) {
+		return ALP_ERR_NOSUPPORT;
 	}
 
 	/* Probe the supervisor up-front + push any provided tuning knobs
