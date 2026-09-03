@@ -11586,6 +11586,10 @@
           "hash": "ca97663d60bb61a4",
           "value": "2u"
         },
+        "ALP_CC3501E_EVENT_PAYLOAD_MAX": {
+          "hash": "e9633fd3da6b0e1b",
+          "value": "16u"
+        },
         "ALP_CC3501E_FLAG_ASYNC_EVENT": {
           "hash": "8ca20156e70067cd",
           "value": "0x02"
