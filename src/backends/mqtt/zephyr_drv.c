@@ -51,8 +51,11 @@
 #include "mqtt_ops.h"
 
 #if defined(CONFIG_ALP_SDK_IOT_MQTT)
+#include <zephyr/logging/log.h>
 #include <zephyr/net/mqtt.h>
 #include <zephyr/net/socket.h>
+
+LOG_MODULE_REGISTER(alp_iot_mqtt_zephyr, CONFIG_LOG_DEFAULT_LEVEL);
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -205,6 +208,25 @@ static int resolve_broker_addr(const char *host, uint16_t port, struct sockaddr_
 #endif
 }
 
+/* Read + discard `remaining` bytes of an inbound PUBLISH payload the
+ * caller isn't keeping, so Zephyr's mqtt_client::internal.remaining_payload
+ * reaches 0 -- left non-zero, client_read() returns -EBUSY on every
+ * subsequent mqtt_input(), wedging the connection permanently (issue
+ * #1645).  Shared by both MQTT_EVT_PUBLISH branches in
+ * alp_mqtt_evt_cb() below: the no-callback branch draining the whole
+ * payload, and the callback branch draining what didn't fit rx_buf. */
+static void mqtt_drain_remaining(struct mqtt_client *client, size_t remaining)
+{
+	uint8_t scratch[64];
+	while (remaining > 0) {
+		int n = mqtt_read_publish_payload(client, scratch, MIN(remaining, sizeof(scratch)));
+		if (n <= 0) {
+			break;
+		}
+		remaining -= (size_t)n;
+	}
+}
+
 /* Event handler -- called from mqtt_input() in the user's loop
  * thread.  Maps Zephyr MQTT events into the alp surface (CONNACK
  * sets connected=true; PUBLISH dispatches to the user callback). */
@@ -226,13 +248,7 @@ static void alp_mqtt_evt_cb(struct mqtt_client *client, const struct mqtt_evt *e
              * stall on QoS-1+ acknowledgement -- but keep the
              * topic-string and length for callers that subscribed
              * without binding a callback. */
-			uint8_t scratch[64];
-			size_t  remaining = pub->message.payload.len;
-			while (remaining > 0) {
-				int n = mqtt_read_publish_payload(client, scratch, MIN(remaining, sizeof(scratch)));
-				if (n <= 0) break;
-				remaining -= (size_t)n;
-			}
+			mqtt_drain_remaining(client, pub->message.payload.len);
 			break;
 		}
 
@@ -250,6 +266,22 @@ static void alp_mqtt_evt_cb(struct mqtt_client *client, const struct mqtt_evt *e
 			if (n <= 0) break;
 			got += (size_t)n;
 		}
+
+		/* A payload bigger than rx_buf leaves the excess unread on the
+		 * wire; drain it (same helper as the msg_cb == NULL branch above)
+		 * BEFORE the PUBACK below, so the broker isn't told delivery
+		 * succeeded while the connection is left wedged (issue #1645). */
+		if (got < pub->message.payload.len) {
+			/* alp_mqtt_msg_cb_t (<alp/iot.h>) has no channel to report a
+			 * truncated delivery to the caller -- got below is silently
+			 * short.  Log it so the drop is at least visible; widening
+			 * the callback signature is a public-API change out of scope
+			 * for this fix. */
+			LOG_WRN("mqtt: payload %u B truncated to rx_buf's %u B",
+			        (unsigned)pub->message.payload.len,
+			        (unsigned)got);
+		}
+		mqtt_drain_remaining(client, pub->message.payload.len - got);
 
 		if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {
 			const struct mqtt_puback_param ack = { .message_id = pub->message_id };

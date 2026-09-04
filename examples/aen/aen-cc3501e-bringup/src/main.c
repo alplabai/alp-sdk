@@ -521,7 +521,7 @@ static void cc3501e_wifi_probe(cc3501e_t *fw)
 				printf("[cc3501e-bringup] RSSI -> %d dBm\n", (int)rssi);
 			}
 			uint8_t ip[4] = { 0 };
-			if (cc3501e_wifi_get_ip(fw, ip) == ALP_OK) {
+			if (cc3501e_wifi_get_ip(fw, ALP_CC3501E_WIFI_IFACE_STA, ip) == ALP_OK) {
 				printf("[cc3501e-bringup] IP -> %u.%u.%u.%u\n", ip[0], ip[1], ip[2], ip[3]);
 			}
 		}
@@ -1392,7 +1392,7 @@ int main(void)
 					printf("[cc3501e-bringup] soak RSSI -> %d dBm\n", (int)rssi);
 				}
 				uint8_t ip[4] = { 0 };
-				if (cc3501e_wifi_get_ip(&fw, ip) == ALP_OK) {
+				if (cc3501e_wifi_get_ip(&fw, ALP_CC3501E_WIFI_IFACE_STA, ip) == ALP_OK) {
 					printf(
 					    "[cc3501e-bringup] soak IP -> %u.%u.%u.%u\n", ip[0], ip[1], ip[2], ip[3]);
 				}

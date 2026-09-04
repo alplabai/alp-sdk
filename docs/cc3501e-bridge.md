@@ -303,7 +303,29 @@ The firmware `#include`s the wire-protocol header **directly** (no
 mirror), so a protocol change moves both sides + the wire-vector tests
 in one commit.  The Alif-side client still refuses to talk to a firmware
 whose `ALP_CC3501E_CMD_GET_VERSION` reply doesn't match the compile-time
-`ALP_CC3501E_PROTOCOL_VERSION` (currently **8**).  What each bump changed:
+`ALP_CC3501E_PROTOCOL_VERSION`.
+
+**The wire version is `MAJOR.MINOR`, and only MAJOR gates the link** (ADR
+0033). The current wire is **3.1**. MAJOR moves only when an unchanged host
+would be *misread* — reusing a previously-reserved byte or flag bit, changing
+framing, changing a struct layout, changing what an existing field means.
+Everything additive is MINOR: new opcodes, new optional request fields whose
+absent form keeps its old meaning, new events. A MINOR difference does **not**
+refuse the link, so shipping a feature no longer forces a lockstep reflash.
+
+Ask `CMD_GET_CAPABILITIES` (`0x06`) rather than inferring a feature from the
+version: the bitmap is composed from the same compile-time switches that decide
+which HAL bodies link, so a build without Wi-Fi or without BLE reports the truth
+where its version number would not.
+
+`MAJOR 0` is reserved: a firmware built before ADR 0033 answers `GET_VERSION`
+with its raw v1..v9 integer, which decodes to major 0 — so "older than the
+scheme" stays distinguishable from "disagrees about the frame layout".
+
+The v1..v9 history below used a single raw integer. Retroactively: v5 = `1.0`,
+v6 = `1.1`, v7 = `2.0`, v8 = `3.0`, v9 = `3.1`. Only v7 and v8 could actually
+misread an old host; v6 and v9 were additive and need not have cost anyone a
+reflash. What each bump changed:
 
 | Version | Change |
 |---|---|
@@ -311,6 +333,7 @@ whose `ALP_CC3501E_CMD_GET_VERSION` reply doesn't match the compile-time
 | v6 | SPI1 host-passthrough opcodes (`0x55`..`0x57`) |
 | v7 | request identity for `SOCK_SEND` only -- an 8-bit retry seq in a spare struct byte, so a lost reply could not make a retry look like a new send and re-transmit it |
 | v8 | request identity for EVERY worker-routed opcode -- a 5-bit retry seq in flags bits 3..7 of the frame header, costing zero wire bytes; and `DIAG_GET_STATS` grew additively 8 -> 16 bytes with `worker_execs` / `retry_latch_hits`, the two counters that distinguish "the retry was absorbed" from "the operation ran twice" |
+| v9 | the LISTENING path, so a host can **serve** over the module's soft-AP: `SOCK_BIND` (`0x25`), `SOCK_LISTEN` (`0x26`) and the async `EVT_SOCK_ACCEPTED` (`0x2C`); plus an optional interface-selector byte on `WIFI_GET_IP` (`0x17`) so a serving application can read the AP-side address instead of inferring it from a client's DHCP gateway. There is deliberately **no accept opcode** -- `accept()` blocks, and a worker-routed blocking body holds READY low across the whole bridge, so an inbound connection is delivered as an event on the existing polled queue instead |
 
 Seq `0` is reserved on the wire to mean "this request carries no identity",
 so the usable space is 1..31 and a pre-v8 host -- which leaves those bits

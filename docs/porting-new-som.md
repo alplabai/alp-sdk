@@ -672,11 +672,13 @@ west build \
 > REFUSES rather than falling back to the E8's, whose node set is
 > different silicon (the E8 declares `ethosu85`; an E3 carries 2x
 > Ethos-U55 and no U85).  The Renesas RZ/V2N family (`v2n` /
-> `v2n-m1`) generates only the family-agnostic files (`board.yml`,
-> `Kconfig.alp_<board>`, the twister `.yaml`) -- its `.dts` / pinctrl
-> `.dtsi` / `_defconfig` stay hand-authored (mirror the nearest sibling,
-> e.g. E1M-V2N101) until the on-module GD32G553 supervisor's Renesas-side
-> pin assignments land in metadata.  TWO files stay hand-authored for
+> `v2n-m1`) generates the family-agnostic files (`board.yml`,
+> `Kconfig.alp_<board>`, the twister `.yaml`) PLUS the pinctrl `.dtsi`
+> and `_defconfig`, sourced from
+> `metadata/e1m_modules/v2n/supervisor-links.yaml` -- only its `.dts`
+> stays hand-authored (mirror the nearest sibling, e.g. E1M-V2N101) until
+> a metadata source for the remaining `.dts`-only facts lands.  TWO files
+> stay hand-authored for
 > every family and must be COPIED ACROSS by hand when a generated tree is
 > used as the board directory: `board.cmake` (flasher/debugger runner
 > args -- see `docs/architecture.md`'s generators-inventory entry for

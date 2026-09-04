@@ -13,14 +13,19 @@
 # with include/alp/hw_info.h (#1231), when AGENTS.md names an
 # ALP_E1M_*/ALP_E1M_X_* identifier or --emit choice the real generators
 # don't produce (#1264), or when a doc-stated workflow name/count,
-# ADR count, or chip/library count disagrees with the tree (#1265).
+# ADR count, or chip/library count disagrees with the tree (#1265), or when
+# include/alp/protocol/cc3501e.h's ALP_CC3501E_PROTOCOL_MAJOR/_MINOR
+# disagrees with ADR 0033's Version ledger (missing row, non-monotonic
+# ledger, MAJOR 0, or a MAJOR row with no "old host would be misread"
+# justification).
 # Mirrors scripts/check_doc_drift.py + scripts/check_doc_links.py +
 # scripts/check_diagnostic_narratives.py +
 # scripts/check_diagnostic_emission_coverage.py +
 # scripts/check_version_doc_sync.py +
 # scripts/check_board_id_doc_parity.py +
 # scripts/check_agents_md_generators.py +
-# scripts/check_doc_inventory.py, all runnable locally (see the
+# scripts/check_doc_inventory.py +
+# scripts/check_protocol_version_policy.py, all runnable locally (see the
 # running-local-ci skill + docs/local-ci.md).
 #
 # Deliberately no `paths:` filter (like pr-static-analysis.yml): these
@@ -98,3 +103,6 @@ jobs:
 
       - name: Doc inventory (workflow names/counts, ADR count, chip/library counts)
         run: python3 scripts/check_doc_inventory.py
+
+      - name: "CC3501E protocol version policy (ADR 0033 Version ledger)"
+        run: python3 scripts/check_protocol_version_policy.py

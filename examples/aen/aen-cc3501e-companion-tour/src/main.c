@@ -289,7 +289,7 @@ static void tour_wifi_connect_and_socket(cc3501e_t *fw)
 
 	/* DHCP lease.  ip[] is network order (ip[0] = MSB), already dotted-quad. */
 	uint8_t ip[4] = { 0 };
-	if (cc3501e_wifi_get_ip(fw, ip) == ALP_OK) {
+	if (cc3501e_wifi_get_ip(fw, ALP_CC3501E_WIFI_IFACE_STA, ip) == ALP_OK) {
 		printf("[tour] IP -> %u.%u.%u.%u\n", ip[0], ip[1], ip[2], ip[3]);
 	} else {
 		printf("[tour] IP -> not leased yet\n");

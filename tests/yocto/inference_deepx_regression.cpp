@@ -171,6 +171,46 @@ void test_get_output_accepts_live_rank_at_4()
 	alp_inference_deepx_close(&h);
 }
 
+/* Test 3: open()-time refusal of a multi-input model (issue #1645).
+ * invoke() hands dx_rt's Run() a single pointer -- st->input_bufs[0].data()
+ * -- that dx_rt reads sum(size_in_bytes()) bytes from, treating it as one
+ * contiguous concatenated blob.  This backend stages each input in its own
+ * SEPARATE std::vector allocation, so for any model declaring more than one
+ * input the real bytes read would run past input_bufs[0]'s allocation and
+ * DMA whatever unrelated heap memory follows it over PCIe.  open() must
+ * refuse before invoke() can ever reach that path. */
+void test_open_refuses_multi_input_model()
+{
+	reset_fakes();
+	dxrt_test::g_declared_inputs.push_back(make_tensor({ 1, 4 }));
+	dxrt_test::g_declared_inputs.push_back(make_tensor({ 1, 4 })); /* 2nd input */
+	dxrt_test::g_declared_outputs.push_back(make_tensor({ 1, 1 }));
+
+	struct alp_inference   h   = {};
+	alp_inference_config_t cfg = base_cfg();
+	alp_status_t           rc  = alp_inference_deepx_open(&h, &cfg);
+
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOSUPPORT);
+	ALP_ASSERT_NULL(h.be_state);
+}
+
+/* Test 3b: a single-input model -- the common case -- still opens fine (no
+ * false positive from the guard). */
+void test_open_accepts_single_input_model()
+{
+	reset_fakes();
+	dxrt_test::g_declared_inputs.push_back(make_tensor({ 1, 4 }));
+	dxrt_test::g_declared_outputs.push_back(make_tensor({ 1, 1 }));
+
+	struct alp_inference   h   = {};
+	alp_inference_config_t cfg = base_cfg();
+	alp_status_t           rc  = alp_inference_deepx_open(&h, &cfg);
+
+	ALP_ASSERT_EQ_INT(rc, ALP_OK);
+	ALP_ASSERT_TRUE(h.be_state != nullptr);
+	alp_inference_deepx_close(&h);
+}
+
 } /* namespace */
 
 int main(void)
@@ -179,6 +219,8 @@ int main(void)
 	test_open_accepts_declared_rank_at_4();
 	test_get_output_refuses_live_rank_over_4();
 	test_get_output_accepts_live_rank_at_4();
+	test_open_refuses_multi_input_model();
+	test_open_accepts_single_input_model();
 
 	ALP_TEST_SUMMARY();
 }
