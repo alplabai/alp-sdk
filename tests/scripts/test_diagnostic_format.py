@@ -19,7 +19,7 @@ remains exercised directly, below.
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import jsonschema
 
@@ -229,7 +229,13 @@ def test_machine_json_for_board_yaml_honours_tool_overrides():
 
 
 def test_uri_posix_absolute_path_becomes_a_file_uri():
-    assert _uri(_diag(path=Path("/w/proj/board.yaml"))) == (
+    # PurePosixPath, not Path -- a bare Path("/w/...") is host-flavoured:
+    # on windows-latest CI it becomes a WindowsPath whose str() spells the
+    # root "\\w\\proj\\board.yaml", losing the leading "/" that signals
+    # POSIX-absolute and misclassifying the whole case. PurePosixPath keeps
+    # the POSIX spelling on every host, which is what _uri is actually
+    # judging.
+    assert _uri(_diag(path=PurePosixPath("/w/proj/board.yaml"))) == (
         "file:///w/proj/board.yaml")
 
 
