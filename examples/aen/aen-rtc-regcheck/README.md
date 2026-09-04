@@ -13,19 +13,29 @@
 >   32 kHz LFXO to the ~5 %-accurate LFRC for as long as POR_N is asserted --
 >   *"it would take a 20 second assertion of POR_N to impose a 1 second loss of
 >   RTC accuracy."*
+> - **Bench fact, beyond the errata text:** the AEN bench module reports
+>   `[SES] No LF XTAL` on every SE boot -- it has no 32 kHz LFXO fitted at all,
+>   so on this module ER002's LFXO->LFRC fallback is **not** confined to the
+>   POR_N window: LFRC is this module's permanent LPRTC clock source. See
+>   `docs/aen-se-services.md`.
 >
-> So: the calendar keeps counting across a reset, but the elapsed time it
-> reports across one is not accurate on either revision. Re-set the time from an
-> external source after any POR if accuracy matters.
+> So: on this module the calendar never runs at LFXO accuracy, reset or not --
+> it drifts continuously at LFRC's ~5 % offset from LFXO, roughly **72 minutes
+> per day**. That is the steady state here, not a transient startup condition
+> or a warning that clears itself; re-sync from an external source
+> periodically, not only after a POR, if wall-clock accuracy matters.
 >
 > **Alif's own workaround for ER002 is "use an external real-time clock source",
 > and the SoM does carry one -- an `rv3028c7` at 7-bit `0x52` -- but it is NOT
-> reachable from the M55 today.** It sits on the module's `BRD_I2C`
-> housekeeping bus, which no application-core I2C controller drives, and the
-> Alif SE services expose no I2C service to route through (`se_service.h` and
-> `services_lib_ids.h` in the pinned hal_alif carry none; the only I2C token in
-> that tree is an EWIC wake-source bit). Using it needs a transport that does
-> not exist yet -- see alp-sdk#1814.
+> reachable from the M55 today.** `BRD_I2C` is SoC I2C0 (function C,
+> `P7_0`/`P7_1`), a master-capable Tier-1 upstream `i2c_dw` controller
+> (`ADTS0013` v1.2 Table 3-16 + HWRM Sec.15.4.1) -- not the slave-only LPI2C0
+> this bus was first believed to be (alp-sdk#1848). The transport exists;
+> what blocks it is electrical, bench-settled 2026-08-31 on the r1 module: pads
+> High-Z abort every address (`-116`/`-ETIMEDOUT`), and the pad's internal
+> ~50 kOhm pull-up only trades that for no ACK (`-5`/`-EIO`) -- the R2 netlist
+> shows `BRD_I2C`'s bridging jumpers (`R93`/`R94`) DNP. It needs a board
+> rework, not firmware -- see alp-sdk#1814.
 
 
 On-silicon validation for the **E1M-AEN801** (Alif Ensemble E8, M55-HE),

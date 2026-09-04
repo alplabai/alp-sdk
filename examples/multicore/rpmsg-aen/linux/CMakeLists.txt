@@ -18,7 +18,12 @@ find_path(ALP_SDK_INC alp/rpc.h REQUIRED)
 if(DEFINED ENV{ALP_GENERATED_DIR})
     set(_alp_gen $ENV{ALP_GENERATED_DIR})
 else()
-    set(_alp_gen ${CMAKE_CURRENT_SOURCE_DIR}/../../build/generated)
+    # One level up from linux/ is the project root (board.yaml's own
+    # directory) -- build/generated/ lives THERE (see the catalog's
+    # `generated_artifacts` entries), not another level up again.
+    # `../../build/generated` (issue #1712) resolved OUTSIDE the
+    # project entirely once this example was scaffolded standalone.
+    set(_alp_gen ${CMAKE_CURRENT_SOURCE_DIR}/../build/generated)
 endif()
 
 add_executable(rpmsg_aen_consumer src/main.c)

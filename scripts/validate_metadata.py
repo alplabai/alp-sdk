@@ -19,6 +19,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -98,6 +99,13 @@ BOARD_PRESETS = REPO / "metadata" / "boards"
 LIBRARIES = REPO / "metadata" / "libraries"
 CHIP_SCHEMA = REPO / "metadata" / "schemas" / "chip-v1.schema.json"
 CHIPS = REPO / "metadata" / "chips"
+# The V2N/V2M on-module GD32G553 supervisor pin-wiring source
+# scripts/gen_zephyr_board.py's `_v2n_pinctrl_dtsi()` / `_v2n_defconfig()`
+# read (#655).  There is NO auto-discovery in this script -- an
+# unregistered schema is silently unvalidated -- so this constant pair is
+# load-bearing, not decorative.
+SUPERVISOR_LINKS_SCHEMA = REPO / "metadata" / "schemas" / "supervisor-links-v1.schema.json"
+SUPERVISOR_LINKS_DATA = REPO / "metadata" / "e1m_modules" / "v2n" / "supervisor-links.yaml"
 BLOCK_SCHEMA = REPO / "metadata" / "schemas" / "block-v1.schema.json"
 BLOCKS = REPO / "metadata" / "blocks"
 MODEL_PERF_SCHEMA = REPO / "metadata" / "schemas" / "model-perf-v1.schema.json"
@@ -325,6 +333,79 @@ def _check_som_peripheral_instance_uniqueness(som_files) -> list:
     return failures
 
 
+def _check_som_i2c_address_collisions(som_files) -> list:
+    """Reject two on-module I2C devices sharing (bus, address_7bit).
+
+    `on_module.i2c_devices.<bus>.devices[]` records the schematic
+    strap-selected address per on-module device.  Two chips answering the
+    same address on the same bus is a real silicon defect, not an
+    editorial nit: #1163 (TMP112 vs the DEEPX LPDDR buck, both at 0x48)
+    and #1659 (an INA236 vs the TAS2563 broadcast address, also 0x48) are
+    real prior instances (#1845).  JSON Schema has no way to express
+    "unique across sibling array entries by a derived key", so enforce it
+    here.
+
+    An entry does NOT count as a fixed, collision-checkable address when:
+      * `address_7bit` is the literal `"TBD"` -- pending the HW-config
+        writeup, not yet a real value;
+      * `address_7bit` is the literal `"configurable"` -- picked by the
+        chip's own firmware (e.g. the GD32 supervisor MCU), not a
+        hardware-fixed strap two devices could physically contend over;
+      * `assembled: false` -- DNI, physically absent from the bus;
+      * `broadcast_address: true` -- a broadcast/global-call address
+        legitimately shared by design (e.g. TAS2563's 0x48, see
+        metadata/chips/tas2563.yaml). Do not reach for this opt-out to
+        silence a real strap conflict.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in som_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        buses = _as_dict(_as_dict(doc.get("on_module")).get("i2c_devices"))
+
+        msgs: list[str] = []
+        checked = 0
+        for bus_name, bus in sorted(buses.items()):
+            if not isinstance(bus, dict):
+                continue
+            seen: dict[int, list[dict]] = {}
+            for dev in _dict_entries(bus.get("devices")):
+                if dev.get("assembled") is False or dev.get("broadcast_address") is True:
+                    continue
+                addr = dev.get("address_7bit")
+                if not isinstance(addr, str) or not re.fullmatch(r"0x[0-9A-Fa-f]{1,2}", addr):
+                    continue  # "TBD" / "configurable" / malformed -- not a fixed address
+                checked += 1
+                seen.setdefault(int(addr, 16), []).append(dev)
+            for addr_int, devs in sorted(seen.items()):
+                if len(devs) < 2:
+                    continue
+                names = ", ".join(f"{d.get('chip')}/{d.get('role')}" for d in devs)
+                msgs.append(
+                    f"on_module.i2c_devices.{bus_name}: {names} all declare "
+                    f"address_7bit=0x{addr_int:02X} on the same bus -- two "
+                    f"devices cannot share a fixed I2C address (#1845); set "
+                    f"broadcast_address: true only if this is a real "
+                    f"broadcast/global-call address")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}  (i2c_devices: {checked} address(es) checked, "
+                  f"no collisions)")
+    return failures
+
+
 def _check_som_slot0_address_resolved(som_files) -> list:
     """Refuse a `memory_map:` region that names an MRAM slot0 path but
     carries no resolved address (tan-cli#353).
@@ -512,6 +593,99 @@ def _check_peripheral_kconfig() -> list:
     else:
         n = len(_as_dict(data.get("peripherals")))
         print(f"OK   {rel}  (peripherals={n})")
+    return failures
+
+
+def _check_board_i2c_address_collisions(board_files) -> list:
+    """Reject two on-board I2C device instances sharing an address.
+
+    A board preset declares on-board I2C devices two ways, checked
+    separately here because each carries its own bus scope:
+
+      * `i2c_devices[]` -- ONE array per file; every entry sits on the
+        single implicit on-board I2C bus documented in-file (e.g.
+        e1m-evk.yaml: "all on ALP_E1M_I2C0, the sensor bus"). The schema
+        has no per-entry bus field because the board only has the one.
+      * `audio.codecs[]` -- each entry names its own `i2c_bus` explicitly
+        (a board can carry more than one audio-adjacent bus).
+
+    Two chips answering the same address on the same bus is a real
+    silicon defect, not an editorial nit: #1163 (TMP112 vs the DEEPX
+    LPDDR buck, both at 0x48) and #1659 (an INA236 vs the TAS2563
+    broadcast address, also 0x48) are real prior instances (#1845). JSON
+    Schema has no way to express "unique across sibling array entries by
+    a derived key", so enforce it here. An entry with
+    `broadcast_address: true` is skipped: a broadcast/global-call address
+    is legitimately shared by design (e.g. TAS2563's 0x48, see
+    metadata/chips/tas2563.yaml) -- do not reach for that opt-out to
+    silence a real strap conflict.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in board_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+
+        msgs: list[str] = []
+        checked = 0
+
+        # i2c_devices[] -- one implicit on-board bus per file.
+        seen: dict[int, list[dict]] = {}
+        for dev in _dict_entries(doc.get("i2c_devices")):
+            if dev.get("broadcast_address") is True:
+                continue
+            addr = dev.get("address")
+            if not isinstance(addr, str) or not re.fullmatch(r"0x[0-9A-Fa-f]{2}", addr):
+                continue
+            checked += 1
+            seen.setdefault(int(addr, 16), []).append(dev)
+        for addr_int, devs in sorted(seen.items()):
+            if len(devs) < 2:
+                continue
+            names = ", ".join(f"{d.get('part')}/{d.get('designator')}" for d in devs)
+            msgs.append(
+                f"i2c_devices: {names} all declare address=0x{addr_int:02X} "
+                f"on the board's on-board I2C bus -- two devices cannot "
+                f"share a fixed I2C address (#1845); set "
+                f"broadcast_address: true only if this is a real "
+                f"broadcast/global-call address")
+
+        # audio.codecs[] -- each entry names its own bus.
+        seen_by_bus: dict[tuple[str, int], list[dict]] = {}
+        for dev in _dict_entries(_as_dict(doc.get("audio")).get("codecs")):
+            if dev.get("broadcast_address") is True:
+                continue
+            bus = dev.get("i2c_bus")
+            addr = dev.get("i2c_address")
+            if not isinstance(bus, str) or not isinstance(addr, str):
+                continue
+            if not re.fullmatch(r"0x[0-9A-Fa-f]{1,2}", addr):
+                continue
+            checked += 1
+            seen_by_bus.setdefault((bus, int(addr, 16)), []).append(dev)
+        for (bus, addr_int), devs in sorted(seen_by_bus.items()):
+            if len(devs) < 2:
+                continue
+            names = ", ".join(f"{d.get('chip')}/{d.get('designator')}" for d in devs)
+            msgs.append(
+                f"audio.codecs: {names} all declare i2c_address=0x{addr_int:02X} "
+                f"on {bus} -- two devices cannot share a fixed I2C address "
+                f"(#1845); set broadcast_address: true only if this is a "
+                f"real broadcast/global-call address")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}  (i2c address(es): {checked} checked, no collisions)")
     return failures
 
 
@@ -1137,6 +1311,173 @@ def _check_chip_physical(chip_files) -> list:
             print(f"FAIL {rel}")
             for m in msgs:
                 print(f"  · {m}")
+    return failures
+
+
+def _check_supervisor_links_cross_refs(supervisor_links_files) -> list:
+    """Cross-check metadata/e1m_modules/v2n/supervisor-links.yaml against
+    the pad-ownership ground truth in metadata/pinmux/v2n.yaml, and the
+    GD32 I2C address against metadata/chips/gd32g553.yaml (#655).
+
+    JSON Schema validates each link's shape but has no way to express a
+    cross-file reference: every (silicon_peripheral, silicon_pad) pair
+    this file claims for the GD32 supervisor bridge -- every pin row plus
+    the `gd32_spi.gpio_chip_select` entry -- must resolve to EXACTLY one
+    `owner: "renesas"` row in metadata/pinmux/v2n.yaml.  Zero matches or
+    more than one is a hard error naming the offending pair.  Where that
+    matched row itself carries a `core:` key, the value MUST be "m33" --
+    but a matched row with NO `core:` key is not an error: the console's
+    UART0_TXD0/UART0_RXD0 rows legitimately carry no `core:` attribution
+    in metadata/pinmux/v2n.yaml (see
+    metadata/e1m_modules/v2n/core-ownership.yaml's own note on why
+    absence is never treated as "a55 by elimination"), so requiring
+    `core: "m33"` unconditionally would fail the console link.
+
+    Also cross-checks `brd_i2c.peer_address_7bit` against
+    metadata/chips/gd32g553.yaml `i2c.default_address_7bit` -- the value
+    is recorded in supervisor-links.yaml to be CROSS-CHECKED, not as an
+    independent authority.
+
+    Also cross-checks every pin row's `pfc_port`/`pfc_pin` against its own
+    `silicon_pad`: the two restate the same fact (`silicon_pad: "P76"`
+    implies `pfc_port: "PORT_07"`, `pfc_pin: 6`) and nothing else in this
+    file catches a typo'd pairing -- a mismatched `pfc_port`/`pfc_pin`
+    would emit a wrong `RZV_PINMUX(...)` to real silicon even though the
+    `silicon_pad` alone still resolves cleanly against
+    metadata/pinmux/v2n.yaml above. Only pads of the `P<digit><digit>`
+    shape are derivable this way; a pad that doesn't match is a hard
+    error too (naming the pad), never a silent skip, so a future non-`Pnn`
+    pad shape forces a deliberate decision here instead of quietly losing
+    the check.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    if not supervisor_links_files:
+        return failures
+    path = supervisor_links_files[0]
+    rel = path.relative_to(REPO).as_posix()
+    try:
+        doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+    except Exception:
+        return failures  # parse errors already reported by the schema pass
+    if not isinstance(doc, dict):
+        return failures
+    links = _as_dict(doc.get("supervisor_links"))
+    if not links:
+        return failures
+
+    msgs: list[str] = []
+
+    pinmux_path = REPO / "metadata" / "pinmux" / "v2n.yaml"
+    pads_by_pair: dict[tuple[str, str], list[dict]] = {}
+    if not pinmux_path.is_file():
+        msgs.append(
+            f"no {pinmux_path.relative_to(REPO).as_posix()} -- cannot "
+            f"cross-check pad ownership")
+    else:
+        try:
+            pm_doc = strict_yaml_load(
+                pinmux_path.read_text(encoding="utf-8"), source=pinmux_path)
+        except Exception as e:
+            msgs.append(
+                f"cannot cross-check against "
+                f"{pinmux_path.relative_to(REPO).as_posix()}: parse error ({e})")
+            pm_doc = None
+        if isinstance(pm_doc, dict):
+            for row in _dict_entries(pm_doc.get("pads")):
+                sp, pad = row.get("silicon_peripheral"), row.get("silicon_pad")
+                if isinstance(sp, str) and isinstance(pad, str):
+                    pads_by_pair.setdefault((sp, pad), []).append(row)
+
+    def _check_pair(sp: object, pad: object, where: str) -> None:
+        if not isinstance(sp, str) or not isinstance(pad, str):
+            return  # already a schema-shape violation reported elsewhere
+        matches = [r for r in pads_by_pair.get((sp, pad), [])
+                   if r.get("owner") == "renesas"]
+        if len(matches) != 1:
+            msgs.append(
+                f"{where}: (silicon_peripheral={sp!r}, silicon_pad={pad!r}) "
+                f"matches {len(matches)} owner=\"renesas\" row(s) in "
+                f"metadata/pinmux/v2n.yaml (need exactly 1)")
+            return
+        core = matches[0].get("core")
+        if core is not None and core != "m33":
+            msgs.append(
+                f"{where}: (silicon_peripheral={sp!r}, silicon_pad={pad!r}) "
+                f"resolves to a metadata/pinmux/v2n.yaml row with "
+                f"core={core!r}, expected \"m33\"")
+
+    _PAD_SHAPE = re.compile(r"^P([0-9])([0-9])$")
+
+    def _check_pad_derivation(pad: object, pfc_port: object, pfc_pin: object,
+                               where: str) -> None:
+        if not isinstance(pad, str):
+            return  # already a schema-shape violation reported elsewhere
+        m = _PAD_SHAPE.match(pad)
+        if not m:
+            msgs.append(
+                f"{where}: silicon_pad={pad!r} does not match the "
+                f"P<port-digit><pin-digit> shape this derivation check "
+                f"understands -- add explicit handling for this pad shape "
+                f"rather than silently skipping the pfc_port/pfc_pin check")
+            return
+        expected_port = f"PORT_0{m.group(1)}"
+        expected_pin = int(m.group(2))
+        if pfc_port != expected_port or pfc_pin != expected_pin:
+            msgs.append(
+                f"{where}: silicon_pad={pad!r} implies "
+                f"pfc_port={expected_port!r}, pfc_pin={expected_pin} but "
+                f"this row declares pfc_port={pfc_port!r}, "
+                f"pfc_pin={pfc_pin!r}")
+
+    for link_name, link in sorted(links.items()):
+        if not isinstance(link, dict):
+            continue
+        for pin in _dict_entries(link.get("pins")):
+            sp, pad = pin.get("silicon_peripheral"), pin.get("silicon_pad")
+            _check_pair(sp, pad, f"supervisor_links.{link_name}.pins")
+            _check_pad_derivation(pad, pin.get("pfc_port"), pin.get("pfc_pin"),
+                                   f"supervisor_links.{link_name}.pins")
+        gcs = link.get("gpio_chip_select")
+        if isinstance(gcs, dict):
+            _check_pair(gcs.get("silicon_peripheral"), gcs.get("silicon_pad"),
+                        f"supervisor_links.{link_name}.gpio_chip_select")
+
+    brd_i2c = links.get("brd_i2c")
+    if isinstance(brd_i2c, dict) and "peer_address_7bit" in brd_i2c:
+        chip_path = REPO / "metadata" / "chips" / "gd32g553.yaml"
+        if not chip_path.is_file():
+            msgs.append(
+                f"no {chip_path.relative_to(REPO).as_posix()} -- cannot "
+                f"cross-check brd_i2c.peer_address_7bit")
+        else:
+            try:
+                chip_doc = strict_yaml_load(
+                    chip_path.read_text(encoding="utf-8"), source=chip_path)
+            except Exception as e:
+                msgs.append(
+                    f"cannot cross-check brd_i2c.peer_address_7bit against "
+                    f"{chip_path.relative_to(REPO).as_posix()}: parse error ({e})")
+                chip_doc = None
+            if isinstance(chip_doc, dict):
+                chip_addr = _as_dict(chip_doc.get("i2c")).get("default_address_7bit")
+                link_addr = brd_i2c.get("peer_address_7bit")
+                if chip_addr != link_addr:
+                    msgs.append(
+                        f"supervisor_links.brd_i2c.peer_address_7bit="
+                        f"{link_addr!r} does not match "
+                        f"{chip_path.relative_to(REPO).as_posix()} "
+                        f"i2c.default_address_7bit={chip_addr!r}")
+
+    if msgs:
+        print(f"FAIL {rel}")
+        for m in msgs:
+            print(f"  · {m}")
+        failures.append((rel, msgs))
+    else:
+        print(f"OK   {rel}  (supervisor_links cross-checked against "
+              f"metadata/pinmux/v2n.yaml + metadata/chips/gd32g553.yaml)")
     return failures
 
 
@@ -2062,6 +2403,9 @@ def main() -> int:
                 lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "name",
             )
+            # #1845: two chips declaring the same (bus, address) reaches
+            # silicon as two devices answering one address.
+            board_failures += _check_board_i2c_address_collisions(board_files)
 
     # Chip manifests (YAML) against chip-v1 schema.
     chip_failures: list = []
@@ -2079,6 +2423,39 @@ def main() -> int:
             )
             chip_failures += _check_chip_semantics(chip_files)
             chip_failures += _check_chip_physical(chip_files)
+
+    # V2N/V2M on-module GD32G553 supervisor pin-wiring source (#655)
+    # against supervisor-links-v1.
+    supervisor_links_failures: list = []
+    supervisor_links_files: list = []
+    if SUPERVISOR_LINKS_SCHEMA.is_file():
+        # SUPERVISOR_LINKS_DATA is an explicit single-file constant, not a
+        # glob -- a deleted/renamed data file used to silently no-op this
+        # whole registration (`0 supervisor-links file(s) checked, 0
+        # failure(s)`, exit 0). That is a hard error, not a skip: the
+        # V2N/V2M pinctrl.dtsi/_defconfig emitters have no other source.
+        if not SUPERVISOR_LINKS_DATA.is_file():
+            rel = SUPERVISOR_LINKS_DATA.relative_to(REPO).as_posix()
+            msg = ("missing -- the V2N/V2M on-module GD32G553 supervisor "
+                   "pin-wiring source (#655) must exist at this exact path")
+            print()
+            print(f"FAIL {rel}")
+            print(f"  · {msg}")
+            supervisor_links_failures.append((rel, [msg]))
+        else:
+            sl_schema = json.loads(SUPERVISOR_LINKS_SCHEMA.read_text(encoding="utf-8"))
+            sl_validator = jsonschema.Draft202012Validator(sl_schema)
+            supervisor_links_files = [SUPERVISOR_LINKS_DATA]
+            print()
+            supervisor_links_failures = _check_files(
+                "YAML", supervisor_links_files, sl_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "schemaVersion",
+            )
+            # Cross-ref against metadata/pinmux/v2n.yaml (pad ownership +
+            # core attribution) and metadata/chips/gd32g553.yaml (peer I2C
+            # address) -- neither is expressible in the schema alone.
+            supervisor_links_failures += _check_supervisor_links_cross_refs(supervisor_links_files)
 
     # Block manifests (YAML) against block-v1 schema.
     block_failures: list = []
@@ -2163,6 +2540,12 @@ def main() -> int:
         print()
         slot0_address_failures = _check_som_slot0_address_resolved(som_files)
 
+    # SoM `on_module.i2c_devices.<bus>.devices[]` (bus, address_7bit) uniqueness (#1845).
+    i2c_collision_failures: list = []
+    if som_files:
+        print()
+        i2c_collision_failures = _check_som_i2c_address_collisions(som_files)
+
     # Silicon -> Kconfig registry + socs/ correspondence.
     print()
     silicon_kconfig_failures = _check_silicon_kconfig()
@@ -2181,16 +2564,19 @@ def main() -> int:
                       + len(restriction_failures)
                       + len(instance_uniqueness_failures)
                       + len(slot0_address_failures)
+                      + len(i2c_collision_failures)
                       + len(silicon_kconfig_failures)
                       + len(peripheral_kconfig_failures)
-                      + len(tier_a_library_ci_failures))
+                      + len(tier_a_library_ci_failures)
+                      + len(supervisor_links_failures))
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
           f"{len(hwrev_files)} hw-revisions file(s) + "
           f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
           f"{len(block_files)} block file(s) + "
           f"{len(model_perf_files)} model-perf point(s) + "
           f"{len(library_files)} library manifest(s) + Kconfig registries + "
-          f"tier-a-library-ci registry "
+          f"tier-a-library-ci registry + "
+          f"{len(supervisor_links_files)} supervisor-links file(s) "
           f"checked, {total_failures} failure(s)")
     return 0 if total_failures == 0 else 1
 

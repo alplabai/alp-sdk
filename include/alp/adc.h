@@ -113,10 +113,12 @@ typedef struct {
 	alp_adc_ref_t reference;
 	uint8_t       gain_num; /**< Gain numerator (e.g. 1 for 1/1). */
 	uint8_t       gain_den; /**< Gain denominator (e.g. 6 for 1/6). */
-	/** Hardware oversampling ratio (1 / 2 / 4 / 8 / 16 / 32 / 64 / 128 / 256).
-     *  Backend rounds down to the nearest power-of-two it supports.  0 means
-     *  "backend default".  Backends without HW oversampling ignore this
-     *  field; the SoC-cap layer documents which SoMs honour it. */
+	/** Hardware oversampling ratio: 0 ("backend default") or a power of two
+     *  (1 / 2 / 4 / 8 / 16 / 32 / 64 / 128 / 256).  A ratio that is not a
+     *  power of two is refused with @ref ALP_ERR_NOSUPPORT at @ref
+     *  alp_adc_open rather than silently rounded to one the hardware can
+     *  represent.  Backends without HW oversampling ignore this field; the
+     *  SoC-cap layer documents which SoMs honour it. */
 	uint16_t oversampling_ratio;
 	/** Extra sample-and-hold cycles at the ADC clock.  Backend rounds to
      *  its nearest discrete tap (8 taps on the GD32 IO MCU; vendor-defined

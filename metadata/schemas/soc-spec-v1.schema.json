@@ -119,7 +119,7 @@
     "inference_arena_sram_kib": {
       "type": "integer",
       "minimum": 0,
-      "description": "Usable SRAM budget (KiB) for an NPU tensor arena on this SoC. The .alpmodel loader admits a blob only if its requires.sram_kib <= this budget. 0 = unknown/unbounded (fit-check skips). This is integration/partition-dependent silicon data; author per-SoC before production."
+      "description": "Usable SRAM budget (KiB) for an NPU tensor arena on this SoC. The .alpmodel loader admits a blob only if its requires.sram_kib <= this budget. 0 = unknown/unbounded (fit-check skips, and alp_model_select_result_t::arena_fit_unverified is set on the winning selection so the skip is not silent -- see src/backends/inference/alp_model_select.h). This is NOT a datasheet constant: it is an integration/partition decision (how much on-die SRAM this SKU's firmware reserves for the NPU tensor arena vs. everything else), which is why every real SoC in this repo carries 0 today (issue #1731) -- author per-SoC only when that partition decision is actually made, never a plausible-looking guess."
     },
     "tcm_kb": {
       "type": "integer",
@@ -348,11 +348,18 @@
         { "required": ["gops"] },
         { "required": ["tops"] }
       ],
+      "if": {
+        "properties": { "type": { "pattern": "^ethos-u" } },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["mac_per_cycle"]
+      },
       "properties": {
         "type":            { "type": "string", "description": "e.g. ethos-u55, ethos-u85, drp-ai3, dx-m1." },
         "subtype":         { "type": "string", "description": "e.g. high-perf (NPU-HP), high-efficiency (NPU-HE), generative (NPU-HG)." },
         "paired_core":     { "type": "string", "description": "`cores[].id` of the CPU core this NPU instance is wired to (Alif: the High-Efficiency M55 drives the 128-MAC high-efficiency Ethos-U55, the High-Performance M55 the 256-MAC high-perf one). Lets the build emit size the accelerator per target core instead of assuming the SoC's most-capable instance. Omit for a shared / non-core-paired NPU (e.g. the E8 U85 on the HG subsystem)." },
-        "mac_per_cycle":   { "type": "integer" },
+        "mac_per_cycle":   { "type": "integer", "description": "Required for every ethos-u* NPU -- the emit's accelerator sizing (scripts/alp_orchestrate/kconfig.py) and target derivation (scripts/alp_model/targets.py) both read npus[].mac_per_cycle directly for this backend; an absent value either raises KeyError (targets.py) or falls through to a silent 256-MAC default (kconfig.py) instead of failing at the metadata source (#1849)." },
         "freq_mhz":        { "type": "integer" },
         "gops":            { "type": "number", "description": "Giga ops per second.  Provide either gops or tops (= gops × 1000)." },
         "tops":            { "type": "number", "description": "Tera ops per second.  Provide either gops or tops." },

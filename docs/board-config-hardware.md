@@ -199,3 +199,57 @@ som:
 The loader merges your overrides onto the preset before generating
 the build config.  No SDK fork needed.
 
+## I2C address collisions: the `broadcast_address` opt-out
+
+`scripts/validate_metadata.py` rejects two I2C device entries on the
+same bus that declare the same fixed address -- SoM
+`on_module.i2c_devices.<bus>.devices[].address_7bit`, board
+`i2c_devices[].address`, and board `audio.codecs[].i2c_address` are
+each checked independently.  Two devices cannot physically answer the
+same strap on the same bus; this caught two real prior defects,
+[#1163](https://github.com/alplabai/alp-sdk/issues/1163) (TMP112 vs.
+the DEEPX LPDDR buck, both at `0x48`) and
+[#1659](https://github.com/alplabai/alp-sdk/issues/1659) (an INA236 vs.
+the TAS2563 broadcast address, also `0x48`) -- see
+[#1845](https://github.com/alplabai/alp-sdk/issues/1845).
+
+The gate treats an entry as not-a-fixed-checkable-address, and skips
+it, when:
+
+- the address field is the literal `"TBD"` or `"configurable"`;
+- `assembled: false` (DNI -- the footprint exists but is empty);
+- **`broadcast_address: true`** -- the address is a real
+  broadcast/global-call address the *part itself* defines, which
+  multiple device entries legitimately share by design.
+
+Worked example -- a stereo pair of TI TAS2563 amps whose metadata
+entries record the part family's shared write-only global-call
+address (`0x48`, see `metadata/chips/tas2563.yaml`), not a
+per-part strap, so both entries answer the same address by design:
+
+```yaml
+i2c_devices:
+  brd_i2c:
+    devices:
+      - { chip: tas2563, role: amp_left,  address_7bit: "0x48", broadcast_address: true }
+      - { chip: tas2563, role: amp_right, address_7bit: "0x48", broadcast_address: true }
+```
+
+Without `broadcast_address: true` on both entries, the gate would
+FAIL with:
+
+```
+on_module.i2c_devices.brd_i2c: tas2563/amp_left, tas2563/amp_right all
+declare address_7bit=0x48 on the same bus -- two devices cannot share
+a fixed I2C address (#1845); set broadcast_address: true only if this
+is a real broadcast/global-call address
+```
+
+Only set `broadcast_address: true` when the datasheet documents the
+shared address as a broadcast mechanism of the part.  Do NOT reach for
+it to silence a real strap conflict between two unrelated devices --
+that is the gate doing its job; fix the strap instead (or, if the real
+strap genuinely isn't known yet, mark the address `"TBD"` with a
+`notes:` / `doc:` comment explaining why -- never guess a value to
+make the check pass).
+

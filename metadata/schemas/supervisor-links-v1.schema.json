@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/supervisor-links-v1.schema.json",
+  "title": "ALP V2N/V2M on-module GD32G553 supervisor pin-wiring source (metadata/e1m_modules/v2n/supervisor-links.yaml) v1",
+  "description": "Alp Lab hand-authored generation authority for the V2N/V2M family's Zephyr `<board>-pinctrl.dtsi` / `<board>_defconfig` (scripts/gen_zephyr_board.py, issue #655). Not vendor pinout data -- pad<->signal authority stays in metadata/pinmux/v2n.yaml (itself generated); this file only references it and adds DT-node-shape facts. Cross-referenced against metadata/pinmux/v2n.yaml and metadata/chips/gd32g553.yaml by scripts/validate_metadata.py -- shape only is validated by this schema.",
+  "type": "object",
+  "required": ["schemaVersion", "families", "supervisor_links"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "supervisor-links-v1" },
+    "families": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "supervisor_links": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gd32_spi", "brd_i2c", "console"],
+      "properties": {
+        "gd32_spi": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "peripheral", "dt_label", "alias", "pinctrl_group_label",
+            "pinctrl_node", "pinctrl_child_node", "status", "pins",
+            "gpio_chip_select"
+          ],
+          "properties": {
+            "peripheral": { "const": "GD32_SPI" },
+            "dt_label": { "const": "sci7" },
+            "alias": { "const": "alp-spi1" },
+            "pinctrl_group_label": { "type": "string", "minLength": 1 },
+            "pinctrl_node": { "type": "string", "minLength": 1 },
+            "pinctrl_child_node": { "type": "string", "minLength": 1 },
+            "status": { "enum": ["enabled", "disabled"] },
+            "pins": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/pin_row" }
+            },
+            "gpio_chip_select": { "$ref": "#/$defs/gpio_chip_select" }
+          }
+        },
+        "brd_i2c": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "peripheral", "dt_label", "alias", "pinctrl_group_label",
+            "pinctrl_node", "pinctrl_child_node", "status",
+            "peer_address_7bit", "pins"
+          ],
+          "properties": {
+            "peripheral": { "const": "RIIC8" },
+            "dt_label": { "const": "i2c8" },
+            "alias": { "const": "alp-i2c0" },
+            "pinctrl_group_label": { "type": "string", "minLength": 1 },
+            "pinctrl_node": { "type": "string", "minLength": 1 },
+            "pinctrl_child_node": { "type": "string", "minLength": 1 },
+            "status": { "enum": ["enabled", "disabled"] },
+            "peer_address_7bit": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 127,
+              "description": "The GD32G553 slave address this link expects. CROSS-CHECKED against metadata/chips/gd32g553.yaml i2c.default_address_7bit by scripts/validate_metadata.py, not an independent authority."
+            },
+            "pins": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/pin_row" }
+            }
+          }
+        },
+        "console": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "peripheral", "dt_label", "pinctrl_group_label", "pinctrl_node",
+            "pinctrl_child_node", "status", "pins"
+          ],
+          "properties": {
+            "peripheral": { "const": "SCI_UART0" },
+            "dt_label": { "const": "sci0" },
+            "pinctrl_group_label": { "type": "string", "minLength": 1 },
+            "pinctrl_node": { "type": "string", "minLength": 1 },
+            "pinctrl_child_node": { "type": "string", "minLength": 1 },
+            "status": { "const": "disabled" },
+            "pins": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/pin_row" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "pin_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "silicon_peripheral", "silicon_pad", "pfc_port", "pfc_pin",
+        "pfc_func", "evidence"
+      ],
+      "properties": {
+        "silicon_peripheral": { "type": "string", "minLength": 1 },
+        "silicon_pad": {
+          "type": "string",
+          "pattern": "^[A-Z]{1,2}[0-9]{1,2}$",
+          "description": "RZ/V2N owner:\"renesas\" pad shapes: port-style (P06, P96), port+letter (PA2, PA5), and BGA ball (K27, J29). Must resolve to exactly one owner:\"renesas\" row in metadata/pinmux/v2n.yaml keyed by (silicon_peripheral, silicon_pad) -- enforced by scripts/validate_metadata.py, not expressible in JSON Schema."
+        },
+        "pfc_port": { "type": "string", "pattern": "^PORT_[0-9]{2}$" },
+        "pfc_pin": { "type": "integer", "minimum": 0, "maximum": 7 },
+        "pfc_func": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 7,
+          "description": "RZ/V2N PFC pin-function-select field is 3 bits wide (func0-func7)."
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A NON-DERIVATIVE citation (RZ/V2N hardware-manual PFC table, an errata entry, or a silicon/bench finding) -- never a generated file."
+        }
+      }
+    },
+    "gpio_chip_select": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "silicon_peripheral", "silicon_pad", "gpio_node", "gpio_pin",
+        "active_low", "evidence"
+      ],
+      "properties": {
+        "silicon_peripheral": { "type": "string", "minLength": 1 },
+        "silicon_pad": { "type": "string", "pattern": "^[A-Z]{1,2}[0-9]{1,2}$" },
+        "gpio_node": { "type": "string", "pattern": "^gpio[0-9]+$" },
+        "gpio_pin": { "type": "integer", "minimum": 0 },
+        "active_low": { "type": "boolean" },
+        "evidence": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A NON-DERIVATIVE citation -- never a generated file."
+        }
+      }
+    }
+  }
+}

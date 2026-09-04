@@ -231,15 +231,48 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 		 * GET_VERSION as a liveness probe, not a compat gate). */
 		return ALP_OK;
 	}
-	if (fw_version != ALP_CC3501E_PROTOCOL_VERSION) {
+	/* MAJOR gates the link; MINOR does not (ADR 0033).
+	 *
+	 * The old check was `fw_version != ALP_CC3501E_PROTOCOL_VERSION` on a flat
+	 * integer, which refused on ANY difference -- so a purely additive firmware
+	 * change (a new opcode this host simply never sends) cost a customer the
+	 * same forced lockstep reflash as a change that genuinely reinterprets
+	 * bytes an old host writes as zero.  Two of the four v6..v9 bumps were the
+	 * harmless kind.
+	 *
+	 * MAJOR is defined as "an unchanged host would be MISREAD", so refusing on
+	 * it keeps exactly the protection v7 and v8 needed.  MINOR is defined as
+	 * additive, which is what makes connecting across it safe: this host never
+	 * sends an opcode it does not know, and the firmware never spontaneously
+	 * emits an event nobody armed. */
+	const uint8_t fw_major = (uint8_t)ALP_CC3501E_PROTOCOL_VERSION_MAJOR(fw_version);
+	const uint8_t fw_minor = (uint8_t)ALP_CC3501E_PROTOCOL_VERSION_MINOR(fw_version);
+
+	if (fw_major != (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR) {
 		/* Permanent, not transient: retrying cannot reconcile two binaries
          * that disagree about the wire, so unlike the transport-timeout case
          * above this clears initialised -- every later call on this ctx now
          * fails ALP_ERR_NOT_READY instead of talking a wrong frame layout to
-         * a radio. */
-		ctx->initialised = false;
+         * a radio.
+         *
+         * fw_major == 0 is the DISTINGUISHABLE legacy case: a firmware built
+         * before ADR 0033 answers with its raw v1..v9 integer, which decodes
+         * to major 0.  Same refusal -- such a firmware really does disagree
+         * about the wire -- but the caller can tell "older than the scheme"
+         * from "disagrees about the frame layout", which is the difference
+         * between "reflash the bridge" and "something is wrong". */
+		ctx->initialised    = false;
+		ctx->fw_proto_major = fw_major;
+		ctx->fw_proto_minor = fw_minor;
 		return ALP_ERR_VERSION;
 	}
+
+	/* Same major: usable.  Record what the firmware actually speaks so callers
+	 * can gate a feature on it -- though CMD_GET_CAPABILITIES is the better
+	 * question, because it reports what this BUILD implements rather than what
+	 * its version number implies. */
+	ctx->fw_proto_major = fw_major;
+	ctx->fw_proto_minor = fw_minor;
 
 	return ALP_OK;
 }
@@ -696,7 +729,8 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
                                            size_t            tx_len,
                                            uint8_t          *rx_buf,
                                            size_t            rx_cap,
-                                           size_t           *rx_len)
+                                           size_t           *rx_len,
+                                           uint8_t           req_seq)
 {
 	alp_status_t s;
 
@@ -720,7 +754,14 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	 * CS-less r1 board with no ready_pin the fallback is the same short settle the
 	 * other phases use. */
 	cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE_US);
-	encode_header(ctx->tx_scratch, cmd, ALP_CC3501E_FLAG_RESP_REQUIRED, (uint16_t)tx_len);
+	/* req_seq rides flags bits 3..7 (proto v8).  Callers that have no retry
+	 * loop pass ALP_CC3501E_REQ_SEQ_NONE, which the firmware treats as "no
+	 * identity" and never latches -- so the masking here is the only place
+	 * the seq touches the wire, and a v7 firmware simply ignores the bits. */
+	const uint8_t flags =
+	    (uint8_t)(ALP_CC3501E_FLAG_RESP_REQUIRED | (uint8_t)((req_seq & ALP_CC3501E_REQ_SEQ_MASK)
+	                                                         << ALP_CC3501E_FLAG_REQ_SEQ_SHIFT));
+	encode_header(ctx->tx_scratch, cmd, flags, (uint16_t)tx_len);
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
 	if (s != ALP_OK) goto out;
 
@@ -918,7 +959,12 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 	 * touching the lock). */
 	alp_status_t s = cc3501e_lock_acquire(ctx);
 	if (s != ALP_OK) return s;
-	s = cc3501e_request_locked(ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len);
+	/* Single-shot: no retry loop, so nothing here is a repeat of anything and
+	 * the frame must not be latchable.  ALP_CC3501E_REQ_SEQ_NONE says exactly
+	 * that on the wire (proto v8).  Retryable callers go through
+	 * poll_by_repeat(), which allocates a real seq. */
+	s = cc3501e_request_locked(
+	    ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len, ALP_CC3501E_REQ_SEQ_NONE);
 	cc3501e_lock_release(ctx);
 	return s;
 }
@@ -933,6 +979,32 @@ alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out)
 	if (s != ALP_OK) return s;
 	if (got < sizeof(reply)) return ALP_ERR_IO;
 	*version_out = (uint16_t)reply[0] | ((uint16_t)reply[1] << 8);
+	return ALP_OK;
+}
+
+alp_status_t cc3501e_get_capabilities(cc3501e_t *ctx, uint32_t *caps_out)
+{
+	if (caps_out == NULL) return ALP_ERR_INVAL;
+	*caps_out = 0u;
+
+	/* Reply DATA = alp_cc3501e_capabilities_t { caps(LE32) | reserved(LE32) }.
+	 * Read only the first word: a future firmware may put more in `reserved`,
+	 * and ignoring what we do not understand is exactly what makes widening it
+	 * a MINOR-class change (ADR 0033). */
+	uint8_t      reply[sizeof(alp_cc3501e_capabilities_t)] = { 0 };
+	size_t       got                                       = 0;
+	alp_status_t s = cc3501e_request(ctx,
+	                                 ALP_CC3501E_CMD_GET_CAPABILITIES,
+	                                 NULL,
+	                                 0,
+	                                 reply,
+	                                 sizeof(reply),
+	                                 &got,
+	                                 CC3501E_REQ_TMO_MS);
+	if (s != ALP_OK) return s;
+	if (got < 4u) return ALP_ERR_IO; /* short reply -- firmware/wire gap */
+	*caps_out = (uint32_t)reply[0] | ((uint32_t)reply[1] << 8) | ((uint32_t)reply[2] << 16) |
+	            ((uint32_t)reply[3] << 24);
 	return ALP_OK;
 }
 
@@ -994,6 +1066,18 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 	uint32_t     remaining   = (timeout_ms > 0u) ? timeout_ms : 1u;
 	uint32_t     next_gap_ms = CC3501E_POLL_GAP_MIN_MS;
 	alp_status_t s;
+	/* ONE seq for this whole logical command, allocated BEFORE the loop and
+	 * re-sent unchanged on every attempt below -- that constancy is what lets
+	 * the firmware answer a repeat from its latch instead of re-executing the
+	 * operation (proto v8, cc3501e-bridge-firmware#102).  Allocating inside
+	 * the loop would make every retry look like a new command, i.e. exactly
+	 * the bug this exists to fix.
+	 *
+	 * Skips 0, which is reserved for "no identity": the space is 1..31 and
+	 * this pre-increments, so a fresh ctx's first retryable command is seq 1
+	 * (same shape as sock_send_seq / spi1_seq). */
+	ctx->req_seq = (ctx->req_seq >= ALP_CC3501E_REQ_SEQ_LAST) ? 1u : (uint8_t)(ctx->req_seq + 1u);
+	const uint8_t req_seq = ctx->req_seq;
 	for (;;) {
 		/* Sentinel + peek bracketed in the SAME lock hold as the request
 		 * itself (issue #1116 follow-up): both touch the shared
@@ -1016,7 +1100,7 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 		 * -EBUSY) rather than resp_to_status() then leaves the sentinel, so it
 		 * can never masquerade as RESP_ERR_STATE. */
 		ctx->rx_scratch[0] = 0xFFu;
-		s = cc3501e_request_locked(ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len);
+		s = cc3501e_request_locked(ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len, req_seq);
 		/* resp_to_status() maps BOTH RESP_ERR_BUSY (worker still running --
 		 * genuinely retryable) and RESP_ERR_STATE (a deterministic firmware
 		 * reject -- e.g. BLE_GATT_REGISTER's NimBLE ordering guard) to the

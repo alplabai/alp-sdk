@@ -36,8 +36,18 @@ def _default_os_from_core_type(core_type: str) -> str:
     Used as the fallback when a SoM preset's `topology.<core>.os` is
     omitted (the field is now optional in som-preset-v1.schema.json --
     M-class cores default to Zephyr, A-class to Yocto).
+
+    *core_type* is typed `str`, but the value is read straight off a SoC
+    JSON that a schema-invalid `--metadata-root` tree makes no promise
+    about, so the annotation is not a guarantee (#1852, porting tan-cli#957).
+    `(core_type or "")` handled `None` and `""` but still reached `.lower()`
+    on a TRUTHY non-string (`7`, a populated list, `True`) and raised
+    `AttributeError` there -- a crash where tan, the other implementation of
+    this same rule, normalises to the `""` unresolved sentinel a genuinely
+    absent `type` already produces. `isinstance` here is the backstop for
+    every caller that forwards a `cores[].type` without its own guard.
     """
-    t = (core_type or "").lower()
+    t = core_type.lower() if isinstance(core_type, str) else ""
     if t.startswith("cortex-a"):
         return "yocto"
     if t.startswith("cortex-m"):
@@ -78,8 +88,18 @@ CLASS_RUNTIMES = ("yocto", "zephyr")
 
 
 def _runtime_class(core_type: str) -> str:
-    """`linux` for Cortex-A, `rtos` for Cortex-M, else `other`."""
-    t = (core_type or "").lower()
+    """`linux` for Cortex-A, `rtos` for Cortex-M, else `other`.
+
+    The `isinstance` guard is defense-in-depth rather than a live bug fix:
+    `core_os_topology`, the one caller, now normalises a non-string `type`
+    to `""` before this is reached, so the branch is currently unreachable
+    -- not currently wrong. It is kept anyway so this helper does not repeat
+    the assumption ("my caller surely guarded this") that let the bare
+    `(core_type or "").lower()` idiom survive unnoticed in three functions at
+    once here (#1852). Mirrors tan's `python/tan/planner/topology.py`
+    `_runtime_class` (tan-cli#957 / tan-cli#962).
+    """
+    t = core_type.lower() if isinstance(core_type, str) else ""
     if t.startswith("cortex-a"):
         return "linux"
     if t.startswith("cortex-m"):
@@ -96,7 +116,24 @@ def _cross_class_os(core_type: str) -> set[str]:
 def _allowed_os_for_core(core_type: str, metadata_root: Path) -> list[str]:
     """The os: values valid for this core: every runtime minus the other
     class's OS -- e.g. Cortex-A -> [yocto, baremetal, off], Cortex-M ->
-    [zephyr, baremetal, off]."""
+    [zephyr, baremetal, off].
+
+    An UNRESOLVED *core_type* -- absent, empty, or not a string -- yields
+    `[]`, not a guess (#1852, porting tan-cli#914 / tan-cli#957). Without
+    this guard `_cross_class_os("")` is `{yocto, zephyr}`, so the
+    comprehension handed back `["baremetal", "off"]`: an offer of two
+    runtimes for a core whose class nobody established. tan's
+    `allowed_os_for_core` rejects exactly that answer by name, and this
+    function is the other half of the same rule, so it must agree.
+
+    `_cross_class_os` is deliberately left unguarded, matching tan's
+    `cross_class_os`: the REFUSAL path it feeds
+    (`validate.py::_enforce_os_matches_core_class`) already declines both
+    real runtimes for an unclassified core in both repos, which is the
+    conservative answer there. Only the *advertised* set was wrong.
+    """
+    if not isinstance(core_type, str) or not core_type:
+        return []
     cross = _cross_class_os(core_type)
     return [o for o in _core_os_choices(metadata_root) if o not in cross]
 
@@ -112,8 +149,18 @@ def core_os_topology(project: "BoardProject") -> dict[str, Any]:
     valid dropdown).  Lets the Board Configurator show the SDK's selection +
     the legal overrides instead of guessing or offering a cross-class OS.
     """
+    # `c.get("type", "")` is UNVALIDATED against `soc-spec-v1.schema.json`'s
+    # own `"type": {"type": "string"}` -- a `--metadata-root` pointing at a
+    # schema-invalid tree reaches here unchecked. `core_type` below feeds
+    # `_runtime_class` / `_default_os_from_core_type` / `_allowed_os_for_core`
+    # AND is written verbatim to the emitted `core_type` field, so a
+    # non-string here is either an `AttributeError` (`--emit os-topology`
+    # aborts with a bare traceback) or a wire leak into the document --
+    # the same two failure modes tan closed in tan-cli#957 / tan-cli#962.
+    # Normalises to the same `""` unresolved sentinel a missing `type` or a
+    # missing entry already produces (#1852).
     soc_types = {
-        c["id"]: c.get("type", "")
+        c["id"]: c["type"] if isinstance(c.get("type"), str) else ""
         for c in (project.soc_spec.get("cores") or []) if "id" in c
     }
     rows: list[dict[str, Any]] = []

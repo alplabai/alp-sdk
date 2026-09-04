@@ -135,8 +135,102 @@ extern "C" {
  * SOCK_RECV is NOT touched.  alp_cc3501e_sock_recv_t is { handle | max_len }
  * with no spare byte -- giving it request identity would be an actual layout
  * change, out of scope here; see cc3501e-bridge-firmware#88 for why it was
- * deliberately left for its own change. */
-#define ALP_CC3501E_PROTOCOL_VERSION 7
+ * deliberately left for its own change.
+ *
+ * v8 generalises that request identity to EVERY worker-routed opcode.  The
+ * SOCK_SEND fix above needed a spare byte inside one request struct and so
+ * could only ever cover one opcode; the other 25 worker-routed opcodes still
+ * had no identity at all, and a lost reply on any of them re-executed the
+ * operation (cc3501e-bridge-firmware#102).  v8 puts the seq in the FRAME
+ * HEADER instead -- flags bits 3..7, unused through v7 -- so it costs zero
+ * wire bytes and needs no per-opcode struct change.  See
+ * ALP_CC3501E_FLAG_REQ_SEQ_SHIFT below.
+ *
+ * SOCK_SEND keeps its own 8-bit struct seq and is deliberately EXEMPT from the
+ * header-seq mechanism: 8 bits of identity is strictly stronger than 5, and
+ * that path is the bench-validated one.  SOCK_RECV is exempt for the same
+ * reason it was left out of v7 -- it consumes stream state, so a header-seq
+ * match is not sufficient evidence that two frames are the same logical read. */
+/* v9 adds the LISTENING-SOCKET path: CMD_SOCK_BIND (0x25), CMD_SOCK_LISTEN
+ * (0x26) and the async EVT_SOCK_ACCEPTED (0x2C), plus an interface selector on
+ * CMD_WIFI_GET_IP (0x17).  Before v9 the socket family was client-only
+ * (OPEN/CONNECT/SEND/RECV/CLOSE), so a host could not terminate an inbound TCP
+ * connection over the module's own soft-AP even though the firmware already
+ * runs lwIP with bind/listen/accept available -- the AP path starts a DHCP
+ * server through that same stack (cc3501e-bridge-firmware#104).
+ *
+ * THERE IS DELIBERATELY NO ACCEPT OPCODE.  accept() blocks, and this transport
+ * is strict request/reply lockstep served from the SPI callback: a blocking
+ * opcode would hold the worker -- and with it READY LOW and the whole bridge --
+ * for the entire time no client is connecting.  The inbound connection arrives
+ * instead as an entry on the EXISTING polled event queue
+ * (CMD_GET_PENDING_EVENTS), carrying a fresh handle the host then uses with the
+ * ordinary CMD_SOCK_RECV / CMD_SOCK_SEND / CMD_SOCK_CLOSE.  No new data path,
+ * no blocking opcode, and the firmware side is one non-blocking accept per
+ * housekeeping tick.
+ *
+ * CMD_WIFI_GET_IP GAINS AN OPTIONAL REQUEST BYTE and keeps its old empty form.
+ * Through v8 it reported the STA address only, so a serving application on the
+ * AP path had to infer the module's own address from an associated client's
+ * DHCP gateway -- indirect, and unavailable until a client shows up.  A v9
+ * request may carry one @ref alp_cc3501e_wifi_iface_t byte; a zero-length
+ * request still means STA, so the frame an old host sends keeps its old
+ * meaning.
+ *
+ * THE BUMP IS STRUCTURAL THIS TIME (new opcodes), so the usual gate applies
+ * unchanged: the three sites listed above move together, and cc3501e_core.c's
+ * GET_VERSION check refuses any host/firmware mismatch outright.
+ *
+ * ===================================================================
+ * v5..v9 WERE A SINGLE RAW INTEGER.  From here the wire version is
+ * MAJOR.MINOR -- see ADR 0033 and the two defines below.
+ * ===================================================================
+ * The raw integer conflated two different questions, and answering both with
+ * one exact-equality gate is why this protocol went v5 -> v9 in a single week
+ * with a forced lockstep reflash each time.  Only TWO of those four bumps
+ * (v7, v8) could actually misread an old host; v6 and v9 were purely additive
+ * and cost customers a reflash for nothing.
+ *
+ * Retroactive mapping, so the history stays legible:
+ *   v5 = 1.0   v6 = 1.1   v7 = 2.0   v8 = 3.0   v9 = 3.1
+ * The current wire is 3.1 and is BYTE-IDENTICAL to what shipped as "v9" --
+ * this renames the contract, it does not change a frame. */
+
+/** Wire-protocol MAJOR: bumped ONLY when an existing host, unchanged, would be
+ *  MISREAD by the new firmware (or would misread its replies) -- reusing a
+ *  reserved byte or flag bit, changing a struct layout, changing framing, or
+ *  changing what an existing field means.
+ *
+ *  A MAJOR mismatch is what @ref cc3501e_reset refuses on; it is the safety
+ *  property the v7 and v8 bumps needed, kept exactly as strict as before. */
+#define ALP_CC3501E_PROTOCOL_MAJOR 3
+
+/** Wire-protocol MINOR: bumped for everything ADDITIVE -- new opcodes, new
+ *  optional request fields whose absent form keeps its old meaning, new event
+ *  types, new capability bits.
+ *
+ *  A MINOR difference does NOT refuse the link. A lower firmware minor simply
+ *  lacks newer features (ask @ref ALP_CC3501E_CMD_GET_CAPABILITIES rather than
+ *  inferring them); a higher one has features this host does not use. That is
+ *  safe BECAUSE minor is defined as additive: the host never sends what it does
+ *  not know, and the firmware never spontaneously emits an event nobody armed.
+ *  A change that cannot honour that is MAJOR by definition. */
+#define ALP_CC3501E_PROTOCOL_MINOR 1
+
+/** The composed value @ref ALP_CC3501E_CMD_GET_VERSION carries on the wire:
+ *  `(MAJOR << 8) | MINOR`, still a 2-byte LE reply.
+ *
+ *  A firmware that predates this scheme answers with its raw v1..v9 integer,
+ *  which decodes to MAJOR 0 -- distinguishable, so the host can say "older
+ *  than the versioning scheme" instead of "corrupt". MAJOR 0 is therefore
+ *  RESERVED and must never be used by a real release. */
+#define ALP_CC3501E_PROTOCOL_VERSION \
+	(((ALP_CC3501E_PROTOCOL_MAJOR) << 8) | (ALP_CC3501E_PROTOCOL_MINOR))
+
+/** Extract the MAJOR half of a @ref ALP_CC3501E_CMD_GET_VERSION reply. */
+#define ALP_CC3501E_PROTOCOL_VERSION_MAJOR(v) (((v) >> 8) & 0xFFu)
+/** Extract the MINOR half of a @ref ALP_CC3501E_CMD_GET_VERSION reply. */
+#define ALP_CC3501E_PROTOCOL_VERSION_MINOR(v) ((v) & 0xFFu)
 
 /** Frame header in bytes, before the payload. */
 #define ALP_CC3501E_HEADER_BYTES 4
@@ -166,6 +260,41 @@ extern "C" {
  *  it on intermediate frames of a multi-frame BLE-write transaction. */
 #define ALP_CC3501E_FLAG_CONTINUATION 0x04
 
+/** Bit position of the v8 request retry seq inside the flags byte.
+ *
+ *  Flags bits 3..7 (`0x08`-`0x80`) carry a 5-bit retry seq identifying one
+ *  LOGICAL request, so the firmware can tell "the host is re-asking for the
+ *  result of the operation I already ran" from "the host wants this operation
+ *  run again".  Without it, the host's poll-by-repeat -- which re-sends a
+ *  byte-identical frame while the worker is busy -- is indistinguishable from
+ *  a fresh request, and a reply lost in transit makes the firmware re-execute
+ *  (cc3501e-bridge-firmware#102).
+ *
+ *  Bits 0..2 keep their v1 meanings; bits 3..7 read zero on every host up to
+ *  and including v7, which is why this needed no wire-format change.
+ *  @see ALP_CC3501E_REQ_SEQ_NONE for why zero is not a usable seq. */
+#define ALP_CC3501E_FLAG_REQ_SEQ_SHIFT 3u
+
+/** Mask of the retry-seq VALUE, after shifting down by
+ *  @ref ALP_CC3501E_FLAG_REQ_SEQ_SHIFT -- i.e. 5 bits, 0..31. */
+#define ALP_CC3501E_REQ_SEQ_MASK 0x1Fu
+
+/** Mask of the retry-seq bits IN PLACE within the flags byte. */
+#define ALP_CC3501E_FLAG_REQ_SEQ_BITS 0xF8u
+
+/** Seq value reserved to mean "this request carries no identity".
+ *
+ *  A v7-and-earlier host leaves the whole flags byte's upper bits clear, so
+ *  every one of its frames would otherwise look like the same seq and could be
+ *  answered from a cached reply for an operation the host never asked twice.
+ *  Reserving zero makes that case explicit and un-cacheable in BOTH
+ *  directions; the usable seq space is 1..@ref ALP_CC3501E_REQ_SEQ_LAST. */
+#define ALP_CC3501E_REQ_SEQ_NONE 0u
+
+/** Highest usable retry seq (the space is 1..31; 0 is
+ *  @ref ALP_CC3501E_REQ_SEQ_NONE). */
+#define ALP_CC3501E_REQ_SEQ_LAST 31u
+
 /** Marker for the first opcode in the vendor-extension reserved range.
  *  Opcodes >= this value are NOT used by the v1 protocol and are
  *  reserved for future vendor extensions; the firmware-side parser
@@ -192,7 +321,8 @@ extern "C" {
  * friendly:
  *
  *   0x00..0x0F  meta (ping, version, reset)
- *   0x10..0x2F  Wi-Fi
+ *   0x10..0x1F  Wi-Fi
+ *   0x20..0x2F  TCP/UDP sockets
  *   0x30..0x3F  BLE
  *   0x40..0x4F  OTA
  *   0x50..0x5F  GPIO proxy (0x50..0x54) + SPI1 host passthrough (0x55..0x57)
@@ -218,14 +348,29 @@ typedef enum {
 	 * status OK) means nothing was queued.  The firmware DRAINS the queue on
 	 * each poll so an event is delivered exactly once.
 	 *
-	 * WHY POLLED: the async EVT_* frames (WIFI 0x18..0x1A, BLE 0x3C..0x3F,
-	 * GPIO 0x54) have no slave->master attention line on this HW rev -- the
+	 * WHY POLLED: the async EVT_* frames (WIFI 0x18..0x1A, SOCK 0x2C, BLE
+	 * 0x3C..0x3F, GPIO 0x54) have no slave->master attention line on this HW
+	 * rev -- the
 	 * CC35 GPIO17 -> Alif P2_6 line is a BODGE not routed on the stock EVK --
 	 * so the host cannot be interrupt-notified; it polls this opcode instead
 	 * (a bodged unit can drive P2_6 to trigger the poll early, but the polled
 	 * path is the benchable default).  0x05 is the first free opcode in the
 	 * meta group (0x00..0x0F; 0x00..0x04 are taken above). */
 	ALP_CC3501E_CMD_GET_PENDING_EVENTS = 0x05,
+	/* Which opcode families this firmware ACTUALLY IMPLEMENTS IN THIS BUILD.
+	 * Reply DATA is @ref alp_cc3501e_capabilities_t.
+	 *
+	 * This exists because the wire version cannot express what the bitmap can.
+	 * The firmware has real build variants: without CC3501E_WIFI the socket
+	 * opcodes are NOTIMPL stubs, and without CC3501E_BLE there is no BLE host
+	 * at all -- yet both report the same wire version as a full build. The
+	 * bitmap is composed from those same compile-time switches, so it reports
+	 * what is really there.
+	 *
+	 * Ask this instead of inferring a feature from a version number: an
+	 * additive feature bumps MINOR and sets a bit, and an old host neither
+	 * knows nor cares. See ADR 0033. */
+	ALP_CC3501E_CMD_GET_CAPABILITIES = 0x06,
 
 	/* Wi-Fi */
 	ALP_CC3501E_CMD_WIFI_SCAN_START   = 0x10,
@@ -250,6 +395,17 @@ typedef enum {
 	ALP_CC3501E_CMD_SOCK_SEND    = 0x22,
 	ALP_CC3501E_CMD_SOCK_RECV    = 0x23,
 	ALP_CC3501E_CMD_SOCK_CLOSE   = 0x24,
+	/* Listening path (v9).  BIND assigns the local endpoint, LISTEN turns the
+	 * socket into a passive one; there is NO accept opcode -- an inbound
+	 * connection is delivered as EVT_SOCK_ACCEPTED on the polled event queue.
+	 * See the v9 paragraph at the top of this header for why. */
+	ALP_CC3501E_CMD_SOCK_BIND   = 0x25,
+	ALP_CC3501E_CMD_SOCK_LISTEN = 0x26,
+	/* Async: a client connected to a listening socket.  Payload is
+	 * @ref alp_cc3501e_sock_accepted_evt_t.  0x2C mirrors the group convention
+	 * that async opcodes sit above the commands in their own range (cf.
+	 * EVT_WIFI_* 0x18..0x1A, EVT_BLE_* 0x3C..0x3F). */
+	ALP_CC3501E_EVT_SOCK_ACCEPTED = 0x2C, /* async */
 
 	/* BLE */
 	ALP_CC3501E_CMD_BLE_ENABLE         = 0x30,
@@ -477,11 +633,61 @@ typedef struct {
 } alp_cc3501e_diag_info_t;
 
 /* ------------------------------------------------------------------ */
+/* Capability bitmap (CMD_GET_CAPABILITIES)                            */
+/* ------------------------------------------------------------------ */
+
+/** Capability bits reported by CMD_GET_CAPABILITIES (opcode 0x06).
+ *
+ *  One bit per opcode FAMILY, set when this firmware build implements it for
+ *  real rather than as a NOTIMPL stub.
+ *
+ *  A BIT IS FOREVER. Once assigned it can never mean a different feature;
+ *  retiring a feature retires its bit. Same discipline as the opcode space,
+ *  and for the same reason -- a host in the field decides what to send from
+ *  these bits. */
+typedef enum {
+	ALP_CC3501E_CAP_WIFI_STA     = 0x00000001u, /**< scan / connect / STA status  */
+	ALP_CC3501E_CAP_WIFI_AP      = 0x00000002u, /**< soft-AP role + its DHCP server */
+	ALP_CC3501E_CAP_SOCK_CLIENT  = 0x00000004u, /**< SOCK_OPEN/CONNECT/SEND/RECV/CLOSE */
+	ALP_CC3501E_CAP_SOCK_LISTEN  = 0x00000008u, /**< SOCK_BIND/LISTEN + EVT_SOCK_ACCEPTED */
+	ALP_CC3501E_CAP_BLE          = 0x00000010u, /**< BLE host (advertise/scan/GATT) */
+	ALP_CC3501E_CAP_OTA          = 0x00000020u, /**< OTA_BEGIN/WRITE/FINISH/PROMOTE */
+	ALP_CC3501E_CAP_GPIO_PROXY   = 0x00000040u, /**< GPIO proxy + edge events     */
+	ALP_CC3501E_CAP_SPI1_MASTER  = 0x00000080u, /**< SPI1 host passthrough        */
+	ALP_CC3501E_CAP_CAMERA       = 0x00000100u, /**< camera enable/disable        */
+	ALP_CC3501E_CAP_POWER_POLICY = 0x00000200u, /**< power-policy control         */
+	ALP_CC3501E_CAP_DIAG_STATS   = 0x00000400u, /**< DIAG_GET_STATS counters      */
+	ALP_CC3501E_CAP_EVENTS       = 0x00000800u, /**< the polled async-event queue */
+} alp_cc3501e_capability_t;
+
+/** Reply DATA for CMD_GET_CAPABILITIES (opcode 0x06).
+ *  Field-level meanings:
+ *   - caps: OR of @ref alp_cc3501e_capability_t bits, LE32.
+ *   - reserved: 0 in this revision. A future firmware may widen the bitmap
+ *     here; a host that does not understand the extra bits ignores them,
+ *     which is exactly why this is a MINOR-class extension point. */
+typedef struct {
+	uint32_t caps;
+	uint32_t reserved;
+} alp_cc3501e_capabilities_t;
+
+/* ------------------------------------------------------------------ */
 /* Async-event queue payload format (CMD_GET_PENDING_EVENTS)           */
 /* ------------------------------------------------------------------ */
 
 /** Fixed per-event header size on the wire (evt_opcode + len). */
 #define ALP_CC3501E_EVENT_HDR_BYTES 2u
+
+/** Largest payload a single queued async event can carry.
+ *
+ *  This is a HARD CAP, not a hint: the firmware's event ring
+ *  (cc3501e-bridge-firmware `src/event_ring.h`, which sizes its slots from
+ *  this constant) CLAMPS a longer payload in `event_ring_push()` rather than
+ *  rejecting it, so an oversized EVT_* struct is silently truncated on the
+ *  wire. Any new event payload must `_Static_assert` its `sizeof` against
+ *  this — see @ref alp_cc3501e_sock_accepted_evt_t, which is carried in a
+ *  compact IPv4 form for exactly this reason. */
+#define ALP_CC3501E_EVENT_PAYLOAD_MAX 16u
 
 /** One entry in a CMD_GET_PENDING_EVENTS (0x05) reply.  The reply DATA (the
  *  bytes after the frame's status byte) is a packed list of ZERO OR MORE
@@ -653,6 +859,20 @@ typedef struct {
 	/* uint8_t ssid[ssid_len]; */
 } alp_cc3501e_scan_result_t;
 
+/** Interface selector for the optional request byte of CMD_WIFI_GET_IP
+ *  (opcode 0x17), protocol v9 and later.  A ZERO-LENGTH request keeps its
+ *  pre-v9 meaning and reports the STA address, so an old host's frame is
+ *  unchanged; a one-byte request selects the interface explicitly.
+ *  Field-level meanings:
+ *   - STA: the station-mode address (the DHCP lease from the joined AP).
+ *   - AP: the module's OWN address on the soft-AP it runs -- the bind
+ *     address a serving application needs, and the DHCP server's gateway
+ *     as seen by an associated client. */
+typedef enum {
+	ALP_CC3501E_WIFI_IFACE_STA = 0u,
+	ALP_CC3501E_WIFI_IFACE_AP  = 1u,
+} alp_cc3501e_wifi_iface_t;
+
 /* ------------------------------------------------------------------ */
 /* TCP/UDP socket payload formats                                      */
 /* ------------------------------------------------------------------ */
@@ -738,6 +958,38 @@ typedef struct {
 	alp_cc3501e_sock_addr_t peer;
 } alp_cc3501e_sock_connect_t;
 
+/** Payload of CMD_SOCK_BIND (opcode 0x25, protocol v9).  Assigns the local
+ *  endpoint a socket serves from, before CMD_SOCK_LISTEN makes it passive.
+ *  The reply carries only the status byte.  Deliberately the same shape as
+ *  @ref alp_cc3501e_sock_connect_t so both directions parse identically.
+ *  Field-level meanings:
+ *   - handle: socket from CMD_SOCK_OPEN.
+ *   - local: local endpoint, @ref alp_cc3501e_sock_addr_t.  An all-zero
+ *     @c addr means "any interface" (INADDR_ANY) -- which is what a server
+ *     on the soft-AP normally wants, since the AP address is only known
+ *     after the role is up.  Port 0 asks the stack to pick an ephemeral
+ *     port, which is not useful for a server; pass the port you serve on. */
+typedef struct {
+	uint16_t                handle;
+	uint16_t                reserved;
+	alp_cc3501e_sock_addr_t local;
+} alp_cc3501e_sock_bind_t;
+
+/** Payload of CMD_SOCK_LISTEN (opcode 0x26, protocol v9).  Turns a bound
+ *  STREAM socket into a passive one.  The reply carries only the status
+ *  byte; inbound connections are NOT returned here -- each one arrives
+ *  asynchronously as @ref alp_cc3501e_sock_accepted_evt_t on the polled
+ *  event queue (CMD_GET_PENDING_EVENTS).
+ *  Field-level meanings:
+ *   - handle: bound socket from CMD_SOCK_OPEN + CMD_SOCK_BIND.
+ *   - backlog: maximum queued, not-yet-accepted connections.  0 asks the
+ *     firmware for its default. */
+typedef struct {
+	uint16_t handle;
+	uint8_t  backlog;
+	uint8_t  reserved;
+} alp_cc3501e_sock_listen_t;
+
 /** Payload of CMD_SOCK_SEND (opcode 0x22).  The data bytes follow this
  *  header packed inline (no padding).  data_len upper-bounds the frame
  *  length (header + data_len still <= MAX_PAYLOAD).  The reply DATA is a
@@ -803,6 +1055,34 @@ typedef struct {
 	uint16_t handle;
 	uint16_t reserved;
 } alp_cc3501e_sock_close_t;
+
+/** Payload of EVT_SOCK_ACCEPTED (opcode 0x2C, protocol v9): a client
+ *  connected to a listening socket and the firmware accepted it.  The event
+ *  is delivered through the polled queue (CMD_GET_PENDING_EVENTS); @c handle
+ *  is a fully-formed socket the host uses with the ordinary CMD_SOCK_RECV /
+ *  CMD_SOCK_SEND / CMD_SOCK_CLOSE, and the host OWNS it -- the firmware will
+ *  not close it on the host's behalf.
+ *
+ *  The peer address is carried in this compact IPv4 form rather than as an
+ *  @ref alp_cc3501e_sock_addr_t because an event payload is capped at 16
+ *  bytes by the firmware's event ring and a sock_addr_t alone is 20.
+ *  @c peer_family still tags the family, so an IPv6 accept -- which needs a
+ *  wider payload than the ring carries today -- is a visible break rather
+ *  than a silent misread.
+ *  Field-level meanings:
+ *   - listen_handle: the listening socket this connection arrived on.
+ *   - handle: the NEW connected socket, host-owned from here on.
+ *   - peer_port: the client's port, host byte order.
+ *   - peer_family: one of @ref alp_cc3501e_sock_family_t (IPV4 in v9).
+ *   - peer_addr: the client's address, big-endian (network order). */
+typedef struct {
+	uint16_t listen_handle;
+	uint16_t handle;
+	uint16_t peer_port;
+	uint8_t  peer_family;
+	uint8_t  reserved;
+	uint8_t  peer_addr[4];
+} alp_cc3501e_sock_accepted_evt_t;
 
 /* ------------------------------------------------------------------ */
 /* BLE advertising / scanning payload formats                          */
@@ -1290,6 +1570,35 @@ _Static_assert(sizeof(alp_cc3501e_sock_recv_t) == 4u, "sock_recv wire length");
 _Static_assert(sizeof(alp_cc3501e_sock_recv_resp_t) == 24u, "sock_recv_resp wire header length");
 _Static_assert(sizeof(alp_cc3501e_sock_close_t) == 4u, "sock_close wire length");
 _Static_assert(sizeof(alp_cc3501e_sock_addr_t) == 20u, "sock_addr wire length");
+_Static_assert(sizeof(alp_cc3501e_capabilities_t) == 8u, "capabilities wire length");
+/* MAJOR 0 is reserved to mean "firmware predates the MAJOR.MINOR scheme and is
+ * answering with a raw v1..v9 integer" -- see the version block at the top.  A
+ * release that shipped MAJOR 0 would be indistinguishable from that legacy
+ * case, so the contract is pinned here rather than left to review. */
+_Static_assert(ALP_CC3501E_PROTOCOL_MAJOR >= 1, "MAJOR 0 is reserved for pre-scheme firmware");
+_Static_assert(ALP_CC3501E_PROTOCOL_MAJOR <= 255 && ALP_CC3501E_PROTOCOL_MINOR <= 255,
+               "each half of the wire version must fit its byte");
+_Static_assert(ALP_CC3501E_PROTOCOL_VERSION_MAJOR(ALP_CC3501E_PROTOCOL_VERSION) ==
+                   ALP_CC3501E_PROTOCOL_MAJOR,
+               "GET_VERSION encoding must round-trip MAJOR");
+_Static_assert(ALP_CC3501E_PROTOCOL_VERSION_MINOR(ALP_CC3501E_PROTOCOL_VERSION) ==
+                   ALP_CC3501E_PROTOCOL_MINOR,
+               "GET_VERSION encoding must round-trip MINOR");
+
+_Static_assert(sizeof(alp_cc3501e_sock_bind_t) == 24u, "sock_bind wire length");
+_Static_assert(sizeof(alp_cc3501e_sock_listen_t) == 4u, "sock_listen wire length");
+/* The accepted-connection event rides the firmware event ring, whose per-entry
+ * payload is capped at @ref ALP_CC3501E_EVENT_PAYLOAD_MAX.  A payload over that
+ * cap is CLAMPED by event_ring_push(), i.e. silently truncated on the wire, so
+ * pin the size here rather than discover it as a short peer address on the
+ * bench.  The second assert tests the CAP SYMBOL, not a repeated literal: the
+ * firmware sizes its ring slots from the same constant, so resizing the ring
+ * moves both sides together instead of leaving this pinning a stale 16. */
+_Static_assert(sizeof(alp_cc3501e_sock_accepted_evt_t) == 12u, "sock_accepted event length");
+_Static_assert(sizeof(alp_cc3501e_sock_accepted_evt_t) <= ALP_CC3501E_EVENT_PAYLOAD_MAX,
+               "sock_accepted must fit ALP_CC3501E_EVENT_PAYLOAD_MAX");
+_Static_assert(offsetof(alp_cc3501e_sock_accepted_evt_t, peer_addr) == 8u,
+               "sock_accepted.peer_addr @8");
 
 /* (B) SPI1 host passthrough -- same deal as the socket ops: the firmware uses
  *     sizeof(T) as the expected header length and both sides byte-parse the

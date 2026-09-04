@@ -105,6 +105,15 @@ static struct {
 	 * still counts them) but no #1435 test drives that many. */
 	uint8_t  cmd_log[16];
 	uint32_t cmd_log_count;
+
+	/* Request FLAGS byte of every request-header phase clocked, in order
+	 * (proto v8): bits 3..7 carry the retry seq, and the property under test
+	 * is that it stays CONSTANT across the retries of one logical command and
+	 * CHANGES between commands.  slave.cmd cannot show either -- it holds one
+	 * opcode with no attempt history -- and cmd_log holds opcodes, not flags.
+	 * Same capacity + drop-past-capacity rule as cmd_log above. */
+	uint8_t  flags_log[16];
+	uint32_t flags_log_count;
 } slave;
 
 /* Set by test_wifi_scan_buf_is_per_context_740 / test_ble_scan_buf_is_per_context_740
@@ -146,12 +155,24 @@ static bool     g_get_version_override_active; /* stage a specific reply value b
 static uint16_t g_get_version_override_value;
 static uint32_t g_get_version_io_down_remaining; /* fail the transaction outright, N times */
 
+/* ADR 0033 mutant controls for CMD_GET_CAPABILITIES (opcode 0x06).  Both
+ * cleared by slave_reset(), so a test that never touches them still gets a
+ * deterministic (zero) bitmap back rather than whatever the previous test
+ * left staged. */
+static uint32_t g_caps_override_value; /* bitmap staged for the next GET_CAPABILITIES reply */
+static bool     g_caps_reply_short;    /* stage a <4-byte reply -- must decode as ALP_ERR_IO */
+
 /* SPI1 TRANSFER mutant control: when true, the reply echoes seq+1 instead of
  * the request's real seq -- models a desynced/stale reply (the firmware
  * answering some OTHER request) so a test can prove cc3501e_spi1_transfer()
  * treats a seq mismatch as ALP_ERR_IO rather than handing back another
  * transaction's RX bytes.  Cleared by slave_reset(). */
 static bool g_spi1_reply_bad_seq;
+
+/* Stage the 16-byte protocol-v8 DIAG_GET_STATS reply instead of the 8-byte v7
+ * one.  Cleared by slave_reset(), so the default across the suite is the OLD
+ * firmware -- the compatibility direction that would otherwise go untested. */
+static bool g_diag_stats_v8;
 
 static void slave_reset(void)
 {
@@ -174,6 +195,9 @@ static void slave_reset(void)
 	g_get_version_override_value       = 0u;
 	g_get_version_io_down_remaining    = 0u;
 	g_spi1_reply_bad_seq               = false;
+	g_diag_stats_v8                    = false;
+	g_caps_override_value              = 0u;
+	g_caps_reply_short                 = false;
 }
 
 static void stage_status(uint8_t st)
@@ -312,6 +336,12 @@ static void slave_dispatch(void)
 	case ALP_CC3501E_CMD_DIAG_LOG_LEVEL:
 	case ALP_CC3501E_CMD_SOCK_CONNECT:
 	case ALP_CC3501E_CMD_SOCK_CLOSE:
+	/* BIND / LISTEN (protocol v9) reply with the bare status too: neither
+	 * carries reply data, and there is no ACCEPT opcode to model -- an inbound
+	 * connection arrives as an EVT_SOCK_ACCEPTED entry on the event queue,
+	 * which the cc3501e_host_events suite covers. */
+	case ALP_CC3501E_CMD_SOCK_BIND:
+	case ALP_CC3501E_CMD_SOCK_LISTEN:
 	/* OTA_PROMOTE (0x46) belongs in THIS bucket, not with the worker-routed
 	 * submits below: handle_ota_promote() returns
 	 * hw_to_resp(cc3501e_hw_ota_promote()), and the TI HAL's
@@ -398,9 +428,14 @@ static void slave_dispatch(void)
 		break;
 	}
 	case ALP_CC3501E_CMD_DIAG_GET_STATS: {
-		uint8_t s[8] = { 0x44, 0x33, 0x22, 0x11,   /* frames_ok  = 0x11223344 */
-			             0x05, 0x00, 0x00, 0x00 }; /* frames_err = 0x00000005 */
-		stage_reply(ALP_CC3501E_RESP_OK, s, 8u);
+		/* v7 answers 8 bytes, v8 answers 16 -- ADDITIVELY, same first two
+		 * counters.  Default to the v7 shape so every pre-existing test keeps
+		 * exercising the old-firmware path; g_diag_stats_v8 opts in. */
+		uint8_t s[16] = { 0x44, 0x33, 0x22, 0x11,   /* frames_ok        = 0x11223344 */
+			              0x05, 0x00, 0x00, 0x00,   /* frames_err       = 0x00000005 */
+			              0x07, 0x00, 0x00, 0x00,   /* worker_execs     = 0x00000007 */
+			              0x03, 0x00, 0x00, 0x00 }; /* retry_latch_hits = 0x00000003 */
+		stage_reply(ALP_CC3501E_RESP_OK, s, g_diag_stats_v8 ? 16u : 8u);
 		break;
 	}
 	case ALP_CC3501E_CMD_WIFI_GET_RSSI: {
@@ -555,6 +590,28 @@ static void slave_dispatch(void)
 		/* Argless escape hatch: bare OK, same as the real firmware. */
 		stage_status(ALP_CC3501E_RESP_OK);
 		break;
+	case ALP_CC3501E_CMD_GET_CAPABILITIES: {
+		/* reply DATA = alp_cc3501e_capabilities_t { caps(LE32) | reserved(LE32) }. */
+		if (g_caps_reply_short) {
+			/* Fewer than 4 data bytes -- the host must treat this as a wire
+			 * gap (ALP_ERR_IO), not decode a truncated bitmap. */
+			const uint8_t d[2] = { 0xAAu, 0xBBu };
+			stage_reply(ALP_CC3501E_RESP_OK, d, 2u);
+			break;
+		}
+		const uint8_t d[8] = {
+			(uint8_t)(g_caps_override_value & 0xFFu),
+			(uint8_t)((g_caps_override_value >> 8) & 0xFFu),
+			(uint8_t)((g_caps_override_value >> 16) & 0xFFu),
+			(uint8_t)((g_caps_override_value >> 24) & 0xFFu),
+			0u,
+			0u,
+			0u,
+			0u, /* reserved, always 0 in this revision */
+		};
+		stage_reply(ALP_CC3501E_RESP_OK, d, 8u);
+		break;
+	}
 	default:
 		stage_status(ALP_CC3501E_RESP_ERR_INVALID);
 		break;
@@ -593,6 +650,10 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 			slave.cmd_log[slave.cmd_log_count] = slave.cmd;
 		}
 		slave.cmd_log_count++;
+		if (slave.flags_log_count < sizeof(slave.flags_log)) {
+			slave.flags_log[slave.flags_log_count] = tx[1];
+		}
+		slave.flags_log_count++;
 		slave.req_len = (uint16_t)tx[2] | ((uint16_t)tx[3] << 8);
 		if (rx != NULL) {
 			memset(rx, ALP_CC3501E_SYNC_IDLE, len);
@@ -722,12 +783,19 @@ ZTEST(cc3501e_host_driver, test_reset_refuses_protocol_version_mismatch_1371)
 	fw.reset_pin  = FAKE_RESET_PIN;
 	fw.enable_pin = FAKE_ENABLE_PIN;
 
+	/* A genuine MAJOR mismatch (ADR 0033).  This test used to add 1 to the
+	 * flat composed value; under MAJOR.MINOR that only bumps MINOR (0x0301 +
+	 * 1 = 0x0302, still MAJOR 3) and must NOT refuse any more -- see
+	 * test_reset_accepts_higher_minor_0033.  Bump MAJOR explicitly instead so
+	 * this test keeps pinning what it always meant to: a wire disagreement
+	 * this host cannot connect across. */
 	g_get_version_override_active = true;
-	g_get_version_override_value  = (uint16_t)ALP_CC3501E_PROTOCOL_VERSION + 1u;
+	g_get_version_override_value  = (uint16_t)(((uint16_t)(ALP_CC3501E_PROTOCOL_MAJOR + 1) << 8) |
+	                                           (uint16_t)ALP_CC3501E_PROTOCOL_MINOR);
 
 	zassert_equal(cc3501e_reset(&fw),
 	              ALP_ERR_VERSION,
-	              "GET_VERSION answered with a different value -> ALP_ERR_VERSION");
+	              "GET_VERSION answered with a different MAJOR -> ALP_ERR_VERSION");
 	zassert_false(fw.initialised, "a refused context is left uninitialised");
 
 	/* The dead end this leaves behind, deliberately: once refused, EVERY
@@ -765,6 +833,107 @@ ZTEST(cc3501e_host_driver, test_reset_tolerates_transport_failure_during_probe_1
 	zassert_equal(v, (uint16_t)ALP_CC3501E_PROTOCOL_VERSION, "and reads the real value");
 }
 
+/* ---- ADR 0033: MAJOR.MINOR wire versioning --------------------------------
+ *
+ * cc3501e_reset()'s GET_VERSION gate now refuses ONLY on a MAJOR mismatch; a
+ * MINOR difference in either direction is additive by definition and must
+ * leave the link usable -- that split is the entire point of ADR 0033. */
+
+ZTEST(cc3501e_host_driver, test_reset_accepts_lower_minor_0033)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	/* Same MAJOR, a MINOR one BELOW this host's -- an older, additive-only
+	 * firmware that simply lacks a newer feature.  The pre-0033 flat-integer
+	 * gate refused on ANY difference; this is the exact case that gate cost a
+	 * customer a needless reflash for. */
+	g_get_version_override_active = true;
+	g_get_version_override_value  = (uint16_t)(((uint16_t)ALP_CC3501E_PROTOCOL_MAJOR << 8) |
+	                                           (uint16_t)(ALP_CC3501E_PROTOCOL_MINOR - 1));
+
+	zassert_equal(
+	    cc3501e_reset(&fw), ALP_OK, "a lower MINOR, same MAJOR, must not refuse the link");
+	zassert_true(fw.initialised, "the context stays usable across a lower MINOR");
+	zassert_equal(fw.fw_proto_major, (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR, "MAJOR recorded");
+	zassert_equal(fw.fw_proto_minor,
+	              (uint8_t)(ALP_CC3501E_PROTOCOL_MINOR - 1),
+	              "the firmware's own (lower) MINOR is recorded, not this host's");
+}
+
+ZTEST(cc3501e_host_driver, test_reset_accepts_higher_minor_0033)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	/* Same MAJOR, a MINOR one ABOVE this host's -- a newer firmware carrying
+	 * features this host does not use yet.  Also additive, also must connect. */
+	g_get_version_override_active = true;
+	g_get_version_override_value  = (uint16_t)(((uint16_t)ALP_CC3501E_PROTOCOL_MAJOR << 8) |
+	                                           (uint16_t)(ALP_CC3501E_PROTOCOL_MINOR + 1));
+
+	zassert_equal(
+	    cc3501e_reset(&fw), ALP_OK, "a higher MINOR, same MAJOR, must not refuse the link");
+	zassert_true(fw.initialised, "the context stays usable across a higher MINOR");
+	zassert_equal(fw.fw_proto_minor,
+	              (uint8_t)(ALP_CC3501E_PROTOCOL_MINOR + 1),
+	              "the firmware's own (higher) MINOR is recorded");
+}
+
+ZTEST(cc3501e_host_driver, test_reset_refuses_legacy_raw_integer_0033)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	/* A pre-ADR-0033 firmware answers with its old raw v1..v9 integer -- e.g.
+	 * 9 (0x0009), the last released flat value -- which decodes to MAJOR 0.
+	 * MAJOR 0 is RESERVED (never a real release) and refuses like any other
+	 * MAJOR mismatch, but recording it lets a caller tell "older than the
+	 * versioning scheme" from "disagrees about the frame layout". */
+	g_get_version_override_active = true;
+	g_get_version_override_value  = 9u;
+
+	zassert_equal(cc3501e_reset(&fw),
+	              ALP_ERR_VERSION,
+	              "a pre-0033 raw integer decodes to MAJOR 0 and is refused");
+	zassert_false(fw.initialised, "a refused context is left uninitialised");
+	zassert_equal(
+	    fw.fw_proto_major, 0u, "MAJOR 0 marks 'older than the versioning scheme', not corrupt");
+}
+
+/* ---- ADR 0033: CMD_GET_CAPABILITIES (0x06) --------------------------------- */
+
+ZTEST(cc3501e_host_driver, test_get_capabilities_decodes_le32_bitmap_0033)
+{
+	g_caps_override_value =
+	    (uint32_t)(ALP_CC3501E_CAP_WIFI_STA | ALP_CC3501E_CAP_BLE | ALP_CC3501E_CAP_SPI1_MASTER);
+
+	uint32_t caps = 0xDEADBEEFu;
+	zassert_equal(cc3501e_get_capabilities(&fw, &caps), ALP_OK, "GET_CAPABILITIES -> OK");
+	zassert_equal(slave.cmd, ALP_CC3501E_CMD_GET_CAPABILITIES, "opcode 0x06");
+	zassert_equal(
+	    caps,
+	    (uint32_t)(ALP_CC3501E_CAP_WIFI_STA | ALP_CC3501E_CAP_BLE | ALP_CC3501E_CAP_SPI1_MASTER),
+	    "decoded LE32 capability bitmap");
+}
+
+ZTEST(cc3501e_host_driver, test_get_capabilities_null_out_invalid_0033)
+{
+	zassert_equal(cc3501e_get_capabilities(&fw, NULL), ALP_ERR_INVAL, "NULL out -> INVAL");
+	zassert_equal(slave.cmd, 0u, "no transfer clocked");
+}
+
+ZTEST(cc3501e_host_driver, test_get_capabilities_short_reply_is_io_0033)
+{
+	g_caps_reply_short = true;
+
+	uint32_t caps = 0x11111111u;
+	zassert_equal(cc3501e_get_capabilities(&fw, &caps),
+	              ALP_ERR_IO,
+	              "fewer than 4 data bytes must not decode a half-formed bitmap");
+	zassert_equal(caps, 0u, "the out-pointer is zeroed up front, not left half-decoded");
+}
+
 /* ============================ DIAGNOSTICS ================================== */
 
 ZTEST(cc3501e_host_driver, test_diag_info_decodes_all_fields)
@@ -789,11 +958,99 @@ ZTEST(cc3501e_host_driver, test_diag_info_null_out_invalid)
 
 ZTEST(cc3501e_host_driver, test_diag_stats_decodes_two_le32)
 {
-	uint32_t ok = 0u, err = 0u;
-	zassert_equal(cc3501e_diag_stats(&fw, &ok, &err), ALP_OK, "DIAG_GET_STATS -> OK");
+	cc3501e_diag_stats_t st;
+	memset(&st, 0xA5, sizeof(st));
+	zassert_equal(cc3501e_diag_stats(&fw, &st), ALP_OK, "DIAG_GET_STATS -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_DIAG_GET_STATS, "opcode 0x70");
-	zassert_equal(ok, 0x11223344u, "frames_ok LE32");
-	zassert_equal(err, 0x00000005u, "frames_err LE32");
+	zassert_equal(st.frames_ok, 0x11223344u, "frames_ok LE32");
+	zassert_equal(st.frames_err, 0x00000005u, "frames_err LE32");
+}
+
+/* A v7 firmware answers only the first two counters.  The two v8 counters must
+ * then report as ABSENT, not as a measured zero -- a bench run that reads
+ * "retry_latch_hits = 0" off firmware that never counted them would record a
+ * pass for a mechanism that was not running. */
+ZTEST(cc3501e_host_driver, test_diag_stats_short_v7_reply_reports_counters_absent)
+{
+	cc3501e_diag_stats_t st;
+	memset(&st, 0xA5, sizeof(st));
+	zassert_equal(cc3501e_diag_stats(&fw, &st), ALP_OK, "8-byte reply is not a fault");
+	zassert_false(st.has_worker_counters, "v7 firmware does not report the worker counters");
+	zassert_equal(st.worker_execs, 0u, "absent counters read zero, flagged by has_*");
+	zassert_equal(st.retry_latch_hits, 0u, "absent counters read zero, flagged by has_*");
+	zassert_equal(st.frames_ok, 0x11223344u, "the two v7 counters still decode");
+}
+
+ZTEST(cc3501e_host_driver, test_diag_stats_v8_reply_decodes_worker_counters)
+{
+	g_diag_stats_v8 = true;
+	cc3501e_diag_stats_t st;
+	memset(&st, 0xA5, sizeof(st));
+	zassert_equal(cc3501e_diag_stats(&fw, &st), ALP_OK, "16-byte reply -> OK");
+	zassert_true(st.has_worker_counters, "v8 firmware reports the worker counters");
+	zassert_equal(st.frames_ok, 0x11223344u, "frames_ok LE32");
+	zassert_equal(st.frames_err, 0x00000005u, "frames_err LE32");
+	zassert_equal(st.worker_execs, 0x00000007u, "worker_execs LE32 at offset 8");
+	zassert_equal(st.retry_latch_hits, 0x00000003u, "retry_latch_hits LE32 at offset 12");
+}
+
+/* ---- proto v8 request identity (cc3501e-bridge-firmware#102) --------------
+ *
+ * The firmware can only absorb a retry if the retry is RECOGNISABLE, which
+ * means the seq in flags bits 3..7 is identical across every attempt of one
+ * logical command.  These assert the wire property directly off the captured
+ * header bytes, because that is the contract the firmware reads -- not the
+ * host-side counter that produced it. */
+
+static uint8_t seq_of(uint8_t flags)
+{
+	return (uint8_t)((flags >> ALP_CC3501E_FLAG_REQ_SEQ_SHIFT) & ALP_CC3501E_REQ_SEQ_MASK);
+}
+
+ZTEST(cc3501e_host_driver, test_retry_seq_is_constant_across_one_commands_retries)
+{
+	slave.rssi_busy_polls_remaining = 3u; /* 3 BUSY acks, then the value */
+	int8_t rssi                     = 0;
+	zassert_equal(cc3501e_wifi_rssi(&fw, &rssi), ALP_OK, "GET_RSSI -> OK after riding out BUSY");
+	zassert_true(slave.flags_log_count >= 4u, "3 BUSY attempts + the collect were clocked");
+
+	const uint8_t seq = seq_of(slave.flags_log[0]);
+	zassert_not_equal(seq,
+	                  ALP_CC3501E_REQ_SEQ_NONE,
+	                  "a retryable command must carry a real seq, not the reserved 0");
+	for (uint32_t i = 1u; i < slave.flags_log_count && i < ARRAY_SIZE(slave.flags_log); i++) {
+		zassert_equal(seq_of(slave.flags_log[i]),
+		              seq,
+		              "every retry of ONE logical command re-sends the SAME seq");
+	}
+}
+
+ZTEST(cc3501e_host_driver, test_each_logical_command_gets_a_different_seq)
+{
+	int8_t rssi = 0;
+	zassert_equal(cc3501e_wifi_rssi(&fw, &rssi), ALP_OK, "first command");
+	const uint8_t  first       = seq_of(slave.flags_log[0]);
+	const uint32_t after_first = slave.flags_log_count;
+	zassert_equal(cc3501e_wifi_rssi(&fw, &rssi), ALP_OK, "second command");
+	zassert_true(slave.flags_log_count > after_first, "the second command clocked a header");
+	zassert_not_equal(seq_of(slave.flags_log[after_first]),
+	                  first,
+	                  "a NEW logical command must not reuse the previous command's seq, or the "
+	                  "firmware would serve it the previous command's cached reply");
+}
+
+/* The single-shot path has no retry loop, so nothing it sends is ever a repeat
+ * of anything -- it must therefore be un-latchable.  Seq 0 says exactly that. */
+ZTEST(cc3501e_host_driver, test_single_shot_request_sends_the_reserved_seq_none)
+{
+	cc3501e_diag_stats_t st;
+	zassert_equal(cc3501e_diag_stats(&fw, &st), ALP_OK, "DIAG_GET_STATS -> OK");
+	zassert_true(slave.flags_log_count >= 1u, "a header was clocked");
+	zassert_equal(seq_of(slave.flags_log[0]),
+	              ALP_CC3501E_REQ_SEQ_NONE,
+	              "cc3501e_request() is single-shot -- it must not claim an identity");
+	zassert_true((slave.flags_log[0] & ALP_CC3501E_FLAG_RESP_REQUIRED) != 0u,
+	             "the v1 flag bits are untouched by the seq");
 }
 
 ZTEST(cc3501e_host_driver, test_diag_log_level_encodes_level_byte)
@@ -842,7 +1099,7 @@ ZTEST(cc3501e_host_driver, test_wifi_rssi_retries_worker_busy_1377)
 ZTEST(cc3501e_host_driver, test_wifi_get_ip_byte_order)
 {
 	uint8_t ip[4] = { 0 };
-	zassert_equal(cc3501e_wifi_get_ip(&fw, ip), ALP_OK, "GET_IP -> OK");
+	zassert_equal(cc3501e_wifi_get_ip(&fw, ALP_CC3501E_WIFI_IFACE_STA, ip), ALP_OK, "GET_IP -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_WIFI_GET_IP, "opcode 0x17");
 	zassert_equal(ip[0], 192, "ip[0]");
 	zassert_equal(ip[1], 168, "ip[1]");
@@ -1555,6 +1812,80 @@ ZTEST(cc3501e_host_driver, test_sock_close_encodes_handle)
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SOCK_CLOSE, "opcode 0x24");
 	zassert_equal(slave.req_pl[0], 0x34u, "handle lo");
 	zassert_equal(slave.req_pl[1], 0x12u, "handle hi");
+}
+
+/* BIND packs the SOCK_CONNECT layout with the LOCAL endpoint, so the two parse
+ * identically firmware-side.  A NULL ip is INADDR_ANY -- the addr field must
+ * come out all-zero, NOT uninitialised stack, because that is what a server on
+ * the soft-AP binds. */
+ZTEST(cc3501e_host_driver, test_sock_bind_null_ip_is_inaddr_any)
+{
+	static const uint8_t zeros[16] = { 0 };
+
+	zassert_equal(cc3501e_sock_bind(&fw, 0x1234u, NULL, 80u, 100u), ALP_OK, "BIND -> OK");
+	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SOCK_BIND, "opcode 0x25");
+	zassert_equal(slave.req_len, 24u, "bind payload is 24 bytes, same as connect");
+	zassert_equal(slave.req_pl[0], 0x34u, "handle lo");
+	zassert_equal(slave.req_pl[1], 0x12u, "handle hi");
+	zassert_equal(slave.req_pl[4], (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4, "local.family");
+	zassert_equal(slave.req_pl[6], 80u, "local.port lo (host order on the wire)");
+	zassert_equal(slave.req_pl[7], 0u, "local.port hi");
+	zassert_mem_equal(&slave.req_pl[8], zeros, 16u, "local.addr all-zero = INADDR_ANY");
+}
+
+ZTEST(cc3501e_host_driver, test_sock_bind_explicit_ip_encodes_octets)
+{
+	const uint8_t ip[4] = { 10, 0, 0, 3 };
+
+	zassert_equal(cc3501e_sock_bind(&fw, 0x0001u, ip, 8080u, 100u), ALP_OK, "BIND -> OK");
+	zassert_equal(slave.req_pl[6], (uint8_t)(8080u & 0xFFu), "local.port lo");
+	zassert_equal(slave.req_pl[7], (uint8_t)(8080u >> 8), "local.port hi");
+	zassert_mem_equal(&slave.req_pl[8], ip, 4u, "local.addr[0..3] = the IPv4 octets");
+}
+
+ZTEST(cc3501e_host_driver, test_sock_listen_encodes_backlog)
+{
+	zassert_equal(cc3501e_sock_listen(&fw, 0x1234u, 4u, 100u), ALP_OK, "LISTEN -> OK");
+	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SOCK_LISTEN, "opcode 0x26");
+	zassert_equal(slave.req_len, 4u, "listen payload = {handle(LE16), backlog, rsvd}");
+	zassert_equal(slave.req_pl[0], 0x34u, "handle lo");
+	zassert_equal(slave.req_pl[1], 0x12u, "handle hi");
+	zassert_equal(slave.req_pl[2], 4u, "backlog");
+	zassert_equal(slave.req_pl[3], 0u, "reserved stays 0");
+}
+
+/* The accepted-connection event decoder.  It exists so a callback never casts
+ * its payload pointer, which aims into the driver's event buffer at whatever
+ * offset the entry landed on and so carries no alignment guarantee. */
+ZTEST(cc3501e_host_driver, test_sock_accepted_decode_fields)
+{
+	/* listen_handle=1 | handle=2 | peer_port=54321 (0xD431) | family=IPV4 |
+	 * rsvd | peer_addr = 192.168.1.14 (network order, MSB first). */
+	const uint8_t wire[12] = { 0x01, 0x00, 0x02, 0x00, 0x31, 0xD4, 0x00, 0x00, 192, 168, 1, 14 };
+	alp_cc3501e_sock_accepted_evt_t ev = { 0 };
+
+	zassert_equal(cc3501e_sock_accepted_decode(wire, sizeof(wire), &ev), ALP_OK, "decode -> OK");
+	zassert_equal(ev.listen_handle, 1u, "listen_handle");
+	zassert_equal(ev.handle, 2u, "handle");
+	zassert_equal(ev.peer_port, 54321u, "peer_port (host order)");
+	zassert_equal(ev.peer_family, (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4, "peer_family");
+	zassert_mem_equal(ev.peer_addr, &wire[8], 4u, "peer_addr copied verbatim");
+}
+
+ZTEST(cc3501e_host_driver, test_sock_accepted_decode_rejects_short_and_null)
+{
+	const uint8_t                   wire[11] = { 0 };
+	alp_cc3501e_sock_accepted_evt_t ev       = { 0 };
+
+	/* A truncated entry must be REJECTED, not decoded from whatever follows:
+	 * the handle it would invent is a firmware socket the host would then try
+	 * to recv on and close. */
+	zassert_equal(cc3501e_sock_accepted_decode(wire, sizeof(wire), &ev),
+	              ALP_ERR_INVAL,
+	              "11 bytes is short -> INVAL");
+	zassert_equal(ev.handle, 0u, "out left untouched on a short payload");
+	zassert_equal(cc3501e_sock_accepted_decode(NULL, 12u, &ev), ALP_ERR_INVAL, "NULL payload");
+	zassert_equal(cc3501e_sock_accepted_decode(wire, 12u, NULL), ALP_ERR_INVAL, "NULL out");
 }
 
 /* ================================ BLE ====================================== */

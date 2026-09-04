@@ -14,6 +14,7 @@ without the DEEPX DX-M1 NPU).
 | `gd32-io-mcu-map.csv`             | `row, peripheral, gd32_pad`                |
 | `hw-revisions.yaml`               | Per-rev SDK-version compatibility window   |
 | `core-ownership.yaml`             | `(peripheral, pad) -> core`, verified pads |
+| `supervisor-links.yaml`           | `supervisor-links-v1`                      |
 
 ## Two MCUs on the module
 
