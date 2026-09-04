@@ -114,17 +114,27 @@ static alp_status_t z_cancel_alarm(alp_counter_backend_state_t *st)
 static void z_close(alp_counter_backend_state_t *st)
 {
 	const struct device *dev = (const struct device *)st->dev;
-	/* Cancel first: counter_stop() does not uninstall a channel alarm, and
-	 * the armed alarm's user_data is the dispatcher's pool slot, which is
+	/* Cancel any armed channel-0 alarm before stopping/releasing the
+	 * slot -- counter_stop() does not uninstall a channel alarm, and the
+	 * armed alarm's user_data is the dispatcher's pool slot, which is
 	 * released as soon as this returns.  A surviving alarm would fire
 	 * _alarm_trampoline from ISR context into whatever handle claims that
 	 * slot next, with the previous owner's tick value -- and on drivers
 	 * that reject a second alarm on an armed channel the new owner's
-	 * set_alarm would fail -EBUSY.  Unconditional: the backend state
-	 * carries no armed flag, and cancelling an idle channel is a no-op.
-	 * Same pool discipline as #629 -- no backend callback outlives the
-	 * slot. (#1627) */
-	(void)z_cancel_alarm(st);
+	 * set_alarm would fail -EBUSY.  Same pool discipline as #629 -- no
+	 * backend callback outlives the slot. (#1627)
+	 *
+	 * On the canonical alp_counter_stop() + alp_counter_close() teardown
+	 * order the counter is already stopped here, and at least the
+	 * native_sim backend's cancel_channel_alarm refuses (-ENOTSUP) on a
+	 * stopped counter without clearing the pending alarm. If the first
+	 * cancel attempt fails, briefly restart the counter so the cancel
+	 * can actually take effect, then leave it stopped as the caller left
+	 * it. */
+	if (z_cancel_alarm(st) != ALP_OK) {
+		(void)counter_start(dev);
+		(void)z_cancel_alarm(st);
+	}
 	(void)counter_stop(dev);
 }
 
