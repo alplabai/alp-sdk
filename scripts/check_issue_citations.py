@@ -36,8 +36,10 @@ DOES NOT CATCH, on purpose (scope, per #1950's own design discussion):
   * a citation whose surrounding clause reads as historical rather than a
     blocker claim (see HISTORICAL below) -- reported as neither pass nor
     fail; it is simply not examined.
-  * anything when the issue-state snapshot is missing or stale: every
-    finding degrades to a WARNING and the gate exits 0 (see STALENESS).
+  * a citation whose number the snapshot has no record of at all -- degrades
+    to a WARNING, never an ERROR (see STALENESS). Staleness alone does NOT
+    do this: a stale-but-present snapshot still enforces every citation it
+    can resolve.
 
 HISTORICAL -- distinguishing "blocked on #N" from "landed via #N"
 -------------------------------------------------------------------
@@ -58,21 +60,24 @@ STALENESS -- this gate is OFFLINE
 ----------------------------------
 No `gh`/network call happens here; a live call inside every PR run would
 make this a network-flake gate on every PR touching metadata/**. Instead it
-reads a COMMITTED snapshot (`metadata/issue-state-snapshot.json`) refreshed
-on a schedule by `.github/workflows/refresh-issue-state-snapshot.yml` via
-`scripts/refresh_issue_state_snapshot.py`. If that snapshot is missing,
-unparsable, or older than `_STALE_AFTER_DAYS` days (the cron did not run),
-every citation that would otherwise be an ERROR is reported as a WARNING
-instead and the gate exits 0. A gate that hard-fails every PR because a cron
-job didn't fire is worse than the drift it exists to catch (#1950).
-A citation whose number has no entry in the snapshot at all (e.g. cited in
-the same PR that adds it) is always a WARNING, never an ERROR -- the
-snapshot cannot know about it yet.
+reads a COMMITTED snapshot (`metadata/issue-state-snapshot.json`), refreshed
+by a human running `python3 scripts/refresh_issue_state_snapshot.py` --
+there is no scheduled workflow, so ageing out is the expected steady state,
+not a rare cron miss.  Because of that, staleness is DELIBERATELY NOT a
+free pass: a citation whose number the snapshot DOES have on record is
+enforced (ERROR) regardless of how old that record is -- an issue that was
+CLOSED a year ago is still closed. Only two things ever downgrade a finding
+to a non-blocking WARNING: (1) the snapshot is entirely missing/unparsable,
+so nothing can be resolved at all, or (2) the cited number has no entry in
+the snapshot yet (e.g. cited in the same PR that adds it) -- the snapshot
+cannot know about a number it has never seen. A stale-but-present snapshot
+additionally prints one WARNING per run naming the exact refresh command,
+so the drift is visible without silently disabling enforcement.
 
 Exit codes:
     0  no ERROR-level findings (WARNINGs may still be printed)
-    1  at least one closed/merged issue cited as an open blocker, checked
-       against a fresh snapshot
+    1  at least one closed/merged issue cited as an open blocker whose
+       number the snapshot has on record
 """
 
 from __future__ import annotations
@@ -88,9 +93,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 SNAPSHOT_RELPATH = Path("metadata") / "issue-state-snapshot.json"
 
-#: A snapshot older than this is treated as unusable -- twice the weekly
-#: refresh cadence, so one missed cron run doesn't immediately start
-#: downgrading every finding.
+#: A snapshot older than this earns a loud staleness WARNING (naming the
+#: refresh command) -- it does NOT stop enforcement; refresh is a manual
+#: `scripts/refresh_issue_state_snapshot.py` run now, so ageing out is the
+#: expected steady state, not a rare miss (see STALENESS above).
 _STALE_AFTER_DAYS = 14
 
 #: `<anything>driver_status: value   # comment` -- matches the top-level
@@ -248,21 +254,24 @@ def _is_stale(generated_at: str) -> bool:
 
 
 def _evaluate(root: Path, snapshot_path: Path) -> tuple[list[str], list[str]]:
+    """Enforce every citation the snapshot CAN resolve, regardless of its
+    age -- a closed issue stays closed. Staleness only earns one loud,
+    non-blocking WARNING naming the refresh command; it never silently
+    downgrades an otherwise-resolvable ERROR (see STALENESS in the module
+    docstring, #1950 round 2)."""
     citations = find_citations(root)
     issues_map, generated_at, warnings = _load_snapshot(snapshot_path)
     warnings = list(warnings)
 
-    stale = False
-    if generated_at is not None:
-        stale = _is_stale(generated_at)
-        if stale:
-            warnings.append(
-                f"{snapshot_path}: snapshot is stale (generated_at="
-                f"{generated_at!r}, older than {_STALE_AFTER_DAYS} days) -- "
-                f"findings below are informational only until it refreshes"
-            )
+    if generated_at is not None and _is_stale(generated_at):
+        warnings.append(
+            f"{snapshot_path}: snapshot is stale (generated_at="
+            f"{generated_at!r}, older than {_STALE_AFTER_DAYS} days) -- "
+            f"still enforced against every citation it has a record for; "
+            f"run `python3 scripts/refresh_issue_state_snapshot.py` to "
+            f"bring it current"
+        )
 
-    usable = issues_map is not None and not stale
     errors: list[str] = []
 
     for c in citations:
@@ -277,14 +286,10 @@ def _evaluate(root: Path, snapshot_path: Path) -> tuple[list[str], list[str]]:
             )
             continue
         if state.strip().upper() != "OPEN":
-            msg = (
+            errors.append(
                 f"{c.file}:{c.line}: cites #{c.issue} ({state}) as an "
                 f'apparent open blocker: "{c.clause}"'
             )
-            if usable:
-                errors.append(msg)
-            else:
-                warnings.append(msg + " [not enforced -- snapshot stale/missing]")
 
     return errors, warnings
 
@@ -292,8 +297,9 @@ def _evaluate(root: Path, snapshot_path: Path) -> tuple[list[str], list[str]]:
 def find_problems(root: Path, snapshot_path: Path | None = None) -> list[str]:
     """Blocking findings only. Empty on a clean tree, on a tree with no
     driver-status citations to a non-open issue, or whenever the snapshot
-    is missing/stale (see STALENESS above) -- use `find_warnings` for the
-    non-blocking picture."""
+    is entirely missing/unparsable or has no record of the cited number
+    yet (staleness alone does NOT empty this -- see STALENESS above) --
+    use `find_warnings` for the non-blocking picture."""
     if snapshot_path is None:
         snapshot_path = root / SNAPSHOT_RELPATH
     errors, _ = _evaluate(root, snapshot_path)

@@ -142,19 +142,25 @@ def test_landed_phrasing_is_not_flagged(tmp_path):
     assert mod.find_problems(tmp_path) == []
 
 
-# -- staleness degrades to WARNING, never a hard fail (#1950 design decision) --
+# -- staleness is loud, never a silent pass (#1950 round 2) -------------------
 
 
-def test_stale_snapshot_degrades_to_warning_not_error(tmp_path):
+def test_stale_snapshot_still_enforces_known_citations(tmp_path):
+    """A stale snapshot must not become a free pass: every citation it DOES
+    have a record for is still enforced (round-1 let staleness alone empty
+    every ERROR -- that made the gate print a clean "OK" after two missed
+    manual refreshes while checking nothing)."""
     mod = _load()
     _chip_yaml(tmp_path, "gd32g553", _GD32G553_BLOCK)
     _snapshot(tmp_path, {"494": "CLOSED", "495": "CLOSED", "496": "CLOSED"},
               age_days=mod._STALE_AFTER_DAYS + 1)
 
-    assert mod.find_problems(tmp_path) == []
+    problems = mod.find_problems(tmp_path)
+    assert len(problems) == 3, problems
+    assert any("#494" in p for p in problems)
+
     warnings = mod.find_warnings(tmp_path)
-    assert any("stale" in w for w in warnings)
-    assert any("#494" in w for w in warnings)
+    assert any("stale" in w and "refresh_issue_state_snapshot.py" in w for w in warnings)
 
 
 def test_missing_snapshot_degrades_to_warning_not_error(tmp_path):
