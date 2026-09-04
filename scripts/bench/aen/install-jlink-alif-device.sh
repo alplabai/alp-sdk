@@ -21,6 +21,42 @@
 # So the probe is fine for debug, halt, register access and RAM loading; only the
 # built-in Alif profile refuses.
 #
+#
+# WHY THE BUILT-IN PROFILE REFUSES -- MEASURED 2026-09-04, not assumed.
+# It is a J-Link PROBE CAPABILITY gate, not anything about the board, the AP map
+# or the silicon revision.  With `-log` enabled the real cause appears (the
+# console only ever prints "Could not connect to the target device."):
+#
+#     ConfigTargetSettings() end - Took 9us
+#     JLINK_EMU_HasCapEx(0x00000052)
+#     - 0.001ms returns 0
+#     - 0.308ms returns 0xFFFFFEFA
+#
+# JLINK_Connect() fails in 0.308 ms on that capability check, BEFORE any SWD line
+# activity -- which is why `Found SW-DP with ID 0x4C013477` never prints on this
+# path.  Probe S/N 600107451 (Hardware version V10.10, Firmware "J-Link V10
+# compiled Jan 30 2023") returns 0 for capability 0x52.
+#
+# Isolated by control: applying `exec SetDormantModeHandling = 1` to the GENERIC
+# Cortex-M55 device -- which connects perfectly without it -- reproduces the Alif
+# profile's failure byte-for-byte, same HasCapEx(0x00000052) -> 0, same
+# 0xFFFFFEFA, same sub-millisecond abort.
+#
+# The reason the profile needs it: the Ensemble is an SWD MULTI-DROP part
+# (AE822FA0E5597LS0_M55_HE / _M55_HP / _A32_0 / _A32_1 all sit on one DP).  The
+# profile's embedded J-Link script, extracted from libjlinkarm, contains
+# `SetSWDTargetId=0x01002927` and `SetSWDInstanceId=0x1` / `=0x0`, so connecting
+# requires dormant-mode / multi-drop target selection.
+#
+# THERE IS NO BYPASS.  `SetDormantModeHandling = 0` is accepted by the DLL but the
+# profile re-asserts its own settings inside ConfigTargetSettings() at connect, so
+# a user `exec` is overwritten; and the DLL contains no SkipDormant /
+# DisableMultidrop / force-legacy-SWD command.  An AP-map override was also tried
+# across six variants and disproven -- the connect never reaches AP enumeration.
+#
+# So Flow D via the built-in loader needs a probe whose firmware has capability
+# 0x52 (the skill's "J-Link V13 fw" row is this, now with the mechanism behind
+# it).  It cannot be fixed from the host.
 # This script sidesteps that profile entirely: it registers a custom device that
 # pairs the WORKING generic Cortex-M55 connect with Alif's OWN flash algorithm,
 # taken from the CMSIS pack (`Flash/algorithms/Ensemble.FLM`).
