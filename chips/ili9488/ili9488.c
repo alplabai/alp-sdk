@@ -45,6 +45,12 @@ alp_status_t ili9488_init(ili9488_t *dev, alp_spi_t *spi, alp_gpio_t *dc, alp_gp
 	dev->dc    = dc;
 	dev->reset = reset;
 
+	/* Every hold below is tens to hundreds of milliseconds, so the sequence
+	 * sleeps (alp_delay_ms) instead of spinning.  alp_delay_us never yields
+	 * (include/alp/peripheral.h) and this bring-up costs 470 ms in total --
+	 * that much non-yielding spin blocks every equal- or lower-priority
+	 * thread.  alp_delay_ms keeps the "at least" guarantee the ILI9488
+	 * datasheet minimums rely on. */
 	if (reset != NULL) {
 		(void)alp_gpio_write(reset, false);
 		alp_delay_ms(20);

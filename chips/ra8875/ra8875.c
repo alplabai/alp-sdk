@@ -46,6 +46,10 @@ alp_status_t ra8875_init(ra8875_t *dev, alp_spi_t *spi, alp_gpio_t *reset)
 	dev->bus   = spi;
 	dev->reset = reset;
 
+	/* 100 ms reset low + 300 ms post-reset settle.  Sleeps (alp_delay_ms):
+	 * alp_delay_us never yields (include/alp/peripheral.h), so 400 ms of it
+	 * would block every equal- or lower-priority thread through the whole
+	 * bring-up.  alp_delay_ms is still "at least", so the holds stand. */
 	if (reset != NULL) {
 		(void)alp_gpio_write(reset, false);
 		alp_delay_ms(100);

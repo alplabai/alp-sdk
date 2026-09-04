@@ -43,7 +43,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _orchestrate_support import REPO, _write_board  # noqa: E402
 
-from alp_orchestrate import emit_build_plan, load_board_yaml  # noqa: E402
+from alp_orchestrate import (OrchestratorError, emit_build_plan,  # noqa: E402
+                             load_board_yaml)
 
 # `preset: e1m-evk` is load-bearing: it is what makes the project resolve
 # a board name, hence an `ALP_BOARD_E1M_EVK` compile guard -- the exact
@@ -468,3 +469,102 @@ def test_an_empty_output_dir_does_not_mean_the_slice_built_nothing(
     assert list(build_dir.rglob("*fwcore*")), "no archive was produced"
     # ...and `output/` was never created.
     assert not (tmp_path / slice_["artifacts"]["outputDir"]).exists()
+
+
+# ---------------------------------------------------------------------
+# #1889 -- an app-less `os: baremetal` core must be refused at
+# validate time, not silently skipped at build time.
+#
+# `_resolve_topology_for_core` (loader.py) merges a project's `cores.<id>`
+# entry OVER the SoM preset's `topology.<id>` default; a project entry
+# that overrides `os:` to `baremetal` without its own `app:` still
+# inherits the topology default's `app:` -- `alp-stock-shim` on every
+# Cortex-M slot, `alp-image-edge` on every Cortex-A slot (every
+# metadata/e1m_modules/<SKU>.yaml agrees). Neither is a bare-metal app,
+# and no bare-metal stock default exists, so `_enforce_loader_rules`'s
+# `not slice_.app` guard alone never fires here -- the inherited token
+# is truthy. Confirmed against `orchestrator._slice_command`: a
+# baremetal slice with no `app:` of its own returns `command: None`
+# and is carried as a silently-skipped slice, never a build failure.
+# ---------------------------------------------------------------------
+
+
+def test_baremetal_core_with_no_app_of_its_own_is_refused_at_load(
+        tmp_path: Path) -> None:
+    """The exact #1889 shape: `os: baremetal` with no `app:` on an
+    M-core slot that has a zephyr stock-shim topology default."""
+    path = _write_board(tmp_path, """
+        som:
+          sku: E1M-AEN801
+          hw_rev: r1
+
+        preset: e1m-evk
+
+        cores:
+          m55_he:
+            os: baremetal
+          m55_hp:
+            os: zephyr
+            app: .
+    """)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+
+    msg = str(excinfo.value)
+    assert "m55_he" in msg
+    assert "app:" in msg
+    assert "alp-stock-shim" in msg
+
+
+def test_baremetal_core_with_no_app_on_an_a_core_slot_is_refused(
+        tmp_path: Path) -> None:
+    """Same shape on the OTHER stock token: a Cortex-A slot's topology
+    default is `alp-image-edge` (the yocto stock image), equally not a
+    bare-metal app."""
+    path = _write_board(tmp_path, """
+        som:
+          sku: E1M-AEN801
+          hw_rev: r1
+
+        preset: e1m-evk
+
+        cores:
+          a32_cluster:
+            os: baremetal
+          m55_hp:
+            os: zephyr
+            app: .
+    """)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+
+    msg = str(excinfo.value)
+    assert "a32_cluster" in msg
+    assert "alp-image-edge" in msg
+
+
+def test_baremetal_core_with_a_real_app_of_its_own_still_loads(
+        tmp_path: Path) -> None:
+    """The fix must not reject a genuine bare-metal `app:` -- only the
+    inherited stock tokens."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.20)\nproject(demo C)\n",
+        encoding="utf-8")
+    path = _write_board(tmp_path, """
+        som:
+          sku: E1M-AEN801
+          hw_rev: r1
+
+        preset: e1m-evk
+
+        cores:
+          m55_he:
+            os: baremetal
+            app: ./src
+          m55_hp:
+            os: zephyr
+            app: .
+    """)
+    project = load_board_yaml(path)  # must not raise
+    assert project.cores["m55_he"].app == "./src"

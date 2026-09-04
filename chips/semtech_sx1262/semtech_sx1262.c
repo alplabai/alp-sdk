@@ -29,9 +29,12 @@ alp_status_t semtech_sx1262_hw_reset(semtech_sx1262_t *dev)
 	if (dev->nreset == NULL) return ALP_ERR_NOSUPPORT;
 	alp_status_t s = alp_gpio_write(dev->nreset, false);
 	if (s != ALP_OK) return s;
-	alp_delay_us(200);
+	alp_delay_us(200); /* NRESET low: 100 us datasheet minimum, sub-ms, spin */
 	s = alp_gpio_write(dev->nreset, true);
 	if (s != ALP_OK) return s;
+	/* Post-reset boot settle.  Sleeps: 10 ms of alp_delay_us would spin
+	 * without yielding (include/alp/peripheral.h) and nothing here is bus
+	 * timing -- overshooting the settle is harmless. */
 	alp_delay_ms(10);
 	return ALP_OK;
 }
@@ -40,9 +43,15 @@ alp_status_t semtech_sx1262_wait_busy(semtech_sx1262_t *dev, uint32_t timeout_ms
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 	if (dev->busy == NULL) {
+		/* No BUSY pin: blind 1 ms wait.  Sleeps rather than spins for the
+		 * same reason as the poll step below. */
 		alp_delay_ms(1);
 		return ALP_OK;
 	}
+	/* The 1 ms poll step sleeps so a long BUSY (a full TX at a low datarate
+	 * can hold it for seconds) does not monopolise the core.  waited_ms counts
+	 * NOMINAL step time, and a sleep may overshoot to the OS tick boundary, so
+	 * timeout_ms bounds the accounted wait, not wall clock. */
 	uint32_t waited_ms = 0;
 	while (waited_ms < timeout_ms) {
 		bool         level = true;

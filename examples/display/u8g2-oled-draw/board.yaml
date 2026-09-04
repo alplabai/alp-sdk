@@ -22,7 +22,7 @@ cores:
     # u8g2 has no zephyr/module.yml upstream, so `libraries: [u8g2]`
     # sets the CONFIG_ALP_SDK_U8G2_VENDORED_CORE Kconfig knob (from
     # u8g2.yaml's integration.zephyr.kconfig array, transcribed by
-    # scripts/alp_orchestrate/libraries.py:197 -- the
+    # scripts/alp_orchestrate/libraries.py:321 -- the
     # `_LIBRARY_KCONFIG["u8g2"]` dict this used to cite is gone, and
     # scripts/alp_project_emit is a package now, not a .py file) -- the
     # alp-sdk Zephyr module then compiles the vendored core draw

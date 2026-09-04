@@ -85,7 +85,7 @@ The server side (Hakan's repo) hands the device an artifact
 
 **Path A implemented (gated, HIL-pending); Path B scaffolded.**
 The `0xF0..0xFF` opcode set is implemented in
-`firmware/gd32-bridge/src/ota.c` and specified in
+`gd32-bridge-firmware:src/ota.c` and specified in
 [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10;
 destructive flashing is armed only in `-DBRIDGE_OTA_PARTITIONED`
 builds (the default build answers `STATUS_NOSUPPORT`).  Host-driven
@@ -96,7 +96,7 @@ path (Path B).
 
 The authoritative wire contract is
 [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10
-(implemented in `firmware/gd32-bridge/src/ota.c`, mirrored host-side
+(implemented in `gd32-bridge-firmware:src/ota.c`, mirrored host-side
 in `<alp/chips/gd32g553.h>`).  As implemented, `OTA_BEGIN` carries
 `size:u32 expected_crc32:u32` (plus an optional additive version
 triple), session state is implicit rather than slot-addressed on

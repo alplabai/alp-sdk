@@ -8,10 +8,12 @@
 # Authoritative per-E1M-pad routing lives in this file's
 # `e1m_routes:` block below; on-board I2C device addresses +
 # INA236 calibration live in the `i2c_devices:` block further
-# down.  `scripts/gen_board_header.py` reads both and produces
+# down; the overlay-extended `alp,pin-array` pad indices live in
+# the `overlay_pins:` block further down still.
+# `scripts/gen_board_header.py` reads all three and produces
 # `include/alp/boards/alp_e1m_evk_routes.h`.  The remaining
-# sections of `alp_e1m_evk.h` (mux enums, overlay-pad indices)
-# stay hand-authored until follow-up slices lift them too.
+# sections of `alp_e1m_evk.h` (mux enums) stay hand-authored
+# until follow-up slices lift them too.
 #
 # Customers building a custom board copy this file into their
 # project root as `board.yaml`, drop the SDK-internal preamble +
@@ -78,12 +80,12 @@ populated:
 #
 # This is the single source of truth for the EVK_PIN_* /
 # EVK_*_BUS_* / EVK_UART_PORT_* / EVK_PWM_* / EVK_ARD_PWM* /
-# EVK_MB_PWM macros (and, via the `i2c_devices:` block further
-# down, the EVK_I2C_ADDR_* / EVK_INA236_* macros) that
-# hand-written firmware uses; do not hand-edit the generated
-# header.  The remaining sections of
-# `include/alp/boards/alp_e1m_evk.h` (mux enums, overlay-pad
-# indices) stay hand-authored until follow-up slices lift them too.
+# EVK_MB_PWM macros (and, via the `i2c_devices:` / `overlay_pins:`
+# blocks further down, the EVK_I2C_ADDR_* / EVK_INA236_* /
+# EVK_PIN_OVERLAY_BASE-based macros) that hand-written firmware
+# uses; do not hand-edit the generated header.  The remaining
+# sections of `include/alp/boards/alp_e1m_evk.h` (mux enums) stay
+# hand-authored until follow-up slices lift them too.
 #
 # Entry schema:
 #   - e1m:         <E1M_GPIO_IO<N> | E1M_PWM<N> | E1M_<bus_class><N>>
@@ -216,8 +218,8 @@ e1m_routes:
   # (`aliases { alp-adc0 = &adc12_0; };`).  Regenerate after editing:
   #   python3 scripts/alp_project.py --input <board.yaml> --emit dts-overlay
   adc:
-    - { e1m: E1M_ADC0, macro: EVK_ADC_BOARD_ID,
-        doc: "Carrier-side BOARD_ID resistor divider (see docs/board-id.md)." }
+    - { e1m: E1M_ADC0, macro: EVK_ADC_ARDUINO_A0,
+        doc: "Arduino UNO header A0 analog input. SHARED with the mikroBUS click ANA pin (net CK_ANA reaches ARD.A0 through R52, R63 pulldown, C60 filter) -- see the Arduino-A0 / mikroBUS-ANA convenience macros in alp_e1m_evk.h. There is no BOARD_ID divider on this board; no BOARD_ID net exists in the EVK netlist." }
     - { e1m: E1M_ADC1, macro: EVK_ADC_ARDUINO_A1,
         doc: "Arduino UNO header A1 analog input." }
     - { e1m: E1M_ADC2, macro: EVK_ADC_ARDUINO_A2,
@@ -228,10 +230,10 @@ e1m_routes:
         doc: "Arduino UNO header A4 analog input (shared with I2C SDA on classic UNO boards)." }
     - { e1m: E1M_ADC5, macro: EVK_ADC_ARDUINO_A5,
         doc: "Arduino UNO header A5 analog input (shared with I2C SCL on classic UNO boards)." }
-    - { e1m: E1M_ADC6, macro: EVK_ADC_MB_AN,
-        doc: "mikroBUS click AN pin." }
-    - { e1m: E1M_ADC7, macro: EVK_ADC_VBAT_SENSE,
-        doc: "Battery voltage divider (4:1 resistor scale) for power-monitor demos." }
+    - { e1m: E1M_ADC6, macro: EVK_ADC_DAC0_LOOPBACK,
+        doc: "DAC0 output loopback sense (net A6: R88 series from DAC0_OUT, R89 pulldown, C107 filter). NOT the mikroBUS AN pin -- mikroBUS ANA is shared with Arduino A0 on E1M_ADC0, see EVK_ADC_ARDUINO_A0." }
+    - { e1m: E1M_ADC7, macro: EVK_ADC_DAC1_LOOPBACK,
+        doc: "DAC1 output loopback sense (net A7: R90 series from DAC1_OUT, R91 pulldown, C108 filter). There is no VBAT net anywhere in the EVK netlist -- this channel cannot be used for battery-voltage sensing." }
   dac:
     - { e1m: E1M_DAC0, macro: EVK_DAC_ARDUINO_DAC0,
         board_alias: BOARD_DAC0,
@@ -278,7 +280,7 @@ i2c_devices:
   - { macro: EVK_I2C_ADDR_TAS2563_LOW, part: tas2563, designator: U27, address: "0x4D",
       doc: "U27 smart amp (AD0 = 10k to GND)." }
   - { macro: EVK_I2C_ADDR_TAS2563_HIGH, part: tas2563, designator: U28, address: "0x4E",
-      doc: "U28 smart amp (AD0 = 10k to VDD). The TAS2563 broadcast address (0x48) was occupied on PRE-RESPIN boards by U32 INA236B (+V_CAM0 rail); the U32 re-strap to 0x4B from the next batch freed it -- firmware that supports both board revisions must still issue two targeted unit-address writes rather than a 0x48 broadcast." }
+      doc: "U28 smart amp (AD0 = 10k to VDD). The TAS2563 broadcast address (0x48) was occupied on PRE-RESPIN boards by U32 INA236B (+V_CAM0 rail); the U32 re-strap to 0x4B from the next batch freed 0x48 at the hardware level. That does not make it usable from the SDK: 0x48 doesn't pin down one physical chip the way a strap address does, and tas2563_init() rejects 0x48 on every board revision regardless of direction, so firmware must unconditionally issue two targeted unit-address writes rather than a 0x48 broadcast." }
   - { macro: EVK_I2C_ADDR_INA236_3V3, part: ina236, designator: U21, address: "0x40",
       doc: "U21 INA236A, +3V3 rail (20 mOhm shunt, 4.0 A max). A0 = GND.",
       calibration: { shunt_macro: EVK_INA236_SHUNT_3V3_OHMS, shunt_ohms: "0.020",
@@ -303,6 +305,39 @@ i2c_devices:
       doc: "U30 INA236B, +5V rail (20 mOhm shunt, 4.0 A max). A0 = SDA.",
       calibration: { shunt_macro: EVK_INA236_SHUNT_5V_OHMS, shunt_ohms: "0.020",
                      max_macro: EVK_INA236_MAX_5V_A, max_current_a: "4.0" } }
+
+# Board-repurposed pads exposed past the standard 52-entry E1M pinout,
+# for an `alp,pin-array` devicetree overlay (see
+# zephyr/dts/bindings/alp,pin-array.yaml).  Each entry's macro gets
+# `EVK_PIN_OVERLAY_BASE + N`, where N is the entry's POSITION IN THIS
+# LIST (0-based) -- an ordinal, not an independent hardware fact, so
+# `scripts/gen_board_header.py` computes it via `enumerate()` rather
+# than reading it from the YAML (#1636).  Reordering entries below
+# reassigns every macro after the moved one, exactly as reordering the
+# backing overlay's `gpios` phandle list would.
+overlay_pins:
+  - { macro: EVK_PIN_IO_EXP_INT,
+      doc: "AUDIO_CLK pad (E1M Z2 / Alif P9_6) repurposed as the I/O expander INT line on this EVK. When the audio path is in use the IO expander interrupt is unavailable; firmware should poll the expander instead." }
+  - { macro: EVK_PIN_IO_EXP_RST,
+      doc: "SPI0_CS1 pad (E1M N1 / Alif P3_6) repurposed as the I/O expander reset line. When SPI0 is used with two chip-selects this pin can't double as IO_EXP_RST -- the EVK assumes SPI0 is in single-CS mode at most." }
+  - { macro: EVK_PIN_AMP_FAULT,
+      doc: "SPI0_MISO pad (E1M L1 / Alif P5_0) repurposed as the audio amplifier fault output (open-drain input from the amp)." }
+  - { macro: EVK_PIN_AMP_ENABLE,
+      doc: "SPI0_CS0 pad (E1M M1 / Alif P5_2) repurposed as the audio amplifier enable input (active-high)." }
+  - { macro: EVK_PIN_MB_INT,
+      doc: "I2S1_SDI pad (E1M AH6 / Alif P13_4) repurposed as the mikroBUS click INT pin. Was earlier (mis)documented as CTP_INT; the user has since clarified that CTP_INT is on SPI1_CS1 (see EVK_PIN_CTP_INT below) and I2S1_SDI is the mikroBUS INT line." }
+  - { macro: EVK_PIN_CK_DIO4,
+      doc: "SPI0_MOSI pad (E1M M2 / Alif P5_1) repurposed as Arduino CK_DIO4 (digital I/O 4 on the Arduino UNO header)." }
+  - { macro: EVK_PIN_CK_DIO3,
+      doc: "SPI0_SCLK pad (E1M N2) repurposed as Arduino CK_DIO3. NB: the Alif-side pad mapping for SPI0_SCLK is left blank in metadata/e1m_modules/aen/from-alif.tsv (user-supplied) and needs filling once the EVK schematic is cross-checked." }
+  - { macro: EVK_PIN_CK_DIO2,
+      doc: "I2S1_WS pad (E1M AG7 / Alif P2_7) repurposed as Arduino CK_DIO2." }
+  - { macro: EVK_PIN_CK_DIO1,
+      doc: "I2S1_SDO pad (E1M AG6 / Alif P13_5) repurposed as Arduino CK_DIO1." }
+  - { macro: EVK_PIN_CK_RST,
+      doc: "I2S1_SCLK pad (E1M AH7 / Alif P2_6) repurposed as Arduino CK_RST (the Arduino UNO header's RESET signal -- shields can pulse it low to force a reboot)." }
+  - { macro: EVK_PIN_CTP_INT,
+      doc: "SPI1_CS1 pad (E1M AH8 -- CC3501E side, GPIO_15) repurposed as the capacitive touch panel interrupt input. Routed through the on-module CC3501E -- firmware reads CTP touches by registering an interrupt callback on the CC3501E's GPIO_15 via ALP_CC3501E_CMD_GPIO_SET_INTERRUPT." }
 
 # Inference + display defaults a stock EVK app would pick.  Apps
 # override in their board.yaml as needed.

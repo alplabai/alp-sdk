@@ -1,0 +1,242 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Mon, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] bootutil: scramble the scratch trailer instead of a no-op
+ erase, and fix a backwards-scramble off-by-one (#1066)
+
+A completed scratch-based swap can leave the scratch area's temporary
+trailer magic GOOD forever, so the device resumes the same finished swap
+on every subsequent boot. Two independent mechanisms in bootutil, not
+one:
+
+(i) swap_scratch.c's `!bs->use_scratch` branch (boot_swap_sectors(),
+    STATE_0) writes a full temporary trailer to the scratch area --
+    magic included, via swap_status_init() -- as a place to stash the
+    swap-type while the primary slot's own trailer is being rebuilt.
+    The comment right after it, "Erase the temporary trailer from the
+    scratch area", is meant to remove that magic once it is no longer
+    needed. On a flash device that does not require an explicit erase
+    before rewrite, that call -- a plain boot_erase_region() -- is a
+    documented no-op: boot_erase_region() (bootutil_area.c) takes its
+    `device_requires_erase(fa) == false` branch, logs "device without
+    erase", and returns success without touching flash. The GOOD magic
+    survives. On the next boot, boot_status_tables[]'s scratch-source
+    entry matches on scratch magic GOOD alone, regardless of the
+    primary slot's own image_ok, and swap_read_status() resumes the
+    same completed swap again.
+
+    Fixed by replacing that no-op erase with
+    swap_scramble_trailer_sectors(state, fap_scratch) -- the same
+    helper already used a few lines up to clear the primary slot's own
+    trailer, so the trailer-scoped offset math (boot_trailer_scramble_
+    offset()) is not duplicated. Scoped to the trailer, not the whole
+    scratch area: nothing outside the trailer has been written to
+    scratch at this point in STATE_0, so scrambling the rest would cost
+    flash endurance (an MRAM write-cycle budget) for no benefit. On a
+    device that DOES require an explicit erase, boot_scramble_region()'s
+    own device_requires_erase() branch routes this to boot_erase_region()
+    scoped to the trailer's own offset/size and backwards -- narrower and
+    a different direction than the plain forward, whole-scratch-area
+    erase this replaces, not identical to it. That narrowing is safe: the
+    unconditional first scratch erase a few lines earlier in this same
+    STATE_0 block already covers everything below the trailer, so this
+    change does not leave any byte of the scratch area unerased on that
+    class of device either.
+
+    The FIRST scratch erase a few lines earlier in the same STATE_0
+    block ("erasing scratch area", unconditional every sector) is
+    deliberately left as a plain erase. At that point nothing has been
+    written to scratch yet in this call, and both of what follows --
+    swap_status_init() a few lines down, and the boot_copy_region()
+    image-data copy later in the same block -- unconditionally
+    overwrite in place whatever they need. A no-op there costs nothing
+    beyond one leftover write block neither of them touches, and
+    unlike the second erase there is no stale magic for a no-op to
+    strand.
+
+(ii) boot_scramble_region()'s backwards branch (bootutil_area.c, the
+    no-erase overwrite path) never writes the block at its own
+    end_offset. end_offset is computed as the range's first (lowest)
+    write block, INCLUSIVE -- unlike the forward branch, where
+    end_offset is one block past the last, exclusive -- but a single
+    `while (off != end_offset)` entry guard shared across both
+    directions treats the two identically: once off has decremented
+    down to end_offset the guard is already false and the loop body
+    never runs for it. For a trailer-scoped call (as (i) above now
+    makes on the scratch area) that dropped block is the trailer's
+    first status entry, which is exactly what would let a stale
+    non-0x00 status byte survive a scramble meant to remove it.
+
+    Fixed by splitting the shared loop into its own per-direction
+    form: the backwards case now writes first and checks the boundary
+    after, mirroring boot_erase_region()'s own post-op break for this
+    same backwards boundary a few lines above -- that function never
+    had this bug, because its `while (true)` always runs the erase
+    before testing for the boundary. The forward branch is untouched,
+    byte for byte.
+
+Not bench-verified on AEN silicon, and cannot be from this tree today:
+#1100 and #1445 removed the AEN family's scratch/slot1 partitions to
+fit the disjoint dual-core slot0 budget, so no AEN board target
+currently builds the scratch-swap path either of these touches. This
+closes the mechanism ahead of a secondary slot being reintroduced.
+
+Does NOT close #1066's second finding (a clean, valid PERM upgrade
+request that produces no swap at all). That trace runs through a
+stale non-0x00 primary status byte surviving into the next boot
+(boot_status_is_reset() false) rather than the scratch mechanism this
+patches, and fix (ii) plausibly removes its source -- but that link is
+a hypothesis, not proven here, and is not claimed as closed.
+
+Regression-verified on the mcuboot host simulator, companion
+0005-sim-scratch-trailer-no-erase-device-regression-test.patch.
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+diff --git a/boot/bootutil/src/bootutil_area.c b/boot/bootutil/src/bootutil_area.c
+index 3bd6bb0..34fc4b8 100644
+--- a/boot/bootutil/src/bootutil_area.c
++++ b/boot/bootutil/src/bootutil_area.c
+@@ -326,26 +326,63 @@ boot_scramble_region(const struct flash_area *fa, uint32_t off, uint32_t size, b
+         BOOT_LOG_DBG("boot_scramble_region: start offset %" PRIu32 ", "
+                      "end offset %" PRIu32, off, end_offset);
+ 
+-        while (off != end_offset) {
+-            /* Write over the area to scramble data that is there */
+-            rc = flash_area_write(fa, off, buf, write_block);
+-            if (rc != 0) {
+-                BOOT_LOG_DBG("boot_scramble_region: error %d for %p "
+-                             "%" PRIu32 " %u",
+-                             rc, fa, off, (unsigned int)write_block);
+-                break;
+-            }
++        if (backwards) {
++            /* (alp-sdk#1066) end_offset here is the FIRST (lowest) write
++             * block of the range, INCLUSIVE -- unlike the forward branch
++             * below, where end_offset is one block past the LAST block,
++             * exclusive. A single `while (off != end_offset)` entry guard
++             * shared across both directions treated the two the same way,
++             * so it never wrote the block at end_offset: by the time off
++             * had decremented down to it, the guard was already false and
++             * the loop body never ran for it. For a trailer-scoped call
++             * that dropped block is the trailer's first status entry,
++             * letting a stale non-0x00 status byte survive a scramble
++             * that was supposed to remove it.
++             *
++             * Fixed by writing first and checking the boundary after,
++             * mirroring boot_erase_region()'s own post-op break for this
++             * same backwards boundary a few lines above -- that function
++             * never had this bug because its `while (true)` always runs
++             * the body before testing for the boundary. The comparison
++             * stays `>=`, not `==`: off and end_offset are both write-block
++             * aligned for every caller today so the two are equivalent on
++             * reachable shapes, but `>=` cannot walk below the requested
++             * range if a future caller ever passes an off/size whose sum
++             * is not write_block-aligned, where `==` would skip past
++             * end_offset and keep decrementing.
++             */
++            while (true) {
++                /* Write over the area to scramble data that is there */
++                rc = flash_area_write(fa, off, buf, write_block);
++                if (rc != 0) {
++                    BOOT_LOG_DBG("boot_scramble_region: error %d for %p "
++                                 "%" PRIu32 " %u",
++                                 rc, fa, off, (unsigned int)write_block);
++                    break;
++                }
+ 
+-            MCUBOOT_WATCHDOG_FEED();
++                MCUBOOT_WATCHDOG_FEED();
+ 
+-            if (backwards) {
+-                if (end_offset >= off) {
+-                    /* Reached the first offset in range and already scrambled it */
++                if (end_offset >= off) {
++                    /* Reached the first offset in range and already scrambled it */
+                     break;
+                 }
+ 
+                 off -= write_block;
+-            } else {
++            }
++        } else {
++            while (off != end_offset) {
++                /* Write over the area to scramble data that is there */
++                rc = flash_area_write(fa, off, buf, write_block);
++                if (rc != 0) {
++                    BOOT_LOG_DBG("boot_scramble_region: error %d for %p "
++                                 "%" PRIu32 " %u",
++                                 rc, fa, off, (unsigned int)write_block);
++                    break;
++                }
++
++                MCUBOOT_WATCHDOG_FEED();
++
+                 off += write_block;
+ 
+                 if (end_offset <= off) {
+diff --git a/boot/bootutil/src/swap_scratch.c b/boot/bootutil/src/swap_scratch.c
+index 59b64ad..09f34f6 100644
+--- a/boot/bootutil/src/swap_scratch.c
++++ b/boot/bootutil/src/swap_scratch.c
+@@ -746,6 +746,18 @@ boot_swap_sectors(int idx, uint32_t sz, struct boot_loader_state *state,
+     bs->use_scratch = (bs->idx == BOOT_STATUS_IDX_0 && copy_sz != sz);
+ 
+     if (bs->state == BOOT_STATUS_STATE_0) {
++        /* (alp-sdk#1066) Plain erase, deliberately left as-is on a device
++         * that does not require an explicit erase before rewrite: nothing
++         * has been written to the scratch area yet at this point, and
++         * both of what follows in this STATE_0 block -- swap_status_init()
++         * a few lines down, and the boot_copy_region() image-data copy
++         * below -- unconditionally overwrite in place whatever they need,
++         * so a no-op erase here costs nothing beyond the one leftover
++         * write block neither of them touches (harmless: nothing reads it
++         * before it is itself overwritten by the same code path on the
++         * next sector). Unlike the erase a few lines down, there is no
++         * stale magic here for a no-op to strand.
++         */
+         BOOT_LOG_DBG("erasing scratch area");
+         rc = boot_erase_region(fap_scratch, 0, flash_area_get_size(fap_scratch), false);
+         assert(rc == 0);
+@@ -769,9 +781,38 @@ boot_swap_sectors(int idx, uint32_t sz, struct boot_loader_state *state,
+                 rc = swap_status_init(state, fap_primary_slot, bs);
+                 assert(rc == 0);
+ 
+-                /* Erase the temporary trailer from the scratch area. */
+-                rc = boot_erase_region(fap_scratch, 0,
+-                        flash_area_get_size(fap_scratch), false);
++                /* (alp-sdk#1066) This one DOES strand a stale magic if
++                 * left as a plain erase: on a device that does not
++                 * require an explicit erase before rewrite,
++                 * boot_erase_region() is a documented no-op here (it logs
++                 * "device without erase" and returns success without
++                 * touching flash -- see boot_erase_region()'s own
++                 * device_requires_erase() branch), so the GOOD magic
++                 * swap_status_init() just wrote a few lines up survives
++                 * in the scratch area forever. The next boot then matches
++                 * boot_status_tables[]'s scratch-source entry (magic
++                 * GOOD, primary ANY) regardless of image_ok, and resumes
++                 * this same completed swap indefinitely.
++                 *
++                 * Scramble instead of erase, and scope it to the trailer
++                 * via swap_scramble_trailer_sectors() (already used a few
++                 * lines up for the primary slot's own trailer) rather
++                 * than the whole scratch area: nothing outside the
++                 * trailer has been written to scratch at this point, so
++                 * scrambling the rest would cost flash endurance for no
++                 * benefit. On a device that DOES require an explicit
++                 * erase, boot_scramble_region()'s own
++                 * device_requires_erase() branch routes this to
++                 * boot_erase_region() scoped to the trailer's own
++                 * offset/size and backwards -- narrower, and a
++                 * different direction, than the plain forward,
++                 * whole-scratch-area erase this replaces, not
++                 * identical to it. That narrowing is safe: the
++                 * unconditional first scratch erase a few lines above
++                 * ("erasing scratch area") already covers everything
++                 * below the trailer on that class of device too.
++                 */
++                rc = swap_scramble_trailer_sectors(state, fap_scratch);
+                 assert(rc == 0);
+             }
+         }

@@ -29,7 +29,12 @@ alp_status_t ublox_sara_r5_power_on(ublox_sara_r5_t *dev)
 	if (dev->pwr_on == NULL) return ALP_ERR_NOSUPPORT;
 	alp_status_t s = alp_gpio_write(dev->pwr_on, true);
 	if (s != ALP_OK) return s;
-	/* 1500 ms pulse per u-blox SARA-R5 HW integration guide. */
+	/* 1500 ms pulse per u-blox SARA-R5 HW integration guide.  Sleep, do not
+	 * spin: alp_delay_us never yields (include/alp/peripheral.h), so a 1.5 s
+	 * pulse denies the CPU to every equal- or lower-priority thread for its
+	 * whole length -- long enough to starve an application watchdog feeder.
+	 * alp_delay_ms carries the same "at least" guarantee, so the vendor
+	 * minimum still holds. */
 	alp_delay_ms(1500);
 	return alp_gpio_write(dev->pwr_on, false);
 }

@@ -48,10 +48,36 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/comparator.h>
+#include <zephyr/sys/sys_io.h>
 
 /* The comparator device is the "alif,cmp" node cmp0@49023000; the
  * comparator_alif driver binds it as a Zephyr comparator-class device. */
 #define CMP_NODE DT_NODELABEL(cmp0)
+
+/*
+ * Raw HSCMP interrupt registers, read directly so the log carries the ONE
+ * witness the portable API cannot show.  Both bits of CMP_INTERRUPT_MASK are
+ * active-HIGH with reset 0x1 (HWRM 19.3.5.3.9: "By default, interrupt mask is
+ * set.  Mask must be cleared to allow interrupt to be driven out."), so an
+ * armed trigger must read 0x0 and COMPARATOR_TRIGGER_NONE must read 0x3.
+ *
+ * The driver used to write 0x01 at both sites, which SET the rising-edge mask
+ * and CLEARED the falling-edge one -- arming the interrupt it claimed to be
+ * disabling, and leaving a latched FILTER_EVENT1 to re-enter a level-sensitive
+ * ISR forever (#1821).  A run of this example on the broken driver prints
+ * mask=0x00000001 where it now prints 0x00000000 / 0x00000003.
+ */
+#define CMP0_BASE             0x49023000U
+#define CMP0_INTERRUPT_STATUS (CMP0_BASE + 0x20U)
+#define CMP0_INTERRUPT_MASK   (CMP0_BASE + 0x24U)
+
+static void print_int_regs(const char *when)
+{
+	printk("  %s: CMP_INTERRUPT_MASK=0x%08x  CMP_INTERRUPT_STATUS=0x%08x\n",
+	       when,
+	       sys_read32(CMP0_INTERRUPT_MASK),
+	       sys_read32(CMP0_INTERRUPT_STATUS));
+}
 
 static const struct device *const cmp = DEVICE_DT_GET(CMP_NODE);
 
@@ -81,6 +107,7 @@ int main(void)
 		return 0;
 	}
 	printk("cmp device ready (neg input = DAC6 internal reference)\n");
+	print_int_regs("after init      ");
 
 	/* 2. read the comparator output through the portable class API.  A valid
 	 *    return is exactly 0 or 1; anything negative is an -errno from the
@@ -108,6 +135,7 @@ int main(void)
 
 	rc = comparator_set_trigger(cmp, COMPARATOR_TRIGGER_BOTH_EDGES);
 	printk("comparator_set_trigger(BOTH_EDGES) rc=%d\n", rc);
+	print_int_regs("armed BOTH_EDGES");
 	if (rc != 0) {
 		printk("RESULT FAIL: set_trigger rc=%d\n", rc);
 		return 0;
@@ -127,6 +155,7 @@ int main(void)
 
 	rc = comparator_set_trigger(cmp, COMPARATOR_TRIGGER_NONE);
 	printk("comparator_set_trigger(NONE) rc=%d\n", rc);
+	print_int_regs("trigger NONE    ");
 	if (rc != 0) {
 		printk("RESULT FAIL: set_trigger(NONE) rc=%d\n", rc);
 		return 0;

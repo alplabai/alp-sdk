@@ -24,8 +24,27 @@ without it.  Repo: `alplabai/alp-studio` (not a public GitHub repo).
 allocator places against the active SoM by consuming the SoM
 preset's `pad_routes:` from alp-sdk.
 
+**board** -- Ambiguous on its own; it carries three distinct meanings
+in this repo, and which one is meant is always determined by context:
+(1) a **Zephyr board target**, e.g. `alp_e1m_aen801_m55_hp/...`, passed
+to the build; (2) a **carrier preset** under `metadata/boards/*.yaml`,
+which describes a physical carrier; (3) the **project file**
+`board.yaml` at an application root, which is a target binding rather
+than a board description.  Prefer the specific term -- "board target",
+"carrier preset", or "board.yaml" -- over the bare word.
+
 **board.yaml** -- The single declarative file at the root of every
-application.  Top-level fields: board identity (`name` /
+application.  Despite the name it is neither a board description nor a
+SoM description: it is the **project's target binding**.  A board
+description lives in `metadata/boards/<preset>.yaml`; a SoM description
+lives in `metadata/e1m_modules/E1M-*.yaml`.  The schema requires only
+`som` and `cores` -- the board-shaped fields are optional, replaceable
+by a `preset:` reference, or omitted entirely for headless builds --
+while the file also carries application config with no board semantics
+at all (`models:`, `libraries:`, `ota:`, `diagnostics:`, `boot:`).  Read
+"board" here as the third of three distinct meanings in this repo (see
+**board** above); the name is kept for compatibility, not because it is
+precise (RFC #853).  Top-level fields: board identity (`name` /
 `description` / `hw_rev`, or `preset:` referencing a shared
 definition under `metadata/boards/<preset>.yaml`), `som.sku`,
 the per-core `cores.<id>` block (`os`, `app`, `peripherals`,
@@ -38,8 +57,11 @@ cross-core `ipc:`, `boot:` (MCUboot), `ota:` (Mender), `storage:`,
 `scripts/validate_board_yaml.py` against
 `metadata/schemas/board.schema.json`.
 
-**BRD_I2C** -- Board-management I²C bus on V2N + V2N-M1.  Hosts
-the PMICs, RTC, OPTIGA, supervisor MCU slave interface.
+**BRD_I2C** -- Board-management I²C bus.  On V2N + V2N-M1 it hosts
+the PMICs, RTC, OPTIGA, supervisor MCU slave interface (Renesas RIIC8
+master).  On the E1M-AEN801 it hosts the RTC/OPTIGA/TMP112 trio over
+SoC I2C0 (function C, `P7_0`/`P7_1` -- #1848; R2-sourced, not yet
+on-unit-verified -- see `docs/bring-up-aen.md` §5.1).
 
 **Bridge (GD32)** -- The V2N module's on-module supervisor MCU
 (GD32G553) reachable over a hybrid SPI + I2C transport.  See
@@ -347,7 +369,7 @@ version-pinned, built in alp-sdk CI for at least one board per
 supported family, ships a teaching example -- breakage blocks
 release.  **Tier B (recipe-only):** wiring + compatibility metadata
 are maintained and emitted, but the library is not built in alp-sdk
-CI; `python -m alp_cli doctor` labels it.  Promotion B → A requires a dedicated
+CI; `tan doctor` labels it.  Promotion B → A requires a dedicated
 owner and a CI build lane.  (Distinct from the driver/library
 integration ladder in
 [ADR 0017](adr/0017-alp-sdk-over-the-vendor-sdk.md).)

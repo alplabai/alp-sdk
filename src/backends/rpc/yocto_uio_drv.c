@@ -494,6 +494,12 @@ struct rpc_be {
 
 	uint8_t tx_scratch[ALP_RPC_TX_FRAME_MAX];
 
+	/* Count of inbound frames dropped by uio_ept_cb() because len exceeded
+	 * ALP_RPC_TX_FRAME_MAX (issue #1645) -- written only from the single
+	 * libmetal IRQ-thread receive path for this channel, so a plain
+	 * counter needs no lock. */
+	uint32_t rx_oversized_drops;
+
 	/* Close protocol (GHSA-xhm8-7f87-93q5), shared-libmetal-worker
 	 * adaptation -- see this file's header comment. All guarded by
 	 * `call_mutex` except `cb_active` (atomic, decrement-only outside
@@ -748,6 +754,23 @@ static int uio_ept_cb(struct rpmsg_endpoint *ept, void *data, size_t len, uint32
 		return RPMSG_SUCCESS;
 	}
 
+	if (len > ALP_RPC_TX_FRAME_MAX) {
+		/* Older code silently clipped an oversized frame to
+		 * sizeof(local_frame) below and dispatched the truncated prefix
+		 * as if it were the whole message -- alp_rpc_call()/a subscribe
+		 * callback saw ALP_OK with a partial response and no signal
+		 * anything was dropped.  Surface it instead (issue #1645). */
+		ch->rx_oversized_drops++;
+		fprintf(stderr,
+		        "alp_rpc: dropping %zu-byte inbound frame on channel '%s' (max %d "
+		        "bytes); %u frame(s) dropped so far\n",
+		        len,
+		        ch->name,
+		        ALP_RPC_TX_FRAME_MAX,
+		        ch->rx_oversized_drops);
+		goto epilogue;
+	}
+
 	/* The rpmsg buffer `data` lives in the UIO-mapped vring-shm, which is
 	 * Device/uncached memory -- an unaligned multi-byte load (as
 	 * __memcpy_generic issues) faults with SIGBUS on ARMv8.  Bench cycle 11
@@ -755,12 +778,10 @@ static int uio_ept_cb(struct rpmsg_endpoint *ept, void *data, size_t len, uint32
 	 * worked).  Copy the frame out BYTE-WISE into an aligned local buffer
 	 * first, then parse + dispatch from normal cached memory. */
 	unsigned char local_frame[ALP_RPC_TX_FRAME_MAX];
-	size_t        frame_len = len < sizeof(local_frame) ? len : sizeof(local_frame);
-	for (size_t i = 0; i < frame_len; ++i) {
+	for (size_t i = 0; i < len; ++i) {
 		local_frame[i] = ((const volatile unsigned char *)data)[i];
 	}
 	data = local_frame;
-	len  = frame_len;
 
 	const void *payload     = NULL;
 	size_t      payload_len = 0;

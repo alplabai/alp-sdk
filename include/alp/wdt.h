@@ -118,7 +118,7 @@ alp_wdt_t *alp_wdt_open(const alp_wdt_config_t *cfg);
  * triggers.  Cheap call — typically a single MMIO write.
  *
  * @param[in] wdt  Handle from @ref alp_wdt_open.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_wdt_feed(alp_wdt_t *wdt);
 

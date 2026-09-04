@@ -144,9 +144,13 @@ alp_status_t alp_i2s_stop(alp_i2s_t *i2s);
  *
  * @param[in] i2s         Handle from @ref alp_i2s_open with TX direction.
  * @param[in] block       Source PCM data.
- * @param[in] bytes       Source length.  Should match block_frames × frame size.
+ * @param[in] bytes       Source length.  Must not exceed the block size
+ *                        negotiated at open (`block_frames` × `channels` ×
+ *                        `word_bits / 8`); a larger value is refused with
+ *                        @ref ALP_ERR_OUT_OF_RANGE rather than truncated.
  * @param[in] timeout_ms  Max wait for an available slab block.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
+ *         ALP_ERR_TIMEOUT.
  */
 alp_status_t alp_i2s_write(alp_i2s_t *i2s, const void *block, size_t bytes, uint32_t timeout_ms);
 

@@ -35,6 +35,13 @@ alp_status_t hx711_wait_ready(hx711_t *dev, uint32_t timeout_ms)
 		alp_status_t s     = alp_gpio_read(dev->dout, &level);
 		if (s != ALP_OK) return s;
 		if (!level) return ALP_OK; /* DOUT low = chip ready. */
+		/* The 1 ms poll step sleeps -- this waits out a whole conversion
+		 * (12.5 ms at 80 SPS, 100 ms at 10 SPS) and spinning it would deny
+		 * the core to everything else for that long.  Unlike the bit-bang
+		 * loop in hx711_read_raw() below, no clock edge is in flight here,
+		 * so a scheduling gap is harmless.  waited_ms counts NOMINAL step
+		 * time and a sleep may overshoot to the OS tick boundary, so
+		 * timeout_ms bounds the accounted wait, not wall clock. */
 		alp_delay_ms(1);
 		waited_ms++;
 	}

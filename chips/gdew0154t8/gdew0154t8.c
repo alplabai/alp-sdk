@@ -33,9 +33,16 @@ alp_status_t gdew0154t8_wait_idle(gdew0154t8_t *dev, uint32_t timeout_ms)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 	if (dev->busy == NULL) {
+		/* No busy pin: fall back to a fixed timing wait.  Sleeps, because a
+		 * 100 ms non-yielding spin (alp_delay_us) would hold the core through
+		 * a refresh nothing else is waiting on. */
 		alp_delay_ms(100);
 		return ALP_OK;
 	}
+	/* The 10 ms poll step sleeps so this releases the core for the seconds a
+	 * full e-paper refresh can take.  waited_ms counts NOMINAL step time, and a
+	 * sleep may overshoot to the OS tick boundary, so timeout_ms bounds the
+	 * accounted wait, not wall clock. */
 	uint32_t waited_ms = 0;
 	while (waited_ms < timeout_ms) {
 		bool         level = false;
@@ -52,6 +59,9 @@ alp_status_t gdew0154t8_hw_reset(gdew0154t8_t *dev)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 	if (dev->reset == NULL) return ALP_ERR_NOSUPPORT;
+	/* 10 ms low + 10 ms post-release settle.  Both sleep: alp_delay_us does
+	 * not yield (include/alp/peripheral.h) and neither hold is bus timing
+	 * that a scheduling gap could break. */
 	alp_status_t s = alp_gpio_write(dev->reset, false);
 	if (s != ALP_OK) return s;
 	alp_delay_ms(10);

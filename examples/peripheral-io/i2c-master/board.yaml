@@ -1,7 +1,7 @@
 # board.yaml -- per-app project configuration for the
 # i2c-master example.
 #
-# Reads the TMP112 temperature sensor on BRD_I2C via the chip-
+# Reads the BMP581 barometer on BOARD_I2C_SENSORS via the chip-
 # driver header.  Discrete master that talks to a known device at
 # a known address -- contrasts with examples/peripheral-io/i2c-scanner which
 # probes every 7-bit address for ACKs.
@@ -30,12 +30,24 @@ cores:
     peripherals:
       - i2c
 
-# TMP112 is populated on every member of the AEN, V2N, V2N-M1
-# families per metadata/chips/tmp112.yaml -- so this example is
+# BMP581 is populated on every member of the AEN, V2N, V2N-M1
+# families per metadata/chips/bmp581.yaml -- so this example is
 # Ring 2 (chip-bound, multi-family) per
 # scripts/check_example_portability.py classification.
+#
+# NOTE (#1269): TMP112 was here previously, but TMP112 lives on
+# BRD_I2C, not on BOARD_I2C_SENSORS -- see metadata/boards/e1m-evk.yaml
+# i2c_devices: and metadata/boards/e1m-x-evk.yaml i2c_devices:, neither
+# of which lists a TMP112 on the sensor bus this example opens. BRD_I2C
+# is a SEPARATE controller instance from BOARD_I2C_SENSORS regardless
+# (on the E1M-AEN family, BRD_I2C is SoC I2C0, function C -- #1848), so
+# repointing the bus_id would still not reach a TMP112 there. BMP581 is
+# the part that is actually on BOARD_I2C_SENSORS on both supported
+# boards, at the same address (0x47) on each -- see
+# examples/v2n/v2n-temp-sensor for the V2N-only BRD_I2C/TMP112 pattern
+# instead.
 chips:
-  - tmp112
+  - bmp581
 
 diagnostics:
   log_level: info

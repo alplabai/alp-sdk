@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * One emulated I2C bus exposed via the alp-i2c0 alias.  No emul
- * targets are attached so tmp112_init returns NACK -- but the
+ * targets are attached so bmp581_init returns NACK -- but the
  * open / probe / close path runs end-to-end and the harness
  * latches on the `[i2c-master] done` marker.
  */

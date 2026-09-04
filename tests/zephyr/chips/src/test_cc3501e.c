@@ -41,5 +41,5 @@ ZTEST(alp_chips, test_cc3501e_calls_reject_uninitialised)
 	zassert_equal(
 	    cc3501e_request(&ctx, (alp_cc3501e_cmd_t)0, tx, sizeof tx, rx, sizeof rx, &rx_len, 100u),
 	    ALP_ERR_NOT_READY);
-	zassert_equal(cc3501e_set_event_callback(&ctx, NULL, NULL), ALP_ERR_NOT_READY);
+	zassert_equal(cc3501e_add_event_callback(&ctx, NULL, NULL), ALP_ERR_NOT_READY);
 }

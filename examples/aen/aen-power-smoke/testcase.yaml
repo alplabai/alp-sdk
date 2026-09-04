@@ -27,7 +27,10 @@ sample:
     beacon/heartbeat in global SRAM0 at 0x02000000 and k_uptime_get advance
     across each sleep).  WFI-equivalent baseline for the Stage-B board
     pm_state_set IWIC hook.  CONFIG_PM-free: pinned upstream Zephyr's Alif E8 SoC
-    does not select HAS_PM (only the zephyr_alif fork does).  BENCH-PENDING.
+    does not select HAS_PM (only the zephyr_alif fork does).  Also logs
+    (informational, non-gating) the portable <alp/power.h> open/configure/
+    request_sleep repro from issue #1812, exercising the honest
+    configuration-time ALP_ERR_NOSUPPORT contract from #1813.  BENCH-PENDING.
 
 tests:
   alp_sdk.examples.aen.power_smoke.aen:

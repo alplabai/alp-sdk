@@ -1,0 +1,696 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Mon, 31 Aug 2026 00:00:00 +0000
+Subject: [PATCH] sim: add regression tests for the scratch trailer scramble
+ and the backwards-scramble boundary fixes (#1066)
+
+Companion to 0004-scramble-scratch-trailer-and-backward-scramble-off-by-
+one.patch, covering BOTH of its independent fixes:
+
+  * scratch_trailer_cleared_after_swap runs a real, uninterrupted,
+    permanent upgrade to completion on a flash device that does not
+    require an explicit erase before rewrite (mcuboot host simulator,
+    sim/, cargo + a C compiler, no embedded toolchain), and asserts the
+    scratch area's temporary trailer never reads back with a GOOD magic
+    afterwards. This exercises fix (i) -- the no-op erase replaced with
+    swap_scramble_trailer_sectors() -- end to end, through the real swap
+    machinery.
+
+  * scramble_region_backwards_boundary calls boot_scramble_region()'s
+    backwards branch directly instead, over an arbitrary sub-range of
+    the scratch area, and asserts the write-block boundary at the low
+    end of that range was actually written, and that nothing below it
+    was touched. This is needed for fix (ii): every real bootutil
+    caller reaches boot_scramble_region() only through
+    swap_scramble_trailer_sectors(), whose off/size always sum to the
+    flash area's own size -- the exact shape scratch_trailer_cleared_
+    after_swap already exercises, and that end-to-end shape cannot
+    distinguish "wrote the boundary block" from "silently dropped it"
+    (verified: reverting just fix (ii)'s bootutil_area.c hunk left
+    scratch_trailer_cleared_after_swap, and every other pre-existing
+    sim test, still passing).
+
+Getting there needed three new, additive pieces of sim plumbing, all
+defaulting to today's behaviour for every existing test:
+
+  * device_requires_erase(fa) (bootutil_area.h) is gated on
+    MCUBOOT_SUPPORT_DEV_WITHOUT_ERASE / _WITH_ERASE. The simulator's own
+    mcuboot_config.h never defined either, so every device the simulator
+    ever built hardcoded device_requires_erase() == true regardless of
+    erased_val -- the no-explicit-erase mechanism 0004 closes was
+    unreachable by ANY sim test, not just an untested one. build.rs now
+    defines both unconditionally, which switches the macro from a
+    compile-time constant to the real runtime dispatch
+    (flash_area_erase_required(), added to
+    csupport/flash_map_backend/flash_map_backend.h), backed by a new
+    SimFlash::erase_required (default true) plumbed through to C via
+    sim_flash_erase_required() (mcuboot-sys/src/api.rs) the same way
+    align/erased_val already are. A test opts a device out with the new
+    SimFlash::set_erase_required(false), mirroring the existing
+    set_verify_writes(false) escape hatch swap_size_erased_collision
+    already uses for the same MRAM-is-directly-rewritable reason.
+
+  * The STATE_0 branch 0004(i) fixes is itself gated on
+    `!bs->use_scratch`, which requires the swapped image to NOT reach
+    the trailer-holding sector(s) at the top of the slot -- slot >>
+    image, matching AEN's real slot size (`DT_SIZE_K(2688)`,
+    alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.dts) against a far
+    smaller application. make_image() (the maker every other sim_test!
+    in this file uses) cannot produce that: maximal() ignores its size
+    argument and always returns ImageSize::Largest, so every existing
+    image fills its slot to capacity and use_scratch is always true --
+    verified empirically, zero
+    `swap_scramble_trailer_sectors: fa_id=<scratch>` log lines across
+    all 26 device/align/erased_val combinations with make_image(). Added
+    ImagesBuilder::make_image_undersized(), a small, self-contained
+    maker that calls install_image() directly with
+    ImageSize::Given(4096) instead of maximal(), touching no other
+    maker or test.
+
+  * boot_scramble_region() itself is private to bootutil and has no
+    Rust-callable surface. Added
+    invoke_scramble_region_backwards_probe() (csupport/run.c): fills a
+    flash area with a caller-chosen sentinel byte, calls
+    boot_scramble_region(fa, off, size, backwards=true) directly over
+    the area's last three write blocks, and reads back the byte at the
+    range's own low boundary plus the byte one write block below it, so
+    the Rust side can assert the boundary was written and nothing below
+    the requested range was touched. Exposed as
+    c::scramble_region_backwards_probe(), following the existing
+    invoke_boot_go()/boot_go() extern-and-wrapper pattern.
+
+Verified against the pinned upstream mcuboot revision
+(6d3b3d2c38ab20c242e5b9abb04d050086383eb2, cargo 1.86.0 / gcc 13.3.0 on
+WSL Ubuntu 24.04, ext/mbedtls submodule fetched at its pinned commit
+2ca6c285a0dd3f33982dd57299012dacab1ff206), 0001-0003 applied first:
+
+  * Pre-0004: `cargo test --release --test core` -- both new tests fail.
+    scratch_trailer_cleared_after_swap fails on the very first
+    device/align/erased_val combination it tries (the scratch area's
+    temporary trailer reads back with a GOOD magic after a completed
+    swap, exactly the self-perpetuating re-swap #1066 reported).
+    scramble_region_backwards_boundary fails too (the boundary block it
+    checks was never written).
+  * With fix (i) applied but fix (ii)'s bootutil_area.c hunk alone
+    reverted: 27 passed, 1 failed -- only scramble_region_backwards_
+    boundary fails; scratch_trailer_cleared_after_swap and every other
+    pre-existing test still pass, confirming fix (ii) needed its own
+    direct test.
+  * Post-0004 (both fixes applied): `cargo test --release --test core`
+    -- 28 passed, 0 failed (26 pre-existing cases plus these two),
+    across every device/alignment/erased_val {0x00, 0xff} combination
+    each_device() sweeps.
+
+Not wired into alp-sdk's own CI, for the same reason 0003 is not: needs
+a Rust + C toolchain plus the ext/mbedtls submodule provisioned for the
+vendored mcuboot checkout, a separate out-of-scope change. Reproduce
+manually: `cd bootloader/mcuboot/sim && cargo test --release --test core
+-- scratch_trailer_cleared_after_swap` and `... --test core --
+scramble_region_backwards_boundary`. Upstream to mcu-tools/mcuboot then
+drop alongside 0004.
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+diff --git a/sim/mcuboot-sys/build.rs b/sim/mcuboot-sys/build.rs
+index 727f44f..1afc66a 100644
+--- a/sim/mcuboot-sys/build.rs
++++ b/sim/mcuboot-sys/build.rs
+@@ -48,6 +48,18 @@ fn main() {
+     conf.conf.define("MCUBOOT_USE_FLASH_AREA_GET_SECTORS", None);
+     conf.conf.define("MCUBOOT_HAVE_ASSERT_H", None);
+     conf.conf.define("MCUBOOT_MAX_IMG_SECTORS", Some("128"));
++    // (alp-sdk#1066) Both, unconditionally: bootutil_area.h's
++    // device_requires_erase(fa) only compiles to the real runtime check
++    // (flash_area_erase_required(), csupport/flash_map_backend.h) when
++    // BOTH are defined; defining only _WITHOUT_ERASE would instead make
++    // every device in this build hardcode "never requires erase",
++    // silently changing all 26 pre-existing test cases instead of adding
++    // to them. flash_area_erase_required() itself defaults every device to
++    // "requires erase" (sim_flash_erase_required() in src/api.rs), so nothing
++    // observes a behaviour change unless a test opts a device out via
++    // SimFlash::set_erase_required(false).
++    conf.conf.define("MCUBOOT_SUPPORT_DEV_WITHOUT_ERASE", None);
++    conf.conf.define("MCUBOOT_SUPPORT_DEV_WITH_ERASE", None);
+
+     if max_align_32 {
+         conf.conf.define("MCUBOOT_BOOT_MAX_ALIGN", Some("32"));
+diff --git a/sim/mcuboot-sys/csupport/flash_map_backend/flash_map_backend.h b/sim/mcuboot-sys/csupport/flash_map_backend/flash_map_backend.h
+index 6783544..f51e9ca 100644
+--- a/sim/mcuboot-sys/csupport/flash_map_backend/flash_map_backend.h
++++ b/sim/mcuboot-sys/csupport/flash_map_backend/flash_map_backend.h
+@@ -1,6 +1,7 @@
+ #ifndef __FLASH_MAP_BACKEND_H__
+ #define __FLASH_MAP_BACKEND_H__
+
++#include <stdbool.h>
+ #include <storage/flash_map.h>
+
+ static inline uint32_t flash_area_get_off(const struct flash_area *fa)
+@@ -35,4 +36,20 @@ static inline uint8_t flash_area_get_id(const struct flash_area *fa)
+ 	return fa->fa_id;
+ }
+
++/* (alp-sdk#1066) bootutil's device_requires_erase(fa) (bootutil_area.h)
++ * expands to this function when both MCUBOOT_SUPPORT_DEV_WITHOUT_ERASE and
++ * MCUBOOT_SUPPORT_DEV_WITH_ERASE are defined -- see build.rs, which now
++ * defines both unconditionally so the simulator can model either class of
++ * device instead of hardcoding "always requires erase". Backed by
++ * sim_flash_erase_required() (mcuboot-sys/src/api.rs), which defaults
++ * true for every device unless a test opts a specific one out via
++ * SimFlash::set_erase_required(false).
++ */
++extern uint8_t sim_flash_erase_required(uint8_t flash_id);
++
++static inline bool flash_area_erase_required(const struct flash_area *fa)
++{
++	return sim_flash_erase_required(fa->fa_device_id) != 0;
++}
++
+ #endif /* __FLASH_MAP_BACKEND_H__*/
+diff --git a/sim/mcuboot-sys/csupport/run.c b/sim/mcuboot-sys/csupport/run.c
+index fd4c347..fedf29e 100644
+--- a/sim/mcuboot-sys/csupport/run.c
++++ b/sim/mcuboot-sys/csupport/run.c
+@@ -647,6 +647,85 @@ int flash_area_get_sector(const struct flash_area *fa, uint32_t off,
+     return (i < slot->num_areas) ? 0 : -1;
+ }
+
++/* (alp-sdk#1066) Direct regression coverage for boot_scramble_region()'s
++ * backwards branch (bootutil_area.c) -- see fix (ii) in
++ * 0004-scramble-scratch-trailer-and-backward-scramble-off-by-one.patch.
++ * Every real bootutil caller reaches this function only through
++ * swap_scramble_trailer_sectors(), and every one of ITS callers (this
++ * issue's own swap_scratch.c hunk, plus swap_move.c/swap_offset.c and
++ * boot_scramble_slot()) always passes an off/size whose sum equals the
++ * flash area's own size -- the exact shape
++ * scratch_trailer_cleared_after_swap (the companion 0005 sim test)
++ * already exercises end to end. That shape cannot distinguish "wrote the
++ * boundary block" from "silently dropped it": reverting just this
++ * hunk during review left all pre-existing sim tests passing. This
++ * calls boot_scramble_region() directly instead, over an arbitrary
++ * sub-range of the area, so the boundary write is directly observable.
++ *
++ * Fills the whole area with the caller-supplied `sentinel` byte (the
++ * caller picks one that differs from the device's own erased_val, so the
++ * scramble's actual write is always distinguishable from the fill),
++ * scrambles backwards over the area's last three write blocks, and reads
++ * back two bytes: the first byte of the block AT the scramble range's own
++ * low boundary (must no longer read as `sentinel` -- this is the block
++ * the pre-fix loop guard skipped), and the first byte of the write block
++ * immediately BELOW that boundary (must still read as `sentinel`,
++ * proving the scramble touched nothing outside its own requested range).
++ */
++int invoke_scramble_region_backwards_probe(struct sim_context *ctx,
++        struct area_desc *adesc, uint8_t area_id, uint8_t sentinel,
++        uint8_t *out_boundary_byte, uint8_t *out_below_byte)
++{
++    const struct flash_area *fa;
++    uint8_t buf[BOOT_MAX_ALIGN];
++    uint32_t write_block, total_len, scramble_off, scramble_len, off;
++    int rc;
++
++    sim_set_flash_areas(adesc);
++    sim_set_context(ctx);
++
++    rc = flash_area_open(area_id, &fa);
++    if (rc != 0) {
++        goto reset;
++    }
++
++    write_block = flash_area_align(fa);
++    total_len = flash_area_get_size(fa);
++    if (total_len < 4 * write_block || write_block > sizeof(buf)) {
++        rc = -1;
++        goto close;
++    }
++
++    memset(buf, sentinel, sizeof(buf));
++    for (off = 0; off < total_len; off += write_block) {
++        rc = flash_area_write(fa, off, buf, write_block);
++        if (rc != 0) {
++            goto close;
++        }
++    }
++
++    scramble_len = 3 * write_block;
++    scramble_off = total_len - scramble_len;
++
++    rc = boot_scramble_region(fa, scramble_off, scramble_len, true);
++    if (rc != 0) {
++        goto close;
++    }
++
++    rc = flash_area_read(fa, scramble_off, out_boundary_byte, 1);
++    if (rc != 0) {
++        goto close;
++    }
++    rc = flash_area_read(fa, scramble_off - write_block, out_below_byte, 1);
++
++close:
++    flash_area_close(fa);
++reset:
++    sim_reset_flash_areas();
++    sim_reset_context();
++    return rc;
++}
++
+ void sim_assert(int x, const char *assertion, const char *file, unsigned int line, const char *function)
+ {
+     if (!(x)) {
+diff --git a/sim/mcuboot-sys/src/api.rs b/sim/mcuboot-sys/src/api.rs
+index 56c685c..79614d5 100644
+--- a/sim/mcuboot-sys/src/api.rs
++++ b/sim/mcuboot-sys/src/api.rs
+@@ -23,6 +23,9 @@ pub type FlashMap = HashMap<u8, FlashPtr>;
+ pub struct FlashParamsStruct {
+     align: u32,
+     erased_val: u8,
++    // (alp-sdk#1066) Snapshotted alongside align/erased_val at set_flash()
++    // time, same as both; see sim_flash_erase_required() below.
++    erase_required: bool,
+ }
+
+ pub type FlashParams = HashMap<u8, FlashParamsStruct>;
+@@ -183,6 +186,7 @@ pub fn set_flash(dev_id: u8, dev: &mut dyn Flash) {
+         ctx.borrow_mut().flash_params.insert(dev_id, FlashParamsStruct {
+             align: dev.align() as u32,
+             erased_val: dev.erased_val(),
++            erase_required: dev.erase_required(),
+         });
+         unsafe {
+             let dev: &'static mut dyn Flash = mem::transmute(dev);
+@@ -320,6 +324,23 @@ pub extern "C" fn sim_flash_erased_val(id: u8) -> u8 {
+     })
+ }
+
++/// (alp-sdk#1066) Backs `flash_area_erase_required()` in the C support
++/// code, which the sim's flash_map_backend.h did not implement at all
++/// before this patch -- bootutil's device_requires_erase() macro
++/// (bootutil_area.h) is gated on MCUBOOT_SUPPORT_DEV_WITHOUT_ERASE /
++/// _WITH_ERASE, and the sim's own mcuboot_config.h never defined either,
++/// so every device the simulator built was hardcoded
++/// device_requires_erase() == true regardless of erased_val -- the
++/// no-explicit-erase defect this issue closes was unreachable by any sim
++/// test. Returns true (erase required) for every device unless a test has
++/// explicitly called SimFlash::set_erase_required(false) on it.
++#[no_mangle]
++pub extern "C" fn sim_flash_erase_required(id: u8) -> u8 {
++    THREAD_CTX.with(|ctx| {
++        ctx.borrow().flash_params.get(&id).unwrap().erase_required as u8
++    })
++}
++
+ fn map_err(err: Result<()>) -> libc::c_int {
+     match err {
+         Ok(()) => 0,
+diff --git a/sim/mcuboot-sys/src/c.rs b/sim/mcuboot-sys/src/c.rs
+index e45f741..64a6fd5 100644
+--- a/sim/mcuboot-sys/src/c.rs
++++ b/sim/mcuboot-sys/src/c.rs
+@@ -221,6 +221,37 @@ pub fn reset_security_counters() {
+     api::sim_reset_nv_counters();
+ }
+
++/// (alp-sdk#1066) Direct probe for boot_scramble_region()'s backwards
++/// branch -- see invoke_scramble_region_backwards_probe() in
++/// csupport/run.c for the mechanics and why no existing sim_test can
++/// distinguish this bug from a passing run. Fills `area_id`'s whole area
++/// with `sentinel`, scrambles its last 3 write blocks backwards, and
++/// returns (byte at the range's own low boundary, byte one write block
++/// below it).
++pub fn scramble_region_backwards_probe(areadesc: &AreaDesc, multiflash: &mut SimMultiFlash,
++                                        area_id: u8, sentinel: u8) -> Result<(u8, u8), i32> {
++    for (&dev_id, flash) in multiflash.iter_mut() {
++        api::set_flash(dev_id, flash);
++    }
++    let mut sim_ctx = api::CSimContext { .. Default::default() };
++    let mut boundary_byte: u8 = 0;
++    let mut below_byte: u8 = 0;
++    let rc: i32 = unsafe {
++        let adesc = areadesc.get_c();
++        raw::invoke_scramble_region_backwards_probe(&mut sim_ctx as *mut _,
++            adesc.borrow() as *const _, area_id, sentinel,
++            &mut boundary_byte as *mut u8, &mut below_byte as *mut u8) as i32
++    };
++    for &dev_id in multiflash.keys() {
++        api::clear_flash(dev_id);
++    }
++    if rc == 0 {
++        Ok((boundary_byte, below_byte))
++    } else {
++        Err(rc)
++    }
++}
++
+ mod raw {
+     use crate::area::CAreaDesc;
+     use crate::api::{BootRsp, CSimContext};
+@@ -232,6 +263,10 @@ mod raw {
+         pub fn invoke_boot_go(sim_ctx: *mut CSimContext, areadesc: *const CAreaDesc,
+             rsp: *mut BootRsp, image_index: libc::c_int) -> libc::c_int;
+
++        pub fn invoke_scramble_region_backwards_probe(sim_ctx: *mut CSimContext,
++            areadesc: *const CAreaDesc, area_id: u8, sentinel: u8,
++            out_boundary_byte: *mut u8, out_below_byte: *mut u8) -> libc::c_int;
++
+         pub fn invoke_boot_load_image_from_flash_to_sram(sim_ctx: *mut CSimContext,
+             areadesc: *const CAreaDesc) -> libc::c_int;
+
+diff --git a/sim/simflash/src/lib.rs b/sim/simflash/src/lib.rs
+index 4c49ccb..f453a88 100644
+--- a/sim/simflash/src/lib.rs
++++ b/sim/simflash/src/lib.rs
+@@ -66,6 +66,14 @@ pub trait Flash {
+
+     fn align(&self) -> usize;
+     fn erased_val(&self) -> u8;
++
++    /// Whether this device needs `erase()` called before a sector can be
++    /// rewritten (alp-sdk#1066). True for every existing device profile
++    /// (matches bootutil's own MCUBOOT_SUPPORT_DEV_WITH_ERASE-only default),
++    /// so this is additive: nothing that does not call
++    /// `set_erase_required(false)` observes any change.
++    fn erase_required(&self) -> bool;
++    fn set_erase_required(&mut self, required: bool);
+ }
+
+ fn ebounds<T: AsRef<str>>(message: T) -> FlashError {
+@@ -94,6 +102,10 @@ pub struct SimFlash {
+     align: usize,
+     verify_writes: bool,
+     erased_val: u8,
++    // (alp-sdk#1066) Defaults true for every existing caller of `new()`, so
++    // this is additive: nothing observes a change unless it explicitly
++    // calls `set_erase_required(false)`.
++    erase_required: bool,
+ }
+
+ impl SimFlash {
+@@ -112,6 +124,7 @@ impl SimFlash {
+             align,
+             verify_writes: true,
+             erased_val,
++            erase_required: true,
+         }
+     }
+
+@@ -267,6 +280,14 @@ impl Flash for SimFlash {
+     fn erased_val(&self) -> u8 {
+         self.erased_val
+     }
++
++    fn erase_required(&self) -> bool {
++        self.erase_required
++    }
++
++    fn set_erase_required(&mut self, required: bool) {
++        self.erase_required = required;
++    }
+ }
+
+ /// It is possible to iterate over the sectors in the device, each element returning this.
+diff --git a/sim/src/image.rs b/sim/src/image.rs
+index 97cddc6..172f0c3 100644
+--- a/sim/src/image.rs
++++ b/sim/src/image.rs
+@@ -297,6 +297,78 @@ impl ImagesBuilder {
+         images
+     }
+
++    /// (alp-sdk#1066) Like make_image(), but the image is a small FIXED size
++    /// instead of maximal()'s hardcoded ImageSize::Largest (see maximal()'s
++    /// own doc comment a few hundred lines down: its size argument is
++    /// ignored -- every existing maker, make_image() included, always fills
++    /// the slot to capacity). That is the opposite of the geometry
++    /// bs->use_scratch (swap_scratch.c) needs to go false: the swapped
++    /// image must NOT reach the trailer-holding sector(s) at the top of the
++    /// slot, which requires slot >> image -- AEN's real slot size
++    /// (`DT_SIZE_K(2688)`) against a far smaller application, not this
++    /// harness's own fill-to-capacity
++    /// convention. Bypasses maximal() and calls install_image() directly
++    /// with ImageSize::Given(), touching no other maker or test.
++    pub fn make_image_undersized(self, deps: &DepTest, permanent: bool) -> Images {
++        const UNDERSIZED_IMAGE_LEN: usize = 4096;
++
++        let num_images = self.num_images();
++        let mut flash = self.flash;
++        let ram = self.ram.clone();
++        let images: Vec<OneImage> = self.slots.into_iter().enumerate().map(|(image_num, slots)| {
++            let dep: Box<dyn Depender> = if num_images > 1 {
++                Box::new(PairDep::new(num_images, image_num, deps))
++            } else {
++                Box::new(BoringDep::new(image_num, deps))
++            };
++            let primaries = install_image(&mut flash, &self.areadesc, &slots, 0,
++                ImageSize::Given(UNDERSIZED_IMAGE_LEN), &ram, &*dep, ImageManipulation::None, Some(0));
++            let upgrades = match deps.depends[image_num] {
++                DepType::NoUpgrade => install_no_image(),
++                _ => install_image(&mut flash, &self.areadesc, &slots, 1,
++                    ImageSize::Given(UNDERSIZED_IMAGE_LEN), &ram, &*dep, ImageManipulation::None, Some(1)),
++            };
++            OneImage { slots, primaries, upgrades }
++        }).collect();
++        install_ptable(&mut flash, &self.areadesc);
++
++        let mut images = Images {
++            flash,
++            areadesc: self.areadesc,
++            images,
++            total_count: None,
++            ram: self.ram,
++        };
++        for image in &images.images {
++            mark_upgrade(&mut images.flash, &image.slots[1]);
++        }
++
++        if !Caps::modifies_flash() {
++            return images;
++        }
++
++        let total_count = match images.run_basic_upgrade(permanent) {
++            Some(v) => v,
++            // (alp-sdk#1066) Same UpgradeInfo::Held tolerance make_image()
++            // above gives: with dependencies that hold the upgrade back,
++            // run_basic_upgrade() legitimately returns None with nothing
++            // wrong. Restored here rather than left as a bare panic!() so a
++            // future caller that passes deps other than &NO_DEPS (every
++            // caller today) does not fall into a trap this maker's own
++            // sibling already knows how to avoid.
++            None =>
++                if deps.upgrades.iter().any(|u| *u == UpgradeInfo::Held) {
++                    0
++                } else {
++                    panic!("Unable to perform basic undersized upgrade");
++                }
++        };
++        c::reset_security_counters();
++
++        images.total_count = Some(total_count);
++        images
++    }
++
+     pub fn make_bad_secondary_slot_image(self, img_manipulation : ImageManipulation) -> Images {
+         let mut bad_flash = self.flash;
+         let ram = self.ram.clone(); // TODO: Avoid this clone.
+@@ -1389,6 +1461,188 @@ impl Images {
+         false
+     }
+
++    /// Regression test for alp-sdk#1066 (the issue's other mechanism, distinct
++    /// from swap_size_erased_collision above): on a flash device that does
++    /// not require an explicit erase before rewrite -- modelled here via
++    /// `SimFlash::set_erase_required(false)`, since MRAM is directly
++    /// rewritable without a bulk erase, same reasoning
++    /// swap_size_erased_collision's own doc comment gives for
++    /// set_verify_writes(false) -- completing a scratch-based swap used to
++    /// leave the scratch area's *temporary* trailer magic GOOD forever.
++    ///
++    /// The "erase" call meant to remove it (swap_scratch.c, "Erase the
++    /// temporary trailer from the scratch area") was a documented no-op on
++    /// such a device: boot_erase_region() (bootutil_area.c) takes the
++    /// `device_requires_erase(fa) == false` branch, logs "device without
++    /// erase", and returns success without touching flash. Nothing else in
++    /// the completed-swap path cleared it, so on the next boot a GOOD
++    /// scratch magic unconditionally selected BOOT_STATUS_SOURCE_SCRATCH
++    /// (boot_status_tables[], swap_scratch.c) regardless of image_ok, and
++    /// the device resumed the same already-finished swap forever.
++    ///
++    /// This is orthogonal to erased_val: the ambiguous-*value* collision
++    /// swap_size_erased_collision reproduces (and the companion 0002/0003
++    /// patches close) depends on erased_val == 0x00, but this is a skipped
++    /// *erase call*, not a value ambiguity, so this method does not gate on
++    /// erased_val and is exercised under both values each_device() sweeps.
++    /// Before this issue's 0004 fix, this method could not be expressed at
++    /// all: the simulator's own mcuboot_config.h never defined
++    /// MCUBOOT_SUPPORT_DEV_WITHOUT_ERASE, so device_requires_erase() was
++    /// hardcoded true for every device the simulator ever built --
++    /// unreachable by any test that only varies erased_val, which is why
++    /// this defect went uncaught by the full 26-case sweep the companion
++    /// fix's own regression test runs under.
++    ///
++    /// Uses make_image_undersized(), not make_image(): the STATE_0 branch
++    /// this method targets is itself gated on `!bs->use_scratch`
++    /// (swap_scratch.c), which requires the swapped image to NOT reach the
++    /// trailer-holding sector(s) at the top of the slot -- i.e. slot >>
++    /// image, matching AEN's real slot size (`DT_SIZE_K(2688)`) against a
++    /// far smaller application. make_image()'s images always fill the slot
++    /// to capacity
++    /// (maximal() ignores its size argument and always returns
++    /// ImageSize::Largest), so `!bs->use_scratch` -- and therefore this
++    /// entire fix -- is unreachable with it: verified empirically, zero
++    /// `swap_scramble_trailer_sectors: fa_id=<scratch>` log lines across
++    /// all 26 device/align/erased_val combinations with make_image().
++    pub fn run_scratch_trailer_cleared_after_swap(&self) -> bool {
++        if !Caps::SwapUsingScratch.present() || !Caps::modifies_flash() {
++            return false;
++        }
++
++        let mut flash = self.flash.clone();
++        for dev in flash.values_mut() {
++            dev.set_erase_required(false);
++            // The simulator's own write-verification otherwise rejects any
++            // rewrite of an already-programmed (non-erased) location as an
++            // illegal NOR/NAND-style write. That does not apply to a device
++            // that does not require an explicit erase: MRAM is directly
++            // rewritable without a bulk erase, which is the reason this
++            // device class exists in the first place (same justification
++            // swap_size_erased_collision's own set_verify_writes(false)
++            // call above gives).
++            dev.set_verify_writes(false);
++        }
++
++        // A real, uninterrupted, permanent upgrade -- not a revert-pending
++        // one -- so the swap actually completes and the scratch trailer's
++        // fate after a finished swap is what gets checked.
++        self.mark_permanent_upgrades(&mut flash, 1);
++
++        if !c::boot_go(&mut flash, &self.areadesc, None, None, false).success() {
++            warn!("scratch_trailer_cleared_after_swap: boot_go failed");
++            return true;
++        }
++        if !self.verify_trailers(&flash, 0, BOOT_MAGIC_GOOD,
++                                 BOOT_FLAG_SET, BOOT_FLAG_SET) {
++            warn!("scratch_trailer_cleared_after_swap: primary slot trailer \
++                   mismatch after a supposedly-completed swap");
++            return true;
++        }
++
++        // No SlotInfo for the scratch area exists on Images/ImagesBuilder
++        // (only primary/secondary do) -- build one the same way
++        // ImagesBuilder::new() already does for those two, via the real
++        // boot_magic_sz()/boot_max_align() accessors rather than a
++        // hand-computed constant, so this stays correct if either ever
++        // changes.
++        let (scratch_base, scratch_len, scratch_dev_id) =
++            match self.areadesc.find(FlashId::ImageScratch) {
++                Some(info) => info,
++                None => {
++                    warn!("scratch_trailer_cleared_after_swap: no scratch area, skipping");
++                    return false;
++                }
++            };
++        let offset_from_end = c::boot_magic_sz() + c::boot_max_align() * 4;
++        let scratch = SlotInfo {
++            base_off: scratch_base,
++            trailer_off: scratch_base + scratch_len - offset_from_end,
++            len: scratch_len,
++            dev_id: scratch_dev_id,
++            index: 0,
++        };
++
++        // Deliberately BOOT_MAGIC_GOOD, not BOOT_MAGIC_UNSET ("must read back
++        // as fully erased"): scratch is legitimately reused as a staging
++        // buffer for later sectors' image data once its temporary trailer's
++        // job is done, so the magic-sized region at its tail can end up
++        // holding ordinary image bytes rather than the device's erased_val
++        // -- harmless, and not what #1066 is about. verify_trailer(...,
++        // BOOT_MAGIC_GOOD, ...) returns true only when those bytes equal the
++        // real MAGIC constant, so this is exactly "assert no GOOD magic",
++        // the property that actually matters: a GOOD magic is the one byte
++        // pattern that makes the next boot's boot_status_tables[] lookup
++        // (swap_scratch.c) select BOOT_STATUS_SOURCE_SCRATCH and resume.
++        if verify_trailer(&flash, &scratch, BOOT_MAGIC_GOOD, None, None) {
++            error!("scratch_trailer_cleared_after_swap: completed swap left a GOOD \
++                    magic in the scratch area's temporary trailer -- alp-sdk#1066's \
++                    self-perpetuating re-swap: the scratch-trailer erase is a no-op \
++                    on a device that does not require an explicit erase, and nothing \
++                    else clears it");
++            return true;
++        }
++
++        false
++    }
++
++    /// (alp-sdk#1066) Direct regression coverage for
++    /// boot_scramble_region()'s backwards branch (bootutil_area.c) -- see
++    /// invoke_scramble_region_backwards_probe() in csupport/run.c for the
++    /// mechanics. Every real bootutil caller reaches boot_scramble_region()
++    /// only via swap_scramble_trailer_sectors(), whose off/size always sum
++    /// to the flash area's own size -- the exact shape
++    /// run_scratch_trailer_cleared_after_swap above already exercises end
++    /// to end, and that end-to-end shape cannot tell "wrote the boundary
++    /// block" apart from "silently dropped it": reverting just the
++    /// bootutil_area.c hunk of alp-sdk#1066's fix (ii) during review left
++    /// every pre-existing sim test passing. This calls
++    /// boot_scramble_region() directly instead.
++    pub fn run_scramble_region_backwards_boundary(&self) -> bool {
++        if !Caps::SwapUsingScratch.present() || !Caps::modifies_flash() {
++            return false;
++        }
++
++        let scratch_dev_id = match self.areadesc.find(FlashId::ImageScratch) {
++            Some((_, _, dev_id)) => dev_id,
++            None => {
++                warn!("scramble_region_backwards_boundary: no scratch area, skipping");
++                return false;
++            }
++        };
++
++        let mut flash = self.flash.clone();
++        // Same set_erase_required(false)/set_verify_writes(false) pair
++        // run_scratch_trailer_cleared_after_swap uses above, and for the
++        // same reason: the overwrite branch of boot_scramble_region() this
++        // targets only runs on a device that does not require an explicit
++        // erase, and the simulator's own write-verification otherwise
++        // rejects a rewrite of an already-programmed (non-erased) location.
++        let dev = flash.get_mut(&scratch_dev_id).expect("scratch device present");
++        dev.set_erase_required(false);
++        dev.set_verify_writes(false);
++        let sentinel = if dev.erased_val() == 0xff { 0x00 } else { 0xff };
++
++        match c::scramble_region_backwards_probe(&self.areadesc, &mut flash,
++                                                  FlashId::ImageScratch as u8, sentinel) {
++            Ok((boundary_byte, below_byte)) => {
++                if boundary_byte == sentinel {
++                    error!("scramble_region_backwards_boundary: the block at the scramble range's own low boundary was never written");
++                    return true;
++                }
++                if below_byte != sentinel {
++                    error!("scramble_region_backwards_boundary: a write block BELOW the requested range was touched -- boot_scramble_region() walked out of range");
++                    return true;
++                }
++                false
++            }
++            Err(rc) => {
++                error!("scramble_region_backwards_boundary: probe failed, rc={}", rc);
++                true
++            }
++        }
++    }
++
+     /// Test the direct XIP configuration.  With this mode, flash images are never moved, and the
+     /// bootloader merely selects which partition is the proper one to boot.
+     pub fn run_direct_xip(&self) -> bool {
+diff --git a/sim/tests/core.rs b/sim/tests/core.rs
+index 1cc7faf..afc5da9 100644
+--- a/sim/tests/core.rs
++++ b/sim/tests/core.rs
+@@ -66,6 +66,8 @@ sim_test!(wrong_load_addr, make_bad_secondary_slot_image(ImageManipulation::Wron
+ sim_test!(status_write_fails_complete, make_image(&NO_DEPS, true), run_with_status_fails_complete());
+ sim_test!(status_write_fails_with_reset, make_image(&NO_DEPS, true), run_with_status_fails_with_reset());
+ sim_test!(swap_size_erased_collision, make_image(&NO_DEPS, true), run_swap_size_erased_collision());
++sim_test!(scratch_trailer_cleared_after_swap, make_image_undersized(&NO_DEPS, true), run_scratch_trailer_cleared_after_swap());
++sim_test!(scramble_region_backwards_boundary, make_no_upgrade_image(&NO_DEPS, ImageManipulation::None), run_scramble_region_backwards_boundary());
+ sim_test!(downgrade_prevention, make_image(&REV_DEPS, true), run_nodowngrade());
+
+ sim_test!(direct_xip_first, make_no_upgrade_image(&NO_DEPS, ImageManipulation::None), run_direct_xip());

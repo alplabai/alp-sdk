@@ -29,7 +29,11 @@ alp_status_t quectel_bg95_power_on(quectel_bg95_t *dev)
 	if (dev->pwrkey == NULL) return ALP_ERR_NOSUPPORT;
 	alp_status_t s = alp_gpio_write(dev->pwrkey, true);
 	if (s != ALP_OK) return s;
-	alp_delay_ms(500); /* 500 ms PWRKEY pulse per Quectel HW guide */
+	/* 500 ms PWRKEY pulse per the Quectel HW design guide.  Sleep rather than
+	 * busy-wait: alp_delay_us does not yield (include/alp/peripheral.h) and
+	 * half a second of spinning starves every other thread on the core.
+	 * alp_delay_ms is still "at least", so the vendor minimum holds. */
+	alp_delay_ms(500);
 	return alp_gpio_write(dev->pwrkey, false);
 }
 

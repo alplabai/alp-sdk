@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/emit-registry-v1.schema.json",
   "title": "ALP Emit Registry v1",
-  "description": "Validates metadata/emit-registry-v1.json -- the single source of truth for every `--emit` mode the SDK exposes across scripts/alp_project.py and scripts/alp_orchestrate/ (and re-exposed by scripts/alp_cli/emit.py / `west alp-emit`). scripts/check_emit_registry.py validates the registry against this schema AND asserts the registry's mode set exactly equals the real `--emit` choices parsed out of the two CLIs, so a mode can never drift between the code and this contract. Stability: schemaVersion 1 is additive-only (new optional per-mode fields only); a breaking change ships as schemaVersion 2.",
+  "description": "Validates metadata/emit-registry-v1.json -- the single source of truth for every `--emit` mode the SDK exposes across scripts/alp_project.py and scripts/alp_orchestrate/ (and re-exposed by `west alp-emit`). scripts/check_emit_registry.py validates the registry against this schema AND asserts the registry's mode set exactly equals the real `--emit` choices parsed out of the two CLIs, so a mode can never drift between the code and this contract. Stability: schemaVersion 1 is additive-only (new optional per-mode fields only); a breaking change ships as schemaVersion 2.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "description", "modes"],

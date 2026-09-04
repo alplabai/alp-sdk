@@ -14,6 +14,7 @@
  * so native_sim tests can exercise it without a real EEPROM.
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
 #include <stdint.h>
@@ -201,4 +202,22 @@ alp_status_t alp_hw_info_assert_matches_build(const alp_hw_info_t *info,
 	}
 	return ALP_OK;
 #endif
+}
+
+bool alp_hw_info_build_hw_rev_mismatch(const alp_hw_info_t *info, const char *built_hw_rev)
+{
+	if (info == NULL || built_hw_rev == NULL || built_hw_rev[0] == '\0') return false;
+	if (info->som_hw_rev[0] == '\0') return false; /* nothing read -- not a mismatch to report */
+	/* Bounded by the manifest field's own size (ALP_HW_INFO_HW_REV_LEN),
+     * same convention as copy_field()/alp_hw_info_assert_matches_build()
+     * above -- deliberately NOT a call through
+     * alp_hw_info_assert_matches_build() itself: that entry point's real
+     * compare body is compiled out (ALP_HW_INFO_EEPROM_ENABLED == 0) on
+     * any build with no EEPROM wired, so a native_sim test built without
+     * that Kconfig chain could never reach it.  (The one real caller, the
+     * boot banner, only gets here after alp_hw_info_read() == ALP_OK,
+     * which itself requires EEPROM_ENABLED == 1 -- so the two entry
+     * points behave identically in production; this one is just
+     * independently testable without a real EEPROM.) */
+	return strncmp(info->som_hw_rev, built_hw_rev, sizeof(info->som_hw_rev)) != 0;
 }

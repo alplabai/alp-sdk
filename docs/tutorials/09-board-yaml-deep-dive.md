@@ -254,8 +254,8 @@ heterogeneous build can declare different peripheral sets.
 Allowed values (exactly the schema enum):
 
 ```
-adc, can, counter, emmc, ethernet, flash, gpio, i2c, i2s,
-pwm, rtc, sensor, spi, uart, usb, watchdog
+adc, can, counter, dac, emmc, ethernet, flash, gpio, i2c,
+i2s, i3c, pwm, rtc, sensor, spi, uart, usb, watchdog
 ```
 
 Higher-level concerns ride other paths: audio is composed from

@@ -3,8 +3,8 @@
 sample:
   name: i2c-master
   description: |
-    Per-peripheral example for I2C master.  Reads the on-module
-    TMP112 temperature sensor at a known 7-bit address via
+    Per-peripheral example for I2C master.  Reads the on-board
+    BMP581 barometer at a known 7-bit address via
     BOARD_I2C_SENSORS.  Builds on both EVKs: E1M EVK uses E1M_I2C0;
     E1M-X EVK uses E1M_X_I2C0.  Contrasts with
     examples/peripheral-io/i2c-scanner (discovery vs known-address read).
