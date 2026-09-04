@@ -19,6 +19,7 @@
 
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
+#include <alp/e1m_x_pinout.h>
 #include <alp/peripheral.h>
 #include <alp/pwm.h>
 
@@ -81,10 +82,25 @@ static void _free_state(gd32_pwm_state_t *s)
 static alp_status_t
 br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilities_t *caps_out)
 {
-	/* E1M spec reserves 8 PWM channels; all map to GD32 timers.
-     * Mirror the adc bridge + the peripheral suite contract: an
-     * out-of-range channel is INVAL (not OUT_OF_RANGE). */
-	if (cfg->channel_id >= 8u) {
+	/* E1M spec reserves 8 PWM channels; ALL EIGHT map to a real GD32
+     * timer/channel on V2N (metadata/chips/gd32g553.yaml pwm_routing:
+     * PWM0..7 -> TIMER0/TIMER7, no gaps) -- unlike zephyr_drv.c /
+     * yocto_drv.c, this backend has no partial-population case to tell
+     * apart from a malformed index, so a single ALP_ERR_INVAL is the
+     * complete (not collapsed) answer here (#1635).  The two-tier
+     * contract still holds for THIS backend overall: the real hardware
+     * floor -- a period the GD32 timer can't represent at its 1 us
+     * prescaled tick (period_us == 0, i.e. under 1 us; under 2 us
+     * center-aligned -- firmware/gd32-bridge/hal/gd32/pwm.c:142,164) --
+     * surfaces as ALP_ERR_OUT_OF_RANGE from br_set_duty()/br_set_period()
+     * via the firmware's own STATUS_OUT_OF_RANGE (wire 0x08, see
+     * gd32g553.c:status_from_wire()), not from this channel_id check.
+     * The other end of the range (a period past the 16-bit ARR --
+     * > 65.536 ms edge-aligned, > 131.070 ms center-aligned, since
+     * the center-aligned path halves the commanded period before
+     * the same ARR clamp -- firmware/gd32-bridge/hal/gd32/pwm.c:157,165)
+     * is currently silently clamped instead of rejected -- #1730. */
+	if (cfg->channel_id >= ALP_E1M_X_PWM_COUNT) {
 		return ALP_ERR_INVAL;
 	}
 	/* Probe the supervisor up-front: with no SPI/I2C bus configured

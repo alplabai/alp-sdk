@@ -140,8 +140,13 @@ typedef struct {
 	void                 *data;       /**< Backend-owned buffer. */
 	size_t                size_bytes; /**< Total buffer size. */
 	alp_inference_dtype_t dtype;
-	uint8_t               rank;     /**< 0..4 typical. */
-	uint16_t              shape[4]; /**< Most-significant first. */
+	/** 0..4.  A model whose real rank exceeds this fixed width cannot be
+	 *  described here: @ref alp_inference_get_input / @ref
+	 *  alp_inference_get_output refuse it with ALP_ERR_NOSUPPORT instead
+	 *  of reporting it truncated to 4 (issue #1729). */
+	uint8_t  rank;
+	uint16_t shape[4]; /**< Most-significant first; valid through index
+	                    *   `rank - 1`, 0 past it. */
 	/** Quantisation params (only meaningful when dtype is integer). */
 	float   scale;
 	int32_t zero_point;
@@ -288,7 +293,10 @@ size_t alp_inference_num_outputs(alp_inference_t *inf);
  * @param[out] out    Filled with the tensor descriptor.
  *                    Must be non-NULL.
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
- *         ALP_ERR_NOT_READY.
+ *         ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT (the model's real rank for
+ *         this tensor exceeds the fixed `shape[4]` -- the ORT, DEEPX, and
+ *         TFLM backends all refuse rather than silently truncate, issue
+ *         #1729).
  */
 alp_status_t
 alp_inference_get_input(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out);
@@ -306,7 +314,10 @@ alp_inference_get_input(alp_inference_t *inf, size_t index, alp_inference_tensor
  * @param[out] out    Filled with the tensor descriptor.
  *                    Must be non-NULL.
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
- *         ALP_ERR_NOT_READY.
+ *         ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT (the model's real rank for
+ *         this tensor exceeds the fixed `shape[4]` -- the ORT, DEEPX, and
+ *         TFLM backends all refuse rather than silently truncate, issue
+ *         #1729).
  */
 alp_status_t
 alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tensor_t *out);

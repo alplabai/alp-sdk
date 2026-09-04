@@ -119,6 +119,8 @@
 
 #include "MeraDrpRuntimeWrapper.h"
 
+#include "drpai_deploy_shapes.h"
+
 extern "C" {
 #include "alp/inference.h"
 
@@ -131,6 +133,11 @@ extern "C" {
 
 namespace
 {
+
+/* Pulls in JsonValue/JsonParser/DeployShapes/_drpai_parse_deploy_shapes
+ * (drpai_deploy_shapes.h) unqualified -- see the "deploy.json rank/shape
+ * recovery" comment below. */
+using namespace alp_drpai;
 
 /* DRP-AI driver device node.  Uniform across every vendor sample. */
 constexpr const char *kDrpAiDevice = "/dev/drpai0";
@@ -286,7 +293,35 @@ struct DrpaiState {
 	/* I/O metadata snapshots: (name, size_bytes, dtype). */
 	std::vector<std::tuple<std::string, size_t, InOutDataType>> in_info;
 	std::vector<std::tuple<std::string, size_t, InOutDataType>> out_info;
+
+	/* Per-tensor shape, parallel to in_info/out_info; an empty entry means
+     * rank stays 0 for that tensor (deploy.json missing/unreadable, this
+     * tensor's rank exceeds 4 -- issue #1729, or its row didn't resolve).
+     * Populated once at open() from deploy.json (see
+     * _drpai_parse_deploy_shapes()); get_input()/get_output() just index
+     * into it. */
+	std::vector<std::vector<uint16_t>> in_shapes;
+	std::vector<std::vector<uint16_t>> out_shapes;
 };
+
+/* ------------------------------------------------------------------ */
+/* deploy.json rank/shape recovery (issue #1635).                      */
+/*                                                                      */
+/* GetInputInfo()/GetOutputInfo() give (name, size_bytes, dtype) only -- */
+/* no shape.  deploy.json, the TVM graph-runtime JSON that              */
+/* scripts/alp_model/adapters/drpai.py tars into every drpai_dir blob   */
+/* alongside drp_desc.bin/weight.bin, carries it, and it's already on   */
+/* disk in st->model_dir by the time open() reaches this.  alp-sdk      */
+/* carries no JSON library (see the file header), so this is a minimal  */
+/* scanner for exactly this one machine-generated structure -- not a    */
+/* general parser -- kept file-local.  The JsonValue/JsonParser/         */
+/* DeployShapes/_drpai_parse_deploy_shapes machinery itself lives in    */
+/* drpai_deploy_shapes.h (included above, `alp_drpai` namespace, pulled */
+/* in unqualified via the `using namespace alp_drpai;` at the top of    */
+/* this anonymous namespace) so it can be unit-tested without the       */
+/* RUHMI/DRP-AI TVM sysroot -- see                                      */
+/* tests/native/drpai_deploy_shapes/test_deploy_shapes.cpp.             */
+/* ------------------------------------------------------------------ */
 
 /** Map a MERA InOutDataType onto the alp_inference dtype enum.  The DRP-AI
  *  wrapper reports FLOAT32 / FLOAT16 / INT32 / INT64 / OTHER; INT64 and
@@ -371,6 +406,35 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
 		st->input_bufs[i].resize(std::get<1>(st->in_info[i]));
 	}
 
+	/* Best-effort rank/shape recovery (issue #1635): the MERA wrapper
+     * itself exposes no per-tensor shape (see the file header), but
+     * deploy.json -- already sitting in st->model_dir -- does.  Anything
+     * that doesn't resolve cleanly just leaves the all-empty default
+     * below in place, so get_input()/get_output() keep today's rank == 0
+     * behaviour exactly as if this block never ran. */
+	st->in_shapes.assign(st->in_info.size(), std::vector<uint16_t>());
+	st->out_shapes.assign(st->out_info.size(), std::vector<uint16_t>());
+	DeployShapes ds;
+	if (_drpai_parse_deploy_shapes(st->model_dir, ds)) {
+		/* Correlate by node name first -- deploy.json's placeholder node
+         * name should match GetInputInfo()'s reported name; positional
+         * fallback rules are correlate_input_shapes()'s (drpai_deploy_shapes.h)
+         * to keep them unit-testable without the RUHMI/DRP-AI TVM sysroot. */
+		std::vector<std::string> in_names;
+		in_names.reserve(st->in_info.size());
+		for (auto &info : st->in_info) {
+			in_names.push_back(std::get<0>(info));
+		}
+		correlate_input_shapes(in_names, ds, st->in_shapes);
+		/* Outputs carry no name to correlate on; deploy.json's `heads`
+         * order already matches GetOutput(idx) order (see
+         * _drpai_parse_deploy_shapes()'s comment), so correlate
+         * positionally, again only when the counts agree. */
+		if (ds.output_shapes.size() == st->out_info.size()) {
+			st->out_shapes = ds.output_shapes;
+		}
+	}
+
 	h->be_state = st;
 	return ALP_OK;
 }
@@ -403,13 +467,25 @@ extern "C" alp_status_t alp_inference_drpai_get_input(struct alp_inference   *h_
 	}
 
 	/* Hand back the SDK-owned staging buffer; the app fills it before
-     * invoke().  The MERA wrapper does not expose per-input shape via the
-     * public surface, so rank/shape stay 0 (size_bytes is authoritative
-     * for buffer sizing). */
+     * invoke().  rank/shape come from deploy.json, resolved once at
+     * open() (see _drpai_parse_deploy_shapes()) -- the MERA wrapper
+     * itself does not expose per-input shape via the public surface.
+     * size_bytes is authoritative for buffer sizing either way; an empty
+     * in_shapes[index] (file missing/unreadable, rank > 4 -- issue
+     * #1729, or a count mismatch) leaves rank 0, same as before this
+     * backend read deploy.json at all. */
+	const std::vector<uint16_t> &shape = st->in_shapes[index];
+
 	out->data       = st->input_bufs[index].data();
 	out->size_bytes = std::get<1>(st->in_info[index]);
 	out->dtype      = mera_dtype_to_alp(std::get<2>(st->in_info[index]));
-	out->rank       = 0u;
+	out->rank       = static_cast<uint8_t>(shape.size());
+	for (size_t i = 0; i < shape.size(); ++i) {
+		out->shape[i] = shape[i];
+	}
+	for (size_t i = shape.size(); i < 4; ++i) {
+		out->shape[i] = 0;
+	}
 	out->scale      = 1.0f;
 	out->zero_point = 0;
 	return ALP_OK;
@@ -438,10 +514,20 @@ extern "C" alp_status_t alp_inference_drpai_get_output(struct alp_inference   *h
 	int64_t       num_elems          = 0;
 	std::tie(dtype, data, num_elems) = st->runtime.GetOutput(static_cast<int>(index));
 
+	/* rank/shape: same deploy.json-derived, open()-time-resolved source
+     * and same fail-safe (empty == rank 0) as get_input() above. */
+	const std::vector<uint16_t> &shape = st->out_shapes[index];
+
 	out->data       = data;
 	out->size_bytes = std::get<1>(st->out_info[index]);
 	out->dtype      = mera_dtype_to_alp(dtype);
-	out->rank       = 0u;
+	out->rank       = static_cast<uint8_t>(shape.size());
+	for (size_t i = 0; i < shape.size(); ++i) {
+		out->shape[i] = shape[i];
+	}
+	for (size_t i = shape.size(); i < 4; ++i) {
+		out->shape[i] = 0;
+	}
 	out->scale      = 1.0f;
 	out->zero_point = 0;
 	return ALP_OK;
