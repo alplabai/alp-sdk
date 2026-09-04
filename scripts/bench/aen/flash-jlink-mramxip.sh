@@ -255,6 +255,28 @@ fi
 # The count is necessary, not sufficient: `verifybin` reads through the same debug
 # AP, so the app's own `RESULT` line off the RAM console in step 4 remains the
 # only end-to-end proof that the flashed image actually runs.
+# #1902 -- DIAGNOSE A FAILED HALT EXPLICITLY.  With `, noreset` on the loadbins,
+# the single explicit `RSetType 2; r; h` above is the ONLY reset in the sequence,
+# so if it does not actually halt the core there is no longer any fallback: both
+# loadbins then run against a LIVE CPU, cannot preserve the RAMCode workspace at
+# 0x00000000-0x0001FFFF (WorkRAMAddr/WorkRAMSize from device.xml), and write
+# NOTHING.  The verify gate below still catches that correctly -- but it reports
+# it as "verify failed", which reads like corrupted MRAM when in fact not one byte
+# was written.  Bench-measured 2026-09-04 over 12 runs: verify failed if and only
+# if the halt failed, 12/12, with `RSetType 2` reporting
+#   Reset: VC_CORERESET did not halt CPU. (Debug logic also reset by reset pin?).
+# i.e. the reset pin appears to reset the debug logic along with the core, so the
+# vector catch is cleared and the core runs.  Name that failure for what it is.
+if grep -qiE "Failed to halt CPU|Cannot read register 16 \(XPSR\) while CPU is running|Failed to preserve target RAM" /tmp/flowd-mramxip.out; then
+  echo "!! HALT FAILED -- the core was RUNNING for the whole flash sequence."
+  grep -iE "Core did not halt after reset|VC_CORERESET did not halt CPU|Failed to halt CPU|Cannot read register 16 \(XPSR\) while CPU is running|Failed to preserve target RAM" /tmp/flowd-mramxip.out | head -5
+  echo "   NOTHING was written: with 'loadbin ..., noreset' there is no fallback reset,"
+  echo "   so the RAMCode workspace could not be preserved and both blobs were skipped."
+  echo "   slot0 still holds whatever was there before -- this is NOT MRAM corruption."
+  echo "   Retry; if it persists, erase slot0 over the SE-UART so the SES boots nothing"
+  echo "   and the core cannot be running when the next flash starts."
+  exit 5
+fi
 if grep -qiE "verification failed @|error while programming flash" /tmp/flowd-mramxip.out; then
   echo "?? loadbin reported an internal verify error -- NOT failing on it (#1902)."
   grep -iE "verification failed @|error while programming flash" /tmp/flowd-mramxip.out | head -3
