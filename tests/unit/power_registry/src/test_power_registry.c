@@ -35,8 +35,6 @@
 #include <alp/peripheral.h>
 #include <alp/power.h>
 
-#include "../../../../src/backends/power/power_ops.h"
-
 ZTEST_SUITE(alp_power_registry, NULL, NULL, NULL, NULL, NULL);
 
 /* ---------- Selector / priority tests ------------------------------- */
