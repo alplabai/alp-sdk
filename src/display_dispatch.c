@@ -96,7 +96,7 @@ alp_display_t *alp_display_open(const alp_display_config_t *cfg)
 	h->backend              = be;
 	h->state.ops            = ops;
 	h->state.display_id     = cfg->display_id;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	alp_status_t       rc   = ops->open(cfg, &h->state, &caps);
 	if (rc != ALP_OK) {
 		_free(h);

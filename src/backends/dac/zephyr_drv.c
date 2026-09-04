@@ -130,6 +130,7 @@ static alp_status_t z_write_mv(alp_dac_backend_state_t *st, uint16_t mv);
 static alp_status_t
 z_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (cfg->channel_id >= ARRAY_SIZE(alp_dac_devs)) {
 		return ALP_ERR_INVAL;
 	}
@@ -162,10 +163,9 @@ z_open(const alp_dac_config_t *cfg, alp_dac_backend_state_t *st, alp_capabilitie
 	bs->reference_mv =
 	    (cfg->channel_id < ARRAY_SIZE(alp_dac_ref_mv)) ? alp_dac_ref_mv[cfg->channel_id] : 3300u;
 
-	st->dev         = (void *)dev;
-	st->channel_id  = cfg->channel_id;
-	st->be_data     = bs;
-	caps_out->flags = 0u;
+	st->dev        = (void *)dev;
+	st->channel_id = cfg->channel_id;
+	st->be_data    = bs;
 
 	/* Apply the initial setpoint so the caller's expected last_mv
      * contract holds on the first read. */

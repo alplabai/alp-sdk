@@ -55,6 +55,7 @@ typedef struct {
 static alp_status_t
 y_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	char path[32];
 	int  n = snprintf(path, sizeof(path), "/dev/rtc%u", (unsigned)rtc_id);
 	if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
@@ -69,10 +70,9 @@ y_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps_ou
 	}
 	d->fd = fd;
 
-	st->dev         = NULL;
-	st->rtc_id      = rtc_id;
-	st->be_data     = d;
-	caps_out->flags = 0u;
+	st->dev     = NULL;
+	st->rtc_id  = rtc_id;
+	st->be_data = d;
 	return ALP_OK;
 }
 

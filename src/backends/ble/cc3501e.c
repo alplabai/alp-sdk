@@ -95,21 +95,19 @@ static alp_status_t pack_adv_data(const alp_ble_adv_config_t *cfg, uint8_t *ad, 
 
 static alp_status_t cc35_open(alp_ble_radio_state_t *state, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (_ble_be.ctx == NULL) {
-		caps_out->flags = 0u;
 		return ALP_ERR_NOT_READY;
 	}
 	if (_ble_be.refcount == 0u || !_ble_be.enabled) {
 		alp_status_t rc = cc3501e_ble_enable(_ble_be.ctx, CC3501E_BLE_ENABLE_TIMEOUT_MS);
 		if (rc != ALP_OK) {
-			caps_out->flags = 0u;
 			return rc;
 		}
 		_ble_be.enabled = true;
 	}
 	_ble_be.refcount++;
-	state->be_data  = &_ble_be;
-	caps_out->flags = 0u;
+	state->be_data = &_ble_be;
 	return ALP_OK;
 }
 

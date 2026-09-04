@@ -939,7 +939,7 @@ static void rpc_be_teardown(struct rpc_be *ch)
 static alp_status_t
 y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
-	if (caps_out != NULL) caps_out->flags = 0u;
+	(void)caps_out;
 	if (cfg == NULL || cfg->name == NULL || cfg->name[0] == '\0') {
 		return ALP_ERR_INVAL;
 	}
@@ -1398,9 +1398,9 @@ static void y_destroy(alp_rpc_backend_state_t *st)
 static alp_status_t
 y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	(void)cfg;
 	(void)st;
-	if (caps_out != NULL) caps_out->flags = 0u;
 	return ALP_ERR_NOSUPPORT;
 }
 

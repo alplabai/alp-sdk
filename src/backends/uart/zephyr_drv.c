@@ -87,6 +87,7 @@ static alp_status_t _errno_to_alp(int err)
 static alp_status_t
 z_open(const alp_uart_config_t *cfg, alp_uart_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (cfg->port_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (cfg->port_id >= ALP_SOC_UART_COUNT) return ALP_ERR_OUT_OF_RANGE;
 	const struct device *dev = _devs[cfg->port_id];
@@ -106,9 +107,8 @@ z_open(const alp_uart_config_t *cfg, alp_uart_backend_state_t *st, alp_capabilit
 		return _errno_to_alp(err);
 	}
 
-	st->dev         = (void *)dev;
-	st->port_id     = cfg->port_id;
-	caps_out->flags = 0u;
+	st->dev     = (void *)dev;
+	st->port_id = cfg->port_id;
 	return ALP_OK;
 }
 

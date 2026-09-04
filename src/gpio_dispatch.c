@@ -72,7 +72,7 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 	}
 	h->backend              = be;
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	if (be->probe != NULL) {
 		uint32_t refined = caps.flags;
 		(void)be->probe(pin_id, &refined);

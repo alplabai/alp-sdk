@@ -162,6 +162,7 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
                              alp_camera_backend_state_t *state,
                              alp_capabilities_t         *caps_out)
 {
+	(void)caps_out;
 	if (cfg == NULL || cfg->camera_id >= ARRAY_SIZE(_devs)) {
 		return ALP_ERR_INVAL;
 	}
@@ -274,7 +275,6 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	state->be_data = st;
 	/* base_caps stays 0 so the surface ABI is reflected exactly; the
 	 * ISP-present cap bit is advertised once cap_instance.h allocates it. */
-	caps_out->flags = 0u;
 	return ALP_OK;
 }
 

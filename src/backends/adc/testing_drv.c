@@ -169,6 +169,7 @@ alp_status_t alp_testing_adc_fail_next(uint32_t channel_id, alp_status_t err)
 static alp_status_t
 t_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	alp_testing_adc_slot_t *slot = alp_testing_instance_table_touch(table(), cfg->channel_id);
 	if (slot == NULL) return ALP_ERR_NOMEM;
 
@@ -182,7 +183,6 @@ t_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capabilitie
 	                          : (uint16_t)ALP_TESTING_ADC_DEFAULT_RESOLUTION_BITS;
 	st->reference_uv    = (uint32_t)ALP_TESTING_ADC_DEFAULT_REFERENCE_UV;
 
-	caps_out->flags = 0u;
 	return ALP_OK;
 }
 

@@ -36,11 +36,11 @@
 static alp_status_t
 sw_open(uint32_t pin_id, alp_gpio_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	(void)pin_id;
-	st->dev         = NULL;
-	st->pin_id      = pin_id;
-	st->be_data     = NULL;
-	caps_out->flags = 0u;
+	st->dev     = NULL;
+	st->pin_id  = pin_id;
+	st->be_data = NULL;
 	return ALP_OK;
 }
 

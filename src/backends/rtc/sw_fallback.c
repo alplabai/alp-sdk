@@ -33,11 +33,11 @@ static alp_rtc_time_t _cursor = {
 static alp_status_t
 sw_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	(void)rtc_id;
-	st->dev         = NULL;
-	st->rtc_id      = rtc_id;
-	st->be_data     = NULL;
-	caps_out->flags = 0u;
+	st->dev     = NULL;
+	st->rtc_id  = rtc_id;
+	st->be_data = NULL;
 	return ALP_OK;
 }
 

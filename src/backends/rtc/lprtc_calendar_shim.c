@@ -218,6 +218,7 @@ static bool _fields_valid(const alp_rtc_time_t *t)
 static alp_status_t
 shim_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (rtc_id >= ALP_SOC_RTC_COUNT) return ALP_ERR_OUT_OF_RANGE;
 	if (_lprtc == NULL || !device_is_ready(_lprtc)) return ALP_ERR_NOT_READY;
 
@@ -239,10 +240,9 @@ shim_open(uint32_t rtc_id, alp_rtc_backend_state_t *st, alp_capabilities_t *caps
 	if (rc != 0) return ALP_ERR_IO;
 	_state.set = false;
 
-	st->dev         = (void *)_lprtc;
-	st->rtc_id      = rtc_id;
-	st->be_data     = &_state;
-	caps_out->flags = 0u;
+	st->dev     = (void *)_lprtc;
+	st->rtc_id  = rtc_id;
+	st->be_data = &_state;
 	return ALP_OK;
 }
 

@@ -32,7 +32,6 @@ static alp_status_t sw_open(const alp_counter_config_t  *cfg,
 	st->dev                 = NULL;
 	st->counter_id          = cfg->counter_id;
 	st->be_data             = NULL;
-	caps_out->flags         = 0u;
 	caps_out->channel_count = 0u; /* no id bound enforced -- alp-sdk#1242 */
 	return ALP_OK;
 }

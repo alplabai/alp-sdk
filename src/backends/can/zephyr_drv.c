@@ -146,6 +146,7 @@ static size_t _side_index(alp_z_can_side_t *s)
 static alp_status_t
 z_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (cfg->bus_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	if (cfg->bus_id >= ALP_SOC_CAN_COUNT) return ALP_ERR_OUT_OF_RANGE;
 	if (cfg->mode == ALP_CAN_MODE_FD && !ALP_SOC_CAN_FD_SUPPORTED) {
@@ -182,10 +183,9 @@ z_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 		return _errno_to_alp(err);
 	}
 
-	st->dev         = (void *)dev;
-	st->bus_id      = cfg->bus_id;
-	st->be_data     = s;
-	caps_out->flags = 0u;
+	st->dev     = (void *)dev;
+	st->bus_id  = cfg->bus_id;
+	st->be_data = s;
 	return ALP_OK;
 }
 

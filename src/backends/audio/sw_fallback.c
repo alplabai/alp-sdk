@@ -75,9 +75,9 @@ static alp_status_t sw_in_open(const alp_audio_config_t     *cfg,
                                alp_audio_in_backend_state_t *state,
                                alp_capabilities_t           *caps_out)
 {
+	(void)caps_out;
 	(void)cfg;
-	state->be_data  = NULL;
-	caps_out->flags = 0u;
+	state->be_data = NULL;
 	return ALP_OK;
 }
 
@@ -120,9 +120,9 @@ static alp_status_t sw_out_open(const alp_audio_config_t      *cfg,
                                 alp_audio_out_backend_state_t *state,
                                 alp_capabilities_t            *caps_out)
 {
+	(void)caps_out;
 	(void)cfg;
-	state->be_data  = NULL;
-	caps_out->flags = 0u;
+	state->be_data = NULL;
 	return ALP_OK;
 }
 

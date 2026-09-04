@@ -9,6 +9,25 @@
  * Populated by each backend's ops->probe() at open time, cached
  * in the handle, returned by alp_<class>_capabilities().
  *
+ * Two-word design: a universal `flags` word plus a class-scoped
+ * `class_flags` word, so no single bit ever means two different
+ * things depending which class handle you happen to be holding.
+ *
+ * @par flags (alp_instance_cap_t) -- universal, meaning fixed here:
+ *      ALP_INSTANCE_CAP_REPORTED marks that the backend deliberately
+ *      populated this descriptor.  `flags == 0` means "not reported"
+ *      -- the backend never spoke -- never "has nothing".  Once
+ *      REPORTED is set, every other bit (in `flags` or `class_flags`)
+ *      that is clear is an affirmative "does not have it", not an
+ *      unknown.  Likewise `channel_count == 0` alongside REPORTED
+ *      means "serves none", distinct from "not reported".
+ *
+ * @par class_flags -- meaning owned by the class header of the
+ *      handle you queried (e.g. ALP_ADC_CAP_* in <alp/adc.h>).  Two
+ *      different classes may reuse the same bit position for
+ *      unrelated facts; class_flags is only ever read next to a
+ *      handle whose class you already know.
+ *
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -28,18 +47,30 @@
 extern "C" {
 #endif
 
-/** Bitwise-OR'd flags describing what a single opened handle can do. */
+/**
+ * @brief Bitwise-OR'd universal flags describing a single opened handle.
+ *
+ * These bits mean the same thing for every peripheral class.
+ * Class-specific facts (e.g. ADC oversample/trigger/differential)
+ * live in the class header's own `ALP_<CLASS>_CAP_*` constants and
+ * are carried in `alp_capabilities_t.class_flags`, not here.
+ */
 typedef enum {
-	ALP_INSTANCE_CAP_DMA           = 1u << 0,
-	ALP_INSTANCE_CAP_HW_OVERSAMPLE = 1u << 1,
-	ALP_INSTANCE_CAP_HW_TRIGGER    = 1u << 2,
-	ALP_INSTANCE_CAP_DIFFERENTIAL  = 1u << 3,
+	/** Backend deliberately populated this descriptor.  `flags == 0`
+	 *  means "not reported" -- the backend never spoke -- never "has
+	 *  nothing".  See the file-level doc for the full contract. */
+	ALP_INSTANCE_CAP_REPORTED = 1u << 0,
+	/** The instance is backed by a DMA engine. */
+	ALP_INSTANCE_CAP_DMA = 1u << 1,
 } alp_instance_cap_t;
 
 /** Per-instance capability descriptor populated by ops->probe. */
 typedef struct alp_capabilities {
-	uint32_t flags;
-	uint32_t max_sample_rate; /* 0 = not applicable */
+	uint32_t flags;       /* alp_instance_cap_t bits (universal) */
+	uint32_t class_flags; /* ALP_<CLASS>_CAP_* bits; meaning owned by the
+	                        * class header of the handle you queried */
+	uint32_t max_rate_hz; /* class-defined rate ceiling: ADC samples/s,
+	                        * I2C/SPI bus clock, PWM carrier. 0 = not reported */
 	uint16_t max_resolution_bits;
 	uint16_t channel_count;
 } alp_capabilities_t;

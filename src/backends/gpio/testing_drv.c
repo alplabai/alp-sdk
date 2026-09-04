@@ -232,6 +232,7 @@ alp_status_t alp_testing_gpio_write_count(uint32_t pin_id, uint32_t *n)
 static alp_status_t
 t_open(uint32_t pin_id, alp_gpio_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	alp_testing_gpio_slot_t *slot = alp_testing_instance_table_touch(table(), pin_id);
 	if (slot == NULL) return ALP_ERR_NOMEM;
 
@@ -243,10 +244,9 @@ t_open(uint32_t pin_id, alp_gpio_backend_state_t *st, alp_capabilities_t *caps_o
 	slot->cb_user    = NULL;
 	slot->owner      = ALP_TESTING_OWNER_OF(st);
 
-	st->dev         = NULL;
-	st->pin_id      = pin_id;
-	st->be_data     = slot;
-	caps_out->flags = 0u;
+	st->dev     = NULL;
+	st->pin_id  = pin_id;
+	st->be_data = slot;
 	return ALP_OK;
 }
 

@@ -34,12 +34,11 @@ alp_status_t alp_wifi_cc3501e_attach(cc3501e_t *ctx)
 
 static alp_status_t cc35_open(alp_wifi_backend_state_t *state, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (g_bridge_ctx == NULL) {
-		caps_out->flags = 0u;
 		return ALP_ERR_NOT_READY;
 	}
-	state->be_data  = g_bridge_ctx;
-	caps_out->flags = 0u;
+	state->be_data = g_bridge_ctx;
 	return ALP_OK;
 }
 

@@ -166,6 +166,7 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
                            alp_camera_backend_state_t *state,
                            alp_capabilities_t         *caps_out)
 {
+	(void)caps_out;
 	if (cfg == NULL || cfg->camera_id >= ARRAY_SIZE(_devs)) {
 		return ALP_ERR_INVAL;
 	}
@@ -289,7 +290,6 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 	state->be_data = st;
 	/* No special caps from the portable Zephyr video class -- ISP
      * gates stay off, vendor backends layer them on. */
-	caps_out->flags = 0u;
 	return ALP_OK;
 }
 

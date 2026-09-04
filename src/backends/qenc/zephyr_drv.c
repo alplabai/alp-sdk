@@ -47,13 +47,13 @@ static alp_status_t _errno_to_alp(int err)
 static alp_status_t
 z_open(const alp_qenc_config_t *cfg, alp_qenc_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (cfg->encoder_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	const struct device *dev = _devs[cfg->encoder_id];
 	if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
 	st->dev           = (void *)dev;
 	st->encoder_id    = cfg->encoder_id;
 	st->last_position = 0;
-	caps_out->flags   = 0u;
 	return ALP_OK;
 }
 

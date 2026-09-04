@@ -210,8 +210,9 @@ static alp_status_t dave2d_open(alp_gpu2d_backend_state_t *state, alp_capabiliti
 	}
 	state->be_data = dev;
 	if (caps_out != NULL) {
-		caps_out->flags               = ALP_INSTANCE_CAP_DMA; /* DMA blit engine */
-		caps_out->max_sample_rate     = 0u;
+		/* DMA blit engine -- vendor-IP identity, genuinely known here. */
+		caps_out->flags               = ALP_INSTANCE_CAP_DMA | ALP_INSTANCE_CAP_REPORTED;
+		caps_out->max_rate_hz         = 0u;
 		caps_out->max_resolution_bits = 0u;
 		caps_out->channel_count       = 0u;
 	}
@@ -415,10 +416,10 @@ ALP_BACKEND_REGISTER(gpu2d,
                      {
                          .silicon_ref = "alif:ensemble:e6",
                          .vendor      = "alif",
-                         .base_caps   = ALP_INSTANCE_CAP_DMA,
-                         .priority    = 100,
-                         .ops         = &_ops,
-                         .probe       = NULL,
+                         .base_caps = (uint32_t)(ALP_INSTANCE_CAP_DMA | ALP_INSTANCE_CAP_REPORTED),
+                         .priority  = 100,
+                         .ops       = &_ops,
+                         .probe     = NULL,
                      });
 
 ALP_BACKEND_REGISTER(gpu2d,
@@ -426,10 +427,10 @@ ALP_BACKEND_REGISTER(gpu2d,
                      {
                          .silicon_ref = "alif:ensemble:e7",
                          .vendor      = "alif",
-                         .base_caps   = ALP_INSTANCE_CAP_DMA,
-                         .priority    = 100,
-                         .ops         = &_ops,
-                         .probe       = NULL,
+                         .base_caps = (uint32_t)(ALP_INSTANCE_CAP_DMA | ALP_INSTANCE_CAP_REPORTED),
+                         .priority  = 100,
+                         .ops       = &_ops,
+                         .probe     = NULL,
                      });
 
 ALP_BACKEND_REGISTER(gpu2d,
@@ -437,10 +438,10 @@ ALP_BACKEND_REGISTER(gpu2d,
                      {
                          .silicon_ref = "alif:ensemble:e8",
                          .vendor      = "alif",
-                         .base_caps   = ALP_INSTANCE_CAP_DMA,
-                         .priority    = 100,
-                         .ops         = &_ops,
-                         .probe       = NULL,
+                         .base_caps = (uint32_t)(ALP_INSTANCE_CAP_DMA | ALP_INSTANCE_CAP_REPORTED),
+                         .priority  = 100,
+                         .ops       = &_ops,
+                         .probe     = NULL,
                      });
 
 #endif /* CONFIG_ALP_SDK_GPU2D_ALIF_DAVE2D */

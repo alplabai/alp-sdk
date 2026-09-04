@@ -209,6 +209,7 @@ static void _unexport_if_owned(const y_pwm_data_t *d)
 static alp_status_t
 y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (cfg->channel_id >= 8u) return ALP_ERR_OUT_OF_RANGE;
 
 	y_pwm_data_t *d = (y_pwm_data_t *)malloc(sizeof(*d));
@@ -300,10 +301,9 @@ y_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabilitie
 		}
 	}
 
-	st->dev         = NULL;
-	st->channel_id  = cfg->channel_id;
-	st->be_data     = d;
-	caps_out->flags = 0u;
+	st->dev        = NULL;
+	st->channel_id = cfg->channel_id;
+	st->be_data    = d;
 	return ALP_OK;
 }
 

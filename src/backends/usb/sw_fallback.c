@@ -32,9 +32,9 @@ static alp_status_t sw_dev_open(const alp_usb_device_config_t *cfg,
                                 alp_usb_dev_state_t           *st,
                                 alp_capabilities_t            *caps_out)
 {
+	(void)caps_out;
 	(void)cfg;
-	st->be_data     = NULL;
-	caps_out->flags = 0u;
+	st->be_data = NULL;
 	return ALP_OK;
 }
 
@@ -83,8 +83,8 @@ static void sw_dev_close(alp_usb_dev_state_t *st)
 
 static alp_status_t sw_host_open(alp_usb_host_state_t *st, alp_capabilities_t *caps_out)
 {
-	st->be_data     = NULL;
-	caps_out->flags = 0u;
+	(void)caps_out;
+	st->be_data = NULL;
 	return ALP_OK;
 }
 

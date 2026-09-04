@@ -526,8 +526,7 @@ static alp_status_t y_open(const alp_display_config_t  *cfg,
 	d->width        = mode.hdisplay;
 	d->height       = mode.vdisplay;
 
-	state->be_data  = d;
-	caps_out->flags = 0u;
+	state->be_data = d;
 	return ALP_OK;
 }
 

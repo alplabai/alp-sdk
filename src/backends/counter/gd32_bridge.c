@@ -38,7 +38,6 @@ static alp_status_t br_open(const alp_counter_config_t  *cfg,
 	st->dev                 = NULL; /* bridge sentinel */
 	st->counter_id          = cfg->counter_id;
 	st->be_data             = NULL;
-	caps_out->flags         = 0u;                               /* no HW_ALARM via bridge */
 	caps_out->channel_count = GD32G553_BRIDGE_COUNTER_CHANNELS; /* alp-sdk#1242 */
 	return ALP_OK;
 }

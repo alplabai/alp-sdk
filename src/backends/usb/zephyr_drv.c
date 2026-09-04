@@ -105,6 +105,7 @@ static alp_status_t z_dev_open(const alp_usb_device_config_t *cfg,
                                alp_usb_dev_state_t           *st,
                                alp_capabilities_t            *caps_out)
 {
+	(void)caps_out;
 	if (cfg == NULL) return ALP_ERR_INVAL;
 #if defined(CONFIG_ALP_SDK_USB)
 	if (cfg->device_class > ALP_USB_DEVICE_HID) return ALP_ERR_INVAL;
@@ -119,11 +120,9 @@ static alp_status_t z_dev_open(const alp_usb_device_config_t *cfg,
      * into the descriptors before usb_enable.  For now open
      * succeeds and enable() drives the stack with the
      * compile-time descriptors. */
-	caps_out->flags = 0u;
 	return ALP_OK;
 #else
 	(void)st;
-	caps_out->flags = 0u;
 	return ALP_ERR_NOSUPPORT;
 #endif
 }
@@ -224,7 +223,7 @@ USBH_CONTROLLER_DEFINE(alp_usbh, DEVICE_DT_GET(DT_NODELABEL(zephyr_uhc0)));
 
 static alp_status_t z_host_open(alp_usb_host_state_t *st, alp_capabilities_t *caps_out)
 {
-	caps_out->flags = 0u;
+	(void)caps_out;
 	if (usbh_init(&alp_usbh) != 0) {
 		return ALP_ERR_IO;
 	}
@@ -260,8 +259,8 @@ static void z_host_close(alp_usb_host_state_t *st)
 
 static alp_status_t z_host_open(alp_usb_host_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	(void)st;
-	caps_out->flags = 0u;
 	/* USB host ops require CONFIG_USB_HOST_STACK and an alif,xhci-uhc
 	 * node (label zephyr_uhc0) in the board DTS.  See the AEN401
 	 * bring-up plan for the bench-gated activation path. */

@@ -197,6 +197,7 @@ _configure_pcm(snd_pcm_t *pcm, const alp_i2s_config_t *cfg, snd_pcm_format_t fmt
 static alp_status_t
 y_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	if (cfg == NULL || st == NULL) return ALP_ERR_INVAL;
 	if (cfg->channels == 0u || cfg->channels > 2u) return ALP_ERR_INVAL;
 	if (cfg->sample_rate_hz == 0u || cfg->block_frames == 0u) return ALP_ERR_INVAL;
@@ -249,10 +250,9 @@ y_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st, alp_capabilitie
 	d->capture     = capture;
 	d->frame_bytes = (size_t)cfg->channels * (size_t)((cfg->word_bits + 7u) / 8u);
 
-	st->dev         = NULL;
-	st->bus_id      = cfg->bus_id;
-	st->be_data     = d;
-	caps_out->flags = 0u;
+	st->dev     = NULL;
+	st->bus_id  = cfg->bus_id;
+	st->be_data = d;
 	return ALP_OK;
 }
 

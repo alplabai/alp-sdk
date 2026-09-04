@@ -196,13 +196,13 @@ alp_status_t alp_testing_spi_last_mosi(uint32_t bus_id, uint8_t *out, size_t cap
 static alp_status_t
 t_open(const alp_spi_config_t *cfg, alp_spi_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	alp_testing_spi_slot_t *slot = alp_testing_instance_table_touch(table(), cfg->bus_id);
 	if (slot == NULL) return ALP_ERR_NOMEM;
 
-	st->dev         = NULL;
-	st->bus_id      = cfg->bus_id;
-	st->be_data     = slot;
-	caps_out->flags = 0u;
+	st->dev     = NULL;
+	st->bus_id  = cfg->bus_id;
+	st->be_data = slot;
 	return ALP_OK;
 }
 

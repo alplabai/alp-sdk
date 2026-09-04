@@ -287,6 +287,7 @@ static void clear_filters(alp_testing_can_slot_t *slot)
 static alp_status_t
 t_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilities_t *caps_out)
 {
+	(void)caps_out;
 	alp_testing_can_slot_t *slot = alp_testing_instance_table_touch(table(), cfg->bus_id);
 	if (slot == NULL) return ALP_ERR_NOMEM;
 
@@ -296,10 +297,9 @@ t_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 	clear_filters(slot);
 	slot->next_filter_id = 0;
 
-	st->dev         = NULL;
-	st->bus_id      = cfg->bus_id;
-	st->be_data     = slot;
-	caps_out->flags = 0u;
+	st->dev     = NULL;
+	st->bus_id  = cfg->bus_id;
+	st->be_data = slot;
 	return ALP_OK;
 }
 

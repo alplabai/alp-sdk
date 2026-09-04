@@ -58,12 +58,12 @@ static alp_status_t z_open(const alp_counter_config_t  *cfg,
                            alp_counter_backend_state_t *st,
                            alp_capabilities_t          *caps_out)
 {
+	(void)caps_out;
 	if (cfg->counter_id >= ARRAY_SIZE(_devs)) return ALP_ERR_INVAL;
 	const struct device *dev = _devs[cfg->counter_id];
 	if (dev == NULL || !device_is_ready(dev)) return ALP_ERR_NOT_READY;
-	st->dev         = (void *)dev;
-	st->counter_id  = cfg->counter_id;
-	caps_out->flags = 0u; /* Slice 4a: HW_ALARM cap flag deferred */
+	st->dev        = (void *)dev;
+	st->counter_id = cfg->counter_id;
 	return ALP_OK;
 }
 

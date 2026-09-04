@@ -134,6 +134,7 @@ static alp_status_t z_open(const alp_display_config_t  *cfg,
                            alp_display_backend_state_t *state,
                            alp_capabilities_t          *caps_out)
 {
+	(void)caps_out;
 	if (cfg->display_id >= ARRAY_SIZE(_devs)) {
 		return ALP_ERR_INVAL;
 	}
@@ -176,8 +177,7 @@ static alp_status_t z_open(const alp_display_config_t  *cfg,
 		return _errno_to_alp(err);
 	}
 
-	state->be_data  = (void *)dev;
-	caps_out->flags = 0u; /* no instance-level cap flags defined for display */
+	state->be_data = (void *)dev;
 	return ALP_OK;
 }
 

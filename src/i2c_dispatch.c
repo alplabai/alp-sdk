@@ -71,7 +71,7 @@ alp_i2c_t *alp_i2c_open(const alp_i2c_config_t *cfg)
 	}
 	h->backend              = be;
 	h->state.ops            = ops;
-	alp_capabilities_t caps = { .flags = be->base_caps };
+	alp_capabilities_t caps = { .flags = be->base_caps, .class_flags = be->base_class_flags };
 	if (be->probe != NULL) {
 		uint32_t refined = caps.flags;
 		(void)be->probe(cfg->bus_id, &refined);
