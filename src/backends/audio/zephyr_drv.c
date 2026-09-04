@@ -51,6 +51,7 @@
 #include "alp_errno.h"
 #include "alp_slot_claim.h"
 #include "audio_ops.h"
+#include "audio_volume_guard.h"
 
 #if defined(CONFIG_ALP_SDK_AUDIO_IN)
 #include <zephyr/audio/dmic.h>
@@ -554,6 +555,11 @@ static alp_status_t z_out_set_volume(alp_audio_out_backend_state_t *state, uint8
 #if defined(CONFIG_ALP_SDK_AUDIO_OUT)
 	struct hw_out_be *be = (struct hw_out_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
+	/* @ref z_out_write only scales S16_LE; a non-unity request on any
+	 * other open format can never actually be applied, so refuse it
+	 * HERE where the caller can see it rather than silently dropping it
+	 * in the write path -- see audio_volume_guard.h. */
+	if (!alp_audio_volume_settable(state->cfg.format, vol)) return ALP_ERR_NOSUPPORT;
 	/* Map 0..255 to 0..0x0100 (Q8.8 unity = 256).  255 maps to 256
      * for a clean unity ceiling -- avoids the off-by-one cliff. */
 	be->volume_q8 = (uint16_t)vol + (uint16_t)(vol == 255);

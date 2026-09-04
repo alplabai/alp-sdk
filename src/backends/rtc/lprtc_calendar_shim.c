@@ -40,6 +40,64 @@
  * Separate TBD, tracked in the receipt.
  */
 
+/*
+ * SILICON CAVEAT (#1814) -- the LPRTC's accuracy across a reset is errata-bound
+ * on every Ensemble revision, and this shim is the AEN calendar path.
+ *
+ * AERR0012 v2.0 ER001 (Rev A0, the bench silicon; fixed in A1): "A Power On
+ * Reset event (assertion of the POR_N pin or wake from STOP mode) will reset
+ * the RTC (Real Time Counter) clock pre-scaler divider ... the RTC will revert
+ * to clock at the default rate of 32KHz ... the accuracy of the real time count
+ * will have already been lost."  Re-programming the divider afterwards does not
+ * recover the lost time.
+ *
+ * AERR0012 v2.0 ER002 (Rev A1, no fix planned): while POR_N is asserted the RTC
+ * clock source falls back from the 32 kHz LFXO to the ~5%-accurate LFRC --
+ * "it would take a 20 second assertion of POR_N to impose a 1 second loss of
+ * RTC accuracy."
+ *
+ * BENCH FACT (goes beyond the errata text above, and beyond POR_N entirely):
+ * the AEN bench module (E1M-AEN801 r1, serial 2617-0001) reports "[SES] No LF
+ * XTAL" on every SE boot (bench-captured 2026-08-30, re-confirmed 2026-08-31;
+ * see docs/aen-se-services.md, "SERAM version, per physical board") -- this
+ * board has no 32 kHz LFXO fitted at all.  ER002's LFXO->LFRC fallback is NOT
+ * confined to a POR_N assertion window on this module: LFRC is the LPRTC's
+ * clock source PERMANENTLY, on every boot, whether or not POR_N is currently
+ * asserted.  The calendar therefore drifts continuously at LFRC's ~5% offset
+ * from LFXO -- roughly 72 minutes per day -- for as long as this shim runs,
+ * not only across a reset.  This is the steady state on this module, not a
+ * transient startup condition or a warning that self-corrects.
+ *
+ * The counter keeps running; both the ELAPSED time across a reset AND the
+ * ongoing wall-clock drift described above are untrustworthy.  A caller that
+ * needs accuracy must periodically re-set the time from an external source --
+ * not just once, after a POR.
+ *
+ * Alif's stated ER002 workaround is "use an external real-time clock source",
+ * and the E1M-AEN801 carries one -- an rv3028c7 at 7-bit 0x52, with a working
+ * driver at chips/rv3028c7/rv3028c7.c.  It is deliberately NOT used here, but
+ * not for the reason an earlier draft of this comment gave: BRD_I2C is SoC
+ * I2C0 (function C, P7_0/P7_1), a master-capable Tier-1 upstream i2c_dw
+ * controller (ADTS0013 v1.2 Table 3-16 + HWRM Sec.15.4.1) -- not the
+ * slave-only LPI2C0 this bus was first believed to be (#1848).  The transport
+ * exists.
+ *
+ * What blocks it is electrical, bench-settled 2026-08-31 on the r1 module
+ * (E1M-AEN801, serial 2617-0001), i2c0 @ 100 kHz, read-only against
+ * 0x52/0x48/0x30: pads High-Z abort every address (-116 / -ETIMEDOUT, "User
+ * Abort on i2c@49010000"); the pad's internal ~50 kOhm pull-up clears the
+ * abort but nothing ACKs (-5 / -EIO).  That bias-only change proves the
+ * pinctrl is right and the controller reaches the wire, and that the net has
+ * no usable pull-up: the E1M-AEN-2626-R2 netlist shows BRD_I2C's bridging
+ * jumpers (R93/R94) DNP, unlike I2C2/EEPROM's own pull-up path (R95/R96,
+ * stuffed) -- see docs/bring-up-aen.md Sec.5.1.
+ *
+ * So rv3028c7 cannot back the AEN calendar until the board supplies a real
+ * pull-up (R93/R94 stuffed, or dedicated resistors on the net) -- a board
+ * change, not firmware, which is why #1814 stays open and this shim stays
+ * the only calendar source on AEN.
+ */
+
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>

@@ -303,7 +303,19 @@ The firmware `#include`s the wire-protocol header **directly** (no
 mirror), so a protocol change moves both sides + the wire-vector tests
 in one commit.  The Alif-side client still refuses to talk to a firmware
 whose `ALP_CC3501E_CMD_GET_VERSION` reply doesn't match the compile-time
-`ALP_CC3501E_PROTOCOL_VERSION` (currently **5** — v5 added `OTA_UPDATE_MODE` and raised `ALP_CC3501E_MAX_PAYLOAD` 512 → 4096).
+`ALP_CC3501E_PROTOCOL_VERSION` (currently **9**).  What each bump changed:
+
+| Version | Change |
+|---|---|
+| v5 | added `OTA_UPDATE_MODE`; raised `ALP_CC3501E_MAX_PAYLOAD` 512 -> 4096 |
+| v6 | SPI1 host-passthrough opcodes (`0x55`..`0x57`) |
+| v7 | request identity for `SOCK_SEND` only -- an 8-bit retry seq in a spare struct byte, so a lost reply could not make a retry look like a new send and re-transmit it |
+| v8 | request identity for EVERY worker-routed opcode -- a 5-bit retry seq in flags bits 3..7 of the frame header, costing zero wire bytes; and `DIAG_GET_STATS` grew additively 8 -> 16 bytes with `worker_execs` / `retry_latch_hits`, the two counters that distinguish "the retry was absorbed" from "the operation ran twice" |
+| v9 | the LISTENING path, so a host can **serve** over the module's soft-AP: `SOCK_BIND` (`0x25`), `SOCK_LISTEN` (`0x26`) and the async `EVT_SOCK_ACCEPTED` (`0x2C`); plus an optional interface-selector byte on `WIFI_GET_IP` (`0x17`) so a serving application can read the AP-side address instead of inferring it from a client's DHCP gateway. There is deliberately **no accept opcode** -- `accept()` blocks, and a worker-routed blocking body holds READY low across the whole bridge, so an inbound connection is delivered as an event on the existing polled queue instead |
+
+Seq `0` is reserved on the wire to mean "this request carries no identity",
+so the usable space is 1..31 and a pre-v8 host -- which leaves those bits
+clear -- can never be answered from a cached reply.
 
 ## Firmware: pre-flashed by Alp; updated via OTA; customer-flashable only to recover a bricked device
 
@@ -411,7 +423,23 @@ Required for M.2 E-key `W_DISABLE1` (CC3501E `GPIO_16` ↔ E1M
 E1M `IO16`, Bluetooth disable).  The current firmware also uses
 these raw CC3501E pins for the bridge (`GPIO16` as SPI0 CS and
 `GPIO17` as READY/host-IRQ), so the SoM metadata records the
-physical wiring while example-local proxy tables omit IO17.  Per
+physical wiring while the generated example proxy tables
+(`scripts/gen_cc3501e_gpio_routes.py`) omit both `IO16` and `IO17`
+(#1859 -- an earlier hand-maintained revision of these tables omitted
+only `IO17`).
+
+**On this board revision the bridge wins, and both pads are refused.**
+`hal/ti/cc3501e_hw_ti_gpio.c` `gpio_pad_reserved()` rejects pads 16 and
+17 from the GPIO proxy outright, so `alp_gpio_*` on E1M `IO16` or `IO17`
+returns an error rather than driving anything -- and that is the correct
+behaviour, since driving either would tear the inter-chip link down
+mid-transfer.  `metadata/e1m_modules/aen/from-cc3501e.tsv` now names the
+claim in the peripheral column (`BRIDGE_READY`, `BRIDGE_SPI_CSN`) so the
+generated pinmux capability carries it too; the open-drain contract below
+applies to the W_DISABLE role only if a future revision moves the bridge
+lines off these pads (#1808).
+
+Per
 the M.2 spec the W_DISABLE lines are open-drain active-low: write 0
 to assert, write 1 (or
 Hi-Z / release) to deassert.  Firmware must:
@@ -547,8 +575,9 @@ way back is `cc3501e_reset()` driving `WIFI_EN`.
 
 ## Peripherals not proxied today
 
-Beyond the wire-protocol surfaces above (Wi-Fi, BLE, GPIO proxy, OTA), the
-CC3501E exposes several on-chip peripherals that are **not** reachable
+Beyond the wire-protocol surfaces above (Wi-Fi, BLE, GPIO proxy, SPI1
+passthrough, OTA — see below), the CC3501E exposes several on-chip
+peripherals that are **not** reachable
 through `<alp/protocol/cc3501e.h>` and have no host-visible surface. None
 of these has an allocated opcode group; if a future board variant needs
 one, add it under the reserved `0x80..0xFF` range.
@@ -570,9 +599,9 @@ one, add it under the reserved `0x80..0xFF` range.
 - **Timers / PWM** — 8 GPT/PWM channels. Not routed to any external pad
   on E1M-AEN; the Alif has its own timer/PWM surface via `<alp/pwm.h>`.
 - **I2C** — 2 on-chip I2C controllers. Not proxied: the E1M-AEN module's
-  I2C devices (OPTIGA Trust M, RV-3028-C7, TMP112 on the Alif's
-  slave-only LPI2C0; EEPROM N24S128 on the Alif's separate SoC I2C2;
-  see `docs/soms/aen.md`) hang off the Alif's own I2C controllers, not
+  I2C devices (OPTIGA Trust M, RV-3028-C7, TMP112 on the Alif's SoC I2C0
+  BRD_I2C bus; EEPROM N24S128 on the Alif's separate SoC I2C2; see
+  `docs/soms/aen.md`) hang off the Alif's own I2C controllers, not
   the CC3501E's.
 
 ## OTA
@@ -706,6 +735,43 @@ host obtains the image via the device-side Mender contract
 ([`docs/ota-device-contract.md`](ota-device-contract.md)); the OTA
 server is a separate repo.
 
+## SPI1 host passthrough
+
+The E1M connector's SPI1 pins (AG10 SCK / AG9 MOSI / AG8 MISO / AH9 CS0 /
+AH8 CS1) land on the CC3501E, **not** the Alif — a carrier device on that
+bus is unreachable except by relay: the CC3501E is the SPI CONTROLLER, and
+these opcodes (proto v6, group `0x55..0x57`) hand it the host's bytes. This
+is a *second*, unrelated SPI instance from the inter-chip bridge link above
+(SPI0) — nothing here touches the bridge.
+
+| Opcode | Command | Payload |
+|--------|---------|---------|
+| `0x55` | `ALP_CC3501E_CMD_SPI1_CONFIGURE` | `alp_cc3501e_spi1_configure_t` (`freq_hz` LE32, `mode`, `bits_per_word`, `cs`) |
+| `0x56` | `ALP_CC3501E_CMD_SPI1_TRANSFER`  | `alp_cc3501e_spi1_transfer_t` (`len` LE16, `flags`, `seq`, `tx_fill`) + inline TX |
+| `0x57` | `ALP_CC3501E_CMD_SPI1_RELEASE`   | none |
+
+All three are worker-routed (a polled multi-KB transfer would stall the
+bridge slave's re-arm from inside its own ISR — the same wedge class every
+other worker-routed family exists to avoid), and re-init is skipped on
+these opcodes specifically because they drive a separate controller and
+make no `Wlan_*` call — the bridge slave's DMA was never touched.
+
+TRANSFER's `seq` byte is a wire-level duplicate-suppression counter: the
+firmware caches the last completed `(seq, result)` and replays it for a
+matching seq instead of re-clocking the bus, which is what makes the host's
+ordinary transport-level `ALP_ERR_IO` retry safe on a bus that can drive
+flash. The host driver additionally requires a CONFIGURE to have succeeded
+in the *current* session before it will send a TRANSFER — the firmware's
+`g_configured` latch and cached result are file statics that outlive an
+Alif reboot, so a freshly initialised host context is forced through a real
+round trip (which discards any stale cache from a session the firmware
+outlived) rather than risk its first TRANSFER colliding with one.
+
+Console: `alp companion spi1 configure|xfer|read|release` — see
+[`cc3501e-companion-commands.md`](cc3501e-companion-commands.md#alp-companion-spi1).
+Host API: `cc3501e_spi1_configure/_transfer/_release()` in
+[`<alp/chips/cc3501e/core.h>`](../include/alp/chips/cc3501e/core.h).
+
 ## v0.x roadmap
 
 | Step                                             | Where it lands                          |
@@ -719,6 +785,7 @@ server is a separate repo.
 | BLE peripheral + advertise                       | `cc3501e-bridge-firmware:` v0.3 ✅ shipped (GAP advertise / scan / connect + GATT); NimBLE enable + scan **silicon-validated** |
 | GPIO proxy + camera-enable                       | `cc3501e-bridge-firmware:` v0.4 ✅ shipped + **silicon-validated** (`examples/aen/aen-cc3501e-gpio`, warm-boot harness pass=8 fail=0) |
 | OTA over the bridge (§ "OTA" above)              | `cc3501e-bridge-firmware:` ✅ shipped; **silicon-validated through install/STAGED** (cold swap-boot needs a cold-bootable unit — see [`cc3501e-production.md`](cc3501e-production.md)) |
+| SPI1 host passthrough (§ "SPI1 host passthrough" above) | `cc3501e-bridge-firmware:` v0.5 ✅ shipped (configure / transfer / release); not yet silicon-validated |
 | Full feature parity with `<alp/iot.h>` /
   `<alp/ble.h>`                                    | Remaining v1.0 work: HOST_IRQ async-event delivery and full runtime GATT/event parity |
 

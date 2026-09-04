@@ -123,8 +123,23 @@ typedef enum {
  * Same shape as the SDIO mux: a 74LVC157 quad 2:1 picks which
  * device drives the SoM's single I2S0 bus.  Control pins:
  *
- *   /E (active-low enable) = E1M IO8   -- Alif side (P7.1)
- *   S  (select)            = E1M IO13  -- CC3501E side (GPIO13)
+ *   /E (active-low enable) = E1M IO8   -- REVISION-DEPENDENT, see below
+ *   S  (select)            = E1M IO13  -- CC3501E side (GPIO13), both revisions
+ *
+ * NOTE: the enable line MOVED between board revisions, so neither answer is
+ * unconditionally true (#913).  Per
+ * metadata/e1m_modules/aen/hw-revisions.yaml:
+ *
+ *   - **r1**: IO8 is a direct Alif GPIO (P7.1).  One mux pin is SoC-direct and
+ *     the other goes through the CC3501E GPIO proxy.
+ *   - **r2**: "IO8 -> WIFI_GPIO30 ... (both now CC3501E)", and
+ *     from-cc3501e.tsv (which tracks R2) maps IO8 to GPIO_30.  BOTH mux
+ *     control pins are then CC3501E-side and both go through the proxy.
+ *
+ * Take the revision from the module, not from this comment: `alp board` prints
+ * it out of the EEPROM manifest.  Portable code should not branch on it by
+ * hand -- open the pin by its E1M_* id and let the SDK apply the per-rev
+ * `pad_route_overrides`.
  *
  * IMPORTANT: the two control pins live on DIFFERENT chips on
  * this EVK -- I2S_EN is driven from Alif via alp_gpio_*, but
@@ -582,10 +597,14 @@ typedef enum {
  * The TAS2563 also has a hardware broadcast page-write convention at
  * 0x48.  On PRE-RESPIN boards that address was occupied by U32
  * INA236B (+V_CAM0 rail), so the broadcast was unusable; U32 was
- * re-strapped A0=SCL -> 0x4B from the next batch, which frees 0x48.
- * Firmware that must work on both board revisions still has to issue
- * two targeted unit-address writes back-to-back rather than relying
- * on a 0x48 broadcast.
+ * re-strapped A0=SCL -> 0x4B from the next batch, which frees 0x48
+ * at the hardware level on respun boards.  That does not make 0x48
+ * usable from the SDK, though: 0x48 does not pin down one physical
+ * chip the way a strap address does, for a write any more than for
+ * a read, and tas2563_init() rejects TAS2563_I2C_ADDR_BROADCAST on
+ * every board revision, respun or not, so firmware unconditionally
+ * has to issue two targeted unit-address writes back-to-back rather
+ * than a 0x48 broadcast.
  *
  * EVK_I2C_ADDR_TAS2563_LOW and EVK_I2C_ADDR_TAS2563_HIGH are defined
  * in the generated routes header. */
@@ -610,10 +629,13 @@ typedef enum {
  * Confirmed against the EVK schematic strap labels.  The three
  * B-bank addresses actually in use (0x49 / 0x4A / 0x4B) collide with
  * nothing: not the TAS2563 unit addresses (0x4D / 0x4E), and not its
- * broadcast address (0x48), which the U32 re-strap freed.  On
- * PRE-RESPIN boards U32 sat at 0x48 and did shadow that broadcast --
- * see the TAS2563 block above for the two-write workaround that
- * remains necessary if you support both revisions.
+ * broadcast address (0x48), which the U32 re-strap freed at the
+ * hardware level.  On PRE-RESPIN boards U32 sat at 0x48 and did
+ * shadow that broadcast -- see the TAS2563 block above: the SDK
+ * cannot use 0x48 on either revision anyway (0x48 doesn't pin down
+ * one physical chip, regardless of direction), so the two-write
+ * workaround is unconditional, not conditional on which revision
+ * you support.
  *
  * EVK_I2C_ADDR_INA236_3V3, _1V8, _VIO, _VCAM0, _VCAM1 and _5V are
  * defined in the generated routes header. */

@@ -90,6 +90,15 @@ this firmware intended for?"
   or carrying no `status` key at all also refuses a build
   (`SdkRevisionNotBuildable`, exit code 5) -- see
   [#1025](https://github.com/alplabai/alp-sdk/issues/1025).)
+* The SAME r1/r2 disagreement, even when the app never calls
+  `alp_hw_info_assert_matches_build()` itself -- the boot banner
+  (`CONFIG_ALP_SDK_BANNER`) runs this same `hw_rev` comparison
+  automatically and prints a warning (issue #1853).  It's a floor, not
+  a substitute for the app-level assert above: it only compares
+  `hw_rev` (not SKU), it never refuses to boot unless
+  `CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL` is on, and it does not stop
+  an individual `alp_gpio_open()` call from dispatching to the wrong
+  chip -- see `src/zephyr/alp_banner.c`.
 
 ## See also
 

@@ -28,6 +28,24 @@ if [ -z "$BUF_SYM" ]; then
   exit 3
 fi
 BUF=0x$BUF_SYM
+# SAFETY GATE (alp-sdk#813) -- confirm the AEN E8 answered BEFORE the
+# halt+mem8 read below. This bench has two probes sharing OEM serial
+# 603000869, one of them on the GD32 bridge on a DIFFERENT board (V2N-M1);
+# JLinkExe selects by serial only, so JLINK_SN alone cannot prove which
+# board is on the other end -- see bench-env.sh. Read-only connect first;
+# nothing is halted until the DP ID matches.
+cat > /tmp/reread-preflight.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_READ
+connect
+exit
+EOF
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/reread-preflight.jlink \
+  > /tmp/reread-preflight.out 2>&1 || true
+bench_jlink_assert_connected /tmp/reread-preflight.out "re-read preflight" || exit 7
+bench_jlink_assert_aen_dpidr /tmp/reread-preflight.out "re-read preflight" || exit 4
+
 cat > /tmp/rr.jlink <<EOF
 connect
 halt

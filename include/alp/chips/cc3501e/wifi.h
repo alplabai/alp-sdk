@@ -359,11 +359,19 @@ alp_status_t cc3501e_wifi_ap_stop(cc3501e_t *ctx);
 alp_status_t cc3501e_wifi_rssi(cc3501e_t *ctx, int8_t *rssi);
 
 /**
- * @brief Read the current STA IPv4 address (WIFI_GET_IP, opcode 0x17).
+ * @brief Read one interface's IPv4 address (WIFI_GET_IP, opcode 0x17).
  *
- * @param ctx  Initialised driver context.
- * @param ip   Receives the 4 IPv4 octets, network order (ip[0] = MSB).
- * @return ALP_OK with @p ip filled; ALP_ERR_NOT_READY if no lease yet
+ * @p iface picks which interface is reported (protocol v9):
+ * @ref ALP_CC3501E_WIFI_IFACE_STA is the station-mode lease from the joined
+ * AP; @ref ALP_CC3501E_WIFI_IFACE_AP is the module's OWN address on the
+ * soft-AP it runs -- the bind address a serving application needs, and the
+ * gateway an associated client sees in its DHCP lease.
+ *
+ * @param ctx    Initialised driver context.
+ * @param iface  One of @ref alp_cc3501e_wifi_iface_t.
+ * @param ip     Receives the 4 IPv4 octets, network order (ip[0] = MSB).
+ * @return ALP_OK with @p ip filled; ALP_ERR_NOT_READY if that interface has no
+ *         address yet -- no DHCP lease for STA, or the AP role not up for AP
  *         (firmware RESP_ERR_NOT_READY); ALP_ERR_IO on a short reply; or the
  *         mapped error.
  *
@@ -371,7 +379,7 @@ alp_status_t cc3501e_wifi_rssi(cc3501e_t *ctx, int8_t *rssi);
  *       protocol header; this helper assumes the reply data is 4 IPv4
  *       bytes after the status byte.  See cc3501e.c gap note.
  */
-alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4]);
+alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t iface, uint8_t ip[4]);
 
 /**
  * @brief Poll the non-blocking STA connection state (WIFI_STATUS, opcode 0x1B).

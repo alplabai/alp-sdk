@@ -63,17 +63,15 @@ alp_dac_t *alp_dac_open(const alp_dac_config_t *cfg)
 		return NULL;
 	}
 
-	/* SoC capability gate: reject an out-of-range channel before any
-	 * backend dispatch.  ALP_SOC_DAC_COUNT is 0 under CONFIG_ALP_SOC_NONE,
-	 * so this is skipped there and a valid-but-unresolved channel surfaces
-	 * NOT_READY from the backend open() instead (mirrors the ADC dispatch's
-	 * capability gate; the DAC registry migration in #33 dropped the old
-	 * wrapper-array channel bound this restores). */
-	if ((ALP_SOC_DAC_COUNT > 0) && (uint32_t)cfg->channel_id >= (uint32_t)ALP_SOC_DAC_COUNT) {
-		alp_z_set_last_error(ALP_ERR_INVAL);
-		return NULL;
-	}
-
+	/* Admission is the backend registry, not the SoC cap table (issue
+	 * #1642): ALP_SOC_DAC_COUNT is 0 for a SoC with no on-die DAC, but a
+	 * bridged DAC backend (e.g. src/backends/dac/gd32_bridge.c on
+	 * renesas:rzv2n:n44) can still register an exact silicon_ref match
+	 * and serve channels the cap table doesn't know about -- gating on
+	 * the count here would reject that channel before alp_backend_select
+	 * ever runs.  Every other class dispatcher (adc, counter, inference,
+	 * ...) already admits this way: select the backend, and let its own
+	 * open() bound-check the channel against what it actually serves. */
 	const alp_backend_t *be = alp_backend_select("dac", ALP_SOC_REF_STR);
 	if (be == NULL) {
 		alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);

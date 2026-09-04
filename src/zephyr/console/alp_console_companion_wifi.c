@@ -406,7 +406,8 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 			shell_print(sh, "rssi:  unavailable (%d)", (int)rs);
 		}
 		uint8_t      ip[4] = { 0 };
-		alp_status_t ips   = cc3501e_wifi_get_ip(companion_cc3501e, ip);
+		alp_status_t ips =
+		    cc3501e_wifi_get_ip(companion_cc3501e, (uint8_t)ALP_CC3501E_WIFI_IFACE_STA, ip);
 		if (ips == ALP_OK) {
 			shell_print(sh, "ip:    %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
 		} else {

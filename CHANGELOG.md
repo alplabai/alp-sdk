@@ -7,6 +7,118 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Changed — CC3501E wire protocol 7 to 8: request identity for every worker-routed opcode
+
+**HELD: needs `cc3501e-bridge-firmware` v0.6.0 (protocol 8) to be released and a
+bench run before this ships.** A protocol-8 host refuses a protocol-7 firmware
+outright (`cc3501e_reset()` returns `ALP_ERR_VERSION` on a `GET_VERSION`
+mismatch), so merging this before that firmware release would break the
+companion link on every unit currently flashed with v0.5.1.
+
+Protocol v7 gave `SOCK_SEND` a retry seq so a lost reply could not make the
+host's poll-by-repeat look like a new request and re-transmit the payload. That
+fix could only ever cover one opcode, because it spent a spare byte that
+happened to exist inside one request struct; the other 25 worker-routed opcodes
+still had no request identity at all, and a lost reply on any of them
+re-executed the operation
+(`alplabai/cc3501e-bridge-firmware#102`).
+
+- **The seq moved to the frame header.** Flags bits 3..7 (`0x08`-`0x80`, unused
+  through v7) carry a 5-bit retry seq, so every worker-routed opcode is covered
+  at zero wire cost and with no per-opcode struct change.
+  `poll_by_repeat()` allocates one seq per LOGICAL command and re-sends it
+  unchanged on every retry of that command — that constancy is the whole
+  mechanism. `cc3501e_request()`, the single-shot path with no retry loop, sends
+  the reserved `ALP_CC3501E_REQ_SEQ_NONE` (0) instead, so a frame that is not a
+  repeat of anything can never be answered from the firmware's latch. A pre-v8
+  host leaves those bits clear, which is why 0 had to be reserved: without it,
+  every one of its frames of a given opcode would look like the same seq.
+- **`DIAG_GET_STATS` grew additively, 8 to 16 bytes.** `cc3501e_diag_stats()`
+  now fills a `cc3501e_diag_stats_t` — a struct rather than out-params,
+  because the reply has now changed shape twice — carrying `worker_execs` and
+  `retry_latch_hits` beside the two frame counters. Those two are what
+  distinguish "the retry was absorbed" from "the operation ran twice", i.e. the
+  only way to observe the fix above on hardware. A v7 firmware answers only the
+  first two counters; `has_worker_counters` then reports the other two as
+  ABSENT rather than as a measured zero, and `alp companion diag stats` says so
+  in words — a bench run told "retry_latch_hits = 0" by firmware that never
+  counted them would record a pass for a mechanism that was not running.
+
+`SOCK_SEND` keeps its own 8-bit struct seq and is exempt from the header-seq
+mechanism on both sides (8 bits of identity is strictly stronger than 5, and
+that path is the bench-validated one); `SOCK_RECV` is exempt because it consumes
+stream state, so a header-seq match is not evidence that two frames are the same
+logical read.
+
+Verified in `tests/zephyr/cc3501e_host_driver` against the software slave model,
+78/78 cases, each new assertion mutation-proven: re-allocating the seq per
+attempt instead of per command, making the single-shot path claim a real seq,
+and hard-coding `has_worker_counters` true each fail exactly one test and no
+others. Not verified on silicon — the AEN801 bench unit is hardware-dead
+(#1883).
+
+### Fixed — thirteen Alif E8 driver defects found against the HWRM, four proven on silicon
+
+A read-only review of the Alif E8 drivers against `AHRM0012NDA` v0.3, datasheet
+`ADTS0013` v1.2 and errata `AERR0012` v2.0 (#1831) produced thirteen filed
+defects. All are fixed here; the four with an on-silicon witness are marked.
+
+**Bench-verified on `E1M-AEN801` (`AE822FA0E5597LS0` Rev A0), 2026-08-30:**
+
+- **Every 8- and 16-bit CRC BusFaulted** (#1847). `CRC_DATA_IN_8_n` is a range of
+  byte-wide registers and HWRM 15.2.5.3.5 says "only 8-bits can be written per
+  beat"; the driver used a 32-bit store, so the whole narrow-CRC path was
+  unreachable on hardware. Found by extending `aen-crc-regcheck` past the one
+  32-bit algorithm it had always run. All four algorithms now pass against their
+  host references.
+- **The ADC12 clock ran ~16x over its rated maximum** (#1823). `PERIPH_CLK`
+  measures ~156.5 MHz with no prescaler, so `clock_div = 2` clocked the SAR at
+  ~78 MHz against a 5000 kHz datasheet limit. Now 16, the lowest the field
+  reaches. Divide-by-32 was tried and does not work — HWRM's "Others: Reserved"
+  is real — so the part is still ~2x over spec and #1823 stays open for Alif.
+- **A falling edge on a comparator input locked the core** (#1821). The HSCMP has
+  two interrupt sources; the ISR cleared only bit 0 on a level-sensitive line,
+  and the "mask" writes set the rising-edge mask while clearing the falling-edge
+  one. `CMP_INTERRUPT_MASK` now reads `0x3 / 0x0 / 0x3` across arm and disarm.
+- **LPTIMER alarms fired one tick late** (#1829). The interval is
+  `LOADCOUNT + 1` clocks (HWRM 13.1.4.7), so a 1-tick alarm at 32768 Hz took
+  61.0 us instead of 30.5. `LOADCOUNT` now reads `ticks - 1` for every row.
+
+**Fixed on the documents, without a bench witness available:** the ADC's
+interrupt-mask direction, sequencer MODE field, sample-width encoding,
+completed-sample-register selection and both PGA gain ladders (#1822); five more
+LPTIMER/UTIMER/PWM defects including a wrong-direction relative alarm and a live
+period change that left a pad dead for ~43 s (#1829); four PDM defects including
+an unmasked FIFO count that overran its destination array (#1826); MHU
+`ACCESS_REQUEST` pinned high for the life of the image (#1827); the CPI frame
+reaching the AXI master with no bound against the caller's buffer (#1825);
+`__enable_irq()` clobbering PRIMASK mid-MRAM-write (#1824); one DMA error
+wedging the SPI driver in a `K_FOREVER` wait (#1819); a `DMASTP` acking the
+wrong peripheral (#1818); the event router discarding silicon `DMA_ACK_TYPE`
+defaults (#1820); no cache maintenance on non-snooping PL330 buffers (#1830);
+and two hal_alif UTIMER bugs routed around at their call sites, plus a QEC
+channel that never counted (#1828).
+
+### Fixed — AEN metadata and pinout facts that were wrong or missing
+
+- `inter-chip.tsv` paired Alif MOSI with CC3501E `GPIO_28` and MISO with
+  `GPIO_29`. That is backwards, and it is what made three Alp documents appear
+  to describe two different boards. The R2 module netlist routes P14_5 to
+  `GPIO_29` (PICO) and P14_4 to `GPIO_28` (POCI) — the board is correct and
+  needs no rework (#1807).
+- `IO16` and `IO17` were published as customer IO while the bridge firmware owns
+  and refuses both pads. Both rows now name the claim, so the generated pinmux
+  capability carries it (#1808).
+- The E8 SoC metadata pointed at datasheet v1.0 and published 29 uA/MHz, a
+  figure from the pre-1.0 v0.51 draft. Now v1.2 and 27 uA/MHz, with the I2C
+  ceiling drop to 1.0 Mbps, the shared-pin LPSPI channel and the six-entry STOP
+  ladder recorded as notes (#1811).
+- **Errata ER004's external brownout supervisor is the carrier's job, not the
+  module's**, and nothing said so. `POR_N` is pulled up on-module and brought
+  out to the E1M edge; no supervisor part is on the SoM. Omitting one on a
+  carrier can permanently damage the SoC (#1810).
+
+
 ### Fixed — CC3501E socket send/recv put 4 KB buffers on the caller's stack
 
 `cc3501e_sock_send()` and `cc3501e_sock_recv()` each declared
@@ -8196,7 +8308,7 @@ The exact order code is **left `TBD`, deliberately**: the sources in this
 tree disagree on precision (the CHANGELOG's own `metadata/e1m_modules/aen/CHANGELOG.md:16`
 says "TI DP83825", the devicetree says `DP83825I`), and the devicetree's own
 label self-flags as an unverified "fork reference" one
-(`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-354`). The MDIO
+(`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:548-555`). The MDIO
 `PHYID1+PHYID2` bench readback (`id=2000a140`,
 `examples/aen/aen-ethernet-link/README.md:39`) confirms the DP83825 die/OUI
 identity but not the temperature/package order-code suffix, so it cannot

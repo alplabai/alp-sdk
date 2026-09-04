@@ -179,6 +179,7 @@ static int counter_alif_utimer_set_alarm(const struct device *dev, uint8_t chan_
 					 const struct counter_alarm_cfg *acfg)
 {
 	struct counter_alif_utimer_data *data = dev->data;
+	const struct counter_alif_utimer_config *cfg  = dev->config;
 	uint32_t base = timer_base(dev);
 	uint32_t target;
 
@@ -192,8 +193,44 @@ static int counter_alif_utimer_set_alarm(const struct device *dev, uint8_t chan_
 		return -EBUSY;
 	}
 
+	if (acfg->ticks > counter_alif_utimer_get_top_value(dev)) {
+		return -EINVAL;
+	}
+
 	if (acfg->flags & COUNTER_ALARM_CFG_ABSOLUTE) {
+		uint32_t now   = alif_utimer_get_counter_value(base);
+		uint32_t guard = data->guard_period;
+
 		target = acfg->ticks;
+
+		/*
+		 * The driver advertises get_guard_period/set_guard_period, so a
+		 * caller is entitled to -ETIME when an absolute target is already
+		 * behind the counter.  set_alarm() used to take acfg->ticks
+		 * verbatim: a target the free-running counter passed microseconds
+		 * ago returned 0 and then fired after a full 2^32-tick wrap --
+		 * about 43 s at 100 MHz -- with no way for the caller to tell
+		 * "armed" from "missed" (#1829).
+		 */
+		if (cfg->direction == ALIF_UTIMER_COUNTER_DIRECTION_DOWN) {
+			if ((now - target) <= guard) {
+				return -ETIME;
+			}
+		} else {
+			if ((target - now) <= guard) {
+				return -ETIME;
+			}
+		}
+	} else if (cfg->direction == ALIF_UTIMER_COUNTER_DIRECTION_DOWN) {
+		/*
+		 * HWRM 13.2.6.3.26 UTIMERn_CNTR_CTRL bit 8 CNTR_DIR: "0x0: Up /
+		 * 0x1: Down".  init() honours a DT counter-direction of DOWN, but
+		 * the relative target was computed by ADDING unconditionally, so
+		 * the counter decremented AWAY from it: the compare matched only
+		 * after underflow to CNTR_PTR and the walk back down, roughly
+		 * 2^32 - ticks later -- about 43 s for a requested 10 us (#1829).
+		 */
+		target = alif_utimer_get_counter_value(base) - acfg->ticks;
 	} else {
 		/* Relative: add to the live counter value (free-running, wraps). */
 		target = alif_utimer_get_counter_value(base) + acfg->ticks;
@@ -303,7 +340,15 @@ static void counter_alif_utimer_isr(const struct device *dev)
 		void *user;
 		uint32_t now;
 
-		alif_utimer_clear_interrupt(base, CHAN_INTERRUPT_COMPARE_A_BUF1_BIT);
+		/* NOTE: hal_alif's alif_utimer_clear_interrupt() read-modify-writes
+		 * UTIMERn_CHAN_INTERRUPT, which HWRM 13.2.4.2 defines as "Write a 1
+		 * to each bit of this register to clear the interrupt" -- so the
+		 * read-back-and-write-all also clears any OVER_FLOW or CAPTURE_A bit
+		 * latched behind another consumer's back.  Write only our bit
+		 * (#1829).  (13.2.4.2 also says to READ this register to find the
+		 * event, while Table 13-16 marks every bit W; the read is
+		 * bench-proven to work, so it stays.) */
+		sys_write32(BIT(CHAN_INTERRUPT_COMPARE_A_BUF1_BIT), UTIMER_CHAN_INTERRUPT(base));
 		alif_utimer_disable_interrupt(base, CHAN_INTERRUPT_COMPARE_A_BUF1_BIT);
 		alif_utimer_disable_compare_match(base, UTIMER_DRIVER_A);
 
@@ -336,8 +381,16 @@ static int counter_alif_utimer_init(const struct device *dev)
 		alif_utimer_set_down_counter(base);
 		break;
 	case ALIF_UTIMER_COUNTER_DIRECTION_TRIANGLE:
-		alif_utimer_set_triangular_counter(base);
-		break;
+		/*
+		 * CNTR_TYPE = 0x4 counts up then back down.  The Zephyr counter
+		 * class assumes a monotonic counter that wraps at the top value --
+		 * every relative-alarm and guard-period calculation in this file
+		 * depends on it -- so a triangular counter cannot back this API
+		 * (#1829).  It is a valid PWM mode; use the PWM driver for it.
+		 */
+		LOG_ERR("counter-direction TRIANGLE is not a monotonic counter and "
+		        "cannot back the Zephyr counter API");
+		return -ENOTSUP;
 	case ALIF_UTIMER_COUNTER_DIRECTION_UP:
 	default:
 		alif_utimer_set_up_counter(base);
@@ -388,34 +441,43 @@ static DEVICE_API(counter, counter_alif_utimer_api) = {
  * global block; the IRQ is the parent's "comp_a_buf1" line (bit2,
  * UTIMER_IRQ2_IRQn = 379), NOT "comp_capt_a" (bit0, CAPTURE_A, IRQ 377).
  */
-#define COUNTER_ALIF_UTIMER_INIT(inst)                                                      \
-	static void counter_alif_utimer_irq_cfg_##inst(const struct device *dev);           \
-	static struct counter_alif_utimer_data counter_alif_utimer_data_##inst;             \
-	static const struct counter_alif_utimer_config counter_alif_utimer_cfg_##inst = {   \
-		.info = {                                                                   \
-			.max_top_value = UTIMER_TOP_VALUE,                                  \
-			.freq          = DT_PROP_OR(DT_INST_PARENT(inst), clock_frequency,  \
-						    UTIMER_DEFAULT_CLK_HZ),                 \
-			.flags         = COUNTER_CONFIG_INFO_COUNT_UP,                      \
-			.channels      = 1,                                                 \
-		},                                                                          \
-		.timer_base  = DT_REG_ADDR_BY_IDX(DT_INST_PARENT(inst), 0),                 \
-		.global_base = DT_REG_ADDR_BY_IDX(DT_INST_PARENT(inst), 1),                 \
-		.freq_hz     = DT_PROP_OR(DT_INST_PARENT(inst), clock_frequency,            \
-					  UTIMER_DEFAULT_CLK_HZ),                           \
-		.timer_id    = DT_PROP_OR(DT_INST_PARENT(inst), timer_id, 0),               \
-		.direction   = DT_PROP_OR(DT_INST_PARENT(inst), counter_direction,          \
-					  ALIF_UTIMER_COUNTER_DIRECTION_UP),                \
-		.irq_cfg     = counter_alif_utimer_irq_cfg_##inst,                          \
-	};                                                                                  \
-	DEVICE_DT_INST_DEFINE(inst, counter_alif_utimer_init, NULL,                         \
-			      &counter_alif_utimer_data_##inst,                             \
-			      &counter_alif_utimer_cfg_##inst, POST_KERNEL,                 \
-			      CONFIG_COUNTER_INIT_PRIORITY, &counter_alif_utimer_api);      \
-	static void counter_alif_utimer_irq_cfg_##inst(const struct device *dev)            \
-	{                                                                                   \
-		ARG_UNUSED(dev);                                                            \
-		/*                                                                          \
+#define COUNTER_ALIF_UTIMER_INIT(inst) \
+	static void counter_alif_utimer_irq_cfg_##inst(const struct device *dev); \
+	static struct counter_alif_utimer_data counter_alif_utimer_data_##inst; \
+	static const struct counter_alif_utimer_config counter_alif_utimer_cfg_##inst = {  \
+		.info = {                                                                  \
+			.max_top_value = UTIMER_TOP_VALUE,                                 \
+			.freq          = DT_PROP_OR(DT_INST_PARENT(inst), clock_frequency, \
+						    UTIMER_DEFAULT_CLK_HZ),                \
+			.flags         = (DT_PROP_OR(DT_INST_PARENT(inst),                 \
+						     counter_direction,                    \
+						     ALIF_UTIMER_COUNTER_DIRECTION_UP) ==  \
+					  ALIF_UTIMER_COUNTER_DIRECTION_DOWN)              \
+						 ? 0U                                      \
+						 : COUNTER_CONFIG_INFO_COUNT_UP,           \
+			.channels      = 1,                                                \
+		},                                                                         \
+		.timer_base  = DT_REG_ADDR_BY_IDX(DT_INST_PARENT(inst), 0),                \
+		.global_base = DT_REG_ADDR_BY_IDX(DT_INST_PARENT(inst), 1),                \
+		.freq_hz     = DT_PROP_OR(DT_INST_PARENT(inst), clock_frequency,           \
+					  UTIMER_DEFAULT_CLK_HZ),                          \
+		.timer_id    = DT_PROP_OR(DT_INST_PARENT(inst), timer_id, 0),              \
+		.direction   = DT_PROP_OR(DT_INST_PARENT(inst), counter_direction,         \
+					  ALIF_UTIMER_COUNTER_DIRECTION_UP),               \
+		.irq_cfg     = counter_alif_utimer_irq_cfg_##inst,                         \
+	}; \
+	DEVICE_DT_INST_DEFINE(inst, \
+	                      counter_alif_utimer_init, \
+	                      NULL, \
+	                      &counter_alif_utimer_data_##inst, \
+	                      &counter_alif_utimer_cfg_##inst, \
+	                      POST_KERNEL, \
+	                      CONFIG_COUNTER_INIT_PRIORITY, \
+	                      &counter_alif_utimer_api); \
+	static void counter_alif_utimer_irq_cfg_##inst(const struct device *dev) \
+	{ \
+		ARG_UNUSED(dev); \
+		/*                                                                         \
 		 * The UTIMER exposes 8 NVIC lines mapping 1:1 to the 8 CHAN_INTERRUPT     \
 		 * event bits (comp_capt_a..overflow == CAPTURE_A..OVER_FLOW).  The alarm  \
 		 * fires on CHAN_INTERRUPT_COMPARE_A_BUF1 (bit2), whose line is            \
@@ -424,11 +486,13 @@ static DEVICE_API(counter, counter_alif_utimer_api) = {
 		 * line (comp_a_buf1) was never enabled, so the ISR never ran (confirmed   \
 		 * on E8 by aen-counter-alarm-regcheck: bit2 latched + unmasked + ISER set \
 		 * yet ISPR(377)=0).                                                       \
-		 */                                                                         \
-		IRQ_CONNECT(DT_IRQ_BY_NAME(DT_INST_PARENT(inst), comp_a_buf1, irq),         \
-			    DT_IRQ_BY_NAME(DT_INST_PARENT(inst), comp_a_buf1, priority),    \
-			    counter_alif_utimer_isr, DEVICE_DT_INST_GET(inst), 0);          \
-		irq_enable(DT_IRQ_BY_NAME(DT_INST_PARENT(inst), comp_a_buf1, irq));         \
+		 */ \
+		IRQ_CONNECT(DT_IRQ_BY_NAME(DT_INST_PARENT(inst), comp_a_buf1, irq), \
+		            DT_IRQ_BY_NAME(DT_INST_PARENT(inst), comp_a_buf1, priority), \
+		            counter_alif_utimer_isr, \
+		            DEVICE_DT_INST_GET(inst), \
+		            0); \
+		irq_enable(DT_IRQ_BY_NAME(DT_INST_PARENT(inst), comp_a_buf1, irq)); \
 	}
 
 DT_INST_FOREACH_STATUS_OKAY(COUNTER_ALIF_UTIMER_INIT)

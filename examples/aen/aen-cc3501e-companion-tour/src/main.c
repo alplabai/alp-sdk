@@ -289,7 +289,7 @@ static void tour_wifi_connect_and_socket(cc3501e_t *fw)
 
 	/* DHCP lease.  ip[] is network order (ip[0] = MSB), already dotted-quad. */
 	uint8_t ip[4] = { 0 };
-	if (cc3501e_wifi_get_ip(fw, ip) == ALP_OK) {
+	if (cc3501e_wifi_get_ip(fw, ALP_CC3501E_WIFI_IFACE_STA, ip) == ALP_OK) {
 		printf("[tour] IP -> %u.%u.%u.%u\n", ip[0], ip[1], ip[2], ip[3]);
 	} else {
 		printf("[tour] IP -> not leased yet\n");
@@ -431,9 +431,18 @@ int main(void)
 	 * opens the inter-chip SPI + the WIFI_EN/nRESET control pins, binds them,
 	 * attaches the GPIO proxy, and runs the power+reset sequence.  Everything
 	 * after this uses the portable cc3501e_* + alp_gpio_* surfaces.
+	 *
+	 * STATIC, not a stack local (#1868): sizeof(cc3501e_t) is ~32 KB
+	 * (measured -- rx_scratch/tx_scratch/wifi_scan_buf/ble_scan_buf/
+	 * evt_buf/sock_buf/spi1_{tx,rx}_buf are each sized off the v5
+	 * ALP_CC3501E_MAX_PAYLOAD=4096) against CONFIG_MAIN_STACK_SIZE=4096,
+	 * so as a local the prologue's frame reservation alone crosses
+	 * PSPLIM and the M55 raises a UsageFault at main() entry -- before
+	 * even this function's first printf runs.  Same fix, same reason,
+	 * as aen-cc3501e-bringup's `fw`.
 	 */
-	cc3501e_t    fw;
-	alp_status_t s = cc3501e_bridge_bringup(&fw);
+	static cc3501e_t fw;
+	alp_status_t     s = cc3501e_bridge_bringup(&fw);
 	if (s == ALP_ERR_NOT_PRESENT_ON_THIS_SOC) {
 		printf("[tour] bridge bring-up failed (SPI bus %u / WIFI_EN+nRESET absent? err=%d) -- "
 		       "check the board overlay\n",

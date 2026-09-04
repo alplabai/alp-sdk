@@ -37,6 +37,9 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(spi_dw_alif);
 
+/* Max push/pull iterations in the polled master loop before declaring a stall. */
+#define SPI_DW_POLL_GUARD 4000000u
+
 #include <errno.h>
 
 #include <zephyr/kernel.h>
@@ -47,6 +50,7 @@ LOG_MODULE_REGISTER(spi_dw_alif);
 #include <zephyr/pm/device.h>
 
 #include <zephyr/sys/sys_io.h>
+#include <zephyr/cache.h>
 #include <zephyr/sys/util.h>
 
 #include <zephyr/pm/device.h>
@@ -70,6 +74,7 @@ LOG_MODULE_REGISTER(spi_dw_alif);
 
 #ifdef CONFIG_SPI_DW_ALIF_USE_DMA
 #include <zephyr/drivers/dma.h>
+#include "spi_dw_alif_dma_burst.h"
 #define SPI_DW_DMA_FULL_DUPLEX 2
 #define SPI_DW_DMA_SEMAPHORE_COUNT SPI_DW_DMA_FULL_DUPLEX
 #endif
@@ -126,8 +131,23 @@ static void completed(const struct device *dev, int error)
 	}
 
 out:
-	/* need to give time for FIFOs to drain before issuing more commands */
-	while (test_bit_sr_busy(dev)) {
+	/* need to give time for FIFOs to drain before issuing more commands.
+	 *
+	 * Bounded: this runs on EVERY transfer, PIO and DMA, in thread context, so
+	 * a wedged macrocell used to hang the calling thread outright.  The other
+	 * polled loops in this file already carry SPI_DW_POLL_GUARD; this one was
+	 * missed (#1819).  There is nothing useful to return from here -- the
+	 * transfer is already being completed -- so log and carry on tearing down
+	 * rather than spin. */
+	{
+		uint32_t guard = 0;
+
+		while (test_bit_sr_busy(dev)) {
+			if (++guard > SPI_DW_POLL_GUARD) {
+				LOG_ERR("SR[BUSY] never cleared; tearing down anyway");
+				break;
+			}
+		}
 	}
 
 	/* Disabling interrupts */
@@ -302,21 +322,6 @@ static void spi_dw_dma_enable_channels(const struct device *dev,
 }
 
 /**
- * Calculate optimal burst length that divides evenly into chunk size
- */
-static uint32_t spi_dw_dma_calculate_burst_length(uint32_t default_burst, size_t chunk)
-{
-	uint32_t burst_length = default_burst ? default_burst : 1;
-
-	/* Adjust burst length to be a factor of chunk size */
-	while (chunk % burst_length) {
-		burst_length--;
-	}
-
-	return burst_length;
-}
-
-/**
  * Check if there's more data to transfer
  */
 static bool spi_dw_dma_has_more_data(const struct spi_dw_dma_state *state)
@@ -378,16 +383,9 @@ static int spi_dw_dma_setup_rx_channel(const struct device *dev,
 {
 	const struct spi_dw_config *info = dev->config;
 	static uint32_t dummy_rx;
-	uint32_t burstlen;
+	uint32_t dw_spi_rxftlr_dflt = (info->fifo_depth * 1) / 2;
+	uint32_t burstlen = spi_dw_dma_burst_for_chunk(dw_spi_rxftlr_dflt, chunk, rx_ptr == &dummy_rx);
 	int ret;
-
-	if (rx_ptr == &dummy_rx) {
-		burstlen = 1;
-	} else {
-		uint32_t dw_spi_rxftlr_dflt = (info->fifo_depth * 1) / 2;
-
-		burstlen = spi_dw_dma_calculate_burst_length(dw_spi_rxftlr_dflt, chunk);
-	}
 
 	write_dmardlr(dev, burstlen - 1);
 	dma_cfg->dest_burst_length = burstlen;
@@ -413,6 +411,26 @@ static int spi_dw_dma_setup_rx_channel(const struct device *dev,
 		spi_dw_dma_cache_shape(&spi_d->dma_state.rx_shape, dma_cfg, dma_block_cfg);
 	}
 
+	/*
+	 * The PL330 is programmed non-cacheable and non-snooping:
+	 * dma_pl330_config_channel() writes CC_CCTRL_MODIFIABLE_VALUE = 0x2 into
+	 * both cache-control fields of DMA_CCRn, i.e. AxCACHE = 0b0010, Normal
+	 * non-cacheable non-bufferable (HWRM 12.2.4.3.15).  So it neither snoops
+	 * nor allocates and software maintenance is mandatory for any buffer in
+	 * cacheable memory -- and this driver did none at all (#1830).
+	 *
+	 * RX: clean+invalidate the destination BEFORE the transfer.  Cleaning
+	 * first matters because a dirty line evicted mid-DMA would overwrite bytes
+	 * the controller had already delivered; invalidating means the post-DMA
+	 * read misses to memory.  The transfer loop invalidates this buffer again
+	 * once the transfer completes, to drop anything speculative prefetch
+	 * pulled in during the transfer window -- see the post-completion
+	 * invalidate after spi_dw_dma_wait_completion().
+	 */
+	if (rx_ptr != &dummy_rx) {
+		sys_cache_data_flush_and_invd_range(rx_ptr, chunk * spi_d->dfs);
+	}
+
 	ret = dma_start(info->dma_dev, info->dma_rx.ch);
 	if (ret < 0) {
 		LOG_ERR("SPI:%p dma_start %p failed %d\n", dev, info->dma_dev, ret);
@@ -436,18 +454,28 @@ static int spi_dw_dma_setup_tx_channel(const struct device *dev,
 	uint32_t burst_length;
 	int ret;
 
+	/*
+	 * DMATDLR gets the raw, unreduced half-FIFO default, deliberately NOT
+	 * burst_length below.  DMATDLR is a low watermark (dma_tx_req asserts
+	 * once the TX FIFO holds <= DMATDLR entries), not a burst count -- the
+	 * only hardware constraint is DMATDLR + burst <= fifo_depth, which the
+	 * unreduced default already satisfies for every burst this function can
+	 * compute.  A #1818 follow-up briefly programmed burst_length into
+	 * DMATDLR instead, on the assumption the two had to match; that was
+	 * reverted on review for lack of bench evidence.  See
+	 * spi_dw_alif_dma_burst.h for the full rationale and the
+	 * CONFIG_SPI_DW_ALIF_DMA_MIN_LEN comment in
+	 * examples/aen/aen-cc3501e-bringup/prj.conf for the open question this
+	 * left behind.
+	 */
 	write_dmatdlr(dev, dw_spi_txftlr_dflt);
+
+	burst_length = spi_dw_dma_burst_for_chunk(dw_spi_txftlr_dflt, chunk, tx_ptr == &dummy_tx);
+	dma_cfg->source_burst_length = burst_length;
+	dma_cfg->dest_burst_length = burst_length;
+
 	dma_cfg->channel_direction = MEMORY_TO_PERIPHERAL;
 	dma_cfg->dma_slot = info->dma_tx.periph;
-
-	if (tx_ptr == &dummy_tx) {
-		dma_cfg->source_burst_length = dma_cfg->dest_burst_length = 1;
-	} else {
-		burst_length = spi_dw_dma_calculate_burst_length(dw_spi_txftlr_dflt, chunk);
-
-		dma_cfg->source_burst_length = burst_length;
-		dma_cfg->dest_burst_length = burst_length;
-	}
 
 	dma_block_cfg->source_address = (uintptr_t)tx_ptr;
 	dma_block_cfg->dest_address = (mm_reg_t)DEVICE_MMIO_GET(dev) + DW_SPI_REG_DR;
@@ -466,6 +494,13 @@ static int spi_dw_dma_setup_tx_channel(const struct device *dev,
 			return ret;
 		}
 		spi_dw_dma_cache_shape(&spi_d->dma_state.tx_shape, dma_cfg, dma_block_cfg);
+	}
+
+	/* TX: clean the source so the non-snooping DMAC reads what the CPU wrote,
+	 * rather than whatever was in SRAM before the dirty lines were evicted
+	 * (#1830).  See the RX path above for the AxCACHE citation. */
+	if (tx_ptr != &dummy_tx) {
+		sys_cache_data_flush_range((void *)tx_ptr, chunk * spi_d->dfs);
 	}
 
 	ret = dma_start(info->dma_dev, info->dma_tx.ch);
@@ -488,7 +523,20 @@ static int spi_dw_dma_wait_completion(const struct device *dev,
 		SPI_DW_DMA_FULL_DUPLEX : 1;
 
 	for (uint8_t i = 0; i < expected_completions; i++) {
-		k_sem_take(&spi->dma_sem, K_FOREVER);
+		/*
+		 * Bounded, not K_FOREVER: this is where every stall on the DMA path
+		 * used to terminate -- a dropped completion callback (see
+		 * spi_dw_dma_cleanup()) left the caller's thread blocked for the life
+		 * of the image with no way to report it (#1819).  A timeout turns
+		 * that into an -ETIMEDOUT the caller can act on.
+		 */
+		if (k_sem_take(&spi->dma_sem, K_MSEC(CONFIG_SPI_DW_ALIF_DMA_TIMEOUT_MS)) != 0) {
+			LOG_ERR("DMA completion %u/%u timed out after %d ms",
+			        i + 1U,
+			        expected_completions,
+			        CONFIG_SPI_DW_ALIF_DMA_TIMEOUT_MS);
+			return -ETIMEDOUT;
+		}
 
 		/* Check for IRQ error first, then DMA error */
 		if (spi->ctx.sync_status < 0) {
@@ -516,6 +564,25 @@ static void spi_dw_dma_cleanup(const struct device *dev, int error)
 		if (info->dma_tx.enabled) {
 			dma_stop(info->dma_dev, info->dma_tx.ch);
 		}
+
+		/*
+		 * dma_stop() tears down the event-router callback mapping --
+		 * dma_alif_evtrtr_stop() clears channel_map[ch].in_use and
+		 * orig_callback on success, and dma_pl330_transfer_stop() returns 0
+		 * whether it killed a running channel or found it already idle, so
+		 * this always happens.  dma_config() is the ONLY place that mapping
+		 * is re-registered.
+		 *
+		 * The descriptor-reuse cache used to survive that: the next transfer
+		 * with a matching shape took the dma_reload() fast path, skipped
+		 * dma_config(), and its completion hit the "Callback for unmapped
+		 * physical channel" branch in evtrtr_callback_wrapper() -- which
+		 * returns WITHOUT k_sem_give().  The caller then blocked in
+		 * spi_dw_dma_wait_completion() forever.  One DMA error wedged the
+		 * driver for good (#1819).
+		 */
+		spi->dma_state.rx_shape.valid = false;
+		spi->dma_state.tx_shape.valid = false;
 	}
 
 	completed(dev, error);
@@ -551,6 +618,12 @@ static int spi_dw_dma_transceive(const struct device *dev,
 	if (!spi_dw_is_slave(spi) && (!tx_bufs || !tx_bufs->buffers)) {
 		write_dr(dev, 0x0);
 	}
+
+	/* ctx.sync_status latches the last error from spi_dw_isr() and from
+	 * completed() in cleanup, and spi_dw_dma_wait_completion() returns it --
+	 * but nothing cleared it, so a transfer that got past a previous failure
+	 * reported that failure's status instead of its own (#1819). */
+	spi->ctx.sync_status = 0;
 
 	/* Main transfer loop */
 	while (spi_dw_dma_has_more_data(state)) {
@@ -642,6 +715,18 @@ static int spi_dw_dma_transceive(const struct device *dev,
 		ret = spi_dw_dma_wait_completion(dev, state);
 		if (ret < 0) {
 			goto dma_out;
+		}
+
+		/* RX: invalidate the destination AFTER the controller has written it.
+		 * The pre-transfer clean+invalidate in spi_dw_dma_setup_rx_channel()
+		 * is not sufficient on its own: the CPU may speculatively prefetch
+		 * this buffer during the transfer window, and any line pulled in then
+		 * holds pre-DMA bytes.  Without this the caller can read stale data
+		 * back from a completed transfer, which is a silent wrong-data bug
+		 * rather than a visible failure (#1830).
+		 */
+		if (state->is_rx_req && rx_ptr != (void *)&dummy_rx) {
+			sys_cache_data_invd_range(rx_ptr, chunk * spi->dfs);
 		}
 
 		state->tx_off += chunk * spi->dfs;
@@ -896,9 +981,6 @@ static bool spi_dw_should_dma(const struct spi_dw_config *info,
 	return len >= (size_t)CONFIG_SPI_DW_ALIF_DMA_MIN_LEN;
 }
 #endif /* CONFIG_SPI_DW_ALIF_USE_DMA */
-
-/* Max push/pull iterations in the polled master loop before declaring a stall. */
-#define SPI_DW_POLL_GUARD 4000000u
 
 /* Batched polled transfer for the common 8-bit master case.
  *

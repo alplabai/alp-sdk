@@ -49,6 +49,18 @@
  * configure time.  Apps pass NULL for a given field to skip
  * matching it.
  *
+ * The app-level assert above is opt-in and SKU-aware; separately, when
+ * `CONFIG_ALP_SDK_BANNER` and `CONFIG_ALP_SDK_HW_INFO` are both on (the
+ * default), the SDK's own boot banner does a narrower, automatic
+ * best-effort check of its own: it compares the live manifest's hw_rev
+ * against `CONFIG_ALP_SDK_SOM_HW_REV` (the revision the firmware's
+ * pad-routing tables were compiled for) and prints a warning on a
+ * disagreement, WITHOUT refusing to boot -- promote that to a hard
+ * failure via `CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL`.  See
+ * `src/zephyr/alp_banner.c` and issue #1853.  It never fires on a
+ * missing/unprovisioned manifest, so a factory-fresh module still boots
+ * silently on this front.
+ *
  * The runtime EEPROM read path is implemented.  On a build with no
  * EEPROM bus configured (CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID
  * unset / < 0) both entry points return @ref ALP_ERR_NOSUPPORT and

@@ -83,7 +83,7 @@ conclusion:
   The same NULL-check shape recurs in the vendor-extension entry points
   `src/backends/adc/alif_e7.c:234` and `alif_e8.c:256`
   (`alp_alif_adc_set_trigger_source`).
-- **jpeg** — `src/jpeg_dispatch.c:104` (`alp_jpeg_capabilities`'s
+- **jpeg** — `src/jpeg_dispatch.c:146` (`alp_jpeg_capabilities`'s
   `h == NULL`), with the same check in its build-stub twin
   `src/common/stub/stub_jpeg.c:38`. Pinned by
   `tests/unit/jpeg_registry/src/test_jpeg_registry.c:34`.
@@ -102,21 +102,31 @@ conclusion:
   `ext/renesas/camera.c` (`:64,103,137`), `ext/renesas/inference.c`
   (`:51,66,79`), `ext/renesas/power.c` (`:45`).
 
-**Yocto backend divergence — known, unresolved (not a grandfathered
-outlier).** This one is not a handful of one-off call sites; it is an
-entire backend answering the documented `ALP_ERR_NOT_READY`-on-a-closed-
-handle contract differently from every Zephyr dispatcher.
-`src/yocto/peripheral_{gpio,i2c,spi,uart}.c` gate every op on
-`pin/bus/port == NULL || !...->in_use` and return `ALP_ERR_INVAL` for
-*both* a NULL handle *and* a closed (non-NULL, `in_use == false`) one:
-`peripheral_gpio.c:238,257,277,470,516`, `peripheral_i2c.c:171,190,214`,
-`peripheral_spi.c:180,207,225`, `peripheral_uart.c:290,400`. Concretely,
-`alp_gpio_write(closed_pin, ...)` returns `ALP_ERR_NOT_READY` built for
-Zephyr and `ALP_ERR_INVAL` built for Yocto — the same public symbol
-answering differently depending which backend it was built against,
-undocumented until now. No test pins either side of this one. Recorded
-here as a known, unresolved divergence; this amendment does not change or
-resolve it.
+**Yocto backend divergence — i2c/spi/uart resolved by #1834, gpio still
+open under #1734.** This was not a handful of one-off call sites; it was
+an entire backend answering the documented `ALP_ERR_NOT_READY`-on-a-
+closed-handle contract differently from every Zephyr dispatcher.
+`src/yocto/peripheral_{gpio,i2c,spi,uart}.c` gated every op on
+`pin/bus/port == NULL || !...->in_use` and returned `ALP_ERR_INVAL` for
+*both* a NULL handle *and* a closed (non-NULL, `in_use == false`) one.
+Issue #1834 splits the lifecycle check out of `peripheral_i2c.c`
+(`alp_i2c_write`, `alp_i2c_read`, `alp_i2c_write_read`),
+`peripheral_spi.c` (`alp_spi_transceive`, `alp_spi_write`,
+`alp_spi_read`), and `peripheral_uart.c` (`alp_uart_write`,
+`alp_uart_read`) so each now returns `ALP_ERR_NOT_READY` for a
+NULL-or-closed handle and reserves `ALP_ERR_INVAL` for a genuinely
+malformed argument, checked only once the handle itself is known good —
+same split #1734 already applied to `peripheral_gpio.c`'s public entry
+points. `peripheral_gpio.c` itself is tracked separately under #1734 and
+still returns `ALP_ERR_INVAL` for a NULL-or-closed `pin` as of this
+amendment: `alp_gpio_write(closed_pin, ...)` still returns
+`ALP_ERR_NOT_READY` built for Zephyr and `ALP_ERR_INVAL` built for Yocto,
+the same public symbol answering differently depending which backend it
+was built against. `tests/yocto/peripheral_{i2c,spi,uart}.c` cover the
+NULL-handle half of #1834's fix; `tests/yocto/peripheral_{i2c,spi,uart}_
+closed_status.c` add the sharper non-NULL, closed-handle case per class,
+mirroring `tests/yocto/peripheral_gpio_closed_pin_status.c`'s technique.
+No test pins the gpio side yet.
 
 **Gap: signex unverified.** No signex checkout exists on the host this
 amendment was written from — searched `/home`, `/opt`, `/srv`, `/mnt`,

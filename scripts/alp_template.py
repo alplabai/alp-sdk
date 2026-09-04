@@ -1261,6 +1261,39 @@ def _scaffold_cmakelists(text: str) -> str:
 
 _RELATIVE_LINK_RE = re.compile(r"\]\((\.\./[^)\s]+)\)")
 
+# Issue #1855: `_RELATIVE_LINK_RE` above only rewrites a MARKDOWN-style
+# `](../docs/x.md)` link, and only inside README.md (the one file
+# `_scaffold_readme` runs on). A board.yaml/src/main.c comment names the
+# same kind of alp-sdk-tree-only path in prose instead -- no `[...](...)`
+# around it at all -- so it never matches and survives a scaffold
+# verbatim (e.g. i2c-master's board.yaml/src/main.c both say "see
+# examples/v2n/v2n-temp-sensor for ..." with no disclaimer that it isn't
+# part of this scaffolded project, unlike the DELIBERATELY-disclaimed
+# i2c-scanner mention two paragraphs above it in the same file). Narrow
+# on purpose: only the two prefixes actually found bare like this
+# (`docs/*.md`, `examples/<category>/<name>[/<subpath>]`) -- a
+# `scripts/`/`metadata/` mention is left alone, since every such mention
+# in the catalog today is either already `${ALP_SDK_ROOT}`-qualified in
+# a CMakeLists.txt or purely descriptive prose that names a script/file
+# by convention rather than telling the customer to open it.
+_BARE_REPO_PATH_RE = re.compile(
+    r"\b(?:docs/[\w./-]+\.md|examples/[\w-]+/[\w-]+(?:/[\w./-]+)?)\b")
+
+
+def _scaffold_bare_repo_paths(text: str, docs_ref: str) -> str:
+    """Rewrite a bare `docs/*.md` or `examples/<category>/<name>
+    [/<subpath>]` mention into the same absolute GitHub URL form
+    `_scaffold_readme`'s `_fix_link` gives a markdown-style link --
+    see `_BARE_REPO_PATH_RE`'s comment for why this exists as a
+    SEPARATE pass rather than widening that one. Best-effort / no-op
+    when neither prefix appears."""
+    def _sub(m: re.Match[str]) -> str:
+        target = m.group(0)
+        kind = "blob" if "." in target.rsplit("/", 1)[-1] else "tree"
+        return f"https://github.com/alplabai/alp-sdk/{kind}/{docs_ref}/{target}"
+
+    return _BARE_REPO_PATH_RE.sub(_sub, text)
+
 
 def _core_board(sku: str, core_id: str | None, metadata_root: Path) -> str | None:
     """`metadata/e1m_modules/<sku>.yaml` `topology.<core_id>.board` --
@@ -1447,7 +1480,20 @@ def _scaffold_readme(
         return f"](https://github.com/alplabai/alp-sdk/{kind}/{docs_ref}/{target})"
 
     text = _RELATIVE_LINK_RE.sub(_fix_link, text)
-    text = re.sub(rf"(?<!\S){re.escape(example_path)}(?!\S)", ".", text)
+    # A bare (non-link) mention of the example's OWN path -- e.g. a
+    # `west build -b <board> <example_path>` argument -- becomes `.`
+    # (the scaffold IS the project root wherever it lands). Issue #1855:
+    # a MULTI-slice template's README also names a bare SUBPATH of its
+    # own example dir this way (mproc-mailbox's `west build -b
+    # <board> examples/multicore/mproc-mailbox/peer`, for the HE-side
+    # peer/ core) -- the plain `example_path` match above never fires
+    # for that (its `(?!\S)` boundary fails on the following `/peer`),
+    # so the `/peer` suffix survived verbatim, naming a path that
+    # exists only inside the alp-sdk tree. Capture + keep any trailing
+    # `/<subpath>` so it becomes `./<subpath>` instead of vanishing.
+    text = re.sub(
+        rf"(?<!\S){re.escape(example_path)}(/\S+)?(?!\S)",
+        lambda m: "." + (m.group(1) or ""), text)
     text = text.replace(
         "-DEXTRA_ZEPHYR_MODULES=$(pwd)", "-DEXTRA_ZEPHYR_MODULES=$ALP_SDK_ROOT")
     if source_board and target_board:
@@ -1528,13 +1574,18 @@ def render_to_envelope(
     whenever the canonical core isn't already valid for `sku` -- this
     is the fix for issue #864's follow-up: the shallow `som.sku`-only
     swap emitted a board.yaml `--emit zephyr-conf --core m55_hp` can't
-    build against for any cross-SoM-family sku. `board.yaml`/`prj.conf`
-    /`src/main.c` are a byte-identical passthrough when `sku` already
-    matches the example's own default (or shares its core ids);
-    CMakeLists.txt and README.md are ALSO scaffold-adapted regardless
-    of `sku` (`_scaffold_cmakelists` / `_scaffold_readme`) -- their
-    in-tree `ALP_SDK_ROOT` guess and SDK-tree-relative links/paths are
-    wrong for a copied-out scaffold no matter which sku was requested.
+    build against for any cross-SoM-family sku. `prj.conf` is a byte-
+    identical passthrough when `sku` already matches the example's own
+    default (or shares its core ids); `board.yaml`/`src/*.c`/`src/*.h`
+    keep their sku/core/pin substitutions scoped to that case but ALWAYS
+    get `_scaffold_bare_repo_paths` (issue #1855: a bare, non-markdown-
+    link `docs/*.md`/`examples/<...>` mention in a comment is wrong for
+    a copied-out scaffold regardless of which sku was requested, same
+    reasoning as the next sentence). CMakeLists.txt and README.md are
+    ALSO scaffold-adapted regardless of `sku` (`_scaffold_cmakelists` /
+    `_scaffold_readme`) -- their in-tree `ALP_SDK_ROOT` guess and SDK-
+    tree-relative links/paths are wrong for a copied-out scaffold no
+    matter which sku was requested.
     """
     doc = load_catalog(catalog_path)
     record = find_template(doc, template_id)
@@ -1632,6 +1683,11 @@ def render_to_envelope(
             # core id (`_strip_stale_core_prose`).
             for old in (pin_renames or {}):
                 text = _strip_stale_core_prose(text, old)
+            # Issue #1855: board.yaml comments carry the same kind of
+            # bare alp-sdk-tree-only cross-reference README.md does
+            # (see `_BARE_REPO_PATH_RE`), but never went through any
+            # rewrite -- only README.md did.
+            text = _scaffold_bare_repo_paths(text, docs_ref)
         elif rel.endswith("CMakeLists.txt"):
             this_core = cmake_core_for.get(rel)
             if this_core and core_renames and this_core in core_renames:
@@ -1644,6 +1700,12 @@ def render_to_envelope(
                 example_sku=example_sku, sku=sku,
                 source_board=source_board, target_board=target_board,
                 pin_renames=pin_renames)
+        elif rel.endswith((".c", ".h")):
+            # Same issue #1855 gap as board.yaml above -- a source
+            # comment (e.g. cold-chain-monitor's src/main.c "(see
+            # examples/ai/cold-chain-monitor/models/README.md)") is
+            # never touched by any existing scaffold-adaptation pass.
+            text = _scaffold_bare_repo_paths(text, docs_ref)
         out.append((rel, text))
     return out
 

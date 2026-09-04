@@ -72,7 +72,7 @@ into the topic-specific docs.
   doc's *Silicon scope — which E-part has what* section).
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
-  index (30 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
+  index (31 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
 
 ## Per-SoM bring-up
 
@@ -138,6 +138,10 @@ into the topic-specific docs.
 - [recommended-libraries.md](recommended-libraries.md) — curated
   third-party libraries (integrated / recommended / deferred) for
   what the SDK deliberately leaves out of `<alp/...>`.
+- [bench/model-perf-capture.md](bench/model-perf-capture.md) — recipe
+  for a tier-2 bench-measured model-perf point
+  (`metadata/model_perf/<SKU>/<hash>.yaml`); the contract ships in
+  #1520, `metadata/model_perf/` stays empty until a real capture runs.
 
 ## Security & release
 

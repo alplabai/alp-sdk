@@ -32,20 +32,24 @@ ledger is the one to trust.
 
 ## Summary
 
-84 silicon/HIL-gated ledger rows parsed across 7 sections.  A row can carry more than one glyph
+90 silicon/HIL-gated ledger rows parsed across 8 sections.  A row can carry more than one glyph
 (e.g. half a feature done, half pending), so glyph counts can
-exceed the row count.  This total EXCLUDES two kinds of row that
+exceed the row count.  This total EXCLUDES three kinds of row that
 would otherwise inflate it: the rows under "CI-only / tooling rows (no HIL gate)"
 below (its own `✅` means "green CI workflow", a different claim
 than the Legend's `✅` below -- so it gets its own table, tallied
-separately), and the rows under a heading starting with "v0.4 prep" (test-plan.md's own intro there says they are
+separately); the rows under "v0.8.0 — E1M-AEN801 (Alif Ensemble E8) first full bench bring-up"
+(that section's own intro says every row is a raw-Zephyr-driver
+regcheck that never touches the portable `alp_*_open()` surface --
+same reasoning, own table, tallied separately); and the rows under
+a heading starting with "v0.4 prep" (test-plan.md's own intro there says they are
 duplicated from the v0.4 section already counted above).
 
 | Glyph | Meaning | Count |
 |---|---|---|
-| `⏳` | untested | 39 |
-| `🟡` | partial | 35 |
-| `✅` | verified | 11 |
+| `⏳` | untested | 35 |
+| `🟡` | partial | 43 |
+| `✅` | verified | 13 |
 | `❌` | failing | 1 |
 | `n/a` | n/a | 0 |
 
@@ -58,6 +62,18 @@ Tracked here so the page is complete, but never pooled into the Summary above --
 | `⏳` | untested | 0 |
 | `🟡` | partial | 0 |
 | `✅` | verified | 9 |
+| `❌` | failing | 0 |
+| `n/a` | n/a | 0 |
+
+### "v0.8.0 — E1M-AEN801 (Alif Ensemble E8) first full bench bring-up" -- counted separately
+
+Tracked here so the page is complete, but never pooled into the Summary above -- see the note there.  Every row in this section exercises a raw Zephyr driver directly (`gpio_pin_set()`, `i2c_transfer()`, `spi_transceive()`, ...), never the ALP SDK's own portable `alp_*_open()` backend, so a `✅` here is not yet a portable-surface verification.
+
+| Glyph | Meaning | Count |
+|---|---|---|
+| `⏳` | untested | 0 |
+| `🟡` | partial | 3 |
+| `✅` | verified | 14 |
 | `❌` | failing | 0 |
 | `n/a` | n/a | 0 |
 
@@ -120,9 +136,45 @@ You should **NOT** ship production firmware against a family with no
 this ledger, **i.MX 93** and **V2M/DEEPX** carry no `✅ verified` row --
 their register addresses, timing values, and init sequences have not
 been silicon-validated.  (**V2N** and **AEN801/E8** do carry `✅`
-rows -- see the v0.6.0 and CI-only sections plus the AEN rows above --
+rows -- see the v0.6.0 and v0.8.0 sections plus the AEN rows above --
 but a family having *some* `✅` rows does not mean every row for it is
 `✅`; check the specific row you depend on.)
+
+## Ledger scope (issue #1893)
+
+This is a **partial backfill of issue #1893, not a fix for it** -- issue
+#1893 stays open.  This ledger previously stopped at a "v0.9.0 candidate"
+section while the SDK had already tagged five releases past it.  This
+pass adds the two releases whose bench evidence was missing outright --
+**v0.7.0** and **v0.8.0**, the latter carrying the E1M-AEN801
+first-full-bench-bring-up result as a structured ledger table (citing
+the authoritative `docs/aen-bench-bringup.md`, not just `CHANGELOG.md`'s
+summary of the same session) -- retitles the "v0.9.0 candidate" section
+to **v0.9.0** (it tagged 2026-07-06, it is not a candidate any more), and
+reconciles the v0.1.0 AEN I²C/SPI/UART/GPIO rows against the v0.8.0
+evidence (see those rows above).  After this pass the ledger's newest
+section is still **v0.9.0** while `metadata/sdk_version.yaml` reports
+**0.16.0** -- seven tagged releases (v0.10.0-v0.16.0) plus the in-flight
+v0.17.0 remain un-audited; see below.
+
+It does **not** attempt a full per-release re-audit of **v0.10.0 through
+v0.16.0**, plus the in-flight **v0.17.0** (`metadata/sdk_version.yaml`
+reports `version: 0.16.0`, `status: released`; `CHANGELOG.md`'s
+`[Unreleased] - v0.17.0 candidate` section is the next one out) -- nine
+releases, each with a `CHANGELOG.md` section running from a few hundred
+to several thousand lines, the large majority of it code/build/doc
+changes with no new HIL claim to ledger.  Where a genuinely new silicon
+result landed inside that span for a row that already exists above (for
+example the peer-core boot row's 2026-08-01 HE-master→HP-peer date, or
+the CC3501E request-identity row's `v0.17` gate), that row's own Evidence
+column already carries it -- new evidence for an EXISTING row is folded
+in in place, not by adding a version section per release.  What is
+**not** done here: walking every `CHANGELOG.md` entry in v0.9.0-v0.16.0
+checking whether it silently extends or invalidates a row that is not
+already flagged.  Treat any row whose Evidence predates a version in
+that range as current only as far as its own Evidence line says --
+cross-check `CHANGELOG.md` for that feature before relying on it to gate
+a release.  Tracked as remaining scope on issue #1893.
 
 ---
 
@@ -130,10 +182,10 @@ but a family having *some* `✅` rows does not mean every row for it is
 
 | Feature | Module / file | Status | What "verified" means | Evidence | Gates |
 |---|---|---|---|---|---|
-| AEN-Zephyr I²C real backend | `src/backends/i2c/zephyr_drv.c` | ⏳ untested | LSM6DSO WHOAMI = 0x6C read back on real E1M EVK via a manual bench run | manual bench run per `docs/ci/HW-IN-LOOP.md`, first captured result | v0.1 |
-| AEN-Zephyr SPI real backend | `src/backends/spi/zephyr_drv.c` | ⏳ untested | SPI flash JEDEC-ID (0x9F READID) returns expected bytes on real EVK | manual bench run per `docs/ci/HW-IN-LOOP.md` | v0.1 |
-| AEN-Zephyr UART real backend | `src/backends/uart/zephyr_drv.c` | ⏳ untested | Loopback 1 KiB at 115200 8N1, zero byte loss | manual bench run per `docs/ci/HW-IN-LOOP.md` | v0.1 |
-| AEN-Zephyr GPIO real backend | `src/backends/gpio/zephyr_drv.c` | ⏳ untested | Button press observed via IRQ; LED toggle visible on EVK | manual bench run per `docs/ci/HW-IN-LOOP.md` | v0.1 |
+| AEN-Zephyr I²C real backend | `src/backends/i2c/zephyr_drv.c` | 🟡 underlying mechanism bench-proven, portable-backend dispatch untested | LSM6DSO WHOAMI = 0x6C read back on real E1M EVK via a manual bench run | The `i2c2` controller itself is bench-proven on real E1M-AEN801 (E8) silicon — `examples/aen/aen-i2c2-eeprom-regcheck` drives the raw Zephyr `i2c_transfer()` API directly (not `alp_i2c_open()`) and enumerates a 24C128 EEPROM at `0x50` plus 12 devices total (`CHANGELOG.md` [v0.8.0] "Peripheral matrix — 15/17 aen-\* apps PASS", 2026-06-24; see the v0.8.0 section below). This is a controller-enumeration result on a different device than the LSM6DSO WHOAMI originally scoped, and the ALP SDK's own `zephyr_drv.c` I²C backend has not itself been separately exercised on real hardware | v0.1 |
+| AEN-Zephyr SPI real backend | `src/backends/spi/zephyr_drv.c` | 🟡 underlying mechanism bench-proven, portable-backend dispatch untested | SPI flash JEDEC-ID (0x9F READID) returns expected bytes on real EVK | The `spi0` controller itself is bench-proven on real E1M-AEN801 (E8) silicon — `examples/aen/aen-spi-regcheck` drives the raw Zephyr `spi_transceive()` API directly (not `alp_spi_open()`) and completes a DWC_ssi loopback (`CHANGELOG.md` [v0.8.0] "Peripheral matrix", 2026-06-24; see the v0.8.0 section below). No JEDEC-ID read against real flash was part of this pass, and the ALP SDK's own `zephyr_drv.c` SPI backend has not itself been separately exercised on real hardware | v0.1 |
+| AEN-Zephyr UART real backend | `src/backends/uart/zephyr_drv.c` | 🟡 underlying mechanism bench-proven, portable-backend dispatch untested | Loopback 1 KiB at 115200 8N1, zero byte loss | The `uart3` controller itself is bench-proven on real E1M-AEN801 (E8) silicon — `examples/aen/aen-uart-ns16550-loopback` drives the raw Zephyr `uart_poll_out()`/`uart_poll_in()` API directly (not `alp_uart_open()`) and byte-compares a loopback (`CHANGELOG.md` [v0.8.0] "Peripheral matrix", 2026-06-24; see the v0.8.0 section below). The exact byte count/baud in this pass were not itemised, and the ALP SDK's own `zephyr_drv.c` UART backend has not itself been separately exercised on real hardware | v0.1 |
+| AEN-Zephyr GPIO real backend | `src/backends/gpio/zephyr_drv.c` | 🟡 underlying mechanism bench-proven, portable-backend dispatch untested | Button press observed via IRQ; LED toggle visible on EVK | The `gpio_dw` controller itself is bench-proven on real E1M-AEN801 (E8) silicon — `examples/aen/aen-gpio-bench` drives the raw Zephyr `gpio_pin_configure()`/`gpio_pin_set()` API directly (not `alp_gpio_open()`) and confirms the full P8_0 pad path (`CHANGELOG.md` [v0.8.0] "Peripheral matrix", 2026-06-24; see the v0.8.0 section below) — that example's own header notes this proves the mux/DDR/DR path, not that the pad electrically moved. No button-IRQ/LED-visible scenario was part of this pass, and the ALP SDK's own `zephyr_drv.c` GPIO backend has not itself been separately exercised on real hardware | v0.1 |
 | `<alp/soc_caps.h>` generation pipeline | `scripts/gen_soc_caps.py` | ⏳ untested | Generated header round-trips against tracked-in-repo reference snapshot | `pr-generated-files.yml` | v0.1 |
 | ABI snapshot diff tool | `scripts/abi_snapshot.py` | ⏳ untested | Catches a deliberately injected breaking signature change | Manual diff test, recorded | v0.1 |
 
@@ -150,6 +202,9 @@ but a family having *some* `✅` rows does not mean every row for it is
 | `<alp/wdt.h>` AEN-Zephyr | `src/backends/wdt/zephyr_drv.c` | ⏳ untested | Watchdog reset observed when feed thread is starved | HIL | v0.2 |
 | Real CC3501E Wi-Fi/BLE dispatch on AEN-Zephyr | `src/backends/wifi/cc3501e.c + src/backends/ble/cc3501e.c` | ⏳ untested | `alp_wifi_open()` selects the CC3501E provider and `alp_ble_open()` + scan complete on real AEN silicon | HIL via `aen-cc3501e-companion-tour` `PORTABLE_WIRELESS:` lines | v0.9 |
 | CC3501E companion OTA (bridge-streamed, cold-swap) | `chips/cc3501e/cc3501e_ota.c` + `cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti.c` | ✅ verified | A forward-signed vendor image streamed over the bridge reaches `state=2` STAGED, the CC35's own `psa_fwu_request_reboot()` swaps it, and the swapped image self-accepts and persists across a true cold POR (no rollback) | Bench-proven on the E1M-AEN801 EVK, 2026-07-10 (`docs/cc3501e-production.md` §OTA; `cc3501e-bridge-firmware:BRINGUP_STATUS.md` §5) | v0.9 |
+| CC3501E request identity (wire protocol v8) | `chips/cc3501e/cc3501e_core.c` (`poll_by_repeat` seq allocation) + `cc3501e-bridge-firmware:src/protocol.c` (retry latch) | 🟡 partial | One logical command re-sends ONE seq across every retry, a new command allocates a different one, and the single-shot path sends the reserved seq 0; on hardware, a dropped reply then shows `worker_execs` +1 and `retry_latch_hits` +1 instead of `worker_execs` +2 | native_sim (`tests/zephyr/cc3501e_host_driver`, 4 cases, each mutation-proven against the software slave model); **HIL pending** -- needs firmware v0.6.0 (protocol 8) and a working AEN801 (#1883 -- the bench unit is hardware-dead) | v0.17 |
+| CC3501E listening socket (wire protocol v9) | `chips/cc3501e/cc3501e_sockets.c` (`cc3501e_sock_bind` / `_listen` / `_accepted_decode`) + `cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti_sock.c` (accept pump) | ✅ verified | A host binds INADDR_ANY, listens, and answers inbound HTTP over the module's own soft-AP: each connection arrives as an `EVT_SOCK_ACCEPTED` (opcode `0x2c`, 12-byte payload) carrying a handle the host recv/sends/closes, and the bridge still answers `GET_VERSION` afterwards | native_sim (`tests/zephyr/cc3501e_host_driver`: bind INADDR_ANY + explicit-IP encoding, listen backlog, accepted-event decode incl. short/NULL rejection) **and HIL** on the E1M-AEN801, 2026-09-03: `wifi ap` up, `sock serve 80` reports `ap ip: 10.0.0.3`, an associated client (DHCP lease 10.0.0.4 from the CC35's own server) got `HTTP/1.0 200 OK` + 71 B body on 11/11 requests across 4 serve runs, ~0.45 s each | v0.17 |
+| CC3501E AP-side IP accessor (`WIFI_GET_IP` iface selector, v9) | `chips/cc3501e/cc3501e_wifi.c` (`cc3501e_wifi_get_ip(ctx, iface, ip)`) + `cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti_wifi.c` | ✅ verified | `ALP_CC3501E_WIFI_IFACE_AP` reports the module's own soft-AP address instead of the STA lease, so a serving application has a bind address before any client associates | HIL, 2026-09-03: `ap ip: 10.0.0.3`, matching the gateway an associated client received by DHCP | v0.17 |
 | EdgeAI vision reference app | `examples/aen/edgeai-vision-aen/` | ⏳ untested | ≥10 fps inference on real E1M EVK | HIL | v0.2 |
 
 ## v0.3.0 — IoT app, multi-proc, board.yaml
@@ -157,9 +212,9 @@ but a family having *some* `✅` rows does not mean every row for it is
 | Feature | Module / file | Status | What "verified" means | Evidence | Gates |
 |---|---|---|---|---|---|
 | `<alp/inference.h>` Ethos-U on AEN | `src/backends/inference/tflm.cpp` + `src/backends/inference/ethos_u_aen.cpp` (Kconfig gates `CONFIG_ALP_TFLM_ETHOS_U85`/`_U65`/`_U55`) | 🟡 underlying mechanism bench-proven, portable-backend dispatch untested | A Vela-compiled model dispatched THROUGH this portable backend outputs values matching a CPU/logit reference within tolerance, on real Ethos-U85 / Ethos-U55-HE silicon | `CONFIG_ALP_TFLM_ETHOS_U85/U65/U55` are Kconfig-reachable (`tests/scripts/test_project_backends.py`), but no Vela-compiled model has been dispatched THROUGH this portable backend yet -- `examples/aen/aen-npu-inference-person-mram` (+ `-alif`) bench-prove the underlying TFLM+Ethos-U85 mechanism directly (`ethosu_invoke`), bypassing `<alp/inference.h>` entirely: person_detect (100% NPU) + keyword_scrambled (mixed 6-NPU/9-CPU) both `runJob=OK` on real E8 silicon, 2026-06-17 (`docs/aen-bench-bringup.md`); output was not compared against a CPU/logit reference | v0.3 |
-| `<alp/inference.h>` DEEPX DX-M1 (A55) | `src/yocto/inference_yocto.c` + `inference_deepx.cpp` | 🟡 code-complete, bench-unverified | Real `dxrt::InferenceEngine` body loads a `.dxnn` model + runs inference; outputs match a host-CPU reference | Body header-compiles against the **real** `dx_rt` headers (`dxrt::InferenceEngine`, replacing a fictional `dxnn_*` API); `tests/yocto/inference_dispatcher.c` covers NULL/INVAL; **real link needs the RZ/V Yocto sysroot, on-silicon run needs the DX-M1 PCIe card** | v0.8 |
-| `<alp/inference.h>` DRP-AI (A55) | `src/yocto/inference_drpai.cpp` | 🟡 code-complete, bench-unverified | Real `MeraDrpRuntimeWrapper` body loads a `drpai_dir` model (tar staged to a tempdir) + runs inference | Body header-compiles against the **real** `MeraDrpRuntimeWrapper.h`; **cross-link needs the RZ/V Yocto SDK sysroot + EdgeCortix MERA libs, on-silicon run needs the V2N board** | v0.8 |
-| `<alp/inference.h>` CPU floor via ONNX Runtime (A55) | `src/yocto/inference_ort.cpp` | 🟡 code-complete, bench-unverified | Real ONNX Runtime C API body opens a `.onnx` graph + runs inference; outputs match a reference run | Recipe BUILDS: `bitbake onnxruntime` completes against `E1M-V2N101` (MACHINE `e1m-v2n101-a55`, DISTRO `alp`) -- 997 tasks, all succeeded, producing `libonnxruntime.so.1.28.0` for `cortexa55` and `usr/include/onnxruntime/onnxruntime_c_api.h`; **but a green build is not a working inference and no SKU has run ORT on silicon**; default-off (`ALP_SDK_USE_ORT_CPU`), `resolve_auto()` orders it strictly last; no `.alpmodel` → ORT route on Yocto yet (hand-built `alp_inference_config_t` only -- zcbor has no Yocto build, so `alp_model_parse()` is the stub, see #1254) | v0.16 |
+| `<alp/inference.h>` DEEPX DX-M1 (A55) | `src/yocto/inference_yocto.c` + `inference_deepx.cpp` | 🟡 code-complete, bench-unverified | Real `dxrt::InferenceEngine` body loads a `.dxnn` model + runs inference; outputs match a host-CPU reference | Body header-compiles against the **real** `dx_rt` headers (`dxrt::InferenceEngine`, replacing a fictional `dxnn_*` API); `tests/yocto/inference_dispatcher.c` covers NULL/INVAL; **compiled + tensor-rank-regression-tested every PR** by `tests/yocto/inference_deepx_regression.cpp` against clean-room stand-in headers (`tests/yocto/fakes/dxrt/`), via `pr-plain-cmake.yml`'s `yocto`/`strict-warnings` jobs (issue #1747); **real link needs the RZ/V Yocto sysroot, on-silicon run needs the DX-M1 PCIe card** | v0.8 |
+| `<alp/inference.h>` DRP-AI (A55) | `src/yocto/inference_drpai.cpp` | 🟡 code-complete, bench-unverified | Real `MeraDrpRuntimeWrapper` body loads a `drpai_dir` model (tar staged to a tempdir) + runs inference | Body header-compiles against the **real** `MeraDrpRuntimeWrapper.h`; **compiled every PR** by `tests/yocto/inference_drpai_regression.cpp` against clean-room stand-in headers (`tests/yocto/fakes/drpai/`), via `pr-plain-cmake.yml`'s `yocto`/`strict-warnings` jobs (issue #1747) -- those tests cover the host-independent guards only (NULL/zero-size `model_data`, the no-`/dev/drpai0` `ALP_ERR_IO` path, NULL-`be_state` guards): no CI runner carries the device, so `LoadModel()`/`GetInputInfo()`/`Run()` stay unexercised until real hardware; **cross-link needs the RZ/V Yocto SDK sysroot + EdgeCortix MERA libs, on-silicon run needs the V2N board** | v0.8 |
+| `<alp/inference.h>` CPU floor via ONNX Runtime (A55) | `src/yocto/inference_ort.cpp` | 🟡 code-complete, bench-unverified | Real ONNX Runtime C API body opens a `.onnx` graph + runs inference; outputs match a reference run | Recipe BUILDS: `bitbake onnxruntime` completes against `E1M-V2N101` (MACHINE `e1m-v2n101-a55`, DISTRO `alp`) -- 997 tasks, all succeeded, producing `libonnxruntime.so.1.28.0` for `cortexa55` and `usr/include/onnxruntime/onnxruntime_c_api.h`; **but a green build is not a working inference and no SKU has run ORT on silicon**; default-off (`ALP_SDK_USE_ORT_CPU`), `resolve_auto()` orders it strictly last; no `.alpmodel` → ORT route on Yocto yet (hand-built `alp_inference_config_t` only -- zcbor has no Yocto build, so `alp_model_parse()` is the stub, see #1254); **compiled + tensor-rank/OrtValue-leak-regression-tested every PR** by `tests/yocto/inference_ort_regression.cpp` against a clean-room stand-in header (`tests/yocto/fakes/onnxruntime/`), via `pr-plain-cmake.yml`'s `yocto`/`strict-warnings` jobs (issue #1747) | v0.16 |
 | `<alp/audio.h>` real impl | `src/backends/audio/zephyr_drv.c` | ⏳ untested | PDM mic captures audio playable through I²S DAC, no buffer underruns | HIL | v0.3 |
 | `<alp/ble.h>` real impl | `src/backends/ble/zephyr_drv.c` + `src/backends/ble/cc3501e.c` | 🟡 partial | GATT server register + characteristic read/write host-tested under native_sim (`tests/zephyr/ble_gatt_server`, incl. client-read callback regression coverage); advertise + connect + client GATT read from a second BLE device over the air still needs a real two-device bench proof | native_sim (server register/read/write + client-read callback); HIL still pending for OTA connect/read/scan and the CC3501E provider | v0.3 |
 | `<alp/security.h>` real impl | `src/backends/security/zephyr_drv.c` (MbedTLS-PSA, priority 100, `silicon_ref="*"`) + `src/backends/security/se_cryptocell.c` (SE CryptoCell HW backend, priority 110, `silicon_ref="alif:ensemble:e8"` only) | 🟡 zephyr_drv native_sim-tested / ✅ se_cryptocell verified (SE, real E8) | SHA-256 + AES-128-GCM round-trip against MbedTLS / NIST reference vectors | `zephyr_drv`: `tests/zephyr/security_mbedtls` AEAD round-trip on native_sim. `se_cryptocell` (the backend that actually wins on AEN E8): SHA-256(`"abc"`) matched the NIST known-answer and an AES-128-GCM encrypt→decrypt round-trip matched, both computed inside the SE, RAM-run on real E8 silicon 2026-06-19 (`docs/aen-bench-bringup.md`; example `examples/aen/aen-se-crypto`) | v0.3 |
@@ -244,7 +299,7 @@ Design captured in
 |---|---|---|---|---|---|
 | GPU2D (D/AVE 2D) portable surface | `src/backends/gpu2d/sw_fallback.c` (real CPU path) + `src/backends/gpu2d/alif_dave2d.c` (D/AVE 2D real backend, bench-unverified, issue #24) | ✅ sw_fallback unit-tested / ⏳ D/AVE 2D untested | sw_fallback `fill_rect` / `blit` / `blend` produce exact pixels asserted in `tests/unit/gpu2d_registry` on native_sim; the D/AVE 2D backend produces the same pixels on a real E1M-AEN EVK | `tests/unit/gpu2d_registry` pixel ZTESTs green in `pr-twister`; **HAL-backed pixel assertion via a manual bench run (`docs/ci/HW-IN-LOOP.md`)** — gated on the Alif D/AVE 2D vendor pack | sw_fallback v0.x (tested), D/AVE 2D bench-gated |
 | ISP (VeriSilicon ISP Pico (vsi,isp-pico)) vendor-ext surface | `src/backends/ext/alif/camera.c` + `<alp/ext/alif/camera.h>`. **The ISP Pico backend registers `priority = 100` on `silicon_ref = "alif:ensemble:e8"` only** (`src/backends/camera/alif_isp_pico.c`) — E4/E6 carry the ISP in silicon but get no backend registration today, and every `ext/alif/camera.c` entry point returns `ALP_ERR_NOSUPPORT` | ⏳ untested | 3A window / per-channel gain LUT / LSC MESH LUT take effect on real ISP Pico silicon (the ISP is present on E4/E6/E8 — **not E7** — though only E8 is wired up); non-Alif handle returns `ALP_ERR_NOT_PRESENT_ON_THIS_SOC` | NULL/INVAL + vendor-handle-gate ZTESTs green in `pr-twister`; **HAL-backed ISP statistics readback** on ISP Pico silicon — AE is declared in the vendored `isp_wrapper` headers but undefined in its archive (no Expm symbol), AF and LSC are absent from that archive outright (no header, no symbol), and, for an additional, independent reason, the gain path is contract-absent (see `src/backends/ext/alif/camera.c`) | v0.5 (header+stub), real bodies gate v0.x |
-| Inline-AES (OSPI SecAES) vendor-ext surface | `src/backends/ext/alif/storage.c` + `<alp/ext/alif/storage.h>` | ⏳ untested | SecAES key-provision binds a slot and encrypted XIP executes from OctalSPI on real ISP-Pico-tier silicon (E4/E6/E8); status read-back reports `ENGAGED` before XIP is trusted | NULL/INVAL + vendor-handle-gate ZTESTs green in `pr-twister`; **encrypted-XIP boot + status readback** on silicon — gated on the Alif SecAES HAL pack | v0.5 (header+stub), real bodies gate v0.x |
+| Inline-AES (OSPI SecAES) vendor-ext surface | `src/backends/ext/alif/storage.c` + `<alp/ext/alif/storage.h>` | ⏳ untested | SecAES key-provision binds a slot and encrypted XIP executes from OctalSPI on real ISP-Pico-tier silicon (E4/E6/E8); status read-back reports `ENGAGED` before XIP is trusted | NULL/INVAL + vendor-handle-gate ZTESTs green in `pr-twister` (`tests/unit/storage_registry`) -- these do **not** reach the real SE-transport body: that native_sim test build has no `HAS_ALIF_SE_SERVICES`, so `CONFIG_ALP_SDK_STORAGE_ALIF_SECAES` compiles out to the `ALP_ERR_NOSUPPORT` fallback there, same as on `dev`; issue #224 landed a real key-provision body (SE-service transport, `CONFIG_ALP_SDK_STORAGE_ALIF_SECAES`, **default OFF** pending a bench PASS) that marshals + sends a real `SERVICE_APPLICATION_OSPI_WRITE_KEY_ID` packet over the same `se_service_send_request()` transport `aen-se-crypto` bench-proved, and checks both the packet's `header.hdr_error_code` and `resp_error_code` (pre-seeded to a non-success sentinel) so an SE that doesn't implement the service can't read back as a false `ALP_OK` -- but the round-trip itself has not been run: no bench unit reachable at implementation time has an OSPI SecAES-relevant part populated (board rev r1; the targeted Macronix `MX25UM25645GXDI00` ships DNP=0 only on the R2 BOM, #915).  **Encrypted-XIP boot + status readback** stay gated on that hardware -- status readback additionally has no vendor-published SE service to call at all (`docs/aen-se-services.md` §2.5) | v0.5 (header+stub), key-provision body v0.x (SE-transport, bench-unverified — issue #224); status stays NOSUPPORT, no vendor SE service exists |
 
 ## v0.6.0 — V2N GD32-bridge silicon campaign (verified on the bench)
 
@@ -264,7 +319,58 @@ matching CHANGELOG `[v0.6.0]` entries.
 | CM33↔GD32 SCI7 SPI bidirectional link | `zephyr/drivers/spi/` RSCI path | ✅ verified | Sustained request/reply traffic, both transports, zero CRC errors in soak | merges `9f3e600`, `7845ad7`, `b5c941c` | v0.6 |
 | SCI7 DMA fast path | `zephyr/drivers/spi/spi_renesas_rz_sci_b.c` DMAC-B path | ❌ failing | DMA-driven transactions sustain the soak | Survives full init incl. v0.7 negotiation, then TX requests stop post-settle (issue #84; vendor ticket drafted); gate stays default-off | v0.7 |
 
-## v0.9.0 candidate — portable-surface consistency batch (2026-07)
+## v0.7.0 — Yocto productionization, provisioning, SoM-release signing
+
+Mostly Yocto/BSP/build/metadata infrastructure (production image +
+hardening, U-Boot production boot, SoM-release bundle signing +
+provenance verification, `provision_som.py` scaffolding, the
+`system-manifest` IDE/tool contract).  None of it is a new HIL-gated
+behavioural claim by itself -- it is covered where relevant by the
+CI-only section below or by the existing rows its output feeds.  Two
+BRD_I2C chip register-map corrections landed against the datasheet, not
+yet against silicon:
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| DA9292 `PMC_STATUS_00` bit decode | `chips/da9292/da9292.c` | 🟡 partial | Bit assignments match the datasheet's own table (not yet cross-checked on a live bus) | Verified against Renesas DA9292 Datasheet Rev 2.2 (R16DS0518EJ0220) Table 14, p.36-37 -- the existing decode confirmed correct, no code change (`CHANGELOG.md` [v0.7.0], 2026-06-07); on-silicon exercise via `examples/v2n/v2n-brd-i2c-bringup` is separate, still-pending work | v0.3.x |
+| ACT8760 register map + VSET accessors | `chips/act8760/act8760.c` | 🟡 partial | Register table matches the vendor workbook + datasheet; `act8760_rail_get_vset`/`_set_vset` are real read-modify-write, not stubs | Re-derived cell-by-cell against `AA82BZ_RegisterMap_Users_Rev1P1` + ACT88760 Datasheet Rev C, 2026-06-06 (`CHANGELOG.md` [v0.7.0]); `driver_status` moved `stub`→`partial`; on-silicon exercise not yet run | v0.3.x |
+
+## v0.8.0 — E1M-AEN801 (Alif Ensemble E8) first full bench bring-up
+
+First full bench bring-up of the `E1M-AEN801` (Alif Ensemble E8,
+Cortex-M55-HE) on real silicon (alplab-gw), flashed over the new Flow D
+(J-Link direct MRAM burn, part-number device profile
+`AE822FA0E5597LS0_M55_HE`).  Captured here as a structured ledger row
+per issue #1893, citing `docs/aen-bench-bringup.md` -- the authoritative
+record of this session (not `CHANGELOG.md`, whose `[v0.8.0]` entry is a
+summary of the same bench run, not its original source).  **Every row below is a
+raw-Zephyr-driver / register-level regcheck example** (`gpio_pin_set()`,
+`i2c_transfer()`, `spi_transceive()`, `uart_poll_out()`,
+`pwm_set_cycles()`, ...) run directly against the Zephyr driver, **not**
+through the ALP SDK's own portable `alp_*_open()` backends -- see the
+reconciled v0.1.0 I²C/SPI/UART/GPIO rows above for that distinction.
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| AEN801 peripheral matrix — GPIO | `examples/aen/aen-gpio-bench` (`gpio_dw`) | ✅ verified | Full P8_0 pad path proven at pad level, not just DDR/DR controller-register readback: an infinite-loop `blink` confirmed blinking by eye, with `EXT_PORTA` following `SWPORTA_DR` 12/12 while it ran | `docs/aen-bench-bringup.md` §1 GPIO row -- the original DDR/DR+`EXT_PORTA` PASS criterion could never independently fail (`EXT_PORTA` mirrors `SWPORTA_DR` for an output-direction pin, Synopsys DW_apb_gpio databook) and proved nothing beyond the controller-register path; a same-day `GPIO_CTRL_CKEN` theory for an earlier "dark pad" was refuted on the bench, and this pad-level optical re-proof superseded it, 2026-07-27, real E8 silicon, alplab-gw | v0.8 |
+| AEN801 peripheral matrix — UART | `examples/aen/aen-uart-ns16550-loopback` | ✅ verified | `uart3` (ns16550) TX/RX loopback byte-compares clean | `docs/aen-bench-bringup.md` §1 "What is validated on silicon" table, real E8 silicon, alplab-gw, 2026-06-24 | v0.8 |
+| AEN801 peripheral matrix — PWM | `examples/aen/aen-pwm-utimer-pwmleds` (UTIMER3) | ✅ verified | `pwm_set_cycles` on UTIMER3/pwm3 register-readback verified | same | v0.8 |
+| AEN801 peripheral matrix — SPI | `examples/aen/aen-spi-regcheck` (DWC_ssi) | ✅ verified | `spi0` loopback via `spi_transceive()` completes clean | same | v0.8 |
+| AEN801 peripheral matrix — Counter | `examples/aen/aen-counter-utimer-regcheck` (utimer0) | ✅ verified | utimer0-backed counter exercised on real silicon | same | v0.8 |
+| AEN801 peripheral matrix — I²C + EEPROM | `examples/aen/aen-i2c2-eeprom-regcheck` | ✅ verified | `i2c2` enumerates a 24C128 EEPROM at `0x50`; 12 devices detected total on the bus | same | v0.8 |
+| AEN801 peripheral matrix — WDT | `examples/aen/aen-wdt-feed` (CMSDK) | ✅ verified | CMSDK watchdog feed/reset path exercised | same | v0.8 |
+| AEN801 peripheral matrix — ADC | `examples/aen/aen-adc-regcheck` (`adc_alif`) | ✅ verified | Single-shot ADC conversion completes | same | v0.8 |
+| AEN801 peripheral matrix — DAC | `examples/aen/aen-dac-regcheck` (`dac_alif`) | ✅ verified | DAC output holds the commanded code (regcheck-level; the VREF correction is a separate row below) | same | v0.8 |
+| AEN801 peripheral matrix — camera stack (bind only) | `examples/aen/aen-camera-regcheck` (cam/csi/dphy/arx3a0) | 🟡 partial | Nodes BIND and `device_is_ready`; live capture is **hardware-gated** -- no sensor populated on this bench unit | same | v0.8 |
+| AEN801 peripheral matrix — Ethos-U85 / Ethos-U55-HE ID | NPU ID registers | ✅ verified | Ethos-U85 ID `0x20007001`; Ethos-U55-HE ID `0x10104201` | same | v0.8 |
+| AEN801 peripheral matrix — NPU inference (tiny fixture) | TFLM + Ethos-U85, direct `ethosu_invoke` | ✅ verified | A tiny TFLM+Ethos-U85 fixture runs to completion (the full `person_detect` model result is the separate, already-listed v0.3.0 row above) | same | v0.8 |
+| AEN801 peripheral matrix — PDM mics | `examples/aen/aen-pdm-mic-alif` | ✅ verified | Live varying PCM captured (real audio, not a static pattern) | same | v0.8 |
+| AEN801 peripheral matrix — I2S TX | `examples/aen/aen-i2s-amp-alif` (i2s3) | ✅ verified | i2s3 clocks a tone out at the 76.8 MHz audio clock (no amp/mux wired -- audible output is separately still-pending) | same | v0.8 |
+| AEN801 peripheral matrix — QEnc | quadrature counter | 🟡 partial | Driver reads clean but the count stays static -- **hardware-gated**: no physical encoder is attached to spin it, not a code/Flow-D bug | same | v0.8 |
+| AEN801 peripheral matrix — SD card | DWC SDHC | 🟡 partial | DWC SDHC controller initialises but the card is unreachable -- **hardware-gated**: the EVK's SDIO 74LVC157 mux (EN=IO20, SEL=IO21, both CC3501E-side) is not routed with a card inserted on this bench unit | same | v0.8 |
+| AEN Ethernet (dp83825 PHY + `eth_dwmac_alif_ensemble` MAC glue) | `zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c` + `metadata/chips/dp83825.yaml` | ✅ verified | DHCP lease acquired and confirmed server-side (dnsmasq lease + ARP REACHABLE); root cause of the earlier no-link was DMA-visible buffers placed in DTCM instead of SRAM0 | `docs/aen-bench-bringup.md` §1 Ethernet row, `examples/aen/aen-ethernet-link` RESULT PASS, real E8 silicon, 2026-06-24; managed-MDIO PHY address corrected `@1`→`@0` against a live MDIO scan (`CHANGELOG.md` [v0.16.0], #1244) | v0.8 |
+
+## v0.9.0 — portable-surface consistency batch (tagged 2026-07-06)
 
 The 2026-07 CX batch (PRs #319..#335): `<alp/version.h>`, the SE-backed
 SoC-identity / power-profile / core-boot surfaces, I²C/SPI target
@@ -283,6 +389,7 @@ silicon-facing row is bench-gated as usual.
 | `alp_init` / `alp_deinit` lifecycle | `src/common/` init path | 🟡 partial | Idempotency contract holds (double-init OK, deinit-then-reopen OK) on native_sim + real target | Every `examples/peripheral-io/*` example calls it first; conformance suite runs on native_sim | v0.9 |
 | SoC identity over SE (`alp_soc_info_read` / `alp_soc_secure_fw_ping`) | `src/backends/soc_info/alif_se.c` (+ `sw_fallback.c`) | ⏳ untested | Part number / die rev / lifecycle / serial read back on a real E8 match SETOOLS' view; ping bounded round-trip | sw_fallback NOSUPPORT-with-soc_ref path covered on native_sim; **SE round-trip via a manual bench run (`docs/ci/HW-IN-LOOP.md`)** | v0.9 |
 | Power profiles over SE (`alp_power_profile_get/_set`) | `src/backends/power/` profile backend (`power_profile` class) | ⏳ untested | RUN/STANDBY profile read matches the SE's view; a set() round-trips exactly (no rounding) without brown-out on a real E8 | NULL/INVAL paths on native_sim; **SE exercise via a manual bench run (`docs/ci/HW-IN-LOOP.md`)** — treat set() like a firmware update on the bench | v0.9 |
+| Power wake-source honesty contract + shape settle (`ALP_POWER_MODE_STOP`, `alp_power_configure_retention`, `alp_power_wake_capabilities`, `ALP_POWER_WAKE_COMPARATOR`/`_BROWNOUT`) | `include/alp/power.h` + `src/power_dispatch.c` + `src/backends/power/{zephyr_stub,zephyr_pm_policy,yocto_drv}.c` | 🟡 partial | The dispatcher centrally rejects any `alp_power_configure_wake_source()` bitmap outside what `alp_power_wake_capabilities()` reports, for every registered backend -- `zephyr_stub` reports 0 (AEN-default, no `CONFIG_PM`, issue #1812), `zephyr_pm_policy` reports `ALP_POWER_WAKE_TIMER` ONLY (its `_wake_sem` has exactly one giver, its own `k_timer` -- an earlier draft advertised RTC/GPIO/UART_RX too, which review caught as #1812 reincarnated on this backend, since nothing wires a GPIO/UART/RTC event to that semaphore), `yocto_drv` reports `ALP_POWER_WAKE_RTC` ONLY (the one bit its wakealarm genuinely arms); a rejected bitmap is never mirrored into the handle, so `alp_renesas_power_supervisor_mode_set` can never forward one to hardware.  `zephyr_pm_policy`'s `request_sleep` additionally refuses `wake_after_ms == 0` outright rather than park on `K_FOREVER` with nothing that can wake it.  `ALP_POWER_MODE_STOP` is a valid `request_sleep()` mode arg on every backend and rounds DOWN to each generic backend's deepest state (`PM_STATE_SUSPEND_TO_RAM` / `"mem"`), reporting `realised_mode == STANDBY` (never a depth the backend didn't prove); all three backends agree that a call which fails outright reports `realised_mode == ALP_POWER_MODE_RUN`, never an echo of the unrealised requested mode.  `alp_power_configure_retention()` NULL/INVAL (incl. `{TCM, retain_kb=0}`, now test-backed)/NOSUPPORT-default paths hold, mirrored only on `ALP_OK` | `tests/zephyr/peripheral/src/main.c` power-mode ZTESTs on native_sim (stub-backend build, no `CONFIG_PM`) + `tests/unit/power_registry` (pm_policy-backend build: wake-caps, `wake_after_ms == 0` refusal, STOP round-down) + `tests/yocto/peripheral_power.c` (STOP round-down) + `examples/aen/aen-power-smoke` demonstrates the portable open/configure/request_sleep flow on the real AEN801 board target, run AFTER its WFI/SysTick proof (build-only, bench-pending); **no real E8 STOP/retention entry -- the full `alif_aipm` backend (#1812 "Proposed resolution") is out of scope for this shape-settling change and remains bench-gated future work** | v0.17 |
 | Peer-core boot (`alp_mproc_boot_core`) | `src/backends/mproc/alif_se_boot.c` (`mproc_boot` class, `silicon_ref="alif:ensemble:e8"`) | ✅ verified | A peer M55 is released at a valid entry and its firmware handshakes back (the AEN dual-core examples) | Bench-proven on real E1M-AEN801 (E8) silicon, both directions: HP-master→HE-peer (2026-06-17, re-confirmed 2026-08-01) and HE-master→HP-peer via the `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC` path (2026-08-01) -- 16/16 RPMsg ping/pong round-trips in `examples/aen/aen-rpc-pingpong` (`docs/aen-bench-bringup.md` § Flow A — Dual-core deferred-TOC boot). `ALP_CORE_SELF` rejection covered on native_sim. Note: this is the boot/release call only -- the SDK's own `alp_mbox_*` mailbox wrapper (`<alp/mproc.h>` real impl row, v0.3 above) is a separate, still-unproven claim; the pingpong example talks over Zephyr's `ipc_service`/RPMsg directly, not `alp_mbox_send` | v0.9 |
 | `alp_dac_capabilities()` | `src/dac_dispatch.c` + backends | 🟡 partial | Caps reported on an opened handle match the silicon (resolution, channel count) on a real target | Live capabilities row in the conformance suite on native_sim | v0.9 |
 | `alp_wdt_open(const alp_wdt_config_t *)` single-arg + ADC `_mv` read renames | `include/alp/wdt.h` / `include/alp/adc.h` + all in-tree callers | 🟡 partial | Pre-1.0 signature migration: no stale two-arg / unsuffixed callers anywhere in tree; behaviour unchanged | Conformance suite adopted the new signatures (`eec8868d`); grep-clean tree; ABI snapshot regenerated | v0.9 |

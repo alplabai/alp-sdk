@@ -73,9 +73,13 @@ config ALP_SDK_GPIO_CC3501E_PROXY
 	  in the board's cc3501e_gpio_routes[] table, routes alp_gpio_open()
 	  through the inter-chip bridge (chips/cc3501e); every other pin_id
 	  delegates to the platform GPIO driver, so the Alif's own pins are
-	  unaffected.  Enable on AEN boards that populate the route table from
-	  the SoM pad map; with the shipped weak EMPTY table (and until
-	  alp_gpio_cc3501e_attach() is called) every pin delegates -- a no-op.
+	  unaffected -- except a pin_id listed in the board's
+	  cc3501e_gpio_unrouted[] list, which is refused with
+	  ALP_ERR_NOSUPPORT (a pad physically open on this hardware revision,
+	  e.g. AEN r2's IO21; #1854).  Enable on AEN boards that populate the
+	  route table from the SoM pad map; with the shipped weak EMPTY
+	  tables (and until alp_gpio_cc3501e_attach() is called) every pin
+	  delegates -- a no-op.
 
 config ALP_SDK_MAX_PWM_HANDLES
 	int "Maximum concurrent alp_pwm_t handles"
@@ -171,3 +175,36 @@ config ALP_SDK_STORAGE_SW_FALLBACK
 	  ALP_ERR_NOSUPPORT.  For native_sim build / test only --
 	  production firmware MUST NOT rely on this since no real
 	  device is driven.
+
+config ALP_SDK_STORAGE_ALIF_SECAES
+	bool "Alif SE-service transport for <alp/ext/alif/storage.h> OSPI SecAES key provisioning"
+	depends on ALP_SDK && HAS_ALIF_SE_SERVICES
+	default n
+	help
+	  Compiles the real body of alp_alif_storage_secaes_key_provision()
+	  in src/backends/ext/alif/storage.c (issue #224).  It builds an
+	  ospi_write_key_svc_t request packet
+	  (SERVICE_APPLICATION_OSPI_WRITE_KEY_ID,
+	  OSPI_WRITE_EXTERNAL_KEY_OSPI0) and hands it to the public
+	  hal_alif se_service_send_request() transport -- the same generic
+	  SE-packet seam src/backends/security/se_cryptocell.c rides for
+	  its CryptoCell AES/SHA/AEAD packets.
+
+	  Default OFF, unlike CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM
+	  (which defaults ON because that path bench-PASSED,
+	  docs/aen-bench-bringup.md): this one is UNVERIFIED ON SILICON --
+	  no bench unit reachable at implementation time has an OSPI
+	  SecAES-relevant part populated (R2 BOM only; see the file
+	  header).  About eight in-tree AEN examples set
+	  CONFIG_HAS_ALIF_SE_SERVICES=y (aen-aipm-read, aen-alp-rpc,
+	  aen-dualcore-doorbell/-ipc/-master/-he-master, aen-rpc-pingpong,
+	  aen-se-service-*), so this stays an opt-in gate -- flipping the
+	  default to y belongs in the same change that adds a bench PASS
+	  row for the round-trip.  With this OFF, or on a build with no
+	  hal_alif SE client linked, key provisioning returns
+	  ALP_ERR_NOSUPPORT.
+
+	  alp_alif_storage_secaes_get_status() is unaffected by this
+	  option -- it stays ALP_ERR_NOSUPPORT unconditionally, because
+	  Alif has not published an SE service that reads the OSPI SecAES
+	  engine's status back.

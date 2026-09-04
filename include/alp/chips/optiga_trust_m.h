@@ -19,11 +19,12 @@
  *
  * Populated on E1M-X V2N / V2M at 0x30 on BRD_I2C, with the RZ/V2N as
  * bus master (`metadata/e1m_modules/E1M-V2N101.yaml`) -- that is the
- * target this driver is written for.  E1M-AEN carries the same
- * footprint but is not a usable target today: the part is DNI on the
- * current bench batch, and AEN's BRD_I2C is LPI2C0, a bus the Alif
- * silicon can only be a *slave* on, so the M55 cannot master it to
- * reach the chip at all (see `docs/bring-up-aen.md` section 5.1).
+ * target this driver is written for.  E1M-AEN801 carries the same
+ * footprint on its own BRD_I2C (SoC I2C0, Alif as bus master -- #1848,
+ * corrected from an earlier belief that this bus was the slave-only
+ * LPI2C0), but is not a usable target on the current bench batch: the
+ * part is DNI there (see `docs/bring-up-aen.md` section 5.1;
+ * `examples/aen/aen-secure-element-sign` exercises this driver on AEN).
  *
  * Default I2C address: **0x30** (7-bit, configurable via
  * provisioning).
@@ -40,7 +41,11 @@
  * Infineon's **OPTIGA Trust M Host Library** is integrated.  Upstream
  * publishes no Zephyr module for it, so that integration is a vendoring
  * decision plus in-tree build glue rather than a manifest pin; the
- * evidence and the open questions are recorded on issue #1164.  Once it
+ * evidence and the open questions -- including why a minimal in-tree APDU
+ * implementation was costed and deferred rather than chosen as the cheaper
+ * path -- are recorded in this driver's own top-of-file comment
+ * (chips/optiga_trust_m/optiga_trust_m.c); see #1164 for the tracking issue,
+ * still open pending a maintainer decision on which path to take.  Once it
  * is in, the cleanest architectural fit is registering OPTIGA's PSA
  * driver with `<alp/security.h>`'s MbedTLS PSA wrapper, so apps that
  * call alp_aead_open / etc. pick up hardware acceleration transparently.

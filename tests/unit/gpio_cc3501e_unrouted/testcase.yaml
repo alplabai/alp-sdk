@@ -1,0 +1,14 @@
+tests:
+  alp.unit.gpio_cc3501e_unrouted:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim
+      - native_sim/native/64
+    tags:
+      - alp
+      - gpio
+      - cc3501e
+      - backend
+      - unit

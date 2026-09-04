@@ -17,11 +17,13 @@
 # destroys bytes that look meaningful. #1334 closed on the measurement; #1430
 # is the standing "erase before ship" step it left behind.
 #
-# [BENCH-GATED / UNVERIFIED-ON-BENCH] This script has NEVER been run against a
-# module. Everything below is assembled from facts already established in this
-# repo (cited inline); the run itself, its transcript, and the post-erase cold
-# power-cycle are still owed. Do not record a SoM as erased on the strength of
-# this file.
+# [BENCH-VERIFIED 2026-08-30] Run once against a real module (off-labgrid
+# E1M-AEN801, `AE822FA0E5597LS0`, J-Link `000821005680`): the window
+# 0x80560000 .. 0x80578000 verified all-0x00, and a cold power-cycle showed
+# `u VB` on the `ALP-HE` boot row, so the ATOC band was undisturbed by the
+# erase. Transcript in docs/aen-provisioning.md section 7. One bench run is
+# not a standing guarantee for a different module -- the DPIDR gate and
+# verifybin below still run, and must still pass, on every unit.
 #
 # ---------------------------------------------------------------------------
 # HAZARDS -- read before running
@@ -63,9 +65,9 @@
 # Address-range note: `loadbin` into MRAM is bench-established at 0x80010000
 # (docs/aen-provisioning.md section 0.5 Option B) and at the ATOC package
 # address near the top of the window (docs/aen-bench-bringup.md, the "Burning:"
-# address) -- i.e. below and above this range -- but the storage window itself
-# has NOT been written this way on the bench. That is part of what the first
-# run has to prove.
+# address) -- i.e. below and above this range -- and the storage window
+# itself was written this way and byte-verified on 2026-08-30 (see the
+# [BENCH-VERIFIED] note above).
 #
 # Exit codes (aligned with the sibling Flow D helpers):
 #   0  window written and byte-verified as erased
@@ -131,8 +133,23 @@ printf '>>> customer storage window: %s .. 0x%X (%s KiB, exclusive of atoc at %s
 #    claim.
 ZEROS=/tmp/aen-storage-erased.bin
 head -c "$SIZE" /dev/zero > "$ZEROS"
+
+# The path handed to the J-Link CommanderScript has to be one the J-Link BINARY
+# can open, which is not always the one this shell sees.  On a Windows bench
+# host (Git Bash / MSYS driving JLink.exe, a native Windows binary) "/tmp/..."
+# is meaningless to the callee and the run dies with
+#     Failed to open file.
+#     ERROR: Could not open file.
+# -- the same trap ti/regen_flashset.sh hit.  The verify gate below catches it
+# and correctly reports NOT erased, but the erase never happens.  Convert when a
+# converter exists; on Linux cygpath is absent and $ZEROS is already right.
+ZEROS_FOR_JLINK="$ZEROS"
+if command -v cygpath >/dev/null 2>&1; then
+	ZEROS_FOR_JLINK="$(cygpath -w "$ZEROS")"
+fi
+
 printf '    erased pattern: %s (%s B of 0x00 -- NOT 0xFF)\n' \
-	"$ZEROS" "$(wc -c < "$ZEROS" | tr -d ' ')" >&2
+	"$ZEROS_FOR_JLINK" "$(wc -c < "$ZEROS" | tr -d ' ')" >&2
 
 # 3. SAFETY GATE -- prove the AEN E8 answered BEFORE any write (hazard 5).
 #    Read-only connect with the generic device, same gate as flash-jlink.sh.
@@ -164,8 +181,8 @@ si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_FLASH
 connect
-loadbin $ZEROS $BASE
-verifybin $ZEROS $BASE
+loadbin $ZEROS_FOR_JLINK $BASE
+verifybin $ZEROS_FOR_JLINK $BASE
 exit
 EOF
 
