@@ -6,7 +6,7 @@
  *
  * The wire protocol is in docs/gd32-bridge-protocol.md.  The firmware
  * counterpart that implements the same command-handler table lives
- * under firmware/gd32-bridge/.
+ * under gd32-bridge-firmware:.
  *
  * This file is deliberately Zephyr-agnostic: all bus access goes
  * through <alp/peripheral.h> so the same source compiles into either
@@ -28,7 +28,7 @@
 /* CRC-16 / CCITT-FALSE  (poly 0x1021, init 0xFFFF, non-reflected,    */
 /* xor-out 0x0000).  Reference vector: "123456789" -> 0x29B1.         */
 /* Matches Zephyr's `crc16_itu_t(0xFFFF, ...)` and the matching       */
-/* firmware/gd32-bridge/src/protocol.c implementation byte-for-byte.           */
+/* gd32-bridge-firmware:src/protocol.c implementation byte-for-byte.           */
 /* ----------------------------------------------------------------- */
 
 static uint16_t crc16_ccitt_false(const uint8_t *buf, size_t len)
@@ -926,7 +926,11 @@ alp_status_t gd32g553_trng_read(gd32g553_t *ctx, uint8_t *dest, size_t len)
      * not a latency-critical surface. */
 	alp_status_t s = ALP_ERR_BUSY;
 	for (unsigned attempt = 0u; attempt < 4u && s == ALP_ERR_BUSY; ++attempt) {
-		if (attempt != 0u) alp_delay_us(2000u);
+		/* The backoff sleeps rather than spins: it sits BETWEEN cmd_send()
+		 * calls with no bus transaction in flight and no lock held, so
+		 * yielding is safe, and a 2 ms non-yielding spin per retry buys
+		 * nothing. */
+		if (attempt != 0u) alp_delay_ms(2u);
 		s = cmd_send(ctx, GD32G553_TRANSPORT_DEFAULT, GD32G553_CMD_TRNG_READ, &req, 1u, dest, len);
 	}
 	return s;

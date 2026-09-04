@@ -287,7 +287,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["provider"],
-      "description": "Optional OTA configuration.  Project-wide (one device = one OTA orchestration).  See docs/ota.md for the device contract.  Yocto path: Mender; Zephyr path: deferred until the SDK lands its in-tree OTA client (Mender MCU client or Hawkbit, decision pending per ADR 0009).",
+      "description": "Optional OTA configuration.  Project-wide (one device = one OTA orchestration).  See docs/ota.md for the device contract.  Yocto path: Mender; Zephyr path: deferred until the SDK lands its in-tree OTA client (Mender MCU client or Hawkbit, decision pending per ADR 0009).  `server.tls_ca_bundle` was removed (no legacy shim -- no active customers): no emitter ever read it -- the Hawkbit path derives TLS solely from `url`'s scheme (`CONFIG_HAWKBIT_USE_TLS`) with no sec-tag/CA registration, and the Mender path emits no CA variable -- so the field promised a pinned trust anchor the SDK didn't deliver, the same defect class `boot.anti_rollback` was removed for.",
       "properties": {
         "provider": {
           "type": "string",
@@ -307,9 +307,8 @@
           "additionalProperties": false,
           "required": ["url"],
           "properties": {
-            "url":           { "type": "string", "format": "uri", "description": "Deployment server URL (Mender / Hawkbit)." },
-            "tenant":        { "type": "string", "description": "Multi-tenancy token / tenant name." },
-            "tls_ca_bundle": { "type": "string", "description": "Optional pinned CA bundle for production.  Path relative to project root." }
+            "url":    { "type": "string", "format": "uri", "description": "Deployment server URL (Mender / Hawkbit)." },
+            "tenant": { "type": "string", "description": "Multi-tenancy token / tenant name." }
           }
         },
         "rollback": {
@@ -594,7 +593,7 @@
         },
         "app": {
           "type": "string",
-          "description": "Path to the app source directory for this core.  Required for `os: zephyr` (must contain prj.conf or CMakeLists.txt), `os: baremetal` (must contain CMakeLists.txt).  For `os: yocto`, `app:` is a project-root-relative *source directory*, not a bitbake target -- pair it with `recipe:` naming the bitbake recipe that packages it (or set `image:` instead to build a stock image, ignoring any `app:`)."
+          "description": "Path to the app source directory for this core.  Optional -- like every other `core_entry` field, when omitted it inherits the SoM preset's `topology.<core_id>` `app:` default (e.g. the `alp-stock-shim` M-core shim).  For `os: baremetal`, `app:` must be the directory holding the app's own CMakeLists.txt -- no fallback.  For `os: zephyr`, `app:` may point at a self-contained app directory carrying its own CMakeLists.txt (the multicore convention, e.g. `./m33_sm`), OR at a sources-only subdirectory such as `./src` that has no CMakeLists.txt of its own -- in that case `alp_orchestrate.orchestrator._zephyr_app_dir` (run at build-command construction, not the board.yaml loader) falls back to `app:`'s PARENT directory's CMakeLists.txt when the parent has one (the single-core convention; most example core entries use this fallback) -- if neither `app:` nor its parent has a CMakeLists.txt, the path is returned unchanged.  For `os: yocto`, `app:` is a project-root-relative *source directory*, not a bitbake target -- pair it with `recipe:` naming the bitbake recipe that packages it (or set `image:` instead to build a stock image, ignoring any `app:`)."
         },
         "image": {
           "type": "string",
@@ -603,6 +602,10 @@
         "recipe": {
           "type": "string",
           "description": "Yocto bitbake recipe name that packages this core's `app:` source directory (e.g. `alp-lvgl-dashboard`).  Required for an app-only `os: yocto` slice (`app:` set, no `image:`) -- without it the slice has no valid bitbake target and the emitted plan carries `command: null` plus a `yocto-recipe-missing` warning rather than an invalid `bitbake <path>` command."
+        },
+        "toolchain": {
+          "type": "string",
+          "description": "Override this slice's toolchain identifier (issue #964), replacing the SoM preset's `topology.<core_id>.toolchain` default (e.g. `arm-zephyr-eabi` for Zephyr, `poky-glibc` for Yocto). Optional -- omit to keep the derived default; every existing board.yaml keeps its current compiler unchanged. Free-form string, passed through verbatim to `--emit build-plan`'s `slices[].toolchain.id` and `system-manifest.yaml`'s `slices[].toolchain` (the same field the SoM-derived default already populates) -- e.g. `llvm` for a Zephyr slice built with the LLVM toolchain variant. For `os: zephyr`, this value ALSO derives `targetTriple`/`compiler` (`<toolchain>`/`<toolchain>-gcc`) in the emitted build-plan the same way the SoM default does; a non-GCC-triple-shaped override (like `llvm`) still populates `id` correctly but the derived `compiler` name will not be meaningful -- resolving that (a vendor-toolchain path, an enum vs. free-form value set) is an open follow-up, not solved by this field."
         },
         "peripherals": {
           "type": "array",

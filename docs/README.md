@@ -72,7 +72,7 @@ into the topic-specific docs.
   doc's *Silicon scope — which E-part has what* section).
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
-  index (28 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
+  index (31 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
 
 ## Per-SoM bring-up
 
@@ -138,6 +138,10 @@ into the topic-specific docs.
 - [recommended-libraries.md](recommended-libraries.md) — curated
   third-party libraries (integrated / recommended / deferred) for
   what the SDK deliberately leaves out of `<alp/...>`.
+- [bench/model-perf-capture.md](bench/model-perf-capture.md) — recipe
+  for a tier-2 bench-measured model-perf point
+  (`metadata/model_perf/<SKU>/<hash>.yaml`); the contract ships in
+  #1520, `metadata/model_perf/` stays empty until a real capture runs.
 
 ## Security & release
 
@@ -203,7 +207,7 @@ into the topic-specific docs.
 
 - [v1.0-readiness.md](v1.0-readiness.md) — a 2026-05-14 execution-plan
   snapshot toward the v1.0.0 tag.  Not maintained current past the
-  session that wrote it (the SDK has since shipped through v0.15.0) —
+  session that wrote it (the SDK has since shipped through v0.16.0) —
   cross-check any status claim against `VERSIONS.md` and
   `CHANGELOG.md`, which are.
 - [v0.6-tbd-and-assumptions.md](v0.6-tbd-and-assumptions.md) —

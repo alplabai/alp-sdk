@@ -18,7 +18,8 @@
 # init/XiP-enable entry points compile and link (see
 # examples/aen/aen-ospi-regcheck).  See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
 #
-# Vendored VERBATIM from here down (no functional edits).
+# Vendored VERBATIM from here down, except `clock-frequency: required` --
+# see the inline note on that property (#1831).
 
 description: Synopsys Designware OSPI controller
 
@@ -51,6 +52,12 @@ properties:
 
   clock-frequency:
     type: int
+    # DEVIATION from vendored-verbatim (#1831): flipped required so a
+    # missing property fails DT validation with a clear message, instead of
+    # an undefined-identifier C error deep inside OSPI_ALIF_INIT's macro
+    # expansion (zephyr/drivers/flash/flash_ospi_alif.c) -- both fail the
+    # build, this one says why.
+    required: true
     description: |
       Input clock frequency
 

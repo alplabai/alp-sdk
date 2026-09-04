@@ -1,7 +1,36 @@
 # 0009. Mender Zephyr client deferred to v1.1; secure OTA on Zephyr cuts from v0.4
 
-Status: Accepted
+Status: Accepted — see **Amendment** below (2026-08-27): the AEN
+secure-boot bullet's "swap-using-scratch" no longer describes the
+tree, which ships `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`.  The
+deferral decision itself is unchanged.
 Date: 2026-05-14
+
+## Amendment (2026-08-27 — the AEN sysbuild overlay ships single-application-slot, not swap-using-scratch)
+
+The Decision's first bullet cites `zephyr/sysbuild/aen/sysbuild.conf`
+as MCUboot + ECDSA-P256 + swap-using-scratch.  Commit `1ad76193`
+(#1069, 2026-08-03) changed that overlay to
+`SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y` (i.e.
+`CONFIG_SINGLE_APPLICATION_SLOT=y` on the mcuboot child image):
+keeping a swap-sized second slot on BOTH M55 cores would force
+slot0_HE + slot0_HP = 2688 KiB each, leaving no room for the
+~2.6 MiB NPU MRAM-model budget in the 5632 KiB App MRAM.
+
+What that does and does not move here:
+
+- Unchanged: MCUboot verifies the application image's ECDSA-P256
+  signature against the public key compiled into the bootloader, so
+  the "signed images that boot" half of the v0.4 promise stands.
+- Changed: there is no secondary/scratch slot on AEN-Zephyr today,
+  so the first workaround below — "physical-access flash (J-Link /
+  OpenOCD against MCUboot's secondary slot)" — names a partition
+  that no longer exists.  The live equivalent is a J-Link write
+  into slot0 itself (HE slot0 @ 0x80010000, HP slot0 @ 0x802b0000,
+  MRAM base 0x80000000); see `zephyr/sysbuild/aen/sysbuild.conf`
+  and `metadata/e1m_modules/E1M-AEN801.yaml` `memory_map:`.
+- Unaffected: the deferral itself.  AEN-Zephyr still has no
+  in-field update path, which is what this ADR decided.
 
 ## Context
 

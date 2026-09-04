@@ -94,8 +94,6 @@ manifest:
       url-base: https://github.com/catchorg
     - name: stephane           # libmodbus
       url-base: https://github.com/stephane
-    - name: freertos-org       # coreMQTT-SN
-      url-base: https://github.com/FreeRTOS
     - name: xio-technologies   # Madgwick AHRS reference
       url-base: https://github.com/xioTechnologies
     - name: bearssl-upstream   # BearSSL upstream git server -- non-GitHub
@@ -137,7 +135,7 @@ manifest:
   #                    tree (u8g2, libcoap, libwebsockets,
   #                    jsmn, bearssl, minimp3, opus,
   #                    catch2, libmodbus, madgwick_ahrs,
-  #                    coremqtt_sn, cmsisstream (repo CMSIS-Stream),
+  #                    cmsisstream (repo CMSIS-Stream),
   #                    CMSIS-CV, Arm-2D).  Disabled by default so v0.5
   #                    workspaces stay light; customers flip via
   #                    `west update --group-filter +extras-tier1`
@@ -460,13 +458,6 @@ manifest:
       repo-path: libmodbus
       revision: v3.1.10           # Aug 2023; v3.1.x stable.
       path: modules/lib/libmodbus
-      groups:
-        - extras-tier1
-    - name: coreMQTT-SN
-      remote: freertos-org
-      repo-path: coreMQTT-SN
-      revision: v1.0.1            # Aug 2024.
-      path: modules/lib/coremqtt_sn
       groups:
         - extras-tier1
     - name: madgwick_ahrs

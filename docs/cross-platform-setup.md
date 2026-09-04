@@ -135,7 +135,6 @@ is not distributed on PyPI, and the bare name `tan` there belongs to an
 unrelated project (`200` for it: `tan` v23.7.0, "The compromising code
 formatter") -- `pip install tan` does not get you this tool. `alp-tan` is
 not registered there either (`404` for it, not a reservation placeholder).
-The old `crates/` tree remains the frozen v0.4.1 behaviour oracle.
 
 ---
 
@@ -199,10 +198,10 @@ them the Zephyr-on-M default:
   bridge recovery
   ([`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)).
 - Building the **CC3501E bridge firmware's silicon-free stub target**
-  ([`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) "Build")
+  ([`cc3501e-bridge-firmware:README.md`](https://github.com/alplabai/cc3501e-bridge-firmware#readme) "Build")
   -- the CC3501E's *production* image builds with TI's `ticlang`, not
   this toolchain
-  ([`firmware/cc3501e/toolchain/arm-none-eabi.cmake`](../firmware/cc3501e/toolchain/arm-none-eabi.cmake));
+  ([`cc3501e-bridge-firmware:toolchain/arm-none-eabi.cmake`](https://github.com/alplabai/cc3501e-bridge-firmware));
   only the stub / CI-compile-smoke target needs `arm-none-eabi-gcc`.
 - Hand-writing **bare-metal firmware for a real M-class core**
   (`ALP_OS=baremetal`, no Zephyr -- see [`docs/architecture.md`](architecture.md)
@@ -310,7 +309,7 @@ the Zephyr-on-M default:
   ([`docs/bring-up-v2n.md`](bring-up-v2n.md)) or bridge recovery
   ([`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)).
 - Building the **CC3501E bridge firmware's silicon-free stub target**
-  ([`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) "Build")
+  ([`cc3501e-bridge-firmware:README.md`](https://github.com/alplabai/cc3501e-bridge-firmware#readme) "Build")
   -- the CC3501E's *production* image builds with TI's `ticlang`, not
   this toolchain; only the stub / CI-compile-smoke target needs
   `arm-none-eabi-gcc`.
@@ -431,12 +430,12 @@ winget install -e --id oss-winget.gperf
 ```
 
 Neither `dtc` nor `gperf` is in `prerequisites.windows`, and
-`bootstrap.ps1` does not require them. The SDK-reference
-`python -m alp_cli doctor` checks are WARN-only: `edtlib` does the load-bearing devicetree
-parse in pure Python (a missing `dtc` never blocks a build), and plain
-kernel-mode apps build without `gperf`.  Install them if your build needs
-extra dts validation or kobject/userspace generation -- the Zephyr SDK's
-Windows bundle ships neither.
+`bootstrap.ps1` does not require them. `tan doctor`'s checks for both are
+WARN-only: `edtlib` does the load-bearing devicetree parse in pure Python (a
+missing `dtc` never blocks a build), and plain kernel-mode apps build without
+`gperf`.  Install them if your build needs extra dts validation or
+kobject/userspace generation -- the Zephyr SDK's Windows bundle ships
+neither.
 
 ### 4.2 Python deps
 
@@ -462,7 +461,7 @@ paths, none of them the Zephyr-on-M default:
   ([`docs/bring-up-v2n.md`](bring-up-v2n.md)) or bridge recovery
   ([`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)).
 - Building the **CC3501E bridge firmware's silicon-free stub target**
-  ([`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) "Build")
+  ([`cc3501e-bridge-firmware:README.md`](https://github.com/alplabai/cc3501e-bridge-firmware#readme) "Build")
   -- the CC3501E's *production* image builds with TI's `ticlang`, not
   this toolchain; only the stub / CI-compile-smoke target needs
   `arm-none-eabi-gcc`.

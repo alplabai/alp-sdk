@@ -41,6 +41,11 @@ list of an enum; reordering, adding, removing, or retyping any entry
 changes both the list AND the parent `hash` (the hash is a fingerprint
 of the *complete* normalised declaration, body included).
 
+`--diff` reports a symbol whose removal is recorded in
+`docs/abi/removed-symbols.json` as `ALLOWED` instead of a bare
+`REMOVED` -- see `load_removed_allowlist()` and `diff()`'s docstring,
+and `docs/abi/README.md`'s "Recording an INTENTIONAL removal".
+
 `--diff` reports a symbol that disappeared from one header and
 reappeared under the same name/category/value in another as `MOVED`,
 not `REMOVED` + `ADDED` -- but only when the old header still
@@ -92,8 +97,15 @@ from typing import Any
 REPO = Path(__file__).resolve().parent.parent
 INCLUDE_ROOT = REPO / "include" / "alp"
 SDK_VERSION_YAML = REPO / "metadata" / "sdk_version.yaml"
+ABI_DIR = REPO / "docs" / "abi"
+REMOVED_SYMBOLS_PATH = ABI_DIR / "removed-symbols.json"
 
-_SDK_VERSION_RE = re.compile(r"^version:\s*(\d+)\.(\d+)\.(\d+)\s*$", re.MULTILINE)
+# Trailing `(?:-[\w.]+)?` tolerates (and ignores) a SemVer pre-release
+# suffix (`0.16.0-rc1`, #1902) -- snapshots are keyed MAJOR.MINOR only, so
+# an rc's own suffix is irrelevant here; without it this regex's `\s*$`
+# anchor rejected the whole line and current_snapshot_version() below
+# silently returned None ("can't verify") for the entire rc window.
+_SDK_VERSION_RE = re.compile(r"^version:\s*(\d+)\.(\d+)\.(\d+)(?:-[\w.]+)?\s*$", re.MULTILINE)
 
 # ---------------------------------------------------------------------
 # Tokenisation helpers
@@ -106,6 +118,18 @@ _WS_RE = re.compile(r"\s+")
 
 class AbiParseError(ValueError):
     """A public declaration this script cannot classify."""
+
+
+class AbiAllowlistError(ValueError):
+    """`docs/abi/removed-symbols.json` is missing, malformed, or has an
+    entry missing a required field / naming an unknown category.
+
+    Always a hard error, never a silently-skipped entry: a bad entry
+    that got skipped would silently un-allowlist the removal it was
+    meant to explain -- turning one typo in a data file into a second,
+    opposite failure mode (a real, already-explained removal reading as
+    an unexplained `REMOVED` again) instead of a loud, obvious one.
+    """
 
 
 def strip_comments(src: str) -> str:
@@ -656,6 +680,53 @@ def current_snapshot_version(sdk_version_yaml: Path | None = None) -> str | None
     return f"v{m.group(1)}.{m.group(2)}"
 
 
+def last_released_snapshot(abi_dir: Path | None = None) -> Path | None:
+    """Return the newest `docs/abi/v*-snapshot.json` that ISN'T the
+    CURRENT one -- the same "last released, frozen" baseline
+    `.github/workflows/pr-generated-files.yml`'s "ABI freeze gate vs
+    the last released snapshot" step computes via
+    `ls docs/abi/v*-snapshot.json | sort -V | grep -v "${ABI_VERSION}" | tail -1`.
+
+    A hardcoded literal (`docs/abi/v0.15-snapshot.json`) goes stale on
+    every single release, the exact bug class issue #826 describes for
+    the CI step this mirrors: CURRENT is a moving target that advances
+    independently of whether a release tag has actually shipped (see
+    `docs/abi/README.md`'s "Versions on file" note -- `metadata/
+    sdk_version.yaml` can lag a real `vX.Y.0` tag by days), so any
+    caller that needs "the last released baseline" -- this script's own
+    `main()` doesn't; only test/tooling callers that want to reproduce
+    the freeze gate locally do -- must derive it fresh every time, the
+    same way the workflow step does, rather than naming a version that
+    was only ever correct on the day it was written.
+
+    Sorted by the numeric (MAJOR, MINOR) parsed out of each filename,
+    not lexicographic (`sort -V`'s semantics) -- `v0.9` must sort
+    before `v0.10`, which a plain string sort gets backwards.
+
+    Returns None if `abi_dir` has no snapshot other than CURRENT (e.g.
+    a fresh v0.1-only checkout, or CURRENT can't be derived at all) --
+    same "can't verify, don't block" contract as
+    `current_snapshot_version()`.
+    """
+    if abi_dir is None:
+        abi_dir = ABI_DIR
+    current = current_snapshot_version()
+
+    def _label(p: Path) -> str:
+        # "v0.16-snapshot.json" -> "v0.16"
+        return p.name.removesuffix("-snapshot.json")
+
+    def _sort_key(p: Path) -> tuple[int, int]:
+        major, minor = _label(p)[1:].split(".")
+        return (int(major), int(minor))
+
+    candidates = sorted(
+        (p for p in abi_dir.glob("v*-snapshot.json") if _label(p) != current),
+        key=_sort_key,
+    )
+    return candidates[-1] if candidates else None
+
+
 def _field_diff(
     header: str, sym: str, prev_rec: dict[str, Any], curr_rec: dict[str, Any]
 ) -> list[str]:
@@ -839,10 +910,92 @@ def build_include_graph(include_root: Path) -> dict[str, list[str]]:
     return graph
 
 
+_REMOVED_CATEGORIES = ("function", "typedef", "macro", "variable")
+_REMOVED_REQUIRED_KEYS = (
+    "header",
+    "category",
+    "symbol",
+    "release",
+    "issue",
+    "reason",
+    "replacement",
+)
+
+
+def load_removed_allowlist(path: Path) -> dict[tuple[str, str, str], dict[str, Any]]:
+    """Load `docs/abi/removed-symbols.json` -- the record of INTENTIONAL
+    public-symbol removals `diff()` must report as `ALLOWED`, not a bare
+    unexplained `REMOVED` (see `diff()`'s docstring and
+    `docs/abi/README.md`'s "Recording an INTENTIONAL removal").
+
+    A missing file returns `{}` -- no removal has been allowlisted yet
+    is a normal, common state (every commit before #1622), not an
+    error.  A file that EXISTS but is malformed -- not valid JSON, not
+    the documented `{"removed": [...]}` shape, an entry missing a
+    required key, an unknown `category`, or a `replacement` that is
+    neither a non-empty string nor `null` -- always raises
+    `AbiAllowlistError` rather than skipping the bad entry; see that
+    class's docstring for why silently skipping would be worse than
+    this script simply crashing.
+
+    @param path  `docs/abi/removed-symbols.json` (`REMOVED_SYMBOLS_PATH`).
+    @return      `{(header, category, symbol): entry}`, keyed on the
+                 exact triple `diff()` matches a REMOVED entry against
+                 -- allowlisting one symbol never suppresses a
+                 same-named removal in a different header or category.
+    """
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise AbiAllowlistError(f"{path}: cannot read/parse: {exc}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("removed"), list):
+        raise AbiAllowlistError(
+            f"{path}: expected a top-level JSON object with a 'removed' array"
+        )
+
+    out: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for i, entry in enumerate(payload["removed"]):
+        if not isinstance(entry, dict):
+            raise AbiAllowlistError(f"{path}: removed[{i}] is not an object")
+        missing = [k for k in _REMOVED_REQUIRED_KEYS if k not in entry]
+        if missing:
+            raise AbiAllowlistError(
+                f"{path}: removed[{i}] missing required key(s): {missing}"
+            )
+        if entry["category"] not in _REMOVED_CATEGORIES:
+            raise AbiAllowlistError(
+                f"{path}: removed[{i}].category is {entry['category']!r}; "
+                f"expected one of {_REMOVED_CATEGORIES}"
+            )
+        for key in ("header", "category", "symbol", "release", "reason"):
+            if not isinstance(entry[key], str) or not entry[key].strip():
+                raise AbiAllowlistError(
+                    f"{path}: removed[{i}].{key} must be a non-empty string"
+                )
+        if not isinstance(entry["issue"], int) or isinstance(entry["issue"], bool):
+            raise AbiAllowlistError(f"{path}: removed[{i}].issue must be an integer")
+        replacement = entry["replacement"]
+        if replacement is not None and (
+            not isinstance(replacement, str) or not replacement.strip()
+        ):
+            raise AbiAllowlistError(
+                f"{path}: removed[{i}].replacement must be a non-empty string "
+                f"or null (explicitly: no replacement exists)"
+            )
+        key3 = (entry["header"], entry["category"], entry["symbol"])
+        if key3 in out:
+            raise AbiAllowlistError(f"{path}: duplicate allowlist entry for {key3}")
+        out[key3] = entry
+    return out
+
+
 def diff(
     prev: dict[str, Any],
     curr: dict[str, Any],
     include_graph: dict[str, list[str]] | None = None,
+    removed_allowlist: dict[tuple[str, str, str], dict[str, Any]] | None = None,
 ) -> list[str]:
     """Per-symbol diff between two snapshots.
 
@@ -863,9 +1016,36 @@ def diff(
     freeze gate's `grep -q '^  REMOVED '`
     (`.github/workflows/pr-generated-files.yml`) -- it is not a
     removal.
+
+    `removed_allowlist` (see `load_removed_allowlist`) is what lets a
+    documented, INTENTIONAL removal read as `ALLOWED` instead of a bare
+    `REMOVED`: a REMOVED entry whose exact `(header, category, symbol)`
+    triple has a matching entry is reported as
+
+        ALLOWED {category} {header}::{symbol} (intentional removal, #{issue} -> {replacement})
+
+    (`{replacement}` reads `no replacement` when the entry's
+    `replacement` field is `null`).  Reported, not dropped from the
+    output entirely -- same reasoning as `MOVED`: a reviewer scanning
+    the diff should see every symbol that stopped existing, whether
+    that needs their attention (`REMOVED`) or is already explained
+    (`ALLOWED`).  `removed_allowlist` defaults to `{}` (no entries), so
+    a caller that doesn't pass one gets the old REMOVED-always
+    behaviour, unchanged -- same compatibility guarantee as
+    `include_graph`.
+
+    `ALLOWED`, like `MOVED`, must never satisfy
+    `m.startswith(("REMOVED", "CHANGED"))` and must never match
+    `grep -q '^  REMOVED '` -- it is a REMOVED that is already
+    explained, not one that still needs review.  The match is checked
+    ONLY after a candidate fails to pair as `MOVED`: a removal that is
+    both a header-split move AND happens to have an allowlist entry
+    reports as `MOVED` (nothing was actually lost), never `ALLOWED`.
     """
     if include_graph is None:
         include_graph = {}
+    if removed_allowlist is None:
+        removed_allowlist = {}
 
     msgs: list[str] = []
     prev_h = prev.get("headers", {})
@@ -923,6 +1103,14 @@ def diff(
         if match_idx is not None:
             a_header = unmatched_added.pop(match_idx)[0]
             msgs.append(f"MOVED   {r_cat[:-1]} {r_sym}: {r_header} -> {a_header}")
+            continue
+        allow_entry = removed_allowlist.get((r_header, r_cat[:-1], r_sym))
+        if allow_entry is not None:
+            replacement = allow_entry["replacement"] or "no replacement"
+            msgs.append(
+                f"ALLOWED {r_cat[:-1]} {r_header}::{r_sym} "
+                f"(intentional removal, #{allow_entry['issue']} -> {replacement})"
+            )
         else:
             msgs.append(f"REMOVED {r_cat[:-1]} {r_header}::{r_sym}")
 
@@ -1096,7 +1284,17 @@ def main() -> int:
             # e.g. release.yml, has no `tee`/grep step to tell them apart).
             print(f"error: cannot parse {args.diff}: {exc}", file=sys.stderr)
             return 2
-        msgs = diff(prior, snapshot, include_graph=build_include_graph(INCLUDE_ROOT))
+        try:
+            removed_allowlist = load_removed_allowlist(REMOVED_SYMBOLS_PATH)
+        except AbiAllowlistError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        msgs = diff(
+            prior,
+            snapshot,
+            include_graph=build_include_graph(INCLUDE_ROOT),
+            removed_allowlist=removed_allowlist,
+        )
         if not msgs:
             print(f"ABI unchanged vs {args.diff}.")
             return 0

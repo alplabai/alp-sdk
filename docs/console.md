@@ -265,6 +265,16 @@ uart:~$ alp companion gpio write 3 1
 companion pin 3 <- 1
 ```
 
+### `alp companion spi1 configure|xfer|read|release` *(Alif/CC3501E only)*
+
+CC3501E SPI1 host passthrough: acquire/release the coprocessor's own SPI1
+controller and clock full-duplex chunks over it for a carrier device on the
+E1M connector's SPI1 pins. Four verbs (`configure`, `xfer`, `read`,
+`release`) — see
+[`cc3501e-companion-commands.md`](cc3501e-companion-commands.md#alp-companion-spi1)
+for the full reference; the companion `wifi` / `ble` / `sock` verb trees are
+documented there as well, not repeated in this command reference.
+
 ### `alp reboot` *(UNSAFE)*
 
 Soft-reset the SoC (calls `sys_reboot(SYS_REBOOT_WARM)`).

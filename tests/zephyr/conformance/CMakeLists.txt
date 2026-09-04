@@ -5,6 +5,18 @@ cmake_minimum_required(VERSION 3.20)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(alp_sdk_conformance_test LANGUAGES C)
 
+# main.c's ops-vtable guard-mutation test (issue #1641) reaches past the
+# portable API into the dispatcher/backend internal ABI
+# (src/backends/<class>/<class>_ops.h) to NULL one op slot on an
+# otherwise-real handle and prove the dispatcher's own NULL check -- not
+# any particular backend's completeness -- is what stands between a
+# partial vendor port and a fault.  Those headers are internal (not
+# under include/), so this test app needs its own path to them; no other
+# alp-sdk consumer gets this include.  Scoped to src/backends (not all of
+# src/) so this app's include path never shadows a real Zephyr header
+# against a same-named future src/zephyr/<name>.h.
+target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../src/backends)
+
 # Single-file suite by design: the per-class conf_class_t table plus
 # the generic contract runners all live in src/main.c so the "add
 # vendor N+1 = add one table row" property stays visible in one place.

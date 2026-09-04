@@ -64,7 +64,10 @@
 #define CAM_VIDEO_FCFG_DATA_MASK  GENMASK(13, 0)
 #define CAM_VIDEO_FCFG_DATA_SHIFT 0
 
-#define CAM_CSI_CMCFG_MODE_MASK  GENMASK(3, 0)
+/* HWRM 17.1.5.3.10 defines "4-0 MODE", a 5-bit field with legal values up to
+ * 0x1A.  GENMASK(3, 0) truncated every mode at or above 0x10 -- 0x12 IPI-16
+ * RGB565 masked to 0x2 IPI-16 RAW8 (#1825). */
+#define CAM_CSI_CMCFG_MODE_MASK  GENMASK(4, 0)
 #define CAM_CSI_CMCFG_MODE_SHIFT 0
 
 #define CAM_FRAME_ADDR_MASK  GENMASK(28, 0)

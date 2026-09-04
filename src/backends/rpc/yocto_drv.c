@@ -176,6 +176,11 @@ struct rpc_be {
 
 	uint8_t tx_scratch[ALP_RPC_TX_FRAME_MAX];
 
+	/* Count of inbound reads rpc_rx_main() dropped because they exactly
+	 * filled `buf` (issue #1645) -- written only from that channel's own
+	 * dedicated rx_thread, so a plain counter needs no lock. */
+	uint32_t rx_oversized_drops;
+
 	/* Synchronous-call slot.  Single-element by design -- tx_mutex
      * serialises alp_rpc_call invocations on this channel so only one
      * response can ever be in flight here.
@@ -343,7 +348,14 @@ static void rpc_be_teardown(struct rpc_be *ch)
 static void *rpc_rx_main(void *arg)
 {
 	struct rpc_be *ch = (struct rpc_be *)arg;
-	uint8_t        buf[ALP_RPC_TX_FRAME_MAX];
+	/* +1: a read() that fills exactly ALP_RPC_TX_FRAME_MAX bytes must stay
+	 * distinguishable from one that overflowed it. A read()-sized buffer
+	 * can never report more than its own size, so sizing buf to the wire
+	 * limit made a legitimate max-size frame indistinguishable from a
+	 * truncated larger one -- every real ALP_RPC_TX_FRAME_MAX-byte frame
+	 * was being dropped (issue #1645 regression). Sizing one byte past the
+	 * limit lets n > ALP_RPC_TX_FRAME_MAX alone mean "oversized". */
+	uint8_t buf[ALP_RPC_TX_FRAME_MAX + 1];
 
 	struct pollfd fds[2] = {
 		{ .fd = ch->ept_fd, .events = POLLIN },
@@ -367,6 +379,23 @@ static void *rpc_rx_main(void *arg)
 		if (n <= 0) {
 			if (n < 0 && errno == EINTR) continue;
 			break;
+		}
+		if ((size_t)n > ALP_RPC_TX_FRAME_MAX) {
+			/* buf is ALP_RPC_TX_FRAME_MAX+1 bytes, so n can only exceed
+			 * ALP_RPC_TX_FRAME_MAX here if the peer's real rpmsg message
+			 * was actually longer than the wire limit -- a legitimate
+			 * exactly-ALP_RPC_TX_FRAME_MAX-byte frame reads n ==
+			 * ALP_RPC_TX_FRAME_MAX and falls through to frame_parse()
+			 * below instead of being dropped (issue #1645 regression). */
+			ch->rx_oversized_drops++;
+			fprintf(stderr,
+			        "alp_rpc: dropping oversized %zd-byte inbound frame on channel "
+			        "'%s' (max %d bytes); %u frame(s) dropped so far\n",
+			        n,
+			        ch->name,
+			        ALP_RPC_TX_FRAME_MAX,
+			        ch->rx_oversized_drops);
+			continue;
 		}
 
 		const void *payload     = NULL;

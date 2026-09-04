@@ -145,11 +145,9 @@ alp_status_t alp_dsp_chain_apply_samples(alp_dsp_chain_t *chain,
 	/* Gate on the lifecycle byte, not a plain in_use read: in_use is
 	 * claimed/released atomically in _alloc/_free, so mixing it with a
 	 * plain read here is a data race, and a racing close could free the
-	 * slot mid-op. op_enter counts this op in; begin_close drains it.
-	 * ALP_ERR_INVAL preserved here (not NOT_READY) to match this op's
-	 * pre-#629 null/not-in-use contract. #629 */
+	 * slot mid-op. op_enter counts this op in; begin_close drains it. #629 */
 	if (chain == NULL || !alp_handle_op_enter(&chain->lifecycle, &chain->active_ops)) {
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	if (chain->state.ops == NULL || chain->state.ops->apply_samples == NULL) {
 		alp_handle_op_leave(&chain->active_ops);
@@ -172,7 +170,7 @@ alp_status_t alp_dsp_chain_apply_bins(alp_dsp_chain_t *chain,
 		return ALP_ERR_INVAL;
 	}
 	if (chain == NULL || !alp_handle_op_enter(&chain->lifecycle, &chain->active_ops)) {
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	if (chain->state.ops == NULL || chain->state.ops->apply_bins == NULL) {
 		alp_handle_op_leave(&chain->active_ops);
@@ -195,7 +193,7 @@ alp_status_t alp_dsp_chain_apply_samples_f32(alp_dsp_chain_t *chain,
 		return ALP_ERR_INVAL;
 	}
 	if (chain == NULL || !alp_handle_op_enter(&chain->lifecycle, &chain->active_ops)) {
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	if (chain->state.ops == NULL || chain->state.ops->apply_samples_f32 == NULL) {
 		alp_handle_op_leave(&chain->active_ops);
@@ -218,7 +216,7 @@ alp_status_t alp_dsp_chain_apply_bins_f32(alp_dsp_chain_t *chain,
 		return ALP_ERR_INVAL;
 	}
 	if (chain == NULL || !alp_handle_op_enter(&chain->lifecycle, &chain->active_ops)) {
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	if (chain->state.ops == NULL || chain->state.ops->apply_bins_f32 == NULL) {
 		alp_handle_op_leave(&chain->active_ops);

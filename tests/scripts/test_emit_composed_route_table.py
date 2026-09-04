@@ -275,7 +275,11 @@ class TestPerRevPadRouteOverride:
         d = self._dispatch(alp_project, "r2")
         assert d["E1M_GPIO_IO8"] == ("cc3501e", 30)
         assert d["E1M_GPIO_IO10"] == ("cc3501e", 35)
-        assert "E1M_GPIO_IO21" not in d          # unrouted in r2
+        # Physically open on r2 (issue #1854): the pad reaches neither the
+        # CC3501E nor the Alif SoC.  It MUST be explicit `unrouted`, not
+        # merely absent from the dict -- an absent entry is indistinguishable
+        # from the (working) `direct` default, which was the bug.
+        assert d["E1M_GPIO_IO21"] == ("unrouted", None)
 
     def test_r1_override_restores_pre_r2_routing(self, alp_project):
         d = self._dispatch(alp_project, "r1")

@@ -125,7 +125,8 @@ alp_counter_t *alp_counter_open(const alp_counter_config_t *cfg);
  *
  * @param[in] counter  Handle from @ref alp_counter_open.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO /
+ *         ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_counter_start(alp_counter_t *counter);
 
@@ -134,7 +135,7 @@ alp_status_t alp_counter_start(alp_counter_t *counter);
  *
  * @param[in] counter  Handle from @ref alp_counter_open.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_counter_stop(alp_counter_t *counter);
 
@@ -143,7 +144,8 @@ alp_status_t alp_counter_stop(alp_counter_t *counter);
  *
  * @param[in]  counter    Handle from @ref alp_counter_open.
  * @param[out] ticks_out  Receives the current value.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO /
+ *         ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_counter_get_value(alp_counter_t *counter, uint32_t *ticks_out);
 
@@ -196,7 +198,7 @@ alp_status_t alp_counter_set_alarm(alp_counter_t         *counter,
  *
  * @param[in] counter  Handle from @ref alp_counter_open.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_counter_cancel_alarm(alp_counter_t *counter);
 
@@ -283,7 +285,8 @@ alp_qenc_t *alp_qenc_open(const alp_qenc_config_t *cfg);
  *
  * @param[in]  enc      Handle from @ref alp_qenc_open.
  * @param[out] pos_out  Receives the signed accumulated count.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO /
+ *         ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_qenc_get_position(alp_qenc_t *enc, int32_t *pos_out);
 
@@ -292,7 +295,8 @@ alp_status_t alp_qenc_get_position(alp_qenc_t *enc, int32_t *pos_out);
  *
  * @param[in] enc  Handle from @ref alp_qenc_open.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY / ALP_ERR_IO /
+ *         ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_qenc_reset_position(alp_qenc_t *enc);
 

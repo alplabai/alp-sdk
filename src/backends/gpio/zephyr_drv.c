@@ -27,6 +27,7 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
+#include "alp_errno.h"
 #include "alp_slot_claim.h"
 #include "gpio_ops.h"
 #include "gpio_resolve.h"
@@ -129,21 +130,13 @@ static gpio_flags_t _to_gpio_irq_flags(alp_gpio_edge_t edge)
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * BEHAVIOUR CHANGE: this switch had no -EAGAIN and/or no -ETIMEDOUT
+	 * arm, so a driver-reported deadline surfaced as ALP_ERR_IO.  Callers
+	 * can now receive ALP_ERR_TIMEOUT here, and ALP_ERR_NOT_READY /
+	 * ALP_ERR_NOMEM / ALP_ERR_NOSUPPORT for the other arms the switch
+	 * lacked.  Every arm it DID carry agreed with the baseline. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 static void _isr_thunk(const struct device *port, struct gpio_callback *cb, gpio_port_pins_t pins)
@@ -157,8 +150,10 @@ static void _isr_thunk(const struct device *port, struct gpio_callback *cb, gpio
 	}
 }
 
-static alp_status_t
-z_open(uint32_t pin_id, alp_gpio_backend_state_t *st, alp_capabilities_t *caps_out)
+alp_status_t alp_z_gpio_open_owned(uint32_t                  pin_id,
+                                   alp_gpio_backend_state_t *st,
+                                   alp_capabilities_t       *caps_out,
+                                   alp_gpio_backend_state_t *owner_state)
 {
 	struct gpio_dt_spec spec;
 	if (!alp_z_gpio_resolve(pin_id, &spec)) return ALP_ERR_INVAL;
@@ -166,14 +161,25 @@ z_open(uint32_t pin_id, alp_gpio_backend_state_t *st, alp_capabilities_t *caps_o
 
 	alp_z_gpio_side_t *s = _alloc_side();
 	if (s == NULL) return ALP_ERR_NOMEM;
-	s->spec  = spec;
-	s->owner = CONTAINER_OF(st, struct alp_gpio, state);
+	s->spec = spec;
+	/* Derived from the state the CALLER named as the owner's, never from `st`
+	 * -- `st` may be nested in a delegating backend's sidecar.  See
+	 * alp_z_gpio_open_owned()'s contract in gpio_ops.h and issue #1618. */
+	s->owner = (owner_state != NULL) ? CONTAINER_OF(owner_state, struct alp_gpio, state) : NULL;
 
 	st->dev         = (void *)spec.port;
 	st->pin_id      = pin_id;
 	st->be_data     = s;
 	caps_out->flags = 0u;
 	return ALP_OK;
+}
+
+static alp_status_t
+z_open(uint32_t pin_id, alp_gpio_backend_state_t *st, alp_capabilities_t *caps_out)
+{
+	/* Direct (non-delegated) open: the dispatcher passed &handle->state, so
+	 * `st` is its own owner state. */
+	return alp_z_gpio_open_owned(pin_id, st, caps_out, st);
 }
 
 static alp_status_t

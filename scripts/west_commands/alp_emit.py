@@ -27,8 +27,8 @@ try:
     )
     _HAVE_WEST = True
 except ImportError:  # pragma: no cover - unit tests run without west installed
-    # Import-safe without west so `_EMIT_MODES` stays importable by the
-    # alp/west emit-parity test (tests/scripts/test_alp_cli_emit.py).
+    # Import-safe without west so `_EMIT_MODES` stays importable by
+    # tests/scripts/test_west_wrapper_exit_codes.py.
     _HAVE_WEST = False
 
     class WestCommand:  # type: ignore[no-redef]

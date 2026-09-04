@@ -160,12 +160,22 @@ struct alp_adc_stream {
 	uint8_t  channel;   /* hardware channel id */
 	uint32_t channel_id;
 	uint32_t sample_rate_hz;
-
 	/* lifecycle/active_ops drive the generic open/op/close guard in
-	 * alp_slot_claim.h (issue #629 / #1634) -- placed before in_use so a
-	 * fresh acquire's whole-struct zero (handles.c's DEFINE_POOL) resets
-	 * both to LC_UNOPENED/0 along with every other field. Non-volatile:
-	 * the guard uses __atomic_* on them directly. */
+	 * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/
+	 * begin_close_blocking, issue #629).  A read counted here holds the
+	 * slot across alp_z_v2n_supervisor_acquire() and the GD32G553 bridge
+	 * transaction that follows it -- a window bounded only by
+	 * CONFIG_ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS -- so a concurrent
+	 * alp_adc_stream_close() drains it instead of handing the slot back
+	 * to the pool under the reader's feet (issue #1634).
+	 *
+	 * Placed before in_use, matching every other guarded handle in the
+	 * tree (struct alp_counter, struct alp_i2c_regfile, ...), so the
+	 * claim-side zeroing convention -- memset up to
+	 * offsetof(..., in_use) -- resets both on a fresh claim.  This pool's
+	 * own allocator in handles.c zeroes the WHOLE struct under its
+	 * mutex, which is a superset, so the ordering costs nothing here and
+	 * keeps the layout rule uniform. */
 	uint8_t  lifecycle;
 	uint32_t active_ops;
 	bool     in_use;

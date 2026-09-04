@@ -113,10 +113,12 @@ typedef struct {
 	alp_adc_ref_t reference;
 	uint8_t       gain_num; /**< Gain numerator (e.g. 1 for 1/1). */
 	uint8_t       gain_den; /**< Gain denominator (e.g. 6 for 1/6). */
-	/** Hardware oversampling ratio (1 / 2 / 4 / 8 / 16 / 32 / 64 / 128 / 256).
-     *  Backend rounds down to the nearest power-of-two it supports.  0 means
-     *  "backend default".  Backends without HW oversampling ignore this
-     *  field; the SoC-cap layer documents which SoMs honour it. */
+	/** Hardware oversampling ratio: 0 ("backend default") or a power of two
+     *  (1 / 2 / 4 / 8 / 16 / 32 / 64 / 128 / 256).  A ratio that is not a
+     *  power of two is refused with @ref ALP_ERR_NOSUPPORT at @ref
+     *  alp_adc_open rather than silently rounded to one the hardware can
+     *  represent.  Backends without HW oversampling ignore this field; the
+     *  SoC-cap layer documents which SoMs honour it. */
 	uint16_t oversampling_ratio;
 	/** Extra sample-and-hold cycles at the ADC clock.  Backend rounds to
      *  its nearest discrete tap (8 taps on the GD32 IO MCU; vendor-defined
@@ -181,7 +183,7 @@ alp_adc_t *alp_adc_open(const alp_adc_config_t *cfg);
  * @param[in]  adc      Handle from @ref alp_adc_open.
  * @param[out] raw_out  Receives the raw code.  Sign-extended on
  *                      ADCs with differential inputs.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_adc_read_raw(alp_adc_t *adc, int32_t *raw_out);
 
@@ -198,7 +200,7 @@ alp_status_t alp_adc_read_raw(alp_adc_t *adc, int32_t *raw_out);
  * @param[in]  adc     Handle from @ref alp_adc_open.
  * @param[out] uv_out  Receives the signed microvolt (µV) reading as
  *                     @c int32_t.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_adc_read_uv(alp_adc_t *adc, int32_t *uv_out);
 

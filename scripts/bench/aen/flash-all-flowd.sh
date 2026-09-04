@@ -48,6 +48,22 @@ read_console() {
   local BD="$1"
   local BUF; BUF=0x$($OBJNM "$BD/zephyr/zephyr.elf" 2>/dev/null | awk '/ ram_console_buf$/{print $1}')
   [ "$BUF" = "0x" ] && { echo "(no ram_console_buf in elf)"; return; }
+  # SAFETY GATE (alp-sdk#813) -- confirm the AEN E8 answered BEFORE the mem8
+  # read below. flash-jlink.sh (invoked earlier in the caller's loop) gates
+  # its own MRAM write, but this is a SEPARATE JLinkExe session -- one of
+  # this bench's probes shares OEM serial 603000869 with the GD32 bridge on
+  # a DIFFERENT board, so this session needs its own DP ID proof too.
+  cat > /tmp/rdc-preflight.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_READ
+connect
+exit
+EOF
+  "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/rdc-preflight.jlink \
+    > /tmp/rdc-preflight.out 2>&1 || true
+  bench_jlink_assert_connected /tmp/rdc-preflight.out "Flow D console read preflight" || exit 7
+  bench_jlink_assert_aen_dpidr /tmp/rdc-preflight.out "Flow D console read preflight" || exit 4
   cat > /tmp/rdc.jlink <<EOF
 device $JLINK_DEVICE_READ
 si SWD

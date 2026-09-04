@@ -691,7 +691,7 @@ if [ "${DO_PIP}" -eq 1 ]; then
     # runtime.
     info "Installing alp-sdk's internal Python tooling into the venv (pip install -e ${PIP_EDITABLE_INSTALL})"
     "${VPY}" -m pip install -q -e "${PIP_EDITABLE_INSTALL}" \
-        || { warn "alp_cli editable install reported a problem -- check manually"; record_phase_warning "editable-install"; }
+        || { warn "alp-sdk internal Python tooling editable install reported a problem -- check manually"; record_phase_warning "editable-install"; }
 else
     info "Skipping pip installs (--no-pip)"
 fi

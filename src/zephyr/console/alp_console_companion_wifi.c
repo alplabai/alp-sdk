@@ -371,7 +371,7 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 	if (st.state == ALP_CC3501E_WIFI_CONNECTED) {
 		/* Do NOT print st.rssi_dbm: the WIFI_STATUS latch byte is NOT a
 		 * measurement.  Every terminal outcome in
-		 * firmware/cc3501e/hal/ti/cc3501e_hw_ti_wifi.c publishes it through
+		 * cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti_wifi.c publishes it through
 		 * wifi_conn_set(), which always sets it to 0 (the firmware may not read
 		 * it there -- a Wlan_Get(WLAN_GET_RSSI) close to associate blocks the
 		 * worker), so that byte has only ever held 0.  And 0 dBm is a LEGAL
@@ -406,7 +406,8 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 			shell_print(sh, "rssi:  unavailable (%d)", (int)rs);
 		}
 		uint8_t      ip[4] = { 0 };
-		alp_status_t ips   = cc3501e_wifi_get_ip(companion_cc3501e, ip);
+		alp_status_t ips =
+		    cc3501e_wifi_get_ip(companion_cc3501e, (uint8_t)ALP_CC3501E_WIFI_IFACE_STA, ip);
 		if (ips == ALP_OK) {
 			shell_print(sh, "ip:    %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
 		} else {

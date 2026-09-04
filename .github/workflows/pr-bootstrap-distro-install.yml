@@ -105,7 +105,6 @@ jobs:
               - 'metadata/schemas/bootstrap-v1.schema.json'
               - 'scripts/bootstrap.sh'
               - 'scripts/bootstrap.ps1'
-              - 'scripts/alp_cli/doctor.py'
               - 'scripts/check_bootstrap_manifest.py'
               - '.github/workflows/pr-bootstrap-distro-install.yml'
 
