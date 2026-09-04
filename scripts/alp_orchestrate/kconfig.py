@@ -49,6 +49,7 @@ from alp_registries import peripheral_kconfig
 from sentinels import is_tbd
 
 from . import libraries as _library_layer
+from . import sdk_compat as _sdk_compat
 from .loader import _library_alias_table
 from .models import BoardProject, OrchestratorError, Slice
 from .paths import REPO
@@ -588,7 +589,25 @@ def _emit_som_caps(
     # alp_project_emit/hw_info.py's `_emit_hw_info_h` (project.hw_rev is
     # already `som.hw_rev or default_hw_rev`; add the same "unknown"
     # floor here so the two resolvers can't disagree on the empty case).
-    lines.append(f'CONFIG_ALP_SDK_SOM_HW_REV="{project.hw_rev or "unknown"}"')
+    # Emit the composed board designator (`2626-r2`), not the bare revision key,
+    # because that is what the module's EEPROM identity carries -- and this symbol
+    # exists only to be compared against it.  Getting this wrong is not cosmetic:
+    # CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL promotes the banner's mismatch warning
+    # to k_panic(), so a write side that composes and a compare side that does not
+    # would halt boot on a correctly provisioned module.
+    #
+    # project.hw_rev itself stays the BARE key -- loader.py passes it to
+    # family_revision_known() as a lookup key into hw_revisions, where a composed
+    # value would not resolve.
+    _som_hw_rev = project.hw_rev
+    if _som_hw_rev:
+        from .loader import _sku_family_dir
+        _fam = _sku_family_dir(project.sku)
+        if _fam:
+            _som_hw_rev = _sdk_compat.board_designator(
+                _sdk_compat.load_family_table(project.effective_metadata_root(), _fam),
+                _som_hw_rev)
+    lines.append(f'CONFIG_ALP_SDK_SOM_HW_REV="{_som_hw_rev or "unknown"}"')
     lines.append("")
 
     if kconfig:
