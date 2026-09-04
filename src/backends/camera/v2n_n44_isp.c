@@ -22,9 +22,17 @@
  * Stub vs real split (commit body documents the boundary):
  *   - The sensor pipeline (open / start / stop / capture / release /
  *     close) routes through Zephyr's video API verbatim -- those
- *     functions are NOT stubs.  When the V2N N44 SoC port wires
- *     its MIPI CSI-2 IP up to drivers/video/, these calls go to
- *     real silicon for free.
+ *     functions are NOT stubs.  They resolve a device ONLY through
+ *     the alp-camera0..3 DT aliases below, so they reach silicon
+ *     exactly when a V2N board or overlay points one of those
+ *     aliases at a real drivers/video/ device -- and not one step
+ *     sooner.  No V2N board or overlay in this repo defines one
+ *     today, so isp_open() below fails its _devs[] NULL check and
+ *     alp_camera_open() on V2N hands back NULL with last_error =
+ *     ALP_ERR_NOT_READY.  An earlier revision of this comment said
+ *     the calls would go to real silicon "for free" once the SoC
+ *     port landed; that undersold the gap by five separate missing
+ *     facts -- see the DATA-GATED block below.
  *   - configure_isp() validates the input, latches the config into
  *     backend state, and returns ALP_OK -- the actual register
  *     poke (toggling the AE / AWB / AF enable bits in the N44 ISP
@@ -38,9 +46,53 @@
  *     routes through this backend's latched state today and grows
  *     real MMIO writes when the N44 port lands.
  *
- * Sensor and ISP register-map work here is blocked on the Renesas RZ/V2N
- * ISP register map (see the "actual register poke" TBD above); no open
- * tracking issue exists yet for that follow-up.
+ * DATA-GATED -- what an alp-cameraN alias on V2N Zephyr still needs, and
+ * why none of it can be written from this tree.  Tracked by alp-sdk #1149;
+ * every claim below was checked against the pinned Zephyr v4.4.1 and the
+ * hal_renesas revision that pin imports, not recalled:
+ *   1. A CSI-2 receiver DRIVER.  Zephyr v4.4.1's drivers/video/ ships no
+ *      Renesas RZ/V receiver at all -- video_renesas_ra_ceu.c is the
+ *      RA-family parallel CEU, and dts/bindings/video/ carries CSI-2
+ *      receiver bindings only for NXP (nxp,mipi-csi2rx.yaml).  There is
+ *      no upstream binding to point a node at, so ADR 0017's
+ *      consume-upstream rung has nothing to consume yet.
+ *   2. Its reg base.  dts/arm/renesas/rz/rzv/r9a09g056.dtsi declares no
+ *      csi2 / cru / isp node; hal_renesas's rzv2n bsp_slave_address.h
+ *      carries no CRU entry; and metadata/socs/renesas/rzv2n/n44.json's
+ *      peripheral_instances block covers i2c / uart / gpt / gtm only, so
+ *      the board generator has no base to emit either.  Source for the
+ *      real value: the RZ/V2N Hardware User's Manual r01uh1003ej, CRU +
+ *      MIPI CSI-2 register chapters (the Renesas BSP reference dts also
+ *      carries it -- neither ships in this repo).
+ *   3. Its CM33 interrupt, which is NOT a datasheet constant here.
+ *      hal_renesas's rzv2n bsp_irq_id.h lists CRU0_CSI2_LINK_INT_IRQSELn
+ *      = 494 and CRU1_CSI2_LINK_INT_IRQSELn = 500 in IRQSELn_Type -- the
+ *      IRQSEL multiplexer's SELECTOR numbers.  IRQn_Type, the enum that
+ *      actually feeds a DT `interrupts` cell, holds no CRU vector at all;
+ *      it ends at SEL126_IRQn = 479.  So the cell is a free choice of one
+ *      SELn vector PLUS an IRQSEL programming step that no code in this
+ *      tree performs.  Contrast the mbox1 node in
+ *      zephyr/boards/alp/e1m_v2n101_m33_sm/, whose `interrupts = <293 2>`
+ *      came straight out of IRQn_Type as MHU_MSG5_NS_IRQn.
+ *   4. The sensor part.  A CSI-2 sensor node needs a real compatible, CCI
+ *      address, lane count and link frequency.  The E1M-X carrier exposes
+ *      bare CAM0 / CAM1 connectors: metadata/boards/e1m-x-evk.yaml sets
+ *      `ov5640: false` and names no sensor anywhere.  The part is a
+ *      product decision, not a value to be looked up.
+ *   5. The carrier routing.  Which of the E1M-X edge connector's four
+ *      CSI instances (metadata/e1m/pinout-x-v1.json, CSI0..CSI3, ten pins
+ *      each) lands on which of this SoC's two CRUs, and which of the
+ *      GD32-owned CAM_EN_LDO0..3 rails
+ *      (metadata/e1m_modules/v2n/gd32-io-mcu-map.csv: PC3 / PE8 / PE7 /
+ *      PE10) powers which connector.  metadata/pinmux/v2n.yaml carries no
+ *      CSI lane row at all -- these are carrier-schematic facts, not
+ *      public metadata.
+ *
+ * Guessing any of 2-5 produces a devicetree that builds clean and binds to
+ * nothing, which then reads as reviewed.  Leave it unwritten.
+ *
+ * The configure_isp register poke above is blocked on the same manual's
+ * ISP chapter, and rides the same issue.
  */
 
 #include <errno.h>
@@ -58,6 +110,7 @@
 #include <alp/cap_instance.h>
 #include <alp/peripheral.h>
 
+#include "alp_errno.h"
 #include "camera_ops.h"
 #include "v2n_n44_isp.h"
 #include "alp_slot_claim.h"
@@ -107,25 +160,11 @@ static void _free_state(alp_v2n_n44_isp_state_t *s)
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-		return ALP_ERR_TIMEOUT;
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)
@@ -140,6 +179,31 @@ static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)
 	default:
 		return 0u;
 	}
+}
+
+/* Release every video_buffer this handle acquired, getting the driver's
+ * queue out of the way first.  video_stream_stop() implies a CANCEL flush
+ * (video.h: `video_flush(dev, true)` moves everything the driver holds
+ * from its incoming queue to the outgoing one as VIDEO_BUF_ABORTED), so a
+ * stop + drain-dequeue detaches the buffers from the device before
+ * video_buffer_release() returns them to the shared pool.  Releasing a
+ * buffer the driver still queues would recycle a pool slot the device can
+ * later hand back -- a stale pointer on the next open (#246). */
+static void _release_vbufs(alp_v2n_n44_isp_state_t *st)
+{
+	struct video_buffer *vb = NULL;
+
+	(void)video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
+	while (video_dequeue(st->dev, &vb, K_NO_WAIT) == 0 && vb != NULL) {
+		vb = NULL;
+	}
+	for (size_t i = 0; i < ARRAY_SIZE(st->vbufs); ++i) {
+		if (st->vbufs[i] != NULL) {
+			(void)video_buffer_release(st->vbufs[i]);
+			st->vbufs[i] = NULL;
+		}
+	}
+	st->vbuf_count = 0;
 }
 
 /* ============================================================== */
@@ -165,8 +229,12 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	if (st == NULL) return ALP_ERR_NOMEM;
 	st->dev = dev;
 
-	struct video_caps vcaps = { 0 };
-	int               err   = video_get_caps(dev, VIDEO_EP_OUT, &vcaps);
+	/* The v4.4 video API names the endpoint with an `enum video_buf_type`
+	 * carried ON the caps / format / buffer structs rather than as a
+	 * separate argument.  The N44 ISP's capture side -- the processed
+	 * frames the app consumes -- is VIDEO_BUF_TYPE_OUTPUT. */
+	struct video_caps vcaps = { .type = VIDEO_BUF_TYPE_OUTPUT };
+	int               err   = video_get_caps(dev, &vcaps);
 	if (err != 0 && err != -ENOSYS) {
 		_free_state(st);
 		return _errno_to_alp(err);
@@ -179,11 +247,12 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 			if (fc->pixelformat != want_fourcc) continue;
 			if (cfg->width < fc->width_min || cfg->width > fc->width_max) continue;
 			if (cfg->height < fc->height_min || cfg->height > fc->height_max) continue;
+			st->fmt.type        = VIDEO_BUF_TYPE_OUTPUT;
 			st->fmt.pixelformat = want_fourcc;
 			st->fmt.width       = cfg->width;
 			st->fmt.height      = cfg->height;
 			st->fmt.pitch       = 0u;
-			err                 = video_set_format(dev, VIDEO_EP_OUT, &st->fmt);
+			err                 = video_set_format(dev, &st->fmt);
 			if (err != 0) {
 				_free_state(st);
 				return _errno_to_alp(err);
@@ -196,7 +265,9 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 			return ALP_ERR_OUT_OF_RANGE;
 		}
 	} else {
-		(void)video_get_format(dev, VIDEO_EP_OUT, &st->fmt);
+		/* get_format reads the endpoint named by fmt.type -- set it first. */
+		st->fmt.type = VIDEO_BUF_TYPE_OUTPUT;
+		(void)video_get_format(dev, &st->fmt);
 	}
 
 	uint8_t want = ARRAY_SIZE(st->vbufs);
@@ -205,21 +276,46 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 		return ALP_ERR_OUT_OF_RANGE;
 	}
 
-	uint32_t bytes_per_buf = (st->fmt.pitch != 0u)
-	                             ? (st->fmt.pitch * st->fmt.height)
-	                             : ((uint32_t)st->fmt.width * st->fmt.height * 2u);
-	if (bytes_per_buf == 0u) bytes_per_buf = 64u;
+	/* Per-buffer size: prefer the driver-negotiated pitch; when the driver
+	 * reports none, derive bytes-per-pixel from the negotiated fourcc via
+	 * Zephyr's own format table (video_bits_per_pixel: RGB565 = 16 bpp,
+	 * RGB24 = 24 bpp, XRGB32 = 32 bpp).  A flat 2 B/px guess here
+	 * under-allocates the RGB888 (3 B/px) and ARGB8888 (4 B/px) frames
+	 * _to_video_fourcc() can negotiate, while the ISP DMA writes the full
+	 * frame regardless (#245). */
+	uint32_t bytes_per_buf = (st->fmt.pitch != 0u) ? (st->fmt.pitch * st->fmt.height)
+	                                               : (((uint32_t)st->fmt.width * st->fmt.height *
+	                                                   video_bits_per_pixel(st->fmt.pixelformat)) /
+	                                                  BITS_PER_BYTE);
+	if (bytes_per_buf == 0u) {
+		if (st->fmt.width != 0u && st->fmt.height != 0u) {
+			/* Real dimensions but a fourcc Zephyr's table can't size:
+			 * refuse rather than under-allocate and let the ISP DMA
+			 * past the end of the pool block. */
+			_free_state(st);
+			return ALP_ERR_NOSUPPORT;
+		}
+		/* No format negotiated at all (driver without get_format):
+		 * keep open() alive with a minimal dummy allocation. */
+		bytes_per_buf = 64u;
+	}
 
 	for (uint8_t i = 0; i < want; ++i) {
-		st->vbufs[i] = video_buffer_alloc(bytes_per_buf);
+		st->vbufs[i] = video_buffer_alloc(bytes_per_buf, K_NO_WAIT);
 		if (st->vbufs[i] == NULL) {
-			for (uint8_t j = 0; j < i; ++j)
-				st->vbufs[j] = NULL;
+			/* Pool exhausted: give back vbufs[0..i-1] (already
+			 * enqueued) before failing (#246). */
+			_release_vbufs(st);
 			_free_state(st);
 			return ALP_ERR_NOMEM;
 		}
-		err = video_enqueue(dev, VIDEO_EP_OUT, st->vbufs[i]);
+		st->vbufs[i]->type = VIDEO_BUF_TYPE_OUTPUT;
+		err                = video_enqueue(dev, st->vbufs[i]);
 		if (err != 0) {
+			/* Mid-loop enqueue failure: vbufs[0..i-1] sit in the
+			 * driver's queue and vbufs[i] is loose -- release them
+			 * all instead of leaking the pool (#246). */
+			_release_vbufs(st);
 			_free_state(st);
 			return _errno_to_alp(err);
 		}
@@ -242,7 +338,7 @@ static alp_status_t isp_start(alp_camera_backend_state_t *state)
 	alp_v2n_n44_isp_state_t *st = (alp_v2n_n44_isp_state_t *)state->be_data;
 	if (st == NULL) return ALP_ERR_NOT_READY;
 	if (st->streaming) return ALP_OK;
-	int err = video_stream_start(st->dev);
+	int err = video_stream_start(st->dev, VIDEO_BUF_TYPE_OUTPUT);
 	if (err == 0) st->streaming = true;
 	return _errno_to_alp(err);
 }
@@ -252,7 +348,7 @@ static alp_status_t isp_stop(alp_camera_backend_state_t *state)
 	alp_v2n_n44_isp_state_t *st = (alp_v2n_n44_isp_state_t *)state->be_data;
 	if (st == NULL) return ALP_ERR_NOT_READY;
 	if (!st->streaming) return ALP_OK;
-	int err = video_stream_stop(st->dev);
+	int err = video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
 	if (err == 0) st->streaming = false;
 	return _errno_to_alp(err);
 }
@@ -266,7 +362,7 @@ isp_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t
 
 	k_timeout_t          t   = (timeout_ms == UINT32_MAX) ? K_FOREVER : K_MSEC(timeout_ms);
 	struct video_buffer *vb  = NULL;
-	int                  err = video_dequeue(st->dev, VIDEO_EP_OUT, &vb, t);
+	int                  err = video_dequeue(st->dev, &vb, t);
 	if (err != 0) return _errno_to_alp(err);
 	if (vb == NULL) return ALP_ERR_IO;
 
@@ -283,7 +379,7 @@ static alp_status_t isp_release(alp_camera_backend_state_t *state, alp_camera_fr
 	if (frame == NULL || frame->data == NULL) return ALP_ERR_INVAL;
 	for (uint8_t i = 0; i < st->vbuf_count; ++i) {
 		if (st->vbufs[i] != NULL && st->vbufs[i]->buffer == frame->data) {
-			int err = video_enqueue(st->dev, VIDEO_EP_OUT, st->vbufs[i]);
+			int err = video_enqueue(st->dev, st->vbufs[i]);
 			return _errno_to_alp(err);
 		}
 	}
@@ -324,14 +420,11 @@ static void isp_close(alp_camera_backend_state_t *state)
 {
 	alp_v2n_n44_isp_state_t *st = (alp_v2n_n44_isp_state_t *)state->be_data;
 	if (st == NULL) return;
-	if (st->streaming) {
-		(void)video_stream_stop(st->dev);
-		st->streaming = false;
-	}
-	for (uint8_t i = 0; i < st->vbuf_count; ++i) {
-		st->vbufs[i] = NULL;
-	}
-	st->vbuf_count = 0;
+	st->streaming = false;
+	/* Stop + drain + release every buffer this handle allocated --
+	 * _release_vbufs stops the stream itself (harmless when already
+	 * stopped), so the pool is whole again for the next open (#246). */
+	_release_vbufs(st);
 	_free_state(st);
 	state->be_data = NULL;
 }

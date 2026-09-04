@@ -44,6 +44,18 @@ def test_unknown_key_emits_ALP_B002_with_didyoumean():
     assert "diagnostics" in (diags[0].hint or "")
 
 
+def test_unknown_nested_key_names_the_offending_key_not_the_parent():
+    # jsonschema reports a nested `additionalProperties: false` violation
+    # AT the containing object (here `ota.server`), not at the offending
+    # key -- the diagnostic must still name the actual unknown key
+    # (`tls_ca_bundle`), not the parent block (`server`, which is valid).
+    c = validate_board_yaml(FIX_BAD / "ALP-B002-unknown-nested-key.yaml")
+    diags = [d for d in c if d.code == "ALP-B002"]
+    assert diags, "ALP-B002 expected"
+    assert "tls_ca_bundle" in diags[0].message
+    assert "'server'" not in diags[0].message
+
+
 def test_bad_enum_emits_ALP_B003():
     c = validate_board_yaml(FIX_BAD / "ALP-B003-bad-enum.yaml")
     diags = [d for d in c if d.code == "ALP-B003"]

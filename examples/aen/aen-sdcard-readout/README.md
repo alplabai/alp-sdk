@@ -40,18 +40,20 @@ card is simply not reachable is reported **PARTIAL**.
 driver builds, the device inits, and `disk_access_init` runs and returns "no card"
 cleanly. No card enumerates because the SD slot is not reachable on this bench:
 
-> **For a card to enumerate (BENCH-BLOCKED) — NOT a driver bug, and NOT completable
-> in M55 software on this bench.** The EVK microSD sits behind a 74LVC157 SDIO mux
+> **For a card to enumerate (BENCH-BLOCKED) — NOT a driver bug, and not something
+> this example does today.** The EVK microSD sits behind a 74LVC157 SDIO mux
 > whose `EN`=**IO20**→CC3501E **GPIO_26** and `SEL`=**IO21**→CC3501E **GPIO_30** are
 > *both on the CC3501E*. Reaching the card needs all of:
-> 1. **CC3501E firmware support** — the v0.1 coprocessor firmware does **not**
->    implement the GPIO-proxy opcode (`CMD_GPIO_WRITE` 0x51 hits `default →
->    RESP_ERR_INVALID` in `firmware/cc3501e/src/protocol.c`). Driving the mux needs
->    NEW firmware on the CC3501E + a reflash — a task on the *other chip*, not the M55.
-> 2. **A working inter-chip SPI1 link** — never round-tripped on silicon (latest
->    bench commit: "CC3501E drives no reply (MISO reads 0xFF)"; the host driver
->    header is marked `[UNTESTED]`). No `GPIO_WRITE` can reach the mux until PING
->    succeeds.
+> 1. **A CC3501E GPIO-proxy write that routes the mux** — the coprocessor firmware
+>    *does* implement the opcode: `CMD_GPIO_WRITE` 0x51 dispatches to
+>    `handle_gpio_write` in `cc3501e-bridge-firmware:src/protocol.c` (firmware `0.4.0`,
+>    protocol version `5`), and `ALP_E1M_GPIO_IO20` → raw CC35 `GPIO_26` (`MUX_EN`)
+>    is in the proxy route table. What is missing is a *caller*, not firmware.
+> 2. **The inter-chip SPI1 link brought up in this app** — the link itself is
+>    bench-validated (`include/alp/chips/cc3501e.h` is marked `[BENCH-VERIFIED]`,
+>    and the GPIO proxy is PASS in `cc3501e-bridge-firmware:BRINGUP_STATUS.md`), but this
+>    example never calls `cc3501e_bridge_bringup()`, so no `GPIO_WRITE` reaches the
+>    mux. See [`aen-cc3501e-gpio`](../aen-cc3501e-gpio/) for the proxy path.
 > 3. **SD pad route + DMA translate:** this overlay wires the **D** route (CLK=P4_1,
 >    CMD=P4_2, D0..D3=P6_0..P6_3) as a documented default (confirm vs schematic; data
 >    pads also want `input-enable`), and correct ADMA2 transfers need
@@ -59,6 +61,6 @@ cleanly. No card enumerates because the SD slot is not reachable on this bench:
 >    ([[project_pending_hw_configs]]).
 
 So on this bench the SDHC **controller + driver are proven** (builds, inits,
-`disk_access_init` runs cleanly) but the card is **unreachable until the CC3501E
-bridge + its GPIO-proxy firmware exist**. Tier-2 retires onto the opt-in fork once
-a card is actually read.
+`disk_access_init` runs cleanly) but the card is **unreachable until this example
+brings the CC3501E bridge up and drives the mux over the GPIO proxy**. Tier-2
+retires onto the opt-in fork once a card is actually read.

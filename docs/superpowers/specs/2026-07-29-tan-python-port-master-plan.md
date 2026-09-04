@@ -516,8 +516,9 @@ survive the port.
   covers the alp-sdk-side doc/ADR record; `tan-cli`#448 covers the `tan
   renode` command removal, scheduled after the `tan` v0.5.0 tags. Retire the
   Rust crates last, and only for capabilities the parity harness has
-  confirmed — `crates/` is currently kept as the frozen v0.4.1
-  behaviour-oracle, not a development path (do not edit it going forward).
+  confirmed — done: `tan-cli`'s `2883cdf4` (2026-08-10) deleted `crates/`
+  and the oracle-parity suite outright (#269, #601); `git ls-tree
+  origin/dev -- crates` on `tan-cli` is empty.
 - **Repoint alp-sdk CI, `bootstrap.sh`/`.ps1`, `doctor`, and the following
   docs** (the original note said "~25 docs" without naming them; this
   reconciliation pass verified the ones below against current `dev` and

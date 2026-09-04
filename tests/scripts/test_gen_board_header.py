@@ -18,12 +18,15 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+import jsonschema
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "gen_board_header.py"
@@ -175,32 +178,63 @@ def test_real_evk_header_covers_known_macros(real_headers):
 def test_no_clash_with_existing_alp_e1m_evk_h(real_headers):
     """The generated routes header MUST NOT also re-define macros
     that live in the surviving hand-authored sections of
-    `alp_e1m_evk.h` (overlay-pad indices, mux enums).  On-board I2C
-    device addresses + INA236 calibration constants were lifted into
-    the `i2c_devices:` metadata block (issue #515) and are generated
-    now -- see `test_real_evk_header_covers_i2c_device_macros` below.
-    This guards against accidental over-lift of what's still
-    hand-authored in future slices."""
+    `alp_e1m_evk.h` (mux enums).  On-board I2C device addresses +
+    INA236 calibration constants (#515) and the overlay-pad indices
+    (#1636) were lifted into metadata and are generated now -- see
+    `test_real_evk_header_covers_i2c_device_macros` and
+    `test_real_evk_header_covers_overlay_pin_macros` below.  This
+    guards against accidental over-lift of what's still hand-authored
+    in future slices."""
     evk_out, _xevk_out = real_headers
     out = evk_out.read_text(encoding="utf-8")
     must_not_appear = [
-        # Overlay-pad indices (slice deferred)
-        "EVK_PIN_OVERLAY_BASE",
-        "EVK_PIN_IO_EXP_INT",
-        "EVK_PIN_IO_EXP_RST",
-        "EVK_PIN_AMP_FAULT",
-        "EVK_PIN_AMP_ENABLE",
-        "EVK_PIN_CTP_INT",
-        "EVK_PIN_MB_INT",
         # ADC spellings not generated (the shipped ADC routes are
-        # EVK_ADC_ARDUINO_A1..A5 / EVK_ADC_MB_AN / EVK_ADC_VBAT_SENSE)
+        # EVK_ADC_ARDUINO_A0..A5 / EVK_ADC_DAC0_LOOPBACK /
+        # EVK_ADC_DAC1_LOOPBACK -- #1622 corrected the ADC0 entry from
+        # a nonexistent BOARD_ID divider to the real shared Arduino
+        # A0 / mikroBUS ANA input, and ADC6/ADC7 from a nonexistent
+        # mikroBUS AN pin / VBAT divider to the real DAC0/DAC1
+        # loopback senses)
         "EVK_ARD_A0",
         "EVK_MB_ANA",
     ]
     for macro in must_not_appear:
         assert macro not in out, (
             f"{macro} unexpectedly appears in generated header -- "
-            f"slice scope is gpio/buses/pwm/i2c_devices only"
+            f"slice scope is gpio/buses/pwm/i2c_devices/overlay_pins only"
+        )
+
+
+def test_real_evk_header_covers_overlay_pin_macros(real_headers):
+    """Issue #1636: the eleven `EVK_PIN_OVERLAY_BASE + N` overlay-pad
+    indices are ordinal positions in an `alp,pin-array` overlay list,
+    not independent hardware facts -- N must come from the metadata
+    list's order, computed by the generator, not hand-typed. Assert
+    every macro is present and its N matches its position (0-based)
+    in `metadata/boards/e1m-evk.yaml`'s `overlay_pins:` list, in the
+    same order the hand-authored header previously hard-coded."""
+    evk_out, _xevk_out = real_headers
+    out = evk_out.read_text(encoding="utf-8")
+    assert "#define EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT" in out
+    ordered_macros = [
+        "EVK_PIN_IO_EXP_INT",
+        "EVK_PIN_IO_EXP_RST",
+        "EVK_PIN_AMP_FAULT",
+        "EVK_PIN_AMP_ENABLE",
+        "EVK_PIN_MB_INT",
+        "EVK_PIN_CK_DIO4",
+        "EVK_PIN_CK_DIO3",
+        "EVK_PIN_CK_DIO2",
+        "EVK_PIN_CK_DIO1",
+        "EVK_PIN_CK_RST",
+        "EVK_PIN_CTP_INT",
+    ]
+    defined = dict(re.findall(r"#define\s+(\S+)\s+\(EVK_PIN_OVERLAY_BASE \+ (\d+)u\)", out))
+    for idx, macro in enumerate(ordered_macros):
+        assert macro in defined, f"{macro} missing from generated header"
+        assert defined[macro] == str(idx), (
+            f"{macro} = BASE + {defined[macro]}, expected BASE + {idx} -- "
+            f"index drifted from list order"
         )
 
 
@@ -336,6 +370,41 @@ def test_real_xevk_header_uses_x_pinout_and_covers_macros(real_headers):
     assert "ALP_E1M_X_I2C0" in out and "ALP_E1M_X_GPIO_PWM5" in out
 
 
+def test_real_xevk_header_covers_i2c_device_macros(real_headers):
+    """Issue #1636: the X-EVK's five INA236 addresses + shunt/max-current
+    calibration must come from `metadata/boards/e1m-x-evk.yaml`'s
+    `i2c_devices:` block and be generated -- not hand-defined in
+    `include/alp/boards/alp_e1m_x_evk.h`, which is the E1M-EVK's #515
+    fix never having been applied to its sibling carrier. Values must
+    be preserved verbatim from the previously hand-authored header."""
+    _evk_out, xevk_out = real_headers
+    out = xevk_out.read_text(encoding="utf-8")
+    must_define = {
+        "XEVK_I2C_ADDR_INA236_3V3": "0x40u",
+        "XEVK_I2C_ADDR_INA236_1V8": "0x41u",
+        "XEVK_I2C_ADDR_INA236_VCAM2": "0x48u",
+        "XEVK_I2C_ADDR_INA236_VCAM3": "0x49u",
+        "XEVK_I2C_ADDR_INA236_5V": "0x4Au",
+        "XEVK_INA236_SHUNT_3V3_OHMS": "0.020f",
+        "XEVK_INA236_MAX_3V3_A": "4.0f",
+        "XEVK_INA236_SHUNT_1V8_OHMS": "0.020f",
+        "XEVK_INA236_MAX_1V8_A": "4.0f",
+        "XEVK_INA236_SHUNT_VCAM2_OHMS": "0.050f",
+        "XEVK_INA236_MAX_VCAM2_A": "1.6f",
+        "XEVK_INA236_SHUNT_VCAM3_OHMS": "0.050f",
+        "XEVK_INA236_MAX_VCAM3_A": "1.6f",
+        "XEVK_INA236_SHUNT_5V_OHMS": "0.020f",
+        "XEVK_INA236_MAX_5V_A": "4.0f",
+    }
+    defined = dict(re.findall(r"#define\s+(\S+)\s+(\S+)", out))
+    for macro, value in must_define.items():
+        assert macro in defined, f"{macro} missing from generated X-EVK header"
+        assert defined[macro] == value, (
+            f"{macro} = {defined[macro]!r}, expected {value!r} -- value drifted "
+            f"from the hand-authored original"
+        )
+
+
 def test_main_removes_orphaned_generated_header(gen_module, tmp_path, monkeypatch):
     """#1128(b): a renamed/deleted board YAML must take its generated
     header with it -- a stale `alp_<slug>_routes.h` left behind would
@@ -421,3 +490,24 @@ def test_main_rejects_identical_board_names(gen_module, tmp_path, monkeypatch):
 
     rc = gen_module.main()
     assert rc == 1
+
+
+def test_schema_rejects_xevk_overlay_pin_macro():
+    """#1636 review: `_emit_overlay_pins()` hard-codes
+    `EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT` (the 35x35 pinout's
+    count) with no E1M-X branch, so an `XEVK_PIN_*` entry in some
+    future board's `overlay_pins:` would emit a base macro built
+    from the WRONG carrier's GPIO count into a header that only
+    includes the E1M-X pinout, where ALP_E1M_GPIO_COUNT does not
+    exist.  The schema must refuse `XEVK_PIN_*` until the generator
+    grows a matching branch."""
+    schema = json.loads(
+        (REPO / "metadata" / "schemas" / "board-preset.schema.json").read_text()
+    )
+    validator = jsonschema.Draft202012Validator(schema)
+    doc = {
+        "name": "DEMO",
+        "overlay_pins": [{"macro": "XEVK_PIN_DEMO", "doc": "demo"}],
+    }
+    errors = list(validator.iter_errors(doc))
+    assert errors, "XEVK_PIN_* overlay_pins macro must fail schema validation"

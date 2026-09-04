@@ -20,7 +20,7 @@
 #     alp_project_emit package itself does still exist, so the citation
 #     read as live rather than obviously dead).  The mechanism today is
 #     the `integration.zephyr.kconfig` array below, transcribed verbatim
-#     by scripts/alp_orchestrate/libraries.py:197 (`zephyr_kconfig_lines`).
+#     by scripts/alp_orchestrate/libraries.py:321 (`zephyr_kconfig_lines`).
 #
 # HW-backends: see metadata/library-profiles/opus/ (folded WS6-c Phase 3).
 # Declares capability-keyed SIMD (helium_mve/neon/fpu) and an always-on

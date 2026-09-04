@@ -385,4 +385,35 @@ ZTEST(alp_console, test_wifi_ap_still_accepts_empty_passphrase_without_wpa3)
 	                 out);
 }
 
+/* SPI1 host passthrough: the group registers, and its argument parsing runs
+ * BEFORE the companion check -- a mistyped option must read as a usage error,
+ * not as "no companion bound", or a bench operator debugging a dead bus starts
+ * from the wrong end. */
+
+ZTEST(alp_console, test_companion_spi1_group_registered)
+{
+	const char *out = run("alp companion spi1 release");
+
+	zassert_is_null(strstr(out, "Unknown command"), "companion spi1 not registered: %s", out);
+}
+
+ZTEST(alp_console, test_spi1_xfer_rejects_odd_hex_before_companion_check)
+{
+	const char *out = run("alp companion spi1 xfer abc");
+
+	zassert_not_null(strstr(out, "usage:"), "an odd-length hex TX must be refused: %s", out);
+	zassert_is_null(strstr(out, "companion not registered"),
+	                "a usage error must not be reported as a missing companion: %s",
+	                out);
+}
+
+ZTEST(alp_console, test_spi1_xfer_accepts_valid_hex_and_reaches_the_companion_check)
+{
+	const char *out = run("alp companion spi1 xfer 9f000000 hold");
+
+	zassert_not_null(strstr(out, "companion not registered"),
+	                 "a well-formed xfer should reach the companion check: %s",
+	                 out);
+}
+
 ZTEST_SUITE(alp_console, NULL, suite_setup, NULL, NULL, NULL);

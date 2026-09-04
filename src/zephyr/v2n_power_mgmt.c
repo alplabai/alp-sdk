@@ -19,6 +19,10 @@
  *   - The work item acquires BRD_I²C via the supervisor, programs
  *     CH2=0.75 V via da9292_v2n_m1_enable_deepx_rail (which polls
  *     CH2 PG internally), releases the bus, and drives P64 high.
+ *   - The request is serviced at most once (g_pwr.rail_up): the P65
+ *     edge and the level sample at the end of the init can both
+ *     submit the work for the same one-shot request.  Only the
+ *     system workqueue touches that flag.
  *   - The DA9292 driver context is owned by this module (g_pwr.dev).
  *     da9292_init() in our SYS_INIT runs with the supervisor's
  *     BRD_I²C lock held so a race with the bridge dispatcher
@@ -61,6 +65,7 @@ static const struct gpio_dt_spec g_core_0p75  = GPIO_DT_SPEC_GET(V2N_CORE_0P75_N
 static struct {
 	da9292_t             dev;
 	bool                 initialised;
+	bool                 rail_up;
 	struct gpio_callback cb;
 	struct k_work        work;
 } g_pwr;
@@ -73,6 +78,15 @@ static void v2n_pwr_work_handler(struct k_work *work)
 {
 	(void)work;
 	if (!g_pwr.initialised) return;
+
+	/* Service the one-shot request at most once.  The P65 edge and the
+     * level sample at the end of alp_z_v2n_power_mgmt_init can both
+     * submit this work for the SAME request, and
+     * da9292_v2n_m1_enable_deepx_rail opens by clearing CH2_EN (step 1
+     * of its sequence -- see da9292.h) -- re-running it would drop and
+     * re-ramp a rail the DEEPX is already running on.  Only the system
+     * workqueue ever touches this flag, so a plain bool is enough. */
+	if (g_pwr.rail_up) return;
 
 	alp_i2c_t   *i2c = NULL;
 	alp_status_t s   = alp_z_v2n_supervisor_brd_i2c_acquire(&i2c);
@@ -105,6 +119,7 @@ static void v2n_pwr_work_handler(struct k_work *work)
 		LOG_ERR("gpio_pin_set_dt(P64=1) failed (%d)", gpio_rc);
 		return;
 	}
+	g_pwr.rail_up = true;
 	LOG_INF("DEEPX 0.75 V rail up + P64 driven high");
 }
 
@@ -135,13 +150,16 @@ alp_status_t alp_z_v2n_power_mgmt_init(void)
 
 	rc = gpio_pin_configure_dt(&g_pwr_en_req, GPIO_INPUT);
 	if (rc != 0) return ALP_ERR_IO;
-	rc = gpio_pin_interrupt_configure_dt(&g_pwr_en_req, GPIO_INT_EDGE_RISING);
-	if (rc != 0) return ALP_ERR_IO;
 
-	gpio_init_callback(&g_pwr.cb, v2n_pwr_irq_handler, BIT(g_pwr_en_req.pin));
-	rc = gpio_add_callback(g_pwr_en_req.port, &g_pwr.cb);
-	if (rc != 0) return ALP_ERR_IO;
-
+	/* Everything the ISR path touches has to be live BEFORE the P65
+     * interrupt is armed, because P65 is a ONE-SHOT rising edge driven
+     * by the A55: an edge that lands on a half-built module is not
+     * repeated, and the DEEPX 0.75 V rail then never comes up.  The
+     * ISR only submits g_pwr.work, so the order is: k_work_init, the
+     * DA9292 base init, g_pwr.initialised, the callback, and the arm
+     * last.  (Arming first let an edge either reach a zero-initialised
+     * k_work whose handler is NULL, or be swallowed by the
+     * !g_pwr.initialised guard in v2n_pwr_work_handler.) */
 	k_work_init(&g_pwr.work, v2n_pwr_work_handler);
 
 	/* Run the DA9292 base init under the supervisor's I²C lock so
@@ -149,22 +167,48 @@ alp_status_t alp_z_v2n_power_mgmt_init(void)
      * with our register reads. */
 	alp_i2c_t   *i2c = NULL;
 	alp_status_t s   = alp_z_v2n_supervisor_brd_i2c_acquire(&i2c);
-	if (s != ALP_OK) {
-		gpio_remove_callback(g_pwr_en_req.port, &g_pwr.cb);
-		return s;
-	}
+	if (s != ALP_OK) return s;
+
 	s = da9292_init(&g_pwr.dev, i2c, DA9292_I2C_ADDR_V2N);
 	if (s == ALP_OK) {
 		s = da9292_v2n_base_init(&g_pwr.dev);
 	}
 	alp_z_v2n_supervisor_brd_i2c_release();
-	if (s != ALP_OK) {
-		gpio_remove_callback(g_pwr_en_req.port, &g_pwr.cb);
-		return s;
+	if (s != ALP_OK) return s;
+
+	/* Set before the IRQ can fire; the work handler drops anything that
+     * arrives while this is false. */
+	g_pwr.initialised = true;
+
+	/* Callback first, then arm -- the reverse order leaves a window in
+     * which the edge fires with no callback registered and is lost. */
+	gpio_init_callback(&g_pwr.cb, v2n_pwr_irq_handler, BIT(g_pwr_en_req.pin));
+	rc = gpio_add_callback(g_pwr_en_req.port, &g_pwr.cb);
+	if (rc != 0) {
+		g_pwr.initialised = false;
+		return ALP_ERR_IO;
 	}
 
-	g_pwr.initialised = true;
-	LOG_INF("V2N DEEPX rail-mgmt initialised -- waiting on P65 rising edge");
+	rc = gpio_pin_interrupt_configure_dt(&g_pwr_en_req, GPIO_INT_EDGE_RISING);
+	if (rc != 0) {
+		gpio_remove_callback(g_pwr_en_req.port, &g_pwr.cb);
+		g_pwr.initialised = false;
+		return ALP_ERR_IO;
+	}
+
+	/* Level-sample once, now that the edge path is live.  The A55 may
+     * already be holding P65 high before this SYS_INIT ran -- a CM33
+     * restart under a running A55 (remoteproc reload) does exactly
+     * that -- and GPIO_INT_EDGE_RISING never reports a level that is
+     * already high.  Submitting here is safe: v2n_pwr_work_handler
+     * services the request at most once.  A negative errno from the
+     * read falls through to the edge path rather than submitting. */
+	if (gpio_pin_get_dt(&g_pwr_en_req) > 0) {
+		LOG_INF("V2N DEEPX rail-mgmt initialised -- P65 already high, servicing now");
+		k_work_submit(&g_pwr.work);
+	} else {
+		LOG_INF("V2N DEEPX rail-mgmt initialised -- waiting on P65 rising edge");
+	}
 	return ALP_OK;
 }
 

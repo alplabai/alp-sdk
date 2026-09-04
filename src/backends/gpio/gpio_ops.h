@@ -32,19 +32,6 @@ struct alp_gpio_ops {
 	alp_status_t (*open)(uint32_t                  pin_id,
 	                     alp_gpio_backend_state_t *state,
 	                     alp_capabilities_t       *caps_out);
-	/* Delegated open: used when the caller is another BACKEND (the CC3501E
-	 * proxy) whose sidecar holds the platform state, so `st` is NOT the
-	 * `state` member of a struct alp_gpio and the owner CANNOT be recovered
-	 * by CONTAINER_OF -- `state` is the first member of struct alp_gpio, so
-	 * that arithmetic silently "succeeds" and yields the sidecar
-	 * reinterpreted as a much larger handle (issue #1618).  `owner` is the
-	 * real portable handle whose cb/cb_user the ISR thunk must read.  NULL
-	 * when a backend cannot be delegated to; a delegating caller must then
-	 * refuse rather than fall back to open(). */
-	alp_status_t (*open_delegated)(uint32_t                  pin_id,
-	                               alp_gpio_backend_state_t *state,
-	                               struct alp_gpio          *owner,
-	                               alp_capabilities_t       *caps_out);
 	alp_status_t (*configure)(alp_gpio_backend_state_t *state,
 	                          alp_gpio_dir_t            dir,
 	                          alp_gpio_pull_t           pull);
@@ -90,5 +77,30 @@ struct alp_gpio {
  * pins here so it reuses the real Zephyr pin I/O instead of re-implementing
  * it.  NULL is never returned. */
 const alp_gpio_ops_t *alp_z_gpio_ops(void);
+
+/* Platform-backend open that takes the owning portable handle EXPLICITLY.
+ *
+ * The Zephyr backend has to know which struct alp_gpio an interrupt belongs to,
+ * because the dispatcher stashes the user callback on the handle (pin->cb) and
+ * the ISR thunk invokes it from there.  Its own ops->open() recovers that owner
+ * with CONTAINER_OF(st, struct alp_gpio, state), which is correct only when the
+ * caller really did pass &handle->state.
+ *
+ * A delegating backend does not: the CC3501E proxy owns the handle's state and
+ * hands the platform backend a state object nested in its own per-handle
+ * sidecar.  CONTAINER_OF on that yields a pointer some bytes BEFORE a
+ * proxy_side_t, and the ISR thunk then loads a callback from whatever lies
+ * there and calls it -- from interrupt context (issue #1618).
+ *
+ * So a delegating caller must name the owner instead of having it inferred.
+ * Pass the OWNER'S state (&handle->state), not the handle: that keeps the
+ * CONTAINER_OF -- and every Zephyr header it needs -- inside the platform
+ * backend, so a delegating backend stays free of Zephyr types.  NULL is
+ * accepted and leaves the pin without a callback target, which is safer than
+ * fabricating one. */
+alp_status_t alp_z_gpio_open_owned(uint32_t                  pin_id,
+                                   alp_gpio_backend_state_t *st,
+                                   alp_capabilities_t       *caps_out,
+                                   alp_gpio_backend_state_t *owner_state);
 
 #endif /* ALP_BACKENDS_GPIO_OPS_H */

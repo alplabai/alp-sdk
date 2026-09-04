@@ -43,12 +43,19 @@ keyword that actually fired, forwarded verbatim; there is no `hint`.
 
 ## Diagnose
 
-Read-only; validates the file without touching the build. Only the SDK's own
-CLI prints the full diagnostic frame with the `ALP-B099` code and the
-`= see:` pointer below:
+Read-only; validates the file without touching the build. In an alp-sdk
+checkout, `scripts/validate_board_yaml.py` prints the full diagnostic frame
+with the `ALP-B099` code and the `= see:` pointer below directly -- it is
+the script `tan validate` itself spawns:
 
 ```sh
-python3 -m alp_cli validate board.yaml
+python3 scripts/validate_board_yaml.py --input board.yaml
+```
+
+With a separate `tan` install:
+
+```sh
+tan validate --board-yaml board.yaml
 ```
 
 The diagnostic points at the offending block and carries the raw

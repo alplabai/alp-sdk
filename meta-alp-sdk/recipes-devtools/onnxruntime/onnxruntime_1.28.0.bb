@@ -10,13 +10,10 @@
 # Inheriting either would make metadata/libraries/onnxruntime.yaml's single
 # `version:` field untrue on one family or the other the moment a second
 # family enabled it. This recipe builds UPSTREAM at one version so the
-# manifest stays honest as Alp Lab adds SoC families -- see PR #1249
-# ("docs(plans): record the own-recipe decision and its architectural
-# rationale", branch docs/ai-gap-plans) for the full O(families) vs O(1)
-# "scaling argument"; the maintainer chose this path explicitly on
-# 2026-08-05 over the meta-imx-ml fallback. (That plan doc does not exist
-# on this branch -- it lands with PR #1249 -- so it is cited by PR number,
-# not by path, to stay resolvable for anyone reading this branch.)
+# manifest stays honest as Alp Lab adds SoC families -- see
+# docs/superpowers/plans/2026-08-05-onnxruntime-own-recipe.md for the full
+# O(families) vs O(1) "scaling argument"; the maintainer chose this path
+# explicitly on 2026-08-05 over the meta-imx-ml fallback.
 #
 # alp-sdk does NOT consume ORT's execution-provider mechanism at all -- NPU
 # dispatch happens one level up, in src/yocto/inference_yocto.c's

@@ -5,11 +5,11 @@
  * libFuzzer harness for the <alp/protocol/cc3501e.h> SPI wire
  * protocol.  Targets the frame parser that the Alif-side host
  * driver (chips/cc3501e/) and the embedded CC3501E firmware
- * (firmware/cc3501e/) both run on inbound bytes.
+ * (the cc3501e-bridge-firmware repo) both run on inbound bytes.
  *
  * This harness carries an inline reference decoder that mirrors the
  * v1 framing rules.  The embedded firmware now implements the real
- * parser (firmware/cc3501e/src/protocol.c `protocol_build_reply`);
+ * parser (cc3501e-bridge-firmware:src/protocol.c `protocol_build_reply`);
  * a follow-up can retarget this harness at that symbol directly for
  * coverage of the production code path.
  *

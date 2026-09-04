@@ -123,8 +123,23 @@ typedef enum {
  * Same shape as the SDIO mux: a 74LVC157 quad 2:1 picks which
  * device drives the SoM's single I2S0 bus.  Control pins:
  *
- *   /E (active-low enable) = E1M IO8   -- Alif side (P7.1)
- *   S  (select)            = E1M IO13  -- CC3501E side (GPIO13)
+ *   /E (active-low enable) = E1M IO8   -- REVISION-DEPENDENT, see below
+ *   S  (select)            = E1M IO13  -- CC3501E side (GPIO13), both revisions
+ *
+ * NOTE: the enable line MOVED between board revisions, so neither answer is
+ * unconditionally true (#913).  Per
+ * metadata/e1m_modules/aen/hw-revisions.yaml:
+ *
+ *   - **r1**: IO8 is a direct Alif GPIO (P7.1).  One mux pin is SoC-direct and
+ *     the other goes through the CC3501E GPIO proxy.
+ *   - **r2**: "IO8 -> WIFI_GPIO30 ... (both now CC3501E)", and
+ *     from-cc3501e.tsv (which tracks R2) maps IO8 to GPIO_30.  BOTH mux
+ *     control pins are then CC3501E-side and both go through the proxy.
+ *
+ * Take the revision from the module, not from this comment: `alp board` prints
+ * it out of the EEPROM manifest.  Portable code should not branch on it by
+ * hand -- open the pin by its E1M_* id and let the SDK apply the per-rev
+ * `pad_route_overrides`.
  *
  * IMPORTANT: the two control pins live on DIFFERENT chips on
  * this EVK -- I2S_EN is driven from Alif via alp_gpio_*, but
@@ -174,7 +189,7 @@ typedef enum {
  * ALP_CC3501E_CMD_GPIO_SET_INTERRUPT and propagates the wake event
  * up to Alif over the inter-chip SPI1.  Apps that want to surface
  * either as a system wake source must subscribe via the CC3501E
- * event callback (alp/chips/cc3501e.h's cc3501e_set_event_callback).
+ * event callback (alp/chips/cc3501e.h's cc3501e_add_event_callback).
  *
  * EVK_PIN_M2E_UART_WAKE (= ALP_E1M_GPIO_IO19) and EVK_PIN_M2E_SDIO_WAKE
  * (= ALP_E1M_GPIO_IO18) are defined in the generated routes header. */
@@ -192,7 +207,7 @@ typedef enum {
  * input pull-up + write 0 to assert / write 1 / Hi-Z to release)
  * + ALP_CC3501E_CMD_GPIO_WRITE.  The CC3501E firmware needs the
  * open-drain mode wired into its GPIO_CONFIGURE handler -- a v0.4
- * item for the embedded firmware/cc3501e/ tree (GPIO proxy group).
+ * item for the embedded cc3501e-bridge-firmware: tree (GPIO proxy group).
  *
  * EVK_PIN_W_DISABLE1 (= ALP_E1M_GPIO_IO17) and EVK_PIN_W_DISABLE2
  * (= ALP_E1M_GPIO_IO16) are defined in the generated routes header. */
@@ -282,7 +297,7 @@ typedef enum {
 /* These can't ride the global `ALP_E1M_GPIO_IO*` namespace -- their  */
 /* pad indices live past the standard 52-entry GPIO array.  The       */
 /* board's `alp,pin-array` overlay extends the array with the       */
-/* extra entries (indices 42..N) and the macros below map a name to  */
+/* extra entries (indices 52..N) and the macros below map a name to  */
 /* that overlay-defined index.                                        */
 /*                                                                    */
 /* The actual integer values are populated by the EVK's overlay,      */
@@ -293,70 +308,18 @@ typedef enum {
 /* needs to verify the overlay declares matching extra entries.       */
 /* ================================================================== */
 
-/** Base index for EVK overlay-extended `alp,pin-array` entries.  Sits
- *  just past the 52 standard entries so it never collides. */
-#define EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT
-
-/** AUDIO_CLK pad (E1M Z2 / Alif P9_6) repurposed as the I/O
- *  expander INT line on this EVK.  When the audio path is in
- *  use the IO expander interrupt is unavailable; firmware should
- *  poll the expander instead. */
-#define EVK_PIN_IO_EXP_INT (EVK_PIN_OVERLAY_BASE + 0u)
-
-/** SPI0_CS1 pad (E1M N1 / Alif P3_6) repurposed as the I/O
- *  expander reset line.  When SPI0 is used with two chip-selects
- *  this pin can't double as IO_EXP_RST -- the EVK assumes SPI0
- *  is in single-CS mode at most. */
-#define EVK_PIN_IO_EXP_RST (EVK_PIN_OVERLAY_BASE + 1u)
-
-/** SPI0_MISO pad (E1M L1 / Alif P5_0) repurposed as the audio
- *  amplifier fault output (open-drain input from the amp). */
-#define EVK_PIN_AMP_FAULT (EVK_PIN_OVERLAY_BASE + 2u)
-
-/** SPI0_CS0 pad (E1M M1 / Alif P5_2) repurposed as the audio
- *  amplifier enable input (active-high). */
-#define EVK_PIN_AMP_ENABLE (EVK_PIN_OVERLAY_BASE + 3u)
-
-/** I2S1_SDI pad (E1M AH6 / Alif P13_4) repurposed as the
- *  mikroBUS click INT pin.  Was earlier (mis)documented as
- *  CTP_INT; the user has since clarified that CTP_INT is on
- *  SPI1_CS1 (see EVK_PIN_CTP_INT below) and I2S1_SDI is
- *  the mikroBUS INT line. */
-#define EVK_PIN_MB_INT (EVK_PIN_OVERLAY_BASE + 4u)
-
 /* CTP_RST: capacitive touch panel reset rides ONLY the TCAL9538
  * I/O expander on this EVK (pin P3 -- see EVK_IOEXP_CTP_RST
  * below).  An earlier draft of these notes had CTP_RST = SPI1_CS0
  * too; that was a mis-label.  SPI1_CS0 is the Arduino UNO
- * header's CK_CS (chip select); see "Arduino UNO header" below. */
-
-/** SPI0_MOSI pad (E1M M2 / Alif P5_1) repurposed as Arduino
- *  CK_DIO4 (digital I/O 4 on the Arduino UNO header). */
-#define EVK_PIN_CK_DIO4 (EVK_PIN_OVERLAY_BASE + 5u)
-
-/** SPI0_SCLK pad (E1M N2) repurposed as Arduino CK_DIO3.
- *  NB: the Alif-side pad mapping for SPI0_SCLK is left blank in
- *  metadata/e1m_modules/aen/from-alif.tsv (user-supplied) and
- *  needs filling once the EVK schematic is cross-checked. */
-#define EVK_PIN_CK_DIO3 (EVK_PIN_OVERLAY_BASE + 6u)
-
-/** I2S1_WS pad (E1M AG7 / Alif P2_7) repurposed as Arduino CK_DIO2. */
-#define EVK_PIN_CK_DIO2 (EVK_PIN_OVERLAY_BASE + 7u)
-
-/** I2S1_SDO pad (E1M AG6 / Alif P13_5) repurposed as Arduino CK_DIO1. */
-#define EVK_PIN_CK_DIO1 (EVK_PIN_OVERLAY_BASE + 8u)
-
-/** I2S1_SCLK pad (E1M AH7 / Alif P2_6) repurposed as Arduino
- *  CK_RST (the Arduino UNO header's RESET signal -- shields can
- *  pulse it low to force a reboot). */
-#define EVK_PIN_CK_RST (EVK_PIN_OVERLAY_BASE + 9u)
-
-/** SPI1_CS1 pad (E1M AH8 -- CC3501E side, GPIO_15) repurposed as
- *  the capacitive touch panel interrupt input.  Routed through
- *  the on-module CC3501E -- firmware reads CTP touches by
- *  registering an interrupt callback on the CC3501E's GPIO_15
- *  via ALP_CC3501E_CMD_GPIO_SET_INTERRUPT. */
-#define EVK_PIN_CTP_INT (EVK_PIN_OVERLAY_BASE + 10u)
+ * header's CK_CS (chip select); see "Arduino UNO header" below.
+ *
+ * EVK_PIN_OVERLAY_BASE and the eleven EVK_PIN_* overlay-pad indices
+ * (which E1M/Alif pad each repurposes, and why) are defined in the
+ * generated routes header `alp_e1m_evk_routes.h` -- N in
+ * `EVK_PIN_OVERLAY_BASE + N` is each entry's position in
+ * metadata/boards/e1m-evk.yaml's `overlay_pins:` list, not an
+ * independently hand-picked value (#1636). */
 
 /* I2S1 is fully consumed by the EVK -- all four I2S1 pads are
  * repurposed as GPIOs:
@@ -634,10 +597,14 @@ typedef enum {
  * The TAS2563 also has a hardware broadcast page-write convention at
  * 0x48.  On PRE-RESPIN boards that address was occupied by U32
  * INA236B (+V_CAM0 rail), so the broadcast was unusable; U32 was
- * re-strapped A0=SCL -> 0x4B from the next batch, which frees 0x48.
- * Firmware that must work on both board revisions still has to issue
- * two targeted unit-address writes back-to-back rather than relying
- * on a 0x48 broadcast.
+ * re-strapped A0=SCL -> 0x4B from the next batch, which frees 0x48
+ * at the hardware level on respun boards.  That does not make 0x48
+ * usable from the SDK, though: 0x48 does not pin down one physical
+ * chip the way a strap address does, for a write any more than for
+ * a read, and tas2563_init() rejects TAS2563_I2C_ADDR_BROADCAST on
+ * every board revision, respun or not, so firmware unconditionally
+ * has to issue two targeted unit-address writes back-to-back rather
+ * than a 0x48 broadcast.
  *
  * EVK_I2C_ADDR_TAS2563_LOW and EVK_I2C_ADDR_TAS2563_HIGH are defined
  * in the generated routes header. */
@@ -662,10 +629,13 @@ typedef enum {
  * Confirmed against the EVK schematic strap labels.  The three
  * B-bank addresses actually in use (0x49 / 0x4A / 0x4B) collide with
  * nothing: not the TAS2563 unit addresses (0x4D / 0x4E), and not its
- * broadcast address (0x48), which the U32 re-strap freed.  On
- * PRE-RESPIN boards U32 sat at 0x48 and did shadow that broadcast --
- * see the TAS2563 block above for the two-write workaround that
- * remains necessary if you support both revisions.
+ * broadcast address (0x48), which the U32 re-strap freed at the
+ * hardware level.  On PRE-RESPIN boards U32 sat at 0x48 and did
+ * shadow that broadcast -- see the TAS2563 block above: the SDK
+ * cannot use 0x48 on either revision anyway (0x48 doesn't pin down
+ * one physical chip, regardless of direction), so the two-write
+ * workaround is unconditional, not conditional on which revision
+ * you support.
  *
  * EVK_I2C_ADDR_INA236_3V3, _1V8, _VIO, _VCAM0, _VCAM1 and _5V are
  * defined in the generated routes header. */

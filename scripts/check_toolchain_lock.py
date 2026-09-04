@@ -262,7 +262,7 @@ def _pinned_zephyr_version() -> str | None:
 def _resolve_zephyr_dir() -> Path:
     """Same resolution order as `tests/scripts/test_hil_blocks_coverage.py`'s
     `_pinned_zephyr_sysbuild_kconfig_symbols`: `$ZEPHYR_BASE` (the
-    convention every `west` command and `scripts/alp_cli/doctor.py` use),
+    convention every `west` command and `tan doctor` use),
     falling back to the west-workspace topdir's conventional `zephyr/`
     project directory (`scripts/bootstrap.sh` does `west init -l <alp-sdk>`,
     so alp-sdk's parent is the topdir)."""

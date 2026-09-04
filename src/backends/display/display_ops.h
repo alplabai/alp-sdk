@@ -75,6 +75,31 @@ struct alp_display {
 	uint8_t  lifecycle;
 	uint32_t active_ops;
 	bool     in_use;
+	/* Slot generation, bumped on every fresh claim.  Deliberately AFTER
+	 * in_use: the dispatcher's atomic-claim zeroing memsets up to
+	 * offsetof(..., in_use), so a counter placed before it would reset on
+	 * every claim and never distinguish one owner from the next.
+	 *
+	 * Exists because a raw `alp_display_t *` is NOT a stable identity:
+	 * the pool is static, so after close -> open the same address is a
+	 * DIFFERENT display.  A holder that cached the pointer (LVGL's
+	 * user-data in src/gui_lvgl.c, issue #1698) must compare epochs to
+	 * notice, or it silently draws onto whoever owns the slot now. */
+	uint32_t epoch;
 };
+
+/**
+ * @brief This handle's slot generation (issue #1698).
+ *
+ * The handle pool is static, so a raw `alp_display_t *` does not identify a
+ * display across a close/open pair -- the same address is reused.  A caller
+ * that caches the pointer (LVGL's user-data in src/gui_lvgl.c) snapshots this
+ * alongside it and re-compares before using the handle; a mismatch means the
+ * slot has a new owner.
+ *
+ * @param[in] h  Display handle, may be NULL.
+ * @return the slot generation, or 0 for NULL.
+ */
+uint32_t alp_display_slot_epoch(const alp_display_t *h);
 
 #endif /* ALP_BACKENDS_DISPLAY_OPS_H */

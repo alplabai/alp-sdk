@@ -116,15 +116,16 @@ Extraction is mechanical, not a hand-maintained list:
     the current corpus, entirely via a bare inline span
     (`test_getting_started_only_subcommand_is_checked`), so tightening
     extraction there would be a straight regression, not a fix.
-  - A verb whose `tan <verb> --help` `Usage:` line ends `[ARGS]...` is a
-    legacy FORWARDING verb (the frozen Rust line used this shape) --
-    clap never lists its real flags there, it only prints a generic
-    "Arguments forwarded verbatim ..." blurb naming a few EXAMPLE flags
-    (`--core`, `-b`, ...) that happen to belong to other forwarding verbs.
-    Checking that blurb against docs/cli.md's tabulated flags is worse than
-    not checking: it fires on every forwarding verb regardless of what its
-    OWN flags are (noise), and it would stay silent if a real forwarded flag
-    were actually dropped (false confidence). So this check skips flag
+  - A verb whose `tan <verb> --help` `Usage:` line ends `[ARGS]...`
+    (Clap/the frozen Rust line) or `[ARGS...]` (Typer/Click, the current
+    Python `tan`'s rendering of the same catch-all) is a legacy FORWARDING
+    verb -- neither ever lists its real flags there, each only prints a
+    generic "Arguments forwarded verbatim ..." blurb naming a few EXAMPLE
+    flags (`--core`, `-b`, ...) that happen to belong to other forwarding
+    verbs. Checking that blurb against docs/cli.md's tabulated flags is worse
+    than not checking: it fires on every forwarding verb regardless of what
+    its OWN flags are (noise), and it would stay silent if a real forwarded
+    flag were actually dropped (false confidence). So this check skips flag
     verification entirely for a forwarding verb -- existence of the verb
     itself is still checked -- and says so by name in the OK line so the
     exclusion is visible rather than silent.
@@ -203,9 +204,12 @@ Deliberately OUT of scope (log it here, don't let silence read as coverage):
     associating a prose flag mention with the right subcommand outside a
     structured table is not reliably mechanical.
   - docs/cli.md-tabulated flags for a FORWARDING verb (see above) -- e.g.
-    `tan new-som`'s SoM-porting flags are real, working, forwarded args
-    (verified by hand against a real `tan`), but this check cannot confirm
-    that mechanically from --help text, so it doesn't claim to.
+    `tan lock`/`tan migrate`/`tan quality`'s forwarded args are real, working
+    flags (verified by hand against a real `tan`), but this check cannot
+    confirm that mechanically from --help text, so it doesn't claim to.
+    `tan new-som` is NOT a forwarding verb -- it is `[OPTIONS]`-only and its
+    thirteen `docs/cli.md`-tabulated flags ARE this check's main verified
+    surface.
   - Windows. This installs/runs the Linux `tan` build only.
   - `west alp-*` (a different, still-supported front door) and
     `python -m alp_cli` (the separate Python preflight) -- neither is `tan`.
@@ -507,14 +511,18 @@ def _run_tan(tan_bin: str, *args: str, timeout: int = 20) -> subprocess.Complete
 
 def _has_legacy_passthrough_args(help_text: str) -> bool:
     """True when `tan <verb> --help`'s own `Usage:` line ends in a bare
-    `[ARGS]...` positional catch-all -- the frozen Rust line's marker for a
-    verb that forwards to the legacy SDK CLI and never lists its real flags
-    in its own --help output; it prints a generic "Arguments forwarded
-    verbatim ..." blurb instead. Verified by hand against a real, installed
-    tan: every `[OPTIONS]`-only verb (`init`/`validate`/`run`/`explain`/
-    `doctor`/`build`) lists its flags directly; every verb whose Usage line
-    also carries `[ARGS]...` does not."""
-    return _usage_line(help_text).endswith("[ARGS]...")
+    ARGS catch-all positional -- the marker for a verb that forwards to the
+    legacy SDK CLI and never lists its real flags in its own --help output;
+    it prints a generic "Arguments forwarded verbatim ..." blurb instead.
+    Two spellings are accepted: `[ARGS]...` (Clap/the frozen Rust line) and
+    `[ARGS...]` (Typer/Click, the current Python `tan`'s rendering of the
+    same `Argument(None, metavar="ARGS...")` catch-all). Verified by hand
+    against a real, installed tan: every `[OPTIONS]`-only verb
+    (`init`/`validate`/`run`/`explain`/`doctor`/`build`/`new-som`) lists its
+    flags directly; every forwarding verb (`lock`/`migrate`/`quality`)
+    carries the ARGS catch-all instead."""
+    usage = _usage_line(help_text)
+    return usage.endswith("[ARGS]...") or usage.endswith("[ARGS...]")
 
 
 # --- Invocation-SHAPE checking (positional args + unrecognised flags) ------

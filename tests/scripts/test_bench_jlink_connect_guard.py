@@ -325,6 +325,55 @@ def test_no_dpidr_at_all_is_refused(tmp_path):
     assert res.returncode == 4
 
 
+@_NEEDS_BASH
+def test_aen_dpidr_is_not_environment_overridable(tmp_path):
+    """alp-sdk#1716: a pre-set AEN_DPIDR must NOT win.
+
+    Before the fix, bench-env.sh assigned
+    `AEN_DPIDR="${AEN_DPIDR:-4C013477}"` -- a caller-exported value silently
+    replaced the real AEN E8 constant, so `export AEN_DPIDR=<whatever the
+    wrong board answers>` before running any of 5 of the 6
+    bench_jlink_assert_aen_dpidr call sites made the wrong-board interlock
+    accept that board. Simulate exactly that: set AEN_DPIDR to a bogus value
+    *before* sourcing bench-env.sh (the same shape an operator's `export
+    AEN_DPIDR=...` would leave), and feed the guard a transcript that answers
+    with that bogus value, not the real AEN E8 ID. A correctly-hardened
+    bench-env.sh ignores the caller's AEN_DPIDR and still expects the real
+    4C013477, so this must be REFUSED (returncode 4), not silently accepted
+    (returncode 0).
+
+    Deliberately does NOT use `bash -c "...$AEN_DPIDR..."` or
+    `subprocess.run(..., env=...)`: on this host, a literal `$VAR` inside a
+    `-c` argument does not survive the Windows argv round-trip (the exact
+    `list2cmdline`/MSYS re-parse trap `_run_verify_gate` above documents),
+    and an env var added only via the `env=` kwarg was observed NOT to reach
+    this MSYS bash at all -- both would make this test pass vacuously
+    regardless of the fix. Writing the override as a literal (no `$`)
+    assignment in a script FILE run as `bash gate.sh` sidesteps both: proven
+    by hand to flip 0 (pre-fix) / 4 (post-fix) for this exact scenario.
+    """
+    workdir = tmp_path
+    out = workdir / "pf.out"
+    out.write_text("Found SW-DP with ID 0xDEADBEEF\n", encoding="utf-8")
+    (workdir / "bench-env.sh").write_bytes(ENV.read_bytes())
+    gate = workdir / "gate.sh"
+    gate.write_bytes(
+        (
+            'AEN_DPIDR="DEADBEEF"\n'          # the attempted override
+            "source ./bench-env.sh\n"
+            f'bench_jlink_assert_aen_dpidr "{out.name}" "unit-test"\n'
+        ).encode("utf-8")
+    )
+    res = subprocess.run(
+        ["bash", "gate.sh"], cwd=workdir, capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=60,
+    )
+    assert res.returncode == 4, (
+        "AEN_DPIDR override was honoured -- the wrong-board MRAM-write "
+        f"interlock is bypassable via a bare env var (alp-sdk#1716)\n{res.stderr}"
+    )
+
+
 def _loadbins(body: str) -> bool:
     """True when the script really issues `loadbin`, not merely mentions it.
 

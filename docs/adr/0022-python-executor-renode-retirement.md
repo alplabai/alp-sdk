@@ -12,9 +12,10 @@ The four `pr-renode-*` workflows — `pr-renode-aen-smoke`,
 DELETED, and with them the hand-maintained Renode v1.16.1 pin and the
 `renode --console --disable-xwt --plain` boot that were the whole of
 alp-sdk's pre-silicon simulator coverage. `metadata/renode/*.repl` /
-`*.resc` and `tests/renode/*` are in scope and go once the `tan-cli` side
-lands; they are still present at this commit because `tan-cli`'s
-`parity.yml` seam-2 job references those model paths by name. What survives:
+`*.resc` and `tests/renode/*` were in scope and are now DELETED as well:
+`tan-cli`#848 removed the `parity.yml` seam-2 job's by-name reference to
+those model paths, and commit `e9552ed4` (#1568, 2026-08-19) deleted all
+nine files, so neither directory exists in the tree. What survives:
 the `diagnostics.sim_console` `board.yaml` field, which serves alp-studio's
 hardware simulator, not `tan renode`. alp-sdk ships no simulator of its own
 and none is planned — the cost is stated plainly in Amendment 2. This block

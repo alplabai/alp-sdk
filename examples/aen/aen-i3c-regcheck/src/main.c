@@ -23,12 +23,16 @@
  * IPSR=0, i.e. it ran fine and the output simply did not route).  For a
  * RAM-run, layer the RAM console on WITHOUT editing this app:
  *
- *     west build ... -- -DEXTRA_CONF_FILE=<file with CONFIG_RAM_CONSOLE=y,
- *                        CONFIG_RAM_CONSOLE_BUFFER_SIZE=2048,
- *                        CONFIG_UART_CONSOLE=n>
+ *     west build ... -- -DEXTRA_CONF_FILE="scripts/bench/aen/aen-bench-shared.conf;scripts/bench/aen/aen-flowc-itcm.conf"
  *
  * then read ram_console_buf over SWD (scripts/bench/aen/ram-run.sh).  A
  * Flow A/D MRAM boot does reach UART5 normally.
+ *
+ * Those two committed fragments ARE the mechanism -- there is no
+ * hand-written file to invent per invocation (#935).  aen-bench-shared.conf
+ * carries the RAM console (and CONFIG_DCACHE=n); aen-flowc-itcm.conf carries
+ * the ITCM link retarget a Flow C run also needs, and ram-run.sh refuses a
+ * slot0-linked image with exit 5 rather than mis-running it.
  *
  * WHAT THIS APP VALIDATES (and what it deliberately does NOT):
  *

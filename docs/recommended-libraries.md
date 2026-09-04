@@ -228,7 +228,7 @@ grouped by accelerator class:
 | Dataflow / scheduling   | `cmsis-stream`                                              |
 | Sensor fusion / control | `madgwick_ahrs`, `pid`                                      |
 | Industrial bus          | `modbus`                                                    |
-| IoT / networking        | `coremqtt_sn`, `libcoap`, `libwebsockets`, `nanopb`, `jsmn` |
+| IoT / networking        | `libcoap`, `libwebsockets`, `nanopb`, `jsmn` |
 | Audio codecs            | `minimp3`, `opus`                                           |
 | Header-only utility     | `etl`, `fmt`, `nlohmann_json`, `doctest`                    |
 | Test framework          | `catch2`                                                    |

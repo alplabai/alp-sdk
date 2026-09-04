@@ -209,10 +209,14 @@ alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
  *
  * @param[in]  out          Handle from @ref alp_audio_out_open.
  * @param[in]  buf          Source PCM data.
- * @param[in]  frames       Frames to push.
+ * @param[in]  frames       Frames to push.  Must not exceed the
+ *                          @c frames_per_block negotiated at open; a larger
+ *                          value is refused with @ref ALP_ERR_OUT_OF_RANGE
+ *                          rather than truncated.
  * @param[out] out_frames   Receives the frame count actually pushed.  May be NULL.
  * @param[in]  timeout_ms   Max wait for driver readiness.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
+ *         ALP_ERR_TIMEOUT.
  */
 alp_status_t alp_audio_out_write(alp_audio_out_t *out,
                                  const void      *buf,
@@ -226,7 +230,11 @@ alp_status_t alp_audio_out_write(alp_audio_out_t *out,
  * @param[in] out  Handle from @ref alp_audio_out_open.
  * @param[in] vol  Linear scale 0..255.  Not in dB — caller does the
  *                 dB → linear conversion if needed.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT
+ *         (@p vol is not full-scale (255) and the format the handle was
+ *         opened with cannot be software-scaled by the backend -- e.g.
+ *         S24_LE / S32_LE on the Yocto and Zephyr backends, which only
+ *         scale S16_LE).
  */
 alp_status_t alp_audio_out_set_volume(alp_audio_out_t *out, uint8_t vol);
 

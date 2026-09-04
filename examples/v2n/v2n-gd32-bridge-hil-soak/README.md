@@ -24,9 +24,10 @@ on ADC) remain their own HIL-PLAN rows.
 | pwm_single_pulse | 0x26 | status OK (waveform = scope row) |
 | pwm_capture | 0x23/24/25 | begin/end OK; read OK or NOSUPPORT (no edges on bench) |
 | adc_read | 0x30 | 4 samples ≤ VREF |
-| adc_stream | 0x33/34/35 | **>0 samples after 50 ms @ 1 kHz — the stream-DMA DMAMUX regression test** |
-| dac | 0x50/0x51 | 1650 mV readback ± 16 mV; parked at 0 after |
-| qenc | 0x60/0x61 | reset → position reads exactly 0 |
+| adc_stream | 0x33/34/35 | two-read paced assertion: read 1 (after 50 ms @ 1 kHz) returns exactly the 32-sample cap; read 2, taken immediately after, returns 1–30 leftover samples — 32 again would mean free-running (rate ignored), 0 would mean a dead stream |
+| adc_stream_guard | 0x33/35 + 0x30 | while `adc_stream` owns a converter (ch0, ADC3), a single-shot `adc_read` on its sibling channel (ch1) must be refused (`ALP_ERR_IO`); a different converter's channel (ch4, ADC1) must still succeed; after `STREAM_END` the sibling read must succeed again (guard not sticky) |
+| dac | 0x50/0x51 | 600 mV readback ± 16 mV (jumper-safe under the 1.8 V rail — DAC0 sits jumpered straight to the ADC0 pad on the X-EVK Tier-B bench); parked at 0 after |
+| qenc | 0x60/0x61 | reset OK, read OK — no encoder is attached on the bench, so the A/B inputs float and the position value isn't asserted, only the reset/read round-trip |
 | counter | 0x70 | strictly increasing across 200 µs |
 | trng | 0x80 | two 16-byte pulls: non-constant + distinct |
 | tmu | 0x90 | sqrt(4)=2 ± 1e-3, sin(0)=0 ± 1e-3 |
@@ -39,28 +40,35 @@ One-shot at boot (not per-cycle): `adc_dsp_chain_open` probe — the
 4-chain pool has no close opcode yet, so looping it would exhaust the
 pool and poison the stats.
 
-**Quarantine list** (skipped, don't gate the verdict): the soak's
-first silicon runs (2026-06-04) caught six HAL surfaces failing from
-cycle 1 — `pwm_capture`, `adc_stream`, `qenc`, `tmu`,
-`ota_get_state`, `trng` — with `adc_stream` actively destructive (a
-failed `STREAM_END` leaves its circular DMA contending with the SPI
-slave's channels until the link rots) and `trng`'s in-handler
-conditioning wait breaking the reply window plus rippling stale
-replies into the next ~3 tests of the cycle.  Each is quarantined in
-the test table with its observed failure; un-quarantine as firmware
-fixes land.
+**Quarantine history** (resolved — nothing is skipped today; every
+row in the test table runs active): the soak's first silicon runs
+(2026-06-04) caught six HAL surfaces failing from cycle 1 —
+`pwm_capture`, `adc_stream`, `qenc`, `tmu`, `ota_get_state`, `trng` —
+and quarantined all six.  Five of them (`pwm_capture`, `qenc`, `tmu`,
+`ota_get_state`, `trng`) turned out to be two compounding host/
+transport bugs, not HAL defects: a `transport_spi.c` slave-cursor
+rewind bug that made a slow handler's reply permanently unreadable,
+plus the host masking every error reply's true status behind a
+generic `ALP_ERR_IO`.  `trng` additionally had a real, now-handled
+hardware condition — the unit latches a fault (`TRNG_STAT = 0x48`)
+after an intermittent seed error; firmware now detects the latch and
+rebuilds instead of hanging the reply window.  `adc_stream` was
+different: a real, separate firmware defect, and its failure mode
+was genuinely destructive — a failed `STREAM_END` left the 1 kHz
+circular DMA contending with the SPI slave's channels until the link
+rotted.  Root cause was `CTL1.DDM` never set (circular DMA stalls by
+design without it) plus the `RCU_DMAMUX` clock never explicitly
+enabled on the stream path.  Both bug classes were fixed 2026-06-04
+(commits `2e30b9d09`, `ffdc66ee5`).
 
-**Validation record** (2026-06-04, trng still active in that run):
-**1526 cycles / ~50 min, cold-boot-autonomous, zero link wedges**.
-The 13 healthy surfaces scored 1526/1526 clean apiece (counter
-1525/1526 — one recovered transient); trng failed every cycle and
-rippled into the 3 tests after it, all recovered at each cycle
-boundary — which is itself the strongest liveness evidence: ~6000
-sustained per-cycle errors with zero hangs.
+**Validation record**: **253/253 across a 20-row HIL soak** on fw
+v0.2.8 + v0.2.9 (2026-06-06, see `docs/test-plan.md`) — every row
+above, including `adc_stream` and `trng`, clean with zero
+quarantined entries.
 
 ## Reading the output
 
-Per cycle: `[hil-soak] cycle N | 19/19 PASS`.  Every 16 cycles a
+Per cycle: `[hil-soak] cycle N | 20/20 PASS`.  Every 16 cycles a
 cumulative per-test table prints, ending in a greppable verdict line:
 `SOAK-CLEAN` (zero failures everywhere) or `SOAK-DIRTY`.  Failures
 never halt the soak — they print one diagnosable line (test name +
