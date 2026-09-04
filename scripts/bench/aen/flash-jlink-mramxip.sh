@@ -143,6 +143,32 @@ $JLINK -nogui 1 -CommanderScript /tmp/flowd-mramxip-preflight.jlink \
 bench_jlink_assert_aen_dpidr /tmp/flowd-mramxip-preflight.out "MRAM write preflight" || exit 4
 echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 
+# #1902 -- THE CUSTOM PATCHED-FLM PATH DOES NOT PRODUCE TRUSTWORTHY BYTES.
+# This warns rather than refuses: on a J-Link V11+ probe that can select SEGGER's
+# built-in AE822FA0E5597LS0_M55_HE profile, this script is fine and is the
+# documented fast path.  The custom AE822_ALP_M55_HE device -- generic Cortex-M55
+# connect + a hand-patched copy of Alif's Ensemble.FLM -- is the one that fails.
+if [ "$DEV" = "AE822_ALP_M55_HE" ]; then
+  echo "?? WARNING: JLINK_DEVICE_FLASH=$DEV is the hand-patched-FLM workaround." >&2
+  echo "   Bench-measured 2026-09-04: only 1 of 4 flashes on this path survived a" >&2
+  echo "   cold power-cycle byte-exact.  Failures corrupt slot0 in a specific way --" >&2
+  echo "   of the 128-bit MRAM ECC words that differ, the LAST 32-bit word is wrong" >&2
+  echo "   in 107/107 and 66/66 (a torn 128-bit commit; NOT a sector or page fault," >&2
+  echo "   0 of 127 cluster starts are 0x400-aligned).  A corrupted image then fails" >&2
+  echo "   SES verification (cert_verify_wrapper returned 0xF1000009, TOC flags 'u s'" >&2
+  echo "   not 'u VB') and never boots." >&2
+  echo "   It cannot be fixed by quiescing the core first: AP[3] (APAddr 0x00300000)," >&2
+  echo "   the AHB-AP carrying the M55 debug domain, exists ONLY while the SES has" >&2
+  echo "   booted a slot0 image.  Erase slot0 and this profile cannot connect at all" >&2
+  echo "   (0 of 5 attempts reached programming).  Attachable and quiesced are" >&2
+  echo "   mutually exclusive on this part." >&2
+  echo "   USE FLOW A INSTEAD: scripts/bench/aen/flash-run.sh (SETOOLS over the" >&2
+  echo "   SE-UART).  Same image, same ATOC config: Flow A gives 'u VB', boots, and" >&2
+  echo "   is cold-cycle byte-exact -- including aen-wdt-feed, which Flow D corrupted" >&2
+  echo "   2 of 2 times." >&2
+  echo "   ALWAYS confirm any write on this path with a cold-cycle readback." >&2
+fi
+
 # 1. stage the app + write the slot0 (mramAddress) signed-ATOC config.
 cp -f "$BIN" "$SET/build/images/$NAME.bin"
 cat > "$SET/build/config/$NAME-slot0.json" <<JSON
