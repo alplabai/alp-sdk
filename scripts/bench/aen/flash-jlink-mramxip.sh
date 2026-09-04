@@ -192,6 +192,32 @@ echo "    atoc -> $ATOC_ADDR ($(stat -c%s "$PKG") B)" >&2
 # reset+halt below as the only reset in the sequence, so nothing is executing
 # from MRAM while MRAM is being written.
 #
+# NO RESET BEFORE PROGRAMMING -- `h` alone, on the live core.
+# Bench-measured 2026-09-04, 8 back-to-back probe-only sessions whose logs are
+# BYTE-IDENTICAL apart from a 1 mV probe ADC reading (`VTref=1.820V` vs
+# `VTref=1.819V`) -- so this is not timing.  The AHB-AP carrying the M55 debug
+# domain, AP[3] (APAddr 0x00300000): AHB-AP (IDR: 0x34770008), is present in the
+# PRE-reset scan 8/8 (`AP[3]: Core found`, `CPUID register: 0x411FD220`,
+# `Found Cortex-M55 r1p0, Little endian.`) and ABSENT from every post-reset scan,
+# which stops at AP[2] (APAddr 0x00070000): AXI-AP (IDR: 0x34770017) and then
+# `Could not find core in Coresight setup`.  So `RSetType 2; r` was DESTROYING the
+# debug access the halt needs: 0/8 halts after a reset, versus a core reachable on
+# a plain `connect` 8/8 here and 15/15 across the earlier flashing logs.
+# Attaching to the live core and halting it took programming from 6/12 to 12/12.
+# The reset that BOOTS the new image still happens, AFTER both blobs are written.
+#
+# !! ACCEPTANCE ON THIS PATH IS A COLD-CYCLE READBACK, NOT `verifybin`.  Halting a
+# !! long-running app and programming from that state has a 2026-07-09 bench
+# !! precedent of a SILENT NON-PERSIST -- `Verify successful.` followed by a cold
+# !! power-cycle REVERTING slot0.  This probe also warns its firmware
+# !! "does not handle I/D-cache correctly" on ARMv8-M, and an app that left
+# !! D-cache on is exactly that case.  Prove a flash by cutting power at the
+# !! DPS-150 and re-reading slot0.  As of 2026-09-04 that is BLOCKED on this bench:
+# !! the AEN place drives DPS-150 13E502BA4055, which is cabled to nothing, while
+# !! the board is actually fed by 10A2617F4486 owned by the retired
+# !! e1mx-v2n-m1-01 agent at 15.0 V -- so the board also runs OFF-RAIL (documented
+# !! AEN Vin is 16.0 V) until the telemetry agents are repointed.
+#
 # SetSkipProgOnCRCMatch = 0: never let J-Link decide a page is already correct
 # from a debug READ.  Debug-AP reads of this part are documented to lie in some
 # states (see reference_aen_e8_bench_traps), and trusting one here would silently
@@ -203,8 +229,6 @@ speed $JLINK_SPEED
 device $DEV
 connect
 exec SetSkipProgOnCRCMatch = 0
-RSetType 2
-r
 h
 loadbin $SET/build/images/$NAME.bin $APP_ADDR, noreset
 loadbin $PKG $ATOC_ADDR, noreset
@@ -255,46 +279,37 @@ fi
 # The count is necessary, not sufficient: `verifybin` reads through the same debug
 # AP, so the app's own `RESULT` line off the RAM console in step 4 remains the
 # only end-to-end proof that the flashed image actually runs.
-# #1902 -- DIAGNOSE A FAILED HALT EXPLICITLY.  With `, noreset` on the loadbins,
-# the single explicit `RSetType 2; r; h` above is the ONLY reset in the sequence,
-# so if it does not actually halt the core there is no longer any fallback: both
-# loadbins then run against a LIVE CPU, cannot preserve the RAMCode workspace at
-# 0x00000000-0x0001FFFF (WorkRAMAddr/WorkRAMSize from device.xml), and write
-# NOTHING.  The verify gate below still catches that correctly -- but it reports
-# it as "verify failed", which reads like corrupted MRAM when in fact not one byte
-# was written.  Bench-measured 2026-09-04 over 12 runs: verify failed if and only
-# if the halt failed, 12/12.
+# #1902 -- CONFIRM THE HALT, SCOPED TO BEFORE PROGRAMMING.
 #
-# What decides it is whether the AHB-AP at
-#   AP[3] (APAddr 0x00300000): AHB-AP (IDR: 0x34770008)
-# reappears in J-Link's post-reset CoreSight scan.  When it does, `AP[3]: Core
-# found` and J-Link manually halts a core the SES has PARKED at VTOR 0 -- every
-# successful dump reads `PC = 0000000C`, `CycleCnt = 00000000`,
-# `IPSR = 000 (NoException)` -- and the SES then leaves it alone for the whole
-# ~5 s program.  When AP[3] is absent the scan stops at
-#   AP[2] (APAddr 0x00070000): AXI-AP
-# and prints `Could not find core in Coresight setup`; the HE debug domain is
-# unreachable, so nothing inside `r` can halt anything.
+# SCOPE IS LOAD-BEARING.  The halt that matters is the one BEFORE the first
+# `loadbin`.  The trailing `RSetType 2; r; g` that BOOTS the image also tries to
+# halt and on this part ALWAYS fails, because AP[3] (APAddr 0x00300000) is gone
+# after any reset (see above).  That trailing failure is EXPECTED and harmless:
+# the bytes are written and verified by then and the SES boots the image anyway.
 #
-# NOTE the halt NEVER catches the reset vector, not even when it works -- the
-# working mechanism is a manual halt of the SES-parked core, never a
-# DEMCR.VC_CORERESET catch.  `Reset: VC_CORERESET did not halt CPU. (Debug logic
-# also reset by reset pin?).` is SEGGER's generic guess and is printed IDENTICALLY
-# in passing runs; do NOT read it as evidence the pin reset cleared debug logic.
+# An earlier version of this gate grepped the WHOLE log, tripped on that trailing
+# reset, and failed 12 of 12 runs whose programming had actually SUCCEEDED
+# (`Program: 2.272s`, both blobs, 2/2 `Verify successful.`), printing
+# "NOTHING was written" over a log showing the opposite.  Never widen it back.
 #
-# A `Verify failed` in such a run says NOTHING about MRAM content: `Expected D0
-# read AA` alongside `Could not read memory.` is the gated-DAP floating-read tell,
-# not a byte comparison.  Name this failure for what it is.
-if grep -qiE "Failed to halt CPU|Cannot read register 16 \(XPSR\) while CPU is running|Failed to preserve target RAM" /tmp/flowd-mramxip.out; then
-  echo "!! HALT FAILED -- the core was RUNNING for the whole flash sequence."
-  grep -iE "Core did not halt after reset|VC_CORERESET did not halt CPU|Failed to halt CPU|Cannot read register 16 \(XPSR\) while CPU is running|Failed to preserve target RAM" /tmp/flowd-mramxip.out | head -5
-  echo "   NOTHING was written: with 'loadbin ..., noreset' there is no fallback reset,"
-  echo "   so the RAMCode workspace could not be preserved and both blobs were skipped."
-  echo "   slot0 still holds whatever was there before -- this is NOT MRAM corruption."
-  echo "   Retry; if it persists, erase slot0 over the SE-UART so the SES boots nothing"
-  echo "   and the core cannot be running when the next flash starts."
+# Split at the first `Downloading file` -- J-Link prints it when loadbin starts.
+awk '/Downloading file/{exit} {print}' /tmp/flowd-mramxip.out > /tmp/flowd-mramxip.preprog
+
+# Confirm the halt POSITIVELY: `h` prints this register dump ONLY when the core
+# actually halted (on failure it prints `WARNING: CPU could not be halted` and no
+# PC line).  Do NOT gate on `Cortex-M55 identified.` -- that is printed at every
+# connect while the app is still running.
+if ! grep -qE "^PC = [0-9A-F]{8}, CycleCnt = " /tmp/flowd-mramxip.preprog; then
+  echo "!! HALT FAILED before programming -- the core was RUNNING for the flash."
+  grep -iE "Could not find core in Coresight setup|CPU could not be halted|Failed to halt CPU|Failed to preserve target RAM" /tmp/flowd-mramxip.preprog | head -5
+  echo "   With 'loadbin ..., noreset' there is no fallback reset, so the RAMCode"
+  echo "   workspace at 0x00000000-0x0001FFFF could not be preserved and both blobs"
+  echo "   were skipped.  NOTHING was written -- slot0 still holds its previous"
+  echo "   contents.  This is NOT MRAM corruption."
   exit 5
 fi
+echo "halt: core halted before programming ($(grep -oE '^PC = [0-9A-F]{8}' /tmp/flowd-mramxip.preprog | head -1))"
+
 if grep -qiE "verification failed @|error while programming flash" /tmp/flowd-mramxip.out; then
   echo "?? loadbin reported an internal verify error -- NOT failing on it (#1902)."
   grep -iE "verification failed @|error while programming flash" /tmp/flowd-mramxip.out | head -3
@@ -313,6 +328,11 @@ if [ "${verify_ok:-0}" -lt 2 ]; then
   exit 3
 fi
 echo "verify: ${verify_ok}/2 verifybin passes OK (app image + AppTocPackage)"
+if grep -qi "CPU could not be halted" /tmp/flowd-mramxip.out; then
+  echo "note: the trailing boot reset could not halt the core -- EXPECTED on this part"
+  echo "      (AP[3] (APAddr 0x00300000) is absent after any reset).  The image is"
+  echo "      already written and verified; the SES boots it regardless."
+fi
 
 # 4. SES has re-booted the app; attach read-only (generic device) + dump RAM console.
 sleep 3
