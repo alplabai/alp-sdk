@@ -60,13 +60,18 @@ def emit_system_manifest(
 def _helper_mcus(project: BoardProject) -> list[dict[str, Any]]:
     """Build the manifest's `helper_mcus[]` block.
 
-    Source: the SoM preset's `helper_firmware:` list (Phase 3) -- each
-    entry is EITHER a customer-flashable helper (carries flash_method +
-    flash_args, projected verbatim -- e.g. gd32_bridge) OR a
-    vendor-OTA-updated coprocessor (carries update_channel instead --
-    e.g. AEN's cc3501e_otp, applied over the bridge SPI programming OTP
-    and never customer-flashed); the manifest carries whichever pair the
-    entry declares, never both.  `firmware_path` is entirely ABSENT from
+    Source: the SoM preset's `helper_firmware:` list (Phase 3).  Each
+    key the entry declares is projected INDEPENDENTLY -- how the image
+    is written locally (flash_method + flash_args), how it is updated in
+    the field (update_channel), and who may invoke the flash method
+    (flash_policy) are three separate axes, and a helper may declare any
+    combination.  The GD32 bridge declares all three: an
+    `alp_ota_spi_bridge` channel for normal field updates AND a
+    `recovery_only` swd_probe method for a bricked board.  Dropping the
+    flash keys because a channel exists would DELETE that recovery path
+    from the manifest rather than let `tan flash` decline it, so this
+    function must never make one key's presence suppress another's
+    (#1357).  `firmware_path` is entirely ABSENT from
     the row when the preset doesn't declare one (e.g. GD32 bridge SKUs
     pending a released binary, #852/#936) -- it is never emitted as
     `null`, because `system-manifest-v1.schema.json` types it `string`
@@ -89,16 +94,16 @@ def _helper_mcus(project: BoardProject) -> list[dict[str, Any]]:
                 "name": entry.get("name"),
                 "chip": entry.get("chip"),
             }
-            firmware_path = entry.get("firmware_path")
-            if firmware_path is not None:
-                row["firmware_path"] = firmware_path
-            update_channel = entry.get("update_channel")
-            if update_channel:
-                # Vendor-OTA coprocessor (e.g. CC3501E): no flash_method/
-                # flash_args -- it is never a `west alp-flash` target.
-                row["update_channel"] = update_channel
-            else:
-                row["flash_method"] = entry.get("flash_method")
-                row["flash_args"]    = entry.get("flash_args")
+            # Project every declared key independently.  No key's
+            # presence suppresses another's: `update_channel` describes
+            # field updates, `flash_method`/`flash_args` describe a local
+            # write, and `flash_policy` says who may perform that write.
+            # A helper declaring both halves keeps both -- `tan flash`
+            # decides what to do with them from `flash_policy` (#1357).
+            for key in ("firmware_path", "flash_method", "flash_args",
+                        "flash_policy", "update_channel"):
+                value = entry.get(key)
+                if value is not None:
+                    row[key] = value
             out.append(row)
     return out

@@ -15,8 +15,16 @@
  *
  * Hardware security IC providing ECC-256/384/521, RSA-1k/2k,
  * AES-128/192/256, SHA-256, TRNG, and 10 KB user NVM with secure
- * key/object storage.  On the E1M-AEN module the chip sits on
- * Alif's LPI2C bus alongside the TMP112 + RV-3028-C7 RTC.
+ * key/object storage.
+ *
+ * Populated on E1M-X V2N / V2M at 0x30 on BRD_I2C, with the RZ/V2N as
+ * bus master (`metadata/e1m_modules/E1M-V2N101.yaml`) -- that is the
+ * target this driver is written for.  E1M-AEN801 carries the same
+ * footprint on its own BRD_I2C (SoC I2C0, Alif as bus master -- #1848,
+ * corrected from an earlier belief that this bus was the slave-only
+ * LPI2C0), but is not a usable target on the current bench batch: the
+ * part is DNI there (see `docs/bring-up-aen.md` section 5.1;
+ * `examples/aen/aen-secure-element-sign` exercises this driver on AEN).
  *
  * Default I2C address: **0x30** (7-bit, configurable via
  * provisioning).
@@ -30,11 +38,17 @@
  *
  * The full APDU command set -- key generation, TLS handshake handler,
  * ECDSA, AES wrapping, SHA, secure NVM read/write -- lands only after
- * Infineon's **OPTIGA Trust M Host Library** is integrated as a Zephyr
- * module.  At that point the cleanest architectural fit is registering
- * OPTIGA's PSA driver with `<alp/security.h>`'s MbedTLS PSA wrapper, so
- * apps that call alp_aead_open / etc. pick up hardware acceleration
- * transparently.
+ * Infineon's **OPTIGA Trust M Host Library** is integrated.  Upstream
+ * publishes no Zephyr module for it, so that integration is a vendoring
+ * decision plus in-tree build glue rather than a manifest pin; the
+ * evidence and the open questions -- including why a minimal in-tree APDU
+ * implementation was costed and deferred rather than chosen as the cheaper
+ * path -- are recorded in this driver's own top-of-file comment
+ * (chips/optiga_trust_m/optiga_trust_m.c); see #1164 for the tracking issue,
+ * still open pending a maintainer decision on which path to take.  Once it
+ * is in, the cleanest architectural fit is registering OPTIGA's PSA
+ * driver with `<alp/security.h>`'s MbedTLS PSA wrapper, so apps that
+ * call alp_aead_open / etc. pick up hardware acceleration transparently.
  */
 
 #ifndef ALP_CHIPS_OPTIGA_TRUST_M_H

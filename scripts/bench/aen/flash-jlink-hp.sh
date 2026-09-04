@@ -35,6 +35,11 @@ BD="$1"
 BEACON="${2:-0x02000000}"
 bench_require_setools || exit $?
 SET="$SETOOLS_DIR"
+# OBJ itself is unused (this flow reads the beacon via J-Link `mem32`, not
+# $OBJ-nm/-readelf); the assignment is kept as a preflight -- `|| exit $?`
+# fails fast if the arm-zephyr-eabi toolchain doesn't resolve, matching
+# every sibling flash-jlink*.sh.
+# shellcheck disable=SC2034
 OBJ="$(bench_tool_prefix)" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
 # See ram-run.sh for why the selector is conditional on JLINK_SN.
@@ -57,18 +62,7 @@ exit
 EOF
 "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/hp-preflight.jlink \
   > /tmp/hp-preflight.out 2>&1 || true
-if grep -qi "$GD32_DPIDR" /tmp/hp-preflight.out; then
-  echo "!! ABORT: probe reports SW-DP IDR 0x$GD32_DPIDR -- that is the V2N-M1" >&2
-  echo "   GD32, NOT the AEN E8. Wrong probe selected (JLINK_SN='${JLINK_SN:-}')." >&2
-  echo "   Refusing to write MRAM. See /tmp/hp-preflight.out." >&2
-  exit 4
-fi
-if ! grep -qi "$AEN_DPIDR" /tmp/hp-preflight.out; then
-  echo "!! ABORT: expected AEN E8 SW-DP IDR 0x$AEN_DPIDR not seen on connect." >&2
-  echo "   Refusing to write MRAM -- check JLINK_SN / wiring / probe selection." >&2
-  cat /tmp/hp-preflight.out >&2
-  exit 4
-fi
+bench_jlink_assert_aen_dpidr /tmp/hp-preflight.out "MRAM write preflight" || exit 4
 echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 
 # 1. stage the HP image + an M55_HP signed-ATOC config (cpu_id/loadAddress are
@@ -111,6 +105,23 @@ if grep -qi "Could not connect to the target device" /tmp/hp-write.out; then
   exit 2
 fi
 
+# GATE ON THE VERIFY RESULT (#1343) -- same defect as flash-jlink-mramxip.sh.
+# The `verifybin` above was issued but its outcome was never read: the output went
+# to a display-only pipe and the connect check was the only thing that could fail
+# this script, so a `Verify failed.` exited 0 and reported a good flash.  One
+# verifybin here (a single package write), against two in the mramxip script.
+if grep -qiE "verify failed|verification failed|mismatch" /tmp/hp-write.out; then
+  echo "!! VERIFY FAILED -- the bytes on the part do NOT match $PKG."
+  grep -iE "verify failed|verification failed|mismatch" /tmp/hp-write.out | head -5
+  echo "   Do not treat this board as flashed."
+  exit 3
+fi
+if ! grep -qi "verify successful" /tmp/hp-write.out; then
+  echo "!! no verifybin success reported -- treating as FAILED (the verify never ran)."
+  exit 3
+fi
+echo "verify: verifybin OK ($PKG @ $ADDR)"
+
 # 3. SES has booted the HP core; read the SRAM0 beacon via the generic device
 #    (the HE/system AP reads global SRAM0 regardless of HP core state), then
 #    re-read the heartbeat word after a delay to show it advancing.
@@ -127,6 +138,10 @@ mem32 $HB, 0x4
 exit
 EOF
 "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/hp-read.jlink 2>/tmp/hp-read.err > /tmp/hp-read.out || true
+# JLinkExe exits 0 even when it never opened the probe, so `|| true` above
+# hides a total connect failure and the decode below would render it as
+# empty target output (alp-sdk#1318).
+bench_jlink_assert_connected /tmp/hp-read.out "Flow D HP read-back" || exit 7
 echo "----- $NAME M55-HP SRAM0 beacon (magic / CPUID / VTOR / heartbeat) -----"
 grep -iE "^$(printf '%08X' $BEACON)| = " /tmp/hp-read.out | head
 echo "(heartbeat re-read below should differ from beacon[3] above = HP actively running)"

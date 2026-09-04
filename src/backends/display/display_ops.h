@@ -6,12 +6,15 @@
  * sees this struct.  Layout may change between SDK versions.
  *
  * Backends in this directory: zephyr_stub.c (wildcard priority-0
- * NOT_IMPLEMENTED fallback) and zephyr_drv.c (wildcard priority-50
- * wrapper over Zephyr's drivers/display.h class, issue #23).
- * Vendor-specific V2N DSI / parallel-RGB and Alif LCD-IF backends
- * land per the tracking issue on the stub source file.  No vendor
- * extensions exist for display, so the first-member-aliasing
- * pattern the ADC vtable uses is not required here.
+ * NOT_IMPLEMENTED fallback), zephyr_drv.c (wildcard priority-50
+ * wrapper over Zephyr's drivers/display.h class, issue #23), and
+ * yocto_drv.c (priority-100 DRM/KMS dumb-buffer backend on Linux,
+ * issue #1143 -- which covers the V2N DU/DSI path through the
+ * generic KMS uAPI, so no vendor-specific V2N backend is owed).
+ * An Alif LCD-IF backend still lands per the tracking issue on the
+ * stub source file.  No vendor extensions exist for display, so the
+ * first-member-aliasing pattern the ADC vtable uses is not required
+ * here.
  */
 
 #ifndef ALP_BACKENDS_DISPLAY_OPS_H
@@ -72,6 +75,31 @@ struct alp_display {
 	uint8_t  lifecycle;
 	uint32_t active_ops;
 	bool     in_use;
+	/* Slot generation, bumped on every fresh claim.  Deliberately AFTER
+	 * in_use: the dispatcher's atomic-claim zeroing memsets up to
+	 * offsetof(..., in_use), so a counter placed before it would reset on
+	 * every claim and never distinguish one owner from the next.
+	 *
+	 * Exists because a raw `alp_display_t *` is NOT a stable identity:
+	 * the pool is static, so after close -> open the same address is a
+	 * DIFFERENT display.  A holder that cached the pointer (LVGL's
+	 * user-data in src/gui_lvgl.c, issue #1698) must compare epochs to
+	 * notice, or it silently draws onto whoever owns the slot now. */
+	uint32_t epoch;
 };
+
+/**
+ * @brief This handle's slot generation (issue #1698).
+ *
+ * The handle pool is static, so a raw `alp_display_t *` does not identify a
+ * display across a close/open pair -- the same address is reused.  A caller
+ * that caches the pointer (LVGL's user-data in src/gui_lvgl.c) snapshots this
+ * alongside it and re-compares before using the handle; a mismatch means the
+ * slot has a new owner.
+ *
+ * @param[in] h  Display handle, may be NULL.
+ * @return the slot generation, or 0 for NULL.
+ */
+uint32_t alp_display_slot_epoch(const alp_display_t *h);
 
 #endif /* ALP_BACKENDS_DISPLAY_OPS_H */

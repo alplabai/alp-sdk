@@ -3,9 +3,8 @@
 """Keep metadata/bootstrap.json in lockstep with everything that copies it.
 
 metadata/bootstrap.json (issue #917) is the single source of truth for the
-Zephyr-workspace-assembly FACTS scripts/bootstrap.sh and scripts/bootstrap.ps1
-both read today; tan (Rust, cross-platform) is the INTENDED future consumer
-of the same facts, not a current reader. Without a drift gate the manifest is
+Zephyr-workspace-assembly FACTS scripts/bootstrap.sh, scripts/bootstrap.ps1,
+and Python Tan read today. Without a drift gate the manifest is
 just a copy of facts that already lived elsewhere. This check fails loudly
 when:
 
@@ -93,11 +92,13 @@ when:
       (`requires.os == ["zephyr"]` -- it exists only inside the zephyr repo,
       nothing else) is what actually distinguishes the two; see
       `_in_tree_zephyr_library_manifests`.
-  11. `prerequisites.install` (issue #949) -- the single source for every
-      per-tool install COMMAND (as opposed to point 6 above, which only
-      polices the tool NAME lists) -- disagrees with anything that copies
-      one of those commands: a tool listed in `prerequisites.windows` or
-      `prerequisites.posix` with no matching `install.<os>.<tool>` entry;
+  11. `prerequisites.install` (issue #949, restructured for `install.linux`
+      by issue #1464) -- the single source for every per-tool install
+      COMMAND (as opposed to point 6 above, which only polices the tool
+      NAME lists) -- disagrees with anything that copies one of those
+      commands: a tool listed in `prerequisites.windows` or
+      `prerequisites.posix` with no matching `install.windows.<tool>` /
+      `install.linux.apt.<tool>` / `install.macos.<tool>` entry;
       `scripts/bootstrap.ps1`'s own hardcoded `$Prereqs` `Hint = "..."`
       value for a tool disagreeing with `install.windows.<tool>`; or one of
       `install.windows`'s own winget PACKAGE IDs (derived from the manifest,
@@ -107,12 +108,36 @@ when:
       command in the first place. The literal scan covers the windows/
       winget side only; see `_check_install_commands`'s own docstring for
       why, the full assertion list, and the exact file set scanned.
+
+      `install.linux` (issue #1464) is keyed by PACKAGE MANAGER, not by
+      tool -- `install.linux.apt` / `install.linux.dnf` -- because a `sudo
+      apt-get install`-shaped command is wrong on a host with no apt at all
+      (Fedora/Arch/Rocky measured byte-identical to Debian before this
+      fix). `install.linux.apt` is required and pinned to
+      `prerequisites.posix` by EXACT key equality, the same bar
+      `install.macos` already meets. `install.linux.dnf` is optional and,
+      when present, its keys must be a SUBSET of `prerequisites.posix` --
+      NOT required to be complete: a dnf-family tool this manifest cannot
+      verify uniformly (today: `ninja` -- Fedora's own repos carry
+      `ninja-build`, the RHEL-derivative default repos do not, without
+      EPEL) is left out entirely rather than guessed. See
+      `metadata/schemas/bootstrap-v1.schema.json`'s `install.linux`
+      description for the full rationale, including why there is
+      deliberately no `pacman` key and no distro-ID layer inside `dnf`.
   12. `scripts/bootstrap.sh`'s own hardcoded POSIX-side hint table (issue
-      #978) -- `PREREQ_HINT_NAMES` / `PREREQ_HINT_LINUX` / `PREREQ_HINT_MACOS`,
-      the bash analogue of bootstrap.ps1's `$Prereqs` `Hint=` field -- must
-      agree entry-for-entry (matched up by array position, since bash 3.2
-      has no associative arrays) with `install.linux` / `install.macos`; see
-      `_check_bootstrap_sh_install_hints`.
+      #978, restructured for the package-manager split by issue #1464) --
+      `PREREQ_HINT_NAMES` / `PREREQ_HINT_APT` / `PREREQ_HINT_DNF` /
+      `PREREQ_HINT_MACOS`, the bash analogue of bootstrap.ps1's `$Prereqs`
+      `Hint=` field -- must agree entry-for-entry (matched up by array
+      position, since bash 3.2 has no associative arrays) with
+      `install.linux.apt` / `install.linux.dnf` / `install.macos`.
+      `PREREQ_HINT_APT` must be COMPLETE (one entry per
+      `prerequisites.posix` tool, mirroring `install.linux.apt`'s own
+      completeness bar); `PREREQ_HINT_DNF` carries an empty string `""` at
+      any position `install.linux.dnf` has no entry for -- asserted
+      explicitly, not merely tolerated, so a future edit cannot quietly
+      replace that intentional gap with a guessed command that this gate
+      would otherwise wave through. See `_check_bootstrap_sh_install_hints`.
   13. `zephyr.pythonMinVersion` (issue #1078) -- the Zephyr-SCOPED Python
       floor, deliberately separate from the host-universal
       `prerequisites.pythonMinVersion` point 6 already polices (see that
@@ -135,16 +160,53 @@ when:
       from point 7's generic orphan-leaf scan (`_GATE_ASSERTED_LEAVES`) the
       same way `prerequisites.*` is -- neither bootstrap script reads or
       enforces it; this cross-check is its gate instead.
+  14. `tools/native-sim-container/Containerfile`'s `ARG ZEPHYR_REV=...`
+      default (issue #1458) disagrees with `zephyr.version`. This is the
+      SAME category of machine pin point 4 already polices for the four CI
+      workflows -- a hardcoded copy of the Zephyr revision, independent of
+      west.yml -- just living in a fifth file point 4's curated CI_WORKFLOWS
+      list was never meant to reach (a Containerfile is not a
+      `.github/workflows/*.yml`). It shipped stuck one patch release behind
+      (`v4.4.0` while west.yml/pr-twister.yml already carried `v4.4.1`) with
+      nothing to catch it -- exactly the silent-drift shape this whole
+      script exists to close. `tools/native-sim-container/Makefile`'s `build`
+      target derives the value LIVE from west.yml and passes it as
+      `--build-arg` on every real `make build`, so this default only matters
+      for a standalone `docker build`/`podman build` that bypasses the
+      Makefile -- but "only matters sometimes" is exactly what let it drift
+      unnoticed before, so it stays gated like every other pin here. See
+      `_check_containerfile`.
+  15. `artifactProvenance` (issue #1574, ADR 0021 §3's one-consent-screen
+      artifact/source/size/licence facts) has a key set that disagrees with
+      the union of tool names `prerequisites.install.linux.apt` /
+      `.linux.dnf` / `.macos` / `.windows` actually name an install command
+      for -- a tool gaining an install command with no matching provenance
+      entry, or a stale provenance entry for a tool no install command
+      names anymore, fails here (`_check_artifact_provenance`), the same
+      drift bar point 11 already holds `prerequisites.posix/macos/windows`
+      to, one level further out. `artifactProvenance.*` is exempted from
+      point 7's generic per-script orphan-leaf scan
+      (`_PRODUCER_ONLY_LEAF_PREFIX`), for a DIFFERENT reason than
+      `prerequisites.*`/`zephyr.pythonMinVersion` are: those two are read
+      by neither script BY DESIGN (bootstrapping-before-the-manifest-is-
+      trustworthy, and a derived-not-declared value, respectively) and have
+      their own dedicated cross-check instead; `artifactProvenance` has no
+      consumer in this repo AT ALL yet -- it is producer-only data for a
+      future IDE/tan consumer (a companion tan-cli issue, filed only once
+      this shape has proven itself) -- so its gate is "stays in lockstep
+      with prerequisites.install", not "is read by bootstrap.sh/ps1".
 
 --fix propagates a changed `zephyr.version` OUT to every machine pin site
-this gate verifies above (points 2, 4, 5, 10 -- west.yml, the CI workflow
-`--mr`/cache-key pins, the README badge, and every in-tree-Zephyr-subsystem
-library manifest's `version:` field). It reuses the exact same
-compiled regexes/constants the verify-only checks read (`_WEST_YML_ZEPHYR_RE`,
-`_WEST_MR_RE`, `_CACHE_KEY_RE`, `_README_BADGE_RE`, `_LIBRARY_VERSION_RE`) --
-there is deliberately no second, parallel pin map; that would just be a new
-flavour of the drift issue #917 exists to kill. Idempotent (a site already
-at zephyr.version is left untouched, byte-for-byte); a site the gate expects
+this gate verifies above (points 2, 4, 5, 10, 14 -- west.yml, the CI
+workflow `--mr`/cache-key pins, the README badge, every
+in-tree-Zephyr-subsystem library manifest's `version:` field, and the
+native-sim-container Containerfile's `ARG ZEPHYR_REV` default). It reuses
+the exact same compiled regexes/constants the verify-only checks read
+(`_WEST_YML_ZEPHYR_RE`, `_WEST_MR_RE`, `_CACHE_KEY_RE`, `_README_BADGE_RE`,
+`_LIBRARY_VERSION_RE`, `_CONTAINERFILE_ZEPHYR_REV_RE`) -- there is
+deliberately no second, parallel pin map; that would just be a new flavour
+of the drift issue #917 exists to kill. Idempotent (a site already at
+zephyr.version is left untouched, byte-for-byte); a site the gate expects
 but can no longer find/match is a hard failure naming it, never a silent
 no-op. bootstrap.sh and bootstrap.ps1 are NOT --fix sites -- they read
 zephyr.version from the manifest at run time and must never hardcode it
@@ -194,15 +256,24 @@ BOOTSTRAP_SH = REPO / "scripts" / "bootstrap.sh"
 BOOTSTRAP_PS1 = REPO / "scripts" / "bootstrap.ps1"
 README_MD = REPO / "README.md"
 LIBRARIES_DIR = REPO / "metadata" / "libraries"
+# The native_sim reproduction container's own Zephyr-revision pin (issue
+# #1458) -- see module docstring point 14.
+CONTAINERFILE = REPO / "tools" / "native-sim-container" / "Containerfile"
 
 # Every CI workflow that assembles its own throwaway Zephyr workspace and
 # therefore pins a Zephyr revision independent of west.yml/west update.
 CI_WORKFLOWS = [
     REPO / ".github" / "workflows" / "pr-twister.yml",
     REPO / ".github" / "workflows" / "pr-tier-a-libraries.yml",
-    REPO / ".github" / "workflows" / "nightly-aen-hil.yml",
     REPO / ".github" / "workflows" / "pr-getting-started-aen801.yml",
 ]
+# `nightly-aen-hil.yml` was listed here until it was deleted (#968): CI no
+# longer drives the AEN bench, because the bench is labgrid-reservation-gated
+# and strictly serial and SETOOLS is licence-gated and not redistributable.
+# This list is a hardcoded set of paths, so a deleted workflow does not drop
+# out of it -- it becomes `missing .github/workflows/<name>` and hard-fails.
+# `pr-twister.yml` runs this gate and is a REQUIRED context, so a stale entry
+# here reds every PR.
 
 # Every top-level manifest key MUST be listed here -- main()'s unknown-key
 # check below fails loudly if a key is added without anyone deciding how it
@@ -210,7 +281,8 @@ CI_WORKFLOWS = [
 # copy). This is the generalisation past just zephyr.version (issue #917).
 KNOWN_KEYS = {
     "_comment", "schemaVersion", "zephyr", "venv", "prerequisites",
-    "west", "pip", "verdict", "env", "nativeLibHints", "manualInstallHints",
+    "artifactProvenance", "west", "pip", "verdict", "env", "nativeLibHints",
+    "manualInstallHints",
 }
 
 # The `revision:` line under `- name: zephyr` in west.yml. Hoisted to a
@@ -236,6 +308,9 @@ _WEST_MR_RE = re.compile(r"--mr\s+(v\d+\.\d+\.\d+)")
 # digits to compare).
 _CACHE_KEY_RE = re.compile(r"key:.*?zephyr-(v\d+\.\d+\.\d+)", re.IGNORECASE)
 _README_BADGE_RE = re.compile(r"Zephyr-v(\d+\.\d+\.\d+)")
+# tools/native-sim-container/Containerfile's `ARG ZEPHYR_REV=...` default
+# (module docstring point 14, issue #1458).
+_CONTAINERFILE_ZEPHYR_REV_RE = re.compile(r"ARG\s+ZEPHYR_REV=(\S+)")
 
 # Leaves that stay hardcoded in both scripts BY DESIGN (see point 6 in the
 # module docstring) -- policed by their own dedicated comparison checks
@@ -249,6 +324,15 @@ _GATE_ASSERTED_LEAF_PREFIX = "prerequisites."
 # or bootstrap.ps1 (neither enforces a Zephyr-scoped floor today; that is
 # tan-cli's still-outstanding half of issue #1078).
 _GATE_ASSERTED_LEAVES = {"zephyr.pythonMinVersion"}
+# `artifactProvenance.*` (issue #1574, module docstring point 15): producer-
+# only data with NO consumer in this repo yet -- neither bootstrap.sh nor
+# bootstrap.ps1 has any reason to read it, since it is ADR 0021 §3's
+# IDE/tan-facing consent-screen data, not workspace-assembly control flow.
+# Gate-asserted-instead by `_check_artifact_provenance` (keyed against
+# `prerequisites.install`'s own tool-name set) rather than by the generic
+# per-script-read scan, which would otherwise demand a reader that has no
+# reason to exist yet.
+_PRODUCER_ONLY_LEAF_PREFIX = "artifactProvenance."
 # Purely structural: the manifest's own self-description, never something a
 # script "reads" as a fact. (`schemaVersion` is NOT here -- both scripts
 # assert it at run time, see the orphan-leaf scan.)
@@ -441,6 +525,30 @@ def _check_readme_badge(manifest_version: str) -> list[str]:
     return []
 
 
+def _check_containerfile(manifest_version: str) -> list[str]:
+    """Point 14 (module docstring, issue #1458):
+    tools/native-sim-container/Containerfile's `ARG ZEPHYR_REV=...` default
+    must agree with `zephyr.version`. `tools/native-sim-container/Makefile`'s
+    `build` target derives the real value LIVE from west.yml on every `make
+    build`, so this default only ever fires for a standalone `docker
+    build`/`podman build` that bypasses the Makefile -- but that is exactly
+    the path issue #1458 found silently stuck a patch release stale, so it
+    is gated the same as every other machine pin this script polices."""
+    if not CONTAINERFILE.is_file():
+        return [f"missing {CONTAINERFILE.relative_to(REPO).as_posix()}"]
+    rel = CONTAINERFILE.relative_to(REPO).as_posix()
+    text = CONTAINERFILE.read_text(encoding="utf-8")
+    m = _CONTAINERFILE_ZEPHYR_REV_RE.search(text)
+    if m is None:
+        return [f"{rel}: no `ARG ZEPHYR_REV=...` default found -- update this "
+                 f"gate if the pin format changed"]
+    containerfile_version = m.group(1)
+    if containerfile_version != manifest_version:
+        return [f"{rel} pins ARG ZEPHYR_REV {containerfile_version!r}, "
+                 f"metadata/bootstrap.json declares zephyr.version {manifest_version!r}"]
+    return []
+
+
 def _in_tree_zephyr_library_manifests() -> list[Path]:
     """metadata/libraries/*.yaml manifests that are genuine IN-TREE ZEPHYR
     SUBSYSTEMS -- the only per-library manifests whose `version:` must equal
@@ -606,6 +714,11 @@ def _run_fix(manifest_version: str) -> int:
         report += r
         problems += p
 
+    r, p = _apply_version_fix(CONTAINERFILE, _CONTAINERFILE_ZEPHYR_REV_RE, manifest_version,
+                               site_desc="the `ARG ZEPHYR_REV=...` default")
+    report += r
+    problems += p
+
     # Print whatever DID get rewritten first, unconditionally -- a failure
     # partway through the sweep above (a site that failed to match, or a
     # write that raised OSError) must never hide that other sites already
@@ -761,7 +874,7 @@ def _resolve_zephyr_dir() -> Path:
     """Same resolution order as `scripts/check_toolchain_lock.py`'s
     `_resolve_zephyr_dir` (and `tests/scripts/test_hil_blocks_coverage.py`'s
     `_pinned_zephyr_sysbuild_kconfig_symbols`): `$ZEPHYR_BASE` (the
-    convention every `west` command and `scripts/alp_cli/doctor.py` use),
+    convention every `west` command and `tan doctor` use),
     falling back to the west-workspace topdir's conventional `zephyr/`
     project directory (`scripts/bootstrap.sh` does `west init -l <alp-sdk>`,
     so alp-sdk's parent is the topdir). Duplicated here rather than
@@ -1000,10 +1113,24 @@ def _check_install_commands(manifest: dict) -> list[str]:
     independent assertions, each covering a different slice:
 
       1. Completeness -- every `prerequisites.windows` tool has a matching
-         `install.windows` entry, and `install.linux` / `install.macos`'s
-         keys each equal `prerequisites.posix`'s tools. The gate ->
-         install direction is subset-only: `install.windows` MAY carry
-         additional entries with no matching `prerequisites.windows` gate --
+         `install.windows` entry, `install.macos`'s keys equal
+         `prerequisites.posix`'s tools, and `install.linux.apt`'s keys ALSO
+         equal `prerequisites.posix`'s tools (issue #1464 -- `install.linux`
+         is keyed by package manager, not tool; `apt` carries the same
+         completeness bar `install.macos` always has, since it is the
+         Debian/Ubuntu-family default every existing consumer already
+         depends on). `install.linux.dnf`, when present, is checked in the
+         OTHER direction only -- every key it DOES carry must be one of
+         `prerequisites.posix`'s tools (a typo'd/stale/unknown tool name is
+         still rejected) -- but it is NOT required to be complete: a
+         dnf-family tool this manifest cannot verify with one
+         Fedora-and-RHEL-derivative-uniform command (today: `ninja`) is
+         correctly represented by its ABSENCE from the map, not by a
+         guessed entry. `install.linux.dnf` itself is optional -- the
+         schema does not `require` it -- consistent with "prove it or leave
+         it out" at the sub-map level too. The gate -> install direction is
+         subset-only for windows: `install.windows` MAY carry additional
+         entries with no matching `prerequisites.windows` gate --
          issue #1036's `7zip` is the first live case, gating `west sdk
          install` rather than bootstrap itself, the same "install has a
          command but nothing refuses without it" shape `install.macos`'s
@@ -1018,7 +1145,7 @@ def _check_install_commands(manifest: dict) -> list[str]:
          `scripts/bootstrap.ps1`'s `$Prereqs` but left behind in
          `install.windows`) would sit undetected forever. A tool with no
          install command at all is the exact hole that produced the drifted/
-         incomplete ninja hint in scripts/alp_cli/doctor.py this change
+         incomplete ninja hint in the now-retired scripts/alp_cli/doctor.py this change
          fixes. This is the ONLY assertion covering install.linux /
          install.macos -- see point 3's own note on why.
       2. scripts/bootstrap.ps1 agreement -- each `$Prereqs` entry's
@@ -1034,7 +1161,7 @@ def _check_install_commands(manifest: dict) -> list[str]:
          `Python.Python.3.12`, `Ninja-build.Ninja` today -- never
          hardcoded a second time here). A line containing an ID without
          its full canonical command string is a drifted copy -- this is
-         exactly the shape scripts/alp_cli/doctor.py's old ninja hint
+         exactly the shape the now-retired scripts/alp_cli/doctor.py's old ninja hint
          had (`winget install Ninja-build.Ninja.` contains the ID but not
          `winget install -e --id Ninja-build.Ninja`).
 
@@ -1099,13 +1226,46 @@ def _check_install_commands(manifest: dict) -> list[str]:
             f"shape)"
         )
     posix_tools = set(prereqs.get("posix", []))
-    for os_key in ("linux", "macos"):
-        os_install = set(install.get(os_key, {}))
-        if os_install != posix_tools:
+    os_install = set(install.get("macos", {}))
+    if os_install != posix_tools:
+        problems.append(
+            f"prerequisites.install.macos keys {sorted(os_install)} disagree "
+            f"with prerequisites.posix tools {sorted(posix_tools)} -- every "
+            f"posix prerequisite needs its own install command on macos"
+        )
+
+    # install.linux (issue #1464): keyed by PACKAGE MANAGER, not tool.
+    # `apt` is required and held to the SAME exact-equality bar as
+    # install.macos above (it is the Debian/Ubuntu-family default every
+    # existing consumer -- bootstrap.sh, doctor.py, tan's byte-pinned
+    # fallback -- already depends on). `dnf` is optional and, when present,
+    # is checked in the OTHER direction only: every key it declares must be
+    # a real prerequisites.posix tool, but it need not cover all of them --
+    # a tool this manifest cannot verify with one command that works across
+    # the whole dnf ecosystem (Fedora + RHEL-derivatives) is correctly
+    # represented by leaving it OUT, not by guessing (see
+    # metadata/schemas/bootstrap-v1.schema.json's install.linux description
+    # for the ninja/EPEL evidence). Schema `additionalProperties: false`
+    # already rejects any package-manager key other than apt/dnf (e.g. a
+    # hand-added `pacman`) before this function ever runs -- see main()'s
+    # early schema-validation return -- so this function does not repeat
+    # that check.
+    linux_install = install.get("linux", {})
+    apt_install = set(linux_install.get("apt", {})) if isinstance(linux_install, dict) else set()
+    if apt_install != posix_tools:
+        problems.append(
+            f"prerequisites.install.linux.apt keys {sorted(apt_install)} disagree "
+            f"with prerequisites.posix tools {sorted(posix_tools)} -- every posix "
+            f"prerequisite needs its own install command on linux.apt (the "
+            f"Debian/Ubuntu-family default)"
+        )
+    if isinstance(linux_install, dict) and "dnf" in linux_install:
+        dnf_install = set(linux_install["dnf"])
+        unknown_dnf = dnf_install - posix_tools
+        if unknown_dnf:
             problems.append(
-                f"prerequisites.install.{os_key} keys {sorted(os_install)} disagree "
-                f"with prerequisites.posix tools {sorted(posix_tools)} -- every "
-                f"posix prerequisite needs its own install command on {os_key}"
+                f"prerequisites.install.linux.dnf has entr(y/ies) {sorted(unknown_dnf)} "
+                f"with no matching prerequisites.posix tool"
             )
 
     # -------- 2. scripts/bootstrap.ps1 Hint= agreement ---------------------
@@ -1205,33 +1365,52 @@ def _check_install_commands(manifest: dict) -> list[str]:
 #
 # The POSIX-side analogue of `_check_install_commands`'s point 2
 # (bootstrap.ps1's own `$Prereqs` `Hint=` agreement). bootstrap.sh's hint
-# table is three PARALLEL arrays, not one `Name=...; Hint=...` pair per line
-# the way `$Prereqs` is (bash 3.2 -- the macOS-shipped version -- has no
-# `declare -A`), so this is matched up by array POSITION rather than a
-# per-entry regex.
+# table is FOUR PARALLEL arrays (was three -- issue #1464 split the old
+# single Linux array by PACKAGE MANAGER), not one `Name=...; Hint=...` pair
+# per line the way `$Prereqs` is (bash 3.2 -- the macOS-shipped version --
+# has no `declare -A`), so this is matched up by array POSITION rather than
+# a per-entry regex.
 _SH_PREREQ_HINT_NAMES_RE = re.compile(r"PREREQ_HINT_NAMES=\(([^)]*)\)")
-_SH_PREREQ_HINT_LINUX_RE = re.compile(r"PREREQ_HINT_LINUX=\((.*?)\n\)", re.DOTALL)
+_SH_PREREQ_HINT_APT_RE = re.compile(r"PREREQ_HINT_APT=\((.*?)\n\)", re.DOTALL)
+_SH_PREREQ_HINT_DNF_RE = re.compile(r"PREREQ_HINT_DNF=\((.*?)\n\)", re.DOTALL)
 _SH_PREREQ_HINT_MACOS_RE = re.compile(r"PREREQ_HINT_MACOS=\((.*?)\n\)", re.DOTALL)
+# `[^"]*` (zero-or-more) rather than `[^"]+` -- matches an EMPTY `""` slot
+# too (issue #1464 -- PREREQ_HINT_DNF carries one for a tool install.linux.
+# dnf declares no command for, e.g. `ninja`), capturing `""` as the empty
+# string rather than skipping that array entry entirely.
 _SH_QUOTED_STRING_RE = re.compile(r'"([^"]*)"')
 
 
 def _check_bootstrap_sh_install_hints(manifest: dict) -> list[str]:
-    """`scripts/bootstrap.sh`'s `PREREQ_HINT_NAMES` / `PREREQ_HINT_LINUX` /
-    `PREREQ_HINT_MACOS` (issue #978) must agree, entry-for-entry, with
-    `prerequisites.install.linux` / `.macos`. Each array is parsed
-    independently and then zipped by index -- a length mismatch between
-    `PREREQ_HINT_NAMES` and either hint array is reported directly rather
-    than silently truncated by `zip`.
+    """`scripts/bootstrap.sh`'s `PREREQ_HINT_NAMES` / `PREREQ_HINT_APT` /
+    `PREREQ_HINT_DNF` / `PREREQ_HINT_MACOS` (issue #978, package-manager
+    split by issue #1464) must agree, entry-for-entry, with
+    `prerequisites.install.linux.apt` / `.linux.dnf` / `.macos`. Each array
+    is parsed independently and then zipped by index -- a length mismatch
+    between `PREREQ_HINT_NAMES` and any hint array is reported directly
+    rather than silently truncated by `zip`.
 
     Also asserts completeness (mirrors `_check_install_commands` point 2's
     own `parsed_names` loop, same "goes dark" failure one level down): every
-    tool key in `prerequisites.install.linux` / `.macos` must have a
-    `PREREQ_HINT_NAMES` entry, not just every `PREREQ_HINT_NAMES` entry a
-    matching install key (which the zip loop below already covers). Without
-    this, a tool added to `install.linux`/`.macos` + `REQUIRED_BINS` but
-    left out of the hint table falls through bootstrap.sh's bare-name
-    `warn "  ${bin}"` branch with this gate reporting rc=0 -- the #978
-    defect, restored."""
+    tool key `prerequisites.install.linux.apt` / `.linux.dnf` / `.macos`
+    DOES carry must have a `PREREQ_HINT_NAMES` entry, not just every
+    `PREREQ_HINT_NAMES` entry a matching install key (which the zip loop
+    below already covers). Without this, a tool added to one of those maps +
+    `REQUIRED_BINS` but left out of the hint table falls through
+    bootstrap.sh's bare-name `warn "  ${bin}"` branch with this gate
+    reporting rc=0 -- the #978 defect, restored.
+
+    `PREREQ_HINT_DNF` is allowed one shape none of the other three arrays
+    are: an entry whose manifest counterpart is genuinely ABSENT (no
+    `install.linux.dnf.<tool>` key at all -- `dnf` is an optional, partial
+    map, issue #1464) must pair with an EMPTY STRING `""` at that position,
+    never a real command -- a real command there with nothing in the
+    manifest backing it would be exactly the pre-#949 drift (a hardcoded
+    hint with no single source of truth) reintroduced one ecosystem later.
+    `install.linux.apt` / `.macos` are both REQUIRED-complete maps (checked
+    by `_check_install_commands` point 1), so this same "absent means
+    empty" allowance applies to them structurally too but should never
+    actually fire in a well-formed manifest."""
     if not BOOTSTRAP_SH.is_file():
         return [f"missing {BOOTSTRAP_SH.relative_to(REPO).as_posix()}"]
     text = BOOTSTRAP_SH.read_text(encoding="utf-8")
@@ -1245,30 +1424,40 @@ def _check_bootstrap_sh_install_hints(manifest: dict) -> list[str]:
     parsed_names = set(names)
 
     install = manifest.get("prerequisites", {}).get("install", {})
-    for os_key, os_re in (
-        ("linux", _SH_PREREQ_HINT_LINUX_RE),
-        ("macos", _SH_PREREQ_HINT_MACOS_RE),
+    linux_install = install.get("linux", {})
+    if not isinstance(linux_install, dict):
+        linux_install = {}
+    for pm_key, pm_re, os_install in (
+        ("apt", _SH_PREREQ_HINT_APT_RE, linux_install.get("apt", {})),
+        ("dnf", _SH_PREREQ_HINT_DNF_RE, linux_install.get("dnf", {})),
+        ("macos", _SH_PREREQ_HINT_MACOS_RE, install.get("macos", {})),
     ):
-        m = os_re.search(text)
+        # install.linux.<pm>.<tool> in the problem text below (not
+        # install.<pm>.<tool>) for apt/dnf, so a reported path is always the
+        # real manifest path a reader can grep for; macos keeps its own flat
+        # install.macos.<tool> path.
+        manifest_prefix = f"linux.{pm_key}" if pm_key in ("apt", "dnf") else pm_key
+        if not isinstance(os_install, dict):
+            os_install = {}
+        m = pm_re.search(text)
         if m is None:
             problems.append(
-                f"scripts/bootstrap.sh: could not find `PREREQ_HINT_{os_key.upper()}=(...)` "
+                f"scripts/bootstrap.sh: could not find `PREREQ_HINT_{pm_key.upper()}=(...)` "
                 f"-- update this gate if it was renamed/restructured"
             )
             continue
         hints = _SH_QUOTED_STRING_RE.findall(m.group(1))
-        os_install = install.get(os_key, {})
         for tool in sorted(os_install):
             if tool not in parsed_names:
                 problems.append(
-                    f"prerequisites.install.{os_key}.{tool} has no "
+                    f"prerequisites.install.{manifest_prefix}.{tool} has no "
                     f"PREREQ_HINT_NAMES entry in scripts/bootstrap.sh -- it "
                     f"would fall through to the bare-name warn() branch "
                     f"(issue #978) instead of printing an install hint"
                 )
         if len(hints) != len(names):
             problems.append(
-                f"scripts/bootstrap.sh PREREQ_HINT_{os_key.upper()} has {len(hints)} "
+                f"scripts/bootstrap.sh PREREQ_HINT_{pm_key.upper()} has {len(hints)} "
                 f"entries but PREREQ_HINT_NAMES has {len(names)} -- they must stay "
                 f"parallel arrays"
             )
@@ -1276,15 +1465,31 @@ def _check_bootstrap_sh_install_hints(manifest: dict) -> list[str]:
         for name, hint in zip(names, hints):
             canonical = os_install.get(name)
             if canonical is None:
+                # Intentional-gap allowance is DNF-ONLY (review finding on
+                # #1471): install.linux.dnf may be a partial map, and an
+                # unbacked "" slot there is exactly the correct rendering of
+                # "this manifest ships no verified command for this tool on
+                # this package manager" -- not a problem to report. apt and
+                # macos are both REQUIRED-complete maps (point 1 of
+                # `_check_install_commands` pins both to `prerequisites.
+                # posix` by exact key equality), so a canonical-less entry on
+                # either of THOSE sides is never legitimate -- gating this
+                # allowance to dnf keeps them exactly as strict as before
+                # this map ever had a partial-allowed sibling. Un-gated, a
+                # stray PREREQ_HINT_APT/_MACOS entry blanked to `""` for a
+                # tool the manifest doesn't declare would silently pass here
+                # instead of being reported.
+                if hint == "" and pm_key == "dnf":
+                    continue
                 problems.append(
-                    f"scripts/bootstrap.sh PREREQ_HINT_{os_key.upper()} has an entry "
+                    f"scripts/bootstrap.sh PREREQ_HINT_{pm_key.upper()} has an entry "
                     f"for {name!r}, but metadata/bootstrap.json has no "
-                    f"prerequisites.install.{os_key}.{name}"
+                    f"prerequisites.install.{manifest_prefix}.{name}"
                 )
             elif hint != canonical:
                 problems.append(
-                    f"scripts/bootstrap.sh PREREQ_HINT_{os_key.upper()} entry {name!r} "
-                    f"= {hint!r} disagrees with prerequisites.install.{os_key}.{name} "
+                    f"scripts/bootstrap.sh PREREQ_HINT_{pm_key.upper()} entry {name!r} "
+                    f"= {hint!r} disagrees with prerequisites.install.{manifest_prefix}.{name} "
                     f"= {canonical!r}"
                 )
     return problems
@@ -1413,6 +1618,7 @@ def _check_no_orphaned_leaves(manifest: dict) -> list[str]:
     problems = []
     for leaf, value in _iter_leaf_paths(manifest):
         if (leaf in _STRUCTURAL_LEAVES or leaf.startswith(_GATE_ASSERTED_LEAF_PREFIX)
+                or leaf.startswith(_PRODUCER_ONLY_LEAF_PREFIX)
                 or leaf in _GATE_ASSERTED_LEAVES):
             continue
         sh_needle = _bash_needle(leaf)
@@ -1475,6 +1681,45 @@ def _check_native_lib_hints_consumption(manifest: dict) -> list[str]:
     return problems
 
 
+def _check_artifact_provenance(manifest: dict) -> list[str]:
+    """`artifactProvenance` (issue #1574, module docstring point 15) must
+    name exactly the tools `prerequisites.install` actually ships an
+    install command for -- the union of `install.linux.apt` /
+    `install.linux.dnf` / `install.macos` / `install.windows` keys, not
+    `prerequisites.posix/macos/windows` directly (those three lists mix
+    `python3` and `python` for the same upstream project, the identical
+    split `install.*` and therefore `artifactProvenance` already make).
+    Catches a tool gaining an install command with no provenance entry
+    (silently unable to render ADR 0021 §3's consent screen for it) and a
+    stale provenance entry for a tool no install command names anymore, the
+    same two-directional drift bar `_check_install_commands` already holds
+    `prerequisites.posix/macos/windows` to for the install commands
+    themselves."""
+    install = manifest["prerequisites"]["install"]
+    expected: set[str] = set()
+    expected |= set(install["linux"]["apt"].keys())
+    expected |= set(install["linux"].get("dnf", {}).keys())
+    expected |= set(install["macos"].keys())
+    expected |= set(install["windows"].keys())
+    actual = set(manifest.get("artifactProvenance", {}).keys())
+    problems = []
+    missing = expected - actual
+    if missing:
+        problems.append(
+            f"artifactProvenance is missing entries for {sorted(missing)} -- every tool "
+            f"prerequisites.install names an install command for needs a "
+            f"tier/source/sizeBytes/licence entry (ADR 0021 §3, issue #1574)"
+        )
+    extra = actual - expected
+    if extra:
+        problems.append(
+            f"artifactProvenance has stale entries for {sorted(extra)} -- no "
+            f"prerequisites.install.* map names an install command for them anymore; "
+            f"remove the entry or restore the matching install command"
+        )
+    return problems
+
+
 def _check_known_keys(manifest: dict) -> list[str]:
     unknown = set(manifest.keys()) - KNOWN_KEYS
     if unknown:
@@ -1489,8 +1734,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1] if __doc__ else "")
     ap.add_argument(
         "--fix", action="store_true",
-        help="Rewrite west.yml, the CI workflow --mr/cache-key pins, and the README badge "
-             "FROM metadata/bootstrap.json's zephyr.version instead of only verifying them. "
+        help="Rewrite west.yml, the CI workflow --mr/cache-key pins, the README badge, and "
+             "the native-sim-container Containerfile's ARG ZEPHYR_REV default FROM "
+             "metadata/bootstrap.json's zephyr.version instead of only verifying them. "
              "Idempotent; run the gate without --fix afterwards to confirm.",
     )
     args = ap.parse_args()
@@ -1532,11 +1778,13 @@ def main() -> int:
     problems += _check_python_min_version_windows(manifest)
     problems += _check_install_commands(manifest)
     problems += _check_bootstrap_sh_install_hints(manifest)
+    problems += _check_artifact_provenance(manifest)
     problems += _check_no_orphaned_leaves(manifest)
     problems += _check_native_lib_hints_consumption(manifest)
     for wf in CI_WORKFLOWS:
         problems += _check_ci_workflow(wf, manifest_version)
     problems += _check_library_versions(manifest_version)
+    problems += _check_containerfile(manifest_version)
 
     zephyr_python_problems, zephyr_python_skip = _check_zephyr_python_min_version(manifest)
     problems += zephyr_python_problems
@@ -1552,7 +1800,8 @@ def main() -> int:
         print(f"check_bootstrap_manifest: SKIP -- {zephyr_python_skip}")
 
     print(f"check_bootstrap_manifest: OK -- metadata/bootstrap.json, west.yml, README.md, "
-          f"scripts/bootstrap.sh, scripts/bootstrap.ps1, and {len(CI_WORKFLOWS)} "
+          f"scripts/bootstrap.sh, scripts/bootstrap.ps1, "
+          f"tools/native-sim-container/Containerfile, and {len(CI_WORKFLOWS)} "
           f"CI workflow(s) all agree on Zephyr {manifest_version}.")
     return 0
 

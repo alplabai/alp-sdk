@@ -1,7 +1,10 @@
 # Cross-EVK Example Portability — Design
 
 **Date:** 2026-05-24
-**Status:** Approved design; pending implementation plan.
+**Status:** **Implemented.** 29 examples now `#include <alp/board.h>` and open
+pins via the portable `BOARD_*` alias (verified by grep over `examples/**/src/main.c`),
+matching this design's plan sibling
+(`docs/superpowers/plans/2026-05-24-cross-evk-example-portability.md`).
 **Scope:** `examples/` only. Application firmware still targets a single
 form factor — the E1M / E1M-X "separate product lines" principle is
 unchanged for apps.

@@ -16,6 +16,15 @@
  *     on the current batch, so there is no external XIP / flash device;
  *   - lays down a production MCUboot partition map in MRAM.
  *
+ * NOTE (AMP, #1069): HE's slot0 lives in its OWN disjoint MRAM window,
+ * physically separate from HP's -- both cores' images can be
+ * resident in MRAM at once (see the partition map below and
+ * metadata/e1m_modules/E1M-AEN801.yaml `memory_map:`).  OTA is DEFERRED
+ * (CONFIG_SINGLE_APPLICATION_SLOT=y, no secondary/scratch slot): the
+ * per-core code slots (HE 2688 KiB + HP 2688 KiB) share the
+ * 5632 KiB App MRAM with boot, storage and the NPU MRAM-model
+ * budget -- see zephyr/sysbuild/aen/README.md for the sizing rationale.
+ *
  * Inter-core IPC (the APSS<->RTSS-HE MHUv2 doorbell pair) + the on-module
  * peripheral buses (GPIO / I2C / SPI / Ethernet) are added alongside the
  * alp-sdk Alif peripheral drivers; this base wires boot + console only.
@@ -101,19 +110,23 @@
  * difference is we reuse the upstream `mram` nodelabel as the controller rather
  * than declaring a fresh `mram_flash` node, since upstream owns the node.
  *
- * MRAM partition map (5632 KiB total) for the sysbuild/aen MCUboot profile
- * (MCUboot + a signed application image, swap-using-scratch).  Offsets are
- * relative to the soc-nv-flash child base (MRAM 0x80000000):
+ * MRAM partition map (this HE core's 2944 KiB view of the
+ * 5632 KiB App MRAM) for the sysbuild/aen MCUboot profile (MCUboot + a
+ * signed application image, CONFIG_SINGLE_APPLICATION_SLOT=y -- no OTA/swap
+ * slot, deferred per #1069).  Offsets are relative to the soc-nv-flash child
+ * base (MRAM 0x80000000).  HP's disjoint slot0 window is NOT a
+ * partition in this table (it's outside this core's own view); see
+ * metadata/e1m_modules/E1M-AEN801.yaml `memory_map:` for the full physical map:
  *
  *   mcuboot  0x000000  64 KiB
  *   image-0  0x010000  2688 KiB   (primary slot, code-partition)
- *   image-1  0x2b0000  2688 KiB   (secondary slot for OTA)
- *   scratch  0x550000  64 KiB
- *   storage  0x560000  128 KiB    (settings / NVS)
- *                      = 5632 KiB
+ *   reserved 0x550000  64 KiB   (ex-scratch; unused, OTA deferred)
+ *   storage  0x560000  96 KiB    (settings / NVS)
+ *   atoc     0x578000  32 KiB    (SE-owned: SETOOLS top-anchors the ATOC here -- do NOT write, #1289)
+ *                      = 2944 KiB (of 5632 KiB App MRAM total)
  *
  * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on this batch, so
- * all of boot, both image slots, scratch, and storage live in MRAM.
+ * boot, this core's own slot0, reserved headroom, and storage all live in MRAM.
  */
 &mram {
 	compatible = "alif,mram-flash-controller";
@@ -150,19 +163,19 @@
 				reg = <0x10000 DT_SIZE_K(2688)>;
 			};
 
-			slot1_partition: partition@2b0000 {
-				label = "image-1";
-				reg = <0x2b0000 DT_SIZE_K(2688)>;
-			};
-
-			scratch_partition: partition@550000 {
-				label = "image-scratch";
+			reserved_partition: partition@550000 {
+				label = "reserved";
 				reg = <0x550000 DT_SIZE_K(64)>;
 			};
 
 			storage_partition: partition@560000 {
 				label = "storage";
-				reg = <0x560000 DT_SIZE_K(128)>;
+				reg = <0x560000 DT_SIZE_K(96)>;
+			};
+
+			atoc_partition: partition@578000 {
+				label = "atoc";
+				reg = <0x578000 DT_SIZE_K(32)>;
 			};
 		};
 	};

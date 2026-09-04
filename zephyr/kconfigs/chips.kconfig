@@ -125,6 +125,33 @@ config ALP_SDK_CHIP_CC3501E
 	  the CC3501E backends when ALP_SDK_WIFI_CC3501E /
 	  ALP_SDK_BLE_CC3501E are enabled.
 
+if ALP_SDK_CHIP_CC3501E
+
+config ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS
+	int "Max wait for the cc3501e_request() transport lock (ms)"
+	default 100
+	range 1 60000
+	help
+	  Bounded acquire timeout for cc3501e_request()'s internal
+	  transport-transaction lock (issue #1116), which serialises the
+	  4-phase SPI exchange (and the shared tx_scratch/rx_scratch) across
+	  every caller of a cc3501e_t -- Wi-Fi, BLE, GPIO proxy, the console
+	  companion, and the OTA path.  A single request/reply transaction
+	  is short (typically well under a millisecond of actual SPI time,
+	  plus the fixed inter-phase settle gaps -- comparable to the V2N
+	  supervisor's own bridge ops); this timeout only matters when a
+	  transaction is stuck (e.g. a wedged link).  A caller that cannot
+	  acquire the lock within the budget gets ALP_ERR_BUSY back instead
+	  of blocking forever.  Mirrors
+	  CONFIG_ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS's rationale for
+	  the structurally identical "one shared transport, many portable
+	  backends" problem.  This core is OS-agnostic (also builds into
+	  the plain-CMake / Yocto libalp_chips.a), so non-Zephyr backends
+	  cannot see this Kconfig value and fall back to the same 100 ms
+	  default compiled into chips/cc3501e/cc3501e_core.c.
+
+endif # ALP_SDK_CHIP_CC3501E
+
 config ALP_SDK_CHIP_TMP112
 	bool "TI TMP112 digital temperature sensor"
 	depends on I2C
@@ -299,7 +326,7 @@ config ALP_SDK_CHIP_GD32G553
 	  Renesas; see chips/da9292 for the direct pin + register
 	  paths) on top of either bus (or both at once with per-call
 	  routing).  The firmware counterpart lives in
-	  firmware/gd32-bridge/ as a separate compile artifact.
+	  gd32-bridge-firmware: as a separate compile artifact.
 
 config ALP_SDK_CHIP_RTL8211FDI
 	bool "Realtek RTL8211FDI-VD-CG 10/100/1000BASE-T Ethernet PHY"

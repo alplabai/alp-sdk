@@ -22,8 +22,11 @@ cores:
     app: ./src
     # `libraries: [littlefs]` makes the loader emit
     # CONFIG_FILE_SYSTEM_LITTLEFS=y + CONFIG_FILE_SYSTEM=y +
-    # CONFIG_ALP_LITTLEFS_SYNC_IO=y (see _LIBRARY_KCONFIG in
-    # scripts/alp_project.py).  The flash-backend Kconfig
+    # CONFIG_ALP_LITTLEFS_SYNC_IO=y (from littlefs.yaml's
+    # integration.zephyr.kconfig array, transcribed by
+    # scripts/alp_orchestrate/libraries.py:321 -- the per-library
+    # _LIBRARY_KCONFIG dict this used to cite no longer exists).
+    # The flash-backend Kconfig
     # (CONFIG_FLASH / CONFIG_FLASH_MAP) is app-local, not
     # library-selection, so it lives in this example's prj.conf.
     peripherals: []

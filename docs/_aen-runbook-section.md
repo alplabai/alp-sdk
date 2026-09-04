@@ -37,8 +37,8 @@ MRAM" claim was only ever true for the generic profile). It burns the signed
 ATOC over SWD in ~0.16 s, verifies it, then a reset of type `nRESET` (RSetType
 2) re-runs the SE boot ROM so the app boots from MRAM.
 
-Requires **J-Link V9.46+ DLL** (the bench has V9.50) and a probe on matched
-J-Link **V13 firmware**. Helper: `bench-builds/flash-jlink.sh`.
+Requires **J-Link V9.46+ DLL** (the bench has V9.50). Helper:
+`bench-builds/flash-jlink.sh`.
 
 > **Probe firmware gotcha.** A version-mismatched probe forces a J-Link
 > firmware update on first connect. That update **times out over a USB hub** —
@@ -202,10 +202,14 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
 ```
 
 **2. Attach with J-Link using the GENERIC core device.** Use the generic
-`Cortex-M55` device — **not** the Alif part number. On the E8 bench the
-part-specific device (`AE822FA0E5597LS0_M55_HE`) connect sequence fails
-post-boot ("Could not connect to the target device"), while the generic core
-device scans the APs and finds the released core directly (BENCH-VERIFIED):
+`Cortex-M55` device for flows B/C — not the Alif part number. On an older
+J-Link DLL the part-specific device (`AE822FA0E5597LS0_M55_HE`) connect
+sequence fails post-boot ("Could not connect to the target device"), while
+the generic core device scans the APs and finds the released core directly
+(BENCH-VERIFIED). **Update (J-Link V9.46, 2026-06-16):** the part-number
+device also connects fine on a current DLL — see
+[`aen-bench-bringup.md`](aen-bench-bringup.md) §1 — but the generic profile
+remains the documented device for flows B/C regardless of DLL version:
 
 ```bash
 JLinkExe -device Cortex-M55 -if SWD -speed 4000 -nogui 1
@@ -244,11 +248,11 @@ Then read the result with flow B (mem8 of `ram_console_buf`).
 | `app-write-mram` sits at `Waiting for Target..[RESET Platform]` | Hard-maintenance — **power-cycle** the board so SETOOLS catches the SES boot-ISP window. A clean write ends `100% ... Done`. |
 | Image written but won't boot | ATOC built with the wrong **DEVICE** config for the part. Re-run `tools-config` for the part, or write an **app-only** ATOC keeping the factory DEVICE config. |
 | `west flash` tries to use J-Link / fails to flash | On the carrier board `west flash` must use the **`alif_flash`** runner (SETOOLS, flow A); confirm the SE-UART port. (To burn over J-Link instead, use the **part-number device profile** — flow D — not the generic core profile.) |
-| J-Link won't write MRAM | You selected the **generic** `Cortex-M55` device (flow C); the MRAM loader only activates with the **part-number profile** `AE822FA0E5597LS0_M55_HE`. Also needs J-Link **V9.46+** DLL and matched V13 probe firmware (flow D). |
+| J-Link won't write MRAM | You selected the **generic** `Cortex-M55` device (flow C); the MRAM loader only activates with the **part-number profile** `AE822FA0E5597LS0_M55_HE`. Also needs J-Link **V9.46+** DLL (flow D). |
 | J-Link firmware update times out on connect | Mismatched probe firmware updates over a **USB hub** stall — connect the probe to a **direct root USB port**. |
 | No app output anywhere over USB | Expected on this bench — the only USB serial is the SE-UART; the HE app console (UART2 on DevKit / UART5 on E1M) isn't wired to USB. Use the **RAM console** (flow B) or **RTT**. |
 | RAM console reads as all-zeros / garbage | Wrong `ram_console_buf` address (re-resolve from `zephyr.map`), or the app never ran (check flow C `go`), or `CONFIG_UART_CONSOLE` left enabled (must be `n`). |
-| J-Link: `Could not connect to the target device` | You used the **Alif part-number** device. Switch to the generic `-device Cortex-M55`. |
+| J-Link: `Could not connect to the target device` | You used the **Alif part-number** device on an **older J-Link DLL** (pre-V9.46). Switch to the generic `-device Cortex-M55`, or update J-Link to V9.46+ — see [`aen-bench-bringup.md`](aen-bench-bringup.md) §1. |
 | J-Link: `Could not find core in CoreSight setup` | Fresh/un-provisioned SoM — the SES holds the M55. Provision an app first (flow A / [`aen-provisioning.md`](aen-provisioning.md)); then the debug-AP comes alive. |
-| Wrong SW-DP IDR (not `0x4C013477`) | Wrong target or reversed SWD wiring. (`0x6BA02477` is the GD32/Cortex-M33 in this repo — that means you're on the wrong chip.) |
+| Wrong SW-DP IDR (not `0x4C013477`) | Wrong target or reversed SWD wiring. Bench-measured IDs for the other two probes on this rack: `0x0BE12477` is the **GD32 bridge**, `0x6BA02477` is the **V2N CM33 DAP** (both on place `e1mx-v2n-m1-01`; see `scripts/bench/aen/bench-env.sh`). Either means you're on the wrong chip. (`0x6BA02477` was previously labelled "the GD32/Cortex-M33" here — that was the generic Cortex-M33 expectation, not a GD32 measurement; #1512.) |
 | After a J-Link reset the RAM-run image is gone | A reset is **SYSRESETREQ** → reboots the **SES**; ITCM contents and your `go` are lost. Re-`loadbin`/`setpc`/`go`; don't reset mid-loop. |

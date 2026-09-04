@@ -3,8 +3,9 @@
 """
 Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which shells
 `alp_project.py --emit zephyr-conf --core <id>` at configure time) and the
-planner's build-plan `configArtefacts` (`--emit build-plan`, consumed by
-`tan`) MUST materialise the identical `alp.conf` for the same core.
+SDK reference build-plan `configArtefacts` MUST materialise the identical
+`alp.conf` for the same core; Python Tan tests its relocated producer against
+the same contract.
 
 Both paths call the same function (`alp_orchestrate.kconfig._slice_alp_conf`)
 -- this gate pins that invariant byte-for-byte so a future change to either

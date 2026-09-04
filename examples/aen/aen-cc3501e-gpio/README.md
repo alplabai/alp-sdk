@@ -12,7 +12,7 @@ GPIO** and **enables/disables the camera LDOs** over the bridge, using only
 the portable `cc3501e_*` host API.
 
 The CC3501E peer firmware is ALP-authored and lives in this repo at
-[`firmware/cc3501e/`](../../../firmware/cc3501e) (embedded, per ADR 0015 —
+[`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware) (embedded, per ADR 0015 —
 like the gd32-bridge).
 
 ## What is the GPIO proxy?

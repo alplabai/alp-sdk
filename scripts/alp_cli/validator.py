@@ -2,8 +2,8 @@
 
 Runs three passes:
   1. schema_pass     - JSON Schema violations (codes ALP-B001..B004).
-  2. xref_pass       - cross-references to SoM / preset / pad metadata
-                       (codes ALP-B005..B009).
+  2. xref_pass       - cross-references to SoM / preset / pad / chip
+                       metadata (codes ALP-B005..B009).
   3. compat_pass     - peripherals vs. SoC capability table
                        (codes ALP-B010+).
 
@@ -34,6 +34,7 @@ METADATA = REPO / "metadata"
 SOM_DIR = METADATA / "e1m_modules"
 PRESET_DIR = METADATA / "boards"
 SOC_DIR = METADATA / "socs"
+CHIP_DIR = METADATA / "chips"
 
 
 def load_board_schema(schema_path: Path | None = None) -> dict[str, Any]:
@@ -95,6 +96,7 @@ def validate_board_yaml(
     som_dir = root / "e1m_modules"
     preset_dir = root / "boards"
     soc_dir = root / "socs"
+    chip_dir = root / "chips"
     schema_path = root / "schemas" / "board.schema.json"
     if not schema_path.is_file():
         # Synthetic/partial metadata roots (e.g. test fixtures) may not
@@ -102,7 +104,8 @@ def validate_board_yaml(
         schema_path = SCHEMA_PATH
 
     _schema_pass(data, path, collector, schema_path=schema_path)
-    _xref_pass(data, path, collector, som_dir=som_dir, preset_dir=preset_dir)
+    _xref_pass(data, path, collector, som_dir=som_dir, preset_dir=preset_dir,
+               chip_dir=chip_dir)
     _compat_pass(data, path, collector, som_dir=som_dir, soc_dir=soc_dir)
     return collector
 
@@ -114,6 +117,7 @@ def _xref_pass(
     *,
     som_dir: Path = SOM_DIR,
     preset_dir: Path = PRESET_DIR,
+    chip_dir: Path = CHIP_DIR,
 ) -> None:
     som = data.get("som")
     # #602: a schema-invalid `som:` (wrong type, e.g. a string/list instead
@@ -166,6 +170,137 @@ def _xref_pass(
         _check_board_hosts_som_family(
             data, path, collector, sku, som_doc, preset, board_doc,
             preset_dir=preset_dir)
+
+    _check_chips_known(data, path, collector, chip_dir=chip_dir)
+
+
+def _known_chip_slugs(*, chip_dir: Path = CHIP_DIR) -> set[str]:
+    """Every valid `chips:` token: real chip manifests plus the small set
+    of non-chip SDK 'block' helpers `chips:` may also legitimately name
+    (`button_led`, `pdm_mic`) -- see `_BLOCK_SLUGS` in
+    `alp_orchestrate/slugs.py`, the dependency-free leaf that is the single
+    source of truth for that distinction (kconfig.py's emitter and
+    check_example_portability.py both consult the same set; e.g.
+    `examples/connectivity/iot-connected-camera/board.yaml`'s
+    `chips: [ssd1306, button_led]`).
+
+    A manifest with `driver_status: planned` OR `driver_status: none`
+    (issue #1224 review; #1270 widened this from `planned`-only after
+    `metadata/chips/dp83825.yaml` shipped the tree's first `none`) ships no
+    `chips/<id>/` driver and declares no `ALP_SDK_CHIP_<NAME>` Kconfig
+    symbol -- naming either in `chips:` would emit the same
+    undeclared-symbol Kconfig line ALP-B008 exists to catch, so both
+    statuses are excluded from "known" the same way an unknown chip is.
+    `partial`/`complete`/`stub` all ship a real `chips/<id>/` driver (even
+    a stub has a `.c` file and a declared Kconfig symbol -- see
+    `chips/ar0234/`) so only these two "no driver at all" tiers apply.
+
+    Lazy import: `alp_orchestrate/loader.py` imports `alp_cli.validator` at
+    module load time, so a top-level import of `alp_orchestrate.*` here
+    would cycle.  Safe once this function actually runs -- by then this
+    module is already fully imported (whatever caller reached this point
+    already finished importing `alp_cli.validator`).
+    """
+    known = {
+        p.stem for p in chip_dir.glob("*.yaml")
+        if (_load_metadata_yaml(p) or {}).get("driver_status") not in (
+            "planned", "none")
+    }
+    try:
+        from alp_orchestrate.slugs import _BLOCK_SLUGS
+    except ImportError:
+        # A synthetic/partial test tree may not carry alp_orchestrate on
+        # sys.path at all; fall back to chip manifests only rather than
+        # crashing validation over an unrelated import.
+        return known
+    return known | _BLOCK_SLUGS
+
+
+def _check_chips_known(
+    data: dict[str, Any],
+    path: Path,
+    collector: DiagnosticCollector,
+    *,
+    chip_dir: Path = CHIP_DIR,
+) -> None:
+    """Reject a `chips:` entry that names no real chip manifest or SDK
+    block helper (issue #1224).
+
+    `chips:` is schema-validated only against a permissive identifier
+    regex (`metadata/schemas/board.schema.json`), so a typo (e.g.
+    `no_such_chip_xyz`) passes schema validation clean and is emitted
+    verbatim into the generated `alp.conf` as
+    `CONFIG_ALP_SDK_CHIP_<TYPO>=y` -- a Kconfig symbol nothing declares,
+    so the driver is silently not built and the app fails at runtime
+    instead of at validation time.  Cross-check every token against the
+    real chip registry (`metadata/chips/*.yaml`, `chip_id:` == filename
+    stem for every manifest) the same way `som.sku` (ALP-B005) and
+    `preset:` (ALP-B006) are already cross-checked.
+    """
+    chips = data.get("chips")
+    if not isinstance(chips, list):
+        return
+
+    known = _known_chip_slugs(chip_dir=chip_dir)
+    # Point at the `chips` KEY, not the list's VALUE node: for a
+    # multi-entry list target="value" gives every offending entry the
+    # position of the FIRST list item, so a caret sized to a LATER
+    # unknown entry (`span=len(chip)`) would underline an unrelated,
+    # valid entry instead (review round 3).  The YAML position loader
+    # (alp_cli/yaml_pos.py) doesn't track individual list-item
+    # positions, so the precise fix -- a caret on the offending token
+    # itself -- needs a loader change; anchoring on the unambiguous
+    # `chips` key is the correct diagnostic today.
+    line, col = node_position(data, "chips", target="key")
+    seen: set[str] = set()
+    for chip in chips:
+        # Non-string / pattern-invalid entries are already reported by
+        # the schema pass (ALP-B003/ALP-B004); nothing new to say here.
+        if not isinstance(chip, str) or chip in known or chip in seen:
+            continue
+        seen.add(chip)
+        # A manifest with `driver_status: planned` or `driver_status: none`
+        # IS a real, committed metadata/chips/<chip>.yaml -- `_known_chip_slugs`
+        # excludes it because it declares no ALP_SDK_CHIP_<NAME> Kconfig
+        # symbol, not because the manifest is missing.  Say that, not "no
+        # metadata/chips/<chip>.yaml" (false -- the file is right there)
+        # and don't offer a "did you mean" against an unrelated chip for
+        # an entry that was spelled correctly (review round 3 major).
+        chip_path = chip_dir / f"{chip}.yaml"
+        if chip_path.is_file():
+            status = (_load_metadata_yaml(chip_path) or {}).get("driver_status")
+            message = (
+                f"chips: '{chip}' has driver_status: {status} "
+                f"-- no Alp SDK driver or ALP_SDK_CHIP_{chip.upper()} "
+                f"symbol yet"
+            )
+            hint = None
+        else:
+            message = (
+                f"chips: unknown chip '{chip}' "
+                f"(no metadata/chips/{chip}.yaml)"
+            )
+            hint = _chip_suggestion(chip, chip_dir=chip_dir)
+        collector.add(
+            Diagnostic(
+                severity="error",
+                path=path,
+                line=line,
+                col=col,
+                span=len("chips"),
+                code="ALP-B008",
+                message=message,
+                hint=hint,
+            )
+        )
+
+
+def _chip_suggestion(chip: str, *, chip_dir: Path = CHIP_DIR) -> str | None:
+    from difflib import get_close_matches
+
+    known = sorted(_known_chip_slugs(chip_dir=chip_dir))
+    match = get_close_matches(chip, known, n=1)
+    return f"did you mean '{match[0]}'?" if match else None
 
 
 def _load_metadata_yaml(path: Path) -> dict[str, Any] | None:
@@ -488,15 +623,21 @@ def _schema_error_to_diagnostic(
         )
 
     if err.validator == "additionalProperties":
-        if abs_path:
-            bad_key = abs_path[-1]
-        else:
-            # jsonschema reports additionalProperties errors at the parent level;
-            # the offending key is embedded in the message text.
-            import re as _re
-            _m = _re.search(r"'([^']+)'", err.message)
-            bad_key = _m.group(1) if _m else "?"
-        if parent and "__keys__" in parent and bad_key in parent["__keys__"]:
+        # jsonschema reports additionalProperties errors AT the object that
+        # rejected the extra key: `abs_path` is that object's OWN path, not
+        # the offending key's -- so the offending key is only ever
+        # recoverable from the message text, never from `abs_path[-1]`.
+        # (Nested case: a `server:` block with `additionalProperties:
+        # false` rejecting `tls_ca_bundle` reports `abs_path ==
+        # ["ota", "server"]`; `abs_path[-1]` is `"server"`, the block
+        # itself, not the unknown key -- which used to surface as the
+        # misleading "unknown key 'server'".)
+        import re as _re
+        _m = _re.search(r"'([^']+)'", err.message)
+        bad_key = _m.group(1) if _m else "?"
+        offending = _walk(data, abs_path) if abs_path else data
+        if offending and "__keys__" in offending and bad_key in offending["__keys__"]:
+            parent = offending
             line, col = node_position(parent, bad_key, target="key")
             span = len(str(bad_key))
         allowed = list(err.schema.get("properties", {}).keys())

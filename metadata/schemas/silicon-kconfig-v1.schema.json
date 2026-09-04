@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/silicon-kconfig-v1.schema.json",
   "title": "ALP silicon-ref -> Zephyr SoC-select Kconfig registry (metadata/registries/silicon-kconfig.json) v1",
-  "description": "Single source for mapping a silicon ref (`<vendor>:<family>:<part>`) to the Zephyr Kconfig symbol that selects that SoC.  The symbol is COMPUTED, not tabulated: `socSymbolPrefix + ref.upper().replace(':','_')`.  `knownSilicon` is the allowlist of host SoCs that receive a symbol; accelerators (e.g. `deepx:dx:m1`) are intentionally absent and resolve to no symbol.  Replaces the former hardcoded `_SILICON_TO_KCONFIG` dicts in scripts/alp_project.py + scripts/alp_orchestrate.py; coverage (every entry resolves to an existing metadata/socs/ spec) is gated by scripts/validate_metadata.py.",
+  "description": "Single source for mapping a silicon ref (`<vendor>:<family>:<part>`) to the Zephyr Kconfig symbol that selects that SoC.  The symbol is COMPUTED, not tabulated: `socSymbolPrefix + ref.upper().replace(':','_')`.  `knownSilicon` is the allowlist of host SoCs that receive a symbol; accelerators (e.g. `deepx:dx:m1`) are intentionally absent and resolve to no symbol.  Replaces the former hardcoded `_SILICON_TO_KCONFIG` dicts in scripts/alp_project.py + the `alp_orchestrate` package (`python -m alp_orchestrate`); coverage (every entry resolves to an existing metadata/socs/ spec) is gated by scripts/validate_metadata.py.",
   "type": "object",
   "required": ["schemaVersion", "socSymbolPrefix", "knownSilicon"],
   "additionalProperties": false,

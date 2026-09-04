@@ -8,13 +8,18 @@ Deciders: alpCaner
 
 The SDK targets two distinct product lines:
 
-- **E1M** (35×35 mm) — Cortex-M-class, mW-class single-die SoCs.
-  Today: Alif Ensemble (AEN3xx..AEN8xx) and NXP i.MX 93 RT-core
-  (NX9101).  Symbol namespace: `<alp/e1m_pinout.h>` (`ALP_E1M_PWM0`,
-  `ALP_E1M_I2C0`, `ALP_E1M_GPIO_IO0..IO25`, …).
-- **E1M-X** (45×65 mm) — heterogeneous Cortex-A55 + Cortex-M33,
-  higher-TDP silicon.  Today: Renesas RZ/V2N (V2N101/102) and the
-  same with DEEPX DX-M1 (V2M101/102).  Symbol namespace:
+- **E1M** (35×35 mm) — mW-class single-die SoCs.  Core mix is
+  per-SKU, not uniform across the family: Cortex-M-only on
+  AEN301/AEN401, heterogeneous Cortex-A32 + Cortex-M55 on
+  AEN501..AEN801, and heterogeneous Cortex-A55 + Cortex-M33 on
+  NX9101 (`metadata/socs/alif/ensemble/{e3,e4,e5,e6,e7,e8}.json`,
+  `metadata/socs/nxp/imx9/imx93.json`).  Today: Alif Ensemble
+  (AEN3xx..AEN8xx) and NXP i.MX 93 (NX9101).  Symbol namespace:
+  `<alp/e1m_pinout.h>` (`ALP_E1M_PWM0`, `ALP_E1M_I2C0`,
+  `ALP_E1M_GPIO_IO0..IO25`, …).
+- **E1M-X** (45×65 mm) — heterogeneous Cortex-A55 + Cortex-M33 on
+  every SKU, higher-TDP silicon.  Today: Renesas RZ/V2N (V2N101/102)
+  and the same with DEEPX DX-M1 (V2M101/102).  Symbol namespace:
   `<alp/e1m_x_pinout.h>` (`ALP_E1M_X_PWM0`, `ALP_E1M_X_I2C0`,
   `ALP_E1M_X_GPIO_IO0..IO35`, …).
 
@@ -27,9 +32,11 @@ code changes" — but that promise has two very different meanings:
    compatible board.
 2. **Cross-form-factor** — swap an E1M app onto an E1M-X SoM, or
    vice versa.  Different mechanical footprint, different power
-   envelope (mW vs W), different SoC architecture (M-class vs
-   heterogeneous A+M), different NPU choices (Ethos-U / DEEPX
-   DX-M1 / DRP-AI), different board.
+   envelope (mW vs W), different core-cluster composition (E1M-X is
+   uniformly Cortex-A55 + Cortex-M33; E1M ranges from Cortex-M-only
+   to heterogeneous Cortex-A32/A55 + Cortex-M depending on SKU),
+   different NPU choices (Ethos-U / DEEPX DX-M1 / DRP-AI), different
+   board.
 
 The `<alp/e1m_pinout.h>` vs `<alp/e1m_x_pinout.h>` split already
 exists, and the e1m-spec itself splits the form factors at the
@@ -86,8 +93,9 @@ SoM can do.  Rejected because:
 
 - It would hide useful features that are line-specific by design —
   DRP-AI and DEEPX DX-M1 are E1M-X-only, Ethos-U / U55 vs U85
-  deltas in E1M are real workload-shaping choices, and the
-  A-cluster on E1M-X simply does not exist on E1M.
+  deltas in E1M are real workload-shaping choices, and every
+  E1M-X SKU guarantees an A-cluster while E1M's A-cluster is
+  SKU-dependent, absent entirely on AEN301/AEN401.
 - The SDK's value is the portable surface plus targeted access to
   line-specific accelerators (see ADR 0008 on the GPU2D shim and
   the inference-backend story).  A strict intersection would

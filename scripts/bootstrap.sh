@@ -60,6 +60,7 @@ BOOTSTRAP_JSON="${REPO_ROOT}/metadata/bootstrap.json"
 
 DO_PIP=1
 DO_WEST=1
+DO_PATCHES=1
 PRINT_ENV_ONLY=0
 ALLOW_PARTIAL=0
 
@@ -67,6 +68,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --no-pip)       DO_PIP=0 ;;
         --no-west)      DO_WEST=0 ;;
+        --no-patches)   DO_PATCHES=0 ;;
         --print-env)    PRINT_ENV_ONLY=1 ;;
         --allow-partial) ALLOW_PARTIAL=1 ;;
         -h|--help)
@@ -88,6 +90,12 @@ Usage:
     bash scripts/bootstrap.sh                # full setup
     bash scripts/bootstrap.sh --no-pip       # skip pip installs
     bash scripts/bootstrap.sh --no-west      # skip west init/update
+    bash scripts/bootstrap.sh --no-patches   # skip `west patch apply` + its
+        # verification (issue #1392). The patches in zephyr/patches.yml are
+        # required to BUILD: zephyr/patches/zephyr/0002-ipm-add-poll-out-poll-in.patch
+        # adds the ipm_driver_api .poll_out/.poll_in fields hal_alif's
+        # se_service.c calls and the pinned upstream Zephyr does not have. Use
+        # this only when you intend to manage the patch state yourself.
     bash scripts/bootstrap.sh --print-env    # only print env-var lines
     bash scripts/bootstrap.sh --allow-partial
         # report success even if zephyr-requirements / sdk-extras /
@@ -188,19 +196,38 @@ fi
 # above (this runs before python3 is confirmed present, so it can't read
 # metadata/bootstrap.json for the hint text either). A second hardcoded
 # copy, kept in lockstep with metadata/bootstrap.json's
-# prerequisites.install.linux / .macos by scripts/check_bootstrap_manifest.py.
-# Three PARALLEL arrays, not an associative array: bash 3.2 (the
-# macOS-shipped version) has no `declare -A` -- the same reason the
-# nativeLibHints print loop further down duplicates itself per OS instead of
-# using indirection. Matched up by POSITION, not by key.
+# prerequisites.install.linux.{apt,dnf} / .macos by
+# scripts/check_bootstrap_manifest.py. Four PARALLEL arrays (was three --
+# issue #1464 split the old single Linux array by PACKAGE MANAGER, not
+# distro), not an associative array: bash 3.2 (the macOS-shipped version)
+# has no `declare -A` -- the same reason the nativeLibHints print loop
+# further down duplicates itself per OS instead of using indirection.
+# Matched up by POSITION, not by key. PREREQ_HINT_DNF carries an EMPTY
+# STRING for a tool metadata/bootstrap.json's install.linux.dnf doesn't
+# declare (today: `ninja` -- Fedora's own repos carry `ninja-build`, but the
+# RHEL-derivative default repos, measured on rockylinux:9, carry it under no
+# name without EPEL, so this manifest ships no dnf.ninja rather than a
+# guessed one) -- the empty-hint branch below already falls back to the bare
+# tool name for that slot, the same host-neutral degrade a PM this script
+# doesn't even try to detect (pacman -- deliberately unshipped, see
+# metadata/schemas/bootstrap-v1.schema.json's install.linux description for
+# why) already gets.
 PREREQ_HINT_NAMES=(git cmake python3 ninja xz wget)
-PREREQ_HINT_LINUX=(
+PREREQ_HINT_APT=(
     "sudo apt-get install -y git"
     "sudo apt-get install -y cmake"
     "sudo apt-get install -y python3"
     "sudo apt-get install -y ninja-build"
     "sudo apt-get install -y xz-utils"
     "sudo apt-get install -y wget"
+)
+PREREQ_HINT_DNF=(
+    "sudo dnf install -y git"
+    "sudo dnf install -y cmake"
+    "sudo dnf install -y python3"
+    ""
+    "sudo dnf install -y xz"
+    "sudo dnf install -y wget"
 )
 PREREQ_HINT_MACOS=(
     "brew install git"
@@ -220,6 +247,21 @@ done
 if [ "${#MISSING[@]}" -gt 0 ]; then
     warn "Missing required tools:"
     UNAME_S="$(uname -s 2>/dev/null || echo unknown)"
+    # Package-manager detection (issue #1464) -- pure `command -v`, no
+    # python3 needed (still bootstrap-of-the-bootstrap safe). Keyed by PM,
+    # not distro: apt-get/dnf are each confirmable on an unknown host where
+    # a distro ID is fuzzy (derivatives, stripped containers). pacman is
+    # deliberately never probed here -- this manifest ships no
+    # install.linux.pacman entry, so detecting it would only ever resolve to
+    # an empty hint anyway; the bare tool name already prints in that case.
+    LINUX_PM=""
+    if [ "${UNAME_S}" != "Darwin" ]; then
+        if command -v apt-get >/dev/null 2>&1; then
+            LINUX_PM="apt"
+        elif command -v dnf >/dev/null 2>&1; then
+            LINUX_PM="dnf"
+        fi
+    fi
     for bin in "${MISSING[@]}"; do
         hint=""
         idx=0
@@ -227,7 +269,13 @@ if [ "${#MISSING[@]}" -gt 0 ]; then
             if [ "${name}" = "${bin}" ]; then
                 case "${UNAME_S}" in
                     Darwin) hint="${PREREQ_HINT_MACOS[$idx]}" ;;
-                    *)      hint="${PREREQ_HINT_LINUX[$idx]}" ;;
+                    *)
+                        case "${LINUX_PM}" in
+                            apt) hint="${PREREQ_HINT_APT[$idx]}" ;;
+                            dnf) hint="${PREREQ_HINT_DNF[$idx]}" ;;
+                            *)   hint="" ;;
+                        esac
+                        ;;
                 esac
                 break
             fi
@@ -500,7 +548,7 @@ esac
 # workspace-local venv, never the system interpreter / --user / --break-system-
 # packages (issue #93: a half-removed system `packaging` once broke `west init`,
 # and a global west couples the build to the host interpreter's state).
-# tan's Python backend (alp_cli) + the VS Code extension auto-discover
+# alp-sdk's internal Python tooling + the VS Code extension auto-discover
 # <workspace>/.venv, so this is backwards-compatible.  Idempotent: an
 # existing WORKING venv is reused.
 if [ "${DO_WEST}" -eq 1 ] || [ "${DO_PIP}" -eq 1 ]; then
@@ -593,7 +641,7 @@ if [ "${DO_WEST}" -eq 1 ]; then
         # fetched by `west update`. alp-sdk's self.west-commands then exposes the
         # alp-* extension commands in this workspace (#769).
         ( cd "${WORKSPACE_DIR}" && "${WEST}" "${WEST_INIT_ARGS[@]}" "${REPO_ROOT}" ) || die "west init -l failed"
-        info "Running 'west update' (shallow + narrow; ~30 MB on a cold cache)"
+        info "Running 'west update' (shallow + narrow; ~1.5 GB+ on a cold cache for zephyr/ + modules/, mostly vendor HALs -- this is a floor, not a ceiling; budget disk/bandwidth accordingly)"
         ( cd "${WORKSPACE_DIR}" && "${WEST}" "${WEST_UPDATE_ARGS[@]}" ) || die "west update failed"
         ( cd "${WORKSPACE_DIR}" && "${WEST}" "${WEST_EXPORT_ARGS[@]}" ) || true
     else
@@ -636,22 +684,103 @@ if [ "${DO_PIP}" -eq 1 ]; then
     info "Installing alp-sdk Python extras into the venv (${PIP_SDK_EXTRAS[*]})"
     "${VPY}" -m pip install -q "${PIP_SDK_EXTRAS[@]}" \
         || { warn "alp-sdk extras install reported a problem -- check manually"; record_phase_warning "sdk-extras"; }
-    # tan's Python backend (alp_cli: init / run / emit / validate / model /
-    # doctor / monitor, invoked as `python -m alp_cli <sub>` by `tan`) --
-    # editable install, so a `git pull` in the checkout updates the backend
-    # in place. `tan` itself is a separate Rust binary, installed
-    # separately:
-    #   curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
-    # The from-source alternative is `git clone https://github.com/alplabai/
-    # tan-cli && cd tan-cli && cargo install --path crates/tan-cli --locked`
-    # -- that path is relative to a TAN-CLI checkout, not to this one. This
-    # comment used to name `crates/tan-cli` alone, which does not exist in
-    # alp-sdk, so anyone who followed it from here got "no such directory".
-    info "Installing the tan CLI's Python backend into the venv (pip install -e ${PIP_EDITABLE_INSTALL})"
+    # SDK-internal/reference Python tooling (including alp_cli) -- editable
+    # install, so a `git pull` in the checkout updates it in place. Python
+    # Tan is installed separately. During the v0.5 port, use tan-cli/dev in
+    # its own Python 3.12+ venv; from v0.5 the installer supplies the frozen
+    # runtime.
+    info "Installing alp-sdk's internal Python tooling into the venv (pip install -e ${PIP_EDITABLE_INSTALL})"
     "${VPY}" -m pip install -q -e "${PIP_EDITABLE_INSTALL}" \
-        || { warn "alp_cli editable install reported a problem -- check manually"; record_phase_warning "editable-install"; }
+        || { warn "alp-sdk internal Python tooling editable install reported a problem -- check manually"; record_phase_warning "editable-install"; }
 else
     info "Skipping pip installs (--no-pip)"
+fi
+
+# -------- zephyr/patches.yml (issue #1392) ------------------------------------
+
+# AFTER the pip section, not inside the west one: `west patch` imports
+# `pykwalify.core` at module import time, and pykwalify arrives with the Zephyr
+# requirements installed just above. Run from the west block this exits
+# non-zero in ~23 ms on a fresh CI workspace, before doing any work --
+# `[bootstrap] west patch apply failed` across every alp-build matrix leg on
+# PR #1426, with no output of its own to say why.
+#
+# This used to be a manual step nothing here mentioned, documented only in
+# docs/aen-bench-bringup.md and replicated by pr-twister-aen.yml in its own
+# stanza. A user who ran this script and started building got an unpatched
+# tree, and every layer stayed quiet about it: bootstrap succeeded, the build
+# succeeded, the flash succeeded, and the board did not boot the application.
+#
+# VERIFY FIRST, then apply only what is missing. `west patch apply` is NOT
+# idempotent: re-running it on an already-patched tree fails, because each
+# patch is fed to `git apply` against content that already carries it --
+#
+#   ERROR: error: patch failed: drivers/clock_control/clock_control_alif.c:124
+#   error: drivers/clock_control/clock_control_alif.c: patch does not apply
+#   FATAL ERROR: failed to apply patch zephyr/0001-clock_control_alif-...patch
+#
+# -- measured on PR #1426's `getting-started` job, whose
+# `actions/cache@v5` key (`getting-started-aen801-zephyr-v4.4.1-${runner.os}`)
+# carries no commit component, so it restored a `zephyr/`+`modules/` tree an
+# earlier run had already patched. `scripts/bootstrap.sh`'s own `REUSE_WS=1`
+# path reaches the same state for a developer re-running it. All three
+# zephyr/patches.yml patches DO apply to a pristine v4.4.1 (`git apply --check`
+# rc=0 each), so the tree being non-pristine is the whole story.
+if [ "${DO_WEST}" -eq 1 ] && [ "${DO_PATCHES}" -eq 1 ]; then
+    # No `set +e`/`set -e` guard around either call: this script runs under
+    # `set -uo pipefail` with errexit OFF (line 37), so a non-zero exit does
+    # not end the script and $? is readable directly. Adding the guard would
+    # switch errexit ON for everything below it.
+    ( cd "${REPO_ROOT}" && "${VPY}" scripts/verify_west_patches.py --topdir "${WORKSPACE_DIR}" --west "${WEST}" >/dev/null 2>&1 )
+    VERIFY_RC=$?
+    if [ "${VERIFY_RC}" -eq 0 ]; then
+        ok "zephyr/patches.yml already applied in ${WORKSPACE_DIR} -- nothing to do"
+    else
+        # PER MODULE, not the whole set. A workspace can be PARTIALLY patched:
+        # pr-getting-started-aen801.yml caches `zephyr` and `modules` under a
+        # key with no commit component, but NOT `bootloader/mcuboot`, so zephyr
+        # arrives already patched while mcuboot arrives fresh. A bare
+        # `west patch apply` then re-applies zephyr's and dies on the first one
+        # (`patch does not apply`), because the command is not idempotent.
+        UNAPPLIED=$( cd "${REPO_ROOT}" && "${VPY}" scripts/verify_west_patches.py \
+            --topdir "${WORKSPACE_DIR}" --west "${WEST}" --list-unapplied 2>/dev/null )
+        if [ -z "${UNAPPLIED}" ]; then
+            die "verify_west_patches.py reported patches missing (exit ${VERIFY_RC}) but named no module -- re-run it directly to see why"
+        fi
+        for _mod in ${UNAPPLIED}; do
+            # `--dst-module` is a flag of `west patch` ITSELF, not of its
+            # `apply` SUBCOMMAND, so it goes BEFORE `apply`:
+            #
+            #   usage: west patch [-h] [-b DIR] [-l FILE] [-w DIR] [-sm MODULE]
+            #                     [-dm MODULE] <subcommand> ...
+            #
+            # Written the other way round it does not run at all --
+            # `west patch: error: unexpected arguments: ['--dst-module', 'mcuboot']`,
+            # exit 2 -- which failed every alp-build job on dev.
+            info "Applying zephyr/patches.yml for module '${_mod}' ('west patch --dst-module ... apply')"
+            PATCH_OUT=$( cd "${WORKSPACE_DIR}" && "${WEST}" patch --dst-module "${_mod}" apply 2>&1 )
+            PATCH_RC=$?
+            printf '%s\n' "${PATCH_OUT}"
+            if [ "${PATCH_RC}" -ne 0 ]; then
+                die "west patch --dst-module ${_mod} apply failed (exit ${PATCH_RC}) -- output above"
+            fi
+        done
+        # Re-verify: `west patch apply`'s own exit status is not evidence it
+        # did anything (three no-op-and-exit-0 paths -- see
+        # scripts/verify_west_patches.py). Exit 3 is "everything present is
+        # patched, but a module this workspace does not carry could not be
+        # checked" -- normal for a narrow workspace, so it warns rather than
+        # dying. 1 and 2 are the real thing.
+        ( cd "${REPO_ROOT}" && "${VPY}" scripts/verify_west_patches.py --topdir "${WORKSPACE_DIR}" --west "${WEST}" )
+        VERIFY_RC=$?
+        case "${VERIFY_RC}" in
+            0) ok "zephyr/patches.yml verified applied in ${WORKSPACE_DIR}" ;;
+            3) warn "some zephyr/patches.yml modules are not in this workspace -- see above" ;;
+            *) die "zephyr/patches.yml is not applied in ${WORKSPACE_DIR} (#1392) -- see the list above" ;;
+        esac
+    fi
+elif [ "${DO_WEST}" -eq 1 ]; then
+    info "Skipping 'west patch apply' (--no-patches) -- zephyr/patches.yml is NOT applied"
 fi
 
 # -------- Optional native libs hint -------------------------------------------
@@ -731,7 +860,7 @@ echo
 #
 # EXIT_CODE is set here but NOT acted on until the very end of this script
 # (matching tan-cli's `verdict()`/`finish()` split): the Next steps block
-# below -- including `tan doctor --build`, the tool that diagnoses exactly
+# below -- including `tan doctor`, the tool that diagnoses exactly
 # this kind of failure -- must still print on the incomplete path. Exiting
 # here would take that away on the one run that needs it most.
 EXIT_CODE=0
@@ -787,10 +916,9 @@ print_env_lines "  "
 cat <<'EOF'
 
   # Sanity-check the host build environment (needs tan on PATH -- see
-  # README.md for the tan-cli `install.sh` one-liner): `tan doctor --build`
-  # is the host/build preflight; plain `tan doctor` is a different,
-  # debug-readiness check (lldb, codeLLDBExtension) -- see docs/cli.md.
-  tan doctor --build
+  # README.md for the current v0.5-transition install). Python Tan runs one
+  # build/flash-oriented checklist; `--build` is a compatibility no-op.
+  tan doctor
 
   # BUILDING YOUR OWN PROJECT -- the customer path. `tan` is the whole command
   # surface (ADR-0020), and `tan build` resolves the board from the project's
@@ -799,10 +927,10 @@ cat <<'EOF'
   #
   # Note `tan build` has NO native_sim option: board.yaml's `os:` is
   # zephyr/yocto/baremetal/off, so it always targets the real SKU your
-  # board.yaml declares and a real toolchain is required. `tan doctor --build`
+  # board.yaml declares and a real toolchain is required. `tan doctor`
   # reports whether you have one.
-  tan init --from-example peripheral-io/uart-echo --name my-app
-  cd my-app && tan build
+  tan init --name my-app --destination .. --sdk-root "$PWD"
+  cd ../my-app && tan build
 
   # WORKING ON THE SDK ITSELF -- contributor commands, not part of building
   # your firmware. native_sim is reachable only through west, for the same

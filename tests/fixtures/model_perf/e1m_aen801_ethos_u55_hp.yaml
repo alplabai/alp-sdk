@@ -1,0 +1,56 @@
+# A schema- and semantic-check-clean model-perf-v1 point (issue #1520).
+#
+# NOT a real bench capture -- src_sha/latency/SRAM values here are
+# illustrative, chosen only to exercise every rule
+# `scripts/validate_metadata.py::_check_model_perf_semantics()` enforces.
+# The sku/hw_rev/target/core combination IS real (E1M-AEN801's real
+# ethos-u55-256 target, paired to its real m55_hp core -- see
+# `metadata/e1m_modules/E1M-AEN801.yaml` and
+# `metadata/socs/alif/ensemble/e8.json`), so this fixture proves the
+# checks accept a genuine SKU/target/hw_rev combination, not just a
+# self-consistent synthetic one. hw_rev is `r1` -- the only E1M-AEN801
+# bench unit actually on hand per `metadata/e1m_modules/E1M-AEN801.yaml`'s
+# BRD_I2C comment -- so this illustrative body can't be mistaken for a
+# real capture off a board that doesn't exist on the bench.
+#
+# `tests/scripts/test_model_perf_metadata.py` loads this as the base body
+# and writes it (at a freshly-computed identity-hash path -- see that
+# file) under a tmp_path metadata_root for every test, including a
+# one-field mutation per rule.  This file itself is never placed under
+# metadata/model_perf/ -- that tree stays empty (see
+# metadata/model_perf/README.md) and refuses any `_fixture`-named path.
+
+schema_version: 1
+sku: E1M-AEN801
+hw_rev: r1
+
+model:
+  name: person_detect_int8_v1
+  src_sha: "70b793a65f456dfeb04327687dd930de5ac744c349ee9b541815017b191408aa"
+  format: tflite
+
+target:
+  backend: ethos_u
+  accel_config: ethos-u55-256
+  core: m55_hp
+  compiler_version: "vela 4.1.0"
+
+vela:
+  system_config: Ethos_U55_High_End_Embedded
+  memory_mode: Sram_Only
+
+perf:
+  req_sram_kib: 384
+  arena_bytes: 300000
+  latency_ms:
+    mean: 12.4
+    p50: 12.1
+    p95: 15.8
+    stdev: 1.9
+    runs: 200
+
+capture:
+  date: "2026-08-20"
+  operator: alpCaner
+  bench_id: e1m-aen-evk-01
+  notes: "illustrative fixture body -- not a real bench capture"

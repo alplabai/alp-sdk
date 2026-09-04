@@ -11,7 +11,17 @@
  * never collides with a real `renesas,rz-mhu-mbox` node and stays a clean `west update`.
  * It is otherwise a structural copy of mbox_renesas_rz_mhu.c: same MBOX class API shape,
  * same tx-mask/rx-mask/channels-count channel model, same busy-wait-before-send behaviour.
- * BENCH-UNVERIFIED. See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * VERIFICATION STATUS (alp-sdk #697, E1M-X V2N-M1 silicon, via this exact driver + DT node --
+ * see examples/multicore/rpmsg-v2n/m33_sm/src/main.c and the board DTS
+ * (zephyr/boards/alp/e1m_v2n101_m33_sm/*_cm33.dts)):
+ *   - Init/attach and the A55->M33 receive path are silicon-proven: R_MHU_NS5.MSG raises the
+ *     M33's own NVIC IRQ 293 and is delivered correctly.
+ *   - mbox_send() (M33->A55) is UNEXERCISED and does NOT reach the A55 on this topology: the
+ *     NS-channel RSP interrupt it raises (R_MHU_NS5.RSP) routes to no A55 GIC line -- the A55
+ *     GIC only receives the MHU-B CA55-routed SWINT units 12-15 (INTID 436-439 / GIC_SPI
+ *     404-407). The working M33->A55 path in examples/multicore/rpmsg-v2n is a direct SWINT
+ *     unit 12 SET write, not this driver's mbox_send().
+ * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ============================================================================
  */
 

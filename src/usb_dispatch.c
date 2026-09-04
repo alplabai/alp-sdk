@@ -26,6 +26,10 @@
 #include "backends/usb/usb_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(usb);
+/* Pull the usb registry section into a static-archive link (#368,
+ * needed once #1141 wires this dispatcher into the Yocto plain-CMake
+ * build). */
+ALP_BACKEND_ANCHOR(usb);
 
 #include "alp_z_last_error.h"
 
@@ -144,11 +148,12 @@ alp_usb_device_write(alp_usb_dev_t *h, const uint8_t *data, size_t len, uint32_t
 	if (data == NULL && len > 0) return ALP_ERR_INVAL; /* param check before gate */
 	/* Counted via alp_handle_op_enter/leave (issue #629): write() can
 	 * block up to timeout_ms draining the transfer, so
-	 * alp_usb_device_close() drains this op with the sleep-poll
-	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
-	 * instead of the busy-spin alp_handle_begin_close() -- generalised
-	 * from rpc_dispatch.c's _rpc_op_enter()/_rpc_begin_close()/
-	 * _rpc_drain() (GHSA-xhm8). */
+	 * alp_usb_device_close() drains this op with
+	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c),
+	 * which sleeps between polls instead of busy-spinning (issue #1114:
+	 * unsafe regardless of op duration) -- generalised from
+	 * rpc_dispatch.c's _rpc_op_enter()/_rpc_begin_close()/_rpc_drain()
+	 * (GHSA-xhm8). */
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
@@ -260,7 +265,7 @@ void alp_usb_host_close(alp_usb_host_t *h)
 	/* begin_close CAS OPEN->CLOSING then spins until every op that
 	 * entered before the CAS has left -- see alp_slot_claim.h (#629).
 	 * Idempotent: a second/never-opened close no-ops. */
-	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) return;
+	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) return;
 	if (h->state.ops != NULL && h->state.ops->host_close != NULL) {
 		h->state.ops->host_close(&h->state);
 	}

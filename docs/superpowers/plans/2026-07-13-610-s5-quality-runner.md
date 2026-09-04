@@ -1,6 +1,13 @@
 # #610 §5 slice 2 — `alp quality` profile runner + JSON/SARIF/JUnit
 
-> REQUIRED SUB-SKILL: subagent-driven-development / executing-plans.
+> **Historical transcript.** Implementation plan dated 2026-07-13. The
+> SDK has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as a
+> live task list; kept for implementation-history rationale only.
+
+> REQUIRED SUB-SKILL: subagent-driven-development / executing-plans. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** A runner that reads `metadata/quality-tasks-v1.json`, runs the tasks for a named profile (quick/pr/full/release), and emits a human summary + JSON + JUnit + SARIF. Completes the §5 acceptance criterion ("one task registry drives local + CI profiles, emits JSON/SARIF/JUnit"). Builds on §5 slice 1 (registry + loader, already on dev).
 

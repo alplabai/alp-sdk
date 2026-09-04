@@ -16,7 +16,9 @@ config ALP_SDK_V2N_SUPERVISOR
 	  counter peripheral on V2N is reached via the GD32 IO MCU
 	  bridge.  The singleton lazy-initialises on first peripheral
 	  open() under a shared mutex and re-uses the same gd32g553_t
-	  context across every backend call.
+	  context across every backend call.  See
+	  docs/adr/0024-v2n-analog-and-counter-classes-stay-on-the-gd32-bridge.md
+	  for why no native RZ/V2N leg exists alongside it.
 
 	  Set CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID and / or
 	  CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID to the alp_spi /

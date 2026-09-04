@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-`_emit_cross_core_shmem_cache` -- CONFIG_DCACHE=n for a `raw_shmem` IPC
-carve-out, independent of the Ethos-U inference path (PR #1080 follow-up).
+`_emit_cross_core_shmem_cache` -- CONFIG_DCACHE=n for a `raw_shmem` or
+`rpmsg` IPC carve-out, independent of the Ethos-U inference path (PR #1080
+follow-up; #1088 extends the mechanism to `rpmsg`).
 
 Before this, CONFIG_DCACHE=n was only ever emitted inside
 `_emit_inference`'s Ethos-U branch, so a non-inference cross-core project
@@ -10,16 +11,21 @@ and had to hand-write the line -- silently correct today, but a trap for
 the next example that forgets to.  These tests pin the widened behaviour:
 
   * a `raw_shmem` endpoint gets CONFIG_DCACHE=n,
+  * a `rpmsg` endpoint now gets CONFIG_DCACHE=n too (#1088) -- NOT because
+    `<alp/rpc.h>` grew cache maintenance (it still hasn't; `cfg->cacheable`
+    is still stored and never read in src/backends/rpc/{zephyr,yocto}
+    _drv.c) -- this is the conservative mitigation: force the D-cache off
+    since nothing else closes the hazard,
   * `mailbox_only` does NOT (no shared memory to keep coherent),
-  * `rpmsg` does NOT either -- NOT because `<alp/rpc.h>` handles cache
-    maintenance (it doesn't; that gap is #1088, tracked separately) --
-    but because forcing every rpmsg slice's D-cache off here would be an
-    unreviewed fix for a different code path than the one this function
-    closes,
-  * an explicit `cacheable: true` opts back out (the app owns cache ops),
+  * an explicit `cacheable: true` opts a `raw_shmem` entry back out (the
+    app owns cache ops); `rpmsg` has no such opt-out -- the loader
+    (test_orchestrate_loader.py) rejects `cacheable: true` on a `rpmsg`
+    entry outright, so no IpcEntry reaching this function ever has
+    kind="rpmsg" and cacheable=True in the real pipeline,
   * a core that isn't a named endpoint is untouched,
   * a project with BOTH an rpmsg entry and a raw_shmem entry on the same
-    core only fires for the raw_shmem one,
+    core still emits exactly one CONFIG_DCACHE=n (dedup, not two kinds
+    fighting),
   * no duplicate line when the Ethos-U branch already asserted it -- both
     a hand-fed `existing_lines` case and a real end-to-end call through
     `_emit_inference` first, the actual `_slice_alp_conf` call order.
@@ -39,8 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from alp_orchestrate import kconfig as K  # noqa: E402
 from alp_orchestrate.models import IpcEntry, Slice  # noqa: E402
-
-_MR = K.METADATA_ROOT
+from alp_orchestrate.paths import METADATA_ROOT as _MR  # noqa: E402
 
 
 def _project(ipc: list[IpcEntry]) -> types.SimpleNamespace:
@@ -71,25 +76,29 @@ def test_non_endpoint_core_untouched():
     assert K._emit_cross_core_shmem_cache(_project(ipc), _slice("a32_cluster"), []) == []
 
 
-def test_rpmsg_kind_excluded():
-    # Not because rpc.h handles cache maintenance for rpmsg -- it doesn't
-    # (#1088). Excluded because forcing the whole core's D-cache off here
-    # would be an unreviewed fix for a different code path than the one
-    # this function closes.
+def test_rpmsg_endpoint_gets_dcache_off():
+    # #1088: rpmsg now gets the same conservative CONFIG_DCACHE=n
+    # raw_shmem already had -- not because <alp/rpc.h> grew cache
+    # maintenance (it hasn't), but because nothing else closes the
+    # hazard, so the SDK's zero-effort-safe default applies here too.
     ipc = [IpcEntry(name="alp_default_rpmsg", kind="rpmsg",
                      endpoints=["a32_cluster", "m55_hp"], carve_out_kb=256)]
-    assert K._emit_cross_core_shmem_cache(_project(ipc), _slice("m55_hp"), []) == []
+    assert "CONFIG_DCACHE=n" in K._emit_cross_core_shmem_cache(
+        _project(ipc), _slice("m55_hp"), [])
 
 
-def test_mixed_raw_shmem_and_rpmsg_only_fires_for_raw_shmem():
+def test_mixed_raw_shmem_and_rpmsg_dedups_to_one_line():
+    # Both kinds now trigger the guard; the dedup check (against
+    # `existing_lines`, then within this call's own return) keeps it to
+    # exactly one CONFIG_DCACHE=n rather than one per matching entry.
     ipc = [
         IpcEntry(name="alp_default_rpmsg", kind="rpmsg",
                  endpoints=["a32_cluster", "m55_hp"], carve_out_kb=256),
         IpcEntry(name="alp_shmem0", kind="raw_shmem",
                  endpoints=["m55_hp", "m55_he"], carve_out_kb=4),
     ]
-    assert "CONFIG_DCACHE=n" in K._emit_cross_core_shmem_cache(
-        _project(ipc), _slice("m55_hp"), [])
+    lines = K._emit_cross_core_shmem_cache(_project(ipc), _slice("m55_hp"), [])
+    assert lines.count("CONFIG_DCACHE=n") == 1
 
 
 def test_mailbox_only_kind_excluded():
@@ -132,7 +141,8 @@ def test_dedup_against_real_emit_inference_output():
     ipc = [IpcEntry(name="alp_shmem0", kind="raw_shmem",
                      endpoints=["m55_hp", "m55_he"], carve_out_kb=4)]
     project = types.SimpleNamespace(
-        soc_spec=soc_spec, som_preset=som, sku="E1M-AEN801", ipc=ipc)
+        soc_spec=soc_spec, som_preset=som, sku="E1M-AEN801", ipc=ipc,
+        effective_metadata_root=lambda: _MR)
     slice_ = Slice(core_id="m55_hp", os="zephyr", inference={"default_arena_kib": 256})
 
     inference_lines = K._emit_inference(project, slice_, som.get("silicon"))

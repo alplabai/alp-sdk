@@ -19,15 +19,27 @@ static alp_status_t br_open(const alp_counter_config_t  *cfg,
                             alp_counter_backend_state_t *st,
                             alp_capabilities_t          *caps_out)
 {
-	if (cfg->counter_id >= 1u) return ALP_ERR_INVAL; /* bridge: only id 0 */
+	/* include/alp/e1m_x_pinout.h publishes COUNTER0..3 as E1M-X
+	 * connector identities -- a form-factor bound, not a per-SoM
+	 * promise (alp-sdk#1242) -- and the V2N/V2M bridge serves only
+	 * id 0.  NOSUPPORT (not INVAL) matches this backend's own
+	 * alp_counter_us_to_ticks / alp_counter_set_alarm convention for a
+	 * bridge limitation ("this SoM doesn't serve that"), rather than
+	 * "you passed a bad argument".  caps_out->channel_count below
+	 * (same field src/backends/adc/gd32_bridge.c populates) publishes
+	 * the served count via alp_counter_capabilities() so a customer
+	 * can discover it after opening COUNTER0, before hitting this on
+	 * COUNTER1..3. */
+	if (cfg->counter_id >= GD32G553_BRIDGE_COUNTER_CHANNELS) return ALP_ERR_NOSUPPORT;
 	gd32g553_t  *ctx = NULL;
 	alp_status_t s   = alp_z_v2n_supervisor_acquire(&ctx);
 	if (s != ALP_OK) return s;
 	alp_z_v2n_supervisor_release();
-	st->dev         = NULL; /* bridge sentinel */
-	st->counter_id  = cfg->counter_id;
-	st->be_data     = NULL;
-	caps_out->flags = 0u; /* no HW_ALARM via bridge */
+	st->dev                 = NULL; /* bridge sentinel */
+	st->counter_id          = cfg->counter_id;
+	st->be_data             = NULL;
+	caps_out->flags         = 0u;                               /* no HW_ALARM via bridge */
+	caps_out->channel_count = GD32G553_BRIDGE_COUNTER_CHANNELS; /* alp-sdk#1242 */
 	return ALP_OK;
 }
 

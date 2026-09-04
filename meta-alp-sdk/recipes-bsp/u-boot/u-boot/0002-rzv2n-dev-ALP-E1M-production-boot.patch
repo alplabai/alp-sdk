@@ -1,80 +1,45 @@
-From d6e704eab2c7a8afbcce8eecbad1177cb8846706 Mon Sep 17 00:00:00 2001
+From 023b67a44b2d0fed75c912c6685853a2f3b3a2e6 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
-Date: Sun, 2 Aug 2026 22:36:58 +0000
+Date: Fri, 12 Jun 2026 13:47:22 +0200
 Subject: [PATCH] rzv2n-dev: ALP E1M production boot: eMMC 1.8 V rail + pinned
- console + boot dtb fix
+ console
 
-Four build-gated ALP E1M additions:
+Two build-gated ALP E1M additions:
 
 CONFIG_ALP_E1M_EMMC_1V8 (default y for rzv2n-dev): drive eMMC_V_SEL
 (PA0) high in board_init, which runs before initr_mmc/initr_env in
-init_sequence_r, so VccQ is a stable 1.8 V before the first MMC
-access.  The E1M SoM's eMMC/SD0 IO rail powers up at 3.3 V
-(on-module pull-down) and eMMC has no live voltage-switch handshake
--- VccQ is fixed from card init -- so the whole chain (U-Boot env
-load, kernel load, Linux) must run the card at 1.8 V from the start.
-Pairs with the Linux-side PA0 gpio-hog in e1m-v2n-som.dtsi.
+init_sequence_r -- the E1M SoM's eMMC/SD0 IO rail powers up at 3.3 V
+from an on-module pull-down, and eMMC defines VccQ as fixed from card
+init with no live voltage-switch handshake.  With the rail parked at
+1.8 V before the first MMC access, U-Boot's own environment load and
+kernel load run the card at its proper signaling voltage and the card
+never sees a VccQ transition; Linux re-asserts the same level via a
+gpio-hog.  Not enabled for stock Renesas boards whose SD0 channel may
+carry a 3.3 V SD card.
 
-CONFIG_ALP_PROD_BOOT (default n, DEV-target only): rebuild the kernel
-cmdline for production -- console=ttySC0,115200 pinned, quiet
-loglevel=4, earlycon dropped.  The dev cmdline keeps earlycon but
-also gains the pinned console=, which stops the kernel replaying its
-early log across the console handover.  Pair with CONFIG_BOOTDELAY=0
-+ CONFIG_AUTOBOOT_KEYED (the ALP prod-boot.cfg fragment).
-
-Both cmdlines are rebuilt at CONFIG_BOOTCOMMAND rather than by
-editing the env block: that block is patched by optional vendor
-feature layers (meta-rz-drpai add-ether) and varies per build, so the
-stable CONFIG_BOOTCOMMAND line is the only patch-safe hook.
-
-CONFIG_ALP_FDT_FILE + CONFIG_ALP_SD_ROOT (per-MACHINE strings,
-DEV-target only): fix issue #1175 -- microSD is the only deployment
-path on the EVK (strapped for xSPI boot, carrier Ethernet dead per
-errata E1), and a self-built image did not boot.  Three defects,
-all in the CONFIG_BOOTCOMMAND override:
-
-(1) Wrong dtb filename, on BOTH media.  The vendor env (untouched,
-    patch-safe) hardcodes boot/r9a09g056n44-dev.dtb in sd2load AND in
-    emmcload -- a filename no ALP image builds, since each E1M
-    MACHINE emits its own named board dtb via KERNEL_DEVICETREE.  So
-    both branches now reload the correct per-MACHINE dtb
-    (CONFIG_ALP_FDT_FILE, injected by a .cfg fragment, same channel
-    as prod-boot.cfg) after the env-default wipe and after
-    bootcmd_check has run.  eMMC is fixed alongside SD: it is the
-    ALP_BOOT_DEVICE default in every E1M machine conf and it was
-    broken in exactly the same way, so fixing only SD would leave the
-    default path dead.
-
-(2) The failed load was silent.  Hush does not abort a ';' list on a
-    failed builtin (common/cli_hush.c run_list_real early-exits only
-    on rcode < -1), so control reached "run bootimage" regardless --
-    and on a card still carrying a vendor r9a09g056n44-dev.dtb that
-    boots the vendor EVK devicetree on ALP hardware.  The reload is
-    now inside "if ext4load ...; then ... else echo ...; fi" and a
-    miss does not boot.
-
-(3) Wrong microSD root.  The SD branch set root=/dev/mmcblk2p2
-    (mirrored from the vendor prodsdbootargs); the ALP board DT
-    enables exactly two MMC hosts and states the carrier card is
-    /dev/mmcblk1p2 (e1m-x-evk.dtsi:88-89).  Now CONFIG_ALP_SD_ROOT,
-    whose default is the vendor value, so only machines that get an
-    ALP .cfg fragment change behaviour.  NOT bench-confirmed: the SD
-    boot path appears never to have been exercised on real hardware.
-    The eMMC root (/dev/mmcblk0p2) is unchanged.
+CONFIG_ALP_PROD_BOOT (default n, DEV-target only -- the rzv2n-evk.h
+config has no override): rebuild the kernel cmdline with the
+production settings (console=ttySC0,115200 + quiet loglevel=4,
+earlycon dropped); the dev cmdline keeps earlycon but gains the pinned
+console=, which stops the kernel replaying the early log across the
+console handover.  The cmdline is rebuilt at CONFIG_BOOTCOMMAND rather
+than by editing the env block: that block is patched by optional
+vendor feature layers (meta-rz-drpai add-ether) and varies per build,
+so the stable CONFIG_BOOTCOMMAND line is the only patch-safe hook.
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- board/renesas/rzv2n-dev/Kconfig     | 60 +++++++++++++++++++++++++++++
- board/renesas/rzv2n-dev/rzv2n-dev.c | 11 ++++++
+ board/renesas/rzv2n-dev/Kconfig     | 24 ++++++++++++++++++++++++
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 11 +++++++++++
  configs/rzv2n-dev_defconfig         |  1 +
- include/configs/rzv2n-dev.h         | 77 ++++++++++++++++++++++++++++++++++++-
- 4 files changed, 148 insertions(+), 1 deletion(-)
+ include/configs/rzv2n-dev.h         | 71 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 4 files changed, 107 insertions(+), 1 deletion(-)
 
 diff --git a/board/renesas/rzv2n-dev/Kconfig b/board/renesas/rzv2n-dev/Kconfig
-index 4ef61be..74b3ba4 100644
+index 4ef61be..bfabe66 100644
 --- a/board/renesas/rzv2n-dev/Kconfig
 +++ b/board/renesas/rzv2n-dev/Kconfig
-@@ -30,3 +30,63 @@ config SYS_CONFIG_NAME
+@@ -30,3 +30,27 @@ config SYS_CONFIG_NAME
  
  endif
  
@@ -103,41 +68,25 @@ index 4ef61be..74b3ba4 100644
 +	  rebuild lives in include/configs/rzv2n-dev.h; rzv2n-evk.h has
 +	  no override, so the symbol would half-apply there.
 +
-+config ALP_FDT_FILE
-+	string "ALP E1M: boot dtb filename (per-MACHINE)"
++config ALP_E1M_FDTFILE
++	string "ALP E1M: board dtb filename loaded from the boot partition"
 +	depends on TARGET_RZV2N_DEV
-+	default "r9a09g056n44-dev.dtb"
++	default "e1m-v2n101-x-evk.dtb"
 +	help
-+	  Devicetree blob filename CONFIG_BOOTCOMMAND
-+	  (include/configs/rzv2n-dev.h) (re)loads from boot/ on the
-+	  rootfs partition -- on BOTH the microSD and the eMMC branch,
-+	  on top of whatever the vendor sd2load / emmcload env already
-+	  loaded.  Both of those env vars hardcode
-+	  boot/r9a09g056n44-dev.dtb, a name no ALP image builds: each
-+	  E1M MACHINE emits its own board dtb via KERNEL_DEVICETREE
-+	  (e.g. renesas/e1m-v2n101-x-evk.dtb vs
-+	  renesas/e1m-v2m101-x-evk.dtb -- see the four
-+	  conf/machine/e1m-v2{n,m}10{1,2}-a55.conf), so this is set
-+	  per-MACHINE by a .cfg fragment merged into the defconfig (same
-+	  channel as prod-boot.cfg) -- see the u-boot_%.bbappend.  The
-+	  default is the vendor filename verbatim, so a build with no
-+	  ALP fragment (a plain rzv2n-dev build, or the stock rzv2n-evk
-+	  MACHINE, which this BSP also builds with rzv2n-dev_defconfig)
-+	  reloads exactly what the vendor env already loaded.
++	  Basename of the board device tree CONFIG_BOOTCOMMAND loads from
++	  boot/ on the rootfs partition.  It must match the MACHINE's
++	  KERNEL_DEVICETREE basename, because that is the only dtb the
++	  image actually contains.
 +
-+config ALP_SD_ROOT
-+	string "ALP E1M: root device for the microSD boot branch"
-+	depends on TARGET_RZV2N_DEV
-+	default "/dev/mmcblk2p2"
-+	help
-+	  Root block device CONFIG_BOOTCOMMAND puts on the kernel
-+	  cmdline when it boots from the carrier microSD.  The default
-+	  is the vendor prodsdbootargs value verbatim, so a build with
-+	  no ALP .cfg fragment is unchanged; the ALP E1M fragments set
-+	  /dev/mmcblk1p2 (see include/configs/rzv2n-dev.h for why, and
-+	  the u-boot_%.bbappend for which MACHINE gets which).  The
-+	  eMMC branch is not configurable -- ALP and vendor agree on
-+	  /dev/mmcblk0p2.
++	  The default suits the V2N SKUs.  V2M SKUs build
++	  e1m-v2m101-x-evk.dtb and MUST override this -- meta-alp-sdk
++	  injects it per-MACHINE via fdtfile-v2m.cfg.  Getting it wrong
++	  is silent: ext4load of a missing file leaves whatever dtb was
++	  already in RAM, and the board boots the wrong device tree.
++
++	  Set the basename only.  KERNEL_DEVICETREE carries a "renesas/"
++	  prefix that the deploy step strips, so the file lands at
++	  boot/<basename> on the target.
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
 index b5f159a..a20ccae 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
@@ -170,10 +119,10 @@ index 7ced1c5..e04099d 100644
  
 +CONFIG_ALP_E1M_EMMC_1V8=y
 diff --git a/include/configs/rzv2n-dev.h b/include/configs/rzv2n-dev.h
-index ad8f46a..25f90db 100644
+index ad8f46a..ac562a9 100644
 --- a/include/configs/rzv2n-dev.h
 +++ b/include/configs/rzv2n-dev.h
-@@ -70,7 +70,82 @@
+@@ -70,7 +70,76 @@
  	"sd2load=ext4load mmc 1:2 0x48080000 boot/Image;ext4load mmc 1:2 0x48000000 boot/r9a09g056n44-dev.dtb;run prodsdbootargs \0" \
  	"bootcmd_check=if mmc dev 1; then run sd2load; else run emmcload; fi \0"
  
@@ -192,68 +141,86 @@ index ad8f46a..25f90db 100644
 + * (e.g. meta-rz-drpai add-ether) and its contents vary per build, so
 + * an override at this stable line is the only patch-safe hook.  The
 + * vendor prodsd/prodemmcbootargs still run inside *load but are
-+ * deliberately overridden (left untouched for patch safety).
++ * deliberately overridden (left untouched for patch safety).  The
++ * sd-vs-emmc root choice mirrors bootcmd_check.
 + *
-+ * Per-SKU dtb (issue #1175): BOTH vendor loaders -- sd2load AND
-+ * emmcload (above, untouched) -- hardcode boot/r9a09g056n44-dev.dtb,
-+ * a filename no ALP image ever builds; every E1M MACHINE emits its
-+ * own named board dtb via KERNEL_DEVICETREE (e.g.
-+ * renesas/e1m-v2n101-x-evk.dtb).  That ext4load therefore fails on
-+ * EITHER medium and 0x48000000 keeps whatever was already there, so
-+ * both branches are fixed the same way: reload CONFIG_ALP_FDT_FILE
-+ * from the same device the vendor branch used, AFTER the leading
-+ * "env default -a" wipe and AFTER bootcmd_check has run (both
-+ * untouched, patch-safe).  Overwriting the FDT already at
-+ * 0x48000000 is safe: the blob's length comes from its own header,
-+ * and it sits 512 KB below the Image at 0x48080000.
++ * SD + eMMC dtb: the vendor sd2load env (above, untouched for patch
++ * safety) loads "boot/r9a09g056n44-dev.dtb" -- a name none of our
++ * KERNEL_DEVICETREE builds ever produce (V2N101 and V2N102 both build
++ * renesas/e1m-v2n101-x-evk.dtb today -- see
++ * meta-alp-sdk/conf/machine/e1m-v2n10{1,2}-a55.conf.  V2N102's own
++ * conf HARDCODES this same filename at line 36 (it does not inherit
++ * it -- only one machine conf is parsed per build); that line carries
++ * a TODO to create a V2N102-specific dtb once its DDR map is
++ * confirmed, with its own note that this bootcmd must change in
++ * lockstep if that TODO ever lands); that load silently fails
++ * (";"-chained, non-fatal) and bootimage would then boot the
++ * stale/garbage dtb already in RAM.
++ * The vendor emmcload env has the identical defect.  Its body is not
++ * visible in THIS patch's own diff context (do_patch context lines
++ * stop above line 70), but is confirmed against the unpatched vendor
++ * default in the RZ/V AI SDK BSP source package,
++ * meta-rz-features/meta-rz-codecs/recipes-bsp/u-boot/files/
++ * 0001-Add-OpenCVA-and-Codec-for-V2N.patch (the "-" / pre-patch context
++ * lines, rzv2n-dev.h hunk):
++ *   "emmcload=ext4load mmc 0:2 0x48080000 boot/Image;ext4load mmc 0:2
++ *   0x48000000 boot/r9a09g056n44-dev.dtb;run prodemmcbootargs \0"
++ * -- i.e. Image at 0x48080000, dtb at 0x48000000, partition 2, exactly
++ * mirroring sd2load with the eMMC device index (SDHI0=mmc0 vs SD's
++ * SDHI1=mmc1).  The same vendor patch's "bootimage" line confirms
++ * 0x48000000 is the dtb address independent of which *load ran:
++ * "bootimage=booti 0x48080000 - 0x48000000 \0" -- booti's 3rd arg is
++ * the fdt address, so this is proof by consumer, not just by the
++ * *load producer.  meta-rz-codecs IS in our layer set
++ * (meta-alp-sdk/conf/layer.conf), so its "+" side (which prepends
++ * ${ocaaddr}/${codaddr} OpenCVA/Codec loads to emmcload/sd2load) is
++ * what actually ships, not the pristine form quoted above -- the
++ * 0x48080000/0x48000000/partition-2 values are unchanged by that
++ * rewrite, only extra loads are prepended.  Re-load the correct dtb
++ * on BOTH branches here instead, overwriting whatever sd2load/emmcload
++ * staged before bootimage runs, same address + mmc spec each already
++ * uses (0x48000000, "mmc 1:2" / "mmc 0:2").
++ * alp_root for the SD branch is also corrected: mmc1 is the carrier
++ * microSD (SDHI1, alias mmc1 in e1m-x-evk.dtsi) -> Linux /dev/mmcblk1,
++ * not mmcblk2 (no third controller exists on this SoM).  mmc0 (SDHI0
++ * eMMC) -> mmcblk0 was already correct.
++ * Per-SKU dtb: done, via CONFIG_ALP_E1M_FDTFILE (a Kconfig string
++ * injected per-MACHINE by a .cfg fragment, the same channel
++ * prod-boot.cfg uses).  It is a BUILD-time selection, which is correct
++ * while one MACHINE produces one image.  An EEPROM-manifest-derived
++ * fdtfile -- one image booting on several SKUs -- remains future work
++ * and would have to be set AFTER the leading "env default -a" wipe. */
++/* ALP: the dtb basename is a per-SKU Kconfig string, not a literal.
++ * V2N SKUs build e1m-v2n101-x-evk.dtb and V2M SKUs build
++ * e1m-v2m101-x-evk.dtb (meta-alp-sdk/conf/machine/e1m-v2{n,m}10*-a55.conf,
++ * each of which carries its own "the U-Boot bootcmd must load this
++ * filename" note).  A hardcoded name meant every V2M image asked for a
++ * file it does not contain. */
++
++/* ALP: the loads are now FATAL, and that is the point of this block.
++ * Every load here used to be ';'-chained, i.e. non-fatal: a missing
++ * kernel Image or a missing dtb left whatever those addresses already
++ * held and "run bootimage" then booted it.  On a cold boot that is
++ * garbage; on a warm one it is the PREVIOUS boot's image, which is
++ * worse -- it looks like a successful boot of the wrong software.
++ * Both loads are re-issued here with '&&' so bootimage is reached only
++ * when both landed, and the failure branch stops at the prompt instead.
 + *
-+ * The reload is GUARDED because hush does not abort a ';' list when a
-+ * builtin fails -- common/cli_hush.c run_list_real only early-exits
-+ * on rcode < -1, and a failed command returns CMD_RET_FAILURE (1).
-+ * Unguarded, a failed reload would fall through to "run bootimage"
-+ * and boot whatever DT is in RAM; on a card that still carries the
-+ * vendor boot/r9a09g056n44-dev.dtb (sd2load's own load SUCCEEDS)
-+ * that means booting the vendor EVK devicetree on ALP hardware.
-+ * Only THIS reload is guarded.  bootcmd_check's own Image load
-+ * (sd2load / emmcload, vendor, untouched above) has no such guard --
-+ * hush does not abort on its failure either -- so a failed Image
-+ * load with a successful dtb reload still falls through to
-+ * "booti 0x48080000 - 0x48000000".  Same ext4 partition as the dtb,
-+ * so a load that fails for one and succeeds for the other is
-+ * unlikely, and it is a pre-existing vendor gap this patch leaves
-+ * alone: not booting on a bad dtb is the failure this hunk fixes.
-+ *
-+ * microSD root device: the vendor prodsdbootargs uses
-+ * root=/dev/mmcblk2p2, which does not match this carrier.  What
-+ * supports /dev/mmcblk1p2 is the board DT itself: it enables exactly
-+ * two MMC hosts -- &sdhi0 (on-module eMMC) and &sdhi1 (carrier
-+ * microSD) -- and states outright that the bench dev image roots the
-+ * carrier card from /dev/mmcblk1p2 (e1m-x-evk.dtsi:88-89).  The
-+ * mmc0/mmc1 aliases are NOT the argument: an alias fixes the host
-+ * index (of_alias_get_id), while the mmcblkN name is allocated from
-+ * an ida in probe order (drivers/mmc/core/block.c).  NOT
-+ * bench-confirmed either way -- the SD boot path appears never to
-+ * have been exercised on real hardware; one console boot settles it.
-+ * The value is CONFIG_ALP_SD_ROOT so that a build with no ALP .cfg
-+ * fragment (stock rzv2n-evk) keeps the vendor default.
-+ *
-+ * The eMMC branch keeps root=/dev/mmcblk0p2 -- vendor and ALP agree
-+ * there -- but note eMMC was NOT a working path either before this
-+ * patch: emmcload loads the same non-existent dtb name, so a
-+ * self-built ALP image did not boot from eMMC any more than from SD.
-+ * Neither medium is bench-confirmed with a self-built image. */
++ * Re-loading Image is deliberate even though bootcmd_check's vendor
++ * sd2load/emmcload already tried: those envs are patched by vendor
++ * feature layers (meta-rz-drpai, meta-rz-opencva) and cannot be relied
++ * on to fail loudly.  Same address and same mmc spec each already uses,
++ * so the re-load is idempotent when the vendor path worked. */
 +#define CONFIG_BOOTCOMMAND	"env default -a;run bootcmd_check;" \
 +	"if mmc dev 1; then " \
-+		"setenv alp_mmc 1;setenv alp_root " CONFIG_ALP_SD_ROOT ";" \
-+	"else " \
-+		"setenv alp_mmc 0;setenv alp_root /dev/mmcblk0p2;" \
-+	"fi;" \
-+	"if ext4load mmc ${alp_mmc}:2 0x48000000 boot/" CONFIG_ALP_FDT_FILE "; then " \
-+		"setenv bootargs " ALP_BOOTARGS_BASE " root=${alp_root};" \
-+		"run bootimage;" \
-+	"else " \
-+		"echo ALP: boot/" CONFIG_ALP_FDT_FILE " missing on mmc ${alp_mmc}:2 -- refusing to boot a stale devicetree;" \
-+	"fi"
++	"setenv alp_mmc 1:2;setenv alp_root /dev/mmcblk1p2; else " \
++	"setenv alp_mmc 0:2;setenv alp_root /dev/mmcblk0p2; fi;" \
++	"if ext4load mmc ${alp_mmc} 0x48080000 boot/Image" \
++	" && ext4load mmc ${alp_mmc} 0x48000000 boot/" CONFIG_ALP_E1M_FDTFILE "; then " \
++	"setenv bootargs " ALP_BOOTARGS_BASE " root=${alp_root};" \
++	"run bootimage; fi;" \
++	"echo ALP: kernel Image or " CONFIG_ALP_E1M_FDTFILE " failed to load" \
++	" from boot/ on mmc ${alp_mmc} -- NOT booting a stale RAM image"
  
  /* For board */
  /* Ethernet RAVB */

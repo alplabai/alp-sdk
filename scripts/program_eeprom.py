@@ -47,9 +47,14 @@ MAGIC = 0x414C5048   # 'ALPH'
 SCHEMA_VERSION = 1
 
 # Field length budgets -- must match the constants in
-# include/alp/hw_info.h.  A drift between this file and the header
-# is caught by the manifest size assertion below + by the C
-# _Static_assert at compile time.
+# include/alp/hw_info.h.  A per-field drift here (e.g. a zero-sum
+# swap between two of these that leaves the 128-byte total
+# unchanged) is caught by scripts/check_board_id_doc_parity.py,
+# which resolves both this file's constants and the header's
+# ALP_HW_INFO_*_LEN macros and diffs them.  The manifest size
+# assertion below + the header's C _Static_assert only catch a
+# change to the overall 128-byte budget, not a per-field offset
+# shift within it.
 FAMILY_LEN = 16
 SKU_LEN = 24
 HW_REV_LEN = 8

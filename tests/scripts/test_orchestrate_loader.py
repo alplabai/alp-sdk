@@ -154,6 +154,24 @@ def test_load_board_yaml_rejects_unknown_core(tmp_path: Path) -> None:
     assert "did you mean" in msg.lower()
 
 
+def test_load_board_yaml_rejects_duplicate_top_level_key(tmp_path: Path) -> None:
+    """#1127: a repeated `som:` key must FAIL the load, not silently keep
+    only the last value (`yaml.safe_load` does that with no error)."""
+    path = _write_board(tmp_path, """
+som:
+  sku: E1M-AEN801
+som:
+  sku: E1M-V2N101
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./src
+""")
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    assert "duplicate key" in str(excinfo.value).lower()
+
+
 def test_load_board_yaml_rejects_unknown_features_key(tmp_path: Path) -> None:
     path = _write_board(tmp_path, """
 som:
@@ -288,6 +306,35 @@ def test_partial_match_raises(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------
+# 4c. #1088: `cacheable: true` on a `kind: rpmsg` entry has no
+#     cache-maintenance implementation behind it -- reject at load time
+# ---------------------------------------------------------------------
+
+
+def test_load_board_yaml_rejects_rpmsg_cacheable_true(tmp_path: Path) -> None:
+    """`cfg->cacheable` is stored on the rpc backend struct
+    (src/backends/rpc/{zephyr,yocto}_drv.c) and never read again -- no
+    `sys_cache_*` call exists anywhere under src/ or include/.  A
+    `cacheable: true` rpmsg entry would therefore select a code path
+    that promises coherency it can't deliver, which is worse than no
+    flag at all, so the loader refuses it outright rather than
+    silently honouring it."""
+    body = V2N_HAPPY.replace(
+        "    name: alp_default_rpmsg\n",
+        "    name: alp_default_rpmsg\n    cacheable: true\n",
+    )
+    assert "cacheable: true" in body  # guard against a silent no-op replace
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "alp_default_rpmsg" in msg
+    assert "rpmsg" in msg
+    assert "cacheable: true" in msg
+    assert "1088" in msg
+
+
+# ---------------------------------------------------------------------
 # 5. _silicon_to_soc_path -- migrated onto resolve_soc_path() (issue #1004)
 # ---------------------------------------------------------------------
 
@@ -303,3 +350,319 @@ def test_silicon_to_soc_path_rejects_malformed_ref(tmp_path: Path) -> None:
     assert str(excinfo.value) == "silicon ref 'acme:widget' is not a triple-colon string"
 
 
+
+
+# ---------------------------------------------------------------------
+# 6. The wrong-board SW-DP IDR preflight pair (#1355)
+#
+# `debug.expect_dpidr` + `debug.jlink_device[<core>]` are ONE guard, and a
+# downstream flasher (tan `flash_plan.py::validate_flow_d_preflight_args`)
+# refuses a half-armed pair at plan time rather than skipping the check --
+# so the loader must never hand out one without the other, and must refuse
+# loudly when a core that genuinely flashes has lost its attach profile.
+# ---------------------------------------------------------------------
+
+
+def _e8_debug(**overrides):
+    """A resolved E8 `debug:` block, shaped exactly like the real
+    AE822FA0E5597LS0 one in metadata/socs/alif/ensemble/e8.json."""
+    block = {
+        "pyocd_target": "AE822FA0E5597LS0",
+        "jlink_device": {"m55_hp": "Cortex-M55", "m55_he": "Cortex-M55"},
+        "jlink_flash_device": "AE822FA0E5597LS0_M55_HE",
+        "expect_dpidr": "0x4C013477",
+    }
+    block.update(overrides)
+    return block
+
+
+def test_resolve_flow_d_preflight_returns_the_measured_pair() -> None:
+    from alp_orchestrate.loader import _resolve_flow_d_preflight
+
+    assert _resolve_flow_d_preflight(_e8_debug(), "m55_hp") == \
+        ("0x4C013477", "Cortex-M55")
+
+
+def test_resolve_flow_d_preflight_drops_both_when_core_has_no_profile(
+) -> None:
+    """`debug.jlink_device` is legitimately sparse: the E8's a32_cluster is
+    a Linux A-cluster, not a J-Link flash target. Returning `expect_dpidr`
+    alone for it would be the half-armed shape a flasher refuses."""
+    from alp_orchestrate.loader import _resolve_flow_d_preflight
+
+    assert _resolve_flow_d_preflight(_e8_debug(), "a32_cluster") == \
+        (None, None)
+
+
+def test_resolve_flow_d_preflight_drops_device_when_dpidr_unmeasured(
+) -> None:
+    """E1M-AEN701's shape: an attach profile, no measured DPIDR. The
+    attach profile must NOT be emitted on its own -- unarmed is safe,
+    half-armed is a hard refusal."""
+    from alp_orchestrate.loader import _resolve_flow_d_preflight
+
+    debug = _e8_debug()
+    del debug["expect_dpidr"]
+    assert _resolve_flow_d_preflight(debug, "m55_hp") == (None, None)
+
+
+def test_flow_d_preflight_pair_refuses_a_flashing_core_with_no_profile(
+) -> None:
+    """The real metadata gap this guard exists for: `expect_dpidr` is
+    published, the slice DOES take Flow D (zephyr + a part-number flash
+    profile), and its core lost its attach profile -- so the pair silently
+    collapsed to nothing and the write would proceed unguarded. Refuse,
+    naming the core and the file to fix."""
+    from alp_orchestrate.loader import _enforce_flow_d_preflight_pair
+    from alp_orchestrate.models import Slice
+
+    debug = _e8_debug()
+    del debug["jlink_device"]["m55_hp"]
+    slice_ = Slice(
+        core_id="m55_hp",
+        os="zephyr",
+        jlink_flash_device=debug["jlink_flash_device"],
+        expect_dpidr=None,
+        jlink_device=None,
+    )
+    with pytest.raises(OrchestratorError) as excinfo:
+        _enforce_flow_d_preflight_pair(slice_, debug, "E1M-AEN801")
+    msg = str(excinfo.value)
+    assert "m55_hp" in msg
+    assert "expect_dpidr" in msg
+    assert "jlink_device" in msg
+
+
+def test_flow_d_preflight_pair_allows_an_unmeasured_variant() -> None:
+    """The CONVERSE must stay legal: no `expect_dpidr` at all is the state
+    of every variant nobody has measured, and inventing one is worse than
+    leaving the guard unarmed."""
+    from alp_orchestrate.loader import _enforce_flow_d_preflight_pair
+    from alp_orchestrate.models import Slice
+
+    debug = _e8_debug()
+    del debug["expect_dpidr"]
+    del debug["jlink_device"]["m55_hp"]
+    slice_ = Slice(core_id="m55_hp", os="zephyr",
+                   jlink_flash_device=debug["jlink_flash_device"])
+    _enforce_flow_d_preflight_pair(slice_, debug, "E1M-AEN701")  # no raise
+
+
+def test_flow_d_preflight_pair_ignores_a_non_flow_d_slice() -> None:
+    """An A-core (or any slice whose variant publishes no part-number
+    flash profile) is not a Flow D target: it emits no `flash_args` a
+    preflight could half-arm, so a missing attach profile there is not a
+    gap. Checking it would fail every AEN project on `a32_cluster`."""
+    from alp_orchestrate.loader import _enforce_flow_d_preflight_pair
+    from alp_orchestrate.models import Slice
+
+    debug = _e8_debug()
+    for slice_ in (
+        Slice(core_id="a32_cluster", os="yocto",
+              jlink_flash_device=debug["jlink_flash_device"]),
+        Slice(core_id="m33_sm", os="zephyr", jlink_flash_device=None),
+    ):
+        _enforce_flow_d_preflight_pair(slice_, debug, "E1M-AEN801")  # no raise
+
+
+def test_load_board_yaml_aen801_carries_the_pair_on_both_m55s(
+    tmp_path: Path,
+) -> None:
+    """End-to-end through the real metadata: the resolved Slices, not just
+    the helpers, carry both halves."""
+    path = _write_board(tmp_path, "som:\n  sku: E1M-AEN801\ncores:\n  a32_cluster:\n    os: \"off\"\n")
+    project = load_board_yaml(path)
+    for core_id in ("m55_hp", "m55_he"):
+        slice_ = project.cores[core_id]
+        assert slice_.expect_dpidr == "0x4C013477"
+        assert slice_.jlink_device == "Cortex-M55"
+    a32 = project.cores["a32_cluster"]
+    assert a32.expect_dpidr is None
+    assert a32.jlink_device is None
+
+
+# ---------------------------------------------------------------------
+# `_resolve_slot0_load_address` (tan-cli#353) -- unit-level, independent
+# of whether any given SoC JSON currently arms `jlink_flash_device` (only
+# `_resolve_load_board_yaml`'s caller gates on that; the resolver itself
+# must be right for every SoM shape, including ones -- E1M-AEN401,
+# E1M-AEN601 -- whose SoC JSON does not arm Flow D *today*).
+# ---------------------------------------------------------------------
+
+
+def test_resolve_slot0_load_address_no_override_defaults_for_hp_role() -> None:
+    """A SoM preset with NO `memory_map:` override at all (the shape of
+    every E1M-AEN401/E1M-AEN601 preset -- both declare `m55_hp` AND
+    `m55_he` in `topology:`, but only the `m55_hp` Zephyr board tree is
+    generated today, #999) must still resolve the stock default for the
+    `hp` role, not just `he` -- the stock symmetric layout has one slot0
+    window shared by whichever core boots it."""
+    from alp_orchestrate.loader import _resolve_slot0_load_address
+
+    assert _resolve_slot0_load_address({}, "m55_hp") == "0x80010000"
+    assert _resolve_slot0_load_address({"memory_map": []}, "m55_hp") == \
+        "0x80010000"
+
+
+def test_resolve_slot0_load_address_no_override_defaults_for_he_role() -> None:
+    from alp_orchestrate.loader import _resolve_slot0_load_address
+
+    assert _resolve_slot0_load_address({}, "m55_he") == "0x80010000"
+
+
+def test_resolve_slot0_load_address_disjoint_override_per_role() -> None:
+    """E1M-AEN801's #1069 disjoint-slot0 shape: each role reads its OWN
+    declared region, not the stock default."""
+    from alp_orchestrate.loader import _resolve_slot0_load_address
+
+    preset = {"memory_map": [
+        {"name": "he_slot0", "base": 0x80010000,
+         "accessible_from": ["m55_he"]},
+        {"name": "hp_slot0", "base": 0x802B0000,
+         "accessible_from": ["m55_hp"]},
+    ]}
+    assert _resolve_slot0_load_address(preset, "m55_he") == "0x80010000"
+    assert _resolve_slot0_load_address(preset, "m55_hp") == "0x802b0000"
+
+
+def test_resolve_slot0_load_address_half_authored_override_raises() -> None:
+    """A `memory_map:` that declares a disjoint slot0 window for ONE role
+    but not its sibling is a half-authored map: `gen_zephyr_board.py`'s
+    `_aen_role_slot0_map` refuses to build a board for the undeclared
+    role (falling back to the stock default there would silently land it
+    on top of the sibling's declared window, #1069's exact bug), so the
+    manifest resolver must refuse too, not silently invent a value no
+    board was ever generated for."""
+    from alp_orchestrate.loader import _resolve_slot0_load_address
+    from alp_orchestrate.models import OrchestratorError
+
+    preset = {"memory_map": [
+        {"name": "hp_slot0", "base": 0x802B0000,
+         "accessible_from": ["m55_hp"]},
+    ]}
+    with pytest.raises(OrchestratorError):
+        _resolve_slot0_load_address(preset, "m55_he")
+
+
+def test_resolve_slot0_load_address_wrong_accessible_from_raises() -> None:
+    """A declared `<role>_slot0` region that is NOT exclusively
+    `accessible_from` its own role's core is a misdeclared disjoint
+    window (the whole point of #1069's fix is per-core exclusivity);
+    `_aen_role_slot0_map` raises rather than accept it, and so must
+    this resolver."""
+    from alp_orchestrate.loader import _resolve_slot0_load_address
+    from alp_orchestrate.models import OrchestratorError
+
+    preset = {"memory_map": [
+        {"name": "he_slot0", "base": 0x80200000,
+         "accessible_from": ["m55_he", "m55_hp"]},
+    ]}
+    with pytest.raises(OrchestratorError):
+        _resolve_slot0_load_address(preset, "m55_he")
+
+
+def test_resolve_slot0_load_address_default_derives_from_gen_zephyr_board(
+) -> None:
+    """The no-override default must be COMPUTED from
+    `gen_zephyr_board`'s own `_AEN_MRAM_BASE`/`_AEN_MCUBOOT_KIB`, not a
+    locally pinned literal only a test keeps in sync -- change either
+    constant and this resolver's default must move with it, with no
+    edit here."""
+    import gen_zephyr_board
+    from alp_orchestrate.loader import _resolve_slot0_load_address
+
+    original_kib = gen_zephyr_board._AEN_MCUBOOT_KIB
+    try:
+        gen_zephyr_board._AEN_MCUBOOT_KIB = 128
+        assert _resolve_slot0_load_address({}, "m55_he") == "0x80020000"
+    finally:
+        gen_zephyr_board._AEN_MCUBOOT_KIB = original_kib
+    # Restored: back to the real, unmodified constant's value.
+    assert _resolve_slot0_load_address({}, "m55_he") == "0x80010000"
+
+
+# ---------------------------------------------------------------------
+# `_enforce_slot0_disjoint_across_roles` (#1384) -- the both-roles-
+# collision guard: a dual-M55 AEN SoM whose m55_he and m55_hp slices
+# resolve `flash_args.slot0_load_address` to the SAME address is the
+# #1069 HE/HP MRAM collision, expressed in flash_args instead of only
+# in board generation.
+# ---------------------------------------------------------------------
+
+
+def test_enforce_slot0_disjoint_across_roles_refuses_a_collision() -> None:
+    from alp_orchestrate.loader import _enforce_slot0_disjoint_across_roles
+    from alp_orchestrate.models import OrchestratorError, Slice
+
+    cores = {
+        "m55_he": Slice(core_id="m55_he", os="zephyr",
+                         slot0_load_address="0x80010000"),
+        "m55_hp": Slice(core_id="m55_hp", os="zephyr",
+                         slot0_load_address="0x80010000"),
+    }
+    with pytest.raises(OrchestratorError) as excinfo:
+        _enforce_slot0_disjoint_across_roles(cores, "E1M-AEN401")
+    msg = str(excinfo.value)
+    assert "m55_he" in msg
+    assert "m55_hp" in msg
+    assert "0x80010000" in msg
+
+
+def test_enforce_slot0_disjoint_across_roles_allows_a_disjoint_pair() -> None:
+    """#1069's actual fix (E1M-AEN801's declared `he_slot0`/`hp_slot0`
+    override) must stay legal."""
+    from alp_orchestrate.loader import _enforce_slot0_disjoint_across_roles
+    from alp_orchestrate.models import Slice
+
+    cores = {
+        "m55_he": Slice(core_id="m55_he", os="zephyr",
+                         slot0_load_address="0x80010000"),
+        "m55_hp": Slice(core_id="m55_hp", os="zephyr",
+                         slot0_load_address="0x802b0000"),
+    }
+    _enforce_slot0_disjoint_across_roles(cores, "E1M-AEN801")  # no raise
+
+
+def test_enforce_slot0_disjoint_across_roles_ignores_a_single_m55_core(
+) -> None:
+    """A SoM with only one M55 slice resolved (or neither slice carrying
+    a slot0 address at all -- `jlink_flash_device` absent) has nothing
+    to compare; must not raise on a missing sibling."""
+    from alp_orchestrate.loader import _enforce_slot0_disjoint_across_roles
+    from alp_orchestrate.models import Slice
+
+    cores = {
+        "m55_hp": Slice(core_id="m55_hp", os="zephyr",
+                         slot0_load_address="0x80010000"),
+    }
+    _enforce_slot0_disjoint_across_roles(cores, "E1M-AEN401")  # no raise
+
+    cores_no_flow_d = {
+        "m55_he": Slice(core_id="m55_he", os="zephyr",
+                         slot0_load_address=None),
+        "m55_hp": Slice(core_id="m55_hp", os="zephyr",
+                         slot0_load_address=None),
+    }
+    _enforce_slot0_disjoint_across_roles(
+        cores_no_flow_d, "E1M-AEN401")  # no raise
+
+
+def test_enforce_slot0_disjoint_across_roles_ignores_a_parked_sibling(
+) -> None:
+    """#1295: E1M-AEN301's `power-managed-sensor` example parks `m55_hp`
+    with `os: "off"` and runs only `m55_he` as Zephyr. Once E3's variant
+    started publishing `debug.jlink_flash_device` (#1295), both roles
+    resolve the SAME no-override default `slot0_load_address` -- but
+    `m55_hp` is parked, so it is never a flash target and this must NOT
+    raise: comparing a live core's slot0 against a parked core's moot one
+    is not the #1069 hazard this guard exists to catch."""
+    from alp_orchestrate.loader import _enforce_slot0_disjoint_across_roles
+    from alp_orchestrate.models import Slice
+
+    cores = {
+        "m55_he": Slice(core_id="m55_he", os="zephyr",
+                         slot0_load_address="0x80010000"),
+        "m55_hp": Slice(core_id="m55_hp", os="off",
+                         slot0_load_address="0x80010000"),
+    }
+    _enforce_slot0_disjoint_across_roles(cores, "E1M-AEN301")  # no raise

@@ -91,9 +91,19 @@ struct alp_ble {
 	 * used to deadlock waiting for its own still-in-flight scan_start()
 	 * call to leave.  These three fields back the reentrant self-close
 	 * guard in src/common/alp_slot_claim.h; see
-	 * alp_ble_scan_start()/alp_ble_close() in src/ble_dispatch.c. */
+	 * alp_ble_scan_start()/alp_ble_close() in src/ble_dispatch.c.
+	 *
+	 * refcount (issue #1118): BLE is a documented system-singleton --
+	 * <alp/ble.h>'s alp_ble_open() promises repeated calls return the
+	 * SAME pointer, and alp_ble_close() only tears the controller down
+	 * on the LAST matching close.  Standard atomic "increment-if-
+	 * nonzero" join / "decrement-and-check-last" release (see
+	 * alp_ble_open()/alp_ble_close() in src/ble_dispatch.c) -- kept
+	 * separate from lifecycle/active_ops, which gate ordinary ops, not
+	 * how many callers currently hold the singleton open. */
 	uint8_t   lifecycle;
 	uint32_t  active_ops;
+	uint32_t  refcount;
 	uintptr_t cb_thread;
 	bool      cb_active;
 	bool      close_pending;

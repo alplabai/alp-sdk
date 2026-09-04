@@ -5,6 +5,11 @@ Status: Accepted — superseded by ADR-0020 (build execution moved to
 Date: 2026-05-15
 Deciders: alpCaner
 
+> **Python-port note (2026-08-03):** Tan now carries the normal in-process
+> planner as well as the executor. alp-sdk's orchestrator is retained as the
+> reference/parity producer. This changes the repository boundary, not this
+> ADR's single-`board.yaml`, per-core-slice, or peer-OS decisions.
+
 ## Context
 
 The SDK presents Zephyr and Yocto as mutually exclusive build targets
@@ -184,7 +189,10 @@ and remains the live architecture.
   single-source-of-truth.
 - [OpenAMP project](https://www.openampproject.org/) — upstream
   reference for the RPMsg + virtio framing.
-- Zephyr [`subsys/ipc/rpmsg_service`](https://docs.zephyrproject.org/latest/services/ipc/rpmsg_service/index.html)
-  documentation.
+- Zephyr [IPC service](https://docs.zephyrproject.org/latest/services/ipc/ipc_service/ipc_service.html)
+  documentation for the icmsg/icbmsg backends, and the
+  [RPMsg service sample](https://docs.zephyrproject.org/latest/samples/subsys/ipc/rpmsg_service/README.html)
+  for the `subsys/ipc/rpmsg_service` module this ADR's OpenAMP path
+  builds on.
 - Linux [remoteproc + RPMsg subsystem](https://docs.kernel.org/staging/remoteproc.html)
   documentation.

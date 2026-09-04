@@ -100,8 +100,8 @@
  *
  * Dispatcher contract
  *   Mirrors the 7-symbol hook shape the Yocto dispatcher in
- *   inference_yocto.c calls.  The handle layout below MUST match
- *   inference_yocto.c's `struct alp_inference` exactly.
+ *   inference_yocto.c calls.  The handle layout (struct alp_inference)
+ *   is the shared definition in inference_handle_internal.h (issue #1257).
  */
 
 #include <cerrno>
@@ -128,15 +128,13 @@
 
 extern "C" {
 #include "alp/inference.h"
+
+#include "inference_handle_internal.h"
 }
 
-/* Mirror of the yocto dispatcher's struct alp_inference layout.  MUST
- * match inference_yocto.c exactly -- keep in sync with the dispatcher. */
-struct alp_inference_handle_layout {
-	bool                    in_use;
-	alp_inference_backend_t backend;
-	void                   *be_state;
-};
+/* The dispatcher's `struct alp_inference` comes from the shared internal
+ * header (issue #1257) -- this file used to hand-mirror the layout, with a
+ * different field order that only worked because pointers are 8 bytes. */
 
 namespace
 {
@@ -329,7 +327,7 @@ alp_inference_dtype_t mera_dtype_to_alp(InOutDataType t)
 extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h_,
                                                  const alp_inference_config_t *cfg)
 {
-	auto *h = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	struct alp_inference *h = h_;
 
 	/* For ALP_INFERENCE_MODEL_DRPAI the blob is the `drpai_dir` tar bytes
      * (see the header comment).  Reject an empty blob early. */
@@ -386,14 +384,14 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
 
 extern "C" std::size_t alp_inference_drpai_num_inputs(struct alp_inference *h_)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DrpaiState *>(h->be_state);
 	return (st != nullptr) ? st->in_info.size() : 0u;
 }
 
 extern "C" std::size_t alp_inference_drpai_num_outputs(struct alp_inference *h_)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DrpaiState *>(h->be_state);
 	return (st != nullptr) ? st->out_info.size() : 0u;
 }
@@ -402,7 +400,7 @@ extern "C" alp_status_t alp_inference_drpai_get_input(struct alp_inference   *h_
                                                       std::size_t             index,
                                                       alp_inference_tensor_t *out)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DrpaiState *>(h->be_state);
 	if (st == nullptr) {
 		return ALP_ERR_NOT_READY;
@@ -428,7 +426,7 @@ extern "C" alp_status_t alp_inference_drpai_get_output(struct alp_inference   *h
                                                        std::size_t             index,
                                                        alp_inference_tensor_t *out)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DrpaiState *>(h->be_state);
 	if (st == nullptr) {
 		return ALP_ERR_NOT_READY;
@@ -458,7 +456,7 @@ extern "C" alp_status_t alp_inference_drpai_get_output(struct alp_inference   *h
 
 extern "C" alp_status_t alp_inference_drpai_invoke(struct alp_inference *h_)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DrpaiState *>(h->be_state);
 	if (st == nullptr) {
 		return ALP_ERR_NOT_READY;
@@ -485,7 +483,7 @@ extern "C" alp_status_t alp_inference_drpai_invoke(struct alp_inference *h_)
 
 extern "C" void alp_inference_drpai_close(struct alp_inference *h_)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DrpaiState *>(h->be_state);
 	if (st == nullptr) {
 		return;

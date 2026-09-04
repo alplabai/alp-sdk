@@ -1,6 +1,8 @@
 # #610 §7 slice 1 — build-receipt-v1
 
-**Status:** design 2026-07-13
+**Status:** **Implemented.** `scripts/build_receipt.py` (a pure composer
+validated against `metadata/schemas/build-receipt-v1.schema.json`) exists in
+the tree.
 **Scope:** a versioned, deterministic **build receipt** — `build-receipt-v1`
 schema + a pure composer that assembles the receipt from already-existing
 inputs (SDK source rev, `board.yaml` identity + digest, `alp.lock` digest,

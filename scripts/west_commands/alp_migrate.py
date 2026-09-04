@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -19,19 +20,53 @@ sys.path.insert(0, str(_HERE.parent.parent))  # scripts/ -> import alp_migrate
 import alp_migrate  # noqa: E402
 
 try:
-    from west.commands import WestCommand  # type: ignore
+    from west.commands import CommandError, WestCommand  # type: ignore
 except ImportError:
     class WestCommand:  # type: ignore[no-redef]
         def __init__(self, *a, **k): ...
 
+    class CommandError(RuntimeError):  # type: ignore[no-redef]
+        """Mirrors `west.commands.CommandError` for the no-west path."""
+
+        def __init__(self, returncode: int = 1) -> None:
+            super().__init__()
+            self.returncode = returncode
+
 REPO = _HERE.parent.parent.parent
+
+# Fallback-only: dirs to prune when REPO isn't a git worktree (see
+# `_all_board_yaml_files`). git itself needs no such list -- `--exclude-
+# standard` already reads `.gitignore`, the one source of truth for
+# "this is build output, not a source".
+_FALLBACK_SKIP_DIRS = frozenset({".git", ".west", "build", "twister-out"})
+
+
+def _all_board_yaml_files(root: Path) -> list[Path]:
+    """Every board.yaml under `root` for `--all`. Same fix as
+    check_library_registry.py's `_board_yaml_files`, same defect class: a
+    raw `root.rglob("board.yaml")` here also walked `twister-out/`/`build/`
+    unbounded from repo root."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--cached", "--others",
+             "--exclude-standard", "--", "*board.yaml"],
+            check=True, capture_output=True, text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        found: list[Path] = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in _FALLBACK_SKIP_DIRS]
+            if "board.yaml" in filenames:
+                found.append(Path(dirpath) / "board.yaml")
+        return sorted(found)
+    return sorted(root / line for line in proc.stdout.splitlines() if line)
 
 
 def _targets(args) -> list[Path]:
     if args.board:
         return [Path(args.board).resolve()]
     if args.all:
-        return sorted(REPO.rglob("board.yaml"))
+        return _all_board_yaml_files(REPO)
     return [Path("board.yaml").resolve()]
 
 
@@ -123,7 +158,15 @@ class AlpMigrate(WestCommand):
         return parser
 
     def do_run(self, args, _unknown):  # type: ignore[no-untyped-def]
-        return run(args)
+        # west DISCARDS `do_run`'s return value and derives the exit status
+        # from exceptions only, so `return run(args)` threw the code away --
+        # `west alp-migrate --check` could report an out-of-date board.yaml
+        # and still exit 0. Same defect and same fix as
+        # `alp_quality`/`alp_lock`; `run()` already computes the right value.
+        rc = run(args)
+        if rc:
+            raise CommandError(rc)
+        return rc
 
 
 def main(argv=None) -> int:

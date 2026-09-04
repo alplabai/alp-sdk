@@ -68,6 +68,24 @@ if [ -z "$BUF_SYM" ]; then
 	echo "      the MRAM write above still completed -- this is not a boot failure. Read the" >&2
 	echo "      console via the labgrid 'console' resource instead." >&2
 else
+	# SAFETY GATE (alp-sdk#813) -- confirm the AEN E8 answered BEFORE the
+	# halt+mem8 read below. This bench has two probes sharing OEM serial
+	# 603000869 (one of them on a DIFFERENT board, the GD32 bridge on
+	# V2N-M1); JLinkExe selects by serial only, so JLINK_SN alone cannot
+	# prove which board is on the other end -- see bench-env.sh. Read-only
+	# connect first; nothing is halted until the DP ID matches.
+	cat > /tmp/flash-run-preflight.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_READ
+connect
+exit
+EOF
+	"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flash-run-preflight.jlink \
+		> /tmp/flash-run-preflight.out 2>&1 || true
+	bench_jlink_assert_connected /tmp/flash-run-preflight.out "Flow A preflight" || exit 7
+	bench_jlink_assert_aen_dpidr /tmp/flash-run-preflight.out "Flow A preflight" || exit 4
+
 	cat > /tmp/flash-read.jlink <<EOF
 connect
 halt
@@ -75,6 +93,10 @@ mem8 $BUF, $SIZE
 qc
 EOF
 	"${JLINK_ARGS[@]}" -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript /tmp/flash-read.jlink 2>/tmp/fr.err > /tmp/fr.out || true
+	# JLinkExe exits 0 even when it never opened the probe, so `|| true` above
+	# hides a total connect failure and the decode below would render it as
+	# empty target output (alp-sdk#1318).
+	bench_jlink_assert_connected /tmp/fr.out "Flow A read-back" || exit 7
 	echo "----- $NAME RAM console (MRAM-flashed, SES-booted) -----"
 	awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>4)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/fr.out
 	echo; echo "--------------------------------------------------------"

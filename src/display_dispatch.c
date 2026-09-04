@@ -42,15 +42,28 @@ static struct alp_display *_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_DISPLAY_HANDLES; ++i) {
 		/* Atomic claim: only the winner of the flag flip may touch the
-		 * slot's other fields (in_use is the struct's last member, so
-		 * zero everything before it -- incl. lifecycle/active_ops,
-		 * parking a fresh slot at LC_UNOPENED). Issue #629. */
+		 * slot's other fields.  Zero everything BEFORE in_use -- incl.
+		 * lifecycle/active_ops, parking a fresh slot at LC_UNOPENED
+		 * (issue #629).  `epoch` sits after in_use precisely so this
+		 * memset does not touch it: it must survive the claim to be a
+		 * generation counter at all (issue #1698). */
 		if (alp_slot_try_claim(&_pool[i].in_use)) {
 			memset(&_pool[i], 0, offsetof(struct alp_display, in_use));
+			/* Publish a new generation for this slot's new owner. Wraps
+			 * at 2^32 claims, which needs a close/open pair every
+			 * microsecond for over an hour to reach -- and a wrap only
+			 * risks a stale holder matching, i.e. back to the old
+			 * behaviour, never worse. */
+			_pool[i].epoch++;
 			return &_pool[i];
 		}
 	}
 	return NULL;
+}
+
+uint32_t alp_display_slot_epoch(const alp_display_t *h)
+{
+	return (h != NULL) ? h->epoch : 0u;
 }
 
 static void _free(struct alp_display *h)
@@ -107,7 +120,12 @@ alp_status_t alp_display_get_caps(alp_display_t *h, alp_display_caps_t *out)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->get_caps(&h->state, out);
+	alp_status_t rc;
+	if (h->state.ops->get_caps == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->get_caps(&h->state, out);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -126,7 +144,12 @@ alp_status_t alp_display_blit(alp_display_t *h,
 		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_INVAL;
 	}
-	alp_status_t rc = h->state.ops->blit(&h->state, x, y, w, h_rect, pixels);
+	alp_status_t rc;
+	if (h->state.ops->blit == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->blit(&h->state, x, y, w, h_rect, pixels);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -136,7 +159,12 @@ alp_status_t alp_display_clear(alp_display_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->clear(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->clear == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->clear(&h->state);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -149,7 +177,7 @@ void alp_display_close(alp_display_t *h)
 	/* begin_close CAS OPEN->CLOSING then spins until every op that
 	 * entered before the CAS has left -- so teardown never races an
 	 * in-flight op. Idempotent: a second/never-opened close no-ops. #629 */
-	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) {
+	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) {
 		return;
 	}
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {

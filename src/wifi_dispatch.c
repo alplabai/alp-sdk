@@ -104,12 +104,13 @@ alp_wifi_connect(alp_wifi_t *h, const alp_wifi_credentials_t *creds, uint32_t ti
 {
 	/* Counted via alp_handle_op_enter/leave (issue #629): association can
 	 * block up to timeout_ms (a real SoM's SSID scan+auth handshake), so
-	 * alp_wifi_close() drains this op with the sleep-poll
-	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
-	 * instead of the busy-spin alp_handle_begin_close() -- generalised
-	 * from rpc_dispatch.c's _rpc_op_enter()/_rpc_begin_close()/
-	 * _rpc_drain() (GHSA-xhm8). A close() racing an in-flight connect()
-	 * can no longer tear down state underneath it. */
+	 * alp_wifi_close() drains this op with
+	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c),
+	 * which sleeps between polls instead of busy-spinning (issue #1114:
+	 * unsafe regardless of op duration) -- generalised from
+	 * rpc_dispatch.c's _rpc_op_enter()/_rpc_begin_close()/_rpc_drain()
+	 * (GHSA-xhm8). A close() racing an in-flight connect() can no longer
+	 * tear down state underneath it. */
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}

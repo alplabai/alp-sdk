@@ -30,6 +30,11 @@ nothing here may silently drift from it. This gate fails when:
     iot-dashboard bypass <alp/display.h>/<alp/gui.h> for a direct
     zephyr/drivers/display.h include) -- such an example may only be
     referenced by a `preview` record with a `note`, never `stable`.
+  - a record's `cores` field (issue #1275) disagrees with its canonical
+    example's own board.yaml `cores:` mapping -- same ids, same `app:`
+    dirs, same EFFECTIVE `os:` (resolved via alp_orchestrate.load_board_
+    yaml, not re-derived here). `cores` duplicates what board.yaml
+    already says; this is what keeps that duplication from drifting.
 
 Run locally:
 
@@ -45,6 +50,7 @@ import sys
 from pathlib import Path
 
 import jsonschema
+import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 CATALOG = REPO / "metadata" / "templates" / "catalog-v1.json"
@@ -53,6 +59,8 @@ INCLUDE_ALP = REPO / "include" / "alp"
 CHIPS_METADATA = REPO / "metadata" / "chips"
 
 sys.path.insert(0, str(REPO / "scripts"))
+
+from alp_orchestrate import OrchestratorError, load_board_yaml  # noqa: E402
 
 # Examples with a TRACKED content-quality gap -- grounded in the two issues
 # named in the module docstring. A `stable` record may never point at one of
@@ -145,6 +153,67 @@ def _check_record_drift(rec: dict, real_libraries: set[str]) -> list[str]:
     return problems
 
 
+def _check_cores_match_board_yaml(rec: dict) -> list[str]:
+    """A record's `cores` field duplicates its canonical example's own
+    board.yaml `cores:` mapping (issue #1275) -- assert they agree
+    EXACTLY (same ids, same `app:` dirs, same effective `os:`) so the
+    duplication is machine-checked, not drift-prone.
+
+    `os` is resolved via `alp_orchestrate.load_board_yaml` -- the same
+    loader `--emit zephyr-conf` itself uses -- rather than re-derived
+    here, so a board.yaml core with no explicit `os:` (inferred from
+    its SoC core class) is compared against the REAL effective value,
+    not a guess. Only ids the board.yaml's own `cores:` mapping
+    declares are compared (never the full SoM topology, which also
+    includes cores the project never mentions, e.g. a second M-class
+    core left at its stock-shim default)."""
+    rid = rec.get("id", "<no id>")
+    board_yaml = REPO / rec["example"] / "board.yaml"
+    if not board_yaml.is_file():
+        return []  # already reported by _check_record_drift
+
+    raw = yaml.safe_load(board_yaml.read_text(encoding="utf-8")) or {}
+    raw_cores = raw.get("cores") or {}
+
+    try:
+        project = load_board_yaml(board_yaml)
+    except OrchestratorError as e:
+        return [f"{rid}: cores: board.yaml failed to load ({e})"]
+
+    expected: dict[str, dict] = {}
+    for core_id, entry in raw_cores.items():
+        slice_ = project.cores.get(core_id)
+        if slice_ is None:
+            continue  # loader already rejects an unmatched core id
+        app = (entry or {}).get("app")
+        expected[core_id] = {
+            "id": core_id,
+            **({"dir": app} if app else {}),
+            "os": slice_.os,
+        }
+
+    declared = {c["id"]: c for c in rec.get("cores", [])}
+
+    problems: list[str] = []
+    missing = sorted(set(expected) - set(declared))
+    if missing:
+        problems.append(
+            f"{rid}: cores is missing {missing} -- {rec['example']}/"
+            f"board.yaml `cores:` declares {sorted(expected)}")
+    extra = sorted(set(declared) - set(expected))
+    if extra:
+        problems.append(
+            f"{rid}: cores declares {extra}, which {rec['example']}/"
+            f"board.yaml `cores:` does not")
+    for core_id in sorted(set(expected) & set(declared)):
+        if expected[core_id] != declared[core_id]:
+            problems.append(
+                f"{rid}: cores entry for {core_id!r} is "
+                f"{declared[core_id]} but {rec['example']}/board.yaml "
+                f"resolves to {expected[core_id]} -- drift")
+    return problems
+
+
 def _check_ids_unique(doc: dict) -> list[str]:
     ids = [t["id"] for t in doc.get("templates", [])]
     dupes = sorted({i for i in ids if ids.count(i) > 1})
@@ -192,6 +261,7 @@ def main() -> int:
         real_libraries = _real_library_names()
         for rec in doc.get("templates", []):
             problems += _check_record_drift(rec, real_libraries)
+            problems += _check_cores_match_board_yaml(rec)
         problems += _check_ids_unique(doc)
         problems += _check_archetypes_covered(doc)
 

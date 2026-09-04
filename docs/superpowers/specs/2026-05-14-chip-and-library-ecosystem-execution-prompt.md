@@ -1,5 +1,17 @@
 # Execution prompt — chip + library ecosystem expansion (alp-sdk + alp-sdk-community)
 
+> **Historical transcript.** Design spec dated 2026-05-14. The SDK
+> has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as
+> current design intent; kept for design-rationale only.
+>
+> Command examples below use this session's original Windows/WSL
+> checkout paths (e.g. `/mnt/c/Users/<user>/...`) verbatim -- treat
+> them as historical record, not copy-paste-ready commands for
+> today's checkout.
+
 > Paste the block below into a fresh Claude Code session at the
 > alp-sdk repo root.  The prompt is self-contained; the agent
 > reads the design spec from disk and executes phase by phase.

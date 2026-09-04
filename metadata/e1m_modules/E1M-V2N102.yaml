@@ -26,8 +26,16 @@ on_module:
   supervisor_mcu:       gd32g553
   ethernet_phy:         rtl8211fdi
   ethernet_phy_count:   2
-  nor_flash:            xspi
-  emmc:                 sd0
+  # nor_flash / emmc are routing annotations (SoC controller the on-module
+  # storage is wired to), not chip slugs -- no chips/<part>/ driver exists
+  # for either (see scripts/alp_orchestrate/slugs.py
+  # _ON_MODULE_NON_CHIP_FIELDS). ADR 0017: no tier -- there is no driver to
+  # tier yet, not an aspirational one, expressed machine-readably via the
+  # *_driver_status fields below rather than left to this comment (#1169).
+  nor_flash:               xspi                # on-module via Renesas xSPI0; no alp-sdk driver yet
+  nor_flash_driver_status: none
+  emmc:                    sd0                 # on-module via Renesas SD0; no alp-sdk driver yet
+  emmc_driver_status:      none
 
   i2c_devices:
     brd_i2c:
@@ -84,12 +92,94 @@ topology:
 # need one).
 
 mailbox:
+  # Renesas MHU-B. ADR 0017 Tier-1.5 (thin Zephyr glue over the vendored
+  # r_mhu_b_ns FSP module) -- zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c.
+  # #697 (E1M-X V2N-M1 silicon): init/attach and the A55->M33 receive path are
+  # silicon-proven. mbox_send() (M33->A55) is UNEXERCISED and does not reach the A55 on
+  # this topology -- see zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c for the full status.
+  # `driver_status: partial` is the closest single enum value (some of the
+  # link is silicon-proven, some is not) -- it cannot itself express WHICH
+  # direction, so `notes` carries the exact split (#1169).
   controller: renesas_mhu
+  driver_status: partial
+  notes: "A55->M33 receive path is silicon-proven under #697 (R_MHU_NS5.MSG -> M33 NVIC IRQ 293). mbox_send() (M33->A55) is unexercised and does not reach the A55 GIC on this topology (R_MHU_NS5.RSP routes to no A55 GIC line) -- see zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c for the full status."
   channels:
     - { id: 0, reserved_for: alp_default_rpmsg }
     - { id: 1, reserved_for: app }
     - { id: 2, reserved_for: app }
     - { id: 3, reserved_for: power_mgmt }
+
+# Renesas on-die peripheral instances with pads routed at the module edge
+# (metadata/e1m_modules/v2n/renesas-peripheral-map.tsv) but no dedicated
+# on_module: role -- bus/interface instances, not populated parts, so no
+# chips/*.yaml manifest applies.  Declared here so the instance is VISIBLE
+# to the SoM model (#1170); DT/pinctrl generation from this layer is #655,
+# not yet built, so `driver_status: none` is accurate for all of them.
+# i2s0/i2s1 each cover a paired SSIU channel group (SSIU1+SSIU2 share
+# BCK/WS with only SSIU2 adding a second SDATA line, same for SSIU3+SSIU4)
+# -- two logical I2S instances, matching ALP_E1M_X_I2S0/I2S1 in
+# include/alp/e1m_x_pinout.h.  Named `i2s0`/`i2s1`, not `i2s_ssiu0`/`1`:
+# SSIU0 does not exist on this pad map (the first channel is SSIU1), and
+# scripts/check_e1m_route_capability.py's `ssiu_to_i2s0` table already
+# aliases this exact SSIU1+SSIU2 pair to the E1M-X I2S0 function, so this
+# name matches an existing convention instead of inventing a new one.
+#
+# #1170 remainder -- disposition of every further routed net the issue
+# names, verified against the TSV cited above:
+#   - SD1 (SD1CLK/CMD/DAT0-3, tsv:103-108) is declared below as `sd1`
+#     (class: sdio -- the SoC JSON's `sdio` count is separate from
+#     `sdio_emmc`, which SD0/eMMC uses).  Its card-detect / power-enable
+#     pads (SD1_SD1CD tsv:109, SD1_SD1PWEN tsv:110) and the microSD
+#     socket's control GPIOs (SDCARD_RST tsv:111, µSD1_V_SEL tsv:2) are
+#     noted on that entry -- control lines for the same slot, not a
+#     separate bus/interface class this block enumerates (and this block
+#     does not enumerate individual GPIOs; the SoC has 86 of them).
+#   - BT_UART (tsv:12-15) and BT_I2S (tsv:8-11) are EXCLUDED: their pad
+#     names carry no channel number (unlike RIIC1/RIIC2/UART1/...), so
+#     they cannot be tied to one of the SoC's 10 UART or 10 I2S instances
+#     without inventing which channel -- forbidden by the no-inventing-
+#     values rule.  They are also already the dedicated HCI-UART / PCM-
+#     audio interface to the populated `wifi_ble: murata_lbee5hy2fy`
+#     combo chip declared under on_module: above, not a free/spare
+#     instance like the twelve below.
+#   - Audio_CLKB / Audio_CLKB_OE / Audio_CLKC (tsv:3-5) are EXCLUDED:
+#     clock-output pins, not a bus/interface peripheral -- none of the
+#     SoC JSON's `peripherals:` classes (i2c, i3c, spi, uart, i2s, pdm,
+#     can_fd, sdio, sdio_emmc, ...) names a clock family, so `class:`
+#     has nothing honest to point at.
+#   - BL_PWM (tsv:6) is EXCLUDED for a different reason: it IS a real
+#     class -- Renesas GPT ("General PWM Timer", n44.json peripherals:
+#     `timer_32bit_gpt: 16`, instances gpt0..gpt15) -- but the TSV names
+#     no GPT channel number for this pad, and this block only declares
+#     instances traceable to a specific numbered instance (see
+#     `silicon_peripheral:` on every entry below); there is none here.
+#   - BT_HOST_WAKE (tsv:7, P05) is already declared: a GPIO sideband on
+#     the populated `wifi_ble: murata_lbee5hy2fy` combo chip
+#     (metadata/chips/murata_lbee5hy2fy.yaml side_channel_lines,
+#     v2n_route: "Renesas P05", alongside WL_HOST_WAKE) -- not a
+#     free/spare bus/interface instance like the twelve below.
+#   - UART0 (UART0_RXD0/TXD0, tsv:120-121, P51/P50) is already declared:
+#     the generated M33 board trees (e1m_v2n101_m33_sm, e1m_v2m101_m33_sm)
+#     bind it as `&sci0`, the EVK's Pmod USB-UART console header,
+#     disabled by default (not wired on the production board -- see
+#     the boards' -pinctrl.dtsi + *_cm33.dts comments). V2N102/V2M102
+#     share this SoM family's pad map and inherit the same disposition
+#     once their board trees generate; it does not need a
+#     soc_peripheral_instances entry to become visible.
+soc_peripheral_instances:
+  - { instance: i3c30,     class: i3c,  silicon_peripheral: "I3C_SCL30/SDA30",              driver_status: none }
+  - { instance: riic1,     class: i2c,  silicon_peripheral: "RIIC1_SCL1/SDA1",               driver_status: none }
+  - { instance: riic2,     class: i2c,  silicon_peripheral: "RIIC2_SCL2/SDA2",               driver_status: none }
+  - { instance: rspi0,     class: spi,  silicon_peripheral: "RSPI0_*",                       driver_status: none }
+  - { instance: sci_spi2,  class: spi,  silicon_peripheral: "SCI_SPI2_*",                    driver_status: none }
+  - { instance: sci_spi3,  class: spi,  silicon_peripheral: "SCI_SPI3_*",                    driver_status: none }
+  - { instance: pdm0,      class: pdm,  silicon_peripheral: "PDM0_PDMCLK0x/PDMDAT0x",         driver_status: none }
+  - { instance: canfd2,    class: can,  silicon_peripheral: "CANFD2_CRX2/CTX2",               driver_status: none }
+  - { instance: canfd3,    class: can,  silicon_peripheral: "CANFD3_CRX3/CTX3",               driver_status: none }
+  - { instance: uart1,     class: uart, silicon_peripheral: "UART1_RXD1/TXD1",                driver_status: none }
+  - { instance: i2s0,      class: i2s,  silicon_peripheral: "SSIU1_SSI1_*/SSIU2_SSI2_SDATA",  driver_status: none }
+  - { instance: i2s1,      class: i2s,  silicon_peripheral: "SSIU3_SSI3_*/SSIU4_SSI4_SDATA",  driver_status: none }
+  - { instance: sd1,       class: sdio, silicon_peripheral: "SD1CLK/SD1CMD/SD1DATx",          driver_status: none, notes: "SD1_SD1CD (tsv:109) + SD1_SD1PWEN (tsv:110) are this slot's control lines; SDCARD_RST (tsv:111) + µSD1_V_SEL (tsv:2) are the microSD socket's reset/voltage-select GPIOs, not a separate instance. #1170." }
 
 # E1M pads / instances that route through the on-module GD32G553
 # IO MCU (the V2N family's peripheral bridge).  RZ/V2N silicon
@@ -163,16 +253,41 @@ helper_firmware:
     # a gitignored build output, absent from every clone (#852).  Build it
     # yourself per firmware/gd32-bridge/README.md before flashing, or wait
     # for an Alp Lab firmware release.  `firmware_path` is deliberately
-    # ABSENT (not `TBD`) so `tan flash` refuses cleanly ("has no
-    # output_artefact / firmware_path; can't flash") instead of spawning a
-    # real flasher against a nonexistent `TBD` path -- see
+    # ABSENT (not `TBD`) so nothing resolves a sentinel path.  It is
+    # `flash_policy: recovery_only`, not `update_channel`, that decides this
+    # entry's fate: `tan flash` declines it ahead of any `flash_method`
+    # check (`python/tan/core/flash_plan.py::helper_flash_gate`, tan-cli#611)
+    # with `flash: helper 'gd32_bridge' is programmed by Alp Lab in
+    # production and is customer-flashable only to recover a bricked
+    # device...; skipping.  Field updates arrive over update_channel:
+    # alp_ota_spi_bridge.  To recover a bricked device deliberately, re-run
+    # with `--helper gd32_bridge --recover`.` (status `skipped`, rc `-1` --
+    # see docs/gd32-bridge.md's "Who flashes it, and when" section) rather
+    # than spawning a real flasher against a nonexistent `TBD` path -- see
     # docs/v0.6-tbd-and-assumptions.md §1.4.
-    flash_method:  swd_probe
-    flash_args:
-      interface: cmsis-dap
-      target:    gd32g553
-      base:      "0x08000000"
-
+    # No local flash path.  GD32 programming is separated out of tan's
+    # scope entirely (#1439, tan-cli#732), so `flash_method` and
+    # `flash_args` are ABSENT rather than set -- tan does not flash this
+    # part, and no preset names a local flash path for it.  Alp Lab flashes
+    # it in production over SWD with its own tooling, and the on-SoM
+    # host-driven bit-bang route (`chips/gd32_swd/`, Path B,
+    # metadata/chips/gd32_swd.yaml) is unaffected by any of this.
+    #
+    # `flash_policy` STAYS.  It answers who may reach a local flash path
+    # if one is ever added, which the schema requires on every helper
+    # entry with or without a `flash_method` -- the six AEN
+    # `cc3501e_otp` entries are that same shape (`recovery_only`, no
+    # `flash_method`).  Alp Lab programs this part in production; a
+    # customer flash is only ever bricked-board recovery with Alp
+    # Lab-supplied binaries, and that is still true with tan out of the
+    # picture (#1357).
+    #
+    # Field updates go over the bridge link -- protocol v0.6 Path A,
+    # slot-A/B application bootloader with commit + rollback
+    # (docs/gd32-bridge.md, firmware/gd32-bridge/src/ota.c) -- which is
+    # what `update_channel` declares.
+    flash_policy:   recovery_only
+    update_channel: alp_ota_spi_bridge
 default_hw_rev:         r1
 default_board:        E1M-X-EVK
 

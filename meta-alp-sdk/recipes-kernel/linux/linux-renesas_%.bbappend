@@ -8,7 +8,7 @@
 #   e1m-v2n-drpai.dtsi  the &drpai0 enable that claims that reserved memory.
 #                       Installed ONLY when meta-rz-drpai is in bblayers
 #                       (it creates the label); stubbed out otherwise --
-#                       see the ALP_DRPAI_LAYER block below.
+#                       see the ALP_DRPAI_DT_ENABLE block below.
 #   e1m-v2m-deepx.dtsi  V2M delta: DEEPX DXM1 NPU on PCIe + the on-module
 #                       lane mux + NPU reset release (gpio-hogs).
 #   e1m-x-evk.dtsi      E1M-X-EVK carrier: eth/i2c/usb/console enables,
@@ -108,8 +108,13 @@ SRC_URI:append = " \
 # e1m-v2n-som.dtsi #includes e1m-v2n-drpai.dtsi unconditionally; this block
 # decides which body that filename gets:
 #
-#   meta-rz-drpai in bblayers.conf -> the real `&drpai0` override
-#   layer absent                   -> a comment-only stub (no node touched)
+#   layer in bblayers.conf AND ALP_ENABLE_DRPAI = "1"
+#                                  -> the real `&drpai0` override
+#   either condition unmet         -> a comment-only stub (no node touched)
+#
+# Both are required.  meta-rz-drpai ships bundled in the RZ/V2N AI SDK BSP,
+# so keying off its presence alone would flip the NPU on for every V2N/V2M
+# image whether or not the owner asked for one.
 #
 # The `drpai0` LABEL does not exist in the pristine linux-renesas tree.  It
 # is CREATED by meta-rz-drpai's
@@ -127,15 +132,38 @@ SRC_URI:append = " \
 # no DRP-AI silicon at all and never build linux-renesas.  This keeps the
 # blast radius inside the one recipe that actually compiles the node.
 #
-# Guarded on the LAYER, not on a MACHINE override, because the layer is what
-# supplies both the label and the driver -- every V2N/V2M SKU carries the
-# same DRP-AI3, so there is no per-SKU axis here.
+# Guarded on the LAYER because the layer is what supplies both the label and
+# the driver -- every V2N/V2M SKU carries the same DRP-AI3, so there is no
+# per-SKU axis here.
 ALP_DRPAI_LAYER = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'rz-drpai', '1', '0', d)}"
 # Hash on the resolved 0/1, not on BBFILE_COLLECTIONS: bb.utils.contains makes
 # bitbake add the whole collection list to do_configure's signature otherwise,
 # so adding ANY unrelated layer would re-run the kernel configure.
 ALP_DRPAI_LAYER[vardepvalue] = "${ALP_DRPAI_LAYER}"
-SRC_URI += "${@' file://e1m-v2n-drpai.dtsi' if d.getVar('ALP_DRPAI_LAYER') == '1' else ''}"
+
+# ...but the layer alone is NOT enough to justify flipping the node on.
+#
+# meta-rz-drpai ships bundled in the RZ/V2N AI SDK BSP v6.30 package (see
+# conf/layer.conf), so it is in the normal bblayers set for anyone building
+# V2N at all.  Gating only on its presence would install this override --
+# and take &drpai0 from "disabled" to "okay" -- on EVERY existing V2N/V2M
+# image, so the driver would probe and /dev/drpai0 would appear on boards
+# whose owners never asked for it.  That is a behaviour change disguised as
+# an opt-in feature.
+#
+# So require an explicit ALP_ENABLE_DRPAI too, defaulting to 0.  It is
+# DECLARED in all four V2N/V2M machine confs (`ALP_ENABLE_DRPAI ?= "0"`)
+# next to ALP_ENABLE_DEEPX_DXM1, so a builder reading the conf for their
+# MACHINE finds it -- the `??=` here is only the fallback for a consumer
+# that uses this bbappend without one of those confs.  Turning the SDK backend on
+# (PACKAGECONFIG "drpai") and turning the kernel node on are deliberately
+# separate switches: the backend without the node fails at open() with a
+# clear error, whereas the node without the backend is simply an idle
+# device -- neither silently half-works.
+ALP_ENABLE_DRPAI ??= "0"
+ALP_DRPAI_DT_ENABLE = "${@'1' if (d.getVar('ALP_DRPAI_LAYER') == '1' and d.getVar('ALP_ENABLE_DRPAI') == '1') else '0'}"
+ALP_DRPAI_DT_ENABLE[vardepvalue] = "${ALP_DRPAI_DT_ENABLE}"
+SRC_URI += "${@' file://e1m-v2n-drpai.dtsi' if d.getVar('ALP_DRPAI_DT_ENABLE') == '1' else ''}"
 
 # Drop the ALP board dts + dtsi into the kernel DT source dir so they
 # compile next to the upstream Renesas dts (the board dts #include the
@@ -154,13 +182,20 @@ do_configure:prepend() {
     # file: dropping meta-rz-drpai from bblayers.conf does not scrub a
     # previously-unpacked ${WORKDIR}, so a file test would keep emitting the
     # real override into a tree that no longer has the label.
-    if [ "${ALP_DRPAI_LAYER}" = "1" ]; then
+    if [ "${ALP_DRPAI_DT_ENABLE}" = "1" ]; then
         install -m 0644 "${WORKDIR}/e1m-v2n-drpai.dtsi" "${ALP_DTS_DST}/"
     else
         printf '%s\n' \
-            '/* meta-rz-drpai not in bblayers.conf: no &drpai0 label exists' \
-            ' * in this kernel tree, so the DRP-AI3 NPU stays unclaimed.' \
-            ' * Add the layer to enable it -- see e1m-v2n-drpai.dtsi in' \
+            '/* DRP-AI3 NPU node not claimed in this build.' \
+            ' *' \
+            ' * Needs BOTH meta-rz-drpai in bblayers.conf (it supplies the' \
+            ' * &drpai0 label and the driver) AND ALP_ENABLE_DRPAI = "1".' \
+            ' * The layer alone is not enough on purpose: it ships bundled' \
+            ' * in the RZ/V2N AI SDK BSP, so keying off its presence would' \
+            ' * flip the node on for every V2N/V2M image whether or not the' \
+            ' * owner asked for an NPU.' \
+            ' *' \
+            ' * See e1m-v2n-drpai.dtsi in' \
             ' * meta-alp-sdk/recipes-kernel/linux/linux-renesas/.' \
             ' */' \
             > "${ALP_DTS_DST}/e1m-v2n-drpai.dtsi"
@@ -178,13 +213,6 @@ SRC_URI:append = " \
     file://trim-unused-storage-net-fs.cfg \
     file://no-kernel-audit.cfg \
 "
-
-# TAS2563 smart-amp codec (mainline ASoC `tas2562` covers it) -- pre-staged
-# for the carrier audio TODO in e1m-x-evk.dtsi. linux-renesas is
-# kernel-yocto based, so this .cfg is auto-merged from SRC_URI. Harmless
-# (no DT consumer) until the ti,tas2563 nodes land in the carrier dtsi.
-SRC_URI:append:e1m-v2m101 = " file://tas2563-audio.cfg"
-SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg"
 
 # Display stack: RK055HDMIPI4MA0 panel on Display 1 (DSI + PWM backlight + GPT
 # + GD32-bridge GPIO for panel reset).

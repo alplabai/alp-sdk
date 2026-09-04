@@ -1,0 +1,336 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Container-job proof for metadata/bootstrap.json's prerequisites.install.linux
+# (issue #1464): the single hard constraint that issue set is "verification
+# is the only admission ticket" -- an unverified package name IS the defect
+# being fixed, so this job actually RUNS every command install.linux.<pm>
+# declares, on a real (non-GitHub-hosted-image) container for that package
+# manager, and asserts the tool lands on PATH afterwards. Nothing here is
+# derived from a second, hardcoded copy of the tool set -- every leg reads
+# prerequisites.install.linux.<pm> straight out of metadata/bootstrap.json at
+# run time (the same discipline the existing onramp-clean-container.yml
+# macOS job already uses for install.macos), so a manifest edit that adds or
+# drops a tool is proven or un-proven here automatically, with nothing to
+# keep in sync by hand.
+#
+# debian-apt proves install.linux.apt -- REQUIRED and complete (every
+# prerequisites.posix tool). Review finding on #1471: this file originally
+# claimed apt "already has continuous proof from onramp-clean-container.yml's
+# ubuntu:24.04 job" and skipped it here on that basis -- false. That job runs
+# a HARDCODED copy of docs/getting-started.md's own one-liner and asserts
+# hint STRINGS are printed; it never derives install.linux.apt from the
+# manifest and runs it the way its own macOS step derives install.macos at
+# runtime, so the REQUIRED, complete apt map had zero execute-and-assert-on-
+# PATH proof while the OPTIONAL, partial dnf map (below) had it. This leg
+# closes that gap -- the map every consumer falls back to (tan's byte-pinned
+# apt table) now gets the same live proof as the map #1464 actually added.
+#
+# fedora-dnf proves the FULL install.linux.dnf map (all 5 declared tools).
+# rockylinux-dnf proves the SAME map on a RHEL-derivative -- this is the
+# leg that matters: Fedora's own repos carry `ninja-build`, but Rocky's
+# default repos (BaseOS/AppStream/Extras, no EPEL) do not carry ninja under
+# any name, which is exactly why install.linux.dnf ships no `ninja` key at
+# all (see metadata/schemas/bootstrap-v1.schema.json's install.linux
+# description). Running the SAME derived-from-the-manifest tool set on both
+# distros, with no `ninja` in it, is what proves the manifest's own choice
+# to leave `ninja` unshipped is correct rather than merely convenient --
+# adding a `ninja` key back to install.linux.dnf without this job proving it
+# on rockylinux:9 too would be exactly the regression #1464 fixes.
+#
+# pacman (Arch) is deliberately NOT a leg here: metadata/bootstrap.json
+# ships no install.linux.pacman entry at all (an unattended `pacman -S`
+# against a sync database staler than the target system risks a partial
+# upgrade -- see the schema's own rationale), so there is nothing this job
+# could run and assert without inventing the same guessed command #1464
+# exists to remove.
+
+name: pr-bootstrap-distro-install
+
+# The trigger is INTENTIONALLY unfiltered on paths. This gate is meant to be
+# a REQUIRED status check on dev/main, and a path-filtered `pull_request`
+# trigger leaves the required check permanently in the "expected" state on
+# any PR that doesn't touch one of the watched paths below -- GitHub then
+# BLOCKS the PR forever (a never-posted required check can't be cleared, not
+# even by --admin). Instead we always run a cheap `detect` job and let the
+# heavy `distro-install` matrix SKIP when none of those paths changed:
+# GitHub counts a skipped required check as passing, so the contract still
+# posts on every PR without a container-matrix boot. Same detect/gate shape
+# as pr-renode-sim-mode.yml -- copy that file's conventions rather than
+# inventing a variant.
+#
+# `merge_group` -- not `push` or `pull_request` -- is what GitHub raises for
+# a merge-queue entry (`dev` has one: ruleset "dev merge queue"), and
+# pr-twister.yml's own required contexts already document why a required
+# workflow needs this trigger: without it, a queued PR waits forever on
+# checks that can never fire. Added here for the same reason.
+#
+# On a `merge_group` event this job does NOT ask `dorny/paths-filter` to
+# diff against anything -- `detect` below is gated off (`if:
+# github.event_name != 'merge_group'`) rather than trusted to resolve a
+# merge-queue base/head pair correctly, since that behaviour isn't something
+# this repo has verified. `distro-install`'s own `if:` (below) treats
+# `merge_group` as an unconditional RUN instead: the queue is the last gate
+# before `dev`, container-matrix cost there is cheap relative to a silent
+# skip of the job that licenses every package name in the manifest.
+on:
+  pull_request:
+    branches: [main, dev]
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Cheap path detector -- NOT a required context itself. Gated off on
+  # `merge_group` (see the trigger comment above); always runs fast on
+  # `pull_request` and `workflow_dispatch`. Its output gates the heavy
+  # matrix below.
+  detect:
+    if: github.event_name != 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      manifest: ${{ steps.filter.outputs.manifest }}
+    steps:
+      - name: Detect bootstrap-manifest-relevant changes
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
+        timeout-minutes: 5
+        with:
+          filters: |
+            manifest:
+              - 'metadata/bootstrap.json'
+              - 'metadata/schemas/bootstrap-v1.schema.json'
+              - 'scripts/bootstrap.sh'
+              - 'scripts/bootstrap.ps1'
+              - 'scripts/check_bootstrap_manifest.py'
+              - '.github/workflows/pr-bootstrap-distro-install.yml'
+
+  distro-install:
+    needs: detect
+    # Fail CLOSED, not open. The naive `needs.detect.outputs.manifest ==
+    # 'true' || ...` form (this job's first cut) skips -- and a skipped
+    # required check reports as PASSING -- whenever `detect` DOESN'T
+    # succeed, not just when it succeeds and finds no relevant change. That
+    # includes a `dorny/paths-filter` error, a token problem, a bad base
+    # ref, or (as of this revision) `detect` being intentionally gated off
+    # on `merge_group`. Every one of those would silently wave through the
+    # job that licenses every package-name string in the manifest, exactly
+    # when the filter machinery -- not the manifest -- is what's broken.
+    #
+    # `always()` is required here, not decorative: GitHub's default is to
+    # skip a job when a job it `needs` was skipped OR failed, which would
+    # otherwise defeat this entire fail-closed rewrite by skipping
+    # `distro-install` before its own `if:` is even consulted, on both the
+    # `merge_group` case (detect gated off = skipped) and a real
+    # detect failure.
+    #
+    # So: skip ONLY when detect genuinely ran, genuinely succeeded, AND
+    # genuinely found no relevant path change. Anything else -- manual
+    # dispatch, a merge-queue entry, a `detect` non-success, or a real
+    # manifest-path hit -- runs the real job.
+    if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' || needs.detect.result != 'success' || needs.detect.outputs.manifest == 'true')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: debian-apt
+            image: debian:12
+            pm: apt
+            bootstrap: apt-get update -qq && apt-get install -y -qq ca-certificates python3
+          - name: fedora-dnf
+            image: fedora:42
+            pm: dnf
+            bootstrap: dnf install -y -q ca-certificates python3
+          - name: rockylinux-dnf
+            image: rockylinux/rockylinux:9
+            pm: dnf
+            bootstrap: dnf install -y -q ca-certificates python3
+    # Shortened from the original `distro install · <name>
+    # (prerequisites.install.linux.<pm>)` -- matrix.name already spells out
+    # the package manager (debian-apt, fedora-dnf, rockylinux-dnf), so the
+    # parenthetical pm suffix was pure duplication. NOTE: this is a
+    # branch-protection required-context string; a future rename here needs a
+    # matching branch-protection update.
+    name: distro install · ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: ${{ matrix.image }}
+    # `set -euo pipefail` below is bash-only. GitHub Actions' own default
+    # shell for a `run:` step with no `container:` override is `sh -e
+    # {0}` on Linux -- and per-container it resolves to whatever `/bin/sh`
+    # actually is on THAT image, not a fixed shell. debian:12's `/bin/sh`
+    # is dash (`set -o pipefail` -> "Illegal option -o pipefail", the
+    # exact failure this pinning fixes); fedora:42/rockylinux:9 happened to
+    # pass without it, but relying on a base image's own `/bin/sh` choice
+    # to keep being bash-compatible is exactly the kind of implicit
+    # cross-container assumption this job's own premise (derive from the
+    # manifest, prove nothing by accident) argues against. All three
+    # images ship a real `/bin/bash` out of the box, so pinning it here
+    # costs nothing and removes the dependency on each image's default.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      # python3 itself is one of the tracked prerequisites.posix tools, so
+      # this container legitimately starts without it -- install it (plus
+      # ca-certificates, this leg's own package manager needs to reach its
+      # HTTPS repo mirrors -- actions/checkout above already succeeded
+      # without it, via the actions runner's bundled CA trust store, not
+      # this container's) as the one bootstrap step this job does NOT
+      # derive from the manifest, the same chicken-and-egg exemption
+      # scripts/bootstrap.sh's own REQUIRED_BINS check documents.
+      - name: Bootstrap ca-certificates + python3 (needed to read the manifest itself)
+        run: ${{ matrix.bootstrap }}
+
+      # Derive both the install script AND the tool list to verify from
+      # metadata/bootstrap.json's prerequisites.install.linux.<pm> at run
+      # time -- never a hardcoded copy in this workflow. This container
+      # already runs as root, so the manifest's literal `sudo ` prefix
+      # (load-bearing for tan-cli#650's root-strip on a customer's non-root
+      # host) is dropped the same way tan's --fix does before executing.
+      - name: Render prerequisites.install.linux.${{ matrix.pm }} as a runnable script
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        env:
+          PM: ${{ matrix.pm }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > /tmp/pm-install.sh
+          import json, os
+          pm = os.environ["PM"]
+          d = json.load(open("metadata/bootstrap.json"))
+          entries = d["prerequisites"]["install"]["linux"][pm]
+          if not entries:
+              raise SystemExit(f"prerequisites.install.linux.{pm} is empty -- nothing to prove")
+          print("set -euo pipefail")
+          if pm == "apt":
+              # A single `apt-get update` up front, not per-package -- apt's
+              # own package index needs refreshing once per container, and
+              # re-running it per tool would just repeat the same fetch 6
+              # times for no extra coverage.
+              print("apt-get update -qq")
+          for tool, cmd in sorted(entries.items()):
+              cmd = cmd[len("sudo "):] if cmd.startswith("sudo ") else cmd
+              print(f"echo '--- installing {tool} ({cmd}) ---'")
+              print(cmd)
+          PY
+          echo "--- rendered script ---"
+          cat /tmp/pm-install.sh
+
+      - name: Run every prerequisites.install.linux.${{ matrix.pm }} command
+        run: bash -e /tmp/pm-install.sh
+
+      # The actual admission bar: every tool the manifest's sub-map
+      # DECLARES must be resolvable on PATH afterwards -- a command that
+      # exits 0 without actually installing the binary (e.g. a metapackage
+      # that pulls in something else entirely) would otherwise slip through
+      # the previous step unnoticed.
+      - name: Assert every declared ${{ matrix.pm }} tool landed on PATH
+        env:
+          PM: ${{ matrix.pm }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > /tmp/pm-tools.txt
+          import json, os
+          pm = os.environ["PM"]
+          d = json.load(open("metadata/bootstrap.json"))
+          print("\n".join(sorted(d["prerequisites"]["install"]["linux"][pm])))
+          PY
+          failed=0
+          while IFS= read -r tool; do
+            [ -n "${tool}" ] || continue
+            if command -v "${tool}" >/dev/null 2>&1; then
+              echo "OK   ${tool} -> $(command -v "${tool}")"
+            else
+              echo "::error::${tool} did not land on PATH after prerequisites.install.linux.${PM}.${tool} ran"
+              failed=1
+            fi
+          done < /tmp/pm-tools.txt
+          exit "${failed}"
+
+  # Static-named summary gate -- THIS is the job branch protection should
+  # require, never the three `distro install · <name>` matrix legs above.
+  # Those names are matrix-interpolated (`${{ matrix.name }}`); GitHub can
+  # only resolve that interpolation while the matrix actually RUNS. When
+  # `distro-install` SKIPS (the normal case -- `detect` gates it to five
+  # watched paths, so most PRs never touch one), GitHub reports the job
+  # under its literal, uninterpolated name instead:
+  #   SKIPPED  distro install · ${{ matrix.name }}
+  # Measured on alp-sdk#1474 (a docs-only PR): none of the three required
+  # contexts (`distro install · debian-apt` etc.) ever reported at all, so a
+  # PR not touching a watched path was blocked permanently. Reverted off
+  # branch protection within minutes of landing -- see #1464's history.
+  #
+  # `summary` always runs (`if: always()`) and reports one literal name --
+  # `distro install · all`, no `${{ }}` anywhere in it -- so it is always
+  # resolvable as a required status check, whether the matrix ran, skipped,
+  # or failed.
+  summary:
+    name: distro install · all
+    needs: [detect, distro-install]
+    if: always()
+    runs-on: ubuntu-latest
+    # This job IS the required branch-protection context, mirroring
+    # pr-twister.yml's `twister` aggregator -- the clock starts when the
+    # job starts (not while it waits on `needs`), so a stuck runner here
+    # can no longer hold the required check open indefinitely.
+    timeout-minutes: 5
+    steps:
+      # Verdict logic mirrors the fail-closed rewrite #1473 did one layer
+      # down in `distro-install`'s own `if:`, and for the same reason: a
+      # naive `needs.distro-install.result != 'failure'` reading treats
+      # 'skipped' as an automatic pass, but 'skipped' is not one condition --
+      # it is whatever `distro-install`'s own `if:` decided, and that `if:`
+      # is exactly the piece of machinery a future edit could weaken back
+      # into the fail-open cascade-skip #1473 fixed (an `if:` that drops
+      # `always()`, or loses one of the OR branches, would again let a
+      # `detect` failure/skip cascade into `distro-install` reporting
+      # 'skipped' for the WRONG reason). So this step does not trust the
+      # word "skipped" at face value -- it re-derives, independently, the
+      # one condition under which a skip is legitimate (pull_request event,
+      # `detect` genuinely ran and succeeded, and found no bootstrap-
+      # manifest-relevant path changed) and fails the gate on every other
+      # shape a 'skipped' result could take. That keeps this summary
+      # fail-closed even if `distro-install`'s own fail-closed `if:` is ever
+      # regressed -- the exact defect class #1464 -> #1473 -> this job
+      # exists to close off, this time one layer further out.
+      - name: Compute verdict from distro-install's + detect's results
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DETECT_RESULT: ${{ needs.detect.result }}
+          DETECT_MANIFEST: ${{ needs.detect.outputs.manifest }}
+          MATRIX_RESULT: ${{ needs.distro-install.result }}
+        run: |
+          set -euo pipefail
+          echo "event=${EVENT_NAME} detect.result=${DETECT_RESULT} detect.manifest=${DETECT_MANIFEST} distro-install.result=${MATRIX_RESULT}"
+
+          case "${MATRIX_RESULT}" in
+            success)
+              echo "PASS: every distro-install leg ran and succeeded"
+              exit 0
+              ;;
+            skipped)
+              if [ "${EVENT_NAME}" = "pull_request" ] && [ "${DETECT_RESULT}" = "success" ] && [ "${DETECT_MANIFEST}" != "true" ]; then
+                echo "PASS: distro-install legitimately skipped -- detect ran, succeeded, and found no metadata/bootstrap.json-relevant path changed"
+                exit 0
+              fi
+              echo "::error::distro-install reported 'skipped' but event=${EVENT_NAME} detect.result=${DETECT_RESULT} detect.manifest=${DETECT_MANIFEST} does not match the one legitimate-skip condition -- treating this as a broken gate, not a pass"
+              exit 1
+              ;;
+            *)
+              echo "::error::distro-install concluded '${MATRIX_RESULT}' -- at least one leg did not run and pass"
+              exit 1
+              ;;
+          esac

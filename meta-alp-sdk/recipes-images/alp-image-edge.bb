@@ -33,6 +33,17 @@ IMAGE_INSTALL += " \
 # only the example package is edge-specific.
 IMAGE_INSTALL += " alp-lvgl-dashboard"
 
+# NOTE: alp-image-common.inc's ALP_RZ_DRPAI_INSTALL (issue #1176) already
+# installs the meta-rz-drpai userspace payload UNCONDITIONALLY once the
+# rz-drpai layer is present in BBFILE_COLLECTIONS -- no opt-in switch. The
+# ALP_ENABLE_DRPAI-gated IMAGE_INSTALL:append below is therefore
+# belt-and-suspenders for that half (bitbake dedupes repeated package
+# names in IMAGE_INSTALL, so this is not a build break); what it alone
+# still drives is the alp-sdk PACKAGECONFIG[drpai] compile flag
+# (`PACKAGECONFIG:append:pn-alp-sdk` below), which alp-image-common.inc
+# does not touch. Reconcile which mechanism owns the userspace install
+# before both land for good.
+#
 # DRP-AI userspace (RZ/V2N on-die NPU) on the rzv2n-family machine confs:
 # the machine confs own this, gated on ALP_ENABLE_DRPAI (meta-rz-drpai's
 # lib-tvm ships through a core-image-% bbappend that does NOT match

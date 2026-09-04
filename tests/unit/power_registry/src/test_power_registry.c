@@ -100,14 +100,27 @@ ZTEST(alp_power_registry, test_power_open_and_close)
 ZTEST(alp_power_registry, test_power_configure_wake_source)
 {
 	/* configure_wake_source mirrors the bitmap into the dispatcher
-     * state without touching hardware on the pm_policy backend. */
+     * state without touching hardware on the pm_policy backend.  On a
+     * build without CONFIG_ALP_SDK_POWER_PM_POLICY (e.g. native_sim,
+     * which selects no HAS_PM) the wildcard zephyr_stub backend wins
+     * instead; either way, per #1812/#1813 the ONLY bit either
+     * backend actually reports is ALP_POWER_WAKE_TIMER -- pm_policy's
+     * _wake_sem has exactly one giver (its own k_timer expiry), so
+     * RTC/GPIO/UART_RX are refused there too (review caught #1812
+     * reincarnated on this backend: it cannot wake on them despite an
+     * earlier draft advertising them). */
 	alp_power_t *h = alp_power_open();
 	zassert_not_null(h);
-	zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC), ALP_OK);
-	zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_GPIO),
-	              ALP_OK);
-	/* The empty bitmap is legal at the configure call -- the INVAL
-     * guard fires only at request_sleep() time. */
+	if (IS_ENABLED(CONFIG_ALP_SDK_POWER_PM_POLICY)) {
+		zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_TIMER), ALP_OK);
+		zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC), ALP_ERR_NOSUPPORT);
+	} else {
+		zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC), ALP_ERR_NOSUPPORT);
+		zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_GPIO),
+		              ALP_ERR_NOSUPPORT);
+	}
+	/* The empty bitmap is legal at the configure call on every backend
+     * -- the INVAL guard fires only at request_sleep() time. */
 	zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_NONE), ALP_OK);
 	alp_power_close(h);
 }
@@ -137,19 +150,21 @@ ZTEST(alp_power_registry, test_power_request_sleep_with_timer_wakes)
      * non-zero wake_after_ms registers the k_timer wake, the call
      * parks on the semaphore, the timer fires, the locks rebalance
      * around the descent + ascent, and the call returns ALP_OK with
-     * info filled.  Uses a tiny 10 ms wake so the test stays fast. */
+     * info filled.  Uses a tiny 10 ms wake so the test stays fast.
+     * ALP_POWER_WAKE_TIMER, not _RTC -- this backend's only real wake
+     * source is its own k_timer (#1812 review). */
 	if (!IS_ENABLED(CONFIG_ALP_SDK_POWER_PM_POLICY)) {
 		ztest_test_skip();
 	}
 	alp_power_t *h = alp_power_open();
 	zassert_not_null(h);
-	zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC), ALP_OK);
+	zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_TIMER), ALP_OK);
 
 	alp_power_wake_info_t info = { 0 };
 	alp_status_t          rc   = alp_power_request_sleep(h, ALP_POWER_MODE_SLEEP, 10u, &info);
 	zassert_equal(rc, ALP_OK);
 	zassert_equal(info.realised_mode, ALP_POWER_MODE_SLEEP);
-	zassert_equal(info.wake_source, (uint32_t)ALP_POWER_WAKE_RTC);
+	zassert_equal(info.wake_source, (uint32_t)ALP_POWER_WAKE_TIMER);
 	/* slept_ms is best-effort; assert >= 0 (i.e. just non-negative
      * which is implicit in the uint32_t type) -- the exact value
      * depends on the scheduler tick + timer granularity. */
@@ -157,9 +172,88 @@ ZTEST(alp_power_registry, test_power_request_sleep_with_timer_wakes)
 	alp_power_close(h);
 }
 
+ZTEST(alp_power_registry, test_power_request_sleep_stop_rounds_down_to_standby)
+{
+	/* #1813 review: STOP rounds DOWN to the same target as STANDBY on
+     * this generic backend (PM_STATE_SUSPEND_TO_RAM -- it has nothing
+     * deeper), and realised_mode must report STANDBY, not STOP, so a
+     * caller is never told this backend reached a depth it never
+     * proved.  The yocto twin is
+     * tests/yocto/peripheral_power.c::test_stop_writes_mem_and_reports_standby. */
+	if (!IS_ENABLED(CONFIG_ALP_SDK_POWER_PM_POLICY)) {
+		ztest_test_skip();
+	}
+	alp_power_t *h = alp_power_open();
+	zassert_not_null(h);
+	zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_TIMER), ALP_OK);
+
+	alp_power_wake_info_t info = { 0 };
+	alp_status_t          rc   = alp_power_request_sleep(h, ALP_POWER_MODE_STOP, 10u, &info);
+	zassert_equal(rc, ALP_OK);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_STANDBY);
+	zassert_equal(info.wake_source, (uint32_t)ALP_POWER_WAKE_TIMER);
+
+	alp_power_close(h);
+}
+
+ZTEST(alp_power_registry, test_power_request_sleep_zero_wake_after_ms_is_nosupport)
+{
+	/* #1812 review BLOCKER fix: this backend can never wake without
+     * wake_after_ms > 0 (its only giver is its own k_timer), so
+     * request_sleep refuses outright rather than parking on
+     * K_FOREVER forever -- even though ALP_POWER_WAKE_TIMER is
+     * configured, matching the header's advertised capability. */
+	if (!IS_ENABLED(CONFIG_ALP_SDK_POWER_PM_POLICY)) {
+		ztest_test_skip();
+	}
+	alp_power_t *h = alp_power_open();
+	zassert_not_null(h);
+	zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_TIMER), ALP_OK);
+
+	alp_power_wake_info_t info = { 0 };
+	alp_status_t          rc   = alp_power_request_sleep(h, ALP_POWER_MODE_SLEEP, 0u, &info);
+	zassert_equal(rc, ALP_ERR_NOSUPPORT);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN);
+
+	alp_power_close(h);
+}
+
 ZTEST(alp_power_registry, test_power_capabilities_returns_null_for_null_handle)
 {
 	zassert_is_null(alp_power_capabilities(NULL));
+}
+
+ZTEST(alp_power_registry, test_power_wake_capabilities_zero_for_null_handle)
+{
+	/* #1813: dedicated accessor, separate storage from
+     * alp_power_capabilities()'s alp_capabilities_t::flags -- NULL
+     * reports 0, matching every other NULL-handle query on this
+     * class. */
+	zassert_equal(alp_power_wake_capabilities(NULL), 0u);
+}
+
+ZTEST(alp_power_registry, test_power_wake_capabilities_matches_active_backend)
+{
+	/* On this test build (CONFIG_ALP_SDK_POWER_PM_POLICY=y, see the
+     * file header) the pm_policy backend wins and reports ONLY
+     * ALP_POWER_WAKE_TIMER -- its _wake_sem has exactly one giver
+     * (its own k_timer), so RTC/GPIO/UART_RX are NOT armable despite
+     * an earlier draft claiming them (#1812 review); the wake_caps
+     * report and the configure_wake_source acceptance/rejection
+     * surface must agree. */
+	alp_power_t *h = alp_power_open();
+	zassert_not_null(h);
+
+	uint32_t caps = alp_power_wake_capabilities(h);
+	if (IS_ENABLED(CONFIG_ALP_SDK_POWER_PM_POLICY)) {
+		zassert_equal(caps, (uint32_t)ALP_POWER_WAKE_TIMER);
+		zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC), ALP_ERR_NOSUPPORT);
+		zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_USB), ALP_ERR_NOSUPPORT);
+	} else {
+		zassert_equal(caps, 0u);
+		zassert_equal(alp_power_configure_wake_source(h, ALP_POWER_WAKE_RTC), ALP_ERR_NOSUPPORT);
+	}
+	alp_power_close(h);
 }
 
 /* ---------- Vendor-ext bypass test --------------------------------- */

@@ -1,5 +1,12 @@
 # Wearable activity recognition + fall detection — IMU edge AI
 
+> **Historical transcript.** Design spec dated 2026-06-28. The SDK
+> has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as
+> current design intent; kept for design-rationale only.
+
 **Date:** 2026-06-28
 **Branch:** `feat/wearable-activity-fall` (off `dev`)
 **Example:** `examples/ai/wearable-activity-fall/`

@@ -11,7 +11,7 @@ project, and modify.
 
 ```bash
 cd alp-workspace
-tan build --native alp-sdk/examples/<category>/<name>   # e.g. examples/peripheral-io/gpio-button-led
+tan build --project alp-sdk/examples/<category>/<name>   # e.g. examples/peripheral-io/gpio-button-led
 ```
 
 `tan build` reads the example's `board.yaml` v2, resolves the
@@ -65,6 +65,12 @@ section headings below -- e.g. Peripheral I/O lives under
 `examples/peripheral-io/`, Audio under `examples/audio/`, and so on.
 (The `v2n/` and `aen/` platform groups predate this layout.)
 
+### Bring-up
+
+| Directory                | What it shows                                                                                |
+|---------------------------|----------------------------------------------------------------------------------------------|
+| `bringup/board-selftest`  | The app to run first on a freshly-assembled board -- answers the four questions every bring-up starts with and prints a single pass/fail report over serial, no debugger needed. |
+
 ### Peripheral I/O
 
 The portable bus + GPIO + analog surfaces.  Start here.
@@ -75,7 +81,7 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `blink`                      | Toggle the RGB-red LED pad as plain GPIO -- start here, before anything else. |
 | `gpio-button-led`            | GPIO open + configure (input + output); button + LED via the `button_led` block. |
 | `i2c-scanner`                | Walk an I2C bus + report every device that ACKs.                         |
-| `i2c-master`                 | Read a known I2C device (TMP112) at a known address.                     |
+| `i2c-master`                 | Read a known I2C device (BMP581) at a known address.                     |
 | `i2c-slave`                  | I2C target (slave) mode -- register-file pattern over `alp_i2c_target_open` callbacks. |
 | `i2c-device-hub`             | Read every populated IC on the EVK sensor/power bus through its real chip driver -- one bus, many devices. |
 | `spi-master`                 | Discrete SPI master -- write / transceive / read patterns.                |
@@ -91,6 +97,8 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `can-loopback`               | CAN(-FD) frame TX + self-reception via loopback mode.                    |
 | `qenc-readout`               | Quadrature-encoder pulse counter.                                        |
 | `drone-autopilot`            | Real-time PID flight controller -- IMU → cascaded PID → PWM ESCs; deterministic multi-rate loops. **(AEN; advanced -- don't fly)** |
+| `alp-console`                | Shippable slot0 app: the `alp` interactive console on the SoM UART, wired to the on-module CC3501E Wi-Fi/BLE coprocessor + an RGB status LED. **(AEN)** |
+| `usb-host-storage`           | USB host role via `<alp/usb.h>`, enumerating an attached mass-storage device on the E1M-AEN401 Cortex-M55-HP. Compile-only skeleton; enumeration bench-gated. **(AEN)** |
 
 ### Audio
 
@@ -100,6 +108,9 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `audio-loopback`            | PDM-in → I2S-out audio pass-through (low-latency).                          |
 | `audio-noise-suppression`   | Real-time denoise -- I2S mic → FFT → int8 CNN gain mask → I2S out. **(V2N)** |
 | `audio-wake-word`           | Always-on "Hey Alp" keyword spotting on the M55-HE core + Ethos-U55. **(AEN)** |
+| `butterworth-lowpass`       | Design a 2nd-order Butterworth low-pass biquad + run it through the `<alp/dsp.h>` IIR chain stage (CMSIS-DSP on-silicon, portable C under native_sim). |
+| `acoustic-anomaly-wind-turbine` | Wind-turbine nacelle acoustic anomaly detector -- acoustic + rotor-speed + bearing-pass-frequency features; v0.6 paper-correct, HiL bench-gated. **(AEN)** |
+| `acoustic-safety-events` | Always-listening safety/security node -- a MEMS mic classifies audible-band events into four types; v0.9 paper-correct, HiL bench-gated. **(AEN)** |
 
 ### Camera / Vision
 
@@ -117,6 +128,12 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `v2n/v2n-drpai-inference`          | DRP-AI3 on-die NPU still-frame inference through `<alp/inference.h>` -- the exhibition booth demo. **(V2N, Yocto)** |
 | `v2n/v2n-m1-deepx-inference`       | DEEPX DX-M1 NPU bring-up + a single inference through `<alp/inference.h>`. **(V2N-M1)** |
 | `v2n/v2n-m1-ros-perception`        | ROS 2 perception node -- detection on DEEPX, DRP-AI3 fallback on plain V2N. **(V2N / V2N-M1, Yocto)** |
+| `cold-chain-monitor`               | Pharma/food cold-chain integrity monitor -- BME280 T/RH/P samples → anomaly classification; v0.9 paper-correct, HiL bench-gated. |
+| `motor-current-signature`          | DC motor/load current-signature health monitor -- INA236 current sensing → 1D-CNN health classifier; v0.9 paper-correct, HiL bench-gated. |
+| `multimodal-fusion-pdm`            | Multi-sensor motor-health monitor fusing vibration (ICM-42670) + current + acoustic (PDM mic); v0.9 paper-correct, HiL bench-gated. |
+| `rail-predictive-maintenance`      | Rail-bogie predictive maintenance -- vibration + GNSS-position features → anomaly score; v0.6 paper-correct, HiL bench-gated. |
+| `visual-defect-detection`          | Camera-fed surface-inspection station flagging manufacturing defects via an autoencoder; v0.9 paper-correct, HiL bench-gated. |
+| `wearable-activity-fall`           | Wearable activity + fall detector -- motion features → two-stage classifier; v0.9 paper-correct, HiL bench-gated. |
 
 ### Connectivity / IoT
 
@@ -127,6 +144,8 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | `iot-fleet-ota`          | Secure OTA firmware update with rollback; the v0.6 declarative `boot:` + `ota:` reference. |
 | `firmware-update-log`    | Portable update audit log -- software tamper-evident tier everywhere, TF-M secure-owner hardware tier where the secure backend is wired. |
 | `production-deployment`  | Field-product lifecycle flagship -- secure-boot + OTA + EEPROM provisioning + attestation in one `board.yaml`. |
+| `modbus-server`      | ADR 0018 `libraries: [modbus]` teaching example -- one Zephyr Modbus client + server in-process over the RAW_ADU backend, no UART/RS-485/CAN/TCP needed. **(V2N)** |
+| `mqtt-telemetry`     | Connected-device starting point -- bring up Wi-Fi, open an `mqtts://` MQTT client, publish telemetry on a cadence via the portable `<alp/iot.h>` surface. **(AEN)** |
 
 ### Display / GUI
 
@@ -138,6 +157,7 @@ Each needs a display panel wired per its `board.yaml`.
 | `lvgl-benchmark`      | Upstream `lv_demo_benchmark()` -- per-scene FPS; shows GPU2D/DMA2D accel on capable SoMs. |
 | `lvgl-music-player`   | Upstream `lv_demo_music()` UI paired with the SDK audio chain (I2S + WM8960 codec). **(AEN)** |
 | `drone-hud`           | Full drone telemetry HUD on a 240×320 TFT, fusing IMU + GNSS + battery via `madgwick_ahrs`. **(AEN)** |
+| `lvgl-dashboard-x-evk` | Minimal LVGL 9 dashboard on the E1M-X V2N MIPI-DSI panel (RK055HDMIPI4MA0, 720×1280@60 Hz) via plain Linux DRM/KMS -- any V2x SKU works, same PCB, same panel path. **(V2N)** |
 
 ### Power / Timing
 
@@ -165,7 +185,6 @@ in their README.
 | `connectivity/jsmn-json-parse`         | jsmn    | Tokenize an embedded JSON config into a typed struct.               |
 | `connectivity/nanopb-encode-decode`    | nanopb  | Protobuf message encode → buffer → decode round-trip.               |
 | `connectivity/coap-client-get`         | libcoap | Build a CoAP GET PDU + parse a response PDU with the real API.      |
-| `connectivity/mqtt-sn-publish`         | coremqtt_sn | Serialize + parse an MQTT-SN PUBLISH (buffer round-trip).       |
 | `connectivity/websocket-frame`         | libwebsockets | RFC 6455 masked text-frame encode/decode round-trip.         |
 | `audio/minimp3-decode`                 | minimp3 | Decode an embedded MP3 blob → PCM; print sample count + RMS.        |
 | `display/u8g2-oled-draw`               | u8g2    | Render text/frame/box to a RAM framebuffer; ASCII-dump it.         |
@@ -220,15 +239,20 @@ SoM EEPROM manifest).
 | `v2n/v2n-xspi-flash-readwrite`  | Erase + write + read-back one page on the on-module xSPI NOR.            |
 | `v2n/v2n-emmc-block-stat`       | Disk-access ioctls + first-block read on the on-module eMMC.             |
 | `v2n/v2n-gd32-swd-flash`        | Host-driven SWD bit-bang -- connect, halt, erase, write, verify, reset.  |
+| `v2n/v2n-brd-i2c-bringup`       | Patch-day diagnostic for the V2N SoM's BRD_I2C management bus (Renesas RIIC8) -- distinguishes a bus-level electrical fault from per-device failures; prints a PASS/FAIL/SKIP table. |
+| `v2n/v2n-gd32-bridge-functional` | Single-pass functional validation of the GD32G553 supervisor-MCU bridge, followed by a forever PWM7 duty staircase as a live oscilloscope observable. **(V2N-M1)** |
+| `v2n/v2n-gd32-bridge-hil-soak`  | Pass/fail soak of the whole GD32 bridge command set over the 25 MHz SPI fast path -- every opcode round-trips each cycle with self-contained verification. **(V2N-M1)** |
+| `v2n/v2n-gd32-bridge-loopback`  | Jumpered Tier-B loopback validation of the GD32 supervisor bridge -- three physical jumpers close the analog + timer signal paths on real silicon. **(V2N-M1)** |
+| `v2n/v2n-power-monitor`         | Live per-rail power table from the E1M-X EVK's on-board INA236 current/voltage monitors, read from Linux/Yocto user-space on the V2N Cortex-A55. |
 
 ### AEN platform
 
 These live under `examples/aen/` and target the E1M-AEN (Alif
 Ensemble) family on the E1M-EVK board (lead part: E8).
 
-`examples/aen/` has ~59 directories total; the 7 below are the
+`examples/aen/` has 66 directories total; the 9 below are the
 customer-facing catalog (the ones carrying a `board.yaml`).  The
-remaining ~52 are internal bring-up/regression apps (per-driver
+remaining 57 are internal bring-up/regression apps (per-driver
 regcheck, bench smoke tests, dual-core internal validation) --
 `board.yaml` presence is the reliable way to tell them apart, not
 their filename (some of those internal dirs don't follow a
@@ -241,6 +265,7 @@ their filename (some of those internal dirs don't follow a
 | `aen/aen-cc3501e-ble-gatt`      | Bench proof of the CC3501E BLE GATT-SERVER path (#480) through the portable `<alp/ble.h>` surface: register/advertise/gatt read-write-notify, server-only with no live central peer. |
 | `aen/aen-cc3501e-bringup`       | Host (M55-HE) bring-up of the on-module TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor -- power, reset, `PING`/`GET_VERSION`/`GET_DIAG_INFO`. |
 | `aen/aen-cc3501e-companion-tour` | Capstone full-surface tour of the CC3501E coprocessor: the portable wireless checkpoint plus every companion surface `aen-cc3501e-bringup` doesn't exercise. |
+| `aen/aen-cc3501e-gatt-register` | Bench PASS/FAIL gate for `alp_ble_gatt_register_service()` (#480/#892) -- registers a service on the CC3501E's NimBLE host over the inter-chip bridge; peer-free, no central-side discovery. |
 | `aen/aen-cc3501e-gpio`          | CC3501E GPIO proxy + camera-enable demo over the inter-chip SPI bridge. |
 | `aen/aen-eeprom-manifest`       | Read + decode the 128-byte Alp hardware-info manifest from the on-module 24C128 EEPROM over the portable `<alp/*>` API. |
 | `aen/aen-secure-element-sign`   | OPTIGA Trust M I2C_STATE probe over BRD_I2C (M55-HE); product-info/raw-APDU return `ALP_ERR_NOSUPPORT`. |
@@ -284,7 +309,7 @@ To adapt to your own project:
    * Heterogeneous projects: `ipc:` -- name a carve-out the
      orchestrator allocates from the SoM's `memory_map:`.
 3. Modify each core's `src/main.c` to whatever your app needs.
-4. `tan build .` from your project directory.
+4. `tan build` from your project directory.
 
 ## See also
 

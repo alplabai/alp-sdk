@@ -37,6 +37,17 @@
  *     include dir.
  * The driver COMPILES against v4.4.  vendor-ext, BENCH-UNVERIFIED (no panel
  * wired on this batch).
+ *
+ * ------------------------- alp-sdk divergence -------------------------
+ * cdc200_generic_write/_read and cdc200_display_write/_read (issue #1121)
+ * computed the framebuffer destination/source offset from (x, y, desc) with
+ * no validation: a rectangle extending past the layer's window, an
+ * undersized caller buffer, or an invalid pitch would all silently
+ * over/under-run the framebuffer or the caller's buffer. All four now call
+ * the shared cdc200_validate_transfer() (display_cdc200.h) before touching
+ * memory. Reapply this divergence if the file is ever re-synced from the
+ * fork.
+ * -------------------------------------------------------------------------
  */
 #define DT_DRV_COMPAT tes_cdc_2_1
 
@@ -423,6 +434,13 @@ int cdc200_generic_write(const struct device *dev, const uint16_t x, const uint1
 	uint8_t *dst_start;
 	uint16_t row;
 	size_t pix_size;
+	int ret;
+
+	ret = cdc200_validate_transfer(layer, x, y, desc);
+	if (ret) {
+		LOG_ERR("Invalid write transfer: rect/pitch/buffer out of bounds");
+		return ret;
+	}
 
 	width = layer->x1 - layer->x0;
 	pix_size = layer->pixel_size;
@@ -455,6 +473,13 @@ int cdc200_generic_read(const struct device *dev, const uint16_t x, const uint16
 	uint32_t width;
 	uint16_t row;
 	size_t pix_size;
+	int ret;
+
+	ret = cdc200_validate_transfer(layer, x, y, desc);
+	if (ret) {
+		LOG_ERR("Invalid read transfer: rect/pitch/buffer out of bounds");
+		return ret;
+	}
 
 	width = layer->x1 - layer->x0;
 	pix_size = layer->pixel_size;
@@ -576,9 +601,17 @@ int cdc200_display_write(const struct device *dev, uint8_t idx, const uint16_t x
 	uint8_t *dst_start;
 	uint16_t row;
 	size_t pix_size;
+	int ret;
 
 	if (idx > CDC_LAYER_2) {
 		return -EINVAL;
+	}
+
+	ret = cdc200_validate_transfer(layer, x, y, desc);
+	if (ret) {
+		LOG_ERR("Invalid write transfer on layer %d: rect/pitch/buffer out of bounds",
+			idx + 1);
+		return ret;
 	}
 
 	width = layer->x1 - layer->x0;
@@ -611,9 +644,17 @@ int cdc200_display_read(const struct device *dev, uint8_t idx, const uint16_t x,
 	uint32_t width;
 	uint16_t row;
 	size_t pix_size;
+	int ret;
 
 	if (idx > CDC_LAYER_2) {
 		return -EINVAL;
+	}
+
+	ret = cdc200_validate_transfer(layer, x, y, desc);
+	if (ret) {
+		LOG_ERR("Invalid read transfer on layer %d: rect/pitch/buffer out of bounds",
+			idx + 1);
+		return ret;
 	}
 
 	width = layer->x1 - layer->x0;

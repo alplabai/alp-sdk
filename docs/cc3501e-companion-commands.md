@@ -68,7 +68,16 @@ commands report the bridge is not ready. See
 | `wifi disconnect` | Tear down the STA association. |
 | `wifi ap <ssid> [pass] [wpa3]` | Start a soft-AP (omit `pass` for an open AP). |
 | `wifi ap-stop` | Stop the soft-AP. |
-| `wifi status` | Show connection state + RSSI + IP. |
+| `wifi status` | Show connection state + RSSI + IP. RSSI is a live radio read when connected -- can take ~10s (~20s if the link is wedged). |
+
+`wifi ap` cannot report a confirmed "up" against CC3501E firmware protocol
+v4: `cc3501e_wifi_ap_start()` submits the request once and returns
+immediately, with no independent AP-status channel to confirm against
+(issue #1385). A call that reaches the firmware still prints an error line —
+`ap start "<ssid>" unconfirmed (-4) -- firmware v4 has no AP status latch
+(#1385); check for the SSID out of band` — rather than `ap "<ssid>" up
+(...)`, even for an AP that came up correctly. Confirm the AP out of band
+(e.g. scan for its SSID from a peer).
 
 ## `alp companion ble`
 
@@ -100,10 +109,54 @@ commands report the bridge is not ready. See
 | Command | What it does |
 |---|---|
 | `sock tcp-get <ip> <port> <path>` | Open a TCP socket, issue an HTTP/1.0 `GET`, and print the reply. |
+| `sock serve <port> [seconds]` | Bind and listen on `<port>`, then answer each inbound HTTP request for `[seconds]` (default 60). |
 
-The socket primitives underneath `tcp-get` — `open`, `connect`, `send`,
-`recv`, `close` — are available from firmware as the `cc3501e_sock_*` API
-(the console exposes only the composed `tcp-get` helper).
+The socket primitives underneath these — `open`, `connect`, `bind`, `listen`,
+`send`, `recv`, `close` — are available from firmware as the `cc3501e_sock_*`
+API (the console exposes only the two composed helpers).
+
+`sock serve` is the **serving** direction, added in wire protocol v9: it is how
+a product with no Ethernet PHY puts a web console on the module's own soft-AP.
+Bring the AP up first (`wifi ap <ssid> <pass>`), then run `serve`; it prints the
+AP-side address to aim a client at. There is no `accept` command and no
+accept opcode on the wire — `accept()` blocks, and this bridge is strict
+request/reply lockstep, so an inbound connection is delivered as an
+`EVT_SOCK_ACCEPTED` event on the polled event queue instead, carrying a handle
+the host then uses with the ordinary `recv` / `send` / `close`.
+
+Two things to expect from `serve`:
+
+- **The shell is blocked for the whole window.** Zephyr's shell has no
+  cancellation hook a running command can poll, so ctrl-c does not cut it
+  short; pick a `[seconds]` you are willing to wait out.
+- **The host owns every accepted handle.** The firmware never closes one on the
+  host's behalf, so a serve loop that forgets `cc3501e_sock_close` leaks
+  firmware sockets until the IP stack runs out.
+
+## `alp companion spi1`
+
+The E1M connector's SPI1 pins land on the CC3501E, not the Alif — a carrier
+device on that bus is reached by **relay**: the CC3501E is the SPI
+controller and these verbs hand it the bytes over the inter-chip bridge (see
+[`cc3501e-bridge.md`](cc3501e-bridge.md)). CONFIGURE must succeed once per
+console session before TRANSFER; a session that skips it gets `NOT_READY`
+without anything touching the wire.
+
+| Command | What it does |
+|---|---|
+| `spi1 configure <freq_hz> <mode 0..3> <cs 0\|1>` | Acquire the SPI1 controller; print the reply's SCK and per-chunk cap. |
+| `spi1 xfer <hexbytes> [hold] [norx]` | Full-duplex chunk: clock the given bytes, print the RX bytes (`hold` leaves CS asserted, `norx` discards MISO). |
+| `spi1 read <len> [hold] [<fill>]` | The NO_TX half: clock `len` copies of `fill` (default `0xFF`) out, print what came back. |
+| `spi1 release` | Deassert CS, close SPI1, free the bus — the escape hatch, never fails. |
+
+`spi1 configure`'s printed SCK can read `sck unknown actual (...)` rather
+than a Hz value: the TI backend has no clock-divider read-back yet, so it
+reports the honest "not measured" answer instead of echoing the request as
+if it were a silicon measurement.
+
+The `cc3501e_spi1_configure` / `_transfer` / `_release` API underneath these
+verbs is documented in
+[`<alp/chips/cc3501e/core.h>`](../include/alp/chips/cc3501e/core.h).
 
 ---
 

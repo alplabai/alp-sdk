@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-05-18 against slice-3b state. -->
+<!-- Last verified: 2026-08-06 against alp-sdk (manifest layout, incl. magic wire-byte order, re-checked against include/alp/hw_info.h; program_eeprom.py --help output re-checked against the script's real CLI; production-rig I2C bus corrected per-SoM-family against docs/bring-up-aen.md, examples/aen/aen-eeprom-manifest/README.md and metadata/e1m_modules/*.yaml -- issue #1195, wave-4 review fixes). -->
 
 # Tutorial 13: EEPROM manifest provisioning
 
@@ -10,7 +10,8 @@ date programming flow.
 
 - A populated E1M module with an unprogrammed 24C128 EEPROM
   (factory state).
-- The board exposing BRD_I²C with a suitable USB-I²C adapter
+- The board exposing the EEPROM's I²C bus test points (family-
+  specific -- see §1 below) with a suitable USB-I²C adapter
   (Aardvark, MCP2221, FT232H).
 - Python 3.10+, `pip install pyyaml`.
 
@@ -30,18 +31,20 @@ calibrated.
 authoritative C struct):
 
 ```
-offset  size  field        description
-─────────────────────────────────────────────────────────────
-   0     4    magic         'ALPH' (0x41 0x4C 0x50 0x48)
-   4     1    schema_v1     0x01
-   5     4    family        ASCII zero-padded ("AEN_", "V2N_", ...)
-   9    16    sku           ASCII zero-padded ("E1M-AEN801")
-  25     8    hw_rev        ASCII zero-padded ("r1")
-  33    16    serial        ASCII; production-assigned
-  49     8    mfg_date      BCD: YYYYMMDD
-  57    67    reserved      zero-padded
- 124     4    crc32_le      CRC-32 (ISO-3309) over bytes 0..123
-─────────────────────────────────────────────────────────────
+offset  size  field          description
+──────────────────────────────────────────────────────────────────
+   0     4    magic           0x414C5048, little-endian uint32 ('ALPH'; wire bytes 0x48 0x50 0x4C 0x41 = 'HPLA')
+   4     4    schema_version  0x00000001 (little-endian)
+   8    16    family          ASCII, NUL-padded (e.g. "aen", "v2n")
+  24    24    sku             ASCII, NUL-padded (e.g. "E1M-AEN801")
+  48     8    hw_rev          ASCII, NUL-padded (e.g. "r1")
+  56    24    serial          ASCII, NUL-padded; production-assigned
+  80     2    mfg_year        uint16, little-endian (e.g. 2026)
+  82     1    mfg_month       uint8 (1..12)
+  83     1    mfg_day         uint8 (1..31)
+  84    40    reserved        zero-padded
+ 124     4    crc32           CRC-32 (ISO-3309) over bytes 0..123, little-endian
+──────────────────────────────────────────────────────────────────
 ```
 
 The CRC ensures a half-written manifest is caught at boot --
@@ -52,9 +55,19 @@ CRC doesn't match.
 
 Hardware:
 
-- USB-I²C adapter wired to the board's BRD_I²C test points
-  (SCL + SDA + GND).  Standard 1.8 V or 3.3 V level shifter on
-  the adapter, matching the SoM family.
+- USB-I²C adapter wired to the EEPROM's actual I²C bus test
+  points (SCL + SDA + GND).  Standard 1.8 V or 3.3 V level
+  shifter on the adapter, matching the SoM family.
+  **This is family-specific -- don't assume BRD_I²C:** on AEN
+  the EEPROM is bridge/DNP-selected onto its own **SoC I2C2**
+  (`P5_6 SCL_C` / `P5_7 SDA_C`), separate from BRD_I²C -- BRD_I²C
+  on AEN **is** SoC I2C0 (`P7_0`/`P7_1`, function C) and carries
+  the RTC/TMP112/OPTIGA instead (see `docs/bring-up-aen.md` §5.1 and
+  `examples/aen/aen-eeprom-manifest/README.md`); on V2N / V2N-M1
+  the EEPROM sits on its own `e1m_i2c0` bus, separate from
+  BRD_I²C (which carries the PMICs/RTC/OPTIGA/GD32 instead) --
+  see `metadata/e1m_modules/E1M-V2N101.yaml:56-59` /
+  `metadata/e1m_modules/E1M-V2M101.yaml:61-64`.
 - Board in factory-test mode (no application running --
   either powered through the USB-I²C alone, or running a
   factory-test firmware that gives I²C bus access to the
@@ -77,54 +90,56 @@ python3 -c "from aardvark_py import *; print(aa_find_devices(1))"
 
 ## 2. Build the per-device manifest data
 
-Per-device inputs:
+`scripts/program_eeprom.py` reads most of the manifest from the
+project's `board.yaml`, not from individual CLI flags:
 
-- **family** (`AEN_`, `V2N_`, `V2M_`, `NX9_`) -- from the SKU.
-- **sku** (`E1M-AEN801`) -- the SoM MPN.
-- **hw_rev** (`r1`, `r2`, ...) -- the PCB revision.
-- **serial** (`A20260514-0001`) -- production-assigned;
-  recommend a date prefix + sequence number.
-- **mfg_date** (`20260514`) -- the calendar date the unit
-  was tested.
+- **`board.yaml`** (`--board-yaml`, default `./board.yaml`) -- must
+  declare `som.sku` (the SoM MPN, e.g. `E1M-AEN801`).  The script
+  resolves **family** automatically from the SKU's
+  `metadata/e1m_modules/<SKU>.yaml` preset, and **hw_rev** from
+  `som.hw_rev` if present, else the preset's `default_hw_rev`.
+- **`--serial`** (`A20260514-0001`) -- production-assigned, max 23
+  ASCII characters; recommend a date prefix + sequence number.
+- **`--mfg-date`** (`2026-05-14`) -- ISO `YYYY-MM-DD`, the calendar
+  date the unit was tested.
 
-CRC32 is computed by the script.
+CRC32 is computed by the script.  Run `python3
+scripts/program_eeprom.py --help` for the authoritative flag list.
 
 ## 3. Run the programmer
 
 ```bash
 cd ~/work/alp-sdk
 
+cat > board.yaml <<'YAML'
+som:
+  sku: E1M-AEN801
+  hw_rev: r2
+YAML
+
 python3 scripts/program_eeprom.py \
-    --sku        E1M-AEN801 \
-    --hw_rev     r2 \
+    --board-yaml board.yaml \
     --serial     A20260514-0001 \
-    --mfg_date   2026-05-14 \
-    --i2c-adapter aardvark0 \
-    --i2c-addr   0x50 \
-    --eeprom-offset 0x0000
+    --mfg-date   2026-05-14 \
+    --output     build/eeprom-manifest.bin
 ```
 
 Expected output:
 
 ```
-[program_eeprom] resolved family from SKU: AEN_
-[program_eeprom] manifest layout:
-  magic       : 0x41 0x4C 0x50 0x48  ('ALPH')
-  schema_v1   : 0x01
-  family      : 'AEN_'
-  sku         : 'E1M-AEN801'
-  hw_rev      : 'r2'
-  serial      : 'A20260514-0001'
-  mfg_date    : 2026-05-14 (BCD 20260514)
-  crc32       : 0xC4B2A1E0 (LE)
-[program_eeprom] writing 128 bytes to /dev/i2c-1 0x50 offset 0x0000
-[program_eeprom] read-back verify: OK
-[program_eeprom] Done.
+program_eeprom: wrote 128 bytes to build/eeprom-manifest.bin
+  family   aen
+  sku      E1M-AEN801
+  hw_rev   r2
+  serial   A20260514-0001
+  mfg_date 2026-05-14
 ```
 
-The script writes the 128 bytes, reads them back, and verifies
-byte-for-byte equality.  Any mismatch aborts before the success
-message.
+The script only **packs** the 128-byte manifest and writes it to
+`--output` (default `./eeprom-manifest.bin`) -- it never talks to
+hardware itself.  Point your USB-I²C adapter's own write tooling at
+that file to program + read-back-verify the on-module EEPROM at
+offset `0x0000`.
 
 ## 4. Verify from device-side firmware
 
@@ -161,7 +176,7 @@ Expected on the UART:
 ```
 
 `alp_hw_info_read` verifies the magic + CRC; an unprogrammed
-EEPROM returns `ALP_ERR_NOT_READY` and the application can
+EEPROM returns `ALP_ERR_NOT_PROVISIONED` and the application can
 react (factory-test fallback, refuse to boot in production,
 etc.).
 
@@ -224,8 +239,8 @@ if (alp_hw_info_read(&info) == ALP_ERR_IO) {
 }
 ```
 
-See [`docs/board-id.md`](../board-id.md) for the full
-rationale + the per-family divider tables.
+See [`docs/board-id.md`](../board-id.md)'s Carrier note for the
+rationale.
 
 ## 7. Production-floor flow
 
@@ -252,7 +267,7 @@ get answered by looking up the record.
   C surface.
 - [`scripts/program_eeprom.py`](../../scripts/program_eeprom.py)
   -- the programmer tool source.
-- [`docs/board-id.md`](../board-id.md) -- the BOARD_ID ADC
-  companion design.
+- [`docs/board-id.md`](../board-id.md) -- the carrier-side
+  BOARD_ID divider path.
 - [`tests/scripts/test_program_eeprom.py`](../../tests/scripts/test_program_eeprom.py)
   -- unit tests for the layout encoder.

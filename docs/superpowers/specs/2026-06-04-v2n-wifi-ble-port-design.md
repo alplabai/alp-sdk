@@ -1,5 +1,13 @@
 # V2N/V2M Wi-Fi + BLE port — Murata LBEE5HY2FY-922 (design)
 
+> **Active.** Design spec dated 2026-06-04; still current design intent,
+> not settled history. Tracked by #479 (V2N/V2M Murata CYW55513
+> Wi-Fi/BLE Yocto stack is missing). Only the side-channel GPIO driver
+> (`include/alp/chips/murata_lbee5hy2fy.h`, `[UNTESTED]`) exists today --
+> the SDIO/brcmfmac Wi-Fi stack, BT UART/BlueZ stack and Yocto DT/kernel
+> wiring below have not been built. Cross-check the tree, but this is
+> the grounded design and should not be discarded.
+
 Date: 2026-06-04
 Status: approved (Approach A)
 Scope: E1M-V2N101/V2N102/V2M101/V2M102 (one PCB, variant-populated — a fix to
@@ -123,7 +131,7 @@ them. DT patches stay in the established carrier bbappend series.
 
 ## 7. alp-sdk changes
 
-- `firmware/gd32-bridge/`: pad-map bits 18/19 + boot power-on sequence +
+- `gd32-bridge-firmware:`: pad-map bits 18/19 + boot power-on sequence +
   `PROTOCOL_VERSION` minor bump (via the protocol-extension workflow,
   HIL-validated before merge). Done on a separate worktree branch; merged
   against the concurrent LCD-session bridge work when that lands.

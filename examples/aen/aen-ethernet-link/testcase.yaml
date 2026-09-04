@@ -42,8 +42,10 @@ tests:
     build_only: true   # no Ethernet HW in CI; end-to-end is a bench flash, not a run.
 
   # Compile-only proof for the new snps,designware-mdio controller
-  # (mdio_dwmac_alif.c, ADR 0017 Tier-1.5, BUILD-ONLY -- no MDIO-managed PHY
-  # exercised on real E8 silicon this batch). mdio-managed.overlay repoints
+  # (mdio_dwmac_alif.c, ADR 0017 Tier-1.5; the MDIO layer has since answered
+  # on real E8 silicon -- #1244 -- but a compile proof never scans the bus,
+  # which is why it could not catch the wrong PHY address on its own).
+  # mdio-managed.overlay repoints
   # &ethernet's phy-handle from the fixed-link eth_phy to the mdio-managed
   # eth_phy_managed (ti,dp83825): closes that the MDIO driver binds,
   # phy_ti_dp83825 binds on the bus, and the upstream eth_dwmac core's

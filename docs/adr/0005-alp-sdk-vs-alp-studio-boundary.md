@@ -12,9 +12,9 @@ power the E1M™ developer experience:
   repo.  Public C/C++ surface (`<alp/...>` headers), the per-OS
   backends behind it, chip drivers, chip metadata, and the
   hand-written reference apps under `examples/<peripheral>-<demo>/`.
-- [`alplabai/alp-studio`](https://github.com/alplabai/alp-studio) —
-  the visual programmer.  Block library, deterministic pin
-  allocator, codegen templates, and studio-level project tooling.
+- `alplabai/alp-studio` — the visual programmer (not a public GitHub
+  repo).  Block library, deterministic pin allocator, codegen
+  templates, and studio-level project tooling.
 
 The two repositories share infrastructure (chip metadata, ABI
 snapshot tooling, the public header surface) but serve genuinely

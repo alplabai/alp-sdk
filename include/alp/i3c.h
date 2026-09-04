@@ -23,9 +23,11 @@
  *          DT children -- a physically present but DT-undeclared target has
  *          no descriptor, so every op returns ALP_ERR_IO WITHOUT toggling a
  *          bus line.  That is indistinguishable from a NACK at this API, so
- *          if a soldered target answers nothing, check the devicetree first.  Timing (SCL rate) is devicetree-owned, not a config field --
- * the legal rate on a mixed I3C/I2C bus depends on the slowest device
- * populated, which is a board fact, not a per-open() choice.
+ *          if a soldered target answers nothing, check the devicetree first.
+ *
+ *          Timing (SCL rate) is devicetree-owned, not a config field --
+ *          the legal rate on a mixed I3C/I2C bus depends on the slowest
+ *          device populated, which is a board fact, not a per-open() choice.
  *
  * Legacy I2C devices: a legacy (non-I3C) target sharing this bus is NOT
  * driven through this handle.  It rides the existing alp_i2c_* surface via
@@ -42,7 +44,13 @@
  * Backends:
  *   - Zephyr   : upstream `i3c_*` driver class (Synopsys DesignWare
  *                i3c_dw.c, "snps,designware-i3c") via DT alias alp-i3c0.
- *   - Yocto    : none yet; sw_fallback (open succeeds, ops NOSUPPORT).
+ *   - Yocto    : a bus PRESENCE check only (src/backends/i3c/yocto_drv.c,
+ *                issue #1147) -- confirms the controller exists under
+ *                /sys/bus/i3c/devices/i3c-N (N == bus_id).  write() / read() /
+ *                write_read() stay ALP_ERR_NOSUPPORT on every mainline
+ *                kernel: unlike I2C's ioctl(I2C_RDWR), Linux has NO
+ *                generic userspace raw-transfer ABI for I3C at all --
+ *                the subsystem is kernel-driver-bind-only.
  *   - Baremetal: none yet; sw_fallback.
  *
  * Typical usage:
@@ -57,7 +65,7 @@
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      New class.  Controller init is BENCH-PROVEN on E1M-AEN801 silicon
- *      (labgrid place e1m-aen-evk-01, Flow C ITCM RAM-run, 2026-07-25):
+ *      (Flow C ITCM RAM-run, 2026-07-25):
  *      lpi3c0 binds, `device_is_ready()` passes, and `alp_i3c_open()`
  *      returns a handle -- so the `ALIF_LPI3C_CLK` clock-id and the
  *      P7_6/P7_7 fn3 pinctrl are confirmed correct, which was the risk
@@ -111,15 +119,34 @@ typedef struct {
  *
  * @param[in] cfg  Bus configuration.  Must be non-NULL.
  *
- * @return Open handle on success, or NULL on any of:
- *         - @p cfg is NULL
- *         - @c bus_id out of range (>= the ACTIVE SoC's I3C count,
- *           ALP_SOC_I3C_COUNT -- not the form-factor count, which may be
- *           smaller) or unresolvable on the active SoM
- *         - underlying controller not ready
- *         - handle pool exhausted
- *         with @ref alp_last_error set to ALP_ERR_INVAL / ALP_ERR_NOT_READY /
- *         ALP_ERR_NOT_PRESENT_ON_THIS_SOC / ALP_ERR_NOSUPPORT.
+ * @return Open handle on success, or NULL on failure with
+ *         @ref alp_last_error set to:
+ *           @ref ALP_ERR_INVAL (@p cfg is NULL; or @c bus_id out of range,
+ *             >= the ACTIVE SoC's I3C count, ALP_SOC_I3C_COUNT -- not the
+ *             form-factor count, which may be smaller; the Zephyr backend
+ *             additionally rejects @c bus_id >= its own DT-instance count
+ *             under CONFIG_ALP_SOC_NONE, where ALP_SOC_I3C_COUNT is
+ *             UINT16_MAX and the SoC-count gate above never rejects);
+ *           @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC (no I3C backend resolves
+ *             for the active SoM -- not reachable through any shipped
+ *             backend today, since sw_fallback registers silicon_ref
+ *             "*" and links into every build);
+ *           @ref ALP_ERR_NOT_IMPLEMENTED (the selected backend declares
+ *             no open op -- not reachable through any shipped backend
+ *             today);
+ *           @ref ALP_ERR_NOT_READY (underlying controller not ready);
+ *           @ref ALP_ERR_NOMEM (the handle pool is exhausted --
+ *             CONFIG_ALP_SDK_MAX_I3C_HANDLES buses already open);
+ *           @ref ALP_ERR_NOSUPPORT (Zephyr backend only, and only when
+ *             built WITHOUT CONFIG_I3C_CONTROLLER -- either CONFIG_I3C=n,
+ *             or CONFIG_I3C=y with CONFIG_I3C_TARGET_ROLE_ONLY selected --
+ *             no controller role compiled in, so every op including
+ *             open() is unsupported.  CONFIG_I3C itself defaults to n, so
+ *             NOSUPPORT is the default outcome; once a board sets
+ *             CONFIG_I3C=y the controller role is on by default (the
+ *             I3C_MODE choice defaults to CONFIG_I3C_DUAL_ROLE), and
+ *             NOSUPPORT then requires explicitly selecting
+ *             CONFIG_I3C_TARGET_ROLE_ONLY).
  */
 alp_i3c_t *alp_i3c_open(const alp_i3c_config_t *cfg);
 

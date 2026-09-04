@@ -62,10 +62,10 @@ if a developer wants to override per-tree.
 
 ### Underlying layer
 
-The orchestrator output drives
+The planner output drives
 [`meta-alp-sdk/conf/distro/include/mender.inc`](../meta-alp-sdk/conf/distro/include/mender.inc),
 which `meta-alp-sdk` pulls in via the generated `INHERIT +=` line.
-See the [`meta-alp-sdk` README](../meta-alp-sdk/README.md#ota-via-mender)
+See the [`meta-alp-sdk` README](../meta-alp-sdk/README.md#ota-via-mender-opt-in)
 for the layer-level walk-through if you're working below the
 `board.yaml` surface.
 
@@ -120,10 +120,20 @@ AEN's MCUboot scaffolding (see [`docs/secure-boot.md`](secure-boot.md))
 sets up the signed-image verification half.  The delivery half
 is open between two viable options:
 
+**Current AEN family hardware note:** the flash map below assumes a
+secondary (OTA) slot.  The AEN family's MRAM partition map does not
+have one -- `slot1_partition` and `scratch_partition` were removed by
+#1100 (AEN801) and #1445 (the rest of the family) to fit the disjoint
+dual-core slot0 budget (see
+[`zephyr/sysbuild/aen/sysbuild.conf`](../zephyr/sysbuild/aen/sysbuild.conf)
+and ADR-0006's 2026-08-25 amendment).  Both options below need that
+slot added back, or a different delivery shape, before OTA is possible
+on the AEN family.
+
 ### Option A — Mender Zephyr client (preferred)
 
 Mender's Zephyr support is upstream as the
-[`mender-mcu-client`](https://github.com/mendersoftware/mender-mcu-client)
+[`mender-mcu-client`](https://github.com/mendersoftware/mender-mcu)
 library (Apache-2.0).  It targets Zephyr v3.6+ + MCUboot + LwM2M
 or HTTPs transport; the v0.4-final integration:
 
@@ -144,7 +154,7 @@ Caveats:
 ### Option B — Hawkbit + bespoke wire
 
 Eclipse Hawkbit is a Mender-alternative deployment server with a
-mature Zephyr client ([`zephyr/subsys/mgmt/hawkbit`](https://docs.zephyrproject.org/latest/services/device_mgmt/hawkbit.html)).
+mature Zephyr client ([`zephyr/subsys/mgmt/hawkbit`](https://docs.zephyrproject.org/latest/services/device_mgmt/ota.html)).
 Trade-off: smaller footprint, more bespoke server-side ops.
 Picked only if Mender's Zephyr client misses a hard requirement.
 
@@ -163,9 +173,9 @@ Alif Ensemble main SoC through the inter-chip SPI1 bus, not
 the CC3501E's own flash.  The CC3501E firmware is **not** updated
 via the same OTA path -- it has its own upgrade flow (Alp-internal
 release tooling in `alp-sdk-internal` produces the version-pinned
-blob under `firmware/cc3501e/prebuilt/`; the firmware source is
+blob under `cc3501e-bridge-firmware:prebuilt/`; the firmware source is
 embedded in alp-sdk at
-[`firmware/cc3501e/`](../firmware/cc3501e/) per
+[`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware) per
 [ADR 0015](adr/0015-cc3501e-firmware-embedded.md)).
 Decoupling the two firmwares means a failed CC3501E update can't
 brick the Alif side and vice versa.

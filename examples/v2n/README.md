@@ -18,7 +18,7 @@ captured in [`docs/bring-up-v2n-m1.md`](../../docs/bring-up-v2n-m1.md).
 | [`v2n-gd32-bridge-hil-soak`](v2n-gd32-bridge-hil-soak/) | Pass/fail soak of the WHOLE GD32 bridge command set over the 25 MHz SPI fast path -- every opcode round-trips each cycle with a self-contained verification. |
 | [`v2n-board-id-readout`](v2n-board-id-readout/)        | Read the 128-byte SoM EEPROM manifest + assert the runtime SKU matches the firmware build's expected SKU.                                       |
 | [`v2n-brd-i2c-bringup`](v2n-brd-i2c-bringup/)          | Patch-day diagnostic for the SoM's BRD_I2C management bus (Renesas RIIC8) -- scan, separate bus-level faults from per-device failures, then read-only probe every populated IC. |
-| [`v2n-eeprom-manifest-dump`](v2n-eeprom-manifest-dump/)| Hexdump + structured decode of the EEPROM manifest at offset 0x0000 (magic, schema_v1, family, sku, hw_rev, serial, mfg_date, CRC32).            |
+| [`v2n-eeprom-manifest-dump`](v2n-eeprom-manifest-dump/)| Hexdump + structured decode of the EEPROM manifest at offset 0x0000 (magic, schema_version, family, sku, hw_rev, serial, mfg_year/mfg_month/mfg_day, CRC32).            |
 | [`v2n-ethernet-dual`](v2n-ethernet-dual/)              | Bring up both RTL8211FDI PHYs (ET0 + ET1) -- probe, reset, autoneg, link, Wake-on-LAN config.                                                    |
 | [`v2n-rtc-multi-alarm`](v2n-rtc-multi-alarm/)          | Register per-source callbacks on the rv3028c7 multi-source alarm dispatcher (timer + periodic + clock-out + manual).                             |
 | [`v2n-temp-sensor`](v2n-temp-sensor/)                  | Read the on-module TMP112 once per second and print degrees Celsius.                                                                             |
@@ -27,6 +27,9 @@ captured in [`docs/bring-up-v2n-m1.md`](../../docs/bring-up-v2n-m1.md).
 | [`v2n-xspi-flash-readwrite`](v2n-xspi-flash-readwrite/)| Erase + write + read-back one page on the on-module xSPI NOR.                                                                                    |
 | [`v2n-emmc-block-stat`](v2n-emmc-block-stat/)          | Disk-access ioctls + first-block read on the on-module eMMC.                                                                                     |
 | [`v2n-gd32-swd-flash`](v2n-gd32-swd-flash/)            | Host-driven SWD bit-bang on the GD32 supervisor -- connect, halt, mass-erase, program, verify, reset.                                            |
+| [`v2n-m1-deepx-inference`](v2n-m1-deepx-inference/)    | DEEPX DX-M1 NPU bring-up + single inference through `<alp/inference.h>` on a V2N-M1 SoM. native_sim exercises the NOSUPPORT framing; the V2N-M1 target is `build_only: true` until the customer-side DEEPX `dx_rt` runtime integration ships. |
+| [`v2n-m1-ros-perception`](v2n-m1-ros-perception/)      | ROS 2 perception node for V2N + V2N-M1 (DRP-AI3 fallback on V2N, DEEPX DX-M1 over PCIe on V2N-M1). `[UNTESTED]` -- no `testcase.yaml`; not built or gated by CI. |
+| [`v2n-power-monitor`](v2n-power-monitor/)              | Live per-rail power table (3V3/1V8/VCAM2/VCAM3 via on-board INA236s) from a Linux/Yocto user-space app on the V2N A55. No `testcase.yaml`; not built or gated by CI. |
 
 ## Why a separate index here
 

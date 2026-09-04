@@ -6,9 +6,9 @@
 ADR-0020 Phase 4 (preview) retired the SDK-side executor -- the
 `Orchestrator` class that fanned build sub-processes out and materialised
 artefacts to disk.  What remains here is pure, side-effect-free: resolving
-what a slice's build command WOULD be, so `emit_build_plan` can describe it
-to an external consumer (`tan`, alplabai/tan-cli, / alp-studio) that owns
-execution.
+what a slice's build command WOULD be, so `emit_build_plan` can describe the
+SDK reference plan to parity tooling, Alp Studio, or Python Tan's explicit
+`--plan-from` path. Normal Tan builds use the relocated equivalent in process.
 """
 
 from __future__ import annotations
@@ -68,9 +68,46 @@ def _slice_flash_recipe(
         # downstream consumer (tan) needs to pick that path over the
         # SETOOLS/SE-UART fallback. Absent for every non-AEN slice today,
         # so the args dict stays `{}` -- no shape change for them.
+        #
+        # `expect_dpidr` + `jlink_device` are the read-only SW-DP IDR
+        # wrong-board preflight (#1355) and are emitted as ONE inseparable
+        # pair: the expected debug-port ID, and the live-core attach profile
+        # the read is performed with. Without them a real MRAM write can
+        # proceed against whatever board answered -- measured on silicon
+        # 2026-08-10, four transcripts, `ISSUES = []` and no guard -- because
+        # `JLinkExe` selects a probe only by serial (`-SelectEmuBySN`) and
+        # this bench has an OEM-cloned serial across two probes on different
+        # boards. Emitting exactly one of the two is NOT a partial win: tan's
+        # `validate_flow_d_preflight_args` refuses a half-armed pair at plan
+        # time, so it would hard-fail every AEN flash including a dry run.
+        # `loader._resolve_flow_d_preflight` guarantees the both-or-neither
+        # shape upstream; the `and` here makes that guarantee locally
+        # readable rather than assumed at a distance.
+        #
+        # `slot0_load_address` (tan-cli#353) is the AEN MRAM slot0-XIP
+        # address the slice's application blob is linked at -- the fact
+        # Flow D's auto-sign-via-SETOOLS path needs and, before this,
+        # alp-sdk never emitted, so tan correctly armed Flow D and then
+        # refused (`flash_args.slot0_load_address is required`), forcing a
+        # customer to hand-edit `system-manifest.yaml`. Independent of the
+        # `expect_dpidr`/`jlink_device` pair above -- see
+        # `loader._resolve_slot0_load_address` for where it comes from.
         args: dict[str, Any] = {}
-        if slice_.jlink_flash_device:
+        # PRESENCE, not truthiness (#1295, tan-cli#734): a schema-declared
+        # `jlink_flash_device: null` is a published "no known J-Link flash
+        # profile" and must reach `flash_args` AS a present null, so the
+        # consumer's presence-based check (tan's `flash_plan._fa_has_key`)
+        # sees it and refuses loudly.  A truthiness test drops it, which
+        # re-collapses declared-null into absent and silently downgrades
+        # Flow D to the SE-UART Flow A path -- the exact failure the null
+        # exists to prevent.  Absent still emits nothing.
+        if slice_.jlink_flash_device_declared or slice_.jlink_flash_device is not None:
             args["jlink_flash_device"] = slice_.jlink_flash_device
+        if slice_.expect_dpidr and slice_.jlink_device:
+            args["expect_dpidr"] = slice_.expect_dpidr
+            args["jlink_device"] = slice_.jlink_device
+        if slice_.slot0_load_address:
+            args["slot0_load_address"] = slice_.slot0_load_address
         return ("zephyr_west_flash", args)
     if slice_.os == "baremetal":
         return ("baremetal_cmake_flash", {})
@@ -162,7 +199,7 @@ class UnknownBoardTargetError(ValueError):
 def _tokenize(path: Path, base_dir: Path, repo: Path) -> str:
     """Render an absolute path as a portable `${PROJECT_ROOT}`/`${SDK_ROOT}`
     token (issue #865) instead of baking in THIS checkout's absolute path.
-    tan-cli (PR #24) substitutes both tokens at materialise time, so a plan
+    tan-cli's plan reader substitutes both tokens at materialise time, so a plan
     emitted on one machine/checkout can be materialised faithfully on
     another -- the split-brain risk a baked-in absolute path invites.
 
@@ -218,10 +255,21 @@ def _slice_command(
                 project.sku, slice_.core_id, slice_.board, real_boards)
         # NB: no explicit `-d`. west's default output is <cwd>/build (a
         # subdirectory of the command's cwd = buildDir), so the tree lands
-        # at <buildDir>/build/; the consumer (tan) reconciles that nested
-        # layout when it resolves artefacts. Adding `-d <buildDir>` here
-        # would double-nest (west resolves a relative -d against its cwd,
+        # at <buildDir>/build/. Adding `-d <buildDir>` here would
+        # double-nest (west resolves a relative -d against its cwd,
         # already = buildDir) -- see finding M14.
+        #
+        # The consumer does NOT have to reconcile that nesting any more:
+        # `_slice_artifacts` reports the `<buildDir>/build/...` paths west
+        # actually writes (issue #1360). `-d .` was the alternative -- it
+        # would move west's tree to <buildDir> itself and make the old
+        # un-nested `artifacts` spelling true -- and was REJECTED: this
+        # slice's `alp.conf` is materialised at <buildDir>/alp.conf and
+        # handed to this very command via `-DEXTRA_CONF_FILE=`, so making
+        # <buildDir> west's own build dir puts that file inside the tree
+        # `west build -p` (or a `--pristine=auto` board/app change) wipes,
+        # deleting the fragment the command line points at. Today it sits
+        # one level ABOVE west's tree, where pristine cannot reach it.
         # Tokenized (issue #865): `_zephyr_app_dir` resolves an absolute
         # path (project-anchored for a customer app, SDK-anchored for the
         # stock M-core shim) -- see `_tokenize`.
@@ -250,7 +298,7 @@ def _slice_command(
         # emitted once by whichever Python ran the planner, but may be
         # materialised on a different host/checkout than that -- baking in
         # a concrete interpreter path here would pin THIS run's Python, not
-        # the consumer's. tan-cli (PR #24) substitutes ${PYTHON} with its
+        # the consumer's. tan-cli's `--plan-from` path substitutes ${PYTHON} with its
         # own resolved interpreter (forward-slashed for the same CMake
         # backslash-escape reason issue #787/#849 fixed: CMake parses
         # `\U`/`\N` etc. in a Windows path as an invalid character escape)
@@ -354,12 +402,226 @@ def _slice_command(
     if slice_.os == "baremetal":
         if not slice_.app:
             return None
-        # `-S` tokenized (issue #865) same as the zephyr app-dir arg above;
-        # `-B` (`slice_.build_dir`) is already relative -- left alone.
+        # `-S` tokenized (issue #865) same as the zephyr app-dir arg above.
         app_path = _tokenize(_resolve_app_path(slice_.app, base_dir),
                               base_dir, REPO)
-        return ["cmake", "-S", app_path, "-B", str(slice_.build_dir)]
+        # `-B .`, NOT `-B <slice_.build_dir>`: the plan pins this command's
+        # `cwd` to the slice's buildDir (schema: "always equal to this
+        # slice's buildDir"), and cmake resolves a relative `-B` against
+        # its own cwd -- so the historical `-B build/<core>-baremetal`
+        # double-nested the tree at `<buildDir>/build/<core>-baremetal/`,
+        # where nothing that reads `artifacts`/`buildDir` would ever find
+        # it (tan-cli#550). The zephyr branch avoids that SECOND level by
+        # emitting no `-d` at all (finding M14, above); the one level west
+        # still adds on its own is reported honestly by `_slice_artifacts`
+        # rather than left for the reader to add back (issue #1360).
+        return [
+            "cmake", "-S", app_path, "-B", ".",
+            # Every `-D` below is set BY THIS PLANNER, not by the customer,
+            # and an app is free to consume none of them -- CMake would then
+            # end each configure with `CMake Warning: Manually-specified
+            # variables were not used by the project: ALP_SOM_FAMILY,
+            # ALP_TOOLCHAIN, ...`, a warning about the planner's own
+            # behaviour that the customer can neither act on nor silence.
+            "--no-warn-unused-cli",
+            # A best-effort IDE convenience, NOT a promise: CMake implements
+            # `CMAKE_EXPORT_COMPILE_COMMANDS` "only by Makefile Generators
+            # and Ninja Generators. It is ignored on other generators"
+            # (CMake's own docs for the variable). This planner does not
+            # choose the generator, so `artifacts.compileCommands` stays
+            # null -- see `buildplan._slice_artifacts`.
+            "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+            # Pins WHERE the slice's linked executables land
+            # (`artifacts.outputDir`). The app's own CMakeLists.txt picks
+            # the target NAMES -- not an SDK convention this planner may
+            # invent -- so the directory is the strongest honest claim
+            # available.
+            #
+            # ABSOLUTE (tokened, #865) on purpose: CMake resolves a RELATIVE
+            # CMAKE_RUNTIME_OUTPUT_DIRECTORY against each target's own
+            # CMAKE_CURRENT_BINARY_DIR, so a relative value would scatter a
+            # multi-subdirectory app's outputs instead of pinning them.
+            #
+            # Wrapped in the no-op generator expression `$<1:...>` on
+            # purpose too: "Multi-configuration generators (Visual Studio,
+            # Xcode, Ninja Multi-Config) append a per-configuration
+            # subdirectory to the specified directory UNLESS A GENERATOR
+            # EXPRESSION IS USED" (CMake's own RUNTIME_OUTPUT_DIRECTORY
+            # docs). Without it the plan says `<buildDir>/output` while the
+            # binary is at `<buildDir>/output/Debug/` on every
+            # multi-config generator -- measured on Ninja Multi-Config, and
+            # the default generator on Windows (Visual Studio) is one.
+            f"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$<1:"
+            f"{_tokenize(_baremetal_output_dir(slice_, base_dir), base_dir, REPO)}>",
+            # tan-cli#551: the slice's `-DALP_SOM_SKU` / `-DALP_SOM_FAMILY`
+            # / `-DALP_CORE_ID` / `-DALP_TOOLCHAIN` / NPU-dispatch cache
+            # entries. They used to be rendered ONLY into a `cmake-args.txt`
+            # nothing ever read, then dropped outright with that artefact
+            # (#1278) -- the configure has never carried a single one of
+            # them. The bare `#if defined(...)` guards from the same source
+            # (`ALP_BOARD_<slug>`, `ALP_SOM_<SKU>`) CANNOT ride here (cmake
+            # rejects a `-D` with no `=value`); they arrive as real compiler
+            # definitions via -DCMAKE_PROJECT_INCLUDE below.
+            *_baremetal_cache_args(project, slice_),
+            *_baremetal_project_include_arg(project, slice_, base_dir),
+        ]
     return None
+
+
+def _baremetal_output_dir(slice_: Slice, base_dir: Path) -> Path:
+    """Absolute directory a baremetal slice's linked executables land in.
+
+    Anchored on `base_dir` (the board.yaml's own directory), never
+    `Path.cwd()`, so the emitted plan is byte-identical wherever it is
+    emitted from -- the same rule `_resolve_app_path` and the zephyr
+    branch's `-DEXTRA_CONF_FILE` follow (issue #596).
+    """
+    out = Path(slice_.build_dir)
+    if not out.is_absolute():
+        out = Path(base_dir) / out
+    return (out / "output").resolve()
+
+
+#: Filename of the generated CMake include a baremetal slice's configure
+#: pulls in via `-DCMAKE_PROJECT_INCLUDE`.  Shared by `_slice_command`
+#: (which references it) and `buildplan._slice_config_artefact` (which
+#: renders its contents) so the two cannot name different files.
+BAREMETAL_PROJECT_INCLUDE = "alp-baremetal.cmake"
+
+
+def _baremetal_alp_lines(project: BoardProject, slice_: Slice) -> list[str]:
+    """The slice's `-D` lines, read from the SINGLE source that renders
+    them -- `kconfig.py::_slice_cmake_args`, the same text
+    `alp_project.py --emit cmake-args` prints -- so the plan's configure
+    and that emit can never drift.
+
+    That emit is a TEXT format, not an argv: it opens with a
+    `# Auto-generated ...` banner, and `libraries.baremetal_cmake_args`
+    contributes `# library <name>: <cmake hint>` lines that are prose FOR
+    A HUMAN (no `-D` in them at all).  Only real flags survive here --
+    handing cmake a `#`-prefixed line would make it a stray source-dir
+    argument, not a define.
+    """
+    # Lazy: `kconfig` is a heavier sibling, and `buildplan` already imports
+    # this module lazily for the same cycle-avoidance reason.
+    from .kconfig import _slice_cmake_args
+
+    return [line for line in _slice_cmake_args(project, slice_).splitlines()
+            if line.startswith("-D")]
+
+
+def _baremetal_cache_args(
+    project: BoardProject,
+    slice_: Slice,
+) -> list[str]:
+    """The `-DNAME=VALUE` subset of the slice's `-D` lines -- CMake CACHE
+    entries, safe to pass on the configure command line verbatim.
+
+    Split from the bare `-DNAME` guards on the one thing that actually
+    distinguishes them: `cmake -D` REQUIRES `VAR[:type]=value` and exits
+    1 with `Parse error in command line argument: ALP_BOARD_E1M_EVK /
+    Should be: VAR:type=value` on anything else (measured, not assumed).
+    `docs/board-config-emit.md` documents that split from the other side.
+    """
+    return [line for line in _baremetal_alp_lines(project, slice_)
+            if "=" in line]
+
+
+def _baremetal_compile_guards(
+    project: BoardProject,
+    slice_: Slice,
+) -> list[str]:
+    """The bare `-DNAME` subset of the slice's `-D` lines, `-D` stripped.
+
+    These are compile-time `#if defined(...)` guards, NOT cache entries:
+    `ALP_BOARD_<SLUG>` gates `include/alp/board.h`'s board facade and
+    `ALP_SOM_<SKU>` gates the per-SKU override block in the generated
+    `<alp/soc_caps.h>`.  A CMake cache variable of the same name is
+    invisible to the preprocessor, so they only do their job as real
+    compiler definitions -- which is what `_baremetal_project_include`
+    turns them into.  Zephyr slices get the identical guards through
+    `CONFIG_COMPILER_OPT="-D..."` in their alp.conf.
+    """
+    return [line[len("-D"):]
+            for line in _baremetal_alp_lines(project, slice_)
+            if "=" not in line]
+
+
+def _baremetal_project_include(
+    project: BoardProject,
+    slice_: Slice,
+) -> Optional[str]:
+    """Contents of the slice's generated `alp-baremetal.cmake`, or None
+    when the slice needs no compile-time guards.
+
+    Wired into the configure as `-DCMAKE_PROJECT_INCLUDE=<abs path>`,
+    which CMake includes at the end of every `project()` call (CMake
+    3.15+, comfortably below the repo-wide `cmake_minimum_required(VERSION
+    3.20)`).  Deliberately NOT `-DCMAKE_C_FLAGS=-DALP_BOARD_...`: setting
+    that variable from the command line seeds the cache entry itself, so a
+    firmware toolchain file's `CMAKE_C_FLAGS_INIT` (`-mcpu=cortex-m55
+    -mfloat-abi=hard`, ...) would never be applied -- silently building the
+    slice for the wrong core.  `add_compile_definitions` only ADDS, and
+    cannot drop a flag.
+    """
+    guards = _baremetal_compile_guards(project, slice_)
+    if not guards:
+        return None
+    lines = [
+        "# Auto-generated by scripts/alp_orchestrate -- do not edit.",
+        "# Pulled in by the slice's configure via -DCMAKE_PROJECT_INCLUDE.",
+        "# Compile-time guards <alp/board.h> / <alp/soc_caps.h> test with",
+        "# #if defined(...); a CMake cache variable would not reach the",
+        "# preprocessor at all.",
+        f"add_compile_definitions({' '.join(guards)})",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _baremetal_project_include_arg(
+    project: BoardProject,
+    slice_: Slice,
+    base_dir: Path,
+) -> list[str]:
+    """`['-DCMAKE_PROJECT_INCLUDE=<abs tokened path>']`, or `[]` when the
+    slice has no guards to carry (absence-emits-nothing: no dangling
+    reference to a file `_slice_config_artefact` would not have written).
+
+    ABSOLUTE and `base_dir`-anchored, never cwd-relative: CMake resolves a
+    relative `CMAKE_PROJECT_INCLUDE` against the SOURCE dir of the
+    `project()` that pulls it in, which is the app's tree, not the slice's
+    build dir. Same anchoring rule as the zephyr branch's
+    `-DEXTRA_CONF_FILE` (issue #596) and tokened the same way (#865).
+    """
+    if _baremetal_project_include(project, slice_) is None:
+        return []
+    inc = Path(slice_.build_dir)
+    if not inc.is_absolute():
+        inc = Path(base_dir) / inc
+    inc = (inc / BAREMETAL_PROJECT_INCLUDE).resolve()
+    return [f"-DCMAKE_PROJECT_INCLUDE={_tokenize(inc, base_dir, REPO)}"]
+
+
+def _slice_post_commands(slice_: Slice) -> list[list[str]]:
+    """Argv steps that MUST run, in order, AFTER the slice's `command`.
+
+    `west build` (zephyr) and `bitbake` (yocto) each configure AND build in
+    one invocation, so they need none. `cmake -S ... -B ...` only
+    CONFIGURES: without the `cmake --build` step below, a baremetal slice
+    exits 0 having produced a `CMakeCache.txt` and no object file, no
+    archive and no executable -- a green build over an empty output
+    directory (tan-cli#550).
+
+    `.` (not the build dir path) for the same cwd-relative reason
+    `_slice_command`'s baremetal `-B .` uses; the caller pairs every step
+    with the slice's buildDir as its `cwd`.
+
+    No `--parallel`: job-count is the consumer's scheduling policy, the
+    same reason the plan carries no `sequential` key.
+    """
+    if slice_.os == "baremetal":
+        return [["cmake", "--build", "."]]
+    return []
 
 
 def _resolve_app_path(app: str, base_dir: Path) -> Path:

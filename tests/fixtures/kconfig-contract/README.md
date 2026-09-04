@@ -9,7 +9,7 @@ returns), exercising every field and every Kconfig type
 
 Both downstream consumers test against this exact file:
 
-- tan-cli's `parse_kconfig` (`alplabai/tan-cli`, `crates/tan-core`)
+- Python Tan's Kconfig parser (`alplabai/tan-cli`, `python/tan/commands/kconfig_cmd.py`)
 - alp-sdk-vscode's `kconfigSymbolsFromEnvelope` (`alplabai/alp-sdk-vscode`,
   `src/`)
 

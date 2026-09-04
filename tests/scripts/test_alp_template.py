@@ -39,6 +39,31 @@ def _minimal_record() -> dict:
     return alp_template.find_template(_catalog(), "minimal")
 
 
+def _no_paragraph_break_between(text: str, start_marker: str, end_marker: str) -> bool:
+    """True iff the span from `start_marker` to `end_marker` has no blank
+    line and no HTML-block opener (`<...`, optionally indented 0-3 spaces
+    per CommonMark's rule for HTML blocks types 1-6 -- a `<!--` comment is
+    type 2) between them. This is a targeted proxy for the #1794 defect
+    shape, NOT a general CommonMark block-boundary oracle: it does not
+    detect the other paragraph-interrupting constructs (ATX headings,
+    thematic breaks, fenced code, block quotes, list markers, setext
+    underlines) -- those are out of scope here. A stray HTML-block opener
+    at column 0-3 is how issue #1794 silently split a sentence into two
+    `<p>` tags; a 4-space indent is an indented code block and does NOT
+    interrupt a paragraph, so it must NOT trip this check. `markdown_it`
+    is not a declared project dependency (not in
+    pyproject.toml/scripts/requirements.txt, so not installed by the CI
+    `pip install -e ".[dev,model-compile]"` step that runs `pytest
+    tests/scripts/`) -- this stdlib-only check pins the same fact without
+    adding one."""
+    start = text.index(start_marker)
+    end = text.index(end_marker, start)
+    between = text[start + len(start_marker):end]
+    if "\n\n" in between:
+        return False
+    return not any(re.match(r" {0,3}<", line) for line in between.split("\n"))
+
+
 # --------------------------------------------------------------------------
 # render(): faithful copy of files.user_owned, files.generated excluded
 # --------------------------------------------------------------------------
@@ -174,6 +199,63 @@ def test_minimal_has_no_declared_parameters_so_it_is_a_pure_copy():
 
 
 # --------------------------------------------------------------------------
+# find_template_by_cores() -- the --cores scaffold selector (issue #1652)
+# --------------------------------------------------------------------------
+
+def test_find_template_by_cores_selects_multicore_mailbox():
+    rec = alp_template.find_template_by_cores(
+        _catalog(), {"m55_hp": "zephyr", "m55_he": "zephyr"})
+    assert rec["id"] == "multicore-mailbox"
+
+
+def test_find_template_by_cores_selects_multicore_rpmsg():
+    rec = alp_template.find_template_by_cores(
+        _catalog(), {"a32_cluster": "yocto", "m55_hp": "zephyr"})
+    assert rec["id"] == "multicore-rpmsg"
+
+
+def test_find_template_by_cores_topology_order_does_not_matter():
+    """dict equality, not list equality -- {a: 1, b: 2} == {b: 2, a: 1}."""
+    rec = alp_template.find_template_by_cores(
+        _catalog(), {"m55_hp": "zephyr", "a32_cluster": "yocto"})
+    assert rec["id"] == "multicore-rpmsg"
+
+
+def test_find_template_by_cores_no_match_names_known_topologies():
+    with pytest.raises(alp_template.TemplateNotFoundError) as exc:
+        alp_template.find_template_by_cores(
+            _catalog(), {"m55_hp": "zephyr", "m55_he": "yocto"})
+    # `multicore-mailbox`'s real topology (m55_hp+m55_he, both zephyr)
+    # is in the "known" list, so a wizard can see what IS on offer.
+    assert "m55_he" in str(exc.value)
+    assert "zephyr" in str(exc.value)
+
+
+def test_find_template_by_cores_ambiguous_topology_names_candidates():
+    """`{"m55_hp": "zephyr"}` alone matches every single-M55-core AEN
+    template (minimal/peripheral/sensor/diagnostics/iot) -- an
+    AmbiguousCoresError naming them all, not a silent pick of one."""
+    with pytest.raises(alp_template.AmbiguousCoresError) as exc:
+        alp_template.find_template_by_cores(_catalog(), {"m55_hp": "zephyr"})
+    assert "minimal" in str(exc.value)
+    assert "peripheral" in str(exc.value)
+
+
+def test_scaffold_via_cores_matches_scaffold_via_template():
+    """The two selectors are alternative INPUTS to the same render
+    path -- --cores must never diverge from what --template already
+    produces for the template it resolves to (issue #1652's fallback-
+    unchanged requirement)."""
+    rec = alp_template.find_template_by_cores(
+        _catalog(), {"m55_hp": "zephyr", "m55_he": "zephyr"})
+    assert rec["id"] == "multicore-mailbox"
+    via_cores = alp_template.render_to_envelope(rec["id"], "E1M-AEN801")
+    via_template = alp_template.render_to_envelope(
+        "multicore-mailbox", "E1M-AEN801")
+    assert via_cores == via_template
+
+
+# --------------------------------------------------------------------------
 # Parameter substitution -- synthetic fixture.
 #
 # No parameter in the SHIPPED catalog declares a substitution target
@@ -283,6 +365,168 @@ def test_no_shipped_template_declares_a_substitution_target():
 
 
 # --------------------------------------------------------------------------
+# Path containment (#1126) -- a catalog-declared files.user_owned entry
+# must never let render()/render_to_envelope() read outside the example
+# root or write outside the destination root, whether it tries via `..`
+# traversal, an absolute path, or a symlink placed inside either root.
+# `_safe_join` backs BOTH the read site (_rendered_bytes) and the write
+# site (render()'s write loop), so testing it directly covers both; the
+# render()-level test below additionally proves the wiring end-to-end.
+# --------------------------------------------------------------------------
+
+def test_safe_join_allows_a_normal_in_root_path(tmp_path):
+    root = tmp_path / "root"
+    (root / "sub").mkdir(parents=True)
+    (root / "sub" / "file.txt").write_text("ok", encoding="utf-8")
+    assert alp_template._safe_join(root, "sub/file.txt", what="x") == (
+        root / "sub" / "file.txt").resolve()
+
+
+def test_safe_join_rejects_parent_traversal(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    (tmp_path / "secret.txt").write_text("outside", encoding="utf-8")
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template._safe_join(root, "../secret.txt", what="x")
+
+
+def test_safe_join_rejects_absolute_path(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template._safe_join(root, "/etc/passwd", what="x")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="os.symlink needs elevated privileges on Windows")
+def test_safe_join_rejects_symlink_escape(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("outside", encoding="utf-8")
+    (root / "escape_link").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template._safe_join(root, "escape_link/secret.txt", what="x")
+
+
+def _write_escape_catalog(root: Path, user_owned: list[str]) -> Path:
+    """Same shape as `_write_fixture_catalog`, minus the substitution
+    parameter -- lets each test declare its own (possibly malicious)
+    `files.user_owned` list without a real example tree behind it."""
+    example_rel = "examples/fixture/escape-app"
+    example_dir = root / example_rel
+    example_dir.mkdir(parents=True)
+    (example_dir / "board.yaml").write_text("name: escape\n", encoding="utf-8")
+
+    catalog = {
+        "schemaVersion": 1,
+        "description": "test fixture catalog",
+        "templates": [
+            {
+                "id": "escape-app",
+                "title": "Escape App",
+                "archetype": "minimal",
+                "example": example_rel,
+                "description": "fixture",
+                "supported": {
+                    "families": ["alif-ensemble"],
+                    "som_skus": ["E1M-AEN801"],
+                    "core_classes": ["m"],
+                    "runtimes": ["zephyr"],
+                },
+                "requires": {
+                    "portable_apis": [],
+                    "libraries": [],
+                    "chips": [],
+                    "routes": [],
+                    "generated_artifacts": [],
+                    "test_backend": ["native_sim"],
+                },
+                "files": {"user_owned": user_owned, "generated": []},
+                "parameters": [],
+                "test": {
+                    "testcase_yaml": [f"{example_rel}/testcase.yaml"],
+                    "native_sim_scenarios": [],
+                    "cross_compile_matrix": [],
+                },
+                "status": "preview",
+                "note": "fixture only, not a real template",
+            }
+        ],
+    }
+    catalog_path = root / "catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    return catalog_path
+
+
+def test_render_valid_in_root_user_owned_file_still_renders(tmp_path):
+    catalog_path = _write_escape_catalog(tmp_path, ["board.yaml"])
+    dest = tmp_path / "out"
+    result = alp_template.render(
+        "escape-app", dest, catalog_path=catalog_path, base_dir=tmp_path)
+    assert result.files == ("board.yaml",)
+    assert (dest / "board.yaml").read_text(encoding="utf-8") == "name: escape\n"
+
+
+def test_render_rejects_traversal_in_user_owned_path(tmp_path):
+    (tmp_path / "secret.txt").write_text("outside", encoding="utf-8")
+    catalog_path = _write_escape_catalog(tmp_path, ["../../../secret.txt"])
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.render(
+            "escape-app", tmp_path / "out",
+            catalog_path=catalog_path, base_dir=tmp_path)
+
+
+def test_render_rejects_absolute_path_in_user_owned(tmp_path):
+    catalog_path = _write_escape_catalog(tmp_path, ["/etc/passwd"])
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.render(
+            "escape-app", tmp_path / "out",
+            catalog_path=catalog_path, base_dir=tmp_path)
+
+
+def test_render_rejects_traversal_in_the_example_root_itself(tmp_path):
+    """Adversarial-review follow-up (#1126, blocker 1): the catalog's
+    `example` field is JUST AS untrusted as `files.user_owned` -- the
+    first pass wired `_safe_join()` around the RELATIVE part of every
+    join (`files.user_owned` entries) but still trusted `example` itself
+    verbatim (`base_dir / record["example"]`), so a catalog naming
+    `"example": "../outside"` walked the containment ROOT out of
+    `base_dir` and the per-file check then faithfully confined the read
+    to that escaped root -- containing nothing. Mirrors the reviewer's
+    production PoC (`base_dir == REPO`, `example` walking out to
+    `/tmp/X/outside`) with a hermetic `base_dir` instead."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("SECRET\n", encoding="utf-8")
+
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+
+    catalog = {
+        "templates": [{
+            "id": "escape-root",
+            "example": "../outside",
+            "files": {"user_owned": ["secret.txt"], "generated": []},
+            "parameters": [],
+            "test": {"testcase_yaml": []},
+        }],
+    }
+    catalog_path = tmp_path / "catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+    dest = tmp_path / "dest"
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.render(
+            "escape-root", dest, catalog_path=catalog_path, base_dir=base_dir)
+
+    # Pre-fix, this is exactly the reviewer's PoC: render() returns clean
+    # and dest/secret.txt contains the exfiltrated file. It must not exist.
+    assert not dest.exists()
+
+
+# --------------------------------------------------------------------------
 # render_to_envelope() -- --emit scaffold's in-memory capture (issue #864)
 # --------------------------------------------------------------------------
 
@@ -357,10 +601,19 @@ def test_render_to_envelope_preserves_trailing_comment_when_value_unchanged():
     byte-passthrough, comment included (already covered end-to-end by
     test_render_to_envelope_is_passthrough_for_the_examples_own_sku for
     `minimal`; this pins it for a record whose lines DO carry inline
-    comments)."""
+    comments) -- MODULO the unconditional issue #1855 bare-repo-path
+    rewrite (`_scaffold_bare_repo_paths`, e.g. this file's own bare
+    `examples/peripheral-io/gpio-button-led/` + `docs/board-config-
+    schema.md` mentions), which is not sku-gated and so applies here too;
+    expected is that same rewrite applied to the raw source once, so this
+    still pins "nothing ELSE changed" rather than papering over a
+    regression in either transform."""
     example = REPO / "examples" / "peripheral-io" / "gpio-button-led"
     envelope = dict(alp_template.render_to_envelope("peripheral", "E1M-AEN801"))
-    assert envelope["board.yaml"] == (example / "board.yaml").read_text(encoding="utf-8")
+    docs_ref = alp_template._docs_ref(alp_template.REPO)
+    expected = alp_template._scaffold_bare_repo_paths(
+        (example / "board.yaml").read_text(encoding="utf-8"), docs_ref)
+    assert envelope["board.yaml"] == expected
 
 
 # --------------------------------------------------------------------------
@@ -380,16 +633,153 @@ def test_scaffold_cmakelists_requires_alp_sdk_root_explicitly():
 
 
 def test_scaffold_cmakelists_hardens_the_hardcoded_variant_too():
-    """cold-chain-monitor's CMakeLists.txt has NO ALP_SDK_ROOT env-var
-    fallback at all -- a hardcoded `${CMAKE_CURRENT_SOURCE_DIR}/../../../
-    scripts/alp_project.py` -- worse than the guess-block variant since
-    there's no override at all. `_scaffold_cmakelists` must harden this
-    shape too."""
-    envelope = dict(alp_template.render_to_envelope("edge-ai", "E1M-AEN801"))
+    """`_scaffold_cmakelists`' SECOND shape: a hardcoded
+    `${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py` with
+    NO ALP_SDK_ROOT resolution at all -- worse than the guess block,
+    since no override is even possible.
+
+    Issue #1390 gave cold-chain-monitor (the `edge-ai` template's
+    source) a real guess block, so NO example carries this shape any
+    more and the catalog can no longer reach this branch -- drive it
+    from a literal instead of asserting it via a render that now takes
+    the other path.
+    """
+    hardcoded = (
+        "# SPDX-License-Identifier: Apache-2.0\n"
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "\n"
+        "execute_process(\n"
+        "    COMMAND ${Python3_EXECUTABLE}\n"
+        "            ${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py\n"
+        ")\n"
+    )
+    out = alp_template._scaffold_cmakelists(hardcoded)
+    assert "${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py" not in out
+    assert "${ALP_SDK_ROOT}/scripts/alp_project.py" in out
+    assert "if(NOT DEFINED ALP_SDK_ROOT AND NOT DEFINED ENV{ALP_SDK_ROOT})" in out
+
+
+# --------------------------------------------------------------------------
+# The comment ABOVE the block has to move with it (issue #1390 review
+# blocker 2): every scaffold-source example but two introduces the guess
+# block with prose teaching the in-tree `../../..` fallback, which the
+# hardened block deliberately drops.  Substituting only the code shipped a
+# scaffold whose comment documented behaviour the emitted file did not have.
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "template,sku",
+    [
+        ("minimal", "E1M-V2N101"),
+        ("peripheral", "E1M-V2N101"),
+        ("sensor", "E1M-V2N101"),
+        ("edge-ai", "E1M-V2N101"),
+        ("multicore-mailbox", "E1M-AEN801"),
+    ],
+)
+def test_scaffold_cmakelists_never_documents_the_dropped_fallback(template, sku):
+    """No emitted CMakeLists.txt may promise the in-tree fallback."""
+    envelope = dict(alp_template.render_to_envelope(template, sku))
+    for rel, text in envelope.items():
+        if not rel.endswith("CMakeLists.txt"):
+            continue
+        lowered = text.lower()
+        assert "grandparent" not in lowered, rel
+        assert "in-tree" not in lowered, rel
+
+
+def test_scaffold_cmakelists_keeps_unrelated_comment_paragraphs():
+    """Only the paragraph describing ALP_SDK_ROOT resolution is
+    rewritten. gpio-button-led (the `peripheral` template's source)
+    leads its comment run with a banner -- "board.yaml ->
+    build/generated/alp.conf at configure time." -- that stays true for
+    a scaffold and must survive verbatim."""
+    envelope = dict(alp_template.render_to_envelope("peripheral", "E1M-V2N101"))
     cmakelists = envelope["CMakeLists.txt"]
-    assert "${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py" not in cmakelists
-    assert "${ALP_SDK_ROOT}/scripts/alp_project.py" in cmakelists
+    assert "# board.yaml -> build/generated/alp.conf at configure time." in cmakelists
+    assert "# Resolve the alp-sdk root." in cmakelists
+    # ... and exactly once -- a second matching paragraph is dropped,
+    # never duplicated.
+    assert cmakelists.count("# Resolve the alp-sdk root.") == 1
+
+
+def test_scaffold_cmakelists_invents_no_prose_where_there_was_none():
+    """i2c-master (the `sensor` template's source) has NO comment above
+    its guess block. The rewrite is a rewrite, not an insertion: it must
+    not grow prose the example never had."""
+    envelope = dict(alp_template.render_to_envelope("sensor", "E1M-V2N101"))
+    cmakelists = envelope["CMakeLists.txt"]
+    assert "# Resolve the alp-sdk root." not in cmakelists
     assert "if(NOT DEFINED ALP_SDK_ROOT AND NOT DEFINED ENV{ALP_SDK_ROOT})" in cmakelists
+
+
+def test_scaffold_cmakelists_leaves_a_detached_comment_run_alone():
+    """The rewrite is scoped to the run IMMEDIATELY above the block.
+    mproc-mailbox's `peer/CMakeLists.txt` opens with a file-header
+    comment separated from the block by `cmake_minimum_required(...)`;
+    it is not the block's prose and must survive untouched."""
+    envelope = dict(alp_template.render_to_envelope(
+        "multicore-mailbox", "E1M-AEN801"))
+    peer = envelope["peer/CMakeLists.txt"]
+    assert "# HE-side peer image for the mproc-mailbox flagship." in peer
+    assert "# Resolve the alp-sdk root." not in peer
+
+
+def _fake_sdk_checkout(root, version, status, tags=()):
+    """A minimal git checkout carrying `metadata/sdk_version.yaml` and
+    `tags` -- enough for `_docs_ref` to read and for `git rev-parse` to
+    answer against. One empty commit, because a tag needs an object."""
+    (root / "metadata").mkdir(parents=True)
+    (root / "metadata" / "sdk_version.yaml").write_text(
+        f"version: {version}\nstatus:  {status}\n", encoding="utf-8")
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    subprocess.run(["git", "init", "-q", str(root)], check=True, env=env)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "--allow-empty", "-m", "x"],
+                   check=True, env=env)
+    for tag in tags:
+        subprocess.run(["git", "-C", str(root), "tag", tag], check=True, env=env)
+    return root
+
+
+def test_docs_ref_falls_back_to_main_when_the_declared_tag_does_not_exist(tmp_path):
+    """#1508. Between an rc cut and its GA tag `metadata/sdk_version.yaml`
+    declares `version: 0.16.0` / `status: released` while only
+    `v0.16.0-rc1` exists, and pinning on that declared pair alone put
+    three unresolvable `blob/v0.16.0/docs/...` links in every scaffolded
+    README for the whole window (six days, for v0.15.0).
+
+    The rc tag being present is the point: this is not "no tags at all",
+    it is the exact shape that fooled the old check.
+    """
+    root = _fake_sdk_checkout(tmp_path / "rc", "0.16.0", "released", tags=("v0.16.0-rc1",))
+    assert alp_template._docs_ref(root) == "main"
+
+
+def test_docs_ref_pins_the_tag_once_it_actually_resolves(tmp_path):
+    """The other direction, so the fix cannot degrade into "always main"
+    -- that would silently drop the stable-docs pin #864 added."""
+    root = _fake_sdk_checkout(tmp_path / "ga", "0.16.0", "released",
+                              tags=("v0.16.0-rc1", "v0.16.0"))
+    assert alp_template._docs_ref(root) == "v0.16.0"
+
+
+def test_docs_ref_is_main_for_a_development_checkout(tmp_path):
+    """Unchanged pre-#1508 behaviour: a non-`released` status never pins,
+    tag present or not."""
+    root = _fake_sdk_checkout(tmp_path / "dev", "0.17.0", "development", tags=("v0.17.0",))
+    assert alp_template._docs_ref(root) == "main"
+
+
+def test_docs_ref_is_main_outside_a_git_checkout(tmp_path):
+    """A tarball export or `--no-tags` clone has the metadata but no refs.
+    `_tag_resolves` must degrade to `main`, never raise -- an exception
+    here would abort the whole scaffold over a README link."""
+    root = tmp_path / "tarball"
+    (root / "metadata").mkdir(parents=True)
+    (root / "metadata" / "sdk_version.yaml").write_text(
+        "version: 0.16.0\nstatus:  released\n", encoding="utf-8")
+    assert alp_template._docs_ref(root) == "main"
 
 
 def test_scaffold_readme_has_no_dangling_sdk_tree_links_or_self_path():
@@ -411,6 +801,54 @@ def test_scaffold_readme_rewrites_sibling_example_links_too():
     assert "../i2c-scanner/" not in readme
     assert (f"https://github.com/alplabai/alp-sdk/tree/{ref}"
             "/examples/peripheral-io/i2c-scanner") in readme
+
+
+def test_scaffold_readme_cold_chain_models_link_survives_scaffolding():
+    """Issues #1688/#1749: cold-chain-monitor's README deliberately links
+    `../cold-chain-monitor/models/README.md` -- climbing out of the
+    example dir and back in -- because `_RELATIVE_LINK_RE` only matches
+    `../`-prefixed links and `models/README.md` is a CHILD of the example
+    dir, not a sibling. A future edit that "tidies" the link to the more
+    natural `](models/README.md)` would stop matching the rewriter
+    entirely and ship a dangling relative link in every scaffold; assert
+    on the EMITTED output, not the source text, so this catches that.
+
+    Also pins issue #1798's rendering regression: a URL substring alone
+    survives even when an explanatory HTML comment sitting at column 0
+    silently splits the "No model is shipped ... See [link]" sentence
+    into two paragraphs, so also assert the lead-in and the link render
+    in the SAME CommonMark block."""
+    envelope = dict(alp_template.render_to_envelope("edge-ai", "E1M-AEN801"))
+    readme = envelope["README.md"]
+    ref = alp_template._docs_ref(alp_template.REPO)
+    assert (f"https://github.com/alplabai/alp-sdk/blob/{ref}"
+            "/examples/ai/cold-chain-monitor/models/README.md") in readme
+    assert _no_paragraph_break_between(
+        readme, "No model is shipped", "[`models/README.md`](")
+
+
+def test_scaffold_readme_mqtt_native_sim_conf_link_survives_scaffolding():
+    """Issue #1794: mqtt-telemetry's README deliberately links
+    `../mqtt-telemetry/native_sim.conf` -- climbing out of the example
+    dir and back in -- because `_RELATIVE_LINK_RE` only matches
+    `../`-prefixed links and `native_sim.conf` is a CHILD of the example
+    dir, not a sibling. A future edit that "tidies" the link to the more
+    natural `](native_sim.conf)` would stop matching the rewriter
+    entirely and ship a dangling relative link in every scaffold; assert
+    on the EMITTED output, not the source text, so this catches that.
+
+    Also pins issue #1798's rendering regression: a URL substring alone
+    survives even when an explanatory HTML comment sitting at column 0
+    silently splits the "turns mbedtls off (see [link])" sentence into
+    two paragraphs, so also assert the lead-in and the link render in
+    the SAME CommonMark block."""
+    envelope = dict(alp_template.render_to_envelope("iot", "E1M-AEN801"))
+    readme = envelope["README.md"]
+    ref = alp_template._docs_ref(alp_template.REPO)
+    assert (f"https://github.com/alplabai/alp-sdk/blob/{ref}"
+            "/examples/connectivity/mqtt-telemetry/native_sim.conf") in readme
+    assert _no_paragraph_break_between(
+        readme, "turns mbedtls off (see", "[`native_sim.conf`](")
 
 
 def test_scaffold_readme_extra_zephyr_modules_uses_alp_sdk_root_not_pwd():
@@ -451,6 +889,143 @@ def test_scaffold_readme_upgrades_bare_board_id_even_for_the_passthrough_sku():
     assert "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp" in readme
 
 
+def test_scaffold_readme_rewrites_bare_mention_alongside_qualified_one():
+    """Issue #1266 review MINOR: a README naming the source board BOTH
+    ways -- a qualified `west build` line AND a separate bare mention
+    (e.g. lvgl-widgets-demo's README:36 `west build -b
+    alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` vs :59's bare
+    "target board (`alp_e1m_aen801_m55_hp`)") -- used to only get the
+    qualified one rewritten; the bare one silently kept naming the
+    source family inside a cross-family scaffold."""
+    source_board = "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp"
+    target_board = "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33"
+    text = (
+        "west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp ex\n"
+        "west flash\n"
+        "\n"
+        "this app's target board (`alp_e1m_aen801_m55_hp`) has no alias yet\n"
+    )
+    out = alp_template._scaffold_readme(
+        text, "examples/display/widget", "main",
+        source_board=source_board, target_board=target_board,
+    )
+    assert "alp_e1m_aen801_m55_hp" not in out
+    assert out.count(target_board) == 2
+
+
+def test_scaffold_readme_passthrough_does_not_duplicate_qualified_suffix():
+    """The same-sku (source_board == target_board) case must not run the
+    short-prefix fallback over a mention the exact-match step already
+    left correctly qualified -- that would append the `/<soc>/<core>`
+    suffix a second time (`.../rtss_hp/ae822fa0e5597ls0/rtss_hp`)."""
+    board = "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp"
+    text = f"west build -b {board} examples/display/widget\n"
+    out = alp_template._scaffold_readme(
+        text, "examples/display/widget", "main",
+        source_board=board, target_board=board,
+    )
+    assert out.count("ae822fa0e5597ls0/rtss_hp") == 1
+
+
+def test_scaffold_readme_rewrites_west_flash_after_every_m33_sm_board_line():
+    """A two-core V2N/V2M scaffold README can carry more than one
+    `<board target>\\nwest flash` pair (one per core) -- every one of
+    them needs `--host <board-ip>` appended, not just the first."""
+    target_board = "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33"
+    text = (
+        f"west build -b {target_board} ex/core0\n"
+        "west flash\n"
+        "\n"
+        f"west build -b {target_board} ex/core1\n"
+        "west flash\n"
+    )
+    out = alp_template._scaffold_readme(
+        text, "examples/multicore/widget", "main",
+        source_board="alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp",
+        target_board=target_board,
+    )
+    assert out.count("west flash --host <board-ip>") == 2
+    assert "\nwest flash\n" not in out
+
+
+def test_scaffold_readme_rewrites_a_subpath_of_the_example_path_too():
+    """Issue #1855: mproc-mailbox's README names the HE-side peer core
+    with `west build -b <board> examples/multicore/mproc-mailbox/peer`
+    -- a SUBPATH of the template's own `example_path`, not an exact
+    match. The plain `example_path` token rewrite (which turns the bare
+    example_path itself into `.`) never fired on this before: its
+    `(?!\\S)` right boundary failed on the following `/peer`, so the
+    scaffold shipped a `west build` argument naming a directory that
+    only exists inside the alp-sdk tree, not the customer's copied-out
+    project."""
+    text = (
+        "west build -b board/soc/core "
+        "examples/multicore/mproc-mailbox/peer\n"
+        "west flash\n"
+    )
+    out = alp_template._scaffold_readme(text, "examples/multicore/mproc-mailbox", "main")
+    assert "examples/multicore/mproc-mailbox" not in out
+    assert "west build -b board/soc/core ./peer\n" in out
+
+
+def test_scaffold_bare_repo_paths_rewrites_a_bare_doc_mention():
+    """Issue #1855: `docs/cc3501e-bridge.md` named bare (no markdown
+    `[...]()` around it) in a board.yaml/src/main.c comment survives a
+    scaffold verbatim -- README.md is the only file any existing
+    transform touches for this class of reference."""
+    ref = "v9.9.9"
+    text = "# the CC3501E bridge (see docs/cc3501e-bridge.md), selected\n"
+    out = alp_template._scaffold_bare_repo_paths(text, ref)
+    assert "(see docs/cc3501e-bridge.md)" not in out
+    assert f"https://github.com/alplabai/alp-sdk/blob/{ref}/docs/cc3501e-bridge.md" in out
+
+
+def test_scaffold_bare_repo_paths_rewrites_a_bare_example_dir_mention():
+    """Same class, `examples/<category>/<name>` form (i2c-master's
+    board.yaml/src/main.c "-- see examples/v2n/v2n-temp-sensor for
+    ..." cross-reference) -- a directory, so it gets a `tree/` URL, not
+    `blob/`."""
+    ref = "v9.9.9"
+    text = "# BRD_I2C/TMP112 -- see examples/v2n/v2n-temp-sensor for the pattern\n"
+    out = alp_template._scaffold_bare_repo_paths(text, ref)
+    assert "see examples/v2n/v2n-temp-sensor" not in out
+    assert f"https://github.com/alplabai/alp-sdk/tree/{ref}/examples/v2n/v2n-temp-sensor" in out
+
+
+def test_scaffold_bare_repo_paths_is_noop_without_a_match():
+    text = "# nothing here names docs/ or examples/ at all\n"
+    assert alp_template._scaffold_bare_repo_paths(text, "main") == text
+
+
+@pytest.mark.parametrize(
+    "template_id,rel,needle",
+    [
+        ("iot", "board.yaml", "docs/cc3501e-bridge.md"),
+        ("iot", "src/main.c", "docs/cc3501e-bridge.md"),
+        ("sensor", "board.yaml", "examples/v2n/v2n-temp-sensor"),
+        ("sensor", "src/main.c", "examples/v2n/v2n-temp-sensor"),
+        ("edge-ai", "src/main.c", "examples/ai/cold-chain-monitor/models/README.md"),
+        ("multicore-mailbox", "src/main.c", "examples/multicore/mproc-mailbox/peer/main.c"),
+    ],
+)
+def test_render_to_envelope_leaves_no_bare_alp_sdk_only_path(template_id, rel, needle):
+    """Issue #1855: each of these (template, file) pairs names an
+    alp-sdk-tree-only path bare in a source comment for the CANONICAL
+    (passthrough) sku, where no OTHER substitution would have touched
+    it -- pins the fix against the real catalog content, not just the
+    helper in isolation."""
+    envelope = dict(alp_template.render_to_envelope(template_id, "E1M-AEN801"))
+    text = envelope[rel]
+    # `needle` still appears as the TAIL of the rewritten GitHub URL --
+    # assert every occurrence sits right after `github.com/alplabai/
+    # alp-sdk/`, i.e. it is never present BARE any more.
+    matches = list(re.finditer(re.escape(needle), text))
+    assert matches, (template_id, rel, needle)
+    for m in matches:
+        prefix = text[max(0, m.start() - 80):m.start()]
+        assert "github.com/alplabai/alp-sdk/" in prefix, (rel, prefix)
+
+
 def test_substitute_board_yaml_sku_rejects_ambiguous_sku_line():
     """More than one line matching the `sku:` pattern is unresolvable --
     which one is the real `som.sku:`? -- so it must hard-error rather
@@ -485,6 +1060,169 @@ def test_derive_core_renames_picks_the_real_app_core_not_alphabetical_first():
     renames = alp_template._derive_core_renames(
         ["m33_sm"], "E1M-AEN801", alp_template.METADATA_ROOT)
     assert renames == {"m33_sm": "m55_hp"}
+
+
+# --------------------------------------------------------------------------
+# render_to_envelope's per-core CMakeLists.txt map (issue #1275 item 1) --
+# synthetic fixture, since no SHIPPED template today needs a cross-family
+# rename on a dual-Zephyr-core template (E1M-AEN801 is the only SKU with
+# two Zephyr M cores in the whole catalog, and every dual-Zephyr-core
+# template only supports that one SKU -- see multicore-mailbox's
+# `supported.som_skus`). Before this fix, ONE re-derived rename
+# (`app_core_sub`, keyed off the first m-prefixed core) was applied to
+# EVERY `*CMakeLists.txt` file a template owned; on a second Zephyr core
+# whose CMakeLists.txt carries a DIFFERENT `--core` literal, that either
+# silently mismatched (a wrong `--core` value written) or, as here,
+# hard-failed with "must have exactly one `--core <old>`... found 0"
+# because the literal being searched for isn't the one that file has.
+# --------------------------------------------------------------------------
+
+def _write_dual_core_fixture(root: Path) -> tuple[Path, Path]:
+    """A minimal two-Zephyr-core template (root `CMakeLists.txt` baking
+    `--core m55_hp`, `peer/CMakeLists.txt` baking `--core m55_he`) plus a
+    metadata_root with two SoM presets: the example's own (SRC, same core
+    ids) and a target (DST) whose topology renames BOTH cores to
+    DIFFERENT ids -- so a correct fix must apply the RIGHT rename to the
+    RIGHT file, not one rename to both. Returns (catalog_path, metadata_root)."""
+    example_dir = root / "examples" / "fixture" / "dual-core-app"
+    (example_dir / "src").mkdir(parents=True)
+    (example_dir / "peer").mkdir(parents=True)
+    (example_dir / "board.yaml").write_text(
+        "som:\n"
+        "  sku: E1M-SRCTEST\n"
+        "preset: src-preset\n"
+        "cores:\n"
+        "  m55_hp:\n"
+        "    app: ./src\n"
+        "  m55_he:\n"
+        "    app: ./peer\n",
+        encoding="utf-8", newline="\n",
+    )
+    (example_dir / "src" / "main.c").write_text("/* hp */\n", encoding="utf-8")
+    (example_dir / "peer" / "main.c").write_text("/* he */\n", encoding="utf-8")
+    (example_dir / "CMakeLists.txt").write_text(
+        "# fixture\nalp_project.py --emit zephyr-conf --core m55_hp\n",
+        encoding="utf-8", newline="\n",
+    )
+    (example_dir / "peer" / "CMakeLists.txt").write_text(
+        "# fixture\nalp_project.py --emit zephyr-conf --core m55_he\n",
+        encoding="utf-8", newline="\n",
+    )
+
+    metadata_root = root / "metadata"
+    (metadata_root / "e1m_modules").mkdir(parents=True)
+    (metadata_root / "e1m_modules" / "E1M-SRCTEST.yaml").write_text(
+        "default_board: SRC-PRESET\n"
+        "topology:\n"
+        "  m55_hp:\n"
+        "    board: src_board/soc/m55_hp\n"
+        "  m55_he:\n"
+        "    board: src_board/soc/m55_he\n",
+        encoding="utf-8", newline="\n",
+    )
+    (metadata_root / "e1m_modules" / "E1M-DSTTEST.yaml").write_text(
+        "default_board: DST-PRESET\n"
+        "topology:\n"
+        "  mX:\n"
+        "    board: dst_board/soc/mX\n"
+        "  mY:\n"
+        "    board: dst_board/soc/mY\n",
+        encoding="utf-8", newline="\n",
+    )
+
+    catalog = {
+        "schemaVersion": 1,
+        "description": "test fixture catalog",
+        "templates": [
+            {
+                "id": "dual-core-app",
+                "title": "Dual Core App",
+                "archetype": "multicore-mailbox",
+                "example": "examples/fixture/dual-core-app",
+                "description": "fixture",
+                "supported": {
+                    "families": ["alif-ensemble"],
+                    "som_skus": ["E1M-SRCTEST", "E1M-DSTTEST"],
+                    "core_classes": ["m"],
+                    "runtimes": ["zephyr"],
+                },
+                "cores": [
+                    {"id": "m55_hp", "dir": "./src", "os": "zephyr"},
+                    {"id": "m55_he", "dir": "./peer", "os": "zephyr"},
+                ],
+                "requires": {
+                    "portable_apis": [], "libraries": [], "chips": [],
+                    "routes": [], "generated_artifacts": [],
+                    "test_backend": ["native_sim"],
+                },
+                "files": {
+                    "user_owned": [
+                        "board.yaml", "CMakeLists.txt", "src/main.c",
+                        "peer/CMakeLists.txt", "peer/main.c",
+                    ],
+                    "generated": [],
+                },
+                "parameters": [],
+                "test": {
+                    "testcase_yaml": [], "native_sim_scenarios": [],
+                    "cross_compile_matrix": [],
+                },
+                "status": "preview",
+                "note": "fixture only, not a real template",
+            }
+        ],
+    }
+    catalog_path = root / "catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    return catalog_path, metadata_root
+
+
+def test_render_to_envelope_renames_each_zephyr_cores_own_cmakelists(tmp_path):
+    catalog_path, metadata_root = _write_dual_core_fixture(tmp_path)
+
+    envelope = dict(alp_template.render_to_envelope(
+        "dual-core-app", "E1M-DSTTEST",
+        catalog_path=catalog_path, base_dir=tmp_path, metadata_root=metadata_root))
+
+    # Each file's OWN core got its OWN rename -- not one rename smeared
+    # across both files (which would leave one wrong, or -- as it did
+    # before this fix -- raise TemplateError on the second file instead).
+    assert "--core mX" in envelope["CMakeLists.txt"]
+    assert "m55_hp" not in envelope["CMakeLists.txt"]
+    assert "--core mY" in envelope["peer/CMakeLists.txt"]
+    assert "m55_he" not in envelope["peer/CMakeLists.txt"]
+
+
+def test_render_to_envelope_passthrough_keeps_each_cores_own_literal(tmp_path):
+    """Same fixture, requesting the example's OWN sku (no rename at
+    all): both CMakeLists.txt must stay byte-identical to the source,
+    each keeping ITS OWN core's literal -- never swapped."""
+    catalog_path, metadata_root = _write_dual_core_fixture(tmp_path)
+
+    envelope = dict(alp_template.render_to_envelope(
+        "dual-core-app", "E1M-SRCTEST",
+        catalog_path=catalog_path, base_dir=tmp_path, metadata_root=metadata_root))
+
+    assert "--core m55_hp" in envelope["CMakeLists.txt"]
+    assert "--core m55_he" in envelope["peer/CMakeLists.txt"]
+
+
+def test_cmake_core_map_rejects_traversal_in_core_dir(tmp_path):
+    """A catalog `cores[].dir` of `../x` must be rejected via the same
+    resolve-then-contain guard (#1126) every other catalog-sourced path
+    in this file uses -- `_cmake_core_map` used to hand `core["dir"]`
+    straight to `_zephyr_app_dir` (no containment check of its own) and
+    then `.relative_to(example_dir)`, which raises a bare ValueError
+    instead of PathEscapeError/TemplateError when the dir escapes."""
+    example_dir = tmp_path / "examples" / "fixture" / "escape-app"
+    example_dir.mkdir(parents=True)
+    record = {
+        "cores": [
+            {"id": "m55_hp", "dir": "../escape", "os": "zephyr"},
+        ],
+    }
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template._cmake_core_map(record, example_dir)
 
 
 # --------------------------------------------------------------------------
@@ -611,6 +1349,149 @@ def test_derive_pin_doc_renames_copies_the_target_boards_own_doc():
     }
 
 
+# --------------------------------------------------------------------------
+# _derive_pin_doc_renames collision guard (issue #1394): the two
+# assignment sites had NO guard, unlike both siblings -- two `pins:`
+# entries sharing one `doc:` string silently overwrote each other, and
+# the `None` (DROP the field) branch made the loser lose its
+# documentation entirely, with the winner decided by `pins:` ordering.
+# Fixture: a synthetic metadata_root, because EVERY aliased route on the
+# real metadata/boards/e1m-x-evk.yaml carries a `doc:` of its own, so
+# the real tree cannot exercise the string-vs-`None` branch at all.
+# --------------------------------------------------------------------------
+
+def _write_shared_doc_fixture(root: Path, second_target_doc: str | None) -> Path:
+    """A metadata_root whose SRC board routes two pads (`E1M_A`,
+    `E1M_B`) that both carry a `board_alias:` onto a DST board. The
+    DST route for `BOARD_A` always has its own `doc:`; the one for
+    `BOARD_B` gets `second_target_doc` (a different string, or no
+    `doc:` at all when `None`). Returns the metadata_root."""
+    metadata_root = root / "metadata"
+    (metadata_root / "e1m_modules").mkdir(parents=True)
+    (metadata_root / "e1m_modules" / "E1M-SRCTEST.yaml").write_text(
+        "default_board: SRC-PRESET\n", encoding="utf-8", newline="\n")
+    (metadata_root / "e1m_modules" / "E1M-DSTTEST.yaml").write_text(
+        "default_board: DST-PRESET\n", encoding="utf-8", newline="\n")
+
+    (metadata_root / "boards").mkdir(parents=True)
+    (metadata_root / "boards" / "src-preset.yaml").write_text(
+        "e1m_routes:\n"
+        "  gpio:\n"
+        "    - e1m: E1M_A\n"
+        "      macro: SRC_PIN_A\n"
+        "      board_alias: BOARD_A\n"
+        "    - e1m: E1M_B\n"
+        "      macro: SRC_PIN_B\n"
+        "      board_alias: BOARD_B\n",
+        encoding="utf-8", newline="\n",
+    )
+    (metadata_root / "boards" / "dst-preset.yaml").write_text(
+        "e1m_routes:\n"
+        "  gpio:\n"
+        "    - e1m: E1M_X_A\n"
+        "      macro: DST_PIN_A\n"
+        "      board_alias: BOARD_A\n"
+        "      doc: Shared debounce network, DST pad A.\n"
+        "    - e1m: E1M_X_B\n"
+        "      macro: DST_PIN_B\n"
+        "      board_alias: BOARD_B\n"
+        + (f"      doc: {second_target_doc}\n" if second_target_doc else ""),
+        encoding="utf-8", newline="\n",
+    )
+    return metadata_root
+
+
+_SHARED_DOC = "Shared debounce network (10k + 0.1uF), SRC pads A and B."
+
+_SHARED_DOC_PINS = [
+    {"e1m": "E1M_A", "macro": "SRC_PIN_A", "doc": _SHARED_DOC},
+    {"e1m": "E1M_B", "macro": "SRC_PIN_B", "doc": _SHARED_DOC},
+]
+
+
+def test_derive_pin_doc_renames_rejects_two_pins_sharing_a_doc(tmp_path):
+    """Two `pins:` entries sharing one `doc:` string that re-derive to
+    two DIFFERENT target strings are ambiguous for the flat
+    `{old_doc: new_doc}` map `_substitute_board_yaml_pin_docs` applies
+    file-wide -- hard error, exactly as `_derive_pin_renames` and
+    `_derive_pin_macro_renames` already did for their own keys
+    (issue #1394)."""
+    metadata_root = _write_shared_doc_fixture(
+        tmp_path, "Shared debounce network, DST pad B.")
+    with pytest.raises(alp_template.TemplateError, match="ambiguous"):
+        alp_template._derive_pin_doc_renames(
+            _SHARED_DOC_PINS, "E1M-DSTTEST", "src-preset", metadata_root)
+
+
+def test_derive_pin_doc_renames_rejects_a_shared_doc_one_side_drops(tmp_path):
+    """The branch that lost data SILENTLY (issue #1394): one entry
+    re-derives the shared `doc:` to a target string, the other's
+    target route has no `doc:` at all -- `None`, which per this
+    function's docstring means DROP the field. Pre-fix the second
+    write won unguarded, so the map said `None` and the documentation
+    was dropped from BOTH pins, including the one with a perfectly
+    good target `doc:`; reverse the `pins:` ordering and the doc
+    survived. "Rename it" and "drop it" are contradictory
+    instructions for one key, so this is ambiguous too."""
+    metadata_root = _write_shared_doc_fixture(tmp_path, None)
+    with pytest.raises(alp_template.TemplateError, match="ambiguous"):
+        alp_template._derive_pin_doc_renames(
+            _SHARED_DOC_PINS, "E1M-DSTTEST", "src-preset", metadata_root)
+
+    # ... and in the reverse `pins:` order too -- the whole point is
+    # that the outcome must no longer depend on iteration order.
+    with pytest.raises(alp_template.TemplateError, match="ambiguous"):
+        alp_template._derive_pin_doc_renames(
+            list(reversed(_SHARED_DOC_PINS)), "E1M-DSTTEST", "src-preset",
+            metadata_root)
+
+
+def test_derive_pin_doc_renames_allows_a_shared_doc_that_agrees(tmp_path):
+    """A shared `doc:` is only ambiguous when the entries DISAGREE --
+    two pins whose target routes carry the SAME `doc:` string yield
+    one unambiguous rename, not an error."""
+    metadata_root = _write_shared_doc_fixture(
+        tmp_path, "Shared debounce network, DST pad A.")
+    assert alp_template._derive_pin_doc_renames(
+        _SHARED_DOC_PINS, "E1M-DSTTEST", "src-preset", metadata_root
+    ) == {_SHARED_DOC: "Shared debounce network, DST pad A."}
+
+
+def test_derive_pin_doc_renames_keeps_an_unchanged_doc_out_of_the_map(tmp_path):
+    """A target `doc:` byte-identical to the entry's own contributes
+    NO map entry -- there is nothing to rewrite. Guarding the two
+    assignment sites must not fold that case into the `None` (DROP)
+    value, which would delete a `doc:` that was already correct
+    (the shape the issue's own proposed snippet had)."""
+    metadata_root = _write_shared_doc_fixture(tmp_path, None)
+    pins = [{
+        "e1m": "E1M_A", "macro": "SRC_PIN_A",
+        "doc": "Shared debounce network, DST pad A.",
+    }]
+    assert alp_template._derive_pin_doc_renames(
+        pins, "E1M-DSTTEST", "src-preset", metadata_root) == {}
+
+
+def test_derive_pin_doc_renames_rejects_a_shared_doc_kept_then_dropped(tmp_path):
+    """The third contradiction #1394 closes: one entry's target `doc:`
+    is byte-identical to the shared string ("keep it" -- no map entry
+    at all), the other's target has none ("drop it"). Pre-fix the map
+    said `None` unconditionally, so the pin whose doc was ALREADY
+    correct lost it to the file-wide substitution with no diagnostic.
+    Recording every resolution -- not only the ones that produce a
+    rename -- is what makes this reachable."""
+    metadata_root = _write_shared_doc_fixture(tmp_path, None)
+    pins = [
+        {"e1m": "E1M_A", "macro": "SRC_PIN_A",
+         "doc": "Shared debounce network, DST pad A."},
+        {"e1m": "E1M_B", "macro": "SRC_PIN_B",
+         "doc": "Shared debounce network, DST pad A."},
+    ]
+    with pytest.raises(alp_template.TemplateError, match="ambiguous"):
+        alp_template._derive_pin_doc_renames(
+            pins, "E1M-DSTTEST", "src-preset", metadata_root)
+
+
 def test_substitute_board_yaml_pins_rewrites_the_bare_string_list_item_form():
     """The schema also allows a bare pad-string `pins:` entry (no
     `{e1m: ...}` mapping) -- the dict-only `e1m:`-key regex left it
@@ -720,9 +1601,9 @@ def test_alp_sdk_root_required_block_checks_both_d_and_env_and_prefers_d():
 
 
 # --------------------------------------------------------------------------
-# render(..., sku=...) / default_sku() -- `alp generate`'s other scaffold
-# front door now agrees with `alp emit scaffold` (issue #864 Fable-review
-# MINOR G)
+# render(..., sku=...) / default_sku() -- tan-cli's scaffold front doors
+# (`tan init`, `tan scaffold`) now agree with `west alp-emit scaffold`
+# (issue #864 Fable-review MINOR G)
 # --------------------------------------------------------------------------
 
 def test_default_sku_is_the_examples_own_som_sku():
@@ -863,3 +1744,49 @@ def test_validate_skips_cleanly_without_zephyr_base():
     result = alp_template.validate("minimal", zephyr_base="")
     assert result.skipped
     assert "ZEPHYR_BASE" in result.reason
+
+
+def test_validate_rejects_traversal_in_testcase_yaml(tmp_path, monkeypatch):
+    """Adversarial-review follow-up (#1126, blocker 2): same class, same
+    file, but the helper was never applied at this site. `validate()`
+    derives `rel` from the catalog-controlled `test.testcase_yaml` by
+    STRING-stripping the example prefix (`tc[len(example_prefix):]`),
+    which preserves a `..` untouched, then joined it straight onto its
+    own tmp dir with no containment check. The reviewer's PoC (`tc =
+    "<example>/../ALP1126_LOOT.txt"`) lands a file as a *sibling* of the
+    twister tmpdir -- outside it -- before validate() ever shells out to
+    twister, let alone errors out. `zephyr_base` here is a nonexistent
+    path: the write-side bug fires before validate() would ever reach a
+    real twister invocation, so no real Zephyr checkout is needed to
+    prove it."""
+    controlled_tmp = tmp_path / "twister-tmp"
+    monkeypatch.setattr(
+        alp_template.tempfile, "mkdtemp", lambda *a, **k: str(controlled_tmp))
+
+    example = "examples/peripheral-io/hello-world"
+    catalog = {
+        "templates": [{
+            "id": "escape-testcase",
+            "example": example,
+            "files": {
+                "user_owned": ["board.yaml", "prj.conf", "CMakeLists.txt",
+                                "src/main.c", "README.md"],
+                "generated": [],
+            },
+            "parameters": [],
+            "test": {
+                "testcase_yaml": [f"{example}/../hello-world/testcase.yaml"],
+            },
+        }],
+    }
+    catalog_path = tmp_path / "catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.validate(
+            "escape-testcase", catalog_path=catalog_path,
+            zephyr_base="/nonexistent-zephyr")
+
+    # The escape target is a sibling of the (deleted) tmpdir -- must never
+    # have been created.
+    assert not (tmp_path / "hello-world").exists()

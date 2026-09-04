@@ -31,8 +31,8 @@ worktree's west topdir hasn't fetched it). `CMakeLists.txt` adds
 `vendors/jsmn/include` to the app's include path directly --
 `board.yaml`'s `cores.m55_hp.libraries: [jsmn]` only carries the
 `CONFIG_ALP_JSMN_SW=y` SW-fallback marker (jsmn has no HW-accelerator
-class; see `metadata/library-profiles/jsmn/hw-backends.yaml`), not an
-include-path hook.
+class; see the `integration.zephyr.hw_backends:` block in
+`metadata/libraries/jsmn.yaml`), not an include-path hook.
 
 ## board.yaml HW swap
 

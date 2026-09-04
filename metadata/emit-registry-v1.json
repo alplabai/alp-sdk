@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Single source of truth for every `--emit` mode the SDK exposes across scripts/alp_project.py and scripts/alp_orchestrate/ (and re-exposed by scripts/alp_cli/emit.py's `alp emit` front door / `west alp-emit`). Frontends (alp-sdk-vscode, Alp Studio, IDE tooling) read THIS instead of hand-mirroring the argparse `choices=` lists in each CLI. A drift gate (scripts/check_emit_registry.py) asserts this file's mode set exactly matches the real `--emit` choices parsed out of alp_project.py and alp_orchestrate/cli.py, so a mode added to the code with no registry entry (or a phantom registry entry with no code) fails CI. Stability: additive-only per mode; a breaking change to an existing mode's shape ships as a new schemaVersion.",
+  "description": "Single source of truth for every `--emit` mode the SDK exposes across scripts/alp_project.py and scripts/alp_orchestrate/ (and re-exposed by `west alp-emit`). Frontends (alp-sdk-vscode, Alp Studio, IDE tooling) read THIS instead of hand-mirroring the argparse `choices=` lists in each CLI. A drift gate (scripts/check_emit_registry.py) asserts this file's mode set exactly matches the real `--emit` choices parsed out of alp_project.py and alp_orchestrate/cli.py, so a mode added to the code with no registry entry (or a phantom registry entry with no code) fails CI. Stability: additive-only per mode; a breaking change to an existing mode's shape ships as a new schemaVersion.",
   "modes": [
     {
       "mode": "zephyr-conf",
@@ -42,8 +42,8 @@
       "output": {
         "media": "cmake-args",
         "schema_id": null,
-        "path": "build/<core_id>-<os>/cmake-args.txt",
-        "consumer_hint": "plain-CMake configure -- sequence of -D args"
+        "path": null,
+        "consumer_hint": "reference/inspection -- not build-plan materialised; adapt the -D args into a hand-written CMakeLists.txt or toolchain file"
       }
     },
     {
@@ -419,7 +419,7 @@
         "media": "json",
         "schema_id": "build-plan-v1",
         "path": null,
-        "consumer_hint": "alp CLI / alp-sdk-vscode -- machine-readable build plan (Wave C consumer contract)"
+        "consumer_hint": "Python Tan --plan-from / alp-sdk-vscode / parity CI -- reference machine-readable build plan"
       }
     },
     {

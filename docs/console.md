@@ -56,7 +56,7 @@ provisioned (`CONFIG_ALP_SDK_HW_INFO=y`); otherwise it falls back to the
 build-time `CONFIG_ALP_SDK_SOM_SKU` (board.yaml `som.sku`), then the raw
 `CONFIG_BOARD`.  The SoC name, the per-core complement (with the active core
 marked), the NPU list, and the total on-chip SRAM/MRAM are data-driven from the
-SoC spec JSON (`CONFIG_ALP_SDK_SOC_*`, emitted by `scripts/alp_orchestrate.py`);
+SoC spec JSON (`CONFIG_ALP_SDK_SOC_*`, emitted by `scripts/alp_orchestrate/`);
 a build without those configs falls back to the devicetree (the running-core
 clock and the chosen sram/flash region sizes).
 
@@ -218,7 +218,7 @@ On V2N:
 
 ```
 uart:~$ alp companion ver
-GD32 supervisor fw v0.2.6
+GD32 supervisor fw v0.2.11
 ```
 
 On Alif / CC3501E:
@@ -264,6 +264,16 @@ Drive a GD32 GPIO pin.
 uart:~$ alp companion gpio write 3 1
 companion pin 3 <- 1
 ```
+
+### `alp companion spi1 configure|xfer|read|release` *(Alif/CC3501E only)*
+
+CC3501E SPI1 host passthrough: acquire/release the coprocessor's own SPI1
+controller and clock full-duplex chunks over it for a carrier device on the
+E1M connector's SPI1 pins. Four verbs (`configure`, `xfer`, `read`,
+`release`) — see
+[`cc3501e-companion-commands.md`](cc3501e-companion-commands.md#alp-companion-spi1)
+for the full reference; the companion `wifi` / `ble` / `sock` verb trees are
+documented there as well, not repeated in this command reference.
 
 ### `alp reboot` *(UNSAFE)*
 

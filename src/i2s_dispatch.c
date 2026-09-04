@@ -132,11 +132,12 @@ alp_status_t alp_i2s_write(alp_i2s_t *i2s, const void *block, size_t bytes, uint
 	if (block == NULL || bytes == 0u) return ALP_ERR_INVAL; /* param check before gate */
 	/* Counted via alp_handle_op_enter/leave (issue #629): write() can
 	 * block up to timeout_ms draining the transfer, so alp_i2s_close()
-	 * drains this op with the sleep-poll alp_handle_begin_close_blocking()
-	 * (src/common/alp_slot_claim.c) instead of the busy-spin
-	 * alp_handle_begin_close() -- generalised from rpc_dispatch.c's
-	 * _rpc_op_enter()/_rpc_begin_close()/_rpc_drain() (GHSA-xhm8).
-	 * start/stop stay on the short, synchronous op_enter/leave path. */
+	 * drains this op with alp_handle_begin_close_blocking()
+	 * (src/common/alp_slot_claim.c), which sleeps between polls instead
+	 * of busy-spinning (issue #1114: unsafe regardless of op duration) --
+	 * generalised from rpc_dispatch.c's _rpc_op_enter()/
+	 * _rpc_begin_close()/_rpc_drain() (GHSA-xhm8). start/stop stay on the
+	 * short, synchronous op_enter/leave path. */
 	if (i2s == NULL || !alp_handle_op_enter(&i2s->lifecycle, &i2s->active_ops))
 		return ALP_ERR_NOT_READY;
 	alp_status_t rc = (i2s->state.ops->write == NULL)

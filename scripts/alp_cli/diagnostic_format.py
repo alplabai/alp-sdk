@@ -18,10 +18,19 @@ each function's docstring):
 `Diagnostic.line` / `.col` are 1-based (Rust-style, matching the human
 renderer's `-->  path:line:col`). Both exporters convert from that single
 1-based source; neither mutates `Diagnostic` itself.
+
+`machine_json_for_board_yaml()` is the LIBRARY entry point: validate a
+board.yaml and get the machine document back, with no command wrapper in
+the way. Every consumer of this contract -- the schema gate, an LSP --
+calls it directly. `alp_cli.validate` used to be one more caller of it,
+but that CLI wrapper itself retired once `tan validate` shipped a native
+port (ADR 0020 end-state B, alp-sdk#1368); this module and its published
+contract did not retire with it.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Iterable
 
 from alp_cli import __version__ as _ALP_CLI_VERSION
@@ -95,6 +104,38 @@ def to_machine_json(
         "tool": {"name": tool_name, "version": tool_version or _ALP_CLI_VERSION},
         "diagnostics": [_diagnostic_to_json(d) for d in diags],
     }
+
+
+def machine_json_for_board_yaml(
+    path: Path,
+    *,
+    tool_name: str = "alp",
+    tool_version: str | None = None,
+) -> dict:
+    """Validate *path* and return its schemaVersion:1 machine document.
+
+    The library door onto this contract: byte-identical to what
+    `--format json` prints, but with no CLI in the call chain -- so a
+    consumer (the schema gate, an LSP, a CI job) binds to the exporter
+    rather than to a command wrapper that ADR 0020 retires.
+
+    Only diagnostics are reported. The hard cross-field consistency
+    check the CLI runs afterwards (`load_board_yaml`) is a SEPARATE
+    contract with no diagnostic-v1 representation, and is deliberately
+    not run here.
+
+    Imports `validate_board_yaml` locally rather than at module scope: this
+    module is the published machine-diagnostics contract (JSON + SARIF
+    exporters), and a consumer wanting only `to_machine_json`/`to_sarif`
+    (an LSP formatting an already-collected diagnostic list) should not
+    have to pull in the validator -- and, with it, `yaml`/`jsonschema`/
+    `alp_project_loader` -- just to import this module.
+    """
+    from alp_cli.validator import validate_board_yaml
+
+    return to_machine_json(
+        validate_board_yaml(path), tool_name=tool_name, tool_version=tool_version
+    )
 
 
 def _sarif_region(diag: Diagnostic) -> dict:

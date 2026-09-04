@@ -27,7 +27,7 @@ exercises one parser surface with corpora-driven input.
 | `cc3501e_fuzz.c`           | The `<alp/protocol/cc3501e.h>` SPI wire-protocol frame parser (Alif <-> CC3501E).         |
 | `iot_mqtt_fuzz.c`          | MQTT v3.1.1 fixed + variable-length header decoder, as consumed by `<alp/iot.h>`'s MQTT path. |
 | `eeprom_manifest_fuzz.c`   | 24C128 EEPROM manifest decoder consumed by `<alp/hw_info.h>` (magic + schema_version + CRC32). |
-| `gd32_bridge_frame_fuzz.c` | Drives `protocol_dispatch` from `firmware/gd32-bridge/src/protocol.c` against arbitrary opcode + payload bytes, then cross-checks the firmware-side `crc16_ccitt_false` symbol against an in-harness reference impl on every iteration -- silent CRC drift between the two becomes a libFuzzer crash. |
+| `gd32_bridge_frame_fuzz.c` | Drives `protocol_dispatch` from `gd32-bridge-firmware:src/protocol.c` against arbitrary opcode + payload bytes, then cross-checks the firmware-side `crc16_ccitt_false` symbol against an in-harness reference impl on every iteration -- silent CRC drift between the two becomes a libFuzzer crash. |
 | `swd_packet_fuzz.c`        | Arm SWD packet header + 32-bit data parity decoder used by `chips/gd32_swd/`.  Still an inline reference parser pending the host driver factoring its parity helpers out as non-static functions; TODO tracked in the file header. |
 
 The `cc3501e_fuzz.c`, `iot_mqtt_fuzz.c`, `eeprom_manifest_fuzz.c`
@@ -39,7 +39,7 @@ parsers for the real ones (`alp_cc3501e_parse_frame`,
 `alp_mqtt_decode_fixed_header`, `alp_hw_info_decode_eeprom`) once
 those land in the implementation pass.  Catching crashes on the
 inline decoder today still has value: it shadows the cc3501e
-firmware's parser (embedded in alp-sdk at `firmware/cc3501e/`), so
+firmware's parser (embedded in alp-sdk at `cc3501e-bridge-firmware:`), so
 malformed-frame issues caught here apply to that parser too.
 
 ## Build
@@ -52,8 +52,10 @@ CC=clang CXX=clang++ cmake -B build-fuzz \
     -DALP_BUILD_FUZZ=ON
 cmake --build build-fuzz --target alp_fuzz_cc3501e alp_fuzz_iot_mqtt
 
-# Run one harness for 30 seconds with the seed corpus.
-./build-fuzz/tests/fuzz/alp_fuzz_cc3501e -max_total_time=30 tests/fuzz/corpus/cc3501e
+# Run one harness for 30 seconds (no seed corpus checked in for this
+# harness yet -- see "Seed corpora" below; libFuzzer mutates from
+# scratch when none is given).
+./build-fuzz/tests/fuzz/alp_fuzz_cc3501e -max_total_time=30
 ```
 
 Clang ≥ 14 is recommended -- earlier versions miss some
@@ -61,14 +63,18 @@ Clang ≥ 14 is recommended -- earlier versions miss some
 
 ## Seed corpora
 
-Each harness ships its own `tests/fuzz/corpus/<name>/` directory with
-one-shot seed inputs that exercise the happy path.  libFuzzer
-mutates from these.  Corpus files are intentionally short (≤ 128 B)
-so the fuzzer reaches deep code paths quickly.
+Each harness is meant to ship its own `tests/fuzz/corpus/<name>/`
+directory with one-shot seed inputs that exercise the happy path.
+libFuzzer mutates from these.  Corpus files are intentionally short
+(≤ 128 B) so the fuzzer reaches deep code paths quickly.
 
-The first round of seeds is hand-rolled (one valid frame per
-opcode family for cc3501e; one CONNECT + one PUBLISH for MQTT).
-v1.0 captures coverage-driven corpus minimisation under
+**Status:** the directory is scaffolded (`.gitkeep`-only) for five
+harnesses today (`ble_adv_parser`, `mproc_frame`, `optiga_apdu`,
+`tls_handshake`, `update_log_entry`); no harness has real seed files
+checked in yet, including the two v0.3 anchors (`cc3501e`,
+`iot_mqtt`).  The first round of seeds is planned hand-rolled (one
+valid frame per opcode family for cc3501e; one CONNECT + one PUBLISH
+for MQTT).  v1.0 captures coverage-driven corpus minimisation under
 `tests/fuzz/corpus/<name>/min/`.
 
 ## CI integration (deferred)

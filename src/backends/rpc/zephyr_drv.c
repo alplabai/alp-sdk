@@ -89,6 +89,7 @@
 #include <alp/peripheral.h>
 #include <alp/rpc.h>
 
+#include "alp_errno.h"
 #include "alp_slot_claim.h"
 #include "rpc_ops.h"
 
@@ -147,7 +148,9 @@ struct rpc_be {
 	bool                 ept_bound;
 
 	/* Subscribe table.  Linear probe on collision; 8 slots is plenty
-     * for the v0.6 framing budget. */
+     * for the v0.6 framing budget.  Guarded by `lock` below -- the
+     * application thread rewrites it while the ipc_service worker
+     * thread dispatches out of it. */
 	struct rpc_sub subs[CONFIG_ALP_SDK_RPC_SUBS_PER_CHANNEL];
 
 	/* TX serialisation. */
@@ -173,8 +176,9 @@ struct rpc_be {
 	bool         call_pending;
 
 	/* GHSA-xhm8-7f87-93q5 redesign: guards `closing`, `recv_thread` +
-     * `recv_active` below, and the check-and-count entry/exit of
-     * rpc_ept_recv() (see that function). */
+     * `recv_active` below, the check-and-count entry/exit of
+     * rpc_ept_recv() (see that function), and the `subs` table
+     * above. */
 	struct k_spinlock lock;
 	bool              closing;
 
@@ -300,28 +304,17 @@ static uint32_t fnv1a_32(const char *s)
 
 static alp_status_t errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN: /* fallthrough */
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP: /* fallthrough */
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	case -ENOMEM:
-		return ALP_ERR_NOMEM;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 
+/* Look up a live subscribe slot.  CALLER MUST HOLD be->lock: the
+ * table is written from the application thread (z_subscribe() /
+ * z_unsubscribe()) and read from the ipc_service worker thread
+ * (rpc_ept_recv()). */
 static struct rpc_sub *sub_find(struct rpc_be *be, const char *method, uint32_t hash)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(be->subs); ++i) {
@@ -334,6 +327,8 @@ static struct rpc_sub *sub_find(struct rpc_be *be, const char *method, uint32_t 
 	return NULL;
 }
 
+/* Claim a free slot (cb == NULL marks a slot free).  CALLER MUST HOLD
+ * be->lock -- see sub_find(). */
 static struct rpc_sub *sub_alloc(struct rpc_be *be)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(be->subs); ++i) {
@@ -557,14 +552,35 @@ static void rpc_ept_recv(const void *data, size_t len, void *priv)
 	}
 
 	{
-		/* Async dispatch via the per-method subscribe table. */
-		uint32_t        h   = fnv1a_32(method);
-		struct rpc_sub *sub = sub_find(be, method, h);
-		if (sub != NULL && sub->cb != NULL) {
-			/* GHSA-xhm8-7f87-93q5: cb() may call alp_rpc_close() on
-             * THIS channel (self-close) -- see this function's doc
-             * comment and z_shutdown()'s from_worker detection. */
-			sub->cb(payload, payload_len, sub->user);
+		/* Async dispatch via the per-method subscribe table.
+         *
+         * The lookup AND the snapshot of the winning slot both happen
+         * under `lock`, because z_subscribe()/z_unsubscribe() rewrite
+         * these same slots from the application thread.  Testing
+         * sub->cb and then re-reading it for the indirect call would
+         * let a concurrent unsubscribe store NULL in between and send
+         * this thread through a null function pointer; reading
+         * sub->user separately from sub->cb would hand a freshly
+         * installed callback the PREVIOUS tenant's context, which its
+         * owner has usually already freed.  cb and user are one
+         * value, so they are copied out together.
+         *
+         * The lock is released BEFORE the invoke.  cb() may call
+         * alp_rpc_close() on THIS channel (self-close,
+         * GHSA-xhm8-7f87-93q5 -- see this function's doc comment and
+         * z_shutdown()'s from_worker detection), and that path takes
+         * this same spinlock; holding it across the callback would
+         * deadlock the very self-close the deferred epilogue below
+         * exists to serve.  Snapshot-then-call is the shape
+         * src/backends/rpc/yocto_drv.c's rpc_rx_main() already uses. */
+		uint32_t            h    = fnv1a_32(method);
+		k_spinlock_key_t    key  = k_spin_lock(&be->lock);
+		struct rpc_sub     *sub  = sub_find(be, method, h);
+		alp_rpc_method_cb_t cb   = (sub != NULL) ? sub->cb : NULL;
+		void               *user = (sub != NULL) ? sub->user : NULL;
+		k_spin_unlock(&be->lock, key);
+		if (cb != NULL) {
+			cb(payload, payload_len, user);
 		}
 	}
 
@@ -700,26 +716,39 @@ z_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t
 	if (be == NULL || !be->in_use) {
 		return ALP_ERR_NOT_READY;
 	}
+	uint32_t h = fnv1a_32(method);
+
+	/* The whole read-modify-write of the table runs under `lock`:
+     * rpc_ept_recv() dispatches out of these same slots on the
+     * ipc_service worker thread.  Bounded critical section -- a
+     * linear probe over CONFIG_ALP_SDK_RPC_SUBS_PER_CHANNEL slots
+     * plus one bounded strncpy -- so a spinlock is the right
+     * primitive here (recv can run close to interrupt priority,
+     * which is why this channel guards its shared state with a
+     * spinlock rather than a mutex in the first place). */
+	k_spinlock_key_t key = k_spin_lock(&be->lock);
+
 	/* NULL cb == unsubscribe -- matches the documented behaviour. */
 	if (cb == NULL) {
-		uint32_t        h   = fnv1a_32(method);
 		struct rpc_sub *sub = sub_find(be, method, h);
 		if (sub == NULL) {
+			k_spin_unlock(&be->lock, key);
 			return ALP_ERR_INVAL;
 		}
 		sub->cb          = NULL;
 		sub->user        = NULL;
 		sub->method[0]   = '\0';
 		sub->method_hash = 0u;
+		k_spin_unlock(&be->lock, key);
 		return ALP_OK;
 	}
-	uint32_t h = fnv1a_32(method);
 
 	/* Replace if already present. */
 	struct rpc_sub *sub = sub_find(be, method, h);
 	if (sub == NULL) {
 		sub = sub_alloc(be);
 		if (sub == NULL) {
+			k_spin_unlock(&be->lock, key);
 			LOG_WRN("rpc: subscribe table full on %s (cap=%d)",
 			        be->name,
 			        CONFIG_ALP_SDK_RPC_SUBS_PER_CHANNEL);
@@ -729,8 +758,15 @@ z_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t
 		strncpy(sub->method, method, sizeof(sub->method) - 1);
 		sub->method[sizeof(sub->method) - 1] = '\0';
 	}
-	sub->cb   = cb;
+	/* `user` first, `cb` last.  A non-NULL cb is what marks a slot
+     * live -- sub_find() and sub_alloc() both key off it -- so the
+     * context must be in place before the callback becomes
+     * reachable.  Redundant while every reader holds `lock`, but
+     * free, and it is the invariant any future lock-free read path
+     * would need. */
 	sub->user = user;
+	sub->cb   = cb;
+	k_spin_unlock(&be->lock, key);
 	return ALP_OK;
 #else
 	(void)st;
@@ -750,15 +786,28 @@ static alp_status_t z_unsubscribe(alp_rpc_backend_state_t *st, const char *metho
 	if (be == NULL || !be->in_use) {
 		return ALP_ERR_NOT_READY;
 	}
-	uint32_t        h   = fnv1a_32(method);
-	struct rpc_sub *sub = sub_find(be, method, h);
+	uint32_t h = fnv1a_32(method);
+
+	/* Same `lock` the recv dispatcher snapshots under -- see
+     * z_subscribe().  NOTE the guarantee this does and does not give:
+     * once this returns ALP_OK the slot is dead, so no LATER frame
+     * can reach the callback, but a dispatch that already snapshotted
+     * cb/user is running on the worker thread right now and will
+     * still complete.  Callers must not free the `user` context on
+     * the strength of this return alone -- the POSIX sibling,
+     * src/backends/rpc/yocto_drv.c's y_unsubscribe(), has exactly the
+     * same boundary. */
+	k_spinlock_key_t key = k_spin_lock(&be->lock);
+	struct rpc_sub  *sub = sub_find(be, method, h);
 	if (sub == NULL) {
+		k_spin_unlock(&be->lock, key);
 		return ALP_ERR_INVAL;
 	}
 	sub->cb          = NULL;
 	sub->user        = NULL;
 	sub->method[0]   = '\0';
 	sub->method_hash = 0u;
+	k_spin_unlock(&be->lock, key);
 	return ALP_OK;
 #else
 	(void)st;

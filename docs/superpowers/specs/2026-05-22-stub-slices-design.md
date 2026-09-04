@@ -1,7 +1,12 @@
 # Stub Registry Slices (5 + 7 + 8) Design
 
 **Date:** 2026-05-22
-**Status:** Draft — pending implementation
+**Status:** **LANDED, and gone well past "stub".** `src/backends/`
+for camera, power, display and gpu2d all now carry real per-silicon
+bodies (e.g. `camera/alif_isp_pico.c`, `camera/v2n_n44_isp.c`,
+`power/alif_se_profile.c`, `gpu2d/alif_dave2d.c`) alongside the
+`*_stub.c` fallback this slice originally scaffolded-only.  Kept for
+the registry-scaffolding rationale.
 **Owner:** alpCaner
 **Spec depth:** Multi-subsystem mechanical scaffolding (one PR / one plan)
 **Predecessor:** `docs/superpowers/specs/2026-05-21-backend-registry-design.md` Section 6 → Slices 5, 7, 8 (combined)

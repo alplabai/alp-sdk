@@ -44,10 +44,10 @@ Want green or blue?  Both EVK route tables declare the full RGB set
 [`alp_e1m_evk_routes.h`](../../../include/alp/boards/alp_e1m_evk_routes.h),
 `XEVK_PIN_LED_GREEN` / `XEVK_PIN_LED_BLUE` in
 [`alp_e1m_x_evk_routes.h`](../../../include/alp/boards/alp_e1m_x_evk_routes.h))
--- but only RED has a cross-EVK `BOARD_*` alias in `<alp/board.h>`
-today.  Open the `EVK_*` / `XEVK_*` macro directly, guarded by
-`ALP_BOARD_E1M_EVK` / `ALP_BOARD_E1M_X_EVK`, for the other two
-channels.
+-- and both alias all three channels, so `BOARD_PIN_LED_GREEN` and
+`BOARD_PIN_LED_BLUE` reach through `<alp/board.h>` exactly like
+`BOARD_PIN_LED_RED`.  Swap the macro in `src/main.c`; no
+`ALP_BOARD_E1M_EVK` / `ALP_BOARD_E1M_X_EVK` guard needed.
 
 ## What this shows
 
@@ -82,7 +82,7 @@ build config, and delegates to `west build`.  You still need a
 real-silicon build -- if `tan build` fails looking for it, that's
 this exact gap (tracked as
 [tan-cli#160](https://github.com/alplabai/tan-cli/issues/160)); run
-`tan doctor --build` to confirm what's missing before re-running.
+`tan doctor` to confirm what's missing before re-running.
 
 To target a different SoM / board, edit `board.yaml` -- nothing else
 needs to change.

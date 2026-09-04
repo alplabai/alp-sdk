@@ -6,8 +6,9 @@
 > `status: tbd` -- the hw_rev-buildable gate
 > ([#1025](https://github.com/alplabai/alp-sdk/issues/1025)) refuses
 > it outright, before the orchestrator ever reaches carve-out
-> resolution against the also-TBD iMX93 memory-map values in
-> `metadata/e1m_modules/E1M-NX9101.yaml`.  Both are TBD by design
+> resolution against the iMX93 memory map, which
+> `metadata/e1m_modules/E1M-NX9101.yaml` cannot resolve either
+> (`silicon_variant: TBD`).  Both are TBD by design
 > (project memory note: don't invent HW values) pending real NX9101
 > silicon; this example is excluded from the build/emit-snapshot/
 > build-plan/system-manifest/parity-oracle gates for the same reason
@@ -44,19 +45,19 @@ examples/multicore/rpmsg-imx93/
 ## Memory map
 
 The iMX93 SoM preset (`metadata/e1m_modules/E1M-NX9101.yaml`)
-currently carries:
+declares no `memory_map:` block at all -- a preset carries one only
+for non-stock partitioning.  The stock layout is derived from the SoC
+variant resolved via `silicon_variant:`, and that field is still TBD:
 
 ```yaml
-memory_map:
-  - { name: ddr_main, base: TBD, size_mib: TBD,
-      accessible_from: [a55_cluster, m33], cacheable: true  }
-  - { name: ocram,    base: TBD, size_kib: TBD,
-      accessible_from: [a55_cluster, m33], cacheable: false }
+silicon: nxp:imx9:imx93
+silicon_variant: TBD
 ```
 
-Both regions are reachable from both cores, but the orchestrator
-prefers the non-cacheable region (`ocram`) for the default carve-out
-because the iMX93's M33 has no cache (spec §6.8).
+So `resolve_memory_map()` returns an empty region table for this SKU
+and the orchestrator has no region to place the carve-out in.  Once
+real regions land it will prefer the non-cacheable one for the
+default carve-out, because the iMX93's M33 has no cache (spec §6.8).
 
 Today `tan build` never even reaches this carve-out check: #1025's
 hw_rev-buildable gate refuses `som.hw_rev: r1`'s `status: tbd` first
@@ -68,15 +69,20 @@ alp_project: SoM E1M-NX9101 hw_rev 'r1' exists but is not buildable
 ```
 
 Once imx93 `r1` carries a real, buildable status, resolution reaches
-this carve-out check next, and -- until the user also supplies real
-memory_map addresses + sizes -- fails with:
+this carve-out check next, and -- until the preset also supplies a
+real `mailbox.controller:` and resolvable memory regions -- the rpmsg
+entry lands in `system-manifest.yaml` with `status: blocked` and the
+first unmet reason:
 
 ```
-OrchestratorError: ipc 'alp_default_rpmsg': memory_map.base is TBD
-for region 'ocram' (E1M-NX9101).  Update
-metadata/e1m_modules/E1M-NX9101.yaml with authoritative values
-before building.
+reason: SoM E1M-NX9101 mailbox controller is TBD; carve-out
+  resolution requires authoritative mailbox metadata.  Fill
+  `mailbox.controller:` in metadata/e1m_modules/E1M-NX9101.yaml with
+  the vendor mailbox node name (e.g. `renesas_mhu`, `nxp_mu`,
+  `alif_mhuv2`) or remove the rpmsg entries from board.yaml.
 ```
+
+The slice-build step is what then fails on the blocked carve-out.
 
 ## Boot order
 
@@ -90,10 +96,10 @@ before building.
 ## Build
 
 ```bash
-tan build alp-sdk/examples/multicore/rpmsg-imx93
+tan build --project examples/multicore/rpmsg-imx93
 ```
 
-The orchestrator fans out:
+Tan's relocated planner fans out:
 
 - `build/a55_cluster-yocto/` (bitbake against `MACHINE = e1m-nx9101-a55`).
 - `build/m33-zephyr/` (Zephyr against `BOARD = alp_e1m_nx9101_m33`).

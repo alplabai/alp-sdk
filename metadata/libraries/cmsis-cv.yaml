@@ -1,0 +1,45 @@
+# CMSIS-CV -- Arm CMSIS optimised computer-vision kernels for Cortex-M
+# (ADR 0018 library manifest).
+#
+# Optimised CV kernels for Cortex-M, with Helium/Neon vectorised variants.
+# Formalises `libraries: [cmsis-cv]`.
+#
+# Grounding (github.com/ARM-software/CMSIS-CV):
+#   * licence Apache-2.0.
+#   * NO upstream tags and NO releases exist. Pinned to `main` at SHA
+#     25c6c111ee04dcfb0ae9093fd6dee4586872982c (2026-07-15) -- a SHA pin,
+#     not a floating branch, per ADR 0017/0018 (a real revision must be
+#     reproducible even though upstream has never cut a tag).
+#   * upstream's own README states, verbatim: "It is a work in progress and
+#     has just started."
+#   * repo layout at the pinned SHA: Include, PrivateInclude, Source,
+#     Examples, Testing, Documentation, cmsiscv_nodes, ARM.CMSIS-CV.pdsc,
+#     gen_pack.sh -- there is NO zephyr/ directory, no zephyr/module.yml,
+#     and no Kconfig anywhere in the tree. Unlike CMSIS-Stream, upstream has
+#     shipped no Zephyr module glue at all as of this pin.
+#
+# `integration.zephyr.module: null` -- no west module exists for this
+# library (same shape as nlohmann-json.yaml's `module: null`: "no west
+# module exists"). No `kconfig:` -- there is no Kconfig symbol to
+# transcribe; inventing one would be exactly the fabrication ADR 0018
+# forbids.
+#
+# This manifest is recipe-only (tier B) purely because upstream has not yet
+# shipped Zephyr integration -- promote to Tier A once CMSIS-CV ships a real
+# zephyr/module.yml (+ Kconfig) and this manifest can name a real module and
+# a real symbol, and a CI build lane + teaching example land alongside it.
+#
+# NOT vendored: no vendors/cmsis-cv/ directory, no zephyr/CMakeLists.txt
+# edit, no synthetic CONFIG_ALP_SDK_*_VENDORED symbol. ADR 0018's non-goals
+# forbid in-tree vendored library sources; the u8g2/catch2 vendoring
+# exception is not widened here.
+schema_version: 1
+name: cmsis-cv
+description: "Arm CMSIS-CV -- optimised computer-vision kernels for Cortex-M with Helium/Neon vectorised variants."
+tier: B
+version: "25c6c111ee04dcfb0ae9093fd6dee4586872982c"
+license: Apache-2.0
+
+integration:
+  zephyr:
+    module: null

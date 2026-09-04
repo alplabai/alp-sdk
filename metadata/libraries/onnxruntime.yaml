@@ -1,0 +1,66 @@
+# ONNX Runtime -- the CPU inference floor on the Cortex-A / Yocto peer.
+#
+# Fills the `ALP_INFERENCE_BACKEND_CPU` slot in src/yocto/inference_yocto.c.
+# It is the CPU floor, not an NPU replacement: `resolve_auto()` keeps the
+# Ethos-U, DRP-AI and DEEPX NPU backends ahead of CPU -- an NPU-bearing SoM
+# never silently falls back to ORT under AUTO.
+#
+# CAPABILITY vs VERIFICATION -- read `requires:` below as the capability claim
+# and this paragraph as the verification status; they are deliberately not the
+# same statement.  ORT needs nothing SKU-specific: any Yocto A-class SoM can
+# run it, which is why `requires:` carries only `os: [yocto]` + `core_class: a`
+# and docs/portability-matrix.md marks every such SKU.  What has actually been
+# EXERCISED is narrower: the recipe was parsed and version-resolved against the
+# `E1M-V2N101` layer stack (meta-renesas + meta-rz-features, MACHINE
+# `e1m-v2n101-a55`) via `bitbake -p` then `bitbake-layers show-recipes
+# onnxruntime` -> `onnxruntime: 1.28.0`.  See the PR for the state of the full
+# `bitbake onnxruntime` build -- nothing here is a build claim, and no SKU has
+# run ORT on silicon.  `E1M-NX9101` cannot be exercised at all yet: the i.MX 93
+# side needs `meta-imx` / `meta-freescale`, which no Alp build host carries.
+# V2M101/102 likewise await a build pass of their own.
+#
+# WHY THIS IS OUR OWN RECIPE, NOT A VENDOR LAYER DEPENDENCY.
+#   Neither `openembedded-core` nor `meta-openembedded` -- the only layers
+#   meta-alp-sdk/conf/layer.conf declares in LAYERDEPENDS_alp-sdk -- ships an
+#   ONNX Runtime recipe at all.  The two vendor stacks that do ship one are
+#   FORKS at incompatible versions: `nxp-imx/meta-imx` builds
+#   gitsm://github.com/nxp-imx/onnxruntime-imx.git (the NXP fork, carrying the
+#   `neutron` and `vsinpu` execution providers) at 1.24.3; `meta-renesas-ai`
+#   ships 1.8.0.  Inheriting either fork would make this manifest's single
+#   `version:` field untrue on whichever family didn't provide it.  This
+#   manifest deliberately describes the UPSTREAM build -- one recipe, one
+#   version, true on every family we enable -- rather than a per-vendor-fork
+#   split (2026-08-05 own-recipe decision).
+#
+# Version:  1.28.0 -- upstream `microsoft/onnxruntime` release tag `v1.28.0`
+#   (published 2026-07-25), pinned in meta-alp-sdk's own
+#   recipes-devtools/onnxruntime recipe.  Never a vendor fork version.
+# License:  MIT & Apache-2.0 -- upstream's own LICENSE is MIT, but the tree we
+#   ship is compound: `onnx/onnx` (Apache-2.0) is BOTH a required git
+#   submodule (cmake/external/onnx) AND a cmake/deps.txt entry -- it is the
+#   model-format parser, and there is no CPU-only build that excludes it.
+#   `libonnxruntime.so` as shipped therefore contains Apache-2.0 code
+#   (ThirdPartyNotices.txt is 325 KB at this tag).  `license: MIT` alone would
+#   be untrue about the redistributed artifact, so this manifest carries the
+#   compound SPDX expression the 2026-08-05 maintainer legal sign-off added to
+#   metadata/schemas/library-v1.schema.json's `license` enum.
+schema_version: 1
+name: onnxruntime
+description: "ONNX Runtime -- CPU inference floor for the Cortex-A / Yocto peer."
+tier: B
+version: "1.28.0"
+license: "MIT & Apache-2.0"
+
+requires:
+  # ORT is the A55 / Linux side only (ADR 0010 core-class split): a `zephyr`
+  # integration section would imply an M-class build we do not ship.
+  os: [yocto]
+  core_class: a
+
+integration:
+  yocto:
+    # libonnxruntime.so + the onnxruntime_c_api.h header, built by
+    # meta-alp-sdk/recipes-devtools/onnxruntime/onnxruntime_1.28.0.bb (own
+    # recipe against upstream, never a vendor fork).
+    image_install:
+      - onnxruntime

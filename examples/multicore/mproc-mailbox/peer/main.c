@@ -24,12 +24,12 @@
  * Build status (v1.0 prep)
  * ========================
  *
- * Compiles standalone today.  Sysbuild glue that builds it
- * alongside the HP image in one `west build` invocation lands
- * with the v0.4 dual-image flow in
- * `alplabai/alp-zephyr-modules`.  Until then customers run two
- * `west build` invocations -- one for HP, one for HE -- and
- * flash both partitions.
+ * Compiles standalone today, and `board.yaml` declaring both
+ * `m55_hp` (`app: ./src`) and `m55_he` (`app: ./peer`) as real
+ * project cores means one `tan build` already produces both images
+ * through the orchestrator's existing multi-slice path -- no
+ * sysbuild involved.  Each core can also be built standalone with
+ * `west build` and flashed to its own partition.
  */
 
 #include <stdio.h>

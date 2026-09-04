@@ -5,7 +5,6 @@
 
 schema_version: 1
 board: alp_e1m_aen301_m55_hp        # E3 has 2x M55 (HP + HE); HP is the app core.
-serial_port: /dev/ttyACM0
 flash_method: westflash
 defaults:
   serial:

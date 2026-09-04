@@ -1,7 +1,11 @@
 # EEPROM-authoritative SoM hardware revision
 
 **Date:** 2026-05-31
-**Status:** Design approved, pending spec review
+**Status:** **LANDED.** `src/common/hw_info_manifest.h` and the
+`ALP_ERR_NOT_PROVISIONED` status exist in `include/alp/hw_info.h`,
+which documents the EEPROM manifest as the sole authoritative SoM
+identity source (no SoM-side ADC cross-check) — matching this
+design's decision. Kept for the design rationale.
 **Branch:** `feat/eeprom-authoritative-som-rev` (off `dev`)
 
 ## Problem

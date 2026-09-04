@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from .paths import METADATA_ROOT
+
 
 class OrchestratorError(RuntimeError):
     """Raised when the orchestrator can't resolve / build a project.
@@ -151,6 +153,45 @@ class Slice:
     # description).  Consumed by `_slice_flash_recipe`'s `zephyr` branch to
     # arm the direct-flash path in `flash_args`.
     jlink_flash_device: Optional[str] = None
+    # Whether the variant's `debug:` block DECLARED `jlink_flash_device` at
+    # all, independent of its value (#1295 / tan-cli#734).  `dict.get`
+    # returns None both for a schema-declared `jlink_flash_device: null` and
+    # for an absent key, and those mean OPPOSITE things: a declared null is
+    # a published "no known J-Link flash profile -- refuse loudly" (e4.json
+    # is the one real case), while absent means the variant says nothing and
+    # the Flow A default stands.  The downstream contract is presence-based
+    # (`flash_plan._fa_has_key` in tan), so the emitter must not collapse the
+    # two -- see `_slice_flash_recipe`.
+    jlink_flash_device_declared: bool = False
+    # The read-only SW-DP IDR (DPIDR) wrong-board preflight PAIR for this
+    # core (soc-spec-v1 `variants[].debug.expect_dpidr` +
+    # `variants[].debug.jlink_device[<core_id>]`), resolved together by
+    # `loader._resolve_flow_d_preflight` -- both None (preflight not armed,
+    # every variant that has not been measured) or both set; never one of
+    # the two.  `expect_dpidr` is the ID the board's debug port must answer
+    # BEFORE any write; `jlink_device` is the LIVE-CORE attach profile that
+    # read is performed with -- distinct from `jlink_flash_device` above,
+    # which is the part-number flash-algorithm profile.  Resolved SoC-variant
+    # facts like `jlink_flash_device`, NOT customer-overridable.  Consumed by
+    # `_slice_flash_recipe`'s `zephyr` branch, which emits them into
+    # `flash_args` as an inseparable pair (#1355).
+    expect_dpidr: Optional[str] = None
+    jlink_device: Optional[str] = None
+    # This core's AEN MRAM slot0-XIP load address, `0x`-prefixed hex string
+    # (tan-cli#353) -- where Flow D's built-in Alif MRAM loader must write
+    # the slot0-linked application blob itself, distinct from
+    # `jlink_flash_device` above (which only selects the loader's device
+    # PROFILE, not an address). Resolved by
+    # `loader._resolve_slot0_load_address` from the SoM preset's
+    # `memory_map:` (NOT the SoC JSON -- this is SDK/module build policy,
+    # not a silicon fact: metadata/e1m_modules/E1M-AEN801.yaml's own
+    # `memory_map:` comment says so explicitly, #1069), so like
+    # `jlink_flash_device` it is NOT customer-overridable.  None when this
+    # core has no AEN slot0-XIP window (every non-AEN slice, and any AEN
+    # core whose SoC variant publishes no `jlink_flash_device`) -- a
+    # published "unknown", never a value to invent. Consumed by
+    # `_slice_flash_recipe`'s `zephyr` branch.
+    slot0_load_address: Optional[str] = None
 
     # Populated by Orchestrator.fan_out:
     build_dir: Optional[Path] = None
@@ -351,6 +392,20 @@ class BoardProject:
     storage: list[StorageEntry] = field(default_factory=list)
     security: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
+    # The metadata root `load_board_yaml(..., metadata_root=...)` resolved
+    # this project against.  `None` means the default in-tree `metadata/`
+    # (the common case); an explicit override (`--metadata-root <path>`)
+    # sets it so every post-load resolver reads the SAME tree the loader
+    # validated against, instead of quietly falling back to the SDK's own
+    # in-tree metadata (#1485).
+    metadata_root: Optional[Path] = None
+
+    def effective_metadata_root(self) -> Path:
+        """The metadata root every resolver must use for this project --
+        the explicit override if `load_board_yaml` was given one, else the
+        SDK's own in-tree `metadata/`."""
+        return (self.metadata_root if self.metadata_root is not None
+                else METADATA_ROOT)
 
     def hw_info_eeprom_feature(self) -> Optional[dict[str, Any]]:
         """Return the explicit ``features.hw_info.eeprom`` projection."""

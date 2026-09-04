@@ -6,6 +6,27 @@
 #      reformat; CI tightens incrementally.
 #   2. cppcheck — full tree under src/ + chips/, treats warnings as
 #      informational (not fatal) until v0.2.
+#   3. shellcheck — every shipped *.sh (#1550; widened from
+#      scripts/bench/** only, #1527's original scope), as extra steps
+#      INSIDE the clang-format-diff job rather than a job of its own: a
+#      separate job's status context is not in dev's/main's
+#      required-status-checks list (only `clang-format · diff-only` is),
+#      so it would show red without blocking a merge -- exactly the
+#      "Expected Behavior" #1527 asks for ("A shell defect in a bench
+#      script fails a PR check"). Piggybacking on the already-required
+#      job hard-blocks with zero branch-protection change. Before #1527,
+#      NOTHING linted scripts/bench/**: scripts/test-all.sh's
+#      stage_shellcheck globbed the flat, non-recursive `scripts/*.sh`
+#      (never reached a subdirectory), and the only shellcheck that ran
+#      anywhere in CI was onramp-clean-container.yml's, scoped to
+#      scripts/bootstrap.sh plus tan-cli's install.sh. #1478 (a stray
+#      literal `n` passed to JLinkExe on a wrong-board MRAM-write
+#      preflight) sat undetected for exactly this reason. #1527 then left
+#      two more groups unchecked in CI: root scripts/*.sh (checked only
+#      by the local stage_shellcheck mirror) and 8 files entirely outside
+#      scripts/ (checked nowhere). #1550 closes both gaps with a
+#      repo-wide `git ls-files '*.sh'` sweep, matching
+#      stage_shellcheck's local mirror below.
 #
 # Build-context-aware tools (clang-tidy + ABI snapshot) need a
 # proper compile_commands.json — they land in v0.2 once we have a
@@ -18,6 +39,14 @@ on:
     branches: [main, dev]
   push:
     branches: [main, dev]
+  # `clang-format · diff-only` is the fifth of `dev`'s required contexts, and
+  # GitHub raises `merge_group` -- not `push` or `pull_request` -- for a
+  # merge-queue entry, so without this a queued PR waits on a check that can
+  # never fire (#1415). Neither `clang-format-diff` nor `cppcheck` carries a
+  # job-level `if:`. The "Determine diff base" step below already handles a
+  # non-`pull_request` event: it falls back to `HEAD~1`, which on a queue ref
+  # is this entry's own delta.
+  merge_group:
   workflow_dispatch:
 
 concurrency:
@@ -28,13 +57,31 @@ jobs:
   clang-format-diff:
     name: clang-format · diff-only
     runs-on: ubuntu-latest
+    # #1477: this job produces the required `clang-format · diff-only`
+    # context and previously had no ceiling at all (GitHub's implicit
+    # 360-minute default applied). Worst observed successful run 23s
+    # across 3 sampled runs. #1527 added the two shellcheck steps below
+    # (originally 13 small bench scripts; #1550 widened the sweep to
+    # every shipped *.sh -- 26 files as of this change, local run 2.7s).
+    # The ceiling is set by this job's LONGEST step cap, not by that
+    # observed time: #1549 replaced #1274's ceiling-exceeds-the-SUM rule
+    # with test_tier_a_workflow_step_timeouts.py's
+    # test_job_ceiling_exceeds_its_longest_step_timeout, and this job's
+    # longest step is the 20-minute clang-format pip install below, so 25
+    # is the smallest value that still clears it.
+    timeout-minutes: 25
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
         with:
+          persist-credentials: false
           fetch-depth: 0  # need history so HEAD~ resolves
 
       - name: Install clang-format 22 (pinned)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         # Pinned to clang-format-22 via the pip wheel (clang-format==22.1.5),
         # which ships BOTH the `clang-format` binary and `clang-format-diff.py`.
         # We pin via pip, NOT apt: apt's `clang-format` floats with the runner
@@ -50,14 +97,31 @@ jobs:
 
       - name: Determine diff base
         id: base
+        # BASE_SHA is routed through env + a quoted shell variable rather
+        # than spliced via ${{ }} into this run: block's source text --
+        # same construct pr-bitbake.yml's Resolve step had to fix (#1475),
+        # applied here too for consistency even though base.sha is a
+        # commit hash of the PR's own target branch, not fork-controlled
+        # data.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "ref=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "ref=$BASE_SHA" >> "$GITHUB_OUTPUT"
           else
             echo "ref=HEAD~1" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run clang-format-diff on changed lines
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        # DIFF_BASE is routed through env, matching the producing step above
+        # -- ${{ }} re-substitutes into every run: block's source text
+        # independently, so quoting the value once at the producer does not
+        # protect this consuming step on its own.
+        env:
+          DIFF_BASE: ${{ steps.base.outputs.ref }}
         run: |
           # clang-format-diff.py from the pinned pip wheel; it shells out to the
           # wheel's bundled v22 clang-format, so the diff check uses v22 too.
@@ -70,8 +134,15 @@ jobs:
           # their UPSTREAM project's style (GigaDevice firmware library,
           # Zephyr/Renesas-FSP drivers) so they stay diffable against
           # their sources -- our .clang-format does not govern them.
-          git diff -U0 ${{ steps.base.outputs.ref }} -- '*.c' '*.h' \
+          # tests/scripts/fixtures/rzv2n_svd/** is excluded for the same
+          # reason and one more: those headers are verbatim BSD-3-Clause
+          # excerpts of the Renesas FSP iodefines/iobitmasks, and
+          # test_gen_rzv2n_cm33_svd.py asserts they stay byte-identical
+          # to the real module headers.  Reformatting them would break
+          # the very property the fixture exists to hold.
+          git diff -U0 "$DIFF_BASE" -- '*.c' '*.h' \
               ':!vendors/**' ':!zephyr/**' \
+              ':!tests/scripts/fixtures/rzv2n_svd/**' \
               | python3 "$DIFF_TOOL" -p1 \
               | tee clang-format-diff.txt
           if [ -s clang-format-diff.txt ]; then
@@ -80,17 +151,99 @@ jobs:
           fi
           echo "clang-format clean on the diff."
 
+      - name: Install shellcheck (pinned)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        # Pinned to the upstream release tarball, NOT apt: apt's
+        # `shellcheck` floats with the runner image, so an unpinned bump
+        # could add or drop warning-severity checks between runs of this
+        # job and silently move CI's own bar with no diff to review. This
+        # pin does NOT by itself guarantee CI and the local
+        # `stage_shellcheck` mirror agree -- that mirror still resolves
+        # whatever `shellcheck` is on PATH / ~/.local/bin (see
+        # scripts/test-all.sh's stage_shellcheck); only pinning both sides
+        # to the same v0.10.0 closes that half of the gap.
+        run: |
+          set -euo pipefail
+          SHELLCHECK_VERSION="v0.10.0"
+          curl -fsSL --retry 3 --retry-delay 5 \
+              "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
+              | tar -xJ
+          sudo install "shellcheck-${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version
+
+      - name: Shellcheck every shipped *.sh
+        # #1550: widened from `scripts/bench/*.sh` (#1527's original
+        # scope) to a repo-wide `git ls-files '*.sh'` sweep -- `git
+        # ls-files` walks the tree recursively where a shell glob won't,
+        # matching stage_shellcheck's local mirror in
+        # scripts/test-all.sh.
+        #
+        # One shellcheck invocation PER FILE. scripts/bench/** keeps -x
+        # (follow `source`) and -S warning, the bar #1527 set:
+        # `flash-jlink-mramxip.sh` sources `bench-env.sh`, and its
+        # `GD32_DPIDR` local is read by that file's
+        # `bench_jlink_assert_aen_dpidr` -- a real cross-file use that
+        # only -x's source-following can see. Without -x that use is
+        # invisible per-file and shellcheck reports a false-positive
+        # SC2034 on it; WITH -x, SC2034 still correctly fires on
+        # `flash-jlink-hp.sh`'s genuinely-unused `OBJ` (confirmed: -x
+        # does not mask real per-file findings, only resolves cross-file
+        # reads). -S warning matches stage_shellcheck's local mirror --
+        # SC1012 (the #1478 stray-`\n` class) is warning-severity, so
+        # -S error alone would not have caught it. scripts/test-all.sh
+        # also runs at -S warning here, matching stage_shellcheck's local
+        # treatment of that file (the load-bearing wrapper itself).
+        # Every other shipped *.sh runs at -S error, matching
+        # stage_shellcheck's own default severity and
+        # onramp-clean-container.yml's scripts/bootstrap.sh step.
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(git ls-files '*.sh')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::'git ls-files *.sh' matched no files -- refusing to report a silent pass."
+            exit 1
+          fi
+          rc=0
+          for f in "${files[@]}"; do
+            case "$f" in
+            scripts/bench/*)
+              shellcheck -x -S warning "$f" || rc=1
+              ;;
+            scripts/test-all.sh)
+              shellcheck -S warning "$f" || rc=1
+              ;;
+            *)
+              shellcheck -S error "$f" || rc=1
+              ;;
+            esac
+          done
+          exit "$rc"
+
   cppcheck:
     name: cppcheck · src + chips
     runs-on: ubuntu-latest
+    # #1477: not a required context, and its own run step already ends
+    # `|| true` with --error-exitcode=0 -- but it too had no ceiling
+    # (360-minute implicit default). Worst observed successful run 42s
+    # across 3 sampled runs; 15min gives headroom over that.
+    timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 5
 
       - name: Install cppcheck
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cppcheck
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y cppcheck
 
       - name: Run cppcheck
         # cppcheck without a build context misses some symbols
@@ -119,7 +272,8 @@ jobs:
 
       - name: Upload cppcheck.xml
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        timeout-minutes: 2
         with:
           name: cppcheck
           path: cppcheck.xml

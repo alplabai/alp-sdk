@@ -15,7 +15,11 @@ This cookbook ties three other docs together:
   guarantee.  Every cell is a SKU × example compile test;
   18 / 21 cells green for E1M (NX9101's only hw_rev is `status: tbd` --
   refused outright by the hw_rev-buildable gate, #1025 --
-  so all 3 of its cells currently fail), 12 / 12 for E1M-X.
+  so all 3 of its cells currently fail), 8 / 12 for E1M-X (the
+  `adc-voltmeter` example fails on all four E1M-X presets --
+  V2N101, V2N102, V2M101, V2M102; the other two pinned examples,
+  `pwm-led-fade` and `v2n-pwm-fan-control`, are green on all four --
+  see the matrix for the per-cell diagnostics).
 - [`docs/adr/0011-intra-family-portability.md`](adr/0011-intra-family-portability.md)
   — the architectural decision record that ratifies the intra-family
   boundary, with the alternatives we considered and rejected.
@@ -68,8 +72,10 @@ on `E1M-V2N101` and vice versa, by design:
 
 - different physical pinouts (the board-side spec differs);
 - different power envelopes (mW-class M-only vs W-class A+M);
-- different SoC architecture (Cortex-M-only vs heterogeneous
-  Cortex-A55 + Cortex-M33);
+- different SoC architecture (E1M-X is uniformly heterogeneous
+  Cortex-A55 + Cortex-M33 on every SKU; E1M's core mix is
+  SKU-dependent, from Cortex-M-only to heterogeneous
+  Cortex-A32/A55 + Cortex-M);
 - different NPU choices (Ethos-U / DRP-AI / DEEPX);
 - and most visibly to your source code, **different header
   namespaces** — `<alp/e1m_pinout.h>` exports `ALP_E1M_PWM0` etc., while
@@ -183,7 +189,7 @@ without losing the U55 dispatch on the same SoM.
 **Build:**
 
 ```bash
-west build -b alp_e1m_aen801_m55_hp examples/peripheral-io/i2c-scanner
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/i2c-scanner
 ```
 
 **Flash:** the `west flash` step is unchanged from any other AEN
@@ -324,7 +330,7 @@ pinout namespaces, one per form factor.
 | Concern | E1M family | E1M-X family |
 | --- | --- | --- |
 | Mechanical | 35 × 35 mm | 45 × 65 mm |
-| SoC class | Cortex-M only (Alif Ensemble, NXP i.MX 93 RT core) | Heterogeneous Cortex-A55 + Cortex-M33 (Renesas RZ/V2N) |
+| SoC class | Per-SKU: Cortex-M only (AEN301/401) to heterogeneous Cortex-A32 + Cortex-M55 (AEN501..AEN801) or Cortex-A55 + Cortex-M33 (NX9101) | Uniform heterogeneous Cortex-A55 + Cortex-M33 (Renesas RZ/V2N) |
 | Power envelope | mW-class | W-class |
 | NPU options | Ethos-U55 / U65 / U85 | DRP-AI3 (V2N), DRP-AI3 + DEEPX DX-M1 (V2M) |
 | Board | `E1M-EVK` or compatible | `E1M-X-EVK` or compatible |
@@ -433,7 +439,7 @@ Two introspection helpers ship today to help validate the chain:
   actually engaged.
 
 Both are exported as `extern "C"` from
-`src/zephyr/inference_tflm.cpp` for Zephyr builds; both return
+`src/backends/inference/tflm.cpp` for Zephyr builds; both return
 static string-literal pointers, callers must not free.
 
 ### 4.2  Form-factor differences (the namespace error)
@@ -561,10 +567,46 @@ hide. Display/LVGL apps route through `<alp/display.h>` +
 A short, explicit allowlist in `check_example_portability.py`
 (`_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST`) covers the handful of examples
 that genuinely have no portable surface to route through yet (raw AMP
-mailbox transport, MDIO PHY diagnostics, flash) -- each entry names
+mailbox transport, MDIO PHY diagnostics, flash) -- keyed per example
+AND per driver header, so allowlisting one driver (e.g. `mdio.h`)
+never exempts that example from a *different*
+`#include <zephyr/drivers/...>` it picks up later; each entry names
 the include and why. Zephyr-specific register/bench tools with no
 `board.yaml` (e.g. `examples/aen/*-regcheck/`) are outside this
 check's scope by construction.
+
+### 4.5  V2N/V2M analog and counter classes (bridge-served, no native leg)
+
+On V2N/V2M, `alp_adc_*`, `alp_pwm_*`, `alp_dac_*`, `alp_counter_*`,
+and `alp_qenc_*` are served entirely by the GD32 IO-MCU bridge. No
+SoC-native RZ/V2N leg exists: the wildcard `zephyr_drv` leg
+(`src/backends/{adc,pwm,dac,counter,qenc}/zephyr_drv.c`) is compiled
+on a V2N build but never selected, because an exact `silicon_ref`
+match beats the wildcard at equal backend priority. This is a
+routing fact, not a preference: no SoC pin reaches an E1M-standard
+analog or counter pad on this family, so a native leg would have
+nothing to attach to even if it were selected
+(`docs/adr/0024-v2n-analog-and-counter-classes-stay-on-the-gd32-bridge.md`).
+
+Capability deltas to plan around at the portable surface: the ADC
+backend advertises `base_caps = 0u` — an SDK-side gap at SDK v0.7,
+not a bridge hardware limit — so no oversample or trigger support is
+exposed yet; counter has no alarm support, because there is no IRQ
+line from the GD32 back to the RZ/V2N SoC. The bridge also serves
+only `counter_id 0` (`src/backends/counter/gd32_bridge.c:33`) even
+though `include/alp/e1m_x_pinout.h:162-165` publishes
+`ALP_E1M_X_COUNTER0..3` — one counter instance, not four, on V2N/V2M
+today. `ALP_E1M_X_COUNTER1..3` are still valid E1M-X connector
+identities (a different SoM may serve all four), so
+`alp_counter_open()` on them returns `ALP_ERR_NOSUPPORT`, not
+`ALP_ERR_INVAL`. The served count is discoverable only *after*
+`ALP_E1M_X_COUNTER0` opens successfully, via
+`alp_counter_capabilities()->channel_count` on that handle -- and that
+open itself needs the GD32 supervisor bus configured, so on a build
+where COUNTER0 cannot open, the served count cannot be queried at all
+(issue #1242). Every call also crosses the SPI/I2C bridge transport
+under a shared supervisor mutex, adding bridge-hop latency that a
+same-die peripheral would not have.
 
 ---
 
@@ -794,30 +836,31 @@ catalogue, and the open gaps — lives in
 when you're picking SKUs or when you suspect the SDK isn't keeping
 its promise.
 
-Headline numbers as of 2026-05-18:
+Headline numbers, measured against the generated block in
+`docs/portability-matrix.md` (re-run `python3
+scripts/gen_portability_matrix.py` to reproduce):
 
-- **E1M family.**  21 / 21 (SKU × example) cells generate cleanly.
+- **E1M family.**  18 / 21 (SKU × example) cells generate cleanly.
   All 6 AEN SKUs produce byte-identical `alp.conf` for every
-  example, after stripping the SoC identity comment.  NX9101
-  participates with its own Ethos-U65 dispatcher.
-- **E1M-X family.**  12 / 12 cells generate cleanly.  V2M SKUs
+  example, after stripping the SoC identity comment.  The other
+  3 cells all belong to E1M-NX9101 — a placeholder MPN whose only
+  hw_rev (imx93 r1) is `status: tbd`, which the hw_rev-buildable
+  gate refuses outright, so none of its cells currently pass.
+- **E1M-X family.**  8 / 12 cells generate cleanly.  V2M SKUs
   add three on-module chip-driver enables (DEEPX DX-M1, PCIe
   mux, DEEPX rail buck) but otherwise produce the same
-  generated config as V2N within each example.
+  generated config as V2N within each example.  The 4 failing
+  cells are `adc-voltmeter` on all four E1M-X presets (V2N101,
+  V2N102, V2M101, V2M102) — see the matrix for the per-cell
+  diagnostics.
 
-Two open gaps in the matrix today (both metadata-level, both
-flagged):
+The A2-1 (V2M102 pad-route namespace) and A2-2 (V2M missing
+extension-GPIO routes) metadata gaps that used to show up as
+matrix drift are resolved (2026-05-18) — see
+[`docs/portability-matrix.md`](portability-matrix.md) for the
+fix detail.
 
-- **A2-1** — `E1M-V2M102.yaml` declares its pad routes in the
-  `E1M_*` namespace instead of `E1M_X_*`.  Apps using
-  `<alp/e1m_x_pinout.h>` symbols resolve on V2N101 / V2N102 /
-  V2M101 but miss on V2M102.  Single-file fix queued.
-- **A2-2** — V2M101 + V2M102 are missing pad routes for
-  `E1M_X_GPIO_IO27..IO35` (V2N101 / V2N102 carry them).  Awaits
-  maintainer input per [[pending-hw-configs]] — we don't invent
-  pin assignments.
-
-Two recently-resolved gaps (the per-variant NPU and CPU-class
+Two other resolved gaps (the per-variant NPU and CPU-class
 selectors):
 
 - **G-1** — Ethos-U variant (U55 / U65 / U85) is now visible to
@@ -829,19 +872,17 @@ selectors):
   emit `_HELIUM=y`, A55 slices emit `_NEON=y`, M33 slices
   emit `_REF=y`.
 
-### Future work — CI enforcement
+### CI enforcement
 
-The matrix is currently maintained **by hand** against the
-evidence under `build/portability-test/` (gitignored).  Each
-release cycle re-runs `scripts/alp_project.py` for every (SKU ×
-example) cell and diffs the generated `alp.conf` to confirm the
-matrix is still green.
-
-Phase E.3 (future work, no release commitment) will land
-`scripts/gen_portability_matrix.py` and a CI job that produces
-the matrix mechanically per commit.  Until then, the matrix and
-this cookbook are the customer-facing guarantee; the
-implementation is verified each release against the matrix.
+Phase E.3 has landed: `scripts/gen_portability_matrix.py`
+re-runs the swap-test sweep for every (SKU × example) cell on
+every invocation and rewrites the generated block in
+`docs/portability-matrix.md`; the `pr-generated-files` CI gate
+fails any PR whose metadata / example / emit-pipeline change
+leaves that block stale.  The matrix is no longer hand-maintained
+against `build/portability-test/` evidence — it is mechanically
+regenerated per commit, and this cookbook's headline numbers above
+are read straight from that generated block.
 
 ---
 

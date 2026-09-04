@@ -27,7 +27,7 @@ RPi CSI │  (e.g. OV5640    │ →  │  classifier  │ →  │  payload    
 | v0.2    | partial  | Camera capture (Zephyr `video_*`), local SSD1306 overlay.  No connectivity yet.                     |
 | v0.3    | target   | Wi-Fi-station provisioning, MQTT-over-TLS publish/subscribe, LVGL widget pack.  **Acceptance: app runs 60 s on a real V2N EVK + broker, publishes ≥ 1 inference/s, no leaks.** |
 
-The full pipeline is the v0.3 [IoT Application Example](../../VERSIONS.md#v030--iot--display-polish--6-weeks-after-v02)
+The full pipeline is the v0.3 [IoT Application Example](../../../VERSIONS.md#v030--iot--display-polish-6-weeks-after-v02)
 deliverable from the original quarterly roadmap.
 
 ## Layout
@@ -52,15 +52,21 @@ iot-connected-camera/
 ## Build (v0.1, host smoke)
 
 ```bash
-ZEPHYR_BASE=~/zephyrproject/zephyr \
-EXTRA_ZEPHYR_MODULES=$(pwd)/../.. \
-west build -b native_sim/native/64 .
+west build -b native_sim/native/64 examples/connectivity/iot-connected-camera \
+    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
 ```
 
 The app prints which v0.1 SDK pieces it successfully initialised and
-which v0.2 / v0.3 stubs it skipped (every `alp_wifi_*` /
-`alp_mqtt_*` / `alp_camera_*` call returns `NOSUPPORT` until the
-real backends land).
+which v0.2 / v0.3 stubs it skipped.  Every `alp_wifi_*` / `alp_mqtt_*`
+/ `alp_camera_*` call returns `NOSUPPORT` on *this build* -- not
+because the backends are unwritten (see the SDK-surfaces table below:
+real Zephyr Wi-Fi/MQTT/camera backends already exist), but because
+this board/core has no matching DT device: V2N's Wi-Fi/BLE radio is
+Linux-owned on the A55 (unreachable from this example's M33 Zephyr
+target -- see "Why V2N rather than AEN" below), and this board's DT
+has no `alp-camera0` node wired -- the X-EVK's camera-sensor
+population is TBD pending the schematic writeup (see `board.yaml`'s
+`preset:` comment).
 
 ## Build (v0.3, on the V2N EVK)
 
@@ -83,8 +89,8 @@ You'll need a TLS CA bundle and (optionally) a client cert in
 | `<alp/peripheral.h>` (i2c, gpio)           | full            | Init OLED + IMU + camera bus.         |
 | `<alp/chips/ssd1306.h>`                    | full            | Status overlay (until DSI panel + LVGL in v0.3). |
 | `<alp/blocks/button_led.h>`                | full            | Capture trigger; LED on PWM3 pad as GPIO. |
-| `<alp/camera.h>`                           | header (stub)   | Frame capture — v0.2 wraps Zephyr `video_*`. |
-| `<alp/iot.h>` (Wi-Fi + MQTT)               | header (stub)   | Wi-Fi-station + MQTT publish — v0.3.  |
+| `<alp/camera.h>`                           | backend real; no DT node | Frame capture — the generic Zephyr `video_*` backend (`src/backends/camera/zephyr_video.c`) plus a V2N-specific ISP-aware backend (`src/backends/camera/v2n_n44_isp.c`) are implemented; this board's DT has no camera node wired yet, so `alp_camera_open` still returns NULL here. |
+| `<alp/iot.h>` (Wi-Fi + MQTT)               | backend real; no HW path on M33 | Real Zephyr Wi-Fi (`src/backends/wifi/zephyr_drv.c`) and MQTT (`src/backends/mqtt/zephyr_drv.c`) backends are implemented, but V2N's Wi-Fi/BLE radio is Linux-owned on the A55 and unreachable from this example's M33 Zephyr target, so `alp_wifi_open`/`alp_mqtt_open` still return NULL here. |
 | `<alp/gui.h>` (LVGL)                       | re-export       | Local UI in v0.3.                     |
 | `<alp/security.h>` (MbedTLS)               | not in v0.1     | TLS for MQTT — v0.3 deliverable.      |
 
@@ -100,4 +106,4 @@ the Cortex-A55 cluster runs the network + UI threads.
 
 The v0.1 skeleton runs against `native_sim` but the *target* is
 V2N + Zephyr per the v0.3 build matrix in
-[`VERSIONS.md`](../../VERSIONS.md).
+[`VERSIONS.md`](../../../VERSIONS.md).

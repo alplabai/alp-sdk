@@ -8,13 +8,14 @@ with page alignment, and flags overlaps. An entry that can't resolve (unknown
 device / no size) becomes a blocked ResolvedPartition. Extracted from
 alp_orchestrate as the #285 partition seam.
 
-Depends only downward -- models, paths (METADATA_ROOT), memregion (_PAGE /
-_region_size_bytes), and alp_project.resolve_memory_map; nothing calls back into
-the package __init__.
+Depends only downward -- models (dataclasses, incl. the project's resolved
+metadata root), memregion (_PAGE / _region_size_bytes), and
+alp_project.resolve_memory_map; nothing calls back into the package __init__.
 """
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any, Optional
 
@@ -23,7 +24,6 @@ from sentinels import is_tbd
 
 from .memregion import _PAGE, _region_size_bytes
 from .models import BoardProject, ResolvedPartition, StorageEntry
-from .paths import METADATA_ROOT
 
 
 def _known_flash_devices(
@@ -35,7 +35,9 @@ def _known_flash_devices(
 
     Today this is the union of:
       - `memory_map:` region names (explicit override or derived from
-        the SoC variant), AND
+        the SoC variant), excluding any region marked `carveout: false`
+        (a partition INSIDE a flash-class node, not a device of its
+        own, #1484), AND
       - `on_module.ospi_memories:` keys (when declared on the SoM).
 
     Kept as a list so the loader's "did you mean..." message can sort
@@ -44,8 +46,19 @@ def _known_flash_devices(
     names: set[str] = set()
     for region in resolve_memory_map(som_preset, metadata_root):
         n = region.get("name")
-        if isinstance(n, str):
-            names.add(n)
+        if not isinstance(n, str):
+            continue
+        if region.get("carveout") is False:
+            # A flash-class SUB-region -- an MRAM partition living inside a
+            # `mram_storage`-class flash node, not a flash device of its own
+            # (see the schema's `memory_region.carveout` description). On
+            # AEN this is `mcuboot` / `he_slot0` / `hp_slot0` / `reserved` /
+            # `storage` / `atoc`: none of them carries a Devicetree label,
+            # and decorating one with a `partitions { }` child targets a
+            # node the board tree never defines (#1484). Keep it out of the
+            # advertised set and out of `_resolve_flash_device()` below.
+            continue
+        names.add(n)
     om = som_preset.get("on_module") or {}
     ospi = om.get("ospi_memories") or {}
     if isinstance(ospi, dict):
@@ -53,6 +66,105 @@ def _known_flash_devices(
             if isinstance(k, str):
                 names.add(k)
     return sorted(names)
+
+
+def _reserved_spans(
+    device_name: str,
+    capacity_bytes: int,
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+) -> "tuple[list[tuple[int, int, str]], Optional[str]]":
+    """Return the SoM's own regions as DEVICE-RELATIVE [lo, hi) spans.
+
+    Returns `(spans, None)` on success, `([], reason)` when the spans can't
+    be computed safely -- the caller then falls back to sibling-only overlap
+    checking rather than trusting a guessed conversion (#1331).
+
+    Why this is needed at all: `storage[].offset_kib:` (and the bump
+    allocator) work in offsets WITHIN a flash device, while `memory_map:`
+    regions declare ABSOLUTE bases. Nothing previously bridged the two, so
+    every check was blind to the SoM's own layout -- on E1M-AEN801 that let a
+    littlefs mount resolve to offset 0 of `mram_main`, which is MCUboot, with
+    no `offset_kib:` involved and no `status: blocked`.
+
+    The device base is DERIVED, then VERIFIED, never assumed:
+
+      - If the device is itself a `memory_map:` region with an integer
+        `base`, that base is the origin.
+      - Otherwise (a whole-window alias like `mram_main`, which declares
+        `base: TBD` deliberately) take the lowest integer base among the
+        sibling regions and require `lowest + capacity == highest region
+        top`. That identity is what proves the alias really spans the same
+        window the fine-grained regions tile; if it does not hold, refuse to
+        convert.
+
+    `_resolve_flash_device`'s descriptor deliberately carries no physical
+    base (Zephyr's flash-mapping layer derives it from the DT controller
+    node), which is why the origin is reconstructed here instead of being
+    read off the descriptor.
+    """
+    regions = [r for r in resolve_memory_map(som_preset, metadata_root)
+               if isinstance(r, dict)]
+    sized = [(r["base"], r["base"] + (_region_size_bytes(r) or 0), str(r.get("name")))
+             for r in regions
+             if isinstance(r.get("base"), int) and _region_size_bytes(r)]
+    if not sized:
+        return [], (f"SoM declares no addressed memory_map region, so "
+                    f"'{device_name}' offsets cannot be checked against it")
+
+    self_region = next((r for r in regions if r.get("name") == device_name), None)
+    if self_region is not None and isinstance(self_region.get("base"), int):
+        origin = self_region["base"]
+    else:
+        origin = min(lo for lo, _, _ in sized)
+        window_top = max(hi for _, hi, _ in sized)
+        if origin + capacity_bytes != window_top:
+            return [], (
+                f"flash device '{device_name}' has no declared base and its "
+                f"capacity ({capacity_bytes} B) does not span the addressed "
+                f"memory_map window (0x{origin:x}..0x{window_top:x}), so its "
+                f"offsets cannot be mapped onto the SoM's regions")
+
+    spans: "list[tuple[int, int, str]]" = []
+    for lo, hi, name in sized:
+        # The device itself is not an obstacle inside itself; nor is a region
+        # that spans the whole window (a coarse alias) -- otherwise every
+        # partition would "overlap" it and nothing could ever be placed.
+        if name == device_name or (lo <= origin and hi - lo >= capacity_bytes):
+            continue
+        rel_lo, rel_hi = lo - origin, hi - origin
+        # Clip to the device; a region outside it is simply not our problem.
+        rel_lo, rel_hi = max(rel_lo, 0), min(rel_hi, capacity_bytes)
+        if rel_hi > rel_lo:
+            spans.append((rel_lo, rel_hi, name))
+    return sorted(spans), None
+
+
+def _first_free(
+    base_bytes: int,
+    size_aligned: int,
+    allocated: "list[tuple[int, int, str]]",
+    capacity_bytes: int,
+) -> int:
+    """Advance `base_bytes` past any span it collides with, page-aligned.
+
+    The bump allocator must allocate AROUND the SoM's reserved regions, not
+    merely notice a collision: refusing instead of skipping would break the
+    ordinary case (a project that names no addresses at all) rather than fix
+    it. Returns the first non-colliding page-aligned base, or a value past
+    `capacity_bytes` when the device has no room left -- the caller reports
+    that as a blocked entry.
+    """
+    moved = True
+    while moved:
+        moved = False
+        for lo, hi, _ in sorted(allocated):
+            if base_bytes < hi and lo < base_bytes + size_aligned:
+                base_bytes = ((hi + _PAGE - 1) // _PAGE) * _PAGE
+                moved = True
+        if base_bytes >= capacity_bytes:
+            return base_bytes
+    return base_bytes
 
 
 def _resolve_flash_device(
@@ -79,6 +191,20 @@ def _resolve_flash_device(
     for region in resolve_memory_map(som_preset, metadata_root):
         if region.get("name") != flash_device:
             continue
+        if region.get("carveout") is False:
+            # Defense in depth for a hand-built project that skips the
+            # loader's `_known_flash_devices()` check: refuse rather than
+            # fabricate a `dt_label` from the region name.  This region is
+            # a partition INSIDE a flash-class node (e.g. AEN's
+            # `mram_storage`), not a flash device -- it has no Devicetree
+            # label of its own and a `partitions { }` child on it targets
+            # a node the board tree never defines (#1484).
+            return None, (
+                f"flash device '{flash_device}' is a partition inside a "
+                f"flash-class region on SoM "
+                f"{som_preset.get('sku', '<unknown>')}, not a flash device "
+                f"of its own -- it has no Devicetree label and cannot take "
+                f"a `partitions {{ }}` child")
         size_bytes = _region_size_bytes(region)
         if size_bytes is None:
             return None, (
@@ -131,6 +257,92 @@ def _resolve_flash_device(
         f"{som_preset.get('sku', '<unknown>')}")
 
 
+def _has_real_dt_label(
+    flash_device: str,
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+) -> bool:
+    """True when `flash_device`'s Devicetree label is KNOWN, not fabricated.
+
+    `_resolve_flash_device()` succeeding is NOT enough to recommend a device
+    to a customer: its `dt_label` DEFAULTS to the device name whenever the
+    metadata omits an explicit override, and that default is unverified
+    against the board `.dts` (see the schema's `memory_region.dt_label`
+    description -- AEN's `mram_main` region, for example, names its flash
+    node `mram_storage`, not `mram_main`). Emitting `&<name>` for one of
+    those is the exact defect #1484 closes.
+
+    An `on_module.ospi_memories:` key does NOT qualify, despite its name
+    matching a controller node's label 1:1 on paper. Measured against the
+    generated Zephyr board trees (#1484 re-review): `ospi0` is the ONLY
+    `ospi<n>` label that exists anywhere under `zephyr/`
+    (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:688`), it is included by
+    only the two E1M-AEN801 board `.dts` files, and there it is the OSPI
+    CONTROLLER node (`compatible = "snps,designware-ospi"`,
+    `status = "disabled"`) -- neither AEN801 board tree enables it or gives
+    it a flash-chip child, so a `fixed-partitions` overlay under `&ospi0`
+    would not be a working flash area even on the one SKU where the label
+    exists. E1M-AEN401/601 have a board tree with no `ospi0` node at all;
+    E1M-AEN301/501/701 have no board tree in `zephyr/boards/alp/` at all.
+    `scripts/gen_zephyr_board.py` never generates an `ospi<n>` node either.
+    So until a real per-instance DT label is wired up and verified against
+    an ENABLED node, no `ospi_memories:` key is trustworthy here.
+
+    Only trust a `memory_map:` region that carries an EXPLICIT `dt_label:`
+    override -- nothing does yet, so this currently returns `False` for
+    every device on every SoM. That is the correct interim answer: it means
+    `alt_devices` never recommends a target this resolver cannot verify,
+    rather than recommending one that merely LOOKS verified.
+
+    alp-sdk#1556: `resolve_storage_partitions()` now gates the PRIMARY
+    resolution on this same predicate for a `memory_map:`-sourced device
+    (not just the alt-device remedy) -- naming `flash_device: mram_main`
+    (or any other unverified `memory_map:` region) can no longer reach
+    `status: ok`; it blocks with a reason instead of fabricating a DT
+    label the board tree never defines. `on_module.ospi_memories:`
+    devices are NOT gated by that change (`is_ospi_device` in the
+    resolver still short-circuits this predicate to `True` for them) --
+    this function already returns `False` for every `ospi_memories:` key
+    (the loop below only ever matches a `memory_map:` region name), so
+    gating the primary path on it unconditionally would also block every
+    `ospi0`-targeting entry, including the ones the existing storage test
+    suite (`tests/scripts/test_orchestrate_storage*.py`) deliberately uses
+    as its "device-independent allocator mechanics" fixture. Verifying
+    `ospi_memories:` against its own real, per-instance DT label is a
+    separate gap this issue's repro does not cover (see this function's
+    own paragraph above) -- left as tracked follow-up, not silently
+    widened here.
+    """
+    for region in resolve_memory_map(som_preset, metadata_root):
+        if region.get("name") == flash_device:
+            return isinstance(region.get("dt_label"), str)
+    return False
+
+
+def _verified_alt_devices(
+    exclude: str,
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+) -> list[str]:
+    """Every known flash device other than `exclude` that both resolves
+    (`_resolve_flash_device()`) and carries a verified Devicetree label
+    (`_has_real_dt_label()`) -- the only kind of device safe to name back
+    to a customer as a `flash_device:` alternative (#1484 / #1556: naming
+    one that merely LOOKS verified reproduces the exact defect either
+    issue closes). Used by `resolve_storage_partitions()`'s #1556
+    unverified-dt_label block; kept separate from the near-identical
+    filter already inlined in the overlap-block remedy below (that one
+    also excludes the SoM's own reserved region names, which don't apply
+    here) rather than risk a shared-helper refactor rippling into that
+    already-reviewed code path.
+    """
+    return sorted(
+        d for d in _known_flash_devices(som_preset, metadata_root)
+        if d != exclude
+        and _has_real_dt_label(d, som_preset, metadata_root)
+        and _resolve_flash_device(d, som_preset, metadata_root)[0] is not None)
+
+
 def _blocked_partition(
     entry: StorageEntry,
     reason: str,
@@ -161,10 +373,13 @@ def resolve_storage_partitions(
       2. Within each group, sort by name for determinism (an explicit
          `offset_kib:` doesn't change sort order — it's an override
          the allocator simply respects).
-      3. For each entry: if `offset_kib:` is set, honour it (page-
-         aligned check; overlap check against prior entries).  Else
-         allocate bottom-up from the current high-water mark, page-
-         aligned.
+      3. Place every `offset_kib:`-pinned entry FIRST (page-aligned
+         check; overlap check against the SoM's own regions and prior
+         pins), then bump-allocate the rest bottom-up from the current
+         high-water mark, stepping over the pins.  Pinning first is
+         what keeps a pin that sorts LATE alphabetically from being
+         dropped by a sibling the allocator had already placed on top
+         of it (#554).
       4. Block on capacity overflow, TBD device, page-misaligned
          offset, or sibling overlap.  Blocked entries land in the
          manifest with `status: blocked` + `reason:` so reviewers see
@@ -203,7 +418,7 @@ def resolve_storage_partitions(
     # entries are name-sorted for byte-stable allocation.
     for device_name in sorted(by_device.keys()):
         descriptor, block_reason = _resolve_flash_device(
-            device_name, project.som_preset, METADATA_ROOT)
+            device_name, project.som_preset, project.effective_metadata_root())
         if descriptor is None:
             for entry in by_device[device_name]:
                 resolved.append(_blocked_partition(
@@ -212,6 +427,34 @@ def resolve_storage_partitions(
 
         dt_label = descriptor["dt_label"]
         capacity_bytes = descriptor["size_bytes"]
+        # True when `device_name` is an `on_module.ospi_memories:` key --
+        # an off-chip OSPI part that legitimately has no `memory_map:`
+        # presence at all, vs. an on-chip `memory_map:` device (`ddr_main`
+        # etc.) where the SoM's own regions really do live on the same
+        # address window.  Used below to keep the reserved-spans warning
+        # for the case it exists to catch.
+        is_ospi_device = device_name in (
+            (project.som_preset.get("on_module") or {}).get(
+                "ospi_memories") or {})
+        # #1556: `descriptor["dt_label"]` DEFAULTS to the device name
+        # whenever the SoM preset sets no explicit `dt_label:` override,
+        # and that default was never checked against the generated
+        # Zephyr board tree -- `flash_device: mram_main` resolved
+        # `status: ok` with a fabricated `dt_label` of `mram_main` even
+        # though the generated tree only defines `mram_storage`. Gate on
+        # the exact predicate #1484 already built for this
+        # (`_has_real_dt_label()`) so an entry can never reach
+        # `status: ok` on a `memory_map:` device whose label is
+        # unverified -- applied in `_place()` below, AFTER the
+        # overlap/overflow checks, so an entry that was already going to
+        # block for one of THOSE reasons keeps that reason (the SoM's
+        # own regions are the more actionable fact to report).
+        # `on_module.ospi_memories:` devices are deliberately exempted
+        # (see `_has_real_dt_label()`'s docstring) -- that key's
+        # verification gap is separate follow-up.
+        verified_dt_label = is_ospi_device or _has_real_dt_label(
+            device_name, project.som_preset,
+            project.effective_metadata_root())
         # Page-aligned high-water mark; sibling partitions allocate
         # bottom-up from offset 0.  Page = 4 KiB matches the IPC
         # carve-out allocator; storage erase blocks on every silicon
@@ -222,55 +465,224 @@ def resolve_storage_partitions(
         # when the bump allocator would have placed them differently.
         allocated: list[tuple[int, int, str]] = []   # (lo, hi, name)
 
+        # Seed with the SoM's OWN regions (#1331).  Without this the checks
+        # below only ever saw sibling storage[] entries, so mcuboot, a core's
+        # slot0 and the SE-owned atoc band were all invisible: on E1M-AEN801
+        # a littlefs mount resolved to offset 0 of `mram_main` -- MCUboot --
+        # with no offset_kib: declared and no status: blocked.
+        reserved_spans, reserved_reason = _reserved_spans(
+            device_name, capacity_bytes, project.som_preset,
+            project.effective_metadata_root())
+        reserved_names = {name for _, _, name in reserved_spans}
+        allocated.extend(reserved_spans)
+        if reserved_reason is not None and not is_ospi_device:
+            # Degrading to sibling-only checking is exactly the silent
+            # false-PASS this fix exists to remove, so SAY so rather than
+            # letting the caller believe the SoM's regions were honoured.
+            # Suppressed for an `ospi_memories:` device: an off-chip OSPI
+            # part has no `memory_map:` presence to begin with, so sibling-
+            # only checking isn't a degradation there -- warning on it
+            # would fire on every AEN storage build using `ospi0` (#1484
+            # review).
+            print(f"alp_orchestrate.partition: WARNING: {reserved_reason}; "
+                  f"storage offsets on '{device_name}' are checked against "
+                  f"sibling partitions only", file=sys.stderr)
+
         entries_sorted = sorted(
             by_device[device_name], key=lambda e: e.name)
 
-        for entry in entries_sorted:
+        # (base_bytes, size_aligned, reason) per entry INDEX.  Placement runs
+        # in TWO passes over the name-sorted list -- every `offset_kib:` pin
+        # first, then the bump allocator around them (#554).  In one pass a
+        # pin only ever became an obstacle for the siblings that happened to
+        # sort BEFORE it, so `pinned_low` (offset_kib: 0, the shape
+        # docs/board-config-features.md itself documents) collided with an
+        # already-auto-allocated `app_data` and was silently dropped from
+        # dts-partitions.dtsi -- a validate-clean layout the allocator could
+        # have satisfied.  Emission below still walks `entries_sorted`.
+        # Keyed by index rather than name because board.schema.json does not
+        # require `storage[].name` to be unique.
+        placement: dict[int, tuple[int, int, Optional[str]]] = {}
+
+        def _place(entry: StorageEntry) -> tuple[int, int, Optional[str]]:
             size_bytes = entry.size_kib * 1024
             size_aligned = ((size_bytes + _PAGE - 1) // _PAGE) * _PAGE
 
             if entry.offset_kib is not None:
                 base_bytes = entry.offset_kib * 1024
                 if base_bytes % _PAGE != 0:
-                    resolved.append(_blocked_partition(entry, (
+                    return 0, size_aligned, (
                         f"storage entry '{entry.name}' explicit "
                         f"offset_kib={entry.offset_kib} is not page-"
-                        f"aligned (4 KiB)")))
-                    continue
+                        f"aligned (4 KiB)")
             else:
-                base_bytes = high_water_bytes
+                # Allocate AROUND the reserved regions and the pins, not
+                # merely detect a collision with them (#1331 / #554):
+                # refusing here instead of skipping would break every
+                # project that names no addresses -- which is the common
+                # case -- rather than fix it.
+                base_bytes = _first_free(
+                    high_water_bytes, size_aligned, allocated, capacity_bytes)
 
             top_bytes = base_bytes + size_aligned
             if top_bytes > capacity_bytes:
-                resolved.append(_blocked_partition(entry, (
+                free_note = ""
+                if entry.offset_kib is None and reserved_spans:
+                    free_note = (
+                        f"; the SoM's own regions ("
+                        f"{', '.join(sorted(reserved_names))}) already occupy "
+                        f"{sum(hi - lo for lo, hi, _ in reserved_spans) // 1024} "
+                        f"KiB of it")
+                return 0, size_aligned, (
                     f"storage entry '{entry.name}' ({entry.size_kib} "
                     f"KiB at offset {base_bytes // 1024} KiB) overruns "
                     f"flash device '{device_name}' "
-                    f"(capacity {capacity_bytes // 1024} KiB)")))
-                continue
+                    f"(capacity {capacity_bytes // 1024} KiB){free_note}")
 
-            # Sibling-overlap check (only meaningful when offset_kib was
-            # supplied; the bump allocator can't overlap with itself).
+            # Overlap check -- against sibling partitions AND the SoM's own
+            # regions seeded above.
             overlap_with: Optional[str] = None
             for lo, hi, peer_name in allocated:
                 if not (top_bytes <= lo or base_bytes >= hi):
                     overlap_with = peer_name
                     break
             if overlap_with is not None:
-                resolved.append(_blocked_partition(entry, (
-                    f"storage entry '{entry.name}' explicit "
-                    f"offset_kib={entry.offset_kib} overlaps sibling "
-                    f"partition '{overlap_with}' on device "
-                    f"'{device_name}'")))
-                continue
+                where = (f"offset_kib={entry.offset_kib}"
+                         if entry.offset_kib is not None
+                         else f"auto-allocated offset {base_bytes // 1024} KiB")
+                if overlap_with in reserved_names:
+                    # `overlap_with` is one of the SoM's OWN regions (any
+                    # `memory_map:` region with an addressed `base:` is
+                    # seeded into `reserved_spans` regardless of its
+                    # `carveout:` value -- see `_reserved_spans()`) -- it
+                    # must NOT be named here as something to target
+                    # directly (#1484), and neither may any other reserved
+                    # region: they are exactly what this entry just failed
+                    # to overlap.  A name in `_known_flash_devices()` is
+                    # not enough either -- e.g. an `ospi_memories:` entry
+                    # with a TBD capacity (E1M-AEN801's `ospi1`) is known
+                    # but does not actually resolve, and a device that DOES
+                    # resolve may still be recommending an undefined DT
+                    # node (`_resolve_flash_device()` defaults `dt_label`
+                    # to the device name when unset -- see
+                    # `_has_real_dt_label()`).  Only recommend a device
+                    # that both resolves AND has a verified DT label.
+                    alt_devices = [
+                        d for d in _known_flash_devices(
+                            project.som_preset,
+                            project.effective_metadata_root())
+                        if d != device_name
+                        and d not in reserved_names
+                        and _has_real_dt_label(
+                            d, project.som_preset,
+                            project.effective_metadata_root())
+                        and _resolve_flash_device(
+                            d, project.som_preset,
+                            project.effective_metadata_root())[0]
+                        is not None]
+                    # Only lead with "pick an offset on <device>" when the
+                    # device actually has free room outside its reserved
+                    # spans.  Reserved spans come from ANY addressed
+                    # memory_map region, `carveout: false` or not; AEN's
+                    # `mram_main` is the fully-tiled case (0 KiB free,
+                    # tiled exactly by its `carveout: false` sub-regions),
+                    # not the only case this branch can fire for.
+                    reserved_bytes = sum(
+                        hi - lo for lo, hi, _ in reserved_spans)
+                    if reserved_bytes < capacity_bytes:
+                        remedy = (
+                            f"pick an offset on '{device_name}' outside "
+                            f"the SoM's declared regions")
+                        if alt_devices:
+                            remedy += (
+                                f", or use a different flash_device: "
+                                f"({', '.join(alt_devices)})")
+                    elif alt_devices:
+                        remedy = (
+                            f"'{device_name}' is fully tiled by the SoM's "
+                            f"own regions ({capacity_bytes // 1024} KiB, "
+                            f"no free room) -- use a different "
+                            f"flash_device: ({', '.join(alt_devices)})")
+                    else:
+                        # NOT "no other flash_device: resolves" -- on an
+                        # AEN SoM, ospi0 typically DOES resolve
+                        # (`_resolve_flash_device()`), it just has no
+                        # verified Devicetree label yet (see
+                        # `_has_real_dt_label()`). Naming it here would
+                        # recommend the very label #1484 exists to stop
+                        # fabricating, so the message must stay true for
+                        # BOTH cases (nothing resolves / something
+                        # resolves but is unverified) without naming a
+                        # device either way.
+                        remedy = (
+                            f"'{device_name}' is fully tiled by the SoM's "
+                            f"own regions ({capacity_bytes // 1024} KiB, "
+                            f"no free room) and no other flash_device: on "
+                            f"this SoM both resolves and has a verified "
+                            f"Devicetree label (alp-sdk#1556)")
+                    return 0, size_aligned, (
+                        f"storage entry '{entry.name}' {where} overlaps SoM "
+                        f"region '{overlap_with}' on device '{device_name}' "
+                        f"-- that region is not customer-writable. "
+                        f"{remedy}.")
+                return 0, size_aligned, (
+                    f"storage entry '{entry.name}' {where} overlaps "
+                    f"sibling partition '{overlap_with}' on device "
+                    f"'{device_name}'")
+
+            if not verified_dt_label:
+                # #1556: this entry cleared every other check (page
+                # alignment, capacity, sibling/reserved overlap) and was
+                # about to resolve `status: ok` -- but `dt_label` is the
+                # device NAME, defaulted because no SoM preset declares
+                # an explicit `dt_label:` override for '{device_name}',
+                # and that default has never been checked against the
+                # generated board tree. Refuse rather than emit a
+                # `partitions { }` overlay under a label the board `.dts`
+                # may not define (`grep -rn '{dt_label}' zephyr/` is the
+                # check to run). Checked HERE, not earlier, so an entry
+                # that would ALSO overlap a reserved/sibling region still
+                # gets that more actionable reason instead.
+                alt = _verified_alt_devices(
+                    device_name, project.som_preset,
+                    project.effective_metadata_root())
+                remedy = (
+                    f"use a different flash_device: ({', '.join(alt)})"
+                    if alt else
+                    "no other flash_device: on this SoM both resolves "
+                    "and has a verified Devicetree label")
+                return 0, size_aligned, (
+                    f"storage entry '{entry.name}' would resolve on "
+                    f"flash device '{device_name}', but its Devicetree "
+                    f"label defaults to '{dt_label}' (the device name) "
+                    f"-- no SoM preset declares an explicit dt_label: "
+                    f"override for '{device_name}', so this default is "
+                    f"unverified against the generated board tree and "
+                    f"may decorate a `partitions {{ }}` child under a "
+                    f"node the board `.dts` never defines; {remedy}.")
 
             allocated.append((base_bytes, top_bytes, entry.name))
-            if entry.offset_kib is None:
-                # Only bump the allocator when we used it; explicit
-                # offsets don't shift the high-water mark (they may be
-                # below it deliberately, e.g. to reserve a low slot).
-                high_water_bytes = top_bytes
+            return base_bytes, size_aligned, None
 
+        for index, entry in enumerate(entries_sorted):
+            if entry.offset_kib is not None:
+                placement[index] = _place(entry)
+        for index, entry in enumerate(entries_sorted):
+            if entry.offset_kib is None:
+                base_bytes, size_aligned, reason = _place(entry)
+                placement[index] = (base_bytes, size_aligned, reason)
+                if reason is None:
+                    # Only bump the allocator when we used it; explicit
+                    # offsets don't shift the high-water mark (they may be
+                    # below it deliberately, e.g. to reserve a low slot) --
+                    # `allocated` is what makes the allocator step over them.
+                    high_water_bytes = base_bytes + size_aligned
+
+        for index, entry in enumerate(entries_sorted):
+            base_bytes, size_aligned, reason = placement[index]
+            if reason is not None:
+                resolved.append(_blocked_partition(entry, reason))
+                continue
             resolved.append(ResolvedPartition(
                 name=entry.name,
                 fs=entry.fs,

@@ -42,7 +42,36 @@ class Report:
     results: list = field(default_factory=list)
 
     def ok(self) -> bool:
+        """Every GATE task passed. FALSE for a run that selected nothing.
+
+        `all()` over an empty sequence is `True`, so before tan-cli#721 a
+        profile that selected no check-script task at all returned 0 and
+        printed `0/0 passed` + `complete.` -- indistinguishable by `$?` from a
+        verified clean run. `quick` selected exactly zero back then
+        (measured against `metadata/quality-tasks-v1.json` as of
+        cd71de060: quick 0, pr 55, full 58, release 55 -- as of 494671530:
+        quick 36, pr 60, full 63, release 60; these will drift further,
+        check the registry itself for the live count), so that was every
+        `--profile quick` invocation -- the gap `selected_nothing()`
+        closed. #1463 populated `quick` (see the registry's own root
+        `description` for the membership bar, and
+        check_quality_registry.py for the gate that now enforces `quick`
+        stays non-empty, a subset of `pr`, and free of module-level
+        `subprocess` imports), so this branch is now reachable only if a
+        future edit strips `quick` back to empty -- the check stays
+        because that regression is exactly the shape this method exists
+        to catch.
+
+        `selected_nothing()` is kept separate from a gate failure because the
+        two are different facts and get different exit codes -- see `main()`.
+        """
+        if self.selected_nothing():
+            return False
         return all(r.passed for r in self.results if r.gate)
+
+    def selected_nothing(self) -> bool:
+        """No task ran. Not a failure of the tree -- a failure to check it."""
+        return not self.results
 
 
 def _tasks_for(profile: str) -> list[dict]:
@@ -107,6 +136,10 @@ def to_sarif(rep: Report) -> dict:
 
 
 def _summary(rep: Report) -> str:
+    if rep.selected_nothing():
+        return (f"alp-quality profile={rep.profile}: NO TASKS SELECTED -- nothing "
+                f"was checked. This is not a pass. The profile matched no "
+                f"`runner: check-script` task in metadata/quality-tasks-v1.json.")
     lines = [f"alp-quality profile={rep.profile}: "
              f"{sum(r.passed for r in rep.results)}/{len(rep.results)} passed"]
     for r in rep.results:
@@ -130,6 +163,12 @@ def main(argv=None) -> int:
     if args.sarif:
         Path(args.sarif).write_text(json.dumps(to_sarif(rep), indent=2) + "\n",
                                     encoding="utf-8", newline="")
+    # 2, not 1, for an empty selection: "nothing was checked" is a different
+    # outcome from "a gate check failed", and a caller that wants to tolerate
+    # one but not the other needs to tell them apart. Same split
+    # `scripts/test-all.sh` draws with its `[GAP]` tag (#1396).
+    if rep.selected_nothing():
+        return 2
     return 0 if rep.ok() else 1
 
 

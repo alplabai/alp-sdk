@@ -27,7 +27,10 @@ cores:
     # path. fmt is header-only in this profile (FMT_HEADER_ONLY=1) --
     # no Kconfig knob of its own; the loader emits a
     # documentation-only comment line in alp.conf for this entry
-    # (see _LIBRARY_KCONFIG in scripts/alp_project.py).
+    # (emitted from the manifest's own
+    # integration.zephyr.hw_backends.sw_fallback.kconfig array
+    # by scripts/alp_orchestrate/libraries.py:283 -- the per-library
+    # _LIBRARY_KCONFIG dict this used to cite no longer exists).
 
 diagnostics:
   log_level: info

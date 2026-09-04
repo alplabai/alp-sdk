@@ -1,7 +1,15 @@
 # Unified AI-accelerator model pipeline — design
 
 - **Date:** 2026-05-26
-- **Status:** Draft for review (brainstorming output → writing-plans next)
+- **Status:** **Implemented.** The `.alpmodel` pipeline (Stages 1a-1c) landed
+  in v0.6.0 (CHANGELOG "Added -- portable `.alpmodel` model pipeline
+  (Stages 1a-1c, 2026-05-26..27)"): `alp model build` (`scripts/alp_model/`),
+  the fat multi-backend `.alpmodel` package, `alp_inference_open_alpmodel()`,
+  and the selection engine (`src/backends/inference/alp_model_select.{c,h}`,
+  in the tree). The `drpai_v2n_stub.c`/`deepx_dxm1_stub.c` stubs this design
+  describes are gone from `src/backends/inference/`. Real compiler/runtime
+  work (Stage 2) is tracked separately -- see
+  `2026-05-27-stage2-npu-compiler-integration-design.md`.
 - **Scope:** A single "model" concept that flows **compile → package → load → run** portably across every AI-accelerator backend the SDK targets (Arm Ethos-U, Renesas DRP-AI3, DEEPX DX-M1, CPU/TFLM).
 - **Builds on:** `<alp/inference.h>`, `<alp/backend.h>`, `src/inference_dispatch.c`, `src/backends/inference/*`, the SoM-preset metadata, and `scripts/alp_*.py` orchestration.
 

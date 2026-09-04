@@ -35,8 +35,6 @@ byte-identical-output pin.
 
 from __future__ import annotations
 
-from alp_registries import peripheral_kconfig
-
 
 # ---------------------------------------------------------------------
 # Shared resolved model: canonical E1M / E1M-X GPIO pad order
@@ -163,13 +161,34 @@ _CHIP_SUBSYSTEMS: dict[str, tuple[str, ...]] = {
     "tlv320aic3204":      ("I2C",),
     "max98357a":          ("GPIO",),
     "es8388":             ("I2C",),
+    # SoM-intrinsic batch (issue #1487) -- act8760/tps628640/pca9451a/
+    # da9292/clk_5l35023b are I2C-only PMIC/clock parts; pi3dbs12212/
+    # murata_lbee5hy2fy/deepx_dxm1/gd32_swd are GPIO-only.  All ten were
+    # missing from this table despite each having a `config
+    # ALP_SDK_CHIP_<NAME>` / `depends on` entry in
+    # zephyr/kconfigs/chips.kconfig, so the loader turned the chip on
+    # without turning its dependency on, and Kconfig silently dropped
+    # the chip assignment as unmet (issue #1487).
+    "act8760":            ("I2C",),
+    "tps628640":          ("I2C",),
+    "pi3dbs12212":        ("GPIO",),
+    "pca9451a":           ("I2C",),
+    "da9292":             ("I2C",),
+    "clk_5l35023b":       ("I2C",),
+    "murata_lbee5hy2fy":  ("GPIO",),
+    "deepx_dxm1":         ("GPIO",),
+    "gd32_swd":           ("GPIO",),
+    # gd32g553 declares `depends on (SPI || I2C)` -- an OR, not an AND:
+    # the driver's bridge protocol is genuinely hybrid (both transports
+    # compiled in, either usable at runtime; see chips/gd32g553/
+    # gd32g553.c and docs/gd32-bridge-protocol.md), so there is no
+    # single right subsystem to force on.  Deliberately over-inclusive
+    # here rather than under (issue #1487's own bug class): turning on
+    # both is always sufficient for the `||`, whereas picking only one
+    # would silently drop the other transport the same way the missing
+    # entries above did.
+    "gd32g553":           ("SPI", "I2C"),
 }
-
-
-# Peripheral name (from board.yaml's `peripherals:` array) -> Zephyr Kconfig
-# symbols.  Single-sourced in metadata/registries/peripheral-kconfig.json and
-# shared with alp_orchestrate/slugs.py.
-_PERIPHERAL_KCONFIG: dict[str, tuple[str, ...]] = peripheral_kconfig()
 
 
 # ---------------------------------------------------------------------

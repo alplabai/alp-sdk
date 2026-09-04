@@ -21,10 +21,28 @@
 #     `e1m_routes:` blocks and emits
 #     include/alp/boards/alp_<board>_routes.h.
 #
+#   - AEN SoM / hw-revisions metadata edits that didn't trigger a
+#     regeneration of the CC3501E GPIO proxy's board route tables.
+#     scripts/gen_cc3501e_gpio_routes.py resolves each AEN example's
+#     board.yaml through `alp_project.py --emit composed-route-table`
+#     (metadata/e1m_modules/E1M-AEN801.yaml `pad_routes:` + the selected
+#     hw_rev's metadata/e1m_modules/aen/hw-revisions.yaml overrides) and
+#     emits <example>/src/cc3501e_gpio_routes.c; a committed copy that
+#     doesn't match is asking reviewers to accept a stale, or
+#     bridge-reserved-pad, route (issue #1859).
+#
 #   - Public-header additions/removals that didn't bump the ABI
 #     snapshot at docs/abi/v<N>-snapshot.json.  The snapshot's
 #     fingerprint diff is the cheapest way to spot accidental
 #     ABI changes.
+#
+#   - docs/test-plan.md ledger edits that didn't trigger a
+#     docs/verification-status.md regeneration.
+#     scripts/gen_verification_status.py reads docs/test-plan.md and
+#     projects the status page from it verbatim (issue #1200); if a
+#     committed copy doesn't match what the script would produce, the
+#     PR is asking reviewers to accept a stale/hand-edited verification
+#     claim.
 
 name: pr-generated-files
 
@@ -46,6 +64,7 @@ on:
       - 'scripts/gen_support_matrix.py'
       - 'scripts/gen_catalog.py'
       - 'scripts/gen_error_catalog.py'
+      - 'scripts/gen_cc3501e_gpio_routes.py'
       # The portability matrix re-runs the som.sku swap-test through
       # scripts/alp_project.py + the alp_orchestrate/ package, so any
       # emit-pipeline change can move its generated block.
@@ -55,6 +74,12 @@ on:
       - 'docs/portability-matrix.md'
       - 'scripts/check_*.py'
       - 'scripts/abi_snapshot.py'
+      # docs/verification-status.md is projected verbatim from
+      # docs/test-plan.md (issue #1200) -- either changing means the
+      # other must be regenerated in step, so both are gate triggers.
+      - 'docs/test-plan.md'
+      - 'docs/verification-status.md'
+      - 'scripts/gen_verification_status.py'
       - '.github/workflows/pr-generated-files.yml'
   push:
     branches: [main, dev]
@@ -67,6 +92,9 @@ on:
       - 'docs/abi/**'
       - 'examples/**'
       - 'scripts/abi_snapshot.py'
+      - 'docs/test-plan.md'
+      - 'docs/verification-status.md'
+      - 'scripts/gen_verification_status.py'
       - '.github/workflows/pr-generated-files.yml'
   workflow_dispatch:
 
@@ -78,13 +106,23 @@ jobs:
   check:
     name: check · generated files in sync
     runs-on: ubuntu-latest
+    # #1477: worst observed successful run 32s across 3 sampled runs.
+    # Raised from the formula's 10min to 25min so the ceiling stays
+    # strictly above the sum of its capped steps plus the 1min/step
+    # budget test_job_ceiling_exceeds_the_sum_of_its_step_timeouts assigns
+    # each of the 13 uncapped (pure-Python regen/diff) steps below.
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 5
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 
@@ -94,6 +132,9 @@ jobs:
       # floats with the runner image).  Without it the regen below is unformatted
       # and the in-sync diff fails.
       - name: Install clang-format 22 (pinned)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
           python3 -m pip install --user 'clang-format==22.1.5'
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -104,6 +145,9 @@ jobs:
       # also schema-validates its output.  setup-python's interpreter ships
       # neither package, so install them explicitly.
       - name: Install generator dependencies
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: python3 -m pip install --user pyyaml jsonschema
 
       # gen_soc_caps.py emits include/alp/soc_caps.h AND the capability
@@ -125,6 +169,13 @@ jobs:
       # gate below flag any drift.
       - name: Regenerate board routes headers from board YAMLs
         run: python3 scripts/gen_board_header.py
+
+      # CC3501E GPIO proxy route tables: examples/aen/<app>/src/cc3501e_gpio_routes.c
+      # is projected from the AEN SoM's pad_routes + hw-revisions overrides by
+      # scripts/gen_cc3501e_gpio_routes.py (issue #1859).  Needs clang-format
+      # (installed above) to match the committed formatting.
+      - name: Regenerate CC3501E GPIO proxy route tables from metadata
+        run: python3 scripts/gen_cc3501e_gpio_routes.py
 
       - name: Regenerate pin-mux capability tables from the pinout TSVs
         run: python3 scripts/gen_pinmux_capability.py
@@ -166,6 +217,14 @@ jobs:
       - name: Regenerate error catalog from headers + diagnostic docs
         run: python3 scripts/gen_error_catalog.py
 
+      # docs/verification-status.md is projected verbatim from
+      # docs/test-plan.md by scripts/gen_verification_status.py (issue
+      # #1200: the status page must never assert a verdict the ledger
+      # doesn't itself carry).  Regenerate and let the diff gate below
+      # flag any drift.
+      - name: Regenerate verification status page from the test-plan ledger
+        run: python3 scripts/gen_verification_status.py
+
       # Single source: metadata/sdk_version.yaml declares MAJOR.MINOR.PATCH
       # and the CURRENT snapshot is docs/abi/vMAJOR.MINOR-snapshot.json
       # (docs/abi/README.md).  EVERY other docs/abi/v*-snapshot.json is a
@@ -200,9 +259,15 @@ jobs:
           fi
 
       - name: Regenerate ABI snapshot (current minor)
-        # The snapshot's `generated` field is a date stamp; re-running
-        # on the same headers always changes that one line, so the
-        # diff below masks it with --ignore-matching-lines.
+        # The snapshot's `generated` field is a date stamp, but
+        # abi_snapshot.py only rewrites the file when re-serializing it
+        # would NOT come out byte-identical to what's already committed
+        # (issue #1232) -- a no-op rerun leaves the committed file's
+        # bytes, generated date included, completely untouched.  The
+        # diff below therefore no longer masks the "generated" line:
+        # doing so would hide exactly the class of bug #1232's guard
+        # exists to prevent (a spurious date-only rewrite slipping past
+        # this gate) rather than defend against it.
         #
         # Reaches the shell as env, not spliced into the script text via ${{ }}.
         env:
@@ -218,10 +283,34 @@ jobs:
           ABI_VERSION: ${{ steps.abi.outputs.version }}
           ABI_SNAPSHOT: ${{ steps.abi.outputs.snapshot }}
         run: |
-          # Allow the snapshot's "generated" date to differ; everything
-          # else must match.
+          # `git diff` alone is blind to a brand-new file the regen step
+          # just created (a not-yet-tracked board header, an added
+          # pinmux table, ...) -- `git status --porcelain` would show it
+          # as `??`, but a plain diff -- exit-code reports 0 and the gate
+          # stays green even though a newly-needed generated file is
+          # missing from the PR (#1128a).  `git add -N` (intent-to-add)
+          # marks each path as tracked-but-empty so the diff below picks
+          # up new files as additions too, without staging real content.
+          git add -N -- include/alp/soc_caps.h "$ABI_SNAPSHOT" \
+                        include/alp/cap.h \
+                        src/cap.c \
+                        src/status_strings.c \
+                        include/alp/boards/ \
+                        metadata/pinmux/ \
+                        metadata/catalog.json \
+                        metadata/error-catalog.json \
+                        docs/peripheral-support-matrix.md \
+                        docs/portability-matrix.md \
+                        docs/verification-status.md \
+                        examples/aen
+          # No line-mask here: abi_snapshot.py's own write-skip guard
+          # (above) is what keeps a no-op rerun from touching the
+          # "generated" line at all, so this diff sees zero lines
+          # changed for that case with no help needed.  A real content
+          # change fails on its content lines regardless of the
+          # "generated" line, so masking it would only ever hide a
+          # regression in that guard -- never a false positive.
           if ! git diff --exit-code \
-                  --ignore-matching-lines='"generated":' \
                   -- include/alp/soc_caps.h "$ABI_SNAPSHOT" \
                      include/alp/cap.h \
                      src/cap.c \
@@ -231,16 +320,20 @@ jobs:
                      metadata/catalog.json \
                      metadata/error-catalog.json \
                      docs/peripheral-support-matrix.md \
-                     docs/portability-matrix.md; then
+                     docs/portability-matrix.md \
+                     docs/verification-status.md \
+                     examples/aen; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
             echo "::error::  python3 scripts/gen_status_strings.py"
             echo "::error::  python3 scripts/gen_board_header.py"
+            echo "::error::  python3 scripts/gen_cc3501e_gpio_routes.py"
             echo "::error::  python3 scripts/gen_pinmux_capability.py"
             echo "::error::  python3 scripts/gen_support_matrix.py"
             echo "::error::  python3 scripts/gen_portability_matrix.py"
             echo "::error::  python3 scripts/gen_catalog.py"
             echo "::error::  python3 scripts/gen_error_catalog.py"
+            echo "::error::  python3 scripts/gen_verification_status.py"
             echo "::error::  python3 scripts/abi_snapshot.py --version $ABI_VERSION --output $ABI_SNAPSHOT"
             echo "::error::and commit the result."
             exit 1

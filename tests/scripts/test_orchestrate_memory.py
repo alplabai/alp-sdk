@@ -53,12 +53,14 @@ ipc:
 """
 
 
-# AEN701/AEN801 resolve their mailbox controller (alif_mhuv2), so they
-# sail past the controller-TBD guard -- but their memory map is derived
-# from the SoC variant JSON, which carries no per-region `base` yet.
-# Before the region.get("base") fix this crashed resolve_carve_outs
-# with `KeyError: 'base'`; it MUST instead land a clean blocked
-# carve-out.  Regression guard for that crash.
+# AEN701 resolves its mailbox controller (alif_mhuv2), so it sails past
+# the controller-TBD guard -- but its memory map is derived from the SoC
+# variant JSON, which carries no per-region `base` yet. Before the
+# region.get("base") fix this crashed resolve_carve_outs with `KeyError:
+# 'base'`; it MUST instead land a clean blocked carve-out.  Regression
+# guard for that crash.  (E1M-AEN801 used to share this fixture -- #1069
+# gave it a real `memory_map:`, so it now RESOLVES instead; see
+# test_resolve_carve_outs_aen801_resolves_after_1069_memory_map below.)
 AEN701_UNMAPPED = """
 som:
   sku: E1M-AEN701
@@ -79,7 +81,7 @@ ipc:
 """
 
 
-AEN801_UNMAPPED = """
+AEN801_MAPPED = """
 som:
   sku: E1M-AEN801
 
@@ -136,7 +138,7 @@ def test_resolve_carve_outs_happy(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------
 
 
-def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path, monkeypatch) -> None:
+def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path) -> None:
     """When the SoM preset still carries TBD metadata (mailbox /
     memory_map), resolve_carve_outs MUST return a `status: blocked`
     entry rather than raise.  The manifest stays emit-able so CI can
@@ -155,7 +157,7 @@ def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path, monkeypatch) -> None:
     this being a claim about the real E1M-NX9101's buildability)."""
     import alp_orchestrate
 
-    meta = _synthetic_nx9101_root(tmp_path, monkeypatch)
+    meta = _synthetic_nx9101_root(tmp_path)
     path = _write_board(tmp_path, NX_TBD)
     project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
     resolved = resolve_carve_outs(project)
@@ -171,7 +173,6 @@ def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path, monkeypatch) -> None:
     "body, sku",
     [
         (AEN701_UNMAPPED, "E1M-AEN701"),
-        (AEN801_UNMAPPED, "E1M-AEN801"),
     ],
 )
 def test_resolve_carve_outs_blocks_on_unmapped_base(
@@ -179,9 +180,9 @@ def test_resolve_carve_outs_blocks_on_unmapped_base(
 ) -> None:
     """AEN presets have a RESOLVED mailbox controller (alif_mhuv2), so
     they proceed past the controller-TBD guard into the region allocator.
-    Their stock memory maps are still base-unmapped, so resolve_carve_outs
-    MUST emit a blocked carve-out rather than crash with `KeyError:
-    'base'`."""
+    A stock (no memory_map:) AEN preset is still base-unmapped, so
+    resolve_carve_outs MUST emit a blocked carve-out rather than crash
+    with `KeyError: 'base'`."""
     path = _write_board(tmp_path, body)
     project = load_board_yaml(path)
     resolved = resolve_carve_outs(project)        # must not raise
@@ -191,6 +192,29 @@ def test_resolve_carve_outs_blocks_on_unmapped_base(
     assert entry.reason is not None
     assert sku in entry.reason
     assert "HW-mapped" in entry.reason
+
+
+def test_resolve_carve_outs_aen801_stays_blocked_after_1069_memory_map(
+    tmp_path: Path,
+) -> None:
+    """#1069 gave E1M-AEN801 a real `memory_map:` (mcuboot/he_slot0/
+    hp_slot0/reserved/storage/mram_main), but an m55_hp+m55_he rpmsg
+    carve-out MUST still land `status: blocked`: the five fine-grained
+    regions are MRAM (flash-class), not RAM, and are marked
+    `carveout: false` so resolve_carve_outs() can't silently place a
+    shared-memory ring inside non-volatile flash just because the region
+    has a real `base` (needed only for the board generator's DTS
+    partition table, see metadata/e1m_modules/E1M-AEN801.yaml). The only
+    other both-core-accessible region, `mram_main`, deliberately keeps
+    `base: TBD`, so the entry blocks there instead."""
+    path = _write_board(tmp_path, AEN801_MAPPED)
+    project = load_board_yaml(path)
+    resolved = resolve_carve_outs(project)
+    assert len(resolved) == 1
+    entry = resolved[0]
+    assert entry.status == "blocked"
+    assert entry.reason is not None
+    assert "mram_main" in entry.reason
 
 
 # ---------------------------------------------------------------------
@@ -221,7 +245,7 @@ def test_resolve_carve_outs_deterministic(tmp_path: Path) -> None:
 
 
 def test_resolve_carve_outs_blocks_on_no_reserved_channel(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path,
 ) -> None:
     """Phase 3 strict mailbox-reservation check (spec §6.4), Phase 4
     blocked-entry semantics.
@@ -283,10 +307,11 @@ def test_resolve_carve_outs_blocks_on_no_reserved_channel(
         default_board: E1M-X-EVK
     """).lstrip("\n"), encoding="utf-8")
 
-    # Patch the orchestrator's METADATA_ROOT for this test.
-    monkeypatch.setattr(alp_orchestrate, "METADATA_ROOT", meta)
-    monkeypatch.setattr(alp_orchestrate, "BOARD_SCHEMA",
-                        schemas / "board.schema.json")
+    # `load_board_yaml(..., metadata_root=meta)` below is the only knob that
+    # matters -- every alp_orchestrate resolver reads
+    # `BoardProject.effective_metadata_root()`, not a module-level
+    # `METADATA_ROOT` global, so monkeypatching `alp_orchestrate.METADATA_ROOT`
+    # is inert (#1485).
 
     path = _write_board(tmp_path, V2N_HAPPY)
     project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)

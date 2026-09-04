@@ -9,10 +9,13 @@ non-empty). While the migration registry is empty this gate is a no-op; it
 gains teeth automatically once a v1->v2 migration lands. A file whose
 `schemaVersion` is NEWER than this SDK's `LATEST` is also reported (it cannot
 be migrated down). Run `west alp-migrate --apply` to resolve real drift.
-Fast, filesystem-only.
+Fast: board.yaml discovery goes through `git ls-files` (prunes build output
+via `.gitignore` without descending into it), not a raw filesystem walk.
 """
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -22,10 +25,37 @@ import alp_migrate  # noqa: E402
 
 ROOT = _HERE.parent.parent
 
+# Fallback-only: dirs to prune when `root` isn't a git worktree (see
+# `_board_yaml_files`). git itself needs no such list -- `--exclude-
+# standard` already reads `.gitignore`, the one source of truth for
+# "this is build output, not a source".
+_FALLBACK_SKIP_DIRS = frozenset({".git", ".west", "build", "twister-out"})
+
+
+def _board_yaml_files(root: Path) -> list[Path]:
+    """Every board.yaml under `root` -- tracked or newly-created-but-not-
+    yet-`git add`ed. Same fix as check_library_registry.py's
+    `_board_yaml_files`, same defect class: a raw `root.rglob("board.yaml")`
+    here also walked `twister-out/`/`build/` unbounded from repo root."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--cached", "--others",
+             "--exclude-standard", "--", "*board.yaml"],
+            check=True, capture_output=True, text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        found: list[Path] = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in _FALLBACK_SKIP_DIRS]
+            if "board.yaml" in filenames:
+                found.append(Path(dirpath) / "board.yaml")
+        return sorted(found)
+    return sorted(root / line for line in proc.stdout.splitlines() if line)
+
 
 def find_drift(root: Path) -> list[Path]:
     drifted: list[Path] = []
-    for path in sorted(root.rglob("board.yaml")):
+    for path in _board_yaml_files(root):
         try:
             doc = alp_migrate.load(path.read_text(encoding="utf-8"))
         except Exception:

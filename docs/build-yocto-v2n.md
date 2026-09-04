@@ -96,8 +96,10 @@ not the distro.
 
 > **Machine fragments:** `alp-image-edge` picks up per-machine `.cfg`
 > fragments from `meta-alp-sdk/recipes-kernel/linux/`.  For V2N with the
-> display and audio features enabled, the active fragment list includes
-> `display.cfg` + `tas2563-audio.cfg`.  To build a minimal image without
+> display feature enabled, the active fragment list is `display.cfg`.
+> (There is no audio fragment: the carrier TAS2563 codec has no DT node
+> yet, so nothing would bind — see the audio TODO in `e1m-x-evk.dtsi`.)
+> To build a minimal image without
 > Weston/display, remove the `alp-lvgl-dashboard`, `weston`, and
 > `weston-init` packages from `IMAGE_INSTALL` in your `local.conf` and
 > drop the `display.cfg` fragment from the `SRC_URI` override.
@@ -107,12 +109,12 @@ not the distro.
 The bootloader's `bootcmd` (rzv2n-dev config + the Alp 0002 patch)
 loads `Image` from the ext4 rootfs `/boot` and then **reloads the
 per-MACHINE board dtb** — `boot/e1m-v2n101-x-evk.dtb` on V2N101/V2N102,
-`boot/e1m-v2m101-x-evk.dtb` on V2M101/V2M102 (issue #1175). The vendor
-env's hardcoded `boot/r9a09g056n44-dev.dtb` is a filename **no Alp
-image builds**, on the eMMC branch as well as the SD one, which is why
-the reload exists. If the dtb is missing from `/boot`, the bootloader
-prints an error and **stops** — it does not fall through and boot
-whatever devicetree is left in RAM.
+`boot/e1m-v2m101-x-evk.dtb` on V2M101/V2M102 (issue #1175, closed as
+#1252). The vendor env's hardcoded `boot/r9a09g056n44-dev.dtb` is a
+filename **no Alp image builds**, on the eMMC branch as well as the SD
+one, which is why the reload exists. If the dtb is missing from
+`/boot`, the bootloader prints an error and **stops** — it does not
+fall through and boot whatever devicetree is left in RAM.
 
 The boot medium is auto-detected **per boot**: if an SD card is
 present, root = `/dev/mmcblk1p2` (the carrier microSD, `&sdhi1` — see

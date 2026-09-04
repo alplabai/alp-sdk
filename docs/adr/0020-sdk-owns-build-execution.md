@@ -1,15 +1,152 @@
 # 0020. The SDK plans; a standalone `tan` CLI is the whole command surface (three repos, one executor)
 
-Status: Accepted — direction + alp-sdk Phase 1/4 code implemented on `dev`; the
-Amendment's release-blocking remediation is met on two of its three conditions
-(oracle frozen, both seams live), the cross-repo `repository_dispatch` trigger
-remains outstanding as a maintainer action, and the release train ran anyway
-(see **Amendment** points 1 and 7).
+Status: Accepted — amended 2026-08-03 for the Python Tan port, 2026-08-12,
+2026-08-26; the original Rust/plans-only mechanism below remains the
+historical Phase 1/4 record.
 Date: 2026-07-18 (Caner) · 2026-07-20 (Hakan co-sign, this commit)
 Deciders: alpCaner (alp-sdk), Hakan (alp-sdk-vscode)
 Supersedes: [0014](0014-build-plan-emit-cli-contract.md) — its
 mechanism clause **and** its 84-87 consequence (`west alp-build` stays native).
 Pairs with RFC #837 (`alp` → `tan`).
+
+## Amendment (2026-08-26 — Amendment 7's cross-repo-trigger condition is now met)
+
+Corrects Amendment 7's third bullet (below, dated 2026-07-28: "**Cross-repo
+trigger — NOT done, and it is the one real gap.**") and the index row's
+matching present-tense clause in `docs/adr/README.md`. Both were accurate when
+written; the trigger shipped the same day, seven hours later.
+
+`.github/workflows/dispatch-tan-parity.yml` is the sender half: it fires a
+`repository_dispatch` (`event_type=alp-sdk-planner-change`) at
+`alplabai/tan-cli` on every push to `dev`/`main`, using a token minted at
+runtime from the org's GitHub App -- one of the two credential types
+Amendment 7's "cannot be built from either repo's CI without a PAT/App
+secret" already named. Item 7 was right about the credential; it was wrong
+that obtaining one made this a **maintainer action** -- the App token is
+minted automatically at workflow runtime, not provisioned by hand. Landed
+`6595d2a4` (2026-07-28, same day as the Amendment-7 commit `0c5cf608`). The
+receiver half is live in `tan-cli`: `parity.yml:69` and
+`planner-resync.yml:101`, both `types: [alp-sdk-planner-change]`.
+
+Re-running Amendment 7's grep today (`grep -rn repository_dispatch
+.github/workflows/*.yml`) no longer returns only the `pr-bitbake.yml` comment
+it cited — it also matches `dispatch-tan-parity.yml`, which carries the real
+trigger.
+
+One residual gap the workflow's own header documents and this correction
+does not close: `repository_dispatch` does not carry the sender's SHA into
+the receiver's run ref, so nothing in this repo can filter tan-cli's run list
+down to "the run this dispatch caused" versus a concurrent sender — recency
+plus `event=repository_dispatch` is the only correlation available
+(`dispatch-tan-parity.yml`'s own in-file NOTE, near its `dispatch-confirm.sh`
+step).
+
+## Amendment (2026-08-26 — PR alplabai/tan-cli#530 shipped in tan v0.6.0-rc1)
+
+Corrects the 2026-08-12 Amendment's closing paragraph (below): "**Not yet in
+a released `tan`.**" no longer holds. `alplabai/tan-cli#530` shipped in tan
+`v0.6.0-rc1` (tagged 2026-08-14; `TAN_VERSION` at `python/tan/version.py:49`),
+carried forward unchanged into the final `v0.6.0` (tagged 2026-08-24) — both
+are real, existing tags, not `dev`-branch-only. `python/tan/core/tool_lookup.py`'s
+`resolve_tool()` and `python/tan/commands/build/execute.py`'s `_spawn_step()`
+(the "`program` is always the RESOLVED absolute path (tan-cli#510)" docstring
+the paragraph below quotes) are both present at that tag.
+`build-plan-v1.schema.json:50`'s `missingTool` description, which cross-references
+this Amendment by date, now describes released behaviour rather than a
+both-ways hedge. The Amendment's five numbered technical claims and the
+Consequence paragraph are otherwise unaffected and stand.
+
+## Amendment (2026-08-26 — `crates/` retired, not just frozen)
+
+The "Amendment (2026-08-03)" section below says "the old `crates/` tree is
+frozen at v0.4.1 as a behaviour oracle, not the active implementation." That
+was accurate on 2026-08-03; it stopped being accurate on 2026-08-10, when
+`tan-cli`'s `2883cdf4` ("retire the Rust oracle -- delete crates/ and the
+oracle-parity suite (#269) (#601)") deleted the tree outright —
+`git ls-tree origin/dev -- crates` on `tan-cli` is now empty. The paragraph
+below stays as the dated record of the frozen-not-deleted interim state;
+read "frozen" there as superseded by deletion, not as the current state.
+
+## Amendment (2026-08-12 — what the Security clause's "never PATH" means)
+
+The *Consequences* → **Security** paragraph below reads "the executor confines
+writes under `buildRoot`, resolves tools/interpreters by explicit path (never
+PATH)", and *The plan contract must be complete before the SDK stops executing*
+carries the short form of the same claim ("resolves tools by explicit path").
+Both were written before an executor implemented them, and "never PATH" reads as
+"PATH is never consulted" — which is not what `tan` does, and was never the
+property the clause was protecting. This amendment states the property precisely;
+the paragraphs below stay as the dated record.
+
+**What is true**, as implemented by `alplabai/tan-cli#510` (PR
+`alplabai/tan-cli#530`, merged to `tan-cli`'s `dev` as `50788ecd`, milestone
+v0.6.0):
+
+1. `command.tool` stays an **identity** in the plan — never a path, never a
+   token. Resolution is executor-owned. (alp-sdk#1286 asked the planner to emit a
+   resolved `tool` and was refused; alp-sdk#1291 put that in `command.tool`'s own
+   schema description.)
+2. The executor resolves that identity to a **concrete filesystem path** with one
+   hardened lookup (`resolve_tool()` in `tan/core/tool_lookup.py`) and spawns **that
+   path**, never the bare name. On the build path that is
+   `_spawn_step()` in `execute.py`, whose own docstring says "`program` is always the
+   RESOLVED absolute path (tan-cli#510), never a bare identity"; on the flash
+   path it is passed as `subprocess` `executable=`.
+3. **PATH is still the search input** for a bare identity — POSIX via
+   `os.get_exec_path` + `shutil.which`, Windows via a hand-rolled `%PATH%` walk
+   that is deliberately not `shutil.which`. What "never PATH" forbids is handing
+   the bare name to the *platform's own* resolver at spawn time: `CreateProcess`
+   with `lpApplicationName=NULL` searches the parent process's current directory
+   ahead of `%PATH%`, so a checkout carrying its own `west.exe`/`openocd.exe` at
+   its root could otherwise be spawned in place of the real tool.
+4. The PATH searched is the **slice's own fully assembled `env`** (post
+   `envAppendPath` / venv), not the executor process's environment.
+5. An **absolute** `command.tool` is answered by existence alone and spawned
+   verbatim — no PATH walk happens for it at all.
+
+**Consequence for `executionPolicy.missingTool`.** It fires when `command.tool`
+**cannot be resolved to an executable**, which is a superset of "not found on
+PATH": an absolute `tool` that does not exist reaches it without PATH being
+consulted, and on Windows a `%PATH%` file whose name carries no `%PATHEXT%`
+extension is deliberately never selected by the hardened walk.
+`metadata/schemas/build-plan-v1.schema.json`'s `missingTool` description is
+re-worded to match (issue #1314). alp-sdk#1291 left the old PATH-pinned wording
+in place deliberately, on the reasoning that the ADR was the wrong half while
+tan-cli#510 was still open; #510 is now closed by #530, so the schema was the
+stale half.
+
+**Not yet in a released `tan`.** PR #530 is on `tan-cli`'s `dev` branch. The
+latest `tan` release is **v0.5.1** (2026-08-05), which still spawns the bare
+identity. The re-worded schema description is chosen to be true of both: "cannot
+be resolved to an executable" holds whether the executor resolves-then-spawns or
+hands the name to the platform resolver.
+
+## Amendment (2026-08-03 — Python Tan relocates the planner)
+
+The command-surface and single-executor decision stands, but the repository
+boundary changed during the Python port:
+
+1. The current Tan development implementation is Python. Until v0.5 is cut,
+   alp-sdk `dev` installs `tan-cli/dev` with Python 3.12+; from v0.5, release
+   archives are PyInstaller freezes. The old `crates/` tree is frozen at v0.4.1
+   as a behaviour oracle, not the active implementation. **`crates/` was
+   subsequently deleted outright — see "Amendment (2026-08-26)" above.**
+2. Normal `tan build` no longer spawns alp-sdk's planner. Tan owns a relocated
+   in-process planner and executor that read alp-sdk metadata, schemas, examples,
+   and selected tooling contracts.
+3. The `build-plan-v1` shape remains the internal planner/executor seam and a
+   public parity/interoperability contract. alp-sdk's
+   `alp_orchestrate --emit build-plan` and other emitters remain the reference
+   producer; `tan build --plan-from <file>` can exercise that seam explicitly.
+4. Most commands are now native Python implementations. Only `migrate`, `lock`,
+   and `quality` forward to the surviving west extensions.
+5. During the port, `tan sdk list/current` work but `sdk install/switch` refuse
+   with `sdk.not-ported`; select an SDK with `--sdk-root`, `.alp/sdk-path`, a
+   sibling checkout, or `ALP_SDK_ROOT`.
+
+This amendment supersedes current-state statements below that call alp-sdk
+"plans-only", describe Rust as the executor, or say Tan consumes the SDK plan as
+its sole input. Those statements remain as the dated migration record.
 
 > **Implemented.** The SDK-side executor, `west alp-build`, and every SDK-side
 > user command are retired; the whole command surface now lives in the
@@ -158,8 +295,11 @@ blocked until the remediation is met. Tracked in #855.
    `composed-route-table` is an intentional maintainer-only pad-route
    regression/demonstrator tool with no product consumer; and the
    remaining four (`hw-info-h`, `west-libraries`, `os-topology`,
-   `zephyr-board`) are real gaps with no design reason for the absence,
-   filed as `tan-cli`#113–#116.
+   `zephyr-board`) were real gaps with no design reason for the absence,
+   filed as `tan-cli`#113–#116 -- all four CLOSED, all four targets now
+   present in Python Tan's `--target` set
+   (`python/tan/commands/generate_cmd.py:139-160`), so this row of
+   `docs/cli.md`'s gap table is stale and should be dropped.
 
 7. **(2026-07-28) Remediation status — point 1's gate is met on two of its
    three conditions, and its "blocks any release/tag" clause was overtaken by
@@ -257,6 +397,22 @@ blocked until the remediation is met. Tracked in #855.
    the fixture.** Point 4's lockstep note is a real constraint, not a
    pleasantry; when the two copies disagree, re-vendor and record it, and treat
    a new comparator allowance as evidence the sync was skipped.
+
+8. **(2026-08-26) Point 6's "11 non-build verbs all still survive in the
+   `alp_cli` package" is now false — alp-sdk#1367/#1368 deleted the rest of
+   the command-line wrappers.** `scripts/alp_cli/main.py`, `__main__.py`,
+   `validate.py`, `doctor.py`, `emit.py`, `faultdecode.py`, `generate.py`,
+   `init.py`, `model.py`, `monitor.py`, `new_som.py`, and `run.py` are gone;
+   there is no `python -m alp_cli <verb>` front door left to run at all, and
+   every one of the 11 verbs point 6 enumerated is now a native `tan`
+   implementation only (all present in `tan-cli` `v0.6.0`). Point 6's "8
+   non-verb modules" list is also stale: `__main__.py` and `main.py` are
+   among the deleted, not the survivors. What remains under
+   `scripts/alp_cli/` is six library modules with real non-CLI callers
+   (`__init__.py`, `diagnostic.py`, `diagnostic_format.py`, `validator.py`,
+   `_workspace.py`, `yaml_pos.py`) — not a command surface of any kind.
+   alp-sdk's own command surface is now, in full, what §Decision-2 always
+   named as the end state: zero user commands.
 
 ## Context
 

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Declarative catalog of Alp SDK project templates (app archetypes), for a frontend (alp-sdk-vscode, Alp Studio, a future `alp new`) to discover what starter projects exist and what each needs, instead of ad-hoc example copying. Every record maps to a CANONICAL existing example under examples/ -- the template does not fork or duplicate the example, it IS the example, described machine-readably. scripts/check_template_catalog.py validates this file against metadata/schemas/template-catalog-v1.schema.json AND drift-checks every referenced example/testcase.yaml/library/chip against the real tree, so a record can never point at a path or dependency that doesn't exist. Per-record `status` is grounded in the tracked example content-quality gaps in issues #448 (iot-connected-camera documented as v1.0-ready while still a runtime skeleton) and #520 (six display/LVGL + iot-dashboard examples bypass <alp/display.h>/<alp/gui.h> for direct zephyr/drivers/display.h) -- scripts/check_template_catalog.py hard-fails a `stable` record whose `example` is one of those; none of the eight templates below reference one. This is the catalog + schema + drift-validation FOUNDATION (epic #610 SS3) only. The deterministic render/preview API -- `alp generate <template-id> <dest>` materialising a template into a fresh directory and running its native_sim test there -- is a deliberately-scoped FOLLOW-UP, tracked separately; it is not built by this change.",
+  "description": "Declarative catalog of Alp SDK project templates (app archetypes), for a frontend (alp-sdk-vscode, Alp Studio, a future `alp new`) to discover what starter projects exist and what each needs, instead of ad-hoc example copying. Every record maps to a CANONICAL existing example under examples/ -- the template does not fork or duplicate the example, it IS the example, described machine-readably. scripts/check_template_catalog.py validates this file against metadata/schemas/template-catalog-v1.schema.json AND drift-checks every referenced example/testcase.yaml/library/chip against the real tree, so a record can never point at a path or dependency that doesn't exist. Per-record `status` is grounded in the tracked example content-quality gaps in issues #448 (iot-connected-camera documented as v1.0-ready while still a runtime skeleton) and #520 (six display/LVGL + iot-dashboard examples bypass <alp/display.h>/<alp/gui.h> for direct zephyr/drivers/display.h) -- scripts/check_template_catalog.py hard-fails a `stable` record whose `example` is one of those; none of the nine templates below reference one. Each record also carries a `cores` map transcribing its canonical example's own board.yaml `cores:` mapping (id/dir/effective-os) -- duplicated on purpose for a frontend/emitter's convenience, kept honest by the same drift gate. This is the catalog + schema + drift-validation FOUNDATION (epic #610 SS3) only. The deterministic render/preview API -- `alp generate <template-id> <dest>` materialising a template into a fresh directory and running its native_sim test there -- is a deliberately-scoped FOLLOW-UP, tracked separately; it is not built by this change.",
   "templates": [
     {
       "id": "minimal",
@@ -14,6 +14,9 @@
         "core_classes": ["m"],
         "runtimes": ["zephyr"]
       },
+      "cores": [
+        { "id": "m55_hp", "dir": "./src", "os": "zephyr" }
+      ],
       "requires": {
         "portable_apis": ["include/alp/cap.h", "include/alp/peripheral.h", "include/alp/soc_caps.h"],
         "libraries": [],
@@ -66,6 +69,9 @@
         "core_classes": ["m"],
         "runtimes": ["zephyr"]
       },
+      "cores": [
+        { "id": "m55_hp", "dir": "./src", "os": "zephyr" }
+      ],
       "requires": {
         "portable_apis": [
           "include/alp/peripheral.h",
@@ -148,6 +154,9 @@
         "core_classes": ["m"],
         "runtimes": ["zephyr"]
       },
+      "cores": [
+        { "id": "m55_hp", "dir": "./src", "os": "zephyr" }
+      ],
       "requires": {
         "portable_apis": [
           "include/alp/peripheral.h",
@@ -218,6 +227,10 @@
         "core_classes": ["a", "m"],
         "runtimes": ["yocto", "zephyr"]
       },
+      "cores": [
+        { "id": "a32_cluster", "dir": "./linux", "os": "yocto" },
+        { "id": "m55_hp", "dir": "./m55_hp", "os": "zephyr" }
+      ],
       "requires": {
         "portable_apis": ["include/alp/peripheral.h", "include/alp/rpc.h"],
         "libraries": ["mbedtls", "nlohmann_json", "cmsis_dsp"],
@@ -246,10 +259,12 @@
       "files": {
         "user_owned": [
           "board.yaml",
+          "CMakeLists.txt",
           "m55_hp/prj.conf",
           "m55_hp/CMakeLists.txt",
           "m55_hp/src/main.c",
           "linux/CMakeLists.txt",
+          "linux/src/main.c",
           "README.md"
         ],
         "generated": [
@@ -267,7 +282,7 @@
         {
           "name": "rpmsg_carve_out_kb",
           "type": "integer",
-          "description": "Cross-core RPMsg shared-memory carve-out size, allocated from the SoM's mram_main region.",
+          "description": "Cross-core RPMsg shared-memory carve-out size, allocated from the SoM's mram_main region. Default kept well under the region's 5632 KiB (metadata/e1m_modules/E1M-AEN801.yaml) and under the 512 KiB ocram_low that resolve_carve_outs() (scripts/alp_orchestrate/carveout.py) resolves to on RZ/V2N/V2M boards using this same field -- see metadata/templates/board.yaml's ipc: comment (#1613).",
           "default": 256,
           "constraints": { "minimum": 16 }
         }
@@ -292,6 +307,9 @@
         "core_classes": ["m"],
         "runtimes": ["zephyr"]
       },
+      "cores": [
+        { "id": "m33_sm", "dir": "./src", "os": "zephyr" }
+      ],
       "requires": {
         "portable_apis": ["include/alp/peripheral.h"],
         "libraries": ["modbus"],
@@ -349,6 +367,10 @@
         "core_classes": ["m"],
         "runtimes": ["zephyr"]
       },
+      "cores": [
+        { "id": "a32_cluster", "os": "off" },
+        { "id": "m55_hp", "dir": "./src", "os": "zephyr" }
+      ],
       "requires": {
         "portable_apis": [
           "include/alp/peripheral.h",
@@ -407,7 +429,7 @@
           "alp_sdk.example.cold_chain_monitor.e1m_x_evk"
         ],
         "cross_compile_matrix": [
-          { "platform": "ensemble_e8_dk/ae402fa0e5597le0/rtss_hp", "build_only": true }
+          { "platform": "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp", "build_only": true }
         ]
       },
       "status": "stable"
@@ -424,6 +446,9 @@
         "core_classes": ["m"],
         "runtimes": ["zephyr"]
       },
+      "cores": [
+        { "id": "m55_hp", "dir": "./src", "os": "zephyr" }
+      ],
       "requires": {
         "portable_apis": [
           "include/alp/hw_info.h",
@@ -495,6 +520,9 @@
         "core_classes": ["m"],
         "runtimes": ["zephyr"]
       },
+      "cores": [
+        { "id": "m55_hp", "dir": "./src", "os": "zephyr" }
+      ],
       "requires": {
         "portable_apis": ["include/alp/iot.h"],
         "libraries": ["mbedtls"],
@@ -538,7 +566,68 @@
         "cross_compile_matrix": []
       },
       "status": "preview",
-      "note": "AEN-only + preview: (1) the E1M-V2N101 Wi-Fi transport does not exist yet -- its Murata murata_lbee5hy2fy radio is hil_silicon: untested and its Linux data path is an unmerged design -- so this template supports only E1M-AEN801, whose CC3501E bridge transport is silicon-validated (2026-06-24, nightly-aen-hil). (2) The mqtts:// TLS path is wired through <alp/iot.h> + libraries: [mbedtls], but CONFIG_MBEDTLS is held off in the build (Zephyr 4.4 / mbedtls 3.6 ssl_misc.h include-order bug; full tf-psa-crypto integration is a v0.6 work item), so the native_sim scenario exercises the SDK framing + the documented alp_wifi_open/alp_mqtt_open NULL (NOT_READY) degradation, not a live TLS round-trip."
+      "note": "AEN-only + preview: (1) the E1M-V2N101 Wi-Fi transport does not exist yet -- its Murata murata_lbee5hy2fy radio is hil_silicon: untested and its Linux data path is an unmerged design -- so this template supports only E1M-AEN801, whose CC3501E bridge transport is silicon-validated (2026-06-24, bench-verified -- not via CI; see #968). (2) The mqtts:// TLS path is wired through <alp/iot.h> + libraries: [mbedtls], but CONFIG_MBEDTLS is held off in the build (Zephyr 4.4 / mbedtls 3.6 ssl_misc.h include-order bug; full tf-psa-crypto integration is a v0.6 work item), so the native_sim scenario exercises the SDK framing + the documented alp_wifi_open/alp_mqtt_open NULL (NOT_READY) degradation, not a live TLS round-trip."
+    },
+    {
+      "id": "multicore-mailbox",
+      "title": "Multicore -- Mailbox (AEN M55-HP <-> M55-HE)",
+      "archetype": "multicore-mailbox",
+      "example": "examples/multicore/mproc-mailbox",
+      "description": "Dual-Zephyr-core starter for the Alif Ensemble E8: two Cortex-M55 cores (HP + HE), both Zephyr, both real project cores -- the first worked example of this shape in the catalog (every other multicore template crosses the Linux/Zephyr boundary instead). HP stages a payload in cache-coherent shared SRAM and signals HE via the hardware mailbox through the portable <alp/mproc.h> raw-shmem + mailbox + hwsem surface; HE echoes it back. This is deliberately NOT RPMsg -- no message-queue framing, no negotiated channel, just a raw pointer view over a fixed shmem carve-out plus a mailbox doorbell -- so it teaches the lower-level primitive multicore-rpmsg's transport sits on top of.",
+      "supported": {
+        "families": ["alif-ensemble"],
+        "som_skus": ["E1M-AEN801"],
+        "core_classes": ["m"],
+        "runtimes": ["zephyr"]
+      },
+      "cores": [
+        { "id": "m55_hp", "dir": "./src", "os": "zephyr" },
+        { "id": "m55_he", "dir": "./peer", "os": "zephyr" }
+      ],
+      "requires": {
+        "portable_apis": ["include/alp/mproc.h", "include/alp/peripheral.h"],
+        "libraries": [],
+        "chips": [],
+        "routes": [],
+        "generated_artifacts": [
+          {
+            "path": "build/generated/alp.conf",
+            "emit_mode": "zephyr-conf",
+            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via EXTRA_CONF_FILE; rendered separately per core (--core m55_hp for the root CMakeLists.txt, --core m55_he for peer/CMakeLists.txt, both against the SAME board.yaml), which carries CONFIG_DCACHE=n on both slices from the shared ipc: raw_shmem block"
+          }
+        ],
+        "test_backend": ["native_sim", "cross_compile"]
+      },
+      "files": {
+        "user_owned": [
+          "board.yaml",
+          "prj.conf",
+          "CMakeLists.txt",
+          "src/main.c",
+          "peer/prj.conf",
+          "peer/CMakeLists.txt",
+          "peer/main.c",
+          "README.md"
+        ],
+        "generated": [
+          {
+            "path": "build/generated/alp.conf",
+            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time (once per core); not committed."
+          }
+        ]
+      },
+      "parameters": [],
+      "test": {
+        "testcase_yaml": [
+          "examples/multicore/mproc-mailbox/testcase.yaml",
+          "examples/multicore/mproc-mailbox/peer/testcase.yaml"
+        ],
+        "native_sim_scenarios": ["alp_sdk.examples.mproc_mailbox.native_sim"],
+        "cross_compile_matrix": [
+          { "platform": "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he", "build_only": true }
+        ]
+      },
+      "status": "stable"
     }
   ]
 }

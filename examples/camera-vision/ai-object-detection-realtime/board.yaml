@@ -60,7 +60,8 @@ cores:
     app: ./src
     # Library set: tflite_micro carries the universal NPU dispatch +
     # the CPU fallback kernels; the §D.lib loader picks the DEEPX
-    # DXNN backend shim from hw-backends.yaml when the SKU's
+    # DXNN backend shim from the `integration.zephyr.hw_backends:`
+    # block in metadata/libraries/tflite-micro.yaml when the SKU's
     # preferred_backend is `deepx_dxm1`.  CMSIS-DSP handles the
     # pre-/post-process (resize, NMS) on the host CPU.
     peripherals:

@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Standalone check for scripts/gen_soc_peripheral_instances.py --check
+# (issue #1154 PR review, #1212).
+#
+# This used to be a step in pr-twister.yml's `matrix.shard == 1` leg,
+# reusing that job's already-bootstrapped Zephyr workspace. Moved out on
+# purpose: that job pins Zephyr via `west init -m ... --mr v4.4.1` as the
+# FULL twister oracle, so any future version bump that happens to touch
+# dts/arm/renesas/rz/rzv/r9a09g056.dtsi would make `--check` return STALE,
+# failing `twister-shard 1/4`, which fails the required aggregator
+# `twister · native_sim/native/64` on `dev` branch protection -- blocking
+# every PR in the repo, not just V2N ones, under a context name that says
+# nothing about metadata, and not unblockable by anyone without a
+# checkout of the NEW Zephyr.
+#
+# This job needs exactly ONE file out of the whole Zephyr tree
+# (r9a09g056.dtsi), not a full west workspace, so it sparse-checks-out
+# just that subtree at the pinned tag and runs in seconds -- none of
+# twister's ~30 minutes.
+#
+# ADVISORY, not required, while this pattern proves itself -- same
+# graduation path issue #974 (pr-renode-aen-smoke.yml) and #1187
+# (pr-renode-v2n-sci0-smoke.yml) set: do not fold this into a required
+# context without a track record of green runs across PRs that actually
+# touch this metadata.
+
+name: pr-metadata-peripheral-instances
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'metadata/socs/renesas/rzv2n/n44.json'
+      - 'metadata/schemas/soc-spec-v1.schema.json'
+      - 'metadata/bootstrap.json'
+      - 'scripts/gen_soc_peripheral_instances.py'
+      - '.github/workflows/pr-metadata-peripheral-instances.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  peripheral-instances-check:
+    name: metadata · RZ/V2N peripheral-instances DTSI projection
+    runs-on: ubuntu-latest
+    # Raised from 5 -> 10 (#1477): 3 flagged network steps (Checkout,
+    # Set up Python, the sparse-checkout of the pinned RZ/V2N devicetree)
+    # each need their own timeout-minutes cap; their sum (6min) left no
+    # headroom under the old 5-minute ceiling, which would fail
+    # test_job_ceiling_exceeds_the_sum_of_its_step_timeouts.
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          path: alp-sdk
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 5
+        with:
+          python-version-file: alp-sdk/.python-version
+
+      # metadata/bootstrap.json (issue #917) is the single source for the
+      # pinned Zephyr revision. Read it here at run time instead of
+      # hardcoding a second `vX.Y.Z`-shaped literal in this workflow --
+      # that would be a second, drift-prone copy of the same pin
+      # check_bootstrap_manifest.py's curated CI_WORKFLOWS list would then
+      # need tracking too. This way there is nothing for that gate (or any
+      # other) to keep in sync: the tag is derived, every run.
+      - name: Resolve pinned Zephyr tag (metadata/bootstrap.json)
+        id: pin
+        run: |
+          set -euo pipefail
+          tag=$(python3 -c "import json; print(json.load(open('alp-sdk/metadata/bootstrap.json'))['zephyr']['version'])")
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Pinned Zephyr tag: ${tag}"
+
+      # Sparse, blobless, depth-1 checkout of ONLY the RZ/V2N SoC
+      # devicetree subtree -- this job needs exactly one file
+      # (dts/arm/renesas/rz/rzv/r9a09g056.dtsi) out of the whole Zephyr
+      # tree, not a full west workspace/SDK/toolchain. Runs in seconds.
+      - name: Sparse-checkout the RZ/V2N devicetree at the pinned tag
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        env:
+          ZEPHYR_TAG: ${{ steps.pin.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --sparse --depth 1 \
+              --branch "${ZEPHYR_TAG}" \
+              https://github.com/zephyrproject-rtos/zephyr zephyr
+          git -C zephyr sparse-checkout set dts/arm/renesas/rz/rzv
+          test -f zephyr/dts/arm/renesas/rz/rzv/r9a09g056.dtsi
+
+      # ALP_REQUIRE_ZEPHYR_ORACLE=1: this job's whole purpose is to
+      # provide the DTSI oracle, so an unresolvable one here is a bug in
+      # THIS job's own checkout (a renamed path upstream, a bad tag, a
+      # network failure), not an environment fact to skip past -- same
+      # escape hatch pr-twister.yml's own Zephyr-oracle steps use
+      # (check_bootstrap_manifest.py, the SB_CONFIG_* class gate), reused
+      # rather than inventing a second flag for the same concept.
+      #
+      # if: always() so a failure in an EARLIER step (the tag resolution
+      # or the sparse checkout itself) still reaches this step and reports
+      # the honest "job promised the oracle and did not deliver it"
+      # failure, instead of GitHub Actions silently skipping this step and
+      # leaving the job's red unexplained.
+      - name: check · SoC peripheral-instances DTSI projection (#1154)
+        if: always()
+        working-directory: alp-sdk
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+          ALP_REQUIRE_ZEPHYR_ORACLE: '1'
+        run: |
+          python3 scripts/gen_soc_peripheral_instances.py --check

@@ -15,18 +15,30 @@
 #     against an out-of-workspace worktree. The `extras-tier1` west.yml
 #     pin (remote lieff, repo-path minimp3, path modules/lib/minimp3)
 #     remains the audit-trail / version source-of-truth per that README.
-#   * upstream version: `master` -- no tagged upstream release exists;
-#     vendored copy fetched 2026-07-10 (vendors/minimp3/README.md
-#     "What's here"). Tracked in
-#     `.github/workflows/nightly-extras-tier1-pins.yml` as a "TBD"
-#     library (WARN, not FAIL, on nightly fetch breakage).
+#   * upstream version: pinned to master HEAD commit
+#     ea99364f61c14656440e8d77e9c233ccf3124633 (2026-07-27) -- no tagged
+#     upstream release exists. The west.yml pin previously read
+#     `revision: main`, which is BROKEN: lieff/minimp3 has no `main`
+#     branch (`gh api repos/lieff/minimp3/commits/main` -> HTTP 422 "No
+#     commit found for SHA: main"); the default branch is `master`. `west
+#     update --group-filter +extras-tier1` could not fetch this project
+#     at all under the old pin. Vendored copy fetched 2026-07-10
+#     (vendors/minimp3/README.md "What's here"); re-verify against the
+#     new SHA when next refreshed. Gated (FAIL, not WARN) in
+#     `.github/workflows/nightly-extras-tier1-pins.yml` alongside the
+#     other ten pinned libraries -- the warn-only "TBD" exemption this
+#     library previously carried is gone now that it has a real pin.
 #   * licence CC0-1.0 -- confirmed verbatim from the vendored
 #     `vendors/minimp3/LICENSE` file (Creative Commons CC0 1.0 Universal
 #     public-domain dedication).
 #   * enable symbol CONFIG_ALP_MINIMP3_PURE_C -- the SW-fallback
-#     (pure-C, no SIMD/DMA) wiring transcribed verbatim from
-#     `_LIBRARY_KCONFIG["minimp3"]`
-#     (scripts/alp_project_emit/__init__.py:261).
+#     (pure-C, no SIMD/DMA) wiring.  This bullet used to cite
+#     `_LIBRARY_KCONFIG["minimp3"]` in scripts/alp_project_emit/__init__.py;
+#     that per-library dict no longer exists anywhere under scripts/ (the
+#     alp_project_emit package itself does still exist, so the citation read
+#     as live rather than obviously dead).  The mechanism today is the
+#     `integration.zephyr.kconfig` array below, transcribed verbatim by
+#     scripts/alp_orchestrate/libraries.py:321 (`zephyr_kconfig_lines`).
 #
 # Licence CC0-1.0 -- public-domain-equivalent, added to this schema's
 # permissive `license` allowlist alongside BSL-1.0 (catch2) per the
@@ -50,7 +62,7 @@ schema_version: 1
 name: minimp3
 description: "minimp3 -- single-header, portable, pure-C MP3 decoder."
 tier: B
-version: "master"
+version: "ea99364f61c14656440e8d77e9c233ccf3124633"
 license: CC0-1.0
 
 integration:

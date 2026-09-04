@@ -41,9 +41,10 @@
  *
  * The HE-side application lives at
  * `examples/multicore/mproc-mailbox/peer/main.c`.  Both halves build
- * standalone today; sysbuild glue that builds them in one
- * `west build` invocation lands alongside the v0.4 dual-image
- * flow in `alplabai/alp-zephyr-modules`.
+ * standalone via `west build`, and `board.yaml` declaring both
+ * `m55_hp` and `m55_he` as real project cores means one `tan build`
+ * already produces both images through the orchestrator's existing
+ * multi-slice path -- no sysbuild involved.
  */
 
 #include <stdio.h>

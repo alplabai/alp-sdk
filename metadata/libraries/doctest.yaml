@@ -2,21 +2,26 @@
 # manifest for the legacy per-core token `doctest`).
 #
 # Grounding (this checkout):
-#   * scripts/alp_project_emit/__init__.py:189 (_LIBRARY_KCONFIG) --
-#     "doctest: include path + doctest_config.h via the v0.4 loader
-#     hook" -- header-only, no real Zephyr Kconfig symbol.
+#   * header-only, no real Zephyr Kconfig symbol -- wired via the v0.4
+#     CMake include-path loader hook (doctest_config.h) instead (see the
+#     "No `kconfig:`" note below).  This bullet used to cite
+#     `_LIBRARY_KCONFIG["doctest"]` in scripts/alp_project_emit/__init__.py;
+#     that per-library dict no longer exists anywhere under scripts/ (the
+#     alp_project_emit package itself does still exist, so the citation
+#     read as live rather than obviously dead).
 #   * west.yml:443-448 -- `name: doctest`, remote doctest-org, revision
 #     `v2.4.11`, path modules/lib/doctest, group `extras-cpp` (disabled
 #     by default; the build resolves against the vendored copy -- see
 #     vendors/doctest/README.md).
 #   * vendors/doctest/README.md -- MIT licence (LICENSE.txt upstream
 #     text unmodified); upstream https://github.com/doctest/doctest.
-#   * metadata/library-profiles/doctest/hw-backends.yaml -- pure-SW,
-#     no accelerator binding.
 #   * examples/testing/doctest-selftest/testcase.yaml -- built + run
 #     green on native_sim/native_sim/native/64.
 #
-# HW-backends: see metadata/library-profiles/doctest/ (folded in WS6-c Phase 3)
+# HW-backends: pure-SW, no accelerator binding -- see this manifest's
+# own `integration.zephyr.hw_backends:` block below (retired standalone
+# metadata/library-profiles/doctest/hw-backends.yaml folded in here in
+# WS6-c Phase 3; that directory still holds doctest_config.h).
 #
 # No `kconfig:` -- header-only, wired via the v0.4 CMake include-path
 # loader hook (doctest_config.h), not a CONFIG_ symbol; `module: doctest`

@@ -24,13 +24,14 @@
  * alp_ble_gatt_write() (conn-side), each of which can block up to a
  * caller-supplied timeout_ms on a real link-layer round-trip.
  * alp_ble_close() / alp_ble_disconnect() therefore drain their pool
- * with alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
- * instead of the busy-spin alp_handle_begin_close(): a sleep-poll
- * drain, generalised from rpc_dispatch.c's _rpc_op_enter()/
- * _rpc_begin_close()/_rpc_drain() (GHSA-xhm8), which is safe to wait
- * on a genuinely long-running op instead of spinning the closer
- * thread for the whole handshake. A racing close/disconnect can no
- * longer tear down state while one of these ops is in flight.
+ * with alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c):
+ * a sleep-poll drain (never busy-spins -- issue #1114: unsafe
+ * unconditionally, not just for a long-running op), generalised from
+ * rpc_dispatch.c's _rpc_op_enter()/_rpc_begin_close()/_rpc_drain()
+ * (GHSA-xhm8), which is safe to wait on a genuinely long-running op
+ * instead of spinning the closer thread for the whole handshake. A
+ * racing close/disconnect can no longer tear down state while one of
+ * these ops is in flight.
  *
  * @par Issue #756 -- callback self-close inside alp_ble_scan_start()
  * The CC3501E backend's scan_start op runs the scan to completion and
@@ -48,6 +49,28 @@
  * this function's own post-op check) from a genuine cross-thread close
  * (unchanged: block and drain, same as before).  Public re-entry
  * guarantees are documented on alp_ble_scan_cb_t in include/alp/ble.h.
+ *
+ * @par Issue #1118 -- repeated alp_ble_open() must join the singleton
+ * <alp/ble.h> documents alp_ble_open() as returning the SAME pointer on
+ * every call (BLE is a system singleton) and alp_ble_close() as only
+ * tearing the controller down on the last matching close.  _alloc_radio()
+ * is a plain pool allocator with no notion of "already open" -- with the
+ * default pool size of 1, a second open() used to find the slot claimed
+ * and surface ALP_ERR_NOMEM instead of the same pointer.  alp_ble_open()
+ * now first tries to JOIN an already-open radio via an atomic
+ * increment-if-nonzero on struct alp_ble::refcount, falling back to
+ * _alloc_radio() (a genuine first open) only when no joinable radio
+ * exists; alp_ble_close() decrement-and-checks the same counter and only
+ * runs ops->close()/frees the slot when it was the last reference.  The
+ * increment-if-nonzero / decrement-and-check-last pair is deliberately
+ * NOT gated through the lifecycle byte the way op_enter/op_leave are --
+ * doing that would let a joiner "resurrect" a handle a closer has
+ * already committed to tearing down (the closer decrements to 0, THEN
+ * transitions lifecycle to CLOSING; a lifecycle-gated joiner could slip
+ * in between and receive a pointer to a handle mid-teardown). A CAS-loop
+ * that only ever increments a refcount still visibly nonzero cannot
+ * succeed once a decrement to zero has already committed -- see
+ * alp_ble_open()/alp_ble_close() below.
  */
 
 #include <stdbool.h>
@@ -117,13 +140,150 @@ static void _free_conn(struct alp_ble_conn *h)
 	alp_slot_release(&h->in_use);
 }
 
+/* Issue #1697 (and its #1644 self-close-path gap): tear down every surviving
+ * connection on radio `h` BEFORE the controller goes away. alp_ble_connect()
+ * stores a raw back-pointer (`c->state.radio = h`), so a conn slot left
+ * in_use here outlives the radio it points at, and the next _alloc_radio()
+ * recycles that slot under it.
+ *
+ * Force-disconnect rather than refusing the close: every other
+ * alp_*_close() in this tree returns void, so there is no channel to report
+ * a refusal, and diverging here would be an API change (the two options are
+ * spelled out in #1697).
+ *
+ * alp_ble_disconnect() IS this pool's teardown op, so call it rather than
+ * open-coding the sequence -- it already does the #629 sleep-poll drain,
+ * the backend disconnect, the lifecycle reset and _free_conn(), and returns
+ * ALP_ERR_NOT_READY on a lost CAS when another thread is already tearing
+ * that same conn down. Its status is deliberately discarded: close() is
+ * infallible by contract, and a peer link that is already gone is exactly
+ * the state we want.
+ *
+ * Ordering (both call sites): call this AFTER the op drain (no new connect
+ * can be admitted past it) and BEFORE ops->close(), because the backend
+ * disconnect needs a live controller. Factored out of alp_ble_close() so
+ * the external-close and self-close (alp_ble_scan_start()'s deferred-close
+ * branch) paths cannot drift apart again -- #1644 was exactly that drift:
+ * #1697 added this walk to alp_ble_close() only, leaving the self-close
+ * path with dangling conn->state.radio back-pointers. */
+static void _disconnect_radio_conns(struct alp_ble *h)
+{
+	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_BLE_CONN_HANDLES; ++i) {
+		struct alp_ble_conn *c = &_conn_pool[i];
+		if (alp_slot_is_claimed(&c->in_use) && c->state.radio == h) {
+			(void)alp_ble_disconnect(c);
+		}
+	}
+}
+
 /* ================================================================== */
 /* Radio-side dispatch                                                 */
 /* ================================================================== */
 
+/* issue #1118: increment-if-nonzero join of an already-open singleton --
+ * see this file's "Issue #1118" header comment for why this is a
+ * standalone CAS-loop on refcount alone rather than routed through
+ * alp_handle_op_enter()'s lifecycle-gated counting. Returns true (h now
+ * holds one more reference) or false (refcount was already 0: h is
+ * unopened, or a close() has already committed to tearing it down --
+ * caller must not touch h and should try the next slot / open fresh). */
+static bool _radio_try_join(struct alp_ble *h)
+{
+	uint32_t cur = __atomic_load_n(&h->refcount, __ATOMIC_ACQUIRE);
+	do {
+		if (cur == 0u) return false;
+	} while (!__atomic_compare_exchange_n(
+	    &h->refcount, &cur, cur + 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+	return true;
+}
+
+/* issue #1118 round-2 dev review: decrement-if-nonzero, the release
+ * half of _radio_try_join() above. alp_ble_close() used to
+ * unconditionally __atomic_fetch_sub() refcount, which underflows to
+ * ~0u on a double/stray close (against <alp/ble.h>'s "second close on
+ * an already-closed handle is a safe no-op" contract) -- and a
+ * corrupted, large-nonzero refcount is exactly what could let a
+ * concurrent alp_ble_open()'s _radio_try_join() "join" a handle that
+ * is mid-teardown (in_use still true, real refcount already 0), the
+ * resurrection this file's #1118 header comment says the
+ * increment-if-nonzero design must prevent. Mirroring _radio_try_join()
+ * as a CAS loop means a close on an already-0 refcount touches nothing
+ * and simply reports "not mine to tear down".
+ * @return true if THIS call was the one that decremented refcount from
+ *         1 to 0 (caller now owns the teardown); false if refcount was
+ *         already 0 (no-op) or is still >0 after decrementing (another
+ *         reference is still live). */
+static bool _radio_try_leave(struct alp_ble *h)
+{
+	uint32_t cur = __atomic_load_n(&h->refcount, __ATOMIC_ACQUIRE);
+	do {
+		if (cur == 0u) return false;
+	} while (!__atomic_compare_exchange_n(
+	    &h->refcount, &cur, cur - 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+	return cur == 1u;
+}
+
 alp_ble_t *alp_ble_open(void)
 {
 	alp_z_clear_last_error();
+
+	/* Issue #1118: BLE is a documented singleton -- try to join an
+	 * already-open radio before claiming a fresh pool slot.
+	 *
+	 * Round-2 dev review: the first cut of this fix stopped here after
+	 * one scan, so a SECOND alp_ble_open() racing the FIRST one's
+	 * in-flight open() saw the exact TOCTOU window this function's
+	 * own opener creates -- _alloc_radio() below claims the slot
+	 * (in_use = true) before ops->open() runs, and refcount is not
+	 * published until ops->open() succeeds. A racing scan in that
+	 * window reads in_use == true (so it can't _alloc_radio() a "free"
+	 * slot) and refcount == 0 (so _radio_try_join() declines) -- with
+	 * the default size-1 pool that is every slot, so the racer fell
+	 * through to _alloc_radio() and got NULL / ALP_ERR_NOMEM instead of
+	 * the singleton pointer <alp/ble.h> documents. The same in_use==true
+	 * / refcount==0 shape also occurs, briefly, while alp_ble_close()
+	 * below is mid-teardown (refcount already decremented to 0, in_use
+	 * not yet released) -- a slot in THAT window must not be joined
+	 * (the closer already committed to tearing it down) but a fresh
+	 * alp_ble_open() must still eventually succeed once the close
+	 * finishes and releases the slot.
+	 *
+	 * Retry the scan with a real sleep between attempts (not a busy
+	 * spin -- same #1114 rationale: a spinning racer at equal-or-higher
+	 * priority than the opener/closer thread could starve it on
+	 * Zephyr's preemptive scheduler) until no slot is left in that
+	 * ambiguous "claimed but refcount says nothing yet" state, then
+	 * fall through to the normal join-scan-once-more/allocate path
+	 * below. With the default 1-entry pool this always resolves the
+	 * single slot one way or the other; a larger pool may wait on a
+	 * pending slot even when a different slot is already free to
+	 * allocate -- correct, just not maximally concurrent (not worth the
+	 * added complexity for a pool this SDK only ever configures to 1
+	 * today). */
+	for (;;) {
+		bool pending = false;
+		for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_BLE_HANDLES; ++i) {
+			struct alp_ble *h = &_radio_pool[i];
+			if (!__atomic_load_n(&h->in_use, __ATOMIC_ACQUIRE)) {
+				continue;
+			}
+			if (_radio_try_join(h)) {
+				return h;
+			}
+			/* in_use but refcount==0: either another thread's open() is
+			 * still running (will publish refcount, or release in_use
+			 * on failure) or another thread's close() is mid-teardown
+			 * (will release in_use). Either way, this slot's state is
+			 * not final yet -- keep waiting on it rather than treating
+			 * the pool as full. */
+			pending = true;
+		}
+		if (!pending) {
+			break;
+		}
+		alp_slot_sleep_tick();
+	}
+
 	const alp_backend_t *be = alp_backend_select("ble", ALP_SOC_REF_STR);
 	if (be == NULL) {
 		alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
@@ -149,6 +309,10 @@ alp_ble_t *alp_ble_open(void)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	/* First (and, until now, only) reference. Publish refcount before
+	 * lifecycle so a racing joiner's increment-if-nonzero CAS can only
+	 * ever see a fully-populated handle once it observes refcount != 0. */
+	__atomic_store_n(&h->refcount, 1u, __ATOMIC_RELEASE);
 	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
@@ -156,6 +320,18 @@ alp_ble_t *alp_ble_open(void)
 void alp_ble_close(alp_ble_t *h)
 {
 	if (h == NULL) return;
+	/* Issue #1118: decrement-and-check-last via _radio_try_leave()
+	 * (round-2 dev review: NOT a plain unconditional fetch_sub -- see
+	 * that function's doc comment for why an unconditional decrement
+	 * underflows on a double/stray close). Any reference but the last
+	 * just drops its count and returns; only the caller that observes
+	 * the count reaching 0 proceeds to actually tear the controller
+	 * down. A stray extra close() past the true last reference reads
+	 * refcount already 0 and no-ops without touching it, preserving the
+	 * existing "second/never-opened close no-ops" contract. */
+	if (!_radio_try_leave(h)) {
+		return;
+	}
 	/* Self-close-aware sleep-poll drain (issues #629/#756): this pool
 	 * counts alp_ble_connect(), which can block up to its caller's
 	 * timeout_ms, so a normal (external) close sleeps between polls
@@ -178,6 +354,13 @@ void alp_ble_close(alp_ble_t *h)
 	if (mode == ALP_HANDLE_CLOSE_DEFERRED) {
 		return;
 	}
+	/* Issue #1697/#1644: tear down this radio's surviving connections
+	 * BEFORE the controller goes away -- see _disconnect_radio_conns()'s
+	 * doc comment for the full rationale and the ordering contract (after
+	 * the drain above, before ops->close() below). Factored into a shared
+	 * helper so this external-close path and alp_ble_scan_start()'s
+	 * deferred self-close path cannot drift apart again. */
+	_disconnect_radio_conns(h);
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}
@@ -281,7 +464,7 @@ alp_status_t alp_ble_gatt_notify(alp_ble_t            *h,
 	 * h-before-conn order cannot deadlock. */
 	if (conn == NULL || !alp_handle_op_enter(&conn->lifecycle, &conn->active_ops)) {
 		alp_handle_op_leave(&h->active_ops);
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	alp_status_t rc;
 	if (payload == NULL && len > 0) {
@@ -341,6 +524,12 @@ alp_status_t alp_ble_scan_start(alp_ble_t *h, bool active, alp_ble_scan_cb_t cb,
 		 * thread the unique owner of this handle's close -- safe to
 		 * drain (any OTHER concurrent op) and tear down now. */
 		alp_handle_drain_blocking(&h->active_ops);
+		/* #1644: this deferred self-close path used to skip the conn-pool
+		 * walk entirely, leaving every c->state.radio back-pointer
+		 * dangling at a recycled radio slot once _free_radio() below
+		 * ran. Same ordering contract as alp_ble_close(): after the
+		 * drain, before ops->close() -- see _disconnect_radio_conns(). */
+		_disconnect_radio_conns(h);
 		if (h->state.ops != NULL && h->state.ops->close != NULL) {
 			h->state.ops->close(&h->state);
 		}
@@ -372,11 +561,10 @@ alp_status_t alp_ble_connect(alp_ble_t            *h,
 {
 	/* Counted via alp_handle_op_enter/leave -- see this file's "Issue
 	 * #629" header comment. connect() can block up to timeout_ms on a
-	 * real link-layer handshake; alp_ble_close() now drains this op
-	 * with the sleep-poll alp_handle_begin_close_blocking() instead of
-	 * the busy-spin alp_handle_begin_close(), so counting a
-	 * long-running op here no longer risks spinning the closer thread
-	 * for the whole handshake. */
+	 * real link-layer handshake; alp_ble_close() drains this op with
+	 * the sleep-poll alp_handle_begin_close_blocking() (never a
+	 * busy-spin), so counting a long-running op here does not risk
+	 * spinning the closer thread for the whole handshake. */
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}

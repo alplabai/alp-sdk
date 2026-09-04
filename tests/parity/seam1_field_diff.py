@@ -7,13 +7,15 @@ ADR-0020 (alp-sdk#855 amendment) requires a two-seam parity gate before the
 parity -- does a live `--emit build-plan` from the alp-sdk checkout under test
 still match the frozen oracle's command / env / appDir / skip-fail-decision
 shape, field for field? Seam 2 (materialise byte-check + a real build + a
-Renode smoke test) is a documented follow-up that needs a Linux toolchain
-runner -- see `tests/parity/README.md` and the `seam2` placeholder job in
-`.github/workflows/parity.yml`.
+Renode smoke test) is not seeded in alp-sdk -- see `tests/parity/README.md`;
+alp-sdk has no job for it. It IS implemented on the tan-cli side: tan-cli's
+own `.github/workflows/parity.yml` `seam2` job runs `tan build --materialise`,
+a real `west`/Zephyr build through `tan build`, and a Renode boot smoke test
+against alp-sdk's pinned tag.
 
 Seam-1 deliberately does NOT compare the materialised config-artefact
 CONTENT (`slices[*].configArtefacts[*].contents` / `sharedArtefacts[*].
-contents` -- the rendered alp.conf/local.conf/cmake-args.txt/DTS-overlay/
+contents` -- the rendered alp.conf/local.conf/DTS-overlay/
 sysbuild-conf bytes each slice carries): that content is covered
 byte-for-byte by `tests/fixtures/emit-snapshots/*.{build-plan,zephyr-conf}.
 snap` (every oracle board has a corresponding emit-snapshot case -- see
@@ -59,8 +61,10 @@ PR #24, substitutes them at materialise time). The frozen 97ad481b oracle
 predates that and stays absolute -- `normalize_plan` reconciles the two
 shapes onto the same normalized form; see its docstring for the mapping.
 
-The ONLY semantic delta allowed to pass without failing the gate is
-``slices[*].debug.probe`` going from ``"openocd"`` (the oracle, at 97ad481b)
+Three hand-reviewed deltas are allowed to pass without failing the gate.
+
+The first is ``slices[*].debug.probe`` going from ``"openocd"`` (the oracle,
+at 97ad481b)
 to ``null`` (df312cec and later). That is #848's hand-reviewed, intentional
 change: the SDK-side executor named a debug-probe runner because it drove
 `west`/OpenOCD itself; post-ADR-0020 the SDK doesn't own flashing at all, so
@@ -68,9 +72,28 @@ change: the SDK-side executor named a debug-probe runner because it drove
 picks the probe. `debug.probe` moving to `null` is a downgrade to "SDK is not
 claiming" and not a hidden capability loss. See ADR-0020's Amendment: "the
 only 97ad481b<->df312cec emit delta is `debug.probe` 'openocd'->null,
-hand-reviewed." Any OTHER diff -- a changed command, a changed env value, a
-changed slice count, a probe change to anything other than that exact
-openocd->null transition -- FAILS the gate.
+hand-reviewed."
+
+The second is the pair of keys the oracle predates entirely --
+``slices[*].postCommands`` and ``slices[*].artifacts.outputDir``, added by
+#1344 (alplabai/tan-cli#550) -- and ONLY where the live plan carries their
+inert non-baremetal default (``[]`` and ``null``). See
+``_ALLOWED_ADDITIVE_KEYS`` for why that allowance is keyed on the exact
+value and not on "the oracle didn't have this key" alone.
+
+The third is a zephyr slice's six ``artifacts`` paths gaining the
+``build/`` level ``west build`` actually writes -- ``<buildDir>/zephyr/
+zephyr.elf`` (oracle) to ``<buildDir>/build/zephyr/zephyr.elf`` (live),
+alp-sdk #1360. The oracle's spelling names a file west never creates: the
+slice's ``command`` runs with cwd=``buildDir`` and no ``-d``, so west
+appends its own default ``build`` level. Allowed ONLY for the six named
+fields and ONLY for that exact one-segment insertion -- see
+``_NESTED_ARTIFACT_TAILS``.
+
+Any OTHER diff -- a changed command, a changed env value, a changed slice
+count, a probe change to anything other than that exact openocd->null
+transition, a new key with any other value, an artifact path that moved
+anywhere but that one ``build/`` level -- FAILS the gate.
 """
 
 from __future__ import annotations
@@ -93,6 +116,58 @@ _PYEXE_ARG_RE = re.compile(r"^-DPython3_EXECUTABLE=.*$")
 # debug.probe "openocd" (oracle, 97ad481b) -> null (df312cec+, #848).
 _ALLOWED_OLD_PROBE = "openocd"
 _ALLOWED_NEW_PROBE = None
+
+# The second hand-reviewed allowance: two keys the 97ad481b oracle predates
+# entirely, added by alp-sdk PR #1344 (alplabai/tan-cli#550) so a baremetal
+# slice can no longer report success without building anything.  On every
+# NON-baremetal slice both keys carry an INERT default -- `postCommands`
+# `[]` (`west build`/`bitbake` configure AND build in one invocation, so
+# there is no follow-up step) and `artifacts.outputDir` `null` (a zephyr
+# slice's five named artifact paths already index its output; a yocto
+# slice's image lands outside the slice's build dir).  All five oracle
+# boards are zephyr/yocto only, so this is the entire live-vs-oracle delta
+# they produce.
+#
+# Deliberately keyed on BOTH the exact field path AND the exact inert
+# value, not a blanket "oracle `<missing>` -> falsy live value is fine":
+# a blanket additive rule would let ANY future key through as long as its
+# first emitted value happened to be empty, which is the opposite of what
+# this comparator exists for.  A baremetal slice's non-inert values (a real
+# `cmake --build .` step, a real `<buildDir>/output`) therefore still FAIL
+# here -- correctly: the frozen oracle emitted no build step at all, so a
+# live plan that carries one against an oracle board is an unreviewed
+# shape delta a human has to look at.
+# KEEP IN LOCKSTEP with tan-cli's vendored copy of this comparator.
+_ALLOWED_ADDITIVE_KEYS = {
+    "postCommands":          [],
+    "artifacts.outputDir":   None,
+}
+_ADDITIVE_SLICE_RE = re.compile(r"^slices\[\d+\]\.(.+)$")
+
+# The third hand-reviewed allowance: alp-sdk #1360.  The 97ad481b oracle
+# emitted a zephyr slice's artifact paths WITHOUT the `build/` level that
+# `west build` -- run with cwd=<buildDir> and no `-d` -- actually creates,
+# so the frozen oracle names files west never wrote.  The live planner now
+# reports the real `<buildDir>/build/...` paths.  This is a CHANGED value,
+# not an additive key, so it needs its own gate rather than riding
+# `_ALLOWED_ADDITIVE_KEYS`.
+#
+# Keyed on the exact field path AND the exact one-segment transformation:
+# each artifact has a fixed tail (Zephyr's own CMake layout picks the
+# names, not this planner), the oracle value must end in that tail, and
+# the live value must be the oracle value with exactly one `build/`
+# inserted immediately before it.  A path that moved anywhere else, gained
+# two levels, or changed filename still FAILS -- which is the point: this
+# allows the one reviewed relocation, not "artifact paths may drift".
+# KEEP IN LOCKSTEP with tan-cli's vendored copy of this comparator.
+_NESTED_ARTIFACT_TAILS = {
+    "artifacts.elf":             "zephyr/zephyr.elf",
+    "artifacts.map":             "zephyr/zephyr.map",
+    "artifacts.bin":             "zephyr/zephyr.bin",
+    "artifacts.sizeReport":      "zephyr/zephyr.stat",
+    "artifacts.symbols":         "zephyr/zephyr.symbols",
+    "artifacts.compileCommands": "compile_commands.json",
+}
 
 
 class ComparatorError(RuntimeError):
@@ -299,6 +374,49 @@ def _walk_diff(path: str, old: Any, new: Any) -> Iterator[tuple[str, Any, Any]]:
         yield (path, old, new)
 
 
+def _is_allowed_additive(path: str, old: Any, new: Any) -> bool:
+    """True for an oracle-predates-it key whose live value is its exact
+    inert default -- see `_ALLOWED_ADDITIVE_KEYS`.
+
+    Requires ALL THREE to line up: the oracle really has no such key
+    (`<missing>`, not a changed value), the path is one of the named
+    per-slice keys, and the live value is that key's documented inert
+    default.  Anything else -- a different key, a different value, an
+    oracle that DID carry the key -- falls through to `failing`.
+    """
+    if old != "<missing>":
+        return False
+    m = _ADDITIVE_SLICE_RE.match(path)
+    if m is None:
+        return False
+    key = m.group(1)
+    if key not in _ALLOWED_ADDITIVE_KEYS:
+        return False
+    return new == _ALLOWED_ADDITIVE_KEYS[key]
+
+
+def _is_allowed_west_nesting(path: str, old: Any, new: Any) -> bool:
+    """True for a zephyr artifact path that gained exactly the one `build/`
+    level west writes -- see `_NESTED_ARTIFACT_TAILS` (alp-sdk #1360).
+
+    Requires ALL of: the path is one of the six named per-slice artifact
+    fields, both sides are strings, the oracle value ends in that field's
+    fixed Zephyr tail, and the live value is the oracle value with exactly
+    one `build/` segment inserted immediately before that tail.
+    """
+    m = _ADDITIVE_SLICE_RE.match(path)
+    if m is None:
+        return False
+    tail = _NESTED_ARTIFACT_TAILS.get(m.group(1))
+    if tail is None:
+        return False
+    if not isinstance(old, str) or not isinstance(new, str):
+        return False
+    if not old.endswith("/" + tail):
+        return False
+    return new == old[:-len(tail)] + "build/" + tail
+
+
 def diff_plans(oracle: dict, live: dict) -> tuple[list[tuple[str, Any, Any]], list[tuple[str, Any, Any]]]:
     """Split the normalized diff into (allowed, failing) delta lists."""
     allowed: list[tuple[str, Any, Any]] = []
@@ -307,6 +425,10 @@ def diff_plans(oracle: dict, live: dict) -> tuple[list[tuple[str, Any, Any]], li
         is_probe_field = path.endswith(".debug.probe")
         if (is_probe_field and old == _ALLOWED_OLD_PROBE
                 and new == _ALLOWED_NEW_PROBE):
+            allowed.append((path, old, new))
+        elif _is_allowed_additive(path, old, new):
+            allowed.append((path, old, new))
+        elif _is_allowed_west_nesting(path, old, new):
             allowed.append((path, old, new))
         else:
             failing.append((path, old, new))
@@ -377,7 +499,7 @@ def run(sdk: Path, oracle_dir: Path, boards: list[str]) -> bool:
                 print(f"    {path}: oracle={old!r} live={new!r}")
             all_ok = False
         else:
-            note = f" ({len(allowed)} allowed debug.probe delta)" if allowed else ""
+            note = f" ({len(allowed)} allowed delta)" if allowed else ""
             print(f"PASS {board}{note}")
         for path, old, new in allowed:
             print(f"    (allowed) {path}: oracle={old!r} live={new!r}")

@@ -26,7 +26,8 @@ on `native_sim` and real silicon.
   `vendors/minimp3/README.md`); we silence it locally rather than
   patch vendored, verbatim upstream source.
 * `libraries: [minimp3]` in `board.yaml` -- wires the Kconfig knobs
-  in `metadata/library-profiles/minimp3/hw-backends.yaml` (Helium
+  from the `integration.zephyr.hw_backends:` block in
+  `metadata/libraries/minimp3.yaml` (Helium
   MVE / Neon / FPU SIMD backends selected by SoM capability; pure-C
   is always the floor). None of those backends change this example's
   behavior since we never touch real hardware, but any app that goes
@@ -71,7 +72,7 @@ west build -b native_sim/native/64 examples/audio/minimp3-decode \
 west build -t run
 
 # On real silicon, point -b at the SoM's Zephyr board target.
-west build -b alp_e1m_aen801_m55_hp examples/audio/minimp3-decode
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/audio/minimp3-decode
 west flash
 ```
 

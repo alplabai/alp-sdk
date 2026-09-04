@@ -27,7 +27,7 @@ Top-level fields:
 | `cores`          | yes      | Per-core app + library/peripheral knobs.  Each core's `os:` is optional; the SoM topology supplies the natural runtime per core class (Cortex-M → Zephyr, Cortex-A → Yocto). |
 | `ipc`            | no       | Cross-core IPC carve-outs (rpmsg / raw_shmem / mailbox_only). |
 | `chips`          | no       | Project-level chip drivers beyond what the board ships.     |
-| `libraries`      | no       | Curated third-party libraries (ADR 0018).  One top-level list, each entry a `{name, cores?}` object (or a bare name as shorthand for a project-wide `{name}`), e.g. `[{name: lvgl}, {name: cmsis-dsp, cores: [m33_sm]}]`.  `name` resolves to a manifest under `metadata/libraries/<name>.yaml`; omit `cores:` for a project-wide selection or list core ids to scope it.  The orchestrator emits the per-OS wiring and rejects an incompatible selection at emit time.  See [`libraries` (ADR 0018)](#libraries-project-wide-adr-0018) below. |
+| `libraries`      | no       | Curated third-party libraries (ADR 0018).  One top-level list, each entry a `{name, cores?}` object (or a bare name as shorthand for a project-wide `{name}`), e.g. `[{name: lvgl}, {name: cmsis-dsp, cores: [m33_sm]}]`.  `name` resolves to a manifest under `metadata/libraries/<name>.yaml`; omit `cores:` for a project-wide selection or list core ids to scope it.  The planner emits the per-OS wiring and rejects an incompatible selection at emit time.  See [`libraries` (ADR 0018)](#libraries-project-wide-adr-0018) below. |
 | `diagnostics`    | no       | `alp_last_error()` + log level.                               |
 
 *Either `preset:` (preset mode) or inline `name:` + `populated:` +
@@ -42,6 +42,7 @@ the SoM preset's `topology.<id>` when omitted):
 | `app`          | App source dir.  Required for `os: zephyr` / `os: baremetal`.  For `os: yocto` an app-only slice, pair with `recipe:` -- `app:` is a source path, never a bitbake target. |
 | `image`        | Yocto image recipe name (e.g. `alp-image-edge`).  Takes priority over `app:`/`recipe:` when both are set. |
 | `recipe`       | Yocto bitbake recipe packaging this slice's `app:` (e.g. `alp-lvgl-dashboard`).  Required for an app-only `os: yocto` slice -- otherwise the plan blocks the slice (`yocto-recipe-missing`) instead of emitting an invalid `bitbake <path>`. |
+| `toolchain`    | Override this slice's toolchain identifier (e.g. `llvm`), replacing the SoM preset's derived default (`arm-zephyr-eabi` for Zephyr, `poky-glibc` for Yocto).  Optional -- omitted keeps today's default.  Passed through verbatim into `--emit build-plan`'s `slices[].toolchain.id`/`system-manifest.yaml`'s `slices[].toolchain`. |
 | `os`           | NOT an OS picker — the runtime is class-derived (M→Zephyr, A→Yocto). Only `off` (skip slice) or `baremetal` (rare) are settable; a cross-class OS is rejected. |
 | `peripherals`  | Zephyr subsystem / Yocto package list for this slice.                                  |
 | `inference`    | App-level inference tuning (`default_arena_kib` only — backend set is silicon-driven). |
@@ -160,10 +161,14 @@ som:
                             # `default_hw_rev`.  Validated at build
                             # time against the family hw_revisions
                             # table (see board-config-hardware.md);
-                            # at runtime the SDK reads the
-                            # rev from the on-module BOARD_ID ADC +
-                            # resistor divider and aborts boot on
-                            # mismatch.
+                            # at runtime the app can compare it
+                            # against the on-module EEPROM manifest
+                            # via `alp_hw_info_assert_matches_build()`
+                            # -- mismatch handling (typically halt)
+                            # is the app's call, not automatic.
+                            # There is no SoM-side ADC cross-check; a
+                            # carrier BOARD_ID divider is a separate
+                            # path.
 
   overrides:                # rare -- only for custom SoM variants
     secure_element: none    # custom AEN without the OPTIGA Trust M
@@ -239,7 +244,7 @@ for the board-side C macros hand-written firmware uses
 entry binds an E1M-standard pad or peripheral instance
 (`ALP_E1M_GPIO_IO<N>`, `ALP_E1M_PWM<N>`, `ALP_E1M_I2C0/1` / `ALP_E1M_SPI0/1` /
 `ALP_E1M_UART0/1` / `ALP_E1M_I3C0`) to a board-side macro plus optional
-`doc:` / `active_low:` / `routes_via:` flags.
+`doc:` / `active_low:` / `pull:` / `debounce_ms:` / `board_alias:` flags.
 [`scripts/gen_board_header.py`](../scripts/gen_board_header.py)
 reads the block and emits `include/alp/boards/alp_<name>_routes.h`
 with one `#define <MACRO> ALP_E1M_<…>` line per entry.
@@ -247,7 +252,7 @@ with one `#define <MACRO> ALP_E1M_<…>` line per entry.
 #### Preset mode (SDK-internal shortcut)
 
 Most example projects under `examples/` target the EVK or X-EVK
-(66 do today — 46 on `e1m-evk`, 20 on `e1m-x-evk`), so they share a
+(99 do today — 74 on `e1m-evk`, 25 on `e1m-x-evk`), so they share a
 single board definition each via the `preset:` field:
 
 ```yaml
@@ -259,6 +264,16 @@ supplies `name`, `populated`, `e1m_routes`, `default_hw_rev`,
 and `hw_revisions` wholesale.  When `preset:` is set, top-level
 `name:`, `populated:`, `e1m_routes:` are forbidden -- the schema
 rejects mixing.
+
+A preset file may also carry `i2c_devices:` (on-board I2C device
+addresses, and for power-monitor chips their shunt/max-current
+calibration) and `overlay_pins:` (board-repurposed pads exposed
+past the standard E1M pinout to an `alp,pin-array` devicetree
+overlay).  These aren't part of the customer-facing `board.yaml`
+schema -- `scripts/gen_board_header.py` reads them straight from
+the preset YAML and emits their macros into the generated
+`alp_<preset>_routes.h` alongside the `e1m_routes:` ones.  See
+`metadata/boards/e1m-evk.yaml` for a worked example of both.
 
 `preset:` is a shortcut for the SDK's own demos; customer
 projects don't need it -- the inline form keeps your `board.yaml`
@@ -383,8 +398,10 @@ or not-yet-final SKUs carry `partial_hw_config: true` so
 the loader knows to expect SKU-specific overrides from the
 consumer's `board.yaml`.  Per the project memory note, values
 not in the silicon datasheet stay `TBD` (e.g.
-`board_id.adc_channel` in family-level `hw-revisions.yaml`)
-until the user supplies them authoritatively.
+`board_id.adc_channel` in the *board* preset's `hw_revisions:`
+entry -- `metadata/boards/e1m-evk.yaml`, not the SoM's
+`metadata/e1m_modules/` family file) until the user supplies them
+authoritatively.
 
 ### `libraries` block (user-facing, no wrapper)
 
@@ -522,7 +539,7 @@ Each name resolves to a manifest at
 [`metadata/libraries/<name>.yaml`](../metadata/libraries/) — the single
 source of truth for that library's per-OS wiring, pinned upstream
 version, SPDX licence, curation tier, and compatibility constraints.
-The orchestrator emits the wiring through the ordinary `--emit`
+The planner emits the wiring through the ordinary `--emit`
 contract (ADR 0014): the library's Kconfig symbols land in each Zephyr
 slice's `alp.conf`, its `IMAGE_INSTALL` entries in each Yocto slice's
 `local.conf`, its CMake pin in each baremetal slice's args. Selecting a
@@ -536,18 +553,34 @@ Two curation tiers bound CI cost (ADR 0018):
   release.
 - **Tier B — recipe-only**: wiring + compatibility metadata are
   maintained and emitted, but the library is not built in alp-sdk CI.
-  `python -m alp_cli doctor` labels it.
+  `tan doctor` labels it.
 
-`python -m alp_cli doctor` reports the selected libraries for the
-project in scope (tier + licence + compatibility), reading the same
-manifests, so the CLI and alp-studio's library picker never disagree.
-(This is alp-sdk's own Python preflight, distinct from `tan doctor` --
-see [`docs/cli.md`](cli.md).)
+`tan doctor` reports the selected libraries for the project in scope
+(tier + licence + compatibility), reading the same manifests, so the CLI
+and alp-studio's library picker never disagree. See
+[`docs/cli.md`](cli.md).
 
 Scoping a library to specific cores (`cores: [<id>]`) folds in what
 earlier schema drafts spelled as a separate per-core
 `cores.<id>.libraries:` token list — there is now one library
-declaration, manifest-driven, and the per-core list is gone.  The
+declaration, manifest-driven, and the per-core list is gone.  A
+core-scoped entry goes through exactly the same layer as a project-wide
+one — the same unknown-name refusal, the same `requires:` checks, and
+the same manifest-sourced wiring.  In particular its Yocto packages come
+from that manifest's `integration.yocto.image_install:` and nowhere
+else; a library whose manifest declares no `integration.yocto:` section
+contributes nothing to `IMAGE_INSTALL`, and the generated `local.conf`
+says so in a comment.
+
+`cores:` is also *stricter* than a project-wide selection, deliberately.
+A project-wide `libraries: [ros2]` on a Yocto-A55 + Zephyr-M33 board is
+fine — it simply wires on the A55.  Naming a core is a positive
+instruction to wire it *there*, so the entry's `requires.os:` and
+`requires.core_class:` are re-checked against that one core and a
+mismatch is refused naming the constraint: `libraries: [{name: ros2,
+cores: [m33_sm]}]` fails with ``library `ros2` is scoped to core
+`m33_sm` (os `zephyr`) but requires os ['yocto']`` instead of resolving
+to nothing.  The
 compile-time config headers under `metadata/library-profiles/<lib>/`
 (e.g. `etl_profile.h`, `lv_conf.h`) still tune each library for the
 SDK's invariants; the HW-backend accelerator model is folded into each
@@ -602,4 +635,3 @@ hidden:
   [ADR 0016](adr/0016-cross-core-peripheral-proxy-wire-schema.md)) is
   bench-gated and out of scope for the manifests — it is its own
   design.
-

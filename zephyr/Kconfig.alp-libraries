@@ -3,11 +3,11 @@
 # Per-library + per-backend Kconfig symbols emitted by the
 # §D.lib.loader cross-library HW-backend loader hook in
 # scripts/alp_project.py.  Each enabled library's
-# metadata/library-profiles/<name>/hw-backends.yaml names accelerator
-# *classes* (not vendor parts) -- the loader cross-references those
-# against the active SoM family and emits the highest-priority
-# matching `CONFIG_ALP_<LIB>_<BACKEND>=y` knob.  Every library has a
-# pure-SW fallback that is always available.
+# `integration.zephyr.hw_backends:` block in metadata/libraries/<name>.yaml
+# names accelerator *classes* (not vendor parts) -- the loader
+# cross-references those against the active SoM family and emits the
+# highest-priority matching `CONFIG_ALP_<LIB>_<BACKEND>=y` knob.  Every
+# library has a pure-SW fallback that is always available.
 #
 # Sourced under `if ALP_SDK` from zephyr/Kconfig once the loader hook
 # is consumed downstream.  This file just declares the symbols.
@@ -52,7 +52,7 @@ config ALP_TFLM_ETHOS_U65
 	  Compile TFLite-Micro kernels against the Ethos-U65 NPU
 	  embedded in i.MX 93.  Same TFLM op-resolver as U55 / U85;
 	  Vela's `--accelerator-config ethos-u65-256` target.  The
-	  legacy `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y` knob is the
+	  legacy `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y` knob is the
 	  N93-specific driver shim that complements this kernel-level
 	  knob.
 
@@ -167,17 +167,8 @@ config ALP_MODBUS_SYNC_IO
 	default y
 
 # ----------------------------------------------------------------------
-# IoT libs (coremqtt_sn / libcoap / nanopb / libwebsockets /
-# jsmn / bearssl)
+# IoT libs (libcoap / nanopb / libwebsockets / jsmn / bearssl)
 # ----------------------------------------------------------------------
-
-config ALP_MQTTSN_MBEDTLS
-	bool "coreMQTT-SN with mbedTLS"
-config ALP_MQTTSN_BEARSSL
-	bool "coreMQTT-SN with BearSSL"
-config ALP_MQTTSN_NO_TLS
-	bool "coreMQTT-SN without TLS (SW fallback)"
-	default y
 
 config ALP_COAP_MBEDTLS
 	bool "libcoap with mbedTLS DTLS"

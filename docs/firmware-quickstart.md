@@ -1,8 +1,8 @@
 # Firmware engineer quickstart
 
-This guide takes a firmware engineer from "I have an E1M-X module
-on the bench" to a working application built against the SDK.  It
-sits **alongside** the general [`docs/getting-started.md`](getting-started.md)
+This guide takes a firmware engineer from "I have an E1M or E1M-X
+module on the bench" to a working application built against the
+SDK.  It sits **alongside** the general [`docs/getting-started.md`](getting-started.md)
 walkthrough (which covers workspace setup + the gpio-button-led
 example end-to-end); this doc focuses on the choices and patterns
 that matter when you're targeting a specific SoM and writing
@@ -10,8 +10,8 @@ real firmware.
 
 ## Who this is for
 
-You're writing Zephyr or bare-metal C against an E1M-X System-on-
-Module (AEN, V2N, V2N-M1, or N93 family) and you want:
+You're writing Zephyr or bare-metal C against an E1M or E1M-X
+System-on-Module (AEN, V2N, V2N-M1, or N93 family) and you want:
 
 * A clear picture of what the SDK gives you per-SoM.
 * Idiomatic patterns for the on-module chips (PMICs, RTC, Wi-Fi/BT
@@ -29,19 +29,20 @@ own quickstart.
 
 ## 1. Pick a target
 
-| If your hardware is...                      | `som.sku` to declare | Board default     | One-pager                                         |
-|---------------------------------------------|----------------------|---------------------|---------------------------------------------------|
-| E1M-AEN3..801 SoM on E1M EVK                | `E1M-AEN801` (etc.)  | `E1M-EVK`           | [`docs/soms/aen.md`](soms/aen.md)                 |
-| E1M-X V2N101 / V2N102 SoM on E1M-X-EVK      | `E1M-V2N101`         | `E1M-X-EVK`         | [`docs/soms/v2n.md`](soms/v2n.md)                 |
-| E1M-X V2N-M1 (V2M101 / V2M102) SoM          | `E1M-V2M101`         | `E1M-X-EVK`         | [`docs/soms/v2n-m1.md`](soms/v2n-m1.md)           |
-| E1M-NX9101 (NXP i.MX 93)                    | `E1M-NX9101`         | `E1M-EVK`           | [`docs/soms/imx93.md`](soms/imx93.md)             |
+| If your hardware is...                      | `som.sku` to declare | Board default     | One-pager                                         | Bring-up doc | Reference examples |
+|---------------------------------------------|----------------------|---------------------|---------------------------------------------------|--------------|---------------------|
+| E1M-AEN3..801 SoM on E1M EVK                | `E1M-AEN801` (etc.)  | `E1M-EVK`           | [`docs/soms/aen.md`](soms/aen.md)                 | [`docs/bring-up-aen.md`](bring-up-aen.md) | `examples/peripheral-io/gpio-button-led`, `i2c-scanner`, `rtc-clock`, `hello-world` |
+| E1M-X V2N101 / V2N102 SoM on E1M-X-EVK      | `E1M-V2N101`         | `E1M-X-EVK`         | [`docs/soms/v2n.md`](soms/v2n.md)                 | [`docs/bring-up-v2n.md`](bring-up-v2n.md) | `examples/v2n/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `v2n-ethernet-dual`, `dac-waveform` |
+| E1M-X V2N-M1 (V2M101 / V2M102) SoM          | `E1M-V2M101`         | `E1M-X-EVK`         | [`docs/soms/v2n-m1.md`](soms/v2n-m1.md)           | [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) | DEEPX bring-up delta on top of V2N |
+| E1M-NX9101 (NXP i.MX 93)                    | `E1M-NX9101`         | `E1M-EVK`           | [`docs/soms/imx93.md`](soms/imx93.md)             | [`docs/getting-started.md`](getting-started.md) §4-5 | same cross-family examples as AEN |
 
 The per-SoM one-pager covers what's populated, which examples
 target it, the bring-up flow, and common gotchas.  The full
 per-SKU populated-parts list lives in
 [`metadata/e1m_modules/<SKU>.yaml`](../metadata/e1m_modules/);
-the loader reads this file at `tan build` time (via alp-sdk's
-`alp_orchestrate`) to decide which chip drivers to compile in.
+Python Tan reads this file at `tan build` time through its relocated planner to
+decide which chip drivers to compile in. alp-sdk's `alp_orchestrate` remains the
+reference/parity producer.
 
 ## 2. Workspace setup
 
@@ -50,24 +51,28 @@ If you haven't already, follow the workspace bootstrap in
 you a `alp-workspace/` with `alp-sdk/`, `zephyr/`, and the standard
 modules.
 
-You'll also need `tan`, the standalone build executor -- a separate
-public repo, not installed by `bootstrap.sh`. The automatic installer
-needs no Rust toolchain:
+You'll also need `tan`, the standalone Python planner and build executor -- a
+separate public repo, not installed by `bootstrap.sh`. As of `tan-cli`
+[v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0) (current
+release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+the published installer (`install.sh`/`install.ps1`) installs the real Python
+`tan` directly -- it no longer resolves the frozen Rust v0.4.1 release. This
+guide instead installs from `tan-cli`'s `dev` branch in a Python 3.12+ venv,
+to track fixes ahead of the last tagged release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
-export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
+git clone --branch dev https://github.com/alplabai/tan-cli
+python3 -m venv tan-cli/.venv
+tan-cli/.venv/bin/python -m pip install ./tan-cli/python
+export PATH="$PWD/tan-cli/.venv/bin:$PATH"
 ```
 
-Building from source instead needs Rust 1.86+ ([rustup.rs](https://rustup.rs))
-and a system C toolchain (`build-essential` on Debian/Ubuntu, `gcc`/`gcc-c++`
-on Fedora/RHEL -- see [`docs/cross-platform-setup.md`](cross-platform-setup.md)
-§2.1):
-
-```bash
-git clone https://github.com/alplabai/tan-cli && cd tan-cli
-cargo install --path crates/tan-cli --locked
-```
+The release installer's PyInstaller archives bundle their own Python
+runtime, so release users do not install Python separately. Alp's `tan`
+is not distributed on PyPI, and the bare name `tan` there belongs to an
+unrelated project (`200` for it: `tan` v23.7.0, "The compromising code
+formatter") -- `pip install tan` does not get you this tool. `alp-tan` is
+not registered there either (`404` for it, not a reservation placeholder).
 
 For the rest of this doc, all paths are relative to `alp-workspace/`.
 
@@ -132,19 +137,16 @@ Build any of them as:
 
 ```bash
 cd alp-workspace
-tan --project alp-sdk/examples/<name> sdk switch "$PWD/alp-sdk"   # one-time per project
-tan --project alp-sdk/examples/<name> build
+tan build --project alp-sdk/examples/<name> --sdk-root "$PWD/alp-sdk"
 # the target comes from the example's board.yaml `som.sku` -- there
 # is no `--board` flag.  Every example in this repo targets a real
 # SoM (none ship a native_sim target), so this cross-compiles; also
 # flash it: tan flash alp-sdk/examples/<name>
 ```
 
-`sdk switch` is scoped to the exact `--project` value (getting-started.md §4)
--- switching to a different example needs its own `sdk switch` first, or
-skip the per-project pin entirely with `tan --sdk-root "$PWD/alp-sdk"
---project alp-sdk/examples/<name> build`.  Without either, `tan build` fails
-with `[x]  sdk   no SDK selected` even though the checkout is right there.
+Python Tan resolves an SDK from `--sdk-root`, `.alp/sdk-path`, a sibling
+checkout, or `ALP_SDK_ROOT`, in that order. `tan sdk install` and `tan sdk
+switch` are not yet ported.
 
 ## 5. Idiomatic patterns
 
@@ -300,17 +302,12 @@ targets:
 cd alp-workspace   # if you left it after §4 -- the rest of this doc is
                     # relative to alp-workspace/ (see §3)
 
-# sdk switch is per-project (see §4 above) -- run it once for each
-# --project value before its first build.
-
 # V2N (RZ/V2N)
-tan --project alp-sdk/examples/v2n/v2n-gd32-bridge-ping sdk switch "$PWD/alp-sdk"
-tan --project alp-sdk/examples/v2n/v2n-gd32-bridge-ping build
+tan build --project alp-sdk/examples/v2n/v2n-gd32-bridge-ping --sdk-root "$PWD/alp-sdk"
 tan flash alp-sdk/examples/v2n/v2n-gd32-bridge-ping
 
 # AEN (Alif Ensemble)
-tan --project alp-sdk/examples/peripheral-io/gpio-button-led sdk switch "$PWD/alp-sdk"
-tan --project alp-sdk/examples/peripheral-io/gpio-button-led build
+tan build --project alp-sdk/examples/peripheral-io/gpio-button-led --sdk-root "$PWD/alp-sdk"
 tan flash alp-sdk/examples/peripheral-io/gpio-button-led
 ```
 
@@ -326,7 +323,7 @@ The `tan` CLI covers the same flow in fewer keystrokes:
 `boot_order:` (see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)).
 `tan monitor --port <port>` opens the board's serial console
 afterwards (portless it lists the host's serial ports).  If a
-build machine misbehaves, `tan doctor --build` is the hardware-free
+build machine misbehaves, `tan doctor` is the hardware-free
 build-readiness triage.  Verb reference: [`docs/cli.md`](cli.md).
 
 ## 8. Where to look next

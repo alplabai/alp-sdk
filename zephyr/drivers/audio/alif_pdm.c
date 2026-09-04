@@ -30,6 +30,19 @@
  * reaches -O3. Reapply this divergence if the file is ever re-synced
  * from the fork.
  * -------------------------------------------------------------------------
+ *
+ * ------------------------- alp-sdk divergence (2) ----------------------
+ * alif_pdm_warning_isr()'s slab rollover (issue #1122) allocated exactly one
+ * replacement block and copied the whole remainder of the IRQ burst into it
+ * without checking the block was large enough -- a burst (up to
+ * MAX_DATA_ITEMS * MAX_NUM_CHANNELS * sizeof(uint16_t) = 128 bytes) can
+ * exceed a configured slab block_size, corrupting adjacent slab memory.
+ * Rewritten to split the remainder across as many fresh blocks as needed
+ * (never copying more than one block's worth per allocation), and
+ * dmic_alif_pdm_configure() now rejects a zero block_size so the split loop
+ * can never divide-by/against zero. Reapply this divergence if the file is
+ * ever re-synced from the fork.
+ * -------------------------------------------------------------------------
  */
 
 #define DT_DRV_COMPAT alif_alif_pdm
@@ -43,7 +56,19 @@
 #include <zephyr/pm/device.h>
 #include <zephyr/pm/policy.h>
 #include <zephyr/drivers/clock_control.h>
+#include <zephyr/sys/util.h>
 #include "alif_pdm_reg.h"
+#include "alif_pdm_burst_plan.h"
+
+/* Upper bound on how many slab blocks a single IRQ burst can be split
+ * across (#1122). A burst is at most MAX_DATA_ITEMS * MAX_NUM_CHANNELS *
+ * sizeof(uint16_t) = 128 bytes; this comfortably covers every block_size
+ * a real audio slab configures (down to single-digit bytes) while keeping
+ * the ISR's chunk-plan array small and stack-bounded. Configurations
+ * needing more chunks than this are rejected at runtime (burst dropped,
+ * logged) rather than risk an unbounded ISR stack allocation.
+ */
+#define MAX_PDM_BURST_CHUNKS 20
 
 LOG_MODULE_REGISTER(alif_pdm, LOG_LEVEL_INF);
 
@@ -71,6 +96,17 @@ struct pdm_config {
 	DEVICE_MMIO_ROM;
 	void (*irq_config)(void);
 	uint32_t fifo_watermark;
+	/*
+	 * Whether this instance has its OWN error / audio-detect interrupt
+	 * lines.  PDM does; LPPDM folds both into the warning interrupt, so the
+	 * warning ISR has to service them itself.  These come from
+	 * DT_INST_IRQ_HAS_NAME() at instantiation -- the warning ISR used to ask
+	 * DT_NODE_HAS_PROP(DT_NODELABEL(dev), ...) with `dev` the C function
+	 * parameter, which expands to an undefined node token and is therefore
+	 * always 0, so both branches ran on every instance (#1826).
+	 */
+	bool                             has_error_irq;
+	bool                             has_audio_det_irq;
 	const struct pinctrl_dev_config *pcfg;
 	const struct device *clk_dev;
 	clock_control_subsys_t clkid;
@@ -94,6 +130,15 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 
 	if (config->channel.req_num_chan == 0 || config->channel.req_num_chan > MAX_NUM_CHANNELS) {
 		LOG_DBG("config invalid: number of channels not valid\n");
+		return -EINVAL;
+	}
+
+	/* A zero block_size would make the IRQ-burst rollover split loop
+	 * divide progress by zero (#1122) -- reject before capture can ever
+	 * start.
+	 */
+	if (config->streams[0].block_size == 0) {
+		LOG_DBG("config invalid: block size must be non-zero\n");
 		return -EINVAL;
 	}
 
@@ -234,7 +279,15 @@ void pdm_mode(const struct device *dev, uint8_t mode)
 
 	uint32_t reg_val = sys_read32(reg_base + PDM_CONFIG_REGISTER);
 
-	reg_val |= (mode << PDM_CLK_MODE);
+	/*
+	 * HWRM 15.7.5.3.1 PDM_CTL0 bits 19-16 PDM_MODE select ONE of modes
+	 * 0x0-0x9, each with its own clock divisor, decimation ratio and
+	 * sampling rate (Table 15-118).  OR-ing without clearing first made
+	 * pdm_mode(dev, 5) then pdm_mode(dev, 2) leave 5 | 2 = 7 -- a third rate
+	 * neither caller asked for, and no error (#1826).
+	 */
+	reg_val &= ~PDM_CLK_MODE_MASK;
+	reg_val |= ((uint32_t)mode << PDM_CLK_MODE) & PDM_CLK_MODE_MASK;
 
 	sys_write32(reg_val, reg_base + PDM_CONFIG_REGISTER);
 }
@@ -434,6 +487,7 @@ static void *get_slab(struct pdm_data *pdm_data)
 static void alif_pdm_warning_isr(const struct device *dev)
 {
 	struct pdm_data *pdmdata = DEV_DATA(dev);
+	const struct pdm_config *cfg     = DEV_CFG(dev);
 	uint8_t k = 0;
 	uint8_t audio_ch;
 	uint8_t intstatus;
@@ -443,7 +497,6 @@ static void alif_pdm_warning_isr(const struct device *dev)
 	uint32_t block_size;
 	uint32_t bytes_available;
 	uint32_t i;
-	uint32_t whole;
 	uint32_t audio_ch_0_1;
 	uint32_t audio_ch_2_3;
 	uint32_t audio_ch_4_5;
@@ -459,14 +512,29 @@ static void alif_pdm_warning_isr(const struct device *dev)
 	audio_ch = reg_val & PDM_CHANNEL_ENABLE;
 
 	intstatus = sys_read32(reg_base + PDM_WARN_IRQ);
-	num_items = sys_read32(reg_base + PDM_FIFO_STATUS_REGISTER);
+	/*
+	 * HWRM 15.7.5.3.4 PDM_FIFO_STAT: bits 31-4 RESERVED, bits 3-0 CNT --
+	 * "Count of sets of audio data entry in FIFO for each channel available
+	 * to be read".  The whole 32-bit word used to become the loop count, and
+	 * the loop below writes up to MAX_NUM_CHANNELS uint16_t per iteration
+	 * into a MAX_NUM_CHANNELS * MAX_DATA_ITEMS array.  CNT legitimately
+	 * reaches 15, so with all eight channels enabled anything above
+	 * MAX_DATA_ITEMS runs past the end of data[] -- the LAST member of
+	 * struct pdm_data, so the overrun lands in whatever follows it.  The
+	 * fifo_watermark binding caps the TRIGGER level at 7; that is not a
+	 * ceiling on CNT, because any ISR-latency stall lets the FIFO fill
+	 * further before this runs.  Mask to the field, then clamp to what
+	 * data[] can hold (#1826).
+	 */
+	num_items = sys_read32(reg_base + PDM_FIFO_STATUS_REGISTER) & PDM_FIFO_STAT_CNT_MASK;
+	num_items = MIN(num_items, MAX_DATA_ITEMS);
 
 	/* LPPDM doesn't have separate error and audio detect isr handlers */
-	if (!DT_NODE_HAS_PROP(DT_NODELABEL(dev), error_intr)) {
+	if (!cfg->has_error_irq) {
 		pdm_error_handler(dev);
 	}
 
-	if (!DT_NODE_HAS_PROP(DT_NODELABEL(dev), audio_det_intr)) {
+	if (!cfg->has_audio_det_irq) {
 		pdm_audio_det_handler(dev);
 	}
 
@@ -514,7 +582,21 @@ static void alif_pdm_warning_isr(const struct device *dev)
 
 		pdmdata->data_buffer = get_slab(pdmdata);
 		if (pdmdata->data_buffer == NULL) {
-			sys_write32(0, reg_base + PDM_INTERRUPT_REGISTER);
+			/*
+			 * The consumer is behind and the slab is momentarily
+			 * empty.  Drop THIS burst (get_slab() already counted it
+			 * in slab_missed) and leave the interrupts armed so
+			 * capture resumes as soon as a block is freed.
+			 *
+			 * Writing 0 to PDM_INTERRUPT_REGISTER here used to mask
+			 * every PDM interrupt including FIFO_ALMOST_FULL_IRQ_EN,
+			 * and nothing re-armed them while record_data stayed 1 --
+			 * so one transient slab exhaustion stopped capture for the
+			 * life of the image and dmic_alif_pdm_read() only ever
+			 * returned -EAGAIN (#1826).  Re-arming costs nothing: the
+			 * warning interrupt is paced by the audio clock, so this
+			 * path cannot spin faster than the sample rate.
+			 */
 			return;
 		}
 		pdmdata->buf_index = 0;
@@ -522,33 +604,75 @@ static void alif_pdm_warning_isr(const struct device *dev)
 
 	bytes_available = block_size - pdmdata->buf_index;
 
-	if (bytes_available >= data_bytes) {
-		memcpy((pdmdata->data_buffer + pdmdata->buf_index), pdmdata->data, data_bytes);
-		pdmdata->buf_index += data_bytes;
-	} else {
-		if (bytes_available > 0) {
-			memcpy((pdmdata->data_buffer + pdmdata->buf_index), pdmdata->data,
-			       bytes_available);
-		}
-		whole = data_bytes - bytes_available;
+	/*
+	 * Plan the split BEFORE touching any slab/queue state: a burst can
+	 * exceed not just bytes_available but the configured block_size
+	 * itself, so never assume a single replacement block is enough
+	 * (#1122). Each chunk after the first starts a fresh block and is
+	 * never larger than block_size, so no single memcpy can overrun a
+	 * block.
+	 */
+	{
+		uint32_t chunks[MAX_PDM_BURST_CHUNKS];
+		size_t nchunks;
+		uint32_t copied = 0;
+		size_t idx;
 
-		if (k_msgq_put(&pdmdata->buf_queue, &pdmdata->data_buffer, K_NO_WAIT) != 0) {
-			/* Queue full: drop oldest block to make room */
-			void *oldest = NULL;
-
-			if (k_msgq_get(&pdmdata->buf_queue, &oldest, K_NO_WAIT) == 0) {
-				k_mem_slab_free(pdmdata->mem_slab, oldest);
-				k_msgq_put(&pdmdata->buf_queue, &pdmdata->data_buffer, K_NO_WAIT);
-			}
-		}
-
-		pdmdata->data_buffer = get_slab(pdmdata);
-
-		if (pdmdata->data_buffer) {
-			memcpy(pdmdata->data_buffer, pdmdata->data + (bytes_available / 2), whole);
-			pdmdata->buf_index = whole;
-		} else {
+		nchunks = pdm_plan_burst_chunks(bytes_available, data_bytes, block_size, chunks,
+						 ARRAY_SIZE(chunks));
+		if (nchunks == 0) {
+			/* Cannot safely split this burst into MAX_PDM_BURST_CHUNKS
+			 * blocks (a pathologically small block_size) -- drop the
+			 * burst rather than risk writing past a block boundary.
+			 */
+			LOG_ERR("PDM burst too large to plan safely (data_bytes=%u "
+				"block_size=%u); dropping burst\n",
+				data_bytes, block_size);
 			pdmdata->buf_index = 0;
+			return;
+		}
+
+		for (idx = 0; idx < nchunks; idx++) {
+			uint32_t chunk = chunks[idx];
+
+			if (chunk > 0) {
+				memcpy(pdmdata->data_buffer + pdmdata->buf_index,
+				       (uint8_t *)pdmdata->data + copied, chunk);
+				pdmdata->buf_index += chunk;
+				copied += chunk;
+			}
+
+			if (idx + 1 >= nchunks) {
+				/* Last chunk: leave it in progress in the
+				 * current block, same as the fast path above.
+				 */
+				break;
+			}
+
+			/* This block is now full; queue it and start a fresh
+			 * one for the next chunk.
+			 */
+			if (k_msgq_put(&pdmdata->buf_queue, &pdmdata->data_buffer, K_NO_WAIT) !=
+			    0) {
+				/* Queue full: drop oldest block to make room */
+				void *oldest = NULL;
+
+				if (k_msgq_get(&pdmdata->buf_queue, &oldest, K_NO_WAIT) == 0) {
+					k_mem_slab_free(pdmdata->mem_slab, oldest);
+					k_msgq_put(&pdmdata->buf_queue, &pdmdata->data_buffer,
+						   K_NO_WAIT);
+				}
+			}
+
+			pdmdata->data_buffer = get_slab(pdmdata);
+			pdmdata->buf_index = 0;
+			if (pdmdata->data_buffer == NULL) {
+				/* Allocation failed mid-burst: drop the
+				 * remainder of this burst, same ownership/
+				 * error behavior as before (#1122).
+				 */
+				return;
+			}
 		}
 	}
 }
@@ -651,40 +775,53 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 
 /********** Device Definition per instance Macros **********/
 
-#define PDM_INIT(n)                                                                                \
-	PINCTRL_DT_INST_DEFINE(n);                                                                 \
-	static void pdm_irq_config_##n(void);                                                      \
-	static struct pdm_data dmic_alif_pdm_data = {                                              \
-		.bypass_iir_filter = DT_INST_PROP(n, bypass_iir_filter),                           \
-	};                                                                                         \
-	static const struct pdm_config dmic_alif_pdm_cfg_##n = {                                   \
-		DEVICE_MMIO_ROM_INIT(DT_DRV_INST(n)),                                              \
-		.fifo_watermark = DT_INST_PROP(n, fifo_watermark),                                 \
-		.irq_config = pdm_irq_config_##n,                                                  \
-		.pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n),                                         \
-		.clk_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)),                                  \
-		.clkid = (clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, clkid),                    \
-	};                                                                                         \
-	static void pdm_irq_config_##n(void)                                                       \
-	{                                                                                          \
-		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, warning_intr, irq),                             \
-			    DT_INST_IRQ_BY_NAME(n, warning_intr, priority), alif_pdm_warning_isr,  \
-			    DEVICE_DT_INST_GET(n), 0);                                             \
-		irq_enable(DT_INST_IRQ_BY_NAME(n, warning_intr, irq));                             \
-		IF_ENABLED(DT_INST_IRQ_HAS_NAME(n, error_intr),                                    \
-			   (IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, error_intr, irq),                   \
-					DT_INST_IRQ_BY_NAME(n, error_intr, priority),              \
-					pdm_error_detect_irq_handler, DEVICE_DT_INST_GET(n), 0);   \
-			    irq_enable(DT_INST_IRQ_BY_NAME(n, error_intr, irq));))                 \
-		IF_ENABLED(DT_INST_IRQ_HAS_NAME(n, audio_det_intr),                                \
-			   (IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, audio_det_intr, irq),               \
-					DT_INST_IRQ_BY_NAME(n, audio_det_intr, priority),          \
-					pdm_audio_detect_irq_handler, DEVICE_DT_INST_GET(n), 0);   \
-			    irq_enable(DT_INST_IRQ_BY_NAME(n, audio_det_intr, irq));))             \
-	}                                                                                          \
-	PM_DEVICE_DT_INST_DEFINE(n, pdm_pm_action);                                                \
-	DEVICE_DT_INST_DEFINE(n, pdm_initialize, PM_DEVICE_DT_INST_GET(n), &dmic_alif_pdm_data,    \
-			      &dmic_alif_pdm_cfg_##n, POST_KERNEL,                                 \
-			      CONFIG_AUDIO_DMIC_INIT_PRIORITY, &dmic_alif_pdm_api);
+#define PDM_INIT(n) \
+	PINCTRL_DT_INST_DEFINE(n); \
+	static void            pdm_irq_config_##n(void); \
+	static struct pdm_data dmic_alif_pdm_data_##n = { \
+		.bypass_iir_filter = DT_INST_PROP(n, bypass_iir_filter), \
+	}; \
+	static const struct pdm_config dmic_alif_pdm_cfg_##n = { \
+		DEVICE_MMIO_ROM_INIT(DT_DRV_INST(n)), \
+		.fifo_watermark    = DT_INST_PROP(n, fifo_watermark), \
+		.has_error_irq     = DT_INST_IRQ_HAS_NAME(n, error_intr), \
+		.has_audio_det_irq = DT_INST_IRQ_HAS_NAME(n, audio_det_intr), \
+		.irq_config        = pdm_irq_config_##n, \
+		.pcfg              = PINCTRL_DT_INST_DEV_CONFIG_GET(n), \
+		.clk_dev           = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)), \
+		.clkid             = (clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, clkid), \
+	}; \
+	static void pdm_irq_config_##n(void) \
+	{ \
+		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, warning_intr, irq), \
+		            DT_INST_IRQ_BY_NAME(n, warning_intr, priority), \
+		            alif_pdm_warning_isr, \
+		            DEVICE_DT_INST_GET(n), \
+		            0); \
+		irq_enable(DT_INST_IRQ_BY_NAME(n, warning_intr, irq)); \
+		IF_ENABLED(DT_INST_IRQ_HAS_NAME(n, error_intr), \
+		           (IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, error_intr, irq), \
+		                        DT_INST_IRQ_BY_NAME(n, error_intr, priority), \
+		                        pdm_error_detect_irq_handler, \
+		                        DEVICE_DT_INST_GET(n), \
+		                        0); \
+		            irq_enable(DT_INST_IRQ_BY_NAME(n, error_intr, irq));)) \
+		IF_ENABLED(DT_INST_IRQ_HAS_NAME(n, audio_det_intr), \
+		           (IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, audio_det_intr, irq), \
+		                        DT_INST_IRQ_BY_NAME(n, audio_det_intr, priority), \
+		                        pdm_audio_detect_irq_handler, \
+		                        DEVICE_DT_INST_GET(n), \
+		                        0); \
+		            irq_enable(DT_INST_IRQ_BY_NAME(n, audio_det_intr, irq));)) \
+	} \
+	PM_DEVICE_DT_INST_DEFINE(n, pdm_pm_action); \
+	DEVICE_DT_INST_DEFINE(n, \
+	                      pdm_initialize, \
+	                      PM_DEVICE_DT_INST_GET(n), \
+	                      &dmic_alif_pdm_data_##n, \
+	                      &dmic_alif_pdm_cfg_##n, \
+	                      POST_KERNEL, \
+	                      CONFIG_AUDIO_DMIC_INIT_PRIORITY, \
+	                      &dmic_alif_pdm_api);
 
 DT_INST_FOREACH_STATUS_OKAY(PDM_INIT)

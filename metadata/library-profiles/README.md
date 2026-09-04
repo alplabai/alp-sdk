@@ -45,7 +45,7 @@ app code
 internally pulls #include "etl_profile.h"
    |
    v
-metadata/library-profiles/etl/alp-embedded.h    <-- our profile
+metadata/library-profiles/etl/etl_profile.h     <-- our profile
                                                     sets ETL_NO_STL,
                                                     pool sizes, etc.
 ```
@@ -83,7 +83,6 @@ metadata/library-profiles/
 │   └── mbedtls_config.h               (MbedTLS.  Set MBEDTLS_CONFIG_FILE
 │                                       to this when including.)
 └── cmsis_dsp/
-    ├── hw-backends.yaml               (SIMD/CORDIC/FFT/DMA backend bindings)
     └── README.md
 ```
 
@@ -95,11 +94,19 @@ opinionated tuning is the consumer's job.
 
 Adding a new library: drop a directory + a config header named
 to match the upstream's expected filename (or a `README.md` if
-no compile-time config is needed), then extend the `libraries:`
-enum (under `cores.<id>.libraries:`) in
-`metadata/schemas/board.schema.json` and the
-`_LIBRARY_KCONFIG` map in `scripts/alp_project.py` so consumers
-can enable it via `board.yaml`.
+no compile-time config is needed).  Nothing else needs editing to
+make it selectable: `libraries:` in `metadata/schemas/board.schema.json`
+is an open `^[a-z][a-z0-9-]*$` pattern that resolves each entry to
+`metadata/libraries/<name>.yaml`, and the emitted CONFIG lines come
+from that manifest's own `integration.zephyr.kconfig` array via
+`scripts/alp_orchestrate/libraries.py:321`.
+
+> Earlier revisions of this section told you to extend a `libraries:`
+> *enum* in `board.schema.json` and a `_LIBRARY_KCONFIG` map in
+> `scripts/alp_project.py`.  Neither exists: the schema field was never
+> a closed enum, and the per-library dict was retired when the library
+> layer became manifest-driven.  Following those instructions today
+> means editing code that isn't there.
 
 ## v0.3 scaffolding vs v0.4 wire-up
 

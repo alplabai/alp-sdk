@@ -117,22 +117,25 @@ channels via the `alp-dac0` / `alp-adc0` devicetree aliases:
   (`zephyr/dts/bindings/adc/alp,adc-input.yaml`), or `ADC_DT_SPEC_GET`
   fails to compile (`..._P_io_channels_IDX_0_PH` / `_VAL_input` undeclared).
 
-## A driver quirk the portable read path now absorbs
+## A driver quirk the vendored driver now guards
 
-The vendored Alif ADC driver (`zephyr/drivers/adc/adc_alif.c`)
-**unconditionally** dereferences `sequence->options->user_data` in
-`adc_start_read()` (`adc_alif.c:728`) -- it stashes a comparator pointer
-there, with **no** `options != NULL` guard (unlike `check_buffer_size()`,
-which does test it). The raw-API sibling `aen-adc-regcheck` already works
-around this by passing a non-NULL `adc_sequence_options` with a valid
-`user_data` (see its `main.c`). The portable `<alp/adc.h>` E8 backend
+The vendored Alif ADC driver (`zephyr/drivers/adc/adc_alif.c`) originally
+dereferenced `sequence->options->user_data` **unconditionally** in
+`adc_start_read()` -- it stashes a comparator pointer there -- with **no**
+`options != NULL` guard, even though Zephyr's `adc_sequence` contract
+makes `options` optional. The portable `<alp/adc.h>` E8 backend
 (`src/backends/adc/alif_e8.c`) originally issued the read with
 `.options = NULL`, so `alp_adc_read_uv()` NULL-faulted **before** the
-conversion ran -- the early / empty-console fault this example hit. The
-backend now passes the same non-NULL `options` the raw sibling does, so
-the customer-facing `<alp/*>` path reaches its `RESULT` line. (The
-sibling E7 backend carried the identical latent fault and was fixed in
-lockstep.)
+conversion ran -- the early / empty-console fault this example hit. That
+is fixed in-tree: `adc_start_read()` now takes the pointer through the
+NULL-safe `adc_alif_sequence_comparator()` (`adc_alif.c:757`, declared in
+`zephyr/drivers/adc/adc_alif_comparator.h`), which returns `NULL` when no
+options were supplied, and the comparator IRQ handlers guard on
+`data->comparator` too. The raw-API sibling `aen-adc-regcheck` and the E8
+backend still pass a non-NULL `adc_sequence_options` with a valid
+`user_data` (see its `main.c`), so the customer-facing `<alp/*>` path
+reaches its `RESULT` line -- that is now belt-and-braces, not a required
+workaround. (The sibling E7 backend was fixed in lockstep.)
 
 ## Follow-up
 

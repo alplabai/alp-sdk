@@ -1,5 +1,7 @@
 from textwrap import dedent
 
+import pytest
+
 from alp_cli.yaml_pos import load_with_positions, node_position
 
 
@@ -53,3 +55,27 @@ def test_scalar_value_position_via_helper():
     assert line == 2
     # "E1M-AEN801" starts after "sku: " on column 8 (1-based).
     assert col == 8
+
+
+def test_duplicate_top_level_key_raises():
+    """#1127: a repeated top-level key must FAIL, not silently keep the last.
+
+    Before the fix, `yaml.safe_load("som: a\\nsom: b\\n")` returned
+    `{'som': 'b'}` with no error -- a duplicated `som:`/route key in a
+    board.yaml would silently drop hardware configuration invisibly in a
+    diff.
+    """
+    with pytest.raises(ValueError, match="duplicate key 'som'"):
+        load_with_positions("som: a\nsom: b\n", source="board.yaml")
+
+
+def test_duplicate_nested_key_raises():
+    src = dedent(
+        """\
+        som:
+          sku: E1M-AEN801
+          sku: E1M-AEN701
+        """
+    )
+    with pytest.raises(ValueError, match="duplicate key 'sku'"):
+        load_with_positions(src, source="board.yaml")

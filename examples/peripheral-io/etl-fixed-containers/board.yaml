@@ -26,7 +26,10 @@ cores:
     # metadata/library-profiles/etl/etl_profile.h onto the include
     # path. ETL is header-only -- no Kconfig knob of its own; the
     # loader emits a documentation-only comment line in alp.conf for
-    # this entry (see _LIBRARY_KCONFIG in scripts/alp_project.py).
+    # this entry (emitted from the manifest's own
+    # integration.zephyr.hw_backends.sw_fallback.kconfig array by
+    # scripts/alp_orchestrate/libraries.py:283 -- the per-library
+    # _LIBRARY_KCONFIG dict this used to cite no longer exists).
 
 diagnostics:
   log_level: info

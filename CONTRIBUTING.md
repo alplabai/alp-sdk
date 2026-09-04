@@ -61,7 +61,7 @@ signatures), if you have one in mind.
 5. Run the full local matrix before opening a PR:
    ```bash
    bash scripts/bootstrap.sh                    # one-time
-   export ZEPHYR_BASE="$PWD/../zephyrproject/zephyr"
+   export ZEPHYR_BASE="$PWD/../zephyr"
    bash scripts/test-all.sh                     # ctest + twister + format + Doxygen
    ```
    See [`docs/testing.md`](docs/testing.md) for the per-stage
@@ -111,8 +111,15 @@ separately — see [`TRADEMARKS.md`](TRADEMARKS.md).)
 - All public symbols use the `alp_` prefix.
 - Keep functions short.  When `src/<os>/<peripheral>.c` exceeds a few
   hundred lines, split by peripheral, not by helper.
-- Vendor-specific code lives only in `vendors/<som>/`.  No `#ifdef
-  ALIF_*` in `include/alp/` or `src/common/`.
+- Vendor/chip-specific code lives in `chips/<part>/` (natural part
+  names, e.g. `lsm6dso_init()` -- never an `alp_` prefix, that's
+  reserved for the portable SDK surface), `src/backends/<peripheral>/`
+  (e.g. `src/backends/gpio/cc3501e_proxy.c`,
+  `src/backends/soc_info/alif_se.c`), and `firmware/<part>/`.
+  Vendored upstream SDKs live under `vendors/<vendor>/` (e.g.
+  `vendors/alif/`, `vendors/gd32_firmware_library/`).  No `#ifdef
+  ALIF_*` in `include/alp/` or `src/common/` -- that boundary is the
+  part that still holds.
 
 ### Formatting
 

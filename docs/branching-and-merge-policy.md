@@ -99,10 +99,11 @@ cut on `main`.
 
 - `develop` / `next` — `dev` is the single shared integration
   branch; we don't keep additional aliases for it.
-- `staging` / `qa` — verification is by Twister + the HiL runs in
-  `.github/workflows/nightly-*.yml`, not by a dedicated branch.
-  `dev` is the integration branch; the `dev` → `main` promotion is
-  the gate that those verification runs guard.
+- `staging` / `qa` — verification is by Twister (CI) plus an
+  explicitly-invoked bench run for on-silicon coverage (see
+  `docs/ci/HW-IN-LOOP.md`), not by a dedicated branch.  `dev` is the
+  integration branch; the `dev` → `main` promotion is the gate those
+  verification runs guard.
 - Long-lived per-contributor `master` clones — fork-based PRs only.
 
 ## What lands where

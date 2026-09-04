@@ -76,8 +76,10 @@ int main(void)
 
 	/* Open the three GPIO handles.  Each call resolves a
      * studio-supplied pin id; failure usually means the board
-     * preset hasn't routed the SWD lines yet (still TBD on the V2N
-     * schematic). */
+     * preset hasn't picked up the SWD routing yet -- the pads
+     * themselves are resolved (P70/P71/P74, maintainer-confirmed
+     * 2026-05-12; see metadata/chips/gd32_swd.yaml), this is a
+     * preset-generation gap, not a schematic TBD. */
 	alp_gpio_t *swdio = alp_gpio_open(V2N_GD32_SWDIO_PIN_ID);
 	alp_gpio_t *swclk = alp_gpio_open(V2N_GD32_SWCLK_PIN_ID);
 	alp_gpio_t *nrst  = alp_gpio_open(V2N_GD32_NRST_PIN_ID);

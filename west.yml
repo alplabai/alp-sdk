@@ -8,7 +8,7 @@
 #
 # Pin policy:
 #   - zephyr: the stable release the SDK is verified against.  Currently
-#     v4.4.0 (the same revision pr-twister.yml + the nightly AEN HIL
+#     v4.4.1 (the same revision pr-twister.yml + the nightly AEN HIL
 #     workflow exercise).  v0.5 bumped from v3.7.0 LTS to v4.4.0 to
 #     pick up mainline LVGL v9, upstream Alif Ensemble board files,
 #     and the I2S inclusive-language rename.  Bumps are deliberate,
@@ -29,7 +29,7 @@
 #     standard cmake/kconfig hookup).  We import it directly here
 #     as a top-level project at the latest tagged release.
 #
-#     IMPORTANT (current as of the v4.4.0 pin): upstream Zephyr v4.4
+#     IMPORTANT (current as of the v4.4.1 pin): upstream Zephyr v4.4
 #     DOES ship the stock Alif Ensemble board files under
 #     boards/alif/ -- ensemble_e8_dk (incl. our E8 part
 #     ae822fa0e5597ls0; targets rtss_he / rtss_hp), ensemble_e1c_dk,
@@ -57,8 +57,8 @@
 # When upgrading the Zephyr pin: change `revision:` below, rerun
 # `west update`, verify the modules/hal/{renesas,nxp} revs that
 # ship with the new Zephyr tag still satisfy the SoMs we target
-# (see docs/os-support-matrix.md), bump pr-twister.yml +
-# nightly-aen-hil.yml's `--mr` to match, and add a CHANGELOG entry.
+# (see docs/os-support-matrix.md), bump pr-twister.yml's `--mr` to
+# match, and add a CHANGELOG entry.
 
 manifest:
   defaults:
@@ -94,15 +94,17 @@ manifest:
       url-base: https://github.com/catchorg
     - name: stephane           # libmodbus
       url-base: https://github.com/stephane
-    - name: freertos-org       # coreMQTT-SN
-      url-base: https://github.com/FreeRTOS
     - name: xio-technologies   # Madgwick AHRS reference
       url-base: https://github.com/xioTechnologies
-    - name: bearssl-mirror     # BearSSL community git mirror (upstream is
-      url-base: https://github.com/bearsslmirror
-                              # tarball-only; mirror tracks main branch).
+    - name: bearssl-upstream   # BearSSL upstream git server -- non-GitHub
+      url-base: https://bearssl.org/git
+                              # https remote.  Upstream runs a real git
+                              # server (not tarball-only, despite an
+                              # earlier comment here claiming otherwise).
     - name: micro-ROS
       url-base: https://github.com/micro-ROS
+    - name: arm-software    # CMSIS-Stream, CMSIS-CV, Arm-2D
+      url-base: https://github.com/ARM-software
     # extras-cpp remotes (Task 0 3p-library-examples batch): three
     # header-only C++ libraries with no Zephyr module.yml, so they
     # can't ride the extras-tier1 mechanism.  Pins here are the
@@ -133,14 +135,16 @@ manifest:
   #                    tree (u8g2, libcoap, libwebsockets,
   #                    jsmn, bearssl, minimp3, opus,
   #                    catch2, libmodbus, madgwick_ahrs,
-  #                    coremqtt_sn).  Disabled by default so v0.5
+  #                    cmsisstream (repo CMSIS-Stream),
+  #                    CMSIS-CV, Arm-2D).  Disabled by default so v0.5
   #                    workspaces stay light; customers flip via
   #                    `west update --group-filter +extras-tier1`
   #                    when they list any of those libraries in
   #                    `board.yaml` `libraries:`.  Revisions below
   #                    are maintainer-verified-as-of 2026-05-14;
-  #                    bumps land alongside the library knob in
-  #                    `metadata/library-profiles/<name>/hw-backends.yaml`.
+  #                    bumps land alongside the library knob in that
+  #                    library's `integration.zephyr.hw_backends:` block
+  #                    in `metadata/libraries/<name>.yaml`.
   # `vendor-sdks`    - public vendor SDK repos pinned to the
   #                    verified tags (Alif sdk-alif, Renesas
   #                    rzv-fsp, NXP mcuxsdk-manifests).  Carries
@@ -179,7 +183,12 @@ manifest:
   #                    loudly at manifest time, and the build only
   #                    dies later on a missing
   #                    tensorflow/lite/micro/*.h header (#1076,
-  #                    surfaced by pr-twister-aen on aen-sim-vision).
+  #                    surfaced by pr-twister-aen; the example that
+  #                    surfaced it was the Renode-sim aen-sim-vision,
+  #                    since deleted -- see docs/adr/0022 Amendment 2
+  #                    -- but the five aen-npu-inference* apps still
+  #                    set CONFIG_TENSORFLOW_LITE_MICRO=y, so the
+  #                    allowlist entry stays load-bearing).
   #                    canopennode/chre/thrift/zephyr-lang-rust are
   #                    the group's other members but aren't
   #                    name-allowlisted, so this only pulls in
@@ -230,8 +239,10 @@ manifest:
           # `depends on ZEPHYR_LITTLEFS_MODULE`, auto-set by Zephyr's
           # module-resolution pass once this module is present) --
           # was missing from the allowlist, so `libraries: [littlefs]`
-          # emitted the right CONFIG_* lines (see _LIBRARY_KCONFIG in
-          # scripts/alp_project.py) but `west update` never actually
+          # emitted the right CONFIG_* lines (the manifest's own
+          # `integration.zephyr.kconfig` array, transcribed by
+          # scripts/alp_orchestrate/libraries.py's zephyr_kconfig_lines)
+          # but `west update` never actually
           # fetched the module a real Kconfig solve needs (#3p-lib-examples
           # Task 0). NOTE: as of this fix, any <zephyr-workspace> topdir
           # this SDK is verified against that was set up before this
@@ -246,6 +257,14 @@ manifest:
           # Required by the RZ/V2N + i.MX93 M33/M-class cores.
           - cmsis_6
           - cmsis-dsp
+          # cmsis-nn (modules/lib/cmsis-nn) is CMSIS-DSP's Cortex-M
+          # inference-kernel companion, `libraries: [cmsis-nn]`
+          # (metadata/libraries/cmsis-nn.yaml, CONFIG_CMSIS_NN). Sits
+          # right beside cmsis-dsp in Zephyr's own west.yml, same
+          # unconditioned (default-active) shape -- was simply missed when
+          # cmsis-dsp was added. Caught by
+          # scripts/check_west_manifest_module_resolution.py (#1136).
+          - cmsis-nn
           - lvgl
           - mbedtls
           - mcuboot
@@ -289,25 +308,41 @@ manifest:
           # backend's MbedTLS-PSA fallthrough, examples/aen/aen-se-crypto)
           # resolves on `west update` without the bench-side symlink.
           - tf-psa-crypto
-          # NOTE: nanopb is intentionally NOT allowlisted here. It backs
-          # `libraries: [nanopb]` (metadata/libraries/nanopb.yaml,
-          # CONFIG_NANOPB) and examples/connectivity/nanopb-encode-decode,
-          # and Zephyr's own west.yml carries an unconditioned
-          # `modules/lib/nanopb` project -- but alp-sdk's own manifest
-          # ALSO defines a project named `nanopb` at that same path
-          # (below, under the disabled-by-default `extras-lwrb-nanopb`
-          # group, SDK-internal mproc IPC framing). West's import
-          # resolution lets a same-named top-level project shadow an
-          # imported one regardless of the name-allowlist, so adding
-          # `nanopb` here has no effect either way: the disabled group
-          # always wins and the import entry is dead weight. CI
-          # (pr-twister.yml) doesn't go through this manifest at all --
-          # it inits its topdir straight from Zephyr's own west.yml
-          # (`west init -m zephyr`), so nanopb already resolves there
-          # via Zephyr's unconditioned project, independent of this
-          # file. See littlefs's allowlist entry above for the pattern
-          # that DOES work (no colliding top-level project of the same
-          # name to shadow it).
+          # nanopb (modules/lib/nanopb, unconditioned -- default-active --
+          # in Zephyr's own west.yml) backs `libraries: [nanopb]`
+          # (metadata/libraries/nanopb.yaml, CONFIG_NANOPB) and
+          # examples/connectivity/nanopb-encode-decode/CMakeLists.txt,
+          # which FATAL_ERRORs at configure time if
+          # ZEPHYR_NANOPB_MODULE_DIR isn't set -- unlike lwrb below (which
+          # has a working in-tree stub covering the group-disabled case,
+          # vendors/lwrb/src/lwrb_stub_impl.c), nanopb's vendor stub is
+          # pure ABI scaffolding with no functional fallback.
+          #
+          # #1136: a previous pass (#650) reverted this exact allowlist
+          # entry as "dead weight", because at the time alp-sdk's own
+          # manifest ALSO defined a top-level project literally named
+          # `nanopb` (below, under the disabled-by-default
+          # `extras-lwrb-nanopb` group, pinned for the SDK-internal mproc
+          # IPC framing rewrite). West's project-name dedup lets a
+          # directly-listed project suppress a same-named imported one
+          # even while sitting in an inactive group -- confirmed with
+          # `west manifest --resolve` against both states of this file --
+          # so the allowlist entry alone truly was inert. The fix is
+          # both halves: allowlist `nanopb` here AND rename the
+          # SDK-internal pin below to `nanopb-mproc-pin` so it no longer
+          # shadows the name. That internal pin is genuine dead code
+          # today regardless (src/common/proto/alp_mproc_frame.c
+          # hand-rolls the wire format and never calls pb_encode/
+          # pb_decode -- see vendors/nanopb/README.md), so renaming it
+          # costs nothing.
+          #
+          # pr-twister.yml never caught this gap because it inits its
+          # topdir straight from Zephyr's own west.yml
+          # (`west init -m zephyr`), never consulting this manifest at
+          # all -- see scripts/check_west_manifest_module_resolution.py,
+          # which resolves THIS manifest's own module set for every
+          # scenario Kconfig actually selects, to catch the next one.
+          - nanopb
 
     # SDK-internal dependencies pinned ahead of their consumers landing
     # for real.  Behind the `extras-lwrb-nanopb` group (disabled above)
@@ -322,10 +357,19 @@ manifest:
       path: modules/lib/lwrb
       groups:
         - extras-lwrb-nanopb
-    - name: nanopb
+    # Named `nanopb-mproc-pin`, not `nanopb` (#1136): this is a SEPARATE
+    # pin (its own revision, for the not-yet-landed mproc IPC framing
+    # generator swap) from the upstream `nanopb` project allowlisted
+    # above for examples/connectivity/nanopb-encode-decode. Giving both
+    # the same west project name would let this one (even disabled)
+    # silently shadow that one -- see the allowlist comment above.
+    # `repo-path` keeps the real upstream URL (github.com/nanopb/nanopb)
+    # under the renamed local project name.
+    - name: nanopb-mproc-pin
       remote: nanopb
+      repo-path: nanopb
       revision: nanopb-0.4.9
-      path: modules/lib/nanopb
+      path: modules/lib/nanopb-mproc-pin
       groups:
         - extras-lwrb-nanopb
 
@@ -343,8 +387,12 @@ manifest:
     # ---------------------------------------------------------------
     # extras-tier1 -- §D.lib batch.  Libraries that aren't in
     # Zephyr's modules tree, pinned to maintainer-verified tagged
-    # releases (or `main` where upstream has no semver releases --
-    # bearssl, minimp3).  Disabled by default; consumers
+    # releases (or a commit SHA where upstream has no semver releases --
+    # bearssl, minimp3).  No project in this group floats a branch
+    # revision (main/master/HEAD) -- see
+    # tests/scripts/test_library_layer.py's
+    # test_no_west_manifest_extras_tier1_tracks_a_floating_branch.
+    # Disabled by default; consumers
     # flip via `west update --group-filter +extras-tier1` when their
     # board.yaml's `libraries:` lists any of these.  Each library
     # ships its compile-time profile + HW-accelerator binding under
@@ -381,9 +429,13 @@ manifest:
     - name: minimp3
       remote: lieff
       repo-path: minimp3
-      revision: main              # No versioned releases; pin to commit
-                                  # when consumed.  TBD: pin to a SHA after
-                                  # the maintainer audit.
+      revision: ea99364f61c14656440e8d77e9c233ccf3124633 # master HEAD,
+                                  # 2026-07-27.  No versioned releases.
+                                  # `main` (the prior pin) does not exist on
+                                  # this repo -- the default branch is
+                                  # `master` -- so `west update
+                                  # --group-filter +extras-tier1` could not
+                                  # fetch this project at all.
       path: modules/lib/minimp3
       groups:
         - extras-tier1
@@ -408,27 +460,78 @@ manifest:
       path: modules/lib/libmodbus
       groups:
         - extras-tier1
-    - name: coreMQTT-SN
-      remote: freertos-org
-      repo-path: coreMQTT-SN
-      revision: v1.0.1            # Aug 2024.
-      path: modules/lib/coremqtt_sn
-      groups:
-        - extras-tier1
     - name: madgwick_ahrs
       remote: xio-technologies
       repo-path: Fusion           # The maintained successor lib (Madgwick
                                   # reference + Fusion are bundled).
-      revision: main              # TBD: pin SHA after maintainer audit.
+      revision: v1.3.2            # 2026-07-20 tagged release, SHA
+                                  # 015d68494274b479b5996bff2530ecbcfdc266f2.
+                                  # Default branch is `main`; pinned to the
+                                  # tag instead now that maintainer audit
+                                  # is done.  Licence MIT, verified from
+                                  # LICENSE.md at this ref.
       path: modules/lib/madgwick_ahrs
       groups:
         - extras-tier1
     - name: BearSSL
-      remote: bearssl-mirror
-      repo-path: BearSSL          # Community git mirror; upstream is
-                                  # tarball-only.  TBD: confirm + pin SHA.
-      revision: master
+      remote: bearssl-upstream
+      repo-path: BearSSL          # Upstream git server, not a mirror.
+      revision: 7bea48e5e850ab4cafbe68d3765cdaba13a86d6f # refs/heads/master
+                                  # HEAD on https://bearssl.org/git/BearSSL.
+                                  # The prior `bearssl-mirror` remote
+                                  # (github.com/bearsslmirror/BearSSL) does
+                                  # not exist -- 404 -- so this project
+                                  # could not be fetched at all.
       path: modules/lib/bearssl
+      groups:
+        - extras-tier1
+    # CMSIS-Stream: static-scheduled streaming/dataflow graph runtime for
+    # DSP/AI/audio/video. Ships its OWN Zephyr module glue AT this tag
+    # (zephyr/module.yml -> module name `cmsisstream`, zephyr/Kconfig,
+    # zephyr/CMakeLists.txt); pinned to the latest tagged release.
+    # The project NAME must be the Zephyr module name `cmsisstream` (not the
+    # GitHub repo name) so that metadata/libraries/cmsis-stream.yaml's
+    # `integration.zephyr.module: cmsisstream` resolves against a real
+    # top-level project -- otherwise an alp-sdk-owned workspace
+    # (`west init -l alp-sdk`) can never fetch it in ANY group-filter
+    # configuration, the #1136 shape that
+    # scripts/check_west_manifest_module_resolution.py gates.  `repo-path`
+    # carries the actual GitHub repo name.
+    - name: cmsisstream
+      remote: arm-software
+      repo-path: CMSIS-Stream
+      revision: v3.2.0            # Apr 2026; matches metadata/libraries/cmsis-stream.yaml.
+      path: modules/lib/cmsis-stream
+      groups:
+        - extras-tier1
+    # CMSIS-CV: optimised computer-vision kernels for Cortex-M
+    # (Helium/Neon vectorised variants). Upstream has cut NO tags and NO
+    # releases as of this pin -- SHA-pinned to `main`, not a floating
+    # branch. Upstream's own README states verbatim "It is a work in
+    # progress and has just started"; no zephyr/ directory, no
+    # zephyr/module.yml, no Kconfig exist at this SHA, so this pin is an
+    # audit trail only (recipe-only, tier B) until upstream ships Zephyr
+    # integration -- see metadata/libraries/cmsis-cv.yaml.
+    - name: CMSIS-CV
+      remote: arm-software
+      repo-path: CMSIS-CV
+      revision: 25c6c111ee04dcfb0ae9093fd6dee4586872982c   # main @ 2026-07-15; no tags exist upstream.
+      path: modules/lib/cmsis-cv
+      groups:
+        - extras-tier1
+    # Arm-2D: 2D graphics library optimised for Cortex-M with Helium (MVE)
+    # acceleration. Stable v1.2.x tagged series (more mature than
+    # CMSIS-CV's tagless upstream); no zephyr/ directory, no
+    # zephyr/module.yml, no Kconfig at this tag -- recipe-only (tier B)
+    # like CMSIS-CV, see metadata/libraries/arm-2d.yaml. Upstream carries
+    # one git submodule (examples/common/loader/freetype_loader/freetype)
+    # scoped under examples/ only -- deliberately NOT set `submodules:
+    # true` here, since alp-sdk never builds Arm-2D's example tree.
+    - name: Arm-2D
+      remote: arm-software
+      repo-path: Arm-2D
+      revision: v1.2.6            # Mar 2026; matches metadata/libraries/arm-2d.yaml.
+      path: modules/lib/arm-2d
       groups:
         - extras-tier1
     # gfx_compat is maintainer-written and ships in-tree under

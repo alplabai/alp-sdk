@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/build-plan-v1.schema.json",
   "title": "ALP Build Plan v1",
-  "description": "The machine-readable build plan `scripts/alp_orchestrate/buildplan.py::emit_build_plan` renders for a resolved board.yaml project (the 'Wave C' consumer contract, settled 2026-06-04 with the alp-sdk-vscode team; the real consumer today is `tan`, alplabai/tan-cli). One entry per non-`off` core slice, each carrying its build command, config artefact contents, and app source dir, plus the shared (cross-slice) generated artefacts and any non-fatal planning warnings. Every artefact carries its full `contents` so the consumer's materialise step stays pure IO -- the plan and the Orchestrator's own on-disk materialise step are written from the same `_shared_artefacts`/`_slice_config_artefact` helpers and MUST agree byte-for-byte. camelCase keys (this is a CLI-consumer contract, not an in-repo YAML). Stability: schemaVersion 1 is locked with the tan-cli consumer -- bump schemaVersion and record the change in the CHANGELOG before altering this shape; do not add breaking changes silently.",
+  "description": "The reference machine-readable build plan `scripts/alp_orchestrate/buildplan.py::emit_build_plan` renders for a resolved board.yaml project. Python Tan normally creates the equivalent plan in process and accepts this form through `--plan-from`; it remains the parity/interoperability contract settled with alp-sdk-vscode and tan-cli. One entry per non-`off` core slice carries its command, config artefact contents, app source dir, shared generated artefacts, and planning warnings. Every artefact carries full `contents` so materialisation stays pure IO. camelCase keys form a CLI-consumer contract, not in-repo YAML. Stability: schemaVersion 1 is locked with tan-cli; bump it and record the change in CHANGELOG before a breaking change.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "generatedBy", "boardYaml", "sku", "buildRoot", "slices", "sharedArtefacts", "warnings"],
@@ -47,7 +47,7 @@
       "description": "SDK-owned skip-vs-fail policy the executor MUST apply when dispatching a slice's `command`, so a plan consumer stops hand-porting that logic. Additive, schemaVersion 1.",
       "properties": {
         "unknownBackend": { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when a slice's `backend` has no known tool mapping. Currently always 'fail'." },
-        "missingTool":     { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when `command.tool` isn't found on the executor's PATH. Currently always 'skip' (normal on a dev host missing one toolchain)." },
+        "missingTool":     { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when `command.tool` cannot be resolved to an executable by the executor. Currently always 'skip' (normal on a dev host missing one toolchain). Deliberately NOT phrased as \"isn't found on the executor's PATH\" (issue #1314): PATH is the executor's *search* input for a bare identity, but what gets spawned is the resolved path, never the bare name -- see ADR-0020's Security consequence and its Amendment (2026-08-12), plus tan-cli#510 / PR alplabai/tan-cli#530. An absolute `command.tool` that does not exist therefore lands on this outcome with no PATH involved at all." },
         "nullCommand":     { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when a slice's `command` is null (this emitter had no valid command to produce -- see `slices[].command`). Currently always 'skip'." }
       }
     },
@@ -78,7 +78,7 @@
           },
           "configArtefacts": {
             "type": "array",
-            "description": "This slice's own generated config artefact(s) (alp.conf / local.conf / cmake-args.txt), or an empty array when the slice's os has none. Byte-identical to what the Orchestrator's own materialise step writes to buildDir.",
+            "description": "This slice's own generated config artefact(s) (alp.conf / local.conf), or an empty array when the slice's os has none -- `baremetal` always has none; its `-D` args are available on request via the standalone `--emit cmake-args` mode instead. Byte-identical to what a consumer's own materialise step writes to buildDir.",
             "items": {
               "type": "object",
               "additionalProperties": false,
@@ -93,26 +93,27 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["targetTriple", "compiler", "sysroot", "id"],
-            "description": "This slice's compiler identity (#610 §4 per-slice tooling index), grounded in the SoM preset's `topology.<core>.toolchain` -- never invented. A field genuinely not derivable for this slice's runtime is null rather than guessed (e.g. a Yocto slice's exact GCC triple depends on the Yocto build's own TUNE_FEATURES/TCLIBC, outside board.yaml/SoM metadata).",
+            "description": "This slice's compiler identity (#610 §4 per-slice tooling index), grounded in the SoM preset's `topology.<core>.toolchain` default or a project's `cores.<core>.toolchain` override (board.schema.json, issue #964) -- never invented. A field genuinely not derivable for this slice's runtime is null rather than guessed (e.g. a Yocto slice's exact GCC triple depends on the Yocto build's own TUNE_FEATURES/TCLIBC, outside board.yaml/SoM metadata).",
             "properties": {
               "targetTriple": { "type": ["string", "null"], "description": "GCC target triple for this slice's compiler (e.g. `arm-zephyr-eabi` for a Zephyr Cortex-M slice, which is both the Zephyr SDK toolchain directory name and its real GCC triple). null when not derivable (e.g. Yocto -- the triple depends on the Yocto build's own TCLIBC/TUNE_FEATURES)." },
               "compiler": { "type": ["string", "null"], "description": "Compiler executable name for this slice (e.g. `arm-zephyr-eabi-gcc`). null when not derivable." },
               "sysroot": { "type": ["string", "null"], "description": "Cross-compile sysroot path for this slice, when the runtime has one. Always null today -- Zephyr bundles its own libc per architecture inside the Zephyr SDK (no conventional sysroot), and Yocto's sysroot lives inside the Yocto build tree, not in board.yaml/SoM metadata." },
-              "id": { "type": ["string", "null"], "description": "Stable toolchain identifier, taken verbatim from the SoM preset's `topology.<core>.toolchain` (e.g. `arm-zephyr-eabi`, `poky-glibc`) -- the same field `system-manifest.yaml`'s `slices[].toolchain` already surfaces. null when the SoM preset doesn't declare one for this core." }
+              "id": { "type": ["string", "null"], "description": "Stable toolchain identifier, taken verbatim from the SoM preset's `topology.<core>.toolchain` default, or a project's `cores.<core>.toolchain` override when set (e.g. `arm-zephyr-eabi`, `poky-glibc`, `llvm`) -- the same field `system-manifest.yaml`'s `slices[].toolchain` already surfaces. null when neither the SoM preset nor board.yaml declares one for this core." }
             }
           },
           "artifacts": {
             "type": "object",
             "additionalProperties": false,
             "required": ["elf", "map", "bin", "sizeReport", "symbols", "compileCommands"],
-            "description": "Deterministic OUTPUT paths under `buildDir` for this slice (#610 §4) -- the WHERE, not a promise the files exist yet (they don't until the slice is actually built). Zephyr's own CMake layout fixes these paths (cmake/modules/kernel.cmake + the top-level CMakeLists.txt); a Yocto slice's real output lands under the Yocto build tree's own deploy dir (outside this slice's buildDir), and a baremetal slice's executable name is the app's own CMakeLists.txt to pick -- both stay null rather than guess a path this emitter can't predict.",
+            "description": "Deterministic OUTPUT paths under `buildDir` for this slice (#610 §4) -- the WHERE, not a promise the files exist yet (they don't until the slice is actually built). Zephyr's own CMake layout fixes these paths (cmake/modules/kernel.cmake + the top-level CMakeLists.txt), rooted at west's own build tree `<buildDir>/build/` -- the slice's `command` runs with cwd=`buildDir` and NO `-d`, so west appends its default `build` level itself. A consumer reads these paths VERBATIM and must not re-derive them from `buildDir`: through alp-sdk issue #1360 this block omitted that `build/` level and named files west never wrote. A Yocto slice's real output lands under the Yocto build tree's own deploy dir (outside this slice's buildDir), so it stays all-null. A baremetal slice's executable NAME is the app's own CMakeLists.txt to pick -- never guessed here -- but its `outputDir` is pinned by the `-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=` arg the slice's own configure carries (alplabai/tan-cli#550). A slice whose `command` is null (blocked -- see the matching `warnings` entry) reports an all-null block: nothing will ever configure its build dir, so any path here would be pinned by a command that never runs.",
             "properties": {
-              "elf": { "type": ["string", "null"], "description": "POSIX-style path to the slice's ELF output (Zephyr: `<buildDir>/zephyr/zephyr.elf`). null when this runtime has no single predictable ELF output (yocto, baremetal)." },
-              "map": { "type": ["string", "null"], "description": "POSIX-style path to the linker map file (Zephyr: `<buildDir>/zephyr/zephyr.map`). null when not derivable." },
-              "bin": { "type": ["string", "null"], "description": "POSIX-style path to the flat binary image (Zephyr: `<buildDir>/zephyr/zephyr.bin`). null when not derivable." },
-              "sizeReport": { "type": ["string", "null"], "description": "POSIX-style path to the readelf-headers size/stat report (Zephyr: `<buildDir>/zephyr/zephyr.stat`, written only when `CONFIG_OUTPUT_STAT=y` -- same 'doesn't exist until built/enabled' caveat as every other artifact path here). null when not derivable." },
-              "symbols": { "type": ["string", "null"], "description": "POSIX-style path to the symbol-table dump (Zephyr: `<buildDir>/zephyr/zephyr.symbols`, written only when `CONFIG_OUTPUT_SYMBOLS=y`). null when not derivable." },
-              "compileCommands": { "type": ["string", "null"], "description": "POSIX-style path to `compile_commands.json` (Zephyr: `<buildDir>/compile_commands.json` -- the top-level Zephyr CMakeLists.txt forces `CMAKE_EXPORT_COMPILE_COMMANDS` unconditionally). null when the slice's runtime doesn't produce one at a predictable path." }
+              "elf": { "type": ["string", "null"], "description": "POSIX-style path to the slice's ELF output (Zephyr: `<buildDir>/build/zephyr/zephyr.elf`). null when this runtime has no single predictable ELF output (yocto, baremetal)." },
+              "map": { "type": ["string", "null"], "description": "POSIX-style path to the linker map file (Zephyr: `<buildDir>/build/zephyr/zephyr.map`). null when not derivable." },
+              "bin": { "type": ["string", "null"], "description": "POSIX-style path to the flat binary image (Zephyr: `<buildDir>/build/zephyr/zephyr.bin`). null when not derivable." },
+              "sizeReport": { "type": ["string", "null"], "description": "POSIX-style path to the readelf-headers size/stat report (Zephyr: `<buildDir>/build/zephyr/zephyr.stat`, written only when `CONFIG_OUTPUT_STAT=y` -- same 'doesn't exist until built/enabled' caveat as every other artifact path here). null when not derivable." },
+              "symbols": { "type": ["string", "null"], "description": "POSIX-style path to the symbol-table dump (Zephyr: `<buildDir>/build/zephyr/zephyr.symbols`, written only when `CONFIG_OUTPUT_SYMBOLS=y`). null when not derivable." },
+              "compileCommands": { "type": ["string", "null"], "description": "POSIX-style path to `compile_commands.json` (Zephyr: `<buildDir>/build/compile_commands.json` -- `west build` drives Ninja and the top-level Zephyr CMakeLists.txt forces `CMAKE_EXPORT_COMPILE_COMMANDS` unconditionally). null when the slice's runtime doesn't produce one at a predictable path -- which includes EVERY baremetal slice: its configure does pass `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, but CMake implements that variable 'only by Makefile Generators and Ninja Generators. It is ignored on other generators' (CMake's own docs), and this plan does not choose the generator -- under the Visual Studio generator, the default on Windows, the file is never written at all." },
+              "outputDir": { "type": ["string", "null"], "description": "Additive under schemaVersion 1 (alplabai/tan-cli#550), like `envAppendPath`/`executionPolicy` before it -- absent from a plan emitted by a pre-#550 producer, which a consumer must treat exactly as null. POSIX-style path to the directory this slice's RUNTIME artifacts -- its `add_executable()` targets -- land in: `<buildDir>/output` for baremetal, pinned by the `-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$<1:...>` arg the slice's own configure carries (the generator expression is what stops a multi-config generator appending a per-config subdirectory, so the path holds on Visual Studio / Xcode / Ninja Multi-Config too). This is a deterministic PLACE TO LOOK, NOT a build-succeeded oracle: `CMAKE_RUNTIME_OUTPUT_DIRECTORY` governs `add_executable` targets only, so an app built as `add_library(... STATIC ...)` plus a custom link/objcopy target builds cleanly and never creates this directory at all -- an empty or absent directory does not mean the slice produced nothing, and a consumer must not treat it as a failure signal. null for zephyr (the six named artifact paths above already index its tree) and yocto (its images land in the Yocto build tree's own deploy dir). This is a DIRECTORY, never a file: the target names inside are the app's own CMakeLists.txt to pick and are never invented here." }
             }
           },
           "debug": {
@@ -131,9 +132,23 @@
             "additionalProperties": false,
             "required": ["tool", "args", "cwd"],
             "properties": {
-              "tool": { "type": "string", "description": "Executable to invoke (e.g. 'west', 'bitbake')." },
+              "tool": { "type": "string", "examples": ["west", "bitbake", "cmake"], "description": "The executable's identity (e.g. 'west', 'bitbake', 'cmake') -- never a location; resolving it to a concrete path is the executor's job, not the plan's. No `pattern` is asserted here by design -- see the CHANGELOG and issue #1286." },
               "args": { "type": "array", "items": { "type": "string" }, "description": "Positional/flag arguments to `tool`, in order." },
               "cwd": { "type": "string", "description": "POSIX-style working directory to run `tool` from; always equal to this slice's buildDir." }
+            }
+          },
+          "postCommands": {
+            "description": "Additive under schemaVersion 1 (alplabai/tan-cli#550), like `envAppendPath`/`executionPolicy` before it -- absent from a plan emitted by a pre-#550 producer, which a consumer must treat exactly as an empty array. Further commands the executor MUST run, IN ORDER, after `command` exits 0; the slice is built only once every one of them has. Empty for the runtimes whose single tool invocation configures AND builds (`west build`, `bitbake`), and always empty when `command` is null. A `baremetal` slice's `command` is a `cmake -S ... -B .` that only CONFIGURES, so its `cmake --build .` step lives here -- an executor that runs `command` alone reports a green build over a build tree with no object file, archive or executable in it, which is the defect this key exists to close. `executionPolicy` applies to each step exactly as it does to `command`. No `--parallel`/`-j`: job count is the consumer's scheduling policy, the same reason the plan carries no `sequential` key.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["tool", "args", "cwd"],
+              "properties": {
+                "tool": { "type": "string", "examples": ["cmake"], "description": "The executable's identity, same contract as `command.tool` -- never a location." },
+                "args": { "type": "array", "items": { "type": "string" }, "description": "Positional/flag arguments to `tool`, in order." },
+                "cwd": { "type": "string", "description": "POSIX-style working directory to run `tool` from; always equal to this slice's buildDir, same as `command.cwd`." }
+              }
             }
           },
           "env": {

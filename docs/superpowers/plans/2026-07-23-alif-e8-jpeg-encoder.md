@@ -1,5 +1,10 @@
 # Alif E8 JPEG Encoder Surface — Implementation Plan
 
+> **STATUS — LANDED** in v0.13.0 (`CHANGELOG.md`, `VERSIONS.md`).
+> `include/alp/jpeg.h` + `src/backends/jpeg/{alif_hantro,sw_baseline}.c`
+> exist; the HW path is recorded silicon-proven.  Kept for
+> implementation-history context.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a portable `<alp/jpeg.h>` JPEG-**encoder** surface to alp-sdk — hardware-accelerated on the E1M-AEN801 (Alif Ensemble E8 Hantro VC9000E) via the vendored Zephyr driver, with a software baseline-JPEG fallback on every other SoM.

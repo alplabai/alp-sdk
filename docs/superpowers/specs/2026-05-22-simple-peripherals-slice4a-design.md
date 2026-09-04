@@ -1,7 +1,9 @@
 # Simple Peripherals Registry Migration (Slice 4a) Design
 
 **Date:** 2026-05-22
-**Status:** Draft — pending implementation
+**Status:** **LANDED.** `src/backends/{rtc,wdt,counter,qenc}/` all
+exist on the registry pattern this slice describes.  Kept for the
+migration-pattern rationale.
 **Owner:** alpCaner
 **Spec depth:** Multi-peripheral mechanical migration (one PR / one plan)
 **Predecessor:** `docs/superpowers/specs/2026-05-21-backend-registry-design.md` Section 6 → Slice 4a

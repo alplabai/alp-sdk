@@ -12,12 +12,35 @@ silicon_variant: AE512F80F55D5LS         # see metadata/socs/alif/ensemble/e5.js
 display_name: "E1M-AEN501 (Alif Ensemble E5 -- 1x A32 + 2x M55 + 2x Ethos-U55, preliminary)"
 
 on_module:
+  # POR_N / ER004: the module carries NO reset or brownout supervisor.  The
+  # E1M-AEN-2626-R2 netlist routes the SoC POR_N only to a pull-up and to the
+  # E1M edge connector, so satisfying the supervisor requirement is the
+  # CARRIER's job, not the module's.
+  #
+  # This is a hardware-damage requirement, not a robustness nicety.  Errata
+  # AERR0012 v2.0 ER004 applies to every E4/E6/E8 revision with no fix
+  # planned: "the voltage on the VDD_MAIN and VDD_BUCK pins must never drop
+  # below 1.65V once 1.65V is reached.  If this cannot be guaranteed, an
+  # external reset supervisor device must be used to drive (active low) the
+  # Ensemble system reset pin, POR_N" -- and, if it is not, "there is
+  # potential to damage the Ensemble SoC rendering it non-functional".
+  # Datasheet ADTS0013 v1.2 5.2.1 has since made it normative: "An external
+  # brownout supervisor must be connected to VDD_MAIN/VDD_BUCK.  The brownout
+  # supervisor must assert before voltage input to the chip falls below
+  # 1.65V."  (#1810)
   silicon:              alif:ensemble:e5       # 1x Cortex-A32 @ 800 + 2x M55 + Ethos-U55
   wifi_ble:             cc3501e
   secure_element:       optiga_trust_m
   rtc_external:         rv3028c7
   temperature_sensor:   tmp112
   eeprom:               eeprom_24c128
+  # Same on-module PHY as every AEN SKU: metadata/e1m_modules/aen/CHANGELOG.md:13-16
+  # records ONE shared PCB (r1) across E3..E8 that includes "TI DP83825
+  # Ethernet PHY"; metadata/socs/alif/ensemble/e5.json declares "ethernet": 1.
+  # Families with a single PHY omit ethernet_phy_count: (schema). See
+  # metadata/e1m_modules/E1M-AEN801.yaml + metadata/chips/dp83825.yaml for
+  # the bench evidence and the order-code caveat (#1241 "Blocked on").
+  ethernet_phy:         dp83825
   ospi_memories:
     ospi0:
       chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
@@ -38,6 +61,36 @@ on_module:
     capacity_mbit:  256             # 256 Mbit (32 MiB)
     interface:      ospi0
     chip_select:    1
+
+  i2c_devices:
+    # HELD, NOT the disproven LPI2C0 claim (#1848, ADR 0017 amended
+    # 2026-08-30): E1M-AEN801 shares this SoM PCB and its BRD_I2C is SoC
+    # I2C0 (function C), master-capable, not the slave-only Alif LPI2C0
+    # this comment used to assert for the whole family. `bus_master` stays
+    # OMITTED here pending a per-part check that this silicon variant's
+    # datasheet backs I2C0_SCL_C/I2C0_SDA_C on the same pads (E1M-AEN801 is
+    # the only one confirmed against ADTS0013 + a netlist so far) --
+    # holding this back is deliberate, not an unreviewed leftover.
+    #
+    # Even on E1M-AEN801 this is the intended master, not a working bus:
+    # the shared netlist shows no pull-up path on BRD_I2C, and the
+    # datasheet/HWRM disagree on whether that is fatal -- see
+    # docs/bring-up-aen.md §5.1. Addresses per docs/bring-up-aen.md
+    # §5.1's bench-verified table; pad names per
+    # examples/aen/aen-secure-element-sign/README.md.
+    brd_i2c:
+      devices:
+        - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }
+        - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30" }
+        - { chip: tmp112,           role: temp_sensor,     address_7bit: "0x48" }
+    # SoC I2C2, bridge/DNP-selected onto the E1M portable I2C0 pads -- the
+    # SoM-manifest EEPROM only, a SEPARATE bus from the trio above (see
+    # docs/bring-up-aen.md §5.1: "Two separate buses -- don't assume a
+    # single shared bus.").
+    e1m_i2c0:
+      bus_master: alif-ensemble
+      devices:
+        - { chip: eeprom_24c128,    role: eeprom,          address_7bit: "0x50" }
 
 # Off-SoC module memory in the canonical cross-family shape (see
 # som-preset-v1.schema.json `memory:`).  Values are DERIVED from the
@@ -72,11 +125,36 @@ topology:
     board: alp_e1m_aen501_m55_he        # Zephyr board target
     toolchain: arm-zephyr-eabi
 
-# Memory layout (SRAM banks + MRAM) is derived from the SoC variant
-# resolved via `silicon_variant:` -- see metadata/socs/<vendor>/<family>/<part>.json
-# `variants[].sram_banks_kb` + `mram_mb`. Declare a memory_map: block
-# here ONLY for non-stock partitioning (none of the current 11 SKUs
-# need one).
+# SRAM banks + total MRAM are derived from the SoC variant resolved via
+# `silicon_variant:` -- see metadata/socs/<vendor>/<family>/<part>.json
+# `variants[].sram_banks_kb` + `mram_mb`.
+#
+# The MRAM PARTITIONING below is declared explicitly, and must be (#1445).
+# It is build POLICY, not a silicon fact (`_resolve_slot0_load_address` in
+# scripts/alp_orchestrate/loader.py says so: two SoMs on the same part may
+# choose different slot0 windows), and the STOCK symmetric default is the
+# #1069 defect -- it puts m55_he's and m55_hp's slot0 at the SAME address,
+# so flashing one core silently clobbers the other's slot0 window. Any
+# dual-M55 SoM that publishes debug.jlink_flash_device therefore needs a
+# disjoint he_slot0/hp_slot0 pair before Flow D is usable at all.
+#
+# The layout is IDENTICAL to E1M-AEN801's, deliberately: every AEN SoM pins
+# a 5.5 MiB-MRAM part, and 64 + 2688 + 2688 + 64 + 96 + 32 = 5632 KiB fills
+# it exactly, so there is no per-SKU slack to allocate differently. Nothing
+# in it is E8-specific -- only mcuboot, the two M55 slot0 windows, and the
+# reserved/storage/atoc tail. he_slot0 0x80010000 and hp_slot0 0x802b0000
+# are bench-verified on E1M-AEN801 silicon (the values `tan flash` emits as
+# flash_args.slot0_load_address); storage 96 KiB + atoc 32 KiB are the
+# #1289 split. Change one of these only with a reason that is specific to
+# THIS SKU.
+memory_map:
+  - { name: mcuboot,   base: 0x80000000, size_kib: 64,   accessible_from: [m55_he, m55_hp], cacheable: true, carveout: false }
+  - { name: he_slot0,  base: 0x80010000, size_kib: 2688, accessible_from: [m55_he],          cacheable: true, carveout: false }
+  - { name: hp_slot0,  base: 0x802b0000, size_kib: 2688, accessible_from: [m55_hp],          cacheable: true, carveout: false }
+  - { name: reserved,  base: 0x80550000, size_kib: 64,   accessible_from: [m55_he, m55_hp],                  carveout: false }
+  - { name: storage,   base: 0x80560000, size_kib: 96,   accessible_from: [m55_he, m55_hp],                  carveout: false }
+  - { name: atoc,      base: 0x80578000, size_kib: 32,   accessible_from: [m55_he, m55_hp],                  carveout: false }
+  - { name: mram_main, base: "TBD",      size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true }
 
 # Inter-core mailbox IP: ARM MHUv2.  The controller token matches alp-sdk's
 # `alif,mhuv2-mbox` Zephyr MBOX driver; endpoint-specific overlays select the
@@ -128,6 +206,8 @@ pad_routes:
       doc: "CC3501E GPIO_19." }
   - { e1m: E1M_GPIO_IO20, dispatch: cc3501e, dispatch_pin: 26,
       doc: "CC3501E GPIO_26." }
+  - { e1m: E1M_GPIO_IO21, dispatch: unrouted,
+      doc: "Physically open on board 2626-R2 (no CC3501E or Alif termination); r1 routed it to CC3501E GPIO_30 -- see aen/hw-revisions.yaml pad_route_overrides (#1854)." }
 
 # On-module helper MCUs.  CC3501E (TI Wi-Fi 6 + BLE 5.4) is wired
 # on the AEN module; firmware is embedded in alp-sdk at
@@ -135,9 +215,27 @@ pad_routes:
 helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e
-    firmware_path: firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin
+    # firmware_path is deliberately OMITTED: the CC3501E firmware and its
+    # signed artefacts moved to alplabai/cc3501e-bridge-firmware (ADR 0031),
+    # so there is no repo-relative file to point at.  Obtain the image from
+    # that repo's prebuilt/ directory, and verify it against the .sha256 and
+    # .sig shipped beside it before flashing.  The schema and
+    # scripts/check_helper_firmware_path.py both treat an absent key as
+    # meaningful rather than missing -- a stale path that no longer resolves
+    # would be worse, because it stays indistinguishable from a good one
+    # until someone tries to flash it.
     # CC3501E firmware is Alp-released, applied over the bridge SPI
-    # programming OTP; NOT customer-flashed.
+    # programming OTP.  Alp Lab programs it in production; a customer
+    # flash is permitted only to recover a bricked device, using
+    # Alp Lab-supplied binaries -- `flash_policy: recovery_only` states
+    # that directly instead of leaving a tool to infer it from the
+    # presence of an OTA channel -- the two are independent facts
+    # (#1357).  `tan flash` DOES decline this entry: `flash_policy:
+    # recovery_only` is checked ahead of any `flash_method` presence
+    # (`python/tan/core/flash_plan.py::helper_flash_gate`, tan-cli#611) --
+    # the same shape as `gd32_bridge` (see docs/gd32-bridge.md's "Who
+    # flashes it, and when" section).
+    flash_policy:   recovery_only
     update_channel: alp_ota_spi_otp
 
 default_hw_rev:         r2                  # see metadata/e1m_modules/<family>/hw-revisions.yaml

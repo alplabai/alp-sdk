@@ -6,7 +6,7 @@
  * abort), Alif companion only.  Command-group TU of the
  * alp_console_companion.c split (#673 Phase 2): registers onto the
  * (alp, companion) dynamic subcommand set the core TU declares.  Shared
- * companion context + bridge-bus mutex come from
+ * companion context comes from
  * alp_console_companion_internal.h.
  *
  * Inspect + drive the over-the-bridge PSA-FWU session (host wrappers
@@ -57,9 +57,7 @@ static int cmd_companion_ota_status(const struct shell *sh, size_t argc, char **
 	}
 
 	alp_cc3501e_ota_status_t st = { 0 };
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
-	alp_status_t s = cc3501e_ota_status(companion_cc3501e, &st, ALP_COMPANION_OTA_MS);
-	k_mutex_unlock(&companion_bus_lock);
+	alp_status_t             s  = cc3501e_ota_status(companion_cc3501e, &st, ALP_COMPANION_OTA_MS);
 
 	if (s == ALP_ERR_NOT_READY) {
 		shell_warn(sh, "OTA not available (no PSA-FWU in this CC3501E image)");
@@ -72,6 +70,23 @@ static int cmd_companion_ota_status(const struct shell *sh, size_t argc, char **
 	shell_print(sh, "state:   %s (%u)", companion_ota_state_name(st.state), st.state);
 	shell_print(sh, "written: %u B", (unsigned int)st.bytes_written);
 	shell_print(sh, "total:   %u B", (unsigned int)st.total_len);
+	/* #1610 bench triage.  reserved[2] carries TWO encodings, and treating it as
+	 * a bare fault code printed `fault: stage 64` on every healthy session:
+	 *   1..0x3F  the psa_fwu_* call that failed the last window flush
+	 *            (cc3501e_hw_ota_fault's fail_stage).
+	 *   0x40|p   no psa fault -- the low bits are the transport PHASE, and bit
+	 *   0xC0|p   0x80 says the bridge is in POLLED mode.  The firmware emits
+	 *            this shape whenever fail_stage is 0, i.e. on every good run
+	 *            (cc3501e-bridge-firmware:src/protocol_ota.c).
+	 * 0 means the device published neither. */
+	if (st.reserved[2] != 0u && st.reserved[2] < 0x40u) {
+		shell_print(sh, "fault:   stage %u (see cc3501e_hw_ota_fault)", st.reserved[2]);
+	} else if (st.reserved[2] != 0u) {
+		shell_print(sh,
+		            "bridge:  %s, phase %u",
+		            (st.reserved[2] & 0x80u) ? "polled" : "DMA",
+		            (unsigned int)(st.reserved[2] & 0x3Fu));
+	}
 	return 0;
 }
 
@@ -88,10 +103,20 @@ static int cmd_companion_ota_begin(const struct shell *sh, size_t argc, char **a
 		shell_error(sh, "usage: alp companion ota begin <total_len_bytes>");
 		return -EINVAL;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
-	alp_status_t s =
-	    cc3501e_ota_begin(companion_cc3501e, (uint32_t)total_len, ALP_COMPANION_OTA_MS);
-	k_mutex_unlock(&companion_bus_lock);
+	/* Enter update mode FIRST.  Opening a session runs psa_fwu_query and, on a
+	 * dirty slot, a full slot erase -- and those never return while the bridge is
+	 * open in callback/DMA mode, so this command used to WEDGE the device until a
+	 * WIFI_EN/nRESET cold cycle.  cc3501e_ota_begin now refuses that outright, so
+	 * without this the command would simply always fail. */
+	alp_status_t s = cc3501e_ota_update_mode(companion_cc3501e, true, ALP_COMPANION_OTA_MS);
+	if (s != ALP_OK) {
+		shell_error(sh,
+		            "could not enter OTA update mode (%d) -- the device reboots into a "
+		            "polled bridge for OTA; retry, or reset the companion",
+		            (int)s);
+		return -EIO;
+	}
+	s = cc3501e_ota_begin(companion_cc3501e, (uint32_t)total_len, ALP_COMPANION_OTA_MS);
 
 	if (s == ALP_ERR_NOT_READY) {
 		shell_warn(sh, "OTA not available (no PSA-FWU in this CC3501E image)");
@@ -116,9 +141,7 @@ static int cmd_companion_ota_abort(const struct shell *sh, size_t argc, char **a
 		shell_warn(sh, "companion not registered");
 		return -ENODEV;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_ota_abort(companion_cc3501e, ALP_COMPANION_OTA_MS);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "ota abort failed (%d)", (int)s);

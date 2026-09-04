@@ -64,18 +64,7 @@ exit
 EOF
 "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd-preflight.jlink \
   > /tmp/flowd-preflight.out 2>&1 || true
-if grep -qi "$GD32_DPIDR" /tmp/flowd-preflight.out; then
-  echo "!! ABORT: probe reports SW-DP IDR 0x$GD32_DPIDR -- that is the V2N-M1" >&2
-  echo "   GD32, NOT the AEN E8. Wrong probe selected (JLINK_SN='${JLINK_SN:-}')." >&2
-  echo "   Refusing to write MRAM. See /tmp/flowd-preflight.out." >&2
-  exit 4
-fi
-if ! grep -qi "$AEN_DPIDR" /tmp/flowd-preflight.out; then
-  echo "!! ABORT: expected AEN E8 SW-DP IDR 0x$AEN_DPIDR not seen on connect." >&2
-  echo "   Refusing to write MRAM -- check JLINK_SN / wiring / probe selection." >&2
-  cat /tmp/flowd-preflight.out >&2
-  exit 4
-fi
+bench_jlink_assert_aen_dpidr /tmp/flowd-preflight.out "MRAM write preflight" || exit 4
 echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 
 # 1. stage the image + the per-app signed-ATOC config (same JSON flow-run.sh uses)
@@ -112,14 +101,39 @@ r
 g
 exit
 EOF
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd.jlink 2>&1 | tee /tmp/flowd.out | \
-  grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Reset|Cortex|Found" | head -30
+# Write the transcript FIRST, fully, then grep|head it for display (#1488
+# finding 5) -- a `... | tee out | grep ... | head -N` pipeline lets `head`
+# exit after N lines and SIGPIPE grep, which then closes tee's stdout pipe;
+# tee can die from that SIGPIPE before JLinkExe's full transcript (including
+# the `Verify successful.` / `Verify failed.` line the gate below depends on)
+# is written to disk. Once a genuinely good flash's transcript got truncated
+# that way, the absence of "verify successful" in the truncated file would
+# read as a hard exit 3 on a board that actually flashed fine.
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd.jlink > /tmp/flowd.out 2>&1 || true
+grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Reset|Cortex|Found" /tmp/flowd.out | head -30
 echo "----- (full log: /tmp/flowd.out) -----"
 if grep -qi "Could not connect to the target device" /tmp/flowd.out; then
   echo "!! $DEV profile FAILED to connect -- flow D not unlocked on this probe (same blocker the doc records)."
   echo "   The MRAM was NOT written. Check the new probe's firmware / connect-under-reset behaviour."
   exit 2
 fi
+
+# GATE ON THE VERIFY RESULT (#1488) -- same defect flash-jlink-hp.sh was fixed
+# for under #1343. The `verifybin` above was issued but its outcome was never
+# read: the output went to a display-only pipe and the connect check was the
+# only thing that could fail this script, so a `Verify failed.` exited 0 and
+# reported a good flash.
+if grep -qiE "verify failed|verification failed|mismatch" /tmp/flowd.out; then
+  echo "!! VERIFY FAILED -- the bytes on the part do NOT match $PKG."
+  grep -iE "verify failed|verification failed|mismatch" /tmp/flowd.out | head -5
+  echo "   Do not treat this board as flashed."
+  exit 3
+fi
+if ! grep -qi "verify successful" /tmp/flowd.out; then
+  echo "!! no verifybin success reported -- treating as FAILED (the verify never ran)."
+  exit 3
+fi
+echo "verify: verifybin OK ($PKG @ $ADDR)"
 
 # 4. SES has re-booted the app; attach read-only with the GENERIC device and dump
 #    the RAM console (the part-number profile can't re-halt the running secure core).
@@ -138,6 +152,10 @@ mem8 $BUF, $SIZE
 exit
 EOF
   "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd-read.jlink 2>/tmp/flowd-rd.err > /tmp/flowd-rd.out || true
+  # JLinkExe exits 0 even when it never opened the probe, so `|| true` above
+  # hides a total connect failure and the decode below would render it as
+  # empty target output (alp-sdk#1318).
+  bench_jlink_assert_connected /tmp/flowd-rd.out "Flow D read-back" || exit 7
   echo "----- $NAME RAM console (flow-D flashed, SE-booted) -----"
   awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/flowd-rd.out
   echo; echo "--------------------------------------------------------"

@@ -1,6 +1,13 @@
 # #610 §7 slice 1 — build-receipt-v1 Implementation Plan
 
-> REQUIRED SUB-SKILL: superpowers:subagent-driven-development / executing-plans. Checkbox steps.
+> **Historical transcript.** Implementation plan dated 2026-07-13. The
+> SDK has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as a
+> live task list; kept for implementation-history rationale only.
+
+> REQUIRED SUB-SKILL: superpowers:subagent-driven-development / executing-plans. Checkbox steps. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** A versioned deterministic build receipt: `build-receipt-v1` schema + pure composer (`scripts/build_receipt.py`) + schema gate + hermetic tests. Composes from existing inputs (git rev, board.yaml/lock/build-plan digests, image hashes). Additive; no build/packaging/release.yml change.
 

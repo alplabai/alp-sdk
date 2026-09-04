@@ -189,7 +189,7 @@ void alp_pwm_close(alp_pwm_t *pwm)
 	 * bounded wait instead of a use-after-free (issue #629).  Losing
 	 * the CAS (already closed/closing/never-opened) makes this a
 	 * no-op, matching the existing void-close idempotency contract. */
-	if (!alp_handle_begin_close(&pwm->lifecycle, &pwm->active_ops)) return;
+	if (!alp_handle_begin_close_blocking(&pwm->lifecycle, &pwm->active_ops)) return;
 	if (pwm->state.ops != NULL && pwm->state.ops->close != NULL) {
 		pwm->state.ops->close(&pwm->state);
 	}
@@ -288,7 +288,7 @@ void alp_pwm_capture_close(alp_pwm_capture_t *cap)
 	 * bounded wait instead of a use-after-free (issue #629).  Losing
 	 * the CAS (already closed/closing/never-opened) makes this a
 	 * no-op, matching the existing void-close idempotency contract. */
-	if (!alp_handle_begin_close(&cap->lifecycle, &cap->active_ops)) return;
+	if (!alp_handle_begin_close_blocking(&cap->lifecycle, &cap->active_ops)) return;
 	if (cap->state.ops != NULL && cap->state.ops->capture_close != NULL) {
 		cap->state.ops->capture_close(&cap->state);
 	}

@@ -5,7 +5,10558 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] - v0.16.0 candidate
+## [Unreleased] - v0.17.0 candidate
+
+### Changed — CC3501E wire protocol 7 to 8: request identity for every worker-routed opcode
+
+**HELD: needs `cc3501e-bridge-firmware` v0.6.0 (protocol 8) to be released and a
+bench run before this ships.** A protocol-8 host refuses a protocol-7 firmware
+outright (`cc3501e_reset()` returns `ALP_ERR_VERSION` on a `GET_VERSION`
+mismatch), so merging this before that firmware release would break the
+companion link on every unit currently flashed with v0.5.1.
+
+Protocol v7 gave `SOCK_SEND` a retry seq so a lost reply could not make the
+host's poll-by-repeat look like a new request and re-transmit the payload. That
+fix could only ever cover one opcode, because it spent a spare byte that
+happened to exist inside one request struct; the other 25 worker-routed opcodes
+still had no request identity at all, and a lost reply on any of them
+re-executed the operation
+(`alplabai/cc3501e-bridge-firmware#102`).
+
+- **The seq moved to the frame header.** Flags bits 3..7 (`0x08`-`0x80`, unused
+  through v7) carry a 5-bit retry seq, so every worker-routed opcode is covered
+  at zero wire cost and with no per-opcode struct change.
+  `poll_by_repeat()` allocates one seq per LOGICAL command and re-sends it
+  unchanged on every retry of that command — that constancy is the whole
+  mechanism. `cc3501e_request()`, the single-shot path with no retry loop, sends
+  the reserved `ALP_CC3501E_REQ_SEQ_NONE` (0) instead, so a frame that is not a
+  repeat of anything can never be answered from the firmware's latch. A pre-v8
+  host leaves those bits clear, which is why 0 had to be reserved: without it,
+  every one of its frames of a given opcode would look like the same seq.
+- **`DIAG_GET_STATS` grew additively, 8 to 16 bytes.** `cc3501e_diag_stats()`
+  now fills a `cc3501e_diag_stats_t` — a struct rather than out-params,
+  because the reply has now changed shape twice — carrying `worker_execs` and
+  `retry_latch_hits` beside the two frame counters. Those two are what
+  distinguish "the retry was absorbed" from "the operation ran twice", i.e. the
+  only way to observe the fix above on hardware. A v7 firmware answers only the
+  first two counters; `has_worker_counters` then reports the other two as
+  ABSENT rather than as a measured zero, and `alp companion diag stats` says so
+  in words — a bench run told "retry_latch_hits = 0" by firmware that never
+  counted them would record a pass for a mechanism that was not running.
+
+`SOCK_SEND` keeps its own 8-bit struct seq and is exempt from the header-seq
+mechanism on both sides (8 bits of identity is strictly stronger than 5, and
+that path is the bench-validated one); `SOCK_RECV` is exempt because it consumes
+stream state, so a header-seq match is not evidence that two frames are the same
+logical read.
+
+Verified in `tests/zephyr/cc3501e_host_driver` against the software slave model,
+78/78 cases, each new assertion mutation-proven: re-allocating the seq per
+attempt instead of per command, making the single-shot path claim a real seq,
+and hard-coding `has_worker_counters` true each fail exactly one test and no
+others. Not verified on silicon — the AEN801 bench unit is hardware-dead
+(#1883).
+
+### Fixed — thirteen Alif E8 driver defects found against the HWRM, four proven on silicon
+
+A read-only review of the Alif E8 drivers against `AHRM0012NDA` v0.3, datasheet
+`ADTS0013` v1.2 and errata `AERR0012` v2.0 (#1831) produced thirteen filed
+defects. All are fixed here; the four with an on-silicon witness are marked.
+
+**Bench-verified on `E1M-AEN801` (`AE822FA0E5597LS0` Rev A0), 2026-08-30:**
+
+- **Every 8- and 16-bit CRC BusFaulted** (#1847). `CRC_DATA_IN_8_n` is a range of
+  byte-wide registers and HWRM 15.2.5.3.5 says "only 8-bits can be written per
+  beat"; the driver used a 32-bit store, so the whole narrow-CRC path was
+  unreachable on hardware. Found by extending `aen-crc-regcheck` past the one
+  32-bit algorithm it had always run. All four algorithms now pass against their
+  host references.
+- **The ADC12 clock ran ~16x over its rated maximum** (#1823). `PERIPH_CLK`
+  measures ~156.5 MHz with no prescaler, so `clock_div = 2` clocked the SAR at
+  ~78 MHz against a 5000 kHz datasheet limit. Now 16, the lowest the field
+  reaches. Divide-by-32 was tried and does not work — HWRM's "Others: Reserved"
+  is real — so the part is still ~2x over spec and #1823 stays open for Alif.
+- **A falling edge on a comparator input locked the core** (#1821). The HSCMP has
+  two interrupt sources; the ISR cleared only bit 0 on a level-sensitive line,
+  and the "mask" writes set the rising-edge mask while clearing the falling-edge
+  one. `CMP_INTERRUPT_MASK` now reads `0x3 / 0x0 / 0x3` across arm and disarm.
+- **LPTIMER alarms fired one tick late** (#1829). The interval is
+  `LOADCOUNT + 1` clocks (HWRM 13.1.4.7), so a 1-tick alarm at 32768 Hz took
+  61.0 us instead of 30.5. `LOADCOUNT` now reads `ticks - 1` for every row.
+
+**Fixed on the documents, without a bench witness available:** the ADC's
+interrupt-mask direction, sequencer MODE field, sample-width encoding,
+completed-sample-register selection and both PGA gain ladders (#1822); five more
+LPTIMER/UTIMER/PWM defects including a wrong-direction relative alarm and a live
+period change that left a pad dead for ~43 s (#1829); four PDM defects including
+an unmasked FIFO count that overran its destination array (#1826); MHU
+`ACCESS_REQUEST` pinned high for the life of the image (#1827); the CPI frame
+reaching the AXI master with no bound against the caller's buffer (#1825);
+`__enable_irq()` clobbering PRIMASK mid-MRAM-write (#1824); one DMA error
+wedging the SPI driver in a `K_FOREVER` wait (#1819); a `DMASTP` acking the
+wrong peripheral (#1818); the event router discarding silicon `DMA_ACK_TYPE`
+defaults (#1820); no cache maintenance on non-snooping PL330 buffers (#1830);
+and two hal_alif UTIMER bugs routed around at their call sites, plus a QEC
+channel that never counted (#1828).
+
+### Fixed — AEN metadata and pinout facts that were wrong or missing
+
+- `inter-chip.tsv` paired Alif MOSI with CC3501E `GPIO_28` and MISO with
+  `GPIO_29`. That is backwards, and it is what made three Alp documents appear
+  to describe two different boards. The R2 module netlist routes P14_5 to
+  `GPIO_29` (PICO) and P14_4 to `GPIO_28` (POCI) — the board is correct and
+  needs no rework (#1807).
+- `IO16` and `IO17` were published as customer IO while the bridge firmware owns
+  and refuses both pads. Both rows now name the claim, so the generated pinmux
+  capability carries it (#1808).
+- The E8 SoC metadata pointed at datasheet v1.0 and published 29 uA/MHz, a
+  figure from the pre-1.0 v0.51 draft. Now v1.2 and 27 uA/MHz, with the I2C
+  ceiling drop to 1.0 Mbps, the shared-pin LPSPI channel and the six-entry STOP
+  ladder recorded as notes (#1811).
+- **Errata ER004's external brownout supervisor is the carrier's job, not the
+  module's**, and nothing said so. `POR_N` is pulled up on-module and brought
+  out to the E1M edge; no supervisor part is on the SoM. Omitting one on a
+  carrier can permanently damage the SoC (#1810).
+
+
+### Fixed — CC3501E socket send/recv put 4 KB buffers on the caller's stack
+
+`cc3501e_sock_send()` and `cc3501e_sock_recv()` each declared
+`uint8_t x[ALP_CC3501E_MAX_PAYLOAD]` — a 4096-byte array — as a local. The Zephyr
+shell thread is `CONFIG_SHELL_STACK_SIZE=2048`, so any shell caller that reached
+those frames overflowed the stack. Observed on E1M-AEN801 as a hard fault from
+`alp companion sock tcp-get`:
+
+```
+E: ***** USAGE FAULT *****
+E:   Stack overflow (context area not valid)
+```
+
+Both buffers now use per-context scratch (`ctx->sock_buf`) guarded by
+`ctx->sock_busy` — the pattern issue #740 established for `wifi_scan_buf` /
+`ble_scan_buf` / `evt_buf`, which the socket path was missed by.
+
+It looks intermittent but is not: the 4 KB frames are only allocated once a
+socket connect **succeeds**, so runs whose connects failed early never entered
+the frames and never faulted. Reaching the defect is what varies; any successful
+`tcp-get` from the shell overflows deterministically.
+
+Same reentrancy caveat as #740 — `sock_busy` catches same-call-stack reentrancy,
+not two genuinely concurrent callers on one ctx. `struct cc3501e` gains
+`sock_buf` and `sock_busy`, so the v0.16 ABI snapshot is regenerated (additive;
+no symbol removed).
+
+**Not yet verified on silicon**: proving it needs a *successful* `tcp-get`, and
+the Alif console app could not be rebuilt (its Zephyr configuration is generated
+by `scripts/alp_orchestrate.py` and three attempts to reconstruct that
+environment failed at kconfig). This is a fix by inspection with a named
+mechanism, not a bench-proven one.
+
+### Fixed — the CC3501E attention line was masked by the first edge and never re-armed
+
+Interrupt-driven async-event delivery (`CONFIG_ALP_SDK_CC3501E_EVENT_IRQ`) never
+delivered. The attention ISR masks the line and delegated re-arming to the
+request lock, but `cc3501e_lock_acquire()` only ever masks and
+`cc3501e_lock_release()` deliberately does not re-arm — re-arming there
+unconditionally had dropped an event drain into the middle of a radio operation
+and hung the device after `WIFI_SCAN`. So the **first** edge masked the line
+permanently.
+
+Instrumented on E1M-AEN801: the ISR frozen at exactly **1** across a 40 s armed
+window, while the firmware's pulse counter climbed to 86 with zero skips and
+arming returned 0. Firmware, wiring and arming were all fine; nothing put the
+line back.
+
+- `cc3501e_attn_arm()` now records the application's intent, and
+  `cc3501e_lock_release()` re-arms only inside that window — ordinary traffic
+  still never re-arms, so the `WIFI_SCAN` hang stays fixed. New public
+  `cc3501e_attn_rearm_if_desired()`.
+- The event drain backs off 50 ms before re-arming when it delivered nothing.
+  The wire is shared with READY flow control, so a transaction end is
+  indistinguishable from an attention pulse and the drain's own trailing READY
+  rise re-triggers the path: 11888 ISRs for 86 real events without the backoff,
+  220 with it, and no events lost either way.
+- The firmware attention pulse holds LOW long enough to be sampled; two
+  back-to-back `GPIO_write()` calls left it under the host pad synchroniser.
+
+Measured with the console timer poll raised to 60 s so only an edge could
+deliver: **86 of 86 pulses delivered**, `RESULT PASS: cc3501e link stable over 20
+soak PINGs (ping_fail=0)`.
+### Fixed — the CC3501E TI build still aborted at the LINK step
+
+#1722 stopped a compiler *warning* on stderr from aborting `build_ti.ps1`, but it
+closed the stderr-tolerant window immediately after the compile loop. The linker,
+`tiarmobjcopy` and `tiarmsize` all run after that point and all write to stderr,
+so the same `NativeCommandError` could still abort the script — just later.
+
+Observed while building with `-Ble -AttnSelftest`: the script printed
+`== Link ==`, then died on a `NativeCommandError` from `tiarmclang` at the link
+invocation. #1722's other half worked exactly as intended — the artifacts are
+deleted up front, so the build left **no** `cc3501e-bridge.out` rather than a
+stale flashable one — but the failure was still reported as a PowerShell
+exception rather than as the build error it was.
+
+- The stderr window now closes only after the last native tool.
+- `tiarmobjcopy` (hex and bin) and `tiarmsize` gained explicit `$LASTEXITCODE`
+  checks, so widening the window cannot hide a genuine failure; the link step
+  already had one.
+
+With this, the same build surfaced its real error — `unresolved symbols remain`
+naming the two missing symbols — instead of a PowerShell stack trace.
+### Added — 16-bit FIFO packing on the Alif DW-SSI polled path (+25% bridge throughput)
+
+The polled SPI path moved one byte per FIFO slot. MMIO accesses are what that
+loop actually costs (~45 cycles each on this SoC), so at 25 MHz the wire needs
+320 ns/byte while the 8-bit loop spends roughly 620 ns of CPU on it — the host,
+not the link, was the bottleneck.
+
+`CONFIG_SPI_DW_ALIF_PACK32` (default `n`) packs 2 bytes per FIFO slot on eligible
+bulk transfers. The DR shifts MSB-first, so writing the stream's next bytes
+big-endian into a 16-bit frame puts exactly the same bits on the wire as two
+8-bit frames — the peer cannot tell the difference, and no firmware change is
+needed on the other end.
+
+Measured on E1M-AEN801 (`e1m-aen-evk-01`), 512 x 4092 B framed and ACKed over the
+CC3501E bridge: **912 KB/s -> 1139 KB/s**, reproducible to within 30 us across
+runs, with `RESULT PASS: cc3501e link stable over 20 soak PINGs (ping_fail=0)`.
+
+Also fixed, and the reason the option was unusable: the frame size is programmed
+by a read-modify-write of the **live** CTRLR0, and `spi_dw_configure()` returns
+early when the `spi_config` is unchanged — which it is for every transfer on a
+bridge that reuses one config. A DFS written for a packed transfer therefore
+persisted, and the next small transfer ran the 8-bit loop against a 16-bit frame
+size. That is not a subtle degradation: it produced zero successful PINGs from
+boot. The frame size is now programmed on both paths, restoring `dfs * 8` when a
+transfer is not packed.
+
+`max-xfer-size = <32>` (4 bytes/slot) was probed on the bench and does **not**
+work on this instance — zero successful PINGs — so the binding default of 16
+stands. Whether that is the macrocell's real `SSI_MAX_XFER_SIZE` or a defect in
+the 32-bit path is unresolved; the TRM value has not been transcribed.
+
+### Fixed — CC3501E async events reached only one consumer
+
+`cc3501e_t` carried a single async-event callback slot, and
+`cc3501e_set_event_callback()` overwrote it unconditionally. The Zephyr console
+companion registers its own callback on the shared context from its init path —
+after the application's `main()` has already registered — so it displaced the
+application's callback and drained every event into its own sink.
+
+Nothing reported the conflict: the firmware ring drained normally,
+`cc3501e_poll_events()` returned `ALP_OK`, and the application simply never saw
+an event. Confirmed on E1M-AEN801 silicon, where the firmware ring showed 16
+events queued and drained while the application's poll returned `ALP_OK` having
+received zero bytes.
+
+- `cc3501e_set_event_callback()` is replaced by
+  `cc3501e_add_event_callback()` / `cc3501e_remove_event_callback()`, and events
+  fan out to every registered subscriber. The console and an application are
+  both legitimate consumers of the same events.
+- Registration is idempotent per (callback, user) pair, so re-arming defensively
+  does not double-deliver.
+- Exhausting `CC3501E_EVENT_SUBSCRIBERS` (4) refuses the new registration with
+  `ALP_ERR_NOMEM` rather than displacing a working subscriber — the failure mode
+  this fixes was precisely a silent displacement.
+
+**Migration:** replace `cc3501e_set_event_callback(ctx, cb, user)` with
+`cc3501e_add_event_callback(ctx, cb, user)`; detach with
+`cc3501e_remove_event_callback(ctx, cb, user)` instead of passing `cb = NULL`.
+### Fixed — the CC3501E TI build could ship a stale image after a failed build
+
+`build_ti.ps1` aborted **mid-compile** on a compiler *warning*: `tiarmclang`
+writes warnings to stderr, and under `$ErrorActionPreference = 'Stop'`
+PowerShell turns native stderr into a terminating `NativeCommandError`. With
+`-Ble`, a warning in a TI SDK source (`cc3xxxhif_ble_hci.c`) ended the build
+before the linker ran — while the script still printed `0 error(s)` from the
+compile summary.
+
+The build left the **previous** `cc3501e-bridge.out` in place, and that file is
+what the flash-image builder packages. Every subsequent flash therefore carried
+a stale image: the device reported the *old* `fw_version`, and firmware changes
+under test never ran on silicon while appearing to have been flashed.
+
+- Delete `cc3501e-bridge.{out,hex,bin}` **before** compiling, so a build that
+  dies cannot leave a flashable artifact behind (both `build_ti.ps1` and
+  `build_ti.sh`).
+- Stop treating a stderr warning as fatal in the compile loop; `$LASTEXITCODE`
+  was already checked per source and remains the real error signal.
+
+Verified on E1M-AEN801 silicon: with the fix, a `firmware-version.txt` bump to
+`0.3.1` reaches the device (`fw_version=0x0301`) — before it, the same flash
+still reported `0x0201`.
+
+### Documented — recovering an Alif E8 whose Secure Enclave is stuck in Recovery
+
+`debugging-aen.md` §7.4 previously said the SDK had no recipe for an SE-side
+fault and would not invent one. One half of that state turns out to be
+routinely recoverable, and the recipe is now written down because we ran it on
+our own AE822 silicon: when the maintenance tool reports `Device connected in
+Recovery`, SEROM is alive with no valid SERAM to hand off to, and ROM → MRAM
+Recovery restores it.
+
+- §7.4 documents the state, its cause — an interrupted **System Package**
+  write, the Secure Enclave counterpart of the interrupted application write
+  already covered in §7.3 — the Recovery-only ROM menu, the ~4.5 minute write,
+  and the two reads that verify the part before the application is reflashed.
+- §7.4.3 covers the case where the tool cannot reach the target at all, where
+  a connect-under-reset over SWD supplies the reset SEUART is waiting for,
+  with the E8 SW-DP ID (`0x4C013477`) as the check that the probe is on the
+  right silicon.
+- §7.5 keeps the honest escalation path for the genuinely silent SE, which is
+  still Alif's domain.
+- The `aen-provisioning.md` troubleshooting row for the "device in SEROM
+  Recovery mode" warning now links the procedure instead of only naming it.
+
+Also recorded: `SE CLOCK: HFRC` is present on a **healthy** board — the SE runs
+on the RC oscillator by design, so it is not a fault signature on its own.
+
+## [v0.16.0] - 2026-08-23
+
+### Documented — the model & edge-AI lifecycle design record lands on `dev`, ahead of the code it plans (#933)
+
+The design spec, roadmap and eight implementation plans for the model &
+edge-AI lifecycle surface (`check` / `envelope` / `zoo` / `prep` / `measure` /
+`tflite-convert`, plus the `tan` and VS Code counterparts) existed only inside
+the consolidated integration PR #933, which is 77 files and `CONFLICTING`.
+That made the *only copy* of ~3,800 lines of design reasoning reachable only by
+checking out a branch that cannot merge.
+
+They are pure additions under `docs/superpowers/`, they conflict with nothing,
+and they are the input to every slice that follows — so they land first, on
+their own:
+
+- `docs/superpowers/specs/2026-07-24-model-edge-ai-management-design.md`
+- `docs/superpowers/specs/2026-07-24-edge-ai-lifecycle-roadmap.md`
+- `docs/superpowers/plans/2026-07-24-alp-model-check.md`
+- `docs/superpowers/plans/2026-07-24-alp-model-envelope.md`
+- `docs/superpowers/plans/2026-07-24-alp-model-zoo.md`
+- `docs/superpowers/plans/2026-07-24-alp-model-prep.md`
+- `docs/superpowers/plans/2026-07-24-alp-model-measure.md`
+- `docs/superpowers/plans/2026-07-25-alp-model-tflite-convert.md`
+- `docs/superpowers/plans/2026-07-24-tan-model-envelope.md`
+- `docs/superpowers/plans/2026-07-24-vscode-models-panel.md`
+
+The two `specs/` files are not optional extras: `2026-07-24-alp-model-check.md`
+§"Spec coverage" and `2026-07-24-alp-model-envelope.md` both cite them by path,
+so landing the plans without them would ship dangling references.
+
+No code, no metadata, no schema, no public header changes. #933 stays open as
+the reference copy until its last code slice lands.
+
+### Fixed — `prerequisites.install.linux` handed every non-Debian Linux host an unrunnable `sudo apt-get` command (#1464)
+
+`metadata/bootstrap.json`'s `prerequisites.install.linux` was apt-only, keyed
+flat by tool. On Fedora, Arch, and Rocky Linux — none of which have
+`apt-get` — `tan` surfaced `sudo apt-get install -y ...` verbatim in
+`data.missingPrerequisites[].command`, the machine-readable field
+`alp-sdk-vscode` consumes, for a host that could not run it. Measured
+byte-identical to `debian:12` on all three.
+
+`install.linux` is now keyed by PACKAGE MANAGER, not distro:
+
+- `install.linux.apt` — unchanged, still the required, complete map for
+  every `prerequisites.posix` tool.
+- `install.linux.dnf` — new, `sudo dnf install -y <pkg>` for `git`, `cmake`,
+  `python3`, `xz`, `wget`. `ninja` is deliberately absent: Fedora's own repos
+  carry `ninja-build`, but the RHEL-derivative default repos (measured on
+  `rockylinux:9` — BaseOS/AppStream/Extras, no EPEL) do not carry `ninja`
+  under any name, so a single dnf-ecosystem-uniform command does not exist —
+  shipped absent rather than guessed.
+- `pacman` (Arch) ships no entry at all: an unattended `pacman -S` against a
+  sync database staler than the target system risks a partial upgrade, a
+  known way to break an Arch install, and no container-provable string is
+  both safe-unattended and reliable on an unknown-staleness real host.
+
+Every shipped entry was proven by actually running it in a real container
+(`fedora:42`, `rockylinux/rockylinux:9`, `debian:12` control) and confirming
+the binary landed on `PATH` — an unverified package name is the defect being
+fixed, so nothing shipped without that proof. `.github/workflows/pr-bootstrap-distro-install.yml`
+re-runs the same proof on every relevant PR going forward, deriving both the
+install commands and the verification tool list from the manifest at run
+time.
+
+Updated in lockstep: `metadata/schemas/bootstrap-v1.schema.json`,
+`scripts/bootstrap.sh` (PM-detecting `PREREQ_HINT_APT`/`PREREQ_HINT_DNF`, was
+one apt-only `PREREQ_HINT_LINUX`), `scripts/alp_cli/doctor.py`
+(`_prereq_install_hint` adds a package-manager-detection hop on Linux only),
+and `scripts/check_bootstrap_manifest.py`'s drift gate (`install.linux.apt`
+stays required-and-complete; `install.linux.dnf` is checked as a
+proven-subset, not required-complete).
+
+Backward compatible: an old `tan` reading this new nested shape sees
+`install.linux` as a dict of dicts, filters every entry to none (its own
+`_resolve_install_commands` keeps only `str -> str` values), and falls back
+to its byte-pinned apt table — today's behaviour, no crash. Verified against
+`python/tan/core/bootstrap.py`'s `_resolve_install_commands`, not assumed.
+
+`tan-cli` carries a byte-pinned copy of the same six apt strings as a
+manifest-predates-this-issue fallback — the consumer-side landing that reads
+the new `dnf` map is `alplabai/tan-cli#760`.
+
+### Fixed — `pr-bitbake.yml`, `pr-static-analysis.yml` and `release.yml` spliced externally-chosen GitHub Actions context into unguarded `run:` blocks, a template injection (#1475)
+
+`.github/workflows/pr-bitbake.yml`'s `Resolve target sha/ref` step
+interpolated `${{ github.event.pull_request.head.ref }}` directly into its
+`run:` block's source text via `${{ }}`. A git branch name may legally
+contain shell metacharacters — `$()`, backticks, `;`, `&`, `|` are all valid
+in `git-check-ref-format` — so a PR opened from a branch named e.g.
+`x$(id)` would have that payload substituted into the shell script *before
+bash ever parsed it*, and executed on the GitHub-hosted runner.
+
+The reach of this differs sharply by PR origin, and the two must not be
+conflated:
+
+* **Fork PRs.** GitHub withholds all secrets from a `pull_request` trigger
+  fired by a fork — this workflow's own security-model header says so
+  ("Fork PRs receive NO secrets, so the App credentials are absent and the
+  guard below skips the dispatch entirely"), as does
+  `docs/ci/runner-architecture.md`. An injected payload here gets
+  arbitrary code execution on an ephemeral GitHub-hosted runner with a
+  read-only, repo-scoped `GITHUB_TOKEN` and no `secrets.*` present to
+  steal.
+* **Same-repo PRs.** `head.ref` is a branch name chosen by anyone with
+  write access to this repo. For that PR the fork guard's `if:` passes, so
+  the job continues past the injection point and, three steps later
+  (`Resolve target sha/ref` → `Guard` → `Set pending status` → `Mint a
+  short-lived App token`), mints a GitHub App installation token from
+  `secrets.ALP_CI_APP_PRIVATE_KEY`, scoped to `alp-sdk-internal` with
+  `Contents:write`. This path is **not** a privilege escalation and must
+  not be written up as one: under the `pull_request` trigger GitHub runs
+  the workflow file *from the PR's merge ref* — that is exactly the
+  documented difference from `pull_request_target`, which alone runs the
+  base branch's copy — and this job carries no `environment:` approval
+  gate. A write-access actor can therefore already add a step that reads
+  `secrets.ALP_CI_APP_PRIVATE_KEY` inside their own PR, no injection
+  required. The branch-name splice grants that actor nothing new.
+
+So the residual impact of the defect is the fork path alone: arbitrary code
+execution on an ephemeral GitHub-hosted runner, reachable from a fork PR —
+i.e. by someone with no write access to this repo — with a read-only
+`GITHUB_TOKEN` and no `secrets.*` present. The fix removes an injection
+**sink**; it does not close a secret-exfiltration path, because for the one
+actor who can reach those secrets the injection was never what stood
+between them and the secret.
+
+Fixed by passing `github.event.pull_request.head.sha`/`.head.ref` through an
+`env:` block and referencing them as quoted shell variables
+(`"$HEAD_SHA"`/`"$HEAD_REF"`) instead of splicing `${{ }}` into the script
+text — the value is then only ever *data*, never re-parsed as shell syntax.
+The same fix was applied to the *consuming* `Dispatch build to
+alp-sdk-internal` step and to the `Set pending status on alp-sdk` step, both
+of which forwarded the now-safe step outputs (`steps.t.outputs.sha`/`.ref`)
+back into their own unguarded `${{ }}` splices — `${{ }}` re-substitutes
+into every `run:` block independently, so quoting it once at the producer
+does not protect a later consumer; each consuming step now carries the same
+`env:` indirection.
+
+The `Resolve target sha/ref` step itself mints no secret and stages no
+request (it only writes step outputs), so it does not additionally need the
+fork guard's `if:` — the env indirection alone removes it as an injection
+vector, for every event type.
+
+Same construct, second site: `.github/workflows/dispatch-tan-parity.yml`'s
+`Dispatch planner-change to tan-cli` step spliced `${{ github.ref_name }}`
+directly into a `run:` block. Lower severity — this trigger is `push` to
+`dev`/`main` only, so `ref_name` is always `dev` or `main` today, not
+fork-controllable — but fixed the same way for consistency, since the trigger
+scope is a workflow-file fact rather than an enforced guarantee. A
+leftover shell comment in that same step's `run:` block still spelled out
+`${{ github.sha }}` — harmless as a comment to bash, but `${{ }}` is
+substituted into the whole block's source text regardless of comments, so it
+is now written as `github.sha` with no `${{ }}` delimiters.
+
+Third site, found by a follow-up sweep: `.github/workflows/pr-static-analysis.yml`'s
+`Determine diff base` step spliced `${{ github.event.pull_request.base.sha }}`
+directly into a `run:` block the same way, and its consumer (`git diff -U0
+${{ steps.base.outputs.ref }}`) did too. `base.sha` is a commit hash of the
+PR's target branch, not fork-author-controlled data, so the practical risk
+here is lower than `head.ref` — but it is the same `${{ }}`-in-`run:`
+construct on the same event type, so it is fixed the same way for
+consistency.
+
+Fourth site, found by a verify pass over this branch's own sweep:
+`.github/workflows/release.yml` put the raw pushed tag into three `run:`
+bodies, laundered through a step output. Its `Parse tag + verify against
+metadata` step binds `TAG="${GITHUB_REF_NAME}"` — safe at that line, since
+nothing is executed on the value there — and publishes it verbatim as
+`steps.tag.outputs.tag`. The guard in that same step only compares
+`CORE_VERSION="${VERSION%%-*}"`, i.e. everything *before the first `-`*,
+against `metadata/sdk_version.yaml`, so a tag's pre-release suffix is never
+validated at all. Three later steps then spliced that unvalidated value
+straight into their own `run:` source text: `Build source tarball`
+(`TAG="${{ steps.tag.outputs.tag }}"`), `Emit SBOM + build receipt`
+(`--output "alp-sdk-${{ steps.tag.outputs.tag }}.cdx.json"`), and `Emit
+base64-encoded digests for the provenance job`, which spliced
+`${{ steps.archive.outputs.archive }}` — itself assembled as
+`alp-sdk-${TAG}.tar.gz`, carrying the same suffix one hop further.
+`git-check-ref-format` permits `"`, `$`, backtick, `(`, `)` and `;` in a tag
+name, so the tag `v0.6.0-$(id)` passes the core-version guard (its core is
+`0.6.0`) and renders in `Build source tarball` as `TAG="v0.6.0-$(id)"` — the
+command substitution executes, inside the `build` job, which declares
+`contents: write`.
+
+Reachability is tag-push access, i.e. write access to this repo. This is
+therefore **not** a privilege escalation over the same-repo path described
+above and must not be written up as one; it is recorded because it was a
+live executable sink that the sweep below had certified as clean. Fixed
+identically to the other three sites: `TAG` and `ARCHIVE` are bound in each
+step's own `env:` block and read as quoted shell variables. Nothing the job
+produces changes — for `v0.16.0` and for `v0.16.0-rc1` the archive, checksum
+and SBOM names come out byte-identical to before the fix.
+
+Full repo-wide sweep of all 29 workflows under `.github/workflows/` for
+`${{ }}` in a `run:` body naming any of `github.event.pull_request`,
+`github.event.issue`, `github.event.comment`, `github.event.review`,
+`github.event.head_commit`, `github.event.commits`, `github.event.inputs`,
+`github.event.workflow_run`, `github.head_ref`, `github.ref_name`,
+`github.ref`, or `github.actor` — the same list the new regression test
+enforces and `docs/ci/runner-architecture.md` records, matched by substring
+so each entry covers its whole subtree. That sweep matches a context named
+**directly** in a `run:` body, and on that basis it found the first three
+sites above. It could not find `release.yml`: no context name appears in
+those three `run:` bodies at all — they name `steps.tag.outputs.tag` and
+`steps.archive.outputs.archive`, while `GITHUB_REF_NAME` appears only in the
+`Parse tag + verify against metadata` step that produced the first of those
+two outputs, one further hop upstream of the second. Counting it, **four**
+workflow
+files are fixed here: `pr-bitbake.yml`, `dispatch-tan-parity.yml`,
+`pr-static-analysis.yml` and `release.yml`.
+
+An earlier draft of this entry justified leaving everything else alone by
+listing "a `steps.*.outputs` value computed from repo metadata" among the
+closed sets the repo controls. That reasoning is wrong and is withdrawn: a
+step output is only as trustworthy as the value that produced it, and
+`release.yml` is exactly how a raw, never-validated `GITHUB_REF_NAME`
+reached three `run:` bodies while presenting as repo-computed data. The rule
+that replaces it: a `${{ }}` reference in a `run:` body that resolves to a
+`steps.*.outputs.*` value proves nothing on its own — it has to be traced
+back to the expression that first assigned that output, and judged on **that
+root**.
+
+Re-checked on that basis, the 38 `${{ }}` expressions that remain in a `run:`
+body across the 29 workflows are: 15 `matrix.*` (hardcoded `strategy.matrix`
+entries), 9 `github.*` (`github.sha`, `github.run_id`, `github.repository`,
+`github.event_name`, `github.workspace` — GitHub-assigned, restricted
+charsets with no shell metacharacters, or a fixed enum), 1
+`needs.twister-shard.result` (fixed enum), 1 `secrets.COVERITY_TOKEN`, and 12
+`steps.*.outputs.*`. Each of those 12 was traced to its producing step:
+`pr-alp-build.yml`'s `steps.pick.outputs.example_path`/`.board_yaml` come from
+a hardcoded `case` over the hardcoded matrix, every branch a literal path;
+`pr-abi-snapshot.yml`'s `steps.snap.outputs.latest` is
+`docs/abi/${VERSION}-snapshot.json` with `VERSION` read out of
+`metadata/sdk_version.yaml` by `scripts/abi_snapshot.py
+--print-current-version`, and its `steps.diff.outputs.has_breaking` is only
+ever the literal `true` or `false`; and in `release.yml` the two that survive
+are `steps.tag.outputs.core_version`, which the release job hard-fails on
+unless it equals `metadata/sdk_version.yaml`'s `version`, and
+`steps.tag.outputs.is_prerelease`, likewise only ever `true` or `false`. No
+fifth site. `pr-bitbake.yml`'s fork guard also now routes
+`github.event.pull_request.head.repo.full_name` through `env:` rather than
+splicing it directly, even though its restricted charset already made it
+safe to leave inline: a blanket "route every `github.event.pull_request.*`
+reference through `env:`" rule needs no per-site exception, and that is what
+the new regression test (below) mechanically enforces with none.
+
+Also hardened for consistency while these files were open: the `gh api -F`
+calls in `pr-bitbake.yml` and `dispatch-tan-parity.yml` that populate
+`client_payload[sha]`, `client_payload[ref]`, and `client_payload[branch]`
+now use `-f` (raw string) instead of `-F` (typed) — `-F` reinterprets its
+value after the shell hands it over (`@file` reads a file, `@-` reads
+stdin, `{owner}`/`{repo}`/`{branch}` are substituted, and bare `true`/
+`false`/`null`/integers become JSON non-strings), and every one of those is
+a legal git branch name. `-F` stays only for `client_payload[pr]`, which
+genuinely wants a JSON number.
+
+The env-indirection rule this establishes is now also recorded in
+`docs/ci/runner-architecture.md`, not just as a comment on each affected
+workflow file.
+
+`tests/scripts/test_workflows_are_loadable.py` gained a regression test that
+walks every workflow's steps and fails on a `${{ }}` expression inside a
+`run:` body that *names* one of the contexts listed above. Three limits,
+worth stating plainly because two of them are what let the `release.yml` site
+survive this branch's first three rounds:
+
+* **It matches direct context references only.** The check is substring
+  containment against an expression's own text, so a value that reaches a
+  `run:` body through `steps.<id>.outputs.*` is invisible to it however
+  untrusted its root is — which is precisely how `release.yml` passed a
+  green run while splicing the raw pushed tag. A step output reaching a
+  `run:` body has to be traced to its root **by hand**; the automated gate
+  does not do it and is not being extended here to try (catching it
+  mechanically needs data-flow across steps, not substring matching).
+* **It is a non-required check.** On a workflow-only edit the only job
+  running `pytest tests/scripts/` is `cross-platform-zephyr`'s
+  `python-smoke`, which is in neither `main`'s nor `dev`'s
+  required-status-check list, so a violation shows red but does not block
+  the merge.
+* **It inspects `run:` bodies only.** A `${{ }}` splice into an
+  `actions/github-script` `with: script:` body is the same class of
+  injection and is not covered. (Closed by #1529, in this same release.)
+
+### Fixed — `west alp-emit` exited 0 on a failed emit; #1427 fixed three of the four west wrappers and the CHANGELOG recorded the fourth as already correct (#1476)
+
+`AlpEmit.do_run` ended with `return subprocess.call(...)`. west calls `do_run`
+for effect and derives the process exit status from **exceptions only**
+(`west.commands.CommandError(returncode)`), so the child orchestrator's
+non-zero exit was thrown away: `west alp-emit build-plan > plan.json` printed
+the orchestrator's failure, wrote an empty file, and exited 0.
+
+This is the same defect #1427 fixed in `alp-lock`, `alp-migrate` and
+`alp-quality`. `alp-emit` was skipped because its two `log.die()` pre-flight
+checks — not inside an alp-sdk workspace, `board.yaml` not found — do exit
+non-zero, and that was generalised into "the one wrapper already doing it
+right". It never covered the failure that matters. `CHANGELOG.md`'s #1427 entry
+is corrected in this commit rather than left for the next auditor to trip over.
+
+Fixed the way the siblings are: `CommandError` is imported alongside
+`WestCommand` and mirrored in this file's existing no-west fallback shim, and
+the last line becomes `rc = subprocess.call(...)` / `if rc: raise
+CommandError(rc)`. The sibling pattern does not drop in unchanged —
+`alp_emit.py` has no module-level `run()`, so the call being wrapped is
+`subprocess.call` itself.
+
+Scope, stated plainly because it bounds the impact: nothing in `.github/`,
+`scripts/`, or the tan-cli checkout invokes `west alp-emit`, and `docs/cli.md`
+scopes it as a maintainer/inspection surface. The live failure mode was the
+redirect above, not a silently-green CI gate.
+
+`tests/scripts/test_west_wrapper_exit_codes.py` gains `alp_emit` as a fourth
+row (stubbing `subprocess.call` and the two pre-flight probes instead of a
+module-level `run()`), plus the cross-check whose absence is why this survived:
+`test_every_registered_west_command_is_covered` asserts the four commands in
+`scripts/west-commands.yml` are exactly the rows in `WRAPPERS`, so registering
+a fifth wrapper without an exit-code test now fails at PR time. Reverting only
+the `alp_emit.py` change reds 4 of the 21 cases; the whole file passes with it.
+
+### Fixed — `pr-static-analysis.yml` carried zero `timeout-minutes`, and the #1319 regression gate could not have caught it (#1477)
+
+`.github/workflows/pr-static-analysis.yml` declared no `timeout-minutes`
+anywhere — not on `clang-format-diff`, which produces `clang-format ·
+diff-only`, the fifth of `dev`'s required branch-protection contexts, nor
+on its sibling `cppcheck`, nor on either job's network steps (the
+`clang-format==22.1.5` pip install, the `apt-get update`/`install` pair).
+GitHub's implicit 360-minute runner default applied to both. The honest
+severity bound, stated plainly rather than inflated: this file's own
+`concurrency: cancel-in-progress: true` makes a stall per-ref (a new push
+cancels it) and a hung run is one click to cancel by hand; `cppcheck` is
+not a required context at all, and its own run step already ends `|| true`
+with `--error-exitcode=0`. This is CI hygiene with trivial manual recovery,
+not a repo-wide merge freeze.
+
+What made it worth fixing as more than a two-line diff: the regression test
+#1319 added for exactly this defect class, `tests/scripts/
+test_tier_a_workflow_step_timeouts.py`, could not have caught it — its
+`WORKFLOWS` constant was a literal two-element tuple naming only
+`pr-tier-a-libraries.yml` and `pr-twister.yml`, the two files #1274 and
+#1319 had already fixed, so every other workflow in `.github/workflows/`
+was silently unchecked by its own regression test. `WORKFLOWS` is now a
+glob over `.github/workflows/*.yml` + `*.yaml` (`_workflow_files()`),
+guarded by a new `test_there_are_workflows_to_glob` (`len(WORKFLOWS) >=
+25`) matching the idiom `test_workflows_are_loadable.py::
+test_there_are_workflows_to_check` already uses — an empty or shrunken
+glob now fails loudly instead of quietly covering nothing.
+
+Widening the glob surfaced every other uncapped job in the repo, not just
+`pr-static-analysis.yml`'s two: **31 jobs across 18 files** as of this
+change (the issue counted 30 across 17 at `v0.16.0-rc1`; `dev` has since
+grown `parity-seam1.yml`, which itself needed one). No allowlist was added
+to exempt any of them — an allowlist entry would just reinstate the silent
+hole this issue is about under a new name — so every one is capped in this
+same change: `coverity.yml`'s `scan`, both `cross-platform-zephyr.yml`
+jobs, `dispatch-tan-parity.yml`, `parity-seam1.yml`, `pr-abi-snapshot.yml`,
+`pr-bitbake.yml`, `pr-bootstrap-distro-install.yml`'s `detect`, both
+`pr-cc3501e-bridge-build.yml` jobs, `pr-doc-drift.yml`, `pr-doxygen.yml`,
+both `pr-gd32-bridge-build.yml` jobs, `pr-generated-files.yml`,
+`pr-metadata-validate.yml`, all 9 of `pr-plain-cmake.yml`'s build jobs,
+`pr-renode-sim-mode.yml`'s `detect`, and `release.yml`'s `build`. Widening
+the glob also put every already-capped job's own steps in scope for the
+first time (the two `test_network_and_compile_steps_carry_their_own_timeout`
+/ `test_job_ceiling_exceeds_the_sum_of_its_step_timeouts` tests apply
+per-step, not per-file) — that surfaced 184 more flagged network/compile
+steps across the other 27 workflow files that had a job-level ceiling but
+no per-step ones, all now capped too, plus two latent crashes in the test
+itself (`step["name"]` and `job["steps"]` assumed every step is named and
+every job has a `steps:` list — both false once the glob left the two
+original hand-picked files) fixed in the same change.
+
+Every ceiling was derived, not invented: `gh api .../actions/workflows/
+<file>.yml/runs` + `.../actions/runs/<id>/jobs`, ~2x the worst observed
+job/step wall time, rounded to a clean number, floor 10 minutes — the same
+derivation `pr-twister.yml`'s `timeout-minutes: 145` on `twister-shard`
+already uses. `coverity.yml`'s `scan` job's only sampled successful runs
+all took the `COVERITY_TOKEN`-missing no-op exit-0 path (the file's own
+header says a real capture+submit takes ~20min), so its ceiling is sized
+off that documented figure, not the unrepresentative 85-second sample.
+`onramp-clean-container.yml`'s `full-quickstart-build` job's steps never
+fired in the sampled run history (gated behind a schedule/label `if:`), so
+their per-step caps are a flat default matched to a sibling job's real
+timings rather than a real measurement.
+
+**Correction after review:** the first version of this change sampled only
+3 successful runs per file, which understated several real worst-case
+durations and produced two ceiling raises that were not actually forced by
+the #1274 sum-of-step-caps invariant, plus one that was forced but by a
+smaller margin than first computed. Re-measured against 8–30 runs:
+
+- `pr-renode-aen-smoke.yml`'s `renode-aen-smoke` — restored to its
+  original `timeout-minutes: 30` (was briefly raised to 35). 8-run worst
+  case: `Build hello-world` 25s (was capped at an unnecessary 5min, the
+  step that had pushed the per-step-cap sum over 30); every flagged step
+  now 1min, `Install Renode`/`Upload Renode boot log` 2min — sum 14min.
+- `onramp-clean-container.yml`'s `prereqs-and-bootstrap` — restored to its
+  original `timeout-minutes: 10` (was briefly raised to 25). 30-run worst
+  case: `Install git + curl` 38s; all 9 flagged steps now 1min — sum 9min.
+- `pr-twister-aen.yml`'s `twister-aen` — `timeout-minutes: 41` (first
+  version raised this to an overcautious 60). This one genuinely needed
+  raising from its original 30: the twister step alone measures
+  1167s/19.45min across 10 runs (first version's 3-run sample understated
+  it at 1055s/17.6min), which alone exceeds 30. Set to 30min (1.54x the
+  real worst case), the seven other flagged setup/upload steps to 1min
+  each (sum 37min); the job ceiling is 41, not the cleaner-looking 40,
+  because `test_job_ceiling_exceeds_the_sum_of_its_step_timeouts` requires
+  the ceiling strictly greater than that sum (40), not merely `>=`.
+
+Also newly raised in this correction round, for reasons unrelated to the
+3-run/8-run gap above:
+
+- `pr-metadata-validate.yml`'s `validate` — `timeout-minutes: 80` (was
+  60). Its "Pytest -- linter + schema regression + topology defaults" step
+  (812s/13.5min real worst case) was riding the uncapped-step 1min/step
+  budget below, which was never true for it; it now carries an explicit
+  20min cap instead, and the resulting sum-of-caps (12min already-capped +
+  20min pytest + 45min budgeted for the job's ~45 remaining trivial
+  `Gate — ...`/schema-check steps = 77min) is what the ceiling has to
+  clear, not the ~18min the job actually takes.
+- `cross-platform-zephyr.yml`'s `python-smoke` — unchanged at
+  `timeout-minutes: 40`, but its "pytest tests/scripts/" step (1009s/
+  16.8min real worst case on Windows) now carries the same kind of
+  explicit 25min cap for the same reason; the existing 40min ceiling
+  already had room for it (sum 38min).
+- `pr-renode-sim-mode.yml`'s `renode-sim-mode` — `timeout-minutes: 45`
+  (was 40). This job never executed in the last 30 successful runs of its
+  file (gated behind `detect`, and no renode-relevant path changed in any
+  of them), so unlike every other job in this change its per-step caps
+  are undocumented-until-now defaults, not measurements — flagged by
+  review as a third silent no-history job alongside the two `coverity.yml`
+  and `onramp-clean-container.yml` cases already called out above. Its
+  three never-executed `west build` steps were flagged as inconsistent
+  with the sibling renode gates (3min for a heavier TFLM-inference build
+  than a plain `hello_world`, which got 5min pre-correction) and are now
+  5min each, each with an explicit "no measurable run history" comment.
+
+`_UNCAPPED_STEP_BUDGET_MINUTES = 1` in the test file itself is unchanged
+as a value, but its justifying comment no longer claims to be a
+measurement across all 29 files — it wasn't (the two long pytest steps
+above were the counterexample); it is now documented as the deliberate
+convention this change enforces for genuinely-trivial local-check steps,
+with the two steps that were never trivial pulled out and capped
+explicitly instead. `docs/ci/README.md`'s "When to add a new workflow"
+section now states the `timeout-minutes:` + sum-of-step-caps invariant so
+a future workflow author does not have to reverse-engineer it from the
+test file. The `test_network_and_compile_steps_carry_their_own_timeout`
+test's file-level `assert any_flagged` — which would have reddened on a
+future genuinely pure-local workflow with "the heuristic itself is
+broken", naming the wrong culprit — is now a `pytest.skip` instead.
+
+One further correctness fix, not a workaround: `release.yml`'s `provenance`
+job calls a reusable workflow (`uses: slsa-framework/... @v2.1.0`) with no
+`runs-on:` of its own. GitHub's schema for that job shape does not accept
+`timeout-minutes` at all — only the called workflow's own jobs may declare
+one. `test_every_job_declares_a_timeout` now exempts any job shaped that
+way (`uses:` present, `runs-on:` absent) via `_is_reusable_workflow_call`,
+not by naming `provenance` specifically, and a comment on the job itself
+explains why it carries no cap.
+
+Verified: `pytest tests/scripts/test_tier_a_workflow_step_timeouts.py -q`
+and the repo-wide `pytest tests/scripts/ -q` both green; every edited
+workflow still parses as YAML
+(`test_workflows_are_loadable.py::test_workflow_parses_as_yaml`); and a
+non-tautology proof — stripping `timeout-minutes` back out of
+`clang-format-diff` reddens `test_every_job_declares_a_timeout
+[pr-static-analysis.yml]` naming that exact job, and restoring the file
+reproduces it byte-identical to before the strip (`diff -q`, matching
+`md5sum`).
+
+**Follow-up, same release: the glob's own guard was the wrong shape.** As
+shipped above, `test_there_are_workflows_to_glob` asserted
+`len(WORKFLOWS) >= 25` against the ~29 workflow files then present. A count
+cannot distinguish a BROKEN GLOB from a repo that legitimately got smaller,
+and the distinction arrived immediately: retiring Renode deletes the four
+`pr-renode-*.yml` workflows and takes the tree to exactly 25, so the next
+deliberate deletion would have failed that test claiming "glob has
+drifted" — blaming the glob for a real shrink, and inviting whoever hit it
+to lower the number again.
+
+It now cross-checks against git's own view of the directory
+(`git ls-files -- '.github/workflows/*.yml' '*.yaml'`) instead of a
+hardcoded count, as `test_the_glob_sees_every_workflow_git_tracks`
+-- `test_there_are_workflows_to_glob` is named above only as history and no
+longer exists in the tree -- and skips cleanly where git cannot answer (no binary,
+tarball export). The comparison is deliberately one-directional: every
+tracked workflow must appear in the glob, but the glob may hold more — a
+new file not yet `git add`ed is a normal mid-edit state and must not fail
+the suite, whereas a tracked file the glob cannot see is exactly the
+failure this guard exists to catch.
+
+Proven, not assumed: narrowing `_workflow_files()` to `pr-*.yml` makes it
+fail naming all 8 dropped files (`coverity.yml`,
+`cross-platform-zephyr.yml`, `dispatch-tan-parity.yml`,
+`nightly-extras-tier1-pins.yml`, `onramp-clean-container.yml`,
+`parity-seam1.yml`, `release.yml`, `tan-docs-drift.yml`) — a break the old
+count form also caught only because it happened to cross the threshold, and
+would have missed entirely had it dropped four files instead of eight.
+
+**Second follow-up: the per-step caps were hair-triggers, and two fired.**
+#1477 derived each cap from that step's observed run times. Within hours of
+landing, two turned green lanes red on a real PR — `pr-doxygen.yml`'s
+`Install Doxygen` timed out against its 3-minute cap (run 32129302623) and
+`pr-twister-aen.yml`'s `Install host build tools` against its 1-minute cap
+(run 32129302570). Neither is a required context, so neither blocked a
+merge; both are noise a reviewer has to triage on every PR, and a merge
+queue would have merged straight past them.
+
+The derivation was the defect. "No cap below the worst observed successful
+run" was the bar #1477 verified against, and it is not the same bar as "no
+cap below what this step can legitimately take": `apt-get` against a slow
+mirror and a ~50 MB tarball fetch from GitHub releases do not care what they
+took on the last ten runs. A step cap exists to catch a HANG — the 360-minute
+runner default is what it is defending against — not to enforce a download
+SLA.
+
+Every network/install step (checkout, package install, toolchain download,
+cache restore, bootstrap) now carries a floor of 5 minutes: 124 steps across
+25 workflow files. 50 job ceilings are recomputed so #1274's
+`test_job_ceiling_exceeds_the_sum_of_its_step_timeouts` invariant still holds
+with the roomier caps.
+
+That invariant is deliberately left alone. It is what forces the tightness —
+a job ceiling must exceed the SUM of its step caps, so generous caps push
+ceilings up — and relaxing it to a max-based rule was considered and
+rejected: it buys correct attribution when something hangs (the step timeout
+fires and names the step, rather than the job timeout firing and naming
+nothing), and that is worth more than the smaller numbers. The ceilings move
+instead. The largest results are `pr-twister.yml twister-shard` 145 -> 160
+and `pr-renode-sim-mode.yml renode-sim-mode` 45 -> 70; every one of them
+remains far under GitHub's 360-minute default, which is the hang this whole
+mechanism exists to bound.
+
+**Third pass: a 5-minute floor was still not enough for the heavy
+installers.** With the floor above in place, `pr-twister.yml`'s
+`Install host build tools (dtc, ninja, ccache, gperf, libffi)` timed out in
+the merge queue against the **8-minute** cap it already carried, which
+ejected #1548 from the queue. Multi-package `apt-get`, a Zephyr SDK
+download and a pip dependency set are a different weight class from a
+checkout, and sizing them off observed runs keeps producing the same
+false red.
+
+Those 36 steps — matched by what they DO (`host build tools`, `Zephyr SDK`,
+`Install Doxygen`, `pip install`, `Install west`, `Install prerequisites`,
+`Install arm-none-eabi`, `Install Yocto-side`) rather than by a hand list —
+now carry 15 minutes, roughly 2x the cap that actually failed.
+
+The ceilings that follow are the uncomfortable part, and they are recorded
+rather than glossed: `pr-twister.yml twister-shard` goes to 210 and
+`pr-renode-sim-mode.yml renode-sim-mode` to 100. A blanket 20-minute floor
+was tried first and rejected precisely here — it pushed `twister-shard` to
+270 and `renode-sim-mode` to 170, at which point the ceiling stops being
+protection and becomes a formality against GitHub's 360-minute default.
+15 minutes is the largest floor that clears the observed failure with real
+margin while keeping every ceiling meaningfully under that default.
+
+The pressure comes from #1274's sum invariant: a job ceiling must exceed the
+SUM of its step caps, so every generous cap pushes its ceiling up. That rule
+is still not relaxed here — it buys correct attribution, and rewriting
+another engineer's gate while fixing my own regression is the wrong order —
+but it is now visibly the constraint that decides these numbers, and a
+max-based formulation is worth a separate discussion if the ceilings climb
+again.
+
+**Fourth pass, and the actual fix: stop capping third-party fetches.** The
+15-minute floor above failed too. In the merge queue, `pr-twister.yml`'s
+`Install host build tools (dtc, ninja, ccache, gperf, libffi)` ran
+15:34:20 → 15:49:32 and died on its cap — against a worst observed
+successful run of **32 seconds**, with `apt-get -o Acquire::Retries=3`
+already in the command.
+
+Four false failures, three of them from caps *derived from observed runs*:
+`Install Doxygen` at 3 minutes, and this step at 1, then 8, then 15. The
+derivation was never going to work. A step that shells `apt-get`, `pip` or
+`curl` has no duration this repo can know — it depends on a mirror, a CDN or
+a registry nobody here operates, and yesterday's timings say nothing about a
+degraded one.
+
+So the heuristic is split by whether duration is a property of THIS repo:
+
+* `_THIRD_PARTY_FETCH_MARKERS` (`pip install`, `pip3 install`, `apt-get`,
+  `curl`, `wget`, `git clone`, `brew install`, `winget install`) — no
+  per-step cap required, and the 54 caps previously on such steps across 21
+  files are removed. The job-level ceiling bounds them, which is the hang
+  protection #1319 exists for and the one that actually works here.
+* `_NETWORK_OR_COMPILE_MARKERS` (`cmake`, `make `, `west `,
+  `scripts/twister`) — a compile or a test sweep over pinned revisions.
+  History bounds these, so their caps stay meaningful and stay required.
+
+What is given up is step-level attribution for the fetch class alone. That
+is worth less than a lane that reds on a slow package mirror.
+
+The ceilings move DOWN as a result, which is the strongest evidence this is
+the right cut: `pr-twister.yml twister-shard` 210 → 155,
+`pr-twister-aen.yml twister-aen` 135 → 60,
+`onramp-clean-container.yml prereqs-and-bootstrap` 65 → 30, and 24 others.
+#1274's ceiling-exceeds-the-sum invariant is untouched and still holds — it
+simply is not being fed inflated numbers any more.
+
+**Fifth pass — the sum rule was the defect all along.** Removing the fetch
+caps (fourth pass) was an over-correction and proved it on itself: with no
+step cap a hung `apt-get` ran 90+ minutes against the job ceiling instead of
+failing in 8, on the very PR meant to fix timeout flakiness. That pass had
+also raised `twister-shard` from 145 to 155, making the worst case worse.
+
+#1274's `ceiling > sum(step caps)` rule permits only two states, both bad:
+tight caps (four false reds) or no caps (unattributed hangs). Generous finite
+caps -- the thing that actually works -- are arithmetically impossible under
+it, since ~54 fetch steps at 20 minutes pushes every ceiling past GitHub's
+360-minute default.
+
+The invariant is now max-based: a job ceiling must exceed its single longest
+step cap. `test_job_ceiling_exceeds_the_sum_of_its_step_timeouts` is replaced
+by `test_job_ceiling_exceeds_its_longest_step_timeout`; the old name appears
+above only as history and no longer exists in the tree. A hang in any step is caught by that step's own timeout and named,
+which is what #1274 wanted; only its unreachable simultaneity case is given
+up. All 54 fetch caps return at 20 minutes, four ceilings rise to satisfy the
+rule, and the 21 ceilings the earlier passes inflated are restored to their
+`dev` values -- `twister-shard` back to 145, `twister-aen` back to 41.
+
+**Sixth pass — the actual root cause: apt had no transport timeout.** Every
+number in the passes above was treating a symptom. `apt-get` was invoked
+without any `Acquire::*::Timeout`, so a stalled TCP connection hangs
+indefinitely, and `Acquire::Retries=3` cannot help because it retries a
+request that FAILS -- a connection the mirror accepts and never answers
+never fails, so the retry counter is never reached. That is why 8 minutes,
+15 minutes and no cap at all behaved identically against a bad mirror.
+
+All 34 real `apt-get` invocations across 11 workflows now carry
+`-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30` alongside the
+existing `Retries=3`. A stalled fetch terminates after 30 seconds and the
+retry runs, usually against a different mirror in the pool. The quoted
+command fixtures in `onramp-clean-container.yml` and the generated
+`print("apt-get update -qq")` lines in `pr-bootstrap-distro-install.yml` are
+test data, not invocations, and are deliberately untouched.
+
+Proven against a black-hole listener that accepts a connection and never
+responds: with a transport timeout the request terminates (`exit=28`) and a
+retry follows; without one it waits forever. The per-step caps remain as the
+backstop for a hang that survives the transport timeout, but they are no
+longer the only thing standing between a degraded mirror and a red required
+lane.
+
+**Seventh pass — the sixth pass fixed apt and left git untouched.** The
+transport-timeout diagnosis above is correct and it was applied to exactly one
+protocol. Every Zephyr workspace in CI is fetched by `west` over
+git-over-https, and `grep -n 'http.lowSpeed\|GIT_HTTP\|git config'
+.github/workflows/*.yml` returned nothing: no transport timeout, no retry, no
+`Acquire`-style knob of any kind — `Acquire::*::Timeout` is an apt option and
+reaches git not at all. That is the user-visible report this issue started
+from, a job "stuck before installing west".
+
+Five sites, all now protected:
+
+* `pr-twister.yml` and `pr-tier-a-libraries.yml` — `west init -m
+  https://github.com/zephyrproject-rtos/zephyr --mr v4.4.1 .` followed by
+  `west update --narrow -o=--depth=1`.
+* `nightly-extras-tier1-pins.yml` — `west init -l .` / `west update`.
+* `pr-twister.yml` and `onramp-clean-container.yml` — `west sdk install
+  --gnu-toolchains arm-zephyr-eabi --no-hosttools`.
+
+Each git-fetching step now sets, in the same step body rather than in a
+separate setup step, `git config --global http.lowSpeedLimit 1000` and
+`git config --global http.lowSpeedTime 30`. Same step on purpose: a guard in
+a distant setup step can be separated from the fetch it guards by a reorder,
+an `if:`, or a cleanup that reasonably concludes it is unrelated. The runners
+are ephemeral, so `--global` is safe, and no existing step set any conflicting
+git config — that grep is what established there was none.
+
+Proven against the same kind of black-hole listener the sixth pass used, one
+that completes the TCP handshake and then sends nothing:
+
+    without the knobs   `git clone` still running when an outer 25s timeout
+                        killed it — exit 124, no error of its own
+    with them (30s)     git terminates itself at 31s, exit 128:
+                        "fatal: unable to access 'http://127.0.0.1:58911/x.git/':
+                        Operation too slow. Less than 1000 bytes/sec
+                        transferred the last 30 seconds"
+
+`west update` and `west sdk install` are additionally wrapped in a bounded
+`for attempt in 1 2 3` loop with a 15-second backoff, propagating the real
+exit code and west's own unredirected stderr on the final attempt.
+`west init` is deliberately left OUTSIDE that loop: it refuses on an
+already-initialised workspace, so a loop around both would fail attempt 2 at
+`init` and report that instead of whatever actually stalled — strictly worse
+than not retrying. `nightly-extras-tier1-pins.yml` keeps its existing
+`echo "west update returned non-zero"` + `continue-on-error: true` ending
+rather than gaining a hard exit, because that step's whole design is to let
+the per-library verify step name which library failed.
+
+Two findings worth recording because they contradict the obvious assumption:
+
+* **`west sdk install` is safely re-runnable** — checked in zephyr v4.4.1's
+  `scripts/west_commands/sdk.py`, not assumed. It downloads and extracts
+  inside a `tempfile.TemporaryDirectory` and `shutil.move`s into
+  `--install-dir` only as its last action, after the sha256 check, so an
+  aborted attempt leaves no partial install; a re-run after a successful one
+  takes the "Zephyr SDK version ... is already installed ... Using it." path.
+  The one narrow non-idempotent window — a failure after the move but during
+  setup would leave an unregistered directory that the next `shutil.move`
+  would NEST inside (`zephyr-sdk/zephyr-sdk-x.y.z`) — is closed by an
+  `rm -rf "${GITHUB_WORKSPACE:?}/zephyr-sdk"` on attempts 2 and 3.
+* **`west sdk install` is NOT covered by the git knobs.** It fetches with
+  `requests.get(archive_url, stream=True)` and passes no `timeout=`, so a
+  stalled CDN hangs inside `iter_content` where no git configuration reaches.
+  Its retry covers the 5xx/reset class only; its stall case is still bounded
+  by the step's own `timeout-minutes` alone. Stated plainly rather than
+  claimed as fixed. `west update`, by contrast, is genuinely covered: west
+  shells out to the `git` binary (`subprocess` `['git', 'clone', ...]`), so
+  global git config applies.
+
+`tests/scripts/test_workflow_fetch_retries.py` — the existing #1410 gate,
+extended rather than duplicated — now pins all of this: a `west init`/`west
+update` step must set both halves of the low-speed guard, a `west update`/
+`west sdk install` step must sit in a bounded retry loop, and `west init`
+must never appear inside one. Matching is step-scoped (the guard and the
+fetch it guards are different lines of one step) and restricted to shell
+command position on non-comment lines, the same "invocation, not the bare
+word" distinction `test_tier_a_workflow_step_timeouts.py` already had to make
+for `scripts/twister`: without it, `echo "::error::FAIL: ... missing after
+west update"` in the nightly verify step and the prose "the west init step"
+in a rationale comment both register as unguarded fetches.
+
+**The strip-and-check earned its keep, on this change's own test.** The first
+version of those patterns anchored with a bare `^` and no `re.MULTILINE`. A
+step body is a multi-line string whose commands are indented, so `^` anchored
+only at the body's first character, every pattern matched nothing, and two of
+the three new tests passed with an empty offender list against workflows with
+no protection at all. Deleting the guard from `pr-twister.yml` left the suite
+green — which is how it was caught, and the reason the check is run rather
+than assumed. Both the `re.M` flag and the leading-indent alternative now
+carry a comment saying that their absence is silent.
+
+Verified after the fix, each edit applied and then reverted to a byte-identical
+file (`md5sum`): stripping both git knobs from `pr-twister.yml` reddens
+`test_every_west_git_fetch_sets_a_transport_timeout[pr-twister.yml]`;
+stripping only `http.lowSpeedTime` reddens it too (half a guard configures
+nothing); dropping the retry loop from `pr-tier-a-libraries.yml` reddens
+`test_retryable_west_fetches_are_retried[pr-tier-a-libraries.yml]`; moving
+`west init` inside the loop reddens
+`test_west_init_is_never_inside_the_retry_loop[pr-twister.yml]`; adding a new
+unprotected `west init`/`west update` step to `pr-doc-drift.yml` reddens both
+rules naming that file; and an unrelated edit inside a retry loop stays green,
+so the gate is not simply reddening on any change.
+
+### Fixed — firewall-probe preflight `JLinkExe` invocation carried a stray literal `n` argument (#1478)
+
+`scripts/bench/aen/flash-update-log-firewall-probe.sh:147` had a typo'd line
+continuation: the two literal characters `\n` sat mid-command instead of a
+backslash-newline, so the read-only preflight invoked `JLinkExe` with an
+unrecognised fifth argument (`... -CommanderScript
+/tmp/fwprobe-preflight.jlink n`) instead of the intended four. Unquoted `\n`
+in bash is just an escaped `n`, not a newline — the redirect on the same
+simple command still worked, so `/tmp/fwprobe-preflight.out` was written as
+intended; the only defect was the extra argument reaching `JLinkExe`.
+
+This preflight is the one safety gate on this destructive helper: it does a
+read-only `connect` and checks the SW-DP DPIDR before the helper goes on to
+`loadbin` a signed package to `$ATOC_ADDR` (an MRAM write), because two
+probes on this bench share OEM serial 603000869 and `JLinkExe` has no USB-path
+selector. Both downstream asserts are grep-based on the JLinkExe transcript,
+so the stray token could only ever cause a *missing* match, never a spurious
+one.
+
+**Measured on silicon, which settles what the outcome actually was.** Running
+both line shapes against the AEN E8 bench probe (J-Link Commander V9.46 / DLL
+V9.46, SW-DP `0x4C013477`), J-Link Commander does **not** tolerate the token —
+it rejects the whole command line and exits without connecting, leaving this
+complete 147-byte transcript:
+
+```
+SEGGER J-Link Commander V9.46 (Compiled May 27 2026 12:24:58)
+DLL version V9.46, compiled May 27 2026 12:23:54
+
+Unknown command line option n.
+```
+
+No connect, no `Found SW-DP`. Fed to the helper's own guards that transcript
+gives `bench_jlink_assert_connected` → 0 but `bench_jlink_assert_aen_dpidr` →
+**4**, so the helper exited 4 at its own preflight. The post-fix shape gives a
+2565-byte transcript containing `Found SW-DP with ID 0x4C013477`, and both
+guards return 0.
+
+So this was not a benign extra argument: **`flash-update-log-firewall-probe.sh`
+aborted on every invocation** from the moment the safety-gate commit introduced
+it (#1312 / #1330) until this fix — the wrong-board gate that commit added had
+never once run as written. Nothing downstream of the preflight, including the
+`loadbin` MRAM write, was ever reached, so no board was mis-flashed and no
+shipped firmware behaviour regressed; what regressed was the helper itself,
+which was unusable.
+
+(That the `bench_jlink_assert_connected` half returns 0 on a transcript with no
+connect in it is a separate defect in the guard, filed and fixed as #1551.)
+
+Fixed by replacing the stray `\n` with a real backslash-newline continuation,
+matching every other `-CommanderScript` call site under `scripts/bench/`
+(e.g. `scripts/bench/aen/flash-update-log-dual.sh:67-68`). Confirmed this was
+the only occurrence of the typo in the tree.
+
+### Fixed — no GitHub Action `uses:` was pinned to a commit SHA, including `softprops/action-gh-release@v3` in the `contents: write` release job (#1479)
+
+Every `uses:` reference across all 25 workflows under `.github/workflows/`
+resolved a mutable tag at run time — 84 references total, 9 distinct
+action names. The sharpest instance was
+`softprops/action-gh-release@v3` at `release.yml`'s `Create GitHub Release`
+step, which runs inside the `build` job, the only job in the repo that holds
+`contents: write` together with the release token: whatever `v3` pointed at
+on the day a release tag was pushed is what executed with that token. The
+same exposure applied to the two `actions/create-github-app-token@v1` call
+sites (`pr-bitbake.yml`, `dispatch-tan-parity.yml`), both of which hand it
+`secrets.ALP_CI_APP_PRIVATE_KEY`, to `dorny/paths-filter@v3`
+(`pr-bootstrap-distro-install.yml`, its sole call site), and to every
+`actions/*` reference (`checkout`, `setup-python`, `cache`, `upload-artifact`,
+`github-script`) and the `slsa-framework/
+slsa-github-generator` reusable-workflow call in `release.yml`'s `provenance`
+job.
+
+Fixed by resolving each tag to its current 40-character commit SHA via the
+GitHub API (`GET /repos/<owner>/<repo>/commits/<tag>`) and rewriting every
+`uses: <action>@<tag>` as `uses: <action>@<sha>  # <tag>`, across all 25
+workflow files — the trailing comment keeps the human-readable version next
+to the pin so a reviewer does not have to resolve the SHA back to a tag by
+hand. The code that runs is now the code that was reviewed at pin time — a
+compromised or retagged upstream release no longer changes what executes on
+the next workflow run, it only changes what a future PR bumping the pin
+would introduce.
+
+One deliberate exception: `release.yml`'s `provenance` job still calls
+`slsa-framework/slsa-github-generator/.github/workflows/
+generator_generic_slsa3.yml@v2.1.0` by tag. Upstream's own README requires
+its builders and generators be referenced as `@vX.Y.Z`, not a commit SHA, so
+that `slsa-verifier` can verify the ref of the trusted reusable workflow
+(tracked upstream as `slsa-verifier#12`); its trust anchor is the
+Sigstore-signed builder identity, not a SHA pin. The
+`test_workflow_uses_are_sha_pinned` test in
+`tests/scripts/test_workflows_are_loadable.py` asserts every OTHER
+`uses:` in `.github/workflows/` resolves a 40-character commit SHA, with
+this one reference as the documented exemption, so the 83 other pins in
+this change cannot silently regress.
+
+Out of scope for this fix, tracked as alp-sdk#1544: adding
+`.github/dependabot.yml` with the `github-actions` ecosystem so the new pins
+get bumped rather than rot, and adding `persist-credentials: false` to
+`actions/checkout` steps.
+
+Note for whoever squash-merges this branch: `b6c7763f`'s second and fourth
+paragraphs each carry a claim `6b684d43` already retracts in prose (the
+reusable-workflow SHA-pin justification, and a pin-count figure) — squash
+message should keep only `6b684d43`'s corrected mechanism paragraph and
+drop both copies, not quote either retracted claim a third time.
+
+### Fixed — `wifi ap` accepted an unrecognised 4th token, silently downgrading WPA3-SAE to WPA2-PSK or dropping the real passphrase (#1480)
+
+`cmd_companion_wifi_ap()` in `src/zephyr/console/alp_console_companion_wifi.c`
+never received the unrecognised-4th-token guard that #1376 added to its
+sibling `cmd_companion_wifi_connect()`. The 4th token was tested with
+`strcmp(argv[3], "wpa3") == 0` and otherwise ignored, so a mistyped security
+token (`wifi ap myssid mypass wpa3x`) silently started the soft-AP as
+WPA2-PSK instead of WPA3-SAE, and an unquoted SSID containing a space
+(`wifi ap my ssid secret`) silently split across `argv[1]`/`argv[2]`, pushing
+the real passphrase into `argv[3]` where it was discarded without a
+diagnostic — the AP came up with SSID `my` and PSK `ssid`, and `secret` was
+never used.
+
+Fixed by giving `cmd_companion_wifi_ap()` the same guard `wifi connect`
+already had: the 4th-token shape is now validated as the function's first
+statement, before the `companion_cc3501e == NULL` check (a wrong argument
+shape is wrong regardless of whether a companion is bound), and an
+unrecognised token now returns `-EINVAL` with the same two-line
+`shell_error` explaining the fix (adjusted to name `wifi ap`). The security
+assignment in `cmd_companion_wifi_ap()` is reduced to
+`if (argc >= 4) { sec = 2u; }`, matching `cmd_companion_wifi_connect()`.
+
+`tests/console/src/test_console.c` gains the `wifi ap` counterparts of the
+`wifi connect` regression ztests: `test_wifi_ap_rejects_unrecognised_fourth_token`,
+`test_wifi_ap_accepts_quoted_ssid_with_space`, and
+`test_wifi_ap_still_accepts_wpa3_token`. These now also run in CI: `tests/console`
+is added as a fourth `--testsuite-root` to both `scripts/test-all.sh` and
+`.github/workflows/pr-twister.yml`, which previously rooted twister at
+`tests/unit`, `tests/zephyr`, and `examples` only, so this suite (and the
+`wifi connect` tests from #1376 before it) never ran in CI.
+
+The class sweep for the pre-fix `strcmp(argv[N], ...) == 0`-and-otherwise-ignored
+shape found one more site: `cmd_companion_ble_connect()`'s 3rd-token
+("random") handling in `src/zephyr/console/alp_console_companion_ble.c`,
+fixed here the same way, with its own regression ztests
+(`test_ble_connect_rejects_unrecognised_third_token`,
+`test_ble_connect_still_accepts_random_token`).
+
+### Fixed — `cc3501e_wifi_connect()` debited `CC3501E_REQ_TMO_MS` on every healthy poll, collapsing `timeout_ms` to roughly 1/3 (#1481)
+
+`chips/cc3501e/cc3501e_wifi.c`'s `cc3501e_wifi_connect()` poll loop debited
+`CC3501E_REQ_TMO_MS` (100 ms) against the caller's `timeout_ms` budget on
+**every** iteration, regardless of whether the `WIFI_STATUS` read that
+iteration actually succeeded. A healthy `CONNECTING` iteration only sleeps
+`CC3501E_WIFI_STATUS_POLL_GAP_MS` (50 ms), so each such iteration was
+charged 150 ms of budget for 50 ms of real elapsed time — collapsing a
+declared `timeout_ms` (e.g. `50000u`) to roughly 1/3 of the requested wall
+clock (~16.7 s) before reporting a false `ALP_ERR_TIMEOUT`.
+
+The debit is now confined to the `ss != ALP_OK` path, where it still applies
+(a failed status read is genuinely unbounded — `cc3501e_request()` does not
+itself enforce `CC3501E_REQ_TMO_MS` as a wall-clock bound; it currently
+discards `timeout_ms` outright, reserved for a future IRQ-driven wait). Every
+comment in `chips/cc3501e/cc3501e_wifi.c` that asserted `cc3501e_request()`
+bounds a single request to that value has been corrected to say so plainly —
+the debit site itself, plus the two `wifi_status_once()` descriptions that
+repeated the claim — instead of justifying the removed unconditional debit
+with a claim `cc3501e_core.c`'s `cc3501e_request()` (`(void)timeout_ms`)
+disproves.
+
+`test_wifi_connect_bounds_status_attempts_on_wedged_transport_1382`
+(the wedged-transport regression this debit exists for) is unaffected — that
+path's `ss` is always non-`ALP_OK`, so its accounting is unchanged. A new
+regression, `test_wifi_connect_healthy_poll_not_over_debited_1481`, proves a
+healthy `CONNECTING` poll now returns `ALP_OK` within a `timeout_ms` budget
+that the pre-fix accounting would have reported `ALP_ERR_TIMEOUT` for
+despite the connection succeeding.
+
+Checked: `poll_by_repeat()` (`cc3501e_core.c`) already debits only the poll
+gap, not an extra attempt cost — it was not affected. `cc3501e_wifi_ap_start()`
+and the other single-shot wrappers issue a plain `cc3501e_request()` with no
+poll loop, so this defect had exactly one site.
+
+This is a real-silicon driver on E1M-AEN801; the host-side test suite
+passing is not proof of bench behaviour — it proves the accounting logic in
+isolation, not the CC3501E bridge under a real, slow association. This is the
+intended contract, not a regression, but a bench operator should know its
+wire consequence before the first run: for the same `timeout_ms`, a
+healthy-but-slow association now issues roughly 3x as many `WIFI_STATUS`
+exchanges as before this fix (a successful read no longer eats a phantom
+100 ms attempt cost on top of the real 50 ms poll gap) — at the console's
+`ALP_COMPANION_WIFI_CONN_MS = 50000u` that is ~1000 polls at the 50 ms
+cadence instead of ~333, and a never-associating AP now blocks
+`companion_conn_thread` for the full 50 s rather than the pre-fix ~16.7 s.
+
+### Fixed — AEN401/AEN601 `m55_hp` board trees kept the pre-#1445 symmetric slot0, so the planner published `slot0_load_address: 0x802b0000` for an image linked at `0x80010000` (#1482)
+
+#1445 moved the SoM presets (`metadata/e1m_modules/E1M-AEN401.yaml`,
+`E1M-AEN601.yaml`) to disjoint per-core slot0 windows — `he_slot0` at
+`0x80010000`, `hp_slot0` at `0x802b0000` — but never touched the two
+committed HP board device trees. Both `alp_e1m_aen401_m55_hp_*.dts` and
+`alp_e1m_aen601_m55_hp_*.dts` still declared the pre-#1069 symmetric
+layout: `slot0_partition: partition@10000` (`image-0`) plus a real
+`image-1`/`image-scratch` pair, with `zephyr,code-partition` still linking
+the image at `0x80010000`. `loader._resolve_slot0_load_address()` reads the
+preset, not the board tree, so it kept publishing `0x802b0000` — the
+address the DT itself labelled `image-1` — for an image the board actually
+links at `0x80010000`. On a live Flow D target this would have written the
+slot0-linked blob into the secondary OTA slot: the board would keep running
+its previous firmware and no error would be raised. Both boards are latent
+today (`E1M-AEN601` is `preliminary`/`partial_hw_config` with no bench and
+no `zephyr_peripherals_dtsi`; `E1M-AEN401`'s SoC JSON declares
+`jlink_flash_device: null`, so `tan` refuses Flow D outright) — but two
+build-time symptoms already were reachable: `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`
+emitted against a DT still declaring two slots plus scratch, and a hard
+`OrchestratorError` on any board.yaml that set `boot.swap_algorithm:`
+explicitly, since `secure.py`'s `_boot_target_is_single_slot()` now (rightly)
+reads both SKUs as single-slot.
+
+Fixed by rewriting both boards' partition tables to the disjoint layout
+their presets declare — `mcuboot@0x0`/64 KiB, `image-0@0x2b0000`/2688 KiB,
+`reserved@0x550000`/64 KiB (ex-scratch, unused), `storage@0x560000`/96 KiB,
+`atoc@0x578000`/32 KiB — dropping `slot1_partition`/`scratch_partition`
+entirely, matching `alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.dts`
+exactly. Refreshed both files' header comment blocks (the `image-1` row and
+the "same layout as AEN401/AEN801" claim) and the `MRAM 0x80010000` comment
+in both `*_rtss_hp_defconfig` files to `0x802b0000`. Also refreshed
+`secure.py`'s `_boot_target_is_single_slot()` docstring, which still read
+"E1M-AEN801 is the only SKU that sets one today" — its own preset and
+E1M-AEN401/E1M-AEN601's have all declared per-core `<role>_slot0` regions
+since #1445.
+
+`scripts/check_atoc_reservation.py` gained a third invariant,
+`_check_slot0_address()`: for every committed AEN board `.dts` whose
+directory names an `m55_he`/`m55_hp` role, the offset its
+`zephyr,code-partition` points at must equal
+`loader._resolve_slot0_load_address()`'s answer for that SKU/core. It reuses
+the same board-tree walk `_check_dts()` already uses — the one that reaches
+`e1m_aen401_m55_hp`/`e1m_aen601_m55_hp` even though
+`tests/scripts/test_gen_zephyr_board.py` cannot generate or byte-parity-check
+them (`NOT_EMITTABLE`, no `zephyr_peripherals_dtsi`) — so this is the only
+gate that would have caught the drift the moment `bd8be484` (#1445) landed.
+Verified against the pre-fix tree: reverting either board `.dts` makes the
+check fail with the exact address mismatch this bug reproduced.
+
+### Fixed — a `storage[].flash_device:` naming an AEN MRAM sub-region (`mcuboot`, `he_slot0`, `hp_slot0`, `reserved`, `storage`, `atoc`) resolved and decorated a Devicetree label that doesn't exist on the board (#1484)
+
+`_resolve_flash_device()` in `scripts/alp_orchestrate/partition.py` fell back
+to a `memory_map:` region's **name** as its Devicetree label whenever
+neither the region nor any SoM preset declared `dt_label:` — and no preset
+ever does; `grep -rn dt_label metadata/e1m_modules/*.yaml` returns nothing.
+On every E1M-AEN30x/40x/50x/60x/70x/801 preset the region names `mcuboot`,
+`he_slot0`, `hp_slot0`, `reserved`, `storage` and `atoc` are *partition*
+labels **inside** the generated `mram_storage` flash node, not Devicetree
+node labels of their own, so a `board.yaml` `storage:` entry targeting any
+of them resolved `status: ok` and made `emit_dts_partitions` decorate a
+label the board tree never defines. `_known_flash_devices()` also
+advertised those same six names in the loader's "Known devices" list.
+
+Every `memory_map:` region marked `carveout: false` (the schema's own flag
+for "a partition inside a flash-class node, not a device of its own") is
+now excluded from `_known_flash_devices()` and refused by
+`_resolve_flash_device()` with a reason, instead of being resolved and
+decorated. The reserved-region overlap remedy also no longer offers a
+"different `flash_device:`" alternative unless that alternative both
+resolves *and* carries an explicit, verified `dt_label:` override — nothing
+does yet, so today the remedy names no alternative device rather than an
+unverified one (previously it could recommend the very reserved region
+just refused, or `ospi0`, neither a working target).
+
+Net effect on AEN SKUs: no `storage[].flash_device:` target is genuinely
+verified against the generated board tree today. `on_module.ospi_memories:`
+keys like `ospi0` still *resolve* (`status: ok`), but with no confirmed
+Devicetree label — it names a disabled OSPI *controller* node present only
+on the two E1M-AEN801 board trees. `mram_main` also resolves as a flash
+*device* (`_resolve_flash_device()` succeeds, and its Devicetree label
+would fall back to a name the board tree never defines, only
+`mram_storage`), but every AEN preset's own `carveout: false` sub-regions
+already tile all 5632 KiB of it, so a `storage:` entry targeting it always
+projects `status: blocked`, never `status: ok`. `alp-sdk#1556` tracks
+validating the resolved `dt_label` against the generated board tree (or
+requiring a verified override) before `ospi0` is treated as genuinely
+usable.
+
+`metadata/schemas/som-preset-v1.schema.json` and
+`metadata/schemas/board.schema.json`'s `flash_device:`/`dt_label`
+descriptions, `docs/board-config-features.md`, and
+`docs/tutorials/09-board-yaml-deep-dive.md` are updated to state the
+`carveout: false` refusal and the "no target is verified yet" caveat.
+`metadata/templates/board.yaml`'s example uses a `<your SoM's flash
+device>` placeholder rather than a name that doesn't work today.
+
+Nothing on `dev` reached this path today — the one example declaring
+`storage:` (`examples/connectivity/production-deployment/board.yaml`)
+targets `mram_main`, and `dts-partitions.dtsi` is `#include`d by no
+committed overlay — so this is a data/logic and docs fix with no example
+or generated-file fallout.
+
+### Fixed — `load_board_yaml(..., metadata_root=R)` mixed two metadata trees: every resolver that reached past it read the in-tree `metadata/` regardless of R (#1485)
+
+`scripts/alp_orchestrate/loader.py`'s `load_board_yaml(path, *, metadata_root=METADATA_ROOT)`
+threads the caller's metadata root through the schema/topology pass, but
+every resolver reached past it, back to either a module-global
+`METADATA_ROOT` (imported from `.paths` / `alp_registries.py` /
+`alp_project_loader.py` at each module's top) or, one layer further out, a
+`metadata_root: Path = METADATA_ROOT` DEFAULT ARGUMENT that a caller could
+bind silently by omitting the last positional argument. An explicit
+`--metadata-root <other>` was ignored across the board, not just by the
+library layer: `loader.py`'s own `_resolve_storage` (`_known_flash_devices
+(som_preset, METADATA_ROOT)`) and `_validate_cross_fields`
+(`resolve_memory_map(som_preset, METADATA_ROOT)`) — the storage / carve-out
+/ partition / SoC-capability checks and the SoM-preset validators — read
+the SDK's own in-tree tree exactly like everything else; a board declaring
+a scratch-root-only flash device name false-failed, and one declaring an
+in-tree-only name false-passed, against the tree the user actually asked
+for. So did the ADR-0018 library layer (`resolve_selection` /
+`zephyr_kconfig_lines` / `yocto_unwireable` / `yocto_image_install` /
+`baremetal_cmake_args`, plus `west_libs.py`'s curated-manifest and
+alias-table readers) and three registry/schema lookups: `peripheral-
+kconfig.json`, read through a `_PERIPHERAL_KCONFIG` dict frozen at *import
+time* in `alp_orchestrate/slugs.py` and `alp_project_emit/__init__.py`
+(before any `--metadata-root` flag is even parsed); `silicon-kconfig.json`,
+read through `alp_project_loader.silicon_to_kconfig()`'s unkeyed
+`functools.lru_cache`; and `topology.py`'s `_core_os_choices()` (the
+`os:` enum a slice's `os:` field is validated against, and `--emit
+os-topology`'s `allowed_os` set), which read the fixed module-level
+`BOARD_SCHEMA` constant unconditionally, with no `metadata_root` parameter
+at all. A `board.yaml` could validate `clean` against facts
+that exist only in the tree the user explicitly asked NOT to use, or fail
+against facts that exist only in the tree they asked for. The default path
+(`metadata_root == METADATA_ROOT`, i.e. every CI run, every example, and
+`tan validate`) was unaffected — the exposed surface was the
+explicit-override callers (`scripts/validate_board_yaml.py --metadata-root`,
+`scripts/alp_project.py`).
+
+Fixed by giving `BoardProject` a `metadata_root: Optional[Path] = None`
+field plus an `effective_metadata_root()` accessor, set from
+`load_board_yaml`'s own `metadata_root` argument, and threading it through
+every resolver. This is a new shape in alp-sdk, not a mirror of anything
+tan-cli carries: tan-cli's relocated planner solves the same problem the
+opposite way, binding its SDK root once process-wide via
+`tan/planner_root.py`'s `bind_sdk_root()` rather than threading a
+per-project root. The `loader.py` sites that run before a `BoardProject`
+exists (`_resolve_storage` / `_validate_cross_fields`) take `metadata_root`
+as an explicit parameter instead; every other site that already receives a
+resolved `BoardProject` now calls `project.effective_metadata_root()` in
+place of the module global — including the five ADR-0018 library-layer
+call sites in `kconfig.py`, the `_library_alias_table()` reads (`kconfig.py`
+now imports `loader.py`'s already-threaded copy instead of keeping a
+second, root-less one), the `extra_libraries:` curated-collision check in
+`validate.py` (recomputed per-project; the module-level
+`_CURATED_LIBRARIES` global stays pinned to the SDK's own in-tree
+`metadata/` on purpose — `check_library_registry.py`'s self-consistency
+gate needs the repo's own set, not a project override's), `west_libs.py`'s
+`_emit_library_hw_backends` / `_emit_west_libraries` /
+`_load_curated_library_manifest` / `_library_alias_table`, and the three
+registry/schema lookups: `alp_registries.peripheral_kconfig(metadata_root)`
+(now a required parameter, its `lru_cache` keyed on `metadata_root` so a
+second root in the same process can't reuse the first root's table; the
+frozen `_PERIPHERAL_KCONFIG` module constants in `slugs.py` and
+`alp_project_emit/__init__.py` are gone — `kconfig.py`'s `_emit_subsystems`
+now calls the function directly with `project.effective_metadata_root()`),
+`alp_project_loader.silicon_to_kconfig(silicon, metadata_root)` (same
+shape: required parameter, root-keyed cache, called from `kconfig.py`'s
+`_slice_alp_conf`), and `topology._core_os_choices(metadata_root)` (same
+shape again; its callers -- `validate.py`'s `_enforce_loader_rules` and
+`topology.py`'s `core_os_topology` -- now thread `metadata_root` /
+`project.effective_metadata_root()` down from `loader.py`'s
+`_validate_topology_cores`, which took `metadata_root` as a new
+parameter). `scripts/alp_orchestrate/libraries.py`'s own seven
+entry points (`available_libraries` / `load_manifest` / `resolve_selection`
+/ `zephyr_kconfig_lines` / `yocto_image_install` / `yocto_unwireable` /
+`baremetal_cmake_args`) also lost their `metadata_root: Path =
+METADATA_ROOT` default argument — the same silently-falls-back-to-in-tree
+shape that hid the library layer's own miss in the first place — so an
+omitted argument now fails loudly with `TypeError` instead of silently
+reading the wrong tree; no caller anywhere in `scripts/`/`tests/` relied on
+the default (`tests/scripts/test_library_layer.py`'s handful of direct
+`liblayer.zephyr_kconfig_lines(project, slice_)` / `liblayer.
+resolve_selection(project)` calls now pass `liblayer.METADATA_ROOT`
+explicitly).
+
+`tests/scripts/test_orchestrate_storage.py` gains
+`test_flash_device_resolves_against_explicit_metadata_root`, which reproduces
+the issue's exact repro against E1M-V2N101 (its `memory_map` derives from the
+SoC JSON rather than an inline SoM override, so a scratch root's renamed
+region is genuinely reachable only through `metadata_root`): a scratch-only
+flash device name resolves against the scratch root, an in-tree-only name
+does not, and the in-tree name still resolves against the real `metadata/`
+with no override. Pre-fix, the test doesn't reach the false-pass assertion
+at all — its first leg (the scratch-only name, expected to resolve) raises
+an uncaught `OrchestratorError` because `_resolve_storage` read the in-tree
+tree, which has no `ocram_scratch` region, so the test errors out on the
+false-fail leg before the false-pass leg ever runs.
+
+`tests/scripts/test_emit_inference_mac.py` and
+`test_emit_cross_core_shmem_cache.py` call `kconfig._emit_inference()`
+directly against a hand-built `types.SimpleNamespace` standing in for
+`BoardProject` (no `load_board_yaml()` in the loop), so they didn't carry the
+new `effective_metadata_root()` method and broke with `AttributeError` under
+the full `pytest tests/scripts/` run. Fixed by adding
+`effective_metadata_root=lambda: _MR` to each fake project alongside its
+other duck-typed attributes.
+
+`tests/scripts/test_orchestrate_libraries.py` gains
+`test_curated_library_kconfig_resolves_against_explicit_metadata_root`,
+reproducing the adversarial review's manual repro: rename
+`CONFIG_CMSIS_DSP_TRANSFORM=y` to a scratch-only marker in a copied metadata
+root's `libraries/cmsis-dsp.yaml`, then assert `_slice_alp_conf()` for a
+project-wide `libraries: [cmsis-dsp]` board emits the scratch marker (not the
+in-tree symbol) under the override, and the reverse with no override.
+Confirmed the test fails on the pre-fix `kconfig.py` call shape (the missing
+third `metadata_root` argument) with the in-tree symbol leaking through.
+
+`tests/scripts/test_orchestrate_registries.py` (new file) covers the two
+Kconfig registry sites round-two of this fix threads: a scratch-metadata-root
+board that renames `silicon-kconfig.json`'s `socSymbolPrefix` and re-keys
+`peripheral-kconfig.json`'s `adc` entry to a scratch-only marker must emit
+the scratch symbols on `--metadata-root <scratch>` and the real in-tree
+symbols with no override, for both `_slice_alp_conf`'s silicon-select line
+and its peripheral-subsystem line. Confirmed both cases fail on the
+pre-round-two code (the frozen `_PERIPHERAL_KCONFIG` import-time constant
+and the unkeyed `silicon_to_kconfig()` cache), matching the `alp_project.py
+--metadata-root` CLI repro used to find the defect. The third round-two site
+(`topology._core_os_choices()`) was found by re-running, post-fix, the same
+`sys.addaudithook` sweep over every `open()` under the SDK's own `metadata/`
+the adversarial review used, across the full `--emit` surface
+(`zephyr-conf`, `cmake-args`, `west-libraries`, `hw-info-h`, `dts-overlay`,
+`os-topology`, `system-manifest`, `ipc-contract-h`, `dts-reservations`) for
+`examples/audio/butterworth-lowpass`, `examples/connectivity/iot-fleet-ota`
+and `examples/multicore/rpmsg-v2n` against a scratch `metadata_root`: the
+sweep flagged a stray `--emit os-topology` read of the in-tree
+`schemas/board.schema.json`, which is fixed by the `_core_os_choices()`
+change above; `test_emit_os_topology.py::test_allowed_os_keyed_on_metadata_root`
+adds the regression coverage for it (reverting the `_core_os_choices()`
+root-keying hunk turns this test red; no other test in the suite catches
+the miss). Post-fix, the only in-tree `metadata/` reads left under
+the swept surface are the two legitimate ones: `metadata/libraries/` +
+`library-aliases-v1.json` (the curated-library registry
+`check_library_registry.py`'s self-consistency gate needs pinned in-tree)
+and `metadata/sdk_version.yaml` (the SDK's own version, not a per-project
+hardware fact).
+
+`tests/scripts/_orchestrate_support.py` and `test_orchestrate_memory.py`
+dropped the `monkeypatch.setattr(alp_orchestrate, "METADATA_ROOT", ...)`
+calls their scratch-metadata-root helpers carried: that patch was already
+inert (the submodules import `METADATA_ROOT` from `.paths` at their own
+module scope, a binding a patch on the `alp_orchestrate` package object never
+touches) and the explicit `load_board_yaml(..., metadata_root=...)` argument
+was always the only thing that mattered. Round three drops the remaining
+`monkeypatch.setattr(alp_orchestrate, "BOARD_SCHEMA", ...)` calls alongside
+them (`_orchestrate_support.py`'s `_synthetic_nx9101_root` and
+`test_orchestrate_memory.py`'s hand-built V2N101 scratch root): by this
+same argument they were inert too -- `loader.py`'s `_validate_board` binds
+`BOARD_SCHEMA` via its own `from .paths import BOARD_SCHEMA`, a separate
+name the `alp_orchestrate` package-level patch never reaches, and every
+fixture that patched it already copies a real `schemas/board.schema.json`
+into the scratch root, so `_validate_board`'s in-tree fallback was never
+exercised by these tests either way. `_core_os_choices()` now carries that
+same in-tree fallback (this round's regression fix, closing the raw
+`FileNotFoundError` a `--metadata-root` with no `schemas/` copy raised) --
+every scratch-metadata-root fixture that reaches `_slice_alp_conf` / `--emit
+os-topology` still carries its own `schemas/board.schema.json` (already true
+of every fixture in this suite) plus, as of this round, its own
+`registries/silicon-kconfig.json` + `registries/peripheral-kconfig.json`
+copies -- added to `_orchestrate_support.py`'s `_synthetic_nx9101_root` and
+the hand-built scratch roots in `test_orchestrate_slices.py` /
+`test_orchestrate_buildplan.py` that previously omitted them and were
+silently passing by reading the SDK's own in-tree registries.
+
+Refs tan-cli: `scripts/alp_project_emit/west_libs.py`'s
+`_emit_west_libraries` / `_library_alias_table` /
+`_load_curated_library_manifest` have drifted in shape from tan-cli's
+relocated verbatim copy (`python/tan/planner_emit.py:415`, which still
+calls the ported function with no `metadata_root` argument). Nothing
+breaks today -- tan's parity oracle goes through
+`alp_project._run_v2_per_core_emit` and the default path is byte-identical
+-- but the two copies are no longer verbatim and the drift should be
+folded back in on the tan-cli side.
+
+### Fixed — ten chip drivers had no entry in `_CHIP_SUBSYSTEMS`, so the Zephyr emit silently dropped their `depends on` subsystem (#1487)
+
+`_CHIP_SUBSYSTEMS` in `scripts/alp_project_emit/__init__.py` is a hand-typed
+copy of each `config ALP_SDK_CHIP_<NAME>` block's `depends on` line in
+`zephyr/kconfigs/chips.kconfig`, consumed by `_emit_chips` /
+`_emit_subsystems` in `scripts/alp_orchestrate/kconfig.py` to turn on the
+matching `CONFIG_<SUBSYS>=y` alongside every `CONFIG_ALP_SDK_CHIP_<NAME>=y`
+it prints. Ten of the eighty `config ALP_SDK_CHIP_*` entries had no key in
+the table at all: `act8760`, `tps628640`, `pca9451a`, `da9292`,
+`clk_5l35023b` (all `depends on I2C`), `pi3dbs12212`, `murata_lbee5hy2fy`,
+`deepx_dxm1`, `gd32_swd` (all `depends on GPIO`), and `gd32g553` (`depends
+on (SPI || I2C)`). A miss is swallowed silently — `chip_subsystems_table.get(chip,
+())` in `_emit_chips` just contributes nothing — so Kconfig received the
+chip's `=y` assignment with its dependency never turned on, and dropped it
+as an unmet dependency (a warning, not a build error). Nine of the ten
+(`act8760`, `tps628640`, `pca9451a`, `da9292`, `clk_5l35023b`,
+`pi3dbs12212`, `murata_lbee5hy2fy`, `deepx_dxm1`, `gd32g553`) are
+SoM-intrinsic on `E1M-NX9101` / `E1M-V2M101` / `E1M-V2M102` /
+`E1M-V2N101` / `E1M-V2N102` presets (`on_module:`). `gd32_swd` is not —
+it has no `on_module:` entry on any preset; it is project-declared, the
+customer opts it in with `chips: [gd32_swd]` in their own `board.yaml`
+(e.g. `examples/v2n/v2n-gd32-swd-flash/board.yaml`).
+
+The gap is latent in-tree today, not an actual miss on every board: a
+sweep of all 100 shipped `examples/*/*/board.yaml` × every declared core
+found zero violations. For the four V2N/V2M presets (`E1M-V2M101` /
+`E1M-V2M102` / `E1M-V2N101` / `E1M-V2N102`), the I2C half is structurally
+masked because the same preset's `on_module:` also populates a
+table-listed I2C chip (`rv3028c7` / `optiga_trust_m` / `eeprom_24c128` /
+`tmp112`), and the GPIO half only surfaces once a board's `peripherals:`
+array stops independently pulling `gpio` in. `E1M-NX9101` is masked for a
+different reason: its `on_module:` block resolves to a single chip slug
+(`pca9451a`, I2C-dependent, already table-covered before this fix), so
+`_slugs_from_on_module()` contributes no GPIO-dependent chip at all; its
+only example, `examples/multicore/rpmsg-imx93/m33/CMakeLists.txt`, is
+refused outright by `check_zephyr_conf_parity.py`'s hw_rev-buildable gate
+(#1025) -- `E1M-NX9101`'s only hw_rev (`imx93 r1`) is `status: tbd` -- so
+neither half is reachable through it today.
+
+It is reachable today, though: a SoM-only `board.yaml` (no carrier
+`preset:`) for `E1M-V2M101` / `E1M-V2M102` emits
+`CONFIG_ALP_SDK_CHIP_DEEPX_DXM1=y` / `_MURATA_LBEE5HY2FY=y` /
+`_PI3DBS12212=y` with no `CONFIG_GPIO=y` (issue #1487's reproduction) --
+adding a carrier `preset:` (e.g. `e1m-x-evk`) masks it too, since the
+preset's own `populated:` table turns on GPIO- and I2C-dependent chips
+(`button_led`, `icm42670`, ...) independently of the SoM's.
+
+Added the missing nine 1:1 entries, and `gd32g553`'s `(SPI || I2C)`
+deliberately: the driver's bridge protocol is genuinely hybrid (both
+transports compiled in, either usable at runtime — see
+`chips/gd32g553/gd32g553.c` and `docs/gd32-bridge-protocol.md`), so rather
+than pick one side of the `||` and risk repeating the same drop for
+whichever transport a future board relies on, both `SPI` and `I2C` are
+turned on. Added `scripts/check_chip_subsystems_parity.py`, a `check-script`
+gate (`metadata/quality-tasks-v1.json` id `chip-subsystems-parity`, wired
+into `pr-metadata-validate.yml`) that asserts every `config
+ALP_SDK_CHIP_*` / `ALP_SDK_BLOCK_*` `depends on` line in
+`zephyr/kconfigs/chips.kconfig` has a matching `_CHIP_SUBSYSTEMS` entry —
+this class of drift can no longer land silently. Confirms the table now
+has no other gaps; the two Kconfig entries with no key, `rtl8211fdi` and
+`pdm_mic`, correctly have no `depends on` line to mirror.
+
+### Fixed — three AEN bench flash scripts wrote MRAM, never read their own `verifybin` result, and exited 0 on a failed flash (#1488)
+
+`scripts/bench/aen/flash-jlink.sh`, `flash-update-log-dual.sh`, and
+`flash-update-log-firewall-probe.sh` each pipe their J-Link CommanderScript
+transcript through a display-only `grep` and only check it for a connect
+failure (`Could not connect to the target device` / `Cannot connect to the
+probe/programmer`). The `verifybin` line each script issues right after its
+`loadbin` was never read: a `Verify failed.` line landed in the tee'd
+transcript and the script still exited 0, proceeded to read the console, and
+reported a good flash on a board that was NOT actually written.
+
+`flash-jlink-hp.sh` and `flash-jlink-mramxip.sh` already carry the fix for
+this (#1343) — a hard gate on the `verifybin` outcome: exit 3 on any
+`verify failed|verification failed|mismatch` line, exit 3 if no
+`verify successful` line is present at all (the verify never ran), only then
+proceed. That same gate is now mirrored, byte-for-byte in shape, onto the
+three scripts that were missing it — each reading its OWN transcript file
+(`/tmp/flowd.out`, `/tmp/firmware-update-log-dual-write.out`,
+`/tmp/firmware-update-log-firewall-probe-write.out` respectively; these three
+scripts each capture to a different temp file, so the gate must read the
+matching one, not `/tmp/hp-write.out` from the sibling it was copied from).
+
+`flash-update-log-firewall-probe.sh` also carried a second, unrelated defect
+(#1478): the preflight `JLinkExe` invocation ended with a stray **literal**
+two-character `\n` instead of a real backslash-newline line continuation,
+passing a bogus `n` argument to `JLinkExe` on the read-only preflight that
+guards the destructive `loadbin` to `alp_ulog_partition`. Fixed to match the
+genuine continuation already used in `flash-update-log-dual.sh`.
+
+**Rework, same issue.** The exit-3 gate above changed the batch caller's
+failure surface, and successive review passes found further defects the
+original PR missed:
+
+- `scripts/bench/aen/flash-all-flowd.sh` runs `set -e` and captured each
+  app's flash with a bare `flog=$(timeout 120 bash "$HERE/flash-jlink.sh" ...)`
+  — a standalone assignment takes the substitution's exit status, so the new
+  `exit 3` aborted the whole strictly-serial batch at the FIRST bad verify,
+  mutely (the just-captured `$flog` was never echoed, and the `BATCH SUMMARY`
+  `cat "$SUM"` at the end never ran). The post-boot console read 24 lines
+  below had the identical shape — a bare `con=$(read_console "$BD")`, where
+  `read_console` ends in
+  `bench_jlink_assert_connected /tmp/rdc.out "Flow D console read" || exit 7`
+  — so a probe that never opened killed the batch there instead, AFTER a
+  successful flash. Both are now `rc=0; x=$(...) || rc=$?`, reset every
+  iteration, mapped to a named batch-summary entry (`FLASH-UNVERIFIED` for
+  exit 3, `FLASH-FAILED` for exit 2, `FLASH-ABORTED (wrong probe)` for exit
+  4, `FLASH-OK-READBACK-FAILED` for exit 7, `FLASH-ERROR (exit N)`
+  otherwise, and `CONSOLE-READ-FAILED (exit N)` for the console read) and
+  `continue` — the batch is resilient again, per its own header comment.
+- The batch's failure display was also truncated to uselessness:
+  `echo "$flog" | grep -iE ... | head -6` cut off well before the verify
+  gate's own terminal `!! VERIFY FAILED ...` / `!! no verifybin success
+  reported ...` lines, which `flash-jlink.sh` emits after up to 30 display
+  lines of its own, so the operator saw a bare `FLASH-UNVERIFIED` label with
+  none of the evidence. On a non-zero child exit the batch now dumps
+  `printf '%s\n' "$flog" | tail -20` before the summary line.
+- `flash-update-log-firewall-probe.sh`'s new gate comment claimed the missing
+  check had been "letting the destructive firewall probe proceed to overwrite
+  alp_ulog_partition on an unconfirmed write." That overclaims: `loadbin`,
+  `verifybin`, `RSetType 2`, `r`, and `g` are all inside the SAME
+  CommanderScript JLinkExe has already finished executing by the time the
+  shell-side gate evaluates, and the ATOC entry carries
+  `"flags": ["load", "boot"]` — the SE has already pin-reset and booted the
+  HE probe before this check runs. Reworded to say what the gate actually
+  does (suppress the false "flash complete" report and the beacon read-back;
+  it cannot prevent the write or the boot) and added an explicit data-loss
+  caveat to both `exit 3` paths: the board was already pin-reset and
+  released, so `alp_ulog_partition` may ALREADY be overwritten — re-read the
+  partition from a known-good state before trusting `BASELINE_WORDS`
+  captured earlier in the same run.
+- That caveat landed on only ONE of the two scripts it is true of.
+  `flash-update-log-dual.sh` has the same one-CommanderScript shape
+  (`loadbin` / `verifybin` / `RSetType 2` / `r` / `g`) and its `HP-OWNER`
+  ATOC entry is likewise `"flags": ["load", "boot"]`, so at both of its
+  `exit 3` paths the board has equally already been pin-reset, and the HP
+  owner has booted and released the HE client — and the update-log app
+  appends a record on boot, so `alp_ulog_partition` may ALREADY have been
+  written. Both `exit 3` paths there now carry the same DATA LOSS caveat,
+  and the gate comment carries the same "what this gate cannot do"
+  paragraph.
+- `scripts/bench/aen/README.md` documented none of this. The rows for
+  `flash-jlink.sh`, `flash-update-log-firewall-probe.sh` and
+  `flash-update-log-dual.sh` now state the exit-3 verify contract (and, for
+  the two update-log helpers, the data-loss consequence), and the
+  `flash-all-flowd.sh` row's flat claim of resilience is replaced by the
+  mechanism that makes it true plus the full summary-label set.
+- `flash-jlink.sh`, `flash-update-log-dual.sh`, and
+  `flash-update-log-firewall-probe.sh` each captured their JLinkExe
+  transcript as `... | tee <file> | grep ... | head -N` — once `head` takes
+  its N lines it exits and SIGPIPEs `grep`, which can in turn SIGPIPE `tee`
+  before the rest of the transcript (including the `Verify successful.` /
+  `Verify failed.` line the new gate reads) is written to disk. Before this
+  fix a truncated transcript was harmless; after it, the absence of
+  `verify successful` in a truncated-but-actually-good transcript is a hard
+  `exit 3` on a board that flashed fine. Fixed to write the transcript FIRST
+  and completely (`... > <file> 2>&1 || true`), then run the display
+  `grep ... | head -N` against the finished file, so `tee` is never the
+  victim of a downstream SIGPIPE. `flash-jlink-hp.sh` / `flash-jlink-mramxip.sh`
+  still use the `tee` shape (pre-existing, out of scope for this rework).
+- `tests/scripts/test_bench_jlink_connect_guard.py` had zero occurrences of
+  `verifybin` or `verify successful` — nothing derived the set of verifybin
+  sites from the script bodies, which is exactly how three of the five
+  scripts went unfixed under #1343 and uncaught for months (six verifybin
+  SITES across those five scripts; `flash-jlink-mramxip.sh` issues two, one
+  per `loadbin`). Added
+  `test_every_verifybin_site_is_gated_on_its_own_transcript`: it regexes
+  every `verifybin` line in `scripts/bench/aen/*.sh`, resolves each site's
+  own JLinkExe transcript-capture file (the `tee` or the direct-redirect
+  shape above), and asserts that file is grepped, by that same script, for
+  both `verify failed|verification failed|mismatch` and `verify successful`.
+  That derivation pins the FILENAME only, and was fail-open on the #1488
+  defect itself: deleting both `exit 3` from a gate, or inverting
+  `if ! grep -qi "verify successful"` to `if grep -qi ...`, left the greps in
+  place and kept it green. `test_every_verifybin_gate_actually_gates` now
+  extracts each script's verify block and RUNS it under `bash` against
+  synthetic transcripts — a failed verify must exit 3, an all-successful one
+  must exit 0, the two must differ, `Verify failed.` alongside a full set of
+  success lines must still exit 3, and a missing or empty transcript must
+  exit 3. All three mutations (delete both exits / invert the success
+  polarity / repoint the gate at a sibling script's transcript) were
+  re-measured and go red. `test_the_verifybin_regex_actually_matches_something`
+  keeps the derivation from passing vacuously if the invocation shape ever
+  drifts; its floor is `>= 6` sites, matching the sibling read-back guard.
+
+### Fixed — GD32 bridge recovery runbook still showed the deleted `flash_method: swd_probe` / `flash_args` keys (#1489)
+
+`docs/gd32-bridge.md` "Who flashes it, and when" claimed the four V2N /
+V2M SoM presets (`E1M-V2N101`, `E1M-V2N102`, `E1M-V2M101`, `E1M-V2M102`)
+declare `flash_method: swd_probe` plus a full `flash_args` block, and
+told a bench operator to run `tan flash --helper gd32_bridge --recover`
+against that entry. #1439 removed both keys from all four presets when
+GD32 programming was separated out of `tan` (#1439, tan-cli#732), so the
+sample was stale, the documented command no-ops (no `flash_method` and
+no `firmware_path` on the entry — `tan flash` skips, status `skipped`,
+rc `-1`, never a run failure — it does not write to the wrong board),
+and the doc's "**Required step on the
+alplab-gw bench: set `ALP_FLASH_REQUIRE_DPIDR=1`**" mitigation was
+attached to a command path that arms nothing.
+
+`docs/gd32-bridge.md` now shows the YAML shape the presets actually
+ship (`flash_policy: recovery_only` + `update_channel:
+alp_ota_spi_bridge`, no `flash_method`, no `flash_args`), states that
+GD32 programming was separated out of `tan` per #1439 / tan-cli#732 so
+there is no `tan`-driven local flash path today, and re-homes bricked-
+bridge recovery onto an out-of-`tan` SWD procedure — the `3-4.2` /
+`3-4.4.3` / J-Link serial `603000869` collision FACTS are carried
+forward unchanged, but the mitigation itself is rewritten: the old
+"**Required step: set `ALP_FLASH_REQUIRE_DPIDR=1`**" line (which armed
+nothing on this out-of-`tan` entry) is replaced by a manual read-only
+DPIDR preflight plus AEN E8 probe detachment, mirroring
+`scripts/bench/aen/flash-jlink-mramxip.sh`'s connect-only pattern. The
+doc now says plainly that no armed wrong-board guard exists on that
+path (see #1369, tracking the SW-DP ID measurement that would let one
+be armed; see also #1370, tracking moving GD32/CC3501E SWD programming
+out of alp-sdk entirely). The rewrite does not claim `tan`
+itself dropped the `swd_probe` backend — as measured against tan-cli
+tag `v0.6.0-rc1`, tan still ships `swd_probe`
+(`python/tan/core/flash_plan.py::plan_swd_probe`), and both
+`--recover` and `ALP_FLASH_REQUIRE_DPIDR`
+(`python/tan/commands/flash_cmd.py`'s `REQUIRE_DPIDR_ENV`, tan-cli#589)
+exist in tan-cli today — they are just inapplicable to this entry,
+since the preset declares no `flash_method` for either to arm.
+(Note for the PR description: two earlier commit bodies on this branch,
+`406928cc` and `dd7f47e5`, claim `--recover` and
+`ALP_FLASH_REQUIRE_DPIDR` are absent from tan-cli entirely — that claim
+was wrong and is superseded by the paragraph above; both symbols exist
+at `python/tan/commands/flash_cmd.py:3880` and `:2089` as measured
+against tan-cli tag `v0.6.0-rc1`. Recorded here rather than by amending
+those commits.)
+
+A later round armed the stop-list itself: the compare step now aborts
+on a match to *either* `4C013477` (AEN E8) or `6BA02477` (V2N CM33
+DAP) instead of treating `6BA02477` as a plausible GD32 reading, and
+the "detach the probe" advice is scoped to the cloned-serial pair
+specifically (GD32 bridge + AEN E8, both J-Link serial `603000869`) —
+the bench has a third probe (the V2N CM33 DAP, serial `600107451`)
+that the stop-list already excludes without a detach.
+
+That round still left two real gaps, closed in this round. First, the
+step it called "manual and mandatory" — `export JLINK_SN=603000869`
+— is inert for the hand-run `JLinkExe` procedure this section
+prescribes: `JLinkExe` takes a probe selector only from
+`-SelectEmuBySN <sn>` on the command line or a `SelectEmuBySN` line
+inside its CommanderScript, never from the environment; the doc now
+shows the literal CommanderScript (`SelectEmuBySN 603000869` as its
+first line) and requires the identical selector on the flash
+invocation. Second, the read and the write were two independent
+`JLinkExe` invocations with the probe-detach step ordered *after* the
+read — so the transcript an operator was told to trust could have
+been taken while the AEN E8 was still attached, and nothing forced a
+re-read afterwards. The procedure is now an explicit ordered sequence:
+detach the AEN E8 first, then select by serial, then the read-only
+preflight and by-eye DPIDR comparison, then flash immediately with the
+same selector, then re-read after any re-plug or intervening
+invocation. The `CHANGELOG.md:1727-1731` citation for the V2N CM33 DAP
+measurement — a line range that shifts every release — is replaced
+with the `e1mx-v2n-m1-01` probe table under CHANGELOG.md's "### Fixed
+— Flow C wrote and executed on a target it never identified (#1312)"
+heading (a heading, not a line number, since CHANGELOG line numbers
+shift every release just as the citation being replaced did),
+and the preflight's `device` step now names the generic `Cortex-M33`
+explicitly instead of implicitly borrowing the AEN read profile
+(`Cortex-M55`) or the GD32 part profile (`AE822FA0E5597LS0_M55_HE`) by
+reference — neither is correct for a GD32G553, and a part profile can
+run vendor-specific init.
+
+`scripts/bench/aen/flash-jlink-mramxip.sh`'s own "0b. SAFETY GATE"
+comment asserted "the V2N-M1 GD32 probe reads 0x0BE12477" as measured
+fact, contradicting this doc's "has not been measured on a GD32 with a
+probe attached" (see #1369); that comment is now hedged to match, and
+the local `AEN_DPIDR`/`GD32_DPIDR` reassignments it carried (which
+only shadowed the exported values `scripts/bench/aen/bench-env.sh:152-153`
+already set,
+to the same literal values) are dropped. This is not behavior-neutral
+for an operator who exports their own `AEN_DPIDR` / `GD32_DPIDR`
+override: those script-local literals previously won over any such
+export (plain shell reassignment beats an exported value), so dropping
+them means `scripts/bench/aen/bench-env.sh:152-153`'s
+`${AEN_DPIDR:-…}` / `${GD32_DPIDR:-…}` exports — and therefore an
+operator's override, if
+one is set — are what now reach `bench_jlink_assert_aen_dpidr` in this
+script.  For the common case of no override set, both paths resolve to
+the same literal values and nothing observable changes.
+
+**This slice deliberately corrects `docs/gd32-bridge.md`,
+`scripts/bench/aen/flash-jlink-mramxip.sh`'s comment, and
+`scripts/bench/aen/bench-env.sh:145`'s "BENCH-VERIFIED" banner** (the
+latter needed the same hedge as `flash-jlink-mramxip.sh`'s comment
+carries, since that comment's hedge defers to `bench-env.sh` as the
+source of the claim — leaving the source unhedged while its downstream
+copy was hedged was incoherent).  The same wrong-board /
+unattested-`0x0BE12477` claim still stands, uncorrected, in:
+
+- `docs/glossary.md:141` (documents `0x6BA02477` as "the IDCODE ...
+  for the GD32G553")
+- `docs/test-plan.md:127` (documents the GD32 SWD controller's expected
+  IDCODE as `0x6BA02477`)
+- `docs/verification-status.md:179` (generated from `docs/test-plan.md`
+  — fix the source, not this file)
+- `metadata/chips/gd32_swd.yaml:49` (`target_expected_idcode:
+  "0x6BA02477"`)
+- `docs/bring-up-aen.md:87` (calls `0x6BA02477` "the generic ...
+  [value] this repo reads for the GD32/Cortex-M33")
+- `docs/superpowers/specs/2026-06-01-gd32-flash-release-design.md:34,84,160,187`
+- `docs/superpowers/plans/2026-06-01-gd32-flash-release.md:544,703`
+
+All are #1440's (tracked `needs-silicon`), which owns the rest of
+this sweep. `docs/_aen-runbook-section.md:257` carried the same claim
+but was independently corrected on `dev` by #1512 before this slice
+started, so it is not in the list above; the same is true of
+`docs/tutorials/07-recovering-a-bricked-bridge.md`'s sample-code
+comment, independently corrected on `dev` by #1538.
+
+Two more sites carried the same stale present-tense claim and are fixed
+in the same sweep: `docs/porting-new-som.md`'s `helper_firmware[]` row
+dropped the "a `swd_probe` entry naming `flash_args.target` must also
+name `flash_args.jlink_device`" sentence, a schema conditional #1439
+deleted along with the keys; and `docs/v0.6-tbd-and-assumptions.md`
+now describes the `flash_method`/`flash_args` survival as a past-tense
+fact about the state at the time that fix landed, not a present-tense
+claim about today's presets.
+
+A further round corrected the *quoted skip message itself*: the four
+V2N/V2M presets, `docs/gd32-bridge.md`, and
+`tests/scripts/test_orchestrate_manifest.py` had all been describing
+the `update_channel`-only skip path, but tan-cli#611 ("the hoist")
+moved the `flash_policy` check (`helper_flash_gate`) ahead of the
+`flash_method`/`update_channel` branch it used to be quoting — so a
+`flash_policy: recovery_only` entry like `gd32_bridge` is declined by
+that earlier gate, with a different message, before the quoted branch
+is ever reached. The quotes now match what `helper_flash_gate` actually
+emits. The same correction was applied to the six AEN `cc3501e_otp`
+entries' "nothing to decline" comment, which was equally wrong for the
+identical reason: `flash_policy: recovery_only` is declined by the
+hoisted gate whether or not the entry also carries a `flash_method`.
+
+A further round closed three review gaps. First, step 5's "repeat
+steps 2-3" remedy for a re-plug or intervening invocation omitted
+step 1 — the physical AEN E8 detach, the only thing that actually
+removes the cloned-serial ambiguity — so a re-plugged AEN E8 could
+answer a later read while the GD32 answered the write with nothing
+stopping the operator; step 1 now names re-plugging the AEN E8 as
+voiding the procedure, step 5 now says "repeat steps 1-3", and both
+steps require confirming with `lsusb -t` that exactly one `603000869`
+probe enumerates.  Second, step 3's transcript check aborted only on a
+*positive* match to a known-wrong ID, so a transcript with no `Found
+SW-DP with ID` line at all — a connect failure or the documented
+gated-DAP `Could not find core in CoreSight setup` state — matched
+neither abort value and the procedure permitted the write; step 3 is
+now fail-closed, requiring the ID line to be present and mirroring
+`bench_jlink_assert_aen_dpidr`'s own abort-unless-seen shape
+(`scripts/bench/aen/bench-env.sh:181-185`).  Third,
+`docs/gd32-bridge.md`'s "has not been measured on a GD32 with a probe
+attached" claim about `0x0BE12477` and
+`docs/tutorials/07-recovering-a-bricked-bridge.md`'s "IDCODE caveat"
+table naming that same value as bench fact (added independently on
+`dev` by #1538) now cross-reference each other by name in both
+directions, state that this hazard section governs the recovery-flash
+decision, and explain why the tutorial's table is the weaker claim —
+without picking a winner on the open #1440/#1369 question itself.  A
+false claim also caught in this round: "the read only constrains the
+write that immediately follows it, on the same selected probe" was
+wrong on its own terms, since probe selection is per-invocation; the
+binding is now attributed to step 1's detach instead.  Also: step 1
+now names the probe-identification command (`lsusb -t`, matching USB
+path `3-4.4.3` for the AEN E8 against `3-4.2` for the GD32 — those
+paths are recorded at `CHANGELOG.md:2736` and `CHANGELOG.md:3339`, not
+in `bench-env.sh`).
+
+No gate caught this — `scripts/check_doc_drift.py` deliberately
+allowlists `ALP_FLASH_REQUIRE_DPIDR`, a live tan-cli symbol
+(`python/tan/commands/flash_cmd.py`'s `REQUIRE_DPIDR_ENV`, tan-cli#589)
+that is not an alp-sdk symbol and so will never appear in this repo's
+headers/Kconfig/generators, and nothing compares a fenced YAML sample
+in `docs/` against the preset files it claims to quote. That gap is
+not closed here; it's noted as a follow-up worth its own issue.
+
+## The hard Doxygen gate — three traps in this branch, plus the class behind them
+
+`pr-doxygen.yml` runs with `WARN_AS_ERROR = FAIL_ON_WARNINGS`, and CI reported
+exactly four errors on this branch:
+
+```
+docs/gd32-bridge.md:155: error: explicit link request to 'helper_flash_gate' could not be resolved
+docs/gd32-bridge.md:156: error: explicit link request to '_flash_entry' could not be resolved
+docs/gd32-bridge.md:174: error: explicit link request to 'plan_swd_probe' could not be resolved
+docs/gd32-bridge.md:192: error: unable to resolve reference to '.../gd32-bridge-firmware:README.md' for \ref command
+```
+
+**The three `::` spans.** Doxygen reads `::` as an explicit link request *even
+inside backticks*, so `` `python/tan/core/flash_plan.py::helper_flash_gate` ``
+becomes an unresolvable link. Split per #1541/#1560 — the file and the symbol
+become two separate code spans (`` `helper_flash_gate` `` in
+`` `python/tan/core/flash_plan.py` ``). Every identifier is preserved verbatim.
+
+**The dead link, fixed by closing a real docs gap rather than rewording.**
+`gd32-bridge-firmware:README.md` was not in `docs/doxygen/Doxyfile`'s `INPUT`,
+so the link could not resolve. Its sibling `cc3501e-bridge-firmware:README.md` *is* in
+`INPUT` — two peer bridge firmwares, one shipped in the generated reference and
+one invisible to it. Rewording the link would have hidden that asymmetry
+permanently, so the README is added to `INPUT` instead. `pr-doxygen.yml`'s
+`paths:` filter is widened from the literal `cc3501e-bridge-firmware:README.md` to
+`firmware/*/README.md`; `tests/scripts/test_doxygen_paths_cover_input.py`
+pins filter and `INPUT` together and passes.
+
+That glob then exposed a third component in the same position:
+`firmware/alp-stock-shim/README.md`, also absent from `INPUT`. It is equally
+customer-facing -- SoM presets select it as `app: alp-stock-shim` for a
+secondary M-core left at the default -- so it is added too. All three
+`firmware/*/README.md` are now in `INPUT`, which means the glob matches `INPUT`
+*exactly* rather than over-triggering, and keeps matching when a fourth
+component lands. The gate cannot go unreachable for a firmware README the way
+it did for `docs/ci/` in #1585.
+
+Adding the file to `INPUT` surfaced a second, previously invisible error —
+caught locally before pushing, and it would have gone red in CI:
+
+```
+gd32-bridge-firmware:README.md:1: error: found more than one \mainpage comment block!
+  (first occurrence: README.md, line 1), Skipping current block!
+```
+
+Every other non-root README in `INPUT` opens with an explicit
+`@page <snake_path>_index <Title>` directive, which is what keeps it from
+competing with the root `README.md` for the mainpage. `firmware/gd32-bridge`
+now carries `@page firmware_gd32_bridge_index GD32 bridge firmware`, matching
+`firmware/cc3501e`'s `@page firmware_cc3501e_index`.
+
+**The class: this is the third landing of the same trap.** #1541 hit it on
+`docs/porting-new-som.md`, #1559/#1560 on `docs/test-plan.md` (carried into the
+generated `docs/verification-status.md`), and now this branch on
+`docs/gd32-bridge.md` — three spans at once. #1560 swept `docs/**.md` by hand
+and reported "no other occurrence"; three more arrived within days. A hand
+sweep does not survive contact with the next author.
+
+New `tests/scripts/test_doxygen_link_traps.py` makes it a gate. It derives its
+file set from the Doxyfile's own `INPUT` (so a README added to `INPUT` later is
+covered without editing the test), honours the Doxyfile's
+`EXCLUDE_PATTERNS = */superpowers/*`, and skips fenced code blocks — Doxygen
+does not autolink inside a fence, and a literal `pytest tests/x.py::test_y`
+there is legitimate. It runs in `python-smoke` and needs no `doxygen` binary,
+so it fails in seconds locally instead of after an Actions round trip.
+
+It deliberately does not require backticks. Measured against doxygen 1.9.8 --
+the version `pr-doxygen.yml` installs from apt -- on a probe page carrying both
+forms, each produced its own error:
+
+```
+probe.md:3: error: explicit link request to 'gamma_sym' could not be resolved
+probe.md:5: error: explicit link request to 'delta_sym' could not be resolved
+```
+
+so a guard that only looked inside code spans would have caught half the trap.
+A seeded-violation self-test asserts the regex still matches this branch's own
+span, that the documented remedy reads as clean, and that a fenced literal does
+not trip it — a green sweep must mean "clean", not "the regex stopped
+matching".
+
+The sweep immediately found one more, latent, in a file this branch never
+touched:
+
+```
+docs/vendor-partnerships.md:68: `chips/da9292/da9292.c::da9292_v2n_m1_enable_deepx_rail`
+```
+
+Doxygen 1.9.8 happens not to error on that one today, so it was not part of the
+CI failure — but it is the same construct, and a Doxygen bump could turn it red
+on an unrelated PR. Split as well, so the invariant the test enforces is
+actually true repo-wide rather than "true except one".
+
+## `GD32_DPIDR`'s label — a labelling defect, not a hole in the guard
+
+The relabelling from BENCH-VERIFIED to unattested is kept: `0x0BE12477` has not
+been measured on a GD32 with a probe attached (#1369), and a banner reading
+"BENCH-VERIFIED IDs" over three constants is how a future operator comes to
+trust a number nobody measured.
+
+What the comment now also records is the safety consequence, because
+"unattested" on its own reads as "the wrong-board guard is unsafe" and invites
+someone to `fix` it. It is not. `bench_jlink_assert_aen_dpidr()` is fail-**closed
+on the positive `AEN_DPIDR` match**: `GD32_DPIDR` and `V2N_CM33_DPIDR` only
+select which board the abort message *names*. Land on a real GD32 with a wrong
+`GD32_DPIDR` and the first branch simply misses, then
+
+```sh
+if ! grep -qi "$AEN_DPIDR" "$out" 2>/dev/null; then
+```
+
+aborts anyway — with a bare `expected AEN E8 SW-DP IDR 0x4C013477, not seen`
+instead of `probe answered the GD32 bridge (0x0BE12477)`. The value is worth
+attesting for diagnosability; it is not load-bearing for refusal. The comment
+says so, says not to weaken the `AEN_DPIDR` check to compensate, and names the
+evidence shape that would close the gap — noting there is currently no J-Link
+path to the GD32 on this bench (2026-08-07), which is why it stays open.
+
+### Documentation — porting guide's `variants[].debug` row contradicted the shipped `jlink_flash_device` gate (#1490)
+
+`docs/porting-new-som.md:229`, the `variants[].debug` row, told a porter
+"every key optional; an absent key is the correct, publishable 'unknown'
+state." For `jlink_flash_device` on an Alif Ensemble SoC that is false:
+`scripts/validate_metadata.py::_check_soc_jlink_flash_device_declared`
+rejects an absent key on every `vendor: "Alif Semiconductor"` /
+`family: "Ensemble"` variant, and the schema's own
+`metadata/schemas/soc-spec-v1.schema.json` per-key description for
+`jlink_flash_device` already said so explicitly — an absent key silently
+downgrades Flow D (the J-Link MRAM loader) to the SE-UART Flow A path with
+no diagnostic (#1295), whereas a present `null` reaches `plan_alif_mram_jlink`'s
+loud refusal instead. The guide's own worked Template (`variants[0]`) carried
+no `debug` object at all, so copy-pasting it reproduced the defect and reddened
+`validate · metadata` in CI.
+
+Fixed by splitting the row: `variants[].debug` now carves out the exception
+up front, a new dedicated `variants[].debug.jlink_flash_device` row states
+the Alif-Ensemble-only presence rule and cites the enforcing check function,
+and the Template's `variants[0]` now includes
+`"debug": { "jlink_flash_device": null }` — `null` is the correct value for
+a hypothetical part with no resolved SEGGER device profile, demonstrating
+the declared-known-unknown convention rather than omitting the key. The
+schema's parent `debug` object description
+(`metadata/schemas/soc-spec-v1.schema.json`, which also said "every key is
+optional" with no carve-out) gained a matching pointer to the per-key
+exception, so the two schema descriptions no longer contradict each other.
+
+No `check_*.py` behavior changes — this is a doc/schema-description fix
+only; the enforcing gate (`_check_soc_jlink_flash_device_declared`) was
+already correct and unchanged.
+
+### Removed — Renode is retired from alp-sdk: verb, CI, models, fixtures, example and every live doc claim (#1502)
+
+ADR 0022 retired the `tan renode` verb on 2026-08-04, **Amendment 1 withdrew
+that clause on 2026-08-07**, and the withdrawal itself is now superseded:
+[ADR 0022](docs/adr/0022-python-executor-renode-retirement.md)'s **Amendment 2
+(2026-08-17)** re-instates the retirement and widens it past the original
+scope. Renode leaves alp-sdk, `tan-cli` and alp-sdk-vscode completely, before
+the pending v0.16.0 (alp-sdk) / v0.6.0 (`tan-cli`) GA releases. The order to
+read is: accepted 2026-08-04 → withdrawn 2026-08-07 → re-instated and widened
+2026-08-17. Amendment 1's text is preserved verbatim per `docs/adr/README.md`'s
+append-only rule — it is the record of a withdrawal that held for ten days, not
+the current state.
+
+Widened beyond the verb: the four `pr-renode-*` workflows go, and with them the
+four hand-maintained copies of the Renode v1.16.1 pin; the platform models
+`metadata/renode/alif_ensemble_e8.repl`,
+`metadata/renode/alif_ensemble_e8.resc`,
+`metadata/renode/renesas_rzv2n.repl`, `metadata/renode/renesas_rzv2n.resc` go;
+so do the Renode-only fixtures `tests/renode/aen_m55_itcm_run.overlay`,
+`aen_m55_sim.conf`, `v2n_m33_ramconsole.conf`, `v2n_m33_sci0_console.conf`,
+`v2n_m33_sci0_console.overlay`. ADR 0022's Decision point 4 is resolved the
+same way: `examples/aen/aen-sim-vision/` is deleted in full, because its only
+run path was `tan renode` against those models.
+
+**What to do instead of `tan renode`:** build and flash to real hardware
+(`tan build` + `tan flash`), or run a single image headless under `native_sim`
+with `tan run` when it has no cross-core dependency. There is no simulated
+substitute for the cross-core RPMsg handshake specifically — that must be
+verified on silicon. `docs/heterogeneous-builds.md`'s "Verifying without a
+board" now says exactly this.
+
+**The cost, stated plainly.** alp-sdk loses its pre-silicon simulator coverage
+outright, with no replacement planned: after this change no CI job boots any
+alp-sdk image on any core. `pr-twister-aen.yml` and
+`pr-getting-started-aen801.yml` become the only CI that cross-compiles for
+`alp_e1m_aen801_m55_he` / `_hp`, and both are compile-only. The V2N M33 sci0
+console path loses its only automated check. Accepted with open eyes, not
+mitigated.
+
+`diagnostics.sim_console` in `board.yaml` is **retained** everywhere — schema,
+metadata, emitters and docs. It emits `CONFIG_RAM_CONSOLE=y` for headless cores
+on behalf of alp-studio's hardware simulator (#686 / alp-studio#74), which is a
+studio bundle concern and never was a `tan renode` one. Only the
+`RENODE_MODE=real` sentence in its `metadata/schemas/board.schema.json`
+description is reworded, so it no longer reads as a pointer to a retired
+alp-sdk capability.
+
+The historical record is untouched, exactly as ADR 0022's Decision point 2
+already carves out: ADR 0010's Renode references, ADR 0014's, ADR 0020's
+superseded text, the two `docs/superpowers/specs/` heterogeneous-OS design
+specs, every RELEASED-section `CHANGELOG.md` entry, and `VERSIONS.md`'s v0.10.1
+/ v0.12.0 release rows all stand as written. They were true when written and
+remain true as history — a later reader must not "fix" them. `docs/cli.md`'s
+`alp renode` / `west alp-{build,image,flash,clean,size,renode}` paragraph is
+retirement history in the same sense and is likewise kept verbatim; only the
+live claim that followed it ("the surface moved to `tan`") changed.
+
+### Documentation — `docs/getting-started.md` misstated the `peripherals:` vs SoC-caps check as a `tan build`-time hard failure with exit code 3 (#1504)
+
+Two passages in `docs/getting-started.md` claimed a `board.yaml`
+`peripherals:` entry the target SoC can't route "fails at `tan build`
+time with exit code 3, before any compile work". None of that is true.
+`tan build`'s in-process planner never spawns
+`scripts/validate_board_yaml.py` — only `tan validate` and `tan diff`
+do. The cross-check itself is diagnostic `ALP-B010` at
+`severity="warning"` in `scripts/alp_cli/validator.py`, deliberately
+non-blocking because SoC peripheral metadata is incomplete for some
+parts and some peripheral categories (e.g. `emmc`, `ethernet`) surface
+board-side rather than directly on the SoC; `validate_board_yaml.py`
+returns 0 on a warning-only run (`if collector.has_errors(): return 1`).
+And exit code 3 already means something else entirely in that script —
+`EXIT_SDK_REVISION_UNSUPPORTED`, the `hw_rev` / SDK-version
+compatibility-window refusal, correctly documented at
+`docs/board-config-hardware.md:19` — so the getting-started passage was
+also pointing readers at the wrong failure for that code.
+
+§9 now says the SoC-caps mismatch is reported as an `ALP-B010` warning
+by `tan validate`, that `scripts/validate_board_yaml.py` still exits 0
+for it, and that `tan build` does not re-run the cross-check at all.
+The `tan build` walkthrough's step 1 no longer lists
+`` `peripherals:` vs SoC caps `` among what `tan build` itself
+validates, and now points readers at running `tan validate` first for
+the full check.
+
+A repo-wide grep for the same wrong fact turned up two more
+occurrences: `docs/verification-status.md` and `docs/test-plan.md`
+each carried a `validate_board_yaml.py v0.3 capability cross-check` row
+claiming it "Returns exit 3 on the deliberately-broken sample boards".
+That claim was also wrong, but not simply "always 0" either: the
+in-tree `ALP-B010` fixture,
+`tests/fixtures/board_yaml_bad/ALP-B010-peripheral-not-on-soc.yaml`,
+picks E1M-NX9101 hw_rev `r1`, which is `status: tbd` and so is
+refused outright by the unrelated hw_rev-buildable gate (#1025) —
+`python3 scripts/validate_board_yaml.py --input
+tests/fixtures/board_yaml_bad/ALP-B010-peripheral-not-on-soc.yaml`
+exits 5, not 0, even though it does emit the `ALP-B010` warning en
+route. What genuinely returns 0 on an `ALP-B010`-only run is
+`tests/scripts/test_validate_board_yaml_entrypoints.py::test_entrypoints_both_report_per_core_peripheral_warning`,
+which uses E1M-AEN801 + `peripherals: [emmc]` specifically to avoid
+tripping the hw_rev gate; `tests/scripts/test_board_yaml_diagnostics.py`'s
+`test_peripheral_not_on_soc_emits_ALP_B010` only asserts the code is
+present and checks no exit status. Both rows now cite that entrypoints
+test by name instead of the fixture, and describe the exit-0 case
+precisely (E1M-AEN801 + `peripherals: [emmc]`) rather than claiming
+exit 0 of "the deliberately-broken sample boards" generically.
+`docs/diagnostics/ALP-B010.md` and `docs/board-config-hardware.md`
+already described both facts correctly and needed no change.
+
+### Fixed — scaffolded READMEs pinned their doc links to `v0.16.0`, a tag that does not exist yet (#1508)
+
+`metadata/sdk_version.yaml` declares `version: 0.16.0` with `status: released`
+while the only cut tag is `v0.16.0-rc1`. `scripts/alp_template.py`'s
+`_docs_ref()` branched on exactly that declared pair, so every project
+scaffolded from this checkout got README links to
+`https://github.com/alplabai/alp-sdk/blob/v0.16.0/docs/cross-platform-setup.md`
+and two siblings — a ref GitHub cannot resolve. Three 404s in the customer's
+first contact with the SDK, produced by the `--emit scaffold` renderer that
+`tan` and the VS Code extension both consume.
+
+The window is real but bounded: it opens at the rc cut and closes when the GA
+tag lands (six days for v0.15.0, `v0.15.0-rc1` 2026-08-01 → `v0.15.0`
+2026-08-07). No build or flash impact.
+
+**The metadata is not what changed.** Flipping `status:` to a non-`released`
+value for the interim is the smaller diff, and it was already considered and
+rejected in the v0.15.0 window — `CHANGELOG.md` records that `status: released`
+was "deliberately unchanged" there because "flipping it back for the interim
+would churn `alp.lock` and every consumer that reads it". That reasoning still
+holds, so the check moves to the consumer that was making the unsafe
+assumption.
+
+`_docs_ref()` now requires the tag to RESOLVE, not merely be declared. A new
+`_tag_resolves()` runs `git -C <checkout> rev-parse --verify --quiet
+refs/tags/v<version>` — local refs only, never `git ls-remote`: scaffolding has
+to work offline, and an `alp init` that stalled on a network call would be a
+worse defect than the dead link. A checkout that fetched from origin carries
+origin's tags, so "resolves here" is the closest offline proxy for "resolves on
+GitHub", and every way it can be wrong (no `git` binary, tarball export,
+`--no-tags` clone, shallow CI checkout) fails the same direction: no tag found,
+pin to `main`, links stay live.
+
+Measured on this checkout: `_docs_ref(REPO)` returned `v0.16.0` before and
+returns `main` after, and the three URLs the issue lists now render as
+`blob/main/docs/...`.
+
+Four tests in `tests/scripts/test_alp_template.py`, each building a throwaway
+git checkout so the assertion is about ref resolution rather than about
+whatever this repo's tags happen to be: the rc-only case that fooled the old
+check (tag `v0.16.0-rc1` present, `v0.16.0` absent → `main`); the GA case, so
+the fix cannot degrade into "always `main`" and silently drop the stable-docs
+pin #864 added (`v0.16.0` present → `v0.16.0`); a `development` checkout with
+its tag present, pinning the unchanged pre-#1508 behaviour; and a
+metadata-without-git tree, where `_tag_resolves` must degrade rather than raise
+— an exception there would abort the whole scaffold over a README link.
+
+### Fixed — `ALP-B000` and `ALP-B099` had no `docs/diagnostics/` page, so the catalog and every `= see:` pointer for them were dead (#1511)
+
+`scripts/alp_cli/validator.py` emits `ALP-B000` when `board.yaml` fails to
+parse as YAML, and `ALP-B099` as the fallback for any jsonschema `validator`
+keyword it hasn't given a dedicated code (everything beyond `required`,
+`additionalProperties`, `enum`/`pattern`, `type`). Both are live, reachable
+emission sites, but neither had a `docs/diagnostics/ALP-B000.md` or
+`ALP-B099.md` page. `scripts/gen_error_catalog.py` builds
+`metadata/error-catalog.json` by globbing `docs/diagnostics/ALP-B*.md`, so a
+missing page is a missing catalog entry by construction: `tan explain --code
+ALP-B000` (and `ALP-B099`) failed to find either code, and
+`scripts/alp_cli/diagnostic.py` unconditionally rendered `= see:
+docs/diagnostics/<code>.md` for both, pointing at a file that didn't exist --
+a pointer `scripts/alp_cli/diagnostic_format.py` also copies verbatim into
+`documentationUri`/`helpUri` for its own `--format json`/`--format sarif`
+consumers.
+
+Added `docs/diagnostics/ALP-B000.md` (YAML parse failure: causes, how to
+read the parser's embedded line/column, fix, escalation) and
+`docs/diagnostics/ALP-B099.md` (unmapped schema-keyword fallback: which
+jsonschema keywords land here vs. the four dedicated codes, how to read the
+raw `jsonschema` message, fix, escalation), in the heading-plus-
+`## Cause`/`## Fix` shape `scripts/gen_error_catalog.py`'s
+`parse_runtime_diagnostic` parses, and re-ran `python3
+scripts/gen_error_catalog.py` to regenerate `metadata/error-catalog.json`
+(24 codes -> 26). `scripts/check_diagnostic_narratives.py` and
+`python3 scripts/gen_error_catalog.py --check` both pass on the new pages.
+
+Known gap left open by this fix, not closed by it: both gates still walk
+`docs/diagnostics/ALP-B*.md`, not the `code="ALP-B..."` emission sites in
+`scripts/alp_cli/validator.py`, so a future emitted-but-undocumented code
+would again ship invisibly. At the time of this fix the two sets are equal
+(11 emission sites, 11 pages: B000, B001-B008, B010, B099) -- a follow-up
+gate that walks the emission sites instead is tracked as #1569.
+
+### Fixed — tutorial 07's bricked-bridge recovery snippet `abort()`ed on the IDCODE a healthy GD32 actually answers (#1512)
+
+`docs/tutorials/07-recovering-a-bricked-bridge.md` is the runbook for a GD32G553
+supervisor that no longer answers `CMD_OTA_*` — the path a reader reaches for
+when nothing else works. Its copy-pasteable snippet `abort()`ed unless the SW-DP
+IDCODE equalled `GD32_SWD_EXPECTED_IDCODE` (`0x6BA02477`), and told the reader a
+mismatch "means mis-wiring or a non-G5x3 part".
+
+The bench measures otherwise. Both on place `e1mx-v2n-m1-01`
+(`scripts/bench/aen/bench-env.sh`): the GD32 bridge answers `0x0BE12477`, and
+`0x6BA02477` is the **V2N CM33 DAP** — whose measurement also reported `Found
+Cortex-M33 r0p4`, not the `r0p1` the constant's comment claims. On those
+numbers a healthy, correctly-wired GD32 fails the comparison, the tool
+`abort()`s on a board that was recoverable, and the comment sends the reader to
+re-check wiring, probe pads and part markings that are all correct.
+
+The tutorial was the only place in the repo that turned this contested constant
+into a hard stop. `gd32_swd_connect()` deliberately does not reject a mismatch
+(`chips/gd32_swd/gd32_swd.c`), and the example the tutorial links in its own
+"See also" — `examples/v2n/v2n-gd32-swd-flash/src/main.c` — already warns and
+continues. Blast radius was limited to code a reader writes from this page;
+every shipped path already behaved correctly.
+
+The snippet now logs and continues, matching that example. A new "The IDCODE
+caveat" section states what is measured versus what is assumed, and says
+plainly that a mismatch is not evidence of mis-wiring while the constant is
+unsettled. A "Status of this flow" section records what the tutorial never
+disclosed: `chips/gd32_swd/` is `driver_status: partial` / `hil_silicon:
+untested` (`metadata/chips/gd32_swd.yaml`), so the whole procedure is
+paper-correct, not proven.
+
+`include/alp/chips/gd32_swd.h`'s macro comment carried the same unmeasured
+value as fact ("Expected SW-DP IDCODE for the GD32G553 ... Boards can match
+against this value in production test"). It now carries the same warning and
+points at the bench numbers; the macro's value is unchanged, since settling it
+needs a probe on a GD32 (#1440, `needs-silicon`, with #1369).
+
+The stale `<!-- Last verified: 2026-05-18 against slice-3b state. -->` header is
+refreshed, and now says explicitly that the date records a documentation
+review rather than a bench run — the previous form read as if the flow had been
+verified.
+
+### Fixed — the `#1295` CHANGELOG entry told an AEN301/501/601/701 owner their SoM still lacked a disjoint slot0 map, after `#1445` gave it one in the same release (#1514)
+
+The `### Fixed` entry for `#1295` (a missing `debug.jlink_flash_device` silently
+downgraded Flow D to Flow A on 10 of 12 Alif Ensemble variants) described, in
+present tense, a real gap it did not close: none of the AEN301/501/601/701
+presets declared a disjoint `he_slot0`/`hp_slot0` `memory_map:` override, so a
+board.yaml leaving its sibling core at the SoM's `alp-stock-shim` default then
+correctly refused. (E1M-AEN401 was never part of this set: at the time, the
+loader only called `_resolve_slot0_load_address` when
+`debug.jlink_flash_device` was truthy, and the E4 variant's explicit `null`
+is not truthy, so the resolver — and the guard the #1295 entry describes —
+never ran for it. #1444/#1446 later changed that gate to test key presence
+instead of truthiness.) That gap and its fix landed together, in the same
+commit (`bd8be484`, PR #1447), but as two separate entries in the same
+`## [Unreleased]` section — the `#1445` entry ("E1M-AEN301/401/501/601/701
+declare disjoint M55 slot0 windows"). Because
+`.github/workflows/release.yml` slices `## [Unreleased]` verbatim as an rc's
+GitHub Release body, and the `#1445` entry sits roughly 1600 lines below the
+`#1295` one in that same body, a reader's first encounter with the topic told
+them a SoM still refused to flash and that 12 portability-matrix cells
+failed — both already fixed by the commit that introduced the change they
+were reading.
+
+The `#1295` entry is reworded to past tense, keeping the four-SKU set
+(AEN301/501/601/701) for the ones that refused, and cross-references the
+`#1445` entry by name instead of calling it an open follow-up. It also states
+what `#1445` (landed together with `#1295` in commit `bd8be484`, PR #1447)
+actually changed: before it, only `E1M-AEN801.yaml` declared the disjoint pair
+(`#1069`/`#1100`); `#1445` added `he_slot0` at `0x80010000` and `hp_slot0` at
+`0x802b0000`, 2688 KiB each, to the other five AEN presets
+(AEN301/401/501/601/701 — AEN401 included, even though it never refused).
+`docs/portability-matrix.md`'s cell count is stated as the current 18 of 21
+passing, not the 12 cells that failed only transiently, and the gap and its
+fix are described as landing together in the same commit (`bd8be484`),
+rather than as separated in time. Other stale-metadata occurrences across
+the orchestrator and generator scripts — including
+`scripts/alp_orchestrate/loader.py`, `scripts/alp_orchestrate/secure.py`,
+`scripts/gen_zephyr_board.py`, and `scripts/check_atoc_reservation.py` — are
+owned by the open `#1499` doc-drift sweep and are not touched here. This
+CHANGELOG fix lands on `dev` only; `origin/main` carries the same stale
+block and is not touched by this change.
+
+Note for whoever composes the squash-merge commit body for this PR: commit
+`78d5852cf`'s own body (already on `origin`, not amended here) still carries
+"the docs briefly recorded the 12 failing cells" — a plural claim disproved
+by this branch's later commits (`6aeabf64`, `7344b77f`): only
+`docs/portability-matrix.md` ever recorded the 12 failing cells;
+`docs/portability.md`, `docs/v1.0-readiness.md`, `README.md`, and
+`docs/tutorials/04-cross-family-portability.md` never did. The squash body
+must be composed from `6aeabf64`/`7344b77f`'s corrected text, not
+`78d5852cf`'s, and must drop that sentence.
+
+### Fixed — `check_public_private.py` never scanned `docs/superpowers` for SoM design/PCB-routing leaks (#1515)
+
+`Rule.scan_superpowers` defaulted to `False`, and the four rules that
+inherited that default were exactly the design-secrecy set:
+`PRIVATE_AUDIT_REFERENCE`, `PRIVATE_DESIGN_REFERENCE`,
+`SOM_PHYSICAL_DESIGN_DETAIL`, and `PCB_ROUTING_DETAIL`. Every other rule in
+the file (`LOCAL_MAINTAINER_PATH`, `DANGLING_PRIVATE_NOTES_LINK`,
+`LABGRID_PLACE`, `PROBE_SERIAL`, `LAB_SSH_ENDPOINT`, `LAB_INFRA_HOSTNAME`,
+`LAB_INFRA_IP`) opted in with `scan_superpowers=True`. That left the largest
+raw-internal-prose tree in the public repo — 98 files / 50,112 lines of
+`docs/superpowers`, 22%+ of `docs/` by bytes, still being actively appended
+to — as the one place a schematic reference, netlist pointer, or PCB-routing
+detail could land and ship in the signed release tarball with CI green.
+
+Measured against the live tree: re-running all four previously-exempt rules
+across `docs/superpowers/**` turns up exactly one hit, total —
+`PRIVATE_DESIGN_REFERENCE` on a benign line in
+`docs/superpowers/plans/2026-07-05-block-physical-layer.md` that describes
+the public/private boundary itself ("mark `visibility: internal` and leave
+the detail-rich body for `alp-sdk-internal`") rather than disclosing
+anything across it. `SOM_PHYSICAL_DESIGN_DETAIL` and `PCB_ROUTING_DETAIL`
+measured zero hits there. `PRIVATE_AUDIT_REFERENCE` also measured zero hits
+there, which disproves the "noise, not signal" rationale the class-default
+comment used to justify keeping it exempt: its "audit"/"report" vocabulary
+never actually collides with `docs/superpowers` prose, so there was nothing
+for a per-rule opt-out to buy for that rule either. This is a gate hole, not
+a live exposure.
+
+`Rule.scan_superpowers` is deleted outright rather than flipped to a `True`
+default with `PRIVATE_AUDIT_REFERENCE` opting back out: with the measured
+result that every rule scans clean there, a per-rule flag that would always
+evaluate the same way for every rule is dead weight, not a live decision
+point — the same shape `check_local_paths.py`'s `EXEMPT_PREFIXES: tuple[str,
+...] = ()` already takes. All eleven rules, `PRIVATE_AUDIT_REFERENCE`
+included, now scan `docs/superpowers` unconditionally, same as any other
+tracked tree. The module docstring and the `scan()` loop's
+`in_superpowers`/`_under_superpowers` machinery are removed along with it.
+The single benign `PRIVATE_DESIGN_REFERENCE` hit gets a `REVIEWED_ACCEPTED`
+entry with its reason, matched by `path` + `category` + `excerpt`, the same
+shape the file already uses for its `CHANGELOG.md` entries.
+
+`tests/scripts/test_check_public_private.py`'s exemption test is renamed
+`test_superpowers_has_no_per_rule_exemption` and now asserts that all five
+design/audit/lab-endpoint rule shapes (`PRIVATE_AUDIT_REFERENCE`,
+`PRIVATE_DESIGN_REFERENCE`, `SOM_PHYSICAL_DESIGN_DETAIL`,
+`PCB_ROUTING_DETAIL`, `LAB_SSH_ENDPOINT`) fire in `docs/superpowers`, not
+just the two the previous fixture set covered; a new
+`test_rule_has_no_scan_superpowers_field` guards against the flag quietly
+coming back.
+
+`python3 scripts/check_public_private.py` stays green with no new findings
+outside the one `REVIEWED_ACCEPTED` entry.
+
+### Documentation -- `docs/cli.md` and `docs/getting-started.md` overstated `tan doctor --fix`'s sudo safety boundary (#1524)
+
+Both docs said `--fix` was scoped to "elevation-free" manifest commands and
+that it "never runs `sudo`" / "only prints commands that need sudo". That
+stopped being true as of tan-cli `0eae9c6` (#650, #669): when the caller's
+`geteuid() == 0`, `--fix` strips the manifest command's literal `sudo `
+prefix and executes the remaining privileged command directly -- it never
+spawns the `sudo` *program*, but the safety boundary a reader took from the
+prose (no privileged system mutation) is gone. In the common shape of an
+interactive root shell inside a container, `tan doctor --fix` installs
+system packages, exactly what both docs promised it would not do.
+
+Neither doc mentioned the companion TTY gate: `--fix` requires a TTY on
+both stdin and stderr (`python/tan/core/consent.py`'s `can_prompt`),
+independent of `--ci`/`--non-interactive`/JSON mode. It is not silent when
+that gate trips -- `doctor_cmd.py` appends a `doctor.fix-suppressed`
+warning naming the condition, `no interactive terminal (stdin/stderr not a
+tty -- piped, redirected, or CI)`. The silent no-op is what tan-cli#91 P1
+removed.
+
+`docs/cli.md` and `docs/getting-started.md` now both state: a remedy that
+needs no elevation (macOS `brew`, Windows `winget`) runs for any caller; a
+`sudo`-prefixed remedy (Linux `apt`/`dnf`) is refused with
+`doctor.fix-needs-sudo` and gets the command printed to run by hand for a
+non-root caller, and has the `sudo ` prefix stripped and the remaining
+command run directly for a caller who is already root; and without a TTY on
+both stdin and stderr -- or under `--ci`/`--non-interactive`/JSON mode --
+repairs are disabled and commands are left as printed guidance. Repo-wide
+grep for `elevation-free` and the two retired phrasings turned up no other
+occurrences in source docs. The checked-in `doxygen-out/` HTML snapshot
+still carries both retired sentences
+(`doxygen-out/html/md_docs_2cli.html`,
+`doxygen-out/html/md_docs_2getting-started.html`); that tree is generated
+output, 2 `docs/cli.md` commits behind `origin/dev` as of this fragment
+(`cf4ba601e`, `6adf30ce8`), with no CI step that regenerates it on merge --
+`pr-doxygen.yml` only uploads a build artefact and its `paths:` filter does
+not even cover either doc -- and is left stale here rather than
+hand-edited. Filed alp-sdk#1573 to track it.
+
+### Fixed — `scripts/bench/**` was linted by nothing, in CI or locally (#1527)
+
+`stage_shellcheck` in `scripts/test-all.sh` was never invoked by any GitHub
+Actions workflow — the only `shellcheck` that ran in CI was
+`onramp-clean-container.yml`'s, scoped to `scripts/bootstrap.sh` plus
+tan-cli's `install.sh` (`grep -n shellcheck
+.github/workflows/pr-static-analysis.yml` returned nothing). On top of
+that, `stage_shellcheck`'s own glob was the flat,
+non-recursive `scripts/*.sh`, so it never reached `scripts/bench/aen/*.sh`
+even when run locally. Nothing under `scripts/bench/` was shellchecked
+anywhere. That gap is exactly why
+`scripts/bench/aen/flash-update-log-firewall-probe.sh:147`'s stray literal
+`n` argument to `JLinkExe` (#1478, an SC1012-class defect) sat undetected
+for as long as it did. #1478 has since landed independently on `dev` as
+`edaf0125` (#1542, tracked in `changelog.d/1478.md`) — this change adds
+the gate that would have caught it, not the fix itself.
+
+Fixed two ways, so CI and the local wrapper agree on what "clean" means:
+
+* `.github/workflows/pr-static-analysis.yml`'s `clang-format-diff` job —
+  not a new job of its own — gains two steps that shellcheck every file
+  `git ls-files 'scripts/bench/*.sh'` finds (a bare `*` in a git pathspec
+  already crosses `/`; `scripts/bench/**/*.sh` was tried first and
+  rejected — it forces at least one intervening directory and silently
+  skips a script added directly at `scripts/bench/<name>.sh`). Piggybacking
+  on the already-required `clang-format-diff` job (its `clang-format ·
+  diff-only` context is one of `dev`'s required status checks) was a
+  deliberate choice over a separate job: a new job's own context is not in
+  `dev`'s or `main`'s required-status-checks list, so it would show red on
+  a shell defect without actually blocking the merge — the same
+  non-required-check gap #1475's changelog entry documents for a different
+  gate (`test_workflows_are_loadable.py`'s regression test, which likewise
+  only runs on `cross-platform-zephyr.yml`'s non-required `python-smoke`
+  job). One `shellcheck` invocation **per file**, with
+  `-x` (follow `source`) — not batching every file into one invocation,
+  and not omitting `-x` either: `flash-jlink-mramxip.sh` sources
+  `bench-env.sh`, and its `GD32_DPIDR` local is read cross-file by that
+  file's `bench_jlink_assert_aen_dpidr`. Without `-x`, shellcheck can't see
+  that read and reports a false-positive `SC2034` on it; with `-x`,
+  `SC2034` still correctly fires on `flash-jlink-hp.sh`'s genuinely-unused
+  `OBJ` — `-x` resolves the false positive without masking the real one.
+  `shellcheck` itself is installed from the pinned upstream release
+  tarball (`v0.10.0`), not floated off apt, so a runner-image bump can't
+  quietly change what "clean" means. `-S warning`, matching
+  `stage_shellcheck`'s own severity for `scripts/test-all.sh` — `SC1012`
+  (the `\n`-as-literal-`n` class) is warning-severity, so `-S error` alone
+  would not have caught #1478.
+* `scripts/test-all.sh`'s `stage_shellcheck` gets the same `scripts/bench/*.sh`
+  sweep at `-S warning -x`, via the same `git ls-files` tool
+  `stage_bash32_parse` already uses (not the same pattern — that stage
+  covers `*.sh` repo-wide), now paired with the same loud empty-list guard
+  `stage_bash32_parse` already carries, so an empty match reads as a hard
+  failure instead of a silent pass. This keeps the local gate a real mirror
+  of the CI one instead of drifting back out of sync.
+
+Turning the gate on surfaced two pre-existing `SC2034` findings at
+`-S warning`, one real and one a shellcheck limitation:
+
+* `flash-jlink-hp.sh`'s `OBJ` is genuinely unused even with `-x` (this flow
+  reads its beacon via J-Link `mem32`, not `$OBJ-nm`/`-readelf`, unlike
+  every sibling `flash-jlink*.sh`) — kept as a toolchain-resolves preflight
+  and documented with `# shellcheck disable=SC2034`.
+* `flash-jlink-mramxip.sh`'s `GD32_DPIDR` is **not** actually unused — it's
+  read cross-file, as above — so with `-x` in place it needs no
+  `# shellcheck disable=SC2034` at all; the comment above it now says so
+  instead of claiming the variable is unread. It stays defined alongside
+  `AEN_DPIDR`'s pin as the documented wrong-board value regardless:
+  deleting the `AEN_DPIDR` half of that pair made the wrong-board
+  MRAM-write gate environment-overridable during #1488 and had to be
+  reverted (27a4e756).
+
+`docs/ci/README.md`'s and `docs/testing.md`'s `pr-static-analysis.yml` rows
+are both updated to describe the new coverage and where it now lives.
+
+**Known scope limit, not closed here:** this only covers `scripts/bench/**`,
+matching #1527's own narrower Proposed change — not every `.sh` file the
+repo ships. Root `scripts/*.sh` (`board-yaml-sweep-exclude.sh`,
+`dispatch-confirm.sh`, `setup-clang-format.sh`, `test-all.sh`) is still
+shellchecked locally only, and 8 `.sh` files outside `scripts/` entirely
+(`cc3501e-bridge-firmware:ti/*.sh`, `keys/generate_dev_key.sh`,
+`meta-alp-sdk/recipes-core/alp-system/files/alp-remoteproc-start.sh`,
+`tests/yocto/*.sh`, `tools/native-sim-container/entrypoint.sh`) are
+shellchecked nowhere at all, in CI or locally. Widening this is tracked as
+#1550.
+
+### Fixed — `cross-platform-zephyr.yml` would have hung the merge queue the moment `python-smoke` becomes a required context (#1528)
+
+The whole-directory sweep `pytest tests/scripts/` runs in exactly two
+workflows — `cross-platform-zephyr`'s `python-smoke` (3-OS matrix) and
+`pr-metadata-validate`'s `validate` (`ubuntu-latest`, `paths:` include
+`tests/scripts/**`) — and NEITHER is a required status context on `dev` or
+`main` today, confirmed live against both branches'
+`required_status_checks.contexts`. A newly added `tests/scripts/` regression
+gate (most recently the #1475 Actions template-injection guard) is therefore
+picked up only by those two sweeps and posts an advisory, non-blocking red
+instead of gating the merge — unless it is *also* named individually in a
+workflow with a required context, which is the pattern a gate must opt into
+today to be enforced: `pr-twister.yml`'s required `twister-shard` job runs
+`test_tier_a_workflow_step_timeouts.py` whole-file, so that file does block
+on `dev` right now even though the directory sweep that also runs it does
+not; `test_hil_blocks_coverage.py` is named there too, but only for one
+`-k`-selected test (`test_emitted_sb_config_symbols_exist_in_pinned_zephyr`),
+so a newly added test elsewhere in that file would not block.
+`test_workflows_are_loadable.py`'s own module docstring records how exactly
+the non-required directory sweep let two unparseable workflows reach `dev`
+before.
+
+Promoting `python-smoke` to required is a live branch-protection setting
+change, not a file, and stays a separate maintainer decision (the issue
+itself flags an open question — whole matrix vs. `ubuntu-latest`-only — that
+this change does not resolve). "python-smoke" is not itself a check-run
+name: the job is a 3-OS matrix, and GitHub reports three separate contexts
+— `python-smoke (ubuntu-latest)`, `python-smoke (macos-latest)`,
+`python-smoke (windows-latest)` (confirmed via `gh api
+.../actions/runs/<run>/jobs --jq '.jobs[].name'` against a completed run).
+Requiring any of those three literal strings directly — or the issue's own
+`cross-platform-zephyr / python-smoke` — registers a context that can never
+report once this job legitimately skips (see the `detect`-gating change
+below), reproducing the exact #1474 permanently-blocked-PR incident this
+same fragment cites two paragraphs down. This change adds a fourth,
+static-named `python-smoke · all` summary job instead (copied from
+`pr-bootstrap-distro-install.yml`'s own `summary:` job, not reinvented) —
+**that** is the context a future promotion should require. The order
+matters: land this change on `dev`, confirm `python-smoke · all` reports
+green on a real `dev` PR first, and only then run the
+`gh api -X PUT .../branches/dev/protection` call that adds it to
+`required_status_checks.contexts` — adding the context before it has ever
+reported green risks the same permanently-`expected` state a required
+check with no matching run produces.
+
+What this change fixes is a prerequisite bug that would otherwise turn that
+promotion into a repeat of the #1474 incident: `dev` runs an active
+merge-queue ruleset ("dev merge queue", confirmed via `gh api
+repos/alplabai/alp-sdk/rulesets`), and GitHub raises `merge_group` — not
+`push` or `pull_request` — for a queued entry. `cross-platform-zephyr.yml`
+carried no `merge_group:` trigger, so once `python-smoke` became required, a
+queued PR would wait forever on a check this workflow could never raise on
+the queue's speculative ref (#1415) — the same trap `pr-twister.yml` and
+`pr-static-analysis.yml` already document and guard against for their own
+required contexts. Added the same bare `merge_group:` trigger here, with no
+`paths:` filter (that event doesn't support the same filtering
+`pull_request`/`push` get above). Since `merge_group` can't be `paths:`-
+scoped, it would otherwise run the full 3-OS matrix (macOS billed 10x,
+Windows 2x) on every `dev` merge-queue entry for both jobs, so
+`python-smoke` and `loader-smoke` each scope their own
+`strategy.matrix.os` down to `["ubuntu-latest"]` on `merge_group` (a
+job-level `if:` can't do this: `matrix` isn't in the context list
+`jobs.<job_id>.if` gets, only `jobs.<job_id>.strategy` does — now enforced
+repo-wide by `scripts/check_workflow_expressions.py`, added in this same
+change after this exact defect shipped on this branch and was caught only
+by a manual `actionlint` run) while leaving `pull_request`/`push` running
+all three legs unchanged. That cap PRESUMES the eventual required context
+ends up ubuntu-latest-only — the issue itself leaves
+whole-matrix-vs-ubuntu-only open (see above) — so if the macOS/Windows
+contexts get required instead, this cap has to widen to run those legs on
+`merge_group` too, or the queue hangs in `AWAITING_CHECKS` on the very
+contexts it now can't ever raise on a queue ref, the same #1415 failure
+mode this change exists to close. UNVERIFIED: no `merge_group` run of this
+workflow exists in this repo's Actions history yet, so this cap's runtime
+behaviour has never actually been observed; its failure mode if wrong is
+fail-open (bills the full 3-OS matrix), not a hang.
+
+Also corrected a stale claim in this same workflow's header comment: it
+asserted `gh api repos/alplabai/alp-sdk/rulesets` returns `[]`, which is no
+longer true now that the merge-queue ruleset exists. And fixed the
+`paths:`-filter gap the header comment used to flag as still-outstanding:
+`pull_request`/`push` no longer restrict this workflow to a fixed path
+list at all — a cheap `detect` job (copied from
+`pr-bootstrap-distro-install.yml`) now decides whether the heavy matrix
+needs to run, with `python-smoke · all` treating a legitimate
+detect-caused skip as a pass, the same fix that file's own #1473 applied
+one layer down for `distro install · all`. Left un-added:
+`loader-smoke · all` — #1528 only asks about promoting `python-smoke`, so
+`loader-smoke` keeps the same `detect` gating for cost parity but gets no
+summary job of its own; a future PR that actually proposes requiring
+`loader-smoke` should add one then.
+
+### Fixed — the #1475 template-injection gate walked `run:` bodies only, leaving `actions/github-script` `with: script:` as an uncovered `${{ }}` sink (#1529)
+
+`tests/scripts/test_workflows_are_loadable.py`'s
+`test_workflow_run_blocks_do_not_splice_attacker_context` read each step's
+`run` key and nothing else. GitHub Actions substitutes a `${{ }}` expression
+into a second place before an interpreter parses it: an
+`actions/github-script` step's `with: script:` body, which splices into
+JavaScript exactly the way `run:` splices into shell. That sink was invisible
+to the gate while `docs/ci/runner-architecture.md` stated the rule in general
+terms, so the documented scope read broader than the enforced one.
+
+**No live defect is fixed here.** The repo has exactly one `github-script`
+step — `.github/workflows/pr-abi-snapshot.yml`'s `Comment ABI diff on the PR`
+— and it is clean: it uses `context.issue.number` and `context.repo.*` with
+no `${{ }}` interpolation at all. This closes an uncovered sink, not an open
+hole.
+
+The step walker (`_run_steps`, now `_source_text_steps`) yields
+`(job_id, step_name, sink, text)` and covers both sinks. Each violation now
+names its sink and carries the remedy for that interpreter: a `run:` body
+reads the value back as `"$VAR"`, a `script:` body as `process.env.VAR`.
+
+Kept deliberately narrow, on both edges:
+
+* A `with: script:` on some **other** action is an input string that action
+  receives, not JavaScript it evals, so it is not reported. The walker gates
+  on `uses:` starting with `actions/github-script`.
+* A composite action's own `run:` steps live outside `.github/workflows/` and
+  remain unchecked, as before.
+* Transitive flow through `steps.<id>.outputs.*` is still not covered.
+  Matching remains direct substring containment against each expression's own
+  text — the #1475 limit that let `release.yml` survive three rounds — and
+  catching it mechanically needs data-flow analysis across steps, which this
+  change does not attempt.
+
+Because the one real `github-script` step interpolates nothing, the
+parametrised test exercises the new branch with zero inputs and would stay
+green if the walker stopped yielding `script:` bodies entirely. A separate
+guard-against-the-guard test seeds the construct: it asserts the walker
+yields the `github-script` body (and only that one), that the detector fires
+on `${{ github.event.pull_request.head.ref }}` inside it, and that the
+same-shaped `with: script:` on `some/other-action@v1` is not yielded.
+
+`docs/ci/runner-architecture.md`'s "Untrusted-input handling in `run:`
+blocks" section gains the `github-script` wrong/right pair and replaces its
+"covers `run:` bodies only" caveat with the true scope.
+
+### Fixed — `validate_metadata.py` crashed on malformed YAML/JSON instead of failing clean, and the vela freshness gate never ran (#1540)
+
+`scripts/validate_metadata.py` applied `.get()`/`.items()`/indexing to values
+parsed straight from YAML/JSON with no type guard, so a malformed manifest (a
+scalar where the schema expects an object) aborted the whole gate with an
+`AttributeError` traceback instead of a clean FAIL line. The first pass added
+19 `isinstance(..., dict)` guard expressions across 8 functions --
+`_check_chip_physical`, `_check_block_realizations`, `_check_board_targets`,
+`_check_soc_npu_pairing`, `_check_soc_debug_probe_identity`,
+`_check_soc_jlink_flash_device_declared`, `_check_soc_no_wlcsp_variants`, and
+`_check_tier_a_library_ci` -- not the "nine sites"/"all nine" this fragment
+originally claimed; its own enumeration named 10 distinct groupings, and the
+diff added 19 guards, so both counts were wrong.
+
+A follow-up review found 5 more crash sites the first pass missed, one of
+them inside `_check_soc_no_wlcsp_variants` -- a function this same fix
+already touched: a non-string `package` value (a bare int, e.g. `208`)
+reaching `.upper()`; 4 SoC functions (`_check_soc_npu_pairing`,
+`_check_soc_debug_probe_identity`, `_check_soc_jlink_flash_device_declared`,
+`_check_soc_no_wlcsp_variants`) missing the top-level `isinstance(doc, dict)`
+guard every other checked function already opens with; 2 unguarded
+`.keys()`/`.items()` calls left in `_check_tier_a_library_ci`; a bare
+`data.get(...)` in `_check_silicon_kconfig` reached unconditionally, ahead of
+the schema-error check that was supposed to gate it; and a bare
+`json.loads()` plus two more non-dict/non-hashable follow-on crashes in
+`_check_silicon_capability_restrictions`. Each was reproduced against the
+pre-fix code and fixed, with its own mutation-proven regression test.
+
+Widening the fix beyond those 5: every guarded function above filtered a
+list's ENTRIES to dicts but never guarded the list ITSELF -- `npus: 5`,
+`variants: 5`, `physical.pins: 5`, `realizations: 5`,
+`hostBuild.libraries: 5`, and several more fields like them still aborted
+the gate (as `TypeError` rather than `AttributeError`, but a traceback
+either way). Three small helpers -- `_as_list`, `_as_dict`, `_dict_entries`
+-- now front every one of these fields, applied across all 12 functions this
+fix now touches (the original 8, plus `_check_silicon_kconfig`,
+`_check_peripheral_kconfig`, `_check_silicon_capability_restrictions`, and
+`_check_library_semantics`), so a non-list/non-dict container degrades to
+empty instead of raising. Also removed a docstring cross-reference to
+`_check_soc_vela_memory_profile`, a function that exists on no branch of
+this repo -- a leftover from the unmerged PR #1470 this fix was split off
+from. Every fix, in both rounds, carries a mutation-proven regression test
+in the gate's own dedicated `tests/scripts/` file.
+
+Separately, `tests/scripts/test_vela_profile_metadata.py`'s freshness test
+(added by the still-open, unmerged PR #1470, so not yet on `dev`)
+`pytest.importorskip("ethosu")`s a cross-check of Arm's 11 built-in vela
+`System_Config` names against the installed `ethos-u-vela` package, but no CI
+workflow installed that package, so the guard silently skipped in every
+automatic run -- a `System_Config` Arm adds in a future vela release would
+never be caught. `pr-metadata-validate.yml`'s `validate` job now installs the
+`model-compile` extra (which already carries `ethos-u-vela` on top of the
+`tflite`/`flatbuffers` the `model-io` extra it previously installed already
+provided) instead of `model-io`, so the freshness gate genuinely executes the
+moment #1470 lands. Verifying that install (`pip install -e
+".[dev,model-compile]"` in an isolated venv, byte-for-byte the new workflow
+step) surfaced a real regression it would otherwise have introduced:
+`test_build_model_default_registry_tflite_source_still_uses_cpu_adapter`
+built E1M-AEN801 (an Ethos-U-bearing SKU) through the default adapter
+registry using a dummy, unparseable `.tflite` payload, which used to skip
+quietly ("vela not installed") and now makes the real `VelaAdapter.compile()`
+raise for real -- `build_model()` does not catch an available adapter's
+`compile()` raising by design (a real, installed tool failing to compile is
+a loud error, not a silent skip). Fixed by copying in the real
+`tests/fixtures/models/tiny_int8.tflite` fixture, the same pattern two other
+tests in this file already use for exactly this reason.
+
+A third review found a further class the container/entry guards above did
+not cover: the VALUE of an array element. `_as_list`/`_dict_entries` guard
+the container and the `isinstance(x, dict)` entry filter, but a malformed
+*element value* (a dict/list where a string was expected, or a non-int
+where an int was) still reached a bare set-comprehension or `in`/`not in`
+membership test and raised `TypeError: unhashable type` -- or, once built,
+`sorted()` raised on a mixed-type set. Fixed the 12 reported crash lines
+(11 distinct guard sites -- two reported lines shared one fix) across
+`_check_silicon_kconfig`, `_check_soc_npu_pairing`, `_check_chip_physical`,
+`_check_block_realizations`, `_check_library_semantics`, and
+`_check_tier_a_library_ci`, then re-swept the whole file for the same
+antipattern rather than stopping at the named list: found 7 more --
+`_check_chip_physical`'s `passives[].net`; `_check_block_realizations`'s
+`parts[].chip` and `maps` values; `_check_soc_debug_probe_identity`'s
+`core_ids`/`m_core_ids` (a miss inside a function this fix had already
+declared hardened for the container/entry class); and
+`_check_tier_a_library_ci`'s `familyMatrix[].som`/`.core`. Every one of the
+18 guards carries its own mutation-proven regression test (reverted,
+confirmed the exact pre-fix `TypeError`, restored). One regression
+surfaced while fixing `_check_silicon_kconfig`'s `knownSilicon[]` entries:
+a plain `isinstance(x, str)` filter would have silently dropped a
+JSON-`null` entry that an existing pinned test expects to still report as
+"not a ref" -- the guard only skips a *truthy* non-string.
+
+Separately, `_check_peripheral_kconfig`'s top-level `isinstance(data, dict)`
+guard turned out to be unreachable via the real CLI path: a malformed
+ON-DISK `metadata/registries/peripheral-kconfig.json` kills the whole gate
+at IMPORT time, not inside `main()` -- `alp_orchestrate/slugs.py` (and
+`alp_project_emit/__init__.py`) call `alp_registries.peripheral_kconfig()`
+at MODULE scope, reached transitively the moment anything imports
+`alp_orchestrate`, including `validate_metadata.py` itself via
+`from alp_orchestrate.sdk_compat import ...`. The existing regression test
+for this guard monkeypatched an ALREADY-IMPORTED `validate_metadata`
+module, so it could never reach that import-time crash -- it proved
+nothing about the real failure mode. Fixed at the real site instead:
+`alp_registries.peripheral_kconfig()` now raises a `ValueError` naming the
+malformed field instead of surfacing a raw
+`JSONDecodeError`/`KeyError`/`AttributeError` several import-frames from
+anything the caller wrote. Kept `_check_peripheral_kconfig()`'s own guard,
+with a comment stating honestly that it is unreachable against the real
+on-disk file (the import-time guard fires first) but does stay reachable,
+and tested, when this function runs against a registry path re-pointed
+after a successful import. Added a subprocess-based regression test that
+copies the real `scripts/` tree into a scratch root, drops a malformed
+registry into it, and invokes `python3 scripts/validate_metadata.py` for
+real -- the only way to reproduce an import-time crash, since an
+already-imported module never re-runs its own import-time code.
+
+Also: dropped `_check_board_targets`'s `isinstance(raw_topology, dict)`
+guard-and-continue -- `_as_dict()` on the very next line already degrades
+any non-dict `topology:` to `{}`, so the explicit guard was behaviourally
+redundant (reverting it alone reddens no test); `_as_dict` alone now
+carries it, same as every other array/object field in this file. Copied
+`test_removing_the_key_from_a_real_soc_file_fails` (jlink_flash_device)
+onto a `tmp_path` copy of `e5.json` instead of mutating the real tracked
+file in-process -- its `try`/`finally` restore does not survive a SIGKILL,
+which would leave a stripped SoC file in the working tree.
+`pr-metadata-validate.yml`'s "Install Python deps" comment now cites the
+vela-gated test NAMES instead of a line-number pair that drifts on any
+edit above it.
+
+### Added — public `alp_inference_last_invoke_latency_us()` accessor (#1541)
+
+`<alp/inference.h>` exposed no way to time an inference through the
+shipped path, so the two in-tree camera-vision harnesses each hand-rolled
+`k_cycle_get_32()` / `k_cyc_to_us_floor32()` around `alp_inference_invoke()`
+— truncating a sub-microsecond result toward zero and risking a 32-bit
+microsecond overflow on a slow invoke.
+
+`alp_inference_invoke()` now brackets the backend's synchronous executor
+in both dispatchers (Zephyr registry + Yocto) and stores the last
+**successful** invoke's duration, round-nearest, in microseconds.
+`alp_inference_last_invoke_latency_us(alp_inference_t *inf, uint64_t *out_us)`
+reads it back: `ALP_ERR_INVAL` for a NULL `out_us`, `ALP_ERR_NOT_READY`
+when `inf` is NULL/closed or no successful invoke has landed yet,
+`ALP_ERR_NOSUPPORT` on a stub build with no inference backend compiled in
+at all, `ALP_OK` otherwise. A failed invoke never updates the stored
+value. Overlapping invokes on one handle are last-store-wins, not
+largest-duration-wins.
+
+Internal storage width differs by OS, not the public `out_us` type: the
+Yocto dispatcher stores the full 64-bit value (native atomics on
+x86-64/aarch64), but the Zephyr/M-class dispatcher stores it in a 32-bit
+field -- Cortex-M has no 64-bit atomic instruction, and the Zephyr SDK's
+`arm-zephyr-eabi` toolchain ships no `libatomic`, so a `uint64_t` field
+there failed to link on every Cortex-M target
+(`src/inference_dispatch.c` compiles unconditionally into every Zephyr
+app). A duration saturates at `UINT32_MAX - 1` microseconds (just under
+~71.58 minutes) on Zephyr rather than wrapping -- the raw `UINT32_MAX`
+value stays reserved as the "no successful invoke yet" sentinel, so a
+saturated reading is always observable as `ALP_OK` plus a value, never
+misread as `ALP_ERR_NOT_READY`, and this now matches on both OSes: on
+either one, `ALP_ERR_NOT_READY` means only "no successful invoke yet,"
+never "the invoke was too slow to report." A second, tighter limit sits
+in front of the storage ceiling on a target without
+`CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER`: the underlying hardware cycle
+counter itself wraps modulo 2^32 cycles first
+(`CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC`-dependent), silently producing a
+too-small duration with `ALP_OK` rather than an error -- under stock
+Kconfig this only actually compiles in at <=60 MHz (Zephyr's
+`CORTEX_M_SYSTICK_64BIT_CYCLE_COUNTER` defaults to `y` above that), where
+the wrap ceiling is >= ~71.58 s. See `<alp/inference.h>`'s accessor doc
+for the exact numbers.
+
+Reports only the last invoke -- no ring buffer, no SDK-side statistics. A
+caller building mean / p95 / run count (the shape the upcoming
+model-perf-capture bench recipe needs) calls this once per invoke and
+retains the samples itself, so the SDK's per-handle memory footprint
+stays fixed regardless of how many samples a caller wants -- a real
+constraint on a part where the inference arena is already tight.
+
+Marked `[ABI-EXPERIMENTAL]` at function granularity; `inference.h`'s
+file-level marker stays `[ABI-STABLE]` (see `docs/abi-markers.md`).
+
+Neither camera-vision harness (`examples/camera-vision/ai-object-detection-realtime`,
+`examples/camera-vision/ai-camera-viewer`) is migrated to the new
+accessor in this change -- both still hand-roll the `k_cycle_get_32()` /
+`k_cyc_to_us_floor32()` pattern the first paragraph above describes.
+Migrating them is a tracked follow-up, kept out of this diff to avoid
+widening an ABI-bearing change.
+
+### Fixed — the #1479 SHA pins had no bump path, and every `actions/checkout` still persisted the run's `GITHUB_TOKEN` into local git config
+
+#1479 pinned every third-party `uses:` in `.github/workflows/` to a commit
+SHA, which trades a mutable-tag exposure for a stale/unpatched-version one —
+a frozen pin never gets Dependabot's security-advisory bump unless something
+is watching that ecosystem. Fixed by adding `.github/dependabot.yml` with a
+`github-actions` ecosystem entry (`directory: "/"`, weekly schedule).
+`target-branch: "dev"` is set explicitly too — `gh api repos/alplabai/alp-sdk
+--jq .default_branch` returns `dev`, so Dependabot already opens against
+`dev` without it; the explicit pin is hardening against that repo setting
+ever changing, not a fix for a live misroute (see
+`docs/branching-and-merge-policy.md:110-112,121` for why `dev` is the
+correct target). No `.github/dependabot.yml` existed before this change, so
+nothing else needed merging into it.
+
+Separately, every one of the 42 `actions/checkout` steps across the 24
+workflow files that use it left `persist-credentials` at its default
+(`true`), writing an `http.https://github.com/.extraheader` token into that
+step's checked-out `.git/config` for the rest of the job even when nothing
+downstream needed it. Swept all 42 and added `persist-credentials: false` to
+every one — verified per job that no later step in the same job runs a `git
+push`/`git fetch`/`git tag` or otherwise shells out to git against a remote
+using the persisted credential (`git grep -n 'git push\|git commit\|git
+tag\|git fetch\b' -- .github/workflows/` returns nothing over the workflow
+YAML; widened to `scripts/` and `tools/`, the only remaining hits are prose
+that isn't a git invocation at all —
+`scripts/alp_orchestrate/buildplan.py:337` and
+`scripts/check_emit_snapshots.py:203` use "git commit" as the English noun
+phrase for a commit hash, `scripts/resolve_generated_conflicts.py:43` is a
+module-docstring usage example telling a *human* to run `git commit` by
+hand, and `scripts/bump_version.py:31,315` are `git push`/`git tag` inside
+`print()`ed release instructions — none of these four is a command any
+script or workflow executes against a remote). The steps that do call `git`
+after a checkout —
+`pr-generated-files.yml`'s `git add -N`/`git diff --exit-code`,
+`pr-static-analysis.yml`'s `git diff -U0` and its second, unrelated `git
+ls-files '*.sh'` sweep, `cross-platform-zephyr.yml`'s `git ls-files '*.sh'`,
+`pr-doxygen.yml`'s `git describe --tags`, `pr-gd32-bridge-build.yml`'s `git
+submodule update` against the public
+`alplabai/gd32g5x3-firmware-library`, `pr-metadata-peripheral-instances.yml`'s
+`git clone` of a sparse Zephyr checkout, `pr-plain-cmake.yml`'s `git clone`
+of upstream `zcbor`, and `release.yml`'s `git archive` — are all either
+local (`git diff`/`git add -N`/`git ls-files`/`git describe`/`git archive`
+read or operate on the already-checked-out worktree, no remote round-trip)
+or point at a different, unauthenticated repository (`git clone`/`git
+submodule update` against `zephyrproject-rtos/zephyr`, `zcbor`, and
+`alplabai/gd32g5x3-firmware-library`); none of them consume the checked-out
+repo's persisted token. (`pr-tier-a-libraries.yml` does not `git clone`
+anything — it fetches Zephyr via `west init -m ... --mr v4.4.1` +
+`west update --narrow -o=--depth=1`, which shells to git internally but
+that's west's business, not a workflow-authored `git` step.) `release.yml`'s
+`softprops/action-gh-release` step, the only step in any workflow that
+publishes to GitHub, authenticates via its own action input/env token, not
+via git-level credential persistence, so it is unaffected.
+
+`pr-gd32-bridge-build.yml`'s `git submodule update` against
+`alplabai/gd32g5x3-firmware-library` now runs unauthenticated where it
+previously inherited the checkout's persisted token, so it now shares
+github.com's anonymous rate limit with the rest of the runner's outbound IP
+— a flakiness delta, not a break (the repo is public: an unauthenticated
+`curl https://api.github.com/repos/alplabai/gd32g5x3-firmware-library`
+returns 200). Left as-is rather than moving the submodule init onto the
+checkout's own `submodules: recursive` input: that step's checkout
+deliberately uses `submodules: false` plus a separate, explicit
+`git submodule update --init` so that a submodule added to this repo in the
+future stays uninitialised in this job unless someone opts it in;
+`submodules: recursive` would silently auto-init any such future submodule
+on every run, trading a rate-limit flakiness delta for a checkout-behaviour
+change that isn't this PR's problem to make.
+
+The follow-on gap #1479 itself left — nothing enforcing `persist-credentials:
+false` going forward, so the next `actions/checkout` step added anywhere
+would silently reintroduce the default — is closed the same way #1479
+closed it for SHA pins: `tests/scripts/test_workflows_are_loadable.py` gets
+`test_checkout_persists_no_credentials` (parametrised per workflow file) and
+its seeded-violation self-test
+`test_persist_credentials_detector_catches_a_seeded_missing_setting`,
+mirroring `test_workflow_uses_are_sha_pinned` /
+`test_sha_pin_detector_catches_a_seeded_tag_reference`. A future job that
+genuinely needs the persisted credential is exempted via
+`_PERSIST_CREDENTIALS_EXEMPT`, the same shape as the SHA-pin test's
+`slsa-framework` exemption, not by weakening or deleting the test.
+
+No `uses:` SHA pin changed: `git grep -hE '^\s*(- )?uses:' --
+.github/workflows/ | grep -vE '@[0-9a-f]{40}([[:space:]]|$)'` still prints
+only the documented `slsa-framework/slsa-github-generator@v2.1.0` exemption.
+`python3 -m pytest tests/scripts/test_workflows_are_loadable.py -q` passes
+(131 tests, up from 105 — includes `test_workflow_uses_are_sha_pinned` and
+the new `test_checkout_persists_no_credentials`); every workflow still
+parses with `python3 -c "import yaml,glob; [yaml.safe_load(open(f)) for f
+in glob.glob('.github/workflows/*.yml')]"`.
+
+Refs #1479.
+
+### Fixed — `validate_metadata.py`'s crash guards over-scoped, silently dropping diagnostics for hashable malformed values (#1545)
+
+Follow-up to #1540. That fix guarded the element-VALUE crash class with
+blanket `not isinstance(..., str)` skips, which is wider than the actual
+hazard: only a `dict` or `list` is unhashable, and every other schema-shape
+violation (`int`, `bool`, YAML `null`) is hashable and safe to
+membership-test. The blanket form therefore traded a crash for a silent
+diagnostic drop -- a `null` `som` stopped emitting the "has no SoM preset"
+message the pre-#1540 code correctly reported, and a non-string `core`
+stopped surfacing "is not a topology core" at all.
+
+Re-scoped `familyMatrix[].som`, `familyMatrix[].core`, `physical.pins[].pad`
+and the matching `sig`/`net` guards in `_check_chip_physical` to skip only
+on `isinstance(x, (dict, list))`, restoring every diagnostic a hashable
+non-string value is owed. Each of the 4 sites carries a regression test
+asserting the `None`-diagnostic string is present, mutation-proven by
+reverting to the blanket str-only guard and confirming the assertion fails.
+
+#1540 also dropped `_check_board_targets`'s `isinstance(raw_topology, dict)`
+guard-and-continue, justified at the time as "behaviourally redundant"
+because `_as_dict()` on the very next line already degrades any non-dict
+`topology:` to `{}` and reverting the guard alone reddened no test. That
+claim was false: the OUTPUT differs. With a non-dict `topology:`, the
+guard-and-continue skips the file entirely (no line printed by this check),
+while `_as_dict()` alone falls through to `checked == 0` and prints a green
+`OK ... (board targets: 0 Zephyr slice(s) resolve)` line for a file the
+schema pass FAILs in the very same run -- worse than the silence it
+replaced. Restored the guard-and-continue, corrected the comment, and added
+a regression test asserting no output line is produced for such a file (the
+prior test only asserted the return value, which the false "redundant"
+claim also satisfied).
+
+A fifth review found the class the previous 4 review rounds missed
+entirely: mapping KEYS, not values. `familyMatrix[idx]/core: ... (available: ...)`
+built its "available" list via `sorted(topology)` -- iterating `topology`
+bare sorts and joins its KEYS -- with no element guard, even though
+`topology` is loaded from YAML, which (unlike JSON) permits int/float/
+bool/null mapping keys. A `topology:` block with a stray non-string key
+raised `TypeError: '<' not supported between instances of 'str' and
+'int'` on a mixed str/int key set, or `TypeError: sequence item 0:
+expected str instance, int found` on an all-non-string key set -- neither
+caught by the schema pass, since JSON Schema cannot type object keys, so
+the same run printed a clean `OK` for the schema pass on the very file
+`_check_tier_a_library_ci` then aborted the whole gate on, with no
+summary line. Fixed by filtering to string keys before `sorted()`, the
+same idiom already used for the JSON-sourced `core_ids`/`macs` sets
+elsewhere in this file. Swept the rest of the file for the same KEY class
+specifically (every `sorted()`/`join()`/`min`/`max`/set-operation over a
+mapping's own keys) -- every other such site turned out to be JSON-sourced
+(object keys are always strings by construction), so this was the one
+genuine instance.
+
+The same review also found that 3 of the blanket `isinstance(x, str)`
+skips this fix added (`familyMatrix[].som`, `familyMatrix[].core`, and
+`physical.pins[].pad`) over-scoped their guard: the actual crash hazard is
+an UNHASHABLE value (a dict/list), not a non-string one, and a JSON `null`
+is hashable and safe to look up. The blanket str-only filter silently
+dropped diagnostics a prior version of this code correctly emitted for a
+`null` `som`/`core`/`pad` (`` `None` has no SoM preset``, `` `None` is not
+a topology core...``, `` pad 'None' used more than once``). Re-scoped all
+3 (plus the matching `sig`/`net` guards in `_check_chip_physical`, for
+consistency, though neither had actually dropped a diagnostic) to skip
+only on `isinstance(x, (dict, list))`, restoring every diagnostic a
+hashable non-string value is owed. Each of the 4 sites carries a
+regression test asserting the `None`-diagnostic string is present,
+mutation-proven by reverting to the blanket str-only guard and confirming
+the assertion fails.
+
+Finally, `alp_registries.peripheral_kconfig()`'s error messages: the
+malformed-`peripherals` message reported `type(data).__name__` (always
+`dict`, since `data` is only reached once it's confirmed to be one) rather
+than `type(peripherals).__name__` (the actually-offending value) --
+self-contradictory on the exact case the subprocess regression test
+exercises (`"peripherals": "not-an-object"` produced `` expected ... (got
+dict) `` while the value actually inspected was a `str`). Fixed to report
+the right type, and split "no `peripherals` key at all" into its own
+message distinct from "`peripherals` is present but the wrong shape". Also
+split `except (OSError, json.JSONDecodeError)` -- which labelled every
+`OSError` (e.g. a missing file) as `` invalid JSON (...) `` -- into
+separate arms, and moved the unconditional `PERIPHERAL_KCONFIG_REGISTRY.
+relative_to(REPO)` (which raised its own confusing `ValueError` when a
+caller repoints the constant outside the repo, exactly the monkeypatch
+idiom every test in this file uses) inside a `try`/`except ValueError`
+that falls back to the raw path string.
+
+### Fixed — shellcheck covered `scripts/bench/**` only; every other `.sh` file shipped unchecked, in CI or locally (#1550)
+
+`git ls-files '*.sh'` returns 26 files. #1527 widened shellcheck to
+`scripts/bench/**` (13 of the 26) in both CI and `stage_shellcheck`, but left
+two more groups unchecked, matching the scope limit `changelog.d/1527.md`
+documented (Refs #1527):
+
+* Root `scripts/*.sh` (`board-yaml-sweep-exclude.sh`, `bootstrap.sh`,
+  `dispatch-confirm.sh`, `setup-clang-format.sh`, `test-all.sh`) —
+  shellchecked by `stage_shellcheck`'s local loop but by no CI job.
+* 8 files entirely outside `scripts/` (`cc3501e-bridge-firmware:ti/build_ti.sh`,
+  `cc3501e-bridge-firmware:ti/deploy_validate.sh`,
+  `cc3501e-bridge-firmware:ti/regen_flashset.sh`, `keys/generate_dev_key.sh`,
+  `meta-alp-sdk/recipes-core/alp-system/files/alp-remoteproc-start.sh`,
+  `tests/yocto/build_rpc_uio_bench_aarch64.sh`,
+  `tests/yocto/run_sanitized_rpc_tests.sh`,
+  `tools/native-sim-container/entrypoint.sh`) — shellchecked nowhere, in CI
+  or locally.
+
+Both `.github/workflows/pr-static-analysis.yml`'s shellcheck step and
+`stage_shellcheck` in `scripts/test-all.sh` are widened from the
+`scripts/bench/*.sh` pathspec to a repo-wide `git ls-files '*.sh'` sweep,
+matching `stage_bash32_parse`'s existing repo-wide `*.sh` sweep. Severity per
+file:
+
+* `scripts/bench/**` keeps `-x -S warning`, the bar #1527 set.
+* `scripts/test-all.sh` runs at `-S warning` (unchanged from #1527 — it is
+  the load-bearing local wrapper itself).
+* Every other file runs at `-S error`, matching `stage_shellcheck`'s existing
+  non-`scripts/bench/**` severity and `onramp-clean-container.yml`'s
+  `scripts/bootstrap.sh` step.
+
+Ran `shellcheck -S error` (v0.10.0, the same version pinned in
+`pr-static-analysis.yml`) against all 8 previously-unchecked-anywhere files
+and against root `scripts/*.sh`: zero findings on every file, so no script
+needed a fix or a `disable=` comment and no file needed excluding from the
+widened sweep. `bash scripts/test-all.sh --target dev`'s `shellcheck` stage
+passes clean over the full 26-file sweep.
+
+`docs/ci/README.md`'s `pr-static-analysis.yml` row is updated to describe the
+repo-wide coverage instead of the old `scripts/bench/**`-only scope.
+
+### Fixed — `bench_jlink_assert_connected` accepted a transcript in which `JLinkExe` never connected (#1551)
+
+`scripts/bench/aen/bench-env.sh`'s `bench_jlink_assert_connected` decided
+"did we reach a board" by enumerating *failure* strings — `Cannot connect to
+the probe/programmer`, `Failed to connect to target`, `Could not connect to
+target`, `No J-Link device found` — plus an empty/missing-file check. Any
+failure mode that stopped `JLinkExe` **before** it printed one of those
+strings therefore passed the guard, which is the exact inversion the guard was
+introduced (#1318) to prevent: absence of a known negative is not evidence a
+board answered.
+
+Measured on the bench probe (J-Link Commander V9.46) while verifying #1542:
+the pre-#1478 line shape made `JLinkExe` reject its own command line, and the
+complete transcript was 147 bytes —
+
+```
+SEGGER J-Link Commander V9.46 (Compiled May 27 2026 12:24:58)
+DLL version V9.46, compiled May 27 2026 12:23:54
+
+Unknown command line option n.
+```
+
+— containing no connect, no `Found SW-DP`, and none of the guard's failure
+strings. `bench_jlink_assert_connected` returned **0** on it. That run was
+still caught, but only by the *next* line, `bench_jlink_assert_aen_dpidr`,
+which returned 4. The read-back-only paths have no such backstop: on
+`reread.sh` and the post-flash console dumps this guard is the sole check, so a
+0 there decodes absent output as a silent app — #1318's original failure mode,
+reachable again through a different door.
+
+The guard now also requires **positive** evidence: at least one `J-Link>`
+command prompt, which `JLinkExe` echoes for every CommanderScript line it
+executes, proving the script ran at all. The failure message names what
+happened (`no 'J-Link>' command prompt ... JLinkExe exited before running it`)
+and prints the transcript's first lines, so an operator is not sent hunting for
+a cable or probe fault when the real cause was a rejected argument.
+
+Deliberately not `Connecting to J-Link ...O.K.`, which is the stronger signal:
+it is absent from legitimately trimmed transcripts (#1318's own `REAL_GOOD_READ`
+fixture begins at the first `J-Link>` line), and this guard must not reject a
+genuine read-back because its capture started mid-run. Prompt presence cannot
+distinguish "connected" from "ran but reached no target" — that remains
+`bench_jlink_assert_aen_dpidr`'s job.
+
+Covered by a new regression test carrying the verbatim 147-byte bench
+transcript; it fails against the pre-fix guard (`assert 0 == 7`) and passes
+after.
+
+### Fixed — `wifi connect` / `wifi ap` accepted `wpa3` with an empty passphrase (#1552)
+
+`cmd_companion_wifi_connect()` and `cmd_companion_wifi_ap()` decided the
+security byte in two steps:
+
+```c
+uint8_t sec = (pass[0] == '\0') ? 0u : 1u;   /* empty pass -> 0 = open */
+if (argc >= 4) {
+        sec = 2u;                            /* "wpa3" token -> 2 = WPA3-SAE */
+}
+```
+
+The second statement overwrote the first unconditionally, so `""` plus the
+`wpa3` token produced **WPA3-SAE with no PSK** — a combination that does not
+exist, since SAE has no open mode. Bench-measured on an E1M-AEN801 before the
+fix: `alp companion wifi ap TestAP-1480 "" wpa3` was accepted and the soft-AP
+was started.
+
+Not a regression from #1543 — the pre-#1543 expression
+(`if (argc >= 4 && strcmp(argv[3], "wpa3") == 0) { sec = 2u; }`) reached the
+identical result for this input; #1543 only dropped the by-then-redundant
+`strcmp`. Found while bench-verifying that change.
+
+Both commands now refuse the combination, naming the conflict:
+
+```
+"wpa3" requires a passphrase -- WPA3-SAE has no open mode.
+for an open soft-AP drop the token: wifi ap "my ssid"
+```
+
+The check sits with the existing 4th-token guard, **before** the
+companion-bound state check, on the same reasoning #1376/#1480 established: a
+contradictory argument shape is wrong whether or not a companion is bound, and
+reporting it as "companion not registered" hides the real problem. (`argc >= 4`
+implies `argc >= 3`, so `argv[2]` is always readable in that branch.)
+
+The two-step assignment itself is collapsed to one expression in both
+functions —
+
+```c
+uint8_t sec = (argc >= 4) ? 2u : ((pass[0] == '\0') ? 0u : 1u);
+```
+
+— because the defect's real shape was a later branch silently undoing an
+earlier decision. Stating the precedence once leaves no window for that class
+to come back.
+
+Four `tests/console` ztests cover it: one per command asserting the refusal
+(and that it is *not* reported as a missing companion), plus a control per
+command proving an empty passphrase **without** the token is still a valid open
+network — without those controls, deleting the `argc >= 4` half of the
+condition would still satisfy the refusal tests while banning every open
+network. Proven to discriminate: against the unfixed source the two refusal
+tests fail and both controls pass (29/31); with the fix the suite is 31/31 on
+`native_sim/native/64`.
+
+### Fixed — `wifi ap-stop` reported an unknowable outcome as a definite failure (#1553)
+
+`cmd_companion_wifi_ap_stop()` printed `ap stop failed (-4)` whenever
+`cc3501e_wifi_ap_stop()` did not return `ALP_OK`. Reaching that branch does not
+mean the teardown failed — and which status you get turns out to depend on
+whether there was anything to tear down.
+
+#### Measured on E1M-AEN801 (2026-08-18), reproducibly
+
+| call | status |
+|---|---|
+| `ap-stop` with **no soft-AP running** (twice) | `ap stopped` — **`ALP_OK`** |
+| `ap start` | `-4` (`ALP_ERR_TIMEOUT`), the known #1385 shape |
+| `ap-stop` with **a soft-AP actually running** (twice) | `-4` every time |
+| `ver` after that sequence | `get_version failed (-5)` — transport wedged |
+
+So the firmware *does* acknowledge `WIFI_AP_STOP`: `ALP_OK` is reachable and
+conclusive for the no-op case. What it cannot report on is the case a caller
+actually cares about — tearing down a live AP takes the bridge through the
+radio-down window and the acknowledgement is not observed across it. `-4` there
+is **inconclusive**: not proof the teardown failed, not proof it succeeded.
+
+`failed` therefore stated more than was known. The console now says:
+
+```
+ap stop unconfirmed (-4) -- firmware v4 has no AP-stop acknowledgement
+(#1553, same gap as #1385); confirm the SSID is gone out of band
+```
+
+and still returns an error, because the status is inconclusive rather than
+successful. The `ap stopped` success line stays and is genuinely reachable — it
+prints for the no-op case, which is exactly where "stopped" is unambiguously
+true.
+
+`cc3501e_wifi_ap_stop()`'s declaration is corrected to match. It claimed
+"`ALP_OK` once the firmware acknowledged the AP stop" with no hint that the
+acknowledgement goes missing precisely when an AP is running; it now documents
+both branches and their evidence. Doc comment only — no signature or ABI
+change.
+
+#### Also established, and also open
+
+Established on an independent radio (the host's Intel AX200 via
+`netsh wlan show networks`, validated against known APs before being trusted —
+it saw the same neighbours the CC3501E's own scan reported):
+
+- **`ap start` really does start the AP despite its own `-4`.** A soft-AP
+  started from the console was confirmed broadcasting. #1385's "unconfirmed"
+  wording is accurate, not pessimistic.
+
+Open, and worth its own issue rather than a claim here:
+
+- **`wifi ap` often does not bring an AP up at all**, on a link confirmed
+  healthy (`alp companion ver` → `CC3501E protocol v4`) immediately before.
+  Three attempts saw no SSID appear across 90 s, 133 s and 121 s of polling,
+  including the first `ap start` after a warm reset, while other attempts in the
+  same session came up fine. What gates it is unknown.
+- **`ap start` followed by `ap-stop` reliably wedges the transport** — every
+  subsequent request returns `ALP_ERR_IO` until the board is reset. Same
+  pre-existing wedge class as #1377.
+
+### Fixed — a `storage[].flash_device:` naming a `memory_map:` region could reach `status: ok` with a fabricated, unverified `dt_label` (#1556)
+
+Follow-up to #1484. `scripts/alp_orchestrate/partition.py`'s
+`_resolve_flash_device()` defaults a `flash_device:`'s Devicetree label to
+the device NAME whenever the SoM preset sets no explicit `dt_label:`
+override, and that default was never checked against the generated Zephyr
+board tree. Measured before this fix, on a real, unmodified E1M-V2N101
+project:
+
+```
+cfg ok ddr_main None
+```
+
+(`status: ok`, `dt_label: 'ddr_main'`), while
+
+```
+$ grep -rn ddr_main zephyr/
+```
+
+returns no match anywhere in the generated tree. The issue's own literal
+example — `flash_device: mram_main` on an AEN SoM — reproduces the same
+way once isolated from #1445's (unrelated) full-tiling of every shipped
+AEN preset's `mram_main`, which now blocks any entry there on capacity
+before the dt_label question is ever reached:
+
+```
+cfg ok mram_main None
+```
+
+with `grep -rn mram_main zephyr/` likewise empty (only `mram_storage` is
+defined).
+
+`resolve_storage_partitions()` now gates the primary resolution on
+`_has_real_dt_label()` — the exact predicate #1484 already built to keep
+this same fabricated-label shape out of its alt-device remedy, applied
+here to the primary path for the first time. A `memory_map:`-sourced
+entry that clears every other check (page alignment, capacity, sibling
+and SoM-region overlap) but has no explicit, verified `dt_label:`
+override now blocks with a reason naming the gap, instead of decorating a
+`partitions { }` child under a label the board `.dts` may not define. The
+remedy never names an alternative device that doesn't itself resolve and
+carry a verified label (`_verified_alt_devices()`), matching #1484's
+established contract.
+
+Scoped to `memory_map:` devices, matching the issue's own root-cause
+wording ("any `memory_map:` region a customer names directly"). An
+`on_module.ospi_memories:` key (e.g. `ospi0`) is NOT gated by this
+change — `_has_real_dt_label()` already returns `False` for every such
+key too (it only ever matches a `memory_map:` region name), so applying
+the same gate unconditionally would also block the `ospi0`-targeting
+fixtures the existing storage test suite deliberately uses as
+device-independent allocator-mechanics coverage; that key's own
+verification gap is separate, tracked follow-up.
+
+Verified both directions with a targeted mutation: forcing the new gate
+off (`verified_dt_label = True`) turns 4 of the 5 new tests red —
+`test_ddr_main_v2n101_real_preset_no_longer_resolves_ok`,
+`test_mram_main_isolated_repro`,
+`test_remedy_never_names_an_unverified_alternative`, and
+`test_remedy_names_a_verified_alternative_when_one_exists` — while
+`test_ospi_memories_device_is_unaffected` (correctly) stays green; restoring
+the gate turns all 5 green again. The full local suite
+(`tests/scripts/`) passes unchanged: 3203 passed, 36 skipped.
+
+New tests: `tests/scripts/test_orchestrate_storage_dt_label_unverified.py`.
+
+`docs/board-config-features.md`'s "Storage partitions (`storage:`)"
+section, `metadata/schemas/board.schema.json`'s `flash_device` and
+`metadata/schemas/som-preset-v1.schema.json`'s `dt_label` descriptions,
+and `metadata/templates/board.yaml`'s `storage:` comment block are
+updated to describe the new enforced behaviour rather than the prior
+"unverified but silently accepted" state.
+
+Closes #1556.
+Refs #1484.
+
+### Fixed — a `path.py::symbol` reference in `docs/test-plan.md` broke the hard Doxygen gate on `dev` (#1559)
+
+#1504's fix cited the test that pins its claim as
+`` `tests/scripts/test_validate_board_yaml_entrypoints.py::test_entrypoints_both_report_per_core_peripheral_warning` ``.
+Doxygen reads `::` as an **explicit link request** even inside backticks, could
+not resolve the symbol, and `pr-doxygen.yml` is a hard gate
+(`WARN_AS_ERROR = FAIL_ON_WARNINGS`), so every PR opened afterwards inherited a
+red `doxygen · public headers`:
+
+```
+docs/test-plan.md:116: error: explicit link request to
+  'test_entrypoints_both_report_per_core_peripheral_warning' could not be resolved
+docs/verification-status.md:168: error: ... (same, via the generator)
+```
+
+This is the same trap #1541 hit on a different line of `docs/porting-new-som.md`,
+where `validate_metadata.py::_check_soc_jlink_flash_device_declared` was split
+into `` `validate_metadata.py` ``'s `` `_check_...` ``. The same split is applied
+here.
+
+`docs/verification-status.md` is generated from `docs/test-plan.md` by
+`scripts/gen_verification_status.py`, so only the source was edited and the
+output regenerated — the error appeared twice because the generator carried the
+reference through.
+
+Verified with the exact CI configuration
+(`{ cat docs/doxygen/Doxyfile; printf 'PROJECT_NUMBER = "%s"\n' ...; } | doxygen -`,
+warnings landing in `doxygen-warnings.log` rather than on stdout): **without**
+the fix `rc=1` with those two errors, **with** it `rc=0` and an empty warnings
+log. A sweep for the same construct across `docs/**.md`
+(`` grep -rn '`[A-Za-z0-9_/.-]*\.py::[a-z_]*`' `` ) returns no other occurrence.
+
+### Fixed — the soft-AP ran with the NWP left in ELP, and `diag info`'s two most useful fields lied (#1562)
+
+`alp companion wifi ap` brings a soft-AP up, it advertises for roughly 100 s, then
+stops — with `ap_start` long since returned. Instrumented bench runs pinned the
+failure **downstream of `Wlan_RoleUp`** (the stage counter saturated at 7), which
+retired the two earlier theories (`network_stack_add_if_ap` never returning,
+unbounded `RoleUp`) and left no visibility past that point.
+
+**Leading cause, now fixed: the AP path never left ELP.** `cc3501e_hw_ble_enable`
+already carries this, root-caused against the SDK on 2026-06-22:
+
+> Always-Active power mode BEFORE the enable — `Wlan_Start` leaves the NWP in ELP,
+> in which it may never complete BLE-controller init
+
+```c
+WlanPowerManagement_e pm = POWER_MANAGEMENT_ALWAYS_ACTIVE_MODE; /* = 0 */
+(void)Wlan_Set(WLAN_SET_POWER_MANAGEMENT, (void *)&pm);
+```
+
+That was the **only** `WLAN_SET_POWER_MANAGEMENT` call in the entire TI HAL, so an
+AP started without BLE ran in whatever mode `Wlan_Start` left behind. A soft-AP is
+the one role that must beacon continuously and so cannot tolerate the NWP dozing,
+and a power-mode death lands exactly where the instrumentation went blind.
+
+The same call now runs in `cc3501e_hw_wifi_ap_start` before the role-up. It is
+scoped to the AP path deliberately — always-active raises idle draw for every
+radio user, and scan/connect are demonstrably fine from ELP (a scan returned 5 APs
+during the #1562 runs). It is best-effort (return ignored, as in the BLE path):
+a rejected set should still leave a possibly-short-lived AP rather than no AP.
+
+**This is a hypothesis with a mechanism, not a confirmed fix.** Two prior theories
+on this issue died on the bench. It stays open until a bench run shows an AP alive
+well past ~100 s.
+
+## `GET_DIAG_INFO` had two fields that did not mean what they say
+
+Both are on the wire already; both were unusable.
+
+**`role` was hardcoded.** `protocol_diag.c` wrote `ALP_CC3501E_ROLE_OFF` behind a
+stale `v0.1: no radio role active` comment, while the header documented it as
+"one of `alp_cc3501e_role_t`". That is the single field that could answer *"is the
+soft-AP role still up?"* — the exact question this issue is stuck on. It now comes
+from a new `cc3501e_hw_radio_role()`, backed by an AP role-up latch alongside the
+existing `wifi_sta_role_up`.
+
+This makes the two candidate faults separable for the first time:
+
+| observation | meaning |
+|---|---|
+| `role` goes `OFF` when the beacon stops | the firmware tore the AP down |
+| `role` stays `WIFI_AP` with no beacon | the NWP dropped the AP underneath us |
+
+Scoped to Wi-Fi: BLE is not folded in, because `cc3501e_nimble_host_is_enabled()`
+lives behind `CC3501E_BLE` in another TU and reaching for it breaks the Wi-Fi-only
+build. `ROLE_OFF` therefore does **not** mean BLE is down, and both the HAL header
+and the protocol header now say so.
+
+**`free_heap_bytes` carried the last Wi-Fi event ID.** A `DEBUG: was free_heap`
+edit repurposed the field without touching its documented meaning or the console,
+so `alp companion diag info` rendered an event ID as `heap: 0 B free` — alarming,
+and false. The field reports `cc3501e_hw_free_heap_bytes()` again.
+
+The event ID was genuinely useful on the bench, so it keeps its value at
+`reserved[0]`: an `ap start` that leaves it at **0** never received a WLAN event at
+all, which is a far sharper signal than "the SSID did not appear on another radio"
+and needs no second radio. Additive into a reserved byte — a host that does not
+know about it reads 0, exactly what the old firmware put there — so no
+`ALP_CC3501E_PROTOCOL_VERSION` bump. The console prints it as `wifievt:`.
+
+Its declaration also moved into `cc3501e_hw.h`; it had been hand-`extern`ed at its
+call site, which is how it spent a release impersonating a documented field.
+
+## Verification
+
+`tests/zephyr/cc3501e_bridge_transport` links the real firmware dispatcher against
+the stub HAL and now pins the corrected layout: `free_heap_bytes` at `reply[13..16]`
+equals the HAL's heap source, `reserved[0]` equals the event ID's low byte, and
+`reserved[1..2]` stay zero.
+
+An honest limit, stated in the test itself: every stub diag getter returns 0 and
+`ROLE_OFF` is also 0, so **no stub assertion can distinguish "reads the HAL" from
+"re-hardcoded to 0"**. The test pins the wire layout; the discriminating check is
+the bench, where an AP that is up must report `ROLE_WIFI_AP` (2). A green unit run
+is not evidence the field is live.
+
+Refs #1385. Refs #1553. Refs #1564.
+
+### Fixed — `WIFI_AP_STOP` ran its blocking radio teardown in the SPI-ISR context (#1563)
+
+`handle_wifi_ap_stop()` called `cc3501e_hw_wifi_ap_stop()` **inline**, i.e. from
+`protocol_dispatch()` in the SPI-ISR context. Every sibling that blocks is
+worker-routed instead — `WIFI_CONNECT_STA`, `WIFI_AP_START`, `WIFI_SCAN_START`,
+`WIFI_GET_RSSI`, `BLE_ADV_STOP`, `BLE_DISABLE` — and `worker.c` states why in
+its own header:
+
+> a radio op kills the SPI-slave DMA (the bridge cannot be serviced while it
+> runs), so the worker drives the line BUSY before every blocking radio op and
+> READY again once the slave is re-armed (after the post-op
+> `bridge_transport_spi_hw_reinit`)
+
+An inline radio op gets **neither** — no BUSY/READY flow-control for the host to
+gate on, and no `bridge_transport_spi_hw_reinit` afterwards. The AP teardown
+therefore killed the SPI-slave DMA and nothing re-armed it.
+
+`WIFI_AP_STOP` is now worker-routed like the rest, which gives it that handling
+automatically. No wire-format change: the host's `cc3501e_wifi_ap_stop()`
+already drives this opcode through `poll_by_repeat`, so the BUSY-then-poll
+sequence a worker-routed handler produces is what it already expects.
+`protocol-version.txt` stays at 4; `firmware-version.txt` bumps 0.2.0 → 0.2.1.
+
+#### Why this is the cause, measured
+
+Bench-measured on E1M-AEN801 (2026-08-18). The inline call explains all four
+observations, including the two that look contradictory:
+
+| call | status | why |
+|---|---|---|
+| `ap-stop`, **no AP running** | `ALP_OK` | nothing to tear down, so the HAL body never blocks and the reply frames normally |
+| `ap start` | `-4` | already worker-routed; the known #1385 no-latch shape |
+| `ap-stop`, **an AP actually running** | `-4`, every time | the teardown blocks the SPI ISR, so the reply cannot be framed |
+| any request afterwards | `-5` until reset | the radio op killed the slave DMA and nothing re-armed it |
+
+The "OK when there is nothing to stop, timeout when there is" split is the
+signature: it is exactly the difference between a HAL body that returns
+immediately and one that blocks.
+
+#### Not verified on silicon
+
+**This is CC3501E bridge firmware and no CC35 was reflashed.** Flashing it is
+the FIB warm-program path over XDS110/SWD, and there is no XDS110 attached to
+the bench host that measured the defect — only the Alif J-Link. What was
+verified here is that both CI stub configurations build clean
+(`CC3501E_HAL_BACKEND=stub`, SPI and SDIO transports, `arm-none-eabi` 13.3.1).
+
+Bench steps owed before this ships, on a host with the XDS110:
+
+1. `alp companion ver` → `CC3501E protocol v4`
+2. `alp companion wifi ap <ssid> <pass>` → confirm the SSID out of band
+3. `alp companion wifi ap-stop` → expected to change from `-4` to `ALP_OK`
+4. `alp companion ver` again → **must still answer**; this is the regression
+   that matters, the bridge surviving the teardown
+5. `alp companion wifi ap <ssid2> <pass>` → does a second AP now come up
+   (#1562)?
+
+Step 5 is the open question: #1562 (`wifi ap` often not starting an AP at all)
+may be downstream of this same wedge — a bridge left desynced by a previous AP
+teardown cannot service the next start — but that is a hypothesis this change
+does not prove, and #1562 stays open until the bench says otherwise.
+
+### Fixed — `doxygen-out/` was a checked-in, unregenerated HTML snapshot; it is now untracked and gated (#1573)
+
+`doxygen-out/` was a **committed** Doxygen-generated HTML tree — 1879 tracked
+files, 25.4 MB — that nothing in the repo regenerated on merge. The only
+references anywhere outside the tree itself were `pr-doxygen.yml`'s "Upload
+HTML artefact" step (uploads `doxygen-out/html/` as a workflow artifact only,
+never commits anything back) and `docs/doxygen/Doxyfile`'s
+`OUTPUT_DIRECTORY = doxygen-out` (where a local build writes it). Zero
+consumers: no `.md`/`.py`/`.sh`/`.yml`/`.json` linked into it, and there is no
+GitHub Pages workflow that publishes it. `.gitignore` had no doxygen entry, so
+a local `doxygen` run's output could be `git add`-ed by accident — which is
+how the snapshot got committed in the first place, and how #1524 found it
+still repeating a "never runs `sudo`" claim that #1524 had already retired
+from `docs/cli.md` / `docs/getting-started.md`.
+
+The issue's premise that "the workflow does not even run on a docs-only
+change to `docs/cli.md`" is **no longer true** as of #1585, which widened
+`pr-doxygen.yml`'s `pull_request.paths` filter to cover `docs/**` (negating
+`docs/superpowers/**`) plus the root and component READMEs, and pinned that
+filter to the Doxyfile's `INPUT` with
+`tests/scripts/test_doxygen_paths_cover_input.py`. That half of the drift is
+already closed; this fragment addresses the other half the issue named as the
+correct fix: the repo no longer checks in a Doxygen-generated HTML tree that
+nothing regenerates on merge.
+
+`doxygen-out/` is `git rm -r`'d and added to `.gitignore` (with a comment
+pointing at `docs/doxygen/Doxyfile:23`, its `OUTPUT_DIRECTORY`) so a local
+Doxygen run cannot re-commit it. `pr-doxygen.yml`'s artefact upload is
+unchanged — that remains the right distribution mechanism for the built HTML.
+A new gate, `scripts/check_no_committed_doxygen_output.py`, parses
+`OUTPUT_DIRECTORY` out of the Doxyfile (rather than hardcoding the string
+`doxygen-out`, so it survives a future rename of the output directory) and
+fails if `git ls-files` finds anything tracked underneath it; wired into
+`pr-metadata-validate.yml`'s `validate` job and registered in
+`metadata/quality-tasks-v1.json` as `doxygen-output-untracked`.
+`tests/scripts/test_check_no_committed_doxygen_output.py` proves the gate
+both passes on a clean tree and fires on a seeded violation, including one
+seeded against `docs/` (a directory the fixture itself tracks) to rule out a
+vacuous parse.
+
+The gate's own inputs are now in `pr-metadata-validate.yml`'s `paths:` filter
+(both the `pull_request` and `push` lists): `docs/doxygen/Doxyfile`, because
+the gate parses `OUTPUT_DIRECTORY` out of it and a rename is exactly the drift
+it follows; `doxygen-out/**`, so a PR whose *only* change is re-committing the
+tree still trips it; and the two `scripts/check_*doxy*.py` gate scripts
+themselves. Without those, the gate would have shipped absent from its own
+trigger — the #1585 defect class this issue is a sibling of, reintroduced by
+the fix for it.
+
+Closes #1573.
+Refs #1524.
+Refs #1585.
+
+### Added — `metadata/bootstrap.json` declares tier/source/size/licence per prerequisite artifact (#1574)
+
+ADR 0021 §3 requires the IDE to show one consent screen before installing
+toolchain dependencies, itemising artifact / source / size / licence across
+three tiers (A: hermetic/package-manager, no elevation; B: needs elevation,
+skippable, command shown; C: licence-gated, never silent). Until now none of
+that lived in `metadata/bootstrap.json`: `prerequisites.install` had an
+install *command* per tool but no tier, licence, source, or size, so the only
+way to build the screen was a hand-written table in the consuming extension
+keyed on tool name — exactly the shortcut alplabai/alp-sdk-vscode#467
+explicitly forbids ("If the producer cannot express it yet, that is an
+upstream issue to file"). This is that issue.
+
+A new top-level `artifactProvenance` object carries one entry per tool
+`prerequisites.install` already ships an install command for — the union of
+`install.linux.apt` / `install.linux.dnf` / `install.macos` /
+`install.windows` keys (`git`, `cmake`, `ninja`, `python3`, `python`, `xz`,
+`wget`, `7zip`), each with `tier` (`A`/`B`/`C`), `source` (canonical upstream
+project URL), `sizeBytes` (nullable), and `licence` (nullable SPDX id).
+Every entry today is tier `A`: every prerequisite this manifest ships an
+install command for is delivered by a signed, user-scope package manager
+(winget/apt/dnf/brew), which ADR 0021 §3's own footnote treats as
+elevation-equivalent to a hermetic archive for tiering purposes.
+
+Two honest gaps, not guesses: `xz` and `7zip`'s `licence` are `null` — both
+projects' real-world licensing is genuinely multi-component (xz-utils mixes
+public-domain, LGPL, and GPL-licensed files across the same distributed
+archive; 7-Zip's core LGPL-2.1-or-later ships alongside a separately
+restricted unRAR-derived decoder) and cannot be honestly reduced to one SPDX
+identifier without a file-level audit this repo has not performed. Every
+entry's `sizeBytes` is `null`: all eight tools are resolved by a package
+manager at install time, whose actual download size varies by host OS,
+architecture, and already-cached version — there is no single fixed number
+to record the way `metadata/toolchains.json`'s pinned, sha256-verified
+Zephyr SDK archives already carry one. Not covered by this change (left for
+follow-up, per the issue's own note that a partial landing is useful and
+`tier` alone unblocks the tiering that cannot be faked downstream): the
+Zephyr SDK / `arm-zephyr-eabi` toolchain (source+size already live in
+`metadata/toolchains.json`, but not tier/licence), `west` + the pip
+dependencies, `tan` itself, and every tier B/C artifact (J-Link/WinUSB
+drivers, udev rules, WSL2 enablement, DEEPX DX-M1, vendor NPU compilers) —
+none of the latter exists as an install-command entry in this manifest yet,
+so there is nothing yet to attach these facts to.
+
+`metadata/schemas/bootstrap-v1.schema.json` gains `artifactProvenance`
+(required) and a new `$defs.artifactProvenanceEntry` (`tier` enum
+`["A","B","C"]`, `source` a URI string, `sizeBytes` nullable non-negative
+integer, `licence` nullable string — `additionalProperties: false`, all four
+required per entry). `scripts/check_bootstrap_manifest.py` gains
+`_check_artifact_provenance`, asserting `artifactProvenance`'s key set stays
+exactly the union of tool names `prerequisites.install`'s four maps name an
+install command for — a tool gaining an install command with no provenance
+entry, or a stale provenance entry for a retired tool, fails the gate.
+`artifactProvenance.*` is producer-only data with no reader in this repo
+today (a future `tan doctor --json` consumer is a companion tan-cli issue,
+filed only once this shape has proven itself) and is exempted from the
+generic per-script orphan-leaf scan accordingly (`_PRODUCER_ONLY_LEAF_PREFIX`),
+the same way `prerequisites.*` is exempted for its own, different reason.
+
+Verified locally:
+
+```
+$ python3 scripts/check_bootstrap_manifest.py
+check_bootstrap_manifest: SKIP -- no Zephyr checkout resolved ... -- skipping the metadata/bootstrap.json zephyr.pythonMinVersion <-> Zephyr's own PYTHON_MINIMUM_REQUIRED cross-check
+check_bootstrap_manifest: OK -- metadata/bootstrap.json, west.yml, README.md, scripts/bootstrap.sh, scripts/bootstrap.ps1, tools/native-sim-container/Containerfile, and 3 CI workflow(s) all agree on Zephyr v4.4.1.
+
+$ python3 -m pytest tests/scripts/test_check_bootstrap_manifest.py -q
+81 passed, 1 skipped in 1.89s
+
+$ python3 scripts/gen_catalog.py --check
+OK   metadata/catalog.json  (11 SoMs, in sync)
+
+$ python3 scripts/check_quality_registry.py
+OK: quality-tasks-v1.json matches scripts/check_*.py.
+```
+
+Ten new tests in `tests/scripts/test_check_bootstrap_manifest.py` cover the
+missing/stale-entry drift check, the schema's required-field and `tier` enum
+enforcement, `null` as a schema-legal `licence`/`sizeBytes` value, and the
+orphan-leaf exemption. Reverting `metadata/bootstrap.json`,
+`metadata/schemas/bootstrap-v1.schema.json`, and
+`scripts/check_bootstrap_manifest.py` while keeping the new tests fails 7 of
+the 10 (`KeyError: 'artifactProvenance'` / schema-error assertions unmet /
+`'artifactProvenance' in gate.KNOWN_KEYS` false) — proving the tests exercise
+the new fields, not the fixture.
+
+Refs alplabai/alp-sdk-vscode#467. Closes #1574.
+
+### Fixed — `apt-get`'s own `Acquire::http::Timeout` cannot bound a mirror that trickles; CI hung for ~11 hours (#1575)
+
+`Acquire::http::Timeout` bounds an IDLE read, not a SLOW one: every byte that
+arrives resets the timer, and apt has no minimum-transfer-rate option (no
+equivalent of curl's `--speed-limit`). Measured locally against two
+purpose-built servers via `/usr/lib/apt/apt-helper download-file` (same
+Acquire stack as `apt-get`):
+
+| server                                          | result |
+|--------------------------------------------------|--------|
+| accepts, sends headers, then goes silent         | `rc=100` after **127s**; `Acquire::http::Timeout=30` fired, 3 retries, apt gave up by itself. BOUNDED. |
+| sends **1 byte every 20s** (never idle 30s)      | apt **never returned**; only an external kill ended it. UNBOUNDED. |
+
+That trickle case is what had been failing alp-sdk CI for ~11 hours as
+`Install host build tools` / `Install cppcheck` / `Install Doxygen` /
+`Install arm-none-eabi toolchain` timing out at the 20-minute step cap —
+distinct from the three previous timeout-tuning attempts (#1477, #1537,
+#1548), which raised step-level `timeout-minutes` caps and tuned
+`Acquire::http::Timeout`/`Acquire::Retries` values. Those all treated the
+symptom (a step running long) without bounding the one class of hang
+`Acquire::http::Timeout` structurally cannot reach.
+
+`scripts/ci/apt-bounded.sh` wraps every `apt-get update`/`apt-get install`
+call with a wall-clock `timeout` per attempt (`APT_ATTEMPT_TIMEOUT=300` by
+default), `APT_ATTEMPTS=3` retries (worst case 900s, still under the
+20-minute step cap that stays as the backstop), and a `dpkg --configure -a`
+recovery before each retry — a killed `apt-get` can leave `dpkg`
+half-configured or holding the lock. It retries only on rc 124 (its own
+timeout) or rc 100 (apt's own transient failure); any other exit code
+surfaces immediately instead of burning further attempts on a real error.
+Proven: fast server → `rc=0` in 0s (no happy-path penalty added by the
+wrapper); dribble server → `rc=124` at 40s with 2×20s test values.
+
+All 34 real `apt-get update`/`apt-get install` invocations across
+`pr-plain-cmake.yml`, `onramp-clean-container.yml`,
+`pr-gd32-bridge-build.yml`, `pr-twister.yml`, `pr-twister-aen.yml`,
+`pr-tier-a-libraries.yml`, `pr-static-analysis.yml`,
+`pr-getting-started-aen801.yml`, `pr-doxygen.yml`,
+`pr-cc3501e-bridge-build.yml`, and `coverity.yml` now call the wrapper
+instead — the wrapper supplies its own `-o Acquire::*` options and `sudo`
+handling, so call sites drop both. Two calls in
+`onramp-clean-container.yml` (git/curl/ca-certificates, needed so
+`actions/checkout` can run at all on a bare `ubuntu:24.04` container) stay
+inline: the repo — and the wrapper script with it — isn't checked out yet
+at that point in the job. Each carries an explicit
+`# apt-bounded:allow (...)` marker.
+
+A new gate, `scripts/check_apt_bounded.py` (`apt-bounded` in
+`metadata/quality-tasks-v1.json`, wired into
+`pr-metadata-validate.yml:validate`), fails any future
+`.github/workflows/*.yml` step that calls `apt-get update`/`apt-get
+install` directly instead of through the wrapper, so this class of hang
+cannot be silently reintroduced by a new workflow.
+
+Closes #1575. Refs #1548.
+
+**Budget correction, found by CI on this PR's own run.** The first revision gave
+each invocation its own budget. A step calls the wrapper TWICE (`update` then
+`install`), so the real worst case was 2x the intended wall clock, and the
+step's own `timeout-minutes` fired before the wrapper could report an
+attributed failure -- the anonymous outcome the design exists to prevent.
+Measured on job `96013431161` (2026-08-19): `update` burned 3x300s, `install`
+then burned 2x300s, and the 20-minute step cap fired at 09:34:08.
+
+The deadline is now computed ONCE per step and persisted in `RUNNER_TEMP`,
+keyed by `GITHUB_ACTION`; later invocations inherit it and each attempt is
+clamped to the time remaining. The step total is `APT_STEP_BUDGET` (780s, 13
+min) no matter how many times the wrapper is called, leaving margin under the
+20-minute cap so the wrapper always loses the race and names the failure.
+
+Writing the regression test then caught a second, worse defect in the fix
+itself: on budget exhaustion it exited `${rc:-124}`, but `rc` is *set* to 0 when
+an earlier invocation spent the budget, so `install` would have reported
+SUCCESS without running -- a silent green strictly worse than the hang being
+bounded. It now forces a non-zero exit, pinned by
+`tests/scripts/test_apt_bounded_wrapper.py` (5 tests: shared deadline, per-step
+scoping, loud failure on exhaustion, and pass-through of a real apt error).
+
+### Fixed — `doxygen · public headers` was red on `dev`, and its own paths filter kept it hidden (#1585)
+
+The hard Doxygen gate (`WARN_AS_ERROR = FAIL_ON_WARNINGS`, zero warnings
+tolerated) failed on unmodified `origin/dev`:
+
+```
+$ { cat docs/doxygen/Doxyfile; printf 'PROJECT_NUMBER="test"\n'; } | doxygen -
+rc=1
+docs/ci/README.md:37: error: found </tt> tag without matching <tt>
+```
+
+The reported line was a red herring — `docs/ci/README.md:37` is the
+`pr-bitbake.yml` table row and contains no markup at all. Bisected with the
+repo's real Doxyfile, the opener is **line 32**, the `pr-static-analysis.yml`
+row, and specifically the code span `` `git ls-files '*.sh'` `` that #1550
+(#1577) added: inside a markdown table cell, Doxygen mis-parses that span and
+emits an unbalanced `</tt>` which it then reports against the next row. Proven
+by substitution — neutralising that one span makes the build clean while
+neutralising `` `*.sh` `` or `` `scripts/bench/**` `` does not. Three other
+docs quote globs the same way (`docs/contribution.md:149`,
+`docs/tutorials/README.md:12`, `docs/v1.0-readiness.md:401`) and are fine, so
+it is the table cell, not the quoting, that breaks. The cell now says
+"repo-wide `git ls-files` sweep over `*.sh`", which describes the same sweep
+without quoting a command form; the exact invocation still appears verbatim in
+`scripts/test-all.sh:362` and `.github/workflows/pr-static-analysis.yml:177`.
+
+**Why `dev` stayed red is the more important half.** `pr-doxygen.yml`'s
+`paths:` filter listed `include/**`, `docs/doxygen/**`, `docs/adr/**` and its
+own file, while the Doxyfile's `INPUT` already covered **all** of `docs` plus
+the root and component READMEs. Every path in `INPUT` that the filter omitted
+was a place where a defect could land the gate red with nothing running to
+notice. It only surfaced because an unrelated PR (#1584) edited
+`pr-doxygen.yml` and so tripped the filter by accident.
+
+Both triggers now list the Doxyfile's real inputs (`docs/**` with
+`docs/superpowers/**` negated to match `EXCLUDE_PATTERNS`, the four root
+markdown files, and the component READMEs), shared between `pull_request` and
+`push` via a YAML anchor so the two cannot drift apart.
+
+`tests/scripts/test_doxygen_paths_cover_input.py` pins the filter to the
+Doxyfile: it parses `INPUT` (including the `+=` continuation), parses the
+workflow's `paths:`, and asserts every input is covered, with a
+seeded-gap self-test proving the matcher actually fails when a pattern is
+removed. Verified in both directions — 19 passed on the fixed tree; restoring
+the old narrow filter fails on `[docs]` and on the seeded-gap guard.
+
+This is the same defect class as #1487 (a parity gate whose own inputs were
+absent from its trigger) and #1528 (a regression suite whose context was never
+required): a check that exists but is not reached.
+
+Refs #1550.
+Refs #1584.
+
+### Fixed — `build_ti.ps1` could not build a clean checkout, and misreported the firmware version (#1587)
+
+The Windows CC3501E build script had drifted behind its Linux sibling
+`build_ti.sh` in two ways, both hit while bench-verifying #1563.
+
+**1. It consumed `memcfg/` but never generated it.** `build_ti.ps1` puts
+`-I$out\memcfg` on the include path and lists
+`$out\memcfg\ti_flash_map_config.c` in its sources, but nothing in the script
+produced either — `build_ti.sh` has always had the MemoryConfigurator step. The
+script therefore only worked in a directory where an earlier run had left a
+`memcfg/` behind; a fresh `git worktree add` checkout died with
+
+```
+tiarmclang: error: no such file or directory: '...\build\ti\memcfg\ti_flash_map_config.c'
+```
+
+The step is now ported. Its load-bearing detail is the **two** `--product`
+manifests: the MemoryConfigurator module ships in the Wi-Fi **Toolbox**, not the
+SDK, so a single-manifest invocation fails to resolve
+`/ti/memoryconfig/MemoryConfigurator/Mem_cfg`. That required a new `-ToolboxDir`
+parameter — the script previously had no Toolbox concept at all — defined as the
+directory holding `.metadata/product.json`, matching `build_ti.sh`'s `--toolbox`.
+A preflight turns a missing or wrong Toolbox path into a named error instead of a
+SysConfig failure deep in the run.
+
+It generates `memcfg/` rather than reusing one: the directory emits the
+`vendor_image_*` / `bl2_*` slot symbols `FWU.a` references, so a stale copy would
+pair an old flash map with the SoM's current `cc35xx-conf.bin` — a mismatch that
+surfaces as a boot failure, not a link error.
+
+**2. It never passed the `fw_version` marker.** `build_ti.sh` derives
+`-DCC3501E_BRIDGE_FW_VERSION_U16` from `firmware-version.txt`, the single source
+of truth. `build_ti.ps1` did not, so Windows-built images silently fell back to
+`protocol_diag.c`'s hardcoded `0x0200u`: after flashing firmware whose
+`firmware-version.txt` said `0.2.1`, `alp companion diag info` still reported
+`fw: 0x0200 (v2.0)`.
+
+That is not cosmetic. `fw_version` is the field an operator reads to answer *"did
+my flash land?"*, and on the Windows path it always answered with the old version
+— indistinguishable from a flash that silently did not take, which is a real
+failure mode on this hardware (#712's skip trap).
+
+Both fixes are verified by building, not by inspection: a fresh worktree cut from
+`dev` now completes, printing
+
+```
+== SysConfig: MemoryConfigurator -> flash map (memcfg) ==
+== fw_version marker: 0.2.0 -> 0x0200 (from firmware-version.txt) ==
+```
+
+and the same script on the #1563 branch prints `0.2.1 -> 0x0201`, confirming the
+marker tracks the file rather than being re-hardcoded.
+
+### Fixed — `test_verify_west_patches.py`'s rmtree helper raced git's background maintenance on macOS (#1588)
+
+`python-smoke (macos-latest)` failed on 2026-08-19 with:
+
+```
+FAILED tests/scripts/test_verify_west_patches.py::test_main_exits_3_when_only_an_uncheckedout_module_blocked_the_check
+FileNotFoundError: [Errno 2] No such file or directory:
+  '/private/var/folders/.../ws/modules/hal/alif/.git/objects/maintenance.lock'
+```
+
+`ubuntu-latest` and `windows-latest` passed the same commit, and the full
+`pytest tests/scripts/` sweep passes on Linux (3135 passed, 36 skipped), so this
+was platform-specific rather than a broken assertion.
+
+`_rmtree_clearing_readonly()` walks the tree collecting `files`, then `chmod`s
+each one to clear the read-only bit git leaves on objects. Git runs background
+maintenance (`gc.autoDetach`), which creates and then removes
+`.git/objects/maintenance.lock`. When that unlink lands between `os.walk`
+enumerating the lock and the `chmod` reaching it, the `chmod` raises
+`FileNotFoundError` and the teardown takes down the test with it.
+`shutil.rmtree` has the same window on its own unlink.
+
+Both windows now tolerate a file vanishing underneath them, and **only**
+`FileNotFoundError` — a real `PermissionError` (the Windows read-only-attribute
+case this helper exists for, #1441) still surfaces. `shutil.rmtree`'s `onexc`
+callback would be the tidier construction but is 3.12+, and
+`pyproject.toml`'s `requires-python` is `>=3.10`, so the fix uses an
+ENOENT-only retry instead.
+
+Guarded by `test_rmtree_helper_tolerates_a_file_vanishing_mid_walk`, which
+simulates the race deterministically rather than trying to provoke it: the
+first `os.chmod` is monkeypatched to raise `FileNotFoundError` exactly as the
+kernel would for an already-unlinked path, and the helper must still remove the
+tree. Mutation-proven — reverting the `try`/`except` around the `chmod` makes
+that test fail with the same `FileNotFoundError`; restoring it passes 17.
+
+This is the third platform-specific failure in this file (#1434 made the west
+shim spawnable on Windows, #1441 fixed 13 Windows-only failures), all of which
+were real bugs rather than infrastructure noise.
+
+Refs #1434.
+Refs #1441.
+
+### Fixed — `regen_flashset.sh` produced a flash-set that was not self-contained (#1591)
+
+`regen_flashset.sh` exists to emit a matched WARM flash-set that can be handed
+to whoever drives the XDS110 — normally a different machine from the one holding
+the signing keys, since the signing key deliberately never leaves that box. Its
+output was not portable: `tool_settings.warm.json` pointed its `debug`
+action-request at the **`REF_SET`** path instead of at a copy inside `DIR_OUT`.
+
+Reusing the debug action_request from `REF_SET` is correct — it is
+version-independent, unlike `programming_instructions`, which must be rebuilt at
+the vendor image's version. Referencing it *in place* is what broke.
+
+Hit for real on 2026-08-19 while bench-verifying #1563: the signing box produced
+the set, the Windows bench programmed it, and the `debug` path — pointing into
+`.../cc3501e-signing/gen-out-conn45/toolbox/` — had to be repaired by hand first.
+
+The second-order trap is why this is a fix and not a doc note: because that file
+was **not in `DIR_OUT`**, the obvious remedy of rewriting the manifest's paths to
+wherever the directory landed silently missed it. Every other entry rewrites
+cleanly; that one still dangles.
+
+The script now copies `debug_action_request.sign.bin` into `DIR_OUT` and
+references the copy, and a new self-containment gate asserts that **every** path
+the emitted manifest names exists and resolves inside `DIR_OUT` — failing there
+(exit 6, naming the offending key) rather than as a confusing programmer error on
+the other machine. The gate was verified to discriminate: the pre-fix manifest
+shape fails it (`actions_req_paths.debug -> OUTSIDE DIR_OUT`), the fixed shape
+passes, and a missing referenced file also fails.
+
+Also in `deploy_validate.sh`, a **units clarification, not a correction**: the
+skip-detector comment's "~1.09 MB" was already right (1094764 B = 1.0948 MB
+decimal), but the same number is 1.04 MiB, which is what `ls -lh` shows. Both
+figures now appear so a reader comparing against a MiB-formatted listing does not
+mistake a full write for a short one — a confusion that already cost one
+round trip.
+
+### Fixed — `metadata/toolchains.json` now carries `tier`/`licence`, so ADR 0021 §3's consent screen can render the Zephyr SDK / `arm-zephyr-eabi` rows (#1603)
+
+`metadata/toolchains.json`'s `zephyrSdk.artifacts[]` had `source` (`baseUrl` +
+`filename`) and `sizeBytes` but no `tier` or `licence` — the two facts ADR
+0021 §3's one-consent-screen requirement (artifact/source/size/licence) still
+needed for the two artifacts that carry a fixed, hermetic-archive size. #1574
+covered the other half (`metadata/bootstrap.json`'s `artifactProvenance` for
+the 8 package-manager prerequisites, every `sizeBytes` correctly `null`) but
+left these two out of scope by design — see that file's own schema comment.
+
+Every one of the 6 artifact rows (`minimal-sdk` / `arm-zephyr-eabi-toolchain`
+× `linux-x86_64` / `windows-x86_64` / `macos-aarch64`) now carries:
+
+```json
+"tier": "A",
+"licence": null
+```
+
+- **`tier: "A"`** — ADR 0021 §3's own table places the Zephyr SDK and
+  `arm-zephyr-eabi` in Tier A ("hermetic, no elevation") explicitly.
+- **`licence: null`, not a guessed SPDX id.** Verified against upstream, not
+  assumed: `curl -sS https://raw.githubusercontent.com/zephyrproject-rtos/sdk-ng/v1.0.1/.gitmodules`
+  (the pinned `v1.0.1` tag) shows `minimal-sdk` bundling `openocd`, `qemu`,
+  `qemu_arc`, `qemu_xilinx`, and `bossa` as separate upstream projects, and
+  `arm-zephyr-eabi-toolchain` bundling `binutils-gdb`, `gcc`, and `picolibc`
+  likewise — each under its own licence. `curl -sS https://api.github.com/repos/zephyrproject-rtos/sdk-ng`
+  reports the sdk-ng *repository's* own licence as `Apache-2.0`, which covers
+  its build scripts, not what the archives it produces actually contain — so
+  copying that value in would have been exactly the fabricated-consent-screen
+  mistake issue #1603 was opened to avoid. `null` here is the same honest
+  answer #1574 already gave `xz`/`7zip` for the identical multi-component
+  shape.
+
+Vocabulary matches #1574's `artifactProvenance` exactly: `tier` enum
+`A`/`B`/`C`, `licence` an SPDX id or explicit `null`. No existing key was
+restructured — `tier`/`licence` were added alongside `host` / `component` /
+`filename` / `sizeBytes` / `sha256` inside the existing per-(host,component)
+artifact rows.
+
+`metadata/schemas/toolchains-v1.schema.json`'s `$defs.artifact` now
+`require`s `tier` (enum `["A","B","C"]`) and `licence` (`["string","null"]`)
+in addition to the five pre-existing fields.
+
+`scripts/check_toolchain_lock.py` gained a fifth check,
+`_check_artifact_provenance_consistency`: `tier`/`licence` are per-row fields
+but `component` is the real artifact identity (repeated once per `host`), so
+this catches one row's `tier`/`licence` edited without its siblings — the
+class of drift schema `required` cannot express. Mirrors the two-directional
+drift bar `_check_artifact_provenance` (#1574, in the sibling
+`check_bootstrap_manifest.py`) holds `artifactProvenance` to, adapted to this
+file's per-host-row shape. No new `check_*.py` file, so no quality-registry
+entry — confirmed:
+
+```
+$ python3 scripts/check_quality_registry.py
+OK: quality-tasks-v1.json matches scripts/check_*.py.
+```
+
+5 new tests in `tests/scripts/test_check_toolchain_lock.py` prove both the
+schema requirement and the new consistency check actually fire. Mutation
+proof — `git stash` the three implementation files (manifest, schema, gate),
+keep the tests:
+
+```
+FAILED tests/scripts/test_check_toolchain_lock.py::test_artifact_missing_tier_fails_schema
+FAILED tests/scripts/test_check_toolchain_lock.py::test_artifact_missing_licence_fails_schema
+FAILED tests/scripts/test_check_toolchain_lock.py::test_tier_disagreement_across_host_rows_for_same_component_fails
+FAILED tests/scripts/test_check_toolchain_lock.py::test_licence_disagreement_across_host_rows_for_same_component_fails
+FAILED tests/scripts/test_check_toolchain_lock.py::test_consistent_tier_and_licence_across_host_rows_passes
+5 failed, 19 passed in 0.32s
+```
+
+`git stash pop`, re-run:
+
+```
+$ python3 -m pytest tests/scripts/test_check_toolchain_lock.py -q
+........................                                                 [100%]
+24 passed in 0.29s
+```
+
+`metadata/catalog.json` and `alp.lock` do not reference `toolchains.json`'s
+artifact fields — confirmed no drift (`python3 scripts/gen_catalog.py
+--check` → `OK`, `alp.lock` has no `toolchain` mention at all today, per its
+own schema's reserved-but-unpopulated key).
+
+**Still open, not this issue's scope:** no Tier B (J-Link/WinUSB drivers,
+udev rules, WSL2 enablement) or Tier C (DEEPX DX-M1 SDK, vendor NPU
+compilers) artifact is declared anywhere in either producer yet — a
+three-tier consent screen can only show Tier A until one is. Deciding where
+those artifacts get declared is left to a follow-up, per issue #1603's own
+body.
+
+Closes #1603.
+Refs #1574.
+Consumer: `alplabai/alp-sdk-vscode#467`.
+
+### Fixed — `apt-bounded.sh` printed a give-up line that contradicted its own progress lines (#1604)
+
+The wrapper had two terminal messages, and they were mutually exclusive by
+construction:
+
+* the budget guard, at the top of each iteration, printed
+  `step budget of Ns exhausted before attempt K`;
+* the loop exit, after `seq 1 $APT_ATTEMPTS` was consumed, printed
+  `all N attempts failed`.
+
+Whenever the remaining budget fell below the 10-second floor *before* the final
+attempt, the guard fired and the loop-exit line became unreachable. A reader
+then saw `attempt 3/3` followed by a give-up naming a different attempt number
+and no total, with no summary of how many attempts had actually run. Observed on
+`twister-shard 1/4` for #1570 (run `32275153453`, job `96140712269`).
+
+Reproduced locally against a hanging `apt-get` with `APT_STEP_BUDGET=30`,
+`APT_ATTEMPT_TIMEOUT=12`, `APT_ATTEMPTS=3` — two attempts consume 24s and leave
+6s, under the floor:
+
+```
+apt-bounded: attempt 2/3 (previous rc=124, 18s of step budget left)
+apt-bounded: step budget of 30s exhausted before attempt 3 ...      <- old
+```
+
+`all 3 attempts failed` never printed, exactly as reported.
+
+Both paths now go through one `give_up()` helper that always reports how many
+attempts actually ran, so the terminal line can never disagree with the
+`attempt N/M` lines above it:
+
+```
+apt-bounded: giving up after 2/3 attempt(s) -- only 6s of the 30s step budget remained, too little to start another attempt ...
+apt-bounded: giving up after 3/3 attempt(s) -- every attempt the budget allowed has failed ...
+apt-bounded: giving up after 0/3 attempt(s) -- ...                  <- apt-get never ran
+```
+
+The `0/3` case is the one worth having: a second invocation in a step whose
+budget an earlier one consumed now says plainly that no `apt-get` executed,
+rather than leaving a reader to infer it. The non-zero exit on that path is
+unchanged and still pinned — reporting success for a package that was never
+installed would be a silent green.
+
+Impact was diagnostic only. The exit code (124) and the underlying diagnosis (a
+degraded mirror) were both correct throughout, and #1592's mirror-bounding
+behaviour is unchanged. But this wrapper exists so a human reading a red log
+gets a correct account instead of an anonymous step-cap kill, so a
+self-contradicting narrative defeats its purpose.
+
+Guarded by three tests in `tests/scripts/test_apt_bounded_wrapper.py`, covering
+the budget-exhausted, all-attempts-failed and never-ran shapes. Mutation-proven:
+restoring the old two-message form fails
+`test_the_give_up_line_agrees_with_the_attempt_lines` and
+`test_an_invocation_that_never_ran_apt_says_zero_attempts` (2 failed, 6 passed);
+restoring the fix gives 8 passed.
+
+Refs #1575.
+Refs #1592.
+
+**A follow-up red this PR caused, and the reason it is fixed at the marker and
+not at the three tests.** The three tests above were added without the
+`@needs_the_wrappers_own_tools` decorator that the file's four pre-existing
+tests already carried, so `python-smoke (macos-latest)` and
+`python-smoke (windows-latest)` went red on exactly those three while
+`ubuntu-latest` stayed green:
+
+```
+FAILED tests/scripts/test_apt_bounded_wrapper.py::test_the_give_up_line_agrees_with_the_attempt_lines - AssertionError: expected the second attempt to announce itself:
+assert 'attempt 2/3' in ''
+FAILED tests/scripts/test_apt_bounded_wrapper.py::test_exhausting_every_attempt_says_so - AssertionError:
+assert 'attempt 3/3' in ''
+FAILED tests/scripts/test_apt_bounded_wrapper.py::test_an_invocation_that_never_ran_apt_says_zero_attempts - AssertionError: an invocation that ran no apt-get must say 0, not omit the count:
+assert 'giving up after 0/3 attempt(s)' in ''
+3 failed, 3138 passed, 96 skipped, 4 warnings, 70 subtests passed in 696.24s (0:11:36)
+```
+
+Marking the three would have cleared the red and left the defect: an opt-in
+guard that only the author's memory applies is a guard that eventually is not
+applied, and this failure mode is invisible locally — no Linux box can run
+`macos-latest` or `windows-latest`. The skip is therefore now a module-level
+`pytestmark`, so the platform gate is the file's default and a test added later
+is covered by writing nothing at all; all seven decorators are gone.
+
+Nothing real goes unchecked by the skip: every workflow step that invokes
+`scripts/ci/apt-bounded.sh` runs on `ubuntu-latest`. Confirmed by sweep — 35
+call sites across 12 workflows, and the one file that also has a
+`macos-latest` job (`onramp-clean-container.yml`, `runs-on:` at lines 153, 372
+and 519) uses the wrapper only in the two `ubuntu-latest` jobs.
+
+Mutation proof that the module-level skip actually fires — flip the platform
+test's own comparison so a Linux host takes the non-POSIX branch:
+
+```
+SKIPPED [1] tests/scripts/test_apt_bounded_wrapper.py:222: scripts/ci/apt-bounded.sh cannot run here: not a POSIX platform -- the PATH shims are `#!/bin/sh` scripts and rely on an executable bit this filesystem does not have
+SKIPPED [1] tests/scripts/test_apt_bounded_wrapper.py:250: ...
+SKIPPED [1] tests/scripts/test_apt_bounded_wrapper.py:261: ...
+8 skipped in 0.04s
+```
+
+Restored, all eight run for real on Linux: `8 passed in 60.37s`.
+
+### Added — cc3501e firmware v0.3.0 / protocol v4: `OTA_PROMOTE` + the bench-found fixes it needed to ship
+
+This entry is a **firmware release** rather than a single-issue fix; #1609
+tracks the cut itself, and the individual fixes it bundles each carry their own
+issue number below.
+
+Firmware `0.2.1` -> **`0.3.0`** (MINOR: adds a wire opcode). Wire protocol
+stays at `4` -- `protocol-version.txt` was already corrected to `4` earlier
+(the source already carried `OTA_PROMOTE` since #493; the pin file had
+drifted). This is the first published `prebuilt/` blob to actually ship it.
+
+**These are two independent counters, and conflating them is exactly the
+error this release exists to clean up:**
+
+- `cc3501e-bridge-firmware:firmware-version.txt` -- the **semver firmware release**.
+  Names the tag and the prebuilt blob `cc3501e-vX.Y.Z.bin`. Moves on the
+  GD32-bridge cadence (0.2.1 -> 0.2.3 -> 0.2.8-style patch/minor bumps).
+- `cc3501e-bridge-firmware:protocol-version.txt` -- the **wire protocol** number.
+  Moves only when the wire format itself changes (an opcode, a field, a
+  compat rule). `0.3.0` is NOT "v0.4" -- that would encode the protocol
+  number into the firmware version and break the scheme these two files
+  exist to keep separate.
+
+Ships in `cc3501e-bridge-firmware:prebuilt/`: `cc3501e-v0.3.0.bin` +
+`cc3501e-v0.3.0.bin.sig` (detached ECDSA-P256/SHA-256, Alp validation vendor
+key) + `cc3501e-v0.3.0.bin.sha256`. `cc3501e-v0.2.0.bin` and its `.sig`/
+`.sha256` stay in the tree -- it is a published, signed artifact people may
+already have; `prebuilt/CHANGELOG.md` documents supersession instead of
+deleting it. All six AEN SoM presets' `helper_firmware.cc3501e_otp.firmware_path`
+now point at the `0.3.0` blob.
+
+Full fix list, the `OTA_PROMOTE` rationale, the open `#1562` soft-AP defect,
+and the anti-rollback rule are in `cc3501e-bridge-firmware:prebuilt/CHANGELOG.md`
+under `[0.3.0]` -- not duplicated here.
+
+Closes #1609.
+
+### Documented — AEN debugging guide gains a symptom entry for a board that boots nothing at all (#1614)
+
+A healthy DAP with parked cores and `VTOR` stuck at `0x00000000` reads as a dead
+module, and until now nothing in the customer-facing docs matched it: §4 covers
+only the opposite failure, where a *running* application gates the debug port
+off. The new `docs/debugging-aen.md` §7 covers the case directly.
+
+It names the three observations that feel like evidence and are not — an
+immediate MRAM readback is not proof of a commit either way, the SE-read-gated
+region above `0x80580000` is unreadable on healthy parts too, and a silent
+application console only ever means "no application is running" — then gives a
+passive SEUART capture as the discriminator and routes each outcome. It also
+covers the documented non-SE cause of `VTOR = 0x00000000` with a live debug
+port: MCUboot refusing slot0, which prints `E: Unable to find bootable image`
+(tampered signature) or `E: Bad image magic 0x20004c60` (a raw `zephyr.bin`
+rather than a `zephyr.signed.bin`) on the application console and needs a
+re-sign rather than a SETOOLS reflash. An SE-side fault is referred to Alif's
+Security Toolkit recovery flow rather than given an invented recipe.
+
+`docs/troubleshooting.md`'s "Module powers up but Renesas / Alif silicon doesn't
+boot" entry, which previously covered only the PMIC and the core rails, now
+routes healthy-rails plus live-SWD plus `VTOR = 0` to the new section instead of
+dead-ending.
+
+### Changed — `alp.lock` no longer records `sdk.revision` (#1615)
+
+The field recorded the git HEAD of the repo the lock was generated in, which is
+self-referential by construction: committing the lock advances HEAD past the
+value baked into it, so the field was stale the instant it landed. Under
+squash-merge it was worse than stale — it named the pre-squash tip of a feature
+branch, a commit the squash discarded, so the value shipped on `dev` was not on
+`dev`'s history at all.
+
+The cost was paid by every concurrent branch. Because the field changed on every
+commit, `alp.lock` was rewritten by essentially every merge to `dev`, so any open
+PR went `CONFLICTING` the moment an unrelated one merged — on a file whose two
+sides never actually disagreed. It also churned the SBOM serial number, a hash
+over the whole lock, for builds that were otherwise byte-identical.
+
+There was no version of the field that could have worked: any git HEAD written
+into a file that is then committed is stale by construction. The genuine "which
+SDK commit produced this artifact" need is already served by
+`scripts/build_receipt.py` (`source.sdkRevision` / `source.sdkDirty`), which
+resolves it against a real build instead of baking it into a tracked file.
+`sdk.version` plus the west project pins lock the SDK identity a consumer builds
+against, and are unchanged.
+
+`alp.lock` is now byte-stable across regenerations of an unchanged tree: every
+remaining input is file-derived, with no git and no clock. It still changes when
+a real input does — `west.yml`, `metadata/libraries/*.yaml`,
+`scripts/requirements.txt`, `metadata/sdk_version.yaml`, the `metadata/**`
+digest (which includes the generated `metadata/catalog.json`, so adding a
+`check_*.py` gate still moves it) or the schemas.
+
+Backward compatible in both directions: the schema keeps `revision` as an
+optional property rather than removing it, so a lock generated before this
+change still validates, and `sdk.revision` stays in the drift-exempt
+`_PROVENANCE_KEYS` set so its absence is not reported as drift by
+`west alp-lock --check`.
+
+`build_lock()` and `verify_lock()` lose their `rev_resolver` keyword argument,
+whose only consumer was this field. (`scripts/build_receipt.py` has a separate
+`rev_resolver` with a different signature, for build receipts rather than a
+committed lock; it is unaffected.)
+
+### Fixed — `pr-bootstrap-distro-install`'s three matrix legs could never serve as required status checks; added a static-named summary gate (Refs #1464)
+
+The matrix job's per-leg names (`distro install · debian-apt` etc.) are
+matrix-interpolated, and GitHub can only resolve that interpolation while the
+matrix actually runs. When `detect` gates the matrix to SKIP — the normal
+case, since it only watches five bootstrap-manifest-relevant paths — GitHub
+reports the job under its literal, uninterpolated name instead
+(`distro install · ${{ matrix.name }}`), so a required context set to one of
+the three leg names never reports and the PR is blocked permanently.
+Reproduced on alp-sdk#1474 (a docs-only PR) and reverted off branch
+protection within minutes.
+
+Added `summary`, a non-matrix job with the literal name `distro install ·
+all`, `needs: [detect, distro-install]`, and `if: always()`, so it always
+reports whether the matrix ran, skipped, or failed. Its verdict logic
+independently re-derives the one condition under which a `skipped`
+`distro-install` result is legitimate (`pull_request` event, `detect` ran and
+succeeded, and found no bootstrap-manifest path touched) instead of trusting
+the word "skipped" at face value — so a future regression in
+`distro-install`'s own fail-closed `if:` (#1473) fails this gate too, rather
+than silently passing exactly when the machinery is broken.
+
+### Fixed — the documented `west update` cost was off by ~50x, and stale-version fallout from the v4.4.1/hal_alif-v2.3.0 bumps had drifted back into prose (#1459)
+
+`scripts/bootstrap.sh`/`.ps1` told a fresh-clone user that `west update`
+(shallow + narrow) costs `~30 MB` on a cold cache.  Measured on a live
+workspace produced by that exact command: `zephyr/` 287 MB / 35,954 files,
+`modules/` 1,213 MB / 20,847 files — **~1.5 GB**, of which `hal_nxp` alone is
+931.2 MB (62% of `modules/`).  And that's a *floor*: the measured workspace
+predated several `name-allowlist` additions (`littlefs`, `cmsis_6`,
+`mcuboot`, `tflite-micro`, `hal_ethos_u`, `zcbor`, `open-amp`, `libmetal`,
+`tf-psa-crypto`, `micro_ros_zephyr_module`).  Both scripts now say `~1.5 GB+`
+and name it explicitly as a floor rather than a fixed number the
+name-allowlist will keep invalidating.
+
+Also swept the residual fallout from two version bumps that never fully
+propagated into prose: `west.yml`'s own header comment still said
+"Currently v4.4.0" (twice) though the pin three lines below it has read
+`v4.4.1` since the last Zephyr patch bump; `docs/getting-started.md`,
+`docs/v1.0-readiness.md`, and `docs/vendor-partnerships.md` all still named
+`hal_alif v2.2.0` though `west.yml` pins `v2.3.0`; and `CONTRIBUTING.md`'s
+`ZEPHYR_BASE` pointed at `$PWD/../zephyrproject/zephyr`, a directory
+`bootstrap.sh` never creates (every other copy in the tree already says
+`$PWD/../zephyr`, matching the workspace layout `scripts/bootstrap.sh`
+actually builds).
+
+The other defect the source issue described — four inconsistent documented
+quickstarts — had already been resolved by earlier accuracy passes before
+this PR started (README's quickstart is a single git-clone + `tan bootstrap`
++ `tan init` path with no `west init -m` content left in it, and it links to
+`docs/getting-started.md` as the full walkthrough instead of restating one);
+verified against the issue's own cited commit rather than re-describing
+content that no longer matches the tree.
+
+### Fixed — `tools/native-sim-container`'s documented `docker` path could not build, and its Zephyr pin had silently drifted from `west.yml` (#1457, #1458)
+
+Two independent bugs in the hardware-free `native_sim` reproduction
+container, both found and reproduced the same day, neither caught by CI
+because nothing in `.github/workflows/` builds this image.
+
+**#1457:** the Makefile header advertises `make CONTAINER_ENGINE=docker
+test`, but the `build` recipe passed no `-f`. Podman auto-detects a build
+file named `Containerfile`; Docker/BuildKit does not — it looks for
+`Dockerfile`, finds none, and aborts (`failed to read dockerfile: open
+Dockerfile: no such file or directory`) before any layer runs. Fixed by
+adding `-f $(HERE)Containerfile` to the `build` recipe; verified an actual
+`make CONTAINER_ENGINE=docker build` now completes (and `make build` under
+podman still does too).
+
+**#1458:** `Containerfile:37` pinned `ARG ZEPHYR_REV=v4.4.0` while
+`west.yml` pins `v4.4.1` — a contributor reproducing a twister result
+locally was silently building against a different Zephyr than CI ran.
+Fixed at the root rather than gated in place: `tools/native-sim-container/
+Makefile`'s `build` target now derives the pinned revision LIVE from
+`west.yml` and passes it as `--build-arg`, so the primary (`make build`)
+path can never carry a second, hand-maintained copy again. The
+Containerfile's own `ARG ZEPHYR_REV` default still exists — only as a
+fallback for a standalone `docker build`/`podman build` that bypasses the
+Makefile — and `scripts/check_bootstrap_manifest.py` (the same gate that
+already keeps `west.yml`, the CI workflow `--mr`/cache-key pins, and the
+README Zephyr badge in lockstep with `metadata/bootstrap.json`) now covers
+that default too, so a future drift fails the PR instead of shipping
+silently. Not `check_toolchain_lock.py`: that gate's own docstring scopes
+itself to the *Zephyr SDK toolchain* release, deliberately leaving the
+*Zephyr revision* pin to `check_bootstrap_manifest.py` — this is that same
+territory, in a fifth file.
+
+### Fixed — the zcbor recipe set both `SRCREV` and a URL `tag=`, so bitbake could not parse it and every A55 image build failed
+
+`meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb:102` pinned the revision
+twice — `;tag=0.9.1` in `SRC_URI` and `SRCREV` on line 104 — the state the
+line was in before this fix; line 102 today reads `;branch=main`, the fixed
+form described below. BitBake's git fetcher refuses that outright, at PARSE
+time, before any task runs:
+
+```
+ERROR: ExpansionError during parsing meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb
+bb.data_smart.ExpansionError: Failure expanding variable
+fetcher_hashes_dummyfunc[vardepvalue], expression was
+${@bb.fetch.get_hashvalue(d)} which triggered exception FetchError: Fetcher
+failure: Conflicting revisions (9b07780aca6fb21f82a241ba386ad9b379809337 from
+SRCREV and 0.9.1 from the url) found, please specify one valid value
+```
+
+Because it halts parsing rather than failing one task, it took down all four
+A55 targets identically — `e1m-v2n101-a55`, `e1m-v2n102-a55`,
+`e1m-v2m101-a55`, `e1m-v2m102-a55` — none of which reached
+`bitbake alp-image-edge`.
+
+`;tag=0.9.1` becomes `;branch=main`, and `SRCREV` is unchanged. **No pinning
+strength is lost.** `branch=` names where to look; it is not a revision, which
+is why the five sibling recipes already pair it with an `SRCREV` and parse
+fine. The immutability the original comment wanted is carried by the SHA
+itself, which is exactly what the tag resolves to:
+
+```
+$ git ls-remote --tags https://github.com/NordicSemiconductor/zcbor.git | grep refs/tags/0.9.1
+9b07780aca6fb21f82a241ba386ad9b379809337	refs/tags/0.9.1
+```
+
+One line, no `^{}` deref entry, so `0.9.1` is a lightweight tag pointing
+straight at that commit — the `SRCREV` already on line 92.
+
+`branch=main` rather than `nobranch=1` because the commit really is on that
+branch, so the fetcher's reachability check stays live instead of being
+switched off:
+
+```
+$ gh api repos/NordicSemiconductor/zcbor/compare/9b07780aca6fb21f82a241ba386ad9b379809337...main
+status: ahead   ahead_by: 142   behind_by: 0
+```
+
+`behind_by: 0` is the part that matters: the pin is an ancestor of `main`.
+
+Swept the rest of the tree for the same shape — every `.bb`/`.bbappend` that
+sets `SRCREV` alongside a URL revision:
+
+```
+meta-alp-sdk/recipes-core/alp-chips/alp-chips_0.6.bb                 -> ;branch=main
+meta-alp-sdk/recipes-core/alp-sdk/alp-sdk_0.6.bb                     -> ;branch=main
+meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb                   -> ;tag=0.9.1
+meta-alp-sdk/recipes-examples/alp-edgeai/alp-edgeai_0.6.bb           -> ;branch=main
+meta-alp-sdk/recipes-examples/alp-lvgl-dashboard/alp-lvgl-dashboard_0.6.bb -> ;branch=dev
+meta-alp-sdk/recipes-ros/alp-perception/alp-perception_0.6.bb        -> ;branch=main
+```
+
+zcbor was the only `tag=`, so this is the only recipe affected.
+
+### Fixed — `alp-quality` exited 0 having run no checks at all (tan-cli#721)
+
+`Report.ok()` was `all(r.passed for r in self.results if r.gate)`, and `all()`
+over an empty sequence is `True`. A profile that selected no `check-script`
+task therefore printed
+
+```
+alp-quality profile=quick: 0/0 passed
+quality: complete.
+```
+
+and returned 0 — indistinguishable by `$?` from a verified clean run. That was
+**every** `--profile quick` invocation: measured against
+`metadata/quality-tasks-v1.json`, `quick` selects **0** check-script tasks,
+against `pr` 55, `full` 58, `release` 55.
+
+An empty selection is now `ok() is False`, exits **2**, and says so:
+
+```
+alp-quality profile=quick: NO TASKS SELECTED -- nothing was checked. This is
+not a pass. The profile matched no `runner: check-script` task in
+metadata/quality-tasks-v1.json.
+```
+
+**2, not 1** — "nothing was checked" is a different fact from "a gate check
+failed", and a caller that tolerates one but not the other has to tell them
+apart. Same split `scripts/test-all.sh` draws with its `[GAP]` tag (#1396). A
+gate failure still exits 1 and a clean run still exits 0; both are pinned by
+tests, and removing the empty-selection guard turns exactly the two new cases
+red while those two stay green.
+
+Whether `quick` *should* select zero tasks is a separate question this does not
+answer — it makes the current answer audible instead of silent. No CI workflow
+invokes `alp_quality.py`, so nothing in this repo changes colour.
+
+The other half of tan-cli#721 — a `[FAIL]`ing gate check also exiting 0 — was
+the west wrapper discarding `do_run`'s return, fixed in #1427.
+
+### Fixed — the AEN E8 devicetree put the on-SoM DP83825 at MDIO address 1; silicon answers at 0 (#1244)
+
+`zephyr/dts/alif/ensemble_e8_peripherals.dtsi` declared the managed-MDIO PHY as
+`eth_phy_managed: ethernet-phy@1` with `reg = <1>`, carried over from a fork
+reference, under a comment asking for exactly one thing before anyone relied on
+it: "confirm this address before relying on it for a real MDIO scan". The
+confirmation has now been done on real E8 silicon and it came back **0**, so the
+node is `ethernet-phy@0` with `reg = <0>` and the caveat is replaced by the
+evidence.
+
+The measurement is a live MDIO transaction on the managed controller itself — a
+Flow C ITCM RAM-run (no MRAM write) of `examples/aen/aen-ethernet-link` built
+with `mdio-managed.overlay` on
+`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`:
+
+```
+[eth] MDIO PHY@0 id=2000a140 (DP83825=2000a140)
+[eth] PHY regs: ANAR=01e1 ANLPAR=0000 PHYSTS=0002 RCSR=00e1
+```
+
+`id=2000a140` is the DP83825 identifier read back over `MAC_MDIO_Address/Data`,
+not the fixed-link path and not a datasheet default. That run reported
+`PHY link DOWN (BMSR=7849)` because the desk had no cable into a switch port —
+reading the PHY ID needs no link, which is what made the address answerable
+without one. So the MDIO layer is now silicon-proven; link and traffic over the
+managed path are not, and the end-to-end `RESULT PASS` remains a `fixed-link`
+result.
+
+Nothing regressed while the address was wrong: the bench-verified path is
+`fixed-link`, which never touches MDIO, and both the `mdio` node and
+`eth_phy_managed` ship `status = "disabled"`. The one artefact that would have
+hit it first — `examples/aen/aen-ethernet-link/mdio-managed.overlay`, the
+compile proof for the managed path — inherits the address rather than
+overriding `reg`, and **keeps** doing so: one source of truth, corrected at the
+node. Its header now records the bench evidence and says explicitly why the
+`reg` override stays absent. A compile proof never scans the bus, so the twister
+entry `alp_sdk.examples.aen.ethernet_link.aen.mdio_managed` could not have
+caught this; that is noted in `testcase.yaml` rather than papered over with a
+test that cannot exist without hardware.
+
+`zephyr/dts/bindings/ethernet/alif,ethernet.yaml:47` already agreed with the
+silicon ("e.g. ti,dp83825 at addr 0"). Stale "no MDIO-managed PHY exercised on
+real E8 silicon yet" claims are corrected in
+`zephyr/kconfigs/vendor-alif-peripherals.kconfig`, `metadata/chips/dp83825.yaml`
+and ADR 0023, each narrowed to what was actually proven (MDIO layer, not link).
+The order code stays TBD (#1241): `id=2000a140` is die/OUI identity only and
+does not distinguish the DP83825 grade/package suffix, so the unverified
+"DP83825I" label is gone from the node rather than re-asserted.
+
+### Fixed — a missing `debug.jlink_flash_device` silently downgraded Flow D to Flow A on 10 of 12 Alif Ensemble variants, with no diagnostic (#1295)
+
+`metadata/socs/alif/ensemble/*.json` published `variants[].debug.jlink_flash_device`
+for only the two E8 variants. Its absence makes tan's `flow_d_available()` false,
+which silently falls back from the J-Link MRAM loader (Flow D) to the SE-UART
+path (Flow A) with no diagnostic — the AEN runbook's #1 trap.
+
+The device-profile names are now populated for the remaining 10 variants (E3 ×6,
+E5, E6, E7 ×2), sourced from the SEGGER J-Link DLL V9.46 device table via
+`JLINKARM_DEVICE_GetInfo` readback of the `AlifSemiconductor` block — canonical
+entry names, not order-code-alias probing. Two naming conventions exist: E3/E5/E7
+drop the package/grade suffix and use a bare `_HE` device name; E6/E8 carry the
+full order code plus `_M55_HE`. Three pairs of order codes legitimately resolve
+to one shared device-table entry (E3's `F5582AE`/`F5582LE`, E3's
+`F55D5AE`/`F55D5LE`, E7's `AS`/`LS`) — confirmed by index readback, not a
+metadata duplication bug. The two already-populated E8 values are unchanged.
+
+`e4.json`'s order code `AE402FA0E5597LE0` has no match in the DB under any
+spelling — the DB's only E4 entries are `LS0`/`BS0` (`LE0` is not `LS0`). Rather
+than leave the key absent (the exact silent-downgrade bug this fixes) or guess
+the nearest string (a wrong device profile fails a flash on real hardware), e4
+now publishes `debug.jlink_flash_device: null` — a declared known-unknown.
+`flow_d_available()` tests key *presence*, so a present-but-null value reaches
+`plan_alif_mram_jlink` and gets the same loud refusal every other malformed Flow
+D field already produces, instead of a silent Flow A fallback.
+
+`metadata/schemas/soc-spec-v1.schema.json` now admits `null` alongside the
+non-empty string on `jlink_flash_device`, with the meaning spelled out in its
+description: null is a declared unknown that must refuse rather than silently
+choose another transport; absence is not a permitted way to spell "unknown".
+`scripts/validate_metadata.py` gains
+`_check_soc_jlink_flash_device_declared`, which fails any Alif Ensemble variant
+missing the key outright (string or null both pass; only a missing key fails) —
+this is what stops the gap regressing, since no gate mentioned the field before.
+Verified by temporarily deleting the key from a real variant and re-running the
+script (`FAIL ... debug.jlink_flash_device is absent`), then restoring it.
+
+Populating `jlink_flash_device` for E3/E5/E6/E7 made
+`scripts/alp_orchestrate/loader.py::_enforce_slot0_disjoint_across_roles` (the
+#1384 both-roles slot0-collision guard) reachable outside E1M-AEN801 for the
+first time. That surfaced two things: a real false positive, fixed here — the
+guard compared a *parked* (`os: "off"`) sibling core's moot slot0 address
+against the live core's, refusing the working
+`examples/power-timing/power-managed-sensor` example; now scoped to
+`os == "zephyr"` on both roles, matching `_enforce_flow_d_preflight_pair`'s
+existing convention — and a real gap #1295 did not close: any AEN301/501/
+601/701 board.yaml that left its sibling core at the SoM's `alp-stock-shim`
+default (the common case) would have refused, because the #1295 slice alone
+left none of those four SoM presets declaring a disjoint `he_slot0`/`hp_slot0`
+`memory_map:` override the way `E1M-AEN801.yaml` does — a state that never
+reached `dev`, since the #1445 slice of the same commit closed it. (E1M-AEN401
+never hit this refusal: at the time, the loader only called `_resolve_slot0_load_address`
+when `debug.jlink_flash_device` was truthy, and the E4 variant's explicit
+`null` is not truthy, so the resolver never ran for it. #1444/#1446 later
+changed that gate to test key presence instead of truthiness.) This gap and
+its fix landed together, in the same commit (`bd8be484`, PR #1447) — see
+"### Fixed — E1M-AEN301/401/501/601/701 declare disjoint M55 slot0 windows
+(#1445)" below, after which all five presets (AEN301/401/501/601/701)
+declare `he_slot0` at `0x80010000` and `hp_slot0` at `0x802b0000`, 2688 KiB
+each. `docs/portability-matrix.md` briefly recorded the 12 swap-test cells
+as failing after that commit landed — the emitted `alp.conf` was never
+affected, and the four SKUs never actually refused on `dev`, since #1445's
+memory_map overrides landed in the same commit — until #1452's sweep
+restored its 18-of-21 count. None of `docs/portability.md`,
+`docs/v1.0-readiness.md`, `README.md`, or
+`docs/tutorials/04-cross-family-portability.md` ever recorded the 12
+failing cells.
+Populating a per-SoM memory map is
+a firmware-policy decision (slot sizing, per-core OTA support) that the
+#1295 slice did not make; the #1445 slice of the same commit made it.
+
+### Fixed — `executionPolicy.missingTool` stops pinning the outcome to PATH, and ADR-0020 says what "never PATH" means
+
+`metadata/schemas/build-plan-v1.schema.json:50` described `missingTool` as the
+outcome "when `command.tool` isn't found on the executor's PATH". Commit
+`f3b4f143` (#1291) looked at this exact string and left it, under *"Not changed,
+deliberately"*, on the reasoning that it "matches what tan actually does" while
+"**the ADR is the half that is wrong**; correcting it is `alplabai/tan-cli#510`,
+not this change".
+
+**That precondition has since been met.** `alplabai/tan-cli#510` is CLOSED,
+resolved by PR `alplabai/tan-cli#530` ("fix(build): resolve command.tool to an
+absolute path and spawn that"), merged into `tan-cli`'s `dev` on 2026-08-07 as
+`50788ecd`, milestone v0.6.0. Read on that branch: `tan/core/tool_lookup.py::
+resolve_tool` is the single hardened lookup, and `tan/commands/build/execute.py::
+_spawn_step` receives the resolved path — its docstring states "`program` is
+always the RESOLVED absolute path (tan-cli#510), never a bare identity". So the
+schema string, not the ADR, is now the stale half.
+
+The description is re-worded to **"Outcome when `command.tool` cannot be resolved
+to an executable by the executor"**, with the reason it is not phrased in PATH
+terms stated inline. This is deliberately mechanism-neutral rather than a flip
+from "PATH" to "explicit path": it is true of *both* executors, so it does not
+strand the currently released `tan` **v0.5.1** (2026-08-05), which predates #530
+and still spawns the bare identity. `command.tool`'s own description is untouched
+— #1291 already made it say the value is an identity, "never a location".
+
+`docs/adr/0020-sdk-owns-build-execution.md` gains an **Amendment (2026-08-12)**
+stating precisely what its *Consequences* → **Security** clause "resolves
+tools/interpreters by explicit path (never PATH)" protects: PATH remains the
+executor's *search* input for a bare identity (POSIX `os.get_exec_path` +
+`shutil.which`; Windows a hand-rolled `%PATH%` walk, deliberately not
+`shutil.which`), searched against the **slice's own assembled `env`**, not the
+executor process's; what is forbidden is handing the bare name to the platform's
+own resolver at spawn time, because `CreateProcess` with
+`lpApplicationName=NULL` searches the parent's current directory ahead of
+`%PATH%`. An absolute `command.tool` is answered by existence alone and spawned
+verbatim, with no PATH walk — which is why `missingTool` is a superset of "not
+found on PATH". The amendment is additive; the paragraphs it clarifies stay as
+the dated record, matching how the 2026-08-03 and 2026-07-20 amendments treat the
+body.
+
+Description text only — no `pattern`, no enum, no `schemaVersion` change, and no
+emitted plan differs by a byte. Closes #1314.
+
+### Fixed — the required twister lane could hang for six hours with no timeout at all
+
+`.github/workflows/pr-twister.yml` carried no `timeout-minutes` anywhere —
+`grep -c timeout-minutes .github/workflows/pr-twister.yml` returned `0`. Its
+`twister-shard` job had neither per-step caps nor a job-level ceiling, so
+GitHub's **360-minute** runner default applied silently, and it applied to the
+lane feeding `twister · native_sim/native/64` — one of only two required
+branch-protection contexts on `dev` (`clang-format · diff-only` is the other).
+The `apt-get`/PyPI/west-mirror stall #1274 diagnosed on
+`.github/workflows/pr-tier-a-libraries.yml` would have landed here as a
+six-hour hang on the one lane every PR must pass.
+
+`twister-shard` now mirrors the shape #1274 established: `Checkout alp-sdk` at
+`timeout-minutes: 2`, `Set up Python` at `2`, `Install host build tools (dtc,
+ninja, ccache, gperf, libffi)` at `8`, `Install west` at `2`, `west init zephyr
+workspace` at `25`, `Cache Zephyr modules` at `5`, `Cache ccache objects` at
+`2`, `pip install Zephyr requirements` at `3`, `pip install Alp SDK Python
+deps` at `2`, `twister · run shard ${{ matrix.shard }}/4 on
+native_sim/native/64` at `45`, `Install ARM Zephyr SDK toolchain (for --emit
+kconfig contract)` at `2`, `west sdk install (arm-zephyr-eabi only)` at `15`,
+and `Upload twister reports artefact` at `3` — summing to 116, plus a minute
+apiece for the five uncapped local-Python steps = 121, under a job ceiling of
+`timeout-minutes: 130`. The aggregator job `twister` gets `timeout-minutes: 5`
+so a stuck runner can no longer hold the required check open for 360 minutes
+either.
+
+Values come from each step's own worst SUCCESSFUL run across **32 sampled
+successful runs = 128 shard jobs**, not from guesses: `west init zephyr
+workspace` median 177s with 126 of 128 jobs under 330s but one real green run
+at **990s** (16m30s) on a slow-mirror day, so 25min = 1500s is 1.52x that
+outlier and 3.7x the next-worst (403s); the twister step clusters at 300-470s
+warm and 800-1210s cold, worst green **1210s** (20m10s, shard 3/4), so 45min =
+2700s = 2.23x; `Install host build tools` worst green 86s but keeps the
+precedent's 8min because the failure it guards against is precisely a mirror
+going slow; `Cache Zephyr modules` worst green 122s → 5min; `pip install Zephyr
+requirements` worst green 72s → 3min. Worst observed whole-job wall clock was
+1544s (25m44s, job `93911719274`). `west sdk install (arm-zephyr-eabi only)`
+has **no** measurement — the SDK cache hit on all 32 sampled runs, so it was
+skipped in every one; its 15 minutes is a deliberately generous ceiling chosen
+to make a stalled toolchain download legible, not a performance target. The
+same is true of the 130-minute job ceiling and the 5-minute aggregator ceiling:
+they are backstops that make a hang legible, sized above the per-step sums so a
+late step is still killed by its OWN timeout first and the failure names the
+actual stall.
+
+The #1274 regression test `tests/scripts/test_tier_a_workflow_step_timeouts.py`
+was hardcoded to `pr-tier-a-libraries.yml`; it is now parametrized over a
+`WORKFLOWS` tuple covering both files, with `ids=` naming the workflow in the
+failure line. A new `test_every_job_declares_a_timeout` catches #1319's actual
+defect — a job with no declaration at all — and the two step-level tests read
+the ceiling through a `_ceiling()` helper that substitutes the real 360-minute
+default rather than raising a bare `KeyError`. `scripts/twister` joins the
+`_NETWORK_OR_COMPILE_MARKERS` heuristic, which had waved through the very step
+that most needs a cap because `python3 zephyr/scripts/twister ...` invokes none
+of `pip install` / `apt-get` / `west ` / `cmake`; it is matched on the
+invocation path rather than the bare word `twister`, which false-positived on
+the aggregator's pure-shell `echo "twister-shard aggregate result: $result"`.
+Verified by restoring the pre-fix `pr-twister.yml` from `origin/dev` and
+re-running the shipped test: `2 failed, 4 passed` —
+`test_every_job_declares_a_timeout[pr-twister.yml]` and
+`test_network_and_compile_steps_carry_their_own_timeout[pr-twister.yml]`. With
+the fix applied, `6 passed`.
+
+`test_job_ceiling_exceeds_the_sum_of_its_step_timeouts[pr-twister.yml]` passes
+on the UNFIXED file, which is worth stating rather than hiding: with no step
+capped, `capped_total` is 0 and 18 uncapped steps sum to 18, comfortably under
+the 360-minute default. That test only becomes meaningful once the steps carry
+their own timeouts, so it is not evidence of the defect — the two above are.
+
+Because a PR touching only `.github/workflows/pr-twister.yml` triggers neither
+`pr-metadata-validate.yml` (which filters on `tests/scripts/**` and its own
+filename) nor `cross-platform-zephyr.yml`, the gate would not have run on the
+edits it guards. `pr-twister.yml` has no `paths:` filter at all, so the test is
+invoked from the workflow itself as shard-1 step `check · workflow step
+timeouts (#1274 / #1319)`, placed before the ~20-minute twister step so a bad
+timeout edit fails in seconds. That step's `name:` is **quoted** — in a plain
+YAML scalar a space followed by `#` opens a comment, and the unquoted form
+silently truncated the name to `check · workflow step timeouts (#1274 /`.
+
+### Fixed — `alp faultdecode` no longer reports the `HFSR.FORCED` escalation as the fault's root cause (#1358)
+
+`HFSR.FORCED` (bit 30) says only that a configurable fault (MemManage/
+BusFault/UsageFault) could not be taken by its own handler and was escalated
+to HardFault -- it answers *how* the CPU reached `HardFault_Handler`, never
+*what* broke; that answer is in CFSR. `BFSR.LSPERR` (bit 13) and
+`MMFSR.MLSPERR` (bit 5) -- lazy floating-point state-preservation faults --
+were the only two CFSR cause bits with no branch in `_root_cause`'s ladder, so
+they fell through every branch onto `FORCED`:
+
+```
+$ alp faultdecode --cfsr 0x2000 --hfsr 0x40000000
+Most likely cause:
+  Forced HardFault -- a configurable fault escalated but its own status bits
+  are clear; ...
+```
+
+-- the least actionable half of the registers, and with `LSPERR` set, false:
+the status bits are **not** clear. `--cfsr 0x20 --hfsr 0x40000000` (`MLSPERR`)
+was the same shape. Both bits now have real root-cause branches in
+`scripts/alp_cli/faultdecode.py`, carrying the `BFAR`/`MMFAR` address the
+generic `<NAME> set (<REG>)` fallback used to discard, placed LAST among the
+CFSR causes (below `VECTTBL` and `DEBUGEVT` too) so every existing precedence
+is untouched. `FORCED` is the headline only when CFSR names no cause at all --
+the new `_cfsr_names_a_cause()` guard is keyed on the flag's **register**, not
+a hand-kept name list, so a CFSR bit added tomorrow outranks `FORCED` the day
+it lands. An address-VALID bit (`BFARVALID`/`MMARVALID`) was never a cause
+either, and the generic fallback now skips those too. The escalation is not
+lost: it is still printed verbatim as its own `[HFSR] FORCED (bit 30)` entry
+under `Set flags:`, which is where a qualifier belongs.
+
+Also fixed in the same pass: `_HexInt.convert` (the `--cfsr`/`--hfsr`/`--dfsr`/
+`--bfar`/`--mmfar` param type) parsed a value with `int(text, 16)`, which
+happily accepts a leading `-`. Fault registers are unsigned, so a negative
+value like `--cfsr=-8200` was silently accepted, printed back as the
+malformed `CFSR=0x-0008200`, and confidently decoded into a bogus root cause
+instead of being refused. `_HexInt.convert` now rejects a negative value with
+a `BadParameter` naming the offending input, the same way it already rejects
+a non-hex one.
+
+### Fixed — a Zephyr slice's `artifacts` paths now carry the `build/` level `west build` actually writes
+
+A Zephyr slice's build plan named output paths west never creates. The slice's
+`command` is `west build -b <board> <app>` with `cwd` = the slice's `buildDir`
+and **no `-d`**, so west appends its own default `build` level and the tree
+lands at `<buildDir>/build/`. `buildplan.py::_slice_artifacts` reported
+`<buildDir>/zephyr/zephyr.elf` — one level short. For the AEN `m55_he` slice
+that meant the plan advertised `build/m55_he-zephyr/zephyr/zephyr.elf` while
+west writes the file to `build/m55_he-zephyr/build/zephyr/zephyr.elf`. The
+nesting is readable in the emit golden itself: that slice of
+`tests/fixtures/emit-snapshots/rpmsg-aen.build-plan.snap` carries `"cwd":
+"build/m55_he-zephyr"` and a `west build -b …` argv with no `-d`.
+
+**No live failure is claimed for this entry.** Nothing reads the plan's
+`artifacts` block today — tan parses it into the slice record
+(`python/tan/core/build_plan.py:224`) and never reads it again — so the wrong
+spelling was a defect in the published contract, not an observed crash. It
+mattered when this entry was written because the same un-nested spelling
+existed independently in a tan path that was live then: `tan renode` resolved
+its ELF from `system-manifest.yaml` via
+`core/renode_plan.py::zephyr_elf_from_manifest`, and a slice with no
+`output_artefact` fell back to `<build_dir>/zephyr/zephyr.elf` — calling that
+function directly with `build_dir: m55_he-zephyr` returned
+`build/m55_he-zephyr/zephyr/zephyr.elf`, the path west never writes. That
+second copy was never fixed; it was deleted. `tan renode` and
+`core/renode_plan.py` are gone with the Renode retirement (ADR 0022,
+Amendment 2), later in this same v0.16.0 cycle. This change removes the
+SDK-side spelling it agreed with, which stands on its own.
+
+All six Zephyr paths move: `elf`, `map`, `bin`, `sizeReport` (`zephyr.stat`)
+and `symbols` (`zephyr.symbols`) now sit under `<buildDir>/build/zephyr/`, and
+`compileCommands` at `<buildDir>/build/compile_commands.json` (Zephyr's
+top-level `CMakeLists.txt` forces `CMAKE_EXPORT_COMPILE_COMMANDS` to the build
+dir **root**, which is west's `build/`, not `buildDir`). `artifacts.outputDir`
+stays `null` for Zephyr, and the comment beside it — which claimed the named
+paths "already index" `<buildDir>/build/` while the six lines of code directly
+above it did not — is now true rather than aspirational.
+
+The alternative, adding `-d .` so west's tree lands at `buildDir` itself and
+the old spelling became correct, was **rejected**: the slice's `alp.conf` is
+materialised at `<buildDir>/alp.conf` and handed to that same command via
+`-DEXTRA_CONF_FILE=`, so making `buildDir` west's own build dir puts the
+fragment inside the tree `west build -p` (or a `--pristine=auto` board/app
+change) deletes — destroying the file the command line points at. It would also
+strand every existing `<buildDir>/build/` tree, `CMakeCache.txt` included, so
+the next build after the change would be a cold one. Emitting the true path
+changes no on-disk behaviour at all, only the description of it: across the six
+regenerated goldens the only changed lines are the 60 `artifacts` path strings
+— no `command`, `cwd`, `env` or `configArtefacts` line moves.
+`_slice_command`'s finding-M14 conclusion is unchanged — `-d <buildDir>` would
+still double-nest, because west resolves a relative `-d` against its own cwd —
+but the comment carrying it IS rewritten here, dropping its stale "the consumer
+(tan) reconciles that nested layout" sentence.
+
+**Cross-repo blocker — this cannot merge alone.** `scripts/alp_orchestrate/` is
+a hash-audited mirror in tan-cli (`PINNED_HASHES` /
+`test_planner_relocation_freshness.py`), so tan-cli must re-sync
+`python/tan/planner/buildplan.py` and `orchestrator.py`, re-pin `PINNED_HASHES`
+and `PINNED_SDK_COMMIT`, and move its frozen emit fixtures before or with this
+change (alplabai/tan-cli#560). tan's vendored copy of
+`tests/parity/seam1_field_diff.py` must take the new `_NESTED_ARTIFACT_TAILS`
+allowance in lockstep. tan's artefact RESOLUTION, by contrast, needs nothing —
+and breaks on nothing: read on a tan-cli checkout while writing this,
+`python/tan/commands/build/manifest.py:259`, `:276`, `:319` and `:368` derive
+west's tree from `slice_cwd / "build"` directly and never read the plan's
+`artifacts` block at all — so they are not compensation for this bug and do not
+become deletable because of it — and `python/tan/core/flash_plan.py::
+resolve_artefact_path`'s nested candidate (the `I-18` note) is `is_file()`-gated
+and probed last, and resolves `output_artefact` strings out of
+`system-manifest.yaml` rather than out of this block.
+
+On this side the frozen `97ad481b` seam-1 oracle is **not** rewritten; it is
+frozen by ADR 0020's Amendment. `tests/parity/seam1_field_diff.py` gains a
+third hand-reviewed allowance, keyed on the six exact field paths and on the
+exact one-segment `build/` insertion before each field's fixed Zephyr tail, so
+a path that gains two levels, moves elsewhere, or changes filename still fails.
+The six `*.build-plan.snap` emit goldens are regenerated (artifacts block
+only), and `metadata/schemas/build-plan-v1.schema.json`'s `artifacts`
+descriptions now tell a consumer to read these paths verbatim rather than
+re-derive them from `buildDir`.
+
+### Fixed — `cc3501e_reset()` now enforces the wire-protocol compatibility `cc3501e-bridge-firmware:DESIGN.md` always claimed (#1371)
+
+`cc3501e-bridge-firmware:DESIGN.md:74` documented "host↔firmware wire compatibility (host refuses a
+mismatch)" for `GET_VERSION` since the table was written. Nothing ever
+compared the reply against `ALP_CC3501E_PROTOCOL_VERSION`:
+`cc3501e_get_version()` (`chips/cc3501e/cc3501e_core.c`) round-tripped
+`GET_VERSION` and handed back whatever the firmware reported, unchecked, on
+every call site (`src/zephyr/console/alp_console_companion.c`'s `ver`/`bench`
+commands, and the three `examples/**` sites that call it). A CC3501E running
+firmware whose wire protocol had moved would be talked to with the wrong
+frame layout — misparsed replies on a Wi-Fi/BLE link, on silicon, with
+nothing pointing at the cause.
+
+The comparison now runs once, at the tail of `cc3501e_reset()`, after the TI
+SWRU626 cold-boot sequence and its Puya-flash hard-reset workaround complete.
+The CC3501E wire carries a single flat `uint16_t` (no major/minor/patch
+triple like the GD32 bridge's `gd32g553_init()` gate), so there is no
+gradation to be lenient about: any difference between the firmware's
+`GET_VERSION` reply and this host's `ALP_CC3501E_PROTOCOL_VERSION` is a
+refusal — `cc3501e_reset()` returns `ALP_ERR_VERSION`, clears `initialised`,
+and every later call on that context fails `ALP_ERR_NOT_READY` rather than
+speaking a frame layout the firmware never claimed. A `GET_VERSION` that does
+not complete at all (the common case immediately after this reset — the
+documented Puya cold-boot flash bug routinely needs a second, caller-driven
+`cc3501e_hard_reset()` before the slave answers anything) is not a version
+verdict and leaves the context usable for the caller's own retry.
+
+`cc3501e_get_version()` itself is deliberately left as a bare round-trip with
+no comparison of its own. Two things depend on that: the #1116 concurrency
+regression (`tests/zephyr/cc3501e_transport_lock`) drives it directly against
+a modelled slave that never claims to speak `ALP_CC3501E_PROTOCOL_VERSION`,
+and the cold-boot liveness soaks (`examples/aen/aen-cc3501e-bringup`'s soak
+loop, every 8th cycle; `examples/peripheral-io/alp-console`'s
+`cc3501e_bridge_bringup` retry) use it purely as "did the round trip
+complete" — putting the check there would have turned a liveness probe into
+a hard failure on real hardware. `examples/peripheral-io/alp-console/src/
+cc3501e_bridge.c` treats a transient `cc3501e_reset()` failure as non-fatal
+(a cold CC35 commonly mis-reads on first contact) and previously discarded
+its return value outright; it now special-cases `ALP_ERR_VERSION` — a
+version mismatch is permanent, not transient, so unlike a transport hiccup it
+is no longer swallowed into the retry soak.
+
+`cc3501e-bridge-firmware:DESIGN.md`'s wire-protocol-version row now names the
+enforcing function instead of describing behaviour that did not exist.
+`include/alp/chips/cc3501e.h` and `include/alp/chips/cc3501e/core.h` document
+the new contract on `cc3501e_reset()` and `cc3501e_get_version()`.
+
+New coverage in `tests/zephyr/cc3501e_host_driver`: a matching version leaves
+`cc3501e_reset()` succeeding, a differing version is refused with
+`ALP_ERR_VERSION` (and pins that `cc3501e_get_version()` does not keep
+working across the refusal), and a `GET_VERSION` transaction that fails
+outright during the probe is tolerated rather than treated as a mismatch.
+The #1116 suite was re-run and still passes unmodified — the risk this issue
+called out by name.
+
+### Fixed — every E1M-AEN board now defaults `LOG_MODE_MINIMAL`, so the bench's non-yielding `main()` stops producing a silent console on a healthy board (#1373)
+
+No AEN board tree ever set a `CONFIG_LOG_MODE_*` symbol — `grep -n CONFIG_LOG`
+over all four `_defconfig` and `Kconfig.defconfig` files returned nothing.
+`CONFIG_LOG_MODE_DEFERRED=y` was inherited from Zephyr's own `choice LOG_MODE`
+default in `subsys/logging/Kconfig.mode`, and deferred mode formats and writes
+from the log processing thread. With `CONFIG_LOG_PROCESS_THREAD_CUSTOM_PRIORITY`
+unset (the default), `subsys/logging/log_core.c` runs that thread at
+`K_LOWEST_APPLICATION_THREAD_PRIO` — strictly below `main`'s
+`CONFIG_MAIN_THREAD_PRIORITY=0` — and time-slicing only rotates among ready
+threads of *equal* priority. The AEN bench procedure requires a `main()` that
+never yields (`for (;;) { k_busy_wait(1000); }`, so an idling M55 does not make
+the Secure Enclave gate the DAP and the SE-UART), which starves that thread
+outright. `CONFIG_LOG_PRINTK` is `default y if PRINTK`, so the Alp SDK
+boot-identity banner from `src/zephyr/alp_banner.c` — a `printk()` — went into
+the same starved queue: the observable is *zero* UART bytes, not "banner, then
+silence", which is why it reads as a dead board rather than an application bug.
+
+Measured on E1M-AEN801 silicon and recorded twice on the issue: `PC` inside
+`z_impl_k_busy_wait`, `IPSR = 000` (`NoException`), `CFSR` at `0xE000ED28` =
+`00000000`, and zero bytes in a 15 s capture on `COM38` @115200 — with the
+identical source printing its banner and both `LOG_INF` lines once
+`CONFIG_LOG_MODE_MINIMAL=y` was added.
+
+All four AEN board trees now carry the board default, not just the one the
+issue named: `zephyr/boards/alp/e1m_aen401_m55_hp`, `e1m_aen601_m55_hp`,
+`e1m_aen801_m55_he` and `e1m_aen801_m55_hp`. The AEN801 pair is generated, so
+the block was added to `scripts/gen_zephyr_board.py::_aen_kconfig_defconfig()`
+and the two `Kconfig.defconfig` files regenerated byte-for-byte; the AEN401 and
+AEN601 trees are hand-authored (no "DO NOT EDIT BY HAND" banner) and were
+edited to a byte-identical copy. The V2N/V2M M33 board trees
+(`e1m_v2n101_m33_sm`, `e1m_v2m101_m33_sm`) are deliberately untouched: they
+have no `Kconfig.defconfig` at all, and the busy-loop requirement that creates
+this collision is the Alif Secure Enclave DAP/SE-UART gate, which is
+AEN-specific.
+
+**The default is expressed as a Kconfig choice default, not as
+`CONFIG_LOG_MODE_MINIMAL=y` in the board `_defconfig` that the issue's option
+(1) proposed.** Both reach `LOG_MODE_MINIMAL` when `CONFIG_LOG=y`, but the
+`_defconfig` form assigns the symbol unconditionally — including on the 47
+`CONFIG_LOG=n` fragments under `examples/aen/`, where the choice is invisible.
+Replaying both shapes through Zephyr v4.4.1's own
+`scripts/kconfig/kconfiglib.py` showed the `_defconfig` form tripping the check
+that `scripts/kconfig/kconfig.py::check_assigned_choice_values()` runs — "The
+choice symbol LOG_MODE_MINIMAL ... was selected (set =y), but no symbol ended
+up as the choice selection" — on every `CONFIG_LOG=n` build, while the
+`Kconfig.defconfig` form is inert there. Precedence is identical either way:
+`Kconfig.zephyr` sources the board's `Kconfig.defconfig` (line 30) ahead of
+`subsys/Kconfig` (line 52) precisely so board defaults outrank upstream ones,
+and an app that wants the deferred pipeline still overrides it with
+`CONFIG_LOG_MODE_DEFERRED=y` in its own `prj.conf`. That replay also confirmed
+the override direction still works under both shapes.
+
+Documentation, the half that makes the silence diagnosable: a new
+`docs/debugging-aen.md` §6 ("The console prints nothing, and the board is
+fine") states the §4-vs-logging interaction plainly, gives the one-attach
+`halt` / `Reg PC` / `Reg IPSR` / `mem32 0xE000ED28 1` triage that separates a
+log-starved board from a faulted one, and says what minimal mode costs (no
+timestamps, prefixes, colours, runtime filtering or log backends;
+`CONFIG_LOG_DEFAULT_LEVEL` build-time filtering still applies). §4's
+"flash a build that stays busy" step now points at it. `docs/troubleshooting.md`
+gains a symptom-keyed entry under "Hardware-related issues" for readers who
+arrive by symptom rather than by board.
+
+`tests/scripts/test_gen_zephyr_board.py` gains `TestAenLogModeDefault`, which
+pins the invariant across every `zephyr/boards/alp/e1m_aen*` directory on disk
+(the byte-equivalence class only covers the two generated trees, so it cannot
+see the hand-authored pair drift) and fails if any AEN `_defconfig` reintroduces
+the direct `CONFIG_LOG_MODE_MINIMAL=y` assignment.
+
+**A bench smoke-check is still wanted and has not been done.** The change is
+Kconfig-only and was verified statically — nothing here was built or flashed,
+and no board was touched this session. The confirming run is: build any AEN app
+with the recommended non-yielding busy-loop `main()`, flash it, and check the
+Alp SDK banner and its `LOG_INF` lines now appear on the console with no
+per-app `CONFIG_LOG_MODE_MINIMAL=y` in `prj.conf`.
+
+### Fixed — `pwm-led-fade` ships its missing M55-HE overlay twin, `drone-autopilot` gets the I2C/UART/PWM overlay it never had, and the overlay regression test can no longer pass on a wrong pad (#1383)
+
+An adversarial review of #1381 (merged as `ac920b33`, closing #1375) found three
+gaps the merged fix left open. None invalidates that fix — the LED fade is
+verified working on E1M-AEN801 silicon — but each is a real hole. Nothing in
+this entry has been run on silicon; the evidence below is source-level plus one
+host-side test file.
+
+**1. The shipped overlay covered only `rtss_hp`, but #1375's own bench repro
+was `rtss_he`.** Zephyr's automatic `boards/<target>.overlay` lookup keys off
+the FULLY-QUALIFIED board target, so
+`alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay` contributes nothing to
+an `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` build and #1375 still
+reproduced there. The pad route is a SoM-level fact, not a per-core one — both
+board `.dts` files `#include <alif/ensemble_e8_peripherals.dtsi>`, where
+`utimer10`/`pwm10` live — so added
+`examples/peripheral-io/pwm-led-fade/boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`,
+identical to the HP file below its header comment, matching the precedent
+`examples/peripheral-io/blink` already sets for its own HE/HP pair.
+
+**2. `examples/peripheral-io/drone-autopilot` had no `boards/` directory at
+all**, while its `board.yaml` declares `peripherals: [i2c, uart, pwm, gpio]`.
+Fixing only the PWM half would have moved the failure rather than removed it:
+`autopilot_init()` opens the sensor bus at `examples/peripheral-io/drone-autopilot/src/autopilot.c:105` and returns
+`-1` with `I2C0 open failed` / `autopilot_init failed -- staying in DISARMED`
+long before it reaches the ESC loop at `:143`, so `ESC%d open failed` never
+prints. The new
+`examples/peripheral-io/drone-autopilot/boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`
+therefore wires the whole reachable path, every route taken from
+`metadata/e1m_modules/aen/from-alif.tsv`:
+
+- `alp-i2c0 = &i2c2` — E1M edge I2C0 is Alif I2C2, `PIN_P5_6__I2C2_SCL_C` /
+  `PIN_P5_7__I2C2_SDA_C`, with the `input-enable` + `bias-pull-down` pad pair
+  copied verbatim from the bench-validated `examples/aen/aen-i2c2-eeprom-regcheck`
+  group (do not "correct" it to `bias-pull-up` — that gives a dead bus).
+- `alp-uart1 = &uart3` — E1M edge UART1 is Alif UART3, `PIN_P1_2__UART3_RX_A` /
+  `PIN_P1_3__UART3_TX_A`; on the EVK that is `EVK_UART_PORT_ARDUINO`, which is
+  free.
+- `alp-pwm0`..`alp-pwm3` — `UT11_T1_C` (P12_7) / `UT11_T0_C` (P12_6) /
+  `UT10_T1_A` (P2_5) / `UT10_T0_A` (P2_4) through `utimer11`/`utimer10`, each
+  aliased to a `pwm-leds` consumer child rather than the controller node.
+
+`alp-uart0` is deliberately NOT aliased: E1M edge UART0 is Alif UART5, which is
+this board target's `zephyr,console`/`zephyr,shell-uart` at 115200 — aliasing it
+would make `examples/peripheral-io/drone-autopilot/src/autopilot.c:128`'s GNSS open succeed and then reconfigure the live
+console to 9600 8N1, destroying the log output the example is diagnosed by. The
+source already tolerates its absence, and `examples/peripheral-io/drone-autopilot/src/mavlink.c:344` documents why
+("no free third port in v0.5"), so the GNSS and MAVLink telemetry paths stay
+disabled pending a carrier with a third UART. No `alp,pin-array` either: no
+file under `src/` contains the string `gpio`, so the declared `gpio` peripheral
+backs nothing today.
+
+This closes the devicetree-alias gap only. `autopilot_init()` still returns
+`-2`/`-3`/`-4` unless an LSM6DSO, a BMP390 and an INA236 answer on the bus, and
+neither example's `testcase.yaml` lists an `alp_e1m_aen801_*` platform, so
+twister does not compile either overlay — the routes are verified against
+metadata and the generated board files, not against a build.
+
+**3. `tests/scripts/test_pwm_led_fade_aen_overlay.py:136` could not catch a
+wrong pad.** Its pinmux assertion was a whole-file
+`assertIn("PIN_P2_4__UT10_T0_A", text)`, satisfied by the literal already
+sitting in the overlay's own header comment — the issue measured three mutations
+(wrong pad, wrong `pwms` driver channel, `pinctrl-0`/`pinctrl-names` deleted)
+that each left the suite at 4 passed. The test now derives the expected pad and
+channel index from `metadata/e1m_modules/aen/from-alif.tsv`, anchors the pinmux
+check to the `pinctrl_pwm10`/`group0` node body instead of the whole file,
+cross-checks the `pwms` channel cell, requires the `pinctrl-0 = <&pinctrl_pwm10>`
+/ `pinctrl-names = "default"` wiring on the `pwm10` node, and adds a fifth case
+asserting the HE twin exists and matches HP below its header comment. All four
+mutations now fail: the wrong-pad one reports `pinctrl_pwm10/group0's pinmux
+must mux exactly ['PIN_P2_4__UT10_T0_A'] ... got ['PIN_P12_7__UT11_T0_A']`.
+
+### Fixed — CC3501E `WIFI_AP_START` no longer reads a dead bus phase as a started AP (#1385)
+
+#1378 established the property that `ALP_OK` must require positive evidence
+the device framed a reply, not merely the absence of evidence that it did
+not: a reply header phase that clocks intact followed by a payload phase that
+dies in the inter-phase settle gap reads back all-zero, and
+`ALP_CC3501E_RESP_OK` is `0x00`. #1382 closed that for exactly one opcode
+(`WIFI_CONNECT_STA`, 0x12). This extends the same per-opcode check in
+`cc3501e_request_locked()` (`chips/cc3501e/cc3501e_core.c`) to
+`WIFI_AP_START` (0x14), which the firmware provably cannot answer with a
+synchronous bare `RESP_OK`: `handle_worker_routed_payload()`
+(`cc3501e-bridge-firmware:src/protocol.c`) acks every fresh submit
+`RESP_ERR_BUSY`, and `worker_run_pending()`
+(`cc3501e-bridge-firmware:src/worker.c`) calls `worker_reset()` for exactly
+`WIFI_CONNECT_STA` and `WIFI_AP_START` **before** `cc3501e_bridge_ready()`
+re-arms the link — so the `WORKER_DONE` branch that would reply `RESP_OK` is
+wiped while the host is still held off and can never be collected. A bare
+`RESP_OK` for this opcode is therefore self-evidently the dead-phase alias
+and is now rejected as `ALP_ERR_IO`.
+
+Unlike `WIFI_CONNECT_STA` this is not defense in depth: that alias was
+`cc3501e_wifi_ap_start()`'s **only** route to `ALP_OK`, so the helper now
+always returns `ALP_ERR_TIMEOUT` — including for an AP that came up fine.
+That is the honest report and is documented as a `@warning` on
+`<alp/chips/cc3501e/wifi.h>`; the console's `wifi ap` now prints
+"unconfirmed", not "up" or a flat "failed". `cc3501e_wifi_ap_start()` submits
+`WIFI_AP_START` exactly **once** and reports `ALP_ERR_TIMEOUT` immediately
+instead of polling, because no reply this opcode can ever produce decodes as
+`ALP_OK`. `ALP_ERR_TIMEOUT` here is documented as fully inconclusive, not
+"submitted, unconfirmed": besides the expected `RESP_ERR_BUSY` submit ack and
+the rejected dead-phase alias, it also covers a `RESP_ERR_BUSY` bounce off a
+different in-flight worker op, a transport IO fault during the radio-down
+window, and a request-lock timeout under a concurrent caller — cases where
+nothing reached the wire at all, indistinguishable from here
+(`include/alp/chips/cc3501e/wifi.h`). This also removes the retry storm the
+old poll shared with #1376's pre-fix `WIFI_CONNECT_STA`: every re-issue that
+landed on the freshly-reset `IDLE` slot submitted a brand new `Wlan_RoleUp`
+on live radio hardware. Restoring a real success path needs the
+submit-once-then-confirm restructure `cc3501e_wifi_connect()` got, which
+protocol v4 cannot support: the TI HAL's `cc3501e_hw_wifi_ap_start()` never
+writes the `g_wifi_conn` latch that `WIFI_STATUS` reads, so there is no
+independent AP channel to confirm against. Giving it one is a firmware +
+protocol change and stays open on #1385.
+
+`OTA_PROMOTE` (0x46) is deliberately **not** added to the check, despite
+being the sharpest case #1378 named: `handle_ota_promote()` returns
+`hw_to_resp(cc3501e_hw_ota_promote())`, and the TI HAL's
+`cc3501e_hw_ota_promote()` arms the deferred swap-reboot then returns
+`CC3501E_HW_OK` unconditionally — a bare `RESP_OK` is that opcode's *only*
+success reply, so rejecting it would make `cc3501e_ota_promote()` always
+return `ALP_ERR_IO` and break firmware promotion outright. Closing the alias
+there needs a wire-level CRC/canary (a protocol version bump) or host-side
+confirmation against `OTA_STATUS` (0x44); neither is a transport-layer
+change. A regression fence
+(`test_ota_promote_bare_ok_still_accepted_1385`) fails the moment someone
+adds that opcode to the list.
+
+The host-driver test's mock slave also stopped modelling `WIFI_AP_START` as
+an argless bare-`RESP_OK` op — a byte pattern the real firmware can never
+produce for it, i.e. the mock had been modelling the dead-phase alias itself
+as success.
+
+### Fixed — `alp companion wifi status` no longer prints the unpopulated WIFI_STATUS latch byte as an RSSI measurement (#1387)
+
+`alp companion wifi status` printed `rssi:  0 dBm` on a live -49 dBm link.
+That 0 was not a stale or a failed read: `alp_cc3501e_wifi_status_t::rssi_dbm`
+is served from a firmware latch that is NEVER populated -- every terminal
+outcome in `cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti_wifi.c` publishes it through
+`wifi_conn_set()`, the single terminal-transition chokepoint, which always
+sets the latch's rssi field to 0, because that connect path may not issue
+`Wlan_Get(WLAN_GET_RSSI)` (the hazard note at `cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti_wifi.c:675-677` --
+the read blocks this NWP and hangs the worker). 0 dBm is a legal `int8` RSSI
+near the top of the range, so nothing downstream could reject it and no
+in-band sentinel existed for the host to test.
+
+`wifi status` now takes the RSSI from the only real source, `WIFI_GET_RSSI`
+-- the same worker-routed radio read the connect result already uses
+successfully (#1382) -- and prints `rssi:  unavailable (%d)` when that read
+fails, rather than a number it cannot vouch for. `state` is unchanged; `ip`
+now also prints `ip:    unavailable (%d)` when the WIFI_GET_IP lease query
+fails, instead of silently omitting the line as before this fix. The
+`protocol.h` / `wifi.h` field comments and the firmware source now say
+plainly that the latch byte is not a measurement.
+
+**Cost, not previously stated anywhere:** `wifi status` on a connected link is
+no longer a cheap read. `WIFI_GET_RSSI` is worker-routed
+(`cc3501e-bridge-firmware:src/protocol.c:310` dispatches to `handle_wifi_get_rssi` in
+`protocol_wifi.c`, which calls `handle_worker_routed`), so it
+always costs at least a submit -> `RESP_ERR_BUSY` -> poll round trip, and the
+host driver's own comment (`chips/cc3501e/cc3501e_wifi.c:386-395`) notes that
+`Wlan_Get(WLAN_GET_RSSI)` lazy-starts the radio on first use, "which can take
+seconds". `cc3501e_wifi_rssi()` floors its `poll_by_repeat` budget to
+`CC3501E_WIFI_DOWN_WINDOW_MS` (10 s), the same window `wifi status`'s existing
+`WIFI_STATUS` read already uses, so on a wedged transport an interactive
+`wifi status` call -- run on the shell thread -- goes from a ~10.1 s worst
+case to a ~20.1 s one. The new call is gated on
+`st.state == ALP_CC3501E_WIFI_CONNECTED`, so no additional worker-routed
+radio read is issued while a `wifi connect` is in flight; the added cost is
+confined to the connected case, where the command's own help text now flags
+it. (This does not touch #1377's remaining exposure: `wifi status`'s own
+`cc3501e_wifi_status()` call can itself poll-by-repeat up to
+`CC3501E_WIFI_DOWN_WINDOW_MS` when it lands in the transport's down-window
+during an in-flight connect -- that cost predates this branch and is out of
+scope here.)
+
+New suite `tests/zephyr/cc3501e_console_wifi` drives the real console
+translation unit and the real host driver against a slave model reproducing
+the asymmetry the bench saw (latch rssi 0, `WIFI_GET_RSSI` -49), plus the
+review follow-ups (a `get_rssi_count`-backed guard and the WIFI_GET_IP failure
+case). It fails 3 of its 5 cases against the pre-fix console.
+
+### Fixed — 20 examples could not be built out of tree: their `CMakeLists.txt` reached `scripts/alp_project.py` through a bare relative hop (#1390)
+
+`examples/peripheral-io/drone-autopilot/CMakeLists.txt` invoked the loader as
+`${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py`. `../../..` is
+the SDK root only while the example sits at `<sdk>/examples/<category>/<name>/`.
+Scaffolded out of tree — which is exactly what `tan init --from-example`
+produces, and what a customer ends up with — three levels up is somewhere else
+entirely: for a project at `C:\alp\proj-drone\aen-drone` the command became
+`C:\scripts\alp_project.py` and configure died with `python.exe: can't open
+file 'C:\scripts\alp_project.py': [Errno 2] No such file or directory`,
+`CMake Error at CMakeLists.txt:18 (message): alp_project.py failed (rc=2)`,
+`failed: m55_hp [zephyr]`. Because the hop was unconditional, setting
+`ALP_SDK_ROOT` was not a workaround. Not Windows-specific and not
+AEN-specific: any host, any board target.
+
+Fixed by adopting the shape
+`examples/peripheral-io/pwm-led-fade/CMakeLists.txt` has had all along —
+prefer `$ENV{ALP_SDK_ROOT}`, falling back to
+`get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../..
+ABSOLUTE)` only for the in-tree case — copied rather than reinvented. In tree
+the resolved root is byte-identical to the old hop, so in-tree builds are
+unchanged.
+
+`drone-autopilot` was not alone: the same block had been copy-pasted into
+**20** examples across `examples/ai/` (7), `examples/audio/` (5),
+`examples/display/` (4), `examples/camera-vision/` (2),
+`examples/connectivity/iot-dashboard`, and
+`examples/peripheral-io/drone-autopilot`. All 20 are fixed; every one of the
+102 `alp_project.py` invocations under `examples/` now resolves through
+`${ALP_SDK_ROOT}`.
+
+Also fixed the failure message that hid its own cause. The `execute_process`
+captured only `RESULT_VARIABLE`, so the operator saw `alp_project.py failed
+(rc=2)` and had to dig through the raw build log for the real Python error.
+It now captures `OUTPUT_VARIABLE`/`ERROR_VARIABLE` and prints `stderr:` in the
+`FATAL_ERROR`, as `pwm-led-fade` already did.
+
+New gate `scripts/check_example_sdk_root.py` (registry id `example-sdk-root`,
+wired as a `pr-metadata-validate.yml` step) fails any
+`examples/**/CMakeLists.txt` whose `scripts/alp_project.py` token is not
+prefixed `${ALP_SDK_ROOT}/`, so the pattern cannot spread by copy-paste again.
+It constrains only that token: the `..` inside the `get_filename_component()`
+fallback is the point of the fallback, and a `--input
+${CMAKE_CURRENT_SOURCE_DIR}/../board.yaml` elsewhere on the command — the
+multicore per-core slices use exactly that — stays legal. The fallback's depth
+is deliberately unchecked, since it varies correctly with nesting (`../../..`
+for `examples/<cat>/<name>/`, `../../../..` for a per-core subdirectory).
+Covered by `tests/scripts/test_check_example_sdk_root.py`.
+
+**One of the 20, `examples/ai/cold-chain-monitor`, is also the `edge-ai`
+scaffold template's source**, so `--emit scaffold` changed with it — and
+that exposed a defect `scripts/alp_template.py::_scaffold_cmakelists` already
+had. A scaffold is unpacked OUTSIDE the SDK tree, where the in-tree `../../..`
+fallback is meaningless, so the transform rewrites the guess block into one
+that hard-fails unless `ALP_SDK_ROOT` (env or `-D`) is set. It rewrote only
+the code, never the comment above it — leaving emitted scaffolds that
+promised a fallback the emitted file did not have: `minimal` shipped "In-tree
+the SDK is the example's grandparent directory; out-of-tree customers point
+ALP_SDK_ROOT at their checkout" and `peripheral` shipped "in-tree we resolve
+it as the example's grandparent directory", both sitting directly above the
+`FATAL_ERROR`. The transform now rewrites the comment paragraph with the code
+it describes, scoped to the run immediately above the block and only to
+paragraphs naming `ALP_SDK_ROOT` or the grandparent fallback —
+`gpio-button-led`'s "board.yaml -> build/generated/alp.conf at configure
+time." banner survives verbatim, and an example with no such comment
+(`i2c-master`,
+`mproc-mailbox`) gains no invented prose. Regenerating
+`tests/fixtures/emit-snapshots/` moved exactly three goldens
+(`scaffold.edge-ai-v2n101` — this branch's own `CMakeLists.txt` change plus
+the comment; `scaffold.minimal-v2n101` and `scaffold.peripheral-v2n101` —
+comment only); the other 33 `--emit` surfaces are byte-identical.
+
+**Follow-up — this commit is a re-vendor trigger for `tan-cli` (not done
+here).** `tan-cli`'s `python/tan/templates/vendored/<template>/<sku>/` tree is
+a byte-for-byte capture of this same `--emit scaffold` output, pinned at
+`v0.15.0-rc1` (`996937ac`) per its `MANIFEST.md`, and
+`tan-cli/tests/parity/scaffold_byte_parity.py` re-runs the live emit against
+the pinned SDK and fails on drift. Emitting every vendored (template, sku)
+pair before and after this change shows **4 of the 9** now drift:
+`edge-ai/E1M-AEN801`, `edge-ai/E1M-V2N101` (the `CMakeLists.txt` change and
+the comment) and `minimal/E1M-AEN801`, `minimal/E1M-V2N101` (comment only);
+`diagnostics`, `iot` and `sensor` are unaffected. Re-vendoring is a
+`tan-cli`-side change: bump `.github/workflows/parity.yml`'s `PINNED_SDK_TAG`
+past this commit and re-run the emit, which drives all four parity gates as
+one atomic unit — it is not four independent bumps.
+
+### Fixed — `west patch apply` exits 0 without applying anything, and `bootstrap.sh` never applied `zephyr/patches.yml` at all (#1392)
+
+`west patch apply` has three paths that do nothing and return 0. All three are
+in Zephyr v4.4.1's `zephyr/scripts/west_commands/patch.py`: `load_yml()` prints
+`no patches to apply: <path> not found` and returns `None` when the YAML is not
+where it looked (`--patch-base`/`--patch-yml` resolve against the manifest repo,
+not the caller's cwd); `apply()` returns early on an empty `patches:` list; and
+`apply()` skips an individual patch whose `module:` resolves to nothing, with
+`if mod is None: continue` and no message. A clean run of it is therefore not
+evidence that a workspace carries the patches.
+
+Every layer below it also succeeded — `bootstrap.sh`, the build, the flash — so
+the first symptom was a board that did not boot the application, which reads as
+a hardware fault. `zephyr/patches/mcuboot/0001-flash_map_extended-alif-mram-base.patch`
+is the load-bearing one: without it `flash_device_base()` has no
+`alif_mram_flash_controller` handling, so MCUboot computes the chainload vector
+table as `0x0 + 0x10000 + 0x800`, an address in unused ITCM, and cannot
+chainload from MRAM.
+
+**`scripts/verify_west_patches.py`** reads the tree instead of trusting an exit
+code: per patch, `git apply --reverse --check` in the module's own checkout,
+which succeeds iff the patch content is present, so there is no marker symbol to
+keep in sync — the patch file is the specification. A patch that applies in
+neither direction is reported `DRIFTED` rather than `ABSENT`; both refuse. Run
+against a real workspace it found two of six patches unapplied:
+
+```
+  DRIFTED     hal_alif/0001-se-service-add-boot-cpu.patch
+              <topdir>/modules/hal/alif -- applies neither forward nor in reverse.
+  ABSENT      zephyr/0003-kconfig-serialize-missing-deps.patch
+              <topdir>/zephyr -- the patch applies cleanly, so its content is simply not there.
+  APPLIED     mcuboot/0001-flash_map_extended-alif-mram-base.patch
+  APPLIED     zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch
+  APPLIED     zephyr/0002-ipm-add-poll-out-poll-in.patch
+  APPLIED     hal_alif/0002-se-service-add-public-send-request.patch
+```
+
+Module names resolve the way `west patch` itself resolves them — through the
+module's own `zephyr/module.yml` `name:`, falling back to the directory
+basename — not through the west project name. The two differ here:
+`zephyr/patches.yml` says `module: alif` while the west project is `hal_alif`.
+
+**`scripts/bootstrap.sh` and `scripts/bootstrap.ps1` now run `west patch apply`
+and then verify it**, after their pip sections rather than inside the west
+one — `west patch` imports `pykwalify.core` at module import time and pykwalify
+arrives with the Zephyr requirements. Instead of leaving it as a manual step
+documented only in
+`docs/aen-bench-bringup.md` and replicated by `pr-twister-aen.yml` in its own
+stanza. `--no-patches` (`-NoPatches` on the PowerShell side) opts out. Exit 3 —
+every patch that could be checked is applied, but a module is not in this
+workspace — warns rather than dying, since bootstrap also serves narrower
+workspaces; `pr-twister-aen.yml` treats any non-zero as a failure, because it
+compiles those modules.
+
+A module's patches are checked as a STACK, not one at a time. Per-patch
+`git apply --reverse --check` is unsound when two patches touch the same file,
+and two here do — `hal_alif/0001-se-service-add-boot-cpu.patch` and
+`hal_alif/0002-se-service-add-public-send-request.patch` both write
+`se_services/zephyr/include/se_service.h` and
+`se_services/zephyr/src/se_service.c`. Measured on a pristine `hal_alif` at
+`v2.3.0` with both patches forward-applied, rc=0 each:
+
+```
+git apply -R --check 0001.patch             -> rc=1   (false DRIFTED)
+git apply -R --check 0002.patch 0001.patch  -> rc=1   (--check stages nothing)
+```
+
+The stack is instead reversed sequentially, with real writes, into a throwaway
+copy of only the files the patches touch — never the workspace. Reversal
+continues past a patch that is missing, so one absent patch does not condemn
+the rest of its module.
+
+Both scripts **verify first, then apply per module** — only the modules the
+verifier names. `west patch apply`
+is not idempotent — re-running it on an already-patched tree fails, because
+each patch is fed to `git apply` against content that already carries it:
+
+```
+$ git apply 0001-clock_control_alif-...patch   # pristine v4.4.1
+rc=0
+$ git apply 0001-clock_control_alif-...patch   # again
+error: patch failed: drivers/clock_control/clock_control_alif.c:124
+error: drivers/clock_control/clock_control_alif.c: patch does not apply
+rc=1
+```
+
+A workspace can be PARTIALLY patched, which is why the apply is per module
+rather than all-or-nothing: `pr-getting-started-aen801.yml` caches `zephyr` and
+`modules`, but **not** `bootloader/mcuboot`, so `zephyr/` is restored already
+patched while `mcuboot` arrives fresh from `west update`. A bare
+`west patch apply` then re-applies zephyr's patches and dies on the first one.
+`verify_west_patches.py --list-unapplied` names the modules that still need
+work, and each gets its own `west patch apply --dst-module`.
+
+That reached CI through `pr-getting-started-aen801.yml`'s
+`actions/cache@v5` key `getting-started-aen801-zephyr-v4.4.1-${runner.os}`,
+which carries no commit component and so restored a `zephyr/`+`modules/` tree
+an earlier run had already patched. `bootstrap.sh`'s own `REUSE_WS=1` path
+reaches the same state for a developer re-running it. All three patches DO
+apply to a pristine v4.4.1 (`git apply --check` rc=0 each).
+
+The verifier takes `--west`: `bootstrap.sh` installs west into the workspace
+venv and calls it by absolute path, so a bare `west` on `PATH` is not there in
+CI. Left as the bare default it raised
+`FileNotFoundError: [Errno 2] No such file or directory: 'west'` out of every
+job that runs bootstrap, and bootstrap reported that as
+`zephyr/patches.yml is not applied` — a verdict the run never reached. That is
+now a refusal (exit 2) naming the executable.
+
+Deliberately **not** a `scripts/check_*.py` gate. Those run in
+`pr-metadata-validate.yml` against a bare clone with no west workspace, so the
+only thing such a gate could do is skip — the same shape as the bug it would be
+claiming to close.
+
+### Fixed — a shared `doc:` no longer silently loses a pin's documentation during a template re-derive
+
+`_derive_pin_doc_renames` in `scripts/alp_template.py` built its
+`{old_doc: new_doc | None}` rename map with **no collision guard**, unlike
+both of its siblings: `_derive_pin_renames` raises `TemplateError`
+(`pad ... re-derives to two different targets ... -- ambiguous`) when two
+`pins:` entries name the same source pad and resolve to different target
+pads, and `_derive_pin_macro_renames` does the same for `macro:`. The `doc:`
+companion had **two** unguarded assignment sites — `renames[old_doc] =
+new_doc` and `renames[old_doc] = None` — and per its own docstring `None`
+means DROP the field entirely.
+
+Two `pins:` entries legitimately sharing one `doc:` string — one sentence
+describing a debounce network, a bus, or a connector common to both pads —
+key a single entry in the flat map `_substitute_board_yaml_pin_docs` applies
+file-wide, so the last write won and the winner was decided by `pins:`
+ordering in the source file. Worst case, the entry with a target `doc:` was
+visited first and the one without second: the map ended up `None` and the
+documentation was dropped from **both** pins, including the one whose
+re-derived `doc:` was perfectly good. Reverse the ordering and it survived.
+No diagnostic either way — a silent wrong answer, not a crash.
+
+Both sites now share one guard, with `None` participating on both sides:
+"rename it" and "drop it" are contradictory instructions for one key, and so
+are "keep it" (a target `doc:` byte-identical to the source, which
+deliberately contributes no map entry) and "drop it". That last pair needs a
+separate `resolved` map recording *every* entry's resolution, not only the
+ones that produce a rename. A target `doc:` identical to the entry's own
+still yields no map entry — it is not folded into the `None` DROP value,
+which would delete a `doc:` that was already correct. All 14 real
+`(template, sku)` combinations in `metadata/templates/catalog-v1.json` still
+render unchanged.
+
+This unblocks **tan-cli#494 defect 9**, which cannot be fixed downstream
+first: `tan/planner/template.py` is a hash-audited mirror of this file
+(tan-cli's `test_planner_relocation_freshness.py` pins a sha256 per upstream
+module), so guarding on the tan side alone would turn that gate red. tan
+re-syncs and re-pins after this lands.
+
+### Added — `changelog.d/` fragments replace the single `CHANGELOG.md` insertion point every open PR conflicted on (#1395)
+
+`CHANGELOG.md` had exactly one insertion point — the top of this
+`## [Unreleased] - vX candidate` section — so any two PRs touching it
+conflicted on it by construction, and the conflict re-fired on every merge.
+Measured 2026-08-12: three of four PRs blocked at the time were blocked by
+`CHANGELOG.md` alone, with no other conflicted file, and they conflicted with
+*each other* too, forcing a strictly serial, fully-gated land order.
+
+New entries now go in `changelog.d/<issue>.md` — see `changelog.d/README.md`
+for the contract. Each fragment is a complete, self-contained block: its own
+`### <Category> — <Title>` heading plus prose, copied byte-for-byte at
+release time — unlike `alplabai/tan-cli`'s fix for the same problem
+(tan-cli#676), alp-sdk keeps no fixed category enum to bucket into, since
+every entry already carries its own heading.
+
+`scripts/assemble_changelog.py` folds every fragment into this section (in
+deterministic filename/issue order) and deletes the fragments; `--check`,
+`--dry-run`, and `--require-empty` mirror tan's flags. A new
+`scripts/check_changelog_fragments.py` gate rejects a malformed fragment
+(missing heading, empty body, wrong filename) at PR time instead of at the
+release cut. `scripts/bump_version.py`'s `slice_changelog()` now refuses to
+run while `changelog.d/` still holds fragments, so a skipped assemble step
+fails loudly rather than silently dropping a cycle's entries from the
+release.
+
+The 47 entries already merged under this section before this system landed
+are not migrated — they conflict with nothing and stay exactly where they
+are. `changelog.d/` applies to new entries only.
+
+### Fixed — `scripts/test-all.sh` no longer reports a host-side missing prerequisite as a FAIL, and no longer reports a partial run as a complete PASS (#1396)
+
+Filed today from a Windows/WSL host with a three-run proof: on a system
+`python3` lacking `natsort`/`pytest`/`pytest-mock`, `twister`,
+`required-gate-scripts` and `pytest-scripts` all reported `FAIL exit=1` on a
+clean tree — nothing wrong with the tree, only with which interpreter
+`python3` resolved to. `stage_twister` (`scripts/test-all.sh:234`) and
+`stage_pytest_scripts` (`:488`) both invoked a bare `python3` without
+checking it could import what the stage actually needs. Both now probe with
+`python3 -c 'import natsort'` / `import pytest, pytest_mock'` before doing
+real work and `return 99` on failure — the same "prerequisite unavailable"
+convention `stage_twister`'s own `ZEPHYR_BASE` check already used, printing
+`SKIP prerequisite unavailable` instead of a false FAIL.
+
+That covers the FAIL direction the issue measured. **A second, worse
+direction was not covered by the issue's own framing**: with `ZEPHYR_BASE`
+unset, the run printed `twister ... SKIP ZEPHYR_BASE not set (run
+scripts/bootstrap.sh first)`, nothing failed, and the run still ended `All
+runnable stages passed. Real-hardware coverage is parked` at **exit 0** — the
+one stage that actually builds and runs code never ran, and the summary read
+as a complete gate anyway. `skip_stage()` now takes a third `scope|gap`
+argument (loudly rejecting a missing/invalid one), and every one of its
+existing call sites was audited and tagged: `--quick` / `--target dev`
+skipping twister/doxygen/the release-only CMake builds is `scope` — a
+deliberate, in-scope choice for the profile requested, and stays quiet. A
+tool/env-var/module genuinely missing (`ZEPHYR_BASE` unset, `clang-format`/
+`shellcheck`/`podman`/`docker` not installed, or a stage function's own
+`return 99`) is `gap`, tagged `[GAP]` in the summary. The summary now exits
+**2** — not 0, and not 1 — when one or more `gap` skips occurred with zero
+failures, and only prints `All runnable stages passed` when that count is
+zero, so neither a human reading the summary nor a script checking `$?` can
+mistake a partial run for a complete one.
+
+### Fixed — every CI network fetch now retries, and `wget` no longer hides why one failed (#1410)
+
+On 2026-08-12 four jobs failed inside about four hours with no code defect
+between them, each on an unretried dependency fetch:
+
+```
+pr-alp-build.yml         Install yq (mikefarah)     wget    exit 8  (server error)
+pr-alp-build.yml         Install yq (mikefarah)     wget    exit 4  (network)
+pr-tier-a-libraries.yml  Install host build tools   apt-get 1537 s stall
+pr-twister-aen.yml       Install Zephyr SDK         curl    (22) 503
+```
+
+The same step failing with two DIFFERENT `wget` exit codes on one day rules out
+an upstream incident and rules in ordinary internet weather meeting a fetch that
+gives up on first contact. The cost is not the lost minute: a red on the board
+stops meaning "this PR is broken", and the next real regression arrives wearing
+the same colour. Five PRs (#1401, #1402, #1406, #1407, #1408) carried a red they
+did not cause.
+
+- Every network fetch retries (`--tries`/`--retry`/`--waitretry`,
+  `Acquire::Retries` for `apt-get`), and `wget -q` is gone so the log says why a
+  download failed instead of reporting a bare exit code.
+- `pr-alp-build.yml`'s yq dependency is **removed**, not retried. The step
+  fetched a binary from GitHub releases and ran it under `sudo` to evaluate one
+  expression — `.slices | length // 0` — that the pyyaml already installed in
+  the job does natively. All five `// 0` cases (populated, `[]`, null, missing
+  key, empty document) were checked against the replacement before the swap.
+- `tests/scripts/test_workflow_fetch_retries.py` pins the rule and the four
+  named regressions, and asserts the yq fetch is **gone** rather than merely
+  retried, so it cannot be reintroduced "with a retry this time".
+
+### Fixed — an omitted `boot.swap_algorithm:` no longer builds swap-using-scratch against E1M-AEN801's single-slot DT (#1413)
+
+`scripts/alp_orchestrate/secure.py`'s `emit_sysbuild_conf` defaulted
+`swap_algorithm` to `"scratch"` unconditionally whenever a `boot:` block was
+present but didn't set it, emitting `SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH=y`
+into the generated `build/alp_sysbuild.conf`. `zephyr/sysbuild/aen/
+sysbuild.conf` documents that this generated overlay is applied AFTER the
+curated `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y` base, so it silently overrode
+single-app on E1M-AEN801 -- whose disjoint-slot0 `memory_map:`
+(`metadata/e1m_modules/E1M-AEN801.yaml`, #1069: both M55 cores share the
+same physical App MRAM) has no `slot1_partition` / `scratch_partition` for
+MCUboot to swap into. Confirmed against the generated board DTS
+(`zephyr/boards/alp/e1m_aen801_m55_{he,hp}/*.dts`): `slot0_partition`,
+`reserved_partition` (ex-scratch), `storage_partition`, `atoc_partition` --
+no slot1, no scratch.
+
+Both halves of the issue's proposed fix landed together, not one alone:
+
+- **The default is now target-aware.** `swap_algorithm:` omitted on a target
+  whose `memory_map:` declares a disjoint per-core `<role>_slot0` region
+  (only E1M-AEN801 today) now resolves to `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`,
+  matching the curated base it used to silently override. Every other
+  target -- no `memory_map:` override at all, or one declared for an
+  unrelated reason that doesn't declare a `<role>_slot0` region -- keeps the
+  historical swap-using-scratch default -- existing `board.yaml` files that
+  omit `swap_algorithm:` on those targets emit byte-identical output.
+- **An explicit two-slot request is now refused, not silently broken.**
+  `swap_algorithm: scratch` / `move` / `overwrite` set explicitly on a
+  single-slot target raises `OrchestratorError` naming the slot1/scratch
+  constraint, instead of emitting a config the board's DT cannot support.
+  Picking (1) alone would have left an explicit `swap_algorithm: scratch`
+  on E1M-AEN801 silently broken; (2) alone would have refused only the two
+  shipped examples below (the only `board.yaml` files that set it
+  explicitly on a single-slot target) while leaving every board.yaml that
+  relies on the default (the common case) emitting exactly what it emitted
+  before this fix. Doing both means only the genuinely wrong case --
+  explicit two-slot on a single-slot target -- ever errors, AND the default
+  itself stops being wrong on E1M-AEN801.
+
+Two shipped examples were hitting exactly this: `examples/connectivity/
+iot-fleet-ota/board.yaml` and `examples/connectivity/production-deployment/
+board.yaml` both declared `sku: E1M-AEN801` with an explicit
+`swap_algorithm: scratch`, and the latter's `storage:` block described
+`mcuboot_primary` / `mcuboot_secondary` / `mcuboot_scratch` partitions that
+are a separate, project-declared partition table -- not the board DT's
+`slot0_partition` / `slot1_partition` / `scratch_partition` labels MCUboot's
+flash-map actually reads. (That `storage:` block was, and remains, entirely
+`status: blocked` on E1M-AEN801 regardless of this fix -- the SoM's own
+`memory_map:` regions already occupy the full 5632 KiB App MRAM, leaving no
+room for any project-declared `storage:` entry; not something this change
+touches.) Both now omit `swap_algorithm:` (resolving correctly to
+single-app) and document the single-slot constraint inline.
+
+`docs/secure-boot.md` and `docs/board-config-features.md` §Bootloader are
+corrected to match: the stock AEN-Zephyr default was documented as
+unconditionally "MCUboot + ECDSA-P256 + swap-using-scratch", which was never
+true for E1M-AEN801.
+
+Two documentation-only inconsistencies the earlier commits left behind are
+also corrected here, both on the two examples above: `iot-fleet-ota/src/
+main.c` and `production-deployment/src/main.c` still narrated the two-slot
+swap-using-scratch model in their teaching comments and (in `iot-fleet-ota`)
+a runtime banner string, even though each example's own `board.yaml` and
+README had already been corrected to single-app; `iot-fleet-ota/testcase.yaml`
+carried the same stale description. And `metadata/schemas/board.schema.json`
+still documented `swap_algorithm`'s schema default as unconditionally
+`"scratch"`, which this fix makes untrue on a single-slot target (all three
+enum values now raise `OrchestratorError` there) -- the field's description
+now says the default is target-derived instead of asserting a fixed one.
+
+Two more issues surfaced in review after the above landed. First,
+`tests/fixtures/emit-snapshots/iot-fleet-ota.build-plan.snap` -- the golden
+`--emit build-plan` fixture `scripts/check_emit_snapshots.py` gates in CI --
+still embedded the pre-fix `SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH=y` line and
+was never regenerated, so the gate was red on this branch the whole time;
+it's now regenerated (`--update`) and the diff is exactly the one
+`SWAP_SCRATCH` -> `SINGLE_APP` line. Second, `iot-fleet-ota/src/main.c` and
+`production-deployment/src/main.c` still went on to describe a slot0 write
++ reboot as the real "what runs on HiL" apply path after the [STATUS] note
+was added -- but `metadata/e1m_modules/E1M-AEN801.yaml` (#1069) records OTA
+apply as DEFERRED on both cores (no staging slot; overwriting the running,
+XIP-executing slot0 in place is not a supported flow), and the
+`production-deployment` copy additionally conflated the on-module OSPI0 NOR
+(`ps_storage: ospi0`, an `assembled: optional` BOM variant per
+`metadata/e1m_modules/E1M-AEN801.yaml`) with the App MRAM that holds slot0,
+mislabelling it QSPI. Both files' Doxygen and narrative teaching comments now
+say apply is DEFERRED, stop describing an unsupported in-place overwrite as
+real, and name the correct device (OSPI, not QSPI) -- `<alp/storage.h>` keeps
+`ALP_STORAGE_KIND_QSPI_FLASH` and `ALP_STORAGE_KIND_OSPI_FLASH` as distinct
+kinds.
+
+Third, the same false apply/reboot narrative survived in several customer-
+facing surfaces the prior two commits didn't touch: `iot-fleet-ota/src/main.c`'s
+Stage 4/5 section banners, its Stage-4 and Stage-5 console `printf` strings
+("writing artefact to flash", "rebooting into the new image"), the body of
+`fleet_finish_update_and_reboot` (which never called `k_reboot()` in either
+build config despite printing that it would), and `fleet_ota_tick`'s Doxygen
+("returns through `k_reboot()`"); `production-deployment/README.md`'s "Real
+silicon" paragraph and its `<alp/storage.h>` reference bullet;
+`production-deployment/testcase.yaml`'s sample description; and
+`iot-fleet-ota/board.yaml`'s header comment plus `iot-fleet-ota/README.md`'s
+lead sentence. All now say OTA apply is DEFERRED (#1069) and that the device
+verifies but does not write or reboot. The two changed `printf` strings are
+runtime-observable but harmless: both example `testcase.yaml` harnesses match
+only the closing `"\[ota\] done"` / `"\[prod\] done"` line, not the
+intermediate stage strings.
+
+### Fixed — the workflows producing `dev`'s required contexts now trigger on `merge_group`, so a merge queue can actually complete (#1415)
+
+GitHub raises `merge_group` — not `push`, not `pull_request` — for a
+merge-queue entry. A required status check whose workflow lacks that trigger
+never reports on the queue's speculative ref, so the entry sits in
+`AWAITING_CHECKS` until the queue's `check_response_timeout_minutes` expires
+and drops it. Nothing fails loudly; the queue simply never merges.
+
+Measured on `origin/dev` before this change:
+
+```
+$ ls .github/workflows/*.yml | wc -l
+28
+$ grep -l merge_group .github/workflows/*.yml | wc -l
+0
+```
+
+`dev`'s five required contexts come from two of those files:
+
+```
+$ gh api repos/alplabai/alp-sdk/branches/dev/protection \
+    --jq '.required_status_checks.contexts'
+["twister-shard 1/4","twister-shard 2/4","twister-shard 3/4",
+ "twister-shard 4/4","clang-format · diff-only"]
+```
+
+`pr-twister.yml` and `pr-static-analysis.yml` now carry `merge_group:`. No job
+in either file has a job-level `if:` mentioning `pull_request` (`twister-shard`
+has none, `twister` has `if: always()`, `clang-format-diff` and `cppcheck` have
+none), so both files' required contexts run unchanged on a `merge_group` event.
+`pr-static-analysis.yml`'s "Determine diff base" step already branches on
+`github.event_name` and falls back to `HEAD~1`, which on a queue ref is that
+entry's own delta.
+
+`tests/scripts/test_workflow_merge_group_triggers.py` pins both halves: the
+trigger is present, and no job in those files gates itself to `pull_request` —
+a `merge_group:` trigger under a job that skips itself is a workflow that runs,
+reports nothing, and looks fixed.
+
+This is the option-4 prerequisite named in #1415, which that issue records as
+"worth doing regardless". It does not pick between the issue's four options for
+`alp.lock` itself — ruleset `20781492` stays as the maintainer left it, and
+enabling a queue is a separate decision.
+
+### Added — a gate that verifies every `path:line` citation in `changelog.d/` still resolves (#1416)
+
+Release notes cite source locations, and source moves. The same citation in
+`changelog.d/1387.md` was wrong twice in one day: it pointed at the unrelated
+ASSOCIATION_REJECTED block, was corrected, and a later commit on the same branch
+shifted the file again so the corrected range became an unrelated comment. Two
+adversarial reviewers and a human were in the loop each time.
+
+`scripts/check_changelog_citations.py` now fails when a fragment cites a path
+that does not exist, or a line past the end of that file. Both were live: three
+citations in `changelog.d/1383.md` were written example-relative and resolved to
+nothing from the repo root —
+
+```
+src/autopilot.c:105    autopilot.c:128    src/mavlink.c:344
+```
+
+— and are corrected there to
+`examples/peripheral-io/drone-autopilot/src/autopilot.c:105`,
+`examples/peripheral-io/drone-autopilot/src/autopilot.c:128` and
+`examples/peripheral-io/drone-autopilot/src/mavlink.c:344`, which this gate
+resolves.
+
+Existence and range alone would **not** have caught the #1387 case, because the
+cited range stayed valid while the code beneath it changed. So a citation can
+opt in to a stronger check by anchoring a verbatim quote:
+
+```
+the hazard note at `chips/cc3501e/x.c:682-684` ("Do NOT read the RSSI here")
+```
+
+The gate then requires that text inside the cited range, and fails when the code
+moves. The summary line reports how many citations are anchored versus merely
+range-checked, so the weaker coverage is visible rather than assumed away.
+
+Citations into another repository (an alp-sdk fragment naming `python/tan/...`)
+are reported as SKIPPED with the reason, never silently passed.
+
+### Fixed — `test-all.sh` reported FAIL, not `SKIP [GAP]`, for a jsonschema that is present but too old (#1423)
+
+`scripts/test-all.sh` decided a Python prerequisite was available by asking
+whether it **imports**. That cannot see the case where the module is installed
+but predates the API the gate scripts call: `jsonschema.Draft202012Validator`
+arrived in jsonschema 4.0, so a distro-packaged 3.2.0 imports cleanly and then
+dies partway through a stage with
+
+```
+AttributeError: module 'jsonschema' has no attribute 'Draft202012Validator'.
+Did you mean: 'Draft3Validator'?
+```
+
+On a fresh clone with `jsonschema 3.2.0` that turned **four** stages red on a
+tree with nothing wrong with it — `metadata-validate`, `doc-yaml-fragments`,
+`required-gate-scripts` and `generated-files` — and the traceback pointed into
+`metadata/`, so the reader's first conclusion was "the tree is broken" rather
+than "this host is old".
+
+That is the same harm #1396 removed ("go red on a clean tree"), reached by a
+different route: #1396 fixed the module being **absent**, which an `import`
+check catches. This is the module being **present but too old**, which no
+`import` check can catch.
+
+`test-all.sh` now probes the attribute rather than the import, in the same shape
+`stage_pytest_scripts` already used for `pytest`/`pytest_mock`, and returns the
+script's documented exit-99 "prerequisite not available" code. The four stages
+report `SKIP [GAP]` and the run exits **2** — the code that already means "this
+run did NOT exercise everything `--target` requires" — instead of exiting 1 as
+if the tree had failed.
+
+The fix is deliberately **not** in the 18 `scripts/*.py` files that call
+`Draft202012Validator`. Those are also invoked directly by
+`pr-metadata-validate.yml` and its siblings, where a 99 exit is a failing check,
+so teaching them to exit 99 would trade a wrong local verdict for a red CI. The
+wrong verdict belongs to `test-all.sh`, so the fix does too.
+
+Both directions are verified on real hosts rather than reasoned about. With
+`jsonschema 3.2.0` the four stages `SKIP [GAP]` and the run exits 2 with
+`0 stage(s) failed`. With `jsonschema 4.26.0` the probe passes and the stages
+run — a probe that always skipped would be a worse defect than the one it
+replaces, so that direction is the one that actually needed proving.
+
+### Fixed — `west alp-quality` / `alp-lock` / `alp-migrate` exited 0 on failure (#1427)
+
+All three west extension commands **returned** their exit code from `do_run(...)`,
+and west **discards it**: `WestApp.run_extension` calls `do_run` for effect and
+derives the process exit status from exceptions only. So each reported its
+failures on screen and exited `0`:
+
+```
+$ west alp-quality --profile pr
+alp-quality profile=pr: 54/55 passed
+  [FAIL] emit-kconfig-contract (scripts/check_emit_kconfig_contract.py)
+exit=0
+
+$ west alp-lock --check
+alp-lock: resolution.board: locked 'E1M-AEN801' != actual None
+exit=0
+```
+
+That `alp-lock` line is real drift on a real project, printed and then passed
+over. Anything gating on these commands — a pre-commit hook, a CI step, a
+release checklist — went green with a failed gate check printed above it.
+
+The scripts themselves were never wrong. `scripts/alp_quality.py` computes
+`0 if rep.ok() else 1` (where `ok()` is "every GATE task passed") and
+`sys.exit(main())` honours it, so `python3 scripts/alp_quality.py --profile pr`
+exited 1 correctly all along. Only the west wrappers lost it, and nothing about
+`return run(args)` looks wrong at the call site — it is the same idiom the
+`main()` three lines below uses. west's contract is the unusual half:
+`west.commands.CommandError(returncode)` is the mechanism, and a plain `return`
+is silently a no-op. `alp_emit.py` looked like the one wrapper already doing it
+right, via `log.die()`. **That reading was wrong and is corrected here (#1476):**
+`log.die()` covers only its two pre-flight checks (no workspace, missing
+`board.yaml`); the failure that matters — the child orchestrator's own non-zero
+exit — was the same bare `return subprocess.call(...)` fixed in the other three,
+so `west alp-emit build-plan > plan.json` wrote an empty file and exited 0 until
+#1476.
+
+All three now raise `CommandError(rc)`, with `CommandError` imported alongside
+`WestCommand` and mirrored in each file's existing no-west fallback shim so the
+standalone `main()` path and the tests keep importing unchanged. Which checks
+count as failures is not re-decided in the wrapper — `run()` already computes
+the value.
+
+Verified both directions, because a fix that made these always fail would be
+worse than the bug:
+
+```
+west alp-quality --profile pr   exit=1   (was 0)   [FAIL] emit-kconfig-contract
+west alp-lock    --check        exit=1   (was 0)   resolution.board drift
+west alp-migrate --check        exit=0             all board.yaml at v1
+```
+
+Found walking the customer command surface for the tan-cli v0.6.0 acceptance,
+and filed first as tan-cli#721 — that is this defect seen through `tan quality`,
+which forwards the child's exit code faithfully. tan was the messenger.
+
+### Fixed — `test_test_all_generated_files_untracked.py` went red on `dev` itself: the extracted `func.sh` called a function it never defined (#1428)
+
+The test pulls individual bash functions out of `scripts/test-all.sh` and runs
+them in isolation — deliberately, because `source scripts/test-all.sh` would
+run the whole slow, tool-dependent suite the extraction exists to avoid. #1424
+added `require_jsonschema_2020` (and its `have_jsonschema_2020`) to
+`stage_generated_files`; the extraction still pulled only
+`abi_current_snapshot` + `stage_generated_files`, so the composed `func.sh`
+called an undefined function.
+
+Measured on `origin/dev` at `48afa4c7`, in a clean worktree:
+
+```
+FAILED tests/scripts/test_test_all_generated_files_untracked.py::test_stage_generated_files_passes_on_a_clean_tree
+1 failed, 1 passed in 0.08s
+
+AssertionError: func.sh: line 16: require_jsonschema_2020: command not found
+assert 99 == 0
+```
+
+At `21c8217f`, the commit before #1424 merged, the same file is `2 passed`.
+The failure reached every open PR through `python-smoke` on all three
+platforms.
+
+Both helpers are now extracted alongside the two functions already pulled.
+
+### Fixed — `west patch --dst-module` was written after `apply`, so bootstrap failed every `alp-build` job on `dev`
+
+`--dst-module` is a flag of `west patch` itself, not of its `apply`
+**subcommand**. west's own usage line puts every flag before the subcommand:
+
+```
+usage: west patch [-h] [-b DIR] [-l FILE] [-w DIR] [-sm MODULE] [-dm MODULE]
+                  <subcommand> ...
+```
+
+Written the other way round the command never runs:
+
+```
+[bootstrap] Applying zephyr/patches.yml for module 'mcuboot' ('west patch apply --dst-module')
+[bootstrap] west patch apply --dst-module mcuboot failed (exit 2) -- output above
+west patch: error: unexpected arguments: ['--dst-module', 'mcuboot']
+```
+
+That landed with the per-module apply and failed the `Bootstrap Zephyr
+workspace` step of every `alp-build` matrix leg on `dev`. Both
+`scripts/bootstrap.sh` and `scripts/bootstrap.ps1` now emit
+`west patch --dst-module <mod> apply`, and
+`tests/scripts/test_bootstrap_west_patch_arg_order.py` pins the order in both,
+with a positive control so deleting the invocation cannot pass instead.
+
+The per-module apply itself is unchanged and still required: a workspace can be
+partially patched (`pr-getting-started-aen801.yml` caches `zephyr` and
+`modules` but not `bootloader/mcuboot`), and `west patch apply` is not
+idempotent.
+
+### Fixed — `test_verify_west_patches.py`'s `west` shim still failed 12 of 13 tests on Windows after the first fix
+
+The previous version of this fragment claimed a `.py` script plus a `.bat`
+wrapper fixed Windows, and that `PATHEXT` picks up `.bat`. Neither survived
+actually running the suite on Windows: `PATHEXT` is a `cmd.exe`/`shutil.which`
+convention, not a `CreateProcess` one. `subprocess.run(["west", ...])` appends
+only `.exe` to a bare command and never consults `PATHEXT`, so it never finds a
+PATH-installed `.bat` no matter where the shim directory sits. On a Windows box
+that also has a real `west.exe` on PATH (`pip install west`), that bare-name
+call silently ran the REAL west instead of the shim -- a real west with no
+workspace at `topdir`, which also fails, but for the wrong reason, so it looked
+like a passing gate. On a CI runner with no west installed at all, the
+identical bare-name lookup instead raised `FileNotFoundError: [WinError 2]`.
+One root cause behind both symptoms, and the fixture's own docstring was
+actively pointing at the wrong mechanism.
+
+The fixture no longer touches `PATH`. It builds a directly-spawnable `west`
+and every test passes it explicitly via `verify(..., west=...)` / `--west` --
+the seam already existed (`west_project_dirs(topdir, west="west")`) and just
+was not being used.
+
+A second, narrower Windows-only defect surfaced only once the PATH fix let the
+tests actually reach `west_project_dirs()`'s real call, `west list -f
+"{name}|{abspath}"`: a `.bat` handed to `subprocess.run` as a full path spawns
+fine for a plain arg list, but not for one containing a bare `|`. A `.bat` is
+not a real Win32 executable, so Windows reroutes it through `cmd.exe`, which
+re-tokenizes the whole reconstructed command line and treats that `|` as a
+shell pipe into a program literally named `{abspath}` -- the `.bat` body never
+even runs. The Windows shim is now `sys.executable` itself (a real `.exe`,
+immune to that re-tokenization) paired with a `sitecustomize.py` reached via
+`PYTHONPATH`, which runs during interpreter start-up and calls `os._exit()`
+before Python would otherwise try to open its first CLI argument as a script
+file.
+
+Two smaller, unrelated failures rode along in the same 12: a fixture's own
+`shutil.rmtree(... / ".git")` hit `PermissionError: [WinError 5]` on the
+read-only mode bits git leaves on packed objects (POSIX deletion is governed by
+the containing directory, not the file's own mode, so this never showed up
+there) -- fixed with a chmod-then-rmtree helper rather than `shutil.rmtree`'s
+version-gated `onexc`/`onerror` callback, since this repo supports Python
+`>=3.10` and `onexc` only exists from 3.12. And
+`test_main_refuses_when_no_workspace_resolves` wrote an always-fails `west` as
+a bare POSIX script relying on `PATH`, inert on Windows for the same reason as
+the main shim, and on this box it passed only because a real `west.exe` on
+PATH happened to also refuse -- for the wrong reason. It now writes a
+genuinely spawnable always-fails `west` (the same `.bat`-on-Windows technique)
+and passes it explicitly via `--west`.
+
+Verified non-vacuous: with `verify()` in `scripts/verify_west_patches.py`
+forced to `return ([], [], [], [])` unconditionally, the suite goes from 16
+passed to 14 failed / 2 passed -- the fix exercises the real code path, not a
+shim that would pass against anything.
+
+### Fixed — a failed `cc3501e_wifi_connect()` left a stale association behind, wedging the very next connect (#1435)
+
+`cc3501e_wifi_connect()` (`chips/cc3501e/cc3501e_wifi.c`) submits `WIFI_CONNECT_STA`
+once and then polls the firmware's independent `WIFI_STATUS` latch for the
+outcome. Neither of that poll's error exits — the terminal
+`ALP_CC3501E_WIFI_CONN_FAILED` branch or the poll-loop's budget-exhaustion
+`remaining == 0u` return — cleared anything before returning, so the failed
+association's state stayed live inside the NWP. The *next* `WIFI_CONNECT_STA`
+then failed at its own `Wlan_Connect` kick, `ALP_CC3501E_WIFI_FAIL_KICK` --
+`include/alp/protocol/cc3501e.h:534` ("STA role-up / Wlan_Connect kick failed")
+-- even for a correct SSID and passphrase that had connected seconds earlier.
+
+Root-caused on real silicon, E1M-AEN801 r1, one boot, single variable,
+reproduced 2/2: connect to a real AP succeeds (`rssi=-48 dBm`,
+`ip: 192.168.1.14`); `wifi disconnect`; the SAME connect succeeds again
+(`rssi=-47 dBm`); one connect to a non-existent SSID fails `-5`; the SAME
+connect that just worked now ALSO fails `-5`, nothing else changed;
+`wifi disconnect`; the same connect succeeds again (`rssi=-49 dBm`). A clean
+disconnect/reconnect never leaked — only the failure path did.
+
+**This is not a role teardown, and an earlier round of this fix that called it
+one was wrong.** The STA role comes up once per process lifetime
+(`wifi_sta_role_up`, pre-cached in `cc3501e_hw_wifi_boot_start()`) and must stay
+up; `Wlan_Disconnect` does not take it down. What wedges the next kick is
+association state left inside the NWP by the failed attempt, and
+`cc3501e_wifi_disconnect()` (`WIFI_DISCONNECT`, 0x13) is the bench-proven clear
+for it — the naming throughout this fix is "clear the stale association", not
+"tear down the role".
+
+**Where that clear runs also changed.** The first round of this fix ran it from
+inside the two failure exits, and a review plus a second bench pass proved that
+shape too broad: `cc3501e_hw_wifi_disconnect()` does `wifi_conn_set(DISCONNECTED,
+FAIL_NONE)`, `cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti_wifi.c:781`
+("wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_DISCONNECTED, (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE);"),
+so clearing on the way OUT of a failed connect erased the `state: failed` /
+`fail: N` diagnostic, `src/zephyr/console/alp_console_companion_wifi.c:416`
+("(unsigned int)st.fail_reason);"), that was the ONLY host-visible way to tell
+`FAIL_KICK` (3) from `FAIL_REJECTED` (2) — both map to `ALP_ERR_IO`. It could
+also run from the poll-exhaustion exit against a latch that had never actually
+failed (still `CONNECTING` or `DISCONNECTED` there), breaking the documented
+`ALP_ERR_TIMEOUT` contract and risking tearing down a late success landing
+right after the timeout. And it added up to `CC3501E_WIFI_DOWN_WINDOW_MS`
+(10000 ms) to every failed call regardless of the caller's `timeout_ms`.
+
+The clear now runs once, at connect **entry**, conditional on the latch: after
+argument validation and before the payload is built, `cc3501e_wifi_connect()`
+takes one bounded `wifi_status_once()` read (never the public
+`cc3501e_wifi_status()`, which rides its own down-window retry and would make a
+wedged transport worse), and only if that read succeeds AND reports
+`CONN_FAILED` does it issue `cc3501e_wifi_disconnect()` — result discarded,
+best-effort — before submitting. `CONNECTING` (a live attempt) and `CONNECTED`
+(connect-while-connected, a separate, unowned semantic) are left alone. A
+failed attempt's `state: failed` / `fail: N` diagnostic is now deliberately
+**preserved** for the caller to read before the next connect clears it; the
+poll-exhaustion exit no longer touches the association at all; and the down-window
+bound now only applies to a connect that follows a failure, on top of — not
+folded into — its own `timeout_ms`. `cc3501e_wifi_connect()`'s Doxygen
+(`include/alp/chips/cc3501e/wifi.h`) documents that extra bound with the same
+"floors the budget regardless of the caller's timeout" precedent
+`cc3501e_wifi_get_mac()` already sets, `chips/cc3501e/cc3501e_wifi.c:46-47`
+("if (budget < CC3501E_WIFI_DOWN_WINDOW_MS) budget = CC3501E_WIFI_DOWN_WINDOW_MS;").
+
+New regression coverage in
+`tests/zephyr/cc3501e_host_driver/src/test_host_driver.c`:
+`test_wifi_connect_entry_clears_stale_failed_association_1435` drives a
+CONN_FAILED latch at entry and asserts `WIFI_DISCONNECT` lands strictly
+BEFORE `WIFI_CONNECT_STA` (ordering, not just "a disconnect happened
+somewhere") and that the connect still submits and returns its own error;
+`test_wifi_connect_entry_skips_clean_when_disconnected_1435`,
+`_when_connecting_1435` and `_when_connected_1435` are the negative cases for
+the other three latch values; and
+`test_wifi_connect_failure_exit_no_longer_tears_down_1435` proves the
+regression this rework undoes — a failure discovered mid-poll, with nothing
+CONN_FAILED at entry, no longer issues `WIFI_DISCONNECT` from either exit.
+`test_wifi_connect_submits_exactly_once_1376`'s success-path assertion is
+fenced with a check on `slave.cmd` itself, so a mutant that tore the
+association down on the SUCCESS path too would no longer pass unnoticed.
+
+### Changed — the four E1M-X GD32 bridge entries declare no local flash path; `flash_method: swd_probe` is gone (#1439)
+
+GD32 programming is separated out of `tan` entirely (tan-cli#732), so the
+`flash_method: swd_probe` half of the `gd32_bridge` helper entries described a
+path that no longer exists. Removed from all four SKUs, which are one PCB and
+must stay byte-identical:
+
+```
+metadata/e1m_modules/E1M-V2M101.yaml
+metadata/e1m_modules/E1M-V2M102.yaml
+metadata/e1m_modules/E1M-V2N101.yaml
+metadata/e1m_modules/E1M-V2N102.yaml
+```
+
+Each `gd32_bridge` entry now carries:
+
+```yaml
+- name:          gd32_bridge
+  chip:          gd32g553
+  flash_policy:   recovery_only
+  update_channel: alp_ota_spi_bridge
+```
+
+The SDK side lands first, deliberately. An SDK still emitting
+`flash_method: swd_probe` to a `tan` whose backend is gone hits
+`executionPolicy.unknownBackend`, which is `fail` — a hard error, not a skip.
+The reverse is harmless.
+
+**`flash_policy` stays, against what #1439 proposed.** That issue reasoned it
+"exists to govern `flash_method` — with no method, it has nothing to gate".
+The schema says the opposite, and is the authority:
+
+> `flash_policy` — "WHO may invoke `flash_method`, and WHEN. REQUIRED on every
+> helper entry -- there is no absent-means-`customer` default; a helper with no
+> local flash path at all (no `flash_method`) still states who may reach it if
+> one is ever added."
+
+It is also in `required`, so removing it fails validation outright. And the six
+AEN `cc3501e_otp` entries are already exactly that shape — `flash_policy:
+recovery_only` with no `flash_method`, whose own comment reads "this entry
+declares no `flash_method`, so there is nothing to decline." Alp Lab still
+programs the GD32 in production and a customer flash is still bricked-board
+recovery only; that fact does not depend on tan.
+
+**`metadata/chips/gd32_swd.yaml` is NOT deleted**, which #1439's last bullet
+contemplated. It has a live consumer independent of tan's backend: the on-SoM
+host-driven bit-bang SWD controller at `chips/gd32_swd/` (Path B), referenced
+from `docs/gd32-bridge.md:128` and `:159`, `docs/verification-status.md:179`,
+`docs/test-plan.md:127` and `docs/glossary.md:281`.
+
+`scripts/flash_backends/swd_probe.py` — alp-sdk's own backend, distinct from
+tan's — is also untouched. No preset reaches it now, but it is a plausible home
+for GD32 programming after it leaves tan, and removing it is a larger decision
+than this issue authorises.
+
+Also removed:
+
+- The `swd_probe`-scoped conditional in
+  `metadata/schemas/som-preset-v1.schema.json` requiring a `target`-naming
+  entry to also name `jlink_device`. It existed solely because tan's
+  `swd_probe` prefers the J-Link arm and refuses rather than guess a device
+  profile. No backend, no rule — `flash_args` shapes are now opaque for every
+  backend, with no per-backend exception.
+- The `metadata/e1m_modules/README.md` paragraph describing the
+  `flash_method: swd_probe` + `flash_policy: recovery_only` combination.
+
+**The DPIDR contradiction is carried forward, not dropped** — and it is worse
+than the "two unmeasured candidates" #1439 described.
+`metadata/chips/gd32_swd.yaml:49` arms the GD32 wrong-board guard with `0x6BA02477`, which `CHANGELOG.md` records as a
+measurement of the **V2N CM33 DAP** on `e1mx-v2n-m1-01` (`Found SW-DP with ID
+0x6BA02477`, `Found Cortex-M33 r0p4` — also contradicting the `r0p1`
+annotation). Filed as #1440; needs one reading on a GD32 with a probe attached.
+No value was picked here.
+
+Non-vacuity, measured. `flash_method: swd_probe` restored to `E1M-V2N101` only:
+
+```
+FAILED tests/scripts/test_helper_firmware_flash_policy.py::test_v2n_v2m_gd32_entries_are_identical_across_the_four_skus
+FAILED tests/scripts/test_helper_firmware_flash_policy.py::test_v2n_v2m_gd32_entry_declares_no_local_flash_path[E1M-V2N101]
+FAILED tests/scripts/test_helper_firmware_flash_policy.py::test_no_som_preset_declares_swd_probe_anywhere
+3 failed, 32 passed in 0.39s
+```
+
+Three independent guards, including the one-PCB drift check. Restored:
+
+```
+35 passed in 0.39s
+```
+
+Two `--emit` golden snapshots lost exactly the six removed lines each
+(`flash_method` plus the five `flash_args` keys) and nothing else;
+`flash_policy` and `update_channel` are still projected. `alp.lock`
+regenerated for the metadata and schema digests.
+
+### Changed — the Alif Ensemble corpus is now exactly the BGA devices Alif declares
+
+`metadata/socs/alif/ensemble/*.json` carried an arbitrary subset of the
+Ensemble device list: some BGA parts missing, nine WLCSP parts present. Both
+halves are fixed, and the result is a set equality that can be stated in one
+line and checked:
+
+```
+DFP BGA devices in E3-E8 : 10
+corpus variants          : 10
+missing from corpus      : none
+in corpus, not DFP BGA   : none
+```
+
+**Added — `AE512F80F5582LS`** (e5, FBGA194, standard, 5.5 MB MRAM, 8448 KiB
+SRAM, `AE512F80F5582_HE`). The one BGA device the vendor declares that this
+repo did not carry.
+
+**Removed — nine WLCSP variants.** Alp Lab modules are BGA only, so these
+described parts this corpus will never ship:
+
+```
+e3  AE302F80F55D5AE   WLCSP208      e5  AE512F80F55D5AS   WLCSP208
+e3  AE302F80F5582AE   WLCSP208      e6  AE612FA0E5597BS0  WLCSP216
+e4  AE402FA0E5597BE0  WLCSP216      e7  AE722F80F55D5AS   WLCSP208
+e4  AE402FA0D5597BS0  WLCSP216      e8  AE822FA0E5597BS0  WLCSP216
+e5  AE512F80F5582AS   WLCSP208
+```
+
+Four of those were already shipped; five were added earlier in this same
+change before the BGA-only decision was confirmed, and are removed in the same
+breath.
+
+None backed an Alp Lab SKU (`alp_module_skus` empty or absent on all nine) and
+no SoM preset pins an order code, so nothing resolves differently. Each did
+carry a `debug` block — a pyocd target and a J-Link flash profile — for
+hardware that does not exist here: never-exercised device strings sitting one
+copy-paste away from a part they do not belong to.
+
+The file-level `packages` lists still name WLCSP208/WLCSP216. That is a vendor
+fact about the silicon and stays true; what changed is which parts this corpus
+tracks.
+
+### Added — `validate_metadata.py` refuses a WLCSP variant
+
+`_check_soc_no_wlcsp_variants`, scoped to `vendor: Alif Semiconductor` +
+`family: Ensemble`:
+
+```
+variants[0] (AE722F80F55D5LS): package 'WLCSP208' is WLCSP -- Alp Lab modules
+are BGA only, so this corpus carries no WLCSP variant in any Alif Ensemble
+subfamily (#1444). Drop the variant; the file-level `packages` list is where
+the vendor's WLCSP offering stays recorded
+```
+
+A gate rather than a note because the natural way to extend `variants[]` is to
+walk the vendor pack's device list, and the pack draws no line between the
+packages we buy and the ones we do not — which is exactly how nine rows
+accumulated. Other vendors' SoC files are untouched; their package choices are
+not this rule's business.
+
+### The extraction was validated before it was trusted
+
+Every field on the added variant is read per device out of the pack
+(`alifsemi/alif_ensemble-cmsis-dfp`, `AlifSemiconductor.Ensemble.pdsc`), not
+decoded from the order code: `package` from the device's own
+`<feature type="BGA"|"CSP" n=...>` element, `mram_mb` and `sram_kb` from its
+resolved memory regions.
+
+Re-deriving all 13 then-shipped variants the same way reproduces their
+declared facts with **zero mismatches**. The first attempt did not — it read
+E7 as 15616 KiB against the corpus's 13824, on both E7 variants. The corpus
+was right: the 1792 KiB delta is exactly `ITCM_HP 256 + ITCM_HE 256 +
+DTCM_HP 1024 + DTCM_HE 256`, core-private TCM this corpus has never counted as
+SRAM. E4/E6 only appeared to agree because their pack entries name the same
+banks `SRAM2..SRAM5` with no `TCM` in the string. Fixing the extractor rather
+than the metadata is what turns the round-trip into evidence; trusting the
+first run would have "corrected" two shipped variants to a wrong value.
+
+`temperature_grade` is the one field the pack does not carry — no temperature
+attribute or feature exists on any device — so it stays the order-code suffix
+decode (`E` = extended, `S` = standard) that holds across every variant.
+
+### Fixed — #1295's E4 Flow D gap is subfamily-wide
+
+The audit settled the question #1295 left open with a sample of one. SEGGER's
+DLL V9.46 table holds exactly two E4 entries — `AE402FA0E5597LS0` and
+`AE402FA0E5597BS0`, indices 93/94 — and Alif declares **neither**. Alif's
+three E4 devices are `AE402FA0E5597LE0`, `AE402FA0E5597BE0`,
+`AE402FA0D5597BS0`. The intersection is empty.
+
+So `e4.json`'s `jlink_flash_device: null` is a vendor-level gap across the
+whole E4 subfamily, not a lookup failure on one order code. Recorded in the
+file so the single remaining entry reads as a checked result rather than an
+unchecked default.
+
+### Verification
+
+```
+10 variants, 0 DFP fact mismatches, all FBGA194
+10 declared jlink_flash_device names round-tripped through
+   JLINKARM_DEVICE_GetIndex -> JLINKARM_DEVICE_GetInfo: 0 mismatches
+validate_metadata.py                      real exit=0
+  with one package flipped to WLCSP208    real exit=1   (restored -> 0)
+6 passed   tests/scripts/test_validate_metadata_no_wlcsp.py
+  with the check body neutered            1 failed, 5 passed
+70 passed  (soc_debug_probe_identity, validate_metadata_jlink_flash_device,
+            gen_zephyr_board, silicon_variant_and_os_inference)
+```
+
+`test_soc_debug_probe_identity.py` asserted "the sibling BS0 variant must stay
+unarmed" via a `next()` lookup on `AE822FA0E5597BS0`. With that row gone the
+lookup would raise `StopIteration` rather than state anything, so the
+assertion is now made over the whole file — exactly one variant may publish a
+measured `expect_dpidr`, and it is the one on the bench.
+
+`AE101F4071542LH` and `AE1C1F4051920PH0` remain uncarried: E1 and E1C are
+subfamilies with no file in this corpus, which is a different change from
+completing the ones that exist.
+
+### Fixed — E1M-AEN301/401/501/601/701 declare disjoint M55 slot0 windows (#1445)
+
+Five AEN SoM presets carried no `memory_map:`, so they inherited the **stock
+symmetric MRAM layout** — which places `m55_he`'s and `m55_hp`'s slot0 at the
+**same address**. That is the #1069 defect: flashing one M55 core silently
+clobbers the other core's slot0 window. Only `E1M-AEN801` had ever been given
+an explicit map.
+
+It stayed invisible because the guard that catches it
+(`_enforce_slot0_disjoint_across_roles`) only fires once a SoM publishes
+`debug.jlink_flash_device` — reasonably, since without a flash profile there
+is no way to flash and so nothing to clobber. Populating those profiles
+(#1295) made it reachable outside AEN801 for the first time, and it refused
+exactly as designed:
+
+```
+E1M-AEN301: m55_he and m55_hp both resolve flash_args.slot0_load_address to
+the same address (0x80010000) -- this is the #1069 HE/HP MRAM slot0 collision
+(flashing one core would silently corrupt the other's slot0 window).
+```
+
+All five now declare the **same** partitioning as `E1M-AEN801`:
+
+```
+mcuboot    0x80000000    64 KiB   m55_he, m55_hp
+he_slot0   0x80010000  2688 KiB   m55_he
+hp_slot0   0x802b0000  2688 KiB   m55_hp
+reserved   0x80550000    64 KiB   m55_he, m55_hp
+storage    0x80560000    96 KiB   m55_he, m55_hp
+atoc       0x80578000    32 KiB   m55_he, m55_hp
+```
+
+Identical deliberately, and derived rather than invented: every AEN SoM pins a
+**5.5 MiB-MRAM** part, and `64 + 2688 + 2688 + 64 + 96 + 32 = 5632 KiB` fills
+it **exactly**, leaving no per-SKU slack to allocate differently. Nothing in
+the layout is E8-specific — it is only MCUboot, the two M55 slot0 windows, and
+the reserved/storage/atoc tail; the A32 takes no slot0 (`mram_main` is an
+overlay view). `E1M-AEN801` is also the *hardest* case, being the one that
+does have an A32 cluster, so a layout that works there works on the SoMs with
+fewer cores.
+
+`he_slot0 0x80010000` and `hp_slot0 0x802b0000` are bench-verified on
+E1M-AEN801 silicon — they are the values `tan flash` emits as
+`flash_args.slot0_load_address`, and the addresses a signed image was written
+to and booted from. `storage` 96 KiB + `atoc` 32 KiB are the #1289 split.
+
+`mram_main`'s `accessible_from` omits `a32_cluster` on **AEN301** and
+**AEN401**: those two SoMs' topologies are `m55_he` + `m55_hp` only, so naming
+an A32 would reference a core they do not have.
+
+Each file's comment is corrected too. All five previously said *"Declare a
+memory_map: block here ONLY for non-stock partitioning (none of the current 11
+SKUs need one)"* — demonstrably false, and precisely why this went unnoticed.
+The replacement records that the stock default is the #1069 defect, that any
+dual-M55 SoM publishing `jlink_flash_device` needs a disjoint pair, and where
+each number came from.
+
+**Still open, deliberately out of scope:** the stock symmetric default remains
+the derivation for any *future* dual-M55 SoM that omits a `memory_map:`.
+Making that default disjoint — or making it refuse — would fix the class
+rather than these five instances, but it changes slot0 derivation for every
+SoM family including V2N, so it wants its own change and its own bench pass.
+
+### Fixed — a dual-M55 AEN SoM can no longer fall back to the symmetric slot0 layout (#1446)
+
+`_aen_role_slot0_map` returned `None` when a SoM preset declared no
+`<role>_slot0` regions, dropping board generation onto the **stock symmetric**
+AEN layout — `m55_he` and `m55_hp` slot0 at the *same* address, so flashing one
+M55 core silently clobbers the other's window. That is the #1069 defect, and
+that silent fallback is how `E1M-AEN301/401/501/601/701` shipped with colliding
+windows until #1445 gave them explicit maps.
+
+The half-authored case — one role declaring a window without its sibling — has
+always raised, and the function's own docstring explains why: answering `None`
+there *"drops the caller onto the stock symmetric layout, whose
+`slot0_partition` lands exactly on top of the sibling's declared window"*. The
+gap was the **fully** unauthored case, which was silent.
+
+`_aen_require_disjoint_slot0` now refuses it, at the single point where
+`memory_map` is resolved in `emit_zephyr_board`:
+
+```
+SoM 'E1M-AEN801' has two M55 cores (m55_he, m55_hp) but its preset declares no
+per-core `<role>_slot0` region, so both would boot from the SAME MRAM slot0
+address -- flashing one core silently corrupts the other's slot0 window
+(#1069). Declare disjoint `he_slot0` / `hp_slot0` regions in this SoM preset's
+`memory_map:`; metadata/e1m_modules/E1M-AEN801.yaml is the shape to copy
+(#1446).
+```
+
+**Why it was believed safe.** The docstring justified the fallback with
+*"Every other AEN SKU (single-M55 aen401/aen601 …)"*. Both named SKUs are
+**dual**-M55 — measured from their own presets, `E1M-AEN401` is
+`[m55_he, m55_hp]` and `E1M-AEN601` is `[a32_cluster, m55_he, m55_hp]`. A wrong
+comment about the very SKUs it named is what carried this; the docstring is
+corrected too.
+
+**Single-M55 SoMs are untouched** — with no sibling core there is nothing to
+clobber, so the symmetric layout stays correct and is still taken.
+
+**Blast radius: AEN only, and zero today.** `_aen_role_slot0_map` /
+`_aen_flash_partitions` are reached exclusively from the AEN emit path, so V2N
+and NX never touch this code. And after #1445 every AEN SoM declares disjoint
+windows, so the new branch is unreachable on the current corpus. Its value is
+the *next* dual-M55 AEN SoM, refused at authoring time rather than discovered
+by someone flashing one core and losing the other's slot0 on a bench.
+
+### Test coverage, and a hole found in it
+
+The first version of these tests called `_aen_require_disjoint_slot0`
+directly -- every one of them. That reads as thorough and is not: deleting the
+single call in `emit_zephyr_board` left **8 of 8 passing**. Measured, not
+suspected. A guard nothing calls protects nothing, and unit tests that never
+cross the call site cannot tell the difference.
+
+Two tests now drive the real entry point against a copied metadata tree: one
+strips `E1M-AEN801`'s `he_slot0`/`hp_slot0` lines and asserts
+`emit_zephyr_board` refuses, the other emits the same SoM unmodified and
+asserts it still succeeds -- so a guard that raised unconditionally would fail
+rather than pass the first test for the wrong reason.
+
+Re-measured with the call site neutered: **1 failed, 9 passed**, against 0
+failed before. Clean tree: **10 passed**.
+
+### Fixed — a declared-null `jlink_flash_device` now reaches `flash_args`
+
+`_slice_flash_recipe` gated the key on **truthiness**, so a schema-declared
+`jlink_flash_device: null` was dropped and arrived downstream as an **absent**
+key. The two mean opposite things:
+
+- **absent** — the SoC variant says nothing; the Flow A default stands.
+- **null** — the variant publishes *"no known J-Link flash profile"*, and
+  `soc-spec-v1.schema.json`'s own description says a consumer must refuse
+  rather than silently choose another transport.
+
+Collapsing null into absent makes tan's presence-based `flow_d_available()`
+(`flash_plan._fa_has_key`) see nothing and silently downgrade Flow D to the
+SE-UART Flow A path. On Windows that path is Linux-only, so the flash fails
+later somewhere else with the real cause already discarded — the exact
+customer-visible failure the null exists to prevent.
+
+This is byte-for-byte the defect tan-cli#734 fixed on tan's side. It lived
+here too, which meant the null was destroyed at the source and tan's fix could
+never see what was never emitted.
+
+`_jlink_flash_device_declared` now reports declaration, `Slice` carries it, and
+the emitter emits on presence. The flag defaults to `False`, so every existing
+construction site is unchanged and an absent key still emits nothing.
+
+Measured through `_slice_flash_recipe`:
+
+```
+declared null   before: {}                              after: {'jlink_flash_device': None}
+undeclared      before: {}                              after: {}          (unchanged)
+real profile    before: {'jlink_flash_device': '...'}   after: unchanged
+```
+
+The tests assert on **key presence**, not on the value: absent and
+declared-null both read as `None`, so a value assertion cannot discriminate and
+would pass against the bug. They drive `_slice_flash_recipe` with a constructed
+`Slice` rather than a board fixture, because no shipped SoC variant on this
+branch declares a null to exercise it with — the first one arrives with the
+`jlink_flash_device` population (#1295), which is where this was found.
+
+### The emitter was not the only truthiness gate — two more, found by diffing against tan
+
+The first version of this fix changed one line. Diffing this module against
+its relocated counterpart in tan-cli (`tan/planner/`) showed tan had already
+fixed **three** sites for the same defect (tan-cli#734, PR #735), and the SDK
+side — the *upstream* of that relocation — was the one lagging:
+
+| site | was | now |
+|---|---|---|
+| `orchestrator._slice_flash_recipe` | `if slice_.jlink_flash_device:` | `if …_declared or … is not None:` |
+| `loader._enforce_flow_d_preflight_pair` | `or not slice_.jlink_flash_device:` | `or not (…_declared or … is not None):` |
+| `loader._validate_topology_cores` (slot0) | `if jlink_flash_device else None` | `if (…_declared or … is not None) else None` |
+
+The preflight one mattered most: `_enforce_flow_d_preflight_pair` is the
+#1355 guard that refuses a variant publishing `expect_dpidr` with no
+`jlink_device` for a core that flashes. Gated on truthiness, a **declared
+null skipped it entirely** — the variant with the least-resolved Flow D
+setup got the fewest diagnostics.
+
+The predicate is now `declared or is not None` at all three sites, byte-identical
+to tan's, rather than the bare `declared` the first version used. Two forms that
+behave alike on every path this code takes are still a divergence between an
+upstream and its relocated copy, and the planner-relocation freshness gate
+hashes exactly these files.
+
+### Coverage, measured per predicate
+
+```
+clean                     10 passed
+revert the emit gate       1 failed, 9 passed
+revert the preflight gate  1 failed, 9 passed
+revert the slot0 gate     10 passed      <- NOT covered
+```
+
+The slot0 predicate is **not** exercised by these tests, and saying otherwise
+would be the vacuity this file already fell into once. It sits inside
+`_validate_topology_cores`, which needs a fully-resolved SoM preset and SoC
+spec, and no shipped variant on `dev` declares a null to reach it with. tan
+does not cover it either — `test_flow_d_manifest_fields.py` recomputes the
+slot0 value in the test and passes it in, so the loader's own predicate is
+never consulted there. A shared gap, stated rather than papered over.
+
+It is closed on the #1295 branch, where `e4.json` declares a real null and
+#1445 gives `E1M-AEN401` disjoint slot0 windows — so an end-to-end
+orchestration of that SKU reaches the line with real metadata instead of a
+mock.
+
+### …and closed here
+
+This branch is where that gap closes, because it is where the corpus first
+contains a real declared null (`e4.json`) *and* a SoM with disjoint per-role
+slot0 windows (#1445 on `E1M-AEN401`). An end-to-end
+`load_board_yaml` -> `emit_system_manifest` on that SKU now reaches the line
+with real metadata:
+
+```
+m55_he -> slot0_load_address 0x80010000
+m55_hp -> slot0_load_address 0x802b0000
+```
+
+Asserted by value, not presence: a regression collapsing both roles onto one
+address would satisfy a presence check while being exactly the #1069
+corruption the disjointness rule exists to prevent.
+
+```
+revert the slot0 predicate -> 1 failed, 15 passed   (was 0 failed)
+```
+
+One existing test had to move rather than be deleted.
+`..._omits_slot0_load_address_when_flow_d_unarmed` ran against `E1M-AEN401`
+on the reading that a declared null leaves Flow D unarmed. That is no longer
+what a null means — `FLOW_D_KEYS` is exactly `("jlink_flash_device",)` and
+`flow_d_available()` is presence-based, so a published null deliberately DOES
+arm Flow D, which is the entire mechanism by which it becomes a loud refusal
+instead of a silent SE-UART fallback.
+
+Its invariant is real and kept: `slot0_load_address` must never appear on its
+own. Only its fixture died — after #1295 no shipped Alif Ensemble variant
+declares nothing — so it now strips the key from a throwaway copy of the
+metadata tree to reach that state honestly, and asserts the absence of BOTH
+keys so a mis-built fixture cannot pass it.
+
+### Fixed — documentation claims the recent metadata merges had falsified
+
+A sweep of `docs/**` after #1447/#1451, checking every present-tense claim
+against the repo's own source. Twenty corrections across eleven files; each was
+verified by quoting the settling line in `metadata/`, `scripts/` or `tests/`
+before it was applied.
+
+**The stale `J-Link V13 firmware` floor, five places.** `docs/aen-provisioning.md`
+(x2), `docs/aen-bench-bringup.md`, `docs/_aen-runbook-section.md` (x2) still told
+a reader Flow D needs "a probe on matched J-Link V13 firmware". That claim was
+retired from `tan doctor` in tan-cli#739 because it is false: Flow D was proven
+on **J-Link V11** firmware with the `AE822FA0E5597LS0_M55_HE` part profile. The
+requirements that ARE real — the part-number device profile, and a J-Link DLL
+**V9.46** or newer — are kept. The dated bench log at
+`docs/aen-bench-bringup.md:455-473` was deliberately left alone: it records what was
+observed on a given day, and a record is not a stale claim.
+
+**`today only E1M-AEN801`, four places.** `docs/board-config-features.md`,
+`docs/secure-boot.md`, `docs/porting-new-som.md` and
+`docs/tutorials/10-secure-boot-signing.md` all said the disjoint per-role slot0
+map was AEN801's alone. Since #1445 every AEN SoM declares it — verified against
+all six presets, each carrying `he_slot0` at `0x80010000` and `hp_slot0` at
+`0x802b0000`, 2688 KiB apiece. `porting-new-som.md` now also states the #1446
+emit-time refusal for a dual-M55 SoM that declares no window.
+
+**`docs/portability-matrix.md`.** The "AEN301/501/601/701 are ❌, tracked at
+#1445" block described a state that #1445 ended; it moves to past tense, and the
+hand-maintained total returns to 18 of 21 cells (NX9101's 3 remain ❌ per #1025).
+
+**ADR-0027.** "ten presets lack a `memory_map`" -> five, counted rather than
+assumed: `^memory_map:` matches exactly six of the eleven files in
+`metadata/e1m_modules/`, so the remaining gap is the V2N/V2M/NX parts. The
+E1M-AEN601 storage retarget the ADR flagged as unresolvable now resolves.
+
+**`docs/ci/HW-IN-LOOP.md`, `docs/ci/README.md`.** The "future boards" paragraph
+described board directories that already exist; re-confirmed against
+`ls tests/hil/`.
+
+Nothing was corrected from memory. Where a claim could not be settled against a
+file in this repo it was left untouched, and the sweep's one out-of-scope
+proposal — a rewrite of tan-cli's `docs/release-contract.md`, whose every claim
+is about the alp-sdk-vscode repo — was discarded rather than guessed at.
+
+### Added — real ONNX Runtime CPU inference backend for the Cortex-A55 / Yocto peer
+
+Closes the `ALP_INFERENCE_BACKEND_CPU` slot in `src/yocto/inference_yocto.c`,
+whose header comment had read "Wiring deferred to v0.4" since v0.4. New
+`src/yocto/inference_ort.cpp` implements the seven `alp_inference_ort_*`
+hooks against the real upstream ONNX Runtime C API, wired into all seven of
+`inference_yocto.c`'s dispatch switches. Gated behind the new CMake option
+`ALP_SDK_USE_ORT_CPU` (default **OFF**), which probes first
+(`find_path(onnxruntime_c_api.h)` + `find_library(onnxruntime)`) and either
+compiles the backend in, hard-fails if the new `ALP_SDK_ORT_REQUIRED` is also
+set, or emits a `WARNING` and skips the backend — the same probe-then-degrade
+shape as the existing DEEPX/DRP-AI blocks. `resolve_auto()` places CPU
+strictly last, after DEEPX and DRP-AI: an NPU-bearing SoM never silently
+falls back to the CPU floor, which would otherwise be a 10-100x throughput
+cliff the caller did not ask for.
+
+New own-recipe `meta-alp-sdk/recipes-devtools/onnxruntime/onnxruntime_1.28.0.bb`
+builds upstream `microsoft/onnxruntime` at tag `v1.28.0`
+(SRCREV `da9b5e364c465de65c49d91e696cd6485270757f`) rather than depending on
+either vendor's fork — `nxp-imx/meta-imx` and `meta-renesas-ai` both ship an
+ONNX Runtime recipe, but at incompatible fork versions (1.24.3 and 1.8.0
+respectively), which would make the new library manifest's single `version:`
+field untrue on whichever family didn't supply it. Neither
+`openembedded-core` nor `meta-openembedded` ships an ONNX Runtime recipe at
+all.
+
+New Tier B manifest `metadata/libraries/onnxruntime.yaml`, selectable via
+`libraries: [onnxruntime]` in `board.yaml`. Its `license:` field is the new
+compound SPDX expression `MIT & Apache-2.0` (`metadata/schemas/library-v1.schema.json`'s
+`license` enum extended by 2026-08-05 maintainer legal sign-off): upstream's
+own licence is MIT, but the shipped `libonnxruntime.so` genuinely contains
+Apache-2.0 code — `onnx/onnx` (the model-format parser) is a required build
+dependency with no CPU-only build that excludes it. The same extension
+unblocks Arm Compute Library, KleidiAI, and ncnn, which are all
+compound-licensed. `onnx` is also now an accepted `blob_format`;
+`scripts/alp_model/manifest.py` gained an enforced `VALID_BLOB_FORMATS`
+constant, replacing a trailing comment, so a new backend cannot silently
+invent a format string.
+
+**Verification status — BUILD-verified, NOT bench-verified. This has not run
+on silicon.** `ALP_SDK_USE_ORT_CPU` defaults OFF.
+
+The recipe builds. `bitbake onnxruntime` completes against the `E1M-V2N101`
+layer stack (MACHINE `e1m-v2n101-a55`, DISTRO `alp`) — "Attempted 997 tasks
+... all succeeded", exit 0 — producing `libonnxruntime.so.1.28.0` for
+`cortexa55` plus `usr/include/onnxruntime/onnxruntime_c_api.h`. That build is
+what settled the recipe's dependency set empirically rather than by
+inference, and it found five real defects on the way: a `SRCREV` that is not
+an ancestor of `main` (fixed with `nobranch=1`), twelve missing
+`sha256sum` entries, four wrong `FETCHCONTENT_SOURCE_DIR_*` names, an
+upstream-injected bare `-Werror`, and a `dlopen`'d runtime plugin being
+packaged into `-dev` where it would have been absent from the image at run
+time. One `[buildpaths]` QA warning remains and is recorded in the recipe.
+
+What is still NOT verified: **no SKU has run ORT on silicon.** A green build
+is not a working inference. `requires:` in the manifest is `os: [yocto]` +
+`core_class: a`, so the portability matrix marks every Yocto A-class SKU as
+capability-compatible — a capability claim, not a verification claim. Only
+`E1M-V2N101` has been built at all; `E1M-NX9101` cannot be built yet (needs
+`meta-imx`/`meta-freescale`, which no Alp build host carries). See #1255
+(V2N101 bench), #1256 (NX9101), #1259 (V2M/V2N102).
+
+There is also no `.alpmodel` -> ORT route on the A55, and that is not a
+missing flag: `alp_model.c` decodes the manifest via zcbor, which has no
+Yocto build (`metadata/libraries/zcbor.yaml` carries only a `zephyr:`
+integration, and no recipe exists), so `alp_model_parse()` resolves to the
+always-`ALP_ERR_NOSUPPORT` stub on both Yocto and bare-metal by deliberate
+precedent. The ORT backend is therefore reachable only via a hand-built
+`alp_inference_config_t`. Tracked as #1254.
+
+### Fixed — `_fmt_enum()` silently mis-decoded every unrecognised `blob_format` as TFLite
+
+`src/backends/inference/alp_model_select.c`'s `_fmt_enum()` defaulted any
+string it didn't recognise to `ALP_INFERENCE_MODEL_TFLITE`.
+`ALP_INFERENCE_MODEL_EXECUTORCH` had been in the public enum with no matching
+case, so every ExecuTorch blob had been silently mis-decoded as TFLite since
+that enum value was added — undebuggable from a customer's side, since
+nothing on the wire said "decoded as the wrong format". `_fmt_enum()` now
+returns a `bool` and `alp_model_select()` returns `ALP_ERR_INVAL` when the
+chosen target's `blob_format` string has no decoder case, instead of
+silently defaulting. Every format `scripts/alp_model/manifest.py`'s new
+`VALID_BLOB_FORMATS` constant can emit — `tflite`, `vela_tflite`,
+`drpai_dir`, `dxnn`, `executorch`, `onnx` — now has an explicit case.
+
+### Fixed — use-after-free between `alp_inference_close()` and a blocking `invoke()`
+
+Same defect class as #629 ("Make static handle pools and operation/close
+lifetimes race-safe"), which hardened the registry dispatcher but did not
+reach the Yocto backend arms. This closes those. #629 stays closed; the gap
+was in coverage, not in its fix.
+
+
+`alp_inference_close()` freed backend state (`be_state`) while a blocking
+`alp_inference_invoke()` was still reading/writing it, because both gated on
+a bare `in_use` check with no coordination between them. Affected all three
+Yocto backend arms — ORT, DEEPX_DXM1, and DRP-AI — the latter two were
+pre-existing on `dev`. Now gated with `alp_handle_op_enter` /
+`alp_handle_begin_close_blocking`, the same mechanism
+`src/inference_dispatch.c` already used. New regression
+`tests/yocto/inference_invoke_close_race.c` drives the real
+`alp_inference_open()`/`invoke()`/`close()` path through a faked backend
+invoke (a poison check wrapped around a sleep standing in for a real
+model executor's hundreds-of-ms run) and asserts close() never observes
+invoke's poison window.
+### Fixed — a `cores:`-scoped `libraries:` entry no longer emits MORE Kconfig than the same library declared project-wide (#1359)
+
+The same library on the same core produced a different `alp.conf` fragment
+depending only on how `board.yaml` spelled the selection.
+`libraries: [cmsis-dsp]` (project-wide) and `libraries: [{name: cmsis-dsp,
+cores: [m55_hp]}]` (core-scoped) both emitted the same 11
+`CONFIG_CMSIS_DSP_*=y` module-enable lines, but only the core-scoped form
+additionally emitted `CONFIG_ALP_CMSIS_DSP_SCALAR=y`,
+`CONFIG_ALP_CMSIS_DSP_HELIUM=y`, and `CONFIG_ALP_CMSIS_DSP_ADC_DMA=y`. A
+`cores:` list reads as *narrowing* an existing project-wide selection down to
+one core; silently widening it to include accelerator/SW-fallback wiring the
+project-wide form never asked for is the opposite of what the syntax
+promises, and the difference was invisible in review — both `board.yaml`
+forms looked equivalent.
+
+Two independent derivers were each reading only the core-scoped channel
+(`Slice.libraries`), never the union with the project-wide channel
+(`project.libraries`):
+
+* `scripts/alp_orchestrate/kconfig.py`'s `_slice_alp_conf` called
+  `_emit_library_hw_backends(slice_.libraries, project.sku)` — the
+  `integration.zephyr.hw_backends` accelerator matcher
+  (`CONFIG_ALP_CMSIS_DSP_HELIUM`/`_ADC_DMA`) never saw a project-wide name.
+* `scripts/alp_orchestrate/libraries.py`'s `zephyr_kconfig_lines` (the
+  project-wide emitter) read only `integration.zephyr.kconfig`, never the
+  manifest's `integration.zephyr.hw_backends.sw_fallback.kconfig` SW floor
+  (`CONFIG_ALP_CMSIS_DSP_SCALAR`) — that line was wired only into
+  `kconfig.py`'s `_per_core_library_kconfig`, the core-scoped path.
+
+Fixed by making both derivers read the SAME set for both channels. The hw-
+backend call now takes `libraries.scoped_names(project, slice_=slice_)` —
+the union helper `libraries.py` already exposed for exactly this purpose
+(added for tan-cli#555) — instead of `slice_.libraries` alone. The base +
+SW-fallback Kconfig set is now computed once, by a new
+`libraries.zephyr_library_kconfig(manifest)`, and both `zephyr_kconfig_lines`
+(project-wide) and `kconfig.py`'s `_per_core_library_kconfig` (core-scoped)
+call it, so a future symbol added to a manifest's `hw_backends`/`sw_fallback`
+block cannot land on only one declaration channel again.
+
+**The behavioural call**: a library's accelerator/SW-fallback support is a
+property of the library manifest and the SoM's silicon, not of which
+`libraries:` spelling board.yaml used to select it — so the fix makes the
+project-wide form gain the symbols, not the core-scoped form lose them.
+`check_emit_snapshots.py`'s 36 golden fixtures stay unchanged (none of the
+pinned fixtures declare a project-wide library with an
+`hw_backends`/`sw_fallback` manifest section, and the new CASE this change
+adds — `examples/connectivity/coap-client-get`, see below — is regenerated
+fresh, not diffed against a pre-fix golden); `check_zephyr_conf_parity.py`'s
+98-example sweep still agrees across both call sites (`_slice_alp_conf`
+compared against itself for the CMakeLists.txt path vs. the build-plan path
+on the same core, so it is self-consistency evidence, not no-drift evidence
+— it stays green under any output change to both paths together, including
+this one). Two real examples in this repo already declare a curated library
+project-wide with an `hw_backends` manifest section, so their *actual*
+`board.yaml` emit changes:
+
+* `examples/connectivity/coap-client-get` (`libraries: [coap]`, project-wide)
+  gains `CONFIG_ALP_COAP_NO_TLS=y` and `CONFIG_ALP_COAP_MBEDTLS=y`.
+* `examples/connectivity/modbus-server` (`libraries: [modbus]`, project-wide)
+  gains `CONFIG_ALP_MODBUS_SYNC_IO=y` and `CONFIG_ALP_MODBUS_UART_DMA=y`.
+
+`examples/ai/*`, `examples/audio/*`, and
+`examples/connectivity/iot-dashboard` do **not** move — every one of those is
+already `cores:`-scoped (or declares no `hw_backends`-bearing library at
+all), so they were already on the superset side of the pre-fix asymmetry and
+emit byte-identical output before and after this fix.
+
+Coverage hole closed: none of the 36 pinned `check_emit_snapshots.py` CASEs
+declared a project-wide library at all, which is why none of them moved and
+why this bug shipped invisibly. Added a `zephyr-conf` CASE for
+`examples/connectivity/coap-client-get/board.yaml` so a future regression on
+this exact path is caught by a golden diff, not only by the unit tests in
+`tests/scripts/test_library_layer.py`.
+
+`scripts/alp_orchestrate/` is hash-audited verbatim into tan-cli's mirror
+(tan-cli#556, milestoned for this same release); this fix must land here
+first, then tan-cli re-syncs the mirror and re-pins its freshness-gate
+hashes/fixtures before tan-cli#556 closes — the tan side cannot fix its copy
+ahead of this commit without going red against its own gate. Concretely,
+`python/tests/gates/test_planner_relocation_freshness.py:129` pins
+`kconfig.py` at
+`d80ab84bec3bc1aefe8640a6d5d1b43334447cb4ea87d4c25cee927ebfc2bf17` and
+`:131` pins `libraries.py` at
+`47b823e0fc06cc657a3c3068598b953e342720cf359443651a9996b93be7aaa5`; both go
+stale the moment this commit lands and need re-pinning to the new file
+hashes. No fixture under `python/tests/parity/oracle_fixtures/` references
+either `coap-client-get` or `modbus-server`, so re-pinning those two hashes
+is likely the entire tan-side follow-up — no new oracle fixture should be
+needed unless one is added deliberately for this path.
+
+**Follow-up (same issue): two more readers of the narrower channel alone.**
+A review that rendered every example `board.yaml` × every Zephyr core
+before/after the fix above found the fix didn't finish #1359 — two more call
+sites reproduced the identical "reads `slice_.libraries` (or
+`project.libraries`) alone" antipattern:
+
+* `scripts/alp_orchestrate/kconfig.py`'s `_slice_wants_inference` decided
+  whether to emit the `<alp/inference.h>` Kconfig block by checking only
+  `slice_.libraries` for `tflite-micro`, so a project-wide `libraries:
+  [tflite-micro]` (no `cores:` key) silently dropped the entire
+  `_emit_inference` section — `CONFIG_TENSORFLOW_LITE_MICRO=y`,
+  `CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y`, the Ethos-U/TFLM-kernel variant
+  switches, `CONFIG_HEAP_MEM_POOL_SIZE=65536` — while the identical
+  `cores:`-scoped spelling emitted it. Now reads
+  `libraries.scoped_names(project, slice_=slice_)`.
+* `scripts/alp_orchestrate/validate.py`'s rule 3 (`cores.<id>.iot.tls: true`
+  requires an mbedtls/bearssl provider) read only `slice_.libraries`, so a
+  project-wide `libraries: [mbedtls]` plus `iot.tls: true` raised
+  `OrchestratorError` — a hard refusal of a legal `board.yaml`, more severe
+  than an emit delta, since the identical `cores:`-scoped spelling loaded
+  fine. Now reads the same `libraries.scoped_names(project, slice_=slice_)`.
+* `scripts/alp_project.py`'s `--emit zephyr-conf` pre-flight validation
+  guard (the one that turns a bad `libraries:` selection into a clean
+  one-line `alp_project: ...` error instead of a mid-emit traceback) gated
+  on `if project.libraries:` alone, so a board.yaml with only a
+  `cores:`-scoped selection skipped the guard and hit the later, unwrapped
+  `_slice_alp_conf` call as an unhandled `OrchestratorError` traceback
+  instead. Now gates on `libraries.scoped_names(project)` (the whole-project
+  view, `slice_=None`).
+
+Both `kconfig.py` and `validate.py` fixes are covered by a regression test
+in the same style as the original ("declaration form does not change
+outcome"): `tests/scripts/test_library_layer.py::
+test_declaration_form_does_not_change_the_inference_block` pins the
+project-wide form against the same 13 `CONFIG_*` symbols the `cores:`-scoped
+form emits; `tests/scripts/test_orchestrate_consistency.py::
+test_consistency_tls_satisfied_by_project_wide_mbedtls` asserts the
+project-wide spelling *loads* rather than raising.
+
+### Added — ADR 0027 proposes declaring storage regions by role, not by SoM-internal region name
+
+`board.yaml`'s `storage:` entries place themselves with `flash_device:`, a
+string naming a region in the SoM preset's `memory_map:` or
+`on_module.ospi_memories:`. Measured across all 11 presets in
+`metadata/e1m_modules/` at `f30f4d4b`, that field is resolvable on **exactly
+one**: only E1M-AEN801 defines a `memory_map:` (`mcuboot`, `he_slot0`,
+`hp_slot0`, `reserved`, `storage`, `atoc`, `mram_main`). E1M-AEN301/401/501/
+601/701 carry `on_module.ospi_memories:` but no `memory_map:`; E1M-V2N101/102,
+E1M-V2M101/102 and E1M-NX9101 carry neither, using `on_module.nor_flash` /
+`emmc` instead.
+
+The single example that uses the field,
+`examples/connectivity/production-deployment/board.yaml`, pins all five
+partitions to `mram_main` under `som.sku: E1M-AEN801` — correct today, and
+portable to nothing: retargeted at E1M-AEN601, the same family ADR 0011 says
+portability must hold across, every entry names a region that preset does not
+define.
+
+**ADR 0027** proposes `role:` (`settings` / `app_data` / `log` / `ota_cache`)
+as the primary, portable declaration, resolved per SoM from the preset, with
+`flash_device:` retained as an explicit non-portable pin for cases roles
+cannot express (the example's three MCUboot slots byte-match the bootloader
+and stay pinned). A pinned region that does not exist after a SoM swap is a
+**refusal** naming the missing region, the SoM, and the role that would
+replace it — never a silent relocation, because relocating persisted settings
+on a green build is data loss. `size_kib` stays required: a role implies
+*where*, never *how much*.
+
+Status is **Proposed** and this changes no code. Migration is sequenced so the
+feature never half-exists, and where a SoM's backing part is not yet pinned
+down the role is marked TBD and refuses with "not yet mapped" rather than
+resolving to a guessed region.
+
+### Added — ADR 0026 proposes retiring alp-sdk as a second planner producer
+
+ADR 0020's 2026-08-03 amendment relocated the planner into tan but kept
+alp-sdk's `scripts/alp_orchestrate/` as "the reference producer", so two
+independent implementations of the same planner ship from two repos and
+neither is allowed to be wrong. **ADR 0026** proposes ending that: tan's
+`python/tan/planner/` becomes the single implementation, alp-sdk keeps what it
+is uniquely authoritative for (`metadata/`, `metadata/schemas/`, examples,
+tooling contracts), and `build-plan-v1` survives unchanged as the
+planner/executor seam.
+
+Measured at alp-sdk `f30f4d4b` / tan-cli `ac7e725`: `scripts/alp_orchestrate/`
+is 21 modules and 7,182 lines, `python/tan/planner/` is 31 modules and 12,071
+lines, 20 of the 21 module basenames are mirrored (all but `__main__.py`), and
+the parity apparatus that exists solely to police the mirror is 47 files and
+23,886 lines — more than three times the logic it guards.
+
+The ADR also records the recurrence evidence (tan-cli #274, #275, #279, #313,
+#320, #324, #409, #425, #485, #492, #509, #531, #543, #544, #545): #320
+recurred as #485, and #543 has dev's parity job failing on every alp-sdk
+dispatch since 2026-08-07. Status is **Proposed** — the ADR changes no code,
+and its migration section requires the two planners be provably equal at one
+ref before any removal begins.
+### Fixed — CC3501E Wi-Fi connect no longer re-associates on every retry or reports a false "connected", `wifi status`/`wifi rssi` survive a radio op, and `wifi connect`'s own timeout budget is honoured (#1376, #1377, #1378)
+
+A wire-contract drift on `WIFI_CONNECT_STA` (0x12): the firmware was
+redesigned to fire-and-forget (submit once, then latch the outcome for
+`WIFI_STATUS` to collect), but the host driver still ran the old poll-by-
+repeat-the-submit contract, re-issuing the SAME command every 50 ms on
+`ALP_ERR_BUSY`/`ALP_ERR_IO`. Each retry landed on a job slot the firmware
+resets to `IDLE` the instant the association drains, so it submitted a
+**brand-new** association — five retries observed as five real join attempts
+for one `wifi connect` command, each producing its own `[event] wifi
+disconnected` burst (#1376).
+
+**`cc3501e_wifi_connect()`** (`chips/cc3501e/cc3501e_wifi.c`) now submits
+`WIFI_CONNECT_STA` exactly once and awaits the outcome off the independent,
+non-blocking `WIFI_STATUS` latch (`CONNECTING` → `CONNECTED`/`CONN_FAILED`)
+instead of trusting the submit's own acknowledgement in either direction.
+
+**`cc3501e_wifi_status()` / `cc3501e_wifi_rssi()`** had no retry stance at
+all — a single request with a short timeout — on the reasoning that neither
+op runs a radio op itself. False: the shared bridge transport is briefly
+down whenever *any* radio op is in flight (a connect this same call may be
+observing the outcome of, included), so a status read taken moments after a
+connect desynced like any other transaction — `ver`/`scan`/`connect` all
+healthy, then every subsequent `wifi status` failing `-5` (`ALP_ERR_IO`),
+repeatably (#1377). Both now poll-by-repeat, floored to the radio
+down-window, like every other radio-adjacent op in this file.
+`WIFI_GET_RSSI` (0x16) is additionally worker-routed (a fresh request
+lazy-starts the radio), so a single non-retried call was collecting only the
+submit's own `BUSY` ack and orphaning the job.
+
+**The console's RSSI print** (`src/zephyr/console/alp_console_companion_wifi.c`)
+discarded `cc3501e_wifi_rssi()`'s return status on a zero-initialised local,
+so a failed read rendered as a plausible `rssi=0 dBm` on any connect success.
+It now reports the read failure instead of a fabricated zero.
+
+**#1378 — an unvalidated reply-payload status byte made a dead bus phase
+indistinguishable from success.** `cc3501e_request_locked()`
+(`chips/cc3501e/cc3501e_core.c`) validated only the reply header; the payload
+status byte fed straight into `resp_to_status()`. `ALP_CC3501E_RESP_OK` is
+`0x00`, and this repo's own silicon finding is that a dead bus phase reads
+back literal `0x00` — so a header that read intact (genuinely alive) followed
+by a payload phase that died in the inter-phase settle gap was silently
+accepted as a successful bare-status reply. `WIFI_CONNECT_STA`'s submit ack
+is now hardened at the transport layer: the firmware's `WORKER_IDLE` branch
+for this opcode unconditionally acks `RESP_ERR_BUSY` and can never
+legitimately reply a synchronous `RESP_OK`, so a bare `RESP_OK` (payload
+length 1) for this specific opcode is rejected as `ALP_ERR_IO` rather than
+accepted — defense in depth alongside `cc3501e_wifi_connect()`'s own refusal
+to trust the ack. A general, opcode-agnostic version of this check is
+**not** applied: several bare-OK replies legitimately are all-zero
+(`WIFI_STATUS`'s disconnected-and-never-attempted state, `DIAG_GET_STATS`'
+zero counters right after boot, `SOCK_RECV`'s zero-bytes-pending), so
+flagging those would trade a rare false `ALP_OK` for a routine false
+`ALP_ERR_IO` on paths that are correct today. The same aliasing remains open
+for every other bare-ack opcode this driver has no per-opcode contract
+knowledge of — `OTA_PROMOTE` is the sharpest example, and `WIFI_AP_START`
+shares `WIFI_CONNECT_STA`'s exact fire-and-forget firmware shape but its host
+wrapper was not restructured here — filed as #1385.
+
+**`cc3501e_wifi_connect()`'s own poll loop was not honouring its declared
+`timeout_ms`.** The loop called the *public* `cc3501e_wifi_status()`, whose
+own down-window retry can burn up to ten seconds per call on a down
+transport — but the loop's `remaining` budget only ever debited its own
+50 ms sleep, never the time that inner call spent. Measured against a wedged
+transport: `connect(timeout_ms=200)` made 1005 `WIFI_STATUS` attempts
+(50250 ms, 251× the declared budget); at the console's real
+`ALP_COMPANION_WIFI_CONN_MS = 50000` it took 2 h 48 min before timing out.
+Fixed with a new `wifi_status_once()` — a single, non-retried `WIFI_STATUS`
+read the connect loop now uses instead, so the loop's own cadence is the
+sole owner of the retry budget, and `remaining` debits that attempt's own
+worst-case cost alongside the poll gap. `cc3501e_wifi_status()` /
+`cc3501e_wifi_rssi()`'s public doc comments now also warn that their
+down-window retry rides out only a *transient* stall — it re-issues the
+identical transaction with no resync/reset, so it cannot recover a
+genuinely wedged transport, and a direct caller (e.g. the console's `wifi
+status`) will still burn the whole down-window before failing in that case.
+
+### Fixed — `examples/peripheral-io/pwm-led-fade` now wires `alp-pwm3` on E1M-AEN801, so `alp_pwm_open` no longer returns NOT_READY on real silicon (#1375)
+
+The example builds, signs, flashes, and boots cleanly on E1M-AEN801, but
+`alp_pwm_open(ALP_E1M_PWM3)` returned `NOT_READY` on the bench: `board.yaml`'s
+declarative `pins:`/`peripherals:` route emits no devicetree alias by itself —
+nothing in this repo's `CMakeLists.txt` wiring ever calls `alp_project.py
+--emit dts-overlay` for a real build (only `--emit zephyr-conf`, for
+`alp.conf`'s `CONFIG_PWM=y`). The Zephyr PWM backend
+(`src/backends/pwm/zephyr_drv.c`) resolves each portable channel through the
+`alp-pwm<N>` DT alias; with none defined, `ALP_PWM_SPEC_3_INIT` was `{ .dev =
+NULL }`.
+
+Fixed by shipping a board-target-qualified
+`boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay` — the same
+precedent `examples/peripheral-io/alp-console` and
+`examples/aen/aen-analog-validate` already set for bridging AEN peripherals
+end-to-end — wiring `E1M_PWM3` (pad P2_4) through UTIMER10 to a `pwm-leds`
+consumer node aliased as `alp-pwm3`. A host-side regression test
+(`tests/scripts/test_pwm_led_fade_aen_overlay.py`) now parses the shipped
+overlay and fails if the alias, the `pwm-leds` consumer node shape, or the
+`utimer10`/`pwm10` enable ever regress.
+
+Also fixed the failure message that hardcoded a `native_sim` explanation —
+`[pwm] open failed: alp_last_error=-2 (expected NOT_READY = -2 on native_sim —
+no PWM emul)` printed unconditionally, so on real silicon it misdirected the
+operator toward a nonexistent emulation gap instead of the actual missing
+alias. The diagnostic now only names the native_sim cause under
+`CONFIG_BOARD_NATIVE_SIM`; on every other target it reports the raw error
+code without guessing at a cause it can't detect.
+
+### Fixed — helper MCUs can now describe the GD32 bridge: `flash_policy`, a second OTA channel, and `jlink_device` on all four E1M-X presets (#1357)
+
+`helper_firmware[]` encoded `update_channel` **XOR** `flash_method`, in two
+independent places, and the GD32 bridge legitimately has both: a real OTA path
+over the bridge link (protocol v0.6 Path A, slot-A/B application bootloader
+with commit + rollback, silicon-validated 2026-06-04) **and** a SWD flash the
+customer may use to recover a bricked board with Alp Lab-supplied binaries.
+The XOR forced a choice the hardware does not offer, and neither field carried
+the fact that actually decides tool behaviour: **who** may invoke the flash
+method, and **when**.
+
+**The schema half.** `som-preset-v1.schema.json` drops the `oneOf` and gains
+`flash_policy` (`customer` / `factory` / `recovery_only`), now **required on
+every `helper_firmware` entry** — there is no absent-means-`customer`
+default; the next SoM port that adds a helper with only `flash_method` no
+longer becomes an ungated customer flash target by omission.
+`system-manifest-v1.schema.json` requires the projected key the same way.
+`update_channel`'s enum gains `alp_ota_spi_bridge` for the GD32; reusing the
+CC3501E's `alp_ota_spi_otp` would assert OTP programming for a part that has
+none.
+
+**The emitter half, which would have silently defeated a preset edit.**
+`scripts/alp_orchestrate/manifest.py::_helper_mcus` carried the same XOR, so a
+both-declaring entry would have had its `flash_method`/`flash_args` **dropped
+from the emitted manifest** — the recovery path *vanishing* rather than being
+declined-but-reachable, leaving no way to tell someone with a bricked bridge
+why it was unavailable. Each declared key is now projected independently, and
+`system-manifest-v1.schema.json` declares `flash_policy` and `update_channel`
+(the latter was emitted undeclared, passing only on `additionalProperties`).
+
+**`jlink_device` on the four E1M-X presets.** `E1M-V2N101` / `E1M-V2N102` /
+`E1M-V2M101` / `E1M-V2M102` named `flash_args.target` without its other half,
+and `tan flash`'s `swd_probe` refuses rather than guess a SEGGER profile from
+an OpenOCD/pyOCD target. Measured, that is wider than a J-Link-only host: the
+J-Link arm is preferred whenever a J-Link binary resolves, and `--dry-run`
+always takes it, so these entries could not even be **previewed** on any host.
+All four now carry `jlink_device: GD32G553MEY7TR` and stay byte-identical (one
+PCB, variant-populated). The schema now rejects a `swd_probe` entry that names
+`target` without `jlink_device`, so the next one is caught at `alp validate`
+time rather than at a bricked customer's bench. `expect_dpidr` stays
+deliberately **unset**: two SW-DP ID values are in circulation for the GD32 —
+`0x6BA02477` in `metadata/chips/gd32_swd.yaml` (itself annotated as the
+generic ADIv5 Cortex-M33 r0p1 SW-DPv2 expectation, not a GD32-specific
+reading) and an unattributed `0x0BE12477` elsewhere in this repo — and
+**neither has been measured on a GD32 with a probe attached**; these entries
+carry a `flash.dpidr-preflight-unarmed` advisory instead of a guard armed at
+a guessed ID.  #1369 tracks the contradiction itself (which value, if
+either, is correct) — that is a bench measurement this repo cannot make
+today.  `docs/gd32-bridge.md` now states a mandatory bench step in the
+meantime: set `ALP_FLASH_REQUIRE_DPIDR=1` before a recovery flash on the
+alplab-gw bench, because the GD32 probe and the AEN E8 probe there enumerate
+the same J-Link serial and `JLinkExe` selects only by serial.
+
+The six `E1M-AEN*` presets' `flash_policy` moves from `factory` to
+`recovery_only` on their `cc3501e_otp` entry, keeping the six in lockstep per
+`metadata/e1m_modules/README.md`.  `factory` denies a recovery flash outright;
+the maintainer-confirmed rule is that only the CC3501E and the GD32 are not
+routinely customer-flashed, and even then a customer may flash either **to
+recover a bricked device**, using Alp Lab-supplied binaries.  Behaviour is
+otherwise unchanged (the entry still declares no `flash_method`).
+
+### Fixed — `flash_args` carries no `slot0_load_address`, so tan refused to auto-sign an AEN Flow D flash (tan-cli#353)
+
+alp-sdk emitted `flash_args.jlink_flash_device` (the Flow D device profile)
+but never `slot0_load_address` (where the slot0-linked application blob
+itself belongs) -- zero occurrences anywhere in `scripts/`/`metadata/`.
+tan-cli correctly routed an AEN slice to Flow D (`alif_mram_jlink`) and
+then refused outright: `flash_args.slot0_load_address is required to
+auto-sign via SETOOLS`, forcing a customer to hand-edit
+`system-manifest.yaml` to flash an AEN at all. Confirmed on silicon with
+the value hand-supplied: three images flashed, persistence proven across
+full cold power cycles at 16.0 V.
+
+**This alone does not make `tan flash` work.** A Windows E1M-AEN801 bench
+run against tan `v0.5.1` (PR #1374 review comment, 2026-08-11) confirmed
+this emitter's addresses are correct on real silicon, then measured that
+tan re-derives `system-manifest.yaml` itself rather than consuming this
+emitter's output: the `build/system-manifest.yaml` tan actually writes
+carries only `jlink_flash_device` -- `slot0_load_address`, `expect_dpidr`
+and `jlink_device` are all absent -- so `tan flash` still fails with the
+same `flash_args.slot0_load_address is required to auto-sign via SETOOLS`
+refusal after this PR. That is tan-cli#353 (reopened 2026-08-11) and is
+fixed on the tan-cli side, not here.
+
+`scripts/alp_orchestrate/loader.py` gains `_resolve_slot0_load_address`,
+resolved PER CORE (unlike `jlink_flash_device`, which is a single
+per-variant string) from the SoM preset's own `memory_map:` `he_slot0`/
+`hp_slot0` regions -- deliberately NOT added to the SoC JSON `debug:`
+block `jlink_flash_device` lives in, because this address is SDK/module
+build POLICY, not a silicon fact:
+`metadata/e1m_modules/E1M-AEN801.yaml`'s own `memory_map:` comment says so
+explicitly (#1069, the disjoint-slot0 fix), and two SoMs sharing one
+silicon part can freely choose different slot0 windows. Measured, not
+asserted: E1M-AEN801's `m55_hp` and `m55_he` share ONE silicon variant
+(`AE822FA0E5597LS0`) yet resolve to two different addresses
+(`0x802b0000` vs `0x80010000`) purely because of that SDK layout choice,
+so a single per-SoC-JSON value beside `jlink_flash_device` (itself a flat
+per-variant string, not per-core) cannot represent this fact without
+growing its own per-core override mechanism -- at which point it is the
+same `memory_map:`-shaped override this PR already added, just moved.
+Bench-proven at `0x80010000` for the HE core
+(`docs/aen-bench-bringup.md`, `docs/aen-provisioning.md` §0.5,
+`docs/secure-boot.md`); `hp_slot0` resolves to `0x802b0000` from the same
+`memory_map:`. Falls back to the stock AEN default (`0x80010000`,
+computed from `gen_zephyr_board`'s own `_AEN_MRAM_BASE`/
+`_AEN_MCUBOOT_KIB`, not a locally pinned copy) for EITHER role when the
+preset declares no `<role>_slot0` override at all -- both
+E1M-AEN401 and E1M-AEN601 declare `m55_hp` AND `m55_he` in `topology:`,
+but only the `m55_hp` Zephyr board tree is generated today (#999), and
+this covers that no-override shape for either role, not just `he` -- by
+reusing `scripts/gen_zephyr_board.py`'s own `_aen_role_slot0_map` (not a
+second copy of its derivation), so the two genuinely cannot disagree on
+the override/no-override decision itself; a declared-but-invalid
+override (half-authored, or a wrong `accessible_from`) now raises
+instead of silently emitting a fabricated address no board was ever
+generated for. The no-override default is deliberately the SAME address
+for both roles, which is not itself a live collision today (no non-
+E1M-AEN801 AEN variant publishes `jlink_flash_device` yet); a new
+`_enforce_slot0_disjoint_across_roles` guard now refuses outright if a
+future SoM variant ever makes it one, rather than leaving that case to
+coincide silently (#1384).
+
+`scripts/validate_metadata.py` gains `_check_som_slot0_address_resolved`:
+a `memory_map:` region whose `name:` declares an MRAM slot0 path
+(`*_slot0`) but whose `base:` isn't a resolved integer (a `"TBD"`
+placeholder or a missing key) is now refused at the metadata layer,
+instead of silently falling through to the wrong default (or `None`) at
+manifest-emit or board-generation time.
+
+### Changed — the diagnostics schema gate no longer runs through the `alp` command surface (#837)
+
+ADR [0020](docs/adr/0020-sdk-owns-build-execution.md) ends with alp-sdk owning
+zero user commands. `scripts/check_diagnostic_schema.py` stood in the way of
+that: to get a real machine document to validate, it shelled `python -m
+alp_cli.main validate --format json`. That made two pure CLI wrappers —
+`alp_cli/main.py` (41 lines) and `alp_cli/validate.py` (43 lines) —
+load-bearing for a gate registered in `metadata/quality-tasks-v1.json`, so the
+command surface could not retire without reddening the metadata sweep.
+
+The gate now calls the emitter directly:
+`alp_cli.diagnostic_format.machine_json_for_board_yaml(path)`, a new library
+entry point that returns exactly the document `--format json` prints. The
+modules doing the actual work — `validator.py`, `diagnostic.py`, `yaml_pos.py`
+and the schema-governed exporters in `diagnostic_format.py` — are untouched and
+stay; only the door the gate comes in through moved. Nothing is deleted here.
+
+The document under test is the same document, measured rather than assumed: on
+all **14** fixtures under `tests/fixtures/board_yaml_bad/` the CLI's stdout and
+`machine_json_for_board_yaml()` compare equal, and both gate forms return the
+same verdict on the passing case, on a schema-nonconformant emitter (a stray
+key, an out-of-enum `severity`, a dropped required `code`), on an invalid
+Draft 2020-12 schema, and on the zero-diagnostics branch. That equality is now
+a test (`test_cli_json_is_document_identical_to_the_library_entry_point`),
+not a claim, for as long as the CLI exists — `alp_cli.validate`'s `--format
+json` branch calls `machine_json_for_board_yaml()` directly rather than a
+parallel `to_machine_json(collector)` path, so the equality is structural.
+
+Two things the subprocess form gave for free had to be re-homed rather than
+dropped. Click's `click.Path(exists=True, dir_okay=False)` turned a bad
+`--fixture` into a clean message; with no argv layer the gate owns that check
+itself, or a mistyped path comes back as an `IsADirectoryError` traceback. And
+the promise that `--format json` prints ONLY the JSON document, with no human
+prose interleaved, is a property of the CLI and not of this schema — it stays
+locked by `tests/scripts/test_diagnostic_format.py`, which lives with the
+wrappers and retires with them.
+
+### Fixed — an AEN MRAM write had no wrong-board guard, because the SW-DP IDR was published nowhere (#1355)
+
+`expect_dpidr` — the value that lets a host writer refuse an unidentified
+board — existed nowhere under `metadata/` or `scripts/`. A real Flow D MRAM
+write to an E1M-AEN801 therefore proceeded with no guard and no signal: four
+bench transcripts on 2026-08-10 reported `ISSUES = []`.
+
+That is a customer path, not bench hygiene. `JLinkExe` selects an adapter
+**only** by serial (`-SelectEmuBySN`), and J-Link serial `603000869` is
+OEM-cloned across two adapters on that bench — the AEN E8 (USB path
+`3-4.4.3`, SW-DP `0x4C013477`) and the GD32 bridge (`3-4.2`). Detaching one
+does not turn the ambiguity into an error; it collapses it into a certainty
+pointing at whichever adapter is still attached.
+
+`metadata/socs/alif/ensemble/e8.json` now publishes
+`debug.expect_dpidr: "0x4C013477"` on `AE822FA0E5597LS0`, the variant
+carrying `E1M-AEN801`, and the orchestrator emits it into `flash_args`
+alongside the already-published `jlink_flash_device`. The value is a
+measurement (re-confirmed on silicon 2026-08-10), not a derivation, and the
+new `soc-spec-v1` schema entry pins it to a `0x`-prefixed 32-bit hex
+constant — a DPIDR is exactly 8 hex digits, and a truncated one would pass a
+downstream address validator that accepts any length.
+
+**`flash_args.jlink_device` ships in the same change, necessarily.**
+`debug.jlink_device` — the per-core *live-core attach profile*, distinct from
+the part-number `jlink_flash_device` used for the write — already existed on
+the E8 variants but never reached `flash_args`. The two are one guard: the
+expected ID, and the device the read is performed with. A consumer validates
+them as a pair and refuses a half-armed one, so publishing `expect_dpidr`
+alone would have turned every AEN write into a hard refusal, dry runs
+included. The emitter treats them as inseparable, `validate_metadata.py`
+rejects a variant that publishes `expect_dpidr` without an attach profile for
+every Cortex-M core, and the loader refuses a Flow-D-armed Zephyr slice whose
+core lost one rather than letting the guard degrade quietly back to nothing.
+
+The GD32 entries are deliberately untouched. That part's SW-DP ID is
+contested — `0x0BE12477`, asserted with no identifiable provenance, versus
+`0x6BA02477` in this repo's own `metadata/chips/gd32_swd.yaml:49` — and the
+GD32 is not on the bench, so nobody can measure it. A guard armed at a wrong
+ID is worse than an unarmed one: if the wrong value happens to match the
+other board, it passes on exactly the board it exists to exclude.
+
+### Fixed — the tan re-sync trigger never fired for a hand-port source (#855)
+
+`.github/workflows/dispatch-tan-parity.yml` is ADR-0020's cross-repo trigger:
+it fires `alp-sdk-planner-change` at `alplabai/tan-cli` whenever this repo's
+reference planner moves, so tan re-tests against the ref that just landed
+instead of its hand-bumped pin. Its `paths:` filter was kept in deliberate
+lockstep with `parity-seam1.yml` — and that lockstep was the bug.
+
+The two lists answer different questions. `parity-seam1.yml` asks *"did our own
+build-plan SHAPE move?"*, so its list is the plan-shape surface. This one asks
+*"did anything TAN MIRRORS move?"*, and tan mirrors a strictly larger surface:
+alongside the 20 relocated `scripts/alp_orchestrate/` modules, `tan/planner/`
+carries **ten hand-ports out of `scripts/`** (`gen_zephyr_board.py`,
+`alp_project_loader.py`, `alp_template.py`, `sentinels.py`, `strict_loaders.py`
+and the five `alp_project_emit/` modules — tan-cli's `HAND_PORT_HASHES` is the
+list). Not one of those paths was in the filter, so a commit touching only a
+hand-port source dispatched nothing and tan learned nothing until someone
+noticed by hand.
+
+Measured over the last 400 commits touching one of those sources: **7 of 29
+matched none of the four original paths**, including `98807809` (the missing
+`CONFIG_USE_DT_CODE_PARTITION=y`, which shipped) and `cb7f64ae` (#1125/#1126,
+path traversal) — the two incidents tan-cli#279 was filed about. The other five
+are `77abfd7c`, `f4d87a1f`, `5efa72dd`, `957fdaa5`, `b92b8785`. All seven match
+the widened list.
+
+`tests/scripts/test_dispatch_paths_match_seam1.py` enforced the old equality,
+so it moves with the workflow rather than being deleted: the direction that
+matters stays STRICT (a path in `parity-seam1.yml` and not in the sender is
+still a hard failure -- that is the tan-cli#156 shape), and the sender's EXTRA
+paths must equal a declared `EXPECTED_HAND_PORT_PATHS` set. Both drift
+directions on that set are reachable failures -- a hand-port source quietly
+dropped, or an unrelated path quietly added -- verified by mutating the
+workflow and re-running, not assumed.
+
+The old comment's warning still holds in its new shape: a path list is a thing
+that can be wrong, and the dispatch API answers 204 whether or not anything is
+listening. The backstop for that needs nothing from this repo — tan-cli's new
+`planner-resync.yml` (alplabai/tan-cli#624) also runs on a daily cron, which
+catches a missed path within 24h with no alp-sdk credential and no list having
+to be right.
+### Fixed — `--emit zephyr-board`: E8 facts on every AEN SKU, four fail-open paths, and an error that blamed the customer (alplabai/tan-cli#493, alplabai/tan-cli#591)
+
+`scripts/gen_zephyr_board.py` generates board files that are meant to be
+derived from metadata with no invented values. Nine places did the opposite.
+Reported against the tan-cli hand-port; fixed here, at the source.
+
+**Ensemble E8 facts were hardcoded for every `E1M-AEN*` SKU.** The display
+string `"Alif Ensemble E8"`, the `#include <alif/ensemble_e8_peripherals.dtsi>`
+line and the `"The Ensemble E8 RTSS-<role> has CONFIG_NUM_IRQS=480"` Kconfig
+comment were generator constants, while `_sku_family_slug()` routes E3/E4/E6/E7
+silicon down the same path. Following `docs/porting-new-som.md` §10 for an
+E1M-AEN301 emitted an **E3 board tree labelled E8, including the E8 peripherals
+overlay** — exit 0, no warning, while the twister `.yaml` and `board.yml` from
+the same run correctly said "Alif Ensemble E3". The part designator now comes
+from the SoC JSON's required `part`, and the peripherals overlay from a new
+`zephyr_peripherals_dtsi` on the SoC. A SoC that declares none is REFUSED: the
+E8's overlay declares `ethosu85`, an E3 carries 2x Ethos-U55 and no U85, so
+inheriting a sibling part's file produces a board that builds and then
+misbehaves on silicon. `NUM_IRQS=480` stays literal — it is an
+Ensemble-family constant in upstream Zephyr, not per-part.
+
+**A missing `atoc` region blamed the customer's SoM metadata** (tan-cli#591).
+`tan generate --target zephyr-board` fails on every AEN board against every
+released alp-sdk, because the SE-owned ATOC reservation (#1289) postdates
+`v0.15.0`; the message read *"AEN disjoint-slot0 memory_map is missing an
+integer-`base` region named 'atoc'"*, sending readers to a `board.yaml` and a
+preset that are both fine. When every other region is present and placed —
+the shape of any pre-#1289 checkout — the refusal now names the real cause and
+says to upgrade alp-sdk, while still telling a preset author what to add.
+
+**Four fail-open paths now raise.** A `memory_map:` that declares a SIBLING
+core's `<role>_slot0` but not this core's fell back to the stock symmetric
+layout, putting `slot0_partition@10000` exactly on top of the sibling's
+declared window and silently undoing #1069. A declared `silicon_variant:` that
+matched no `variants[].order_code` was discarded without a diagnostic and the
+`alp_module_skus` reverse lookup answered instead, so `...LS0` typo'd to
+`...LSO` emitted a full board tree named after a part number the preset does
+not declare. Neither partition branch checked extents, so a `storage` region
+grown to 2048 KiB emitted `partition@560000 reg = <0x560000 DT_SIZE_K(2048)>`
+1.9 MiB outside its own `mram_storage` `reg` — the stock branch's
+`offset != total_kib * 1024` assertion is a tautology that can never fire, not
+a bounds check. And the flash node's address was a hardcoded `0x80000000`
+literal while the offsets came from the metadata `mcuboot` base, an invariant
+documented only in an error string: a map shifted 32 KiB emitted every
+partition below its declared physical address, with the `.dts` and
+`_defconfig` disagreeing about where slot0 is.
+
+**Two prose facts now derive from metadata.** The `_defconfig` console comment
+spelled the AEN801 silicon pads `P3_4/P3_5` as a literal on every SKU while
+the sibling `.dts` and `-pinctrl.dtsi` read them from
+`metadata/pinmux/aen.yaml`. And the #1069 rationale asserted "both 2688 KiB
+code slots fit the 5632 KiB App MRAM alongside the ~2.6 MiB NPU MRAM-model
+budget" unconditionally, ~100 lines above a partition map derived from the
+same `memory_map:` — the slot sizes now come from the map, and the `~2.6 MiB`
+policy figure (which no generator input carries, and which does not survive
+the arithmetic at other slot sizes) is replaced by a pointer to
+`zephyr/sysbuild/aen/README.md`.
+
+**The module docstring listed only `board.cmake` as hand-maintained.** The bare
+per-board `Kconfig` is too — it sets `CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS
+default y`, and its absence is silent: the build succeeds on Zephyr's generic
+2-region FLASH_0/SRAM_0 fallback, whose whole-flash FLASH_0 region is unsafe on
+Flow D. Both the docstring and `docs/porting-new-som.md` now name both files
+as ones a porter must copy across.
+
+Emitted output moves in exactly one place: the #1069 rationale sentence in
+`e1m_aen801_m55_hp` / `_m55_he`'s `.dts`. Every other AEN801 surface, and all
+four V2N/V2M family-agnostic files, are byte-identical.
+
+### Fixed — memory placement: silent carve-out overlaps, an unreachable DDR address, and a dropped storage layout (alplabai/tan-cli#552, #553, #554)
+
+Three placement defects in `scripts/alp_orchestrate/`, each of which resolved
+`status: ok` (or dropped a partition) with nothing said at build time.
+
+**Two IPC carve-outs could land on one physical address** (tan-cli#552).
+`ipc[].address:` was honoured after a 4 KiB alignment check and nothing else —
+no overlap check against carve-outs already placed, no bounds check that the
+pinned range even lies inside the region it was then labelled with. On
+E1M-V2N101 that produced `a_chan ok base=0x80000` and `b_chan ok base=0x80000`
+— one 64 KiB window handed to two channels, two `ALP_IPC_*_ADDR` defines with
+the same value and two `no-map` `shared-dma-pool` nodes over the same memory —
+and accepted `wild_chan ok base=0xdeadb000 region=ocram_low`, an address in no
+declared region at all. Pins are now placed before the automatic allocator runs
+(so it steps around them), the region that CONTAINS the pin decides the
+`region:` label, and an out-of-region pin is refused with the reachable windows
+named.
+
+**A DDR carve-out landed outside the CM33's 256 MiB window** (tan-cli#553).
+The top-down allocator only ever bounds-checked downward, so a
+`cacheable: true` entry took the top of `ddr_main` (4 GiB from `0x48000000`)
+and emitted `ALP_IPC_ALP_DEFAULT_RPMSG_ADDR 0x147f80000` into the header the
+M33 `#include`s — a 33-bit address that truncates to `0x47f80000`, below the
+DDR base, when cast to a pointer on the M33.
+`metadata/socs/renesas/rzv2n/n44.json` now declares the real limit as
+`access_windows: { m33_sm: ... }` (base `0x40000000`, 256 MiB, per Renesas FSP
+`bsp_slave_address.h`: CM33-secure `0x80000000` / CM33-non-secure `0x90000000`
+→ A55 `0x40000000`), the som-preset and soc-spec schemas gained the optional
+key, and the allocator confines an entry to the intersection of every
+endpoint's window. The same entry now resolves to `0x4ff80000`.
+
+**A validate-clean storage layout was silently dropped** (tan-cli#554). Storage
+entries are name-sorted and the bump allocator only saw the siblings placed
+before it, so an `offset_kib:`-pinned partition whose name sorts late collided
+with a sibling already placed on top of it and was refused — `status: blocked`
+in `system-manifest.yaml`, but simply absent from the generated
+`dts-partitions.dtsi` with its `CONFIG_FILE_SYSTEM_LITTLEFS` never emitted,
+while the build reported success. `docs/board-config-features.md`'s own
+`storage:` example is that shape and lost `pinned_low`. Pins are placed first
+here too.
+
+No shipped `board.yaml` uses `ipc[].address:` or `storage[].offset_kib:`, and
+none declares a `cacheable: true` carve-out, so no generated artefact in the
+repo moves.
+
+### Fixed — Kconfig emission: Hawkbit OTA units + URI, `diagnostics.modules`, and the bypassed library layer
+
+Four planner defects, all in `scripts/alp_orchestrate/`, reported against the
+tan-cli mirror as `alplabai/tan-cli#555`, `#557`, `#558` and `#559`.
+
+- **`ota.poll_interval_s` is now converted from seconds to minutes**
+  (`alplabai/tan-cli#557`). `CONFIG_HAWKBIT_POLL_INTERVAL` is declared in
+  MINUTES with `range 1 43200`; the seconds value was written through verbatim,
+  so the board schema's own `1800` default made a fleet poll every **30 hours**
+  instead of 30 minutes. A value that is not a whole number of minutes, or that
+  falls outside the declared range, is now refused naming the constraint rather
+  than emitted out of range.
+- **`ota.server.url` is now decomposed** (`alplabai/tan-cli#558`).
+  `CONFIG_HAWKBIT_SERVER` is a bare host fed to `zsock_getaddrinfo()`, the TLS
+  hostname and the HTTP `Host:` header — a full URI could never resolve. The
+  host, port and scheme now emit as `CONFIG_HAWKBIT_SERVER` /
+  `CONFIG_HAWKBIT_PORT` / `CONFIG_NET_SOCKETS_SOCKOPT_TLS` +
+  `CONFIG_HAWKBIT_USE_TLS`; a base path, URL userinfo or a non-HTTP scheme is
+  refused.
+- **`diagnostics.modules:` emits the choice symbol** (`alplabai/tan-cli#559`).
+  The old `CONFIG_<MOD>_LOG_LEVEL=<n>` int form could not build for *any* key —
+  the int symbol is promptless and derived. Entries now emit
+  `CONFIG_<MOD>_LOG_LEVEL_<LEVEL>=y` (what `board.schema.json` always
+  documented), live only where that choice symbol is declared, and downgraded
+  to a hint comment otherwise, so a typo no longer aborts the Zephyr configure.
+  "Declared" is the exact enclosing `if` chain, not the module's enable symbol
+  alone: `mbedtls` needs `CONFIG_MBEDTLS_DEBUG=y` on top of `CONFIG_MBEDTLS=y`
+  (`modules/mbedtls/Kconfig:89`) and `net_ipv4` needs `CONFIG_NET_NATIVE=y` on
+  top of `CONFIG_NET_IPV4=y` (`subsys/net/ip/Kconfig.ipv4:44`). Getting that
+  wrong is invisible at build time — the configure still exits 0 and only warns
+  `The choice symbol … was selected (set =y), but no symbol ended up as the
+  choice selection` while the override is discarded.
+- **Core-scoped libraries go through the ADR-0018 layer**
+  (`alplabai/tan-cli#555`). A `libraries:` entry carrying `cores:` bypassed
+  `libraries.resolve_selection()` entirely, so it got no unknown-name refusal,
+  no `requires:` check and no read of `integration.yocto.image_install` — and a
+  Yocto slice invented the package name as `lib-<name>`, emitting recipes that
+  RPROVIDE nothing (four shipped examples emitted `IMAGE_INSTALL:append =
+  " lib-mbedtls lib-nlohmann-json"`). Both declaration channels now resolve
+  through the same layer, and `cores:` is additionally re-checked against the
+  named core: `requires.os:` / `requires.core_class:` are per-core facts, so
+  `libraries: [{name: ros2, cores: [m33_sm]}]` on a live Yocto-A55 + Zephyr-M33
+  board is refused naming the constraint instead of silently resolving to
+  nothing (the project-wide check passes there — the A55 supplies `yocto`).
+
+### Fixed — an unreadable `hw-revisions.yaml` refuses instead of disabling the hw_rev gates, in all three readers (alplabai/tan-cli#563)
+
+`sdk_compat._load_family_table()` swallowed `OSError` and `yaml.YAMLError` and
+answered `{}`. Every predicate above it reads an empty table as "nothing to
+judge", so **one tab-indented line** in a SoM family's
+`metadata/e1m_modules/<family>/hw-revisions.yaml` silently disabled the
+unknown-revision gate (#1025), the not-buildable-status gate (#1025) and the
+SDK-version-range gate (#1019) *at once* — `som: {sku: E1M-AEN801, hw_rev: r99}`
+then loaded clean at exit 0. A present-but-unusable table is now an
+`OrchestratorError` refusal naming the file; an ABSENT table stays benign (an
+in-development family has nothing to check against). Also refuses the shapes
+that parse without raising: an empty file, a bare scalar, and a file truncated
+above its `hw_revisions:` block.
+
+**That was one of THREE independent readers of the same file, and all three
+fell open.** `alp_project_loader._hwrev_pad_route_overrides()` — the
+`--emit composed-route-table` / `--emit carrier-netlist` path, which resolves
+its SoM data independently and so carries its own copies of the #1025 gates —
+had its own `yaml.safe_load(...) or {}`, and that `or {}` fell open on an empty
+table and on one truncated above `hw_revisions:`, emitting a route table for
+`hw_rev: r99` at exit 0; the unparseable shapes escaped it as a raw
+`yaml.ScannerError` traceback instead of a diagnosable refusal.
+`alp_cli.new_som._family_hw_revisions()` — the scaffold-time
+`--default-hw-rev` cross-check — fell open widest: it caught `yaml.YAMLError`
+*and* read a non-mapping `hw_revisions:` as "not resolvable", so three of the
+four unusable shapes let `alp new-som --default-hw-rev <nonexistent>` write a
+SoM preset naming a revision that does not exist, at exit 0. Both now read
+through the same guarded reader (`sdk_compat.load_family_table()`, public for
+that reason), so the three cannot disagree about whether a damaged table is
+fatal or about what the refusal says. No emitted artefact moves: every tree
+whose table parses emits byte-identically.
+
+### Fixed — a Yocto-only V2N project with `rsa3072` can build again (alplabai/tan-cli#562)
+
+`emit_sysbuild_conf()` hard-defaulted `boot.method:` to `mcuboot` for every SoM
+family and then hard-raised on `rsa3072`, without looking at the project's
+slices — so a Yocto-only Renesas RZ/V2N board.yaml that validated clean failed
+its **entire** build-plan emit with MCUboot advice, on a platform that never
+runs sysbuild. Two halves, both closed: the sysbuild overlay is emitted only
+for a project with at least one `os: zephyr` slice, and `boot.method:` now
+defaults **per SoM family** (`alif-ensemble`/`nxp-imx9` → `mcuboot`,
+`renesas-rzv2n*` → `none`) as `board.schema.json` has always documented and
+nothing implemented. The #807 `rsa3072` refusal is unchanged for an explicit
+`method: mcuboot`.
+
+### Fixed — a baremetal slice built nothing and dropped every `-DALP_*` define (alplabai/tan-cli#550, alplabai/tan-cli#551)
+
+An `os: baremetal` core planned a single `cmake -S <app> -B <buildDir>` step.
+That only CONFIGURES, so a consumer read its exit 0 as a built slice and
+reported a green build over a tree holding `Makefile`, `CMakeCache.txt`,
+`cmake_install.cmake` and `CMakeFiles/` — no `.o`, no `.a`, no executable. The
+slice's `artifacts` block was all-null, so nothing downstream could notice the
+missing binary either, and not one of the slice's `-DALP_SOM_SKU` /
+`-DALP_SOM_FAMILY` / `-DALP_SOM_<SKU>` / `-DALP_CORE_ID` / `-DALP_BOARD_<SLUG>`
+/ `-DALP_TOOLCHAIN` arguments reached the configure — the app saw them all
+empty and the slice still reported `status: ok, rc: 0`.
+
+The planner (`scripts/alp_orchestrate/orchestrator.py`,
+`scripts/alp_orchestrate/buildplan.py`) now emits, per baremetal slice:
+
+- **a build step.** `cmake --build .` in the slice's new `postCommands`, which
+  an executor must run in order once `command` exits 0.
+- **a findable build tree.** The configure's `-B` is `.`, not the buildDir
+  path: `command.cwd` already IS the buildDir and cmake resolves a relative
+  `-B` against its own cwd, so the tree used to land two levels down at
+  `<buildDir>/build/<core>-baremetal/`.
+- **the `-DALP_*` settings, in the two shapes CMake accepts.** `NAME=VALUE`
+  entries as `-D` cache arguments; the bare `#if defined(…)` guards
+  (`ALP_BOARD_<SLUG>` for `<alp/board.h>`, `ALP_SOM_<SKU>` for the generated
+  `<alp/soc_caps.h>` override block) as real compiler definitions through a
+  generated `build/<core>-baremetal/alp-baremetal.cmake` the configure pulls in
+  with `-DCMAKE_PROJECT_INCLUDE=`. `cmake -D` rejects a bare `-DNAME` outright
+  (`Parse error in command line argument`), and `-DCMAKE_C_FLAGS=` would seed
+  that cache entry and silently defeat a firmware toolchain file's
+  `CMAKE_C_FLAGS_INIT` — so neither shape is used.
+- **an artifact that describes the output.** A new `artifacts.outputDir`,
+  forced by the configure's own
+  `-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$<1:<buildDir>/output>` — the generator
+  expression is what stops a multi-config generator (Visual Studio, Xcode,
+  Ninja Multi-Config) appending a per-config subdirectory and putting the
+  binary in `output/Debug/` while the plan pointed at `output/`. It is a
+  deterministic place to LOOK, not a build-succeeded oracle:
+  `CMAKE_RUNTIME_OUTPUT_DIRECTORY` governs `add_executable` targets only, so an
+  app built as `add_library(fwcore STATIC …)` plus a custom link/objcopy target
+  builds cleanly and never creates the directory at all. The executable's
+  *name* stays unreported: the app's `CMakeLists.txt` picks it and this planner
+  never invents one. `artifacts.compileCommands` stays **null** on baremetal —
+  the configure asks for it with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, but
+  CMake implements that variable "only by Makefile Generators and Ninja
+  Generators. It is ignored on other generators", and this planner does not
+  choose the generator. A slice whose `command` is blocked reports an all-null
+  `artifacts` block and no `configArtefacts`, rather than paths pinned by a
+  configure that will never run.
+- **a configure that does not warn about the planner's own defines.**
+  `--no-warn-unused-cli`: every `-D` on that line is set by the SDK, not the
+  customer, so `CMake Warning: Manually-specified variables were not used by
+  the project: ALP_SOM_FAMILY, ALP_TOOLCHAIN, …` was noise no customer could
+  act on.
+
+`metadata/schemas/build-plan-v1.schema.json` gains two **additive**,
+non-`required` keys at `schemaVersion: 1` — `slices[].postCommands` and
+`slices[].artifacts.outputDir` — the same additive treatment `envAppendPath`
+and `executionPolicy` had. A consumer pinned to the older shape must read an
+absent `postCommands` as `[]` and an absent `outputDir` as `null`.
+`scripts/check_build_plan.py` extends the #1286 bare-tool-identity gate over
+`postCommands[]`, and `tests/parity/seam1_field_diff.py` gains a second
+hand-reviewed allowance beside the `debug.probe` one so the frozen 97ad481b
+oracle — which predates both keys — still compares clean. That allowance is
+keyed on the exact field path AND the exact inert value (`[]` / `null`), never
+on "the oracle lacked this key": a slice that really grows a build step still
+fails the comparator.
+
+### Changed — DMAC0's CM33-exclusive ownership is a written contract, not one dtsi line (#1152, #1153)
+
+RZ/V2N's MCPU DMAC (`DMAC0`, base `0x11400000`) is dual-claimable: the CM33
+firmware arms it directly through the vendored Renesas FSP `r_dmac_b` for the
+GD32 supervisor link's SCI7 SPI DMA path, and the upstream Linux SoC devicetree
+declares a `dma-controller@11400000` node that `rz-dmac` binds unconditionally
+when enabled. Both reach the same 8 channels and their 8 GIC interrupts.
+
+The mitigation — `&dmac0 { status = "disabled"; }` — has been in place since
+#84, but it survived only as one dtsi line with no statement of *why*, which is
+what #1152 asked to fix. **ADR 0025** now records it: DMAC0 stays CM33-exclusive
+as a whole unit (Linux uses one of the other four DMAC instances), not a
+per-channel mask. The ADR names the CM33's actual claim —
+`ALP_V2N_SCI7_DMAC_RX_CH 0` / `ALP_V2N_SCI7_DMAC_TX_CH 1`, from
+`zephyr/drivers/spi/spi_renesas_rz_sci_b.c` — and explains why a Linux-side
+channel mask is the wrong shape: the CM33 configures DMAC0 by writing FSP config
+structs directly, so there is no DT-expressible partition to publish on that
+side.
+
+**Confirmed on the live board** (`e1mx-v2n-m1-01`, 2026-08-08), which is what
+the ADR needed to assert the mitigation still holds:
+
+```
+# cat /sys/firmware/devicetree/base/soc/dma-controller@11400000/status
+disabled
+# grep -c 11400000 /proc/interrupts
+0
+```
+
+DMAC0 claims zero IRQs and does not appear in `/proc/interrupts` at all. The
+four other DMAC instances (`@12000000`, `@12010000`, `@14830000`, `@14840000`)
+carry 16 lines each — 64 total — all with zero counts, so nothing is starved by
+the disable either.
+
+Also documented in the same pass (#1153): `wdt0` (CM33) is **not** enabled
+anywhere, and cannot be without inventing hardware facts. The pinned Zephyr
+v4.4.0 RZ/V2N SoC devicetree (`dts/arm/renesas/rz/rzv/r9a09g056.dtsi`, a west
+module, not vendored here) declares no watchdog node, and no driver binds this
+SoC's WDT — so there is no label to reference and no register base in this tree
+to hand-author one from. `<alp/wdt.h>` on the M33 therefore returns
+`ALP_ERR_NOT_PRESENT_ON_THIS_SOC` (`src/wdt_dispatch.c`), *not* the
+`ALP_ERR_NOSUPPORT` stub path, which is Yocto/baremetal-only and never compiled
+into a Zephyr build. The `wdt1` (A55) validation note is also corrected: a
+keepalive-only check does not prove hang-reset — the bench step must stop
+feeding the watchdog and confirm the board resets within `timeout-sec`.
+
+Documentation and comments only; no functional change. The V2N/V2M CM33 board
+`.dts` files are hand-maintained (the generator emits `board.yml`, `Kconfig.*`
+and a `.yaml` for those targets, not a `.dts`), so the added comment blocks do
+not disturb the byte-parity gate.
+
+### Fixed — `scripts/bench/aen/build.sh` exited 0 on a failed build (#1338)
+
+The bench's build entry point printed `BUILD FAILED: no zephyr.bin` and then
+**exited 0**, because the check was the script's last command in `&&`/`||`
+form:
+
+```sh
+[ -f "$BD/zephyr/zephyr.bin" ] && echo "BIN OK: ..." || echo "BUILD FAILED: no zephyr.bin"
+```
+
+The `||` branch runs `echo`, `echo` succeeds, and that status is the script's.
+The `west build ... | grep ... || true` above it compounded the problem: the
+pipeline's status is `grep`'s, not west's, and `|| true` discarded even that —
+so nothing after `west build` could make the script fail.
+
+Every consumer gating on `build.sh && <next step>` was gating on nothing: a
+RAM-run or a flash would proceed with a **stale** binary from a previous build,
+or a build failure would surface as a run-time "no RESULT" and get blamed on
+the app or the board. Found while running the AEN e2e suite against merged
+`dev`, where `aen-analog-validate` was classified `NO_RESULT` when the truth
+was a configure failure.
+
+The check is now a terminal `if`/`else` with `exit 1`, and west's own status is
+captured out of `PIPESTATUS[0]` so the failure message can report it.
+`zephyr.bin` remains the assertion: it is the artefact every downstream flow
+consumes, and it is absent for every failure mode, not just a configure error.
+
+Verified on `e1m-aen-evk-01`'s gateway, both directions:
+
+```
+FAILING app:     EXIT=1   BUILD FAILED: no zephyr.bin at .../aen-analog-validate/... (west exit 1)
+KNOWN-GOOD app:  EXIT=0   BIN OK: .../aen-adc-regcheck/zephyr/zephyr.bin (80204 B)
+```
+
+Same failure family as #1318 (`JLinkExe` exits 0 without ever reaching the
+probe) — a tool that succeeds without doing the thing.
+
+### Changed — the inference handle layout is defined once instead of hand-mirrored per backend (#1257)
+
+Each Yocto inference backend hand-mirrored the dispatcher's private
+`struct alp_inference` so it could reach `be_state`:
+
+```c
+struct alp_inference_handle_layout {
+	bool                    in_use;
+	alp_inference_backend_t backend;
+	void                   *be_state;
+};
+```
+
+That mirror has a **different field order** from the real struct
+(`{backend, be_state, in_use}`) and was correct only by a coincidence of
+pointer width. Measured on this ABI:
+
+```
+real   : backend@0 be_state@8 in_use@16 size=24
+mirror : in_use@0 backend@4 be_state@8
+```
+
+`be_state` lands at 8 both ways — 4-byte enum + 4 bytes padding on one side,
+1-byte bool + 3 bytes padding + 4-byte enum on the other. On an ILP32 target
+the real offset is 4 and the mirror's is 8, so a write through the mirror
+would silently corrupt the adjacent field. Nothing tied the copies to the
+original, so adding or reordering a field could corrupt handles in every
+backend at once with no diagnostic — which nearly happened during the
+use-after-free fix, where new fields had to be threaded between `be_state`
+and `in_use` specifically to keep the mirrored prefix byte-identical.
+
+`struct alp_inference` now lives in `src/yocto/inference_handle_internal.h`,
+included by the dispatcher and by every backend; the mirrors and their 14
+`reinterpret_cast`s are gone. The compiler is the enforcer instead of a
+comment. The header is internal — not installed, and `<alp/inference.h>`
+keeps the type opaque, so there is no public-API change.
+
+`in_use` stays LAST and the header says why: `pool_acquire()` zeroes
+`offsetof(struct alp_inference, in_use)` bytes to reset a claimed slot
+without clobbering the flag it just won (#1115).
+
+Note on scope: the issue described **three** mirrors. `dev` carries two —
+`inference_deepx.cpp` and `inference_drpai.cpp`. The third, `inference_ort.cpp`,
+is not on `dev` yet (it arrives with the ONNX Runtime CPU backend on
+`feat/ort-cpu-a55-inference`); that branch should include the shared header
+rather than re-introducing a mirror.
+
+### Fixed — `storage[]` was bounds-checked against sibling partitions but not against the SoM's own regions (#1331)
+
+`scripts/alp_orchestrate/partition.py` validated a storage entry's offset for
+page alignment, device capacity, and overlap with **other `storage[]`
+entries** — and nothing else. The SoM's `memory_map:` regions were invisible
+to it, so MCUboot, a core's `slot0`, and the SE-owned `atoc` band were all
+placeable.
+
+This was not only an `offset_kib:` hazard. Measured on
+`examples/connectivity/production-deployment/board.yaml` — the flagship v1.0
+reference app, `som.sku: E1M-AEN801`, five entries on `flash_device: mram_main`
+and **no offsets declared anywhere**:
+
+```
+- name: app_data   fs: littlefs   offset_kib: 0   size_kib: 256   -> 0x80000000
+```
+
+A littlefs mount resolving onto **MCUboot**, with no `status: blocked`. The
+bump allocator starts at offset 0 of whatever `flash_device` names, and
+`mram_main` is the whole 5632 KiB App MRAM.
+
+It was also **not a function of the SoM at all**. The same file with only
+`som.sku` swapped emitted byte-identical offsets on AEN801 and AEN601 —
+two SoMs that do not share a boot layout (AEN801 has the explicit #1069
+disjoint-slot0 map; AEN601 is auto-derived stock two-slot + scratch). So a SoM
+swap silently preserved a layout invalid on both. `cores:` already rejects a
+bad swap by name (`unknown core id(s) ['a32_cluster'] … Did you mean one of:
+['m55_he', 'm55_hp']?`); `storage:` did not.
+
+The resolver now seeds its overlap set with the SoM's own regions, converted
+to device-relative spans, and:
+
+- **the bump allocator advances past them** rather than merely detecting a
+  collision — refusing instead of skipping would have broken every project
+  that names no addresses, which is the common case;
+- **an explicit `offset_kib:` that lands in one is blocked**, naming the
+  region and the remedy (`flash_device: <region>` to allocate inside it);
+- **the device origin is derived and then verified** — `memory_map:` bases are
+  absolute while offsets are device-relative, and `_resolve_flash_device`'s
+  descriptor deliberately carries no base. For a whole-window alias like
+  `mram_main` (`base: TBD` on purpose) the origin is the lowest sibling base,
+  accepted only if `origin + capacity == highest region top`. If that identity
+  fails the conversion is refused and a WARNING says the offsets were checked
+  against siblings only — degrading silently is the false-PASS this fix exists
+  to remove.
+
+No new schema field: a customer wanting space inside `storage` targets
+`flash_device: storage`, which the block message tells them.
+
+Consequence for the flagship example: all five entries now resolve
+`status: blocked`, because AEN801's map tiles all 5632 KiB and leaves 0 KiB
+free. That is the truthful answer — its bulk storage belongs on `ospi0`
+(`role: app_storage`, 32 MiB, `assembled: optional`), and three of its entries
+(`mcuboot_primary`/`_secondary`/`_scratch`) describe the swap-using-scratch
+layout #1069 removed. Re-homing them is a product decision, tracked separately.
+
+Test sensitivity proven against the pre-fix resolver: 5 of the 7 new tests
+fail there, including a littlefs mount accepted onto MCUboot. The 2 that pass
+in both directions are the no-false-positive guards (a SKU whose map derives
+to a bare `mram_main` alias must keep allocating from offset 0).
+
+### Fixed — every AEN board handed apps a writable partition on top of the SE boot table (#1289)
+
+Alif's SETOOLS (`app-gen-toc` / `app-write-mram`) does not place the ATOC
+application table at a fixed address: it **top-anchors** the generated package
+at the App MRAM window end (`0x80580000` on the E8) and grows it **downward**,
+sized to the package. Placement happens at *provisioning* time, not link time,
+so no compile-time constant exists to carve around.
+
+Every AEN board's last partition was `storage`, 128 KiB at `0x80560000`,
+running to exactly that window top — so the NVS/settings region an app is
+invited to write **was** the boot table. Measured on the E1M-AEN801 bench
+2026-08-08: `examples/aen/aen-mram-flash-validate` erased and wrote
+`0x80560000` while the live ATOC sat intact at `0x8057EA50`, magic `ckBS`
+(`0x53426B63`), inside that same partition. Nothing failed at build time and
+nothing failed at run time; the part fails on the **following** boot, when the
+SE reads a table an app has overwritten. The example's own comment asserted
+the region "is empty on this bench and holds no boot code" — false, and the
+sentence that made writing there look safe.
+
+`storage` now ends at `0x80578000` (96 KiB) and the top 32 KiB is a separate
+SE-owned `atoc` partition no app has a handle to. Sizing is bounded by three
+independent figures against the same window top: **5552 B** observed on the
+bench, **13552 B** from an E7 SETOOLS transcript in the Alif DFP
+(`docs/Overview.md:193-224`), and **23696 B** worst case computed from
+SETOOLS' own `build/app-package-map.txt` rule (2560 B per signed user image +
+2880 B fixed + 48 + 32×N TOC) at the 8-image maximum — that rule reproduces
+the observed 5552 B exactly. 32 KiB leaves 9072 B spare. *Unverified:* no
+documented maximum TOC entry count was found, so the 8-image worst case is an
+assumption; widen the band, never narrow it.
+
+The 32 KiB comes out of `storage`, not out of a slot, so
+`_AEN_MCUBOOT_KIB + _AEN_SCRATCH_KIB + _AEN_STORAGE_KIB + _AEN_ATOC_KIB` still
+sums to the old 256 KiB and **no image slot geometry moved**. `storage` also
+keeps its name and nodelabel deliberately: an earlier draft renamed the whole
+128 KiB region to `atoc`, which would have broken `tan`'s literal `"storage"`
+region lookup and every `PARTITION_ID(storage_partition)` consumer. Both AEN
+generator paths are covered — the disjoint-slot0 branch (AEN801) and the stock
+branch (`aen401`, `aen601`, and any future AEN SKU).
+
+`scripts/check_atoc_reservation.py` is the new gate: the last partition of
+every AEN table must be labelled `atoc`, and the region owning the top of a
+preset's declared `memory_map:` must be named `atoc`. The window top is
+derived per board/preset, never hardcoded — the AEN SKUs do not share an MRAM
+size. It scans example `boards/` overlays as well as board trees, because an
+app that `/delete-node/`s the generated partitions escapes the board tree
+entirely; `examples/connectivity/firmware-update-log` already carried a
+hand-rolled reservation labelled `alif-atoc` that no gate recognised.
+
+Two things this does NOT fix, tracked separately: `tan` carries its own copy
+of this generator and still emits the old layout until tan-cli#544 lands (that
+port and its `PINNED_SDK_TAG` bump must be one PR, or emit-parity goes red
+either way); and `board.yaml` `storage[].offset_kib:` is still bounds-checked
+only against sibling partitions, so an explicit offset can be placed on any
+SoM region — #1331.
+
+### Fixed — Flow C wrote and executed on a target it never identified (#1312)
+
+`scripts/bench/aen/ram-run.sh` — the default day-to-day flow — did
+`loadbin` + `go` without ever confirming which board answered. The MRAM
+writers have checked the SW-DP IDR since #1069; the flow people run most
+often did not.
+
+The probe serial cannot disambiguate. Two J-Links on this bench share OEM
+serial `603000869` (AEN E8 at USB `3-4.4.3`, V2N-M1 GD32 bridge at `3-4.2`),
+and `JLinkExe` selects only by serial with no USB-path selector — so
+`JLINK_SN=603000869` is ambiguous by construction. Flow C is not a read: it
+writes an AEN-linked image into ITCM and executes it. On the wrong probe that
+runs foreign code on the V2N-M1, a **different labgrid place** an AEN
+reservation does not cover.
+
+`bench_jlink_assert_aen_dpidr` now holds that logic in one place, and every
+helper that writes to or executes on a target calls it before touching
+anything: `ram-run.sh` (new), plus `flash-jlink.sh`, `flash-jlink-hp.sh`,
+`flash-jlink-mramxip.sh` and `flash-update-log-dual.sh`, whose inline
+copies are folded into it.
+
+**A fourth ungated MRAM writer surfaced while gating the third.**
+`flash-update-log-firewall-probe.sh` issues `loadbin $PKG $ATOC_ADDR` — a
+signed-package write — with no DP-ID check at all. Nobody had reported it;
+the test that derives the writer set from actual `loadbin` lines found it.
+
+The gate also names the wrong board rather than reporting a bare mismatch,
+now that all three probes are known:
+
+| probe | SW-DP IDR | place |
+|---|---|---|
+| AEN E8 | `0x4C013477` | `e1m-aen-evk-01` |
+| GD32 bridge | `0x0BE12477` | `e1mx-v2n-m1-01` |
+| V2N CM33 DAP | `0x6BA02477` | `e1mx-v2n-m1-01` |
+
+`V2N_CM33_DPIDR` is new, measured on `e1mx-v2n-m1-01` — `Found SW-DP with ID
+0x6BA02477`, `Found Cortex-M33 r0p4`. That core answers on **SWD, not JTAG**.
+
+### Fixed — the new J-Link guard tests reddened `python-smoke (windows-latest)` on every PR
+
+`tests/scripts/test_bench_jlink_connect_guard.py` (added with the alp-sdk#1318
+fix) invokes `bash` to source `bench-env.sh` and exercise
+`bench_jlink_assert_connected`. On GitHub's **windows-latest** runner `bash`
+resolves to `System32ash.exe` — the WSL launcher — with no distribution
+installed. It exits 1 and prints a UTF-16 message about installing one, so all
+four subprocess-backed tests failed with
+
+```
+FAILED tests/scripts/test_bench_jlink_connect_guard.py::test_failed_connect_is_a_hard_error - AssertionError: expected exit 7, got 1
+```
+
+Assertion text that reads like a real guard defect and is not: the guard was
+never invoked at all. Landing that put a permanent red on `python-smoke
+(windows-latest)` for every subsequent PR — the same "CI noise trains the
+reader to ignore the channel" failure this release has been removing
+elsewhere.
+
+The four bash-dependent tests now skip on a host with no working shell, with
+the reason naming the cause. Availability is probed by RUNNING `bash -c
+'printf ok'` and checking both the exit status and the output — not by
+`shutil.which`, which would have found the WSL launcher and reported success.
+The non-bash tests in the file (read-back coverage, conflict-marker scan) still
+run everywhere and are unaffected.
+
+### Fixed — a SoM chip with no driver emitted a Kconfig symbol that does not exist (#1241)
+
+Adding `ethernet_phy: dp83825` to the AEN SoM presets made every AEN Zephyr
+slice emit
+
+```
+CONFIG_ALP_SDK_CHIP_DP83825=y
+```
+
+into its generated `alp.conf`, and `ALP_SDK_CHIP_DP83825` is not declared
+anywhere. Measured across `metadata/chips/*.yaml`: 77 of 81 chips carry a
+declared symbol in `zephyr/kconfigs/chips.kconfig` — every `complete`,
+`partial` and `stub` one, each with a real `chips/<part>/` directory. The
+only undeclared ones are the four `planned` Murata modules, which no SoM
+populates. `dp83825` has `driver_status: none` and no `chips/dp83825/`
+directory at all, so the emitted line named a symbol with nothing behind it.
+
+`_slugs_from_on_module` already applied exactly this rule per-field —
+`ospi_memories` and `hyperram` are excluded because those parts have "no
+`chips/<part>/` driver, so their MPNs are NOT extracted as chip slugs
+(emitting them as `CONFIG_ALP_SDK_CHIP_<X>` would trip Zephyr's
+undefined-symbol guard)". It now holds per-chip too: a scalar `on_module:`
+field can name a real chip manifest with no driver behind it, which is what
+`ethernet_phy:` was the first to do.
+
+Driver presence is checked on disk rather than read from `driver_status:`,
+because the directory is what the Kconfig declaration points at — every entry
+reads "Compile chips/<part>/<part>.c". A status string can drift from the
+tree; the directory cannot.
+
+The chip stays in metadata. It is real, populated hardware, and the manifest
+is what documents the ADR-0023 layer-3 gap; it simply no longer gets a
+driver-selection Kconfig for a driver that does not exist.
+
+Caught by `scripts/check_emit_snapshots.py`, which reported six snapshot
+DIFFs. The committed goldens were correct throughout — the fix brings the
+emitter back to them (6 DIFFs before, 0 after) rather than regenerating them,
+which would have frozen the defect as expected output.
+### Fixed — the SRCREV parity gate lost a recipe's pin to an appended patch (#1281)
+
+`_recipe_ref` read only the LAST `SRC_URI` assignment when looking for a
+`;tag=`. BitBake's `+=` **appends** rather than replaces, so on the commonest
+real shape
+
+```
+SRC_URI = "git://...;protocol=https;branch=main;tag=v1.2.3"
+SRC_URI += " file://0001-fix.patch"
+```
+
+the last assignment is the patch line, carries no tag, and the function fell
+through to `SRCREV` — finding none, it returned `None` and the recipe was
+silently **exempted** from the parity check instead of compared against its
+real pin. A fail-open on the gate's own subject.
+
+The assignments are now folded the way BitBake folds them: `=` replaces,
+`+=` appends, and the tag is searched in the resulting effective value. A
+later plain `=` still wins, so an intentionally re-pinned recipe reports its
+current tag and not a superseded one. A `;tag=` inside a comment is still
+never read as the live pin — that is an assignment-shaped string in prose,
+not an assignment.
+
+The west-axis coverage test also dropped a tautology:
+`covered | not_covered == {f.stem for f in libdir.glob("*.yaml")}` — both
+sets are built by iterating that exact glob and adding `f.stem`, so their
+union equalled the glob by construction and the assertion could never fail.
+Replaced with checks that can: the corpus is non-empty (an assertion sweep
+over an empty glob passes vacuously), the two sets are disjoint, and the west
+axis still grounds a real share of the manifests. If `covered` ever empties,
+the axis is inert everywhere and the gate would report green while checking
+only the SRCREV half.
+
+### Fixed — two workflows on `dev` could not be loaded by GitHub Actions
+
+`.github/workflows/pr-doc-drift.yml` carried **nine unresolved merge-conflict
+marker lines** into a merge commit:
+
+```
+  <<<<<<< HEAD
+  =======
+  >>>>>>> 8e72b3dc (fix(docs): catch CONFIG_-prefixed and vendor-doc Kconfig symbol drift (#1228))
+```
+
+(indented by two spaces above so a repo-wide conflict-marker grep does not
+match this changelog entry describing them)
+
+and `.github/workflows/pr-metadata-validate.yml:336` had an unquoted plain
+scalar containing a colon-space:
+
+```yaml
+- name: Gate — Zephyr core app: <-> CMakeLists.txt --core mapping
+```
+
+which YAML reads as a nested mapping key, making the whole document invalid.
+
+Neither failed loudly. A workflow that cannot be **loaded** reports as a
+`failure` with a duration of **0s**, and neither is a required status
+context — so roughly thirty metadata/schema gates and every doc-drift gate
+silently stopped running while PRs continued to merge green. Eight
+consecutive `pr-metadata-validate.yml` runs are recorded as `failure … 0s`.
+
+`pr-doc-drift.yml`'s conflict is resolved toward no `paths:` filter on
+either trigger, which is what its own (unconflicted) header comment already
+documents as the intent. `pr-metadata-validate.yml`'s step name is quoted.
+
+### Fixed — the only job running `pytest tests/scripts/` ignored other workflows
+
+`cross-platform-zephyr.yml` triggered on `.github/workflows/cross-platform-zephyr.yml`
+— its own filename — not on `.github/workflows/**`. It is the only job that
+runs `pytest tests/scripts/`, so a PR breaking a *different* workflow never
+ran the checks that would catch it. Broadened to `.github/workflows/**`.
+
+`tests/scripts/test_workflows_are_loadable.py` parses every workflow and
+rejects committed conflict markers, as two separate checks: a marked-up file
+usually also fails to parse, but markers landing inside a block scalar can
+still load and would then ship semantically wrong triggers rather than an
+obvious error. It also asserts the file glob still matches ≥20 workflows, so
+the parametrised checks cannot silently cover nothing.
+
+### Fixed — a failed J-Link connect was reported as an empty RAM console (#1318)
+
+Found by an end-to-end Flow C run on the physical `e1m-aen-evk-01` bench.
+`scripts/bench/aen/ram-run.sh` printed its normal header and an empty
+console block:
+
+```
+>>> RAM-run aen-counter-alarm-regcheck  entry=0x43C4  base=0x0  ram_console_buf=0x20000d00  sleep=6000ms
+----- RAM console (decoded) -----
+
+---------------------------------
+```
+
+which reads as "the app ran and printed nothing" — an app crash. The app
+was fine. `JLinkExe` had never opened the probe at all; every command in
+the CommanderScript had answered `Cannot connect to the probe/programmer.`
+`JLinkExe` still **exits 0** in that state and still ends `Script
+processing completed.`, so the `|| true` on the invocation discarded
+nothing useful and the ASCII decoder rendered a total infrastructure
+failure identically to a silent application.
+
+`bench-env.sh` gains `bench_jlink_assert_connected`, called before any
+decode at all seven J-Link read-back sites — `ram-run.sh`, `reread.sh`,
+`flash-run.sh`, `flash-all-flowd.sh`, `flash-jlink.sh`,
+`flash-jlink-hp.sh`, `flash-jlink-mramxip.sh`. A failed or empty transcript
+is now `exit 7` naming the real J-Link message and the fix
+(`export JLINK_SN=<serial>`), never an empty console.
+
+`ram-run.sh`'s comment justified leaving `JLINK_SN` unset as preserving
+"today's single-probe behaviour exactly". That was true when written and is
+false now: alplab-gw has three J-Link probes attached and two of them share
+a cloned OEM serial, so an unselected `JLinkExe` there fails outright or
+attaches the wrong board. The comment is corrected.
+
+### Fixed — `flash-update-log-dual.sh` wrote MRAM with no DPIDR safety gate (#1318)
+
+`flash-jlink.sh`, `flash-jlink-hp.sh` and `flash-jlink-mramxip.sh` each
+confirm the AEN E8 SW-DP IDR `0x4C013477` and explicitly reject the V2N-M1
+GD32's `0x0BE12477` before any MRAM write. `flash-update-log-dual.sh`
+writes MRAM directly over `JLinkExe` (`loadbin $PKG $ATOC_ADDR`) and was
+the only such writer with no gate. It now runs the same read-only preflight
+and hard-aborts, using the `AEN_DPIDR`/`GD32_DPIDR` that `bench-env.sh`
+already exports as the single source rather than re-declaring them.
+
+`tests/scripts/test_bench_jlink_connect_guard.py` covers both. The
+read-back check derives its site list from the actual `|| true` invocations
+in each script rather than a hand-maintained allowlist, so a newly added
+read-back that skips the assertion fails the test instead of silently
+reintroducing the bug.
+
+### Added — per-example filter facets in `metadata/catalog.json`, resolved from `os-topology` not the raw `board.yaml` (#1283)
+
+`metadata/catalog.json`'s `examples` rows carried only `board` / `name` /
+`path` / `som` / `summary` — no way to filter the ~100 examples by core
+count, per-core OS, or what an example actually declares. Each row now also
+carries `cores[]` (`id` / `os`, plus `app` when the resolved slice names
+one — see below), `coreCount`, `osSet`, and a `declares` map (`peripherals`
+/ `chips` / `ipc` / `models`).
+
+The trap the issue is built around: `cores` / `coreCount` / `osSet` are
+resolved through `core_os_topology()` — the same planner
+`alp_project.py --emit os-topology` calls — not read off the example's own
+`board.yaml`. Measured on this tree: 47 of the 100 examples never write
+`os:` on any core at all; of the other 53, only 2 name a runtime `os:`
+directly (`zephyr`) and the remaining 54 `os: off` occurrences just turn a
+peer off. Every core left unmentioned still defaults to the SoM topology,
+which enables it (and gives an unused Zephyr peer the SDK's own
+`alp-stock-shim` app) — a fact the YAML never states either way. Reading
+the YAML's `cores:` entries literally reports between 43 (raw entry count)
+and 95 (once each explicit `os: off` is honored) examples as "1 core", and
+47 as "no `os:` written at all" — worse than no filter at all. `rpmsg-aen`,
+for instance, only writes `cores:` entries for `a32_cluster` + `m55_hp`;
+the resolved catalog row also carries `m55_he` (`os: zephyr`,
+`app: alp-stock-shim`) even though that core name never appears in the
+example's `board.yaml`. `app` itself is optional even on a resolved core:
+a Yocto slice can be a stock recipe (`image:` set, no `app:`), and then the
+core dict carries no `app` key at all. `declares` is the cheap opposite
+case — a literal read of the YAML's own `chips:` / `ipc:` / `models:`
+top-level keys and each core's `peripherals:` list, since those answers
+don't need resolution to be honest.
+
+An example whose topology can't resolve at all (currently just
+`rpmsg-imx93` — its only SoM hw_rev is `status: tbd`, the same #1025
+exclusion `check_emit_snapshots.py` already carves out) omits the
+resolved facets rather than guessing; `declares` stays present regardless,
+since it never depended on resolution. Any other topology failure is
+printed to stderr at regen time rather than silently omitted, so a future
+regression can't ride into `metadata/catalog.json` as if it were "in sync".
+
+The two are told apart by exception TYPE, not by string-matching a message:
+the not-buildable case raises `SdkRevisionNotBuildable`, which exists as a
+subclass for exactly this purpose alongside `SdkRevisionUnsupported` and
+`SdkRevisionUnknown`. Keeping the expected case silent matters as much as
+warning on the unexpected one — a line printed by every regen and every CI
+`--check` is a standing false alarm, and it trains the reader to ignore the
+very channel the warning depends on.
+
+`schema_version` bumps 1 → 2 for the new per-example fields.  This is
+additive metadata only.
+
+`metadata/catalog.json` and `alp.lock` regenerated
+(`python3 scripts/gen_catalog.py && west alp-lock`).
+### Added — `check_library_pin_parity.py`: a meta-alp-sdk recipe's pin must match its west.yml / metadata/libraries counterpart (#1281)
+
+`grep -rln SRCREV scripts/` returned no file -- nothing cross-checked a
+`meta-alp-sdk` recipe's `SRCREV`/tag against the revision `west.yml` pins,
+or the version `metadata/libraries/<name>.yaml` records, for the SAME
+third-party module. A `.alpmodel`-shaped library decoded by both the
+M-class Zephyr build and the A-class Yocto build (zcbor, #1254/#1280)
+could drift to two different upstream pins on the two OSes with CI
+staying green throughout, discovered only when a packed model decoded
+differently on the two cores -- the hardest class of bug to attribute.
+
+The recipe<->manifest link is BitBake's own `<pn>_<pv>.bb` naming
+convention, not an invented field: a recipe names a real curated library
+the moment `metadata/libraries/<pn>.yaml` exists. Deliberate, explicit
+exemptions rather than silent skips: a recipe with no such counterpart
+(this layer's own `alp-sdk`/`dx-rt` recipes), an unpinned `${AUTOREV}`
+recipe, and -- the exact zcbor shape -- a module reachable only through
+Zephyr's own `name-allowlist` import, whose revision `west.yml` never
+states directly (that lives in Zephyr's own manifest, resolvable only
+from a real checkout, the same oracle
+`check_west_manifest_module_resolution.py` already declines to carry).
+That module's recipe<->metadata-version axis is still checked, so it
+isn't left wholly uncovered.
+
+The recipe's own pin -- `SRC_URI ...;tag=<X>` if present, else the
+literal `SRCREV` -- is read only from the actual assignment line(s), not
+searched across the whole recipe text: a `;tag=` sitting in a comment
+(e.g. a "previous pin was ...;tag=X" note) is never mistaken for the
+live pin. The tag is also checked independently of whether an `SRCREV`
+line exists at all, so a recipe pinned via `SRC_URI`'s tag alone is
+read correctly rather than silently treated as having no pin to
+compare.
+
+The west axis is inert for most of `metadata/libraries/` -- of the 35
+manifests, 18 have a west grounding this gate can compare a recipe
+against today; the other 17, including zcbor (the motivating case),
+are named explicitly in the gate's own module docstring by exact
+reason: 7 are in-tree Zephyr subsystems or maintainer-written libraries
+with no upstream git pin anywhere to compare; 8 (zcbor among them) are
+reachable only through Zephyr's own `name-allowlist` import, whose
+revision `west.yml` never states directly; 2 (`arm-2d`, `cmsis-cv`)
+are a named, still-open gap -- each carries a real west.yml top-level
+project pin under a different name than its `integration.zephyr.module`
+field, which this gate does not yet look up. A dedicated test re-derives
+this 18/17 split against the real tree so the accounting cannot drift
+out of date silently.
+
+States its "same revision vs. same consumed trees" answer outright
+rather than leaving it implicit: a recipe ref and its comparison target
+are compared only when they're the SAME KIND of git reference (both
+40-hex SHAs, or both not) -- a SHA-vs-tag pairing is a representation
+mismatch, not provable drift without a real clone (subtree-hash
+comparison, the more honest check, needs one), so it is never reported.
+This is what keeps PR #1280's real zcbor pin -- a canonical-remote tag
+proven by hand to check out byte-identical trees to a different,
+mirror-only SHA -- from becoming a permanent false positive.
+
+Proven in both directions: green over the current tree (vacuously --
+no third-party recipe exists yet), red on an injected drift on each of
+the two comparison axes naming the file, and confirmed NOT red on each
+of the three exemptions above. Mutation-tested against both comparison
+axes and the last-assignment-wins `SRCREV` resolution.
+
+Wired into `pr-metadata-validate.yml`'s `validate` job.
+
+### Fixed — `check_tan_docs_surface.py` decoded `tan --help` with the host locale (#1301)
+
+The check read every `tan <verb> --help` through
+`subprocess.run(..., capture_output=True, text=True)` with no explicit
+`encoding=`, so the output was decoded with `locale.getencoding()`. Typer
+renders `--help` as a Rich options table whose box-drawing characters
+cp1252 (a Windows console) and ASCII (`LC_ALL=C`) cannot decode.
+
+That produced two wrong outcomes rather than one clean failure. Against
+`tan 0.5.0-rc3` the check reported 25 problems naming flags that exist —
+`tan build --project`, `tan generate --target`, `tan validate --offline`,
+`tan monitor --port` are all listed by the shipped binary's own `--help`.
+Against `tan 0.5.1` the `UnicodeDecodeError` was raised inside subprocess's
+reader thread, leaving `proc.stdout` as `None`, and the check died with
+`AttributeError: 'NoneType' object has no attribute 'splitlines'` in
+`_usage_line()` instead of reporting anything at all. Neither appeared in
+CI, whose runner is Linux with a UTF-8 default locale; forcing
+`PYTHONUTF8=1` made the same tree, same binary pass outright, so no
+documentation was drifting.
+
+Every `tan` invocation now goes through one `_run_tan()` helper that pins
+`encoding="utf-8"`, with `errors="replace"` so a stray undecodable byte
+stays a reportable problem rather than becoming a traceback. The four call
+sites that each built their own `subprocess.run` are routed through it, so
+a fifth added later inherits the decoding instead of repeating the bug.
+
+The regression test drives the real script against a stub `tan` that
+renders a genuine Rich options table, under `PYTHONUTF8=0` plus
+`LC_ALL=C`/`LANG=C`. Every other stub in that file prints plain ASCII,
+which both codecs round-trip unharmed, so none of them could see this
+class of defect.
+### Fixed — `scripts/test-all.sh` dirtied the current ABI snapshot with a same-day, zero-substance `generated` date bump (#1232)
+
+Every full `scripts/test-all.sh` run regenerated `docs/abi/<current>-snapshot.json`
+unconditionally, so an otherwise-clean local run that touched no public header
+still stamped today's date and dirtied the file, and that same-day-clean bump
+rode along into the next commit. `pr-generated-files.yml`'s own diff check
+never caught it: it masked the `"generated":` line with
+`--ignore-matching-lines='"generated":'`, so CI stayed green regardless —
+training reviewers to expect (and ignore) an ABI-diff-free date churn on the
+one file whose entire purpose is to be diffed for real ABI drift.
+`scripts/abi_snapshot.py --output` now skips the write entirely when
+re-serializing the snapshot would come out byte-identical to what's already
+committed, once the existing file's own `generated` date is substituted back
+in; the CI and local gates match, so neither rewrites the file on a no-op
+rerun. Both `.github/workflows/pr-generated-files.yml` and `scripts/test-all.sh`
+drop their now-redundant `--ignore-matching-lines='"generated":'` diff mask,
+since the write-skip guard is what keeps a no-op regen from touching that line
+at all — a real content change still fails on its content lines regardless of
+the mask.
+### Removed — dead `cmake-args.txt` materialisation from the baremetal build-plan slice (#1278)
+
+`emit_build_plan`'s `configArtefacts` no longer carries a `cmake-args.txt`
+entry for `os: baremetal` slices
+(`scripts/alp_orchestrate/buildplan.py::_slice_config_artefact`). The
+artefact was dead on both sides of the contract: nothing in this repo's own
+`_slice_command` (baremetal branch) ever read it back — the `cmake -S ... -B
+...` argv is built independently — and tan-cli's materialise step writes
+`configArtefacts` to disk without ever reading them back either. #1278 gave
+two ways to close the gap -- route the args into the cmake invocation, or
+drop the dead emit -- and this takes the second: the standalone `--emit
+cmake-args` mode (`_slice_cmake_args`) remains as an on-request,
+manually-wired reference surface (`docs/board-config-emit.md`), but no
+automatic path threads `-DALP_CORE_ID` or any of its sibling `-D` args into
+a baremetal build any more; that was never true before this change either
+(the args were computed and written, not read back), so nothing that
+previously worked stops working.
+
+- `metadata/schemas/build-plan-v1.schema.json`'s `configArtefacts`
+  description and `docs/architecture.md`'s pipeline diagram both stop naming
+  `cmake-args` among what a build-plan consumer materialises.
+  `metadata/emit-registry-v1.json`'s `cmake-args` mode entry drops its
+  `path` to `null` -- no fixed build/materialise-flow location remains for
+  it; the standalone `--emit cmake-args` mode itself is unchanged and stays
+  a caller-chosen `--output`.
+- `docs/board-config-emit.md`'s "Plain CMake" recipe no longer claims
+  `--emit cmake-args`'s output is directly pipeable into `cmake -B build
+  $ARGS .`, and instead documents `--output` to a file for manual/tooling
+  consumption; `--emit cmake-args` itself is unchanged and still valid.
+- No `schemaVersion` bump: ADR-0020 Amendment (2026-07-20) item 3 sets the
+  precedent for a build-plan shape change against `tan-cli`'s pinned
+  `schemaVersion == 1` -- don't bump (it would strand the pin), keep
+  strict-producer/tolerant-consumer instead. No committed fixture (pinned
+  oracle or `tests/fixtures/emit-snapshots/*`) exercises a baremetal slice
+  today -- neither fixture tree has an `"os": "baremetal"` entry -- so this
+  shape change trips no gate yet.
+- Not fixed here: this repo's `_slice_config_artefact`
+  (`scripts/alp_orchestrate/buildplan.py`) has a byte-identical twin at
+  tan-cli's `python/tan/planner/buildplan.py:51-69`, whose baremetal branch
+  (lines 67-68) still returns a `cmake-args.txt` entry -- this change makes
+  the two planners disagree on that shape. tan-cli issue #492 (item 2,
+  `python/tan/planner/buildplan.py:68`) already tracks the dead-materialise
+  side of this on tan-cli's own code; it needs to land the matching drop
+  before the two repos re-agree. ADR-0020 Amendment item 4 governs exactly
+  this: seam-1 (`tests/parity/seam1_field_diff.py` and tan-cli's vendored
+  twin) diffs `configArtefacts[*].path` after dropping `contents`, and an
+  artefact "appearing/vanishing/moving still fails the gate" -- so once
+  either repo's parity suite gains a baremetal-slice fixture, seam-1 fails
+  until tan-cli's twin drops the same branch.
+### Fixed — ADR 0021 read tan-cli#86 as unblocking the `${TOOLCHAIN_ROOT}` env-injection half; the resolver is still unported (#1286)
+
+`docs/adr/0021-toolchain-provisioning.md`'s 2026-07-26 "drop
+`-DCMAKE_MAKE_PROGRAM`..." Amendment says the prior blocker "still held, but
+... the `${TOOLCHAIN_ROOT}` token simply did not exist in tan's substitution
+set until tan-cli#86" -- true, but tan-cli#86 (merged 2026-07-26) ported only
+`crates/`, tan-cli's frozen Rust oracle; the shipping Python executor line's
+`python/tan/commands/build_cmd.py:1173-1178` still hardcodes
+`toolchain_root=None` behind a `# NOT YET PORTED:
+crate::toolchain::resolve_toolchain_root` comment (confirmed on live `dev`,
+2026-08-07). A slice naming `${TOOLCHAIN_ROOT}` is unconditionally demoted on
+that line, and on `--materialise` the demotion is dropped silently --
+`configArtefacts` absent from `written`, `issues: []`, exit 0, `ok: true`,
+regardless of `executionPolicy.missingTool` (tan-cli#505 item 3, measured).
+Adds a dated Amendment to ADR 0021 recording this and leaves #1286's
+env-injection producer half correctly un-landed, now for the reason that is
+actually true.
+### Fixed — `provision_som.py` reported success it did not earn (#1276)
+
+Two related defects in `scripts/provision_som.py`, both the same "reports
+success it did not earn" class. First, `--carrier` derived its HiL spec
+path from the bundle's `sku` (e.g. `E1M-V2N101`) without stripping the
+`E1M-` prefix, pointing at a `tests/hil/e1m-v2n101-x-evk` directory that
+never exists — the real directories are unprefixed (`tests/hil/v2n101-x-evk`).
+The HiL spec dir (derived or given) is now validated right after the
+derive, before any xSPI flashing or manufacturing-serial allocation
+happens — a miss fails the run loudly instead of silently reporting
+`ok=True`, and, because the check now runs first, can no longer allocate a
+serial with nothing recorded against it. Second, on the no-spec path
+(`--execute` with neither `--hil-spec` nor `--carrier`), `_power_on_test`
+correctly treats the skip as a non-failure of the step, but `_record` was
+reading that `ok=True` as "the power-on test passed" and recording a
+ledger `pass` for a test that never ran. `_power_on_test` now returns
+whether the test actually ran, and `_record` only credits a `pass` when it
+did — a skipped test, a dry run, and a configured test that ran and failed
+all record `pending-hw`, keeping to the two `--test-result` values this repo
+has ever emitted (`pass`/`pending-hw`). `som_ledger.py` lives in
+alp-sdk-internal, so whether it would accept a third value cannot be checked
+from here; the consequence is that a test which ran and FAILED stays
+indistinguishable in the ledger from a unit never tested, which needs a
+vocabulary change on the private side rather than a workaround here.
+
+Sweeping the file for the same class surfaced a third, smaller instance:
+`_eeprom`'s message tagged the planned RIIC0 write `(execute)` under
+`--execute`, implying the write happened, when the i2c write is HW-gated
+and this script never performs it, in either mode. The message no longer
+varies with `--execute` -- it always states the write is planned only.
+
+A relative `--hil-spec` (docs/provisioning.md's bench example passes one)
+now resolves against `--alp-sdk-root`, or the repo root, instead of the
+process's current working directory -- matching how the `--carrier`-derived
+path and the smoke-test runner itself already resolve.
+
+`docs/provisioning.md`'s HiL spec and power-on test steps are rewritten to
+describe all of this: the spec dir is checked up front, before flashing or
+serial allocation, and only `pass`/`pending-hw` are ever recorded.
+
+### Fixed — ADR 0022 claimed a `tan renode` retirement that never shipped
+
+ADR 0022 was recorded as "Accepted — implemented" for both of its clauses. Only
+one shipped. `tan` is indeed Python (PyInstaller freeze of `alp-tan`) from
+v0.5.0, but the `tan renode` verb was never removed: at `tan-cli` tag `v0.5.1`
+`python/tan/cli.py` still runs `app.command("renode")(renode)` against a real
+`python/tan/commands/renode_cmd.py`. The issue the ADR named as its tracking
+work, `tan-cli`#448, is still open and has since been re-scoped from removal to
+"emit a support-paused warning; retain the command, modules, fixtures and CI
+models" — retention, not removal.
+
+The ADR's Status is amended to "Accepted in part", Decision points 2 and 3 are
+withdrawn, and the index rows for 0020 and 0022 no longer claim that 0020's
+`renode` command-surface entries are superseded. The Decision body is preserved
+verbatim per `docs/adr/README.md`'s append-only rule; the correction is an
+appended Amendment.
+
+This left the doc surface inconsistent — `a39d73e5` stripped `renode` on the
+strength of the ADR, `2b817532` restored it in three files but not the rest, so
+`docs/cli.md`, `docs/heterogeneous-builds.md` and `docs/board-config-emit.md`
+document the live verb while `README.md`, `docs/README.md`,
+`docs/troubleshooting.md` and `VERSIONS.md` still omit it. Restoring those four
+is tracked separately.
+### Fixed — V2N/V2M `alp_counter_open()` returned `ALP_ERR_INVAL` for published `ALP_E1M_X_COUNTER1..3` (#1242)
+
+`include/alp/e1m_x_pinout.h` publishes `ALP_E1M_X_COUNTER0..3` as E1M-X
+connector identities, but the only backend serving counter on V2N/V2M
+(`src/backends/counter/gd32_bridge.c`) rejected ids 1..3 with
+`ALP_ERR_INVAL` — "bad argument", which sends a customer looking for a
+bug in their own code, when the id was a published identity this SoM
+simply doesn't serve. The IDs stay (a different SoM on the E1M-X
+connector may serve all four); the backend now returns
+`ALP_ERR_NOSUPPORT` for the ids it doesn't serve, matching the
+convention this same backend already uses for `alp_counter_us_to_ticks`
+and `alp_counter_set_alarm`. The served count is also discoverable
+before hitting that error: `alp_counter_capabilities()->channel_count`
+now reports it (1, on V2N/V2M) after opening `ALP_E1M_X_COUNTER0`,
+mirroring the field the ADC gd32_bridge backend already populates.
+Documented at `include/alp/counter.h`, `include/alp/e1m_x_pinout.h`,
+and `docs/portability.md` §4.5. Does not change which die serves the
+counter class — that is `docs/adr/0024`, unaffected by this fix.
+### Fixed — `ensemble_e8_dk` board-target lines paired the E8 upstream board with the E4's SoC id (#1266)
+
+Docs and example READMEs that build against Alif's upstream `ensemble_e8_dk`
+Zephyr board (the exact E1M-AEN801 / Ensemble E8 part) paired it with
+`ae402fa0e5597le0`, the E1M-AEN401 (Ensemble E4)'s own SoC id
+(`zephyr/boards/alp/e1m_aen401_m55_hp/board.yml`), instead of the E8's own
+`ae822fa0e5597ls0` (`zephyr/boards/alp/e1m_aen801_m55_hp/board.yml`).
+
+That target is **not** a build error. Upstream `ensemble_e8_dk` legitimately
+declares three SoC variants — `zephyr/boards/alif/ensemble_e8_dk/board.yml`
+lists `ae402fa0e5597le0`, `ae612fa0e5597ls0` and `ae822fa0e5597ls0`, each
+with its own `.dts` / `.yaml` / `_defconfig` on disk — so
+`ensemble_e8_dk/ae402fa0e5597le0/rtss_hp` builds cleanly. That is precisely
+what makes it dangerous: a customer copy-pasting the documented line onto a
+real E8 dev kit gets a **silently wrong silicon-variant image**, an E4 die
+configuration flashed onto E8 hardware, with no error to notice. Every
+instance is retagged with the E8's own id across
+`testcase.yaml`, `README.md`, `docs/local-ci.md`,
+`docs/vendor-partnerships.md`, `docs/superpowers/plans/*.md`,
+`metadata/catalog.json`, and `metadata/templates/catalog-v1.json`.
+
+`examples/ai/cold-chain-monitor` (source example of the `edge-ai` scaffold
+template) documents and tests the in-tree carrier board,
+`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` -- the qualified form
+`scripts/alp_template.py`'s cross-family scaffold substitution keys off.
+`metadata/templates/catalog-v1.json`'s `edge-ai` template record matches:
+its `cross_compile_matrix` now names that same qualified board, not the
+upstream `ensemble_e8_dk` fallback the rest of the catalog uses. Every
+other affected example documents and tests the upstream fallback board,
+`ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`, in both its README and its
+`testcase.yaml`, so a reader's `west build` line and that example's own
+`testcase.yaml` name the same target.
+
+No CI job builds `ensemble_e8_dk` at all — `pr-twister-aen.yml` builds
+`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` and
+`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`, and `pr-twister.yml` is
+`native_sim/native/64` only. The upstream-board lines in these READMEs are
+documentation for a dev kit the repo does not build in CI, so nothing
+mechanically holds them correct; that is why they drifted, and it stays
+true after this change.
+
+`scripts/alp_template.py`'s scaffold README substitution runs its short
+board-id-prefix fallback alongside the exact qualified-string match
+unconditionally, so a README naming the source board both ways (a
+qualified `west build` line plus a separate bare mention) gets both
+rewritten. `_m33_sm` (RZ/V2N system-manager) scaffold targets get
+`--host <board-ip>` appended to every `west flash` line that follows one of
+the scaffold's own board-target lines, not just the first -- that board
+family's default flasher is SSH-to-the-booted-A55, and a bare `west flash`
+carried over from an AEN801 (JLink) source README can't reach it.
+
+`scripts/check_board_soc_id_pairing.py` is a new CI gate (registered in
+`metadata/quality-tasks-v1.json`, run from
+`.github/workflows/pr-metadata-validate.yml`): it fails when
+`ensemble_e8_dk` is paired with any SoC id other than `ae822fa0e5597ls0`
+under `docs/`, `examples/*/README.md`, `examples/*/testcase.yaml`,
+`examples/**/*.c` and `*.h` (the antipattern also reached a `west build -b
+...` teaching comment in `examples/display/lvgl-widgets-demo/src/main.c`),
+`tests/hil/**/*.md`, `.github/workflows/**`, or the example catalogs, so
+this mismatch can't recur silently the way it did across 29 files.
+
+`examples/peripheral-io/pwm-led-fade` and
+`examples/peripheral-io/vendor-ext-composability` build against
+`alp_e1m_aen801_m55_hp` (their own `board.yaml` declares `m55_hp`, not
+`m55_he`). `examples/multicore/mproc-mailbox`'s `src/main.c` / `peer/main.c`
+build-matrix comments describe `tan build`'s existing multi-slice path
+(`board.yaml` already declares both `m55_hp` and `m55_he` as project
+cores) instead of a sysbuild dual-image flow that
+`alplabai/alp-zephyr-modules` -- an empty scaffold today -- doesn't provide.
+### Added — two doc-accuracy gates: `scripts/check_agents_md_generators.py` and `scripts/check_doc_inventory.py` (#1264, #1265)
+
+`AGENTS.md` hand-writes `ALP_E1M_*`/`ALP_E1M_X_*` pinout-identifier examples
+and the `--emit` choice lists for `scripts/alp_project.py` and
+`python -m alp_orchestrate`; several other docs hand-count workflows, ADRs,
+chips, and libraries. Nothing checked either against the tree, so a rename
+in a real generator or a change to any of those counts could drift silently
+-- #1198's fifth required-work item and #1209's fifth required-work item,
+both deferred out of the wave-3 docs-inventory slice because a new
+`scripts/check_*.py` gate needs the `adding-a-ci-gate` four-site lockstep,
+not a docs edit.
+
+Both new gates are built so that every extraction step that can't find
+what it's looking for is a hard failure, never a silent skip, and each
+checks only claims with a genuine ground truth to compare against (real
+`#define`s, a real `argparse choices=` list read via `ast`, or a real
+a markdown link whose text is a code span) rather than open-ended prose,
+with every occurrence of a count claim checked, not just the first.
+`check_doc_inventory.py`'s docstring explains, with the
+counter-examples the tree already contains (`docs/ci/HW-IN-LOOP.md`'s
+historical `nightly-aen-hil.yml` mention, `docs/test-plan.md`'s link to
+`alp-sdk-vscode`'s own `ci.yml`), why a blanket "every workflow filename
+mentioned anywhere must exist" sweep was deliberately left out: it would
+flag legitimate prose, which is worse than no gate at all.
+
+Both gates are wired into `pr-doc-drift.yml`'s existing `doc-drift` job
+alongside `check_doc_drift.py` / `check_doc_links.py`.
+### Fixed — `check_doc_drift.py` missed `CONFIG_`-prefixed dead symbols and vendor-doc drift (#1228)
+
+The dead-symbol regex, `\b(ALP_[A-Z0-9_]+|alp_[a-z0-9_]+)\b`, never matched
+inside a `CONFIG_ALP_SDK_FOO=y` line: `\b` does not fire between `CONFIG_`
+and `ALP_` (both are `\w`), so the token was invisible to the scan, not
+merely "known" -- a dead `CONFIG_ALP_*` Kconfig reference in a doc could
+drift silently forever. Scanning a doc now consumes an optional `CONFIG_`
+prefix without capturing it, so `CONFIG_ALP_SDK_FOO=y` resolves against the
+bare `ALP_SDK_FOO` Kconfig source spells.
+
+Harvesting known symbols is a separate match that deliberately does NOT
+strip that prefix. A `CONFIG_ALP_SDK_FOO` occurrence inside a header, C
+source, CMake file, generator, or Kconfig help text is always a
+*reference* to an already-existing Kconfig symbol (`#ifdef
+CONFIG_ALP_SDK_FOO`, `if(CONFIG_ALP_SDK_FOO)`, prose) -- never itself the
+point where the bare `ALP_SDK_FOO` identifier is defined. Stripping the
+prefix on the harvest side too let a Kconfig symbol stay "known" after its
+`config ALP_SDK_FOO` stanza was renamed or removed, as long as one stale
+`#ifdef`/`#elif defined(CONFIG_...)` of the old name remained in a
+`.c`/`.cpp` file -- defeating the exact drift class this gate exists to
+catch. A real `config ALP_SDK_FOO` line has no `CONFIG_` glued in front,
+so it still resolves the symbol; only a same-file reference to the
+generated macro spelling stops counting as proof of existence.
+
+`vendors/**/*.md` is now a scanned surface (previously unscanned, so a
+vendored library's README could reference a removed symbol -- e.g. the
+stale `ALP_U8G2_MODULE_DIR` override `vendors/u8g2/README.md` claimed --
+with no gate catching it), and `vendors/**/CMakeLists.txt` is a new
+known-symbol source layer (a vendor integration anchor like
+`ALP_HAS_RENESAS_FSP` can be declared ONLY there). The known-symbol
+harvest also now reads `src/**/*.c`, `src/**/*.cpp`, per-core
+`examples/**/boards/*.conf` / `examples/**/boards/*.overlay` filenames
+(the full board+SoC+core target identity, not just the bare board name,
+bounded to `examples/` so this stays a directory-scoped harvest rather
+than a whole-tree walk), and `keys/*.pem` filenames.
+
+Every `scripts/check_*.py` gate script is now excluded, as a class, from
+the `scripts/**/*.py` known-symbol harvest: a gate script narrates
+`ALP_*`/`alp_*` tokens by name in comments, docstrings, and allowlist
+rationale without ever declaring or generating one, so leaving any of
+them in let a symbol they merely discussed self-confirm as "known" and
+hide the exact class of drift this gate exists to catch.
+
+`docs/board-config-features.md`'s PSA-attestation paragraph names
+`CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA` -- an accurate description of what
+`scripts/alp_orchestrate/secure.py` emits for `attestation_root:
+optiga_trust_m`, but no Kconfig source defines that bare symbol and the
+`src/security/optiga_trust_m_bridge.c` its emitted comment cites does not
+exist (only the probe-only `chips/optiga_trust_m/optiga_trust_m.c` chip
+driver is real). The stricter harvest above correctly surfaces this as a
+second, independent instance of the class #1228 named; it is allowlisted
+rather than fixed here pending a maintainer decision on the PSA <-> OPTIGA
+attestation wiring itself.
+
+`.github/workflows/pr-doc-drift.yml` drops its `paths:` filter and now
+runs on every PR/push to `main`/`dev`, matching `pr-static-analysis.yml`'s
+precedent. These five scripts' harvests span over a dozen directories
+across the tree; a `paths:` list is a second copy of that surface that
+drifts out of sync with the scripts every time a harvest input is added.
+The job itself is a few seconds of Python, so always running it is
+cheaper than maintaining that second list.
+
+This is robustness, not the root cause of #1222/#1228. Injecting a symbol
+that exists nowhere in the tree into `vendors/nxp-imx93/README.md` on a
+clean `origin/dev` export still gives `check_doc_drift.py` exit `0`, so
+the gate was blind to that doc/symbol shape whether or not the trigger
+fired. Dropping the filter prevents a *future* harvest input from
+escaping the trigger; it would not have caught either of those two. The
+blindness itself is what the rest of this entry fixes.
+
+Separately, `docs/portability-matrix.md`,
+`docs/tutorials/04-cross-family-portability.md`, and
+`docs/tutorials/16-inference-mobilenet.md` still named the old
+`CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}` /
+`CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}` spellings; they now
+match what the orchestrator actually emits
+(`CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U65,U85}` /
+`CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_{NEON,HELIUM,REF}`).
+`docs/porting-new-som.md`'s worked-example stdout excerpt is corrected
+to match real `alp_project.py --emit zephyr-conf` output (drops the
+invented `CONFIG_ALP_OS_ZEPHYR` line, fixes `CONFIG_ALP_PERIPHERAL_I2C`
+to `CONFIG_I2C`, transcribes the real generator header line).
+`vendors/u8g2/README.md` and
+`examples/display/u8g2-oled-draw/CMakeLists.txt` are corrected to state
+that `libraries: [u8g2]` always compiles the vendored core with no
+SDK-level switch to the full upstream tree, replacing the stale
+`ALP_U8G2_MODULE_DIR` override claim.
+
+### Fixed — the ALP-B008 unknown-chip guard didn't recognize `driver_status: none`
+
+`scripts/alp_cli/validator.py`'s `_known_chip_slugs()` excluded a chip
+manifest from "known" only when its `driver_status` read `planned` --
+`metadata/chips/dp83825.yaml`'s `driver_status: none` (the honest tier for a
+part with no chip driver and none planned, ADR 0023) passed the guard
+unchanged, so a `board.yaml` with `chips: [dp83825]` validated clean and
+emitted `CONFIG_ALP_SDK_CHIP_DP83825=y` -- a Kconfig symbol nothing declares
+(`zephyr/kconfigs/chips.kconfig` has `ALP_SDK_CHIP_RTL8211FDI`, not
+`_DP83825`). That is the exact silent non-build ALP-B008 exists to prevent
+(#1224). The predicate now excludes both `planned` and `none` -- both mean
+"no `chips/<id>/` driver, no declared Kconfig symbol" -- and the ALP-B008
+diagnostic message reports the chip's real `driver_status` instead of
+hardcoding `planned`.
+
+### Added — every AEN SoM preset's `ethernet_phy:` + `metadata/chips/dp83825.yaml` (#1241)
+
+Every AEN SoM preset declared no `ethernet_phy:` at all, reading as "no PHY on
+this module" when the on-module TI DP83825 is real, silicon-proven hardware
+(`examples/aen/aen-ethernet-link` records a RESULT PASS on real E8 silicon --
+link up, DHCP lease acquired). `metadata/e1m_modules/aen/CHANGELOG.md:13-16`
+records the family shipping ONE module PCB design across every SoC tier
+(E3..E8), and each of `metadata/socs/alif/ensemble/e{3..8}.json` declares one
+`"ethernet"` MAC -- so all six presets, `E1M-AEN301.yaml` through
+`E1M-AEN801.yaml`, now declare `ethernet_phy: dp83825`; no
+`ethernet_phy_count:` is added on any of them, matching the schema's
+"families with a single PHY omit it" convention.
+
+`metadata/chips/dp83825.yaml` is new, following `rtl8211fdi.yaml`'s shape.
+Its `driver_status: none` is honest, not aspirational: no `chips/dp83825/`
+driver exists (ADR 0023's "AEN has no layer-3 chip driver" gap) -- the
+bench-proven path reaches the PHY through the upstream
+`eth_dwmac_alif_ensemble` MAC glue and raw MDIO register reads in
+application code, not a PHY driver; the managed-MDIO alternative
+(`MDIO_DWMAC_ALIF` + upstream `phy_ti_dp83825`) is BUILD-ONLY, not exercised
+on real E8 silicon. `scripts/check_chip_manifest_parity.py`'s
+`KNOWN_MANIFEST_NO_DRIVER` allowlist gained the corresponding entry.
+
+The exact order code is **left `TBD`, deliberately**: the sources in this
+tree disagree on precision (the CHANGELOG's own `metadata/e1m_modules/aen/CHANGELOG.md:16`
+says "TI DP83825", the devicetree says `DP83825I`), and the devicetree's own
+label self-flags as an unverified "fork reference" one
+(`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:548-555`). The MDIO
+`PHYID1+PHYID2` bench readback (`id=2000a140`,
+`examples/aen/aen-ethernet-link/README.md:39`) confirms the DP83825 die/OUI
+identity but not the temperature/package order-code suffix, so it cannot
+settle the question either. Resolving it needs the netlist/BOM, per #1241's
+own "Blocked on" section; `docs/soms/aen.md`'s on-module table is corrected
+to say so instead of the unsourced `DP83825IRMQR` it previously carried.
+
+The same unverified `DP83825I` antipattern the DT's own self-flag warns
+against had leaked well past `docs/soms/aen.md`. Every remaining occurrence
+is corrected: `docs/bring-up-aen.md` (three sites -- the
+on-module inventory bullet, the §5.3 link-check step, and the §8
+troubleshooting entry), `docs/bring-up-imx93.md` (two sites -- and here
+the defect is worse than a suffix: `metadata/e1m_modules/E1M-NX9101.yaml:28`
+declares `ethernet_phy: TBD # variant of RTL or NXP PHY per BOM`, so the
+i.MX 93 module's PHY isn't confirmed to be a DP83825 at all, never mind
+which suffix -- corrected to TBD, not just de-suffixed), five prose sites in
+`examples/aen/aen-ethernet-link/src/main.c` (comments plus the live
+`printf` label a customer's own build would keep re-asserting on every
+run), `vendors/alif/README.md`'s support-matrix table, and one un-caveated
+DT comment (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi`, the FIXED-LINK
+bring-up paragraph -- distinct from the already-self-flagged managed-MDIO
+comment two paragraphs below it, which is correct as written and untouched).
+All corrected to the bare `DP83825` (+ "(exact order code TBD)" where a
+label stands alone). Left as-is, each for a stated reason: two
+already-published `CHANGELOG.md` sections (`## [v0.6.0]`, append-only, and
+this entry's own paragraph above, which is describing the disagreement, not
+asserting a suffix); ADR 0023's three mentions, each explicitly attributed
+to what the DT or a bench-log transcript literally contains, not asserted
+as fact; `metadata/chips/dp83825.yaml`'s own warning comment, which is the
+canonical instance of the correct caveat; the DT's other, already
+self-flagged "fork reference … confirm" comment; and
+`examples/aen/aen-ethernet-link/README.md`'s fenced RESULT PASS console
+block, a verbatim historical bench-console capture that must not be
+retouched to match the now-corrected `printf` (the two need not match --
+the block records what a past run printed, not a live-regenerated string).
+
+### Added — `on_module.i2c_devices` block on every AEN SoM preset + a doc/example bus-name consistency gate (#1270)
+
+`metadata/e1m_modules/E1M-V2N101.yaml` and `E1M-V2M101.yaml` have long
+split their on-module I2C devices per bus, machine-readably; the six AEN
+presets (`E1M-AEN301`..`E1M-AEN801`) had no `i2c_devices:` block at all, so
+"which bus is this part on" existed only in prose -- and four consecutive
+wave-4 doc passes each corrected one AEN bus assignment while breaking
+another, because nothing could check any of them against a source of truth.
+
+Every AEN preset now declares the same two buses, values transcribed from
+ADR 0017:74-79, `docs/bring-up-aen.md` Section 5.1's bench-verified table,
+and `examples/aen/aen-secure-element-sign/README.md:14-15` (never
+re-derived): `brd_i2c` (Alif LPI2C0, `P7_4`/`P7_5`, slave-only,
+SE-mastered) carries the RV-3028-C7 RTC (`0x52`), OPTIGA Trust M
+(`0x30`), and TMP112 (`0x48`); `e1m_i2c0` (SoC I2C2, `P5_6 SCL_C` /
+`P5_7 SDA_C`) carries the 24C128 EEPROM (`0x50`). `brd_i2c` omits
+`bus_master:` per the schema's own documented convention for a bus no
+on-module silicon masters.
+
+`scripts/check_i2c_bus_doc_consistency.py` is new: it flags a doc or
+example-source line that names a known on-module I2C part next to a bus
+name that disagrees with the `i2c_devices` ground truth (cross-family --
+every `metadata/e1m_modules/E1M-*.yaml` preset, not AEN's six alone), the
+same way `check_pin_conflicts.py` cross-checks silicon pads. It is
+deliberately narrow and LINE-scoped -- ground truth excludes any chip
+whose bus assignment disagrees across presets, a line naming two buses at
+once is treated as a contrast and skipped, a chip-id part that is itself
+an ordinary English word (`trust`) is excluded from its alias set rather
+than treated as a doc-name candidate, `docs/superpowers/plans/**` and
+`docs/superpowers/specs/**` (archival, deliberately past-state) are out of
+scope, and board-side (carrier) parts are out of scope. Being line-scoped,
+a bus/part claim split across two sentences is invisible to it. Against
+the four wave-4 defects #1270 names verbatim, ONE is caught: fix commit
+`35cf42ca` names `docs/bring-up-aen.md` as (with `docs/soms/aen.md` /
+`docs/troubleshooting.md` / tutorial 13) the site "that originated the
+error" for "the EEPROM was documented on BRD_I2C when it is on SoC I2C2",
+and the pre-fix line -- "**EEPROM / board_id read over BRD_I2C.**  Confirm
+the 24C128" -- names `24C128` (a real alias) and `BRD_I2C` on one line,
+which this gate flags. The other three are NOT caught: the carrier-part
+one is out of scope by design, the `aen-secure-element-sign` one splits
+the bus name and part name across separate sentences, and
+`docs/cc3501e-bridge.md` spells the EEPROM by its abbreviated MPN
+(`N24S128` for `N24S128C4DYT3G`), which this gate's chip-alias match never
+resolves. `docs/bring-up-aen.md`'s stale "the AEN presets have no
+`i2c_devices:` block" line is corrected to point at the new block, and the
+same stale claim is corrected everywhere else it still appeared
+(`docs/troubleshooting.md`, `docs/tutorials/02-i2c-scan.md`,
+`examples/aen/aen-eeprom-manifest/src/main.c`). Registered in
+`metadata/quality-tasks-v1.json` and wired into `pr-metadata-validate.yml`.
+
+An earlier form of this gate also treated a `0xNN`-shaped literal next to a
+co-located single bus and single chip as an address-mismatch check. That
+half is dropped: no line-level signal cheap enough for this gate reliably
+distinguishes a 7-bit I2C address from a register offset, bitmask or length
+that happens to share the same two-hex-digit shape -- proven against that
+earlier script (git archive `8f5c2728`): `TMP112 config register 0x49 resets to default
+on BRD_I2C.` (a register value, correct bus, correct chip) reported
+`names 'tmp112' at address '0x49' ... but ... puts 'tmp112' at '0x48'`, a
+false positive with no real address claim on the line at all. The address
+check is dropped outright; `address_7bit` stays real, human-authored
+`i2c_devices` metadata, just no longer doc-cross-checked. A regression
+test (`test_register_value_on_a_correct_chip_bus_line_is_not_a_false_address_claim`)
+pins this.
+
+The schema's `i2c_bus.bus_pads:` field is dropped from
+`metadata/schemas/som-preset-v1.schema.json`: populated by no preset (not
+just AEN's) and read by no script. Wiring it up would mean per-silicon pad data for every existing
+family plus a gate read path, out of narrow-round scope; dropped instead.
+
+Ground truth being cross-family means AEN's own six `i2c_devices` blocks
+add no NEW detection power today: every chip they declare (OPTIGA Trust
+M, RV-3028-C7, TMP112, the 24C128 EEPROM) already had an identical
+V2N/V2M declaration, so deleting all six AEN blocks changes zero
+reported problems -- only the provenance list each problem cites
+shrinks. AEN's own block earns its keep the day AEN needs a value that
+disagrees with V2N/V2M, or for a direct per-SoM lookup outside this
+gate.
+
+This PR does not close #1270 -- the issue's own bar ("even a narrow
+version ... would have caught every defect above") is unmet (one of four,
+not every one), per the four-defects paragraph above. The bus half stays; the address half
+is dropped rather than shipped imprecise.
+### Fixed — DRP-AI `--images` calibration silently assumed every model is a 224x224 classifier (#1271)
+
+`scripts/alp_model/adapters/drpai.py` forwarded any `models[].compile.drpai`
+config to the DRP-AI TVM tutorial's `--images` flag regardless of the model's
+declared `input_shape`. The tutorial's `--images` handling always runs
+calibration images through `pre_process_imagenet_pytorch()`, which ignores the
+`dims` argument it accepts and hard-codes `resize(256)` + `center_crop(224)` --
+so `--images` only ever produced correctly-shaped calibration tensors for a
+224x224 ImageNet-style classifier. For any other geometry, including every
+object detector (e.g. YOLOX at `1,3,640,640`), the compile ran the full
+(multi-minute) DRP-AI Translator and quantisation pass and only then aborted
+deep inside the vendor tutorial with `ValueError: could not broadcast input
+array from shape (1,3,224,224) into shape (...)`.
+
+The adapter now checks `input_shape` against the 224x224 NCHW geometry
+(`1,3,224,224` — the layout ONNX, the only format this adapter accepts, uses
+by convention) before invoking the tutorial, and raises a clear `RuntimeError`
+naming the mismatch immediately instead of running the compile first. This
+closes the *slow, cryptic failure* -- it does not make `--images` calibration
+work for detectors: the vendor tutorial's preprocessing would still need to
+own the model's real geometry (letterbox padding for YOLOX, for instance) to
+produce a correctly-calibrated quantised model, and validating the resulting
+accuracy needs a real calibration image set and a board. Both remain open,
+tracked in #1271.
+
+Also fixed on the way to reaching this code from `board.yaml`:
+`scripts/alp_cli/model.py`'s `_resolve_compile()` resolved *every* string
+value in a `models[].compile.<backend>` block to an absolute path, so
+`input_shape: "1,3,224,224"` and `product: "V2N"` arrived at the adapter as
+bogus filesystem paths and the new 224x224 check above misfired on exactly
+the board.yaml-driven path it exists to protect. It now only resolves the
+keys that are actually paths (`config`, `calibration`, `images`, `spec`).
+Separately, and not fixed here: `metadata/schemas/board.schema.json`'s
+`models[].compile.drpai` block still only declares a `spec:` key and rejects
+`input_shape`/`input_name`/`images`/`product` outright, so `alp validate`
+cannot be used against a `board.yaml` with a `compile.drpai` block yet --
+`alp model build` still can, since it never runs schema validation itself;
+see `docs/bring-up-drpai-v2n.md`.
+
+The 224x224 check compares the PARSED dimensions, not a stringified
+spelling. An `input_shape = str(input_shape)` normalization -- intended to
+stop `.split(",")` crashing on a YAML flow-sequence `input_shape:
+[1,3,224,224]` -- broke the very case it was meant to support:
+`str([1, 3, 224, 224])` is `'[1, 3, 224, 224]'`, and `.split(",")` on that
+yields tokens (`'[1'`, `' 224]'`, ...) that do not parse as plain ints, so a
+genuinely valid list-form 224x224 classifier shape was rejected as
+unsupported. `_is_224_imagenet_shape` now uses `_parse_shape_dims`, a helper
+accepting either a comma-separated string or a list/tuple. The vendor CLI's
+`-s` argument is built from those parsed dims too, so it is always the
+comma-joined form the tutorial expects, never Python's `str()` of a list.
+
+`docs/bring-up-drpai-v2n.md` no longer contradicts itself or name a command
+that cannot be run. Step 5 documented `alp model build --board board.yaml`
+and then, seventeen lines later, told readers no schema-valid `board.yaml`
+can drive that path and to call `build_model()` directly -- an internal
+Python API, and wrong: the CLI reads `board.yaml` with a plain
+`yaml.safe_load` and never calls the schema validator (only the separate
+`validate` command does), so it already works with
+`compile.drpai.input_shape`/`input_name`/`images`/`product` today, exactly as
+`test_alp_model_build_only_resolves_path_valued_drpai_opts` exercises
+end-to-end.
+
+Separately, there is no `alp` binary to run any of it with:
+`pyproject.toml`'s `[project.scripts]` declares only `alp-mcp`, because
+"standalone Python Tan is the user-facing command surface (ADR-0020). The
+`alp_cli` package remains an SDK-internal reference and parity CLI for direct
+maintenance, never a user-installed `alp` binary." Every invocation in the
+document is now the module form that actually runs --
+`python3 -m alp_cli model build --board <path>/board.yaml` from `scripts/`.
+### Added — an ExecuTorch adapter closes the write side of a decode gap the enum had carried unused (#1260)
+### Added — ExecuTorch is now a producible and decodable model format, reachable from `alp model build` (Refs #1260)
+
+`ALP_INFERENCE_MODEL_EXECUTORCH` had sat in the public
+`alp_inference_model_format_t` enum with no matching case in `_fmt_enum()`
+(`src/backends/inference/alp_model_select.c`), so a `blob_format` string of
+`"executorch"` silently decoded as `ALP_INFERENCE_MODEL_TFLITE` -- the wrong
+parser, reported as `ALP_OK` -- and no host-side adapter could produce that
+string in the first place, so the gap could not be reached from a real
+build either. `_fmt_enum()` now has an explicit `"executorch"` case.
+`scripts/alp_model/adapters/executorch.py` is a new `CompilerAdapter`
+(`backend="cpu"`) that packages an exported `.pte` program into an
+`.alpmodel` blob the same way `CpuAdapter` passes a `.tflite` through
+untouched, and it is registered by default in `build.py`'s `_ADAPTERS` list
+alongside `CpuAdapter`. `build_model()` now selects among a backend's
+adapters by `accepts(src_fmt)` when a backend carries more than one; since
+`tflite` and `pte` are mutually exclusive, no existing board's TFLite build
+changes behavior. A `board.yaml` declaring a `.pte` model source now builds
+through `alp model build` instead of raising `ValueError: no blob compiled
+...; cpu:incompatible (cpu does not accept .pte)`.
+`metadata/schemas/board.schema.json`'s `models[].source` description now
+names `.pte` alongside `.tflite`/`.onnx`.
+
+This closes the write-side gap only; there is still no on-device ExecuTorch
+*runtime* backend, so a package built this way has nothing to
+`alp_inference_invoke()` it yet (`docs/recommended-libraries.md` Tier 4).
+
+Issue #1260 ask 2 ("add `executorch` to `VALID_BLOB_FORMATS` in the same
+change") is not done here: that constant does not exist on this branch --
+it arrives only with the unmerged `origin/feat/ort-cpu-a55-inference`,
+whose format set omits `executorch` -- so ask 2 stays open.
+### Fixed — `tier-a-libraries · E1M-V2N101` timing out looked like a build regression when it was an apt-get stall (#1274)
+
+`#1272` hit the `pr-tier-a-libraries.yml` job's 30-minute `timeout-minutes`
+(the workflow's own setting, not a runner default) on the `E1M-V2N101` shard,
+cancelled mid-"Build Tier-A library smoke on native_sim". The suspected cause
+— the curated Tier-A set growing with Arm-2D, CMSIS-CV, and cmsisstream — does
+not hold: those three are Tier B (`metadata/libraries/arm-2d.yaml`,
+`cmsis-cv.yaml`, `cmsis-stream.yaml`), never part of
+`tier-a-library-ci.json`'s `hostBuild.libraries` (unchanged since Modbus
+joined it on 2026-07-07), so they never reach this job's build at all.
+
+The real cause, read from the run's own logs (run 31100778339): `apt-get
+update`/`install` stalled 25m37s on the `E1M-V2N101` shard (job 92613574776,
+`Install host build tools`, 12:27:37Z→12:53:14Z) while the sibling
+`E1M-AEN801`/`E1M-V2M101` shards in the same run ran that same step in 19s
+(job 92613574774, 12:20:16Z→12:20:35Z) and 26s (job 92613574765,
+12:25:47Z→12:26:13Z) respectively — a runner/mirror hiccup, not library
+content. ccache was cold in all three shards that run (`Cache not found` for
+every one), so it was not a warm/cold-cache effect either; the actual `west
+build` step, once it started, compiled its ~1200 objects in 1-2 minutes in
+every run inspected. The library set does not need sharding the way
+`twister` shards its suite — the per-library build time was never the
+bottleneck; setup (apt-get, `west update`) was, and stays constant regardless
+of library count.
+
+`.github/workflows/pr-tier-a-libraries.yml`'s three jobs now carry
+`timeout-minutes` on every step whose `run:`/`uses:` body does real
+network/install/compile work, not just the `tier-a-library-build` job
+#1272 hit: `compute-family-matrix`'s `Checkout alp-sdk` and `Set up
+Python` (2 each, ceiling 6); `tier-a-library-build`'s `Checkout alp-sdk`:
+2, `Set up Python`: 2, `Install host build tools`: 8, `Install west`: 2,
+`west init Zephyr workspace`: 13, `Cache Zephyr modules`: 3, `Cache
+ccache objects`: 2, `pip install Zephyr + alp-sdk requirements`: 3,
+`Build Tier-A library smoke on native_sim`: 6 (capped sum 41, plus a
+1-minute budget for the job's one uncapped step -- see below -- stays
+under the job's 45-minute ceiling); and `cmsis-nn-metadata`'s `Checkout
+alp-sdk`, `Set up Python`, and `Install Python deps` (2 each, ceiling 10,
+capped sum 6). A future stall in any one of them now fails fast and
+names itself, instead of silently spending the whole job's budget and
+reporting a timeout on whichever step happened to be running when the
+ceiling hit.
+
+Every cap is re-derived from that step's own worst **successful** run
+across 44 sampled runs (`30800710350`..`31218962355`, 2026-08-03 through
+2026-08-07, via the GitHub API's per-job step timestamps), not guessed:
+`Checkout alp-sdk` max 43s (cap 2min, 2.79x), `Set up Python` max 1s
+(2min, effectively unbounded headroom), `Install host build tools` max
+214s (cap 8min = 480s, **2.24x** -- the first round of this fix capped it
+at 4min = 240s, only **1.1x** over this same 214s worst-successful
+observation, close enough to flake on an ordinary slow-but-fine run, the
+exact misattribution class this issue exists to stop), `Install west` max
+11s (2min, 10.9x), `west init Zephyr workspace` max 383s (6m23s, run
+`30800710350`; cap 13min = 780s, **2.04x** -- was capped at 8min = 480s,
+**1.25x**, the same too-tight class), `Cache Zephyr modules` max 62s (cap
+3min, 2.9x; was 2min, 1.94x), `Cache ccache objects` max 2s (2min, no
+practical risk), `pip install Zephyr + alp-sdk requirements` max 72s
+(3min, 2.5x), `Build Tier-A library smoke on native_sim` max 96s (6min,
+3.75x), `Install Python deps` (`cmsis-nn-metadata`) max 6s (2min, 20x).
+
+`tests/scripts/test_tier_a_workflow_step_timeouts.py` enforces both
+properties across all three jobs, not just `tier-a-library-build`: every
+step whose `run:`/`uses:` body does real network or compile work (a
+marketplace `uses:` action always makes its own round trip, same as
+`actions/checkout`/`actions/cache` here) carries a timeout under its
+job's own ceiling, and each job's caps sum under that same ceiling.
+`test_job_ceiling_exceeds_the_sum_of_its_step_timeouts` was unsound: it
+summed only steps carrying `timeout-minutes`, so a step with none (not
+flagged by the network/compile heuristic, since it does neither --
+`Derive build matrix from familyMatrix registry`, `Generate Tier-A
+alp.conf for ...`, `Validate Tier-A library metadata and emit tests`)
+contributed 0 to the sum even though it still spends real wall-clock time
+before whatever runs after it, letting a ceiling with no real headroom
+read as safe. Concretely, `compute-family-matrix`'s prior ceiling (5)
+exactly equalled its two capped steps' sum (4) plus this budget (1) --
+`5 < 5` is false, so that ceiling had already spent every minute of its
+declared margin on a step (`Derive build matrix...`) the old test could
+not see at all; its real duration has never exceeded 2s, so this was not
+an active flake today, but the old test would have said "safe" (4 < 5)
+regardless of how long that step actually took, which is exactly the
+soundness gap this fix closes. Each such step is
+now budgeted a flat `_UNCAPPED_STEP_BUDGET_MINUTES = 1`, comfortably
+above every real observation of the three today (max 45s, `Validate
+Tier-A library metadata and emit tests`; a couple of seconds for the
+other two) without hardcoding per-step numbers that would drift the
+moment a new uncapped step is added. `compute-family-matrix`'s ceiling
+moves 5 -> 6 and `tier-a-library-build`'s 33 -> 45 so both stay strictly
+above their now-honest sums (5 and 42 respectively); `cmsis-nn-metadata`'s
+already had headroom (6 capped + 1 budgeted = 7, under its unchanged
+10-minute ceiling).
+
+The `cmsis-nn-metadata` job's `Validate Tier-A library metadata and emit
+tests` step also runs this test file directly -- it is the only lane
+that executes when a PR touches nothing but this workflow file (the two
+lanes that run the full `tests/scripts/` sweep, `pr-metadata-validate.yml`
+and `cross-platform-zephyr.yml`, do not trigger on
+`.github/workflows/pr-tier-a-libraries.yml`'s own path), so without this
+the regression gate would not run on the file it guards. Observed
+successful runs (`31218962355`, `31217270650`) finish in 4m19s-6m40s per
+shard, comfortably under every new cap.
+
+## [v0.15.0] - 2026-08-07
+
+### Fixed — the v0.15.0 cut was blocked, and the CHANGELOG claimed a GA that only ever shipped as an rc1 (#1292)
+
+`v0.15.0` was bumped on 2026-07-31 (`4d0f4aae`) and tagged `v0.15.0-rc1`, but
+the final `v0.15.0` tag was never pushed -- `v0.14.0` is still the latest
+release. Two artefacts were left inconsistent with that, and together they
+made the GA cut impossible to run.
+
+`scripts/bump_version.py`'s `update_sdk_version_yaml` raised `SystemExit`
+when the substitution was a no-op, so `bump_version.py 0.15.0` aborted before
+doing anything: `metadata/sdk_version.yaml` already read `version: 0.15.0`.
+It now prints `unchanged … (already at version: X)` and continues, the same
+way `update_version_h` already handled an already-current `version.h`. A
+version can legitimately be bumped in one PR and tagged in a later one.
+
+The duplicate-section hazard that raise was incidentally guarding against is
+now caught where it actually lives: `slice_changelog` refuses outright when a
+`## [vX]` section already exists. That is not cosmetic -- `release.yml`
+slices the release body by `## \[v{VERSION}\]` and takes the **first** match,
+so a second section would have published the new content and silently
+orphaned the older one from the release page, with no error anywhere.
+
+`CHANGELOG.md`'s dated `[v0.15.0] - 2026-07-31` section is retitled
+`[v0.15.0-rc1] - 2026-07-31`, naming what actually shipped it. The rest of
+the tree already recorded this -- `docs/abi/README.md:157` ("no final
+`v0.15.0` tag exists yet") and a dozen `docs/superpowers/plans/*.md` headers
+("`v0.15.0-rc1`; no plain `v0.15.0` tag exists"); the dated heading was the
+only artefact asserting a GA. The working heading is relabelled
+`[Unreleased] - v0.15.0 candidate` so the accumulated work cuts as the GA.
+
+`metadata/sdk_version.yaml`'s `status: released` is deliberately unchanged --
+it becomes accurate the moment the tag is pushed, and flipping it back for
+the interim would churn `alp.lock` and every consumer that reads it.
+
+### Added — `scripts/check_board_id_doc_parity.py`: a struct-parity gate pinning `docs/board-id.md` and `scripts/program_eeprom.py` to `include/alp/hw_info.h` (#1231)
+
+The `alp_hw_info_eeprom_t` struct-width drift #1231 reported
+(`docs/board-id.md` disagreeing with `include/alp/hw_info.h` on
+`schema_version` / `serial` / `reserved`) was already corrected by
+#1223. This delivers the issue's remaining "worth doing properly"
+ask: a gate that catches the next drift instead of relying on another
+manual doc pass.
+
+`docs/board-id.md`'s prose paragraph below the `alp_hw_info_eeprom_t`
+typedef block now cites the header's `ALP_HW_INFO_*_LEN` macro names
+each width was transcribed from, so a reader decoding raw manifest
+bytes can trace every width back to its source instead of trusting a
+hand-copied number. The typedef block itself still spells widths as
+plain integers -- deliberate, per the doc's own explanation -- and
+the gate parses that block, not this citation paragraph, which the
+doc labels unenforced prose.
+
+A new gate, `scripts/check_board_id_doc_parity.py`, parses the
+`alp_hw_info_eeprom_t` typedef struct out of both `docs/board-id.md`
+and `include/alp/hw_info.h`, resolves the header's length macros, and
+diffs field names, order, and widths between the two sides. It also
+resolves `scripts/program_eeprom.py`'s own `FAMILY_LEN` / `SKU_LEN` /
+`HW_REV_LEN` / `SERIAL_LEN` / `RESERVED_LEN` constants -- the
+manifest's third transcription, after the header and the doc -- and
+checks each against its header macro (or, for `RESERVED_LEN`, against
+the header's `reserved` field width, which has no macro). A
+same-total-size zero-sum edit to two of those constants (one grows,
+one shrinks by the same amount) would otherwise pass every existing
+size check while moving every field after the swap to a new byte
+offset, silently mis-programming production EEPROMs at the old
+offsets. Generation (`@include`-ing the header into the doc) was
+rejected: Markdown has no such directive, and the doc's block carries
+per-field explanatory prose a generator would strip. The gate fails
+loudly -- never silently OK -- if a struct block or length constant
+cannot be located at all, so renaming or moving any of the three files
+cannot silently disarm it; a struct-body line that doesn't parse as a
+field declaration (e.g. a two-token type like `unsigned char`, or a
+comma-list declaration) is now also a reported failure on whichever
+side(s) it appears, rather than being silently dropped from both
+sides' field lists and comparing "equal" by omission.
+
+It is registered in `metadata/quality-tasks-v1.json` and wired into
+`pr-doc-drift.yml`. The `pull_request` filter's `docs/**` +
+`include/**` entries already covered the doc and the header, but the
+gate script and `scripts/program_eeprom.py` are two more inputs it
+reads, so both got their own filter entries. The `push` filter had no
+per-script entries at all before this change -- not just missing this
+gate's -- so it is brought to parity with `pull_request` outright:
+`push`'s path list is now identical to `pull_request`'s, not just
+missing one more line appended to whatever it already had.
+
+### Fixed — `check_public_private.py`'s `REVIEWED_ACCEPTED` exemptions broke on every CHANGELOG-editing PR (#524)
+
+`REVIEWED_ACCEPTED` matched an exemption on an exact `CHANGELOG.md` line
+number (`_is_reviewed_accepted` required `line_no == e.line`). New entries
+are prepended at the top of the file, so every `[Unreleased]` insertion
+shifted the four existing exemptions off their anchors -- the reviewed
+line no longer matched, the finding reappeared, and the gate failed.
+Because the PR template requires a CHANGELOG entry, this fired on
+essentially every PR that touched one: measured, the pre-fix script
+against the current `CHANGELOG.md` reports four findings, at lines 6897,
+8155, 10984, and 11146 -- the SoM carrier-errata pointer and the three
+audit-doc citations reviewed and accepted under #524.
+
+`scan()` now matches a `REVIEWED_ACCEPTED` excerpt by content instead of
+line position, and only treats it as active when the excerpt appears on
+EXACTLY ONE line of the file it names. Zero matches (the reviewed text was
+deleted) or more than one (a looser excerpt would silently exempt a line
+nobody reviewed) both leave the exemption inactive, so the ordinary
+finding stands instead of being suppressed by accident; the three affected
+`PRIVATE_AUDIT_REFERENCE` entries are lengthened to the reviewed sentence
+so each is unique again. `line` is now kept only as a human-facing hint
+for where a reviewer originally found the text -- it plays no part in
+matching, so a later `CHANGELOG.md` insertion can no longer break the
+exemption. `main()` also now prints one diagnostic line per stale or
+ambiguous exemption -- scoped to the actual checkout this script lives in
+(`root == REPO`), since the excerpts are a snapshot of alp-sdk's own
+history -- so a gate-integrity problem is visible on its own line instead
+of being read as an ordinary leak finding.
+### Changed — build-plan `command.tool`: bare-identity convention documented and gated (#1286)
+
+- `command.tool`'s (`metadata/schemas/build-plan-v1.schema.json`)
+  description is clarified to state it is an executable identity
+  ('west', 'bitbake', 'cmake'), never a location — resolving it to a
+  concrete path is the executor's job, not the plan's. A
+  non-asserting `"examples": ["west", "bitbake", "cmake"]` annotation
+  is added; no `pattern` is asserted, so the shared schema stays
+  deliberately tolerant of a path-shaped value (the #847 precedent:
+  tightening a shared shape at unchanged `schemaVersion: const 1`
+  breaks a consumer already holding a valid plan, with no version
+  signal — see ADR-0020, Amendment (2026-07-20), item 3).
+- The bare-identity convention is instead enforced only over plans
+  the SDK emits itself, in a new
+  `check_build_plan.py::_tool_identity_violations` check scoped to
+  the `_validate_generated` branch — never against an
+  externally-supplied `--plan` file.
+### Added — a redistributed zcbor Yocto recipe: `<alp/model.h>` becomes real on Linux for the first time (#1254)
+
+**First non-Zephyr `.alpmodel` reader.** `meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb`
+packages zcbor (Apache-2.0, canonical `NordicSemiconductor/zcbor` remote,
+tag `0.9.1`) as a Yocto shared library, so `src/common/alp_model.c`'s real
+CBOR-manifest parser now compiles on the A55/Linux side of every
+V2N/V2M/NX91 SoM instead of the `ALP_ERR_NOSUPPORT` stub. `src/yocto/
+CMakeLists.txt` degrades cleanly (warn + stub) on a sysroot with no zcbor
+and fails configure only when meta-alp-sdk's own recipe — which DEPENDS on
+it unconditionally — is the one asking.
+
+### Added — ADR 0024: V2N/V2M analog and counter classes stay on the GD32 bridge (#1150)
+
+Design decision only, no code:
+`docs/adr/0024-v2n-analog-and-counter-classes-stay-on-the-gd32-bridge.md`
+records that ADC, PWM, DAC, counter, and qenc stay served exclusively
+by the GD32 IO-MCU bridge on V2N/V2M — no native RZ/V2N leg is added.
+No SoC pin reaches an E1M-standard analog or counter pad on this
+family (verified at the `gd32-io-mcu-map.tsv` / `renesas-peripheral-map.tsv`
+source), so a priority-selected fallback leg would have nothing to
+attach to and could only fail silently. Also records that the
+six-surface 2026-06-04 HiL quarantine #1150 cites has mostly moved
+on — four of the six are firmware-cleared and a fifth is mitigated,
+per a later 253/253 20-row soak at fw v0.2.9; the real single point
+of failure is the shared supervisor/transport, which is a
+bridge-firmware quality question, not a backend-priority one.
+
+### Added — ADR 0023: Ethernet stays out of the `<alp/*>` surface (#1144)
+
+Design decision only, no code: `docs/adr/0023-ethernet-out-of-the-alp-surface.md`
+records that Ethernet's control and data planes stay outside
+`<alp/*>` — the portable contract is the compile-time capability
+(`ALP_SOC_ETHERNET_COUNT`), the form-factor port identity
+(`ALP_E1M_ETH0`/`ALP_E1M_X_ETH0`/`ALP_E1M_X_ETH1`), and the
+ring-2 `rtl8211fdi` PHY chip driver, not a new `<alp/net.h>`. Narrowly
+supersedes `docs/adr/0003-peripheral-coverage.md`'s "Ethernet folds
+into `<alp/iot.h>`" row, which never happened.
+
+### Added — `scripts/gen_rzv2n_cm33_svd.py`: a CMSIS-SVD register view for the RZ/V2N CM33 (#1029)
+
+Renesas ships no CMSIS-SVD for the RZ/V2N, so a debugger's peripheral view
+has had nothing to load. This generator mechanically projects one from the
+vendored `hal_renesas` west module's FSP headers, cross-validating each
+bitfield it emits between the two independent vendor projections
+(`iodefines/`'s C register structs and `iobitmasks/`'s `_Pos`/`_Msk`
+macros) so a mismatch fails loudly instead of rendering a wrong value in a
+debugger. 15 fields (of ~9200, against the real corpus) are exempt — real,
+itemised disagreements between the two vendor projections themselves,
+listed with evidence in `FIELD_CROSS_CHECK_SKIPS` (a further 7
+`iobitmasks/`-side macros with no `iodefine` counterpart at all are
+tracked separately in `IOBITMASK_ORPHAN_SKIPS`). Each of the 15 either
+emits with the position/width the OTHER evidence agrees on
+(`FIELD_POSITION_OVERRIDES`) or with an explicit `NOT CROSS-VALIDATED`
+`<description>`, never as an indistinguishable plain field. Deliberately
+**not committed and not a CI gate** — every consumer is mid-CM33-debug and
+already has the west workspace this reads from; see
+`docs/architecture.md`'s generators section for the full reasoning. Run
+locally: `python3 scripts/gen_rzv2n_cm33_svd.py --output <path>`. The test
+fixture's header excerpts join `vendors/**` and `zephyr/**` on the
+clang-format gate's exclusion list, in both `pr-static-analysis.yml` and
+`scripts/test-all.sh`'s local mirror — they are verbatim vendor content
+whose byte-identity with the real headers the tests assert, so
+reformatting them would break the fixture.
+
+### Fixed — `ALP_CAP_HW_ETHERNET` read false on V2N/V2M despite two 1 GbE ports (#1240)
+
+`scripts/gen_soc_caps.py`'s `ETHERNET_COUNT` matched only the `ethernet` key.
+RZ/V2N's `metadata/socs/renesas/rzv2n/n44.json` publishes `ethernet_1g`
+instead, so `ALP_SOC_ETHERNET_COUNT` emitted `0` for the family with the most
+Ethernet on it and `ALP_CAP_HW_ETHERNET` — the compile-time gate a customer is
+meant to key off — reported the opposite of the silicon. It now sums every
+Ethernet-flavoured key, mirroring how `USB_COUNT` already sums `usb_2` +
+`usb_3` two entries below, and `include/alp/soc_caps.h` is regenerated: one
+line moves, `:373` from `0` to `2`.
+
+The guard against a recurrence is the substance of the fix, not a courtesy.
+Its first form hardcoded its own copy of the key list, so reverting the
+generator left it green — the same defect wearing a test's clothes. It now
+probes the real `ETHERNET_COUNT` lambda out of `gen_soc_caps.CAPS`, which
+fails in both directions: a SoC key the generator ignores, and a generator
+that stops consuming a key already in the tree. Key matching is
+case-insensitive because `metadata/schemas/soc-spec-v1.schema.json` puts no
+pattern on peripherals key names.
+
+Two things worth recording. The sibling generator
+`scripts/gen_support_matrix.py` already read this correctly, via
+`_has_prefix(s, "ethernet")` — the two generators disagreed about the same
+metadata, and only one of them feeds `ALP_CAP_HW_ETHERNET` (#1243). And
+`ALP_CAP_HW_ETHERNET` stays false for `nxp:imx9:imx93` after this change, for
+an unrelated reason: that SoC declares its peripheral counts pending
+reference-manual ingestion, so there is no key to sum and none may be
+inferred from the absence.
+
+### Fixed — the Doxygen build was red on `dev` itself (#1245)
+
+Two ordinary GitHub-Markdown links in `README.md` were unresolvable `\ref`
+targets for Doxygen: `[Status](#status)` (Doxygen's heading-anchor scheme
+does not yield `status` for `## Status`) and `` [`CHANGELOG.md`](CHANGELOG.md) ``
+(`CHANGELOG.md` is not in the Doxyfile `INPUT`). Since the Doxyfile runs
+`WARN_AS_ERROR`, the `pr-doxygen` gate and `scripts/test-all.sh`'s `doxygen`
+stage failed on **every** branch cut from `dev`, including branches touching
+no documentation.
+
+The links now point at `README.md#status` and at the changelog's canonical
+URL under `/blob/HEAD/`, which follows the default branch instead of pinning
+one. Both still resolve on GitHub, and the Doxygen warning log is empty.
+
+Two tidier-looking fixes were tested and rejected: adding `CHANGELOG.md` to
+the Doxyfile `INPUT` trades one error for thirty from the changelog's own
+prose, and `MARKDOWN_ID_STYLE = GITHUB` needs Doxygen 1.10+ while this repo
+builds on 1.9.8, where setting it raises a different error instead.
+
+The reason it reached `dev` at all is that `pr-doxygen` is not a required
+status check on `dev` or on `main`.
+
+### Added — the RZ/V2N on-die DRP-AI3 NPU is reachable from `<alp/inference.h>`, opt-in (#1145)
+
+DRP-AI3 was dark: the CMake option defaulted OFF, no kernel driver bound the
+reserved carve-out, and `src/yocto/inference_drpai.cpp` was a stub, so 4 TOPS
+of on-die NPU had no path from the portable inference surface.
+
+**Two independent switches, both default OFF, deliberately not merged into
+one.** `PACKAGECONFIG[drpai]` on the `alp-sdk` recipe compiles the backend in;
+`ALP_ENABLE_DRPAI = "1"` installs the devicetree override that claims the
+carve-out. The backend without the node fails at `open()` with a clear error;
+the node without the backend is an idle device. Neither silently half-works.
+
+The DT switch is separate from layer presence on purpose. `meta-rz-drpai`
+ships bundled in the RZ/V2N AI SDK BSP v6.30, so gating only on its presence —
+as an earlier revision of this change did — would have taken `&drpai0` from
+`disabled` to `okay` on **every** existing V2N/V2M image, making the driver
+probe and `/dev/drpai0` appear on boards whose owners never asked for an NPU.
+That is a behaviour change wearing an opt-in's clothes.
+
+- `e1m-v2n-drpai.dtsi` overrides `&drpai0` with `memory-region = <&drp_reserved>`
+  (`0xd0000000`, `0x20000000`) and `memory-shared-for-drpai-ext-cont =
+  <&shared_drp_reserved>` (`0xafcff000`, `0x1000`), matching the vendor's own
+  EVK override. Both properties are mandatory: on V2N the driver defines
+  `ENABLE_DRP_SUPPORT_SHARED_MEMORY`, so a probe missing the second hard-fails
+  with `-ENOMEM` rather than degrading.
+- `mera2-drpai-tvm_2.7.0.bb` packages the EdgeCortix MERA2 + DRP-AI TVM
+  runtime, staged from a builder-supplied `RUHMI_DRPAI_TVM_DIR`. It vendors
+  nothing. Now scoped with `COMPATIBLE_MACHINE` to the four V2N/V2M machines
+  and pinned to `PACKAGE_ARCH = "${MACHINE_ARCH}"` — `EXCLUDE_FROM_WORLD`
+  alone would not have stopped an image pulling SoC-specific prebuilts into an
+  unrelated aarch64 build.
+- `src/yocto/inference_drpai.cpp` becomes real `MeraDrpRuntimeWrapper` code.
+
+### Changed — `libalp_sdk`'s own link now refuses undefined symbols (#1145)
+
+`LINKER:--no-undefined` on GNU ld / lld. A shared library tolerates undefined
+symbols by default, and that is how `libalp_sdk.so` once linked *successfully*
+with the DRP-AI backend compiled in while `MeraDrpRuntimeWrapper`'s symbols
+were nowhere on the link line — the break surfaced later, in a downstream
+consumer, via the direct plain-CMake path.
+
+Every optional Linux/Yocto backend was audited for a legitimate
+`dlopen()`/weak-external pattern that needs undefined symbols tolerated; none
+exists. The weak symbols in this tree (`cc3501e_proxy`, `zephyr_drv`
+`gpio_resolve`, `update_log`'s TF-M seam) are weak **definitions** with real
+fallback bodies, not unresolved weak references.
+
+This makes an existing latent DEEPX bug fatal, so that is fixed in the same
+change: the DEEPX block added `inference_deepx.cpp` before probing and only
+warned when `find_library(DXRT_LIB dxrt)` missed. There is no in-tree
+`dxrt/dxrt_api.h` stub, so a sysroot carrying `dx-rt-dev` headers without
+`libdxrt` compiled fine and would now fail the SDK's own link. It now probes
+first and skips the backend rather than compiling a translation unit whose
+symbols cannot resolve, with `ALP_SDK_DEEPX_REQUIRED` to turn that into a hard
+error where a recipe opted in by name — mirroring `ALP_SDK_DRPAI_REQUIRED`.
+
+**Not bench-verified.** None of this has run on DRP-AI silicon, and no
+`alp-image-edge` bake has completed with `drpai` enabled. The kernel driver is
+proven independently on real V2N-M1 silicon (`/dev/drpai0` probes clean,
+`DRPAI_GET_DRPAI_AREA` returns the `0xD0000000` / 512 MiB arena) but that is
+the vendor driver, not this change's payload.
+### Fixed — two `extras-tier1` library pins were unfetchable, not merely unpinned; a third floated a branch
+
+Two of the three curated-library pins in `west.yml` were broken outright,
+not just non-reproducible: `minimp3` pinned `revision: main`, but
+`lieff/minimp3` has no `main` branch (the default branch is `master`) —
+`west update --group-filter +extras-tier1` could not fetch the project at
+all. `BearSSL` pinned remote `bearssl-mirror`
+(`github.com/bearsslmirror/BearSSL`), which does not exist (`git
+ls-remote` returns "Repository not found"); the manifest's own comment
+also falsely claimed upstream bearssl.org was tarball-only, when it runs a
+real git server at `https://bearssl.org/git/BearSSL`.
+
+- `minimp3` now pins `master` HEAD, `ea99364f61c14656440e8d77e9c233ccf3124633`
+  (2026-07-27, no tagged releases upstream).
+- `BearSSL`'s remote is repointed from the dead `bearssl-mirror` to
+  upstream `bearssl-upstream` (`https://bearssl.org/git`), pinned to
+  `7bea48e5e850ab4cafbe68d3765cdaba13a86d6f` (`refs/heads/master`).
+- `madgwick-ahrs` (`xioTechnologies/Fusion`) previously floated
+  `revision: main` with "TBD: pin SHA after maintainer audit"; now pinned
+  to the tagged release `v1.3.2`
+  (`015d68494274b479b5996bff2530ecbcfdc266f2`, 2026-07-20). Its licence
+  (MIT) is now verified from source (`LICENSE.md` at that ref) rather than
+  cited best-effort from upstream's published licence; the manifest's
+  stale grounding citation to a removed `_LIBRARY_KCONFIG` symbol is also
+  corrected to the real mechanism, `scripts/alp_orchestrate/libraries.py`'s
+  `zephyr_kconfig_lines()`.
+- `metadata/libraries/{minimp3,bearssl,madgwick-ahrs}.yaml` and `alp.lock`
+  updated to match.
+- New regression guards in `tests/scripts/test_library_layer.py`: no
+  `metadata/libraries/*.yaml` manifest may declare a floating
+  `main`/`master`/`HEAD`/`trunk` version, and no `west.yml` project in the
+  `extras-tier1` group may pin one either — a floating branch pin is a
+  supply-chain hole (non-reproducible build, silent upstream force-push)
+  and, as minimp3 showed, can also simply not exist.
+- `.github/workflows/nightly-extras-tier1-pins.yml` now derives its
+  `extras-tier1` roster from `west.yml` at run time instead of hardcoding
+  it: PR #1237 added three libraries (`cmsisstream`, `CMSIS-CV`,
+  `Arm-2D`) to `west.yml`'s `extras-tier1` group without updating this
+  workflow's then-hardcoded library list, so those three were fetched and
+  verified by nothing — a pin nothing checked. A third regression guard,
+  `test_nightly_extras_tier1_workflow_does_not_hardcode_the_library_list`,
+  fails the build if the roster is ever re-hardcoded.
+
+### Added — real Yocto backends for `<alp/display.h>` and `<alp/i3c.h>` (#1143, #1147)
+
+**ABI + behaviour change, both deliberate.** `alp_display_config_t` gains
+`bool allow_modeset` (default `false`), so `sizeof()` changes and the type's
+hash in `docs/abi/v0.15-snapshot.json` moves. Opening a display on
+Yocto/Linux now requires setting it explicitly, and `alp_display_open`
+returns `ALP_ERR_INVAL` otherwise.
+
+The first draft argued no gate was needed, on the grounds that
+`DRM_IOCTL_SET_MASTER`'s kernel-side exclusivity was guard enough. That was
+wrong in the way that matters: `SET_MASTER` only fails while another process
+*currently* holds master. When master is merely unheld — an idle framebuffer
+console, a Wayland/X session VT-switched away or on an inactive logind seat
+(both `DROP_MASTER`), a headless SSH login on a board with a panel attached —
+`drm_master_open()` hands us master and `SETCRTC` reprograms the live output.
+`alp_display_open()` with the documented default `display_id = 0` reaches
+every one of those, so a default-constructed config could have blanked a
+screen it did not own. Same posture as `alp_storage_config_t`'s
+`allow_unsafe_write` (#1140). The six in-tree examples that drive a panel now
+opt in explicitly, which also makes the model visible where people read it.
+
+Two claims in that first draft were false and are corrected rather than
+softened: `SET_MASTER`'s result was stored in a `bool` and never surfaced, so
+open() continued through `CREATE_DUMB`/`MAP_DUMB`/`mmap` — allocating a
+full-screen scanout buffer, ~8 MB at 1080p — before `SETCRTC` refused; and
+the promised `ALP_ERR_BUSY` was unreachable, since `drm_setmaster_ioctl`
+returns `-EBUSY` while `SETCRTC` returns `-EACCES`, which
+`alp_status_from_posix_errno()` does not map and lands on `ALP_ERR_IO`.
+`close()` also does **not** leave the last frame on screen as documented: it
+`RMFB`s the framebuffer still being scanned out, and the DRM ABI requires the
+kernel to disable any CRTC still using a removed framebuffer.
+
+Also hardened: the two-call `GETCONNECTOR`/`GETRESOURCES` idiom now re-checks
+the kernel's returned counts against what was allocated for. A hotplug
+between the two calls makes the kernel skip the copy and write back only the
+new count, leaving the arrays all-zero while the count reads non-zero —
+`modes[0].hdisplay == 0` would then reach `create.width`, failing safe today
+only because `drm_mode_create_dumb` rejects `width == 0`.
+
+`alp_i3c_open()` on Yocto changes from always-succeeds to can-fail. It
+previously resolved to `sw_fallback` (priority 0, open succeeds and every op
+returns NOSUPPORT); the new backend registers at priority 100, and
+`alp_backend_select()` picks exactly one backend without falling back when
+its `open()` fails. On a Linux board with no `/sys/bus/i3c/devices/i3c-N`,
+the call now returns NULL with `ALP_ERR_NOT_READY` — more honest, but it is a
+behaviour change for anyone who relied on the open succeeding.
+
+- `src/backends/display/yocto_drv.c`: `alp_display_open` drives the DU/DSI
+  (or any KMS-capable) output over DRM/KMS dumb buffers via direct ioctls
+  against `<drm/drm.h>`/`<drm/drm_mode.h>`/`<drm/drm_fourcc.h>` — no libdrm
+  dependency added. Modeset flow: `GETRESOURCES` → the first `CONNECTED`
+  connector with a mode → `GETENCODER` → `CREATE_DUMB` + `ADDFB2`
+  (`DRM_FORMAT_ARGB8888`, byte-identical to `ALP_PIXFMT_ARGB8888`) +
+  `MAP_DUMB` + `mmap()` → `SETCRTC`. `alp_display_blit`/`alp_display_clear`
+  write straight into the mapped dumb buffer, honouring the kernel-reported
+  scanline pitch. `alp_display_open` requires
+  `alp_display_config_t.allow_modeset` (default `false`) and returns
+  `ALP_ERR_INVAL` without it — see the ABI-and-behaviour note at the top of
+  this entry, and the backend's own file header, for why
+  `DRM_IOCTL_SET_MASTER`'s kernel-side exclusivity is NOT sufficient on its
+  own.
+- `src/backends/i3c/yocto_drv.c`: `alp_i3c_open` is a bus PRESENCE check
+  only, confirming `/sys/bus/i3c/devices/i3c-<bus_id>` exists.
+  `alp_i3c_write`/`alp_i3c_read`/`alp_i3c_write_read` stay honest
+  `ALP_ERR_NOSUPPORT` on every call: mainline Linux (`drivers/i3c/`) has no
+  generic userspace raw-transfer ABI for I3C at all — unlike I2C's
+  `ioctl(I2C_RDWR)`, there is no `/dev/i3c-*` chardev and no uapi header;
+  the subsystem is kernel-driver-bind-only. Because no raw-transfer path
+  exists, nothing in this backend can reach a broadcast CCC or a
+  dynamic-address-assignment op, so there is no storage-style
+  `allow_unsafe_write` gate to add.
+- `include/alp/display.h`, `include/alp/i3c.h`: doc comments no longer
+  describe the Yocto path as stub-only; corrected to describe the real
+  backends above and their honest NOSUPPORT boundaries.
+- `tests/yocto/peripheral_display.c`, `tests/yocto/peripheral_i3c.c`: new
+  regression suites (`alp_test_peripheral_display`,
+  `alp_test_peripheral_i3c`) exercising each backend's file-local logic —
+  the pitch-aware blit/clear range checks (against a plain heap buffer
+  standing in for the real mmap'd dumb buffer) and CRTC-selection helper
+  for display; the sysfs presence check and the always-NOSUPPORT transfer
+  ops for I3C — not just linking against the sw fallback.
+- `src/yocto/CMakeLists.txt`: adds the two `yocto_drv.c` files to the
+  `__linux__`-gated block, registering at priority 100 above the existing
+  `zephyr_stub`(display)/`sw_fallback`(i3c) backends; `i3c_dispatch.c` and
+  its `sw_fallback.c` were already wired unconditionally, so only the real
+  backend needed adding there.
+- **Bench-unverified**: neither backend has been exercised against real
+  V2N DU/DSI/Mali-DRM or I3C silicon — nothing in this change has run on
+  V2N. Both compile, link, and pass their new unit tests plus the existing
+  registry/dispatcher test suite on a Linux host with no real
+  `/dev/dri/card*` or `/sys/bus/i3c/devices` tree present.
+
+### Fixed — `test-all.sh` reported a missing formatter as FAIL, and a stale i.MX 93 Kconfig symbol survived two more sites (#1221, #1222)
+
+- `stage_generated_files()` in `scripts/test-all.sh` reported `FAIL exit=1`,
+  not `SKIP`, on any host without `clang-format` on PATH: `gen_soc_caps.py`
+  and `gen_status_strings.py` both refused via `raise SystemExit("error:
+  ...")`, which always exits 1, and the stage's `>/dev/null 2>&1 || return 1`
+  loop swallowed the message and treated the missing tool as a generator
+  failure. Both generators now print the same error to stderr and exit
+  **99** for a missing-tool refusal (the existing "prerequisite unavailable"
+  convention `run_stage()` already maps to SKIP everywhere else in this
+  script); a genuine generator defect still exits nonzero-and-not-99 and
+  still FAILs the stage exactly as before. `stage_generated_files()` now
+  tracks each of the 8 looped generators' exit status individually: a 99 is
+  counted, not failed; if any generator skipped and none failed, the stage
+  reports `generated-files SKIP (N of 8 generators need clang-format)` and
+  returns 99 instead of a silent PASS or a false FAIL (#1221).
+- `include/alp/inference.h`, `zephyr/Kconfig.alp-libraries`, and
+  `vendors/nxp-imx93/README.md` all referenced a Kconfig symbol,
+  `ALP_SDK_INFERENCE_ETHOS_U_N93`, that is not defined anywhere in the tree;
+  the real symbol is `ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93` (note
+  `_BACKEND_`), defined at `zephyr/kconfigs/iot-audio-inference.kconfig`
+  and consumed at `zephyr/CMakeLists.txt`. The `vendors/nxp-imx93/README.md`
+  table row was stale a second way too: it named a source file,
+  `src/zephyr/inference_ethosu_n93.c`, that has never existed in this tree;
+  corrected to the file that actually implements the backend,
+  `src/backends/inference/ethos_u_n93.cpp` (#1222).
+### Fixed — AEN `rpmsg` carve-outs default to non-cacheable; `cacheable: true` now rejected until real cache maintenance ships (#1088)
+
+Conservative mitigation, not the real fix. #1080 root-caused a cross-core
+D-cache incoherence hazard on `ipc[].kind: raw_shmem` and closed it with
+`_emit_cross_core_shmem_cache` (`scripts/alp_orchestrate/kconfig.py`):
+force `CONFIG_DCACHE=n` for any core named as an endpoint, unless the
+entry opts in with `cacheable: true`. That function's own docstring
+deliberately excluded `kind: rpmsg`, tracking the identical hazard there
+as #1088 — this is that issue. `cfg->cacheable` is stored on the rpc
+backend struct (`src/backends/rpc/{zephyr,yocto}_drv.c:~630`) and never
+read again; there is no `sys_cache_*`/`arch_dcache_*`/`SCB_Clean`/
+`SCB_Invalidate` call anywhere under `src/` or `include/`. AEN's own
+example, `examples/multicore/rpmsg-aen/board.yaml`, declared
+`cacheable: true` on its `alp_default_rpmsg` entry (`a32_cluster` writer,
+`m55_hp` reader, M55 D-cache on) — the exact shape #1080 bench-proved
+stale under D-cache-on, just not yet proven for this specific rpmsg path.
+
+`_emit_cross_core_shmem_cache` now also matches `kind: rpmsg`, mirroring
+the `raw_shmem` mechanism rather than inventing a parallel one: any core
+named as an rpmsg endpoint with no `cacheable: true` gets
+`CONFIG_DCACHE=n`. Because the function is board/SoC-agnostic (keyed off
+`ipc:`, not a vendor check — same as `raw_shmem` already was), this also
+reaches `examples/multicore/rpmsg-v2n`,
+`examples/multicore/heterogeneous-offload` and
+`examples/multicore/rpmsg-imx93`, which carried the same
+implicit-non-cacheable shape with no `CONFIG_DCACHE=n` before either.
+Verified rather than assumed: Zephyr's
+`arch/arm/core/cortex_m/Kconfig` does not `select CPU_HAS_DCACHE` for
+`CPU_CORTEX_M33`, so the emission is a genuine no-op on V2N's `m33_sm`,
+NX9101's `m33` and i.MX 93's `m33`; `CPU_CORTEX_M55` does select it, so
+AEN's `m55_hp` is the one core where this is a real (and intended)
+behaviour change. The Linux-side cores cannot be reached at all —
+`_slice_alp_conf` runs only for `os: zephyr` slices.
+
+`cacheable: true` is now actively dangerous for `kind: rpmsg`, not merely
+unused: after this change it selects the branch that skips
+`CONFIG_DCACHE=n`, i.e. the one unsafe path with no maintenance behind
+it. `load_board_yaml` (`scripts/alp_orchestrate/loader.py`) now rejects
+`cacheable: true` on a `kind: rpmsg` entry outright with an
+`OrchestratorError` naming #1088, rather than silently honouring a flag
+that selects unimplemented behaviour.
+`examples/multicore/rpmsg-aen/board.yaml`'s `alp_default_rpmsg` entry
+drops `cacheable: true` accordingly (the emitted `CONFIG_DCACHE=n` now
+covers it instead) — this is `raw_shmem`-only going forward; `rpmsg` has
+no cacheable opt-out until real cache maintenance exists.
+
+Real fix — `sys_cache_data_flush_range()` on the writer and
+`sys_cache_data_invd_range()` on the reader in `<alp/rpc.h>` — is
+explicitly NOT implemented here. That needs the same kind of AEN bench
+sweep #1080 ran to prove it actually eliminates stale lines under
+D-cache-on, and this change ships no such proof.
+
+Three documentation sites described the OLD contract and are corrected
+here, since this change is what made them false: `docs/heterogeneous-
+builds.md` §10 and `docs/v0.6-tbd-and-assumptions.md`'s open-items table
+both still presented `cacheable: true` as a legal per-entry opt-in, and
+`examples/multicore/rpmsg-aen/README.md` still described its own
+carve-out as cacheable — contradicting the `board.yaml` in the same
+example that this change edits. All three now state that the opt-in is
+rejected and that `CONFIG_DCACHE=n` is emitted instead.
+
+Added `test_load_board_yaml_rejects_rpmsg_cacheable_true`
+(`tests/scripts/test_orchestrate_loader.py`) and widened
+`tests/scripts/test_emit_cross_core_shmem_cache.py` (renamed
+`test_rpmsg_kind_excluded` → `test_rpmsg_endpoint_gets_dcache_off`; mixed
+raw_shmem+rpmsg now pins a single deduped `CONFIG_DCACHE=n`, not "only
+raw_shmem fires"). Regenerated the four `check_emit_snapshots.py` goldens
+this touches (`rpmsg-aen`, `rpmsg-v2n`, `hetero-offload`,
+`mproc-mailbox` — the last only for updated comment wording, not new
+behaviour).
+
+Not bench-verified: this closes the hazard by turning the D-cache off,
+the same class of mitigation #1080 bench-proved works for `raw_shmem`,
+but the rpmsg-specific path itself was not re-run on E8 silicon as part
+of this change.
+
+### Fixed — HIL runner comments no longer claim specs that don't exist (#1160)
+
+- `tests/hil/v2n101-x-evk/_runner.yaml` claimed Ethernet, eMMC, xSPI, EEPROM,
+  and OPTIGA HIL specs "live alongside in this dir"; none of those five files
+  exist. Reworded to name the two specs that actually exist
+  (`v2n-gd32-bridge-ping.yaml`, `v2n-temp-sensor.yaml`) and list the five
+  missing topics as an explicit `TODO(#1160)`, not a claim of presence.
+- `tests/hil/v2m101-x-evk/_runner.yaml` had the same defect for DEEPX specs
+  (`v2n-m1-deepx-inference`, the DEEPX 0.75 V rail); the directory holds only
+  `_runner.yaml`. Same fix: state plainly that no SoM-specific specs exist yet
+  and list the two as a `TODO(#1160)`.
+- `tests/hil/v2n102-x-evk/_runner.yaml` and `tests/hil/v2m102-x-evk/_runner.yaml`
+  were checked and do not overclaim — they inherit only the portable
+  `tests/hil/_common/` spec set and name nothing SoM-specific.
+- True HIL coverage as of this fix: v2n101-x-evk has 2 SoM-specific specs
+  (`v2n-gd32-bridge-ping`, `v2n-temp-sensor`) against 18 `examples/v2n/`
+  directories (16 of which have a `testcase.yaml`, all `build_only: true`,
+  so CI proves compile/link only, never real hardware); v2n102-x-evk,
+  v2m101-x-evk, and v2m102-x-evk have 0 SoM-specific specs each.
+- `examples/v2n/README.md`'s table was missing three directories present on
+  disk (`v2n-m1-deepx-inference`, `v2n-m1-ros-perception`, `v2n-power-monitor`).
+  Added rows; `v2n-m1-ros-perception` and `v2n-power-monitor` have no
+  `testcase.yaml` and the new rows say so rather than implying CI coverage.
+- Investigated whether any `check_*.py` gate or workflow step would catch a
+  `_runner.yaml` comment naming a spec file that doesn't exist: none does.
+  `pr-metadata-validate.yml`'s `tests/hil/run_smoke.py --validate` step
+  schema-checks the actual `*.yaml` spec files present in a board dir; YAML
+  comments are stripped before it ever sees them. No gate was added in this
+  change, but not because a mechanical one could never fire: the smallest
+  candidate (extract kebab-case tokens in the spec-filename convention from
+  `_runner.yaml` comments, assert `<token>.yaml` exists in that dir) was
+  built and run against the pre-fix content of both files. On
+  `v2n101-x-evk` it finds zero tokens and stays silent, because that comment
+  named topics in prose ("Ethernet, eMMC, ...") with no filename-shaped
+  tokens. On `v2m101-x-evk` it finds `v2n-m1-deepx-inference`, finds no
+  matching `.yaml`, and fails — so such a gate *would* have caught one of
+  the two real overclaims.
+  What blocks it is a different problem: the same naive gate still flags
+  that token in the new `TODO(#1160): not yet written` line, so it needs an
+  explicit TODO carve-out to avoid failing on an honest, accurate comment.
+  Catching this class properly wants a structured spec-manifest field
+  (e.g. `specs_present:` / `specs_todo:` lists in `_runner.yaml`, cross-checked
+  against the directory listing) rather than free-text-comment parsing plus
+  an exception list; left as a follow-up, not implemented here.
+
+### Added — real Yocto backends for `<alp/storage.h>` and `<alp/usb.h>` (#1140, #1141)
+
+- `src/backends/storage/yocto_drv.c`: routes `alp_storage_get_info`/`read`
+  through `/dev/mmcblk<instance_id>` (SD/MMC, via `BLKGETSIZE64`/
+  `BLKSSZGET`/discard-granularity sysfs) and `/dev/mtd<instance_id>`
+  (xSPI/QSPI/OSPI/internal NOR, via `MEMGETINFO`) instead of falling
+  through to the stub's `ALP_ERR_NOSUPPORT`. `write`/`erase` route the
+  same way but additionally require `alp_storage_config_t.allow_unsafe_write
+  = true` — new field, defaults `false` — because `/dev/mmcblk<N>` is the
+  whole-disk node (GPT/MBR + bootloader at offset 0) and on some boards
+  `/dev/mtd0` is itself the bootloader/FIP partition; a caller using
+  `ALP_STORAGE_CONFIG_DEFAULT` verbatim cannot write or erase through this
+  backend. `alp_storage_configure_inline_aes` stays `ALP_ERR_NOSUPPORT` —
+  no Linux userspace ABI exposes inline XIP-AES key/IV programming for a
+  block or MTD chardev. MTD writes are a raw `pwrite()` with no
+  erase-before-write (NOR write-after-erase is still the caller's
+  responsibility on this backend); SD/MMC `erase()` issues `BLKDISCARD`,
+  a best-effort TRIM hint that does not guarantee a zeroed/erased
+  readback. Both caveats are now documented at the `<alp/storage.h>` call
+  site, not only in the backend.
+- `src/backends/usb/yocto_drv.c`: `alp_usb_host_open` enumerates root hubs
+  under `/sys/bus/usb/devices` as a presence check (Linux already binds +
+  starts the host controllers by the time this runs).
+  `alp_usb_host_enable`/`alp_usb_host_disable` are honest
+  `ALP_ERR_NOSUPPORT` — no Linux userspace ABI starts/stops an
+  already-bound controller or detaches already-authorized devices; an
+  earlier draft of this backend faked `ALP_OK` here via the
+  `authorized_default` sysfs attribute, which review caught and this
+  change removes. The USB **device**/gadget role stays
+  `ALP_ERR_NOSUPPORT` — the V2N X-EVK device tree this issue targets
+  brings up only host-role controllers (`ehci0`/`ohci0`/`hsusb`/`xhci0`),
+  no UDC/gadget node. No libusb dependency was added or needed for the
+  host role's minimal open/enable/disable/close surface.
+- `include/alp/storage.h`, `include/alp/usb.h`: document the
+  `allow_unsafe_write` safety gate, the MTD-no-RMW write caveat, the
+  BLKDISCARD non-zeroed-readback erase caveat, and the real Yocto
+  host-enable/disable/device-role behaviour at the public call sites.
+- `tests/yocto/peripheral_storage.c`, `tests/yocto/peripheral_usb.c`: new
+  regression suites (`alp_test_peripheral_storage`,
+  `alp_test_peripheral_usb`) exercising the two backends' actual
+  file-local logic — the write/erase safety gate against a real temporary
+  file, the discard-granularity geometry fix, the MTD 32-bit erase-length
+  truncation guard, the honest host-enable/disable NOSUPPORT, and the
+  root-hub-enumeration edge cases — not just linking against the sw
+  fallback.
+- `src/yocto/CMakeLists.txt`: wires `storage_dispatch.c`/`usb_dispatch.c` +
+  their `sw_fallback.c` into the same unconditional block as every other
+  migrated class, mutes the split stub backend via
+  `ALP_VENDOR_OVERRIDES_STORAGE`/`ALP_VENDOR_OVERRIDES_USB`, and adds the
+  two `yocto_drv.c` files to the `__linux__`-gated block.
+- `src/common/stub/stub_storage.c`, `src/common/stub/stub_usb.c`: gained the
+  `#if !defined(ALP_VENDOR_OVERRIDES_*)` guard every other migrated class's
+  stub already carries (these two were previously unguarded — no vendor
+  backend had ever overridden them before now).
+- `src/backends/storage/sw_fallback.c`, `src/backends/usb/sw_fallback.c`,
+  `src/storage_dispatch.c`, `src/usb_dispatch.c`: added the
+  `ALP_BACKEND_ANCHOR_DEFINE`/`ALP_BACKEND_ANCHOR` pair (#368) the
+  plain-CMake static-archive link needs now that these two classes are
+  reachable from that path.
+- **Bench-unverified**: neither backend has been exercised against real
+  V2N SDHI/xSPI/xHCI/EHCI/OHCI silicon — nothing in this change has run on
+  V2N. Both compile, link, and pass their new unit tests plus the existing
+  registry/dispatcher test suite on a Linux host with no real
+  `/dev/mmcblk*`, `/dev/mtd*`, or `/sys/bus/usb/devices` root hubs present.
+
+### Changed — documentation and drift gates follow the Python Tan port
+
+- Swept current guides, examples, ADR indexes/amendments, metadata commentary,
+  and onboarding workflows to describe Python Tan's relocated in-process
+  planner, native command surface, the explicit `tan-cli/dev` source-install
+  transition before v0.5 release archives exist, SDK-resolution ladder, and
+  single `tan doctor` checklist.
+- Updated the Tan documentation-surface gate to parse both the frozen
+  Rust/Clap v0.4 help format and the Python/Typer Rich help format during the
+  release transition.
+- Restored honest hedging the sweep above over-confidently dropped: the
+  `bootstrap-v1.schema.json` `verdict` description no longer claims a
+  tan-cli test asserts `WORKSPACE_BLOCKING` parity (none does —
+  `parse_bootstrap_manifest` never reads the `verdict` key at all), and
+  `zephyr.pythonMinVersion`'s description is back to its original wording:
+  no consumer reads this key today; a project-aware executor enforcing it
+  is still the outstanding half of issue #1078 (tan-cli#270).
+  `metadata/toolchains.json`'s `_comment` is left byte-identical to `dev` —
+  a shortening was considered, but tan-cli vendors this file byte-for-byte
+  (`contract/fixtures/toolchains/toolchains.json`) and hard-fails on any
+  difference with no "predates the feature" branch, so any edit here breaks
+  a required cross-repo gate on merge.
+- Fixed `scripts/check_tan_docs_surface.py`'s `_OPTION_LINE_RE`: it rejected
+  two shapes real Python Tan's Rich-rendered `--help` actually produces — a
+  long `<a|b|c>` choice metavar wrapped across the option's own continuation
+  row, and two long flag names comma-joined with no space
+  (`--board,--board-yaml`) — false-failing `tan-docs-drift` against a real
+  `tan 0.5.0`. Added regression tests pinned to real `tan --help` captures
+  for both shapes.
+- `VERSIONS.md`'s v0.15.0 row claimed "released 2026-07-31"; only
+  `v0.15.0-rc1` is tagged (`v0.14.0` remains GitHub's Latest release) —
+  corrected to "candidate". `docs/adr/0020-sdk-owns-build-execution.md`'s
+  `tan-cli`#113–#116 gap list is stale: all four issues are CLOSED and
+  their `--target` values (`hw-info-h`/`west-libraries`/`os-topology`/
+  `zephyr-board`) are live in `python/tan/commands/generate_cmd.py`,
+  already reflected correctly in `docs/cli.md`.
+
+### Fixed — CC3501E Wi-Fi/BLE/GPIO/OTA backends shared one unlocked transport (#1116)
+
+**ABI: `sizeof(cc3501e_t)` changes.**  The fix adds a `bool request_lock`
+field to the public `struct cc3501e` (`include/alp/chips/cc3501e/core.h`),
+so `docs/abi/v0.15-snapshot.json`'s hash for that type moves from
+`f21bf2fc8bd4f83d` to `41bef4a1f9e78117`.  Callers allocate the struct by
+value (e.g. `cc3501e_t fw;` in `examples/aen/aen-cc3501e-bringup`,
+`aen-cc3501e-gpio`, `aen-usb-firstlight` and three more), so anything
+compiled against the previous layout must be rebuilt.  Everything in-tree
+is rebuilt from source and the SDK ships no binary compatibility promise
+before v1.0, so this is accepted rather than worked around — noted here
+because a silent struct-layout change is exactly what an ABI snapshot
+exists to surface.
+
+`cc3501e_request()` ran its 4-phase SPI exchange (request header / payload /
+reply header / reply payload) with no locking, reading and writing the
+per-context `tx_scratch`/`rx_scratch` scratch buffers a `struct cc3501e` has
+no mutex or semaphore field to protect. Five independent callers share one
+`cc3501e_t *` on E1M-AEN (the Wi-Fi backend, the BLE backend, the GPIO
+proxy backend, the `alp companion` console, and the OTA path); only the
+console self-protected with its own `companion_bus_lock`, leaving the other
+four free to interleave frames on the CS-less 3-wire link or read back each
+other's replies.
+
+- `cc3501e_request()` now serialises the whole exchange itself (the lock
+  belongs with the shared transport, not each consumer) via a bounded
+  acquire (`ALP_ERR_BUSY` on timeout, never `K_FOREVER`) using
+  compiler-builtin atomics on a plain flag — not a Zephyr `k_mutex` —
+  because this driver core is OS-agnostic and also builds into the
+  plain-CMake / Yocto `libalp_chips.a`. A new Kconfig knob,
+  `CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS` (default 100 ms,
+  mirroring the V2N supervisor singleton's own bounded-acquire pattern),
+  bounds it on Zephyr; non-Zephyr backends fall back to the same 100 ms
+  compiled-in default.
+- Removed the now-redundant `companion_bus_lock` from every `alp companion`
+  console command body — each one already wraps a single (or short
+  sequential) `cc3501e_request()` call the driver itself now serialises.
+  Kept a narrower, still-needed `companion_events_lock` around
+  `companion_drain_events()`: the timer-poll thread and the opt-in
+  `CONFIG_ALP_SDK_CC3501E_EVENT_IRQ` workqueue both drive the `evt_busy` +
+  `evt_buf` walk-and-dispatch loop wrapped around (not just the single
+  request inside) `cc3501e_poll_events()`, which the transport lock does
+  not cover.
+- `poll_by_repeat()`'s own `ctx->rx_scratch[0]` sentinel write and post-call
+  peek (used to disambiguate a retryable transport `BUSY` from a terminal
+  firmware `RESP_ERR_STATE` reject) sat OUTSIDE `cc3501e_request()`'s
+  per-call lock, so a second caller's request could still land between the
+  sentinel write and this attempt's own request, or between the request
+  and the peek. Split `cc3501e_request()` into a public locked wrapper and
+  an internal `cc3501e_request_locked()`; `poll_by_repeat()` now takes
+  ctx's lock once per attempt and brackets the sentinel write, the
+  request, and the peek all under it.
+- Not re-entrant: verified no call path invokes `cc3501e_request()` from
+  inside another already-in-flight `cc3501e_request()` call on the same
+  `cc3501e_t` (the async event callback runs only after
+  `cc3501e_poll_events()`'s own request has already returned and released
+  the lock).
+- New `tests/zephyr/cc3501e_transport_lock` native_sim regression test
+  forces a deterministic concurrent PING + GET_VERSION interleave against
+  a shared context and asserts neither call cross-talks or desyncs; it
+  fails against the pre-fix driver (`ALP_ERR_IO` from the reply-header
+  cmd-echo mismatch) and passes with the fix. Proven on host/native_sim
+  only — not bench/silicon-verified.
+
+### Fixed — V2N/V2M SoC-internal IP maturity was comments-only, and further routed nets stayed undeclared (#1169, #1170)
+
+#1183 closed both issues prematurely: it added a `driver_status` enum
+(`metadata/schemas/som-preset-v1.schema.json`) but applied it only to its
+own new `soc_peripheral_instances` entries, leaving `nor_flash`, `emmc` and
+the MHU mailbox tracked by YAML comment only (#1169's actual ask), and it
+declared twelve `soc_peripheral_instances` while the TSV routed several
+more nets the issue named that stayed neither declared nor excluded
+(#1170).
+
+**#1169.** `on_module.nor_flash` / `on_module.emmc` each gained a sibling
+`nor_flash_driver_status` / `emmc_driver_status` field (`none` on all four
+presets — both name a SoC controller, not a chip slug, so there is no
+`chips/<part>/` driver to tier per ADR 0017). `mailbox:` gained
+`driver_status` + `notes`: `driver_status: partial` is the closest single
+enum value for the MHU-B link (PR #1189 bounded it precisely — A55->M33
+receive is silicon-proven under #697, `mbox_send()`/M33->A55 is unexercised
+and does not reach the A55 GIC on this topology), and since one enum value
+can't express *which* direction, `notes` carries the exact split verbatim
+from `zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c`. The three new fields
+share `$defs/driver_status` with `soc_peripheral_instance.driver_status`
+so the vocabulary can't drift apart per field.
+
+**#1170.** Verified every net the issue named against
+`metadata/e1m_modules/v2n/renesas-peripheral-map.tsv` line by line:
+- `sd1` (SD1CLK/CMD/DAT0-3, tsv:103-108) is now a declared
+  `soc_peripheral_instances` entry (`class: sdio` — distinct from SD0's
+  `sdio_emmc`); its card-detect/power-enable pads (tsv:109-110) and the
+  microSD socket's control GPIOs (`SDCARD_RST` tsv:111, `µSD1_V_SEL`
+  tsv:2) are recorded on that entry's `notes`, not as separate instances.
+- `BT_UART` (tsv:12-15) and `BT_I2S` (tsv:8-11) are explicitly excluded
+  (documented in a preset comment): their pad names carry no channel
+  number, so binding them to one of the SoC's 10 UART / 10 I2S instances
+  would mean inventing which channel; they are also already the
+  populated `wifi_ble: murata_lbee5hy2fy` combo chip's dedicated
+  HCI-UART/PCM-audio interface, not a free/spare instance.
+- `Audio_CLKB`/`Audio_CLKB_OE`/`Audio_CLKC` (tsv:3-5) and `BL_PWM`
+  (tsv:6) are explicitly excluded: clock-output/PWM pins, not a
+  bus/interface peripheral — no class in the SoC JSON's `peripherals:`
+  block names a clock or PWM family.
+
+Also fixed two review findings from the same block: `i2s_ssiu0`/`1`
+(SSIU0 doesn't exist on this pad map) renamed to `i2s0`/`i2s1`, matching
+`ALP_E1M_X_I2S0`/`I2S1` in `include/alp/e1m_x_pinout.h` and the existing
+`ssiu_to_i2s0` alias in `scripts/check_e1m_route_capability.py`; and
+`soc_peripheral_instances[].instance` now has a real uniqueness check
+(`scripts/validate_metadata.py`, `_check_som_peripheral_instance_uniqueness`)
+since JSON Schema `uniqueItems` only rejects two byte-identical entries,
+not two entries sharing a slug with a different `class`/`driver_status` —
+exactly the shape #655's DT/pinctrl generation binds nodes by.
+
+The shared `mailbox:` + `soc_peripheral_instances:` block stays
+byte-identical across all four V2N/V2M presets (verified by checksum).
+
+### Added — per-instance RZ/V2N peripheral data (#1154)
+
+- **`metadata/socs/renesas/rzv2n/n44.json` gains a `peripheral_instances`
+  block: per-instance register base/size + interrupts for `i2c` (RIIC0-8),
+  `uart` (SCI0-9), `timer_32bit_gpt` (GPT0-15) and `timer_32bit_gtm`
+  (GTM0-7).** `peripherals:` was previously counts only (`"i2c": 9`), so
+  the two consumers that needed a real address —
+  `metadata/renode/renesas_rzv2n.repl:61` (CPG/ICU) and `:71` (RIIC8 /
+  BRD_I2C) — hand-transcribed it. New generator
+  `scripts/gen_soc_peripheral_instances.py` (`--check` mode included)
+  mechanically projects `reg`/`interrupts` from the vendored Zephyr SoC
+  devicetree the M33 board `.dts` already `#include`s
+  (`dts/arm/renesas/rz/rzv/r9a09g056.dtsi`) — the same file the repl's
+  hand-placed RIIC8 base (`0x41c01000`) was manually copied from, now
+  regenerated instead. `peripheral_instances` is additive: `peripherals:`
+  is untouched and every existing consumer (`gen_soc_caps.py`,
+  `gen_support_matrix.py`, `validate_metadata.py`, the studio compat
+  pass) is unaffected. `metadata/schemas/soc-spec-v1.schema.json` gains
+  the matching optional `peripheral_instances` property.
+  - **`base`/`size` are lowercase `0x`-prefixed hex STRINGS** (e.g.
+    `"base": "0x41c01000"`), constrained by a `^0x[0-9a-f]+$` schema
+    pattern — matching the DTSI's own `i2c@44400400` literal style and
+    every other address already in this repo's metadata; JSON has no hex
+    literal, and a decimal int hides a transposed digit a hex string
+    makes visible on sight. `index`/`irq`/`priority` stay decimal ints,
+    matching how the DTSI writes `channel = <0>` / `interrupts = <406 1>`
+    and how Zephyr writes IRQ numbers everywhere else.
+  - Coverage is deliberately partial: of n44.json's 27 `peripherals:`
+    keys, only the four above are projected (their DTSI node count is an
+    exact match for the `peripherals:` count). `adc_12bit` and `gpio`
+    ARE modelled in the DTSI (3 ADC units, 12 GPIO ports) but at a
+    different instance granularity than their count (24 channels, 86
+    pins), so they are deliberately left unprojected rather than emit a
+    count-mismatched list. The DTSI carries **no `clocks` property at
+    all** — confirmed by grep, not even a raw `<&cpg ...>` phandle — so
+    no `clocks` field is emitted anywhere; treat this as "absent", not
+    merely "not covered". The remaining 21 keys have no node in this
+    devicetree at all. Every skip is printed on every run.
+    `metadata/renode/renesas_rzv2n.repl` is intentionally untouched —
+    retiring its hand-placement onto this data is separate follow-up
+    work.
+  - **`--check` runs in its own advisory CI job**,
+    `.github/workflows/pr-metadata-peripheral-instances.yml` — moved out
+    of `pr-twister.yml`'s `matrix.shard == 1` leg in a second review
+    round: that job's Zephyr pin is the FULL twister oracle, so a future
+    version bump touching `r9a09g056.dtsi` would fail the required
+    `twister-shard 1/4` → `twister · native_sim/native/64` aggregator and
+    block every PR to `dev`, not only V2N ones, under a context name that
+    says nothing about metadata. The dedicated job sparse-checks-out just
+    the one DTSI file at the pinned tag (derived from
+    `metadata/bootstrap.json` at run time, never a second hardcoded
+    literal) and runs in seconds. It is advisory (non-required) while the
+    pattern proves itself, same graduation path as `pr-renode-aen-smoke.yml`
+    (#974) / `pr-renode-v2n-sci0-smoke.yml` (#1187).
+    `ALP_REQUIRE_ZEPHYR_ORACLE=1` (same escape hatch
+    `check_bootstrap_manifest.py` / `check_toolchain_lock.py` use) turns
+    an unresolvable checkout in that job into a hard failure instead of a
+    skip — that job PROMISES the oracle, so an unresolvable one there is
+    a bug in its own setup.
+  - Both modes still skip cleanly (exit 0) on a machine with no Zephyr
+    checkout, but `scripts/test-all.sh`'s `generated-files` stage now
+    DOES run this generator (plain, unsuppressed, unlike the other seven
+    `gens`) specifically so a contributor sees the `skipped: ...` line
+    instead of every stage reading PASS with no signal that this one
+    fact went unchecked; when `$ZEPHYR_BASE` resolves locally, that stage
+    actually regenerates + diffs `n44.json`, catching real drift the same
+    way CI does. The schema's `^0x[0-9a-f]+$` pattern on `base`/`size` is
+    a further, independent guard that doesn't depend on `--check` having
+    run at all.
+  - Three more silent-degradation classes escalate to a hard failure now
+    (none of them change the emitted instance COUNT, so the existing
+    count-vs-`peripherals:` guard could not catch any of them alone): an
+    unresolved `reg` size macro (e.g. a future `DT_SIZE_M(n)`), a node
+    with no `channel` cell (previously defaulted `"index": 0` silently,
+    contradicting the schema's own "never inferred from array position"),
+    and a multi-cell `reg` property (previously silently truncated to
+    its first cell).
+
+### Fixed — bring-up guide claimed `tps628640_set_voltage_mv` was unimplemented (#1166)
+
+`docs/bring-up-v2n-m1.md` told readers to reach for the
+"(currently-`NOSUPPORT`) `tps628640_set_voltage_mv` helper once the
+datasheet drop unblocks the VSET decode TODO".  The decode landed in
+`07755ca4` on 2026-05-12, one hour after `4a0b294a` added that line, and
+the doc was never updated: `chips/tps628640/tps628640.c:85-96` has
+range-checked the input against `TPS628640_VOUT_BASE_MV`/`_MAX_MV`,
+encoded `(mv - 400) / 5` and written `TPS628640_REG_VOUT1` ever since,
+returning `ALP_ERR_OUT_OF_RANGE`/`ALP_ERR_NOT_READY` and never
+`ALP_ERR_NOSUPPORT`.  The guide now describes the real behaviour, and
+records the gap that *is* still open: nothing in-tree calls the helper at
+boot, so the four instances come up on their factory OTP voltages.
+
+### Fixed — MHU-B mailbox verification claim overstated the send path (#1169)
+
+`mbox_renesas_rz_mhu_b.c` and the four V2N/V2M SoM presets said `SILICON-PROVEN`
+for the driver as a whole; #697 only silicon-proved init/attach and the
+A55->M33 receive path (`R_MHU_NS5.MSG` -> M33 NVIC IRQ 293). `mbox_send()`
+(M33->A55) is unexercised and does not reach the A55 on this topology — the
+NS-channel RSP interrupt it raises (`R_MHU_NS5.RSP`) routes to no A55 GIC line;
+only the MHU-B CA55-routed SWINT units 12-15 (INTID 436-439 / GIC_SPI 404-407)
+do. `examples/multicore/rpmsg-v2n/m33_sm/src/main.c` already works around this
+by writing SWINT unit 12's SET register directly instead of calling
+`mbox_send()`. Bounded the claim to what #697 actually proved across all eight
+sites that describe this driver: the `mbox_renesas_rz_mhu_b.c` header, the four
+V2N/V2M SoM presets, the `renesas,rz-mhu-b-mbox.yaml` binding, the M33 board DTS
+comment, the `zephyr/CMakeLists.txt` build comment, and
+`zephyr/kconfigs/vendor-renesas-mhu.kconfig`'s prompt string and help text —
+the prompt being the one a reader meets in `menuconfig`. A repo-wide
+`git grep -i BENCH-UNVERIFIED | grep -iE 'mhu.b|mhu_b|rz-mhu'` now returns
+nothing. The Alif MHUv2, HWSEM, ADC, PDM and comparator drivers keep their own
+`BENCH-UNVERIFIED` markings, which remain accurate.
+
+### Added — enforce the V2N Renode sci0 console model (#1158 remainder)
+
+- **#1182 added a real sci0 UART model to `metadata/renode/renesas_rzv2n.repl`
+  and the opt-in `tests/renode/v2n_m33_sci0_console.{conf,overlay}`, but
+  nothing executed any of it.** The required `renode · V2N101 --sim-mode
+  socket contract` context (`pr-renode-sim-mode.yml`) only builds the
+  M33-SM image — with the default headless `ram_console` overlay, not the
+  sci0 one — and never boots it; its e2e steps are no-op `echo`s pending
+  tan-cli#77. So the sci0 model could regress silently. New advisory job
+  `pr-renode-v2n-sci0-smoke.yml` (`renode · V2N101 M33-SM sci0 console`)
+  builds the M33-SM `hello_world` WITH the sci0 overlay/conf and boots it
+  under the pinned Renode v1.16.1, polling the log for the real boot
+  banner + app console line the sci0 Python peripheral emits. Mirrors
+  `pr-renode-aen-smoke.yml`'s advisory-then-graduate pattern (issue #974)
+  — not required yet, so it cannot block anyone's merge to `dev` while the
+  poll-a-log-for-a-string pattern proves itself. Mutation-tested locally:
+  deleting the `sci0` node from `renesas_rzv2n.repl` fails the boot e2e
+  (observed: `sysbus: [cpu: 0x8006624] ReadByte from non existing
+  peripheral at 0x42800C1C` — CESR, offset `0x1C`, the first register
+  `R_SCI_B_UART_Open()` reads — no boot banner); desyncing the overlay's
+  `chosen` node fails the build step
+  itself (`devicetree error: undefined node label`). The existing
+  required `renode · V2N101 --sim-mode socket contract` context is
+  untouched — it still posts `skipping` for most PRs and its e2e steps
+  are still no-ops; that remains open, tracked in #1158.
+
+### Fixed — three V2N build/boot defects (#1175, #1176, #1158)
+
+- **microSD *and* eMMC boot loaded a dtb the image never builds; microSD
+  also rooted at the wrong device (#1175).** The vendor `sd2load` and
+  `emmcload` U-Boot envs (pinned renesas-u-boot-cip,
+  `include/configs/rzv2n-dev.h`) both load `boot/r9a09g056n44-dev.dtb` —
+  a filename none of our `KERNEL_DEVICETREE` builds ever produce
+  (V2N101/V2N102 both build `renesas/e1m-v2n101-x-evk.dtb`, confirmed
+  against `meta-alp-sdk/conf/machine/e1m-v2n10{1,2}-a55.conf` and
+  `docs/build-yocto-v2n.md`). The load silently fails (`;`-chained, not
+  fatal) and `bootimage` would boot whatever stale dtb was already in
+  RAM — the eMMC path is the provisioning default
+  (`ALP_BOOT_DEVICE ?= "emmc"`), so this is the path most consumers hit.
+  `meta-alp-sdk/recipes-bsp/u-boot/u-boot/0002-rzv2n-dev-ALP-E1M-production-boot.patch`
+  now re-loads the correct dtb from `CONFIG_BOOTCOMMAND` on **both**
+  branches, same load address + partition each vendor env already uses
+  (0x48000000, partition 2). The vendor `emmcload` body itself is not
+  visible in *this* patch's diff context (fetched at build time, not
+  vendored), but its address/mmc-spec (`mmc 0:2`, `0x48000000`) is
+  confirmed against the unpatched vendor default in the RZ/V AI SDK BSP
+  source package
+  (`meta-rz-features/meta-rz-codecs/.../0001-Add-OpenCVA-and-Codec-for-V2N.patch`,
+  quoted in the 0002 patch comment). The SD branch also rooted at
+  `/dev/mmcblk2p2`; `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi:88-89` names the carrier microSD
+  `/dev/mmcblk1p2` (SDHI1, alias `mmc1`) — no third MMC controller
+  exists on this SoM. Both fixed; the eMMC branch's root (`mmc0` →
+  `mmcblk0p2`) was already correct. V2N101 and V2N102 currently build
+  the *same* dtb filename (`e1m-v2n101-x-evk.dtb`) — not via inheritance;
+  V2N102's own conf **hardcodes** this filename at
+  `meta-alp-sdk/conf/machine/e1m-v2n102-a55.conf:36`, alongside a TODO to create a V2N102-specific
+  dts once its DDR map is confirmed and a note that this bootcmd must
+  change in lockstep if that TODO ever lands — so the hardcoded name in
+  the patch covers both SKUs today but is a real tripwire, not a
+  structural guarantee. V2M SKUs build a different dtb and remain
+  out of scope (see the patch's "FUTURE (V2M / per-SKU dtb)" note).
+  `docs/build-yocto-v2n.md` updated to match. **Unverified on real
+  silicon** — this is a boot-path change and no bitbake build, FIP
+  rebuild, reflash, or on-board boot was run to confirm it.
+- **`alp-image-edge` silently omitted all `meta-rz-*` vendor payload
+  (#1176).** `meta-rz-drpai`, `meta-rz-codecs`, and `meta-rz-opencva`
+  each ship their runtime payload through their own
+  `recipes-core/images/core-image-%.bbappend` — a `core-image-%`
+  bbappend filename does not match `alp-image-edge` (bitbake matches a
+  `.bbappend` to its exact target recipe base name), so adding the
+  layers to `bblayers.conf` was necessary but not sufficient: the
+  bbappends never fired and the bake still "succeeded" with none of
+  that payload. Verified against each vendor layer's own
+  `core-image-%.bbappend` + `layer.conf` `BBFILE_COLLECTIONS` name in a
+  BSP v6.30 Source Code checkout. `alp-image-edge.bb` initially installed
+  each layer's payload explicitly, gated on the layer's collection —
+  since superseded by the follow-up below, which relocates that wiring
+  to a shared, single-source home instead of an image-recipe block.
+- **`alp-image-prod` and `alp-image-base` had the identical #1176 silent
+  omission, and the fix above still left a second, one-level-deeper copy
+  of the same defect in the SDK sysroot task.** Closed by what each
+  piece of payload is actually for, not by copy-pasting the edge block
+  everywhere: DRP-AI3's runtime (`meta-rz-drpai`: `lib-tvm
+  kernel-module-mmngr`) is the SoC's core NPU accelerator, not
+  camera/display-tied, so it now lives once in `alp-image-common.inc`
+  and every image (`base`/`prod`/`edge`) installs it from there.
+  `meta-rz-codecs` (`drp-fw`) and `meta-rz-opencva` (`opencv oca`) exist
+  to feed a GStreamer/vision pipeline, so they ride the `alp-camera`
+  FEATURE itself — `packagegroup-alp-camera.bb`'s `RDEPENDS`, gated the
+  same way — rather than any image recipe: `alp-image-prod` and
+  `alp-image-edge` (both already `alp-camera`-enabled) get the identical
+  payload through that one shared gate, and a customer's own
+  `alp-image-base`-derived image that turns `alp-camera` on gets it too,
+  automatically, with no per-image or per-customer copy needed.
+  Additionally ported the vendor bbappends' `TOOLCHAIN_TARGET_TASK`
+  entries (`drpai` from `meta-rz-drpai`, `drp` from `meta-rz-codecs` /
+  `meta-rz-opencva`) into `alp-image-common.inc`, so `bitbake
+  alp-image-* -c populate_sdk` now actually produces `<linux/drpai.h>` /
+  `<linux/drp.h>` in the SDK sysroot — `meta-alp-sdk/README.md`
+  previously (and incorrectly) documented those headers as appearing
+  automatically from layer presence alone, which was the same silent-
+  omission belief that caused #1176 in the first place; corrected.
+- **Review pass on the above: the feature-gated `packagegroup-alp-camera`
+  RDEPENDS could abort `do_rootfs` on a non-RZ MACHINE.** `drp-fw` carries
+  `COMPATIBLE_MACHINE = "(rzv2h-family|rzv2n-family)"`; a tree that keeps
+  `meta-rz-codecs` in `bblayers.conf` (as `conf/layer.conf`'s
+  `LAYERRECOMMENDS_alp-sdk` recommends) while building `MACHINE=e1m-aen801-a32`
+  or `e1m-nx9101-a55` would skip that recipe, leaving the packagegroup's
+  hard `RDEPENDS` with no provider — a `do_rootfs` abort, not a graceful
+  skip, since `packagegroup-alp-camera` defaulted to `allarch`
+  (`packagegroup.bbclass`'s own comment: `PACKAGE_ARCH` must move to
+  `MACHINE_ARCH` before `inherit packagegroup` whenever content varies by
+  `MACHINE_FEATURES`, which this now does). Fixed by setting
+  `PACKAGE_ARCH = "${MACHINE_ARCH}"` and AND-ing a `MACHINE_FEATURES`
+  `v2n` check alongside the existing `BBFILE_COLLECTIONS` gate (same fix
+  applied to `alp-image-common.inc`'s DRP-AI `RDEPENDS`, since
+  `kernel-module-mmngr` has no `COMPATIBLE_MACHINE` guard of its own to
+  fall back on). Also: corrected `LAYERRECOMMENDS_alp-sdk` (it named
+  `meta-rz-drpai`/`meta-rz-opencva` by directory, but their real
+  `BBFILE_COLLECTIONS` names are `rz-drpai`/`rz-opencva` — matched
+  nothing); corrected `alp-sdk_0.6.bb`'s comment repeating the same
+  "headers appear from layer presence alone" belief and its stale
+  `alp-image-edge` `dx-rt` cross-reference; scoped the "opencv
+  deliberately not ported" comment in `alp-image-common.inc` to the
+  DRP-AI vendor bbappend's own python3-demo-chain copy — `opencv` itself
+  does ship, via `meta-rz-opencva`. Settled by inspection of the vendor
+  sources only; nobody in this environment can run `bitbake
+  alp-image-prod` for a non-RZ MACHINE to confirm `do_rootfs` succeeds.
+  Also established (not merely left unfixed) that `meta-rz-graphics`,
+  which #1176's Impact list named as a fourth affected layer, was never
+  affected: it wires through a conf-level `IMAGE_INSTALL:append:mali-family`
+  with no `core-image-%.bbappend` at all, so the recipe-name-matching
+  defect the other three layers had never applied to it.
+- **The V2N Renode model had no UART, so `tan renode` produced no
+  console output at all (#1158).** The M33-SM stays headless in
+  production (no Pmod USB-UART populated on the SoM), so
+  `metadata/renode/renesas_rzv2n.repl` deliberately modelled no UART —
+  but that meant a sim gate could not fail on anything the console
+  would show. Added a coarse `sci0` register model (real M33-visible
+  base `0x42800c00`, Zephyr SoC dtsi `arm/renesas/rz/rzv/r9a09g056.dtsi`;
+  offsets from the vendor FSP `R_SCI_B0_Type` register header) that
+  unblocks `R_SCI_B_UART_Open()` and `uart_rz_sci_poll_out()` and logs
+  transmitted lines — verified booting a real
+  `alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33` `hello_world` build under
+  Renode v1.16.1 and observing `*** Booting Zephyr OS build v4.4.1 ***`
+  / `Hello World! ...` on the Renode log. Opt-in only, via new
+  `tests/renode/v2n_m33_sci0_console.{overlay,conf}` (mirrors the AEN
+  M55 sim's own Renode-only overlay pattern) — the production board
+  `.dts` keeps `sci0` disabled, and the default headless/`ram_console`
+  boot path is unchanged (regression-checked: no `sci0` bus traffic, no
+  faults).
+
+### Fixed — three V2N/V2M metadata-declaration gaps (#1155, #1169, #1170)
+
+**`catalog.json` had no key for PDM, SD1, WIFI_SDIO or xSPI (#1155).** PDM was
+already correctly projected; the real gaps were xSPI/OSPI (structurally
+recorded in `external_memory_interfaces`, never read by `gen_catalog.py`) and
+SD1/WIFI_SDIO (both fold into n44.json's single `sdio: 2` count, so the two
+routed instances were indistinguishable from the class boolean alone).
+`scripts/gen_support_matrix.py` gained an `xSPI/OSPI` peripheral class
+(matches any `external_memory_interfaces` entry whose `kind` contains "spi",
+vendor-normalised across xSPI/OctalSPI/HexSPI/FlexSPI); `scripts/gen_catalog.py`
+gained a named-instance projection sourced from the SoM's routed pin-mux table
+(`metadata/pinmux/<family>.yaml`) for the two instances the SoC-level count
+can't split. Regenerated `metadata/catalog.json` and
+`docs/peripheral-support-matrix.md`.
+
+**eMMC, xSPI and the MHU mailbox had no chip metadata or driver tier (#1169).**
+`nor_flash`/`emmc` are on-die routing annotations with no `chips/*.yaml`
+manifest and, confirmed by grep, no alp-sdk driver anywhere in the tree — now
+say so explicitly in the four V2N/V2M SoM presets, rather than staying silent.
+The MHU mailbox already carries an ADR 0017 Tier-1.5 declaration in
+`zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c`, just an aspirational
+`BENCH-UNVERIFIED` one — the DT node it backs is the exact one
+`examples/multicore/rpmsg-v2n/m33_sm` exercises under #697, so the header now
+cites that evidence: init/attach and the A55->M33 receive path are
+silicon-proven, while `mbox_send()` (M33->A55) remains unexercised (see the
+correction below). All four SoM presets now cross-reference this from their
+`mailbox:` block.
+
+**"Nine" SoC peripheral instances had routed pads but no SoM-level
+declaration (#1170).** `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv`
+routes I3C ch30, RIIC1, RIIC2, RSPI0, SCI_SPI2, SCI_SPI3, PDM0, CANFD2,
+CANFD3, UART1, and two paired SSIU channel groups — verified line-by-line
+against the TSV, all genuine. The issue's own body table already runs to ten
+row-groups, not nine: `CANFD2`/`CANFD3` is one row for two distinct
+channel-numbered instances, and `SSIU1-4` reads as one row but is two paired
+I2S instances (SSIU1+SSIU2 share BCK/WS, SSIU3+SSIU4 likewise — matching
+`ALP_E1M_X_I2S_COUNT == 2` in `include/alp/e1m_x_pinout.h`, not one merged
+instance or four independent ones). A new `soc_peripheral_instances:` block
+(schema: `metadata/schemas/som-preset-v1.schema.json`) declares all twelve
+individual instances this resolves to, each with its class, its TSV
+`silicon_peripheral` name for traceability, and an honest `driver_status:
+none` (no DT node targets any of them yet; DT/pinctrl generation from this
+layer is #655, not this change).
+
+### Fixed — an alp-sdk-owned workspace couldn't build the nanopb example (#1136)
+
+`libraries: [nanopb]`'s west module was reachable in CI (`pr-twister.yml`
+inits its topdir straight from Zephyr's own `west.yml`, `west init -m
+zephyr`, where nanopb is unconditioned) but unreachable from a real
+alp-sdk-owned workspace (`west init -l alp-sdk` — what `tan bootstrap` and
+every customer runs): `nanopb` was missing from the Zephyr import's
+`name-allowlist`, so `west update` never fetched `modules/lib/nanopb` and
+`examples/connectivity/nanopb-encode-decode/CMakeLists.txt` — which has no
+stub fallback, unlike `lwrb` — `FATAL_ERROR`ed on the unset
+`ZEPHYR_NANOPB_MODULE_DIR`. A previous pass (#650) had allowlisted `nanopb`
+correctly, then reverted it as "dead weight": at the time, alp-sdk's own
+manifest ALSO defined a top-level project literally named `nanopb` (the
+dormant SDK-internal mproc-IPC-framing pin), and west's project-name dedup
+lets a directly-listed project permanently shadow a same-named import even
+from a disabled group. Fixed both halves: allowlisted `nanopb` again, and
+renamed the shadowing internal pin to `nanopb-mproc-pin` (`repo-path:
+nanopb` keeps its real upstream URL) so the two no longer collide. Verified
+against a real, from-scratch alp-sdk-owned workspace: `west manifest
+--resolve` now resolves `nanopb` as an active, unconditioned project, and
+`alp_sdk.examples.nanopb_encode_decode.native_sim` builds and PASSes under
+twister. `lwrb` shares the same disabled `extras-lwrb-nanopb` group but has
+no equivalent gap — its consumer compiles a working in-tree stub
+(`vendors/lwrb/src/lwrb_stub_impl.c`) whenever the upstream module isn't
+present, so the group being off-by-default is a real, harmless deferral
+there, not a hidden defect.
+
+Added `scripts/check_west_manifest_module_resolution.py` (wired into
+`pr-metadata-validate.yml`) so this class of drift can't recur silently: it
+statically proves every `libraries:`-selectable Zephyr module resolves to a
+reachable `west.yml` project, and that no Zephyr import `name-allowlist`
+entry is shadowed by a same-named top-level project. Running it for the
+first time caught a second, independent instance of the exact same shape:
+`libraries: [cmsis-nn]` (`metadata/libraries/cmsis-nn.yaml`) was never
+allowlisted despite sitting unconditioned right next to `cmsis-dsp` in
+Zephyr's own manifest — now fixed alongside nanopb. A first cut of the gate
+treated any top-level `projects:` entry as "reachable" regardless of its own
+`groups:` state, which missed the literal original shape (a module reachable
+*only* through a top-level pin sitting in a permanently-disabled group, no
+allowlist entry at all) and, when tightened bluntly, false-positived on the
+thirteen `tier: B` libraries that are legitimately, documentedly gated
+behind a disabled-by-default group (jsmn, Catch2, BearSSL, etc.). The gate
+now adds a third, `tier: A`-scoped check (ADR 0018: a curated/bundled
+library must resolve with no group-filter opt-in) that reproduces and fires
+on the original bug shape without disturbing tier B's legitimate deferrals.
+
+### Fixed — example READMEs documented rejected `tan build` syntax (#1137)
+
+**Round 1** fixed `examples/multicore/heterogeneous-offload/README.md`,
+`examples/multicore/rpmsg-aen/README.md`, `examples/multicore/rpmsg-v2n/README.md`,
+and `examples/multicore/rpmsg-imx93/README.md` — all showed `tan build <path>
+[--core <core>]`, a positional path and/or `--core` flag `tan build` rejects
+outright (`error: unexpected argument ... found`) — and left
+`examples/multicore/mproc-mailbox/README.md` flagged as a real, unfixed
+residual, plus asserted (wrongly) that this was the complete set.
+
+**Round 2** found the round-1 sweep had checked only the files its issue
+named, not the shape itself, and fixed the rest — ten more `tan build`
+positional/`--board` sites (two of them `mproc-mailbox`'s own previously-
+flagged residual) across eight files, plus two genuinely different rejected
+shapes (six `tan validate <path>` sites, two `tan explain <code>` sites) the
+same under-scoped sweep missed entirely because it only ever grepped for
+`tan build`:
+
+- `examples/README.md` (×2), `examples/peripheral-io/i2c-device-hub/README.md`,
+  `examples/peripheral-io/vendor-ext-composability/README.md`,
+  `examples/v2n/v2n-gd32-bridge-functional/README.md` — the same bare-
+  positional-path shape (`tan build <path>` / `tan build --native <path>`),
+  rewritten to `tan build --project <path>` (or `--native --project <path>`).
+- `examples/power-timing/power-managed-sensor/README.md`,
+  `examples/v2n/v2n-m1-deepx-inference/README.md`,
+  `examples/connectivity/production-deployment/README.md` — `tan build
+  --board <sku> <path>`; `--board` is not a `tan build` flag at all (it
+  exists on `tan size`/`tan renode`, never `build`) and board.yaml already
+  pins the SoM, so both the flag and the positional are simply dropped.
+- `examples/multicore/mproc-mailbox/README.md` — the round-1 residual, now
+  actually fixed rather than re-flagged: `tan build` has no per-core
+  selector at all (confirmed against a real `tan build --help`), so the
+  doc's "build HP alone via `--board rtss_hp`" framing was never achievable
+  either way; rewritten to state plainly that `tan build` produces the HP
+  app plus the topology-default HE `alp-stock-shim` placeholder until the
+  v0.4 dual-image flow lands, and the real peer image is still built by
+  hand via `west build`.
+- A **second, distinct rejected shape** found by grepping the wider corpus,
+  not just `tan build`: `tan validate <path>` (bare positional) in
+  `README.md`, `AGENTS.md` (×2), and `docs/cli.md` (×3) — `tan validate` has
+  no positional argument either; the real flag is `--board-yaml <path>`.
+- A **third**, deeper issue in `docs/cli.md`'s `tan explain` section:
+  `tan explain ALP-B001` ("decode a diagnostic code") is not merely
+  mis-syntaxed, the CAPABILITY is gone from `tan explain` in the installed
+  `tan 0.3.1` (`tan explain` only explains project/module templates and
+  generation targets now, confirmed against `tan-cli`'s own `validate.rs`
+  and a real `tan explain`/`tan explain --template ...` run) — the real,
+  current mechanism is the `see: docs/diagnostics/ALP-Bxxx.md` hint line
+  `tan validate`'s own output already carries. Rewrote both `docs/cli.md`
+  mentions and the "You are..." front-door table row accordingly.
+- `docs/v0.6-tbd-and-assumptions.md` named a fourth: `` `tan build --emit
+  system-manifest` `` — `--emit` is not a `tan build` flag (`tan build` has
+  `--target`/`--manifest`, never `--emit`); reworded to name the actual SDK
+  call (`alp_orchestrate --emit system-manifest`) `tan build` consumes
+  internally.
+
+**Root cause of the round-1 miss and the fix**:
+`scripts/check_tan_docs_surface.py`'s `DOC_SOURCES` never included example
+project READMEs at all (only four top-level docs), and even where it did
+scan a file, it only checked that a verb NAME still existed — never what
+came after it. Extended the gate two ways: `EXAMPLE_README_GLOB` now folds
+every `examples/**/README.md` into the scanned surface, and a new
+`check_invocation_shapes` pass extracts every full `tan ...` invocation
+(fenced `bash`/`sh`/`shell`/`console`/`zsh` blocks + inline spans — sample-
+OUTPUT blocks like `tan doctor`'s own untagged-fence report header are
+deliberately excluded, see that function's docstring) and statically
+validates it against that verb's real `--help` grammar: an unrecognised
+flag, or a positional argument on a verb whose Usage line takes none. Proven
+by mutation against the real repo (`git stash` each fixed file, re-run the
+gate, see it fail naming the exact rejected invocation; `git stash pop`,
+green again) and by a new pytest suite
+(`tests/scripts/test_check_tan_docs_surface.py`) covering the positional-arg
+rejection, the unrecognised-flag rejection, the `tan --project <path> build`
+global-flag-before-subcommand ordering, a verb that DOES accept a real
+positional (`tan flash`), a forwarding verb's anything-goes grammar, and the
+sample-output/fence-language exclusion.
+
+### Fixed — five driver defects from the 2026-08-02 whole-codebase review (#1131, #1132, #1133, #1134, #1135)
+
+`mbox_alif_mhuv2.c`'s `mhuv2_send()` spun for the receiver's `ACCESS_READY`
+handshake, discarded the outcome, and rang `CH0_SET` + returned 0 regardless
+— so a dead/absent peer looked like a delivered message to OpenAMP/RPMsg
+callers. `mhuv2_set_enabled()` in the same file already returns `-EIO` on the
+identical timeout; `mhuv2_send()` now does too, before ringing the doorbell
+(#1131).
+
+The legacy `ipm_arm_mhuv2.c` IPM driver (a separate driver/file/Zephyr
+subsystem from the mbox one above, not the same defect) left the mandatory
+`max_data_size_get` op `NULL` — a call through it null-derefs — and ignored
+caller-supplied sizes in `send`/`poll_out`/`poll_in`, always transferring the
+CH_SET/CH_ST register's 4 bytes regardless of what the caller declared, so a
+shorter buffer could be read/written out of bounds. This driver is not dead
+code to delete outright: `zephyr/dts/alif/ensemble_e8_peripherals.dtsi`'s
+`seservice0s`/`seservice0r` nodes wire it to the Secure Enclave services path
+consumed by `examples/aen/aen-se-service-info`, `aen-aipm-read`,
+`aen-se-crypto`, and `aen-se-service-query` — repaired in place, not removed.
+`max_data_size_get` now reports `sizeof(uint32_t)`, and all three transfer
+paths reject any size other than 4 with `-EINVAL`.
+
+The CC3501E TI SPI transport's `arm_transfer()` already left READY low
+(rather than lying about it) when `SPI_transfer()` refused to queue a
+descriptor, but nothing then re-armed the slave — a permanent stall with the
+host waiting forever, not a transient one. A new arm-failure counter
+(`g_arm_fail_count`, mirroring the existing `g_resync_count` self-heal) is
+now polled by `cc3501e_hw_tick()`, which drives the same proven full
+SPI re-open recovery a radio-op reinit already uses (#1133).
+
+`gpu2d`'s software-fallback pixel packer shifted a `uint8_t` (promoted to
+signed `int`) left by 24 bits; a component at/above `0x80` — reachable, since
+alpha legitimately spans 0..255 — is not representable in `int` at that
+shift, which is undefined behaviour (real, UBSan-only-detectable; the plain
+build's output is bit-identical on this two's-complement toolchain so it did
+not corrupt output here, but a build that traps or optimizes on it could).
+All three blend modes now cast each packed component to `uint32_t` before
+shifting (#1134).
+
+`rv3028c7_init()` cleared the RTC's power-on-reset flag with the write
+result cast to `(void)` — genuinely discarded, not merely logged — so a
+failed clear was invisible and a later successful register write still
+returned `ALP_OK` with PORF still latched. The write's status is now
+propagated; a failure returns early, leaving the instance uninitialised
+(#1135).
+
+### Fixed — three V2N metadata/docs/example contradictions against their own recorded evidence (#1161, #1167, #1168)
+
+- **`metadata/chips/gd32g553.yaml`** (#1161): `verification.hil_silicon` flipped
+  `untested` -> `verified`. `examples/v2n/v2n-gd32-bridge-hil-soak/README.md`
+  records a 1526-cycle / ~50 min bench soak (13/13 healthy surfaces clean,
+  zero link wedges) plus the v0.6.0 functional suite (26/26) and A/B OTA
+  e2e documented in `docs/test-plan.md` / `docs/verification-status.md`.
+  Every other V2N-family chip (`clk_5l35023b`, `gd32_swd`, `deepx_dxm1`, …)
+  stays `untested` — none has an equivalent recorded silicon result;
+  `gd32_swd` in particular is still `driver_status: partial` pending its
+  own first-silicon exercise.
+- **`docs/bring-up-v2n.md`** + **`examples/v2n/v2n-gd32-swd-flash/src/main.c`**
+  (#1168, SWD pin status): both said the GD32 SWD pin assignments
+  (SWDIO/SWCLK/NRST -> Renesas P70/P71/P74) are resolved in one paragraph,
+  then called them "TBD pending the next schematic revision" two sentences
+  later. The pads are maintainer-confirmed 2026-05-12 and consistently
+  recorded everywhere else (`metadata/chips/gd32_swd.yaml`,
+  `metadata/chips/gd32g553.yaml`, `metadata/e1m_modules/v2n/renesas-peripheral-map.csv`,
+  `CHANGELOG.md`) — the `TBD` claim was the stale side; removed.
+- **`docs/console.md`** (#1168, expected bridge firmware version): the
+  `alp companion ver` example output showed `GD32 supervisor fw v0.2.6`.
+  `gd32-bridge-firmware:firmware-version.txt` (the firmware's own version
+  string) is `0.2.11`, matching `docs/verification-status.md`'s "the bridge
+  has since moved to fw v0.2.11 / protocol v0.9". Updated the example
+  output to match.
+- **`examples/multicore/rpmsg-v2n/linux/src/main.c`** (#1167): rewritten so
+  the two halves of the example are an actual matched pair. Changed the
+  **Linux side**, not the M33 side: `m33_sm/src/main.c` is a bench-proven
+  (#683/#697) raw-OpenAMP echo responder that deliberately bypasses
+  `<alp/rpc.h>` and publishes no `temperature` method — the Linux side
+  previously subscribed to that method regardless, so the pair never
+  actually talked (per the example's own README status note). Rewriting
+  the M33 side to publish a `temperature` reading would mean inventing a
+  sensor result with no silicon backing, so instead the Linux side now
+  drives `src/backends/rpc/yocto_uio_drv.c` (the `<alp/rpc.h>` backend
+  already built to attach to this exact M33 firmware, `silicon_ref
+  "renesas:rzv2n:n44"`) against the M33's real fixed endpoint address
+  (`APP_EPT_ADDR` = 1024) and round-trips an `echo_test` request via
+  `alp_rpc_call`, verifying the exact bytes come back — matching what the
+  M33 firmware actually implements. `board.yaml` / `README.md` updated to
+  match; `m33_sm/src/main.c`'s transport code is unchanged.
+
+### Fixed — five memory-safety defects in the AEN Zephyr drivers (#1119, #1120, #1121, #1122, #1124)
+
+`flash_mram_alif.c`'s `flash_range_is_valid()` computed `offset + len` in
+unsigned arithmetic; a `len` close to `SIZE_MAX` wrapped the sum past
+`FLASH_MRAM_FLASH_SIZE` and evaded the bound, reaching the MRAM
+read/write/erase path with an out-of-range request. Rewritten
+subtraction-based, in a new companion header `flash_mram_range.h`, and
+called directly at all three read/write/erase call sites — there is no
+longer a driver-local `flash_range_is_valid()` wrapper to silently regress
+back to the wrapping arithmetic while a header-only test stayed green
+(#1119).
+
+**Round-2 dev-review fixes to the above (both release-blockers):**
+
+- `flash_mram_range.h` initially `#include`d the shared
+  `src/common/alp_checked_arith.h` helper. `flash_mram_alif.c` is compiled
+  by `zephyr/CMakeLists.txt` *before* the `if(NOT CONFIG_ALP_SDK) return()`
+  early-return (`zephyr/Kconfig:52-60` — MCUboot is exactly such an image),
+  and `src/common` is only added to the include path *after* that
+  early-return, so the include was unresolvable in any image that never
+  sets `CONFIG_ALP_SDK` — `fatal error: alp_checked_arith.h: No such file
+  or directory` building MCUboot for
+  `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`. No CI job builds
+  MCUboot, so nothing caught it. Fixed by duplicating the four-line
+  subtraction check inline in `flash_mram_range.h` instead of including the
+  shared helper. Verified with a real `west build .../mcuboot/boot/zephyr
+  -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he -- \
+  -DCONFIG_SINGLE_APPLICATION_SLOT=y` (the `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP`
+  the AEN sysbuild config now requires post-#1069/#1103): `rc=1` with the
+  pre-fix header restored, `rc=0` with the fix, confirmed both ways.
+- `tests/unit/flash_mram_range` and the sibling `display_cdc200_bounds` /
+  `dma_pl330_sg_validate` suites only exercised each driver's extracted
+  header helper, never the driver's own call site — proven in review by
+  reverting `flash_range_is_valid()` to the wrapping arithmetic, deleting
+  all four `cdc200_validate_transfer()` calls from `display_cdc200.c`, and
+  neutering the `dma_pl330_sg_chain_matches()` call to `if (false)`: all
+  three still passed 3/3 twister configurations, 10/10 test cases. NOT closed
+  for flash_mram: removing the driver-local wrapper deleted a location, not
+  the detectability — re-review reintroduced the exact wrapping arithmetic at
+  all three call sites in `flash_mram_alif.c` and still saw 63/63
+  configurations, 550/550 cases pass, rc=0, because no suite compiles that
+  driver. Closed for CDC200 by a new
+  `tests/unit/display_cdc200_entrypoints` suite that links the *actual*
+  `display_cdc200.c` under `native_sim` (no `<soc.h>`/hardware-register
+  dependency in its read/write entry points) and calls
+  `cdc200_generic_write`/`_read` and `cdc200_display_write`/`_read`
+  directly — mutation-proven: deleting the four `cdc200_validate_transfer()`
+  calls turns 5 of its 9 cases red, restoring the calls turns them green
+  again. **Not closed for PL330**: `dma_pl330_alif.c` unconditionally
+  `#include`s the Alif `hal_alif` module's `<soc.h>`/`<soc_memory_map.h>`
+  (for `local_to_global()`), a west module not present in this environment
+  and not buildable under `native_sim` without vendoring a stand-in that
+  risks masking a real hal_alif integration break — see
+  `tests/unit/dma_pl330_sg_validate/CMakeLists.txt` for the residual-gap
+  note. The `dma_pl330_configure()` call site already calls
+  `dma_pl330_sg_chain_matches()` directly (no wrapper indirection to strip,
+  unlike flash_mram), so the remaining exposure is narrower than before,
+  but a call-site regression there is still undetected by CI.
+
+`adc_alif.c`'s `adc_start_read()` unconditionally dereferenced
+`sequence->options->user_data`, even though Zephyr's `adc_sequence` contract
+makes `options` optional (NULL is a normal one-shot read) — a NULL-options
+one-shot read faulted the driver. The sibling `adc_cmpa_irq_handler()` /
+`adc_cmpb_irq_handler()` shared the same unguarded dereference, reachable
+whenever devicetree `interrupt_en` has a comparator bit set regardless of
+the triggering read's `options`. All three sites now guard on the
+comparator pointer being non-NULL (#1120).
+
+`display_cdc200.c`'s four read/write entry points (`cdc200_generic_write`/
+`_read` and the indexed `cdc200_display_write`/`_read`) computed the
+framebuffer offset from `(x, y, desc)` with no validation — a rectangle
+extending past the layer's window, an undersized caller buffer, or a pitch
+narrower than the claimed width could over/under-run the framebuffer or the
+caller's buffer. All four now validate the rectangle, pitch, and buffer
+size (in a 64-bit intermediate, so the size computation itself cannot
+overflow) before touching memory (#1121).
+
+`alif_pdm.c`'s ISR slab rollover allocated exactly one replacement block
+and copied the *whole* remainder of an IRQ burst into it without checking
+the block was large enough — a burst (up to 128 bytes) could exceed a
+configured block size, corrupting adjacent slab memory. The rollover now
+splits the remainder across as many fresh blocks as needed, and
+`dmic_alif_pdm_configure()` rejects a zero `block_size` (#1122).
+
+`dma_pl330_alif.c`'s `dma_pl330_configure()` dereferenced `cfg->head_block`
+before its own NULL check further down, and copied exactly `block_count`
+pool entries from the caller's scatter-gather list without confirming the
+list actually had that many — a shorter list left a stale/zeroed pool entry
+linked into the chain as a phantom zero-address/zero-size block the ISR
+could try to start. All scatter-gather validation (head-block non-NULL,
+`block_count` bounds, exact chain-length match, address-adjustment support)
+now runs up front, before any channel state is mutated, so a rejected
+`configure()` call never publishes partial state (#1124).
+
+Each fix carries a hosted `tests/unit/` regression suite for its extracted
+guard header (`flash_mram_range`, `adc_alif_comparator`,
+`display_cdc200_bounds`, `alif_pdm_burst_plan`, `dma_pl330_sg_validate`) —
+most of these drivers only build against a devicetree-instantiated AEN
+target, so the guard logic is split into small dependency-free headers the
+drivers and the native_sim tests both include. As of the round-2 review
+above, CDC200 (by a new `display_cdc200_entrypoints` suite) additionally
+proves the *driver's own call site* still invokes the guard, mutation-tested
+by deleting the call and watching the suite go red.
+
+`flash_mram` does NOT have call-site coverage, despite an earlier claim here
+that it did "by construction". Disproven in review: reintroducing the exact
+#1119 wrapping arithmetic at all three call sites in `flash_mram_alif.c`
+left 63/63 configurations and 550/550 cases passing, rc=0. No suite compiles
+that driver, so deleting the wrapper removed a location, not the
+detectability. It sits with ADC and PDM below. ADC (#1120) and PDM (#1122) remain at
+header-only coverage — round 2 did not demonstrate a call-site regression
+for either, but that also means neither claim is stronger than "the guard
+logic is correct", not "the driver still calls it". PL330 (#1124) remains
+header-only for a documented reason (see above): its driver file needs the
+`hal_alif` west module, unavailable here.
+
+### Fixed — five "gate exists but cannot fail" defects across dev-review (#1127, #1128, #1129, #1130, #1138)
+
+`yaml.safe_load`/`json.loads` silently keep only the LAST value of a
+duplicated mapping key with no error — a duplicated `som:`/route key in a
+hand-edited `board.yaml` (or a SoM/chip/SoC/library manifest) dropped
+hardware configuration invisibly in a diff. Added `scripts/strict_loaders.py`
+(a duplicate-key-rejecting YAML loader + a `json.loads(object_pairs_hook=…)`
+wrapper) and routed every metadata ingestion boundary through it:
+`scripts/alp_cli/yaml_pos.py`'s position-aware mapping constructor,
+`scripts/alp_orchestrate/loader.py`'s `_load_yaml`/`_load_json` (+ the
+library-alias table load), and every board/SoM/hw-revisions/chip/block/
+library/SoC document load in `scripts/validate_metadata.py` (#1127).
+
+`pr-generated-files.yml`'s `git diff --exit-code` step is blind to a
+brand-new untracked file — a newly-needed generated board header could
+land un-committed and the gate would still report green. The step now
+`git add -N`s (intent-to-add) every generated path before diffing, so a
+new file shows up as an addition. `scripts/gen_board_header.py` also
+gained a reconciliation pass that deletes an orphaned
+`alp_<slug>_routes.h` whose source board YAML was renamed/deleted, and a
+slug-collision guard that fails closed when two distinct board `name:`s
+fold onto the same `_board_slug()` output path instead of silently
+letting the second write clobber the first (#1128).
+
+`check_example_portability.py`'s `check_no_zephyr_driver_includes()`
+allowlist check ran before the per-line scan, so allowlisting ONE
+`zephyr/drivers/*` include for an example silently exempted that example
+from every OTHER driver include too. `_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST`
+is now keyed per `(example_key, driver)` and the allowlist check moved
+inside the loop (#1129).
+
+`check_supported_board_testcases()` joined every scalar string anywhere
+in `testcase.yaml` (descriptions, tags, names included) and did a bare
+substring check for `ALP_BOARD_<NAME>` — a `description:` merely
+mentioning the define satisfied `supported_boards:` with no real build
+scenario. It now parses the `tests:` scenario structure and checks only
+`extra_configs`/`extra_args` for an exact `-D<define>` compiler flag
+(#1130).
+
+`alp_ahrs_reset()` was the last untested portable-core API
+(`check_test_coverage.py --fail-on-gaps` HARD FAIL). Added ztests for
+the NULL-handle guard, identity restoration after filter drift, and
+post-reset filter usability (a reset filter converges identically to a
+freshly-initialised one under the same input) (#1138).
+
+**Round 2 (PR #1177 review):** each round-1 fix above was correct where
+applied and absent one site over.
+
+- `scripts/test-all.sh`'s `stage_generated_files` — the LOCAL mirror of
+  `pr-generated-files.yml`'s `git diff --exit-code` step — had the exact
+  same blind-to-a-new-untracked-file shape the CI copy was fixed for, but
+  never got its own `git add -N`. Since local-first CI is this repo's
+  documented flow, the sink developers actually hit stayed blind: proven
+  by `printf 'x\n' > include/alp/boards/alp_untracked_routes.h` then the
+  old `git diff --quiet …` → rc=0 (green over a missing generated file).
+  Added the same `git add -N` before the diff, and reconciled its path
+  list against CI's (it was missing `metadata/error-catalog.json` and
+  `docs/peripheral-support-matrix.md`).
+- `scripts/gen_board_header.py`'s slug-collision guard only fired when
+  `slug_owners[slug] != name` — so the more probable instance of the
+  clobber it names, two board YAMLs with the **identical** `name:` (a
+  preset copied and never renamed), stayed silent: `wrote
+  .../alp_e1m_x_evk_routes.h` printed twice, rc=0. Reworked to key on the
+  slug alone and report both source YAML *paths*, not both names.
+- `scripts/strict_loaders.py`'s duplicate-key scan ran on
+  `flatten_mapping()`'s OUTPUT, so a spec-legal `<<: *anchor` merge-key
+  override (an explicit sibling key overriding the anchor's value for the
+  same key) was misreported as a duplicate. The scan now runs on the
+  node's own explicit pairs before `flatten_mapping()` splices the anchor
+  in. Latent only — no committed `metadata/**` document uses YAML anchors
+  today — fixed ahead of the first one that does.
+
+### Fixed — two path-traversal bugs: `tan model build` and untrusted template catalogs (#1125, #1126)
+
+`tan model build` (`scripts/alp_model/build.py`) wrote its packaged model to
+`out_dir / f"{name}.alpmodel"` with `name` taken straight from `board.yaml`'s
+`models[].name` and no containment check — a name like
+`../../../../tmp/evil` wrote outside the requested `--out` directory.
+`build_model()` now rejects any `name` that doesn't match
+`^[A-Za-z][A-Za-z0-9_-]*$` (the same pattern `board.schema.json` already
+declares) before doing anything else, and asserts the resolved output path
+stays beneath the resolved `out_dir` as a second, independent check. The
+guard lives in `build_model()` itself — the one write chokepoint every
+caller (the `alp model build` CLI, and every direct test caller) routes
+through, not just the CLI's own board.yaml parsing.
+
+`scripts/alp_template.py` (`alp_template.py render`, `--emit scaffold`, and
+any future `--catalog` caller) joined a catalog record's
+`files.user_owned` entries onto the example dir (read) and the destination
+dir (write) with no path-shape check at all —
+`metadata/schemas/template-catalog-v1.schema.json`'s `user_owned` items are
+plain, unconstrained strings, so a `--catalog`-supplied doc naming an entry
+with `..`, an absolute path, or a path through a symlink could read outside
+the example tree or write outside the chosen destination (the write side
+also `mkdir(parents=True)`s any missing intermediate directory, so it's a
+stronger primitive than the model-build bug — no pre-existing directory
+required). A new `_safe_join(root, rel)` helper resolves both `root` and
+`root / rel` and requires the resolved candidate stay beneath the resolved
+root — a fail-closed, resolve-then-contain check (not a `..`-pattern scan),
+so it also catches an absolute `rel` and a symlink placed inside either
+root, not just literal traversal.
+
+The first pass wired `_safe_join()` around the *relative* part of every
+join but left the *root* itself trusted verbatim from the same catalog
+record — `base_dir / record["example"]` — so a catalog naming
+`"example": "../../../../tmp/evil"` still walked the root itself outside
+`base_dir` and the per-file check then faithfully contained everything
+*inside that escaped root*, i.e. contained nothing. `_safe_join()` is now
+applied to `record["example"]` itself, everywhere it's joined onto a base
+directory (`_rendered_bytes()`'s read, `default_sku()`, and
+`render_to_envelope()`'s board.yaml read) — the example root can no longer
+walk outside `base_dir` in the first place. `validate()`'s own
+`test.testcase_yaml` copy (catalog-controlled, not part of
+`files.user_owned`, so it wasn't touched by the first pass at all) gets
+the same `_safe_join()` treatment on both the read (`REPO`-relative
+source) and the write (temp-dir-relative destination) side.
+
+Both fixes are allowlist/containment checks, not denylists: `PathEscapeError`
+(alp_template.py) and a plain `ValueError` (`build_model()`) name exactly
+what escaped and where. New regression tests cover a traversal name, an
+absolute name, and (since `build_model()`'s `name` is a bare-filename
+allowlist with no `/` allowed at all) a valid in-root name for
+`build_model()`; `_safe_join()` -- shared by every read/write site above --
+gets direct traversal / absolute-path / symlink-escape / valid-in-root unit
+tests, plus end-to-end tests proving a malicious `--catalog` `example` root
+and a `..`-bearing `test.testcase_yaml` entry are both rejected before
+either side touches disk.
+
+### Fixed — flash-backend hardening: path traversal and script command injection (#1112, #1113)
+
+`scripts/flash_backends/yocto_wic.py` validated `flash_args.target` with a
+bare `str(target).startswith("/dev/")` check, so `/dev/../tmp/foo` passed
+straight through to `bmaptool`/`dd` — since flashing commonly runs elevated,
+that could overwrite an arbitrary regular file. The target is now
+canonicalized (a lexical `..`-traversal collapse on every host, plus a
+symlink-chasing `os.path.realpath` pass on POSIX hosts only — a Windows host
+has no `/dev` tree to chase symlinks through) and required to resolve
+strictly beneath `/dev/`; right before a tool actually runs, a second gate
+additionally requires the resolved target to `stat` as a real block device.
+A regular file is rejected outright, with no silent fallback. Traversal and
+symlink escapes are rejected before any external tool runs. The command
+that actually executes always uses the caller's original `/dev/...` string,
+never the resolved form — the resolution is for validation and the
+block-device check only, so a device-name symlink still flashes under the
+name the caller gave it, and the emitted `dd`/`bmaptool` argv is never
+reinterpreted through Windows NT path semantics (which previously turned
+`/dev/sdb` into `\dev\sdb`). The `stat`-then-open-by-name pair is not
+atomic (TOCTOU); closing that needs root on the flashing host already, so
+it's named as a residual defense-in-depth gap in the backend's docstring
+rather than closed.
+
+`scripts/flash_backends/swd_probe.py` interpolated the artefact path and
+base address raw into generated J-Link Commander (newline-separated) and
+OpenOCD Tcl (`-c` command string) scripts — a newline in the path injected
+additional J-Link commands, a Tcl separator in the address injected
+OpenOCD commands, and an ordinary path containing spaces simply parsed
+wrong. `base` is now parsed as a bounded 32-bit integer literal (decimal or
+`0x`-prefixed hex) and re-rendered canonically — the raw string is never
+passed through. The artefact path is validated for control characters/
+newlines and then quoted per the target script's own grammar: double-quoted
+for J-Link Commander, brace-quoted for Tcl — the two are not
+interchangeable, and either quoting fails closed (rejects) rather than
+attempting to escape an embedded quote/brace (a trailing backslash, which
+would otherwise escape Tcl's closing brace, is rejected too). A third sink
+in the same file went unfixed by the initial pass: `flash_args.interface`
+and `flash_args.target` were interpolated raw into `-f interface/{value}.cfg`
+/ `-f target/{value}.cfg` — OpenOCD *sources* a `-f` file as Tcl, so a
+traversal payload there reaches arbitrary code execution, not just an
+unexpected file read. Both are now constrained to
+`^[a-z0-9][a-z0-9_-]*$` before interpolation and rejected outright (not
+sanitized) if they don't match.
+
+`metadata/schemas/som-preset-v1.schema.json`'s `flash_args` stays
+deliberately open (per its own doc comment, the shape follows whichever
+backend `flash_method` names, which the schema can't enumerate without
+backend-conditional logic this schema doesn't otherwise use) — the address
+grammar is enforced at the one place that's authoritative for it, the
+backend itself, which also gives a precise error instead of a generic
+schema-pattern failure.
+
+### Fixed — `firmware-update-log` failed to link on both AEN801 board targets (#1101)
+
+`zephyr/soc-bridge/alif/mpu_regions_e8.c` unconditionally reads
+`DT_NODELABEL(storage_partition)` to size its non-MCUboot MRAM_DEVICE MPU
+window, but `examples/connectivity/firmware-update-log`'s own
+`boards/alp_e1m_aen801_m55_log_mram.dtsi` deleted that nodelabel without
+replacing it, so both `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` and
+`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` failed at CMake configure
+(`DT_N_NODELABEL_storage_partition... undeclared`) — breaking
+`scripts/bench/aen/flash-update-log-dual.sh` and
+`flash-update-log-firewall-probe.sh`. Fixed by adding `storage_partition`
+as a SECOND nodelabel on the existing `alp_ulog_partition` node (not a
+rename): the SDK's own `update_log` sw_tier binds by the
+`alp_ulog_partition` nodelabel (`src/backends/update_log/sw_tier.c`), so a
+plain rename would have kept the example linking while silently degrading
+`HW_ENFORCED` to the RAM tier. Two nodelabels on one DT node is legal and
+already has prior art in the pinned Zephyr toolchain
+(`boards/st/b_u585i_iot02a/b_u585i_iot02a-common.dtsi`'s `memc:
+aps6408l:`). Verified both AEN801 targets now link clean via a local
+worktree twister build (`west twister -p
+alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he -p
+alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp --build-only`, 0 failed / 0
+errored) and confirmed the computed MPU windows from the generated
+`devicetree_generated.h` match the non-MCUboot branch's intent: MRAM_EXEC
+`0x80000000..0x8008ffff` (RO, flash-attr), MRAM_DEVICE
+`0x80090000..0x8009ffff` (the NVS window the HP owner actually writes,
+device-attr). Also gave the example real `platform_allow` scenarios
+(`he_client.aen` / `hp_owner.aen`, `build_only: true`) so twister catches a
+regression — it was `native_sim/native/64`-only before, the only reason
+neither `pr-twister.yml` nor the AEN-scoped `pr-twister-aen.yml` (scoped to
+`examples/aen/**`) ever saw this break.
+
+A follow-up review round decoded `mpu_regions` out of the built
+`zephyr.elf` (not DTS arithmetic) and found the dual-nodelabel fix alone
+still left `0x800A0000..0x8057FFFF` (4.875 MiB, including
+`atoc_reserved_partition@0x560000`, marked `read-only` in the same
+overlay) covered by no MPU region — privileged RW+exec by ARMv8-M's
+default `PRIVDEFENA` map. Root cause: the vendor model `mpu_regions_e8.c`
+mirrors assumes `storage_partition` is the last partition in
+`mram_storage`; this example's overlay isn't (ulog/storage sits at
+`0x90000`, below the SE-fixed ATOC package). Closed generically in
+`mpu_regions_e8.c` with a conditional fifth `MRAM_RESERVED` region
+spanning MRAM_DEVICE's top to the top of `mram_storage`, RO like
+MRAM_EXEC — it compiles out (size 0) on every other board/example, which
+already tile to top-of-flash. `pr-twister-aen.yml` also gained
+`zephyr/soc-bridge/**` and `src/backends/update_log/**` in its `paths:`
+blocks (both were previously unwatched, despite being exactly the files
+that caused this bug), and `testcase.yaml` gained a third scenario
+building `alp_e1m_aen801_m55_he_firewall_probe.conf`, the profile
+`scripts/bench/aen/flash-update-log-firewall-probe.sh` actually requires
+and which stayed build-uncovered before.
+
+### Fixed — E1M-AEN801 M55-HP and M55-HE both linked to slot0 `0x80010000`, so flashing both cores silently overwrote one image (#1069, release-blocker)
+
+Both AEN801 per-core board files declared byte-identical MRAM partition
+maps over the SAME physical App MRAM (`mram_storage@80000000`,
+`slot0_partition` at offset `0x10000`), so a dual-core project's `west
+flash` (or a hand-assembled two-entry ATOC) wrote two images to one
+`mramAddress` and the second silently overwrote the first — bench-confirmed
+on `e1m-aen-evk-01`: an `m55_hp` build and an `m55_he` build both resolved
+to `mramAddress 0x80010000` in their staged ATOC. Decided layout (deferring
+OTA rather than shrinking either slot, since a swap-sized secondary slot on
+both cores would break the ~2.6 MiB NPU MRAM-model budget; every
+E8 measurement to date ran `CONFIG_SINGLE_APPLICATION_SLOT=y`, so nothing
+proven is lost):
+
+- **New disjoint slot0 windows** (`metadata/e1m_modules/E1M-AEN801.yaml`
+  `memory_map:`): `mcuboot` 64 KiB @ `0x80000000` (shared) · HE `slot0`
+  2688 KiB @ `0x80010000` (**unchanged**) · HP `slot0` 2688 KiB @
+  `0x802b0000` (**moved off** the old shared `0x80010000` window, onto
+  what used to be the OTA `slot1` window) · `reserved` 64 KiB @
+  `0x80550000` (ex-scratch, unused) · `storage` 128 KiB @ `0x80560000`.
+  64 + 2688 + 2688 + 64 + 128 = 5632 KiB, the full App MRAM. HE keeps the
+  low window because everything else canonical is HE (the runner's default
+  core, the factory MCUboot ATOC's `cpu_id M55_HE`, the canonical
+  `person_detect` slot0, the MRAM-XIP NPU example overlays); Alif's own
+  DevKit-e8 dual-core example orders HE low too.
+- **`scripts/gen_zephyr_board.py`'s `_aen_flash_partitions()` is now
+  role-aware**, sourced from the preset's `memory_map:` when a `<role>_slot0`
+  entry is declared; both `alp_e1m_aen801_m55_{he,hp}` board `.dts` files
+  are regenerated (byte-for-byte, `tests/scripts/test_gen_zephyr_board.py`).
+  The single-M55 SKUs (`aen401`, `aen601`) have no `memory_map:` override
+  and keep the stock symmetric two-slot swap-using-scratch layout unchanged.
+- **`zephyr/sysbuild/aen/sysbuild.conf`** switches from
+  `SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH` to `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP`
+  (no secondary/scratch slot), matching what was actually silicon-proven.
+- **`scripts/west_commands/runners/alif_flash.py`** no longer hard-codes
+  one `mramAddress` for both cores: it derives the ATOC `mramAddress` from
+  which disjoint window the build's own reset vector falls in, cross-checked
+  against `--device` (the same defence-in-depth the ITCM branch already
+  applied) — a build whose vector lands in the sibling core's window is
+  now a hard `RuntimeError`, not a silent burn.
+- **New shared guard, `scripts/aen_atoc.py`**, used by both
+  `alif_flash.py` and `scripts/bench/aen/flash-run-dualcore.sh`: rejects,
+  before `app-gen-toc` runs, an ATOC `mramAddress` entry outside its
+  `cpu_id`'s declared slot0 window, two entries at the same `mramAddress`,
+  or an entry past System MRAM (`0x80580000`). `loadAddress` (ITCM) entries
+  — what every current AEN dual-core *example* actually stages — are left
+  alone; they were already disjoint by construction.
+  `scripts/bench/aen/flash-jlink-mramxip.sh` (Flow D, HE-only slot0-XIP)
+  now calls the guard too, and its reset-vector sanity check gives an
+  explicit diagnostic for an HP-linked binary instead of a generic
+  "drop the itcm overlay" message.
+- **`examples/multicore/mproc-mailbox` / `examples/multicore/rpmsg-aen`
+  `board.yaml`** IPC carve-out comments updated. Both stay
+  `status: blocked` on E1M-AEN801: the five fine-grained MRAM regions
+  (`mcuboot`/`he_slot0`/`hp_slot0`/`reserved`/`storage`) are flash-class,
+  not RAM, so `metadata/schemas/som-preset-v1.schema.json` gains a
+  `memory_region.carveout` field and all five are marked
+  `carveout: false`, keeping `scripts/alp_orchestrate/carveout.py`
+  `resolve_carve_outs()` from ever placing a shared-memory ring inside
+  MRAM even though those regions now publish a real `base` (needed only
+  for `_aen_flash_partitions()`'s DTS partition table). `mproc-mailbox`'s
+  `raw_shmem` entry and `rpmsg-aen`'s `a32_cluster`-endpointed entry both
+  block on the remaining candidate, `mram_main`, whose `base: TBD` is
+  deliberate (see its comment in `E1M-AEN801.yaml`) so a coarse
+  whole-MRAM carve-out can't silently land inside a real
+  mcuboot/slot0/reserved/storage region either.
+  `tests/fixtures/emit-snapshots/{mproc-mailbox,rpmsg-aen}.*.snap`
+  regenerated to match.
+
+**Known limits, not closed by this fix:** a sequential single-core
+`west flash` writes a whole fresh TOC each run, so the previous core's
+entry is invisible to the assembly-time guard by the time the second
+`west flash` runs — catching that needs a pre-burn TOC read-back over the
+SE-UART, out of scope here. The J-Link customer path (`loadbin` straight
+to slot0) has no ATOC assembly step at all; for that path the disjoint DTS
+windows themselves are the guard, since the link address moves per core.
+
+**BENCH-GATED: this fix has NOT been run on real E8 silicon and must not
+merge without that run.**
+
+### Fixed — `alp_handle_begin_close()` busy-spin could deadlock under priority scheduling (#1114)
+
+`src/common/alp_slot_claim.h`'s `alp_handle_begin_close()` drained
+in-flight ops with a bare busy-spin, defended on op *duration* ("every op
+it drains is short, so it finishes in a handful of instructions"). That
+defence never considered *priority*: on Zephyr's single-core preemptive-
+priority scheduler, a higher-priority closing thread spinning in a tight
+loop never yields the core back to a lower-priority thread, however few
+instructions that thread needs to reach `alp_handle_op_leave()` — the
+spin runs forever. Reachable from ordinary public API `close()` calls
+across 20+ dispatchers (`adc`, `gpio`, `i2c`, `spi`, `security`,
+`update_log`, and more). `alp_handle_begin_close()` is now a thin
+wrapper over the same sleep-poll drain `alp_handle_begin_close_blocking()`
+already used for genuinely-blocking ops (`src/common/alp_slot_claim.c`):
+a real sleep removes the closing thread from the ready queue, letting
+the scheduler run a strictly lower-priority op thread — something a spin
+(or a same-priority-only `k_yield()`) cannot do. Short ops still close
+fast in practice (the drain's first check usually already sees
+`active_ops` back at 0). `tests/yocto/slot_claim_race.c`'s existing #629
+mechanism-level races (close-under-active-op, double-close) already
+exercise the new implementation and stay green; the ISR/non-preemptive
+paths are unaffected since no `close()` in this codebase is ever invoked
+from interrupt context.
+
+**Round 2 (dev review):** the fix above shipped a NEW unbounded hang.
+`ensure_psa()` in `src/backends/security/zephyr_drv.c` — the one-time
+`psa_crypto_init()` election #1115 below also describes — waited with
+`while (!g_psa_inited) k_sleep(...)`, but the elected initialiser's
+FAILURE path only releases its claim and returns the error to itself;
+it never sets `g_psa_inited`. Every thread that lost the race then hung
+in that loop forever, worse than the pre-#1114 behaviour (which simply
+returned the error to each caller). Fixed by looping the whole
+elect-or-wait attempt instead of waiting on a flag the failure path
+never sets: once the failed initialiser releases its claim, a waiter
+re-wins `alp_slot_try_claim()` and retries `psa_crypto_init()` itself.
+Added `tests/yocto/elect_once_init_race.c`, a mechanism-level regression
+mirroring the algorithm shape (the real function is Zephyr/mbedtls-PSA
+locked and can't run host-side); mutation-proved by reverting to the
+wait-on-flag-only shape (the watchdog-bounded test then fails cleanly
+instead of hanging the run) and restoring (green).
+
+Also, `alp_handle_begin_close()` (the "short-op" name) had become a
+pure one-line alias for `alp_handle_begin_close_blocking()` once the
+busy-spin was removed, leaving two names for identical behaviour and
+~12 stale comment blocks across 9 dispatchers (plus `rpc_dispatch.c`
+and `src/update_log/engine.c`) that still described a distinction that
+no longer existed. Collapsed: every call site now calls
+`alp_handle_begin_close_blocking()` directly, the alias is gone, and
+the misleading comments were corrected.
+
+### Fixed — sidecar backend pools claimed non-atomically, aliasing concurrent handles (#1115)
+
+`src/backends/security/zephyr_drv.c`, `src/backends/security/
+se_cryptocell.c`, `src/backends/audio/zephyr_drv.c`, and `src/backends/
+dsp/sw_fallback.c` each scanned their static backend-object pool with a
+plain read-then-write `in_use` check, called from `ops->open()` — after
+only the *frontend* dispatcher slot was claimed atomically — so two
+threads opening concurrently could alias one backend object. In the
+security backends that's crypto cross-talk (a shared `psa_hash_operation_t`
+/ AES-GCM key); the DSP fallback's `acquire_be_slot()` was worse: it
+returned a pointer without setting `in_use` at all, leaving the entire
+`sw_open()` body (a full `memset` + per-stage validate/copy) as a TOCTOU
+window. Every pool now claims through the existing `alp_slot_try_claim()`
+(`src/common/alp_slot_claim.h`); the DSP fallback's claim moved to the
+point of acquisition instead of the end of `open()`. `zephyr_drv.c`'s
+`g_psa_inited` one-time-init flag had the same check-then-set race (two
+threads racing the first `alp_hash_open()`/`alp_aead_open()`/
+`alp_random_bytes()` call could both call `psa_crypto_init()`
+concurrently); it now elects exactly one initialiser via the same atomic
+claim, with every other caller sleep-waiting (not spinning, per #1114
+above) for it to publish.
+
+**Round 2 (dev review):** the round-1 fix covered exactly four files by
+name; the same unclaimed-acquire shape was found by grep in two more
+places, including one identical-in-kind to the DSP fallback's
+whole-open()-body TOCTOU window:
+`src/zephyr/peripheral_adc.c`'s `alp_adc_filter_pool_acquire()` /
+`alp_adc_spectrum_pool_acquire()` returned a pointer with `in_use` set
+only at the very end of `alp_adc_filter_open()` /
+`alp_adc_spectrum_open()`. Plus a plain check-then-set sweep across
+every other backend pool named in the follow-up review:
+`src/backends/adc/{alif_e7,alif_e8,gd32_bridge,zephyr_drv}.c`,
+`src/backends/camera/{alif_isp_pico,v2n_n44_isp,zephyr_video}.c`,
+`src/backends/can/zephyr_drv.c`, `src/backends/dac/gd32_bridge.c`,
+`src/backends/gpio/cc3501e_proxy.c`, `src/backends/i2s/zephyr_drv.c`,
+`src/backends/jpeg/alif_hantro.c`, `src/backends/mqtt/yocto_drv.c`,
+`src/backends/pwm/gd32_bridge.c`, `src/yocto/{peripheral_i2c,
+peripheral_spi,peripheral_uart,inference_yocto}.c` — all now claim
+through `alp_slot_try_claim()`, with `in_use` moved to the last struct
+member where it wasn't already (so a partial `memset`/reset can zero
+every other field without ever transiently un-claiming the slot).
+`src/yocto/peripheral_gpio.c` was reviewed and left unchanged: its pool
+is already fully serialised by a real mutex (`g_irq.mu`), not a plain
+check-then-set — converting it to the atomic-flag primitive would have
+been no-op busywork on top of an already-correct design.
+
+Also closed the "no regression test at all" gap: every `in_use` read
+across the three round-1 files (`zephyr_drv.c`, `se_cryptocell.c`,
+`dsp/sw_fallback.c`) now goes through `__atomic_load_n(__ATOMIC_ACQUIRE)`
+instead of a plain load, so no access to the flag mixes atomic and
+non-atomic operations on the same object.
+
+### Fixed — SHA-256 word assembly invoked signed left-shift UB (#1117)
+
+`src/update_log/sha256.c`'s `sha256_transform()` built each 32-bit
+message word as `(data[j] << 24) | ...` where `data[j]` is `BYTE`
+(`unsigned char`); integer promotion made every shift operand an `int`,
+and left-shifting a promoted byte ≥ 0x80 by 24 sets the sign bit of that
+`int` — undefined behaviour, routinely triggered by ordinary binary
+firmware payloads hashed by `ulog_sha256()` (`src/update_log/engine.c`).
+Each byte is now cast to `uint32_t` before shifting.
+
+**Round 2 (dev review):** the round-1 fix covered `sha256.c` only;
+`src/backends/gpu2d/sw_fallback.c`'s `_blend_px()` has the identical
+shape in its `ADDITIVE`/`MULTIPLY` blend arms (`SRC_OVER` was already
+correct) — `_u8()` returns `uint8_t`, which integer-promotes to
+`(signed) int`, so `_u8(x) << 24` is signed-overflow UB whenever the
+clamped byte is >= 0x80 (an opaque alpha channel, the common case).
+Every `_u8()` result is now cast to `uint32_t` before the shift. Added
+an opaque-alpha `ADDITIVE`/`MULTIPLY` case to
+`tests/yocto/gpu2d_dispatcher.c` plus a new `alp_test_gpu2d_ubsan` CTest
+entry that runs the same binary under `-fsanitize=undefined` (mirroring
+the RPC suite's `run_sanitized_rpc_tests.sh`) — a plain build does not
+discriminate pre-/post-fix here, since every mainstream two's-complement
+compiler already emits the "obviously correct" bit pattern
+un-instrumented; only UBSan catches the shift itself.
+
+### Fixed — repeated `alp_ble_open()` violated the documented singleton contract (#1118)
+
+`include/alp/ble.h` documents `alp_ble_open()` as returning the same
+pointer on every call (BLE is a system singleton) and `alp_ble_close()`
+as tearing the controller down only on the last matching close.
+`src/ble_dispatch.c`'s `_alloc_radio()` was a plain pool allocator with
+no notion of "already open"; with the default pool size of 1, a second
+`alp_ble_open()` found the one slot claimed and surfaced
+`ALP_ERR_NOMEM` instead of the same pointer — the CC3501E backend's own
+`refcount++`/`--` (`src/backends/ble/cc3501e.c`) was dead code, only
+ever reached on the single real `ops->open()`/`ops->close()` call.
+`alp_ble_open()` now first tries to join an already-open radio via an
+atomic increment-if-nonzero on a new `struct alp_ble::refcount`, falling
+back to `_alloc_radio()` only when no joinable radio exists;
+`alp_ble_close()` decrement-and-checks the same counter and only tears
+the controller down on the reference that observes the count reach 0.
+Deliberately not routed through the lifecycle-gated `alp_handle_op_enter`/
+`begin_close` machinery, which would let a joiner "resurrect" a handle a
+closer has already committed to tearing down — see the "Issue #1118"
+header comment in `src/ble_dispatch.c` for why increment-if-nonzero /
+decrement-and-check-last is race-free where that would not be.
+
+**Round 2 (dev review):** the round-1 fix still broke under a genuinely
+CONCURRENT `alp_ble_open()`. `_alloc_radio()` sets `in_use` before
+`ops->open()` runs, and `refcount` is not published until `ops->open()`
+succeeds — a second thread's `alp_ble_open()` landing in that window saw
+`in_use == true` / `refcount == 0`, declined to join (refcount says
+nothing to join yet), found the size-1 pool's only slot already
+claimed, and returned `NULL`/`ALP_ERR_NOMEM` — the original #1118
+symptom, reintroduced by the join-on-open fix itself. `alp_ble_open()`
+now retries the join scan with a real sleep (`alp_slot_sleep_tick()`,
+newly exposed from `src/common/alp_slot_claim.c`) between attempts
+instead of falling straight through to allocate-and-fail, until every
+`in_use && refcount == 0` slot resolves one way or the other (a
+publish, or a release from a failed open/an in-progress close).
+Separately, `alp_ble_close()`'s unconditional `__atomic_fetch_sub()` on
+`refcount` underflowed to `~0u` on a double/stray close — against
+`<alp/ble.h>`'s documented "second close is a safe no-op" contract, and
+a corrupted large-nonzero refcount is exactly what could let a
+concurrent `alp_ble_open()` wrongly "join" a handle mid-teardown.
+Replaced with a decrement-if-nonzero CAS (`_radio_try_leave()`) mirroring
+the existing `_radio_try_join()`. Added a genuinely concurrent-open
+regression to `tests/yocto/ble_dispatch_self_close.c` (the round-1 test
+only ever hand-built the first handle and called `alp_ble_open()`
+single-threaded) plus a stray-third-close underflow check; both
+mutation-proved against the round-1 shapes (fail) and the fix (pass).
 
 ### Added — the RZ/V2N on-die DRP-AI3 NPU backend, opt-in and BENCH-UNVERIFIED (#1145)
 
@@ -142,20 +10693,14 @@ with real build-time deps. Every corrected site now names **which** of the two
 enable paths — the `kconfig.py` auto-emit or the recipe PACKAGECONFIG — it
 means.
 
-Honest in the other direction as well: **DRP-AI has never run on silicon.**
-A `drpai`-enabled `alp-image-edge` bake HAS completed on this host twice —
-see the `mera2-drpai-tvm` packaging entry below for the first, via the
-manual `PACKAGECONFIG:append:pn-alp-sdk = " drpai"` override in
-`local.conf`, before the machine-conf `ALP_ENABLE_DRPAI` opt-in this branch
-introduces existed. It is now bake-verified in its own right: with that
-manual override commented out so `ALP_ENABLE_DRPAI = "1"` was the only
-source of the enable, a second bake completed (12118 tasks attempted,
-11223 already satisfied and not rerun, all succeeded), producing
-`alp-image-edge-e1m-v2m101-a55.rootfs-20260805211027.wic.gz` (716220145
-bytes) with the DRP-AI payload in the rootfs manifest and `libalp_sdk.so`
-linked against the DRP-AI wrapper library (see `docs/bring-up-drpai-v2n.md`
-§4 for the manifest rows and the `readelf -d` output). Everything above is
-code-complete and now bake-verified; on-silicon execution remains
+Honest in the other direction as well: **DRP-AI has never run on silicon,
+and no `drpai`-enabled `alp-image-edge` bake has completed on any host
+either.** See the `mera2-drpai-tvm` packaging entry below for exactly what
+IS established (`do_compile` succeeds cross-compiling
+`apps/MeraDrpRuntimeWrapper.cpp` on an x86_64 host up to the final aarch64
+link) and what is UNTESTED (the final link against the real aarch64 RUHMI
+payload, packaging QA, and symbol resolution). Everything above is
+code-complete and BENCH-UNVERIFIED; on-silicon execution remains
 unverified.
 
 ### Added — `mera2-drpai-tvm` closes the `PACKAGECONFIG[drpai]` packaging gap (#1145)
@@ -191,8 +10736,8 @@ keeps a bare `bitbake world` from tripping the fatal by default.
 
 **First cut of this recipe staged only three of the eight libraries the
 runtime actually needs, and shipped even those into the wrong package —
-a real `bitbake` run with `drpai` enabled hit both bugs as `do_package_qa`
-failures, not just static inspection.** The two-line takeaway this
+both would surface as `do_package_qa` failures on an enabled bake, not
+just on static inspection.** The two-line takeaway this
 CHANGELOG entry previously carried (three libraries, gap closed) was
 wrong on both counts:
 
@@ -231,8 +10776,8 @@ wrong on both counts:
   default `PACKAGES` order lists `${PN}-dev` ahead of `${PN}`, and
   `${PN}-dev`'s own built-in `FILES` default already globs
   `${libdir}/*.so` — so every unversioned `.so` this recipe staged was
-  claimed by `-dev` before `FILES:${PN}` was ever consulted. That is
-  exactly the `do_package_qa` error a real bake hit: `-dev package
+  claimed by `-dev` before `FILES:${PN}` was ever consulted. That would
+  surface as the `do_package_qa` error `-dev package
   mera2-drpai-tvm-dev contains non-symlink .so '/usr/lib/libmera2_runtime.so'`,
   followed by `file-rdeps` failures on that same misplaced package. The
   fix redefines (does not append to) `FILES:${PN}-dev = "${includedir}"`
@@ -250,13 +10795,18 @@ both corrected to describe this real, eight-library-plus-three-RDEPENDS
 closure — both previously said "three libraries, gap closed," which
 overstated it the same way this entry did.
 
-**Packaging is now bake-confirmed, not just fixed-on-paper**: a
-`drpai`-enabled `alp-image-edge` bake has completed on this host (12118
-tasks, all succeeded), and `libalp_sdk.so`'s `DT_NEEDED` on
-`libmera_drpai_wrapper.so` resolves clean — see
-`mera2-drpai-tvm_2.7.0.bb` for the symbol-resolution figures — the full
-MERA2 runtime closure (ten libraries) stages correctly. **Still
-BENCH-UNVERIFIED**: on-silicon inference has never
+**Packaging is fixed on paper; no bake has confirmed it.** No
+`drpai`-enabled `alp-image-edge` bake has completed on any host yet — see
+`mera2-drpai-tvm_2.7.0.bb` for exactly what IS established (`do_compile`
+succeeds cross-compiling `apps/MeraDrpRuntimeWrapper.cpp` on an x86_64
+host up to the final aarch64 link) and what is UNTESTED (the final link
+against the real aarch64 RUHMI payload, packaging QA, and whether
+`libalp_sdk.so`'s `DT_NEEDED` on `libmera_drpai_wrapper.so` actually
+resolves). The MERA2/TVM closure this recipe packages is nine libraries,
+not ten (eight staged verbatim, one — `libmera_drpai_wrapper.so` —
+compiled from RUHMI's own glue source; `libtvm_runtime.so` is a tenth
+input but comes from `meta-rz-drpai`'s `lib-tvm`, not this recipe).
+**BENCH-UNVERIFIED**: on-silicon inference has never
 run — the image has not booted on a board — and the compiled
 YOLOX-S/VOC model was quantised against 8 random frames, not RUHMI's
 real calibration set (its 200 images ship as 129-byte Git LFS pointer
@@ -287,9 +10837,10 @@ branch (this example is not on `main` yet); flip `branch=dev` to
 ### Fixed — `mera2-drpai-tvm` staged a header with no library behind it; `libalp_sdk.so` now fails its OWN link instead of a downstream consumer's (#1145)
 
 **Third correction to this closure, and this one was not caught by
-`do_package_qa` at all — it took a downstream consumer's own link.** A real
-bake with `PACKAGECONFIG[drpai]` enabled produced a `libalp_sdk.so` that
-linked cleanly and passed packaging QA, but a separate recipe
+`do_package_qa` at all — it surfaced via the direct plain-CMake path
+(`-DALP_SDK_USE_DRPAI_V2N=ON`, which predates this recipe), not a Yocto
+bake.** A `libalp_sdk.so` built that way linked "successfully" (a shared
+library permits undefined symbols by default), but a separate consumer
 (`alp-perception`) linking against it hit:
 
 ```
@@ -386,39 +10937,6 @@ this recipe, with or without the new `do_compile` step, has happened at
 all. **This entry is unverified until the next `drpai`-enabled bake**;
 treat it as proven only at the "source compiles cleanly against the real
 vendor headers" level, nothing further.
-
-### Fixed — U-Boot loaded a devicetree filename no Alp image builds, on both boot media (#1175)
-
-The E1M-X EVK is strapped for xSPI boot with carrier Ethernet dead (errata
-E1), so a microSD card is the only way an image reaches the board — and a
-self-built image did not boot from it. The vendor `rzv2n-dev` environment
-hardcodes `boot/r9a09g056n44-dev.dtb` in **both** `sd2load` and `emmcload`,
-while every E1M MACHINE emits its own board dtb via `KERNEL_DEVICETREE`
-(`renesas/e1m-v2n101-x-evk.dtb`, `renesas/e1m-v2m101-x-evk.dtb`). eMMC — the
-`ALP_BOOT_DEVICE` default in all four machine confs — was broken in exactly
-the same way, so both branches are fixed, not just SD.
-
-`CONFIG_BOOTCOMMAND` now reloads the correct per-MACHINE dtb from whichever
-medium `bootcmd_check` selected, after the leading `env default -a` wipe. The
-reload is **guarded**: hush does not abort a `;`-separated list when a builtin
-fails (`common/cli_hush.c` `run_list_real` early-exits only on `rcode < -1`),
-so an unguarded miss would have fallen through to `booti` and, on a card still
-carrying a vendor `r9a09g056n44-dev.dtb`, silently booted the **vendor EVK
-devicetree on Alp hardware**. A miss now prints an error and does not boot.
-
-The microSD root device also moves from the vendor's `/dev/mmcblk2p2` to
-`/dev/mmcblk1p2` — the Alp board DT enables exactly two MMC hosts and states
-the carrier card is `mmcblk1p2` (`e1m-x-evk.dtsi`). **Not bench-confirmed:**
-the microSD boot path appears never to have been exercised on real hardware,
-and neither medium has been booted with a self-built image.
-
-Both values are Kconfig strings (`CONFIG_ALP_FDT_FILE`, `CONFIG_ALP_SD_ROOT`)
-whose **defaults are the vendor values**, injected per-SKU by `.cfg` fragments
-selected on the exact `MACHINE` rather than by `:append:<override>` — a V2M
-build inherits `e1m-v2n101-a55` in its `MACHINEOVERRIDES` chain, so an
-override-tagged append would have fired for both SKUs and handed V2M the V2N
-dtb name. The stock `rzv2n-evk` MACHINE gets no fragment and keeps vendor
-behaviour.
 
 ### Fixed — `do_generate_toolchain_file`'s stamp outlives the file it writes, so an `alp-sdk` reconfigure could never recover
 
@@ -545,7 +11063,7 @@ returns `None` for both. `alp_cli/validator.py::_load_soc_caps` still
 soft-fails to `None` and still roots at its injected `soc_dir`: rebuilding it
 as `resolve_soc_path(ref, soc_dir.parent)` is exact only while every caller
 passes a directory literally named `socs`, and a test now injects one that
-is not. `new_som.py:154` keeps its `_SOC_REF_RE` guard, which is strictly
+is not. `alp_cli/new_som.py:154` keeps its `_SOC_REF_RE` guard, which is strictly
 narrower than an arity check (it also demands lowercase slugs), so
 `Alif:ensemble:e8` still prefills empty rather than `Alif`.
 
@@ -1016,8 +11534,24 @@ self-contradicted, citing p.112 correctly a few lines below the p.113 typo),
 `zephyr/kconfigs/mproc-rpc-usb.kconfig`, `docs/aen-bench-bringup.md` (two
 sites), and this file's own `[v0.15.0]` entry. Citation-only; no behavior
 change.
+### Added — three Arm curated third-party libraries (ADR 0018, Tier B)
 
-## [v0.15.0] - 2026-07-31
+`metadata/libraries/cmsis-stream.yaml`, `cmsis-cv.yaml`, and `arm-2d.yaml`
+formalise `libraries: [cmsis-stream]` / `[cmsis-cv]` / `[arm-2d]`, all
+recipe-only (Tier B, not built in alp-sdk CI). `west.yml` gains an
+`arm-software` remote and three `extras-tier1` project pins:
+`cmsisstream` (repo `CMSIS-Stream`) at tag `v3.2.0` (upstream ships its own
+`zephyr/module.yml`,
+module `cmsisstream`, umbrella symbol `CONFIG_CMSISSTREAM`), `CMSIS-CV`
+SHA-pinned at `25c6c111ee04dcfb0ae9093fd6dee4586872982c` (upstream has cut
+no tags and ships no Zephyr module glue — self-described "work in
+progress"), and `Arm-2D` at tag `v1.2.6` (mature tagged release, likewise
+no upstream Zephyr module glue; LVGL v9's `LV_USE_DRAW_ARM2D_SYNC` draw
+path exists upstream but Zephyr v4.4's `modules/lvgl/Kconfig` does not
+expose it, so only Arm-2D's standalone Helium API is usable today). None
+of the three is vendored in-tree.
+
+## [v0.15.0-rc1] - 2026-07-31
 
 ### Added — documented `alp_mproc_boot_core()`'s image-residency precondition, and a direction-specific M55-HP erratum (#1070)
 
@@ -1387,11 +11921,11 @@ neither reads as drift to a future editor.
 
 `metadata/e1m_modules/E1M-V2N101.yaml`, `…V2N102.yaml`, `…V2M101.yaml`, and
 `…V2M102.yaml` declared `helper_firmware[].firmware_path:
-firmware/gd32-bridge/build/gd32/gd32-bridge.bin` — a gitignored CMake build
+gd32-bridge-firmware:build/gd32/gd32-bridge.bin` — a gitignored CMake build
 output, absent from every fresh clone. That exact path only matches
-`.github/workflows/pr-gd32-bridge-build.yml`'s `-B firmware/gd32-bridge/build/gd32`
+`.github/workflows/pr-gd32-bridge-build.yml`'s `-B gd32-bridge-firmware:build/gd32`
 CI invocation (whose binary is a 14-day GitHub Actions artifact, not
-something the repo ships); `firmware/gd32-bridge/README.md`'s own quick-start
+something the repo ships); `gd32-bridge-firmware:README.md`'s own quick-start
 (`cmake -B build`, matching the `CMakeLists.txt` top comment) lands the same
 binary one directory up, at `build/gd32-bridge.bin` — so even a customer who
 builds the firmware by the tree's own documented instructions does not land
@@ -1491,7 +12025,7 @@ disclaiming it. The two changes are sequential, not contradictory: the docs
 were made honest first, and this makes them honest in the other direction.
 
 The exposure was real. `grep -rn 'min_sdk_version\|max_sdk_version' scripts/`
-returned nothing, and `alp_project_loader.py:35`'s `SDK_VERSION_FILE` was
+returned nothing, and `scripts/alp_project_loader.py:35`'s `SDK_VERSION_FILE` was
 referenced nowhere else in its own file, so a customer whose upgraded SDK no
 longer supported their board revision got a normal, successful emit and
 firmware built against the wrong hardware assumptions, silently — while the
@@ -2535,7 +13069,7 @@ pure-Python fallback).
   recording this three-path answer to its Arm-GNU-Toolchain open-evidence
   question. `docs/bring-up-v2n.md`'s GD32-build step also had a stale
   `cd alp-sdk/gd32-bridge` (no such directory) — corrected to
-  `firmware/gd32-bridge/`, and its "unprogrammed module" framing now
+  `gd32-bridge-firmware:`, and its "unprogrammed module" framing now
   distinguishes the bare GD32 chip shipped blank from GigaDevice from a
   customer-shipped module, which Alp Lab pre-flashes during production.
 
@@ -2893,8 +13427,8 @@ mixed I3C/I2C bus depends on the slowest device populated.
 - `aen-i3c-regcheck` re-based off the raw-DT bind-proof staged on
   `feat/aen-soc-peripheral-coverage` to drive the portable API instead:
   opens `ALP_E1M_I3C0`, reads back capabilities, and issues a probe write.
-  **SILICON-PROVEN (controller init)** on E1M-AEN801, labgrid place
-  `e1m-aen-evk-01`, Flow C ITCM RAM-run, 2026-07-25, reproduced twice:
+  **SILICON-PROVEN (controller init)** on E1M-AEN801, Flow C ITCM
+  RAM-run, 2026-07-25, reproduced twice:
 
   ```
   bus: ALP_E1M_I3C0 = 0 (alp-i3c0 alias -> lpi3c0@0x43006000)
@@ -3130,7 +13664,7 @@ CDC200), `<alp/dsp.h>` (CMSIS-DSP Helium is already the E8 path), `<alp/tmu.h>`
   no longer returns `ALP_ERR_NOSUPPORT`. New wire message
   `BLE_GATT_REGISTER` (`0x38`, `include/alp/protocol/cc3501e.h`) carries a
   variable-length service/characteristic descriptor; the firmware
-  (`firmware/cc3501e/`) bounds-validates it and dynamically
+  (`cc3501e-bridge-firmware:`) bounds-validates it and dynamically
   `ble_gatts_add_svcs`, preserving the existing demo service (`0xFFF0`/
   `0xFFF1`) across a `ble_gatts_reset()` + re-add (a naive second
   `ble_gatts_start()` use-after-frees the demo's attribute entries — caught
@@ -3443,6 +13977,19 @@ CDC200), `<alp/dsp.h>` (CMSIS-DSP Helium is already the E8 path), `<alp/tmu.h>`
   `--runner` unless `flash_args.runner` is explicitly set, and `west flash`
   falls back to the board's own `board.cmake` default. `build-plan`'s
   `debug.probe` follows suit (null unless a runner is explicitly configured).
+
+### Added — Kconfig `.config-missing-deps.json` (prj.conf LSP support)
+
+- The Zephyr `scripts/kconfig/kconfig.py` west patch now writes
+  `.config-missing-deps.json` next to `.config-trace.json`, a
+  `{"CONFIG_X": ["DEP (=n)", ...]}` map of the unmet direct dependencies that
+  blocked each ignored `prj.conf` assignment. It reuses Zephyr v4.4.0's own
+  `missing_deps()` (Burelli/Arduino SA, `zephyrproject-rtos/zephyr#95808`),
+  gated on `--handwritten-input-configs` to match
+  `check_assigned_sym_values()`'s own stderr warning (empty `{}` otherwise).
+  The alp-sdk-vscode prj.conf language server consumes it to name the blocking
+  dependency instead of a "no prompt, or unmet deps" disjunction. Upstreamable
+  — propose to Zephyr, then drop the carry.
 
 ### Added — build-plan envelope `executionPolicy`
 
@@ -3815,7 +14362,7 @@ overlay wiring the customer's path silently drops.
   *pinned* Zephyr's `share/sysbuild/**/Kconfig*`. It resolves that oracle from
   `$ZEPHYR_BASE` / the west topdir and `pytest.skip`s when neither exists. No job
   satisfied the precondition: the only two running `tests/scripts/`
-  (`cross-platform-zephyr.yml:156`, `pr-metadata-validate.yml:385`) are
+  (`.github/workflows/cross-platform-zephyr.yml:156`, `.github/workflows/pr-metadata-validate.yml:385`) are
   pure-Python checkouts with zero `west init` / `ZEPHYR_BASE`, while the jobs
   that DO carry a workspace (`pr-twister.yml`, `pr-tier-a-libraries.yml`,
   `nightly-aen-hil.yml`) never ran `tests/scripts/`. So the gate shipped, skipped
@@ -4803,7 +15350,7 @@ claims to the real hardware reality, scoped so nothing overclaims:
 - `docs/os-support-matrix.md`, `docs/bring-up-aen.md`,
   `docs/recommended-libraries.md`, and the peripheral-io example READMEs:
   current-state currency (incl. a `<alp/dac.h>` reference fix).
-- `firmware/cc3501e/README.md`: documents the **hardware SS0 chip-select**
+- `cc3501e-bridge-firmware:README.md`: documents the **hardware SS0 chip-select**
   link (was "3-wire CS-less"); no Wi-Fi/BLE concurrency overclaim.
 - `scripts/bump_version.py` + `scripts/check_version_doc_sync.py`: track the
   reworded intro-badge label so future version bumps keep it in sync.  (#257)
@@ -5039,8 +15586,8 @@ boards (FIB `v0.0.207`).
 ### Added — cc3501e-bridge: embedded CC3501E Wi-Fi/BLE firmware (v0.1 bring-up) + selectable SPI/SDIO transport
 
 The TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor on the E1M-AEN family now has
-its bridge firmware **embedded in alp-sdk** at `firmware/cc3501e/` — modeled
-on `firmware/gd32-bridge/`, not a separate repo ([ADR
+its bridge firmware **embedded in alp-sdk** at `cc3501e-bridge-firmware:` — modeled
+on `gd32-bridge-firmware:`, not a separate repo ([ADR
 0015](docs/adr/0015-cc3501e-firmware-embedded.md), which supersedes the
 earlier separate-`alplabai/cc3501e-firmware` plan).  The firmware `#include`s
 the canonical `include/alp/protocol/cc3501e.h` directly, so the host driver,
@@ -5758,7 +16305,7 @@ SCI7 register access ≈ 341 ns; `k_busy_wait(10)` ≈ 15 µs measured):
   SCI7 **permanently** (an RSPI reroute was rejected — pads committed
   elsewhere); `docs/gd32-link-sci7-next-rev.md` replaces the RSPI
   migration plan, and stale "RSPI master" wording was corrected across
-  the docs/headers.  `firmware/gd32-bridge/CMakeLists.txt` now re-runs
+  the docs/headers.  `gd32-bridge-firmware:CMakeLists.txt` now re-runs
   configure when `firmware-version.txt` changes (incremental builds
   used to bake a stale `GET_BUILD_ID`).
 
@@ -5772,7 +16319,7 @@ rate stays the DMAC path's job).
 
 ### Changed — gd32-bridge protocol v0.6 + OTA Path-A real, silicon-validated (2026-06-04)
 
-Wire MINOR bump `PROTOCOL_VERSION` 0.5.0 → 0.6.0 (`firmware/gd32-bridge/
+Wire MINOR bump `PROTOCOL_VERSION` 0.5.0 → 0.6.0 (`gd32-bridge-firmware:
 src/protocol.h`, host mirror in `<alp/chips/gd32g553.h>` in lock-step):
 `OTA_WRITE_CHUNK`'s request payload is now length-checked
 (`offset:u32 len:u8 data[len]`), closing a silicon-caught wire hole —
@@ -8400,7 +18947,7 @@ small framing helper the SDK keeps in
 ### Added (2026-05-14 -- GD32 ADC stream DMA + DSP chain_bind + RTC wake §C.23 §C.24 §C.25)
 
 Three back-to-back HAL bodies in
-`firmware/gd32-bridge/hal/bridge_hw_gd32.c` that close the
+`gd32-bridge-firmware:hal/bridge_hw_gd32.c` that close the
 remaining §1a opcodes:
 
 - **§C.23 -- `bridge_hw_adc_stream_begin/read/end`** (opcodes
@@ -8599,7 +19146,7 @@ on HiL.
 ### Added (2026-05-14 -- GD32 timer-sync HAL §C.15b)
 
 - **`bridge_hw_timer_sync` real body** in
-  `firmware/gd32-bridge/hal/bridge_hw_gd32.c`.  Replaces the
+  `gd32-bridge-firmware:hal/bridge_hw_gd32.c`.  Replaces the
   NOSUPPORT stub with a master-slave SMC configuration over the
   three GD32G5x3 advanced timers (TIMER0 / TIMER7 / TIMER19).
   Wire byte mapping: `master`/`slave` integer ids 0..2 ->
@@ -8620,7 +19167,7 @@ on HiL.
 ### Added (2026-05-14 -- GD32 PWM input-capture HAL §C.15a)
 
 - **`bridge_hw_pwm_capture_begin` / `_read` / `_end` real bodies**
-  in `firmware/gd32-bridge/hal/bridge_hw_gd32.c`.  Replaces the
+  in `gd32-bridge-firmware:hal/bridge_hw_gd32.c`.  Replaces the
   three NOSUPPORT stubs that landed with v0.5 wave-2 §2B.2 with
   a polled-drain implementation: BEGIN switches the channel from
   output mode (CHxN driving) to input-capture (CIx polled),
@@ -8955,12 +19502,12 @@ Deferred from this batch:
   `gd32_bridge_frame_fuzz.c`, `iot_mqtt_fuzz.c`), plus the
   `tests/bench/README.md` cross-ref bumped from `../../fuzz/`
   to `../fuzz/`.
-- **`gd32-bridge/` moved to `firmware/gd32-bridge/`.**  Unifies
-  the firmware trees -- `firmware/cc3501e/` (already there) and
-  `firmware/gd32-bridge/` (new home) now sit side-by-side
+- **`gd32-bridge/` moved to `gd32-bridge-firmware:`.**  Unifies
+  the firmware trees -- `cc3501e-bridge-firmware:` (already there) and
+  `gd32-bridge-firmware:` (new home) now sit side-by-side
   instead of being scattered between the top level + `firmware/`.
   Mechanical search-and-replace: 22 files updated with
-  `gd32-bridge/` -> `firmware/gd32-bridge/` (skipping
+  `gd32-bridge/` -> `gd32-bridge-firmware:` (skipping
   `CHANGELOG.md`'s historical entries).  Notable touch points:
   `.github/workflows/pr-gd32-bridge-build.yml` paths filter
   + build/source/toolchain paths (14 occurrences),
@@ -9362,8 +19909,7 @@ Deferred from this batch:
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**
   Wires a customer-facing math primitive set (sin / cos / tan / atan /
   atan2 / sqrt / log / exp / sinh / cosh / tanh / hypot) without
-  exposing the GD32 name to application code (per
-  `memory/feedback_portable_hw_offload_with_sw_fallback.md`).  Three
+  exposing the GD32 name to application code.  Three
   pieces:
   - New wire opcode `CMD_TMU_COMPUTE` (0x90) on the bridge protocol;
     bumps `PROTOCOL_VERSION_MINOR` 3 -> 4.  Request payload is 12 B
@@ -9405,8 +19951,7 @@ Deferred from this batch:
 
 - **`<alp/pwm.h>` -- portable per-channel PWM tuning surface (2026-05-14).**
   Wires the customer-facing path for the v0.3 `CMD_PWM_CONFIGURE`
-  opcode without exposing the GD32 name to application code (per
-  `memory/feedback_portable_hw_offload_with_sw_fallback.md`).
+  opcode without exposing the GD32 name to application code.
   Three additions:
   - `alp_pwm_align_t` enum mirrors the four advanced-timer counter
     shapes (edge, center-aligned-up, center-aligned-down,
@@ -9434,7 +19979,7 @@ Deferred from this batch:
   in the protocol-v0.3 commit) into MbedTLS's platform entropy
   callback, so the portable `alp_random_bytes()` transparently picks
   up true randomness on V2N without app code mentioning the GD32
-  name (per `memory/feedback_portable_hw_offload_with_sw_fallback.md`).
+  name.
   The SDK's mbedtls profile already sets `MBEDTLS_NO_PLATFORM_ENTROPY`,
   which makes mbedtls request a `mbedtls_hardware_poll()` from the
   integrator; the new implementation in `src/zephyr/security_zephyr.c`
@@ -9459,8 +20004,7 @@ Deferred from this batch:
 - **`<alp/adc.h>` -- portable streaming ADC surface + v0.3 configure knobs (2026-05-14).**
   Wires the customer-facing path for the v0.3 wire opcodes the prior
   commit shipped on the GD32 side, with no `gd32g553_*` symbols
-  visible to application code (per
-  `memory/feedback_portable_hw_offload_with_sw_fallback.md`).  Two
+  visible to application code.  Two
   additions:
   - `alp_adc_config_t` grows `oversampling_ratio` (1..256, rounded
     down to power-of-two) and `sample_cycles` (rounded down to the
@@ -9614,7 +20158,6 @@ Deferred from this batch:
   opcode plus a `STATUS_NOSUPPORT` reply envelope.
 
 - **`<alp/adc.h>` -- portable DAC surface (2026-05-14).**
-  Per the portability memo (`memory/feedback_portable_peripheral_api.md`),
   DAC sits alongside ADC in the same header.  Adds `alp_dac_t`,
   `alp_dac_open(cfg)` (`channel_id` + `initial_mv`), `alp_dac_write_mv`,
   `alp_dac_read_mv`, `alp_dac_close`.  Backend wiring lands in the
@@ -9673,9 +20216,7 @@ Deferred from this batch:
   identity IIR; DC + sinusoid + impulse FFT verification).
   Wave-2 bridge-wired counterparts (`alp_adc_filter_t` /
   `alp_adc_spectrum_t` in `<alp/adc.h>`) land in the v0.5.x (b)
-  and (c) follow-ups -- see
-  `memory/project_wave2_dsp_pipeline_design.md` for the design
-  intent and bridge wire-format split.
+  and (c) follow-ups.
 
 - **`gd32-bridge` protocol v0.5 -- reserves
   `CMD_ADC_STREAM_CONFIGURE_DSP` (opcode `0x36`) for the wave-2
@@ -10361,7 +20902,7 @@ Deferred from this batch:
   discovery tools.  §10 reserves OTA opcodes `0xF0..0xFF` for the
   planned application-bootloader path; §10 also documents the
   V2N→GD32 BOOT0 reroute the maintainer has committed to (pad
-  selection TBD per `memory/project_gd32_boot0_to_v2n_planned.md`).
+  selection TBD).
 
 - **`chips/gd32g553/` host-side bridge driver (2026-05-12).**
   Renesas-side driver that speaks the bridge protocol over either
@@ -10623,45 +21164,12 @@ Deferred from this batch:
   directory; per-chip manifests for the other V2N populated parts
   land alongside their drivers).
 
-- **Renesas Ethernet + eMMC + uSD + xSPI NOR-flash pin assignments (2026-05-11).**
-  Maintainer supplied four additional schematic excerpts.  63 new
-  rows added to `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv`:
-  - **30 Ethernet rows** — RGMII to two on-module
-    `RTL8211FDI-VD-CG` PHYs (ET0 + ET1).  Each PHY: 15 pins
-    (TX_CTL/CLK + 4× TXD, RX_CTL/CLK + 4× RXD, MDIO/MDC,
-    PHY_INTR).  22 Ω series resistors documented per data line;
-    MDIO/MDC pull-ups to VDD_1V8 via 1 kΩ 1%; layout constraints
-    (single 50 Ω ±10%, GND guard trace on TX/RX clocks; 5 mm
-    length matching on RX_CTL relative to RX_CLK) preserved in
-    the notes column.
-  - **11 eMMC rows** — `SD0CLK` / `SD0CMD` / `SD0DAT0..7` /
-    `SD0RSTN` for the on-module eMMC.  22 Ω series on each line,
-    1 MΩ pull-up to `VDD_eMMC_3V3_1V8`, ±1.27 mm length matching
-    on `eMMC_CLK`.
-  - **6 uSD-card rows** — `SD1CLK` / `SD1CMD` / `SD1DAT0..3` for
-    the on-module microSD card slot.  22 Ω series, 10 kΩ pull-ups
-    to `µSD1_1833V` (1.8 V), ESD protection via `PUSB3FR6Z` (D28).
-  - **16 xSPI rows** — `XSPI0_*` to the on-module xSPI NOR flash
-    (CK ± / CS / 8× IO / DS / ECS / INT / RSTO / RESET).  22 Ω
-    series on CK + IO0..IO3 (x4 data path), 10 kΩ pull-downs on
-    IO4..IO7 + DS, 10 kΩ pull-ups on ECS / INT / RSTO to 0V.
-    Series resistor IDs (R143..R376) preserved in notes for
-    board-engineering cross-reference.
-
-  These pads use **BGA designators** (J26, AC27, AJ18, etc.)
-  rather than port-pin names because they're dedicated-function
-  pads outside the GPIO bank.  The `renesas_pad` column carries
-  either convention depending on the pin -- header comment block
-  documents the dual-convention explicitly.  Three of the new
-  pads happen to start with `P` followed by digits (P24, P25, P29
-  on ET1) -- those are BGA pads, not port pins; the peripheral
-  column makes the distinction unambiguous.
-
-  Renesas peripheral map now totals **146 data rows** (was 83);
-  CSV regenerated.
-
-  Pad-uniqueness check after the additions: **all 146 Renesas pads
-  are unique**.  No collisions introduced by the new rows.
+- **Renesas Ethernet + eMMC + uSD + xSPI NOR-flash pin assignments documented (2026-05-11).**
+  Maintainer supplied the schematic-derived pin assignments for the two
+  on-module Ethernet PHYs, the on-module eMMC, the microSD card slot, and
+  the on-module xSPI NOR flash; 63 rows added to
+  `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv` (146 data rows
+  total, was 83; all pads unique after the additions; CSV regenerated).
 
 ### Changed
 
@@ -11729,7 +22237,7 @@ Deferred from this batch:
   `<alp/iot.h>` routed through MCUboot (Zephyr) or RAUC (Linux),
   trust-anchor pinning + min-version anti-rollback baked into the
   config.  No code yet -- v0.4 cycle implements it.
-- `firmware/cc3501e/` scaffolding -- the alp-sdk side of the
+- `cc3501e-bridge-firmware:` scaffolding -- the alp-sdk side of the
   two-repo boundary with the future `alplabai/cc3501e-firmware`:
   bootstrap README that mirrors the contract from
   `docs/cc3501e-bridge.md`, a `flash.py` stub (dry-run + SHA-256

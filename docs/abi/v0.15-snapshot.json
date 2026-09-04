@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-31",
+  "generated": "2026-08-12",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -2848,7 +2848,7 @@
           "kind": "fnptr"
         },
         "cc3501e_t": {
-          "definition": "typedef struct cc3501e { bool initialised; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; cc3501e_event_cb_t event_cb; void *event_user; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; } cc3501e_t;",
+          "definition": "typedef struct cc3501e { bool initialised; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; cc3501e_event_cb_t event_cb; void *event_user; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool request_lock; } cc3501e_t;",
           "fields": [
             "bool initialised",
             "alp_spi_t *bus",
@@ -2864,9 +2864,10 @@
             "uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]",
             "bool wifi_scan_busy",
             "bool ble_scan_busy",
-            "bool evt_busy"
+            "bool evt_busy",
+            "bool request_lock"
           ],
-          "hash": "f21bf2fc8bd4f83d",
+          "hash": "41bef4a1f9e78117",
           "kind": "struct"
         }
       },
@@ -8186,8 +8187,8 @@
       },
       "macros": {
         "ALP_DISPLAY_CONFIG_DEFAULT": {
-          "hash": "73c74079692a36e5",
-          "value": "(id) ((alp_display_config_t){ .display_id = (id) })"
+          "hash": "a02c498f6d3317c9",
+          "value": "(id) ((alp_display_config_t){ .display_id = (id), .allow_modeset = false })"
         }
       },
       "typedefs": {
@@ -8202,11 +8203,12 @@
           "kind": "struct"
         },
         "alp_display_config_t": {
-          "definition": "typedef struct { uint32_t display_id; } alp_display_config_t;",
+          "definition": "typedef struct { uint32_t display_id; bool allow_modeset; } alp_display_config_t;",
           "fields": [
-            "uint32_t display_id"
+            "uint32_t display_id",
+            "bool allow_modeset"
           ],
-          "hash": "61ccc1403c6a27f2",
+          "hash": "bc0fa13b0c678721",
           "kind": "struct"
         },
         "alp_display_t": {
@@ -10442,15 +10444,16 @@
           "kind": "enum"
         },
         "alp_inference_model_format_t": {
-          "definition": "typedef enum { ALP_INFERENCE_MODEL_TFLITE = 0, ALP_INFERENCE_MODEL_VELA = 1, ALP_INFERENCE_MODEL_DRPAI = 2, ALP_INFERENCE_MODEL_DXNN = 3, ALP_INFERENCE_MODEL_EXECUTORCH = 4 } alp_inference_model_format_t;",
+          "definition": "typedef enum { ALP_INFERENCE_MODEL_TFLITE = 0, ALP_INFERENCE_MODEL_VELA = 1, ALP_INFERENCE_MODEL_DRPAI = 2, ALP_INFERENCE_MODEL_DXNN = 3, ALP_INFERENCE_MODEL_EXECUTORCH = 4, ALP_INFERENCE_MODEL_ONNX = 5 } alp_inference_model_format_t;",
           "enumerators": [
             "ALP_INFERENCE_MODEL_TFLITE = 0",
             "ALP_INFERENCE_MODEL_VELA = 1",
             "ALP_INFERENCE_MODEL_DRPAI = 2",
             "ALP_INFERENCE_MODEL_DXNN = 3",
-            "ALP_INFERENCE_MODEL_EXECUTORCH = 4"
+            "ALP_INFERENCE_MODEL_EXECUTORCH = 4",
+            "ALP_INFERENCE_MODEL_ONNX = 5"
           ],
-          "hash": "770aa51a15e02706",
+          "hash": "c69fe4ed9cd3f11a",
           "kind": "enum"
         },
         "alp_inference_t": {
@@ -12652,8 +12655,8 @@
       },
       "macros": {
         "ALP_STORAGE_CONFIG_DEFAULT": {
-          "hash": "75268ef3c004fc9c",
-          "value": "(id) ((alp_storage_config_t){ .kind = (id), .instance_id = 0u, .freq_hz = 0u, .read_only = false })"
+          "hash": "31d9f999bb2c9004",
+          "value": "(id) ((alp_storage_config_t){ .kind = (id), .instance_id = 0u, .freq_hz = 0u, .read_only = false, .allow_unsafe_write = false })"
         }
       },
       "typedefs": {
@@ -12681,14 +12684,15 @@
           "kind": "enum"
         },
         "alp_storage_config_t": {
-          "definition": "typedef struct { alp_storage_kind_t kind; uint32_t instance_id; uint32_t freq_hz; bool read_only; } alp_storage_config_t;",
+          "definition": "typedef struct { alp_storage_kind_t kind; uint32_t instance_id; uint32_t freq_hz; bool read_only; bool allow_unsafe_write; } alp_storage_config_t;",
           "fields": [
             "alp_storage_kind_t kind",
             "uint32_t instance_id",
             "uint32_t freq_hz",
-            "bool read_only"
+            "bool read_only",
+            "bool allow_unsafe_write"
           ],
-          "hash": "680d93f98d11c484",
+          "hash": "2f5b4264a748c408",
           "kind": "struct"
         },
         "alp_storage_info_t": {

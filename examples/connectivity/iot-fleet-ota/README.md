@@ -1,7 +1,9 @@
 # iot-fleet-ota [UNTESTED]
 
-Secure OTA firmware update with rollback. The production-readiness
-proof for "how do we update 10 000 units in the field?".
+Secure OTA firmware update, verify-only on the qualified E1M-AEN801
+SKU (apply is DEFERRED, #1069 -- see [STATUS] in `board.yaml`). The
+production-readiness proof for "how do we update 10 000 units in
+the field?".
 
 Targets every E1M-X SoM family. native_sim build verified; HiL
 verification gates on a staged Mender server (separate repo).
@@ -17,7 +19,11 @@ boot:
   signing:
     algorithm: ecdsa_p256
     key_file:  keys/mcuboot_dev_ecdsa_p256.pem
-  swap_algorithm: scratch
+  # swap_algorithm: intentionally omitted -- E1M-AEN801's disjoint-slot0
+  # `memory_map:` (#1069, #1413) has no slot1/scratch partition, so the
+  # per-target default resolves to single-app boot.  Setting
+  # `swap_algorithm: scratch` (or `move`/`overwrite`) explicitly here is
+  # a build-time error on this SKU.
 
 ota:
   provider: mender
@@ -38,11 +44,12 @@ config:
 
 - `boot:` -> sysbuild MCUboot child image. `scripts/alp_orchestrate/`
   emits `SB_CONFIG_BOOTLOADER_MCUBOOT=y`,
-  `SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_ECDSA_P256=y`,
+  `SB_CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y`,
   `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="keys/mcuboot_dev_ecdsa_p256.pem"`,
-  and `SB_CONFIG_MCUBOOT_MODE_SWAP_USING_SCRATCH=y` into the
-  sysbuild overlay.
-- `ota:` -> Mender wiring. On Yocto slices the orchestrator writes
+  and -- since this SKU's disjoint-slot0 `memory_map:` has no
+  slot1/scratch partition -- `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`
+  into the sysbuild overlay.
+- `ota:` -> Mender wiring. On Yocto slices the planner writes
   `INHERIT += "mender-full"`, `MENDER_ARTIFACT_NAME`,
   `MENDER_SERVER_URL`, `MENDER_TENANT_TOKEN`,
   `MENDER_STORAGE_DEVICE_BASE`, `MENDER_BOOT_PART_SIZE_MB`,
@@ -72,11 +79,16 @@ Four pieces fit together:
   (driven by `boot.signing.key_file:`). Same key gates both
   secure boot and OTA acceptance -- one trust root, fewer
   surfaces.
-- **MCUboot slot-A/B** -- two-slot firmware layout with
-  swap-using-scratch. The new image lands in the inactive slot;
-  MCUboot re-verifies its signature at boot, swaps, hands off.
-  Mid-swap power loss recovers atomically via the scratch
-  sector.
+- **MCUboot boot chain** -- on this SKU (E1M-AEN801), MCUboot boots
+  single-app (`SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`, #1069/#1413):
+  both M55 cores share the same physical App MRAM, so there is no
+  inactive slot to swap the new image into. MCUboot re-verifies the
+  slot0 image's signature on every boot and halts (rather than
+  rolling back) if it fails. The classic two-slot swap-using-scratch
+  model -- new image lands in the inactive slot, MCUboot swaps and
+  hands off, mid-swap power loss recovers atomically via the scratch
+  sector -- needs a two-slot AEN target, which none of the qualified
+  boards are today.
 - **Mender protocol** -- HTTPS-poll deployment fabric. Driven
   by the `ota:` block. Poll interval defaults to 30 min for
   battery-friendly nodes; this example sets it explicitly to
@@ -84,14 +96,19 @@ Four pieces fit together:
 
 ## Rollback semantics
 
-The new image must call `boot_set_confirmed()` within its
-health-check window (typically 30 s after boot, after a
-successful Mender check-in). If it doesn't -- because it
-crashes, hangs, or can't reach the server -- MCUboot's "test
-pending" flag triggers an automatic rollback to the previous
-slot on the next reboot. A bricking OTA undoes itself: the
-watchdog-friendly safety net the fleet operator needs to sleep
-at night.
+On a genuine two-slot AEN target, the new image would call
+`boot_set_confirmed()` within its health-check window (typically 30 s
+after boot, after a successful Mender check-in); if it doesn't --
+because it crashes, hangs, or can't reach the server -- MCUboot's
+"test pending" flag would trigger an automatic rollback to the
+previous slot on the next reboot.
+
+**On this SKU (E1M-AEN801) that path does not exist.** Single-app
+boot has no inactive slot to roll back to: a rejected or failed image
+halts rather than rolling back (see the [STATUS] note in `board.yaml`
+and `docs/secure-boot.md`). This example demonstrates the Mender +
+signing wiring; the swap-with-revert rollback path needs a two-slot
+AEN target, which none of the qualified boards are today.
 
 ## Linux variants
 

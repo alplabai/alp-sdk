@@ -1,5 +1,5 @@
 {
-  "_comment": "Single source of truth for the FACTS scripts/bootstrap.sh and scripts/bootstrap.ps1 both read to assemble a Zephyr workspace (issue #917); tan (Rust, cross-platform) has read the same facts since tan-cli PR #55 (tan-core's parse_bootstrap_manifest / BootstrapFacts) -- not merely an INTENDED future consumer. Facts only -- control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor; do not grow this file into a step-execution DSL. Checkout/workspace-anchored paths use the ${SDK_ROOT} / ${WORKSPACE_DIR} tokens, the same convention metadata/schemas/build-plan-v1.schema.json's planPathMode: tokened uses -- a consumer substitutes its own resolved paths before use. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, its schema, both bootstrap scripts, and everything else that copies a fact from here in lockstep -- see that script's own module docstring for the full, authoritative list of what it checks; do not restate that list here, it will only drift again.",
+  "_comment": "Single source of truth for the FACTS scripts/bootstrap.sh, scripts/bootstrap.ps1, and Python Tan read to assemble a Zephyr workspace (issue #917). Facts only -- control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor; do not grow this file into a step-execution DSL. Checkout/workspace-anchored paths use the ${SDK_ROOT} / ${WORKSPACE_DIR} tokens, the same convention metadata/schemas/build-plan-v1.schema.json's planPathMode: tokened uses -- a consumer substitutes its own resolved paths before use. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, its schema, both bootstrap scripts, and everything else that copies a fact from here in lockstep -- see that script's own module docstring for the full, authoritative list of what it checks; do not restate that list here, it will only drift again.",
   "schemaVersion": 1,
   "zephyr": {
     "version": "v4.4.1",
@@ -18,12 +18,21 @@
     "pythonMinVersion": "3.10",
     "install": {
       "linux": {
-        "git": "sudo apt-get install -y git",
-        "cmake": "sudo apt-get install -y cmake",
-        "python3": "sudo apt-get install -y python3",
-        "ninja": "sudo apt-get install -y ninja-build",
-        "xz": "sudo apt-get install -y xz-utils",
-        "wget": "sudo apt-get install -y wget"
+        "apt": {
+          "git": "sudo apt-get install -y git",
+          "cmake": "sudo apt-get install -y cmake",
+          "python3": "sudo apt-get install -y python3",
+          "ninja": "sudo apt-get install -y ninja-build",
+          "xz": "sudo apt-get install -y xz-utils",
+          "wget": "sudo apt-get install -y wget"
+        },
+        "dnf": {
+          "git": "sudo dnf install -y git",
+          "cmake": "sudo dnf install -y cmake",
+          "python3": "sudo dnf install -y python3",
+          "xz": "sudo dnf install -y xz",
+          "wget": "sudo dnf install -y wget"
+        }
       },
       "macos": {
         "git": "brew install git",
@@ -40,6 +49,56 @@
         "ninja": "winget install -e --id Ninja-build.Ninja",
         "7zip": "winget install -e --id 7zip.7zip"
       }
+    }
+  },
+  "artifactProvenance": {
+    "git": {
+      "tier": "A",
+      "source": "https://git-scm.com/",
+      "sizeBytes": null,
+      "licence": "GPL-2.0-only"
+    },
+    "cmake": {
+      "tier": "A",
+      "source": "https://cmake.org/",
+      "sizeBytes": null,
+      "licence": "BSD-3-Clause"
+    },
+    "ninja": {
+      "tier": "A",
+      "source": "https://ninja-build.org/",
+      "sizeBytes": null,
+      "licence": "Apache-2.0"
+    },
+    "python3": {
+      "tier": "A",
+      "source": "https://www.python.org/",
+      "sizeBytes": null,
+      "licence": "PSF-2.0"
+    },
+    "python": {
+      "tier": "A",
+      "source": "https://www.python.org/",
+      "sizeBytes": null,
+      "licence": "PSF-2.0"
+    },
+    "xz": {
+      "tier": "A",
+      "source": "https://tukaani.org/xz/",
+      "sizeBytes": null,
+      "licence": null
+    },
+    "wget": {
+      "tier": "A",
+      "source": "https://www.gnu.org/software/wget/",
+      "sizeBytes": null,
+      "licence": "GPL-3.0-or-later"
+    },
+    "7zip": {
+      "tier": "A",
+      "source": "https://www.7-zip.org/",
+      "sizeBytes": null,
+      "licence": null
     }
   },
   "west": {
@@ -92,7 +151,7 @@
   "manualInstallHints": {
     "posix": {
       "note": [
-        "The Zephyr SDK (`west sdk install`) is a separate, manual, one-time install on Linux/macOS -- not auto-installed by bootstrap.sh. It is the one every Zephyr-on-M customer on Linux or Apple Silicon macOS needs (Intel Mac excepted -- see below): it provides the `arm-zephyr-eabi` cross toolchain the real-silicon build (`west build` / `west flash`) actually uses. Run it from your west workspace's top-level directory -- the alp-sdk checkout's parent directory -- after this script completes, e.g. `west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools --install-dir \"$PWD/zephyr-sdk\"`; see docs/getting-started.md for the full one-liner and the `tan sdk switch` step that pins it per project. On an Intel Mac this command has no target to install: the pinned SDK ships `macos-aarch64` only (no `macos-x86_64`), so real-silicon Zephyr builds need a Linux host instead -- `native_sim` and this bootstrap step are unaffected.",
+        "The Zephyr SDK (`west sdk install`) is a separate, manual, one-time install on Linux/macOS -- not auto-installed by bootstrap.sh. It is the one every Zephyr-on-M customer on Linux or Apple Silicon macOS needs (Intel Mac excepted -- see below): it provides the `arm-zephyr-eabi` cross toolchain the real-silicon build (`west build` / `west flash`) actually uses. Run it from your west workspace's top-level directory -- the alp-sdk checkout's parent directory -- after this script completes, e.g. `west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools --install-dir \"$PWD/zephyr-sdk\"`; see docs/getting-started.md for the full one-liner and select the checkout with `tan build --sdk-root <path>` or `.alp/sdk-path`. On an Intel Mac this command has no target to install: the pinned SDK ships `macos-aarch64` only (no `macos-x86_64`), so real-silicon Zephyr builds need a Linux host instead -- `native_sim` and this bootstrap step are unaffected.",
         "The Arm GNU Toolchain (`arm-none-eabi-gcc`) is a SEPARATE manual install, needed by three opt-in paths -- rebuilding the GD32 bridge firmware (custom-carrier bring-up or bridge recovery), building the CC3501E bridge firmware's silicon-free stub target (its production image builds with TI ticlang, not this toolchain), or hand-writing bare-metal firmware for a real M-class core -- most customers never touch any of them, since the GD32G553 ships pre-flashed by Alp Lab (rebuilding it is optional and fully open, see docs/gd32-bridge.md). See docs/cross-platform-setup.md section 2.3 (Linux) / 3.4 (macOS) for the apt/brew/curl install.",
         "`west sdk install` may print \"could not find a 'file' executable, falling back to guess mime type by file extension\" -- patool's extension-based fallback works fine without it; this is WARN-only, not a bootstrap.sh prerequisite. Install `file` (`apt-get install -y file` / it ships by default on macOS) only to silence the message."
       ]

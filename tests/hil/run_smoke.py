@@ -18,24 +18,31 @@ Modes:
                         no hardware access.
   --dry-run <path>      Print the build / flash / capture commands
                         each spec would run; no hardware access.
-  (default) <path>      Full run: build, flash, capture, assert.
+  (default) <path>      Full run: build, flash, capture, assert.  Needs
+                        a resolved serial port -- pass --serial-port or
+                        set ALP_HIL_SERIAL_PORT (no hardcoded default;
+                        see docs/ci/HW-IN-LOOP.md).
 
 Exit codes:
   0  every spec passed
   1  one or more specs failed (assertion miss, build error, …)
   2  invocation error (missing path, malformed spec, …)
 
-See tests/hil/README.md for the spec format and the runner-host
-contract; docs/ci/HW-IN-LOOP.md for runner-side setup.
+CI does not drive this runner -- it's invoked by hand on the bench,
+under a held labgrid reservation.  See tests/hil/README.md for the
+spec format; docs/ci/HW-IN-LOOP.md for the bench-run contract
+(hardware, serial-port resolution, the capture helper).
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses as dc
+import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -163,7 +170,16 @@ def parse_spec(spec_path: Path, runner_path: Path | None = None) -> SmokeSpec:
         raise SpecError(
             f"{spec_path}: no `board:` declared and no _runner.yaml default"
         )
-    serial_port = data.get("serial_port") or runner.get("serial_port", "/dev/ttyACM0")
+    # No hardcoded default: the bench fronts UART devices with labgrid,
+    # which allocates a ser2net port on reservation ACQUIRE -- it differs
+    # per session, and a raw /dev/ttyUSB*/ttyACM* path isn't durable
+    # either (worse, /dev/ttyACM0 on this bench is the DPS-150 power
+    # supply, not a console -- see docs/ci/HW-IN-LOOP.md).  An empty
+    # string here just means "not resolved yet"; --validate/--dry-run
+    # don't need it, and main() resolves it from --serial-port /
+    # ALP_HIL_SERIAL_PORT before a real run, erroring clearly if it's
+    # still unresolved at that point (see run_spec's capture guard).
+    serial_port = data.get("serial_port") or runner.get("serial_port") or ""
     flash_method = data.get("flash_method") or runner.get("flash_method", "westflash")
 
     example = Path(data["example"])
@@ -298,16 +314,29 @@ def flash_command(spec: SmokeSpec) -> list[str]:
     )
 
 
+def _capture_output_path(spec: SmokeSpec) -> Path:
+    """A fresh, per-process, per-spec capture path -- NEVER a single
+    fixed log file.  A previous invocation's log (this process, an
+    earlier one, or a different spec in the same run) can never share
+    this path, so a capture that silently fails to write can never be
+    asserted against stale content and read as a false PASS (the bug
+    a single shared /tmp/hil-output.log had)."""
+    return Path(tempfile.gettempdir()) / f"alp-hil-{os.getpid()}-{spec.name}.log"
+
+
 def capture_command(spec: SmokeSpec) -> list[str]:
-    """Invoke the runner-host helper that captures serial output.
-    The script (documented in docs/ci/HW-IN-LOOP.md) ships at
-    /opt/alp-hil/capture-serial.sh; humans can substitute via
-    --capture-cmd."""
+    """Invoke the serial-capture helper (documented in
+    docs/ci/HW-IN-LOOP.md; /opt/alp-hil/capture-serial.sh by
+    convention).  spec.serial_port must be resolved by the caller
+    before a REAL run -- see run_spec's guard -- but this builder stays
+    pure/side-effect-free so --dry-run can still print it when the
+    port isn't resolved yet (--dry-run touches no hardware)."""
+    port = spec.serial_port or "<unresolved: pass --serial-port or set ALP_HIL_SERIAL_PORT>"
     return [
         "/opt/alp-hil/capture-serial.sh",
-        "--port", spec.serial_port,
+        "--port", port,
         "--duration", str(spec.serial.duration_s),
-        "--output", "/tmp/hil-output.log",
+        "--output", str(_capture_output_path(spec)),
     ]
 
 
@@ -365,12 +394,27 @@ def run_spec(spec: SmokeSpec, *, dry_run: bool = False) -> SmokeResult:
     if rc != 0:
         return SmokeResult(spec, False, (f"flash failed (rc={rc}): {out.strip()[:400]}",))
 
-    # 3. Capture serial.
+    # 3. Capture serial.  A real run (unlike --validate/--dry-run) must
+    # have a resolved port -- there is no default to fall back to (see
+    # docs/ci/HW-IN-LOOP.md: the bench allocates it per labgrid
+    # reservation).
+    if not spec.serial_port:
+        return SmokeResult(spec, False, (
+            "no serial port resolved -- pass --serial-port or set "
+            "ALP_HIL_SERIAL_PORT (the bench's labgrid reservation "
+            "allocates a ser2net port per session; there is no fixed "
+            "default -- see docs/ci/HW-IN-LOOP.md).",
+        ))
+    capture_path = _capture_output_path(spec)
+    capture_path.unlink(missing_ok=True)  # belt-and-suspenders: the path
+    # is already unique per (pid, spec), so this can't remove another
+    # run's data -- it only guards a leftover from a killed prior
+    # invocation that reused this same pid+spec-name combination.
     rc, out = _run(capture_command(spec))
     if rc != 0:
         return SmokeResult(spec, False, (f"capture failed (rc={rc}): {out.strip()[:400]}",))
-    captured = Path("/tmp/hil-output.log").read_text(encoding="utf-8", errors="replace") \
-        if Path("/tmp/hil-output.log").exists() else out
+    captured = capture_path.read_text(encoding="utf-8", errors="replace") \
+        if capture_path.exists() else out
 
     # 4. Assert.
     failures = assert_serial(spec, captured)
@@ -416,6 +460,15 @@ def main() -> int:
              "_common/ portable spec set; run only the board's "
              "own specs.  Useful for board-specific smoke sweeps.",
     )
+    parser.add_argument(
+        "--serial-port",
+        help="Serial device/port to capture from for THIS invocation "
+             "(e.g. a ser2net host:port the bench's labgrid reservation "
+             "allocated this session).  Overrides serial_port in every "
+             "resolved spec.  Falls back to the ALP_HIL_SERIAL_PORT env "
+             "var when omitted -- there is no hardcoded default; see "
+             "docs/ci/HW-IN-LOOP.md.",
+    )
     args = parser.parse_args()
 
     if not args.target.exists():
@@ -448,6 +501,14 @@ def main() -> int:
         except SpecError as e:
             print(f"run_smoke: {e}", file=sys.stderr)
             return 2
+
+    # Resolve the serial port for this invocation -- CLI flag, then env
+    # var, then whatever (if anything) the specs/_runner.yaml carried.
+    # No hardcoded default at any point in this chain (see
+    # docs/ci/HW-IN-LOOP.md).
+    port_override = args.serial_port or os.environ.get("ALP_HIL_SERIAL_PORT")
+    if port_override:
+        specs = [dc.replace(s, serial_port=port_override) for s in specs]
 
     if args.validate:
         for s in specs:

@@ -7,8 +7,13 @@
 # suite under native_sim/native/64 with the HOST gcc
 # (ZEPHYR_TOOLCHAIN_VARIANT=host), not the Zephyr SDK cross-toolchains.
 #
-# The pins below track pr-twister.yml + west.yml in lockstep:
-#   - Zephyr            v4.4.0   (west.yml `zephyr` revision; pr-twister --mr)
+# The pins below track pr-twister.yml + west.yml in lockstep. Zephyr itself
+# is deliberately NOT restated here as a literal -- see the `ARG ZEPHYR_REV`
+# comment below for where that value actually comes from (west.yml, read
+# live by ../Makefile). A version literal in THIS comment, alongside the
+# real one on `ARG ZEPHYR_REV`, is exactly the second-hand-maintained-copy
+# defect issue #1458 was filed over -- this line briefly carried its own
+# copy of the pin during that very fix, ungated, until review caught it.
 #   - Ubuntu base       24.04    (pr-twister runs on ubuntu-latest == 24.04)
 #   - Python            3.12     (.python-version, via pr-twister `setup-python`;
 #                                 the image itself uses ubuntu:24.04 system python,
@@ -31,10 +36,15 @@
 
 FROM ubuntu:24.04
 
-# Pin knobs -- override at build time with --build-arg if a workspace
-# bumps the Zephyr revision (keep in lockstep with west.yml + the
-# pr-twister.yml `--mr` flag).
-ARG ZEPHYR_REV=v4.4.0
+# Pin knob -- `make build` (see ../Makefile) derives this LIVE from
+# west.yml's `zephyr` revision and always passes it via --build-arg, so it
+# never has to be hand-edited here.  The default below exists only for a
+# standalone `docker build`/`podman build` invocation that bypasses the
+# Makefile; scripts/check_bootstrap_manifest.py gates it against
+# metadata/bootstrap.json (the same lockstep it already enforces for
+# west.yml + the pr-twister.yml `--mr` flag), so a stale default here fails
+# the PR instead of silently drifting (issue #1458).
+ARG ZEPHYR_REV=v4.4.1
 
 ENV DEBIAN_FRONTEND=noninteractive \
     ZEPHYR_TOOLCHAIN_VARIANT=host \

@@ -57,7 +57,7 @@ firmware → both sides discover `alp_default_rpmsg`.
 ## Build
 
 ```bash
-tan build alp-sdk/examples/multicore/heterogeneous-offload
+tan build --project examples/multicore/heterogeneous-offload
 ```
 
 Fan-out:
@@ -65,23 +65,24 @@ Fan-out:
 - `build/a55_cluster-yocto/` (bitbake against `MACHINE = e1m-v2n101-a55`).
 - `build/m33_sm-zephyr/` (Zephyr against `BOARD = alp_e1m_v2n101_m33_sm`).
 
-Iterate on the M-side worker only:
-
-```bash
-tan build alp-sdk/examples/multicore/heterogeneous-offload --core m33_sm
-```
+`tan build` has no per-slice `--core` flag -- it rebuilds every slice
+on each invocation.  To iterate on the M-side worker only, just
+re-run the same command: the already-built Yocto slice is reused
+(bitbake short-circuits an up-to-date tree) while the Zephyr slice
+rebuilds incrementally in seconds. See
+[`docs/heterogeneous-builds.md`](../../../docs/heterogeneous-builds.md#iterating-on-one-slice).
 
 ## What you'll see
 
 After remoteproc brings up the M33 firmware:
 
 ```
-[m55_sm] FFT worker ready; waiting for 'fft' calls
+[m33_sm] FFT worker ready; waiting for 'fft' calls
 [a55]    generated 1024-sample @ 440 Hz sine, calling fft...
-[m55_sm] processing 1024-sample frame
+[m33_sm] processing 1024-sample frame
 [a55]    fft returned; dominant bin=23 (~430.7 Hz)
 [a55]    generated 1024-sample @ 880 Hz sine, calling fft...
-[m55_sm] processing 1024-sample frame
+[m33_sm] processing 1024-sample frame
 [a55]    fft returned; dominant bin=46 (~861.3 Hz)
 [heterogeneous-offload] done
 ```

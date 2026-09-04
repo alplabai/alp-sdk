@@ -42,11 +42,13 @@ project(u8g2_oled_draw LANGUAGES C)
 # Zephyr module (zephyr/CMakeLists.txt) compiles it into this build
 # automatically because board.yaml's `libraries: [u8g2]` sets
 # CONFIG_ALP_SDK_U8G2_VENDORED_CORE=y; nothing to wire here beyond the
-# app's own sources. Building against the FULL upstream u8g2 checkout instead
-# (real panel drivers, bundled fonts) is still possible for a customer
-# who wants one -- point ZEPHYR_MODULES at a checkout with csrc/u8g2.h
-# and add its csrc/ to the include path ahead of the vendored one --
-# not needed for this example, which only exercises the vendored core.
+# app's own sources. That Kconfig line is unconditional for every
+# `libraries: [u8g2]` slice (metadata/libraries/u8g2.yaml's
+# integration.zephyr.kconfig:) -- there is no SDK-level switch to swap
+# in a FULL upstream u8g2 checkout (real panel drivers, bundled fonts)
+# instead; a customer who wants one vendors/builds it as their own
+# Zephyr module rather than through this SDK's `libraries: [u8g2]` knob.
+# Not needed for this example, which only exercises the vendored core.
 target_sources(app PRIVATE
     src/main.c
     src/u8g2_ram_null.c

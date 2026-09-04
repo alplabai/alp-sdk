@@ -3,32 +3,37 @@
 # `madgwick_ahrs`).
 #
 # Grounding (this checkout):
-#   * scripts/alp_project_emit/__init__.py:247 (_LIBRARY_KCONFIG) --
-#     "CONFIG_ALP_SDK_AHRS=y", "CONFIG_ALP_MADGWICK_LIBM=y" -- both real
-#     CONFIG_ lines, copied verbatim (no comment-string element for this
-#     token, unlike tflite_micro/gfx_compat).
-#   * west.yml:401-406 -- west module `madgwick_ahrs`, remote
+#   * scripts/alp_orchestrate/libraries.py:321-359 (zephyr_kconfig_lines) --
+#     the per-library Kconfig mechanism is the manifest's own
+#     `integration.zephyr.kconfig` array below, spliced verbatim into a
+#     Zephyr slice's alp.conf.  (A prior version of this header cited
+#     scripts/alp_project_emit/__init__.py:247 / `_LIBRARY_KCONFIG`; that
+#     symbol is gone, but the alp_project_emit package itself does still
+#     exist -- corrected here.)
+#   * west.yml:464-474 -- west module `madgwick_ahrs`, remote
 #     xio-technologies, repo-path Fusion ("the maintained successor lib --
 #     Madgwick reference + Fusion are bundled"), path
 #     modules/lib/madgwick_ahrs, group `extras-tier1` (disabled by
-#     default). revision: main -- "TBD: pin SHA after maintainer audit" is
-#     a FLOATING branch pin in west.yml today, not yet a reproducible
-#     commit; flagged as a concern below rather than silently treated as
-#     resolved.
-#   * licence: no local checkout of xioTechnologies/Fusion is available in
-#     this workspace to confirm from source; cited as MIT per the
-#     upstream project's published licence (best-effort -- flagged as a
-#     concern below, not independently re-verified from a LICENSE file).
+#     default). revision: v1.3.2 (SHA
+#     015d68494274b479b5996bff2530ecbcfdc266f2, 2026-07-20) -- pinned to a
+#     tagged release now that the maintainer audit is done; no longer a
+#     floating branch pin.
+#   * licence: MIT, verified from source -- LICENSE.md at ref v1.3.2 begins
+#     "The MIT License (MIT)".  The prior best-effort citation (upstream's
+#     published licence, not independently re-verified from a LICENSE
+#     file) is superseded.
 #
-# HW-backends: metadata/library-profiles/madgwick_ahrs/hw-backends.yaml
-# carries per-accelerator priority binding (FPU SIMD floor is universal --
-# every target carries an FPU -- plus an optional TMU CORDIC fast path);
-# folded in WS6-c Phase 3 (needs library-v1 schema extension).
+# HW-backends: this manifest's own `integration.zephyr.hw_backends:`
+# block below carries per-accelerator priority binding (FPU SIMD floor
+# is universal -- every target carries an FPU -- plus an optional TMU
+# CORDIC fast path); folded in from the retired standalone
+# metadata/library-profiles/madgwick_ahrs/hw-backends.yaml in WS6-c
+# Phase 3.
 #
 # No `requires:` -- CONFIG_ALP_MADGWICK_LIBM=y (libm trig) is the
 # always-available floor; the FPU SIMD backend is universal across every
 # target this SDK supports (no capability key to name), and the CORDIC
-# fast path is opportunistic per-SoM (see hw-backends.yaml above).
+# fast path is opportunistic per-SoM (see `hw_backends:` above).
 #
 # `tier: B` for this Phase-1 pass: madgwick_ahrs is NOT listed in
 # metadata/registries/tier-a-library-ci.json's hostBuild.libraries or
@@ -36,16 +41,16 @@
 # (examples/display/drone-hud, examples/peripheral-io/drone-autopilot).
 # Promotion to Tier A is a named follow-up (add the CI-contract entry).
 #
-# CONCERN: west.yml pins this project to the floating branch `main`
-# ("TBD: pin SHA after maintainer audit") rather than a tag/commit --
-# ADR 0017's "pin, don't float" rule is not yet satisfied upstream of this
-# manifest. `version:` below is left as a placeholder pending that pin;
-# do not treat it as a reproducible upstream revision.
+# RESOLVED: west.yml previously pinned this project to the floating branch
+# `main` ("TBD: pin SHA after maintainer audit"), violating ADR 0017's
+# "pin, don't float" rule. Now pinned to the v1.3.2 tagged release
+# (015d68494274b479b5996bff2530ecbcfdc266f2, 2026-07-20); `version:` below
+# is a reproducible upstream revision.
 schema_version: 1
 name: madgwick-ahrs
 description: "Madgwick/x-io AHRS -- gyroscope + accelerometer (+ magnetometer) sensor-fusion orientation filter."
 tier: B
-version: "unpinned (west.yml tracks xio-technologies/Fusion@main; TBD pin SHA after maintainer audit)"
+version: "v1.3.2"
 license: MIT
 
 integration:

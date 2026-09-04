@@ -2,10 +2,11 @@
 """Unit tests for scripts/check_bootstrap_manifest.py.
 
 The gate is 100% regex-driven against metadata/bootstrap.json + its schema +
-scripts/bootstrap.sh + scripts/bootstrap.ps1 + west.yml + README.md + four CI
-workflows. Each test here mutates a TEMP COPY of that corpus and asserts the
-gate actually fires for the documented failure mode -- a green run on the
-real repo alone proves nothing about whether the gate catches drift.
+scripts/bootstrap.sh + scripts/bootstrap.ps1 + west.yml + README.md + three CI
+workflows + tools/native-sim-container/Containerfile. Each test here mutates
+a TEMP COPY of that corpus and asserts the gate actually fires for the
+documented failure mode -- a green run on the real repo alone proves nothing
+about whether the gate catches drift.
 
 Run locally:
 
@@ -42,8 +43,8 @@ _CORPUS_RELPATHS = [
     "README.md",
     ".github/workflows/pr-twister.yml",
     ".github/workflows/pr-tier-a-libraries.yml",
-    ".github/workflows/nightly-aen-hil.yml",
     ".github/workflows/pr-getting-started-aen801.yml",
+    "tools/native-sim-container/Containerfile",
 ]
 
 
@@ -70,10 +71,12 @@ def _point_gate_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gate, "BOOTSTRAP_PS1", tmp_path / "scripts/bootstrap.ps1")
     monkeypatch.setattr(gate, "README_MD", tmp_path / "README.md")
     monkeypatch.setattr(gate, "LIBRARIES_DIR", tmp_path / "metadata/libraries")
+    monkeypatch.setattr(
+        gate, "CONTAINERFILE", tmp_path / "tools/native-sim-container/Containerfile"
+    )
     monkeypatch.setattr(gate, "CI_WORKFLOWS", [
         tmp_path / ".github/workflows/pr-twister.yml",
         tmp_path / ".github/workflows/pr-tier-a-libraries.yml",
-        tmp_path / ".github/workflows/nightly-aen-hil.yml",
         tmp_path / ".github/workflows/pr-getting-started-aen801.yml",
     ])
     # The zephyr.pythonMinVersion <-> pinned-Zephyr cross-check (issue #1078)
@@ -301,6 +304,44 @@ def test_readme_badge_disagreement_fails(tmp_path, monkeypatch, capsys):
     err = capsys.readouterr().err
     assert rv == 1
     assert "README.md badge pins Zephyr" in err
+
+
+# ---------------------------------------------------------------------
+# 5b. native-sim-container Containerfile ARG ZEPHYR_REV disagreement
+#     (issue #1458)
+# ---------------------------------------------------------------------
+
+
+def test_containerfile_arg_zephyr_rev_disagreement_fails(tmp_path, monkeypatch, capsys):
+    """Reproduces issue #1458: the Containerfile's `ARG ZEPHYR_REV` default
+    stuck one patch release behind west.yml/zephyr.version, silently, with
+    nothing to catch it -- this is the gate that now does."""
+    _scaffold(tmp_path)
+    _replace(
+        tmp_path / "tools/native-sim-container/Containerfile",
+        "ARG ZEPHYR_REV=v4.4.1",
+        "ARG ZEPHYR_REV=v4.4.0",
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "Containerfile pins ARG ZEPHYR_REV" in err
+    assert "'v4.4.0'" in err
+
+
+def test_containerfile_missing_arg_fails(tmp_path, monkeypatch, capsys):
+    _scaffold(tmp_path)
+    _replace(
+        tmp_path / "tools/native-sim-container/Containerfile",
+        "ARG ZEPHYR_REV=v4.4.1",
+        "ARG ZEPHYR_REV_RENAMED=v4.4.1",
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "no `ARG ZEPHYR_REV=...` default found" in err
 
 
 # ---------------------------------------------------------------------
@@ -646,12 +687,13 @@ def test_fix_propagates_bumped_version_to_every_site(tmp_path, monkeypatch, caps
     assert "--mr v4.10.0" in tier_a
     assert "key: zephyr-v4.10.0-tier-a-${{ runner.os }}" in tier_a
 
-    nightly = (tmp_path / ".github/workflows/nightly-aen-hil.yml").read_text(encoding="utf-8")
-    assert "--mr v4.10.0" in nightly
-
     getting_started = (tmp_path / ".github/workflows/pr-getting-started-aen801.yml").read_text(
         encoding="utf-8")
     assert "key: getting-started-aen801-zephyr-v4.10.0-${{ runner.os }}" in getting_started
+
+    containerfile = (tmp_path / "tools/native-sim-container/Containerfile").read_text(
+        encoding="utf-8")
+    assert "ARG ZEPHYR_REV=v4.10.0" in containerfile
 
 
 def test_fix_is_idempotent(tmp_path, monkeypatch, capsys):
@@ -841,7 +883,7 @@ def test_fix_rewrites_library_manifest_versions(tmp_path, monkeypatch, capsys):
 def test_install_missing_tool_command_fails(tmp_path, monkeypatch, capsys):
     """A tool listed in prerequisites.windows with no matching
     install.windows entry is the exact hole that shipped the drifted/
-    incomplete ninja hint in scripts/alp_cli/doctor.py -- the completeness
+    incomplete ninja hint in the now-retired scripts/alp_cli/doctor.py -- the completeness
     assertion must catch it."""
     _scaffold(tmp_path)
     _edit_manifest(tmp_path, lambda d: d["prerequisites"]["install"]["windows"].pop("ninja"))
@@ -861,15 +903,115 @@ def test_install_linux_missing_tool_command_fails(tmp_path, monkeypatch, capsys)
     this test. Branch coverage reported the `if os_install != posix_tools:`
     line covered by two unrelated fixtures tripping it incidentally; only a
     real `if False:` mutation of that line exposed the gap (it still stayed
-    42 passed, 1 skipped). Popping a tool from install.linux must fail."""
+    42 passed, 1 skipped). Popping a tool from install.linux.apt (issue
+    #1464 -- linux is keyed by package manager; apt is the required,
+    complete map) must fail."""
     _scaffold(tmp_path)
-    _edit_manifest(tmp_path, lambda d: d["prerequisites"]["install"]["linux"].pop("cmake"))
+    _edit_manifest(
+        tmp_path, lambda d: d["prerequisites"]["install"]["linux"]["apt"].pop("cmake")
+    )
     _point_gate_at(tmp_path, monkeypatch)
     rv = gate.main()
     err = capsys.readouterr().err
     assert rv == 1
-    assert "prerequisites.install.linux" in err
+    assert "prerequisites.install.linux.apt" in err
     assert "prerequisites.posix" in err
+
+
+def test_install_linux_dnf_partial_map_passes(tmp_path, monkeypatch, capsys):
+    """issue #1464: install.linux.dnf is OPTIONAL and need not cover every
+    prerequisites.posix tool -- popping `xz` from BOTH the manifest and
+    bootstrap.sh's PREREQ_HINT_DNF (in lockstep -- an in-sync partial
+    removal, mirroring how `ninja` is already shipped) must still pass; a
+    dnf sub-map missing a tool is the shipped, correct shape, not drift.
+    (Popping the manifest side ALONE is covered by
+    test_bootstrap_sh_hint_dnf_value_drift_fails's sibling shape -- that
+    correctly fails, since bootstrap.sh would then carry a phantom hint with
+    no manifest backing.)"""
+    _scaffold(tmp_path)
+    manifest_path = tmp_path / "metadata/bootstrap.json"
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "ninja" not in data["prerequisites"]["install"]["linux"]["dnf"], (
+        "fixture assumption broken: the real manifest's install.linux.dnf "
+        "already carries a ninja entry"
+    )
+    _edit_manifest(
+        tmp_path, lambda d: d["prerequisites"]["install"]["linux"]["dnf"].pop("xz")
+    )
+    _replace(
+        tmp_path / "scripts/bootstrap.sh",
+        '    "sudo dnf install -y xz"\n',
+        '    ""\n',
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "OK" in out
+
+
+def test_install_linux_dnf_unknown_tool_fails(tmp_path, monkeypatch, capsys):
+    """install.linux.dnf's keys must still be a SUBSET of prerequisites.posix
+    -- a typo'd/unknown tool name must fail even though the map is allowed
+    to be partial (issue #1464).
+
+    Mutation-tested (review finding on #1471): the ORIGINAL version of this
+    test only asserted `"prerequisites.install.linux.dnf" in err` and
+    `"nnija" in err` -- both weak substrings are ALSO produced by
+    `_check_bootstrap_sh_install_hints`'s own, unrelated "no
+    PREREQ_HINT_NAMES entry" completeness problem (since 'nnija' isn't in
+    bootstrap.sh's PREREQ_HINT_NAMES either -- a real, independent gap this
+    same mutation happens to also trip), so neutering the actual
+    `unknown_dnf` check this test names (`if False:` in place of the real
+    condition) still left the test reporting "1 passed". Asserting the
+    FULL, exact problem line instead -- unique to `unknown_dnf`'s
+    "entr(y/ies) ... with no matching prerequisites.posix tool" phrasing, no
+    other check in this file produces that text -- means a disabled
+    `unknown_dnf` check makes this exact string absent from `err` and the
+    test correctly goes red, regardless of what else the same mutation also
+    happens to trip. (Silencing the confound at the source by making
+    'nnija' fully recognised everywhere else was tried and rejected: it
+    requires giving `install.linux.apt` / `install.macos` a matching
+    'nnija' entry too, which then fails THEIR OWN exact-equality
+    completeness check against `prerequisites.posix` -- a structural
+    conflict, not a workaround-able gap.)"""
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["prerequisites"]["install"]["linux"]["dnf"].__setitem__(
+            "nnija", "sudo dnf install -y ninja-build"
+        ),
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert (
+        "prerequisites.install.linux.dnf has entr(y/ies) ['nnija'] with no "
+        "matching prerequisites.posix tool"
+    ) in err, err
+
+
+def test_install_linux_unknown_package_manager_fails_schema(tmp_path, monkeypatch, capsys):
+    """A hand-added package-manager key (e.g. `pacman`) must be rejected by
+    schema validation -- issue #1464's manifest description explicitly rules
+    out shipping one without a container job proving it, and the schema's
+    `additionalProperties: false` on install.linux is what actually enforces
+    that (not this gate's own Python, which trusts schema validation ran
+    first)."""
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["prerequisites"]["install"]["linux"].__setitem__(
+            "pacman", {"git": "sudo pacman -S --noconfirm git"}
+        ),
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "schema:" in err
+    assert "pacman" in err
 
 
 def test_install_macos_missing_tool_command_fails(tmp_path, monkeypatch, capsys):
@@ -977,7 +1119,7 @@ def test_install_literal_scan_catches_drifted_winget_id(tmp_path, monkeypatch, c
     """A winget PACKAGE ID from install.windows (`Ninja-build.Ninja`)
     appearing anywhere in the scanned file set WITHOUT its full canonical
     command alongside it must fail -- this is exactly the shape
-    scripts/alp_cli/doctor.py's drifted ninja hint had (`winget install
+    the now-retired scripts/alp_cli/doctor.py's drifted ninja hint had (`winget install
     Ninja-build.Ninja.`, missing `-e --id`)."""
     _scaffold(tmp_path)
     readme = tmp_path / "README.md"
@@ -1163,9 +1305,10 @@ def test_install_windows_stale_entry_after_gate_removal_fails(tmp_path, monkeypa
 
 
 def test_bootstrap_sh_hint_value_drift_fails(tmp_path, monkeypatch, capsys):
-    """A PREREQ_HINT_LINUX entry's command must agree with
-    prerequisites.install.linux[<tool>] byte-for-byte -- the POSIX-side
-    analogue of test_install_ps1_hint_disagreement_fails."""
+    """A PREREQ_HINT_APT entry's command must agree with
+    prerequisites.install.linux.apt[<tool>] byte-for-byte (issue #1464
+    renamed PREREQ_HINT_LINUX -> PREREQ_HINT_APT) -- the POSIX-side analogue
+    of test_install_ps1_hint_disagreement_fails."""
     _scaffold(tmp_path)
     _replace(
         tmp_path / "scripts/bootstrap.sh",
@@ -1176,12 +1319,113 @@ def test_bootstrap_sh_hint_value_drift_fails(tmp_path, monkeypatch, capsys):
     rv = gate.main()
     err = capsys.readouterr().err
     assert rv == 1
-    assert "PREREQ_HINT_LINUX entry 'git'" in err
-    assert "disagrees with prerequisites.install.linux.git" in err
+    assert "PREREQ_HINT_APT entry 'git'" in err
+    assert "disagrees with prerequisites.install.linux.apt.git" in err
+
+
+def test_bootstrap_sh_hint_dnf_value_drift_fails(tmp_path, monkeypatch, capsys):
+    """Same shape, dnf side (issue #1464) -- a PREREQ_HINT_DNF entry's
+    command must agree with prerequisites.install.linux.dnf[<tool>]
+    byte-for-byte."""
+    _scaffold(tmp_path)
+    _replace(
+        tmp_path / "scripts/bootstrap.sh",
+        '"sudo dnf install -y git"',
+        '"sudo dnf install git"',
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "PREREQ_HINT_DNF entry 'git'" in err
+    assert "disagrees with prerequisites.install.linux.dnf.git" in err
+
+
+def test_bootstrap_sh_hint_dnf_empty_slot_with_real_manifest_entry_fails(
+    tmp_path, monkeypatch, capsys
+):
+    """The "absent means empty" allowance (issue #1464) only covers a tool
+    with NO manifest entry at all -- blanking a DNF hint slot for a tool the
+    manifest DOES carry a real command for (here: `git`) must still fail,
+    not silently pass as though it were the sanctioned ninja-shaped gap."""
+    _scaffold(tmp_path)
+    _replace(
+        tmp_path / "scripts/bootstrap.sh",
+        '"sudo dnf install -y git"',
+        '""',
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "PREREQ_HINT_DNF entry 'git'" in err
+    assert "disagrees with prerequisites.install.linux.dnf.git" in err
+
+
+def test_bootstrap_sh_hint_dnf_absent_ninja_slot_passes(tmp_path, monkeypatch, capsys):
+    """The real, unmodified PREREQ_HINT_DNF ninja slot (empty string,
+    matching install.linux.dnf's genuine absence of a `ninja` key, issue
+    #1464) must NOT be reported as a problem -- this is the sanctioned gap,
+    not drift."""
+    _scaffold(tmp_path)
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "ninja" not in out
+
+
+def test_bootstrap_sh_hint_empty_slot_unbacked_by_apt_or_macos_still_fails(
+    tmp_path, monkeypatch, capsys
+):
+    """The "unbacked empty slot is fine" allowance is DNF-ONLY (review
+    finding on #1471 -- both install.linux.apt and install.macos are
+    REQUIRED-complete maps, so a canonical-less entry on either is never
+    legitimate the way it is for the optional, partial dnf map). Adds one
+    brand-new name to all four bootstrap.sh arrays, blanked to `""`
+    everywhere -- DNF's own genuine partial-map allowance stays quiet (its
+    behaviour is unchanged by this fix), while apt and macos, now exactly as
+    strict as before dnf ever gained a lenient sibling, must both still
+    fail."""
+    _scaffold(tmp_path)
+    sh_path = tmp_path / "scripts/bootstrap.sh"
+    _replace(
+        sh_path,
+        "PREREQ_HINT_NAMES=(git cmake python3 ninja xz wget)",
+        "PREREQ_HINT_NAMES=(git cmake python3 ninja xz wget bogustool)",
+    )
+    _replace(
+        sh_path,
+        '    "sudo apt-get install -y wget"\n)',
+        '    "sudo apt-get install -y wget"\n    ""\n)',
+    )
+    _replace(
+        sh_path,
+        '    "sudo dnf install -y wget"\n)',
+        '    "sudo dnf install -y wget"\n    ""\n)',
+    )
+    _replace(
+        sh_path,
+        '    "brew install wget"\n)',
+        '    "brew install wget"\n    ""\n)',
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert (
+        "scripts/bootstrap.sh PREREQ_HINT_APT has an entry for 'bogustool', "
+        "but metadata/bootstrap.json has no prerequisites.install.linux.apt.bogustool"
+    ) in err
+    assert (
+        "scripts/bootstrap.sh PREREQ_HINT_MACOS has an entry for 'bogustool', "
+        "but metadata/bootstrap.json has no prerequisites.install.macos.bogustool"
+    ) in err
+    assert "PREREQ_HINT_DNF" not in err
 
 
 def test_bootstrap_sh_hint_length_mismatch_fails(tmp_path, monkeypatch, capsys):
-    """PREREQ_HINT_NAMES and PREREQ_HINT_LINUX/_MACOS are matched up by
+    """PREREQ_HINT_NAMES and PREREQ_HINT_APT/_DNF/_MACOS are matched up by
     array POSITION (bash 3.2 has no `declare -A`) -- a length mismatch
     between them must be reported directly, not silently truncated by
     `zip`."""
@@ -1195,7 +1439,7 @@ def test_bootstrap_sh_hint_length_mismatch_fails(tmp_path, monkeypatch, capsys):
     rv = gate.main()
     err = capsys.readouterr().err
     assert rv == 1
-    assert "PREREQ_HINT_LINUX has 5 entries but PREREQ_HINT_NAMES has 6" in err
+    assert "PREREQ_HINT_APT has 5 entries but PREREQ_HINT_NAMES has 6" in err
     assert "must stay parallel arrays" in err
 
 
@@ -1203,24 +1447,26 @@ def test_bootstrap_sh_hint_deleted_in_lockstep_does_not_silently_drop_tool(
     tmp_path, monkeypatch, capsys
 ):
     """Reproduces the review finding verbatim: deleting a tool's entry from
-    PREREQ_HINT_NAMES + PREREQ_HINT_LINUX + PREREQ_HINT_MACOS in lockstep
-    keeps the two arrays parallel (no length mismatch) and every remaining
-    zip pair still agrees -- the old zip-only check went dark on this.
-    metadata/bootstrap.json's prerequisites.install.linux/.macos still
-    declare a command for the deleted tool, so bootstrap.sh:174 falls
-    through to the bare-name `warn "  ${bin}"` branch (the #978 defect,
-    restored) with nothing here to catch it before this completeness
-    assertion existed."""
+    PREREQ_HINT_NAMES + PREREQ_HINT_APT + PREREQ_HINT_DNF + PREREQ_HINT_MACOS
+    in lockstep keeps every array parallel (no length mismatch) and every
+    remaining zip pair still agrees -- the old zip-only check went dark on
+    this. metadata/bootstrap.json's prerequisites.install.linux.apt /
+    .linux.dnf / .macos still declare a command for the deleted tool, so
+    bootstrap.sh:174-ish falls through to the bare-name `warn "  ${bin}"`
+    branch (the #978 defect, restored) with nothing here to catch it before
+    this completeness assertion existed."""
     _scaffold(tmp_path)
     sh_path = tmp_path / "scripts/bootstrap.sh"
     _replace(sh_path, "PREREQ_HINT_NAMES=(git cmake python3 ninja xz wget)", "PREREQ_HINT_NAMES=(cmake python3 ninja xz wget)")
     _replace(sh_path, '    "sudo apt-get install -y git"\n', "")
+    _replace(sh_path, '    "sudo dnf install -y git"\n', "")
     _replace(sh_path, '    "brew install git"\n', "")
     _point_gate_at(tmp_path, monkeypatch)
     rv = gate.main()
     err = capsys.readouterr().err
     assert rv == 1
-    assert "prerequisites.install.linux.git has no PREREQ_HINT_NAMES entry" in err
+    assert "prerequisites.install.linux.apt.git has no PREREQ_HINT_NAMES entry" in err
+    assert "prerequisites.install.linux.dnf.git has no PREREQ_HINT_NAMES entry" in err
     assert "prerequisites.install.macos.git has no PREREQ_HINT_NAMES entry" in err
 
 
@@ -1558,3 +1804,141 @@ def test_zephyr_python_min_version_leaf_is_gate_asserted_not_orphaned(tmp_path, 
     out = capsys.readouterr().out
     assert rv == 0, out
     assert "is not read by" not in out
+
+
+# ---------------------------------------------------------------------
+# 10. artifactProvenance (issue #1574, ADR 0021 §3 consent-screen facts):
+#     key-set lockstep with prerequisites.install, schema shape, and
+#     orphan-leaf exemption.
+# ---------------------------------------------------------------------
+
+
+def test_artifact_provenance_missing_entry_fails(tmp_path, monkeypatch, capsys):
+    """Drop the `git` provenance entry while prerequisites.install still
+    ships a `git` install command on every OS -- the consent screen would
+    silently have nothing to show for it; the gate must name it."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["artifactProvenance"].pop("git"))
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "missing entries for" in err
+    assert "'git'" in err
+
+
+def test_artifact_provenance_stale_entry_fails(tmp_path, monkeypatch, capsys):
+    """A provenance entry for a tool no prerequisites.install.* map names
+    an install command for anymore is stale, not merely extra -- the gate
+    must flag it so a removed prerequisite doesn't leave a dangling
+    consent-screen fact behind."""
+    _scaffold(tmp_path)
+
+    def _mutate(d):
+        d["artifactProvenance"]["bogus-retired-tool"] = {
+            "tier": "A", "source": "https://example.invalid/", "sizeBytes": None,
+            "licence": "MIT",
+        }
+
+    _edit_manifest(tmp_path, _mutate)
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "stale entries for" in err
+    assert "'bogus-retired-tool'" in err
+
+
+def test_artifact_provenance_valid_addition_passes(tmp_path, monkeypatch, capsys):
+    """The mirror-image mutation: add a new prerequisite consistently (an
+    install command on every OS AND a matching artifactProvenance entry) --
+    proves the check isn't just permanently red once touched, it tracks
+    real lockstep, not merely 'never changed'."""
+    _scaffold(tmp_path)
+
+    def _mutate(d):
+        for key in ("apt",):
+            d["prerequisites"]["install"]["linux"][key]["newtool"] = "sudo apt-get install -y newtool"
+        d["prerequisites"]["install"]["macos"]["newtool"] = "brew install newtool"
+        d["prerequisites"]["install"]["windows"]["newtool"] = "winget install -e --id New.Tool"
+        d["prerequisites"]["posix"].append("newtool")
+        d["prerequisites"]["macos"].append("newtool")
+        d["prerequisites"]["windows"].append("newtool")
+        d["artifactProvenance"]["newtool"] = {
+            "tier": "A", "source": "https://example.invalid/newtool", "sizeBytes": None,
+            "licence": "MIT",
+        }
+
+    _edit_manifest(tmp_path, _mutate)
+    # bootstrap.sh/.ps1 hardcode REQUIRED_BINS/$Prereqs and the PREREQ_HINT_*
+    # tables independently of artifactProvenance -- adding a prerequisite
+    # for real would also need those updated, which is out of scope for
+    # this test (it exercises _check_artifact_provenance in isolation).
+    _point_gate_at(tmp_path, monkeypatch)
+    problems = gate._check_artifact_provenance(
+        json.loads((tmp_path / "metadata/bootstrap.json").read_text(encoding="utf-8"))
+    )
+    assert problems == [], problems
+
+
+def test_artifact_provenance_missing_required_field_fails_schema(tmp_path, monkeypatch, capsys):
+    """Every entry needs tier/source/sizeBytes/licence at minimum (issue
+    #1574's own wording) -- dropping one must fail schema validation, not
+    silently validate a partial fact."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["artifactProvenance"]["git"].pop("tier"))
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "artifactProvenance" in err
+    assert "tier" in err
+
+
+def test_artifact_provenance_bad_tier_value_fails_schema(tmp_path, monkeypatch, capsys):
+    """`tier` is constrained to ADR 0021 §3's three tiers -- a made-up
+    value must fail, not silently pass through as a string."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["artifactProvenance"]["git"].__setitem__("tier", "D"))
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "artifactProvenance" in err
+
+
+def test_artifact_provenance_null_licence_and_size_are_valid(tmp_path, monkeypatch, capsys):
+    """null is an explicit, schema-legal representation for sizeBytes/
+    licence (issue #1574: an honest null beats a fabricated value) -- the
+    real corpus already carries null for xz/7zip licence and every
+    sizeBytes, and the baseline-passes tests already cover that; this
+    locks in that a FRESH null (not just the pre-existing ones) also
+    validates, so the schema's nullable union isn't accidentally narrowed
+    later to reject null again."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["artifactProvenance"]["wget"].__setitem__("licence", None))
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+
+
+def test_artifact_provenance_leaf_is_gate_asserted_not_orphaned(tmp_path, monkeypatch, capsys):
+    """`artifactProvenance.*` has no reader in bootstrap.sh/bootstrap.ps1 by
+    design (producer-only data for a future IDE/tan consumer) -- it must
+    NOT trip the generic per-leaf orphan scan the way an ordinary unread
+    leaf would."""
+    _scaffold(tmp_path)
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "is not read by" not in out
+
+
+def test_artifact_provenance_unknown_key_without_check_would_have_failed_known_keys(tmp_path, monkeypatch, capsys):
+    """Fixture-assumption guard: `artifactProvenance` is in KNOWN_KEYS (if
+    this ever drifts back out, `_check_known_keys` -- proven by the
+    pre-existing `test_unknown_top_level_key_fails_with_known_keys_guidance`
+    -- is what would catch it)."""
+    assert "artifactProvenance" in gate.KNOWN_KEYS

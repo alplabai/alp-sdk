@@ -8,6 +8,22 @@
  * Enables host-side DMA for continuous SPI streams (the CC3501E bridge).
  * Retires onto the opt-in sdk-alif fork once the DMA nodes repoint to the fork
  * compatibles AND bench-verified.
+ *
+ * ------------------------- alp-sdk divergence -------------------------
+ * dma_pl330_configure() (issue #1124) dereferenced cfg->head_block (to seed
+ * channel_cfg->src_addr/dst_addr/trans_size/dst_addr_adj) BEFORE its own
+ * `if (!cfg->head_block) return -EINVAL;` NULL check further down, and
+ * copied exactly block_count pool entries from the caller's linked list
+ * without confirming the list actually had that many -- a shorter list left
+ * a stale/zeroed pool entry linked into the chain (a phantom zero-address/
+ * zero-size block the ISR could try to start), a longer one was silently
+ * truncated. All scatter-gather validation (head_block non-NULL, block_count
+ * within CONFIG_DMA_PL330_ALIF_MAX_BLOCK_COUNT, the linked list matching
+ * block_count exactly, and addr_adj support) now happens up front, before
+ * any channel_cfg/block_pool state is mutated, so a rejected configure()
+ * call never publishes partial state. Reapply this divergence if the file
+ * is ever re-synced from the fork.
+ * -------------------------------------------------------------------------
  */
 /*
  * Copyright 2020 Broadcom
@@ -28,6 +44,7 @@
 #include <zephyr/pm/device.h>
 
 #include "dma_pl330_alif.h"
+#include "dma_pl330_sg_validate.h"
 #include <soc_memory_map.h>
 
 #define LOG_LEVEL CONFIG_DMA_LOG_LEVEL
@@ -285,8 +302,41 @@ static uint32_t dma_pl330_gen_copy_op(struct dma_pl330_ch_internal *ch_dat,
 				dma_exec_addr + offset);
 		}
 		offset = offset + 1;
-		dma_pl330_gen_op(OP_DMA_STP(req_type), dma_exec_addr + offset,
-				((ch_dat->src_id) << 3));
+		/*
+		 * dst_id, NOT src_id.  On MEMORY_TO_PERIPHERAL the peripheral is the
+		 * DESTINATION: dma_pl330_config_channel() assigns exactly one
+		 * identifier per direction, so src_id is never written on this path
+		 * and the memset in dma_pl330_configure() leaves it 0.  Every DMASTP
+		 * therefore acknowledged peripheral request interface 0 -- which HWRM
+		 * Table 12-29 DMA0 Requests Mapping assigns to UT0_T0_DMA_REQ, not to
+		 * the peripheral actually transferring.
+		 *
+		 * The two instructions above in this same branch already use dst_id;
+		 * only the store did not.  HWRM 15.8.4.4.1 makes the acknowledgement
+		 * what retires the request -- "Upon reception of the DMA_TX_ACK/
+		 * DMA_RX_ACK signal ... the SPI de-asserts the DMA_TX_REQ/DMA_RX_REQ
+		 * burst request signal" -- so acking the wrong interface left the real
+		 * request unretired: either the channel parks in
+		 * Waiting-For-Peripheral, or (with the event router completing the
+		 * handshake, the reset default) the router re-pulses, the DMAC
+		 * free-runs bursts into the 16-entry TX FIFO, SPI_ISR[TXOIS] fires and
+		 * the caller sees -EIO.
+		 *
+		 * BENCH, 2026-08-30, E1M-AEN801: this is NOT the cause of the open
+		 * OTA_WRITE -> -5.  Three images differing only in this operand and
+		 * the two DMA changes beside it (event-router ACK_TYPE, SPI cache
+		 * maintenance) were run at CONFIG_SPI_DW_ALIF_DMA_MIN_LEN=64 with
+		 * 64/256/1024/2048-byte host->bridge payloads; all three timed out
+		 * identically on the first transfer and desynced the link.  The
+		 * operand is still wrong and is still fixed here -- src_id is
+		 * provably 0 on this path -- but a further DMA defect keeps the
+		 * MIN_LEN=8192 workaround load-bearing (#1818).
+		 *
+		 * PERIPHERAL_TO_MEMORY is unaffected: it uses src_id
+		 * throughout and closes with a plain DMAST carrying no peripheral
+		 * operand.
+		 */
+		dma_pl330_gen_op(OP_DMA_STP(req_type), dma_exec_addr + offset, ((ch_dat->dst_id) << 3));
 		offset = offset + 2;
 	} else {
 		sys_write8(OP_DMA_LD(DMA_LDST_REQ_TYPE_FORCE),
@@ -670,7 +720,7 @@ static int dma_pl330_configure(const struct device *dev, uint32_t channel,
 	struct dma_pl330_ch_config *channel_cfg;
 	struct dma_pl330_ch_internal *ch_handle;
 	uint32_t bsize;
-	uint32_t count = (cfg->block_count > 0) ? cfg->block_count : 1;
+	uint32_t count;
 
 	if (channel >= dev_cfg->max_dma_channels) {
 		return -EINVAL;
@@ -693,6 +743,41 @@ static int dma_pl330_configure(const struct device *dev, uint32_t channel,
 		return -EINVAL;
 	}
 
+	/*
+	 * Scatter-gather validation -- ALL of it, BEFORE any channel_cfg or
+	 * block_pool state is touched (#1124). head_block must be non-NULL
+	 * (never dereferenced before this check), the linked list must have
+	 * EXACTLY block_count entries (neither short -- which would leave a
+	 * stale/zeroed pool entry linked in as a phantom block -- nor long
+	 * -- which would be silently truncated), and both address-adjustment
+	 * modes must be supported. A rejected configure() call must never
+	 * publish partial pool state.
+	 */
+	if (!cfg->head_block) {
+		return -EINVAL;
+	}
+
+	count = (cfg->block_count > 0) ? cfg->block_count : 1;
+
+	if (count > CONFIG_DMA_PL330_ALIF_MAX_BLOCK_COUNT) {
+		LOG_ERR("DMA PL330: block_count %u exceeds CONFIG_DMA_PL330_ALIF_MAX_BLOCK_COUNT=%u; ",
+			count, CONFIG_DMA_PL330_ALIF_MAX_BLOCK_COUNT);
+		return -EINVAL;
+	}
+
+	if (!dma_pl330_sg_chain_matches(cfg->head_block, count)) {
+		LOG_ERR("DMA PL330: scatter-gather chain length does not match block_count %u",
+			count);
+		return -EINVAL;
+	}
+
+	if ((cfg->head_block->source_addr_adj != DMA_ADDR_ADJ_INCREMENT &&
+	     cfg->head_block->source_addr_adj != DMA_ADDR_ADJ_NO_CHANGE) ||
+	    (cfg->head_block->dest_addr_adj != DMA_ADDR_ADJ_INCREMENT &&
+	     cfg->head_block->dest_addr_adj != DMA_ADDR_ADJ_NO_CHANGE)) {
+		return -ENOTSUP;
+	}
+
 	channel_cfg = &dev_data->channels[channel];
 
 	if (atomic_get(&channel_cfg->channel_is_active) != DMA_CHANNEL_IS_FREE) {
@@ -711,6 +796,7 @@ static int dma_pl330_configure(const struct device *dev, uint32_t channel,
 	channel_cfg->periph_slot = cfg->dma_slot;
 
 	channel_cfg->direction = cfg->channel_direction;
+	channel_cfg->src_addr_adj = cfg->head_block->source_addr_adj;
 	channel_cfg->dst_addr_adj = cfg->head_block->dest_addr_adj;
 
 	channel_cfg->src_addr =
@@ -738,26 +824,14 @@ static int dma_pl330_configure(const struct device *dev, uint32_t channel,
 	channel_cfg->user_data = cfg->user_data;
 
 	/*
-	 * Scatter-gather configuration
-	 *
-	 * Initialize the scatter-gather chain pointers and count the total
-	 * number of blocks. Validate that address adjustments are supported.
+	 * Copy the already-validated scatter-gather chain into the driver's
+	 * fixed-size block pool.
 	 */
-	if (!cfg->head_block) {
-		return -EINVAL;
-	}
-
-	if (count > CONFIG_DMA_PL330_ALIF_MAX_BLOCK_COUNT) {
-		LOG_ERR("DMA PL330: block_count %u exceeds CONFIG_DMA_PL330_ALIF_MAX_BLOCK_COUNT=%u; ",
-			count, CONFIG_DMA_PL330_ALIF_MAX_BLOCK_COUNT);
-		return -EINVAL;
-	}
-
 	memset(channel_cfg->block_pool, 0, sizeof(channel_cfg->block_pool));
 
 	struct dma_block_config *src = cfg->head_block;
 
-	for (uint32_t i = 0; i < count && src != NULL; i++) {
+	for (uint32_t i = 0; i < count; i++) {
 		memcpy(&channel_cfg->block_pool[i], src, sizeof(*src));
 		channel_cfg->block_pool[i].next_block =
 			(i + 1 < count) ? &channel_cfg->block_pool[i + 1] : NULL;
@@ -766,20 +840,6 @@ static int dma_pl330_configure(const struct device *dev, uint32_t channel,
 
 	channel_cfg->head_block    = &channel_cfg->block_pool[0];
 	channel_cfg->current_block = &channel_cfg->block_pool[0];
-
-	if (cfg->head_block->source_addr_adj == DMA_ADDR_ADJ_INCREMENT ||
-	    cfg->head_block->source_addr_adj == DMA_ADDR_ADJ_NO_CHANGE) {
-		channel_cfg->src_addr_adj = cfg->head_block->source_addr_adj;
-	} else {
-		return -ENOTSUP;
-	}
-
-	if (cfg->head_block->dest_addr_adj == DMA_ADDR_ADJ_INCREMENT ||
-	    cfg->head_block->dest_addr_adj == DMA_ADDR_ADJ_NO_CHANGE) {
-		channel_cfg->dst_addr_adj = cfg->head_block->dest_addr_adj;
-	} else {
-		return -ENOTSUP;
-	}
 
 	return 0;
 }

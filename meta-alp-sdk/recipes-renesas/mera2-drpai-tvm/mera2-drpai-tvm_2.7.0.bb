@@ -18,8 +18,9 @@
 # executable target lists the .cpp directly in its own `SRC`).  `nm -D
 # --defined-only` across all eight `obj/build_runtime/v2h/lib/*.so` files
 # confirms the symbol is in none of them.  A first cut of this recipe staged
-# only `MeraDrpRuntimeWrapper.h` -- the DECLARATIONS -- and a real bake with
-# a downstream consumer (alp-perception) surfaced the gap as unresolved
+# only `MeraDrpRuntimeWrapper.h` -- the DECLARATIONS -- and the gap surfaced
+# via the direct plain-CMake path (-DALP_SDK_USE_DRPAI_V2N=ON, which predates
+# this recipe) in a downstream consumer (alp-perception) as unresolved
 # `MeraDrpRuntimeWrapper::*` symbols in `libalp_sdk.so`, which had built
 # "successfully" only because a shared library permits undefined symbols by
 # default (see the durable fix: alp-sdk's own CMakeLists.txt now links with
@@ -44,8 +45,8 @@
 #
 # A first cut of this recipe staged only three libraries
 # (libmera2_runtime.so, libmera2_plan_io.so, libdrp_tvm_rt.so) and
-# failed a real `bitbake -c package_qa` with PACKAGECONFIG[drpai]
-# enabled: those three DT_NEED five more libraries this recipe never
+# would fail do_package_qa's file-rdeps check: those three DT_NEED five
+# more libraries this recipe never
 # staged (libdrp_rt.so, libacl_rt.so, libarm_compute.so,
 # libarm_compute_core.so, libarm_compute_graph.so -- all present in
 # the same RUHMI obj/build_runtime/v2h/lib/ directory) and two more
@@ -72,8 +73,8 @@
 # builder already has on disk (RUHMI is itself Apache-2.0 -- <https://
 # github.com/renesas-rz/rzv_drp-ai_tvm> -- only the prebuilt MERA2 libs +
 # Translator inside a built tree are gated), pointed to by the
-# RUHMI_DRPAI_TVM_DIR variable. See meta-alp-sdk/README.md's "Making the
-# RUHMI checkout visible to the bake" for how to set it.
+# RUHMI_DRPAI_TVM_DIR variable. See docs/bring-up-drpai-v2n.md section 4 for how
+# to set it.
 #
 # RZ/V2N consumes the checkout's v2h runtime build
 # (obj/build_runtime/v2h/lib); obj/build_runtime/v2m is Renesas
@@ -154,10 +155,9 @@ def _drpai_ruhmi_dir(d):
     if not ruhmi_dir:
         bb.fatal(
             "RUHMI_DRPAI_TVM_DIR is unset. Point it at a BUILT "
-            "rzv_drp-ai_tvm (RUHMI) checkout's root -- see "
-            "meta-alp-sdk/README.md's 'Making the RUHMI checkout "
-            "visible to the bake' -- before building mera2-drpai-tvm "
-            "or enabling alp-sdk's PACKAGECONFIG[drpai]."
+            "rzv_drp-ai_tvm (RUHMI) checkout's root before building "
+            "mera2-drpai-tvm or enabling alp-sdk's PACKAGECONFIG[drpai] "
+            "-- see docs/bring-up-drpai-v2n.md section 4."
         )
     return os.path.abspath(ruhmi_dir)
 
@@ -255,7 +255,7 @@ python do_compile() {
         # branch unless the CONSUMER defines this too, giving
         #     spdlog/fmt/fmt.h:28:14: fatal error:
         #     spdlog/fmt/bundled/core.h: No such file or directory
-        # on a real bake.  Defining it selects the "#include <fmt/core.h>"
+        # on a bake without it.  Defining it selects the "#include <fmt/core.h>"
         # branch instead, which fmt (already in the sysroot via spdlog's own
         # DEPENDS) provides.  RUHMI's apps/CMakeLists.txt does not need this
         # because it builds against a vendored spdlog with fmt bundled in.
@@ -409,7 +409,7 @@ python do_install() {
 # ${PN}-dev's own built-in FILES default already globs "${libdir}/*.so"
 # ahead of anything FILES:${PN} claims, so every one of these libraries
 # was landing in mera2-drpai-tvm-dev regardless -- exactly the
-# do_package_qa "non-symlink .so ... in ... -dev" error a real bake hit.
+# do_package_qa "non-symlink .so ... in ... -dev" error that produces.
 # Redefining (not appending to) FILES:${PN}-dev below drops that default
 # glob; this recipe never ships a .la/.a/.pc/cmake file, so headers-only
 # is a complete definition, not a narrowed one. With no .so left for
@@ -446,46 +446,16 @@ FILES:${PN}-dev = " \
 # exactly libarm_compute.so, libarm_compute_core.so and
 # libarm_compute_graph.so ship without .gnu.hash (they are ARM Compute
 # Library prebuilts); the other five copied libraries do have it. So
-# packaging is not mangling them; they arrive this way.
+# packaging is not mangling them; they arrive this way. The ninth library,
+# libmera_drpai_wrapper.so, IS one of OUR builds (do_compile does append
+# ${LDFLAGS} to its link line), so it is not expected to need this skip --
+# but the check is package-wide, not per-file, so this stays in place
+# regardless.
 #
 # Consequence, stated because it is not free: without .gnu.hash those three
 # fall back to the older SysV .hash chain, which makes symbol lookup slower at
 # load time. That is a vendor property of the binaries, not something this
 # recipe can fix, and it does not affect correctness.
-#
-# WHAT ELSE THIS GIVES UP, AND WHY THAT'S ACCEPTED: INSANE_SKIP is
-# package-wide, not per-file. libmera_drpai_wrapper.so -- the one library in
-# this recipe we actually COMPILE (do_compile, above) -- ships in this same
-# ${PN}, so this line also silences the ldflags/GNU_HASH check for the one
-# artefact where a dropped ${LDFLAGS} would be a genuine defect, not a
-# vendor property we can't touch.
-#
-# Verified this is not currently a live gap: do_compile's link command
-# unconditionally appends `d.getVar("LDFLAGS")` to `cmd` (the
-# `cmd += (d.getVar("LDFLAGS") or "").split()` line, before the -L/-l
-# flags) -- no conditional path skips it -- and the confirmed real aarch64
-# bake referenced at the bottom of this file did produce a
-# libmera_drpai_wrapper.so alongside the five .gnu.hash-bearing copied
-# libraries, not the three hash-less ones.
-#
-# Considered and rejected: splitting PACKAGES so the eight vendor prebuilts
-# carry this skip in a sub-package while libmera_drpai_wrapper.so ships
-# skip-free in another, so QA would keep actively checking the one library
-# we build. Rejected because none of these nine libraries carries a
-# DT_SONAME (see the FILES:${PN} comment above) -- the same reason the
-# mmngr libraries below need an explicit RDEPENDS instead of relying on
-# do_package_qa's automatic shlibs resolution. Splitting the wrapper into
-# its own package would need a fourth manual RDEPENDS entry (wrapper ->
-# prebuilts, for libmera2_runtime/libmera2_plan_io/libdrp_tvm_rt) purely to
-# recreate, across a package boundary, a within-package relationship that
-# already works for free today -- to protect a check that reading
-# do_compile already confirms is not being violated. Not worth it for a
-# recipe this small.
-#
-# REVISIT IF: do_compile's link line ever drops or reorders the ${LDFLAGS}
-# append (this comment's evidence goes stale then), or this recipe grows
-# enough unrelated packages that a split starts paying for itself on its
-# own merits regardless of this one check.
 INSANE_SKIP:${PN} += "ldflags"
 
 # libmmngr.so.1 / libmmngrbuf.so.1 are DT_NEEDED by libdrp_rt.so /
@@ -493,7 +463,7 @@ INSANE_SKIP:${PN} += "ldflags"
 # meta-rz-drpai's mmngr-user-module / mmngrbuf-user-module recipes.
 # do_package_qa's file-rdeps check has no way to infer that on its own
 # (nothing in this recipe DEPENDS on them at build time), so it has to
-# be said explicitly or the QA errors from the real bake recur.  (This
+# be said explicitly or those QA errors recur.  (This
 # does NOT apply to libmera_drpai_wrapper.so's own runtime deps -- spdlog
 # is a real DEPENDS, so shlibs infers that RDEPENDS automatically; see the
 # DEPENDS comment above.)
@@ -502,12 +472,11 @@ INSANE_SKIP:${PN} += "ldflags"
 # against it (kernel modules never show up as a DT_NEEDED entry, so QA
 # never asks for it): mmngr-user-module / mmngrbuf-user-module are thin
 # ioctl wrappers around /dev/mmngr, which that kernel module provides,
-# so the userspace libs are inert without it at runtime. The rzv2n-family
-# machine confs also install it explicitly when ALP_ENABLE_DRPAI = "1"
-# (worked around because meta-rz-drpai only hooks core-image-% images,
-# never alp-image-edge) -- listing it here too is a harmless duplicate
-# for that image and makes this recipe runtime-correct standalone, for
-# any other image that pulls it in.
+# so the userspace libs are inert without it at runtime. alp-image-common.inc
+# also installs it explicitly (ALP_RZ_DRPAI_INSTALL, worked around
+# because meta-rz-drpai only hooks core-image-% images) -- listing it
+# here too is a harmless duplicate for that image and makes this recipe
+# runtime-correct standalone, for any other image that pulls it in.
 RDEPENDS:${PN} += "mmngr-user-module mmngrbuf-user-module kernel-module-mmngr"
 
 # Excluded from `bitbake world`: this recipe only builds successfully
@@ -516,10 +485,23 @@ RDEPENDS:${PN} += "mmngr-user-module mmngrbuf-user-module kernel-module-mmngr"
 # runtime in this layer.
 EXCLUDE_FROM_WORLD = "1"
 
+# EXCLUDE_FROM_WORLD only keeps this out of `bitbake world`.  It does NOT
+# stop an image, or a PACKAGECONFIG DEPENDS, pulling it into a machine that
+# has no DRP-AI at all -- so scope it explicitly.  The payload staged here
+# is the RZ/V2N `obj/build_runtime/v2h` prebuilt set; on an AEN or NX9101
+# build it is not merely useless, it is wrong.
+COMPATIBLE_MACHINE = "^(e1m-v2n101-a55|e1m-v2n102-a55|e1m-v2m101-a55|e1m-v2m102-a55)$"
+
+# Pin to MACHINE_ARCH.  With the default TUNE_PKGARCH this recipe's output
+# would share an sstate/feed slot with every other aarch64 machine, so a
+# V2N-specific prebuilt could be served to an unrelated aarch64 build.  The
+# staged libraries are SoC-specific, not tune-specific.
+PACKAGE_ARCH = "${MACHINE_ARCH}"
+
 # BENCH-UNVERIFIED, and more unverified than the packaging fix this entry
 # previously described: that one was static staging (copy files, fix
-# FILES:/RDEPENDS), caught wrong twice already by a REAL `bitbake` run and
-# corrected both times from that evidence, not from inspection. This one
+# FILES:/RDEPENDS), corrected twice by inspection against the real
+# checkout's contents. This one
 # ADDS A COMPILE STEP -- a real g++ invocation against RUHMI's real headers
 # was run by hand on a dev host to prove apps/MeraDrpRuntimeWrapper.cpp
 # actually compiles to a valid .o with every one of the previously-missing
@@ -531,31 +513,33 @@ EXCLUDE_FROM_WORLD = "1"
 # incompatible ... when searching for -lmera2_runtime" is an
 # architecture mismatch, not a symbol error).
 #
-# UPDATE -- that final step has now been taken; this recipe is no longer
-# fixed-on-paper. A `drpai`-ENABLED alp-image-edge bake completed on the real
-# aarch64 Yocto cross-toolchain (12118 tasks, all succeeded, with
-# PACKAGECONFIG:append:pn-alp-sdk = " drpai" and RUHMI_DRPAI_TVM_DIR set;
-# this recipe ran 18 tasks in it). It settles all three open questions:
-#   - do_compile cross-compiles apps/MeraDrpRuntimeWrapper.cpp to aarch64 and
-#     the link against obj/build_runtime/v2h/lib succeeds;
-#   - packaging passes do_package_qa, after the FILES:${PN}-dev redefinition
-#     and the narrowly-scoped INSANE_SKIP ldflags above;
-#   - the symbols resolve. libalp_sdk.so's DT_NEEDED now names
-#     libmera_drpai_wrapper.so, libmera2_runtime.so, libmera2_plan_io.so and
-#     libtvm_runtime.so, and all 9 MeraDrpRuntimeWrapper symbols it imports
-#     match definitions the wrapper exports (26 exported, 9 matched, 0
-#     unresolved). All ten libraries ship in the rootfs.
+# THAT FINAL STEP HAS NOT BEEN TAKEN.  This recipe is correct on paper and
+# nothing more.
 #
-# A model DOES now compile to a drpai_dir bundle -- YOLOX-S/VOC, compiled
-# with the account-gated DRP-AI Translator i8 v1.12; deploy.json carries
-# exactly two nodes, a `null` input `images` and one fused `tvm_op`
-# (tvmgen_default_tvmgen_default_mera_drp_main_0), so the graph is fully
-# offloaded, nothing falls back to CPU. What remains unproven is on-silicon
-# execution: no inference has run on a real board yet. The model's
-# quantisation is ALSO unvalidated -- it was compiled without the vendor
-# calibration set, because all 200 images under the Translator's
-# drpAI_Quantizer/calibrate_images are 129-byte Git LFS pointer stubs, not
-# real images -- so accuracy against real inputs is unknown. The kernel side
-# IS proven independently -- /dev/drpai0 probes clean on a real board and
-# DRPAI_GET_DRPAI_AREA returns the correct 0xD0000000 / 512 MiB arena -- but
-# that is the vendor driver, not this recipe's payload.
+# An earlier revision of this comment claimed a `drpai`-ENABLED
+# alp-image-edge bake had completed (12118 tasks, DT_NEEDED resolved, 0
+# unresolved symbols, ten libraries in the rootfs).  That claim was removed
+# rather than softened, for two reasons:
+#
+#   1. docs/bring-up-drpai-v2n.md, in the same change, states that no
+#      bitbake run of this recipe -- with or without do_compile -- has
+#      happened at all, and that the 12118-task bake it refers to ran with
+#      `drpai` OFF.  Same task count, opposite verdict.  Both cannot be
+#      true.
+#   2. The bake it described could not have run: it names
+#      `PACKAGECONFIG:append:pn-alp-sdk = " drpai"`, and until #1145 no
+#      PACKAGECONFIG[drpai] existed in alp-sdk_0.6.bb.  OE errors out on an
+#      append naming an undefined flag.
+#
+# So what is actually established, and nothing beyond it: do_compile
+# cross-compiles apps/MeraDrpRuntimeWrapper.cpp on an x86_64 host up to the
+# final link, where it stops with "skipping incompatible ... when searching
+# for -lmera2_runtime" -- an architecture mismatch against the aarch64
+# obj/build_runtime/v2h libraries, not a symbol error.  Whether packaging
+# passes do_package_qa, and whether the symbols resolve against the real
+# aarch64 payload, are both UNTESTED.
+#
+# The kernel side is proven independently of this recipe: /dev/drpai0 probes
+# clean on a real board and DRPAI_GET_DRPAI_AREA returns the 0xD0000000 /
+# 512 MiB arena.  That is the vendor driver, not this recipe's payload, and
+# it says nothing about the userspace runtime packaged here.

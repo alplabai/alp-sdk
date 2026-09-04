@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Generate include/alp/boards/alp_<board>_routes.h from each
-metadata/boards/<name>.yaml `e1m_routes:` + `i2c_devices:` blocks.
+metadata/boards/<name>.yaml `e1m_routes:` + `i2c_devices:` +
+`overlay_pins:` blocks.
 
 The generated header mirrors the YAML `e1m_routes:` block into plain
 `#define EVK_* ALP_E1M_*` lines so hand-written firmware can keep using
@@ -13,12 +14,17 @@ of truth.  The YAML carries the connector-namespace pad names
 the C token.  The `i2c_devices:` block does the same for on-board I2C
 device addresses (EVK_I2C_ADDR_*) and INA236 shunt/max-current
 calibration (EVK_INA236_SHUNT_*_OHMS / EVK_INA236_MAX_*_A) -- these
-carry a literal hex/float value rather than an `ALP_E1M_*` token.
-Idempotent: running twice produces byte-identical output.
+carry a literal hex/float value rather than an `ALP_E1M_*` token.  The
+`overlay_pins:` block emits `EVK_PIN_OVERLAY_BASE + N` pad indices for
+boards that expose repurposed pads past the standard E1M pinout to an
+`alp,pin-array` devicetree overlay; N is the entry's position in the
+YAML list (an ordinal, not a hardware fact), computed via `enumerate()`
+rather than read from the YAML.  Idempotent: running twice produces
+byte-identical output.
 
 The remaining sections of `include/alp/boards/alp_<board>.h`
-(mux enums, overlay-pad indices, prose comments) stay hand-authored
-until follow-up slices lift them too.
+(mux enums, prose comments) stay hand-authored until follow-up slices
+lift them too.
 
 Run:
 
@@ -156,6 +162,38 @@ def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
     return out
 
 
+def _emit_overlay_pins(entries: list[dict[str, Any]]) -> list[str]:
+    """Emit `EVK_PIN_OVERLAY_BASE` + the board's overlay-extended
+    `alp,pin-array` pad indices (`overlay_pins:`).  Each macro is
+    `EVK_PIN_OVERLAY_BASE + N`, where N is the entry's position in
+    THIS list (0-based) -- an ordinal, not an independent hardware
+    fact, so it is computed here via `enumerate()` rather than read
+    from the YAML.  See zephyr/dts/bindings/alp,pin-array.yaml for
+    the array-index convention this mirrors."""
+    if not entries:
+        return []
+
+    out: list[str] = [
+        "/* ------------------------------------------------------------------ */",
+        "/* Overlay-extended pin-array indices (from `overlay_pins:`) */",
+        "/* ------------------------------------------------------------------ */",
+        "",
+        "#define EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT",
+        "",
+    ]
+    widest = max(len(e["macro"]) for e in entries)
+    for idx, entry in enumerate(entries):
+        macro = entry["macro"]
+        doc = entry.get("doc", "")
+        value = f"(EVK_PIN_OVERLAY_BASE + {idx}u)"
+        if doc:
+            out.append(f"#define {macro:<{widest}} {value}  /**< {doc} */")
+        else:
+            out.append(f"#define {macro:<{widest}} {value}")
+    out.append("")
+    return out
+
+
 def _emit_board_aliases(routes: dict[str, Any]) -> list[str]:
     """Emit portable BOARD_* aliases for every entry carrying a
     `board_alias:` (the e1m-spec §7.2 common roles).  Same BOARD_* name
@@ -210,12 +248,13 @@ def _emit_section(title: str, entries: list[dict[str, Any]]) -> list[str]:
 
 def emit_board(name: str, doc: dict[str, Any]) -> str | None:
     """Return the full text of the generated routes header for one board,
-    or `None` if the shared board YAML has neither an `e1m_routes:` nor
-    an `i2c_devices:` block.
+    or `None` if the shared board YAML has none of an `e1m_routes:`,
+    `i2c_devices:`, or `overlay_pins:` block.
     """
     routes = doc.get("e1m_routes")
     i2c_devices = doc.get("i2c_devices")
-    if not routes and not i2c_devices:
+    overlay_pins = doc.get("overlay_pins")
+    if not routes and not i2c_devices and not overlay_pins:
         return None
     routes = routes or {}
     slug = _board_slug(name)
@@ -264,6 +303,8 @@ def emit_board(name: str, doc: dict[str, Any]) -> str | None:
 
     lines.extend(_emit_i2c_devices(doc.get("i2c_devices") or []))
 
+    lines.extend(_emit_overlay_pins(doc.get("overlay_pins") or []))
+
     lines.extend(_emit_board_aliases(routes))
 
     lines.extend([
@@ -289,6 +330,15 @@ def main() -> int:
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     written = 0
+    expected: set[Path] = set()
+    # slug -> source YAML path that claimed it.  Keyed on the slug ALONE:
+    # two board YAMLs with the identical `name:` (a preset copy-pasted
+    # and never renamed -- the realistic path) collapse onto the same
+    # slug just as surely as two distinct names that `_board_slug()`'s
+    # lossy case/`-`/`_` fold happens to collide on (e.g. `FOO-BAR` and
+    # `foo_bar`); without this check the second write would silently
+    # clobber the first with no error (#1128).
+    slug_owners: dict[str, Path] = {}
     for preset_path in sorted(BOARDS_DIR.glob("*.yaml")):
         doc = yaml.safe_load(preset_path.read_text(encoding="utf-8"))
         if not isinstance(doc, dict):
@@ -297,13 +347,41 @@ def main() -> int:
         out_text = emit_board(name, doc)
         if out_text is None:
             continue
-        out_path = OUT_DIR / f"alp_{_board_slug(name)}_routes.h"
+
+        slug = _board_slug(name)
+        if slug in slug_owners:
+            print(
+                f"gen_board_header: {slug_owners[slug].relative_to(REPO)} "
+                f"and {preset_path.relative_to(REPO)} both slugify to "
+                f"{slug!r} -- "
+                f"{OUT_DIR.relative_to(REPO)}/alp_{slug}_routes.h would be "
+                f"silently overwritten by whichever board is processed "
+                f"last.  Rename one of them.",
+                file=sys.stderr,
+            )
+            return 1
+        slug_owners[slug] = preset_path
+
+        out_path = OUT_DIR / f"alp_{slug}_routes.h"
         out_path.write_text(out_text, encoding="utf-8", newline="")
+        expected.add(out_path)
         print(
             f"wrote {out_path.relative_to(REPO)} "
             f"({len(out_text.splitlines())} lines)"
         )
         written += 1
+
+    # Reconciliation pass: a board YAML that was renamed or deleted must
+    # take its generated header with it -- otherwise the stale header
+    # stays committed (and the diff-only CI gate stays green, since it
+    # only ever compares files this script still touches) forever (#1128).
+    for existing in sorted(OUT_DIR.glob("alp_*_routes.h")):
+        if existing not in expected:
+            existing.unlink()
+            print(
+                f"removed orphaned {existing.relative_to(REPO)} "
+                f"(no matching board YAML)"
+            )
 
     if written == 0:
         print(

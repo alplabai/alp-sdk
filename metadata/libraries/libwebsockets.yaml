@@ -16,8 +16,14 @@
 #   * licence MIT -- libwebsockets relicensed from LGPL-2.1+static-linking-
 #     exception to MIT in 2017; the v4.3.4 pin postdates that relicense.
 #   * enable symbol CONFIG_ALP_LWS_NO_TLS -- the SW-fallback (no-TLS)
-#     wiring transcribed verbatim from `_LIBRARY_KCONFIG["libwebsockets"]`
-#     (scripts/alp_project_emit/__init__.py:256).
+#     wiring.  This bullet used to cite
+#     `_LIBRARY_KCONFIG["libwebsockets"]` in
+#     scripts/alp_project_emit/__init__.py; that per-library dict no
+#     longer exists anywhere under scripts/ (the alp_project_emit package
+#     itself does still exist, so the citation read as live rather than
+#     obviously dead).  The mechanism today is the
+#     `integration.zephyr.kconfig` array below, transcribed verbatim by
+#     scripts/alp_orchestrate/libraries.py:321 (`zephyr_kconfig_lines`).
 #
 # HW-backends: see metadata/library-profiles/libwebsockets/ (folded WS6-c
 # Phase 3). Declares crypto (mbedtls/bearssl) and TCP-DMA accelerator

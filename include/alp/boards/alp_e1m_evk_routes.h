@@ -84,14 +84,14 @@ extern "C" {
 /* ADC channels (ALP_E1M_ADC<N> -> board-side signal) */
 /* ------------------------------------------------------------------ */
 
-#define EVK_ADC_BOARD_ID   ALP_E1M_ADC0  /**< Carrier-side BOARD_ID resistor divider (see docs/board-id.md). */
-#define EVK_ADC_ARDUINO_A1 ALP_E1M_ADC1  /**< Arduino UNO header A1 analog input. */
-#define EVK_ADC_ARDUINO_A2 ALP_E1M_ADC2  /**< Arduino UNO header A2 analog input. */
-#define EVK_ADC_ARDUINO_A3 ALP_E1M_ADC3  /**< Arduino UNO header A3 analog input. */
-#define EVK_ADC_ARDUINO_A4 ALP_E1M_ADC4  /**< Arduino UNO header A4 analog input (shared with I2C SDA on classic UNO boards). */
-#define EVK_ADC_ARDUINO_A5 ALP_E1M_ADC5  /**< Arduino UNO header A5 analog input (shared with I2C SCL on classic UNO boards). */
-#define EVK_ADC_MB_AN      ALP_E1M_ADC6  /**< mikroBUS click AN pin. */
-#define EVK_ADC_VBAT_SENSE ALP_E1M_ADC7  /**< Battery voltage divider (4:1 resistor scale) for power-monitor demos. */
+#define EVK_ADC_ARDUINO_A0    ALP_E1M_ADC0  /**< Arduino UNO header A0 analog input. SHARED with the mikroBUS click ANA pin (net CK_ANA reaches ARD.A0 through R52, R63 pulldown, C60 filter) -- see the Arduino-A0 / mikroBUS-ANA convenience macros in alp_e1m_evk.h. There is no BOARD_ID divider on this board; no BOARD_ID net exists in the EVK netlist. */
+#define EVK_ADC_ARDUINO_A1    ALP_E1M_ADC1  /**< Arduino UNO header A1 analog input. */
+#define EVK_ADC_ARDUINO_A2    ALP_E1M_ADC2  /**< Arduino UNO header A2 analog input. */
+#define EVK_ADC_ARDUINO_A3    ALP_E1M_ADC3  /**< Arduino UNO header A3 analog input. */
+#define EVK_ADC_ARDUINO_A4    ALP_E1M_ADC4  /**< Arduino UNO header A4 analog input (shared with I2C SDA on classic UNO boards). */
+#define EVK_ADC_ARDUINO_A5    ALP_E1M_ADC5  /**< Arduino UNO header A5 analog input (shared with I2C SCL on classic UNO boards). */
+#define EVK_ADC_DAC0_LOOPBACK ALP_E1M_ADC6  /**< DAC0 output loopback sense (net A6: R88 series from DAC0_OUT, R89 pulldown, C107 filter). NOT the mikroBUS AN pin -- mikroBUS ANA is shared with Arduino A0 on E1M_ADC0, see EVK_ADC_ARDUINO_A0. */
+#define EVK_ADC_DAC1_LOOPBACK ALP_E1M_ADC7  /**< DAC1 output loopback sense (net A7: R90 series from DAC1_OUT, R91 pulldown, C108 filter). There is no VBAT net anywhere in the EVK netlist -- this channel cannot be used for battery-voltage sensing. */
 
 /* ------------------------------------------------------------------ */
 /* DAC channels (ALP_E1M_DAC<N> -> board-side signal) */
@@ -131,7 +131,7 @@ extern "C" {
 #define EVK_I2C_ADDR_TCAL9538_PCIE 0x71u  /**< U37 PCIe I/O expander (A0=1, A1=0). Handles the I2C-mux SEL + PCIe slot RST/WAKE/CLKREQ signals + M2E_ALERT. */
 #define EVK_I2C_ADDR_TCA6408A_MAIN 0x20u  /**< U35 main I/O expander, TCA6408ARSVR alternative (R112 fitted, R145 DNP). PCA9538-register-compatible, so chips/tcal9538 drives it unchanged. BENCH-CONFIRMED 2026-06-16: read back config=0xFF + a live input port. */
 #define EVK_I2C_ADDR_TAS2563_LOW   0x4Du  /**< U27 smart amp (AD0 = 10k to GND). */
-#define EVK_I2C_ADDR_TAS2563_HIGH  0x4Eu  /**< U28 smart amp (AD0 = 10k to VDD). The TAS2563 broadcast address (0x48) was occupied on PRE-RESPIN boards by U32 INA236B (+V_CAM0 rail); the U32 re-strap to 0x4B from the next batch freed it -- firmware that supports both board revisions must still issue two targeted unit-address writes rather than a 0x48 broadcast. */
+#define EVK_I2C_ADDR_TAS2563_HIGH  0x4Eu  /**< U28 smart amp (AD0 = 10k to VDD). The TAS2563 broadcast address (0x48) was occupied on PRE-RESPIN boards by U32 INA236B (+V_CAM0 rail); the U32 re-strap to 0x4B from the next batch freed 0x48 at the hardware level. That does not make it usable from the SDK: 0x48 doesn't pin down one physical chip the way a strap address does, and tas2563_init() rejects 0x48 on every board revision regardless of direction, so firmware must unconditionally issue two targeted unit-address writes rather than a 0x48 broadcast. */
 #define EVK_I2C_ADDR_INA236_3V3    0x40u  /**< U21 INA236A, +3V3 rail (20 mOhm shunt, 4.0 A max). A0 = GND. */
 #define EVK_I2C_ADDR_INA236_1V8    0x41u  /**< U31 INA236A, +1V8 rail (20 mOhm shunt, 4.0 A max). A0 = V+. */
 #define EVK_I2C_ADDR_INA236_VIO    0x42u  /**< U33 INA236A, +VIO rail (50 mOhm shunt, 1.6 A max). A0 = SDA. */
@@ -155,6 +155,24 @@ extern "C" {
 #define EVK_INA236_MAX_VCAM1_A      1.6f  /**< Max current for EVK_I2C_ADDR_INA236_VCAM1. */
 #define EVK_INA236_SHUNT_5V_OHMS    0.020f  /**< Shunt for EVK_I2C_ADDR_INA236_5V. */
 #define EVK_INA236_MAX_5V_A         4.0f  /**< Max current for EVK_I2C_ADDR_INA236_5V. */
+
+/* ------------------------------------------------------------------ */
+/* Overlay-extended pin-array indices (from `overlay_pins:`) */
+/* ------------------------------------------------------------------ */
+
+#define EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT
+
+#define EVK_PIN_IO_EXP_INT (EVK_PIN_OVERLAY_BASE + 0u)  /**< AUDIO_CLK pad (E1M Z2 / Alif P9_6) repurposed as the I/O expander INT line on this EVK. When the audio path is in use the IO expander interrupt is unavailable; firmware should poll the expander instead. */
+#define EVK_PIN_IO_EXP_RST (EVK_PIN_OVERLAY_BASE + 1u)  /**< SPI0_CS1 pad (E1M N1 / Alif P3_6) repurposed as the I/O expander reset line. When SPI0 is used with two chip-selects this pin can't double as IO_EXP_RST -- the EVK assumes SPI0 is in single-CS mode at most. */
+#define EVK_PIN_AMP_FAULT  (EVK_PIN_OVERLAY_BASE + 2u)  /**< SPI0_MISO pad (E1M L1 / Alif P5_0) repurposed as the audio amplifier fault output (open-drain input from the amp). */
+#define EVK_PIN_AMP_ENABLE (EVK_PIN_OVERLAY_BASE + 3u)  /**< SPI0_CS0 pad (E1M M1 / Alif P5_2) repurposed as the audio amplifier enable input (active-high). */
+#define EVK_PIN_MB_INT     (EVK_PIN_OVERLAY_BASE + 4u)  /**< I2S1_SDI pad (E1M AH6 / Alif P13_4) repurposed as the mikroBUS click INT pin. Was earlier (mis)documented as CTP_INT; the user has since clarified that CTP_INT is on SPI1_CS1 (see EVK_PIN_CTP_INT below) and I2S1_SDI is the mikroBUS INT line. */
+#define EVK_PIN_CK_DIO4    (EVK_PIN_OVERLAY_BASE + 5u)  /**< SPI0_MOSI pad (E1M M2 / Alif P5_1) repurposed as Arduino CK_DIO4 (digital I/O 4 on the Arduino UNO header). */
+#define EVK_PIN_CK_DIO3    (EVK_PIN_OVERLAY_BASE + 6u)  /**< SPI0_SCLK pad (E1M N2) repurposed as Arduino CK_DIO3. NB: the Alif-side pad mapping for SPI0_SCLK is left blank in metadata/e1m_modules/aen/from-alif.tsv (user-supplied) and needs filling once the EVK schematic is cross-checked. */
+#define EVK_PIN_CK_DIO2    (EVK_PIN_OVERLAY_BASE + 7u)  /**< I2S1_WS pad (E1M AG7 / Alif P2_7) repurposed as Arduino CK_DIO2. */
+#define EVK_PIN_CK_DIO1    (EVK_PIN_OVERLAY_BASE + 8u)  /**< I2S1_SDO pad (E1M AG6 / Alif P13_5) repurposed as Arduino CK_DIO1. */
+#define EVK_PIN_CK_RST     (EVK_PIN_OVERLAY_BASE + 9u)  /**< I2S1_SCLK pad (E1M AH7 / Alif P2_6) repurposed as Arduino CK_RST (the Arduino UNO header's RESET signal -- shields can pulse it low to force a reboot). */
+#define EVK_PIN_CTP_INT    (EVK_PIN_OVERLAY_BASE + 10u)  /**< SPI1_CS1 pad (E1M AH8 -- CC3501E side, GPIO_15) repurposed as the capacitive touch panel interrupt input. Routed through the on-module CC3501E -- firmware reads CTP touches by registering an interrupt callback on the CC3501E's GPIO_15 via ALP_CC3501E_CMD_GPIO_SET_INTERRUPT. */
 
 /* ------------------------------------------------------------------ */
 /* Portable cross-EVK aliases (e1m-spec STANDARD.md §7.2 common set). */

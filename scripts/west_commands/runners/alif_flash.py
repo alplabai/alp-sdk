@@ -22,18 +22,23 @@ vector (bytes 4-8 of zephyr.bin) -- no flag needed:
 - An ITCM-linked app (reset vector 0x58xxxxxx on the M55-HE / 0x50xxxxxx
   on the M55-HP) gets an embedded ("load", "boot") ATOC entry; the SE
   copies it into ITCM before booting.
-- A slot0-XIP app (reset vector 0x8001xxxx -- e.g. a build that
-  overflows ITCM, such as a real NPU model) gets a standalone
-  ("boot"-only) ATOC entry at mramAddress 0x80010000; the SE boots it
-  in place.
+- A slot0-XIP app (reset vector inside App MRAM) gets a standalone
+  ("boot"-only) ATOC entry at its OWN core's disjoint slot0 window
+  (#1069) -- M55-HE at mramAddress 0x80010000 (unchanged), M55-HP at
+  0x802b0000 (moved off the old shared 0x80010000 window; see
+  ``scripts/aen_atoc.py`` and ``metadata/e1m_modules/E1M-AEN801.yaml``
+  ``memory_map:``). Which window the reset vector falls in is what
+  distinguishes the core here, cross-checked against ``--device`` the
+  same way the ITCM branch below cross-checks it.
 
-Bench-verified 2026-07-19: a single ``app-write-mram -c <uart> -p`` run
-over the SE-UART burns BOTH shapes -- for the slot0-XIP case it burns
-the standalone app blob to 0x80010000 AND the signed ATOC in one pass
-(two ``COMMAND_BURN_MRAM`` phases, both confirmed by read-back:
-byte-exact at 0x80010000, reset vector 0x80011F15, core PC 0x80016048
-running from slot0). There is therefore no separate J-Link-only
-requirement for slot0 provisioning; the two-blob bench Flow D helper
+Bench-verified 2026-07-19 (pre-#1069, on the M55-HE window, since both
+cores shared it then): a single ``app-write-mram -c <uart> -p`` run over
+the SE-UART burns BOTH shapes -- for the slot0-XIP case it burns the
+standalone app blob to 0x80010000 AND the signed ATOC in one pass (two
+``COMMAND_BURN_MRAM`` phases, both confirmed by read-back: byte-exact at
+0x80010000, reset vector 0x80011F15, core PC 0x80016048 running from
+slot0). There is therefore no separate J-Link-only requirement for
+slot0 provisioning; the two-blob bench Flow D helper
 (``scripts/bench/aen/flash-jlink-mramxip.sh``) remains available as an
 alternative, not a prerequisite.
 
@@ -57,11 +62,28 @@ Setup (one-off, per host)
   import ``fdt`` itself; the SETOOLS executables do.)
 '''
 
+import importlib.util
 import os
 import shutil
 from pathlib import Path
 
 from runners.core import RunnerCaps, ZephyrBinaryRunner
+
+
+def _load_aen_atoc():
+    '''Import scripts/aen_atoc.py (the #1069 ATOC-assembly guard) by file
+    path rather than package import -- this module runs as a Zephyr
+    module runner (imported via zephyr/module.yml's runners: list at
+    `west flash` time), a context with no guarantee that alp-sdk's
+    `scripts/` dir is already on sys.path.'''
+    path = Path(__file__).resolve().parents[2] / 'aen_atoc.py'
+    spec = importlib.util.spec_from_file_location('aen_atoc', path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_aen_atoc = _load_aen_atoc()
 
 # ATOC app-entry shapes. Both burn identically over the SE-UART
 # (app-write-mram -c <uart> -p); which one applies to a given build is
@@ -79,19 +101,20 @@ from runners.core import RunnerCaps, ZephyrBinaryRunner
 # MRAM slot0 XIP (standalone): an app LINKED INTO MRAM slot0 (e.g. one
 # that overflows ITCM, such as a real NPU model). The ATOC only tells
 # the SE to boot it where it already sits (mramAddress), not to load it.
-#   mramAddress 0x80010000 = MRAM base 0x80000000 + slot0 offset 0x10000
-#   -- MUST be the full address; the bare 0x10000 offset gives SETOOLS
-#   "Invalid Global Address" (bench-pinned).
-#       cite: scripts/bench/aen/flash-jlink-mramxip.sh:45  (APP_ADDR=0x80010000)
-#       cite: scripts/bench/aen/flash-jlink-mramxip.sh:67  ("mramAddress": "0x80010000")
+#   mramAddress = MRAM base 0x80000000 + this core's slot0 offset -- MUST
+#   be the full address; the bare offset gives SETOOLS "Invalid Global
+#   Address" (bench-pinned). Since #1069 the offset is per-core (disjoint
+#   windows -- see scripts/aen_atoc.SLOT0_WINDOWS): M55-HE keeps the
+#   pre-#1069 0x80010000, M55-HP moved to 0x802b0000.
+#       cite: scripts/bench/aen/flash-jlink-mramxip.sh:45  (APP_ADDR=0x80010000, HE)
+#       cite: scripts/bench/aen/flash-jlink-mramxip.sh:67  ("mramAddress": "0x80010000", HE)
 #   flags ["boot"] only (NOT load -- the SE boots it in place); the slot0
-#   reset vector then lands in MCUboot/the app at VTOR 0x80010800.
+#   reset vector then lands in MCUboot/the app at VTOR slot0_base + 0x800.
 _CPU_PROFILES = {
     'HE': ('M55_HE', '0x58000000'),
     'HP': ('M55_HP', '0x50000000'),
 }
 _DEFAULT_CPU_SUFFIX = 'HE'  # boards that omit --device were always HE-only
-_SLOT0_MRAM_ADDRESS = '0x80010000'
 
 
 def _cpu_suffix(device):
@@ -122,24 +145,43 @@ def _reset_vector(bin_path):
     return int.from_bytes(header[4:8], 'little')
 
 
-_SLOT0_REGION_END = 0x80580000  # System MRAM base (bench-confirmed); App
-                                 # MRAM slot0 XIP images sit below this.
-
-
 def _select_app_shape(reset_vector, cpu_suffix):
     '''Map a build's reset vector to its ATOC app-entry shape. Both
     shapes burn identically over the SE-UART (see module docstring);
     this only selects the config, it never rejects a flash (except a
-    core mismatch -- see the TCM branch below).'''
-    if 0x80010000 <= reset_vector < _SLOT0_REGION_END:
-        # Shared App-MRAM slot0 XIP region (0x80010000, the load offset,
-        # up to System MRAM at 0x80580000). BOTH cores link a slot0 app
-        # to this same region, so the vector can't tell HE from HP here
-        # -- --device is the only signal for cpu_id in this branch.
+    core mismatch -- see the TCM/slot0-window branches below).'''
+    if 0x80010000 <= reset_vector < _aen_atoc.MRAM_END:
+        # App-MRAM slot0 XIP region. Since #1069 each core has its OWN
+        # disjoint window (scripts/aen_atoc.SLOT0_WINDOWS) -- find which
+        # window contains this build's reset vector, the same way the
+        # ITCM branch below finds the core from the vector's top byte,
+        # then cross-check --device agrees.
+        vector_cpu_id = None
+        for candidate_cpu_id, (win_base, win_size) in _aen_atoc.SLOT0_WINDOWS.items():
+            if win_base <= reset_vector < win_base + win_size:
+                vector_cpu_id = candidate_cpu_id
+                break
+        if vector_cpu_id is None:
+            windows_desc = ', '.join(
+                f'{cid} 0x{b:08x}..0x{b + s:08x}'
+                for cid, (b, s) in _aen_atoc.SLOT0_WINDOWS.items())
+            raise RuntimeError(
+                f'reset vector 0x{reset_vector:08x} is in App MRAM but '
+                f'outside every declared slot0 window ({windows_desc}) -- '
+                'refusing to burn (see metadata/e1m_modules/'
+                'E1M-AEN801.yaml memory_map:).')
+        vector_suffix = 'HE' if vector_cpu_id == 'M55_HE' else 'HP'
+        if vector_suffix != cpu_suffix:
+            raise RuntimeError(
+                f'reset vector 0x{reset_vector:08x} is linked into the '
+                f'{vector_cpu_id} slot0 window but --device selected '
+                f'M55-{cpu_suffix} -- refusing to burn a core-mismatched '
+                'image (check --device against the actual link address).')
         cpu_id, _unused_load_address = _CPU_PROFILES[cpu_suffix]
+        win_base, _win_size = _aen_atoc.SLOT0_WINDOWS[cpu_id]
         return {
             'cpu_id': cpu_id,
-            'mramAddress': _SLOT0_MRAM_ADDRESS,
+            'mramAddress': f'0x{win_base:08x}',
             'flags': ['boot'],
         }
     core_byte = reset_vector & 0xFF000000
@@ -163,7 +205,7 @@ def _select_app_shape(reset_vector, cpu_suffix):
         }
     raise RuntimeError(
         f'unrecognised reset vector 0x{reset_vector:08x} -- expected a '
-        f'slot0-XIP image in App MRAM (0x80010000..0x{_SLOT0_REGION_END:08x}) '
+        f'slot0-XIP image in App MRAM (0x80010000..0x{_aen_atoc.MRAM_END:08x}) '
         'or an ITCM-load image (0x58xxxxxx M55-HE / 0x50xxxxxx M55-HP). '
         'Refusing to burn a mismatched image (see docs/aen-provisioning.md).')
 
@@ -307,6 +349,16 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         cpu_suffix = _cpu_suffix(self.device)
         reset_vector = _reset_vector(bin_file)
         app_shape = _select_app_shape(reset_vector, cpu_suffix)
+
+        # #1069 ATOC-assembly guard: reject a mramAddress outside its
+        # cpu_id's declared slot0 window before app-gen-toc runs (a
+        # single-entry flash can't hit the sibling-overlap check, but the
+        # window check alone is exactly what makes _select_app_shape's
+        # window lookup above load-bearing rather than decorative).
+        try:
+            _aen_atoc.validate_atoc_entries({'app': app_shape})
+        except _aen_atoc.AtocValidationError as exc:
+            raise RuntimeError(str(exc)) from exc
 
         # 1. Stage the image + a per-app signed-ATOC config that keeps the
         #    factory DEVICE config and points the app entry at this build's

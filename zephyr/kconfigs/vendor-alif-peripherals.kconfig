@@ -153,9 +153,11 @@ config MDIO_DWMAC_ALIF
 	  ADR 0017 Tier-1.5: no upstream v4.4 driver targets this register
 	  layout, but the MAC_MDIO_Address/Data field offsets and bitmasks are
 	  CONSUMED from the upstream eth_dwmac core's own private header
-	  (eth_dwmac_priv.h) -- not reinvented. BUILD-ONLY this batch: proven by
-	  the aen-ethernet-link mdio-managed twister scenario on the AEN801
-	  M55-HE target; no MDIO-managed PHY exercised on real E8 silicon yet.
+	  (eth_dwmac_priv.h) -- not reinvented. Compile-proven in CI by the
+	  aen-ethernet-link mdio-managed twister scenario on the AEN801 M55-HE
+	  target; the MDIO layer itself has since answered on real E8 silicon
+	  (#1244, `[eth] MDIO PHY@0 id=2000a140`), but link/traffic over the
+	  managed path is still unproven.
 
 config MDIO_DWMAC_ALIF_CLOCK_RANGE
 	int "GMAC MDIO CSR clock-range select (MAC_MDIO_Address CR field)"
@@ -205,6 +207,43 @@ config SPI_DW_ALIF_USE_DMA
 	  stay on the PIO/interrupt path.  Drives the vendored peripheral-flow
 	  PL330 (alif,dma-pl330) + event-router (alif,dma-event-router).
 
+config SPI_DW_ALIF_PACK32
+	bool "Pack byte-stream SPI transfers 4 bytes per FIFO slot"
+	default n
+	depends on SPI_DW_ALIF
+	help
+	  Performance option for large 8-bit byte-stream transfers on the polled
+	  master path.  The macrocell is programmed DFS=32 so one write_dr and one
+	  read_dr move FOUR bytes instead of one, cutting the dominant cost of the
+	  polled loop -- peripheral MMIO accesses, ~45 cycles each on this SoC --
+	  from ~2.2 per byte to ~0.55.
+
+	  The wire is BIT-IDENTICAL to the 8-bit case: DW SSI shifts each frame out
+	  MSB-first, so packing the four bytes big-endian (__REV) emits exactly the
+	  byte order an 8-bit transfer would.  The peer therefore cannot tell the
+	  difference, and this needs no agreement from the other end of the link.
+
+	  Applied only when every condition holds, else the transfer falls back to
+	  the normal 8-bit path: master (not slave), caller asked for 8-bit words,
+	  the controller supports 32-bit frames, the transfer is TX_RX with both
+	  buffers present (so CTRLR1/NDF frame counting is not involved), every
+	  buffer length is a multiple of 4, and the transfer is at least
+	  SPI_DW_ALIF_PACK32_MIN_LEN bytes.
+
+	  Does NOT change the meaning of a caller-requested 16/32-bit word size;
+	  bits_per_word stays a public contract about the wire, and this is purely
+	  an internal FIFO-packing optimisation for 8-bit streams.
+
+config SPI_DW_ALIF_PACK32_MIN_LEN
+	int "Minimum transfer length (bytes) to pack 4 bytes per FIFO slot"
+	default 64
+	depends on SPI_DW_ALIF_PACK32
+	help
+	  Shorter transfers keep the 8-bit path.  Switching frame size costs an
+	  SSIENR disable/enable plus a CTRLR0 rewrite, which is not worth paying
+	  for a handful of bytes -- and the bridge's 4-8 byte lockstep control
+	  frames are not where the time goes anyway.
+
 config SPI_DW_ALIF_DMA_MIN_LEN
 	int "Minimum transfer length (bytes) to use the SPI DMA path"
 	default 64
@@ -215,6 +254,25 @@ config SPI_DW_ALIF_DMA_MIN_LEN
 	  transfer never reaches the burst watermark, so it would stall).  Tiny
 	  control frames (e.g. the CC3501E bridge's 4-8 byte lockstep transfers)
 	  thus keep working on PIO while large continuous streams use DMA.
+
+config SPI_DW_ALIF_DMA_TIMEOUT_MS
+	int "Timeout (ms) waiting for a SPI DMA completion callback"
+	default 1000
+	depends on SPI_DW_ALIF_USE_DMA
+	help
+	  How long spi_dw_dma_wait_completion() waits for each DMA completion
+	  before giving up with -ETIMEDOUT.
+
+	  This used to be K_FOREVER, which is where every stall on the DMA path
+	  terminated: one DMA error tore down the event-router callback mapping
+	  while the descriptor-shape cache stayed valid, the next matching transfer
+	  skipped the dma_config() that would have re-registered it, and its
+	  completion was discarded as "unmapped" -- so the caller's thread blocked
+	  for the life of the image with no way to report it (#1819).
+
+	  The default is generous: even a full CONFIG_SPI_DW_ALIF_DMA_MIN_LEN-bounded
+	  streaming transfer completes in single-digit milliseconds, so 1000 ms only
+	  ever fires on a genuine fault.
 
 # ----------------------------------------------------------------------------
 # Secure-Enclave (SE) SERVICE transport -- Arm MHUv2 IPM driver + hal_alif client

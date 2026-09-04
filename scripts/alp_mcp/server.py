@@ -151,6 +151,24 @@ def som_info(sku: str) -> dict[str, Any]:
     return som
 
 
+# #1146: `soc_peripherals` (see the #1243 comment in scripts/gen_catalog.py)
+# is a literal silicon projection -- "does the SoC integrate this IP block" --
+# not "does <alp/CLASS.h> work on this SKU today". A `true` here can still
+# mean zero DT node, zero backend binding and ALP_ERR_NOT_READY on every call
+# (e.g. V2N `can: true`: the RZ/V2N integrates 6 CAN-FD controllers in
+# silicon, but the E1M-X V2N module bonds out only 2 -- CANFD2 and CANFD3 --
+# and neither has a live DT node on either core yet). Every response mode
+# below carries this note so an agent never reads `true`/`supported` as a
+# portable-API or backend-implementation guarantee.
+_PERIPHERAL_SUPPORT_NOTE = (
+    "soc_peripherals reflects silicon integration only (the SoC/module has "
+    "the IP block), not portable-API availability or backend implementation "
+    "status. A peripheral can read true here with no live DT node and no "
+    "working <alp/CLASS.h> call -- check src/backends/<peripheral>/ and the "
+    "board's devicetree before assuming it works."
+)
+
+
 def peripheral_support(
     sku: Optional[str] = None, peripheral: Optional[str] = None
 ) -> dict[str, Any]:
@@ -166,6 +184,11 @@ def peripheral_support(
     ``i2c``, ``mipi_csi``, ``npu``, ``pcie``, ``spi``, ``uart``, ``usb`` ...)
     and are matched case-insensitively. Returns ``{"error": ...}`` on an
     unknown SKU or peripheral, or if neither argument is given.
+
+    Every successful response carries a ``note`` caveat: this map is a
+    silicon-integration fact, not a portable-API or backend-implementation
+    guarantee -- ``true`` can still mean no live devicetree node exists (see
+    issue #1146 for the V2N/V2M CAN-FD case).
     """
     catalog = _load_catalog()
 
@@ -177,22 +200,31 @@ def peripheral_support(
         if som is None:
             known = [s.get("sku") for s in catalog.get("soms", [])]
             return {"error": f"unknown SoM SKU: {sku!r}", "known_skus": known}
-        periph_map: dict[str, bool] = som.get("peripherals", {})
+        periph_map: dict[str, bool] = som.get("soc_peripherals", {})
         if peripheral is None:
-            return {"sku": som.get("sku"), "peripherals": periph_map}
+            return {
+                "sku": som.get("sku"),
+                "soc_peripherals": periph_map,
+                "note": _PERIPHERAL_SUPPORT_NOTE,
+            }
         key = peripheral.strip().lower()
         if key not in periph_map:
             return {
                 "error": f"unknown peripheral: {peripheral!r}",
                 "known_peripherals": sorted(periph_map.keys()),
             }
-        return {"sku": som.get("sku"), "peripheral": key, "supported": bool(periph_map[key])}
+        return {
+            "sku": som.get("sku"),
+            "peripheral": key,
+            "supported": bool(periph_map[key]),
+            "note": _PERIPHERAL_SUPPORT_NOTE,
+        }
 
     # peripheral only -> which SoMs support it.
     key = peripheral.strip().lower()  # type: ignore[union-attr]
     all_keys: set[str] = set()
     for som in catalog.get("soms", []):
-        all_keys.update((som.get("peripherals") or {}).keys())
+        all_keys.update((som.get("soc_peripherals") or {}).keys())
     if key not in all_keys:
         return {
             "error": f"unknown peripheral: {peripheral!r}",
@@ -201,9 +233,13 @@ def peripheral_support(
     supported = [
         som.get("sku")
         for som in catalog.get("soms", [])
-        if (som.get("peripherals") or {}).get(key)
+        if (som.get("soc_peripherals") or {}).get(key)
     ]
-    return {"peripheral": key, "supported_by": supported}
+    return {
+        "peripheral": key,
+        "supported_by": supported,
+        "note": _PERIPHERAL_SUPPORT_NOTE,
+    }
 
 
 def list_examples(

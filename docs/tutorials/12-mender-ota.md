@@ -109,7 +109,7 @@ Flash the initial image to microSD or eMMC:
 
 ```bash
 sudo dd \
-    if=tmp/deploy/images/e1m-v2n101-a55/core-image-minimal-mender-e1m-v2n101-a55.wic \
+    if=tmp/deploy/images/e1m-v2n101-a55/alp-image-edge-e1m-v2n101-a55.wic \
     of=/dev/sdX bs=4M conv=fsync
 ```
 
@@ -139,7 +139,7 @@ Make a small change in your meta-alp-sdk recipes (e.g. bump a
 package version, add a debug log).  Rebuild:
 
 ```bash
-bitbake core-image-minimal-mender
+bitbake alp-image-edge
 ```
 
 Upload the new `.mender` artefact via the UI's **Releases**

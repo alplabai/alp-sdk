@@ -59,22 +59,22 @@
 #define MHUV2_CH_STRIDE 0x20U
 
 /* SENDER frame registers (window 0). */
-#define MHUV2_TX_CH0_STAT 0x00U        /* RO  current flag bits (rx clears)   */
-#define MHUV2_TX_CH0_SET 0x0CU         /* W1S ring doorbell: write (1u<<bit)  */
+#define MHUV2_TX_CH0_STAT       0x00U  /* RO  current flag bits (rx clears)   */
+#define MHUV2_TX_CH0_SET        0x0CU  /* W1S ring doorbell: write (1u<<bit)  */
 #define MHUV2_TX_ACCESS_REQUEST 0xF88U /* RW  write 1 to request rx wake      */
-#define MHUV2_TX_ACCESS_READY 0xF8CU   /* RO  reads 1 when rx is ready        */
+#define MHUV2_TX_ACCESS_READY   0xF8CU /* RO  reads 1 when rx is ready        */
 /*
  * NOTE: MHUv2.1 adds per-window CH_INT_* at window-offset +0x10/+0x14/+0x18 on
  * the sender side; MHUv2.0 lacks them. This driver does NOT rely on them.
  */
 
 /* RECEIVER frame registers (window 0). */
-#define MHUV2_RX_CH0_STAT 0x00U        /* RO  raw incoming flag bits          */
+#define MHUV2_RX_CH0_STAT        0x00U /* RO  raw incoming flag bits          */
 #define MHUV2_RX_CH0_STAT_MASKED 0x04U /* RO  flags AND enabled (unmasked)    */
-#define MHUV2_RX_CH0_CLEAR 0x08U       /* W1C ack: write (1u<<bit) to clear   */
+#define MHUV2_RX_CH0_CLEAR       0x08U /* W1C ack: write (1u<<bit) to clear   */
 #define MHUV2_RX_CH0_MASK_STATUS 0x10U /* RO  1 = masked (no IRQ)             */
-#define MHUV2_RX_CH0_MASK_SET 0x14U    /* W1S write 1 to MASK (disable IRQ)   */
-#define MHUV2_RX_CH0_MASK_CLEAR 0x18U  /* W1C write 1 to UNMASK (enable IRQ)  */
+#define MHUV2_RX_CH0_MASK_SET    0x14U /* W1S write 1 to MASK (disable IRQ)   */
+#define MHUV2_RX_CH0_MASK_CLEAR  0x18U /* W1C write 1 to UNMASK (enable IRQ)  */
 /*
  * Receiver-frame control block (after the 124 channel windows at 0x0..0xF7C):
  * INT_EN @0xF98 gates the COMBINED receive interrupt. Unmasking a channel
@@ -93,21 +93,24 @@
 
 /** @brief Per-instance immutable configuration. */
 struct mhuv2_config {
-    /** Mapped base address of this MHUv2 frame (window 0 base). */
-    mm_reg_t base;
-    /** true for a sender ("tx") frame, false for a receiver ("rx") frame. */
-    bool is_tx;
+	/** Mapped base address of this MHUv2 frame (window 0 base). */
+	mm_reg_t base;
+	/** true for a sender ("tx") frame, false for a receiver ("rx") frame. */
+	bool is_tx;
 };
 
 /** @brief Per-instance mutable state (receiver frames only). */
 struct mhuv2_data {
-    /** Registered per-doorbell-bit callbacks. */
-    mbox_callback_t cb[MHUV2_NUM_CHANNELS];
-    /** User context paired with each callback. */
-    void *cb_ctx[MHUV2_NUM_CHANNELS];
-    /** Back-pointer for the poll timer (see below). */
-    const struct device *dev;
-    /**
+	/** Serialises the read-then-ack in mhuv2_rx_dispatch(), which is reachable
+     *  from both the RX ISR and the poll-timer expiry. */
+	struct k_spinlock lock;
+	/** Registered per-doorbell-bit callbacks. */
+	mbox_callback_t cb[MHUV2_NUM_CHANNELS];
+	/** User context paired with each callback. */
+	void *cb_ctx[MHUV2_NUM_CHANNELS];
+	/** Back-pointer for the poll timer (see below). */
+	const struct device *dev;
+	/**
      * POLL fallback: on the Alif E8 the non-secure HE<->HP MHU-1 receiver does
      * NOT raise the combined NVIC interrupt even when correctly configured
      * (INT_EN.CHCOMB set, channel unmasked, IRQ enabled) -- bench-confirmed
@@ -115,14 +118,14 @@ struct mhuv2_data {
      * silicon polls the raw CH0_STAT. So drive the same dispatch from a periodic
      * poll timer started in set_enabled(), independent of the (dead) IRQ.
      */
-    struct k_timer poll_timer;
-    /**
+	struct k_timer poll_timer;
+	/**
      * Bitmask of currently-enabled doorbell bits. The poll timer is shared by
      * the whole frame, so it may only be stopped once the LAST enabled channel
      * is disabled -- otherwise disabling one channel would silently kill
      * dispatch for every other still-enabled channel.
      */
-    uint32_t enabled_mask;
+	uint32_t enabled_mask;
 };
 
 /* Dispatch the registered callbacks for every asserted (and unmasked) doorbell
@@ -143,41 +146,69 @@ static void mhuv2_rx_dispatch(const struct device *dev);
  * @retval 0         On success.
  * @retval -EINVAL   channel_id out of range, or frame is not tx.
  * @retval -EMSGSIZE msg is non-NULL (doorbell mode carries no payload).
+ * @retval -EIO      the receiver never reported ACCESS_READY (wake timeout).
  */
-static int mhuv2_send(const struct device *dev, mbox_channel_id_t channel_id,
-                      const struct mbox_msg *msg)
+static int
+mhuv2_send(const struct device *dev, mbox_channel_id_t channel_id, const struct mbox_msg *msg)
 {
-    const struct mhuv2_config *cfg = dev->config;
+	const struct mhuv2_config *cfg = dev->config;
 
-    if (!cfg->is_tx) {
-        return -EINVAL;
-    }
-    if (channel_id >= MHUV2_NUM_CHANNELS) {
-        return -EINVAL;
-    }
-    /* Doorbell-only: no payload is carried through the MHU. */
-    if (msg != NULL) {
-        return -EMSGSIZE;
-    }
+	if (!cfg->is_tx) {
+		return -EINVAL;
+	}
+	if (channel_id >= MHUV2_NUM_CHANNELS) {
+		return -EINVAL;
+	}
+	/* Doorbell-only: no payload is carried through the MHU. */
+	if (msg != NULL) {
+		return -EMSGSIZE;
+	}
 
-    /*
+	/*
      * Wake the link BEFORE ringing: assert ACCESS_REQUEST and spin for
      * ACCESS_READY. The OpenAMP ipc_service backend never calls set_enabled on
      * the TX frame, so without this the doorbell write does not propagate to the
      * receiver's CH0_STAT (bench-confirmed: rings sent but RX status stayed 0).
      * Matches the proven raw-MHU path in examples/aen/aen-dualcore-ipc.
      */
-    sys_write32(1U, cfg->base + MHUV2_TX_ACCESS_REQUEST);
-    for (uint32_t i = 0U; i < MHUV2_ACCESS_READY_SPINS; i++) {
-        if (sys_read32(cfg->base + MHUV2_TX_ACCESS_READY) != 0U) {
-            break;
-        }
-    }
+	sys_write32(1U, cfg->base + MHUV2_TX_ACCESS_REQUEST);
+	bool ready = false;
+	for (uint32_t i = 0U; i < MHUV2_ACCESS_READY_SPINS; i++) {
+		if (sys_read32(cfg->base + MHUV2_TX_ACCESS_READY) != 0U) {
+			ready = true;
+			break;
+		}
+	}
+	if (!ready) {
+		/* Same readiness timeout mhuv2_set_enabled() already treats as -EIO:
+         * ringing the doorbell now would tell the caller delivery succeeded
+         * when the receiver never woke to observe it.  Drop the request first
+         * (see below) -- leaving it asserted after a FAILED send pins the
+         * receiver frame ready for nothing at all. */
+		sys_write32(0U, cfg->base + MHUV2_TX_ACCESS_REQUEST);
+		return -EIO;
+	}
 
-    /* Window 0, CH0_SET is write-1-to-set: assert the doorbell bit. */
-    sys_write32(BIT(channel_id), cfg->base + MHUV2_TX_CH0_SET);
+	/* Window 0, CH0_SET is write-1-to-set: assert the doorbell bit. */
+	sys_write32(BIT(channel_id), cfg->base + MHUV2_TX_CH0_SET);
 
-    return 0;
+	/*
+	 * De-assert the request now that the transfer is done.  HWRM 9.2.3.4.1
+	 * Software Requirements, step 5: "Sender sets the MHU_ACCESS_REQUEST
+	 * [ACC_REQ] field to 0 if it has no further transfer to send.  If the
+	 * Sender has more transfers to send, it repeats step 4 until it has no more
+	 * transfers to send."  This driver has no batching, so every send is "no
+	 * further transfer".
+	 *
+	 * Before this there was no write of 0 anywhere in the file: the first
+	 * mbox_send() pinned ACC_REQ = 1 for the life of the image, holding the
+	 * receiver frame's power domain ready forever, so the RTSS-HP or A32 side
+	 * could never drop to low power through the MHU wake protocol.  It never
+	 * surfaced as an error (#1827).
+	 */
+	sys_write32(0U, cfg->base + MHUV2_TX_ACCESS_REQUEST);
+
+	return 0;
 }
 
 /**
@@ -191,23 +222,25 @@ static int mhuv2_send(const struct device *dev, mbox_channel_id_t channel_id,
  * @retval 0        On success.
  * @retval -EINVAL  channel_id out of range or frame is not rx.
  */
-static int mhuv2_register_callback(const struct device *dev, mbox_channel_id_t channel_id,
-                                   mbox_callback_t cb, void *user_data)
+static int mhuv2_register_callback(const struct device *dev,
+                                   mbox_channel_id_t    channel_id,
+                                   mbox_callback_t      cb,
+                                   void                *user_data)
 {
-    const struct mhuv2_config *cfg  = dev->config;
-    struct mhuv2_data         *data = dev->data;
+	const struct mhuv2_config *cfg  = dev->config;
+	struct mhuv2_data         *data = dev->data;
 
-    if (cfg->is_tx) {
-        return -EINVAL;
-    }
-    if (channel_id >= MHUV2_NUM_CHANNELS) {
-        return -EINVAL;
-    }
+	if (cfg->is_tx) {
+		return -EINVAL;
+	}
+	if (channel_id >= MHUV2_NUM_CHANNELS) {
+		return -EINVAL;
+	}
 
-    data->cb[channel_id]     = cb;
-    data->cb_ctx[channel_id] = user_data;
+	data->cb[channel_id]     = cb;
+	data->cb_ctx[channel_id] = user_data;
 
-    return 0;
+	return 0;
 }
 
 /**
@@ -221,9 +254,9 @@ static int mhuv2_register_callback(const struct device *dev, mbox_channel_id_t c
  */
 static int mhuv2_mtu_get(const struct device *dev)
 {
-    ARG_UNUSED(dev);
+	ARG_UNUSED(dev);
 
-    return 0;
+	return 0;
 }
 
 /**
@@ -234,9 +267,9 @@ static int mhuv2_mtu_get(const struct device *dev)
  */
 static uint32_t mhuv2_max_channels_get(const struct device *dev)
 {
-    ARG_UNUSED(dev);
+	ARG_UNUSED(dev);
 
-    return MHUV2_NUM_CHANNELS;
+	return MHUV2_NUM_CHANNELS;
 }
 
 /**
@@ -259,59 +292,62 @@ static uint32_t mhuv2_max_channels_get(const struct device *dev)
  */
 static int mhuv2_set_enabled(const struct device *dev, mbox_channel_id_t channel_id, bool enable)
 {
-    const struct mhuv2_config *cfg = dev->config;
+	const struct mhuv2_config *cfg = dev->config;
 
-    if (channel_id >= MHUV2_NUM_CHANNELS) {
-        return -EINVAL;
-    }
+	if (channel_id >= MHUV2_NUM_CHANNELS) {
+		return -EINVAL;
+	}
 
-    if (cfg->is_tx) {
-        if (!enable) {
-            /* Sender doorbells are not IRQ sources -- nothing to mask. */
-            return 0;
-        }
+	if (cfg->is_tx) {
+		if (!enable) {
+			/* Sender doorbells are not IRQ sources -- nothing to mask. */
+			return 0;
+		}
 
-        /*
+		/*
 		 * Wake handshake: request the receiver, then poll ACCESS_READY
 		 * with a bounded spin so a dead/absent peer can't hang us.
 		 */
-        sys_write32(1U, cfg->base + MHUV2_TX_ACCESS_REQUEST);
+		sys_write32(1U, cfg->base + MHUV2_TX_ACCESS_REQUEST);
 
-        for (uint32_t i = 0U; i < MHUV2_ACCESS_READY_SPINS; i++) {
-            if (sys_read32(cfg->base + MHUV2_TX_ACCESS_READY) != 0U) {
-                return 0;
-            }
-        }
+		for (uint32_t i = 0U; i < MHUV2_ACCESS_READY_SPINS; i++) {
+			if (sys_read32(cfg->base + MHUV2_TX_ACCESS_READY) != 0U) {
+				return 0;
+			}
+		}
 
-        return -EIO;
-    }
+		/* Timed out waking the receiver.  Drop the request rather than leave
+         * the far frame held ready by a handshake that failed (#1827). */
+		sys_write32(0U, cfg->base + MHUV2_TX_ACCESS_REQUEST);
+		return -EIO;
+	}
 
-    /* Receiver: UNMASK to enable the IRQ for this bit, MASK to disable. */
-    if (enable) {
-        struct mhuv2_data *data = dev->data;
+	/* Receiver: UNMASK to enable the IRQ for this bit, MASK to disable. */
+	if (enable) {
+		struct mhuv2_data *data = dev->data;
 
-        data->enabled_mask |= BIT(channel_id);
-        sys_write32(BIT(channel_id), cfg->base + MHUV2_RX_CH0_MASK_CLEAR);
-        /* Also enable the COMBINED receive interrupt (Alif DFP mhu_receiver.c).
+		data->enabled_mask |= BIT(channel_id);
+		sys_write32(BIT(channel_id), cfg->base + MHUV2_RX_CH0_MASK_CLEAR);
+		/* Also enable the COMBINED receive interrupt (Alif DFP mhu_receiver.c).
          * NOTE: on the E8 non-secure HE<->HP pair this still does not raise an
          * NVIC IRQ, so we ALSO start the poll timer below as the real driver.
          * (Re)starting an already-running k_timer is a harmless restart. */
-        sys_write32(sys_read32(cfg->base + MHUV2_RX_INT_EN) | MHUV2_RX_INT_CHCOMB,
-                    cfg->base + MHUV2_RX_INT_EN);
-        k_timer_start(&data->poll_timer, K_MSEC(1), K_MSEC(1));
-    } else {
-        struct mhuv2_data *data = dev->data;
+		sys_write32(sys_read32(cfg->base + MHUV2_RX_INT_EN) | MHUV2_RX_INT_CHCOMB,
+		            cfg->base + MHUV2_RX_INT_EN);
+		k_timer_start(&data->poll_timer, K_MSEC(1), K_MSEC(1));
+	} else {
+		struct mhuv2_data *data = dev->data;
 
-        data->enabled_mask &= ~BIT(channel_id);
-        /* The poll timer serves EVERY enabled doorbell bit on this frame:
+		data->enabled_mask &= ~BIT(channel_id);
+		/* The poll timer serves EVERY enabled doorbell bit on this frame:
          * only stop it once the last enabled channel goes away. */
-        if (data->enabled_mask == 0U) {
-            k_timer_stop(&data->poll_timer);
-        }
-        sys_write32(BIT(channel_id), cfg->base + MHUV2_RX_CH0_MASK_SET);
-    }
+		if (data->enabled_mask == 0U) {
+			k_timer_stop(&data->poll_timer);
+		}
+		sys_write32(BIT(channel_id), cfg->base + MHUV2_RX_CH0_MASK_SET);
+	}
 
-    return 0;
+	return 0;
 }
 
 /**
@@ -326,49 +362,70 @@ static int mhuv2_set_enabled(const struct device *dev, mbox_channel_id_t channel
  */
 static void mhuv2_rx_dispatch(const struct device *dev)
 {
-    const struct mhuv2_config *cfg  = dev->config;
-    struct mhuv2_data         *data = dev->data;
-    /* Read the RAW status (+0x00, the only bench-proven RX register on the Alif
-     * MHU frame) rather than CH0_STAT_MASKED (+0x04, unvalidated on silicon). */
-    uint32_t pending = sys_read32(cfg->base + MHUV2_RX_CH0_STAT);
+	const struct mhuv2_config *cfg  = dev->config;
+	struct mhuv2_data         *data = dev->data;
+	uint32_t                   pending;
+	k_spinlock_key_t           key;
 
-    if (pending == 0U) {
-        return;
-    }
+	/*
+     * This runs from BOTH mhuv2_rx_isr() and the poll-timer expiry, each in
+     * interrupt context.  Without a lock they could both read the same non-zero
+     * status before either wrote CH0_CLEAR, and one doorbell would dispatch the
+     * registered callback twice (#1827).  The lock covers only read-and-ack;
+     * the callbacks run outside it.
+     */
+	key = k_spin_lock(&data->lock);
 
-    /* Ack first (W1C) so a fresh ring during dispatch is not lost. */
-    sys_write32(pending, cfg->base + MHUV2_RX_CH0_CLEAR);
+	/* Read the RAW status (+0x00, the only bench-proven RX register on the Alif
+     * MHU frame) rather than CH0_STAT_MASKED (+0x04, unvalidated on silicon).
+     * That means the MASKING has to be applied here: HWRM 9.2.3.5 generates the
+     * interrupt from MHU_CHn_ST_MSK, "flags AND unmasked", so a bit that was
+     * never set_enabled(true) -- or was explicitly disabled -- must not be
+     * touched.  Clearing it anyway released the sender's flag and silently
+     * discarded the transfer: the receiver acked a message it would never
+     * dispatch (#1827). */
+	pending = sys_read32(cfg->base + MHUV2_RX_CH0_STAT) & data->enabled_mask;
 
-    for (uint32_t bit = 0U; bit < MHUV2_NUM_CHANNELS; bit++) {
-        if ((pending & BIT(bit)) == 0U) {
-            continue;
-        }
-        if (data->cb[bit] != NULL) {
-            data->cb[bit](dev, bit, data->cb_ctx[bit], NULL);
-        }
-    }
+	if (pending == 0U) {
+		k_spin_unlock(&data->lock, key);
+		return;
+	}
+
+	/* Ack first (W1C) so a fresh ring during dispatch is not lost. */
+	sys_write32(pending, cfg->base + MHUV2_RX_CH0_CLEAR);
+
+	k_spin_unlock(&data->lock, key);
+
+	for (uint32_t bit = 0U; bit < MHUV2_NUM_CHANNELS; bit++) {
+		if ((pending & BIT(bit)) == 0U) {
+			continue;
+		}
+		if (data->cb[bit] != NULL) {
+			data->cb[bit](dev, bit, data->cb_ctx[bit], NULL);
+		}
+	}
 }
 
 static void mhuv2_rx_isr(const void *arg)
 {
-    mhuv2_rx_dispatch((const struct device *)arg);
+	mhuv2_rx_dispatch((const struct device *)arg);
 }
 
 /* Poll-timer expiry: same dispatch as the ISR, for the silicon where the
  * combined RX interrupt does not fire (see struct mhuv2_data). */
 static void mhuv2_poll_expiry(struct k_timer *t)
 {
-    struct mhuv2_data *data = CONTAINER_OF(t, struct mhuv2_data, poll_timer);
+	struct mhuv2_data *data = CONTAINER_OF(t, struct mhuv2_data, poll_timer);
 
-    mhuv2_rx_dispatch(data->dev);
+	mhuv2_rx_dispatch(data->dev);
 }
 
 static const struct mbox_driver_api mhuv2_driver_api = {
-    .send              = mhuv2_send,
-    .register_callback = mhuv2_register_callback,
-    .mtu_get           = mhuv2_mtu_get,
-    .max_channels_get  = mhuv2_max_channels_get,
-    .set_enabled       = mhuv2_set_enabled,
+	.send              = mhuv2_send,
+	.register_callback = mhuv2_register_callback,
+	.mtu_get           = mhuv2_mtu_get,
+	.max_channels_get  = mhuv2_max_channels_get,
+	.set_enabled       = mhuv2_set_enabled,
 };
 
 /*
@@ -376,36 +433,52 @@ static const struct mbox_driver_api mhuv2_driver_api = {
  * the IRQ_CONNECT is emitted via COND_CODE_1(DT_INST_IRQ_HAS_IDX(...)) -- sender
  * frames (no interrupts) compile cleanly with no IRQ code at all.
  */
-#define MHUV2_IRQ_CONNECT(inst)                                                                    \
-    COND_CODE_1(DT_INST_IRQ_HAS_IDX(inst, 0),                                                      \
-                (IRQ_CONNECT(DT_INST_IRQN(inst), DT_INST_IRQ(inst, priority), mhuv2_rx_isr,        \
-                             DEVICE_DT_INST_GET(inst), 0);                                         \
-                 irq_enable(DT_INST_IRQN(inst));),                                                 \
-                ())
+#define MHUV2_IRQ_CONNECT(inst) \
+	COND_CODE_1(DT_INST_IRQ_HAS_IDX(inst, 0), \
+	            (IRQ_CONNECT(DT_INST_IRQN(inst), \
+	                         DT_INST_IRQ(inst, priority), \
+	                         mhuv2_rx_isr, \
+	                         DEVICE_DT_INST_GET(inst), \
+	                         0); \
+	             irq_enable(DT_INST_IRQN(inst));), \
+	            ())
 
-#define MHUV2_INST(inst)                                                                           \
-    static struct mhuv2_data         mhuv2_data_##inst;                                            \
-    static const struct mhuv2_config mhuv2_config_##inst = {                                       \
-        .base = (mm_reg_t)DT_INST_REG_ADDR(                                                        \
-            inst), /* `alif,direction` enum is ["tx","rx"] -> idx 0 == "tx". */                    \
-        .is_tx = (DT_INST_ENUM_IDX(inst, alif_direction) == 0),                                    \
-    };                                                                                             \
-    static int mhuv2_init_##inst(const struct device *dev)                                         \
-    {                                                                                              \
-        /* rx frames start fully masked; UNMASK happens in            \
-		 * set_enabled(true) per the MBOX contract. tx frames have    \
-		 * no init-time register writes (the wake handshake is        \
-		 * deferred to the first set_enabled).                        \
-		 */                            \
-        if (!mhuv2_config_##inst.is_tx) {                                                          \
-            mhuv2_data_##inst.dev = dev;                                                           \
-            k_timer_init(&mhuv2_data_##inst.poll_timer, mhuv2_poll_expiry, NULL);                  \
-            sys_write32(0xFFFFFFFFU, mhuv2_config_##inst.base + MHUV2_RX_CH0_MASK_SET);            \
-        }                                                                                          \
-        MHUV2_IRQ_CONNECT(inst);                                                                   \
-        return 0;                                                                                  \
-    }                                                                                              \
-    DEVICE_DT_INST_DEFINE(inst, mhuv2_init_##inst, NULL, &mhuv2_data_##inst, &mhuv2_config_##inst, \
-                          POST_KERNEL, CONFIG_MBOX_INIT_PRIORITY, &mhuv2_driver_api);
+#define MHUV2_INST(inst) \
+	static struct mhuv2_data         mhuv2_data_##inst; \
+	static const struct mhuv2_config mhuv2_config_##inst = { \
+		.base = (mm_reg_t)DT_INST_REG_ADDR( \
+		    inst), /* `alif,direction` enum is ["tx","rx"] -> idx 0 == "tx". */ \
+		.is_tx = (DT_INST_ENUM_IDX(inst, alif_direction) == 0), \
+	}; \
+	static int mhuv2_init_##inst(const struct device *dev) \
+	{ \
+		/* rx frames start fully masked; UNMASK happens in                                         \
+		 * set_enabled(true) per the MBOX contract. tx frames have                         \
+		 * no init-time register writes (the wake handshake is                             \
+		 * deferred to the first set_enabled).                                             \
+		 */ \
+		if (!mhuv2_config_##inst.is_tx) { \
+			mhuv2_data_##inst.dev = dev; \
+			k_timer_init(&mhuv2_data_##inst.poll_timer, mhuv2_poll_expiry, NULL); \
+			sys_write32(0xFFFFFFFFU, mhuv2_config_##inst.base + MHUV2_RX_CH0_MASK_SET); \
+			/* Clear any doorbell rung before this core reset.  HWRM 9.2.3.4.1:                    \
+             * "It is the responsibility of the Sender and Receiver to clear                       \
+             * and ignore any transfers which were from before the Sender was                      \
+             * reset."  Without it the first set_enabled(true) started the poll                    \
+             * timer straight onto a stale flag and dispatched a phantom                           \
+             * callback (#1827). */ \
+			sys_write32(0xFFFFFFFFU, mhuv2_config_##inst.base + MHUV2_RX_CH0_CLEAR); \
+		} \
+		MHUV2_IRQ_CONNECT(inst); \
+		return 0; \
+	} \
+	DEVICE_DT_INST_DEFINE(inst, \
+	                      mhuv2_init_##inst, \
+	                      NULL, \
+	                      &mhuv2_data_##inst, \
+	                      &mhuv2_config_##inst, \
+	                      POST_KERNEL, \
+	                      CONFIG_MBOX_INIT_PRIORITY, \
+	                      &mhuv2_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(MHUV2_INST)

@@ -50,5 +50,7 @@ west flash -d /tmp/usb_host
 
 ## Sibling example
 
-- `examples/peripheral-io/usb-device-cdc/` — USB device (CDC-ACM) on the
-  same silicon (uses the USB2 controller in device mode via `alp_usb_dev_*`).
+- USB device mode (CDC-ACM) on the same silicon, via
+  `<alp/usb.h>`'s `alp_usb_device_*` API, is not shipped as an
+  example yet -- no `examples/peripheral-io/usb-device-cdc/` exists
+  today.

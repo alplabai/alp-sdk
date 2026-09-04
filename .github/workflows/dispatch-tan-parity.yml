@@ -3,21 +3,23 @@
 # ADR-0020 cross-repo trigger — SENDER half (alp-sdk → tan-cli).
 #
 # Fires a `repository_dispatch` at `alplabai/tan-cli` whenever this repo's
-# CONTRACT SURFACE moves, carrying the SHA that just landed so tan's parity
-# gate tests THAT ref instead of its hand-bumped `PINNED_SDK_TAG`.
+# REFERENCE PLANNER / CONTRACT SURFACE moves, carrying the SHA that just landed
+# so Python Tan's relocated planner parity gate tests THAT ref instead of its
+# hand-bumped `PINNED_SDK_TAG`.
 #
 # Why this exists, stated as the gap it closes rather than as the ADR line it
 # satisfies:
 #
 #   * `parity-seam1.yml` (this repo) diffs our own `--emit build-plan` against
 #     our OWN frozen oracle. It never runs tan. It cannot tell us that a
-#     planner change broke tan's ability to EXECUTE the plan.
+#     reference-planner change broke Tan's relocated producer parity or its
+#     ability to EXECUTE the plan.
 #   * tan's `parity.yml` on a pull_request tests against a PINNED alp-sdk ref,
 #     bumped by hand. Until someone bumps it, tan is green against an alp-sdk
 #     that no longer exists.
 #
-# So "alp-sdk changed and tan can no longer build from the plan" is invisible on
-# both sides. tan's seam2 -- materialise, cross-compile through `tan build`,
+# So "alp-sdk changed and Tan no longer produces/executes an equivalent plan"
+# is invisible on both sides. Tan's seam2 -- materialise, cross-compile through `tan build`,
 # boot in Renode -- is exactly the check that sees it, and this is what points
 # it at the right commit.
 #
@@ -38,16 +40,47 @@ name: dispatch-tan-parity
 on:
   push:
     branches: [dev, main]
-    # Kept in lockstep with parity-seam1.yml's path list ON PURPOSE: that job
-    # decides when OUR plan shape is re-checked, and this decides when TAN
-    # re-checks it. If the two lists drift, one side starts testing changes the
-    # other ignores, which is the silent-divergence this whole gate exists to
-    # prevent.
+    # NO LONGER in lockstep with parity-seam1.yml's path list, and the
+    # divergence is the point. The two lists answer different questions:
+    #
+    #   * parity-seam1.yml asks "did OUR OWN build-plan SHAPE move?" -- so its
+    #     list is the plan-shape surface, and adding a generator that emits no
+    #     build-plan byte (`gen_zephyr_board.py`) to it would only add noise.
+    #   * this list asks "did anything TAN MIRRORS move?" -- and tan mirrors a
+    #     strictly LARGER surface than the plan shape. Alongside the 20
+    #     relocated `alp_orchestrate` modules, `tan/planner/` carries TEN
+    #     hand-ports out of `scripts/` (see tan-cli's
+    #     `python/tests/gates/test_planner_relocation_freshness.py`,
+    #     HAND_PORT_HASHES) -- and until this change, none of their sources was
+    #     in this list at all.
+    #
+    # Measured over the last 400 commits touching one of those hand-port
+    # sources: SEVEN of 29 matched none of the four original paths, so no
+    # dispatch fired and tan learned nothing. Two of them are exactly the
+    # incidents tan-cli#279 was filed about -- `98807809` (the missing
+    # `CONFIG_USE_DT_CODE_PARTITION=y`, which shipped) and `cb7f64ae` (#1125 /
+    # #1126, path traversal). `f4d87a1f`, `5efa72dd`, `b92b8785`, `957fdaa5`
+    # and `77abfd7c` are the rest.
+    #
+    # The old comment's warning still stands, restated for the shape it now
+    # has: a path list is a thing that can be wrong, and the dispatch API
+    # answers 204 whether or not anything is listening. The backstop for that
+    # is on tan's side and needs nothing from this repo -- tan-cli's
+    # `planner-resync.yml` also runs on a daily cron, which catches a missed
+    # path within 24h without any alp-sdk credential or any list being right.
     paths:
       - "scripts/alp_orchestrate/**"
       - "metadata/**"
       - "examples/**/board.yaml"
       - "tests/parity/**"
+      # The hand-port sources tan-cli's HAND_PORT_HASHES / STRICT_LOADERS_HASH
+      # pin. Keep this block in step with THAT table, not with parity-seam1.yml.
+      - "scripts/gen_zephyr_board.py"
+      - "scripts/alp_project_loader.py"
+      - "scripts/alp_project_emit/**"
+      - "scripts/alp_template.py"
+      - "scripts/sentinels.py"
+      - "scripts/strict_loaders.py"
   workflow_dispatch:
 
 concurrency:
@@ -74,19 +107,30 @@ jobs:
   dispatch:
     name: "dispatch · tan parity"
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Mint a short-lived App token (scoped to tan-cli)
         id: apptoken
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        timeout-minutes: 2
         with:
           app-id: ${{ secrets.ALP_CI_APP_ID }}
           private-key: ${{ secrets.ALP_CI_APP_PRIVATE_KEY }}
           owner: alplabai
           repositories: tan-cli
 
+      # SDK_REF/BRANCH_REF: this trigger is push-to-dev/main only (see the
+      # `on:` block above), so github.ref_name is always "dev" or "main"
+      # today -- but it is still the same construct as pr-bitbake.yml's fork
+      # injection (github.ref_name splices verbatim into this run: block's
+      # SOURCE TEXT via ${{ }}), and that trigger scope is a workflow-file
+      # fact, not an enforced guarantee. Routed through env + quoted shell
+      # variables for the same reason, at no cost.
       - name: Dispatch planner-change to tan-cli
         env:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+          SDK_REF: ${{ github.sha }}
+          BRANCH_REF: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           # Captured HERE, immediately before the dispatch call, not in the
@@ -105,8 +149,9 @@ jobs:
           #
           # NOTE (residual correlation gap, see dispatch-confirm.sh): the run
           # this creates on tan-cli carries tan-cli's own default-branch
-          # head_sha, not ${{ github.sha }} -- repository_dispatch does not
-          # let the sender's SHA travel into the receiver's run ref. So
+          # head_sha, not this workflow's github.sha (SDK_REF above) --
+          # repository_dispatch does not let the sender's SHA travel into
+          # the receiver's run ref. So
           # nothing in this repo can filter tan-cli's run list down to "the
           # run THIS dispatch caused" versus a concurrent alp-sdk push (or
           # any other repository_dispatch sender to tan-cli); dispatch-confirm.sh
@@ -114,11 +159,16 @@ jobs:
           # Closing that gap needs a tan-cli-side change (e.g. tan's
           # parity.yml naming its run from client_payload.sdk_ref so it's
           # visible in the run list) -- tracked as follow-up, not done here.
+          # -f (raw string), not -F: -F reinterprets its value after the
+          # shell hands it over (leading `@` reads a FILE, `{owner}`/
+          # `{repo}`/`{branch}` are substituted, bare true/false/null/
+          # integers become JSON non-strings) -- see pr-bitbake.yml's
+          # Dispatch step for the same reasoning.
           gh api repos/alplabai/tan-cli/dispatches \
             -f event_type=alp-sdk-planner-change \
-            -F "client_payload[sdk_ref]=${{ github.sha }}" \
-            -F "client_payload[branch]=${{ github.ref_name }}"
-          echo "::notice::dispatched alp-sdk-planner-change to tan-cli for ${{ github.sha }} (${{ github.ref_name }})"
+            -f "client_payload[sdk_ref]=$SDK_REF" \
+            -f "client_payload[branch]=$BRANCH_REF"
+          echo "::notice::dispatched alp-sdk-planner-change to tan-cli for $SDK_REF ($BRANCH_REF)"
 
       - name: Find this workflow's previous dispatch (self-calibration baseline)
         env:
@@ -178,8 +228,10 @@ jobs:
       # (exit 127), because the runner's workspace was empty. Sparse, because
       # the one file is all this job reads.
       - name: Check out the confirm script
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 2
         with:
+          persist-credentials: false
           fetch-depth: 1
           sparse-checkout: |
             scripts/dispatch-confirm.sh

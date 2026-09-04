@@ -1,6 +1,13 @@
 # `.alpmodel` Runtime Loader + Blob Selection (Stage 1c) — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical transcript.** Implementation plan dated 2026-05-27. The
+> SDK has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as a
+> live task list; kept for implementation-history rationale only.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** An on-device runtime loader `alp_inference_open_alpmodel()` that parses a `.alpmodel` package, **selects the right blob** for the active SoM (backend availability + `silicon_ref` compat + a SRAM `requires` fit-check + `preferred_backend` tiebreak), and delegates to the existing `alp_inference_open()` — plus the public `DEEPX_DX → DEEPX_DXM1` enum rename this stage owns, and the SoC SRAM-envelope plumbing the fit-check consumes.
 
@@ -665,7 +672,7 @@ Run (the header changes from T1/T2/T5 are now all in): `py -3.14 scripts/abi_sna
 - [ ] **Step 2: Verify the diff is exactly the intended ABI delta**
 
 Run: `git diff docs/abi/v0.5-snapshot.json`
-Expected: the `alp_inference_backend_t` definition now shows `..._DEEPX_DXM1 = 4` (rename); `alp_status_t` gains `NO_BACKEND/NO_FIT/NOT_FOUND`; a new `alp_model_open_opts_t` typedef + `alp_inference_open_alpmodel` function appear; the `generated` date line changes. **No other symbols change.** (The pr-generated-files gate diffs with `--ignore-matching-lines='"generated":'`, so the date line alone won't fail; but commit the regenerated file regardless.)
+Expected: the `alp_inference_backend_t` definition now shows `..._DEEPX_DXM1 = 4` (rename); `alp_status_t` gains `NO_BACKEND/NO_FIT/NOT_FOUND`; a new `alp_model_open_opts_t` typedef + `alp_inference_open_alpmodel` function appear; the `generated` date line changes. **No other symbols change.**
 
 - [ ] **Step 3: Commit**
 ```bash

@@ -20,6 +20,7 @@
  * driver works out of the box gets the portable API for free.
  */
 
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -34,6 +35,7 @@
 #include <alp/soc_caps.h>
 
 #include "adc_ops.h"
+#include "alp_slot_claim.h"
 
 /* DT alias table.  Each alp-adcN alias resolves to an adc_dt_spec;
  * unwired aliases collapse to a zeroed spec (dev == NULL). */
@@ -100,12 +102,14 @@ typedef struct alp_z_adc_state {
 
 static alp_z_adc_state_t _state_pool[CONFIG_ALP_SDK_ADC_HANDLE_POOL];
 
+/* issue #1115 round-2 dev review: claim atomically (in_use is the LAST
+ * member; memset only the bytes ahead of it) -- see
+ * dsp/sw_fallback.c's acquire_be_slot() for the full rationale. */
 static alp_z_adc_state_t *_alloc_state(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_ADC_HANDLE_POOL; ++i) {
-		if (!_state_pool[i].in_use) {
-			memset(&_state_pool[i], 0, sizeof(_state_pool[i]));
-			_state_pool[i].in_use = true;
+		if (alp_slot_try_claim(&_state_pool[i].in_use)) {
+			memset(&_state_pool[i], 0, offsetof(alp_z_adc_state_t, in_use));
 			return &_state_pool[i];
 		}
 	}
@@ -114,7 +118,7 @@ static alp_z_adc_state_t *_alloc_state(void)
 
 static void _free_state(alp_z_adc_state_t *s)
 {
-	s->in_use = false;
+	alp_slot_release(&s->in_use);
 }
 
 static alp_status_t
@@ -140,6 +144,19 @@ z_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capabilitie
 	}
 	if (cfg->resolution_bits != 0 && cfg->resolution_bits > spec->resolution) {
 		return ALP_ERR_OUT_OF_RANGE;
+	}
+	/* No ADC backend in this tree can honour a hardware oversampling
+	 * ratio today: alif_e7.c / alif_e8.c refuse any ratio > 1 too, because
+	 * their vendored Alif driver rejects every non-zero
+	 * adc_sequence.oversampling outright (no power-of-two carve-out).
+	 * This generic backend serves whatever Zephyr ADC driver the board
+	 * wires up, with no single vendor contract to validate a log2
+	 * mapping against even if one existed. Refuse oversampling outright
+	 * rather than silently dropping the field (the previous
+	 * `.oversampling = 0` below) or guessing at hardware this backend
+	 * hasn't proven. */
+	if (cfg->oversampling_ratio > 1u) {
+		return ALP_ERR_NOSUPPORT;
 	}
 
 	alp_z_adc_state_t *s = _alloc_state();

@@ -16,11 +16,11 @@ below.
 
 `board.yaml` declares `libraries: [libwebsockets]`, which is enough
 for `scripts/alp_project.py` to emit `CONFIG_ALP_LWS_NO_TLS=y` (the
-SW-fallback default from
-`metadata/library-profiles/libwebsockets/hw-backends.yaml`). It does
+SW-fallback default from the `integration.zephyr.hw_backends:` block
+in `metadata/libraries/libwebsockets.yaml`). It does
 **not** get the real library linked in, for two compounding reasons
 (both confirmed by reading the actual checkout at
-`modules/lib/libwebsockets` -- unlike `coremqtt_sn`, this module
+`modules/lib/libwebsockets` -- this module
 fetch *did* succeed and the full ~230 KB upstream source tree is
 present):
 

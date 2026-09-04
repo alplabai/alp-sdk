@@ -151,7 +151,21 @@
       "alp_module_skus": ["E1M-AEN501"],
       "debug": {
         "pyocd_target": "AE512F80F55D5LS",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": "AE512F80F55D5_HE"
+      }
+    },
+    {
+      "order_code": "AE512F80F5582LS",
+      "package": "FBGA194",
+      "temperature_grade": "standard",
+      "mram_mb": 5.5,
+      "sram_kb": 8448,
+      "alp_module_skus": [],
+      "debug": {
+        "pyocd_target": "AE512F80F5582LS",
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": "AE512F80F5582_HE"
       }
     }
   ],
@@ -161,6 +175,8 @@
     "E5 silicon datasheet from Alif is STILL not on file as of 2026-05-11 -- E3 (v2.8), E4 (v1.0), E6 (v1.0), E7 (v2.9), and E8 (v1.0) have all been published; E5 alone remains pending.  Replace this stub when ADTS00xx for E5 is published.",
     "Topology assumed identical to E7 with one of the two Cortex-A32 cores depopulated.  NPU and external-memory interfaces match E7 (OctalSPI, U55+U55).",
     "Peripheral counts inherited from the E7 sibling (E5 = E7 with one A32 depopulated; same OctalSPI / U55 topology per this file's own topology note).  `watchdog` derived as one-per-core (1x A32 + 2x M55 = 3).  No `isp`/`jpeg_encoder` (E5 carries U55x2 only, no U85, none in its variant).  ASSUMED pending the E5 datasheet, which is still unpublished as of 2026-05-11 -- confirm every count when ADTS00xx for E5 ships.",
-    "Order code AE512F80F55D5LS backs the E1M-AEN501 module SKU."
+    "Order code AE512F80F55D5LS backs the E1M-AEN501 module SKU.",
+    "debug.jlink_flash_device = AE512F80F55D5_HE populated (#1295), sourced from the SEGGER J-Link DLL V9.46 built-in device table via JLINKARM_DEVICE_GetInfo readback of the AlifSemiconductor block -- canonical entry name, not an order-code-alias probe. E5 is one of three Ensemble subfamilies (E3/E5/E7) whose device names drop the package/grade suffix and use a bare `_HE` string; E6/E8 keep the full order code plus `_M55_HE`.",
+    "2026-08-14 (#1444): variants[] completed against the Alif CMSIS DFP (alifsemi/alif_ensemble-cmsis-dfp, AlifSemiconductor.Ensemble.pdsc). The DFP declares four E5 devices; this file carried one. AE512F80F5582LS is added -- it is the only one of the three missing devices in a BGA package; AE512F80F5582AS and AE512F80F55D5AS are WLCSP208 and this corpus carries no WLCSP part in any subfamily (product decision -- Alp Lab modules are BGA only; enforced by validate_metadata.py). package, mram_mb and sram_kb are read per device out of the pack -- package from its own `<feature type=\"BGA\"|\"CSP\" n=...>` element rather than decoded from the order code, and sram_kb as the sum of the device's non-MRAM, non-TCM memory regions, which is the convention this corpus already follows (re-deriving all 13 previously-shipped Ensemble variants that way reproduces their declared package/mram_mb/sram_kb with zero mismatches, which is what establishes the rule rather than assuming it). temperature_grade is the one field the DFP does not carry; it stays the order-code suffix decode (E = extended, S = standard) that holds across every shipped variant. No optional_features on any E5 variant: the DFP annotates all four E5 devices with the identical feature set -- 2x Ethos-U55, no U85, no ISP, no JPEG encoder -- so there is nothing per-variant to toggle, which this file's own topology note already states."
   ]
 }

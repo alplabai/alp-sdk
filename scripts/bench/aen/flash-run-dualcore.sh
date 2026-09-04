@@ -92,6 +92,14 @@ cat > "$SET/build/config/dualcore.json" <<JSON
 }
 JSON
 
+# #1069 ATOC-assembly guard: both entries above use loadAddress (ITCM,
+# already disjoint by construction -- 0x50000000 HP vs 0x58000000 HE),
+# not mramAddress, so this is a no-op today. It's here so a future
+# slot0-XIP dual-core recipe added to this script inherits the same
+# window/overlap check alif_flash.py's runner uses, instead of
+# reintroducing the collision this issue fixes. See scripts/aen_atoc.py.
+python3 "$ALP_SDK_DIR/scripts/aen_atoc.py" "$SET/build/config/dualcore.json" || exit 1
+
 cd "$SET"
 echo ">>> FLASH dual-core HP=$HP_NAME (master) HE=$HE_NAME (deferred peer, entry id ALP-HE)" >&2
 ./app-gen-toc -f "build/config/dualcore.json" >/tmp/gentoc-dual.log 2>&1 || { echo "gen-toc FAILED"; tail /tmp/gentoc-dual.log; exit 1; }

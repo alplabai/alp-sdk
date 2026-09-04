@@ -165,7 +165,7 @@ void alp_shmem_close(alp_shmem_t *s)
 	/* begin_close CAS OPEN->CLOSING then spins until every op that
 	 * entered before the CAS has left -- see alp_slot_claim.h (#629).
 	 * Idempotent: a second/never-opened close no-ops. */
-	if (!alp_handle_begin_close(&s->lifecycle, &s->active_ops)) return;
+	if (!alp_handle_begin_close_blocking(&s->lifecycle, &s->active_ops)) return;
 	if (s->state.ops != NULL && s->state.ops->shmem_close != NULL) {
 		s->state.ops->shmem_close(&s->state);
 	}
@@ -218,10 +218,11 @@ alp_status_t alp_mbox_send(alp_mbox_t *mb, const void *data, size_t len, uint32_
 	if (data == NULL && len > 0) return ALP_ERR_INVAL; /* param check before gate */
 	/* Counted via alp_handle_op_enter/leave (issue #629): send() can block
 	 * up to timeout_ms draining to the peer core, so alp_mbox_close()
-	 * drains this op with the sleep-poll alp_handle_begin_close_blocking()
-	 * (src/common/alp_slot_claim.c) instead of the busy-spin
-	 * alp_handle_begin_close() -- generalised from rpc_dispatch.c's
-	 * _rpc_op_enter()/_rpc_begin_close()/_rpc_drain() (GHSA-xhm8). */
+	 * drains this op with alp_handle_begin_close_blocking()
+	 * (src/common/alp_slot_claim.c), which sleeps between polls instead
+	 * of busy-spinning (issue #1114: unsafe regardless of op duration) --
+	 * generalised from rpc_dispatch.c's _rpc_op_enter()/
+	 * _rpc_begin_close()/_rpc_drain() (GHSA-xhm8). */
 	if (mb == NULL || !alp_handle_op_enter(&mb->lifecycle, &mb->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
@@ -314,10 +315,9 @@ alp_status_t alp_hwsem_lock(alp_hwsem_t *sem, uint32_t timeout_ms)
 {
 	/* Counted via alp_handle_op_enter/leave (issue #629): lock() can
 	 * block up to timeout_ms waiting on the peer core, so
-	 * alp_hwsem_close() drains this op with the sleep-poll
-	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
-	 * instead of the busy-spin alp_handle_begin_close() -- see
-	 * alp_mbox_send() above for the same rationale.
+	 * alp_hwsem_close() drains this op with
+	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c) --
+	 * see alp_mbox_send() above for the same rationale.
 	 * hwsem_try_lock/unlock stay short, synchronous ops. */
 	if (sem == NULL || !alp_handle_op_enter(&sem->lifecycle, &sem->active_ops)) {
 		return ALP_ERR_NOT_READY;

@@ -11,12 +11,17 @@ This is the **E1M-AEN (Alif Ensemble) sibling** of
 The `src/` is intentionally parallel -- everything goes through the SoM-portable
 `<alp/*>` API — so the only AEN-specific facts are:
 
-- **BRD_I2C is the Alif LPI2C0** (the LP-island I2C, `P7_4 SCL_A` /
-  `P7_5 SDA_A`), surfaced as portable bus 0, carrying the Trust M at
-  `0x30` alongside the RTC + EEPROM + TMP112.
-- BRD_I2C lives in the low-power domain, so it is owned by the
-  **M55-HE** subsystem — hence `board.yaml`'s app core is `m55_he`
-  and the board target is `…/rtss_he`.
+- **BRD_I2C is SoC I2C0, function C** (`P7_1 I2C0_SCL_C` / `P7_0 I2C0_SDA_C`)
+  -- corrected in #1848; earlier docs believed it was the slave-only Alif
+  LPI2C0. This example's own board overlay wires it as portable bus 2
+  (`alp-i2c2` -- 0 and 1 are already the E1M edge I2C buses), carrying the
+  Trust M at `0x30` alongside the RTC + TMP112.
+  (A different, separate bus carries the EEPROM -- SoC I2C2, see
+  `docs/bring-up-aen.md` §5.1 -- an unrelated same-numbered controller;
+  don't confuse the `alp-i2c2` *alias index* with the *SoC I2C2* node.)
+- `board.yaml`'s app core is `m55_he` (board target `…/rtss_he`); only this
+  example's HE overlay enables SoC I2C0, so nothing on the HP core touches
+  the same controller.
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
@@ -24,11 +29,20 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
 west flash
 ```
 
-> **Bench note:** running on hardware needs the AEN board's BRD_I2C
-> (LPI2C0) enabled + mapped to portable bus 0 (the alp-sdk Alif LPI2C
-> driver bring-up). Until that lands, the example builds (CI builds it
-> under `native_sim`) but `alp_i2c_open(bus_id=0)` will not find the
-> chip on a board that hasn't wired LPI2C0 yet.
+> **Bench note:** this example's own board overlay wires BRD_I2C (I2C0) to
+> portable bus 2 (#1848), so `alp_i2c_open(bus_id=2)` now reaches the
+> physical bus. That routing is **R2-sourced and not yet on-unit-verified**:
+> it comes from the E1M-AEN-2626-R2 netlist + `ADTS0013`; no R1 netlist is
+> available, and the only bench unit on hand is an r1 module -- probe
+> `P7_0`/`P7_1` before treating a probe result here as confirming the wiring
+> itself, not just the chip response.
+>
+> **The pull-up state is also unresolved, on purpose.** The overlay adds NO
+> internal bias: the R2 components CSV shows this net's pull-up jumpers
+> (R93/R94) DNP, so there is no external pull-up either, and the datasheet
+> (open-drain, needs a pull-up) and the HWRM (push-pull is the correct I2C
+> mode on these pins) disagree about what that means for this bus. Do not
+> add `bias-pull-down` -- see the overlay's pinctrl comment.
 >
 > **The current E1M-AEN801 bench batch does not populate the OPTIGA**
 > (DNI), so this example has nothing to talk to on those boards — it is
@@ -37,7 +51,7 @@ west flash
 
 ## What it shows
 
-1. Opening BRD_I2C at 400 kHz and initialising
+1. Opening BRD_I2C at 100 kHz and initialising
    [`optiga_trust_m_t`](../../../include/alp/chips/optiga_trust_m.h).
    `optiga_trust_m_init` performs an I2C_STATE register read only;
    failing this means the chip is not on the bus or is not strapped to
@@ -51,15 +65,15 @@ west flash
 
 ```
 [se] I2C_STATE probe -> ALP_OK
-[se] read_product_info -> -5 (expected NOSUPPORT)
-[se] send_apdu -> -5 resp_len=0 (expected NOSUPPORT, zero bytes)
+[se] read_product_info -> -6 (expected NOSUPPORT)
+[se] send_apdu -> -6 resp_len=0 (expected NOSUPPORT, zero bytes)
 [se] RESULT PASS: Trust M I2C_STATE probe works; product-info/raw-APDU are cleanly blocked with ALP_ERR_NOSUPPORT
 ```
 
 ## Expected output (current AEN bench gates)
 
 ```
-[se] RESULT SKIP: alp_i2c_open failed: -2 (BRD_I2C/LPI2C0 not ready on this bench)
+[se] RESULT SKIP: alp_i2c_open failed: -2 (BRD_I2C not ready on this bench)
 ```
 
 or, once BRD_I2C opens but the assembly is OPTIGA-DNI:

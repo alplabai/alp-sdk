@@ -1,5 +1,6 @@
 # tests/scripts/test_alp_model_build.py
 """build_model: resolve targets -> run available adapters -> write .alpmodel."""
+import shutil
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,56 @@ def test_build_model_records_unavailable_tool_as_skip(tmp_path):
     assert all("not installed" in c.reason for c in ethos_u_skips)
 
 
+def test_build_model_default_registry_reaches_executorch_adapter_for_pte_source(tmp_path):
+    # #1260 reachability: `tan model build` (python/tan/commands/model_cmd.py
+    # in tan-cli, which imports alp_model.build directly -- scripts/alp_cli/
+    # model.py retired, alp-sdk#1367/#1368) calls build_model() with NO
+    # adapters= kwarg -- the default registry. Before this
+    # fix, ExecutorchAdapter existed but was never in _ADAPTERS, and even adding
+    # it there naively would have collided with CpuAdapter on the "cpu" backend
+    # key. Exercise the real default path, not an injected adapter list.
+    src = tmp_path / "m.pte"
+    src.write_bytes(b"PTE-DUMMY-PROGRAM")
+    out = build_model(sku="E1M-AEN801", name="demo", source=src, out_dir=tmp_path,
+                      metadata_root=_META)   # default registry
+    mft, blobs = read_package(out.read_bytes())
+    cpu = [t for t in mft.targets if t.backend == "cpu"]
+    assert len(cpu) == 1
+    assert cpu[0].blob_format == "executorch"
+    assert blobs[cpu[0].blob] == b"PTE-DUMMY-PROGRAM"
+    # ethos_u (VelaAdapter) still gets a coverage entry, not silently absorbed
+    # as "no adapter registered" (its reason is host-dependent: "not installed"
+    # if vela isn't on PATH here, else "does not accept .pte").
+    ethos_u = [c for c in mft.coverage if c.backend == "ethos_u"]
+    assert ethos_u and all(c.status in ("skipped", "incompatible") for c in ethos_u)
+
+
+def test_build_model_default_registry_tflite_source_still_uses_cpu_adapter(tmp_path):
+    # Guards the by_backend grouping: registering ExecutorchAdapter must not
+    # steal the "cpu" backend key from CpuAdapter for an ordinary .tflite build
+    # (a naive `{a.backend: a for a in registry}` dict would let the later
+    # entry in _ADAPTERS silently win here).
+    #
+    # This uses the DEFAULT registry (unlike the sibling test above, which
+    # injects only CpuAdapter), so VelaAdapter is genuinely in play whenever
+    # `ethos-u-vela` is installed on the host -- e.g. CI once it installs the
+    # `model-compile` extra. `adapter.compile()` is not caught in
+    # `build_model()` (a real, available tool that fails to compile is a
+    # loud error, not a silent skip -- see build.py's module docstring), so
+    # a dummy/invalid payload here would raise instead of being ignored. Use
+    # the real fixture so the vela targets compile cleanly too; this test's
+    # own assertions still only inspect the `cpu` target.
+    src = tmp_path / "m.tflite"
+    shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite", src)
+    out = build_model(sku="E1M-AEN801", name="demo", source=src, out_dir=tmp_path,
+                      metadata_root=_META)   # default registry
+    mft, blobs = read_package(out.read_bytes())
+    cpu = [t for t in mft.targets if t.backend == "cpu"]
+    assert len(cpu) == 1
+    assert cpu[0].blob_format == "tflite"
+    assert blobs[cpu[0].blob] == src.read_bytes()
+
+
 def test_build_model_v2m101_records_drpai_and_deepx_skips(tmp_path, monkeypatch):
     # With the default registry, V2M101 has drpai (host) + deepx_dxm1 (on-module) targets;
     # both require compile opts which aren't provided -> "no compile config" skips;
@@ -121,3 +172,38 @@ def test_build_model_passes_compile_opts_to_adapter(tmp_path):
                 metadata_root=_META, adapters=[CpuAdapter(), _Capture()],
                 compile_opts={"drpai": {"spec": "/abs/p.yaml"}})
     assert seen["opts"] == {"spec": "/abs/p.yaml"}
+
+
+# --------------------------------------------------------------------------
+# #1125: `name` reaches `out_dir / f"{name}.alpmodel"` directly -- build_model
+# is called by non-CLI callers too (this file), so the guard lives here, not
+# only behind the CLI's board.schema.json validation.
+# --------------------------------------------------------------------------
+
+def test_build_model_rejects_traversal_in_name(tmp_path):
+    src = tmp_path / "m.tflite"
+    src.write_bytes(b"TFL3-DUMMY")
+    out_dir = tmp_path / "out"
+    with pytest.raises(ValueError, match="invalid model name"):
+        build_model(sku="E1M-AEN801", name="../../../../tmp/evil", source=src,
+                    out_dir=out_dir, metadata_root=_META, adapters=[CpuAdapter()])
+    assert not out_dir.exists()
+
+
+def test_build_model_rejects_absolute_name(tmp_path):
+    src = tmp_path / "m.tflite"
+    src.write_bytes(b"TFL3-DUMMY")
+    out_dir = tmp_path / "out"
+    with pytest.raises(ValueError, match="invalid model name"):
+        build_model(sku="E1M-AEN801", name="/etc/passwd", source=src,
+                    out_dir=out_dir, metadata_root=_META, adapters=[CpuAdapter()])
+
+
+def test_build_model_valid_name_still_writes_in_out_dir(tmp_path):
+    src = tmp_path / "m.tflite"
+    src.write_bytes(b"TFL3-DUMMY")
+    out_dir = tmp_path / "out"
+    out = build_model(sku="E1M-AEN801", name="demo-model_1", source=src,
+                      out_dir=out_dir, metadata_root=_META, adapters=[CpuAdapter()])
+    assert out == out_dir / "demo-model_1.alpmodel"
+    assert out.is_file()

@@ -2,8 +2,9 @@
 # example.
 #
 # `cores.m55_hp.libraries: [libwebsockets]` makes alp_project.py emit
-# CONFIG_ALP_LWS_NO_TLS=y -- the SW-fallback default from
-# metadata/library-profiles/libwebsockets/hw-backends.yaml.  It does
+# CONFIG_ALP_LWS_NO_TLS=y -- the SW-fallback default from the
+# `integration.zephyr.hw_backends:` block in
+# metadata/libraries/libwebsockets.yaml.  It does
 # NOT add the upstream module's include path or build its sources:
 # libwebsockets ships no `zephyr/module.yml` (see README's
 # "Integration reality"), and its public header

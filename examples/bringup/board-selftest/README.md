@@ -46,7 +46,7 @@ west build -t run
 
 # On real silicon, point -b at the SoM's Zephyr board target.
 # Example for E1M-AEN801:
-west build -b alp_e1m_aen801_m55_hp examples/bringup/board-selftest
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/bringup/board-selftest
 west flash
 ```
 
@@ -90,8 +90,9 @@ still latches, so the twister console harness passes regardless.
 
 * **SoM identity `ALP_ERR_NOT_PROVISIONED`.** The on-module EEPROM
   reads back blank -- the module was never run through
-  `scripts/program_eeprom.py` at production test. On a factory-fresh
-  board this is expected; on a shipped SoM it is a real fault.
+  [`scripts/program_eeprom.py`](../../../scripts/program_eeprom.py) at
+  production test. On a factory-fresh board this is expected; on a
+  shipped SoM it is a real fault.
 * **SoM identity `ALP_ERR_IO`.** Magic present but the CRC/schema
   check failed -- a corrupt manifest. Re-program the EEPROM.
 * **i2c scan `open failed`.** The `alp-i2c0` DT alias isn't set --

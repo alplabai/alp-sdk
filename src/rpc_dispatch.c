@@ -205,13 +205,15 @@ static bool _rpc_begin_close(struct alp_rpc_channel *ch)
  * rpc_ops.h's alp_rpc_shutdown_result_t doc comment -- so this drains
  * in a small, bounded number of iterations, not an open-ended wait.
  *
- * Deliberately NOT alp_handle_begin_close() from alp_slot_claim.h:
- * that helper's own doc comment states its precondition explicitly --
- * every op it drains must be a short, synchronous backend call.
- * alp_rpc_call() is not (it can block up to `timeout_ms`, including
- * UINT32_MAX == forever, unblocked only by the backend's own
- * shutdown()) -- so this dispatcher owns its own drain, here, rather
- * than reusing that helper outside its documented precondition.
+ * Deliberately NOT alp_handle_begin_close_blocking() from
+ * alp_slot_claim.h, even though that helper's sleep-poll drain would
+ * also be correctness-safe here: this dispatcher's close additionally
+ * needs to CANCEL the in-flight op via ops->shutdown() before draining
+ * (alp_rpc_call() can block up to `timeout_ms`, including
+ * UINT32_MAX == forever, and nothing else would ever wake it) --
+ * alp_handle_begin_close_blocking() only waits, it has no cancellation
+ * hook, so this dispatcher owns its own shutdown-then-drain sequence
+ * here rather than reusing that helper.
  */
 static void _rpc_drain(struct alp_rpc_channel *ch)
 {

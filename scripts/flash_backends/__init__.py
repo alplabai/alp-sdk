@@ -26,9 +26,15 @@ and helper-MCU entries from SoM presets emit (e.g.):
 
     GD32 supervisor: "swd_probe"
 
+A helper MCU entry describes flashing along three independent axes:
+``flash_method``/``flash_args`` (how it is written locally), ``update_channel``
+(how it is updated in the field), and ``flash_policy`` (who may invoke
+``flash_method``, and when -- ``customer`` / ``factory`` / ``recovery_only``).
 CC3501E coprocessors are Alp-OTA-updated (``update_channel:
-alp_ota_spi_otp``), never customer-flashed, so they carry no
-``flash_method`` and register no backend here.
+alp_ota_spi_otp``, ``flash_policy: recovery_only``) and carry no
+``flash_method`` today, so they register no backend here; a customer flash
+of the CC3501E is permitted only to recover a bricked device, with
+Alp Lab-supplied binaries, if a local flash method is ever added.
 
 The yocto backend also registers under the short alias ``yocto_wic``
 so direct test invocations and manifest hand-edits stay terse.

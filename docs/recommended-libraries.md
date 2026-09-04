@@ -189,21 +189,23 @@ once the case is made.
 ## HW-backend profiles (per-library accelerator binding)
 
 Alongside the compile-time profile header (`etl_profile.h`,
-`fmt_config.h`, ...) each enabled library also ships a
-[`hw-backends.yaml`](../metadata/library-profiles/) table.  This
-table is the source of truth that
+`fmt_config.h`, ...), 23 of the 35 library manifests under
+`metadata/libraries/*.yaml` also declare an
+`integration.zephyr.hw_backends:` block -- an inline table inside
+that library's own manifest, not a separate `hw-backends.yaml` file.
+This block is the source of truth that
 [`scripts/alp_project.py`](../scripts/alp_project.py) reads against
 each SoM preset's `capabilities:` matrix to emit the right
 accelerator-binding `CONFIG_*` lines into the slice's `alp.conf`.
 
-The shape mirrors `metadata/library-profiles/mbedtls/hw-backends.yaml`:
-a list of `accelerators:` (one block per accelerator class --
-`crypto`, `gpu_2d`, `dma`, `simd`, `cordic`, `fft`, `ml_npu_primary`,
-...) where each entry pairs a `requires_cap:` (capability flag
-declared in the SoM preset) with the Kconfig that lights up that
-backend.  A `sw_fallback:` floor (always `required: true`) backs
-every library so a slice with no matching capability still builds
-and runs.
+The shape mirrors the `integration.zephyr.hw_backends:` block in
+`metadata/libraries/mbedtls.yaml`: a list of `accelerators:` (one
+block per accelerator class -- `crypto`, `gpu_2d`, `dma`, `simd`,
+`cordic`, `fft`, `ml_npu_primary`, ...) where each entry pairs a
+`requires_cap:` (capability flag declared in the SoM preset) with the
+Kconfig that lights up that backend.  A `sw_fallback:` floor (always
+`required: true`) backs every library so a slice with no matching
+capability still builds and runs.
 
 Priority entries may carry `status: planned` or `status: stub`.
 Those rows remain in metadata as the intended binding, but the
@@ -212,22 +214,24 @@ symbol.  This keeps generated `alp.conf` files from claiming
 hardware acceleration that would still run through the library's
 software path.
 
-**Coverage status (v0.6).**  All 25 libraries in the schema enum
-ship a per-library `hw-backends.yaml`:
+**Coverage (v0.6).**  23 of the 35 manifests declare an
+`integration.zephyr.hw_backends:` block; the libraries below are
+grouped by accelerator class:
 
-| Class                 | Libraries                                                            |
-|-----------------------|----------------------------------------------------------------------|
-| Crypto / TLS          | `mbedtls`, `bearssl`                                                 |
-| ML inference          | `tflite_micro`                                                       |
-| DSP / math            | `cmsis_dsp`                                                          |
-| Filesystem            | `littlefs`                                                           |
-| Graphics              | `lvgl`, `u8g2`, `gfx_compat`                                         |
-| Sensor fusion / control | `madgwick_ahrs`, `pid`                                             |
-| Industrial bus        | `modbus`                                                             |
-| IoT / networking      | `coremqtt_sn`, `libcoap`, `libwebsockets`, `nanopb`, `jsmn`          |
-| Audio codecs          | `minimp3`, `opus`                                                    |
-| Header-only utility   | `etl`, `fmt`, `nlohmann_json`, `doctest`                             |
-| Test framework        | `catch2`                                                             |
+| Class                   | Libraries                                                   |
+|-------------------------|-------------------------------------------------------------|
+| Crypto / TLS            | `mbedtls`, `bearssl`                                        |
+| ML inference            | `tflite_micro`, `onnxruntime`                               |
+| DSP / math              | `cmsis_dsp`                                                 |
+| Filesystem              | `littlefs`                                                  |
+| Graphics / vision       | `lvgl`, `u8g2`, `gfx_compat`, `arm-2d`, `cmsis-cv`          |
+| Dataflow / scheduling   | `cmsis-stream`                                              |
+| Sensor fusion / control | `madgwick_ahrs`, `pid`                                      |
+| Industrial bus          | `modbus`                                                    |
+| IoT / networking        | `libcoap`, `libwebsockets`, `nanopb`, `jsmn` |
+| Audio codecs            | `minimp3`, `opus`                                           |
+| Header-only utility     | `etl`, `fmt`, `nlohmann_json`, `doctest`                    |
+| Test framework          | `catch2`                                                    |
 
 Seven libraries declare an empty `accelerators:` list -- the four
 header-only utility libraries (`etl`, `fmt`, `nlohmann_json`,
@@ -238,13 +242,13 @@ to bind.  The other 18 libraries each carry at least one
 `requires_cap:`-gated backend entry.
 
 Regression-tested by
-[`tests/scripts/test_library_profiles.py`](../tests/scripts/test_library_profiles.py):
-the test fails if a library is added to the schema enum without a
-matching `hw-backends.yaml`, if a profile's `library:` slug drifts
-from the directory name, or if any emitted `kconfig:` line is not a
-real-looking `CONFIG_<NAME>=<value>` token.  The test does NOT
-validate that each emitted symbol exists in the pinned Zephyr's
-Kconfig tree -- that's a build-time concern.
+[`tests/scripts/test_project_backends.py`](../tests/scripts/test_project_backends.py)'s
+`TestHwBackendsLoader`: locks in the per-SKU `CONFIG_ALP_*=y` wiring
+`scripts/alp_project.py` emits from each library's
+`integration.zephyr.hw_backends:` block against the SoM preset's
+`capabilities:` matrix, so a metadata change can't silently drop a
+binding.  The test does NOT validate that each emitted symbol exists
+in the pinned Zephyr's Kconfig tree -- that's a build-time concern.
 
 ## Tier 2 — deferred to v0.5+
 
@@ -284,7 +288,9 @@ libraries below are smaller / different in scope:
 |-------------|------------------------------------------------------------------------|--------------------------------------------------------------------|
 | [TinyMaix](https://github.com/sipeed/TinyMaix) | Sub-100 KB inference for tiny MCUs (Cortex-M0, AVR)             | Below our target tier — alp-sdk's smallest target is the AEN M55.   |
 | [nnom](https://github.com/majianjia/nnom) | Pure-C neural net on MCUs, Keras export                        | Overlap with TFLM; no clear win on AEN/N93.                          |
+| [libonnx](https://github.com/xboot/libonnx) | C99 ONNX inference for embedded                                | Superseded as the ONNX answer by the real `onnxruntime` Tier B manifest (own `meta-alp-sdk` recipe, upstream `microsoft/onnxruntime` v1.28.0) — the A55/Yocto CPU inference floor, default off (`ALP_SDK_USE_ORT_CPU`), not yet run on silicon.  libonnx's remaining niche is a sub-Yocto (M-class / bare-metal) pure-ONNX path, which nothing in-tree needs yet. |
 | [libonnx](https://github.com/xboot/libonnx) | C99 ONNX inference for embedded                                | ONNX path is reachable via TFLM (TFLite converter).  Revisit if model authors want pure ONNX. |
+| [ExecuTorch](https://github.com/pytorch/executorch) | PyTorch's own on-device runtime for exported `.pte` programs | Write-side only (#1260): `ALP_INFERENCE_MODEL_EXECUTORCH` decodes and `scripts/alp_model/adapters/executorch.py` packages a `.pte` into an `.alpmodel`, but no on-device ExecuTorch runtime backend exists yet — a package built this way has nothing to `alp_inference_invoke()` it. |
 
 ## Tier 5 — considered, NOT pursued
 

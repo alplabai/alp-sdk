@@ -27,7 +27,7 @@ does not decode or play any audio.
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/display/lvgl-music-player
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/display/lvgl-music-player
 west flash
 ```
 

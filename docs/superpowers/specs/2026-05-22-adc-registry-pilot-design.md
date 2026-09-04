@@ -1,7 +1,11 @@
 # ADC Registry Pilot (Slice 1) Design
 
 **Date:** 2026-05-22
-**Status:** Draft — pending implementation
+**Status:** **LANDED.** `src/backends/adc/` exists with `adc_ops.h` +
+`alif_e7.c` / `alif_e8.c` / `gd32_bridge.c` / `sw_fallback.c` /
+`testing_drv.c` / `yocto_drv.c` / `zephyr_drv.c` — the three backends
+this pilot describes and more.  Kept for the migration-pattern
+rationale.
 **Owner:** alpCaner
 **Spec depth:** Single-subsystem migration (one PR / one plan)
 **Predecessor:** `docs/superpowers/specs/2026-05-21-backend-registry-design.md` Section 6 → Slice 1
@@ -330,7 +334,7 @@ Builds on every SoM. Customer reading the example learns both gating mechanisms 
 ## Open questions deferred to implementation
 
 1. `alif_e7.c` vendor-ext function bodies: whether `set_oversampling` re-opens the Zephyr ADC sequence (slow but always-correct) or queues the ratio for the next `read_raw` (fast but ordering-sensitive). Decided during the plan's TDD step that exercises both call orders.
-2. GD32 bridge ABI: the existing supervisor MCU command set is in `firmware/gd32-bridge/protocol_vectors.txt`. The plan should verify the `CMD_ADC_*` opcodes haven't shifted since the legacy `peripheral_adc.c` was written.
+2. GD32 bridge ABI: the existing supervisor MCU command set is in `gd32-bridge-firmware:protocol_vectors.txt`. The plan should verify the `CMD_ADC_*` opcodes haven't shifted since the legacy `peripheral_adc.c` was written.
 3. Whether `alp_adc_capabilities` returns a const pointer or a copy. Spec says const pointer; if the team prefers value semantics for ABI stability, swap during implementation. Cost is one struct copy per call.
 
 ## References

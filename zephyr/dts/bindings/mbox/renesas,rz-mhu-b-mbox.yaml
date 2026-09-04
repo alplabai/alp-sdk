@@ -1,7 +1,10 @@
 # Copyright 2026 Alp Lab AB
 # SPDX-License-Identifier: Apache-2.0
 #
-# vendor-ext (alp-sdk #683); BENCH-UNVERIFIED.
+# vendor-ext (alp-sdk #683). Verification status: init/attach and the A55->M33
+# receive path are silicon-proven under #697; mbox_send() (M33->A55) is
+# unexercised and does not reach the A55 on this topology -- see
+# zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c for the full status.
 #
 # Renesas RZ MHU-B mailbox controller, as found on RZ/V2N (R9A09G056).  MHU-B is
 # NOT the plain linear MHU the upstream `renesas,rz-mhu-mbox` binding + driver

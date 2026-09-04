@@ -1,7 +1,7 @@
 # `board.yaml` build-artefact emission
 
-How `scripts/alp_project.py` compiles a resolved `board.yaml` into
-the per-backend native config: the `tan build` entry point, the
+How Python Tan and alp-sdk's reference `scripts/alp_project.py` compile a
+resolved `board.yaml` into the per-backend native config: the `tan build` entry point, the
 Zephyr `alp.conf` overlay, plain-CMake `-D` args, the Yocto
 `local.conf` snippet, `west.yml` library auto-pinning, the
 build-time `hw-info-h` identifier header, and the DTS overlay for
@@ -17,23 +17,25 @@ and emits the requested build artifacts.  Common workflows below.
 
 ### `tan` -- validate, generate, and build
 
-alp-sdk is plans-only (ADR [0020](adr/0020-sdk-owns-build-execution.md));
-the standalone [`tan` CLI](https://github.com/alplabai/tan-cli) is the
-executor.  The usual application build entry point is:
+The standalone Python [`tan` CLI](https://github.com/alplabai/tan-cli) owns the
+normal in-process planner and executor (ADR
+[0020](adr/0020-sdk-owns-build-execution.md)). The usual application build
+entry point is:
 
 ```bash
-tan --project <app-dir> build
+tan build --project <app-dir>
 ```
 
-`tan build` validates `<app-dir>/board.yaml` (via alp-sdk's
-`alp_orchestrate --emit build-plan`), materialises the generated
+`tan build` validates `<app-dir>/board.yaml` with its relocated planner,
+materialises the generated
 per-slice configuration and system manifest, then dispatches the
 underlying Zephyr / Yocto / baremetal build steps for the enabled
 cores.  Companion `tan` verbs (`tan image`, `tan flash`, `tan clean`,
-`tan size`, and `tan renode`) consume the same build state for
-bundle, flash, sizing, and simulation workflows.  The SDK's own
-surviving `west alp-emit` remains for read-only, west-centric
-artefact inspection with no build attached.
+and `tan size`) consume the same build state for bundle, flash, and
+sizing workflows. The SDK's
+`alp_project.py`, `alp_orchestrate --emit ...`, and `west alp-emit` surfaces
+remain the reference implementations for parity, direct SDK maintenance, and
+west-centric artefact inspection.
 
 ### Zephyr -- generated `alp.conf` appended to `prj.conf`
 
@@ -97,18 +99,53 @@ input to a Zephyr tree built from a different one. A clean cross-version skew
 error (rather than a Kconfig "assign to undefined symbol" abort) is #855's
 version-detection work, not this loader's.
 
-### Plain CMake (baremetal / yocto) -- generated `-D` args
+### Plain CMake (baremetal / yocto) -- generated `-D` args (reference / inspection)
+
+`--emit cmake-args` renders a slice's would-be `-D` arguments as text: an
+on-request surface for inspecting what a baremetal build needs, or for a
+build system that parses the lines itself. It is **not** a directly
+shell-pipeable recipe -- `cmake -B build $(... --emit cmake-args) .` fails
+CMake's own argument parser today, for two independent reasons: the CLI's
+leading `# --- core: <id> (<os>) ---` section marker
+(`scripts/alp_project.py:442-444` prepends it unconditionally for
+`cmake-args`, unlike the `zephyr-conf` branch, which only adds it in the
+unscoped multi-core sum case), and the board-facade selector's bare
+`-DALP_BOARD_<SLUG>` (a compile-time `#if defined(...)` guard consumed by
+`include/alp/board.h`, not a `VAR=value` CMake cache entry -- CMake rejects
+a `-D` with no `=value`). Write the output to a file and adapt the lines
+into your own CMakeLists.txt / toolchain file instead:
 
 ```bash
-# Pipe the generated args straight into your configure step:
-ARGS=$(python3 $ALP_SDK/scripts/alp_project.py \
+python3 $ALP_SDK/scripts/alp_project.py \
     --input board.yaml \
-    --emit cmake-args)
-cmake -B build $ARGS .
+    --emit cmake-args \
+    --output build/generated/alp-cmake-args.txt
 ```
 
 Or wire the loader into a `CMakeUserPresets.json` writer if your
 build system already drives presets.
+
+**You do not need to do any of that for a `tan build`.** The build plan's
+own baremetal slice already carries these settings in the two shapes CMake
+actually accepts (alplabai/tan-cli#551): the `NAME=VALUE` lines become real
+`-D` cache arguments on the slice's `cmake -S … -B .` configure, and the
+bare guards become real compiler definitions through a generated
+`build/<core>-baremetal/alp-baremetal.cmake` that the same configure pulls
+in with `-DCMAKE_PROJECT_INCLUDE=`. This section is the *inspection*
+surface -- for reading what a slice needs, or for a build system that is
+not `tan`.
+
+One class of line stays inspection-only: a curated library with an
+`integration.baremetal.cmake` section in its
+`metadata/libraries/<name>.yaml` contributes a
+`# library <name>: <cmake hint>` line, which is prose for a human and not
+a `-D` flag at all -- handing it to cmake would make it a stray
+source-directory argument. Those lines are therefore dropped from the
+slice's configure, so the `_library_layer.baremetal_cmake_args` half of
+alplabai/tan-cli#551 is still open. Impact today is zero: no manifest
+under `metadata/libraries/` declares a `baremetal` section. Closing it
+needs those manifests to carry a machine-readable argument rather than a
+hint string.
 
 ### Yocto -- generated `local.conf` snippet
 
@@ -234,4 +271,3 @@ the same rule.
   validate that requested features (e.g. 16-bit ADC) match the
   SoC's documented caps.  The `<alp/soc_caps.h>` runtime check
   catches mismatches at `_open` time today.
-

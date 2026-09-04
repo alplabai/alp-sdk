@@ -254,11 +254,10 @@ static void kbuf(char *out, size_t cap, uint64_t seq)
  * g_engine_lock serializes every call below across append/verify/count
  * (and, without needing counter access, get()) so two concurrent callers
  * can never interleave the three mutations, and a reader can never
- * observe a state midway through an append. Unlike
- * alp_handle_begin_close() in src/common/alp_slot_claim.h -- whose
- * critical section really is a handful of short, synchronous in-RAM
- * calls -- the critical section guarded here can include the SW-NVS
- * tier's nvs_write()/nvs_calc_free_space(), which can trigger NVS garbage
+ * observe a state midway through an append. Unlike the pool-slot claim
+ * in src/common/alp_slot_claim.h (a single atomic compare-exchange),
+ * the critical section guarded here can include the SW-NVS tier's
+ * nvs_write()/nvs_calc_free_space(), which can trigger NVS garbage
  * collection (a sector erase: milliseconds of flash I/O). On a
  * single-core target (each AEN M55 is single-core Zephyr) a pure busy
  * spin is therefore not safe regardless of what it yields with: a

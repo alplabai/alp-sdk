@@ -50,6 +50,14 @@ static struct {
 	uint8_t          cmd;
 	uint16_t         req_len;
 	uint8_t          req_pl[ALP_CC3501E_MAX_PAYLOAD];
+
+	/* Opcode of the WIFI_CONNECT_STA submit, captured separately from the
+	 * generic `cmd` above: cc3501e_wifi_connect() now submits once (fire-
+	 * and-forget) and then polls WIFI_STATUS to collect the outcome (see
+	 * chips/cc3501e/cc3501e_wifi.c), so by the time connect() returns, `cmd`
+	 * reflects the trailing WIFI_STATUS poll, not the CONNECT_STA submit
+	 * this test's assertions care about. */
+	uint8_t connect_cmd_seen;
 } slave;
 
 static void slave_reset(void)
@@ -81,14 +89,38 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 		slave.phase = PH_REPLY_HDR;
 		break;
 	case PH_REPLY_HDR:
-		rx[0]       = slave.cmd; /* echo cmd */
-		rx[1]       = 0x00u;
-		rx[2]       = 1u; /* reply payload = 1 status byte */
+		rx[0] = slave.cmd; /* echo cmd */
+		rx[1] = 0x00u;
+		/* WIFI_STATUS carries a real 4-byte payload (state | fail_reason |
+		 * rssi_dbm | reserved); every other opcode this test drives is a
+		 * bare status byte. */
+		rx[2]       = (slave.cmd == ALP_CC3501E_CMD_WIFI_STATUS) ? 5u : 1u;
 		rx[3]       = 0x00u;
 		slave.phase = PH_REPLY_PL;
 		break;
 	case PH_REPLY_PL:
-		rx[0]       = ALP_CC3501E_RESP_OK;
+		if (slave.cmd == ALP_CC3501E_CMD_WIFI_CONNECT_STA) {
+			/* The real firmware's WORKER_IDLE submit ack is UNCONDITIONALLY
+			 * RESP_ERR_BUSY (see cc3501e-bridge-firmware:src/protocol.c) -- never a
+			 * synchronous OK -- and cc3501e_request_locked() now refuses to
+			 * hand back OK for this opcode's bare-ack shape either way (see
+			 * cc3501e_core.c, issue #1378).  Model the real ack so
+			 * cc3501e_wifi_connect() falls through to polling WIFI_STATUS
+			 * below, exactly as it does on real silicon. */
+			slave.connect_cmd_seen = slave.cmd;
+			rx[0]                  = ALP_CC3501E_RESP_ERR_BUSY;
+		} else if (slave.cmd == ALP_CC3501E_CMD_WIFI_STATUS) {
+			/* Immediately CONNECTED -- this test cares about the on-wire
+			 * `security` byte the CONNECT_STA submit carried, not the
+			 * connect state machine, so resolve it on the first poll. */
+			rx[0] = ALP_CC3501E_RESP_OK;
+			rx[1] = ALP_CC3501E_WIFI_CONNECTED;
+			rx[2] = ALP_CC3501E_WIFI_FAIL_NONE;
+			rx[3] = (uint8_t)(-50);
+			rx[4] = 0u;
+		} else {
+			rx[0] = ALP_CC3501E_RESP_OK;
+		}
 		slave.phase = PH_REQ_HDR;
 		break;
 	}
@@ -159,7 +191,7 @@ ZTEST(cc3501e_wifi_backend_security, test_connect_no_psk_selects_open)
 
 	const alp_wifi_credentials_t creds = { .ssid = "OpenNet", .psk = NULL };
 	zassert_equal(state.ops->connect(&state, &creds, 100u), ALP_OK, "CONNECT -> OK");
-	zassert_equal(slave.cmd, ALP_CC3501E_CMD_WIFI_CONNECT_STA, "opcode 0x12 emitted");
+	zassert_equal(slave.connect_cmd_seen, ALP_CC3501E_CMD_WIFI_CONNECT_STA, "opcode 0x12 emitted");
 	/* alp_cc3501e_wifi_connect_t: ssid_len(0) | psk_len(1) | security(2) | reserved(3). */
 	zassert_equal(slave.req_pl[2], CC3501E_WIFI_CONNECT_SEC_OPEN, "NULL psk -> open (sec=0)");
 	zassert_equal(slave.req_pl[1], 0u, "psk_len=0 for a NULL psk");

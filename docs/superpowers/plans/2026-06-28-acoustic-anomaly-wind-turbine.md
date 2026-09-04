@@ -1,6 +1,18 @@
 # Wind-Turbine Acoustic Anomaly Monitor Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical transcript.** Implementation plan dated 2026-06-28. The
+> SDK has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as a
+> live task list; kept for implementation-history rationale only.
+>
+> Command examples below use this session's original Windows/WSL
+> checkout paths (e.g. `/mnt/c/Users/<user>/...`) verbatim -- treat
+> them as historical record, not copy-paste-ready commands for
+> today's checkout.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** A nacelle acoustic condition monitor: capture mic audio, extract DSP features, normalize blade-periodic energy to rotor order (RPM-invariant via BPF), and emit a per-interval anomaly score + advisory subsystem/flag for drivetrain tonals and gross blade aero-anomalies.
 
@@ -1504,7 +1516,7 @@ tests:
 
   alp_sdk.example.acoustic_anomaly_wind_turbine.aen_build:
     platform_allow:
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
     build_only: true
     tags:
       - alp-sdk
@@ -1604,7 +1616,7 @@ WTAC,12.0,17.4,0.87,0.62,BLADE_BPF,5833.3,IMBALANCE,ESTIMATED
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/audio/acoustic-anomaly-wind-turbine
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/audio/acoustic-anomaly-wind-turbine
 west flash
 ```
 

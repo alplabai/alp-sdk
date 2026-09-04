@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# HE-side peer slice of mproc-mailbox.  `board.yaml` (one level up)
+# wires this directory as the `m55_he` core's `app:`, so Twister
+# discovers this as its own app root, separate from the HP-side
+# `../testcase.yaml` (rooted at the example's `./src`).  No
+# native_sim overlay exists under this directory -- the `alp_shmem0`
+# DT alias is provided only by `../boards/native_sim_native_64.overlay`,
+# which applies to the HP-side (`../src`) build, not this one -- so
+# this testcase carries AEN-board coverage only.
+
+sample:
+  name: mproc-mailbox-peer
+  description: |
+    M55-HE side of the mproc-mailbox roundtrip: waits on the same
+    mbox + shmem region as ../src (m55_hp), echoes the payload back.
+
+tests:
+  alp_sdk.examples.mproc_mailbox.peer.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args: CONFIG_ALP_SDK_MPROC=y
+    build_only: true   # roundtrip verification is HiL (dual-ATOC bench flash), not a CI run.

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/som-preset-v1.schema.json",
   "title": "ALP SoM preset (metadata/e1m_modules/<SKU>.yaml) v1",
-  "description": "Schema for the per-SKU SoM preset.  The SDK's loader resolves the customer's board.yaml `som.sku` to the matching preset here.  Every released-MPN preset shares ONE canonical shape: the top-level key set, `memory:`, `on_module:`, `inference:`, and `status:` are closed (additionalProperties: false) so cross-family key drift fails validation instead of passing silently.  The only deliberately-open spots are the ones where genuine per-family variance is legitimate, and each carries its own description saying why: `capabilities:` (open set of accelerator flags matched against library hw-backends.yaml), `i2c_devices` bus KEYS (bus identifiers differ per family), `bus_pads` (per-silicon pad naming), and `helper_firmware[].flash_args` (shape follows the flash backend).",
+  "description": "Schema for the per-SKU SoM preset.  The SDK's loader resolves the customer's board.yaml `som.sku` to the matching preset here.  Every released-MPN preset shares ONE canonical shape: the top-level key set, `memory:`, `on_module:`, `inference:`, and `status:` are closed (additionalProperties: false) so cross-family key drift fails validation instead of passing silently.  The only deliberately-open spots are the ones where genuine per-family variance is legitimate, and each carries its own description saying why: `capabilities:` (open set of accelerator flags matched against each library's `integration.zephyr.hw_backends:` block in metadata/libraries/*.yaml), `i2c_devices` bus KEYS (bus identifiers differ per family), and `helper_firmware[].flash_args` (shape follows the flash backend).",
   "type": "object",
   "required": [
     "schema_version", "sku", "family", "silicon", "display_name",
@@ -86,7 +86,15 @@
           "description": "Number of populated Ethernet PHY instances.  Only meaningful alongside `ethernet_phy:`; families with a single PHY (or none) omit it."
         },
         "nor_flash":          { "$ref": "#/$defs/chip_ref", "description": "SoC controller / peripheral name that reaches the on-module NOR flash (routing annotation, not a chip slug -- e.g. `xspi`)." },
+        "nor_flash_driver_status": {
+          "$ref": "#/$defs/driver_status",
+          "description": "alp-sdk driver maturity for the on-module NOR flash reached via `nor_flash:`. `nor_flash:` names the SoC controller, not a chip slug, so there is no `chips/<part>/` driver to tier -- `none` is the honest (not aspirational) value per ADR 0017 (#1169)."
+        },
         "emmc":               { "$ref": "#/$defs/chip_ref", "description": "SoC controller / peripheral name that reaches the on-module eMMC (routing annotation -- e.g. `sd0`)." },
+        "emmc_driver_status": {
+          "$ref": "#/$defs/driver_status",
+          "description": "alp-sdk driver maturity for the on-module eMMC reached via `emmc:`. `emmc:` names the SoC controller, not a chip slug, so there is no `chips/<part>/` driver to tier -- `none` is the honest (not aspirational) value per ADR 0017 (#1169)."
+        },
         "npu":                { "$ref": "#/$defs/chip_ref", "description": "Discrete on-module NPU chip (V2M's DEEPX DX-M1).  On-die NPUs (Ethos-U, DRP-AI) are silicon facts and do NOT appear here." },
         "pcie_mux":           { "$ref": "#/$defs/chip_ref" },
         "ospi_memories": {
@@ -165,7 +173,7 @@
       "type": "object",
       "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
       "additionalProperties": { "type": "boolean" },
-      "description": "Per-SoM hardware-accelerator / feature capability flags.  DELIBERATELY OPEN keys (values pinned to booleans): the key set is matched against each library's metadata/library-profiles/<name>/hw-backends.yaml, which grows with the library catalogue -- enumerating it here would couple the preset schema to every library release.  ADDITIVE direction only: declare capabilities the SoM ADDS on top of the silicon (on-module chips, bridge features).  Removing a silicon capability the SKU leaves unpopulated goes in `silicon_capabilities.unpopulated` instead, never as a `false` here."
+      "description": "Per-SoM hardware-accelerator / feature capability flags.  DELIBERATELY OPEN keys (values pinned to booleans): the key set is matched against each library's `integration.zephyr.hw_backends:` block in metadata/libraries/<name>.yaml, which grows with the library catalogue -- enumerating it here would couple the preset schema to every library release.  ADDITIVE direction only: declare capabilities the SoM ADDS on top of the silicon (on-module chips, bridge features).  Removing a silicon capability the SKU leaves unpopulated goes in `silicon_capabilities.unpopulated` instead, never as a `false` here."
     },
     "silicon_capabilities": {
       "type": "object",
@@ -213,17 +221,42 @@
         "channels": {
           "type": "array",
           "items": { "$ref": "#/$defs/mailbox_channel" }
+        },
+        "driver_status": {
+          "$ref": "#/$defs/driver_status",
+          "description": "alp-sdk driver maturity for the mailbox controller. A directional link (e.g. RX proven, TX unexercised) is a single value short of what this enum can express on its own -- pair it with `notes` when the two directions differ (#1169)."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Free-form maturity note -- e.g. recording which direction of a bidirectional link is silicon-proven when `driver_status` alone can't capture the split."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "driver_status": { "const": "partial" } },
+            "required": ["driver_status"]
+          },
+          "then": {
+            "required": ["notes"],
+            "properties": { "notes": { "minLength": 1 } }
+          }
+        }
+      ]
     },
     "pad_routes": {
       "type": "array",
-      "description": "E1M pads / peripheral instances that route through a SoM-side mediator chip (e.g., CC3501E coprocessor on AEN, GD32G553 IO MCU on V2N). Pads NOT listed here are assumed to route directly to the main silicon's GPIO / peripheral. The SDK loader composes this list with the board's `e1m_routes:` block at codegen time: when an E1M pad appears in both blocks, the board supplies the role (e.g., `bmi323_int1`) and the SoM supplies the dispatch path (e.g., CC3501E GPIO 14).",
+      "description": "E1M pads / peripheral instances whose dispatch is worth recording explicitly: routed through a SoM-side mediator chip (e.g., CC3501E coprocessor on AEN, GD32G553 IO MCU on V2N), or -- via `dispatch: unrouted` -- physically open on this revision (reaches neither a mediator nor the main silicon). Pads NOT listed here are assumed to route directly to the main silicon's GPIO / peripheral -- that default is only ever `direct`; a pad that goes nowhere MUST carry an explicit `unrouted` entry rather than falling out of the list silently (#1854). The SDK loader composes this list with the board's `e1m_routes:` block at codegen time: when an E1M pad appears in both blocks, the board supplies the role (e.g., `bmi323_int1`) and the SoM supplies the dispatch path (e.g., CC3501E GPIO 14).",
       "items": { "$ref": "#/$defs/pad_route_entry" }
+    },
+    "soc_peripheral_instances": {
+      "type": "array",
+      "description": "On-die SoC peripheral instances with pads routed on the module's edge (metadata/e1m_modules/<family>/*.tsv) but no dedicated `on_module:` role -- they are bus/interface instances, not populated parts (no MPN, no chips/*.yaml manifest). Declared here purely so the instance is VISIBLE to the SoM model (a prerequisite for #655's DT/pinctrl generation and for board.yaml requests to bind to) -- this block does NOT itself generate anything and does NOT duplicate the pad list, which stays single-sourced in the TSV. `driver_status: none` is the honest default for an instance with no alp-sdk driver behind it yet; do not mark a tier here that the driver files don't back. `instance` slugs must be unique within a preset -- `uniqueItems` on this array only catches two byte-identical entries, so the real check (same slug, differing class/driver_status) is a semantic cross-check in scripts/validate_metadata.py, not this schema (#1170).",
+      "items": { "$ref": "#/$defs/soc_peripheral_instance" }
     },
     "helper_firmware": {
       "type": "array",
-      "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`).  Each entry is EITHER a customer-flashable helper MCU -- carries `flash_method`/`flash_args` (e.g. `gd32_bridge` via `swd_probe`), independently flashed via `tan flash` -- OR a vendor-OTA-updated coprocessor -- carries `update_channel` (e.g. AEN's `cc3501e_otp` via `alp_ota_spi_otp`), whose firmware is Alp-released and applied over the bridge link programming the chip's own OTP, and is NEVER customer-flashed.  See `$defs/helper_firmware_entry`.",
+      "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`).  An entry describes a helper along three INDEPENDENT axes: how it is written locally (`flash_method`/`flash_args`, no preset declares one today), how it is updated in the FIELD (`update_channel`, e.g. AEN's `cc3501e_otp` via `alp_ota_spi_otp` or the GD32 bridge's `alp_ota_spi_bridge`), and WHO may invoke the flash method and when (`flash_policy`).  A helper may declare any combination -- the GD32 bridge carries a field-update channel and a `recovery_only` policy with NO local flash method at all, and AEN's `cc3501e_otp` is the same shape.  See `$defs/helper_firmware_entry`.",
       "items": { "$ref": "#/$defs/helper_firmware_entry" }
     },
     "default_hw_rev": {
@@ -250,6 +283,11 @@
     }
   },
   "$defs": {
+    "driver_status": {
+      "type": "string",
+      "enum": ["none", "planned", "partial", "complete"],
+      "description": "Shared alp-sdk driver-maturity vocabulary, reused wherever a preset tracks it (`soc_peripheral_instance.driver_status`, `mailbox.driver_status`, `on_module.nor_flash_driver_status`, `on_module.emmc_driver_status`) so the tiers can't drift apart per field. `none` is the honest default absent a matching driver; do not write an aspirational tier (#1169)."
+    },
     "chip_ref": {
       "oneOf": [
         {
@@ -437,10 +475,41 @@
           "type": "boolean",
           "description": "When true the region is cacheable from all `accessible_from` cores.  Default carve-out is non-cacheable."
         },
+        "carveout": {
+          "type": "boolean",
+          "description": "When explicitly false, this region is excluded from IPC carve-out allocation (scripts/alp_orchestrate/carveout.py resolve_carve_outs) even though it declares a real `base`.  For a flash-class region (e.g. an MRAM MCUboot/slot0/reserved/storage sub-region that must publish a base so the board generator can lay out its partition table) that base is NOT byte-addressable shared memory a raw_shmem/rpmsg carve-out can safely land in.  Defaults to true (eligible).  Setting this false ALSO removes the region from `_known_flash_devices()` and refuses it as a board.yaml `storage[].flash_device:` target (#1484) -- a second, overloaded meaning; #1365 tracks giving carveout eligibility and flash-device eligibility their own, principled fields instead of sharing this flag."
+        },
+        "access_windows": {
+          "type": "object",
+          "description": "OPTIONAL per-core addressable sub-window of this region, keyed by core id.  `accessible_from:` is a yes/no per core and cannot express \"this core reaches only PART of the region\" -- the RZ/V2N Cortex-M33 does exactly that (FSP bsp_slave_address.h: CM33-secure 0x80000000 / CM33-non-secure 0x90000000 -> A55 0x40000000, 256 MiB) while ddr_main spans 4 GiB.  Declare the reachable slice here and scripts/alp_orchestrate/carveout.py confines that core's IPC carve-outs to it instead of allocating at the region top, where the address does not exist for that core.  Omit for regions every accessible_from core reaches in full.",
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]+$" },
+          "additionalProperties": {
+            "type": "object",
+            "required": ["base"],
+            "additionalProperties": false,
+            "anyOf": [
+              { "required": ["size_kib"] },
+              { "required": ["size_mib"] }
+            ],
+            "properties": {
+              "base": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Window base in the SAME address space as the region's own `base` (i.e. the physical/host view), NOT the aliased address the core issues."
+              },
+              "size_kib": { "type": "integer", "minimum": 1 },
+              "size_mib": { "type": "integer", "minimum": 1 },
+              "note": {
+                "type": "string",
+                "description": "Provenance for the window -- name the vendor header/manual it was read from."
+              }
+            }
+          }
+        },
         "dt_label": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9_]*$",
-          "description": "Optional Zephyr Devicetree label for this region.  Used by the storage emitter when board.yaml `storage:` entries reference this region as their `flash_device:`; the emitted overlay decorates `&<dt_label>` with a `partitions { ... }` child node.  Defaults to the region `name` when omitted."
+          "description": "Optional Zephyr Devicetree label for this region.  Used by the storage emitter when board.yaml `storage:` entries reference this region as their `flash_device:`; the emitted overlay decorates `&<dt_label>` with a `partitions { ... }` child node.  Defaults to the region `name` when omitted, which is only safe when the region name already IS its Devicetree label -- verify against the generated board `.dts` before relying on the default (AEN's `mram_main`, for example, names its flash node `mram_storage`, not `mram_main`).  Since alp-sdk#1556, `resolve_storage_partitions()` enforces this itself: a `storage:` entry cannot reach `status: ok` on a region that omits this field, so an unverified default now blocks with a reason instead of silently resolving.  A region with `carveout: false` is a partition INSIDE a flash-class node, not a flash device of its own, and is refused as a `flash_device:` target regardless of this field (#1484)."
         }
       }
     },
@@ -463,12 +532,8 @@
     },
     "helper_firmware_entry": {
       "type": "object",
-      "required": ["name", "chip"],
+      "required": ["name", "chip", "flash_policy"],
       "additionalProperties": false,
-      "oneOf": [
-        { "required": ["flash_method"], "not": { "required": ["update_channel"] } },
-        { "required": ["update_channel"], "not": { "required": ["flash_method"] } }
-      ],
       "properties": {
         "name": {
           "type": "string",
@@ -483,7 +548,7 @@
         "firmware_path": {
           "type": "string",
           "minLength": 1,
-          "description": "Repo-relative path to the prebuilt / shipped firmware image.  Omit this key entirely when no artefact exists yet (schema-legal -- only `name` and `chip` are required) so `tan flash` gives its clean refusal ('has no output_artefact / firmware_path; can't flash') instead of resolving a sentinel path."
+          "description": "Repo-relative path to the prebuilt / shipped firmware image.  Omit this key entirely when no artefact exists yet (schema-legal -- only `name`, `chip` and `flash_policy` are required)."
         },
         "flash_method": {
           "type": "string",
@@ -491,7 +556,7 @@
             { "pattern": "^[a-z][a-z0-9_]+$" },
             { "const": "TBD" }
           ],
-          "description": "Backend tool key consumed by `tan flash`'s helper-MCU dispatcher (e.g. `swd_probe`) for a CUSTOMER-flashable helper.  TBD pending the authoritative flow.  Mutually exclusive with `update_channel` -- an entry carries exactly one of the two."
+          "description": "Backend tool key naming the transport by which this helper's image is WRITTEN locally.  TBD pending the authoritative flow.  Independent of `update_channel` (which answers how the device is updated in the FIELD): an entry may carry both.  It says nothing about who is allowed to invoke it -- that is `flash_policy`, which is REQUIRED on every helper entry regardless of which of these two keys it carries.  NO SoM preset declares this key today: `swd_probe` was removed from the four E1M-X GD32 bridge entries when GD32 programming was separated out of `tan` (#1439, tan-cli#732)."
         },
         "flash_args": {
           "oneOf": [
@@ -500,10 +565,44 @@
           ],
           "description": "Backend-specific args (interface, target, base address, ...) forwarded verbatim to the flash backend.  DELIBERATELY OPEN object: the shape follows `flash_method`'s backend contract, which this schema cannot enumerate; TBD when the method is TBD.  Only meaningful alongside `flash_method`."
         },
+        "flash_policy": {
+          "type": "string",
+          "enum": ["customer", "factory", "recovery_only"],
+          "description": "WHO may invoke `flash_method`, and WHEN.  REQUIRED on every helper entry -- there is no absent-means-`customer` default; a helper with no local flash path at all (no `flash_method`) still states who may reach it if one is ever added.  `customer`: a genuine customer flash target.  `factory`: programmed by Alp Lab in production, never a customer flash target.  `recovery_only`: programmed by Alp Lab in production, and customer-flashable ONLY to recover a bricked device, with Alp Lab-supplied binaries.  Independent of `update_channel`, which answers how the device is updated in the FIELD -- a helper can carry both, and the GD32 bridge does."
+        },
         "update_channel": {
           "type": "string",
-          "enum": ["alp_ota_spi_otp"],
-          "description": "Marks this helper as a vendor-OTA-updated coprocessor rather than a customer-flash target (e.g. AEN's `cc3501e_otp`): firmware is Alp-released and applied over the bridge SPI link, programming the chip's own OTP -- the customer never flashes it directly.  Mutually exclusive with `flash_method` -- an entry carries exactly one of the two."
+          "enum": ["alp_ota_spi_otp", "alp_ota_spi_bridge"],
+          "description": "How this helper's firmware is updated in the FIELD, once the module is in a customer's hands.  `alp_ota_spi_otp` (AEN's `cc3501e_otp`): Alp-released firmware applied over the bridge SPI link, programming the chip's own OTP.  `alp_ota_spi_bridge` (the GD32 bridge): streamed over the bridge link into a slot-A/B application bootloader with commit + rollback -- a DIFFERENT value on purpose, because the GD32 has no OTP to program.  Independent of `flash_method`; declaring a channel does not by itself make the helper un-flashable, and does not imply anything about who may flash it -- that is `flash_policy`."
+        }
+      }
+    },
+    "soc_peripheral_instance": {
+      "type": "object",
+      "required": ["instance", "class", "silicon_peripheral"],
+      "additionalProperties": false,
+      "properties": {
+        "instance": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Instance slug local to this SoM, e.g. `riic1`, `i3c30`, `rspi0`, `canfd2`."
+        },
+        "class": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Peripheral class, matching a `metadata/socs/**.json` `peripherals:` key family (e.g. `i2c`, `i3c`, `spi`, `pdm`, `can`, `uart`, `i2s`)."
+        },
+        "silicon_peripheral": {
+          "type": "string",
+          "description": "The pad-route source's `silicon_peripheral` name/prefix this instance corresponds to (e.g. `RIIC1_`), for traceability back to metadata/e1m_modules/<family>/*.tsv."
+        },
+        "driver_status": {
+          "$ref": "#/$defs/driver_status",
+          "description": "alp-sdk driver maturity for this instance. `none` (the default assumption) is the honest value while no zephyr/drivers/** node targets it -- do not write an aspirational tier."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Free-form one-line note."
         }
       }
     },
@@ -519,21 +618,33 @@
         },
         "dispatch": {
           "type": "string",
-          "enum": ["cc3501e", "gd32_bridge", "direct", "TBD"],
-          "description": "SoM-side mediator the pad routes through. `direct` is the default for pads not in the list; an explicit `direct` entry is allowed for clarity. `TBD` marks pads whose routing is pending the user's HW-config writeup (per the no-inventing-values rule)."
+          "enum": ["cc3501e", "gd32_bridge", "direct", "unrouted", "TBD"],
+          "description": "SoM-side mediator the pad routes through. `direct` is the default for pads not in the list; an explicit `direct` entry is allowed for clarity. `unrouted` marks a pad that is physically open on this hardware revision -- it reaches neither a mediator nor the main silicon's GPIO / peripheral -- and MUST be listed here explicitly; there is no implicit `unrouted` default (an absent entry always means `direct`). The SDK's GPIO dispatch path refuses to open an `unrouted` pad with ALP_ERR_NOSUPPORT instead of silently driving a pin that goes nowhere (#1854). `TBD` marks pads whose routing is pending the user's HW-config writeup (per the no-inventing-values rule)."
         },
         "dispatch_pin": {
           "oneOf": [
             { "type": "integer", "minimum": 0 },
             { "type": "string", "pattern": "^[A-Za-z0-9_./]+$" }
           ],
-          "description": "Mediator-local pin or bus identifier. Forms: integer (CC3501E GPIO index, e.g. `14`); single pad name (`\"PA11\"` for a GD32 port pad); bus pin (`\"SPI1.MISO\"`); or a slash-joined pair for multi-pin peripherals (`\"PA0/PB3\"` for a quadrature encoder's X/Y pads)."
+          "description": "Mediator-local pin or bus identifier. Forms: integer (CC3501E GPIO index, e.g. `14`); single pad name (`\"PA11\"` for a GD32 port pad); bus pin (`\"SPI1.MISO\"`); or a slash-joined pair for multi-pin peripherals (`\"PA0/PB3\"` for a quadrature encoder's X/Y pads). Meaningless for `dispatch: unrouted` (there is no mediator pin to name); omit it there."
         },
         "doc": {
           "type": "string",
-          "description": "One-line free-form note (matches the e1m_routes entry shape on the board side)."
+          "description": "One-line free-form note (matches the e1m_routes entry shape on the board side). Required for `dispatch: unrouted` -- the whole point of that state is to record WHY the pad is dead (e.g. which revision/pin it moved from)."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "dispatch": { "const": "unrouted" } },
+            "required": ["dispatch"]
+          },
+          "then": {
+            "required": ["doc"],
+            "properties": { "doc": { "minLength": 1 } }
+          }
+        }
+      ]
     },
     "i2c_bus": {
       "type": "object",
@@ -543,11 +654,6 @@
         "bus_master": {
           "type": "string",
           "description": "Which silicon drives the bus (informational).  Omitted when no on-module silicon masters the bus (e.g. AEN's slave-only LPI2C0 housekeeping bus, ADR 0017)."
-        },
-        "bus_pads": {
-          "type": "object",
-          "additionalProperties": true,
-          "description": "Per-silicon bus pad assignments (informational).  DELIBERATELY OPEN: keys name the silicon, values follow that vendor's pad-naming convention."
         },
         "devices": {
           "type": "array",
@@ -602,6 +708,10 @@
         "notes": {
           "type": "string",
           "description": "Free-form note (rare in the public form -- design rationale belongs in the private metadata repo)."
+        },
+        "broadcast_address": {
+          "type": "boolean",
+          "description": "True when `address_7bit` is a broadcast / global-call address multiple devices on this bus legitimately answer BY DESIGN (e.g. the TAS2563 family's 0x48 global-call write-only address, metadata/chips/tas2563.yaml). Excludes this entry from scripts/validate_metadata.py's duplicate-(bus,address_7bit) collision check (#1845). Do NOT set this to silence a real strap conflict between two unrelated devices -- document a real conflict via `notes:` instead and fix the strap."
         }
       }
     }

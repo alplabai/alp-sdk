@@ -74,7 +74,7 @@ extern "C" {
 
 /* --------------------------------------------------------------- */
 /* Wire constants — kept in sync with docs/gd32-bridge-protocol.md   */
-/* and firmware/gd32-bridge/src/protocol.c on the firmware side.              */
+/* and gd32-bridge-firmware:src/protocol.c on the firmware side.              */
 /* --------------------------------------------------------------- */
 
 /** Start-of-frame marker carried by every SPI frame. */
@@ -258,9 +258,7 @@ typedef enum {
      * `bridge_hw_adc_dsp_*` HAL bodies land in the GD32 firmware
      * tree.  Host helpers in `chips/gd32g553/` honour the same
      * NOSUPPORT contract by routing through cmd_send unchanged.
-     * See `docs/gd32-bridge-protocol.md` §3.x for the wire layout and
-     * `memory/project_wave2_dsp_pipeline_design.md` for design
-     * context. */
+     * See `docs/gd32-bridge-protocol.md` §3.x for the wire layout. */
 	GD32G553_CMD_ADC_DSP_CHAIN_OPEN = 0x37,
 	GD32G553_CMD_ADC_DSP_STAGE_PUSH = 0x38,
 	GD32G553_CMD_ADC_DSP_CHAIN_BIND = 0x39,
@@ -403,7 +401,7 @@ alp_status_t gd32g553_get_reset_reason(gd32g553_t *ctx, gd32g553_reset_cause_t *
  *
  *  @param ctx     GD32G553 bridge context (must be initialised first).
  *  @param mask    Logical GD32 pad indices the caller cares about.
- *                 Mapping is documented in firmware/gd32-bridge/README.md;
+ *                 Mapping is documented in gd32-bridge-firmware:README.md;
  *                 the host MUST NOT assume bit `n` is `Pxn`.
  *  @param levels  Output: bit `i` set iff (mask bit i set) and
  *                 (the corresponding pad reads high). */
@@ -521,7 +519,7 @@ alp_status_t gd32g553_qenc_reset(gd32g553_t *ctx, uint8_t encoder);
  *
  *  v0.2 of the protocol does not expose a counter-frequency opcode,
  *  so the caller must know the bridge counter's tick rate out-of-
- *  band (firmware-defined; see `firmware/gd32-bridge/README.md`).  A future
+ *  band (firmware-defined; see `gd32-bridge-firmware:README.md`).  A future
  *  minor revision will add `CMD_COUNTER_GET_FREQ` so the host can
  *  convert ticks ↔ microseconds without that out-of-band knowledge.
  *
@@ -750,7 +748,7 @@ alp_status_t gd32g553_tmu_compute(gd32g553_t             *ctx,
 /* All six opcodes return STATUS_NOSUPPORT today against the current  */
 /* firmware (the bridge_hw_* HAL bodies are the gating dep -- see     */
 /* the firmware-side comment block at the top of                      */
-/* firmware/gd32-bridge/src/protocol.h).  The host helpers below match the     */
+/* gd32-bridge-firmware:src/protocol.h).  The host helpers below match the     */
 /* contract: every call returns ALP_ERR_NOSUPPORT today and ALP_OK    */
 /* once the firmware-side HAL ships.  Portable surfaces in            */
 /* <alp/pwm.h> + <alp/counter.h> + <alp/power.h> dispatch through     */
@@ -1051,7 +1049,7 @@ bool gd32g553_ota_supported(const gd32g553_t *ctx);
 
 /** OTA state-machine snapshot returned by @ref gd32g553_ota_get_state.
  *  Values are the WIRE encoding from the firmware state machine
- *  (firmware/gd32-bridge/src/ota.c) -- keep numerically identical. */
+ *  (gd32-bridge-firmware:src/ota.c) -- keep numerically identical. */
 typedef enum {
 	GD32G553_OTA_STATE_IDLE     = 0, /**< No upgrade session open. */
 	GD32G553_OTA_STATE_READY    = 1, /**< Session open; accepting chunks. */
@@ -1061,7 +1059,7 @@ typedef enum {
 } gd32g553_ota_state_t;
 
 /** Slot id -- the WIRE encoding from the firmware's A/B metadata
- *  (firmware/gd32-bridge/src/ota_layout.h OTA_SLOT_A/B); 0xFF is the
+ *  (gd32-bridge-firmware:src/ota_layout.h OTA_SLOT_A/B); 0xFF is the
  *  GET_STATE "no pending slot" sentinel. */
 typedef enum {
 	GD32G553_OTA_SLOT_A    = 0u,

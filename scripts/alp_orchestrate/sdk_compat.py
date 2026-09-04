@@ -32,6 +32,16 @@ from not existing at all (`SdkRevisionNotBuildable`, not
 to `status:` -- existence and buildability are two different questions,
 answered by two different predicates, so a later status change can't slip
 into the wrong one silently.
+
+All three of those gates read ONE file per SoM family,
+`metadata/e1m_modules/<family>/hw-revisions.yaml`, through
+`load_family_table()` below.  That reader used to swallow `OSError` and
+`yaml.YAMLError` and answer `{}`, which every predicate here reads as
+"nothing to judge" -- so a single tab-indented line in that file disabled
+the unknown-revision gate, the not-buildable gate AND the SDK-range gate
+at once and emitted a wrong-hardware artefact at exit 0.  It now refuses
+instead; see `load_family_table`'s own docstring for why an ABSENT table
+is still benign while a present-but-unusable one is not.
 """
 
 from __future__ import annotations
@@ -41,6 +51,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
+
+from .models import OrchestratorError
 
 # A revision may bound one side, both, or neither.  `max_sdk_version: ~`
 # (YAML null) is the common case in tree today and means "no upper bound
@@ -191,18 +203,86 @@ def revision_buildable(table: Any, hw_rev: Optional[str]) -> Optional[bool]:
     return True
 
 
-def _load_family_table(metadata_root: Path, family_dir: str) -> Any:
-    """The raw parsed `hw-revisions.yaml` for a SoM family, or {} if
-    missing/unreadable -- same tolerant-read idiom `family_revision` used
-    inline before this was factored out for `family_revision_known` to
-    share."""
+def _table_unreadable(path: Path, why: str) -> OrchestratorError:
+    """The refusal every present-but-unusable family table raises.
+
+    One message shape so the three gates that read the table cannot
+    disagree about what an unreadable one means.
+    """
+    return OrchestratorError(
+        f"{path}: the SoM-family hardware-revision table is present but "
+        f"unusable ({why}).  This table is the ONLY thing the hw_rev "
+        "existence, buildable-status and SDK-version-range gates check "
+        "against, so an unusable one is refused rather than read as "
+        "\"this family declares no revisions\" -- treating it as empty "
+        "would let every one of those gates pass and emit firmware for "
+        "an unverified hardware revision.  Restore the file (a partial "
+        "checkout, a truncated write or a hand-edit that broke the YAML "
+        "are the usual causes) and re-run.")
+
+
+def load_family_table(metadata_root: Path, family_dir: str) -> Any:
+    """The raw parsed `hw-revisions.yaml` for a SoM family, or {} when the
+    family ships no table at all.
+
+    Public, not `_`-private, because it has a SECOND consumer outside this
+    module: `alp_project_loader._hwrev_pad_route_overrides()` carries its
+    own copies of the #1025 existence and buildable gates for the
+    `--emit composed-route-table` / `--emit carrier-netlist` path, which
+    resolves its SoM data independently of `alp_orchestrate.loader`.  That
+    reader had its own tolerant `yaml.safe_load(...) or {}` and fell open
+    on exactly the shapes guarded below; both readers now share this one,
+    so they cannot disagree about whether a damaged table is fatal or
+    about what the refusal says.
+
+    ABSENT and UNUSABLE are two different situations and only one of them
+    is benign (#563).  A family directory with no `hw-revisions.yaml`
+    legitimately has nothing to check against -- the tri-state predicates
+    below answer None ("nothing to judge") and the gates skip, which is
+    what an in-development family and the test-isolation fixture in
+    `tests/scripts/_orchestrate_support.py` both rely on.  A table that
+    EXISTS but cannot be read or parsed is the opposite: there IS
+    something to check against and we failed to read it, so answering
+    None would silently disable all three gates on one typo and produce
+    a wrong-hardware artefact at exit 0.  That is a refusal.
+
+    Raises `OrchestratorError` (not one of the `SdkRevision*` subclasses):
+    those name a defect in the customer's `board.yaml`, and
+    `scripts/validate_board_yaml.py` maps each to its own exit code.  An
+    unreadable table is a defect in the SDK's own metadata tree, so it
+    takes the generic refusal + exit 1 instead.
+    """
     path = metadata_root / "e1m_modules" / family_dir / "hw-revisions.yaml"
     if not path.is_file():
         return {}
     try:
-        return yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
-        return {}
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise _table_unreadable(path, f"cannot be read: {exc}") from exc
+    try:
+        table = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        detail = str(exc)
+        first = detail.splitlines()[0] if detail else type(exc).__name__
+        raise _table_unreadable(path, f"is not valid YAML: {first}") from exc
+    if not isinstance(table, dict):
+        # An empty file parses to None and a stray scalar to a str/int;
+        # both are "present but not a table", the same fail-open hazard
+        # as a parse error.  `metadata/schemas/hw-revisions-v1.schema.json`
+        # requires a mapping with `family`, `display_name` and
+        # `hw_revisions`, so no legitimate in-tree file lands here.
+        kind = "an empty file" if table is None else type(table).__name__
+        raise _table_unreadable(
+            path, f"does not parse to a mapping ({kind})")
+    if not isinstance(table.get("hw_revisions"), dict):
+        # A file truncated above its `hw_revisions:` block still parses
+        # as valid YAML, so the parse guards above do not catch it --
+        # and a family table with no `hw_revisions:` mapping disables
+        # the same three gates just as completely.  The schema requires
+        # the key, so this is only ever a damaged file.
+        raise _table_unreadable(
+            path, "declares no `hw_revisions:` mapping")
+    return table
 
 
 def family_revision(metadata_root: Path,
@@ -216,7 +296,7 @@ def family_revision(metadata_root: Path,
     """
     if not family_dir:
         return {}
-    return _revision(_load_family_table(metadata_root, family_dir), hw_rev)
+    return _revision(load_family_table(metadata_root, family_dir), hw_rev)
 
 
 def family_revision_known(metadata_root: Path,
@@ -225,7 +305,7 @@ def family_revision_known(metadata_root: Path,
     """`revision_known()` against the SoM-family hw-revisions.yaml table."""
     if not family_dir:
         return None
-    return revision_known(_load_family_table(metadata_root, family_dir), hw_rev)
+    return revision_known(load_family_table(metadata_root, family_dir), hw_rev)
 
 
 def family_revision_buildable(metadata_root: Path,
@@ -234,7 +314,7 @@ def family_revision_buildable(metadata_root: Path,
     """`revision_buildable()` against the SoM-family hw-revisions.yaml table."""
     if not family_dir:
         return None
-    return revision_buildable(_load_family_table(metadata_root, family_dir), hw_rev)
+    return revision_buildable(load_family_table(metadata_root, family_dir), hw_rev)
 
 
 def family_available_revisions(metadata_root: Path,
@@ -246,7 +326,7 @@ def family_available_revisions(metadata_root: Path,
     """
     if not family_dir:
         return []
-    revisions = _hw_revisions(_load_family_table(metadata_root, family_dir))
+    revisions = _hw_revisions(load_family_table(metadata_root, family_dir))
     return sorted(revisions.keys()) if revisions else []
 
 

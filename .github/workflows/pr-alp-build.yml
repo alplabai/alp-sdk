@@ -14,13 +14,10 @@
 #      §6.1 "Determinism" clause requires re-running the build to
 #      produce identical layouts so CI can diff.
 #
-# ADR-0020 Phase 4: the SDK-side executor (`west alp-build` et al.)
-# was retired -- alp-sdk is plans-only now.  This workflow only ever
-# exercised plan/manifest generation (real slice compilation was
-# always `continue-on-error` -- see the step below), so it verifies
-# `alp_orchestrate --emit system-manifest` directly.  Actual slice
-# compilation is `tan build`'s job (github.com/alplabai/tan-cli),
-# exercised elsewhere.
+# ADR-0020 Phase 4 retired the SDK-side executor (`west alp-build` et al.).
+# Python Tan now carries the normal relocated planner and executor; this job
+# deliberately verifies alp-sdk's reference `alp_orchestrate --emit
+# system-manifest` producer. Real slice compilation is exercised in tan-cli.
 #
 # v0.6 examples referenced below (`examples/rpmsg-<som-short>/`,
 # `examples/connectivity/iot-connected-camera/`, `examples/peripheral-io/gpio-button-led/`)
@@ -86,8 +83,10 @@ jobs:
 
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
         with:
+          persist-credentials: false
           path: alp-sdk
           fetch-depth: 1
 
@@ -95,24 +94,18 @@ jobs:
       # toolchain version pin keeps the orchestrator behaviour
       # consistent across the metadata gate + this gate.
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 5
         with:
           # Repo is checked out under alp-sdk/ (path:), but setup-python (a
           # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
           python-version-file: alp-sdk/.python-version
 
       - name: Install Python deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip install jsonschema pyyaml
-
-      # `yq` parses the system-manifest.  Pin to the mikefarah Go
-      # build (apt's `yq` is the Python wrapper around jq and has a
-      # different CLI surface).
-      - name: Install yq (mikefarah)
-        run: |
-          sudo wget -qO /usr/local/bin/yq \
-              https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-          yq --version
 
       # Mirror pr-twister.yml's workspace pattern: Zephyr workspace
       # lives next to alp-sdk via scripts/bootstrap.sh.  The script
@@ -175,11 +168,11 @@ jobs:
 
       # ----- Steps below run only when the example exists ---------
 
-      # ADR-0020 Phase 4: alp_orchestrate is plans-only -- there is no
-      # SDK-side executor to bypass west for any more (the wrapper at
+      # ADR-0020 Phase 4: alp_orchestrate is the SDK reference planner -- there
+      # is no SDK-side executor (the wrapper at
       # scripts/west_commands/alp_build.py this comment used to
       # reference was deleted with the executor).  Invoke the
-      # orchestrator's surviving `--emit system-manifest` planner
+      # reference orchestrator's `--emit system-manifest` path
       # directly and capture its stdout at the same path the old
       # build-executor used to write.
       - name: alp-build (primary verification, orchestrator-direct)
@@ -218,7 +211,14 @@ jobs:
           # Per §5.2 fan-out, the manifest must carry a `slices:`
           # block with at least one entry.  `yq` returns null (not
           # an empty list) if the key is absent -- guard both cases.
-          slice_count=$(yq '.slices | length // 0' "${manifest}")
+          # Was `yq '.slices | length // 0'`, which cost a 60 MB binary
+          # downloaded from GitHub releases and run under sudo -- and which
+          # failed ELEVEN times on 2026-08-12 alone (#1410), reddening five PRs
+          # whose diffs could not have caused it. pyyaml is already installed by
+          # "Install Python deps" two steps above, so the dependency was never
+          # needed. `or {}` / `or []` reproduce yq's `// 0` for a missing, null
+          # or empty `slices:` -- verified against all five cases.
+          slice_count=$(python3 -c 'import sys,yaml; d=yaml.safe_load(open(sys.argv[1])) or {}; print(len(d.get("slices") or []))' "${manifest}")
           if [ "${slice_count}" -lt 1 ]; then
             echo "::error::system-manifest.yaml has no slices[] entries (got ${slice_count})"
             exit 1
@@ -231,6 +231,7 @@ jobs:
       - name: Determinism check (rebuild + diff system-manifest.yaml)
         if: steps.gate.outputs.present == 'true'
         working-directory: ${{ github.workspace }}/alp-sdk
+        timeout-minutes: 2
         run: |
           set -euo pipefail
           app_path="${{ steps.pick.outputs.example_path }}"
@@ -258,7 +259,8 @@ jobs:
 
       - name: Upload system-manifest artefact
         if: always() && steps.gate.outputs.present == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        timeout-minutes: 2
         with:
           name: system-manifest-${{ matrix.som }}-${{ matrix.scenario }}
           path: ${{ github.workspace }}/alp-sdk/${{ steps.pick.outputs.example_path }}/build/system-manifest.yaml

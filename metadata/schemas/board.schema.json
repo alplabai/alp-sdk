@@ -171,7 +171,7 @@
         "sim_console": {
           "type": "boolean",
           "default": false,
-          "description": "Opt-in (issue #686): when true, emit CONFIG_RAM_CONSOLE=y for every HEADLESS core (a core the SoM topology marks `hw_console: false`, e.g. the RZ/V2N M33 system-manager) so the studio hardware simulator's `uart_socket` streams that core's boot/console output.  Cores that already have a UART console are unchanged, and absent/false emits nothing (no RAM cost on production images).  Studio sets this when producing a bundle destined for `RENODE_MODE=real` (alp-studio#74)."
+          "description": "Opt-in (issue #686): when true, emit CONFIG_RAM_CONSOLE=y for every HEADLESS core (a core the SoM topology marks `hw_console: false`, e.g. the RZ/V2N M33 system-manager) so the studio hardware simulator's `uart_socket` streams that core's boot/console output.  Cores that already have a UART console are unchanged, and absent/false emits nothing (no RAM cost on production images).  Studio sets this when producing a bundle destined for that simulator (alp-studio#74)."
         },
         "modules": {
           "type": "object",
@@ -179,14 +179,14 @@
             "type": "string",
             "enum": ["error", "warn", "info", "debug", "trace", "off"]
           },
-          "description": "Per-module log-level overrides.  Keys match Alp SDK module names (e.g. `alp_iot`, `alp_inference`, `alp_audio`, `alp_security`, `alp_gpio`, ...).  Each value is the same log-level enum as the top-level `log_level`, plus `off` to silence the module entirely.  The loader emits CONFIG_<MODULE>_LOG_LEVEL_<LEVEL>=y per entry into the generated alp.conf."
+          "description": "Per-module log-level overrides.  Keys are either Alp SDK module names (e.g. `alp_iot`, `alp_inference`, `alp_audio`, `alp_security`, `alp_gpio`, ...) or Zephyr log modules the SDK wires (`i2c`, `spi`, `gpio`, `adc`, `net_tcp`, ...).  Each value is the same log-level enum as the top-level `log_level`, plus `off` to silence the module entirely.  The loader emits CONFIG_<MODULE>_LOG_LEVEL_<LEVEL>=y per entry into the generated alp.conf -- live only where that choice symbol exists (the module and CONFIG_LOG are both enabled on that core), and downgraded to a hint comment otherwise so the fragment always configures."
         }
       }
     },
 
     "storage": {
       "type": "array",
-      "description": "Optional flash / persistent-storage partitioning.  Each entry declares one partition: a name, a filesystem (or `raw: true` for unformatted partitions used as OTA slot backing / image cache), a size, an optional mount point, and a flash-device reference into the SoM preset's `memory_map:` or `on_module.ospi_memories:` block.  The orchestrator emits a partial DTS overlay (the `&<flash>; partitions { ... }` node) plus the matching Kconfig (CONFIG_FILE_SYSTEM_LITTLEFS / CONFIG_FAT_FILESYSTEM_ELM / ...) per entry.  Partition addresses are pinned by the orchestrator (bottom-up, page-aligned within the flash device) for byte-stable OTA images across rebuilds; supply `offset_kib:` to override the allocator with an explicit offset.",
+      "description": "Optional flash / persistent-storage partitioning.  Each entry declares one partition: a name, a filesystem (`fs: raw` for unformatted partitions used as OTA slot backing / image cache), a size, an optional mount point, and a flash-device reference into the SoM preset's `memory_map:` or `on_module.ospi_memories:` block.  The orchestrator emits a partial DTS overlay (the `&<flash>; partitions { ... }` node) plus the matching Kconfig (CONFIG_FILE_SYSTEM_LITTLEFS / CONFIG_FAT_FILESYSTEM_ELM / ...) per entry.  Partition addresses are pinned by the orchestrator (bottom-up, page-aligned within the flash device) for byte-stable OTA images across rebuilds; supply `offset_kib:` to override the allocator with an explicit offset.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -196,9 +196,8 @@
           "size_kib":     { "type": "integer", "minimum": 4 },
           "fs":           { "type": "string", "enum": ["littlefs", "fat", "ext4", "raw"], "default": "raw", "description": "Filesystem to format the partition with.  `raw` leaves it unformatted (e.g. for image slots managed by MCUboot)." },
           "mount":        { "type": "string", "description": "Mount point at boot.  Optional; when omitted the partition isn't auto-mounted." },
-          "flash_device": { "type": "string", "description": "Region this partition lives in.  References the SoM preset's `memory_map:` name (`mram_main`, `ocram_low`, ...) or an `on_module.ospi_memories:` entry (`ospi0`, ...)." },
-          "offset_kib":   { "type": "integer", "minimum": 0, "description": "Optional explicit offset (in KiB) within the flash device.  When omitted, the orchestrator allocates bottom-up from offset 0 in name-sorted order.  When supplied, must be page-aligned (4 KiB); the allocator surfaces overlaps via `status: blocked` on the resolved partition." },
-          "raw":          { "type": "boolean", "description": "Legacy alias for `fs: raw`.  Prefer `fs:` directly." }
+          "flash_device": { "type": "string", "description": "Region this partition lives in.  References the SoM preset's `memory_map:` name (`mram_main`, `ocram_low`, ...) or an `on_module.ospi_memories:` entry (`ospi0`, ...).  A `memory_map:` region marked `carveout: false` is a partition INSIDE a flash-class node, not a flash device of its own, and is refused as a target (#1484).  No target resolves to a genuinely working Devicetree label today: a `memory_map:` region's label DEFAULTS to the region name when the SoM preset sets no explicit `dt_label:` override (neither `mram_main` nor `ocram_low` has that override), and as of alp-sdk#1556 the resolver refuses `status: ok` for that case -- it blocks with a reason instead of decorating the fabricated label.  An `on_module.ospi_memories:` key like `ospi0` is unverified against the generated board tree too, and is NOT yet gated the same way (separate follow-up) -- see `docs/board-config-features.md`'s \"Storage partitions (`storage:`)\" section." },
+          "offset_kib":   { "type": "integer", "minimum": 0, "description": "Optional explicit offset (in KiB) within the flash device.  When omitted, the orchestrator allocates bottom-up from offset 0 in name-sorted order.  When supplied, must be page-aligned (4 KiB); the allocator surfaces overlaps via `status: blocked` on the resolved partition." }
         }
       }
     },
@@ -273,8 +272,7 @@
         "swap_algorithm": {
           "type": "string",
           "enum": ["scratch", "move", "overwrite"],
-          "default": "scratch",
-          "description": "MCUboot swap strategy.  `scratch` (crash-safe, needs scratch partition), `move` (more erases, no scratch), `overwrite` (no rollback)."
+          "description": "MCUboot swap strategy.  `scratch` (crash-safe, needs scratch partition), `move` (more erases, no scratch), `overwrite` (no rollback).  There is no fixed schema default: when omitted, the SDK derives the default from the target's real slot layout -- `scratch` on a stock two-slot AEN target, but a single-slot target (e.g. E1M-AEN801, whose disjoint-slot0 `memory_map:` has no slot1/scratch region, #1069/#1413) defaults to the SDK's stock single-app boot instead. Setting any of the three values explicitly on a single-slot target is a build-time OrchestratorError -- that target has no slot1/scratch partition for any of them to swap into."
         },
         "build_type": {
           "type": "string",
@@ -289,7 +287,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["provider"],
-      "description": "Optional OTA configuration.  Project-wide (one device = one OTA orchestration).  See docs/ota.md for the device contract.  Yocto path: Mender; Zephyr path: deferred until the SDK lands its in-tree OTA client (Mender MCU client or Hawkbit, decision pending per ADR 0009).",
+      "description": "Optional OTA configuration.  Project-wide (one device = one OTA orchestration).  See docs/ota.md for the device contract.  Yocto path: Mender; Zephyr path: deferred until the SDK lands its in-tree OTA client (Mender MCU client or Hawkbit, decision pending per ADR 0009).  `server.tls_ca_bundle` was removed (no legacy shim -- no active customers): no emitter ever read it -- the Hawkbit path derives TLS solely from `url`'s scheme (`CONFIG_HAWKBIT_USE_TLS`) with no sec-tag/CA registration, and the Mender path emits no CA variable -- so the field promised a pinned trust anchor the SDK didn't deliver, the same defect class `boot.anti_rollback` was removed for.",
       "properties": {
         "provider": {
           "type": "string",
@@ -309,9 +307,8 @@
           "additionalProperties": false,
           "required": ["url"],
           "properties": {
-            "url":           { "type": "string", "format": "uri", "description": "Deployment server URL (Mender / Hawkbit)." },
-            "tenant":        { "type": "string", "description": "Multi-tenancy token / tenant name." },
-            "tls_ca_bundle": { "type": "string", "description": "Optional pinned CA bundle for production.  Path relative to project root." }
+            "url":    { "type": "string", "format": "uri", "description": "Deployment server URL (Mender / Hawkbit)." },
+            "tenant": { "type": "string", "description": "Multi-tenancy token / tenant name." }
           }
         },
         "rollback": {
@@ -327,7 +324,7 @@
           "type": "integer",
           "minimum": 60,
           "default": 1800,
-          "description": "How often the device polls the deployment server for updates.  Mender default is 60 s; SDK default is 1800 s (30 min) for battery-friendly nodes."
+          "description": "How often the device polls the deployment server for updates, in SECONDS.  Mender default is 60 s; SDK default is 1800 s (30 min) for battery-friendly nodes.  `provider: hawkbit` converts to CONFIG_HAWKBIT_POLL_INTERVAL, which Zephyr declares in MINUTES with `range 1 43200`, so a hawkbit project's value must be a whole number of minutes between 60 s and 2592000 s -- anything else is refused at emit rather than written out of range."
         },
         "storage": {
           "type": "object",
@@ -436,7 +433,7 @@
         "required": ["name", "source"],
         "properties": {
           "name":   { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" },
-          "source": { "type": "string", "description": "Path (relative to board.yaml) to the source model. `.tflite` compiles for CPU (TFLM) + Ethos-U (Vela) out of the box; `.onnx` requires a vendor toolchain (DRP-AI / DEEPX) on the build host and is otherwise recorded as a coverage skip." },
+          "source": { "type": "string", "description": "Path (relative to board.yaml) to the source model. `.tflite` compiles for CPU (TFLM) + Ethos-U (Vela) out of the box; `.onnx` requires a vendor toolchain (DRP-AI / DEEPX) on the build host and is otherwise recorded as a coverage skip; `.pte` (an ExecuTorch `torch.export` program) passes through for CPU via scripts/alp_model/adapters/executorch.py -- no on-device ExecuTorch runtime backend exists yet, so the resulting blob is producible but not yet invocable (#1260)." },
           "spec":   { "type": "string", "description": "Optional $ref to an external model spec for large/shared models." },
           "inputs": { "type": "array", "description": "Optional app-side input hints (e.g. layout)." },
           "compile": {
@@ -592,11 +589,11 @@
         "os": {
           "type": "string",
           "enum": ["zephyr", "yocto", "baremetal", "off"],
-          "description": "The OS runtime is DERIVED from the core's silicon class and is not selectable: Cortex-M -> Zephyr (RTOS), Cortex-A -> Yocto (Linux). Omit `os:` to take that runtime. The only values a board.yaml may set explicitly are `off` (skip the slice; no app required) or `baremetal` (rare hand-written firmware in place of the core's RTOS). Setting the OTHER class's OS (e.g. `zephyr` on a Cortex-A, `yocto` on a Cortex-M) is rejected by the loader -- the enum lists every resolved runtime, but the cross-file core-class check (board.yaml `os:` vs the SoC `cores[].type`) is enforced in scripts/alp_orchestrate.py, since JSON Schema cannot see the SoC spec."
+          "description": "The OS runtime is DERIVED from the core's silicon class and is not selectable: Cortex-M -> Zephyr (RTOS), Cortex-A -> Yocto (Linux). Omit `os:` to take that runtime. The only values a board.yaml may set explicitly are `off` (skip the slice; no app required) or `baremetal` (rare hand-written firmware in place of the core's RTOS). Setting the OTHER class's OS (e.g. `zephyr` on a Cortex-A, `yocto` on a Cortex-M) is rejected by the loader -- the enum lists every resolved runtime, but the cross-file core-class check (board.yaml `os:` vs the SoC `cores[].type`) is enforced in the `alp_orchestrate` package (`python -m alp_orchestrate`), since JSON Schema cannot see the SoC spec."
         },
         "app": {
           "type": "string",
-          "description": "Path to the app source directory for this core.  Required for `os: zephyr` (must contain prj.conf or CMakeLists.txt), `os: baremetal` (must contain CMakeLists.txt).  For `os: yocto`, `app:` is a project-root-relative *source directory*, not a bitbake target -- pair it with `recipe:` naming the bitbake recipe that packages it (or set `image:` instead to build a stock image, ignoring any `app:`)."
+          "description": "Path to the app source directory for this core.  Optional -- like every other `core_entry` field, when omitted it inherits the SoM preset's `topology.<core_id>` `app:` default (e.g. the `alp-stock-shim` M-core shim).  For `os: baremetal`, `app:` must be the directory holding the app's own CMakeLists.txt -- no fallback.  For `os: zephyr`, `app:` may point at a self-contained app directory carrying its own CMakeLists.txt (the multicore convention, e.g. `./m33_sm`), OR at a sources-only subdirectory such as `./src` that has no CMakeLists.txt of its own -- in that case `alp_orchestrate.orchestrator._zephyr_app_dir` (run at build-command construction, not the board.yaml loader) falls back to `app:`'s PARENT directory's CMakeLists.txt when the parent has one (the single-core convention; most example core entries use this fallback) -- if neither `app:` nor its parent has a CMakeLists.txt, the path is returned unchanged.  For `os: yocto`, `app:` is a project-root-relative *source directory*, not a bitbake target -- pair it with `recipe:` naming the bitbake recipe that packages it (or set `image:` instead to build a stock image, ignoring any `app:`)."
         },
         "image": {
           "type": "string",
@@ -605,6 +602,10 @@
         "recipe": {
           "type": "string",
           "description": "Yocto bitbake recipe name that packages this core's `app:` source directory (e.g. `alp-lvgl-dashboard`).  Required for an app-only `os: yocto` slice (`app:` set, no `image:`) -- without it the slice has no valid bitbake target and the emitted plan carries `command: null` plus a `yocto-recipe-missing` warning rather than an invalid `bitbake <path>` command."
+        },
+        "toolchain": {
+          "type": "string",
+          "description": "Override this slice's toolchain identifier (issue #964), replacing the SoM preset's `topology.<core_id>.toolchain` default (e.g. `arm-zephyr-eabi` for Zephyr, `poky-glibc` for Yocto). Optional -- omit to keep the derived default; every existing board.yaml keeps its current compiler unchanged. Free-form string, passed through verbatim to `--emit build-plan`'s `slices[].toolchain.id` and `system-manifest.yaml`'s `slices[].toolchain` (the same field the SoM-derived default already populates) -- e.g. `llvm` for a Zephyr slice built with the LLVM toolchain variant. For `os: zephyr`, this value ALSO derives `targetTriple`/`compiler` (`<toolchain>`/`<toolchain>-gcc`) in the emitted build-plan the same way the SoM default does; a non-GCC-triple-shaped override (like `llvm`) still populates `id` correctly but the derived `compiler` name will not be meaningful -- resolving that (a vendor-toolchain path, an enum vs. free-form value set) is an open follow-up, not solved by this field."
         },
         "peripherals": {
           "type": "array",

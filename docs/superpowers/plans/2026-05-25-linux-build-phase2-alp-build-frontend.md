@@ -1,5 +1,16 @@
 # Linux Build — Phase 2: Unified `alp build` front-end
 
+> **STATUS — SUPERSEDED, DO NOT IMPLEMENT.** [ADR 0020](../../adr/0020-sdk-owns-build-execution.md)
+> (accepted 2026-07-18/20) retired every SDK-side build-execution verb
+> in favour of the standalone `tan` CLI; `scripts/alp_cli/` carries no
+> `build.py` / `bsp/` package in the tree today, confirming this plan
+> was never executed and should not be. Implementing the `alp build`
+> command below would resurrect the exact SDK-side executor ADR 0020
+> exists to prevent. If Yocto/BSP-provider work is needed again, it
+> belongs behind `tan`'s build-plan consumer contract, not a new
+> alp-sdk command — see `docs/adr/0020-sdk-owns-build-execution.md`
+> and the `tan-cli` skill/domain docs.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** One `alp build` command, driven by `board.yaml`, builds every supported SoM's Zephyr (M-core) + Linux (A-core) slices — the customer never invokes `bitbake-layers` / `TEMPLATECONF` / `west` directly.

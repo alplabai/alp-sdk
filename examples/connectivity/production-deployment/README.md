@@ -22,17 +22,21 @@ boot:
   signing:
     algorithm: ecdsa_p256
     key_file:  keys/mcuboot_dev_ecdsa_p256.pem
-  swap_algorithm: scratch
 ```
 
 Drives sysbuild's MCUboot child image. ECDSA-P256 ties to the
-OPTIGA Trust M production key (see `iot-fleet-ota`). Slot/scratch
-partition *sizes* aren't a `boot:` field -- MCUboot takes its
-geometry from the board DT `partitions {}` node; this example
-declares the layout explicitly via `storage:` below instead.
-Downgrade prevention is the `ota.rollback.min_version` software
-floor below; a hardware anti-rollback counter tier (OPTIGA/OTP
-fuse) isn't built yet, so this skeleton doesn't claim one.
+OPTIGA Trust M production key (see `iot-fleet-ota`). `swap_algorithm:`
+is intentionally omitted: E1M-AEN801's disjoint-slot0 `memory_map:`
+(#1069, #1413) has no slot1/scratch partition, so the SDK's per-target
+default resolves to single-app boot
+(`SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`); setting `swap_algorithm:
+scratch` (or `move`/`overwrite`) explicitly here is a build-time error
+on this SKU. Slot/scratch partition *sizes* aren't a `boot:` field
+either way -- MCUboot takes its geometry from the board DT
+`partitions {}` node, not from `storage:` (see the `storage:` section
+below). Downgrade prevention is the `ota.rollback.min_version`
+software floor below; a hardware anti-rollback counter tier
+(OPTIGA/OTP fuse) isn't built yet, so this skeleton doesn't claim one.
 
 ### `ota:` -- Mender HTTPS poll + A/B rollback
 
@@ -88,14 +92,25 @@ storage:
   - { name: app_data,          fs: littlefs, size_kib:  256, flash_device: mram_main, mount: /lfs/app }
 ```
 
-The MCUboot slots are explicit here -- this is the only place their
-size is declared, since `boot:` has no slot-size field; Zephyr's
-settings subsystem gets its own littlefs partition;
-app-managed runtime data gets its own. Adds to ~2.4 MiB of the
-AEN E8's 5.5 MiB MRAM -- the rest stays free for code + MCUboot
-itself + TF-M's secure partition. The orchestrator emits a
-partial DTS overlay (`partitions { ... }` node) + matching
-Kconfig (`CONFIG_FILE_SYSTEM_LITTLEFS=y`) per entry.
+`mcuboot_primary` / `mcuboot_secondary` / `mcuboot_scratch` are named
+to illustrate a two-slot MCUboot layout, but they are `storage:`
+partitions, NOT the board DT's `slot0_partition` / `slot1_partition`
+/ `scratch_partition` labels MCUboot's flash-map actually reads --
+MCUboot itself boots single-app on this SKU (see the `boot:` section
+above). Sizes sum to ~2.4 MiB (1024 + 1024 + 64 + 64 + 256 KiB), but
+on E1M-AEN801 there is no remainder to place them in: the SoM's own
+`memory_map:` regions already occupy the full 5632 KiB App MRAM
+window (`metadata/e1m_modules/E1M-AEN801.yaml`), so EVERY entry above
+emits `status: blocked` in the generated `dts-partitions.dtsi`
+(verify with `--emit dts-partitions`) for that reason alone.
+`mram_main` would ALSO not be a working `flash_device:` target even
+with free room: no AEN preset declares a `dt_label:` override for it,
+so it resolves to a Devicetree label of `mram_main`, but the
+generated board tree never defines that node -- only `mram_storage`
+(alp-sdk#1484; see `docs/board-config-features.md`'s "Storage
+partitions (`storage:`)" section). This section demonstrates
+the `storage:` declarative shape only, not a working layout, on this
+SKU.
 
 ### `cores.m55_hp.memory:` -- per-core memory tuning
 
@@ -148,16 +163,19 @@ west build -t run
 ### Real silicon (AEN-Zephyr, requires a staged Mender server)
 
 ```bash
-tan build --board ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/connectivity/production-deployment
+tan build --project examples/connectivity/production-deployment
 west flash
 ```
 
-On HiL the full lifecycle runs: boot from a factory-signed
+On HiL the qualified path runs: boot from a factory-signed
 image, read the EEPROM manifest, inspect MCUboot slots, connect
-to the board-staged Mender server, poll for an update.  When
-a deployment lands the SDK downloads + verifies + applies it,
-requests reboot, then confirms post-reboot.  Attestation
-heartbeats publish every 60 s thereafter.
+to the board-staged Mender server, poll for an update.  When a
+deployment lands the SDK downloads and verifies it -- but on
+this SKU (E1M-AEN801) OTA *apply* is DEFERRED (#1069, see
+[STATUS] in `board.yaml`): there is no secondary/scratch slot to
+write, and self-overwriting the running slot0 is not a supported
+flow, so the SDK stops after verification and does not write or
+reboot.  Attestation heartbeats publish every 60 s regardless.
 
 ## Production variants
 
@@ -175,7 +193,8 @@ Customer-side variants typically:
 - [`<alp/hw_info.h>`](../../../include/alp/hw_info.h) -- factory
   EEPROM manifest read-back.
 - [`<alp/storage.h>`](../../../include/alp/storage.h) -- MCUboot
-  slot inspection + OTA chunk write.
+  slot inspection; OTA chunk write is DEFERRED on this SKU
+  (#1069, see [STATUS] in `board.yaml`).
 - [`<alp/iot.h>`](../../../include/alp/iot.h) -- Wi-Fi + MQTT +
   TLS for the Mender connection.
 - [`<alp/security.h>`](../../../include/alp/security.h) -- AEAD

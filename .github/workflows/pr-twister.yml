@@ -18,6 +18,14 @@ on:
     branches: [main, dev]
   push:
     branches: [main, dev]
+  # A queued PR waits on the branch's required contexts, and GitHub raises
+  # `merge_group` -- not `push` or `pull_request` -- for a merge-queue entry.
+  # Four of `dev`'s five required contexts come from this file
+  # (`twister-shard 1/4` .. `4/4`), so without this trigger a queued PR would
+  # wait on checks that can never fire (#1415). Neither job here is gated to
+  # `pull_request`: `twister-shard` carries no job-level `if:` and `twister`
+  # carries `if: always()` -- read, not assumed.
+  merge_group:
   workflow_dispatch:
 
 # Cancel in-flight runs on the same branch when a new commit lands.
@@ -32,6 +40,34 @@ jobs:
     # shard count can change here without touching branch protection.
     name: twister-shard ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
+
+    # #1319: this job carried NO timeout-minutes at all -- neither
+    # job-level nor on a single step -- so GitHub's 360-minute runner
+    # default applied to the lane that feeds `twister ·
+    # native_sim/native/64`, one of only two required branch-protection
+    # contexts on `dev`.  The same apt-get/PyPI/west-mirror stall #1274
+    # diagnosed on pr-tier-a-libraries.yml would have hung EVERY PR here
+    # for up to six hours instead of failing legibly.  Every step below
+    # that does real network/install/compile work now carries its own
+    # cap, each derived from that step's own worst SUCCESSFUL run across
+    # 32 sampled successful runs = 128 shard jobs (the numbers are in
+    # each step's comment and in CHANGELOG.md's #1319 entry).  This
+    # ceiling sits above the sum of those caps (126) plus a minute
+    # apiece for the four uncapped local-Python steps (4) = 130, so a
+    # step running late is still killed by its OWN timeout first and the
+    # failure names the actual stall rather than whatever happened to be
+    # running.  Worst observed whole-job wall clock in the same sample
+    # was 1544s (25m44s, job 93911719274) -- this ceiling is a backstop
+    # to make a hang legible, not a performance target.
+    #
+    # 145, not 130: capping `check · --emit kconfig contract (#893)` at 10
+    # moved it out of the uncapped-local-Python bucket (5 -> 4) and into the
+    # sum (116 -> 126), landing the total exactly ON the old ceiling.
+    # test_job_ceiling_exceeds_the_sum_of_its_step_timeouts requires the
+    # ceiling to be STRICTLY above the sum -- a ceiling equal to it leaves no
+    # room for a step to be killed by its own timeout first, which is the
+    # whole point.  The gate caught that, which is the gate working.
+    timeout-minutes: 145
 
     strategy:
       # Run every shard even if one fails, so a single failing suite
@@ -59,47 +95,125 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
+      # #1319: a marketplace `uses:` step is its own network round trip
+      # (fetch the action, then do its job) and can stall like any other
+      # step here -- same reasoning as #1274's caps on
+      # pr-tier-a-libraries.yml.  Worst successful run of this step in
+      # the 128-shard-job sample was 8s; 2min is the same value the
+      # precedent uses for the byte-identical step.
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
         with:
+          persist-credentials: false
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 5
         with:
           # Repo is checked out under alp-sdk/ (path:), but setup-python (a
           # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
           python-version-file: alp-sdk/.python-version
 
+      # #1319: this is the byte-identical apt-get step that stalled on
+      # pr-tier-a-libraries.yml long enough to consume that job's whole
+      # 30-minute budget in one run (#1274) -- a runner/mirror hiccup,
+      # not this repo's content.  Worst successful run HERE was 86s
+      # (median 36s) across 128 shard jobs; the cap keeps the precedent's
+      # 8 minutes rather than tightening to ~3, because the failure this
+      # guards against is exactly a mirror going slow and 8min = 480s =
+      # 5.6x the worst good run will not fire on a slow-but-fine one.
       - name: Install host build tools (dtc, ninja, ccache, gperf, libffi)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh update
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               ninja-build gperf ccache dfu-util device-tree-compiler \
               python3-dev python3-pip python3-setuptools python3-wheel \
               libffi-dev libssl-dev xz-utils file make gcc gcc-multilib \
               g++-multilib libsdl2-dev libmagic1
 
+      # #1319: same failure class as "Install host build tools" above
+      # (PyPI/mirror stall).  Worst successful run 13s; 2min = 9.2x.
       - name: Install west
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip3 install west
 
       # Zephyr workspace lives next to alp-sdk.  We use west init
       # from a temporary topdir so alp-sdk itself isn't relocated.
+      #
+      # #1319: `west update` fetches every Zephyr module over the
+      # network, so a slow mirror hangs here.  Median 177s, and 126 of
+      # 128 sampled shard jobs finished under 330s -- but one real
+      # SUCCESSFUL run took 990s (16m30s) on a slow-mirror day, so a cap
+      # sized off the typical run would have killed a good build.  25min
+      # = 1500s is 1.52x that outlier and 3.7x the next-worst (403s):
+      # a ceiling to make a stall legible, not a performance target.
       - name: west init zephyr workspace
         working-directory: ${{ github.workspace }}
+        timeout-minutes: 25
         run: |
+          # #1549: git-over-https had none of the protection apt got.
+          # `Acquire::*::Timeout` is an apt knob and reaches nothing here,
+          # and git's own default is to wait forever on a connection a
+          # mirror accepts and never answers -- the request never FAILS,
+          # so no retry counter is ever reached.  Same diagnosis as the
+          # apt fix, same class of remedy: http.lowSpeed* aborts a
+          # transfer moving under 1000 bytes/sec for 30s.
+          #
+          # Measured, not assumed, against a listener that accepts a
+          # connection and never sends: WITHOUT these two lines `git
+          # clone` was still running when an outer 25s timeout killed it
+          # (exit 124); WITH them it terminates itself at 31s (exit 128)
+          # -- "fatal: unable to access '...': Operation too slow. Less
+          # than 1000 bytes/sec transferred the last 30 seconds".
+          #
+          # Set inside this step rather than as a separate setup step so
+          # the guard cannot be separated from the fetch it guards by a
+          # reorder, an `if:`, or a well-meant cleanup.  `--global` is
+          # safe: the runner is ephemeral.  west shells out to the `git`
+          # binary (subprocess ['git', 'clone', ...]), so global config
+          # applies to both west commands below.
+          git config --global http.lowSpeedLimit 1000
+          git config --global http.lowSpeedTime 30
           mkdir -p zephyrproject
           cd zephyrproject
           # Pin to the Zephyr release the v0.1 dependency matrix
           # documents (VERSIONS.md).  Bump intentionally; do not
           # track main.
           west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.1 .
-          west update --narrow -o=--depth=1
+          # `west init` is deliberately OUTSIDE the retry loop: it is not
+          # idempotent -- it refuses on an already-initialised workspace
+          # -- so a loop wrapping both would fail attempt 2 at `init`,
+          # reporting that instead of whatever actually stalled.  Only
+          # `west update` is retried.  west's own stderr is not
+          # redirected and the real exit code propagates on the last
+          # attempt, so a genuine manifest error still fails loudly
+          # rather than being retried into a generic timeout.
+          for attempt in 1 2 3; do
+            west update --narrow -o=--depth=1 && break
+            rc=$?
+            if [ "$attempt" = 3 ]; then
+              echo "::error::west update failed after 3 attempts (exit $rc)"
+              exit "$rc"
+            fi
+            echo "west update failed (exit $rc); retry $attempt/3 in 15s" >&2
+            sleep 15
+          done
           west zephyr-export
 
+      # #1319: actions/cache@ makes its own network round trip to the
+      # cache service and can hang on a backend issue.  Worst successful
+      # run 122s (median 38s); 5min = 300s = 2.46x.
       - name: Cache Zephyr modules
-        uses: actions/cache@v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        timeout-minutes: 5
         with:
           path: |
             ${{ github.workspace }}/zephyrproject/modules
@@ -109,15 +223,22 @@ jobs:
       # Persist ccache objects across runs, per shard.  The save key is
       # per-SHA so each run writes a fresh entry; restore-keys falls
       # back to the latest cache for this shard so warm builds reuse it.
+      # #1319: worst successful run 14s; 2min = 8.6x.
       - name: Cache ccache objects
-        uses: actions/cache@v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        timeout-minutes: 5
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ runner.os }}-twister-shard${{ matrix.shard }}-${{ github.sha }}
           restore-keys: |
             ccache-${{ runner.os }}-twister-shard${{ matrix.shard }}-
 
+      # #1319: worst successful run 72s (median 41s); 3min = 180s = 2.5x,
+      # the same value the precedent gives its equivalent step.
       - name: pip install Zephyr requirements
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         working-directory: ${{ github.workspace }}/zephyrproject
         run: |
           pip3 install -r zephyr/scripts/requirements.txt
@@ -127,11 +248,47 @@ jobs:
       # Zephyr's requirements-base.txt).  Install it after the
       # Zephyr deps so version pins don't override.
       - name: pip install Alp SDK Python deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
           pip3 install jsonschema
 
+      # #1319: the regression gate for this file's own step timeouts.
+      # #1274 put it on pr-tier-a-libraries.yml's `cmsis-nn-metadata`
+      # pytest invocation for exactly this reason -- otherwise a PR that
+      # touches ONLY a workflow file never runs the test that guards it
+      # (pr-metadata-validate.yml triggers on `tests/scripts/**` and its
+      # own filename, not on `.github/workflows/pr-twister.yml`).  This
+      # workflow has no `paths:` filter at all, so putting it here means
+      # it runs on every PR, and it runs BEFORE the ~20-minute twister
+      # step so a bad timeout edit fails in seconds.  pytest + PyYAML
+      # come from `pip3 install -r zephyr/scripts/requirements.txt`
+      # above (requirements-build-test.txt / requirements-base.txt) --
+      # the same source the shard-1 pytest steps below already rely on.
+      #
+      # The `name:` below is QUOTED: in a plain YAML scalar a space
+      # followed by `#` opens a comment, so the unquoted form silently
+      # truncated this step's name to
+      # `check · workflow step timeouts (#1274 /`.
+      - name: 'check · workflow step timeouts (#1274 / #1319)'
+        if: matrix.shard == 1
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: |
+          python3 -m pytest tests/scripts/test_tier_a_workflow_step_timeouts.py -q
+
+      # #1319: the compile+run step, and the one a job-level-only
+      # timeout would land on when an earlier setup step is the real
+      # stall (that misattribution is what #1274 was filed about).
+      # Warm-ccache runs cluster at 300-470s; cold ones at 800-1210s.
+      # Worst SUCCESSFUL run across the 128-shard-job sample was 1210s
+      # (20m10s, shard 3/4).  45min = 2700s = 2.23x that, matching the
+      # precedent's headroom ratio and leaving room for the suite to
+      # grow with every new example -- it is a ceiling that makes a hang
+      # legible under this step's own name, not a performance target.
       - name: twister · run shard ${{ matrix.shard }}/4 on native_sim/native/64
         working-directory: ${{ github.workspace }}/zephyrproject
+        timeout-minutes: 45
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
           EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
@@ -146,6 +303,7 @@ jobs:
           python3 zephyr/scripts/twister \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/unit" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/zephyr" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/tests/console" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples" \
             -p native_sim/native/64 \
             --subset ${{ matrix.shard }}/4 \
@@ -227,24 +385,67 @@ jobs:
       # Zephyr release are different things pinned independently; naming the
       # wrong one here let an SDK bump silently reuse a stale cached
       # toolchain forever.
+      # #1319: worst successful run 6s; 2min = 20x.
       - name: Install ARM Zephyr SDK toolchain (for --emit kconfig contract)
         if: matrix.shard == 1
-        uses: actions/cache@v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        timeout-minutes: 15
         id: zephyr-sdk-cache
         with:
           path: ${{ github.workspace }}/zephyr-sdk
           key: zephyr-sdk-arm-zephyr-eabi-${{ env.ZEPHYR_SDK_VERSION }}-${{ runner.os }}
 
+      # #1319: no runtime data exists for this step -- the cache above
+      # hit on all 32 sampled runs, so it was SKIPPED in every one of
+      # them; it only executes on an SDK bump.  15min is therefore a
+      # deliberately generous ceiling chosen to make a stalled toolchain
+      # download legible, NOT a measured performance target: the
+      # arm-zephyr-eabi GNU toolchain with --no-hosttools is a few
+      # hundred MB, so a healthy run should be minutes.
       - name: west sdk install (arm-zephyr-eabi only)
         if: matrix.shard == 1 && steps.zephyr-sdk-cache.outputs.cache-hit != 'true'
         working-directory: ${{ github.workspace }}/zephyrproject
+        timeout-minutes: 15
         env:
           # No explicit --version below -- `west sdk install` auto-detects
           # the right SDK release from $ZEPHYR_BASE/SDK_VERSION.
           ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
         run: |
-          west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
-            --install-dir "$GITHUB_WORKSPACE/zephyr-sdk"
+          # #1549: `west sdk install` IS safely re-runnable -- verified
+          # against zephyr v4.4.1's scripts/west_commands/sdk.py, not
+          # assumed.  It downloads and extracts inside a
+          # tempfile.TemporaryDirectory and only shutil.move()s into
+          # --install-dir as the very last action, after the sha256
+          # check, so an aborted attempt leaves no partial install; a
+          # re-run after a SUCCESSFUL one takes its "Zephyr SDK version
+          # ... is already installed ... Using it." path.
+          #
+          # It is deliberately NOT covered by the http.lowSpeed* guard on
+          # the west init step: this command fetches with python-requests
+          # (`requests.get(archive_url, stream=True)`, no timeout=), not
+          # git, so no git knob reaches it and a stalled CDN hangs inside
+          # iter_content.  This step's own timeout-minutes is what bounds
+          # THAT case; the retry below covers the 5xx/reset class, which
+          # is the same class pr-twister-aen.yml's SDK curl already
+          # retries for.
+          #
+          # The rm -rf closes the one narrow non-idempotent window in the
+          # command: a failure after shutil.move() but during setup would
+          # leave an unregistered dir that the next attempt's move would
+          # NEST inside (zephyr-sdk/zephyr-sdk-x.y.z).  `:?` makes an
+          # unset GITHUB_WORKSPACE abort rather than expand to /.
+          for attempt in 1 2 3; do
+            [ "$attempt" = 1 ] || rm -rf "${GITHUB_WORKSPACE:?}/zephyr-sdk"
+            west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
+              --install-dir "$GITHUB_WORKSPACE/zephyr-sdk" && break
+            rc=$?
+            if [ "$attempt" = 3 ]; then
+              echo "::error::west sdk install failed after 3 attempts (exit $rc)"
+              exit "$rc"
+            fi
+            echo "west sdk install failed (exit $rc); retry $attempt/3 in 15s" >&2
+            sleep 15
+          done
 
       # check_emit_kconfig_contract.py (#893) -- schema/smoke, not a
       # byte-golden: `--emit kconfig`'s exact symbol set moves with the
@@ -252,8 +453,16 @@ jobs:
       # known-must-exist symbols.  Deliberately NOT in
       # check_emit_snapshots.py (the hermetic gate) -- this mode needs
       # the workspace this job (and only this job) already bootstraps.
+      # NOT local Python, despite reading like it. check_emit_kconfig_contract.py
+      # subprocess-runs `python3 -m alp_orchestrate --emit kconfig --core ...`
+      # (:119) under the ZEPHYR_BASE / ZEPHYR_SDK_INSTALL_DIR /
+      # ZEPHYR_TOOLCHAIN_VARIANT below, which drives a real Zephyr CMake
+      # configure -- compile work, so it gets a compile-sized cap. An uncapped
+      # step inherits the 360-minute job default, and a hung CMake here is
+      # exactly the misattribution #1274 and #1319 exist to prevent.
       - name: check · --emit kconfig contract (#893)
         if: matrix.shard == 1
+        timeout-minutes: 10
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
@@ -262,6 +471,18 @@ jobs:
           EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
         run: |
           python3 scripts/check_emit_kconfig_contract.py
+
+      # gen_soc_peripheral_instances.py's --check does NOT run in this
+      # job (moved out in PR review on #1212): this job's Zephyr pin
+      # (`--mr v4.4.1` above) is the FULL twister oracle -- any future
+      # bump that happens to touch dts/arm/renesas/rz/rzv/r9a09g056.dtsi
+      # would make `--check` go STALE here, failing `twister-shard 1/4`,
+      # which fails the required aggregator `twister ·
+      # native_sim/native/64` and blocks every PR to `dev`, not just V2N
+      # ones, under a context name that says nothing about metadata. See
+      # pr-metadata-peripheral-instances.yml, which checks the same thing
+      # with a seconds-long sparse checkout of just the one DTSI, under
+      # its own honestly-named (and, for now, non-required) context.
 
       # Persist the twister REPORTS (json/xml/log) regardless of
       # pass/fail.  Do NOT upload the whole twister-out/ tree: the
@@ -273,9 +494,14 @@ jobs:
       # in the job output via --inline-logs.
       #
       # Per-shard artefact name so the 4 parallel uploads don't clash.
+      # #1319: capped like every other `uses:` step -- and this one has
+      # already failed hard once (PR #88's upload-artifact@v7 heap OOM,
+      # above).  Worst successful run 2s; 3min covers a report set that
+      # grows with the suite.
       - name: Upload twister reports artefact
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        timeout-minutes: 3
         with:
           name: twister-out-${{ matrix.shard }}
           path: |
@@ -295,6 +521,12 @@ jobs:
     needs: twister-shard
     if: always()
     runs-on: ubuntu-latest
+    # #1319: this job is the required context itself, so it gets a
+    # ceiling too even though its single step is a shell `if`.  The
+    # clock starts when the job STARTS, not while it waits on `needs`,
+    # so 5min is ample -- and it means a stuck runner here can no longer
+    # hold the required check open for 360 minutes.
+    timeout-minutes: 5
     steps:
       - name: Gate on all twister shards
         run: |

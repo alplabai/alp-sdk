@@ -10,10 +10,13 @@
     "generatedBy": { "const": "west alp-lock" },
     "sdk": {
       "type": "object", "additionalProperties": false,
-      "required": ["version", "revision"],
+      "required": ["version"],
       "properties": {
         "version": { "type": "string" },
-        "revision": { "type": ["string", "null"] }
+        "revision": {
+          "type": ["string", "null"],
+          "description": "Retired (#1615): no longer emitted. Kept OPTIONAL rather than removed so a lock generated before that change still validates against this schema. Delete this property, and the matching entry in scripts/alp_lock/__init__.py's _PROVENANCE_KEYS, at the next lockVersion bump -- no pre-#1615 lock can still be in play across a version boundary."
+        }
       }
     },
     "west": {

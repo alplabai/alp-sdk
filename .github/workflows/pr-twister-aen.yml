@@ -2,16 +2,19 @@
 #
 # AEN801 real-silicon twister gate (issue #1076).
 #
-# The problem this closes: examples/aen/** now carries 62 testcase.yaml
-# files, 53 of which name AEN board targets in platform_allow
-# (alp_e1m_aen801_m55_he/... and /_hp/...), contributing 60 of the tree's
-# 70 scenarios. The other 9 files are native_sim/native/64-only by design
+# The problem this closes: examples/aen/** now carries 61 testcase.yaml
+# files, 52 of which name AEN board targets in platform_allow
+# (alp_e1m_aen801_m55_he/... and /_hp/...), contributing 59 of the tree's
+# 69 scenarios. The other 9 files are native_sim/native/64-only by design
 # (aen-analog-validate, the five aen-cc3501e-* companion examples,
 # aen-eeprom-manifest, aen-secure-element-sign, edgeai-vision-aen) and are
-# not this gate's business. Of the 62 files, 25 predate this gate, 36 were
+# not this gate's business. Of the 61 files, 25 predate this gate, 35 were
 # added by the #1076 metadata sweep (#1095), and 1 (aen-sdcard-readout) by
 # #1097 once its driver linked; PR #1085 added the workflow itself, not the
-# metadata. pr-twister.yml's shards run
+# metadata. (The counts were 62/53/60/70 and a 36-file #1095 bucket until
+# docs/adr/0022 Amendment 2 deleted the Renode-sim aen-sim-vision example,
+# which carried one HP-only scenario from that sweep.)
+# pr-twister.yml's shards run
 # `-p native_sim/native/64` only (by design -- see that file's own header
 # comment: it deliberately skips the Zephyr SDK to dodge a disk-space
 # failure mode), so every AEN-only scenario is statically filtered out of
@@ -75,10 +78,13 @@ on:
     branches: [main, dev]
     paths:
       - 'examples/aen/**'
+      - 'examples/connectivity/firmware-update-log/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
+      - 'zephyr/soc-bridge/**'
       - 'src/backends/mproc/**'
       - 'src/backends/soc_info/alif_se.c'
+      - 'src/backends/update_log/**'
       - 'zephyr/drivers/sdhc/**'
       - 'zephyr/kconfigs/vendor-alif-peripherals.kconfig'
       - 'west.yml'
@@ -88,10 +94,13 @@ on:
     branches: [main, dev]
     paths:
       - 'examples/aen/**'
+      - 'examples/connectivity/firmware-update-log/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
+      - 'zephyr/soc-bridge/**'
       - 'src/backends/mproc/**'
       - 'src/backends/soc_info/alif_se.c'
+      - 'src/backends/update_log/**'
       - 'zephyr/drivers/sdhc/**'
       - 'zephyr/kconfigs/vendor-alif-peripherals.kconfig'
       - 'west.yml'
@@ -106,35 +115,62 @@ jobs:
   twister-aen:
     name: twister · AEN801 (M55-HE + M55-HP)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # #1477: raised from 30 -> 41 (corrected from a 3-run sample that
+    # overstated this to 60). True worst observed job wall is 1337s/
+    # 22.28min across 10 sampled runs -- 30min was genuinely unreachable
+    # because the twister step alone measures 1167s/19.45min (see that
+    # step's own comment below). 30 (twister step) + 7 (seven 1min
+    # setup/upload steps) + 3 (budget for the 3 remaining uncapped
+    # steps) sums to 40, so the ceiling must be at least 41 to stay
+    # strictly above that sum (test_job_ceiling_exceeds_the_sum_of_
+    # its_step_timeouts requires total < ceiling, not <=); 41 is also
+    # comfortably above the real 22.28min observed total.
+    timeout-minutes: 41
 
     env:
       ZEPHYR_TOOLCHAIN_VARIANT: zephyr
 
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        # #1477: worst observed successful run 4s across 10 sampled runs.
+        timeout-minutes: 5
         with:
+          persist-credentials: false
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        # #1477: worst observed successful run 1s across 10 sampled runs.
+        timeout-minutes: 5
         with:
           # Repo is checked out under alp-sdk/ (path:), but setup-python (a
           # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
           python-version-file: alp-sdk/.python-version
 
       - name: Install host build tools
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        # Worst observed successful run 32s across 10 sampled runs, but
+        # #1477's 1-minute cap derived from that TIMED OUT on a real PR
+        # (2026-08-18, run 32129302570): apt-get against a slow mirror
+        # routinely exceeds it. The cap is here to catch a hang, not to
+        # police apt, so it now carries ~10x the observed time.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh update
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               ninja-build gperf ccache dfu-util device-tree-compiler \
               python3-dev python3-pip python3-setuptools python3-wheel \
               libffi-dev libssl-dev xz-utils file make gcc \
               ca-certificates curl gnupg
 
       - name: Install west + Python deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        # #1477: worst observed successful run 7s across 10 sampled runs.
         run: pip3 install west jsonschema pyyaml
 
       # Zephyr workspace lives next to alp-sdk.  bootstrap.sh is
@@ -147,21 +183,35 @@ jobs:
         working-directory: ${{ github.workspace }}/alp-sdk
         run: bash scripts/bootstrap.sh
 
-      # bootstrap.sh does NOT apply zephyr/patches.yml (`west patch apply` is
-      # a separate, documented manual step -- see docs/aen-bench-bringup.md
-      # §3). The mproc/SE-boot examples this job builds pull in hal_alif's
-      # se_service.c, which calls ipm_poll_out()/ipm_poll_in() -- fields
+      # `bootstrap.sh` above runs `west patch apply` itself as of #1392 -- it
+      # used to be a manual step documented only in docs/aen-bench-bringup.md
+      # §3 and replicated here, which is a step a user running the script
+      # misses. This job still needs the patches: the mproc/SE-boot examples
+      # it builds pull in hal_alif's se_service.c, which calls
+      # ipm_poll_out()/ipm_poll_in() -- fields
       # zephyr/patches/zephyr/0002-ipm-add-poll-out-poll-in.patch adds to
       # upstream Zephyr's ipm_driver_api; vanilla v4.4.1 doesn't have them.
-      # Skipping this step is what a clean-checkout CI run (unlike a
-      # long-lived dev workspace that already carries the patch applied,
-      # uncommitted, from earlier bring-up work) exposes: a build error on
-      # `.poll_out`/`.poll_in` with no member by that name.
-      - name: west patch apply (zephyr/patches.yml)
+      # Without them a clean-checkout CI run fails on `.poll_out`/`.poll_in`
+      # with no member by that name.
+      #
+      # `west patch apply` exits 0 on three paths that apply nothing (#1392):
+      # patches.yml not found, an empty `patches:` list, and -- per patch -- a
+      # `module:` that resolves to nothing, which patch.py skips with
+      # `if mod is None: continue` and no message. Its exit status is
+      # therefore not evidence. This step reads the tree instead, with
+      # `git apply --reverse --check` per patch, and is what stops a silently
+      # unpatched workspace reaching twister. bootstrap.sh only WARNS on exit
+      # 3 (a module absent from a narrower workspace); this job compiles those
+      # modules, so any non-zero is a failure here.
+      #
+      # Not a `scripts/check_*.py` gate: those run in pr-metadata-validate.yml
+      # on a bare clone with no west workspace, where the only thing they
+      # could do is skip.
+      - name: verify zephyr/patches.yml actually applied
         working-directory: ${{ github.workspace }}/alp-sdk
         run: |
           set -euo pipefail
-          west patch apply
+          python3 scripts/verify_west_patches.py
 
       # twister itself (not just `west build`) needs Zephyr's full Python
       # dependency set under the runner's hosted interpreter -- e.g.
@@ -172,6 +222,10 @@ jobs:
       # runs twister successfully in CI with this exact install -- copied
       # verbatim rather than guessing a requirements file name.
       - name: pip install Zephyr requirements
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        # #1477: worst observed successful run 26s across 10 sampled runs.
         run: |
           set -euo pipefail
           pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements.txt"
@@ -199,10 +253,14 @@ jobs:
       # Both AEN801 board targets (M55-HE and M55-HP) are real
       # arm-zephyr-eabi cross builds, unlike the native_sim twister gate.
       - name: Install Zephyr SDK (arm-zephyr-eabi)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         working-directory: ${{ github.workspace }}
+        # #1477: worst observed successful run 9s across 10 sampled runs.
         run: |
           set -euo pipefail
-          curl -fsSL -o /tmp/zephyr-sdk.tar.xz "${ZEPHYR_SDK_URL}"
+          curl -fsSL --retry 3 --retry-delay 5 -o /tmp/zephyr-sdk.tar.xz "${ZEPHYR_SDK_URL}"
           ACTUAL_SHA256="$(sha256sum /tmp/zephyr-sdk.tar.xz | awk '{print $1}')"
           if [ "${ACTUAL_SHA256}" != "${ZEPHYR_SDK_SHA256}" ]; then
             echo "::error::sha256 mismatch for zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz: expected ${ZEPHYR_SDK_SHA256}, got ${ACTUAL_SHA256}"
@@ -216,17 +274,30 @@ jobs:
       # Run twister against both AEN801 board targets, scoped to
       # examples/aen -- the 52 testcase.yaml files whose platform_allow
       # names an AEN target are the entire point; nothing outside that
-      # tree is in scope for this job.
-      - name: twister · AEN801 (M55-HE + M55-HP) on examples/aen
+      # tree is in scope for this job. examples/connectivity/
+      # firmware-update-log is a second, bounded root (issue #1101): it
+      # is the one non-examples/aen example with AEN801 platform_allow
+      # entries, kept as its own --testsuite-root rather than widened to
+      # all of examples/ (this job's stated disk-budget concern, see the
+      # header comment) or moved under examples/aen (it is a portable
+      # <alp/update_log.h> demo, not AEN-only).
+      - name: twister · AEN801 (M55-HE + M55-HP) on examples/aen + firmware-update-log
         working-directory: ${{ github.workspace }}
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
           EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
+        # #1477: worst observed successful run 1167s/19.45min across 10
+        # sampled runs (corrected from a 3-run sample that understated
+        # this at 1055s/17.6min and a resulting 25min cap). 30min =
+        # ~1.54x that real worst case, kept under the job's own 41min
+        # ceiling (see that job-level comment).
+        timeout-minutes: 30
         run: |
           python3 zephyr/scripts/twister \
             -p alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
             -p alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/aen" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/firmware-update-log" \
             --inline-logs \
             --no-detailed-test-id
 
@@ -235,7 +306,9 @@ jobs:
       # pr-twister.yml.
       - name: Upload twister reports artefact
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        # #1477: worst observed successful run 2s across 10 sampled runs.
+        timeout-minutes: 1
         with:
           name: twister-out-aen
           path: |

@@ -40,7 +40,7 @@ WACT,12.80,IDLE,0.74,1,4.8
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/ai/wearable-activity-fall
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/wearable-activity-fall
 west flash
 ```
 

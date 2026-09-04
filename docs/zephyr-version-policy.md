@@ -13,7 +13,7 @@ upstream releases.**
 
 | Surface                              | Pinned to                | Where                                                                                |
 |--------------------------------------|--------------------------|--------------------------------------------------------------------------------------|
-| Zephyr release                       | **v4.4.1** (stable)      | [`metadata/bootstrap.json`](../metadata/bootstrap.json) (`zephyr.version` -- the bootstrap-facts single source of truth, issue #917), [`west.yml`](../west.yml) (manifest), [`.github/workflows/pr-twister.yml`](../.github/workflows/pr-twister.yml), [`.github/workflows/pr-tier-a-libraries.yml`](../.github/workflows/pr-tier-a-libraries.yml), [`.github/workflows/pr-getting-started-aen801.yml`](../.github/workflows/pr-getting-started-aen801.yml) (CI), [`.github/workflows/nightly-aen-hil.yml`](../.github/workflows/nightly-aen-hil.yml) (HIL), and the `Zephyr-vX.Y.Z` badge in [`README.md`](../README.md) |
+| Zephyr release                       | **v4.4.1** (stable)      | [`metadata/bootstrap.json`](../metadata/bootstrap.json) (`zephyr.version` -- the bootstrap-facts single source of truth, issue #917), [`west.yml`](../west.yml) (manifest), [`.github/workflows/pr-twister.yml`](../.github/workflows/pr-twister.yml), [`.github/workflows/pr-tier-a-libraries.yml`](../.github/workflows/pr-tier-a-libraries.yml), [`.github/workflows/pr-getting-started-aen801.yml`](../.github/workflows/pr-getting-started-aen801.yml) (CI), the `Zephyr-vX.Y.Z` badge in [`README.md`](../README.md), and the `ARG ZEPHYR_REV` default in [`tools/native-sim-container/Containerfile`](../tools/native-sim-container/Containerfile) (issue #1458 -- a fallback for a standalone `docker build`/`podman build` only; [`tools/native-sim-container/Makefile`](../tools/native-sim-container/Makefile)'s `build` target derives the live value from `west.yml` instead of reading this default).  (The bench itself pins its own Zephyr checkout by hand per [`HW-IN-LOOP.md`](ci/HW-IN-LOOP.md); there's no CI workflow pin for it -- CI does not drive the bench.) |
 | `hal_alif` Zephyr module             | Whatever ships with the pinned Zephyr | (we do **not** re-pin -- Zephyr's own west.yml owns this revision)         |
 
 All pins above move together when we bump.  Drift between them fails
@@ -90,12 +90,16 @@ When a new Zephyr LTS lands and we want to adopt it:
      - `.github/workflows/pr-tier-a-libraries.yml` &mdash; `--mr` arg + cache key
      - `.github/workflows/pr-getting-started-aen801.yml` &mdash; cache key
        (does **not** track the separate `ZEPHYR_SDK_VERSION` toolchain pin)
-     - `.github/workflows/nightly-aen-hil.yml` &mdash; `--mr` arg
      - `README.md`'s `Zephyr-vX.Y.Z` badge
      - every `metadata/libraries/*.yaml` manifest that is a genuine
        in-tree Zephyr subsystem (`integration.zephyr.module: null` **and**
        `requires.os == [zephyr]` -- today that's `coap.yaml`, `lwm2m.yaml`,
        `modbus.yaml`) &mdash; its `version:` field
+     - `tools/native-sim-container/Containerfile` &mdash; the `ARG ZEPHYR_REV`
+       default (issue #1458; a fallback for a standalone `docker
+       build`/`podman build` only -- `tools/native-sim-container/Makefile`'s
+       `build` target derives the live value from `west.yml` and never reads
+       this default)
    - Run `python3 scripts/check_bootstrap_manifest.py` with no flag to
      prove every pin above now agrees with `metadata/bootstrap.json` --
      it fails loudly on any pin left behind.
@@ -106,8 +110,12 @@ When a new Zephyr LTS lands and we want to adopt it:
      READ and stay frozen at the old version) are **not** `--fix` sites --
      update them by hand.
 4. **Re-verify the peripheral matrix** -- every column in
-   [`docs/os-support-matrix.md`](os-support-matrix.md) re-runs
-   either on native_sim (CI) or on real hardware (nightly HIL).
+   [`docs/os-support-matrix.md`](os-support-matrix.md) re-runs on
+   native_sim (CI, `pr-twister.yml`).  Real-silicon columns re-run as
+   an **explicitly-invoked bench run** under a held labgrid
+   reservation, not a nightly CI job -- see
+   [`docs/ci/HW-IN-LOOP.md`](ci/HW-IN-LOOP.md) for that contract; the
+   bump PR (or a follow-up before the tag) attaches the bench result.
    Twister failures get peripheral-by-peripheral triage.
 
 Steps 5-7 below apply to an **LTS-to-LTS / minor** bump only -- a same-line
