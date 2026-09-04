@@ -1,4 +1,7 @@
-"""Alp SDK command-line interface."""
+"""Alp SDK internal/reference Python library modules (board.yaml validation,
+diagnostic-v1/SARIF export) -- not a command surface; the command-line
+wrappers this package used to hold retired to `tan` (alp-sdk#1367,
+alp-sdk#1368)."""
 
 from importlib import metadata as _metadata
 from pathlib import Path

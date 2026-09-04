@@ -209,10 +209,31 @@ def _normalize_token_tails(text: str) -> str:
 # meaningful, stable part of the golden.
 _SDK_COMMIT_RE = re.compile(r'("sdkCommit":\s*)("[0-9a-f]+"|null)')
 
+# A scaffolded README pins its doc links to a GitHub ref chosen by
+# `alp_template._docs_ref()`: `v<version>` when metadata/sdk_version.yaml says
+# `status: released` AND that tag RESOLVES in the local checkout, else `main`.
+# The tag-resolution half makes the emitted bytes depend on the CHECKOUT, not
+# the commit: a clone that fetched origin's tags emits `blob/v0.16.0/`, while a
+# shallow / `--no-tags` / tarball checkout of the very same commit emits
+# `blob/main/` (same for the `tree/` form used for directory links).  That
+# is the machine-specific class this module already
+# the gate unwinnable: the goldens were written from a tagless checkout, so
+# every tagged checkout failed four scaffold snapshots with no code change in
+# sight (alp-sdk#1738).  Tokenise it so the goldens pin the LINK SHAPE -- what
+# this gate is actually for -- instead of re-drifting at every release tag.
+_DOCS_REF_RE = re.compile(
+    r"(https://github\.com/alplabai/alp-sdk/(?:blob|tree)/)"
+    r"(main|v\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)(/)")
+
 
 def _normalize_provenance(text: str) -> str:
     """Replace the volatile per-commit ``sdkCommit`` value with a stable token."""
     return _SDK_COMMIT_RE.sub(r'\1"<SDK_COMMIT>"', text)
+
+
+def _normalize_docs_ref(text: str) -> str:
+    """Replace the checkout-dependent scaffold doc-link ref with a token."""
+    return _DOCS_REF_RE.sub(r"\1<DOCS_REF>\3", text)
 
 
 def _normalize_host_paths(text: str, repo: str, python: str) -> str:
@@ -233,6 +254,7 @@ def _normalize_host_paths(text: str, repo: str, python: str) -> str:
     text = _normalize_path(text, repo, "<SDK_ROOT>")
     text = _normalize_path(text, python, "<PYTHON_EXECUTABLE>")
     text = _normalize_provenance(text)
+    text = _normalize_docs_ref(text)
     return _normalize_token_tails(text)
 
 

@@ -412,6 +412,29 @@ ZTEST(alp_can_registry, test_zephyr_drv_close_unregisters_filters)
 	alp_can_close(hb);
 }
 
+/* ---------- (l2) FD open rejected when CONFIG_CAN_FD_MODE=n (#1631) ------- */
+
+ZTEST(alp_can_registry, test_zephyr_drv_fd_open_rejected_without_fd_kconfig)
+{
+	/* This suite's prj.conf does not set CONFIG_CAN_FD_MODE, so
+	 * z_open()'s FD arm must reject unconditionally -- previously it
+	 * only rejected when bitrate_data_hz > 0u, so a caller passing
+	 * bitrate_data_hz == 0u fell through to the non-FD `else` arm and
+	 * opened successfully despite cfg.mode staying ALP_CAN_MODE_FD,
+	 * contradicting <alp/can.h>'s documented alp_can_open() contract. */
+	alp_can_config_t cfg = {
+		.bus_id             = 0u,
+		.bitrate_nominal_hz = 500000u,
+		.bitrate_data_hz    = 0u, /* the previously-unguarded case */
+		.mode               = ALP_CAN_MODE_FD,
+		.loopback           = false,
+	};
+	alp_can_t *h = alp_can_open(&cfg);
+	zassert_is_null(h,
+	                "alp_can_open() succeeded for ALP_CAN_MODE_FD with bitrate_data_hz == 0 on "
+	                "a CONFIG_CAN_FD_MODE=n build -- should return NULL per <alp/can.h>");
+}
+
 /* ---------- (l) payload_len <-> wire-DLC boundary mapping (#633) ---------- */
 
 ZTEST(alp_can_registry, test_zephyr_drv_fd_dlc_byte_boundaries)

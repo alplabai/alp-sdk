@@ -84,14 +84,14 @@ extern "C" {
 /* ADC channels (ALP_E1M_ADC<N> -> board-side signal) */
 /* ------------------------------------------------------------------ */
 
-#define EVK_ADC_BOARD_ID   ALP_E1M_ADC0  /**< Carrier-side BOARD_ID resistor divider (see docs/board-id.md). */
-#define EVK_ADC_ARDUINO_A1 ALP_E1M_ADC1  /**< Arduino UNO header A1 analog input. */
-#define EVK_ADC_ARDUINO_A2 ALP_E1M_ADC2  /**< Arduino UNO header A2 analog input. */
-#define EVK_ADC_ARDUINO_A3 ALP_E1M_ADC3  /**< Arduino UNO header A3 analog input. */
-#define EVK_ADC_ARDUINO_A4 ALP_E1M_ADC4  /**< Arduino UNO header A4 analog input (shared with I2C SDA on classic UNO boards). */
-#define EVK_ADC_ARDUINO_A5 ALP_E1M_ADC5  /**< Arduino UNO header A5 analog input (shared with I2C SCL on classic UNO boards). */
-#define EVK_ADC_MB_AN      ALP_E1M_ADC6  /**< mikroBUS click AN pin. */
-#define EVK_ADC_VBAT_SENSE ALP_E1M_ADC7  /**< Battery voltage divider (4:1 resistor scale) for power-monitor demos. */
+#define EVK_ADC_ARDUINO_A0    ALP_E1M_ADC0  /**< Arduino UNO header A0 analog input. SHARED with the mikroBUS click ANA pin (net CK_ANA reaches ARD.A0 through R52, R63 pulldown, C60 filter) -- see the Arduino-A0 / mikroBUS-ANA convenience macros in alp_e1m_evk.h. There is no BOARD_ID divider on this board; no BOARD_ID net exists in the EVK netlist. */
+#define EVK_ADC_ARDUINO_A1    ALP_E1M_ADC1  /**< Arduino UNO header A1 analog input. */
+#define EVK_ADC_ARDUINO_A2    ALP_E1M_ADC2  /**< Arduino UNO header A2 analog input. */
+#define EVK_ADC_ARDUINO_A3    ALP_E1M_ADC3  /**< Arduino UNO header A3 analog input. */
+#define EVK_ADC_ARDUINO_A4    ALP_E1M_ADC4  /**< Arduino UNO header A4 analog input (shared with I2C SDA on classic UNO boards). */
+#define EVK_ADC_ARDUINO_A5    ALP_E1M_ADC5  /**< Arduino UNO header A5 analog input (shared with I2C SCL on classic UNO boards). */
+#define EVK_ADC_DAC0_LOOPBACK ALP_E1M_ADC6  /**< DAC0 output loopback sense (net A6: R88 series from DAC0_OUT, R89 pulldown, C107 filter). NOT the mikroBUS AN pin -- mikroBUS ANA is shared with Arduino A0 on E1M_ADC0, see EVK_ADC_ARDUINO_A0. */
+#define EVK_ADC_DAC1_LOOPBACK ALP_E1M_ADC7  /**< DAC1 output loopback sense (net A7: R90 series from DAC1_OUT, R91 pulldown, C108 filter). There is no VBAT net anywhere in the EVK netlist -- this channel cannot be used for battery-voltage sensing. */
 
 /* ------------------------------------------------------------------ */
 /* DAC channels (ALP_E1M_DAC<N> -> board-side signal) */
@@ -131,7 +131,7 @@ extern "C" {
 #define EVK_I2C_ADDR_TCAL9538_PCIE 0x71u  /**< U37 PCIe I/O expander (A0=1, A1=0). Handles the I2C-mux SEL + PCIe slot RST/WAKE/CLKREQ signals + M2E_ALERT. */
 #define EVK_I2C_ADDR_TCA6408A_MAIN 0x20u  /**< U35 main I/O expander, TCA6408ARSVR alternative (R112 fitted, R145 DNP). PCA9538-register-compatible, so chips/tcal9538 drives it unchanged. BENCH-CONFIRMED 2026-06-16: read back config=0xFF + a live input port. */
 #define EVK_I2C_ADDR_TAS2563_LOW   0x4Du  /**< U27 smart amp (AD0 = 10k to GND). */
-#define EVK_I2C_ADDR_TAS2563_HIGH  0x4Eu  /**< U28 smart amp (AD0 = 10k to VDD). The TAS2563 broadcast address (0x48) was occupied on PRE-RESPIN boards by U32 INA236B (+V_CAM0 rail); the U32 re-strap to 0x4B from the next batch freed it -- firmware that supports both board revisions must still issue two targeted unit-address writes rather than a 0x48 broadcast. */
+#define EVK_I2C_ADDR_TAS2563_HIGH  0x4Eu  /**< U28 smart amp (AD0 = 10k to VDD). The TAS2563 broadcast address (0x48) was occupied on PRE-RESPIN boards by U32 INA236B (+V_CAM0 rail); the U32 re-strap to 0x4B from the next batch freed 0x48 at the hardware level. That does not make it usable from the SDK: 0x48 doesn't pin down one physical chip the way a strap address does, and tas2563_init() rejects 0x48 on every board revision regardless of direction, so firmware must unconditionally issue two targeted unit-address writes rather than a 0x48 broadcast. */
 #define EVK_I2C_ADDR_INA236_3V3    0x40u  /**< U21 INA236A, +3V3 rail (20 mOhm shunt, 4.0 A max). A0 = GND. */
 #define EVK_I2C_ADDR_INA236_1V8    0x41u  /**< U31 INA236A, +1V8 rail (20 mOhm shunt, 4.0 A max). A0 = V+. */
 #define EVK_I2C_ADDR_INA236_VIO    0x42u  /**< U33 INA236A, +VIO rail (50 mOhm shunt, 1.6 A max). A0 = SDA. */

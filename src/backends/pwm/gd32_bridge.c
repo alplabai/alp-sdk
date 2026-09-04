@@ -27,6 +27,25 @@
 #include "v2n_supervisor.h"
 #include <alp/chips/gd32g553.h>
 
+/* CONTAINER_OF without <zephyr/sys/util.h>: nothing this TU includes
+ * pulls it in, and open() must reach the enclosing portable handle.
+ * offsetof comes from <stddef.h> above.  Guarded so a build that
+ * already has Zephyr's definition transitively keeps its own.
+ *
+ * The intermediate (void *) cast (rather than a direct char*->type*
+ * cast) is deliberate: `st` is always the `state` member embedded in a
+ * real `struct alp_pwm` (the dispatcher only ever hands the ops table
+ * &h->state), so the recovered pointer's alignment is correct by
+ * construction -- but a direct cast still trips -Wcast-align=strict
+ * because the compiler can't see that invariant.  Routing through
+ * void* (alignment-agnostic by definition) is the standard
+ * container_of idiom for this, matching how Zephyr's own
+ * <zephyr/sys/util.h> CONTAINER_OF avoids the same diagnostic
+ * (issue #634). */
+#ifndef CONTAINER_OF
+#define CONTAINER_OF(ptr, type, member) ((type *)(void *)((char *)(ptr) - offsetof(type, member)))
+#endif
+
 typedef struct gd32_pwm_state {
 	uint8_t  channel_id;
 	uint32_t period_ns;
@@ -81,8 +100,27 @@ br_open(const alp_pwm_config_t *cfg, alp_pwm_backend_state_t *st, alp_capabiliti
 	if (bs == NULL) {
 		return ALP_ERR_NOMEM;
 	}
+	/* Prime the PORTABLE handle too, not just our private state: the
+     * dispatcher bounds-checks pulse_ns against struct alp_pwm::period_ns
+     * (a different field from the gd32_pwm_state_t::period_ns assigned
+     * just below, which only this backend reads).  Left at its memset zero, every
+     * alp_pwm_set_duty() with a non-zero pulse fails ALP_ERR_INVAL in
+     * the dispatcher and never reaches the supervisor.  Same
+     * CONTAINER_OF write-back the zephyr / sw_fallback / yocto backends
+     * do.
+     *
+     * cfg->period_ns == 0 means "backend default".  There is no
+     * devicetree behind a GD32 timer channel to defer to, so take the
+     * 1 kHz the sw_fallback / yocto backends default to, and keep both
+     * copies of the period equal -- the dispatcher's bound and the
+     * period this backend puts on the wire must not disagree, and the
+     * bridge itself rejects duty_ns > period_ns. */
+	struct alp_pwm *h = CONTAINER_OF(st, struct alp_pwm, state);
+	h->channel        = cfg->channel_id;
+	h->period_ns      = (cfg->period_ns != 0u) ? cfg->period_ns : 1000000u; /* 1 kHz */
+
 	bs->channel_id = (uint8_t)cfg->channel_id;
-	bs->period_ns  = cfg->period_ns;
+	bs->period_ns  = h->period_ns;
 	bs->duty_ns    = 0u;
 
 	st->dev         = NULL; /* bridge sentinel */

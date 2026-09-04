@@ -7,6 +7,309 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Changed — CC3501E wire protocol 7 to 8: request identity for every worker-routed opcode
+
+**HELD: needs `cc3501e-bridge-firmware` v0.6.0 (protocol 8) to be released and a
+bench run before this ships.** A protocol-8 host refuses a protocol-7 firmware
+outright (`cc3501e_reset()` returns `ALP_ERR_VERSION` on a `GET_VERSION`
+mismatch), so merging this before that firmware release would break the
+companion link on every unit currently flashed with v0.5.1.
+
+Protocol v7 gave `SOCK_SEND` a retry seq so a lost reply could not make the
+host's poll-by-repeat look like a new request and re-transmit the payload. That
+fix could only ever cover one opcode, because it spent a spare byte that
+happened to exist inside one request struct; the other 25 worker-routed opcodes
+still had no request identity at all, and a lost reply on any of them
+re-executed the operation
+(`alplabai/cc3501e-bridge-firmware#102`).
+
+- **The seq moved to the frame header.** Flags bits 3..7 (`0x08`-`0x80`, unused
+  through v7) carry a 5-bit retry seq, so every worker-routed opcode is covered
+  at zero wire cost and with no per-opcode struct change.
+  `poll_by_repeat()` allocates one seq per LOGICAL command and re-sends it
+  unchanged on every retry of that command — that constancy is the whole
+  mechanism. `cc3501e_request()`, the single-shot path with no retry loop, sends
+  the reserved `ALP_CC3501E_REQ_SEQ_NONE` (0) instead, so a frame that is not a
+  repeat of anything can never be answered from the firmware's latch. A pre-v8
+  host leaves those bits clear, which is why 0 had to be reserved: without it,
+  every one of its frames of a given opcode would look like the same seq.
+- **`DIAG_GET_STATS` grew additively, 8 to 16 bytes.** `cc3501e_diag_stats()`
+  now fills a `cc3501e_diag_stats_t` — a struct rather than out-params,
+  because the reply has now changed shape twice — carrying `worker_execs` and
+  `retry_latch_hits` beside the two frame counters. Those two are what
+  distinguish "the retry was absorbed" from "the operation ran twice", i.e. the
+  only way to observe the fix above on hardware. A v7 firmware answers only the
+  first two counters; `has_worker_counters` then reports the other two as
+  ABSENT rather than as a measured zero, and `alp companion diag stats` says so
+  in words — a bench run told "retry_latch_hits = 0" by firmware that never
+  counted them would record a pass for a mechanism that was not running.
+
+`SOCK_SEND` keeps its own 8-bit struct seq and is exempt from the header-seq
+mechanism on both sides (8 bits of identity is strictly stronger than 5, and
+that path is the bench-validated one); `SOCK_RECV` is exempt because it consumes
+stream state, so a header-seq match is not evidence that two frames are the same
+logical read.
+
+Verified in `tests/zephyr/cc3501e_host_driver` against the software slave model,
+78/78 cases, each new assertion mutation-proven: re-allocating the seq per
+attempt instead of per command, making the single-shot path claim a real seq,
+and hard-coding `has_worker_counters` true each fail exactly one test and no
+others. Not verified on silicon — the AEN801 bench unit is hardware-dead
+(#1883).
+
+### Fixed — thirteen Alif E8 driver defects found against the HWRM, four proven on silicon
+
+A read-only review of the Alif E8 drivers against `AHRM0012NDA` v0.3, datasheet
+`ADTS0013` v1.2 and errata `AERR0012` v2.0 (#1831) produced thirteen filed
+defects. All are fixed here; the four with an on-silicon witness are marked.
+
+**Bench-verified on `E1M-AEN801` (`AE822FA0E5597LS0` Rev A0), 2026-08-30:**
+
+- **Every 8- and 16-bit CRC BusFaulted** (#1847). `CRC_DATA_IN_8_n` is a range of
+  byte-wide registers and HWRM 15.2.5.3.5 says "only 8-bits can be written per
+  beat"; the driver used a 32-bit store, so the whole narrow-CRC path was
+  unreachable on hardware. Found by extending `aen-crc-regcheck` past the one
+  32-bit algorithm it had always run. All four algorithms now pass against their
+  host references.
+- **The ADC12 clock ran ~16x over its rated maximum** (#1823). `PERIPH_CLK`
+  measures ~156.5 MHz with no prescaler, so `clock_div = 2` clocked the SAR at
+  ~78 MHz against a 5000 kHz datasheet limit. Now 16, the lowest the field
+  reaches. Divide-by-32 was tried and does not work — HWRM's "Others: Reserved"
+  is real — so the part is still ~2x over spec and #1823 stays open for Alif.
+- **A falling edge on a comparator input locked the core** (#1821). The HSCMP has
+  two interrupt sources; the ISR cleared only bit 0 on a level-sensitive line,
+  and the "mask" writes set the rising-edge mask while clearing the falling-edge
+  one. `CMP_INTERRUPT_MASK` now reads `0x3 / 0x0 / 0x3` across arm and disarm.
+- **LPTIMER alarms fired one tick late** (#1829). The interval is
+  `LOADCOUNT + 1` clocks (HWRM 13.1.4.7), so a 1-tick alarm at 32768 Hz took
+  61.0 us instead of 30.5. `LOADCOUNT` now reads `ticks - 1` for every row.
+
+**Fixed on the documents, without a bench witness available:** the ADC's
+interrupt-mask direction, sequencer MODE field, sample-width encoding,
+completed-sample-register selection and both PGA gain ladders (#1822); five more
+LPTIMER/UTIMER/PWM defects including a wrong-direction relative alarm and a live
+period change that left a pad dead for ~43 s (#1829); four PDM defects including
+an unmasked FIFO count that overran its destination array (#1826); MHU
+`ACCESS_REQUEST` pinned high for the life of the image (#1827); the CPI frame
+reaching the AXI master with no bound against the caller's buffer (#1825);
+`__enable_irq()` clobbering PRIMASK mid-MRAM-write (#1824); one DMA error
+wedging the SPI driver in a `K_FOREVER` wait (#1819); a `DMASTP` acking the
+wrong peripheral (#1818); the event router discarding silicon `DMA_ACK_TYPE`
+defaults (#1820); no cache maintenance on non-snooping PL330 buffers (#1830);
+and two hal_alif UTIMER bugs routed around at their call sites, plus a QEC
+channel that never counted (#1828).
+
+### Fixed — AEN metadata and pinout facts that were wrong or missing
+
+- `inter-chip.tsv` paired Alif MOSI with CC3501E `GPIO_28` and MISO with
+  `GPIO_29`. That is backwards, and it is what made three Alp documents appear
+  to describe two different boards. The R2 module netlist routes P14_5 to
+  `GPIO_29` (PICO) and P14_4 to `GPIO_28` (POCI) — the board is correct and
+  needs no rework (#1807).
+- `IO16` and `IO17` were published as customer IO while the bridge firmware owns
+  and refuses both pads. Both rows now name the claim, so the generated pinmux
+  capability carries it (#1808).
+- The E8 SoC metadata pointed at datasheet v1.0 and published 29 uA/MHz, a
+  figure from the pre-1.0 v0.51 draft. Now v1.2 and 27 uA/MHz, with the I2C
+  ceiling drop to 1.0 Mbps, the shared-pin LPSPI channel and the six-entry STOP
+  ladder recorded as notes (#1811).
+- **Errata ER004's external brownout supervisor is the carrier's job, not the
+  module's**, and nothing said so. `POR_N` is pulled up on-module and brought
+  out to the E1M edge; no supervisor part is on the SoM. Omitting one on a
+  carrier can permanently damage the SoC (#1810).
+
+
+### Fixed — CC3501E socket send/recv put 4 KB buffers on the caller's stack
+
+`cc3501e_sock_send()` and `cc3501e_sock_recv()` each declared
+`uint8_t x[ALP_CC3501E_MAX_PAYLOAD]` — a 4096-byte array — as a local. The Zephyr
+shell thread is `CONFIG_SHELL_STACK_SIZE=2048`, so any shell caller that reached
+those frames overflowed the stack. Observed on E1M-AEN801 as a hard fault from
+`alp companion sock tcp-get`:
+
+```
+E: ***** USAGE FAULT *****
+E:   Stack overflow (context area not valid)
+```
+
+Both buffers now use per-context scratch (`ctx->sock_buf`) guarded by
+`ctx->sock_busy` — the pattern issue #740 established for `wifi_scan_buf` /
+`ble_scan_buf` / `evt_buf`, which the socket path was missed by.
+
+It looks intermittent but is not: the 4 KB frames are only allocated once a
+socket connect **succeeds**, so runs whose connects failed early never entered
+the frames and never faulted. Reaching the defect is what varies; any successful
+`tcp-get` from the shell overflows deterministically.
+
+Same reentrancy caveat as #740 — `sock_busy` catches same-call-stack reentrancy,
+not two genuinely concurrent callers on one ctx. `struct cc3501e` gains
+`sock_buf` and `sock_busy`, so the v0.16 ABI snapshot is regenerated (additive;
+no symbol removed).
+
+**Not yet verified on silicon**: proving it needs a *successful* `tcp-get`, and
+the Alif console app could not be rebuilt (its Zephyr configuration is generated
+by `scripts/alp_orchestrate.py` and three attempts to reconstruct that
+environment failed at kconfig). This is a fix by inspection with a named
+mechanism, not a bench-proven one.
+
+### Fixed — the CC3501E attention line was masked by the first edge and never re-armed
+
+Interrupt-driven async-event delivery (`CONFIG_ALP_SDK_CC3501E_EVENT_IRQ`) never
+delivered. The attention ISR masks the line and delegated re-arming to the
+request lock, but `cc3501e_lock_acquire()` only ever masks and
+`cc3501e_lock_release()` deliberately does not re-arm — re-arming there
+unconditionally had dropped an event drain into the middle of a radio operation
+and hung the device after `WIFI_SCAN`. So the **first** edge masked the line
+permanently.
+
+Instrumented on E1M-AEN801: the ISR frozen at exactly **1** across a 40 s armed
+window, while the firmware's pulse counter climbed to 86 with zero skips and
+arming returned 0. Firmware, wiring and arming were all fine; nothing put the
+line back.
+
+- `cc3501e_attn_arm()` now records the application's intent, and
+  `cc3501e_lock_release()` re-arms only inside that window — ordinary traffic
+  still never re-arms, so the `WIFI_SCAN` hang stays fixed. New public
+  `cc3501e_attn_rearm_if_desired()`.
+- The event drain backs off 50 ms before re-arming when it delivered nothing.
+  The wire is shared with READY flow control, so a transaction end is
+  indistinguishable from an attention pulse and the drain's own trailing READY
+  rise re-triggers the path: 11888 ISRs for 86 real events without the backoff,
+  220 with it, and no events lost either way.
+- The firmware attention pulse holds LOW long enough to be sampled; two
+  back-to-back `GPIO_write()` calls left it under the host pad synchroniser.
+
+Measured with the console timer poll raised to 60 s so only an edge could
+deliver: **86 of 86 pulses delivered**, `RESULT PASS: cc3501e link stable over 20
+soak PINGs (ping_fail=0)`.
+### Fixed — the CC3501E TI build still aborted at the LINK step
+
+#1722 stopped a compiler *warning* on stderr from aborting `build_ti.ps1`, but it
+closed the stderr-tolerant window immediately after the compile loop. The linker,
+`tiarmobjcopy` and `tiarmsize` all run after that point and all write to stderr,
+so the same `NativeCommandError` could still abort the script — just later.
+
+Observed while building with `-Ble -AttnSelftest`: the script printed
+`== Link ==`, then died on a `NativeCommandError` from `tiarmclang` at the link
+invocation. #1722's other half worked exactly as intended — the artifacts are
+deleted up front, so the build left **no** `cc3501e-bridge.out` rather than a
+stale flashable one — but the failure was still reported as a PowerShell
+exception rather than as the build error it was.
+
+- The stderr window now closes only after the last native tool.
+- `tiarmobjcopy` (hex and bin) and `tiarmsize` gained explicit `$LASTEXITCODE`
+  checks, so widening the window cannot hide a genuine failure; the link step
+  already had one.
+
+With this, the same build surfaced its real error — `unresolved symbols remain`
+naming the two missing symbols — instead of a PowerShell stack trace.
+### Added — 16-bit FIFO packing on the Alif DW-SSI polled path (+25% bridge throughput)
+
+The polled SPI path moved one byte per FIFO slot. MMIO accesses are what that
+loop actually costs (~45 cycles each on this SoC), so at 25 MHz the wire needs
+320 ns/byte while the 8-bit loop spends roughly 620 ns of CPU on it — the host,
+not the link, was the bottleneck.
+
+`CONFIG_SPI_DW_ALIF_PACK32` (default `n`) packs 2 bytes per FIFO slot on eligible
+bulk transfers. The DR shifts MSB-first, so writing the stream's next bytes
+big-endian into a 16-bit frame puts exactly the same bits on the wire as two
+8-bit frames — the peer cannot tell the difference, and no firmware change is
+needed on the other end.
+
+Measured on E1M-AEN801 (`e1m-aen-evk-01`), 512 x 4092 B framed and ACKed over the
+CC3501E bridge: **912 KB/s -> 1139 KB/s**, reproducible to within 30 us across
+runs, with `RESULT PASS: cc3501e link stable over 20 soak PINGs (ping_fail=0)`.
+
+Also fixed, and the reason the option was unusable: the frame size is programmed
+by a read-modify-write of the **live** CTRLR0, and `spi_dw_configure()` returns
+early when the `spi_config` is unchanged — which it is for every transfer on a
+bridge that reuses one config. A DFS written for a packed transfer therefore
+persisted, and the next small transfer ran the 8-bit loop against a 16-bit frame
+size. That is not a subtle degradation: it produced zero successful PINGs from
+boot. The frame size is now programmed on both paths, restoring `dfs * 8` when a
+transfer is not packed.
+
+`max-xfer-size = <32>` (4 bytes/slot) was probed on the bench and does **not**
+work on this instance — zero successful PINGs — so the binding default of 16
+stands. Whether that is the macrocell's real `SSI_MAX_XFER_SIZE` or a defect in
+the 32-bit path is unresolved; the TRM value has not been transcribed.
+
+### Fixed — CC3501E async events reached only one consumer
+
+`cc3501e_t` carried a single async-event callback slot, and
+`cc3501e_set_event_callback()` overwrote it unconditionally. The Zephyr console
+companion registers its own callback on the shared context from its init path —
+after the application's `main()` has already registered — so it displaced the
+application's callback and drained every event into its own sink.
+
+Nothing reported the conflict: the firmware ring drained normally,
+`cc3501e_poll_events()` returned `ALP_OK`, and the application simply never saw
+an event. Confirmed on E1M-AEN801 silicon, where the firmware ring showed 16
+events queued and drained while the application's poll returned `ALP_OK` having
+received zero bytes.
+
+- `cc3501e_set_event_callback()` is replaced by
+  `cc3501e_add_event_callback()` / `cc3501e_remove_event_callback()`, and events
+  fan out to every registered subscriber. The console and an application are
+  both legitimate consumers of the same events.
+- Registration is idempotent per (callback, user) pair, so re-arming defensively
+  does not double-deliver.
+- Exhausting `CC3501E_EVENT_SUBSCRIBERS` (4) refuses the new registration with
+  `ALP_ERR_NOMEM` rather than displacing a working subscriber — the failure mode
+  this fixes was precisely a silent displacement.
+
+**Migration:** replace `cc3501e_set_event_callback(ctx, cb, user)` with
+`cc3501e_add_event_callback(ctx, cb, user)`; detach with
+`cc3501e_remove_event_callback(ctx, cb, user)` instead of passing `cb = NULL`.
+### Fixed — the CC3501E TI build could ship a stale image after a failed build
+
+`build_ti.ps1` aborted **mid-compile** on a compiler *warning*: `tiarmclang`
+writes warnings to stderr, and under `$ErrorActionPreference = 'Stop'`
+PowerShell turns native stderr into a terminating `NativeCommandError`. With
+`-Ble`, a warning in a TI SDK source (`cc3xxxhif_ble_hci.c`) ended the build
+before the linker ran — while the script still printed `0 error(s)` from the
+compile summary.
+
+The build left the **previous** `cc3501e-bridge.out` in place, and that file is
+what the flash-image builder packages. Every subsequent flash therefore carried
+a stale image: the device reported the *old* `fw_version`, and firmware changes
+under test never ran on silicon while appearing to have been flashed.
+
+- Delete `cc3501e-bridge.{out,hex,bin}` **before** compiling, so a build that
+  dies cannot leave a flashable artifact behind (both `build_ti.ps1` and
+  `build_ti.sh`).
+- Stop treating a stderr warning as fatal in the compile loop; `$LASTEXITCODE`
+  was already checked per source and remains the real error signal.
+
+Verified on E1M-AEN801 silicon: with the fix, a `firmware-version.txt` bump to
+`0.3.1` reaches the device (`fw_version=0x0301`) — before it, the same flash
+still reported `0x0201`.
+
+### Documented — recovering an Alif E8 whose Secure Enclave is stuck in Recovery
+
+`debugging-aen.md` §7.4 previously said the SDK had no recipe for an SE-side
+fault and would not invent one. One half of that state turns out to be
+routinely recoverable, and the recipe is now written down because we ran it on
+our own AE822 silicon: when the maintenance tool reports `Device connected in
+Recovery`, SEROM is alive with no valid SERAM to hand off to, and ROM → MRAM
+Recovery restores it.
+
+- §7.4 documents the state, its cause — an interrupted **System Package**
+  write, the Secure Enclave counterpart of the interrupted application write
+  already covered in §7.3 — the Recovery-only ROM menu, the ~4.5 minute write,
+  and the two reads that verify the part before the application is reflashed.
+- §7.4.3 covers the case where the tool cannot reach the target at all, where
+  a connect-under-reset over SWD supplies the reset SEUART is waiting for,
+  with the E8 SW-DP ID (`0x4C013477`) as the check that the probe is on the
+  right silicon.
+- §7.5 keeps the honest escalation path for the genuinely silent SE, which is
+  still Alif's domain.
+- The `aen-provisioning.md` troubleshooting row for the "device in SEROM
+  Recovery mode" warning now links the procedure instead of only naming it.
+
+Also recorded: `SE CLOCK: HFRC` is present on a **healthy** board — the SE runs
+on the RC oscillator by design, so it is not a fault signature on its own.
+
 ## [v0.16.0] - 2026-08-23
 
 ### Documented — the model & edge-AI lifecycle design record lands on `dev`, ahead of the code it plans (#933)
@@ -1614,7 +1917,7 @@ exactly four errors on this branch:
 docs/gd32-bridge.md:155: error: explicit link request to 'helper_flash_gate' could not be resolved
 docs/gd32-bridge.md:156: error: explicit link request to '_flash_entry' could not be resolved
 docs/gd32-bridge.md:174: error: explicit link request to 'plan_swd_probe' could not be resolved
-docs/gd32-bridge.md:192: error: unable to resolve reference to '.../firmware/gd32-bridge/README.md' for \ref command
+docs/gd32-bridge.md:192: error: unable to resolve reference to '.../gd32-bridge-firmware:README.md' for \ref command
 ```
 
 **The three `::` spans.** Doxygen reads `::` as an explicit link request *even
@@ -1624,12 +1927,12 @@ become two separate code spans (`` `helper_flash_gate` `` in
 `` `python/tan/core/flash_plan.py` ``). Every identifier is preserved verbatim.
 
 **The dead link, fixed by closing a real docs gap rather than rewording.**
-`firmware/gd32-bridge/README.md` was not in `docs/doxygen/Doxyfile`'s `INPUT`,
-so the link could not resolve. Its sibling `firmware/cc3501e/README.md` *is* in
+`gd32-bridge-firmware:README.md` was not in `docs/doxygen/Doxyfile`'s `INPUT`,
+so the link could not resolve. Its sibling `cc3501e-bridge-firmware:README.md` *is* in
 `INPUT` — two peer bridge firmwares, one shipped in the generated reference and
 one invisible to it. Rewording the link would have hidden that asymmetry
 permanently, so the README is added to `INPUT` instead. `pr-doxygen.yml`'s
-`paths:` filter is widened from the literal `firmware/cc3501e/README.md` to
+`paths:` filter is widened from the literal `cc3501e-bridge-firmware:README.md` to
 `firmware/*/README.md`; `tests/scripts/test_doxygen_paths_cover_input.py`
 pins filter and `INPUT` together and passes.
 
@@ -1646,7 +1949,7 @@ Adding the file to `INPUT` surfaced a second, previously invisible error —
 caught locally before pushing, and it would have gone red in CI:
 
 ```
-firmware/gd32-bridge/README.md:1: error: found more than one \mainpage comment block!
+gd32-bridge-firmware:README.md:1: error: found more than one \mainpage comment block!
   (first occurrence: README.md, line 1), Skipping current block!
 ```
 
@@ -2210,7 +2513,7 @@ matching #1527's own narrower Proposed change — not every `.sh` file the
 repo ships. Root `scripts/*.sh` (`board-yaml-sweep-exclude.sh`,
 `dispatch-confirm.sh`, `setup-clang-format.sh`, `test-all.sh`) is still
 shellchecked locally only, and 8 `.sh` files outside `scripts/` entirely
-(`firmware/cc3501e/ti/*.sh`, `keys/generate_dev_key.sh`,
+(`cc3501e-bridge-firmware:ti/*.sh`, `keys/generate_dev_key.sh`,
 `meta-alp-sdk/recipes-core/alp-system/files/alp-remoteproc-start.sh`,
 `tests/yocto/*.sh`, `tools/native-sim-container/entrypoint.sh`) are
 shellchecked nowhere at all, in CI or locally. Widening this is tracked as
@@ -2732,9 +3035,9 @@ documented (Refs #1527):
 * Root `scripts/*.sh` (`board-yaml-sweep-exclude.sh`, `bootstrap.sh`,
   `dispatch-confirm.sh`, `setup-clang-format.sh`, `test-all.sh`) —
   shellchecked by `stage_shellcheck`'s local loop but by no CI job.
-* 8 files entirely outside `scripts/` (`firmware/cc3501e/ti/build_ti.sh`,
-  `firmware/cc3501e/ti/deploy_validate.sh`,
-  `firmware/cc3501e/ti/regen_flashset.sh`, `keys/generate_dev_key.sh`,
+* 8 files entirely outside `scripts/` (`cc3501e-bridge-firmware:ti/build_ti.sh`,
+  `cc3501e-bridge-firmware:ti/deploy_validate.sh`,
+  `cc3501e-bridge-firmware:ti/regen_flashset.sh`, `keys/generate_dev_key.sh`,
   `meta-alp-sdk/recipes-core/alp-system/files/alp-remoteproc-start.sh`,
   `tests/yocto/build_rpc_uio_bench_aarch64.sh`,
   `tests/yocto/run_sanitized_rpc_tests.sh`,
@@ -3801,16 +4104,16 @@ drifted). This is the first published `prebuilt/` blob to actually ship it.
 **These are two independent counters, and conflating them is exactly the
 error this release exists to clean up:**
 
-- `firmware/cc3501e/firmware-version.txt` -- the **semver firmware release**.
+- `cc3501e-bridge-firmware:firmware-version.txt` -- the **semver firmware release**.
   Names the tag and the prebuilt blob `cc3501e-vX.Y.Z.bin`. Moves on the
   GD32-bridge cadence (0.2.1 -> 0.2.3 -> 0.2.8-style patch/minor bumps).
-- `firmware/cc3501e/protocol-version.txt` -- the **wire protocol** number.
+- `cc3501e-bridge-firmware:protocol-version.txt` -- the **wire protocol** number.
   Moves only when the wire format itself changes (an opcode, a field, a
   compat rule). `0.3.0` is NOT "v0.4" -- that would encode the protocol
   number into the firmware version and break the scheme these two files
   exist to keep separate.
 
-Ships in `firmware/cc3501e/prebuilt/`: `cc3501e-v0.3.0.bin` +
+Ships in `cc3501e-bridge-firmware:prebuilt/`: `cc3501e-v0.3.0.bin` +
 `cc3501e-v0.3.0.bin.sig` (detached ECDSA-P256/SHA-256, Alp validation vendor
 key) + `cc3501e-v0.3.0.bin.sha256`. `cc3501e-v0.2.0.bin` and its `.sig`/
 `.sha256` stay in the tree -- it is a published, signed artifact people may
@@ -3819,7 +4122,7 @@ deleting it. All six AEN SoM presets' `helper_firmware.cc3501e_otp.firmware_path
 now point at the `0.3.0` blob.
 
 Full fix list, the `OTA_PROMOTE` rationale, the open `#1562` soft-AP defect,
-and the anti-rollback rule are in `firmware/cc3501e/prebuilt/CHANGELOG.md`
+and the anti-rollback rule are in `cc3501e-bridge-firmware:prebuilt/CHANGELOG.md`
 under `[0.3.0]` -- not duplicated here.
 
 Closes #1609.
@@ -3978,9 +4281,11 @@ territory, in a fifth file.
 
 ### Fixed — the zcbor recipe set both `SRCREV` and a URL `tag=`, so bitbake could not parse it and every A55 image build failed
 
-`meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb:90` pinned the revision
-twice — `;tag=0.9.1` in `SRC_URI` and `SRCREV` on line 92. BitBake's git
-fetcher refuses that outright, at PARSE time, before any task runs:
+`meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb:102` pinned the revision
+twice — `;tag=0.9.1` in `SRC_URI` and `SRCREV` on line 104 — the state the
+line was in before this fix; line 102 today reads `;branch=main`, the fixed
+form described below. BitBake's git fetcher refuses that outright, at PARSE
+time, before any task runs:
 
 ```
 ERROR: ExpansionError during parsing meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb
@@ -4437,9 +4742,9 @@ only), and `metadata/schemas/build-plan-v1.schema.json`'s `artifacts`
 descriptions now tell a consumer to read these paths verbatim rather than
 re-derive them from `buildDir`.
 
-### Fixed — `cc3501e_reset()` now enforces the wire-protocol compatibility `firmware/cc3501e/DESIGN.md` always claimed (#1371)
+### Fixed — `cc3501e_reset()` now enforces the wire-protocol compatibility `cc3501e-bridge-firmware:DESIGN.md` always claimed (#1371)
 
-`firmware/cc3501e/DESIGN.md:74` documented "host↔firmware wire compatibility (host refuses a
+`cc3501e-bridge-firmware:DESIGN.md:74` documented "host↔firmware wire compatibility (host refuses a
 mismatch)" for `GET_VERSION` since the table was written. Nothing ever
 compared the reply against `ALP_CC3501E_PROTOCOL_VERSION`:
 `cc3501e_get_version()` (`chips/cc3501e/cc3501e_core.c`) round-tripped
@@ -4479,7 +4784,7 @@ its return value outright; it now special-cases `ALP_ERR_VERSION` — a
 version mismatch is permanent, not transient, so unlike a transport hiccup it
 is no longer swallowed into the retry soak.
 
-`firmware/cc3501e/DESIGN.md`'s wire-protocol-version row now names the
+`cc3501e-bridge-firmware:DESIGN.md`'s wire-protocol-version row now names the
 enforcing function instead of describing behaviour that did not exist.
 `include/alp/chips/cc3501e.h` and `include/alp/chips/cc3501e/core.h` document
 the new contract on `cc3501e_reset()` and `cc3501e_get_version()`.
@@ -4652,9 +4957,9 @@ dies in the inter-phase settle gap reads back all-zero, and
 `cc3501e_request_locked()` (`chips/cc3501e/cc3501e_core.c`) to
 `WIFI_AP_START` (0x14), which the firmware provably cannot answer with a
 synchronous bare `RESP_OK`: `handle_worker_routed_payload()`
-(`firmware/cc3501e/src/protocol.c`) acks every fresh submit
+(`cc3501e-bridge-firmware:src/protocol.c`) acks every fresh submit
 `RESP_ERR_BUSY`, and `worker_run_pending()`
-(`firmware/cc3501e/src/worker.c`) calls `worker_reset()` for exactly
+(`cc3501e-bridge-firmware:src/worker.c`) calls `worker_reset()` for exactly
 `WIFI_CONNECT_STA` and `WIFI_AP_START` **before** `cc3501e_bridge_ready()`
 re-arms the link — so the `WORKER_DONE` branch that would reply `RESP_OK` is
 wiped while the host is still held off and can never be collected. A bare
@@ -4708,10 +5013,10 @@ as success.
 `alp companion wifi status` printed `rssi:  0 dBm` on a live -49 dBm link.
 That 0 was not a stale or a failed read: `alp_cc3501e_wifi_status_t::rssi_dbm`
 is served from a firmware latch that is NEVER populated -- every terminal
-outcome in `firmware/cc3501e/hal/ti/cc3501e_hw_ti_wifi.c` publishes it through
+outcome in `cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti_wifi.c` publishes it through
 `wifi_conn_set()`, the single terminal-transition chokepoint, which always
 sets the latch's rssi field to 0, because that connect path may not issue
-`Wlan_Get(WLAN_GET_RSSI)` (the hazard note at `firmware/cc3501e/hal/ti/cc3501e_hw_ti_wifi.c:675-677` --
+`Wlan_Get(WLAN_GET_RSSI)` (the hazard note at `cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti_wifi.c:675-677` --
 the read blocks this NWP and hangs the worker). 0 dBm is a legal `int8` RSSI
 near the top of the range, so nothing downstream could reject it and no
 in-band sentinel existed for the host to test.
@@ -4727,7 +5032,7 @@ plainly that the latch byte is not a measurement.
 
 **Cost, not previously stated anywhere:** `wifi status` on a connected link is
 no longer a cheap read. `WIFI_GET_RSSI` is worker-routed
-(`firmware/cc3501e/src/protocol.c:310` dispatches to `handle_wifi_get_rssi` in
+(`cc3501e-bridge-firmware:src/protocol.c:310` dispatches to `handle_wifi_get_rssi` in
 `protocol_wifi.c`, which calls `handle_worker_routed`), so it
 always costs at least a submit -> `RESP_ERR_BUSY` -> poll round trip, and the
 host driver's own comment (`chips/cc3501e/cc3501e_wifi.c:386-395`) notes that
@@ -5491,7 +5796,7 @@ outcome. Neither of that poll's error exits — the terminal
 `remaining == 0u` return — cleared anything before returning, so the failed
 association's state stayed live inside the NWP. The *next* `WIFI_CONNECT_STA`
 then failed at its own `Wlan_Connect` kick, `ALP_CC3501E_WIFI_FAIL_KICK` --
-`include/alp/protocol/cc3501e.h:447` ("STA role-up / Wlan_Connect kick failed")
+`include/alp/protocol/cc3501e.h:534` ("STA role-up / Wlan_Connect kick failed")
 -- even for a correct SSID and passphrase that had connected seconds earlier.
 
 Root-caused on real silicon, E1M-AEN801 r1, one boot, single variable,
@@ -5514,10 +5819,10 @@ for it — the naming throughout this fix is "clear the stale association", not
 **Where that clear runs also changed.** The first round of this fix ran it from
 inside the two failure exits, and a review plus a second bench pass proved that
 shape too broad: `cc3501e_hw_wifi_disconnect()` does `wifi_conn_set(DISCONNECTED,
-FAIL_NONE)`, `firmware/cc3501e/hal/ti/cc3501e_hw_ti_wifi.c:715`
+FAIL_NONE)`, `cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti_wifi.c:781`
 ("wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_DISCONNECTED, (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE);"),
 so clearing on the way OUT of a failed connect erased the `state: failed` /
-`fail: N` diagnostic, `src/zephyr/console/alp_console_companion_wifi.c:348`
+`fail: N` diagnostic, `src/zephyr/console/alp_console_companion_wifi.c:416`
 ("(unsigned int)st.fail_reason);"), that was the ONLY host-visible way to tell
 `FAIL_KICK` (3) from `FAIL_REJECTED` (2) — both map to `ALP_ERR_IO`. It could
 also run from the poll-exhaustion exit against a latch that had never actually
@@ -8003,7 +8308,7 @@ The exact order code is **left `TBD`, deliberately**: the sources in this
 tree disagree on precision (the CHANGELOG's own `metadata/e1m_modules/aen/CHANGELOG.md:16`
 says "TI DP83825", the devicetree says `DP83825I`), and the devicetree's own
 label self-flags as an unverified "fork reference" one
-(`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-354`). The MDIO
+(`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:548-555`). The MDIO
 `PHYID1+PHYID2` bench readback (`id=2000a140`,
 `examples/aen/aen-ethernet-link/README.md:39`) confirms the DP83825 die/OUI
 identity but not the temperature/package order-code suffix, so it cannot
@@ -9293,13 +9598,13 @@ nothing. The Alif MHUv2, HWSEM, ADC, PDM and comparator drivers keep their own
   source package
   (`meta-rz-features/meta-rz-codecs/.../0001-Add-OpenCVA-and-Codec-for-V2N.patch`,
   quoted in the 0002 patch comment). The SD branch also rooted at
-  `/dev/mmcblk2p2`; `e1m-x-evk.dtsi:88-89` names the carrier microSD
+  `/dev/mmcblk2p2`; `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi:88-89` names the carrier microSD
   `/dev/mmcblk1p2` (SDHI1, alias `mmc1`) — no third MMC controller
   exists on this SoM. Both fixed; the eMMC branch's root (`mmc0` →
   `mmcblk0p2`) was already correct. V2N101 and V2N102 currently build
   the *same* dtb filename (`e1m-v2n101-x-evk.dtb`) — not via inheritance;
   V2N102's own conf **hardcodes** this filename at
-  `e1m-v2n102-a55.conf:36`, alongside a TODO to create a V2N102-specific
+  `meta-alp-sdk/conf/machine/e1m-v2n102-a55.conf:36`, alongside a TODO to create a V2N102-specific
   dts once its DDR map is confirmed and a note that this bootcmd must
   change in lockstep if that TODO ever lands — so the hardcoded name in
   the patch covers both SKUs today but is a real tripwire, not a
@@ -9630,7 +9935,7 @@ propagated; a failure returns early, leaving the instance uninitialised
   `CHANGELOG.md`) — the `TBD` claim was the stale side; removed.
 - **`docs/console.md`** (#1168, expected bridge firmware version): the
   `alp companion ver` example output showed `GD32 supervisor fw v0.2.6`.
-  `firmware/gd32-bridge/firmware-version.txt` (the firmware's own version
+  `gd32-bridge-firmware:firmware-version.txt` (the firmware's own version
   string) is `0.2.11`, matching `docs/verification-status.md`'s "the bridge
   has since moved to fw v0.2.11 / protocol v0.9". Updated the example
   output to match.
@@ -10352,7 +10657,7 @@ returns `None` for both. `alp_cli/validator.py::_load_soc_caps` still
 soft-fails to `None` and still roots at its injected `soc_dir`: rebuilding it
 as `resolve_soc_path(ref, soc_dir.parent)` is exact only while every caller
 passes a directory literally named `socs`, and a test now injects one that
-is not. `new_som.py:154` keeps its `_SOC_REF_RE` guard, which is strictly
+is not. `alp_cli/new_som.py:154` keeps its `_SOC_REF_RE` guard, which is strictly
 narrower than an arity check (it also demands lowercase slugs), so
 `Alif:ensemble:e8` still prefills empty rather than `Alif`.
 
@@ -11210,11 +11515,11 @@ neither reads as drift to a future editor.
 
 `metadata/e1m_modules/E1M-V2N101.yaml`, `…V2N102.yaml`, `…V2M101.yaml`, and
 `…V2M102.yaml` declared `helper_firmware[].firmware_path:
-firmware/gd32-bridge/build/gd32/gd32-bridge.bin` — a gitignored CMake build
+gd32-bridge-firmware:build/gd32/gd32-bridge.bin` — a gitignored CMake build
 output, absent from every fresh clone. That exact path only matches
-`.github/workflows/pr-gd32-bridge-build.yml`'s `-B firmware/gd32-bridge/build/gd32`
+`.github/workflows/pr-gd32-bridge-build.yml`'s `-B gd32-bridge-firmware:build/gd32`
 CI invocation (whose binary is a 14-day GitHub Actions artifact, not
-something the repo ships); `firmware/gd32-bridge/README.md`'s own quick-start
+something the repo ships); `gd32-bridge-firmware:README.md`'s own quick-start
 (`cmake -B build`, matching the `CMakeLists.txt` top comment) lands the same
 binary one directory up, at `build/gd32-bridge.bin` — so even a customer who
 builds the firmware by the tree's own documented instructions does not land
@@ -11314,7 +11619,7 @@ disclaiming it. The two changes are sequential, not contradictory: the docs
 were made honest first, and this makes them honest in the other direction.
 
 The exposure was real. `grep -rn 'min_sdk_version\|max_sdk_version' scripts/`
-returned nothing, and `alp_project_loader.py:35`'s `SDK_VERSION_FILE` was
+returned nothing, and `scripts/alp_project_loader.py:35`'s `SDK_VERSION_FILE` was
 referenced nowhere else in its own file, so a customer whose upgraded SDK no
 longer supported their board revision got a normal, successful emit and
 firmware built against the wrong hardware assumptions, silently — while the
@@ -12358,7 +12663,7 @@ pure-Python fallback).
   recording this three-path answer to its Arm-GNU-Toolchain open-evidence
   question. `docs/bring-up-v2n.md`'s GD32-build step also had a stale
   `cd alp-sdk/gd32-bridge` (no such directory) — corrected to
-  `firmware/gd32-bridge/`, and its "unprogrammed module" framing now
+  `gd32-bridge-firmware:`, and its "unprogrammed module" framing now
   distinguishes the bare GD32 chip shipped blank from GigaDevice from a
   customer-shipped module, which Alp Lab pre-flashes during production.
 
@@ -12953,7 +13258,7 @@ CDC200), `<alp/dsp.h>` (CMSIS-DSP Helium is already the E8 path), `<alp/tmu.h>`
   no longer returns `ALP_ERR_NOSUPPORT`. New wire message
   `BLE_GATT_REGISTER` (`0x38`, `include/alp/protocol/cc3501e.h`) carries a
   variable-length service/characteristic descriptor; the firmware
-  (`firmware/cc3501e/`) bounds-validates it and dynamically
+  (`cc3501e-bridge-firmware:`) bounds-validates it and dynamically
   `ble_gatts_add_svcs`, preserving the existing demo service (`0xFFF0`/
   `0xFFF1`) across a `ble_gatts_reset()` + re-add (a naive second
   `ble_gatts_start()` use-after-frees the demo's attribute entries — caught
@@ -13651,7 +13956,7 @@ overlay wiring the customer's path silently drops.
   *pinned* Zephyr's `share/sysbuild/**/Kconfig*`. It resolves that oracle from
   `$ZEPHYR_BASE` / the west topdir and `pytest.skip`s when neither exists. No job
   satisfied the precondition: the only two running `tests/scripts/`
-  (`cross-platform-zephyr.yml:156`, `pr-metadata-validate.yml:385`) are
+  (`.github/workflows/cross-platform-zephyr.yml:156`, `.github/workflows/pr-metadata-validate.yml:385`) are
   pure-Python checkouts with zero `west init` / `ZEPHYR_BASE`, while the jobs
   that DO carry a workspace (`pr-twister.yml`, `pr-tier-a-libraries.yml`,
   `nightly-aen-hil.yml`) never ran `tests/scripts/`. So the gate shipped, skipped
@@ -14639,7 +14944,7 @@ claims to the real hardware reality, scoped so nothing overclaims:
 - `docs/os-support-matrix.md`, `docs/bring-up-aen.md`,
   `docs/recommended-libraries.md`, and the peripheral-io example READMEs:
   current-state currency (incl. a `<alp/dac.h>` reference fix).
-- `firmware/cc3501e/README.md`: documents the **hardware SS0 chip-select**
+- `cc3501e-bridge-firmware:README.md`: documents the **hardware SS0 chip-select**
   link (was "3-wire CS-less"); no Wi-Fi/BLE concurrency overclaim.
 - `scripts/bump_version.py` + `scripts/check_version_doc_sync.py`: track the
   reworded intro-badge label so future version bumps keep it in sync.  (#257)
@@ -14875,8 +15180,8 @@ boards (FIB `v0.0.207`).
 ### Added — cc3501e-bridge: embedded CC3501E Wi-Fi/BLE firmware (v0.1 bring-up) + selectable SPI/SDIO transport
 
 The TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor on the E1M-AEN family now has
-its bridge firmware **embedded in alp-sdk** at `firmware/cc3501e/` — modeled
-on `firmware/gd32-bridge/`, not a separate repo ([ADR
+its bridge firmware **embedded in alp-sdk** at `cc3501e-bridge-firmware:` — modeled
+on `gd32-bridge-firmware:`, not a separate repo ([ADR
 0015](docs/adr/0015-cc3501e-firmware-embedded.md), which supersedes the
 earlier separate-`alplabai/cc3501e-firmware` plan).  The firmware `#include`s
 the canonical `include/alp/protocol/cc3501e.h` directly, so the host driver,
@@ -15594,7 +15899,7 @@ SCI7 register access ≈ 341 ns; `k_busy_wait(10)` ≈ 15 µs measured):
   SCI7 **permanently** (an RSPI reroute was rejected — pads committed
   elsewhere); `docs/gd32-link-sci7-next-rev.md` replaces the RSPI
   migration plan, and stale "RSPI master" wording was corrected across
-  the docs/headers.  `firmware/gd32-bridge/CMakeLists.txt` now re-runs
+  the docs/headers.  `gd32-bridge-firmware:CMakeLists.txt` now re-runs
   configure when `firmware-version.txt` changes (incremental builds
   used to bake a stale `GET_BUILD_ID`).
 
@@ -15608,7 +15913,7 @@ rate stays the DMAC path's job).
 
 ### Changed — gd32-bridge protocol v0.6 + OTA Path-A real, silicon-validated (2026-06-04)
 
-Wire MINOR bump `PROTOCOL_VERSION` 0.5.0 → 0.6.0 (`firmware/gd32-bridge/
+Wire MINOR bump `PROTOCOL_VERSION` 0.5.0 → 0.6.0 (`gd32-bridge-firmware:
 src/protocol.h`, host mirror in `<alp/chips/gd32g553.h>` in lock-step):
 `OTA_WRITE_CHUNK`'s request payload is now length-checked
 (`offset:u32 len:u8 data[len]`), closing a silicon-caught wire hole —
@@ -18236,7 +18541,7 @@ small framing helper the SDK keeps in
 ### Added (2026-05-14 -- GD32 ADC stream DMA + DSP chain_bind + RTC wake §C.23 §C.24 §C.25)
 
 Three back-to-back HAL bodies in
-`firmware/gd32-bridge/hal/bridge_hw_gd32.c` that close the
+`gd32-bridge-firmware:hal/bridge_hw_gd32.c` that close the
 remaining §1a opcodes:
 
 - **§C.23 -- `bridge_hw_adc_stream_begin/read/end`** (opcodes
@@ -18435,7 +18740,7 @@ on HiL.
 ### Added (2026-05-14 -- GD32 timer-sync HAL §C.15b)
 
 - **`bridge_hw_timer_sync` real body** in
-  `firmware/gd32-bridge/hal/bridge_hw_gd32.c`.  Replaces the
+  `gd32-bridge-firmware:hal/bridge_hw_gd32.c`.  Replaces the
   NOSUPPORT stub with a master-slave SMC configuration over the
   three GD32G5x3 advanced timers (TIMER0 / TIMER7 / TIMER19).
   Wire byte mapping: `master`/`slave` integer ids 0..2 ->
@@ -18456,7 +18761,7 @@ on HiL.
 ### Added (2026-05-14 -- GD32 PWM input-capture HAL §C.15a)
 
 - **`bridge_hw_pwm_capture_begin` / `_read` / `_end` real bodies**
-  in `firmware/gd32-bridge/hal/bridge_hw_gd32.c`.  Replaces the
+  in `gd32-bridge-firmware:hal/bridge_hw_gd32.c`.  Replaces the
   three NOSUPPORT stubs that landed with v0.5 wave-2 §2B.2 with
   a polled-drain implementation: BEGIN switches the channel from
   output mode (CHxN driving) to input-capture (CIx polled),
@@ -18791,12 +19096,12 @@ Deferred from this batch:
   `gd32_bridge_frame_fuzz.c`, `iot_mqtt_fuzz.c`), plus the
   `tests/bench/README.md` cross-ref bumped from `../../fuzz/`
   to `../fuzz/`.
-- **`gd32-bridge/` moved to `firmware/gd32-bridge/`.**  Unifies
-  the firmware trees -- `firmware/cc3501e/` (already there) and
-  `firmware/gd32-bridge/` (new home) now sit side-by-side
+- **`gd32-bridge/` moved to `gd32-bridge-firmware:`.**  Unifies
+  the firmware trees -- `cc3501e-bridge-firmware:` (already there) and
+  `gd32-bridge-firmware:` (new home) now sit side-by-side
   instead of being scattered between the top level + `firmware/`.
   Mechanical search-and-replace: 22 files updated with
-  `gd32-bridge/` -> `firmware/gd32-bridge/` (skipping
+  `gd32-bridge/` -> `gd32-bridge-firmware:` (skipping
   `CHANGELOG.md`'s historical entries).  Notable touch points:
   `.github/workflows/pr-gd32-bridge-build.yml` paths filter
   + build/source/toolchain paths (14 occurrences),
@@ -21526,7 +21831,7 @@ Deferred from this batch:
   `<alp/iot.h>` routed through MCUboot (Zephyr) or RAUC (Linux),
   trust-anchor pinning + min-version anti-rollback baked into the
   config.  No code yet -- v0.4 cycle implements it.
-- `firmware/cc3501e/` scaffolding -- the alp-sdk side of the
+- `cc3501e-bridge-firmware:` scaffolding -- the alp-sdk side of the
   two-repo boundary with the future `alplabai/cc3501e-firmware`:
   bootstrap README that mirrors the contract from
   `docs/cc3501e-bridge.md`, a `flash.py` stub (dry-run + SHA-256

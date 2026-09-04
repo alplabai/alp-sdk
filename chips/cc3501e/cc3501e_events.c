@@ -12,12 +12,42 @@
 
 #include "cc3501e_internal.h"
 
-alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user)
+alp_status_t cc3501e_add_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-	ctx->event_cb   = cb;
-	ctx->event_user = user;
-	return ALP_OK;
+	if (cb == NULL) return ALP_ERR_INVAL;
+
+	/* Idempotent: re-registering the SAME (cb, user) pair is a no-op rather
+	 * than a second slot, so a caller that re-arms defensively (e.g. on
+	 * reconnect) cannot end up receiving every event twice. */
+	for (size_t i = 0; i < CC3501E_EVENT_SUBSCRIBERS; i++) {
+		if (ctx->event_subs[i].cb == cb && ctx->event_subs[i].user == user) {
+			return ALP_OK;
+		}
+	}
+	for (size_t i = 0; i < CC3501E_EVENT_SUBSCRIBERS; i++) {
+		if (ctx->event_subs[i].cb == NULL) {
+			ctx->event_subs[i].user = user;
+			ctx->event_subs[i].cb   = cb;
+			return ALP_OK;
+		}
+	}
+	return ALP_ERR_NOMEM;
+}
+
+alp_status_t cc3501e_remove_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, void *user)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (cb == NULL) return ALP_ERR_INVAL;
+
+	for (size_t i = 0; i < CC3501E_EVENT_SUBSCRIBERS; i++) {
+		if (ctx->event_subs[i].cb == cb && ctx->event_subs[i].user == user) {
+			ctx->event_subs[i].cb   = NULL;
+			ctx->event_subs[i].user = NULL;
+			return ALP_OK;
+		}
+	}
+	return ALP_ERR_NOT_FOUND;
 }
 
 alp_status_t cc3501e_poll_events(cc3501e_t *ctx)
@@ -26,7 +56,14 @@ alp_status_t cc3501e_poll_events(cc3501e_t *ctx)
 	/* No sink registered -> don't drain: leave the events queued in the firmware
 	 * ring so they aren't lost before a callback is attached (the firmware drains
 	 * on every GET_PENDING_EVENTS, so a poll with no cb would silently discard). */
-	if (ctx->event_cb == NULL) return ALP_OK;
+	bool have_sink = false;
+	for (size_t i = 0; i < CC3501E_EVENT_SUBSCRIBERS; i++) {
+		if (ctx->event_subs[i].cb != NULL) {
+			have_sink = true;
+			break;
+		}
+	}
+	if (!have_sink) return ALP_OK;
 
 	/* Explicit reentrancy guard (issue #740): the callback below is handed
 	 * pointers INTO ctx->evt_buf, valid only for the duration of that one
@@ -71,6 +108,31 @@ alp_status_t cc3501e_poll_events(cc3501e_t *ctx)
 	while (off + ALP_CC3501E_EVENT_HDR_BYTES <= got) {
 		const uint8_t opcode = evt_buf[off];
 		const uint8_t len    = evt_buf[off + 1u];
+		/* End of list.  0x00 is not a defined ALP_CC3501E_EVT_* opcode, and a
+		 * reply is zero-padded up to a CC3501E_REPLY_PAD (8 B) multiple for DMA
+		 * burst alignment (firmware protocol.c, #1610/#1655) with the pad folded
+		 * INTO the declared payload length -- so the host cannot distinguish pad
+		 * from entries by length alone.  That is harmless for a self-delimiting
+		 * payload (SOCK_RECV carries its own data_len) but this list has neither
+		 * a count nor a terminator, so an EMPTY ring arrived here as 7 zero bytes
+		 * and was walked as three {opcode 0, len 0} entries -- ~5.8 phantom
+		 * events/second on an idle AEN801 bench, fanned out to every subscriber
+		 * (#1740).  Treat a zero opcode as the padding it is and stop.
+		 */
+		if (opcode == 0u) {
+			break;
+		}
+		/* End of list.  0x00 is not a defined ALP_CC3501E_EVT_* opcode, and a
+		 * reply is zero-padded up to a CC3501E_REPLY_PAD (8 B) multiple for DMA
+		 * burst alignment (firmware protocol.c, #1610/#1655) with the pad folded
+		 * INTO the declared payload length -- so the host cannot distinguish pad
+		 * from entries by length alone.  That is harmless for a self-delimiting
+		 * payload (SOCK_RECV carries its own data_len) but this list has neither
+		 * a count nor a terminator, so an EMPTY ring arrived here as 7 zero bytes
+		 * and was walked as three {opcode 0, len 0} entries -- ~5.8 phantom
+		 * events/second on an idle AEN801 bench, fanned out to every subscriber
+		 * (#1740).  Treat a zero opcode as the padding it is and stop.
+		 */
 		if (off + ALP_CC3501E_EVENT_HDR_BYTES + (size_t)len > got) {
 			break; /* truncated trailing entry -- stop cleanly */
 		}
@@ -78,7 +140,16 @@ alp_status_t cc3501e_poll_events(cc3501e_t *ctx)
 		 * it points into ctx->evt_buf, which the NEXT poll (this ctx) will
 		 * overwrite.  A callback that needs the bytes afterward must copy
 		 * them before returning. */
-		ctx->event_cb(opcode, &evt_buf[off + ALP_CC3501E_EVENT_HDR_BYTES], len, ctx->event_user);
+		/* Fan out to every subscriber (issue #1723).  Snapshot each slot
+		 * before invoking it: a callback is allowed to unregister itself,
+		 * which would otherwise clear the slot mid-dispatch. */
+		for (size_t i = 0; i < CC3501E_EVENT_SUBSCRIBERS; i++) {
+			const cc3501e_event_cb_t cb   = ctx->event_subs[i].cb;
+			void *const              user = ctx->event_subs[i].user;
+			if (cb != NULL) {
+				cb(opcode, &evt_buf[off + ALP_CC3501E_EVENT_HDR_BYTES], len, user);
+			}
+		}
 		off += ALP_CC3501E_EVENT_HDR_BYTES + (size_t)len;
 	}
 	ctx->evt_busy = false;

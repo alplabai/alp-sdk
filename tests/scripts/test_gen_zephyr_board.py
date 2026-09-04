@@ -15,12 +15,12 @@ Two things are pinned:
 2. The `scripts/alp_project.py --emit zephyr-board` CLI wiring actually
    writes those files to `--output`.
 
-`e1m_v2n101_m33_sm` / `e1m_v2m101_m33_sm` are covered for only the three
-family-agnostic files the generator produces for them today
-(`board.yml`, `Kconfig.alp_<board>`, the twister `.yaml`) -- their
-`.dts` / pinctrl `.dtsi` / `_defconfig` stay hand-authored (see the
-module docstring in `gen_zephyr_board.py`) and are intentionally not
-checked here.
+`e1m_v2n101_m33_sm` / `e1m_v2m101_m33_sm` are covered for the three
+family-agnostic files (`board.yml`, `Kconfig.alp_<board>`, the twister
+`.yaml`) PLUS the pinctrl `.dtsi` and `_defconfig`, generated from
+`metadata/e1m_modules/v2n/supervisor-links.yaml` (#655).  Only the board
+`.dts` stays hand-authored for this family (see the module docstring in
+`gen_zephyr_board.py`) and is intentionally not checked here.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
 from gen_zephyr_board import ZephyrBoardEmitError, _load_soc_spec, emit_zephyr_board  # noqa: E402
+import validate_metadata as validate_metadata_module  # noqa: E402
 
 BOARDS_ROOT = REPO / "zephyr" / "boards" / "alp"
 
@@ -69,6 +70,12 @@ METADATA_ROOT = REPO / "metadata"
 PARITY_COVERED: dict[str, tuple[str, str]] = {
     "e1m_aen801_m55_hp": ("E1M-AEN801", "m55_hp"),
     "e1m_aen801_m55_he": ("E1M-AEN801", "m55_he"),
+    # V2N/V2M: `emit_zephyr_board()` now also claims the two files sourced
+    # from metadata/e1m_modules/v2n/supervisor-links.yaml
+    # (`<board>-pinctrl.dtsi`, `<board>_defconfig`) alongside the three
+    # family-agnostic ones (#655) -- `_assert_matches_committed()` below
+    # diffs every file the generator returns, so no separate file list is
+    # needed here; only the `.dts` stays outside this SKU/core mapping.
     "e1m_v2n101_m33_sm": ("E1M-V2N101", "m33_sm"),
     "e1m_v2m101_m33_sm": ("E1M-V2M101", "m33_sm"),
 }
@@ -192,9 +199,13 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
             "board.cmake / Kconfig should stay hand-authored -- see "
             "gen_zephyr_board.py's NOT GENERATED docstring section")
 
-    def test_v2n_dts_pinctrl_defconfig_stay_hand_authored(self) -> None:
-        """The Renesas-side GD32 supervisor pin wiring isn't in metadata
-        yet, so these three files must NOT be claimed as generated."""
+    def test_v2n_dts_stays_hand_authored(self) -> None:
+        """The board `.dts` is the only V2N/V2M file this generator does
+        NOT claim (#655 slice 1 covers pinctrl.dtsi/_defconfig; the `.dts`
+        itself needs a metadata source of its own -- see the module
+        docstring).  Narrowing this from a 3-file to a 5-file claim set is
+        deliberate: it stays a ratchet against silent scope creep into
+        `.dts`, not a relaxation of the check."""
         files = emit_zephyr_board("E1M-V2N101", "m33_sm", METADATA_ROOT)
         claimed = {relpath.split("/", 1)[1] for relpath in files}
         self.assertEqual(
@@ -203,8 +214,229 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
                 "board.yml",
                 "Kconfig.alp_e1m_v2n101_m33_sm",
                 "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.yaml",
+                "alp_e1m_v2n101_m33_sm-pinctrl.dtsi",
+                "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33_defconfig",
             },
         )
+        self.assertNotIn("alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts", claimed)
+
+    def test_families_list_is_load_bearing_for_v2m(self) -> None:
+        """`supervisor-links.yaml`'s `families:` list gates
+        `emit_zephyr_board()`'s V2N/V2M branch (#655 review), not a
+        hardcoded `("v2n", "v2n-m1")` tuple -- dropping `v2n-m1` from it
+        must stop E1M-V2M101 from emitting the pinctrl.dtsi/_defconfig a
+        stale local constant would still have produced."""
+        with _MutatedMetadata() as mm:
+            mm.sub("e1m_modules/v2n/supervisor-links.yaml",
+                   "families:\n  - v2n\n  - v2n-m1\n",
+                   "families:\n  - v2n\n")
+            files = emit_zephyr_board("E1M-V2M101", "m33_sm", mm.root)
+            claimed = {relpath.split("/", 1)[1] for relpath in files}
+            self.assertNotIn("alp_e1m_v2m101_m33_sm-pinctrl.dtsi", claimed)
+            self.assertNotIn(
+                "alp_e1m_v2m101_m33_sm_r9a09g056n48gbg_cm33_defconfig", claimed)
+            # The family-agnostic files (unaffected by the supervisor-links
+            # families: list) still emit -- only the two files this list gates.
+            self.assertIn("board.yml", claimed)
+            # V2N101 (still declared) must be unaffected by dropping v2n-m1.
+            v2n_files = emit_zephyr_board("E1M-V2N101", "m33_sm", mm.root)
+            v2n_claimed = {relpath.split("/", 1)[1] for relpath in v2n_files}
+            self.assertIn("alp_e1m_v2n101_m33_sm-pinctrl.dtsi", v2n_claimed)
+
+
+class TestSupervisorLinksPinmuxCrossCheck(unittest.TestCase):
+    """`scripts/validate_metadata.py::_check_supervisor_links_cross_refs`
+    (#655) must actually go red on a (silicon_peripheral, silicon_pad)
+    pair that metadata/pinmux/v2n.yaml doesn't carry -- a gate nobody
+    proves red is not a gate."""
+
+    def test_pair_absent_from_pinmux_v2n_is_a_hard_error(self) -> None:
+        original_repo = validate_metadata_module.REPO
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                validate_metadata_module.REPO = tmp_path
+                (tmp_path / "metadata" / "pinmux").mkdir(parents=True)
+                (tmp_path / "metadata" / "chips").mkdir(parents=True)
+                # No "GD32_SPI.MOSI" / "P76" row at all -- the pair the
+                # supervisor-links file below claims is unresolvable.
+                (tmp_path / "metadata" / "pinmux" / "v2n.yaml").write_text(
+                    "schemaVersion: pinmux-capability-v1\n"
+                    "family: v2n\n"
+                    'display_name: "test"\n'
+                    "pads:\n"
+                    '  - { e1m_pad: "TBD", e1m_function: "TBD", '
+                    'owner: "renesas", silicon_peripheral: "SOME_OTHER", '
+                    'silicon_pad: "P99" }\n',
+                    encoding="utf-8",
+                )
+                (tmp_path / "metadata" / "chips" / "gd32g553.yaml").write_text(
+                    "i2c:\n  default_address_7bit: 0x70\n", encoding="utf-8")
+                sl_path = tmp_path / "supervisor-links.yaml"
+                sl_path.write_text(
+                    "schemaVersion: supervisor-links-v1\n"
+                    "families: [v2n]\n"
+                    "supervisor_links:\n"
+                    "  gd32_spi:\n"
+                    "    peripheral: GD32_SPI\n"
+                    "    pins:\n"
+                    '      - { silicon_peripheral: "GD32_SPI.MOSI", '
+                    'silicon_pad: "P76", pfc_port: "PORT_07", pfc_pin: 6, '
+                    'pfc_func: 1, evidence: "test" }\n'
+                    '    gpio_chip_select: { silicon_peripheral: "GD32_SPI.CS0", '
+                    'silicon_pad: "P97", gpio_node: gpio9, gpio_pin: 7, '
+                    'active_low: true, evidence: "test" }\n'
+                    "  brd_i2c:\n"
+                    "    peer_address_7bit: 0x70\n"
+                    "    pins: []\n"
+                    "  console:\n"
+                    "    pins: []\n",
+                    encoding="utf-8",
+                )
+                failures = validate_metadata_module._check_supervisor_links_cross_refs(
+                    [sl_path])
+        finally:
+            validate_metadata_module.REPO = original_repo
+
+        self.assertTrue(
+            failures,
+            "a (silicon_peripheral, silicon_pad) pair absent from "
+            "metadata/pinmux/v2n.yaml must be a hard error, not silently "
+            "unvalidated")
+        msg = failures[0][1][0]
+        self.assertIn("GD32_SPI.MOSI", msg)
+        self.assertIn("P76", msg)
+        self.assertIn("0 owner", msg)
+
+    def test_core_a55_on_a_matched_pad_is_a_hard_error(self) -> None:
+        """A matched `metadata/pinmux/v2n.yaml` row carrying `core: "a55"`
+        must fail: the conditional is `core is not None and core != "m33"`,
+        and this exercises the `core is not None` half going red -- flipping
+        it to `core is None` would leave this test green for the wrong
+        reason (see `test_absent_core_key_stays_green` below for the other
+        half)."""
+        original_repo = validate_metadata_module.REPO
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                validate_metadata_module.REPO = tmp_path
+                (tmp_path / "metadata" / "pinmux").mkdir(parents=True)
+                (tmp_path / "metadata" / "chips").mkdir(parents=True)
+                # P76 resolves to exactly one owner="renesas" row, but that
+                # row is core-owned by the a55, not the m33 this link needs.
+                (tmp_path / "metadata" / "pinmux" / "v2n.yaml").write_text(
+                    "schemaVersion: pinmux-capability-v1\n"
+                    "family: v2n\n"
+                    'display_name: "test"\n'
+                    "pads:\n"
+                    '  - { e1m_pad: "TBD", e1m_function: "TBD", '
+                    'owner: "renesas", silicon_peripheral: "GD32_SPI.MOSI", '
+                    'silicon_pad: "P76", core: "a55" }\n'
+                    '  - { e1m_pad: "TBD", e1m_function: "TBD", '
+                    'owner: "renesas", silicon_peripheral: "GD32_SPI.CS0", '
+                    'silicon_pad: "P97", core: "m33" }\n',
+                    encoding="utf-8",
+                )
+                (tmp_path / "metadata" / "chips" / "gd32g553.yaml").write_text(
+                    "i2c:\n  default_address_7bit: 0x70\n", encoding="utf-8")
+                sl_path = tmp_path / "supervisor-links.yaml"
+                sl_path.write_text(
+                    "schemaVersion: supervisor-links-v1\n"
+                    "families: [v2n]\n"
+                    "supervisor_links:\n"
+                    "  gd32_spi:\n"
+                    "    peripheral: GD32_SPI\n"
+                    "    pins:\n"
+                    '      - { silicon_peripheral: "GD32_SPI.MOSI", '
+                    'silicon_pad: "P76", pfc_port: "PORT_07", pfc_pin: 6, '
+                    'pfc_func: 1, evidence: "test" }\n'
+                    '    gpio_chip_select: { silicon_peripheral: "GD32_SPI.CS0", '
+                    'silicon_pad: "P97", gpio_node: gpio9, gpio_pin: 7, '
+                    'active_low: true, evidence: "test" }\n'
+                    "  brd_i2c:\n"
+                    "    peer_address_7bit: 0x70\n"
+                    "    pins: []\n"
+                    "  console:\n"
+                    "    pins: []\n",
+                    encoding="utf-8",
+                )
+                failures = validate_metadata_module._check_supervisor_links_cross_refs(
+                    [sl_path])
+        finally:
+            validate_metadata_module.REPO = original_repo
+
+        self.assertTrue(
+            failures,
+            "a matched pad with core: \"a55\" must be a hard error -- "
+            "this link needs core: \"m33\"")
+        messages = failures[0][1]
+        core_msg = next(m for m in messages if "GD32_SPI.MOSI" in m)
+        self.assertIn("P76", core_msg)
+        self.assertIn("'a55'", core_msg)
+        self.assertIn('"m33"', core_msg)
+
+    def test_absent_core_key_stays_green(self) -> None:
+        """The real `UART0_TXD0` P50 / `UART0_RXD0` P51 shape
+        (`metadata/pinmux/v2n.yaml:134-135`): a matched row with NO `core:`
+        key at all must NOT fail -- only a row that carries a `core:` key
+        other than "m33" may. This exercises the `core is not None` half
+        staying green; flipping the condition to drop that guard (checking
+        `core != "m33"` unconditionally) would fail this test."""
+        original_repo = validate_metadata_module.REPO
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                validate_metadata_module.REPO = tmp_path
+                (tmp_path / "metadata" / "pinmux").mkdir(parents=True)
+                (tmp_path / "metadata" / "chips").mkdir(parents=True)
+                # No `core:` key on either row -- matches the real console
+                # pads in metadata/pinmux/v2n.yaml.
+                (tmp_path / "metadata" / "pinmux" / "v2n.yaml").write_text(
+                    "schemaVersion: pinmux-capability-v1\n"
+                    "family: v2n\n"
+                    'display_name: "test"\n'
+                    "pads:\n"
+                    '  - { e1m_pad: "TBD", e1m_function: "TBD", '
+                    'owner: "renesas", silicon_peripheral: "UART0_TXD0", '
+                    'silicon_pad: "P50" }\n'
+                    '  - { e1m_pad: "TBD", e1m_function: "TBD", '
+                    'owner: "renesas", silicon_peripheral: "UART0_RXD0", '
+                    'silicon_pad: "P51" }\n',
+                    encoding="utf-8",
+                )
+                (tmp_path / "metadata" / "chips" / "gd32g553.yaml").write_text(
+                    "i2c:\n  default_address_7bit: 0x70\n", encoding="utf-8")
+                sl_path = tmp_path / "supervisor-links.yaml"
+                sl_path.write_text(
+                    "schemaVersion: supervisor-links-v1\n"
+                    "families: [v2n]\n"
+                    "supervisor_links:\n"
+                    "  gd32_spi:\n"
+                    "    peripheral: GD32_SPI\n"
+                    "    pins: []\n"
+                    "  brd_i2c:\n"
+                    "    peer_address_7bit: 0x70\n"
+                    "    pins: []\n"
+                    "  console:\n"
+                    "    pins:\n"
+                    '      - { silicon_peripheral: "UART0_TXD0", '
+                    'silicon_pad: "P50", pfc_port: "PORT_05", pfc_pin: 0, '
+                    'pfc_func: 1, evidence: "test" }\n'
+                    '      - { silicon_peripheral: "UART0_RXD0", '
+                    'silicon_pad: "P51", pfc_port: "PORT_05", pfc_pin: 1, '
+                    'pfc_func: 1, evidence: "test" }\n',
+                    encoding="utf-8",
+                )
+                failures = validate_metadata_module._check_supervisor_links_cross_refs(
+                    [sl_path])
+        finally:
+            validate_metadata_module.REPO = original_repo
+
+        self.assertEqual(
+            failures, [],
+            "a matched pad with no core: key at all must stay green -- "
+            "absence is not \"a55 by elimination\" (see "
+            "metadata/e1m_modules/v2n/core-ownership.yaml)")
 
 
 AEN801_PRESET = "e1m_modules/E1M-AEN801.yaml"
@@ -253,6 +485,19 @@ class _MutatedMetadata:
         spec.pop(key, None)
         path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
 
+    def stage_overlay(self, relpath: str) -> None:
+        """Place a file at `self.root.parent / "zephyr" / "dts" / relpath`.
+
+        `_aen_peripherals_dtsi()`'s vintage probe looks next to
+        *metadata_root* (`self.root`), not at the real repo checkout
+        (#1354) -- a test exercising that branch has to stage the overlay
+        in THIS tmp tree, not rely on alp-sdk's own `zephyr/` directory.
+        """
+        path = self.root.parent / "zephyr" / "dts" / relpath
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("/* test double, not a real overlay */\n",
+                         encoding="utf-8")
+
 
 class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
     """Every SKU, part designator, pin name and base address in a generated
@@ -295,13 +540,71 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
 
     def test_soc_without_a_peripherals_overlay_is_refused(self) -> None:
         """A non-E8 Ensemble part must not silently inherit the E8's
-        overlay: the E8 declares `ethosu85`, an E3 has 2x U55 and no U85."""
+        overlay: the E8 declares `ethosu85`, an E3 has 2x U55 and no U85.
+
+        `ref` is mutated off `alif:ensemble:e8` too so this exercises the
+        genuine authoring-gap message -- with `ref` left at E8 this is the
+        VINTAGE shape instead, covered by
+        `test_e8_missing_the_key_names_the_alp_sdk_vintage_not_the_som`
+        below (#1354)."""
+        with _MutatedMetadata() as mm:
+            mm.json_del(E8_SOC, "zephyr_peripherals_dtsi")
+            mm.json_set(E8_SOC, "ref", "alif:ensemble:e9")
+            # Stage the E8 overlay too: in every real checkout it IS present
+            # beside metadata/, so this must be refused on `ref != e8` alone,
+            # not merely because no overlay happens to exist in this tmp
+            # tree -- without this, deleting the `ref` check leaves the
+            # suite green for the wrong reason (#1354 review round 2).
+            mm.stage_overlay("alif/ensemble_e8_peripherals.dtsi")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        self.assertIn("zephyr_peripherals_dtsi", str(ctx.exception))
+        self.assertIn("alif:ensemble:e9", str(ctx.exception))
+
+    def test_e8_missing_the_key_names_the_alp_sdk_vintage_not_the_som(self) -> None:
+        """#1352 added `zephyr_peripherals_dtsi` after the E8 overlay file
+        (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi`) already shipped, so
+        every real checkout that has the field also has the file -- the old
+        message ("Add the overlay ... before generating this board") told an
+        E8 user on an old-but-real checkout to hand-author a 64+ KiB file
+        that was already sitting in their own tree (#1354).
+
+        The overlay is staged in THIS tmp tree (`mm.stage_overlay`), not
+        read off alp-sdk's own `zephyr/` directory -- the probe judges the
+        *metadata_root*'s tree, so a bare `json_del` here (with no overlay
+        anywhere under `mm.root.parent`) must NOT be enough to trip the
+        vintage branch; see
+        `test_e8_missing_the_key_and_no_overlay_gets_the_authoring_message`
+        below for that half."""
+        with _MutatedMetadata() as mm:
+            mm.json_del(E8_SOC, "zephyr_peripherals_dtsi")
+            mm.stage_overlay("alif/ensemble_e8_peripherals.dtsi")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        message = str(ctx.exception)
+        self.assertIn(
+            "this alp-sdk predates the per-SoC peripherals-overlay "
+            "declaration", message)
+        self.assertIn("alp-sdk#1352", message)
+        self.assertIn("upgrade alp-sdk", message)
+        self.assertIn("v0.16.0-rc1", message)
+        self.assertNotIn("Add the overlay under zephyr/dts/alif/", message)
+
+    def test_e8_missing_the_key_and_no_overlay_gets_the_authoring_message(
+            self) -> None:
+        """Same missing key as above, but with no overlay staged anywhere
+        under `mm.root.parent` -- the `.is_file()` half of the vintage
+        guard must still gate on it, not fire on `ref` alone.  Mutating
+        that half away (`if soc_spec.get("ref") == "alif:ensemble:e8":`)
+        left this branch's test suite fully green before this test existed
+        (#1354 review)."""
         with _MutatedMetadata() as mm:
             mm.json_del(E8_SOC, "zephyr_peripherals_dtsi")
             with self.assertRaises(ZephyrBoardEmitError) as ctx:
                 emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
-        self.assertIn("zephyr_peripherals_dtsi", str(ctx.exception))
-        self.assertIn("alif:ensemble:e8", str(ctx.exception))
+        message = str(ctx.exception)
+        self.assertIn("Add the overlay under zephyr/dts/alif/", message)
+        self.assertNotIn("this alp-sdk predates", message)
 
     def test_console_pads_in_the_defconfig_come_from_the_pinmux(self) -> None:
         """The `_defconfig` console comment used to hardcode the AEN801
@@ -343,6 +646,7 @@ class TestAenMemoryMapValidation(unittest.TestCase):
         self.assertIn("this alp-sdk predates the SE-owned ATOC reservation", message)
         self.assertIn("alp-sdk#1289", message)
         self.assertIn("upgrade alp-sdk", message)
+        self.assertIn("v0.16.0", message)
 
     def test_missing_non_atoc_region_still_reads_as_an_authoring_gap(self) -> None:
         with _MutatedMetadata() as mm:

@@ -48,6 +48,15 @@ cores:
 
 # Cross-core RPMsg channel.  The orchestrator sizes it large enough
 # to carry a 1024-sample float buffer (4 KiB) plus framing overhead.
+#
+# carve_out_kb: 512 below is copied from rpmsg-v2n on purpose (see
+# README.md's "Memory map" -- "same layout as rpmsg-v2n"), not
+# derived from this example's own traffic: this M33-SM side speaks
+# <alp/rpc.h>, not a hand-authored OpenAMP resource table, so there
+# is no vring math of its own to size against.  512 is the whole of
+# ocram_low (512 KiB total -- metadata/socs/renesas/rzv2n/n44.json),
+# the region this entry resolves against on paper today, so a second
+# `ipc:` entry on this SoM has no headroom left there.
 ipc:
   - kind: rpmsg
     endpoints: [a55_cluster, m33_sm]

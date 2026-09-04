@@ -17,6 +17,19 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["e1m_pad", "e1m_function", "owner", "silicon_peripheral", "silicon_pad"],
+        "allOf": [
+          {
+            "description": "`core` is a Renesas-only fact: its value set (a55 / m33) names RZ/V2N cores, and `renesas` is the only currently-multi-core owner.  A gd32-owned or cc3501e-owned row carrying a `core` is an attribution error, not a stricter fact -- the GD32 supervisor MCU's own pads (GD32_SPI.SCLK/PA9, .MOSI/PB15, .MISO/PA10, .CS0/PA8) share the *peripheral* name with the four CM33-driven RZ/V2N pads on the other end of the same link, so a core-ownership entry keyed to the wrong end of an inter-chip link lands here.  Rejecting it in the schema means the generator refuses to WRITE such a table (it validates before writing) rather than emitting an authoritative-looking file that is wrong about four pads.  When another multi-core owner is attributed (alif: M55-HE / M55-HP), widen `core`'s enum and this `const` together.",
+            "if": {
+              "required": ["core"]
+            },
+            "then": {
+              "properties": {
+                "owner": { "const": "renesas" }
+              }
+            }
+          }
+        ],
         "properties": {
           "e1m_pad": {
             "type": "string",
@@ -31,6 +44,10 @@
           "owner": {
             "enum": ["alif", "cc3501e", "renesas", "gd32"],
             "description": "On-module silicon that drives the pad.  Per-family legal values: aen -> alif | cc3501e; v2n -> renesas | gd32."
+          },
+          "core": {
+            "enum": ["a55", "m33"],
+            "description": "Which AMP core on the `owner` silicon drives the pad, for owners whose silicon is itself multi-core (renesas: A55 Linux vs CM33 Zephyr).  Present ONLY for pads with silicon-verified evidence (devicetree pinctrl claim, runtime alp_gpio_* claim, or an in-tree errata/patch) -- absent means \"not attributed\", never \"shared\" or \"a55 by elimination\".  Sourced from metadata/e1m_modules/<family>/core-ownership.yaml, not invented by the generator."
           },
           "silicon_peripheral": {
             "type": "string",

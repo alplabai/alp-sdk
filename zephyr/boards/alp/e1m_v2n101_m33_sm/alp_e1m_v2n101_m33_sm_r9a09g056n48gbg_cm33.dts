@@ -132,10 +132,102 @@
  */
 
 /*
+ * No &canfd node here (alp-sdk#1146): CAN-FD cannot be enabled on this
+ * core at the pinned Zephyr v4.4.1 / hal_renesas 06282060fa, and what is
+ * missing is vendor data this tree does not carry -- not lines nobody has
+ * got round to writing.  Upstream DOES ship the driver
+ * (drivers/can/can_renesas_rz_canfd.c) and both bindings
+ * (dts/bindings/can/renesas,rz-canfd.yaml + renesas,rz-canfd-global.yaml),
+ * and src/backends/can/zephyr_drv.c already binds any DT_ALIAS(alp_canN),
+ * so this is an enablement gap and not a missing backend.  Four things
+ * block the enablement:
+ *
+ *   1. No FSP CAN-FD module for RZ/V.  CONFIG_CAN_RENESAS_RZ_CANFD
+ *      selects USE_RZ_FSP_CANFD (Zephyr drivers/can/Kconfig.renesas_rz),
+ *      which compiles fsp/src/${SOC_SERIES_PREFIX}/r_canfd/r_canfd.c
+ *      (hal_renesas drivers/rz/CMakeLists.txt).  hal_renesas carries that
+ *      module for RZ/G only: fsp/src/rzg/r_canfd/ and
+ *      fsp/inc/instances/rzg/r_canfd.h exist, the rzv counterparts do
+ *      not.  Setting the symbol under SOC_SERIES_RZV2N is a CMake
+ *      configure error on a missing source file, and the driver's
+ *      #include "r_canfd.h" does not resolve on the rzv include path.
+ *
+ *   2. No CAN-FD node in the SoC devicetree.  arm/renesas/rz/rzv/
+ *      r9a09g056.dtsi declares none -- no label to reference, no reg and
+ *      no interrupts to inherit.  The only RZ SoC dtsi that carries them
+ *      is RZ/G3S's r9a08g045.dtsi (canfd-global@400c0000, global
+ *      interrupts 373 and 374, per-channel 375..380).  DO NOT COPY THOSE
+ *      NUMBERS: different SoC, different vector map, different base.  On
+ *      THIS part the CAN-FD register base is 0x42440000 -- hal_renesas
+ *      .../Include/R9A09G056N/iodefines/canfd_iodefine.h, R_CANFD_BASE.
+ *      The `(@ 0x400B0000)` in that same file's R_CANFD struct
+ *      doc-comment is a template annotation, not this SoC's base; it is
+ *      the second trap in one header.
+ *
+ *   3. No static NVIC vector exists to write.  RZ/V2N's CM33 gives CAN-FD
+ *      no dedicated vector at all: bsp_irq_id.h's IRQn_Type enum has zero
+ *      CANFD entries, and all 20 CAN-FD sources live in the separate
+ *      IRQSELn_Type enum (354..373 -- per-channel err/rec/trx, plus
+ *      CANFD_INTRCANGERR_IRQSELn 366 and CANFD_INTRCANGRECC_IRQSELn 367
+ *      for the global controller).  Reaching the NVIC means routing an
+ *      IRQSEL source onto one of the selectable slots
+ *      SEL0_IRQn..SEL126_IRQn (NVIC 353..479) at run time, through
+ *      R_BSP_SelectIrqSet() (bsp/mcu/all/bsp_mcu_api.h).  Upstream's dtsi
+ *      hands those slots out itself (adc0 = 403 = SEL50, gpt0 = 406..408
+ *      = SEL53..55, on up to 453) and both CAN-FD bindings require
+ *      `interrupts`, so choosing slots here means inventing an allocation
+ *      that collides with whatever upstream picks when it adds the nodes.
+ *
+ *   4. No PFC function index for the pads.  The module bonds out two of
+ *      the SoC's six controllers -- CANFD2 (CTX2 = P84, CRX2 = P85) and
+ *      CANFD3 (CTX3 = P86, CRX3 = P87), per
+ *      metadata/e1m_modules/v2n/renesas-peripheral-map.tsv -- but
+ *      metadata/pinmux/v2n.yaml carries pad <-> signal only, with no
+ *      alternate-function number.  RZV_PINMUX() needs one, and it comes
+ *      from the RZ/V2N hardware manual's PFC table (the same source
+ *      sci7_spi_pins above cites), not from this tree.
+ *
+ * What IS already in place, so a future port does not re-derive it: the
+ * clock path.  RZ_CLOCK_CANFD(ch) exists
+ * (dt-bindings/clock/renesas_rzv_clock.h) and
+ * clock_control_renesas_rz_cpg.c already maps RZ_IP_CANFD onto
+ * R_BSP_MODULE_START(FSP_IP_CANFD, ch); the rzv2n bsp_feature.h declares
+ * 6 channels, CAN-FD support and 96 RX message buffers for this part.
+ *
+ * Carrier note: the TCAN1044 transceivers' standby line is NOT a Renesas
+ * pad.  CAN_STBY belongs to the GD32 IO-MCU on PB13
+ * (metadata/pinmux/v2n.yaml, metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv),
+ * so taking the transceivers out of standby is a bridge GPIO call, not a
+ * pinctrl entry.
+ *
+ * Until those clear, <alp/can.h> on this core returns ALP_ERR_NOT_READY
+ * from src/backends/can/zephyr_drv.c -- the alp-canN aliases resolve to
+ * nothing.
+ */
+
+/*
  * OpenAMP / RPMsg carve-out for the M33-SM <-> A55-Linux link (alp-sdk #683,
  * Path B Phase 1).  Addresses are the Renesas RZ/V Multi-OS Package memory
- * map, NOT the paper `ipc:` carve-out in this project's board.yaml (still
- * ocram_low pending a follow-up that reconciles the two -- see #683).
+ * map, NOT the paper `ipc:` carve-out in this project's board.yaml.  The two
+ * are different regions by construction, not by omission: `resolve_carve_outs()`
+ * (scripts/alp_orchestrate/carveout.py) allocates board.yaml's `ipc:` entry
+ * from `ocram_low` (512 KiB, non-cacheable -- the only region it can reach
+ * from both `a55_cluster` and `m33_sm`; metadata/socs/renesas/rzv2n/n44.json)
+ * purely because the resolver needs *some* region and that is the only
+ * candidate -- nothing in this firmware reads or writes the address it
+ * resolves to.  The real transport uses the hand-authored DDR window below
+ * instead, sized from this responder's OpenAMP resource table (512 rpmsg
+ * buffers x 512 B x 2 vrings -- m33_sm/src/resource_table.h's
+ * RSC_TABLE_NUM_RPMSG_BUFF).  That sizing happens to consume the whole of
+ * `ocram_low` when expressed as `carve_out_kb` in board.yaml (both examples
+ * on this SoM request 512, i.e. all 512 KiB of `ocram_low`) -- harmless
+ * today because nothing consumes the resolved address, but it means a
+ * second `ipc:` entry on this SoM has no ocram_low headroom left to land
+ * in.  Whether the fix is teaching the resolver about this DDR window, or
+ * shrinking the paper `carve_out_kb` values to leave ocram_low headroom, is
+ * an open sizing question for whoever picks it up next -- it is not settled
+ * by #683, which is about bench-validating the real `/dev/rpmsg` transport,
+ * not this address reconciliation.
  *
  * CORRECTED (alp-sdk #683, address root-cause fix): this region used to be
  * quoted at the RZ/V2L CM33-NS offset (0x62f00000, i.e. A55 - 0x20000000),

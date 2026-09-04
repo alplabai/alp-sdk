@@ -77,12 +77,12 @@ rebuilds incrementally in seconds. See
 After remoteproc brings up the M33 firmware:
 
 ```
-[m55_sm] FFT worker ready; waiting for 'fft' calls
+[m33_sm] FFT worker ready; waiting for 'fft' calls
 [a55]    generated 1024-sample @ 440 Hz sine, calling fft...
-[m55_sm] processing 1024-sample frame
+[m33_sm] processing 1024-sample frame
 [a55]    fft returned; dominant bin=23 (~430.7 Hz)
 [a55]    generated 1024-sample @ 880 Hz sine, calling fft...
-[m55_sm] processing 1024-sample frame
+[m33_sm] processing 1024-sample frame
 [a55]    fft returned; dominant bin=46 (~861.3 Hz)
 [heterogeneous-offload] done
 ```

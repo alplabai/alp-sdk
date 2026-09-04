@@ -67,6 +67,26 @@ index 4ef61be..bfabe66 100644
 +	  ALP prod-boot.cfg fragment).  DEV-target only: the cmdline
 +	  rebuild lives in include/configs/rzv2n-dev.h; rzv2n-evk.h has
 +	  no override, so the symbol would half-apply there.
++
++config ALP_E1M_FDTFILE
++	string "ALP E1M: board dtb filename loaded from the boot partition"
++	depends on TARGET_RZV2N_DEV
++	default "e1m-v2n101-x-evk.dtb"
++	help
++	  Basename of the board device tree CONFIG_BOOTCOMMAND loads from
++	  boot/ on the rootfs partition.  It must match the MACHINE's
++	  KERNEL_DEVICETREE basename, because that is the only dtb the
++	  image actually contains.
++
++	  The default suits the V2N SKUs.  V2M SKUs build
++	  e1m-v2m101-x-evk.dtb and MUST override this -- meta-alp-sdk
++	  injects it per-MACHINE via fdtfile-v2m.cfg.  Getting it wrong
++	  is silent: ext4load of a missing file leaves whatever dtb was
++	  already in RAM, and the board boots the wrong device tree.
++
++	  Set the basename only.  KERNEL_DEVICETREE carries a "renesas/"
++	  prefix that the deploy step strips, so the file lands at
++	  boot/<basename> on the target.
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
 index b5f159a..a20ccae 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
@@ -164,19 +184,43 @@ index ad8f46a..ac562a9 100644
 + * microSD (SDHI1, alias mmc1 in e1m-x-evk.dtsi) -> Linux /dev/mmcblk1,
 + * not mmcblk2 (no third controller exists on this SoM).  mmc0 (SDHI0
 + * eMMC) -> mmcblk0 was already correct.
-+ * FUTURE (V2M / per-SKU dtb): V2M SKUs build e1m-v2m101-x-evk.dtb
-+ * instead (same shared u-boot binary) -- true per-SKU selection needs
-+ * an EEPROM-manifest-derived fdtfile, set AFTER the leading
-+ * "env default -a" wipe, injected per-MACHINE via a Kconfig string +
-+ * .cfg fragment (same channel as prod-boot.cfg). */
++ * Per-SKU dtb: done, via CONFIG_ALP_E1M_FDTFILE (a Kconfig string
++ * injected per-MACHINE by a .cfg fragment, the same channel
++ * prod-boot.cfg uses).  It is a BUILD-time selection, which is correct
++ * while one MACHINE produces one image.  An EEPROM-manifest-derived
++ * fdtfile -- one image booting on several SKUs -- remains future work
++ * and would have to be set AFTER the leading "env default -a" wipe. */
++/* ALP: the dtb basename is a per-SKU Kconfig string, not a literal.
++ * V2N SKUs build e1m-v2n101-x-evk.dtb and V2M SKUs build
++ * e1m-v2m101-x-evk.dtb (meta-alp-sdk/conf/machine/e1m-v2{n,m}10*-a55.conf,
++ * each of which carries its own "the U-Boot bootcmd must load this
++ * filename" note).  A hardcoded name meant every V2M image asked for a
++ * file it does not contain. */
++
++/* ALP: the loads are now FATAL, and that is the point of this block.
++ * Every load here used to be ';'-chained, i.e. non-fatal: a missing
++ * kernel Image or a missing dtb left whatever those addresses already
++ * held and "run bootimage" then booted it.  On a cold boot that is
++ * garbage; on a warm one it is the PREVIOUS boot's image, which is
++ * worse -- it looks like a successful boot of the wrong software.
++ * Both loads are re-issued here with '&&' so bootimage is reached only
++ * when both landed, and the failure branch stops at the prompt instead.
++ *
++ * Re-loading Image is deliberate even though bootcmd_check's vendor
++ * sd2load/emmcload already tried: those envs are patched by vendor
++ * feature layers (meta-rz-drpai, meta-rz-opencva) and cannot be relied
++ * on to fail loudly.  Same address and same mmc spec each already uses,
++ * so the re-load is idempotent when the vendor path worked. */
 +#define CONFIG_BOOTCOMMAND	"env default -a;run bootcmd_check;" \
 +	"if mmc dev 1; then " \
-+	"ext4load mmc 1:2 0x48000000 boot/e1m-v2n101-x-evk.dtb;" \
-+	"setenv alp_root /dev/mmcblk1p2; else " \
-+	"ext4load mmc 0:2 0x48000000 boot/e1m-v2n101-x-evk.dtb;" \
-+	"setenv alp_root /dev/mmcblk0p2; fi;" \
++	"setenv alp_mmc 1:2;setenv alp_root /dev/mmcblk1p2; else " \
++	"setenv alp_mmc 0:2;setenv alp_root /dev/mmcblk0p2; fi;" \
++	"if ext4load mmc ${alp_mmc} 0x48080000 boot/Image" \
++	" && ext4load mmc ${alp_mmc} 0x48000000 boot/" CONFIG_ALP_E1M_FDTFILE "; then " \
 +	"setenv bootargs " ALP_BOOTARGS_BASE " root=${alp_root};" \
-+	"run bootimage"
++	"run bootimage; fi;" \
++	"echo ALP: kernel Image or " CONFIG_ALP_E1M_FDTFILE " failed to load" \
++	" from boot/ on mmc ${alp_mmc} -- NOT booting a stale RAM image"
  
  /* For board */
  /* Ethernet RAVB */

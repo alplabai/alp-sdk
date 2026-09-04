@@ -189,7 +189,12 @@ def test_no_clash_with_existing_alp_e1m_evk_h(real_headers):
     out = evk_out.read_text(encoding="utf-8")
     must_not_appear = [
         # ADC spellings not generated (the shipped ADC routes are
-        # EVK_ADC_ARDUINO_A1..A5 / EVK_ADC_MB_AN / EVK_ADC_VBAT_SENSE)
+        # EVK_ADC_ARDUINO_A0..A5 / EVK_ADC_DAC0_LOOPBACK /
+        # EVK_ADC_DAC1_LOOPBACK -- #1622 corrected the ADC0 entry from
+        # a nonexistent BOARD_ID divider to the real shared Arduino
+        # A0 / mikroBUS ANA input, and ADC6/ADC7 from a nonexistent
+        # mikroBUS AN pin / VBAT divider to the real DAC0/DAC1
+        # loopback senses)
         "EVK_ARD_A0",
         "EVK_MB_ANA",
     ]

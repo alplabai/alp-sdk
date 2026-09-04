@@ -37,7 +37,7 @@
 # Each stage prints `[stage] PASS` or `[stage] FAIL`.  A stage function
 # signals "prerequisite not available" (a missing tool, env var, or
 # importable module -- e.g. ZEPHYR_BASE unset, or a python3 that can't
-# `import natsort`/`pytest`/`pytest_mock`) by returning exit code 99;
+# `import natsort`/`pytest`) by returning exit code 99;
 # run_stage() turns that into `[stage] SKIP`, never `FAIL` -- a missing
 # prerequisite is not a defect in the tree.
 #
@@ -232,7 +232,7 @@ skip_stage() {
 # `import` check can catch.
 #
 # Probe the attribute, not the import -- the same shape
-# stage_pytest_scripts uses for pytest/pytest_mock.  Deliberately NOT
+# stage_pytest_scripts uses for pytest.  Deliberately NOT
 # fixed inside the 18 `scripts/*.py` files that call
 # `Draft202012Validator`: those are also run DIRECTLY by
 # pr-metadata-validate.yml and friends, where a 99 exit is a failing
@@ -363,7 +363,7 @@ stage_shellcheck() {
     # sweep -- matching stage_bash32_parse's existing repo-wide `*.sh`
     # sweep below. Before this, two groups shipped unchecked: root
     # scripts/*.sh had no CI coverage at all (only this local stage), and 8
-    # files entirely outside scripts/ (firmware/cc3501e/ti/*.sh,
+    # files entirely outside scripts/ (
     # keys/generate_dev_key.sh,
     # meta-alp-sdk/recipes-core/alp-system/files/alp-remoteproc-start.sh,
     # tests/yocto/*.sh, tools/native-sim-container/entrypoint.sh) were
@@ -576,12 +576,22 @@ stage_metadata_validate() {
 }
 
 stage_alp_lock() {
-    # Mirrors pr-metadata-validate.yml's `alp.lock --check` step (#1045) --
-    # previously the ONLY place that check ran, so a locally-green branch
-    # could still redden CI on lock drift it never saw. No "script missing"
-    # skip: this is a tracked repo file, so a missing/renamed script means
-    # the gate itself vanished and that must redden, not SKIP silently
-    # (same reasoning as stage_generated_files above).
+    # Mirrors pr-metadata-validate.yml's `alp.lock --check` step (#1045).
+    # alp.lock is no longer committed (#1576 -- its `digests.metadata` is a
+    # single hash over the whole metadata/** tree, so any two PRs touching
+    # different metadata files conflicted on this one line by construction).
+    # `--check` therefore GENERATES a lock in memory and schema-validates it
+    # rather than diffing against a tracked copy; it still catches a broken
+    # generator (schema mismatch) and a local-path leak (`_reject_local`).
+    # No "script missing" skip: scripts/west_commands/alp_lock.py is a
+    # tracked repo file, so a missing/renamed script means the gate itself
+    # vanished and that must redden, not SKIP silently (same reasoning as
+    # stage_generated_files above).
+    #
+    # alp_lock.py imports jsonschema at module scope for its draft 2020-12
+    # schema validation -- same missing/too-old-prerequisite trap as
+    # stage_metadata_validate and stage_doc_yaml_fragments above (#1396/#1423).
+    require_jsonschema_2020 stage_alp_lock || return 99
     python3 scripts/west_commands/alp_lock.py --workspace . --check || return 1
 }
 
@@ -626,18 +636,18 @@ stage_pytest_scripts() {
         return 99
     fi
     # python3 existing on PATH says nothing about whether IT has pytest:
-    # a system interpreter without pytest/pytest-mock made `python3 -m
-    # pytest` below exit 1 with "No module named pytest" -- a genuine
-    # module-not-found on a clean tree, previously reported as this
-    # stage FAILING rather than SKIPping for the missing prerequisite it
-    # actually is (alp-sdk#1396). pytest_mock is checked here too, not
-    # left to surface later as a wall of `fixture 'mocker' not found`
-    # errors from tests/scripts/test_alp_cli.py /
-    # test_alp_cli_emit.py -- both are the stage's real dependencies,
-    # so both gate entry the same way the ZEPHYR_BASE / natsort checks
-    # gate stage_twister above.
-    if ! python3 -c 'import pytest, pytest_mock' >/dev/null 2>&1; then
-        echo "stage_pytest_scripts: python3 ($(command -v python3)) cannot import pytest and/or pytest_mock. Activate the zephyrproject venv or: pip install pytest pytest-mock."
+    # a system interpreter without pytest made `python3 -m pytest` below
+    # exit 1 with "No module named pytest" -- a genuine module-not-found
+    # on a clean tree, previously reported as this stage FAILING rather
+    # than SKIPping for the missing prerequisite it actually is
+    # (alp-sdk#1396). pytest_mock used to be checked here too, gating
+    # entry the same way the ZEPHYR_BASE / natsort checks gate
+    # stage_twister above -- it was the stage's only pytest-mock
+    # consumer (test_alp_cli.py / test_alp_cli_emit.py), both retired by
+    # the alp_cli CLI-wrapper retirement (#1367/#1368); no test under
+    # tests/scripts/ uses the `mocker` fixture any more.
+    if ! python3 -c 'import pytest' >/dev/null 2>&1; then
+        echo "stage_pytest_scripts: python3 ($(command -v python3)) cannot import pytest. Activate the zephyrproject venv or: pip install pytest."
         return 99
     fi
     python3 -m pytest tests/scripts/ -q || return 1
@@ -745,12 +755,11 @@ stage_required_gate_scripts() {
 
     # gd32-bridge protocol vectors must not drift from the generator
     # (mirrors the pr-metadata-validate.yml gd32-bridge step).
-    if [ -f firmware/gd32-bridge/tests/gen_protocol_vectors.py ]; then
-        ran=1
-        echo "--- gd32-bridge protocol vectors --check ---"
-        python3 firmware/gd32-bridge/tests/gen_protocol_vectors.py --check \
-            || failed=1
-    fi
+    # The GD32 wire vectors moved with the firmware (ADR 0031).  Their
+    # regeneration check now runs in alplabai/gd32-bridge-firmware's own CI,
+    # against the same generator -- see that repo's .github/workflows/ci.yml.
+    # Nothing to do here; the host-side consumers of those vectors are still
+    # covered by tests/zephyr/chips/gd32g553/.
 
     if [ "${ran}" -eq 0 ]; then
         return 99
@@ -872,6 +881,7 @@ stage_generated_files() {
     # some of its artifacts is not a drift check.
     require_jsonschema_2020 stage_generated_files || return 99
     local gens=(gen_soc_caps gen_status_strings gen_board_header
+                gen_cc3501e_gpio_routes
                 gen_pinmux_capability gen_support_matrix
                 gen_portability_matrix gen_catalog gen_error_catalog
                 gen_verification_status)
@@ -956,6 +966,7 @@ stage_generated_files() {
         metadata/socs/renesas/rzv2n/n44.json \
         docs/portability-matrix.md docs/peripheral-support-matrix.md \
         docs/verification-status.md \
+        examples/aen \
         docs/diagnostics 2>/dev/null; then
         echo "git add -N failed -- an expected generated path is missing from the tree"
         return 1
@@ -979,6 +990,7 @@ stage_generated_files() {
             metadata/socs/renesas/rzv2n/n44.json \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
+            examples/aen \
             docs/diagnostics 2>/dev/null; then
         echo "generated files are OUT OF SYNC -- regenerated in place; git add + commit:"
         git --no-pager diff --stat -- \
@@ -987,6 +999,7 @@ stage_generated_files() {
             metadata/socs/renesas/rzv2n/n44.json \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
+            examples/aen \
             docs/diagnostics 2>/dev/null | tail -20
         return 1
     fi
@@ -1094,10 +1107,10 @@ else
 
     # alp.lock --check -- both the dev (fast) and main (release-grade)
     # profiles run this unconditionally, same as metadata-validate above.
-    # MUST run after generated-files: that stage rewrites metadata/catalog.json
-    # and metadata/error-catalog.json in place, and both are now lock-covered
-    # (#1045) -- checking the lock first would pass on pre-regen bytes and
-    # leave a just-regenerated catalog unverified.
+    # Placed after generated-files for narrative order only: `--check` no
+    # longer diffs against a committed lock (#1576), it schema-validates a
+    # freshly generated one, so this stage's verdict does not depend on
+    # running before or after generated-files regenerates its inputs.
     run_stage "alp-lock" stage_alp_lock
 
     # Main-only: the strict ABI-snapshot diff gate that pr-abi-snapshot.yml

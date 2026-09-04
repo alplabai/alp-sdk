@@ -101,7 +101,7 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	case PH_REPLY_PL:
 		if (slave.cmd == ALP_CC3501E_CMD_WIFI_CONNECT_STA) {
 			/* The real firmware's WORKER_IDLE submit ack is UNCONDITIONALLY
-			 * RESP_ERR_BUSY (see firmware/cc3501e/src/protocol.c) -- never a
+			 * RESP_ERR_BUSY (see cc3501e-bridge-firmware:src/protocol.c) -- never a
 			 * synchronous OK -- and cc3501e_request_locked() now refuses to
 			 * hand back OK for this opcode's bare-ack shape either way (see
 			 * cc3501e_core.c, issue #1378).  Model the real ack so

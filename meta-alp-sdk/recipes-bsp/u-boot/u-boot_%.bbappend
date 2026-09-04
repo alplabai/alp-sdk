@@ -31,7 +31,6 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRC_URI:append:rzv2n-family = " \
     file://0001-rzv2n-dev-EEPROM-gated-DEEPX-DX-M1-PCIe-bring-up.patch \
     file://0002-rzv2n-dev-ALP-E1M-production-boot.patch \
-    file://0003-rzv2n-dev-select-fdtfile-fatal-image-and-dtb-load.patch \
     file://no-dirty-version.cfg \
 "
 
@@ -57,7 +56,9 @@ SRC_URI:append:rzv2n-family = " \
 #     dev cmdline keeps earlycon but gains console=ttySC0,115200,
 #     which stops the kernel replaying the early log across the
 #     console handover. The cmdline is rebuilt at CONFIG_BOOTCOMMAND
-#     (patch-safe vs the build-varying env block).
+#     (patch-safe vs the build-varying env block); the future per-SKU
+#     fdtfile derivation must also happen there, AFTER the leading
+#     'env default -a' wipe -- see the comment in the patch.
 # VALIDATION: bitbake-built dev + prod with config asserts; the FIP
 # (BL2+BL31+u-boot, manual flow) was built 2026-06-12 with both ALP
 # patches and the u-boot binary content-verified (alp_root bootcmd +
@@ -67,34 +68,6 @@ SRC_URI:append:rzv2n-family = " \
 # was updated the same day to apply 0002 alongside the DEEPX patch and
 # to verify it (strings u-boot | grep 'setenv alp_root').
 
-# 0003 (fixes #1252, #1302): CONFIG_BOOTCOMMAND hardcoded the V2N101
-# dtb filename on both branches, so a V2M SKU (different
-# KERNEL_DEVICETREE, same shared u-boot binary/config) loaded a
-# filename that does not exist in its own image; the vendor
-# sd2load/emmcload env's kernel-Image ext4load was also still
-# ";"-chained (non-fatal), so a missing/truncated boot/Image silently
-# fell through to booti-ing stale RAM. 0003 adds an alpselectfdt
-# U-Boot command (rzv2n-dev.c) that reuses the same EEPROM-manifest
-# read 0001's DEEPX gating already performs (alp_som_is_v2n_m1()) to
-# set alp_fdtfile per-SKU -- run from CONFIG_BOOTCOMMAND AFTER the
-# leading 'env default -a' wipe, since that wipe drops anything
-# board_late_init() could have set earlier (see the patch's own
-# comments). Both the Image and the dtb are now re-loaded fatally: a
-# failed load prints "ALP FATAL: ..." and bootcmd ends without calling
-# bootimage, leaving U-Boot at the interactive prompt (recoverable via
-# the same serial console / USB gadget download path already
-# available) rather than continuing to boot on stale RAM content.
-# VALIDATION: applies cleanly on top of 0001+0002 (patch -p1, git
-# apply --check, and git am all accept it unmodified); rebuilt
-# rzv2n-dev_defconfig end to end against the actual e1m-v2m101-a55
-# alp-ci build tree's cross toolchain + STAGING sysroot (0 warnings, 0
-# errors), and `strings` on the resulting u-boot.bin confirms the
-# alpselectfdt command is registered and the compiled-in default
-# bootcmd matches this patch exactly. NOT bench-verified: the EEPROM
-# read, the SD/eMMC branch, and the hush if/then/else/fi runtime
-# behaviour all need a real V2N/V2M board on the serial console --
-# V2M101 bring-up is currently blocked on separate hardware issues.
-
 # Production boot lockdown (BOOTDELAY=0 + keyed autoboot + the prod
 # cmdline above): opt-in for release-bundle builds only. An
 # un-overridden prod build has an EMPTY stop string (= no stop
@@ -103,6 +76,21 @@ SRC_URI:append:rzv2n-family = " \
 # and the deferred saved-env hole.
 ALP_PROD_BOOT ?= "0"
 SRC_URI:append:rzv2n-family = "${@' file://prod-boot.cfg' if bb.utils.to_boolean(d.getVar('ALP_PROD_BOOT')) else ''}"
+
+# Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
+# binary serves both families, so the dtb basename is a Kconfig string
+# (CONFIG_ALP_E1M_FDTFILE, patch 0002) whose default suits the V2N SKUs;
+# the V2M MACHINEs override it through the same *.cfg channel
+# prod-boot.cfg uses (u-boot-configure.inc's find_cfgs() +
+# merge_config.sh pick up any *.cfg in SRC_URI).
+#
+# Scoped by MACHINE, not by rzv2n-family: the family override covers the
+# V2N SKUs too, and applying the V2M name there would invert the bug.
+# Any new V2M MACHINE needs a line here -- there is no wildcard that is
+# safe, because "which dtb does this image contain" is a per-MACHINE fact
+# (KERNEL_DEVICETREE), not a family one.
+SRC_URI:append:e1m-v2m101-a55 = " file://fdtfile-v2m.cfg"
+SRC_URI:append:e1m-v2m102-a55 = " file://fdtfile-v2m.cfg"
 
 # Build U-Boot with the rzv2n-dev config, not the machine's stock rzv2n-evk.
 # The DEEPX bring-up patched above lives in board/renesas/rzv2n-dev/rzv2n-dev.c,

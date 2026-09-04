@@ -129,8 +129,9 @@ alp_status_t alp_i2c_regfile_open(uint32_t            bus_id,
  * @param[in] first  First controller-writable register index.
  * @param[in] count  Number of controller-writable registers.
  *
- * @return ALP_OK; ALP_ERR_INVAL on NULL @p rf or a window that does
- *         not fit the register file.
+ * @return ALP_OK; ALP_ERR_NOT_READY on NULL or closed @p rf;
+ *         ALP_ERR_INVAL on a window that does not fit the register
+ *         file.
  */
 alp_status_t alp_i2c_regfile_set_write_window(alp_i2c_regfile_t *rf, size_t first, size_t count);
 
@@ -140,7 +141,8 @@ alp_status_t alp_i2c_regfile_set_write_window(alp_i2c_regfile_t *rf, size_t firs
  * @param[in]  rf   Handle from @ref alp_i2c_regfile_open.
  * @param[out] out  Receives the counter snapshot.
  *
- * @return ALP_OK; ALP_ERR_INVAL on NULL @p rf / @p out.
+ * @return ALP_OK; ALP_ERR_NOT_READY on NULL or closed @p rf;
+ *         ALP_ERR_INVAL on NULL @p out.
  */
 alp_status_t alp_i2c_regfile_stats(const alp_i2c_regfile_t *rf, alp_i2c_regfile_stats_t *out);
 

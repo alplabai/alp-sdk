@@ -48,14 +48,24 @@ west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/ai/cold-ch
 west flash
 ```
 
-Flip `som.sku` in `board.yaml` to `E1M-V2M101` for the DEEPX DX-M1 path.
+The DEEPX DX-M1 NPU is populated on `E1M-V2M101`/`E1M-V2M102` -- not on
+`E1M-V2N101`/`E1M-V2N102`, the same PCB without it. Pick either via
+`som.sku` in `board.yaml`.
 
 ## Model
 
+<!-- The ../cold-chain-monitor/ detour is deliberate: the scaffold
+     rewriter's _RELATIVE_LINK_RE only matches `../`-prefixed links, and
+     models/ is a child of this dir, not a sibling -- don't "fix" this. -->
+
 No model is shipped (stub + deterministic classifier/fallback). See
-`models/README.md` for the autoencoder training recipe.
+[`models/README.md`](../cold-chain-monitor/models/README.md) for the
+autoencoder training recipe.
 
 ## Tests
+
+In the alp-sdk tree, unit tests live in
+[`tests/unit/cold_chain`](../../../tests/unit/cold_chain/) and run with:
 
 ```
 twister -p native_sim/native/64 -T tests/unit/cold_chain

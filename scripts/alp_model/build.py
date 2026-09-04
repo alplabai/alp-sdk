@@ -33,8 +33,10 @@ _ADAPTERS: list[CompilerAdapter] = [
 
 # #1125: mirrors metadata/schemas/board.schema.json's `models[].name` pattern.
 # build_model() is called directly by non-CLI callers (tests, future tooling),
-# not just alp_cli.model's schema-validated path -- an allowlist here is the
-# root-cause guard, independent of whether the caller validated board.yaml.
+# not just tan model build's spawned driver (python/tan/commands/model_cmd.py
+# in tan-cli, which imports alp_model.build and calls build_model() itself)
+# -- an allowlist here is the root-cause guard, independent of whether the
+# caller validated board.yaml.
 _NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 
 

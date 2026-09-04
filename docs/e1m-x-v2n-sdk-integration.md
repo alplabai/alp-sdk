@@ -60,19 +60,24 @@ TAS2563 amps on `ALP_E1M_X_I2C0`, I2S on `ALP_E1M_X_I2S0`, the TMUX1574 path
 mux, the `\SD_N` / `IRQ_N` control lines on E1M IOs, and `board_id` on
 `ALP_E1M_X_ADC7`.
 
-Still pending: add the `ti,tas2563` codec nodes + audio-graph-card to
-the carrier `e1m-x-evk.dtsi` (the `CONFIG_SND_SOC_TAS2562=y` fragment is
-already staged as `linux-renesas/tas2563-audio.cfg`), plus the on-board
-control-line wiring on the current PCB rev.
+Still pending, and **data-gated** rather than merely unwritten: adding the
+`ti,tas2563` codec nodes + audio-graph-card to the carrier
+`e1m-x-evk.dtsi` needs four SoC-side values this repo does not carry —
+the SSI/SSIU node label the linux-renesas 6.1.141-cip43 `r9a09g056` dtsi
+exposes, its binding, the PFC function for the SSIU pads
+(`metadata/pinmux/v2n.yaml` still reads `e1m_pad`/`e1m_function` `"TBD"`
+on every SSIU row), and the MCLK source + rate.  A
+`CONFIG_SND_SOC_TAS2562=y` kernel fragment used to be staged ahead of
+those nodes; it was removed in #1171 because a codec driver with no DT
+consumer cannot bind, and it lands again in the same change as the nodes.
+The on-board control-line wiring on the current PCB rev is also pending.
 
 ## Follow-ups (not blockers)
 
 - The per-board `renesas/e1m-v2n101-x-evk.dts` / `e1m-v2m101-x-evk.dts`
   now compose up from the SoC + SoM + carrier dtsi (no longer patching the
-  rzv2n-evk dtb). The bootloader now loads the matching per-product dtb
-  filename at runtime, keyed off the on-module EEPROM manifest
-  (`meta-alp-sdk/recipes-bsp/u-boot/u-boot/0003-rzv2n-dev-select-fdtfile-fatal-image-and-dtb-load.patch`,
-  #1252) — rebuild-verified, not yet bench-verified.
+  rzv2n-evk dtb), but still require the production bootloader's bootcmd to
+  load the new per-product dtb filename. Coordinate with the bootloader landing.
 - V2M (DEEPX) SKUs reuse the same DT deltas via `e1m-v2m-deepx.dtsi` +
   the `e1m-v2m101-x-evk.dts` board target — to be exercised when those
   boards are on the bench.

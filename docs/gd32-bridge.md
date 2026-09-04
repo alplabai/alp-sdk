@@ -16,7 +16,7 @@ build it, how to flash it, and what state the implementation is in.
 > GD32G553 ships flashed by Alp with the bridge firmware, so for normal
 > use the customer does nothing — the Renesas host talks to a working
 > supervisor out of the box.  Like the CC3501E bridge, the GD32 firmware is
-> **open**: the source lives in this repo (`firmware/gd32-bridge/`) and
+> **open**: the source lives in this repo (`gd32-bridge-firmware:`) and
 > the GigaDevice library
 > is a public submodule, so rebuilding or customizing needs no gated
 > download — see **Build** below.
@@ -25,7 +25,7 @@ build it, how to flash it, and what state the implementation is in.
 
 | Aspect              | Today (2026-06-04)                                                                |
 |---------------------|-----------------------------------------------------------------------------------|
-| Firmware tree       | [`firmware/gd32-bridge/`](../firmware/gd32-bridge/)                                                 |
+| Firmware tree       | [`gd32-bridge-firmware:`](https://github.com/alplabai/gd32-bridge-firmware)                                                 |
 | Toolchain           | Arm GNU Toolchain (`arm-none-eabi-gcc`), Cortex-M33 + thumb                       |
 | Build system        | CMake (separate from the Zephyr-side `west build`)                                |
 | HAL                 | Stub default; `BRIDGE_HAL_BACKEND=gd32` consumes the GigaDevice firmware library via the [`alplabai/gd32g5x3-firmware-library`](https://github.com/alplabai/gd32g5x3-firmware-library) submodule at `vendors/gd32_firmware_library/upstream/` (run `git submodule update --init` once after cloning) |
@@ -77,7 +77,7 @@ Output: `build/gd32-bridge.elf`, `.hex`, `.bin`.
 ## Source layout
 
 ```
-firmware/gd32-bridge/
+gd32-bridge-firmware:
 ├── CMakeLists.txt                   (default monolithic build; -DBRIDGE_OTA_PARTITIONED=ON
 │                                     emits bootloader + slot-A/B apps instead)
 ├── README.md
@@ -124,7 +124,7 @@ change.
 | Method                                | Status today      | Notes                                                                                                                                  |
 |---------------------------------------|-------------------|----------------------------------------------------------------------------------------------------------------------------------------|
 | External SWD probe (J-Link, ST-Link)  | **Supported.**    | SWDIO + SWCLK accessible on the V2N module's programming header.                                                                       |
-| In-system upgrade over SPI / I2C      | **Implemented, gated — silicon-validated 2026-06-04.** | Application-bootloader path; the `0xF0..0xFF` opcodes route through `src/bootloader/` into the OTA state machine in [`src/ota.c`](../firmware/gd32-bridge/src/ota.c) (FMC backend `hal/fmc_ota.c`). Destructive flashing is armed only with `-DBRIDGE_OTA_PARTITIONED`; default builds reply `STATUS_NOSUPPORT` (can't brick the running image). The armed build emits the partitioned set (32 KB bootloader + slot-A/B apps); first-flash also needs the factory metadata record from [`tools/gen_ota_metadata.py`](../firmware/gd32-bridge/tools/gen_ota_metadata.py) at `0x08008000`. Validated end-to-end on the bench: stream → verify → commit → boot new slot → rollback (protocol v0.6). See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path A. |
+| In-system upgrade over SPI / I2C      | **Implemented, gated — silicon-validated 2026-06-04.** | Application-bootloader path; the `0xF0..0xFF` opcodes route through `src/bootloader/` into the OTA state machine in [`src/ota.c`](https://github.com/alplabai/gd32-bridge-firmware) (FMC backend `hal/fmc_ota.c`). Destructive flashing is armed only with `-DBRIDGE_OTA_PARTITIONED`; default builds reply `STATUS_NOSUPPORT` (can't brick the running image). The armed build emits the partitioned set (32 KB bootloader + slot-A/B apps); first-flash also needs the factory metadata record from [`tools/gen_ota_metadata.py`](https://github.com/alplabai/gd32-bridge-firmware) at `0x08008000`. Validated end-to-end on the bench: stream → verify → commit → boot new slot → rollback (protocol v0.6). See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path A. |
 | Host-driven SWD bit-bang from V2N     | **Scaffolded.**   | Renesas-side software SWD controller drives `GD32_SWDIO` + `GD32_SWCLK` (routed back to V2N pads per the 2026-05-12 HW decision); universal recovery + factory first-flash.  Driver lives at [`chips/gd32_swd/`](../chips/gd32_swd/) (`driver_status: partial` until exercised on real silicon).  See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path B. |
 
 ### Who flashes it, and when
@@ -189,7 +189,7 @@ programming header and flash an Alp Lab-supplied binary with
 `GD32G553MEY7TR` device string / `0x08000000` flash base that the
 `flash_args` block removed by #1439 used to carry (partitioned images
 also need the factory A/B metadata record at `0x08008000` -- see
-[`firmware/gd32-bridge/README.md`](../firmware/gd32-bridge/README.md)).
+[`gd32-bridge-firmware:README.md`](https://github.com/alplabai/gd32-bridge-firmware#readme)).
 Note the SW-DP ID guard is **unarmed** on that
 procedure: `metadata/chips/gd32_swd.yaml` currently arms its
 wrong-board guard with `0x6BA02477`, but that value is not a GD32

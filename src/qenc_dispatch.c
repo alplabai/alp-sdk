@@ -96,7 +96,12 @@ alp_status_t alp_qenc_get_position(alp_qenc_t *h, int32_t *pos_out)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->get_position(&h->state, pos_out);
+	alp_status_t rc;
+	if (h->state.ops->get_position == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->get_position(&h->state, pos_out);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -106,7 +111,12 @@ alp_status_t alp_qenc_reset_position(alp_qenc_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->reset_position(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->reset_position == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->reset_position(&h->state);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
