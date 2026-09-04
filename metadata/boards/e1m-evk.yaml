@@ -9,11 +9,13 @@
 # `e1m_routes:` block below; on-board I2C device addresses +
 # INA236 calibration live in the `i2c_devices:` block further
 # down; the overlay-extended `alp,pin-array` pad indices live in
-# the `overlay_pins:` block further down still.
-# `scripts/gen_board_header.py` reads all three and produces
+# the `overlay_pins:` block further down still; mux-select enums
+# live in the `mux_enums:` block after that.
+# `scripts/gen_board_header.py` reads all four and produces
 # `include/alp/boards/alp_e1m_evk_routes.h`.  The remaining
-# sections of `alp_e1m_evk.h` (mux enums) stay hand-authored
-# until follow-up slices lift them too.
+# hand-authored content in `alp_e1m_evk.h` is prose explaining the
+# hardware (plus `evk_cam_select_t`, out of this slice's scope --
+# see issue #637).
 #
 # Customers building a custom board copy this file into their
 # project root as `board.yaml`, drop the SDK-internal preamble +
@@ -80,12 +82,11 @@ populated:
 #
 # This is the single source of truth for the EVK_PIN_* /
 # EVK_*_BUS_* / EVK_UART_PORT_* / EVK_PWM_* / EVK_ARD_PWM* /
-# EVK_MB_PWM macros (and, via the `i2c_devices:` / `overlay_pins:`
-# blocks further down, the EVK_I2C_ADDR_* / EVK_INA236_* /
-# EVK_PIN_OVERLAY_BASE-based macros) that hand-written firmware
-# uses; do not hand-edit the generated header.  The remaining
-# sections of `include/alp/boards/alp_e1m_evk.h` (mux enums) stay
-# hand-authored until follow-up slices lift them too.
+# EVK_MB_PWM macros (and, via the `i2c_devices:` / `overlay_pins:` /
+# `mux_enums:` blocks further down, the EVK_I2C_ADDR_* /
+# EVK_INA236_* / EVK_PIN_OVERLAY_BASE-based macros and the
+# mux-select enums) that hand-written firmware uses; do not
+# hand-edit the generated header.
 #
 # Entry schema:
 #   - e1m:         <E1M_GPIO_IO<N> | E1M_PWM<N> | E1M_<bus_class><N>>
@@ -338,6 +339,52 @@ overlay_pins:
       doc: "I2S1_SCLK pad (E1M AH7 / Alif P2_6) repurposed as Arduino CK_RST (the Arduino UNO header's RESET signal -- shields can pulse it low to force a reboot)." }
   - { macro: EVK_PIN_CTP_INT,
       doc: "SPI1_CS1 pad (E1M AH8 -- CC3501E side, GPIO_15) repurposed as the capacitive touch panel interrupt input. Routed through the on-module CC3501E -- firmware reads CTP touches by registering an interrupt callback on the CC3501E's GPIO_15 via ALP_CC3501E_CMD_GPIO_SET_INTERRUPT." }
+
+# Board mux-select enums (74LVC157 / TMUXHS221 mux control values and
+# IO-expander pin layouts).  Single source of truth for the
+# `evk_*_select_t` / `evk_*_ioexp_pin_t` typedefs; `scripts/gen_board_header.py`
+# reads this block and emits each as a `typedef enum { ... }` into
+# `include/alp/boards/alp_e1m_evk_routes.h`.  Do not hand-edit the
+# generated header.  `evk_cam_select_t` (the MIPI CSI camera mux) is
+# intentionally excluded -- out of this slice's scope (issue #637).
+mux_enums:
+  - name: evk_sdio_select_t
+    values:
+      - { name: EVK_SDIO_M2E_KEY, value: 0, doc: "MUX_SEL.SDIO low." }
+      - { name: EVK_SDIO_SDCARD,  value: 1, doc: "MUX_SEL.SDIO high." }
+  - name: evk_i2s_select_t
+    values:
+      - { name: EVK_I2S_AMP,     value: 0, doc: "I2S0 routed to the TAS2563 amplifiers." }
+      - { name: EVK_I2S_M2E_KEY, value: 1, doc: "I2S0 routed to the M.2 E-key slot." }
+  - name: evk_usb2_select_t
+    values:
+      - { name: EVK_USB2_CONNECTOR, value: 0, doc: "External USB-A jack." }
+      - { name: EVK_USB2_M2E_KEY,   value: 1, doc: "M.2 E-key USB." }
+  - name: evk_pcie_select_t
+    values:
+      - { name: EVK_PCIE_E_KEY, value: 0, doc: "Lanes 0 routed to PCIe E-key (Wi-Fi/BT modules)." }
+      - { name: EVK_PCIE_M_KEY, value: 1, doc: "Lanes 0..3 routed to PCIe M-key (NVMe SSD)." }
+  - name: evk_pcie_ioexp_pin_t
+    doc: "PCIe IO expander pin layout (TCAL9538 #2 on I2C0 at 0x71)."
+    values:
+      - { name: EVK_PCIE_IOEXP_I2C_SEL,       value: 0, doc: "P0: PCIE0_I2C.SEL -- selects which slot the I2C mux routes to." }
+      - { name: EVK_PCIE_IOEXP_M2E_ALERT,     value: 1, doc: "P1: M.2 E-key alert input." }
+      - { name: EVK_PCIE_IOEXP_E_PCIE0_RST,   value: 2, doc: "P2: E-key PCIe reset output." }
+      - { name: EVK_PCIE_IOEXP_E_PCIE0_WAKE,  value: 3, doc: "P3: E-key PCIe wake input." }
+      - { name: EVK_PCIE_IOEXP_E_PCIE0_CLKREQ, value: 4, doc: "P4: E-key PCIe clock-request input." }
+      - { name: EVK_PCIE_IOEXP_M_PCIE0_RST,   value: 5, doc: "P5: M-key PCIe reset output." }
+      - { name: EVK_PCIE_IOEXP_M_PCIE0_WAKE,  value: 6, doc: "P6: M-key PCIe wake input." }
+      - { name: EVK_PCIE_IOEXP_M_PCIE0_CLKREQ, value: 7, doc: "P7: M-key PCIe clock-request input." }
+  - name: evk_ioexp_pin_t
+    values:
+      - { name: EVK_IOEXP_LCD_PWR_EN,     value: 0, doc: "P0: LCD power enable." }
+      - { name: EVK_IOEXP_LCD_RST,        value: 1, doc: "P1: LCD reset." }
+      - { name: EVK_IOEXP_CAM_EN,         value: 2, doc: "P2: Camera-module enable (drives the camera sensor's EN/STBY pin -- NOT the +V_CAM0/+V_CAM1 power rails, which are gated separately)." }
+      - { name: EVK_IOEXP_CTP_RST,        value: 3, doc: "P3: Capacitive touch panel reset." }
+      - { name: EVK_IOEXP_ICM42670_INT1,  value: 4, doc: "P4: ICM-42670 INT1 input." }
+      - { name: EVK_IOEXP_ICM42670_INT2,  value: 5, doc: "P5: ICM-42670 INT2 input." }
+      - { name: EVK_IOEXP_ICM42670_FSYNC, value: 6, doc: "P6: ICM-42670 frame-sync input." }
+      - { name: EVK_IOEXP_BMP581_INT1,    value: 7, doc: "P7: BMP581 INT1 input." }
 
 # Inference + display defaults a stock EVK app would pick.  Apps
 # override in their board.yaml as needed.
