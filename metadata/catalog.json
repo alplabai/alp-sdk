@@ -260,6 +260,35 @@
           "models": false,
           "peripherals": true
         },
+        "name": "aen-eeprom-provision",
+        "osSet": [
+          "zephyr"
+        ],
+        "path": "examples/aen/aen-eeprom-provision",
+        "som": "E1M-AEN801",
+        "summary": "**Write** the 128-byte Alp hardware-info manifest into the on-module **24C128 EEPROM** on the E1M-AEN (Alif Ensemble) SoM, then read it back and verify. The write sibling of [`aen-eeprom-manifest`](../aen-eeprom-manifest), which reads the same bytes."
+      },
+      {
+        "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "aen-secure-element-sign",
         "osSet": [
           "zephyr"
