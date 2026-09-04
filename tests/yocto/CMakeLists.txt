@@ -815,6 +815,37 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_gpio_irq_rollback
              COMMAND alp_test_peripheral_gpio_irq_rollback)
 
+    # Closed-pin status-code regression for issue #1734: every op on a
+    # NULL-or-closed `pin` must return ALP_ERR_NOT_READY, matching every
+    # Zephyr dispatcher and ADR-0002's 2026-08-27 amendment, instead of
+    # the ALP_ERR_INVAL this backend used to return for both cases.
+    # peripheral_gpio_closed_pin_status.c #includes the real
+    # src/yocto/peripheral_gpio.c directly (same technique as
+    # alp_test_peripheral_gpio_irq_rollback above) to reach
+    # pool_acquire()/pool_release() and build a genuinely closed,
+    # non-NULL handle without a real /dev/gpiochipN line.  Deliberately
+    # NOT linked against alp::sdk -- same ODR rationale as
+    # alp_test_peripheral_gpio_irq_rollback above.
+    add_executable(alp_test_peripheral_gpio_closed_pin_status
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio_closed_pin_status.c
+        # alp_gpio_open() (compiled in as part of the #include-the-.c-file
+        # technique, even though this test never calls it) references
+        # alp_internal_set_last_error(); pull in its one canonical
+        # definition so the link is self-contained without alp::sdk.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    )
+    target_link_libraries(alp_test_peripheral_gpio_closed_pin_status PRIVATE Threads::Threads)
+    target_include_directories(alp_test_peripheral_gpio_closed_pin_status PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_gpio_closed_pin_status PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_gpio_closed_pin_status
+             COMMAND alp_test_peripheral_gpio_closed_pin_status)
+
     # Post-open failure rollback + timeout-overflow regression for issue
     # #760 (Yocto watchdog backend): every failure after open() must
     # attempt a best-effort disarm (WDIOS_DISABLECARD / magic close)

@@ -102,31 +102,38 @@ conclusion:
   `ext/renesas/camera.c` (`:64,103,137`), `ext/renesas/inference.c`
   (`:51,66,79`), `ext/renesas/power.c` (`:45`).
 
-**Yocto backend divergence — i2c/spi/uart resolved by #1834, gpio still
-open under #1734.** This was not a handful of one-off call sites; it was
-an entire backend answering the documented `ALP_ERR_NOT_READY`-on-a-
+**Yocto backend divergence — i2c/spi/uart resolved by #1834, gpio resolved
+by #1734 (this amendment).** This was not a handful of one-off call sites;
+it was an entire backend answering the documented `ALP_ERR_NOT_READY`-on-a-
 closed-handle contract differently from every Zephyr dispatcher.
-`src/yocto/peripheral_{gpio,i2c,spi,uart}.c` gated every op on
+`src/yocto/peripheral_{gpio,i2c,spi,uart}.c` each gated every op on
 `pin/bus/port == NULL || !...->in_use` and returned `ALP_ERR_INVAL` for
 *both* a NULL handle *and* a closed (non-NULL, `in_use == false`) one.
+
 Issue #1834 splits the lifecycle check out of `peripheral_i2c.c`
 (`alp_i2c_write`, `alp_i2c_read`, `alp_i2c_write_read`),
 `peripheral_spi.c` (`alp_spi_transceive`, `alp_spi_write`,
 `alp_spi_read`), and `peripheral_uart.c` (`alp_uart_write`,
 `alp_uart_read`) so each now returns `ALP_ERR_NOT_READY` for a
 NULL-or-closed handle and reserves `ALP_ERR_INVAL` for a genuinely
-malformed argument, checked only once the handle itself is known good —
-same split #1734 already applied to `peripheral_gpio.c`'s public entry
-points. `peripheral_gpio.c` itself is tracked separately under #1734 and
-still returns `ALP_ERR_INVAL` for a NULL-or-closed `pin` as of this
-amendment: `alp_gpio_write(closed_pin, ...)` still returns
-`ALP_ERR_NOT_READY` built for Zephyr and `ALP_ERR_INVAL` built for Yocto,
-the same public symbol answering differently depending which backend it
-was built against. `tests/yocto/peripheral_{i2c,spi,uart}.c` cover the
-NULL-handle half of #1834's fix; `tests/yocto/peripheral_{i2c,spi,uart}_
-closed_status.c` add the sharper non-NULL, closed-handle case per class,
-mirroring `tests/yocto/peripheral_gpio_closed_pin_status.c`'s technique.
-No test pins the gpio side yet.
+malformed argument, checked only once the handle itself is known good.
+`tests/yocto/peripheral_{i2c,spi,uart}.c` cover the NULL-handle half of
+#1834's fix; `tests/yocto/peripheral_{i2c,spi,uart}_closed_status.c` add
+the sharper non-NULL, closed-handle case per class.
+
+Issue #1734 brings `peripheral_gpio.c` into the same agreement:
+`alp_gpio_configure`, `alp_gpio_write`, `alp_gpio_read`,
+`alp_gpio_irq_enable` and `alp_gpio_irq_disable` each split the fused
+`pin == NULL || !pin->in_use || <malformed arg>` condition into a
+lifecycle check first (`ALP_ERR_NOT_READY`) and a malformed-argument
+check second (`ALP_ERR_INVAL`, a NULL `level` out-param on read or a
+NULL `cb` on IRQ enable), checked only once the handle is known good.
+Pinned by `tests/yocto/peripheral_gpio_closed_pin_status.c`, which covers
+the closed-but-non-NULL case a NULL-check-only test would miss.
+
+All four Yocto peripheral families now match the Zephyr convention;
+`alp_gpio_write(closed_pin, ...)` (and its i2c/spi/uart equivalents) no
+longer answers differently depending which backend it was built against.
 
 **Gap: signex unverified.** No signex checkout exists on the host this
 amendment was written from — searched `/home`, `/opt`, `/srv`, `/mnt`,
