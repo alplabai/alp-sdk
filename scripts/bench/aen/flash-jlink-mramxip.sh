@@ -171,14 +171,43 @@ echo "    atoc -> $ATOC_ADDR ($(stat -c%s "$PKG") B)" >&2
 
 # 3. J-Link: part-number device unlocks the MRAM loader; write BOTH blobs, verify,
 #    sanity-check the reset vector, then PIN reset (RSetType 2) -> SE boot ROM boots it.
+# `, noreset` on BOTH loadbins is load-bearing -- see #1902.  By default
+# `loadbin` does an "implicit reset & halt of MCU", which on the E8 is an
+# AIRCR.SYSRESETREQ that resets the WHOLE system including the Secure Enclave.
+# The SES then re-boots slot0, so the M55 starts executing XIP out of the very
+# MRAM J-Link is mid-way through erasing and programming.  Bench log evidence
+# (2026-09-04, aen-qenc-readout): the second loadbin's own reset reported
+#   Reset: ARMv8M core with Security Extension enabled detected. Switch to secure domain.
+# and then died with the app demonstrably running out of slot0 --
+#   ****** Error: PC of target system has unexpected value after preparing target. (PC = 0x8001D38E)!
+#   Failed to perform RAMCode-sided Prepare()
+# -- while the first loadbin, whose reset could NOT switch to the secure domain
+# ("switching to secure domain is not possible"), had already reported
+#   ****** Error: Verification failed @ address 0x80010000
+# This is a RACE between the SES re-booting slot0 and J-Link's program/verify,
+# which is why the SAME app passed and failed under identical settings and why
+# a busy resident app (aen-wdt-feed feeding a watchdog, aen-sdcard-readout doing
+# long I/O) failed far more often than one that idles quickly.  It is NOT flaky
+# MRAM and NOT a probe-firmware limit.  `noreset` keeps the single explicit
+# reset+halt below as the only reset in the sequence, so nothing is executing
+# from MRAM while MRAM is being written.
+#
+# SetSkipProgOnCRCMatch = 0: never let J-Link decide a page is already correct
+# from a debug READ.  Debug-AP reads of this part are documented to lie in some
+# states (see reference_aen_e8_bench_traps), and trusting one here would silently
+# skip programming a page that does not actually match.
 cat > /tmp/flowd-mramxip.jlink <<EOF
 $SEL
 si SWD
 speed $JLINK_SPEED
 device $DEV
 connect
-loadbin $SET/build/images/$NAME.bin $APP_ADDR
-loadbin $PKG $ATOC_ADDR
+exec SetSkipProgOnCRCMatch = 0
+RSetType 2
+r
+h
+loadbin $SET/build/images/$NAME.bin $APP_ADDR, noreset
+loadbin $PKG $ATOC_ADDR, noreset
 verifybin $SET/build/images/$NAME.bin $APP_ADDR
 verifybin $PKG $ATOC_ADDR
 mem32 $APP_ADDR 2
@@ -205,17 +234,39 @@ fi
 # `verifybin` and reasonably concluded writes were checked.  The absence would at
 # least have been visible.
 #
-# Both directions are checked, deliberately.  An explicit failure string is the
-# common case; the COUNT catches the quieter one -- a run that aborted before the
-# verifies executed at all reports neither success nor failure, and a
-# "no news is good news" gate would pass it.
-if grep -qiE "verify failed|verification failed|mismatch" /tmp/flowd-mramxip.out; then
+# #1902 -- the gate must key on the EXPLICIT `verifybin` results ONLY, never on a
+# blanket grep of the whole log.  `loadbin` runs its own internal post-program
+# verify and prints "Verification failed @ address ..." / "Error while programming
+# flash: Verify failed." from inside the reset race described above.  A blanket
+# grep matched THOSE lines and failed the run even when both explicit `verifybin`
+# passes reported "Verify successful." on the full image -- i.e. it reported a
+# GOOD flash as a failure and exited before ever booting the app or reading its
+# console.  Bench-measured 2026-09-04 on aen-qenc-readout: internal verify failed
+# at 0x80010000, `verifybin` of all 77776 bytes @0x80010000 and all 5552 bytes
+# @0x8057EA50 both succeeded.
+#
+# This does NOT weaken corruption detection.  `verifybin` reads the image back off
+# the part and compares every byte; if the bytes are wrong it prints "Verify
+# failed." and the 2/2 count below does not reach 2, so the script still exits 3.
+# The count also catches the quieter case -- a run that aborted before the
+# verifies executed reports neither success nor failure, and a "no news is good
+# news" gate would pass it.
+#
+# The count is necessary, not sufficient: `verifybin` reads through the same debug
+# AP, so the app's own `RESULT` line off the RAM console in step 4 remains the
+# only end-to-end proof that the flashed image actually runs.
+if grep -qiE "verification failed @|error while programming flash" /tmp/flowd-mramxip.out; then
+  echo "?? loadbin reported an internal verify error -- NOT failing on it (#1902)."
+  grep -iE "verification failed @|error while programming flash" /tmp/flowd-mramxip.out | head -3
+  echo "   Deferring to the explicit verifybin results below, which read the whole image back."
+fi
+verify_ok=$(grep -ci "verify successful" /tmp/flowd-mramxip.out || true)
+if grep -qiE "^Verify failed\.|mismatch" /tmp/flowd-mramxip.out; then
   echo "!! VERIFY FAILED -- the bytes on the part do NOT match the image."
-  grep -iE "verify failed|verification failed|mismatch" /tmp/flowd-mramxip.out | head -5
+  grep -iE "^Verify failed\.|mismatch" /tmp/flowd-mramxip.out | head -5
   echo "   slot0 content is NOT what you built.  Do not treat this board as flashed."
   exit 3
 fi
-verify_ok=$(grep -ci "verify successful" /tmp/flowd-mramxip.out || true)
 if [ "${verify_ok:-0}" -lt 2 ]; then
   echo "!! only ${verify_ok:-0} of 2 verifybin passes reported success -- treating as FAILED."
   echo "   (expected one per loadbin: the app image and the AppTocPackage.)"

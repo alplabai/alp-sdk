@@ -25,40 +25,64 @@
 # pairs the WORKING generic Cortex-M55 connect with Alif's OWN flash algorithm,
 # taken from the CMSIS pack (`Flash/algorithms/Ensemble.FLM`).
 #
-# THE SECTOR-SIZE PATCH (the part that actually took the digging)
-# --------------------------------------------------------------
-# Using Alif's .FLM unmodified still fails, with a J-Link DLL log ending:
+# THE SECTOR-SIZE PATCH (necessary, and NOT the Flow D fix -- read before trusting)
+# ------------------------------------------------------------------------------
+# Using Alif's .FLM unmodified fails outright, with a J-Link DLL log ending:
 #
 #     Flash bank @ 0x80000000: SFL: Parsing sectorization info from ELF file
 #       FlashDevice.SectorInfo[0]: .SectorSize = 0x00580000, .SectorStartAddr = 0
 #      -- Start of determining dirty areas in flash cache
 #       ***** Internal Error:
 #
-# The algorithm's own descriptor reads:
+# The algorithm programs in 1 KB pages but declares the whole 5.5 MB as ONE sector.
+# J-Link treats a sector as its read-modify-write unit, so any partial write tries
+# to buffer 5.5 MB and throws.  Patching a COPY to a smaller sector gets past that.
 #
-#     DevName 'Ensemble 5.5MB MRAM'  DevAdr 0x80000000  szDev 0x00580000
-#     szPage  0x400                  valEmpty 0x00
-#     sectors: szSector=0x00580000 AddrSector=0x00000000      <-- ONE 5.5 MB sector
+# !! CORRECTION (2026-09-04).  Commits 441b48220 and 4c504e7ef both credited the
+# !! SECTOR SIZE as "the fix" for Flow D's intermittent failures.  That was
+# !! concluded from single passing samples and is WRONG.  The sector patch only
+# !! makes the loader USABLE at all; it has nothing to do with why writes then
+# !! failed intermittently.  The actual cause is the implicit reset in `loadbin`
+# !! -- see the #1902 comment block in flash-jlink-mramxip.sh.  On the E8 that
+# !! AIRCR.SYSRESETREQ resets the Secure Enclave too, the SES re-boots slot0, and
+# !! the M55 executes XIP out of the MRAM being programmed.  Fixed there with
+# !! `loadbin ..., noreset`, not here.
 #
-# It programs in 1 KB pages but declares the whole 5.5 MB as a single SECTOR.
-# J-Link treats a sector as its read-modify-write unit, so any partial write
-# tries to buffer 5.5 MB and throws an internal error.  MRAM is byte-writable and
-# does not need erase-before-write, so the giant sector is a NOR-flash fiction.
+# !! ALSO WRONG, and previously written into this header: that MRAM's
+# !! valEmpty = 0x00 means "a write over non-erased MRAM cannot flip bits back".
+# !! MRAM has no erase physics -- it is byte-writable and `valEmpty` is a Keil
+# !! FlashDevice convention, not a device property.  What an un-erased write
+# !! actually fights is J-Link's own dirty-page bookkeeping, not the array.
 #
-# Patching a COPY of the .FLM to declare 1 KB sectors -- matching the real page
-# size -- makes the cache work in page-sized units and programming succeeds:
+# SECTOR SIZE = the FLM's 1 KB page size, deliberately.  Making the sector equal
+# the page means J-Link never has to MERGE: no sector is part-written, so it never
+# needs to pre-READ the surrounding bytes to reconstruct them.  That matters
+# because debug-AP reads of this part are documented to lie in some states (see
+# reference_aen_e8_bench_traps) -- and under a 64 KB sector a lying pre-read would
+# make J-Link write ZEROS over up-to-64 KB of perfectly good neighbouring content
+# it thought it was preserving.  1 KB bounds that blast radius to one page.
+# An earlier comment here claimed 1 KB "costs reliability"; that too was a single
+# sample and is withdrawn.  The REAL cost of 1 KB is THROUGHPUT, and it is
+# measured: a ~108 KB image becomes ~106 sector erases and programs at 29 KB/s,
+# versus ~2 erases and 82-196 KB/s at 64 KB.  That trade is taken deliberately --
+# a slow flash is worth bounding how much good neighbouring content a lying
+# debug-AP pre-read can zero.
 #
-#     J-Link: Flash download: Bank 0 @ 0x80000000: 1 range affected (1024 bytes)
-#     J-Link: Flash download: Program & Verify speed: 29 KB/s
+# ALWAYS ERASE FIRST anyway -- it keeps J-Link's dirty-area detection trivially
+# correct and removes the merge path entirely.  Verify the erase actually
+# happened: the SETOOLS maintenance menu silently does nothing if its prompts
+# desync, so read slot0 back rather than trusting "Full Erase done".
 #
-# VERIFIED on silicon 2026-09-04 (E1M-AEN801 2026W36-0001, E8 Rev A1):
-#   - a 16-byte probe write read back correctly AND survived a cold power-cycle
-#     (the real bar -- `verifybin` alone has historically passed on writes the
-#     SES never committed)
-#   - the full flash-jlink-mramxip.sh flow then ran end to end: 2/2 verifybin,
-#     slot0 = 20011B88 8001571D matching the built image, and the app BOOTED
-#     MRAM-XIP -- `ROM 5632 KB` in the banner, not the 256 KB of an ITCM load
-#   - slot0 still matched after another cold power-cycle
+# !! NOT A DAMAGE CASE (correcting an earlier claim in this file): the address
+# !! 0x8057fe50 is NOT an SES-owned structure and was NOT destroyed by a 64 KB
+# !! erase.  It is `app-device-config.bin` (0x138 = 312 bytes) INSIDE the app
+# !! package we write ourselves at 0x8057ea50, per SETOOLS'
+# !! build/app-package-map.txt.  Every successful package write recreates it.
+# !! It disappeared from `gettoc` because the package write did not land, not
+# !! because anything erased across into SES territory.  No Alif escalation.
+#
+# The supported alternative is a J-Link V11+ probe, which can select SEGGER's own
+# AE822FA0E5597LS0_M55_HE profile and needs none of this.
 #
 # USAGE
 #   bash scripts/bench/aen/install-jlink-alif-device.sh
@@ -109,9 +133,13 @@ print(f"   sectors[0]: szSector=0x{szs:08x} AddrSector=0x{adr:08x}")
 if (szs, adr) != (0x00580000, 0x00000000):
     sys.exit(f"!! unexpected sector descriptor -- refusing to patch {src}")
 
-struct.pack_into("<II", d, SECTORS, page, 0x00000000)
+# Equal to the FLM's 1 KB programming page size, so "sector" and "page" coincide
+# and J-Link never merges -- hence never pre-reads neighbouring bytes through a
+# debug AP that can lie.  See the header note.
+SECTOR_SIZE = 0x00000400
+struct.pack_into("<II", d, SECTORS, SECTOR_SIZE, 0x00000000)
 open(dst, "wb").write(bytes(d))
-print(f"   patched   : szSector=0x{page:08x} (matches the programming page size)")
+print(f"   patched   : szSector=0x{SECTOR_SIZE:08x} (1 KB = page size -- no read-modify-write merge)")
 PY
 
 cat > "$DEST/device.xml" <<EOF
