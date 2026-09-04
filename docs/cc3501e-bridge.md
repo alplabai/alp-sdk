@@ -303,7 +303,29 @@ The firmware `#include`s the wire-protocol header **directly** (no
 mirror), so a protocol change moves both sides + the wire-vector tests
 in one commit.  The Alif-side client still refuses to talk to a firmware
 whose `ALP_CC3501E_CMD_GET_VERSION` reply doesn't match the compile-time
-`ALP_CC3501E_PROTOCOL_VERSION` (currently **9**).  What each bump changed:
+`ALP_CC3501E_PROTOCOL_VERSION`.
+
+**The wire version is `MAJOR.MINOR`, and only MAJOR gates the link** (ADR
+0033). The current wire is **3.1**. MAJOR moves only when an unchanged host
+would be *misread* — reusing a previously-reserved byte or flag bit, changing
+framing, changing a struct layout, changing what an existing field means.
+Everything additive is MINOR: new opcodes, new optional request fields whose
+absent form keeps its old meaning, new events. A MINOR difference does **not**
+refuse the link, so shipping a feature no longer forces a lockstep reflash.
+
+Ask `CMD_GET_CAPABILITIES` (`0x06`) rather than inferring a feature from the
+version: the bitmap is composed from the same compile-time switches that decide
+which HAL bodies link, so a build without Wi-Fi or without BLE reports the truth
+where its version number would not.
+
+`MAJOR 0` is reserved: a firmware built before ADR 0033 answers `GET_VERSION`
+with its raw v1..v9 integer, which decodes to major 0 — so "older than the
+scheme" stays distinguishable from "disagrees about the frame layout".
+
+The v1..v9 history below used a single raw integer. Retroactively: v5 = `1.0`,
+v6 = `1.1`, v7 = `2.0`, v8 = `3.0`, v9 = `3.1`. Only v7 and v8 could actually
+misread an old host; v6 and v9 were additive and need not have cost anyone a
+reflash. What each bump changed:
 
 | Version | Change |
 |---|---|

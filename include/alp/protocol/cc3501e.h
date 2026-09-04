@@ -179,8 +179,58 @@ extern "C" {
  *
  * THE BUMP IS STRUCTURAL THIS TIME (new opcodes), so the usual gate applies
  * unchanged: the three sites listed above move together, and cc3501e_core.c's
- * GET_VERSION check refuses any host/firmware mismatch outright. */
-#define ALP_CC3501E_PROTOCOL_VERSION 9
+ * GET_VERSION check refuses any host/firmware mismatch outright.
+ *
+ * ===================================================================
+ * v5..v9 WERE A SINGLE RAW INTEGER.  From here the wire version is
+ * MAJOR.MINOR -- see ADR 0033 and the two defines below.
+ * ===================================================================
+ * The raw integer conflated two different questions, and answering both with
+ * one exact-equality gate is why this protocol went v5 -> v9 in a single week
+ * with a forced lockstep reflash each time.  Only TWO of those four bumps
+ * (v7, v8) could actually misread an old host; v6 and v9 were purely additive
+ * and cost customers a reflash for nothing.
+ *
+ * Retroactive mapping, so the history stays legible:
+ *   v5 = 1.0   v6 = 1.1   v7 = 2.0   v8 = 3.0   v9 = 3.1
+ * The current wire is 3.1 and is BYTE-IDENTICAL to what shipped as "v9" --
+ * this renames the contract, it does not change a frame. */
+
+/** Wire-protocol MAJOR: bumped ONLY when an existing host, unchanged, would be
+ *  MISREAD by the new firmware (or would misread its replies) -- reusing a
+ *  reserved byte or flag bit, changing a struct layout, changing framing, or
+ *  changing what an existing field means.
+ *
+ *  A MAJOR mismatch is what @ref cc3501e_reset refuses on; it is the safety
+ *  property the v7 and v8 bumps needed, kept exactly as strict as before. */
+#define ALP_CC3501E_PROTOCOL_MAJOR 3
+
+/** Wire-protocol MINOR: bumped for everything ADDITIVE -- new opcodes, new
+ *  optional request fields whose absent form keeps its old meaning, new event
+ *  types, new capability bits.
+ *
+ *  A MINOR difference does NOT refuse the link. A lower firmware minor simply
+ *  lacks newer features (ask @ref ALP_CC3501E_CMD_GET_CAPABILITIES rather than
+ *  inferring them); a higher one has features this host does not use. That is
+ *  safe BECAUSE minor is defined as additive: the host never sends what it does
+ *  not know, and the firmware never spontaneously emits an event nobody armed.
+ *  A change that cannot honour that is MAJOR by definition. */
+#define ALP_CC3501E_PROTOCOL_MINOR 1
+
+/** The composed value @ref ALP_CC3501E_CMD_GET_VERSION carries on the wire:
+ *  `(MAJOR << 8) | MINOR`, still a 2-byte LE reply.
+ *
+ *  A firmware that predates this scheme answers with its raw v1..v9 integer,
+ *  which decodes to MAJOR 0 -- distinguishable, so the host can say "older
+ *  than the versioning scheme" instead of "corrupt". MAJOR 0 is therefore
+ *  RESERVED and must never be used by a real release. */
+#define ALP_CC3501E_PROTOCOL_VERSION \
+	(((ALP_CC3501E_PROTOCOL_MAJOR) << 8) | (ALP_CC3501E_PROTOCOL_MINOR))
+
+/** Extract the MAJOR half of a @ref ALP_CC3501E_CMD_GET_VERSION reply. */
+#define ALP_CC3501E_PROTOCOL_VERSION_MAJOR(v) (((v) >> 8) & 0xFFu)
+/** Extract the MINOR half of a @ref ALP_CC3501E_CMD_GET_VERSION reply. */
+#define ALP_CC3501E_PROTOCOL_VERSION_MINOR(v) ((v) & 0xFFu)
 
 /** Frame header in bytes, before the payload. */
 #define ALP_CC3501E_HEADER_BYTES 4
@@ -307,6 +357,20 @@ typedef enum {
 	 * path is the benchable default).  0x05 is the first free opcode in the
 	 * meta group (0x00..0x0F; 0x00..0x04 are taken above). */
 	ALP_CC3501E_CMD_GET_PENDING_EVENTS = 0x05,
+	/* Which opcode families this firmware ACTUALLY IMPLEMENTS IN THIS BUILD.
+	 * Reply DATA is @ref alp_cc3501e_capabilities_t.
+	 *
+	 * This exists because the wire version cannot express what the bitmap can.
+	 * The firmware has real build variants: without CC3501E_WIFI the socket
+	 * opcodes are NOTIMPL stubs, and without CC3501E_BLE there is no BLE host
+	 * at all -- yet both report the same wire version as a full build. The
+	 * bitmap is composed from those same compile-time switches, so it reports
+	 * what is really there.
+	 *
+	 * Ask this instead of inferring a feature from a version number: an
+	 * additive feature bumps MINOR and sets a bit, and an old host neither
+	 * knows nor cares. See ADR 0033. */
+	ALP_CC3501E_CMD_GET_CAPABILITIES = 0x06,
 
 	/* Wi-Fi */
 	ALP_CC3501E_CMD_WIFI_SCAN_START   = 0x10,
@@ -567,6 +631,45 @@ typedef struct {
 	uint8_t  last_error;
 	uint8_t  reserved[3];
 } alp_cc3501e_diag_info_t;
+
+/* ------------------------------------------------------------------ */
+/* Capability bitmap (CMD_GET_CAPABILITIES)                            */
+/* ------------------------------------------------------------------ */
+
+/** Capability bits reported by CMD_GET_CAPABILITIES (opcode 0x06).
+ *
+ *  One bit per opcode FAMILY, set when this firmware build implements it for
+ *  real rather than as a NOTIMPL stub.
+ *
+ *  A BIT IS FOREVER. Once assigned it can never mean a different feature;
+ *  retiring a feature retires its bit. Same discipline as the opcode space,
+ *  and for the same reason -- a host in the field decides what to send from
+ *  these bits. */
+typedef enum {
+	ALP_CC3501E_CAP_WIFI_STA     = 0x00000001u, /**< scan / connect / STA status  */
+	ALP_CC3501E_CAP_WIFI_AP      = 0x00000002u, /**< soft-AP role + its DHCP server */
+	ALP_CC3501E_CAP_SOCK_CLIENT  = 0x00000004u, /**< SOCK_OPEN/CONNECT/SEND/RECV/CLOSE */
+	ALP_CC3501E_CAP_SOCK_LISTEN  = 0x00000008u, /**< SOCK_BIND/LISTEN + EVT_SOCK_ACCEPTED */
+	ALP_CC3501E_CAP_BLE          = 0x00000010u, /**< BLE host (advertise/scan/GATT) */
+	ALP_CC3501E_CAP_OTA          = 0x00000020u, /**< OTA_BEGIN/WRITE/FINISH/PROMOTE */
+	ALP_CC3501E_CAP_GPIO_PROXY   = 0x00000040u, /**< GPIO proxy + edge events     */
+	ALP_CC3501E_CAP_SPI1_MASTER  = 0x00000080u, /**< SPI1 host passthrough        */
+	ALP_CC3501E_CAP_CAMERA       = 0x00000100u, /**< camera enable/disable        */
+	ALP_CC3501E_CAP_POWER_POLICY = 0x00000200u, /**< power-policy control         */
+	ALP_CC3501E_CAP_DIAG_STATS   = 0x00000400u, /**< DIAG_GET_STATS counters      */
+	ALP_CC3501E_CAP_EVENTS       = 0x00000800u, /**< the polled async-event queue */
+} alp_cc3501e_capability_t;
+
+/** Reply DATA for CMD_GET_CAPABILITIES (opcode 0x06).
+ *  Field-level meanings:
+ *   - caps: OR of @ref alp_cc3501e_capability_t bits, LE32.
+ *   - reserved: 0 in this revision. A future firmware may widen the bitmap
+ *     here; a host that does not understand the extra bits ignores them,
+ *     which is exactly why this is a MINOR-class extension point. */
+typedef struct {
+	uint32_t caps;
+	uint32_t reserved;
+} alp_cc3501e_capabilities_t;
 
 /* ------------------------------------------------------------------ */
 /* Async-event queue payload format (CMD_GET_PENDING_EVENTS)           */
@@ -1467,6 +1570,21 @@ _Static_assert(sizeof(alp_cc3501e_sock_recv_t) == 4u, "sock_recv wire length");
 _Static_assert(sizeof(alp_cc3501e_sock_recv_resp_t) == 24u, "sock_recv_resp wire header length");
 _Static_assert(sizeof(alp_cc3501e_sock_close_t) == 4u, "sock_close wire length");
 _Static_assert(sizeof(alp_cc3501e_sock_addr_t) == 20u, "sock_addr wire length");
+_Static_assert(sizeof(alp_cc3501e_capabilities_t) == 8u, "capabilities wire length");
+/* MAJOR 0 is reserved to mean "firmware predates the MAJOR.MINOR scheme and is
+ * answering with a raw v1..v9 integer" -- see the version block at the top.  A
+ * release that shipped MAJOR 0 would be indistinguishable from that legacy
+ * case, so the contract is pinned here rather than left to review. */
+_Static_assert(ALP_CC3501E_PROTOCOL_MAJOR >= 1, "MAJOR 0 is reserved for pre-scheme firmware");
+_Static_assert(ALP_CC3501E_PROTOCOL_MAJOR <= 255 && ALP_CC3501E_PROTOCOL_MINOR <= 255,
+               "each half of the wire version must fit its byte");
+_Static_assert(ALP_CC3501E_PROTOCOL_VERSION_MAJOR(ALP_CC3501E_PROTOCOL_VERSION) ==
+                   ALP_CC3501E_PROTOCOL_MAJOR,
+               "GET_VERSION encoding must round-trip MAJOR");
+_Static_assert(ALP_CC3501E_PROTOCOL_VERSION_MINOR(ALP_CC3501E_PROTOCOL_VERSION) ==
+                   ALP_CC3501E_PROTOCOL_MINOR,
+               "GET_VERSION encoding must round-trip MINOR");
+
 _Static_assert(sizeof(alp_cc3501e_sock_bind_t) == 24u, "sock_bind wire length");
 _Static_assert(sizeof(alp_cc3501e_sock_listen_t) == 4u, "sock_listen wire length");
 /* The accepted-connection event rides the firmware event ring, whose per-entry

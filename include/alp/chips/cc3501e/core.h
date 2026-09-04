@@ -44,7 +44,22 @@ typedef void (*cc3501e_event_cb_t)(uint8_t cmd, const uint8_t *payload, size_t l
 #define CC3501E_EVENT_SUBSCRIBERS 4
 
 struct cc3501e {
-	bool        initialised;
+	bool initialised;
+	/* Wire version the FIRMWARE reported at the last @ref cc3501e_reset
+	 * (ADR 0033).  Both are 0 before the first successful GET_VERSION.
+	 *
+	 * fw_proto_major always equals ALP_CC3501E_PROTOCOL_MAJOR on a usable
+	 * context -- a mismatch refuses the link -- so the field that carries
+	 * information is fw_proto_minor: LOWER than this host's minor means the
+	 * firmware lacks newer additive features.  These are also set on the
+	 * REFUSAL path, so a caller that got ALP_ERR_VERSION can report what the
+	 * firmware actually claimed; a fw_proto_major of 0 there means the
+	 * firmware predates the scheme and answered with a raw v1..v9 integer.
+	 *
+	 * Prefer @ref cc3501e_get_capabilities over reasoning from the minor: it
+	 * reports what the build IMPLEMENTS, not what its number implies. */
+	uint8_t     fw_proto_major;
+	uint8_t     fw_proto_minor;
 	alp_spi_t  *bus;        /**< SPI1 to the CC3501E (Alif master). */
 	alp_gpio_t *enable_pin; /**< WIFI.EN (P15_5).  May be NULL on boards that tie it on. */
 	alp_gpio_t *reset_pin;  /**< E_WIFI.NRST (P15_1_FLEX). */
@@ -379,6 +394,29 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms);
  * about wire compatibility.
  */
 alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out);
+
+/**
+ * @brief Read which opcode families the firmware implements
+ *        (GET_CAPABILITIES, opcode 0x06).
+ *
+ * **Ask this instead of inferring a feature from a version number.** The wire
+ * version cannot express what this bitmap can: the firmware has real build
+ * variants, and a build without Wi-Fi or without BLE reports the same wire
+ * version as a full one while its socket or BLE opcodes are `NOTIMPL` stubs.
+ * The bitmap is composed from those same compile-time switches.
+ *
+ * Because features are discovered rather than implied, adding one is a MINOR
+ * bump that never refuses an existing host — see ADR 0033.
+ *
+ * @param ctx       Initialised driver context.
+ * @param caps_out  Receives an OR of @ref alp_cc3501e_capability_t bits.
+ * @return ALP_OK with @p caps_out set; ALP_ERR_INVAL if @p caps_out is NULL;
+ *         ALP_ERR_IO on a short reply; mapped error otherwise. A firmware
+ *         predating this opcode answers `RESP_ERR_INVALID`, which maps to
+ *         @c ALP_ERR_INVAL — treat that as "no capability information", not as
+ *         "no capabilities".
+ */
+alp_status_t cc3501e_get_capabilities(cc3501e_t *ctx, uint32_t *caps_out);
 
 /**
  * @brief Send one FRAMED bulk-data frame to the CC3501E stream sink (proto v2).
