@@ -7,6 +7,34 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.17.0 candidate
 
+### Fixed — `cc3501e_ble_enable()` honours the caller's timeout instead of flooring it to 90 s
+
+`cc3501e_ble_enable()` raised any budget below `CC3501E_BLE_ENABLE_WINDOW_MS`
+(90000 ms) to that value before polling. All three in-tree callers pass 30000,
+so every one of them silently waited three times as long as it asked, and that
+is where `alplabai/cc3501e-bridge-firmware#82`'s headline reading comes from:
+`ble enable failed (-4)` after **90.5 s** against a `CC3501E_BLE_ENABLE_TIMEOUT_MS`
+of 30000 — the floor plus one attempt, not a device still working. The comment
+above the define described a 30 s floor; the value had been 90000 since it was
+introduced.
+
+The floor's premise — a BLE-controller cold-init that "can take ~10-15 s" — does
+not match the silicon. Bench-measured on an E1M-AEN801 at `fw 0.6.0 (wire 3.1)`,
+a cold `ble enable` on a fresh boot completes in **0.67 s** end to end and a
+repeat completes at the measurement floor (0.20 s). `cc3501e-bridge-firmware#112`
+separately removed the two pointless bridge-SPI teardowns an already-enabled
+`BLE_ENABLE` was doing, which is what made the operation take minutes.
+
+`@p timeout_ms` is now the budget, as the parameter always claimed to be. No
+wire change, no ABI change.
+
+**Known limitation, unchanged by this fix and tracked separately:**
+`poll_by_repeat()`'s budget counts only the back-off sleeps it performs, not the
+time spent inside each attempt, so `timeout_ms` is a floor on wall time rather
+than a bound. Making it a true wall-clock bound needs a portable monotonic
+millisecond clock, and `chips/cc3501e/*.c` is deliberately OS-agnostic (no
+Zephyr/vendor headers) so it has none available today.
+
 ### Changed — CC3501E wire protocol 7 to 8: request identity for every worker-routed opcode
 
 **HELD: needs `cc3501e-bridge-firmware` v0.6.0 (protocol 8) to be released and a
