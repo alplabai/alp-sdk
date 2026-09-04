@@ -57,6 +57,19 @@ alp_status_t alp_rpc_unsubscribe(alp_rpc_channel_t *ch, const char *method)
 	(void)method;
 	return ALP_ERR_NOT_READY;
 }
+alp_status_t alp_rpc_set_link_callback(alp_rpc_channel_t *ch, alp_rpc_link_cb_t cb, void *user)
+{
+	(void)ch;
+	(void)cb;
+	(void)user;
+	return ALP_ERR_NOSUPPORT;
+}
+alp_status_t alp_rpc_link_state(alp_rpc_channel_t *ch, alp_rpc_link_state_t *out_state)
+{
+	(void)ch;
+	if (out_state != NULL) *out_state = ALP_RPC_LINK_DOWN;
+	return ALP_ERR_NOSUPPORT;
+}
 alp_status_t
 alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, size_t len)
 {
