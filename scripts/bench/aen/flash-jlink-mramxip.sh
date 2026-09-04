@@ -263,10 +263,28 @@ fi
 # NOTHING.  The verify gate below still catches that correctly -- but it reports
 # it as "verify failed", which reads like corrupted MRAM when in fact not one byte
 # was written.  Bench-measured 2026-09-04 over 12 runs: verify failed if and only
-# if the halt failed, 12/12, with `RSetType 2` reporting
-#   Reset: VC_CORERESET did not halt CPU. (Debug logic also reset by reset pin?).
-# i.e. the reset pin appears to reset the debug logic along with the core, so the
-# vector catch is cleared and the core runs.  Name that failure for what it is.
+# if the halt failed, 12/12.
+#
+# What decides it is whether the AHB-AP at
+#   AP[3] (APAddr 0x00300000): AHB-AP (IDR: 0x34770008)
+# reappears in J-Link's post-reset CoreSight scan.  When it does, `AP[3]: Core
+# found` and J-Link manually halts a core the SES has PARKED at VTOR 0 -- every
+# successful dump reads `PC = 0000000C`, `CycleCnt = 00000000`,
+# `IPSR = 000 (NoException)` -- and the SES then leaves it alone for the whole
+# ~5 s program.  When AP[3] is absent the scan stops at
+#   AP[2] (APAddr 0x00070000): AXI-AP
+# and prints `Could not find core in Coresight setup`; the HE debug domain is
+# unreachable, so nothing inside `r` can halt anything.
+#
+# NOTE the halt NEVER catches the reset vector, not even when it works -- the
+# working mechanism is a manual halt of the SES-parked core, never a
+# DEMCR.VC_CORERESET catch.  `Reset: VC_CORERESET did not halt CPU. (Debug logic
+# also reset by reset pin?).` is SEGGER's generic guess and is printed IDENTICALLY
+# in passing runs; do NOT read it as evidence the pin reset cleared debug logic.
+#
+# A `Verify failed` in such a run says NOTHING about MRAM content: `Expected D0
+# read AA` alongside `Could not read memory.` is the gated-DAP floating-read tell,
+# not a byte comparison.  Name this failure for what it is.
 if grep -qiE "Failed to halt CPU|Cannot read register 16 \(XPSR\) while CPU is running|Failed to preserve target RAM" /tmp/flowd-mramxip.out; then
   echo "!! HALT FAILED -- the core was RUNNING for the whole flash sequence."
   grep -iE "Core did not halt after reset|VC_CORERESET did not halt CPU|Failed to halt CPU|Cannot read register 16 \(XPSR\) while CPU is running|Failed to preserve target RAM" /tmp/flowd-mramxip.out | head -5
