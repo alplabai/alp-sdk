@@ -157,17 +157,22 @@ alp_status_t rv3028c7_register_handler(rv3028c7_t            *ctx,
 
 /**
  * @brief Read `STATUS`, dispatch registered handlers for each set
- *        bit, and write-back the cleared bits to acknowledge.
+ *        bit, and acknowledge only what was actually dispatched.
  *
  * Call from a bottom-half / work-queue context after the INT line
- * asserts.  Returns the raw `STATUS` byte read (post-dispatch) for
- * diagnostic logging; the actual clear-write happens internally.
+ * asserts.  This may perform more than one internal STATUS
+ * read/dispatch/clear round trip: a source that latches while an
+ * earlier handler is still doing its own I2C work (or during the
+ * acknowledge write itself) is not lost -- it gets its own dispatch
+ * pass on this same call instead of being silently cleared unseen.
  *
  * @param ctx          RV-3028-C7 driver context (must be initialised first).
- * @param status_seen  Output: the latched STATUS value before the
- *                     clear.  May be NULL if the caller doesn't care.
- * @return ALP_OK on a clean dispatch + clear cycle, ALP_ERR_IO on
- *         a transport failure.
+ * @param status_seen  Output: the latched STATUS value from the
+ *                     first read, before any dispatch or clear.  May
+ *                     be NULL if the caller doesn't care.
+ * @return ALP_OK on a clean dispatch + clear cycle, ALP_ERR_IO on a
+ *         transport failure, ALP_ERR_NOT_READY if @p ctx has not
+ *         been initialised.
  */
 alp_status_t rv3028c7_dispatch_irq(rv3028c7_t *ctx, uint8_t *status_seen);
 

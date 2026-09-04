@@ -12,8 +12,9 @@
  *   - Board-side ISR fires when the INT pin falls.
  *   - The ISR posts a work item that calls rv3028c7_dispatch_irq().
  *   - dispatch_irq reads STATUS, fans out to the per-source
- *     handlers we registered below, and write-0-to-clears every
- *     fired flag.
+ *     handlers we registered below, and acknowledges only the
+ *     flags it actually dispatched -- re-checking after the
+ *     acknowledge for anything that raced it.
  *
  * This example doesn't wire a real INT-pin GPIO -- it calls
  * dispatch_irq directly from main() to show the flow.  On real

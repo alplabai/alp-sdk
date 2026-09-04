@@ -15,7 +15,8 @@ application's state-machine cleanly separates concerns.
    source.
 3. `rv3028c7_set_alarm(...)` configures a minute-match alarm.
 4. `rv3028c7_dispatch_irq(...)` reads STATUS, invokes registered
-   handlers, write-0-to-clears every fired flag.
+   handlers, and acknowledges only the flags it actually dispatched
+   -- re-checking after the acknowledge for anything that raced it.
 5. `rv3028c7_route_clkout(...)` reprograms the CLKOUT pin to act
    as a second physical interrupt line tied to a specific source.
 

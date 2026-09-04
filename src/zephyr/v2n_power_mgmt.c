@@ -28,6 +28,18 @@
  *     BRD_I²C lock held so a race with the bridge dispatcher
  *     during the init read cannot land between the I²C
  *     transactions that the init issues.
+ *   - alp_z_v2n_power_mgmt_init() finishes k_work_init() and sets
+ *     g_pwr.initialised BEFORE it registers the callback or arms
+ *     the P65 interrupt, so no edge can land on an uninitialised
+ *     k_work or get dropped by the work handler's initialised
+ *     guard.  It also registers the callback BEFORE arming the
+ *     interrupt -- the reverse order leaves a window where the GPIO
+ *     controller can deliver an edge to a callback list that
+ *     doesn't contain us yet, losing it with nothing to retry.
+ *     Because P65 is edge-triggered, init also samples the pin once
+ *     the interrupt is live and submits the work item directly if
+ *     the line is already asserted -- an already-high pin never
+ *     generates a rising edge on its own.
  */
 
 #include "v2n_power_mgmt.h"
