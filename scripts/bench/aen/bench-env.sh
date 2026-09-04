@@ -292,7 +292,15 @@ bench_jlink_exe() {
 # read-only path needs this one.
 bench_jlink_assert_connected() {
 	local out="$1" ctx="${2:-J-Link}"
-	local pat='Cannot connect to the probe/programmer|Failed to connect to target|Could not connect to target|No J-Link device found'
+		# 'Could not connect to' is deliberately left OPEN-ENDED.  JLinkExe prints
+	# "Could not connect to the target device." -- the old pattern demanded
+	# "Could not connect to target" (no "the ... device"), so it NEVER matched,
+	# and because the log still contained a `J-Link>` prompt the guard passed a
+	# session that had connected to nothing.  A read-back from that session
+	# decoded to an EMPTY RAM console and was rendered as app output -- exactly
+	# the alp-sdk#1318 failure this function exists to catch.  Bench-measured
+	# again 2026-09-04.
+	local pat='Cannot connect to the probe/programmer|Failed to connect to target|Could not connect to|No J-Link device found'
 	if [ ! -s "$out" ]; then
 		echo "bench-env: $ctx produced no J-Link output at all ('$out' missing or empty)." >&2
 		return 7

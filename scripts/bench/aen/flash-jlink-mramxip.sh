@@ -315,6 +315,28 @@ if grep -qiE "verification failed @|error while programming flash" /tmp/flowd-mr
   grep -iE "verification failed @|error while programming flash" /tmp/flowd-mramxip.out | head -3
   echo "   Deferring to the explicit verifybin results below, which read the whole image back."
 fi
+# #1902 -- A FAILED `loadbin` IS NOT SURVIVABLE, AND `verifybin` DOES NOT CATCH IT.
+#
+# Bench-measured 2026-09-04: a run whose ATOC `loadbin` died with
+#   ****** Error: Timeout while preparing target, core does not stop. (PC = 0x80015190, XPSR = 0x01000003, SP = 0x20002EA8)!
+#   Failed to perform RAMCode-sided Prepare()
+#   Unspecified error -1
+# still reported `verify: 2/2` and exited 0.  It passed because the PREVIOUS
+# app's ATOC was still resident and happened to satisfy the comparison -- the
+# resident ATOC reported size 78932 (aen-gpu2d-bench's) while the app being
+# flashed was aen-wdt-feed at 78752.  So counting `verifybin` successes is NOT
+# sufficient: a stale-but-self-consistent blob verifies clean.
+#
+# Fail on the loadbin error directly.  This must run BEFORE the verify count, so
+# a false 2/2 can never mask it.
+if grep -qiE "Failed to perform RAMCode-sided Prepare\(\)|Timeout while preparing target|Failed to prepare for programming|Unspecified error -1" /tmp/flowd-mramxip.out; then
+  echo "!! LOADBIN FAILED -- at least one blob was NOT written to MRAM."
+  grep -iE "Timeout while preparing target|Failed to perform RAMCode-sided Prepare|Failed to prepare for programming|Unspecified error -1" /tmp/flowd-mramxip.out | head -4
+  echo "   Do NOT trust any 'Verify successful.' in this run: a stale resident blob"
+  echo "   from a previous flash can satisfy verifybin while the new one never landed."
+  echo "   slot0 and/or the ATOC are now MIXED -- erase and reflash before using this board."
+  exit 6
+fi
 verify_ok=$(grep -ci "verify successful" /tmp/flowd-mramxip.out || true)
 if grep -qiE "^Verify failed\.|mismatch" /tmp/flowd-mramxip.out; then
   echo "!! VERIFY FAILED -- the bytes on the part do NOT match the image."
