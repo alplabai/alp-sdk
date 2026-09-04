@@ -399,7 +399,8 @@ alp_i2c_t *alp_i2c_open(const alp_i2c_config_t *cfg);
  * @param[in] data  Source bytes.
  * @param[in] len   Byte count.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ * @return ALP_OK / ALP_ERR_INVAL (@p data NULL with @p len > 0) /
+ *         ALP_ERR_NOT_READY (NULL or closed @p bus) /
  *         ALP_ERR_IO (NACK / bus fault) / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, size_t len);
@@ -412,7 +413,8 @@ alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, si
  * @param[out] data  Destination buffer.
  * @param[in]  len   Byte count to read.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ * @return ALP_OK / ALP_ERR_INVAL (@p data NULL with @p len > 0) /
+ *         ALP_ERR_NOT_READY (NULL or closed @p bus) /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t len);
@@ -430,8 +432,9 @@ alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t le
  * @param[out] rdata  Receive buffer.
  * @param[in]  rlen   Read length.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
- *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ * @return ALP_OK / ALP_ERR_INVAL (@p wdata NULL with @p wlen > 0, or
+ *         @p rdata NULL with @p rlen > 0) / ALP_ERR_NOT_READY (NULL or
+ *         closed @p bus) / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_i2c_write_read(alp_i2c_t     *bus,
                                 uint8_t        addr,
@@ -668,7 +671,8 @@ alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg);
  * buffer its own cache line(s).  This does not apply to @p tx, which is
  * only ever cleaned, never invalidated.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ * @return ALP_OK / ALP_ERR_INVAL (@p len exceeds the per-transfer
+ *         ceiling) / ALP_ERR_NOT_READY (NULL or closed @p bus) /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, size_t len);
@@ -680,7 +684,8 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
  * @param[in] tx   Bytes to send.  Must be non-NULL when @p len > 0.
  * @param[in] len  Byte count.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ * @return ALP_OK / ALP_ERR_INVAL (@p tx NULL with @p len > 0) /
+ *         ALP_ERR_NOT_READY (NULL or closed @p bus) /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len);
@@ -692,7 +697,8 @@ alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len);
  * @param[out] rx   Receive buffer.  Must be non-NULL when @p len > 0.
  * @param[in]  len  Byte count.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ * @return ALP_OK / ALP_ERR_INVAL (@p rx NULL with @p len > 0) /
+ *         ALP_ERR_NOT_READY (NULL or closed @p bus) /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len);
@@ -909,7 +915,8 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg);
  * @param[in] data  Source bytes.
  * @param[in] len   Byte count.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ * @return ALP_OK / ALP_ERR_INVAL (@p data NULL with @p len > 0) /
+ *         ALP_ERR_NOT_READY (NULL or closed @p port) /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
@@ -934,7 +941,8 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
  * @param[in]  timeout_ms  Max wait for the whole call; 0 = poll once,
  *                         don't block.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ * @return ALP_OK / ALP_ERR_INVAL (@p data NULL with @p len > 0) /
+ *         ALP_ERR_NOT_READY (NULL or closed @p port) /
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t timeout_ms);

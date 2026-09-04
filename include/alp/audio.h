@@ -230,7 +230,11 @@ alp_status_t alp_audio_out_write(alp_audio_out_t *out,
  * @param[in] out  Handle from @ref alp_audio_out_open.
  * @param[in] vol  Linear scale 0..255.  Not in dB — caller does the
  *                 dB → linear conversion if needed.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT
+ *         (@p vol is not full-scale (255) and the format the handle was
+ *         opened with cannot be software-scaled by the backend -- e.g.
+ *         S24_LE / S32_LE on the Yocto and Zephyr backends, which only
+ *         scale S16_LE).
  */
 alp_status_t alp_audio_out_set_volume(alp_audio_out_t *out, uint8_t vol);
 
