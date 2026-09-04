@@ -1,4 +1,4 @@
-# 0033. Support policy is declared data with exactly one normative evaluator
+# 0034. Support policy is declared data with exactly one normative evaluator
 
 Status: Proposed
 Date: 2026-08-30
@@ -68,7 +68,7 @@ inherits that voice.
    **26** per-core `topology` entries across the eleven
    `metadata/e1m_modules/*.yaml` presets omit it, and `$defs.topology_entry` has
    `required: []`, so the preset half of that preference has never once been
-   exercised -- a customer's own `board.yaml cores.<id>.os` still reaches it
+   exercised -- a customer's own `board.yaml cores.\<id\>.os` still reaches it
    through the merge at `loader.py:165-179`, and 53 in-tree `board.yaml` files
    use it. For any core a customer does not name, the fall-back is the
    mechanism.

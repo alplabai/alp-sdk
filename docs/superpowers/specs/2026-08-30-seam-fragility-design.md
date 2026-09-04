@@ -193,7 +193,7 @@ Some rule genuinely will depend on consumer-side state the SDK cannot see —
 correctly today.
 
 **The governing decision for that residue is now
-[ADR 0033](../../adr/0033-support-policy-is-declared-data-with-one-normative-evaluator.md)**
+[ADR 0034](../../adr/0034-support-policy-is-declared-data-with-one-normative-evaluator.md)**
 (Proposed): alp-sdk declares support policy as data, and exactly **one**
 normative evaluator turns a declared policy into a verdict — consumers call it
 or carry a hash-pinned audited port, never a prose re-derivation. That evaluator
@@ -205,7 +205,7 @@ compatible with the non-goals below: "no embeddable policy engine" and "no pure
 data plus N interpreters" both stand unchanged, since the harm those name is
 *two* interpreters.
 
-ADR 0033 also settles a framing this spec was carrying loosely: a refusal that
+ADR 0034 also settles a framing this spec was carrying loosely: a refusal that
 enforces a **support decision** must say so rather than assert a hardware limit.
 The class refusal at `scripts/alp_orchestrate/validate.py:270-282`, reached from
 `loader.py:910`, tells the customer its runtime "is determined by the core
