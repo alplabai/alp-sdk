@@ -3,11 +3,16 @@
 # `mbedtls`; name is already canonical).
 #
 # Grounding (pinned Zephyr v4.4.0 workspace):
-#   * scripts/alp_project_emit/__init__.py:200-201 (_LIBRARY_KCONFIG) --
-#     "CONFIG_MBEDTLS=y", "CONFIG_MBEDTLS_BUILTIN=y",
+#   * "CONFIG_MBEDTLS=y", "CONFIG_MBEDTLS_BUILTIN=y",
 #     "CONFIG_ALP_MBEDTLS_PURE_C=y" -- all three real CONFIG_ lines,
-#     copied verbatim (base enable + Zephyr-in-tree-build choice + ALP-side
-#     always-on SW-fallback marker).
+#     copied verbatim into `integration.zephyr.kconfig` below (base enable
+#     + Zephyr-in-tree-build choice + ALP-side always-on SW-fallback
+#     marker), transcribed by scripts/alp_orchestrate/libraries.py:321
+#     (`zephyr_kconfig_lines`).  This bullet used to cite
+#     `_LIBRARY_KCONFIG["mbedtls"]` in scripts/alp_project_emit/__init__.py;
+#     that per-library dict no longer exists anywhere under scripts/ (the
+#     alp_project_emit package itself does still exist, so the citation
+#     read as live rather than obviously dead).
 #   * west module `mbedtls`, path modules/crypto/mbedtls -- resolved
 #     through Zephyr's own v4.4.0 west manifest via the
 #     `modules.name-allowlist` passthrough (west.yml:223 `- mbedtls`), not
@@ -22,15 +27,16 @@
 #     permissive Apache-2.0 option per the schema's copyleft-free
 #     allowlist (ADR 0018 non-goal).
 #
-# HW-backends: metadata/library-profiles/mbedtls/hw-backends.yaml carries
-# per-accelerator priority binding (CryptoCell, inline-AES, CAU via the
-# GD32 bridge, OPTIGA Trust M handshake offload -- all currently
-# `status: planned`); folded in WS6-c Phase 3 (needs library-v1 schema
-# extension).
+# HW-backends: this manifest's own `integration.zephyr.hw_backends:`
+# block below carries per-accelerator priority binding (CryptoCell,
+# inline-AES, CAU via the GD32 bridge, OPTIGA Trust M handshake
+# offload -- all currently `status: planned`); folded in from the
+# retired standalone metadata/library-profiles/mbedtls/hw-backends.yaml
+# in WS6-c Phase 3.
 #
 # No `requires:` -- CONFIG_ALP_MBEDTLS_PURE_C=y is the always-available
 # floor on every target this manifest's `integration.zephyr` section
-# supports; the HW crypto accelerators named in hw-backends.yaml above are
+# supports; the HW crypto accelerators named in `hw_backends:` above are
 # all still `status: planned`, so none is a real, satisfiable hard
 # requirement yet.
 #

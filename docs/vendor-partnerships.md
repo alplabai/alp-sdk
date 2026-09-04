@@ -65,7 +65,8 @@ application-processor line).  Don't confuse the two.
   diff against the public FSP; lands when the maintainer
   has bandwidth.
 - 📋 **DA9292 + V2N PMIC pad-routing confirmation.**  The
-  bring-up sequence in `chips/da9292/da9292.c::da9292_v2n_m1_enable_deepx_rail`
+  bring-up sequence in `da9292_v2n_m1_enable_deepx_rail`
+  (`chips/da9292/da9292.c`)
   encodes the maintainer's reading of the V2N schematic +
   the AROVx OTP variant trap.  Renesas' AE has confirmed
   the schematic; the OTP confirmation is open.
@@ -82,8 +83,7 @@ compiler licence + DA9292 OTP confirmation.
 ## Alif Semiconductor (AEN family)
 
 **Surface impact**: `examples/aen/` flagships +
-`chips/aen-isp` /`<alp/gpu2d.h>` AEN backends + the dual-
-image build flow for `mproc-mailbox`.
+`chips/aen-isp` /`<alp/gpu2d.h>` AEN backends.
 
 **Status update 2026-05-14 (verified against upstream)**:
 
@@ -101,8 +101,8 @@ matter for AEN builds.
 **Piece 1 -- HAL drivers (`hal_alif`)**: Apache-2.0,
 standalone, at
 [`github.com/alifsemi/hal_alif`](https://github.com/alifsemi/hal_alif).
-Latest release v2.2.0 (2026-03-27); steady release cadence
-(v2.1.0 Dec 2025, v2.0.0 Nov 2025).  Standard Zephyr-module
+We pin v2.3.0 (see `west.yml`); steady release cadence
+(v2.2.0 2026-03-27, v2.1.0 Dec 2025, v2.0.0 Nov 2025).  Standard Zephyr-module
 shape (`zephyr/module.yml` + `zephyr/Kconfig` + root
 `CMakeLists.txt`) -- structurally indistinguishable from
 `zephyrproject-rtos/hal_renesas` / `hal_nxp`.  Our `west.yml`
@@ -118,7 +118,7 @@ Alif boards at all, and Alif's own
 [`alifsemi/zephyr_alif`](https://github.com/alifsemi/zephyr_alif)
 fork was the only path to stock board files.  With v4.4 the
 upstream coverage is enough for SDK CI -- our example twister
-scenarios target `ensemble_e8_dk/ae402fa0e5597le0/rtss_hp` as
+scenarios target `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp` as
 the AEN proxy.  Customers wanting the **full** Alif EVK board
 catalogue (the older 8-board set under `alif_e7_*` naming) still
 fall back to `sdk-alif` (zas-v2.0.0-rc1) in the
@@ -370,11 +370,11 @@ live; nothing depends on it.
 
 **Open items**:
 
-- 📋 **v0.4 dual-image build flow.**  The `mproc-mailbox`
-  HE-side peer (§C.30) builds via single-target invocation
-  today; the dual-image sysbuild glue (under
-  `zephyr/sysbuild/aen/`) is an in-tree v0.4 gap, not gated
-  on any external repo.
+- ✅ **v0.4 dual-image build flow** (closed 2026-08-06, #1275).
+  `board.yaml` now declares both `m55_hp` and `m55_he` as real
+  project cores, so `tan build` builds the `mproc-mailbox`
+  HE-side peer (§C.30) alongside the HP side from one project --
+  no sysbuild glue, not gated on any external repo.
 - 📋 **Per-SoM HW baselines.**  Pillar 5 wants per-(SoM, OS)
   bench baselines under `tests/bench/baselines/`.  Those
   files have to be captured against real silicon, using the

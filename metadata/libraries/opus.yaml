@@ -14,9 +14,13 @@
 #   * licence BSD-3-Clause -- Xiph.Org's libopus is released under the
 #     3-clause BSD licence (COPYING in the upstream tree).
 #   * enable symbol CONFIG_ALP_OPUS_PURE_C -- the SW-fallback (pure-C, no
-#     SIMD/DMA) wiring transcribed verbatim from
-#     `_LIBRARY_KCONFIG["opus"]`
-#     (scripts/alp_project_emit/__init__.py:262).
+#     SIMD/DMA) wiring.  This bullet used to cite
+#     `_LIBRARY_KCONFIG["opus"]` in scripts/alp_project_emit/__init__.py;
+#     that per-library dict no longer exists anywhere under scripts/ (the
+#     alp_project_emit package itself does still exist, so the citation
+#     read as live rather than obviously dead).  The mechanism today is
+#     the `integration.zephyr.kconfig` array below, transcribed verbatim
+#     by scripts/alp_orchestrate/libraries.py:321 (`zephyr_kconfig_lines`).
 #
 # HW-backends: see metadata/library-profiles/opus/ (folded WS6-c Phase 3).
 # Declares capability-keyed SIMD (helium_mve/neon/fpu) and an always-on

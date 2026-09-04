@@ -72,12 +72,32 @@
  *   into src/yocto/CMakeLists.txt's ALP_SDK_USE_DRPAI_V2N block so the
  *   cross-build resolves mera2_runtime/drp_tvm_rt/tvm_runtime.
  *
+ * DRP-AI working-memory arena
+ *   LoadModel()'s second argument is the PHYSICAL base of the DRP-AI
+ *   reserved working-memory region -- the arena the runtime allocates the
+ *   model's DRP descriptors, weights and I/O buffers out of, and which the
+ *   DRP-AI hardware DMAs against directly.  It is board DT policy, never a
+ *   compile-time constant: a wrong base does not fail loudly, it makes the
+ *   NPU scribble over whatever else owns that RAM.  _drpai_mem_start()
+ *   below asks the driver, exactly as all 16 vendor call sites do.
+ *
+ *   The DT is the single source of truth for that arena -- its carve-outs,
+ *   which of them &drpai0 claims, and why both memory properties are
+ *   mandatory are documented once, at the &drpai0 node in
+ *   meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-drpai.dtsi.
+ *   (e1m-v2n-som.dtsi declares the reserved-memory carve-outs and
+ *   #includes that file; the override itself lives apart because the
+ *   `drpai0` label only exists when the optional meta-rz-drpai layer is in
+ *   bblayers.conf.)  None of it is restated here; this file only ASKS the
+ *   driver.
+ *
  * Dispatcher contract
  *   Mirrors the 7-symbol hook shape the Yocto dispatcher in
- *   inference_yocto.c calls.  The handle layout below MUST match
- *   inference_yocto.c's `struct alp_inference` exactly.
+ *   inference_yocto.c calls.  The handle layout (struct alp_inference)
+ *   is the shared definition in inference_handle_internal.h (issue #1257).
  */
 
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -88,29 +108,119 @@
 #include <tuple>
 #include <vector>
 
+/* Target-only.  <linux/drpai.h> is the DRP-AI driver uapi header; it ships
+ * into the RZ/V sysroot as ${includedir}/linux/drpai.h from meta-rz-drpai's
+ * drpai_1.4.0 recipe, so the ALP_SDK_USE_DRPAI_V2N=ON build must carry a
+ * `drpai` DEPENDS (recipe-side; not this file's to add). */
+#include <fcntl.h>
+#include <linux/drpai.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+
 #include "MeraDrpRuntimeWrapper.h"
 
 extern "C" {
 #include "alp/inference.h"
+
+#include "inference_handle_internal.h"
 }
 
-/* Mirror of the yocto dispatcher's struct alp_inference layout.  MUST
- * match inference_yocto.c exactly -- keep in sync with the dispatcher. */
-struct alp_inference_handle_layout {
-	bool                    in_use;
-	alp_inference_backend_t backend;
-	void                   *be_state;
-};
+/* The dispatcher's `struct alp_inference` comes from the shared internal
+ * header (issue #1257) -- this file used to hand-mirror the layout, with a
+ * different field order that only worked because pointers are 8 bytes. */
 
 namespace
 {
 
-/* DRP-AI runtime memory window start address on the RZ/V2N.  The DRP-AI
- * reserved CMA region base; the tutorial apps use the value the kernel
- * exports via /sys (udmabuf) -- a placeholder here, resolved on-target
- * before bench bring-up.  TODO(bench): read the real base from the
- * drpai udmabuf/CMA node rather than hard-coding. */
-constexpr uint64_t kDrpAiMemStart = 0x80000000ULL;
+/* DRP-AI driver device node.  Uniform across every vendor sample. */
+constexpr const char *kDrpAiDevice = "/dev/drpai0";
+
+/** Map a DRP-AI driver errno onto the portable status enum.
+ *
+ *  Two of the driver's failure modes are transient and worth retrying, so
+ *  they do not collapse into the ALP_ERR_IO catch-all:
+ *    - ETIMEDOUT                   down_timeout(&priv->sem, MAX_SEM_TIMEOUT)
+ *                                  expired -- 1000 ms; someone else holds the
+ *                                  driver.
+ *    - EINPROGRESS / EADDRNOTAVAIL the V2N shared-memory exclusion lock
+ *                                  (R_DRPAI_LockDrpaiContStatus) is contended
+ *                                  or already held.
+ *  Everything else stays ALP_ERR_IO -- notably ENOENT, i.e. /dev/drpai0 is
+ *  absent because &drpai0 never got enabled, which is what lets a caller
+ *  tell "no DRP-AI on this board" from "busy, retry".
+ */
+alp_status_t _drpai_errno_to_status(int err)
+{
+	switch (err) {
+	case ETIMEDOUT:
+		return ALP_ERR_TIMEOUT;
+	case EINPROGRESS:
+	case EADDRNOTAVAIL:
+		return ALP_ERR_BUSY;
+	default:
+		return ALP_ERR_IO;
+	}
+}
+
+/** Resolve the physical base of the DRP-AI reserved working-memory arena
+ *  and return it in @p out -- the value LoadModel() takes as its start
+ *  address (see the "DRP-AI working-memory arena" note in the file header).
+ *
+ *  Asked of the driver, never hard-coded: the driver returns exactly the
+ *  base its DT `memory-region` phandle resolves to, so this tracks the
+ *  board DT instead of duplicating it.  A stale constant here would point
+ *  the NPU's DMA at whatever else owns that RAM -- on the Alp SoM the old
+ *  0x80000000 was `mmp_reserved: linux,multimedia`, the mmngr video buffer
+ *  pool, not the NPU carve-out at 0xd0000000.
+ *
+ *  A fresh fd per call is deliberate, and it is NOT free.
+ *
+ *  Deliberate: DRPAI_GET_DRPAI_AREA is stateful per-fd.  The alternating
+ *  cursor is `get_drpai_area_count` in the per-fd drpai_rw_status, zeroed in
+ *  drpai_open() and toggled only when drpai_region2_size != 0, so a fresh fd
+ *  always yields region 1 -- the arena the runtime wants, and what the vendor
+ *  samples do.
+ *
+ *  Not free: drpai_open() is not a cheap open().  It takes
+ *  down_timeout(&priv->sem, MAX_SEM_TIMEOUT) (1000 ms), takes the
+ *  shared-memory exclusion lock, and when refcount == 1 runs
+ *  drpai_open_process(); the matching ::close(fd) runs drpai_close_process(),
+ *  which RESETS the DRP-AI, when it is the sole opener.  So on a first
+ *  alp_inference_open() this probe power-cycles the NPU, and LoadModel() then
+ *  opens its own fd and initialises it again.  Cheap enough at open() time,
+ *  but do not call this per inference.
+ *
+ *  @return ALP_OK on success; otherwise the mapped driver errno --
+ *          ALP_ERR_TIMEOUT / ALP_ERR_BUSY when the driver is contended,
+ *          ALP_ERR_IO when the node is absent (i.e. &drpai0 was never
+ *          enabled) or the ioctl fails for any other reason.
+ */
+alp_status_t _drpai_mem_start(uint64_t &out)
+{
+	const int fd = ::open(kDrpAiDevice, O_RDWR | O_CLOEXEC);
+	if (fd < 0) {
+		return _drpai_errno_to_status(errno);
+	}
+
+	drpai_data_t area = {};
+	const int    rc   = ::ioctl(fd, DRPAI_GET_DRPAI_AREA, &area);
+	/* Latch errno before ::close(), which clobbers it (and resets the
+	 * DRP-AI -- see above). */
+	const int err = errno;
+	::close(fd);
+
+	if (rc != 0) {
+		return _drpai_errno_to_status(err);
+	}
+	/* A zero-sized area means the driver probed without a usable
+	 * memory-region; treat it as hard failure rather than DMA at 0. */
+	if (area.size == 0) {
+		return ALP_ERR_IO;
+	}
+
+	out = area.address;
+	return ALP_OK;
+}
 
 /** Recursively remove a staging directory created by _stage_drpai_blob().
  *  No-op on an empty path.  Best-effort: the path is always an mkdtemp()
@@ -210,12 +320,23 @@ alp_inference_dtype_t mera_dtype_to_alp(InOutDataType t)
 extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h_,
                                                  const alp_inference_config_t *cfg)
 {
-	auto *h = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	struct alp_inference *h = h_;
 
 	/* For ALP_INFERENCE_MODEL_DRPAI the blob is the `drpai_dir` tar bytes
      * (see the header comment).  Reject an empty blob early. */
 	if (cfg->model_data == nullptr || cfg->model_size == 0) {
 		return ALP_ERR_INVAL;
+	}
+
+	/* Ask the driver for the working-memory arena base FIRST, before any
+     * allocation or staging: a board with no DRP-AI (or a busy one) then
+     * fails here, without the untar-then-rm_rf round trip.  No constant
+     * fallback on failure: guessing this address is a memory-corruption
+     * class bug, so a driver that cannot answer fails the open instead. */
+	uint64_t     mem_start = 0;
+	alp_status_t mem       = _drpai_mem_start(mem_start);
+	if (mem != ALP_OK) {
+		return mem;
 	}
 
 	auto *st = new (std::nothrow) DrpaiState();
@@ -233,7 +354,7 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
 
 	/* LoadModel returns false on a missing/corrupt object dir or a DRP-AI
      * memory-mapping failure. */
-	if (!st->runtime.LoadModel(st->model_dir, kDrpAiMemStart)) {
+	if (!st->runtime.LoadModel(st->model_dir, mem_start)) {
 		std::string dir = st->staged_dir;
 		delete st; /* tears down the runtime before we remove the dir */
 		_rm_rf(dir);
@@ -256,14 +377,14 @@ extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h
 
 extern "C" std::size_t alp_inference_drpai_num_inputs(struct alp_inference *h_)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DrpaiState *>(h->be_state);
 	return (st != nullptr) ? st->in_info.size() : 0u;
 }
 
 extern "C" std::size_t alp_inference_drpai_num_outputs(struct alp_inference *h_)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DrpaiState *>(h->be_state);
 	return (st != nullptr) ? st->out_info.size() : 0u;
 }
@@ -272,7 +393,7 @@ extern "C" alp_status_t alp_inference_drpai_get_input(struct alp_inference   *h_
                                                       std::size_t             index,
                                                       alp_inference_tensor_t *out)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DrpaiState *>(h->be_state);
 	if (st == nullptr) {
 		return ALP_ERR_NOT_READY;
@@ -298,7 +419,7 @@ extern "C" alp_status_t alp_inference_drpai_get_output(struct alp_inference   *h
                                                        std::size_t             index,
                                                        alp_inference_tensor_t *out)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DrpaiState *>(h->be_state);
 	if (st == nullptr) {
 		return ALP_ERR_NOT_READY;
@@ -328,7 +449,7 @@ extern "C" alp_status_t alp_inference_drpai_get_output(struct alp_inference   *h
 
 extern "C" alp_status_t alp_inference_drpai_invoke(struct alp_inference *h_)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DrpaiState *>(h->be_state);
 	if (st == nullptr) {
 		return ALP_ERR_NOT_READY;
@@ -355,7 +476,7 @@ extern "C" alp_status_t alp_inference_drpai_invoke(struct alp_inference *h_)
 
 extern "C" void alp_inference_drpai_close(struct alp_inference *h_)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DrpaiState *>(h->be_state);
 	if (st == nullptr) {
 		return;

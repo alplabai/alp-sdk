@@ -98,29 +98,69 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = (len == 0) ? ALP_OK : bus->state.ops->transceive(&bus->state, tx, rx, len);
+	alp_status_t rc;
+	if (len == 0) {
+		rc = ALP_OK;
+	} else if (bus->state.ops->transceive == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = bus->state.ops->transceive(&bus->state, tx, rx, len);
+	}
 	alp_handle_op_leave(&bus->active_ops);
 	return rc;
 }
 
 alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len)
 {
+	/* Lifecycle gate FIRST (issues #1734/#1834): a NULL-or-closed bus
+	 * must answer ALP_ERR_NOT_READY regardless of tx/len shape -- this
+	 * used to delegate straight to alp_spi_transceive, but the
+	 * malformed-argument check below ran before that delegation and
+	 * so won on a closed/NULL bus, answering ALP_ERR_INVAL instead. */
+	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
 	/* Half-duplex contract (public header): tx must be non-NULL when
      * len > 0.  alp_spi_transceive's NULL semantics (NULL tx = "send
      * 0xFF") are a full-duplex convenience this half-duplex wrapper
      * must NOT inherit -- forwarding a NULL straight through would
      * silently turn an invalid write call into a real bus transfer. */
-	if (len > 0 && tx == NULL) return ALP_ERR_INVAL;
-	return alp_spi_transceive(bus, tx, NULL, len);
+	alp_status_t rc;
+	if (tx == NULL && len > 0) {
+		rc = ALP_ERR_INVAL;
+	} else if (len == 0) {
+		rc = ALP_OK;
+	} else if (bus->state.ops->transceive == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = bus->state.ops->transceive(&bus->state, tx, NULL, len);
+	}
+	alp_handle_op_leave(&bus->active_ops);
+	return rc;
 }
 
 alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len)
 {
+	/* Lifecycle gate FIRST -- see alp_spi_write above; same #1734/
+	 * #1834 ordering fix. */
+	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
 	/* Half-duplex contract (public header): rx must be non-NULL when
      * len > 0 -- same reasoning as alp_spi_write above (NULL rx =
      * "discard MISO" is a transceive-only convenience). */
-	if (len > 0 && rx == NULL) return ALP_ERR_INVAL;
-	return alp_spi_transceive(bus, NULL, rx, len);
+	alp_status_t rc;
+	if (rx == NULL && len > 0) {
+		rc = ALP_ERR_INVAL;
+	} else if (len == 0) {
+		rc = ALP_OK;
+	} else if (bus->state.ops->transceive == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = bus->state.ops->transceive(&bus->state, NULL, rx, len);
+	}
+	alp_handle_op_leave(&bus->active_ops);
+	return rc;
 }
 
 void alp_spi_close(alp_spi_t *bus)
@@ -130,7 +170,7 @@ void alp_spi_close(alp_spi_t *bus)
 	 * state.ops (issue #629). Losing the CAS (already closed/closing/
 	 * never-opened) makes this a no-op, matching the existing
 	 * void-close idempotency contract. */
-	if (!alp_handle_begin_close(&bus->lifecycle, &bus->active_ops)) return;
+	if (!alp_handle_begin_close_blocking(&bus->lifecycle, &bus->active_ops)) return;
 	if (bus->state.ops != NULL && bus->state.ops->close != NULL) {
 		bus->state.ops->close(&bus->state);
 	}
@@ -225,6 +265,8 @@ alp_status_t alp_spi_target_transceive(alp_spi_target_t *bus,
 		 * alp_spi_transceive): a target cannot stage a zero-length
 		 * transfer for the external controller to clock. */
 		rc = ALP_ERR_INVAL;
+	} else if (bus->state.ops->target_transceive == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
 	} else {
 		rc = bus->state.ops->target_transceive(&bus->state, tx, rx, len, rx_len, timeout_ms);
 	}
@@ -243,6 +285,13 @@ alp_status_t alp_spi_target_close(alp_spi_target_t *tgt)
 		}
 		return ALP_OK; /* already closed / closing elsewhere */
 	}
+	/* No target_close == NULL guard here: alp_spi_target_open() already
+	 * rejects target_open/target_transceive/target_close as a set, so an
+	 * open target handle's target_close is guaranteed non-NULL.  A guard
+	 * on this path would be dead code whose only live effect is worse
+	 * than what it replaces -- the rc != ALP_OK branch below re-arms
+	 * LC_IDLE without releasing the slot, so a reachable NOSUPPORT here
+	 * would permanently leak a pool slot instead of crashing. */
 	alp_status_t rc = tgt->state.ops->target_close(&tgt->state);
 	if (rc != ALP_OK) {
 		/* Backend still owns a timed-out transfer (armed in the

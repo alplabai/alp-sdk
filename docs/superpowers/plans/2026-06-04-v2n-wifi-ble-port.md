@@ -1,16 +1,24 @@
 # V2N/V2M Wi-Fi + BLE Port Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Active.** Implementation plan dated 2026-06-04; the work below is not
+> finished. Tracked by #479 (V2N/V2M Murata CYW55513 Wi-Fi/BLE Yocto
+> stack is missing). Only the side-channel GPIO driver
+> (`include/alp/chips/murata_lbee5hy2fy.h`, `[UNTESTED]`) exists today --
+> the SDIO/brcmfmac Wi-Fi stack, BT UART/BlueZ stack and Yocto DT/kernel
+> wiring below have not been built. Cross-check the current tree before
+> treating a step as done, but do not discard this as history.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** Bring the Murata LBEE5HY2FY-922 (Infineon CYW55513) Wi-Fi 6 + BT 5.4 module up on V2N/V2M: `wlan0` (SDIO/brcmfmac backports) + `hci0` (HCI UART/BlueZ) on Linux/A55, GD32-owned REG_ON power path, validated on silicon.
 
 **Architecture:** GD32 bridge gains pad-map bits 18/19 (BT/WL_REG_ON on PE14/PE15, boot default-on). Linux gets a kernel config fragment (kernel cfg80211 OUT, BT stack IN), DT patches 0014/0015 (SDHI1→WLAN on the dedicated SD1 pins; RSCI BT UART), the Murata `cyw-fmac` backports kmod, and murata-wireless firmware blobs. Bench-proof first (hand-built artifacts over ssh), then productionize (Yocto recipes in meta-alp-sdk + patch series), then V2M.
 
-**Tech Stack:** GD32 firmware (gd32 + stub HALs), Zephyr twister (native_sim) for host-side smokes, WSL kernel build (`kbuild-cip43`, 6.1.141), backports/cyw-fmac, dtc, Yocto/kas, bench over COM24 + ssh (`root@192.168.1.198`) + J-Link.
+**Tech Stack:** GD32 firmware (gd32 + stub HALs), Zephyr twister (native_sim) for host-side smokes, WSL kernel build (`kbuild-cip43`, 6.1.141), backports/cyw-fmac, dtc, Yocto/kas, bench over COM24 + ssh (`root@<bench-host>`) + J-Link.
 
 **Spec:** `docs/superpowers/specs/2026-06-04-v2n-wifi-ble-port-design.md`
 
-**Cross-session coordination (read first):** another session is concurrently editing `firmware/gd32-bridge/` (LCD sideband work; fw moved v0.2.3→v0.2.8, protocol may move past 0.6.0). **LAYOUT CHANGE 2026-06-05 (fw v0.2.8 refactor):** the monolithic `hal/bridge_hw_gd32.c` was split move-only into per-peripheral TUs under `hal/gd32/` — `gpio_pad_map[]` + GPIO bodies now live in `hal/gd32/gpio.c`, boot bring-up in `hal/gd32/init.c`, shared decls in `hal/gd32/gd32_common.h` (note: `GPIO_PAD_MAP_COUNT` is now a literal there — adding pad rows means bumping it + the `_Static_assert` keeps you honest). ALL work happens in a separate worktree branched from **latest** `dev`; before flashing the GD32 or merging, re-check `git -C <alp-sdk> log dev -3` and renumber the protocol bump / re-sequence J-Link use if needed.
+**Cross-session coordination (read first):** another session is concurrently editing `gd32-bridge-firmware:` (LCD sideband work; fw moved v0.2.3→v0.2.8, protocol may move past 0.6.0). **LAYOUT CHANGE 2026-06-05 (fw v0.2.8 refactor):** the monolithic `hal/bridge_hw_gd32.c` was split move-only into per-peripheral TUs under `hal/gd32/` — `gpio_pad_map[]` + GPIO bodies now live in `hal/gd32/gpio.c`, boot bring-up in `hal/gd32/init.c`, shared decls in `hal/gd32/gd32_common.h` (note: `GPIO_PAD_MAP_COUNT` is now a literal there — adding pad rows means bumping it + the `_Static_assert` keeps you honest). ALL work happens in a separate worktree branched from **latest** `dev`; before flashing the GD32 or merging, re-check `git -C <alp-sdk> log dev -3` and renumber the protocol bump / re-sequence J-Link use if needed.
 
 ---
 
@@ -18,9 +26,9 @@
 
 | File | Change | Responsibility |
 |---|---|---|
-| `firmware/gd32-bridge/hal/gd32/gpio.c` + `gd32_common.h` + `init.c` | modify | pad-map +2 rows (+COUNT bump), boot REG_ON sequence |
-| `firmware/gd32-bridge/hal/bridge_hw_stub.c` | modify | stub parity for bits 18/19 |
-| `firmware/gd32-bridge/src/protocol.h` | modify | `PROTOCOL_VERSION_MINOR` bump |
+| `gd32-bridge-firmware:hal/gd32/gpio.c` + `gd32_common.h` + `init.c` | modify | pad-map +2 rows (+COUNT bump), boot REG_ON sequence |
+| `gd32-bridge-firmware:hal/bridge_hw_stub.c` | modify | stub parity for bits 18/19 |
+| `gd32-bridge-firmware:src/protocol.h` | modify | `PROTOCOL_VERSION_MINOR` bump |
 | `docs/gd32-bridge-protocol.md` | modify | §3.1 REG_ON bit rows + boot-default note |
 | `include/alp/chips/gd32g553.h` | modify | REG_ON bit/mask constants (Doxygen) |
 | `include/alp/chips/murata_lbee5hy2fy.h` | modify | wiring table: UART instance, LPO, mask bits; drop `[UNTESTED]` after HIL |
@@ -83,9 +91,9 @@ Resolves spec §9 rows 2–3. No code; produces facts used by Tasks 7/8 and 13.
 REQUIRED SUB-SKILL: `extending-the-gd32-bridge-protocol` (covers version-bump etiquette, doc table, host-driver lockstep).
 
 **Files:**
-- Modify: `firmware/gd32-bridge/hal/gd32/gpio.c` (`gpio_pad_map[]` + `bridge_hw_gpio_write`), `hal/gd32/gd32_common.h` (`GPIO_PAD_MAP_COUNT` literal), `hal/gd32/init.c` (boot loop) — anchor on symbols (post v0.2.8 TU split)
-- Modify: `firmware/gd32-bridge/hal/bridge_hw_stub.c`
-- Modify: `firmware/gd32-bridge/src/protocol.h`
+- Modify: `gd32-bridge-firmware:hal/gd32/gpio.c` (`gpio_pad_map[]` + `bridge_hw_gpio_write`), `hal/gd32/gd32_common.h` (`GPIO_PAD_MAP_COUNT` literal), `hal/gd32/init.c` (boot loop) — anchor on symbols (post v0.2.8 TU split)
+- Modify: `gd32-bridge-firmware:hal/bridge_hw_stub.c`
+- Modify: `gd32-bridge-firmware:src/protocol.h`
 - Modify: `docs/gd32-bridge-protocol.md`
 
 - [ ] **Step 1:** In `hal/gd32/gpio.c`, append to `gpio_pad_map[]` (after the `{ GPIOD, GPIO_PIN_1 },  /* bit 17 = E1M IO35 */` row; then bump `GPIO_PAD_MAP_COUNT` 18u→20u in `hal/gd32/gd32_common.h` — the `_Static_assert` in gpio.c enforces it):
@@ -162,7 +170,7 @@ re-enumerate.
 - [ ] **Step 7:** Commit:
 
 ```bash
-git add firmware/gd32-bridge/hal/gd32/gpio.c firmware/gd32-bridge/hal/gd32/gd32_common.h firmware/gd32-bridge/hal/gd32/init.c firmware/gd32-bridge/hal/bridge_hw_stub.c firmware/gd32-bridge/src/protocol.h docs/gd32-bridge-protocol.md
+git add gd32-bridge-firmware:hal/gd32/gpio.c gd32-bridge-firmware:hal/gd32/gd32_common.h gd32-bridge-firmware:hal/gd32/init.c gd32-bridge-firmware:hal/bridge_hw_stub.c gd32-bridge-firmware:src/protocol.h docs/gd32-bridge-protocol.md
 git commit -q -m "feat(gd32-bridge): REG_ON pad-map bits 18/19, boot default-on for Murata Wi-Fi/BT"
 ```
 
@@ -248,14 +256,14 @@ grep -E "^CONFIG_(CFG80211|BT|BT_HCIUART|BT_HCIUART_BCM|RFKILL)" .config
 
 Expected: `CFG80211` absent/`is not set`, `CONFIG_BT=m`, `CONFIG_BT_HCIUART=m`, `CONFIG_BT_HCIUART_BCM=y`, `CONFIG_RFKILL=y`. (Kernel cfg80211 must be OUT — the backports package ships its own `compat.ko`+`cfg80211.ko`, which cannot stack on a built-in copy. RFKILL stays in-kernel; backports consumes it.)
 - [ ] **Step 3:** Build: `make -j$(nproc) Image modules` then `make modules_install INSTALL_MOD_PATH=/tmp/kmods`. Expected: clean build; `/tmp/kmods/lib/modules/6.1.141-cip43-yocto-standard/` exists.
-- [ ] **Step 4: deploy with backups.** Discover the boot flow first: `ssh root@192.168.1.198 'ls -la /boot; cat /proc/cmdline'` and check whether the dtb/Image come from a FAT partition (`mmcblk0p1`) — mount and list it. Back up the current Image + dtb on-board (`cp` to `/root/`), then scp the new `arch/arm64/boot/Image` over the deployed one and rsync the modules dir alongside the existing one (do NOT delete the old modules dir). Reboot via the detached-setsid recipe (see `reference-v2n-board-bench` — a `reboot` at the end of an `&&` chain silently dies).
+- [ ] **Step 4: deploy with backups.** Discover the boot flow first: `ssh root@<bench-host> 'ls -la /boot; cat /proc/cmdline'` and check whether the dtb/Image come from a FAT partition (`mmcblk0p1`) — mount and list it. Back up the current Image + dtb on-board (`cp` to `/root/`), then scp the new `arch/arm64/boot/Image` over the deployed one and rsync the modules dir alongside the existing one (do NOT delete the old modules dir). Reboot via the detached-setsid recipe (see `reference-v2n-board-bench` — a `reboot` at the end of an `&&` chain silently dies).
 - [ ] **Step 5:** Verify: `uname -r` unchanged, board boots, Ethernet still up, `zgrep` N/A — instead `test -d /sys/module/bluetooth || modprobe bluetooth && echo BT-OK`. Expected: `BT-OK`; `cfg80211` no longer present (`ls /sys/module/cfg80211` fails).
 
 ### Task 7: dtb — SDHI1→WLAN + BT UART (hand-patch via dtbwork flow)
 
 **Files:** WSL kernel worktree (`/tmp/n48wt2` per `V2N-Yocto/dtbwork/build_dtb.sh`); deployed dtb on the board
 
-- [ ] **Step 1: diagnose the live dtb.** Pull what the board actually boots: `ssh root@192.168.1.198 'dtc -I fs -O dts /proc/device-tree 2>/dev/null | grep -A14 "sd1 {"'` (or copy the dtb file found in Task 6 Step 4 and decompile in WSL). Compare against `cur.dts:307-326`. Record why pinctrl said "no mapping found" (expected: the deployed dtb's `sd1` group lost its `pins`/`pinmux` subnodes somewhere in the hand-patch history — the patch-series dtbs in `dtbwork/patched.dts` are intact).
+- [ ] **Step 1: diagnose the live dtb.** Pull what the board actually boots: `ssh root@<bench-host> 'dtc -I fs -O dts /proc/device-tree 2>/dev/null | grep -A14 "sd1 {"'` (or copy the dtb file found in Task 6 Step 4 and decompile in WSL). Compare against `cur.dts:307-326`. Record why pinctrl said "no mapping found" (expected: the deployed dtb's `sd1` group lost its `pins`/`pinmux` subnodes somewhere in the hand-patch history — the patch-series dtbs in `dtbwork/patched.dts` are intact).
 - [ ] **Step 2: author the overrides** in the kernel worktree's `r9a09g056n48-rzv2n-evk.dts`, following the patch-series append style (see `finalize.sh`'s 0010 example). First read the source dts + included dtsi for the real label names (`&sdhi1`, the `sd1` pinctrl group label, the Task-2 serial node label); then append:
 
 ```dts
@@ -550,7 +558,7 @@ plus image userland via the kas/local config used by the bake: `wpa-supplicant b
 REQUIRED SUB-SKILL: `running-local-ci` (full Windows + WSL gate list). 
 
 - [ ] **Step 1:** Run ALL local gates on the worktree (twister native_sim full testsuite-root, pytest `py -3.14`, clang-format diff, doc gates, schema checks). EXPECTED: all green; fix anything that isn't before proceeding.
-- [ ] **Step 2:** Rebase/merge against `dev` (the LCD session has been merging there): resolve `firmware/gd32-bridge/` overlaps — pad-map rows are append-only so conflicts are textual; **re-check the protocol version number is still the next free minor** and that their pad-map/doc changes didn't take bits 18/19. Re-run the firmware builds (stub + gd32) after merge. If the GD32 on the bench has moved past my flash, re-flash the merged firmware and re-run the functional tier + a Task-7-style SDIO enumeration check before calling it merged.
+- [ ] **Step 2:** Rebase/merge against `dev` (the LCD session has been merging there): resolve `gd32-bridge-firmware:` overlaps — pad-map rows are append-only so conflicts are textual; **re-check the protocol version number is still the next free minor** and that their pad-map/doc changes didn't take bits 18/19. Re-run the firmware builds (stub + gd32) after merge. If the GD32 on the bench has moved past my flash, re-flash the merged firmware and re-run the functional tier + a Task-7-style SDIO enumeration check before calling it merged.
 - [ ] **Step 3:** Merge to `dev` with the repo's `git merge --no-ff -m` pattern. No Claude co-author footer.
 
 ### Task 15: V2M101 validation

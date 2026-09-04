@@ -17,16 +17,34 @@ manifests + a pin allocator.  Reads SoM metadata
 (including the `pad_routes:` block) from this repo's
 `metadata/e1m_modules/<SKU>.yaml`; alp-sdk's metadata is
 alp-studio's input, not its output.  alp-sdk is fully usable
-without it.  See
-[`github.com/alplabai/alp-studio`](https://github.com/alplabai/alp-studio).
+without it.  Repo: `alplabai/alp-studio` (not a public GitHub repo).
 
 **Block** -- An alp-studio concept: a reusable feature unit
 (button-LED, OLED display, IMU read) that alp-studio's pin
 allocator places against the active SoM by consuming the SoM
 preset's `pad_routes:` from alp-sdk.
 
+**board** -- Ambiguous on its own; it carries three distinct meanings
+in this repo, and which one is meant is always determined by context:
+(1) a **Zephyr board target**, e.g. `alp_e1m_aen801_m55_hp/...`, passed
+to the build; (2) a **carrier preset** under `metadata/boards/*.yaml`,
+which describes a physical carrier; (3) the **project file**
+`board.yaml` at an application root, which is a target binding rather
+than a board description.  Prefer the specific term -- "board target",
+"carrier preset", or "board.yaml" -- over the bare word.
+
 **board.yaml** -- The single declarative file at the root of every
-application.  Top-level fields: board identity (`name` /
+application.  Despite the name it is neither a board description nor a
+SoM description: it is the **project's target binding**.  A board
+description lives in `metadata/boards/<preset>.yaml`; a SoM description
+lives in `metadata/e1m_modules/E1M-*.yaml`.  The schema requires only
+`som` and `cores` -- the board-shaped fields are optional, replaceable
+by a `preset:` reference, or omitted entirely for headless builds --
+while the file also carries application config with no board semantics
+at all (`models:`, `libraries:`, `ota:`, `diagnostics:`, `boot:`).  Read
+"board" here as the third of three distinct meanings in this repo (see
+**board** above); the name is kept for compatibility, not because it is
+precise (RFC #853).  Top-level fields: board identity (`name` /
 `description` / `hw_rev`, or `preset:` referencing a shared
 definition under `metadata/boards/<preset>.yaml`), `som.sku`,
 the per-core `cores.<id>` block (`os`, `app`, `peripherals`,
@@ -39,8 +57,11 @@ cross-core `ipc:`, `boot:` (MCUboot), `ota:` (Mender), `storage:`,
 `scripts/validate_board_yaml.py` against
 `metadata/schemas/board.schema.json`.
 
-**BRD_I2C** -- Board-management I²C bus on V2N + V2N-M1.  Hosts
-the PMICs, RTC, OPTIGA, supervisor MCU slave interface.
+**BRD_I2C** -- Board-management I²C bus.  On V2N + V2N-M1 it hosts
+the PMICs, RTC, OPTIGA, supervisor MCU slave interface (Renesas RIIC8
+master).  On the E1M-AEN801 it hosts the RTC/OPTIGA/TMP112 trio over
+SoC I2C0 (function C, `P7_0`/`P7_1` -- #1848; R2-sourced, not yet
+on-unit-verified -- see `docs/bring-up-aen.md` §5.1).
 
 **Bridge (GD32)** -- The V2N module's on-module supervisor MCU
 (GD32G553) reachable over a hybrid SPI + I2C transport.  See
@@ -63,7 +84,7 @@ auto-derived region table (from `metadata/socs/.../<part>.json
 variants[].sram_banks_kb` + `mram_mb`, computed by
 `_resolve_memory_map()`); SoM presets may override this with an
 explicit `memory_map:` block for non-stock partitioning.  The
-orchestrator emits matching reservations into both kernels' device
+planner emits matching reservations into both kernels' device
 trees so neither side maps the region as ordinary memory.
 
 **Chip driver** -- A non-OS-specific C module under `chips/<part>/`
@@ -150,7 +171,9 @@ the HiL rig plan in the internal `alp-sdk-internal` repo.
 Distinguishes board respins of the same SKU.
 
 **hw_info** -- Runtime structure populated from the on-module
-EEPROM manifest + BOARD_ID ADC.  See
+EEPROM manifest, which is the SoM's identity (no SoM-side ADC
+cross-check).  A carrier BOARD_ID divider, where wired, is a
+separate board-side path.  See
 [`<alp/hw_info.h>`](../include/alp/hw_info.h).
 
 **Inline AES** -- On-the-fly encryption of external flash traffic by
@@ -189,7 +212,7 @@ Declares its per-OS `integration:` wiring (Zephyr Kconfig / Yocto
 `IMAGE_INSTALL` / baremetal CMake), `requires:` compatibility
 constraints, curation `tier:`, pinned `version:`, and SPDX `license:`.
 Selected project-wide via the top-level `libraries: [<name>, ...]` key
-in `board.yaml`; the orchestrator emits the wiring and rejects an
+in `board.yaml`; the planner emits the wiring and rejects an
 incompatible selection at emit time.  See
 [`metadata/libraries/README.md`](../metadata/libraries/).
 
@@ -321,9 +344,9 @@ each preset is distinguishable in a directory listing.
 V2N modules.  Owns peripherals that don't fit on the main SoC's
 pinmux.  See [`docs/gd32-bridge.md`](gd32-bridge.md).
 
-**System manifest** -- `build/system-manifest.yaml`, the generated
-artefact produced by `tan build` (seeded by the SDK's `alp_orchestrate
---emit system-manifest`) that captures every slice's output binary,
+**System manifest** -- `build/system-manifest.yaml`, the generated artefact
+produced by Python Tan's relocated planner (and by the SDK's reference
+`alp_orchestrate --emit system-manifest`) that captures every slice's output binary,
 every IPC carve-out's resolved address, the boot order, and pointers
 to helper-MCU firmware.  The single source of truth consumed by `tan
 image`, `tan flash`, the OTA bundler, and (eventually) alp-studio.
@@ -346,7 +369,7 @@ version-pinned, built in alp-sdk CI for at least one board per
 supported family, ships a teaching example -- breakage blocks
 release.  **Tier B (recipe-only):** wiring + compatibility metadata
 are maintained and emitted, but the library is not built in alp-sdk
-CI; `python -m alp_cli doctor` labels it.  Promotion B → A requires a dedicated
+CI; `tan doctor` labels it.  Promotion B → A requires a dedicated
 owner and a CI build lane.  (Distinct from the driver/library
 integration ladder in
 [ADR 0017](adr/0017-alp-sdk-over-the-vendor-sdk.md).)
@@ -363,12 +386,10 @@ E1M-X form factor.  See [`docs/soms/v2n.md`](soms/v2n.md).
 SKUs `E1M-V2M101` / `E1M-V2M102`.  See
 [`docs/soms/v2n-m1.md`](soms/v2n-m1.md).
 
-**west** -- Zephyr's meta-tool for workspace management +
-sub-commands.  alp-sdk is plans-only (ADR
-[0020](adr/0020-sdk-owns-build-execution.md)) and no longer ships a
-build-executing west extension; building goes through the standalone
-`tan` CLI (`tan build`), which pre-flights `board.yaml` validation
-before delegating to `west build`.  The SDK still ships the
+**west** -- Zephyr's meta-tool for workspace management + sub-commands. Python
+Tan owns the normal in-process planner and build executor (ADR
+[0020](adr/0020-sdk-owns-build-execution.md)); alp-sdk retains metadata,
+schemas, and reference emitters but no build-executing west extension. The SDK still ships the
 non-build west extension commands `west alp-migrate` (board.yaml
 schema migration), `west alp-lock` (dependency lockfile), `west
 alp-quality` (quality-task registry), and `west alp-emit` (artefact

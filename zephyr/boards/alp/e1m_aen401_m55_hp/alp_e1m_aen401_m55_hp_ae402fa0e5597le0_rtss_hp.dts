@@ -19,12 +19,14 @@
  * Alif DFP soc.h/soc_features.h (AE402FA0E5597).  The `alif,xhci-uhc`
  * binding is created in Task 2; this DTS references it ahead of that.
  *
- * MRAM partition map (5632 KiB, same layout as AEN801):
+ * MRAM partition map (this HP core's 2944 KiB view of the 5632 KiB App
+ * MRAM, disjoint per-core slot0 windows, OTA DEFERRED -- #1069, same
+ * layout as AEN801):
  *   mcuboot  0x000000  64 KiB
- *   image-0  0x010000  2688 KiB   (primary slot, code-partition)
- *   image-1  0x2b0000  2688 KiB   (secondary OTA slot)
- *   scratch  0x550000  64 KiB
- *   storage  0x560000  128 KiB
+ *   image-0  0x2b0000  2688 KiB   (primary slot, code-partition)
+ *   reserved 0x550000  64 KiB   (ex-scratch; unused, OTA deferred)
+ *   storage  0x560000  96 KiB
+ *   atoc     0x578000  32 KiB    (SE-owned: SETOOLS top-anchors the ATOC here -- do NOT write, #1289)
  */
 
 /dts-v1/;
@@ -96,24 +98,24 @@
 				reg = <0x0 DT_SIZE_K(64)>;
 			};
 
-			slot0_partition: partition@10000 {
+			slot0_partition: partition@2b0000 {
 				label = "image-0";
-				reg = <0x10000 DT_SIZE_K(2688)>;
-			};
-
-			slot1_partition: partition@2b0000 {
-				label = "image-1";
 				reg = <0x2b0000 DT_SIZE_K(2688)>;
 			};
 
-			scratch_partition: partition@550000 {
-				label = "image-scratch";
+			reserved_partition: partition@550000 {
+				label = "reserved";
 				reg = <0x550000 DT_SIZE_K(64)>;
 			};
 
 			storage_partition: partition@560000 {
 				label = "storage";
-				reg = <0x560000 DT_SIZE_K(128)>;
+				reg = <0x560000 DT_SIZE_K(96)>;
+			};
+
+			atoc_partition: partition@578000 {
+				label = "atoc";
+				reg = <0x578000 DT_SIZE_K(32)>;
 			};
 		};
 	};

@@ -39,16 +39,6 @@ void alp_console_companion_set(cc3501e_t *ctx)
 	companion_cc3501e = ctx;
 }
 
-#if !IS_ENABLED(CONFIG_ALP_SDK_V2N_SUPERVISOR)
-/* Bridge-bus serialisation (Alif CC3501E).  The shell thread (companion command
- * bodies) and the async-connect result thread BOTH drive the inter-chip bridge,
- * and cc3501e_request is not internally locked -- two concurrent transactions
- * would interleave on the SPI bus and desync the link.  Every bridge
- * access from this split (each command body + the result thread's status poll)
- * takes this mutex. */
-K_MUTEX_DEFINE(companion_bus_lock);
-#endif
-
 static int cmd_companion_ver(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
@@ -79,16 +69,64 @@ static int cmd_companion_ver(const struct shell *sh, size_t argc, char **argv)
 		return -ENODEV;
 	}
 
-	uint16_t ver = 0;
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
-	alp_status_t s = cc3501e_get_version(companion_cc3501e, &ver);
-	k_mutex_unlock(&companion_bus_lock);
+	uint16_t     ver = 0;
+	alp_status_t s   = cc3501e_get_version(companion_cc3501e, &ver);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "get_version failed (%d)", (int)s);
 		return -EIO;
 	}
-	shell_print(sh, "CC3501E protocol v%u", (unsigned int)ver);
+	/* Report the RELEASE version first and the wire version second (ADR 0033).
+	 *
+	 * This line is where the raw wire number leaked into customer-facing
+	 * conversations: it printed "CC3501E protocol v9", so release notes and
+	 * support threads quoted the wire integer as if it were the thing to match,
+	 * when the number a customer can actually act on is the firmware SemVer
+	 * from firmware-version.txt.  The wire version is a contract between this
+	 * host library and the firmware -- worth showing, not worth leading with.
+	 *
+	 * GET_DIAG_INFO carries the release version; if it is unavailable (older
+	 * firmware, or a transport hiccup) fall back to printing the wire version
+	 * alone rather than inventing a release number. */
+	const unsigned int wire_major = (unsigned int)ALP_CC3501E_PROTOCOL_VERSION_MAJOR(ver);
+	const unsigned int wire_minor = (unsigned int)ALP_CC3501E_PROTOCOL_VERSION_MINOR(ver);
+
+	alp_cc3501e_diag_info_t diag = { 0 };
+	if (cc3501e_diag_info(companion_cc3501e, &diag) == ALP_OK) {
+		/* fw_version packs (MINOR << 8) | PATCH and does NOT carry the major at
+		 * all -- the firmware's CMake calls it "pre-1.0 packing" and derives it
+		 * from firmware-version.txt that way.  The leading "0." below is
+		 * therefore hardcoded because the wire genuinely does not transmit it.
+		 *
+		 * THAT MAKES THIS LINE WRONG THE DAY firmware-version.txt REACHES 1.0.0:
+		 * a 1.2.3 firmware would print "fw 0.2.3".  Fixing it needs the wire
+		 * field widened (a MINOR-class change under ADR 0033, since a host that
+		 * ignores the extra byte keeps working), not a change here -- so this
+		 * comment is the warning for whoever bumps that major. */
+		shell_print(sh,
+		            "fw 0.%u.%u  (wire %u.%u)",
+		            (unsigned int)((diag.fw_version >> 8) & 0xFFu),
+		            (unsigned int)(diag.fw_version & 0xFFu),
+		            wire_major,
+		            wire_minor);
+	} else {
+		shell_print(sh, "wire %u.%u  (release version unavailable)", wire_major, wire_minor);
+	}
+
+	if (wire_major == 0u) {
+		/* Cannot happen against a firmware this host will talk to -- cc3501e_reset
+		 * refuses major 0 -- but `ver` is also used as a bare liveness probe on a
+		 * context that never passed the gate, so say what it means rather than
+		 * printing "wire 0.9" and leaving the reader to guess. */
+		shell_warn(sh,
+		           "this firmware predates the MAJOR.MINOR scheme (raw protocol %u)",
+		           (unsigned int)ver);
+	}
+
+	uint32_t caps = 0u;
+	if (cc3501e_get_capabilities(companion_cc3501e, &caps) == ALP_OK) {
+		shell_print(sh, "caps 0x%08x", (unsigned int)caps);
+	}
 	return 0;
 #endif
 }
@@ -116,9 +154,7 @@ static int cmd_companion_ping(const struct shell *sh, size_t argc, char **argv)
 		shell_warn(sh, "companion not registered (call alp_console_companion_set)");
 		return -ENODEV;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_ping(companion_cc3501e);
-	k_mutex_unlock(&companion_bus_lock);
 	shell_print(sh, "ping %s", s == ALP_OK ? "OK" : "FAIL");
 	return s == ALP_OK ? 0 : -EIO;
 #endif
@@ -138,10 +174,17 @@ static int cmd_companion_ping(const struct shell *sh, size_t argc, char **argv)
 #define ALP_COMPANION_EVENT_POLL_MS 500
 
 /* Runs on the driver's RX/poll context (here: the event-poll thread or the IRQ
- * workqueue) while the bridge bus lock is held.  Print-only -- printk goes to
- * the active console backend, so it is safe off the shell thread. */
+ * workqueue), AFTER cc3501e_poll_events()'s own cc3501e_request() call has
+ * returned and released ctx's transport lock -- so this callback may itself
+ * drive another request (e.g. reading a status register in response to an
+ * event) without self-deadlocking.  Print-only -- printk goes to the active
+ * console backend, so it is safe off the shell thread. */
+static volatile uint32_t companion_evt_seen;
+static volatile bool     companion_attn_backoff;
+
 static void companion_event_cb(uint8_t opcode, const uint8_t *payload, size_t len, void *user)
 {
+	companion_evt_seen++;
 	ARG_UNUSED(payload);
 	ARG_UNUSED(user);
 	switch (opcode) {
@@ -166,23 +209,37 @@ static void companion_event_cb(uint8_t opcode, const uint8_t *payload, size_t le
 	}
 }
 
-/* Drain + dispatch pending events under the bridge bus lock.  Shared by the
- * timer-poll thread and the opt-in IRQ workqueue.  No-op until a companion is
- * registered (the cb is attached lazily on first poll). */
+/* Drain + dispatch pending events.  Shared by the timer-poll thread and the
+ * opt-in IRQ workqueue -- the ONLY two callers of companion_drain_events(),
+ * both in this file, so this lock stays file-local (issue #1116: unlike
+ * every OTHER companion_bus_lock use this split used to have, this one is
+ * NOT redundant against cc3501e_request()'s new internal transport lock --
+ * that lock covers only the single cc3501e_request() call inside
+ * cc3501e_poll_events(); the evt_busy check + the evt_buf walk-and-dispatch
+ * loop around it are a SEPARATE critical section evt_busy alone does not
+ * make safe against a genuinely concurrent second caller, per
+ * cc3501e_poll_events()'s own @warning in <alp/chips/cc3501e/events.h>).
+ * No-op until a companion is registered (the cb is attached lazily on first
+ * poll). */
 static bool companion_event_cb_set;
+K_MUTEX_DEFINE(companion_events_lock);
 
 static void companion_drain_events(void)
 {
 	if (companion_cc3501e == NULL) {
 		return;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
+	k_mutex_lock(&companion_events_lock, K_FOREVER);
 	if (!companion_event_cb_set) {
-		(void)cc3501e_set_event_callback(companion_cc3501e, companion_event_cb, NULL);
+		/* ADD, never replace (issue #1723): this runs after the application's
+		 * main() has registered its own callback, and the old single-slot
+		 * registration overwrote it -- the console then consumed every event
+		 * and the application silently received none. */
+		(void)cc3501e_add_event_callback(companion_cc3501e, companion_event_cb, NULL);
 		companion_event_cb_set = true;
 	}
 	(void)cc3501e_poll_events(companion_cc3501e);
-	k_mutex_unlock(&companion_bus_lock);
+	k_mutex_unlock(&companion_events_lock);
 }
 
 static void companion_event_thread(void *a, void *b, void *c)
@@ -216,10 +273,68 @@ K_THREAD_DEFINE(companion_event_tid, 1024, companion_event_thread, NULL, NULL, N
 static const struct gpio_dt_spec companion_attn = GPIO_DT_SPEC_GET(DT_ALIAS(cc3501e_attn), gpios);
 static struct gpio_callback      companion_attn_cb_data;
 
+/* Strong override of the driver's weak hook: the bridge is idle exactly when its
+ * request lock is free, and that is the only window in which a rising edge on
+ * this wire can mean "event pending" rather than "a transaction just re-armed".
+ * cc3501e_core.c calls this around every request. */
+void cc3501e_attn_set_armed(bool armed)
+{
+	if (!device_is_ready(companion_attn.port)) {
+		return;
+	}
+	/* While backing off, refuse to ARM.  The wire is shared with READY flow
+	 * control, so a transaction end is indistinguishable from an attention
+	 * pulse; re-arming on each one lets the drain's own trailing READY rise
+	 * re-trigger this path.  Measured: 11888 ISRs for 86 real events. */
+	if (armed && companion_attn_backoff) {
+		return;
+	}
+	(void)gpio_pin_interrupt_configure_dt(&companion_attn,
+	                                      armed ? GPIO_INT_EDGE_TO_ACTIVE : GPIO_INT_DISABLE);
+}
+
+/* Long enough to break the self-feeding chain, short enough that a real event
+ * behind a spurious one is not held up meaningfully. */
+#define ALP_COMPANION_ATTN_BACKOFF_MS 50
+
+static void companion_attn_rearm_fn(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	companion_attn_backoff = false;
+	cc3501e_attn_rearm_if_desired(companion_cc3501e);
+}
+static K_WORK_DELAYABLE_DEFINE(companion_attn_rearm_work, companion_attn_rearm_fn);
+
+/* An explicit application arm overrides the back-off: drop the latch and cancel
+ * the pending delayed re-arm so the arm below actually reaches the controller. */
+void cc3501e_attn_clear_backoff(void)
+{
+	companion_attn_backoff = false;
+	(void)k_work_cancel_delayable(&companion_attn_rearm_work);
+}
+
 static void companion_event_work_fn(struct k_work *work)
 {
 	ARG_UNUSED(work);
+	const uint32_t seen_before = companion_evt_seen;
+
 	companion_drain_events();
+
+	/* RE-ARM HERE.  The requests inside the drain only MASK the line
+	 * (cc3501e_lock_acquire); nothing re-armed it, so the FIRST edge masked it
+	 * permanently -- bench-measured as the ISR frozen at 1 across a 40 s armed
+	 * window (#130).
+	 *
+	 * An EMPTY drain means that edge was flow control, not attention: back off
+	 * so the chain (edge -> drain -> READY rise -> edge) breaks.  A drain that
+	 * DID deliver re-arms immediately, keeping real events fast. */
+	if (companion_evt_seen == seen_before) {
+		companion_attn_backoff = true;
+		k_work_reschedule(&companion_attn_rearm_work, K_MSEC(ALP_COMPANION_ATTN_BACKOFF_MS));
+		return;
+	}
+	companion_attn_backoff = false;
+	cc3501e_attn_rearm_if_desired(companion_cc3501e);
 }
 static K_WORK_DEFINE(companion_event_work, companion_event_work_fn);
 
@@ -228,8 +343,31 @@ static void companion_attn_isr(const struct device *port, struct gpio_callback *
 	ARG_UNUSED(port);
 	ARG_UNUSED(cb);
 	ARG_UNUSED(pins);
-	/* Defer the SPI drain to a workqueue -- never do bridge I/O in the ISR. */
+
+	/* MASK THE LINE BEFORE SCHEDULING, re-armed by the work item once the drain
+	 * is done.  Without this the path livelocks the device (bench 2026-08-26:
+	 * the app boots, registers, enters its soak and goes silent forever,
+	 * reproducibly).
+	 *
+	 * The wire is shared with READY flow control, which is raised on EVERY
+	 * bridge re-arm -- so the edge does not mean "event pending", it means
+	 * "a transaction just finished".  The drain scheduled here does its OWN
+	 * bridge I/O, which raises READY again, which re-enters this ISR: the path
+	 * feeds itself, and it contends with the application's traffic while doing
+	 * it.  "An empty ring answers with an empty list" does not save it -- the
+	 * cost is the transaction, not the answer.
+	 *
+	 * Masking bounds it to ONE drain per re-arm instead of an unbounded chain.
+	 * It does NOT make the edge meaningful: a genuinely idle-time-only
+	 * attention signal still needs the line qualified (a distinguishable pulse
+	 * width, a second wire, or arming this only while the host has no request
+	 * in flight). See #130. */
+	(void)gpio_pin_interrupt_configure_dt(&companion_attn, GPIO_INT_DISABLE);
 	k_work_submit(&companion_event_work);
+	/* Re-arming is the request lock's job (cc3501e_attn_set_armed), not this
+	 * ISR's: the drain about to run will mask and re-arm around each of its own
+	 * requests, and leaving it masked until the bridge is genuinely idle is what
+	 * stops an active link from re-triggering this path. */
 }
 
 static int companion_event_irq_init(void)
@@ -271,15 +409,13 @@ static int cmd_companion_bench(const struct shell *sh, size_t argc, char **argv)
 	}
 	uint16_t     ver   = 0;
 	unsigned int fails = 0;
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
-	int64_t t0 = k_uptime_get();
+	int64_t      t0    = k_uptime_get();
 	for (unsigned long i = 0; i < n; i++) {
 		if (cc3501e_get_version(companion_cc3501e, &ver) != ALP_OK) {
 			fails++;
 		}
 	}
 	int64_t dt = k_uptime_get() - t0;
-	k_mutex_unlock(&companion_bus_lock);
 	if (dt <= 0) {
 		dt = 1;
 	}
@@ -304,9 +440,7 @@ static int cmd_companion_reset(const struct shell *sh, size_t argc, char **argv)
 	}
 	/* Soft reset: the firmware acks then DEFERRED-reboots.  The bridge link drops
 	 * afterwards -- the app must cc3501e_reset()/sync + re-register to talk again. */
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_soft_reset(companion_cc3501e);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "soft reset failed (%d)", (int)s);

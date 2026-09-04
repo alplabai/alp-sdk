@@ -12,10 +12,9 @@
  *   - Renesas RZ/V2N RSIP -- same story via the V2N driver wrapper.
  *   - Everything else -- MbedTLS reference software implementations.
  *
- * The portable-HW-offload audit rule (memory/feedback_portable_hw_
- * offload_with_sw_fallback.md) is satisfied because the chip-specific
- * dispatch happens inside MbedTLS -- application code never sees a
- * vendor name in <alp/security.h>.
+ * The portable-HW-offload audit rule is satisfied because the
+ * chip-specific dispatch happens inside MbedTLS -- application code
+ * never sees a vendor name in <alp/security.h>.
  *
  * V2N TRNG entropy source.  The mbedtls profile (under
  * metadata/library-profiles/mbedtls/) sets MBEDTLS_NO_PLATFORM_ENTROPY,
@@ -24,8 +23,7 @@
  * route that callback through the supervisor's GD32G553 TRNG so the
  * portable alp_random_bytes() transparently picks up true randomness
  * the first time PSA's DRBG seeds itself.  The wire-level chip name
- * stays hidden behind the supervisor singleton (per
- * memory/feedback_portable_hw_offload_with_sw_fallback.md).
+ * stays hidden behind the supervisor singleton.
  *
  * Backend-owned state moved into module-static pools indexed via
  * state->be_data:
@@ -45,6 +43,7 @@
  */
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -56,6 +55,7 @@
 #include <alp/peripheral.h>
 #include <alp/security.h>
 
+#include "alp_slot_claim.h"
 #include "security_ops.h"
 
 #if defined(CONFIG_ALP_SDK_SECURITY)
@@ -82,26 +82,43 @@
 
 #if defined(CONFIG_ALP_SDK_SECURITY)
 
+/* in_use is the LAST member (see alp_slot_claim.h): the winning claimant
+ * zeroes everything before it via offsetof, so lifecycle-relevant fields
+ * never carry a prior tenant's stale value into a freshly claimed slot.
+ * Round-2 dev review: every op's `!be->in_use` guard below now reads it
+ * with __atomic_load_n(__ATOMIC_ACQUIRE) too, not a plain load -- it is
+ * always written via alp_slot_try_claim()/alp_slot_release(), and mixing
+ * a plain read with an atomic RMW/store on the same object is a data
+ * race in the C memory model even though no real hardware miscompiles a
+ * bool this way. */
 struct hash_be {
-	bool                 in_use;
 	psa_hash_operation_t op;
+	bool                 in_use;
 };
 
 struct aead_be {
-	bool         in_use;
 	psa_key_id_t key_id;
+	bool         in_use;
 };
 
 static struct hash_be g_hash_be_pool[CONFIG_ALP_SDK_MAX_HASH_HANDLES];
 static struct aead_be g_aead_be_pool[CONFIG_ALP_SDK_MAX_AEAD_HANDLES];
-static bool           g_psa_inited;
+/* One-time PSA init, atomically claimed -- see ensure_psa() (issue #1115). */
+static bool g_psa_init_claimed;
+static bool g_psa_inited;
 
+/* issue #1115: this used to be a plain `if (!in_use) { in_use = true; }`
+ * scan -- called from ops->open() only AFTER the FRONTEND dispatcher slot
+ * (src/security_dispatch.c) was already claimed atomically, so two
+ * threads opening concurrently could both win the SAME backend slot here
+ * and alias one psa_hash_operation_t / psa_key_id_t between two live
+ * alp_hash_t/alp_aead_t handles -- crypto cross-talk. Route the claim
+ * through the same atomic primitive the dispatcher pools already use. */
 static struct hash_be *hash_be_acquire(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(g_hash_be_pool); ++i) {
-		if (!g_hash_be_pool[i].in_use) {
-			memset(&g_hash_be_pool[i], 0, sizeof(g_hash_be_pool[i]));
-			g_hash_be_pool[i].in_use = true;
+		if (alp_slot_try_claim(&g_hash_be_pool[i].in_use)) {
+			memset(&g_hash_be_pool[i], 0, offsetof(struct hash_be, in_use));
 			return &g_hash_be_pool[i];
 		}
 	}
@@ -111,9 +128,8 @@ static struct hash_be *hash_be_acquire(void)
 static struct aead_be *aead_be_acquire(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(g_aead_be_pool); ++i) {
-		if (!g_aead_be_pool[i].in_use) {
-			memset(&g_aead_be_pool[i], 0, sizeof(g_aead_be_pool[i]));
-			g_aead_be_pool[i].in_use = true;
+		if (alp_slot_try_claim(&g_aead_be_pool[i].in_use)) {
+			memset(&g_aead_be_pool[i], 0, offsetof(struct aead_be, in_use));
 			return &g_aead_be_pool[i];
 		}
 	}
@@ -171,13 +187,57 @@ static alp_status_t psa_to_alp(psa_status_t st)
 	}
 }
 
+/* issue #1115: this used to be a plain check-then-set (`if (g_psa_inited)
+ * return; ...; g_psa_inited = true;`), so two threads racing the first
+ * alp_hash_open()/alp_aead_open()/alp_random_bytes() call could both see
+ * g_psa_inited == false and both call psa_crypto_init() concurrently.
+ * mbedtls's own psa_crypto_init() only serialises its internal
+ * global_data state under MBEDTLS_THREADING_C, which the alp-sdk mbedtls
+ * profile does not enable -- so on this build two unsynchronised callers
+ * really do race the same mutable global state.  Elect exactly one
+ * initialiser with the same atomic claim the sidecar pools above use;
+ * every other caller waits for it to publish g_psa_inited.
+ *
+ * issue #1114 round-2 dev review: the first liveness fix waited on
+ * `while (!g_psa_inited) k_sleep(...)`, but the elected initialiser's
+ * FAILURE path releases g_psa_init_claimed and returns its error
+ * WITHOUT ever setting g_psa_inited -- so every thread that lost the
+ * race hung in that loop forever, a worse hang than the pre-fix
+ * behaviour (which simply returned the error to each caller). Loop the
+ * whole elect-or-wait attempt instead of waiting on a flag the failure
+ * path never sets: once the failed initialiser releases its claim, one
+ * waiter re-wins alp_slot_try_claim() and retries psa_crypto_init()
+ * itself (matching the existing "let a later caller retry" contract),
+ * so every caller's wait terminates in either success or a real PSA
+ * error -- never a permanent hang. */
 static alp_status_t ensure_psa(void)
 {
-	if (g_psa_inited) return ALP_OK;
-	psa_status_t st = psa_crypto_init();
-	if (st != PSA_SUCCESS) return psa_to_alp(st);
-	g_psa_inited = true;
-	return ALP_OK;
+	for (;;) {
+		if (__atomic_load_n(&g_psa_inited, __ATOMIC_ACQUIRE)) {
+			return ALP_OK;
+		}
+		if (alp_slot_try_claim(&g_psa_init_claimed)) {
+			psa_status_t st = psa_crypto_init();
+			if (st != PSA_SUCCESS) {
+				/* Let a later caller (this thread or a waiter that
+				 * re-wins the claim below) retry the one-time init. */
+				alp_slot_release(&g_psa_init_claimed);
+				return psa_to_alp(st);
+			}
+			__atomic_store_n(&g_psa_inited, true, __ATOMIC_RELEASE);
+			return ALP_OK;
+		}
+		/* Lost the race: another thread is running psa_crypto_init() (or
+		 * just failed it and released the claim) right now. Wait for it
+		 * with a real sleep, not a spin (issue #1114) -- this backend
+		 * runs under Zephyr's preemptive-priority scheduler, so a
+		 * spinning loser at equal-or-higher priority than the
+		 * initialiser could never let the scheduler run the initialiser
+		 * back. Loop back to re-check g_psa_inited AND re-attempt the
+		 * claim (not just re-check the flag) so a failed initialiser's
+		 * released claim gets picked up. */
+		k_sleep(K_TICKS(1));
+	}
 }
 
 static alp_status_t aead_alg_meta(alp_aead_alg_t   a,
@@ -227,7 +287,7 @@ z_hash_open(alp_hash_alg_t alg, alp_hash_backend_state_t *state, alp_capabilitie
 	be->op          = psa_hash_operation_init();
 	psa_status_t st = psa_hash_setup(&be->op, psa_alg);
 	if (st != PSA_SUCCESS) {
-		be->in_use = false;
+		alp_slot_release(&be->in_use);
 		return psa_to_alp(st);
 	}
 	state->alg     = alg;
@@ -244,7 +304,7 @@ static alp_status_t z_hash_update(alp_hash_backend_state_t *state, const uint8_t
 {
 #if defined(CONFIG_ALP_SDK_SECURITY)
 	struct hash_be *be = (struct hash_be *)state->be_data;
-	if (be == NULL || !be->in_use) return ALP_ERR_NOT_READY;
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) return ALP_ERR_NOT_READY;
 	return psa_to_alp(psa_hash_update(&be->op, data, len));
 #else
 	(void)state;
@@ -261,7 +321,7 @@ static alp_status_t z_hash_finish(alp_hash_backend_state_t *state,
 {
 #if defined(CONFIG_ALP_SDK_SECURITY)
 	struct hash_be *be = (struct hash_be *)state->be_data;
-	if (be == NULL || !be->in_use) return ALP_ERR_NOT_READY;
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) return ALP_ERR_NOT_READY;
 
 	const size_t required = alp_hash_digest_len(state->alg);
 	if (digest_out == NULL || digest_cap < required) {
@@ -280,8 +340,8 @@ static alp_status_t z_hash_finish(alp_hash_backend_state_t *state,
 	size_t       got = 0;
 	psa_status_t st  = psa_hash_finish(&be->op, digest_out, digest_cap, &got);
 	if (digest_len != NULL) *digest_len = got;
-	be->in_use     = false;
 	state->be_data = NULL;
+	alp_slot_release(&be->in_use);
 	return psa_to_alp(st);
 #else
 	(void)state;
@@ -296,10 +356,10 @@ static void z_hash_close(alp_hash_backend_state_t *state)
 {
 #if defined(CONFIG_ALP_SDK_SECURITY)
 	struct hash_be *be = (struct hash_be *)state->be_data;
-	if (be == NULL || !be->in_use) return;
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) return;
 	(void)psa_hash_abort(&be->op);
-	be->in_use     = false;
 	state->be_data = NULL;
+	alp_slot_release(&be->in_use);
 #else
 	(void)state;
 #endif
@@ -339,7 +399,7 @@ static alp_status_t z_aead_open(alp_aead_alg_t            alg,
 	psa_status_t st = psa_import_key(&attr, key, key_len, &be->key_id);
 	psa_reset_key_attributes(&attr);
 	if (st != PSA_SUCCESS) {
-		be->in_use = false;
+		alp_slot_release(&be->in_use);
 		return psa_to_alp(st);
 	}
 	state->alg     = alg;
@@ -367,7 +427,7 @@ static alp_status_t z_aead_encrypt(alp_aead_backend_state_t *state,
 {
 #if defined(CONFIG_ALP_SDK_SECURITY)
 	struct aead_be *be = (struct aead_be *)state->be_data;
-	if (be == NULL || !be->in_use) return ALP_ERR_NOT_READY;
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) return ALP_ERR_NOT_READY;
 
 	/* tag_len must be exactly 16 B -- the only length every backend
      * (this one, yocto_drv.c, se_cryptocell.c) round-trips.  Check
@@ -479,7 +539,7 @@ static alp_status_t z_aead_decrypt(alp_aead_backend_state_t *state,
 {
 #if defined(CONFIG_ALP_SDK_SECURITY)
 	struct aead_be *be = (struct aead_be *)state->be_data;
-	if (be == NULL || !be->in_use) return ALP_ERR_NOT_READY;
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) return ALP_ERR_NOT_READY;
 
 	/* tag_len must be exactly 16 B -- see z_aead_encrypt. */
 	if (tag_len != 16u) return ALP_ERR_INVAL;
@@ -580,10 +640,10 @@ static void z_aead_close(alp_aead_backend_state_t *state)
 {
 #if defined(CONFIG_ALP_SDK_SECURITY)
 	struct aead_be *be = (struct aead_be *)state->be_data;
-	if (be == NULL || !be->in_use) return;
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) return;
 	(void)psa_destroy_key(be->key_id);
-	be->in_use     = false;
 	state->be_data = NULL;
+	alp_slot_release(&be->in_use);
 #else
 	(void)state;
 #endif

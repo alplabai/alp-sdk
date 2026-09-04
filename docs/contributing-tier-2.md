@@ -15,7 +15,7 @@ to "customers can drop it into their workspace."
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │ Tier 1: alp-sdk (this repo)                                      │
-│   80 chips, 25 libraries.  Maintainer-curated, Apache-2.0,       │
+│   80 chips, 35 libraries.  Maintainer-curated, Apache-2.0,       │
 │   portability-tested, doxygen-clean, ABI-tracked, CHANGELOG'd.   │
 └──────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────┐
@@ -30,6 +30,18 @@ to "customers can drop it into their workspace."
 │   consumed via EXTRA_ZEPHYR_MODULES or your own west.yml.        │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+Both counts move as drivers/libraries are added or retired; recount
+before trusting them: `find chips -mindepth 1 -maxdepth 1 -type d |
+wc -l` (chips) and `ls metadata/libraries/*.yaml | wc -l` (libraries,
+the curated `metadata/libraries/<name>.yaml` manifests a board.yaml's
+`libraries:` entries name; `metadata/schemas/board.schema.json` only
+pattern-validates the name shape, `scripts/check_library_registry.py`
+is what actually resolves each name against these manifests).
+
+On Windows (PowerShell), the same counts:
+`(Get-ChildItem chips -Directory).Count` and
+`(Get-ChildItem metadata/libraries -Filter *.yaml).Count`.
 
 Tier 2's quality bar is intentionally lower than Tier 1 -- the
 goal is to let customers reach hundreds of community chip drivers
@@ -165,7 +177,9 @@ Promotion lands as an alp-sdk PR that:
 
 - Copies the contribution from `alp-sdk-community/chips/<name>/`
   to `alp-sdk/chips/<name>/`.
-- Adds the chip to `metadata/chip-registry.yaml`.
+- Adds the chip's manifest at `metadata/chips/<name>.yaml`
+  (`scripts/check_chip_manifest_parity.py` gates the driver <->
+  manifest correspondence -- there is no separate registry file).
 - Adds a CHANGELOG entry.
 - The original alp-sdk-community entry stays but its
   `registry.yaml` row gains `promoted_to: alp-sdk` to redirect

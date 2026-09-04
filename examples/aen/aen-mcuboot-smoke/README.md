@@ -21,9 +21,10 @@ Notes (bench-derived 2026-06-16, first on-silicon bring-up of this chain):
 - `sysbuild/mcuboot.overlay` retargets MCUboot to **ITCM**. The Alif SES loads an
   ATOC image to RAM and jumps to it — `app-gen-toc` REJECTS an MRAM `loadAddress`
   ("An MRAM address can not be used in loadAddress attribute"), so MCUboot cannot
-  be MRAM-XIP for the ATOC; it must be RAM-linked. slot0/slot1 stay on the MRAM
-  flash-controller (`&mram_storage`) for `flash_map`; MCUboot reads/verifies them
-  via the `flash_mram_alif` driver (brought in-tree, Tier-2).
+  be MRAM-XIP for the ATOC; it must be RAM-linked. slot0 (and, before #1069's
+  disjoint-slot0 fix, slot1) stay on the MRAM flash-controller (`&mram_storage`)
+  for `flash_map`; MCUboot reads/verifies them via the `flash_mram_alif` driver
+  (brought in-tree, Tier-2).
 - `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` resolves relative to `WEST_TOPDIR`, not the
   repo — pass an absolute path (above) or place the key at `<topdir>/keys/`.
 

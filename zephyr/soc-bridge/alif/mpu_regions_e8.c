@@ -28,7 +28,10 @@
  * hand-maintained `Kconfig`, see the placement note below) and, instead of
  * one "whole flash" region, always defines the two disjoint MRAM windows
  * (MRAM_EXEC / MRAM_DEVICE) plus the two other CPU-local memories (ITCM /
- * DTCM) as FOUR static regions. This is flow-aware WITHOUT any
+ * DTCM) as FOUR static regions, plus a FIFTH conditional region
+ * (MRAM_RESERVED, see below) that appears only when this board's own
+ * boot/slot0/storage partitions leave a span of mram_storage that neither
+ * MRAM_EXEC nor MRAM_DEVICE covers. This is flow-aware WITHOUT any
  * `#if`-on-flow branching, because ITCM ([0x0, 0x40000)) and MRAM
  * ([0x80000000, 0x80580000)) are disjoint address ranges by construction:
  *
@@ -133,6 +136,47 @@
 #define MRAM_DEVICE_SIZE      MRAM_STORAGE_PARTITION_SIZE
 #endif
 
+/* All three branches above converge on the same "top of coverage" address:
+ * MRAM_DEVICE_BASE_ADDR + MRAM_DEVICE_SIZE == MRAM_STORAGE_PARTITION_ADDR +
+ * MRAM_STORAGE_PARTITION_SIZE. The fork's own model (and the three branches
+ * above, mirroring it) assumes `storage_partition` is the LAST partition in
+ * `mram_storage`, so that sum lands exactly on top-of-flash and MRAM_EXEC +
+ * MRAM_DEVICE tile the whole part. Where that assumption holds (every board
+ * default: e.g. this board's own alp_e1m_aen801_m55_{he,hp}*.dts has
+ * storage_partition@0x560000 sized to run to 0x580000), MRAM_RESERVED_SIZE
+ * below is 0 and the extra region compiles out. Where a board overlay places
+ * `storage_partition` somewhere in the MIDDLE of mram_storage instead (see
+ * examples/connectivity/firmware-update-log's log_mram.dtsi: ulog/storage at
+ * 0x90000, with the Alif SE ATOC package fixed at 0x560000 above it),
+ * MRAM_EXEC/MRAM_DEVICE alone leave that upper span -- ATOC included --
+ * covered by no region at all, which falls through to the ARMv8-M default
+ * map (PRIVDEFENA, arch/arm/core/mpu/arm_mpu.c): Normal memory, privileged
+ * RW *and* executable. For an example whose subject is application
+ * immutability that is a silent write hole over the ATOC package, so this
+ * table closes it generically instead of leaving it to each overlay. */
+#define MRAM_RESERVED_BASE_ADDR (MRAM_DEVICE_BASE_ADDR + MRAM_DEVICE_SIZE)
+#define MRAM_RESERVED_SIZE \
+	(DT_REG_ADDR(DT_NODELABEL(mram_storage)) + DT_REG_SIZE(DT_NODELABEL(mram_storage)) - \
+	 MRAM_RESERVED_BASE_ADDR)
+
+/* RO *and* non-executable, which no stock `(base, size)` attr macro gives:
+ * REGION_FLASH_ATTR is RO under CONFIG_MPU_ALLOW_FLASH_WRITE=n but omits
+ * NOT_EXEC (arm_mpu_v8.h:325-331 -- `.rbar = RO_Msk | NON_SHAREABLE_Msk`),
+ * because for MRAM_EXEC/ITCM being executable is the whole point. Reusing it
+ * here would close the write hole and leave an execute hole: the ATOC package
+ * and any stale image bytes in this span would stay fetchable as code. There
+ * is a NOT_EXEC + RO pairing in the `(limit)`-form family
+ * (REGION_RAM_RO_ATTR, arm_mpu_v8.h:193-198) but not in the `(base, size)`
+ * form this table uses, so spell it out rather than reshape the table. MAIR
+ * stays MPU_MAIR_INDEX_FLASH: this span IS MRAM, and the index drives
+ * cache-ability, not permissions. */
+#define REGION_MRAM_RESERVED_ATTR(base, size)                                  \
+	{                                                                      \
+		.rbar = NOT_EXEC | RO_Msk | NON_SHAREABLE_Msk, /* AP, XN, SH */ \
+		.mair_idx = MPU_MAIR_INDEX_FLASH,             /* Cache-ability */ \
+		.r_limit = REGION_LIMIT_ADDR(base, size),     /* Region Limit */  \
+	}
+
 static const struct arm_mpu_region mpu_regions[] = {
 	/* Region 0: executable MRAM (boot + slot0, minus the MCUboot trailer
 	 * sector under CONFIG_BOOTLOADER_MCUBOOT). RO even for privileged
@@ -161,6 +205,17 @@ static const struct arm_mpu_region mpu_regions[] = {
 	    "DTCM",
 	    DT_REG_ADDR(DT_NODELABEL(dtcm)),
 	    REGION_RAM_ATTR(DT_REG_ADDR(DT_NODELABEL(dtcm)), DT_REG_SIZE(DT_NODELABEL(dtcm)))),
+#if MRAM_RESERVED_SIZE > 0
+	/* Region 4 (conditional): the part of mram_storage above MRAM_DEVICE
+	 * that boot/slot0/storage don't already reach -- see the comment on
+	 * MRAM_RESERVED_SIZE above. RO *and* XN: nothing here is meant to be
+	 * written OR executed by this image, the ATOC package included. Note
+	 * this is deliberately NOT REGION_FLASH_ATTR, which would leave the
+	 * span executable -- see REGION_MRAM_RESERVED_ATTR above. */
+	MPU_REGION_ENTRY("MRAM_RESERVED",
+	                 MRAM_RESERVED_BASE_ADDR,
+	                 REGION_MRAM_RESERVED_ATTR(MRAM_RESERVED_BASE_ADDR, MRAM_RESERVED_SIZE)),
+#endif
 };
 
 const struct arm_mpu_config mpu_config = {

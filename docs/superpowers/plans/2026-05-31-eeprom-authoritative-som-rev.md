@@ -1,5 +1,15 @@
 # EEPROM-authoritative SoM hardware revision — Implementation Plan
 
+> **STATUS — LANDED.** `src/common/hw_info_manifest.h` and
+> `ALP_ERR_NOT_PROVISIONED` (`include/alp/hw_info.h`) exist in the
+> tree; the SoM-side ADC cross-check this plan retires is gone.  Kept
+> for implementation-history context.
+>
+> Command examples below use this session's original Windows/WSL
+> checkout paths (e.g. `/mnt/c/Users/<user>/...`) verbatim -- treat
+> them as historical record, not copy-paste-ready commands for today's
+> checkout.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the on-module EEPROM manifest's `hw_rev` the single authoritative source of the SoM hardware revision; drop the never-implemented SoM-side ADC cross-check; distinguish a blank (unprovisioned) module from a corrupt one.

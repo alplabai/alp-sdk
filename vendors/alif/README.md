@@ -47,7 +47,7 @@ non-routed instances return `ALP_ERR_NOSUPPORT`.
 | Role | Part |
 |---|---|
 | Wi-Fi 6 + BLE 5.4 combo | TI `CC3501E` |
-| Ethernet PHY (100 Mbps) | TI `DP83825I` |
+| Ethernet PHY (100 Mbps) | TI `DP83825` (exact order code TBD) |
 | CAN transceiver | TI `TCAN1044AVDRBRQ1` |
 
 ## HAL pinning

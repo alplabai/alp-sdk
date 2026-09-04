@@ -44,7 +44,7 @@ ASE,0.10,SCREAM,0.75,1684.0,0.22
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/audio/acoustic-safety-events
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/audio/acoustic-safety-events
 west flash
 ```
 

@@ -2,30 +2,55 @@
 #
 # Doc-drift gate: fails a PR when customer docs reference SDK
 # identifiers that no longer exist in any SDK source layer (public +
-# internal headers, Kconfig, CMake, generators, schemas, Yocto), or
-# when a top-level docs/*.md isn't linked from the docs index.  Mirrors
-# scripts/check_doc_drift.py, which is runnable locally (see the
+# internal headers, Kconfig, CMake, generators, schemas, Yocto), when a
+# top-level docs/*.md isn't linked from the docs index, when a relative
+# doc-to-doc link is dead, when VERSIONS.md carries no row for the
+# released version, when an ALP-Bxxx diagnostic landing page is still a
+# placeholder, when an ALP-Bxxx code scripts/alp_cli/validator.py can emit
+# has no docs/diagnostics/ALP-Bxxx.md page (#1569), or when
+# docs/board-id.md's alp_hw_info_eeprom_t struct
+# or scripts/program_eeprom.py's pack-format length constants disagree
+# with include/alp/hw_info.h (#1231), when AGENTS.md names an
+# ALP_E1M_*/ALP_E1M_X_* identifier or --emit choice the real generators
+# don't produce (#1264), or when a doc-stated workflow name/count,
+# ADR count, or chip/library count disagrees with the tree (#1265), or when
+# include/alp/protocol/cc3501e.h's ALP_CC3501E_PROTOCOL_MAJOR/_MINOR
+# disagrees with ADR 0033's Version ledger (missing row, non-monotonic
+# ledger, MAJOR 0, or a MAJOR row with no "old host would be misread"
+# justification).
+# Mirrors scripts/check_doc_drift.py + scripts/check_doc_links.py +
+# scripts/check_diagnostic_narratives.py +
+# scripts/check_diagnostic_emission_coverage.py +
+# scripts/check_version_doc_sync.py +
+# scripts/check_board_id_doc_parity.py +
+# scripts/check_agents_md_generators.py +
+# scripts/check_doc_inventory.py +
+# scripts/check_protocol_version_policy.py, all runnable locally (see the
 # running-local-ci skill + docs/local-ci.md).
+#
+# Deliberately no `paths:` filter (like pr-static-analysis.yml): these
+# five scripts' known-symbol / cross-reference harvests read from over a
+# dozen directories across the tree (headers, Kconfig, CMake, generators,
+# schemas, Yocto, vendor docs, board overlays, keys/, ...), so a paths
+# list here is a second copy of that surface that silently drifts out of
+# sync with the scripts every time a harvest input is added.
+#
+# This is a robustness change, NOT the root cause of #1222/#1228 -- do
+# not cite it as one. Measured: inject a symbol that exists nowhere in
+# the tree into vendors/nxp-imx93/README.md on a clean origin/dev export
+# and check_doc_drift.py still exits 0. The gate was blind to that
+# doc/symbol shape whether or not it ran, so the paths filter cannot be
+# why those two shipped green. Dropping it stops a FUTURE harvest input
+# from escaping the trigger; it would not have caught either of them.
+# The job itself is a few seconds of Python; always running it is cheaper
+# than maintaining that second list.
 name: pr-doc-drift
 
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'README.md'
-      - 'docs/**'
-      - 'include/**'
-      - 'metadata/sdk_version.yaml'
-      - 'scripts/check_doc_drift.py'
-      - 'scripts/check_version_doc_sync.py'
-      - '.github/workflows/pr-doc-drift.yml'
   push:
     branches: [main, dev]
-    paths:
-      - 'README.md'
-      - 'docs/**'
-      - 'include/**'
-      - 'metadata/sdk_version.yaml'
   workflow_dispatch:
 
 concurrency:
@@ -36,18 +61,48 @@ jobs:
   doc-drift:
     name: doc-drift · symbols + index
     runs-on: ubuntu-latest
+    # #1477: worst observed successful run 13s across 3 sampled runs.
+    # Raised from the formula's 10min to 15min so the ceiling stays
+    # strictly above the sum of its capped steps plus the 1min/step
+    # budget for the 7 uncapped (pure-Python) doc-drift check steps below.
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 5
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 
       - name: Doc-drift check (dead symbols + docs index)
         run: python3 scripts/check_doc_drift.py
 
-      - name: Version-doc sync (README labels vs sdk_version.yaml)
+      - name: Doc links (dead relative doc-to-doc paths)
+        run: python3 scripts/check_doc_links.py
+
+      - name: Diagnostic landing pages (no placeholder-only ALP-B pages)
+        run: python3 scripts/check_diagnostic_narratives.py
+
+      - name: Diagnostic emission coverage (every emitted ALP-B code has a doc page)
+        run: python3 scripts/check_diagnostic_emission_coverage.py
+
+      - name: Version-doc sync (README labels + VERSIONS.md vs sdk_version.yaml)
         run: python3 scripts/check_version_doc_sync.py
+
+      - name: Board-ID struct parity (docs/board-id.md vs include/alp/hw_info.h)
+        run: python3 scripts/check_board_id_doc_parity.py
+
+      - name: AGENTS.md generator parity (ALP_E1M_* identifiers + --emit choices)
+        run: python3 scripts/check_agents_md_generators.py
+
+      - name: Doc inventory (workflow names/counts, ADR count, chip/library counts)
+        run: python3 scripts/check_doc_inventory.py
+
+      - name: "CC3501E protocol version policy (ADR 0033 Version ledger)"
+        run: python3 scripts/check_protocol_version_policy.py

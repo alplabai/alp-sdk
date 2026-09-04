@@ -70,16 +70,23 @@ extern "C" {
 /** Pixel format for 2D surfaces.  Backends honour the subset their
  *  HW supports; unsupported formats return ALP_ERR_NOSUPPORT.
  *  Field-level meanings:
- *   - ARGB8888: 32-bit, A:R:G:B = 8:8:8:8 (default for DAVE2D).
- *   - RGB565: 16-bit, R:G:B = 5:6:5.
  *   - A8: 8-bit alpha only (useful for masks).
+ *   - RGB565: 16-bit, R:G:B = 5:6:5.
  *   - RGB888: 24-bit packed; backend-defined byte order.
- *   - RGBA8888: 32-bit, R:G:B:A = 8:8:8:8 (alternate ordering). */
+ *   - ARGB8888: 32-bit, A:R:G:B = 8:8:8:8 (default for DAVE2D).
+ *   - RGBA8888: 32-bit, R:G:B:A = 8:8:8:8 (alternate ordering).
+ *
+ *  RGB565 / RGB888 / ARGB8888 are numbered to agree with @ref
+ *  alp_pixfmt_t's members of the same name (issue #1647) -- a caller
+ *  wiring a display's advertised @ref alp_pixfmt_t straight into a
+ *  GPU2D surface no longer gets a silently-relabelled format.  A8 and
+ *  RGBA8888 have no @ref alp_pixfmt_t counterpart, so they take the
+ *  remaining values; keep it that way if either enum grows. */
 typedef enum {
-	ALP_GPU2D_FMT_ARGB8888 = 0,
+	ALP_GPU2D_FMT_A8       = 0,
 	ALP_GPU2D_FMT_RGB565   = 1,
-	ALP_GPU2D_FMT_A8       = 2,
-	ALP_GPU2D_FMT_RGB888   = 3,
+	ALP_GPU2D_FMT_RGB888   = 2,
+	ALP_GPU2D_FMT_ARGB8888 = 3,
 	ALP_GPU2D_FMT_RGBA8888 = 4,
 } alp_gpu2d_format_t;
 

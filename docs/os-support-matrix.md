@@ -95,8 +95,17 @@ plan in `VERSIONS.md`.
 | **RTC** (`<alp/rtc.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
 | **Watchdog** (`<alp/wdt.h>`) | code complete¹             | code complete¹         | code complete¹            | code complete¹            |
 | **Audio** (`<alp/audio.h>`) | code complete¹              | code complete¹         | code complete¹            | code complete¹            |
-| **Camera** (`<alp/camera.h>`) | planned                   | **GA** (MIPI CSI-2)    | **GA**                    | planned |
+| **Camera** (`<alp/camera.h>`) | planned                   | stub [^cam1]            | stub [^cam1]               | planned |
 | **IoT** (`<alp/iot.h>`)   | **GA**                        | **GA**                 | **GA**                    | planned |
+
+[^cam1]: The Yocto/A55 camera backend (`src/backends/camera/zephyr_stub.c`, linked
+    unconditionally at `src/yocto/CMakeLists.txt:323`, `silicon_ref = "*"`, priority
+    0) returns `ALP_ERR_NOT_IMPLEMENTED` for every op on every SoM, V2N/V2N-M1
+    included — that is a **stub** per the status key above, not GA.  The real
+    MIPI CSI-2 ISP-aware camera backend (`src/backends/camera/v2n_n44_isp.c`) is a
+    **Zephyr** backend for the V2N `m33_sm` core (`zephyr/CMakeLists.txt:812`,
+    opt-in via `CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP`); it does not link on Yocto and
+    does not back this Cortex-A cell.
 
 ### Cortex-M (Zephyr)
 
@@ -220,7 +229,7 @@ hasn't been measured.
 |---------|-----------|-----------------|--------|
 | Display class | `display.h` | M (Zephyr `display_*` driver-class wrapper, `alp-display0..3` DT aliases, issue #23); A (Yocto) + baremetal: NOSUPPORT stub | Zephyr backend **code complete (untested on silicon)** — native_sim ZTESTs against the upstream dummy display cover open/get_caps/blit/clear/close + degrade paths; a build-only native_sim scenario instantiates Zephyr MIPI DBI Type C (`zephyr,mipi-dbi-spi`) with an ST7789V child panel and proves the DT/Kconfig/backend wiring.  No panel has been driven on real hardware through this class yet.  V2N DSI / parallel-RGB + Alif LCD-IF vendor backends still pending |
 | GUI/LVGL bridge | `gui.h` (`alp_gui_lvgl_attach`, issue #23) | M (Zephyr): real LVGL v9 hand-off (`src/gui_lvgl.c`) — creates an `lv_display_t` over any `alp_display_t`, wires LVGL's flush callback to `alp_display_blit()`; `ALP_HAS_LVGL` auto-derives from `CONFIG_LVGL` via `CONFIG_ALP_SDK_HAS_LVGL`. A (Yocto) + baremetal / no-LVGL builds: guard-clause NOSUPPORT | **code complete, native_sim-tested** (`tests/zephyr/gui_lvgl/`) — a priority-255 test-double display backend proves a forced LVGL refresh reaches `alp_display_blit()`, plus NULL/unsupported-pixel-format/no-LVGL-build degrade paths. RGB565/RGB888/ARGB8888 mapped; `ALP_PIXFMT_MONO_VLSB` has no LVGL v9 equivalent and is refused. No real panel driven through this bridge yet — real-silicon bench run still pending |
-| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr): registry over `tflm` / `ethos_u`; A (Yocto): dispatcher over `tflm` / `drpai` / `deepx_dxm1` | surface + registry present; the A55 **DeepX (`dxrt::InferenceEngine`)** + **DRP-AI (`MeraDrpRuntimeWrapper`)** backend bodies are **real, bench-unverified** (link needs the Yocto sysroot; default-off CMake options); the former M-class DRP-AI/DEEPX stubs are removed — both engines are A55-only, M-class runs TFLM (code-complete) — #58/#59; `tflm`/`ethos_u` paths still untested |
+| Inference dispatcher | `inference.h` + `backend.h` | M (Zephyr): registry over `tflm` / `ethos_u`; A (Yocto): dispatcher over `ort` (CPU) / `drpai` / `deepx_dxm1` | surface + registry present; the A55 **DeepX (`dxrt::InferenceEngine`)** + **DRP-AI (`MeraDrpRuntimeWrapper`)** + **CPU (ONNX Runtime, `src/yocto/inference_ort.cpp`)** backend bodies are **real, bench-unverified** (link needs the Yocto sysroot; default-off CMake options — `ALP_SDK_USE_ORT_CPU` off by default); `resolve_auto()` orders CPU strictly last so an NPU-bearing SoM never silently falls back to it; the former M-class DRP-AI/DEEPX stubs are removed — all three A55 engines are A55-only, M-class runs TFLM (code-complete) — #58/#59; `tflm`/`ethos_u` paths still untested. No `.alpmodel` → ORT route exists yet (`CONFIG_ALP_SDK_MODEL_READER` undefined on Yocto): ORT is reachable only via a hand-built `alp_inference_config_t` |
 | DSP / math offload | `dsp.h` + `tmu.h` | M + A; CMSIS-DSP / libm SW fallback, GD32 FAC/CORDIC HW path on V2N | surface present; **untested** on HW |
 | Storage | `storage.h` | M (LittleFS) + A (filesystem) | surface present; **untested** |
 | 2D graphics | `gpu2d.h` | portable **software fallback** (real, native_sim **unit-tested**) + Alif **D/AVE 2D** backend (real, bench-unverified) | sw_fallback `fill_rect`/`blit`/`blend` exact-pixel ZTESTs pass on native_sim + **E8 bench PASS** (RAM-run, 2026-06-17); D/AVE 2D code-complete, bench-unverified (ADDITIVE/MULTIPLY blends delegate to the sw path).  (AEN 2D engine is **D/AVE 2D** (TES D/AVE 2D), not Mali-D71; i.MX 93 = **PXP**, no Vivante — N93 is served by the sw fallback today, now wired on `ALP_OS=yocto` plain-CMake builds too (dispatcher + sw_fallback replace the NOSUPPORT stub, ctest-covered); a Linux-side PXP/`libg2d` backend is future work gated on the `meta-imx` machine wiring + an in-repo API source, see #24) |

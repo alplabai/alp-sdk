@@ -1,0 +1,236 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * E1M-AEN801 M55-HP overlay for drone-autopilot (#1383 item 2).
+ *
+ * WHY THIS FILE EXISTS: the same gap examples/peripheral-io/pwm-led-fade closed
+ * for #1375 -- board.yaml's `peripherals:` list does NOT emit a DT alias
+ * anywhere in the build (`tan build`'s CMakeLists.txt only calls
+ * `alp_project.py --emit zephyr-conf`, never `--emit dts-overlay`), so nothing
+ * wires an E1M pad to hardware on its own. Every portable backend resolves its
+ * instance through an `alp-<class><N>` alias; with none defined the alias
+ * expands to `{ .dev = NULL }` and the open returns ALP_ERR_NOT_READY. This
+ * example had no `boards/` directory at all.
+ *
+ * ORDER MATTERS -- FIXING ONLY PWM WOULD HAVE MOVED THE FAILURE, NOT REMOVED
+ * IT. autopilot_init() (src/autopilot.c) opens I2C0 at :105 and returns -1
+ * there before it ever reaches the ESC loop at :143, so the observed bench
+ * failure on the unpatched tree is
+ *
+ *     <err> autopilot: I2C0 open failed
+ *     <err> drone_autopilot: autopilot_init failed -- staying in DISARMED
+ *
+ * and `ESC%d open failed` never prints. This overlay therefore wires the I2C
+ * bus AND the ESC bank, in that dependency order.
+ *
+ * WHAT THIS OVERLAY DOES *NOT* MAKE WORK. It closes the devicetree-alias gap
+ * only. autopilot_init() still returns -2 / -3 / -4 unless an LSM6DSO, a
+ * BMP390 and an INA236 actually answer on the bus (:114-:122). On the E1M-EVK
+ * only the INA236 is populated (metadata/boards/e1m-evk.yaml `ina236: true`,
+ * six instances at 0x40..0x42 / 0x49..0x4B) -- and the one at 0x40 that
+ * autopilot.c:118 targets is U21, the EVK's own +3V3 rail monitor (20 mOhm
+ * shunt, 4.0 A max), not a flight battery; the example calibrates it for
+ * 10 mOhm / 50 A (:119-:120), so it answers but scales wrong. The IMU,
+ * barometer and GNSS are external parts the customer plugs into the EVK's
+ * sensor header. No part of this has been run on silicon -- see the CHANGELOG
+ * entry.
+ *
+ * ── I2C0: the sensor bus (fatal path) ────────────────────────────────────
+ * The E1M edge "I2C0" signal is Alif I2C2 on this module, NOT the SoC's own
+ * i2c0 block (which has no edge routing here):
+ * metadata/e1m_modules/aen/from-alif.tsv rows AE2/AD2 --
+ * "I2C0_SCL" -> I2C2_SCL_C -> P5_6, "I2C0_SDA" -> I2C2_SDA_C -> P5_7.
+ * The pinctrl group is copied verbatim from
+ * examples/aen/aen-i2c2-eeprom-regcheck, where the input-enable +
+ * bias-pull-down pair is BENCH-VALIDATED on the E8 (2026-06-15). Do NOT
+ * "correct" bias-pull-down to bias-pull-up: the upstream binding's pull naming
+ * is effectively inverted vs the Alif pad HW and pull-up gives a DEAD bus.
+ * `clock-frequency` here is the DT default only -- autopilot.c:107 opens with
+ * `.bitrate_hz = 400000`, and src/backends/i2c/zephyr_drv.c turns that into
+ * I2C_SPEED_FAST at i2c_configure() time. The bench note on the 100 kHz DT
+ * value (aen-i2c2-eeprom-regcheck: "the on-module bus has no fast-mode margin
+ * unless external pull-ups are stuffed") therefore applies to this example's
+ * runtime request as well.
+ *
+ * ── PWM0..PWM3: the four ESC outputs (fatal path) ────────────────────────
+ * From two sources that agree -- metadata/e1m_modules/aen/from-alif.tsv and
+ * this repo's own PWM driver header (zephyr/drivers/pwm/pwm_alif_utimer.c:11-18,
+ * which documents the E1M-PWM -> UTIMER/channel table for all eight pads):
+ *
+ *   E1M_PWM0 = UT11_T1_C (utimer11, driver B / channel 1) -> P12_7
+ *   E1M_PWM1 = UT11_T0_C (utimer11, driver A / channel 0) -> P12_6
+ *   E1M_PWM2 = UT10_T1_A (utimer10, driver B / channel 1) -> P2_5
+ *   E1M_PWM3 = UT10_T0_A (utimer10, driver A / channel 0) -> P2_4
+ *
+ * utimer10/pwm10 and utimer11/pwm11 are already instantiated (disabled) for
+ * both M55 cores in zephyr/dts/alif/ensemble_e8_peripherals.dtsi:990-1024; this
+ * overlay enables them and points each pinctrl group at its pad. The `pwms`
+ * cell period below is informational -- autopilot.c:145 passes an explicit
+ * `.period_ns = 2500000` (400 Hz) and the backend prefers it
+ * (src/backends/pwm/zephyr_drv.c:126: `h->period_ns = (cfg->period_ns != 0u) ?
+ * cfg->period_ns : spec->period`).
+ *
+ * CARRIER REALITY CHECK: on the E1M-EVK these four pads are NOT ESC headers.
+ * metadata/boards/e1m-evk.yaml `pwm:` maps E1M_PWM0 = EVK_PWM_LED_RED,
+ * E1M_PWM1 = EVK_PWM_LED_BLUE, E1M_PWM3 = EVK_PWM_LED_GREEN (the RGB LED) and
+ * E1M_PWM2 = EVK_ARD_PWM4 (Arduino header CK_PWM4). Running this example on an
+ * EVK drives the RGB LED with ESC pulse-widths; a real airframe carrier routes
+ * the same four E1M pads to its ESC connector, which is exactly the SoM-swap
+ * portability contract.
+ *
+ * ── UART1: the SBUS RC receiver (non-fatal path) ─────────────────────────
+ * E1M edge "UART1" is Alif UART3 on this module -- from-alif.tsv rows AG4/AH4
+ * ("UART1_TX" -> UART3_TX_A -> P1_3, "UART1_RX" -> UART3_RX_A -> P1_2). On the
+ * EVK that edge signal is EVK_UART_PORT_ARDUINO, the Arduino UNO header UART
+ * on D0/D1 (metadata/boards/e1m-evk.yaml:178-180), which is free. autopilot.c
+ * :132 opens it at 100000 baud for SBUS; note the source's own caveat at
+ * :124-127 that SBUS is 100000/8E2 INVERTED and needs an external inverter --
+ * this overlay cannot supply one.
+ *
+ * ── DELIBERATELY ABSENT: alp-uart0 ───────────────────────────────────────
+ * E1M edge "UART0" is Alif UART5 (from-alif.tsv rows F2/G2: P3_5 TX_A / P3_4
+ * RX_A), and on this board target UART5 is the CONSOLE:
+ * zephyr/boards/alp/e1m_aen801_m55_hp/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.dts
+ * sets `zephyr,console = &uart5` and `zephyr,shell-uart = &uart5` at 115200,
+ * with pinctrl_uart5 already declared in the generated board pinctrl dtsi.
+ * Aliasing `alp-uart0 = &uart5` would make autopilot.c:128's GNSS open SUCCEED
+ * and then reconfigure the live console down to 9600 8N1 -- destroying the very
+ * LOG_ERR output this example is diagnosed by. The source already tolerates the
+ * absence (`if (s_gps_uart) ublox_neo_m9n_init(...)`, :136 -- GNSS off, no
+ * failure return), and src/mavlink.c:344 documents the underlying constraint:
+ * "MAVLink GCS shares ALP_E1M_UART0 with the GNSS link -- route to a dedicated
+ * UART before flight (no free third port in v0.5)." So the GNSS / MAVLink
+ * telemetry paths stay DISABLED here by design; a flight-ready carrier needs a
+ * third UART routed out, which is a hardware change, not an overlay one.
+ *
+ * ── DELIBERATELY ABSENT: alp_pins (GPIO) ─────────────────────────────────
+ * board.yaml lists `gpio # Arming-switch input + status LED`, but no source
+ * file under src/ contains the string "gpio" -- the example never calls
+ * alp_gpio_open(), so an alp,pin-array here would back nothing.
+ *
+ * TRAP (see examples/aen/aen-pwm-utimer-pwmleds, examples/peripheral-io/
+ * pwm-led-fade): each `alp-pwm<N>` alias must point at a `pwm-leds` CONSUMER
+ * child, never a pwmN controller node directly -- DEVICE_DT_GET on the
+ * controller triggers a phantom `pwmN_P_pwms_IDX_0` codegen reference because
+ * the "alif,pwm" binding re-declares #pwm-cells.
+ *
+ * TRAP (numbering domains): the Zephyr node number and the E1M pad number are
+ * NOT the same axis -- node `pwm10` backs E1M_PWM2 and E1M_PWM3, and `i2c2`
+ * backs E1M_I2C0. Do not generalize pwm<N> -> alp-pwm<N> or i2c<N> ->
+ * alp-i2c<N>; each E1M pad needs its own confirmed mapping.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/ {
+	esc_pwm_leds: pwm-leds {
+		compatible = "pwm-leds";
+
+		esc0: esc0 {
+			label = "esc0";
+			pwms  = <&pwm11 1 PWM_USEC(2500) PWM_POLARITY_NORMAL>;
+		};
+
+		esc1: esc1 {
+			label = "esc1";
+			pwms  = <&pwm11 0 PWM_USEC(2500) PWM_POLARITY_NORMAL>;
+		};
+
+		esc2: esc2 {
+			label = "esc2";
+			pwms  = <&pwm10 1 PWM_USEC(2500) PWM_POLARITY_NORMAL>;
+		};
+
+		esc3: esc3 {
+			label = "esc3";
+			pwms  = <&pwm10 0 PWM_USEC(2500) PWM_POLARITY_NORMAL>;
+		};
+	};
+
+	aliases {
+		alp-i2c0 = &i2c2;  /* ALP_E1M_I2C0  -- IMU + baro + INA236 (autopilot.c:106) */
+		alp-uart1 = &uart3; /* ALP_E1M_UART1 -- SBUS RC receiver (autopilot.c:133) */
+		alp-pwm0 = &esc0;  /* ESC0 / ALP_E1M_PWM0 */
+		alp-pwm1 = &esc1;  /* ESC1 / ALP_E1M_PWM1 */
+		alp-pwm2 = &esc2;  /* ESC2 / ALP_E1M_PWM2 */
+		alp-pwm3 = &esc3;  /* ESC3 / ALP_E1M_PWM3 */
+	};
+};
+
+&pinctrl {
+	/* I2C2 master: SCL P5_6 / SDA P5_7 (_C). input-enable + bias-pull-down
+	 * are the bench-validated pair -- see the header, do not "correct". */
+	pinctrl_i2c2: pinctrl_i2c2 {
+		group0 {
+			pinmux = <PIN_P5_6__I2C2_SCL_C>, <PIN_P5_7__I2C2_SDA_C>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+
+	/* UART3 = E1M edge UART1: RX P1_2 needs the pad receiver enabled,
+	 * TX P1_3 is a plain output -- same split the generated board
+	 * pinctrl dtsi uses for the UART5 console. */
+	pinctrl_uart3: pinctrl_uart3 {
+		group0 {
+			pinmux = <PIN_P1_2__UART3_RX_A>;
+			input-enable;
+		};
+
+		group1 {
+			pinmux = <PIN_P1_3__UART3_TX_A>;
+		};
+	};
+
+	pinctrl_pwm10: pinctrl_pwm10 {
+		group0 {
+			/* UT10_T0_A -> P2_4 = E1M_PWM3, UT10_T1_A -> P2_5 = E1M_PWM2. */
+			pinmux = <PIN_P2_4__UT10_T0_A>, <PIN_P2_5__UT10_T1_A>;
+		};
+	};
+
+	pinctrl_pwm11: pinctrl_pwm11 {
+		group0 {
+			/* UT11_T0_C -> P12_6 = E1M_PWM1, UT11_T1_C -> P12_7 = E1M_PWM0. */
+			pinmux = <PIN_P12_6__UT11_T0_C>, <PIN_P12_7__UT11_T1_C>;
+		};
+	};
+};
+
+&i2c2 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	pinctrl-names = "default";
+	/* DT default only; autopilot.c:107 requests 400 kHz at open time. */
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+};
+
+&uart3 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_uart3>;
+	pinctrl-names = "default";
+	/* DT default only; autopilot.c:134 requests 100000 baud at open time. */
+	current-speed = <115200>;
+};
+
+&utimer10 {
+	status = "okay";
+
+	pwm10 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_pwm10>;
+		pinctrl-names = "default";
+	};
+};
+
+&utimer11 {
+	status = "okay";
+
+	pwm11 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_pwm11>;
+		pinctrl-names = "default";
+	};
+};

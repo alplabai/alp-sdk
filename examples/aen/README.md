@@ -3,8 +3,9 @@
 Reference applications for the E1M-AEN family (lead part: Alif
 Ensemble E8 -- dual-M55 + Ethos-U85/U55 NPUs, on-module ISP /
 camera path, GPU2D).  Build any of these against an E1M-AEN SoM
-populated on the E1M-EVK board; the per-example `board.yaml`
-carries the exact SKU + board.
+populated on the E1M-EVK board; where an example ships a
+per-example `board.yaml` (9 of the 66 directories here), that
+file carries the exact SKU + board.
 
 Apps tagged **bench** are on-silicon RAM-run validations read over SWD via the
 RAM console; **regcheck/staging** apps prove a driver binds + programs its
@@ -42,7 +43,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-se-service-info`](aen-se-service-info/)      | **staging** -- SE SERVICE transport binds + a single LCS read over the bench RAM-run flow (deliberately vendor-specific bring-up regcheck; customer code uses the portable wrappers instead). |
 | [`aen-se-service-query`](aen-se-service-query/)    | **bench** -- READ-ONLY dump of the portable SE-backed surfaces: SoC identity (`<alp/hw_info.h>`), RUN/STANDBY profiles (`<alp/power.h>`), TRNG (`<alp/security.h>`). |
 | [`aen-se-crypto`](aen-se-crypto/)                  | SHA-256 known-answer + AES-128-GCM round-trip + TRNG through `<alp/security.h>`, backed by the SE CryptoCell (else MbedTLS-PSA fallback). |
-| [`aen-secure-element-sign`](aen-secure-element-sign/) | OPTIGA Trust M I2C_STATE probe over BRD_I2C (LPI2C0, M55-HE); product-info/raw-APDU return `ALP_ERR_NOSUPPORT` until host-library integration. |
+| [`aen-secure-element-sign`](aen-secure-element-sign/) | OPTIGA Trust M I2C_STATE probe over BRD_I2C (I2C0, M55-HE); product-info/raw-APDU return `ALP_ERR_NOSUPPORT` until host-library integration. |
 
 ### NPU + AI accelerators
 

@@ -36,8 +36,12 @@ manifest-driven **top-level** `libraries:` selection.
 | `azure-iot` | B    | 1.5.0      | MIT        | zephyr    | Zephyr; west project pin § |
 | `canopennode` | B  | dec12fa3f0d790cafa8414a4c2930ea71ab72ffd | Apache-2.0 | zephyr | Cortex-M; optional west pin; CAN controller |
 | `micropython` | B  | v1.24.1    | MIT        | zephyr    | Cortex-M; source pin; dedicated owner needed |
+| `cmsis-stream` | B | v3.2.0     | Apache-2.0 | zephyr    | west module `cmsisstream`; app must override `CONFIG_CMSISSTREAM_POOL_SECTION` off-AEN; app must also set `CONFIG_CPP=y` + a C++ stdlib choice |
+| `cmsis-cv`  | B    | (SHA pin, no upstream tags) | Apache-2.0 | zephyr | no upstream Zephyr module glue yet; recipe-only |
+| `arm-2d`    | B    | v1.2.6     | Apache-2.0 | zephyr    | no upstream Zephyr module glue yet; recipe-only |
+| `onnxruntime` | B  | 1.28.0     | MIT & Apache-2.0 | yocto | Cortex-A; own `meta-alp-sdk` recipe, upstream (not a vendor fork) |
 
-`python -m alp_cli doctor` reports the selection for the project in scope (tier + licence +
+`tan doctor` reports the selection for the project in scope (tier + licence +
 compatibility), reading these same manifests — so the CLI and alp-studio's
 library picker can never disagree.
 
@@ -100,6 +104,43 @@ remaining curation set without inventing capabilities or symbols:
   source pin to upstream `micropython/micropython` at `v1.24.1` with no
   invented Kconfig.  Tier-A promotion needs a dedicated owner (ADR 0018).
 
+**The Arm CMSIS/CV/2D Cortex-M batch.** Three manifests pin `github.com/
+ARM-software` repos, all Tier B (recipe-only):
+
+- `cmsis-stream` ships its **own** upstream Zephyr module glue at the pinned
+  tag `v3.2.0` (`zephyr/module.yml`, module name `cmsisstream`,
+  `zephyr/Kconfig`'s `menuconfig CMSISSTREAM`), so its `integration.zephyr`
+  names a real module and a real `CONFIG_CMSISSTREAM=y` symbol. Its
+  `CMSISSTREAM_POOL_SECTION` Kconfig defaults to `.alif_sram0.evt_pool`, a
+  linker section that exists only on Alif Ensemble (E1M-AEN); apps on the
+  Renesas RZ/V2N or NXP i.MX 93 M33 cores MUST override it with a real
+  section from their own memory map or the link fails — the manifest does
+  not re-emit that default and invents no replacement. Separately,
+  `CONFIG_CMSISSTREAM=y` unconditionally compiles two C++ translation
+  units (upstream's `zephyr/CMakeLists.txt`), so a C-only application
+  slice pulling in `cmsis-stream` MUST also set `CONFIG_CPP=y` plus a C++
+  standard-library choice in its own `prj.conf` — the manifest does not
+  add `CONFIG_CPP=y` itself, to avoid silently imposing a C++ runtime on
+  every consumer.
+- `cmsis-cv` has **no upstream tags or releases** (pinned to a `main` SHA)
+  and **no upstream Zephyr module glue at all** — upstream's own README
+  says it "is a work in progress and has just started". `module: null`,
+  no `kconfig:`; promotion to Tier A needs a real `zephyr/module.yml`
+  upstream plus a CI build lane and example.
+- `arm-2d` has a mature tagged `v1.2.x` release series but likewise ships
+  **no** `zephyr/` directory, `zephyr/module.yml`, or Kconfig — `module:
+  null`, no `kconfig:`. LVGL v9 does carry an Arm-2D accelerated draw path
+  (`LV_USE_DRAW_ARM2D_SYNC`), but Zephyr v4.4's `modules/lvgl/Kconfig`
+  does not expose that symbol (only `LV_USE_DRAW_DMA2D` /
+  `LV_USE_DRAW_DAVE2D`), so Arm-2D cannot be wired in as an LVGL
+  accelerator through this checkout's Kconfig tree today — only its
+  standalone Helium-accelerated 2D API is usable, on the Cortex-M55
+  (E1M-AEN family).
+
+None of the three is vendored in-tree (no `vendors/<lib>/` directory, no
+`zephyr/CMakeLists.txt` edit, no synthetic `CONFIG_ALP_SDK_*_VENDORED`
+symbol) — the existing u8g2/catch2 vendoring exception is not widened here.
+
 **Memfault — deliberately NOT shipped.** Memfault's `memfault-firmware-sdk` is
 not pinned in `west.yml`, and its licence is the proprietary **Memfault SDK
 License** (source-available, use-with-Memfault-services), which is **not** in the
@@ -118,7 +159,7 @@ for the authoritative schema. A manifest declares:
 ```yaml
 schema_version: 1
 name: lvgl                     # must match the filename (<name>.yaml)
-description: "..."             # one-liner, surfaced in `python -m alp_cli doctor`
+description: "..."             # one-liner, surfaced in `tan doctor`
 tier: A                        # A (curated, CI-built) | B (recipe-only)
 version: "9.5.0"               # the pinned upstream version (never a range)
 license: MIT                   # SPDX id from the allowlist (below)
@@ -180,7 +221,8 @@ copyleft or proprietary surprise cannot ride in through a `libraries:`
 selection:
 
 ```
-Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, Zlib, MIT-0, BSL-1.0, CC0-1.0
+Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, Zlib, MIT-0, BSL-1.0, CC0-1.0,
+MIT & Apache-2.0
 ```
 
 **Extending this allowlist is a deliberate human decision, not a metadata
@@ -192,6 +234,26 @@ design. `BSL-1.0` (Boost, `catch2`) and `CC0-1.0` (public-domain-equivalent,
 the same decision dropped `tinygsm` (LGPL-3.0) and `libhelix` (RPSL-1.0)
 from the curated set rather than admit their copyleft/non-permissive
 licences into this allowlist.
+
+`MIT & Apache-2.0` is a **compound SPDX expression**, added by 2026-08-05
+maintainer legal sign-off to cover a real shape the simple-id enum could not
+express honestly: a library whose own licence is MIT but whose shipped
+artifact contains an inseparable Apache-2.0 component pulled in as a
+required build input. `onnxruntime` is the first case — its `onnx/onnx`
+model-format parser (Apache-2.0) is both a required git submodule
+(`cmake/external/onnx`) and a `cmake/deps.txt` entry, with no CPU-only build
+that excludes it, and its 325 KB `ThirdPartyNotices.txt` at v1.28.0 confirms
+this is not a lone edge case. Writing `license: MIT` alone would be untrue
+about the redistributed `libonnxruntime.so`, and the manifest is what
+customers read to build their own compliance bill of materials for images
+they redistribute — a field that can only hold simple ids forces exactly
+that untrue entry. This recurs immediately: Arm Compute Library ships
+Apache-2.0 + BSD-3-Clause + MIT, KleidiAI ships Apache-2.0 + BSD-3-Clause,
+and ncnn is BSD-3-Clause plus separately-licensed components — all three are
+blocked by the same limitation the enum previously had. Every component
+named in a compound expression must itself already be a permissive
+allowlisted id (both `MIT` and `Apache-2.0` are); a compound naming a
+non-allowlisted licence still needs its own sign-off, not a slip-in.
 
 ## Adding a library
 
@@ -219,5 +281,5 @@ A library ships as **Tier A** only if it clears all of:
 
 Anything that can't yet meet that bar ships as **Tier B** (recipe-only): the
 wiring + compatibility metadata are maintained and emitted, but the library is
-not built in alp-sdk CI, and `python -m alp_cli doctor` labels it. Promotion B → A requires
+not built in alp-sdk CI, and `tan doctor` labels it. Promotion B → A requires
 a dedicated owner and a CI build lane.

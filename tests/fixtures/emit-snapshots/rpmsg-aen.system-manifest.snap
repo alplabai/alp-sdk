@@ -26,6 +26,9 @@ slices:
   flash_method: zephyr_west_flash
   flash_args:
     jlink_flash_device: AE822FA0E5597LS0_M55_HE
+    expect_dpidr: '0x4C013477'
+    jlink_device: Cortex-M55
+    slot0_load_address: '0x802b0000'
 - core_id: m55_he
   os: zephyr
   app: alp-stock-shim
@@ -35,6 +38,9 @@ slices:
   flash_method: zephyr_west_flash
   flash_args:
     jlink_flash_device: AE822FA0E5597LS0_M55_HE
+    expect_dpidr: '0x4C013477'
+    jlink_device: Cortex-M55
+    slot0_load_address: '0x80010000'
 ipc:
 - name: alp_default_rpmsg
   kind: rpmsg
@@ -42,14 +48,14 @@ ipc:
   - a32_cluster
   - m55_hp
   status: blocked
-  reason: memory_map.base is unset for region 'sram0' in SoM E1M-AEN801; this SoM
+  reason: memory_map.base is TBD for region 'mram_main' in SoM E1M-AEN801; this SoM
     hasn't been HW-mapped yet so IPC carve-outs cannot be allocated.  Add a `memory_map:`
     block to metadata/e1m_modules/E1M-AEN801.yaml (or per-region `base`) or remove
     the matching ipc entry from board.yaml.
 helper_mcus:
 - name: cc3501e_otp
   chip: cc3501e
-  firmware_path: firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin
+  flash_policy: recovery_only
   update_channel: alp_ota_spi_otp
 boot_order: []
 

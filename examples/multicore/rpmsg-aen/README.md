@@ -33,9 +33,15 @@ examples/multicore/rpmsg-aen/
 
 The AEN801 preset resolves the mailbox controller and derives the
 memory envelope from the E8 SoC variant.  The `alp_default_rpmsg`
-carve-out lands in `mram_main` (cacheable, accessible from all three
-cores). Spec §6.8 dictates AEN defaults to cacheable carve-outs
-because the M55 cores have caches enabled.
+carve-out lands in `mram_main`, accessible from all three cores.
+
+Spec §6.8 says AEN defaults to cacheable carve-outs because the M55
+cores have caches enabled — but the SDK emits no cache maintenance to
+make that safe, so this example does **not** take that path.  The
+`cacheable: true` opt-in is rejected on `kind: rpmsg` entries, and the
+orchestrator emits `CONFIG_DCACHE=n` for the `m55_hp` slice instead, so
+both sides see each other's writes without explicit clean/invalidate.
+Tracked as #1088; see `docs/heterogeneous-builds.md`.
 
 | Range                     | Owner                  | Notes                                                |
 |---------------------------|------------------------|------------------------------------------------------|
@@ -63,20 +69,21 @@ ships the authoritative `boot_order:` block.)
 ## Build
 
 ```bash
-cd alp-workspace
-tan build alp-sdk/examples/multicore/rpmsg-aen
+cd alp-workspace/alp-sdk/examples/multicore/rpmsg-aen
+tan build
 ```
 
-The orchestrator fans out:
+Tan's relocated planner fans out:
 
 - `build/a32_cluster-yocto/` (bitbake against `MACHINE = e1m-aen801-a32`).
 - `build/m55_hp-zephyr/` (Zephyr against `BOARD = alp_e1m_aen801_m55_hp`).
 
-Iterate on the M-side only:
-
-```bash
-tan build alp-sdk/examples/multicore/rpmsg-aen --core m55_hp
-```
+`tan build` has no per-slice `--core` flag -- it rebuilds every slice
+on each invocation.  To iterate on the M-side only, just re-run the
+same command: the already-built Yocto slice is reused (bitbake
+short-circuits an up-to-date tree) while the Zephyr slice rebuilds
+incrementally in seconds. See
+[`docs/heterogeneous-builds.md`](../../../docs/heterogeneous-builds.md#iterating-on-one-slice).
 
 ## Reference
 

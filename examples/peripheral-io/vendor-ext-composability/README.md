@@ -33,7 +33,7 @@ pins, in the same firmware.
 ## Running under native_sim
 
 ```bash
-tan build --native examples/peripheral-io/vendor-ext-composability
+tan build --native --project examples/peripheral-io/vendor-ext-composability
 west build -d build -t run
 ```
 
@@ -50,9 +50,9 @@ canonical two-controller split a full 52-slot board file uses.
 ## Build (on the EVK)
 
 The board file ships in-tree at
-[`zephyr/boards/alp/e1m_aen801_m55_he/`](../../../zephyr/boards/alp/e1m_aen801_m55_he/):
+[`zephyr/boards/alp/e1m_aen801_m55_hp/`](../../../zephyr/boards/alp/e1m_aen801_m55_hp/):
 
 ```bash
-west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/vendor-ext-composability
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/vendor-ext-composability
 west flash
 ```

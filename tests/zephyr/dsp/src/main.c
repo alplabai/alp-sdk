@@ -709,6 +709,86 @@ ZTEST(alp_dsp_chain_apply_samples, test_f32_unity_fir_passthrough)
 	alp_dsp_chain_close(c);
 }
 
+ZTEST(alp_dsp_chain_apply_samples, test_f32_three_tap_fir_matches_closed_form_in_place)
+{
+	/* #1629 regression: the portable-C fir_apply() read its own output
+	 * as the delay line when out == in (which every call site through
+	 * this public API is, internally -- sw_apply_samples_f32 always
+	 * runs fir_apply(s, buf, n, buf)).  A 1-tap "identity" FIR can't
+	 * catch this (the k>=1 history loop never executes); a 3-tap
+	 * moving average forces it: taps = {1/3, 1/3, 1/3} over a ramp,
+	 * zero initial state.
+	 *
+	 * Closed form: y[n] = (x[n] + x[n-1] + x[n-2]) / 3, x[-1]=x[-2]=0.
+	 * Buggy portable branch instead read already-overwritten out[]
+	 * samples for k>=1, e.g. y[1] came out ~0.778 instead of 1.0. */
+	static const float taps[3] = { 1.0f / 3.0f, 1.0f / 3.0f, 1.0f / 3.0f };
+	alp_dsp_stage_t    stage   = { 0 };
+	stage.kind                 = ALP_DSP_STAGE_FIR;
+	stage.u.fir.coeff_format   = ALP_DSP_COEFF_FORMAT_F32;
+	stage.u.fir.n_taps         = 3u;
+	stage.u.fir.taps           = taps;
+	alp_dsp_chain_t *c         = alp_dsp_chain_open(&stage, 1u);
+	zassert_not_null(c, NULL);
+
+	float        in[8]       = { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f };
+	const float  expected[8] = { 1.0f / 3.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f };
+	float        out[8]      = { 0 };
+	size_t       got         = 0u;
+	alp_status_t s           = alp_dsp_chain_apply_samples_f32(c, in, 8u, out, 8u, &got);
+	zassert_equal(s, ALP_OK, NULL);
+	zassert_equal(got, 8u, NULL);
+	for (size_t i = 0u; i < 8u; i++) {
+		zassert_within(out[i],
+		               expected[i],
+		               1e-5f,
+		               "fir sample %zu: got %f want %f",
+		               i,
+		               (double)out[i],
+		               (double)expected[i]);
+	}
+
+	alp_dsp_chain_close(c);
+}
+
+ZTEST(alp_dsp_chain_apply_samples, test_f32_three_tap_fir_state_continuous_across_calls)
+{
+	/* Same moving-average filter split across two calls (4 + 4 samples)
+	 * must match a single 8-sample call -- proves the M-1 state saved
+	 * at the end of fir_apply() carries the caller's ORIGINAL input
+	 * samples (not already-overwritten output) across the boundary. */
+	static const float taps[3] = { 1.0f / 3.0f, 1.0f / 3.0f, 1.0f / 3.0f };
+	alp_dsp_stage_t    stage   = { 0 };
+	stage.kind                 = ALP_DSP_STAGE_FIR;
+	stage.u.fir.coeff_format   = ALP_DSP_COEFF_FORMAT_F32;
+	stage.u.fir.n_taps         = 3u;
+	stage.u.fir.taps           = taps;
+	alp_dsp_chain_t *c         = alp_dsp_chain_open(&stage, 1u);
+	zassert_not_null(c, NULL);
+
+	float        in1[4]  = { 1.0f, 2.0f, 3.0f, 4.0f };
+	float        in2[4]  = { 5.0f, 6.0f, 7.0f, 8.0f };
+	float        out1[4] = { 0 };
+	float        out2[4] = { 0 };
+	size_t       got     = 0u;
+	alp_status_t s       = alp_dsp_chain_apply_samples_f32(c, in1, 4u, out1, 4u, &got);
+	zassert_equal(s, ALP_OK, NULL);
+	zassert_equal(got, 4u, NULL);
+	s = alp_dsp_chain_apply_samples_f32(c, in2, 4u, out2, 4u, &got);
+	zassert_equal(s, ALP_OK, NULL);
+	zassert_equal(got, 4u, NULL);
+
+	const float expected[8] = { 1.0f / 3.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f };
+	for (size_t i = 0u; i < 4u; i++) {
+		zassert_within(out1[i], expected[i], 1e-5f, "chunk1 sample %zu", i);
+	}
+	for (size_t i = 0u; i < 4u; i++) {
+		zassert_within(out2[i], expected[4u + i], 1e-5f, "chunk2 sample %zu", i);
+	}
+
+	alp_dsp_chain_close(c);
+}
+
 ZTEST(alp_dsp_chain_apply_bins, test_f32_dc_peaks_at_bin_zero)
 {
 	alp_dsp_stage_t stages[1] = {

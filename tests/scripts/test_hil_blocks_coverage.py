@@ -134,20 +134,33 @@ def _make_project(
     *,
     boot: dict | None = None,
     diagnostics: dict | None = None,
+    sku: str = "E1M-AEN701",
+    som_preset: dict | None = None,
 ) -> BoardProject:
     """Build a minimal BoardProject for the orchestrator-emit checks
     below.  We don't go through load_board_yaml() because that
     requires real preset files on disk; the emit functions take
-    BoardProject + Slice directly."""
+    BoardProject + Slice directly.
+
+    `cores` carries a real `os: zephyr` slice and `family:` carries the
+    real `alif-ensemble` token out of metadata/e1m_modules/E1M-AEN701.yaml
+    (it used to be `cores={}` and `family: "alif"` -- neither of which any
+    loaded project can produce).  `emit_sysbuild_conf` reads both since
+    #562: sysbuild only exists inside a Zephyr build, and `boot.method:`
+    now defaults per SoM family rather than unconditionally to mcuboot,
+    so a fixture with no Zephyr slice and an unrecognised family would
+    quietly stop exercising the AEN MCUboot path these tests are about."""
     return BoardProject(
-        sku="E1M-AEN701",
+        sku=sku,
         hw_rev=None,
         board_name="hil-blocks-test",
         board_hw_rev=None,
-        cores={},
+        cores={"m55_hp": Slice(core_id="m55_hp", os="zephyr", app="./src")},
         ipc=[],
         soc_spec={"silicon": "alif:e1c:e1c-aen"},
-        som_preset={"family": "alif", "topology": {}},
+        som_preset=som_preset
+        if som_preset is not None
+        else {"family": "alif-ensemble", "topology": {}},
         board_preset=None,
         diagnostics=diagnostics or {},
         chips=[],
@@ -212,6 +225,143 @@ def test_boot_block_emits_mcuboot_config() -> None:
     assert "SB_CONFIG_BOOT_COUNTERS_MCUBOOT" not in sysbuild
 
 
+def test_omitted_swap_algorithm_still_defaults_to_scratch_on_two_slot_sku() -> None:
+    """#1413: the fix must not move behaviour for the common case.  A
+    `boot:` block with no `swap_algorithm:` on a SKU with no
+    `memory_map:` override (every AEN SKU except E1M-AEN801) keeps the
+    historical swap-using-scratch default -- its DT has a real
+    slot1/scratch partition to swap into."""
+    project = _make_project(boot={
+        "method": "mcuboot",
+        "signing": {"algorithm": "ecdsa_p256",
+                    "key_file": "keys/dev_ecdsa_p256.pem"},
+        # swap_algorithm intentionally omitted
+    })
+    sysbuild = emit_sysbuild_conf(project)
+    assert "SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH=y" in sysbuild
+    assert "SB_CONFIG_MCUBOOT_MODE_SINGLE_APP" not in sysbuild
+
+
+# E1M-AEN801's real `memory_map:` shape (metadata/e1m_modules/
+# E1M-AEN801.yaml #1069): disjoint per-core slot0 windows, no
+# slot1/scratch region.  Trimmed to the fields _boot_target_is_single_
+# slot() and the rest of emit_sysbuild_conf() actually read.
+_AEN801_SOM_PRESET = {
+    "family": "alif-ensemble",
+    "topology": {},
+    "memory_map": [
+        {"name": "mcuboot",   "base": 0x80000000, "size_kib": 64,
+         "accessible_from": ["m55_he", "m55_hp"]},
+        {"name": "he_slot0",  "base": 0x80010000, "size_kib": 2688,
+         "accessible_from": ["m55_he"]},
+        {"name": "hp_slot0",  "base": 0x802b0000, "size_kib": 2688,
+         "accessible_from": ["m55_hp"]},
+        {"name": "reserved",  "base": 0x80550000, "size_kib": 64,
+         "accessible_from": ["m55_he", "m55_hp"]},
+        {"name": "storage",   "base": 0x80560000, "size_kib": 96,
+         "accessible_from": ["m55_he", "m55_hp"]},
+        {"name": "atoc",      "base": 0x80578000, "size_kib": 32,
+         "accessible_from": ["m55_he", "m55_hp"]},
+    ],
+}
+
+
+def test_omitted_swap_algorithm_defaults_to_single_app_on_aen801() -> None:
+    """#1413: E1M-AEN801's disjoint-slot0 `memory_map:` has no
+    slot1/scratch partition, so a `boot:` block that omits
+    `swap_algorithm:` must NOT resolve to swap-using-scratch (there is
+    nothing for MCUboot to swap into) -- it must resolve to the
+    single-app boot the curated zephyr/sysbuild/aen/sysbuild.conf base
+    already ships."""
+    project = _make_project(
+        sku="E1M-AEN801",
+        som_preset=_AEN801_SOM_PRESET,
+        boot={
+            "method": "mcuboot",
+            "signing": {"algorithm": "ecdsa_p256",
+                        "key_file": "keys/dev_ecdsa_p256.pem"},
+            # swap_algorithm intentionally omitted -- the #1413 bug
+        },
+    )
+    sysbuild = emit_sysbuild_conf(project)
+    assert "SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y" in sysbuild, (
+        "an omitted swap_algorithm: on single-slot AEN801 must default "
+        "to single-app boot, not swap-using-scratch"
+    )
+    assert "SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH" not in sysbuild, (
+        "AEN801 has no slot1/scratch partition -- swap-using-scratch "
+        "must never be emitted for it"
+    )
+
+
+@pytest.mark.parametrize("swap", ["scratch", "move", "overwrite"])
+def test_explicit_two_slot_swap_algorithm_refused_on_aen801(swap: str) -> None:
+    """#1413 fix (2): an EXPLICIT `swap_algorithm:` that needs a
+    slot1/scratch partition must hard-fail on a single-slot target
+    like E1M-AEN801 rather than silently emit a config the board's DT
+    cannot support."""
+    project = _make_project(
+        sku="E1M-AEN801",
+        som_preset=_AEN801_SOM_PRESET,
+        boot={
+            "method": "mcuboot",
+            "signing": {"algorithm": "ecdsa_p256",
+                        "key_file": "keys/dev_ecdsa_p256.pem"},
+            "swap_algorithm": swap,
+        },
+    )
+    with pytest.raises(OrchestratorError, match="slot1/scratch"):
+        emit_sysbuild_conf(project)
+
+
+# A `memory_map:` present for a reason OTHER than a disjoint-slot0
+# override (an rpmsg carve-out, say) -- no `<role>_slot0` region, so
+# `scripts/gen_zephyr_board.py`'s `_aen_flash_partitions` falls through
+# to the STOCK two-slot layout (a real `image-1` + `image-scratch`)
+# regardless of what THIS map's own region names are.  Deliberately
+# named so neither "slot1" nor "scratch" appears as a substring of any
+# region name -- the shape that broke the pre-fix name-substring check
+# (it scanned `memory_map:` region names instead of asking
+# `gen_zephyr_board._aen_role_slot0_map` the real question).
+_RPMSG_CARVEOUT_SOM_PRESET = {
+    "family": "alif-ensemble",
+    "topology": {},
+    "memory_map": [
+        {"name": "mcuboot",        "base": 0x80000000, "size_kib": 64,
+         "accessible_from": ["m55_he", "m55_hp"]},
+        {"name": "rpmsg_carveout", "base": 0x80010000, "size_kib": 256,
+         "accessible_from": ["m55_he", "m55_hp"]},
+    ],
+}
+
+
+def test_memory_map_without_role_slot0_still_defaults_to_scratch() -> None:
+    """A `memory_map:` override that exists for a reason other than a
+    disjoint-slot0 layout (no `<role>_slot0` region) must NOT be read
+    as single-slot: `gen_zephyr_board._aen_flash_partitions` falls
+    through to the stock two-slot layout for it (a real slot1 + a real
+    scratch partition), so an omitted `swap_algorithm:` must still
+    default to swap-using-scratch, and single-app must never be
+    emitted.  Regression for the proxy-vs-referent bug: an earlier
+    `_boot_target_is_single_slot` scanned `memory_map:` region NAMES
+    for "slot1"/"scratch" substrings, which this fixture's names never
+    contain, so it answered single-slot=True on a target that actually
+    generates a real slot1/scratch pair."""
+    project = _make_project(
+        sku="E1M-AEN301",
+        som_preset=_RPMSG_CARVEOUT_SOM_PRESET,
+        boot={
+            "method": "mcuboot",
+            "signing": {"algorithm": "ecdsa_p256",
+                        "key_file": "keys/dev_ecdsa_p256.pem"},
+            # swap_algorithm intentionally omitted
+        },
+    )
+    sysbuild = emit_sysbuild_conf(project)
+    assert "SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH=y" in sysbuild
+    assert "SB_CONFIG_MCUBOOT_MODE_SINGLE_APP" not in sysbuild
+
+
 def test_rsa3072_hard_errors_in_mcuboot_path() -> None:
     """sysbuild's BOOT_SIGNATURE_TYPE choice has no RSA key-length
     knob (that lives in mcuboot-image's own CONFIG_BOOT_SIGNATURE_
@@ -267,7 +417,7 @@ def _pinned_zephyr_sysbuild_kconfig_symbols() -> Optional[set[str]]:
     to a stale pin, e.g. v3.7.0 while the repo pins v4.4.0).
 
     Resolution order: `$ZEPHYR_BASE` (the workspace convention every
-    `west` command + `scripts/alp_cli/doctor.py` use), falling back to
+    `west` command + `tan doctor` use), falling back to
     the west-workspace topdir's conventional `zephyr/` project
     directory (`scripts/bootstrap.sh` does `west init -l <alp-sdk>`,
     so alp-sdk's parent is the topdir and `<topdir>/zephyr` is the
@@ -457,14 +607,16 @@ def test_power_block_disabled_emits_no_pm() -> None:
 
 def test_diagnostics_modules_emits_per_module_log_level() -> None:
     """`diagnostics.modules:` -> _slice_alp_conf() emits one log-level
-    line per entry.  ALP_* SDK-side modules have not registered any
-    LOG_MODULE yet, so emitting `CONFIG_ALP_<MOD>_LOG_LEVEL=N`
-    upstream is rejected as an undefined symbol; until each ALP
-    module gains its LOG_MODULE_REGISTER call, the emit is a hint
-    comment.  Non-ALP modules (Zephyr subsystems whose Kconfig
-    already exists) keep the live CONFIG_<MOD>_LOG_LEVEL=N form.
-    Level-name -> integer mapping (off=0 / error=1 / warn=2 / info=3
-    / debug=trace=4) is preserved either way."""
+    line per entry, in the CHOICE form Zephyr accepts:
+    `CONFIG_<MOD>_LOG_LEVEL_<OFF|ERR|WRN|INF|DBG>=y`.  (The int
+    `CONFIG_<MOD>_LOG_LEVEL` is promptless and derived from that choice, so
+    assigning it is rejected outright -- alplabai/tan-cli#559.)  ALP_*
+    SDK-side modules have not registered any LOG_MODULE yet, so their
+    choice symbol does not exist either; until each ALP module gains its
+    LOG_MODULE_REGISTER call the emit stays a hint comment.  A Zephyr
+    subsystem the slice actually enables keeps the live form.
+    Level-name -> suffix mapping (off=OFF / error=ERR / warn=WRN /
+    info=INF / debug=trace=DBG) is preserved either way."""
     project = _make_project(diagnostics={
         "log_level": "info",
         "modules": {
@@ -476,16 +628,18 @@ def test_diagnostics_modules_emits_per_module_log_level() -> None:
     slice_ = _make_slice()
     conf = _slice_alp_conf(project, slice_)
     # ALP_* modules: hint comment with the would-be Kconfig + level.
-    assert "# CONFIG_ALP_IOT_LOG_LEVEL=4" in conf
-    assert "# CONFIG_ALP_SECURITY_LOG_LEVEL=0" in conf
-    assert "# CONFIG_ALP_GPIO_LOG_LEVEL=3" in conf
+    assert "# CONFIG_ALP_IOT_LOG_LEVEL_DBG=y" in conf
+    assert "# CONFIG_ALP_SECURITY_LOG_LEVEL_OFF=y" in conf
+    assert "# CONFIG_ALP_GPIO_LOG_LEVEL_INF=y" in conf
     # And not as a live setting -- the undefined-symbol form is rejected
     # by Zephyr Kconfig today; re-introducing it would break twister.
     for stem in ("ALP_IOT_LOG_LEVEL", "ALP_SECURITY_LOG_LEVEL", "ALP_GPIO_LOG_LEVEL"):
-        assert f"\nCONFIG_{stem}=" not in conf, (
-            f"CONFIG_{stem} must stay commented until alp_{stem.split('_')[1].lower()} "
-            "calls LOG_MODULE_REGISTER (otherwise Zephyr aborts on undefined symbol)"
-        )
+        for line in conf.splitlines():
+            assert not line.startswith(f"CONFIG_{stem}"), (
+                f"CONFIG_{stem} must stay commented until "
+                f"alp_{stem.split('_')[1].lower()} calls LOG_MODULE_REGISTER "
+                "(otherwise Zephyr aborts on undefined symbol)"
+            )
 
 
 # ---------------------------------------------------------------------

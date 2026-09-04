@@ -17,7 +17,7 @@
  *   3. read 16 bytes from EEPROM offset 0 via i2c_write_read(dev, 0x50,
  *      {0x00,0x00} (big-endian 2-byte word address), 2, buf, 16) and hexdump.
  *
- * The EEPROM reaches I2C2 (not the slave-only LPI2C0) via bridge/DNP resistors on
+ * The EEPROM reaches I2C2 (not BRD_I2C, SoC I2C0) via bridge/DNP resistors on
  * P5_6 SCL_C / P5_7 SDA_C -- the established board finding; see the overlay.
  *
  * PASS criteria: device ready AND 0x50 found in the scan AND i2c_write_read()

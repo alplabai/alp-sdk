@@ -35,7 +35,7 @@ gating (see #874).
 
 from __future__ import annotations
 
-import json
+from pathlib import Path
 from typing import Any, Optional
 
 import yaml
@@ -45,14 +45,16 @@ from alp_project import (
     silicon_to_kconfig,
     som_unpopulated_capabilities,
 )
+from alp_registries import peripheral_kconfig
 from sentinels import is_tbd
 
 from . import libraries as _library_layer
-from .models import BoardProject, Slice
-from .paths import METADATA_ROOT, REPO
+from .loader import _library_alias_table
+from .models import BoardProject, OrchestratorError, Slice
+from .paths import REPO
 from .partition import resolve_storage_partitions
 from .slugs import (
-    _PERIPHERAL_KCONFIG,
+    _BLOCK_SLUGS,
     _board_define_slug,
     _slugs_from_helper_firmware,
     _slugs_from_on_module,
@@ -108,7 +110,8 @@ def _emit_extra_library_profile(
         soc_family_token = "nxp_imx9"
 
     # resolve_capabilities merges SoC-JSON defaults + SoM overrides.
-    capabilities = resolve_capabilities(project.som_preset, METADATA_ROOT)
+    capabilities = resolve_capabilities(
+        project.som_preset, project.effective_metadata_root())
 
     def _cap_truthy(cap_name: str) -> bool:
         v = capabilities.get(cap_name)
@@ -574,6 +577,20 @@ def _emit_som_caps(
                 f"{hw_info_eeprom['offset']}")
         lines.append("")
 
+    # Build-time hw_rev this project resolved -- lets the boot banner warn
+    # when the LIVE EEPROM manifest disagrees (issue #1853).  Emitted
+    # unconditionally (not scoped to the `hw_info_eeprom` block above): a
+    # SKU with no on_module.eeprom today (e.g. E1M-NX9101) still gets the
+    # symbol, so it isn't silently dropped if that SKU gains an EEPROM
+    # later, and it stays harmless meanwhile (alp_hw_info_read() never
+    # returns ALP_OK without a bus, so the banner's compare never runs).
+    # Same `hw_rev or ... or "unknown"` fallback chain as
+    # alp_project_emit/hw_info.py's `_emit_hw_info_h` (project.hw_rev is
+    # already `som.hw_rev or default_hw_rev`; add the same "unknown"
+    # floor here so the two resolvers can't disagree on the empty case).
+    lines.append(f'CONFIG_ALP_SDK_SOM_HW_REV="{project.hw_rev or "unknown"}"')
+    lines.append("")
+
     if kconfig:
         lines.append(f"# SoM silicon ({silicon} via {project.sku})")
         lines.append(f"CONFIG_{kconfig}=y")
@@ -619,13 +636,6 @@ def _emit_som_caps(
         lines.append("")
 
     return lines
-
-
-# Slugs that map to BLOCK_ Kconfig symbols rather than CHIP_.
-# These live under blocks/ + <alp/blocks/*.h> because they are
-# SDK-level *block* utilities (`alp_button_led_*`, `alp_pdm_mic_*`)
-# rather than third-party-IC chip drivers; see blocks/README.md.
-_BLOCK_SLUGS = frozenset({"button_led", "pdm_mic"})
 
 
 def _slug_kconfig(slug: str) -> str:
@@ -685,6 +695,26 @@ def _resolve_chip_states(project: "BoardProject") -> dict[str, bool]:
     return states
 
 
+def _chip_has_driver(slug: str) -> bool:
+    """True when `chips/<slug>/` exists, i.e. there is something to compile.
+
+    This is the same criterion `_slugs_from_on_module` already applies to
+    `ospi_memories` and `hyperram`, whose docstring records the reason:
+    those parts have "no `chips/<part>/` driver, so their MPNs are NOT
+    extracted as chip slugs (emitting them as `CONFIG_ALP_SDK_CHIP_<X>`
+    would trip Zephyr's undefined-symbol guard)". The rule is applied there
+    per-field; it has to hold per-chip too, because a scalar `on_module:`
+    field can name a real chip manifest that has no driver behind it.
+
+    Driver presence is checked on disk rather than read from the manifest's
+    `driver_status:`, because the directory is what the Kconfig declaration
+    actually points at -- every entry in `zephyr/kconfigs/chips.kconfig`
+    reads "Compile chips/<part>/<part>.c". A status string can drift from
+    the tree; the directory cannot.
+    """
+    return (REPO / "chips" / slug).is_dir()
+
+
 def _emit_chips(
     project: "BoardProject",
     chip_subsystems_table: dict[str, tuple[str, ...]],
@@ -738,6 +768,25 @@ def _emit_chips(
     for slug in _slugs_from_helper_firmware(hf):
         som_chips.add(slug)
 
+    # A CONFIG_ALP_SDK_CHIP_<X> line is only meaningful when the symbol
+    # exists, and the symbol only exists when there is a driver to compile:
+    # every declaration in zephyr/kconfigs/chips.kconfig reads "Compile
+    # chips/<part>/<part>.c".  A manifest whose driver_status says no such
+    # driver exists therefore has no symbol, and emitting the line anyway
+    # writes a CONFIG_ assignment Zephyr cannot resolve (alp-sdk#1241).
+    #
+    # Measured over metadata/chips/*.yaml when this was added: 77 of 81
+    # chips carry a declared symbol -- every `complete`, `partial` and
+    # `stub` one, each with a real chips/<part>/ directory.  The only
+    # undeclared ones are the four `planned` Murata modules, which no SoM
+    # populates.  `ethernet_phy: dp83825` made an undriven chip reachable
+    # from on_module: for the first time, which is how this surfaced.
+    #
+    # The chip stays in metadata -- it is real, populated hardware, and the
+    # manifest is what documents the ADR-0023 layer-3 gap.  It just does not
+    # get a driver-selection Kconfig it has no driver for.
+    som_chips = {s for s in som_chips if _chip_has_driver(s)}
+
     _emit_block(
         f"# SoM-intrinsic chip drivers (from `{project.sku}` "
         f"on_module + helper_firmware)", som_chips)
@@ -786,15 +835,18 @@ def _emit_chips(
     return lines, chip_subsystems, resolved_chip_state
 
 
-def _emit_subsystems(slice_: Slice, chip_subsystems: set[str]) -> list[str]:
+def _emit_subsystems(
+    project: BoardProject, slice_: Slice, chip_subsystems: set[str]
+) -> list[str]:
     """Zephyr subsystems required by the slice: union of (chip-driver-
     required subsystems, from `_emit_chips`) and (this core's
     `peripherals:` array, which adds to the union per spec §4.6).
     """
     lines: list[str] = []
+    periph_kconfig = peripheral_kconfig(project.effective_metadata_root())
     periph_subsystems: set[str] = set()
     for periph in slice_.peripherals or []:
-        periph_subsystems.update(_PERIPHERAL_KCONFIG.get(periph, ()))
+        periph_subsystems.update(periph_kconfig.get(periph, ()))
     all_subsystems = chip_subsystems | periph_subsystems
     if all_subsystems:
         lines.append(f"# Zephyr subsystems required on core "
@@ -805,54 +857,43 @@ def _emit_subsystems(slice_: Slice, chip_subsystems: set[str]) -> list[str]:
     return lines
 
 
-def _library_alias_table() -> dict[str, str]:
-    """Legacy per-core `libraries:` token -> canonical manifest name
-    (metadata/library-aliases-v1.json).  Empty dict if the table is absent."""
-    path = METADATA_ROOT / "library-aliases-v1.json"
-    if not path.is_file():
-        return {}
-    doc = json.loads(path.read_text(encoding="utf-8"))
-    aliases = doc.get("aliases")
-    return dict(aliases) if isinstance(aliases, dict) else {}
-
-
-def _per_core_library_kconfig(lib: str) -> Optional[list[str]]:
+def _per_core_library_kconfig(
+        lib: str,
+        manifest: Optional[dict],
+        metadata_root: Path) -> Optional[list[str]]:
     """Base-Kconfig lines for a per-core `libraries:` token, read from the
     library's ADR 0018 manifest (metadata/libraries/<canonical>.yaml) rather
     than a hand-maintained table (WS6-c #610 §6).
 
-    The token is resolved to its canonical manifest through the
-    metadata/library-aliases-v1.json alias table.  The emitted set is the union
-    of the manifest's `integration.zephyr.kconfig` (the upstream module-enable
-    line(s)) and its `integration.zephyr.hw_backends.sw_fallback.kconfig` (the
-    SDK SW floor), module-enable first and the SW-fallback marker last, deduped.
-    Header-only libraries whose SW floor is a doc comment surface that comment.
+    `manifest` is the already-resolved document from the ADR-0018 library
+    layer (`libraries.resolve_selection`); pass it so the per-core channel
+    reads exactly what the layer validated instead of re-reading the file
+    behind the layer's back (alplabai/tan-cli#555).  Omit it and the token is
+    resolved to its canonical manifest through the
+    metadata/library-aliases-v1.json alias table (read from `metadata_root`,
+    the SAME tree `load_board_yaml(..., metadata_root=...)` resolved this
+    project against -- #1485) and loaded here.
+
+    The emitted set is the union of the manifest's
+    `integration.zephyr.kconfig` (the upstream module-enable line(s)) and its
+    `integration.zephyr.hw_backends.sw_fallback.kconfig` (the SDK SW floor),
+    module-enable first and the SW-fallback marker last, deduped -- computed
+    by `libraries.zephyr_library_kconfig`, the same derivation the
+    project-wide channel (`libraries.zephyr_kconfig_lines`) calls, so a
+    library's base Kconfig set cannot drift between the two declaration
+    channels (#1359).
 
     Returns None when no manifest resolves (caller emits the pending-wire TODO).
     """
-    alias = _library_alias_table()
-    canonical = alias.get(lib, lib)
-    path = METADATA_ROOT / "libraries" / f"{canonical}.yaml"
-    if not path.is_file():
-        return None
-    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    zephyr = (doc.get("integration") or {}).get("zephyr") or {}
-    out: list[str] = []
-    for kc in (zephyr.get("kconfig") or []):
-        kc = str(kc)
-        if kc not in out:
-            out.append(kc)
-    swf = ((zephyr.get("hw_backends") or {}).get("sw_fallback") or {}).get("kconfig")
-    if swf:
-        swf = str(swf)
-        if swf.lstrip().startswith("#"):
-            # Header-only library: the SW floor is a documentation comment,
-            # not a real knob.  Surface it only when there is no module enable.
-            if not out:
-                out.append(swf)
-        elif swf not in out:
-            out.append(swf)
-    return out
+    doc = manifest
+    if doc is None:
+        alias = _library_alias_table(metadata_root)
+        canonical = alias.get(lib, lib)
+        path = metadata_root / "libraries" / f"{canonical}.yaml"
+        if not path.is_file():
+            return None
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return _library_layer.zephyr_library_kconfig(doc)
 
 
 def _emit_libraries(
@@ -864,14 +905,27 @@ def _emit_libraries(
 
     Per-core Kconfig is resolved from each library's manifest
     (`_per_core_library_kconfig`), not a hand-maintained enable table.
+
+    Both the project-wide and the core-scoped declaration channels go through
+    the SAME ADR-0018 layer: `libraries.resolve_selection(..., slice_=)` is
+    what refuses an unknown name, a failed `requires:` constraint or a library
+    that cannot be wired on this target, and it is resolved FIRST so that
+    refusal lands before a single line is emitted (alplabai/tan-cli#555).
     """
     lines: list[str] = []
+
+    # name -> validated manifest for every library in scope on this slice.
+    resolved: dict[str, dict] = {}
+    if slice_.os == "zephyr":
+        resolved = dict(_library_layer.resolve_selection(
+            project, project.effective_metadata_root(), slice_=slice_))
 
     if slice_.libraries:
         lines.append(f"# Libraries declared on core "
                      f"`{slice_.core_id}`")
         for lib in sorted(slice_.libraries):
-            kcs = _per_core_library_kconfig(lib)
+            kcs = _per_core_library_kconfig(
+                lib, resolved.get(lib), project.effective_metadata_root())
             if kcs is None:
                 lines.append(
                     f"# TODO: wire library '{lib}' once its v0.4 enable lands")
@@ -884,7 +938,8 @@ def _emit_libraries(
     # ADR 0018).  Emitted from the metadata/libraries/<name>.yaml manifests;
     # resolve_selection() has already rejected any incompatible selection.
     # Guard keeps a project with no `libraries:` byte-identical.
-    library_lines = _library_layer.zephyr_kconfig_lines(project, slice_)
+    library_lines = _library_layer.zephyr_kconfig_lines(
+        project, slice_, project.effective_metadata_root())
     if library_lines:
         lines.append("# Curated third-party libraries "
                      "(project `libraries:`, ADR 0018)")
@@ -928,30 +983,32 @@ def _emit_libraries(
     return lines
 
 
-def _slice_wants_inference(slice_: Slice) -> bool:
+def _slice_wants_inference(project: "BoardProject", slice_: Slice) -> bool:
     """True when this slice genuinely uses `<alp/inference.h>`.
 
     Two independent signals, either sufficient: `cores.<id>.inference:`
     declared (app-level tuning, e.g. `default_arena_kib:` -- the signal
     every inference example under examples/ai, examples/audio,
-    examples/camera-vision declares), OR the slice's own `libraries:`
-    pulls in `tflite-micro` (resolved through the same alias table
-    `_per_core_library_kconfig` uses -- a `cores:`-scoped top-level
-    `libraries:` entry folds into `slice_.libraries` at load time, see
-    `loader.py::_normalize_libraries`). The library signal exists because
-    `cores.<id>.inference:` is app-level TUNING, not a declaration of
-    intent -- an app that never overrides the arena default has no reason
-    to write the block, and #874's adversarial follow-up found exactly
-    that false negative (`examples/camera-vision/
+    examples/camera-vision declares), OR the slice's `libraries:` scope
+    (project-wide AND core-scoped, via `libraries.scoped_names` -- #1359
+    follow-up: reading `slice_.libraries` alone missed a project-wide
+    `libraries: [tflite-micro]` entry) pulls in `tflite-micro` (resolved
+    through the same alias table `_per_core_library_kconfig` uses -- a
+    `cores:`-scoped top-level `libraries:` entry folds into
+    `slice_.libraries` at load time, see `loader.py::_normalize_libraries`).
+    The library signal exists because `cores.<id>.inference:` is app-level
+    TUNING, not a declaration of intent -- an app that never overrides the
+    arena default has no reason to write the block, and #874's adversarial
+    follow-up found exactly that false negative (`examples/camera-vision/
     ai-object-detection-realtime`, `libraries: tflite-micro` with no
     `inference:` block). A slice with NEITHER signal stays clean (no
     unconditional emit returns, issue #874 item 4).
     """
     if slice_.inference:
         return True
-    alias = _library_alias_table()
+    alias = _library_alias_table(project.effective_metadata_root())
     return any(alias.get(lib, lib) == "tflite-micro"
-               for lib in (slice_.libraries or ()))
+               for lib in _library_layer.scoped_names(project, slice_=slice_))
 
 
 def _emit_inference(
@@ -982,15 +1039,15 @@ def _emit_inference(
     the ALP_SDK_* parent it `depends on` in
     zephyr/kconfigs/iot-audio-inference.kconfig (issue #874 item 3):
 
-      - CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y -- derived from
-        the silicon capability counts (ethos_u{55,65,85}_count, resolved
+      - CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U65,U85}=y -- derived
+        from the silicon capability counts (ethos_u{55,65,85}_count, resolved
         from the SoC JSON npus[]), the single source for which NPUs the
         part carries.  U85 carries Arm's larger MAC array + TensorOptimized
         kernels; U55 carries the smaller MAC + reference kernels; U65 is
         i.MX 93-only.  U55/U85 depend on BACKEND_ETHOS_U_AEN; U65 depends
         on BACKEND_ETHOS_U_N93.
 
-      - CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}=y -- picked
+      - CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_{NEON,HELIUM,REF}=y -- picked
         from the SoC JSON's `cores[<slice.core_id>].vector_extension`
         so the CPU-side TFLM kernel set matches the target core's SIMD
         reality (NEON on A-cluster, Helium MVE on M55, scalar / REF
@@ -998,7 +1055,7 @@ def _emit_inference(
         multiple core classes (E7 = A32 + M55, all three Helium /
         Neon flavours).  All three depend on BACKEND_TFLM.
     """
-    if not _slice_wants_inference(slice_):
+    if not _slice_wants_inference(project, slice_):
         return []
 
     lines: list[str] = []
@@ -1006,7 +1063,8 @@ def _emit_inference(
     # resolve_capabilities merges SoC-JSON defaults with SoM overrides
     # so silicon-determined caps (ethos_u55_count, drp_ai, ...) resolve
     # even when removed from the SoM YAML (capability unification, slice 3b).
-    capabilities = resolve_capabilities(project.som_preset, METADATA_ROOT)
+    capabilities = resolve_capabilities(
+        project.som_preset, project.effective_metadata_root())
     inference_lines: list[str] = [
         # BACKEND_TFLM depends on TENSORFLOW_LITE_MICRO && CPP -- genuinely
         # external (upstream Zephyr / tflite-micro module) symbols, not
@@ -1045,8 +1103,18 @@ def _emit_inference(
     for c in (project.soc_spec.get("cores") or []):
         if c.get("id") != slice_.core_id:
             continue
-        vec = (c.get("vector_extension") or "").lower()
-        ctype = (c.get("type") or "").lower()
+        # Same `isinstance`-or-unresolved treatment topology.py adopted for
+        # this exact field (#1852 review): `(x or "").lower()` raises
+        # AttributeError on a truthy non-string, so a schema-invalid
+        # `--metadata-root` aborted `--emit kconfig` with a bare traceback
+        # instead of a diagnostic.  `vector_extension` is guarded alongside
+        # `type` because it is the same idiom on the same object, is declared
+        # `"type": "string"` by the same `$defs/core`, and this is its only
+        # read in the tree -- fixing one line and not the one above it is the
+        # partial scope this review caught the first time.
+        vec = c["vector_extension"].lower() \
+            if isinstance(c.get("vector_extension"), str) else ""
+        ctype = c["type"].lower() if isinstance(c.get("type"), str) else ""
         if vec == "neon" or ctype.startswith("cortex-a"):
             tflm_kernel_kc = "CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_NEON=y"
         elif vec == "helium":
@@ -1180,13 +1248,13 @@ def _emit_cross_core_shmem_cache(
     slice_: Slice,
     existing_lines: list[str],
 ) -> list[str]:
-    """CONFIG_DCACHE=n for a slice sharing a non-cacheable `raw_shmem` IPC
-    carve-out with a peer core -- the hardware fact this symbol encodes
-    (each core has its own D-cache; shared SRAM is cross-core incoherent
-    unless the cache is off, or the app does explicit cache maintenance)
-    is NOT specific to Ethos-U inference.  Before this, the only place
-    that emitted it was the Ethos-U branch of `_emit_inference`, so a
-    non-inference cross-core project (e.g. `examples/multicore/
+    """CONFIG_DCACHE=n for a slice sharing a non-cacheable `raw_shmem` or
+    `rpmsg` IPC carve-out with a peer core -- the hardware fact this symbol
+    encodes (each core has its own D-cache; shared SRAM is cross-core
+    incoherent unless the cache is off, or the app does explicit cache
+    maintenance) is NOT specific to Ethos-U inference.  Before this, the
+    only place that emitted it was the Ethos-U branch of `_emit_inference`,
+    so a non-inference cross-core project (e.g. `examples/multicore/
     mproc-mailbox`, an M55-HP<->M55-HE mailbox+shmem roundtrip with no
     `inference:` block) got no help from the generator and had to
     hand-write the line in `prj.conf` -- see PR #1080, which found three
@@ -1198,26 +1266,27 @@ def _emit_cross_core_shmem_cache(
     yaml §3.9), not a SoC/vendor check, so it fires for any silicon that
     declares a matching carve-out:
 
-      - `kind: rpmsg` is deliberately left alone here, NOT because
-        `<alp/rpc.h>` handles cache maintenance -- it doesn't.
-        `cfg->cacheable` is stored on the backend struct
-        (`src/backends/rpc/{zephyr,yocto}_drv.c`) and never read again;
-        there is no `sys_cache_*` call anywhere under `src/` or `include/`.
-        A `cacheable: true` rpmsg channel on AEN (e.g. `examples/multicore/
-        rpmsg-aen`) carries the same #1080-class hazard this function
-        closes for `raw_shmem` -- tracked separately as #1088, because
-        forcing every rpmsg slice's D-cache off here would be a blunt,
-        unreviewed fix for a different code path (`<alp/rpc.h>`, not
-        `<alp/mproc.h>`) than the one #1080 root-caused.
+      - `kind: rpmsg` is covered too (#1088's conservative fix), for the
+        identical reason `raw_shmem` is: `cfg->cacheable` is stored on the
+        backend struct (`src/backends/rpc/{zephyr,yocto}_drv.c`) and never
+        read again -- there is no `sys_cache_*` call anywhere under `src/`
+        or `include/`.  A `cacheable: true` rpmsg channel would therefore
+        select a code path with no maintenance behind it, so the loader
+        (`loader.py`) rejects `cacheable: true` on a `rpmsg` entry outright
+        rather than silently honouring it -- any entry that reaches this
+        function is already non-cacheable, and the D-cache goes off
+        unconditionally for its endpoints.  The real fix --
+        `sys_cache_data_flush_range` / `sys_cache_data_invd_range` in
+        `<alp/rpc.h>` -- remains open; see #1088.
       - `kind: mailbox_only` is excluded -- it carries no shared memory
         (doorbell + signal only), so there is nothing to keep coherent.
-      - `kind: raw_shmem` is the one this function closes: `<alp/mproc.h>`'s
-        raw shmem+mailbox primitives have no cache-maintenance layer either
-        (same gap as rpmsg, just never suggested otherwise), so the SDK's
-        zero-effort-safe default is to turn the D-cache off for every
-        endpoint -- unless the entry opts out with an explicit
+      - `kind: raw_shmem` closes the original #1080 case: `<alp/mproc.h>`'s
+        raw shmem+mailbox primitives have no cache-maintenance layer either,
+        so the SDK's zero-effort-safe default is to turn the D-cache off for
+        every endpoint -- unless the entry opts out with an explicit
         `cacheable: true`, which is the app declaring it will do its own
-        cache ops instead (board.schema.json `ipc_entry.cacheable`).
+        cache ops instead (board.schema.json `ipc_entry.cacheable`).  This
+        opt-out is `raw_shmem`-only; `rpmsg` has no opt-out (see above).
 
     Must run after `_emit_inference` in `_slice_alp_conf` (the dedup below
     depends on that order, it does not detect the reverse case): skips
@@ -1231,7 +1300,7 @@ def _emit_cross_core_shmem_cache(
     if any("CONFIG_DCACHE=n" in line for line in existing_lines):
         return []
     needs_dcache_off = any(
-        entry.kind == "raw_shmem"
+        entry.kind in ("raw_shmem", "rpmsg")
         and slice_.core_id in entry.endpoints
         and not entry.cacheable
         for entry in project.ipc
@@ -1239,11 +1308,13 @@ def _emit_cross_core_shmem_cache(
     if not needs_dcache_off:
         return []
     return [
-        "# board.yaml ipc[].kind: raw_shmem names this core as an",
-        "# endpoint.  <alp/mproc.h> has no cache-maintenance layer, so",
-        "# the D-cache must stay off (not just the carve-out's own",
-        "# region) for both sides to see each other's writes without",
-        "# explicit clean/invalidate (PR #1080).",
+        "# board.yaml ipc[].kind: raw_shmem or rpmsg names this core as",
+        "# an endpoint with no explicit cacheable: true opt-out.",
+        "# <alp/mproc.h> (raw_shmem) and <alp/rpc.h> (rpmsg) both have no",
+        "# cache-maintenance layer, so the D-cache must stay off (not",
+        "# just the carve-out's own region) for both sides to see each",
+        "# other's writes without explicit clean/invalidate (PR #1080,",
+        "# #1088).",
         "CONFIG_DCACHE=n",
         "",
     ]
@@ -1355,6 +1426,140 @@ def _emit_storage(project: "BoardProject") -> list[str]:
     return lines
 
 
+def _split_server_url(url: str) -> tuple[str, Optional[int], Optional[str]]:
+    """Decompose an `ota.server.url` into (host, port, scheme).
+
+    board.yaml's `ota.server.url` is a full URI (`board.schema.json` types it
+    `format: uri`).  Zephyr's Hawkbit client wants the three parts SEPARATELY
+    -- a bare host for `zsock_getaddrinfo()` / the TLS SNI name / the HTTP
+    `Host:` header, an int port, and a TLS bool.  Handing it the whole URI is
+    a DNS lookup that can never resolve (alplabai/tan-cli#558).
+
+    A value carrying no `://` is taken as an already-bare host and returned
+    verbatim -- that covers a plain hostname and a whole-value `${VAR}`
+    placeholder, which the build system substitutes later.  Host case is
+    preserved (DNS is case-insensitive, a `${VAR}` placeholder is not), so
+    this parses the authority by hand rather than through `urlsplit`, whose
+    `.hostname` lowercases.
+
+    Raises OrchestratorError on anything that cannot be expressed as those
+    three parts rather than emitting a value the client cannot use.
+    """
+    raw = url.strip()
+    if "://" not in raw:
+        return raw, None, None
+    scheme, _, rest = raw.partition("://")
+    scheme = scheme.lower()
+    if scheme not in ("http", "https"):
+        raise OrchestratorError(
+            f"ota.server.url `{url}`: scheme `{scheme}` is not supported by "
+            f"the Zephyr Hawkbit DDI client -- use http:// or https://")
+    authority, sep, path = rest.partition("/")
+    if sep and path not in ("", "/"):
+        raise OrchestratorError(
+            f"ota.server.url `{url}`: the Hawkbit DDI client builds its own "
+            f"request paths (/{{tenant}}/controller/v1/...) and has no knob "
+            f"for a base path, so `/{path}` cannot be honoured -- give the "
+            f"scheme, host and port only")
+    if "@" in authority:
+        raise OrchestratorError(
+            f"ota.server.url `{url}`: userinfo in the URL is not supported -- "
+            f"Hawkbit authenticates with a DDI security token "
+            f"(`ota.server.tenant`), not URL credentials")
+    port: Optional[int] = None
+    host = authority
+    if authority.startswith("["):          # bracketed IPv6 literal
+        close = authority.find("]")
+        if close < 0:
+            raise OrchestratorError(
+                f"ota.server.url `{url}`: unterminated IPv6 literal in the host")
+        host = authority[:close + 1]
+        tail = authority[close + 1:]
+        if tail.startswith(":"):
+            port_text = tail[1:]
+        elif tail:
+            raise OrchestratorError(
+                f"ota.server.url `{url}`: unexpected `{tail}` after the "
+                f"IPv6 host literal")
+        else:
+            port_text = ""
+    else:
+        host, _, port_text = authority.partition(":")
+    if port_text:
+        if not port_text.isdigit() or not 1 <= int(port_text) <= 65535:
+            raise OrchestratorError(
+                f"ota.server.url `{url}`: `{port_text}` is not a valid TCP port")
+        port = int(port_text)
+    if not host:
+        raise OrchestratorError(
+            f"ota.server.url `{url}`: no host to resolve")
+    if port is None:
+        port = 443 if scheme == "https" else 80
+    return host, port, scheme
+
+
+def _hawkbit_server_lines(url: str) -> list[str]:
+    """`CONFIG_HAWKBIT_{SERVER,PORT,USE_TLS}` for one `ota.server.url`.
+
+    Grounded in the pinned Zephyr v4.4.1 tree:
+      * `HAWKBIT_SERVER` -- "User address for the hawkbit server"
+        (subsys/mgmt/hawkbit/Kconfig:68): bare host, fed to
+        `zsock_getaddrinfo()`, the TLS hostname and the `Host:` header.
+      * `HAWKBIT_PORT` -- int, `default 8080` (Kconfig:75).
+      * `HAWKBIT_USE_TLS` -- `depends on NET_SOCKETS_SOCKOPT_TLS`
+        (Kconfig:168), so the socket option has to be enabled alongside it
+        or kconfiglib warns "assigned y but got n" and the Zephyr configure
+        aborts.
+    """
+    host, port, scheme = _split_server_url(url)
+    lines = [f'CONFIG_HAWKBIT_SERVER="{host}"']
+    if port is not None:
+        lines.append(f"CONFIG_HAWKBIT_PORT={port}")
+    if scheme == "https":
+        lines.append("CONFIG_NET_SOCKETS_SOCKOPT_TLS=y")
+        lines.append("CONFIG_HAWKBIT_USE_TLS=y")
+    elif scheme is None:
+        lines.append("# ota.server.url carries no scheme -- taken as a bare "
+                     "host; CONFIG_HAWKBIT_PORT / CONFIG_HAWKBIT_USE_TLS keep "
+                     "their Zephyr defaults (8080, plaintext).")
+    return lines
+
+
+# Zephyr's CONFIG_HAWKBIT_POLL_INTERVAL is declared in MINUTES with
+# `range 1 43200` (subsys/mgmt/hawkbit/Kconfig:29-33) and is multiplied by
+# SEC_PER_MIN at runtime (subsys/mgmt/hawkbit/hawkbit.c:57).
+_HAWKBIT_POLL_MIN_MINUTES = 1
+_HAWKBIT_POLL_MAX_MINUTES = 43200
+
+
+def _hawkbit_poll_line(poll_s: int) -> str:
+    """`CONFIG_HAWKBIT_POLL_INTERVAL` for one `ota.poll_interval_s`.
+
+    board.yaml states the interval in SECONDS; the Kconfig symbol is in
+    MINUTES.  Writing the seconds value through verbatim dilated every fleet's
+    poll period 60x -- the schema's own 1800 s default became 1800 minutes =
+    30 hours (alplabai/tan-cli#557).  Convert, and refuse a value that cannot
+    be expressed in whole minutes or that falls outside Zephyr's declared
+    range, rather than emitting an out-of-range value the Zephyr configure
+    will abort on (or, with the abort relaxed, silently replace with the
+    default of 5).
+    """
+    minutes, remainder = divmod(poll_s, 60)
+    if remainder:
+        raise OrchestratorError(
+            f"ota.poll_interval_s: {poll_s} s cannot be expressed in "
+            f"CONFIG_HAWKBIT_POLL_INTERVAL, which Zephyr declares in whole "
+            f"MINUTES -- use {minutes * 60} or {(minutes + 1) * 60}")
+    if not _HAWKBIT_POLL_MIN_MINUTES <= minutes <= _HAWKBIT_POLL_MAX_MINUTES:
+        raise OrchestratorError(
+            f"ota.poll_interval_s: {poll_s} s is {minutes} min, outside "
+            f"CONFIG_HAWKBIT_POLL_INTERVAL's `range "
+            f"{_HAWKBIT_POLL_MIN_MINUTES} {_HAWKBIT_POLL_MAX_MINUTES}` "
+            f"(minutes) -- use {_HAWKBIT_POLL_MIN_MINUTES * 60} .. "
+            f"{_HAWKBIT_POLL_MAX_MINUTES * 60} s")
+    return f"CONFIG_HAWKBIT_POLL_INTERVAL={minutes}"
+
+
 def _emit_ota(project: "BoardProject") -> list[str]:
     """OTA Zephyr client (board.yaml `ota:` block, provider-driven dispatch).
 
@@ -1404,9 +1609,9 @@ def _emit_ota(project: "BoardProject") -> list[str]:
             lines.append("CONFIG_HAWKBIT=y")
             lines.append("CONFIG_HAWKBIT_SHELL=y")
             if srv.get("url"):
-                lines.append(f'CONFIG_HAWKBIT_SERVER="{srv["url"]}"')
+                lines.extend(_hawkbit_server_lines(str(srv["url"])))
             if isinstance(poll, int) and poll > 0:
-                lines.append(f"CONFIG_HAWKBIT_POLL_INTERVAL={poll}")
+                lines.append(_hawkbit_poll_line(poll))
         elif provider == "mcumgr":
             # MCUmgr is upstream; the transport (UART/BLE/UDP) stays the
             # app's call -- we only enable the base SMP server.
@@ -1419,34 +1624,206 @@ def _emit_ota(project: "BoardProject") -> list[str]:
     return lines
 
 
-def _emit_diagnostics(project: "BoardProject") -> list[str]:
+# board.yaml `diagnostics.modules:` level -> the Zephyr log-choice suffix.
+# Zephyr's per-module choice is <MOD>_LOG_LEVEL_{OFF,ERR,WRN,INF,DBG,DEFAULT}
+# (subsys/logging/Kconfig.template.log_config); the int <MOD>_LOG_LEVEL is
+# PROMPTLESS and derived from that choice, so it cannot be assigned from a
+# fragment at all.  Zephyr has no TRACE level -- `trace` maps to DBG, the same
+# value 4 the old int emit used.
+_LOG_LEVEL_CHOICE = {
+    "off":   "OFF",
+    "error": "ERR",
+    "warn":  "WRN",
+    "info":  "INF",
+    "debug": "DBG",
+    "trace": "DBG",
+}
+
+# board.yaml `diagnostics.modules:` key -> (Zephyr log-module name, the
+# Kconfig symbol(s) whose `=y` proves the choice symbol is DECLARED -- one
+# name, or a tuple when the declaration is nested in more than one `if` --,
+# the symbol the module's log choice `depends on`).
+#
+# All three are load-bearing.  A module's `<MOD>_LOG_LEVEL_<LEVEL>` choice
+# symbols exist only inside the `if` block(s) enclosing the module's
+# `source "...Kconfig.template.log_config"`, and the choice itself
+# `depends on` a logging gate -- plain `LOG` for the subsys/logging template,
+# `NET_LOG` for the networking one
+# (subsys/net/Kconfig.template.log_config.net: `depends on $(module-dep)`).
+# Both failure modes are real, and they are NOT the same failure:
+#
+#   * assigning an UNDEFINED symbol is fatal -- alp.conf is loaded as a
+#     handwritten fragment with `warn_assign_undef=True` and
+#     `zephyr/scripts/kconfig/kconfig.py` turns that warning into
+#     `err("Aborting due to Kconfig warnings")`;
+#   * assigning a DEFINED-but-undeclared-here choice symbol is SILENT -- the
+#     configure still exits 0, the override is discarded, and all you get is
+#     `warning: The choice symbol <SYM> ... was selected (set =y), but no
+#     symbol ended up as the choice selection`.  Measured on real Zephyr
+#     v4.4.1 (`cmake -DBOARD=native_sim samples/hello_world` + a fragment
+#     carrying CONFIG_LOG=y / CONFIG_MBEDTLS=y / CONFIG_MBEDTLS_LOG_LEVEL_DBG=y:
+#     EXIT=0, and the generated .config has no CONFIG_MBEDTLS_LOG_LEVEL_DBG
+#     line at all).  That silent branch is exactly what tan-cli#559 is about,
+#     so the guard columns below have to be EXACT, not approximately right.
+#
+# So a line goes live only when EVERY guard symbol AND the logging gate are
+# already `=y` in this very fragment.
+#
+# Every entry below is transcribed from the pinned Zephyr v4.4.1 tree -- the
+# module name appears there as a literal `module = <NAME>` feeding a
+# log_config template, and each guard symbol is a real `config`/`menuconfig`
+# this emitter can put in the fragment.  The guard column is the enclosing
+# `if` chain resolved across the whole `source` chain from Kconfig.zephyr
+# down, minus the parts a guard already implies (e.g. `if NETWORKING` around
+# every net_* row is implied by `NET_LOG`, which is declared inside it; the
+# hidden `BT_LOG` is `default y if LOG && BT`; `FILE_SYSTEM_LIB_LINK` is
+# `select`ed by `FILE_SYSTEM`).
+#
+# Two residual `if`s cannot be expressed here because they are NEGATIVE and
+# the guard set only knows `=y`: `if !NET_RAW_MODE` (hidden, default n, only
+# `select`ed by the IEEE-802.15.4 raw drivers) around net_core / net_tcp /
+# net_ipv4, and the `BT_STACK_SELECTION` choice defaulting to `BT_HCI` around
+# bluetooth.  A board that selects `NET_RAW_MODE` or `BT_CUSTOM` would get the
+# silent-discard branch above; the SDK enables neither.
+#
+# A key that is not in this table (a typo, or a real Zephyr module the SDK
+# never enables) degrades to a comment; that is the safe direction -- a
+# missing entry costs a log-level override, a wrong entry costs the override
+# silently and leaves a Kconfig warning in the build.
+_LOG_MODULES: dict[str, tuple[str, str | tuple[str, ...], str]] = {
+    # drivers/ -- subsys/logging/Kconfig.template.log_config (`depends on LOG`)
+    "adc":             ("ADC", "ADC", "LOG"),                    # drivers/adc/Kconfig:94
+    "can":             ("CAN", "CAN", "LOG"),                    # drivers/can/Kconfig:16
+    "counter":         ("COUNTER", "COUNTER", "LOG"),            # drivers/counter/Kconfig:47
+    "dac":             ("DAC", "DAC", "LOG"),                    # drivers/dac/Kconfig:16
+    "display":         ("DISPLAY", "DISPLAY", "LOG"),            # drivers/display/Kconfig:19
+    "ethernet":        ("ETHERNET", "ETH_DRIVER", "LOG"),        # drivers/ethernet/Kconfig:23 (enable :6)
+    "flash":           ("FLASH", "FLASH", "LOG"),                # drivers/flash/Kconfig:226
+    "gpio":            ("GPIO", "GPIO", "LOG"),                  # drivers/gpio/Kconfig:13
+    "i2c":             ("I2C", "I2C", "LOG"),                    # drivers/i2c/Kconfig:188
+    "i2s":             ("I2S", "I2S", "LOG"),                    # drivers/i2s/Kconfig:22
+    "pwm":             ("PWM", "PWM", "LOG"),                    # drivers/pwm/Kconfig:13
+    "rtc":             ("RTC", "RTC", "LOG"),                    # drivers/rtc/Kconfig:11
+    "sensor":          ("SENSOR", "SENSOR", "LOG"),              # drivers/sensor/Kconfig:14
+    "spi":             ("SPI", "SPI", "LOG"),                    # drivers/spi/Kconfig:102
+    "uart_console":    ("UART_CONSOLE", "UART_CONSOLE", "LOG"),  # drivers/console/Kconfig:286
+    "watchdog":        ("WDT", "WATCHDOG", "LOG"),               # drivers/watchdog/Kconfig:43
+    "wifi":            ("WIFI", "WIFI", "LOG"),                  # drivers/wifi/Kconfig:11-12
+    # subsys/
+    "bluetooth":       ("BT", "BT", "LOG"),                      # subsys/bluetooth/Kconfig.logging:17
+    "fs":              ("FS", "FILE_SYSTEM", "LOG"),             # subsys/fs/Kconfig:144
+    "modbus":          ("MODBUS", "MODBUS", "LOG"),              # subsys/modbus/Kconfig:94
+    "pm":              ("PM", "PM", "LOG"),                      # subsys/pm/Kconfig:55
+    "pm_device":       ("PM_DEVICE", "PM_DEVICE", "LOG"),        # subsys/pm/Kconfig:118
+    "tls_credentials": ("TLS_CREDENTIALS", "TLS_CREDENTIALS", "LOG"),  # subsys/net/lib/tls_credentials/Kconfig:11
+    "usb_device":      ("USB_DEVICE", "USB_DEVICE_STACK", "LOG"),  # subsys/usb/device/Kconfig:16
+    # subsys/net -- Kconfig.template.log_config.net (`module-dep = NET_LOG`)
+    "coap":            ("COAP", "COAP", "NET_LOG"),              # subsys/net/lib/coap/Kconfig:286-287
+    "net_core":        ("NET_CORE", "NETWORKING", "NET_LOG"),    # subsys/net/ip/Kconfig.debug:48-49
+    # NET_NATIVE is load-bearing: the log_config sits inside `if
+    # NET_NATIVE_IPV4` (Kconfig.ipv4:44), a HIDDEN symbol -- `depends on
+    # NET_NATIVE`, `default y if NET_IPV4` (subsys/net/ip/Kconfig:60-63).  So
+    # NET_IPV4=y alone does NOT declare the choice on an offload-only
+    # (NET_NATIVE=n) target; NET_IPV4=y + NET_NATIVE=y does, exactly.
+    "net_ipv4":        ("NET_IPV4", ("NET_IPV4", "NET_NATIVE"), "NET_LOG"),  # subsys/net/ip/Kconfig.ipv4:191-192
+    "net_l2_ethernet": ("NET_L2_ETHERNET", "NET_L2_ETHERNET", "NET_LOG"),  # subsys/net/l2/ethernet/Kconfig:13-14
+    "net_sockets":     ("NET_SOCKETS", "NET_SOCKETS", "NET_LOG"),  # subsys/net/lib/sockets/Kconfig:443-444
+    "net_tcp":         ("NET_TCP", "NET_TCP", "NET_LOG"),        # subsys/net/ip/Kconfig.tcp:16-17
+    # modules/
+    # MBEDTLS_DEBUG is the real guard, not MBEDTLS: `module = MBEDTLS` sits
+    # inside `if MBEDTLS_DEBUG` (modules/mbedtls/Kconfig:89), itself nested in
+    # `if MBEDTLS` (:31).  MBEDTLS_DEBUG is a prompted bool defaulting n that
+    # this emitter never writes, while CONFIG_MBEDTLS=y IS written (from
+    # metadata/libraries/mbedtls.yaml) by iot-fleet-ota, production-deployment,
+    # rpmsg-v2n, rpmsg-aen and heterogeneous-offload -- so guarding on MBEDTLS
+    # alone made the ONE in-table module the SDK routinely enables emit a line
+    # whose choice symbol is not declared.
+    "mbedtls":         ("MBEDTLS", ("MBEDTLS", "MBEDTLS_DEBUG"), "LOG"),  # modules/mbedtls/Kconfig:89-93
+}
+
+
+def _enabled_symbols(lines: list[str]) -> set[str]:
+    """The Kconfig symbols this fragment has already switched on.
+
+    Reads back the `CONFIG_<SYM>=y` lines built so far (annotations like
+    `CONFIG_X=y  # lib / class` included), which is the only authority on what
+    this particular slice compiles in.
+    """
+    out: set[str] = set()
+    for line in lines:
+        text = line.strip()
+        if not text.startswith("CONFIG_") or "=" not in text:
+            continue
+        symbol, _, value = text.partition("=")
+        if value.split("#", 1)[0].strip() == "y":
+            out.add(symbol[len("CONFIG_"):])
+    return out
+
+
+def _emit_diagnostics(project: "BoardProject",
+                      slice_: Slice,
+                      emitted: list[str]) -> list[str]:
     """Per-module log-level overrides (board.yaml `diagnostics.modules:`).
 
-    Zephyr's per-module CONFIG_<MOD>_LOG_LEVEL symbol exists only when
-    the matching module has called LOG_MODULE_REGISTER() at build time.
-    ALP_* SDK-side modules have not registered any LOG modules yet, so
-    emitting `CONFIG_ALP_<MOD>_LOG_LEVEL=N` trips the Zephyr build with
-    `undefined symbol ALP_<MOD>_LOG_LEVEL`.  We restrict the active
-    emit to modules whose Kconfig declaration is known to exist and
-    downgrade ALP_* + unknown modules to a hint comment until their
-    LOG_MODULE_REGISTER call lands.
+    `board.schema.json` documents this knob as emitting
+    `CONFIG_<MODULE>_LOG_LEVEL_<LEVEL>=y` -- the choice-symbol form.  That is
+    what is emitted here.  The old `CONFIG_<MODULE>_LOG_LEVEL=<n>` int form
+    could not build for ANY key (alplabai/tan-cli#559): the int symbol is
+    promptless and derived, so Zephyr rejects assigning it even for a real
+    module (`I2C_LOG_LEVEL ... is not directly user-configurable (has no
+    prompt)`), and an unknown key was an assignment to an undefined symbol.
+
+    A live line is emitted only when the module is in `_LOG_MODULES` AND
+    EVERY one of its guard symbols AND its logging gate (`LOG`, or `NET_LOG`
+    for the networking modules) are already `=y` in `emitted` -- the
+    conditions under which the choice symbol is declared at all.  A module
+    can carry more than one guard when its log_config template is nested in
+    more than one `if`: `mbedtls` needs MBEDTLS **and** MBEDTLS_DEBUG,
+    `net_ipv4` needs NET_IPV4 **and** NET_NATIVE.  Getting that wrong is not
+    caught by the build: the configure still exits 0 and merely warns that
+    the choice symbol "was selected (set =y), but no symbol ended up as the
+    choice selection", so the override vanishes silently -- the same
+    silent-failure class tan-cli#559 is about.
+
+    Everything else (an ALP_* SDK module with no LOG_MODULE_REGISTER yet, a
+    module that lives on another core, a typo) is downgraded to a comment
+    naming the reason, so the fragment always configures.
     """
     lines: list[str] = []
     modules = (project.diagnostics or {}).get("modules") or {}
     if modules:
-        level_to_n = {"off": 0, "error": 1, "warn": 2, "info": 3, "debug": 4, "trace": 4}
+        enabled = _enabled_symbols(emitted)
         lines.append("# Per-module log-level overrides (board.yaml diagnostics.modules:)")
         for mod, lvl in sorted(modules.items()):
-            n = level_to_n.get(str(lvl).lower())
-            if n is None:
+            choice = _LOG_LEVEL_CHOICE.get(str(lvl).lower())
+            if choice is None:
                 continue
-            kc_stem = mod.upper()
-            if kc_stem.startswith("ALP_"):
-                lines.append(
-                    f"# CONFIG_{kc_stem}_LOG_LEVEL={n} "
-                    "(pending LOG_MODULE_REGISTER on this SDK module)")
+            known = _LOG_MODULES.get(str(mod).lower())
+            if known is None:
+                stem = str(mod).upper()
+                reason = (
+                    "pending LOG_MODULE_REGISTER on this SDK module"
+                    if stem.startswith("ALP_") else
+                    f"no Zephyr log module `{mod}` the SDK can wire -- "
+                    f"check the spelling")
+                lines.append(f"# CONFIG_{stem}_LOG_LEVEL_{choice}=y ({reason})")
+                continue
+            log_module, guard_symbols, log_gate = known
+            if isinstance(guard_symbols, str):
+                guard_symbols = (guard_symbols,)
+            symbol = f"CONFIG_{log_module}_LOG_LEVEL_{choice}"
+            missing = [g for g in guard_symbols if g not in enabled]
+            if log_gate not in enabled:
+                lines.append(f"# {symbol}=y (its log choice depends on "
+                             f"CONFIG_{log_gate}=y, not set on core "
+                             f"`{slice_.core_id}`)")
+            elif missing:
+                need = ", ".join(f"CONFIG_{g}=y" for g in missing)
+                lines.append(f"# {symbol}=y (its log choice is declared only "
+                             f"under {need}, not set on core "
+                             f"`{slice_.core_id}`)")
             else:
-                lines.append(f"CONFIG_{kc_stem}_LOG_LEVEL={n}")
+                lines.append(f"{symbol}=y")
         lines.append("")
     return lines
 
@@ -1474,7 +1851,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     which declare a ``raw_shmem`` ``ipc:`` entry) stay byte-identical.
     """
     silicon = project.som_preset.get("silicon")
-    kconfig = silicon_to_kconfig(silicon)
+    kconfig = silicon_to_kconfig(silicon, project.effective_metadata_root())
     diagnostics = project.diagnostics
 
     # Lazy-import alp_project tables — alp_project imports us, so a
@@ -1500,7 +1877,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     chip_lines, chip_subsystems, resolved_chip_state = _emit_chips(
         project, _CHIP_SUBSYSTEMS)
     lines.extend(chip_lines)
-    lines.extend(_emit_subsystems(slice_, chip_subsystems))
+    lines.extend(_emit_subsystems(project, slice_, chip_subsystems))
 
     iot_lines = _zephyr_iot_kconfig(project, slice_, resolved_chip_state)
     if iot_lines:
@@ -1514,7 +1891,18 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # -- folded in here (2026-07-20) so the two paths cannot silently
     # diverge on a `libraries:` entry with a hw_backends matcher; see
     # docs/adr/0020-sdk-owns-build-execution.md addendum.
-    hw_backend_lines = _emit_library_hw_backends(slice_.libraries, project.sku)
+    #
+    # Reads BOTH declaration channels (`libraries.scoped_names`), not just
+    # `slice_.libraries`.  A library's accelerator support is a property of
+    # the library manifest and the SoM's silicon, not of whether board.yaml
+    # spelled the selection as a bare/project-wide entry or a `cores:`-
+    # scoped one -- the two forms must resolve to the identical hw-backend
+    # set for the same core (#1359: a `cores:` entry was silently a
+    # SUPERSET of the project-wide form, gaining HELIUM/ADC_DMA/etc. that
+    # `cores:` reads as narrowing, not widening).
+    hw_backend_lines = _emit_library_hw_backends(
+        _library_layer.scoped_names(project, slice_=slice_), project.sku,
+        project.effective_metadata_root())
     if hw_backend_lines:
         lines.append("# §D.lib.loader -- per-library HW-accelerator "
                      "wiring (auto-emitted).")
@@ -1526,7 +1914,10 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     lines.extend(_emit_power(slice_))
     lines.extend(_emit_storage(project))
     lines.extend(_emit_ota(project))
-    lines.extend(_emit_diagnostics(project))
+    # Passed the fragment built so far: a per-module log-level override is
+    # only a real Kconfig symbol when THIS slice already switched the module
+    # (and CONFIG_LOG) on -- see `_emit_diagnostics`.
+    lines.extend(_emit_diagnostics(project, slice_, lines))
 
     return "\n".join(lines) + "\n"
 
@@ -1559,14 +1950,22 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
     iot_lines = _yocto_iot_lines(project, slice_)
     if iot_lines:
         lines.extend(iot_lines)
-    if slice_.libraries:
-        imageinstall = " ".join(
-            f"lib-{lib.replace('_', '-')}" for lib in slice_.libraries)
-        lines.append(f'IMAGE_INSTALL:append = " {imageinstall}"')
-    # Project-wide curated third-party libraries (top-level `libraries:`,
-    # ADR 0018) with a Yocto integration section.  Guard keeps a project
-    # with no such libraries byte-identical.
-    library_pkgs = _library_layer.yocto_image_install(project, slice_)
+    # Curated third-party libraries (top-level `libraries:`, ADR 0018) with a
+    # Yocto integration section -- BOTH the project-wide entries and the ones
+    # scoped to this core.  Every recipe name comes from the library's own
+    # `integration.yocto.image_install:`; nothing is derived from the library
+    # name.  (alplabai/tan-cli#555: the core-scoped half used to bypass the
+    # library layer entirely and emit `lib-<name>` -- a recipe that RPROVIDES
+    # nothing, so `bitbake alp-image-edge` died on `Nothing RPROVIDES
+    # 'lib-mbedtls'`.)  Guard keeps a project with no such libraries
+    # byte-identical.
+    for name in _library_layer.yocto_unwireable(
+            project, slice_, project.effective_metadata_root()):
+        lines.append(f"# library `{name}`: manifest declares no "
+                     f"`integration.yocto:` section -- nothing to add to "
+                     f"IMAGE_INSTALL on core `{slice_.core_id}`.")
+    library_pkgs = _library_layer.yocto_image_install(
+        project, slice_, project.effective_metadata_root())
     if library_pkgs:
         joined = " ".join(library_pkgs)
         lines.append(f'IMAGE_INSTALL:append = " {joined}"')
@@ -1602,7 +2001,7 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
 
 
 def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
-    """Per-core cmake -D args for a baremetal / yocto slice.
+    """Per-core cmake -D args for a baremetal / zephyr slice.
 
     NPU-dispatch enables (DRP-AI, DEEPX) are driven from the SoM
     preset's `capabilities:` matrix -- never from board.yaml.  On
@@ -1612,7 +2011,8 @@ def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
     """
     family = project.som_preset.get("family") or "unknown"
     # resolve_capabilities merges SoC-JSON defaults with SoM overrides.
-    capabilities = resolve_capabilities(project.som_preset, METADATA_ROOT)
+    capabilities = resolve_capabilities(
+        project.som_preset, project.effective_metadata_root())
     lines: list[str] = []
     lines.append("# Auto-generated by scripts/alp_orchestrate.py "
                  "-- pass to cmake.")
@@ -1643,6 +2043,7 @@ def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
     # Project-wide curated third-party libraries (top-level `libraries:`,
     # ADR 0018) with a baremetal integration section.  Guard keeps a project
     # with no such libraries byte-identical.
-    for arg in _library_layer.baremetal_cmake_args(project, slice_):
+    for arg in _library_layer.baremetal_cmake_args(
+            project, slice_, project.effective_metadata_root()):
         lines.append(arg)
     return "\n".join(lines) + "\n"

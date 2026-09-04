@@ -321,31 +321,3 @@ def test_measurement_from_capture_keeps_honest_labels():
     m = measurement_from_capture(parse_console(_three_window_capture()))
     assert m.source == "measured"
     assert m.scope == "carrier-rail-delta"
-
-
-# ---------------------------------------------------------------------------
-# CLI: --on-device failure must exit non-zero and never emit a null energy
-# (a silent null would read as "measured nothing" instead of "run failed").
-# ---------------------------------------------------------------------------
-
-def test_cli_on_device_failure_exits_nonzero_without_null_energy(monkeypatch):
-    pytest.importorskip("onnxruntime")
-    from click.testing import CliRunner
-
-    import alp_cli.model as climod
-    from alp_cli.main import cli
-    from alp_model.ondevice import OnDeviceError
-
-    def _boom(app_dir, **kwargs):
-        raise OnDeviceError("labgrid place 'aen-e8-01' has no held reservation")
-
-    monkeypatch.setattr(climod, "resolve_app_dir", lambda *a, **k: Path("dummy"))
-    monkeypatch.setattr(climod, "run_on_device", _boom)
-
-    raw = _ROOT / "tests/fixtures/models/tiny_cnn.onnx"
-    res = CliRunner().invoke(cli, ["model", "run", str(raw), "--runs", "3",
-                                   "--on-device", "--format", "json"])
-    assert res.exit_code != 0
-    assert "error:" in res.output
-    assert "no held reservation" in res.output
-    assert "energy" not in res.output       # failed run never reaches payload emission

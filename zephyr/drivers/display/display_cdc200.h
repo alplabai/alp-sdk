@@ -18,6 +18,9 @@
 #ifndef _DISPLAY_CDC200_H_
 #define _DISPLAY_CDC200_H_
 
+#include <errno.h>
+#include <stdint.h>
+
 #include <zephyr/device.h>
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/display.h>
@@ -302,6 +305,59 @@ struct cdc200_layer_config {
 	uint16_t y0;
 	uint16_t y1;
 };
+
+/**
+ * @brief Validate a read/write transfer against a layer's framebuffer window
+ *        and the caller's buffer descriptor (#1121).
+ *
+ * Split into its own dependency-free, static-inline helper (display.h's
+ * struct display_buffer_descriptor plus this header's struct
+ * cdc200_layer_config only) so tests/unit/display_cdc200_bounds can exercise
+ * the exact check every read/write entry point runs, without pulling in
+ * DEVICE_MMIO or a devicetree-instantiated layer.
+ *
+ * Checks, in order:
+ *   - `desc->pitch >= desc->width` (a caller row can't be narrower than the
+ *     pixels it claims to hold);
+ *   - the (x, y, desc->width, desc->height) rectangle lies wholly inside the
+ *     layer's window (subtraction-based: `x > layer_width` is checked before
+ *     `layer_width - x`, so the subtraction itself cannot underflow);
+ *   - `desc->buf_size` is large enough for a `desc->pitch`-strided,
+ *     `desc->height`-row transfer at this layer's pixel size (checked in a
+ *     64-bit intermediate so pitch*pixel_size*height cannot overflow a
+ *     32-bit size_t on target).
+ *
+ * @param layer Layer configuration (window + pixel size) being transferred.
+ * @param x X coordinate of the upper-left corner of the transfer rectangle.
+ * @param y Y coordinate of the upper-left corner of the transfer rectangle.
+ * @param desc Buffer layout descriptor supplied by the caller.
+ *
+ * @return 0 if the transfer is valid, -EINVAL otherwise.
+ */
+static inline int cdc200_validate_transfer(const struct cdc200_layer_config *layer, uint16_t x,
+					   uint16_t y,
+					   const struct display_buffer_descriptor *desc)
+{
+	uint32_t layer_width = (uint32_t)layer->x1 - layer->x0;
+	uint32_t layer_height = (uint32_t)layer->y1 - layer->y0;
+	uint64_t required;
+
+	if (desc->pitch < desc->width) {
+		return -EINVAL;
+	}
+
+	if ((x > layer_width) || (desc->width > (layer_width - x)) || (y > layer_height) ||
+	    (desc->height > (layer_height - y))) {
+		return -EINVAL;
+	}
+
+	required = (uint64_t)desc->pitch * layer->pixel_size * desc->height;
+	if ((uint64_t)desc->buf_size < required) {
+		return -EINVAL;
+	}
+
+	return 0;
+}
 
 /*
  * Device config structure. Includes:

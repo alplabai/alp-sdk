@@ -1,0 +1,64 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# vendor-ext, BENCH-UNVERIFIED.
+#
+# Binding for the Alif Ensemble Low-Power Comparator (LPCMP) -- a SINGLE
+# instance, distinct from the four HSCMP instances bound by alif,cmp.yaml.
+# NO DRIVER EXISTS for this compatible: comparator_alif.c targets the HSCMP
+# register layout (CMP_COMP_REG2 / config_reg), which the AE822 HWRM (LPCMP
+# Registers Description, ADTS0013/AHRM0012NDA) does NOT share -- the LPCMP has
+# its own, materially smaller register map.  This binding exists so the node
+# below VALIDATES (reg + interrupts only); it is deliberately NOT wired to a
+# driver.  Bring one up when an application needs the LPCMP wake-from-STOP
+# path (see alp-sdk issue #1816 / #1817).
+#
+# reg base (0x4200_3000, 4KB) is HWRM Table 10-4 Low Power VBAT Peripherals
+# Memory Map; interrupts (56, M55HE_IRQS[56] LPCMP_IRQ) is HWRM Table
+# "Interrupt Input / Interrupt Number" for the M55-HE local IRQ space.  Both
+# are in the VBAT/AON low-power island alongside LPRTC/LPTIMER/LPGPIO (this
+# dtsi's rtc0 / lptimer0 nodes), which is why -- like those two -- this binding
+# carries no `clocks` property: HWRM Table 19-24 "LPCMP Clocks" names a single
+# CLK32K (LFXO/LFRC) functional clock, gated by "LPCOMP_CLK32K_EN bit in the
+# VBAT_ANA_REG1" per that table's own footnote -- a REAL software gate, just
+# not the HE_CLK_ENA block the M55-HE-local LP peripherals use, and not a
+# register `clockctrl` currently maps (VBAT_ANA_REG1 is in the "ANA" block,
+# HWRM Table 19-30, base 0x1A60A000, distinct from clockctrl's existing
+# "vbat" region at 0x1A609000).  A future driver author should model that as
+# an ALIF_CLK_CFG()-encoded gate once clockctrl maps the ANA block, not as a
+# fixed-rate clock.
+#
+# Example (LPCMP at 0x42003000):
+#
+#   lpcmp0: cmp@42003000 {
+#       compatible = "alif,lpcmp";
+#       reg = <0x42003000 0x1000>;
+#       interrupts = <56 3>;
+#       status = "disabled";
+#   };
+
+description: |
+  Alif Ensemble Low-Power Comparator (LPCMP) -- a single low-power,
+  rail-to-rail analog comparator with a selectable internal or external
+  reference, in the VBAT/AON always-on domain.  A STANDBY/STOP wake source
+  (Datasheet Table 3-4).
+
+  vendor-ext, BENCH-UNVERIFIED -- authored from the AE822 HWRM memory map and
+  interrupt tables; NO DRIVER binds this compatible yet (see the file header
+  above).  A disabled node only: it validates the devicetree without claiming
+  the peripheral is usable from application code.
+
+compatible: "alif,lpcmp"
+
+include: [base.yaml]
+
+properties:
+  reg:
+    required: true
+    description: LPCMP register base address and size (0x1000, HWRM Table 10-4).
+
+  interrupts:
+    required: true
+    description: |
+      LPCMP_IRQ, M55HE_IRQS[56] (interrupt number 56) -- an EWIC-wired wake
+      source from STANDBY and STOP low-power modes (HWRM section 19.4.1).

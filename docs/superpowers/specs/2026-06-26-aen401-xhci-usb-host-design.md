@@ -1,5 +1,14 @@
 # E1M-AEN401 M55/Zephyr USB host — xHCI (corrected IP)
 
+> **Active.** Design spec dated 2026-06-26; still current design intent,
+> not settled history. Tracked by #812 (prove the M55-HP xHCI USB-host
+> path on E8 silicon) and #388 (stack complete on E8, enumeration blocked
+> on the EVK D+/D- path). `zephyr/drivers/usb/uhc/uhc_xhci_alif.c` is
+> still a `TODO(aen401-bench)` skeleton and host lifecycle is
+> BENCH-UNVERIFIED (`docs/abi-markers.md`'s `usb.h` row) -- cross-check
+> the tree, but this is the grounded record for the register base,
+> IRQ and glue decisions and should not be discarded.
+
 **Date:** 2026-06-26
 **Branch:** `feat/aen401-usb-host` (off `dev`) · **PR:** #268 (re-pointed)
 **Supersedes:** `2026-06-26-aen401-usb-host-design.md` (the DWC2 design — wrong IP).

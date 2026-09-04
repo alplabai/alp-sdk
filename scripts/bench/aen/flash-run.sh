@@ -32,6 +32,9 @@ fi
 SET="$SETOOLS_DIR"
 OBJ="$(bench_tool_prefix)" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
+# See ram-run.sh for why the selector is conditional on JLINK_SN.
+JLINK_ARGS=("$JLINK")
+[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
 ELF="$BD/zephyr/zephyr.elf"
@@ -65,6 +68,24 @@ if [ -z "$BUF_SYM" ]; then
 	echo "      the MRAM write above still completed -- this is not a boot failure. Read the" >&2
 	echo "      console via the labgrid 'console' resource instead." >&2
 else
+	# SAFETY GATE (alp-sdk#813) -- confirm the AEN E8 answered BEFORE the
+	# halt+mem8 read below. This bench has two probes sharing OEM serial
+	# 603000869 (one of them on a DIFFERENT board, the GD32 bridge on
+	# V2N-M1); JLinkExe selects by serial only, so JLINK_SN alone cannot
+	# prove which board is on the other end -- see bench-env.sh. Read-only
+	# connect first; nothing is halted until the DP ID matches.
+	cat > /tmp/flash-run-preflight.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_READ
+connect
+exit
+EOF
+	"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flash-run-preflight.jlink \
+		> /tmp/flash-run-preflight.out 2>&1 || true
+	bench_jlink_assert_connected /tmp/flash-run-preflight.out "Flow A preflight" || exit 7
+	bench_jlink_assert_aen_dpidr /tmp/flash-run-preflight.out "Flow A preflight" || exit 4
+
 	# SIZE is caller-supplied ($2); JLinkExe rejects a single mem8 over 0x10000 and
 	# reads NOTHING while the script keeps going -- chunk it (bench_jlink_mem8_chunks).
 	{
@@ -73,11 +94,11 @@ else
 		bench_jlink_mem8_chunks "$BUF" "$SIZE"
 		echo qc
 	} > /tmp/flash-read.jlink
-	# shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
-	$JLINK $(bench_jlink_select) -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript /tmp/flash-read.jlink 2>/tmp/fr.err > /tmp/fr.out || true
-	if grep -qi "Cannot connect to the probe" /tmp/fr.out; then
-		echo "flash-run: J-Link probe not selected/reachable -- export JLINK_SN (multi-probe host)." >&2
-	fi
+	"${JLINK_ARGS[@]}" -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript /tmp/flash-read.jlink 2>/tmp/fr.err > /tmp/fr.out || true
+	# JLinkExe exits 0 even when it never opened the probe, so `|| true` above
+	# hides a total connect failure and the decode below would render it as
+	# empty target output (alp-sdk#1318).
+	bench_jlink_assert_connected /tmp/fr.out "Flow A read-back" || exit 7
 	echo "----- $NAME RAM console (MRAM-flashed, SES-booted) -----"
 	awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>4)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/fr.out
 	echo; echo "--------------------------------------------------------"

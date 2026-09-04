@@ -39,10 +39,10 @@
  *   });
  *   cc3501e_t fw;
  *   cc3501e_init(&fw, bus);
- *   cc3501e_reset(&fw);            // pulses E_WIFI.NRST + WIFI.EN
- *   uint16_t version = 0;
- *   cc3501e_get_version(&fw, &version);
- *   if (version != ALP_CC3501E_PROTOCOL_VERSION) { ... }
+ *   // pulses E_WIFI.NRST + WIFI.EN, then refuses (ALP_ERR_VERSION) if the
+ *   // firmware's GET_VERSION reply disagrees with ALP_CC3501E_PROTOCOL_VERSION
+ *   alp_status_t s = cc3501e_reset(&fw);
+ *   if (s != ALP_OK) { ... }        // NOSUPPORT (no pins), VERSION (refused), ...
  * @endcode
  *
  * The Alif drives `WIFI.EN` (P15_5) and `E_WIFI.NRST`

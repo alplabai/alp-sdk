@@ -2,10 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/bootstrap-v1.schema.json",
   "title": "ALP Bootstrap Facts v1",
-  "description": "Validates metadata/bootstrap.json -- the single source of truth for the Zephyr-workspace-assembly FACTS scripts/bootstrap.sh and scripts/bootstrap.ps1 both read today; tan (Rust, cross-platform) has read the same facts since tan-cli PR #55 (tan-core's parse_bootstrap_manifest / BootstrapFacts), not merely an INTENDED future consumer (issue #917). Facts only; control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor -- this schema deliberately has no step/action shape. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, west.yml's zephyr revision, and each CI workflow's own Zephyr pin in lockstep (see that script's own module docstring for the full list of checks it runs).",
+  "description": "Validates metadata/bootstrap.json -- the single source of truth for the Zephyr-workspace-assembly FACTS scripts/bootstrap.sh, scripts/bootstrap.ps1, and Python Tan read today (issue #917). Facts only; control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor -- this schema deliberately has no step/action shape. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, west.yml's zephyr revision, and each CI workflow's own Zephyr pin in lockstep (see that script's own module docstring for the full list of checks it runs).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["_comment", "schemaVersion", "zephyr", "venv", "prerequisites", "west", "pip", "verdict", "env", "nativeLibHints", "manualInstallHints"],
+  "required": ["_comment", "schemaVersion", "zephyr", "venv", "prerequisites", "artifactProvenance", "west", "pip", "verdict", "env", "nativeLibHints", "manualInstallHints"],
   "properties": {
     "_comment": {
       "type": "string",
@@ -60,12 +60,25 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["linux", "macos", "windows"],
-          "description": "The single-source-of-truth install command for each prerequisites.* tool (issue #949) -- one shell command per tool, not per bare package name, so a doctor/doc/script site can print it verbatim. Deliberately keyed by linux/macos/windows -- NOT by a single `posix` key the way prerequisites.posix itself is -- because a `sudo apt-get install`-shaped command is Debian-family-specific and a `brew install`-shaped command is macOS-specific; one `posix` key cannot hold both without silently picking one distro's package manager as the de-facto POSIX standard, which is exactly why the issue #949 body itself already listed `posix` and `macos` separately rather than folding them together. These three OS keys instead mirror nativeLibHints' own OS key set immediately below, which hit the identical apt-vs-brew problem for the same reason. Each OS object's tool-name KEYS must exactly equal `prerequisites.posix` -- for BOTH install.linux and install.macos, deliberately, even though macOS only hard-*checks* the narrower `prerequisites.macos` subset at run time (see that key's own description): install.macos still carries a command for every posix tool, `xz`/`wget` included, so the hint text exists for the rare macOS user who needs one of them manually even though bootstrap.sh doesn't refuse without it. install.windows' keys are NOT pinned by equality the way install.linux / install.macos are pinned to prerequisites.posix -- the completeness check is one-directional only: every prerequisites.windows tool needs an install.windows entry, but install.windows may ALSO carry an entry with no matching prerequisites.windows gate at all, PROVIDED it is named in scripts/check_bootstrap_manifest.py's own `_WINDOWS_INSTALL_ONLY_TOOLS` allowlist -- an entry that is neither gated nor allowlisted is rejected, so this is a bounded, not unbounded, superset (issue #1036's `7zip` is the first allowlisted case -- `west sdk install` on native Windows needs it on PATH since patoolib shells out to an external 7z/7za/7zr/7zz/7zzs/unar binary for .7z extraction with no pure-Python fallback, but bootstrap.ps1 itself never runs `west sdk install`, so 7-Zip must NOT gate bootstrap.ps1 -- see manualInstallHints.windows.note). Membership in `install.linux` / `install.macos` is exact-equality-pinned to prerequisites.posix -- a stray key there is always rejected, regardless of what a bootstrap script refuses without. An unallowlisted stray key in `install.windows` is likewise always rejected, not silently accepted -- scripts/check_bootstrap_manifest.py's `_check_install_commands` (issue #949, extended #1036) is the single check that enforces all of this. The two live superset cases today: install.macos's `xz`/`wget` (macOS's bsdtar decompresses .xz in-process, and the pinned Zephyr SDK's setup.sh only hard-checks for `wget` on its linux-* host branch, not darwin-*) and install.windows's `7zip` (gates `west sdk install`, a separate manual step bootstrap.ps1 deliberately never runs -- not bootstrap.ps1 itself). See that function's own docstring for the full, authoritative list of what it verifies; not restated here so it can't drift out of step a second time.",
+          "description": "The single-source-of-truth install command for each prerequisites.* tool (issue #949) -- one shell command per tool, not per bare package name, so a doctor/doc/script site can print it verbatim. Deliberately keyed by linux/macos/windows -- NOT by a single `posix` key the way prerequisites.posix itself is -- because a `sudo apt-get install`-shaped command is Debian-family-specific and a `brew install`-shaped command is macOS-specific; one `posix` key cannot hold both without silently picking one distro's package manager as the de-facto POSIX standard, which is exactly why the issue #949 body itself already listed `posix` and `macos` separately rather than folding them together. These three OS keys instead mirror nativeLibHints' own OS key set immediately below, which hit the identical apt-vs-brew problem for the same reason. `install.macos` and `install.windows` each still carry ONE flat tool->command map (macOS has exactly one relevant package manager -- brew -- and so does native Windows -- winget), and each object's tool-name KEYS must exactly equal `prerequisites.posix` (macos) or are windows' own completeness rule below. `install.linux` (issue #1464) is DIFFERENT: it is keyed by PACKAGE MANAGER, not by tool -- `install.linux.apt` / `install.linux.dnf`, each an inner tool->command map -- because 'linux' is not one target the way 'macos'/'windows' are: a `sudo apt-get install`-shaped command that's correct on Debian/Ubuntu is either absent or wrong on a host with no apt at all (Fedora/Arch/Rocky measured byte-identical to Debian before this fix), and a bare `posix`-shaped or `linux`-shaped single command can never hold more than one package manager's shape without silently picking one as the de-facto Linux standard -- the same one-key-can't-hold-two-shapes problem `posix` vs `macos` already solved one level up. `install.linux.apt` is REQUIRED and, like install.macos, its tool-name keys must exactly equal `prerequisites.posix` (the Debian/Ubuntu-family default every existing consumer already depends on). `install.linux.dnf` is OPTIONAL and, when present, its tool-name keys must be a SUBSET of `prerequisites.posix` -- NOT required to be complete: a dnf-family tool this manifest cannot verify (issue #1464's hard bar -- a container job actually running the command and confirming the binary lands on PATH is the only admission ticket) is left OUT of the map entirely rather than guessed, and every consumer (bootstrap.sh's PREREQ_HINT_DNF, tan's `_resolve_install_commands`) already degrades an absent per-tool entry to a host-neutral, package-manager-agnostic hint instead of a broken command -- the exact discipline issue #949 established for a tool with no install command on ANY OS at all, now also available at the sub-map level. `ninja` is the first live case: Fedora's own repos carry `ninja-build`, but the RHEL-derivative default repos (measured on rockylinux:9 -- BaseOS/AppStream/Extras, no EPEL) do not carry `ninja`/`ninja-build` under any name, so `sudo dnf install -y ninja-build` is DEMONSTRABLY not a `dnf`-ecosystem-uniform command the way the other five are -- `install.linux.dnf` therefore has no `ninja` key, by design, not by omission. `pacman` (Arch) is deliberately NOT a key here at all: an unattended `pacman -S <pkg>` against a sync database staler than the target system risks a partial upgrade (a known way to break an Arch install), and no single command is both safe-unattended and reliable against an unknown-staleness real host -- absent, with the CONSUMER expected to print a host-neutral hint (never a guessed pacman command), is the correct data for that ecosystem today. Deliberately NO distro-ID layer inside `install.linux.dnf` either (e.g. no `rockylinux`/`fedora` split) -- a package-manager key is confirmable on an unknown host (`command -v dnf`) where a distro ID is fuzzy (derivatives, stripped containers); add one only once a name genuinely diverges WITHIN the dnf ecosystem for a tool this manifest still ships (today's one divergence -- ninja -- is handled by leaving it unshipped, not by adding a distro split for it).",
           "properties": {
             "linux": {
               "type": "object",
-              "additionalProperties": { "type": "string", "minLength": 1 },
-              "description": "One shell install command per prerequisites.posix tool, `sudo apt-get install -y <pkg>`-shaped -- the same command style nativeLibHints.linux.command already uses, so the manifest stays internally consistent."
+              "additionalProperties": false,
+              "required": ["apt"],
+              "description": "Keyed by PACKAGE MANAGER (issue #1464), not by tool and not by distro -- see prerequisites.install's own description above for the full rationale (why 'linux' can't be one flat tool map the way 'macos'/'windows' are, why `apt` is required-and-complete while `dnf` is optional-and-partial, and why there is no `pacman` key).",
+              "properties": {
+                "apt": {
+                  "type": "object",
+                  "additionalProperties": { "type": "string", "minLength": 1 },
+                  "description": "One shell install command per prerequisites.posix tool, `sudo apt-get install -y <pkg>`-shaped -- the same command style nativeLibHints.linux.command already uses, so the manifest stays internally consistent. REQUIRED to cover every prerequisites.posix tool (scripts/check_bootstrap_manifest.py enforces exact-key-equality here, the same bar install.macos already meets)."
+                },
+                "dnf": {
+                  "type": "object",
+                  "additionalProperties": { "type": "string", "minLength": 1 },
+                  "description": "One `sudo dnf install -y <pkg>` command per prerequisites.posix tool THIS MANIFEST CAN VERIFY on the dnf ecosystem (Fedora + RHEL-family) -- a SUBSET of prerequisites.posix, not required to be complete. A tool with no entry here (today: `ninja` -- see prerequisites.install's own description for why) is absent BY DESIGN; every consumer treats an absent per-tool entry as 'print a host-neutral hint', never as licence to guess."
+                }
+              }
             },
             "macos": {
               "type": "object",
@@ -80,6 +93,11 @@
           }
         }
       }
+    },
+    "artifactProvenance": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/artifactProvenanceEntry" },
+      "description": "ADR 0021 §3's one-consent-screen facts (issue #1574) -- itemising artifact / source / size / licence per tier, so the IDE can render that screen without a hardcoded downstream allowlist keyed on tool name (alplabai/alp-sdk-vscode#467 names that shortcut explicitly and forbids it: 'If the producer cannot express it yet, that is an upstream issue to file' -- this is that issue). Keyed by the SAME tool-name string `prerequisites.install` already uses across `install.linux.apt` / `install.linux.dnf` / `install.macos` / `install.windows` -- the union of those maps' keys, not a synthetic OS-independent id: `python3` (posix/macos) and `python` (windows) are the same upstream CPython project and so carry near-identical entries under two keys, the same choice `prerequisites.install` already made rather than inventing a canonical id this manifest has never had. scripts/check_bootstrap_manifest.py's `_check_artifact_provenance` asserts this key set stays exactly that union, so a tool added to any install.* map without a matching entry here (or a stale entry for a tool no install.* map still names) fails the gate instead of drifting silently -- the same bar `_check_install_commands` already holds `prerequisites.posix/macos/windows` to, one level further out. Every entry here today is tier A: every prerequisite this manifest ships an install command for is delivered by a signed, user-scope package manager (winget/apt/dnf/brew) -- no elevation, one consent click -- per the ADR 0021 §3 table's own footnote that delivery mechanism (package manager vs hermetic archive) and elevation are independent axes. No tier B (J-Link/WinUSB drivers, udev rules, WSL2 enablement) or tier C (DEEPX DX-M1, vendor NPU compilers) artifact is declared ANYWHERE in metadata/bootstrap.json yet -- neither exists as an install-command entry here today, so there is nothing yet to attach these facts to; adding one is a separate, larger change (a new install surface, not just new facts about an existing one) left to a follow-up issue, not invented here. The Zephyr SDK / `arm-zephyr-eabi` toolchain -- also tier A per the ADR table -- is DELIBERATELY NOT duplicated in here either: its source (`baseUrl`+`filename`) and sizeBytes already live, per-host, in metadata/toolchains.json's `zephyrSdk.artifacts[]` (the pinned-hermetic-archive case this key's own `sizeBytes`/`source` descriptions below contrast themselves against) -- restating them here would be a second copy of the same fact to drift, and that file's own tier/licence facts are left to a follow-up rather than bundled into this issue's file scope. This is producer-only data today: no script in this repo reads it yet (see `_PRODUCER_ONLY_LEAF_PREFIX` in the gate) -- forwarding it through `tan doctor --json` is deliberately left to a companion tan-cli issue, filed only once this shape has proven itself, not described here as a shape nothing downstream has verified yet."
     },
     "west": {
       "type": "object",
@@ -133,7 +151,7 @@
         },
         "editableInstall": {
           "type": "string",
-          "description": "Target `pip install -e <target>` installs -- the ${SDK_ROOT}-tokened alp-sdk checkout (tan's Python backend, alp_cli)."
+          "description": "Target `pip install -e <target>` installs -- the ${SDK_ROOT}-tokened alp-sdk checkout, including the SDK's internal/reference `alp_cli` library modules (used by scripts/validate_board_yaml.py and friends, not a command-line front door of their own) and surviving west commands."
         }
       }
     },
@@ -141,7 +159,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["blockingPhases", "partialNoteTemplate", "incompleteMessageTemplate", "incompleteRemedy"],
-      "description": "The single source for the closing-verdict rule (issue #1038 / tan-cli#220): each pip-install phase below stays non-fatal in itself -- the workspace is left on disk regardless of which packages failed -- but a run that hit one of `blockingPhases` has NOT produced an environment that can do what it was bootstrapped for, and must not report unqualified success. Both scripts/bootstrap.sh and scripts/bootstrap.ps1 read this object (instead of each hardcoding the phase set and the wording a second time); tan-cli's own `WORKSPACE_BLOCKING` (crates/tan-cli/src/commands/bootstrap/steps.rs) declares the identical three phase IDs independently -- tan does not read this manifest key today, so keeping the two declarations in sync across repos is still a by-hand contract, not a mechanically-gated one.",
+      "description": "The single source for the closing-verdict rule (issue #1038 / tan-cli#220): each pip-install phase below stays non-fatal in itself -- the workspace is left on disk regardless of which packages failed -- but a run that hit one of `blockingPhases` has NOT produced an environment that can do what it was bootstrapped for, and must not report unqualified success. Both SDK bootstrap scripts read this object; Python Tan mirrors the identical three phase IDs independently in `python/tan/commands/bootstrap_cmd.py::WORKSPACE_BLOCKING` -- tan does not read this manifest key, so keeping the declarations in sync across repos remains a by-hand contract, not a mechanically-gated one.",
       "properties": {
         "blockingPhases": {
           "type": "array",
@@ -226,6 +244,32 @@
     }
   },
   "$defs": {
+    "artifactProvenanceEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tier", "source", "sizeBytes", "licence"],
+      "properties": {
+        "tier": {
+          "type": "string",
+          "enum": ["A", "B", "C"],
+          "description": "ADR 0021 §3's consent-screen tier. A -- hermetic or signed-package-manager delivered, no elevation: install after one consent click. B -- needs elevation (drivers, udev rules, WSL2 enablement): prompt once, stay skippable, and show the command that will run rather than only executing it. C -- licence-gated third party: never silently fetched, show the licence, then verify. A property of the ARTIFACT, not of any one consumer's opinion -- the reason issue #1574 exists is so an IDE never has to hardcode this per tool name."
+        },
+        "source": {
+          "type": "string",
+          "format": "uri",
+          "description": "The artifact's canonical upstream origin -- its project homepage or source repository -- NOT a per-version download URL. Every entry today is delivered by a signed, user-scope package manager (winget/apt/dnf/brew), which resolves its OWN download URL per host, architecture, and already-installed version, so no single fixed download URL exists to pin here the way metadata/toolchains.json's `baseUrl` does for the pinned, hermetic Zephyr SDK archives."
+        },
+        "sizeBytes": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Approximate download size in bytes, or null. null here is the honest answer, not an unresearched gap: every entry today is package-manager-resolved, and a package manager's own download size varies by host OS, CPU architecture, and whichever version is already cached or partially installed -- there is no single number that would be true across hosts. Contrast metadata/toolchains.json's `zephyrSdk.artifacts[].sizeBytes`, which IS a fixed, sha256-verified figure, because that artifact is a pinned hermetic archive fetched from one exact URL regardless of host."
+        },
+        "licence": {
+          "type": ["string", "null"],
+          "description": "SPDX licence identifier for the artifact's primary licence, or null. null means the upstream project's licensing is genuinely multi-component (more than one licence covers different files/modules of the same distributed artifact) and cannot be honestly reduced to a single SPDX id without a file-level audit this repo has not performed -- an absent value, not a guessed one, per issue #1574's own instruction that a fabricated licence string is worse than an absent one. A non-null value is a real, verifiable fact about the named upstream project."
+        }
+      }
+    },
     "nativeLibHint": {
       "type": "object",
       "additionalProperties": false,

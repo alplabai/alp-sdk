@@ -60,8 +60,8 @@ _RAMRUN_TIMEOUT_S = 120
 # The on-target app's final home is a concurrent WIP under examples/; an env
 # var (not a guessed path) is what keeps this module correct once it lands.
 _APP_DIR_ENV = "ALP_ENERGY_APP_DIR"
-# labgrid place name + client binary: both host/bench-specific, so both come
-# from the environment (check_local_paths.py forbids a hard-coded path here).
+# bench place name + labgrid client binary: both host/bench-specific, so both
+# come from the environment (check_local_paths.py forbids a hard-coded path here).
 _PLACE_ENV = "ALP_BENCH_PLACE"
 _CLIENT_ENV = "ALP_LABGRID_CLIENT"
 
@@ -382,10 +382,10 @@ def run_on_device(app_dir: str | Path, *, board: str | None = None,
         raise OnDeviceError(f"'{client}' not on PATH -- install labgrid-client "
                             f"or set {_CLIENT_ENV}")
     if not place:
-        raise OnDeviceError(f"no labgrid place given -- pass place= or set {_PLACE_ENV}")
+        raise OnDeviceError(f"no bench place given -- pass place= or set {_PLACE_ENV}")
     if not _reservation_held(client, place):
         raise OnDeviceError(
-            f"labgrid place {place!r} has no held reservation -- acquire it yourself "
+            f"bench place {place!r} has no held reservation -- acquire it yourself "
             "first (this runner never acquires/releases a shared board)")
 
     bench_dir = Path(__file__).resolve().parents[2] / "scripts" / "bench" / "aen"

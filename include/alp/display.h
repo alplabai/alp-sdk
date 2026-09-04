@@ -11,13 +11,19 @@
  * CONFIG_DISPLAY, ops are served by the real `display_*`
  * driver-class wrapper (src/backends/display/zephyr_drv.c) -- any
  * panel with an upstream Zephyr display driver resolves via the
- * `alp-display0..3` devicetree aliases.  Elsewhere the priority-0
+ * `alp-display0..3` devicetree aliases.  On Yocto/Linux builds, ops
+ * are served by a real DRM/KMS dumb-buffer backend
+ * (src/backends/display/yocto_drv.c, issue #1143) written against the
+ * generic KMS uAPI, so it needs no vendor-specific code for the V2N
+ * `du` + `dsi0` path (RK055HDMIPI4MA0 panel) -- but that path has NOT
+ * been run on V2N silicon yet, so treat it as unproven until it has.
+ * Opening a display there requires @ref alp_display_config_t::allow_modeset.
+ * Elsewhere the priority-0
  * NOT_IMPLEMENTED stub (zephyr_stub.c) keeps the surface linkable.
  * alp_gui_lvgl_attach() (<alp/gui.h>) binds any alp_display_t opened
  * through this surface to an LVGL v9 lv_display_t -- code-complete,
  * native_sim-tested (tests/zephyr/gui_lvgl/); real-panel bench run
  * still pending.  Still tracked by issue #23:
- *   - the V2N DSI / parallel-RGB framebuffer path,
  *   - the Alif LCD-IF path.
  *
 
@@ -30,6 +36,7 @@
 #ifndef ALP_DISPLAY_H
 #define ALP_DISPLAY_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
 #include "alp/cap_instance.h"
@@ -46,21 +53,57 @@ typedef struct alp_display alp_display_t;
 
 typedef struct {
 	uint32_t display_id; /**< Studio-resolved display instance. */
+	/**
+	 * @brief Permit taking over and reprogramming a display this process
+	 *        does not already own.  Defaults to @c false.
+	 *
+	 * Only the Yocto/Linux backend consults this; it is ignored elsewhere,
+	 * where a display is a dedicated panel the app owns by construction.
+	 *
+	 * On Linux the SDK drives KMS directly: it becomes DRM master and
+	 * issues @c DRM_IOCTL_MODE_SETCRTC, which reprograms the physical
+	 * output.  The kernel only refuses that when another process is
+	 * *currently* master.  It does NOT refuse when master is merely
+	 * unheld -- an idle framebuffer console, a Wayland or X session that
+	 * has been VT-switched away, or a headless SSH login on a machine
+	 * with a panel attached.  In all of those, opening the display would
+	 * silently take the screen over.
+	 *
+	 * So @ref alp_display_open returns @c ALP_ERR_INVAL unless the caller
+	 * sets this explicitly.  Taking over a display is a deliberate act,
+	 * not something a default-constructed config should do.
+	 *
+	 * **Honoured by the Yocto/Linux backend only; ignored elsewhere.**
+	 * The hazard above is specific to KMS: a Zephyr backend drives a
+	 * dedicated panel it already owns, with no DRM master to take from
+	 * and no VT-switched session to displace, so there is nothing for
+	 * the flag to protect.  A default-constructed config therefore opens
+	 * normally on Zephyr and is refused on Linux -- deliberate, and
+	 * stated here because the paragraph above otherwise reads as an
+	 * unconditional promise the MCU backends do not keep (issue #1648
+	 * tier 2).  `alp_storage_config_t.allow_unsafe_write` documents its
+	 * own Yocto-only scope the same way.
+	 */
+	bool allow_modeset;
 } alp_display_config_t;
 
 /**
  * @brief Default-initialize an @ref alp_display_config_t for display @p id.
  *
- * The display config has no tunable fields beyond its identity, so the
- * default simply names the instance: @code alp_display_config_t cfg =
+ * Names the instance and leaves @ref alp_display_config_t::allow_modeset
+ * @c false -- the safe default: @code alp_display_config_t cfg =
  * ALP_DISPLAY_CONFIG_DEFAULT(0); @endcode
+ *
+ * On the Yocto/Linux backend a config built this way cannot take over a
+ * display; see that field's documentation for why.
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_DISPLAY_CONFIG_DEFAULT(id) ((alp_display_config_t){ .display_id = (id) })
+#define ALP_DISPLAY_CONFIG_DEFAULT(id) \
+	((alp_display_config_t){ .display_id = (id), .allow_modeset = false })
 
 typedef struct {
 	uint16_t     width;

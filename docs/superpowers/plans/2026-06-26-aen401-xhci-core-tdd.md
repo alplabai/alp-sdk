@@ -1,6 +1,19 @@
 # AEN401 xHCI Core (host-testable, TDD) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Active.** Implementation plan dated 2026-06-26; the work below is not
+> finished. Tracked by #812 (prove the M55-HP xHCI USB-host path on E8
+> silicon) and #388 (stack complete on E8, enumeration blocked on the EVK
+> D+/D- path). `zephyr/drivers/usb/uhc/uhc_xhci_alif.c` is still a
+> `TODO(aen401-bench)` skeleton and host lifecycle is BENCH-UNVERIFIED
+> (`docs/abi-markers.md`'s `usb.h` row) -- cross-check the current tree
+> before treating a step below as done, but do not discard this as history.
+>
+> Command examples below use this session's original Windows/WSL
+> checkout paths (e.g. `/mnt/c/Users/<user>/...`) verbatim -- treat
+> them as historical record, not copy-paste-ready commands for
+> today's checkout.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** Factor the host-deterministic xHCI logic (TRB rings, DCBAA/contexts, the init register sequence) into a pure-C `xhci_core` unit and validate it with a `native_sim` ztest — turning unvalidated skeleton into host-tested code.
 

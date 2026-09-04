@@ -11,6 +11,10 @@ _TARGET_KEYS = {"backend", "silicon_ref", "blob_format", "accel_config",
                 "arena", "requires", "blob", "compiler_version"}
 _COV_KEYS = {"backend", "accel_config", "status", "reason"}
 
+# The blob formats the SDK can describe. A real constant, not a comment, so a
+# new backend cannot silently invent a format string.
+VALID_BLOB_FORMATS = frozenset({"vela_tflite", "tflite", "drpai_dir", "dxnn", "onnx"})
+
 
 def _pick(d: dict, keys: set) -> dict:
     return {k: d[k] for k in keys if k in d}   # drop unknown keys + tolerate missing-known
@@ -35,7 +39,7 @@ class Tensor:
 class Target:
     backend: str            # cpu | ethos_u | drpai | deepx_dxm1
     silicon_ref: str        # e.g. "alif:ensemble:e8" or "*"
-    blob_format: str        # vela_tflite | drpai_dir | dxnn | tflite
+    blob_format: str        # one of VALID_BLOB_FORMATS
     accel_config: str       # "" when N/A
     arena: int
     requires: dict[str, object]  # {"sram_kib": int, "op_features": list[str]}

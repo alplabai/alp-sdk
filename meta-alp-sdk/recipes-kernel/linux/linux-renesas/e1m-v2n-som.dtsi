@@ -216,6 +216,22 @@
 	};
 };
 
+/*
+ * On-die DRP-AI3 NPU enable (claims drp_reserved + shared_drp_reserved
+ * above, and flips the node to "okay").
+ *
+ * Kept in its own file because it can only be compiled when the OPTIONAL
+ * meta-rz-drpai layer is in bblayers.conf: that layer's
+ * 0001-add-drpai-property-to-devicetree.patch is what CREATES the `drpai0`
+ * label in r9a09g056.dtsi -- the pristine linux-renesas tree has no such
+ * node, so an unconditional `&drpai0` here aborts dtc for every board that
+ * includes this SoM dtsi (V2N and V2M alike).  The linux-renesas bbappend
+ * installs the real override when the layer is present and a comment-only
+ * stub when it is not; the rationale, the mandatory-second-property rule and
+ * the mmp_reserved warning all live in that file.
+ */
+#include "e1m-v2n-drpai.dtsi"
+
 /* On-module eMMC on SDHI0 (8-bit, HS200, non-removable). */
 &sdhi0 {
 	pinctrl-0 = <&sdhi0_emmc_pins>;
@@ -301,7 +317,27 @@
  * renesas,syscon-cpg-error-rst) -- supervision only resets the board
  * when running the ALP/BSP FIP.
  * VALIDATION: pending bench hang-injection on a built image + the
- * deployed FIP. */
+ * deployed FIP -- start the watchdog, stop feeding it, and confirm
+ * the board actually resets within timeout-sec; a keepalive-only
+ * check (feed succeeds, no starvation attempted) does not prove this
+ * (alp-sdk#1153).
+ *
+ * wdt0 (CM33): NOT enabled anywhere in this tree (alp-sdk#1153).
+ * Checked against the exact pinned Zephyr v4.4.0 tag's own upstream
+ * SoC devicetree (dts/arm/renesas/rz/rzv/r9a09g056.dtsi, zephyr west
+ * module -- not vendored in this repo): it declares no watchdog node
+ * and no watchdog driver binds this SoC at all yet, so there is no
+ * label to reference from the CM33 board dts and no register base
+ * address in this tree to hand-author one from (contrast the MHU-B
+ * mbox1 node hand-authored at CM33 board level in
+ * alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts -- that one had a
+ * real vendored FSP register map, bsp_mhu_b.h, to draw from; no
+ * equivalent WDT FSP module is vendored under zephyr/drivers/ here).
+ * <alp/wdt.h> on the M33 therefore finds no matching backend
+ * (src/wdt_dispatch.c returns ALP_ERR_NOT_PRESENT_ON_THIS_SOC) --
+ * NOT the ALP_ERR_NOSUPPORT stub_wdt.c path, which is Yocto/baremetal-
+ * only and never compiled into a Zephyr build (zephyr/CMakeLists.txt
+ * has no reference to it). */
 &wdt1 {
 	timeout-sec = <60>;
 	status = "okay";
@@ -319,7 +355,22 @@
  * (dmac0_aclk is NOT gated by this: bench-verified on the pristine
  * BSP kernel with the node disabled, the cpg driver keeps the clock
  * held -- enable_cnt=1, deviceless -- so the CM33's engine keeps its
- * clock.) */
+ * clock.)
+ *
+ * OWNERSHIP CONTRACT (alp-sdk#1152, docs/adr/0025-v2n-dmac0-cm33-
+ * exclusive-channel-partition.md): DMAC0 is CM33-exclusive, whole
+ * unit -- this status="disabled" line IS the enforcement, not a
+ * placeholder for a finer-grained one.  Within that exclusive
+ * ownership, the CM33 FSP config
+ * (zephyr/drivers/spi/spi_renesas_rz_sci_b.c:257-259) reserves ch0
+ * (RX, DMAINT0 -> NVIC 89) + ch1 (TX, DMAINT1 -> NVIC 90) for the
+ * SCI7 SPI DMA fast path (currently gated off pending #84,
+ * ALP_V2N_SCI7_DMAC=0); ch2-7 are unclaimed margin, still CM33-side.
+ * No Linux-side per-channel mask/partition mechanism is evidenced in
+ * this tree or the upstream rz-dmac binding -- do NOT attempt a
+ * partial re-enable without first finding and silicon-verifying one;
+ * Linux DMA needs on this SoM route through one of the other four
+ * A55 DMAC units instead. */
 &dmac0 {
 	status = "disabled";
 };

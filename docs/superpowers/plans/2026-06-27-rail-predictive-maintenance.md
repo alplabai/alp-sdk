@@ -1,6 +1,18 @@
 # Rail Predictive-Maintenance Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical transcript.** Implementation plan dated 2026-06-27. The
+> SDK has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as a
+> live task list; kept for implementation-history rationale only.
+>
+> Command examples below use this session's original Windows/WSL
+> checkout paths (e.g. `/mnt/c/Users/<user>/...`) verbatim -- treat
+> them as historical record, not copy-paste-ready commands for
+> today's checkout.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** A train-mounted edge demo that analyzes rail condition from vibration (DSP feature extraction → small AI classifier), and geotags each verdict to a track position (GNSS lat/lon + chainage), emitting one CSV record per track segment.
 
@@ -1458,7 +1470,7 @@ tests:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
       - native_sim/native/64
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
     integration_platforms:
       - native_sim/native/64
     tags:
@@ -1554,7 +1566,7 @@ RAIL,100.0,59.334591,18.062400,6.2,CORRUGATION,0.81,120.0,0.0517,1
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/ai/rail-predictive-maintenance
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/rail-predictive-maintenance
 west flash
 ```
 

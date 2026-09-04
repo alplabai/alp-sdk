@@ -20,13 +20,18 @@ cores:
   m55_hp:
     app: ./src
     peripherals: []
-    # Emits CONFIG_ALP_SDK_CATCH2_VENDORED=y (scripts/alp_project_emit.py's
-    # `_LIBRARY_KCONFIG["catch2"]`), which gates the alp-sdk Zephyr
+    # Emits CONFIG_ALP_SDK_CATCH2_VENDORED=y (from catch2.yaml's
+    # integration.zephyr.kconfig array, transcribed by
+    # scripts/alp_orchestrate/libraries.py:321 -- the
+    # `_LIBRARY_KCONFIG["catch2"]` dict this used to cite is gone, and
+    # scripts/alp_project_emit is a package now, not a .py file), which
+    # gates the alp-sdk Zephyr
     # module compiling the vendored Catch2 amalgamated distribution
     # (vendors/catch2/, no zephyr/module.yml upstream -- see that
     # directory's README.md). CONFIG_ALP_CATCH2_SW (Kconfig.alp-libraries:
     # "Catch2 (always pure-SW)", no HW-accelerator binding possible --
-    # see metadata/library-profiles/catch2/hw-backends.yaml) is a
+    # see the `integration.zephyr.hw_backends:` block in
+    # metadata/libraries/catch2.yaml) is a
     # separate `default y` fallback-capability marker, true for every
     # build regardless of this slice -- it does NOT gate compiled
     # sources; see zephyr/CMakeLists.txt for why.

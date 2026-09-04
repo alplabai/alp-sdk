@@ -24,8 +24,31 @@
  * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==================================================================
  *
- * Vendored VERBATIM from the fork beyond this provenance header (no functional
- * edits).  Binds the soc-nv-flash child node by its `mram_storage` nodelabel.
+ * Vendored from the fork with this provenance header added, plus one
+ * documented divergence below.  Binds the soc-nv-flash child node by its
+ * `mram_storage` nodelabel.
+ *
+ * ------------------------- alp-sdk divergence -------------------------
+ * The fork's flash_range_is_valid(dev, offset, len) end-calculation
+ * (`(offset + len) > size`, issue #1119) was replaced by a direct call, at
+ * all three read/write/erase call sites, to the overflow-safe
+ * flash_mram_range_is_valid() helper (this driver's companion
+ * flash_mram_range.h; a local subtraction-based check mirroring, but not
+ * including, the shared alp_size_range_valid() from
+ * src/common/alp_checked_arith.h, #743 -- this file is compiled before
+ * CMakeLists.txt's CONFIG_ALP_SDK early-return for images such as MCUboot
+ * that never set CONFIG_ALP_SDK, and src/common is not on the include path
+ * that early, see flash_mram_range.h's banner).  There is deliberately no
+ * driver-local flash_range_is_valid() wrapper any more (round-2 #1119
+ * follow-up): a wrapper is a second place the check could silently regress
+ * back to the wrapping arithmetic while tests/unit/flash_mram_range, which
+ * only exercises the header, stayed green -- calling the tested header
+ * function directly at each call site removes that gap structurally. The
+ * addition wraps on a 32-bit target when len is close to SIZE_MAX, which
+ * lets an out-of-range offset+len pair evade the bound and reach the MRAM
+ * read/write/erase path. Reapply this divergence if the file is ever
+ * re-synced from the fork.
+ * -------------------------------------------------------------------------
  */
 #define DT_DRV_COMPAT alif_mram_flash_controller
 
@@ -33,6 +56,7 @@
 #include <zephyr/drivers/flash.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
+#include <zephyr/irq.h>
 #include <zephyr/sys/util.h>
 #include <stdint.h>
 #include <string.h>
@@ -40,6 +64,7 @@
 #include <errno.h>
 #define LOG_LEVEL CONFIG_FLASH_LOG_LEVEL
 #include <zephyr/logging/log.h>
+#include "flash_mram_range.h"
 LOG_MODULE_REGISTER(flash_mram_alif);
 
 #define SOC_NV_FLASH_NODE      DT_NODELABEL(mram_storage)
@@ -52,6 +77,22 @@ LOG_MODULE_REGISTER(flash_mram_alif);
 
 #if (FLASH_MRAM_ERASE_UNIT % FLASH_MRAM_PROG_UNIT)
 #error "Erase unit must be a multiple of program unit"
+#endif
+
+/*
+ * The program path hardcodes 16 bytes everywhere -- MRAM_ADDR_ALIGN_MASK, the
+ * & 0xF alignment tests, and the four literal dst32[0..3] stores -- while
+ * MRAM_UNIT_SECTOR_SIZE comes from the devicetree write-block-size.  Nothing
+ * tied the two together, so a node with write-block-size = <32> compiled
+ * cleanly and then counted 32-byte sectors while programming 16 bytes per
+ * iteration: half of every image silently unwritten (#1824).
+ *
+ * HWRM 10.1.1 MRAM Overview: "The 128-bit (16-byte) word represents the
+ * minimum sector size for the MRAM" with "16 ECC bits for each 128-bit data
+ * word", so 16 is a property of the silicon, not a tunable.
+ */
+#if (FLASH_MRAM_PROG_UNIT != 16)
+#error "MRAM program unit is fixed at 16 bytes (HWRM 10.1.1); fix write-block-size in the DT"
 #endif
 
 #define MRAM_FLASH(offset) ((volatile uint8_t *)FLASH_MRAM_BASE_OFFSET + (offset))
@@ -89,15 +130,24 @@ static int mram_write_16bytes(volatile void *dst, const void *src)
 
 	const uint32_t *src32 = src;
 	volatile uint32_t *dst32 = dst;
+	unsigned int       key;
 
-	__disable_irq();
+	/*
+	 * irq_lock()/irq_unlock(), NOT __disable_irq()/__enable_irq().  The latter
+	 * CLEARS PRIMASK unconditionally instead of restoring the caller's state,
+	 * so a caller that already held interrupts masked -- a Zephyr irq_lock()
+	 * region, an MCUboot last-gasp write, a fault path -- had its critical
+	 * section silently torn open here, and every later 16-byte word of the
+	 * same slot write ran unmasked (#1824).
+	 */
+	key = irq_lock();
 
 	dst32[0] = UNALIGNED_GET(&src32[0]);
 	dst32[1] = UNALIGNED_GET(&src32[1]);
 	dst32[2] = UNALIGNED_GET(&src32[2]);
 	dst32[3] = UNALIGNED_GET(&src32[3]);
 
-	__enable_irq();
+	irq_unlock(key);
 
 	return 0;
 }
@@ -119,36 +169,19 @@ static int mram_erase_16bytes(volatile void *dst)
 	}
 
 	volatile uint32_t *dst32 = dst;
+	unsigned int       key;
 
-	__disable_irq();
+	/* See mram_write_16bytes(): restore PRIMASK, do not clear it (#1824). */
+	key = irq_lock();
 
 	dst32[0] = 0;
 	dst32[1] = 0;
 	dst32[2] = 0;
 	dst32[3] = 0;
 
-	__enable_irq();
+	irq_unlock(key);
 
 	return 0;
-}
-
-/**
- * @brief check if offset and len are in valid range.
- *
- * @param dev Pointer to device driver instance
- * @param offset Flash offset address for read/write operation.
- * @param len Number of bytes to read/write from offset address.
- *
- * @return 1 if range is valid, 0 otherwise.
- */
-static int flash_range_is_valid(const struct device *dev, off_t offset,
-				size_t len)
-{
-	ARG_UNUSED(dev);
-	if (((offset + len) > FLASH_MRAM_FLASH_SIZE) || (offset < 0x0)) {
-		return 0;
-	}
-	return 1;
 }
 
 /**
@@ -209,7 +242,7 @@ static int flash_mram_read(const struct device *dev, const off_t offset,
 {
 	struct mram_flash_data *dev_data = dev->data;
 
-	if (!flash_range_is_valid(dev, offset, len)) {
+	if (!flash_mram_range_is_valid(offset, len, FLASH_MRAM_FLASH_SIZE)) {
 		LOG_ERR("mram_read: Invalid range offset: %ld len: %d\n",
 			(long)offset, len);
 		return -EINVAL;
@@ -247,8 +280,9 @@ static int flash_mram_write(const struct device *dev, const off_t offset,
 			     const void *data, const size_t len)
 {
 	struct mram_flash_data *dev_data = dev->data;
+	int                     ret      = 0;
 
-	if (!flash_range_is_valid(dev, offset, len)) {
+	if (!flash_mram_range_is_valid(offset, len, FLASH_MRAM_FLASH_SIZE)) {
 		LOG_ERR("mram_write: Invalid range offset: %ld len: %d\n",
 			(long)offset, len);
 		return -EINVAL;
@@ -294,7 +328,10 @@ static int flash_mram_write(const struct device *dev, const off_t offset,
 		memcpy(temp_buff + unaligned_offset, p_data, unaligned_bytes);
 
 		/* now, copy 128bit from buffer to MRAM. */
-		mram_write_16bytes(p_aligned_addr, temp_buff);
+		ret = mram_write_16bytes(p_aligned_addr, temp_buff);
+		if (ret != 0) {
+			goto out;
+		}
 
 		p_aligned_addr += MRAM_UNIT_SECTOR_SIZE;
 		p_data         += unaligned_bytes;
@@ -309,7 +346,10 @@ static int flash_mram_write(const struct device *dev, const off_t offset,
 		/* as MRAM address is 16-byte aligned,
 		 * directly copy 128bit from source-data to MRAM.
 		 */
-		mram_write_16bytes(p_aligned_addr, p_data);
+		ret = mram_write_16bytes(p_aligned_addr, p_data);
+		if (ret != 0) {
+			goto out;
+		}
 
 		p_aligned_addr += MRAM_UNIT_SECTOR_SIZE;
 		p_data         += MRAM_UNIT_SECTOR_SIZE;
@@ -324,12 +364,17 @@ static int flash_mram_write(const struct device *dev, const off_t offset,
 		memcpy(temp_buff, p_data, unaligned_cnt);
 
 		/* now, copy 128bit from buffer to MRAM. */
-		mram_write_16bytes(p_aligned_addr, temp_buff);
+		ret = mram_write_16bytes(p_aligned_addr, temp_buff);
 	}
 
+out:
+	/* A rejected 16-byte program used to be dropped at all three call sites and
+	 * flash_mram_write() returned 0 regardless -- "hardware refused the write,
+	 * caller told it succeeded", on the very path MCUboot uses to decide a slot
+	 * is valid (#1824). */
 	k_sem_give(&dev_data->lock);
 
-	return 0;
+	return ret;
 }
 
 /**
@@ -338,16 +383,25 @@ static int flash_mram_write(const struct device *dev, const off_t offset,
  * @param unit Address to erase FLASH_MRAM_ERASE_UNIT bytes.
  *             The erase value is defined by FLASH_MRAM_ERASE_VALUE.
  */
-static void mram_unit_erase(const uint32_t unit)
+static int mram_unit_erase(const uint32_t unit)
 {
 	const off_t unit_addr = (unit * FLASH_MRAM_ERASE_UNIT);
 	uint32_t i;
 
 	for (i = unit_addr; i < (unit_addr + FLASH_MRAM_ERASE_UNIT);
 	    i += FLASH_MRAM_PROG_UNIT) {
-		/* Erase 16 bytes of MRAM data */
-		mram_erase_16bytes(MRAM_FLASH(i));
+		/* Erase 16 bytes of MRAM data.  The return is propagated for the
+		 * same reason the write path's is (#1824): a caller told the erase
+		 * succeeded when the hardware refused it is how a bootloader comes
+		 * to believe it cleared a trailer it did not (#1066). */
+		int ret = mram_erase_16bytes(MRAM_FLASH(i));
+
+		if (ret != 0) {
+			return ret;
+		}
 	}
+
+	return 0;
 }
 
 /**
@@ -367,8 +421,9 @@ static int flash_mram_erase(const struct device *dev, off_t offset,
 	struct mram_flash_data *dev_data = dev->data;
 	uint32_t mram_unit_start;
 	uint32_t i;
+	int                     ret = 0;
 
-	if (!flash_range_is_valid(dev, offset, len)) {
+	if (!flash_mram_range_is_valid(offset, len, FLASH_MRAM_FLASH_SIZE)) {
 		LOG_ERR("mram_erase: Invalid range offset: %ld len :%d\n",
 			(long)offset, len);
 		return -EINVAL;
@@ -386,11 +441,14 @@ static int flash_mram_erase(const struct device *dev, off_t offset,
 		return -EACCES;
 	}
 	for (i = 0 ; i < len / FLASH_MRAM_ERASE_UNIT ; ++i) {
-		mram_unit_erase(mram_unit_start + i);
+		ret = mram_unit_erase(mram_unit_start + i);
+		if (ret != 0) {
+			break;
+		}
 	}
 	k_sem_give(&dev_data->lock);
 
-	return 0;
+	return ret;
 }
 
 #ifdef CONFIG_FLASH_PAGE_LAYOUT
@@ -431,8 +489,17 @@ static int flash_mram_init(const struct device *dev)
 	struct mram_flash_data *dev_data = dev->data;
 
 	k_sem_init(&dev_data->lock, 1, 1);
-	/* NOTE: Uncomment below line to erase storage parition of MRAM */
-	/* flash_mram_erase(dev, 0x0, FLASH_MRAM_FLASH_SIZE); */
+
+	/*
+	 * There is deliberately NO erase here.  This runs at POST_KERNEL on every
+	 * boot, so a full-partition erase would wipe the MCUboot slots and burn one
+	 * program cycle per boot against the datasheet's NMRAME 100000 Cycles
+	 * (ADTS0013 v1.2 Table 5-15) and HWRM 10.1.1's "High endurance (more than
+	 * 100 000 erase cycles)".  A commented-out flash_mram_erase(dev, 0x0,
+	 * FLASH_MRAM_FLASH_SIZE) used to sit on this line as an invitation; it is
+	 * removed rather than left in a boot-medium driver (#1824).  Use
+	 * scripts/bench/aen/erase-storage.sh when a partition really must be wiped.
+	 */
 	return 0;
 }
 static struct mram_flash_data data;

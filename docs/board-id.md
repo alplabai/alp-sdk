@@ -35,19 +35,30 @@ struct definition lives in `<alp/hw_info.h>`:
 
 ```c
 typedef struct {
-    uint32_t magic;             /* "ALPH" -- 0x41 0x4C 0x50 0x48 */
-    uint16_t schema_version;    /* currently 1 */
+    uint32_t magic;             /* "ALPH" -- 0x414C5048, little-endian */
+    uint32_t schema_version;    /* currently 1 */
     char     family[16];        /* e.g. "v2n", "v2n-m1", "aen" */
     char     sku[24];           /* e.g. "E1M-V2N101"            */
     char     hw_rev[8];         /* e.g. "r1"                    */
-    char     serial[32];        /* free-form, vendor-defined    */
+    char     serial[24];        /* factory-assigned             */
     uint16_t mfg_year;
     uint8_t  mfg_month;
     uint8_t  mfg_day;
-    uint8_t  reserved[__];
+    uint8_t  reserved[40];
     uint32_t crc32;             /* ISO-3309 over offset 0..crc32 */
-} alp_hw_info_eeprom_t;
+} alp_hw_info_eeprom_t;          /* 128 bytes total */
 ```
+
+The field widths above are plain integers, not the header's
+`ALP_HW_INFO_*_LEN` macro names, because this doc's audience is
+decoding raw manifest bytes off an EEPROM, not compiling C -- but the
+numbers themselves are transcribed straight from those macros, not
+independently chosen: `ALP_HW_INFO_FAMILY_LEN`, `ALP_HW_INFO_SKU_LEN`,
+`ALP_HW_INFO_HW_REV_LEN`, and `ALP_HW_INFO_SERIAL_LEN`.
+`scripts/check_board_id_doc_parity.py` resolves those macros and
+re-checks the typedef block above against them on every PR; it does
+not parse this paragraph, which is unenforced prose -- the typedef
+block above is the one the gate actually holds in sync.
 
 The CRC32 polynomial matches Python's `zlib.crc32` (poly
 `0xEDB88320`, init `0xFFFFFFFF`, xor-out `0xFFFFFFFF`) so the
@@ -60,25 +71,30 @@ runtime reader cannot disagree.
 production tool                          on-module EEPROM
 ─────────────────                        ────────────────
 $ python scripts/program_eeprom.py \
-      --bus /dev/i2c-N \
-      --addr 0x50 \
-      --family v2n \
-      --sku E1M-V2N101 \
-      --hw-rev r1 \
+      --board-yaml board.yaml \
       --serial ALP-V2N101-26W19-00042 \
-      --mfg-date 2026-05-09
+      --mfg-date 2026-05-09 \
+      --output build/eeprom-manifest.bin
         │
+        ├── read som.sku (+ hw_rev) from board.yaml
+        ├── resolve family from the SKU's metadata/e1m_modules preset
         ├── pack 128 bytes per <alp/hw_info.h>
         ├── append zlib.crc32 over offset 0..(crc32-1)
-        └── i2c write to offset 0
+        └── write the 128-byte blob to --output
                                           ┌──────────────┐
                                           │ offset 0:    │
                                           │  ALPH..CRC32 │
                                           └──────────────┘
+                                          A separate production-test
+                                          fixture writes --output's
+                                          bytes to the EEPROM over
+                                          I²C -- program_eeprom.py
+                                          itself never touches hardware.
 ```
 
-The maintainer runs this script during board assembly QC.  Failed
-boards (CRC mismatch on read-back) are quarantined for rework.
+The maintainer runs this script during board assembly QC, then the
+test fixture writes its output to the module.  Failed boards (CRC
+mismatch on read-back) are quarantined for rework.
 
 ## Runtime read flow
 
@@ -90,7 +106,8 @@ boards (CRC mismatch on read-back) are quarantined for rework.
                                                     │ I2C read
                                                     ▼
 alp_hw_info_read(out)
-   ├── eeprom_24c128_init(...) on ALP_E1M_I2C0 (V2N) / Alif LPI2C (AEN)
+   ├── eeprom_24c128_init(...) on ALP_E1M_I2C0 (V2N) / SoC I2C2,
+   │     DesignWare i2c_dw (AEN -- bridge/DNP-selected, NOT LPI2C0)
    ├── eeprom_24c128_read(0, &manifest, 128)
    ├── verify manifest.magic == "ALPH"
    ├── verify manifest.schema_version == 1

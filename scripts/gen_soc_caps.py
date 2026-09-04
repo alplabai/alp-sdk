@@ -51,6 +51,22 @@ CAPS: list[tuple[str, callable]] = [
         lambda p: (p.get("i2c", 0) or 0) + (p.get("i2c_lp", 0) or 0)),
     ("I3C_COUNT",
         lambda p: (p.get("i3c", 0) or 0) + (p.get("i3c_lp", 0) or 0)),
+    # SPI and UART stay EXACT on purpose (#1304 asked for the per-field
+    # judgement to be written down rather than left to the next reader).
+    #
+    # These are `alp_spi_open()` / `alp_uart_open()` ADDRESSABLE-INSTANCE
+    # counts, not "does the part have anything SPI-shaped" predicates, and
+    # `src/backends/**` bounds-check channel ids against them. The nearby keys
+    # a prefix sum would swallow are NOT addressable through those APIs:
+    #
+    #   * `qspi` (deepx:dx:m1, 1) is a memory-mapped execute-in-place flash
+    #     controller, reached as storage, never as an `alp_spi_open()` bus.
+    #   * `scif` (renesas:rzv2n:n44, 1) is the Renesas boot/debug serial
+    #     interface; the 10 `uart` instances are the addressable ones.
+    #
+    # Counting either would let a caller open an id that no backend can
+    # serve -- the mirror image of the zero-count bug fixed above, and worse,
+    # because it fails at runtime rather than at build time.
     ("SPI_COUNT",
         lambda p: (p.get("spi", 0) or 0) + (p.get("spi_lp", 0) or 0)),
     ("UART_COUNT",
@@ -85,18 +101,53 @@ CAPS: list[tuple[str, callable]] = [
         lambda p: p.get("watchdog", 0) or 0),
     ("QENC_COUNT",
         lambda p: p.get("encoder_quadrature", 0) or 0),
+    # Every `timer*` instance key, however the vendor spells the family
+    # (#1304).  Exact-key matching read `timer_32bit` + `timer_lp` only, so a
+    # part naming its families differently counted ZERO and the derived
+    # `ALP_CAP_HW_TIMER` came out FALSE on silicon that has timers:
+    # `renesas:rzv2n:n44` declares `timer_32bit_gpt` 16 + `timer_32bit_cmtw` 8
+    # + `timer_32bit_gtm` 8 and emitted 0; `deepx:dx:m1` declares
+    # `timer_general` 3 and emitted 0; the three Alif parts carrying
+    # `timer_lp_32bit` 3 (e4/e6/e8) emitted 16 instead of 19.  Same defect
+    # class as #1240's `ethernet_1g`, one field over.
+    #
+    # Prefix-summing is what `gen_support_matrix.py` already does for the same
+    # metadata (`_has_prefix(s, "timer_")`) -- two generators over one metadata
+    # tree that answered differently.  #1304 also asks for a gate that fails
+    # when the two disagree; that is NOT in this change and #1304 stays open
+    # for it.  Until it exists, a new vendor key spelling can split them again.
     ("TIMER_COUNT",
-        lambda p: (p.get("timer_32bit", 0) or 0) +
-                  (p.get("timer_lp", 0) or 0)),
+        lambda p: sum(int(v) for k, v in p.items()
+                      if k.startswith("timer") and isinstance(v, int))),
     ("PWM_COUNT",
-        # No SoC metadata declares "pwm" directly; PWM channels come
-        # off general-purpose timers.  Use timer_32bit as the upper
-        # bound until we get a more specific field.
+        # DELIBERATELY exact, NOT prefix-summed like TIMER_COUNT above.
+        #
+        # PWM channels come off general-purpose timers, so this falls back to
+        # `timer_32bit` where the part has no explicit `pwm` key.  Prefix-
+        # summing here would be actively wrong twice over:
+        #
+        #   * On `renesas:rzv2n:n44` it would take PWM_COUNT from 0 to 32, but
+        #     ADR 0024 records that V2N/V2M PWM is served EXCLUSIVELY by the
+        #     GD32 bridge -- no native leg, because no SoC pin reaches an
+        #     E1M-standard PWM pad.  Zero is the correct native count there.
+        #   * A v0.16.0 sweep tried the opposite simplification,
+        #     `p.get("pwm", 0)`, which took PWM_COUNT from 12 to 0 on all six
+        #     `alif:ensemble:e3..e8` parts.  `src/backends/pwm/zephyr_drv.c`
+        #     refuses `channel_id >= ALP_SOC_PWM_COUNT`, so that would have
+        #     made `alp_pwm_open()` return ALP_ERR_OUT_OF_RANGE for every
+        #     channel on every E1M-AEN SKU -- on silicon where PWM is bench
+        #     PASS (docs/aen-bench-bringup.md) and GA (docs/os-support-matrix.md).
+        #
+        # Leave it exact until a part declares real PWM instances (#1304).
         lambda p: p.get("pwm", p.get("timer_32bit", 0) or 0)),
     ("ETHERNET_COUNT",
-        lambda p: p.get("ethernet", 0) or 0),
+        lambda p: (p.get("ethernet", 0) or 0) + (p.get("ethernet_1g", 0) or 0)),
+    # Every `usb*` controller key (#1304).  `usb_2` + `usb_3` missed
+    # `renesas:rzv2n:n44`'s `usb_3_2_gen2` (counted 1, has 2) and
+    # `deepx:dx:m1`'s `usb_2_otg` (counted 0, has 1).
     ("USB_COUNT",
-        lambda p: (p.get("usb_2", 0) or 0) + (p.get("usb_3", 0) or 0)),
+        lambda p: sum(int(v) for k, v in p.items()
+                      if k.startswith("usb") and isinstance(v, int))),
     ("MIPI_CSI_COUNT",
         lambda p: p.get("mipi_csi2", 0) or 0),
     ("MIPI_DSI_COUNT",
@@ -442,6 +493,12 @@ def emit(meta_dir: Path = META_DIR, som_dir: Path = SOM_DIR) -> str:
     for path in sorted(meta_dir.rglob("*.json")):
         soc = json.loads(path.read_text(encoding="utf-8"))
         ref = soc["ref"]
+        # 0 on every real SoC today, deliberately -- this is an
+        # integration/partition decision, not a datasheet constant any
+        # vendor publishes (issue #1731 investigation).  Do not "fix" this
+        # by filling in a plausible-looking number here; see
+        # metadata/schemas/soc-spec-v1.schema.json's field description and
+        # src/backends/inference/alp_model_select.c's _fits().
         arena_kib = int(soc.get("inference_arena_sram_kib", 0))
         socs.append((ref, kconfig_token(ref), extract_caps(soc), extract_bool_caps(soc),
                      arena_kib, extract_unverified_peripherals(soc)))
@@ -539,11 +596,17 @@ def _clang_format_exe() -> str:
     """
     exe = shutil.which("clang-format-22") or shutil.which("clang-format")
     if exe is None:
-        raise SystemExit(
+        # Exit 99, not the default 1: this is a missing-tool refusal, not
+        # a generator failure, and test-all.sh's stage_generated_files
+        # maps 99 to SKIP (same contract as every other prerequisite
+        # check in that script) rather than FAIL (alp-sdk#1221).
+        print(
             "error: clang-format not found on PATH; cannot format the "
             "generated SoC-caps files to match the repo .clang-format "
-            "(install clang-format==22.* -- see docs/testing.md)"
+            "(install clang-format==22.* -- see docs/testing.md)",
+            file=sys.stderr,
         )
+        raise SystemExit(99)
     return exe
 
 

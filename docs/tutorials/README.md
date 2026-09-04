@@ -9,8 +9,8 @@ and what to change to adapt it to their board.
 
 Per the [`VERSIONS.md`](../../VERSIONS.md) v1.0 acceptance bar:
 "Tutorials per library."  Curated set below; the rest of the
-61 examples are reference material with their own per-directory
-READMEs.
+100 example projects (`git ls-files 'examples/**/board.yaml' | wc -l`)
+are reference material, most with their own per-directory READMEs.
 
 ## Hand-picked tutorials
 

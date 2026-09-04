@@ -1,6 +1,8 @@
 # Block physical data layer — carrier netlist + BOM enablement
 
-**Status:** design approved 2026-07-05
+**Status:** **Implemented.** `metadata/blocks/` + `metadata/schemas/block-v1.schema.json`
+exist; `scripts/alp_project.py --emit carrier-netlist` emits the netlist/BOM
+handoff (`_emit_carrier_netlist`, wired at the `--emit` dispatch).
 **Issue:** alplabai/alp-studio#65 (sibling of #35)
 **Repo:** alp-sdk (public); detail-rich mirror in alp-sdk-internal
 

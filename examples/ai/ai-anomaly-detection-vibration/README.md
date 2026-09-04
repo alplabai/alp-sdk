@@ -2,7 +2,7 @@
 
 > ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on
 > `native_sim/native/64` + cross-compiles to
-> `ensemble_e8_dk/ae402fa0e5597le0/rtss_hp`.  HiL bring-up with a
+> `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`.  HiL bring-up with a
 > real motor / pump and a customer-trained model is v0.6 work.
 
 Predictive-maintenance edge-AI on the E1M-AEN module: read a
@@ -39,7 +39,7 @@ Three customer questions get one answer:
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/ai/ai-anomaly-detection-vibration
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/ai-anomaly-detection-vibration
 west flash
 ```
 

@@ -80,7 +80,7 @@ bytes.
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/camera-vision/ai-camera-viewer
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/camera-vision/ai-camera-viewer
 west flash
 ```
 

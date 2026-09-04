@@ -47,11 +47,11 @@ def _fixture_ws(tmp_path):
 def test_build_lock_validates_and_is_deterministic(tmp_path):
     import alp_lock
     ws = _fixture_ws(tmp_path)
-    lock1 = alp_lock.build_lock(ws, rev_resolver=lambda r: "deadbeef")
-    lock2 = alp_lock.build_lock(ws, rev_resolver=lambda r: "deadbeef")
+    lock1 = alp_lock.build_lock(ws)
+    lock2 = alp_lock.build_lock(ws)
     jsonschema.validate(lock1, json.loads(SCHEMA.read_text()))
     assert lock1 == lock2
-    assert lock1["sdk"] == {"version": "9.9.9", "revision": "deadbeef"}
+    assert lock1["sdk"] == {"version": "9.9.9"}   # no `revision` (#1615)
     # sorted by name
     assert [p["name"] for p in lock1["west"]["projects"]] == ["cmsis", "hal_alif"]
     assert lock1["west"]["groupFilter"] == ["-optional"]
@@ -79,13 +79,13 @@ def test_collectors_route_leaves_through_guard(tmp_path):
     (ws / "metadata" / "libraries" / "aws-iot.yaml").write_text(
         "schema_version: 1\nname: aws-iot\nversion: v3.1.5\nlicense: /etc/secret\n")
     with pytest.raises(alp_lock.LockError):
-        alp_lock.build_lock(ws, rev_resolver=lambda r: "x")
+        alp_lock.build_lock(ws)
     # poison a west group
     ws2 = _fixture_ws(tmp_path / "b")
     (ws2 / "west.yml").write_text(
         "manifest:\n  projects:\n    - name: p\n      revision: r\n      groups: [/abs]\n")
     with pytest.raises(alp_lock.LockError):
-        alp_lock.build_lock(ws2, rev_resolver=lambda r: "x")
+        alp_lock.build_lock(ws2)
 
 
 def test_flatten_duplicate_names_do_not_mask_drift(tmp_path):
@@ -104,29 +104,51 @@ def test_flatten_duplicate_names_do_not_mask_drift(tmp_path):
 def test_verify_lock_detects_drift(tmp_path):
     import alp_lock
     ws = _fixture_ws(tmp_path)
-    locked = alp_lock.build_lock(ws, rev_resolver=lambda r: "v1")
-    assert alp_lock.verify_lock(locked, ws, rev_resolver=lambda r: "v1") == []
+    locked = alp_lock.build_lock(ws)
+    assert alp_lock.verify_lock(locked, ws) == []
     # mutate a west revision on disk
     (ws / "west.yml").write_text(
         (ws / "west.yml").read_text().replace("abc123", "9999999"))
-    drifts = alp_lock.verify_lock(locked, ws, rev_resolver=lambda r: "v1")
+    drifts = alp_lock.verify_lock(locked, ws)
     assert any(d.path == "west.projects[hal_alif].revision"
                and d.locked == "abc123" and d.actual == "9999999" for d in drifts)
 
 
-def test_verify_lock_ignores_sdk_revision(tmp_path):
-    """sdk.revision is provenance, not a frozen input: a moved HEAD alone is
-    not drift (else the SDK's own committed alp.lock would fail --check on
-    every subsequent commit). Real input drift still fails."""
+def test_build_lock_omits_sdk_revision(tmp_path):
+    """#1615: `sdk.revision` is no longer emitted, and the lock is byte-stable
+    across regenerations of an unchanged tree.
+
+    It recorded the HEAD of the repo the lock was generated in, so in alp-sdk's
+    own tree it changed on every commit -- which conflicted every concurrent PR
+    on a file whose two sides never disagreed -- while being stale the instant
+    it landed. The schema still ALLOWS the key (see the companion test), it is
+    just not written."""
     import alp_lock
     ws = _fixture_ws(tmp_path)
-    locked = alp_lock.build_lock(ws, rev_resolver=lambda r: "old_head")
-    # Only the SDK HEAD moved -> no drift.
-    assert alp_lock.verify_lock(locked, ws, rev_resolver=lambda r: "new_head") == []
-    # HEAD moved AND a real input drifted -> only the real input is reported.
+    lock = alp_lock.build_lock(ws)
+    assert "revision" not in lock["sdk"]
+    jsonschema.validate(lock, json.loads(SCHEMA.read_text()))
+    # The whole point: regenerating over an unchanged tree yields the identical
+    # document, so nothing churns between commits.
+    assert alp_lock.build_lock(ws) == lock
+
+
+def test_verify_lock_accepts_a_pre_1615_lock_carrying_sdk_revision(tmp_path):
+    """A lock generated BEFORE #1615 still verifies clean against a build that
+    omits the field -- `sdk.revision` stays in `_PROVENANCE_KEYS` precisely so
+    dropping it is not itself reported as drift. Real input drift still fails."""
+    import alp_lock
+    ws = _fixture_ws(tmp_path)
+    locked = alp_lock.build_lock(ws)
+    # Simulate the old generator: re-add the field the way it used to be written.
+    locked["sdk"]["revision"] = "old_head"
+    jsonschema.validate(locked, json.loads(SCHEMA.read_text()))
+    assert alp_lock.verify_lock(locked, ws) == []
+    # ...and a real input drifting is still reported, with the retired field
+    # neither masking it nor appearing alongside it.
     (ws / "west.yml").write_text(
         (ws / "west.yml").read_text().replace("abc123", "9999999"))
-    drifts = alp_lock.verify_lock(locked, ws, rev_resolver=lambda r: "new_head")
+    drifts = alp_lock.verify_lock(locked, ws)
     assert [d.path for d in drifts] == ["west.projects[hal_alif].revision"]
 
 
@@ -139,21 +161,68 @@ def _run_cli(ws, *args):
                     "--workspace", str(ws), *args],
                    capture_output=True, text=True, env=env)
 
-def test_cli_writes_then_check_passes(tmp_path):
+def test_cli_write_writes_a_schema_valid_lock_file(tmp_path):
+    """#1576 review: the name promises schema validity, so assert it.
+
+    Previously this checked only rc==0 and is_file(), which would still
+    pass if the writer emitted a structurally invalid lock -- exactly the
+    regression the plain write path can introduce now that `--check` no
+    longer diffs against a committed copy.
+    """
     ws = _fixture_ws(tmp_path)
     r = _run_cli(ws)
     assert r.returncode == 0, r.stderr
-    assert (ws / "alp.lock").is_file()
-    r2 = _run_cli(ws, "--check")
-    assert r2.returncode == 0, r2.stdout + r2.stderr
+    written = ws / "alp.lock"
+    assert written.is_file()
+    jsonschema.validate(json.loads(written.read_text()), json.loads(SCHEMA.read_text()))
 
-def test_cli_check_fails_on_drift(tmp_path):
+
+def test_cli_check_passes_with_no_lock_file_on_disk(tmp_path):
+    """#1576: `--check` no longer diffs against a committed alp.lock -- it
+    generates one in memory and schema-validates it, so it must pass on a
+    workspace that has never written one."""
     ws = _fixture_ws(tmp_path)
-    assert _run_cli(ws).returncode == 0
-    (ws / "west.yml").write_text((ws / "west.yml").read_text().replace("abc123", "9999999"))
+    assert not (ws / "alp.lock").exists()
+    r = _run_cli(ws, "--check")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not (ws / "alp.lock").exists()  # --check never writes
+
+
+def test_cli_check_fails_on_schema_invalid_lock(tmp_path, monkeypatch):
+    """`--check`'s jsonschema.ValidationError branch has no other coverage:
+    every other --check test exercises either the happy path or the
+    `_reject_local` LockError guard, never a lock that BUILDS successfully
+    but is schema-invalid (e.g. a generator regression that corrupts a
+    digest). Monkeypatch build_lock to return one, in-process (not via the
+    `_run_cli` subprocess -- there is no other way to hand the CLI a
+    malformed-but-buildable lock)."""
+    import importlib
+    import argparse
+    import alp_lock
+    cli = importlib.import_module("west_commands.alp_lock")
+    ws = _fixture_ws(tmp_path)
+    real_build_lock = alp_lock.build_lock  # cli.alp_lock IS this same module object
+
+    def _malformed(root, board=None):
+        lock = real_build_lock(root, board)
+        lock["digests"]["metadata"] = "not-a-sha256-digest"  # violates the schema pattern
+        return lock
+
+    monkeypatch.setattr(cli.alp_lock, "build_lock", _malformed)
+    args = argparse.Namespace(check=True, workspace=str(ws), board=None)
+    assert cli.run(args) == 1
+
+
+def test_cli_check_fails_on_local_path_leak(tmp_path):
+    """The generator's own guard (`_reject_local`) is what `--check` now
+    relies on to catch a broken/misconfigured input -- prove it still fires
+    through the CLI path, not just the library call."""
+    ws = _fixture_ws(tmp_path)
+    (ws / "metadata" / "libraries" / "aws-iot.yaml").write_text(
+        "schema_version: 1\nname: aws-iot\nversion: v3.1.5\nlicense: /etc/secret\n")
     r = _run_cli(ws, "--check")
     assert r.returncode == 1
-    assert "west.projects[hal_alif].revision" in (r.stdout + r.stderr)
+    assert "refusing to lock a local" in (r.stdout + r.stderr)
 
 
 def test_dir_digest_orders_by_posix_parts(tmp_path):

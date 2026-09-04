@@ -6,6 +6,129 @@ correction, and the item-2 injection-set / dtc-gperf corrections.
 Date: 2026-07-25
 Deciders: alpCaner
 
+## Amendment (2026-08-26 — the dtc/gperf-consumer citation named a retired file)
+
+The dtc/gperf open-evidence Amendment below (2026-07-26) names its
+consumers as "`scripts/alp_cli/doctor.py`'s `_check_dtc` / `_check_gperf`
+hints and `metadata/bootstrap.json`'s `manualInstallHints.windows.note`."
+`scripts/alp_cli/doctor.py` is gone — alp-sdk#1367/#1368 deleted it along
+with the rest of the `alp_cli` command-line wrappers (ADR 0020's Amendment
+item 8). `metadata/bootstrap.json`'s `manualInstallHints.windows.note`
+still carries the corrected wording and is unaffected. The host-tool check
+itself is now `tan doctor`'s job — a generic host-tools presence check
+(`git`/`cmake`/`ninja`/`dtc`/`gperf`/`vendorToolchain`/...,
+`python/tan/commands/doctor_cmd.py` in `tan-cli`), not a `dtc`/`gperf`-named
+function; this ADR's earlier text should not be read as pinning specific
+function names in the live tool.
+
+## Amendment (2026-08-26 — both 2026-08-07 blockers cleared at tan-cli v0.6.0-rc1)
+
+Corrects the 2026-08-07 Amendment's "Net effect" paragraph: both halves of
+the blocker it named are now closed, so the Lane-1 P1 env-injection half is
+no longer resolver-blocked.
+
+- **The resolver landed.** `python/tan/commands/build/toolchain.py`'s
+  `resolve_toolchain_root()` is the Python port of
+  `crate::toolchain::resolve_toolchain_root` (tan-cli#547) and is wired at
+  `python/tan/commands/build_cmd.py:1497` as `toolchain_root=toolchain.root`.
+  No live call site in the shipped `python/tan/` package still passes
+  `toolchain_root=None`; the only two occurrences of that literal left in
+  `python/tan/` are prose in `build/toolchain.py`'s own module docstring
+  and `doctor_cmd.py` narrating the old, now-closed state. (`python/tests/`
+  carries the other 28 of the tree's 30 occurrences at `v0.6.0-rc1`,
+  several as live call sites, e.g. `test_build_token_substitution.py:38,60,80`
+  and `test_plan_tokens.py:53` — expected, since those tests exercise the
+  pre-resolver default explicitly; this claim is scoped to the shipped
+  package, not the test suite.)
+- **The `--materialise` demotion silence is also closed**, by tan-cli#565:
+  `_demoted_artefact_issues()` (`build_cmd.py:1406`) reports a demoted
+  artefact as an `Issue` in the envelope when `mode == _MODE_MATERIALISE`
+  (`build_cmd.py:1545-1549`), instead of the silent, policy-blind drop the
+  2026-08-07 Amendment's repro described.
+- **Shipped in tan-cli `v0.6.0-rc1`** (tagged 2026-08-14; `TAN_VERSION` at
+  `python/tan/version.py:49`), a real, existing tag.
+
+**Net effect on this ADR's Lane-1 P1 env-injection half.** No longer
+resolver-blocked or silence-blocked. Whether to move this ADR off
+`Proposed` is a decision on its remaining merits, not on either blocker
+named above.
+
+## Amendment (2026-08-07 — a substitution-set token existing is not the same as it resolving; the Python executor line still hardcodes `toolchain_root=None`)
+
+Corrects the 2026-07-26 "drop `-DCMAKE_MAKE_PROGRAM`..." Amendment's read of
+tan-cli#86 (merged the same day) as settling this landing site. It settled
+the schema-vs-substitution-set question — `${TOOLCHAIN_ROOT}` is no longer an
+*unknown* token — but not the resolution question, and the two are different
+blockers.
+
+- **What tan-cli#86 actually ported.** Its files —
+  `crates/tan-cli/src/toolchain.rs`,
+  `crates/tan-cli/src/commands/build/token_substitution.rs`,
+  `crates/tan-cli/src/main.rs`, `crates/tan-cli/src/commands/doctor.rs`,
+  `crates/tan-core/src/plan_tokens.rs` — sit entirely under `crates/`,
+  tan-cli's FROZEN Rust oracle, kept only as the release-contract reference
+  now that the shipping `tan` (from `v0.5.0-rc1`) is the Python program under
+  `python/tan/`. The oracle genuinely resolves a toolchain root end-to-end —
+  proven by running it (tan-cli#505's evidence block): with
+  `ZEPHYR_SDK_INSTALL_DIR` unset it demotes correctly, and on a host where the
+  SDK is actually installed it resolves the real path and no demotion
+  happens at all.
+- **The shipping Python line only got half of it.**
+  `python/tan/commands/build/token_substitution.py` recognises
+  `${TOOLCHAIN_ROOT}` as a known token name (`:164`), so a plan naming it no
+  longer hard-fails with an unknown-token `PlanTokenError` — that half of the
+  port landed. The *value* feeding it never did:
+  `python/tan/commands/build_cmd.py:1173-1178` (live `dev`,
+  `433046c558e0fe0ea55d5f354ee248d413b81be1`, 2026-08-07) reads
+
+  ```python
+  # NOT YET PORTED: `crate::toolchain::resolve_toolchain_root`. Left
+  # unresolved rather than guessed -- resolution is lazy, so a plan
+  # that never names ${TOOLCHAIN_ROOT} (every SDK plan today) is
+  # unaffected, and one that does is demoted per its own
+  # executionPolicy instead of built against the host root.
+  toolchain_root=None,
+  ```
+
+  so on the Python executor line every host demotes every slice naming
+  `${TOOLCHAIN_ROOT}`, unconditionally — not "when the host has no
+  detectable toolchain," which is what the oracle's lazy design and this
+  ADR's own wording both imply.
+- **The demotion is not the benign skip it sounds like on `--materialise`.**
+  On `--execute` it correctly routes through `executionPolicy.missingTool`
+  (default skip), the same seam the oracle uses. On `--materialise`,
+  `build_cmd.py`'s `_MODE_MATERIALISE` branch binds the `demotions` return
+  value and never reads it (tan-cli#505 item 3, measured repro): a demoted
+  slice's `configArtefacts` are silently absent from the envelope's
+  `written` list, `issues: []`, exit 0, `ok: true` — byte-identical whether
+  `executionPolicy.missingTool` is `"skip"` or `"fail"`, i.e. the policy is
+  not consulted on this path at all. The repro's own stated consequence: "A
+  CI step that materialises then runs `west build` for that core gets
+  default Kconfig instead of the project's, i.e. wrong firmware, with no
+  signal on either side." That is a data-loss-shaped failure for a
+  consumer, not a skipped build.
+- **Net effect on this ADR's Lane-1 P1 env-injection half.** Still correctly
+  not landed. Not blocked by a closed schema (unchanged: `slices[].env` /
+  `slices[].toolchain` stay `additionalProperties: false`,
+  `slices[].command.args` stays open) and no longer blocked by an unknown
+  token on either the oracle or the Python line's *parser*. It is blocked by
+  the Python executor line's *resolver* — `build_cmd.py`'s
+  `toolchain_root=None` — which has no tracking issue of its own yet;
+  [alp-sdk#1286](https://github.com/alplabai/alp-sdk/issues/1286) records
+  this from the alp-sdk side.
+
+## Amendment (2026-08-03 — Python Tan owns the active host checks)
+
+The provisioning policy is unchanged, but exact Tan implementation paths in
+the historical body now refer to the frozen v0.4.1 Rust oracle. The active
+Python consumers are `python/tan/commands/doctor_cmd.py` (including
+`ZEPHYR_SDK_INSTALL_VERSION` and the effective Python-floor checks) and
+`python/tan/commands/bootstrap_cmd.py` (including `WORKSPACE_BLOCKING`). Keep
+their tan-cli tests in parity with alp-sdk's `metadata/toolchains.json` and
+`metadata/bootstrap.json` when either contract changes. The active structured
+spelling is `tan doctor --format json`; `tan doctor --json` in the historical
+body below names the superseded v0.4 surface.
+
 ## Amendment (2026-07-26 — answer the Arm GNU Toolchain open-evidence question)
 
 "Open evidence"'s second bullet below asks whether the Arm GNU Toolchain is
@@ -19,7 +142,7 @@ GD32-only scoping:
   the E1M-X V2N / V2N-M1 GD32 bridge firmware (`docs/gd32-bridge.md`,
   `docs/bring-up-v2n.md`, `docs/tutorials/07-recovering-a-bricked-bridge.md`);
   building the CC3501E bridge firmware's silicon-free stub target
-  (`firmware/cc3501e/README.md`, `firmware/cc3501e/toolchain/arm-none-eabi.cmake`
+  (`cc3501e-bridge-firmware:README.md`, `cc3501e-bridge-firmware:toolchain/arm-none-eabi.cmake`
   -- the CC3501E's *production* image builds with TI `ticlang`, not this
   toolchain); and hand-written bare-metal firmware targeting a real
   M-class core (`ALP_OS=baremetal`, no Zephyr).
@@ -453,6 +576,7 @@ Bad / costs:
 
 - [ADR 0012](0012-cross-platform-developer-host.md) — cross-platform developer
   host; Linux required only for Yocto.  This ADR automates what 0012 documented.
-- [ADR 0020](0020-sdk-owns-build-execution.md) — the SDK plans, tan executes.
+- [ADR 0020](0020-sdk-owns-build-execution.md) — Python Tan owns the normal
+  relocated planner and executor; alp-sdk retains the reference producer.
 - [ADR 0010](0010-heterogeneous-os-orchestration.md) — why Lane 2 is Linux-only.
 - `docs/cross-platform-setup.md` — the manual per-OS steps this replaces.

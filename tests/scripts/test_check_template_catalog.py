@@ -111,6 +111,59 @@ def test_dangling_testcase_yaml_rejected(tmp_path):
     assert "does not exist" in proc.stdout
 
 
+def test_cores_dir_drift_rejected(tmp_path):
+    """issue #1275: a record's `cores` field duplicates its canonical
+    example's own board.yaml `cores:` mapping -- a stale `dir` must fail
+    the gate, not silently pass."""
+    doc = copy.deepcopy(_catalog())
+    t = next(t for t in doc["templates"] if t["id"] == "minimal")
+    t["cores"][0]["dir"] = "./bogus"
+    p = _write(tmp_path, doc)
+    proc = _run("--catalog", str(p))
+    assert proc.returncode != 0
+    assert "drift" in proc.stdout
+
+
+def test_cores_missing_entry_rejected(tmp_path):
+    """Dropping a declared core (multicore-mailbox's board.yaml
+    declares BOTH m55_hp and m55_he) must fail, not pass with a
+    partial map."""
+    doc = copy.deepcopy(_catalog())
+    t = next(t for t in doc["templates"] if t["id"] == "multicore-mailbox")
+    t["cores"] = [c for c in t["cores"] if c["id"] != "m55_he"]
+    p = _write(tmp_path, doc)
+    proc = _run("--catalog", str(p))
+    assert proc.returncode != 0
+    assert "cores is missing" in proc.stdout
+
+
+def test_cores_os_drift_rejected(tmp_path):
+    """A `cores` entry's `os` disagreeing with the example's own
+    board.yaml EFFECTIVE resolved os (issue #1275) must fail too --
+    the dir/missing/extra shapes above cover the other three ways this
+    same equality check can trip, but not the `os` direction."""
+    doc = copy.deepcopy(_catalog())
+    t = next(t for t in doc["templates"] if t["id"] == "minimal")
+    assert t["cores"][0]["os"] == "zephyr"
+    t["cores"][0]["os"] = "baremetal"
+    p = _write(tmp_path, doc)
+    proc = _run("--catalog", str(p))
+    assert proc.returncode != 0
+    assert "drift" in proc.stdout
+
+
+def test_cores_extra_entry_rejected(tmp_path):
+    """A `cores` entry naming a core board.yaml doesn't declare must
+    fail, not pass with a phantom core."""
+    doc = copy.deepcopy(_catalog())
+    t = next(t for t in doc["templates"] if t["id"] == "minimal")
+    t["cores"].append({"id": "m55_he", "dir": "./ghost", "os": "zephyr"})
+    p = _write(tmp_path, doc)
+    proc = _run("--catalog", str(p))
+    assert proc.returncode != 0
+    assert "cores declares" in proc.stdout
+
+
 def test_unreal_library_rejected(tmp_path):
     doc = copy.deepcopy(_catalog())
     doc["templates"][0]["requires"]["libraries"] = ["totally_fake_library"]
@@ -183,6 +236,14 @@ def test_known_gap_example_allowed_as_preview(tmp_path):
         "examples/connectivity/iot-connected-camera/testcase.yaml"]
     t["status"] = "preview"
     t["note"] = "Tracked gap #448 -- example still behaves as a skeleton."
+    # `cores` (issue #1275) must match the swapped-in example's own
+    # board.yaml `cores:` mapping too, or the new drift check rejects
+    # this fixture for an unrelated reason (a stale `cores`, not the
+    # #448 gap this test targets).
+    t["cores"] = [
+        {"id": "a55_cluster", "os": "off"},
+        {"id": "m33_sm", "dir": "./src", "os": "zephyr"},
+    ]
     p = _write(tmp_path, doc)
     proc = _run("--catalog", str(p))
     assert proc.returncode == 0, proc.stdout + proc.stderr

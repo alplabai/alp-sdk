@@ -1,0 +1,160 @@
+# On-module GD32G553 supervisor MCU pin wiring for RZ/V2N (Alp Lab
+# hand-authored source -- not vendor pinout data and not generated; pad
+# <-> signal authority for the RZ/V2N silicon stays in
+# metadata/pinmux/v2n.yaml, itself generated DO-NOT-EDIT output of
+# scripts/gen_pinmux_capability.py -- this file only REFERENCES it, by
+# (silicon_peripheral, silicon_pad), and adds the DT-node-shape facts
+# that table doesn't carry: dt_label, pinctrl group/node/child-node
+# names, alias, per-link enable/disable state, and (for brd_i2c) the
+# GD32 peer I2C address.
+#
+# This is the generation authority scripts/gen_zephyr_board.py's
+# `_v2n_pinctrl_dtsi()` / `_v2n_defconfig()` emitters read to produce the
+# V2N/V2M Zephyr `<board>-pinctrl.dtsi` and `<board>_defconfig` (issue
+# #655, slice 1).  Family-scoped: covers both the `v2n` (E1M-V2N101) and
+# `v2n-m1` (E1M-V2M101) families -- their committed pinctrl.dtsi and
+# _defconfig are byte-identical to each other (verified by diff before
+# this file was authored), the same "one shared-PCB source" pattern
+# renesas-peripheral-map.tsv already uses for the two families.
+#
+# Every pin row and the GD32_SPI.CS0 GPIO chip-select carries an
+# `evidence:` string citing a NON-DERIVATIVE source (the RZ/V2N
+# hardware-manual PFC table, an errata entry, or a silicon/bench
+# finding) -- never a generated file.  `scripts/validate_metadata.py`
+# cross-checks every (silicon_peripheral, silicon_pad) pair below
+# against metadata/pinmux/v2n.yaml: it must resolve to exactly one
+# `owner: "renesas"` row, and where that row carries a `core:` key, the
+# value must be "m33" -- console rows legitimately carry no `core:` key
+# there (see metadata/e1m_modules/v2n/core-ownership.yaml) and this file
+# does not require one either.
+schemaVersion: supervisor-links-v1
+families:
+  - v2n
+  - v2n-m1
+
+supervisor_links:
+  # SCI7 clock-synchronous Simple-SPI to the on-module GD32G553 supervisor.
+  gd32_spi:
+    peripheral: "GD32_SPI"
+    dt_label: sci7
+    alias: alp-spi1
+    pinctrl_group_label: sci7_spi_pins
+    pinctrl_node: sci7_spi
+    pinctrl_child_node: sci7-spi-pinmux
+    status: enabled
+    pins:
+      - silicon_peripheral: "GD32_SPI.MOSI"
+        silicon_pad: "P76"
+        pfc_port: "PORT_07"
+        pfc_pin: 6
+        pfc_func: 1
+        evidence: >-
+          RZ/V2N PFC Table 1.2-3: P76 = TXD7_MOSI7 (func1), P77 =
+          RXD7_MISO7 (func1), P96 = SCK7 (func2); calibrated against the
+          known-good console pin P50 = TXD0 (func1)
+      - silicon_peripheral: "GD32_SPI.MISO"
+        silicon_pad: "P77"
+        pfc_port: "PORT_07"
+        pfc_pin: 7
+        pfc_func: 1
+        evidence: >-
+          RZ/V2N PFC Table 1.2-3: P76 = TXD7_MOSI7 (func1), P77 =
+          RXD7_MISO7 (func1), P96 = SCK7 (func2); calibrated against the
+          known-good console pin P50 = TXD0 (func1)
+      - silicon_peripheral: "GD32_SPI.SCLK"
+        silicon_pad: "P96"
+        pfc_port: "PORT_09"
+        pfc_pin: 6
+        pfc_func: 2
+        evidence: >-
+          RZ/V2N PFC Table 1.2-3: P76 = TXD7_MOSI7 (func1), P77 =
+          RXD7_MISO7 (func1), P96 = SCK7 (func2); calibrated against the
+          known-good console pin P50 = TXD0 (func1). Also
+          docs/errata-e1m-x-v2n.md, "## E3: USB2.0 over-current pins read
+          permanently asserted" section -- the E3 P9.6 hog REGRESSED
+          when the CM33-owned GD32 supervisor SPI took P96/SCK7
+          (2026-06-03)
+    # GD32_SPI.CS0 is deliberately NOT a muxed pin row: master
+    # Simple-SPI has no hardware slave-select, so P97 stays plain GPIO
+    # for per-transaction chip-select framing.  Muxing it would break
+    # the design (see evidence below).
+    gpio_chip_select:
+      silicon_peripheral: "GD32_SPI.CS0"
+      silicon_pad: "P97"
+      gpio_node: gpio9
+      gpio_pin: 7
+      active_low: true
+      evidence: >-
+        metadata/chips/gd32g553.yaml spi.renesas_pads.cs = P97 /
+        gd32_pads.cs = PA8; master Simple-SPI has no hardware
+        slave-select, so P97 stays GPIO for per-transaction framing of
+        the GD32's PA8 CS-EXTI
+
+  # RIIC8 / BRD_I2C management path to the on-module GD32G553.
+  brd_i2c:
+    peripheral: "RIIC8"
+    dt_label: i2c8
+    alias: alp-i2c0
+    pinctrl_group_label: i2c8_pins
+    pinctrl_node: i2c8
+    pinctrl_child_node: i2c8-pinmux
+    status: enabled
+    # CROSS-CHECKED against metadata/chips/gd32g553.yaml
+    # i2c.default_address_7bit -- not an independent authority; see
+    # scripts/validate_metadata.py's supervisor-links cross-check.
+    peer_address_7bit: 0x70
+    pins:
+      - silicon_peripheral: "RIIC8_SDA8"
+        silicon_pad: "P06"
+        pfc_port: "PORT_00"
+        pfc_pin: 6
+        pfc_func: 1
+        evidence: >-
+          metadata/chips/gd32g553.yaml i2c.renesas_pads scl P07 / sda
+          P06, plus
+          meta-alp-sdk/recipes-kernel/linux/linux-renesas/0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-RIIC8-on.patch
+          (silicon-validated 2026-06-03 on E1M-V2M101: Linux
+          clk_disable_unused gating RIIC8 bus-faults the CM33 until
+          power-cycle)
+      - silicon_peripheral: "RIIC8_SCL8"
+        silicon_pad: "P07"
+        pfc_port: "PORT_00"
+        pfc_pin: 7
+        pfc_func: 1
+        evidence: >-
+          metadata/chips/gd32g553.yaml i2c.renesas_pads scl P07 / sda
+          P06, plus
+          meta-alp-sdk/recipes-kernel/linux/linux-renesas/0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-RIIC8-on.patch
+          (silicon-validated 2026-06-03 on E1M-V2M101: Linux
+          clk_disable_unused gating RIIC8 bus-faults the CM33 until
+          power-cycle)
+
+  # SCI_UART0 -- the EVK "Pmod USB-UART", left disabled on this board.
+  console:
+    peripheral: "SCI_UART0"
+    dt_label: sci0
+    pinctrl_group_label: sci0_pins
+    pinctrl_node: sci0
+    pinctrl_child_node: sci0-pinmux
+    status: disabled
+    pins:
+      - silicon_peripheral: "UART0_TXD0"
+        silicon_pad: "P50"
+        pfc_port: "PORT_05"
+        pfc_pin: 0
+        pfc_func: 1
+        evidence: >-
+          RZ/V2N PFC Table 1.2-3: P50 = TXD0 (func1), P51 = RXD0 (func1);
+          sci0 is the EVK "Pmod USB-UART", not wired as a CM33 console on
+          this board -- opening it faults on the floating RX (sci0 eri =
+          NVIC 114 -> Zephyr fatal -> hang before main())
+      - silicon_peripheral: "UART0_RXD0"
+        silicon_pad: "P51"
+        pfc_port: "PORT_05"
+        pfc_pin: 1
+        pfc_func: 1
+        evidence: >-
+          RZ/V2N PFC Table 1.2-3: P50 = TXD0 (func1), P51 = RXD0 (func1);
+          sci0 is the EVK "Pmod USB-UART", not wired as a CM33 console on
+          this board -- opening it faults on the floating RX (sci0 eri =
+          NVIC 114 -> Zephyr fatal -> hang before main())

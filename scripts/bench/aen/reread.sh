@@ -15,6 +15,9 @@ BD="$1"
 SIZE="${2:-0x500}"
 OBJ="$(bench_tool_prefix)" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
+# See ram-run.sh for why the selector is conditional on JLINK_SN.
+JLINK_ARGS=("$JLINK")
+[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 # See ram-run.sh (issue #935): if BUF_SYM is empty, do NOT fold it into BUF --
 # BUF would silently become the bare string "0x" and `mem8 $BUF, $SIZE` would
 # run as `mem8 0x, $SIZE`, printing an EMPTY "RAM console" block
@@ -25,20 +28,36 @@ if [ -z "$BUF_SYM" ]; then
   exit 3
 fi
 BUF=0x$BUF_SYM
+# SAFETY GATE (alp-sdk#813) -- confirm the AEN E8 answered BEFORE the
+# halt+mem8 read below. This bench has two probes sharing OEM serial
+# 603000869, one of them on the GD32 bridge on a DIFFERENT board (V2N-M1);
+# JLinkExe selects by serial only, so JLINK_SN alone cannot prove which
+# board is on the other end -- see bench-env.sh. Read-only connect first;
+# nothing is halted until the DP ID matches.
+cat > /tmp/reread-preflight.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_READ
+connect
+exit
+EOF
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/reread-preflight.jlink \
+  > /tmp/reread-preflight.out 2>&1 || true
+bench_jlink_assert_connected /tmp/reread-preflight.out "re-read preflight" || exit 7
+bench_jlink_assert_aen_dpidr /tmp/reread-preflight.out "re-read preflight" || exit 4
+
+# SIZE is caller-supplied ($2); JLinkExe rejects a single mem8 over 0x10000 and
+# reads NOTHING while the script keeps going -- chunk it (bench_jlink_mem8_chunks).
 {
 	echo connect
 	echo halt
 	bench_jlink_mem8_chunks "$BUF" "$SIZE"
 	echo qc
 } > /tmp/rr.jlink
-# shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
-# "Cannot connect to the probe" can land on either stream -- stderr used to be
-# discarded (2>/dev/null), so a stderr-only failure never tripped the grep
-# below. Merge it in; the awk decoder only matches "<hex addr> = ..." lines so
-# the extra text is harmless.
-$JLINK $(bench_jlink_select) -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript /tmp/rr.jlink > /tmp/rr.out 2>&1 || true
-if grep -qi "Cannot connect to the probe" /tmp/rr.out; then
-	echo "reread: J-Link probe not selected/reachable -- export JLINK_SN (multi-probe host)." >&2
-fi
+"${JLINK_ARGS[@]}" -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript /tmp/rr.jlink 2>/dev/null > /tmp/rr.out || true
+# JLinkExe exits 0 even when it never opened the probe, so `|| true` above
+# hides a total connect failure and the decode below would render it as
+# empty target output (alp-sdk#1318).
+bench_jlink_assert_connected /tmp/rr.out "re-read" || exit 7
 awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/rr.out
 echo; echo "(buf=$BUF)"

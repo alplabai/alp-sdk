@@ -45,7 +45,7 @@ RPi CSI │  (e.g. ARX3A0    │ →  │  (vsi,       │ →  │  inference  
 | v0.1    | skeleton | Compiles under `native_sim/native/64` and on the EVK (`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`, in-tree).  Init flow is real (I²C, OLED, IMU init); camera + Ethos-U inference are stubbed. |
 | v0.2    | target   | Real ARX3A0 (ON Semi MIPI sensor) capture via `<alp/camera.h>`, Vela-compiled MobileNetV2 inference on Ethos-U55-HP, results overlay on OLED. **Acceptance ≥ 10 fps.** |
 
-The full pipeline is the v0.2 [EdgeAI Application Example](../../../VERSIONS.md#v020--richer-blocks--v2n-intro--6-weeks-after-v01)
+The full pipeline is the v0.2 [EdgeAI Application Example](../../../VERSIONS.md#v020--richer-blocks--v2n-intro-6-weeks-after-v01)
 deliverable from the original quarterly roadmap.
 
 ## Layout
@@ -74,9 +74,8 @@ edgeai-vision-aen/
 ## Build (v0.1, host smoke)
 
 ```bash
-ZEPHYR_BASE=~/zephyrproject/zephyr \
-EXTRA_ZEPHYR_MODULES=$(pwd)/../.. \
-west build -b native_sim/native/64 .
+west build -b native_sim/native/64 examples/aen/edgeai-vision-aen \
+    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
 ```
 
 The app prints which v0.1 SDK pieces it successfully initialised
@@ -108,7 +107,7 @@ EEPROM.
 | `<alp/chips/ssd1306.h>`                    | full            | Status overlay.                       |
 | `<alp/chips/lsm6dso.h>`                    | full            | Tilt-aware viewport (v0.2).           |
 | `<alp/blocks/button_led.h>`                | full            | Capture trigger; LED on PWM0 pad as GPIO. |
-| `<alp/camera.h>`                           | header (stub)   | Frame capture — v0.2 wraps Zephyr `video_*`. |
+| `<alp/camera.h>`                           | backend real; no DT node | Frame capture — the generic Zephyr `video_*` backend (`src/backends/camera/zephyr_video.c`) is implemented; this EVK batch has no camera DT node wired (no sensor populated), so `alp_camera_open` still returns NULL here. |
 | `arm_math.h` (CMSIS-DSP, direct include)   | external        | Pre/post-processing (normalisation).  Use CMSIS-DSP directly -- ALP does not re-export it. |
 | `<alp/gui.h>` (LVGL)                       | re-export       | Optional richer overlay in v0.3.      |
 

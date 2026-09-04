@@ -467,10 +467,10 @@ ISP-window race entirely.
 secure-boot verification — always write both consistent blobs.
 
 > **Verified state on *this* Linux bench (alplab-gw, 2026-06-17): flow D WORKS.** The
-> original probe (J-Link PLUS S/N 600107451, old firmware) could not connect with
+> original probe (J-Link PLUS, old firmware) could not connect with
 > `-device AE822FA0E5597LS0_M55_HE` — it only worked with the generic `-device
 > Cortex-M55` (reads/RAM-run). Swapping to a probe on **J-Link V13 firmware (May 2026,
-> matched to DLL V9.50; S/N 603000869)** fixed it: the AE822 profile now connects
+> matched to DLL V9.50)** fixed it: the AE822 profile now connects
 > (`Connecting to J-Link ...O.K.` → `Found Cortex-M55 r1p0`), the built-in MRAM loader
 > programs + verifies the ATOC over SWD (`Verify successful.`, ~0.16 s @ ~200 KB/s), and
 > `RSetType 2` (nRESET pin) re-runs the SE boot ROM so the app boots from MRAM. Bench
@@ -529,9 +529,14 @@ secure-boot verification — always write both consistent blobs.
   `clock-frequency = <100000000>` placeholder on the `utimer*` SoC nodes. The
   count is correct; only the µs↔ticks scale is off. Set the verified value from
   the Alif TRM (do not invent it).
-- **Housekeeping trio (RTC/TMP/OPTIGA)** is on the slave-only **LPI2C0** this rev
-  → Tier-3 (SE-mediated). A next-rev respin moves it to a master-capable I2C
-  (LPI2C0 → I2C0 on P7_0/P7_1).
+- **Housekeeping trio (RTC/TMP/OPTIGA) routing, CORRECTED (#1848).** This entry
+  originally read "is on the slave-only LPI2C0 this rev → Tier-3
+  (SE-mediated); a next-rev respin moves it to a master-capable I2C (LPI2C0 →
+  I2C0 on P7_0/P7_1)." That was wrong: it is already on I2C0 (function C,
+  P7_0/P7_1) on the E1M-AEN801 -- no future respin needed, Tier-1 upstream
+  `i2c_dw` -- per the E1M-AEN-2626-R2 netlist + `ADTS0013` v1.2 Table 3-16.
+  R2-sourced; the bench module on hand is r1, so this still needs an on-unit
+  probe (no R1 netlist is available).
 - **SPI needs the SoC master-mode select set (not just CTRLR0).** The Ensemble
   wraps the DWC_ssi macrocell behind a SoC master/slave select in
   `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`: bit n = SSI*n* master-mode, bit 8+n =
@@ -585,7 +590,7 @@ secure-boot verification — always write both consistent blobs.
 | `west flash` tries to use J-Link | The carrier defaults to the **`alif_flash`** runner (SETOOLS/ISP, now flow A / fallback). J-Link *does* burn MRAM (flow D) with the `AE822FA0E5597LS0_M55_HE` device profile — the loader is built into J-Link V9.46+, no separate pack. |
 | No app output over USB | Expected — only the SE-UART is on USB. Use the RAM console (flow B) or RTT. |
 | RAM console all-zeros | Read the **`ram_console_buf`** symbol (not `ram_console`); re-resolve from `zephyr.map`; ensure `CONFIG_UART_CONSOLE=n`. |
-| J-Link `Could not connect to the target device` (Alif part device) | For **read/attach/RAM-run** use the generic `-device Cortex-M55` (attaches to the live core). For **MRAM flash** (flow D) the `AE822FA0E5597LS0_M55_HE` part device is required — it unlocks the built-in MRAM loader (J-Link V9.46+ DLL, probe on matched V13 firmware); the AE822 profile won't connect on an old-firmware probe (§ Flow D). |
+| J-Link `Could not connect to the target device` (Alif part device) | For **read/attach/RAM-run** use the generic `-device Cortex-M55` (attaches to the live core). For **MRAM flash** (flow D) the `AE822FA0E5597LS0_M55_HE` part device is required — it unlocks the built-in MRAM loader (J-Link V9.46+ DLL) (§ Flow D). |
 | Link error `region FLASH overflowed` on a RAM-run app | The overlay used `zephyr,flash = <&itcm>` — use the path-reference form `&itcm` (else `FLASH_SIZE=0`). |
 | I2C2 probe times out (`-ETIMEDOUT`) | Bus stuck — pads not driving. Add the I2C pinctrl pad config (§3): `input-enable` + `bias-pull-down`; run at 100 kHz. |
 | I2C2 clean NACKs but no device ACKs | The pinctrl is missing **`input-enable`** (REN) so the controller can't sense SDA, or it used `bias-pull-up` (DSC=1) instead of `bias-pull-down` (DSC=2). Match Alif's reference (§3) — then the EEPROM ACKs at 0x50. |

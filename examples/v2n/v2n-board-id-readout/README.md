@@ -44,7 +44,8 @@ bus/address/offset into `system-manifest.yaml`.
 ## See also
 
 * [`docs/board-id.md`](../../../docs/board-id.md) -- full identification
-  flow (EEPROM manifest + planned BOARD_ID ADC cross-check).
+  flow: the on-module EEPROM manifest is the SoM's identity, and a
+  carrier-side BOARD_ID divider is a separate board-only path.
 * [`<alp/hw_info.h>`](../../../include/alp/hw_info.h) -- public API.
 * [`scripts/program_eeprom.py`](../../../scripts/program_eeprom.py) --
   production-test programmer.

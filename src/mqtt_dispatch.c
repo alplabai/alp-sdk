@@ -23,13 +23,13 @@
  * alp_mqtt_loop(), each of which takes a timeout_ms that can block for
  * a genuinely long time (a real broker round-trip / keepalive wait).
  * alp_mqtt_close() drains the pool with
- * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
- * instead of the busy-spin alp_handle_begin_close(): a sleep-poll
- * drain, generalised from rpc_dispatch.c's _rpc_op_enter()/
- * _rpc_begin_close()/_rpc_drain() (GHSA-xhm8), safe to wait on a
- * multi-second (or timeout_ms == forever) op instead of spinning the
- * closer thread.  A racing close() can no longer tear down state while
- * connect()/loop() is in flight.
+ * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c): a
+ * sleep-poll drain (never busy-spins -- issue #1114: unsafe
+ * unconditionally, not just for a long-running op), generalised from
+ * rpc_dispatch.c's _rpc_op_enter()/_rpc_begin_close()/_rpc_drain()
+ * (GHSA-xhm8), safe to wait on a multi-second (or timeout_ms ==
+ * forever) op instead of spinning the closer thread.  A racing close()
+ * can no longer tear down state while connect()/loop() is in flight.
  *
  * @par Issue #756 -- callback self-close inside alp_mqtt_loop()
  * Both the Yocto Mosquitto and Zephyr MQTT backends invoke the
@@ -141,9 +141,8 @@ alp_status_t alp_mqtt_connect(alp_mqtt_t *h, uint32_t timeout_ms)
 {
 	/* Counted via alp_handle_op_enter/leave -- see this file's "Issue
 	 * #629" header comment: connect() can block up to timeout_ms on a
-	 * real broker handshake; alp_mqtt_close() now drains this op with
-	 * the sleep-poll alp_handle_begin_close_blocking() instead of the
-	 * busy-spin alp_handle_begin_close(). */
+	 * real broker handshake; alp_mqtt_close() drains this op with the
+	 * sleep-poll alp_handle_begin_close_blocking(), never a busy-spin. */
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}

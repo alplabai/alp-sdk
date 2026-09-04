@@ -27,15 +27,23 @@ ONLY**:
   `ALP_OK` on success).
 - Name instances with the portable IDs from `<alp/e1m_pinout.h>`
   (`ALP_E1M_I2C0`, `ALP_E1M_PWM3`, `ALP_E1M_GPIO_IO15`, …) or, for E1M-X, the `ALP_E1M_X_*`
-  IDs from `<alp/e1m_x_pinout.h>`. (There is no `ALP_E1M_*` prefix.)
-- **Never include a chip driver in app/example code** — symbols like
-  `gd32g553_*`, `alif_*`, `lsm6dso_*` are **SDK backends and bridge demos**,
-  not application API. Pulling them into an app breaks portability and trips
-  `scripts/check_example_portability.py`.
+  IDs from `<alp/e1m_x_pinout.h>`.
+- **A Ring-1 (cross-family, general/peripheral-agnostic) example never
+  includes a chip driver** — symbols like `gd32g553_*`, `alif_*`, `lsm6dso_*`
+  are SDK backends, not portable API, and pulling one into a Ring-1 example
+  breaks its cross-family build and trips
+  `scripts/check_example_portability.py`. Ring-2 (chip-bound) and Ring-3
+  (SoM-bound) examples are an accepted, intentional category, not
+  portability debt: a chip bring-up demo or single-sensor/single-display
+  tutorial is *supposed* to `#include <alp/chips/<chip>.h>` directly and
+  declare that chip in `board.yaml`'s `chips:` list — that's how the example
+  teaches the specific part. See `docs/portability.md` §4.4 /
+  `examples/README.md` for the customer-facing statement of this contract.
 
 The only board-side names an app references are the C macros generated from
 `board.yaml`'s `e1m_routes:` (e.g. `EVK_PIN_LED_RED`, `I2C_BUS_SENSORS`), each
-of which resolves to an `E1M_*` ID.
+of which resolves to an `ALP_E1M_*` ID (`ALP_E1M_X_*` for an E1M-X board) —
+see `scripts/gen_board_header.py`'s `_c_token()`.
 
 ## The board.yaml → orchestrator flow
 
@@ -54,9 +62,13 @@ Two loaders fan `board.yaml` into per-core slices:
 - `python -m alp_orchestrate --emit {system-manifest,build-plan,ipc-contract-h,dts-reservations,dts-partitions,storage-mounts-c,tfm-sysbuild-conf,kconfig}`
   — the cross-core / system artefacts.
 
-`tan --project <app-dir> build` is the convenience wrapper: it consumes the
-SDK's `--emit build-plan`, materialises the per-slice config, then runs each
-slice's native build command.
+`tan build --project <app-dir>` is the customer wrapper. The current Python
+implementation carries a relocated in-process planner, reads the selected
+alp-sdk checkout's metadata/schemas, materialises the per-slice config, then
+runs each slice's native build command. The SDK's own `--emit build-plan` and
+`--emit system-manifest` remain the inspectable parity/reference producer while
+the port settles; emit them directly when reviewing what a `board.yaml`
+resolves to.
 
 The `--emit` surface is the **machine-readable contract** other tools consume
 (ADR 0014, `docs/adr/0014-build-plan-emit-cli-contract.md`). When you need to
@@ -68,22 +80,22 @@ rather than guessing.
 An agent's loop here is: generate, then run the validators, then fix what they
 report.
 
-- `tan doctor --build` — HW-free build-readiness preflight: checks `west`,
+- `tan doctor` — HW-free build/flash-readiness preflight: checks `west`,
   `cmake`, `ninja`, the pinned Zephyr version, the Zephyr SDK, etc., and
   prints a remediation hint per failing check (`--format json` for machine
   consumption; there's no `--strict`). Run it first on a fresh checkout to
-  find why a build won't work before you build. (Plain `tan doctor`, no
-  `--build`, is a different debug-readiness preflight — see
-  [`docs/cli.md`](docs/cli.md).)
-- `tan validate board.yaml` — the diagnostic-rich `board.yaml` validator
-  (CLI entry `tan`, which forwards to `python -m alp_cli validate`;
-  equivalently `python3 scripts/validate_board_yaml.py`).
-  Try it against a fixture under `tests/fixtures/board_yaml_bad/` to learn the
-  output format. Exit code 1 on a hard validation or consistency failure;
-  warnings return 0.
-- `tan validate board.yaml` / `python -m alp_orchestrate --input board.yaml
-  --emit build-plan` — the same validation as a build pre-flight before any
-  compile work.
+  find why a build won't work before you build. `--build` remains accepted
+  for v0.4 compatibility but no longer changes the check list.
+- `tan validate --offline --board-yaml board.yaml` — Python Tan's bundled
+  structural checks, without resolving an SDK. Without `--offline`, Tan
+  resolves the SDK checkout and spawns its full validator itself (ported in
+  tan-cli#376, shipped in tan v0.6.0). The same validator can also be run
+  directly, without Tan: `python3 scripts/validate_board_yaml.py --input
+  board.yaml` — note the flag is `--input`, not `--board-yaml`. Try it against
+  a fixture under `tests/fixtures/board_yaml_bad/` to learn the output
+  format.
+- `python -m alp_orchestrate --input board.yaml --emit build-plan` — the SDK
+  reference validation/planning path used for parity before compile work.
 - CI gates — `scripts/check_*.py` (e.g. `check_doc_drift.py`,
   `check_example_portability.py`, `check_pin_conflicts.py`,
   `check_system_manifest.py`) plus **twister** for the Zephyr ztest + example
@@ -98,9 +110,12 @@ report.
 - **No legacy compat.** There are no active external customers; delete removed
   code cleanly. No ABI shims, no tombstones, no deprecation aliases. Update
   dependent code (dispatch, backends, examples, tests, docs) in the same change.
-- **Examples are documentation.** Each `examples/*/src/main.c` is a teaching
-  artefact (~50% comments) for hand-written firmware — keep that density; don't
-  strip the explanatory comments.
+- **Examples are documentation.** Each example's `src/main.c` — nearly always
+  nested under a family directory (`examples/<family>/<name>/src/main.c`,
+  e.g. `examples/v2n/v2n-temp-sensor/src/main.c`), not directly under
+  `examples/<name>/src/main.c` — is a teaching artefact (~50% comments) for
+  hand-written firmware — keep that density; don't strip the explanatory
+  comments.
 - **Metadata is single-source.** Every hardware fact has exactly one home under
   `metadata/`. Don't duplicate it into headers, docs, or code — duplicated
   truth is a bug. Downstream files are generated from `metadata/`.

@@ -1,6 +1,11 @@
 # Chip + library ecosystem expansion for the Alp SDK
 
-**Status**: design approved 2026-05-14.  Ready for implementation planning.
+**Status**: **Implemented, goals exceeded.** This design's v1.0 goals were
+30 chips -> 75 by v1.0, 8 libraries -> 25 by v1.0, plus a Tier-2 community
+repo. Measured against the tree: 81 chip drivers under `chips/` (exceeds 75),
+35 curated manifests under `metadata/libraries/*.yaml` (exceeds 25), and
+`docs/contributing-tier-2.md` documents the live `alplabai/alp-sdk-community`
+Tier-2 repo.
 **Cross-refs**: docs/branching-and-merge-policy.md (PR + override flow),
 docs/vendor-partnerships.md (vendor SDK status), docs/v1.0-readiness.md.
 

@@ -41,6 +41,13 @@ KNOWN_MANIFEST_NO_DRIVER = {
     "murata_lbee5pl2dl",
     "murata_lbes0zz2ll",
     "murata_lbes5pl2el",
+    # AEN's on-module Ethernet PHY (#1241). ADR 0023 keeps Ethernet's PHY
+    # read/write out of `<alp/*>` on AEN today -- the bench-proven path
+    # (examples/aen/aen-ethernet-link) reaches the PHY via the upstream
+    # eth_dwmac_alif_ensemble glue + raw MDIO reads, not a chips/dp83825/
+    # driver. `driver_status: none` in the manifest is the honest state,
+    # not aspirational.
+    "dp83825",
 }
 
 

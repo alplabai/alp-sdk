@@ -1,0 +1,81 @@
+# CMSIS-Stream -- Arm CMSIS static-scheduled streaming/dataflow graph
+# framework (ADR 0018 library manifest).
+#
+# A static-scheduled graph runtime for DSP/AI/audio/video pipelines: a Python
+# package computes the static schedule offline; a small C/C++ runtime under
+# Zephyr executes it. Formalises `libraries: [cmsis-stream]`.
+#
+# Grounding (github.com/ARM-software/CMSIS-Stream):
+#   * licence Apache-2.0.
+#   * latest tag v3.2.0 = commit d0c834caa7310ce3f4ed60a816936569a12bdb75
+#     (2026-04-23). Pinned to the tag, not the SHA, per house style for a
+#     library with real upstream releases.
+#   * upstream ships its OWN Zephyr module glue AT the v3.2.0 tag:
+#     zephyr/module.yml (module name `cmsisstream`,
+#     `build: {cmake: zephyr, kconfig: zephyr/Kconfig}`), zephyr/Kconfig,
+#     zephyr/CMakeLists.txt -- so this is a real west module import, not a
+#     from-scratch integration.
+#   * umbrella Kconfig symbol `menuconfig CMSISSTREAM`
+#     (zephyr/Kconfig at the v3.2.0 tag). Only the master switch is
+#     transcribed here; the library's own sub-symbols default sanely and
+#     are left for the application to override, not re-asserted here as
+#     CONFIG_*=y lines: CMSISSTREAM_EVENT_QUEUE_LENGTH default 20,
+#     CMSISSTREAM_NB_MAX_EVENTS default 20, CMSISSTREAM_NB_MAX_BUFS
+#     default 20, CMSISSTREAM_STREAM_THREAD_PRIORITY default 0,
+#     CMSISSTREAM_STREAM_THREAD_STACK_SIZE default 4096,
+#     CMSISSTREAM_EVT_THREAD_STACK_SIZE default 4096,
+#     CMSISSTREAM_TENSOR_MAX_DIMENSIONS default 3,
+#     CMSISSTREAM_EVT_HIGH_PRIORITY default 4,
+#     CMSISSTREAM_EVT_NORMAL_PRIORITY default 5,
+#     CMSISSTREAM_EVT_LOW_PRIORITY default 6,
+#     CMSISSTREAM_MAX_NUMBER_EVENT_ARGUMENTS default 4,
+#     CMSISSTREAM_SHARED_OVERHEAD default 16. CMSISSTREAM_POOL_SECTION is
+#     the one exception to "defaults sanely" -- see the IMPORTANT block
+#     below, it does NOT default sanely off-Alif.
+#   * zephyr/CMakeLists.txt at the v3.2.0 tag builds
+#     platform/zephyr_runtime/stream_event_queue.cpp and
+#     stream_runtime_init.cpp UNCONDITIONALLY whenever CONFIG_CMSISSTREAM=y
+#     -- two C++ translation units, not gated behind any C++-specific
+#     Kconfig. They use std::shared_ptr / std::allocate_shared (see
+#     upstream's own CMSISSTREAM_SHARED_OVERHEAD Kconfig help text).
+#     zephyr/Kconfig does NOT `select CPP`, so this is a silent
+#     prerequisite -- see the IMPORTANT block below.
+#
+# IMPORTANT -- CMSISSTREAM_POOL_SECTION is NOT re-emitted here on purpose.
+# Upstream's own default for that string Kconfig is
+# `.alif_sram0.evt_pool` -- a linker section name that exists ONLY on Alif
+# Ensemble parts (the E1M-AEN family). That default is correct as-is for
+# AEN, but the Renesas RZ/V2N and NXP i.MX 93 M33 cores have no such
+# section: an application targeting those cores MUST override
+# CONFIG_CMSISSTREAM_POOL_SECTION with a real linker section from its own
+# board's memory map, or the link fails. There is no portable replacement
+# section name to invent here -- inventing one for non-Alif cores would be
+# exactly the fabrication ADR 0018 forbids. Document the override
+# requirement in the consuming app's board.yaml / prj.conf, per core.
+#
+# IMPORTANT -- CMSIS-Stream requires C++ even for a C-only application.
+# CONFIG_CMSISSTREAM=y unconditionally compiles two C++ translation units
+# (stream_event_queue.cpp, stream_runtime_init.cpp -- see grounding
+# above), and upstream's zephyr/Kconfig does not `select CPP`. Any
+# application slice with `libraries: [cmsis-stream]` MUST also set
+# CONFIG_CPP=y plus a C++ standard-library choice
+# (CONFIG_GLIBCXX_LIBCPP or CONFIG_MINIMAL_LIBCPP) in its own prj.conf,
+# or the build fails. This is deliberately NOT added to this manifest's
+# `kconfig:` list below: doing so would silently impose a C++ runtime on
+# every consumer of this library, not just the ones that need it.
+#
+# No `requires.core_class` -- upstream's zephyr/Kconfig has no
+# `depends on CPU_CORTEX_M` (unlike cmsis-nn's `menuconfig CMSIS_NN`), so
+# constraining this manifest to Cortex-M would be unfounded.
+schema_version: 1
+name: cmsis-stream
+description: "Arm CMSIS-Stream -- static-scheduled streaming/dataflow graph runtime for DSP/AI/audio/video pipelines."
+tier: B
+version: "v3.2.0"
+license: Apache-2.0
+
+integration:
+  zephyr:
+    module: cmsisstream
+    kconfig:
+      - CONFIG_CMSISSTREAM=y

@@ -75,6 +75,177 @@ target_compile_features(alp_test_inference_dispatcher PRIVATE c_std_99)
 add_test(NAME alp_test_inference_dispatcher
          COMMAND alp_test_inference_dispatcher)
 
+# Regression coverage for src/yocto/inference_ort.cpp's open() path: the
+# tensor-rank refusal (issue #1729) split into two separate ceilings
+# (hostile/corrupt ndim vs. a well-formed model this 4-slot descriptor
+# can't represent), and the OrtValue release path on open()'s throw path
+# (issue #1494).  Compiles inference_ort.cpp directly -- NOT through
+# alp::sdk / ALP_SDK_USE_ORT_CPU, which probes for a real onnxruntime
+# install the way src/yocto/CMakeLists.txt's own block does (issue #1747:
+# no PR gate builds this backend for that reason) -- against
+# tests/yocto/fakes/onnxruntime/, a clean-room stand-in vendor header (see
+# that file's own comment) that gives the test full control over the "ORT"
+# surface, so inference_ort.cpp's OWN C++ logic is exercised
+# deterministically without any real ONNX Runtime install.  See
+# inference_ort_regression.cpp's header comment for the full design.
+add_executable(alp_test_inference_ort_regression
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_ort_regression.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/inference_ort.cpp
+)
+target_include_directories(alp_test_inference_ort_regression PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/onnxruntime
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto
+)
+target_compile_features(alp_test_inference_ort_regression PRIVATE cxx_std_17)
+
+add_test(NAME alp_test_inference_ort_regression
+         COMMAND alp_test_inference_ort_regression)
+
+# Regression coverage for src/yocto/inference_deepx.cpp's tensor-rank
+# guards (issue #1729): the open()-time refusal (all_tensor_ranks_fit(),
+# validates the DECLARED GetInputs()/GetOutputs() metadata) AND the
+# separate LIVE post-Run() guard in get_output() that the open()-time
+# check alone does not cover.  Same fake-vendor-header technique as
+# alp_test_inference_ort_regression above -- dx_rt is proprietary (DEEPX
+# EULA), so this is NOT linked through alp::sdk / ALP_SDK_USE_DEEPX_DXM1
+# for the same issue #1747 reason.  See tests/yocto/fakes/dxrt/datatype.h
+# and inference_deepx_regression.cpp's own header comment for the full
+# design.
+add_executable(alp_test_inference_deepx_regression
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_deepx_regression.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/inference_deepx.cpp
+)
+target_include_directories(alp_test_inference_deepx_regression PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto
+)
+target_compile_features(alp_test_inference_deepx_regression PRIVATE cxx_std_17)
+
+add_test(NAME alp_test_inference_deepx_regression
+         COMMAND alp_test_inference_deepx_regression)
+
+# Compile + regression coverage for src/yocto/inference_drpai.cpp (issue
+# #1747, closing the gap for the last of the three: ORT/DEEPX above, now
+# DRP-AI).  Same fake-vendor-header technique as the two targets above --
+# the EdgeCortix MERA2 / DRP-AI TVM runtime is Renesas/EdgeCortix
+# account-gated, so this is NOT linked through alp::sdk /
+# ALP_SDK_USE_DRPAI_V2N.  Compiles against tests/yocto/fakes/drpai/, a
+# clean-room stand-in for MeraDrpRuntimeWrapper.h plus a fake
+# linux/drpai.h for the DRP-AI driver uapi struct/ioctl this file also
+# needs (real vendor-recipe-only, same "not on a stock CI runner"
+# reason).  See inference_drpai_regression.cpp's own header comment for
+# what these tests do and do not reach.  Linux-only, like the file it
+# tests (<fcntl.h>/<sys/ioctl.h>/<linux/drpai.h>/<unistd.h> are hard
+# #includes, matching inference_drpai.cpp's own real-build posture) --
+# no platform guard here beyond the one this whole `yocto` leg already
+# implies (issue #1747's CI gate runs on ubuntu-latest).
+add_executable(alp_test_inference_drpai_regression
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_drpai_regression.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/inference_drpai.cpp
+)
+target_include_directories(alp_test_inference_drpai_regression PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/drpai
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto
+)
+target_compile_features(alp_test_inference_drpai_regression PRIVATE cxx_std_17)
+
+add_test(NAME alp_test_inference_drpai_regression
+         COMMAND alp_test_inference_drpai_regression)
+
+# alp_inference_last_invoke_latency_us() end-to-end regression: the last-
+# successful-invoke-latency accessor added alongside <alp/inference.h>'s
+# model-perf-capture support. #includes src/yocto/inference_yocto.c
+# directly (see the test's own header comment) through a fake DEEPX_DXM1
+# backend -- deliberately NOT linked against alp::sdk, same ODR rationale
+# as alp_test_inference_invoke_close_race below. Needs stub_core.c
+# (alp_internal_set_last_error) and alp_slot_claim.c (the close drain) for
+# the same reason that test does. Single-threaded: no Threads dependency.
+add_executable(alp_test_inference_latency
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_latency.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+)
+target_include_directories(alp_test_inference_latency PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+)
+target_compile_features(alp_test_inference_latency PRIVATE c_std_99)
+
+add_test(NAME alp_test_inference_latency
+         COMMAND alp_test_inference_latency)
+
+# Issue #1254 end-to-end regression: an "onnx" blob_format .alpmodel,
+# decoded by the REAL zcbor-backed alp_model_parse() (src/common/
+# alp_model.c, compiled in place of the ALP_ERR_NOSUPPORT stub only
+# when src/yocto/CMakeLists.txt's own find_path/find_library(zcbor)
+# above succeeds), selects ALP_INFERENCE_BACKEND_CPU through
+# alp_model_select() -- see alpmodel_onnx_cpu.c's own header comment for
+# the fixture provenance.
+#
+# Gated on the SAME ZCBOR_INCLUDE_DIR/ZCBOR_LIB cache variables
+# src/yocto/CMakeLists.txt's find_path/find_library populated (that
+# add_subdirectory() runs before this one -- see the top-level
+# CMakeLists.txt -- and unlike pkg_check_modules's IMPORTED_TARGET
+# result below, a find_path/find_library cache variable DOES propagate
+# across the add_subdirectory() boundary). Re-find here anyway (same
+# calls, same variable names) rather than trust that propagation blind:
+# if find_path/find_library already populated the cache variable this
+# is a cheap cache hit, and if a future refactor ever reorders the two
+# add_subdirectory() calls this stays correct instead of silently
+# vanishing the test -- the same self-validation the OPENAMP_USER_TEST
+# re-find below does for pkg_check_modules.
+find_path(ZCBOR_INCLUDE_DIR zcbor_decode.h)
+find_library(ZCBOR_LIB zcbor)
+# zcbor is not a Debian/Ubuntu package (see metadata/libraries/zcbor.yaml
+# and src/yocto/CMakeLists.txt's own ALP_SDK_MODEL_ZCBOR_REQUIRED
+# comment), so a direct plain-CMake -DALP_OS=yocto configure on the
+# pr-plain-cmake.yml stock Ubuntu runners never has it and
+# alp_model_parse degrades to stub_model.c's ALP_ERR_NOSUPPORT body --
+# asserting ALP_OK unconditionally here would fail on exactly that
+# degrade leg (issue #1254 follow-up), so this test is skipped, not
+# failed, the same way alp_test_rpc_uio_self_close below skips when
+# open-amp/libmetal aren't found.
+if(ZCBOR_INCLUDE_DIR AND ZCBOR_LIB)
+    add_executable(alp_test_alpmodel_onnx_cpu
+        ${CMAKE_CURRENT_SOURCE_DIR}/alpmodel_onnx_cpu.c
+    )
+    target_link_libraries(alp_test_alpmodel_onnx_cpu PRIVATE alp::sdk)
+    target_include_directories(alp_test_alpmodel_onnx_cpu PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_features(alp_test_alpmodel_onnx_cpu PRIVATE c_std_99)
+
+    add_test(NAME alp_test_alpmodel_onnx_cpu
+             COMMAND alp_test_alpmodel_onnx_cpu)
+else()
+    # Registered-but-DISABLED, not just a STATUS line: `ctest` prints
+    # "N% tests passed ... out of M" counting only ENABLED tests, so a
+    # bare STATUS message leaves zero trace in that summary that this
+    # test was never built at all. add_test() against a command that
+    # doesn't exist on this leg, marked DISABLED, keeps it out of the
+    # pass/fail tally while still surfacing in `ctest -N` /
+    # `ctest --show-only` for anyone auditing what ran.
+    add_test(NAME alp_test_alpmodel_onnx_cpu
+             COMMAND ${CMAKE_COMMAND} -E echo
+             "alp_test_alpmodel_onnx_cpu skipped -- zcbor not found")
+    set_tests_properties(alp_test_alpmodel_onnx_cpu PROPERTIES DISABLED TRUE)
+    message(STATUS
+        "alp-sdk yocto: zcbor not found; alp_test_alpmodel_onnx_cpu "
+        "skipped -- it exercises the REAL zcbor-backed alp_model_parse() "
+        "and would just be re-proving the stub's ALP_ERR_NOSUPPORT body "
+        "otherwise.  Install meta-alp-sdk's zcbor recipe "
+        "(recipes-devtools/zcbor/zcbor_0.9.1.bb) to the sysroot to "
+        "enable.")
+endif()
+
 # GPU2D dispatcher + portable sw_fallback on the plain-CMake Yocto
 # build (#24): proves Linux apps get the REAL CPU fill/blit/blend,
 # not the old NOSUPPORT stub.  Portable pure C -- no Linux gate.
@@ -89,6 +260,34 @@ target_compile_features(alp_test_gpu2d_dispatcher PRIVATE c_std_99)
 
 add_test(NAME alp_test_gpu2d_dispatcher
          COMMAND alp_test_gpu2d_dispatcher)
+
+# issue #1117 round-2 dev review: _blend_px()'s `_u8(x) << 24` shift
+# (src/backends/gpu2d/sw_fallback.c) is signed-integer-overflow UB for
+# any opaque alpha (>= 0x80) -- gpu2d_dispatcher.c's
+# test_blend_additive_and_multiply_opaque_alpha() exercises the exact
+# values, but a plain build doesn't discriminate pre-/post-fix (every
+# mainstream two's-complement compiler already produces the "right" bit
+# pattern un-instrumented). Run the same test binary under UBSan so the
+# shift itself is checked, mirroring the RPC suite's
+# run_sanitized_rpc_tests.sh (GHSA-xhm8-7f87-93q5 defect 3) rather than
+# inventing a second sanitizer-runner script.
+# -fno-sanitize-recover=undefined is NOT decoration. Plain
+# -fsanitize=undefined RECOVERS: it prints "runtime error: left shift of 255
+# by 24 places cannot be represented in type 'int'" and then carries on, so
+# the process still exits 0 and ctest passes. Measured directly:
+#   gcc -fsanitize=undefined                              -> exit 0
+#   gcc -fsanitize=undefined -fno-sanitize-recover=undefined -> exit 1
+# both printing the identical diagnostic. Without the second flag this gate
+# detects the defect it exists for and reports success anyway.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(NAME alp_test_gpu2d_ubsan
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/run_sanitized_rpc_tests.sh
+                     ${CMAKE_SOURCE_DIR}
+                     ${CMAKE_CURRENT_BINARY_DIR}/sanitizer-gpu2d-ubsan
+                     "-fsanitize=undefined -fno-sanitize-recover=undefined"
+                     alp_test_gpu2d_dispatcher)
+    set_tests_properties(alp_test_gpu2d_ubsan PROPERTIES TIMEOUT 600)
+endif()
 
 # GPU2D static handle-pool race regression (#629): the exact
 # duplicate-slot / op-vs-close reproduction from the issue, against
@@ -126,6 +325,76 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_slot_claim_race
              COMMAND alp_test_slot_claim_race)
 
+    # Inference dispatcher close()-vs-invoke() race regression (#629):
+    # alp_inference_close() used to race a blocked alp_inference_invoke()
+    # (ORT api->Run() et al.) on a bare `in_use` check, freeing be_state
+    # out from under the still-running invoke.  #includes
+    # src/yocto/inference_yocto.c directly (see the test's own header
+    # comment) -- deliberately NOT linked against alp::sdk, same ODR
+    # rationale as alp_test_can_add_filter_close_race above.  Needs
+    # stub_core.c (alp_internal_set_last_error) and alp_slot_claim.c
+    # (the sleep-poll close drain) for the same reason that test does.
+    add_executable(alp_test_inference_invoke_close_race
+        ${CMAKE_CURRENT_SOURCE_DIR}/inference_invoke_close_race.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+    )
+    target_link_libraries(alp_test_inference_invoke_close_race PRIVATE Threads::Threads)
+    target_include_directories(alp_test_inference_invoke_close_race PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_inference_invoke_close_race PRIVATE c_std_99)
+
+    add_test(NAME alp_test_inference_invoke_close_race
+             COMMAND alp_test_inference_invoke_close_race)
+
+    # Inference dispatcher invoke()-vs-invoke() overlap regression (PR
+    # #1541 review): alp_inference_last_invoke_latency_us()'s "last-store-
+    # wins" contract for two concurrent alp_inference_invoke() calls on
+    # the SAME handle had no test at all. Same #include-the-.c-directly +
+    # fake-DEEPX-backend technique as alp_test_inference_invoke_close_race
+    # above, deliberately NOT linked against alp::sdk (same ODR
+    # rationale).
+    add_executable(alp_test_inference_invoke_overlap_race
+        ${CMAKE_CURRENT_SOURCE_DIR}/inference_invoke_overlap_race.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+    )
+    target_link_libraries(alp_test_inference_invoke_overlap_race PRIVATE Threads::Threads)
+    target_include_directories(alp_test_inference_invoke_overlap_race PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_inference_invoke_overlap_race PRIVATE c_std_99)
+
+    add_test(NAME alp_test_inference_invoke_overlap_race
+             COMMAND alp_test_inference_invoke_overlap_race)
+    set_tests_properties(alp_test_inference_invoke_overlap_race PROPERTIES TIMEOUT 30)
+
+    # Mechanism-level regression for issue #1114's round-2 dev-review
+    # finding: src/backends/security/zephyr_drv.c's ensure_psa() elect-once-
+    # init algorithm must not hang a losing waiter when the elected
+    # initialiser FAILS (Zephyr/PSA-specific, so mirrored here rather
+    # than exercised directly -- see the file header comment).
+    add_executable(alp_test_elect_once_init_race
+        ${CMAKE_CURRENT_SOURCE_DIR}/elect_once_init_race.c
+    )
+    target_link_libraries(alp_test_elect_once_init_race PRIVATE alp::sdk Threads::Threads)
+    target_include_directories(alp_test_elect_once_init_race PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_elect_once_init_race PRIVATE c_std_99)
+
+    add_test(NAME alp_test_elect_once_init_race
+             COMMAND alp_test_elect_once_init_race)
+    set_tests_properties(alp_test_elect_once_init_race PROPERTIES TIMEOUT 60)
+
     # Stateless dispatcher ops-cache race regression (#628): concurrent
     # cold first calls into TMU / SoC-info / security.  Recompiles the
     # security sw_fallback TU straight into the executable -- same
@@ -138,6 +407,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     target_link_libraries(alp_test_dispatch_cache_race PRIVATE alp::sdk Threads::Threads)
     target_include_directories(alp_test_dispatch_cache_race PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     target_compile_features(alp_test_dispatch_cache_race PRIVATE c_std_99)
@@ -375,6 +645,36 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_i2c
              COMMAND alp_test_peripheral_i2c)
 
+    # Closed-bus status-code regression for issue #1834: every op on a
+    # NULL-or-closed `bus` must return ALP_ERR_NOT_READY, matching every
+    # Zephyr dispatcher and ADR-0002's 2026-08-27 amendment, instead of
+    # the ALP_ERR_INVAL this backend used to return for both cases.
+    # peripheral_i2c_closed_status.c #includes the real
+    # src/yocto/peripheral_i2c.c directly (same technique as
+    # alp_test_peripheral_gpio_irq_rollback below) to reach
+    # pool_acquire()/pool_release() and build a genuinely closed,
+    # non-NULL handle without a real /dev/i2c-N.  Deliberately NOT
+    # linked against alp::sdk -- same ODR rationale as
+    # alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_peripheral_i2c_closed_status
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i2c_closed_status.c
+        # alp_i2c_open() (compiled in as part of the #include-the-.c-file
+        # technique, even though this test never calls it) references
+        # alp_internal_set_last_error(); pull in its one canonical
+        # definition so the link is self-contained without alp::sdk.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    )
+    target_include_directories(alp_test_peripheral_i2c_closed_status PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_i2c_closed_status PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_i2c_closed_status
+             COMMAND alp_test_peripheral_i2c_closed_status)
+
     add_executable(alp_test_peripheral_spi
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_spi.c
     )
@@ -387,6 +687,29 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_spi
              COMMAND alp_test_peripheral_spi)
 
+    # Closed-bus status-code regression for issue #1834: same rationale
+    # as alp_test_peripheral_i2c_closed_status above, for the SPI
+    # backend.  peripheral_spi_closed_status.c #includes the real
+    # src/yocto/peripheral_spi.c directly to reach
+    # pool_acquire()/pool_release() and build a genuinely closed,
+    # non-NULL handle without a real /dev/spidevN.M.  Deliberately NOT
+    # linked against alp::sdk -- same ODR rationale as
+    # alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_peripheral_spi_closed_status
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_spi_closed_status.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    )
+    target_include_directories(alp_test_peripheral_spi_closed_status PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_spi_closed_status PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_spi_closed_status
+             COMMAND alp_test_peripheral_spi_closed_status)
+
     add_executable(alp_test_peripheral_uart
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart.c
     )
@@ -398,6 +721,29 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     add_test(NAME alp_test_peripheral_uart
              COMMAND alp_test_peripheral_uart)
+
+    # Closed-port status-code regression for issue #1834: same
+    # rationale as alp_test_peripheral_i2c_closed_status above, for the
+    # UART backend.  peripheral_uart_closed_status.c #includes the real
+    # src/yocto/peripheral_uart.c directly to reach
+    # pool_acquire()/pool_release() and build a genuinely closed,
+    # non-NULL handle without a real /dev/tty*.  Deliberately NOT
+    # linked against alp::sdk -- same ODR rationale as
+    # alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_peripheral_uart_closed_status
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart_closed_status.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    )
+    target_include_directories(alp_test_peripheral_uart_closed_status PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_uart_closed_status PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_uart_closed_status
+             COMMAND alp_test_peripheral_uart_closed_status)
 
     add_executable(alp_test_peripheral_gpio
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio.c
@@ -495,6 +841,122 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_wdt
              COMMAND alp_test_peripheral_wdt)
 
+    # #1140 review regression (Yocto storage backend): write()/erase()
+    # must refuse with ALP_ERR_INVAL, before touching the device fd,
+    # unless alp_storage_config_t.allow_unsafe_write was set at open()
+    # -- a caller using ALP_STORAGE_CONFIG_DEFAULT must never be able
+    # to damage the whole-disk mmcblk node or an unvalidated MTD
+    # partition (blockers 1+2).  Also covers the discard_granularity
+    # geometry fix and the MTD 32-bit erase-length truncation guard.
+    # peripheral_storage.c #includes the real
+    # src/backends/storage/yocto_drv.c directly (see the test's own
+    # header comment) to drive y_write()/y_read()/y_erase() against a
+    # real temporary regular file -- never a real /dev/mmcblk*/mtd*
+    # node.  Deliberately NOT linked against alp::sdk -- same ODR
+    # rationale as alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_peripheral_storage
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_storage.c
+    )
+    target_include_directories(alp_test_peripheral_storage PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/storage
+        # storage_ops.h #includes "alp_checked_arith.h" unprefixed,
+        # relying on src/common being on the include path the way
+        # src/common/CMakeLists.txt adds it for the alp_sdk target
+        # itself -- this standalone test binary needs the same.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_storage PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_storage
+             COMMAND alp_test_peripheral_storage)
+
+    # #1141 review regression (Yocto USB backend): host_enable()/
+    # host_disable() must be honest ALP_ERR_NOSUPPORT, never a faked
+    # ALP_OK (blockers 4+5); dev_open() stays ALP_ERR_NOSUPPORT (no
+    # UDC/gadget path); _is_roothub_name() rejects a strtoul() ERANGE
+    # overflow; _discover_buses() reports an error instead of silently
+    # truncating when more root hubs exist than its fixed-capacity
+    # array can track.  peripheral_usb.c #includes the real
+    # src/backends/usb/yocto_drv.c directly (see the test's own header
+    # comment) to drive these against a real temporary directory via
+    # g_usb_test_sysfs_root_hook instead of the real
+    # /sys/bus/usb/devices tree.  Deliberately NOT linked against
+    # alp::sdk -- same ODR rationale as alp_test_rpc_yocto_self_close
+    # above.
+    add_executable(alp_test_peripheral_usb
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_usb.c
+    )
+    target_include_directories(alp_test_peripheral_usb PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/usb
+    )
+    target_compile_features(alp_test_peripheral_usb PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_usb
+             COMMAND alp_test_peripheral_usb)
+
+    # #1147 regression (Yocto I3C backend): _bus_present() must find a
+    # real "i3c-<N>" sysfs directory and reject a missing one / a
+    # same-named regular file; y_open() must mirror that presence
+    # check exactly (never a fabricated ALP_OK for a bus that was
+    # never confirmed to exist); write()/read()/write_read() must stay
+    # honest ALP_ERR_NOSUPPORT on every call -- mainline Linux has no
+    # raw-transfer ABI for I3C at all (see the backend's own file
+    # header).  peripheral_i3c.c #includes the real
+    # src/backends/i3c/yocto_drv.c directly (see the test's own header
+    # comment) to drive these against a real temporary directory via
+    # g_i3c_test_sysfs_root_hook instead of the real
+    # /sys/bus/i3c/devices tree.  Deliberately NOT linked against
+    # alp::sdk -- same ODR rationale as alp_test_rpc_yocto_self_close
+    # above.
+    add_executable(alp_test_peripheral_i3c
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i3c.c
+    )
+    target_include_directories(alp_test_peripheral_i3c PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/i3c
+    )
+    target_compile_features(alp_test_peripheral_i3c PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_i3c
+             COMMAND alp_test_peripheral_i3c)
+
+    # #1143 regression (Yocto display backend): _blit_copy()/
+    # _clear_fill() must honour fb_pitch (which can exceed fb_w * 4 --
+    # the kernel pads scanlines) rather than assuming a tight stride,
+    # must reject a zero-area or out-of-bounds rect before touching
+    # the buffer, and must never write past the requested rect/rows.
+    # _pick_crtc() must select the first CRTC the encoder's bitmask
+    # allows and must not misbehave on a mask with no match.  The real
+    # y_open()/y_close() drive DRM/KMS ioctls against a real
+    # /dev/dri/card* node this build environment does not have (see
+    # the backend's own Status note), so this test targets only the
+    # pure logic factored out of the ops -- see peripheral_display.c's
+    # own header comment.  #includes the real
+    # src/backends/display/yocto_drv.c directly, same ODR rationale as
+    # alp_test_rpc_yocto_self_close above -- deliberately NOT linked
+    # against alp::sdk.
+    add_executable(alp_test_peripheral_display
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_display.c
+    )
+    target_include_directories(alp_test_peripheral_display PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/display
+    )
+    target_compile_features(alp_test_peripheral_display PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_display
+             COMMAND alp_test_peripheral_display)
+
     # /sys/power/state + RTC wakealarm mapping regression for issue #613
     # (Yocto power backend): each alp_power_mode_t must write the exact
     # kernel sysfs token, a timed wake must clear-then-program the
@@ -545,6 +1007,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
         target_link_libraries(alp_test_iot_mqtt PRIVATE alp::sdk)
         target_include_directories(alp_test_iot_mqtt PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
             ${CMAKE_CURRENT_SOURCE_DIR}
         )
         target_compile_features(alp_test_iot_mqtt PRIVATE c_std_99)
@@ -570,6 +1033,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
         target_link_libraries(alp_test_audio_alsa PRIVATE alp::sdk)
         target_include_directories(alp_test_audio_alsa PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
             ${CMAKE_CURRENT_SOURCE_DIR}
         )
         target_compile_features(alp_test_audio_alsa PRIVATE c_std_99)
@@ -596,6 +1060,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
         target_link_libraries(alp_test_security_openssl PRIVATE alp::sdk)
         target_include_directories(alp_test_security_openssl PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
             ${CMAKE_CURRENT_SOURCE_DIR}
         )
         target_compile_features(alp_test_security_openssl PRIVATE c_std_99)
@@ -620,6 +1085,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     target_link_libraries(alp_test_registry_sw_fallback PRIVATE alp::sdk)
     target_include_directories(alp_test_registry_sw_fallback PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     target_compile_features(alp_test_registry_sw_fallback PRIVATE c_std_99)
@@ -696,6 +1162,32 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_ble_dispatch_self_close
              COMMAND alp_test_ble_dispatch_self_close)
     set_tests_properties(alp_test_ble_dispatch_self_close PROPERTIES TIMEOUT 30)
+
+    # issue #1697: alp_ble_close() must sweep _conn_pool before freeing the
+    # radio, or a conn slot outlives the radio its state.radio back-points to.
+    # Same #include-the-.c-file / no-alp::sdk-link technique and the same
+    # sources as alp_test_ble_dispatch_self_close above; a black-box test is
+    # impossible because native_sim has no BLE controller, so alp_ble_open()
+    # returns NULL (see the test's own header comment).
+    add_executable(alp_test_ble_dispatch_conn_pool_orphan
+        ${CMAKE_CURRENT_SOURCE_DIR}/ble_dispatch_conn_pool_orphan.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backend.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/dispatch_last_error_shim.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/ble/sw_fallback.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+    )
+    target_link_libraries(alp_test_ble_dispatch_conn_pool_orphan PRIVATE Threads::Threads)
+    target_include_directories(alp_test_ble_dispatch_conn_pool_orphan PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_ble_dispatch_conn_pool_orphan PRIVATE c_std_99)
+    add_test(NAME alp_test_ble_dispatch_conn_pool_orphan
+             COMMAND alp_test_ble_dispatch_conn_pool_orphan)
+    set_tests_properties(alp_test_ble_dispatch_conn_pool_orphan PROPERTIES TIMEOUT 30)
 
     # Yocto SocketCAN backend RX-thread self-close (yocto_drv.c's
     # y_shutdown()/y_destroy() split).  #includes the real backend .c

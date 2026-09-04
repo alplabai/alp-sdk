@@ -79,6 +79,59 @@
     "irq_external": 16,
     "dmac_channels": 80
   },
+  "peripheral_instances": {
+    "i2c": [
+      {"index": 0, "label": "i2c0", "base": "0x44400400", "size": "0x400", "interrupts": [{"irq": 174, "priority": 1, "name": "tei"}, {"irq": 175, "priority": 1, "name": "naki"}, {"irq": 176, "priority": 1, "name": "spi"}, {"irq": 177, "priority": 1, "name": "sti"}, {"irq": 178, "priority": 1, "name": "ali"}, {"irq": 179, "priority": 1, "name": "tmoi"}, {"irq": 385, "priority": 1, "name": "txi"}, {"irq": 386, "priority": 1, "name": "rxi"}], "compatible": "renesas,rz-riic"},
+      {"index": 1, "label": "i2c1", "base": "0x44400800", "size": "0x400", "interrupts": [{"irq": 180, "priority": 1, "name": "tei"}, {"irq": 181, "priority": 1, "name": "naki"}, {"irq": 182, "priority": 1, "name": "spi"}, {"irq": 183, "priority": 1, "name": "sti"}, {"irq": 184, "priority": 1, "name": "ali"}, {"irq": 185, "priority": 1, "name": "tmoi"}, {"irq": 387, "priority": 1, "name": "txi"}, {"irq": 388, "priority": 1, "name": "rxi"}], "compatible": "renesas,rz-riic"},
+      {"index": 2, "label": "i2c2", "base": "0x44400c00", "size": "0x400", "interrupts": [{"irq": 186, "priority": 1, "name": "tei"}, {"irq": 187, "priority": 1, "name": "naki"}, {"irq": 188, "priority": 1, "name": "spi"}, {"irq": 189, "priority": 1, "name": "sti"}, {"irq": 190, "priority": 1, "name": "ali"}, {"irq": 191, "priority": 1, "name": "tmoi"}, {"irq": 389, "priority": 1, "name": "txi"}, {"irq": 390, "priority": 1, "name": "rxi"}], "compatible": "renesas,rz-riic"},
+      {"index": 3, "label": "i2c3", "base": "0x44401000", "size": "0x400", "interrupts": [{"irq": 192, "priority": 1, "name": "tei"}, {"irq": 193, "priority": 1, "name": "naki"}, {"irq": 194, "priority": 1, "name": "spi"}, {"irq": 195, "priority": 1, "name": "sti"}, {"irq": 196, "priority": 1, "name": "ali"}, {"irq": 197, "priority": 1, "name": "tmoi"}, {"irq": 391, "priority": 1, "name": "txi"}, {"irq": 392, "priority": 1, "name": "rxi"}], "compatible": "renesas,rz-riic"},
+      {"index": 4, "label": "i2c4", "base": "0x44401400", "size": "0x400", "interrupts": [{"irq": 198, "priority": 1, "name": "tei"}, {"irq": 199, "priority": 1, "name": "naki"}, {"irq": 200, "priority": 1, "name": "spi"}, {"irq": 201, "priority": 1, "name": "sti"}, {"irq": 202, "priority": 1, "name": "ali"}, {"irq": 203, "priority": 1, "name": "tmoi"}, {"irq": 393, "priority": 1, "name": "txi"}, {"irq": 394, "priority": 1, "name": "rxi"}], "compatible": "renesas,rz-riic"},
+      {"index": 5, "label": "i2c5", "base": "0x44401800", "size": "0x400", "interrupts": [{"irq": 204, "priority": 1, "name": "tei"}, {"irq": 205, "priority": 1, "name": "naki"}, {"irq": 206, "priority": 1, "name": "spi"}, {"irq": 207, "priority": 1, "name": "sti"}, {"irq": 208, "priority": 1, "name": "ali"}, {"irq": 209, "priority": 1, "name": "tmoi"}, {"irq": 395, "priority": 1, "name": "txi"}, {"irq": 396, "priority": 1, "name": "rxi"}], "compatible": "renesas,rz-riic"},
+      {"index": 6, "label": "i2c6", "base": "0x44401c00", "size": "0x400", "interrupts": [{"irq": 210, "priority": 1, "name": "tei"}, {"irq": 211, "priority": 1, "name": "naki"}, {"irq": 212, "priority": 1, "name": "spi"}, {"irq": 213, "priority": 1, "name": "sti"}, {"irq": 214, "priority": 1, "name": "ali"}, {"irq": 215, "priority": 1, "name": "tmoi"}, {"irq": 397, "priority": 1, "name": "txi"}, {"irq": 398, "priority": 1, "name": "rxi"}], "compatible": "renesas,rz-riic"},
+      {"index": 7, "label": "i2c7", "base": "0x44402000", "size": "0x400", "interrupts": [{"irq": 216, "priority": 1, "name": "tei"}, {"irq": 217, "priority": 1, "name": "naki"}, {"irq": 218, "priority": 1, "name": "spi"}, {"irq": 219, "priority": 1, "name": "sti"}, {"irq": 220, "priority": 1, "name": "ali"}, {"irq": 221, "priority": 1, "name": "tmoi"}, {"irq": 399, "priority": 1, "name": "txi"}, {"irq": 400, "priority": 1, "name": "rxi"}], "compatible": "renesas,rz-riic"},
+      {"index": 8, "label": "i2c8", "base": "0x41c01000", "size": "0x400", "interrupts": [{"irq": 222, "priority": 1, "name": "tei"}, {"irq": 223, "priority": 1, "name": "naki"}, {"irq": 224, "priority": 1, "name": "spi"}, {"irq": 225, "priority": 1, "name": "sti"}, {"irq": 226, "priority": 1, "name": "ali"}, {"irq": 227, "priority": 1, "name": "tmoi"}, {"irq": 401, "priority": 1, "name": "txi"}, {"irq": 402, "priority": 1, "name": "rxi"}], "compatible": "renesas,rz-riic"}
+    ],
+    "uart": [
+      {"index": 0, "label": "sci0", "base": "0x42800c00", "size": "0x400", "interrupts": [{"irq": 114, "priority": 1, "name": "eri"}, {"irq": 115, "priority": 1, "name": "rxi"}, {"irq": 116, "priority": 1, "name": "txi"}, {"irq": 117, "priority": 1, "name": "tei"}], "compatible": "renesas,rz-sci-b"},
+      {"index": 1, "label": "sci1", "base": "0x42801000", "size": "0x400", "interrupts": [{"irq": 120, "priority": 1, "name": "eri"}, {"irq": 121, "priority": 1, "name": "rxi"}, {"irq": 122, "priority": 1, "name": "txi"}, {"irq": 123, "priority": 1, "name": "tei"}], "compatible": "renesas,rz-sci-b"},
+      {"index": 2, "label": "sci2", "base": "0x42801400", "size": "0x400", "interrupts": [{"irq": 126, "priority": 1, "name": "eri"}, {"irq": 127, "priority": 1, "name": "rxi"}, {"irq": 128, "priority": 1, "name": "txi"}, {"irq": 129, "priority": 1, "name": "tei"}], "compatible": "renesas,rz-sci-b"},
+      {"index": 3, "label": "sci3", "base": "0x42801800", "size": "0x400", "interrupts": [{"irq": 132, "priority": 1, "name": "eri"}, {"irq": 133, "priority": 1, "name": "rxi"}, {"irq": 134, "priority": 1, "name": "txi"}, {"irq": 135, "priority": 1, "name": "tei"}], "compatible": "renesas,rz-sci-b"},
+      {"index": 4, "label": "sci4", "base": "0x42801c00", "size": "0x400", "interrupts": [{"irq": 138, "priority": 1, "name": "eri"}, {"irq": 139, "priority": 1, "name": "rxi"}, {"irq": 140, "priority": 1, "name": "txi"}, {"irq": 141, "priority": 1, "name": "tei"}], "compatible": "renesas,rz-sci-b"},
+      {"index": 5, "label": "sci5", "base": "0x42802000", "size": "0x400", "interrupts": [{"irq": 144, "priority": 1, "name": "eri"}, {"irq": 145, "priority": 1, "name": "rxi"}, {"irq": 146, "priority": 1, "name": "txi"}, {"irq": 147, "priority": 1, "name": "tei"}], "compatible": "renesas,rz-sci-b"},
+      {"index": 6, "label": "sci6", "base": "0x42802400", "size": "0x400", "interrupts": [{"irq": 150, "priority": 1, "name": "eri"}, {"irq": 151, "priority": 1, "name": "rxi"}, {"irq": 152, "priority": 1, "name": "txi"}, {"irq": 153, "priority": 1, "name": "tei"}], "compatible": "renesas,rz-sci-b"},
+      {"index": 7, "label": "sci7", "base": "0x42802800", "size": "0x400", "interrupts": [{"irq": 156, "priority": 1, "name": "eri"}, {"irq": 157, "priority": 1, "name": "rxi"}, {"irq": 158, "priority": 1, "name": "txi"}, {"irq": 159, "priority": 1, "name": "tei"}], "compatible": "renesas,rz-sci-b"},
+      {"index": 8, "label": "sci8", "base": "0x42802c00", "size": "0x400", "interrupts": [{"irq": 162, "priority": 1, "name": "eri"}, {"irq": 163, "priority": 1, "name": "rxi"}, {"irq": 164, "priority": 1, "name": "txi"}, {"irq": 165, "priority": 1, "name": "tei"}], "compatible": "renesas,rz-sci-b"},
+      {"index": 9, "label": "sci9", "base": "0x42803000", "size": "0x400", "interrupts": [{"irq": 168, "priority": 1, "name": "eri"}, {"irq": 169, "priority": 1, "name": "rxi"}, {"irq": 170, "priority": 1, "name": "txi"}, {"irq": 171, "priority": 1, "name": "tei"}], "compatible": "renesas,rz-sci-b"}
+    ],
+    "timer_32bit_gpt": [
+      {"index": 0, "label": "gpt0", "base": "0x43010000", "size": "0x100", "interrupts": [{"irq": 406, "priority": 1, "name": "ccmpa"}, {"irq": 407, "priority": 1, "name": "ccmpb"}, {"irq": 408, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"},
+      {"index": 1, "label": "gpt1", "base": "0x43010100", "size": "0x100", "interrupts": [{"irq": 409, "priority": 1, "name": "ccmpa"}, {"irq": 410, "priority": 1, "name": "ccmpb"}, {"irq": 411, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"},
+      {"index": 2, "label": "gpt2", "base": "0x43010200", "size": "0x100", "interrupts": [{"irq": 412, "priority": 1, "name": "ccmpa"}, {"irq": 413, "priority": 1, "name": "ccmpb"}, {"irq": 414, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"},
+      {"index": 3, "label": "gpt3", "base": "0x43010300", "size": "0x100", "interrupts": [{"irq": 415, "priority": 1, "name": "ccmpa"}, {"irq": 416, "priority": 1, "name": "ccmpb"}, {"irq": 417, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"},
+      {"index": 4, "label": "gpt4", "base": "0x43010400", "size": "0x100", "interrupts": [{"irq": 418, "priority": 1, "name": "ccmpa"}, {"irq": 419, "priority": 1, "name": "ccmpb"}, {"irq": 420, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"},
+      {"index": 5, "label": "gpt5", "base": "0x43010500", "size": "0x100", "interrupts": [{"irq": 421, "priority": 1, "name": "ccmpa"}, {"irq": 422, "priority": 1, "name": "ccmpb"}, {"irq": 423, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"},
+      {"index": 6, "label": "gpt6", "base": "0x43010600", "size": "0x100", "interrupts": [{"irq": 424, "priority": 1, "name": "ccmpa"}, {"irq": 425, "priority": 1, "name": "ccmpb"}, {"irq": 426, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"},
+      {"index": 7, "label": "gpt7", "base": "0x43010700", "size": "0x100", "interrupts": [{"irq": 427, "priority": 1, "name": "ccmpa"}, {"irq": 428, "priority": 1, "name": "ccmpb"}, {"irq": 429, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"},
+      {"index": 8, "label": "gpt8", "base": "0x43020000", "size": "0x100", "interrupts": [{"irq": 430, "priority": 1, "name": "ccmpa"}, {"irq": 431, "priority": 1, "name": "ccmpb"}, {"irq": 432, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"},
+      {"index": 9, "label": "gpt9", "base": "0x43020100", "size": "0x100", "interrupts": [{"irq": 433, "priority": 1, "name": "ccmpa"}, {"irq": 434, "priority": 1, "name": "ccmpb"}, {"irq": 435, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"},
+      {"index": 10, "label": "gpt10", "base": "0x43020200", "size": "0x100", "interrupts": [{"irq": 436, "priority": 1, "name": "ccmpa"}, {"irq": 437, "priority": 1, "name": "ccmpb"}, {"irq": 438, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"},
+      {"index": 11, "label": "gpt11", "base": "0x43020300", "size": "0x100", "interrupts": [{"irq": 439, "priority": 1, "name": "ccmpa"}, {"irq": 440, "priority": 1, "name": "ccmpb"}, {"irq": 441, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"},
+      {"index": 12, "label": "gpt12", "base": "0x43020400", "size": "0x100", "interrupts": [{"irq": 442, "priority": 1, "name": "ccmpa"}, {"irq": 443, "priority": 1, "name": "ccmpb"}, {"irq": 444, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"},
+      {"index": 13, "label": "gpt13", "base": "0x43020500", "size": "0x100", "interrupts": [{"irq": 445, "priority": 1, "name": "ccmpa"}, {"irq": 446, "priority": 1, "name": "ccmpb"}, {"irq": 447, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"},
+      {"index": 14, "label": "gpt14", "base": "0x43020600", "size": "0x100", "interrupts": [{"irq": 448, "priority": 1, "name": "ccmpa"}, {"irq": 449, "priority": 1, "name": "ccmpb"}, {"irq": 450, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"},
+      {"index": 15, "label": "gpt15", "base": "0x43020700", "size": "0x100", "interrupts": [{"irq": 451, "priority": 1, "name": "ccmpa"}, {"irq": 452, "priority": 1, "name": "ccmpb"}, {"irq": 453, "priority": 1, "name": "ovf"}], "compatible": "renesas,rz-gpt"}
+    ],
+    "timer_32bit_gtm": [
+      {"index": 0, "label": "gtm0", "base": "0x41800000", "size": "0x1000", "interrupts": [{"irq": 17, "priority": 1, "name": "overflow"}], "compatible": "renesas,rz-gtm"},
+      {"index": 1, "label": "gtm1", "base": "0x41801000", "size": "0x1000", "interrupts": [{"irq": 18, "priority": 1, "name": "overflow"}], "compatible": "renesas,rz-gtm"},
+      {"index": 2, "label": "gtm2", "base": "0x44000000", "size": "0x1000", "interrupts": [{"irq": 19, "priority": 1, "name": "overflow"}], "compatible": "renesas,rz-gtm"},
+      {"index": 3, "label": "gtm3", "base": "0x44001000", "size": "0x1000", "interrupts": [{"irq": 20, "priority": 1, "name": "overflow"}], "compatible": "renesas,rz-gtm"},
+      {"index": 4, "label": "gtm4", "base": "0x42c00000", "size": "0x1000", "interrupts": [{"irq": 21, "priority": 1, "name": "overflow"}], "compatible": "renesas,rz-gtm"},
+      {"index": 5, "label": "gtm5", "base": "0x42c01000", "size": "0x1000", "interrupts": [{"irq": 22, "priority": 1, "name": "overflow"}], "compatible": "renesas,rz-gtm"},
+      {"index": 6, "label": "gtm6", "base": "0x42c02000", "size": "0x1000", "interrupts": [{"irq": 23, "priority": 1, "name": "overflow"}], "compatible": "renesas,rz-gtm"},
+      {"index": 7, "label": "gtm7", "base": "0x42c03000", "size": "0x1000", "interrupts": [{"irq": 24, "priority": 1, "name": "overflow"}], "compatible": "renesas,rz-gtm"}
+    ]
+  },
   "capabilities": {
     "drp_ai":   true,
     "neon":     true,
@@ -179,7 +232,14 @@
       "base":            1207959552,
       "size_mib":        4096,
       "accessible_from": ["a55_cluster", "m33_sm"],
-      "cacheable":       true
+      "cacheable":       true,
+      "access_windows": {
+        "m33_sm": {
+          "base":     1073741824,
+          "size_mib": 256,
+          "note":     "CM33 DDR window per Renesas FSP drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/bsp_slave_address.h: CM33-secure 0x80000000 / CM33-non-secure 0x90000000 -> A55 0x40000000, 256 MiB.  In A55-physical terms 0x40000000..0x50000000, so the CM33 reaches only the first 128 MiB of ddr_main (base 0x48000000); the remaining 3968 MiB is unaddressable from the CM33 and must never receive an IPC carve-out that lists m33_sm as an endpoint."
+        }
+      }
     },
     {
       "name":            "ocram_low",
@@ -207,6 +267,7 @@
     "AC0 default per Alp Lab vendors/renesas-rzv2n/README.md — R9A09G056N44GBG#AC0 backs the E1M-V2N* and E1M-V2M* SoM SKUs.",
     "MIPI CSI-2 has 2 instances; MIPI DSI has 1.  PCIe Gen3 supports 1 or 2 lanes (no 4-lane on RZ/V2N — that's RZ/V2H).",
     "GPU and ISP are optional silicon and require software to detect them at runtime via the Renesas FSP.",
-    "On the V2N-M1 SoM, the DEEPX DX-M1 sits behind PCIe internally — see metadata/socs/deepx/dx/m1.json."
+    "On the V2N-M1 SoM, the DEEPX DX-M1 sits behind PCIe internally — see metadata/socs/deepx/dx/m1.json.",
+    "peripheral_instances (#1154): per-instance reg/interrupts for i2c (RIIC0-8), uart (SCI0-9), timer_32bit_gpt (GPT0-15) and timer_32bit_gtm (GTM0-7), mechanically projected by scripts/gen_soc_peripheral_instances.py from the vendored Zephyr SoC devicetree the M33 board .dts already #includes (dts/arm/renesas/rz/rzv/r9a09g056.dtsi, upstream Zephyr, west-managed — not a second hand-transcribed copy).  Sourcing from the n48gbg-labelled DTSI is correct for this n44 SoC spec: see the R9A09G056N44GBG variant note above (devicetree-identical for the M33 peripherals).  That DTSI carries no `clocks = <&cpg ...>` reference at all for any node in scope, so no `clocks` field is emitted.  `adc_12bit` and `gpio` ARE modelled in the DTSI (adc0-2, gpio0-11) but at a different instance granularity than their `peripherals:` count (channels/pins vs. units/ports) and are deliberately left unprojected rather than emit a count-mismatched list.  The other 21 `peripherals:` keys have no node in this devicetree at all.  Regenerate via `python3 scripts/gen_soc_peripheral_instances.py`; do not hand-edit."
   ]
 }

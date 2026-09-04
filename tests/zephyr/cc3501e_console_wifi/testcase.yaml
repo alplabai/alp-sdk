@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Native-sim tests for what `alp companion wifi status` PRINTS, driven through
+# the real console TU (src/zephyr/console/alp_console_companion_wifi.c) and the
+# real CC3501E host driver against a software model of the firmware SPI slave.
+#
+# Sibling of cc3501e_host_driver (which covers the driver's encode/decode in
+# isolation); this suite covers the reporting contract on top of it -- issue
+# #1387, a fabricated "rssi:  0 dBm" on a live connection.
+
+tests:
+  alp_sdk.cc3501e.console_wifi:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - cc3501e
+      - console
+      - wifi

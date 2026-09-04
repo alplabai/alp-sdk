@@ -137,7 +137,12 @@ alp_status_t alp_adc_read_raw(alp_adc_t *h, int32_t *raw_out)
 	if (!alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->read_raw(&h->state, raw_out);
+	alp_status_t rc;
+	if (h->state.ops->read_raw == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->read_raw(&h->state, raw_out);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -151,7 +156,12 @@ alp_status_t alp_adc_read_uv(alp_adc_t *h, int32_t *uv_out)
 		return ALP_ERR_NOT_READY;
 	}
 	int32_t      raw = 0;
-	alp_status_t rc  = h->state.ops->read_raw(&h->state, &raw);
+	alp_status_t rc;
+	if (h->state.ops->read_raw == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->read_raw(&h->state, &raw);
+	}
 	if (rc != ALP_OK) {
 		alp_handle_op_leave(&h->active_ops);
 		return rc;
@@ -184,7 +194,7 @@ void alp_adc_close(alp_adc_t *h)
 	 * bounded wait instead of a use-after-free (issue #629).  Losing
 	 * the CAS (already closed/closing/never-opened) makes this a
 	 * no-op, matching the existing void-close idempotency contract. */
-	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) {
+	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) {
 		return;
 	}
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {

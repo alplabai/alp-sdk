@@ -119,7 +119,7 @@
     "inference_arena_sram_kib": {
       "type": "integer",
       "minimum": 0,
-      "description": "Usable SRAM budget (KiB) for an NPU tensor arena on this SoC. The .alpmodel loader admits a blob only if its requires.sram_kib <= this budget. 0 = unknown/unbounded (fit-check skips). This is integration/partition-dependent silicon data; author per-SoC before production."
+      "description": "Usable SRAM budget (KiB) for an NPU tensor arena on this SoC. The .alpmodel loader admits a blob only if its requires.sram_kib <= this budget. 0 = unknown/unbounded (fit-check skips, and alp_model_select_result_t::arena_fit_unverified is set on the winning selection so the skip is not silent -- see src/backends/inference/alp_model_select.h). This is NOT a datasheet constant: it is an integration/partition decision (how much on-die SRAM this SKU's firmware reserves for the NPU tensor arena vs. everything else), which is why every real SoC in this repo carries 0 today (issue #1731) -- author per-SoC only when that partition decision is actually made, never a plausible-looking guess."
     },
     "tcm_kb": {
       "type": "integer",
@@ -134,6 +134,12 @@
       "description": "Always-on / utility SRAM that survives STOP mode."
     },
 
+    "zephyr_peripherals_dtsi": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_./-]+\\.dtsi$",
+      "description": "OPTIONAL `#include <...>` path of the alp-sdk devicetree overlay declaring THIS SoC's peripheral and NPU node set (e.g. \"alif/ensemble_e8_peripherals.dtsi\", which lives at zephyr/dts/alif/ensemble_e8_peripherals.dtsi). `scripts/gen_zephyr_board.py --emit zephyr-board` emits it verbatim into the generated board .dts. Declared per SoC rather than derived from `part` because a wrong overlay produces a board that builds and then misbehaves on silicon -- the E8's overlay declares `ethosu85`, while an E3 carries 2x Ethos-U55 and no U85 -- so a SoC with no overlay of its own must REFUSE to generate a board rather than inherit a sibling part's. Omit for SoCs the board generator does not fully cover."
+    },
+
     "peripherals": {
       "type": "object",
       "description": "Counts per peripheral kind. Studio uses these to validate which blocks fit on the SoC. Use the SAME keys across vendors so the studio can do generic matching.",
@@ -144,6 +150,40 @@
       "type": "array",
       "items": { "type": "string" },
       "description": "Subset of THIS file's `peripherals` keys whose count has no datasheet/DFP/HWRM/SVD citation (inherited from a sibling, carried forward from an early ingestion pass, or otherwise asserted without a primary source). Distinct from `pending_reference_manual_ingestion`, which marks the WHOLE block unaudited on an otherwise-placeholder file; this field flags specific gaps on a file that IS mostly grounded (issue #936). `gen_soc_caps.py` surfaces the listed keys as a comment above the SoC's block in soc_caps.h; `validate_metadata.py` warns (non-fatal) if a listed key isn't actually present in `peripherals`."
+    },
+
+    "peripheral_instances": {
+      "type": "object",
+      "description": "OPTIONAL sibling to `peripherals`, keyed by a SUBSET of `peripherals`' keys (issue #1154). `peripherals` stays the count map every existing consumer (gen_soc_caps.py, gen_support_matrix.py, validate_metadata.py, the studio compat pass) reads; this block adds, per key that has a grounded 1:1 source, one entry per physical instance with its register base/size and interrupt lines, mechanically projected from a vendored Zephyr SoC devicetree (see scripts/gen_soc_peripheral_instances.py's module docstring for the exact source + the documented coverage gaps). A key absent here is NOT a claim the class doesn't exist -- it means no grounded per-instance source has been projected yet, exactly like an absent `peripherals` key means unknown, not zero. Never hand-edit; regenerate.",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["index", "label", "base"],
+          "additionalProperties": false,
+          "properties": {
+            "index":       { "type": "integer", "minimum": 0, "description": "Instance/channel number, taken from the devicetree node's own `channel` cell (never inferred from array position)." },
+            "label":       { "type": "string", "description": "Devicetree node label, e.g. \"i2c8\"." },
+            "compatible":  { "type": "string", "description": "Devicetree `compatible` string the instance was matched on, e.g. \"renesas,rz-riic\"." },
+            "base":        { "type": "string", "pattern": "^0x[0-9a-f]+$", "description": "Register window base address, lowercase 0x-prefixed hex (matching the devicetree's own `i2c@44400400` literal style), from the devicetree node's `reg` property. A decimal or uppercase-hex value fails this pattern rather than being silently accepted -- see issue #1154's PR review." },
+            "size":        { "type": "string", "pattern": "^0x[0-9a-f]+$", "description": "Register window size in bytes, lowercase 0x-prefixed hex, from the same `reg` property." },
+            "interrupts": {
+              "type": "array",
+              "description": "One entry per devicetree `interrupts` cell pair, in source order.",
+              "items": {
+                "type": "object",
+                "required": ["irq"],
+                "additionalProperties": false,
+                "properties": {
+                  "irq":      { "type": "integer", "minimum": 0 },
+                  "priority": { "type": "integer", "minimum": 0 },
+                  "name":     { "type": "string", "description": "From the paired `interrupt-names` cell, when present." }
+                }
+              }
+            }
+          }
+        }
+      }
     },
 
     "capabilities": {
@@ -221,7 +261,8 @@
           "size_kib":         { "type": "integer" },
           "size_mib":         { "type": "integer" },
           "accessible_from":  { "type": "array", "items": { "type": "string" } },
-          "cacheable":        { "type": "boolean" }
+          "cacheable":        { "type": "boolean" },
+          "access_windows":   { "$ref": "#/$defs/access_windows" }
         }
       }
     },
@@ -234,6 +275,33 @@
   },
 
   "$defs": {
+    "access_windows": {
+      "type": "object",
+      "description": "OPTIONAL per-core addressable sub-window of the region, keyed by core id.  `accessible_from:` is a yes/no per core and cannot express \"this core reaches only PART of the region\" -- the RZ/V2N Cortex-M33 does exactly that (FSP bsp_slave_address.h: CM33-secure 0x80000000 / CM33-non-secure 0x90000000 -> A55 0x40000000, 256 MiB) while ddr_main spans 4 GiB.  Declare the reachable slice here and scripts/alp_orchestrate/carveout.py confines that core's IPC carve-outs to it instead of allocating at the region top, where the address does not exist for that core.  Omit for regions every accessible_from core reaches in full.",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]+$" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["base"],
+        "additionalProperties": false,
+        "anyOf": [
+          { "required": ["size_kib"] },
+          { "required": ["size_mib"] }
+        ],
+        "properties": {
+          "base": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Window base in the SAME address space as the region's own `base` (i.e. the physical/host view), NOT the aliased address the core issues."
+          },
+          "size_kib": { "type": "integer", "minimum": 1 },
+          "size_mib": { "type": "integer", "minimum": 1 },
+          "note": {
+            "type": "string",
+            "description": "Provenance for the window -- name the vendor header/manual it was read from."
+          }
+        }
+      }
+    },
     "core": {
       "type": "object",
       "required": ["id", "type", "count"],
@@ -280,11 +348,18 @@
         { "required": ["gops"] },
         { "required": ["tops"] }
       ],
+      "if": {
+        "properties": { "type": { "pattern": "^ethos-u" } },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["mac_per_cycle"]
+      },
       "properties": {
         "type":            { "type": "string", "description": "e.g. ethos-u55, ethos-u85, drp-ai3, dx-m1." },
         "subtype":         { "type": "string", "description": "e.g. high-perf (NPU-HP), high-efficiency (NPU-HE), generative (NPU-HG)." },
         "paired_core":     { "type": "string", "description": "`cores[].id` of the CPU core this NPU instance is wired to (Alif: the High-Efficiency M55 drives the 128-MAC high-efficiency Ethos-U55, the High-Performance M55 the 256-MAC high-perf one). Lets the build emit size the accelerator per target core instead of assuming the SoC's most-capable instance. Omit for a shared / non-core-paired NPU (e.g. the E8 U85 on the HG subsystem)." },
-        "mac_per_cycle":   { "type": "integer" },
+        "mac_per_cycle":   { "type": "integer", "description": "Required for every ethos-u* NPU -- the emit's accelerator sizing (scripts/alp_orchestrate/kconfig.py) and target derivation (scripts/alp_model/targets.py) both read npus[].mac_per_cycle directly for this backend; an absent value either raises KeyError (targets.py) or falls through to a silent 256-MAC default (kconfig.py) instead of failing at the metadata source (#1849)." },
         "freq_mhz":        { "type": "integer" },
         "gops":            { "type": "number", "description": "Giga ops per second.  Provide either gops or tops (= gops × 1000)." },
         "tops":            { "type": "number", "description": "Tera ops per second.  Provide either gops or tops." },
@@ -365,22 +440,29 @@
         "debug": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Debug-probe identity for this variant (#987), consumed by alp-sdk-vscode to generate a working cortex-debug launch.json without human input. Every key is optional -- an absent key is a published 'unknown', not a guess, and must be copied verbatim from the owning tool's own list or a working in-tree invocation; a plausible-looking guess fails at the probe rather than at validation.",
+          "description": "Debug-probe identity for this variant (#987), consumed by alp-sdk-vscode to generate a working cortex-debug launch.json without human input. Every key is optional -- an absent key is a published 'unknown', not a guess, and must be copied verbatim from the owning tool's own list or a working in-tree invocation; a plausible-looking guess fails at the probe rather than at validation. EXCEPTION: `jlink_flash_device` on an Alif Ensemble SoC is not optional -- see its own description below and scripts/validate_metadata.py::_check_soc_jlink_flash_device_declared.",
           "properties": {
             "pyocd_target": {
               "type": "string",
               "minLength": 1,
-              "description": "pyOCD target id (cortex-debug `targetId` for servertype `pyocd`). For Alif Ensemble parts this is the variant's own `order_code` -- confirmed 1:1 against the CMSIS-Pack index (pack AlifSemiconductor.Ensemble 2.2.0)."
+              "description": "pyOCD target id (cortex-debug `targetId` for servertype `pyocd`). For Alif Ensemble parts this is the variant's own `order_code` -- confirmed 1:1 against the CMSIS-Pack index (pack AlifSemiconductor.Ensemble 2.2.0, released 2026-06-30, github.com/alifsemi/alif_ensemble-cmsis-dfp tag v2.2.0). Note: the DFP checkout used elsewhere in this repo for order-code/core spelling is pinned at v2.1.0 (2025-12-19) -- 2.1.0 is simply older than this citation, not a mismatch; the order-code spelling itself is unchanged between the two (both list AE822FA0E5597BS0 / LS0 identically)."
             },
             "jlink_device": {
               "type": "object",
-              "description": "SEGGER J-Link **attach/debug** device name (cortex-debug `device` for servertype `jlink`) for a live core, keyed by `cores[].id`. On Alif Ensemble this is the GENERIC `Cortex-M55` for every M55 core, not a part-number profile: `scripts/bench/aen/bench-env.sh:99-111` documents two distinct J-Link identities and states the part-number profile 'will NOT connect to a live/running secure core' -- corroborated by `docs/_aen-runbook-section.md:251` (`Could not connect to the target device` when the part profile is used to attach) and `docs/aen-bench-bringup.md:14` (the generic profile is what is bench-proven to attach, CPUID `0x411FD220` / SW-DP IDR `0x4C013477`). The part-number profile is a *separate* fact -- see `jlink_flash_device`. Validated against cores[].id by scripts/validate_metadata.py::_check_soc_debug_probe_identity.",
+              "description": "SEGGER J-Link **attach/debug** device name (cortex-debug `device` for servertype `jlink`) for a live core, keyed by `cores[].id`. On Alif Ensemble this is the GENERIC `Cortex-M55` for every M55 core, not a part-number profile: `scripts/bench/aen/bench-env.sh:108-119` documents two distinct J-Link identities. On a J-Link DLL older than V9.46 the part-number profile 'will NOT connect to a live/running secure core' -- corroborated by `docs/_aen-runbook-section.md:255` (`Could not connect to the target device` when the part profile is used to attach on an old DLL) -- but on V9.46+ the part-number profile also connects to a live core (`docs/aen-bench-bringup.md:14`, bench-confirmed 2026-06-16); the generic profile remains the documented choice for read/RAM-run regardless of DLL version, and is what was originally bench-proven to attach (CPUID `0x411FD220` / SW-DP IDR `0x4C013477`). The part-number profile is a *separate* fact -- see `jlink_flash_device`. Validated against cores[].id by scripts/validate_metadata.py::_check_soc_debug_probe_identity.",
               "additionalProperties": { "type": "string", "minLength": 1 }
             },
             "jlink_flash_device": {
+              "oneOf": [
+                { "type": "string", "minLength": 1 },
+                { "type": "null" }
+              ],
+              "description": "SEGGER J-Link **part-number device profile**, used ONLY to unlock J-Link's built-in Flow D MRAM loader (`scripts/bench/aen/bench-env.sh:108-114`) -- on a J-Link DLL older than V9.46 it cannot attach to a live/running core (use `jlink_device` for that); on V9.46+ it also attaches, but `jlink_device`'s generic profile stays the documented choice for read/RAM-run regardless. It is not per-core: both `scripts/bench/aen/flash-jlink-hp.sh` and `flash-jlink-mramxip.sh` select the SAME device string regardless of which core they flash, so this is a single per-variant string, not a jlink_device-shaped map. Populate only from a canonical entry in the vendor's own device database (e.g. SEGGER J-Link DLL `JLINKARM_DEVICE_GetInfo` readback) -- never derive it from a naming convention, and never publish an order-code alias that merely happens to resolve. `null` is a DECLARED known-unknown: this variant's device profile is genuinely unresolved (e.g. an order code the vendor device DB does not carry under any spelling) -- consumers must refuse rather than silently choose another transport. tan's `flow_d_available()` tests key PRESENCE, so a present-but-null value deliberately reaches `plan_alif_mram_jlink` and becomes the loud refusal it already produces for every other malformed Flow D field, instead of a silent Flow-A (SE-UART) fallback. ABSENCE of this key is NOT a permitted way to spell 'unknown' on an Alif Ensemble SoC: a missing key is exactly what silently downgrades Flow D to Flow A with no diagnostic (#1295) -- every Alif Ensemble variant must publish either the string or explicit null, enforced by scripts/validate_metadata.py::_check_soc_jlink_flash_device_declared."
+            },
+            "expect_dpidr": {
               "type": "string",
-              "minLength": 1,
-              "description": "SEGGER J-Link **part-number device profile**, used ONLY to unlock J-Link's built-in Flow D MRAM loader (`scripts/bench/aen/bench-env.sh:99-102`) -- it cannot attach to a live/running core (use `jlink_device` for that) and is not per-core: both `scripts/bench/aen/flash-jlink-hp.sh` and `flash-jlink-mramxip.sh` select the SAME device string regardless of which core they flash, so this is a single per-variant string, not a jlink_device-shaped map. Populate only where an in-tree script proves the exact string -- do not derive it from a naming convention."
+              "pattern": "^0x[0-9A-Fa-f]{8}$",
+              "description": "The ADIv5 SW-DP IDR (DPIDR) this variant's debug port answers, as a 32-bit `0x`-prefixed hex constant -- the wrong-board guard a host flasher reads BEFORE any write, while the session is still read-only (#1355). This is a property of the DEBUG PORT, not of a core: it is one per-variant string, not a `jlink_device`-shaped per-core map. Populate ONLY from a measurement on real silicon (`Found SW-DP with ID <id>` in a J-Link/pyOCD connect log) -- an absent key is the correct published 'unknown' and simply leaves the guard unarmed, whereas a GUESSED value is strictly worse than absent: if it happens to match some other board on the same bench it makes the guard pass on exactly the board it exists to exclude. Consumed as `flash_args.expect_dpidr`, and PAIRED there with this variant's per-core `jlink_device` (the live-core read attach profile) -- a downstream consumer refuses a half-armed pair, so a variant publishing `expect_dpidr` must also publish `jlink_device` for every core (enforced by scripts/validate_metadata.py::_check_soc_debug_probe_identity)."
             },
             "openocd_config": {
               "type": "string",

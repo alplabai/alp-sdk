@@ -41,29 +41,33 @@ Expected output:
 [mproc] done
 ```
 
-### Real silicon (AEN dual-core, requires the peer firmware)
-
-```bash
-tan build --board ensemble_e8_dk/ae402fa0e5597le0/rtss_he examples/multicore/mproc-mailbox
-west flash
-```
+### Real silicon (AEN dual-core, both images built from this project)
 
 The peer-side firmware lives at
 [`examples/multicore/mproc-mailbox/peer/main.c`](peer/main.c) -- HE-side
 image that waits on the same mbox, reads the staged shmem
 payload, and writes back an echo via reverse send.
 
-Until the v0.4 dual-image build flow in
-`alplabai/alp-zephyr-modules` lands, the two halves build
-separately:
+`board.yaml` declares both `m55_hp` (`app: ./src`) and `m55_he`
+(`app: ./peer`) as real project cores, so one `tan build` now
+produces both images -- no more topology-default `alp-stock-shim`
+placeholder on the HE side:
 
 ```bash
-# HP side -- builds + runs the application.
-tan build --board ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/multicore/mproc-mailbox
+tan build --project examples/multicore/mproc-mailbox
+```
 
-# HE side -- builds the peer image manually.  Sysbuild picks
-# this up automatically once the v0.4 dual-image flow ships.
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_he examples/multicore/mproc-mailbox/peer
+Each core can also be built standalone with `west build` directly
+(e.g. while iterating on one side):
+
+```bash
+# HP side.
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/multicore/mproc-mailbox
+west flash
+
+# HE side.
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox/peer
+west flash
 ```
 
 Flash both into the matching SoC partitions (HP -> RTSS-HP slot,
@@ -85,5 +89,6 @@ HE -> RTSS-HE slot) and the roundtrip completes:
 - [`<alp/mproc.h>`](../../../include/alp/mproc.h) -- mailbox + shmem
   + hwsem API.
 - [`docs/v1.0-readiness.md`](../../../docs/v1.0-readiness.md) §4 --
-  this example is one of the two v1.0 reference-app flagships
-  still ahead (the peer-firmware half is what's left).
+  this example is one of the v1.0 reference-app flagships; both the
+  HP host and the HE peer now build from this one project, with
+  HiL verification of the round-trip still ahead.

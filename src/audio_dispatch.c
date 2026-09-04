@@ -184,10 +184,11 @@ alp_status_t alp_audio_in_read(alp_audio_in_t *in,
 	if (buf == NULL || frames == 0) return ALP_ERR_INVAL; /* param check before gate */
 	/* Counted via alp_handle_op_enter/leave (issue #629): read() can
 	 * block up to timeout_ms waiting on frames, so alp_audio_in_close()
-	 * drains this op with the sleep-poll alp_handle_begin_close_blocking()
-	 * (src/common/alp_slot_claim.c) instead of the busy-spin
-	 * alp_handle_begin_close() -- generalised from rpc_dispatch.c's
-	 * _rpc_op_enter()/_rpc_begin_close()/_rpc_drain() (GHSA-xhm8). */
+	 * drains this op with alp_handle_begin_close_blocking()
+	 * (src/common/alp_slot_claim.c), which sleeps between polls instead
+	 * of busy-spinning (issue #1114: unsafe regardless of op duration) --
+	 * generalised from rpc_dispatch.c's _rpc_op_enter()/
+	 * _rpc_begin_close()/_rpc_drain() (GHSA-xhm8). */
 	if (in == NULL || !alp_handle_op_enter(&in->lifecycle, &in->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}

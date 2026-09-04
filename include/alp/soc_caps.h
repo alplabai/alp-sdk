@@ -84,7 +84,7 @@
 #define ALP_SOC_RTC_COUNT               1
 #define ALP_SOC_WDT_COUNT               2
 #define ALP_SOC_QENC_COUNT              4
-#define ALP_SOC_TIMER_COUNT             16
+#define ALP_SOC_TIMER_COUNT             19
 #define ALP_SOC_PWM_COUNT               12
 #define ALP_SOC_ETHERNET_COUNT          1
 #define ALP_SOC_USB_COUNT               1
@@ -166,7 +166,7 @@
 #define ALP_SOC_RTC_COUNT               1
 #define ALP_SOC_WDT_COUNT               4
 #define ALP_SOC_QENC_COUNT              4
-#define ALP_SOC_TIMER_COUNT             16
+#define ALP_SOC_TIMER_COUNT             19
 #define ALP_SOC_PWM_COUNT               12
 #define ALP_SOC_ETHERNET_COUNT          1
 #define ALP_SOC_USB_COUNT               1
@@ -248,7 +248,7 @@
 #define ALP_SOC_RTC_COUNT               1
 #define ALP_SOC_WDT_COUNT               4
 #define ALP_SOC_QENC_COUNT              4
-#define ALP_SOC_TIMER_COUNT             16
+#define ALP_SOC_TIMER_COUNT             19
 #define ALP_SOC_PWM_COUNT               12
 #define ALP_SOC_ETHERNET_COUNT          1
 #define ALP_SOC_USB_COUNT               1
@@ -288,10 +288,10 @@
 #define ALP_SOC_RTC_COUNT               0
 #define ALP_SOC_WDT_COUNT               1
 #define ALP_SOC_QENC_COUNT              0
-#define ALP_SOC_TIMER_COUNT             0
+#define ALP_SOC_TIMER_COUNT             3
 #define ALP_SOC_PWM_COUNT               1
 #define ALP_SOC_ETHERNET_COUNT          0
-#define ALP_SOC_USB_COUNT               0
+#define ALP_SOC_USB_COUNT               1
 #define ALP_SOC_MIPI_CSI_COUNT          0
 #define ALP_SOC_MIPI_DSI_COUNT          0
 #define ALP_SOC_LCDIF_COUNT             0
@@ -368,10 +368,10 @@
 #define ALP_SOC_RTC_COUNT               1
 #define ALP_SOC_WDT_COUNT               4
 #define ALP_SOC_QENC_COUNT              0
-#define ALP_SOC_TIMER_COUNT             0
+#define ALP_SOC_TIMER_COUNT             32
 #define ALP_SOC_PWM_COUNT               0
-#define ALP_SOC_ETHERNET_COUNT          0
-#define ALP_SOC_USB_COUNT               1
+#define ALP_SOC_ETHERNET_COUNT          2
+#define ALP_SOC_USB_COUNT               2
 #define ALP_SOC_MIPI_CSI_COUNT          2
 #define ALP_SOC_MIPI_DSI_COUNT          1
 #define ALP_SOC_LCDIF_COUNT             0

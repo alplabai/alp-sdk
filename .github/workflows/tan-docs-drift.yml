@@ -1,12 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Advisory: alp-sdk deliberately tracks tan-cli's `latest` (docs/cli.md
-# explains why) -- a tan release changes documented CLI behaviour with no
-# version pin to buffer alp-sdk's own docs from it. This installs `tan` by
-# the EXACT path docs/cli.md itself documents (proving that path still
-# works too), then asserts every `tan` subcommand + docs/cli.md-tabulated
-# flag alp-sdk's docs name still exists and is listed in that real binary's
-# `--help` output -- see scripts/check_tan_docs_surface.py's docstring for
+# Advisory: alp-sdk `dev` tracks tan-cli `dev` for continuous drift
+# detection. tan-cli v0.5.0 cut the frozen-Rust-to-Python transition and
+# v0.5.1 followed with fixes on top -- this gate deliberately still builds
+# from tan-cli's `dev` branch rather than `releases/latest`, so a
+# subcommand/flag rename lands here as caught drift before the next tag,
+# not after. This checks out the real Python source from tan-cli `dev`,
+# installs it, then asserts every documented
+# subcommand/flag/invocation exists in that binary's help grammar. See
+# scripts/check_tan_docs_surface.py's docstring for
 # the exact extraction rules and everything this deliberately does NOT check
 # (whether a flag actually parses, output text, exit codes, semantic
 # behaviour, Windows).
@@ -31,6 +33,12 @@ on:
       - "docs/cli.md"
       - "docs/getting-started.md"
       - "docs/troubleshooting.md"
+      # check_tan_docs_surface.py scans examples/**/README.md for full `tan ...`
+      # invocations, so a rejected invocation added there must be able to
+      # trigger this gate. Without this entry the scan existed and could never
+      # fire on the files it covers -- which is how nine rejected `tan build`
+      # spellings accumulated across the example READMEs unnoticed.
+      - "examples/**/README.md"
       - "scripts/bootstrap.sh"
       - "scripts/check_tan_docs_surface.py"
       - ".github/workflows/tan-docs-drift.yml"
@@ -45,22 +53,36 @@ concurrency:
 
 jobs:
   tan-docs-drift:
-    name: "tan-docs-drift · subcommand + flag existence (advisory)"
+    name: "tan-docs-drift · Python Tan surface (advisory)"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 5
+
+      - name: Checkout tan-cli Python port
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          repository: alplabai/tan-cli
+          ref: dev
+          path: .tan-cli
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 
-      - name: Install tan (docs/cli.md's own documented install.sh path)
-        run: |
-          curl -fsSL -o /tmp/tan-install.sh https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh
-          sh /tmp/tan-install.sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install Python Tan from source
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        run: python3 -m pip install ./.tan-cli/python
 
       - name: Sanity-check tan is really on PATH
         run: tan --version

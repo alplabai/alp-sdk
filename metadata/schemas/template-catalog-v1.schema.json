@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/template-catalog-v1.schema.json",
   "title": "ALP Template Catalog v1",
-  "description": "Validates metadata/templates/catalog-v1.json -- the declarative catalog of project templates (app archetypes) a frontend (alp-sdk-vscode, Alp Studio, `alp new`) reads to discover 'what starter projects exist + what each needs' instead of ad-hoc example copying. Each record maps to a CANONICAL existing example under examples/ (never a copy -- the example IS the template's rendered form) and declares its support matrix, required portable-API/library/chip surface, user-owned vs SDK-generated files, tunable parameters, and test wiring. scripts/check_template_catalog.py validates the catalog against this schema AND drift-checks that every referenced example/testcase.yaml/library/chip is real, so a template can never point at a path or dependency that doesn't exist. This is the catalog + schema + drift-validation FOUNDATION (epic #610 SS3); the deterministic render/preview API (materialising a template into a fresh directory and running its test) is a separate, deliberately-scoped follow-up -- NOT part of this contract. Stability: schemaVersion 1 is additive-only (new optional fields only); a breaking change to the shape ships as schemaVersion 2.",
+  "description": "Validates metadata/templates/catalog-v1.json -- the declarative catalog of project templates (app archetypes) a frontend (alp-sdk-vscode, Alp Studio, `alp generate`) reads to discover 'what starter projects exist + what each needs' instead of ad-hoc example copying. Each record maps to a CANONICAL existing example under examples/ (never a copy -- the example IS the template's rendered form) and declares its support matrix, required portable-API/library/chip surface, user-owned vs SDK-generated files, tunable parameters, and test wiring. scripts/check_template_catalog.py validates the catalog against this schema AND drift-checks that every referenced example/testcase.yaml/library/chip is real, so a template can never point at a path or dependency that doesn't exist. This is the catalog + schema + drift-validation FOUNDATION (epic #610 SS3); the deterministic render/preview API (materialising a template into a fresh directory, substituting parameters) is implemented and exposed as `alp generate <id> <dest>` -- a separate `scripts/alp_template.py` `validate()` gate exists too, but stays a library/test entry point (it needs ZEPHYR_BASE + twister) and is not reached from that CLI path. Stability: schemaVersion 1 is additive-only (new optional fields only); a breaking change to the shape ships as schemaVersion 2.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "description", "templates"],
@@ -23,13 +23,13 @@
       "additionalProperties": false,
       "required": [
         "id", "title", "archetype", "example", "description",
-        "supported", "requires", "files", "parameters", "test", "status"
+        "supported", "requires", "files", "parameters", "test", "status", "cores"
       ],
       "properties": {
         "id": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9-]*$",
-          "description": "Stable catalog key a frontend selects a template by (e.g. `alp new --template <id>`, once the render follow-up exists)."
+          "description": "Stable catalog key a frontend selects a template by (e.g. `alp generate <id> <dest>`)."
         },
         "title": {
           "type": "string",
@@ -37,8 +37,8 @@
         },
         "archetype": {
           "type": "string",
-          "enum": ["minimal", "peripheral", "sensor", "multicore-rpmsg", "gateway", "edge-ai", "diagnostics", "iot"],
-          "description": "The app-shape class this template represents. One template per archetype in v1."
+          "enum": ["minimal", "peripheral", "sensor", "multicore-rpmsg", "multicore-mailbox", "gateway", "edge-ai", "diagnostics", "iot"],
+          "description": "The app-shape class this template represents. One template per archetype in v1 -- still true after issue #1275 added `multicore-mailbox` alongside `multicore-rpmsg`: two multicore archetypes now, differentiated by IPC transport (rpmsg vs raw shmem+hw mailbox), not a second template for either one."
         },
         "example": {
           "type": "string",
@@ -102,7 +102,7 @@
               "type": "array",
               "uniqueItems": true,
               "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
-              "description": "Curated library tokens the board.yaml `libraries:`/`cores.<id>.libraries:` selects (ADR 0018 vocabulary -- scripts/alp_project_emit.py's _LIBRARY_KCONFIG union metadata/libraries/*.yaml). Drift-checked against that real vocabulary."
+              "description": "Curated library tokens the board.yaml `libraries:`/`cores.<id>.libraries:` selects (ADR 0018 vocabulary -- the metadata/libraries/*.yaml manifest names, each reachable either by its legacy token in metadata/library-aliases-v1.json or by its own name with hyphens folded to underscores; globbed by scripts/alp_orchestrate/libraries.py's available_libraries(). The _LIBRARY_KCONFIG dict this description used to name was retired when the library layer became manifest-driven). Drift-checked against that real vocabulary."
             },
             "chips": {
               "type": "array",
@@ -151,6 +151,33 @@
               "description": "Which harness(es) actually exercise this template today. `yocto_host` names a Linux-side slice that exists but is not covered by the Zephyr twister gate (see the record's optional `note`)."
             }
           }
+        },
+        "cores": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "os"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]*$",
+                "description": "Core id -- must match a key under the referenced example's own board.yaml `cores:` mapping."
+              },
+              "dir": {
+                "type": "string",
+                "description": "That core's `cores.<id>.app` value, transcribed verbatim from the referenced example's board.yaml. Omitted for a core with no `app:` (an `os: off` slice)."
+              },
+              "os": {
+                "type": "string",
+                "enum": ["zephyr", "yocto", "baremetal", "off"],
+                "description": "That core's EFFECTIVE resolved runtime (board.yaml's own `os:` when it sets one, else the SoC core-class default) -- the same vocabulary metadata/schemas/board.schema.json's `core_entry.os` uses."
+              }
+            }
+          },
+          "description": "Per-core map of the referenced example's own board.yaml `cores:` mapping -- duplicates what `board.yaml` already says (one machine source per fact is the repo's stated principle), so scripts/check_template_catalog.py drift-checks this against the example's real board.yaml on every run: same ids, same dirs, same effective os, or the gate fails. scripts/alp_template.py's render_to_envelope() reads this to know which CMakeLists.txt file belongs to which Zephyr core when re-deriving a `--core` literal for a cross-family sku, instead of assuming a single app core."
         },
         "files": {
           "type": "object",
@@ -247,7 +274,7 @@
         "constraints": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Validation bounds for the render follow-up. Optional; only the bounds that genuinely apply to this knob.",
+          "description": "Validation bounds enforced by `alp generate`'s parameter substitution (scripts/alp_template.py's `_check_constraints`). Optional; only the bounds that genuinely apply to this knob.",
           "properties": {
             "minimum": { "type": "integer" },
             "maximum": { "type": "integer" },

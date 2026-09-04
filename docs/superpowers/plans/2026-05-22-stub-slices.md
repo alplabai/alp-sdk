@@ -1,5 +1,10 @@
 # Stub Registry Slices (5 + 7 + 8) Implementation Plan
 
+> **STATUS — LANDED, and gone well past "stub".** `src/backends/`
+> for camera, power, display and gpu2d all carry real per-silicon
+> bodies today (not just the scaffolding this plan shipped). Kept for
+> implementation-history context.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development to dispatch ONE subagent per subsystem.
 
 **Goal:** Install registry scaffolding (dispatcher + ops vtable + single stub backend + test harness) for Camera, Power, Display, GPU2D. NO real bodies. Each stub references a real GitHub tracking issue.

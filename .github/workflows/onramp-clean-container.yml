@@ -80,8 +80,8 @@
 #     arm-zephyr-eabi --no-hosttools` download, a few hundred MB per
 #     pr-twister.yml's own measurement): walks the REST of the
 #     documented quickstart -- installs `tan`, runs `tan bootstrap`,
-#     installs the toolchain, runs `tan sdk switch` + `tan --project
-#     ... build` against the curated gpio-button-led example, and
+#     installs the toolchain, runs `tan build --sdk-root ... --project ...`
+#     against the curated gpio-button-led example, and
 #     asserts a real `zephyr.elf` came out the other end.  This is the
 #     expensive half (defects 3, 4) and does NOT run on every PR by
 #     default -- a doc-only PR that breaks this path normally waits for
@@ -91,12 +91,11 @@
 #     #1024 addition: this job used to assemble the workspace with
 #     `bash scripts/bootstrap.sh` directly, same as prereqs-and-bootstrap
 #     above -- so nothing anywhere ever ran `tan bootstrap` itself, the
-#     Rust binary's own subcommand that docs/getting-started.md's
+#     user command that docs/getting-started.md's
 #     quickstart actually tells a customer to run. `tan bootstrap` is
-#     documented as "a thin wrapper" around scripts/bootstrap.sh, not a
-#     separate implementation; this job now proves that delegation for
-#     real instead of assuming it. It also now runs `tan init` to
-#     scaffold a fresh project (the other forwarded verb #1024 named)
+#     now Python and consumes the same metadata/bootstrap.json contract as
+#     the SDK scripts; this job proves that implementation too. It also runs `tan init` to
+#     scaffold a fresh project (the other onboarding path #1024 named)
 #     and builds THAT, separately from the curated gpio-button-led
 #     build above -- the existing build only ever exercises a project
 #     that already existed in the repo, never one `tan init` produced.
@@ -152,7 +151,12 @@ jobs:
     name: onramp · bare container -- prereqs + bootstrap.sh (docs §1)
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # #1477: worst observed successful run 61s across 30 sampled runs
+    # (corrected from a 3-run sample that produced an unnecessary
+    # 10->25 raise). timeout-minutes unchanged from before this issue;
+    # its 9 flagged steps are each 1min below (sum 9min, real headroom
+    # under 10).
+    timeout-minutes: 30
     container:
       image: ubuntu:24.04
     steps:
@@ -163,7 +167,11 @@ jobs:
       # premise: if these ever stop being absent (a base-image change
       # upstream), this job silently stops testing what it claims to.
       - name: Assert the base image is actually bare (git/curl/cmake/python3/ninja/xz/wget absent)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         shell: bash
+        # #1477: worst observed successful run <1s across 30 sampled runs.
         run: |
           set -uo pipefail
           missing=0
@@ -176,8 +184,11 @@ jobs:
           exit "${missing}"
 
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        # #1477: worst observed successful run 4s across 30 sampled runs.
+        timeout-minutes: 5
         with:
+          persist-credentials: false
           path: alp-sdk
           fetch-depth: 1
 
@@ -185,15 +196,24 @@ jobs:
       # quickstart -- `git`/`curl` first, since bootstrap.sh itself
       # can't be fetched without them.
       - name: Install git + curl (docs/getting-started.md's own prerequisite note)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        # #1477: worst observed successful run 38s across 30 sampled runs
+        # -- the worst step in this job; still fits the 1min budget.
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git curl ca-certificates
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh update
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh install -y --no-install-recommends git curl ca-certificates
 
       # scripts/bootstrap.sh should refuse HERE (cmake/python3/ninja/xz/wget
       # still absent) with a curated per-tool install hint, not a bare
       # tool-name list -- the exact defect #949 addendum item 2 fixes.
       - name: bootstrap.sh refuses with an actionable per-tool hint (expect failure)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         working-directory: alp-sdk
+        # #1477: worst observed successful run <1s across 30 sampled runs.
         run: |
           set +e
           out="$(bash scripts/bootstrap.sh 2>&1)"
@@ -205,9 +225,10 @@ jobs:
             exit 1
           fi
           # Every missing tool's curated install command (from
-          # metadata/bootstrap.json's prerequisites.install.linux, via
-          # bootstrap.sh's drift-gated PREREQ_HINT_LINUX mirror) must
-          # actually appear -- a bare tool-name-only message is the
+          # metadata/bootstrap.json's prerequisites.install.linux.apt, via
+          # bootstrap.sh's drift-gated PREREQ_HINT_APT mirror -- renamed
+          # from PREREQ_HINT_LINUX by issue #1464's package-manager split)
+          # must actually appear -- a bare tool-name-only message is the
           # pre-#978/#949 regression this asserts against.
           for hint in \
             "sudo apt-get install -y cmake" \
@@ -221,7 +242,7 @@ jobs:
             esac
           done
 
-      # Install EXACTLY docs/getting-started.md:160's Debian/Ubuntu one-liner
+      # Install EXACTLY docs/getting-started.md:194's Debian/Ubuntu one-liner
       # -- byte-for-byte, git/curl included even though the earlier step
       # already installed them (apt no-ops on an already-installed package)
       # -- so this step stays a mirror of the doc and any future divergence
@@ -229,11 +250,15 @@ jobs:
       # superset the doc never told a customer to install (this job used to
       # install "plus the newly-declared xz/wget prerequisites" beyond the
       # doc's own list, which is exactly how the doc fell behind in the
-      # first place -- see docs/getting-started.md:160 for the source of
+      # first place -- see docs/getting-started.md:194 for the source of
       # truth this must keep matching).
       - name: Install prerequisites (docs/getting-started.md section 1's Debian/Ubuntu one-liner, verbatim)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        # #1477: worst observed successful run 14s across 30 sampled runs.
         run: |
-          apt-get install -y --no-install-recommends \
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
 
       - name: bootstrap.sh succeeds once every prerequisite is installed
@@ -245,6 +270,8 @@ jobs:
         # download and can absorb it. This job's job is proving the
         # venv + prerequisite layer alone, not re-proving west.yml
         # resolves (pr-twister.yml already covers that on every PR).
+        # #1477: worst observed successful run 14s across 30 sampled runs.
+        timeout-minutes: 5
         run: |
           # set -e (not set -euo pipefail) is deliberate here: the refusal
           # step above (line ~131) captures rc/output BEFORE dying for the
@@ -277,6 +304,10 @@ jobs:
       # kept out of the "Install prerequisites" step above so that step
       # stays an honest mirror of docs/getting-started.md's own one-liner.
       - name: Install shellcheck
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        # #1477: worst observed successful run <5s across 30 sampled runs.
         run: apt-get install -y --no-install-recommends shellcheck
 
       # #1024: scripts/bootstrap.sh IS already shellchecked -- but only by
@@ -284,18 +315,22 @@ jobs:
       # repo actually invokes in CI (every `test-all.sh` reference under
       # .github/workflows/ is a comment pointing at the local-CI
       # equivalent, not a `run:` step). tan-cli's install.sh -- the
-      # `curl | sh` one-liner docs/getting-started.md's quickstart and
-      # the "Smoke-run install.sh" step below both use -- has never been
+      # `curl | sh` release installer and the "Smoke-run install.sh" step
+      # below both use -- has never been
       # shellchecked anywhere in either repo. `-S error` matches
       # stage_shellcheck's own severity for non-test-all.sh scripts, so
       # this does not diverge from the local gate's bar.
       - name: Shellcheck scripts/bootstrap.sh + tan-cli's install.sh
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         working-directory: alp-sdk
         shell: bash
+        # #1477: worst observed successful run <5s across 30 sampled runs.
         run: |
           set -euo pipefail
           shellcheck -S error scripts/bootstrap.sh
-          curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh -o /tmp/tan-install.sh
+          curl -fsSL --retry 3 --retry-delay 5 https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh -o /tmp/tan-install.sh
           # --shell=sh: install.sh's own shebang is `#!/usr/bin/env sh`
           # (POSIX dash-compatible, not bash) -- shellcheck auto-detects
           # this from the shebang line it just downloaded, but pinning it
@@ -303,16 +338,18 @@ jobs:
           # cannot silently switch this to bash-dialect checking instead.
           shellcheck --shell=sh -S error /tmp/tan-install.sh
 
-      # #1024: the "Install tan" step in full-quickstart-build below
-      # already runs this exact `curl | sh` one-liner -- but that job
-      # only runs on schedule/workflow_dispatch/a labelled PR, so a
-      # broken installer sits uncaught for up to a week. This job already
+      # #1024: keep the published release installer healthy even while the
+      # v0.5 development quickstart below installs tan-cli/dev. This job already
       # is the bare-container premise install.sh's smoke run needs (only
       # docs/getting-started.md's own prerequisites on PATH), so running
       # it here too costs nothing extra and closes that window to every
       # relevant PR.
-      - name: Smoke-run install.sh on this bare container (docs quickstart step 2)
+      - name: Smoke-run the published release installer on this bare container
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         shell: bash
+        # #1477: worst observed successful run <5s across 30 sampled runs.
         run: |
           set +e
           out="$(curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh -s -- --dir /tmp/tan-smoke-bin --no-modify-path 2>&1)"
@@ -333,11 +370,14 @@ jobs:
     name: onramp · macos-latest -- prereqs + bootstrap.sh --no-west (docs §1, #1033)
     if: github.event_name != 'schedule'
     runs-on: macos-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        # #1477: worst observed successful run 4s across 30 sampled runs.
+        timeout-minutes: 5
         with:
+          persist-credentials: false
           path: alp-sdk
           fetch-depth: 1
 
@@ -389,6 +429,9 @@ jobs:
       # than silently degrading to a no-op on a runner image that moved
       # Homebrew somewhere this loop doesn't check.
       - name: Hide xz + wget (and prove neither remains resolvable)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         shell: bash
         run: |
           set -euo pipefail
@@ -417,6 +460,9 @@ jobs:
       # python3 ninja) on Darwin -- this must succeed with xz/wget
       # unreachable, and must not name either as missing.
       - name: bootstrap.sh --no-west succeeds on macOS without xz/wget
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         working-directory: alp-sdk
         shell: bash
         run: |
@@ -472,6 +518,15 @@ jobs:
        contains(github.event.pull_request.labels.*.name, 'run-full-quickstart'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # #1477: the per-step timeout-minutes below are a flat 3min default,
+    # not measurements -- this job's own `if:` above gates it to
+    # schedule/workflow_dispatch/a labelled PR, and none of those fired in
+    # the 3 most-recent successful runs of this file sampled for #1477, so
+    # no real per-step duration was available. 3min is comfortably inside
+    # this job's pre-existing 30min ceiling (their sum is 21min) and in
+    # line with the per-step caps measured on this file's sibling
+    # `prereqs-and-bootstrap` job, whose steps do the same class of work
+    # (apt install / bootstrap.sh runs) with real timings.
     container:
       image: ubuntu:24.04
     steps:
@@ -484,46 +539,63 @@ jobs:
       # mirrors prereqs-and-bootstrap's own "Install git + curl" /
       # "Install prerequisites" split above.
       - name: Install checkout prerequisites (git/curl/ca-certificates -- not part of docs/getting-started.md section 1)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git curl ca-certificates
+          apt-get update -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3  # apt-bounded:allow (pre-checkout -- scripts/ci/apt-bounded.sh isn't on disk yet, #1575)
+          apt-get install -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates  # apt-bounded:allow (pre-checkout -- scripts/ci/apt-bounded.sh isn't on disk yet, #1575)
 
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
         with:
+          persist-credentials: false
           path: alp-sdk
           fetch-depth: 1
 
-      # Install EXACTLY docs/getting-started.md:160's Debian/Ubuntu one-liner
+      - name: Checkout tan-cli Python port
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          repository: alplabai/tan-cli
+          ref: dev
+          path: tan-cli
+          fetch-depth: 1
+
+      # Install EXACTLY docs/getting-started.md:194's Debian/Ubuntu one-liner
       # -- byte-for-byte (git/curl already present from the step above, kept
       # here anyway so this stays a mirror of the doc and any future
       # divergence between the two reddens this job).
       - name: Install prerequisites (docs/getting-started.md section 1's Debian/Ubuntu one-liner, verbatim)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        # #1477: worst observed successful run 14s across 30 sampled runs.
         run: |
-          apt-get install -y --no-install-recommends \
+          "$GITHUB_WORKSPACE"/alp-sdk/scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
 
-      - name: Install tan (docs quickstart step 2 -- the documented install.sh one-liner)
+      - name: Install tan-cli/dev (docs quickstart step 2)
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         shell: bash
         run: |
           set -euo pipefail
-          # GHA's default shell is `bash -e {0}`, which does NOT set
-          # pipefail: on a 404, `curl -f` exits nonzero but `sh` reads
-          # empty stdin and exits 0, so the pipeline (graded on the LAST
-          # command) reports success and the real failure only surfaces
-          # two steps later as "tan: command not found". `set -o pipefail`
-          # makes the pipeline fail on curl's exit code instead.
-          curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
-          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+          python3 -m venv tan-cli/.venv
+          tan-cli/.venv/bin/python -m pip install ./tan-cli/python
+          echo "${GITHUB_WORKSPACE}/tan-cli/.venv/bin" >> "${GITHUB_PATH}"
 
       # #1024: this used to be a raw `bash scripts/bootstrap.sh` call,
       # same as prereqs-and-bootstrap above -- which means no CI job
       # anywhere ever ran `tan bootstrap` itself, the command
       # docs/getting-started.md's quickstart actually tells a customer to
       # run. Moved after "Install tan" above (was before it) so `tan` is
-      # on PATH here. `tan bootstrap` is documented as "a thin wrapper"
-      # around scripts/bootstrap.sh -- this proves the wrapper's own
-      # argument parsing and delegation, not just the script underneath.
+      # on PATH here. Python Tan consumes metadata/bootstrap.json directly;
+      # this proves its argument parsing and bootstrap implementation, not
+      # only the SDK shell script's parallel path.
       - name: tan bootstrap (docs quickstart step 3 -- via the tan binary, not bash directly)
         working-directory: alp-sdk
         run: tan bootstrap --sdk-root "${PWD}"
@@ -556,8 +628,9 @@ jobs:
           PY
 
       - name: Cache Zephyr SDK (arm-zephyr-eabi only)
-        uses: actions/cache@v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         id: zephyr-sdk-cache
+        timeout-minutes: 15
         with:
           path: zephyr-sdk
           key: onramp-sdk-${{ env.ZEPHYR_SDK_VERSION }}-arm-zephyr-eabi-${{ runner.os }}
@@ -582,14 +655,32 @@ jobs:
         # builtin and this container's /bin/sh is dash, which has `.` instead
         # and answers `source: not found` with exit 127 before west is reached.
         shell: bash
+        timeout-minutes: 5
         run: |
           source .venv/bin/activate
-          west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
-              --install-dir "${GITHUB_WORKSPACE}/zephyr-sdk"
+          # #1549: same retry as pr-twister.yml's `west sdk install` step
+          # -- see there for why the command is safely re-runnable
+          # (tempdir download, sha256, shutil.move last; "already
+          # installed ... Using it." on a re-run) and why the git
+          # http.lowSpeed* guard does NOT apply to it: this one fetches
+          # with python-requests, not git, so a stall is bounded by this
+          # step's timeout-minutes, and the retry covers 5xx/reset.
+          for attempt in 1 2 3; do
+            [ "$attempt" = 1 ] || rm -rf "${GITHUB_WORKSPACE:?}/zephyr-sdk"
+            west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
+                --install-dir "${GITHUB_WORKSPACE}/zephyr-sdk" && break
+            rc=$?
+            if [ "$attempt" = 3 ]; then
+              echo "::error::west sdk install failed after 3 attempts (exit $rc)"
+              exit "$rc"
+            fi
+            echo "west sdk install failed (exit $rc); retry $attempt/3 in 15s" >&2
+            sleep 15
+          done
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
 
-      - name: tan sdk switch + tan build (docs quickstart -- the documented per-project pin)
+      - name: tan build (docs quickstart -- explicit SDK checkout)
         working-directory: alp-sdk
         env:
           ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk
@@ -604,8 +695,7 @@ jobs:
           # PyYAML/jsonschema, so `tan build` fails -- matches
           # pr-getting-started-aen801.yml's own venv activation.
           source ../.venv/bin/activate
-          tan --project examples/peripheral-io/gpio-button-led sdk switch "${PWD}"
-          tan --project examples/peripheral-io/gpio-button-led build
+          tan build --project examples/peripheral-io/gpio-button-led --sdk-root "${PWD}"
 
       - name: Assert a real ELF came out the other end
         working-directory: alp-sdk
@@ -621,19 +711,19 @@ jobs:
 
       # #1024: the build above only ever exercises gpio-button-led, an
       # example that already existed in the repo -- it never proves `tan
-      # init` (docs/getting-started.md's own forwarded-verb path for a
+      # init` (docs/getting-started.md's native Python path for a
       # first-time customer scaffolding THEIR OWN project) produces
       # something `tan build` can actually build. `--sdk-root` here makes
       # the scaffolded project resolve `sdk` readiness on its own --
       # verified locally: `tan init --sdk-root <path>` writes
       # `.alp/sdk-path` itself, and `tan build`'s own readiness report
-      # shows `[+] sdk` from that alone, no separate `tan sdk switch`
+      # shows `[+] sdk` from that alone, no separate persistent selection
       # call needed for a freshly-init'd project.
-      - name: tan init (docs' forwarded-verb onboarding path -- scaffold a fresh project)
+      - name: tan init (docs onboarding path -- scaffold a fresh project)
         working-directory: alp-sdk
         run: |
-          tan init --sdk-root "${PWD}" --destination "${RUNNER_TEMP}/tan-init-smoke" \
-              --template zephyr-app --som E1M-AEN801 --ci
+          tan init --sdk-root "${PWD}" --destination "${RUNNER_TEMP}" \
+              --name tan-init-smoke --template zephyr-app --som E1M-AEN801
 
       - name: tan build the tan-init-scaffolded project
         working-directory: alp-sdk
@@ -643,11 +733,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Same reason as the "tan sdk switch + tan build" step above:
+          # Same reason as the curated-example build step above:
           # each GHA step is a fresh shell, so `west` needs the venv
           # re-activated here too.
           source ../.venv/bin/activate
-          tan --project "${RUNNER_TEMP}/tan-init-smoke" build
+          tan build --project "${RUNNER_TEMP}/tan-init-smoke"
 
       - name: Assert the tan-init-scaffolded project produced a real ELF too
         shell: bash

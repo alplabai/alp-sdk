@@ -11,8 +11,9 @@
  * alp_last_error() == ALP_ERR_NOSUPPORT (or precisely-stamped
  * ALP_ERR_INVAL for malformed inputs).
  *
- * Real Wi-Fi + MQTT round-trips happen in HW-in-loop CI on
- * AEN-Zephyr (the hil-aen runner).
+ * Real Wi-Fi + MQTT round-trips happen on real AEN-Zephyr silicon via
+ * an explicitly-invoked bench run (no CI runner drives this bench) --
+ * see docs/ci/HW-IN-LOOP.md.
  */
 
 #include <zephyr/ztest.h>

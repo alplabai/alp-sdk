@@ -38,7 +38,9 @@
 #include <alp/soc_caps.h>
 #include <alp/storage.h>
 
+#include "alp_errno.h"
 #include "alp_checked_arith.h"
+#include "alp_slot_claim.h"
 #include "storage_ops.h"
 
 typedef struct lfs_state {
@@ -58,9 +60,13 @@ static bool        _lfs_in_use[CONFIG_ALP_SDK_STORAGE_LITTLEFS_HANDLE_POOL];
 static lfs_state_t *_lfs_alloc(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_STORAGE_LITTLEFS_HANDLE_POOL; ++i) {
-		if (!_lfs_in_use[i]) {
+		/* Atomic claim (src/common/alp_slot_claim.h, issue #1115):
+		 * a compare-exchange, so exactly one concurrent opener wins the
+		 * slot.  in_use lives in a parallel array rather than inside the
+		 * slot struct, so the winner may zero the whole slot afterwards --
+		 * no offsetof form is needed here. */
+		if (alp_slot_try_claim(&_lfs_in_use[i])) {
 			memset(&_lfs_pool[i], 0, sizeof(_lfs_pool[i]));
-			_lfs_in_use[i] = true;
 			return &_lfs_pool[i];
 		}
 	}
@@ -71,7 +77,7 @@ static void _lfs_free(lfs_state_t *s)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_STORAGE_LITTLEFS_HANDLE_POOL; ++i) {
 		if (&_lfs_pool[i] == s) {
-			_lfs_in_use[i] = false;
+			alp_slot_release(&_lfs_in_use[i]);
 			return;
 		}
 	}
@@ -79,29 +85,13 @@ static void _lfs_free(lfs_state_t *s)
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENODEV:
-	case -ENOENT:
-		return ALP_ERR_NOT_READY;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	case -ERANGE:
-		return ALP_ERR_OUT_OF_RANGE;
-	case -ENOMEM:
-	case -ENOSPC:
-		return ALP_ERR_NOMEM;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * BEHAVIOUR CHANGE: this switch had no -EAGAIN and/or no -ETIMEDOUT
+	 * arm, so a driver-reported deadline surfaced as ALP_ERR_IO.  Callers
+	 * can now receive ALP_ERR_TIMEOUT here, and ALP_ERR_NOT_READY /
+	 * ALP_ERR_NOMEM / ALP_ERR_NOSUPPORT for the other arms the switch
+	 * lacked.  Every arm it DID carry agreed with the baseline. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 /*

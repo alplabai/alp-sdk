@@ -1,7 +1,17 @@
 # Stage 2 — Real NPU compilers + runtimes (DRP-AI + DEEPX) — design
 
 - **Date:** 2026-05-27
-- **Status:** Design / grounding (kickoff for the Stage-2 cycle — no code yet beyond the adapter probes)
+- **Status:** **Active, largely wired.** Both host compiler adapters are real,
+  not stubs: `scripts/alp_model/adapters/deepx.py`'s `DeepxAdapter.compile()`
+  (real `dxcom` compile, landed v0.6.0) and `scripts/alp_model/adapters/drpai.py`'s
+  `DrpaiAdapter.compile()` (invokes the DRP-AI TVM tutorial driver) both exist
+  in the tree. Both Yocto/A55 runtime backends exist too
+  (`src/yocto/inference_deepx.cpp`, `src/yocto/inference_drpai.cpp`). The
+  RZ/V2N DRP-AI3 path was wired end-to-end opt-in by `cbea0e29` ("wire the
+  RZ/V2N on-die DRP-AI3 NPU backend, opt-in (#1145)") but is explicitly
+  **BENCH-UNVERIFIED** there -- no `alp-image-edge` bake has completed with
+  `PACKAGECONFIG[drpai]` enabled and DRP-AI has never run on silicon; #1145
+  stays open for the bake and bench run.
 - **Scope:** Turn the two NOT_IMPLEMENTED NPU paths (`drpai`, `deepx_dxm1`) into real **host compilers** (the `scripts/alp_model/adapters/` side) and real **A55/Linux runtimes** (the `src/yocto/` side), against the actual vendor toolchains. The `.alpmodel` contract (Stages 1a–1c) is **frozen** and already reserves both backends — Stage 2 slots in with **no format change**.
 - **Builds on:** [[project_unified_model_pipeline]] (Stage 2), [[reference_deepx_toolchain]], the 1c selection engine/loader, the backend registry, and `src/yocto/inference_yocto.c` (the Linux dispatch that already routes `ALP_INFERENCE_BACKEND_DEEPX_DXM1`).
 

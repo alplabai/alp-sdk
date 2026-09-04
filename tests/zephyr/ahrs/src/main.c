@@ -79,4 +79,69 @@ ZTEST(alp_ahrs, test_converges_to_tilt)
 	zassert_within(roll, 0.0f, 3.0f, "roll %f (want ~0)", (double)roll);
 }
 
+ZTEST(alp_ahrs, test_reset_rejects_null)
+{
+	/* alp_ahrs_reset() takes the caller-owned struct directly (no
+	 * alp_*_open() handle, no backend, no alp_status_t return) -- the
+	 * only guard is the NULL check; proven here by "does not crash". */
+	alp_ahrs_reset(NULL);
+}
+
+ZTEST(alp_ahrs, test_reset_returns_to_identity_after_drift)
+{
+	alp_ahrs_t ahrs;
+	alp_ahrs_init(&ahrs, &(alp_ahrs_config_t){ .beta = 0.3f });
+
+	/* Drive the filter away from identity with a sustained tilt. */
+	const float th  = 20.0f * (float)M_PI / 180.0f;
+	const float axf = sinf(th), azf = cosf(th);
+	for (int i = 0; i < 500; i++) {
+		alp_ahrs_update_imu(&ahrs, 0, 0, 0, axf, 0.0f, azf, 0.01f);
+	}
+	float pitch = 0;
+	alp_ahrs_euler(&ahrs, NULL, &pitch, NULL);
+	zassert_true(fabsf(pitch) > 1.0f,
+	             "precondition: filter must have drifted off level (pitch %f)",
+	             (double)pitch);
+
+	alp_ahrs_reset(&ahrs);
+
+	/* Post-reset state: the quaternion is back to identity. */
+	zassert_within(ahrs.q0, 1.0f, 1e-6f, NULL);
+	zassert_within(ahrs.q1, 0.0f, 1e-6f, NULL);
+	zassert_within(ahrs.q2, 0.0f, 1e-6f, NULL);
+	zassert_within(ahrs.q3, 0.0f, 1e-6f, NULL);
+
+	float roll = 9, pitch2 = 9, yaw = 9;
+	alp_ahrs_euler(&ahrs, &roll, &pitch2, &yaw);
+	zassert_within(roll, 0.0f, 1e-3f, "roll %f", (double)roll);
+	zassert_within(pitch2, 0.0f, 1e-3f, "pitch %f", (double)pitch2);
+	zassert_within(yaw, 0.0f, 1e-3f, "yaw %f", (double)yaw);
+}
+
+ZTEST(alp_ahrs, test_post_reset_update_matches_fresh_init)
+{
+	/* Reset must leave the filter fully usable, not just zero the
+	 * quaternion -- a reset filter driven by the same input sequence
+	 * as a freshly alp_ahrs_init()'d one must converge identically. */
+	alp_ahrs_t fresh, reset_ahrs;
+	alp_ahrs_init(&fresh, &(alp_ahrs_config_t){ .beta = 0.3f });
+	alp_ahrs_init(&reset_ahrs, &(alp_ahrs_config_t){ .beta = 0.3f });
+
+	/* Perturb reset_ahrs only, then bring it back with alp_ahrs_reset(). */
+	alp_ahrs_update_imu(&reset_ahrs, 0.1f, 0.1f, 0.1f, 0.0f, 0.0f, 1.0f, 0.01f);
+	alp_ahrs_reset(&reset_ahrs);
+
+	const float th  = 20.0f * (float)M_PI / 180.0f;
+	const float axf = sinf(th), azf = cosf(th);
+	for (int i = 0; i < 500; i++) {
+		alp_ahrs_update_imu(&fresh, 0, 0, 0, axf, 0.0f, azf, 0.01f);
+		alp_ahrs_update_imu(&reset_ahrs, 0, 0, 0, axf, 0.0f, azf, 0.01f);
+	}
+	zassert_within(fresh.q0, reset_ahrs.q0, 1e-4f, NULL);
+	zassert_within(fresh.q1, reset_ahrs.q1, 1e-4f, NULL);
+	zassert_within(fresh.q2, reset_ahrs.q2, 1e-4f, NULL);
+	zassert_within(fresh.q3, reset_ahrs.q3, 1e-4f, NULL);
+}
+
 ZTEST_SUITE(alp_ahrs, NULL, NULL, NULL, NULL, NULL);

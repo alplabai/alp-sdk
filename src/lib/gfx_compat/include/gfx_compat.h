@@ -16,10 +16,11 @@
  * This header declares only the pure-C software fallback
  * (CONFIG_ALP_GFX_COMPAT_SW, see zephyr/Kconfig.alp-libraries).
  * Hardware-accelerated backends (Alif GPU2D / generic DMA2D / SPI-DMA
- * push) are metadata-tracked in
- * metadata/library-profiles/gfx_compat/hw-backends.yaml as `status:
- * planned` -- they are not yet implemented, and this header's two
- * functions are the only entry points that exist today.
+ * push) are metadata-tracked as `accelerators:` entries in the
+ * `integration.zephyr.hw_backends:` block of
+ * metadata/libraries/gfx-compat.yaml -- they are not yet implemented,
+ * and this header's two functions are the only entry points that
+ * exist today.
  */
 
 #ifndef ALP_SDK_LIB_GFX_COMPAT_H_

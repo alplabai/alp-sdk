@@ -128,9 +128,14 @@ After every change in the bring-up flow, re-run these in order:
 * **`da9292_v2n_m1_enable_deepx_rail` succeeds but DEEPX silicon is
   flaky under load.**  Check the three TPS628640 rails -- the
   factory OTP voltages assume a specific load envelope.  Verify
-  with a scope; reach for the (currently-`NOSUPPORT`)
-  `tps628640_set_voltage_mv` helper once the datasheet drop
-  unblocks the VSET decode TODO.
+  with a scope, then retune with `tps628640_set_voltage_mv()`.
+  The VSET decode it needs is implemented (TI SLVSEI1C): the
+  helper range-checks against `TPS628640_VOUT_BASE_MV` (400 mV)
+  and `TPS628640_VOUT_MAX_MV` (1675 mV), encodes
+  `(mv - 400) / 5` and writes `TPS628640_REG_VOUT1`.  Nothing
+  in-tree calls it at boot, so the four instances still come up
+  on their factory OTP voltages -- program them from the
+  bring-up path if a rail needs to differ.
 
 ## See also
 

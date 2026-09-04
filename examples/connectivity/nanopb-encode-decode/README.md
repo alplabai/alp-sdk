@@ -31,7 +31,8 @@ stubs are not used by this example).
 
 `board.yaml`'s `cores.m55_hp.libraries: [nanopb]` only emits
 `CONFIG_ALP_NANOPB_SW=y` (nanopb has no HW-accelerator class -- see
-`metadata/library-profiles/nanopb/hw-backends.yaml`). It does **not**
+the `integration.zephyr.hw_backends:` block in
+`metadata/libraries/nanopb.yaml`). It does **not**
 pull the upstream runtime into the build: the fetched module's
 `zephyr/module.yml` declares `cmake-ext`/`kconfig-ext` (an external-glue
 extension point alp-sdk does not wire centrally today; the SDK's own

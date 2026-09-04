@@ -20,8 +20,7 @@
  * struct alp_audio_in / struct alp_audio_out pools; this backend
  * carries only the Zephyr-specific per-handle blobs.
  *
- * The portable-HW-offload audit rule (memory/feedback_portable_hw_
- * offload_with_sw_fallback.md) is satisfied because the chip-
+ * The portable-HW-offload audit rule is satisfied because the chip-
  * specific dispatch happens inside Zephyr's audio_dmic / I2S driver
  * classes -- application code never sees a vendor name in
  * <alp/audio.h>.
@@ -36,6 +35,7 @@
  */
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -48,7 +48,10 @@
 #include <alp/i2s.h>
 #include <alp/peripheral.h>
 
+#include "alp_errno.h"
+#include "alp_slot_claim.h"
 #include "audio_ops.h"
+#include "audio_volume_guard.h"
 
 #if defined(CONFIG_ALP_SDK_AUDIO_IN)
 #include <zephyr/audio/dmic.h>
@@ -80,8 +83,9 @@
 
 #if defined(CONFIG_ALP_SDK_AUDIO_IN)
 
+/* in_use is the LAST member (see alp_slot_claim.h): the winning claimant
+ * zeroes everything before it via offsetof. */
 struct hw_in_be {
-	bool                 in_use;
 	const struct device *dev;
 	struct k_mem_slab    slab;
 	uint8_t slab_buf[CONFIG_ALP_SDK_AUDIO_BLOCK_BYTES * CONFIG_ALP_SDK_AUDIO_IN_SLAB_BLOCKS];
@@ -91,6 +95,7 @@ struct hw_in_be {
      * at 16 kHz -- inaudible but kills DC bias from PDM mics. */
 	int32_t dc_x_prev[2];
 	int32_t dc_y_prev[2];
+	bool    in_use;
 };
 
 static struct hw_in_be g_in_be_pool[CONFIG_ALP_SDK_MAX_AUDIO_IN_HANDLES];
@@ -99,11 +104,13 @@ static struct hw_in_be g_in_be_pool[CONFIG_ALP_SDK_MAX_AUDIO_IN_HANDLES];
 
 #if defined(CONFIG_ALP_SDK_AUDIO_OUT)
 
+/* in_use is the LAST member (see alp_slot_claim.h): the winning claimant
+ * zeroes everything before it via offsetof. */
 struct hw_out_be {
-	bool       in_use;
 	alp_i2s_t *i2s;
 	bool       started;
 	uint16_t   volume_q8; /* Q8.8 software gain, 0x0100 = unity */
+	bool       in_use;
 };
 
 static struct hw_out_be g_out_be_pool[CONFIG_ALP_SDK_MAX_AUDIO_OUT_HANDLES];
@@ -114,26 +121,11 @@ static struct hw_out_be g_out_be_pool[CONFIG_ALP_SDK_MAX_AUDIO_OUT_HANDLES];
 
 static alp_status_t errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	case -ENOMEM:
-		return ALP_ERR_NOMEM;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 #endif /* CONFIG_ALP_SDK_AUDIO_IN */
@@ -177,12 +169,18 @@ static const struct device *const alp_pdm_devs[] = {
 	ALP_PDM_DEV_OR_NULL(1),
 };
 
+/* issue #1115: this used to be a plain `if (!in_use) { in_use = true; }`
+ * scan -- called from ops->open() only AFTER the FRONTEND dispatcher slot
+ * (src/audio_dispatch.c) was already claimed atomically, so two threads
+ * opening concurrently could both win the SAME backend slot here and
+ * alias one DMIC device/slab between two live alp_audio_in_t handles.
+ * Route the claim through the same atomic primitive the dispatcher pools
+ * already use. */
 static struct hw_in_be *alloc_in_be(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(g_in_be_pool); ++i) {
-		if (!g_in_be_pool[i].in_use) {
-			memset(&g_in_be_pool[i], 0, sizeof(g_in_be_pool[i]));
-			g_in_be_pool[i].in_use = true;
+		if (alp_slot_try_claim(&g_in_be_pool[i].in_use)) {
+			memset(&g_in_be_pool[i], 0, offsetof(struct hw_in_be, in_use));
 			return &g_in_be_pool[i];
 		}
 	}
@@ -191,7 +189,7 @@ static struct hw_in_be *alloc_in_be(void)
 
 static void free_in_be(struct hw_in_be *be)
 {
-	if (be != NULL) be->in_use = false;
+	if (be != NULL) alp_slot_release(&be->in_use);
 }
 
 /* DC-block: y[n] = x[n] - x[n-1] + alpha * y[n-1].  alpha = 0.995 in
@@ -397,12 +395,12 @@ static alp_i2s_format_t audio_to_i2s_format(alp_audio_format_t f)
 	return ALP_I2S_FMT_I2S;
 }
 
+/* issue #1115: same TOCTOU as alloc_in_be() above, on the output pool. */
 static struct hw_out_be *alloc_out_be(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(g_out_be_pool); ++i) {
-		if (!g_out_be_pool[i].in_use) {
-			memset(&g_out_be_pool[i], 0, sizeof(g_out_be_pool[i]));
-			g_out_be_pool[i].in_use = true;
+		if (alp_slot_try_claim(&g_out_be_pool[i].in_use)) {
+			memset(&g_out_be_pool[i], 0, offsetof(struct hw_out_be, in_use));
 			return &g_out_be_pool[i];
 		}
 	}
@@ -411,7 +409,7 @@ static struct hw_out_be *alloc_out_be(void)
 
 static void free_out_be(struct hw_out_be *be)
 {
-	if (be != NULL) be->in_use = false;
+	if (be != NULL) alp_slot_release(&be->in_use);
 }
 
 #endif /* CONFIG_ALP_SDK_AUDIO_OUT */
@@ -496,6 +494,12 @@ static alp_status_t z_out_write(alp_audio_out_backend_state_t *state,
 	struct hw_out_be *be = (struct hw_out_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
 
+	/* Refuse more frames than the block negotiated at open() before
+	 * deriving a byte count from them.  alp_audio_out_write() checks only
+	 * buf != NULL and frames != 0, so without this the portable path
+	 * hands alp_i2s_write() an arbitrary length. */
+	if (frames > (size_t)state->cfg.frames_per_block) return ALP_ERR_OUT_OF_RANGE;
+
 	size_t bytes = frames * bytes_per_frame(&state->cfg);
 
 	/* Software volume.  Unity (0x0100) skips the loop -- common case
@@ -551,6 +555,11 @@ static alp_status_t z_out_set_volume(alp_audio_out_backend_state_t *state, uint8
 #if defined(CONFIG_ALP_SDK_AUDIO_OUT)
 	struct hw_out_be *be = (struct hw_out_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
+	/* @ref z_out_write only scales S16_LE; a non-unity request on any
+	 * other open format can never actually be applied, so refuse it
+	 * HERE where the caller can see it rather than silently dropping it
+	 * in the write path -- see audio_volume_guard.h. */
+	if (!alp_audio_volume_settable(state->cfg.format, vol)) return ALP_ERR_NOSUPPORT;
 	/* Map 0..255 to 0..0x0100 (Q8.8 unity = 256).  255 maps to 256
      * for a clean unity ceiling -- avoids the off-by-one cliff. */
 	be->volume_q8 = (uint16_t)vol + (uint16_t)(vol == 255);

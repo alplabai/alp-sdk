@@ -117,8 +117,7 @@ Sysbuild is Zephyr's umbrella build for multi-image projects --
 it builds the bootloader + the application in one invocation.
 
 For projects that want to customise the bootloader's signing
-key / slot sizes / swap algorithm, drop a `boot:` block into your
-`board.yaml`:
+key / swap algorithm, drop a `boot:` block into your `board.yaml`:
 
 ```yaml
 # board.yaml
@@ -127,17 +126,30 @@ boot:
   signing:
     algorithm: ecdsa_p256
     key_file: keys/prod_ecdsa_p256.pub.pem
-  swap_algorithm: scratch
 ```
 
-(Slot/scratch partition *sizes* aren't a `boot:` field -- MCUboot
-takes its geometry from the board DT `partitions {}` node; declare an
-explicit layout via `storage:` if you need one in your `board.yaml`.)
+`swap_algorithm:` is intentionally omitted above: it's optional, and
+the SDK's per-target default now follows the target's own `memory_map:`
+(#1413) rather than one value for every SKU.  **On every AEN SKU**
+the disjoint-slot0 `memory_map:` (#1069, #1445) has no slot1/scratch
+partition, so the default resolves to single-app boot
+(`SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`) -- setting `swap_algorithm:
+scratch` (or `move`/`overwrite`) explicitly here is a build-time error
+on all six (E1M-AEN301/401/501/601/701/801).  See
+[`docs/secure-boot.md`](../secure-boot.md) "Declarative wiring" for
+the full per-target rule.
+
+(Slot/scratch partition *sizes* aren't a `boot:` field either way --
+MCUboot takes its geometry from the board DT `partitions {}` node;
+declare an explicit layout via `storage:` if you need one in your
+`board.yaml`.)
 
 The loader emits the matching `SB_CONFIG_*` overlay; `tan build`
 passes it as `-DSB_CONF_FILE=<abs>/build/alp_sysbuild.conf`
-automatically.  Without a `boot:` block the SDK's stock profile
-above is used unchanged.
+automatically.  Without a `boot:` block the SDK's stock per-family
+profile applies instead -- on AEN-Zephyr that is the curated
+`zephyr/sysbuild/aen/sysbuild.conf` alone (single-app boot for every
+AEN SKU, not just a single-slot one; see `docs/secure-boot.md`).
 
 Direct build (without `tan build` orchestration):
 
@@ -217,7 +229,7 @@ Two images, both signed, the new one buggy:
 ```bash
 # Build a "buggy" variant that panics shortly after boot.
 # In practice: an app that calls k_panic() at start.
-tan --project examples/buggy-app build
+tan build --project examples/buggy-app
 imgtool sign \
     --key keys/mcuboot_dev_ecdsa_p256.pem \
     --version 0.2.0 \

@@ -70,6 +70,7 @@
 #include <alp/peripheral.h>
 
 #include "mqtt_ops.h"
+#include "alp_slot_claim.h"
 
 #ifndef ALP_SDK_YOCTO_MAX_MQTT_HANDLES
 #define ALP_SDK_YOCTO_MAX_MQTT_HANDLES 2
@@ -104,8 +105,11 @@ struct mqtt_sub {
 /* Per-handle backend data.  The dispatcher owns the public
  * struct alp_mqtt pool; this backend carries only the
  * mosquitto-specific per-handle blob behind state->be_data. */
+/* in_use is the LAST member (issue #1115 round-2 dev review, mirrors
+ * dsp/sw_fallback.c's struct dsp_be): be_acquire() below memsets only
+ * the bytes ahead of it, so the atomic claim is never transiently
+ * undone by the reset. */
 struct mqtt_be {
-	bool              in_use;
 	struct mosquitto *mosq;
 	char              host[ALP_SDK_YOCTO_MQTT_HOST_MAX];
 	int               port;
@@ -114,6 +118,7 @@ struct mqtt_be {
 	bool              connected;
 	struct mqtt_sub   subs[ALP_SDK_YOCTO_MAX_MQTT_SUBS];
 	size_t            nsubs;
+	bool              in_use;
 };
 
 static struct mqtt_be g_mqtt_be_pool[ALP_SDK_YOCTO_MAX_MQTT_HANDLES];
@@ -124,12 +129,14 @@ static struct mqtt_be g_mqtt_be_pool[ALP_SDK_YOCTO_MAX_MQTT_HANDLES];
  * and process exit reaps the rest). */
 static bool g_mosq_lib_init_done;
 
+/* issue #1115 round-2 dev review: claim atomically (in_use is the LAST
+ * member; memset only the bytes ahead of it) instead of the previous
+ * plain check-then-set scan. */
 static struct mqtt_be *be_acquire(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(g_mqtt_be_pool); ++i) {
-		if (!g_mqtt_be_pool[i].in_use) {
-			memset(&g_mqtt_be_pool[i], 0, sizeof(g_mqtt_be_pool[i]));
-			g_mqtt_be_pool[i].in_use = true;
+		if (alp_slot_try_claim(&g_mqtt_be_pool[i].in_use)) {
+			memset(&g_mqtt_be_pool[i], 0, offsetof(struct mqtt_be, in_use));
 			return &g_mqtt_be_pool[i];
 		}
 	}
@@ -152,8 +159,8 @@ static void be_release(struct mqtt_be *be)
 		free(be->subs[i].filter);
 		be->subs[i].filter = NULL;
 	}
-	be->nsubs  = 0;
-	be->in_use = false;
+	be->nsubs = 0;
+	alp_slot_release(&be->in_use);
 }
 
 /** @brief Map a libmosquitto return code to the closest alp_status_t. */

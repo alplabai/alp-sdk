@@ -63,8 +63,10 @@ example's own extracted glyph table carries its own provenance comment.
 ## See also
 
 - [`examples/display/u8g2-oled-draw/README.md`](../../examples/display/u8g2-oled-draw/README.md)
-  -- the teaching example this vendored copy backs, and the
-  `ALP_U8G2_MODULE_DIR` override for building against the full
-  upstream checkout instead (real panel drivers, bundled fonts).
+  -- the teaching example this vendored copy backs.  Its `CMakeLists.txt`
+  comment covers the FULL upstream u8g2 tree (real panel drivers, bundled
+  fonts): there is no SDK-level switch for it -- `libraries: [u8g2]`
+  always compiles this vendored `csrc/`; a customer who wants the full
+  tree vendors/builds it as their own Zephyr module instead.
 - [`vendors/etl/README.md`](../etl/README.md) -- companion precedent
   for a library vendored because it has no Zephyr module glue.

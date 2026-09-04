@@ -65,6 +65,7 @@
 #include "alp/peripheral.h"
 #include "alp_internal.h"
 #include "common/alp_errno.h"
+#include "common/alp_slot_claim.h"
 
 /* Private test seam (issue #595 / #634): the bounded poll()+read() loop
  * alp_uart_read() runs, split out so tests/yocto/peripheral_uart.c can
@@ -82,20 +83,25 @@ alp_status_t alp_uart_read_fd_bounded(int fd, uint8_t *data, size_t len, uint32_
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
 
+/* in_use is the LAST member (issue #1115 round-2 dev review, mirrors
+ * dsp/sw_fallback.c's struct dsp_be): pool_acquire() below memsets only
+ * the bytes ahead of it, so the atomic claim is never transiently
+ * undone by the reset. */
 struct alp_uart {
-	bool in_use;
 	int  fd;
+	bool in_use;
 };
 
 static struct alp_uart g_uart_pool[ALP_SDK_YOCTO_MAX_UART_HANDLES];
 
+/* issue #1115 round-2 dev review: claim atomically instead of the
+ * previous plain check-then-set scan. */
 static struct alp_uart *pool_acquire(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(g_uart_pool); ++i) {
-		if (!g_uart_pool[i].in_use) {
-			memset(&g_uart_pool[i], 0, sizeof(g_uart_pool[i]));
-			g_uart_pool[i].in_use = true;
-			g_uart_pool[i].fd     = -1;
+		if (alp_slot_try_claim(&g_uart_pool[i].in_use)) {
+			memset(&g_uart_pool[i], 0, offsetof(struct alp_uart, in_use));
+			g_uart_pool[i].fd = -1;
 			return &g_uart_pool[i];
 		}
 	}
@@ -111,7 +117,7 @@ static void pool_release(struct alp_uart *h)
 		(void)close(h->fd);
 		h->fd = -1;
 	}
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 static int resolve_path(uint32_t port_id, char *out, size_t cap)
@@ -281,7 +287,15 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
 
 alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len)
 {
-	if (port == NULL || !port->in_use || (data == NULL && len > 0)) {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1834, same shape as
+	 * #1734's GPIO fix).  A malformed @p data/@p len pairing is a
+	 * separate condition -- ALP_ERR_INVAL, checked only once the
+	 * handle itself is known good. */
+	if (port == NULL || !port->in_use) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (data == NULL && len > 0) {
 		return ALP_ERR_INVAL;
 	}
 	size_t written = 0;
@@ -391,7 +405,14 @@ alp_status_t alp_uart_read_fd_bounded(int fd, uint8_t *data, size_t len, uint32_
 
 alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t timeout_ms)
 {
-	if (port == NULL || !port->in_use || (data == NULL && len > 0)) {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1834).  A malformed
+	 * @p data/@p len pairing is a separate condition -- ALP_ERR_INVAL,
+	 * checked only once the handle itself is known good. */
+	if (port == NULL || !port->in_use) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (data == NULL && len > 0) {
 		return ALP_ERR_INVAL;
 	}
 	return alp_uart_read_fd_bounded(port->fd, data, len, timeout_ms);

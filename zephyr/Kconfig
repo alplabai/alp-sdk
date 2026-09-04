@@ -35,7 +35,7 @@ rsource "kconfigs/testing.kconfig"
 # §D.lib.loader -- per-library HW-accelerator Kconfig knobs declared
 # in a sibling file so the chip-driver menu above stays focused on
 # chip surfaces.  Loader emits these from each enabled library's
-# metadata/library-profiles/<name>/hw-backends.yaml.
+# `integration.zephyr.hw_backends:` block in metadata/libraries/<name>.yaml.
 rsource "Kconfig.alp-libraries"
 
 # ---------------------------------------------------------------------------

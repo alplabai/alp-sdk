@@ -1,6 +1,6 @@
 # 0017. alp-sdk rides over the vendor SDK — no rewritten vendor drivers
 
-Status: Accepted (amended 2026-06-15 — adds **Tier 1.5**; reclassifies the four AEN drivers; see "Amendment" below)
+Status: Accepted (amended 2026-06-15 — adds **Tier 1.5**; reclassifies the four AEN drivers; amended 2026-08-30 — corrects the E1M-AEN801 BRD_I2C routing; see "Amendment" below)
 Date: 2026-06-15
 
 alp-sdk's value is the portable `<alp/*>` unification layer plus the SoM/carrier
@@ -76,7 +76,9 @@ Every AEN peripheral falls into exactly one tier:
   bus (the SoC is a slave at the hardcoded address 0x40; TRM §3.17.4), so the SE
   masters that bus. Such devices are read via **Alif SE services** (vendor SDK),
   surfaced through a portable board-info/manifest API — never an alp-sdk I2C
-  master driver.
+  master driver. *(SUPERSEDED for the E1M-AEN801's BRD_I2C trio — see
+  "Amendment (2026-08-30)" below. The general Tier-3 category stands for any
+  device genuinely behind the SE.)*
 
 Bench-verification on real E8 silicon remains the acceptance gate for every tier.
 
@@ -177,3 +179,79 @@ scope **correction**, not a reversal of the policy: rewritten fork-driver copies
 (SPI, LPI2C) are still wrong and still go; in-tree drivers that link only an
 Apache-2.0 HW library or an upstream core are recognised as legitimate and kept.
 The one-upstream-base invariant and bench-verification gate are unchanged.
+
+## Amendment (2026-08-30) — E1M-AEN801 BRD_I2C is I2C0, not slave-only LPI2C0
+
+The Decision's Tier-3 paragraph and the LPI2C0-retirement rationale in
+Consequences both state that the E1M-AEN801's on-module housekeeping trio
+(RV-3028-C7 RTC / OPTIGA Trust M / TMP112) sits on the slave-only LPI2C0
+(hardcoded slave address 0x40, TRM §3.17.4), so the M55 can never master it
+and the SE must mediate every read. That routing claim is wrong. It is not
+reversed here — the original text above is left as written, so a reader sees
+what was decided and why it seemed right — but the underlying hardware fact
+it depended on does not hold for this SoM, so the Tier-3 disposition it
+produced for this specific trio does not either.
+
+**What the evidence actually shows (#1848, #1814).** `BRD_I2C_SCL`/`BRD_I2C_SDA`
+land on SoC pins `P7_1`/`P7_0` (the E1M-AEN-2626-R2 netlist, balls B3/B8).
+Alif's `ADTS0013` v1.2 Table 3-16 gives those same pads the alternate function
+`I2C0_SCL_C`/`I2C0_SDA_C` — **SoC I2C0**, not LPI2C0 (which lives on the
+unrelated pad pair `P7_4`/`P7_5`). Per the HWRM §15.4.1, I2C0 is one of the
+four shared-peripheral I2C modules and is **master-or-slave capable** — the
+slave-only constraint is real, but it describes LPI2C0, a bus this trio was
+never actually wired to.
+
+**Effect on this ADR's tiering.** For the E1M-AEN801, the RTC/OPTIGA/TMP112
+trio is **Tier 1 (upstream-native)**: ordinary upstream `i2c_dw` over the
+already-Tier-1 `i2c0` node, the same as the edge I2C buses — no SE
+mediation, no portable board-info/manifest API detour needed to reach it.
+See `zephyr/dts/alif/ensemble_e8_peripherals.dtsi` (the `i2c0` node and its
+LPI2C0-note comment) and `metadata/e1m_modules/E1M-AEN801.yaml`
+(`on_module.i2c_devices.brd_i2c`) for the corrected routing.
+
+Getting a working bus needs more than "a pinctrl group + a board enable",
+and two open facts bound it, not just the R2-vs-r1 netlist gap above:
+
+- **No confirmed pull-up.** The R2 components CSV shows this net's pull-up
+  jumpers (R93/R94) DNP -- unlike the I2C2/EEPROM bus, whose own pull-up
+  path (R95/R96 into carrier resistors) IS stuffed. Whether that's a live
+  problem depends on an unresolved document conflict: the datasheet marks
+  `I2C0_SCL_C`/`I2C0_SDA_C` open-drain, requiring an external pull-up, while
+  the HWRM's per-pin note for these ports says I2C "is operating properly
+  with the push-pull (default) driver type" and that open-drain "must not
+  be selected for I2C". Tri-state-high-phase-with-no-pull-up is a dead bus;
+  push-pull makes the missing pull-up moot. Not resolved by paper alone --
+  see `examples/aen/aen-secure-element-sign`'s board overlay, which wires
+  the bus with NO internal bias pending a bench answer.
+- **OPTIGA (IC1) is DNI** on the current bench population, independent of
+  the bus question -- already documented in `docs/bring-up-aen.md`
+  §5.1/§5.2 and unaffected by this amendment.
+
+**What this amendment does not claim.** It is scoped to the E1M-AEN801's
+BRD_I2C only — it does not revisit LPI2C0 itself (still genuinely slave-only;
+the retired master-TX driver is still correctly retired), and it does not
+reopen Tier 3 in general (a device genuinely behind the SE still belongs
+there). It also does not claim bench verification: the routing evidence is
+the E1M-AEN-2626-R2 netlist -- no R1 netlist is available, and the only
+bench unit on hand is an r1 module — the physical bus needs an on-unit
+probe before this routing is more than paper-correct for that unit.
+
+**Bench-settled 2026-08-31** on the r1 module (`E1M-AEN801`, serial `2617-0001`),
+`i2c0` at 100 kHz, read-only `i2c_write_read` of register `0x00`:
+
+| pad bias | result on `0x48` (TMP112), `0x52` (RV-3028-C7), `0x30` (OPTIGA) |
+|---|---|
+| High-Z, no bias | `rc=-116` (`-ETIMEDOUT`) with `E: User Abort on i2c@49010000` |
+| same build + internal pull-up (~50 kΩ) | `rc=-5` (`-EIO`), no abort |
+
+A bias-only edit changing the error class proves the pinctrl is correct and the
+controller reaches the wire, and that the net has **no usable pull-up**. It also
+settles the open-drain question against the HWRM's push-pull note: had these pads
+driven push-pull, the High-Z run would have worked. The I2C IP tri-states for the
+high phase, so an **external pull-up is required**. Nothing ACKed under the internal
+pull-up either, which is expected — ~50 kΩ is far too weak for 100 kHz rise time.
+
+**So this bus is not usable as built.** It needs `R93`/`R94` stuffed — bridging
+BRD_I2C into the segment the carrier already pulls up via `R137`/`R144` — or
+dedicated pull-ups on the net. That is a board change, not a firmware one, which is
+why #1814 stays open.

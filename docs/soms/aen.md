@@ -22,13 +22,55 @@ tier (cores + NPU count + memory).
 |-------------------------|----------------------------|------------------|-----------------------------------------|
 | Application SoC         | Alif Ensemble E3..E8       | --               | (vendor HAL)                            |
 | Wi-Fi 6 + BLE 5.4       | TI CC3501E                 | inter-chip SPI1 + SDIO | App APIs: [`<alp/iot.h>`](../../include/alp/iot.h), [`<alp/ble.h>`](../../include/alp/ble.h); diagnostics: [`<alp/chips/cc3501e.h>`](../../include/alp/chips/cc3501e.h) |
-| Secure element          | Infineon OPTIGA Trust M    | LPI2C            | [`<alp/chips/optiga_trust_m.h>`](../../include/alp/chips/optiga_trust_m.h) |
-| RTC                     | Micro Crystal RV-3028-C7   | LPI2C            | [`<alp/chips/rv3028c7.h>`](../../include/alp/chips/rv3028c7.h) |
-| Temperature sensor      | TI TMP112                  | LPI2C            | [`<alp/chips/tmp112.h>`](../../include/alp/chips/tmp112.h) |
-| EEPROM (SoM manifest)   | Onsemi N24S128             | LPI2C            | [`<alp/chips/eeprom_24c128.h>`](../../include/alp/chips/eeprom_24c128.h) |
-| Ethernet PHY            | TI DP83825IRMQR            | RMII             | (Zephyr-side PHY driver)                |
+| Secure element          | Infineon OPTIGA Trust M    | BRD_I2C†          | [`<alp/chips/optiga_trust_m.h>`](../../include/alp/chips/optiga_trust_m.h) |
+| RTC                     | Micro Crystal RV-3028-C7   | BRD_I2C†          | [`<alp/chips/rv3028c7.h>`](../../include/alp/chips/rv3028c7.h) |
+| Temperature sensor      | TI TMP112                  | BRD_I2C†          | [`<alp/chips/tmp112.h>`](../../include/alp/chips/tmp112.h) |
+| EEPROM (SoM manifest)   | Onsemi N24S128             | SoC I2C2 (bridge/DNP-selected, a separate bus from BRD_I2C) | [`<alp/chips/eeprom_24c128.h>`](../../include/alp/chips/eeprom_24c128.h) |
+| Ethernet PHY            | TI DP83825 (exact order code TBD) | RMII      | none -- see [`metadata/chips/dp83825.yaml`](../../metadata/chips/dp83825.yaml) |
+
+† On the **E1M-AEN801**, BRD_I2C is SoC I2C0 (function C, `P7_0`/`P7_1`),
+master-capable -- corrected from an earlier belief that it was the
+slave-only Alif LPI2C0 -- wired in `aen-secure-element-sign`'s own board
+overlay (#1848). That is necessary, not sufficient: the R2 netlist shows
+no pull-up path to any rail on the bus, and the datasheet/HWRM disagree on
+whether that is fatal -- see `docs/bring-up-aen.md` §5.1. The routing
+itself is R2-sourced (`E1M-AEN-2626-R2` netlist) and not yet confirmed on
+an actual unit. The other AEN SKUs still carry the pre-#1848 LPI2C0
+assumption in their own preset files pending the same netlist evidence.
 
 Memory + per-SKU specifics: [`metadata/e1m_modules/E1M-AEN<NNN>.yaml`](../../metadata/e1m_modules/).
+
+## Carrier requirement: an external brownout supervisor on POR_N
+
+**The module carries no reset or brownout supervisor, and omitting one on the
+carrier can permanently damage the SoC.**
+
+Errata `AERR0012` v2.0 `ER004` applies to every Ensemble E4/E6/E8 revision with
+no fix planned:
+
+> During this 10ms period, the power supply voltage must rise monotonically, and
+> the voltage on the VDD_MAIN and VDD_BUCK pins must never drop below 1.65V once
+> 1.65V is reached. If this cannot be guaranteed, an external reset supervisor
+> device must be used to drive (active low) the Ensemble system reset pin,
+> POR_N, to an active state while the power supply voltage is below 1.65V.
+
+> If the voltage profile outlined in the description above is not met, and an
+> external reset supervisor device is not used, there is potential to damage the
+> Ensemble SoC rendering it non-functional.
+
+Datasheet `ADTS0013` v1.2 §5.2.1 has since promoted this from an erratum to a
+normative operating condition:
+
+> An external brownout supervisor must be connected to VDD_MAIN/VDD_BUCK. The
+> brownout supervisor must assert before voltage input to the chip falls below
+> 1.65V. Care (that is, sufficient decoupling) must be taken to ensure that
+> supply noise/transients do not spuriously trigger resets.
+
+On the `E1M-AEN-2626-R2` module, `POR_N` is pulled up on-module and brought out
+to the E1M edge connector; nothing on the module drives it. So the supervisor,
+and the decoupling that keeps it from tripping spuriously, belong to the
+carrier design. The E1M-EVK is a development carrier -- do not infer from it
+that a product carrier can skip this.
 
 ## CC3501E coprocessor
 
@@ -51,7 +93,11 @@ Boot model + architecture: [`docs/cc3501e-bridge.md`](../cc3501e-bridge.md).
 
 ## Boot + identification
 
-Same two-stage flow as V2N: EEPROM manifest + BOARD_ID ADC.  See
+The SoM's identity comes solely from the on-module EEPROM manifest
+(family / SKU / hw_rev / serial / mfg date) — there is no SoM-side
+ADC cross-check.  A carrier-board BOARD_ID resistor divider, where
+present, identifies the *carrier* revision and is independent of the
+SoM revision; it is not yet wired into `alp_hw_info_read()`.  See
 [`docs/board-id.md`](../board-id.md).
 
 ## Bring-up

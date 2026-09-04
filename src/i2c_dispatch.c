@@ -99,9 +99,14 @@ alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, si
 	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = (data == NULL && len > 0)
-	                      ? ALP_ERR_INVAL
-	                      : bus->state.ops->write(&bus->state, addr, data, len);
+	alp_status_t rc;
+	if (data == NULL && len > 0) {
+		rc = ALP_ERR_INVAL;
+	} else if (bus->state.ops->write == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = bus->state.ops->write(&bus->state, addr, data, len);
+	}
 	alp_handle_op_leave(&bus->active_ops);
 	return rc;
 }
@@ -111,9 +116,14 @@ alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t le
 	if (bus == NULL || !alp_handle_op_enter(&bus->lifecycle, &bus->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = (data == NULL && len > 0)
-	                      ? ALP_ERR_INVAL
-	                      : bus->state.ops->read(&bus->state, addr, data, len);
+	alp_status_t rc;
+	if (data == NULL && len > 0) {
+		rc = ALP_ERR_INVAL;
+	} else if (bus->state.ops->read == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = bus->state.ops->read(&bus->state, addr, data, len);
+	}
 	alp_handle_op_leave(&bus->active_ops);
 	return rc;
 }
@@ -131,6 +141,8 @@ alp_status_t alp_i2c_write_read(alp_i2c_t     *bus,
 	alp_status_t rc;
 	if ((wdata == NULL && wlen > 0) || (rdata == NULL && rlen > 0)) {
 		rc = ALP_ERR_INVAL;
+	} else if (bus->state.ops->write_read == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
 	} else {
 		rc = bus->state.ops->write_read(&bus->state, addr, wdata, wlen, rdata, rlen);
 	}
@@ -145,7 +157,7 @@ void alp_i2c_close(alp_i2c_t *bus)
 	 * state.ops (issue #629). Losing the CAS (already closed/closing/
 	 * never-opened) makes this a no-op, matching the existing
 	 * void-close idempotency contract. */
-	if (!alp_handle_begin_close(&bus->lifecycle, &bus->active_ops)) return;
+	if (!alp_handle_begin_close_blocking(&bus->lifecycle, &bus->active_ops)) return;
 	if (bus->state.ops != NULL && bus->state.ops->close != NULL) {
 		bus->state.ops->close(&bus->state);
 	}

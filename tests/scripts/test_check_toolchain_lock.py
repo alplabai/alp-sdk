@@ -3,7 +3,7 @@
 
 The gate is regex/schema-driven against metadata/toolchains.json + its
 schema + metadata/bootstrap.json + a repo-wide `.github/workflows/*.yml`
-scan (plus a positive assertion over four curated workflows and a live
+scan (plus a positive assertion over the curated workflows and a live
 `git show <rev>:SDK_VERSION` cross-check against a pinned Zephyr checkout).
 Each test here mutates a TEMP COPY of that corpus (or a throwaway fake
 Zephyr git repo) and asserts the gate actually fires for the documented
@@ -33,14 +33,12 @@ import check_toolchain_lock as gate  # noqa: E402
 # The exact relative-path corpus the gate reads (mirrors
 # gate.TOOLCHAIN_WORKFLOWS + its other module-level Path constants). This is
 # also the full set of files `_iter_workflow_files` sees in the scaffolded
-# tmp_path corpus -- tests that need a FIFTH, non-curated workflow to
+# tmp_path corpus -- tests that need an EXTRA, non-curated workflow to
 # exercise the repo-wide scan add one explicitly (see `_add_workflow`).
 _CORPUS_RELPATHS = [
     "metadata/toolchains.json",
     "metadata/schemas/toolchains-v1.schema.json",
     "metadata/bootstrap.json",
-    ".github/workflows/pr-renode-aen-smoke.yml",
-    ".github/workflows/pr-renode-sim-mode.yml",
     ".github/workflows/pr-getting-started-aen801.yml",
     ".github/workflows/pr-twister.yml",
 ]
@@ -64,8 +62,6 @@ def _point_gate_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gate, "BOOTSTRAP_MANIFEST", tmp_path / "metadata/bootstrap.json")
     monkeypatch.setattr(gate, "WORKFLOWS_DIR", tmp_path / ".github/workflows")
     monkeypatch.setattr(gate, "TOOLCHAIN_WORKFLOWS", [
-        tmp_path / ".github/workflows/pr-renode-aen-smoke.yml",
-        tmp_path / ".github/workflows/pr-renode-sim-mode.yml",
         tmp_path / ".github/workflows/pr-getting-started-aen801.yml",
         tmp_path / ".github/workflows/pr-twister.yml",
     ])
@@ -79,7 +75,7 @@ def _point_gate_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _add_workflow(tmp_path: Path, name: str, text: str) -> Path:
-    """Drop a FIFTH workflow file into the scaffolded corpus -- the exact
+    """Drop an EXTRA workflow file into the scaffolded corpus -- the exact
     shape of the real bypass this change closes: a workflow
     TOOLCHAIN_WORKFLOWS never named, dropped straight into
     .github/workflows/, that the repo-wide scan must still cover."""
@@ -320,7 +316,7 @@ def test_bypass_b_env_default_and_interpolated_url_fails(tmp_path, monkeypatch, 
 
 def test_manifest_sourced_env_var_with_hash_check_passes(tmp_path, monkeypatch, capsys):
     """The real, correct pattern -- a NEW workflow (not one of the curated
-    four) that reads metadata/toolchains.json, references the version/URL
+    ones) that reads metadata/toolchains.json, references the version/URL
     only via the canonical `${ZEPHYR_SDK_VERSION}` / `${ZEPHYR_SDK_URL}`
     forms, and verifies `ZEPHYR_SDK_SHA256` -- must PASS. This is the
     no-false-positive proof for the repo-wide scan."""
@@ -392,8 +388,8 @@ def test_prose_comment_quoting_version_is_not_flagged(tmp_path, monkeypatch, cap
 def test_sdk_cache_key_category_confusion_fails(tmp_path, monkeypatch, capsys):
     """The exact defect-4 regression: an SDK cache key naming the
     *Zephyr* version instead of `${{ env.ZEPHYR_SDK_VERSION }}`. Repo-wide
-    now, not curated-scope, but pr-twister.yml (one of the four) is still
-    where this literal lives."""
+    now, not curated-scope, but pr-twister.yml (one of the curated
+    workflows) is still where this literal lives."""
     _scaffold(tmp_path)
     _replace(
         tmp_path / ".github/workflows/pr-twister.yml",
@@ -423,16 +419,21 @@ def test_zephyr_only_cache_key_not_flagged_as_sdk_confusion(tmp_path, monkeypatc
 
 def test_sdk_url_without_sha256_verification_fails(tmp_path, monkeypatch, capsys):
     """A file that fetches the SDK archive by URL but never verifies it --
-    defect 3's exact shape (the historical wget-with-no-check)."""
+    defect 3's exact shape (the historical wget-with-no-check).
+    pr-getting-started-aen801.yml is the vehicle because it is the corpus's
+    only remaining workflow that fetches the archive by URL at all
+    (pr-twister.yml installs via `west sdk install`); this test used
+    pr-renode-aen-smoke.yml until docs/adr/0022 Amendment 2 deleted it."""
     _scaffold(tmp_path)
-    text = (tmp_path / ".github/workflows/pr-renode-aen-smoke.yml").read_text(encoding="utf-8")
-    text = text.replace("ZEPHYR_SDK_SHA256", "SOME_OTHER_NAME")
-    (tmp_path / ".github/workflows/pr-renode-aen-smoke.yml").write_text(text, encoding="utf-8")
+    wf = tmp_path / ".github/workflows/pr-getting-started-aen801.yml"
+    text = wf.read_text(encoding="utf-8")
+    assert "ZEPHYR_SDK_SHA256" in text, "fixture assumption broken: no sha256 check to remove"
+    wf.write_text(text.replace("ZEPHYR_SDK_SHA256", "SOME_OTHER_NAME"), encoding="utf-8")
     _point_gate_at(tmp_path, monkeypatch)
     rv = gate.main()
     err = capsys.readouterr().err
     assert rv == 1
-    assert "pr-renode-aen-smoke.yml" in err
+    assert "pr-getting-started-aen801.yml" in err
     assert "no ZEPHYR_SDK_SHA256 verification" in err
 
 
@@ -454,8 +455,8 @@ def test_missing_workflow_fails(tmp_path, monkeypatch, capsys):
 
 def test_curated_workflow_manifest_read_deleted_fails(tmp_path, monkeypatch, capsys):
     """Item 2's whole reason to exist: TOOLCHAIN_WORKFLOWS is repurposed
-    from "the scan scope" to a positive assertion that each of the four
-    still contains a manifest read. pr-twister.yml never names an sdk-ng
+    from "the scan scope" to a positive assertion that each curated
+    workflow still contains a manifest read. pr-twister.yml never names an sdk-ng
     URL/filename literal at all (it installs via `west sdk install`), so
     the repo-wide scan (check 3) has NOTHING to trigger on here -- deleting
     its manifest-read step must still fail, and only this separate check
@@ -475,3 +476,113 @@ def test_curated_workflow_manifest_read_deleted_fails(tmp_path, monkeypatch, cap
     assert rv == 1
     assert "pr-twister.yml" in err
     assert "no longer reads metadata/toolchains.json" in err
+
+
+# ---------------------------------------------------------------------
+# 5. tier/licence (issue #1603)
+# ---------------------------------------------------------------------
+
+
+def test_artifact_missing_tier_fails_schema(tmp_path, monkeypatch, capsys):
+    """Presence of `tier` is enforced by the schema (check 1), the same way
+    `sha256` already is -- proves the field is actually REQUIRED, not just
+    documented."""
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["zephyrSdk"]["artifacts"].__setitem__(
+            0, {k: v for k, v in d["zephyrSdk"]["artifacts"][0].items() if k != "tier"}
+        ),
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "schema:" in err
+
+
+def test_artifact_missing_licence_fails_schema(tmp_path, monkeypatch, capsys):
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["zephyrSdk"]["artifacts"].__setitem__(
+            0, {k: v for k, v in d["zephyrSdk"]["artifacts"][0].items() if k != "licence"}
+        ),
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "schema:" in err
+
+
+def test_artifact_bad_tier_value_fails_schema(tmp_path, monkeypatch, capsys):
+    """`tier` is a closed enum (A/B/C) -- a made-up tier must fail, not
+    silently pass through as a string."""
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["zephyrSdk"]["artifacts"].__setitem__(
+            0, {**d["zephyrSdk"]["artifacts"][0], "tier": "Z"}
+        ),
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "schema:" in err
+
+
+def test_tier_disagreement_across_host_rows_for_same_component_fails(tmp_path, monkeypatch, capsys):
+    """The exact drift `_check_artifact_provenance_consistency` exists for:
+    schema validation alone would happily accept a `minimal-sdk` row with
+    tier A on linux and tier B on windows -- both are individually valid
+    enum members. This is the regression only the new check catches."""
+    _scaffold(tmp_path)
+
+    def _mutate(d):
+        artifacts = d["zephyrSdk"]["artifacts"]
+        for i, row in enumerate(artifacts):
+            if row["component"] == "minimal-sdk" and row["host"] == "windows-x86_64":
+                artifacts[i] = {**row, "tier": "B"}
+
+    _edit_manifest(tmp_path, _mutate)
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "minimal-sdk" in err
+    assert "disagreeing tier" in err
+
+
+def test_licence_disagreement_across_host_rows_for_same_component_fails(tmp_path, monkeypatch, capsys):
+    _scaffold(tmp_path)
+
+    def _mutate(d):
+        artifacts = d["zephyrSdk"]["artifacts"]
+        for i, row in enumerate(artifacts):
+            if row["component"] == "arm-zephyr-eabi-toolchain" and row["host"] == "macos-aarch64":
+                artifacts[i] = {**row, "licence": "GPL-3.0-or-later"}
+
+    _edit_manifest(tmp_path, _mutate)
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "arm-zephyr-eabi-toolchain" in err
+    assert "disagreeing licence" in err
+
+
+def test_consistent_tier_and_licence_across_host_rows_passes():
+    """Direct unit test of the helper (not the whole gate) proving it
+    accepts the consistent real shape -- every row tier A, licence null."""
+    manifest = {
+        "zephyrSdk": {
+            "artifacts": [
+                {"host": "linux-x86_64", "component": "minimal-sdk", "tier": "A", "licence": None},
+                {"host": "windows-x86_64", "component": "minimal-sdk", "tier": "A", "licence": None},
+                {"host": "macos-aarch64", "component": "minimal-sdk", "tier": "A", "licence": None},
+            ]
+        }
+    }
+    assert gate._check_artifact_provenance_consistency(manifest) == []

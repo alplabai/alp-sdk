@@ -41,6 +41,7 @@
 #include <alp/soc_caps.h>
 
 #include "adc_ops.h"
+#include "alp_slot_claim.h"
 
 /* DT alias table.  Each alp-adcN alias resolves to an adc_dt_spec;
  * we look it up by channel_id at open time. */
@@ -110,12 +111,17 @@ typedef struct alif_e8_adc_state {
 
 static alif_e8_adc_state_t _state_pool[CONFIG_ALP_SDK_ADC_HANDLE_POOL];
 
+/* issue #1115 round-2 dev review: this used to be a plain check-then-set
+ * scan (`if (!in_use) { memset(...); in_use = true; }`) -- two threads
+ * racing alp_adc_open() on the same channel could both see in_use ==
+ * false and both win the same slot. in_use is the LAST member, so claim
+ * it atomically first and memset only the bytes ahead of it (mirrors
+ * dsp/sw_fallback.c's acquire_be_slot()). */
 static alif_e8_adc_state_t *_alloc_state(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_ADC_HANDLE_POOL; ++i) {
-		if (!_state_pool[i].in_use) {
-			memset(&_state_pool[i], 0, sizeof(_state_pool[i]));
-			_state_pool[i].in_use           = true;
+		if (alp_slot_try_claim(&_state_pool[i].in_use)) {
+			memset(&_state_pool[i], 0, offsetof(alif_e8_adc_state_t, in_use));
 			_state_pool[i].oversample_ratio = 1u;
 			return &_state_pool[i];
 		}
@@ -125,7 +131,7 @@ static alif_e8_adc_state_t *_alloc_state(void)
 
 static void _free_state(alif_e8_adc_state_t *s)
 {
-	s->in_use = false;
+	alp_slot_release(&s->in_use);
 }
 
 static alp_status_t
@@ -153,10 +159,19 @@ alif_e8_open(const alp_adc_config_t *cfg, alp_adc_backend_state_t *st, alp_capab
 	s->channel_id = cfg->channel_id;
 	s->resolution_bits =
 	    (cfg->resolution_bits != 0) ? cfg->resolution_bits : (uint8_t)spec->resolution;
-	/* HW oversampling reaches us via the portable config field (Zephyr's
-     * adc_sequence.oversampling already abstracts this).  Vendor-ext
-     * for oversampling would be redundant -- it's promoted to portable. */
-	s->oversample_ratio = (cfg->oversampling_ratio > 1u) ? cfg->oversampling_ratio : 1u;
+	/* MUST refuse any ratio > 1: the Alif adc_alif driver rejects every
+     * non-zero adc_sequence.oversampling outright, power-of-two or not --
+     * zephyr/drivers/adc/adc_alif.c:779 is `if (sequence->oversampling !=
+     * 0U) { ... return -ENOTSUP; }`, with no power-of-two carve-out.  A
+     * ratio that passed the old power-of-two-only guard here still got
+     * written to adc_sequence.oversampling below and every subsequent
+     * adc_read() still faulted ALP_ERR_IO (issue #1648) -- refuse it here,
+     * at open(), instead. */
+	if (cfg->oversampling_ratio > 1u) {
+		_free_state(s);
+		return ALP_ERR_NOSUPPORT;
+	}
+	s->oversample_ratio = 1u;
 
 	int err = adc_channel_setup_dt(spec);
 	if (err != 0) {
@@ -236,8 +251,7 @@ ALP_BACKEND_REGISTER(adc,
                      {
                          .silicon_ref = "alif:ensemble:e8",
                          .vendor      = "alif",
-                         .base_caps   = (uint32_t)(ALP_INSTANCE_CAP_HW_OVERSAMPLE |
-                                                   ALP_INSTANCE_CAP_HW_TRIGGER),
+                         .base_caps   = (uint32_t)ALP_INSTANCE_CAP_HW_TRIGGER,
                          .priority    = 100,
                          .ops         = &alif_e8_ops,
                          .probe       = NULL,

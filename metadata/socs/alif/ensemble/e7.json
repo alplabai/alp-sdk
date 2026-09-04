@@ -157,25 +157,6 @@
   "packages": ["WLCSP208 0.5mm", "FBGA194 0.5mm"],
   "variants": [
     {
-      "order_code": "AE722F80F55D5AS",
-      "package": "WLCSP208",
-      "temperature_grade": "standard",
-      "mram_mb": 5.5,
-      "sram_kb": 13824,
-      "sram_banks_kb": {
-        "SRAM0": 4096, "SRAM1": 2560,
-        "SRAM2_M55_HP_ITCM": 256, "SRAM3_M55_HP_DTCM": 1024,
-        "SRAM4_M55_HE_ITCM": 256, "SRAM5_M55_HE_DTCM": 256,
-        "SRAM6": 2048, "SRAM7": 512, "SRAM8": 2048, "SRAM9": 768
-      },
-      "gpio_18v": 120,
-      "shipment_suffixes": ["-T", "-Y"],
-      "debug": {
-        "pyocd_target": "AE722F80F55D5AS",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
-      }
-    },
-    {
       "order_code": "AE722F80F55D5LS",
       "package": "FBGA194",
       "temperature_grade": "standard",
@@ -192,7 +173,8 @@
       "alp_module_skus": ["E1M-AEN701"],
       "debug": {
         "pyocd_target": "AE722F80F55D5LS",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": "AE722F80F55D5_HE"
       }
     }
   ],
@@ -203,6 +185,7 @@
     "Watchdog count is 4 on E7 (vs 2 on E3); active dynamic consumption is 29 µA/MHz (vs 27 on E3).",
     "Operating temperature is 'Standard' grade (-40 / +75 ambient) vs E3 'Extended' (-40 / +85).",
     "AE722F80F55D5LS is the variant Alp Lab uses on the E1M-AEN701 module SKU.",
-    "USB = xHCI USB-2.0 dual-role @ 0x48200000 (IRQ 101), 8 endpoints; grounded from the Alif DFP soc.h/soc_features.h (AE722F80F55D5). Host mode supported."
+    "USB = xHCI USB-2.0 dual-role @ 0x48200000 (IRQ 101), 8 endpoints; grounded from the Alif DFP soc.h/soc_features.h (AE722F80F55D5). Host mode supported.",
+    "debug.jlink_flash_device populated for the single remaining variant (#1295; it was both of two before #1444 dropped this file's WLCSP208 row), sourced from the SEGGER J-Link DLL V9.46 built-in device table via JLINKARM_DEVICE_GetInfo readback of the AlifSemiconductor block -- canonical entry name, not order-code-alias probing. E7 is one of three Ensemble subfamilies (E3/E5/E7) whose device names drop the package/grade suffix and use a bare `_HE` string; E6/E8 keep the full order code plus `_M55_HE`. AE722F80F55D5AS/LS share one DB entry (`AE722F80F55D5_HE`) -- two order codes legitimately resolving to one device-table entry, confirmed by index readback, not a metadata duplication bug."
   ]
 }

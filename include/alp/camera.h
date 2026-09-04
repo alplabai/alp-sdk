@@ -5,13 +5,40 @@
 
 /**
  * @file camera.h
- * @brief Alp SDK camera abstraction (stub for v0.1).
+ * @brief Alp SDK camera abstraction.
  *
- * v0.2 ships a real MIPI CSI-2 wrapper for the V2N family.  v0.1
- * declares the surface so app code can compile against it; the
- * implementation returns ALP_ERR_NOSUPPORT on every backend.
+ * Real backends are registered on Zephyr, each gated by its own
+ * Kconfig symbol (`CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO` /
+ * `_V2N_N44_ISP` / `_ALIF_ISP`, all `depends on VIDEO`) -- without
+ * `CONFIG_VIDEO` only `zephyr_stub` below links and every call
+ * returns ALP_ERR_NOT_IMPLEMENTED:
+ *   - **zephyr_video** (silicon_ref `"*"`, priority 50): portable
+ *     `drivers/video/` wrapper.  open/start/stop/capture/release/
+ *     close route to real silicon on any board with a `video_*`
+ *     sensor driver; `configure_isp` is ALP_ERR_NOSUPPORT (the
+ *     portable video class has no in-line ISP knobs).
+ *   - **v2n_n44_isp** (silicon_ref `"renesas:rzv2n:n44"`, priority
+ *     100): same sensor pipeline as zephyr_video, real once the
+ *     V2N N44 SoC port wires its MIPI CSI-2 IP up to
+ *     `drivers/video/` (not yet landed), plus the N44 on-die ISP's
+ *     `configure_isp` (AE/AWB/AF + tuning offsets latch and return
+ *     ALP_OK; the MMIO pokes land once the N44 ISP register map is
+ *     public).
+ *   - **alif_isp_pico** (silicon_ref `"alif:ensemble:e8"`, priority
+ *     100): same real sensor pipeline, plus the E8 VeriSilicon
+ *     ISP-Pico's `configure_isp` (same latch-and-ALP_OK posture).
+ *     OPT-IN (`CONFIG_ALP_SDK_CAMERA_ALIF_ISP`, default n) --
+ *     depends on `VIDEO_ISP_VSI`, whose vendored `hal_alif` libisp
+ *     wrapper is older than this backend's driver needs, so it
+ *     FAILS TO COMPILE today; bump the wrapper before enabling.
+ *     BENCH-UNVERIFIED.
+ *   - **zephyr_stub** (silicon_ref `"*"`, priority 0): tracked
+ *     fallback for silicon none of the above cover -- every op
+ *     returns ALP_ERR_NOT_IMPLEMENTED (issue #223).
  *
-
+ * On Yocto and baremetal only `zephyr_stub` is linked today, so
+ * every call there returns ALP_ERR_NOT_IMPLEMENTED / NULL.
+ *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      v0.5 added alp_camera_configure_isp -- surface tentative pending real hardware feedback.  Base capture path stable; ISP block experimental.
  *      See docs/abi-markers.md for the convention.
@@ -75,9 +102,16 @@ typedef struct {
  *                 shape.  Must be non-NULL.
  *
  * @return Open handle on success, or NULL with @ref alp_last_error
- *         set to one of ALP_ERR_INVAL (NULL cfg or out-of-range
- *         field), ALP_ERR_NOT_READY (no backend wired),
- *         ALP_ERR_NOSUPPORT (backend lacks a camera class).
+ *         set to one of ALP_ERR_INVAL (NULL cfg), ALP_ERR_NOMEM
+ *         (handle pool exhausted), ALP_ERR_NOT_PRESENT_ON_THIS_SOC
+ *         (no backend registered for the active silicon),
+ *         ALP_ERR_NOT_IMPLEMENTED (registered backend has no open
+ *         hook), or a backend-specific failure from the open call
+ *         itself -- e.g. ALP_ERR_INVAL (zephyr_video / v2n_n44_isp /
+ *         alif_isp_pico: out-of-range @c camera_id), ALP_ERR_NOT_READY
+ *         (zephyr_video: no camera aliased in devicetree for the
+ *         requested @c camera_id), or ALP_ERR_NOT_IMPLEMENTED
+ *         (zephyr_stub, on silicon with no real backend).
  */
 alp_camera_t *alp_camera_open(const alp_camera_config_t *cfg);
 

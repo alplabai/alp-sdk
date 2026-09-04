@@ -1,7 +1,11 @@
 # Design: Alif Ensemble E8 (E1M-AEN801) JPEG encoder surface
 
 **Date:** 2026-07-23
-**Status:** Draft for review
+**Status:** **LANDED** in v0.13.0 (`CHANGELOG.md`, `VERSIONS.md`) —
+`include/alp/jpeg.h` + `src/backends/jpeg/{alif_hantro,sw_baseline}.c`
+exist, and the hardware path is recorded silicon-proven (`JPEG_SWREG0`
+readback + a real HW-encoded round-trip through libjpeg). Kept for
+the design rationale.
 **Scope:** New portable `<alp/jpeg.h>` JPEG-**encoder** surface for alp-sdk, hardware-accelerated
 on the E1M-AEN801 (Alif AE822 / Ensemble E8) Hantro VC9000E block, with a software baseline
 fallback for every other SoM. **Encode only** — the E8 has no hardware JPEG decoder.

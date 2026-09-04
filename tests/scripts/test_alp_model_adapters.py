@@ -9,8 +9,16 @@ from alp_model.adapters.cpu import CpuAdapter
 from alp_model.adapters.drpai import DrpaiAdapter
 from alp_model.adapters.deepx import DeepxAdapter
 from alp_model.adapters.ethos_u import VelaAdapter, _parse_vela_summary
+from alp_model.adapters.executorch import ExecutorchAdapter
 
 _ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_onnx_is_an_accepted_blob_format():
+    """The ORT CPU backend consumes raw .onnx -- neither vela_tflite nor dxnn
+    nor drpai_dir."""
+    from alp_model import manifest
+    assert "onnx" in manifest.VALID_BLOB_FORMATS
 
 
 def test_cpu_adapter_is_a_compiler_adapter():
@@ -33,6 +41,33 @@ def test_cpu_adapter_compile_passes_bytes_through(tmp_path):
     assert blob.format == "tflite"
     assert blob.payload == b"TFL3-DUMMY-MODEL"
     assert blob.arena_bytes >= 0
+
+
+def test_executorch_adapter_is_a_compiler_adapter():
+    assert issubclass(ExecutorchAdapter, CompilerAdapter)
+
+
+def test_executorch_adapter_is_always_available_and_accepts_pte():
+    a = ExecutorchAdapter()
+    assert a.backend == "cpu"
+    assert a.is_available() is True
+    assert a.accepts("pte") is True
+    assert a.accepts("tflite") is False      # ExecuTorch ingests its own .pte, not .tflite
+    assert a.accepts("onnx") is False
+
+
+def test_executorch_adapter_compile_passes_bytes_through(tmp_path):
+    src = tmp_path / "m.pte"
+    src.write_bytes(b"PTE-DUMMY-PROGRAM")
+    blob = ExecutorchAdapter().compile(src, accel_config="", out_dir=tmp_path)
+    assert isinstance(blob, Blob)
+    assert blob.format == "executorch"       # matches the device _fmt_enum case (#1260)
+    assert blob.payload == b"PTE-DUMMY-PROGRAM"
+    assert blob.arena_bytes >= 0
+
+
+def test_executorch_adapter_does_not_require_compile_opts():
+    assert ExecutorchAdapter().requires_compile_opts is False
 
 
 def test_drpai_adapter_detect_and_skip(monkeypatch):
@@ -320,6 +355,108 @@ _DXCOM_MIN_RAM_GIB = 15.5
 def _drpai_opts(images_dir):
     return {"input_shape": "1,3,224,224", "input_name": "input",
             "images": str(images_dir), "product": "V2N"}
+
+
+def test_drpai_compile_rejects_non_224_images_early(tmp_path, monkeypatch):
+    # Issue #1271: the vendor tutorial's --images path always resizes through
+    # pre_process_imagenet_pytorch(), which hard-codes resize(256)+center_crop(224)
+    # regardless of the model's real input_shape. A detector geometry (e.g.
+    # YOLOX 1,3,640,640) must be rejected FAST and clearly here, not forwarded
+    # into a multi-minute compile that then dies deep in the vendor tutorial
+    # with `could not broadcast input array from shape (1,3,224,224) into
+    # shape (1,3,640,640)`.
+    home = tmp_path / "tvm"; (home / "tutorials").mkdir(parents=True)
+    monkeypatch.setenv("ALP_DRPAI_TVM_HOME", str(home))
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
+    calib = tmp_path / "calib"; calib.mkdir()
+    (calib / "0.jpg").write_bytes(b"JPG")
+
+    def fail_if_called(*a, **k):
+        raise AssertionError(
+            "compile_onnx_model_quant.py must not run for a shape mismatch")
+    monkeypatch.setattr("alp_model.adapters.drpai.subprocess.run", fail_if_called)
+
+    opts = {"input_shape": "1,3,640,640", "input_name": "images",
+            "images": str(calib), "product": "V2N"}
+    with pytest.raises(RuntimeError, match="pre_process_imagenet_pytorch"):
+        DrpaiAdapter().compile(src, accel_config="", out_dir=tmp_path, opts=opts)
+
+
+def test_drpai_compile_handles_non_str_input_shape_without_crashing(tmp_path, monkeypatch):
+    # board.yaml can hand the adapter a YAML flow-sequence input_shape
+    # ([1,3,640,640], parsed as a Python list) instead of a string; a
+    # non-224 list shape must produce the same clean RuntimeError as its
+    # string spelling, not an uncaught AttributeError from .split() on a
+    # non-str.
+    monkeypatch.setenv("ALP_DRPAI_TVM_HOME", str(tmp_path))
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX")
+    calib = tmp_path / "calib"; calib.mkdir()
+    opts = {"input_shape": [1, 3, 640, 640], "input_name": "images",
+            "images": str(calib), "product": "V2N"}
+    with pytest.raises(RuntimeError, match="pre_process_imagenet_pytorch"):
+        DrpaiAdapter().compile(src, accel_config="", out_dir=tmp_path, opts=opts)
+
+
+def test_drpai_compile_accepts_224_shape_as_yaml_list(tmp_path, monkeypatch):
+    # Round 4 (#1271): the adapter used to str()-normalize input_shape before
+    # the 224x224 check, so str([1, 3, 224, 224]) == '[1, 3, 224, 224]' and
+    # .split(",") on THAT tears into tokens ('[1', ' 224]', ...) that can't
+    # parse as ints -- misdiagnosing a genuinely valid YAML-list 224x224
+    # classifier shape as unsupported. A list-form 224x224 shape must compile
+    # exactly like its string spelling, and the vendor CLI must still see a
+    # comma-joined "-s 1,3,224,224", never Python's str() of the list.
+    home = tmp_path / "tvm"; (home / "tutorials").mkdir(parents=True)
+    monkeypatch.setenv("ALP_DRPAI_TVM_HOME", str(home))
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
+    calib = tmp_path / "calib"; calib.mkdir()
+    (calib / "0.png").write_bytes(b"PNG")
+    seen = {}
+
+    def fake_run(cmd, capture_output, text, timeout, env):
+        seen["cmd"] = cmd
+        out = Path(cmd[cmd.index("-o") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "drp_desc.bin").write_bytes(b"DESC")
+        (out / "weight.bin").write_bytes(b"WEIGHT")
+        (out / "addr_map.txt").write_text("0x0", encoding="utf-8")
+
+        class _R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return _R()
+    monkeypatch.setattr("alp_model.adapters.drpai.subprocess.run", fake_run)
+
+    opts = {"input_shape": [1, 3, 224, 224], "input_name": "input",
+            "images": str(calib), "product": "V2N"}
+    blob = DrpaiAdapter().compile(src, accel_config="", out_dir=tmp_path, opts=opts)
+    assert blob.format == "drpai_dir"
+    assert seen["cmd"][seen["cmd"].index("-s") + 1] == "1,3,224,224"
+
+
+def test_drpai_is_224_imagenet_shape_accepts_nchw():
+    from alp_model.adapters.drpai import _is_224_imagenet_shape
+    assert _is_224_imagenet_shape("1,3,224,224") is True
+    # Same geometry as a YAML flow-sequence list/tuple must match too --
+    # compared structurally, not via a stringified spelling (#1271 round 4).
+    assert _is_224_imagenet_shape([1, 3, 224, 224]) is True
+    assert _is_224_imagenet_shape((1, 3, 224, 224)) is True
+
+
+@pytest.mark.parametrize("input_shape", [
+    "1,3,640,640",       # YOLOX detector geometry (the issue's repro)
+    [1, 3, 640, 640],    # same geometry as a YAML flow-sequence list
+    "1,3,300,300",       # SSD-style detector geometry
+    "1,224,224,3",       # NHWC: not what accepts() ever hands this ONNX-only
+                          # adapter (ONNX is NCHW by convention) -- unsourced,
+                          # see #1271 review; must NOT be accepted
+    [1, 224, 224, 3],    # same NHWC geometry as a list
+    "1,224,224",         # wrong rank
+    "not,a,shape,x",     # unparsable
+])
+def test_drpai_is_224_imagenet_shape_rejects_non_224(input_shape):
+    from alp_model.adapters.drpai import _is_224_imagenet_shape
+    assert _is_224_imagenet_shape(input_shape) is False
 
 
 def test_drpai_compile_rejects_missing_opts(tmp_path, monkeypatch):

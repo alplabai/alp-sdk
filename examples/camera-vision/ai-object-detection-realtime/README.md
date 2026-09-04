@@ -54,7 +54,7 @@ west build -b rzv2n_evk examples/camera-vision/ai-object-detection-realtime
 **AEN fallback (works today on the public stack):**
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp \
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp \
            examples/camera-vision/ai-object-detection-realtime
 ```
 

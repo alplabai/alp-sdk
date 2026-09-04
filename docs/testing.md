@@ -52,8 +52,9 @@ A green run proves:
 It does **not** prove:
 
 - Any peripheral works against real silicon.  That's HIL territory
-  (see `docs/test-plan.md`; ⏳ / 🟡 rows gate on the `hil-yocto`
-  + `nightly-aen-hil` runners).
+  (see `docs/test-plan.md`; ⏳ / 🟡 rows flip to ✅ only when a person
+  attaches real-bench evidence per `docs/ci/HW-IN-LOOP.md` -- there is
+  no automated runner or CI workflow that does this).
 - Performance or memory budgets.  See `tests/bench/` for those.
 
 ---
@@ -63,7 +64,7 @@ It does **not** prove:
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │ HIL: real silicon, real broker, real sensor                    │
-│   nightly-aen-hil.yml + hil-yocto (parked, docs/ci/HW-IN-LOOP.md)   │
+│   Explicit bench run, no CI workflow (docs/ci/HW-IN-LOOP.md).  │
 │   Flips test-plan.md rows from 🟡 → ✅.                         │
 ├────────────────────────────────────────────────────────────────┤
 │ CI: GitHub-hosted runners, no hardware                         │
@@ -83,37 +84,37 @@ It does **not** prove:
 
 ## Coverage map per public header
 
-| Header                            | Local test(s)                                                                                                         | HIL gate (flips to ✅)                |
+| Header                            | Local test(s)                                                                                                         | Bench evidence (flips ✅ per HW-IN-LOOP.md) |
 |-----------------------------------|------------------------------------------------------------------------------------------------------------------------|---------------------------------------|
-| `<alp/peripheral.h>` — I²C        | `tests/yocto/peripheral_i2c.c` + `tests/unit/i2c_registry/`                                                  | `nightly-aen-hil` + `hil-yocto`       |
-| `<alp/peripheral.h>` — SPI        | `tests/yocto/peripheral_spi.c` + `tests/unit/spi_registry/`                                                            | `nightly-aen-hil` + `hil-yocto`       |
-| `<alp/peripheral.h>` — UART       | `tests/yocto/peripheral_uart.c` + `tests/unit/uart_registry/` + `examples/peripheral-io/uart-echo/`                                   | `nightly-aen-hil` + `hil-yocto`       |
-| `<alp/peripheral.h>` — UART RX ringbuf | `tests/unit/uart_registry/` (rx_ringbuf scenario) + `examples/peripheral-io/uart-rx-ringbuf/`                              | `nightly-aen-hil`                     |
-| `<alp/peripheral.h>` — GPIO       | `tests/yocto/peripheral_gpio.c` + `tests/unit/gpio_registry/` + `examples/peripheral-io/gpio-button-led/`                             | `nightly-aen-hil` + `hil-yocto`       |
-| Portable-class lifecycle contract — every `alp_<class>_open/close/capabilities` (14 classes + I²C/SPI target modes, `alp_init`/`alp_deinit`, UART RX ringbuf) | `tests/zephyr/conformance/` — the data-driven conformance gate a new backend must pass; on real-SoM builds expectations derive from `alp_has()` (caps↔backend parity) and WDT arming is opt-in (`CONFIG_TEST_ALP_CONFORMANCE_WDT_ARM`); see the matrix in its `src/main.c` + `docs/porting-new-som.md` §11 | `nightly-aen-hil` (qualified boards in `platform_allow` build via `--build-only` today; CI runs native_sim) |
-| `<alp/pwm.h>`                     | `tests/unit/pwm_registry/` + `examples/peripheral-io/pwm-led-fade/`                                             | `nightly-aen-hil`                     |
-| `<alp/adc.h>`                     | `tests/unit/adc_registry/` + `examples/peripheral-io/adc-voltmeter/`                                                                 | `nightly-aen-hil`                     |
-| `<alp/dac.h>`                     | `tests/zephyr/conformance/` only (no `tests/unit/dac_registry/`) + `examples/peripheral-io/dac-waveform/` + `examples/aen/aen-dac-regcheck/`                                          | `nightly-aen-hil`                     |
-| `<alp/counter.h>`                 | `tests/unit/counter_registry/` + `tests/unit/qenc_registry/` + `examples/power-timing/counter-alarm/` + `examples/peripheral-io/qenc-readout/`                                      | `nightly-aen-hil`                     |
-| `<alp/i2s.h>`                     | `tests/unit/i2s_registry/` + `examples/audio/i2s-tone/`                                                                      | `nightly-aen-hil`                     |
-| `<alp/can.h>`                     | `tests/unit/can_registry/` + `examples/peripheral-io/can-loopback/`                                                                  | `nightly-aen-hil`                     |
-| `<alp/rtc.h>`                     | `tests/unit/rtc_registry/` + `examples/power-timing/rtc-clock/`                                                                     | `nightly-aen-hil`                     |
-| `<alp/wdt.h>`                     | `tests/unit/wdt_registry/` + `examples/power-timing/wdt-feed/`                                                                      | `nightly-aen-hil`                     |
-| `<alp/i3c.h>`                     | `tests/zephyr/conformance/` only (no `tests/unit/i3c_registry/`) + `examples/aen/aen-i3c-regcheck/` — no portable `examples/peripheral-io/` sibling yet, and the regcheck is not observable under a Flow C RAM-run (#935) | `nightly-aen-hil`                     |
-| `<alp/audio.h>` (Zephyr)          | `tests/zephyr/audio/` + `examples/audio/audio-loopback/`                                                                     | `nightly-aen-hil`                     |
-| `<alp/audio.h>` (Yocto, ALSA)     | `tests/yocto/audio_alsa.c` — 11 failure paths                                                                          | `hil-yocto`                           |
-| `<alp/iot.h>` — MQTT cleartext    | `tests/yocto/iot_mqtt.c` (parse + open) + `tests/zephyr/iot/`                                                          | `hil-yocto` + `nightly-aen-hil`       |
-| `<alp/iot.h>` — MQTT TLS          | `tests/yocto/iot_mqtt.c` (5 TLS tests: default / pinned-CA / missing-CA / insecure / default-port-8883)                | `hil-yocto`                           |
-| `<alp/security.h>` (Zephyr)       | `tests/zephyr/security/`                                                                                               | `nightly-aen-hil`                     |
+| `<alp/peripheral.h>` — I²C        | `tests/yocto/peripheral_i2c.c` + `tests/unit/i2c_registry/`                                                  | AEN bench + Yocto bench       |
+| `<alp/peripheral.h>` — SPI        | `tests/yocto/peripheral_spi.c` + `tests/unit/spi_registry/`                                                            | AEN bench + Yocto bench       |
+| `<alp/peripheral.h>` — UART       | `tests/yocto/peripheral_uart.c` + `tests/unit/uart_registry/` + `examples/peripheral-io/uart-echo/`                                   | AEN bench + Yocto bench       |
+| `<alp/peripheral.h>` — UART RX ringbuf | `tests/unit/uart_registry/` (rx_ringbuf scenario) + `examples/peripheral-io/uart-rx-ringbuf/`                              | AEN bench                     |
+| `<alp/peripheral.h>` — GPIO       | `tests/yocto/peripheral_gpio.c` + `tests/unit/gpio_registry/` + `examples/peripheral-io/gpio-button-led/`                             | AEN bench + Yocto bench       |
+| Portable-class lifecycle contract — every `alp_<class>_open/close/capabilities` (14 classes + I²C/SPI target modes, `alp_init`/`alp_deinit`, UART RX ringbuf, dispatcher ops-vtable NULL-slot guard) | `tests/zephyr/conformance/` — the data-driven conformance gate a new backend must pass; on real-SoM builds expectations derive from `alp_has()` (caps↔backend parity) and WDT arming is opt-in (`CONFIG_TEST_ALP_CONFORMANCE_WDT_ARM`); see the matrix in its `src/main.c` + `docs/porting-new-som.md` §11 | AEN bench (qualified boards in `platform_allow` build via `--build-only` today; CI runs native_sim) |
+| `<alp/pwm.h>`                     | `tests/unit/pwm_registry/` + `examples/peripheral-io/pwm-led-fade/`                                             | AEN bench                     |
+| `<alp/adc.h>`                     | `tests/unit/adc_registry/` + `examples/peripheral-io/adc-voltmeter/`                                                                 | AEN bench                     |
+| `<alp/dac.h>`                     | `tests/zephyr/conformance/` only (no `tests/unit/dac_registry/`) + `examples/peripheral-io/dac-waveform/` + `examples/aen/aen-dac-regcheck/`                                          | AEN bench                     |
+| `<alp/counter.h>`                 | `tests/unit/counter_registry/` + `tests/unit/qenc_registry/` + `examples/power-timing/counter-alarm/` + `examples/peripheral-io/qenc-readout/`                                      | AEN bench                     |
+| `<alp/i2s.h>`                     | `tests/unit/i2s_registry/` + `examples/audio/i2s-tone/`                                                                      | AEN bench                     |
+| `<alp/can.h>`                     | `tests/unit/can_registry/` + `examples/peripheral-io/can-loopback/`                                                                  | AEN bench                     |
+| `<alp/rtc.h>`                     | `tests/unit/rtc_registry/` + `examples/power-timing/rtc-clock/`                                                                     | AEN bench                     |
+| `<alp/wdt.h>`                     | `tests/unit/wdt_registry/` + `examples/power-timing/wdt-feed/`                                                                      | AEN bench                     |
+| `<alp/i3c.h>`                     | `tests/zephyr/conformance/` only (no `tests/unit/i3c_registry/`) + `examples/aen/aen-i3c-regcheck/` — no portable `examples/peripheral-io/` sibling yet, and the regcheck is not observable under a Flow C RAM-run (#935) | AEN bench                     |
+| `<alp/audio.h>` (Zephyr)          | `tests/zephyr/audio/` + `examples/audio/audio-loopback/`                                                                     | AEN bench                     |
+| `<alp/audio.h>` (Yocto, ALSA)     | `tests/yocto/audio_alsa.c` — 11 failure paths                                                                          | Yocto bench                           |
+| `<alp/iot.h>` — MQTT cleartext    | `tests/yocto/iot_mqtt.c` (parse + open) + `tests/zephyr/iot/`                                                          | Yocto bench + AEN bench       |
+| `<alp/iot.h>` — MQTT TLS          | `tests/yocto/iot_mqtt.c` (5 TLS tests: default / pinned-CA / missing-CA / insecure / default-port-8883)                | Yocto bench                           |
+| `<alp/security.h>` (Zephyr)       | `tests/zephyr/security/`                                                                                               | AEN bench                     |
 | `<alp/security.h>` (Yocto, OpenSSL) | `tests/yocto/security_openssl.c` — 16 tests: SHA-256 NIST `"abc"` KAT, SHA-384/512 length, AEAD round-trip, tag-mismatch, key-length / NULL refusals, TRNG fill | meta-alp-sdk image build (flips ✅)      |
-| `<alp/ble.h>`                     | `tests/zephyr/ble/`                                                                                                    | `nightly-aen-hil`                     |
-| `<alp/mproc.h>` — shmem/mbox/hwsem | `tests/zephyr/mproc/` (`smoke` scenario)                                                                              | `nightly-aen-hil`                     |
-| `<alp/mproc.h>` — IPC framing     | `tests/zephyr/mproc/` (`nanopb_framing` scenario, 9 ZTESTs)                                                            | `nightly-aen-hil`                     |
-| `<alp/inference.h>`               | `tests/zephyr/inference/` + `tests/yocto/inference_dispatcher.c`                                                       | `nightly-aen-hil` + `hil-yocto`       |
-| `<alp/usb.h>`                     | `tests/zephyr/usb/`                                                                                                    | `nightly-aen-hil`                     |
-| `<alp/hw_info.h>`                 | `tests/zephyr/hw_info/`                                                                                                | `nightly-aen-hil` + production-test bench |
+| `<alp/ble.h>`                     | `tests/zephyr/ble/`                                                                                                    | AEN bench                     |
+| `<alp/mproc.h>` — shmem/mbox/hwsem | `tests/zephyr/mproc/` (`smoke` scenario)                                                                              | AEN bench                     |
+| `<alp/mproc.h>` — IPC framing     | `tests/zephyr/mproc/` (`nanopb_framing` scenario, 9 ZTESTs)                                                            | AEN bench                     |
+| `<alp/inference.h>`               | `tests/zephyr/inference/` + `tests/yocto/inference_dispatcher.c`                                                       | AEN bench + Yocto bench       |
+| `<alp/usb.h>`                     | `tests/zephyr/usb/`                                                                                                    | AEN bench                     |
+| `<alp/hw_info.h>`                 | `tests/zephyr/hw_info/`                                                                                                | AEN bench + production-test bench |
 | `<alp/display.h>` / `<alp/gui.h>` / `<alp/camera.h>` / `<alp/storage.h>` | compile-only via `tests/smoke.c` + headers-include test                                              | (real impls pending)                  |
-| Chip drivers (`chips/*/`)         | `tests/zephyr/chips/` with fakes for `lsm6dso`, `bme280`, `ssd1306`                                                    | per-chip on `nightly-aen-hil`         |
+| Chip drivers (`chips/*/`)         | `tests/zephyr/chips/` with fakes for `lsm6dso`, `bme280`, `ssd1306`                                                    | per-chip on AEN bench         |
 | `<alp/soc_caps.h>` generation     | `pr-generated-files.yml` (drift gate)                                                                                  | n/a (generator-deterministic)         |
 | ABI snapshot                      | `scripts/abi_snapshot.py` + `docs/abi/v0.1-snapshot.json` (drift gate)                                                 | n/a                                   |
 | `board.yaml` schema + loader      | `pr-metadata-validate.yml` smoke + `tests/scripts/test_project_*.py`                                                   | n/a                                   |
@@ -195,7 +196,7 @@ Every CI workflow has a local counterpart that runs the same coverage:
 |--------------------------------|-----------------------------------------------------------|
 | `pr-plain-cmake.yml`           | `bash scripts/test-all.sh --yocto-only`                   |
 | `pr-twister.yml`               | `bash scripts/test-all.sh --zephyr-only`                  |
-| `pr-static-analysis.yml`       | `bash scripts/test-all.sh` (clang-format-diff stage)      |
+| `pr-static-analysis.yml`       | `bash scripts/test-all.sh` (clang-format-diff + shellcheck stages) |
 | `pr-generated-files.yml`       | `python3 scripts/gen_soc_caps.py --check`                 |
 | `pr-metadata-validate.yml`     | `python3 scripts/validate_metadata.py` + alp_project.py   |
 | public/private classifier      | `python3 scripts/check_public_private.py`                 |

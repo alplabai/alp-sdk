@@ -18,9 +18,9 @@
 # note.  Do not add E1M-V2N101 to a scaffold of this template until
 # that port lands.
 #
-# Customer workflow: copy this directory, set your SSID/PSK + broker
-# URI in src/main.c (or wire them from provisioning), and `west
-# build` for the AEN board target.
+# Customer workflow: `tan init --from-example connectivity/mqtt-telemetry`,
+# set your SSID/PSK + broker URI in src/main.c (or wire them from
+# provisioning), and `tan build` for the AEN board target.
 libraries:
   # mbedtls backs the `mqtts://` TLS path.  The v0.6 board.yaml
   # cross-field validator requires `mbedtls` (or `bearssl`) in

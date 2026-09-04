@@ -5,7 +5,7 @@
 # Fresh-clone bootstrap for the Alp SDK on NATIVE Windows (PowerShell 7+).
 # Mirrors scripts/bootstrap.sh: a Zephyr workspace beside the alp-sdk
 # checkout, a workspace-local venv (west + Python deps), and an editable
-# install of the `tan` CLI's Python backend (`alp_cli`) -- see
+# install of alp-sdk's internal/reference Python tooling (`alp_cli`) -- see
 # docs/cross-platform-setup.md section 4 for the manual walkthrough
 # this script automates.
 #
@@ -37,6 +37,10 @@
 #     pwsh scripts\bootstrap.ps1                # full setup
 #     pwsh scripts\bootstrap.ps1 -NoPip         # skip pip installs
 #     pwsh scripts\bootstrap.ps1 -NoWest        # skip west init/update
+#     pwsh scripts\bootstrap.ps1 -NoPatches     # skip `west patch apply` + its
+#         # verification (issue #1392). The patches in zephyr/patches.yml are
+#         # required to BUILD. Use this only when you intend to manage the
+#         # patch state yourself.
 #     pwsh scripts\bootstrap.ps1 -PrintEnv      # only print env-var lines
 #     pwsh scripts\bootstrap.ps1 -AllowPartial
 #         # report success even if zephyr-requirements / sdk-extras /
@@ -48,6 +52,7 @@
 param(
     [switch]$NoPip,
     [switch]$NoWest,
+    [switch]$NoPatches,
     [switch]$PrintEnv,
     [switch]$AllowPartial
 )
@@ -351,7 +356,7 @@ if (-not $NoWest) {
             # this workspace (#769).
             & $West @WestInitArgs $RepoRoot
             if ($LASTEXITCODE -ne 0) { Fail "west init -l failed" }
-            Write-Info "Running 'west update' (shallow + narrow)"
+            Write-Info "Running 'west update' (shallow + narrow; ~1.5 GB+ on a cold cache for zephyr/ + modules/, mostly vendor HALs -- this is a floor, not a ceiling; budget disk/bandwidth accordingly)"
             & $West @WestUpdateArgs
             if ($LASTEXITCODE -ne 0) { Fail "west update failed" }
             & $West @WestExportArgs
@@ -387,6 +392,7 @@ if (-not $NoWest) {
         }
         Write-Ok "alp-* extension commands registered ('west alp-migrate' resolves in $WorkspaceDir)"
     }
+
 } else {
     Write-Info "Skipping west setup (-NoWest)"
 }
@@ -411,18 +417,12 @@ if (-not $NoPip) {
         Write-Warn2 "alp-sdk extras install reported a problem -- check manually"
         Add-BlockingPhase "sdk-extras"
     }
-    # tan's Python backend (alp_cli: init / run / emit / validate / model /
-    # doctor / monitor, invoked as `python -m alp_cli <sub>` by `tan`) --
-    # editable install, so a `git pull` in the checkout updates the backend
-    # in place. `tan` itself is a separate Rust binary, installed
-    # separately:
-    #   irm https://raw.githubusercontent.com/alplabai/tan-cli/main/install.ps1 | iex
-    # The from-source alternative is `git clone https://github.com/alplabai/
-    # tan-cli; cd tan-cli; cargo install --path crates/tan-cli --locked`
-    # -- that path is relative to a TAN-CLI checkout, not to this one. This
-    # comment used to name `crates/tan-cli` alone, which does not exist in
-    # alp-sdk, so anyone who followed it from here got "no such directory".
-    Write-Info "Installing the tan CLI's Python backend into the venv (pip install -e $PipEditableInstall)"
+    # SDK-internal/reference Python tooling (including alp_cli) -- editable
+    # install, so a `git pull` in the checkout updates it in place. Python
+    # Tan is installed separately. During the v0.5 port, use tan-cli/dev in
+    # its own Python 3.12+ venv; from v0.5 the installer supplies the frozen
+    # runtime.
+    Write-Info "Installing alp-sdk's internal Python tooling into the venv (pip install -e $PipEditableInstall)"
     & $Vpy -m pip install -q -e $PipEditableInstall
     if ($LASTEXITCODE -ne 0) {
         Write-Warn2 "alp_cli editable install reported a problem -- check manually"
@@ -430,6 +430,79 @@ if (-not $NoPip) {
     }
 } else {
     Write-Info "Skipping pip installs (-NoPip)"
+}
+
+# -------- zephyr/patches.yml (issue #1392) ------------------------------------
+
+# AFTER the pip section, not inside the west one: `west patch` imports
+# `pykwalify.core` at module import time, and pykwalify arrives with the Zephyr
+# requirements installed just above.
+#
+# VERIFY FIRST, then apply only what is missing. `west patch apply` is NOT
+# idempotent: re-running it on an already-patched tree fails, because each
+# patch is fed to `git apply` against content that already carries it. Measured
+# on PR #1426's `getting-started` job, whose workspace cache key carries no
+# commit component and so restored an already-patched tree.
+#
+# Mirrors scripts/bootstrap.sh's block of the same name. Without it a Windows
+# user gets exactly the silently-unpatched workspace #1392 is about, while a
+# Linux user does not.
+if (-not $NoWest -and -not $NoPatches) {
+    Push-Location $RepoRoot
+    try {
+        & $Vpy scripts/verify_west_patches.py --topdir $WorkspaceDir --west $West *> $null
+        $VerifyRc = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+    if ($VerifyRc -eq 0) {
+        Write-Ok "zephyr/patches.yml already applied in $WorkspaceDir -- nothing to do"
+    } else {
+        # PER MODULE, not the whole set -- a workspace can be PARTIALLY
+        # patched, and `west patch apply` is not idempotent. See
+        # scripts/bootstrap.sh's block of the same name for the measurement.
+        Push-Location $RepoRoot
+        try {
+            $Unapplied = & $Vpy scripts/verify_west_patches.py --topdir $WorkspaceDir --west $West --list-unapplied 2>$null
+        } finally {
+            Pop-Location
+        }
+        if (-not $Unapplied) {
+            Fail "verify_west_patches.py reported patches missing (exit $VerifyRc) but named no module -- re-run it directly to see why"
+        }
+        foreach ($Mod in $Unapplied) {
+            # `--dst-module` belongs to `west patch`, not to its `apply`
+            # subcommand -- see scripts/bootstrap.sh's note of the same name.
+            Write-Info "Applying zephyr/patches.yml for module '$Mod' ('west patch --dst-module ... apply')"
+            Push-Location $WorkspaceDir
+            try {
+                & $West patch --dst-module $Mod apply
+                if ($LASTEXITCODE -ne 0) { Fail "west patch --dst-module $Mod apply failed (exit $LASTEXITCODE) -- output above" }
+            } finally {
+                Pop-Location
+            }
+        }
+        # Re-verify: `west patch apply`'s own exit status is not evidence it
+        # did anything. Exit 3 is "everything present is patched, but a module
+        # this workspace does not carry could not be checked" and warns; 1 and
+        # 2 are the real thing.
+        Push-Location $RepoRoot
+        try {
+            & $Vpy scripts/verify_west_patches.py --topdir $WorkspaceDir --west $West
+            $VerifyRc = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+        if ($VerifyRc -eq 0) {
+            Write-Ok "zephyr/patches.yml verified applied in $WorkspaceDir"
+        } elseif ($VerifyRc -eq 3) {
+            Write-Warn2 "some zephyr/patches.yml modules are not in this workspace -- see above"
+        } else {
+            Fail "zephyr/patches.yml is not applied in $WorkspaceDir (#1392) -- see the list above"
+        }
+    }
+} elseif (-not $NoWest) {
+    Write-Info "Skipping 'west patch apply' (-NoPatches) -- zephyr/patches.yml is NOT applied"
 }
 
 # -------- Manual-install hints ------------------------------------------------
@@ -463,7 +536,7 @@ Write-Host ""
 #
 # $ExitCode is set here but NOT acted on until the very end of this script
 # (matching tan-cli's `verdict()`/`finish()` split): the Next steps block
-# below -- including `tan doctor --build`, the tool that diagnoses exactly
+# below -- including `tan doctor`, the tool that diagnoses exactly
 # this kind of failure -- must still print on the incomplete path. Exiting
 # here would take that away on the one run that needs it most.
 $ExitCode = 0
@@ -482,7 +555,7 @@ if ($BlockingPhases.Count -eq 0) {
 @"
 
 Next steps:
-  # Activate the workspace venv (west + Zephyr/SDK deps + tan's Python backend):
+  # Activate the workspace venv (west + Zephyr/SDK deps):
   & "$VenvDir\$VenvWindowsBin\Activate.ps1"
 
   # Make Zephyr reachable for builds:
@@ -491,19 +564,18 @@ Write-EnvLines "  "
 @"
 
   # Sanity-check the host build environment (needs tan on PATH -- see
-  # README.md for the tan-cli `install.sh` one-liner): `tan doctor --build`
-  # is the host/build preflight; plain `tan doctor` is a different,
-  # debug-readiness check (lldb, codeLLDBExtension) -- see docs/cli.md.
-  tan doctor --build
+  # README.md for the current v0.5-transition install). Python Tan runs one
+  # build/flash-oriented checklist; --build is a compatibility no-op.
+  tan doctor
 
   # BUILDING YOUR OWN PROJECT -- the customer path. ``tan`` is the whole
   # command surface (ADR-0020), and ``tan build`` resolves the board from the
   # project's own board.yaml, so there is no -b to pass. ``tan examples`` lists
   # what you can start from. It always targets the real SKU your board.yaml
-  # declares, so a real toolchain is required; ``tan doctor --build`` reports
+  # declares, so a real toolchain is required; ``tan doctor`` reports
   # whether you have one.
-  tan init --from-example peripheral-io/uart-echo --name my-app
-  cd my-app; tan build
+  tan init --name my-app --destination .. --sdk-root "$PWD"
+  cd ../my-app; tan build
 
   # WORKING ON THE SDK ITSELF -- a contributor command, not part of building
   # your firmware. Spelling the Zephyr board target by hand is only needed on

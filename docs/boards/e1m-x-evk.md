@@ -59,19 +59,21 @@ deltas (verify when the HW config writeup lands):
 
 ## Targeted SoM SKUs
 
-| SoM SKU       | Backing silicon                                          | Module metadata `soc_ref` |
+| SoM SKU       | Backing silicon                                          | Module metadata `silicon` |
 |---------------|----------------------------------------------------------|---------------------------|
 | `E1M-V2N101`  | Renesas `R9A09G056N44GBG#AC0`                            | `renesas:rzv2n:n44`       |
 | `E1M-V2N102`  | Renesas `R9A09G056N44GBG#AC0` (different memory tier)    | `renesas:rzv2n:n44`       |
-| `E1M-V2M101`  | Renesas `R9A09G056N44GBG#AC0` + DEEPX `DX-M1`            | `renesas:rzv2n:n44` + `deepx:dx:m1` |
+| `E1M-V2M101`  | Renesas `R9A09G056N44GBG#AC0` + DEEPX `DX-M1`            | `renesas:rzv2n:n44` (+ `npu: deepx_dxm1`) |
 | `E1M-V2M102`  | Same, alt memory tier                                    | same                      |
 
 ## What this means for the SDK
 
-- v0.2 ships first-class support for the E1M-X EVK + V2N101 SoM
-  via `tests/zephyr/peripheral/boards/alp_e1m_v2n101_m33_sm.overlay`
-  and a placeholder header at `include/alp/boards/alp_e1m_v2n101_m33_sm.h`
-  (lands with v0.2).
+- v0.2 ships first-class support for the E1M-X EVK + V2N101 SoM via
+  the in-tree Zephyr board definition below -- there is no separate
+  per-SoM peripheral-test overlay or placeholder header under
+  `include/alp/boards/` for V2N101 (unlike the AEN EVK's
+  `alp_e1m_evk.h` / `alp_e1m_evk_routes.h`); the carrier-level
+  `alp_e1m_x_evk.h` / `alp_e1m_x_evk_routes.h` pair covers it.
 - v0.3 extends to V2M101 / V2M102 with DX-M1 detection on PCIe.
 - The Zephyr board file for `alp_e1m_v2n101_m33_sm` ships in-tree at
   [`zephyr/boards/alp/e1m_v2n101_m33_sm/`](../../zephyr/boards/alp/e1m_v2n101_m33_sm/)
@@ -102,6 +104,23 @@ Display 2, its LCD2_RST (E1M-X IO21), LCD2_PWR_EN (E1M-X IO22), and CTP2 sideban
 (IO17/IO19) are therefore **permanently unavailable on V2N/V2M** at this
 hardware revision.
 
+## I²C address collision (TAS2563 broadcast)
+
+INA236B (U32) sits at `0x48` on `XEVK_I2C_BUS_SENSORS`
+(`XEVK_I2C_ADDR_INA236_VCAM2`, `metadata/boards/e1m-x-evk.yaml`),
+the same address as the TAS2563's global broadcast address
+(`TAS2563_I2C_ADDR_BROADCAST`, `include/alp/chips/tas2563.h`).  This
+is the identical strap collision recorded for the E1M-EVK's U32 at
+[`e1m-evk.md`](e1m-evk.md) — there, a respin re-strapped
+A0=SCL to move U32 off `0x48`; no such respin is recorded for the
+E1M-X EVK, so U32 is still at `0x48` on this board.  The SDK-side
+guard (`chips/tas2563/tas2563.c`) now refuses to target `0x48` at
+all — that closes the write-into-INA236's-CONFIG-register hazard (the
+`select_page()` write inside `tas2563_init()` would have landed on
+`INA236_REG_CONFIG`, `chips/ina236/ina236.c`), but it does not restore
+broadcast addressing to the TAS2563 amps.  Only a respin re-strapping
+U32's A0 off `0x48` does that.
+
 ## Pending from the user
 
 - Authoritative pad-by-pad routing (which E1M-X pad maps to which
@@ -112,4 +131,4 @@ hardware revision.
 
 When that lands, this doc becomes the SDK-side cheat sheet for
 the E1M-X EVK matching what
-[`docs/boards/e1m-evk.md`](e1m-evk.md) does for the smaller EVK.
+[`e1m-evk.md`](e1m-evk.md) does for the smaller EVK.

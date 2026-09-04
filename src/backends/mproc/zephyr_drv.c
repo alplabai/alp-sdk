@@ -55,6 +55,8 @@
 #include <alp/mproc.h>
 #include <alp/peripheral.h>
 
+#include "alp_errno.h"
+#include "alp_slot_claim.h"
 #include "mproc_ops.h"
 
 #if defined(CONFIG_ALP_SDK_MPROC)
@@ -119,9 +121,13 @@ static bool            _hwsem_be_in_use[CONFIG_ALP_SDK_MAX_HWSEM_HANDLES];
 static struct shmem_be *_shmem_be_alloc(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_shmem_be_pool); ++i) {
-		if (!_shmem_be_in_use[i]) {
+		/* Atomic claim (src/common/alp_slot_claim.h, issue #1115):
+		 * a compare-exchange, so exactly one concurrent opener wins the
+		 * slot.  in_use lives in a parallel array rather than inside the
+		 * slot struct, so the winner may zero the whole slot afterwards --
+		 * no offsetof form is needed here. */
+		if (alp_slot_try_claim(&_shmem_be_in_use[i])) {
 			memset(&_shmem_be_pool[i], 0, sizeof(_shmem_be_pool[i]));
-			_shmem_be_in_use[i] = true;
 			return &_shmem_be_pool[i];
 		}
 	}
@@ -133,7 +139,7 @@ static void _shmem_be_free(struct shmem_be *p)
 	if (p == NULL) return;
 	for (size_t i = 0; i < ARRAY_SIZE(_shmem_be_pool); ++i) {
 		if (&_shmem_be_pool[i] == p) {
-			_shmem_be_in_use[i] = false;
+			alp_slot_release(&_shmem_be_in_use[i]);
 			return;
 		}
 	}
@@ -142,9 +148,13 @@ static void _shmem_be_free(struct shmem_be *p)
 static struct mbox_be *_mbox_be_alloc(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_mbox_be_pool); ++i) {
-		if (!_mbox_be_in_use[i]) {
+		/* Atomic claim (src/common/alp_slot_claim.h, issue #1115):
+		 * a compare-exchange, so exactly one concurrent opener wins the
+		 * slot.  in_use lives in a parallel array rather than inside the
+		 * slot struct, so the winner may zero the whole slot afterwards --
+		 * no offsetof form is needed here. */
+		if (alp_slot_try_claim(&_mbox_be_in_use[i])) {
 			memset(&_mbox_be_pool[i], 0, sizeof(_mbox_be_pool[i]));
-			_mbox_be_in_use[i] = true;
 			return &_mbox_be_pool[i];
 		}
 	}
@@ -156,7 +166,7 @@ static void _mbox_be_free(struct mbox_be *p)
 	if (p == NULL) return;
 	for (size_t i = 0; i < ARRAY_SIZE(_mbox_be_pool); ++i) {
 		if (&_mbox_be_pool[i] == p) {
-			_mbox_be_in_use[i] = false;
+			alp_slot_release(&_mbox_be_in_use[i]);
 			return;
 		}
 	}
@@ -165,9 +175,13 @@ static void _mbox_be_free(struct mbox_be *p)
 static struct hwsem_be *_hwsem_be_alloc(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_hwsem_be_pool); ++i) {
-		if (!_hwsem_be_in_use[i]) {
+		/* Atomic claim (src/common/alp_slot_claim.h, issue #1115):
+		 * a compare-exchange, so exactly one concurrent opener wins the
+		 * slot.  in_use lives in a parallel array rather than inside the
+		 * slot struct, so the winner may zero the whole slot afterwards --
+		 * no offsetof form is needed here. */
+		if (alp_slot_try_claim(&_hwsem_be_in_use[i])) {
 			memset(&_hwsem_be_pool[i], 0, sizeof(_hwsem_be_pool[i]));
-			_hwsem_be_in_use[i] = true;
 			return &_hwsem_be_pool[i];
 		}
 	}
@@ -179,7 +193,7 @@ static void _hwsem_be_free(struct hwsem_be *p)
 	if (p == NULL) return;
 	for (size_t i = 0; i < ARRAY_SIZE(_hwsem_be_pool); ++i) {
 		if (&_hwsem_be_pool[i] == p) {
-			_hwsem_be_in_use[i] = false;
+			alp_slot_release(&_hwsem_be_in_use[i]);
 			return;
 		}
 	}
@@ -187,26 +201,11 @@ static void _hwsem_be_free(struct hwsem_be *p)
 
 static alp_status_t errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	case -ENOMEM:
-		return ALP_ERR_NOMEM;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 #endif /* CONFIG_ALP_SDK_MPROC */
 
@@ -446,7 +445,15 @@ static void z_mbox_close(alp_mbox_backend_state_t *state)
 #if defined(CONFIG_ALP_SDK_MPROC)
 	struct mbox_be *be = (struct mbox_be *)state->be_data;
 	if (be == NULL) return;
+	/* #1644: disable first, then unregister the callback, then free --
+	 * z_mbox_set_callback() registers `be` itself as the driver's
+	 * user_data, so freeing it first would leave that registration
+	 * pointing at freed memory. Not a demonstrated crash (the channel is
+	 * already disabled above, so the stale registration is not known to
+	 * be reachable) -- this restores the documented invariant that
+	 * backend callbacks stop before their slot is released. */
 	(void)mbox_set_enabled(be->dev, be->channel, false);
+	(void)mbox_register_callback(be->dev, be->channel, NULL, NULL);
 	_mbox_be_free(be);
 	state->be_data = NULL;
 #else

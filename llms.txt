@@ -7,7 +7,7 @@ For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent gu
 ## Getting started
 
 - [README.md](README.md): project overview, architecture diagram, and quick orientation.
-- [docs/getting-started.md](docs/getting-started.md): clone → `native_sim` build → real silicon, with the `tan build` workflow.
+- [docs/getting-started.md](docs/getting-started.md): clone → workspace/toolchain setup → real E1M-AEN build with Python Tan.
 - [docs/firmware-quickstart.md](docs/firmware-quickstart.md): the shortest hand-written-firmware path.
 - [CONTRIBUTING.md](CONTRIBUTING.md): contributor workflow, branching, and local CI expectations.
 
@@ -22,7 +22,7 @@ For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent gu
 - [metadata/templates/board.yaml](metadata/templates/board.yaml): copy-friendly commented `board.yaml` template.
 - [docs/adr/0014-build-plan-emit-cli-contract.md](docs/adr/0014-build-plan-emit-cli-contract.md): ADR 0014 — the `--emit` CLI as the tool-facing build-plan contract.
 - [scripts/alp_project.py](scripts/alp_project.py): per-core loader (`--emit zephyr-conf | cmake-args | yocto-conf | hw-info-h | dts-overlay | west-libraries | os-topology`).
-- [scripts/alp_orchestrate/](scripts/alp_orchestrate/): system orchestrator package, invoked `python -m alp_orchestrate` (`--emit system-manifest | build-plan | ipc-contract-h | dts-reservations | dts-partitions | storage-mounts-c | tfm-sysbuild-conf`).
+- [scripts/alp_orchestrate/](scripts/alp_orchestrate/): SDK reference/parity orchestrator, invoked `python -m alp_orchestrate` (`--emit system-manifest | build-plan | ipc-contract-h | dts-reservations | dts-partitions | storage-mounts-c | tfm-sysbuild-conf`); normal Python Tan planning is relocated in process.
 
 ## Hardware
 
@@ -60,8 +60,7 @@ For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent gu
 
 ## Validation
 
-- [scripts/alp_cli/doctor.py](scripts/alp_cli/doctor.py): `tan doctor` — HW-free environment preflight (toolchain / west / Zephyr-pin / deps), with `--json`.
-- [scripts/validate_board_yaml.py](scripts/validate_board_yaml.py): the `board.yaml` validator (also exposed as the `tan validate` CLI command).
+- [scripts/validate_board_yaml.py](scripts/validate_board_yaml.py): the SDK's full `board.yaml` reference validator; Python Tan currently provides bundled structural checks via `tan validate --offline` while its SDK-backed path is ported.
 - [scripts/check_example_portability.py](scripts/check_example_portability.py): gate enforcing the portable-API rule for examples.
 - [scripts/check_doc_drift.py](scripts/check_doc_drift.py): gate catching docs that drifted from code/metadata.
 - [docs/testing.md](docs/testing.md): the full local verification pass (twister + checks) CI runs short of HIL.

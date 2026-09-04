@@ -95,7 +95,9 @@ def test_supported_boards_fail_when_declared_board_has_no_variant(
 
     assert errors == [
         "supported_boards declares 'e1m-x-evk' but testcase.yaml has no "
-        "ALP_BOARD_E1M_X_EVK variant"
+        "scenario whose extra_configs/extra_args passes "
+        "-DALP_BOARD_E1M_X_EVK -- a mention elsewhere (description, tags, "
+        "...) doesn't build the board"
     ]
 
 
@@ -448,5 +450,7 @@ def test_yaml_comment_does_not_satisfy_supported_board_variant(
 
     assert errors == [
         "supported_boards declares 'e1m-x-evk' but testcase.yaml has no "
-        "ALP_BOARD_E1M_X_EVK variant"
+        "scenario whose extra_configs/extra_args passes "
+        "-DALP_BOARD_E1M_X_EVK -- a mention elsewhere (description, tags, "
+        "...) doesn't build the board"
     ]

@@ -38,63 +38,261 @@
     "aen": [
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "aen-analog-validate",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/aen/aen-analog-validate",
         "som": "E1M-AEN801",
         "summary": "On-silicon analog validation for the **E1M-AEN801** (Alif Ensemble E8, M55-HE), via the bench RAM-run + RAM-console flow."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "aen-cc3501e-ble-gatt",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/aen/aen-cc3501e-ble-gatt",
         "som": "E1M-AEN801",
         "summary": "Bench proof of the **#480 CC3501E BLE GATT-SERVER path** through the portable [`<alp/ble.h>`](../../../include/alp/ble.h) surface, on the **E1M-AEN801** (Alif Ensemble E8) SoM's M55-HE core."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "aen-cc3501e-bringup",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/aen/aen-cc3501e-bringup",
         "som": "E1M-AEN801",
         "summary": "Host (Alif) side of the on-module **TI CC3501E** Wi-Fi 6 + BLE 5.4 coprocessor bring-up on the **E1M-AEN801** (Alif Ensemble E8) SoM."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "aen-cc3501e-companion-tour",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/aen/aen-cc3501e-companion-tour",
         "som": "E1M-AEN801",
         "summary": "The **capstone** full-surface example for the on-module **TI CC3501E** Wi-Fi 6 + BLE 5.4 coprocessor, driven from the Alif **M55-HE** core on the **E1M-AEN801** (Alif Ensemble E8) SoM."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "aen-cc3501e-gatt-register",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/aen/aen-cc3501e-gatt-register",
         "som": "E1M-AEN801",
         "summary": "Bench check for the **NEW CC3501E dynamic GATT registration** path (#480/#892) on the Alif **M55-HE** (**E1M-AEN801**, Alif Ensemble E8) SoM. `alp_ble_gatt_register_service()` (`<alp/ble.h>`) used to be a stub; on this branch it really registers a service on the CC3501E's NimBLE host over the inter-chip bridge and fills in a real attribute handle per characteristic."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "aen-cc3501e-gpio",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/aen/aen-cc3501e-gpio",
         "som": "E1M-AEN801",
         "summary": "Host (Alif) side of the on-module **TI CC3501E** GPIO proxy + camera-enable demo on the **E1M-AEN801** (Alif Ensemble E8) SoM."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "aen-eeprom-manifest",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/aen/aen-eeprom-manifest",
         "som": "E1M-AEN801",
         "summary": "Read + decode the 128-byte Alp hardware-info manifest from the on-module **24C128 EEPROM** on the E1M-AEN (Alif Ensemble) SoM, over the portable `<alp/*>` API. The AEN sibling of [`v2n-eeprom-manifest-dump`](../../v2n/v2n-eeprom-manifest-dump) (same `src/` flow)."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "aen-secure-element-sign",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/aen/aen-secure-element-sign",
         "som": "E1M-AEN801",
         "summary": "Probe the OPTIGA Trust M on the E1M-AEN's **BRD_I2C** and confirm the current probe-only driver contract. The driver reads I2C_STATE to prove the part is reachable; product-info and raw-APDU helpers return `ALP_ERR_NOSUPPORT` until the Infineon host-library transport is integrated."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "edgeai-vision-aen",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/aen/edgeai-vision-aen",
         "som": "E1M-AEN801",
         "summary": "End-to-end EdgeAI reference application for the **E1M EVK** populated with an **E1M-AEN801** SoM (Alif Ensemble E8 -- the lead AEN part)."
@@ -103,10 +301,32 @@
     "ai": [
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "ai-anomaly-detection-vibration",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/ai/ai-anomaly-detection-vibration",
         "som": "E1M-AEN801",
-        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to > `ensemble_e8_dk/ae402fa0e5597le0/rtss_hp`. HiL bring-up with a > real motor / pump and a customer-trained model is v0.6 work.",
+        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to > `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`. HiL bring-up with a > real motor / pump and a customer-trained model is v0.6 work.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -114,7 +334,29 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "cold-chain-monitor",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/ai/cold-chain-monitor",
         "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `cold_chain` core > is host-unit-tested on `native_sim/native/64`; the full app runs end-to-end on > native_sim with synthetic environment data covering the states. HiL with a > real BME280 + a trained model is bench-gated.",
@@ -125,7 +367,29 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "motor-current-signature",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/ai/motor-current-signature",
         "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `current_features` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic current covering all five states. HiL > on a real motor + a trained model is bench-gated.",
@@ -136,7 +400,29 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "multimodal-fusion-pdm",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/ai/multimodal-fusion-pdm",
         "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `fusion_health` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic per-modality data covering every > scenario. HiL with the three real sensors + a trained model is bench-gated.",
@@ -147,7 +433,29 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "rail-predictive-maintenance",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/ai/rail-predictive-maintenance",
         "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.6 paper-correct.** The DSP cores > (`rail_features`, `rail_position`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > a canned NMEA track + synthetic vibration. HiL on a real bogie with a > customer-trained model is bench-gated.",
@@ -158,7 +466,29 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "visual-defect-detection",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/ai/visual-defect-detection",
         "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `defect_map` core > is host-unit-tested on `native_sim/native/64`; the full app runs end-to-end on > native_sim with synthetic clean + defect frames. HiL with a real CSI camera + > a trained autoencoder is bench-gated.",
@@ -169,7 +499,29 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "wearable-activity-fall",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/ai/wearable-activity-fall",
         "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The two cores > (`motion_features`, `fall_detect`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > synthetic motion (incl. an injected fall). HiL on a real wearable + a trained > model is bench-gated.",
@@ -182,28 +534,117 @@
     "audio": [
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "acoustic-anomaly-wind-turbine",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/audio/acoustic-anomaly-wind-turbine",
         "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.6 paper-correct.** The three DSP cores > (`acoustic_features`, `rotor_speed`, `bpf_modulation`) are host-unit-tested on > `native_sim/native/64`; the full app runs end-to-end on native_sim with > synthetic acoustics + a canned RPM track. HiL on a real nacelle with a > customer-trained model is bench-gated."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "acoustic-safety-events",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/audio/acoustic-safety-events",
         "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** The `acoustic_event` > core is host-unit-tested on `native_sim/native/64`; the full app runs > end-to-end on native_sim with synthetic audio cycling the four event types. > HiL with a real mic + a trained model is bench-gated."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "audio-loopback",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/audio/audio-loopback",
         "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/audio.h>`. Reads PCM blocks from the on-module PDM microphone, runs them through the ALP DSP chain (DC-block in v0.2), and pushes them straight back out over I²S. Demonstrates the full `audio_in` / `audio_out` lifecycle."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "audio-noise-suppression",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/audio/audio-noise-suppression",
         "som": "E1M-V2N101",
         "summary": "Real-time noise suppression demo on the V2N (and V2H by SKU flip). Target market: USB-C headsets, true-wireless hearables, desktop conferencing rigs -- anywhere you want cloud-grade denoising at sub-perceptual latency without shipping audio off-device.",
@@ -213,14 +654,58 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "audio-wake-word",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/audio/audio-wake-word",
         "som": "E1M-AEN801",
-        "summary": "> ![status: UNTESTED](https://img.shields.io/badge/status-%5BUNTESTED%5D-orange) > v0.5 paper-correct. Builds clean on `native_sim/native/64`; real > PDM mic capture + Ethos-U55 dispatch + Vela-compiled model land > in v0.6 AEN HiL."
+        "summary": "Always-on \"Hey Alp\" keyword spotting on the **E1M-AEN** family's low-power AI subsystem. Targets the Cortex-M55 HE (\"High Efficiency\") core at ~50 MHz with the on-die Ethos-U55 NPU bursting the convolutions on demand."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "butterworth-lowpass",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/audio/butterworth-lowpass",
         "som": "E1M-AEN801",
         "summary": "butterworth-lowpass -- design a 2nd-order Butterworth low-pass filter and run it through the portable <alp/dsp.h> IIR chain stage. =====================================================================",
@@ -231,7 +716,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "i2s-tone",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/audio/i2s-tone",
         "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/i2s.h>`. Generates a 1 kHz sine wave and writes it as 16-bit stereo PCM to ALP_E1M_I2S0.",
@@ -242,7 +755,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "minimp3-decode",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/audio/minimp3-decode",
         "som": "E1M-AEN801",
         "summary": "Decodes a canned MP3 byte array to 16-bit PCM with the vendored [minimp3](https://github.com/lieff/minimp3) single-header decoder and prints the sample count + RMS of the decoded audio. Pure compute -- no I2S/codec hardware required, so this builds and runs identically on `native_sim` and real silicon."
@@ -251,7 +792,35 @@
     "bringup": [
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "board-selftest",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/bringup/board-selftest",
         "som": "E1M-AEN801",
         "summary": "The app you run **first** on a freshly-assembled board, before chasing a peripheral that \"doesn't work\". It answers the four questions every bring-up starts with and prints a single pass/fail report a field tech can read off a serial console without a debugger.",
@@ -264,14 +833,53 @@
     "camera-vision": [
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "ai-camera-viewer",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/camera-vision/ai-camera-viewer",
         "som": "E1M-AEN801",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on > `native_sim/native/64` against the full `<alp/camera.h>` / > `<alp/inference.h>` surfaces (both ship today; Ethos-U dispatch > runs through `alp_inference_open(...)` same as any other backend). > What's still missing is a real Vela-compiled `person_detect.tflite` > model and AEN HiL bench validation."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "ai-object-detection-realtime",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/camera-vision/ai-object-detection-realtime",
         "som": "E1M-V2M101",
         "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on > `native_sim/native/64` + the AEN fallback target against the full > `<alp/camera.h>` / `<alp/inference.h>` / `<alp/display.h>` surfaces, > which all ship today -- DEEPX DX-M1 dispatch runs through > `alp_inference_open(...)` same as any other backend. What's still > missing is a real Vela-/DXNN-compiled YOLOv8-tiny model (see \"Adding > the model\" below) and V2N-M1 HiL bench validation."
@@ -280,77 +888,311 @@
     "connectivity": [
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "coap-client-get",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/connectivity/coap-client-get",
         "som": "E1M-AEN801",
         "summary": "`[UNTESTED]` -- native_sim build+run PASSED locally (see below), but this has not been verified on real silicon (no bench/HIL sweep)."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "iot-connected-camera",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/connectivity/iot-connected-camera",
         "som": "E1M-V2N101",
         "summary": "Connected-camera reference application for the **E1M EVK** populated with an **E1M-V2N101 / E1M-V2N102** SoM (Renesas RZ/V2N)."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "iot-dashboard",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/connectivity/iot-dashboard",
         "som": "E1M-AEN801",
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds clean on > `native_sim/native/64`; real WiFi + MQTT + TLS bring-up gates on > v0.6 AEN HiL."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "iot-fleet-ota",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/connectivity/iot-fleet-ota",
         "som": "E1M-AEN801",
-        "summary": "Secure OTA firmware update with rollback. The production-readiness proof for \"how do we update 10 000 units in the field?\"."
+        "summary": "Secure OTA firmware update, verify-only on the qualified E1M-AEN801 SKU (apply is DEFERRED, #1069 -- see [STATUS] in `board.yaml`). The production-readiness proof for \"how do we update 10 000 units in the field?\"."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "jsmn-json-parse",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/connectivity/jsmn-json-parse",
         "som": "E1M-AEN801",
         "summary": "`[UNTESTED]` -- native_sim build+run PASSED locally (see below), but this has not been verified on real silicon (no bench/HIL sweep)."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "modbus-server",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/connectivity/modbus-server",
         "som": "E1M-V2N101",
         "summary": "Modbus teaching example for the ADR 0018 `libraries: [modbus]` manifest."
       },
       {
         "board": "e1m-evk",
-        "name": "mqtt-sn-publish",
-        "path": "examples/connectivity/mqtt-sn-publish",
-        "som": "E1M-AEN801",
-        "summary": "coreMQTT-SN teaching example. Encodes an MQTT-SN PUBLISH packet into a buffer, then parses it back out of the same buffer and asserts the topic id, message id, QoS, retain flag, and payload all survive the round trip. No socket, no gateway, no live transport -- this is the unit-test shape you'd run before wiring the encoder to a real UDP/ BLE/UART MQTT-SN link."
-      },
-      {
-        "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "mqtt-telemetry",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/connectivity/mqtt-telemetry",
         "som": "E1M-AEN801",
         "summary": "The **connected device** starting point: bring up Wi-Fi, open an `mqtts://` (TLS) MQTT client, and publish a telemetry reading on a cadence -- the whole path on the portable [`<alp/iot.h>`](../../../include/alp/iot.h) surface."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "nanopb-encode-decode",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/connectivity/nanopb-encode-decode",
         "som": "E1M-AEN801",
         "summary": "`[UNTESTED]` -- native_sim build+run PASSED locally (see below), but this has not been verified on real silicon (no bench/HIL sweep)."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "production-deployment",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/connectivity/production-deployment",
         "som": "E1M-AEN801",
         "summary": "The v1.0 reference application for a field-deployable IoT product. Demonstrates the full manufactured -> deployed -> updated -> attested lifecycle on a single app, so customers see how the SDK's secure-boot, OTA, EEPROM-provisioning, and remote-attestation pieces fit together."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "websocket-frame",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/connectivity/websocket-frame",
         "som": "E1M-AEN801",
         "summary": "libwebsockets teaching example. Masks and encodes a single unfragmented RFC 6455 TEXT frame into a buffer, then decodes (unmasks) it back out and asserts the payload survives the round trip. No socket, no TLS, no handshake -- this is the frame-layout byte accounting you'd want to get right before ever opening a real connection."
@@ -359,49 +1201,210 @@
     "display": [
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "drone-hud",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/display/drone-hud",
         "som": "E1M-AEN801",
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds on > `native_sim/native/64`; HiL silicon bring-up of the IMU + GPS + > battery + display chain lands in v0.6."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "gfx-compat-blit",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/display/gfx-compat-blit",
         "som": "E1M-AEN801",
         "summary": "**[UNTESTED]** -- `native_sim` build-and-run only; not yet run on a bench SoM."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "lvgl-benchmark",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/display/lvgl-benchmark",
         "som": "E1M-AEN801",
         "summary": "Wraps the upstream **`lv_demo_benchmark()`** -- the canonical LVGL performance harness. Walks a fixed scene set (gradients, alpha blends, text rendering, image rotation, ...) and reports per-scene FPS at the end."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "lvgl-dashboard-x-evk",
+        "osSet": [
+          "yocto"
+        ],
         "path": "examples/display/lvgl-dashboard-x-evk",
         "som": "E1M-V2N101",
         "summary": "A minimal LVGL 9 dashboard on the E1M-X V2N MIPI-DSI panel (RK055HDMIPI4MA0, 720 x 1280 @ 60 Hz)."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "lvgl-music-player",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/display/lvgl-music-player",
         "som": "E1M-AEN801",
         "summary": "Wraps the upstream **`lv_demo_music()`** -- album-art carousel, time slider, track list, equaliser visualiser. This is a **display-only** demo: it renders and animates the player UI but does not decode or play any audio."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "lvgl-widgets-demo",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/display/lvgl-widgets-demo",
         "som": "E1M-AEN801",
         "summary": "Wraps the upstream **`lv_demo_widgets()`** from LVGL's `demos/` tree -- the headline showcase of every standard LVGL widget (buttons, sliders, tabs, charts, meters, lists, animations)."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "u8g2-oled-draw",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/display/u8g2-oled-draw",
         "som": "E1M-AEN801",
         "summary": "**[UNTESTED]** -- `native_sim` build-and-run only; not yet run on a bench SoM."
@@ -410,58 +1413,239 @@
     "multicore": [
       {
         "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./linux",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "./m33_sm",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": true,
+          "models": false,
+          "peripherals": true
+        },
         "name": "heterogeneous-offload",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/multicore/heterogeneous-offload",
         "som": "E1M-V2N101",
         "summary": "> `[UNTESTED]` -- v0.6 paper-correct. Builds against the same V2N > memory_map as rpmsg-v2n (no TBD addresses). HiL bring-up gates > on v0.8."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "./peer",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": true,
+          "models": false,
+          "peripherals": false
+        },
         "name": "mproc-mailbox",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/multicore/mproc-mailbox",
         "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/mproc.h>`. Demonstrates the M55-HP side of a Cortex-M55-HP ↔ Cortex-M55-HE mailbox roundtrip on AEN: stage a payload in shared SRAM, signal the peer via the hardware mailbox, wait for a reply, read the result back."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "./linux",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./m55_hp",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": true,
+          "models": false,
+          "peripherals": true
+        },
         "name": "rpmsg-aen",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/multicore/rpmsg-aen",
         "som": "E1M-AEN801",
         "summary": "> `[UNTESTED]` -- v0.6 structural draft. Board.yaml + sources are > shape-correct, but the end-to-end RPMsg path still needs AEN801 > bench validation."
       },
       {
         "board": "e1m-evk",
+        "declares": {
+          "chips": false,
+          "ipc": true,
+          "models": false,
+          "peripherals": true
+        },
         "name": "rpmsg-imx93",
         "path": "examples/multicore/rpmsg-imx93",
         "som": "E1M-NX9101",
-        "summary": "> `[UNTESTED]` -- v0.6 structural draft, targeting **E1M-NX9101** > (NXP i.MX 93), which is **not yet buildable**. Its only hw_rev, > `metadata/e1m_modules/imx93/hw-revisions.yaml`'s `r1`, is > `status: tbd` -- the hw_rev-buildable gate > ([#1025](https://github.com/alplabai/alp-sdk/issues/1025)) refuses > it outright, before the orchestrator ever reaches carve-out > resolution against the also-TBD iMX93 memory-map values in > `metadata/e1m_modules/E1M-NX9101.yaml`. Both are TBD by design > (project memory note: don't invent HW values) pending real NX9101 > silicon; this example is excluded from the build/emit-snapshot/ > build-plan/system-manifest/parity-oracle gates for the same reason > (see those gates' own `#1025` comments) but its source and this > README stay -- the declarative structural files are the contract > that lets the orchestrator land cleanly the moment a real hw_rev > status lands."
+        "summary": "> `[UNTESTED]` -- v0.6 structural draft, targeting **E1M-NX9101** > (NXP i.MX 93), which is **not yet buildable**. Its only hw_rev, > `metadata/e1m_modules/imx93/hw-revisions.yaml`'s `r1`, is > `status: tbd` -- the hw_rev-buildable gate > ([#1025](https://github.com/alplabai/alp-sdk/issues/1025)) refuses > it outright, before the orchestrator ever reaches carve-out > resolution against the iMX93 memory map, which > `metadata/e1m_modules/E1M-NX9101.yaml` cannot resolve either > (`silicon_variant: TBD`). Both are TBD by design > (project memory note: don't invent HW values) pending real NX9101 > silicon; this example is excluded from the build/emit-snapshot/ > build-plan/system-manifest/parity-oracle gates for the same reason > (see those gates' own `#1025` comments) but its source and this > README stay -- the declarative structural files are the contract > that lets the orchestrator land cleanly the moment a real hw_rev > status lands."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./linux",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "./m33_sm",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": true,
+          "models": false,
+          "peripherals": true
+        },
         "name": "rpmsg-v2n",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/multicore/rpmsg-v2n",
         "som": "E1M-V2N101",
-        "summary": "> **Status: the raw A55↔M33 transport is bench-proven; this example's > own two halves are not a matched pair.** > > - **Proven (#697), on E1M-X V2N-M1 silicon:** the raw OpenAMP > transport that `m33_sm/src/main.c` implements -- resource table, > vrings, MHU mailbox doorbell, rpmsg endpoint -- against real > RZ/V2N devicetree. Attach + echo round-trip (1/4/16/64 B) and > the GHSA-xhm8 concurrent-close case all pass end-to-end, with > Renesas's `rpmsg_sample_client` over UIO as the Linux peer. > - **Not proven:** the `linux/` + `m33_sm/` pairing *in this > directory*. `linux/src/main.c` subscribes to a `temperature` > method that the M33 echo responder never publishes, so the two > slices as shipped do not talk to each other. `m33_sm` is > `build_only: true` in CI (no native_sim: it needs real V2N > devicetree + the Renesas MHU/FSP/OpenAMP modules). > - **By design:** the M33 slice **deliberately bypasses > `<alp/rpc.h>`** and uses raw OpenAMP (alp-sdk #683 \"Path B, > Phase 1\"). Its verified peer is Renesas's licence-gated > Multi-OS Package sample, which dials a resource table shaped > exactly like `resource_table.c` -- not whatever Zephyr's > `ipc_service` would generate. See `m33_sm/src/main.c`'s file > header. A v2n-specific `<alp/rpc.h>` backend is follow-up work."
+        "summary": "> **Status: the raw A55↔M33 transport is bench-proven; the two halves > in this directory are now a matched pair (alp-sdk #1167).** > > - **Proven (#697), on E1M-X V2N-M1 silicon:** the raw OpenAMP > transport that `m33_sm/src/main.c` implements -- resource table, > vrings, MHU mailbox doorbell, rpmsg endpoint -- against real > RZ/V2N devicetree. Attach + echo round-trip (1/4/16/64 B) and > the GHSA-xhm8 concurrent-close case all pass end-to-end, with > Renesas's `rpmsg_sample_client` over UIO as the reference Linux > peer. `m33_sm` is `build_only: true` in CI (no native_sim: it > needs real V2N devicetree + the Renesas MHU/FSP/OpenAMP modules); > its transport code is unchanged by #1167. > - **By design, the M33 slice still bypasses `<alp/rpc.h>`'s framed > convention** and speaks raw OpenAMP (alp-sdk #683 \"Path B, Phase > 1\"): it echoes whatever bytes land on its fixed endpoint rather > than publishing a named method. What changed in #1167 is the > **Linux side**: `linux/src/main.c` now drives that fixed endpoint > through `src/backends/rpc/yocto_uio_drv.c` -- the `<alp/rpc.h>` > backend that already targets this exact firmware (see that > backend's file header) -- and round-trips an `echo_test` request > instead of subscribing to a `temperature` push the M33 never > sent. See `m33_sm/src/main.c`'s file header and > `linux/src/main.c`'s file header for the full rationale."
       }
     ],
     "peripheral-io": [
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "adc-voltmeter",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/adc-voltmeter",
         "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/adc.h>`. Reads ADC channel `ALP_E1M_ADC1` once and prints the converted microvolt value. Demonstrates capability validation: requesting a resolution higher than the active SoC's `ALP_SOC_ADC_MAX_RESOLUTION_BITS` fails at `alp_adc_open` with `ALP_ERR_OUT_OF_RANGE`."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "alp-console",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/alp-console",
         "som": "E1M-AEN801",
         "summary": "<!-- SPDX-License-Identifier: Apache-2.0 -->"
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "blink",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/blink",
         "som": "E1M-AEN801",
         "summary": "Toggle an LED. The canonical first program -- if you're new to the Alp SDK, start here before anything else in this repo.",
@@ -472,7 +1656,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "can-loopback",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/can-loopback",
         "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/can.h>`. Brings up CAN0 in loopback mode, sends a frame, demonstrates the receive-callback contract.",
@@ -483,7 +1695,29 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "dac-waveform",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/dac-waveform",
         "som": "E1M-AEN801",
         "summary": "Generate a sine wave on `BOARD_DAC0`.",
@@ -494,14 +1728,64 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "drone-autopilot",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/drone-autopilot",
         "som": "E1M-AEN801",
-        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to `ensemble_e8_dk/ae402fa0e5597le0/rtss_hp`. > **Do NOT fly this build.** The PID gains, sensor scales, > failsafe thresholds, and motor mapping are starting-point > values that need bench tuning + ground-tied throttle tests > before a real airframe goes near them."
+        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`. > **Do NOT fly this build.** The PID gains, sensor scales, > failsafe thresholds, and motor mapping are starting-point > values that need bench tuning + ground-tied throttle tests > before a real airframe goes near them."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "etl-fixed-containers",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/etl-fixed-containers",
         "som": "E1M-AEN801",
         "summary": "Builds an `etl::vector<int, 8>` and an `etl::map<const char *, int, 4>` -- two of the Embedded Template Library's fixed-capacity, STL-shaped containers -- and demonstrates their headline property for firmware: **no heap allocation, ever**. Storage for both containers is embedded inline at compile time, sized by the `MAX_SIZE` template parameter.",
@@ -512,7 +1796,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "fmt-formatting",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/fmt-formatting",
         "som": "E1M-AEN801",
         "summary": "Formats an `int` + a `float` + a `const char *` into a fixed `char[64]` stack buffer using `fmt::format_to` -- {fmt} (https://github.com/fmtlib/fmt)'s API for writing formatted text through a caller-supplied output iterator instead of returning an owning `std::string`. No heap allocation, no `<iostream>`.",
@@ -523,7 +1835,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "gpio-button-led",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/gpio-button-led",
         "som": "E1M-AEN801",
         "summary": "Read a button and toggle an LED -- both as plain GPIO, through the `<alp/blocks/button_led.h>` block helper.",
@@ -534,7 +1874,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "hello-world",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/hello-world",
         "som": "E1M-AEN801",
         "summary": "The canonical \"first program\" for the Alp SDK. No peripherals, no chips, no board-specific wiring -- just a periodic `printf` loop so you can confirm the toolchain, flash flow, and log console are wired correctly before chasing harder bugs.",
@@ -545,14 +1913,70 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "i2c-device-hub",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/i2c-device-hub",
         "som": "E1M-AEN801",
         "summary": "Functional read-out of **every populated device on the EVK sensor/power I2C bus**, each through its real chip driver -- not a raw register poke. This is the \"prove the whole board is usable\" demo: one bus, many ICs, each brought up and read for a real value."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "i2c-master",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/i2c-master",
         "som": "E1M-AEN801",
         "summary": "Discrete I2C master that reads a known device at a known address. Pattern: open the bus, init the chip driver, loop reading the sensor every second, close cleanly.",
@@ -563,7 +1987,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "i2c-scanner",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/i2c-scanner",
         "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/peripheral.h>` I²C. Walks every 7-bit address on `ALP_E1M_I2C0` and reports which respond.",
@@ -574,7 +2026,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "i2c-slave",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/i2c-slave",
         "som": "E1M-AEN801",
         "summary": "Make this MCU answer on the bus as a register-mapped I2C target (slave) using the register-file helper from `<alp/i2c_regfile.h>` (v0.9, `[ABI-EXPERIMENTAL]`), a pure layer over the portable `alp_i2c_target_*` surface in `<alp/peripheral.h>`.",
@@ -585,7 +2065,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "pwm-led-fade",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/pwm-led-fade",
         "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/pwm.h>`. Fades an LED on PWM channel `ALP_E1M_PWM3` from 0 % to 100 % and back, demonstrating the canonical open / set-duty / close pattern.",
@@ -596,7 +2104,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "qenc-readout",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/qenc-readout",
         "som": "E1M-AEN801",
         "summary": "Per-peripheral example for the quadrature-decoder side of `<alp/counter.h>`. Reads `ALP_E1M_ENC0`'s position once per 100 ms for ~1 second.",
@@ -607,7 +2143,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "spi-loopback",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/spi-loopback",
         "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/peripheral.h>` SPI. Demonstrates the canonical transceive pattern.",
@@ -618,7 +2182,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "spi-master",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/spi-master",
         "som": "E1M-AEN801",
         "summary": "Discrete SPI master. Send a known byte pattern out MOSI, log whatever clocks back on MISO.",
@@ -629,7 +2221,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "spi-slave",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/spi-slave",
         "som": "E1M-AEN801",
         "summary": "Claim the bus in target (slave) mode using the portable `alp_spi_target_*` surface from `<alp/peripheral.h>` (v0.9, `[ABI-EXPERIMENTAL]`) and answer an external SPI controller.",
@@ -640,7 +2260,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "uart-echo",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/uart-echo",
         "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/peripheral.h>` UART. Reads single bytes from the UART and writes them back.",
@@ -651,14 +2299,70 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "uart-hello-world",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/uart-hello-world",
         "som": "E1M-AEN801",
         "summary": "The canonical \"printf via UART\" walkthrough. Opens a UART port with `alp_uart_open()`, sends a greeting + a monotonically- increasing counter every second, demonstrates error handling."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "uart-rx-ringbuf",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/uart-rx-ringbuf",
         "som": "E1M-AEN801",
         "summary": "Per-feature example for `<alp/peripheral.h>`'s opt-in interrupt-driven RX ring buffer (`CONFIG_ALP_SDK_UART_RX_RINGBUF`).",
@@ -669,14 +2373,64 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "usb-host-storage",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/usb-host-storage",
         "som": "E1M-AEN401",
         "summary": "Opens the USB host role via `<alp/usb.h>` and enumerates an attached USB mass-storage device on the E1M-AEN401 Cortex-M55-HP."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "vendor-ext-composability",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/peripheral-io/vendor-ext-composability",
         "som": "E1M-AEN801",
         "summary": "One pad, three ways -- a proof that the Alp SDK's vendor-extension layer (`<alp/ext/<vendor>/...>`) is **additive, never exclusive**."
@@ -685,7 +2439,35 @@
     "power-timing": [
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "counter-alarm",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/power-timing/counter-alarm",
         "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/counter.h>`. Schedules a one-shot alarm 100 ms in the future and prints from the callback.",
@@ -696,7 +2478,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "littlefs-keyvalue",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/power-timing/littlefs-keyvalue",
         "som": "E1M-AEN801",
         "summary": "Mounts a littlefs partition, writes a single key/value pair to a file, reads it back, lists the mount-point directory, and asserts the read matches the write. Teaches the Zephyr `fs` subsystem's `fs_mount`/`fs_open`/`fs_write`/`fs_read`/`fs_readdir` API surface using the littlefs backend (`libraries: [littlefs]` in `board.yaml`).",
@@ -707,14 +2517,59 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "power-managed-sensor",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/power-timing/power-managed-sensor",
         "som": "E1M-AEN301",
         "summary": "The SDK's reference for the v0.6 `cores.<id>.power:` declarative block, on the AEN301 M55-HE (high-efficiency) core: a worked example of sleep-mode selection + multi-source wakeup."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "rtc-clock",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/power-timing/rtc-clock",
         "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/rtc.h>`. Sets the wall-clock to a fixed instant, sleeps a few hundred ms, then reads it back to verify the RTC ticked.",
@@ -725,7 +2580,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "timer-periodic-interrupt",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/power-timing/timer-periodic-interrupt",
         "som": "E1M-AEN801",
         "summary": "The canonical \"periodic ISR plus main-thread coordination\" example.",
@@ -736,7 +2619,35 @@
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "wdt-feed",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/power-timing/wdt-feed",
         "som": "E1M-AEN801",
         "summary": "Per-peripheral example for `<alp/wdt.h>`. Installs a 5 second watchdog timeout and feeds it from a background loop.",
@@ -749,14 +2660,70 @@
     "testing": [
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "catch2-selftest",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/testing/catch2-selftest",
         "som": "E1M-AEN801",
         "summary": "A minimal [Catch2](https://github.com/catchorg/Catch2) v3 unit-test binary, built from Catch2's own \"amalgamated\" single-TU distribution: 3 `TEST_CASE`s over a trivial `clamp()` helper."
       },
       {
         "board": "e1m-evk",
+        "coreCount": 3,
+        "cores": [
+          {
+            "app": "alp-image-edge",
+            "id": "a32_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "./src",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "doctest-selftest",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/testing/doctest-selftest",
         "som": "E1M-AEN801",
         "summary": "A minimal [doctest](https://github.com/doctest/doctest) v2.4.11 unit-test binary: 3 `TEST_CASE`s over a trivial `clamp()` helper."
@@ -765,126 +2732,444 @@
     "v2n": [
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-board-id-readout",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-board-id-readout",
         "som": "E1M-V2N101",
         "summary": "Reads + prints the SoM's hardware-info manifest from the on-module 24C128 EEPROM, then asserts the firmware build is intended for the SKU on the module."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-brd-i2c-bringup",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-brd-i2c-bringup",
         "som": "E1M-V2N101",
         "summary": "Patch-day diagnostic for the V2N SoM's BRD_I2C management bus (Renesas RIIC8). Scans the bus, distinguishes a bus-level electrical fault (line held low / missing pull-ups / wrong pinmux) from per-device failures, then probes every populated IC read-only and prints a PASS/FAIL/SKIP table."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-eeprom-manifest-dump",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-eeprom-manifest-dump",
         "som": "E1M-V2N101",
         "summary": "Hexdumps the 128-byte hardware-info manifest at offset 0x0000 of the on-module 24C128 EEPROM, decodes every field, and verifies the CRC. Useful during bring-up to confirm the production-test fixture programmed the module correctly."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-emmc-block-stat",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-emmc-block-stat",
         "som": "E1M-V2N101",
         "summary": "Query the V2N module's on-module eMMC via Zephyr's disk-access (block-storage) subsystem. Reports sector count + sector size, reads the first 16 blocks (8 KiB) of the device, looks for the MBR signature, and asks the driver for any erase-block / wear-level data it caches."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-ethernet-dual",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-ethernet-dual",
         "som": "E1M-V2N101",
         "summary": "Brings up both RTL8211FDI Ethernet PHYs on the V2N module (ET0 + ET1), exercises the management surface (MDIO probe, soft-reset, autoneg restart, link-status read), and configures Wake-on-LAN."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-gd32-bridge-functional",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-gd32-bridge-functional",
         "som": "E1M-V2M101",
         "summary": "Single-pass **functional** validation of the V2N module's GD32G553 supervisor-MCU bridge, followed by a forever PWM7 duty staircase as a live oscilloscope observable."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-gd32-bridge-hil-soak",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-gd32-bridge-hil-soak",
         "som": "E1M-V2M101",
         "summary": "Pass/fail soak of the **whole GD32 bridge command set** over the 25 MHz SPI fast path. Where [`v2n-gd32-bridge-ping`](../v2n-gd32-bridge-ping) proves the link, this proves the opcodes: every command the bridge firmware implements round-trips each cycle with a self-contained verification — readback compares (PWM, DAC), range sanity (ADC, reset-reason), monotonicity (counter), entropy (TRNG), exact math (TMU sqrt/sin), and documented-sentinel asserts (DA9292 `0xFF`, OTA `NOSUPPORT` on the unarmed image). No external instruments needed; the instrument-grade checks (scope on PWM, precision source on ADC) remain their own HIL-PLAN rows."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-gd32-bridge-loopback",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-gd32-bridge-loopback",
         "som": "E1M-V2M101",
         "summary": "<!-- Copyright 2026 Alp Lab AB SPDX-License-Identifier: Apache-2.0 -->"
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-gd32-bridge-ping",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-gd32-bridge-ping",
         "som": "E1M-V2M101",
         "summary": "Continuous PING + `GET_VERSION` liveness probe against the V2N module's on-module GD32G553 supervisor MCU over the 25 MHz SPI fast path. (BRD_I2C is deliberately not opened -- the management-path transport has its own HIL rows.)"
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-gd32-swd-flash",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-gd32-swd-flash",
         "som": "E1M-V2N101",
         "summary": "Demonstrate the host-driven SWD bit-bang controller ([`chips/gd32_swd/`](../../../chips/gd32_swd/)) by attaching from the Renesas RZ/V2N to the on-module GD32G553 over three GPIOs (SWDIO + SWCLK + optional NRST), reading the SW-DP IDCODE, halting the Cortex-M33, erasing a flash sector, writing + verifying a scratch pattern, and resetting."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "v2n-m1-deepx-inference",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-m1-deepx-inference",
         "som": "E1M-V2M101",
         "summary": "DEEPX DX-M1 NPU bring-up + single inference through `<alp/inference.h>` on a V2N-M1 SoM."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-m1-ros-perception",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-m1-ros-perception",
         "som": "E1M-V2M101",
         "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Builds against a > Yocto SDK that includes ROS 2 + the alp-sdk runtime. Real > bring-up (V2N-M1 + DEEPX runtime + camera capture pipeline) > gates on v0.8 V2M HiL."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-power-monitor",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-power-monitor",
         "som": "E1M-V2N101",
         "summary": "Live per-rail power table from the **E1M-X EVK**'s on-board INA236 current/voltage monitors, read from a Linux/Yocto user-space app on the V2N Cortex-A55."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-pwm-fan-control",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-pwm-fan-control",
         "som": "E1M-V2N101",
         "summary": "Drive a fan from `ALP_E1M_PWM0` on V2N. Walks duty cycle through a five-stop curve at a fixed 25 kHz board (above audible) using the portable `<alp/pwm.h>` surface, so the wave shape is observable on a scope."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-rtc-multi-alarm",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-rtc-multi-alarm",
         "som": "E1M-V2N101",
         "summary": "Exercises the RV-3028-C7's **multi-source event dispatcher**: the RTC has seven distinct interrupt sources (PORF, EXT_EVENT, ALARM, COUNTDOWN, PERIODIC, BSF, CLKF) that all latch into a single STATUS register and route to one physical INT pin. The driver fans the single IRQ out into per-source callbacks so the application's state-machine cleanly separates concerns."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-secure-element-sign",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-secure-element-sign",
         "som": "E1M-V2N101",
         "summary": "Probe the OPTIGA Trust M on V2N's BRD_I2C and confirm the current probe-only driver contract. The driver reads I2C_STATE to prove the part is reachable; product-info and raw-APDU helpers return `ALP_ERR_NOSUPPORT` until the Infineon host-library transport is integrated."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-temp-sensor",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-temp-sensor",
         "som": "E1M-V2N101",
         "summary": "Reads the on-module TMP112 once per second and prints the temperature in degrees Celsius (with 0.001 °C resolution). Classic V2N starter app -- one I²C bus open, one chip init, a ten-sample loop."
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-xspi-flash-readwrite",
+        "osSet": [
+          "zephyr"
+        ],
         "path": "examples/v2n/v2n-xspi-flash-readwrite",
         "som": "E1M-V2N101",
         "summary": "Erase one sector on the V2N module's on-module xSPI NOR, write a known pattern, read it back, and report the comparison. Exercises Zephyr's standard `flash` driver class against the board-facing xSPI bus."
@@ -892,6 +3177,26 @@
     ]
   },
   "gates": [
+    {
+      "purpose": "AGENTS.md hand-writes two kinds of generator-derived fact: concrete `ALP_E1M_*` / `ALP_E1M_X_*` pinout identifiers (its worked examples) and the `--emit` choice lists for `scripts/alp_project.py` and `python -m alp_orchestrate`. Nothing checks either against the real generators, so a pinout rename or an `--emit` choice-list change can leave AGENTS.md naming something that no longer compiles or runs, with no gate to catch it (issue #1264).",
+      "script": "scripts/check_agents_md_generators.py"
+    },
+    {
+      "purpose": "Cross-core pad-claim gate for the AMP RZ/V2N SoM (issue #1142).",
+      "script": "scripts/check_amp_pad_claims.py"
+    },
+    {
+      "purpose": "Reject a raw `apt-get update`/`apt-get install` in a workflow step.",
+      "script": "scripts/check_apt_bounded.py"
+    },
+    {
+      "purpose": "Refuse an Alif Ensemble (AEN) layout that leaves the top of the App MRAM window writable by the application, or that publishes a slot0 flash address disagreeing with `loader._resolve_slot0_load_address()` (#1482).",
+      "script": "scripts/check_atoc_reservation.py"
+    },
+    {
+      "purpose": "Board-ID manifest struct-parity gate -- fails (exit 1) when the `alp_hw_info_eeprom_t` typedef struct documented in docs/board-id.md, or the pack-format constants `scripts/program_eeprom.py` transcribes from the same struct, disagree with the shipping definition in include/alp/hw_info.h on field names, field order, or field widths.",
+      "script": "scripts/check_board_id_doc_parity.py"
+    },
     {
       "purpose": "Fail if any repo board.yaml has an outstanding schema migration.",
       "script": "scripts/check_board_schema_version.py"
@@ -905,12 +3210,20 @@
       "script": "scripts/check_bootstrap_manifest.py"
     },
     {
-      "purpose": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract (metadata/schemas/build-plan-v1.schema.json).",
+      "purpose": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract (metadata/schemas/build-plan-v1.schema.json), plus, for a plan the SDK emits itself, the `command.tool` bare-identity convention the shared schema deliberately does not assert (#1286).",
       "script": "scripts/check_build_plan.py"
     },
     {
       "purpose": "Validate the build-receipt-v1 schema is well-formed (#610 §7).",
       "script": "scripts/check_build_receipt.py"
+    },
+    {
+      "purpose": "Verify every `path:line` citation in `changelog.d/` still resolves.",
+      "script": "scripts/check_changelog_citations.py"
+    },
+    {
+      "purpose": "Guard: every `changelog.d/*.md` fragment is well-formed (#1395).",
+      "script": "scripts/check_changelog_fragments.py"
     },
     {
       "purpose": "CI gate: chip-header `@par Driver status:` labels match metadata truth.",
@@ -921,12 +3234,28 @@
       "script": "scripts/check_chip_manifest_parity.py"
     },
     {
+      "purpose": "`_CHIP_SUBSYSTEMS` <-> Kconfig `depends on` parity gate -- fails (exit 1) when `_CHIP_SUBSYSTEMS` in `scripts/alp_project_emit/__init__.py` drifts from the `depends on` line of the matching `config ALP_SDK_CHIP_<NAME>` / `config ALP_SDK_BLOCK_<NAME>` block in `zephyr/kconfigs/chips.kconfig`.",
+      "script": "scripts/check_chip_subsystems_parity.py"
+    },
+    {
       "purpose": "Plain-CMake chip-list parity gate -- fails (exit 1) when the root `CMakeLists.txt` `ALP_SDK_CHIP_LIST` (the plain-CMake / Yocto `libalp_chips.a` archive, gated by `ALP_BUILD_CHIPS_ONLY`) drifts from the drivers that actually exist under `chips/<id>/`.",
       "script": "scripts/check_cmake_chip_list_parity.py"
     },
     {
+      "purpose": "Core-to-CMakeLists mapping gate: fails (exit 1) when an example's baked `--emit zephyr-conf --core <id>` literal disagrees with the board.yaml core whose `app:` resolves to it, or when two distinct Zephyr cores resolve to the same CMakeLists.txt.",
+      "script": "scripts/check_core_cmakelists_mapping.py"
+    },
+    {
       "purpose": "Lint repo content for Linux-only idioms in customer-facing surfaces.",
       "script": "scripts/check_cross_platform.py"
+    },
+    {
+      "purpose": "Assert every ALP-Bxxx code scripts/alp_cli/validator.py can emit has a docs/diagnostics/ALP-Bxxx.md landing page (issue #1569).",
+      "script": "scripts/check_diagnostic_emission_coverage.py"
+    },
+    {
+      "purpose": "Reject a placeholder-only ALP-Bxxx diagnostic landing page (issue #1207).",
+      "script": "scripts/check_diagnostic_narratives.py"
     },
     {
       "purpose": "Validate the versioned machine diagnostics contract (metadata/schemas/diagnostic-v1.schema.json) two ways:",
@@ -937,12 +3266,24 @@
       "script": "scripts/check_doc_drift.py"
     },
     {
+      "purpose": "Doc-inventory gate -- fails (exit 1) when a hand-maintained inventory count or workflow-table entry in the docs drifts from the tree it describes (issue #1265, following up on #1209's fifth required-work item).",
+      "script": "scripts/check_doc_inventory.py"
+    },
+    {
+      "purpose": "CI gate: no dead relative-path links in customer-facing documentation.",
+      "script": "scripts/check_doc_links.py"
+    },
+    {
       "purpose": "Guard: no second Doxyfile-shaped heredoc regrows next to docs/doxygen/Doxyfile.",
       "script": "scripts/check_doxyfile_single_source.py"
     },
     {
       "purpose": "Doxygen-coverage audit -- walks include/alp/*.h and flags every public function declaration that lacks a `@brief` (or `\\brief`) tag in the preceding doc-comment block.",
       "script": "scripts/check_doxygen_coverage.py"
+    },
+    {
+      "purpose": "CI gate: driver_status declarations outside metadata/chips/*.yaml are bound to the artefact they claim to describe (issue #1216).",
+      "script": "scripts/check_driver_status_backing.py"
     },
     {
       "purpose": "Validate the vendored e1m-spec pinout snapshot and cross-check it against the per-SoM pin-mux tables -- fully **offline** (no network).",
@@ -973,20 +3314,44 @@
       "script": "scripts/check_example_portability.py"
     },
     {
+      "purpose": "CI gate: no `examples/**/CMakeLists.txt` may reach `scripts/alp_project.py` through a bare relative hop -- every invocation resolves the script under `${ALP_SDK_ROOT}`.",
+      "script": "scripts/check_example_sdk_root.py"
+    },
+    {
       "purpose": "Reject examples that claim Alp storage coverage while using Zephyr storage APIs.",
       "script": "scripts/check_example_storage_claims.py"
+    },
+    {
+      "purpose": "CI gate: every `helper_firmware[].firmware_path` in every `metadata/e1m_modules/*.yaml` SoM preset resolves to a real, repo-relative file on disk.",
+      "script": "scripts/check_helper_firmware_path.py"
+    },
+    {
+      "purpose": "Reject two declared I2C devices claiming the same 7-bit address on the same bus (issue #1675).",
+      "script": "scripts/check_i2c_address_uniqueness.py"
+    },
+    {
+      "purpose": "CI gate: doc/example prose that names a known on-module I2C part next to an I2C bus name must agree with that part's bus in the owning SoM preset's `on_module.i2c_devices:` block. #1270 added this block to `metadata/e1m_modules/E1M-AEN801.yaml` and its five AEN siblings (`E1M-V2N101.yaml` / `E1M-V2M101.yaml` already carried one); this gate is the cross-check #1270 asked for, reading across every SoM preset -- not AEN's alone -- mirroring what check_pin_conflicts.py does for silicon pads.",
+      "script": "scripts/check_i2c_bus_doc_consistency.py"
     },
     {
       "purpose": "Inference backend/format <-> dispatcher canonicalisation gate.",
       "script": "scripts/check_inference_backend_parity.py"
     },
     {
-      "purpose": "Assert the library alias table covers every curated token and resolves to real manifests (WS6-c #610 §6).",
+      "purpose": "Recipe-vs-west pin-parity gate (issue #1281).",
+      "script": "scripts/check_library_pin_parity.py"
+    },
+    {
+      "purpose": "Assert the curated-library registry is self-consistent (WS6-c #610 §6).",
       "script": "scripts/check_library_registry.py"
     },
     {
       "purpose": "CI gate: no hard-coded home-directory paths in executable / build files.",
       "script": "scripts/check_local_paths.py"
+    },
+    {
+      "purpose": "No tracked file may live under the Doxygen OUTPUT_DIRECTORY (#1573).",
+      "script": "scripts/check_no_committed_doxygen_output.py"
     },
     {
       "purpose": "Validate that every silicon pad referenced in the SoM peripheral maps is claimed by **exactly one** peripheral.",
@@ -995,6 +3360,10 @@
     {
       "purpose": "Plain-CMake link-completeness gate (issue #593).",
       "script": "scripts/check_plain_cmake_link_complete.py"
+    },
+    {
+      "purpose": "Protocol version policy gate for the CC3501E wire (ADR 0033).",
+      "script": "scripts/check_protocol_version_policy.py"
     },
     {
       "purpose": "CI gate: root public headers stay chip-neutral.",
@@ -1011,6 +3380,10 @@
     {
       "purpose": "CI gate: gen_sbom.py produces a valid, deterministic CycloneDX SBOM (#610 §7).",
       "script": "scripts/check_sbom.py"
+    },
+    {
+      "purpose": "Reject the unlocked check-then-set slot claim (issue #1630).",
+      "script": "scripts/check_slot_claim_atomic.py"
     },
     {
       "purpose": "Validate SoM-release bundle manifests against the public metadata/schemas/som-release-bundle-v1.schema.json contract.",
@@ -1061,11 +3434,19 @@
       "script": "scripts/check_version_doc_sync.py"
     },
     {
+      "purpose": "Prove every `libraries:`-selectable Zephyr module actually resolves in west.yml -- the alp-sdk-OWNED workspace (`west init -l alp-sdk`, what `tan bootstrap` and every customer runs), not the Zephyr-owned one pr-twister.yml happens to init from (`west init -m zephyr`) instead.",
+      "script": "scripts/check_west_manifest_module_resolution.py"
+    },
+    {
+      "purpose": "Reject a job-level `if:` that references a GitHub Actions context it does not get.",
+      "script": "scripts/check_workflow_expressions.py"
+    },
+    {
       "purpose": "Guard: every scripts/ and firmware/ write_text() of a repo-tree text artifact passes newline=\"\".",
       "script": "scripts/check_write_text_newline.py"
     },
     {
-      "purpose": "Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which shells `alp_project.py --emit zephyr-conf --core <id>` at configure time) and the planner's build-plan `configArtefacts` (`--emit build-plan`, consumed by `tan`) MUST materialise the identical `alp.conf` for the same core.",
+      "purpose": "Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which shells `alp_project.py --emit zephyr-conf --core <id>` at configure time) and the SDK reference build-plan `configArtefacts` MUST materialise the identical `alp.conf` for the same core; Python Tan tests its relocated producer against the same contract.",
       "script": "scripts/check_zephyr_conf_parity.py"
     }
   ],
@@ -1316,6 +3697,7 @@
         "alp_inference_get_input",
         "alp_inference_get_output",
         "alp_inference_invoke",
+        "alp_inference_last_invoke_latency_us",
         "alp_inference_num_inputs",
         "alp_inference_num_outputs",
         "alp_inference_open",
@@ -1434,11 +3816,13 @@
       "functions": [
         "alp_power_capabilities",
         "alp_power_close",
+        "alp_power_configure_retention",
         "alp_power_configure_wake_source",
         "alp_power_open",
         "alp_power_profile_get",
         "alp_power_profile_set",
-        "alp_power_request_sleep"
+        "alp_power_request_sleep",
+        "alp_power_wake_capabilities"
       ],
       "header": "include/alp/power.h"
     },
@@ -1577,7 +3961,7 @@
       "header": "include/alp/wdt.h"
     }
   ],
-  "schema_version": 1,
+  "schema_version": 2,
   "soms": [
     {
       "capabilities": {
@@ -1589,7 +3973,10 @@
         "xspi_dma": true
       },
       "family": "alif-ensemble",
-      "peripherals": {
+      "silicon": "alif:ensemble:e3",
+      "sku": "E1M-AEN301",
+      "soc_part": "E3",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": true,
@@ -1605,16 +3992,16 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
-      "silicon": "alif:ensemble:e3",
-      "sku": "E1M-AEN301",
-      "soc_part": "E3",
       "topology": {
         "m55_he": {
           "app": "alp-stock-shim",
@@ -1641,7 +4028,10 @@
         "xspi_dma": true
       },
       "family": "alif-ensemble",
-      "peripherals": {
+      "silicon": "alif:ensemble:e4",
+      "sku": "E1M-AEN401",
+      "soc_part": "E4",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": true,
@@ -1657,16 +4047,16 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
-      "silicon": "alif:ensemble:e4",
-      "sku": "E1M-AEN401",
-      "soc_part": "E4",
       "topology": {
         "m55_he": {
           "app": "alp-stock-shim",
@@ -1693,7 +4083,10 @@
         "xspi_dma": true
       },
       "family": "alif-ensemble",
-      "peripherals": {
+      "silicon": "alif:ensemble:e5",
+      "sku": "E1M-AEN501",
+      "soc_part": "E5",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": true,
@@ -1709,16 +4102,16 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
-      "silicon": "alif:ensemble:e5",
-      "sku": "E1M-AEN501",
-      "soc_part": "E5",
       "topology": {
         "a32_cluster": {
           "app": "alp-image-edge",
@@ -1754,7 +4147,10 @@
         "xspi_dma": true
       },
       "family": "alif-ensemble",
-      "peripherals": {
+      "silicon": "alif:ensemble:e6",
+      "sku": "E1M-AEN601",
+      "soc_part": "E6",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": true,
@@ -1770,16 +4166,16 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
-      "silicon": "alif:ensemble:e6",
-      "sku": "E1M-AEN601",
-      "soc_part": "E6",
       "topology": {
         "a32_cluster": {
           "app": "alp-image-edge",
@@ -1815,7 +4211,10 @@
         "xspi_dma": true
       },
       "family": "alif-ensemble",
-      "peripherals": {
+      "silicon": "alif:ensemble:e7",
+      "sku": "E1M-AEN701",
+      "soc_part": "E7",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": true,
@@ -1831,16 +4230,16 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
-      "silicon": "alif:ensemble:e7",
-      "sku": "E1M-AEN701",
-      "soc_part": "E7",
       "topology": {
         "a32_cluster": {
           "app": "alp-image-edge",
@@ -1876,7 +4275,10 @@
         "neon": true
       },
       "family": "alif-ensemble",
-      "peripherals": {
+      "silicon": "alif:ensemble:e8",
+      "sku": "E1M-AEN801",
+      "soc_part": "E8",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": true,
@@ -1892,16 +4294,16 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
-      "silicon": "alif:ensemble:e8",
-      "sku": "E1M-AEN801",
-      "soc_part": "E8",
       "topology": {
         "a32_cluster": {
           "app": "alp-image-edge",
@@ -1930,7 +4332,10 @@
         "neon": true
       },
       "family": "nxp-imx9",
-      "peripherals": {
+      "silicon": "nxp:imx9:imx93",
+      "sku": "E1M-NX9101",
+      "soc_part": "i.MX 93",
+      "soc_peripherals": {
         "adc": false,
         "can": false,
         "dac": false,
@@ -1946,16 +4351,16 @@
         "pwm": false,
         "quadrature_encoder": false,
         "rtc": false,
+        "sd1": false,
         "sdio_emmc": false,
         "spi": false,
         "timer": false,
         "uart": false,
         "usb": false,
-        "watchdog": false
+        "watchdog": false,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
-      "silicon": "nxp:imx9:imx93",
-      "sku": "E1M-NX9101",
-      "soc_part": "i.MX 93",
       "topology": {
         "a55_cluster": {
           "app": "alp-image-edge",
@@ -1978,7 +4383,10 @@
         "neon": true
       },
       "family": "renesas-rzv2n-deepx",
-      "peripherals": {
+      "silicon": "renesas:rzv2n:n44",
+      "sku": "E1M-V2M101",
+      "soc_part": "R9A09G056N44GBG",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": false,
@@ -1994,16 +4402,16 @@
         "pwm": false,
         "quadrature_encoder": false,
         "rtc": true,
+        "sd1": true,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
       },
-      "silicon": "renesas:rzv2n:n44",
-      "sku": "E1M-V2M101",
-      "soc_part": "R9A09G056N44GBG",
       "topology": {
         "a55_cluster": {
           "app": "alp-image-edge",
@@ -2026,7 +4434,10 @@
         "neon": true
       },
       "family": "renesas-rzv2n-deepx",
-      "peripherals": {
+      "silicon": "renesas:rzv2n:n44",
+      "sku": "E1M-V2M102",
+      "soc_part": "R9A09G056N44GBG",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": false,
@@ -2042,16 +4453,16 @@
         "pwm": false,
         "quadrature_encoder": false,
         "rtc": true,
+        "sd1": true,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
       },
-      "silicon": "renesas:rzv2n:n44",
-      "sku": "E1M-V2M102",
-      "soc_part": "R9A09G056N44GBG",
       "topology": {
         "a55_cluster": {
           "app": "alp-image-edge",
@@ -2074,7 +4485,10 @@
         "neon": true
       },
       "family": "renesas-rzv2n",
-      "peripherals": {
+      "silicon": "renesas:rzv2n:n44",
+      "sku": "E1M-V2N101",
+      "soc_part": "R9A09G056N44GBG",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": false,
@@ -2090,16 +4504,16 @@
         "pwm": false,
         "quadrature_encoder": false,
         "rtc": true,
+        "sd1": true,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
       },
-      "silicon": "renesas:rzv2n:n44",
-      "sku": "E1M-V2N101",
-      "soc_part": "R9A09G056N44GBG",
       "topology": {
         "a55_cluster": {
           "app": "alp-image-edge",
@@ -2122,7 +4536,10 @@
         "neon": true
       },
       "family": "renesas-rzv2n",
-      "peripherals": {
+      "silicon": "renesas:rzv2n:n44",
+      "sku": "E1M-V2N102",
+      "soc_part": "R9A09G056N44GBG",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": false,
@@ -2138,16 +4555,16 @@
         "pwm": false,
         "quadrature_encoder": false,
         "rtc": true,
+        "sd1": true,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
       },
-      "silicon": "renesas:rzv2n:n44",
-      "sku": "E1M-V2N102",
-      "soc_part": "R9A09G056N44GBG",
       "topology": {
         "a55_cluster": {
           "app": "alp-image-edge",

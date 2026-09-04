@@ -161,3 +161,21 @@ def test_cli_migrate_error_is_clean(tmp_path, capsys):
     err = capsys.readouterr().err
     assert "alp-migrate:" in err            # clean message, not a traceback
     assert "Traceback" not in err
+
+
+def test_all_board_yaml_files_prunes_build_output(tmp_path):
+    """`--all` must find every real board.yaml and skip build output --
+    the same defect class as check_library_registry.py's #1197 followup:
+    a raw `root.rglob("board.yaml")` would also match a stray
+    twister-out/.../board.yaml (never a real source file, but proof the
+    walk doesn't descend into build dirs at all)."""
+    cli = _load_cli()
+    real = tmp_path / "examples" / "widget" / "board.yaml"
+    real.parent.mkdir(parents=True)
+    real.write_text("som:\n  sku: X\n")
+    junk = tmp_path / "twister-out" / "widget" / "board.yaml"
+    junk.parent.mkdir(parents=True)
+    junk.write_text("not a real source file\n")
+    found = cli._all_board_yaml_files(tmp_path)
+    assert real in found
+    assert junk not in found

@@ -160,21 +160,49 @@ def test_select_app_shape_system_mram_base_excluded_from_slot0() -> None:
         alif_flash._select_app_shape(0x80580000, "HE")
 
 
-def test_select_app_shape_high_slot0_region_accepted() -> None:
-    # Just below System MRAM base -- still inside the widened slot0
-    # region, must be accepted (not just the narrow 0x8001xxxx band).
-    shape = alif_flash._select_app_shape(0x8057ea50, "HE")
+def test_select_app_shape_high_in_window_vector_accepted() -> None:
+    # Near the TOP of HE's own disjoint slot0 window (#1069:
+    # 0x80010000..0x802b0000), not just the narrow 0x8001xxxx band --
+    # still HE's mramAddress (the window base), not the raw vector.
+    shape = alif_flash._select_app_shape(0x802affff, "HE")
+    assert shape["cpu_id"] == "M55_HE"
     assert shape["mramAddress"] == "0x80010000"
     assert shape["flags"] == ["boot"]
 
 
 def test_select_app_shape_large_slot0_vector_accepted() -> None:
     # A slot0 vector well above the narrow 0x8001xxxx band (e.g. a large
-    # app whose entry point lands past the old 64KiB-only mask).
-    shape = alif_flash._select_app_shape(0x80020000, "HP")
+    # app whose entry point lands past the old 64KiB-only mask) --
+    # inside HP's own window (#1069: 0x802b0000..0x80550000).
+    shape = alif_flash._select_app_shape(0x80300000, "HP")
     assert shape["cpu_id"] == "M55_HP"
-    assert shape["mramAddress"] == "0x80010000"
+    assert shape["mramAddress"] == "0x802b0000"
     assert shape["flags"] == ["boot"]
+
+
+def test_select_app_shape_vector_in_sibling_window_raises() -> None:
+    # #1069 core of the fix: a vector that resolves inside the OTHER
+    # core's disjoint slot0 window must be refused, not silently
+    # flashed under --device's cpu_id (that refusal IS the guard --
+    # this is exactly the pre-#1069 collision shape, just now caught
+    # before app-gen-toc instead of after both cores overwrite MRAM).
+    with pytest.raises(RuntimeError, match="M55_HE slot0 window"):
+        alif_flash._select_app_shape(0x80010000, "HP")
+    with pytest.raises(RuntimeError, match="M55_HP slot0 window"):
+        alif_flash._select_app_shape(0x802b0000, "HE")
+
+
+def test_select_app_shape_vector_at_he_window_returns_unchanged_address() -> None:
+    # HE keeps the pre-#1069 address unchanged (#1069 decided layout).
+    shape = alif_flash._select_app_shape(0x80011F15, "HE")
+    assert shape["mramAddress"] == "0x80010000"
+
+
+def test_select_app_shape_vector_at_hp_window_returns_moved_address() -> None:
+    # HP moved off the old shared 0x80010000 window onto the ex-OTA
+    # slot1 window (#1069 decided layout).
+    shape = alif_flash._select_app_shape(0x802b0801, "HP")
+    assert shape["mramAddress"] == "0x802b0000"
 
 
 # ---------------------------------------------------------------------

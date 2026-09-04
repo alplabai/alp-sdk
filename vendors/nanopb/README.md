@@ -71,13 +71,21 @@ the mproc path) gates whether the library is *used*.
 
 ## Wiring (deferred, no committed release)
 
-The west.yml pin is **shipped** (pinned since v0.3):
+The west.yml pin is **shipped** (pinned since v0.3), named
+`nanopb-mproc-pin` (#1136) -- deliberately NOT `nanopb` -- to avoid
+colliding with the upstream `nanopb` project that
+`examples/connectivity/nanopb-encode-decode` needs (allowlisted from
+Zephyr's own manifest, unconditioned there, no `groups:`). West's
+project-name resolution lets a directly-listed project shadow a
+same-named imported one even from a disabled group, so this pin and
+that example's dependency must never share a name:
 
 ```yaml
-- name: nanopb
+- name: nanopb-mproc-pin
   remote: nanopb
-  revision: nanopb-0.4.9    # GitHub tag format (note prefix); bump intentionally on each upgrade.
-  path: modules/lib/nanopb
+  repo-path: nanopb          # keeps the real github.com/nanopb/nanopb URL
+  revision: nanopb-0.4.9     # GitHub tag format (note prefix); bump intentionally on each upgrade.
+  path: modules/lib/nanopb-mproc-pin
   groups:
     - extras-lwrb-nanopb     # disabled by default -- see top-level group-filter
 ```

@@ -1,0 +1,18 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake I2S controller used only by the i2s_write_bounds ztest.  native_sim
+# ships no built-in I2S emulation (unlike CAN's can_loopback0), so this test
+# supplies its own minimal `struct device` behind the standard Zephyr i2s_*
+# driver API -- enough for src/backends/i2s/zephyr_drv.c's z_open() /
+# z_write() to run for real instead of falling back to a NULL device.
+
+description: |
+  Fake I2S controller for the alp-sdk i2s_write_bounds unit test.
+  configure() and trigger() always succeed; write() accepts any block
+  (the alp-sdk oversize guard under test runs before this driver ever
+  sees a write); read() is unsupported.
+
+compatible: "alp,test-i2s"
+
+include: i2s-controller.yaml

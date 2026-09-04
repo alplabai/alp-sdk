@@ -73,6 +73,23 @@ def soc_npus(soc: dict) -> list:
     return soc.get("npus") or []
 
 
+def _has_ext_mem_spi(soc: dict) -> bool:
+    """True iff the SoC declares a positive-count external SPI-NOR memory
+    interface in `external_memory_interfaces` -- xSPI/OctalSPI/HexSPI/FlexSPI
+    are vendor names for the same external quad/octal-lane NOR-flash class,
+    structurally separate from `peripherals:` (see e.g.
+    metadata/socs/renesas/rzv2n/n44.json, metadata/socs/alif/ensemble/e8.json).
+    Every recorded kind in this list that is SD/eMMC or LPDDR omits "spi"
+    from its name, so a case-insensitive substring match cleanly isolates
+    the class without an enumerated vendor-name list.
+    """
+    for entry in soc.get("external_memory_interfaces") or []:
+        kind = str(entry.get("kind", ""))
+        if "spi" in kind.lower() and int(entry.get("count", 0) or 0) > 0:
+            return True
+    return False
+
+
 # Peripheral CLASS columns, in a fixed (deterministic) canonical order.
 # Each entry is (label, predicate(soc) -> bool).  Modelled on
 # scripts/gen_soc_caps.py CAPS; predicates normalise the SoC key-naming
@@ -95,6 +112,7 @@ PERIPHERAL_CLASSES: list[tuple[str, "callable"]] = [
     ("Ethernet", lambda s: _has_prefix(s, "ethernet")),
     ("USB", lambda s: _has_prefix(s, "usb_")),
     ("SDIO/eMMC", lambda s: _has_prefix(s, "sdio")),
+    ("xSPI/OSPI", _has_ext_mem_spi),
     ("PCIe", lambda s: _has_prefix(s, "pcie")),
     ("MIPI CSI", lambda s: _has(s, "mipi_csi2")),
     ("MIPI DSI", lambda s: _has(s, "mipi_dsi")),

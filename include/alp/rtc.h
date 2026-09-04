@@ -78,7 +78,8 @@ alp_rtc_t *alp_rtc_open(uint32_t rtc_id);
  * @param[in] time  New time.  All fields are validated against the
  *                  documented ranges; out-of-range values return
  *                  ALP_ERR_INVAL without modifying the RTC.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO /
+ *         ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_rtc_set_time(alp_rtc_t *rtc, const alp_rtc_time_t *time);
 
@@ -87,7 +88,8 @@ alp_status_t alp_rtc_set_time(alp_rtc_t *rtc, const alp_rtc_time_t *time);
  *
  * @param[in]  rtc   Handle from @ref alp_rtc_open.
  * @param[out] time  Receives the current time.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_IO /
+ *         ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_rtc_get_time(alp_rtc_t *rtc, alp_rtc_time_t *time);
 

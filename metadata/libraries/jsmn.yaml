@@ -2,8 +2,13 @@
 # canonical manifest for the legacy per-core token `jsmn`).
 #
 # Grounding (this checkout):
-#   * scripts/alp_project_emit/__init__.py:257 (_LIBRARY_KCONFIG) --
-#     verbatim: `CONFIG_ALP_JSMN_SW=y`.
+#   * `integration.zephyr.kconfig` below, verbatim: `CONFIG_ALP_JSMN_SW=y`,
+#     transcribed by scripts/alp_orchestrate/libraries.py:321
+#     (`zephyr_kconfig_lines`).  This bullet used to cite
+#     `_LIBRARY_KCONFIG["jsmn"]` in scripts/alp_project_emit/__init__.py;
+#     that per-library dict no longer exists anywhere under scripts/ (the
+#     alp_project_emit package itself does still exist, so the citation
+#     read as live rather than obviously dead).
 #   * west.yml:340-345 -- `name: jsmn`, remote zserge, revision `v1.1.0`
 #     ("Header-only; latest tagged release."), path modules/lib/jsmn,
 #     group `extras-tier1` (disabled by default; the build resolves
@@ -11,15 +16,18 @@
 #     `west update` cannot run against an out-of-workspace worktree).
 #   * vendors/jsmn/README.md -- MIT licence (LICENSE upstream text
 #     unmodified); upstream https://github.com/zserge/jsmn.
-#   * metadata/library-profiles/jsmn/hw-backends.yaml -- pure-SW,
-#     no accelerator binding (parsing class).
 #   * examples/connectivity/jsmn-json-parse/testcase.yaml -- built +
 #     run green on native_sim/native_sim/native/64.
 #
-# HW-backends: see metadata/library-profiles/jsmn/ (folded in WS6-c Phase 3)
+# HW-backends: pure-SW, no accelerator binding (parsing class) -- see
+# this manifest's own `integration.zephyr.hw_backends:` block below
+# (retired standalone metadata/library-profiles/jsmn/hw-backends.yaml
+# folded in here in WS6-c Phase 3; no library-profiles/jsmn/ directory
+# exists).
 #
 # `module: jsmn` matches the real (disabled-by-default) west project
-# name above; `kconfig:` is transcribed verbatim from _LIBRARY_KCONFIG.
+# name above; `kconfig:` is transcribed verbatim by
+# scripts/alp_orchestrate/libraries.py:321 (`zephyr_kconfig_lines`).
 #
 # No `requires:` -- pure portable C99, single self-contained header, no
 # capability/core-class/RAM floor of note.

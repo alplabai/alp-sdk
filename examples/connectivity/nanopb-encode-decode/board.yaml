@@ -2,7 +2,8 @@
 #
 # `cores.m55_hp.libraries: [nanopb]` makes alp_project.py emit
 # CONFIG_ALP_NANOPB_SW=y (nanopb has no HW-accelerator class -- see
-# metadata/library-profiles/nanopb/hw-backends.yaml, pure-SW only).
+# the `integration.zephyr.hw_backends:` block in
+# metadata/libraries/nanopb.yaml, pure-SW only).
 # The upstream nanopb runtime (pb_encode.c/pb_decode.c/pb_common.c) is
 # NOT wired through Zephyr's module-CMake extension automatically --
 # nanopb's zephyr/module.yml declares `cmake-ext`/`kconfig-ext`

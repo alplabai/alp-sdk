@@ -180,7 +180,8 @@ ZTEST(alp_peripheral, test_uart_read_partial_arrival_then_deadline_returns_ok)
  * deterministic.  Successful attach against a real device -- double
  * attach, detach, and close-cleanup -- is exercised further down under
  * native_sim's own uart0 (see the #600 section, CONFIG_ALP_SDK_UART_RX_RINGBUF
- * block); only true silicon RX byte delivery is parked behind nightly-aen-hil. */
+ * block); only true silicon RX byte delivery is parked behind an
+ * explicitly-invoked bench run (docs/ci/HW-IN-LOOP.md). */
 ZTEST(alp_peripheral, test_uart_rx_ringbuf_attach_null_port)
 {
 	uint8_t                buf[64];

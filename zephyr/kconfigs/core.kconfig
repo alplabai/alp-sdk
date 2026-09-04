@@ -81,6 +81,62 @@ config ALP_SDK_SOM_SKU
 	  absent, unprovisioned, or unreadable (before falling back to the raw
 	  CONFIG_BOARD target).  Empty when built without alp_orchestrate.py.
 
+config ALP_SDK_SOM_HW_REV
+	string "SoM hardware revision this firmware was built for"
+	default ""
+	help
+	  The hw_rev the BUILD resolved (board.yaml `som.hw_rev`, falling
+	  back to the SKU preset's `default_hw_rev`), emitted into the
+	  generated alp.conf by scripts/alp_orchestrate.py
+	  (kconfig.py::_emit_som_caps).  This is the build's resolved
+	  identity ONLY -- nothing in the compiled firmware derives a
+	  pad-routing table from it.  The SoM preset's `pad_routes`/
+	  `pad_route_overrides` data (scripts/alp_project_loader.py) is
+	  read only by scripts/alp_project_emit/bom_netlist.py, for the
+	  debug/BOM `--emit composed-route-table` / `--emit carrier-netlist`
+	  surfaces -- no header/C table/DT overlay a real build produces is
+	  generated from it.
+
+	  When CONFIG_ALP_SDK_HW_INFO is also on, the boot banner compares
+	  this against the LIVE revision read from the on-module identity
+	  EEPROM and warns on a mismatch -- see
+	  CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL and issue #1853.  Empty when
+	  built without alp_orchestrate.py, in which case there is nothing
+	  to compare and the check never fires.
+
+config ALP_SDK_HW_REV_MISMATCH_FATAL
+	bool "Halt boot on a SoM hw_rev mismatch instead of only warning"
+	default n
+	depends on ALP_SDK_HW_INFO && ALP_SDK_BANNER
+	help
+	  Promotes the boot banner's CONFIG_ALP_SDK_SOM_HW_REV vs. live-
+	  EEPROM comparison (issue #1853) from a printed warning to
+	  k_panic().  A mismatch means this firmware's resolved hw_rev
+	  disagrees with the module it is actually running on; on the AEN
+	  family, three E1M pads (IO8/IO10/IO21) physically sit on a
+	  DIFFERENT chip depending on hw_rev, so code carrying a hw_rev-
+	  blind pin-to-chip map (see #1859) can silently target the wrong
+	  chip.  A production build that would rather halt than risk that
+	  should turn this on.
+
+	  Off by default: a factory-fresh module with no EEPROM manifest
+	  yet programmed is an expected, legitimate boot (surfaced as
+	  ALP_ERR_NOT_PROVISIONED, which never reaches the comparison at
+	  all -- see alp_hw_info_classify_manifest()), and bricking a
+	  developer's board over a revision-string mismatch is a worse
+	  failure mode than the wrong-chip risk it guards against.  This
+	  option does not make the check any more PRECISE -- it still
+	  compares the whole-module hw_rev, not the individual pad a given
+	  alp_gpio_open() call is about to touch; see the comment above
+	  alp_sdk_banner()'s hw_rev check in src/zephyr/alp_banner.c for why
+	  a per-pad dispatch refusal is not implemented here.
+
+	  Note: this depends on CONFIG_ALP_SDK_BANNER because the whole
+	  check lives inside the boot banner's manifest read.  A footprint-
+	  conscious production build that disables ALP_SDK_BANNER loses
+	  both the warning and this option -- known limitation, not fixed
+	  here.
+
 config ALP_SDK_SOC_NAME
 	string "SoC display name (boot banner)"
 	default ""
@@ -127,6 +183,24 @@ config ALP_SDK_CONSOLE
 	  identity, gpio / i2c / adc / pwm pokes via the portable <alp/*>
 	  API, a memory peek, a clock dump, and a companion-chip bridge.
 	  Read-only verbs only unless ALP_SDK_CONSOLE_UNSAFE is also set.
+
+# The `alp` console runs every command on the Zephyr shell thread, including the
+# companion-bridge verbs, which descend shell -> cc3501e_request() -> the SPI
+# transport and then format the result back through shell_print().  Zephyr's
+# 2048-byte SHELL_STACK_SIZE default is not enough headroom for that chain:
+# measured on an E1M-AEN801 with CONFIG_THREAD_ANALYZER, `alp companion ver`
+# alone peaks the shell thread at 1044/2048 (50 %), and a `sock tcp-get`
+# attempt at 1156/2048 (56 %) -- leaving under 900 bytes for the receive loop's
+# own formatting.  With data actually flowing, that overflowed and halted the
+# system (#1743: "Stack overflow ... ZEPHYR FATAL ERROR 2 ... Halting system",
+# on thread shell_uart).
+#
+# 4096 restores roughly 2.9 KB of headroom over the measured peak.  It costs
+# 2 KB of RAM, ~0.8 % of the AEN801's 256 KB, and only on builds that opt into
+# the console at all.  `configdefault` raises the default without preventing an
+# application from choosing its own value.
+configdefault SHELL_STACK_SIZE
+	default 4096 if ALP_SDK_CONSOLE
 
 config ALP_SDK_CONSOLE_UNSAFE
 	bool "Allow write / destructive `alp` console commands"

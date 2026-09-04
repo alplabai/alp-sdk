@@ -105,7 +105,12 @@ alp_status_t alp_camera_start(alp_camera_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->start(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->start == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->start(&h->state);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -115,7 +120,12 @@ alp_status_t alp_camera_stop(alp_camera_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->stop(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->stop == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->stop(&h->state);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -124,18 +134,20 @@ alp_status_t alp_camera_capture(alp_camera_t *h, alp_camera_frame_t *out, uint32
 {
 	/* Counted via alp_handle_op_enter/leave (issue #629): capture() can
 	 * block up to timeout_ms waiting for a frame, so alp_camera_close()
-	 * drains this op with the sleep-poll
-	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
-	 * instead of the busy-spin alp_handle_begin_close() -- generalised
-	 * from rpc_dispatch.c's _rpc_op_enter()/_rpc_begin_close()/
-	 * _rpc_drain() (GHSA-xhm8). A close() racing an in-flight capture()
-	 * can no longer tear down state underneath it. */
+	 * drains this op with alp_handle_begin_close_blocking()
+	 * (src/common/alp_slot_claim.c), which sleeps between polls instead
+	 * of busy-spinning (issue #1114: unsafe regardless of op duration) --
+	 * generalised from rpc_dispatch.c's _rpc_op_enter()/
+	 * _rpc_begin_close()/_rpc_drain() (GHSA-xhm8). A close() racing an
+	 * in-flight capture() can no longer tear down state underneath it. */
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
 	alp_status_t rc;
 	if (out == NULL) {
 		rc = ALP_ERR_INVAL;
+	} else if (h->state.ops->capture == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
 	} else {
 		rc = h->state.ops->capture(&h->state, out, timeout_ms);
 	}
@@ -152,7 +164,12 @@ alp_status_t alp_camera_release(alp_camera_t *h, alp_camera_frame_t *frame)
 		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_INVAL;
 	}
-	alp_status_t rc = h->state.ops->release(&h->state, frame);
+	alp_status_t rc;
+	if (h->state.ops->release == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->release(&h->state, frame);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -165,7 +182,12 @@ alp_status_t alp_camera_configure_isp(alp_camera_t *h, const alp_camera_isp_conf
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->configure_isp(&h->state, isp);
+	alp_status_t rc;
+	if (h->state.ops->configure_isp == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->configure_isp(&h->state, isp);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }

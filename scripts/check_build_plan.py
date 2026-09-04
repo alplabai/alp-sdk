@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Validate a build plan against the public alp CLI / alp-sdk-vscode contract
-(metadata/schemas/build-plan-v1.schema.json).
+(metadata/schemas/build-plan-v1.schema.json), plus, for a plan the SDK
+emits itself, the `command.tool` bare-identity convention the shared
+schema deliberately does not assert (#1286).
 
 `--emit build-plan` (`scripts/alp_orchestrate/buildplan.py::emit_build_plan`)
 renders one machine-readable JSON build plan per resolved board.yaml project:
@@ -28,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -38,6 +41,49 @@ SCHEMA = REPO / "metadata" / "schemas" / "build-plan-v1.schema.json"
 sys.path.insert(0, str(REPO / "scripts"))
 
 from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
+
+# Issue #1286: `command.tool` must be a bare executable identity (e.g.
+# 'west'), never a location -- the executor's job is resolving that
+# identity to a concrete path, not the plan's. This is asserted ONLY over
+# plans WE generate (see _validate_generated below), never the shared
+# schema (metadata/schemas/build-plan-v1.schema.json carries no `pattern`
+# on this field on purpose): a third-party plan may legitimately carry an
+# absolute tool path, and #847 already showed that tightening a shared
+# shape at unchanged `schemaVersion: const 1` breaks pinned consumers.
+# `re.fullmatch`, not `^...$`: JSON Schema is ECMA-262 where `$` matches
+# only at end of input, while Python `re`'s `$` also matches just before a
+# trailing newline -- `re.fullmatch` keeps this gate's verdict identical
+# to what an ajv-based consumer would give.
+_TOOL_IDENTITY_RE = re.compile(r"[A-Za-z0-9._+-]+")
+
+
+def _tool_identity_violations(doc) -> list[str]:
+    """Return one message per slice command whose `tool` isn't a bare
+    executable identity. Doc-shaped input only -- callers own schema
+    validation separately.
+
+    Covers `postCommands[]` as well as `command` (alplabai/tan-cli#550):
+    those steps are dispatched by the same executor under the same
+    `executionPolicy`, so a location leaking into one of them is the
+    identical #1286 defect.
+    """
+    bad = []
+    for slice_ in doc.get("slices", []):
+        steps = [("command", slice_.get("command"))]
+        steps += [(f"postCommands[{i}]", step) for i, step
+                  in enumerate(slice_.get("postCommands") or [])]
+        for field, command in steps:
+            if command is None:
+                continue
+            tool = command.get("tool", "")
+            if (not isinstance(tool, str)
+                    or not _TOOL_IDENTITY_RE.fullmatch(tool)):
+                bad.append(
+                    f"slices[{slice_.get('coreId')!r}].{field}.tool "
+                    f"{tool!r} is not a bare executable identity "
+                    f"(issue #1286)")
+    return bad
+
 
 # Representative projects exercising the multi-image (A+M) shape across all
 # three SoC families -- the same corpus check_system_manifest.py pins.
@@ -100,7 +146,13 @@ def _validate_generated(board_yaml: Path, validator: jsonschema.Draft202012Valid
         rel = board_yaml.relative_to(REPO)
     except ValueError:
         rel = board_yaml
-    return _validate_doc(f"{rel} (generated)", json.loads(plan_json), validator)
+    label = f"{rel} (generated)"
+    doc = json.loads(plan_json)
+    failures = _validate_doc(label, doc, validator)
+    for msg in _tool_identity_violations(doc):
+        print(f"FAIL {label}: {msg}")
+        failures += 1
+    return failures
 
 
 def main() -> int:

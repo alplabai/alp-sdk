@@ -1,11 +1,14 @@
 # E1M EVK — SDK reference
 
 The **E1M Development Board** (UG-E1M-001) is the official Alp Lab
-board for E1M / E1M-X System-on-Modules.  It exposes USB,
+board for the **E1M** (35 × 35 mm) form factor.  It exposes USB,
 Ethernet, CAN, MIPI DSI, multiple camera options, audio, sensors,
 M.2/PCIe, and Arduino + mikroBUS expansion — all wired so that any
-E1M-conformant SoM (E1M-AEN family, E1M-X V2N, etc.) plugs into the
-same board and the same SDK build runs.
+E1M-conformant SoM (the E1M-AEN family today; E1M-N93 once its HW
+config lands) plugs into the same board and the same SDK build
+runs.  E1M-X SoMs (Renesas RZ/V2N, V2N-M1 — 45 × 65 mm, a separate
+product line with its own C namespace) do **not** fit this board;
+they use the [E1M-X Development Board](e1m-x-evk.md) instead.
 
 > Source: *E1M Development Board User Guide* — UG-E1M-001 Rev. 0.1
 > (April 2026), archived vendor documentation
@@ -23,11 +26,18 @@ board-file repo).
 
 ## SoM compatibility
 
+This EVK accepts **E1M-conformant SoMs only** — the E1M and E1M-X
+form factors are separate product lines (different pad counts,
+different C namespaces; no cross-form-factor portability) and do
+not share a board.
+
 | SoM family       | EVK support | Notes                                                                                  |
 |------------------|-------------|----------------------------------------------------------------------------------------|
 | E1M-AEN (Alif Ensemble) | **v0.1** target | Primary bring-up target. ETH0 only (AEN family routes a single MAC).             |
-| E1M-X V2N        | v0.2        | Two MAC controllers wired to the EVK's two RJ45 jacks.                                 |
-| E1M-X V2N-M1     | v0.3        | DX-M1 sits behind PCIe; M.2 Key M slot is functionally a bridge share, not exclusive ×4. |
+| E1M-N93 (NXP i.MX 93)   | planned, no committed version | `VERSIONS.md` Tier 3 ("deferred indefinitely past v1.0") lists NXP NX9101 silicon enablement.  Provisional preset `E1M-NX9101`; production MPN pending the HW config writeup. |
+
+E1M-X SoMs (`E1M-V2N101/102`, `E1M-V2M101/102`) target the separate
+[E1M-X Development Board](e1m-x-evk.md), not this one.
 
 ## Power and rails
 
@@ -201,10 +211,10 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   that wires the `alp-i2c0` alias, the `alp,pin-array` (rotary encoder,
   RGB LED, IO_EXP.INT), and the `alp-uart0` alias to EVK pins via the
   SoM's pinmux.  It targets `alp_e1m_aen801_m55_he` (AEN-family build);
-  V2N builds add their own overlay in v0.2.
+  future E1M-N93 builds add their own overlay once that SoM lands.
 - v0.1 does **not** ship full board-level sensor drivers.  The
   ICM-42670-P / BMI323 / BMP581 / TCAL9538 drivers land as part of
-  the v0.2 "Chips" library expansion (`chips/icm42670p/`, etc.) per
+  the v0.2 "Chips" library expansion (`chips/icm42670/`, etc.) per
   [`VERSIONS.md`](../../VERSIONS.md).
 - The EVK example app (`examples/evk-bringup/`) lands in v0.2.  v0.1
   ships a stub README at that path so the doc tree is stable.

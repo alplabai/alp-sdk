@@ -39,7 +39,7 @@ DEFECT,2,FAIL,0.98,1.6,5,3,1.98
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/ai/visual-defect-detection
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/visual-defect-detection
 west flash
 ```
 

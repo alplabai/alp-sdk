@@ -5,25 +5,60 @@
 # Steps (now split across two jobs for SLSA L3):
 #
 #   1. `build` job:
-#      a. Verify the tag matches `metadata/sdk_version.yaml`.
+#      a. Verify the tag matches `metadata/sdk_version.yaml`.  Compares
+#         CORE versions on both sides (#1902): `metadata/sdk_version.yaml`'s
+#         `version:` may itself carry a pre-release suffix during an rc
+#         window (`scripts/bump_version.py --to X.Y.Z-rcN` writes it
+#         verbatim, matching SemVer's own prerelease syntax so a build made
+#         from that checkout identifies itself as an rc instead of as its
+#         eventual GA version) or stay the bare core version the way a GA
+#         bump always does -- either form must match the TAG's core
+#         version, suffix or no suffix on either side.  Also refuses a GA
+#         tag whose metadata still carries a leftover rc suffix, and a
+#         pre-release tag whose own suffix disagrees with a pre-release
+#         DECLARED (both directions of #1902).
 #      b. Verify the ABI snapshot at docs/abi/v<N>-snapshot.json
 #         exists.
-#      c. Verify CHANGELOG.md has a matching `## [v<N>] - YYYY-MM-DD`
-#         section and slice it for the release notes -- a missing
-#         heading, or one present but with an empty body (e.g. the
-#         section is still under `## [Unreleased]`), FAILS the
-#         release rather than publishing an empty/stub body.  A
-#         pre-release tag (`vX.Y.Z-rcN`) is cut before the final
-#         heading exists, so it falls back to `## [Unreleased]`
-#         instead -- clearly labelled, never a silent stub.
-#      d. Build a source tarball (no binaries -- the SDK is a source
-#         release).
-#      e. Generate SHA-256 + SHA-512 checksums.
-#      f. Emit an SBOM + build receipt (`*.cdx.json`).
-#      g. Emit the tarball's base64-encoded SHA-256 digest for the
+#      c. PRE-RELEASE TAG ONLY: verify CHANGELOG.md has a `##
+#         [Unreleased]` section with a non-empty body and slice it
+#         for the release notes -- an rc is cut before the final `##
+#         [v<N>] - YYYY-MM-DD` heading exists, so this is the only
+#         draft body available yet.  A missing/empty section FAILS
+#         the release rather than publishing an empty/stub body.
+#         Skipped entirely for a final tag: its body always comes
+#         from (d) instead, so computing a slice here would only add
+#         a spurious failure mode (an oversized/unsliceable section
+#         hard-failing a release whose real body is already correct).
+#      d. Prefer `docs/release-notes/v<N>.md` for the release body
+#         (#1728 -- mechanises cutting-a-release's step 0): a FINAL
+#         tag always uses it and FAILS the release if it's missing or
+#         empty; a pre-release tag uses it too when already
+#         committed, else keeps the CHANGELOG-slice draft from (c).
+#         See docs/release-notes/README.md.
+#      e. Generate alp.lock.  It isn't committed (#1576 -- its
+#         `digests.metadata` is a single hash over the whole
+#         metadata/** tree, so any two PRs touching different
+#         metadata files conflicted on that one line by
+#         construction), so a non-git consumer of the tarball still
+#         needs one -- it is folded into the tarball in the next
+#         step so the tamper-check property survives outside git.
+#      f. Build a source tarball (no binaries -- the SDK is a source
+#         release), including the generated alp.lock.
+#      g. Generate SHA-256 + SHA-512 checksums.
+#      h. Emit an SBOM + build receipt (`*.cdx.json`) from that
+#         alp.lock.
+#      i. Emit the tarball's base64-encoded SHA-256 digest for the
 #         provenance generator (consumed via `outputs.hashes`).
-#      h. Create the GitHub Release with the CHANGELOG slice as the
-#         body and the tarball + checksums + SBOM as artefacts.
+#      j. Create the GitHub Release with the body from (d) --
+#         truncated + warned if the (c)-fallback path is what's
+#         publishing and it would exceed GitHub's 125,000-char
+#         release-body limit, see the slice step below -- and the
+#         tarball + checksums + SBOM as artefacts.  For a final tag
+#         with the release-notes file, this is the last step that
+#         touches the body -- no post-tag hand-edit
+#         (`gh release edit`) any more.  The CHANGELOG stays the
+#         exhaustive record; a bare CHANGELOG-slice draft is never
+#         the final published prose for a final tag (alp-sdk#1492).
 #
 #   2. `provenance` job (calls the slsa-framework reusable workflow):
 #      a. Runs inside an isolated, ephemeral GitHub-hosted runner
@@ -80,6 +115,14 @@ permissions: read-all
 jobs:
   build:
     runs-on: ubuntu-latest
+    # #1477: worst observed successful run 22s across 3 sampled release
+    # runs -- comfortably inside the formula's 10min floor, but this job
+    # makes several independent network round trips (pip install, the
+    # tarball's GitHub Release upload) and release.yml fires rarely
+    # enough (a handful of times a month) that the 3-run sample is thin.
+    # 20min keeps headroom over both that floor and the sum of this job's
+    # own capped + budgeted-uncapped step timeouts.
+    timeout-minutes: 30
     permissions:
       contents: write  # required to create the GitHub Release
     outputs:
@@ -87,16 +130,22 @@ jobs:
       hashes: ${{ steps.hash.outputs.hashes }}
     steps:
       - name: Checkout (full history for CHANGELOG slice)
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 
       - name: Install Python deps
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip install pyyaml jsonschema
 
       - name: Parse tag + verify against metadata
@@ -111,10 +160,42 @@ jobs:
           echo "core_version=$CORE_VERSION" >> "$GITHUB_OUTPUT"
           echo "is_prerelease=$([ "$VERSION" = "$CORE_VERSION" ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
 
-          # Verify metadata/sdk_version.yaml matches.
+          # Verify metadata/sdk_version.yaml matches. `version:` may itself
+          # carry a pre-release suffix during an rc window (#1902, e.g.
+          # `0.16.0-rc1` for the commit tagged `v0.16.0-rc1` --
+          # scripts/bump_version.py writes it verbatim) or stay the bare
+          # core version the way a GA bump always does -- strip DECLARED's
+          # own suffix the same way the tag's was stripped above so both
+          # forms compare against the tag's core version consistently.
           DECLARED=$(python3 -c "import yaml; print(yaml.safe_load(open('metadata/sdk_version.yaml'))['version'])")
-          if [ "$DECLARED" != "$CORE_VERSION" ]; then
+          DECLARED_CORE="${DECLARED%%-*}"
+          if [ "$DECLARED_CORE" != "$CORE_VERSION" ]; then
             echo "::error::Tag core version $CORE_VERSION doesn't match metadata/sdk_version.yaml ($DECLARED)"
+            exit 1
+          fi
+          # A GA tag (no suffix of its own) must not ship a build still
+          # declaring an rc suffix -- that would silently reintroduce
+          # #1902 in the other direction (a GA build reporting itself as
+          # an rc). Catches a forgotten final `--to X.Y.Z` bump after the
+          # last rc; a pre-release tag has no such constraint (DECLARED
+          # may legitimately still be a bare core version if the operator
+          # never re-bumped for this particular rc -- back-compatible with
+          # the pre-#1902 workflow).
+          if [ "$VERSION" = "$CORE_VERSION" ] && [ "$DECLARED" != "$CORE_VERSION" ]; then
+            echo "::error::Tag $TAG is a GA release, but metadata/sdk_version.yaml still declares a pre-release version ($DECLARED) -- bump it to the bare $CORE_VERSION before tagging GA."
+            exit 1
+          fi
+          # The other direction of the same defect: a pre-release tag whose
+          # own suffix disagrees with a pre-release DECLARED still passed
+          # both checks above (core-only compares), so `v0.16.0-rc2` tagged
+          # against a metadata `version: 0.16.0-rc1` build silently
+          # self-reported as rc1 -- #1902 surviving in the pre-release
+          # direction. DECLARED may still legitimately be a bare core
+          # version here (the "never re-bumped for this rc" back-compat
+          # case above); this only fires once BOTH sides carry a suffix and
+          # they differ.
+          if [ "$VERSION" != "$CORE_VERSION" ] && [ "$DECLARED" != "$DECLARED_CORE" ] && [ "$DECLARED" != "$VERSION" ]; then
+            echo "::error::Tag $TAG is a pre-release, but metadata/sdk_version.yaml declares a different pre-release version ($DECLARED) -- bump it to $VERSION before tagging."
             exit 1
           fi
 
@@ -131,6 +212,20 @@ jobs:
 
       - name: Verify + slice CHANGELOG section for the release notes
         id: changelog
+        # Only runs for a pre-release tag. A final tag's release body
+        # always comes from docs/release-notes/v<N>.md (the next step,
+        # `id: release_notes`) -- this step's output is either
+        # overwritten by that step's `cp` or never read at all, so
+        # running it for a final tag buys nothing but a spurious extra
+        # failure mode: an oversized/unsliceable CHANGELOG section
+        # would hard-fail the job here even though the notes file
+        # already has the correct, published body, discarding a
+        # perfectly good release_notes.md and telling the operator to
+        # "point body_path at" the exact file the job died before ever
+        # reading. A pre-release tag has no notes file yet by
+        # construction (cut before it exists), so it still needs this
+        # step's `## [Unreleased]` fallback.
+        if: steps.tag.outputs.is_prerelease == 'true'
         run: |
           VERSION="${{ steps.tag.outputs.core_version }}"
           IS_PRERELEASE="${{ steps.tag.outputs.is_prerelease }}"
@@ -221,22 +316,202 @@ jobs:
                   f"notes under that heading before tagging."
               )
 
-          print(prefix + body)
+          # GitHub's release body has a hard 125,000-char cap. The
+          # softprops/action-gh-release step below enforces it by
+          # silently substring()-ing the body to 124,999 chars right
+          # before the API call -- no warning, no log line, and the
+          # cut lands wherever the char count happens to fall, mid-word
+          # or mid-code-fence. A full CHANGELOG section already exceeds
+          # this routinely (v0.16.0-rc1's slice was 255,413 chars)
+          # because this step's output is a DRAFT body, replaced by
+          # hand with a lean summary right after the Release page
+          # exists (docs/release-policy.md step 7).
+          #
+          # Truncate at the last complete "### " CHANGELOG entry
+          # boundary below the limit -- but only when that boundary (a)
+          # keeps at least half the budget's worth of real content and
+          # (b) does not land inside an open ``` fence, which would cut
+          # mid-fence and swallow the truncation note itself inside the
+          # unclosed block. When neither holds -- e.g. the first entry
+          # alone already overruns the budget, so the only boundary
+          # below it is the one at the very start of the body -- fail
+          # the job instead of publishing a near-empty body: a
+          # maintainer writes the release notes by hand for that tag
+          # (`alp-lab:cutting-a-release` skill step 0) rather than have
+          # this step guess (alp-sdk#1492).
+          GITHUB_BODY_MAX = 125000
+          full_body = prefix + body
+          if len(full_body) >= GITHUB_BODY_MAX:
+              budget = GITHUB_BODY_MAX - 500  # headroom for the ~280-char note below
+
+              # Scan "### " entry boundaries and ``` fence markers together,
+              # in document order, so a boundary is only accepted while no
+              # fence is left open at that point. "### \S" (not bare
+              # "### ") also excludes a wrapped continuation line like
+              # "###   more text" that starts with the same four
+              # characters but is not a real heading.
+              fence_open = False
+              cut = -1
+              for m in re.finditer(r"\n(```|### \S)", full_body[:budget]):
+                  if m.group(1) == "```":
+                      fence_open = not fence_open
+                  elif not fence_open:
+                      cut = m.start()
+
+              if cut == -1 or cut < budget // 2:
+                  fail(
+                      f"CHANGELOG slice is {len(full_body)} chars -- over "
+                      f"GitHub's {GITHUB_BODY_MAX}-char release-body limit, "
+                      f"and no safe CHANGELOG entry boundary was found "
+                      f"below the limit to truncate at (the first entry "
+                      f"alone may already be oversized, or every '### ' "
+                      f"boundary sits inside a fenced code block). "
+                      f"Truncating anyway would publish a body with little "
+                      f"or no real content. Write a hand-crafted release "
+                      f"body for this tag instead and point body_path at "
+                      f"it (`alp-lab:cutting-a-release` skill step 0), or "
+                      f"split the oversized CHANGELOG entry before tagging."
+                  )
+
+              truncated_body = (
+                  full_body[:cut].rstrip()
+                  + "\n\n> ... truncated: the full CHANGELOG.md section for "
+                  "this release is over GitHub's 125,000-char release-body "
+                  "limit. See CHANGELOG.md for the rest. This is a draft "
+                  "body -- it should already have been replaced with a "
+                  "lean, hand-written summary (docs/release-policy.md "
+                  "step 7)."
+              )
+              print(
+                  f"::warning::CHANGELOG slice is {len(full_body)} chars -- "
+                  f"over GitHub's {GITHUB_BODY_MAX}-char release-body limit. "
+                  f"Truncated the DRAFT body to {len(truncated_body)} chars "
+                  f"at a CHANGELOG entry boundary instead of letting the "
+                  f"platform cut it mid-word. This is a draft -- replace "
+                  f"it with a lean hand-written summary now that the "
+                  f"Release page exists (docs/release-policy.md step 7).",
+                  file=sys.stderr,
+              )
+              full_body = truncated_body
+
+          print(full_body)
           PY
+
+      - name: Prefer the committed release-notes file for the release body
+        id: release_notes
+        # #1728: mechanises cutting-a-release's step 0. The CHANGELOG-slice
+        # step above is always a DRAFT for a final tag -- exhaustive by
+        # construction (a full [Unreleased] section runs tens to hundreds of
+        # thousands of characters, alp-sdk#1492) -- and used to require a
+        # maintainer to paste a lean summary in by hand right after the
+        # Release page appeared: `gh release edit v<N> --notes-file
+        # <lean.md>`, the old docs/release-policy.md step 8. That summary is
+        # now a file committed to the repo BEFORE the tag is pushed
+        # (docs/release-notes/v<CORE_VERSION>.md -- see
+        # docs/release-notes/README.md for the format and how to draft it),
+        # landing through the normal dev -> main flow alongside the bump
+        # commit, so this step picks it up automatically instead: no
+        # post-tag hand-edit step, and no window where the public Release
+        # page shows the raw CHANGELOG dump.
+        #
+        # A FINAL tag with no release-notes file fails the release, the same
+        # fail-loud-not-stub posture as the CHANGELOG-slice step above -- a
+        # missing lean body is exactly the gap that used to leave a
+        # six-figure-character CHANGELOG draft as the published body until a
+        # human noticed (alp-sdk#1492). A pre-release (`-rcN`) tag is exempt:
+        # it is cut before the file necessarily exists (same reasoning as
+        # the CHANGELOG-slice step's `## [Unreleased]` fallback above), so
+        # it keeps the draft body computed there.
+        #
+        # VERSION here is interpolated the same way the CHANGELOG step above
+        # does it: it's the VALIDATED core version (the "Parse tag" step
+        # already checked it matches metadata/sdk_version.yaml), not the raw
+        # pushed tag, so it carries none of the shell-metacharacter risk that
+        # makes TAG/ARCHIVE go through env: indirection elsewhere in this
+        # file (#1475).
+        run: |
+          VERSION="${{ steps.tag.outputs.core_version }}"
+          IS_PRERELEASE="${{ steps.tag.outputs.is_prerelease }}"
+          NOTES="docs/release-notes/v${VERSION}.md"
+
+          if [ -f "$NOTES" ]; then
+            # `-s` alone only catches a true zero-byte file -- a file
+            # containing just whitespace/blank lines passes `-s` (it has
+            # bytes) and would publish a blank Release body. Strip all
+            # whitespace and check what's left instead.
+            if [ -z "$(tr -d '[:space:]' < "$NOTES")" ]; then
+              echo "::error::$NOTES exists but is empty -- write the release body before tagging (see docs/release-notes/README.md)."
+              exit 1
+            fi
+            cp "$NOTES" release_notes.md
+          elif [ "$IS_PRERELEASE" != "true" ]; then
+            echo "::error::Missing $NOTES -- write the release-notes file before tagging (see docs/release-notes/README.md), then cut a new tag. The CHANGELOG slice is never the published body for a final release (alp-sdk#1492)."
+            exit 1
+          fi
+          # else: pre-release tag with no notes file yet -- keep the
+          # CHANGELOG-slice draft written by the previous step untouched.
+
+      - name: Generate alp.lock
+        # Not committed (#1576) -- generated here so it can be folded into
+        # the tarball below (a non-git consumer of the source release still
+        # gets the tamper-check property) and read by gen_sbom.py further
+        # down. Pure function of tracked files already in this checkout.
+        run: python3 scripts/west_commands/alp_lock.py --workspace .
 
       - name: Build source tarball
         id: archive
+        # TAG is the RAW pushed tag: `steps.tag.outputs.tag` is set from
+        # GITHUB_REF_NAME verbatim, and the core-version guard above only
+        # validates the part before the first `-` (`VERSION%%-*`), so the
+        # pre-release suffix reaches here unchecked.  git-check-ref-format
+        # permits `"`, `$`, backtick, `(`, `)` and `;` in a tag name, so a
+        # tag like `v0.6.0-$(id)` passes that guard and would be
+        # substituted into this block's SOURCE TEXT before bash parsed it.
+        # Route it through env: and read it as a quoted shell variable
+        # instead -- the value is then only ever data (#1475).
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          TAG="${{ steps.tag.outputs.tag }}"
           ARCHIVE="alp-sdk-${TAG}.tar.gz"
-          git archive --format=tar --prefix="alp-sdk-${TAG}/" HEAD | gzip -n > "$ARCHIVE"
+          TARFILE="alp-sdk-${TAG}.tar"
+          PREFIX_DIR="alp-sdk-${TAG}"
+          # git archive only knows tracked files, and alp.lock isn't one
+          # (#1576) -- build the tar from HEAD first, then append the
+          # generated alp.lock under the same release prefix before gzip.
+          #
+          # Stage the file under a real "$PREFIX_DIR/alp.lock" path instead
+          # of `tar --transform` with a `,`-delimited sed expression: TAG is
+          # the raw pushed tag (see the comment above), and a `,` in it
+          # breaks the transform's delimiter (`tar: Unknown flag in
+          # transform expression`) -- staging sidesteps that entirely.  Pin
+          # mtime/owner/group/mode so the member is byte-reproducible: `tar
+          # --append` otherwise stamps the runner's wall-clock mtime and
+          # uid/gid/uname/gname, which CHANGELOG.md's "byte-reproducible
+          # source tarball (`gzip -n`)" promise (#610 §7) requires it not
+          # do.
+          git archive --format=tar --prefix="${PREFIX_DIR}/" -o "$TARFILE" HEAD
+          mkdir -p "$PREFIX_DIR"
+          cp alp.lock "$PREFIX_DIR/alp.lock"
+          tar --append --file="$TARFILE" \
+              --owner=root:0 --group=root:0 --mode=644 \
+              --mtime="@$(git log -1 --format=%ct HEAD)" \
+              "$PREFIX_DIR/alp.lock"
+          rm -rf "$PREFIX_DIR"
+          gzip -n "$TARFILE"
           echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
           sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
           sha512sum "$ARCHIVE" > "$ARCHIVE.sha512"
 
       - name: Emit SBOM + build receipt
+        # Same raw tag, same treatment: a workflow expression is
+        # re-substituted into every run: block independently, so
+        # env-indirecting it in the step above does not protect this one
+        # (#1475).  Written without expression delimiters on purpose -- see
+        # the header note about empty expressions rejecting the whole file.
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          python3 scripts/gen_sbom.py --output "alp-sdk-${{ steps.tag.outputs.tag }}.cdx.json"
+          python3 scripts/gen_sbom.py --output "alp-sdk-${TAG}.cdx.json"
           # (receipt for a source release: the tarball is the sole image)
 
       - name: Emit base64-encoded digests for the provenance job
@@ -247,13 +522,19 @@ jobs:
         # produces one provenance subject; the tarball is the only
         # canonical release artefact (checksums + provenance bundle
         # are derived, not subjects in their own right).
+        #
+        # ARCHIVE is `alp-sdk-<raw tag>.tar.gz`, so it carries the same
+        # unvalidated pre-release suffix one step further; env-indirected
+        # for the same reason (#1475).
+        env:
+          ARCHIVE: ${{ steps.archive.outputs.archive }}
         run: |
-          ARCHIVE="${{ steps.archive.outputs.archive }}"
           HASH=$(sha256sum "$ARCHIVE" | base64 -w0)
           echo "hashes=$HASH" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3
+        timeout-minutes: 3
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.tag }}
@@ -270,12 +551,32 @@ jobs:
   # above cannot tamper with the attestation -- the source of L3.
   # Bundle is uploaded to the GitHub Release the build job created
   # via `upload-assets: true`.
+  #
+  # #1477: this job carries no `timeout-minutes` -- GitHub's schema for a
+  # job that calls a reusable workflow (`uses:` with no `runs-on:`) does
+  # not accept that key; only the CALLED workflow's own jobs can declare
+  # one, and this generator is not ours to add it to. Worst observed
+  # total wall time across 3 sampled release runs was 95s, well inside
+  # the isolated runner's own limits, so this is a real schema
+  # constraint, not a gap being waved through --
+  # tests/scripts/test_tier_a_workflow_step_timeouts.py exempts exactly
+  # this job shape (`uses:` present, `runs-on:` absent).
   provenance:
     needs: [build]
     permissions:
       actions: read       # needed to read the workflow trigger event
       id-token: write     # OIDC token for Sigstore signing
       contents: write     # write the attestation to the Release
+    # alp-sdk#1479: deliberately NOT SHA-pinned, unlike every other `uses:`
+    # in this repo. slsa-framework/slsa-github-generator's own README
+    # ("Referencing SLSA builders and generators") requires its builders
+    # and generators be referenced by tag as `@vX.Y.Z` so slsa-verifier can
+    # verify the ref of the trusted reusable workflow -- a hash pin is not
+    # supported (tracked upstream as slsa-verifier#12). The generator's
+    # `compile-generator` input also defaults to false here, meaning its
+    # binary-fetch step downloads a release asset at this ref, which MUST
+    # be a tag; a commit SHA breaks that fetch. Trust anchor for this one
+    # reference is the Sigstore-signed builder identity, not a SHA pin.
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
     with:
       base64-subjects: "${{ needs.build.outputs.hashes }}"

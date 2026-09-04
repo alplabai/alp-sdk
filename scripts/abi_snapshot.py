@@ -41,6 +41,19 @@ list of an enum; reordering, adding, removing, or retyping any entry
 changes both the list AND the parent `hash` (the hash is a fingerprint
 of the *complete* normalised declaration, body included).
 
+`--diff` reports a symbol whose removal is recorded in
+`docs/abi/removed-symbols.json` as `ALLOWED` instead of a bare
+`REMOVED` -- see `load_removed_allowlist()` and `diff()`'s docstring,
+and `docs/abi/README.md`'s "Recording an INTENTIONAL removal".
+
+`--diff` reports a symbol that disappeared from one header and
+reappeared under the same name/category/value in another as `MOVED`,
+not `REMOVED` + `ADDED` -- but only when the old header still
+`#include`s the new one in the CURRENT tree (see `build_include_graph`
+and `diff()`).  That reachability check reads today's headers off
+disk; it is intentionally NOT part of this file's persisted JSON
+schema, so `--output` keeps writing exactly what it always has.
+
 The parser is **deliberately simple** -- it walks the SDK's own
 declaration style, which is consistent across the headers (one decl per
 logical declaration, no macro-generated symbols, no template / generic
@@ -75,6 +88,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import posixpath
 import re
 import sys
 from pathlib import Path
@@ -83,8 +97,15 @@ from typing import Any
 REPO = Path(__file__).resolve().parent.parent
 INCLUDE_ROOT = REPO / "include" / "alp"
 SDK_VERSION_YAML = REPO / "metadata" / "sdk_version.yaml"
+ABI_DIR = REPO / "docs" / "abi"
+REMOVED_SYMBOLS_PATH = ABI_DIR / "removed-symbols.json"
 
-_SDK_VERSION_RE = re.compile(r"^version:\s*(\d+)\.(\d+)\.(\d+)\s*$", re.MULTILINE)
+# Trailing `(?:-[\w.]+)?` tolerates (and ignores) a SemVer pre-release
+# suffix (`0.16.0-rc1`, #1902) -- snapshots are keyed MAJOR.MINOR only, so
+# an rc's own suffix is irrelevant here; without it this regex's `\s*$`
+# anchor rejected the whole line and current_snapshot_version() below
+# silently returned None ("can't verify") for the entire rc window.
+_SDK_VERSION_RE = re.compile(r"^version:\s*(\d+)\.(\d+)\.(\d+)(?:-[\w.]+)?\s*$", re.MULTILINE)
 
 # ---------------------------------------------------------------------
 # Tokenisation helpers
@@ -97,6 +118,18 @@ _WS_RE = re.compile(r"\s+")
 
 class AbiParseError(ValueError):
     """A public declaration this script cannot classify."""
+
+
+class AbiAllowlistError(ValueError):
+    """`docs/abi/removed-symbols.json` is missing, malformed, or has an
+    entry missing a required field / naming an unknown category.
+
+    Always a hard error, never a silently-skipped entry: a bad entry
+    that got skipped would silently un-allowlist the removal it was
+    meant to explain -- turning one typo in a data file into a second,
+    opposite failure mode (a real, already-explained removal reading as
+    an unexplained `REMOVED` again) instead of a loud, obvious one.
+    """
 
 
 def strip_comments(src: str) -> str:
@@ -647,6 +680,53 @@ def current_snapshot_version(sdk_version_yaml: Path | None = None) -> str | None
     return f"v{m.group(1)}.{m.group(2)}"
 
 
+def last_released_snapshot(abi_dir: Path | None = None) -> Path | None:
+    """Return the newest `docs/abi/v*-snapshot.json` that ISN'T the
+    CURRENT one -- the same "last released, frozen" baseline
+    `.github/workflows/pr-generated-files.yml`'s "ABI freeze gate vs
+    the last released snapshot" step computes via
+    `ls docs/abi/v*-snapshot.json | sort -V | grep -v "${ABI_VERSION}" | tail -1`.
+
+    A hardcoded literal (`docs/abi/v0.15-snapshot.json`) goes stale on
+    every single release, the exact bug class issue #826 describes for
+    the CI step this mirrors: CURRENT is a moving target that advances
+    independently of whether a release tag has actually shipped (see
+    `docs/abi/README.md`'s "Versions on file" note -- `metadata/
+    sdk_version.yaml` can lag a real `vX.Y.0` tag by days), so any
+    caller that needs "the last released baseline" -- this script's own
+    `main()` doesn't; only test/tooling callers that want to reproduce
+    the freeze gate locally do -- must derive it fresh every time, the
+    same way the workflow step does, rather than naming a version that
+    was only ever correct on the day it was written.
+
+    Sorted by the numeric (MAJOR, MINOR) parsed out of each filename,
+    not lexicographic (`sort -V`'s semantics) -- `v0.9` must sort
+    before `v0.10`, which a plain string sort gets backwards.
+
+    Returns None if `abi_dir` has no snapshot other than CURRENT (e.g.
+    a fresh v0.1-only checkout, or CURRENT can't be derived at all) --
+    same "can't verify, don't block" contract as
+    `current_snapshot_version()`.
+    """
+    if abi_dir is None:
+        abi_dir = ABI_DIR
+    current = current_snapshot_version()
+
+    def _label(p: Path) -> str:
+        # "v0.16-snapshot.json" -> "v0.16"
+        return p.name.removesuffix("-snapshot.json")
+
+    def _sort_key(p: Path) -> tuple[int, int]:
+        major, minor = _label(p)[1:].split(".")
+        return (int(major), int(minor))
+
+    candidates = sorted(
+        (p for p in abi_dir.glob("v*-snapshot.json") if _label(p) != current),
+        key=_sort_key,
+    )
+    return candidates[-1] if candidates else None
+
+
 def _field_diff(
     header: str, sym: str, prev_rec: dict[str, Any], curr_rec: dict[str, Any]
 ) -> list[str]:
@@ -669,10 +749,317 @@ def _field_diff(
     return msgs
 
 
-def diff(prev: dict[str, Any], curr: dict[str, Any]) -> list[str]:
+# ---------------------------------------------------------------------
+# MOVED detection: one-hop #include graph of the CURRENT tree
+# ---------------------------------------------------------------------
+
+# `#include "target"` / `#include <target>`, matched against
+# comment-stripped text (same as `_DEFINE_RE`'s sibling passes).  Not
+# restricted to `alp/`-rooted targets here -- `_resolve_include` below
+# decides what a bare relative target resolves to; this regex only
+# extracts the raw text between the quotes/angle-brackets.
+_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"](?P<target>[^">]+)[>"]', re.MULTILINE)
+
+# Preprocessor conditional boundaries, needed by _unconditional_includes()
+# below.  Only the directive keyword matters -- the CONDITION is deliberately
+# never evaluated; see that function's docstring for why.
+_CPP_OPEN_RE  = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef)\b")
+_CPP_CLOSE_RE = re.compile(r"^\s*#\s*endif\b")
+# A classic `#ifndef FOO_H` / `#define FOO_H` include guard, i.e. the first
+# conditional in the file paired with an immediate #define of the same token.
+# Absent for a `#pragma once` header -- see _unconditional_includes().
+_GUARD_RE = re.compile(
+    r"^\s*#\s*ifndef\s+(?P<tok>\w+)\s*\n\s*#\s*define\s+(?P=tok)\b", re.MULTILINE
+)
+
+
+def _resolve_include(own_key: str, target: str) -> str:
+    """Resolve one `#include` target to the canonical `alp/...` key
+    used as a `headers` dict key elsewhere in this module.
+
+    This codebase's public headers cross-reference EACH OTHER by a
+    full `alp/...`-rooted path (`#include "alp/boards/..._routes.h"`,
+    `#include <alp/adc.h>`) -- that string already IS the canonical
+    key, no resolution needed.  A same-directory relative include
+    (`#include "cap_instance.h"` in `alp/cap.h`) is resolved against
+    `own_key`'s own directory instead, the way the C preprocessor
+    would.  The result isn't checked against the real header set here
+    -- a system/vendor header (`#include <stdint.h>`, `#include
+    "lvgl.h"`) resolves to some string just as readily; the caller
+    (`build_include_graph`) doesn't care, since a resolved string that
+    matches no real header key simply never satisfies a later
+    membership check.
+    """
+    if target.startswith("alp/"):
+        return target
+    base_dir = own_key.rsplit("/", 1)[0] if "/" in own_key else ""
+    joined = f"{base_dir}/{target}" if base_dir else target
+    return posixpath.normpath(joined)
+
+
+def _is_guard_open(lines: list[str], i: int, guard_tok: str) -> bool:
+    """True when `lines[i]` is the `#ifndef <guard_tok>` of the file's own
+    include guard -- i.e. immediately followed by `#define <guard_tok>`."""
+    if not re.match(rf"^\s*#\s*ifndef\s+{re.escape(guard_tok)}\s*$", lines[i]):
+        return False
+    nxt = lines[i + 1] if i + 1 < len(lines) else ""
+    return re.match(rf"^\s*#\s*define\s+{re.escape(guard_tok)}\b", nxt) is not None
+
+
+def _unconditional_includes(text: str) -> list[str]:
+    """The `#include` targets a consumer of this header gets in EVERY
+    configuration -- i.e. those outside any `#if`/`#ifdef`/`#ifndef`.
+
+    Why this filter exists, because removing it silently breaks an ABI
+    gate: `build_include_graph()` feeds `diff()`'s MOVED detection, which
+    downgrades a REMOVED+ADDED pair to MOVED when the old header still
+    reaches the new one.  A naive scan records an edge for an include
+    sitting inside a conditional arm that the real preprocessor would
+    NOT follow -- claiming reachability that does not exist.  That turns
+    a genuine ABI removal into a `MOVED` line, which the freeze gate in
+    .github/workflows/pr-generated-files.yml passes, and the gate whose
+    whole job is catching a silently-dropped symbol reports it safe.
+
+    Live example, not hypothetical: include/alp/board.h selects between
+    `alp/boards/alp_e1m_x_evk_routes.h` and
+    `alp/boards/alp_e1m_evk_routes.h` with a mutually exclusive
+    `#if defined(ALP_BOARD_E1M_X_EVK) / #elif defined(ALP_BOARD_E1M_EVK)
+    / #else #error`.  Counting both arms would let a symbol moved out of
+    board.h into either routes header read as MOVED, while every
+    consumer building the OTHER board really has lost it.
+
+    The CONDITION is never evaluated, only its presence.  "Is this
+    include unconditional?" is answerable from the text; "is this arm
+    taken?" is not, and guessing would rebuild the same differential one
+    level up.  So a conditional include simply never counts as
+    reachability -- the symbol stays REMOVED.  That is the safe
+    direction: a false REMOVED is noise a human resolves, a false MOVED
+    is a silent ABI break.
+
+    Depth 1 is the file's own `#ifndef ALP_FOO_H` include guard, which
+    every header in this tree has and which is not a real conditional.
+
+    @param text  Header source with comments already stripped.
+    @return      Include targets that are outside every conditional arm.
+    """
+    out: list[str] = []
+    depth = 0
+    # The file's own `#ifndef ALP_FOO_H` include guard wraps everything and
+    # is not a real conditional, so includes directly inside it still count.
+    # Detected rather than assumed to be depth 1: a header using `#pragma
+    # once`, or one with a top-level `#if` ABOVE its guard, would otherwise
+    # shift every real conditional down one level and silently re-open the
+    # false-MOVED hole this function exists to close.
+    guard_match = _GUARD_RE.search(text)
+    guard_tok = guard_match["tok"] if guard_match is not None else None
+    # Depth AT which the include guard sits, discovered while scanning
+    # rather than assumed: 0 for a `#pragma once` header (no guard), and
+    # not necessarily 1 for a guarded one either, since a header may open
+    # a top-level `#if` above its guard.
+    guard_depth = 0
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if _CPP_OPEN_RE.match(line):
+            depth += 1
+            if guard_tok is not None and _is_guard_open(lines, i, guard_tok):
+                guard_depth = depth
+            continue
+        if _CPP_CLOSE_RE.match(line):
+            depth = max(0, depth - 1)
+            continue
+        if depth > guard_depth:
+            continue
+        m = _INCLUDE_RE.match(line)
+        if m is not None:
+            out.append(m["target"])
+    return out
+
+
+def build_include_graph(include_root: Path) -> dict[str, list[str]]:
+    """One-hop UNCONDITIONAL `#include` edges between the headers this
+    script walks, read straight off today's disk -- the CURRENT tree,
+    not anything persisted in a snapshot.  An include inside a
+    conditional arm is deliberately excluded and therefore never counts
+    as reachability; see _unconditional_includes() for why that is a
+    correctness requirement and not a simplification.  Used only by `diff()`'s MOVED detection:
+    a symbol relocated from header A to header B is a real ABI break
+    UNLESS a consumer `#include`-ing A today still reaches B, and that
+    can only be answered by the live tree -- the OLD snapshot predates
+    the move, and the NEW one doesn't carry `#include` info in its
+    schema at all.  Keeping that info out of the persisted JSON is
+    deliberate: it means `--output` keeps writing exactly the same
+    bytes as before this feature, so `pr-generated-files.yml`'s
+    "generated files in sync" byte-diff gate against a committed
+    `docs/abi/*.json` is unaffected by adding this check.
+
+    # ponytail: one-hop only, not transitive.  Every real header split
+    # in this tree (dac.h out of adc.h in v0.8.0, the *_routes.h
+    # split) is a direct #include from the old file straight into the
+    # new one -- no intermediate header in between.  If a future split
+    # ever routes through one, upgrade this to a BFS over the same
+    # edge dict; diff()'s reachability check (`a_header in
+    # include_graph.get(r_header, [])`) is the only caller and would
+    # need to become a graph walk, not a rewrite.
+    """
+    graph: dict[str, list[str]] = {}
+    for path in sorted(include_root.rglob("*.h")):
+        rel = path.relative_to(include_root.parent).as_posix()
+        text = strip_comments(path.read_text(encoding="utf-8"))
+        edges = {_resolve_include(rel, target) for target in _unconditional_includes(text)}
+        graph[rel] = sorted(edges)
+    return graph
+
+
+_REMOVED_CATEGORIES = ("function", "typedef", "macro", "variable")
+_REMOVED_REQUIRED_KEYS = (
+    "header",
+    "category",
+    "symbol",
+    "release",
+    "issue",
+    "reason",
+    "replacement",
+)
+
+
+def load_removed_allowlist(path: Path) -> dict[tuple[str, str, str], dict[str, Any]]:
+    """Load `docs/abi/removed-symbols.json` -- the record of INTENTIONAL
+    public-symbol removals `diff()` must report as `ALLOWED`, not a bare
+    unexplained `REMOVED` (see `diff()`'s docstring and
+    `docs/abi/README.md`'s "Recording an INTENTIONAL removal").
+
+    A missing file returns `{}` -- no removal has been allowlisted yet
+    is a normal, common state (every commit before #1622), not an
+    error.  A file that EXISTS but is malformed -- not valid JSON, not
+    the documented `{"removed": [...]}` shape, an entry missing a
+    required key, an unknown `category`, or a `replacement` that is
+    neither a non-empty string nor `null` -- always raises
+    `AbiAllowlistError` rather than skipping the bad entry; see that
+    class's docstring for why silently skipping would be worse than
+    this script simply crashing.
+
+    @param path  `docs/abi/removed-symbols.json` (`REMOVED_SYMBOLS_PATH`).
+    @return      `{(header, category, symbol): entry}`, keyed on the
+                 exact triple `diff()` matches a REMOVED entry against
+                 -- allowlisting one symbol never suppresses a
+                 same-named removal in a different header or category.
+    """
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise AbiAllowlistError(f"{path}: cannot read/parse: {exc}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("removed"), list):
+        raise AbiAllowlistError(
+            f"{path}: expected a top-level JSON object with a 'removed' array"
+        )
+
+    out: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for i, entry in enumerate(payload["removed"]):
+        if not isinstance(entry, dict):
+            raise AbiAllowlistError(f"{path}: removed[{i}] is not an object")
+        missing = [k for k in _REMOVED_REQUIRED_KEYS if k not in entry]
+        if missing:
+            raise AbiAllowlistError(
+                f"{path}: removed[{i}] missing required key(s): {missing}"
+            )
+        if entry["category"] not in _REMOVED_CATEGORIES:
+            raise AbiAllowlistError(
+                f"{path}: removed[{i}].category is {entry['category']!r}; "
+                f"expected one of {_REMOVED_CATEGORIES}"
+            )
+        for key in ("header", "category", "symbol", "release", "reason"):
+            if not isinstance(entry[key], str) or not entry[key].strip():
+                raise AbiAllowlistError(
+                    f"{path}: removed[{i}].{key} must be a non-empty string"
+                )
+        if not isinstance(entry["issue"], int) or isinstance(entry["issue"], bool):
+            raise AbiAllowlistError(f"{path}: removed[{i}].issue must be an integer")
+        replacement = entry["replacement"]
+        if replacement is not None and (
+            not isinstance(replacement, str) or not replacement.strip()
+        ):
+            raise AbiAllowlistError(
+                f"{path}: removed[{i}].replacement must be a non-empty string "
+                f"or null (explicitly: no replacement exists)"
+            )
+        key3 = (entry["header"], entry["category"], entry["symbol"])
+        if key3 in out:
+            raise AbiAllowlistError(f"{path}: duplicate allowlist entry for {key3}")
+        out[key3] = entry
+    return out
+
+
+def diff(
+    prev: dict[str, Any],
+    curr: dict[str, Any],
+    include_graph: dict[str, list[str]] | None = None,
+    removed_allowlist: dict[tuple[str, str, str], dict[str, Any]] | None = None,
+) -> list[str]:
+    """Per-symbol diff between two snapshots.
+
+    `include_graph` (see `build_include_graph`) is what lets a header
+    SPLIT read as `MOVED` instead of `REMOVED` + `ADDED`: when the same
+    symbol name disappears from header A and reappears in header B, in
+    the same category, with an IDENTICAL hash (value/signature
+    unchanged -- a move that ALSO changes the value is still reported
+    as a plain REMOVED + ADDED, never collapsed into MOVED), and A
+    still `#include`s B in the CURRENT tree, a consumer of A sees
+    exactly what it saw before.  `include_graph` defaults to `{}` (no
+    edges), so a caller that doesn't pass one -- every caller before
+    this feature existed -- gets the old REMOVED+ADDED behaviour,
+    unchanged.
+
+    `MOVED` must never satisfy `m.startswith(("REMOVED", "CHANGED"))`
+    (the exit-code check in `main()` below) and must never match the
+    freeze gate's `grep -q '^  REMOVED '`
+    (`.github/workflows/pr-generated-files.yml`) -- it is not a
+    removal.
+
+    `removed_allowlist` (see `load_removed_allowlist`) is what lets a
+    documented, INTENTIONAL removal read as `ALLOWED` instead of a bare
+    `REMOVED`: a REMOVED entry whose exact `(header, category, symbol)`
+    triple has a matching entry is reported as
+
+        ALLOWED {category} {header}::{symbol} (intentional removal, #{issue} -> {replacement})
+
+    (`{replacement}` reads `no replacement` when the entry's
+    `replacement` field is `null`).  Reported, not dropped from the
+    output entirely -- same reasoning as `MOVED`: a reviewer scanning
+    the diff should see every symbol that stopped existing, whether
+    that needs their attention (`REMOVED`) or is already explained
+    (`ALLOWED`).  `removed_allowlist` defaults to `{}` (no entries), so
+    a caller that doesn't pass one gets the old REMOVED-always
+    behaviour, unchanged -- same compatibility guarantee as
+    `include_graph`.
+
+    `ALLOWED`, like `MOVED`, must never satisfy
+    `m.startswith(("REMOVED", "CHANGED"))` and must never match
+    `grep -q '^  REMOVED '` -- it is a REMOVED that is already
+    explained, not one that still needs review.  The match is checked
+    ONLY after a candidate fails to pair as `MOVED`: a removal that is
+    both a header-split move AND happens to have an allowlist entry
+    reports as `MOVED` (nothing was actually lost), never `ALLOWED`.
+    """
+    if include_graph is None:
+        include_graph = {}
+    if removed_allowlist is None:
+        removed_allowlist = {}
+
     msgs: list[str] = []
     prev_h = prev.get("headers", {})
     curr_h = curr.get("headers", {})
+
+    # Deferred instead of emitted inline: a REMOVED entry in header A
+    # may turn out to be a MOVED once matched against an ADDED entry in
+    # some other header B, so both lists are collected in full before
+    # either is turned into a message.  CHANGED (same header, same
+    # symbol, different hash) is unaffected by any of this and is
+    # still emitted directly, in the original per-header/per-category
+    # traversal order.
+    removed: list[tuple[str, str, str, str]] = []  # (header, category, sym, hash)
+    added: list[tuple[str, str, str, str]] = []
 
     for name in sorted(set(prev_h) | set(curr_h)):
         if name not in curr_h:
@@ -686,14 +1073,118 @@ def diff(prev: dict[str, Any], curr: dict[str, Any]) -> list[str]:
             c = curr_h[name].get(category, {})
             for sym in sorted(set(p) | set(c)):
                 if sym not in c:
-                    msgs.append(f"REMOVED {category[:-1]} {name}::{sym}")
+                    removed.append((name, category, sym, p[sym]["hash"]))
                 elif sym not in p:
-                    msgs.append(f"ADDED   {category[:-1]} {name}::{sym}")
+                    added.append((name, category, sym, c[sym]["hash"]))
                 elif p[sym]["hash"] != c[sym]["hash"]:
                     msgs.append(f"CHANGED {category[:-1]} {name}::{sym}")
                     if category == "typedefs":
                         msgs.extend(_field_diff(name, sym, p[sym], c[sym]))
+
+    # Pair each REMOVED entry with an ADDED entry of the same
+    # category/symbol/hash where the OLD header still #includes the
+    # NEW one today.  Every hash-matching candidate is tried, not just
+    # the first: a same-name/same-value symbol that happens to reappear
+    # in some UNRELATED, unreachable header first must not shadow a
+    # later candidate that genuinely is reachable -- and must not get
+    # consumed either way, since it was never a real match.
+    unmatched_added = list(added)
+    for r_header, r_cat, r_sym, r_hash in removed:
+        match_idx = None
+        for i, (a_header, a_cat, a_sym, a_hash) in enumerate(unmatched_added):
+            if (
+                a_cat == r_cat
+                and a_sym == r_sym
+                and a_hash == r_hash
+                and a_header in include_graph.get(r_header, [])
+            ):
+                match_idx = i
+                break
+        if match_idx is not None:
+            a_header = unmatched_added.pop(match_idx)[0]
+            msgs.append(f"MOVED   {r_cat[:-1]} {r_sym}: {r_header} -> {a_header}")
+            continue
+        allow_entry = removed_allowlist.get((r_header, r_cat[:-1], r_sym))
+        if allow_entry is not None:
+            replacement = allow_entry["replacement"] or "no replacement"
+            msgs.append(
+                f"ALLOWED {r_cat[:-1]} {r_header}::{r_sym} "
+                f"(intentional removal, #{allow_entry['issue']} -> {replacement})"
+            )
+        else:
+            msgs.append(f"REMOVED {r_cat[:-1]} {r_header}::{r_sym}")
+
+    for a_header, a_cat, a_sym, _a_hash in unmatched_added:
+        msgs.append(f"ADDED   {a_cat[:-1]} {a_header}::{a_sym}")
+
     return msgs
+
+
+def _only_generated_date_differs(existing_path: Path, new_snapshot: dict[str, Any]) -> bool:
+    """True if `existing_path` holds a real ISO `generated` date AND
+    re-serializing `new_snapshot` with that date spliced in reproduces
+    `existing_path` byte-for-byte -- i.e. writing it for real would
+    touch nothing but that one field.
+
+    Every full `scripts/test-all.sh` run regenerates the current
+    snapshot unconditionally, so with no such check a same-day-clean
+    rerun still stamped today's date and dirtied the file (issue
+    #1232) -- training reviewers to expect (and ignore) an ABI-diff-
+    free date churn on this exact file, which is precisely the wrong
+    habit for a file whose only purpose is to be diffed for real ABI
+    drift.
+
+    Compares the CANONICAL bytes this script would write, not parsed
+    dicts: a dict compare would treat any semantics-preserving
+    corruption of the file on disk (hand-reindented, keys unsorted) as
+    "unchanged" and leave it in place forever, invisible to the
+    "generated files in sync" gate -- the real v0.15 snapshot
+    reindented to indent=4 is 599,988 bytes against the canonical
+    479,576 the dict would call equal.  A byte compare rejects it,
+    because it doesn't serialize back to the exact text this script
+    writes.
+
+    `generated` is spliced from `existing` into `patched` before that
+    comparison (see below), so this guard cannot detect corruption
+    confined to that one field by a byte compare alone -- it validates
+    `existing["generated"]` is a real ISO date first instead, so a
+    hand-edited `"generated": "NOT-A-DATE"` fails that check and falls
+    through to a real write, which overwrites it with a fresh valid
+    date rather than leaving it spliced into every future no-op rerun.
+
+    Returns False (caller writes as normal) for a missing existing
+    file, an undecodable or unparsable (non-UTF-8, non-JSON) one, or a
+    JSON-valid file that isn't an object -- none of those can be
+    spliced or compared. An invalid `generated` field (not a real ISO
+    date) COULD still be spliced and byte-compared, but is refused by
+    design: splicing a corrupt value through would let it survive
+    every future no-op rerun instead of being replaced by a fresh
+    valid one. All four cases fall through to the real write path
+    rather than a silent no-op.
+    """
+    try:
+        # read_bytes().decode(), not read_text(): read_text()'s universal-
+        # newline mode collapses CRLF to LF, which would compare a CRLF
+        # copy of this file as byte-identical to the canonical LF text
+        # the write side (write_text(..., newline="")) actually produces.
+        existing_text = existing_path.read_bytes().decode("utf-8")
+        existing = json.loads(existing_text)
+    except (OSError, ValueError):
+        # ValueError covers json.JSONDecodeError (a subclass) and the
+        # UnicodeDecodeError .decode("utf-8") raises on a non-UTF-8
+        # existing file (also a ValueError subclass) -- both are an
+        # unparsable existing file, so both fall through to the real
+        # write path instead of crashing `--output`.
+        return False
+    if not isinstance(existing, dict):
+        return False
+    existing_generated = existing.get("generated")
+    try:
+        dt.date.fromisoformat(existing_generated)
+    except (TypeError, ValueError):
+        return False
+    patched = dict(new_snapshot, generated=existing_generated)
+    return json.dumps(patched, indent=2, sort_keys=True) + "\n" == existing_text
 
 
 def main() -> int:
@@ -793,7 +1284,17 @@ def main() -> int:
             # e.g. release.yml, has no `tee`/grep step to tell them apart).
             print(f"error: cannot parse {args.diff}: {exc}", file=sys.stderr)
             return 2
-        msgs = diff(prior, snapshot)
+        try:
+            removed_allowlist = load_removed_allowlist(REMOVED_SYMBOLS_PATH)
+        except AbiAllowlistError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        msgs = diff(
+            prior,
+            snapshot,
+            include_graph=build_include_graph(INCLUDE_ROOT),
+            removed_allowlist=removed_allowlist,
+        )
         if not msgs:
             print(f"ABI unchanged vs {args.diff}.")
             return 0
@@ -805,12 +1306,19 @@ def main() -> int:
     payload = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        # newline="": git normalizes CRLF back to LF on `git add`, so a
-        # plain write_text() here never reaches a commit or reds CI --
-        # it just leaves this file whole-file-dirty in every working
-        # tree on Windows, burying the one real line that changed.
-        args.output.write_text(payload, encoding="utf-8", newline="")
-        print(f"wrote {args.output} ({len(snapshot['headers'])} headers)")
+        if args.output.exists() and _only_generated_date_differs(args.output, snapshot):
+            # Substance identical to what's already committed -- leave
+            # the file untouched so `generated` keeps meaning "when the
+            # ABI last actually changed", not "when someone last ran
+            # the gate" (#1232).
+            print(f"{args.output} unchanged (ABI identical; generated date left as-is)")
+        else:
+            # newline="": git normalizes CRLF back to LF on `git add`, so a
+            # plain write_text() here never reaches a commit or reds CI --
+            # it just leaves this file whole-file-dirty in every working
+            # tree on Windows, burying the one real line that changed.
+            args.output.write_text(payload, encoding="utf-8", newline="")
+            print(f"wrote {args.output} ({len(snapshot['headers'])} headers)")
     else:
         sys.stdout.write(payload)
     return 0

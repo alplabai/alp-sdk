@@ -5,7 +5,7 @@ Real-silicon verification harness.  The layout is two-tier:
 | Directory                          | Role                                                |
 |------------------------------------|-----------------------------------------------------|
 | [`_common/`](_common/)             | Portable smoke specs that work on every E1M SoM.  One per peripheral example under `examples/`. |
-| `<sku>-<board>/`                 | Per-board directory.  Carries a `_runner.yaml` (board target, serial port, flash method) and ANY SoM-specific specs that don't apply to other SoMs. |
+| `<sku>-<board>/`                 | Per-board directory.  Carries a `_runner.yaml` (board target, flash method -- no serial port default, see below) and ANY SoM-specific specs that don't apply to other SoMs. |
 
 A runner script ([`run_smoke.py`](run_smoke.py)) reads the specs
 and drives the hardware.  When invoked against a board directory
@@ -34,7 +34,7 @@ HiL spec under this tree passes against the matching board.
 | **SoM**       | One supported per smoke-spec directory (today: AEN801)      |
 | **Board**   | The E1M EVK that matches (today: E1M-EVK -- 35x35 reference)|
 | **Debug**     | SEGGER J-Link or Alif's recommended SWD adapter on J2       |
-| **Serial**    | USB-C from the EVK exposes the UART (Linux: `/dev/ttyACM0`) |
+| **Serial**    | USB-C from the EVK exposes the UART, but the device node it lands on is bench- and session-specific -- see "Serial port" below; never assume `/dev/ttyACM0` (on the AEN801 bench that's the DPS-150 power supply, not a console) |
 | **Power**     | 12 V barrel jack OR USB-C from the runner host              |
 | **Toolchain** | Zephyr workspace at `$ZEPHYR_BASE` + the per-SoM board file |
 
@@ -45,6 +45,24 @@ no external module needed.  SoMs marked "pending" in the table below
 have no board dir yet; point the runner at your own DT overlay via
 `--board` and `--west-args` in the meantime (the runner is
 target-agnostic).
+
+### Serial port
+
+No spec or `_runner.yaml` in this tree hardcodes a serial device --
+resolve it at run time with `--serial-port <path>` or the
+`ALP_HIL_SERIAL_PORT` env var (`run_smoke.py --help`).  Two reasons a
+fixed default would be actively wrong, not just imprecise:
+
+- On the AEN801 bench, `/dev/ttyACM0` is the **DPS-150 programmable
+  power supply**, not a console.  The app console is UART5; the
+  SE-UART is a separate device again.
+- The bench fronts both with **labgrid**, which allocates a ser2net
+  port fresh on reservation *acquire* -- it differs every session, so
+  even the correct raw `/dev/ttyUSB*` path from last week's session
+  won't be this week's.
+
+See [`docs/ci/HW-IN-LOOP.md`](../../docs/ci/HW-IN-LOOP.md) for the
+full bench-run contract.
 
 ---
 
@@ -62,8 +80,9 @@ python3 tests/hil/run_smoke.py --validate tests/hil/aen801-evk/
 # running them.  Useful to confirm board targets + paths.
 python3 tests/hil/run_smoke.py --dry-run tests/hil/aen801-evk/
 
-# Real run.  Builds, flashes, captures serial, asserts.
-python3 tests/hil/run_smoke.py tests/hil/aen801-evk/
+# Real run.  Builds, flashes, captures serial, asserts.  --serial-port
+# (or ALP_HIL_SERIAL_PORT) is required here -- see "Serial port" below.
+python3 tests/hil/run_smoke.py --serial-port "$ALP_HIL_SERIAL_PORT" tests/hil/aen801-evk/
 
 # V2N101 mode -- pulls in 12 portable specs + 2 V2N-specific ones
 # (GD32 bridge ping, on-module TMP112).
@@ -144,7 +163,6 @@ Per-directory defaults live in `<sku>-<board>/_runner.yaml`:
 ```yaml
 schema_version: 1
 board:    alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
-serial_port:  /dev/ttyACM0
 flash_method: westflash         # or pyocd-flash
 defaults:
   serial:
@@ -152,15 +170,19 @@ defaults:
     duration_s: 15
 ```
 
-The runner merges per-spec values on top of these.
+The runner merges per-spec values on top of these.  A `serial_port:`
+key is accepted here too if you want to pin one for your own bench,
+but the shipped `_runner.yaml` files deliberately omit it -- see
+"Serial port" above.
 
 ---
 
 ## What this tree does NOT do
 
-- **No CI runner installation.**  The runner lives at
-  `/opt/alp-hil/` on the self-hosted runner host; setup is documented
-  in [`docs/ci/HW-IN-LOOP.md`](../../docs/ci/HW-IN-LOOP.md).
+- **No CI-driven runs.**  CI does not drive the bench.  This runner is
+  invoked by hand, under a held labgrid reservation; the bench-run
+  contract (hardware, serial-port resolution, the capture helper) is
+  documented in [`docs/ci/HW-IN-LOOP.md`](../../docs/ci/HW-IN-LOOP.md).
 - **No fixture model.**  Specs that need external probes (logic
   analyser for I²S tone capture, USB sound card for audio loopback,
   external relay for power cycling) are tracked under future
@@ -176,16 +198,20 @@ The runner merges per-spec values on top of these.
 ## Adding a new SoM
 
 1. Create `tests/hil/<sku>-<board>/_runner.yaml` with the
-   per-directory defaults (board target, serial port, flash method).
-   The 12 portable specs in `_common/` apply automatically.
+   per-directory defaults (board target, flash method -- no
+   `serial_port:`, see "Serial port" above).  The 12 portable specs in
+   `_common/` apply automatically.
 2. Add SoM-specific YAML specs alongside `_runner.yaml` for the
    peripherals only that SoM has (e.g. V2N's GD32 supervisor bridge,
    V2M's DEEPX NPU bring-up, AEN's CC3501E Wi-Fi).
 3. Run `python tests/hil/run_smoke.py --validate tests/hil/<sku>-<board>/`
    to confirm every spec parses against the board target.
-4. Add the runner label (`hil-<sku>`) to the matching
-   `.github/workflows/nightly-<sku>-hil.yml`.
-5. Once a HiL run passes, flip the relevant rows in
+4. A person with bench access runs it for real under a held labgrid
+   reservation (`--serial-port`/`ALP_HIL_SERIAL_PORT`, per
+   [`docs/ci/HW-IN-LOOP.md`](../../docs/ci/HW-IN-LOOP.md)) and attaches
+   the result to the PR that adds the board -- there is no CI runner
+   label to register any more.
+5. Once that bench run passes, flip the relevant rows in
    `docs/test-plan.md` from `⏳` to `✅`.
 
 ## Adding a new portable peripheral
@@ -216,13 +242,13 @@ real silicon -- not just that the schema accepts the block.
 | `power_sleep_wake.yaml`       | `cores.<id>.power:`         | PM subsystem activates; device enters declared `sleep_mode`; wakes from a declared `wakeup_sources:` entry. |
 | `diagnostics_modules.yaml`    | `diagnostics.modules:`      | Per-module log levels filter at runtime -- `alp_iot: debug` -> `<dbg>` lines appear; `alp_security: off` -> module silent. |
 
-The block-coverage specs are exercised in CI by the same matrix as
-the peripheral specs (`.github/workflows/nightly-aen-hil.yml`'s
-"HiL smoke" step).  An adjacent host-side test --
+The block-coverage specs run in the same explicitly-invoked bench pass
+as the peripheral specs (see [`docs/ci/HW-IN-LOOP.md`](../../docs/ci/HW-IN-LOOP.md)
+-- CI does not drive this).  An adjacent host-side test --
 `tests/scripts/test_hil_blocks_coverage.py` -- cross-checks each
 spec against the orchestrator's emit code so a schema field that
-the emit silently drops fails CI on a normal machine, before the
-HiL runner ever gets near it.
+the emit silently drops fails on a normal CI machine, before anyone
+ever gets to the bench with it.
 
 ### Optional spec flag: `pending_hardware_support:`
 

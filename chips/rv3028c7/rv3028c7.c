@@ -121,7 +121,8 @@ alp_status_t rv3028c7_init(rv3028c7_t *ctx, alp_i2c_t *bus)
      * init -- they can read it via rv3028_read_status() once the
      * v0.3.x diagnostic helpers land. */
 	if (status & RV3028_STATUS_PORF) {
-		(void)rv3028_write_reg(ctx, RV3028_REG_STATUS, status & ~RV3028_STATUS_PORF);
+		s = rv3028_write_reg(ctx, RV3028_REG_STATUS, status & ~RV3028_STATUS_PORF);
+		if (s != ALP_OK) return s;
 	}
 
 	/* Force 24-hour mode (bit 6 of CONTROL_2). */
@@ -267,6 +268,15 @@ alp_status_t rv3028c7_register_handler(rv3028c7_t            *ctx,
 	return ALP_OK;
 }
 
+/* Dispatchable STATUS bits.  Bit 7 (EEBUSY) is a read-only "EEPROM write
+ * in flight" indicator, not an event, and never takes part in an
+ * acknowledge write.
+ *
+ * Passes one rv3028c7_dispatch_irq call will make before it stops
+ * draining STATUS -- see the drain comment inside the function. */
+#define RV3028_STATUS_FLAGS        0x7Fu
+#define RV3028_DISPATCH_MAX_PASSES 4u
+
 alp_status_t rv3028c7_dispatch_irq(rv3028c7_t *ctx, uint8_t *status_seen)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
@@ -276,21 +286,55 @@ alp_status_t rv3028c7_dispatch_irq(rv3028c7_t *ctx, uint8_t *status_seen)
 	if (s != ALP_OK) return s;
 	if (status_seen != NULL) *status_seen = status;
 
-	if (status == 0) return ALP_OK;
+	status &= RV3028_STATUS_FLAGS;
 
-	/* Dispatch handlers for each set source flag. */
-	for (unsigned i = 0; i < RV3028C7_SRC_COUNT; ++i) {
-		if ((status & src_tab[i].status_bit) == 0) continue;
-		rv3028c7_src_handler_t cb = (rv3028c7_src_handler_t)ctx->src_handler[i];
-		if (cb != NULL) cb(ctx, (rv3028c7_src_t)i, ctx->src_user[i]);
+	/* Drain inside this call instead of trusting a further INT.  The
+     * flags preserved by the acknowledge below keep the chip's
+     * open-drain INT pin held low, so a host that latched on the
+     * falling edge sees no new edge and would never call back in for
+     * them.  Bounded, so a source re-arming underneath us (a 1 s
+     * PERIODIC tick, a chattering EVI) cannot pin the bottom half
+     * here: the leftovers stay latched, INT stays low, and the next
+     * dispatch picks them up. */
+	for (unsigned pass = 0; status != 0u && pass < RV3028_DISPATCH_MAX_PASSES; ++pass) {
+		/* Dispatch handlers for each set source flag. */
+		for (unsigned i = 0; i < RV3028C7_SRC_COUNT; ++i) {
+			if ((status & src_tab[i].status_bit) == 0) continue;
+			rv3028c7_src_handler_t cb = (rv3028c7_src_handler_t)ctx->src_handler[i];
+			if (cb != NULL) cb(ctx, (rv3028c7_src_t)i, ctx->src_user[i]);
+		}
+
+		/* Acknowledge exactly the flags dispatched above and nothing
+         * else.  Each handler does its own I2C work, so the chip has
+         * had several bus transactions in which to latch a fresh
+         * flag; a flat write of 0x00 clears those late arrivals too,
+         * and ALARM / EXT_EVENT / BSF are one-shot -- no "next event"
+         * re-latches them, so the event is gone with INT de-asserted
+         * behind it and no error anywhere.
+         *
+         * Re-read instead of writing ~status: the flag bits are
+         * plain R/W, so writing a 1 into a position the chip reads
+         * as 0 manufactures an event.  Writing back (fresh & ~status)
+         * puts a 1 only where the chip just showed us one.  What
+         * remains is the single transaction between this read and the
+         * write -- the part has no atomic acknowledge, so that is the
+         * floor for this register. */
+		uint8_t fresh = 0;
+		s             = rv3028_read(ctx, RV3028_REG_STATUS, &fresh, 1);
+		if (s != ALP_OK) return s;
+		fresh &= RV3028_STATUS_FLAGS;
+
+		status = (uint8_t)(fresh & ~status); /* latched while handlers ran */
+		s      = rv3028_write_reg(ctx, RV3028_REG_STATUS, status);
+		if (s != ALP_OK) return s;
+
+		/* status_seen reports every flag this call found latched, so a
+         * diagnostic log shows the late arrival too, not just the
+         * first read. */
+		if (status_seen != NULL) *status_seen |= status;
 	}
 
-	/* Write-back 0 to acknowledge every fired flag.  STATUS is
-     * write-0-to-clear; any flag that fires after our read will set
-     * itself again on the next event and trigger another INT, so the
-     * race between read and write is safe.  Bit 7 is reserved -- write
-     * 0. */
-	return rv3028_write_reg(ctx, RV3028_REG_STATUS, 0x00);
+	return ALP_OK;
 }
 
 alp_status_t rv3028c7_set_int_enable(rv3028c7_t *ctx, rv3028c7_src_t src, bool enable)

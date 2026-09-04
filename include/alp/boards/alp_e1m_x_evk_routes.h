@@ -117,6 +117,36 @@ extern "C" {
 #define XEVK_ENC_ROTARY ALP_E1M_X_ENC0  /**< PEC12R-4222F rotary encoder: ENC0_X = A phase, ENC0_Y = B phase; push switch on XEVK_PIN_ENCODER_SW (E1M_X_GPIO_IO28).  ENC1-3 pads are broken out but unpopulated. */
 
 /* ------------------------------------------------------------------ */
+/* On-board I2C device addresses (from `i2c_devices:`) */
+/* ------------------------------------------------------------------ */
+
+#define XEVK_I2C_ADDR_BMI323       0x68u  /**< U-IMU BMI323 6-axis IMU (alternate IMU). */
+#define XEVK_I2C_ADDR_ICM42670     0x69u  /**< Canonical primary IMU (ICM-42670). */
+#define XEVK_I2C_ADDR_BMP581       0x47u  /**< BMP581 barometer (SDO->VIO; 0x46 if SDO->GND). */
+#define XEVK_I2C_ADDR_TCAL9538     0x72u  /**< TCAL9538 I/O expander. */
+#define XEVK_I2C_ADDR_EEPROM       0x50u  /**< Board ID EEPROM (24-series). */
+#define XEVK_I2C_ADDR_INA236_3V3   0x40u  /**< U21 INA236A, +3V3 rail   (20 mOhm shunt, 4.0 A max). A0 = GND. */
+#define XEVK_I2C_ADDR_INA236_1V8   0x41u  /**< U31 INA236A, +1V8 rail   (20 mOhm shunt, 4.0 A max). A0 = V+. */
+#define XEVK_I2C_ADDR_INA236_VCAM2 0x48u  /**< U32 INA236B, +VCAM2 rail (50 mOhm shunt, 1.6 A max). A0 = GND. */
+#define XEVK_I2C_ADDR_INA236_VCAM3 0x49u  /**< U34 INA236B, +VCAM3 rail (50 mOhm shunt, 1.6 A max). A0 = V+. */
+#define XEVK_I2C_ADDR_INA236_5V    0x4Au  /**< U30 INA236B, +5V rail    (20 mOhm shunt, 4.0 A max). A0 = SDA. */
+
+/* ------------------------------------------------------------------ */
+/* INA236 calibration constants (from `i2c_devices[].calibration`) */
+/* ------------------------------------------------------------------ */
+
+#define XEVK_INA236_SHUNT_3V3_OHMS   0.020f  /**< Shunt for XEVK_I2C_ADDR_INA236_3V3. */
+#define XEVK_INA236_MAX_3V3_A        4.0f  /**< Max current for XEVK_I2C_ADDR_INA236_3V3. */
+#define XEVK_INA236_SHUNT_1V8_OHMS   0.020f  /**< Shunt for XEVK_I2C_ADDR_INA236_1V8. */
+#define XEVK_INA236_MAX_1V8_A        4.0f  /**< Max current for XEVK_I2C_ADDR_INA236_1V8. */
+#define XEVK_INA236_SHUNT_VCAM2_OHMS 0.050f  /**< Shunt for XEVK_I2C_ADDR_INA236_VCAM2. */
+#define XEVK_INA236_MAX_VCAM2_A      1.6f  /**< Max current for XEVK_I2C_ADDR_INA236_VCAM2. */
+#define XEVK_INA236_SHUNT_VCAM3_OHMS 0.050f  /**< Shunt for XEVK_I2C_ADDR_INA236_VCAM3. */
+#define XEVK_INA236_MAX_VCAM3_A      1.6f  /**< Max current for XEVK_I2C_ADDR_INA236_VCAM3. */
+#define XEVK_INA236_SHUNT_5V_OHMS    0.020f  /**< Shunt for XEVK_I2C_ADDR_INA236_5V. */
+#define XEVK_INA236_MAX_5V_A         4.0f  /**< Max current for XEVK_I2C_ADDR_INA236_5V. */
+
+/* ------------------------------------------------------------------ */
 /* Portable cross-EVK aliases (e1m-spec STANDARD.md §7.2 common set). */
 /* Same BOARD_* names on every board; include via <alp/board.h>.       */
 /* ------------------------------------------------------------------ */

@@ -42,6 +42,14 @@ jobs:
   scan:
     name: scan · coverity build + submit
     runs-on: ubuntu-latest
+    # #1477: every sampled successful run (85s worst of 3) took the
+    # COVERITY_TOKEN-missing no-op exit-0 short-circuit above, NOT a real
+    # analysis -- this file's own header comment says the real Coverity
+    # capture + submit takes ~20min once the token is provisioned. A
+    # ceiling derived from the no-op runs alone would be dangerously
+    # tight against that real path, so this is set with headroom over the
+    # documented ~20min rather than 2x the (unrepresentative) 85s sample.
+    timeout-minutes: 30
 
     steps:
       - name: Check for Coverity token
@@ -57,16 +65,25 @@ jobs:
 
       - name: Checkout
         if: steps.token_check.outputs.configured == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 5
 
       - name: Install build dependencies
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         if: steps.token_check.outputs.configured == 'true'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y --no-install-recommends \
               build-essential cmake python3 wget
 
       - name: Download Coverity Build Tool
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         if: steps.token_check.outputs.configured == 'true'
         env:
           COV_TOKEN: ${{ secrets.COVERITY_TOKEN }}
@@ -110,11 +127,13 @@ jobs:
 
       - name: Configure SDK (plain-CMake, baremetal stub)
         if: steps.token_check.outputs.configured == 'true'
+        timeout-minutes: 2
         run: |
           cmake -B build -S . -DALP_OS=baremetal
 
       - name: Capture build with Coverity
         if: steps.token_check.outputs.configured == 'true'
+        timeout-minutes: 5
         run: |
           cov-build --dir cov-int cmake --build build --parallel
 
@@ -123,6 +142,9 @@ jobs:
         run: tar czf alp-sdk-cov.tgz cov-int
 
       - name: Submit to Coverity Scan
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         if: steps.token_check.outputs.configured == 'true'
         env:
           COV_TOKEN: ${{ secrets.COVERITY_TOKEN }}

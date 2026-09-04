@@ -129,6 +129,17 @@ on it.  Only the e-con Systems MIPI camera patch requires a
 manufacturer contact, and it's optional (only needed if you
 populate `e-CAM22_CURZH` on the board).
 
+`meta-rz-graphics` does **not** have the #1176 defect the three layers
+above did (or the `alp-image-edge`-only fix): it carries no
+`core-image-%.bbappend` at all. Its `conf/layer.conf` `include`s
+`include/rz-graphics.inc` → `include/mali-graphics.inc`, which sets
+`IMAGE_INSTALL:append:mali-family` — a conf-level override, not a
+recipe-name-matched bbappend, so it reaches `alp-image-*` (or any other
+image recipe) normally regardless of what the image is called. Its
+Mali/Weston wiring was never affected; issue #1176's "Impact" list
+naming it alongside the other three was inaccurate, not merely unfixed
+— see the closing comment on #1176.
+
 Yocto release: **Scarthgap (5.0.11)**.  GCC 13.  Toolchain SDK:
 `bitbake core-image-weston -c populate_sdk` against the matching
 MACHINE.
@@ -268,11 +279,31 @@ There is NO build-time pin -- silicon is the source of truth.
 
 ### DRP-AI userspace headers
 
-When `meta-rz-drpai` is in `bblayers.conf`, the DRP-AI userspace
-runtime + headers (`<linux/drpai.h>`, the `drpai_*` ioctls) appear
-in the target sysroot at standard paths.  The SDK's
-`<alp/inference.h>` Yocto backend picks them up through the sysroot
-include path — no per-app pkg-config plumbing needed.
+Adding `meta-rz-drpai` (or `meta-rz-codecs` / `meta-rz-opencva`) to
+`bblayers.conf` is **not**, by itself, enough to get their payload —
+this was issue #1176: each of these vendor layers ships its runtime
+packages and its `TOOLCHAIN_TARGET_TASK` SDK-sysroot entries through
+its own `recipes-core/images/core-image-%.bbappend`, and a
+`core-image-%` bbappend filename does not match any `alp-image-*`
+recipe name (bitbake matches a `.bbappend` to its exact target recipe
+base name; `%` only wildcards the version suffix). Both halves of the
+payload have to be ported explicitly on the `meta-alp-sdk` side —
+which is what `alp-image-common.inc` / `packagegroup-alp-camera.bb` do,
+gated on the layer's `BBFILE_COLLECTIONS` name (not on `MACHINE`, so
+builds that legitimately drop the RZ/V feature layers still parse):
+
+- **Runtime (target rootfs):** `alp-image-common.inc` installs
+  `lib-tvm` + `kernel-module-mmngr` into every `alp-image-*` build —
+  the DRP-AI3 userspace runtime the `<alp/inference.h>` Yocto backend
+  dispatches into at runtime.
+- **SDK sysroot headers (`populate_sdk`):** `alp-image-common.inc`
+  also ports the vendor bbappends' `TOOLCHAIN_TARGET_TASK:append`
+  entries (`drpai` from `meta-rz-drpai`, `drp` — shared — from
+  `meta-rz-codecs` / `meta-rz-opencva`), so `bitbake alp-image-* -c
+  populate_sdk` actually produces `<linux/drpai.h>` / `<linux/drp.h>`
+  (the `drpai_*` / `drp_*` ioctls) at standard sysroot paths. Without
+  that port, `populate_sdk` silently produces an SDK missing both
+  headers even with the layer present and the image built cleanly.
 
 ### Model compilation toolchain (RUHMI / DRP-AI TVM)
 
@@ -281,8 +312,18 @@ DRP-AI TVM) toolchain on the build host — not at image build
 time.  It's a separate Apache-2.0 project at
 <https://github.com/renesas-rz/rzv_drp-ai_tvm>; model authors
 install it on their workstation and ship the compiled output
-as a model asset.  The image build only needs the runtime side,
-which is in `meta-rz-drpai`.
+as a model asset.
+
+The image build needs more than `meta-rz-drpai` alone.  That layer
+supplies `<linux/drpai.h>` (recipe `drpai`) and `libtvm_runtime.so`
+(recipe `lib-tvm`), but the rest of the MERA2 runtime closure is
+staged by `recipes-renesas/mera2-drpai-tvm`, which reads it out of a
+BUILT `rzv_drp-ai_tvm` (RUHMI) checkout the builder points at with
+`RUHMI_DRPAI_TVM_DIR`.  That recipe fetches and vendors nothing.  All
+three are pulled in together by the `alp-sdk` recipe's
+`PACKAGECONFIG[drpai]`; see `docs/bring-up-drpai-v2n.md` section 4 for
+the full procedure and section 3 for the separate `ALP_ENABLE_DRPAI`
+switch that enables the kernel-side node.
 
 ## OTA via Mender (opt-in)
 
@@ -332,7 +373,8 @@ updates ride the `.mender` artefact through the Mender server.
 
 - Recipe wiring lands in v0.6 (this revision).
 - Real artefact generation + on-device install + rollback test
-  parked behind the `hil-yocto` HIL runner per
+  parked behind an explicit Yocto bench run -- there is no automated
+  HIL runner -- per
   [`docs/ci/HW-IN-LOOP.md`](../docs/ci/HW-IN-LOOP.md).
 - The Mender-server side (deployment orchestration, fleet
   monitoring) is out of scope for `meta-alp-sdk`; consumers stand

@@ -147,8 +147,13 @@ cores:
 
 def test_baremetal_slice_and_stock_image_appdir_null_conform(tmp_path: Path):
     """`os: baremetal` on m55_hp (with the SoM preset's other cores left
-    at their defaults) exercises: the `baremetal` backend enum value,
-    its `cmake-args.txt` configArtefact, the baremetal `command` shape
+    at their defaults) exercises: the `baremetal` backend enum value, its
+    EMPTY `configArtefacts` on a project with NO `preset:` (this board
+    resolves no board name and E1M-AEN801 declares no restricted
+    capabilities, so the slice has no `ALP_BOARD_<SLUG>`/`ALP_SOM_<SKU>`
+    compile guard to carry and `alp-baremetal.cmake` is not emitted at
+    all -- absence-emits-nothing; the preset-bearing case is covered in
+    test_orchestrate_baremetal_slice.py), the baremetal `command` shape
     (`tool: cmake`, `-S`/`-B` args), AND the A-class core's stock-image
     Yocto slice, which reports `appDir: null` (issue #597 -- there is no
     app source dir to report for the `alp-image-edge` token)."""
@@ -164,7 +169,7 @@ def test_baremetal_slice_and_stock_image_appdir_null_conform(tmp_path: Path):
     by_id = {s["coreId"]: s for s in plan["slices"]}
     baremetal = by_id["m55_hp"]
     assert baremetal["backend"] == "baremetal"
-    assert baremetal["configArtefacts"][0]["path"].endswith("cmake-args.txt")
+    assert baremetal["configArtefacts"] == []
     assert baremetal["command"]["tool"] == "cmake"
     assert "-S" in baremetal["command"]["args"]
     assert "-B" in baremetal["command"]["args"]
@@ -325,13 +330,21 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
         "sysroot":      None,
         "id":           "arm-zephyr-eabi",
     }
+    # Every path carries the `build/` level west actually writes (issue
+    # #1360): the slice's `command` runs with cwd=`build/m55_hp-zephyr`
+    # and no `-d`, so west's tree is `build/m55_hp-zephyr/build/`. The
+    # old spelling (no `build/`) named files west never creates, and
+    # every consumer had to add the level back by hand.
     assert m55_hp["artifacts"] == {
-        "elf":             "build/m55_hp-zephyr/zephyr/zephyr.elf",
-        "map":             "build/m55_hp-zephyr/zephyr/zephyr.map",
-        "bin":             "build/m55_hp-zephyr/zephyr/zephyr.bin",
-        "sizeReport":      "build/m55_hp-zephyr/zephyr/zephyr.stat",
-        "symbols":         "build/m55_hp-zephyr/zephyr/zephyr.symbols",
-        "compileCommands": "build/m55_hp-zephyr/compile_commands.json",
+        "elf":             "build/m55_hp-zephyr/build/zephyr/zephyr.elf",
+        "map":             "build/m55_hp-zephyr/build/zephyr/zephyr.map",
+        "bin":             "build/m55_hp-zephyr/build/zephyr/zephyr.bin",
+        "sizeReport":      "build/m55_hp-zephyr/build/zephyr/zephyr.stat",
+        "symbols":         "build/m55_hp-zephyr/build/zephyr/zephyr.symbols",
+        "compileCommands": "build/m55_hp-zephyr/build/compile_commands.json",
+        # `outputDir` (alplabai/tan-cli#550) stays null for zephyr: the
+        # six named paths above already index Zephyr's own output tree.
+        "outputDir":       None,
     }
     assert m55_hp["debug"] == {"console": "uart", "probe": None}
 
@@ -355,14 +368,15 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
                 "targetTriple", "compiler", "sysroot", "id"}
             assert set(sl["artifacts"]) == {
                 "elf", "map", "bin", "sizeReport", "symbols",
-                "compileCommands"}
+                "compileCommands", "outputDir"}
             assert set(sl["debug"]) == {"console", "probe"}
 
 
 def test_baremetal_slice_toolchain_artifacts_debug_are_null(tmp_path: Path):
-    """A `baremetal` slice's `artifacts` + `debug` fields are all null,
-    and `toolchain.targetTriple`/`.compiler` stay null too -- there is
-    no SDK-wide vendor bare-toolchain / executable-name / debug-probe
+    """A `baremetal` slice's `debug` fields are all null, its
+    NAMED artifacts (`elf`/`map`/`bin`/`sizeReport`/`symbols`) are all
+    null, and `toolchain.targetTriple`/`.compiler` stay null too -- there
+    is no SDK-wide vendor bare-toolchain / executable-name / debug-probe
     convention this emitter can predict without guessing (the app's own
     CMakeLists.txt picks its own executable name and cross toolchain
     file, and `arm-zephyr-eabi-gcc` is never actually invoked by the
@@ -372,7 +386,21 @@ def test_baremetal_slice_toolchain_artifacts_debug_are_null(tmp_path: Path):
     role) verbatim regardless of this project's `os: baremetal`
     override -- an honest passthrough of the real resolved `Slice.
     toolchain` fact, not a fabricated value, even though it's a
-    leftover from the core's un-overridden default."""
+    leftover from the core's un-overridden default.
+
+    `outputDir` is the one exception, and it is NOT a guess: the slice's
+    own configure carries
+    `-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$<1:<buildDir>/output>`, so CMake
+    is made to put every `add_executable()` target exactly there, on
+    single- and multi-config generators alike (alplabai/tan-cli#550 --
+    an all-null block left a slice that produced NO binary
+    indistinguishable from one that built fine).
+
+    `compileCommands` stays null even though the configure passes
+    `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`: CMake implements that variable
+    only for the Makefile and Ninja generator families and ignores it on
+    every other generator, and this planner does not choose the
+    generator."""
     path = _write_board(tmp_path, AEN801_BAREMETAL_AND_STOCK_IMAGE)
     project = load_board_yaml(path)
     plan = json.loads(emit_build_plan(
@@ -384,7 +412,15 @@ def test_baremetal_slice_toolchain_artifacts_debug_are_null(tmp_path: Path):
         "targetTriple": None, "compiler": None, "sysroot": None,
         "id": "arm-zephyr-eabi",
     }
-    assert all(v is None for v in baremetal["artifacts"].values())
+    assert baremetal["artifacts"] == {
+        "elf":             None,
+        "map":             None,
+        "bin":             None,
+        "sizeReport":      None,
+        "symbols":         None,
+        "compileCommands": None,
+        "outputDir":       "build/m55_hp-baremetal/output",
+    }
     assert baremetal["debug"] == {"console": None, "probe": None}
 
 
@@ -392,38 +428,10 @@ def test_missing_required_field_rejected():
     """A plan missing a required field (here, a slice's `env`) fails
     validation -- the schema actually enforces its `required` arrays,
     it isn't just documentation."""
-    bad = {
-        "schemaVersion": 1,
-        "generatedBy": "scripts/alp_orchestrate.py",
-        "boardYaml": "board.yaml",
-        "sku": "E1M-V2N101",
-        "buildRoot": "build",
-        "slices": [{
-            "coreId": "m33_sm",
-            "backend": "zephyr",
-            "buildDir": "build/m33_sm-zephyr",
-            "appDir": None,
-            "configArtefacts": [],
-            "toolchain": {
-                "targetTriple": "arm-zephyr-eabi",
-                "compiler": "arm-zephyr-eabi-gcc",
-                "sysroot": None,
-                "id": "arm-zephyr-eabi",
-            },
-            "artifacts": {
-                "elf": None, "map": None, "bin": None,
-                "sizeReport": None, "symbols": None,
-                "compileCommands": None,
-            },
-            "debug": {"console": "uart", "probe": None},
-            "command": None,
-            # "env" deliberately omitted -- required by the schema.
-        }],
-        "sharedArtefacts": [],
-        "warnings": [],
-    }
+    p = _plan_with_tool("west")
+    del p["slices"][0]["env"]
     validator = jsonschema.Draft202012Validator(_schema())
-    errors = list(validator.iter_errors(bad))
+    errors = list(validator.iter_errors(p))
     assert errors, "missing required 'env' should have been rejected"
 
 
@@ -516,6 +524,66 @@ def test_unknown_top_level_key_rejected():
     }
     validator = jsonschema.Draft202012Validator(_schema())
     assert list(validator.iter_errors(bad)) != []
+
+
+def _plan_with_tool(tool: str) -> dict:
+    """A minimal otherwise-valid plan whose single slice's `command.tool`
+    is the given string -- used to probe the `command.tool` identity
+    convention (issue #1286) in isolation from every other field. Also
+    reused as a minimal valid-plan base by tests that need one (e.g.
+    test_missing_required_field_rejected)."""
+    return {
+        "schemaVersion": 1,
+        "generatedBy": "scripts/alp_orchestrate.py",
+        "boardYaml": "board.yaml",
+        "sku": "E1M-V2N101",
+        "buildRoot": "build",
+        "slices": [{
+            "coreId": "m33_sm",
+            "backend": "zephyr",
+            "buildDir": "build/m33_sm-zephyr",
+            "appDir": None,
+            "configArtefacts": [],
+            "toolchain": {
+                "targetTriple": "arm-zephyr-eabi",
+                "compiler": "arm-zephyr-eabi-gcc",
+                "sysroot": None,
+                "id": "arm-zephyr-eabi",
+            },
+            "artifacts": {
+                "elf": None, "map": None, "bin": None,
+                "sizeReport": None, "symbols": None,
+                "compileCommands": None,
+            },
+            "debug": {"console": "uart", "probe": None},
+            "command": {"tool": tool, "args": [], "cwd": "build/m33_sm-zephyr"},
+            "env": {"ALP_SDK_ROOT": "${SDK_ROOT}"},
+            "envAppendPath": {},
+        }],
+        "sharedArtefacts": [],
+        "warnings": [],
+    }
+
+
+def test_command_tool_schema_stays_tolerant_of_paths():
+    """#847 precedent (also applied to `executionPolicy` above): the
+    SHARED schema must not tighten a field's accepted shape at unchanged
+    `schemaVersion: const 1`, or a consumer already holding a valid plan
+    (e.g. one carrying a real path -- an IDE resolving `command.tool`
+    itself before #1286's convention existed) gets rejected with no
+    version signal. Every one of these was a valid `command.tool` before
+    the #1286 change and must stay valid against the schema after it;
+    the identity convention is enforced elsewhere (see the
+    test_command_tool_*_gate tests in test_check_build_plan.py), never
+    here."""
+    validator = jsonschema.Draft202012Validator(_schema())
+    for tool in (
+        "west", "bitbake", "cmake",
+        "/usr/bin/west", r"C:\x\west.exe", "${WEST}", "./west",
+        ".venv/bin/west", "C:/tools/west.exe", "~/bin/west",
+    ):
+        errors = list(validator.iter_errors(_plan_with_tool(tool)))
+        assert errors == [], f"{tool!r}: {[str(e) for e in errors]}"
 
 
 def test_wrong_schema_version_rejected():

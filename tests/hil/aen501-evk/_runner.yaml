@@ -5,7 +5,6 @@
 
 schema_version: 1
 board: alp_e1m_aen501_m55_hp        # Pick M55-HP for the M-class smokes.
-serial_port: /dev/ttyACM0
 flash_method: westflash
 defaults:
   serial:

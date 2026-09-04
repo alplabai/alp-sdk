@@ -28,8 +28,23 @@
  * Safe scratch target -- NOT slot0/slot1
  * --------------------------------------
  * The test writes ONLY the `storage` fixed-partition (label "storage", MRAM
- * offset 0x560000 = absolute 0x80560000, 128 KiB, the NVS/settings region),
- * which is empty on this bench and holds no boot code.  The app also re-erases
+ * offset 0x560000 = absolute 0x80560000, 96 KiB, the NVS/settings region),
+ * and touches only its first ERASE_UNIT (1 KiB at 0x80560000).
+ *
+ * CORRECTION (#1289): an earlier revision of this comment claimed the region
+ * "is empty on this bench and holds no boot code".  That was FALSE and it is
+ * what made writing here look safe.  `storage` was then 128 KiB and ran to
+ * 0x80580000 -- the top of the App MRAM window, which is exactly where Alif's
+ * SETOOLS top-anchors the ATOC application table.  Measured on this bench
+ * 2026-08-08: this app erased 0x80560000 while the live ATOC sat intact at
+ * 0x8057EA50, magic `ckBS` (0x53426B63), INSIDE the same partition this app
+ * held a writable handle to.  Nothing failed at build or run time; the part
+ * would have failed on the FOLLOWING boot had the write reached that far.
+ *
+ * The top 32 KiB (0x80578000..0x80580000) is now a separate `atoc` partition
+ * this app has no handle to, and scripts/check_atoc_reservation.py keeps it
+ * that way.  `storage` is genuinely safe to write NOW -- because it is
+ * bounded, not because it is empty.  The app also re-erases
  * the scratch block on exit so it is left clean.  This app is flashed into MRAM
  * slot0 and SE-booted (bench flow D -- the SES boots the resident slot0 image
  * in preference to a Flow-C ITCM RAM-run), so slot0 briefly holds THIS app
@@ -40,7 +55,7 @@
  *
  * Console is the Alp UART console (see prj.conf): E1M edge UART0 = Alif UART5
  * (P3_4/P3_5, 115200 8N1), USB-routed to the labgrid `console` resource
- * (/dev/ttyUSB2) since 2026-07-03, so the RESULT PASS/FAIL line streams live as
+ * since 2026-07-03, so the RESULT PASS/FAIL line streams live as
  * the SES boots this slot0 image.  Independently, the human reads mem32
  * 0x80560000 over J-Link after the program step -- silicon ground truth for the
  * written pattern (first word 0xA5A5A5A5), independent of any printk.

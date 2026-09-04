@@ -57,3 +57,50 @@ def test_sarif_shape():
     assert sarif["version"] == "2.1.0"
     res = sarif["runs"][0]["results"]
     assert res[0]["level"] == "error" and res[0]["ruleId"] == "alp-quality/gate-ok"
+
+
+# ---------------------------------------------------------------------------
+# tan-cli#721: a profile that selects no task must not look like a clean run.
+# `all()` over an empty sequence is True, so `ok()` returned True and `main()`
+# returned 0 while printing `0/0 passed` + `complete.` -- and `quick` selected
+# exactly zero check-script tasks back then, so that was every `--profile
+# quick` invocation. #1463 populated `quick` (36 tasks), but the empty-
+# selection case this guards is still reachable by construction below, and
+# would be real again for ANY profile a future edit strips back to empty --
+# these two tests exercise `Report`/`main()` directly against a synthetic
+# empty result rather than the real registry, so they stay meaningful either
+# way.
+# ---------------------------------------------------------------------------
+
+
+def test_a_profile_that_selected_nothing_is_not_ok():
+    rep = alp_quality.Report(profile="quick", results=[])
+    assert rep.selected_nothing() is True
+    assert rep.ok() is False
+
+
+def test_main_exits_2_when_no_task_was_selected(monkeypatch, capsys):
+    """2, not 1: "nothing was checked" differs from "a gate check failed"."""
+    monkeypatch.setattr(alp_quality, "run_profile",
+                        lambda profile, **kw: alp_quality.Report(profile=profile, results=[]))
+    rc = alp_quality.main(["--profile", "quick"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "NO TASKS SELECTED" in err
+    assert "This is not a pass" in err
+    # The old wording is what made it read as a verified run.
+    assert "0/0 passed" not in err
+    assert "complete." not in err
+
+
+def test_a_gate_failure_still_exits_1_not_2(monkeypatch):
+    """The two outcomes keep distinct codes; neither collapses into the other."""
+    monkeypatch.setattr(alp_quality, "run_profile",
+                        lambda profile, **kw: _synthetic(gate_fail=True))
+    assert alp_quality.main(["--profile", "pr"]) == 1
+
+
+def test_a_clean_run_still_exits_0(monkeypatch):
+    """Positive control: without it, a change that refused everything passes."""
+    monkeypatch.setattr(alp_quality, "run_profile", lambda profile, **kw: _synthetic())
+    assert alp_quality.main(["--profile", "pr"]) == 0

@@ -8,7 +8,7 @@ CONFIG_ARM_MPU=y
 CONFIG_HW_STACK_PROTECTION=y
 
 # Link the image into the board's `zephyr,code-partition`
-# (slot0_partition, MRAM 0x80010000) instead of the MRAM base --
+# (slot0_partition, MRAM 0x802b0000) instead of the MRAM base --
 # without it the reset vector lands at 0x8000xxxx and no AEN flash
 # flow accepts the image.  Flow C (ITCM RAM-run) overrides it via
 # scripts/bench/aen/aen-flowc-itcm.conf.

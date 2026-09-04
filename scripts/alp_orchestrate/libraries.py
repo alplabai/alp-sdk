@@ -41,7 +41,7 @@ def _libraries_dir(metadata_root: Path) -> Path:
     return metadata_root / "libraries"
 
 
-def available_libraries(metadata_root: Path = METADATA_ROOT) -> list[str]:
+def available_libraries(metadata_root: Path) -> list[str]:
     """Sorted list of every curated library token (manifest filename stem)."""
     d = _libraries_dir(metadata_root)
     if not d.is_dir():
@@ -49,7 +49,7 @@ def available_libraries(metadata_root: Path = METADATA_ROOT) -> list[str]:
     return sorted(p.stem for p in d.glob("*.yaml"))
 
 
-def load_manifest(name: str, metadata_root: Path = METADATA_ROOT) -> dict[str, Any]:
+def load_manifest(name: str, metadata_root: Path) -> dict[str, Any]:
     """Load one library manifest, or raise OrchestratorError naming the options.
 
     The error lists every available library so a typo in ``libraries: [...]``
@@ -161,9 +161,42 @@ def _check_requires(
                 f"project's cores run {sorted(have_os) or '<none>'}")
 
 
+def scoped_names(
+    project: BoardProject,
+    slice_: Optional[Slice] = None,
+) -> list[str]:
+    """Every library name in scope, in declaration order, deduped.
+
+    board.yaml declares each curated library ONCE, in the top-level
+    `libraries:` list.  `loader._normalize_libraries` then folds each entry
+    into one of two internal channels: an entry with no `cores:` lands in
+    `project.libraries`, an entry with `cores:` lands in each named
+    `Slice.libraries`.  Both channels are the SAME ADR-0018 selection and
+    must pass through the SAME checks -- reading only `project.libraries`
+    here is what let a core-scoped entry skip `load_manifest`'s unknown-name
+    refusal, its `requires:` constraints and its `integration:` sections
+    entirely (alplabai/tan-cli#555).
+
+    ``slice_`` None  -> project-wide + every core-scoped name declared on any
+                        core: the whole-project view `alp validate` /
+                        `alp doctor` check.
+    ``slice_`` given -> project-wide + that one slice's core-scoped names:
+                        what the per-slice emitters wire.
+    """
+    names: list[str] = list(project.libraries or [])
+    slices = [slice_] if slice_ is not None else list(project.cores.values())
+    for s in slices:
+        for name in (s.libraries or []):
+            if name not in names:
+                names.append(name)
+    return names
+
+
 def resolve_selection(
     project: BoardProject,
-    metadata_root: Path = METADATA_ROOT,
+    metadata_root: Path,
+    *,
+    slice_: Optional[Slice] = None,
 ) -> list[tuple[str, dict[str, Any]]]:
     """Validate every selected library and return [(name, manifest), ...].
 
@@ -171,8 +204,23 @@ def resolve_selection(
     constraint, or a library whose manifest has no `integration:` section for
     ANY OS this project's cores run (you asked for a library that cannot be
     wired anywhere on this target).  Returns [] for an empty selection.
+
+    The selection covers BOTH declaration channels -- see `scoped_names` for
+    what ``slice_`` narrows it to.
+
+    `requires:` is checked at TWO altitudes, because the two channels ask
+    different questions.  `_check_requires` is project-wide: a project-wide
+    `libraries: [ros2]` on a Yocto-A55 + Zephyr-M33 board is legitimate and
+    simply wires on the A55 only.  A CORE-SCOPED entry (`{name: ros2, cores:
+    [m33_sm]}`) is instead an explicit instruction to wire it THERE, so it
+    additionally goes through `_check_slice_requires` against that one slice
+    (alplabai/tan-cli#555: "ros2's `requires: {os: [yocto], core_class: a}`
+    is never checked, so ros2 scoped to a Cortex-M core is silently
+    no-op'd").  The project-wide check cannot catch it -- `_project_oses`
+    contains `yocto` from the A55, so it passes.
     """
-    selected = list(project.libraries or [])
+    selected = scoped_names(project, slice_)
+    core_scoped = set(slice_.libraries or ()) if slice_ is not None else set()
     resolved: list[tuple[str, dict[str, Any]]] = []
     project_oses = _project_oses(project)
     for name in selected:
@@ -186,32 +234,119 @@ def resolve_selection(
                 f"library `{name}` cannot be wired on this project: its manifest "
                 f"has integration section(s) [{have_sections}] but this project's "
                 f"cores run {sorted(project_oses)}")
+        if name in core_scoped:
+            assert slice_ is not None  # core_scoped is empty when slice_ is None
+            _check_slice_requires(name, manifest, project, slice_)
         resolved.append((name, manifest))
     return resolved
+
+
+def _check_slice_requires(
+    name: str,
+    manifest: dict[str, Any],
+    project: BoardProject,
+    slice_: Slice,
+) -> None:
+    """`requires:` for a library board.yaml explicitly scoped to THIS core.
+
+    `cores: [<id>]` is a positive instruction, not a hint, so a `requires:`
+    key that the named core violates has to fail early and name the
+    constraint rather than resolve to nothing.  Checks the two keys that are
+    per-core facts:
+
+      * `os:`         -- against this slice's own OS, not the project-wide
+                         union `_check_requires` uses.
+      * `core_class:` -- delegated to `_check_core_class`, which used to be
+                         reachable only from `zephyr_kconfig_lines` AFTER an
+                         `if not zephyr: continue`, so a manifest with no
+                         `integration.zephyr:` (ros2) never reached it.
+
+    Deliberately does NOT refuse a manifest that merely has no
+    `integration.<this os>:` section: mbedtls and nlohmann-json are scoped to
+    the Yocto cores of four shipped examples and have no `integration.yocto:`,
+    and the honest handling for those is the explanatory `yocto_unwireable`
+    comment, not a hard error.
+    """
+    requires = manifest.get("requires") or {}
+    req_os = requires.get("os")
+    if req_os and slice_.os not in set(req_os):
+        raise OrchestratorError(
+            f"library `{name}` is scoped to core `{slice_.core_id}` "
+            f"(os `{slice_.os}`) but requires os {sorted(req_os)}")
+    _check_core_class(name, manifest, project, slice_)
 
 
 # ---------------------------------------------------------------------------
 # Per-slice emit helpers (called from kconfig.py)
 # ---------------------------------------------------------------------------
 
+def zephyr_library_kconfig(manifest: dict[str, Any]) -> list[str]:
+    """Kconfig lines for ONE library manifest's Zephyr integration.
+
+    The upstream module-enable line(s) (`integration.zephyr.kconfig`)
+    followed by the SDK SW-fallback floor
+    (`integration.zephyr.hw_backends.sw_fallback.kconfig`), module-enable
+    first and the fallback marker last, deduped. Header-only libraries whose
+    SW floor is a doc comment surface that comment only when there is no
+    module-enable line to attach it to.
+
+    The ONE derivation both declaration channels call for the base+fallback
+    set -- `zephyr_kconfig_lines` (project-wide) and
+    `kconfig.py::_per_core_library_kconfig` (core-scoped) -- so the same
+    library manifest can never emit a different symbol set depending on
+    which `libraries:` channel declared it (#1359: the project-wide channel
+    used to skip the SW-fallback line entirely, e.g. cmsis-dsp's project-wide
+    form never emitted `CONFIG_ALP_CMSIS_DSP_SCALAR=y` while its core-scoped
+    form did).
+    """
+    zephyr = (manifest.get("integration") or {}).get("zephyr") or {}
+    out: list[str] = []
+    for kc in zephyr.get("kconfig") or []:
+        kc = str(kc)
+        if kc not in out:
+            out.append(kc)
+    swf = ((zephyr.get("hw_backends") or {}).get("sw_fallback") or {}).get("kconfig")
+    if swf:
+        swf = str(swf)
+        if swf.lstrip().startswith("#"):
+            # Header-only library: the SW floor is a documentation comment,
+            # not a real knob.  Surface it only when there is no module enable.
+            if not out:
+                out.append(swf)
+        elif swf not in out:
+            out.append(swf)
+    return out
+
+
 def zephyr_kconfig_lines(
     project: BoardProject,
     slice_: Slice,
-    metadata_root: Path = METADATA_ROOT,
+    metadata_root: Path,
 ) -> list[str]:
-    """Kconfig lines for every top-level library with a Zephyr integration.
+    """Kconfig lines for every project-wide library with a Zephyr integration.
 
     Emitted into a Zephyr slice's alp.conf.  Returns [] when the project
     selects no libraries (keeps existing emit byte-identical).
+
+    Both channels are RESOLVED here (so a core-scoped entry gets the same
+    unknown-name / `requires:` / wireability / core-class refusals as a
+    project-wide one), but only the project-wide half is EMITTED: the Zephyr
+    Kconfig for a core-scoped entry rides `kconfig.py::_emit_libraries`'
+    per-core channel, which reads the very same manifest.  Emitting it twice
+    would duplicate every CONFIG_ line.  Both halves derive their per-library
+    CONFIG_ set from the same `zephyr_library_kconfig` helper (#1359).
     """
-    if not project.libraries or slice_.os != "zephyr":
+    if slice_.os != "zephyr":
         return []
+    project_wide = set(project.libraries or ())
     lines: list[str] = []
-    for name, manifest in resolve_selection(project, metadata_root):
+    for name, manifest in resolve_selection(project, metadata_root, slice_=slice_):
         zephyr = (manifest.get("integration") or {}).get("zephyr")
         if not zephyr:
             continue
         _check_core_class(name, manifest, project, slice_)
+        if name not in project_wide:
+            continue
         module = zephyr.get("module")
         version = str(manifest.get("version", "?"))
         display_version = version if version.startswith("v") else f"v{version}"
@@ -219,7 +354,7 @@ def zephyr_kconfig_lines(
         if module:
             tag += f" (west module `{module}`)"
         lines.append(f"# library: {tag}")
-        for kc in zephyr.get("kconfig") or []:
+        for kc in zephyr_library_kconfig(manifest):
             lines.append(kc)
     return lines
 
@@ -227,30 +362,62 @@ def zephyr_kconfig_lines(
 def yocto_image_install(
     project: BoardProject,
     slice_: Slice,
-    metadata_root: Path = METADATA_ROOT,
+    metadata_root: Path,
 ) -> list[str]:
-    """IMAGE_INSTALL recipe names for libraries with a Yocto integration."""
-    if not project.libraries or slice_.os != "yocto":
+    """IMAGE_INSTALL recipe names for libraries with a Yocto integration.
+
+    Covers BOTH declaration channels: a `libraries:` entry scoped to this
+    Yocto core contributes its manifest's `integration.yocto.image_install`
+    recipes, exactly like a project-wide one.  The recipe names come from the
+    manifest and nowhere else -- they are never derived from the library name
+    (alplabai/tan-cli#555: the old per-core path invented `lib-<name>`, which
+    RPROVIDES nothing in meta-alp-sdk or OE).
+    """
+    if slice_.os != "yocto":
         return []
     packages: list[str] = []
-    for name, manifest in resolve_selection(project, metadata_root):
+    for name, manifest in resolve_selection(project, metadata_root, slice_=slice_):
         yocto = (manifest.get("integration") or {}).get("yocto")
         if not yocto:
             continue
-        packages.extend(yocto.get("image_install") or [])
+        for pkg in yocto.get("image_install") or []:
+            if pkg not in packages:
+                packages.append(pkg)
     return packages
+
+
+def yocto_unwireable(
+    project: BoardProject,
+    slice_: Slice,
+    metadata_root: Path,
+) -> list[str]:
+    """In-scope library names whose manifest has NO `integration.yocto:`.
+
+    Such a library contributes nothing to this slice's `IMAGE_INSTALL` -- the
+    honest emit is nothing.  The caller surfaces the names as a comment so the
+    no-op is visible in the generated local.conf instead of silent.
+    """
+    if slice_.os != "yocto":
+        return []
+    return [
+        name
+        for name, manifest in resolve_selection(project, metadata_root, slice_=slice_)
+        if not (manifest.get("integration") or {}).get("yocto")
+    ]
 
 
 def baremetal_cmake_args(
     project: BoardProject,
     slice_: Slice,
-    metadata_root: Path = METADATA_ROOT,
+    metadata_root: Path,
 ) -> list[str]:
-    """cmake hint lines for libraries with a baremetal integration."""
-    if not project.libraries or slice_.os != "baremetal":
+    """cmake hint lines for libraries with a baremetal integration.
+
+    Covers both declaration channels (see `scoped_names`)."""
+    if slice_.os != "baremetal":
         return []
     args: list[str] = []
-    for name, manifest in resolve_selection(project, metadata_root):
+    for name, manifest in resolve_selection(project, metadata_root, slice_=slice_):
         baremetal = (manifest.get("integration") or {}).get("baremetal")
         if not baremetal:
             continue

@@ -255,6 +255,25 @@ if(NOT DEFINED ZEPHYR_BASE)
         set_target_properties(alp_sdk PROPERTIES
             VERSION   ${PROJECT_VERSION}
             SOVERSION ${PROJECT_VERSION_MAJOR})
+        # #1145: a shared library permits undefined symbols at link time by
+        # default -- libalp_sdk.so built "successfully" with the DRP-AI
+        # backend compiled in while MeraDrpRuntimeWrapper's symbols were
+        # nowhere on the link line, and the break only surfaced later, in a
+        # downstream consumer's link (alp-perception).  --no-undefined makes
+        # the linker refuse that: any unresolved reference now fails
+        # libalp_sdk's OWN link, loudly, at the point the bug is introduced.
+        # Audited every optional Linux/Yocto backend for a legitimate
+        # dlopen()/weak-external pattern that depends on undefined symbols
+        # being tolerated (grep for dlopen + __attribute__((weak)) across
+        # src/): none exists -- the weak symbols in this tree (cc3501e_proxy,
+        # zephyr_drv gpio_resolve, update_log's TF-M seam) are all weak
+        # DEFINITIONS with real fallback bodies, not unresolved weak
+        # references, so they are unaffected by this flag.  GNU ld / lld
+        # only (Linux/Yocto is this option's stated audience); Apple ld
+        # rejects the long-form spelling, hence the UNIX guard.
+        if(UNIX AND NOT APPLE)
+            target_link_options(alp_sdk PRIVATE "LINKER:--no-undefined")
+        endif()
     else()
         add_library(alp_sdk STATIC)
     endif()

@@ -7,20 +7,43 @@
 # Demonstrates EVERY v0.6 declarative block applied at production
 # stance:
 #
-#   - `boot:`              MCUboot + ECDSA-P256 (slot geometry lives
-#                           in `storage:` + the board DT, not `boot:`)
+#   - `boot:`              MCUboot + ECDSA-P256, single-app boot on
+#                           this SKU (slot geometry lives in the
+#                           board DT, not `boot:` -- see [STATUS])
 #   - `ota:`               Mender HTTPS-poll, A/B rootfs (for the
-#                           Linux-fork variant) + MCUboot slots
-#                           (Zephyr side)
+#                           Linux-fork variant)
 #   - `security.psa:`      TF-M secure partition + OPTIGA-rooted
 #                           attestation
-#   - `storage:`           explicit partitions for primary +
-#                           secondary slots + scratch + settings +
-#                           app_data
+#   - `storage:`           illustrates the declarative SHAPE only on
+#                           this SKU -- E1M-AEN801's `memory_map:`
+#                           already claims the full 5632 KiB App MRAM,
+#                           so every entry below is BLOCKED at emit
+#                           time; see [STATUS]
 #   - `cores.<id>.memory:` tuned stack / heap / ISR-stack sizes
 #   - `cores.<id>.power:`  standby with multi-source wakeup
 #   - `diagnostics.modules:` security / iot at info, everything
 #                           else at warn
+#
+# [STATUS] On this SoM (E1M-AEN801), MCUboot boots single-app
+# (CONFIG_SINGLE_APPLICATION_SLOT=y, #1069/#1413) -- both M55 cores
+# share the same physical App MRAM, so there is no inactive MCUboot
+# slot on the Zephyr side.  The `mcuboot_secondary` / `mcuboot_scratch`
+# entries under `storage:` below are a separate, project-declared
+# partition table (a customer `storage:` block, not the board DT's
+# `slot0_partition` / `slot1_partition` / `scratch_partition` labels
+# MCUboot's flash-map actually reads) -- they do not give this SKU a
+# second boot slot.  A/B rootfs OTA is real on the Linux-fork variant
+# (`os: yocto`, a different core); Zephyr-side MCUboot swap/rollback
+# needs a two-slot AEN target, which none of the qualified boards are
+# today.  See docs/secure-boot.md.
+#
+# The `storage:` block below is illustrative-only on E1M-AEN801: its
+# `memory_map:` regions (mcuboot + he_slot0 + hp_slot0 + reserved +
+# storage + atoc, metadata/e1m_modules/E1M-AEN801.yaml) already occupy
+# the full 5632 KiB App MRAM window, so EVERY entry under `storage:`
+# below emits `status: blocked` in the generated `dts-partitions.dtsi`
+# (measured via `--emit dts-partitions`) -- there is no free MRAM left
+# to place any of them, including `settings` / `app_data`.
 #
 # Real customer shipping variants fork this for V2N or i.MX 93
 # boards; the SDK's declarative surface stays identical across
@@ -83,14 +106,18 @@ chips:
 # ----------------------------------------------------------------
 # Bootloader (project-wide).
 # ----------------------------------------------------------------
-# MCUboot + ECDSA-P256.  Slot/scratch partition sizes are declared
-# explicitly below under `storage:` (mcuboot_primary / mcuboot_secondary
-# / mcuboot_scratch) -- MCUboot itself takes its slot geometry from
-# the board DT `partitions {}` node, not from a `boot:` field; there
-# is no sysbuild knob for a partition size.  Downgrade prevention is
-# `ota.rollback.min_version` below (software floor); a hardware
-# anti-rollback counter tier (OPTIGA/OTP fuse) isn't built yet, so
-# this board.yaml doesn't claim one.
+# MCUboot + ECDSA-P256.  `swap_algorithm:` is intentionally omitted:
+# the SDK's per-target default now follows the target's own DT
+# (#1413) rather than one value for every AEN SKU, and this SKU
+# (E1M-AEN801) has no slot1/scratch partition -- see [STATUS] above.
+# Setting `swap_algorithm: scratch` here would be a build-time error
+# on this SKU (no slot1/scratch to swap into).  MCUboot itself takes
+# its actual slot geometry from the board DT `partitions {}` node,
+# not from a `boot:` field; there is no sysbuild knob for a partition
+# size.  Downgrade prevention is `ota.rollback.min_version` below
+# (software floor); a hardware anti-rollback counter tier
+# (OPTIGA/OTP fuse) isn't built yet, so this board.yaml doesn't claim
+# one.
 #
 # `key_file:` is the SIGNING key (it becomes
 # `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE`, which imgtool signs with and
@@ -106,7 +133,6 @@ boot:
   signing:
     algorithm: ecdsa_p256
     key_file:  keys/mcuboot_dev_ecdsa_p256.pem
-  swap_algorithm: scratch
 
 # ----------------------------------------------------------------
 # OTA (project-wide).
@@ -157,11 +183,25 @@ security:
 # ----------------------------------------------------------------
 # Storage partitions.
 # ----------------------------------------------------------------
-# Explicit partition table backing the MCUboot slot layout + the
-# Zephyr settings subsystem + an app_data littlefs mount.  Sizes
-# add up to ~2.4 MiB out of the AEN E8's 5.5 MiB MRAM -- the
-# remainder stays available for code + MCUboot itself + the
-# TF-M secure partition.
+# A project-declared partition table for the Zephyr settings
+# subsystem + an app_data littlefs mount.  The `mcuboot_primary` /
+# `mcuboot_secondary` / `mcuboot_scratch` entries below are named to
+# illustrate a two-slot MCUboot layout, but they are `storage:`
+# partitions, NOT the board DT's `slot0_partition` / `slot1_partition`
+# / `scratch_partition` labels MCUboot's flash-map actually reads --
+# see [STATUS] above.  Sizes below sum to ~2.4 MiB (1024 + 1024 + 64 +
+# 64 + 256 KiB), but on E1M-AEN801 there is no remainder to place them
+# in: the SoM's own `memory_map:` regions already occupy the full 5632
+# KiB App MRAM window (metadata/e1m_modules/E1M-AEN801.yaml), so every
+# entry below emits `status: blocked` in the generated
+# `dts-partitions.dtsi` for that reason alone.  `mram_main` would ALSO
+# not be a working `flash_device:` target even with free room: no AEN
+# preset declares a `dt_label:` override for it, so it resolves to a
+# Devicetree label of `mram_main`, but the generated board tree never
+# defines that node -- only `mram_storage` (#1484; see
+# docs/board-config-features.md's "Storage partitions (`storage:`)"
+# section).  This block demonstrates the `storage:`
+# declarative shape only, not a working layout, on this SKU.
 storage:
   - name:         mcuboot_primary
     fs:           raw

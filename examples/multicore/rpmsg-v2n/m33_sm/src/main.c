@@ -34,6 +34,14 @@
  * likely a v2n-specific `<alp/rpc.h>` backend once this raw transport is
  * bench-proven -- is follow-up, not this phase.
  *
+ * That follow-up backend has since landed: `src/backends/rpc/
+ * yocto_uio_drv.c` (silicon_ref "renesas:rzv2n:n44") attaches
+ * `alp_rpc_open()` directly to THIS firmware's raw endpoint (fixed
+ * address APP_EPT_ADDR below, RPMSG_ADDR_ANY-learned peer) -- see
+ * ../../linux/src/main.c, which now drives it as the real Linux
+ * counterpart (alp-sdk #1167).  This file's own transport code is
+ * unchanged: it is still the bench-proven half.
+ *
  * Echo behaviour kept from the vendor sample on purpose: the A55 side's
  * `rpmsg_sample_client` sends a growing message and checks the SAME bytes
  * come back, so keeping the echo (rather than trimming it to

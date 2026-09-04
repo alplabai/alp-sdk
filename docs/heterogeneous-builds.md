@@ -4,7 +4,7 @@ This guide walks through writing your first **dual-app project** for
 E1M-V2N101: Yocto Linux on the four Cortex-A55 cores plus Zephyr on
 the Cortex-M33 system-manager, the two halves talking over RPMsg.
 You'll declare both halves in a single `board.yaml`, let `tan build`
-fan out into per-core slices (planned by alp-sdk's `alp_orchestrate`),
+fan out into per-core slices with Tan's relocated in-process planner,
 and end up with a flashable bundle that covers Linux + Zephyr + the
 on-module GD32 helper MCU.
 
@@ -15,6 +15,19 @@ The same pattern generalises to **E1M-AEN801** (A32 + M55-HP + M55-HE),
 > only), follow [`docs/firmware-quickstart.md`](firmware-quickstart.md)
 > instead.  The orchestrator handles single-slice fan-outs too, but
 > you don't need the cross-core machinery this guide focuses on.
+
+Which SoM families are heterogeneous in the first place:
+
+| SoM family | A-class cores | M-class cores | Heterogeneous? |
+|---|---|---|---|
+| E1M-AEN E3/E4 | — | M55-HP, M55-HE (both Zephyr) | No — RTOS-only silicon |
+| E1M-AEN E5..E8 | A32 cluster (Yocto) | M55-HP, M55-HE (Zephyr) | Yes |
+| E1M-X V2N / V2N-M1 | A55 cluster (Yocto) | M33-SM (Zephyr) | Yes |
+| E1M-N93 (iMX93) | A55 cluster (Yocto) | M33 (Zephyr) | Yes |
+
+A bare `som: { sku: <MPN> }` produces a working dual-image build for every
+heterogeneous SoM — the per-core OS defaults come from the SoM preset's
+`topology:` block; override per-core via the project's `cores:` block.
 
 ## 1. What this guide covers
 
@@ -211,12 +224,29 @@ ipc:
   unset or `false`) — `cacheable: true` is an explicit per-entry
   opt-in, not a SoM-level default; see the cache-coherency note in
   §10 for what it does and does not buy you today.
+- **`address`** — *optional* escape hatch pinning the carve-out to an
+  explicit physical base.  Must be 4 KiB page-aligned, must lie wholly
+  inside a region every `endpoints:` core can reach, and must not
+  overlap another carve-out — the planner refuses the entry with a
+  `status: blocked` reason naming the reachable windows otherwise.
+  Pins are placed before the automatic allocator runs, so the allocator
+  steps around them regardless of alphabetical order.
 - **`name`** — stable identifier.  Becomes the resource-table label
   on OpenAMP, the Linux DT `reserved-memory` node label, and the
   `#define` prefix in the generated header.  Stick to
   `[a-z][a-z0-9_]+`.
 
-For each `ipc:` entry, `tan build` (via alp-sdk's `alp_orchestrate`)
+**Not every `accessible_from:` core reaches a whole region.**  A region
+may declare `access_windows:` — a per-core addressable sub-window — and
+the allocator confines that core's carve-outs to it.  The RZ/V2N
+Cortex-M33 is the live case: per Renesas FSP `bsp_slave_address.h` its
+DDR window is CM33-secure `0x80000000` / CM33-non-secure `0x90000000` →
+A55 `0x40000000`, **256 MiB**, while `ddr_main` spans 4 GiB from
+`0x48000000`.  Without the window a top-down allocation handed the M33
+`0x147f80000`, a 33-bit address that truncates to `0x47f80000` — below
+the DDR base — the moment it is cast to a pointer on the M33.
+
+For each `ipc:` entry, `tan build`
 emits a header both halves `#include`:
 
 For a channel named `alp_default_rpmsg`, the stem is its
@@ -244,7 +274,7 @@ between the Linux DT and the Zephyr overlay becomes impossible.
 
 **Blocked carve-outs.**  When a SoM preset still carries TBD
 `mailbox.controller` or TBD `memory_map.base` / `size` (the common
-case while the SoM is being HW-mapped), the orchestrator emits the
+case while the SoM is being HW-mapped), the planner emits the
 manifest entry as `status: blocked` + `reason: ...` instead of
 aborting.  The generated `<alp/system_ipc.h>` carries an `#error`
 directive for the blocked channel so the slice build trips at compile
@@ -256,13 +286,13 @@ unblock.
 ## 6. Building
 
 ```bash
-tan --project examples/multicore/rpmsg-v2n build
+tan build --project examples/multicore/rpmsg-v2n
 ```
 
-`tan build` plans first, then executes (ADR 0020: alp-sdk plans,
-`tan` is the sole executor):
+`tan build` plans and executes in Python Tan (ADR 0020). alp-sdk keeps the
+original planner as the reference/parity producer:
 
-1. The SDK's planner (`alp_orchestrate`) loads + validates
+1. Tan's relocated planner loads + validates
    `board.yaml` against the board.yaml schema.
 2. The planner resolves the SoM preset → topology defaults →
    effective per-core mapping.
@@ -275,8 +305,7 @@ tan --project examples/multicore/rpmsg-v2n build
    plan registers.
 6. `tan` dispatches slice builds in parallel (`west` / `bitbake` /
    `cmake` per slice).
-7. `tan` writes `build/system-manifest.yaml`, seeded from the
-   planner's `--emit system-manifest`, joining everything together.
+7. `tan` writes `build/system-manifest.yaml`, joining everything together.
 
 Output layout:
 
@@ -286,7 +315,9 @@ build/
 │   ├── conf/local.conf
 │   └── tmp/deploy/images/e1m-v2n101-a55/{rootfs.wic.gz, Image, *.dtb}
 ├── m33_sm-zephyr/
-│   └── zephyr/zephyr.elf
+│   ├── alp.conf                   (the slice's -DEXTRA_CONF_FILE fragment)
+│   └── build/                     (west's own tree — `west build` runs here
+│       └── zephyr/zephyr.elf       with cwd=m33_sm-zephyr and no `-d`)
 ├── helper-gd32/
 │   └── gd32_bridge.bin
 ├── helper-cc3501e/
@@ -304,7 +335,7 @@ or the Zephyr CMakeLists.
 
 **Manifest determinism.**  `system-manifest.yaml` is byte-stable
 across rebuilds — re-running `alp_orchestrate --emit system-manifest`
-(what `tan build` / `tan clean` drive under the hood) yields an
+(the SDK reference path mirrored by Python Tan) yields an
 identical manifest, which `pr-alp-build.yml` enforces by calling the
 orchestrator directly.  Wall-clock fields (per-slice `duration_s`)
 live on the runtime Slice dataclass but never land in the manifest;
@@ -341,9 +372,8 @@ This pairs with the build plan below: the **manifest** is the *result*
 build/run/debug/flash; the **build plan** is the *write-free recipe* to
 drive the build itself.
 
-**Machine-readable build plan.**  Tooling that wants to drive the
-build itself — the `tan` CLI / IDE extension does — consumes the plan
-instead of re-deriving it:
+**Machine-readable SDK reference plan.** The published plan contract remains a
+parity and interoperability seam. Generate the SDK reference form with:
 
 ```bash
 PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit build-plan
@@ -352,7 +382,10 @@ PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit build-pl
 The JSON carries one entry per non-`off` core (build dir, the resolved
 app source dir, the exact tool command, env) plus every generated
 artefact **with its contents**, so a consumer materialises files and
-runs commands without any planner logic of its own.  Every relative
+runs commands without planner logic of its own. Python Tan normally creates
+the equivalent plan in process; `tan build --plan-from <file>` can consume a
+saved reference plan, with writes opt-in through `--materialise` or `--execute`.
+Every relative
 path resolves against the input `board.yaml`'s own directory, never the
 CLI's CWD, so the plan is deterministic, write-free, and versioned by
 its own `schemaVersion` — see
@@ -383,6 +416,15 @@ enforces for the manifest above.  Validate a real plan with:
 ```bash
 python3 scripts/check_build_plan.py --plan build-plan.json
 ```
+
+`--plan` validates only against the schema above (tolerant consumer): a
+slice's `command.tool` is documented as a bare executable identity
+('west', 'bitbake', …), never a location, but the schema itself accepts
+any string there — a `--plan`-supplied file, e.g. one an IDE resolved a
+tool path into itself, may legitimately carry one. The bare-identity
+convention is instead asserted only over plans the SDK emits itself
+(the default no-`--plan` corpus check), never against a `--plan` file
+(issue #1286).
 
 ### Build receipts (`build-receipt-v1`)
 
@@ -418,7 +460,7 @@ Zephyr slice rebuilds incrementally in seconds while the already-built
 Yocto slice is reused (west/bitbake short-circuit an up-to-date tree):
 
 ```bash
-tan --project examples/multicore/rpmsg-v2n build --native
+tan build --project examples/multicore/rpmsg-v2n --native
 ```
 
 (There is no per-slice `--core` flag on `tan build`; it runs every
@@ -476,23 +518,44 @@ jumps straight to the right log on a failure.
   with `printk("ept=%u\n", ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT)` — they
   should match the manifest's `ipc[].rpmsg_endpoint_ids` field.
 
-### Renode smoke test
+### Verifying without a board
 
-You don't need a board to verify the heterogeneous handshake:
+Renode-based simulation (`tan renode`) is retired — see
+[ADR 0022](adr/0022-python-executor-renode-retirement.md), **Amendment
+2**, which re-instated the retirement Amendment 1 had withdrawn and
+widened it. The `pr-renode-*` CI workflows are deleted, `tan-cli` no
+longer registers the verb, and the `metadata/renode/` platform models and
+the `tests/renode/` fixtures are deleted with them.
+alp-sdk ships no simulator of its own, and none is planned.
 
-```bash
-tan renode
-```
-
-Renode loads both slice images, simulates RPMsg over its mailbox
-peripheral, and runs a name-service ping/pong.  CI uses the same
-`tan renode` invocation in `pr-renode-dual-os.yml`.
+**Verify on real hardware instead.** `tan build` + `tan flash`, then
+read the per-slice logs listed above. There is no simulated substitute
+for the cross-core RPMsg handshake itself — it can only be exercised on
+silicon. A single core's own logic, if it has no cross-core dependency,
+can still be smoke-tested headless with `tan run` under `native_sim`;
+that is the only board-free path alp-sdk has left, and it covers one
+image at a time, never the multi-core system.
 
 ## 9. Cross-core API
 
 `<alp/rpc.h>` is the customer-facing IPC API.  It sits on OpenAMP and
 uses the generated endpoint constants — apps don't type addresses,
 endpoint IDs, or mailbox channels by hand.
+
+> **This section shows the general, symmetric `<alp/rpc.h>` shape.**
+> `examples/multicore/rpmsg-v2n`'s actual `m33_sm/src/main.c` does
+> **not** follow it: for this V2N phase (alp-sdk #683) the M33 side
+> deliberately speaks raw OpenAMP instead of `<alp/rpc.h>`, and its
+> endpoint address is a fixed constant rather than the generated
+> `ALP_IPC_..._SRC_EPT`/`_DST_EPT` pair the producer snippet below
+> uses.  The real Linux side (`linux/src/main.c`) is written against
+> that raw-OpenAMP reality — see its file header and
+> `examples/multicore/rpmsg-v2n/README.md`'s status note (alp-sdk
+> #1167) rather than this section's snippets for the working code.
+> The producer/consumer shape below applies as-is on boards whose
+> M-class side uses the standard `<alp/rpc.h>` backend -- see
+> `examples/multicore/rpmsg-aen` (AEN M55-HP → A32, method
+> `imu_sample`) for a working matched pair.
 
 ### Producer (M33-SM)
 
@@ -568,23 +631,39 @@ you hardcode the strings instead, the runtime returns
 `ALP_ERR_NOSUPPORT` because no carve-out backs the name; check
 `alp_last_error()`.
 
-**Cache coherency on AEN — read this before setting `cacheable: true`
-on an rpmsg channel.**  The allocator's default carve-out is
-non-cacheable on every SoM, V2N and AEN alike.  `cacheable: true` is an
-explicit per-entry opt-in that is supposed to mean "the orchestrator
-emits matching cache-maintenance hooks on both sides, don't write cache
-ops by hand" — **that emission does not exist yet.**
-`cfg->cacheable` is stored on the `<alp/rpc.h>` backend struct
-(`src/backends/rpc/zephyr_drv.c` / `yocto_drv.c`) and never read again;
-there is no `sys_cache_*` / `arch_dcache_*` call anywhere under `src/`
-or `include/`. A `cacheable: true` rpmsg channel on AEN today (e.g.
-`examples/multicore/rpmsg-aen`, `a32_cluster` ↔ `m55_hp`) is exactly the
-#1080 cross-core D-cache hazard with no mitigation — tracked as **#1088**.
-Until that lands: if you reach below the RPC surface to read shared
-memory directly, or you're on AEN at all, treat `cacheable: true` as
-"I will call the right cache ops myself" (`sys_cache_data_flush_range`
-on the writer + `sys_cache_data_invd_range` on the reader), not as a
-promise the SDK does it for you.
+**Cache coherency on AEN — `cacheable: true` is rejected on rpmsg
+channels.**  The allocator's default carve-out is non-cacheable on every
+SoM, V2N and AEN alike.  `cacheable: true` was once an explicit
+per-entry opt-in, meant to say "the orchestrator emits matching
+cache-maintenance hooks on both sides, don't write cache ops by hand" —
+**that emission was never built.**  `cfg->cacheable` is stored on the
+`<alp/rpc.h>` backend struct (`src/backends/rpc/zephyr_drv.c` /
+`yocto_drv.c`) and never read again; there is no `sys_cache_*` /
+`arch_dcache_*` call anywhere under `src/` or `include/`.
+
+Rather than leave a flag that selects an unimplemented safety path,
+`load_board_yaml` now **hard-rejects** `cacheable: true` on any
+`kind: rpmsg` entry with an `OrchestratorError` naming #1088, and the
+orchestrator emits `CONFIG_DCACHE=n` for every Zephyr core named as an
+rpmsg endpoint — the same treatment `kind: raw_shmem` has had since
+#1080/#1086.  Remove the flag (or set it to `false`); there is nothing
+to opt into yet.
+
+This is a mitigation, not the feature.  Real per-carve-out cache
+maintenance (`sys_cache_data_flush_range` on the writer,
+`sys_cache_data_invd_range` on the reader) plus a `cacheable: true` path
+that honours it remains open as **#1088**.
+
+Scope, so nobody assumes more than is true: `CONFIG_DCACHE` is a Zephyr
+symbol, and `_slice_alp_conf` only runs for `os: zephyr` slices, so the
+Linux-side cores never receive it.  They do not need it — the A55/A32
+side of an rpmsg carve-out is already uncached, whether it is UIO-mapped
+as Device memory (`src/backends/rpc/yocto_uio_drv.c`) or kernel-managed
+through the standard rpmsg/virtio DMA-coherent path
+(`src/backends/rpc/yocto_drv.c`).  Practically the emission only changes
+behaviour on Cortex-M55 (AEN's `m55_hp`); Cortex-M33 does not select
+`CPU_HAS_DCACHE`, so it is a no-op on V2N's `m33_sm`, NX9101's `m33`,
+and i.MX 93's `m33`.
 
 `ipc[].kind: raw_shmem` — the low-level `<alp/mproc.h>` shmem+mailbox
 primitives `<alp/rpc.h>` sits on — has the identical gap (no
@@ -620,10 +699,10 @@ as the build argument:
 
 ```bash
 # good
-tan --project examples/multicore/rpmsg-v2n build
+tan build --project examples/multicore/rpmsg-v2n
 ```
 
-The orchestrator writes `build/` next to the project's `board.yaml`.
+Tan materialises `build/` next to the project's `board.yaml`.
 
 ## 11. Next steps
 

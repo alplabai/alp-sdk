@@ -11,57 +11,72 @@ firmware as a first-class consumer.
 > it with cross-version navigation + search.  Stuck on something?
 > Ask on [**community.alplab.ai**](https://community.alplab.ai/).
 
-> **Two front ends: `tan` (build) vs `alp` (everything else).**  The
-> SDK's `board.yaml` drives both, but alp-sdk itself is **plans-only**
-> (ADR [0020](adr/0020-sdk-owns-build-execution.md)) — it never runs a
-> build.
+> **One user CLI: `tan`.** The SDK's `board.yaml` remains the project source of
+> truth. Python Tan owns the normal in-process planner and executor; alp-sdk
+> owns the metadata, schemas, generated contracts, and reference emitters used
+> to keep that relocated planner in parity (ADR
+> [0020](adr/0020-sdk-owns-build-execution.md)).
 >
-> - **`tan` CLI** — the sole build executor, a standalone public repo
+> - **`tan` CLI** — the planner and build executor, in a standalone public repo
 >   ([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)).
->   `tan --project <app-dir> build` fans the app's `board.yaml` out
->   into per-core build slices (via alp-sdk's `alp_orchestrate --emit
->   build-plan`), runs the full pre-flight (schema validation, SoC
+>   `tan build --project <app-dir>` fans the app's `board.yaml` out
+>   into per-core build slices in process, runs the full pre-flight (schema validation, SoC
 >   caps, hw_info header) and delegates to `west build` for the real
 >   SoM `board.yaml` names; there is no separate `--board`/`--core`
 >   selector, the target comes from the project itself.  This is the headline
 >   [README Quickstart](../README.md#quickstart) — if you just want
->   a hello-world running in two minutes, start there.  Install
->   `tan` separately from its own repo -- the automatic installer
->   needs no Rust toolchain: `curl -fsSL
->   https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh
->   | sh`.  Building from source instead needs Rust 1.86+
->   ([rustup.rs](https://rustup.rs)) and a system C toolchain
->   (`build-essential` / `gcc gcc-c++` -- see
->   [`docs/cross-platform-setup.md`](cross-platform-setup.md) §2.1):
->   `git clone https://github.com/alplabai/tan-cli && cd tan-cli &&
->   cargo install --path crates/tan-cli --locked`.
-> - **`tan`'s forwarded verbs** — everything that isn't a build: `tan
+>   a hello-world running in two minutes, start there. As of `tan-cli`
+>   [v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0) (current
+>   release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+>   the published release installer (`curl -fsSL
+>   https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh`
+>   on Linux/macOS, `irm
+>   https://raw.githubusercontent.com/alplabai/tan-cli/main/install.ps1 | iex`
+>   on Windows) installs the real
+>   Python `tan` directly — it no longer resolves the frozen Rust v0.4.1
+>   release. Four prebuilt archives ship (Windows x64, Linux x64 glibc, macOS
+>   x64/arm64); other hosts install from source. Most users should just run
+>   the release installer above and skip the "fastest path" block below —
+>   this walkthrough's own source-build steps exist to exercise the exact
+>   clone-and-build path this repo's own CI validates (and are how you'd
+>   pick up a `tan-cli` fix that hasn't been tagged yet), not because the
+>   release is behind. Alp's `tan` is
+>   not distributed on PyPI, and the bare name `tan` there belongs to an
+>   unrelated project (`200` for it: `tan` v23.7.0, "The compromising code
+>   formatter") -- `pip install tan` does not get you this tool. `alp-tan`
+>   is not registered there either (`404` for it, not a reservation
+>   placeholder).
+> - **Native Python commands** — `tan
 >   init` scaffolds a project, `tan validate` checks a `board.yaml`,
->   `tan generate --target zephyr-conf` (one of six supported targets
+>   `tan generate --target zephyr-conf` (one of twelve supported targets
 >   — see [`docs/cli.md`](cli.md) for the full list) regenerates a
 >   single build artefact, plus `tan monitor` / `tan model` /
->   `tan new-som` / `tan explain` / `tan faultdecode`.  `tan doctor`
->   is the one exception -- a native Rust check, not a forwarded verb.
+>   `tan new-som` / `tan explain` / `tan faultdecode` / `tan doctor`.
+>   Only `migrate`, `lock`, and `quality` still forward to west commands.
 >   The full verb reference lives in [`docs/cli.md`](cli.md).
 >
-> Every `board.yaml`-driven `tan --project <app-dir> build` runs
+> Every `board.yaml`-driven `tan build --project <app-dir>` runs
 > through the same loader and validator, whichever real SoM the
 > project targets.  The surviving west-extension commands (`west
 > alp-migrate`, `west alp-lock`, `west alp-quality`, `west alp-emit`)
 > are unaffected by the build-executor move.
 
-If you'd rather skim, the fastest path is:
+If you'd rather skim, here's the source-build path in one block (the
+release installer above is the faster route if you just want the tool —
+this is the clone-and-build path CI itself exercises):
 
-> Needs `git` and `curl` already on PATH -- a from-scratch host (a bare
-> container, a fresh VM) needs those installed first; see the
+> Needs `git` and Python 3.12+ already on PATH -- a from-scratch host (a
+> bare container, a fresh VM) needs those installed first; see the
 > per-platform one-liners under "1. Prerequisites" below
 > (`sudo apt install -y git curl` on Debian/Ubuntu).
 
 ```bash
 git clone https://github.com/alplabai/alp-sdk
 cd alp-sdk
-curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh  # one-time: install tan (no Rust toolchain needed)
-export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
+git clone --branch dev https://github.com/alplabai/tan-cli ../tan-cli
+python3 -m venv ../tan-cli/.venv
+../tan-cli/.venv/bin/python -m pip install ../tan-cli/python
+export PATH="$PWD/../tan-cli/.venv/bin:$PATH"
 tan bootstrap --sdk-root "$PWD"                      # one-time: west + Zephyr workspace + venv
 
 # one-time: the arm-zephyr-eabi cross toolchain this build needs (~a few
@@ -71,33 +86,30 @@ tan bootstrap --sdk-root "$PWD"                      # one-time: west + Zephyr w
     --install-dir "$PWD/zephyr-sdk" )
 export ZEPHYR_SDK_INSTALL_DIR="$PWD/../zephyr-sdk"
 
-# one-time per project: pin THIS alp-sdk checkout for the example --
-# `--project` scoping means this has to match the --project value below,
-# not just be run once at the repo root; until it's run, `tan build`
-# reports `[x]  sdk   no SDK selected`
-tan --project examples/peripheral-io/gpio-button-led sdk switch "$PWD"
-
-tan --project examples/peripheral-io/gpio-button-led build
+# sdk install/switch are not yet ported; select this checkout explicitly.
+tan build --project examples/peripheral-io/gpio-button-led --sdk-root "$PWD"
 # this cross-compiles for the example's real SoM (E1M-AEN801) -- it
 # needs the Zephyr SDK toolchain pinned in metadata/toolchains.json;
 # flash it and open a serial monitor to see output like:
-#   [gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
+#   [gpio] init button=BOARD_PIN_ENCODER_SW, led=BOARD_PIN_LED_RED
 #   ...
 #   [gpio] done
 ```
 
-`tan bootstrap` is the canonical fresh-clone setup on POSIX hosts --
-Linux and macOS.  On native Windows it refuses outright
-(`bootstrap.sh` is POSIX-only); use WSL2 (Ubuntu) or follow the
-native steps in [`docs/cross-platform-setup.md`](cross-platform-setup.md)
-§4.  On the hosts it supports, `tan bootstrap` runs the SDK's own
-`scripts/bootstrap.sh` -- it creates the Zephyr workspace one level
-up from `alp-sdk/`, runs `west update --narrow`, installs the Zephyr
-Python deps + the SDK's extras (`jsonschema`, `imgtool`), and prints
-OS-specific `apt` / `brew` commands for the optional native libraries
-the Yocto-side backends need.  It is a thin wrapper around that
-script, not a separate implementation -- the delegation is exactly
-why the two cannot drift apart.
+`tan bootstrap` is the canonical fresh-clone setup and runs natively on
+Linux, macOS, **and Windows** (PowerShell) for the Zephyr-on-M workflow this
+walkthrough uses -- it no longer shells out to `bootstrap.sh` (that POSIX-only
+refusal was retired; see tan-cli's `bootstrap.windows-unsupported` issue code,
+now reserved-but-unused). Only the Yocto/A-class path needs WSL2 (Ubuntu); see
+[`docs/cross-platform-setup.md`](cross-platform-setup.md) §4/§5 for the native
+Windows walkthrough and the Yocto/WSL2 split. Python Tan performs the
+bootstrap phases from the SDK's `metadata/bootstrap.json` on every host: it
+creates the Zephyr workspace one level up from `alp-sdk/` (or under
+`--workspace <dir>`, relocating the checkout there first if needed), runs
+`west update --narrow`, installs the Zephyr Python dependencies and SDK
+extras, and reports any missing host prerequisites -- native Windows gets
+Windows-specific guidance (7-Zip on PATH for `west sdk install`, the
+`arm-zephyr-eabi` toolchain stays a separate manual step everywhere).
 
 `scripts/bootstrap.sh` (and its PowerShell twin `scripts/bootstrap.ps1`
 -- see [`docs/cross-platform-setup.md`](cross-platform-setup.md) §4)
@@ -112,8 +124,8 @@ the build plan carries the per-slice `PATH` additions, so `tan build`
 resolves `west` itself.  Activate it (`source ../.venv/bin/activate`)
 only if you intend to drive `west` directly.
 
-`tan build` validates the example's `board.yaml` (via alp-sdk's
-`alp_orchestrate`), generates the build-time config from it, and
+`tan build` validates the example's `board.yaml` with Tan's relocated planner,
+generates the build-time config from it, and
 delegates to `west build`.  The rest of this document explains *why*
 each step is what it is so you can adapt it to your own project.
 
@@ -167,7 +179,7 @@ instead -- see
 | Tool        | Version          | Notes                                                    |
 |-------------|------------------|----------------------------------------------------------|
 | Zephyr      | v4.4.1 (stable)  | Pinned by `west.yml`; see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md). |
-| Python      | 3.10+ to bootstrap; 3.12+ to actually build | 3.10 is `bootstrap.sh`/`.ps1`'s and `pyproject.toml`'s support **floor**. Zephyr v4.4.1's own `cmake/modules/python.cmake` separately hardcodes `PYTHON_MINIMUM_REQUIRED 3.12`, so a host below that gets through bootstrap but fails later, at `west build`'s CMake configure -- bootstrap doesn't raise its own floor to match today; see [`docs/cross-platform-setup.md`](cross-platform-setup.md) §1.1 for why. Dev/CI standardise on the repo-root `.python-version` **pin** (currently 3.12). |
+| Python      | 3.10+ for SDK bootstrap tools; 3.12+ for current Tan source and Zephyr builds | 3.10 is `bootstrap.sh`/`.ps1`'s and `pyproject.toml`'s support **floor**. The Python Tan port and Zephyr v4.4.1's `cmake/modules/python.cmake` require 3.12, so use 3.12+ for the documented end-to-end path; see [`docs/cross-platform-setup.md`](cross-platform-setup.md) §1.1. Dev/CI standardise on the repo-root `.python-version` **pin** (currently 3.12). |
 | Python deps | `pyyaml`, `jsonschema`, `imgtool` | All installed by `scripts/bootstrap.sh`; manual install: `pip install pyyaml jsonschema imgtool`. |
 | CMake       | 3.20+            | `find_package(Zephyr)` minimum.                          |
 | C compiler  | GCC 11+ / Clang 14+ | `native_sim` builds; cross-toolchain for real silicon. |
@@ -202,46 +214,30 @@ pip install west
 wsl --install -d Ubuntu
 ```
 
-**Verify your setup first.**  Before building anything, run the
-read-only build-readiness preflight -- it checks the tools above
-(Python, `west`, `cmake`, `ninja`, the Zephyr pin read live from
-`west.yml`, the Zephyr SDK) plus `board.yaml` resolution, and prints
-a `[+]` (pass) / `[!]` (warn) / `[x]` (fail) line with a fix hint for
-each -- not `[PASS]`/`[WARN]`/`[FAIL]`, and there is no `--strict`
-flag:
+**Verify your setup first.** Before building anything, run Tan's read-only
+build/flash readiness preflight. It checks the SDK and project, the resolved
+west/Zephyr workspace and pin, the effective Python floor, host prerequisites,
+the Zephyr SDK, and programming tools. Each problem includes a fix hint:
 
 ```bash
-tan doctor --build                    # human-readable report
-tan doctor --build --format json      # machine-readable
+tan doctor                    # human-readable report
+tan doctor --format json      # machine-readable
 ```
 
-```
-  tan doctor --build  zephyr · yocto · baremetal
+It is HW-free (no build and no flash), so it is safe to run anytime. An
+unhealthy environment exits 4. `--build` remains accepted for compatibility
+with v0.4 callers but no longer changes the checklist. On tan-cli `dev`
+(ahead of the tagged `v0.5.1` release the installer above ships -- lands in
+`v0.6.0-rc1`+), interactive `--fix` (it needs a TTY on both stdin and
+stderr) can run manifest remedies: a remedy that needs no elevation (macOS
+`brew`, Windows `winget`) runs for any caller; a `sudo`-prefixed remedy
+(Linux `apt`/`dnf`) is refused with the command printed to run by hand for
+a non-root caller, and has the literal `sudo ` prefix stripped and the rest
+run for a caller who is already root; and without a TTY there are no
+repairs.
 
-  [+]  sdk               alp-sdk at /work/alp-sdk
-  [x]  boardYaml         board.yaml not found — run `tan init` or pass `--board-yaml <path>`
-  [+]  workspace         Zephyr workspace at /work
-  [+]  westResolved      west resolved
-  [+]  zephyrVersion     Zephyr v4.4 matches the SDK pin
-  [+]  west              west is available.
-  [+]  cmake             cmake is available.
-  [!]  ninja             ninja not found on PATH — needed for Zephyr builds.
-  [!]  zephyrSdk         Zephyr SDK toolchain not detected (ZEPHYR_SDK_INSTALL_DIR unset).
-  [!]  bitbake           bitbake not found on PATH — needed for Yocto builds.
-  [!]  bmaptool          bmaptool not found; Yocto .wic flash falls back to dd (slower).
-  [!]  vendorToolchain   Baremetal needs a vendor toolchain (Alif/Renesas/NXP), per SoC family.
-  [+]  sdkProvenance     alp-sdk 0.13.0 @ 08230793
-
-  7 passed · 5 warnings · 1 failed
-```
-
-It is HW-free (no build, no board, no flash), so it is safe to run
-anytime.  Resolve every `[x]` before continuing.  Most `[!]` lines are
-optional or real-silicon-only tooling (Zephyr SDK, hal_alif) and can
-wait -- but `ninja` is the one exception: `tan doctor --build` rates
-it `[!]` today, yet every `west build` needs it (Zephyr's default
-CMake generator on every host), so treat a `[!] ninja` line the same
-as a `[x]` and install it before building:
+Every `west build` needs Ninja, so install it before continuing if the report
+cannot find it:
 
 ```bash
 sudo apt-get install -y ninja-build   # Linux
@@ -249,13 +245,9 @@ brew install ninja                    # macOS
 winget install -e --id Ninja-build.Ninja   # Windows
 ```
 
-Skipping it doesn't fail here; it surfaces later as a raw `CMake
-Error: CMake was unable to find a build program corresponding to
-"Ninja"` deep inside `west build` (see
-[`docs/troubleshooting.md`](troubleshooting.md)).  Plain
-`tan doctor` (no `--build`) is a different, debug-readiness preflight
-for attaching a debugger to a target/server, not this build check --
-see [`docs/cli.md`](cli.md#tan-doctor----debug-readiness-preflight).
+See [`docs/cli.md`](cli.md#tan-doctor) for the
+current check contract and [`docs/troubleshooting.md`](troubleshooting.md) for
+the failures each check prevents.
 
 For real-silicon builds you'll also need the Zephyr SDK toolchain --
 its pinned version/URL/sha256 live in
@@ -271,18 +263,17 @@ west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
 export ZEPHYR_SDK_INSTALL_DIR="$PWD/zephyr-sdk"
 ```
 
-Then, once per project, tell `tan` which alp-sdk checkout to build
-with -- scoped to the SAME `--project` value you pass to `tan build`,
-not run once globally:
+Select the alp-sdk checkout with `--sdk-root` when you build:
 
 ```bash
-tan --project <app-dir> sdk switch <path-to-this-alp-sdk-checkout>
+tan build --project <app-dir> --sdk-root <path-to-this-alp-sdk-checkout>
 ```
 
-Skipping this makes `tan doctor --build`'s `sdk` line, and `tan
-build` itself, report `no SDK selected` even with everything else in
-place.  See [`docs/boards/e1m-evk.md`](boards/e1m-evk.md) for
-the EVK's wiring.
+Python Tan resolves SDKs in this order: `--sdk-root`, the project's
+`.alp/sdk-path`, a sibling checkout, then `ALP_SDK_ROOT`. `tan sdk install` and
+`tan sdk switch` currently refuse with `sdk.not-ported`; do not use the old
+persistent-selection commands during the port. See
+[`docs/boards/e1m-evk.md`](boards/e1m-evk.md) for the EVK's wiring.
 
 > **Note for Windows users.**  The repo's `.gitattributes` pins
 > LF on every source file -- a fresh clone gets identical bytes
@@ -315,7 +306,7 @@ allocator reads the SoM preset + `pad_routes:` from this repo's
 emits the same `<alp/...>` calls you'd write by hand.  Switching
 to studio at any point is non-destructive — your standalone app
 keeps working alongside the studio-generated code.  See
-[`alplabai/alp-studio`](https://github.com/alplabai/alp-studio).
+`alplabai/alp-studio` (not a public GitHub repo).
 
 ## 3. Set up a Zephyr workspace
 
@@ -356,10 +347,9 @@ read-only artefact inspector), all registered via
 `scripts/west-commands.yml`.  Building is not one of them: the rest
 of this walkthrough uses the standalone `tan` CLI
 ([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)), which
-consumes alp-sdk's `alp_orchestrate --emit build-plan` output and
-drives `west build` itself.  See [`docs/cli.md`](cli.md) for the
-full `alp` verb reference (init, validate, emit, doctor, monitor,
-model, new-som, …) — none of which execute a build.
+plans from alp-sdk's metadata in process and drives `west build` itself.
+alp-sdk's `alp_orchestrate --emit build-plan` remains the reference/parity
+producer. See [`docs/cli.md`](cli.md) for the full Tan verb reference.
 
 ## 4. First build: the GPIO example
 
@@ -370,16 +360,13 @@ build` does the pre-flight + delegates to `west build`:
 
 ```bash
 cd alp-workspace
-tan --project alp-sdk/examples/peripheral-io/gpio-button-led sdk switch "$PWD/alp-sdk"   # one-time per project
-tan --project alp-sdk/examples/peripheral-io/gpio-button-led build
+tan build --project alp-sdk/examples/peripheral-io/gpio-button-led \
+    --sdk-root "$PWD/alp-sdk"
 ```
 
-The `sdk switch` step pins which alp-sdk checkout `tan` builds this
-project with — it's scoped to the exact `--project` value, so a
-DIFFERENT `--project` (a different example, or your own app) needs its
-own `sdk switch` first; see "6. Run more examples" below for the
-multi-project shape. Skip it and `tan build` fails with `[x]  sdk   no
-SDK selected` even though the checkout is right there.
+`--sdk-root` selects the checkout for this invocation. A committed
+`.alp/sdk-path` can provide the same project-local selection when you control
+the application repository.
 
 What this does:
 
@@ -399,13 +386,15 @@ What this does:
   `board.yaml` target; it's reached through twister /
   `testcase.yaml`'s `platform_allow`, a separate mechanism.
 
-`tan build` walks four steps under the hood, driven by alp-sdk's
-`alp_orchestrate --emit build-plan`:
+`tan build` walks four steps under the hood, driven by Tan's relocated
+in-process planner. The SDK's `alp_orchestrate --emit build-plan` path is kept
+as its reference/parity producer:
 
 1. **Validates** the app's `board.yaml` (schema + SoM SKU preset +
-   board preset + `hw_rev` / SDK-version compatibility window +
-   `peripherals:` vs SoC caps) — the same check `tan validate` runs
-   standalone.
+   board preset + `hw_rev` / SDK-version compatibility window) — run
+   `tan validate` first for the full check, including the advisory
+   `peripherals:` vs SoC caps cross-check; `tan build` plans in-process
+   and never spawns the SDK validator.
 2. **Materialises** every generated artefact the plan carries,
    including the build-time hw_info header at
    `<build>/generated/alp_hw_info_build.h` so apps that include
@@ -424,8 +413,8 @@ not this one) — flash it and open a serial monitor to see illustrative
 output like this (exact ordering/timing may vary):
 
 ```
-*** Booting Zephyr OS build v4.4.0 ***
-[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
+*** Booting Zephyr OS build v4.4.1 ***
+[gpio] init button=BOARD_PIN_ENCODER_SW, led=BOARD_PIN_LED_RED
 [gpio] led=0 status=0
 [gpio] led=1 status=0
 [gpio] led=0 status=0
@@ -467,11 +456,9 @@ for ex in peripheral-io/pwm-led-fade peripheral-io/adc-voltmeter \
           peripheral-io/can-loopback peripheral-io/qenc-readout \
           power-timing/counter-alarm power-timing/rtc-clock \
           power-timing/wdt-feed audio/i2s-tone; do
-    # --sdk-root here (rather than a `sdk switch` per project) is the
-    # right shape for a one-shot loop over many --project values: it
-    # takes effect for this invocation only, no persistent per-project
-    # pointer to clean up afterwards.
-    tan --sdk-root "$PWD/alp-sdk" --project alp-sdk/examples/$ex build
+    # --sdk-root applies to this invocation, so the loop needs no persistent
+    # per-project pointer.
+    tan build --sdk-root "$PWD/alp-sdk" --project alp-sdk/examples/$ex
 done
 ```
 
@@ -500,14 +487,24 @@ Each name resolves to a manifest under
 right wiring per OS (Zephyr `CONFIG_LVGL=y` in `alp.conf`, Yocto
 `IMAGE_INSTALL` for the A-cores, …) and refuses a library the target
 can't run, naming the failing constraint.  Check what's selected and
-whether it's compatible:
+whether it's compatible — run this from *your project's* directory
+(the one containing the `board.yaml` above): the `libraries` line only
+appears when `doctor` is run where it can find that `board.yaml`:
 
 ```bash
-python -m alp_cli doctor    # a "libraries" line reports tier + licence + fit
+cd <your-project-dir>   # contains the board.yaml you just edited
+tan doctor               # a "libraries" line reports tier + licence + fit
 ```
 
+`doctor`'s library check only handles the bare-string `libraries: [name,
+...]` form shown above today; the dict form (`- name: lvgl` / `cores:
+[...]`, also schema-valid and what several in-tree examples use) currently
+makes it abort with an uncaught error instead of reporting — a `doctor.py`
+fix, not a docs one, tracked separately.
+
 The curated set today: `lvgl`, `cmsis-dsp`, `cmsis-nn`, `nanopb`,
-`zcbor` (all Tier A).  See
+`zcbor`, `modbus` (all Tier A), plus a growing Tier B (recipe-only) set
+including `cmsis-stream`, `cmsis-cv`, and `arm-2d`.  See
 [`metadata/libraries/README.md`](../metadata/libraries/) for
 the full list and how to add one.
 
@@ -528,7 +525,7 @@ som:
 — then build and flash the same way:
 
 ```bash
-tan --project alp-sdk/examples/peripheral-io/gpio-button-led build
+tan build --project alp-sdk/examples/peripheral-io/gpio-button-led
 tan flash alp-sdk/examples/peripheral-io/gpio-button-led
 ```
 
@@ -541,7 +538,7 @@ som:
 ```
 
 ```bash
-tan --project alp-sdk/examples/peripheral-io/gpio-button-led build
+tan build --project alp-sdk/examples/peripheral-io/gpio-button-led
 tan flash alp-sdk/examples/peripheral-io/gpio-button-led
 ```
 
@@ -622,7 +619,7 @@ default `west update` skips it.
 |----------|----------------------------------------------------|---------------------------------------------------------------------------------------------------------|
 | **Renesas (RZ/V)** | `hal_renesas` (in Zephyr's own west.yml)   | Nothing extra.  Our `name-allowlist` lets Zephyr import it; `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/` is what the V2N + V2N-M1 paths consume. |
 | **NXP (i.MX 9x)**  | `hal_nxp` (in Zephyr's own west.yml)       | Nothing extra.  `mcux/mcux-sdk-ng/devices/i.MX/i.MX93/` covers MIMX9301..9352 (E1M-NX9101 = MIMX9352).   |
-| **Alif (Ensemble)** | `hal_alif` (in our west.yml, from Alif's own GitHub) + upstream Zephyr `boards/alif/` | **Simpler than v3.7.**  HAL drivers come from `alifsemi/hal_alif v2.2.0` (Apache-2.0) which we pin as a top-level project — fetched on every `west update`.  Upstream Zephyr v4.4 also ships the stock Alif Ensemble board files under `boards/alif/` (`ensemble_e8_dk`, `ensemble_e1c_dk`, `balletto_b1_dk`) -- those target Alif's own EVKs, not the E1M board.  The AEN-specific board files (`alp_e1m_aen801_m55_he`, `alp_e1m_aen801_m55_hp`, `alp_e1m_aen401_m55_hp`, `alp_e1m_aen601_m55_hp`) ship in-tree at [`zephyr/boards/alp/`](../zephyr/boards/alp/) -- no separate overlay or repo needed.  Two Alif drivers (`alif_dave2d-driver`, `alif_image-processing-lib`) are vendor-licensed and sit in the `vendor-sdks` opt-in group; enable when you need DAVE2D / Helium image kernels.  See `docs/vendor-partnerships.md` §Alif for the migration history. |
+| **Alif (Ensemble)** | `hal_alif` (in our west.yml, from Alif's own GitHub) + upstream Zephyr `boards/alif/` | **Simpler than v3.7.**  HAL drivers come from `alifsemi/hal_alif v2.3.0` (Apache-2.0) which we pin as a top-level project — fetched on every `west update`.  Upstream Zephyr v4.4 also ships the stock Alif Ensemble board files under `boards/alif/` (`ensemble_e8_dk`, `ensemble_e1c_dk`, `balletto_b1_dk`) -- those target Alif's own EVKs, not the E1M board.  The AEN-specific board files (`alp_e1m_aen801_m55_he`, `alp_e1m_aen801_m55_hp`, `alp_e1m_aen401_m55_hp`, `alp_e1m_aen601_m55_hp`) ship in-tree at [`zephyr/boards/alp/`](../zephyr/boards/alp/) -- no separate overlay or repo needed.  Two Alif drivers (`alif_dave2d-driver`, `alif_image-processing-lib`) are vendor-licensed and sit in the `vendor-sdks` opt-in group; enable when you need DAVE2D / Helium image kernels.  See `docs/vendor-partnerships.md` §Alif for the migration history. |
 | **DEEPX (DX-M1)**  | Out of Zephyr scope (Linux-side runtime).  | The on-device NPU runs from a Linux PCIe driver, not a Zephyr backend.  `chips/deepx_dxm1/` is the **host-side** Zephyr code that brings up the M1 from the Renesas A55 cluster; `dx_rt` itself rides on Linux/Yocto.  See `examples/v2n/v2n-m1-deepx-inference/` and the customer-side integration notes in `docs/vendor-partnerships.md` §DEEPX. |
 
 ### Bare-metal / non-Zephyr customers
@@ -652,21 +649,44 @@ fetched when a customer opts in to the `vendor-sdks` group.
 ## Reproducing a build with alp.lock
 
 `west alp-lock` writes `alp.lock` — a deterministic, public-safe record of the
-workspace's SDK revision, west project pins, curated library versions, Python
-requirements, and metadata digests. Commit it. `west alp-lock --check` (run in
-CI) fails with a field-level diagnostic when any locked input drifts, so an old
-release can be rebuilt against its exact declared inputs. It contains no local
-paths or credentials. The recorded `sdk.revision` is **provenance** (which SDK
-commit generated the lock) and is not frozen-verified — committing the lock
-advances the repo's own HEAD past it, so `--check` reports it but never fails on
-it; `sdk.version` and the west pins lock the SDK identity you build against. It
-does not yet pin resolved commit SHAs or toolchain container identities (tracked
-follow-ups).
+workspace's SDK version, west project pins, curated library versions, Python
+requirements, and metadata digests. It contains no local paths or credentials.
 
-Because `alp.lock` hashes `metadata/**` and pins the west/library/Python inputs,
-**re-run `west alp-lock` and commit the updated `alp.lock` in the same PR**
-whenever you touch `west.yml`, `metadata/**`, `scripts/requirements.txt`, or
-`scripts/alp_cli/__init__.py` — otherwise the `alp.lock in sync` CI check reds.
+**It is generated on demand, not committed (#1576).** `digests.metadata` is a
+single hash over the whole `metadata/**` tree, so two PRs touching *different*
+metadata files rewrote that one digest line from different bases and
+conflicted on it by construction — the whole-tree hash carries no information
+about which file changed, only that something did, so it couldn't tell two
+non-conflicting edits apart. `build_lock` is a pure function of tracked files
+(`scripts/alp_lock/__init__.py`), so any consumer can regenerate the identical
+document from whichever commit they need it for. CI enforces that the
+generator itself keeps working — `west alp-lock --check` now builds a lock in
+memory and schema-validates it (nonzero on a broken generator or a
+local/abs-path leak) rather than diffing against a tracked copy, because
+there is no tracked copy to diff against.
+
+A tagged **release still ships one**: `.github/workflows/release.yml`
+generates `alp.lock` before packaging the source tarball and folds it into
+the archive, so a consumer with only the tarball — not a git checkout — still
+gets it without running the generator themselves.
+
+`sdk.version` and the west pins lock the SDK identity you build against. The
+lock no longer records an `sdk.revision` (#1615) — a git HEAD written into a
+file that is then committed is stale the moment it lands — and every remaining
+input is file-derived, so regenerating over an unchanged tree reproduces the
+document byte for byte. A lock generated before that change still verifies
+clean. For "which SDK commit produced *this artifact*", use the build receipt
+(`scripts/build_receipt.py`), whose `source.sdkRevision` and `source.sdkDirty`
+are resolved against a real build rather than baked into a committed file —
+worth reaching for between release tags, where many commits share one
+`sdk.version` and the lock's digests cover `metadata/**` but not `src/` or
+`include/`. The lock does not yet pin resolved commit SHAs or toolchain
+container identities (tracked follow-ups).
+
+To inspect a lock locally — e.g. to see what a release tarball would carry —
+run `west alp-lock` (or `python3 scripts/west_commands/alp_lock.py
+--workspace .`); it writes `./alp.lock`, which `.gitignore` keeps out of any
+commit.
 
 ## 9. SoC capability validation
 
@@ -678,8 +698,11 @@ resolves the MPN to the silicon ref (`alif:ensemble:e8` for
 hand.  The validator also cross-checks every entry in
 `peripherals:` against the SoC's `metadata/socs/<vendor>/<family>/<part>.json`
 caps -- a board.yaml asking for `i2s` on a SoC that doesn't route
-I²S fails at `tan build` time with exit code 3, before any
-compile work (the same check runs standalone via `tan validate`).
+I²S is reported by `tan validate` as an `ALP-B010` **warning**
+(`scripts/validate_board_yaml.py` still exits 0; the check is advisory
+because SoC peripheral metadata is incomplete for some parts and some
+peripherals are board-side). `tan build` does not re-run this
+cross-check at all.
 
 At runtime, the documented caps drive the per-`*_open` validation:
 e.g. `alp_adc_open` with `resolution_bits = 16` on a 12-bit SoC
@@ -736,8 +759,8 @@ Key tasks (Command Palette → **Tasks: Run Task**):
   `cmake-args`, `yocto-conf`, `dts-overlay`, `hw-info-h`,
   `west-libraries`).
 - **Per-peripheral examples**: [`examples/`](../examples/README.md)
-  -- 11 minimal apps, one per `<alp/*.h>` class, each driven by a
-  matching `board.yaml`.
+  -- 50+ example apps covering the `<alp/*.h>` peripheral classes,
+  each driven by a matching `board.yaml`.
 - **End-to-end reference apps**:
   [`examples/aen/edgeai-vision-aen/`](../examples/aen/edgeai-vision-aen/)
   (camera → Ethos-U inference → display) and
@@ -746,7 +769,7 @@ Key tasks (Command Palette → **Tasks: Run Task**):
   workflow at a larger scale.
 - **Hardware identification + production-test**:
   [`<alp/hw_info.h>`](../include/alp/hw_info.h) for the runtime
-  EEPROM-manifest + BOARD_ID-ADC API; `scripts/program_eeprom.py`
+  on-module EEPROM-manifest API; `scripts/program_eeprom.py`
   for the factory programmer.
 - **Recommended third-party libraries** that pair with the SDK
   (CMSIS-DSP, ETL, fmt, nlohmann_json, doctest, LittleFS, LVGL,

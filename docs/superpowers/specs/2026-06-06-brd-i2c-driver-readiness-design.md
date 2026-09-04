@@ -1,7 +1,10 @@
 # BRD_I2C Driver Readiness for V2N SoM Bring-up — Design
 
 **Date:** 2026-06-06
-**Status:** Approved
+**Status:** **Implemented.** `chips/act8760/act8760.c` + `chips/da9292/da9292.c`
+(and headers) exist; mocked-I2C unit smokes cover both
+(`tests/zephyr/chips/src/test_power.c`); the probe-all bring-up example
+exists at `examples/v2n/v2n-brd-i2c-bringup`.
 **Branch:** `dev`
 
 ## Context

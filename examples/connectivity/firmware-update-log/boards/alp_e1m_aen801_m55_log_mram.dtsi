@@ -8,20 +8,52 @@
  * audit-log body is the part that lives in MRAM, in alp_ulog_partition below.
  *
  *   0x000000..0x00ffff  boot placeholder
- *   0x010000..0x08ffff  unused by this ITCM-loaded demo
+ *   0x010000..0x08ffff  unused by this ITCM-loaded demo (each core's real
+ *                       slot0 window differs -- see E1M-AEN801.yaml `memory_map:`)
  *   0x090000..0x09ffff  alp_ulog_partition, Zephyr NVS update-log store
  *   0x560000..0x57ffff  reserved for the Alif ATOC package
  *
  * In the hardware-enforced flow, HP owns alp_ulog_partition and HE must be
  * blocked from writing it by the SE/device firewall. Without that firewall
  * policy, MRAM/NVS is persistence only, not application-immutability.
+ *
+ * alp_ulog_partition ALSO carries the `storage_partition` nodelabel (issue
+ * #1101). zephyr/soc-bridge/alif/mpu_regions_e8.c derives its non-MCUboot
+ * MRAM_DEVICE window from DT_NODELABEL(storage_partition) -- that is the
+ * vendor fork's own contract name (zephyr_alif-ref mpu_regions.c), declared
+ * unconditionally at SoC level on every upstream board. A plain rename to
+ * `alp_ulog_partition` alone would silently break sw_tier.c's
+ * PARTITION_EXISTS(alp_ulog_partition) gate too (src/backends/update_log/
+ * sw_tier.c) -- it would just stop finding a *different* name, degrading to
+ * the RAM tier with no build error. Two nodelabels on one node is legal DT
+ * (see zephyr/boards/st/b_u585i_iot02a/b_u585i_iot02a-common.dtsi's
+ * `memc: aps6408l:` for prior art in the pinned toolchain) and resolves both
+ * consumers to the same physical node -- do not "simplify" this back to one
+ * label.
+ *
+ * Unlike this board's own default partition map, `storage_partition` here
+ * is NOT the last partition in mram_storage -- atoc_reserved_partition sits
+ * above it, fixed at 0x560000 by the Alif SE ATOC package. That breaks the
+ * vendor model's implicit "storage tiles to top-of-flash" assumption:
+ * MRAM_EXEC (0x0..0x90000) + MRAM_DEVICE (0x90000..0xa0000) alone would
+ * leave 0xa0000..0x580000 -- ATOC included -- covered by no MPU region, i.e.
+ * privileged RW+exec by ARMv8-M default (PRIVDEFENA). mpu_regions_e8.c
+ * closes that generically with a conditional fifth "MRAM_RESERVED" RO
+ * region that appears only when boot/slot0/storage don't already tile
+ * mram_storage (zero-cost on every other board/example, which do tile it);
+ * see that file's comment on MRAM_RESERVED_SIZE for the full reasoning.
  */
 
 /delete-node/ &boot_partition;
 /delete-node/ &slot0_partition;
-/delete-node/ &slot1_partition;
-/delete-node/ &scratch_partition;
 /delete-node/ &storage_partition;
+/* The board tree's SE-owned band (#1289) is deleted too, because this
+ * overlay re-declares it below with a wider extent.  Leaving both in place
+ * gives two `fixed-partitions` children with label "atoc", and Zephyr emits
+ * `DT_COMPAT_fixed_partitions_LABEL_atoc` once per label:
+ *     error: "DT_COMPAT_fixed_partitions_LABEL_atoc" redefined [-Werror]
+ */
+/delete-node/ &atoc_partition;
 
 &mram_storage {
 	partitions {
@@ -30,18 +62,33 @@
 			reg = <0x0 DT_SIZE_K(64)>;
 		};
 
-		slot0_partition: partition@10000 {
-			label = "image-0-unused";
-			reg = <0x10000 DT_SIZE_K(512)>;
-		};
-
-		alp_ulog_partition: partition@90000 {
+		alp_ulog_partition: storage_partition: partition@90000 {
 			label = "alp-ulog";
 			reg = <0x90000 DT_SIZE_K(64)>;
 		};
 
+		/*
+		 * SE-owned ATOC band (#1289).  Labelled "atoc" to match the
+		 * generated board trees and satisfy
+		 * scripts/check_atoc_reservation.py; it read "alif-atoc" before,
+		 * which no gate recognised.
+		 *
+		 * DELIBERATELY over-reserved: the board trees reserve 32 KiB
+		 * (0x578000..0x580000) and keep 0x560000..0x578000 as writable
+		 * `storage`, but this example replaces the whole partition table
+		 * with its own and has no use for that 96 KiB -- so it keeps the
+		 * wider band rather than perturbing the MRAM_RESERVED MPU region
+		 * described above.  Over-reserving is safe; under-reserving is
+		 * what bricks the part.
+		 *
+		 * NOTE: `read-only;` here is DOCUMENTATION, not enforcement.
+		 * Zephyr's flash_area_write() bounds-checks the partition and
+		 * never consults this property, so a `read-only;` fixed-partition
+		 * child is still writable through a flash_area handle.  What
+		 * actually protects this band is that nothing opens it.
+		 */
 		atoc_reserved_partition: partition@560000 {
-			label = "alif-atoc";
+			label = "atoc";
 			reg = <0x560000 DT_SIZE_K(128)>;
 			read-only;
 		};

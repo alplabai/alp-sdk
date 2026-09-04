@@ -197,6 +197,19 @@ def test_current_snapshot_version_reads_sdk_version_yaml(tmp_path):
     assert abi.current_snapshot_version(sdk_yaml) == "v2.3"
 
 
+def test_current_snapshot_version_tolerates_a_prerelease_suffix(tmp_path):
+    """#1902: `version:` may carry a SemVer pre-release suffix during an rc
+    window (`scripts/bump_version.py --to X.Y.Z-rcN` writes it verbatim).
+    Snapshots are keyed MAJOR.MINOR only, so the suffix is irrelevant to
+    the label -- but pre-fix, the regex's `\\s*$` anchor rejected the whole
+    line and this returned None ("can't verify") for the entire rc window,
+    silently SKIPPING `stage_abi_strict` (scripts/test-all.sh) instead of
+    running it."""
+    sdk_yaml = tmp_path / "sdk_version.yaml"
+    sdk_yaml.write_text("version: 2.3.4-rc1\nstatus: released\n", encoding="utf-8")
+    assert abi.current_snapshot_version(sdk_yaml) == "v2.3"
+
+
 def test_current_snapshot_version_none_when_missing(tmp_path):
     assert abi.current_snapshot_version(tmp_path / "does-not-exist.yaml") is None
 
@@ -234,6 +247,252 @@ def test_main_allows_writing_the_current_version(tmp_path, monkeypatch):
         sys,
         "argv",
         ["abi_snapshot.py", "--version", "v0.10", "--output", str(out)],
+    )
+    rc = abi.main()
+    assert rc == 0
+    assert out.exists()
+
+
+# ---------------------------------------------------------------------
+# Issue #1232: a `--output` rerun that changes no public symbol must
+# not rewrite the file at all -- not even to bump `generated` -- so a
+# full `scripts/test-all.sh` pass on an unrelated PR doesn't dirty
+# `docs/abi/<current>-snapshot.json` with a same-day, zero-substance
+# diff.
+# ---------------------------------------------------------------------
+
+_EMPTY_HEADER = {"functions": {}, "typedefs": {}, "macros": {}, "variables": {}}
+
+
+def test_main_does_not_rewrite_output_when_only_generated_date_differs(tmp_path, monkeypatch):
+    """The core acceptance criterion: headers unchanged from what's
+    already committed -> the file on disk must come out BYTE-IDENTICAL
+    to before the run, even though today's date differs from the
+    committed `generated` value."""
+    sdk_yaml = tmp_path / "sdk_version.yaml"
+    sdk_yaml.write_text("version: 0.10.1\nstatus: released\n", encoding="utf-8")
+    monkeypatch.setattr(abi, "SDK_VERSION_YAML", sdk_yaml)
+
+    fixed_headers = {"alp/x.h": dict(_EMPTY_HEADER)}
+    monkeypatch.setattr(abi, "collect", lambda include_root: fixed_headers)
+
+    out = tmp_path / "v0.10-snapshot.json"
+    existing = {"version": "v0.10", "generated": "2020-01-01", "headers": fixed_headers}
+    # newline="": this fixture stands in for a file git checked out onto
+    # disk, which (.gitattributes: `* text=auto eol=lf`) is LF-exact --
+    # plain write_text() would let Windows' text-mode default silently
+    # write CRLF here, which the guard's byte-exact read must NOT
+    # treat as equivalent to canonical LF (the CRLF case this suite also
+    # covers below); a wrong-mode fixture would trip that same
+    # guard for the wrong reason.
+    out.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="")
+    before = out.read_bytes()
+
+    monkeypatch.setattr(
+        sys, "argv", ["abi_snapshot.py", "--version", "v0.10", "--output", str(out)]
+    )
+    rc = abi.main()
+    assert rc == 0
+    assert out.read_bytes() == before, "unchanged ABI must leave the file byte-identical"
+
+
+def test_main_still_rewrites_output_when_abi_content_actually_changes(tmp_path, monkeypatch):
+    """The guard must not swallow a REAL change: a new public function
+    still gets written, `generated` included."""
+    sdk_yaml = tmp_path / "sdk_version.yaml"
+    sdk_yaml.write_text("version: 0.10.1\nstatus: released\n", encoding="utf-8")
+    monkeypatch.setattr(abi, "SDK_VERSION_YAML", sdk_yaml)
+
+    new_headers = {
+        "alp/x.h": {
+            "functions": {
+                "alp_foo": {"signature": "void alp_foo(void);", "hash": "deadbeefcafebabe"}
+            },
+            "typedefs": {},
+            "macros": {},
+            "variables": {},
+        }
+    }
+    monkeypatch.setattr(abi, "collect", lambda include_root: new_headers)
+
+    out = tmp_path / "v0.10-snapshot.json"
+    existing = {"version": "v0.10", "generated": "2020-01-01", "headers": {"alp/x.h": dict(_EMPTY_HEADER)}}
+    # newline="": without it Windows text mode writes CRLF, and the byte
+    # compare would then differ on line endings alone -- the rewrite this
+    # test asserts would happen for a reason that has nothing to do with
+    # the ABI content having changed.
+    out.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="")
+
+    monkeypatch.setattr(
+        sys, "argv", ["abi_snapshot.py", "--version", "v0.10", "--output", str(out)]
+    )
+    rc = abi.main()
+    assert rc == 0
+    after = json.loads(out.read_text(encoding="utf-8"))
+    assert after["headers"] == new_headers
+    assert after["generated"] != "2020-01-01"
+
+
+def test_main_rewrites_a_reformatted_existing_file_even_though_headers_match(
+    tmp_path, monkeypatch
+):
+    """Comparing PARSED JSON would let a hand-reindented, unsorted-keys
+    copy of the committed snapshot -- identical ABI, wildly different
+    bytes -- read as "unchanged" and stay corrupted forever, invisible to the
+    "generated files in sync" gate.  The guard must compare against
+    the CANONICAL bytes this script itself writes, so any formatting
+    drift on the committed file is treated as real content that needs
+    rewriting, not silently preserved."""
+    sdk_yaml = tmp_path / "sdk_version.yaml"
+    sdk_yaml.write_text("version: 0.10.1\nstatus: released\n", encoding="utf-8")
+    monkeypatch.setattr(abi, "SDK_VERSION_YAML", sdk_yaml)
+
+    fixed_headers = {"alp/x.h": dict(_EMPTY_HEADER)}
+    monkeypatch.setattr(abi, "collect", lambda include_root: fixed_headers)
+
+    out = tmp_path / "v0.10-snapshot.json"
+    existing = {"version": "v0.10", "generated": "2020-01-01", "headers": fixed_headers}
+    # Same content, deliberately NOT canonical: indent=4, keys unsorted.
+    # newline="" so the ONLY difference from canonical is the formatting
+    # under test; Windows CRLF would otherwise force the rewrite by itself.
+    out.write_text(json.dumps(existing, indent=4, sort_keys=False) + "\n", encoding="utf-8", newline="")
+    before = out.read_bytes()
+
+    monkeypatch.setattr(
+        sys, "argv", ["abi_snapshot.py", "--version", "v0.10", "--output", str(out)]
+    )
+    rc = abi.main()
+    assert rc == 0
+    after = out.read_bytes()
+    assert after != before, "reformatted-but-equivalent file must be rewritten canonical"
+    after_json = json.loads(after.decode("utf-8"))
+    assert after_json["headers"] == fixed_headers
+
+
+def test_main_rewrites_when_existing_generated_field_is_not_a_valid_date(tmp_path, monkeypatch):
+    """`generated` is spliced from the existing file into `patched`
+    before the byte compare, so the byte compare alone can never catch
+    corruption confined to that one field -- a hand-edited
+    `"generated": "NOT-A-DATE"` would splice straight through and read
+    as "unchanged" forever.  The guard validates the existing value is
+    a real ISO date first, so a corrupt value falls through to a real
+    write and is replaced with a fresh valid one instead of surviving
+    every future no-op rerun."""
+    sdk_yaml = tmp_path / "sdk_version.yaml"
+    sdk_yaml.write_text("version: 0.10.1\nstatus: released\n", encoding="utf-8")
+    monkeypatch.setattr(abi, "SDK_VERSION_YAML", sdk_yaml)
+
+    fixed_headers = {"alp/x.h": dict(_EMPTY_HEADER)}
+    monkeypatch.setattr(abi, "collect", lambda include_root: fixed_headers)
+
+    out = tmp_path / "v0.10-snapshot.json"
+    existing = {"version": "v0.10", "generated": "NOT-A-DATE", "headers": fixed_headers}
+    # newline="": a plain write_text() lets Windows' text-mode default
+    # write CRLF, which would already fail the guard's byte compare on
+    # line endings alone -- exercising the write-fallback path for the
+    # wrong reason and never reaching the ISO-date validation this test
+    # targets. See the identical note on the sibling fixture above.
+    out.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="")
+
+    monkeypatch.setattr(
+        sys, "argv", ["abi_snapshot.py", "--version", "v0.10", "--output", str(out)]
+    )
+    rc = abi.main()
+    assert rc == 0
+    after = json.loads(out.read_text(encoding="utf-8"))
+    assert after["generated"] != "NOT-A-DATE", "corrupt generated field must not survive a rerun"
+
+
+def test_main_rewrites_a_crlf_existing_file_even_though_content_matches(tmp_path, monkeypatch):
+    """The guard's read path decodes bytes directly, with no
+    universal-newline translation, so a CRLF copy of an otherwise-
+    canonical snapshot must not compare equal to the LF text this
+    script generates in memory.  Read and write must agree on the
+    exact-bytes axis: a CRLF file must be treated as different from
+    the canonical LF bytes and get rewritten."""
+    sdk_yaml = tmp_path / "sdk_version.yaml"
+    sdk_yaml.write_text("version: 0.10.1\nstatus: released\n", encoding="utf-8")
+    monkeypatch.setattr(abi, "SDK_VERSION_YAML", sdk_yaml)
+
+    fixed_headers = {"alp/x.h": dict(_EMPTY_HEADER)}
+    monkeypatch.setattr(abi, "collect", lambda include_root: fixed_headers)
+
+    out = tmp_path / "v0.10-snapshot.json"
+    existing = {"version": "v0.10", "generated": "2020-01-01", "headers": fixed_headers}
+    canonical = json.dumps(existing, indent=2, sort_keys=True) + "\n"
+    out.write_bytes(canonical.replace("\n", "\r\n").encode("utf-8"))
+    before = out.read_bytes()
+
+    monkeypatch.setattr(
+        sys, "argv", ["abi_snapshot.py", "--version", "v0.10", "--output", str(out)]
+    )
+    rc = abi.main()
+    assert rc == 0
+    after = out.read_bytes()
+    assert after != before, "a CRLF-only difference must still trigger a rewrite"
+    assert b"\r\n" not in after, "the rewritten file must be LF-exact, matching the write side"
+
+
+@pytest.mark.parametrize("existing_payload", ['["a", "b"]', "5"])
+def test_main_does_not_crash_on_a_json_valid_non_object_existing_file(
+    tmp_path, monkeypatch, existing_payload
+):
+    """A JSON-valid but non-object existing snapshot (a bare list, a
+    bare int) must not crash `main()` with a raw traceback.  It is not
+    comparable, so the guard falls through to the real write path and
+    overwrites it."""
+    sdk_yaml = tmp_path / "sdk_version.yaml"
+    sdk_yaml.write_text("version: 0.10.1\nstatus: released\n", encoding="utf-8")
+    monkeypatch.setattr(abi, "SDK_VERSION_YAML", sdk_yaml)
+    monkeypatch.setattr(abi, "collect", lambda include_root: {"alp/x.h": dict(_EMPTY_HEADER)})
+
+    out = tmp_path / "v0.10-snapshot.json"
+    out.write_text(existing_payload, encoding="utf-8")
+
+    monkeypatch.setattr(
+        sys, "argv", ["abi_snapshot.py", "--version", "v0.10", "--output", str(out)]
+    )
+    rc = abi.main()
+    assert rc == 0
+    after = json.loads(out.read_text(encoding="utf-8"))
+    assert after["headers"] == {"alp/x.h": dict(_EMPTY_HEADER)}
+
+
+def test_main_does_not_crash_on_a_non_utf8_existing_file(tmp_path, monkeypatch):
+    """A non-UTF-8 existing snapshot must not crash `main()` with a raw
+    `UnicodeDecodeError` traceback -- `.decode("utf-8")` raises that, a
+    `ValueError` subclass the guard's `except (OSError, ValueError)`
+    clause catches.  The file is not decodable, so the guard falls
+    through to the real write path and overwrites it."""
+    sdk_yaml = tmp_path / "sdk_version.yaml"
+    sdk_yaml.write_text("version: 0.10.1\nstatus: released\n", encoding="utf-8")
+    monkeypatch.setattr(abi, "SDK_VERSION_YAML", sdk_yaml)
+    monkeypatch.setattr(abi, "collect", lambda include_root: {"alp/x.h": dict(_EMPTY_HEADER)})
+
+    out = tmp_path / "v0.10-snapshot.json"
+    out.write_bytes(b'{"version": "v0.10", "generated": "2020-01-01", "b": "\xff"}')
+
+    monkeypatch.setattr(
+        sys, "argv", ["abi_snapshot.py", "--version", "v0.10", "--output", str(out)]
+    )
+    rc = abi.main()
+    assert rc == 0
+    after = json.loads(out.read_text(encoding="utf-8"))
+    assert after["headers"] == {"alp/x.h": dict(_EMPTY_HEADER)}
+
+
+def test_main_writes_output_on_first_write_with_no_existing_file(tmp_path, monkeypatch):
+    """No prior file on disk -- there is nothing to compare against, so
+    the guard must not block the very first write."""
+    sdk_yaml = tmp_path / "sdk_version.yaml"
+    sdk_yaml.write_text("version: 0.10.1\nstatus: released\n", encoding="utf-8")
+    monkeypatch.setattr(abi, "SDK_VERSION_YAML", sdk_yaml)
+    monkeypatch.setattr(abi, "collect", lambda include_root: {"alp/x.h": dict(_EMPTY_HEADER)})
+
+    out = tmp_path / "v0.10-snapshot.json"
+    assert not out.exists()
+    monkeypatch.setattr(
+        sys, "argv", ["abi_snapshot.py", "--version", "v0.10", "--output", str(out)]
     )
     rc = abi.main()
     assert rc == 0
@@ -573,6 +832,51 @@ def test_freeze_gate_fails_on_a_removed_symbol():
 
 
 @pytestmark_bash
+def test_freeze_gate_passes_on_a_moved_symbol():
+    """A relocated symbol must NOT fail the step.
+
+    This pins the coupling between `diff()`'s MOVED verdict and the
+    WORKFLOW's own `grep -q '^  REMOVED '` -- the unit tests in
+    test_abi_snapshot.py prove diff() emits MOVED, but only running the
+    real step proves the gate does not match it. A header split that
+    keeps every symbol reachable is allowed; see docs/abi/README.md.
+
+    Built from a real, currently-reachable relocation: a macro that lives
+    in a board header today is recorded in the baseline as having lived in
+    the hand-written parent that unconditionally includes it, so the
+    current tree reads as a move INTO the routes header.
+    """
+    baseline = REPO / "docs" / "abi" / "v99.97-snapshot.json"
+    curr = json.loads(
+        subprocess.run(
+            [sys.executable, "scripts/abi_snapshot.py", "--version", "v99.97"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    )
+    owner = "alp/boards/alp_e1m_evk.h"
+    routes = "alp/boards/alp_e1m_evk_routes.h"
+    moved_sym = next(iter(curr["headers"][routes]["macros"]))
+    # Baseline = today's tree with one macro relocated back to the parent
+    # header, i.e. exactly the shape a header split produces.
+    payload = json.loads(json.dumps(curr))
+    payload["headers"][owner]["macros"][moved_sym] = payload["headers"][routes][
+        "macros"
+    ].pop(moved_sym)
+
+    proc = _run_freeze_gate(baseline, payload)
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert f"MOVED   macro {moved_sym}: {owner} -> {routes}" in proc.stdout, proc.stdout
+    assert "::error::Public symbol(s) removed" not in proc.stdout
+    assert not any(
+        line.startswith("  REMOVED ") for line in proc.stdout.splitlines()
+    ), proc.stdout
+
+
+@pytestmark_bash
 def test_freeze_gate_passes_on_a_changed_only_diff():
     """A CHANGED entry (a real symbol, deliberately mis-hashed so it
     still exists but its recorded signature differs) must NOT fail the
@@ -599,6 +903,96 @@ def test_freeze_gate_passes_on_a_changed_only_diff():
     proc = _run_freeze_gate(baseline, payload)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "CHANGED function alp/peripheral.h::alp_gpio_read" in proc.stdout
+
+
+# ---------------------------------------------------------------------
+# 6. issue #1622: an INTENTIONAL removal recorded in
+# docs/abi/removed-symbols.json must pass the REAL bash step, and a
+# removal that ISN'T recorded there must still fail it -- run through
+# the actual workflow step, not just abi_snapshot.py's diff() in
+# isolation, the same reasoning as test_freeze_gate_passes_on_a_moved_symbol.
+# ---------------------------------------------------------------------
+
+
+@pytestmark_bash
+def test_freeze_gate_passes_on_an_allowlisted_removal():
+    """A baseline that still has one of the three real #1622 macro
+    names, which the current tree genuinely no longer has, must pass
+    the step: `docs/abi/removed-symbols.json` explains it as ALLOWED,
+    not a bare REMOVED, so the step's own `grep -q '^  REMOVED '`
+    finds nothing to block on."""
+    baseline = REPO / "docs" / "abi" / "v99.96-snapshot.json"
+    curr = json.loads(
+        subprocess.run(
+            [sys.executable, "scripts/abi_snapshot.py", "--version", "v99.96"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    )
+    routes = "alp/boards/alp_e1m_evk_routes.h"
+    allowlisted_sym = "EVK_ADC_BOARD_ID"
+    assert allowlisted_sym not in curr["headers"][routes]["macros"], (
+        f"{allowlisted_sym} exists in the current tree -- pick a symbol "
+        "that's genuinely gone, or this test proves nothing"
+    )
+    # Baseline = today's tree PLUS the old, renamed-away macro -- exactly
+    # the shape a baseline frozen before #1622 landed would have.
+    payload = json.loads(json.dumps(curr))
+    payload["headers"][routes]["macros"][allowlisted_sym] = {
+        "value": "(E1M_ADC0)",
+        "hash": "0000000000000000",
+    }
+
+    proc = _run_freeze_gate(baseline, payload)
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (
+        f"ALLOWED macro {routes}::{allowlisted_sym} "
+        "(intentional removal, #1622 -> EVK_ADC_ARDUINO_A0)" in proc.stdout
+    ), proc.stdout
+    assert "::error::Public symbol(s) removed" not in proc.stdout
+    assert not any(
+        line.startswith("  REMOVED ") for line in proc.stdout.splitlines()
+    ), proc.stdout
+
+
+@pytestmark_bash
+def test_freeze_gate_still_fails_on_a_removal_the_allowlist_does_not_cover():
+    """MUTATION-PROOF at the integration level: a real, non-allowlisted
+    removal must still fail the step even though
+    `docs/abi/removed-symbols.json` is non-empty (has the three real
+    #1622 entries) -- a populated allowlist must never make the gate
+    vacuous for a symbol it doesn't name. Reuses the exact fabricated-
+    symbol shape `test_freeze_gate_fails_on_a_removed_symbol` already
+    pins; this variant's only point is proving a NON-EMPTY allowlist
+    doesn't change that outcome."""
+    baseline = REPO / "docs" / "abi" / "v99.95-snapshot.json"
+    payload = {
+        "version": "v99.95",
+        "generated": "1970-01-01",
+        "headers": {
+            "alp/peripheral.h": {
+                "functions": {
+                    "alp___freeze_gate_regression_test_only_2": {
+                        "signature": "void alp___freeze_gate_regression_test_only_2(void);",
+                        "hash": "0000000000000000",
+                    }
+                },
+                "typedefs": {},
+                "macros": {},
+                "variables": {},
+            }
+        },
+    }
+    proc = _run_freeze_gate(baseline, payload)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert (
+        "REMOVED function alp/peripheral.h::alp___freeze_gate_regression_test_only_2"
+        in proc.stdout
+    )
+    assert "::error::Public symbol(s) removed" in proc.stdout
 
 
 if __name__ == "__main__":

@@ -13,10 +13,25 @@ SDK it describes (a CI regen-diff gate keeps it byte-in-sync):
   - soms          metadata/e1m_modules/E1M-*.yaml, each resolved to its
                   on-module SoC spec (metadata/socs/<v>/<f>/<part>.json)
                   via its `silicon:` ref -- the same SoM->SoC resolution +
-                  peripheral-presence projection as gen_support_matrix.py.
+                  peripheral-presence projection as gen_support_matrix.py,
+                  plus a few named-instance keys (see
+                  `_named_instance_presence`) for pad-routed silicon
+                  instances the SoC-level class counts merge together.
   - examples      examples/<category>/<name>/board.yaml -- the example's
-                  default SoM + board target plus a one-line summary from
-                  its README / main.c.
+                  default SoM + board target, a one-line summary from its
+                  README / main.c, and per-example filter facets
+                  (schema_version 2, issue #1283): `cores[]` / `coreCount` /
+                  `osSet` resolved through `core_os_topology()` -- the same
+                  planner `alp_project.py --emit os-topology` calls, NOT the
+                  raw board.yaml (47 of 100 examples never write `os:` on
+                  ANY core at all, and of the other 53 only 2 name a
+                  runtime `os:` directly -- the rest just turn a peer off --
+                  so the YAML alone reports the wrong core count for almost
+                  every example) -- plus a `declares` map of
+                  cheap YAML-literal booleans (peripherals / chips / ipc /
+                  models).  An example whose topology can't resolve (e.g. an
+                  SoM hw_rev still `status: tbd`) omits the resolved facets
+                  rather than guessing; `declares` stays present regardless.
   - emit_modes    the `--emit` artefact modes the orchestrator CLI exposes
                   (scripts/alp_orchestrate/cli.py) -- the ADR-0014 machine
                   contract.  The mode list is read from the CLI source so
@@ -68,13 +83,71 @@ from gen_support_matrix import (  # noqa: E402  (import after sys.path tweak)
     load_socs,
 )
 
+# Per-example facets (issue #1283) are resolved through the SAME planner the
+# orchestrator CLI's `--emit os-topology` uses -- NOT read off the raw
+# board.yaml.  47 of 100 examples never write `os:` on any core at all;
+# reading the YAML literally reports the wrong core count / OS set for
+# almost every example (see the module docstring below).
+from alp_orchestrate import (  # noqa: E402
+    OrchestratorError,
+    SdkRevisionNotBuildable,
+    core_os_topology,
+    load_board_yaml,
+)
+
 MODULES = REPO / "metadata" / "e1m_modules"
 EXAMPLES = REPO / "examples"
 INCLUDE = REPO / "include" / "alp"
 CLI = SCRIPTS / "alp_orchestrate" / "cli.py"
+PINMUX = REPO / "metadata" / "pinmux"
 OUT = REPO / "metadata" / "catalog.json"
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+# Some SoC-level peripheral CLASSES (PERIPHERAL_CLASSES) merge multiple
+# silicon instances into one count (e.g. n44.json's `sdio: 2` backs BOTH the
+# SD1 card slot and the on-module WIFI_SDIO host controller -- there's no
+# separate per-instance count to split).  Where the *routed pads* name the
+# instances distinctly, project that pad-route evidence into its own
+# catalog key instead of leaving the instance unrepresented.  Source:
+# metadata/pinmux/<family>.yaml (generated from the real pinout TSVs, e.g.
+# metadata/e1m_modules/v2n/renesas-peripheral-map.tsv:103-129) -- never a
+# guessed split of the SoC count.
+#
+# SoM `family:` (metadata/e1m_modules/E1M-*.yaml) -> pin-mux family file.
+# V2M reuses the V2N pinout in full (see the v2n-m1 comment in
+# scripts/gen_pinmux_capability.py); NX9101 (nxp-imx9) has no pinmux table
+# yet, so it is deliberately absent here, not guessed.
+_SOM_FAMILY_TO_PINMUX_FAMILY: dict[str, str] = {
+    "alif-ensemble":       "aen",
+    "renesas-rzv2n":       "v2n",
+    "renesas-rzv2n-deepx": "v2n",
+}
+
+# catalog key -> the `silicon_peripheral` name prefix that identifies the
+# instance in the pin-mux table.
+_NAMED_INSTANCE_PIN_PREFIXES: dict[str, str] = {
+    "sd1":       "SD1",
+    "wifi_sdio": "WIFI_SDIO",
+}
+
+
+def _named_instance_presence(som_family: str | None) -> dict[str, bool]:
+    """Per-instance presence flags the SoC-level classes can't express,
+    derived from the SoM family's routed pin-mux table (empty/False for a
+    family with no pin-mux table -- absence of routing evidence, not a
+    guess)."""
+    pinmux_family = _SOM_FAMILY_TO_PINMUX_FAMILY.get(som_family or "")
+    names: set[str] = set()
+    if pinmux_family:
+        path = PINMUX / f"{pinmux_family}.yaml"
+        if path.is_file():
+            doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            names = {p.get("silicon_peripheral") or "" for p in doc.get("pads", [])}
+    return {
+        key: any(name.startswith(prefix) for name in names)
+        for key, prefix in _NAMED_INSTANCE_PIN_PREFIXES.items()
+    }
 
 _GENERATED = (
     "AUTO-GENERATED by scripts/gen_catalog.py -- DO NOT EDIT; regenerate with "
@@ -167,13 +240,24 @@ def build_soms() -> list[dict]:
             _slug(label): bool(pred(soc))
             for label, pred in PERIPHERAL_CLASSES
         }
+        peripherals.update(_named_instance_presence(doc.get("family")))
         soms.append({
             "sku":          sku,
             "silicon":      ref,
             "family":       doc.get("family"),
             "soc_part":     soc.get("part"),
             "topology":     _topology(doc),
-            "peripherals":  peripherals,
+            # #1243: renamed from `peripherals`, which read as "does
+            # <alp/CLASS.h> work on this SKU" and is NOT what it means. It
+            # is the literal silicon projection, vendor key spellings and
+            # all -- `pwm: false` on V2N only means no SoC JSON uses the
+            # key `pwm` (the silicon spells it `timer_32bit_gpt`), and
+            # `dac: false` there is a true silicon fact that reads as the
+            # opposite of reality, since <alp/dac.h> works via the GD32
+            # bridge. The companion `portable_classes` map #1243 also asks
+            # for is NOT emitted yet: it cannot be derived from
+            # ALP_BACKEND_REGISTER today -- see the issue thread.
+            "soc_peripherals":  peripherals,
             "capabilities": soc.get("capabilities") or {},
         })
     return soms
@@ -225,6 +309,76 @@ def _summary_from_main_c(src_dir: Path) -> str | None:
     return joined or None
 
 
+def _declares(doc: dict) -> dict[str, bool]:
+    """Cheap YAML-literal presence booleans (issue #1283) -- these ARE what
+    the raw board.yaml says, unlike `cores`/`coreCount`/`osSet` below, so no
+    topology resolution is needed to answer them honestly."""
+    cores = doc.get("cores") or {}
+    return {
+        "peripherals": any((c or {}).get("peripherals") for c in cores.values()),
+        "chips":       bool(doc.get("chips")),
+        "ipc":         bool(doc.get("ipc")),
+        "models":      bool(doc.get("models")),
+    }
+
+
+def _resolved_core_facets(board_yaml: Path) -> dict | None:
+    """`cores[]` / `coreCount` / `osSet`, resolved through the SAME planner
+    `alp_project.py --emit os-topology` calls (issue #1283) -- NOT the raw
+    board.yaml.  A peer core left at its SoM topology default (47 of 100
+    examples never write `os:` on any core at all) is enabled and carries
+    a real `os` -- and an `app` when the resolved slice actually names one
+    (including the SDK's own `alp-stock-shim` for an unused Zephyr peer)
+    that the YAML alone never states.  `app` is OPTIONAL, not guaranteed: a
+    Yocto slice can be a stock recipe (`image:` set, no `app:` -- schema-
+    legal, see `alp_orchestrate.validate`) and then the core dict carries
+    no `app` key at all.
+
+    Returns None -- an honest absence, not a guess -- when the board can't
+    be resolved at all.
+
+    The EXPECTED case is silent: `SdkRevisionNotBuildable` means the SoM
+    hw_rev exists but its `status:` refuses a build (`tbd` / `reserved` /
+    no status key), which is exactly the exclusion
+    `check_emit_snapshots.py:81-85` carves out for rpmsg-imx93.  Warning
+    about it on every regen and every `--check` would be a permanent false
+    alarm that trains the reader to ignore the channel.
+
+    Any OTHER `OrchestratorError` is unexpected and warns on stderr rather
+    than silently dropping the row's facets, so a regression is visible at
+    regen time instead of getting committed as "in sync" by the next
+    `--check` run.
+
+    Discriminated by exception TYPE, not by string-matching the message.
+    `SdkRevisionNotBuildable` exists as a subclass for precisely this
+    reason -- see its docstring in `alp_orchestrate.models`, alongside
+    `SdkRevisionUnsupported` and `SdkRevisionUnknown`."""
+    try:
+        project = load_board_yaml(board_yaml)
+        topo = core_os_topology(project)
+    except SdkRevisionNotBuildable:
+        return None
+    except OrchestratorError as exc:
+        print(f"gen_catalog: {board_yaml.relative_to(REPO).as_posix()}: "
+              f"os-topology did not resolve ({exc}) -- resolved facets "
+              f"omitted for this example", file=sys.stderr)
+        return None
+    cores: list[dict] = []
+    for row in topo["cores"]:
+        if not row["enabled"]:
+            continue
+        core: dict = {"id": row["core_id"], "os": row["effective_os"]}
+        slice_ = project.cores.get(row["core_id"])
+        if slice_ is not None and slice_.app:
+            core["app"] = slice_.app
+        cores.append(core)
+    return {
+        "cores":     cores,
+        "coreCount": len(cores),
+        "osSet":     sorted({c["os"] for c in cores}),
+    }
+
+
 def build_examples() -> dict[str, list[dict]]:
     """Group examples/<category>/<name>/ (with a board.yaml) by category."""
     by_cat: dict[str, list[dict]] = {}
@@ -248,6 +402,10 @@ def build_examples() -> dict[str, list[dict]]:
             entry["supported_boards"] = list(doc["supported_boards"])
         if summary:
             entry["summary"] = summary
+        facets = _resolved_core_facets(board_yaml)
+        if facets is not None:
+            entry.update(facets)
+        entry["declares"] = _declares(doc)
         by_cat.setdefault(category, []).append(entry)
     for entries in by_cat.values():
         entries.sort(key=lambda e: e["path"])

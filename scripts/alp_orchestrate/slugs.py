@@ -3,16 +3,21 @@
 """Kconfig / board-define slug derivation -- a shared leaf.
 
 The slug + symbol helpers the per-slice config emitters (alp.conf, cmake-args)
-share: the board-define slug, the on-module / helper-firmware Kconfig slug
-derivation (+ the non-chip field set they skip), and the peripheral->Kconfig
-symbol table. A dependency-free leaf so every per-slice emitter pulls them from
-one place instead of duplicating. Extracted as a #285 leaf seam (the paths.py /
-memregion.py move) ahead of the kconfig emitter.
+share: the board-define slug and the on-module / helper-firmware Kconfig slug
+derivation (+ the non-chip field set they skip). A dependency-free leaf so
+every per-slice emitter pulls them from one place instead of duplicating.
+Extracted as a #285 leaf seam (the paths.py / memregion.py move) ahead of the
+kconfig emitter.
+
+The peripheral->Kconfig symbol table used to live here too, as a module-level
+constant computed once at import time from the SDK's own in-tree metadata/ --
+a project's `--metadata-root` override never reached it (#1485). Callers now
+import `alp_registries.peripheral_kconfig` directly and pass
+`project.effective_metadata_root()` at the point of use.
 """
 
 from __future__ import annotations
 
-from alp_registries import peripheral_kconfig
 from sentinels import is_tbd
 
 
@@ -56,6 +61,15 @@ _ON_MODULE_NON_CHIP_FIELDS: frozenset[str] = frozenset({
     "emmc",
 })
 
+# Any `<x>_driver_status` field (nor_flash_driver_status, emmc_driver_status,
+# and whatever the next one is) is a maturity tier -- none/planned/partial/
+# complete -- never a chip slug.  A denylist entry per field re-opens this
+# leak every time a new one is added (it did once already: the literal
+# string "none" reached CONFIG_ALP_SDK_CHIP_NONE=y before this suffix check
+# existed).  Matched by suffix, not enumerated by name, so it can't miss the
+# next one (#1169).
+_DRIVER_STATUS_SUFFIX = "_driver_status"
+
 
 def _slugs_from_on_module(on_module: dict) -> list[str]:
     """Extract unique, non-TBD chip slugs from an ``on_module:`` block.
@@ -81,9 +95,9 @@ def _slugs_from_on_module(on_module: dict) -> list[str]:
         seen.add(val)
 
     # 1. Scalar fields — every key whose value is a plain string and
-    #    is not in the exclusion list.
+    #    is not in the exclusion list (or a `*_driver_status` field).
     for key, val in on_module.items():
-        if key in _ON_MODULE_NON_CHIP_FIELDS:
+        if key in _ON_MODULE_NON_CHIP_FIELDS or key.endswith(_DRIVER_STATUS_SUFFIX):
             continue
         if isinstance(val, str):
             _add(val)
@@ -123,4 +137,13 @@ def _slugs_from_helper_firmware(helper_firmware: list) -> list[str]:
     return sorted(seen)
 
 
-_PERIPHERAL_KCONFIG: dict[str, tuple[str, ...]] = peripheral_kconfig()
+# Slugs that map to BLOCK_ Kconfig symbols rather than CHIP_.
+# These live under blocks/ + <alp/blocks/*.h> because they are
+# SDK-level *block* utilities (`alp_button_led_*`, `alp_pdm_mic_*`)
+# rather than third-party-IC chip drivers; see blocks/README.md.
+#
+# Single source of truth -- kconfig.py's emitter, check_example_portability.py
+# and alp_cli/validator.py's ALP-B008 chip-token check all consult this same
+# set rather than each carrying its own copy (a prior state that had drifted
+# into three independent copies).
+_BLOCK_SLUGS = frozenset({"button_led", "pdm_mic"})

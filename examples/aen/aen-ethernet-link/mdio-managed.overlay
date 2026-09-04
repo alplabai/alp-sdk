@@ -10,11 +10,26 @@
  * zephyr/dts/alif/ensemble_e8_peripherals.dtsi, and repoints &ethernet's
  * phy-handle at it instead of the default fixed-link eth_phy.
  *
- * BUILD-ONLY / COMPILE-PROOF, NOT bench-verified: this closes that the
- * mdio_dwmac_alif driver binds, phy_ti_dp83825 binds on the bus, and the
- * upstream eth_dwmac core's phy_link path compiles with a managed PHY --
- * see the mdio-managed test entry in testcase.yaml. No MDIO-managed PHY has
- * been exercised on real E8 silicon this batch.
+ * COMPILE-PROOF in CI (see the mdio-managed test entry in testcase.yaml):
+ * closes that the mdio_dwmac_alif driver binds, phy_ti_dp83825 binds on the
+ * bus, and the upstream eth_dwmac core's phy_link path compiles with a
+ * managed PHY.
+ *
+ * The MDIO layer itself HAS since been exercised on real E8 silicon by a
+ * Flow C ITCM RAM-run of this variant (#1244):
+ *
+ *   [eth] MDIO PHY@0 id=2000a140 (DP83825=2000a140)
+ *   [eth] PHY regs: ANAR=01e1 ANLPAR=0000 PHYSTS=0002 RCSR=00e1
+ *
+ * That run reported `PHY link DOWN (BMSR=7849)` -- no cable on that desk --
+ * so link/traffic over the managed path is still unproven; reading the PHY
+ * ID needs no link, which is what made the address answerable without one.
+ *
+ * This overlay deliberately does NOT override `reg`: it inherits the PHY
+ * address from `eth_phy_managed` in
+ * zephyr/dts/alif/ensemble_e8_peripherals.dtsi, so there is ONE source of
+ * truth for it. Keep it that way -- the fix for the wrong address (1 -> 0)
+ * belongs at that node, not here.
  */
 
 &mdio {

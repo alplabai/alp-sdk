@@ -176,7 +176,12 @@ alp_status_t alp_gpu2d_fill_rect(alp_gpu2d_t               *h,
 		alp_handle_op_leave(&h->active_ops);
 		return s;
 	}
-	alp_status_t rc = h->state.ops->fill_rect(&h->state, dst, x, y, w, height, argb_color);
+	alp_status_t rc;
+	if (h->state.ops->fill_rect == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->fill_rect(&h->state, dst, x, y, w, height, argb_color);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -204,7 +209,12 @@ alp_status_t alp_gpu2d_blit(alp_gpu2d_t               *h,
 		alp_handle_op_leave(&h->active_ops);
 		return s;
 	}
-	alp_status_t rc = h->state.ops->blit(&h->state, src, sx, sy, dst, dx, dy, w, height);
+	alp_status_t rc;
+	if (h->state.ops->blit == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->blit(&h->state, src, sx, sy, dst, dx, dy, w, height);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -237,7 +247,12 @@ alp_status_t alp_gpu2d_blend(alp_gpu2d_t               *h,
 		alp_handle_op_leave(&h->active_ops);
 		return s;
 	}
-	alp_status_t rc = h->state.ops->blend(&h->state, src, sx, sy, dst, dx, dy, w, height, mode);
+	alp_status_t rc;
+	if (h->state.ops->blend == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->blend(&h->state, src, sx, sy, dst, dx, dy, w, height, mode);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -252,7 +267,7 @@ void alp_gpu2d_close(alp_gpu2d_t *h)
 	 * bounded wait instead of a use-after-free (issue #629).  Losing
 	 * the CAS (already closed/closing/never-opened) makes this a
 	 * no-op, matching the existing void-close idempotency contract. */
-	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) {
+	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) {
 		return;
 	}
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {

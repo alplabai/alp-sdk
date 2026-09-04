@@ -30,6 +30,104 @@ _FAMILY_SYSBUILD_DIRS: dict[str, str] = {
     "alif-ensemble": "aen",
 }
 
+# The per-family `boot.method:` default `board.schema.json` documents but
+# nothing implemented (#562): "the SoM family supplies the default
+# (AEN/N93 -> mcuboot, V2N/V2N-M1 -> none on the Zephyr slice since
+# U-Boot owns boot on Linux)".  `emit_sysbuild_conf` used to hard-default
+# every family to `mcuboot`, so a Renesas project that omitted `method:`
+# was pushed down the MCUboot path -- and, with `rsa3072` (a value
+# `validate.py` PERMITS for renesas-rzv2n precisely because its boot
+# chain is the U-Boot/FIT stack, not sysbuild), hard-raised and took the
+# whole build-plan emit with it.  Same `family:`-token `startswith` match
+# as `_FAMILY_SYSBUILD_DIRS` above and `validate._boot_signing_supported_
+# for_family`.  `boot.method:` has no other consumer anywhere in the
+# tree, so this emitter is the only site the default has to exist at.
+_FAMILY_BOOT_METHOD_DEFAULTS: dict[str, str] = {
+    "alif-ensemble": "mcuboot",
+    "nxp-imx9":      "mcuboot",
+    "renesas-rzv2n": "none",
+}
+
+# What an UNRECOGNISED `family:` token defaults to.  Deliberately the
+# historical value, so an in-development preset whose family string is
+# not in the table above emits exactly what it emitted before #562 --
+# the fix is "recognised families get their documented default", not
+# "the default silently flips for everyone".
+_BOOT_METHOD_FALLBACK = "mcuboot"
+
+
+def _default_boot_method(project: BoardProject) -> str:
+    """The `boot.method:` this project's SoM family implies."""
+    family = (project.som_preset.get("family") or "").lower()
+    return next((v for k, v in _FAMILY_BOOT_METHOD_DEFAULTS.items()
+                 if family.startswith(k)), _BOOT_METHOD_FALLBACK)
+
+
+def _has_zephyr_slice(project: BoardProject) -> bool:
+    """Whether any core in this project builds under Zephyr.
+
+    sysbuild is a Zephyr-build concept: `build/alp_sysbuild.conf` is
+    consumed only as `west build --sysbuild -- -DSB_CONF_FILE=<path>`.
+    A project with no Zephyr slice has no sysbuild configure for the
+    overlay to reach, so emitting one is dead output at best -- and at
+    worst (#562) a hard refusal of a project that never runs sysbuild.
+    """
+    return any(s.os == "zephyr" for s in project.cores.values())
+
+
+def _boot_target_is_single_slot(project: BoardProject) -> bool:
+    """Whether this project resolves to a disjoint-slot0 boot shape on
+    ANY of its Zephyr M55 cores -- i.e. any MCUboot swap mode (scratch,
+    move, overwrite) has no slot1/scratch partition to swap into.
+
+    Reuses `gen_zephyr_board._aen_role_slot0_map` -- the SAME resolver
+    the board-DT generator (`_aen_dts` / `_aen_flash_partitions`) and
+    `loader._resolve_slot0_load_address` already call to answer this
+    exact question -- instead of re-deriving the answer from
+    `memory_map:` region NAMES.  The two disagree in general:
+    `metadata/schemas/som-preset-v1.schema.json` documents
+    `memory_map:` as an SDK build-policy override "ONLY for non-stock
+    partitioning", not something only a disjoint-slot0 SoM sets --
+    `docs/v0.6-tbd-and-assumptions.md` lists filling the V2N, AEN E7
+    and iMX93 memory_maps as open items.  A `memory_map:` present for
+    an unrelated reason (an rpmsg carve-out, say) that declares no
+    `<role>_slot0` region makes `_aen_flash_partitions` fall through to
+    the STOCK two-slot layout -- a REAL `image-1` + `image-scratch` --
+    regardless of what its OWN region names happen to be, so a check
+    that scans those names for the substrings "slot1"/"scratch" can
+    answer True (single-slot) on a target that generates a real slot1
+    and a real scratch partition.  `_aen_role_slot0_map` asks the real
+    question instead: does THIS role have its own `<role>_slot0`
+    region (the only shape that drops slot1/scratch, #1069 --
+    every AEN preset sets one: each SoM's
+    M55 cores share one physical App MRAM, so slot0 is split into
+    per-core windows and the secondary/scratch slot was dropped
+    rather than forced to fit)?
+
+    Only `m55_he`/`m55_hp` roles are AEN slot0-XIP cores (same
+    convention as `loader._resolve_slot0_load_address`); a project
+    with neither in `cores:` -- any non-AEN family, or an AEN project
+    with no Zephyr M55 slice -- is never single-slot by this check.
+    """
+    memory_map = project.som_preset.get("memory_map")
+    if not memory_map:
+        return False
+    from gen_zephyr_board import ZephyrBoardEmitError, _aen_role_slot0_map
+    for core_id in project.cores:
+        if not core_id.startswith("m55_"):
+            continue
+        role = core_id[len("m55_"):]
+        if role not in ("he", "hp"):
+            continue
+        try:
+            if _aen_role_slot0_map(memory_map, role) is not None:
+                return True
+        except ZephyrBoardEmitError as exc:
+            raise OrchestratorError(
+                f"cannot resolve boot.swap_algorithm default for "
+                f"{project.sku}: {exc}") from exc
+    return False
+
 
 def sysbuild_family_base_conf(project: BoardProject) -> Optional[Path]:
     """Path to the curated `zephyr/sysbuild/<family>/sysbuild.conf` for
@@ -65,7 +163,18 @@ def emit_sysbuild_conf(project: BoardProject) -> str:
     `build/alp_sysbuild.conf` (consumed via `west build --sysbuild
     -- -DSB_CONF_FILE=<abs path>`).  Returns an empty string when the project
     does not declare a `boot:` block (the SDK's stock per-family
-    defaults at zephyr/sysbuild/<family>/sysbuild.conf apply).
+    defaults at zephyr/sysbuild/<family>/sysbuild.conf apply), and when
+    the project has NO Zephyr slice at all (#562) -- sysbuild exists
+    only inside a Zephyr build, so a Yocto-only project has nothing to
+    apply the overlay to.  On such a project the `boot:` block governs
+    the U-Boot/FIT chain instead, which this emitter has never rendered;
+    the previous behaviour was to render it as MCUboot anyway and, on
+    `rsa3072`, to raise below and fail the project's entire build-plan
+    emit with sysbuild advice for a platform that never runs sysbuild.
+
+    `boot.method:` is optional and the SoM family supplies its default
+    (`_FAMILY_BOOT_METHOD_DEFAULTS` -- the value board.schema.json has
+    always documented).  It is NOT an unconditional `mcuboot`.
 
     Every `SB_CONFIG_*` symbol emitted here MUST exist in the pinned
     Zephyr's `share/sysbuild/**/Kconfig*` -- sysbuild treats an
@@ -81,7 +190,9 @@ def emit_sysbuild_conf(project: BoardProject) -> str:
     boot = project.boot or {}
     if not boot:
         return ""
-    method = (boot.get("method") or "mcuboot").lower()
+    if not _has_zephyr_slice(project):
+        return ""
+    method = (boot.get("method") or _default_boot_method(project)).lower()
     if method == "none":
         return ("# Auto-generated from board.yaml `boot:` block.\n"
                 "SB_CONFIG_BOOTLOADER_MCUBOOT=n\n")
@@ -123,11 +234,38 @@ def emit_sysbuild_conf(project: BoardProject) -> str:
         lines.append(algo_kc)
     if sign.get("key_file"):
         lines.append(f'SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="{sign["key_file"]}"')
-    swap = (boot.get("swap_algorithm") or "scratch").lower()
+    swap_explicit = boot.get("swap_algorithm")
+    swap = (swap_explicit or "").lower()
+    single_slot = _boot_target_is_single_slot(project)
+    if swap_explicit and swap in ("scratch", "move", "overwrite") and single_slot:
+        # #1413: this SKU's `memory_map:` has no slot1/scratch region
+        # (see _boot_target_is_single_slot) -- every two-slot MCUboot
+        # swap mode needs one.  An explicit request for one here isn't
+        # a default that quietly drifted, it's a `boot:` block asking
+        # for a partition that doesn't exist on this target's DT, so
+        # fail loud rather than emit a config that can't boot.
+        raise OrchestratorError(
+            f"boot.swap_algorithm: {swap} needs a slot1/scratch "
+            f"partition that {project.sku}'s disjoint-slot0 "
+            "`memory_map:` (metadata/e1m_modules/"
+            f"{project.sku}.yaml, #1069) doesn't declare -- this "
+            "single-slot target only supports the stock "
+            "single-app boot.  Drop `boot.swap_algorithm:` (it now "
+            "defaults correctly on single-slot targets) rather than "
+            "setting it explicitly.")
+    if not swap_explicit:
+        # Historically defaulted unconditionally to "scratch" (#1413):
+        # wrong on a single-slot target, whose DT has no scratch
+        # partition to swap into.  Single-slot targets default to the
+        # single-app boot their curated zephyr/sysbuild/aen/sysbuild.conf
+        # base already ships; every other target keeps the historical
+        # "scratch" default.
+        swap = "none" if single_slot else "scratch"
     swap_kc = {
         "scratch":   "SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH=y",
         "move":      "SB_CONFIG_MCUBOOT_MODE_SWAP_USING_MOVE=y",
         "overwrite": "SB_CONFIG_MCUBOOT_MODE_OVERWRITE_ONLY=y",
+        "none":      "SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y",
     }.get(swap)
     if swap_kc:
         lines.append(swap_kc)

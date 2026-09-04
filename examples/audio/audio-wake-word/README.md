@@ -1,14 +1,37 @@
-# audio-wake-word
-
-> ![status: UNTESTED](https://img.shields.io/badge/status-%5BUNTESTED%5D-orange)
-> v0.5 paper-correct. Builds clean on `native_sim/native/64`; real
-> PDM mic capture + Ethos-U55 dispatch + Vela-compiled model land
-> in v0.6 AEN HiL.
+# audio-wake-word  ![status: UNTESTED](https://img.shields.io/badge/status-%5BUNTESTED%5D-orange)
 
 Always-on "Hey Alp" keyword spotting on the **E1M-AEN** family's
 low-power AI subsystem. Targets the Cortex-M55 HE ("High
 Efficiency") core at ~50 MHz with the on-die Ethos-U55 NPU
 bursting the convolutions on demand.
+
+> Builds clean on `native_sim/native/64`. The bench-verified pieces
+> this example depends on belong to two vendor-direct examples, not
+> to this example's own SDK backends
+> (`src/backends/audio/zephyr_drv.c`,
+> `src/backends/inference/ethos_u_aen.cpp`) -- neither has run on
+> silicon. PDM mic capture ("PDM mics -- Live varying PCM = real
+> audio",
+> [`docs/aen-bench-bringup.md`](../../../docs/aen-bench-bringup.md))
+> ran through `examples/aen/aen-pdm-mic-alif`, which drives the
+> Zephyr `dmic_configure`/`dmic_trigger`/`dmic_read` API directly,
+> bypassing `<alp/audio.h>`. NPU inference (person_detect /
+> keyword_scrambled, same doc) ran through
+> `examples/aen/aen-npu-inference-person-mram`'s own
+> `ethosu_utils/inference_process.cpp` calling `ethosu_invoke`
+> directly, bypassing `<alp/inference.h>` -- and on the Ethos-U85 (a
+> different NPU/core); the Ethos-U55-HE this example targets has only
+> had an ID readback on silicon (`0x10104201`, same doc). Per the
+> "`<alp/inference.h>` Ethos-U on AEN" row of
+> [`docs/verification-status.md`](../../../docs/verification-status.md)
+> (generated from [`docs/test-plan.md`](../../../docs/test-plan.md)),
+> the SDK's own per-NPU TFLM driver gates
+> (`CONFIG_ALP_TFLM_ETHOS_U85/U65/U55`) are Kconfig-reachable, but no
+> Vela-compiled model has been dispatched THROUGH this portable
+> backend yet -- only through the vendor-direct examples named above,
+> which bypass it. This example's own MFCC feature extraction and wake-word decode
+> (`extract_mfcc`/`decode_wake` in `src/main.c`) are still stubs, and
+> the model bytes (`s_model[]`) are still a placeholder.
 
 ## The AEN pitch (vs V2N)
 
@@ -49,7 +72,7 @@ WIC (mic activity)  ──▶  M55 HE wakes from STOP
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/audio/audio-wake-word
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/audio/audio-wake-word
 west flash
 ```
 

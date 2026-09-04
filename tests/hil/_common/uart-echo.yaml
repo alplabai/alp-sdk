@@ -5,11 +5,14 @@
 # present).
 #
 # Hardware fixtures expected:
-#   - E1M_UART0 routed out the EVK's USB-C bridge as the runner-
-#     side serial port (Linux: /dev/ttyACM0; Windows: COM<N>;
-#     macOS: /dev/cu.usbmodem*).  The example's printf output AND
-#     its alp_uart_write("hello") output both land on the same
-#     wire when the Zephyr console is wired to E1M_UART0.
+#   - E1M_UART0 routed out the EVK's USB-C bridge as the bench-host
+#     serial port.  Which device node that lands on is host- and
+#     session-specific (on the labgrid-fronted bench, a ser2net port
+#     allocated fresh per reservation -- see docs/ci/HW-IN-LOOP.md;
+#     resolve it with --serial-port / ALP_HIL_SERIAL_PORT, never a
+#     hardcoded path).  The example's printf output AND its
+#     alp_uart_write("hello") output both land on the same wire when
+#     the Zephyr console is wired to E1M_UART0.
 #
 # What this proves end-to-end:
 #   - alp_uart_open(E1M_UART0, 115200) returns a real handle.

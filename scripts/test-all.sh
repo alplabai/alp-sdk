@@ -19,7 +19,8 @@
 #   2. Plain-CMake / baremetal build (compile-only -- no tests yet)
 #   3. Zephyr twister (skipped if ZEPHYR_BASE is unset)
 #   4. clang-format diff vs HEAD~1 (skipped if no clang-format)
-#   5. shellcheck over scripts/*.sh (skipped if shellcheck isn't installed)
+#   5. shellcheck over every shipped *.sh (repo-wide `git ls-files
+#      '*.sh'`; skipped if that tool isn't installed)
 #   6. bash -n parse of every shipped *.sh under REAL bash 3.2.57 in a
 #      container (skipped, loudly, if podman/docker isn't on PATH --
 #      cross-platform-zephyr.yml's macos-latest leg still covers it)
@@ -33,11 +34,34 @@
 #  11. Doxygen zero-warnings build (generates the pr-doxygen.yml
 #      Doxyfile inline; finds doxygen on PATH or in ~/doxybin)
 #
-# Each stage prints `[stage] PASS` or `[stage] FAIL`; the script
-# returns non-zero if any required stage failed.  A stage function
-# signals "prerequisite not available" by returning exit code 99;
-# run_stage() turns that into `[stage] SKIP`, never `FAIL` -- skipped
-# stages don't fail the run.
+# Each stage prints `[stage] PASS` or `[stage] FAIL`.  A stage function
+# signals "prerequisite not available" (a missing tool, env var, or
+# importable module -- e.g. ZEPHYR_BASE unset, or a python3 that can't
+# `import natsort`/`pytest`) by returning exit code 99;
+# run_stage() turns that into `[stage] SKIP`, never `FAIL` -- a missing
+# prerequisite is not a defect in the tree.
+#
+# Exit codes:
+#   0 -- every stage that ran passed, AND nothing was skipped for a
+#        missing prerequisite.  A complete run for the chosen --target.
+#   1 -- at least one stage FAILED.  See the per-stage output above the
+#        summary.
+#   2 -- no stage FAILED, but at least one REQUIRED stage was SKIPPED
+#        for a missing prerequisite (tagged `[GAP]` in the summary) --
+#        e.g. twister SKIPping because ZEPHYR_BASE is unset.  This is a
+#        PARTIAL run: something that should have been checked was not,
+#        so "0 failures" must not be read as "fully verified"
+#        (alp-sdk#1396).  Install/configure the missing prerequisite
+#        and re-run.
+#
+# A `[GAP]`-tagged SKIP is not the same thing as a plain SKIP: `--quick`
+# and `--target dev` also skip stages (twister, doxygen, the release-only
+# CMake builds), but those are a DELIBERATE, in-scope choice for the
+# profile requested -- they print with no `[GAP]` tag and do not affect
+# the exit code, because the run is still complete for what it claims to
+# cover.  Same word ("SKIP") in the per-stage line either way; the
+# summary's `[GAP]` tag and the exit code are what distinguish "chose not
+# to run this" from "tried to run this and couldn't".
 #
 # Worktree-safe: this script resolves its own location via
 # `${BASH_SOURCE[0]}`, so REPO_ROOT is always the checkout the script
@@ -117,7 +141,7 @@ while [ $# -gt 0 ]; do
         --main)         TARGET=main ;;
         --list-required-gate-scripts) LIST_REQUIRED_GATE_SCRIPTS=1 ;;
         -h|--help)
-            sed -n '3,68p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '3,104p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -138,7 +162,18 @@ esac
 
 # -------- Stage tracking ------------------------------------------------------
 
-declare -a STAGE_NAMES STAGE_STATUS STAGE_NOTES
+declare -a STAGE_NAMES STAGE_STATUS STAGE_NOTES STAGE_KIND
+# STAGE_KIND is only meaningful for STAGE_STATUS=SKIP rows, and is one of:
+#   scope -- deliberately out of scope for THIS run (an explicit --quick /
+#            --target flag chose not to run it; --target dev's release-grade
+#            doxygen/yocto/baremetal stages are the canonical example). The
+#            run is still COMPLETE for the profile it claims to be.
+#   gap   -- the stage tried to run and could not, for a missing tool /
+#            env var / importable module / script. Real local coverage did
+#            NOT happen, regardless of how the run otherwise reads (issue
+#            alp-sdk#1396: a `ZEPHYR_BASE` gap here once still printed "All
+#            runnable stages passed." and exited 0).
+# PASS/FAIL rows carry "" so the four arrays stay index-aligned.
 
 run_stage() {
     local name="$1"; shift
@@ -147,25 +182,75 @@ run_stage() {
     "$@"
     local rc=$?
     # Convention: a stage function returns 99 to mean "a prerequisite
-    # (tool / optional script / env var) isn't available here" -- that
-    # is a SKIP, never a FAIL, regardless of which stage it came from.
+    # (tool / optional script / env var / importable module) isn't
+    # available here" -- that is always a SKIP, never a FAIL, and always
+    # STAGE_KIND=gap: a stage function only returns 99 because something
+    # it needed to actually run was missing, which is a gap in coverage
+    # by construction -- never a deliberate scope choice (those are
+    # expressed via skip_stage()'s explicit "scope" callers below,
+    # before run_stage() is ever reached for that stage this run).
     if [ "${rc}" -eq 99 ]; then
-        STAGE_NAMES+=("${name}"); STAGE_STATUS+=("SKIP"); STAGE_NOTES+=("prerequisite unavailable")
+        STAGE_NAMES+=("${name}"); STAGE_STATUS+=("SKIP"); STAGE_KIND+=("gap"); STAGE_NOTES+=("prerequisite unavailable")
         echo "[${name}] SKIP (prerequisite unavailable)"
     elif [ "${rc}" -eq 0 ]; then
-        STAGE_NAMES+=("${name}"); STAGE_STATUS+=("PASS"); STAGE_NOTES+=("")
+        STAGE_NAMES+=("${name}"); STAGE_STATUS+=("PASS"); STAGE_KIND+=(""); STAGE_NOTES+=("")
         echo "[${name}] PASS"
     else
-        STAGE_NAMES+=("${name}"); STAGE_STATUS+=("FAIL"); STAGE_NOTES+=("exit=${rc}")
+        STAGE_NAMES+=("${name}"); STAGE_STATUS+=("FAIL"); STAGE_KIND+=(""); STAGE_NOTES+=("exit=${rc}")
         echo "[${name}] FAIL (exit=${rc})"
     fi
 }
 
 skip_stage() {
-    local name="$1"; local reason="$2"
+    local name="$1"; local reason="$2"; local kind="${3:-}"
+    case "${kind}" in
+        scope|gap) ;;
+        *)
+            echo "test-all.sh: internal error: skip_stage '${name}' called with kind='${kind}', want scope|gap" >&2
+            exit 70
+            ;;
+    esac
     echo
     echo "===== [${name}] SKIP: ${reason} ====="
-    STAGE_NAMES+=("${name}"); STAGE_STATUS+=("SKIP"); STAGE_NOTES+=("${reason}")
+    STAGE_NAMES+=("${name}"); STAGE_STATUS+=("SKIP"); STAGE_KIND+=("${kind}"); STAGE_NOTES+=("${reason}")
+}
+
+# `import jsonschema` succeeding says NOTHING about whether that
+# jsonschema has the API the gate scripts call.  `Draft202012Validator`
+# arrived in jsonschema 4.0; a distro-packaged 3.2.0 imports cleanly and
+# then dies partway through a stage with
+#
+#     AttributeError: module 'jsonschema' has no attribute
+#     'Draft202012Validator'. Did you mean: 'Draft3Validator'?
+#
+# which surfaced as FOUR stages FAILING on a clean tree
+# (metadata-validate, doc-yaml-fragments, required-gate-scripts,
+# generated-files) instead of SKIPping for the missing prerequisite they
+# actually have -- alp-sdk#1423.  That is #1396's harm ("go red on a
+# clean tree") reached by a different route: #1396 fixed the module
+# being ABSENT, this is the module being PRESENT BUT TOO OLD, which no
+# `import` check can catch.
+#
+# Probe the attribute, not the import -- the same shape
+# stage_pytest_scripts uses for pytest.  Deliberately NOT
+# fixed inside the 18 `scripts/*.py` files that call
+# `Draft202012Validator`: those are also run DIRECTLY by
+# pr-metadata-validate.yml and friends, where a 99 exit is a failing
+# check, so teaching them to exit 99 would trade a wrong local verdict
+# for a red CI.  The wrong verdict is test-all.sh's, so the fix is
+# test-all.sh's.
+have_jsonschema_2020() {
+    python3 -c 'import jsonschema; jsonschema.Draft202012Validator' >/dev/null 2>&1
+}
+
+require_jsonschema_2020() {
+    local stage="$1"
+    if ! have_jsonschema_2020; then
+        local found
+        found="$(python3 -c 'import jsonschema; print(jsonschema.__version__)' 2>/dev/null || echo 'not installed')"
+        echo "${stage}: python3 ($(command -v python3)) has jsonschema ${found}, which has no Draft202012Validator (needs jsonschema >= 4.0). Activate the zephyrproject venv or: pip install 'jsonschema>=4'."
+        return 99
+    fi
 }
 
 # -------- Stage implementations -----------------------------------------------
@@ -196,6 +281,19 @@ stage_baremetal_build() {
 
 stage_twister() {
     if [ -z "${ZEPHYR_BASE:-}" ]; then
+        return 99
+    fi
+    # ZEPHYR_BASE being set proves nothing about the python3 that will
+    # actually run twister below: on a system interpreter without
+    # natsort, twister's own import chain
+    # (zephyr/scripts/pylib/twister/twisterlib/hardwaremap.py does
+    # `from natsort import natsorted`) raises ModuleNotFoundError before
+    # a single test runs -- previously that read as this stage FAILING
+    # ("nothing wrong with the tree" reported red) instead of the
+    # missing-prerequisite SKIP it actually is (alp-sdk#1396). Same
+    # `return 99` idiom as the ZEPHYR_BASE check above.
+    if ! python3 -c 'import natsort' >/dev/null 2>&1; then
+        echo "stage_twister: python3 ($(command -v python3)) cannot import natsort, which twister's own hardwaremap.py requires. Activate the zephyrproject venv (or: pip install natsort) so a python3 with it resolves first on PATH."
         return 99
     fi
     # Pin THIS checkout as the alp-sdk Zephyr module -- always, even
@@ -234,6 +332,7 @@ stage_twister() {
     python3 "${ZEPHYR_BASE}/scripts/twister" \
         --testsuite-root "${REPO_ROOT}/tests/unit" \
         --testsuite-root "${REPO_ROOT}/tests/zephyr" \
+        --testsuite-root "${REPO_ROOT}/tests/console" \
         --testsuite-root "${REPO_ROOT}/examples" \
         -p native_sim/native/64 \
         --extra-args=CONFIG_COMPILER_WARNINGS_AS_ERRORS=y \
@@ -242,11 +341,15 @@ stage_twister() {
 }
 
 stage_shellcheck() {
-    # Static-lint the project shell scripts so a shell bug (an SC2164
+    # Static-lint EVERY shipped shell script so a shell bug (an SC2164
     # cd-without-guard, a `set -u` empty-array trap, a POSIX-portability
     # slip that only bites macOS's bash 3.2) is caught on Linux BEFORE it
     # reddens macOS/Windows python-smoke.  Resolve shellcheck on PATH or
-    # the no-root ~/.local/bin install.
+    # the no-root ~/.local/bin install.  NOTE: unlike
+    # pr-static-analysis.yml's CI mirror (pinned to the v0.10.0 upstream
+    # release tarball), this resolves whatever shellcheck version is
+    # already installed locally -- a version skew here can disagree with
+    # CI about what counts as clean; install v0.10.0 locally to match.
     local sc
     sc=$(command -v shellcheck 2>/dev/null || true)
     if [ -z "${sc}" ] && [ -x "${HOME}/.local/bin/shellcheck" ]; then
@@ -255,16 +358,51 @@ stage_shellcheck() {
     if [ -z "${sc}" ]; then
         return 99
     fi
+    # #1550: widened from a flat `scripts/*.sh` glob (which only reached
+    # scripts/ itself, one level deep) to a repo-wide `git ls-files '*.sh'`
+    # sweep -- matching stage_bash32_parse's existing repo-wide `*.sh`
+    # sweep below. Before this, two groups shipped unchecked: root
+    # scripts/*.sh had no CI coverage at all (only this local stage), and 8
+    # files entirely outside scripts/ (
+    # keys/generate_dev_key.sh,
+    # meta-alp-sdk/recipes-core/alp-system/files/alp-remoteproc-start.sh,
+    # tests/yocto/*.sh, tools/native-sim-container/entrypoint.sh) were
+    # linted nowhere at all, in CI or locally.
+    #
     # test-all.sh is the load-bearing local-CI wrapper (it runs in a macOS
-    # CI test, test_test_all_worktree.py), so lint it at warning level;
-    # lint the rest of scripts/*.sh at error level to avoid drowning in
-    # pre-existing style warnings.
+    # CI test, test_test_all_worktree.py), so lint it at warning level.
+    # scripts/bench/** keeps the -S warning -x bar #1527 set (SC1012, the
+    # #1478 stray-`\n` class, is warning-severity, so -S error alone would
+    # not have caught it; -x follows `source` so bench-env.sh's
+    # cross-file reads don't false-positive SC2034). Everything else --
+    # every other file `git ls-files '*.sh'` returns -- runs at -S error,
+    # matching this stage's own prior non-test-all.sh severity and
+    # onramp-clean-container.yml's scripts/bootstrap.sh step.
+    local -a all_files=()
+    local f
+    while IFS= read -r f; do
+        all_files+=("${f}")
+    done < <(git ls-files '*.sh')
+    # An empty file list must never read as "0 broken files == PASS" --
+    # that is a silent-empty-loop, the exact shape of gate this PR argues
+    # against, and stage_bash32_parse below guards the identical case.
+    if [ "${#all_files[@]}" -eq 0 ]; then
+        echo "stage_shellcheck: 'git ls-files *.sh' returned NO files -- refusing to report a silent pass."
+        return 1
+    fi
     local rc=0
-    "${sc}" -S warning scripts/test-all.sh || rc=1
-    local other
-    for other in scripts/*.sh; do
-        [ "${other}" = "scripts/test-all.sh" ] && continue
-        "${sc}" -S error "${other}" || rc=1
+    for f in "${all_files[@]}"; do
+        case "${f}" in
+        scripts/test-all.sh)
+            "${sc}" -S warning "${f}" || rc=1
+            ;;
+        scripts/bench/*)
+            "${sc}" -x -S warning "${f}" || rc=1
+            ;;
+        *)
+            "${sc}" -S error "${f}" || rc=1
+            ;;
+        esac
     done
     return "${rc}"
 }
@@ -402,8 +540,18 @@ stage_clang_format() {
     # (GigaDevice/Zephyr/Renesas-FSP), our .clang-format does not govern
     # them, and CI never flags them -- so neither should the local mirror.
     # (Without this, a vendored .c drift produced a FALSE local failure.)
+    # tests/scripts/fixtures/rzv2n_svd/** is excluded on the same grounds:
+    # verbatim BSD-3-Clause Renesas FSP header excerpts that
+    # test_gen_rzv2n_cm33_svd.py asserts stay byte-identical to the real
+    # module headers, so reformatting them would break the fixture.
+    #
+    # NOTE: this stage diffs against a COMMIT, so it cannot see untracked
+    # files.  A brand-new .c/.h shows up here only once it is staged or
+    # committed -- run it again after `git add`, or the gate passes on a
+    # file it never read.
     local out
     out=$(git diff -U0 "${base}" -- '*.c' '*.h' ':!vendors/**' ':!zephyr/**' \
+          ':!tests/scripts/fixtures/rzv2n_svd/**' \
           | python3 "${diff_tool}" -p1 || true)
     if [ -n "${out}" ]; then
         echo "${out}"
@@ -415,6 +563,7 @@ stage_metadata_validate() {
     if [ ! -f scripts/validate_metadata.py ]; then
         return 99
     fi
+    require_jsonschema_2020 stage_metadata_validate || return 99
     python3 scripts/validate_metadata.py || return 1
     if [ -f metadata/templates/board.yaml.example ] && \
        [ -f scripts/alp_project.py ]; then
@@ -427,12 +576,22 @@ stage_metadata_validate() {
 }
 
 stage_alp_lock() {
-    # Mirrors pr-metadata-validate.yml's `alp.lock --check` step (#1045) --
-    # previously the ONLY place that check ran, so a locally-green branch
-    # could still redden CI on lock drift it never saw. No "script missing"
-    # skip: this is a tracked repo file, so a missing/renamed script means
-    # the gate itself vanished and that must redden, not SKIP silently
-    # (same reasoning as stage_generated_files above).
+    # Mirrors pr-metadata-validate.yml's `alp.lock --check` step (#1045).
+    # alp.lock is no longer committed (#1576 -- its `digests.metadata` is a
+    # single hash over the whole metadata/** tree, so any two PRs touching
+    # different metadata files conflicted on this one line by construction).
+    # `--check` therefore GENERATES a lock in memory and schema-validates it
+    # rather than diffing against a tracked copy; it still catches a broken
+    # generator (schema mismatch) and a local-path leak (`_reject_local`).
+    # No "script missing" skip: scripts/west_commands/alp_lock.py is a
+    # tracked repo file, so a missing/renamed script means the gate itself
+    # vanished and that must redden, not SKIP silently (same reasoning as
+    # stage_generated_files above).
+    #
+    # alp_lock.py imports jsonschema at module scope for its draft 2020-12
+    # schema validation -- same missing/too-old-prerequisite trap as
+    # stage_metadata_validate and stage_doc_yaml_fragments above (#1396/#1423).
+    require_jsonschema_2020 stage_alp_lock || return 99
     python3 scripts/west_commands/alp_lock.py --workspace . --check || return 1
 }
 
@@ -446,6 +605,7 @@ stage_doc_yaml_fragments() {
     if [ ! -f metadata/schemas/board.schema.json ]; then
         return 99
     fi
+    require_jsonschema_2020 stage_doc_yaml_fragments || return 99
     python3 scripts/lint_doc_yaml_fragments.py || return 1
 }
 
@@ -475,12 +635,33 @@ stage_pytest_scripts() {
     if ! command -v python3 >/dev/null 2>&1; then
         return 99
     fi
+    # python3 existing on PATH says nothing about whether IT has pytest:
+    # a system interpreter without pytest made `python3 -m pytest` below
+    # exit 1 with "No module named pytest" -- a genuine module-not-found
+    # on a clean tree, previously reported as this stage FAILING rather
+    # than SKIPping for the missing prerequisite it actually is
+    # (alp-sdk#1396). pytest_mock used to be checked here too, gating
+    # entry the same way the ZEPHYR_BASE / natsort checks gate
+    # stage_twister above -- it was the stage's only pytest-mock
+    # consumer (test_alp_cli.py / test_alp_cli_emit.py), both retired by
+    # the alp_cli CLI-wrapper retirement (#1367/#1368); no test under
+    # tests/scripts/ uses the `mocker` fixture any more.
+    if ! python3 -c 'import pytest' >/dev/null 2>&1; then
+        echo "stage_pytest_scripts: python3 ($(command -v python3)) cannot import pytest. Activate the zephyrproject venv or: pip install pytest."
+        return 99
+    fi
     python3 -m pytest tests/scripts/ -q || return 1
 
     # tests/parity/ is NOT under tests/scripts/, so the seam-1 comparator's own
-    # 11 unit tests were excluded from this stage AND from parity-seam1.yml,
+    # 15 unit tests were excluded from this stage AND from parity-seam1.yml,
     # which invoked only the comparator. Run them here too so a local
     # `test-all.sh` green means the same thing CI's does.
+    #
+    # NOT the same as running the comparator: this stage still does NOT invoke
+    # `tests/parity/seam1_field_diff.py` against the frozen oracle -- only
+    # parity-seam1.yml does. A green test-all.sh therefore does NOT clear the
+    # `parity-seam1` gate; run the comparator separately before pushing:
+    #   python3 tests/parity/seam1_field_diff.py --sdk . --oracle tests/parity/oracle
     if [ -f tests/parity/test_seam1_field_diff.py ]; then
         python3 -m pytest tests/parity/test_seam1_field_diff.py -q || return 1
     fi
@@ -534,6 +715,13 @@ stage_required_gate_scripts() {
     if ! command -v python3 >/dev/null 2>&1; then
         return 99
     fi
+    # Most of REQUIRED_GATE_SCRIPTS validate a schema, so an inadequate
+    # jsonschema takes the stage down mid-loop (check_bootstrap_manifest.py
+    # and check_build_plan.py were the first two to hit it) -- after the
+    # earlier scripts have already printed OK, which makes the FAIL read
+    # like a real gate break rather than a host gap.  Gate the whole
+    # stage: a partial pass here is not a meaningful verdict either.
+    require_jsonschema_2020 stage_required_gate_scripts || return 99
     local script path failed=0 ran=0
     for script in "${REQUIRED_GATE_SCRIPTS[@]}"; do
         path="scripts/${script}"
@@ -567,12 +755,11 @@ stage_required_gate_scripts() {
 
     # gd32-bridge protocol vectors must not drift from the generator
     # (mirrors the pr-metadata-validate.yml gd32-bridge step).
-    if [ -f firmware/gd32-bridge/tests/gen_protocol_vectors.py ]; then
-        ran=1
-        echo "--- gd32-bridge protocol vectors --check ---"
-        python3 firmware/gd32-bridge/tests/gen_protocol_vectors.py --check \
-            || failed=1
-    fi
+    # The GD32 wire vectors moved with the firmware (ADR 0031).  Their
+    # regeneration check now runs in alplabai/gd32-bridge-firmware's own CI,
+    # against the same generator -- see that repo's .github/workflows/ci.yml.
+    # Nothing to do here; the host-side consumers of those vectors are still
+    # covered by tests/zephyr/chips/gd32g553/.
 
     if [ "${ran}" -eq 0 ]; then
         return 99
@@ -685,14 +872,54 @@ stage_abi_strict() {
 # and commit the result" (the tree is left regenerated for you to add).
 stage_generated_files() {
     command -v python3 >/dev/null 2>&1 || return 99
+    # gen_pinmux_capability.py validates its own output against
+    # metadata/schemas/pinmux-capability-v1.schema.json, so it needs the
+    # 2020-12 validator too.  The per-generator rc==99 path below cannot
+    # help here: the generator dies with an AttributeError (rc 1), not a
+    # refusal, so the stage would report a generator DEFECT for a host
+    # gap.  Gate at stage entry -- a drift check that regenerated only
+    # some of its artifacts is not a drift check.
+    require_jsonschema_2020 stage_generated_files || return 99
     local gens=(gen_soc_caps gen_status_strings gen_board_header
+                gen_cc3501e_gpio_routes
                 gen_pinmux_capability gen_support_matrix
-                gen_portability_matrix gen_catalog gen_error_catalog)
-    local g
+                gen_portability_matrix gen_catalog gen_error_catalog
+                gen_verification_status)
+    local g rc
+    local gen_total=0 gen_skipped=0
     for g in "${gens[@]}"; do
         [ -f "scripts/${g}.py" ] || continue
-        python3 "scripts/${g}.py" >/dev/null 2>&1 || { echo "scripts/${g}.py failed"; return 1; }
+        gen_total=$((gen_total + 1))
+        python3 "scripts/${g}.py" >/dev/null 2>&1
+        rc=$?
+        if [ "${rc}" -eq 99 ]; then
+            # 99 = the generator refused for lack of a tool (clang-format;
+            # see gen_soc_caps.py / gen_status_strings.py), not a
+            # generator defect -- count it, don't fail the stage over it
+            # (alp-sdk#1221). The files it would have written are simply
+            # left as committed, so the diff check below stays honest.
+            gen_skipped=$((gen_skipped + 1))
+        elif [ "${rc}" -ne 0 ]; then
+            echo "scripts/${g}.py failed"
+            return 1
+        fi
     done
+    # gen_soc_peripheral_instances.py is NOT in the array above: unlike
+    # every other generator here, it needs a resolvable Zephyr checkout
+    # (the vendored SoC devicetree) and skips cleanly (exit 0, a
+    # `skipped: ...` line) without one -- the other seven have no such
+    # prerequisite and would silently swallow that line under the loop's
+    # `>/dev/null 2>&1`.  Run it separately, unsuppressed, so the skip is
+    # visible instead of a contributor seeing 16/16 PASS with no signal
+    # that this specific fact went unchecked (#1154 PR review). When
+    # $ZEPHYR_BASE (or the west-topdir zephyr/ fallback) DOES resolve --
+    # the common case on a bootstrapped dev machine -- this actually
+    # regenerates metadata/socs/renesas/rzv2n/n44.json in place, and the
+    # diff check below catches real drift, same as every other generator.
+    if [ -f scripts/gen_soc_peripheral_instances.py ]; then
+        python3 scripts/gen_soc_peripheral_instances.py \
+            || { echo "scripts/gen_soc_peripheral_instances.py failed"; return 1; }
+    fi
     # ABI snapshot -- current working snapshot is derived from
     # metadata/sdk_version.yaml (older snapshots are frozen).
     if [ -f scripts/abi_snapshot.py ]; then
@@ -721,17 +948,68 @@ stage_generated_files() {
             return 1
         fi
     fi
-    # Ignore only the snapshot's "generated" date line, like the CI gate.
-    if ! git diff --quiet --ignore-matching-lines='"generated":' -- \
+    # `git diff` alone is blind to a brand-new file the regen step just
+    # created (a not-yet-tracked board header, an added pinmux table,
+    # ...) -- a plain diff --exit-code reports 0 and this stage stays
+    # green even though a newly-needed generated file is missing from
+    # the commit (#1128a, mirrors pr-generated-files.yml's own `git add
+    # -N` step).  Mark every generated path intent-to-add so a new file
+    # shows up as an addition in the diff below, without staging real
+    # content. A `git add -N` pathspec that matches nothing (an expected
+    # generated path flat-out missing from the tree) fails closed with
+    # nothing staged -- swallowing that exit code would turn "can't even
+    # see what I'm supposed to check" into the same unearned PASS #1128a
+    # was about, so it's a hard failure here, not a silent no-op.
+    if ! git add -N -- \
+        include/alp docs/abi src/cap.c src/status_strings.c \
+        metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
+        metadata/socs/renesas/rzv2n/n44.json \
+        docs/portability-matrix.md docs/peripheral-support-matrix.md \
+        docs/verification-status.md \
+        examples/aen \
+        docs/diagnostics 2>/dev/null; then
+        echo "git add -N failed -- an expected generated path is missing from the tree"
+        return 1
+    fi
+    # No line-mask here: abi_snapshot.py's own write-skip guard is what
+    # keeps a no-op regen from touching the snapshot's "generated" line
+    # at all (issue #1232), so this diff sees zero lines changed for
+    # that case with no help needed -- matching pr-generated-files.yml's
+    # own `git diff` step, which drops the mask for the same reason. A
+    # real content change fails on its content lines regardless, so
+    # masking "generated" would only ever hide a regression in that
+    # guard, never a false positive. metadata/socs/renesas/rzv2n/n44.json
+    # only actually moves above when gen_soc_peripheral_instances.py
+    # found a resolvable Zephyr checkout (see the comment above its
+    # invocation) -- when it didn't, this path is untouched and simply
+    # contributes no diff, same as any other unaffected path in this
+    # list.
+    if ! git diff --quiet -- \
             include/alp docs/abi src/cap.c src/status_strings.c \
-            metadata/catalog.json metadata/pinmux docs/portability-matrix.md \
+            metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
+            metadata/socs/renesas/rzv2n/n44.json \
+            docs/portability-matrix.md docs/peripheral-support-matrix.md \
+            docs/verification-status.md \
+            examples/aen \
             docs/diagnostics 2>/dev/null; then
         echo "generated files are OUT OF SYNC -- regenerated in place; git add + commit:"
-        git --no-pager diff --stat --ignore-matching-lines='"generated":' -- \
+        git --no-pager diff --stat -- \
             include/alp docs/abi src/cap.c src/status_strings.c \
-            metadata/catalog.json metadata/pinmux docs/portability-matrix.md \
+            metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
+            metadata/socs/renesas/rzv2n/n44.json \
+            docs/portability-matrix.md docs/peripheral-support-matrix.md \
+            docs/verification-status.md \
+            examples/aen \
             docs/diagnostics 2>/dev/null | tail -20
         return 1
+    fi
+
+    # Every generator ran clean and nothing drifted -- but if one or more
+    # skipped for lack of clang-format, that coverage gap is real and must
+    # stay visible, not collapse into a plain PASS: SKIP, named (#1221).
+    if [ "${gen_skipped}" -gt 0 ]; then
+        echo "generated-files SKIP (${gen_skipped} of ${gen_total} generators need clang-format)"
+        return 99
     fi
 }
 
@@ -748,8 +1026,8 @@ else
     # The full plain-CMake builds are release-grade -- the fast `dev`
     # profile skips them (dev PRs iterate on twister + the cheap gates).
     if [ "${TARGET}" = "dev" ]; then
-        skip_stage "yocto-build-and-ctest" "--target dev (release-grade build)"
-        skip_stage "baremetal-build"       "--target dev (release-grade build)"
+        skip_stage "yocto-build-and-ctest" "--target dev (release-grade build)" scope
+        skip_stage "baremetal-build"       "--target dev (release-grade build)" scope
     else
         run_stage "yocto-build-and-ctest" stage_yocto_build_and_ctest
         run_stage "baremetal-build"       stage_baremetal_build
@@ -757,9 +1035,9 @@ else
 
     if [ "${YOCTO_ONLY}" -eq 0 ]; then
         if [ "${QUICK}" -eq 1 ]; then
-            skip_stage "twister" "--quick"
+            skip_stage "twister" "--quick" scope
         elif [ -z "${ZEPHYR_BASE:-}" ]; then
-            skip_stage "twister" "ZEPHYR_BASE not set (run scripts/bootstrap.sh first)"
+            skip_stage "twister" "ZEPHYR_BASE not set (run scripts/bootstrap.sh first)" gap
         else
             run_stage "twister" stage_twister
         fi
@@ -768,7 +1046,7 @@ else
     if command -v clang-format >/dev/null 2>&1; then
         run_stage "clang-format-diff" stage_clang_format
     else
-        skip_stage "clang-format-diff" "clang-format not installed"
+        skip_stage "clang-format-diff" "clang-format not installed" gap
     fi
 
     # Shell-script static lint -- catches shell bugs (cd-without-guard,
@@ -777,7 +1055,7 @@ else
     if command -v shellcheck >/dev/null 2>&1 || [ -x "${HOME}/.local/bin/shellcheck" ]; then
         run_stage "shellcheck" stage_shellcheck
     else
-        skip_stage "shellcheck" "shellcheck not installed (PATH or ~/.local/bin)"
+        skip_stage "shellcheck" "shellcheck not installed (PATH or ~/.local/bin)" gap
     fi
 
     # bash 3.2 parse gate -- catches the class of defect PR #1050 hit
@@ -790,7 +1068,7 @@ else
     if command -v podman >/dev/null 2>&1 || command -v docker >/dev/null 2>&1; then
         run_stage "bash32-parse" stage_bash32_parse
     else
-        skip_stage "bash32-parse" "neither podman nor docker on PATH -- CI's macos-latest python-smoke leg runs this unconditionally with real bash 3.2.57"
+        skip_stage "bash32-parse" "neither podman nor docker on PATH -- CI's macos-latest python-smoke leg runs this unconditionally with real bash 3.2.57" gap
     fi
 
     run_stage "metadata-validate" stage_metadata_validate
@@ -799,13 +1077,13 @@ else
     if [ -f scripts/lint_doc_yaml_fragments.py ]; then
         run_stage "doc-yaml-fragments" stage_doc_yaml_fragments
     else
-        skip_stage "doc-yaml-fragments" "scripts/lint_doc_yaml_fragments.py missing"
+        skip_stage "doc-yaml-fragments" "scripts/lint_doc_yaml_fragments.py missing" gap
     fi
 
     if [ -f scripts/check_public_private.py ]; then
         run_stage "public-private" stage_public_private
     else
-        skip_stage "public-private" "scripts/check_public_private.py missing"
+        skip_stage "public-private" "scripts/check_public_private.py missing" gap
     fi
 
     # Mirrors cross-platform-zephyr.yml's python-smoke --fail-on-warning
@@ -814,7 +1092,7 @@ else
     if [ -f scripts/check_cross_platform.py ]; then
         run_stage "cross-platform-lint" stage_cross_platform_lint
     else
-        skip_stage "cross-platform-lint" "scripts/check_cross_platform.py missing"
+        skip_stage "cross-platform-lint" "scripts/check_cross_platform.py missing" gap
     fi
 
     # Required scripts/check_*.py gates -- see REQUIRED_GATE_SCRIPTS
@@ -829,10 +1107,10 @@ else
 
     # alp.lock --check -- both the dev (fast) and main (release-grade)
     # profiles run this unconditionally, same as metadata-validate above.
-    # MUST run after generated-files: that stage rewrites metadata/catalog.json
-    # and metadata/error-catalog.json in place, and both are now lock-covered
-    # (#1045) -- checking the lock first would pass on pre-regen bytes and
-    # leave a just-regenerated catalog unverified.
+    # Placed after generated-files for narrative order only: `--check` no
+    # longer diffs against a committed lock (#1576), it schema-validates a
+    # freshly generated one, so this stage's verdict does not depend on
+    # running before or after generated-files regenerates its inputs.
     run_stage "alp-lock" stage_alp_lock
 
     # Main-only: the strict ABI-snapshot diff gate that pr-abi-snapshot.yml
@@ -848,7 +1126,7 @@ else
     if command -v python3 >/dev/null 2>&1 && [ -d tests/scripts ]; then
         run_stage "pytest-scripts" stage_pytest_scripts
     else
-        skip_stage "pytest-scripts" "tests/scripts missing or no python3"
+        skip_stage "pytest-scripts" "tests/scripts missing or no python3" gap
     fi
 
     # HiL spec validation -- host-side parse + board-target check
@@ -856,7 +1134,7 @@ else
     if [ -f tests/hil/run_smoke.py ]; then
         run_stage "hil-spec-validate" stage_hil_spec_validate
     else
-        skip_stage "hil-spec-validate" "tests/hil/run_smoke.py missing"
+        skip_stage "hil-spec-validate" "tests/hil/run_smoke.py missing" gap
     fi
 
     if [ "${QUICK}" -eq 0 ] && [ "${YOCTO_ONLY}" -eq 0 ] && [ "${TARGET}" != "dev" ]; then
@@ -866,10 +1144,10 @@ else
         if command -v doxygen >/dev/null 2>&1 || [ -x "${HOME}/doxybin/doxygen" ]; then
             run_stage "doxygen" stage_doxygen
         else
-            skip_stage "doxygen" "doxygen not installed (PATH or ~/doxybin)"
+            skip_stage "doxygen" "doxygen not installed (PATH or ~/doxybin)" gap
         fi
     elif [ "${TARGET}" = "dev" ]; then
-        skip_stage "doxygen" "--target dev (slow release-grade stage)"
+        skip_stage "doxygen" "--target dev (slow release-grade stage)" scope
     fi
 fi
 
@@ -880,8 +1158,14 @@ END=$(date +%s)
 echo
 echo "===== SUMMARY ($((END - START))s) ====="
 fail_count=0
+gap_count=0
 for i in "${!STAGE_NAMES[@]}"; do
-    printf "  %-28s %s %s\n" "${STAGE_NAMES[$i]}" "${STAGE_STATUS[$i]}" "${STAGE_NOTES[$i]}"
+    tag=""
+    if [ "${STAGE_STATUS[$i]}" = "SKIP" ] && [ "${STAGE_KIND[$i]}" = "gap" ]; then
+        tag="[GAP] "
+        gap_count=$((gap_count + 1))
+    fi
+    printf "  %-28s %s %s%s\n" "${STAGE_NAMES[$i]}" "${STAGE_STATUS[$i]}" "${tag}" "${STAGE_NOTES[$i]}"
     [ "${STAGE_STATUS[$i]}" = "FAIL" ] && fail_count=$((fail_count + 1))
 done
 
@@ -889,6 +1173,24 @@ if [ "${fail_count}" -gt 0 ]; then
     echo
     echo "${fail_count} stage(s) failed.  See per-stage output above."
     exit 1
+fi
+
+# A [GAP] stage is one that TRIED to run and could not, for a missing
+# tool / env var / importable module -- as opposed to a plain SKIP that
+# --quick / --target deliberately scoped out (STAGE_KIND=scope, printed
+# with no [GAP] tag). Zero failures does NOT mean this run measured
+# what it claims to: alp-sdk#1396 was exactly this shape --
+# `ZEPHYR_BASE` unset made twister SKIP, nothing failed, and the run
+# still printed "All runnable stages passed." and exited 0, which reads
+# as "the tree is fully verified" when the one stage that could have
+# caught a build break never ran. A distinct exit code (2, not 0 or 1)
+# means a caller that only checks $? for zero can't mistake this for a
+# clean run either.
+if [ "${gap_count}" -gt 0 ]; then
+    echo
+    echo "${gap_count} stage(s) SKIPPED for a missing prerequisite (marked [GAP] above) -- this run did NOT exercise everything --target ${TARGET} requires."
+    echo "Install/configure what's missing (see docs/testing.md, docs/local-ci.md) and re-run before trusting this as a complete local gate."
+    exit 2
 fi
 echo
 echo "All runnable stages passed.  Real-hardware coverage is parked"

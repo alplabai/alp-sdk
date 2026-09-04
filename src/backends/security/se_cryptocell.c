@@ -85,6 +85,7 @@
  */
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -97,6 +98,7 @@
 #include <alp/security.h>
 
 #include "alp_checked_arith.h"
+#include "alp_slot_claim.h"
 #include "security_ops.h"
 
 #if defined(CONFIG_ALP_SDK_SECURITY_SE_CRYPTOCELL)
@@ -179,8 +181,18 @@ static alp_status_t se_rc_to_alp(int rc)
 #define CONFIG_ALP_SDK_SECURITY_SE_HASH_BUF 512
 #endif
 
+/*
+ * in_use is the LAST member on both structs below (see alp_slot_claim.h):
+ * the winning claimant zeroes everything before it via offsetof, and every
+ * release below wipes that same region (sensitive key/plaintext material)
+ * before atomically releasing the slot with alp_slot_release() -- see
+ * se_hash_acquire()/se_aead_acquire() (issue #1115). Round-2 dev review:
+ * every op's `!be->in_use` guard below now reads it with
+ * __atomic_load_n(__ATOMIC_ACQUIRE) too, not a plain load -- mixing a
+ * plain read with the atomic claim/release RMW/store on the same object
+ * is a data race in the C memory model.
+ */
 struct se_hash_be {
-	bool in_use;
 	/*
 	 * Once the buffered byte count would exceed the single-shot SE SHA
 	 * ceiling, this handle transparently switches to the portable PSA
@@ -196,23 +208,31 @@ struct se_hash_be {
 	alp_hash_backend_state_t  psa_state;
 	size_t                    used;
 	uint8_t                   buf[CONFIG_ALP_SDK_SECURITY_SE_HASH_BUF];
+	bool                      in_use;
 };
 
 struct se_aead_be {
-	bool    in_use;
 	uint8_t key[32]; /* up to 256-bit AES / ChaCha20 key */
 	size_t  key_len;
+	bool    in_use;
 };
 
 static struct se_hash_be g_se_hash_pool[CONFIG_ALP_SDK_MAX_HASH_HANDLES];
 static struct se_aead_be g_se_aead_pool[CONFIG_ALP_SDK_MAX_AEAD_HANDLES];
 
+/* issue #1115: this used to be a plain `if (!in_use) { in_use = true; }`
+ * scan -- called from ops->open() only AFTER the FRONTEND dispatcher slot
+ * (src/security_dispatch.c) was already claimed atomically, so two
+ * threads opening concurrently could both win the SAME SE backend slot
+ * here and alias one se_hash_be/se_aead_be (buffered plaintext, AES/
+ * ChaCha20 key material) between two live handles -- crypto cross-talk.
+ * Route the claim through the same atomic primitive the dispatcher pools
+ * already use. */
 static struct se_hash_be *se_hash_acquire(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(g_se_hash_pool); ++i) {
-		if (!g_se_hash_pool[i].in_use) {
-			memset(&g_se_hash_pool[i], 0, sizeof(g_se_hash_pool[i]));
-			g_se_hash_pool[i].in_use = true;
+		if (alp_slot_try_claim(&g_se_hash_pool[i].in_use)) {
+			memset(&g_se_hash_pool[i], 0, offsetof(struct se_hash_be, in_use));
 			return &g_se_hash_pool[i];
 		}
 	}
@@ -222,13 +242,31 @@ static struct se_hash_be *se_hash_acquire(void)
 static struct se_aead_be *se_aead_acquire(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(g_se_aead_pool); ++i) {
-		if (!g_se_aead_pool[i].in_use) {
-			memset(&g_se_aead_pool[i], 0, sizeof(g_se_aead_pool[i]));
-			g_se_aead_pool[i].in_use = true;
+		if (alp_slot_try_claim(&g_se_aead_pool[i].in_use)) {
+			memset(&g_se_aead_pool[i], 0, offsetof(struct se_aead_be, in_use));
 			return &g_se_aead_pool[i];
 		}
 	}
 	return NULL;
+}
+
+/* Wipe sensitive material (buffered plaintext / delegated PSA context) and
+ * atomically release the slot -- the counterpart to se_hash_acquire()
+ * above.  Every finish/close path below routes release through this
+ * instead of a raw `memset(be, 0, sizeof(*be))`, which zeroed in_use with
+ * a plain store rather than alp_slot_release()'s atomic release-store. */
+static void se_hash_release(struct se_hash_be *be)
+{
+	memset(be, 0, offsetof(struct se_hash_be, in_use));
+	alp_slot_release(&be->in_use);
+}
+
+/* Counterpart to se_aead_acquire() -- wipes key material, then atomically
+ * releases the slot. */
+static void se_aead_release(struct se_aead_be *be)
+{
+	memset(be, 0, offsetof(struct se_aead_be, in_use));
+	alp_slot_release(&be->in_use);
 }
 
 /* SHA byte length per alg.  Only SHA-256 is offered by the E8 CryptoCell
@@ -396,7 +434,7 @@ se_hash_open(alp_hash_alg_t alg, alp_hash_backend_state_t *state, alp_capabiliti
 static alp_status_t se_hash_update(alp_hash_backend_state_t *state, const uint8_t *data, size_t len)
 {
 	struct se_hash_be *be = (struct se_hash_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return ALP_ERR_NOT_READY;
 	}
 	if (data == NULL && len != 0u) {
@@ -433,7 +471,7 @@ static alp_status_t se_hash_finish(alp_hash_backend_state_t *state,
                                    size_t                   *digest_len)
 {
 	struct se_hash_be *be = (struct se_hash_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return ALP_ERR_NOT_READY;
 	}
 
@@ -462,8 +500,8 @@ static alp_status_t se_hash_finish(alp_hash_backend_state_t *state,
 		 * copy) before release rather than leaving it to the next
 		 * se_hash_acquire() -- sensitive material shouldn't linger in
 		 * a "free" slot any longer than necessary. */
-		memset(be, 0, sizeof(*be));
 		state->be_data = NULL;
+		se_hash_release(be);
 		return s;
 	}
 
@@ -498,15 +536,15 @@ static alp_status_t se_hash_finish(alp_hash_backend_state_t *state,
 	 * has already run/will run its own close-or-not decision on the
 	 * PUBLIC handle; this backend's own resource is done with either
 	 * outcome and must not hold sensitive bytes past this point. */
-	memset(be, 0, sizeof(*be));
 	state->be_data = NULL;
+	se_hash_release(be);
 	return s;
 #else
 	/* Unreachable by construction: with the send seam off, se_hash_open
 	 * declines at open (issue #239) and no SE hash handle exists.  Keep
 	 * the defensive decline so the vtable entry still compiles. */
-	memset(be, 0, sizeof(*be));
 	state->be_data = NULL;
+	se_hash_release(be);
 	if (digest_len != NULL) {
 		*digest_len = 0u;
 	}
@@ -517,7 +555,7 @@ static alp_status_t se_hash_finish(alp_hash_backend_state_t *state,
 static void se_hash_close(alp_hash_backend_state_t *state)
 {
 	struct se_hash_be *be = (struct se_hash_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return;
 	}
 	/* Tear down the delegated PSA context before wiping our slot. */
@@ -525,8 +563,8 @@ static void se_hash_close(alp_hash_backend_state_t *state)
 		be->psa_ops->hash_close(&be->psa_state);
 	}
 	/* Wipe buffered plaintext before releasing the slot. */
-	memset(be, 0, sizeof(*be));
 	state->be_data = NULL;
+	se_hash_release(be);
 }
 
 /* ================================================================== */
@@ -610,7 +648,7 @@ static alp_status_t se_aead_encrypt(alp_aead_backend_state_t *state,
                                     size_t                    tag_len)
 {
 	struct se_aead_be *be = (struct se_aead_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return ALP_ERR_NOT_READY;
 	}
 
@@ -729,7 +767,7 @@ static alp_status_t se_aead_decrypt(alp_aead_backend_state_t *state,
                                     uint8_t                  *plain_out)
 {
 	struct se_aead_be *be = (struct se_aead_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return ALP_ERR_NOT_READY;
 	}
 
@@ -819,12 +857,12 @@ static alp_status_t se_aead_decrypt(alp_aead_backend_state_t *state,
 static void se_aead_close(alp_aead_backend_state_t *state)
 {
 	struct se_aead_be *be = (struct se_aead_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return;
 	}
 	/* Wipe key material before releasing the slot. */
-	memset(be, 0, sizeof(*be));
 	state->be_data = NULL;
+	se_aead_release(be);
 }
 
 /* ================================================================== */

@@ -11,7 +11,7 @@ example of sleep-mode selection + multi-source wakeup.
 > "re-entering deep sleep" lines below are literal `printf` string
 > constants that frame where a real node's `alp_*` calls would go.
 > What is real and worth copying is the **declarative half**: the
-> `power:` block and the `CONFIG_PM_*` set the orchestrator emits
+> `power:` block and the `CONFIG_PM_*` set the planner emits
 > from it. Despite the example's name, no BME280 or IMU is driven
 > here (the SDK does ship a BME280 driver -- see
 > [`<alp/chips/bme280.h>`](../../../include/alp/chips/bme280.h) --
@@ -138,7 +138,7 @@ Expected output:
 ### Real silicon (AEN301)
 
 ```bash
-tan build --board alp_e1m_aen301_m55_he examples/power-timing/power-managed-sensor
+tan build --project examples/power-timing/power-managed-sensor
 west flash
 ```
 
@@ -165,7 +165,7 @@ stays the same.
 
 - [`docs/board-config-features.md`](../../../docs/board-config-features.md)
   "Per-slice power-management profile" -- the schema reference.
-- [`examples/connectivity/production-deployment`](../production-deployment/)
+- [`examples/connectivity/production-deployment`](../../connectivity/production-deployment/)
   -- the application-core counterpart (sleep_mode: standby with
   wake-on-network for the Mender poll thread).
 - [`docs/portability.md`](../../../docs/portability.md) -- which

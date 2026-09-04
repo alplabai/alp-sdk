@@ -54,6 +54,18 @@
 #define ADC_BASE ((uint32_t)DT_REG_ADDR_BY_NAME(ADC_NODE, adc_reg))
 
 /* ADC register offsets -- VERBATIM from adc_alif.c. */
+/* Timing registers read back beside the result, so the log records the
+ * configuration the measurement below belongs to (HWRM 19.1.5.3.4 / .3.7 /
+ * .3.8 / .3.11). */
+#define OFF_CLK_DIVISOR   0x0CU
+#define OFF_SAMPLE_WIDTH  0x18U
+#define OFF_AVG_NUM       0x20U
+#define OFF_SEQUENCER_CTL 0x34U
+
+/* How many conversions the timing loop runs.  Large enough that the k_cycle
+ * resolution and per-call software overhead are small next to the total. */
+#define TIMING_ITERATIONS 2000U
+
 #define OFF_START_SRC 0x00U
 #define OFF_CONTROL   0x30U
 #define OFF_SEL       0x3CU
@@ -179,7 +191,45 @@ int main(void)
 	uint32_t sel       = rd(ADC_BASE, OFF_SEL);
 	uint32_t samp_reg  = rd(ADC_BASE, OFF_SAMPLE_0 + 4U * TEST_CHANNEL);
 
+	/*
+	 * ADC_CLK measurement (#1823).  Time TIMING_ITERATIONS identical
+	 * single-shot reads.  Each conversion is avg_sample_num ADC_CLK periods, so
+	 * running this image at two clock_div values and differencing cancels the
+	 * per-call software overhead:
+	 *
+	 *     PERIPH_CLK = avg_sample_num * (div_b - div_a) / (t_b - t_a)
+	 *
+	 * A single run cannot separate hardware time from call overhead, so the
+	 * per-conversion number below is reported, never gated.
+	 */
+	uint32_t t0 = k_cycle_get_32();
+
+	for (uint32_t i = 0; i < TIMING_ITERATIONS; i++) {
+		(void)adc_read(adc, &seq);
+	}
+
+	uint32_t elapsed_cyc = k_cycle_get_32() - t0;
+	uint64_t elapsed_ns  = k_cyc_to_ns_floor64(elapsed_cyc);
+
+	printk("-- timing (#1823) --\n");
+	printk("iterations : %u\n", TIMING_ITERATIONS);
+	printk("total      : %u ns\n", (unsigned)elapsed_ns);
+	printk("per read   : %u ns  (hardware + adc_read() overhead)\n",
+	       (unsigned)(elapsed_ns / TIMING_ITERATIONS));
+
 	printk("-- readback --\n");
+	printk("CLK_DIVISOR   0x%08x = 0x%08x (HWRM 19.1.5.3.4, 0x2..0x10)\n",
+	       ADC_BASE + OFF_CLK_DIVISOR,
+	       rd(ADC_BASE, OFF_CLK_DIVISOR));
+	printk("SAMPLE_WIDTH  0x%08x = 0x%08x (HWRM 19.1.5.3.7, 2..32 PCLK)\n",
+	       ADC_BASE + OFF_SAMPLE_WIDTH,
+	       rd(ADC_BASE, OFF_SAMPLE_WIDTH));
+	printk("AVG_NUM       0x%08x = 0x%08x (samples per result)\n",
+	       ADC_BASE + OFF_AVG_NUM,
+	       rd(ADC_BASE, OFF_AVG_NUM));
+	printk("SEQUENCER_CTL 0x%08x = 0x%08x (bit16 MODE, bits 8-0 MASKED)\n",
+	       ADC_BASE + OFF_SEQUENCER_CTL,
+	       rd(ADC_BASE, OFF_SEQUENCER_CTL));
 	printk("START_SRC 0x%08x = 0x%08x (bit7 ENABLE exp 0 after completion)\n",
 	       ADC_BASE + OFF_START_SRC,
 	       start_src);

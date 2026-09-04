@@ -76,6 +76,8 @@ alp-sdk/
 │   ├── e1m_x_pinout.h               # E1M-X-family portable pad constants
 │   ├── chips/                       # one <alp/chips/<part>.h> per chip driver
 │   ├── blocks/                      # <alp/blocks/<name>.h> for SDK-level block helpers
+│   ├── ext/<vendor>/                # vendor escape-hatch headers (alif/renesas/nxp/deepx)
+│   │                                 # for capabilities the portable <alp/*> API can't express
 │   └── boards/                      # GENERATED: per-board route headers
 ├── src/
 │   ├── <class>_dispatch.c           # per-peripheral-class dispatcher (i2c_dispatch.c, …)
@@ -113,9 +115,9 @@ alp-sdk/
 │   └── cc3501e/                     # TI CC3501E Wi-Fi bridge firmware (AEN)
 ├── cmake/                           # find_package + Zephyr module helpers
 │   └── alp-sdk-config.cmake.in
-├── scripts/                         # CODEGEN + ORCHESTRATION
-│   ├── alp_orchestrate/             # board.yaml → per-core slice fan-out + manifest
-│   ├── alp_project.py               # per-slice Kconfig / cmake-args / DTS overlay emit
+├── scripts/                         # REFERENCE CODEGEN + ORCHESTRATION
+│   ├── alp_orchestrate/             # reference board.yaml → per-core planner
+│   ├── alp_project.py               # reference per-slice config/overlay emit
 │   ├── gen_soc_caps.py              # SoC JSONs → include/alp/soc_caps.h
 │   ├── gen_board_header.py        # board YAML → include/alp/boards/<board>_routes.h
 │   ├── validate_board_yaml.py       # board.yaml schema check
@@ -190,8 +192,10 @@ canonical core IDs of the active SoM's SoC (`a55_cluster`,
 `m33_sm`, `m55_hp`, `m55_he`, …).  Each entry declares the runtime,
 app source, peripherals, libraries, inference, iot, plus the new
 `memory:` and `power:` sub-blocks for stack/heap sizing and
-sleep-mode wake sources.  `scripts/alp_orchestrate/` loads the file, resolves
-each entry against the SoM preset's `topology:` defaults, and emits
+sleep-mode wake sources. Python Tan's relocated planner is the normal user
+path. The SDK's `scripts/alp_orchestrate/` reference implementation loads the
+same file, resolves each entry against the SoM preset's `topology:` defaults,
+and emits
 one **slice** per non-`off` core:
 
 ```
@@ -204,19 +208,65 @@ board.yaml (`cores:`)
    {core_id: Slice}               # one Slice per non-off core
         │
         ▼
-   --emit build-plan              # plan JSON: per-slice command + generated files (ADR 0014)
+   Tan planner / SDK reference    # plan JSON: per-slice command + generated files
         │
         ▼
-   tan materialise                # writes alp.conf / local.conf / cmake-args per slice
-                                   # under build/<core>-<os>/, then runs each slice's build
+   tan build                      # writes alp.conf / local.conf per slice under
+                                   # build/<core>-<os>/, then runs each slice's build
 ```
+
+The SDK's own reference emitter no longer materialises a `cmake-args.txt` for a
+baremetal slice: nothing consumed it (#1278). The shipping `tan` executor still
+writes one — `python/tan/planner/buildplan.py` returns it per baremetal slice, so
+`tan build --materialise` produces `build/<core>-baremetal/cmake-args.txt` — and
+dropping it there is tracked as tan-cli#492. Until that lands, a baremetal build
+directory carries the file even though no build step reads it.
+
+A **baremetal slice is a two-step build**, and the plan now says so. Its
+`command` (`cmake -S <app> -B . …`) only CONFIGURES; the `cmake --build .` that
+turns that configure into object files and an executable is a separate entry in
+the slice's `postCommands`, which an executor MUST run in order once `command`
+exits 0. Running `command` alone reports a green build over a tree holding
+`CMakeCache.txt` and no binary at all (alplabai/tan-cli#550). The slice's
+`-DALP_*` settings ride that configure directly: the `-DNAME=VALUE` entries
+(`-DALP_SOM_SKU`, `-DALP_SOM_FAMILY`, `-DALP_CORE_ID`, `-DALP_TOOLCHAIN`, the
+NPU dispatch enables) as cmake cache arguments, and the bare `#if defined(…)`
+guards
+(`ALP_BOARD_<SLUG>`, `ALP_SOM_<SKU>`) as real compiler definitions through a
+generated `build/<core>-baremetal/alp-baremetal.cmake` the configure pulls in
+with `-DCMAKE_PROJECT_INCLUDE=` (alplabai/tan-cli#551). Unlike the retired
+`cmake-args.txt`, that file IS read by the build command — a slice that stops
+writing it stops compiling with its guards, loudly.
+
+The slice's `artifacts` block reports one path: `outputDir`, the directory
+`-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$<1:…>` pins the app's `add_executable()`
+targets to. The `$<1:…>` wrap is load-bearing — CMake appends a per-config
+subdirectory to a plain value on every multi-config generator (Visual Studio,
+Xcode, Ninja Multi-Config), and suppresses that append when a generator
+expression is used, so without it the plan would say `<buildDir>/output` while
+the binary sat in `output/Debug/`. The executable's *name* is the app's own
+`CMakeLists.txt` to pick and is never guessed here.
+
+`outputDir` is a deterministic place to look, **not a build-succeeded oracle**.
+`CMAKE_RUNTIME_OUTPUT_DIRECTORY` governs `add_executable` targets only, so a
+firmware app written as `add_library(fwcore STATIC …)` plus a custom
+link/objcopy target builds cleanly and never creates the directory at all — an
+empty or absent `output/` does not mean the slice produced nothing, and a
+consumer must not read it as a failure. `artifacts.compileCommands` stays
+**null** on baremetal even though the configure passes
+`-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`: CMake implements that variable "only by
+Makefile Generators and Ninja Generators. It is ignored on other generators",
+and this planner does not choose the generator — under Visual Studio, the
+default on Windows, the file is never written. A slice whose `command` was
+blocked reports an all-null `artifacts` block and no `configArtefacts`: nothing
+will ever configure its build dir.
 
 OS inference defaults are silicon-class driven: Cortex-M cores
 default to Zephyr, Cortex-A cores default to Yocto Linux.  The
 customer writes an explicit `os:` only when overriding the default
 (`os: off` to skip a peer core, `os: baremetal` on a Cortex-M that
 normally takes Zephyr).  Yocto-on-A55 + Zephyr-on-M33 on a single
-V2N SoM is one `alp_orchestrate/` invocation, not two.  Full
+V2N SoM is one planner invocation, not two. Full
 walkthrough: [`docs/heterogeneous-builds.md`](heterogeneous-builds.md).
 
 ### Sparse capabilities flow
@@ -266,7 +316,15 @@ emits `CONFIG_ALP_SDK_CHIP_<NAME>=y` per chip slug (or
 helper rather than a `chips/` driver — the `button_led` and
 `pdm_mic` exceptions).  The orchestrator also pulls in each chip
 driver's required Zephyr subsystems (`CONFIG_I2C=y`, `CONFIG_SPI=y`,
-…) via the `_CHIP_SUBSYSTEMS` table in `scripts/alp_project.py`.
+…) via the `_CHIP_SUBSYSTEMS` table in
+`scripts/alp_project_emit/__init__.py` (`scripts/alp_project.py`
+re-exports the name, but the table itself lives in the emit package).
+A chip whose Kconfig `depends on` line is an OR (e.g. `gd32g553`'s
+`depends on (SPI || I2C)`) turns **both** sides of the `||` on rather
+than picking one — always sufficient for the OR, and it can't silently
+drop whichever transport a future board relies on
+(`scripts/check_chip_subsystems_parity.py` pins this table against
+`zephyr/kconfigs/chips.kconfig`, issue #1487).
 
 Devices marked `assembled: optional` in `i2c_devices:` (DNI on some
 builds) are **not** auto-enabled; the customer opts them in via
@@ -281,9 +339,10 @@ The active generators are:
 
 | Script                                  | Reads                                                | Writes                                                                         |
 |-----------------------------------------|------------------------------------------------------|--------------------------------------------------------------------------------|
-| `scripts/alp_orchestrate/`            | `board.yaml` + SoM preset + SoC JSON + board preset| Emits (via `--emit`; `tan` materialises to disk -- ADR 0020): `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, `build/alp_sysbuild.conf` (when `boot:` declared), per-slice `alp.conf` / `local.conf` / `cmake-args.txt`; also `--emit build-plan` — the machine-readable plan JSON `tan` consumes as its sole build input (ADR 0014 contract, ADR 0020 executor) |
+| `scripts/alp_orchestrate/`            | `board.yaml` + SoM preset + SoC JSON + board preset| Reference/parity producer for `system-manifest`, IPC/reservation/sysbuild artefacts, per-slice configuration, and `--emit build-plan`. Normal `tan build` uses Tan's relocated in-process equivalent; `--plan-from` can still exercise the published plan seam (ADRs 0014 and 0020). |
 | `scripts/alp_project.py`                | same inputs as orchestrator                          | Per-slice emits: `--emit zephyr-conf`, `--emit yocto-conf`, `--emit cmake-args`, `--emit dts-overlay`, `--emit hw-info-h`, `--emit west-libraries`; also `--emit composed-route-table` (JSON SoM × board route-table demonstrator), `--emit carrier-netlist` (Studio-facing carrier nets + BOM handoff, not PCB layout), and `--emit zephyr-board` (per-core Zephyr board tree -- see below) |
 | `scripts/gen_soc_caps.py`               | `metadata/socs/**/*.json`                            | `include/alp/soc_caps.h` (per-SoC `ALP_SOC_*_COUNT` + `ALP_SOC_*_MAX_*` macros) |
+| `scripts/gen_soc_peripheral_instances.py` | vendored Zephyr SoC devicetree (`dts/arm/renesas/rz/rzv/r9a09g056.dtsi` today) | `metadata/socs/renesas/rzv2n/n44.json`'s `peripheral_instances` block (per-instance `reg`/`interrupts`, issue #1154) |
 | `scripts/gen_board_header.py`         | `metadata/boards/<name>.yaml`                       | `include/alp/boards/alp_<board>_routes.h` (board macro mapping)            |
 | `scripts/validate_board_yaml.py`        | `board.yaml`                                         | (validator only -- non-zero exit on schema/xref/consistency error)             |
 | `scripts/validate_metadata.py`          | `metadata/**/*.{json,yaml}`                          | (validator only)                                                               |
@@ -300,14 +359,43 @@ twister board `.yaml`, `_defconfig`, pinctrl `.dtsi`, `Kconfig.defconfig`,
 and the board `.dts` all derive from the SoM preset + SoC JSON
 (`tests/scripts/test_gen_zephyr_board.py` pins them byte-identical to the
 committed tree).  The Renesas RZ/V2N family (`v2n` / `v2n-m1`) generates
-only the family-agnostic files (`board.yml`, `Kconfig.alp_<board>`, the
-twister `.yaml`); its `.dts` / pinctrl `.dtsi` / `_defconfig` stay
-hand-authored because the on-module GD32G553 supervisor's Renesas-side pin
-assignments (SCI7 SPI, RIIC8/BRD_I2C, the disabled SCI0 console) aren't
-yet captured in `metadata/pinmux/*.yaml`.  `board.cmake` (flasher/debugger
-runner args) stays hand-authored for every family -- its prose is a
-documentation choice (which sibling board's file carries the full
-bring-up runbook), not a hardware fact derivable from metadata.
+the family-agnostic files (`board.yml`, `Kconfig.alp_<board>`, the
+twister `.yaml`) PLUS the pinctrl `.dtsi` and `_defconfig`, sourced from
+`metadata/e1m_modules/v2n/supervisor-links.yaml` -- a hand-authored,
+family-scoped source for the on-module GD32G553 supervisor's Renesas-side
+pin assignments (SCI7 SPI, RIIC8/BRD_I2C, the disabled SCI0 console),
+deliberately kept out of `metadata/pinmux/*.yaml` (itself generated
+DO-NOT-EDIT output, so it cannot also be a hand-authored generation
+source).  Only the board `.dts` stays hand-authored for this family; it
+has no metadata source yet.  `board.cmake` (flasher/debugger runner args)
+stays hand-authored for every family -- its prose is a documentation
+choice (which sibling board's file carries the full bring-up runbook),
+not a hardware fact derivable from metadata.
+
+**Not in the inventory above -- a standalone dev tool, not a build-time
+generator.** `scripts/gen_rzv2n_cm33_svd.py` (issue #1029 step 2) projects a
+CMSIS-SVD 1.3 register-view file for the RZ/V2N CM33 out of the vendored
+`hal_renesas` west module's FSP headers (`iodefines/` register structs
+cross-checked field-for-field against `iobitmasks/` `_Pos`/`_Msk` constants
+-- Renesas ships no SVD for this part at all -- except for 15 fields, of
+~9200 against the real corpus, where the two vendor headers disagree with
+each other (plus 7 further `iobitmasks/`-side macros with no `iodefine`
+counterpart at all); those are named individually in the script and still
+emit, either at a position corroborated by other evidence or carrying an
+explicit "not cross-validated" note, never silently). It differs from every
+generator above in three ways, all deliberate: **its output is never
+committed** (there is no `docs/svd/*.svd` in this tree and there will not
+be); **it is not wired into any CI gate** (`pr-generated-files` or
+otherwise); and it **requires a west workspace with `hal_renesas` checked
+out** to run at all (`--fsp-include-dir` to point at one explicitly, or
+automatic discovery via the west topdir). The reasoning: every developer who
+wants this SVD is mid-CM33-debug and therefore already has exactly such a
+workspace -- the one that built the firmware they are debugging. Committing
+the generated file would serve nobody and would force a second, CI-visible
+`hal_renesas` pin that drifts from the real one (which already resolves
+transitively through Zephyr's own `west.yml`) -- a contract-drift trap the
+"generators inventory" pattern above exists to avoid, not invite. Run it
+locally: `python3 scripts/gen_rzv2n_cm33_svd.py --output <path>`.
 
 ## Library design
 
@@ -348,13 +436,28 @@ not others.
 | GUI/LVGL         | `alp/gui.h`          | Upstream LVGL with an Alp `lv_conf.h`.                         | Header re-export only — no custom widgets |
 | DSP              | `alp/dsp.h`          | Composable chain primitives — FIR/IIR/FFT/WINDOW via `alp_dsp_chain_t`; CMSIS-DSP SW fallback when `ALP_HAS_CMSIS_DSP` is set; GD32 FAC/CORDIC HW path on V2N via the bridge.  CMSIS-DSP low-level math (`arm_math.h`) consumed directly from app code — the SDK does not re-export it. | v0.5 surface (Wave-2 DSP); see ADR 0007. |
 | IoT              | `alp/iot.h`          | Wi-Fi station via the AEN CC3501E backend or Zephyr `net_*` on native-radio targets; MQTT via Zephyr `mqtt_client` or Linux net + libmosquitto. | v0.1 surface; AEN Wi-Fi station dispatches through the CC3501E bridge; Yocto MQTT cleartext + TLS (`mqtts://` via `mosquitto_tls_set`) code complete via libmosquitto (v0.4 prep, `pkg_check_modules`-gated), **broker roundtrip untested** -- see [test-plan.md](test-plan.md) |
-| Audio            | `alp/audio.h`        | Zephyr `audio_dmic` + `i2s_*` chains; ALSA `snd_pcm_*` on Yocto.| v0.1 surface; Zephyr backend v0.2; Yocto ALSA backend code complete v0.4-prep (`pkg_check_modules(alsa)`-gated), real capture/playback gates on `hil-yocto` |
+| Audio            | `alp/audio.h`        | Zephyr `audio_dmic` + `i2s_*` chains; ALSA `snd_pcm_*` on Yocto.| v0.1 surface; Zephyr backend v0.2; Yocto ALSA backend code complete v0.4-prep (`pkg_check_modules(alsa)`-gated), real capture/playback gates on a Yocto bench run (`docs/ci/HW-IN-LOOP.md`) |
 | BLE              | `alp/ble.h`          | AEN CC3501E backend or Zephyr `bt` host stack (peripheral + central + GATT). | v0.1 surface; impl v0.3 |
 | Security         | `alp/security.h`     | MbedTLS PSA Crypto API (Zephyr) + OpenSSL `EVP_*` (Yocto).      | v0.1 surface; Yocto OpenSSL backend (SHA-256/384/512, AES-128/256-GCM, ChaCha20-Poly1305, `alp_random_bytes`) code complete v0.4-prep with KATs green at `tests/yocto/security_openssl.c`; Zephyr MbedTLS impl v0.3 |
 | Multi-proc IPC   | `alp/mproc.h`        | Zephyr `mbox_*` (MHU on Alif), `hwsem_*`, shared-memory regions, plus framed RPC over RPMsg / OpenAMP (`rpc.h`, opened with the generated `system_ipc.h`); placeholder framing helper at `src/common/proto/alp_mproc_frame.{h,c}` (replaced by nanopb-generated codec once `extras-lwrb-nanopb` lands -- interim/deferred as of v0.9, no committed version). | v0.1 surface; framing scaffolding shipping (interim); full impl v0.3+ |
-| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + `preferred_backend` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `scripts/alp_model/` (`tan model build`) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends (M-class registry): `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `sw_fallback`; DRP-AI3 + DEEPX DX-M1 are A55/Linux-side only (`src/yocto/inference_{drpai,deepx}.cpp`, #58/#59).  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
+| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + `preferred_backend` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `scripts/alp_model/` (`tan model build`) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends (M-class registry): `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `sw_fallback`; DRP-AI3, DEEPX DX-M1, and the ONNX Runtime CPU floor are A55/Linux-side only (`src/yocto/inference_{drpai,deepx,ort}.cpp`, #58/#59).  ORT is default-off (`ALP_SDK_USE_ORT_CPU`), sits strictly last in `resolve_auto()` so an NPU-bearing SoM never silently falls back to it, and — unlike the other two — is reachable only via a hand-built `alp_inference_config_t` today: no `.alpmodel` → ORT route exists on Yocto.  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
 | Storage          | `alp/storage.h`      | Block + filesystem (LittleFS) on Zephyr; standard FS on Yocto.  | v0.5 surface |
 | 2D graphics      | `alp/gpu2d.h`        | Portable blit/fill shim (Alif Dave2D / GPU2D); SW fallback.     | v0.5 surface; see [ADR 0008](adr/0008-gpu2d-portable-shim.md) |
+
+### AI / inference pipeline (off-device → on-device)
+
+Training stays off-device, in TensorFlow / PyTorch, producing a
+`.tflite` / `.onnx` source model.  `tan model build` (host-side,
+`scripts/alp_model/`) compiles that source model for **every** NPU
+backend the target SoM declares and packs the results into one fat,
+multi-backend **`.alpmodel`** package (CBOR manifest + per-backend
+blobs).  The per-backend compiler differs by silicon: Arm **Vela**
+for Ethos-U (AEN, i.MX 93), the **DRP-AI translator** for Renesas
+RZ/V2N, **dxcom** for DEEPX DX-M1, plus a portable CPU/TFLM blob as
+the universal fallback.  At runtime, `alp_inference_open_alpmodel()`
+loads the package and its selection engine picks the matching blob
+(silicon-ref + SRAM-fit + `preferred_backend` tiebreak); see the
+*Inference* row above for the dispatcher detail.
 
 ### Peripherals: how a block resolves to a backend
 
@@ -434,10 +537,10 @@ fronts that Zephyr does *not* cover:
 
 1. **OS portability, not just vendor portability.**  The SDK pivots
    across **three OS targets** (Zephyr / Yocto / baremetal).  An app
-   that targets `<alp/i2c.h>` recompiles unchanged on AEN-Zephyr and
-   V2N-Yocto.  An app written against `i2c_*` does not — Yocto
-   doesn't have `i2c_*`, it has `/dev/i2c-N`.  This is the central
-   justification for the wrapper.
+   that targets `<alp/peripheral.h>` (`alp_i2c_open` et al.)
+   recompiles unchanged on AEN-Zephyr and V2N-Yocto.  An app written
+   against `i2c_*` does not — Yocto doesn't have `i2c_*`, it has
+   `/dev/i2c-N`.  This is the central justification for the wrapper.
 2. **Studio codegen target.**  alp-studio's pin allocator emits C
    that calls a fixed API regardless of which OS the SoM uses.
    Without the Alp wrapper, studio codegen would fork per-OS.
@@ -631,6 +734,20 @@ CONFIG_ALP_SDK_CHIP_LSM6DSO=y
 #include <alp/peripheral.h>
 #include <alp/chips/lsm6dso.h>
 ```
+
+### Plain CMake consumption (bare-metal, Yocto, host tests)
+
+For a non-west consumer, `add_subdirectory()` the SDK directly:
+
+```cmake
+add_subdirectory(third_party/alp-sdk)
+target_link_libraries(my_app PRIVATE alp::sdk)
+```
+
+`ALP_OS` picks the backend (`zephyr`, `baremetal`, or `yocto`): the top-level
+`CMakeLists.txt` defaults it to `zephyr` when `ZEPHYR_BASE` is defined in the
+including build, else `baremetal`.  Set it explicitly for a Yocto consumer
+(`-DALP_OS=yocto`).
 
 ### Yocto consumption (v0.4+)
 

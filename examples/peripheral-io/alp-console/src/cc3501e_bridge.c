@@ -159,13 +159,26 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 #ifdef CONFIG_ALP_SDK_BLE_CC3501E
 	(void)alp_ble_cc3501e_attach(fw);
 #endif
-	/* Power + reset sequence (cold-cycle + Puya hard-reset workaround).  A non-OK
-	 * cc3501e_reset here is NOT fatal: a cold CC35 commonly mis-reads on first
-	 * contact and only aligns after the hard-reset soak below, so fall through
-	 * rather than abort -- otherwise the caller never registers the companion on a
-	 * cold boot (bench-confirmed on the E1M-AEN801: the early return left the shell
-	 * reporting "companion not registered" until the soak ran). */
-	(void)cc3501e_reset(fw);
+	/* Power + reset sequence (cold-cycle + Puya hard-reset workaround).  A
+	 * TRANSPORT-level non-OK from cc3501e_reset() here is NOT fatal: a cold
+	 * CC35 commonly mis-reads on first contact and only aligns after the
+	 * hard-reset soak below, so fall through rather than abort -- otherwise
+	 * the caller never registers the companion on a cold boot (bench-
+	 * confirmed on the E1M-AEN801: the early return left the shell reporting
+	 * "companion not registered" until the soak ran).
+	 *
+	 * ALP_ERR_VERSION is the one exception (#1371): it means cc3501e_reset()'s
+	 * own GET_VERSION probe DID land and the firmware DID answer -- with a
+	 * protocol version this host refuses to talk to.  That is permanent, not
+	 * transient (retrying cannot reconcile two binaries that disagree about
+	 * the wire), so unlike a transport hiccup it must not be swallowed into
+	 * the retry soak below: surface it so the caller leaves the companion
+	 * unregistered instead of silently talking a frame layout the firmware
+	 * never claimed to speak. */
+	alp_status_t reset_status = cc3501e_reset(fw);
+	if (reset_status == ALP_ERR_VERSION) {
+		return ALP_ERR_VERSION;
+	}
 	/* COLD-BOOT SOAK (the cold-boot workaround is a MUST): the Puya double-boot can need
 	 * SEVERAL hard resets before the cold-booted image services the bridge.  Retry
 	 * cc3501e_hard_reset until a GET_VERSION probe succeeds (cold first-contact aligns via
