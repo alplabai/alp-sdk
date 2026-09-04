@@ -158,6 +158,22 @@ target_compile_features(alp_test_inference_drpai_regression PRIVATE cxx_std_17)
 add_test(NAME alp_test_inference_drpai_regression
          COMMAND alp_test_inference_drpai_regression)
 
+# Regression for issue #1729: src/yocto/inference_tensor_shape.h, the
+# rank/shape-copy helper shared by the ORT and DEEPX Yocto inference
+# backends -- see the header's own file comment. Deliberately NOT linked
+# against alp::sdk: the header pulls in nothing from the SDK besides
+# <alp/inference.h> itself.
+add_executable(alp_test_inference_tensor_shape
+    ${CMAKE_CURRENT_SOURCE_DIR}/inference_tensor_shape.cpp
+)
+target_include_directories(alp_test_inference_tensor_shape PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+)
+
+add_test(NAME alp_test_inference_tensor_shape
+         COMMAND alp_test_inference_tensor_shape)
+
 # alp_inference_last_invoke_latency_us() end-to-end regression: the last-
 # successful-invoke-latency accessor added alongside <alp/inference.h>'s
 # model-perf-capture support. #includes src/yocto/inference_yocto.c

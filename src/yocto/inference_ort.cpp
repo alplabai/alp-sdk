@@ -128,6 +128,7 @@ extern "C" {
 }
 
 #include "inference_handle_internal.h"
+#include "inference_tensor_shape.h"
 
 namespace
 {
@@ -707,26 +708,21 @@ alp_inference_ort_get_input(struct alp_inference *h_, size_t index, alp_inferenc
 		}
 
 		const OrtTensorInfo &info = st->in_info[index];
-		/* info.shape.size() is <= 4 by construction: _gather_tensor_info()
-         * refuses (ALP_ERR_NOSUPPORT) any tensor whose rank exceeds
-         * out->shape[]'s 4 slots at open() time (issue #1729), so this
-         * clamp is defense-in-depth against that invariant ever slipping,
-         * not a truncation this accessor performs on a live rank > 4 --
-         * such a tensor never reaches here.  Every dim that reaches here
-         * has also been bounds-checked against UINT16_MAX in
-         * _gather_tensor_info(), so the cast below never truncates. */
-		const size_t rank = (info.shape.size() > 4) ? 4 : info.shape.size();
+		/* info.shape.size() is <= 4 and every dim <= UINT16_MAX by
+         * construction: _gather_tensor_info() already refuses
+         * (ALP_ERR_NOSUPPORT) any tensor whose rank exceeds out->shape[]'s
+         * 4 slots, or whose extent would overflow uint16_t, at open() time
+         * (issue #1729). fill_fixed_shape() re-checks both here as
+         * defense-in-depth against that invariant ever slipping, and is
+         * what actually writes out->rank/out->shape[] -- there is no
+         * separate write below. */
+		if (!alp_inference_shape::fill_fixed_shape(info.shape.data(), info.shape.size(), out)) {
+			return ALP_ERR_NOSUPPORT;
+		}
 
 		out->data       = st->input_bufs[index].data();
 		out->size_bytes = info.size_bytes;
 		out->dtype      = _ort_dtype_to_alp(info.dtype);
-		out->rank       = static_cast<uint8_t>(rank);
-		for (size_t i = 0; i < rank; ++i) {
-			out->shape[i] = static_cast<uint16_t>(info.shape[i]);
-		}
-		for (size_t i = rank; i < 4; ++i) {
-			out->shape[i] = 0;
-		}
 		out->scale      = 1.0f;
 		out->zero_point = 0;
 		return ALP_OK;
@@ -750,20 +746,15 @@ alp_inference_ort_get_output(struct alp_inference *h_, size_t index, alp_inferen
 
 		const OrtTensorInfo &info = st->out_info[index];
 		/* See the matching comment in alp_inference_ort_get_input() above:
-         * info.shape.size() is <= 4 by construction (issue #1729); this
-         * clamp is defense-in-depth, not a live truncation. */
-		const size_t rank = (info.shape.size() > 4) ? 4 : info.shape.size();
+         * fill_fixed_shape() re-checks rank/extent as defense-in-depth
+         * (issue #1729) and is what writes out->rank/out->shape[]. */
+		if (!alp_inference_shape::fill_fixed_shape(info.shape.data(), info.shape.size(), out)) {
+			return ALP_ERR_NOSUPPORT;
+		}
 
 		out->data       = st->output_bufs[index].data();
 		out->size_bytes = info.size_bytes;
 		out->dtype      = _ort_dtype_to_alp(info.dtype);
-		out->rank       = static_cast<uint8_t>(rank);
-		for (size_t i = 0; i < rank; ++i) {
-			out->shape[i] = static_cast<uint16_t>(info.shape[i]);
-		}
-		for (size_t i = rank; i < 4; ++i) {
-			out->shape[i] = 0;
-		}
 		out->scale      = 1.0f;
 		out->zero_point = 0;
 		return ALP_OK;

@@ -75,6 +75,8 @@ extern "C" {
 #include "inference_handle_internal.h"
 }
 
+#include "inference_tensor_shape.h"
+
 /* The dispatcher's `struct alp_inference` comes from the shared internal
  * header (issue #1257).  This file used to hand-mirror the layout and cast
  * to the mirror; the mirror had a DIFFERENT field order and only worked
@@ -158,24 +160,31 @@ bool all_tensor_ranks_fit(dxrt::Tensors &tensors)
 /** Fill an alp tensor descriptor from a dx_rt Tensor.  `data` points at
  *  the engine/SDK-owned buffer; the app must not free it.
  *
- *  PRECONDITION: @p t's rank is <= 4.  For st->inputs/st->outputs, open()
- *  refuses (ALP_ERR_NOSUPPORT) any model carrying a tensor that doesn't
- *  hold, via all_tensor_ranks_fit() above; for a live st->last_outputs[i]
- *  tensor (get_output() after invoke()), the caller re-checks the rank
- *  itself immediately before this call, for the same reason -- either way
- *  this never truncates a live rank > 4 (issue #1729). */
-void fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t *out)
+ *  For st->inputs/st->outputs, open() already refuses (ALP_ERR_NOSUPPORT)
+ *  any model carrying a declared tensor whose rank exceeds 4, via
+ *  all_tensor_ranks_fit() above; for a live st->last_outputs[i] tensor
+ *  (get_output() after invoke()), the caller re-checks the rank itself
+ *  immediately before this call, for the same reason. Neither of those
+ *  checks the per-axis EXTENT, though: shape[] is uint16_t, and a dim
+ *  above 65535 or a symbolic/dynamic negative dim would silently wrap
+ *  when cast, the same "plausible-looking wrong shape" issue #1729 is
+ *  about, one level down. fill_fixed_shape() below checks both rank and
+ *  every extent before writing anything to @p out.
+ *
+ *  @return false, leaving @p out untouched, when @p t's real rank exceeds
+ *          the fixed shape[4] descriptor, or any extent does not fit
+ *          uint16_t -- the caller must return ALP_ERR_NOSUPPORT instead of
+ *          a truncated or wrapped shape (issue #1729). */
+bool fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t *out)
 {
+	const std::vector<int64_t> &shape = t.shape();
+	if (!alp_inference_shape::fill_fixed_shape(shape.data(), shape.size(), out)) {
+		return false;
+	}
+
 	out->data       = data;
 	out->size_bytes = static_cast<size_t>(t.size_in_bytes());
 	out->dtype      = dxrt_dtype_to_alp(t.type());
-
-	const std::vector<int64_t> &shape = t.shape();
-	const size_t                n     = shape.size();
-	out->rank                         = static_cast<uint8_t>((n <= 4) ? n : 4);
-	for (uint8_t i = 0; i < out->rank; ++i) {
-		out->shape[i] = static_cast<uint16_t>(shape[i]);
-	}
 
 	/* dx_rt models carry per-task quant params internally and emit
      * already-dequantized FLOAT outputs for the common case; the public
@@ -184,6 +193,7 @@ void fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t 
      * <alp/ext/deepx/inference.h> escape hatch. */
 	out->scale      = 1.0f;
 	out->zero_point = 0;
+	return true;
 }
 
 } /* namespace */
@@ -297,7 +307,9 @@ extern "C" alp_status_t alp_inference_deepx_get_input(struct alp_inference   *h_
 	}
 	/* Hand back the SDK-owned staging buffer, not the engine's internal
      * pointer -- the app fills this before invoke(). */
-	fill_tensor_descriptor(st->inputs[index], st->input_bufs[index].data(), out);
+	if (!fill_tensor_descriptor(st->inputs[index], st->input_bufs[index].data(), out)) {
+		return ALP_ERR_NOSUPPORT; /* real rank > 4 -- see #1729 */
+	}
 	return ALP_OK;
 }
 
@@ -325,15 +337,19 @@ extern "C" alp_status_t alp_inference_deepx_get_output(struct alp_inference   *h
      * does not hold for that path on its own, so re-check the live
      * tensor's rank here too before trusting it (issue #1729). */
 	void *data = nullptr;
+	bool  ok;
 	if (index < st->last_outputs.size() && st->last_outputs[index] != nullptr) {
 		if (st->last_outputs[index]->shape().size() > 4) {
 			return ALP_ERR_NOSUPPORT;
 		}
 		data = st->last_outputs[index]->data();
-		fill_tensor_descriptor(*st->last_outputs[index], data, out);
+		ok   = fill_tensor_descriptor(*st->last_outputs[index], data, out);
 	} else {
 		data = st->outputs[index].data();
-		fill_tensor_descriptor(st->outputs[index], data, out);
+		ok   = fill_tensor_descriptor(st->outputs[index], data, out);
+	}
+	if (!ok) {
+		return ALP_ERR_NOSUPPORT; /* real rank > 4 -- see #1729 */
 	}
 	return ALP_OK;
 }
