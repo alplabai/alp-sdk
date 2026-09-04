@@ -1041,6 +1041,26 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         add_test(NAME alp_test_audio_alsa
                  COMMAND alp_test_audio_alsa)
     endif()
+    if(ALSA_TEST_FOUND)
+        # Same archive-extraction rationale as alp_test_audio_alsa above:
+        # compile the i2s backend TUs straight into the test so the
+        # alp_backends_i2s section is populated and the ALSA backend
+        # (priority 100) wins selection.
+        add_executable(alp_test_i2s_alsa
+            ${CMAKE_CURRENT_SOURCE_DIR}/i2s_alsa.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/i2s/sw_fallback.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/i2s/yocto_drv.c
+        )
+        target_link_libraries(alp_test_i2s_alsa PRIVATE alp::sdk)
+        target_include_directories(alp_test_i2s_alsa PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+            ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+        target_compile_features(alp_test_i2s_alsa PRIVATE c_std_99)
+
+        add_test(NAME alp_test_i2s_alsa
+                 COMMAND alp_test_i2s_alsa)
+    endif()
 
     # Security test compiles only when OpenSSL is on the sysroot;
     # without it the stubs return NULL and the hash KAT path would
