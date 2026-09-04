@@ -793,7 +793,13 @@ clocks back out on the *next* CS transaction within
 | CMD     | 1     | Opcode from §3.                                                                                |
 | STATUS  | 1     | Reply only.  Bits `[3:0]` = status code (`0x0` = OK, §6).  Bits `[7:4]` = the v0.7 **sequence stamp** — zero until `LINK_FEATURES` negotiates `STATUS_SEQ` (§4.3), so the legacy wire is unchanged. |
 | PAYLOAD | N / M | Length is **opcode-derived** — both ends know the byte count from the opcode + status pair.   |
-| CRC     | 2     | CRC-16/CCITT-FALSE (poly `0x1021`, init `0xFFFF`, xor-out 0x0000, **non-reflected**), MSB first |
+| CRC     | 2     | CRC-16/CCITT-FALSE (poly `0x1021`, init `0xFFFF`, xor-out 0x0000, **non-reflected**), LSB first |
+
+The CRC is transmitted **LSB first** (low byte on the wire first, then the
+high byte) — e.g. CRC-16/CCITT-FALSE over the PING request body `A5 00` is
+`0xFF84`, which goes on the wire as `84 FF`. This is the one field in the
+envelope that is little-endian; every other multi-byte field in this protocol
+is big-endian, and that asymmetry is exactly what makes it easy to get wrong.
 
 Length is **not** carried on the wire because a single opcode has a
 fixed request-payload width and a status-code-determined reply-payload
