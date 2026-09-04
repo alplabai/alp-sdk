@@ -222,9 +222,7 @@ def _load_snapshot(path: Path) -> tuple[dict | None, str | None, list[str]]:
     if not path.is_file():
         return None, None, [
             f"no issue-state snapshot at {path} -- run "
-            f"scripts/refresh_issue_state_snapshot.py (normally done by "
-            f".github/workflows/refresh-issue-state-snapshot.yml on a "
-            f"schedule)"
+            f"`python3 scripts/refresh_issue_state_snapshot.py` to create one"
         ]
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
