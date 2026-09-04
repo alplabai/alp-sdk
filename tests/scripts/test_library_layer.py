@@ -394,29 +394,14 @@ def test_emit_lvgl_yocto_image_install(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------
 # alp doctor
 # ---------------------------------------------------------------------
-
-def test_doctor_libraries_none_without_project(monkeypatch, tmp_path: Path) -> None:
-    from alp_cli import doctor
-    monkeypatch.chdir(tmp_path)  # no board.yaml here
-    assert doctor._check_libraries() is None
-
-
-def test_doctor_libraries_reports_selection(monkeypatch, tmp_path: Path) -> None:
-    from alp_cli import doctor
-    _write_board(tmp_path, _V2N_LVGL)
-    monkeypatch.chdir(tmp_path)
-    result = doctor._check_libraries()
-    assert result is not None
-    assert result.status == doctor.PASS
-    assert "lvgl" in result.message
-    assert "tier A" in result.message and "MIT" in result.message
-
-
-def test_doctor_libraries_none_when_empty(monkeypatch, tmp_path: Path) -> None:
-    from alp_cli import doctor
-    _write_board(tmp_path, _V2N_NOLIB)
-    monkeypatch.chdir(tmp_path)
-    assert doctor._check_libraries() is None
+#
+# `alp_cli.doctor._check_libraries()`'s three tests retired here alongside
+# `scripts/alp_cli/doctor.py` itself (alp-sdk#1368): tan's own
+# `tan/core/doctor_libraries.py` is the native, released port (tan-cli#629,
+# shipped in tan-cli v0.6.0) and carries its own tan-cli test coverage.
+# `scripts/alp_orchestrate/libraries.py`'s `resolve_selection()` -- the
+# selection logic both readers report on -- is untouched and still covered
+# directly by test_orchestrate_libraries.py.
 
 
 # ---------------------------------------------------------------------

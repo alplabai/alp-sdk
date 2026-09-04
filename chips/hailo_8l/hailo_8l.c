@@ -16,9 +16,12 @@ alp_status_t hailo_8l_reset(hailo_8l_t *dev)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
 	if (dev->resetb == NULL) return ALP_ERR_NOSUPPORT;
+	/* 100 ms RESETB-low pulse.  Sleeps: alp_delay_us never yields
+	 * (include/alp/peripheral.h), and holding a reset line low is not bus
+	 * timing -- a scheduling gap can only lengthen the pulse, which is safe. */
 	alp_status_t s = alp_gpio_write(dev->resetb, false);
 	if (s != ALP_OK) return s;
-	alp_delay_us(100000);
+	alp_delay_ms(100);
 	return alp_gpio_write(dev->resetb, true);
 }
 

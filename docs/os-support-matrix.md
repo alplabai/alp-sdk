@@ -95,8 +95,17 @@ plan in `VERSIONS.md`.
 | **RTC** (`<alp/rtc.h>`)   | code complete¹                | code complete¹         | code complete¹            | code complete¹            |
 | **Watchdog** (`<alp/wdt.h>`) | code complete¹             | code complete¹         | code complete¹            | code complete¹            |
 | **Audio** (`<alp/audio.h>`) | code complete¹              | code complete¹         | code complete¹            | code complete¹            |
-| **Camera** (`<alp/camera.h>`) | planned                   | **GA** (MIPI CSI-2)    | **GA**                    | planned |
+| **Camera** (`<alp/camera.h>`) | planned                   | stub [^cam1]            | stub [^cam1]               | planned |
 | **IoT** (`<alp/iot.h>`)   | **GA**                        | **GA**                 | **GA**                    | planned |
+
+[^cam1]: The Yocto/A55 camera backend (`src/backends/camera/zephyr_stub.c`, linked
+    unconditionally at `src/yocto/CMakeLists.txt:323`, `silicon_ref = "*"`, priority
+    0) returns `ALP_ERR_NOT_IMPLEMENTED` for every op on every SoM, V2N/V2N-M1
+    included — that is a **stub** per the status key above, not GA.  The real
+    MIPI CSI-2 ISP-aware camera backend (`src/backends/camera/v2n_n44_isp.c`) is a
+    **Zephyr** backend for the V2N `m33_sm` core (`zephyr/CMakeLists.txt:812`,
+    opt-in via `CONFIG_ALP_SDK_CAMERA_V2N_N44_ISP`); it does not link on Yocto and
+    does not back this Cortex-A cell.
 
 ### Cortex-M (Zephyr)
 

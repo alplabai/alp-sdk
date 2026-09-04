@@ -51,4 +51,11 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
                             size_t           *rx_len,
                             uint32_t          timeout_ms);
 
+/* Tell the transport the peer is a POLLED slave (OTA update mode): the READY
+ * gate then waits for a LOW->HIGH edge instead of a level. */
+void cc3501e_set_peer_polled(bool on);
+
+/* True when the host believes the peer is running the POLLED update-mode boot. */
+bool cc3501e_peer_is_polled(void);
+
 #endif /* CC3501E_INTERNAL_H */

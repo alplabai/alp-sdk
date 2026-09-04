@@ -27,14 +27,56 @@
  * which exercises alif_hal_ospi_initialize() directly from application code
  * as an independent compile+link+reachability proof.
  *
- * core_clk: the binding's `clock-frequency` property has no documented
- * default and this batch does not set it on the ospi0 node (per the alp-sdk
- * pending-hw-configs policy: the true OSPI core-clock source is a
- * silicon-determined HW fact that must come from the Alif Ensemble E8 TRM,
- * not be invented).  Falls back to the node's `bus-speed` (a real,
- * DFP/fork-sourced value, 100 MHz) as a clearly-marked placeholder -- wrong
- * only in that it may not match the true core-clock divider input; it does
- * not change what gets programmed into the controller from the other fields.
+ * core_clk: PREVIOUSLY a placeholder that fell back to the node's `bus-speed`
+ * (100 MHz) when `clock-frequency` was unset. This value feeds
+ * alif_hal_ospi_initialize()'s whole-register write to OSPI_BAUDR (hal_alif
+ * v2.3.0 modules/hal/alif drivers/ospi/include/ospi.h:507:
+ * `ospi->OSPI_BAUDR = (clk / speed);`) -- core_clk == bus_speed wrote
+ * OSPI_BAUDR = 1. HWRM AHRM0012NDA v0.3 S16.1.5.3.5 defines OSPI_BAUDR's
+ * SCKDV field as bits 15:1 (bit 0 is RESERVED and forced to 0 on every
+ * write, so the effective divider is the written value with its low bit
+ * cleared): "If this field is set to all 0s, the serial output clock
+ * (OSPI_SCLK) is disabled." A written value of 1 leaves SCKDV all zero --
+ * the old fallback disabled OSPI_SCLK entirely. It was a DEAD BUS, not an
+ * overclock. (An earlier revision of this fix claimed the old fallback
+ * would overclock an external device past its rating; that claim was
+ * wrong and is corrected here. HWRM S16.1.4.2 also makes SCLK <=
+ * OSPI_CLK/2 a hardware property of Master mode, which makes an overclock
+ * past the core clock structurally impossible regardless of what
+ * core_clk / bus_speed evaluates to.)
+ *
+ * Fixed here: the true OSPI core-clock source is NOT an unavailable HW
+ * fact -- HWRM Table 16-2 sources HEXSPI0's internal core clock
+ * (OSPI0_CLK) from "SYST_ACLK or 266M_CLK", selected by
+ * MISC_CLK_CTRL[SEL_OSPI_CLK]; HWRM 8.3.2.3.7 gives that bit's reset value
+ * 0x0 as "400 MHz (SYST_ACLK)" (AHRM0012NDA v0.3). The ospi0 node now
+ * declares `clock-frequency = <400000000>` (see
+ * zephyr/dts/alif/ensemble_e8_peripherals.dtsi) and the fallback to
+ * `bus-speed` below is REMOVED -- a board/SoM that omits `clock-frequency`
+ * on its ospi0 node now fails to build instead of silently programming a
+ * disabled clock. Worked through: 400000000 / 100000000 = 4, SCKDV = 2,
+ * BAUDR = SCKDV x 2 = 4, SCLK = 400 / 4 = 100 MHz -- exactly the node's
+ * bus-speed, and half the S10.5 200 MHz HEXSPI controller cap.
+ *
+ * WHAT REMAINS UNADDRESSED: this driver still does not program
+ * MISC_CLK_CTRL[SEL_OSPI_CLK] itself, so 400 MHz is correct only for as
+ * long as whatever boot stage runs before it (ROM/SE) leaves that mux at
+ * its documented silicon reset value. HWRM 8.3.2.3.7 also documents a 0x1
+ * selection (266 MHz from 266M_CLK/PLL, additionally gated on
+ * CLK_ENA[CLK266M]) -- if a future boot stage or SoM selects that path,
+ * this driver's 400 MHz would again be wrong. Making the value
+ * unconditionally correct means the driver programming SEL_OSPI_CLK itself
+ * and deriving core_clk from the selection it just made -- a distinct
+ * change that touches a shared system clock-mux register (MISC_CLK_CTRL is
+ * not OSPI-instance-scoped) and needs bench confirmation of its placement
+ * relative to the OSPI0 clock-enable sequence above; not done here.
+ *
+ * DIVIDER INVARIANT: `clock-frequency` and `bus-speed` are both free DT
+ * integers, and the HAL truncates their ratio into OSPI_BAUDR without
+ * checking the result -- see OSPI_ALIF_CHECK_SCLK() below, which
+ * BUILD_ASSERTs the same S16.1.5.3.5 semantics at compile time instead of
+ * leaving a second silent-wrong-value path open for a plausible-looking
+ * but wrong ratio.
  * ======================================================================
  *
  * ====== OSPI0 clock-enable (CLKCTL_PER_SLV->OSPI_CTRL) -- FIXES A
@@ -421,13 +463,43 @@ static int ospi_alif_init(const struct device *dev)
 	return 0;
 }
 
+/* (clock-frequency / bus-speed): see the file-header DIVIDER INVARIANT note. */
+#define OSPI_ALIF_SCLK_DIV(inst)                                                                 \
+	(DT_INST_PROP(inst, clock_frequency) / DT_INST_PROP(inst, bus_speed))
+
+/*
+ * OSPI_BAUDR[SCKDV] is bits 15:1 of the register the HAL writes whole from
+ * `core_clk / bus_speed`; bit 0 is RESERVED and hardware-clears on every
+ * write, so the effective divider is the written value with its low bit
+ * forced off, not OSPI_ALIF_SCLK_DIV(inst) itself (HWRM AHRM0012NDA v0.3
+ * S16.1.5.3.5). A written value of 0 or 1 leaves SCKDV all zero, which
+ * S16.1.5.3.5 defines as "the serial output clock (OSPI_SCLK) is
+ * disabled" -- the exact dead-bus failure this file fixed for a MISSING
+ * `clock-frequency`; these three catch it for a present but WRONG ratio
+ * instead, at build time rather than on a populated part nobody scoped.
+ */
+#define OSPI_ALIF_CHECK_SCLK(inst)                                                               \
+	BUILD_ASSERT(OSPI_ALIF_SCLK_DIV(inst) >= 2,                                              \
+		     "ospi" STRINGIFY(inst) ": clock-frequency / bus-speed < 2 leaves "          \
+		     "OSPI_BAUDR[SCKDV] all zero -- OSPI_SCLK disabled (HWRM S16.1.5.3.5)");     \
+	BUILD_ASSERT(OSPI_ALIF_SCLK_DIV(inst) % 2 == 0,                                          \
+		     "ospi" STRINGIFY(inst) ": clock-frequency / bus-speed is odd -- "           \
+		     "OSPI_BAUDR[SCKDV]'s reserved bit 0 rounds the divider DOWN, so SCLK "      \
+		     "silently OVERSHOOTS bus-speed");                                          \
+	BUILD_ASSERT(DT_INST_PROP(inst, clock_frequency) /                                       \
+				     (OSPI_ALIF_SCLK_DIV(inst) & ~1 ? OSPI_ALIF_SCLK_DIV(inst) & ~1 : 1) <= \
+			     200000000,                                                           \
+		     "ospi" STRINGIFY(inst) ": resulting OSPI_SCLK exceeds the 200 MHz HEXSPI "  \
+		     "controller cap (HWRM S10.5)")
+
 #define OSPI_ALIF_INIT(inst)                                                                      \
+	OSPI_ALIF_CHECK_SCLK(inst);                                                                   \
 	static struct ospi_alif_data         ospi_alif_data_##inst;                                  \
 	static const struct ospi_alif_config ospi_alif_config_##inst = {                             \
 		.base_regs       = (uint32_t *)DT_INST_REG_ADDR(inst),                                   \
 		.aes_regs        = (uint32_t *)DT_INST_PROP_BY_IDX(inst, aes_reg, 0),                    \
 		.bus_speed       = DT_INST_PROP(inst, bus_speed),                                        \
-		.core_clk        = DT_INST_PROP_OR(inst, clock_frequency, DT_INST_PROP(inst, bus_speed)),\
+		.core_clk        = DT_INST_PROP(inst, clock_frequency),                                  \
 		.cs_pin          = DT_INST_PROP(inst, cs_pin),                                           \
 		.rx_ds_delay     = DT_INST_PROP(inst, rx_ds_delay),                                       \
 		.ddr_drive_edge  = DT_INST_PROP(inst, ddr_drive_edge),                                    \

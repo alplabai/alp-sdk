@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * `alp companion sock` -- CC3501E TCP/UDP sockets (tcp-get <ip> <port>
- * <path>), Alif companion only.  Command-group TU of the
+ * <path>, serve <port> [seconds]), Alif companion only.  Command-group TU of the
  * alp_console_companion.c split (#673 Phase 2): registers onto the
  * (alp, companion) dynamic subcommand set the core TU declares.  Shared
  * companion context comes from
@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/shell/shell.h>
@@ -30,6 +31,13 @@
 #define ALP_COMPANION_SOCK_RECV_MS     8000u
 #define ALP_COMPANION_SOCK_RECV_BUF    512u
 #define ALP_COMPANION_SOCK_RECV_ROUNDS 128u
+/* `sock serve` limits.  The request read stops at the blank line that ends the
+ * HTTP headers, so the buffer only has to hold a request line + headers. */
+#define ALP_COMPANION_SERVE_REQ_BUF    512u
+#define ALP_COMPANION_SERVE_REQ_ROUNDS 16u
+#define ALP_COMPANION_SERVE_BACKLOG    4u
+#define ALP_COMPANION_SERVE_DEFAULT_S  60u
+#define ALP_COMPANION_SERVE_MAX_S      3600u
 
 /* Parse a dotted-quad "a.b.c.d" into 4 network-order octets (out[0] = a). */
 static int companion_parse_ipv4(const char *s, uint8_t out[4])
@@ -140,7 +148,7 @@ static int cmd_companion_sock_tcp_get(const struct shell *sh, size_t argc, char 
 	bool           got_data = false;
 	for (unsigned round = 0; round < ALP_COMPANION_SOCK_RECV_ROUNDS; round++) {
 		size_t n = 0;
-		s = cc3501e_sock_recv(
+		s        = cc3501e_sock_recv(
 		    companion_cc3501e, handle, rx, sizeof(rx), &n, ALP_COMPANION_SOCK_RECV_MS);
 		if (s != ALP_OK) {
 			/* A recv error AFTER the body already arrived is the peer-close tail: the
@@ -172,6 +180,246 @@ out_close:
 	return (s == ALP_OK) ? 0 : -EIO;
 }
 
+/*
+ * `sock serve <port> [seconds]` -- the listening-socket demo (protocol v9).
+ *
+ * The counterpart to `tcp-get`: instead of connecting OUT, this binds a
+ * listening socket and answers inbound HTTP requests over the module's own
+ * soft-AP, which is what a product with no Ethernet PHY needs in order to serve
+ * an embedded web console.  Bring the AP up first (`alp companion wifi
+ * ap-start ...`), then run this and point a browser on an associated client at
+ * the AP address it prints.
+ *
+ * There is no accept call to wait on: the firmware accepts each connection on
+ * its housekeeping tick and publishes it as an EVT_SOCK_ACCEPTED event, so this
+ * command registers an event callback, hands the accepted handles to a queue,
+ * and serves them from the shell thread.  The event thread
+ * (alp_console_companion.c) is what drains the firmware ring, so it must be
+ * running for connections to arrive at all -- this command does not poll.
+ */
+static struct k_msgq companion_accept_q;
+static uint16_t      companion_accept_slots[8];
+/* Accepted connections the callback could not queue.  Written from the event
+ * thread, read by the serve loop when it finishes -- a plain counter is enough
+ * for a report that is only printed after the callback is unregistered. */
+static unsigned companion_accept_drops;
+
+static void companion_serve_event_cb(uint8_t opcode, const uint8_t *payload, size_t len, void *user)
+{
+	ARG_UNUSED(user);
+	alp_cc3501e_sock_accepted_evt_t ev;
+
+	if (opcode != (uint8_t)ALP_CC3501E_EVT_SOCK_ACCEPTED) {
+		return;
+	}
+	if (cc3501e_sock_accepted_decode(payload, len, &ev) != ALP_OK) {
+		return;
+	}
+	/* Queue-full drops the handle, which LEAKS a firmware socket -- the firmware
+	 * hands ownership over with this event and never closes it itself.  Eight
+	 * slots is deep for a console demo, and a silent drop would be the worse
+	 * failure, so count it; the serve loop reports the total when it finishes.
+	 * Closing it HERE is not an option: this runs on the event thread, and
+	 * cc3501e_sock_close() is a poll-by-repeat bridge transaction. */
+	if (k_msgq_put(&companion_accept_q, &ev.handle, K_NO_WAIT) != 0) {
+		companion_accept_drops++;
+		return;
+	}
+}
+
+/* Serve one accepted connection: read the request headers, answer a fixed
+ * HTTP/1.0 200, close.  Returns 0 on success. */
+static int companion_serve_one(const struct shell *sh, uint16_t handle)
+{
+	static uint8_t req[ALP_COMPANION_SERVE_REQ_BUF];
+	size_t         used  = 0;
+	unsigned       empty = 0;
+
+	for (unsigned round = 0; round < ALP_COMPANION_SERVE_REQ_ROUNDS; round++) {
+		size_t       n = 0;
+		alp_status_t s = cc3501e_sock_recv(companion_cc3501e,
+		                                   handle,
+		                                   &req[used],
+		                                   sizeof(req) - used - 1u,
+		                                   &n,
+		                                   ALP_COMPANION_SOCK_RECV_MS);
+		if (s != ALP_OK) {
+			break; /* client went away mid-request -- still answer what we can */
+		}
+		if (n == 0u) {
+			if (++empty >= 3u) {
+				break;
+			}
+			continue;
+		}
+		empty = 0;
+		used += n;
+		req[used] = 0u;
+		if (strstr((const char *)req, "\r\n\r\n") != NULL) {
+			break; /* headers complete */
+		}
+		if (used >= sizeof(req) - 1u) {
+			break;
+		}
+	}
+	/* Echo the request line so the bench log shows what the client actually
+	 * asked for, not just that something connected. */
+	if (used > 0u) {
+		const char *eol = strchr((const char *)req, '\r');
+		shell_print(sh, "  request: %.*s", eol ? (int)(eol - (const char *)req) : (int)used, req);
+	} else {
+		shell_print(sh, "  request: (none read)");
+	}
+
+	static const char body[] = "<!doctype html><title>ALP</title>"
+	                           "<h1>Served by the CC3501E soft-AP</h1>";
+	char              resp[320];
+	const int         n = snprintf(resp,
+	                               sizeof(resp),
+	                               "HTTP/1.0 200 OK\r\nContent-Type: text/html\r\n"
+	                               "Content-Length: %u\r\nConnection: close\r\n\r\n%s",
+	                               (unsigned)(sizeof(body) - 1u),
+	                               body);
+	if (n <= 0 || (size_t)n >= sizeof(resp)) {
+		return -EINVAL;
+	}
+	const alp_status_t s = cc3501e_sock_send(companion_cc3501e,
+	                                         handle,
+	                                         (const uint8_t *)resp,
+	                                         (size_t)n,
+	                                         NULL,
+	                                         ALP_COMPANION_SOCK_OP_MS);
+	if (s != ALP_OK) {
+		shell_error(sh, "  send failed (%d)", (int)s);
+		return -EIO;
+	}
+	shell_print(sh, "  replied %d bytes", n);
+	return 0;
+}
+
+static int cmd_companion_sock_serve(const struct shell *sh, size_t argc, char **argv)
+{
+	if (companion_cc3501e == NULL) {
+		shell_warn(sh, "companion not registered");
+		return -ENODEV;
+	}
+	unsigned long port;
+	if (alp_console_parse_ulong(argv[1], &port) != 0 || port == 0u || port > 0xFFFFu) {
+		shell_error(sh, "bad port '%s' (want 1..65535)", argv[1]);
+		return -EINVAL;
+	}
+	unsigned long secs = ALP_COMPANION_SERVE_DEFAULT_S;
+	if (argc > 2 && (alp_console_parse_ulong(argv[2], &secs) != 0 || secs == 0u ||
+	                 secs > ALP_COMPANION_SERVE_MAX_S)) {
+		shell_error(
+		    sh, "bad duration '%s' (want 1..%u seconds)", argv[2], ALP_COMPANION_SERVE_MAX_S);
+		return -EINVAL;
+	}
+
+	/* The AP-side address is what a client must aim at.  Print it up front; a
+	 * NOT_READY here means the AP role is not up, which is the usual reason a
+	 * serve run sees nothing. */
+	uint8_t            apip[4] = { 0 };
+	const alp_status_t ips =
+	    cc3501e_wifi_get_ip(companion_cc3501e, (uint8_t)ALP_CC3501E_WIFI_IFACE_AP, apip);
+	if (ips == ALP_OK) {
+		shell_print(sh, "ap ip: %u.%u.%u.%u", apip[0], apip[1], apip[2], apip[3]);
+	} else {
+		shell_warn(sh, "ap ip: unavailable (%d) -- is the AP started?", (int)ips);
+	}
+
+	k_msgq_init(&companion_accept_q,
+	            (char *)companion_accept_slots,
+	            sizeof(companion_accept_slots[0]),
+	            ARRAY_SIZE(companion_accept_slots));
+	companion_accept_drops = 0u; /* per-run, like the served count */
+
+	uint16_t     srv = 0;
+	alp_status_t s   = cc3501e_sock_open(companion_cc3501e,
+	                                     ALP_CC3501E_SOCK_FAMILY_IPV4,
+	                                     ALP_CC3501E_SOCK_TYPE_STREAM,
+	                                     0u,
+	                                     &srv,
+	                                     ALP_COMPANION_SOCK_OP_MS);
+	if (s != ALP_OK) {
+		shell_error(sh, "sock open failed (%d)", (int)s);
+		return -EIO;
+	}
+	/* Print the handle: the firmware hands out lwIP fd + 1, so a handle that
+	 * climbs across successive runs is the visible symptom of a listening socket
+	 * that was not released, and a bind/listen failure is only diagnosable
+	 * against the handle it was attempted on. */
+	shell_print(sh, "listen handle %u", (unsigned)srv);
+	/* NULL ip = INADDR_ANY: the AP address does not exist until the role is up,
+	 * so binding it explicitly would race the role-up. */
+	s = cc3501e_sock_bind(companion_cc3501e, srv, NULL, (uint16_t)port, ALP_COMPANION_SOCK_OP_MS);
+	if (s != ALP_OK) {
+		shell_error(sh, "bind :%lu failed (%d)", port, (int)s);
+		goto out_close;
+	}
+	s = cc3501e_sock_listen(
+	    companion_cc3501e, srv, ALP_COMPANION_SERVE_BACKLOG, ALP_COMPANION_SOCK_OP_MS);
+	if (s != ALP_OK) {
+		shell_error(sh, "listen failed (%d)", (int)s);
+		goto out_close;
+	}
+	s = cc3501e_add_event_callback(companion_cc3501e, companion_serve_event_cb, NULL);
+	if (s != ALP_OK) {
+		shell_error(sh, "cannot register the accept callback (%d)", (int)s);
+		goto out_close;
+	}
+
+	/* The shell is BLOCKED for the whole window and there is no way to cut it
+	 * short: Zephyr's shell has no cancellation hook a running command can poll,
+	 * so ctrl-c does not reach this loop.  Say the duration plainly rather than
+	 * offering an escape that does not exist -- pick a [seconds] you are willing
+	 * to wait out. */
+	shell_print(sh, "listening on :%lu for %lu s (the shell is blocked until then)", port, secs);
+	const int64_t deadline = k_uptime_get() + (int64_t)secs * 1000;
+	unsigned      served   = 0;
+	while (k_uptime_get() < deadline) {
+		uint16_t handle = 0;
+
+		if (k_msgq_get(&companion_accept_q, &handle, K_MSEC(200)) != 0) {
+			continue; /* nobody connected in this window */
+		}
+		shell_print(sh, "accepted handle %u", (unsigned)handle);
+		(void)companion_serve_one(sh, handle);
+		(void)cc3501e_sock_close(companion_cc3501e, handle, ALP_COMPANION_SOCK_OP_MS);
+		served++;
+	}
+	(void)cc3501e_remove_event_callback(companion_cc3501e, companion_serve_event_cb, NULL);
+
+	/* Close what the loop never got to.  The host OWNS every accepted handle,
+	 * so a connection that landed after the last k_msgq_get -- or that was
+	 * still queued when the deadline passed -- is a firmware socket nothing
+	 * would ever release, which is precisely the leak this command's own
+	 * documentation warns callers about.  Drain AFTER unregistering the
+	 * callback, so nothing new can be queued behind us. */
+	unsigned closed = 0;
+	uint16_t leftover;
+	while (k_msgq_get(&companion_accept_q, &leftover, K_NO_WAIT) == 0) {
+		(void)cc3501e_sock_close(companion_cc3501e, leftover, ALP_COMPANION_SOCK_OP_MS);
+		closed++;
+	}
+	shell_print(sh, "served %u connection(s)", served);
+	if (closed > 0u) {
+		shell_print(sh, "closed %u unserved connection(s)", closed);
+	}
+	if (companion_accept_drops > 0u) {
+		/* These were never queued, so their handles are unknown here and the
+		 * firmware sockets stay allocated until the next companion reset. */
+		shell_warn(sh,
+		           "dropped %u accepted connection(s): queue full, their firmware "
+		           "sockets are leaked until the companion resets",
+		           companion_accept_drops);
+	}
+
+out_close:
+	(void)cc3501e_sock_close(companion_cc3501e, srv, ALP_COMPANION_SOCK_OP_MS);
+	return (s == ALP_OK) ? 0 : -EIO;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(
     alp_companion_sock_subcmds,
     /* "tcp-get" is a shell command name, not a subtraction expression. */
@@ -183,12 +431,18 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
                   4,
                   0),
     /* clang-format on */
+    SHELL_CMD_ARG(serve,
+                  NULL,
+                  "serve <port> [seconds]  -- listen and answer HTTP over the soft-AP",
+                  cmd_companion_sock_serve,
+                  2,
+                  1),
     SHELL_SUBCMD_SET_END);
 
 SHELL_SUBCMD_ADD((alp, companion),
                  sock,
                  &alp_companion_sock_subcmds,
-                 "CC3501E TCP/UDP sockets (tcp-get <ip> <port> <path>)",
+                 "CC3501E TCP/UDP sockets (tcp-get <ip> <port> <path>, serve <port> [seconds])",
                  NULL,
                  1,
                  0);

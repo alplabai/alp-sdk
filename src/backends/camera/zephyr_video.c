@@ -16,7 +16,9 @@
  *   alp_camera_capture   -> video_dequeue (blocking with timeout)
  *   alp_camera_release   -> video_enqueue (return the buffer to the
  *                           driver's incoming queue for reuse)
- *   alp_camera_close     -> stop if running + video_buffer free path
+ *   alp_camera_close     -> video_stream_stop + drain-dequeue +
+ *                           video_buffer_release x N (the pool is
+ *                           whole again for the next open)
  *   configure_isp        -> NOSUPPORT (the portable video class has
  *                           no in-line ISP knobs; vendor backends
  *                           ride on top to add the configure_isp op).
@@ -48,6 +50,7 @@
 #include <alp/cap_instance.h>
 #include <alp/peripheral.h>
 
+#include "alp_errno.h"
 #include "camera_ops.h"
 #include "alp_slot_claim.h"
 
@@ -109,25 +112,11 @@ static void _free_state(alp_z_video_state_t *s)
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-		return ALP_ERR_TIMEOUT;
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 /** Map the portable alp_pixfmt_t enum to a Zephyr video FourCC.
@@ -212,9 +201,10 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 	 * minimal-info -- some bridges (e.g. CSI-2 SerDes pairs) leave
 	 * get_caps unimplemented and only honour set_format.
 	 *
-	 * v4.4 video API: caps/format carry an `enum video_buf_type type`
-	 * the caller sets instead of the removed VIDEO_EP_OUT endpoint-id
-	 * argument.  This backend only drives the capture-out side. */
+	 * The v4.4 video API names the endpoint with an `enum video_buf_type`
+	 * carried ON the caps / format / buffer structs rather than as a
+	 * separate argument.  A camera's capture side -- the frames the app
+	 * consumes -- is VIDEO_BUF_TYPE_OUTPUT. */
 	struct video_caps vcaps = { .type = VIDEO_BUF_TYPE_OUTPUT };
 	int               err   = video_get_caps(dev, &vcaps);
 	if (err != 0 && err != -ENOSYS) {
@@ -223,22 +213,16 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 	}
 
 	/* Walk the format_caps list -- accept the first entry whose
-	 * (pixelformat, width, height) bracket the requested config.
-	 * If no portable FourCC is requested or the list is empty the
-	 * sensor's default format stays in place. */
+     * (pixelformat, width, height) bracket the requested config.
+     * If no portable FourCC is requested or the list is empty the
+     * sensor's default format stays in place. */
 	uint32_t want_fourcc    = _to_video_fourcc(cfg->format);
 	bool     fmt_negotiated = false;
 	if (want_fourcc != 0u && vcaps.format_caps != NULL) {
 		for (const struct video_format_cap *fc = vcaps.format_caps; fc->pixelformat != 0u; ++fc) {
-			if (fc->pixelformat != want_fourcc) {
-				continue;
-			}
-			if (cfg->width < fc->width_min || cfg->width > fc->width_max) {
-				continue;
-			}
-			if (cfg->height < fc->height_min || cfg->height > fc->height_max) {
-				continue;
-			}
+			if (fc->pixelformat != want_fourcc) continue;
+			if (cfg->width < fc->width_min || cfg->width > fc->width_max) continue;
+			if (cfg->height < fc->height_min || cfg->height > fc->height_max) continue;
 			st->fmt.type        = VIDEO_BUF_TYPE_OUTPUT;
 			st->fmt.pixelformat = want_fourcc;
 			st->fmt.width       = cfg->width;
@@ -258,7 +242,8 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 		}
 	} else {
 		/* Caller didn't supply a portable format -- read back the
-		 * sensor's default so our buffer allocations match. */
+		 * sensor's default so our buffer allocations match.  get_format
+		 * reads the endpoint named by fmt.type, so set it first. */
 		st->fmt.type = VIDEO_BUF_TYPE_OUTPUT;
 		(void)video_get_format(dev, &st->fmt);
 	}
@@ -334,7 +319,7 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 
 	state->be_data = st;
 	/* No special caps from the portable Zephyr video class -- ISP
-	 * gates stay off, vendor backends layer them on. */
+     * gates stay off, vendor backends layer them on. */
 	caps_out->flags = 0u;
 	return ALP_OK;
 }
@@ -342,32 +327,20 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 static alp_status_t z_start(alp_camera_backend_state_t *state)
 {
 	alp_z_video_state_t *st = (alp_z_video_state_t *)state->be_data;
-	if (st == NULL) {
-		return ALP_ERR_NOT_READY;
-	}
-	if (st->streaming) {
-		return ALP_OK; /* idempotent */
-	}
+	if (st == NULL) return ALP_ERR_NOT_READY;
+	if (st->streaming) return ALP_OK; /* idempotent */
 	int err = video_stream_start(st->dev, VIDEO_BUF_TYPE_OUTPUT);
-	if (err == 0) {
-		st->streaming = true;
-	}
+	if (err == 0) st->streaming = true;
 	return _errno_to_alp(err);
 }
 
 static alp_status_t z_stop(alp_camera_backend_state_t *state)
 {
 	alp_z_video_state_t *st = (alp_z_video_state_t *)state->be_data;
-	if (st == NULL) {
-		return ALP_ERR_NOT_READY;
-	}
-	if (!st->streaming) {
-		return ALP_OK;
-	}
+	if (st == NULL) return ALP_ERR_NOT_READY;
+	if (!st->streaming) return ALP_OK;
 	int err = video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
-	if (err == 0) {
-		st->streaming = false;
-	}
+	if (err == 0) st->streaming = false;
 	return _errno_to_alp(err);
 }
 
@@ -375,29 +348,21 @@ static alp_status_t
 z_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t timeout_ms)
 {
 	alp_z_video_state_t *st = (alp_z_video_state_t *)state->be_data;
-	if (st == NULL) {
-		return ALP_ERR_NOT_READY;
-	}
-	if (!st->streaming) {
-		return ALP_ERR_NOT_READY;
-	}
+	if (st == NULL) return ALP_ERR_NOT_READY;
+	if (!st->streaming) return ALP_ERR_NOT_READY;
 
 	k_timeout_t t = (timeout_ms == UINT32_MAX) ? K_FOREVER : K_MSEC(timeout_ms);
 
 	struct video_buffer *vb  = NULL;
 	int                  err = video_dequeue(st->dev, &vb, t);
-	if (err != 0) {
-		return _errno_to_alp(err);
-	}
-	if (vb == NULL) {
-		return ALP_ERR_IO;
-	}
+	if (err != 0) return _errno_to_alp(err);
+	if (vb == NULL) return ALP_ERR_IO;
 
 	out->data = vb->buffer;
 	out->size = vb->bytesused;
 	/* Zephyr's video_buffer timestamp is milliseconds; expose as
-	 * microseconds to the portable surface so callers don't need
-	 * to know the upstream unit. */
+     * microseconds to the portable surface so callers don't need
+     * to know the upstream unit. */
 	out->timestamp_us = (uint64_t)vb->timestamp * 1000ull;
 	return ALP_OK;
 }
@@ -405,12 +370,8 @@ z_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t t
 static alp_status_t z_release(alp_camera_backend_state_t *state, alp_camera_frame_t *frame)
 {
 	alp_z_video_state_t *st = (alp_z_video_state_t *)state->be_data;
-	if (st == NULL) {
-		return ALP_ERR_NOT_READY;
-	}
-	if (frame == NULL || frame->data == NULL) {
-		return ALP_ERR_INVAL;
-	}
+	if (st == NULL) return ALP_ERR_NOT_READY;
+	if (frame == NULL || frame->data == NULL) return ALP_ERR_INVAL;
 
 	/* Find the vbuf whose buffer pointer matches and re-enqueue it. */
 	for (uint8_t i = 0; i < st->vbuf_count; ++i) {
@@ -428,18 +389,16 @@ static alp_status_t z_configure_isp(alp_camera_backend_state_t    *state,
 	(void)state;
 	(void)isp;
 	/* The portable Zephyr drivers/video/ class has no in-line ISP
-	 * surface.  Vendor backends (v2n_n44_isp, alif_mali_c55_isp)
-	 * register at higher priority on their matching silicon and
-	 * provide a real configure_isp body. */
+     * surface.  Vendor backends (v2n_n44_isp, alif_mali_c55_isp)
+     * register at higher priority on their matching silicon and
+     * provide a real configure_isp body. */
 	return ALP_ERR_NOSUPPORT;
 }
 
 static void z_close(alp_camera_backend_state_t *state)
 {
 	alp_z_video_state_t *st = (alp_z_video_state_t *)state->be_data;
-	if (st == NULL) {
-		return;
-	}
+	if (st == NULL) return;
 	st->streaming = false;
 	/* Stop + drain + release every buffer this handle allocated --
 	 * _release_vbufs(st, true) stops the stream itself (harmless when

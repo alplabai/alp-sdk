@@ -62,8 +62,14 @@ def test_sarif_shape():
 # ---------------------------------------------------------------------------
 # tan-cli#721: a profile that selects no task must not look like a clean run.
 # `all()` over an empty sequence is True, so `ok()` returned True and `main()`
-# returned 0 while printing `0/0 passed` + `complete.` -- and `quick` selects
-# exactly zero check-script tasks today, so that was every `--profile quick`.
+# returned 0 while printing `0/0 passed` + `complete.` -- and `quick` selected
+# exactly zero check-script tasks back then, so that was every `--profile
+# quick` invocation. #1463 populated `quick` (36 tasks), but the empty-
+# selection case this guards is still reachable by construction below, and
+# would be real again for ANY profile a future edit strips back to empty --
+# these two tests exercise `Report`/`main()` directly against a synthetic
+# empty result rather than the real registry, so they stay meaningful either
+# way.
 # ---------------------------------------------------------------------------
 
 

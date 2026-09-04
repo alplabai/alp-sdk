@@ -101,7 +101,12 @@ alp_status_t alp_counter_start(alp_counter_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->start(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->start == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->start(&h->state);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -111,7 +116,12 @@ alp_status_t alp_counter_stop(alp_counter_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->stop(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->stop == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->stop(&h->state);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -122,7 +132,12 @@ alp_status_t alp_counter_get_value(alp_counter_t *h, uint32_t *ticks_out)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->get_value(&h->state, ticks_out);
+	alp_status_t rc;
+	if (h->state.ops->get_value == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->get_value(&h->state, ticks_out);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -133,7 +148,12 @@ alp_status_t alp_counter_us_to_ticks(alp_counter_t *h, uint32_t us, uint32_t *ti
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->us_to_ticks(&h->state, us, ticks_out);
+	alp_status_t rc;
+	if (h->state.ops->us_to_ticks == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->us_to_ticks(&h->state, us, ticks_out);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -149,7 +169,12 @@ alp_status_t alp_counter_set_alarm(alp_counter_t         *h,
 	}
 	h->state.alarm_cb   = cb;
 	h->state.alarm_user = user;
-	alp_status_t rc     = h->state.ops->set_alarm(&h->state, ticks_from_now, h);
+	alp_status_t rc;
+	if (h->state.ops->set_alarm == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->set_alarm(&h->state, ticks_from_now, h);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -159,7 +184,12 @@ alp_status_t alp_counter_cancel_alarm(alp_counter_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc     = h->state.ops->cancel_alarm(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->cancel_alarm == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->cancel_alarm(&h->state);
+	}
 	h->state.alarm_cb   = NULL;
 	h->state.alarm_user = NULL;
 	alp_handle_op_leave(&h->active_ops);

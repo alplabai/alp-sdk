@@ -25,7 +25,7 @@ mpn_population:
                                      # netlist/BOM -- see #1241 "Blocked on".
                                      # Do not promote the "DP83825I" label the
                                      # devicetree used to carry (dropped from
-                                     # zephyr/dts/alif/ensemble_e8_peripherals.dtsi:353-375
+                                     # zephyr/dts/alif/ensemble_e8_peripherals.dtsi:538-560
                                      # with the #1244 address fix) into this
                                      # field as fact: the bench-read
                                      # id=2000a140 is die/OUI identity only.
@@ -48,7 +48,7 @@ phy_id_pattern:   0x2000a140         # PHYID1+PHYID2, bench-confirmed via
                                      # settle the order-code blocker above.
 
 notes: |
-  On-module TI RMII PHY (zephyr/dts/alif/ensemble_e8_peripherals.dtsi:282),
+  On-module TI RMII PHY (zephyr/dts/alif/ensemble_e8_peripherals.dtsi:467),
   listed as "TI DP83825 Ethernet PHY" in
   metadata/e1m_modules/aen/CHANGELOG.md:16 (family only, no order code).
   Real hardware, not theoretical:

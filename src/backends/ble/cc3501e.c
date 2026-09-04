@@ -37,6 +37,16 @@ typedef struct {
 	cc3501e_t *ctx;
 	unsigned   refcount;
 	bool       enabled;
+	/* GATT_REGISTER staging.  cc35_gatt_register_service() used to build this
+	 * request in `uint8_t buf[ALP_CC3501E_MAX_PAYLOAD]` -- 4096 bytes on the
+	 * CALLER's stack, reached through the public alp_ble_gatt_register_service().
+	 * Any caller on a small thread stack overflows there; the Zephyr shell
+	 * thread, for scale, is CONFIG_SHELL_STACK_SIZE=2048.  Same defect the
+	 * socket path had, and the same fix issue #740 established for the ctx-side
+	 * scan/event buffers.  `_ble_be` is already a file-static singleton, so this
+	 * costs no extra RAM beyond moving the bytes out of the stack. */
+	uint8_t gatt_buf[ALP_CC3501E_MAX_PAYLOAD];
+	bool    gatt_busy;
 } cc35_ble_be_t;
 
 static cc35_ble_be_t _ble_be;
@@ -142,23 +152,22 @@ static alp_status_t cc35_advertise_stop(alp_ble_radio_state_t *state)
 	return cc3501e_ble_adv_stop(be->ctx, CC3501E_BLE_OP_TIMEOUT_MS);
 }
 
-static alp_status_t cc35_gatt_register_service(alp_ble_radio_state_t       *state,
-                                               const alp_ble_service_def_t *def,
-                                               alp_ble_attr_handle_t       *handles_out)
+/* Encode the BLE_GATT_REGISTER (0x38) request per the wire layout documented in
+ * <alp/protocol/cc3501e.h>: version | service_uuid[16] | num_chars, then per
+ * characteristic char_uuid[16] | properties(1) | initial_len(LE16) |
+ * initial_value[initial_len].  Writes at most `cap` bytes and reports the
+ * encoded length in *off_out.  Split out of cc35_gatt_register_service() so its
+ * four validation failures cannot skip that function's guard-flag reset. */
+static alp_status_t
+encode_gatt_register(const alp_ble_service_def_t *def, uint8_t *buf, size_t cap, size_t *off_out)
 {
-	cc35_ble_be_t *be = (cc35_ble_be_t *)state->be_data;
-	if (be == NULL || !be->enabled) return ALP_ERR_NOT_READY;
-	if (def == NULL || handles_out == NULL) return ALP_ERR_INVAL;
-	if (def->num_chars < 1u || def->num_chars > ALP_CC3501E_BLE_GATT_MAX_CHARS) {
-		return ALP_ERR_INVAL;
-	}
+	size_t off = 0u;
 
-	/* Encode the BLE_GATT_REGISTER (0x38) request per the wire layout
-	 * documented in <alp/protocol/cc3501e.h>: version | service_uuid[16] |
-	 * num_chars, then per characteristic char_uuid[16] | properties(1) |
-	 * initial_len(LE16) | initial_value[initial_len]. */
-	uint8_t buf[ALP_CC3501E_MAX_PAYLOAD];
-	size_t  off = 0u;
+	/* Fixed header: version(1) | service_uuid(16) | num_chars(1).  The per-char
+	 * loop below checks every variable write against `cap`, but these three did
+	 * not -- safe at the only call site (cap is ALP_CC3501E_MAX_PAYLOAD), and
+	 * still worth refusing rather than trusting, since `cap` is a parameter. */
+	if (cap < 1u + sizeof(def->service_uuid.b) + 1u) return ALP_ERR_INVAL;
 
 	buf[off++] = ALP_CC3501E_BLE_GATT_REGISTER_VERSION;
 	memcpy(&buf[off], def->service_uuid.b, sizeof(def->service_uuid.b));
@@ -171,7 +180,7 @@ static alp_status_t cc35_gatt_register_service(alp_ble_radio_state_t       *stat
 		if (c->initial_value == NULL && c->initial_len > 0u) return ALP_ERR_INVAL;
 
 		size_t need = off + sizeof(c->uuid.b) + 1u + 2u + c->initial_len;
-		if (need > sizeof(buf)) return ALP_ERR_INVAL;
+		if (need > cap) return ALP_ERR_INVAL;
 
 		memcpy(&buf[off], c->uuid.b, sizeof(c->uuid.b));
 		off += sizeof(c->uuid.b);
@@ -184,22 +193,55 @@ static alp_status_t cc35_gatt_register_service(alp_ble_radio_state_t       *stat
 		}
 	}
 
-	uint16_t     handles[ALP_CC3501E_BLE_GATT_MAX_CHARS];
-	size_t       num_handles = 0u;
-	alp_status_t rc          = cc3501e_ble_gatt_register(be->ctx,
-	                                                     buf,
-	                                                     off,
-	                                                     handles,
-	                                                     ALP_CC3501E_BLE_GATT_MAX_CHARS,
-	                                                     &num_handles,
-	                                                     CC3501E_BLE_OP_TIMEOUT_MS);
-	if (rc != ALP_OK) return rc;
-	if (num_handles < def->num_chars) return ALP_ERR_IO; /* short reply -- shouldn't happen */
-
-	for (size_t i = 0u; i < def->num_chars; i++) {
-		handles_out[i] = (alp_ble_attr_handle_t)handles[i];
-	}
+	*off_out = off;
 	return ALP_OK;
+}
+
+static alp_status_t cc35_gatt_register_service(alp_ble_radio_state_t       *state,
+                                               const alp_ble_service_def_t *def,
+                                               alp_ble_attr_handle_t       *handles_out)
+{
+	cc35_ble_be_t *be = (cc35_ble_be_t *)state->be_data;
+	if (be == NULL || !be->enabled) return ALP_ERR_NOT_READY;
+	if (def == NULL || handles_out == NULL) return ALP_ERR_INVAL;
+	if (def->num_chars < 1u || def->num_chars > ALP_CC3501E_BLE_GATT_MAX_CHARS) {
+		return ALP_ERR_INVAL;
+	}
+
+	/* Build into the backend's scratch, NOT a 4 KB stack frame -- see the
+	 * gatt_buf comment on cc35_ble_be_t.  The encode is a separate function so
+	 * gatt_busy has exactly ONE clear point: the original had four early returns
+	 * inside the encode loop, and cleared-on-every-path is how a guard flag ends
+	 * up leaked and the backend wedged at ALP_ERR_BUSY forever. */
+	if (be->gatt_busy) return ALP_ERR_BUSY;
+	be->gatt_busy = true;
+
+	size_t       off = 0u;
+	alp_status_t rc  = encode_gatt_register(def, be->gatt_buf, sizeof(be->gatt_buf), &off);
+
+	if (rc == ALP_OK) {
+		uint16_t handles[ALP_CC3501E_BLE_GATT_MAX_CHARS];
+		size_t   num_handles = 0u;
+
+		rc = cc3501e_ble_gatt_register(be->ctx,
+		                               be->gatt_buf,
+		                               off,
+		                               handles,
+		                               ALP_CC3501E_BLE_GATT_MAX_CHARS,
+		                               &num_handles,
+		                               CC3501E_BLE_OP_TIMEOUT_MS);
+		if (rc == ALP_OK && num_handles < def->num_chars) {
+			rc = ALP_ERR_IO; /* short reply -- shouldn't happen */
+		}
+		if (rc == ALP_OK) {
+			for (size_t i = 0u; i < def->num_chars; i++) {
+				handles_out[i] = (alp_ble_attr_handle_t)handles[i];
+			}
+		}
+	}
+
+	be->gatt_busy = false;
+	return rc;
 }
 
 static alp_status_t cc35_gatt_notify(alp_ble_radio_state_t *radio_state,
