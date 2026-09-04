@@ -3,7 +3,11 @@
 Status: Accepted — amended 2026-08-30 (the decision stands; migration step 3's
 deletion unit was wrong as scoped, a missing split step is inserted before it,
 and clause 4's surviving-oracle and `crates/` bullets are re-homed — see
-**Amendment, 2026-08-30**)
+**Amendment, 2026-08-30**) and decided 2026-09-04 (§C: a surviving alp-sdk
+emitter core answers the configure-time call, not `tan` — option one; §D:
+alp-sdk's emitters stay canonical for rendered-artefact bytes and `tan`
+consumes plan-embedded bytes instead of re-implementing them — see
+**Amendment, 2026-08-30, §C/§D**)
 Date: 2026-08-08 (Caner)
 Deciders: alpCaner (alp-sdk, tan-cli)
 Amends: [0020](0020-sdk-owns-build-execution.md) — its 2026-08-03 amendment
@@ -217,34 +221,62 @@ Two consequences the Migration section does not state:
 
 The split in §A must keep the loader and its revision gate.
 
-### C. Who answers the configure-time CMake call
+### C. Decided — who answers the configure-time CMake call: Option one
 
 Scaffolded and example `CMakeLists.txt` invoke
 `alp_project.py --emit zephyr-conf --core <id>` at cmake-configure time. That
 call is load-bearing enough that the template engine rewrites it per-SKU
 (`scripts/alp_template.py:1007-1013`) and carries dedicated SDK-root discovery
-for it (`:1186-1210`). After this ADR, either a surviving emitter core in
-alp-sdk answers it, or it is repointed at `tan` — which makes tan a hard
-dependency of **every user project build, including a plain `west build` with
-tan nowhere in the loop**. That is materially larger than the Consequences
-section's "some alp-sdk CI paths". It also reaches projects already shipped to
-customers, which no repo-side change can fix retroactively, so option two needs
-a deprecation window rather than a cut. Decide which, here, before step 3.
+for it (`:1186-1210`).
 
-### D. The renderers are duplicated too, and clause 4 does not police them
+**Decision: a surviving emitter core in alp-sdk answers this call. It is not
+repointed at `tan`.**
+
+Alp Lab ships SoMs. A customer who buys a module and runs a plain `west build`
+must not thereby acquire a hard dependency on a second tool that was nowhere
+in their loop — repointing the call at `tan` would make it a hard dependency
+of **every user project build**, materially larger than the Consequences
+section's original "some alp-sdk CI paths" scope. It also reaches projects
+already shipped to customers, and no repo-side change fixes those
+retroactively: a vendor does not break a delivered customer build to simplify
+its own repo. The SDK ships with the hardware; the build CLI is optional
+convenience layered above it — the same direction ADR-0017 sets (alp-sdk rides
+over the vendor SDK as a unification layer) and ADR-0020's layering, and
+keeping the configure-time call answerable in-repo is consistent with both.
+This also satisfies §B: the loader and its revision gate stay inside alp-sdk's
+surviving core rather than crossing into `tan`.
+
+Consequence, stated plainly: alp-sdk keeps a renderer surface alive past the
+planner's retirement. That cost is accepted deliberately, and §D below is what
+stops it becoming drift.
+
+### D. Decided — single owner for rendered-artefact bytes: alp-sdk's emitters
 
 The Context table's own measurement — 20 of 21 modules mirrored — includes
 `kconfig.py`, `headers.py` and `secure.py`, i.e. the `alp.conf` / sysbuild
 renderers, not only the planner. A cross-repo audit on 2026-08-30 confirms the
 shape: of the 20 `--emit` modes, **19 are re-implemented in tan** against
 alp-sdk's raw metadata and **1 (`scaffold`) is a byte-for-byte vendored
-snapshot**; none is consumed as a schema-validated envelope. Retiring only the
-plan producer while deleting the parity axis leaves those renderers duplicated
-with no gate. The record must name a single owner for rendered-artefact bytes:
-either tan's copies become canonical and alp-sdk's emitters die (which implies
-§C option two), or alp-sdk's emitters stay canonical and tan consumes
-plan-embedded bytes. Left implicit, this recreates the #320 → #485 drift class
-one layer down, now undetected.
+snapshot**; none is consumed as a schema-validated envelope.
+
+**Decision: alp-sdk's emitters are canonical. `tan` consumes plan-embedded
+bytes rather than re-implementing the renderers.** This follows from §C option
+one and is the single owner this section demands the record name.
+
+Rendering `alp.conf` / sysbuild / kconfig / headers / secure bytes is
+hardware-truth generation from `metadata/`, which clause 2 keeps in alp-sdk
+under every migration outcome. The producer of hardware truth and the
+renderer of hardware truth belong in the same repo.
+
+Under this decision, the 19 re-implementations found in the audit are the
+thing that goes away — `tan` consumes the schema-validated envelope instead of
+re-deriving the bytes from raw metadata. The parity apparatus therefore
+shrinks to the render envelope rather than being deleted along with the
+planner axis.
+
+Something must FAIL when tan's copy of the rendered bytes diverges from
+alp-sdk's canonical output. That gate is required; its implementation is not
+decided here.
 
 ### E. Oracle and snapshot custody
 
@@ -281,25 +313,35 @@ Steps 2-4 above are replaced by the following. The order is load-bearing.
    it. Taken out of order, the deletion becomes a silent behaviour change.
 2. **Land the `alp_orchestrate` split** — the step this ADR was missing.
    Separate the planner axis from the emitter/loader core per §A, keeping the
-   revision gate of §B. Exit condition: `scripts/alp_project.py` and every
-   `check_*.py` import a surviving module, and `--emit build-plan` is the only
-   mode owned by the doomed axis. Skipped, step 3 breaks every example
-   configure and roughly a dozen gate scripts in one commit.
-3. **Repoint alp-sdk's own consumers** — CI workflows, `docs/cli.md`,
-   `docs/board-config-features.md`, `docs/heterogeneous-builds.md`, and the
-   emit-registry `owner` fields — at tan or at the surviving core. Exit
-   condition: `git grep alp_orchestrate` returns only history and CHANGELOG.
+   revision gate of §B. The emitter/loader core stays in alp-sdk per §C — it
+   is not moved to tan. Exit condition: `scripts/alp_project.py` and every
+   `check_*.py` import a surviving in-repo module, and `--emit build-plan` is
+   the only mode owned by the doomed axis. Skipped, step 3 breaks every
+   example configure and roughly a dozen gate scripts in one commit.
+3. **Repoint alp-sdk's own plan-producer consumers** — CI workflows,
+   `docs/cli.md`, `docs/board-config-features.md`,
+   `docs/heterogeneous-builds.md`, and the emit-registry `owner` field for
+   `build-plan` — at tan. Renderer-owned emit-registry entries (`zephyr-conf`,
+   kconfig, headers, secure, topology, manifest, and the rest) are **not**
+   repointed: per §C/§D they keep resolving to alp-sdk's surviving emitter
+   core, and the eleven vendored `CMakeLists.txt` templates that spawn
+   `alp_project.py --emit zephyr-conf` at build time are correct as written
+   and stay unchanged. Exit condition: `git grep alp_orchestrate` for the
+   plan-producer paths returns only history and CHANGELOG, and every
+   renderer-owned emit-registry entry still resolves to an in-repo module.
    Done before step 1, this repoints onto a divergent planner.
 4. **Move oracle and snapshot custody to tan** per §E. Exit condition: tan CI
    runs the shape check with no alp-sdk planner checkout.
 5. **Delete the plan producer** in one commit naming this ADR, retiring
    `parity-seam1.yml` and `dispatch-tan-parity.yml` in the same commit.
-6. **Delete — not merely disable — the alp-sdk-vs-tan parity axis in tan.**
-   Exit condition: the second producer exists in **no alp-sdk release that
-   tan's supported-version floor still accepts**. Until tan's minimum supported
-   SDK rises past the release that dropped the producer, a user on an old SDK
-   with a new tan has two producers again and no gate. That gap is the whole
-   difference between disabling the axis and deleting it.
+6. **Delete — not merely disable — the alp-sdk-vs-tan planner parity axis in
+   tan.** Exit condition: the second producer exists in **no alp-sdk release
+   that tan's supported-version floor still accepts**. Until tan's minimum
+   supported SDK rises past the release that dropped the producer, a user on
+   an old SDK with a new tan has two producers again and no gate. That gap is
+   the whole difference between disabling the axis and deleting it. This does
+   not retire the render-envelope gate named in §D — that polices a different
+   owner boundary (rendered bytes, not the plan) and stays live.
 
 ### What this amendment does not change
 
@@ -309,3 +351,11 @@ is the dominant cost, and one implementation is the right end state. Reading
 tan strengthens the case rather than weakening it: `python/tan/planner/` is a
 superset of the SDK planner, and with `crates/` gone there is no
 language-boundary argument left for keeping two.
+
+§C and §D do not reverse any of that. `tan` owns the planner outright and
+alp-sdk stops being a second plan producer — full stop. Only the *renderers*
+(the `alp.conf` / sysbuild / kconfig / headers / secure emitters, and the
+configure-time `--emit zephyr-conf` call) stay in alp-sdk, for the reasons
+§C and §D give. §C/§D narrow the deletion unit of migration step 3 — what
+"stops producing plans" deletes versus keeps — they do not reopen or soften
+the ADR's core decision.
