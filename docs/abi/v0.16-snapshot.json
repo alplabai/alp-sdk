@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-03",
+  "generated": "2026-09-04",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -11170,8 +11170,8 @@
           "value": "(id) ((alp_spi_target_config_t){ .bus_id = (id), .mode = ALP_SPI_MODE_0, .bits_per_word = 0u })"
         },
         "ALP_UART_CONFIG_DEFAULT": {
-          "hash": "3186ecc94f7ca975",
-          "value": "(id) ((alp_uart_config_t){ .port_id = (id), .baudrate = 115200u, .data_bits = 8u, .stop_bits = 1u, .parity = ALP_UART_PARITY_NONE })"
+          "hash": "8294a351f7c5504f",
+          "value": "(id) ((alp_uart_config_t){ .port_id = (id), .baudrate = 115200u, .data_bits = 8u, .stop_bits = 1u, .parity = ALP_UART_PARITY_NONE, .flow_control = ALP_UART_FLOW_NONE })"
         }
       },
       "typedefs": {
@@ -11343,16 +11343,27 @@
           "kind": "enum"
         },
         "alp_uart_config_t": {
-          "definition": "typedef struct { uint32_t port_id; uint32_t baudrate; uint8_t data_bits; uint8_t stop_bits; alp_uart_parity_t parity; } alp_uart_config_t;",
+          "definition": "typedef struct { uint32_t port_id; uint32_t baudrate; uint8_t data_bits; uint8_t stop_bits; alp_uart_parity_t parity; alp_uart_flow_t flow_control; } alp_uart_config_t;",
           "fields": [
             "uint32_t port_id",
             "uint32_t baudrate",
             "uint8_t data_bits",
             "uint8_t stop_bits",
-            "alp_uart_parity_t parity"
+            "alp_uart_parity_t parity",
+            "alp_uart_flow_t flow_control"
           ],
-          "hash": "fd0724f00181ce0f",
+          "hash": "c6ea5fb1ad7ef326",
           "kind": "struct"
+        },
+        "alp_uart_flow_t": {
+          "definition": "typedef enum { ALP_UART_FLOW_NONE = 0, ALP_UART_FLOW_RTS_CTS = 1, ALP_UART_FLOW_XON_XOFF = 2 } alp_uart_flow_t;",
+          "enumerators": [
+            "ALP_UART_FLOW_NONE = 0",
+            "ALP_UART_FLOW_RTS_CTS = 1",
+            "ALP_UART_FLOW_XON_XOFF = 2"
+          ],
+          "hash": "2cdcb3e6a951a1ef",
+          "kind": "enum"
         },
         "alp_uart_parity_t": {
           "definition": "typedef enum { ALP_UART_PARITY_NONE = 0, ALP_UART_PARITY_EVEN = 1, ALP_UART_PARITY_ODD = 2 } alp_uart_parity_t;",
@@ -12472,6 +12483,10 @@
           "hash": "dcf59935692075e0",
           "signature": "void alp_rpc_close(alp_rpc_channel_t *ch);"
         },
+        "alp_rpc_link_state": {
+          "hash": "f96f3c1c9156a39a",
+          "signature": "alp_status_t alp_rpc_link_state(alp_rpc_channel_t *ch, alp_rpc_link_state_t *out_state);"
+        },
         "alp_rpc_open": {
           "hash": "1e0d36d7b43c476d",
           "signature": "alp_rpc_channel_t * alp_rpc_open(const alp_rpc_config_t *cfg);"
@@ -12479,6 +12494,10 @@
         "alp_rpc_send": {
           "hash": "c85e5a8d173ec7dc",
           "signature": "alp_status_t alp_rpc_send(alp_rpc_channel_t *ch, const char *method, const void *payload, size_t len);"
+        },
+        "alp_rpc_set_link_callback": {
+          "hash": "5de2375a11820ea7",
+          "signature": "alp_status_t alp_rpc_set_link_callback(alp_rpc_channel_t *ch, alp_rpc_link_cb_t cb, void *user);"
         },
         "alp_rpc_subscribe": {
           "hash": "d0eb3f7a68d621cf",
@@ -12520,6 +12539,21 @@
           ],
           "hash": "bc14a9238bc4dab0",
           "kind": "struct"
+        },
+        "alp_rpc_link_cb_t": {
+          "definition": "typedef void (*alp_rpc_link_cb_t)(alp_rpc_link_state_t state, void *user);",
+          "hash": "95307895fe7e238a",
+          "kind": "fnptr"
+        },
+        "alp_rpc_link_state_t": {
+          "definition": "typedef enum { ALP_RPC_LINK_DOWN = 0, ALP_RPC_LINK_UP = 1, ALP_RPC_LINK_LOST = 2 } alp_rpc_link_state_t;",
+          "enumerators": [
+            "ALP_RPC_LINK_DOWN = 0",
+            "ALP_RPC_LINK_UP = 1",
+            "ALP_RPC_LINK_LOST = 2"
+          ],
+          "hash": "b9a1cd09b69aad43",
+          "kind": "enum"
         },
         "alp_rpc_method_cb_t": {
           "definition": "typedef void (*alp_rpc_method_cb_t)(const void *payload, size_t len, void *user);",
@@ -13533,14 +13567,21 @@
           "kind": "enum"
         },
         "alp_wdt_config_t": {
-          "definition": "typedef struct { uint32_t wdt_id; uint32_t timeout_ms; alp_wdt_action_t on_timeout; } alp_wdt_config_t;",
+          "definition": "typedef struct { uint32_t wdt_id; uint32_t timeout_ms; alp_wdt_action_t on_timeout; alp_wdt_expiry_cb_t on_expire; void *user; } alp_wdt_config_t;",
           "fields": [
             "uint32_t wdt_id",
             "uint32_t timeout_ms",
-            "alp_wdt_action_t on_timeout"
+            "alp_wdt_action_t on_timeout",
+            "alp_wdt_expiry_cb_t on_expire",
+            "void *user"
           ],
-          "hash": "f7ae928097ebe8d7",
+          "hash": "4d8abadbb3481b00",
           "kind": "struct"
+        },
+        "alp_wdt_expiry_cb_t": {
+          "definition": "typedef void (*alp_wdt_expiry_cb_t)(alp_wdt_t *wdt, void *user);",
+          "hash": "dcb108c0e15c61eb",
+          "kind": "fnptr"
         },
         "alp_wdt_t": {
           "definition": "typedef struct alp_wdt alp_wdt_t;",

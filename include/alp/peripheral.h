@@ -870,20 +870,52 @@ typedef enum {
 	ALP_UART_PARITY_ODD  = 2
 } alp_uart_parity_t;
 
+/**
+ * @brief Hardware/software line flow control for @ref alp_uart_config_t.
+ *
+ * On a real UART port, a backend that cannot honour a non-@ref
+ * ALP_UART_FLOW_NONE value returns @ref ALP_ERR_NOSUPPORT from @ref
+ * alp_uart_open instead of silently accepting the request and dropping
+ * it (issue #1639).  This is a guarantee about the backend's own
+ * configuration layer: where the driver exposes a way to read its
+ * applied setting back (Zephyr's @c uart_config_get, Linux @c
+ * tcgetattr), a request that was accepted but not actually applied is
+ * caught and turned into @ref ALP_ERR_NOSUPPORT; where it does not (no
+ * @c config_get, or the CMSIS-Driver @c Control call itself refusing
+ * the mode), @ref ALP_OK trusts the driver's own success return with
+ * nothing further to check locally.  It does NOT cover the physical
+ * wiring: on a board whose devicetree overlay/pinmux does not route
+ * RTS/CTS to this UART node, @ref alp_uart_open can still return @ref
+ * ALP_OK for @ref ALP_UART_FLOW_RTS_CTS with no flow control on the
+ * line, because per-SoM RTS/CTS pad routing is not yet emitted (see
+ * issue #1639's changelog).  This governs backends that drive an
+ * actual line (Zephyr driver, Yocto tty, vendor CMSIS); it does not
+ * extend to the test doubles under @c CONFIG_ALP_SDK_TESTING_UART or
+ * @c CONFIG_ALP_SDK_UART_SW_FALLBACK, which are not real ports and
+ * document their own always-succeeds contract.
+ */
+typedef enum {
+	ALP_UART_FLOW_NONE     = 0, /**< No flow control (default). */
+	ALP_UART_FLOW_RTS_CTS  = 1, /**< 4-wire hardware flow control. */
+	ALP_UART_FLOW_XON_XOFF = 2  /**< In-band software framing; many drivers reject. */
+} alp_uart_flow_t;
+
 typedef struct {
 	uint32_t          port_id;
 	uint32_t          baudrate;
 	uint8_t           data_bits; /**< Usually 8. */
 	uint8_t           stop_bits; /**< 1 or 2. */
 	alp_uart_parity_t parity;
+	alp_uart_flow_t   flow_control; /**< Default @ref ALP_UART_FLOW_NONE. */
 } alp_uart_config_t;
 
 /**
  * @brief Default-initialize an @ref alp_uart_config_t for port @p id.
  *
- * Identity from @p id; canonical defaults = 115200 8N1:
+ * Identity from @p id; canonical defaults = 115200 8N1, no flow control:
  * @c baudrate = 115200, @c data_bits = 8, @c stop_bits = 1,
- * @c parity = @ref ALP_UART_PARITY_NONE.
+ * @c parity = @ref ALP_UART_PARITY_NONE,
+ * @c flow_control = @ref ALP_UART_FLOW_NONE.
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer
@@ -891,16 +923,21 @@ typedef struct {
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_UART_CONFIG_DEFAULT(id) \
-	((alp_uart_config_t){ .port_id   = (id), \
-	                      .baudrate  = 115200u, \
-	                      .data_bits = 8u, \
-	                      .stop_bits = 1u, \
-	                      .parity    = ALP_UART_PARITY_NONE })
+	((alp_uart_config_t){ .port_id      = (id), \
+	                      .baudrate     = 115200u, \
+	                      .data_bits    = 8u, \
+	                      .stop_bits    = 1u, \
+	                      .parity       = ALP_UART_PARITY_NONE, \
+	                      .flow_control = ALP_UART_FLOW_NONE })
 
 /**
  * @brief Acquire a UART port handle.
  *
- * @param[in] cfg  Port configuration.  Must be non-NULL.
+ * @param[in] cfg  Port configuration.  Must be non-NULL.  A non-@ref
+ *                 ALP_UART_FLOW_NONE @c flow_control the backend
+ *                 cannot honour fails the whole open with @ref
+ *                 ALP_ERR_NOSUPPORT rather than silently dropping it
+ *                 and configuring the line with no flow control.
  *
  * @return Open handle on success; NULL with @ref alp_last_error
  *         set to @ref ALP_ERR_INVAL / @ref ALP_ERR_NOT_READY /

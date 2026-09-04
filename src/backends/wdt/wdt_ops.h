@@ -33,8 +33,17 @@ typedef struct alp_wdt_backend_state {
 struct alp_wdt_ops {
 	/* Open the watchdog.  cfg is the customer's config (carries the
 	 * instance id in cfg->wdt_id); state is preallocated by the
-	 * dispatcher; caps_out is filled with the (possibly probe-refined)
-	 * instance capabilities. */
+	 * dispatcher, always as &h->state for the owning struct alp_wdt
+	 * `h`; caps_out is filled with the (possibly probe-refined)
+	 * instance capabilities.  A backend that needs an ISR-reachable
+	 * back-ref to cfg.on_expire/cfg.user (the Zephyr backend's
+	 * trampoline table -- Zephyr's wdt_callback_t carries no user_data
+	 * cookie, unlike counter_alarm_cfg's, #1637) recovers its owning
+	 * struct alp_wdt with CONTAINER_OF(state, struct alp_wdt, state)
+	 * instead of taking it as a separate parameter -- `state` is
+	 * struct alp_wdt's first member and no wdt backend delegates the
+	 * way the CC3501E GPIO proxy does (gpio_ops.h), so that recovery
+	 * is always correct here. */
 	alp_status_t (*open)(const alp_wdt_config_t  *cfg,
 	                     alp_wdt_backend_state_t *state,
 	                     alp_capabilities_t      *caps_out);

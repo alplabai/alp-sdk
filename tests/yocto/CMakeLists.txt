@@ -745,6 +745,26 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_uart_closed_status
              COMMAND alp_test_peripheral_uart_closed_status)
 
+    # Flow-control bit-mapping regression for issue #1639.
+    # peripheral_uart_flow_control.c #includes the real
+    # src/yocto/peripheral_uart.c directly to reach the file-local, pure
+    # apply_flow_control() helper -- same ODR rationale (and NOT linked
+    # against alp::sdk) as alp_test_peripheral_uart_closed_status above.
+    add_executable(alp_test_peripheral_uart_flow_control
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_uart_flow_control.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    )
+    target_include_directories(alp_test_peripheral_uart_flow_control PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_uart_flow_control PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_uart_flow_control
+             COMMAND alp_test_peripheral_uart_flow_control)
+
     add_executable(alp_test_peripheral_gpio
         ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio.c
     )
@@ -1040,6 +1060,26 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
         add_test(NAME alp_test_audio_alsa
                  COMMAND alp_test_audio_alsa)
+    endif()
+    if(ALSA_TEST_FOUND)
+        # Same archive-extraction rationale as alp_test_audio_alsa above:
+        # compile the i2s backend TUs straight into the test so the
+        # alp_backends_i2s section is populated and the ALSA backend
+        # (priority 100) wins selection.
+        add_executable(alp_test_i2s_alsa
+            ${CMAKE_CURRENT_SOURCE_DIR}/i2s_alsa.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/i2s/sw_fallback.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/i2s/yocto_drv.c
+        )
+        target_link_libraries(alp_test_i2s_alsa PRIVATE alp::sdk)
+        target_include_directories(alp_test_i2s_alsa PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+            ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+        target_compile_features(alp_test_i2s_alsa PRIVATE c_std_99)
+
+        add_test(NAME alp_test_i2s_alsa
+                 COMMAND alp_test_i2s_alsa)
     endif()
 
     # Security test compiles only when OpenSSL is on the sysroot;

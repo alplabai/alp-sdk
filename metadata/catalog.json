@@ -3846,8 +3846,10 @@
         "alp_rpc_call",
         "alp_rpc_capabilities",
         "alp_rpc_close",
+        "alp_rpc_link_state",
         "alp_rpc_open",
         "alp_rpc_send",
+        "alp_rpc_set_link_callback",
         "alp_rpc_subscribe",
         "alp_rpc_unsubscribe"
       ],
