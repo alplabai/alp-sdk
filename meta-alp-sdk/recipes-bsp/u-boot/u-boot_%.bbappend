@@ -42,7 +42,7 @@ SRC_URI:append:rzv2n-family = " \
 # resolved defconfig by u-boot-configure.inc (find_cfgs() + merge_config.sh
 # pick up any *.cfg in SRC_URI) -- the same path prod-boot.cfg uses.
 
-# 0002 (production boot): four build-gated ALP additions to the same
+# 0002 (production boot): two build-gated ALP additions to the same
 # rzv2n-dev board files.
 #   CONFIG_ALP_E1M_EMMC_1V8 (default y in the patched defconfig):
 #     drive eMMC_V_SEL (PA0) high in board_init, BEFORE the first MMC
@@ -56,86 +56,17 @@ SRC_URI:append:rzv2n-family = " \
 #     dev cmdline keeps earlycon but gains console=ttySC0,115200,
 #     which stops the kernel replaying the early log across the
 #     console handover. The cmdline is rebuilt at CONFIG_BOOTCOMMAND
-#     (patch-safe vs the build-varying env block).
-#   CONFIG_ALP_FDT_FILE + CONFIG_ALP_SD_ROOT (per-MACHINE strings,
-#     issue #1175): microSD is the only deployment path on the EVK
-#     (xSPI-strapped, carrier Ethernet dead per errata E1), and it did
-#     not boot a self-built image.  The vendor env hardcodes
-#     boot/r9a09g056n44-dev.dtb -- a filename no ALP image builds -- in
-#     BOTH sd2load and emmcload, so eMMC (the ALP_BOOT_DEVICE default in
-#     every E1M machine conf) was broken the same way and is fixed
-#     alongside it.  CONFIG_BOOTCOMMAND now reloads the correct
-#     per-MACHINE dtb on either medium, AFTER the leading
-#     'env default -a' wipe, inside an 'if ... then ... else echo ... fi'
-#     so a miss does NOT fall through to booting a stale devicetree
-#     (hush does not abort a ';' list on a failed builtin).  It also
-#     fixes the microSD root device (vendor mmcblk2p2 -> mmcblk1p2 per
-#     e1m-x-evk.dtsi:88-89).  Both values are injected per-family below
-#     (alp-boot-v2n.cfg / alp-boot-v2m.cfg) and both Kconfig
-#     defaults are the VENDOR values, so a machine that gets no fragment
-#     (stock rzv2n-evk) keeps the vendor VALUES -- but NOT vendor
-#     BEHAVIOUR: the guard around the dtb reload is unconditional (it
-#     is part of CONFIG_BOOTCOMMAND itself, not build-gated), so a
-#     missing boot/r9a09g056n44-dev.dtb now hard-stops the boot instead
-#     of falling through silently, on every machine built with this
-#     defconfig, ALP fragment or not.  The mmcblk1p2 root is NOT
-#     bench-confirmed (see the patch comment).
+#     (patch-safe vs the build-varying env block); the future per-SKU
+#     fdtfile derivation must also happen there, AFTER the leading
+#     'env default -a' wipe -- see the comment in the patch.
 # VALIDATION: bitbake-built dev + prod with config asserts; the FIP
 # (BL2+BL31+u-boot, manual flow) was built 2026-06-12 with both ALP
 # patches and the u-boot binary content-verified (alp_root bootcmd +
 # pinned console). On-silicon FIP flash + boot is PENDING maintainer
 # authorization (a persistent bootloader write to the shared bench
-# board).
-#
-# OPERATIONAL TRAP -- READ BEFORE THE NEXT MANUAL FIP BUILD: the manual
-# FIP flow (build_custom_fip_v630_deepx.sh, WSL, outside this repo) has
-# no merge_config.sh step, so it builds off the Kconfig DEFAULTS --
-# CONFIG_ALP_FDT_FILE="r9a09g056n44-dev.dtb" (the vendor filename) and
-# CONFIG_ALP_SD_ROOT="/dev/mmcblk2p2" (the vendor root) -- not the
-# per-MACHINE ALP values. Before this change that wrong dtb name fell
-# through silently and the board limped along on whatever stale FDT
-# was already in RAM; after this change the reload guard is
-# unconditional, so the NEXT FIP that script builds hard-stops with
-# "refusing to boot a stale devicetree" and does not boot at all.
-# REQUIRED ACTION before the next FIP build: the script's .config must
-# set CONFIG_ALP_FDT_FILE and CONFIG_ALP_SD_ROOT to the per-MACHINE
-# values (see alp-boot-v2n.cfg / alp-boot-v2m.cfg for what to copy in)
-# -- this is the difference between a booting bootloader and one that
-# reads as bricked. The manual flow was updated the same day to apply
-# 0002 alongside the DEEPX patch and to verify it (strings u-boot |
-# grep 'setenv alp_root'), but that flow has NOT yet been run with the
-# corrected .config -- the boot-dtb fix (CONFIG_ALP_FDT_FILE +
-# CONFIG_ALP_SD_ROOT) is UNVERIFIED beyond the hand-checked patch
-# application (see the patch's own git-apply/patch --dry-run note).
-
-# CONFIG_ALP_FDT_FILE + CONFIG_ALP_SD_ROOT (issue #1175): the per-MACHINE
-# boot dtb filename and microSD root device.  V2N* and V2M* build
-# different board dtbs (KERNEL_DEVICETREE differs -- see the four
-# conf/machine/e1m-v2{n,m}10{1,2}-a55.conf), so the fragment must be
-# picked per SKU.
-#
-# Selected on MACHINE EXACTLY, deliberately NOT via ":append:<override>".
-# MACHINEOVERRIDES is an inherited CHAIN here: e1m-v2m101-a55 declares
-# "e1m-v2m101-a55:e1m-v2m101:e1m-v2n101-a55:e1m-v2n101" (V2M is "V2N101 +
-# DEEPX"), so a V2M build ALSO carries the V2N tags.  bitbake applies
-# EVERY matching :append:<override> -- it does not pick the most specific
-# -- so :append:e1m-v2m101-a55 and :append:e1m-v2n101-a55 would BOTH fire,
-# both fragments would reach find_cfgs(), CONFIG_ALP_FDT_FILE would be set
-# twice and merge_config.sh takes the LAST one merged.  Which one that is
-# comes down to bitbake's PARSE order, not to override precedence:
-# data_smart.py iterates the :append list in the order the lines were
-# parsed and keeps each whose override is in OVERRIDES at all -- it does
-# not rank them.  So the winner is simply whichever append line is written
-# last in this file, which is a silent, order-dependent coin flip between
-# e1m-v2n101-x-evk.dtb and e1m-v2m101-x-evk.dtb for a V2M board.
-# (A plain override ASSIGNMENT is a different mechanism but no safer here;
-# and e1m-v2n102-a55, whose chain also contains e1m-v2n101-a55, would match
-# two append lines and pull the v2n fragment in twice.)
-# d.getVar('MACHINE') has no chain and no precedence, so it is the only
-# safe selector.  A machine that matches nothing -- stock rzv2n-evk --
-# gets no fragment and keeps the vendor-identical Kconfig defaults.
-SRC_URI:append:rzv2n-family = "${@' file://alp-boot-v2n.cfg' if d.getVar('MACHINE') in ('e1m-v2n101-a55', 'e1m-v2n102-a55') else ''}"
-SRC_URI:append:rzv2n-family = "${@' file://alp-boot-v2m.cfg' if d.getVar('MACHINE') in ('e1m-v2m101-a55', 'e1m-v2m102-a55') else ''}"
+# board). The manual FIP flow (build_custom_fip_v630_deepx.sh, WSL)
+# was updated the same day to apply 0002 alongside the DEEPX patch and
+# to verify it (strings u-boot | grep 'setenv alp_root').
 
 # Production boot lockdown (BOOTDELAY=0 + keyed autoboot + the prod
 # cmdline above): opt-in for release-bundle builds only. An

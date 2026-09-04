@@ -2780,7 +2780,24 @@
       },
       {
         "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
         "name": "v2n-drpai-inference",
+        "osSet": [
+          "yocto"
+        ],
         "path": "examples/v2n/v2n-drpai-inference",
         "som": "E1M-V2N101",
         "summary": "Run a compiled model through the RZ/V2N's on-die **DRP-AI3** NPU via `<alp/inference.h>`, on one or more still frames given on the command line, and print per-image results plus timing -- the demo the exhibition booth runs (issue #1268)."
