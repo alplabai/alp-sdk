@@ -69,16 +69,24 @@ static alp_status_t z_get_info(alp_storage_backend_state_t *st, alp_storage_info
 {
 	const struct flash_area *fa = (const struct flash_area *)st->dev;
 	if (fa == NULL) return ALP_ERR_NOT_READY;
-	/* Erase size from the underlying flash device.  Zephyr exposes
-     * the unit via flash_get_write_block_size / flash_params; for
-     * v0.6 we report fa_size as both total and erase granule when
-     * the device API is opaque.  Real-silicon backends override. */
+	/* include/alp/storage.h: "Both bounds MUST align to the device's
+     * erase_size".  flash_area_get_device(fa) below is a real device
+     * handle, not opaque -- flash_get_page_info_by_offs() reads the
+     * actual page/sector size straight from the flash driver.  1u is
+     * only a last-resort default if CONFIG_FLASH_PAGE_LAYOUT is off
+     * or the lookup fails. */
 	info->total_bytes        = fa->fa_size;
 	info->block_size         = 1u;
 	info->erase_size         = 1u;
 	const struct device *dev = flash_area_get_device(fa);
 	if (dev != NULL) {
 		info->block_size = flash_get_write_block_size(dev);
+#if defined(CONFIG_FLASH_PAGE_LAYOUT)
+		struct flash_pages_info page;
+		if (flash_get_page_info_by_offs(dev, fa->fa_off, &page) == 0) {
+			info->erase_size = page.size;
+		}
+#endif
 	}
 	return ALP_OK;
 }
