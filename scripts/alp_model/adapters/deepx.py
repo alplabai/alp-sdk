@@ -36,13 +36,16 @@ _DXCOM_TIMEOUT_S = 1800
 
 
 def _dxcom_version() -> str:
-    """Best-effort compiler version, e.g. 'DX-COM 2.3.0'; 'dxcom' on failure."""
+    """Best-effort compiler version, e.g. 'DX-COM 2.3.0'; 'DX-COM <unknown>' on
+    failure -- the vendor token must stay 'DX-COM' on every path (never the
+    lowercase console-script name 'dxcom') so a perf point written during a
+    probe failure still carries the same token downstream consumers match on."""
     try:
         proc = subprocess.run(["dxcom", "-v"], capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError):
-        return "dxcom"
+        return "DX-COM <unknown>"
     m = re.search(r"DX-COM[^\d]*(\d+\.\d+\.\d+)", proc.stdout + proc.stderr)
-    return f"DX-COM {m.group(1)}" if m else "dxcom"
+    return f"DX-COM {m.group(1)}" if m else "DX-COM <unknown>"
 
 
 class DeepxAdapter(CompilerAdapter):
