@@ -35,7 +35,7 @@
  * a minimal test-local double below tracks how many times, and with
  * which owner, it was actually invoked.
  *
- * Four scenarios:
+ * Five scenarios:
  *
  *   1. test_defect1_recv_vs_timed_out_call_race -- uses
  *      zephyr_drv.c's g_rpc_recv_test_sync_hook (a test-only seam
@@ -107,6 +107,16 @@
  *      for what was, and was not, possible to drive on native_sim for
  *      the narrower check-and-count instruction-level race, confirmed
  *      by hand.
+ *
+ *   5. test_1632_dispatch_vs_unsubscribe_snapshot_is_coherent -- #1632:
+ *      rpc_ept_recv()'s async dispatch races z_unsubscribe() mutating
+ *      the same subscribe-table entry, both previously lock-free.
+ *      Drives a genuinely concurrent unsubscribe against an in-flight
+ *      dispatch, timed via a new hook (g_rpc_dispatch_test_sync_hook)
+ *      fired from inside the fix's `be->lock` critical section right
+ *      after `sub` is found, mirroring scenario 1's technique. See
+ *      that scenario's own header comment for the full mutation-proof
+ *      argument.
  */
 
 /* Faked purely at the preprocessor level -- no real Kconfig ALP_SDK_RPC
@@ -706,4 +716,187 @@ ZTEST(alp_rpc_zephyr_backend, test_defect2_shutdown_waits_for_inflight_recv)
 	zassert_false(be.recv_active,
 	              "recv must have cleared recv_active before z_shutdown() returned DONE");
 	zassert_equal(atomic_get(&be.cb_active), 0);
+}
+
+/* ------------------------------------------------------------------ */
+/* 4. #1632: rpc_ept_recv() async dispatch vs z_unsubscribe() race.     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Before the fix, rpc_ept_recv()'s async dispatch block read
+ * `sub->cb`/`sub->user` with NO lock held while z_subscribe()/
+ * z_unsubscribe() mutated the exact same fields, also lock-free, from
+ * the application thread.  This drives a genuinely concurrent
+ * z_unsubscribe() against an in-flight rpc_ept_recv() dispatch, timed
+ * via g_rpc_dispatch_test_sync_hook (declared in zephyr_drv.c, called
+ * from inside the fixed code's `be->lock` critical section right
+ * after `sub` is found, before cb+user are copied into locals) --
+ * mirrors test_defect1_recv_vs_timed_out_call_race's technique
+ * exactly: the hook wakes a HIGHER-priority "unsubscriber" thread
+ * that immediately tries to take the same `be->lock` z_unsubscribe()
+ * needs.
+ *
+ * Fixed code: that lock is already held by rpc_ept_recv() at the
+ * moment the hook fires, so the unsubscriber cannot actually run
+ * until rpc_ept_recv() has finished copying `cb`+`user` into locals
+ * and released the lock -- the dispatch therefore always observes a
+ * coherent (cb, user) pair and the subscriber callback always fires
+ * exactly once, with the correct payload and user pointer, before the
+ * unsubscribe clears the table.
+ *
+ * Pre-fix (mutation-proof target): nothing guards the window between
+ * `sub_find()` returning and `sub->cb`/`sub->user` being read -- the
+ * woken higher-priority unsubscriber thread preempts immediately (no
+ * lock/IRQ state to defer it) and fully clears `sub->cb`/`sub->user`/
+ * `sub->method` before the dispatch resumes, so the dispatch observes
+ * `sub->cb == NULL` and silently drops the callback entirely --
+ * `g_1632_record_calls` stays 0.  See this file's own comment on the
+ * hook's call site in zephyr_drv.c for the exact insertion point a
+ * manual revert must match to reproduce this.
+ */
+
+static atomic_t     g_1632_record_calls;
+static void        *g_1632_record_user;
+static uint8_t      g_1632_record_payload[RACE_RESP_CAP];
+static size_t       g_1632_record_payload_len;
+static struct k_sem g_1632_unsub_woken;
+static atomic_t     g_1632_unsub_ran;
+static alp_status_t g_1632_unsub_status;
+
+static int g_1632_user_ctx; /* Address-only sentinel -- never dereferenced. */
+
+static void record_cb(const void *payload, size_t len, void *user)
+{
+	g_1632_record_user        = user;
+	g_1632_record_payload_len = len;
+	if (len <= sizeof(g_1632_record_payload)) {
+		memcpy(g_1632_record_payload, payload, len);
+	}
+	atomic_inc(&g_1632_record_calls);
+}
+
+/* g_rpc_dispatch_test_sync_hook (declared in zephyr_drv.c, inside
+ * rpc_ept_recv()'s async-dispatch critical section): wakes the
+ * unsubscriber thread.  Non-blocking, same contract as
+ * recv_write_race_hook() above. */
+static void wake_1632_unsub_hook(void)
+{
+	k_sem_give(&g_1632_unsub_woken);
+}
+
+static struct rpc_be           g_1632_be;
+static alp_rpc_backend_state_t g_1632_state;
+
+static void unsub_1632_entry(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	k_sem_take(&g_1632_unsub_woken, K_FOREVER);
+	g_1632_unsub_status = z_unsubscribe(&g_1632_state, "probe");
+	atomic_set(&g_1632_unsub_ran, 1);
+}
+
+static void recv_1632_entry(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	uint8_t payload[RACE_RESP_CAP];
+	memset(payload, RACE_PAYLOAD_BYTE, sizeof(payload));
+
+	uint8_t frame[64];
+	int     built = frame_build(frame, sizeof(frame), "probe", payload, sizeof(payload));
+	zassert_true(built > 0, "frame_build failed");
+
+	rpc_ept_recv(frame, (size_t)built, &g_1632_be);
+}
+
+ZTEST(alp_rpc_zephyr_backend, test_1632_dispatch_vs_unsubscribe_snapshot_is_coherent)
+{
+	static K_THREAD_STACK_DEFINE(recv_stack, RACE_STACK_SIZE);
+	static struct k_thread recv_thread_h;
+	static K_THREAD_STACK_DEFINE(unsub_stack, RACE_STACK_SIZE);
+	static struct k_thread unsub_thread_h;
+
+	init_test_channel(&g_1632_be, "sub1632");
+	g_1632_be.subs[0].method_hash = fnv1a_32("probe");
+	strncpy(g_1632_be.subs[0].method, "probe", sizeof(g_1632_be.subs[0].method) - 1);
+	g_1632_be.subs[0].cb   = record_cb;
+	g_1632_be.subs[0].user = &g_1632_user_ctx;
+
+	memset(&g_1632_state, 0, sizeof(g_1632_state));
+	g_1632_state.be_data = &g_1632_be;
+
+	k_sem_init(&g_1632_unsub_woken, 0, 1);
+	atomic_clear(&g_1632_record_calls);
+	atomic_clear(&g_1632_unsub_ran);
+	g_1632_record_user        = NULL;
+	g_1632_record_payload_len = 0;
+	g_1632_unsub_status       = (alp_status_t)-1;
+
+	g_rpc_dispatch_test_sync_hook = wake_1632_unsub_hook;
+
+	/* HIGHER priority than the recv below -- once woken (inside
+	 * rpc_ept_recv()'s critical section, pre-fix; only after it,
+	 * post-fix), it always gets the CPU before recv's own next
+	 * instruction -- mirrors test_defect1_recv_vs_timed_out_call_race. */
+	k_thread_create(&unsub_thread_h,
+	                unsub_stack,
+	                K_THREAD_STACK_SIZEOF(unsub_stack),
+	                unsub_1632_entry,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(4),
+	                0,
+	                K_NO_WAIT);
+
+	k_tid_t recv_tid = k_thread_create(&recv_thread_h,
+	                                   recv_stack,
+	                                   K_THREAD_STACK_SIZEOF(recv_stack),
+	                                   recv_1632_entry,
+	                                   NULL,
+	                                   NULL,
+	                                   NULL,
+	                                   K_PRIO_PREEMPT(5),
+	                                   0,
+	                                   K_NO_WAIT);
+
+	zassert_equal(k_thread_join(recv_tid, K_MSEC(RACE_BOUND_MS)), 0, "recv thread never finished");
+	g_rpc_dispatch_test_sync_hook = NULL;
+
+	int waited_ms = 0;
+	while (!atomic_get(&g_1632_unsub_ran) && waited_ms < RACE_BOUND_MS) {
+		k_sleep(K_MSEC(1));
+		waited_ms += 1;
+	}
+	zassert_true(atomic_get(&g_1632_unsub_ran), "unsubscriber thread never ran");
+
+	uint8_t expect_payload[RACE_RESP_CAP];
+	memset(expect_payload, RACE_PAYLOAD_BYTE, sizeof(expect_payload));
+
+	/* The decisive assertions: the unsubscriber ran at the earliest
+	 * possible instant (right when dispatch found `sub`, before it
+	 * read cb/user), yet the lock means dispatch always observes a
+	 * coherent (cb, user) snapshot and the callback always fires --
+	 * never silently dropped, never called with a torn/mismatched
+	 * user pointer. */
+	zassert_equal(atomic_get(&g_1632_record_calls),
+	              1,
+	              "subscriber callback was not invoked exactly once -- the racing unsubscribe "
+	              "corrupted or dropped the dispatch");
+	zassert_equal(g_1632_record_user,
+	              &g_1632_user_ctx,
+	              "callback ran with the wrong user pointer -- torn cb/user snapshot");
+	zassert_equal(g_1632_record_payload_len, RACE_RESP_CAP);
+	zassert_mem_equal(g_1632_record_payload, expect_payload, RACE_RESP_CAP);
+
+	/* The unsubscribe itself must still have succeeded cleanly once
+	 * dispatch released the lock. */
+	zassert_equal(g_1632_unsub_status, ALP_OK);
+	zassert_equal(g_1632_be.subs[0].cb, NULL);
+	zassert_equal(g_1632_be.subs[0].user, NULL);
 }
