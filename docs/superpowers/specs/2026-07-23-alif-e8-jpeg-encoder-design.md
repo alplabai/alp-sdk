@@ -26,8 +26,9 @@ is tracked separately and is **out of scope** here.
 
 ## 2. Silicon facts (verbatim — do not round)
 
-Source: `Alif_E8_Datasheet_v1.0.pdf` §3.19.4 pp.85–86; `Confidential-Alif_E8_HWRM_v0.3.pdf` §17.4
-p.1768; register map Table 17-54 p.1771; IRQs Table 17-52 p.1770.
+Source: `Alif_E8_Datasheet_v1.0.pdf` §3.19.4 pp.85–86; Alif E8 HWRM (doc id
+AHRM0012NDA v0.3) §17.4 p.1768; register map Table 17-54 p.1771; IRQs Table
+17-52 p.1770.
 
 - **Block:** JPEG Encoder, VeriSilicon **Hantro VC9000E**.
 - **Base address:** `0x4904_4000`. Power domain **PD-6**. **128-bit AXI master**.

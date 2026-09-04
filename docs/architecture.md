@@ -440,7 +440,7 @@ not others.
 | BLE              | `alp/ble.h`          | AEN CC3501E backend or Zephyr `bt` host stack (peripheral + central + GATT). | v0.1 surface; impl v0.3 |
 | Security         | `alp/security.h`     | MbedTLS PSA Crypto API (Zephyr) + OpenSSL `EVP_*` (Yocto).      | v0.1 surface; Yocto OpenSSL backend (SHA-256/384/512, AES-128/256-GCM, ChaCha20-Poly1305, `alp_random_bytes`) code complete v0.4-prep with KATs green at `tests/yocto/security_openssl.c`; Zephyr MbedTLS impl v0.3 |
 | Multi-proc IPC   | `alp/mproc.h`        | Zephyr `mbox_*` (MHU on Alif), `hwsem_*`, shared-memory regions, plus framed RPC over RPMsg / OpenAMP (`rpc.h`, opened with the generated `system_ipc.h`); placeholder framing helper at `src/common/proto/alp_mproc_frame.{h,c}` (replaced by nanopb-generated codec once `extras-lwrb-nanopb` lands -- interim/deferred as of v0.9, no committed version). | v0.1 surface; framing scaffolding shipping (interim); full impl v0.3+ |
-| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + `preferred_backend` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `scripts/alp_model/` (`tan model build`) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends (M-class registry): `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `sw_fallback`; DRP-AI3, DEEPX DX-M1, and the ONNX Runtime CPU floor are A55/Linux-side only (`src/yocto/inference_{drpai,deepx,ort}.cpp`, #58/#59).  ORT is default-off (`ALP_SDK_USE_ORT_CPU`), sits strictly last in `resolve_auto()` so an NPU-bearing SoM never silently falls back to it, and — unlike the other two — is reachable only via a hand-built `alp_inference_config_t` today: no `.alpmodel` → ORT route exists on Yocto.  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
+| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + `preferred_backend` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `tan model build` (`tan.model`, `alplabai/tan-cli`; relocated from this repo's `scripts/alp_model/` under ADR-0028) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends (M-class registry): `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `sw_fallback`; DRP-AI3, DEEPX DX-M1, and the ONNX Runtime CPU floor are A55/Linux-side only (`src/yocto/inference_{drpai,deepx,ort}.cpp`, #58/#59).  ORT is default-off (`ALP_SDK_USE_ORT_CPU`), sits strictly last in `resolve_auto()` so an NPU-bearing SoM never silently falls back to it, and — unlike the other two — is reachable only via a hand-built `alp_inference_config_t` today: no `.alpmodel` → ORT route exists on Yocto.  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
 | Storage          | `alp/storage.h`      | Block + filesystem (LittleFS) on Zephyr; standard FS on Yocto.  | v0.5 surface |
 | 2D graphics      | `alp/gpu2d.h`        | Portable blit/fill shim (Alif Dave2D / GPU2D); SW fallback.     | v0.5 surface; see [ADR 0008](adr/0008-gpu2d-portable-shim.md) |
 
@@ -448,10 +448,11 @@ not others.
 
 Training stays off-device, in TensorFlow / PyTorch, producing a
 `.tflite` / `.onnx` source model.  `tan model build` (host-side,
-`scripts/alp_model/`) compiles that source model for **every** NPU
-backend the target SoM declares and packs the results into one fat,
-multi-backend **`.alpmodel`** package (CBOR manifest + per-backend
-blobs).  The per-backend compiler differs by silicon: Arm **Vela**
+`tan.model` in `alplabai/tan-cli` -- relocated from this repo's
+`scripts/alp_model/` under ADR-0028) compiles that source model for
+**every** NPU backend the target SoM declares and packs the results
+into one fat, multi-backend **`.alpmodel`** package (CBOR manifest +
+per-backend blobs).  The per-backend compiler differs by silicon: Arm **Vela**
 for Ethos-U (AEN, i.MX 93), the **DRP-AI translator** for Renesas
 RZ/V2N, **dxcom** for DEEPX DX-M1, plus a portable CPU/TFLM blob as
 the universal fallback.  At runtime, `alp_inference_open_alpmodel()`

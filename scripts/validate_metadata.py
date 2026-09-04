@@ -108,6 +108,8 @@ SUPERVISOR_LINKS_SCHEMA = REPO / "metadata" / "schemas" / "supervisor-links-v1.s
 SUPERVISOR_LINKS_DATA = REPO / "metadata" / "e1m_modules" / "v2n" / "supervisor-links.yaml"
 BLOCK_SCHEMA = REPO / "metadata" / "schemas" / "block-v1.schema.json"
 BLOCKS = REPO / "metadata" / "blocks"
+NPU_OPS_SCHEMA = REPO / "metadata" / "schemas" / "npu-ops-v1.schema.json"
+NPU_OPS = REPO / "metadata" / "npu_ops"
 MODEL_PERF_SCHEMA = REPO / "metadata" / "schemas" / "model-perf-v1.schema.json"
 MODEL_PERF = REPO / "metadata" / "model_perf"
 # Generated Zephyr board trees (one dir per <board>; each carries a twister
@@ -471,6 +473,236 @@ def _check_som_slot0_address_resolved(som_files) -> list:
     return failures
 
 
+#: `silicon:` refs on which `on_module.hyperram` + `on_module.ospi_memories`
+#: are MANDATORY, not merely bindable-if-present.  Matched on the ref rather
+#: than a SKU allow-list so a future E1M-AEN901 is covered the day it lands.
+#: The Alif Ensemble die's only external memory interface is the OSPI/HexSPI
+#: octal bus (`metadata/socs/alif/ensemble/e8.json` `external_memory_interfaces`
+#: lists HexSPI + SD/eMMC and no DRAM), so on this family those two blocks are
+#: not one possible source for `memory:` -- they are its whole source.
+_ALIF_ENSEMBLE_SILICON_PREFIX = "alif:ensemble:"
+
+
+def _population_state(entry: dict) -> str:
+    """Project an `assembled:` key onto `fitted` / `optional` / `absent`.
+
+    The schema's own default is authoritative: *"Population status: true
+    (default), false (DNI), or \"optional\" (assembled per BOM variant)"* --
+    an entry with no `assembled` key describes a part that IS fitted, so a
+    missing key must read `fitted`, never "unknown".
+    """
+    raw = entry.get("assembled", True)
+    if raw is False:
+        return "absent"
+    if raw == "optional":
+        return "optional"
+    return "fitted"
+
+
+def _memory_population_msgs(
+    figure_key: str,
+    figure,
+    parts: "list[tuple[str, dict]]",
+) -> "list[str]":
+    """Bind ONE `memory.<figure_key>` against the population of its parts.
+
+    `parts` is `[(dotted_path, entry)]` -- every `on_module` part whose
+    population decides this figure.  Returns the failure messages, empty
+    when the figure and the population agree.
+    """
+    if not parts:
+        return []
+
+    # `True`/`False` are `int` subclasses in Python; the schema forbids a
+    # boolean here, but never let one read as the integer 0/1.
+    is_int = isinstance(figure, int) and not isinstance(figure, bool)
+    fitted = [(n, e) for n, e in parts if _population_state(e) == "fitted"]
+    optional = [(n, e) for n, e in parts if _population_state(e) == "optional"]
+    populating = fitted + optional
+    names = ", ".join(n for n, _ in parts)
+
+    if not populating:
+        # Every declared part is `assembled: false` -- the population
+        # question is ANSWERED, and the answer is "none".  That is `0`.
+        # `TBD` would re-open a question the preset just closed, and any
+        # positive figure claims memory the module demonstrably has not
+        # got (which is exactly the 32 MiB #915 deleted).
+        if not (is_int and figure == 0):
+            return [
+                f"memory.{figure_key}={figure!r} but every part that could "
+                f"carry it is `assembled: false` ({names}) -- a resolved "
+                f"'populates none' is `0`, never TBD and never a capacity"
+            ]
+        return []
+
+    populating_names = ", ".join(n for n, _ in populating)
+    if is_int and figure == 0:
+        # `0` means "no such part on any current BOM variant"; at least one
+        # part says otherwise.  This is the mutation that used to be FULLY
+        # GREEN: `hyperram.assembled: true` next to `dram_mbit: 0`.
+        # Name each offender WITH its own state -- a mixed fitted/optional
+        # set must not be reported under one blanket `assembled:` value.
+        stated = ", ".join(
+            f"{n} (`assembled: {'optional' if _population_state(e) == 'optional' else 'true'}`)"
+            for n, e in populating)
+        return [
+            f"memory.{figure_key}=0 claims the module populates no such "
+            f"part, but {stated} is populated"
+        ]
+
+    if optional:
+        # BOM-variant dependent: the capacity of the variant that DOES
+        # fit the part is a maintainer call, so only the `0` contradiction
+        # above is decidable here.
+        return []
+
+    caps = [e.get("capacity_mbit") for _, e in fitted]
+    if not all(isinstance(c, int) and not isinstance(c, bool) for c in caps):
+        # A fitted part whose own capacity is TBD leaves the module figure
+        # genuinely underivable -- nothing to cross-check against.
+        return []
+
+    expected = sum(int(c) for c in caps)
+    if figure != expected:
+        return [
+            f"memory.{figure_key}={figure!r} does not match the parts it is "
+            f"derived from: {populating_names} "
+            f"{'sum to' if len(fitted) > 1 else 'declares'} "
+            f"capacity_mbit={expected}"
+        ]
+    return []
+
+
+def _check_som_memory_population(som_files) -> list:
+    """Bind `memory:` to the `on_module` population facts it is DERIVED from.
+
+    Every AEN preset carries a comment stating the derivation
+    (`metadata/e1m_modules/E1M-AEN801.yaml`: *"dram_mbit  <- 0:
+    on_module.hyperram is `assembled: false`"*), and until this check
+    landed a comment was the whole of the enforcement.  Proven by
+    mutation: setting `hyperram.assembled: true` while leaving
+    `dram_mbit: 0` was FULLY GREEN -- `validate_metadata.py` rc=0 AND
+    `pytest tests/scripts/` rc=0 -- and `dram_mbit: 128` against an
+    unpopulated part left only one hardcoded string assertion red.  A
+    derivation nothing binds is not a derivation; it is a comment that
+    happens to be true today.
+
+    The rules, per figure:
+
+      - `memory.dram_mbit` is decided by `on_module.hyperram`;
+        `memory.flash_mbit` by every `on_module.ospi_memories[]` entry.
+        A preset that declares neither block (V2N/V2M's LPDDR4X + eMMC,
+        E1M-NX9101's open capacities) states no population fact here and
+        is skipped -- there is nothing to bind to, and inventing one
+        would be inventing a hardware value.  A skipped preset prints an
+        explicit `SKIP <rel> (nothing bound ...)` line, so "this file was
+        not cross-checked" is a thing you can READ in the gate's output
+        rather than an absence you have to notice.  The first version of
+        this check printed nothing at all for an unbound preset.
+      - EXCEPT on an Alif Ensemble part (`silicon: alif:ensemble:*`),
+        where both blocks are REQUIRED.  Skipping-when-absent is the
+        right default for a family whose external memory the SDK has no
+        model of, but on Ensemble the OSPI/HexSPI octal bus is the ONLY
+        external memory interface the die has -- `on_module.hyperram`
+        and `on_module.ospi_memories` are not one possible source for
+        `memory:`, they are its whole source.  Omitting them there does
+        not leave the question open, it DELETES the fact this check
+        binds to: measured, `_check_som_memory_population([synthetic])`
+        returned `[]` for an AEN preset carrying `dram_mbit: 256` with
+        no `on_module` memory blocks at all, i.e. a NEW AEN SKU could
+        restate the exact 32-MiB-of-HyperRAM claim #915 had just deleted
+        and ship it at rc=0.  Derived from the `silicon:` ref rather
+        than a SKU allow-list, so an E1M-AEN901 added tomorrow is
+        covered the day it lands.
+      - Every relevant part `assembled: false` => the figure MUST be `0`.
+        This is the `0`-vs-`TBD` distinction #915 established: `0` is a
+        RESOLVED fact ("populates none"), `TBD` is an open question
+        ("nobody has written the capacity down yet", E1M-NX9101's state).
+        A preset that has answered the question may not then spell the
+        answer `TBD`, and may not claim a capacity either.
+      - Any relevant part populated (`assembled: true`, or the key
+        absent -- the schema's own default) => the figure MUST NOT be
+        `0`, and when every fitted part declares an integer
+        `capacity_mbit` it must equal their sum.
+      - `assembled: "optional"` is BOM-variant dependent, so only the `0`
+        contradiction is decidable; the exact capacity is not.
+
+    JSON Schema cannot reach across `on_module` into `memory:` (nor sum
+    a sibling object's values), so this is the only layer that can hold
+    the derivation.  Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[str, list[str]]] = []
+    for path in som_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        memory = doc.get("memory")
+        if not isinstance(memory, dict):
+            memory = {}
+        on_module = doc.get("on_module")
+        if not isinstance(on_module, dict):
+            on_module = {}
+
+        msgs: list[str] = []
+        bound: list[str] = []
+
+        hyperram = on_module.get("hyperram")
+        ospi = on_module.get("ospi_memories")
+
+        # An Ensemble part's ONLY external memory sits on the OSPI/HexSPI
+        # octal bus, so declaring the blocks is not optional there: without
+        # them `memory:` is unbindable and can claim anything at rc=0.
+        silicon = doc.get("silicon")
+        if isinstance(silicon, str) and \
+                silicon.startswith(_ALIF_ENSEMBLE_SILICON_PREFIX):
+            for key, block, figure in (
+                    ("hyperram", hyperram, "dram_mbit"),
+                    ("ospi_memories", ospi, "flash_mbit")):
+                if not isinstance(block, dict) or not block:
+                    msgs.append(
+                        f"silicon={silicon!r} is an Alif Ensemble part, whose "
+                        f"only external memory sits on the OSPI/HexSPI octal "
+                        f"bus, so `memory.{figure}` is DERIVED from "
+                        f"`on_module.{key}` -- but that block is missing or "
+                        f"empty. Omitting it does not leave the question open, "
+                        f"it deletes the fact this check binds `memory.{figure}"
+                        f"` to. Declare the part with `assembled:` (see "
+                        f"metadata/e1m_modules/E1M-AEN801.yaml), `assembled: "
+                        f"false` if the SKU populates none")
+
+        if isinstance(hyperram, dict):
+            bound.append("dram_mbit <- on_module.hyperram")
+            msgs += _memory_population_msgs(
+                "dram_mbit", memory.get("dram_mbit"),
+                [("on_module.hyperram", hyperram)])
+
+        if isinstance(ospi, dict) and ospi:
+            entries = [(f"on_module.ospi_memories.{k}", v)
+                       for k, v in sorted(ospi.items()) if isinstance(v, dict)]
+            if entries:
+                bound.append("flash_mbit <- on_module.ospi_memories")
+                msgs += _memory_population_msgs(
+                    "flash_mbit", memory.get("flash_mbit"), entries)
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        elif bound:
+            print(f"OK   {rel}  ({'; '.join(bound)})")
+        else:
+            # Printed, not omitted: an unbound preset that produced NO line
+            # was indistinguishable from one this loop never reached.
+            print(f"SKIP {rel}  (nothing bound -- declares neither "
+                  f"on_module.hyperram nor on_module.ospi_memories)")
+    return failures
+
+
 def _check_silicon_kconfig() -> list:
     """Validate the silicon->Kconfig registry and its socs/ correspondence.
 
@@ -740,8 +972,52 @@ def _check_soc_npu_pairing(soc_files) -> list:
          the emit cannot tell the cores apart and a 256-MAC stream would error
          a 128-MAC NPU at invoke (issue #909).
 
-    A single-MAC variant, or an instance on a shared non-core subsystem (the
-    E8 U85 on the HG subsystem), legitimately omits `paired_core`.
+    A single-MAC variant, or an instance that is a shared, SoC-level NPU not
+    wired to one core, legitimately omits `paired_core`. The E8's Ethos-U85
+    (Alif block name NPU_HG) is that case: `NPU_HG_BASE 0x49042000` is
+    byte-identical in both M55 cores' generated CMSIS headers (rtss_hp/soc.h
+    and rtss_he/soc.h), unlike the two U55s, which alias the same local
+    address (0x400E1000) under per-core names (NPU_HP_BASE / NPU_HE_BASE)
+    with an interrupt in only their own core's NVIC. The A32 cluster can
+    reach the U85 too -- register-programmable, not merely interrupt-notified:
+    Alif E8 HWRM (AHRM0012NDA v0.3) Table 10-2 places 0x49042000 inside the
+    Shared Peripherals row (0x48000000, 32MB -- A32/M55-HP/M55-HE all Y),
+    unlike the M55-local-peripherals row directly above it (A32 N); Table 10-6
+    lists NPU-HG at that same 0x49042000 among the Shared Peripherals; and
+    Table 4-13 fans NPU_HG_IRQ to all three cores -- GIC400_IRQS[355] on the
+    A32, M55HP_IRQS[366] / M55HE_IRQS[366] on the M55s (366 is the M55 NVIC
+    number, not an A32 IRQ; the A32's own number, via GIC400, is 355).
+
+    The i.MX 93 Ethos-U65 (`nxp:imx9:imx93`) is the same kind of omission but
+    on WEAKER evidence, and the two must not be conflated. IMX93RM Rev. 7
+    (2026-02-10) §2.2 "System memory map used by all initiators" Table 4
+    lists a 4 KB "NPU Controller" region (4A90_0000 (NS) / 5A90_0000 (S)) in
+    the memory map used by ALL initiators, not one; Table 5, "System memory
+    map (Cortex-M33)", repeats the identical row in the Cortex-M33's OWN
+    memory map too -- so the block sits in both, not exclusively in either.
+    §17.2.8 "Interrupt signals" says only "See Arm's General Interrupt
+    Controller (GIC) documentation for NPU block interrupts" -- the GIC is
+    the Cortex-A55's controller, not the M33's NVIC. Chapter 17 never names a
+    host core, repeatedly using Arm's generic Ethos-U wording ("the external
+    host application processor", §17.2 and §17.2.9) instead of an i.MX
+    93-specific assignment. Unlike the E8 HWRM's Table 10-2, this is an
+    all-initiators memory map plus a GIC pointer, not a per-master access
+    table: it does not enumerate which masters may reach the NPU Controller
+    (TRDC governs actual masters, not this chapter), and it names no host
+    core at all. So imx93's single Ethos-U65 instance also omits
+    `paired_core`, but not for the E8's reason ("verified as shared") --
+    for the opposite one ("no pairing documented, period"). Do not add a
+    `paired_core` to the imx93 SoC spec on the strength of this manual; the
+    absence stays deliberate.
+
+    That silicon-documentation gap does not mean no core drives the NPU
+    today: NXP's own shipped Yocto/Linux driver stack
+    (`nxp-imx/ethos-u-driver-stack-imx`) runs the Ethos-U driver on the
+    Cortex-M33, with Linux on the Cortex-A55 dispatching to it over shared
+    memory and mailbox IRQs -- a separate, sourced, software-stack fact (see
+    `vendors/nxp-imx93/README.md`) that this omission does not contradict.
+    `paired_core` records documented silicon wiring, not which core a given
+    software stack happens to run on, so it still carries no value here.
     Returns a failure list shaped like `_check_files()`.
     """
     failures: list[tuple[Path, list[str]]] = []
@@ -811,6 +1087,153 @@ def _check_soc_npu_pairing(soc_files) -> list:
                         f"{ntype} appears with distinct MAC arrays {sorted(macs)} "
                         f"but instance(s) [{subs}] omit paired_core -- the build "
                         f"cannot size the accelerator per core (see #909)")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
+# `[Memory_Mode.*]` sections shipped in Arm's own vela.ini (ethos-u-vela
+# 5.1.0) whose `arena_mem_area` is `Axi1` -- the non-SRAM memory that same
+# file documents as "assumed to be read-writeable", i.e. DRAM.  Vela's own
+# no-flags default (`Dedicated_Sram_384KB`) is in this set, which is exactly
+# why a DRAM-less part must never inherit it.
+_VELA_DRAM_BACKED_MEMORY_MODES = {
+    "Dedicated_Sram",
+    "Dedicated_Sram_256KB",
+    "Dedicated_Sram_384KB",
+    "Dedicated_Sram_512KB",
+}
+
+# `[System_Config.*]` sections shipped in that same Arm vela.ini.  Anything
+# else exists only in a vendor config; passing it without `--config` is a hard
+# vela rc=1, not a degradation.
+_VELA_BUILTIN_SYSTEM_CONFIGS = {
+    "Ethos_U55_Deep_Embedded",
+    "Ethos_U55_High_End_Embedded",
+    "Ethos_U65_Embedded",
+    "Ethos_U65_Mid_End",
+    "Ethos_U65_High_End",
+    "Ethos_U65_Client_Server",
+    "Ethos_U85_SYS_Flash_Low",
+    "Ethos_U85_SYS_Flash_High",
+    "Ethos_U85_SYS_DRAM_Low",
+    "Ethos_U85_SYS_DRAM_Mid",
+    "Ethos_U85_SYS_DRAM_High",
+}
+
+
+def _check_soc_vela_memory_profile(soc_files) -> list:
+    """Cross-check `npu_toolchain.vela` against the rest of the SAME SoC spec.
+
+    `--emit build-plan`'s consumer derives vela's `--memory-mode` from the SKU
+    rather than letting vela fall back to `Dedicated_Sram_384KB`, which places
+    the whole working set in DRAM and reports `sram_memory_used = 0.0`.  Zero
+    then satisfies alp-sdk's on-device fit gate against ANY arena
+    (src/backends/inference/alp_model_select.c), so a wrong profile is worse
+    than none.  JSON Schema cannot reach the sibling fields these invariants
+    need, so enforce them here:
+
+      1. every SoC declaring an `ethos-u*` NPU carries the block, and no SoC
+         without one does (vela compiles for nothing else);
+      2. a `Dedicated_Sram*` memory_mode puts the arena in read-writeable
+         non-SRAM, so the SoC must declare a DRAM-class
+         `external_memory_interfaces` entry -- the Alif Ensemble parts declare
+         only OctalSPI/HexSPI + SD/eMMC and must never claim one;
+      3. a scalar `system_config` describes ONE accelerator (on Alif, one core
+         subsystem), so it is legal only on a SoC carrying exactly one
+         distinct Ethos-U `(type, subtype)`;
+      4. a `system_config` outside Arm's built-in set must be flagged
+         `system_config_requires_vendor_config: true` AND name its file, else
+         a consumer would put an unresolvable section on the command line.
+
+    Reading the `source` citations back -- proving the cited lines still state
+    the declared `memory_mode` -- deliberately does NOT live here. Those
+    citations point into `examples/` and `vendors/`, and this script is run
+    against a metadata-ONLY scratch clone by
+    tests/scripts/test_alp_cli_new_som.py's
+    `_clone_metadata_gates`, where those trees do not exist. Making the check
+    tolerate their absence would turn it into a silent skip; it lives in
+    tests/scripts/test_vela_profile_metadata.py instead, which always runs
+    against the real checkout.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in soc_files:
+        try:
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        rel = path.relative_to(REPO).as_posix()
+        # Every list read out of the parsed doc here (`npus`,
+        # `external_memory_interfaces`) is schema-typed as a list of objects,
+        # but the schema pass that would reject a malformed entry (e.g. a
+        # bare string or a list) runs separately and is not guaranteed to
+        # have run first -- filter to dicts rather than let a non-object
+        # raise `AttributeError: '<type>' object has no attribute 'get'`
+        # here and abort the whole gate mid-run, hiding the schema FAIL line
+        # that already explains the real problem.  Same reasoning as
+        # `npu_toolchain` below, and the same shape as the fix in
+        # `_check_soc_npu_pairing`.
+        npus = [n for n in (doc.get("npus") or []) if isinstance(n, dict)]
+        ethos = [n for n in npus if str(n.get("type", "")).startswith("ethos-u")]
+        npu_toolchain = doc.get("npu_toolchain")
+        npu_toolchain = npu_toolchain if isinstance(npu_toolchain, dict) else {}
+        vela = npu_toolchain.get("vela")
+        vela = vela if isinstance(vela, dict) else {}
+        msgs: list[str] = []
+
+        # (1) presence is decided by the accelerator the SoC actually carries.
+        if ethos and not vela:
+            msgs.append(
+                "declares an Ethos-U NPU but no npu_toolchain.vela -- a consumer "
+                "would inherit vela's DRAM-backed default profile")
+        if vela and not ethos:
+            msgs.append(
+                "declares npu_toolchain.vela but no ethos-u* NPU -- vela does not "
+                "compile for this accelerator")
+
+        if vela and ethos:
+            mode = vela.get("memory_mode")
+
+            # (2) a DRAM-backed placement needs a DRAM interface on this part.
+            kinds = [str(e.get("kind", ""))
+                     for e in (doc.get("external_memory_interfaces") or [])
+                     if isinstance(e, dict)]
+            has_dram = any("DDR" in k.upper() for k in kinds)
+            if mode in _VELA_DRAM_BACKED_MEMORY_MODES and not has_dram:
+                msgs.append(
+                    f"npu_toolchain.vela.memory_mode={mode!r} places the tensor arena "
+                    f"in read-writeable non-SRAM, but external_memory_interfaces "
+                    f"{kinds} declares no DRAM")
+
+            sysconf = vela.get("system_config")
+            if sysconf is not None:
+                # (3) one System_Config cannot describe several accelerators.
+                identities = {(n.get("type"), n.get("subtype")) for n in ethos}
+                if len(identities) != 1:
+                    msgs.append(
+                        f"npu_toolchain.vela.system_config={sysconf!r} is a single "
+                        f"section name but this SoC carries {len(identities)} distinct "
+                        f"Ethos-U accelerators "
+                        f"{sorted(str(i) for i in identities)} -- a System_Config "
+                        f"describes one accelerator (on Alif, one core subsystem)")
+                # (4) a vendor section is unusable without its file.
+                if sysconf not in _VELA_BUILTIN_SYSTEM_CONFIGS:
+                    if vela.get("system_config_requires_vendor_config") is not True:
+                        msgs.append(
+                            f"npu_toolchain.vela.system_config={sysconf!r} is not an Arm "
+                            f"built-in but system_config_requires_vendor_config is not "
+                            f"true -- a consumer would pass an unresolvable section and "
+                            f"vela would exit 1")
+                    if not vela.get("vendor_config_filename"):
+                        msgs.append(
+                            f"npu_toolchain.vela.system_config={sysconf!r} needs a vendor "
+                            f"config but vendor_config_filename is unset")
 
         if msgs:
             print(f"FAIL {rel}")
@@ -1378,6 +1801,140 @@ def _check_block_realizations(block_files, chip_files) -> list:
             print(f"FAIL {rel}")
             for m in msgs:
                 print(f"  · {m}")
+    return failures
+
+
+def _check_npu_ops_semantics(npu_ops_files) -> list:
+    """Cross-checks on `metadata/npu_ops/<backend_family>/*.json` beyond pure
+    schema validation (ADR-0028, reshaped from the flat one-file-per-backend
+    layout to one-file-per-SUPPORT-TABLE-IDENTITY).
+
+    The schema enforces per-file shape, but not facts that only exist
+    relative to the file's PATH (its parent directory + its own filename):
+
+      1. `applies_to.variant` + `applies_to.toolchain` +
+         `applies_to.toolchain_version` must reproduce the filename exactly
+         (`<variant>@<toolchain>-<toolchain_version>.json`).  Without this, a
+         file could claim one identity in its path and another inside its own
+         body, and a future consumer resolving a table by path alone would
+         silently load metadata that disagrees with what it asked for.
+      2. `op_namespace` must match the backend FAMILY's compiler ingest
+         format -- the `ethos_u/` directory is TFLite (Vela), the `drpai/`
+         directory is ONNX (DRP-AI Translator) -- mirroring each adapter's
+         `accepts(src_format)`.  Scoring a model's ops against a list in the
+         wrong vocabulary matches nothing and yields a categorically wrong
+         no-fit verdict.
+      3. `provenance.count_expected`, when present, must equal
+         `len(supported_ops)` -- it exists specifically so a transcription
+         that silently drops or duplicates an op (the exact defect this data
+         asset was reshaped to correct) is caught mechanically rather than
+         trusted on review alone.
+      4. Every entry in `supported_ops` must itself be spelled in the
+         vocabulary `op_namespace` declares -- TFLite builtins are
+         UPPER_SNAKE (`CONV_2D`), ONNX operators are CamelCase or a short
+         all-caps acronym and never contain an underscore (`Conv`, `LRN`).
+         Check (2) above only catches a table in the wrong FILE (`onnx`
+         table under `ethos_u/`); this catches a table with the wrong
+         `op_namespace` LABEL for its own contents (an `onnx` table whose
+         ops are actually spelled `CONV_2D`-style) -- the exact defect class
+         this data asset exists to correct, and the schema's own
+         `supported_ops[].pattern` admits both spellings so it can't tell
+         them apart on its own.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    # Backend-FAMILY (the directory under metadata/npu_ops/) -> the source
+    # format its compiler ingests.  A family with no entry here is unknown
+    # territory for this cross-check (nothing to compare against), not a
+    # failure -- new families are free to be added; this dict just doesn't
+    # yet know their ingest format.
+    _expected_namespace_by_family = {"ethos_u": "tflite", "drpai": "onnx"}
+    failures: list[tuple[Path, list[str]]] = []
+    for path in npu_ops_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+
+        msgs: list[str] = []
+        family = path.parent.name
+        applies_to = doc.get("applies_to") if isinstance(doc.get("applies_to"), dict) else {}
+
+        variant = applies_to.get("variant")
+        toolchain = applies_to.get("toolchain")
+        toolchain_version = applies_to.get("toolchain_version")
+        if isinstance(variant, str) and isinstance(toolchain, str) and isinstance(toolchain_version, str):
+            expected_stem = f"{variant}@{toolchain}-{toolchain_version}"
+            if path.stem != expected_stem:
+                msgs.append(
+                    f"applies_to (variant={variant!r}, toolchain={toolchain!r}, "
+                    f"toolchain_version={toolchain_version!r}) implies filename "
+                    f"`{expected_stem}.json`, but this file is `{path.name}` -- "
+                    f"a consumer resolving this table by path would load metadata "
+                    f"that disagrees with what it asked for")
+
+        namespace = doc.get("op_namespace")
+        expected = _expected_namespace_by_family.get(family)
+        if expected is not None and namespace != expected:
+            msgs.append(
+                f"op_namespace: `{namespace}` but the `{family}/` directory's "
+                f"backend ingests `{expected}` -- see the matching adapter's "
+                f"accepts(src_format)")
+
+        # Spelling-vs-namespace (docstring item 4): TFLite builtins are
+        # UPPER_SNAKE; ONNX operators are CamelCase or a short all-caps
+        # acronym (`LRN`, `GRU`, `LSTM`) and never contain an underscore.
+        # `op == op.upper()` is NOT the discriminator here -- it would
+        # reject those legitimate all-caps ONNX acronyms as if they were
+        # TFLite spellings. An underscore is what TFLite-style multi-word
+        # names carry that ONNX names never do, so that is what a
+        # wrong-vocabulary onnx table (`CONV_2D` instead of `Conv`) trips.
+        ops = doc.get("supported_ops")
+        if isinstance(ops, list):
+            if namespace == "tflite":
+                bad_ops = [op for op in ops
+                          if not (isinstance(op, str) and op == op.upper())]
+            elif namespace == "onnx":
+                bad_ops = [op for op in ops if isinstance(op, str) and "_" in op]
+            else:
+                bad_ops = []
+            if bad_ops:
+                msgs.append(
+                    f"op_namespace: `{namespace}` but supported_ops contains "
+                    f"{len(bad_ops)} op(s) spelled in the wrong vocabulary: "
+                    f"{bad_ops} -- TFLite builtins are UPPER_SNAKE, ONNX "
+                    f"operators are CamelCase or a short all-caps acronym "
+                    f"with no underscore")
+
+        authority = doc.get("authority")
+        has_banner = isinstance(doc.get("_generated"), str)
+        if authority == "tool-generated" and not has_banner:
+            msgs.append(
+                "authority: tool-generated but no `_generated` DO-NOT-EDIT "
+                "banner -- a machine-reproducible table should self-identify "
+                "so a hand-edit is recognisable as wrong on sight")
+        if authority == "vendor-manual" and has_banner:
+            msgs.append(
+                "authority: vendor-manual but carries a `_generated` "
+                "DO-NOT-EDIT banner -- there is no script to regenerate a "
+                "hand-transcribed table from, so the banner is misleading")
+
+        provenance = doc.get("provenance") if isinstance(doc.get("provenance"), dict) else {}
+        count_expected = provenance.get("count_expected")
+        if isinstance(count_expected, int) and isinstance(ops, list) and len(ops) != count_expected:
+            msgs.append(
+                f"provenance.count_expected={count_expected} but supported_ops "
+                f"has {len(ops)} entries -- a dropped/duplicated op vs. the "
+                f"cited source, or a stale count_expected")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
     return failures
 
 
@@ -2178,6 +2735,8 @@ def main() -> int:
     )
     # Semantic cross-ref the schema can't express: npus[].paired_core -> cores[].
     soc_failures += _check_soc_npu_pairing(soc_files)
+    # #1470: npu_toolchain.vela vs npus[] / external_memory_interfaces on the SAME spec.
+    soc_failures += _check_soc_vela_memory_profile(soc_files)
     # Semantic cross-ref the schema can't express: variants[].debug.jlink_device keys -> cores[].
     soc_failures += _check_soc_debug_probe_identity(soc_files)
     # #1295: every Alif Ensemble variant must declare debug.jlink_flash_device (string or null) -- never omit it.
@@ -2303,6 +2862,32 @@ def main() -> int:
             )
             block_failures += _check_block_realizations(block_files, chip_files)
 
+    # Per-NPU op-support tables (the static-analyzer data asset, ADR-0028).
+    # One file per SUPPORT-TABLE IDENTITY under a per-backend-family
+    # subdirectory (metadata/npu_ops/<family>/<variant>@<toolchain>-
+    # <toolchain_version>.json) -- glob with `**` so this ALSO catches a file
+    # sitting directly under metadata/npu_ops/ (the retired flat layout).
+    # `*/*.json` looked recursive but isn't: it requires exactly one
+    # directory level, so a reintroduced flat file matches nothing and never
+    # reaches schema/semantic validation at all -- silently, not as a FAIL.
+    # A family directory can be legitimately absent (metadata/npu_ops/ has
+    # no deepx/ -- dxcom publishes no op-support table; see
+    # _check_npu_ops_semantics).
+    npu_ops_failures: list = []
+    npu_ops_files: list = []
+    if NPU_OPS_SCHEMA.is_file():
+        npu_ops_schema = json.loads(NPU_OPS_SCHEMA.read_text(encoding="utf-8"))
+        npu_ops_validator = jsonschema.Draft202012Validator(npu_ops_schema)
+        npu_ops_files = sorted(NPU_OPS.glob("**/*.json"))
+        if npu_ops_files:
+            print()
+            npu_ops_failures = _check_files(
+                "JSON", npu_ops_files, npu_ops_validator,
+                lambda p: strict_json_loads(p.read_text(encoding="utf-8"), source=p),
+                "op_namespace",
+            )
+            npu_ops_failures += _check_npu_ops_semantics(npu_ops_files)
+
     # Tier-2 model-perf points (YAML) against model-perf v1 (#1520).
     # metadata/model_perf/ ships EMPTY today -- a perf point comes off real
     # silicon or it does not exist (docs/bench/model-perf-capture.md) -- so
@@ -2370,6 +2955,12 @@ def main() -> int:
         print()
         slot0_address_failures = _check_som_slot0_address_resolved(som_files)
 
+    # SoM `memory:` <-> `on_module` population cross-check.
+    memory_population_failures: list = []
+    if som_files:
+        print()
+        memory_population_failures = _check_som_memory_population(som_files)
+
     # SoM `on_module.i2c_devices.<bus>.devices[]` (bus, address_7bit) uniqueness (#1845).
     i2c_collision_failures: list = []
     if som_files:
@@ -2388,12 +2979,15 @@ def main() -> int:
     print()
     total_failures = (len(soc_failures) + len(som_failures)
                       + len(hwrev_failures) + len(board_failures) + len(chip_failures)
-                      + len(block_failures) + len(model_perf_failures)
+                      + len(block_failures)
+                      + len(npu_ops_failures)
+                      + len(model_perf_failures)
                       + len(library_failures) + len(library_semantic_failures)
                       + len(board_target_failures)
                       + len(restriction_failures)
                       + len(instance_uniqueness_failures)
                       + len(slot0_address_failures)
+                      + len(memory_population_failures)
                       + len(i2c_collision_failures)
                       + len(silicon_kconfig_failures)
                       + len(peripheral_kconfig_failures)
@@ -2402,7 +2996,7 @@ def main() -> int:
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
           f"{len(hwrev_files)} hw-revisions file(s) + "
           f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
-          f"{len(block_files)} block file(s) + "
+          f"{len(block_files)} block file(s) + {len(npu_ops_files)} npu-ops file(s) + "
           f"{len(model_perf_files)} model-perf point(s) + "
           f"{len(library_files)} library manifest(s) + Kconfig registries + "
           f"tier-a-library-ci registry + "

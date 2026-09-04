@@ -1192,8 +1192,8 @@ def _emit_inference(
         # stream errors a 128-MAC NPU at invoke (register-proven on E8), so a
         # blind max() would mis-size the HE slice.  Prefer the core-paired
         # instance; fall back to the most-capable of the variant when the chosen
-        # variant is not core-paired (the E8 U85 on the shared HG subsystem) or
-        # the SoC JSON predates paired_core.
+        # variant is not core-paired (the E8 U85, a shared SoC-level NPU --
+        # Alif block name NPU_HG) or the SoC JSON predates paired_core.
         paired = [n["mac_per_cycle"] for n in npus_of_type
                   if n.get("paired_core") == slice_.core_id]
         macs   = [n["mac_per_cycle"] for n in npus_of_type]

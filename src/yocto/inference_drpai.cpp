@@ -45,9 +45,11 @@
  *   DRP-AI's compiled model is a multi-file object DIRECTORY (drp_desc.bin
  *   / weight.bin / addr_map.txt / deploy.json / deploy.so / preprocess/ ...)
  *   emitted by the host DRP-AI TVM compiler
- *   (scripts/alp_model/adapters/drpai.py).  It is NOT a single flat
+ *   (tan.model.adapters.drpai, tan-cli; formerly scripts/alp_model/
+ *   adapters/drpai.py here before ADR-0028).  It is NOT a single flat
  *   buffer, so the portable `.alpmodel` blob is the deterministic .tar of
- *   that object dir produced by adapters/drpai.py (`blob_format "drpai_dir"`).
+ *   that object dir produced by tan.model.adapters.drpai (`blob_format
+ *   "drpai_dir"`).
  *   cfg.model_data / cfg.model_size carry those raw tar BYTES by value --
  *   exactly like the DEEPX path passes the raw .dxnn buffer, so the generic
  *   loader (src/common/alp_model_loader.c) stays format-agnostic.

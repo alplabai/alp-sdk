@@ -6,14 +6,17 @@
  * ============================== STATUS ==============================
  * ADR 0017 Tier-1.5 (in-tree thin driver over the Apache-2.0 hal_alif OSPI
  * register library, modules/hal/alif drivers/ospi/{include,src}/ospi*.{c,h})
- * -- HW-BLOCKED, BUILD-ONLY this batch.  The fork ships no Zephyr OSPI
+ * -- HW-BLOCKED, BUILD-ONLY.  The fork ships no Zephyr OSPI
  * class driver either (only the DT binding), so this thin shell -- authored
  * here against the documented hal_alif API, no offset/bitfield open-coded --
  * is the only path to AEN OSPI.  See docs/adr/0017.
  *
- * The E1M-AEN801 (Ensemble E8) has no octal-NOR/HyperBus part populated this
- * hardware batch, so there is nothing on the bus to silicon-verify: this
- * driver's init reads its `struct ospi_init` straight out of the devicetree
+ * NO AEN SKU populates an octal-NOR/HyperBus part -- `assembled: false` on
+ * every ospi_memories/hyperram entry in metadata/e1m_modules/E1M-AEN*.yaml,
+ * with memory.dram_mbit / .flash_mbit both 0.  That is a BOM fact about the
+ * product line, not a caveat about one batch, so there is nothing on the bus
+ * to silicon-verify anywhere: this driver's init reads its `struct ospi_init`
+ * straight out of the devicetree
  * node (reg/aes-reg/cs-pin/rx-ds-delay/ddr-drive-edge/bus-speed) and calls
  * alif_hal_ospi_initialize() ONCE at POST_KERNEL -- exercising the
  * controller-side register program (expected to complete now that the OSPI0
@@ -22,8 +25,8 @@
  * It does NOT call alif_hal_ospi_xip_enable() -- see the FOURTH section
  * below, that call bus-faults on AE822 and init must not fault regardless of
  * whether an app wants XiP -- and does NOT implement flash_driver_api
- * (read/write/erase/SFDP) -- that is a larger silicon-gated follow-up once a
- * part is populated, not this batch.  See examples/aen/aen-ospi-regcheck,
+ * (read/write/erase/SFDP) -- that is a larger silicon-gated follow-up, gated
+ * on a BOM change and not on a later batch.  See examples/aen/aen-ospi-regcheck,
  * which exercises alif_hal_ospi_initialize() directly from application code
  * as an independent compile+link+reachability proof.
  *

@@ -189,6 +189,12 @@ _ALLOWLIST: set[str] = {
     # ALP_FLASH_REQUIRE_DPIDR above.
     "ALP_AEN_INCLUDE_DEVICE_CONFIG",
     "ALP_AEN_DEVICE_CONFIG_JSON",
+    # NOTE: no ALP_DRPAI_TVM_HOME entry here. PR #1470's ADR-0028 Task 6
+    # (retiring scripts/alp_model/ to tan.model) is declined in this merge --
+    # see the PR's merge report -- so scripts/alp_model/adapters/drpai.py's
+    # own `os.environ.get("ALP_DRPAI_TVM_HOME")` still lives under the
+    # harvested scripts/**/*.py surface and resolves this symbol as real
+    # without an allowlist entry.
 }
 
 # Identifier shapes we treat as SDK symbols.  The optional `CONFIG_`

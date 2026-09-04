@@ -3,8 +3,8 @@
 # Build-only compile + DT-bind proof of the Alif Ensemble OSPI/HexSPI
 # controller (Synopsys DesignWare OSPI, zephyr/drivers/flash/
 # flash_ospi_alif.c, "snps,designware-ospi") staging on the E1M-AEN801
-# (Ensemble E8, M55-HE).  HW-BLOCKED, BUILD-ONLY this batch: no octal-NOR/
-# HyperBus part is populated.
+# (Ensemble E8, M55-HE).  HW-BLOCKED, BUILD-ONLY: no octal-NOR/HyperBus part
+# is populated on ANY AEN SKU.
 #
 # Compile-checks the driver + DT node on the real E8 board target; filtered OUT
 # of the native_sim PR gate (platform_allow = the AEN801 HE board only).
@@ -15,8 +15,8 @@ sample:
     Bench RAM-run OSPI/HexSPI (snps,designware-ospi) bind proof for the
     E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE): confirms ospi0 binds and
     alif_hal_ospi_initialize() compiles, links, and reads back live
-    registers.  HW-BLOCKED, BUILD-ONLY this batch (no octal-NOR/HyperBus
-    part populated).
+    registers.  HW-BLOCKED, BUILD-ONLY (no octal-NOR/HyperBus part is
+    populated on ANY AEN SKU).
 
 tests:
   alp_sdk.examples.aen.ospi_regcheck.aen:

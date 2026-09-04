@@ -12,8 +12,10 @@
  *   - retargets the console from the DevKit's UART2 to the E1M carrier console
  *     (Alif UART5, P3_4/P3_5 -- the E1M edge "UART0");
  *   - runs boot + storage from on-die MRAM only.  The SoM's OSPI0 NOR
- *     (MX25UM25645) + HyperRAM (W958D8NB) are BOM-optional and NOT populated
- *     on the current batch, so there is no external XIP / flash device;
+ *     (MX25UM25645) + HyperRAM (W958D8NB) are NOT populated on ANY AEN SKU
+ *     (`assembled: false` in every metadata/e1m_modules/E1M-AEN*.yaml, and
+ *     memory.dram_mbit / .flash_mbit are 0), so there is no external XIP /
+ *     flash device -- this is not a per-batch or per-BOM-variant caveat;
  *   - lays down a production MCUboot partition map in MRAM.
  *
  * NOTE (AMP, #1069): HP's slot0 lives in its OWN disjoint MRAM window,
@@ -125,7 +127,7 @@
  *   atoc     0x578000  32 KiB    (SE-owned: SETOOLS top-anchors the ATOC here -- do NOT write, #1289)
  *                      = 2944 KiB (of 5632 KiB App MRAM total)
  *
- * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on this batch, so
+ * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on any AEN SKU, so
  * boot, this core's own slot0, reserved headroom, and storage all live in MRAM.
  */
 &mram {

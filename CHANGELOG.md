@@ -17449,6 +17449,10 @@ Transformer-capable):
    of named instances with `role:` + `paired_with:` tags
    (NPU-HE / M55-HE, NPU-HP / M55-HP, NPU-HG / HG-subsystem).
    Matches the Alif Ensemble block diagram in the datasheet.
+   **Superseded 2026-08:** `HG` is the NPU block's own
+   Alif-assigned instance name, not a subsystem -- the E8 has
+   exactly three subsystems (RTSS-HE, RTSS-HP, A32 APSS); see
+   the "no HG subsystem" fix (#1520).
 
 The loader (`scripts/alp_project.py`) still picks matches via
 `silicon:` / `soc_family:` -- the new `capabilities:` block is

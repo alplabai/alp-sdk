@@ -64,7 +64,7 @@
       "description": "Optional pointer to a Hardware Reference Manual that supplements the datasheet (Alif Ensemble family uses these heavily). The PDF itself does not live in the repo; this block carries provenance only.",
       "properties": {
         "version":      { "type": "string" },
-        "source":       { "type": "string", "description": "Filename of the PDF the data was extracted from." },
+        "source":       { "type": "string", "description": "A document identifier the data was extracted from -- a title, vendor doc id, and/or revision (e.g. \"Alif E4 Hardware Reference Manual\"). NEVER the PDF's filename when `confidential` is true: an NDA-bound vendor filename is itself confidential and disclosing it in this public repo leaks it. For a non-confidential document a filename is acceptable if that is the clearest citation." },
         "doc_id":       { "type": "string" },
         "confidential": { "type": "boolean", "default": false, "description": "When true, the PDF is NDA-bound and stays out of git. The block is kept here for traceability." }
       }
@@ -110,6 +110,15 @@
     "npus": {
       "type": "array",
       "items": { "$ref": "#/$defs/npu" }
+    },
+
+    "npu_toolchain": {
+      "type": "object",
+      "description": "Host-toolchain profile for the accelerators in `npus[]` -- the silicon-determined flags a model compiler must be given for THIS part. Required on every SoC that declares an `ethos-u*` NPU and forbidden on every SoC that does not (validate_metadata.py's `_check_soc_vela_memory_profile`); it is derivable from the SKU, so it belongs here and NOT in a customer's board.yaml `models[].compile`, which board.schema.json scopes to config the SDK *cannot* derive.",
+      "additionalProperties": false,
+      "properties": {
+        "vela": { "$ref": "#/$defs/vela_profile" }
+      }
     },
 
     "soc_ram_kb":  {
@@ -358,13 +367,51 @@
       "properties": {
         "type":            { "type": "string", "description": "e.g. ethos-u55, ethos-u85, drp-ai3, dx-m1." },
         "subtype":         { "type": "string", "description": "e.g. high-perf (NPU-HP), high-efficiency (NPU-HE), generative (NPU-HG)." },
-        "paired_core":     { "type": "string", "description": "`cores[].id` of the CPU core this NPU instance is wired to (Alif: the High-Efficiency M55 drives the 128-MAC high-efficiency Ethos-U55, the High-Performance M55 the 256-MAC high-perf one). Lets the build emit size the accelerator per target core instead of assuming the SoC's most-capable instance. Omit for a shared / non-core-paired NPU (e.g. the E8 U85 on the HG subsystem)." },
+        "paired_core":     { "type": "string", "description": "`cores[].id` of the CPU core this NPU instance is wired to (Alif: the High-Efficiency M55 drives the 128-MAC high-efficiency Ethos-U55, the High-Performance M55 the 256-MAC high-perf one). Lets the build emit size the accelerator per target core instead of assuming the SoC's most-capable instance. Omit for a shared, SoC-level NPU that is not wired to one core -- the E8's Ethos-U85 (Alif block name NPU_HG) at 0x49042000, mapped identically into both M55 peripheral views (rtss_hp/soc.h and rtss_he/soc.h both define NPU_HG_BASE 0x49042000, vs. the two U55s' per-core-aliased NPU_HP_BASE / NPU_HE_BASE at the shared local address 0x400E1000). The A32 cluster can reach it too, register-programmable and not merely interrupt-notified: Alif E8 HWRM (AHRM0012NDA v0.3) Table 10-2 places 0x49042000 inside the Shared Peripherals row (0x48000000, 32MB -- A32/M55-HP/M55-HE all Y), unlike the M55-local-peripherals row above it (A32 N); Table 10-6 lists NPU-HG at that same 0x49042000 among the Shared Peripherals; and Table 4-13 fans NPU_HG_IRQ to all three cores -- GIC400_IRQS[355] on the A32, M55HP_IRQS[366] / M55HE_IRQS[366] on the M55s. The i.MX 93 Ethos-U65 (`nxp:imx9:imx93`) also omits `paired_core`, but on WEAKER evidence than the E8 case above -- the two must not be conflated: IMX93RM Rev. 7 (2026-02-10) §2.2 Table 4 lists the NPU Controller in the system memory map used by ALL initiators (not naming one), Table 5 repeats the identical row in the Cortex-M33's own memory map (so the block is in both, not exclusively either), and §17.2.8 points NPU interrupt documentation at Arm's GIC -- the Cortex-A55's controller, not the M33's NVIC -- while Chapter 17 never names a host core, using only Arm's generic Ethos-U wording ('the external host application processor', §17.2, §17.2.9). Unlike the E8 HWRM's Table 10-2, this is an all-initiators memory map plus a GIC pointer, not a per-master access table: it does not enumerate which masters may reach the NPU (that is TRDC's job, undocumented here), and it names no host core at all. So imx93's single Ethos-U65 instance omits `paired_core` for a different reason than the E8's U85: not 'verified as shared', but 'no pairing documented, period'. That silicon-documentation gap does not mean no core drives the NPU today: NXP's own shipped Yocto/Linux driver stack (`nxp-imx/ethos-u-driver-stack-imx`) runs the Ethos-U driver on the Cortex-M33, with Linux on the Cortex-A55 dispatching to it over shared memory and mailbox IRQs -- a separate, sourced, software-stack fact (see `vendors/nxp-imx93/README.md`) that this silicon-pairing omission does not contradict. `paired_core` records documented silicon wiring, not which core a given software stack happens to run on, so it still carries no value here." },
         "mac_per_cycle":   { "type": "integer", "description": "Required for every ethos-u* NPU -- the emit's accelerator sizing (scripts/alp_orchestrate/kconfig.py) and target derivation (scripts/alp_model/targets.py) both read npus[].mac_per_cycle directly for this backend; an absent value either raises KeyError (targets.py) or falls through to a silent 256-MAC default (kconfig.py) instead of failing at the metadata source (#1849)." },
         "freq_mhz":        { "type": "integer" },
         "gops":            { "type": "number", "description": "Giga ops per second.  Provide either gops or tops (= gops × 1000)." },
         "tops":            { "type": "number", "description": "Tera ops per second.  Provide either gops or tops." },
         "supports":        { "type": "array", "items": { "type": "string" } },
         "external":        { "type": "boolean", "description": "true when the accelerator is a separate IC (e.g. DEEPX DX-M1)." }
+      }
+    },
+
+    "vela_profile": {
+      "type": "object",
+      "description": "How `ethos-u-vela` must be invoked for THIS part. Invoked with neither flag, vela falls back to `Ethos_U85_SYS_DRAM_Mid` / `Dedicated_Sram_384KB` and reports the entire working set in DRAM -- `sram_memory_used = 0.0` on a part that has no DRAM at all -- and that zero then satisfies alp-sdk's on-device fit gate (src/backends/inference/alp_model_select.c) against ANY arena.",
+      "required": ["memory_mode", "system_config_requires_vendor_config", "source"],
+      "additionalProperties": false,
+      "if": {
+        "required": ["system_config_requires_vendor_config"],
+        "properties": { "system_config_requires_vendor_config": { "const": true } }
+      },
+      "then": { "required": ["vendor_config_filename"] },
+      "properties": {
+        "memory_mode": {
+          "type": "string",
+          "enum": ["Sram_Only", "Shared_Sram", "Dedicated_Sram",
+                   "Dedicated_Sram_256KB", "Dedicated_Sram_384KB", "Dedicated_Sram_512KB"],
+          "description": "vela `--memory-mode`. Constrained to the `[Memory_Mode.*]` sections Arm's own vela.ini ships (ethos-u-vela 5.1.0) because this is the flag that fixes the footprint: it must work for a customer with no proprietary vendor config. This flag picks the PORT (`Axi0`/`Axi1`) each of const/arena/cache sits on; `--system-config` maps ports to memory AREAS via `axi0_port`/`axi1_port`. Under `Sram_Only` all three sit on `Axi0` and every Arm section sets `axi0_port=Sram`, so the system config cannot move placement there -- but under `Shared_Sram` (`const_mem_area=Axi1`) and `Dedicated_Sram*` (const AND arena on `Axi1`) it decides whether the weights land in DRAM or off-chip flash. Measured on ethos-u-vela 5.1.0, `person_detect_int8.tflite` at `ethos-u65-256 --memory-mode Shared_Sram`: `Ethos_U65_Embedded` puts 228.265625 KiB in off-chip flash, `Ethos_U65_Client_Server` puts 228.25 KiB in DRAM. So on a `Shared_Sram`/`Dedicated_Sram*` part a missing `system_config` is a real unpinned placement, not a cosmetic gap. `Dedicated_Sram*` puts the arena in read-writeable non-SRAM, i.e. DRAM, so validate_metadata.py rejects it on a SoC whose `external_memory_interfaces` declares none."
+        },
+        "system_config": {
+          "type": "string",
+          "description": "OPTIONAL vela `--system-config`. A System_Config section describes ONE accelerator's -- on Alif, one CORE SUBSYSTEM's -- memory view, never a whole die, so validate_metadata.py permits it only on a SoC carrying exactly one distinct Ethos-U `(type, subtype)`. The Alif Ensemble parts each carry two or three and are therefore left without one: the E8's U85 wants `Ethos_U85_SRAM_Only` (examples/aen/aen-npu-inference-alp/CMakeLists.txt:42-43) while its M55-HE-paired U55 wants `RTSS_HE_SRAM_Only` (examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:39-40), and one scalar would be wrong for whichever accelerator it does not describe. Express those per-accelerator, in a slice that has a consumer for them; do not guess a scalar here."
+        },
+        "system_config_requires_vendor_config": {
+          "type": "boolean",
+          "description": "true when this SoC's tuned System_Config sections live only in a vendor config file alp-sdk does not redistribute. A consumer must then pass `--system-config` ONLY alongside a `--config <that file>`: naming a section vela cannot resolve is a hard rc=1 -- `Section System_Config.<name> not found in Vela config file` -- not a degradation (examples/aen/aen-npu-inference-alif/CMakeLists.txt:85-89). On its own -- with no sibling `system_config` -- this flag does not make the file usable either; see `vendor_config_filename`."
+        },
+        "vendor_config_filename": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+$",
+          "description": "Basename only of the vendor config named above (e.g. \"ensemble_vela.ini\"), so a consumer can tell a customer what to look for. Required whenever `system_config_requires_vendor_config` is true. NEVER a path: where the file lives is environment, not silicon, and an absolute path in committed metadata is a leak. INFORMATIONAL until this block also carries a `system_config`, and deliberately so: measured on ethos-u-vela 5.1.0, `--config <ini> --memory-mode Sram_Only` with no `--system-config` is rc=1 -- verbatim, `Error: Incorrect argument to CLI option --config=[...]: Specifying a configuration file is not allowed when using a default system configuration`. The only legal way to put this filename on a vela command line is alongside a section name to resolve out of it, and the Alif parts declare none (see `system_config`). So today this field tells a customer which file to obtain; it is not yet a `--config` a consumer can emit."
+        },
+        "source": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_./-]+:[0-9]+(-[0-9]+)?(; [A-Za-z0-9_./-]+:[0-9]+(-[0-9]+)?)*$",
+          "description": "Where in THIS repo the profile is stated: `<repo-relative-path>:<line>` (or `:<first>-<last>`), joined by \"; \" when more than one file states it. tests/scripts/test_vela_profile_metadata.py requires the FIRST cited line to literally contain the declared `memory_mode`, and that line's text to appear exactly once in the file. Cite the one line that states the mode, not a range around it: a range merely CONTAINING the mode tolerated a 1-line shift, and on `vendors/nxp-imx93/README.md` it let the window slide off the vela command onto the provenance note that disclaims it -- the note names `Shared_Sram` too, so the disclaimer satisfied the check it was written to strengthen."
+        }
       }
     },
 

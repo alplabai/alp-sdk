@@ -9,6 +9,37 @@ Deciders: alpCaner (alp-sdk, tan-cli)
 Amends: [0020](0020-sdk-owns-build-execution.md) — its 2026-08-03 amendment
 clause 3, which keeps alp-sdk's `alp_orchestrate` as "the reference producer"
 alongside tan's relocated planner.
+Applied to a second surface by
+[0028](0028-tan-owns-the-model-engine.md), which reuses this ADR's
+hardware-truth-vs-consumer principle for the model engine.
+
+## Amendment (2026-08-15 — accepted in direction, HELD in deletion)
+
+The **decision** is accepted: clauses 1-3 stand, and no further investment
+should go into keeping two planners honest. The **deletion** — migration step 3,
+`Delete scripts/alp_orchestrate/ from alp-sdk in one commit` — is explicitly
+**held**, because this ADR's own step 1 precondition is not met today.
+
+Step 1 requires the two sides be "provably equal at one ref" and says **"Do not
+start removal against a known-divergent pair — the equal state is what makes the
+removal reviewable."** As of 2026-08-15 they are divergent:
+**tan-cli#756 is OPEN** (filed 2026-08-15T01:55:20Z), titled *"tan/planner
+drift: the dispatched parity suite is red against alp-sdk"* — the same title as
+the closed #531. The recurrence chain this ADR records as
+#320 → #485 → #531 → #543 therefore continues as **#756**, a fifth instance in
+four months. A `fix/756-planner-drift-resync` branch is in flight; a `parity.yml`
+run failed at 2026-08-15T15:57:16Z.
+
+Reading the closure of #544/#545/#531/#543/#409 as "unblocked" is the specific
+mistake this amendment exists to prevent: **closed issues are not a green parity
+run.** Step 3 unblocks only on a green `parity.yml` at the actual merge ref, not
+on an issue list.
+
+That #756 exists at all is evidence *for* clauses 1-3, not against them: it is
+the fifth time detection caught an instance of a class the apparatus cannot
+prevent. Accepting the direction while holding the deletion is the correct
+split — it stops new investment in the duplicate immediately, and defers only
+the irreversible step.
 
 ## Context
 

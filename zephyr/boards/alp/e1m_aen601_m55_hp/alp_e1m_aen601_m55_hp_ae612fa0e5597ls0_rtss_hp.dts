@@ -16,8 +16,10 @@
  * matching the AEN401/AEN801 pin assignment for the E1M-EVK console.
  *
  * Boot + storage run from on-die MRAM only.  The SoM's OSPI0 NOR + HyperRAM
- * are BOM-optional and not assumed populated, so there is no external XIP
- * device on the baseline.  Inter-core IPC and the on-module peripheral buses
+ * are NOT populated on ANY AEN SKU (`assembled: false` in every
+ * metadata/e1m_modules/E1M-AEN*.yaml, and memory.dram_mbit / .flash_mbit are
+ * 0), so there is no external XIP device -- this is not a per-batch or
+ * per-BOM-variant caveat.  Inter-core IPC and the on-module peripheral buses
  * (GPIO / I2C / SPI / Ethernet / USB) are added alongside their drivers once
  * grounded + benched on E6; this base wires boot + console only.
  *

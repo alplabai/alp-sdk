@@ -381,7 +381,8 @@ endif()
 # hal_alif's own ospi CMakeLists is header-self-contained (its
 # zephyr_include_directories(include) fires when USE_ALIF_HAL_OSPI pulls the
 # subdirectory in), so no extra include path is needed here.  HW-BLOCKED /
-# BUILD-ONLY this batch: see the OSPI_ALIF Kconfig help + examples/aen/aen-ospi-regcheck.
+# BUILD-ONLY on ANY AEN SKU (no octal-NOR/HyperBus part is populated on the
+# product line): see the OSPI_ALIF Kconfig help + examples/aen/aen-ospi-regcheck.
 zephyr_library_sources_ifdef(CONFIG_OSPI_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_ospi_alif.c)
 

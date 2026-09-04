@@ -72,7 +72,7 @@ into the topic-specific docs.
   doc's *Silicon scope — which E-part has what* section).
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
-  index (32 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
+  index (33 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
 
 ## Per-SoM bring-up
 
@@ -187,6 +187,12 @@ into the topic-specific docs.
   verification matrix, GENERATED from test-plan.md
   (`scripts/gen_verification_status.py`); do not hand-edit.
 - [local-ci.md](local-ci.md) — running CI checks locally.
+- [bench/model-perf-capture.md](bench/model-perf-capture.md) — the recipe a
+  bench run must follow to produce a `metadata/model_perf/` perf point:
+  fixing the measurement identity, the exact toolchain invocation, how
+  latency is measured (mean + p95 + run count, never a single shot),
+  where the raw capture goes, and what to do when a figure cannot be
+  measured (omit it — there is no estimated perf point).
 
 ## Tutorials
 

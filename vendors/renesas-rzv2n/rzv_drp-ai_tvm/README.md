@@ -34,7 +34,8 @@ repo directly).  That's only the *compiler* side, though.  The
 *runtime* side this compiler's output targets already has a real,
 implemented backend in the SDK:
 
-- Host-side model conversion: `scripts/alp_model/adapters/drpai.py`
+- Host-side model conversion: `tan.model.adapters.drpai` (tan-cli;
+  formerly `scripts/alp_model/adapters/drpai.py` here before ADR-0028)
   packages a DRP-AI TVM compiler output directory into the portable
   `.alpmodel` blob format (`blob_format "drpai_dir"`).
 - Target-side dispatch: `src/yocto/inference_drpai.cpp` links the

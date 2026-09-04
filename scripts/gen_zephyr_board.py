@@ -1174,8 +1174,10 @@ def _aen_dts(
         " *   - retargets the console from the DevKit's UART2 to the E1M carrier console",
         f" *     (Alif {uart_node.upper()}, {rx_row['silicon_pad']}/{tx_row['silicon_pad']} -- the E1M edge \"UART0\");",
         " *   - runs boot + storage from on-die MRAM only.  The SoM's OSPI0 NOR",
-        " *     (MX25UM25645) + HyperRAM (W958D8NB) are BOM-optional and NOT populated",
-        " *     on the current batch, so there is no external XIP / flash device;",
+        " *     (MX25UM25645) + HyperRAM (W958D8NB) are NOT populated on ANY AEN SKU",
+        " *     (`assembled: false` in every metadata/e1m_modules/E1M-AEN*.yaml, and",
+        " *     memory.dram_mbit / .flash_mbit are 0), so there is no external XIP /",
+        " *     flash device -- this is not a per-batch or per-BOM-variant caveat;",
         " *   - lays down a production MCUboot partition map in MRAM.",
     ]
     if disjoint_slot0:
@@ -1335,7 +1337,7 @@ def _aen_dts(
         lines += [
             f" *                      = {partitions_total_kib} KiB (of {total_kib} KiB App MRAM total)",
             " *",
-            " * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on this batch, so",
+            " * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on any AEN SKU, so",
             f" * boot, this core's own slot0, reserved headroom, and storage all live in MRAM.",
             " */",
         ]
@@ -1343,7 +1345,7 @@ def _aen_dts(
         lines += [
             f" *                      = {total_kib} KiB",
             " *",
-            " * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on this batch, so",
+            " * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on any AEN SKU, so",
             " * all of boot, both image slots, scratch, and storage live in MRAM.",
             " */",
         ]

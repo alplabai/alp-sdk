@@ -199,7 +199,9 @@ jobs:
         # test_vela_real_compile_for_e8_accel_configs cases, both
         # shutil.which("vela")-skipif'd) SKIP in every automatic run instead
         # of actually exercising the real compiler. cbor2 is a base dep
-        # either way.
+        # either way. scripts/alp_model/ stays in alp-sdk for now (PR #1470's
+        # ADR-0028 Task 6 relocation to tan.model is declined in this merge
+        # -- see the PR's merge report), so this extra stays installed.
         run: pip install -e ".[dev,model-compile]"
 
       - name: Validate every SoC file against the v1 schema

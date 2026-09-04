@@ -80,35 +80,34 @@ def test_owner_module_holds_the_only_split():
     )
 
 
-def test_resolve_targets_still_raises_valueerror_on_a_malformed_ref(tmp_path):
-    """The migration must NOT collapse ValueError into FileNotFoundError.
+def test_resolve_soc_path_returns_none_for_a_malformed_silicon_ref(tmp_path):
+    """The ValueError half of the distinction (#1096): a malformed silicon ref
+    (not exactly 3 colon-separated parts) resolves to None -- a caller must
+    turn that into ValueError, not FileNotFoundError.
 
-    `resolve_soc_path()` returns None for both 'malformed ref' and (by not
-    checking the disk) 'ref fine, file absent'. Callers of resolve_targets()
-    distinguish the two, so the site re-raises ValueError itself.
+    This was previously exercised through
+    `alp_model.targets.resolve_targets()`, the caller that read a SoM
+    preset's `silicon:` field out of `metadata/e1m_modules/*.yaml` and
+    re-raised accordingly. That caller relocated to `tan.model.targets`
+    under ADR-0028 (the host-side model engine is tan's now), so this test
+    is re-expressed directly against `resolve_soc_path()` -- the
+    metadata/** single-source primitive alp-sdk still owns -- rather than
+    importing the (now tan-owned) engine.
     """
-    from alp_model.targets import resolve_targets
-
     meta = tmp_path / "metadata"
     (meta / "e1m_modules").mkdir(parents=True)
-    (meta / "e1m_modules" / "E1M-TEST.yaml").write_text(
-        "silicon: alif:ensemble\n", encoding="utf-8"
-    )
-    with pytest.raises(ValueError, match="malformed silicon ref"):
-        resolve_targets("E1M-TEST", metadata_root=meta)
+    assert resolve_soc_path("alif:ensemble", meta) is None
 
 
-def test_resolve_targets_still_raises_filenotfound_for_a_wellformed_missing_spec(tmp_path):
-    """The other half of the pair -- a good ref naming a spec that isn't there."""
-    from alp_model.targets import resolve_targets
-
+def test_resolve_soc_path_names_a_nonexistent_file_for_a_wellformed_missing_spec(tmp_path):
+    """The other half of the pair -- a well-formed ref naming a spec that
+    isn't on disk resolves to a real Path (not None), which a caller must
+    turn into FileNotFoundError, distinct from the ValueError case above."""
     meta = tmp_path / "metadata"
     (meta / "e1m_modules").mkdir(parents=True)
-    (meta / "e1m_modules" / "E1M-TEST.yaml").write_text(
-        "silicon: alif:ensemble:nosuchpart\n", encoding="utf-8"
-    )
-    with pytest.raises(FileNotFoundError, match="no SoC spec for"):
-        resolve_targets("E1M-TEST", metadata_root=meta)
+    soc_path = resolve_soc_path("alif:ensemble:nosuchpart", meta)
+    assert soc_path is not None
+    assert not soc_path.is_file()
 
 
 def test_load_soc_caps_still_returns_none_on_a_malformed_ref(tmp_path):

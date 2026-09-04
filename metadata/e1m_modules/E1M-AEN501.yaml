@@ -41,24 +41,35 @@ on_module:
   # metadata/e1m_modules/E1M-AEN801.yaml + metadata/chips/dp83825.yaml for
   # the bench evidence and the order-code caveat (#1241 "Blocked on").
   ethernet_phy:         dp83825
+  # OSPI-bus external memories.  NOT POPULATED on any currently shipping AEN
+  # SKU -- `assembled: false` on all three entries below, and `memory:` further
+  # down reads 0/0 to match.  Boot and app storage run from on-die MRAM only;
+  # the generated board DTS, zephyr/kconfigs/vendor-alif-peripherals.kconfig,
+  # docs/bring-up-aen.md and examples/aen/aen-ospi-regcheck already say so.
+  # What survives here is the DESIGN -- which controller, which chip-select,
+  # and the part each footprint was drawn around -- so a populated BOM variant
+  # would flip one flag rather than re-derive the bus.  `capacity_mbit` is that
+  # designed-in part's capacity, NOT a capacity this module carries.
   ospi_memories:
     ospi0:
       chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
-      assembled:      optional            # BOM variant
-      capacity_mbit:  256                 # 256 Mbit (32 MiB)
+      assembled:      false               # NOT populated on any SKU
+      capacity_mbit:  256                 # 256 Mbit (32 MiB) if ever fitted
       chip_select:    0                   # OSPI0 CS0
       role:           app_storage
     ospi1:
       chip:           TBD            # OSPI1 controller unused on this SoM: both OSPI devices
-      assembled:      optional       # share the OSPI0 octal bus (NOR = CS0, HyperRAM = CS1)
+      assembled:      false          # would share the OSPI0 octal bus (NOR = CS0, HyperRAM = CS1)
       capacity_mbit:  TBD
       role:           data_log
-  # External HyperRAM -- volatile XIP / scratch RAM, separate from the
-  # NOR flash above.  Shares the OSPI0 octal controller with the flash,
-  # separated only by chip-select (NOR flash = CS0, HyperRAM = CS1).
+  # External HyperRAM -- volatile XIP / scratch RAM, separate from the NOR
+  # flash above.  NOT POPULATED either: it would share the OSPI0 octal
+  # controller with the flash, separated only by chip-select (NOR flash = CS0,
+  # HyperRAM = CS1), but no SKU fits it.
   hyperram:
     chip:           W958D8NBYA5I    # Winbond OctalRAM (HyperBus)
-    capacity_mbit:  256             # 256 Mbit (32 MiB)
+    assembled:      false           # NOT populated on any SKU
+    capacity_mbit:  256             # 256 Mbit (32 MiB) if ever fitted
     interface:      ospi0
     chip_select:    1
 
@@ -95,14 +106,19 @@ on_module:
 # Off-SoC module memory in the canonical cross-family shape (see
 # som-preset-v1.schema.json `memory:`).  Values are DERIVED from the
 # on_module facts above, never invented:
-#   dram_mbit  <- on_module.hyperram.capacity_mbit (populated on every
-#                 AEN BOM variant).
-#   flash_mbit <- TBD: the OSPI0 NOR (256 Mbit) is `assembled: optional`
-#                 (per-BOM variant), so a single number would be wrong
-#                 for the DNI variant.
+#   dram_mbit  <- 0: on_module.hyperram is `assembled: false`.  No AEN SKU
+#                 fits the HyperRAM, so the module carries no external
+#                 volatile memory at all.
+#   flash_mbit <- 0: on_module.ospi_memories.ospi0 (the 256 Mbit NOR) and
+#                 .ospi1 are `assembled: false` too, so there is no external
+#                 non-volatile memory either.  On-die MRAM is NOT counted
+#                 here -- it derives from `silicon_variant:`.
+# 0 is a RESOLVED fact, not a TBD: the population question has an answer (no).
+# Contrast E1M-NX9101, whose capacities are genuinely still unknown and so
+# stay TBD -- a consumer must be able to tell those two states apart.
 memory:
-  dram_mbit:            256
-  flash_mbit:           TBD
+  dram_mbit:            0
+  flash_mbit:           0
 
 inference:
   preferred_backend:    ethos_u

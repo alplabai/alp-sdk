@@ -11,8 +11,10 @@
  *       (I2C2 P5_6/P5_7), NOT the BRD_I2C LPI2C0 (P7_4/P7_5).
  *     - P8_0's only non-GPIO alternate functions are OSPI1_SCLKN / AUDIO_CLK /
  *       FAULT0 / LPCAM_D0 / SD_D0 / CDC_D0 / CAM_D0 -- the SoM's OSPI1 HyperRAM
- *       (W958D8NB) is BOM-optional and NOT populated on this batch, and no
- *       camera / SD / display is wired, so the pad is free and uncontended.
+ *       (W958D8NB) is NOT populated on ANY AEN SKU (`assembled: false` in every
+ *       metadata/e1m_modules/E1M-AEN*.yaml, not a per-batch caveat), and no
+ *       camera / SD / display is wired on this bench batch, so the pad is free
+ *       and uncontended.
  *     - We do NOT touch port 4 (P4_x AF1 = JTAG0 trace) so SWD/JTAG debug is
  *       undisturbed.
  *

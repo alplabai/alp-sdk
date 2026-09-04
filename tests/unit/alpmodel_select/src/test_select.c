@@ -350,8 +350,10 @@ ZTEST(alp_model_select, test_executorch_format_decodes_not_silent_tflite_default
 	 * silently mis-decoded as ALP_INFERENCE_MODEL_TFLITE (wrong parser,
 	 * reported ALP_OK) instead of surfacing as the distinct format it is.
 	 * Prove the round trip: the string a host adapter
-	 * (scripts/alp_model/adapters/executorch.py) writes must come back out
-	 * as ALP_INFERENCE_MODEL_EXECUTORCH, not the TFLite default. */
+	 * (tan.model.adapters.executorch -- tan-cli; formerly
+	 * scripts/alp_model/adapters/executorch.py here before ADR-0028)
+	 * writes must come back out as ALP_INFERENCE_MODEL_EXECUTORCH, not
+	 * the TFLite default. */
 	static const uint8_t b0[4]     = { 1 };
 	alp_model_t          m         = { 0 };
 	m.n_targets                    = 1;

@@ -83,7 +83,9 @@ Five things bite here:
 - **RZ/V2N uses the V2H build.** The runtime libraries are
   `obj/build_runtime/v2h/lib/`, and the model compile takes `PRODUCT=V2N`
   (upstream `README.md` pairs "RZ/V2H and RZ/V2N" throughout;
-  `scripts/alp_model/adapters/drpai.py` defaults to `PRODUCT=V2N`).
+  `tan.model.adapters.drpai` -- tan-cli; formerly
+  `scripts/alp_model/adapters/drpai.py` here before ADR-0028 -- defaults to
+  `PRODUCT=V2N`).
 - **`obj/build_runtime/v2m/` is NOT ours.** That is Renesas **RZ/V2M**, an older,
   different SoC. It is unrelated to the E1M-V2M SKU, which is RZ/V2N + DEEPX and
   also uses the **v2h** libraries. Linking `v2m` would be the wrong silicon's NPU
@@ -232,8 +234,9 @@ global default) picking the right one.
 former `model` command (and the rest of its command-line wrappers) retired
 once `tan model` shipped a native port (alp-sdk#1368). There is no `alp`
 console script, and no `python -m alp_cli <verb>` front door either any
-more.
-
+more. The host-side model engine itself (`scripts/alp_model/`) still lives
+in alp-sdk today — ADR-0028's relocation to `tan.model` is Proposed, not yet
+enacted (see the ADR).
 There is no `--target`/`--product` flag and no positional `<model.onnx>`
 argument. `tan model build` compiles every `models:` entry declared in
 `board.yaml` for every backend the SoM resolves to; `PRODUCT` for DRP-AI
@@ -245,7 +248,7 @@ comes from `models[].compile.drpai.product` (falling back to
 `metadata/schemas/board.schema.json`'s `models[].compile.drpai` block only
 declares a `spec:` key (`additionalProperties: false`, `required: ["spec"]`)
 — a leftover from a design where an external spec file carried the model
-geometry. `scripts/alp_model/adapters/drpai.py` never reads `spec`; it reads
+geometry. `tan.model.adapters.drpai` never reads `spec`; it reads
 `input_shape`, `input_name`, `images` and `product` straight out of the
 `compile.drpai` block, so `tan validate` rejects a `board.yaml` written this
 way. That does not block the command in step 5 above: `tan model build`
@@ -257,7 +260,7 @@ reconciled with what the adapter actually reads, `tan validate` cannot be
 used against a `board.yaml` with a `compile.drpai` block; `tan model build`
 can.
 
-`scripts/alp_model/adapters/drpai.py` drives
+`tan.model.adapters.drpai` drives
 `$ALP_DRPAI_TVM_HOME/tutorials/compile_onnx_model_quant.py` with `PRODUCT` in the
 environment. It needs an input shape and name, and calibration images, and
 always forwards the images through the tutorial's `--images` flag.

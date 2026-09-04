@@ -171,6 +171,14 @@ artifact per silicon SKU.
     { "type": "ethos-u85", "subtype": "high-perf",        "mac_per_cycle": 512, "freq_mhz": 480, "gops": 491 },
     { "type": "ethos-u55", "subtype": "high-efficiency",  "mac_per_cycle": 128, "freq_mhz": 200, "gops":  51 }
   ],
+  "npu_toolchain": {
+    "vela": {
+      "memory_mode": "Sram_Only",
+      "system_config_requires_vendor_config": true,
+      "vendor_config_filename": "ensemble_vela.ini",
+      "source": "examples/aen/aen-npu-inference-alp/CMakeLists.txt:43; examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:40"
+    }
+  },
   "soc_ram_kb": 13824,
   "soc_flash_mb": 5.5,
   "always_on_sram_kb": 4,
@@ -225,6 +233,8 @@ artifact per silicon SKU.
 | `peripherals`                   | Counts per peripheral kind; drives `ALP_SOC_*_COUNT` ceilings in the same generated header.  `{}` is legal but trips the `pending_*` warning.          |
 | `peripherals_unverified`        | Array of `peripherals` keys whose count has no datasheet/DFP/HWRM citation in this file (#936) — e.g. a value copied from a sibling part and never independently confirmed. `scripts/gen_soc_caps.py` prints an `UNVERIFIED` comment above the SoC's block in `soc_caps.h`; `validate_metadata.py` warns if a listed key doesn't exist in `peripherals`. Use this — listing every key, if that's every key — even when the WHOLE block is inherited wholesale from a sibling (e.g. E5 from E7): `pending_reference_manual_ingestion: true` means something narrower, "`peripherals: {}` / counts default to zero," which is false for a fully-populated-but-uncited block and produces a wrong `validate_metadata.py` WARN. `pending_reference_manual_ingestion` is for a file that genuinely has no populated counts yet (e.g. i.MX93, still mostly `{}` pending its RM pass); a file can combine both flags when most of the block is genuinely pending but a handful of keys are individually grounded — in that case `peripherals_unverified: []` on the grounded keys tells `gen_soc_caps.py` NOT to also mark them unverified via the wholesale fallback. |
 | `peripheral_instances`          | OPTIONAL, keyed by a SUBSET of `peripherals`' keys (issue #1154). Per-instance register `base`/`size` (lowercase `0x`-prefixed hex strings, `^0x[0-9a-f]+$`) + `interrupts` (`irq`/`priority` decimal ints, `name` when the DTSI names it), one entry per physical instance. `peripherals` stays the count map every other consumer reads; this is additive, for a consumer that needs an actual address rather than just a ceiling. Only populated where a real vendor devicetree/SVD source gives a grounded 1:1 instance count — a key absent here means "not yet projected," not "doesn't exist," same as an absent `peripherals` key. RZ/V2N n44 is the only populated example today: `scripts/gen_soc_peripheral_instances.py` mechanically projects it from the vendored Zephyr `r9a09g056.dtsi`; never hand-edit, regenerate. |
+| `npu_toolchain.vela`            | **Required** on every SoC whose `npus[]` declares an `ethos-u*` accelerator, and rejected on every SoC that does not (`validate_metadata.py`). `memory_mode` is the load-bearing field: invoked without it, `ethos-u-vela` falls back to `Dedicated_Sram_384KB`, places the whole working set in DRAM and reports `sram_memory_used = 0.0` — which then satisfies the on-device fit gate (`src/backends/inference/alp_model_select.c`) against *any* arena. It is constrained to the `[Memory_Mode.*]` sections Arm's own `vela.ini` ships, so the flag works for a customer with no vendor config; the `Dedicated_Sram*` modes place the arena in read-writeable non-SRAM and are refused on a part whose `external_memory_interfaces` declares no DRAM. `source` cites `<repo-relative-path>:<line>` (joined by `"; "`) and is read back by `tests/scripts/test_vela_profile_metadata.py`, which requires the FIRST cited line to state the declared mode and that line's text to appear exactly once in the file — cite the ONE line you actually read the mode off, not a range around it, and **do not guess a mode for a part no source in this repo describes**. |
+| `npu_toolchain.vela.system_config` | OPTIONAL, and left unset on every Alif Ensemble part today. A Vela `System_Config` section describes ONE accelerator's memory view — on Alif, one *core subsystem's* (`RTSS_HE_SRAM_Only` is the M55-HE view, not a U55 section) — so `validate_metadata.py` permits a scalar only on a SoC carrying exactly one distinct Ethos-U `(type, subtype)`. Set `system_config_requires_vendor_config: true` plus `vendor_config_filename` (basename only — where the file lives is environment, not silicon) whenever the tuned sections live in a vendor config this repo does not redistribute; a consumer then passes `--system-config` only alongside `--config <that file>`, because naming a section Vela cannot resolve is a hard `rc=1`, not a degradation. |
 | `variants[].order_code`         | Vendor order code; **must match** the SoM preset's `silicon_variant:` field for the loader to resolve memory layout from this entry's `sram_banks_kb`. |
 | `variants[].alp_module_skus`    | Reverse-lookup hint; lets the validator catch a SoM SKU that references this variant by silicon ref alone (no `silicon_variant:` declared).            |
 | `variants[].debug`                    | Debug-probe identity (`jlink_device`, `jlink_flash_device`, `expect_dpidr`, `pyocd_target`, `openocd_config`) consumed by `alp-sdk-vscode` to generate a working launch config, and by the orchestrator's `flash_args`.  Every key optional **except `jlink_flash_device` on an Alif Ensemble SoC — see its own row below**; for the rest, an absent key is the correct, publishable "unknown" state.  Populate each key **only** from the owning tool's own list or a working in-tree invocation (SEGGER's device list / `pyocd list --targets` / an actual `board.cmake` or bench script) — never by pattern-extending a sibling part's string to an unverified one.  #987 shipped a first draft that broke this: it read a *SETOOLS flasher* argument as a J-Link device name and then extended that wrong string to every part by naming convention.  A plausible-looking guess fails at the probe, not at `validate_metadata.py`, so nothing catches it until a customer's launch does. |
@@ -278,6 +288,15 @@ on_module:
   rtc_external:         rv3028c7
   temperature_sensor:   tmp112
   eeprom:               eeprom_24c128
+  # MANDATORY on an `alif:ensemble:*` part -- `ospi_memories` and `hyperram`
+  # below are the ONLY external memory an Ensemble die has, so `memory:` is
+  # DERIVED from them and `validate_metadata.py` refuses a preset that omits
+  # either block.  Omitting one does not leave the question open; it deletes
+  # the fact the cross-check binds `memory.flash_mbit` / `.dram_mbit` to, and
+  # lets the figure claim anything.  `assembled:` is the answer: `false` when
+  # the SKU populates none (then the matching figure MUST be `0`, never
+  # `TBD`), `optional` when it is BOM-variant dependent.  Every shipping AEN
+  # SKU is `false` on all three -- see metadata/e1m_modules/E1M-AEN801.yaml.
   ospi_memories:
     ospi0:
       chip:           TBD
@@ -289,6 +308,12 @@ on_module:
       assembled:      optional
       capacity_mbit:  TBD
       role:           data_log
+  hyperram:
+    chip:           TBD
+    assembled:      optional
+    capacity_mbit:  TBD
+    interface:      ospi0
+    chip_select:    1
 
 # Inference defaults -- silicon-determined.  See E1M-AEN801 for the
 # E8 (U85 + 2x U55) shape; tune to whatever the E9 silicon actually
@@ -384,7 +409,7 @@ status:
 |------------------------|----------------------------------|---------------------------|------------------------------------------------------------------------------------------------------------------------|
 | `silicon`              | Yes — must match an `e9.json`    | No                        | Loader fails fast if the triple-colon ref does not resolve to a SoC JSON.                                              |
 | `silicon_variant`      | Yes — must match a `variants[]`  | Yes (`"TBD"`)             | When `TBD`, the loader falls back to `alp_module_skus[]` reverse lookup.                                                |
-| `on_module:*`          | No — SoM extension                | Yes per field             | The set of keys is open; chip names match `chips/<part>/` driver dirs (driver-naming convention applies).               |
+| `on_module:*`          | No — SoM extension                | Yes per field             | The set of keys is open; chip names match `chips/<part>/` driver dirs (driver-naming convention applies). **Two exceptions on an `alif:ensemble:*` part:** `on_module.hyperram` and `on_module.ospi_memories` are REQUIRED, because the OSPI/HexSPI octal bus is that die's only external memory interface and `memory.dram_mbit` / `memory.flash_mbit` are derived from their `assembled:` flags — `validate_metadata.py`'s `_check_som_memory_population` refuses a preset that omits either, and prints `SKIP <file> (nothing bound ...)` for the families where the blocks legitimately do not apply. |
 | `inference`            | Mixed                             | Yes (omit when unsure)    | `preferred_backend` is silicon-determined; the customer cannot override it from `board.yaml` (per the v0.6 cleanup).    |
 | `capabilities`         | SoM extension only                | Yes                       | Only list keys the SoM **adds** to silicon caps (e.g., on-module CAU on V2N, `optiga_trust_m` on AEN/V2N).               |
 | `silicon_capabilities` | Silicon-determined (restriction)  | Omit when unrestricted    | Optional `unpopulated:` list of SoC `capabilities:` keys this SKU does **not** populate; can only remove what the silicon offers (`validate_metadata.py` cross-check). |

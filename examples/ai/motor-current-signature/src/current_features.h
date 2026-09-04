@@ -59,7 +59,7 @@ struct curr_window_state {
  *
  * All fields are in SI units.  The vector is designed to feed both the
  * deterministic rule-based classifier (current_classify) and a trained ML
- * model delivered via the alp model pipeline.  Field order is fixed and must
+ * model delivered via the tan model pipeline.  Field order is fixed and must
  * match the training-time feature order used by any downstream model (see
  * curr_feat_pack for the serialisation order).
  */

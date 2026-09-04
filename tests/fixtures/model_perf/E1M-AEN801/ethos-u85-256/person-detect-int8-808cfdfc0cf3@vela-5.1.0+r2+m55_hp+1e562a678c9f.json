@@ -1,0 +1,38 @@
+{
+  "_fixture": "SYNTHETIC TEST FIXTURE -- NOT A MEASUREMENT. No bench run produced any figure under `measured` below; they are placeholders chosen only to exercise every branch of the perf-point contract. This file exists because metadata/model_perf/ is empty until the first bench campaign, and a glob over an empty directory makes every check in tests/scripts/test_model_perf_metadata.py pass vacuously -- green for the wrong reason. scripts/validate_metadata.py REFUSES this key on any file under metadata/model_perf/, so this document cannot be promoted into the published tree and read as bench data. The identity fields (model sha256, size_bytes) ARE real, measured off tests/fixtures/models/person_detect_int8.tflite. `measured_on.core` is a placeholder too: metadata/socs/alif/ensemble/e8.json declares a `paired_core` for each Ethos-U55 and NONE for the Ethos-U85, so nothing in this tree says which core drives the U85 and this fixture does not invent one -- it names a core the SKU's `topology:` declares, and no more.",
+  "stance": "bench-measured",
+  "measured_on": {
+    "sku": "E1M-AEN801",
+    "hw_rev": "r2",
+    "core": "m55_hp",
+    "backend": "ethos_u",
+    "accel_config": "ethos-u85-256"
+  },
+  "model": {
+    "slug": "person-detect-int8",
+    "sha256": "808cfdfc0cf3a6fa6f6fa26bfa379ea97c16d5db7334637766e39c3408502e9d",
+    "size_bytes": 300568,
+    "source": "tests/fixtures/models/person_detect_int8.tflite"
+  },
+  "toolchain": {
+    "name": "vela",
+    "version": "5.1.0",
+    "system_config": "Ethos_U85_SRAM_Only",
+    "memory_mode": "Sram_Only"
+  },
+  "measured": {
+    "npu_ops": 1,
+    "cpu_ops": 0,
+    "arena_bytes": 1024,
+    "req_sram_kib": 1,
+    "latency_ms_mean": 1.0,
+    "latency_ms_p95": 2.0,
+    "runs": 100
+  },
+  "capture": {
+    "date": "2026-08-16",
+    "operator": "n/a -- synthetic fixture, nobody ran a bench",
+    "reference": "alp-sdk-internal:bench/captures/SYNTHETIC-FIXTURE-no-such-capture.log"
+  },
+  "notes": "Placeholder figures. See `_fixture` above; do not cite this file for anything. `capture.reference` models the SHAPE of a citation rather than naming a real capture: docs/bench/model-perf-capture.md §6 tells an operator to copy this file's structure, so a fixture that modelled a non-citation would teach the very shape the gate exists to refuse."
+}

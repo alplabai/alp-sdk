@@ -724,10 +724,11 @@
 	 * disabled, a dead bus, not the overclock an earlier revision of this
 	 * fix claimed (HWRM S16.1.5.3.5; see flash_ospi_alif.c:30-80).
 	 *
-	 * HW-BLOCKED, BUILD-ONLY this batch: no octal-NOR/HyperBus part is
-	 * populated on the E1M-AEN801, so this proves the node BINDS + the
-	 * hal_alif init/XiP-enable entry points compile and link -- not a live
-	 * XiP read.  No pinctrl-0: the enabling board/example overlay supplies it
+	 * HW-BLOCKED, BUILD-ONLY: no octal-NOR/HyperBus part is populated on ANY
+	 * AEN SKU (not a per-batch or per-BOM-variant caveat), so this proves the
+	 * node BINDS + the hal_alif init/XiP-enable entry points compile and link
+	 * -- not a live XiP read.
+	 * No pinctrl-0: the enabling board/example overlay supplies it
 	 * (the eth/isp precedent) -- see examples/aen/aen-ospi-regcheck.
 	 */
 	ospi0: ospi0@83000000 {

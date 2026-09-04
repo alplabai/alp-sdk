@@ -273,15 +273,16 @@ int main(void)
 	 * both from the driver's own init and directly from this app -- AND the
 	 * register file reads back its documented CTRLR0 reset value. XiP setup
 	 * is out of scope for this gate (see the module header SKIP note); a
-	 * live XiP read stays HW-blocked regardless (no octal-NOR/HyperBus part
-	 * populated this batch).
+	 * live XiP read stays HW-blocked regardless (no OSPI memory is fitted
+	 * on this bench unit -- design-populated per BOM, not assembled here,
+	 * see the module header's DESIGNED-vs-ASSEMBLED note, #915).
 	 */
 	if (node_ok && hal_init_ok && ctrlr0_ok) {
 		printk("RESULT PASS: OSPI/HexSPI node BINDS -- ospi0@83000000 binds to "
 		       "snps,designware-ospi at the fork reg/aes-reg base with IRQ 96; "
 		       "alif_hal_ospi_initialize() is reachable and links; CTRLR0 reads "
 		       "its documented reset value; XiP SKIPPED (no XIP_SER on this die), "
-		       "live XiP HW-blocked (no part populated this batch)\n");
+		       "live XiP HW-blocked (no OSPI part assembled on this unit, #915)\n");
 	} else {
 		printk("RESULT FAIL: OSPI/HexSPI node NOT staged "
 		       "(bound=%d base_ok=%d irq_ok=%d hal_init_ok=%d ctrlr0_ok=%d -- node "

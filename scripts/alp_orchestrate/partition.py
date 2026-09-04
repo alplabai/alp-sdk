@@ -222,6 +222,26 @@ def _resolve_flash_device(
         }, None
 
     # on_module.ospi_memories: key match.
+    #
+    # KNOWN HAZARD, deliberately not fixed here (#915 follow-up).  This branch
+    # keys off `capacity_mbit` alone and ignores `assembled:`, so on an AEN SKU
+    # `_resolve_flash_device("ospi0", ...)` happily returns size_bytes=33554432
+    # (32 MiB, from `capacity_mbit: 256`) for a part every preset now declares
+    # `assembled: false` -- and `_known_flash_devices()` above still offers
+    # `ospi0`/`ospi1` to a customer's `storage[].flash_device:`.  `assembled` is
+    # the declared fact a fix keys on; `capacity_mbit` is the DESIGNED-IN part's
+    # capacity, not one the module carries.
+    #
+    # Latent, not live: no in-tree board.yaml names either device (the only
+    # `flash_device:` user is examples/connectivity/production-deployment/
+    # board.yaml, five entries, all `mram_main`).
+    #
+    # It is not fixed here because the fix crosses repos.  tan-cli's
+    # `python/tan/planner/partition.py::_resolve_flash_device` is a
+    # line-for-line port of this function, and tan is the executor: a refusal
+    # added on one side only would make alp-sdk and tan disagree about the same
+    # board.yaml, which is the drift ADR-0020 exists to prevent.  Both sides
+    # move in one change, or neither does.
     om = som_preset.get("on_module") or {}
     ospi = om.get("ospi_memories") or {}
     if isinstance(ospi, dict) and flash_device in ospi:

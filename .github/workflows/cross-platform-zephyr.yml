@@ -311,6 +311,9 @@ jobs:
         timeout-minutes: 20
         # model-io adds tflite + flatbuffers so the .alpmodel tensor-I/O
         # tests run here (they importorskip otherwise); cbor2 is a base dep.
+        # scripts/alp_model/ stays in alp-sdk for now (PR #1470's ADR-0028
+        # Task 6 relocation to tan.model is declined in this merge -- see
+        # the PR's merge report) so the extra stays installed here too.
         run: pip install -e ".[dev,model-io]"
 
       # ---------------------------------------------------------

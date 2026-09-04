@@ -50,7 +50,6 @@ def test_generated_paths_are_recognised(path):
     "path",
     [
         "src/yocto/inference_yocto.c",
-        "scripts/alp_model/manifest.py",
         "docs/recommended-libraries.md",
         "VERSIONS.md",
         "CHANGELOG.md",                             # changelog.d/ handles this

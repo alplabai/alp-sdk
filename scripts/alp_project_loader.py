@@ -287,6 +287,10 @@ def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
     would have left the drift the issue exists to close; those sites are
     gone with the module now.
 
+    ADR-0028 proposes relocating `alp_model/targets.py` into tan-cli's
+    `tan.model.targets` (Status: Proposed, not yet enacted) -- until that
+    lands, `alp_model/targets.py` stays this module's in-tree caller.
+
     There is no remaining `silicon.split(":")` outside this module; a
     regression test pins that.
     """

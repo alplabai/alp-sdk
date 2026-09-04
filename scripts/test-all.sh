@@ -920,6 +920,66 @@ stage_generated_files() {
         python3 scripts/gen_soc_peripheral_instances.py \
             || { echo "scripts/gen_soc_peripheral_instances.py failed"; return 1; }
     fi
+    # gen_npu_ops.py is deliberately NOT in the `gens` array above (see its
+    # own module docstring): that array always REGENERATES, and doing that
+    # here unconditionally would make the heavy, optional `vela` toolchain a
+    # gate dependency for every contributor. `--check` sidesteps that: it
+    # exits 2 -- not 1 -- the instant `vela` isn't found on PATH, before
+    # anything toolchain-heavy runs, so this call is safe and cheap to make
+    # unconditionally. rc 1 is a real defect (stale tables, or a report-format
+    # /delta mismatch) and DOES fail the stage, same as any other generator.
+    #
+    # rc 2 is a SKIP -- but ONLY when the change under test cannot have
+    # invalidated the tables. Unconditionally, it was the proxy-check shape
+    # this repo keeps digging out: `vela` is on almost no contributor's PATH,
+    # so the default local invocation printed "SKIPPED" and never checked the
+    # NPU op tables AT ALL -- including on a diff that edited nothing but
+    # metadata/npu_ops/ and scripts/gen_npu_ops.py, i.e. exactly the tooling
+    # whose freshness this call is the only local proof of. A gate that
+    # cannot run on the one change it exists for is decoration. So: if the
+    # diff touches those paths and vela is missing, the stage FAILS and says
+    # what to install; otherwise it still skips, loudly.
+    if [ -f scripts/gen_npu_ops.py ]; then
+        local gen_npu_ops_out npu_ops_touched npu_ops_base
+        # Same DIFF_BASE convention as the clang-format stage above.  Two
+        # sources, because either alone has a blind spot: `git diff <commit>`
+        # cannot see uncommitted work (which is what a local run usually IS),
+        # and the working tree cannot see what an earlier commit on the branch
+        # already changed.
+        npu_ops_base="${DIFF_BASE:-HEAD~1}"
+        npu_ops_touched=""
+        if git rev-parse "${npu_ops_base}" >/dev/null 2>&1; then
+            npu_ops_touched=$(git diff --name-only "${npu_ops_base}" -- \
+                metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null)
+        fi
+        # `--porcelain` v1 is "XY <path>"; strip the status columns so both
+        # probes yield bare paths and `sort -u` can merge them.
+        npu_ops_touched="${npu_ops_touched}
+$(git status --porcelain -- metadata/npu_ops scripts/gen_npu_ops.py 2>/dev/null | cut -c4-)"
+        # Collapse to nothing when both probes came back empty.
+        npu_ops_touched=$(printf '%s\n' "${npu_ops_touched}" \
+            | sed '/^[[:space:]]*$/d' | sort -u)
+
+        gen_npu_ops_out=$(python3 scripts/gen_npu_ops.py --check 2>&1)
+        rc=$?
+        if [ "${rc}" -eq 2 ] && [ -n "${npu_ops_touched}" ]; then
+            echo "${gen_npu_ops_out}"
+            echo "generated-files: gen_npu_ops.py --check could NOT run (vela not"
+            echo "on PATH) -- but this change touches the very files it checks:"
+            printf '%s\n' "${npu_ops_touched}" | sed 's/^/    /'
+            echo "Skipping here would leave the NPU op tables unverified by the"
+            echo "one gate that verifies them.  Install ethos-u-vela into a venv"
+            echo "and re-run with it on PATH, e.g."
+            echo "    PATH=<venv>/bin:\$PATH bash scripts/test-all.sh --target dev"
+            return 1
+        elif [ "${rc}" -eq 2 ]; then
+            echo "generated-files: gen_npu_ops.py --check SKIPPED (vela not on PATH; this change touches no metadata/npu_ops/ or scripts/gen_npu_ops.py file)"
+        elif [ "${rc}" -ne 0 ]; then
+            echo "${gen_npu_ops_out}"
+            echo "scripts/gen_npu_ops.py --check failed"
+            return 1
+        fi
+    fi
     # ABI snapshot -- current working snapshot is derived from
     # metadata/sdk_version.yaml (older snapshots are frozen).
     if [ -f scripts/abi_snapshot.py ]; then
