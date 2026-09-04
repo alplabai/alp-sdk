@@ -3250,6 +3250,10 @@
       "script": "scripts/check_cross_platform.py"
     },
     {
+      "purpose": "Reject a fixed-literal `alp_delay_us(N)` with N >= 1000 under chips/.",
+      "script": "scripts/check_delay_us_literal.py"
+    },
+    {
       "purpose": "Assert every ALP-Bxxx code scripts/alp_cli/validator.py can emit has a docs/diagnostics/ALP-Bxxx.md landing page (issue #1569).",
       "script": "scripts/check_diagnostic_emission_coverage.py"
     },
