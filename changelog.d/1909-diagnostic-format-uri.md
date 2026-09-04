@@ -1,0 +1,35 @@
+### Fixed — `diagnostic_format.py`'s SARIF/LSP `_uri()` emitted a bare filesystem path, not a URI reference (#1909)
+
+`_uri()` fed both `to_machine_json` (LSP `uri`, diagnostic-v1) and `to_sarif`
+(`artifactLocation.uri`) with `diag.path.as_posix()` — a bare path, not a
+URI. Both SARIF 2.1.0's `artifactLocation.uri` and LSP's `DocumentUri`
+define this field as a URI reference: on an absolute Windows-spelled root
+this rendered `C:/w/proj/board.yaml` (forward-slashed, still no `file:`
+scheme, still invalid at the drive-letter-colon position), and a POSIX
+absolute root rendered with no scheme either — a consumer resolving either
+fails or matches nothing, silently.
+
+`_uri()` now renders an absolute path as an absolute `file:` URI and keeps a
+relative path relative (already a legal RFC 3986 §4.2 URI reference), judged
+Windows- vs POSIX-spelled from the path string itself
+(`scripts/alp_cli/diagnostic_format.py:61-100`, `_is_windows_spelled` /
+`_path_to_uri_reference`) rather than the rendering host's own OS — the host
+formatting a diagnostic may not match the path's own spelling. Ported from
+tan-cli's `path_to_uri_reference` (alplabai/tan-cli#1111,
+`python/tan/core/uri_reference.py`), the reference implementation for the
+identical defect in tan's own SARIF/LSP exporters, so the two emitters of
+`schemaVersion: 1` documents agree on `uri` again.
+
+Left out of scope, matching tan-cli's own reverted attempt at it
+(alplabai/tan-cli#1117): declaring `originalUriBaseIds`/`uriBaseId` on
+`to_sarif`'s output so a relative `artifactLocation.uri` has a base to
+resolve against — tan-cli found no sound anchor for it yet (a `root="."`
+vs. a `--project` override disagree on what the relative path is even
+relative to) and reverting an authoritatively wrong base was judged safer
+than shipping one.
+
+Filed as `1909-diagnostic-format-uri.md` rather than `1909.md`: that
+filename is already in use in this tree for an unrelated fragment
+(`### Added — a diagnostic warning when a module's SERAM sits below the
+ADR-0030 floor (#1700)`) — `changelog.d/README.md` only requires the
+filename be unique, not that it equal the issue number.

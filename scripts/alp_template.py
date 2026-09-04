@@ -270,6 +270,19 @@ def _check_constraints(template_id: str, spec: dict[str, Any], value: Any) -> No
         raise ParameterError(
             f"{template_id}: {spec['name']}={value!r} not in "
             f"{constraints['enum']}")
+    for bound in ("minimum", "maximum"):
+        if bound not in constraints:
+            continue
+        # `minimum`/`maximum` only make sense for a numeric (integer)
+        # value -- on string/enum a bare `<`/`>` raises TypeError on a
+        # schema-VALID catalog record (#1916), and on boolean it silently
+        # never fires (bool < int never raises) but is still meaningless.
+        # Refuse with a curated error instead of crashing or no-opping.
+        if spec["type"] != "integer":
+            raise ParameterError(
+                f"{template_id}: {spec['name']}={value!r} is type "
+                f"{spec['type']!r}; constraints.{bound} "
+                f"({constraints[bound]}) only applies to type 'integer'")
     if "minimum" in constraints and value < constraints["minimum"]:
         raise ParameterError(
             f"{template_id}: {spec['name']}={value!r} < minimum "

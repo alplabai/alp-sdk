@@ -24,7 +24,7 @@ from pathlib import Path
 import jsonschema
 
 from alp_cli.diagnostic import Diagnostic, render
-from alp_cli.diagnostic_format import (machine_json_for_board_yaml,
+from alp_cli.diagnostic_format import (_uri, machine_json_for_board_yaml,
                                        to_machine_json, to_sarif)
 
 REPO = Path(__file__).resolve().parents[2]
@@ -221,3 +221,28 @@ def test_machine_json_for_board_yaml_honours_tool_overrides():
     doc = machine_json_for_board_yaml(FIX_BAD / "ALP-B005-bad-sku.yaml",
                                       tool_name="alp-lsp", tool_version="9.9.9")
     assert doc["tool"] == {"name": "alp-lsp", "version": "9.9.9"}
+
+
+# ---------------------------------------------------------------------------
+# _uri: #1909 -- render a URI reference, not a bare filesystem path
+# ---------------------------------------------------------------------------
+
+
+def test_uri_posix_absolute_path_becomes_a_file_uri():
+    assert _uri(_diag(path=Path("/w/proj/board.yaml"))) == (
+        "file:///w/proj/board.yaml")
+
+
+def test_uri_windows_spelled_absolute_path_becomes_a_file_uri():
+    # Judged Windows-spelled from the string itself -- this test runs on a
+    # POSIX host, so Path()/as_posix() alone would not catch this (#1909).
+    assert _uri(_diag(path=Path(r"C:\w\proj\board.yaml"))) == (
+        "file:///C:/w/proj/board.yaml")
+
+
+def test_uri_relative_path_stays_relative():
+    # Path() itself normalises away a leading "./" -- str(Path("./x")) is
+    # "x" -- so this asserts on the value _uri actually receives, not the
+    # caller's original spelling.
+    assert _uri(_diag(path=Path("sub/dir/board.yaml"))) == (
+        "sub/dir/board.yaml")
