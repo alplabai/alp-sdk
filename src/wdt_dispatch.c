@@ -27,13 +27,16 @@ ALP_BACKEND_ANCHOR(wdt);
 
 /* The pool is indexed by wdt_id: one slot per watchdog INSTANCE, not
  * one per caller.  The watchdog is the class where a second handle on
- * the same instance is itself the defect -- the backend close path
- * disables the whole DEVICE rather than the handle's channel
- * (src/backends/wdt/zephyr_drv.c z_close calls wdt_disable(dev) with
- * the error (void)-cast away), so two subsystems each holding
- * ALP_E1M_WDT0 means the first one to close silently removes the
- * other's protection, with no error on any path.  Indexing by id makes
- * the existing atomic slot claim BE the exclusivity check: one
+ * the same instance is itself the defect: before #1637, the backend
+ * close path disabled the whole DEVICE rather than the handle's
+ * channel (src/backends/wdt/zephyr_drv.c z_close used to call
+ * wdt_disable(dev) with the error (void)-cast away), so two
+ * subsystems each holding ALP_E1M_WDT0 meant the first one to close
+ * silently removed the other's protection, with no error on any path.
+ * z_close() no longer calls wdt_disable(dev) at all -- see its own
+ * comment for what closing does and does not disarm now -- so it is
+ * indexing by id, below, that actually prevents this class of defect:
+ * making the existing atomic slot claim BE the exclusivity check, one
  * compare-exchange, no scan of the pool, and no TOCTOU window between
  * "is this instance taken?" and "take it".  Issue #1637.
  *
@@ -71,7 +74,12 @@ alp_wdt_t *alp_wdt_open(const alp_wdt_config_t *cfg)
 {
 	alp_z_clear_last_error();
 	if (cfg == NULL || cfg->timeout_ms == 0u ||
-	    cfg->wdt_id >= (uint32_t)CONFIG_ALP_SDK_MAX_WDT_HANDLES) {
+	    cfg->wdt_id >= (uint32_t)CONFIG_ALP_SDK_MAX_WDT_HANDLES ||
+	    (cfg->on_timeout == ALP_WDT_INTERRUPT_ONLY && cfg->on_expire == NULL)) {
+		/* The last arm rejects an INTERRUPT_ONLY request with no way to
+		 * observe the interrupt -- that combination neither resets the
+		 * SoC nor notifies anyone, which is strictly worse than not
+		 * offering the mode at all (#1637). */
 		alp_z_set_last_error(ALP_ERR_INVAL);
 		return NULL;
 	}
@@ -117,7 +125,12 @@ alp_status_t alp_wdt_feed(alp_wdt_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->feed(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->feed == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->feed(&h->state);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -127,7 +140,12 @@ alp_status_t alp_wdt_disable(alp_wdt_t *h)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->disable(&h->state);
+	alp_status_t rc;
+	if (h->state.ops->disable == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->disable(&h->state);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }

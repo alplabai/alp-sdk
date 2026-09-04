@@ -40,21 +40,22 @@
  * (replacing the old single z_close()) implement:
  *
  *   - z_shutdown(): a sticky `closing` flag guarded by a k_spinlock
- *     (ipc_service's `received` callback may run close to interrupt
- *     priority, so this can't be a blocking mutex) that z_call()
- *     rechecks both before staging and is woken from, replacing a
- *     one-shot cancel.  Self-close detection ANDs two things, both
- *     read under the same spinlock: `recv_active` (true only while
- *     THIS channel's OWN rpc_ept_recv() is genuinely on some thread's
- *     call stack right now -- set/cleared by rpc_ept_recv() itself)
- *     AND the CURRENT thread matching `recv_thread` (the thread
- *     presently running that recv).  Checking `recv_active` is what
- *     closes the defect-3 hole a bare thread-identity compare had:
- *     `recv_thread` is never cleared, and every channel shares the
- *     SAME single ipc_service worker thread (BENCH-UNVERIFIED
- *     assumption: exactly one such thread ever invokes a given
- *     endpoint's `received` callback, never concurrently, never from
- *     ISR context -- see rpc_ept_recv()'s own comment), so a bare
+ *     (ipc_service's `received` and `bound` callbacks may run close to
+ *     interrupt priority, so this can't be a blocking mutex) that
+ *     z_call() rechecks both before staging and is woken from,
+ *     replacing a one-shot cancel.  Self-close detection ANDs two
+ *     things, both read under the same spinlock: `recv_active` (true
+ *     only while THIS channel's OWN rpc_ept_recv() is genuinely on
+ *     some thread's call stack right now -- set/cleared by
+ *     rpc_ept_recv() itself) AND the CURRENT thread matching
+ *     `recv_thread` (the thread presently running that recv).
+ *     Checking `recv_active` is what closes the defect-3 hole a bare
+ *     thread-identity compare had: `recv_thread` is never cleared,
+ *     and every channel shares the SAME single ipc_service worker
+ *     thread (BENCH-UNVERIFIED assumption: exactly one such thread
+ *     ever invokes a given endpoint's `received` OR `bound` callback,
+ *     never concurrently, never from ISR context -- see
+ *     rpc_ept_recv()'s own comment and rpc_ept_bound()'s), so a bare
  *     `k_current_get() == recv_thread` misfired for a CROSS-channel
  *     close (channel A's callback closing channel B) -- it saw B's
  *     STALE `recv_thread` (set the last time B ever received
@@ -71,10 +72,59 @@
  *     see rpc_ept_recv()'s own comment) to reach 0 before returning
  *     DONE, because ipc_service_deregister_endpoint()'s return does
  *     not, by itself, clearly guarantee no recv is still in flight
- *     (also BENCH-UNVERIFIED).
+ *     (also BENCH-UNVERIFIED).  `bound` shares this same
+ *     rpc_recv_enter()/rpc_worker_leave() bracket (see rpc_ept_bound()
+ *     below) and, on the pinned RPMsg static-vrings backend (see this
+ *     file's "Link liveness" section below), is the ONLY ipc_service
+ *     callback that actually fires on real silicon -- `unbound`/`error`
+ *     are wired and tested but structurally unreachable there -- so an
+ *     app that closes its own channel from its link callback reaches
+ *     OpenAMP's ept_cb reentrantly from inside `bound` on a path this
+ *     repo has never benched.
  *   - z_destroy(): trivial for this backend (a static pool slot, no
  *     heap, no fds) -- just releases the pool slot.  Called exactly
  *     once by the dispatcher, strictly after its own active-op drain.
+ *
+ * @par Link liveness (issue #1643)
+ * ipc_service exposes `bound` / `unbound` / `received` / `error`
+ * endpoint callbacks; this file used to wire only `bound` +
+ * `received` and threw the disconnect signal away.  `rpc_ept_bound()`
+ * now also calls the dispatcher's alp_rpc_notify_link() (rpc_ops.h)
+ * with ALP_RPC_LINK_UP; the new rpc_ept_unbound() / rpc_ept_error()
+ * report ALP_RPC_LINK_LOST, bracketed by the SAME
+ * rpc_recv_enter()/rpc_worker_leave() pair (factored out of
+ * rpc_ept_recv()'s own epilogue) that already brackets `received` --
+ * so an unbound/error notify (a) never fires once this channel's own
+ * `closing` is set (no notify racing a torn-down `owner`) and (b)
+ * correctly defers this channel's close if the app's link callback
+ * reacts by closing its own channel from inside the notify, exactly
+ * like a subscriber callback already could.
+ *
+ * CONFIRMED against the pinned Zephyr v4.4.1 tree (see west.yml),
+ * not merely BENCH-UNVERIFIED: the only backend CONFIG_ALP_SDK_RPC
+ * permits (`depends on IPC_SERVICE_BACKEND_RPMSG && OPENAMP`,
+ * zephyr/kconfigs/mproc-rpc-usb.kconfig) is
+ * subsys/ipc/ipc_service/backends/ipc_rpmsg_static_vrings.c, whose
+ * `received`/`bound` invocations (`ept->cb->received`/`bound`) are the
+ * ONLY `ept->cb->*` calls it makes -- it never calls `cb->unbound` or
+ * `cb->error`.  Those two are invoked only by the ICMsg backend family
+ * (subsys/ipc/ipc_service/lib/icmsg.c), which this Kconfig does not
+ * select.  So in THIS revision, on Zephyr, ALP_RPC_LINK_UP is
+ * reliably reported but ALP_RPC_LINK_LOST is NOT observable through
+ * ipc_service at all: rpc_ept_unbound()/rpc_ept_error() are wired,
+ * tested (see tests/unit/rpc_zephyr_backend), and correct, but
+ * structurally unreachable under the pinned RPMsg static-vrings
+ * backend.  Kept rather than deleted -- this is forward-compatible
+ * dead code, not legacy: it goes live the day either upstream
+ * Zephyr's RPMsg backend starts propagating its ns-unbind, or a
+ * future backend swap (e.g. ICMsg) lands.  Until then, the only
+ * backend that can report a genuine ALP_RPC_LINK_LOST is
+ * src/backends/rpc/yocto_drv.c's rx-thread read()-EOF/error path
+ * (Linux/A-class cores) -- see include/alp/rpc.h's `@par Link
+ * liveness` block for the customer-facing version of this same
+ * caveat, and this issue's `needs-silicon` label for what genuinely
+ * still needs a bench (which of `unbound` vs `error` a REAL far-core
+ * reset would drive is moot until one of them is reachable at all).
  */
 
 #include <errno.h>
@@ -148,7 +198,9 @@ struct rpc_be {
 	bool                 ept_bound;
 
 	/* Subscribe table.  Linear probe on collision; 8 slots is plenty
-     * for the v0.6 framing budget. */
+     * for the v0.6 framing budget.  Guarded by `lock` below -- the
+     * application thread rewrites it while the ipc_service worker
+     * thread dispatches out of it. */
 	struct rpc_sub subs[CONFIG_ALP_SDK_RPC_SUBS_PER_CHANNEL];
 
 	/* TX serialisation. */
@@ -174,8 +226,9 @@ struct rpc_be {
 	bool         call_pending;
 
 	/* GHSA-xhm8-7f87-93q5 redesign: guards `closing`, `recv_thread` +
-     * `recv_active` below, and the check-and-count entry/exit of
-     * rpc_ept_recv() (see that function). */
+     * `recv_active` below, the check-and-count entry/exit of
+     * rpc_ept_recv() (see that function), and the `subs` table
+     * above. */
 	struct k_spinlock lock;
 	bool              closing;
 
@@ -308,6 +361,10 @@ static alp_status_t errno_to_alp(int err)
 	return alp_status_from_zephyr_errno(err);
 }
 
+/* Look up a live subscribe slot.  CALLER MUST HOLD be->lock: the
+ * table is written from the application thread (z_subscribe() /
+ * z_unsubscribe()) and read from the ipc_service worker thread
+ * (rpc_ept_recv()). */
 static struct rpc_sub *sub_find(struct rpc_be *be, const char *method, uint32_t hash)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(be->subs); ++i) {
@@ -320,6 +377,8 @@ static struct rpc_sub *sub_find(struct rpc_be *be, const char *method, uint32_t 
 	return NULL;
 }
 
+/* Claim a free slot (cb == NULL marks a slot free).  CALLER MUST HOLD
+ * be->lock -- see sub_find(). */
 static struct rpc_sub *sub_alloc(struct rpc_be *be)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(be->subs); ++i) {
@@ -378,15 +437,6 @@ frame_build(uint8_t *out, size_t cap, const char *method, const void *payload, s
 /* ipc_service callbacks                                               */
 /* ------------------------------------------------------------------ */
 
-static void rpc_ept_bound(void *priv)
-{
-	struct rpc_be *be = (struct rpc_be *)priv;
-	if (be != NULL) {
-		be->ept_bound = true;
-		LOG_DBG("rpc: endpoint bound name=%s", be->name);
-	}
-}
-
 /**
  * @brief Enter rpc_ept_recv(): check `closing` and count this recv in
  *        ONE spinlock critical section (GHSA-xhm8-7f87-93q5 defect 2).
@@ -434,6 +484,61 @@ static void rpc_recv_leave(struct rpc_be *be)
 	be->recv_active      = false;
 	k_spin_unlock(&be->lock, key);
 	atomic_dec(&be->cb_active);
+}
+
+/**
+ * @brief Shared epilogue for every callback bracketed by
+ *        rpc_recv_enter()/this function: `received`, and (issue
+ *        #1643) `unbound`/`error`.
+ *
+ * Reads `close_from_worker` into a local BEFORE rpc_recv_leave()
+ * decrements `cb_active` -- see rpc_ept_recv()'s own epilogue comment
+ * for why that ordering matters (GHSA-xhm8-7f87-93q5 follow-up); this
+ * is the exact same sequence, factored out so rpc_ept_unbound() /
+ * rpc_ept_error() below share it instead of re-deriving it.
+ */
+static void rpc_worker_leave(struct rpc_be *be)
+{
+	bool close_from_worker = be->close_from_worker;
+	rpc_recv_leave(be);
+	if (close_from_worker) {
+		(void)ipc_service_deregister_endpoint(&be->ept);
+		alp_rpc_close_finalize(be->owner);
+	}
+}
+
+/**
+ * @brief ipc_service `bound` callback (issue #1643): the endpoint bound
+ *        to the peer -- the link-up event.
+ *
+ * Bracketed by rpc_recv_enter()/rpc_worker_leave(), exactly like
+ * rpc_ept_unbound()/rpc_ept_error() below.  bound() is NOT exempt from
+ * that gate: alp_rpc_notify_link() invokes the app's registered
+ * alp_rpc_link_cb_t synchronously (rpc_ops.h), and that callback may
+ * call alp_rpc_close() on THIS channel (see alp_rpc_link_cb_t's doc
+ * comment in include/alp/rpc.h) -- the same self-close
+ * rpc_ept_recv()'s bracket already handles for `received`.  An
+ * unbracketed bound() would let z_shutdown() misclassify that self-close
+ * as EXTERNAL (its detection reads `recv_active`, which only
+ * rpc_recv_enter() sets) and call ipc_service_deregister_endpoint()
+ * reentrantly from inside ipc_service's own `bound` callback -- and
+ * would leave `bound` uncounted in cb_active, letting a concurrent
+ * external close drain/destroy/free the slot while this callback is
+ * still using it.
+ */
+static void rpc_ept_bound(void *priv)
+{
+	struct rpc_be *be = (struct rpc_be *)priv;
+	if (be == NULL || !be->in_use) {
+		return;
+	}
+	if (!rpc_recv_enter(be)) {
+		return;
+	}
+	be->ept_bound = true;
+	LOG_DBG("rpc: endpoint bound name=%s", be->name);
+	alp_rpc_notify_link(be->owner, ALP_RPC_LINK_UP);
+	rpc_worker_leave(be);
 }
 
 /**
@@ -543,14 +648,35 @@ static void rpc_ept_recv(const void *data, size_t len, void *priv)
 	}
 
 	{
-		/* Async dispatch via the per-method subscribe table. */
-		uint32_t        h   = fnv1a_32(method);
-		struct rpc_sub *sub = sub_find(be, method, h);
-		if (sub != NULL && sub->cb != NULL) {
-			/* GHSA-xhm8-7f87-93q5: cb() may call alp_rpc_close() on
-             * THIS channel (self-close) -- see this function's doc
-             * comment and z_shutdown()'s from_worker detection. */
-			sub->cb(payload, payload_len, sub->user);
+		/* Async dispatch via the per-method subscribe table.
+         *
+         * The lookup AND the snapshot of the winning slot both happen
+         * under `lock`, because z_subscribe()/z_unsubscribe() rewrite
+         * these same slots from the application thread.  Testing
+         * sub->cb and then re-reading it for the indirect call would
+         * let a concurrent unsubscribe store NULL in between and send
+         * this thread through a null function pointer; reading
+         * sub->user separately from sub->cb would hand a freshly
+         * installed callback the PREVIOUS tenant's context, which its
+         * owner has usually already freed.  cb and user are one
+         * value, so they are copied out together.
+         *
+         * The lock is released BEFORE the invoke.  cb() may call
+         * alp_rpc_close() on THIS channel (self-close,
+         * GHSA-xhm8-7f87-93q5 -- see this function's doc comment and
+         * z_shutdown()'s from_worker detection), and that path takes
+         * this same spinlock; holding it across the callback would
+         * deadlock the very self-close the deferred epilogue below
+         * exists to serve.  Snapshot-then-call is the shape
+         * src/backends/rpc/yocto_drv.c's rpc_rx_main() already uses. */
+		uint32_t            h    = fnv1a_32(method);
+		k_spinlock_key_t    key  = k_spin_lock(&be->lock);
+		struct rpc_sub     *sub  = sub_find(be, method, h);
+		alp_rpc_method_cb_t cb   = (sub != NULL) ? sub->cb : NULL;
+		void               *user = (sub != NULL) ? sub->user : NULL;
+		k_spin_unlock(&be->lock, key);
+		if (cb != NULL) {
+			cb(payload, payload_len, user);
 		}
 	}
 
@@ -563,35 +689,79 @@ epilogue:
      * ipc_service_deregister_endpoint() reentrantly from within its
      * own `received` callback.
      *
-     * Read `close_from_worker` into a local BEFORE rpc_recv_leave()
-     * decrements `cb_active` -- i.e. while this recv is still counted
-     * (GHSA-xhm8-7f87-93q5 follow-up). Reading the field AFTER the
-     * decrement is a formal C11 data race: once `cb_active` hits 0 an
-     * external z_shutdown() elsewhere is free to finish its drain,
-     * return DONE, and let the dispatcher call z_destroy()/_be_free()
-     * -- and a subsequent z_open() reusing the freed pool slot would
-     * memset() straight over this same field while this thread is
-     * still reading it. Value-benign under the single-worker
-     * ipc_service model this backend assumes (see this file's header
-     * comment) -- the pending epilogue IS the only recv-dispatching
-     * thread, so no NEW recv on this same channel can race it -- but
-     * not provably race-free in the C11 sense, unlike yocto_drv.c's
-     * atomic close_from_worker. Capturing the value while `cb_active`
-     * still protects `be` closes the gap without needing atomics: the
-     * value cannot change between this read and rpc_recv_leave() (it
-     * is set, at most once, earlier on this SAME thread's call stack,
-     * by the self-close z_shutdown() nested inside the callback
-     * above), so this is a pure reorder, not a behaviour change --
-     * DONE vs DEFERRED and the exactly-once finalize() call are
-     * unaffected. */
-	{
-		bool close_from_worker = be->close_from_worker;
-		rpc_recv_leave(be);
-		if (close_from_worker) {
-			(void)ipc_service_deregister_endpoint(&be->ept);
-			alp_rpc_close_finalize(be->owner);
-		}
+     * rpc_worker_leave() reads `close_from_worker` into a local BEFORE
+     * rpc_recv_leave() decrements `cb_active` -- i.e. while this recv
+     * is still counted (GHSA-xhm8-7f87-93q5 follow-up). Reading the
+     * field AFTER the decrement is a formal C11 data race: once
+     * `cb_active` hits 0 an external z_shutdown() elsewhere is free to
+     * finish its drain, return DONE, and let the dispatcher call
+     * z_destroy()/_be_free() -- and a subsequent z_open() reusing the
+     * freed pool slot would memset() straight over this same field
+     * while this thread is still reading it. Value-benign under the
+     * single-worker ipc_service model this backend assumes (see this
+     * file's header comment) -- the pending epilogue IS the only
+     * recv-dispatching thread, so no NEW recv on this same channel can
+     * race it -- but not provably race-free in the C11 sense, unlike
+     * yocto_drv.c's atomic close_from_worker. Capturing the value
+     * while `cb_active` still protects `be` closes the gap without
+     * needing atomics: the value cannot change between this read and
+     * rpc_recv_leave() (it is set, at most once, earlier on this SAME
+     * thread's call stack, by the self-close z_shutdown() nested
+     * inside the callback above), so this is a pure reorder, not a
+     * behaviour change -- DONE vs DEFERRED and the exactly-once
+     * finalize() call are unaffected. */
+	rpc_worker_leave(be);
+}
+
+/**
+ * @brief ipc_service `unbound` callback (issue #1643): the peer
+ *        endpoint went away -- the far core reset or its firmware
+ *        tore the endpoint down.
+ *
+ * Bracketed by rpc_recv_enter()/rpc_worker_leave(), exactly like
+ * rpc_ept_recv() above: bails immediately if this channel is already
+ * `closing` (an in-flight external close already owns the teardown --
+ * no new notify may fire once that has started, so `owner` stays a
+ * live, not-yet-recycled alp_rpc_channel_t for the notify below), and
+ * the same self-close detection applies if the app's registered
+ * @ref alp_rpc_link_cb_t reacts by calling alp_rpc_close() on this
+ * same channel from inside alp_rpc_notify_link()'s synchronous
+ * callback invocation.
+ */
+static void rpc_ept_unbound(void *priv)
+{
+	struct rpc_be *be = (struct rpc_be *)priv;
+	if (be == NULL || !be->in_use) {
+		return;
 	}
+	if (!rpc_recv_enter(be)) {
+		return;
+	}
+	be->ept_bound = false;
+	LOG_WRN("rpc: endpoint unbound name=%s (peer link lost)", be->name);
+	alp_rpc_notify_link(be->owner, ALP_RPC_LINK_LOST);
+	rpc_worker_leave(be);
+}
+
+/**
+ * @brief ipc_service `error` callback (issue #1643): the transport
+ *        reported a fault on this endpoint.  Treated as link-lost --
+ *        see rpc_ept_unbound()'s doc comment for the concurrency
+ *        discipline, which this function shares.
+ */
+static void rpc_ept_error(const char *message, void *priv)
+{
+	struct rpc_be *be = (struct rpc_be *)priv;
+	if (be == NULL || !be->in_use) {
+		return;
+	}
+	if (!rpc_recv_enter(be)) {
+		return;
+	}
+	be->ept_bound = false;
+	LOG_ERR("rpc: endpoint error name=%s: %s", be->name, message != NULL ? message : "?");
+	alp_rpc_notify_link(be->owner, ALP_RPC_LINK_LOST);
+	rpc_worker_leave(be);
 }
 
 #endif /* CONFIG_ALP_SDK_RPC */
@@ -652,7 +822,9 @@ z_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 
 	be->ept_cfg.name        = be->name;
 	be->ept_cfg.cb.bound    = rpc_ept_bound;
+	be->ept_cfg.cb.unbound  = rpc_ept_unbound; /* issue #1643 */
 	be->ept_cfg.cb.received = rpc_ept_recv;
+	be->ept_cfg.cb.error    = rpc_ept_error; /* issue #1643 */
 	be->ept_cfg.priv        = be;
 
 	rc = ipc_service_register_endpoint(be->ipc_dev, &be->ept, &be->ept_cfg);
@@ -686,26 +858,39 @@ z_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t
 	if (be == NULL || !be->in_use) {
 		return ALP_ERR_NOT_READY;
 	}
+	uint32_t h = fnv1a_32(method);
+
+	/* The whole read-modify-write of the table runs under `lock`:
+     * rpc_ept_recv() dispatches out of these same slots on the
+     * ipc_service worker thread.  Bounded critical section -- a
+     * linear probe over CONFIG_ALP_SDK_RPC_SUBS_PER_CHANNEL slots
+     * plus one bounded strncpy -- so a spinlock is the right
+     * primitive here (recv can run close to interrupt priority,
+     * which is why this channel guards its shared state with a
+     * spinlock rather than a mutex in the first place). */
+	k_spinlock_key_t key = k_spin_lock(&be->lock);
+
 	/* NULL cb == unsubscribe -- matches the documented behaviour. */
 	if (cb == NULL) {
-		uint32_t        h   = fnv1a_32(method);
 		struct rpc_sub *sub = sub_find(be, method, h);
 		if (sub == NULL) {
+			k_spin_unlock(&be->lock, key);
 			return ALP_ERR_INVAL;
 		}
 		sub->cb          = NULL;
 		sub->user        = NULL;
 		sub->method[0]   = '\0';
 		sub->method_hash = 0u;
+		k_spin_unlock(&be->lock, key);
 		return ALP_OK;
 	}
-	uint32_t h = fnv1a_32(method);
 
 	/* Replace if already present. */
 	struct rpc_sub *sub = sub_find(be, method, h);
 	if (sub == NULL) {
 		sub = sub_alloc(be);
 		if (sub == NULL) {
+			k_spin_unlock(&be->lock, key);
 			LOG_WRN("rpc: subscribe table full on %s (cap=%d)",
 			        be->name,
 			        CONFIG_ALP_SDK_RPC_SUBS_PER_CHANNEL);
@@ -715,8 +900,15 @@ z_subscribe(alp_rpc_backend_state_t *st, const char *method, alp_rpc_method_cb_t
 		strncpy(sub->method, method, sizeof(sub->method) - 1);
 		sub->method[sizeof(sub->method) - 1] = '\0';
 	}
-	sub->cb   = cb;
+	/* `user` first, `cb` last.  A non-NULL cb is what marks a slot
+     * live -- sub_find() and sub_alloc() both key off it -- so the
+     * context must be in place before the callback becomes
+     * reachable.  Redundant while every reader holds `lock`, but
+     * free, and it is the invariant any future lock-free read path
+     * would need. */
 	sub->user = user;
+	sub->cb   = cb;
+	k_spin_unlock(&be->lock, key);
 	return ALP_OK;
 #else
 	(void)st;
@@ -736,15 +928,28 @@ static alp_status_t z_unsubscribe(alp_rpc_backend_state_t *st, const char *metho
 	if (be == NULL || !be->in_use) {
 		return ALP_ERR_NOT_READY;
 	}
-	uint32_t        h   = fnv1a_32(method);
-	struct rpc_sub *sub = sub_find(be, method, h);
+	uint32_t h = fnv1a_32(method);
+
+	/* Same `lock` the recv dispatcher snapshots under -- see
+     * z_subscribe().  NOTE the guarantee this does and does not give:
+     * once this returns ALP_OK the slot is dead, so no LATER frame
+     * can reach the callback, but a dispatch that already snapshotted
+     * cb/user is running on the worker thread right now and will
+     * still complete.  Callers must not free the `user` context on
+     * the strength of this return alone -- the POSIX sibling,
+     * src/backends/rpc/yocto_drv.c's y_unsubscribe(), has exactly the
+     * same boundary. */
+	k_spinlock_key_t key = k_spin_lock(&be->lock);
+	struct rpc_sub  *sub = sub_find(be, method, h);
 	if (sub == NULL) {
+		k_spin_unlock(&be->lock, key);
 		return ALP_ERR_INVAL;
 	}
 	sub->cb          = NULL;
 	sub->user        = NULL;
 	sub->method[0]   = '\0';
 	sub->method_hash = 0u;
+	k_spin_unlock(&be->lock, key);
 	return ALP_OK;
 #else
 	(void)st;

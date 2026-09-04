@@ -129,7 +129,8 @@ def _slice_toolchain(slice_: Slice) -> dict[str, Optional[str]]:
     """This slice's compiler identity: `{targetTriple, compiler, sysroot, id}`
     (#610 §4 per-slice tooling index).
 
-    Grounded in the SoM preset's `topology.<core>.toolchain` -- the same
+    Grounded in the SoM preset's `topology.<core>.toolchain` default, or a
+    project's `cores.<core>.toolchain` override (issue #964) -- the same
     field `Slice.to_manifest_entry` already surfaces in
     `system-manifest.yaml` -- never invented.  For a Zephyr slice this
     value (e.g. `arm-zephyr-eabi`) IS the real Zephyr SDK toolchain

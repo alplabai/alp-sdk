@@ -37,6 +37,9 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(spi_dw_alif);
 
+/* Max push/pull iterations in the polled master loop before declaring a stall. */
+#define SPI_DW_POLL_GUARD 4000000u
+
 #include <errno.h>
 
 #include <zephyr/kernel.h>
@@ -47,6 +50,7 @@ LOG_MODULE_REGISTER(spi_dw_alif);
 #include <zephyr/pm/device.h>
 
 #include <zephyr/sys/sys_io.h>
+#include <zephyr/cache.h>
 #include <zephyr/sys/util.h>
 
 #include <zephyr/pm/device.h>
@@ -70,6 +74,7 @@ LOG_MODULE_REGISTER(spi_dw_alif);
 
 #ifdef CONFIG_SPI_DW_ALIF_USE_DMA
 #include <zephyr/drivers/dma.h>
+#include "spi_dw_alif_dma_burst.h"
 #define SPI_DW_DMA_FULL_DUPLEX 2
 #define SPI_DW_DMA_SEMAPHORE_COUNT SPI_DW_DMA_FULL_DUPLEX
 #endif
@@ -126,8 +131,23 @@ static void completed(const struct device *dev, int error)
 	}
 
 out:
-	/* need to give time for FIFOs to drain before issuing more commands */
-	while (test_bit_sr_busy(dev)) {
+	/* need to give time for FIFOs to drain before issuing more commands.
+	 *
+	 * Bounded: this runs on EVERY transfer, PIO and DMA, in thread context, so
+	 * a wedged macrocell used to hang the calling thread outright.  The other
+	 * polled loops in this file already carry SPI_DW_POLL_GUARD; this one was
+	 * missed (#1819).  There is nothing useful to return from here -- the
+	 * transfer is already being completed -- so log and carry on tearing down
+	 * rather than spin. */
+	{
+		uint32_t guard = 0;
+
+		while (test_bit_sr_busy(dev)) {
+			if (++guard > SPI_DW_POLL_GUARD) {
+				LOG_ERR("SR[BUSY] never cleared; tearing down anyway");
+				break;
+			}
+		}
 	}
 
 	/* Disabling interrupts */
@@ -302,21 +322,6 @@ static void spi_dw_dma_enable_channels(const struct device *dev,
 }
 
 /**
- * Calculate optimal burst length that divides evenly into chunk size
- */
-static uint32_t spi_dw_dma_calculate_burst_length(uint32_t default_burst, size_t chunk)
-{
-	uint32_t burst_length = default_burst ? default_burst : 1;
-
-	/* Adjust burst length to be a factor of chunk size */
-	while (chunk % burst_length) {
-		burst_length--;
-	}
-
-	return burst_length;
-}
-
-/**
  * Check if there's more data to transfer
  */
 static bool spi_dw_dma_has_more_data(const struct spi_dw_dma_state *state)
@@ -327,6 +332,50 @@ static bool spi_dw_dma_has_more_data(const struct spi_dw_dma_state *state)
 /**
  * Setup RX DMA channel for current chunk
  */
+/* Reuse an already-built PL330 descriptor when only addresses/length differ.
+ *
+ * dma_config() on this PL330 constructs a microcode program; dma_reload() only
+ * rewrites source_address / dest_address / block_size on the descriptor already
+ * there (dma_pl330_alif.c: three field stores).  Every steady-state CC3501E
+ * bridge frame reprograms the SAME channel, direction, burst, width and buffers,
+ * so that rebuild was pure per-transfer overhead -- and it is why DMA measured
+ * SLOWER than PIO here despite moving identical bytes (113 kB/s vs 678 kB/s at
+ * ~1.7 KB payloads). */
+static bool spi_dw_dma_try_reload(const struct device           *dev,
+                                  uint32_t                       ch,
+                                  struct spi_dw_dma_shape       *shape,
+                                  const struct dma_config       *cfg,
+                                  const struct dma_block_config *blk)
+{
+	const struct spi_dw_config *info = dev->config;
+
+	if (!shape->valid || shape->burst != cfg->dest_burst_length ||
+	    shape->dfs != cfg->source_data_size || shape->dir != cfg->channel_direction ||
+	    shape->slot != cfg->dma_slot || shape->src_adj != blk->source_addr_adj ||
+	    shape->dst_adj != blk->dest_addr_adj) {
+		return false;
+	}
+
+	return dma_reload(info->dma_dev,
+	                  ch,
+	                  (uint32_t)blk->source_address,
+	                  (uint32_t)blk->dest_address,
+	                  blk->block_size) == 0;
+}
+
+static void spi_dw_dma_cache_shape(struct spi_dw_dma_shape       *shape,
+                                   const struct dma_config       *cfg,
+                                   const struct dma_block_config *blk)
+{
+	shape->valid   = true;
+	shape->burst   = cfg->dest_burst_length;
+	shape->dfs     = cfg->source_data_size;
+	shape->dir     = cfg->channel_direction;
+	shape->slot    = cfg->dma_slot;
+	shape->src_adj = blk->source_addr_adj;
+	shape->dst_adj = blk->dest_addr_adj;
+}
+
 static int spi_dw_dma_setup_rx_channel(const struct device *dev,
 				       struct dma_config *dma_cfg,
 				       struct dma_block_config *dma_block_cfg,
@@ -334,16 +383,9 @@ static int spi_dw_dma_setup_rx_channel(const struct device *dev,
 {
 	const struct spi_dw_config *info = dev->config;
 	static uint32_t dummy_rx;
-	uint32_t burstlen;
+	uint32_t dw_spi_rxftlr_dflt = (info->fifo_depth * 1) / 2;
+	uint32_t burstlen = spi_dw_dma_burst_for_chunk(dw_spi_rxftlr_dflt, chunk, rx_ptr == &dummy_rx);
 	int ret;
-
-	if (rx_ptr == &dummy_rx) {
-		burstlen = 1;
-	} else {
-		uint32_t dw_spi_rxftlr_dflt = (info->fifo_depth * 1) / 2;
-
-		burstlen = spi_dw_dma_calculate_burst_length(dw_spi_rxftlr_dflt, chunk);
-	}
 
 	write_dmardlr(dev, burstlen - 1);
 	dma_cfg->dest_burst_length = burstlen;
@@ -356,10 +398,37 @@ static int spi_dw_dma_setup_rx_channel(const struct device *dev,
 		DMA_ADDR_ADJ_NO_CHANGE : DMA_ADDR_ADJ_INCREMENT;
 	dma_block_cfg->source_addr_adj = DMA_ADDR_ADJ_NO_CHANGE;
 
-	ret = dma_config(info->dma_dev, info->dma_rx.ch, dma_cfg);
-	if (ret < 0) {
-		LOG_ERR("SPI:%p dma_config %p failed %d\n", dev, info->dma_dev, ret);
-		return ret;
+	struct spi_dw_data *spi_d = dev->data;
+
+	if (!spi_dw_dma_try_reload(
+	        dev, info->dma_rx.ch, &spi_d->dma_state.rx_shape, dma_cfg, dma_block_cfg)) {
+		ret = dma_config(info->dma_dev, info->dma_rx.ch, dma_cfg);
+		if (ret < 0) {
+			LOG_ERR("SPI:%p dma_config %p failed %d\n", dev, info->dma_dev, ret);
+			spi_d->dma_state.rx_shape.valid = false;
+			return ret;
+		}
+		spi_dw_dma_cache_shape(&spi_d->dma_state.rx_shape, dma_cfg, dma_block_cfg);
+	}
+
+	/*
+	 * The PL330 is programmed non-cacheable and non-snooping:
+	 * dma_pl330_config_channel() writes CC_CCTRL_MODIFIABLE_VALUE = 0x2 into
+	 * both cache-control fields of DMA_CCRn, i.e. AxCACHE = 0b0010, Normal
+	 * non-cacheable non-bufferable (HWRM 12.2.4.3.15).  So it neither snoops
+	 * nor allocates and software maintenance is mandatory for any buffer in
+	 * cacheable memory -- and this driver did none at all (#1830).
+	 *
+	 * RX: clean+invalidate the destination BEFORE the transfer.  Cleaning
+	 * first matters because a dirty line evicted mid-DMA would overwrite bytes
+	 * the controller had already delivered; invalidating means the post-DMA
+	 * read misses to memory.  The transfer loop invalidates this buffer again
+	 * once the transfer completes, to drop anything speculative prefetch
+	 * pulled in during the transfer window -- see the post-completion
+	 * invalidate after spi_dw_dma_wait_completion().
+	 */
+	if (rx_ptr != &dummy_rx) {
+		sys_cache_data_flush_and_invd_range(rx_ptr, chunk * spi_d->dfs);
 	}
 
 	ret = dma_start(info->dma_dev, info->dma_rx.ch);
@@ -385,18 +454,28 @@ static int spi_dw_dma_setup_tx_channel(const struct device *dev,
 	uint32_t burst_length;
 	int ret;
 
+	/*
+	 * DMATDLR gets the raw, unreduced half-FIFO default, deliberately NOT
+	 * burst_length below.  DMATDLR is a low watermark (dma_tx_req asserts
+	 * once the TX FIFO holds <= DMATDLR entries), not a burst count -- the
+	 * only hardware constraint is DMATDLR + burst <= fifo_depth, which the
+	 * unreduced default already satisfies for every burst this function can
+	 * compute.  A #1818 follow-up briefly programmed burst_length into
+	 * DMATDLR instead, on the assumption the two had to match; that was
+	 * reverted on review for lack of bench evidence.  See
+	 * spi_dw_alif_dma_burst.h for the full rationale and the
+	 * CONFIG_SPI_DW_ALIF_DMA_MIN_LEN comment in
+	 * examples/aen/aen-cc3501e-bringup/prj.conf for the open question this
+	 * left behind.
+	 */
 	write_dmatdlr(dev, dw_spi_txftlr_dflt);
+
+	burst_length = spi_dw_dma_burst_for_chunk(dw_spi_txftlr_dflt, chunk, tx_ptr == &dummy_tx);
+	dma_cfg->source_burst_length = burst_length;
+	dma_cfg->dest_burst_length = burst_length;
+
 	dma_cfg->channel_direction = MEMORY_TO_PERIPHERAL;
 	dma_cfg->dma_slot = info->dma_tx.periph;
-
-	if (tx_ptr == &dummy_tx) {
-		dma_cfg->source_burst_length = dma_cfg->dest_burst_length = 1;
-	} else {
-		burst_length = spi_dw_dma_calculate_burst_length(dw_spi_txftlr_dflt, chunk);
-
-		dma_cfg->source_burst_length = burst_length;
-		dma_cfg->dest_burst_length = burst_length;
-	}
 
 	dma_block_cfg->source_address = (uintptr_t)tx_ptr;
 	dma_block_cfg->dest_address = (mm_reg_t)DEVICE_MMIO_GET(dev) + DW_SPI_REG_DR;
@@ -404,11 +483,24 @@ static int spi_dw_dma_setup_tx_channel(const struct device *dev,
 	dma_block_cfg->source_addr_adj = (tx_ptr == &dummy_tx) ?
 		DMA_ADDR_ADJ_NO_CHANGE : DMA_ADDR_ADJ_INCREMENT;
 
-	ret = dma_config(info->dma_dev, info->dma_tx.ch, dma_cfg);
+	struct spi_dw_data *spi_d = dev->data;
 
-	if (ret < 0) {
-		LOG_ERR("SPI:%p dma_config %p failed %d\n", dev, info->dma_dev, ret);
-		return ret;
+	if (!spi_dw_dma_try_reload(
+	        dev, info->dma_tx.ch, &spi_d->dma_state.tx_shape, dma_cfg, dma_block_cfg)) {
+		ret = dma_config(info->dma_dev, info->dma_tx.ch, dma_cfg);
+		if (ret < 0) {
+			LOG_ERR("SPI:%p dma_config %p failed %d\n", dev, info->dma_dev, ret);
+			spi_d->dma_state.tx_shape.valid = false;
+			return ret;
+		}
+		spi_dw_dma_cache_shape(&spi_d->dma_state.tx_shape, dma_cfg, dma_block_cfg);
+	}
+
+	/* TX: clean the source so the non-snooping DMAC reads what the CPU wrote,
+	 * rather than whatever was in SRAM before the dirty lines were evicted
+	 * (#1830).  See the RX path above for the AxCACHE citation. */
+	if (tx_ptr != &dummy_tx) {
+		sys_cache_data_flush_range((void *)tx_ptr, chunk * spi_d->dfs);
 	}
 
 	ret = dma_start(info->dma_dev, info->dma_tx.ch);
@@ -431,7 +523,20 @@ static int spi_dw_dma_wait_completion(const struct device *dev,
 		SPI_DW_DMA_FULL_DUPLEX : 1;
 
 	for (uint8_t i = 0; i < expected_completions; i++) {
-		k_sem_take(&spi->dma_sem, K_FOREVER);
+		/*
+		 * Bounded, not K_FOREVER: this is where every stall on the DMA path
+		 * used to terminate -- a dropped completion callback (see
+		 * spi_dw_dma_cleanup()) left the caller's thread blocked for the life
+		 * of the image with no way to report it (#1819).  A timeout turns
+		 * that into an -ETIMEDOUT the caller can act on.
+		 */
+		if (k_sem_take(&spi->dma_sem, K_MSEC(CONFIG_SPI_DW_ALIF_DMA_TIMEOUT_MS)) != 0) {
+			LOG_ERR("DMA completion %u/%u timed out after %d ms",
+			        i + 1U,
+			        expected_completions,
+			        CONFIG_SPI_DW_ALIF_DMA_TIMEOUT_MS);
+			return -ETIMEDOUT;
+		}
 
 		/* Check for IRQ error first, then DMA error */
 		if (spi->ctx.sync_status < 0) {
@@ -459,6 +564,25 @@ static void spi_dw_dma_cleanup(const struct device *dev, int error)
 		if (info->dma_tx.enabled) {
 			dma_stop(info->dma_dev, info->dma_tx.ch);
 		}
+
+		/*
+		 * dma_stop() tears down the event-router callback mapping --
+		 * dma_alif_evtrtr_stop() clears channel_map[ch].in_use and
+		 * orig_callback on success, and dma_pl330_transfer_stop() returns 0
+		 * whether it killed a running channel or found it already idle, so
+		 * this always happens.  dma_config() is the ONLY place that mapping
+		 * is re-registered.
+		 *
+		 * The descriptor-reuse cache used to survive that: the next transfer
+		 * with a matching shape took the dma_reload() fast path, skipped
+		 * dma_config(), and its completion hit the "Callback for unmapped
+		 * physical channel" branch in evtrtr_callback_wrapper() -- which
+		 * returns WITHOUT k_sem_give().  The caller then blocked in
+		 * spi_dw_dma_wait_completion() forever.  One DMA error wedged the
+		 * driver for good (#1819).
+		 */
+		spi->dma_state.rx_shape.valid = false;
+		spi->dma_state.tx_shape.valid = false;
 	}
 
 	completed(dev, error);
@@ -495,6 +619,12 @@ static int spi_dw_dma_transceive(const struct device *dev,
 		write_dr(dev, 0x0);
 	}
 
+	/* ctx.sync_status latches the last error from spi_dw_isr() and from
+	 * completed() in cleanup, and spi_dw_dma_wait_completion() returns it --
+	 * but nothing cleared it, so a transfer that got past a previous failure
+	 * reported that failure's status instead of its own (#1819). */
+	spi->ctx.sync_status = 0;
+
 	/* Main transfer loop */
 	while (spi_dw_dma_has_more_data(state)) {
 		/* Reset semaphore before each chunk transfer */
@@ -509,6 +639,32 @@ static int spi_dw_dma_transceive(const struct device *dev,
 		size_t rx_words = rx_len / spi->dfs;
 		size_t chunk = (tx_words && rx_words) ?
 					MIN(tx_words, rx_words) : (tx_words ? tx_words : rx_words);
+
+		/* Keep each chunk a MULTIPLE of the default burst.
+		 *
+		 * spi_dw_dma_calculate_burst_length() shrinks the burst until it divides
+		 * the chunk exactly -- it has to, because the DW SSI raises its DMA
+		 * request on a FIFO watermark, so a final partial burst would never
+		 * request and the transfer would hang.  The consequence is brutal for an
+		 * ODD chunk: the burst collapses all the way to 1, i.e. ONE DMA
+		 * transaction per byte.  That is the measured 15723 us for a 512-byte
+		 * bridge payload (~55x its 286 us of wire time) that made the whole DMA
+		 * path look broken and got it disabled behind
+		 * CONFIG_SPI_DW_ALIF_DMA_MIN_LEN.
+		 *
+		 * Real bridge sizes hit it constantly -- reply payload is data_len + 1,
+		 * so about half of all frames are odd: 1723 -> burst 1, 487 -> burst 1.
+		 *
+		 * Splitting the aligned bulk from the short tail keeps the bulk at the
+		 * full burst and leaves at most (burst - 1) items for a final chunk,
+		 * which the loop handles on its next pass.  No hang, no per-byte DMA. */
+		{
+			const size_t dflt_burst = (info->fifo_depth * 1) / 2;
+
+			if (dflt_burst > 1u && chunk > dflt_burst && (chunk % dflt_burst) != 0u) {
+				chunk -= (chunk % dflt_burst);
+			}
+		}
 
 		if (chunk == 0) {
 			if (tx_len == 0 && txb) {
@@ -559,6 +715,18 @@ static int spi_dw_dma_transceive(const struct device *dev,
 		ret = spi_dw_dma_wait_completion(dev, state);
 		if (ret < 0) {
 			goto dma_out;
+		}
+
+		/* RX: invalidate the destination AFTER the controller has written it.
+		 * The pre-transfer clean+invalidate in spi_dw_dma_setup_rx_channel()
+		 * is not sufficient on its own: the CPU may speculatively prefetch
+		 * this buffer during the transfer window, and any line pulled in then
+		 * holds pre-DMA bytes.  Without this the caller can read stale data
+		 * back from a completed transfer, which is a silent wrong-data bug
+		 * rather than a visible failure (#1830).
+		 */
+		if (state->is_rx_req && rx_ptr != (void *)&dummy_rx) {
+			sys_cache_data_invd_range(rx_ptr, chunk * spi->dfs);
 		}
 
 		state->tx_off += chunk * spi->dfs;
@@ -814,6 +982,225 @@ static bool spi_dw_should_dma(const struct spi_dw_config *info,
 }
 #endif /* CONFIG_SPI_DW_ALIF_USE_DMA */
 
+/* Batched polled transfer for the common 8-bit master case.
+ *
+ * The generic push_data()/pull_data() pair costs about FOUR peripheral MMIO
+ * accesses per byte: pull_data() re-reads RXFLR for every single word, and
+ * push_data() re-reads TXFLR+RXFLR on every call.  On this SoC a peripheral
+ * register access is ~45 cycles at 160 MHz, so that is ~180 cycles/byte = 1.12 us
+ * -- against 560 ns/byte of wire at 14.29 MHz.  Silicon-measured 1221 ns/byte,
+ * i.e. 46% duty, which is exactly the half-idle SCLK seen on a scope.
+ *
+ * A byte fundamentally costs ONE write_dr + ONE read_dr.  Hoisting the level
+ * reads out of the inner loops takes a level snapshot once per burst instead of
+ * once per byte, which is the difference between ~4 and ~2.2 accesses/byte.
+ *
+ * Returns false if this transfer is not eligible (caller falls back). */
+static bool spi_dw_poll_xfer_u8(const struct device *dev)
+{
+	const struct spi_dw_config *info = dev->config;
+	struct spi_dw_data         *spi  = dev->data;
+	struct spi_context         *ctx  = &spi->ctx;
+	uint32_t                    guard = 0u;
+
+	if (spi->dfs != 1) {
+		return false;
+	}
+
+	while (spi_context_tx_on(ctx) || spi_context_rx_on(ctx)) {
+		/* Drain a SNAPSHOT of the RX level -- the FIFO cannot grow while we
+		 * read it, and the outer loop picks up anything that lands meanwhile. */
+		uint32_t avail = read_rxflr(dev);
+
+		while (avail--) {
+			uint32_t data = read_dr(dev);
+
+			if (spi_context_rx_buf_on(ctx)) {
+				UNALIGNED_PUT(data, (uint8_t *)ctx->rx_buf);
+			}
+			spi_context_update_rx(ctx, 1, 1);
+			spi->fifo_diff--;
+		}
+
+		/* Refill against a single free-space snapshot. */
+		uint32_t txlvl = read_txflr(dev);
+		uint32_t room  = (info->fifo_depth > txlvl) ? (info->fifo_depth - txlvl) : 0u;
+
+		if (spi_context_rx_on(ctx)) {
+			const uint32_t rxlvl = read_rxflr(dev);
+
+			room = (room > rxlvl) ? (room - rxlvl) : 0u;
+		}
+
+		while (room--) {
+			uint32_t data;
+
+			if (spi_context_tx_buf_on(ctx)) {
+				data = UNALIGNED_GET((uint8_t *)ctx->tx_buf);
+			} else if (spi_context_rx_on(ctx)) {
+				if ((int)(ctx->rx_len - spi->fifo_diff) <= 0) {
+					break;
+				}
+				data = 0U;
+			} else if (spi_context_tx_on(ctx)) {
+				data = 0U;
+			} else {
+				break;
+			}
+			write_dr(dev, data);
+			spi_context_update_tx(ctx, 1, 1);
+			spi->fifo_diff++;
+		}
+
+		if (++guard > SPI_DW_POLL_GUARD) {
+			LOG_ERR("SPI %p polled transfer stalled", dev);
+			return false;
+		}
+	}
+	return true;
+}
+
+#ifdef CONFIG_SPI_DW_ALIF_PACK32
+/* How many bytes this transfer can pack into one FIFO slot: 0 (not eligible),
+ * 2, or 4.
+ *
+ * The width is whatever frame size the node declares -- `max-xfer-size`, the
+ * macrocell's SSI_MAX_XFER_SIZE.  The binding defaults it to 16 and calls that
+ * "a conservative overridable default", so 2 is what we get until someone
+ * transcribes the real value from the TRM; a node that declares 32 doubles the
+ * saving with no code change.
+ *
+ * Every condition here keeps the change invisible to the caller and the peer.
+ * TX_RX with both buffers present is required so CTRLR1/NDF -- which counts
+ * FRAMES and would need rescaling -- is not part of the picture. */
+static uint8_t spi_dw_pack_width(const struct device *dev,
+				 const struct spi_buf_set *tx_bufs,
+				 const struct spi_buf_set *rx_bufs)
+{
+	const struct spi_dw_config *info = dev->config;
+	struct spi_dw_data         *spi  = dev->data;
+	size_t                      total = 0u;
+	uint8_t                     w;
+
+	if (spi_dw_is_slave(spi) || spi->dfs != 1) {
+		return 0u;
+	}
+	if (info->max_xfer_size == 32) {
+		w = 4u;
+	} else if (info->max_xfer_size == 16) {
+		w = 2u;
+	} else {
+		return 0u;
+	}
+
+	if (tx_bufs == NULL || tx_bufs->buffers == NULL ||
+	    rx_bufs == NULL || rx_bufs->buffers == NULL) {
+		return 0u;
+	}
+
+	for (size_t i = 0; i < tx_bufs->count; i++) {
+		if ((tx_bufs->buffers[i].len % w) != 0u) {
+			return 0u;
+		}
+		total += tx_bufs->buffers[i].len;
+	}
+	for (size_t i = 0; i < rx_bufs->count; i++) {
+		if ((rx_bufs->buffers[i].len % w) != 0u) {
+			return 0u;
+		}
+	}
+
+	return (total >= (size_t)CONFIG_SPI_DW_ALIF_PACK32_MIN_LEN) ? w : 0u;
+}
+
+/* Batched polled transfer moving `spi->pack` bytes per FIFO slot.
+ *
+ * Structurally identical to spi_dw_poll_xfer_u8() -- snapshot the level once
+ * per burst rather than once per word -- but each write_dr/read_dr now carries
+ * a 2- or 4-byte frame.  MMIO accesses are what the polled loop actually costs
+ * (~45 cycles each on this SoC), so this takes ~2.2 accesses/byte down to ~1.1
+ * at 16-bit frames and ~0.55 at 32-bit.  At 25 MHz the wire needs 320 ns/byte
+ * and the 8-bit loop spends roughly 620 ns of CPU on it -- the host, not the
+ * link, is the bottleneck.
+ *
+ * The byte order is the whole trick: the DR shifts out MSB-first, so writing
+ * the stream's next bytes big-endian into the frame emits exactly the byte
+ * order an 8-bit transfer would.  The wire is bit-identical and the peer cannot
+ * tell the difference.
+ *
+ * spi->dfs stays 1 and the context is advanced in BYTES (dfs 1, w frames), so
+ * all length bookkeeping outside this function is unchanged.  fifo_diff counts
+ * FIFO ENTRIES, and one entry is now w bytes. */
+static bool spi_dw_poll_xfer_packed(const struct device *dev)
+{
+	const struct spi_dw_config *info  = dev->config;
+	struct spi_dw_data         *spi   = dev->data;
+	struct spi_context         *ctx   = &spi->ctx;
+	const uint8_t               w     = spi->pack;
+	uint32_t                    guard = 0u;
+
+	while (spi_context_tx_on(ctx) || spi_context_rx_on(ctx)) {
+		uint32_t avail = read_rxflr(dev);
+
+		while (avail--) {
+			uint32_t data = read_dr(dev);
+
+			if (spi_context_rx_buf_on(ctx)) {
+				uint8_t *dst = (uint8_t *)ctx->rx_buf;
+
+				/* Big-endian unpack: first byte of the stream is the
+				 * frame's most significant byte. */
+				for (uint8_t b = 0; b < w; b++) {
+					dst[b] = (uint8_t)(data >> (8u * (w - 1u - b)));
+				}
+			}
+			spi_context_update_rx(ctx, 1, w);
+			spi->fifo_diff--;
+		}
+
+		uint32_t txlvl = read_txflr(dev);
+		uint32_t room  = (info->fifo_depth > txlvl) ? (info->fifo_depth - txlvl) : 0u;
+
+		if (spi_context_rx_on(ctx)) {
+			const uint32_t rxlvl = read_rxflr(dev);
+
+			room = (room > rxlvl) ? (room - rxlvl) : 0u;
+		}
+
+		while (room--) {
+			uint32_t data;
+
+			if (spi_context_tx_buf_on(ctx)) {
+				const uint8_t *src = (const uint8_t *)ctx->tx_buf;
+
+				data = 0u;
+				for (uint8_t b = 0; b < w; b++) {
+					data |= (uint32_t)src[b] << (8u * (w - 1u - b));
+				}
+			} else if (spi_context_rx_on(ctx)) {
+				if ((int)(ctx->rx_len - ((size_t)spi->fifo_diff * w)) <= 0) {
+					break;
+				}
+				data = 0U;
+			} else if (spi_context_tx_on(ctx)) {
+				data = 0U;
+			} else {
+				break;
+			}
+			write_dr(dev, data);
+			spi_context_update_tx(ctx, 1, w);
+			spi->fifo_diff++;
+		}
+
+		if (++guard > SPI_DW_POLL_GUARD) {
+			LOG_ERR("SPI %p packed transfer stalled", dev);
+			return false;
+		}
+	}
+	return true;
+}
+#endif /* CONFIG_SPI_DW_ALIF_PACK32 */
+
 static int transceive(const struct device *dev,
 		      const struct spi_config *config,
 		      const struct spi_buf_set *tx_bufs,
@@ -905,6 +1292,36 @@ static int transceive(const struct device *dev,
 		}
 	}
 
+#ifdef CONFIG_SPI_DW_ALIF_PACK32
+	/* Decided here because this is the one window where SSIENR is already
+	 * clear -- the frame size cannot be changed with the controller enabled. */
+	spi->pack = spi_dw_pack_width(dev, tx_bufs, rx_bufs);
+	{
+		/* ALWAYS program the frame size, both directions.
+		 *
+		 * reg_data is a read-modify-write of the LIVE CTRLR0, and
+		 * spi_dw_configure() returns early when the spi_config is unchanged --
+		 * which it is for every transfer on a bridge that reuses one config.
+		 * So a DFS written for a packed transfer PERSISTS: the next small
+		 * transfer takes the 8-bit polled loop while the macrocell is still
+		 * clocking 16-bit frames, and the peer sees garbage.
+		 *
+		 * That is not a subtle degradation -- it is why enabling PACK32 gave
+		 * zero successful PINGs from boot (#1677).  Restoring dfs*8 on the
+		 * not-packed path is what makes the option usable at all. */
+		const uint8_t bits = (spi->pack != 0u) ? (uint8_t)(spi->pack * 8u)
+		                                       : (uint8_t)(spi->dfs * 8u);
+
+		if (info->max_xfer_size == 32) {
+			reg_data &= ~SPI_DW_CTRLR0_DFS_32_MASK;
+			reg_data |= DW_SPI_CTRLR0_DFS_32(bits);
+		} else {
+			reg_data &= ~SPI_DW_CTRLR0_DFS_16_MASK;
+			reg_data |= DW_SPI_CTRLR0_DFS_16(bits);
+		}
+	}
+#endif
+
 	write_ctrlr0(dev, reg_data);
 
 	/* Set buffers info */
@@ -950,6 +1367,26 @@ static int transceive(const struct device *dev,
 	}
 #endif
 
+	/* POLLED master path.  The ISR path takes an interrupt at every TXFTLR /
+	 * RXFTLR crossing -- with a 16-entry FIFO that is one ISR round trip per
+	 * ~8 bytes, and the FIFO drains in 16 x 560 ns = 9 us at 14.29 MHz, so the
+	 * shift clock STALLS waiting to be refilled.  Silicon-measured on the
+	 * CC3501E bridge: 1221 ns/byte against 560 ns/byte of wire = 46% duty, which
+	 * matches the ~50% idle SCLK seen on a scope.  Driving push/pull inline from
+	 * the calling thread removes the round trip entirely.
+	 *
+	 * Master + synchronous + non-DMA only: a slave cannot spin (it must wait for
+	 * a master that may never clock), async owes the caller a callback, and the
+	 * DMA path has its own completion. */
+	const bool polled = !spi_dw_is_slave(spi) && !asynchronous
+#ifdef CONFIG_SPI_DW_ALIF_USE_DMA
+	                    && !use_dma
+#endif
+	    ;
+	if (polled) {
+		reg_data = DW_SPI_IMR_MASK; /* no interrupts -- we drive it ourselves */
+	}
+
 	write_imr(dev, reg_data);
 
 	if (!spi_dw_is_slave(spi)) {
@@ -973,6 +1410,47 @@ static int transceive(const struct device *dev,
 	if (use_dma) {
 		ret = spi_dw_dma_transceive(dev, tx_bufs, rx_bufs);
 	}
+#endif
+
+	if (polled) {
+#ifdef CONFIG_SPI_DW_ALIF_PACK32
+		if (spi->pack != 0u) {
+			static bool pack_announced;
+
+			if (!pack_announced) {
+				pack_announced = true;
+				printk("PACK ENGAGED w=%u rx_len=%u\n",
+				       (unsigned)spi->pack, (unsigned)spi->ctx.rx_len);
+			}
+			/* No fallback to the 8-bit loop from here: the macrocell is
+			 * programmed DFS=32 for this transfer, so re-running it a byte
+			 * at a time would clock the wrong frame size. */
+			if (!spi_dw_poll_xfer_packed(dev)) {
+				ret = -ETIMEDOUT;
+			}
+			completed(dev, ret);
+			goto packed_done;
+		}
+#endif
+		if (!spi_dw_poll_xfer_u8(dev)) {
+			/* Not 8-bit, or stalled -- fall back to the generic pair, bounded
+			 * so a wedged macrocell cannot hang the calling thread. */
+			uint32_t guard = 0u;
+
+			while (spi_context_tx_on(&spi->ctx) || spi_context_rx_on(&spi->ctx)) {
+				pull_data(dev);
+				push_data(dev);
+				if (++guard > SPI_DW_POLL_GUARD) {
+					LOG_ERR("SPI %p polled transfer stalled", dev);
+					ret = -ETIMEDOUT;
+					break;
+				}
+			}
+		}
+		completed(dev, ret);
+	}
+#ifdef CONFIG_SPI_DW_ALIF_PACK32
+packed_done:
 #endif
 
 	if (!ret) {

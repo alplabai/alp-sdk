@@ -17,14 +17,99 @@
  *     only -- see the `&rcar_sound` block for what's still open, including
  *     the still-unwired MCLK pin claim). See chips/tas2563 + issue #25,
  *     #1171.
+ *
+ *     UNVERIFIED BINDING, flagged independently on `dev`: `rcar_sound` is
+ *     an R-Car audio-graph binding, and whether the RZ/V2N SSIU IP block
+ *     actually answers to it -- as opposed to needing a different
+ *     compatible/binding this repo has not identified -- has not been
+ *     confirmed against the linux-renesas 6.1.141-cip43 r9a09g056 dtsi.
+ *     dtc-clean and phandle-resolved is not the same claim as
+ *     binding-correct-for-this-SoC.  Do not treat this as more than a
+ *     port to verify on the bench: first boot with the kernel config
+ *     below is the actual answer.
  *   - Display 1 (J6): ported -- rk055hdmipi4ma0 panel on dsi0 (see below).
  *     Display 2 (J28) is permanently unavailable: it requires DSI1 lane
  *     set, which the V2N/V2M family does not populate.
  *     Touch (GT911 on the panel FFC): DEFERRED -- its I2C bus
  *     (DSI1_CSI_I2C) terminates on the GD32 IO-MCU bridge; Linux has no
  *     direct path until the bridge gains an I2C-master proxy.
- *   - 2x MIPI-CSI cameras.
- *   - CAN-FD (TCAN1044 x2).
+ *   - 2x MIPI-CSI cameras (two separate, bare CSI connectors -- see
+ *     docs/boards/e1m-x-evk.md's "Camera connectors" row).
+ *
+ *     DATA-GATED, and gated on a product decision rather than on a
+ *     document.  What the carrier DOES already carry is in tree: the
+ *     CAM0 control pads (metadata/boards/e1m-x-evk.yaml -> generated
+ *     macros XEVK_PIN_CAM0_MUX_SEL = E1M_X_GPIO_IO16, XEVK_PIN_CAM0_EN
+ *     = E1M_X_GPIO_IO18, XEVK_PIN_CAM0_RST = E1M_X_GPIO_IO20
+ *     active-low), the camera-side control buses (XEVK_I2C_BUS_DSI_CSI0
+ *     = E1M_X_I2C2, XEVK_I2C_BUS_DSI_CSI1 = E1M_X_I2C3), and the CRU +
+ *     ISP DMA pools, which e1m-v2n-som.dtsi already reserves
+ *     (isp@90000000 and cru_buffer@b4000000).
+ *
+ *     What is missing is four things, none of them guessable:
+ *       1. The SENSOR.  No part is chosen: e1m-x-evk.yaml sets
+ *          `ov5640: false` and names none, and the connectors are bare
+ *          (the OV5645 pair mentioned in the header above belongs to
+ *          the Renesas EVK, not to this carrier).  Without a part there
+ *          is no compatible, no CCI address, no lane count, and no
+ *          link-frequency -- and inventing a plausible one is how you
+ *          get a node that binds to nothing.
+ *       2. Which connector lands on which of the SoC's two CSI-2
+ *          receivers, and on how many lanes.  The E1M-X edge connector
+ *          carries FOUR CSI instances (metadata/e1m/pinout-x-v1.json,
+ *          CSI0..CSI3); the RZ/V2N populates two
+ *          (metadata/socs/renesas/rzv2n/n44.json, "mipi_csi2": 2).
+ *          Nothing in tree maps one onto the other:
+ *          metadata/pinmux/v2n.yaml carries no CSI lane row at all.
+ *       3. Which rail powers which connector.  The camera LDO enables
+ *          are GD32-owned, not Renesas-owned
+ *          (metadata/e1m_modules/v2n/gd32-io-mcu-map.csv: CAM_EN_LDO0 =
+ *          PC3, CAM_EN_LDO1 = PE8, CAM_EN_LDO2 = PE7, CAM_EN_LDO3 =
+ *          PE10), so power-up is a bridge GPIO write, not a
+ *          regulator-fixed node -- but the LDO-to-connector pairing is
+ *          a schematic fact this repo does not carry.  CAM1_RST is
+ *          likewise still TBD (e1m-x-evk.yaml's `partial_hw_config`).
+ *       4. For CAM1 specifically, a Linux I2C master.  E1M-X I2C3
+ *          (DSI1_CSI_I2C) terminates on the GD32 IO-MCU bridge, so a
+ *          sensor whose CCI lands there cannot be configured from
+ *          Linux until the bridge gains an I2C-master proxy -- the
+ *          same blocker that defers GT911 touch above.
+ *
+ *     The Zephyr/CM33 side of this is a DIFFERENT and larger gap, not a
+ *     mirror of it: upstream Zephyr v4.4.1 ships no Renesas RZ/V CSI-2
+ *     receiver driver or binding at all.  Full analysis in
+ *     src/backends/camera/v2n_n44_isp.c's DATA-GATED block.
+ *
+ *     See issue #1149.
+ *   - CAN-FD (TCAN1044 x2).  DATA-GATED on the kernel side, same shape as
+ *     the audio entry above.  The module bonds out two of the SoC's six
+ *     controllers -- CANFD2 (CTX2 = P84, CRX2 = P85) and CANFD3
+ *     (CTX3 = P86, CRX3 = P87), per
+ *     metadata/e1m_modules/v2n/renesas-peripheral-map.tsv -- but this repo
+ *     does not carry the linux-renesas 6.1.x r9a09g056 dtsi, so three
+ *     values the nodes need are unverified here: the canfd node's label
+ *     and its compatible string in that tree, the RZV2N_PORT_PINMUX
+ *     function index for P84..P87 (metadata/pinmux/v2n.yaml still carries
+ *     e1m_pad/e1m_function "TBD" on all four CANFD rows), and whether the
+ *     BSP defconfig builds a CAN-FD driver at all.  Do not guess any of
+ *     them -- read them out of the kernel tree at the SHA this port was
+ *     generated against (6717c06).
+ *
+ *     Two facts that ARE settled and belong in the port when it lands.
+ *     First, CAN_STBY is not a Renesas pad: the transceivers' standby line
+ *     is owned by the GD32 IO-MCU on PB13 (metadata/pinmux/v2n.yaml,
+ *     metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv), so it is reached
+ *     through 0005-gpio-add-gd32-bridge-expander-driver.patch's expander,
+ *     not through pinctrl.  Second, CANFD2/CANFD3 are unattributed in
+ *     metadata/e1m_modules/v2n/core-ownership.yaml, whose "absence means
+ *     not attributed" rule means check_amp_pad_claims.py cannot see an
+ *     A55-vs-CM33 conflict on these pads until whichever core claims them
+ *     is recorded there.
+ *
+ *     The CM33 side is analysed in alp-sdk#1146 and in this board's
+ *     Zephyr dts (upstream ships the RZ CAN-FD driver, but hal_renesas has
+ *     no rzv FSP CAN-FD module and the RZ/V2N SoC dtsi has no node); it is
+ *     blocked for different reasons, so neither core unblocks the other.
  */
 
 #include <dt-bindings/interrupt-controller/irq.h>

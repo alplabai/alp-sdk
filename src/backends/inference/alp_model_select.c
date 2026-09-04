@@ -79,7 +79,17 @@ static bool _silicon_available(const char *ref, const alp_model_select_env_t *e)
 	return false;
 }
 
-/* SRAM gate: 0 budget = unknown -> always fits. */
+/* SRAM gate: 0 budget = unknown -> always fits, permissively.  This stays a
+ * pass rather than a fail-closed reject (issue #1731): ALP_SOC_NPU_ARENA_SRAM_KIB
+ * is 0 on all nine real SoCs today because the figure is an integration
+ * decision (how much on-die SRAM this SKU's firmware reserves for the NPU
+ * tensor arena vs. everything else), not a datasheet constant any vendor
+ * publishes -- rejecting every selection on every real SoC until that
+ * per-SKU decision is made would break inference on hardware that works
+ * today, over a fact nobody can currently supply.  What changes is that the
+ * pass is no longer SILENT: alp_model_select() now flags every such
+ * unverified pass on its result (arena_fit_unverified) instead of returning
+ * ALP_OK indistinguishably from a budget that was actually checked. */
 static bool _fits(const alp_model_target_t *t, const alp_model_select_env_t *e)
 {
 	return e->arena_sram_kib == 0u || t->req_sram_kib <= e->arena_sram_kib;
@@ -192,5 +202,9 @@ alp_status_t alp_model_select(const alp_model_t            *m,
 	out->target_index = (uint32_t)best;
 	out->backend      = _backend_enum(t->backend);
 	out->arena_bytes  = t->arena_bytes;
+	/* The winning target only ever passed the SRAM gate unconditionally
+	 * (not by comparison) when the device published no arena budget at
+	 * all -- see _fits() and the field's own doc comment. */
+	out->arena_fit_unverified = (env->arena_sram_kib == 0u);
 	return ALP_OK;
 }

@@ -445,7 +445,15 @@ static void z_mbox_close(alp_mbox_backend_state_t *state)
 #if defined(CONFIG_ALP_SDK_MPROC)
 	struct mbox_be *be = (struct mbox_be *)state->be_data;
 	if (be == NULL) return;
+	/* #1644: disable first, then unregister the callback, then free --
+	 * z_mbox_set_callback() registers `be` itself as the driver's
+	 * user_data, so freeing it first would leave that registration
+	 * pointing at freed memory. Not a demonstrated crash (the channel is
+	 * already disabled above, so the stale registration is not known to
+	 * be reachable) -- this restores the documented invariant that
+	 * backend callbacks stop before their slot is released. */
 	(void)mbox_set_enabled(be->dev, be->channel, false);
+	(void)mbox_register_callback(be->dev, be->channel, NULL, NULL);
 	_mbox_be_free(be);
 	state->be_data = NULL;
 #else

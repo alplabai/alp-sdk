@@ -883,7 +883,7 @@ def test_fix_rewrites_library_manifest_versions(tmp_path, monkeypatch, capsys):
 def test_install_missing_tool_command_fails(tmp_path, monkeypatch, capsys):
     """A tool listed in prerequisites.windows with no matching
     install.windows entry is the exact hole that shipped the drifted/
-    incomplete ninja hint in scripts/alp_cli/doctor.py -- the completeness
+    incomplete ninja hint in the now-retired scripts/alp_cli/doctor.py -- the completeness
     assertion must catch it."""
     _scaffold(tmp_path)
     _edit_manifest(tmp_path, lambda d: d["prerequisites"]["install"]["windows"].pop("ninja"))
@@ -1119,7 +1119,7 @@ def test_install_literal_scan_catches_drifted_winget_id(tmp_path, monkeypatch, c
     """A winget PACKAGE ID from install.windows (`Ninja-build.Ninja`)
     appearing anywhere in the scanned file set WITHOUT its full canonical
     command alongside it must fail -- this is exactly the shape
-    scripts/alp_cli/doctor.py's drifted ninja hint had (`winget install
+    the now-retired scripts/alp_cli/doctor.py's drifted ninja hint had (`winget install
     Ninja-build.Ninja.`, missing `-e --id`)."""
     _scaffold(tmp_path)
     readme = tmp_path / "README.md"

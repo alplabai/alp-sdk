@@ -133,7 +133,15 @@ static void _rx_trampoline(const struct device *dev, struct can_frame *frame, vo
 		.brs         = (frame->flags & CAN_FRAME_BRS) != 0,
 		.payload_len = can_dlc_to_bytes(frame->dlc),
 	};
+	/* #1631 review: can_dlc_to_bytes() maps DLC 9..15 to 12..64, which
+	 * is legal on the wire for a classic frame -- bound the copy by
+	 * BOTH the destination (out.data, the alp frame, 64 bytes) and the
+	 * SOURCE (frame->data, Zephyr's CAN_MAX_DLEN -- 8 bytes without
+	 * CONFIG_CAN_FD_MODE, 64 with it). Clamping only against the
+	 * destination let a DLC 9..15 classic frame memcpy up to 56 bytes
+	 * past an 8-byte struct can_frame.data on a non-FD build. */
 	if (out.payload_len > sizeof out.data) out.payload_len = sizeof out.data;
+	if (out.payload_len > sizeof frame->data) out.payload_len = sizeof frame->data;
 	memcpy(out.data, frame->data, out.payload_len);
 	ctx->cb(&out, ctx->user);
 }
@@ -163,12 +171,23 @@ z_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 		return _errno_to_alp(err);
 	}
 
-	if (cfg->mode == ALP_CAN_MODE_FD && cfg->bitrate_data_hz > 0u) {
+	if (cfg->mode == ALP_CAN_MODE_FD) {
+		/* #1631 review: this arm must reject unconditionally when
+		 * CONFIG_CAN_FD_MODE=n, not only when bitrate_data_hz > 0 --
+		 * a caller with bitrate_data_hz == 0 previously fell through
+		 * to the `else` below and opened successfully in NORMAL
+		 * mode while cfg.mode stayed ALP_CAN_MODE_FD, contradicting
+		 * <alp/can.h>'s alp_can_open() contract ("CAN-FD requested
+		 * but CONFIG_CAN_FD_MODE=n" -> NULL) and leaving z_send()'s
+		 * bound check as the only guard against an fd-flagged frame
+		 * on that handle. */
 #if defined(CONFIG_CAN_FD_MODE)
-		err = can_set_bitrate_data(dev, cfg->bitrate_data_hz);
-		if (err != 0) {
-			_free_side(s);
-			return _errno_to_alp(err);
+		if (cfg->bitrate_data_hz > 0u) {
+			err = can_set_bitrate_data(dev, cfg->bitrate_data_hz);
+			if (err != 0) {
+				_free_side(s);
+				return _errno_to_alp(err);
+			}
 		}
 		err = can_set_mode(dev, CAN_MODE_FD | (cfg->loopback ? CAN_MODE_LOOPBACK : 0));
 #else
@@ -204,13 +223,52 @@ static alp_status_t z_stop(alp_can_backend_state_t *st)
 static alp_status_t
 z_send(alp_can_backend_state_t *st, const alp_can_frame_t *frame, uint32_t timeout_ms)
 {
+	/* Belt-and-braces (#1631): src/can_dispatch.c already rejects an
+	 * fd-flagged frame on a handle not opened ALP_CAN_MODE_FD, but zf
+	 * below is sized by Zephyr's CAN_MAX_DLEN -- 8 bytes without
+	 * CONFIG_CAN_FD_MODE, 64 with it -- so bound the copy against the
+	 * actual destination regardless of what the dispatcher already
+	 * checked. */
+	if (frame->payload_len > sizeof(((struct can_frame *)0)->data)) {
+		return ALP_ERR_INVAL;
+	}
+
 	const struct device *dev = (const struct device *)st->dev;
-	struct can_frame     zf  = {
-		.id    = frame->id,
-		.dlc   = can_bytes_to_dlc(frame->payload_len),
-		.flags = (frame->ext_id ? CAN_FRAME_IDE : 0) | (frame->rtr ? CAN_FRAME_RTR : 0) |
-		         (frame->fd ? CAN_FRAME_FDF : 0) | (frame->brs ? CAN_FRAME_BRS : 0),
-	};
+	struct can_frame     zf  = { 0 };
+
+	/* Zephyr sizes can_frame.data[] as CAN_MAX_DLEN -- 8 without
+	 * CONFIG_CAN_FD_MODE, 64 with it.  src/can_dispatch.c can only
+	 * bound payload_len by the PORTABLE frame's own 64-byte maximum;
+	 * it has no view of the Kconfig this backend was compiled
+	 * against, so an fd-flagged 64-byte frame reaches here intact and
+	 * on a classic build the memcpy below would run 56 bytes past zf
+	 * into z_send's own stack frame.  Both lines are therefore drawn
+	 * here, before a single byte is copied -- the same two checks
+	 * y_send() makes in src/backends/can/yocto_drv.c.
+	 *
+	 * An FD frame needs BOTH a build that can carry one and a handle
+	 * opened for it: a controller left in CAN_MODE_NORMAL cannot put
+	 * FDF on the wire, and z_open() falls through to normal mode when
+	 * ALP_CAN_MODE_FD is asked for with bitrate_data_hz == 0, so the
+	 * caller's config snapshot is the only honest record of what this
+	 * bus is actually running.  Bound the copy by sizeof zf.data
+	 * rather than by CAN_MAX_DLEN so the guard tracks the destination
+	 * object itself, matching _rx_trampoline() above. */
+	if (frame->fd) {
+		const struct alp_can *h = CONTAINER_OF(st, struct alp_can, state);
+		if (!IS_ENABLED(CONFIG_CAN_FD_MODE) || h->cfg.mode != ALP_CAN_MODE_FD) {
+			return ALP_ERR_NOSUPPORT;
+		}
+	}
+	if ((size_t)frame->payload_len >
+	    (frame->fd ? sizeof zf.data : (size_t)ALP_CAN_MAX_PAYLOAD_BYTES_CLASSIC)) {
+		return ALP_ERR_INVAL;
+	}
+
+	zf.id    = frame->id;
+	zf.dlc   = can_bytes_to_dlc(frame->payload_len);
+	zf.flags = (frame->ext_id ? CAN_FRAME_IDE : 0) | (frame->rtr ? CAN_FRAME_RTR : 0) |
+	           (frame->fd ? CAN_FRAME_FDF : 0) | (frame->brs ? CAN_FRAME_BRS : 0);
 	memcpy(zf.data, frame->data, frame->payload_len);
 	return _errno_to_alp(can_send(dev, &zf, K_MSEC(timeout_ms), NULL, NULL));
 }

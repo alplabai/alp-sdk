@@ -391,7 +391,7 @@ status:
 | `topology`             | Silicon-determined (core ids)     | No                        | Keys must match `soc.cores[].id`; `app:` / `board:` / `machine:` / `toolchain:` are SoM-extension.                       |
 | `memory_map`           | Silicon-determined (derived)      | Omit only when the SoM is not a dual-M55 AEN | Declare for non-stock partitioning; otherwise the loader derives from SoC `sram_banks_kb`. On AEN, a region named `<role>_slot0` (`he_slot0`/`hp_slot0`) is what makes `flash_args.slot0_load_address` (tan-cli#353) exist for that core; its `base:` may not be `TBD`/missing (`validate_metadata.py`'s `_check_som_slot0_address_resolved`). A DUAL-M55 AEN SoM must declare a disjoint `he_slot0`/`hp_slot0` pair: declaring it for one M55 role and not its sibling, or omitting it entirely, both make board generation refuse (#1069's disjoint-slot0 rule, extended to the fully-unauthored case by #1446); manifest emission refuses the half-authored case too. |
 | `mailbox.controller`   | Mixed                             | Yes (`"TBD"`)             | Required when any topology entry runs Zephyr or baremetal; controller name comes from the hand-written HW config.        |
-| `pad_routes[]`         | SoM extension                     | Yes (`dispatch: TBD`)     | One row per E1M pad that routes through an on-module mediator; pads NOT listed are implicit `dispatch: direct`.          |
+| `pad_routes[]`         | SoM extension                     | Yes (`dispatch: TBD`)     | One row per E1M pad that routes through an on-module mediator; pads NOT listed are implicit `dispatch: direct`. A pad that is physically open on this hardware revision (reaches neither a mediator nor the silicon) MUST get an explicit `dispatch: unrouted` row with a `doc:` — there is no implicit `unrouted`; `alp_gpio_open()` on one refuses with `ALP_ERR_NOSUPPORT` (#1854). |
 | `helper_firmware[]`    | SoM extension                     | Yes (`TBD` per field)     | One entry per on-module helper MCU image (CC3511E firmware, GD32 bridge firmware, …).  Three INDEPENDENT axes: `flash_method`/`flash_args` (how it is written locally), `update_channel` (how it is updated in the field), `flash_policy` (who may invoke the flash method — `customer`/`factory`/`recovery_only`; **required on every entry**, regardless of which of the other two it declares).  No preset declares `flash_method` today — GD32 programming was separated out of `tan` (#1439, tan-cli#732); see `metadata/e1m_modules/README.md`. |
 | `default_hw_rev`       | SoM extension                     | No                        | Must match a key in `metadata/e1m_modules/<family>/hw-revisions.yaml`.                                                  |
 | `status.*`             | SoM extension                     | n/a                       | Flags for tooling (e.g. preliminary, partial HW config).                                                                |
@@ -672,11 +672,13 @@ west build \
 > REFUSES rather than falling back to the E8's, whose node set is
 > different silicon (the E8 declares `ethosu85`; an E3 carries 2x
 > Ethos-U55 and no U85).  The Renesas RZ/V2N family (`v2n` /
-> `v2n-m1`) generates only the family-agnostic files (`board.yml`,
-> `Kconfig.alp_<board>`, the twister `.yaml`) -- its `.dts` / pinctrl
-> `.dtsi` / `_defconfig` stay hand-authored (mirror the nearest sibling,
-> e.g. E1M-V2N101) until the on-module GD32G553 supervisor's Renesas-side
-> pin assignments land in metadata.  TWO files stay hand-authored for
+> `v2n-m1`) generates the family-agnostic files (`board.yml`,
+> `Kconfig.alp_<board>`, the twister `.yaml`) PLUS the pinctrl `.dtsi`
+> and `_defconfig`, sourced from
+> `metadata/e1m_modules/v2n/supervisor-links.yaml` -- only its `.dts`
+> stays hand-authored (mirror the nearest sibling, e.g. E1M-V2N101) until
+> a metadata source for the remaining `.dts`-only facts lands.  TWO files
+> stay hand-authored for
 > every family and must be COPIED ACROSS by hand when a generated tree is
 > used as the board directory: `board.cmake` (flasher/debugger runner
 > args -- see `docs/architecture.md`'s generators-inventory entry for

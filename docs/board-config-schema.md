@@ -42,6 +42,7 @@ the SoM preset's `topology.<id>` when omitted):
 | `app`          | App source dir.  Required for `os: zephyr` / `os: baremetal`.  For `os: yocto` an app-only slice, pair with `recipe:` -- `app:` is a source path, never a bitbake target. |
 | `image`        | Yocto image recipe name (e.g. `alp-image-edge`).  Takes priority over `app:`/`recipe:` when both are set. |
 | `recipe`       | Yocto bitbake recipe packaging this slice's `app:` (e.g. `alp-lvgl-dashboard`).  Required for an app-only `os: yocto` slice -- otherwise the plan blocks the slice (`yocto-recipe-missing`) instead of emitting an invalid `bitbake <path>`. |
+| `toolchain`    | Override this slice's toolchain identifier (e.g. `llvm`), replacing the SoM preset's derived default (`arm-zephyr-eabi` for Zephyr, `poky-glibc` for Yocto).  Optional -- omitted keeps today's default.  Passed through verbatim into `--emit build-plan`'s `slices[].toolchain.id`/`system-manifest.yaml`'s `slices[].toolchain`. |
 | `os`           | NOT an OS picker — the runtime is class-derived (M→Zephyr, A→Yocto). Only `off` (skip slice) or `baremetal` (rare) are settable; a cross-class OS is rejected. |
 | `peripherals`  | Zephyr subsystem / Yocto package list for this slice.                                  |
 | `inference`    | App-level inference tuning (`default_arena_kib` only — backend set is silicon-driven). |
@@ -243,7 +244,7 @@ for the board-side C macros hand-written firmware uses
 entry binds an E1M-standard pad or peripheral instance
 (`ALP_E1M_GPIO_IO<N>`, `ALP_E1M_PWM<N>`, `ALP_E1M_I2C0/1` / `ALP_E1M_SPI0/1` /
 `ALP_E1M_UART0/1` / `ALP_E1M_I3C0`) to a board-side macro plus optional
-`doc:` / `active_low:` / `routes_via:` flags.
+`doc:` / `active_low:` / `pull:` / `debounce_ms:` / `board_alias:` flags.
 [`scripts/gen_board_header.py`](../scripts/gen_board_header.py)
 reads the block and emits `include/alp/boards/alp_<name>_routes.h`
 with one `#define <MACRO> ALP_E1M_<…>` line per entry.
@@ -251,7 +252,7 @@ with one `#define <MACRO> ALP_E1M_<…>` line per entry.
 #### Preset mode (SDK-internal shortcut)
 
 Most example projects under `examples/` target the EVK or X-EVK
-(66 do today — 46 on `e1m-evk`, 20 on `e1m-x-evk`), so they share a
+(99 do today — 74 on `e1m-evk`, 25 on `e1m-x-evk`), so they share a
 single board definition each via the `preset:` field:
 
 ```yaml
@@ -552,13 +553,12 @@ Two curation tiers bound CI cost (ADR 0018):
   release.
 - **Tier B — recipe-only**: wiring + compatibility metadata are
   maintained and emitted, but the library is not built in alp-sdk CI.
-  `python -m alp_cli doctor` labels it.
+  `tan doctor` labels it.
 
-`python -m alp_cli doctor` reports the selected libraries for the
-project in scope (tier + licence + compatibility), reading the same
-manifests, so the CLI and alp-studio's library picker never disagree.
-(This is alp-sdk's own Python preflight, distinct from `tan doctor` --
-see [`docs/cli.md`](cli.md).)
+`tan doctor` reports the selected libraries for the project in scope
+(tier + licence + compatibility), reading the same manifests, so the CLI
+and alp-studio's library picker never disagree. See
+[`docs/cli.md`](cli.md).
 
 Scoping a library to specific cores (`cores: [<id>]`) folds in what
 earlier schema drafts spelled as a separate per-core

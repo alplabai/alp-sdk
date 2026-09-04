@@ -152,14 +152,33 @@ ZTEST(alp_peripheral, test_power_open_returns_handle)
 	alp_power_close(p);
 }
 
-ZTEST(alp_peripheral, test_power_configure_wake_source_records_bitmap)
+ZTEST(alp_peripheral, test_power_configure_wake_source_none_is_ok)
 {
 	alp_power_t *p = alp_power_open();
 	zassert_not_null(p, NULL);
-	/* The configure call itself returns OK on every backend -- bits
-     * are evaluated lazily at request_sleep time. */
-	alp_status_t s = alp_power_configure_wake_source(p, ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_GPIO);
+	/* ALP_POWER_WAKE_NONE is trivially honoured -- there's nothing to
+     * arm, so even a backend with zero real wake capability accepts
+     * it. */
+	alp_status_t s = alp_power_configure_wake_source(p, ALP_POWER_WAKE_NONE);
 	zassert_equal(s, ALP_OK, NULL);
+	alp_power_close(p);
+}
+
+ZTEST(alp_peripheral, test_power_configure_wake_source_unsupported_bits_rejected)
+{
+	/* #1812 / #1813: the stub backend active on this native_sim build
+     * (no CONFIG_PM) can arm zero real wake sources -- reflected in
+     * alp_power_wake_capabilities() -- so a non-empty bitmap is now
+     * rejected HERE, at configuration time, instead of silently
+     * accepted and only failing later at request_sleep(). */
+	alp_power_t *p = alp_power_open();
+	zassert_not_null(p, NULL);
+
+	zassert_equal(
+	    alp_power_wake_capabilities(p), 0u, "stub backend must report zero armable wake bits");
+
+	alp_status_t s = alp_power_configure_wake_source(p, ALP_POWER_WAKE_RTC | ALP_POWER_WAKE_GPIO);
+	zassert_equal(s, ALP_ERR_NOSUPPORT, "got %d", (int)s);
 	alp_power_close(p);
 }
 
@@ -187,21 +206,88 @@ ZTEST(alp_peripheral, test_power_request_sleep_no_wake_no_timeout_returns_inval)
 ZTEST(alp_peripheral, test_power_request_sleep_valid_args_returns_nosupport)
 {
 	/* Backend HAL not wired yet -- valid args still NOSUPPORT, but
-     * the call must not crash and the optional info struct gets
-     * populated with the realised_mode echo. */
+     * the call must not crash and the optional info struct reports
+     * realised_mode == RUN, never the requested mode: nothing was
+     * actually realised on a call that always fails (#1813 review;
+     * matches yocto_drv.c's y_request_sleep failure path). */
 	alp_power_t *p = alp_power_open();
 	zassert_not_null(p, NULL);
-	alp_power_configure_wake_source(p, ALP_POWER_WAKE_RTC);
+	alp_power_configure_wake_source(p, ALP_POWER_WAKE_NONE);
 	alp_power_wake_info_t info = { 0 };
 	alp_status_t          s = alp_power_request_sleep(p, ALP_POWER_MODE_DEEP_SLEEP, 1000u, &info);
 	zassert_equal(s, ALP_ERR_NOSUPPORT, "got %d", (int)s);
-	zassert_equal(info.realised_mode, ALP_POWER_MODE_DEEP_SLEEP, NULL);
+	zassert_equal(info.realised_mode, ALP_POWER_MODE_RUN, NULL);
 	alp_power_close(p);
 }
 
 ZTEST(alp_peripheral, test_power_close_null_is_noop)
 {
 	alp_power_close(NULL); /* must not crash */
+}
+
+ZTEST(alp_peripheral, test_power_request_sleep_stop_mode_valid_arg)
+{
+	/* #1813: ALP_POWER_MODE_STOP is a valid request_sleep() mode --
+     * the dispatcher's INVAL enum guard must accept it exactly like
+     * the pre-existing three modes; the stub backend still reports
+     * NOSUPPORT (no real HAL wired), same as DEEP_SLEEP above. */
+	alp_power_t *p = alp_power_open();
+	zassert_not_null(p, NULL);
+	alp_power_configure_wake_source(p, ALP_POWER_WAKE_NONE);
+	alp_status_t s = alp_power_request_sleep(p, ALP_POWER_MODE_STOP, 1000u, NULL);
+	zassert_equal(s, ALP_ERR_NOSUPPORT, "got %d", (int)s);
+	alp_power_close(p);
+}
+
+ZTEST(alp_peripheral, test_power_configure_retention_none_is_ok)
+{
+	/* #1813: a backend with no configure_retention op (the stub)
+     * still accepts ALP_POWER_RETAIN_NONE -- "retain nothing" needs
+     * no backend opinion. */
+	alp_power_t *p = alp_power_open();
+	zassert_not_null(p, NULL);
+	alp_power_retain_t retain = { .level = ALP_POWER_RETAIN_NONE, .retain_kb = 0u };
+	alp_status_t       s      = alp_power_configure_retention(p, &retain);
+	zassert_equal(s, ALP_OK, "got %d", (int)s);
+	alp_power_close(p);
+}
+
+ZTEST(alp_peripheral, test_power_configure_retention_unsupported_level_rejected)
+{
+	/* Same reported-capability + error contract as the wake-source
+     * bitmap: a level the backend never promised is NOSUPPORT, not a
+     * silently-ignored request. */
+	alp_power_t *p = alp_power_open();
+	zassert_not_null(p, NULL);
+	alp_power_retain_t retain = { .level = ALP_POWER_RETAIN_UTILITY, .retain_kb = 0u };
+	alp_status_t       s      = alp_power_configure_retention(p, &retain);
+	zassert_equal(s, ALP_ERR_NOSUPPORT, "got %d", (int)s);
+	alp_power_close(p);
+}
+
+ZTEST(alp_peripheral, test_power_configure_retention_null_arg_returns_inval)
+{
+	alp_power_t *p = alp_power_open();
+	zassert_not_null(p, NULL);
+	alp_status_t s = alp_power_configure_retention(p, NULL);
+	zassert_equal(s, ALP_ERR_INVAL, "got %d", (int)s);
+	alp_power_close(p);
+}
+
+ZTEST(alp_peripheral, test_power_configure_retention_tcm_zero_kb_returns_inval)
+{
+	/* {ALP_POWER_RETAIN_TCM, retain_kb=0} is ambiguous, not "retain
+     * nothing" (that's ALP_POWER_RETAIN_NONE) -- the dispatcher
+     * rejects it before it ever reaches a backend op.  Without this
+     * guard the stub's NULL-configure_retention default path would
+     * return ALP_ERR_NOSUPPORT instead (level != NONE), not INVAL --
+     * this pins the INVAL specifically. */
+	alp_power_t *p = alp_power_open();
+	zassert_not_null(p, NULL);
+	alp_power_retain_t retain = { .level = ALP_POWER_RETAIN_TCM, .retain_kb = 0u };
+	alp_status_t       s      = alp_power_configure_retention(p, &retain);
+	zassert_equal(s, ALP_ERR_INVAL, "got %d", (int)s);
+	alp_power_close(p);
 }
 
 /* ------------------------------------------------------------------ */

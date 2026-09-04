@@ -89,6 +89,38 @@
  *       free `ch` while an op still holds it" guarantee, from ABOVE
  *       this file).
  *
+ * @par Link liveness (issue #1643)
+ * y_open() reports ALP_RPC_LINK_UP (rpc_ops.h's alp_rpc_notify_link())
+ * once /dev/rpmsg<N> is open -- the kernel only creates that chardev
+ * after the remote firmware's name-service announce, so reaching that
+ * point already means bound.  Reported strictly BEFORE pthread_create()
+ * spawns the RX worker below: that ordering (not the earlier revision's
+ * "notify after thread start") is load-bearing -- see y_open()'s own
+ * comment for the clobber it closes.  rpc_rx_main()'s poll()-failure
+ * and read()-returned-EOF/error paths (the existing "kernel dropped
+ * this endpoint" branches, NOT the wake-pipe close-side branch) both
+ * report ALP_RPC_LINK_LOST -- either one ends this thread's ability to
+ * ever receive again, so both must report the same link state, whether
+ * the far core actually reset or this side merely lost its poll().
+ * Deliberately does not touch the close protocol above: no new gate,
+ * no self-close detection added for this notify call, since neither
+ * failure path is ever reachable from inside a subscriber callback
+ * (only from the rx thread's own poll loop) and ch->ept_fd is never
+ * closed while this thread is still running (rpc_be_teardown() runs
+ * only from y_destroy(), strictly after this thread has returned) --
+ * so `ch` stays valid for the notify unconditionally.
+ * src/backends/rpc/yocto_uio_drv.c (RZ/V2N's userspace-virtio path)
+ * is NOT wired for link liveness in this revision -- its
+ * remoteproc/virtio teardown shape doesn't have this file's
+ * poll()+read() EOF signal, and mutating that backend's own delicate
+ * close protocol without V2N silicon to verify against was judged
+ * too risky for this change; tracked as follow-up work for issue
+ * #1643 rather than guessed at here.  Combined with the Zephyr
+ * backend's structural gap (see src/backends/rpc/zephyr_drv.c's own
+ * `@par Link liveness` comment), this is currently the ONLY path that
+ * can report a genuine ALP_RPC_LINK_LOST for the V2N CM33 target --
+ * V2N's A55 side needs yocto_uio_drv.c wired, not this file.
+ *
  * Linking: src/yocto/CMakeLists.txt gates this file behind
  * find_package(Threads) + pkg_check_modules(libmetal librpmsg) and
  * the ALP_SDK_HAVE_OPENAMP_USERLAND define.  When the host doesn't
@@ -175,6 +207,11 @@ struct rpc_be {
 	struct alp_rpc_sub subs[ALP_RPC_SUBS_PER_CHANNEL];
 
 	uint8_t tx_scratch[ALP_RPC_TX_FRAME_MAX];
+
+	/* Count of inbound reads rpc_rx_main() dropped because they exactly
+	 * filled `buf` (issue #1645) -- written only from that channel's own
+	 * dedicated rx_thread, so a plain counter needs no lock. */
+	uint32_t rx_oversized_drops;
 
 	/* Synchronous-call slot.  Single-element by design -- tx_mutex
      * serialises alp_rpc_call invocations on this channel so only one
@@ -343,7 +380,14 @@ static void rpc_be_teardown(struct rpc_be *ch)
 static void *rpc_rx_main(void *arg)
 {
 	struct rpc_be *ch = (struct rpc_be *)arg;
-	uint8_t        buf[ALP_RPC_TX_FRAME_MAX];
+	/* +1: a read() that fills exactly ALP_RPC_TX_FRAME_MAX bytes must stay
+	 * distinguishable from one that overflowed it. A read()-sized buffer
+	 * can never report more than its own size, so sizing buf to the wire
+	 * limit made a legitimate max-size frame indistinguishable from a
+	 * truncated larger one -- every real ALP_RPC_TX_FRAME_MAX-byte frame
+	 * was being dropped (issue #1645 regression). Sizing one byte past the
+	 * limit lets n > ALP_RPC_TX_FRAME_MAX alone mean "oversized". */
+	uint8_t buf[ALP_RPC_TX_FRAME_MAX + 1];
 
 	struct pollfd fds[2] = {
 		{ .fd = ch->ept_fd, .events = POLLIN },
@@ -354,6 +398,13 @@ static void *rpc_rx_main(void *arg)
 		int rc = poll(fds, 2, -1);
 		if (rc < 0) {
 			if (errno == EINTR) continue;
+			/* A genuine poll() failure ends this thread's ability to
+             * ever receive again, exactly like the read()-EOF/error
+             * branch below -- report the same LINK_LOST instead of
+             * silently leaving link_state at UP forever (issue #1643
+             * follow-up: both branches end the same thread, so both
+             * must report the same link state). */
+			alp_rpc_notify_link(ch->owner, ALP_RPC_LINK_LOST);
 			break;
 		}
 		if (fds[1].revents & POLLIN) {
@@ -366,7 +417,34 @@ static void *rpc_rx_main(void *arg)
 		ssize_t n = read(ch->ept_fd, buf, sizeof buf);
 		if (n <= 0) {
 			if (n < 0 && errno == EINTR) continue;
+			/* n == 0 (EOF) or a real read error: the kernel dropped
+             * this endpoint out from under us -- the far core reset or
+             * its remoteproc firmware stopped (issue #1643).  Not a
+             * close-side event: fds[1] (the wake pipe) was already
+             * checked above and would have taken that branch instead,
+             * so this thread's own y_shutdown() has not run yet.
+             * ch->owner stays valid for the rest of this function --
+             * y_destroy() only runs, via the dispatcher's own drain,
+             * strictly after this thread has returned (below). */
+			alp_rpc_notify_link(ch->owner, ALP_RPC_LINK_LOST);
 			break;
+		}
+		if ((size_t)n > ALP_RPC_TX_FRAME_MAX) {
+			/* buf is ALP_RPC_TX_FRAME_MAX+1 bytes, so n can only exceed
+			 * ALP_RPC_TX_FRAME_MAX here if the peer's real rpmsg message
+			 * was actually longer than the wire limit -- a legitimate
+			 * exactly-ALP_RPC_TX_FRAME_MAX-byte frame reads n ==
+			 * ALP_RPC_TX_FRAME_MAX and falls through to frame_parse()
+			 * below instead of being dropped (issue #1645 regression). */
+			ch->rx_oversized_drops++;
+			fprintf(stderr,
+			        "alp_rpc: dropping oversized %zd-byte inbound frame on channel "
+			        "'%s' (max %d bytes); %u frame(s) dropped so far\n",
+			        n,
+			        ch->name,
+			        ALP_RPC_TX_FRAME_MAX,
+			        ch->rx_oversized_drops);
+			continue;
 		}
 
 		const void *payload     = NULL;
@@ -733,6 +811,20 @@ y_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 		rpc_be_open_fail(ch, init_mask);
 		return ALP_ERR_NOT_READY;
 	}
+
+	/* issue #1643 follow-up: the kernel only creates /dev/rpmsg<N> once
+     * the remote firmware's name-service announce for this endpoint has
+     * already arrived -- reaching here means the link is genuinely
+     * bound.  Report it now, strictly BEFORE pthread_create() below
+     * starts the RX worker: that thread's very first poll()/read() can
+     * observe an already-dead peer and report LOST immediately, and if
+     * this UP notify ran afterward (the original ordering) it could
+     * clobber that LOST right back to UP -- reintroducing the exact
+     * bug #1643 exists to fix.  Harmless if a later stage in this
+     * function still fails: `ch` is never published via
+     * rpc_be_data_store() in that case, so no caller-visible channel
+     * ever observes the notify. */
+	alp_rpc_notify_link(st->owner, ALP_RPC_LINK_UP);
 
 	int pipe_rc = rpc_be_open_test_should_fail(RPC_BE_OPEN_STAGE_PIPE) ? (errno = EMFILE, -1)
 	                                                                   : pipe(ch->rx_wake_pipe);

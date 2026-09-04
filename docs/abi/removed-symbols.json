@@ -1,0 +1,41 @@
+{
+  "$comment": "Record of INTENTIONAL public-symbol removals -- see docs/abi/README.md's \"Recording an INTENTIONAL removal\" section. Loaded by scripts/abi_snapshot.py's load_removed_allowlist(); diff() reports a matching removal as ALLOWED instead of REMOVED. Every entry MUST carry: header, category (function|typedef|macro|variable), symbol, release, issue, reason, replacement (a symbol name, or null if there truly is none).",
+  "removed": [
+    {
+      "header": "alp/boards/alp_e1m_evk_routes.h",
+      "category": "macro",
+      "symbol": "EVK_ADC_BOARD_ID",
+      "release": "v0.17.0",
+      "issue": 1622,
+      "reason": "No BOARD_ID net exists anywhere on the E1M-EVK -- the name described a divider that was never on the board.",
+      "replacement": "EVK_ADC_ARDUINO_A0"
+    },
+    {
+      "header": "alp/boards/alp_e1m_evk_routes.h",
+      "category": "macro",
+      "symbol": "EVK_ADC_MB_AN",
+      "release": "v0.17.0",
+      "issue": 1622,
+      "reason": "ANA_S6 is a DAC0 output loopback sense (R88/R89/C107), not a mikroBUS AN pin.",
+      "replacement": "EVK_ADC_DAC0_LOOPBACK"
+    },
+    {
+      "header": "alp/boards/alp_e1m_evk_routes.h",
+      "category": "macro",
+      "symbol": "EVK_ADC_VBAT_SENSE",
+      "release": "v0.17.0",
+      "issue": 1622,
+      "reason": "There is no VBAT net on the E1M-EVK -- ANA_S7 is a DAC1 output loopback sense (R90/R91/C108); reading it as a battery voltage would silently misreport a DAC output as VBAT.",
+      "replacement": "EVK_ADC_DAC1_LOOPBACK"
+    },
+    {
+      "header": "alp/chips/cc3501e/events.h",
+      "category": "function",
+      "symbol": "cc3501e_set_event_callback",
+      "release": "v0.17.0",
+      "issue": 1723,
+      "reason": "A single callback slot per context made registration silently destructive: the Zephyr console companion registers on the shared context from its init path, AFTER the application's main() has registered, so it displaced the application's callback and consumed every async event while cc3501e_poll_events() kept returning ALP_OK. Replaced by add/remove so events fan out to every subscriber; keeping a set-style entry point would preserve the exact 'last registration silently wins' semantics the fix exists to remove.",
+      "replacement": "cc3501e_add_event_callback"
+    }
+  ]
+}

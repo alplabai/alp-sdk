@@ -66,6 +66,14 @@ SSI2 -> right amp) landed in the carrier `e1m-x-evk.dtsi` (issue #1171); the
 has a DT consumer. dtc-clean against the vendored linux-renesas source for
 both `e1m-v2n101-x-evk` and `e1m-v2m101-x-evk`; not bench-verified.
 
+**Binding unverified for this SoC, flagged independently on `dev`:** the
+audio-graph path uses the `rcar_sound` (R-Car) binding, and whether the
+RZ/V2N SSIU IP actually answers to it — as opposed to a different
+compatible/binding this repo has not identified — has not been confirmed
+against the linux-renesas 6.1.141-cip43 `r9a09g056` dtsi. dtc-clean and
+phandle-resolved is not the same claim as binding-correct-for-this-SoC;
+first boot on the bench is the actual answer.
+
 The `ssi1_pins`/`ssi2_pins` vs `i2c6_pins`/`i2c7_pins` pad conflict (both
 groups claimed port 4, pins 4-7) is resolved: `&i2c6`/`&i2c7` are now
 `status = "disabled"` -- neither RIIC6 nor RIIC7 names a board net in

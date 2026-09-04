@@ -71,7 +71,11 @@
             "required": ["e1m"],
             "properties": {
               "e1m": { "type": "string", "pattern": "^E1M_[A-Z0-9_]+$" },
-              "dispatch": { "type": "string" },
+              "dispatch": {
+                "type": "string",
+                "enum": ["cc3501e", "gd32_bridge", "direct", "TBD"],
+                "description": "Same vocabulary as the SoM preset's pad_route_entry.dispatch (som-preset-v1.schema.json) -- a typo here would otherwise validate and silently reach scripts/gen_cc3501e_gpio_routes.py as a no-match, dropping the pad instead of failing the build."
+              },
               "dispatch_pin": { "type": ["integer", "string"] },
               "doc": { "type": "string" }
             }

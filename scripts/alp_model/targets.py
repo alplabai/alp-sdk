@@ -33,6 +33,31 @@ def _npu_backend(npu_type: str, subtype: str) -> str | None:
     return None
 
 
+def _accel_config(npu: dict, backend: str) -> str:
+    """vela `--accelerator-config` string for one `npus[]` entry, e.g.
+    `ethos-u55-256`; `""` for a backend with no per-target accel-config.
+
+    The one machine source of this string -- `_soc_targets()` below and
+    `scripts/validate_metadata.py`'s model-perf paired-core cross-check
+    both import it, rather than each hand-building the same f-string, so
+    the two can't drift (issue #1520 review, PR #1884): a missing
+    `mac_per_cycle` on an `ethos_u` npus[] entry is a malformed SoC JSON
+    and raises `KeyError` here, with a message naming the npu type and the
+    missing key -- it must never be silently masked into a truncated
+    string like `ethos-u55-`."""
+    if backend != "ethos_u":
+        return ""
+    try:
+        return f"{npu['type']}-{npu['mac_per_cycle']}"
+    except KeyError as exc:
+        raise KeyError(
+            f"ethos_u npu {npu.get('type', '<missing type>')!r} is missing "
+            f"required key {exc.args[0]!r} -- every ethos-u* npus[] entry "
+            f"must declare mac_per_cycle "
+            f"(metadata/schemas/soc-spec-v1.schema.json)"
+        ) from exc
+
+
 def _soc_targets(soc: dict, silicon_ref: str) -> list[TargetSpec]:
     """One TargetSpec per mappable NPU in a SoC's npus[] (deduped by the caller)."""
     out: list[TargetSpec] = []
@@ -41,7 +66,7 @@ def _soc_targets(soc: dict, silicon_ref: str) -> list[TargetSpec]:
         backend = _npu_backend(npu_type, npu.get("subtype", ""))
         if backend is None:
             continue
-        accel = f"{npu_type}-{npu['mac_per_cycle']}" if backend == "ethos_u" else ""
+        accel = _accel_config(npu, backend)
         out.append(TargetSpec(backend=backend, silicon_ref=silicon_ref, accel_config=accel))
     return out
 

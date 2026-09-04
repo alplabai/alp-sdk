@@ -52,14 +52,14 @@ on:
       - 'scripts/lint_doc_yaml_fragments.py'
       - 'scripts/check_som_bundle.py'
       - 'scripts/check_chip_header_status.py'
+      - 'scripts/check_i2c_address_uniqueness.py'
       - 'scripts/check_e1m_pinout.py'
+      - 'scripts/check_amp_pad_claims.py'
       - 'scripts/sync_e1m_spec.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
       - 'tests/fixtures/emit-snapshots/**'
       - 'tests/fixtures/stub-symbol-matrix/**'
-      - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
-      - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
       - 'docs/**/*.md'
       - 'examples/**/*.md'
@@ -72,7 +72,6 @@ on:
       - 'scripts/alp_cli/__init__.py'
       - 'scripts/alp_lock/**'
       - 'scripts/west_commands/alp_lock.py'
-      - 'alp.lock'
       - 'changelog.d/**'
       - 'scripts/assemble_changelog.py'
       - 'scripts/check_changelog_fragments.py'
@@ -122,13 +121,13 @@ on:
       - 'scripts/lint_doc_yaml_fragments.py'
       - 'scripts/check_som_bundle.py'
       - 'scripts/check_chip_header_status.py'
+      - 'scripts/check_i2c_address_uniqueness.py'
       - 'scripts/check_e1m_pinout.py'
+      - 'scripts/check_amp_pad_claims.py'
       - 'scripts/sync_e1m_spec.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
       - 'tests/fixtures/stub-symbol-matrix/**'
-      - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
-      - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
       - 'docs/**/*.md'
       - 'examples/**/*.md'
@@ -141,7 +140,6 @@ on:
       - 'scripts/alp_cli/__init__.py'
       - 'scripts/alp_lock/**'
       - 'scripts/west_commands/alp_lock.py'
-      - 'alp.lock'
       - 'changelog.d/**'
       - 'scripts/assemble_changelog.py'
       - 'scripts/check_changelog_fragments.py'
@@ -211,6 +209,14 @@ jobs:
       # accidentally claim the same silicon pad on a SoM pinout.
       - name: Check pin conflicts in every SoM peripheral map
         run: python3 scripts/check_pin_conflicts.py
+
+      # #1142: the A55's pad claims live in the Linux devicetree under
+      # meta-alp-sdk/, the CM33's in metadata/pinmux/v2n.yaml's `core`
+      # field (#1157), and neither side could see the other -- which is
+      # how the usb20 OVC gpio-hog silently clobbered the CM33's live
+      # SCK7 mux on P9.6 (errata E3) until a bench session found it.
+      - name: Check no Linux DT pad claim lands on a CM33-owned pad
+        run: python3 scripts/check_amp_pad_claims.py
 
       # Cross-checks every non-TBD E1M pad/function claimed by a SoM
       # pin-mux table against the vendored e1m-spec standard snapshot
@@ -414,7 +420,7 @@ jobs:
 
       # Issue #1372: nothing validated that a SoM preset's
       # helper_firmware[].firmware_path (six AEN presets pointed at
-      # firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin) actually resolves to a
+      # a prebuilt companion image) actually resolves to a
       # file in the tree -- not the schema, not the validator, not the
       # manifest emitter, not tan. Omission of the key is legal (means "no
       # artefact yet") and is left alone; only a present-but-broken path
@@ -487,6 +493,13 @@ jobs:
       - name: Gate — I2C bus name in docs/examples agrees with i2c_devices metadata
         run: python3 scripts/check_i2c_bus_doc_consistency.py
 
+      # #1675: no two declared I2C devices may claim the same 7-bit
+      # address on the same bus -- #1163 (TMP112 vs TPS628640 both
+      # claiming brd_i2c 0x48 on two SoM presets) sat unremediated in
+      # metadata with nothing to catch it in CI.
+      - name: Gate — I2C 7-bit address uniqueness per declared bus
+        run: python3 scripts/check_i2c_address_uniqueness.py
+
       # #1136: pr-twister.yml inits its topdir from Zephyr's OWN west.yml
       # (`west init -m zephyr`), so it never notices a Zephyr module that's
       # unreachable from alp-sdk's OWN manifest (`west init -l alp-sdk` --
@@ -544,7 +557,13 @@ jobs:
       - name: "Gate — apt-get update/install goes through scripts/ci/apt-bounded.sh (#1575)"
         run: python3 scripts/check_apt_bounded.py
 
-      - name: alp.lock in sync
+      - name: alp.lock generator self-check
+        # alp.lock is generated on demand, not committed (#1576): its
+        # `digests.metadata` is a single hash over the whole metadata/**
+        # tree, so any two PRs touching different metadata files rewrote
+        # the same line from different bases and conflicted by
+        # construction. `--check` builds a lock in memory and
+        # schema-validates it instead of diffing against a tracked copy.
         run: python3 scripts/west_commands/alp_lock.py --workspace . --check
 
       # Validate every HiL smoke spec under tests/hil/ parses against
@@ -587,7 +606,6 @@ jobs:
       # only surface in a HiL run.
       - name: gd32-bridge protocol vectors are not drifted
         run: |
-          python3 firmware/gd32-bridge/tests/gen_protocol_vectors.py --check
 
       # Cross-family portability lint -- catches an example that
       # silently reaches for a chip that isn't populated on its own

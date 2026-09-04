@@ -59,7 +59,7 @@ typedef enum {
 typedef enum {
 	ALP_OK               = 0,
 	ALP_ERR_INVAL        = -1, /**< Invalid argument. */
-	ALP_ERR_NOT_READY    = -2, /**< Peripheral not initialised. */
+	ALP_ERR_NOT_READY    = -2, /**< The handle is not in a state to perform this operation. */
 	ALP_ERR_BUSY         = -3, /**< Peripheral busy. */
 	ALP_ERR_TIMEOUT      = -4, /**< Transfer timed out. */
 	ALP_ERR_IO           = -5, /**< Bus / line error. */
@@ -399,7 +399,8 @@ alp_i2c_t *alp_i2c_open(const alp_i2c_config_t *cfg);
  * @param[in] data  Source bytes.
  * @param[in] len   Byte count.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ * @return ALP_OK / ALP_ERR_INVAL (@p data NULL with @p len > 0) /
+ *         ALP_ERR_NOT_READY (NULL or closed @p bus) /
  *         ALP_ERR_IO (NACK / bus fault) / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, size_t len);
@@ -412,7 +413,8 @@ alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, si
  * @param[out] data  Destination buffer.
  * @param[in]  len   Byte count to read.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ * @return ALP_OK / ALP_ERR_INVAL (@p data NULL with @p len > 0) /
+ *         ALP_ERR_NOT_READY (NULL or closed @p bus) /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t len);
@@ -430,8 +432,9 @@ alp_status_t alp_i2c_read(alp_i2c_t *bus, uint8_t addr, uint8_t *data, size_t le
  * @param[out] rdata  Receive buffer.
  * @param[in]  rlen   Read length.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
- *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
+ * @return ALP_OK / ALP_ERR_INVAL (@p wdata NULL with @p wlen > 0, or
+ *         @p rdata NULL with @p rlen > 0) / ALP_ERR_NOT_READY (NULL or
+ *         closed @p bus) / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_i2c_write_read(alp_i2c_t     *bus,
                                 uint8_t        addr,
@@ -652,7 +655,24 @@ alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg);
  * @param[out] rx   Receive buffer.  May be NULL to discard MISO.
  * @param[in]  len  Transfer length in bytes.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ * DMA and the data cache: @p tx and @p rx may live in ordinary cacheable
+ * memory -- a caller does not have to allocate them out of TCM or a
+ * non-cacheable region.  Where a backend moves the data over a DMA master
+ * that does not snoop the CPU cache, the driver owns the maintenance: it
+ * cleans @p tx before the transfer and invalidates @p rx after it.  (On
+ * AEN the PL330 is programmed AxCACHE = 0b0010 -- Normal non-cacheable,
+ * non-bufferable -- so it neither snoops nor allocates; see #1830.)
+ *
+ * The one thing that is the caller's job is granularity.  Cache
+ * maintenance operates on whole cache lines, so a partially-covered line
+ * is invalidated in full: if @p rx shares a cache line with other live
+ * data, a CPU write to that neighbour during the transfer window can be
+ * discarded by the post-transfer invalidate.  Give a DMA-sized @p rx
+ * buffer its own cache line(s).  This does not apply to @p tx, which is
+ * only ever cleaned, never invalidated.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL (@p len exceeds the per-transfer
+ *         ceiling) / ALP_ERR_NOT_READY (NULL or closed @p bus) /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, size_t len);
@@ -664,7 +684,8 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
  * @param[in] tx   Bytes to send.  Must be non-NULL when @p len > 0.
  * @param[in] len  Byte count.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ * @return ALP_OK / ALP_ERR_INVAL (@p tx NULL with @p len > 0) /
+ *         ALP_ERR_NOT_READY (NULL or closed @p bus) /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len);
@@ -676,7 +697,8 @@ alp_status_t alp_spi_write(alp_spi_t *bus, const uint8_t *tx, size_t len);
  * @param[out] rx   Receive buffer.  Must be non-NULL when @p len > 0.
  * @param[in]  len  Byte count.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ * @return ALP_OK / ALP_ERR_INVAL (@p rx NULL with @p len > 0) /
+ *         ALP_ERR_NOT_READY (NULL or closed @p bus) /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_spi_read(alp_spi_t *bus, uint8_t *rx, size_t len);
@@ -848,20 +870,52 @@ typedef enum {
 	ALP_UART_PARITY_ODD  = 2
 } alp_uart_parity_t;
 
+/**
+ * @brief Hardware/software line flow control for @ref alp_uart_config_t.
+ *
+ * On a real UART port, a backend that cannot honour a non-@ref
+ * ALP_UART_FLOW_NONE value returns @ref ALP_ERR_NOSUPPORT from @ref
+ * alp_uart_open instead of silently accepting the request and dropping
+ * it (issue #1639).  This is a guarantee about the backend's own
+ * configuration layer: where the driver exposes a way to read its
+ * applied setting back (Zephyr's @c uart_config_get, Linux @c
+ * tcgetattr), a request that was accepted but not actually applied is
+ * caught and turned into @ref ALP_ERR_NOSUPPORT; where it does not (no
+ * @c config_get, or the CMSIS-Driver @c Control call itself refusing
+ * the mode), @ref ALP_OK trusts the driver's own success return with
+ * nothing further to check locally.  It does NOT cover the physical
+ * wiring: on a board whose devicetree overlay/pinmux does not route
+ * RTS/CTS to this UART node, @ref alp_uart_open can still return @ref
+ * ALP_OK for @ref ALP_UART_FLOW_RTS_CTS with no flow control on the
+ * line, because per-SoM RTS/CTS pad routing is not yet emitted (see
+ * issue #1639's changelog).  This governs backends that drive an
+ * actual line (Zephyr driver, Yocto tty, vendor CMSIS); it does not
+ * extend to the test doubles under @c CONFIG_ALP_SDK_TESTING_UART or
+ * @c CONFIG_ALP_SDK_UART_SW_FALLBACK, which are not real ports and
+ * document their own always-succeeds contract.
+ */
+typedef enum {
+	ALP_UART_FLOW_NONE     = 0, /**< No flow control (default). */
+	ALP_UART_FLOW_RTS_CTS  = 1, /**< 4-wire hardware flow control. */
+	ALP_UART_FLOW_XON_XOFF = 2  /**< In-band software framing; many drivers reject. */
+} alp_uart_flow_t;
+
 typedef struct {
 	uint32_t          port_id;
 	uint32_t          baudrate;
 	uint8_t           data_bits; /**< Usually 8. */
 	uint8_t           stop_bits; /**< 1 or 2. */
 	alp_uart_parity_t parity;
+	alp_uart_flow_t   flow_control; /**< Default @ref ALP_UART_FLOW_NONE. */
 } alp_uart_config_t;
 
 /**
  * @brief Default-initialize an @ref alp_uart_config_t for port @p id.
  *
- * Identity from @p id; canonical defaults = 115200 8N1:
+ * Identity from @p id; canonical defaults = 115200 8N1, no flow control:
  * @c baudrate = 115200, @c data_bits = 8, @c stop_bits = 1,
- * @c parity = @ref ALP_UART_PARITY_NONE.
+ * @c parity = @ref ALP_UART_PARITY_NONE,
+ * @c flow_control = @ref ALP_UART_FLOW_NONE.
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer
@@ -869,16 +923,21 @@ typedef struct {
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_UART_CONFIG_DEFAULT(id) \
-	((alp_uart_config_t){ .port_id   = (id), \
-	                      .baudrate  = 115200u, \
-	                      .data_bits = 8u, \
-	                      .stop_bits = 1u, \
-	                      .parity    = ALP_UART_PARITY_NONE })
+	((alp_uart_config_t){ .port_id      = (id), \
+	                      .baudrate     = 115200u, \
+	                      .data_bits    = 8u, \
+	                      .stop_bits    = 1u, \
+	                      .parity       = ALP_UART_PARITY_NONE, \
+	                      .flow_control = ALP_UART_FLOW_NONE })
 
 /**
  * @brief Acquire a UART port handle.
  *
- * @param[in] cfg  Port configuration.  Must be non-NULL.
+ * @param[in] cfg  Port configuration.  Must be non-NULL.  A non-@ref
+ *                 ALP_UART_FLOW_NONE @c flow_control the backend
+ *                 cannot honour fails the whole open with @ref
+ *                 ALP_ERR_NOSUPPORT rather than silently dropping it
+ *                 and configuring the line with no flow control.
  *
  * @return Open handle on success; NULL with @ref alp_last_error
  *         set to @ref ALP_ERR_INVAL / @ref ALP_ERR_NOT_READY /
@@ -893,7 +952,8 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg);
  * @param[in] data  Source bytes.
  * @param[in] len   Byte count.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ * @return ALP_OK / ALP_ERR_INVAL (@p data NULL with @p len > 0) /
+ *         ALP_ERR_NOT_READY (NULL or closed @p port) /
  *         ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
@@ -918,7 +978,8 @@ alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len);
  * @param[in]  timeout_ms  Max wait for the whole call; 0 = poll once,
  *                         don't block.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
+ * @return ALP_OK / ALP_ERR_INVAL (@p data NULL with @p len > 0) /
+ *         ALP_ERR_NOT_READY (NULL or closed @p port) /
  *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_NOSUPPORT.
  */
 alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t timeout_ms);

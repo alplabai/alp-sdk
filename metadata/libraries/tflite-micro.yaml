@@ -6,7 +6,7 @@
 #   * `integration.zephyr.kconfig` below emits only
 #     "CONFIG_ALP_TFLM_REF_KERNELS=y" (the always-on SW-fallback kernel
 #     set) today, transcribed verbatim by
-#     scripts/alp_orchestrate/libraries.py:197 (`zephyr_kconfig_lines`) --
+#     scripts/alp_orchestrate/libraries.py:321 (`zephyr_kconfig_lines`) --
 #     the schema's kconfig items must match `^CONFIG_...=...$`, so the
 #     "include path + tflm_config.h via v0.4 loader hook" note lives here
 #     as prose instead of an invented CONFIG_ line.  This bullet used to

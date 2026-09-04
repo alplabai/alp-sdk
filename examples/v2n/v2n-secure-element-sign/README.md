@@ -22,8 +22,8 @@ integrated.
 
 ```
 [se] I2C_STATE probe -> ALP_OK
-[se] read_product_info -> -5 (expected NOSUPPORT)
-[se] send_apdu -> -5 resp_len=0 (expected NOSUPPORT, zero bytes)
+[se] read_product_info -> -6 (expected NOSUPPORT)
+[se] send_apdu -> -6 resp_len=0 (expected NOSUPPORT, zero bytes)
 [se] RESULT PASS: Trust M I2C_STATE probe works; product-info/raw-APDU are cleanly blocked with ALP_ERR_NOSUPPORT
 ```
 

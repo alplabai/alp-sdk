@@ -27,11 +27,17 @@ machinery:
      `atoc`.
 
      Board trees, because tests/scripts/test_gen_zephyr_board.py CANNOT cover
-     `e1m_aen401_m55_hp` / `e1m_aen601_m55_hp`: their SoC spec entries have no
-     `zephyr_cpucluster`, so `emit_zephyr_board()` refuses to generate them
-     and the byte-parity test skips them entirely (#1332). A generator-only
-     check misses those two boards -- it did exactly that while this change
-     was being written.
+     `e1m_aen401_m55_hp` / `e1m_aen601_m55_hp`: e4.json/e6.json publish no
+     `zephyr_peripherals_dtsi`, so `emit_zephyr_board()` raises and the
+     byte-parity test skips them entirely -- see that test's NOT_EMITTABLE
+     table, which carries the same reason. A generator-only check misses
+     those two boards -- it did exactly that while this change was being
+     written.
+
+     (This used to name a missing `zephyr_cpucluster` as the blocker, citing
+     #1332. #1332 is what ADDED that key: e4.json and e6.json both declare
+     `zephyr_cpucluster` now, so that reason no longer holds and pointed a
+     reader at the wrong file to fix.)
 
      Example overlays, because an app can `/delete-node/` the generated
      partitions and declare its own table, escaping the board tree completely

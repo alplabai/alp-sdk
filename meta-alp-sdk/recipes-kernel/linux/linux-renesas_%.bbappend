@@ -214,13 +214,6 @@ SRC_URI:append = " \
     file://no-kernel-audit.cfg \
 "
 
-# TAS2563 smart-amp codec (mainline ASoC `tas2562` covers it) -- pre-staged
-# for the carrier audio TODO in e1m-x-evk.dtsi. linux-renesas is
-# kernel-yocto based, so this .cfg is auto-merged from SRC_URI. Harmless
-# (no DT consumer) until the ti,tas2563 nodes land in the carrier dtsi.
-SRC_URI:append:e1m-v2m101 = " file://tas2563-audio.cfg"
-SRC_URI:append:e1m-v2n101 = " file://tas2563-audio.cfg"
-
 # Display stack: RK055HDMIPI4MA0 panel on Display 1 (DSI + PWM backlight + GPT
 # + GD32-bridge GPIO for panel reset).
 SRC_URI:append:e1m-v2n101 = " file://display.cfg"

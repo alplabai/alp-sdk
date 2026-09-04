@@ -35,7 +35,12 @@ alp_status_t atecc608b_wake(atecc608b_t *dev)
      * lives in CryptoAuthLib's HAL backend (TBD). */
 	uint8_t buf = 0;
 	(void)alp_i2c_write(dev->bus, 0x00, &buf, 1);
-	alp_delay_us(1500);
+	/* tWHI: the part needs >= 1500 us after the wake pulse before it answers.
+	 * alp_delay_ms has millisecond granularity, so this rounds UP to 2 ms --
+	 * the contract is a minimum hold and overshooting is safe (the device
+	 * stays awake until an idle/sleep command or its ~1.3 s watchdog).
+	 * Rounding DOWN to 1 ms would break the datasheet minimum. */
+	alp_delay_ms(2);
 	return ALP_OK;
 }
 

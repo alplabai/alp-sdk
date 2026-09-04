@@ -24,11 +24,20 @@
  * SPI1 IRQ number (upstream Zephyr declares no SPI node, so it is not in
  * the build tree) -- confirm it against the AE822 TRM before relying on
  * the interrupt-driven path on silicon.
+ *
+ * Also enables i2c2 (P5_6 SCL_C / P5_7 SDA_C) + the `alp-i2c0` alias -- the
+ * on-module EEPROM manifest bus alp_hw_info_read() opens as bus_id 0.
+ * Without it the manifest read structurally cannot succeed and the banner
+ * falls back to the raw board target instead of the SoM identity; see #1870.
+ * Same pinctrl (input-enable + bias-pull-down) as
+ * examples/peripheral-io/alp-console's bench-validated overlay -- do NOT
+ * "correct" the pull direction.
  */
 
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/dma/alif_dma_event_router.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
 
 &pinctrl {
 	/*
@@ -50,6 +59,38 @@
 		group1 {
 			pinmux = <PIN_P14_4__SPI1_MISO_C>;
 			input-enable;
+		};
+
+		/*
+		 * P2_6 = the CC3501E READY/host-IRQ input (CC35 GPIO17).  Its mux default
+		 * IS GPIO, but on Alif the pad INPUT BUFFER is a PADCTRL bit that only
+		 * pinctrl sets -- gpio_dw drives direction in the controller and never
+		 * touches the pad, and snps,designware-gpio has no pinctrl-0 property of
+		 * its own.  Without this group the buffer stays off and
+		 * alp_gpio_read(P2_6) returns 0 forever no matter what the CC35 drives
+		 * (scope 2026-08-24: a clean 1.767 V line idling HIGH with narrow LOW
+		 * pulses), so the host silently fell back to fixed settle gaps.
+		 *
+		 * It lives HERE rather than in a standalone state applied at runtime
+		 * because P2_6's alternate function is SPI1_SCLK_A: a second pinctrl pass
+		 * after SPI1 is up killed the bridge on silicon.  In the SPI driver's
+		 * single init pass it is inert.
+		 */
+		group2 {
+			pinmux = <PIN_P2_6__GPIO>;
+			input-enable;
+		};
+	};
+
+	/* I2C2 master (EEPROM manifest bus): SCL P5_6 / SDA P5_7 (_C).  Same
+	 * pad config as alp-console's bench-validated overlay -- input-enable
+	 * for ACK-detect, bias-pull-down (the pad DSC value Alif's reference
+	 * uses; the bus is pulled up on the carrier via R95/R96). */
+	pinctrl_i2c2: pinctrl_i2c2 {
+		group0 {
+			pinmux = <PIN_P5_6__I2C2_SCL_C>, <PIN_P5_7__I2C2_SDA_C>;
+			input-enable;
+			bias-pull-down;
 		};
 	};
 };
@@ -94,6 +135,10 @@
 		clock-frequency = <200000000>; /* real SSI functional clock (was mis-set 400M; proven via BAUDR scaling) */
 		dwc-ssi;
 		fifo-depth = <16>;
+		/* MISO capture delay in SSI clocks.  Needed at 25 MHz (40 ns bit period):
+		 * silicon-measured on e1m-aen-evk-01, rx-delay 0 fails outright and 4
+		 * fails too; 2 is the working point.  Harmless at 14.29 MHz. */
+		rx-delay = <2>;
 		pinctrl-0 = <&pinctrl_spi1>;
 		pinctrl-names = "default";
 		status = "okay";
@@ -113,9 +158,10 @@
 
 /*
  * gpio2 for the host-IRQ/READY input (CC35 GPIO17 -> Alif P2_6, alp_pins[2]).
- * P2_6's reset-default mux is function 0 = GPIO (PIN_P2_6__GPIO), so no pinctrl
- * group is needed; gpio_dw defaults the pin to input, which the app confirms via
- * alp_gpio_configure(INPUT).  The READY line lets the host gate reply phases on
+ * P2_6's reset-default mux IS function 0 = GPIO (PIN_P2_6__GPIO), but the pad
+ * still needs an input-enable group to turn its INPUT BUFFER on -- that lives in
+ * pinctrl_spi1 group2 above.  gpio_dw defaults the pin to input, which the app
+ * confirms via alp_gpio_configure(INPUT).  The READY line lets the host gate reply phases on
  * the slave's actual re-arm instead of a fixed settle gap. */
 &gpio2 {
 	status = "okay";
@@ -131,32 +177,17 @@
  * is SYSTOP (already on -- the app drives SPI1/GPIO in the same region); its
  * PL330 boot-manager security latch (CLKCTRL_PER_MST) is in dma_alif_boot_latch.c.
  * The fork PL330 driver statically allocates the per-channel ucode + remaps it via
- * local_to_global(), so no external `microcode` prop is needed.  IRQs 299..306 =
- * the 8 DMA0 channel-done lines, 331 = abort (AE822 DFP rtss_he).
+ * local_to_global(), so no external `microcode` prop is needed.
+ *
+ * dma0 + evtrtr0 are now declared in ensemble_e8_peripherals.dtsi (disabled
+ * by default, alp-sdk issue #1815); this overlay only enables them.
  */
-&soc {
-	dma0: dma@49080000 {
-		compatible = "alif,dma-pl330";
-		reg = <0x49080000 0x1000>;
-		#dma-cells = <2>;
-		dma-channels = <8>;
-		interrupt-parent = <&nvic>;
-		interrupts = <299 3>, <300 3>, <301 3>, <302 3>, <303 3>,
-			     <304 3>, <305 3>, <306 3>, <331 3>;
-		interrupt-names = "channel0", "channel1", "channel2", "channel3",
-				  "channel4", "channel5", "channel6", "channel7", "abort";
-		status = "okay";
-	};
+&dma0 {
+	status = "okay";
+};
 
-	evtrtr0: event-router@49035000 {
-		compatible = "alif,dma-event-router";
-		reg = <0x49035000 0x100>;
-		dma-controller = <&dma0>;
-		channels = <32>;
-		dma-groups = <4>;  /* SYSTOP router: 4 ACK_TYPE groups (0-3); SPI1 uses group 2 */
-		#dma-cells = <2>;
-		status = "okay";
-	};
+&evtrtr0 {
+	status = "okay";
 };
 
 /*
@@ -172,10 +203,48 @@
 	dma-names = "txdma", "rxdma";
 };
 
+&i2c2 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_STANDARD>;   /* 100 kHz */
+};
+
 / {
 	aliases {
 		/* bus_id 1 in alp_spi_open() -> this controller. */
 		alp-spi1 = &cc3501e_spi;
+		alp-i2c0 = &i2c2;   /* bus 0 for alp_hw_info_read() -> EEPROM manifest */
+
+		/*
+		 * Attention line for CONFIG_ALP_SDK_CC3501E_EVENT_IRQ (#130): the
+		 * companion console's edge ISR schedules a GET_PENDING_EVENTS drain
+		 * instead of waiting for the ~500 ms timer poll.
+		 *
+		 * SAME PIN as alp_pins[2] above, deliberately.  There is one
+		 * slave->master wire and it already carries READY flow control; the
+		 * firmware (built with CC3501E_ATTN_PULSE) gives it an edge when an
+		 * event is queued while the bridge is idle.  Draining on ANY rising
+		 * edge is safe -- an empty ring answers with an empty list -- so the
+		 * host never has to tell attention from an ordinary re-arm.
+		 *
+		 * BODGE-GATED: this net is a rev-1 wire, absent on the stock EVK,
+		 * which is why CONFIG_ALP_SDK_CC3501E_EVENT_IRQ stays default-off.
+		 * The alias existing does nothing on its own.
+		 */
+		cc3501e-attn = &cc3501e_attn;
+	};
+
+	/* Node the cc3501e-attn alias points at; `gpios` is what
+	 * GPIO_DT_SPEC_GET(DT_ALIAS(cc3501e_attn), gpios) reads. */
+	/* NO compatible: GPIO_DT_SPEC_GET() only needs the `gpios` phandle-array.
+	 * Declaring "alp,pin-array" here made a SECOND node of that compatible and
+	 * broke the SDK's pin-array resolution outright -- bridge bring-up failed
+	 * with err=-1 ("SPI bus 1 / WIFI_EN+nRESET absent?") because alp_pins no
+	 * longer resolved. Bench-caught 2026-08-26. */
+	cc3501e_attn: cc3501e-attn {
+		compatible = "alp,cc3501e-attn";
+		gpios = <&gpio2 6 GPIO_ACTIVE_HIGH>;
 	};
 
 	/*

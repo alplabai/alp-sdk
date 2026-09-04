@@ -23,7 +23,7 @@
 
 | File | Responsibility | Task |
 | --- | --- | --- |
-| `firmware/gd32-bridge/**` (from branch) | Real transport HAL + build (`transport_hw_gd32.c`, `bridge_board_config.h`, `transport.h`); integrated, **no logic edits** | 1 |
+| `gd32-bridge-firmware:**` (from branch) | Real transport HAL + build (`transport_hw_gd32.c`, `bridge_board_config.h`, `transport.h`); integrated, **no logic edits** | 1 |
 | `scripts/flash_backends/swd_probe.py` | Renamed from `swd_v2n_host.py`; SEGGER J-Link primary path + OpenOCD/pyOCD fallback | 2 |
 | `scripts/flash_backends/__init__.py` | Update the backend import (`swd_v2n_host`→`swd_probe`) | 2 |
 | `tests/scripts/test_flash_backends.py` | Rename refs; new J-Link tests; update interface/target-guard test | 2 |
@@ -32,7 +32,7 @@
 | `metadata/schemas/som-preset-v1.schema.json`, `scripts/west_commands/alp_flash.py`, `docs/v0.6-tbd-and-assumptions.md` | Update the `swd_v2n_host` example/comment/table to `swd_probe` | 2 |
 | `scripts/openocd/cmsis-dap.cfg`, `jlink.cfg`, `gd32g553.cfg`, `README.md` | OpenOCD alternative-path configs (bench-unverified, honestly flagged) | 3 |
 | `docs/gd32-flashing.md` | The public build→wire→flash→verify SOP | 4 |
-| `docs/gd32-bridge.md`, `firmware/gd32-bridge/README.md`, `docs/firmware-quickstart.md` | Cross-link the SOP | 4 |
+| `docs/gd32-bridge.md`, `gd32-bridge-firmware:README.md`, `docs/firmware-quickstart.md` | Cross-link the SOP | 4 |
 
 **Branch:** all work lands on `feat/gd32-flash-release`; Task 5 integrates it into `dev`.
 
@@ -49,15 +49,15 @@ git submodule status vendors/gd32_firmware_library/upstream   # expect: a commit
 ## Task 1: Integrate transport-bringup + build-verify the v0.1.0 candidate image
 
 **Files:**
-- Modify (via merge): `firmware/gd32-bridge/**`
+- Modify (via merge): `gd32-bridge-firmware:**`
 - No source edits in this task — it is a merge + two builds.
 
-> **Note — stale foreign build dir.** The pre-existing `firmware/gd32-bridge/build/`
+> **Note — stale foreign build dir.** The pre-existing `gd32-bridge-firmware:build/`
 > (dated May 29) was produced on a *different* computer and only rode along in this
 > synced tree; its `CMakeCache.txt` holds that machine's absolute paths. **Do not
 > reuse it.** This task configures fresh `build/stub` + `build/gd32` dirs, so the
 > `gd32` build is genuinely verified *on this machine* for the first time. Optionally
-> clear the stale dir first: `rm -rf firmware/gd32-bridge/build` (gitignored).
+> clear the stale dir first: `rm -rf gd32-bridge-firmware:build` (gitignored).
 
 - [ ] **Step 1: Confirm branch + print the merge conflict surface**
 
@@ -66,9 +66,9 @@ Run:
 cd "<alp-sdk>"
 git fetch origin
 git merge-base dev origin/feat/gd32-transport-bringup
-git diff --stat 0977435..dev -- firmware/gd32-bridge/ docs/gd32-bridge.md
+git diff --stat 0977435..dev -- gd32-bridge-firmware: docs/gd32-bridge.md
 ```
-Expected: the diff is empty or only a brand-casing/comment touch. If a real overlap on `firmware/gd32-bridge/` shows up, note it — Step 2's merge will need manual resolution.
+Expected: the diff is empty or only a brand-casing/comment touch. If a real overlap on `gd32-bridge-firmware:` shows up, note it — Step 2's merge will need manual resolution.
 
 - [ ] **Step 2: Merge the transport-bringup branch**
 
@@ -77,15 +77,15 @@ Run:
 git merge --no-ff origin/feat/gd32-transport-bringup \
   -m "merge(gd32-bridge): SPI1+I2C0 slave transport HAL (feat/gd32-transport-bringup)"
 ```
-Expected: `Merge made by the 'ort' strategy`, files under `firmware/gd32-bridge/` added/changed (incl. `hal/transport_hw_gd32.c`, `hal/bridge_board_config.h`, `src/transport.h`).
+Expected: `Merge made by the 'ort' strategy`, files under `gd32-bridge-firmware:` added/changed (incl. `hal/transport_hw_gd32.c`, `hal/bridge_board_config.h`, `src/transport.h`).
 If conflicts: confined to comments/README casing — keep `dev`'s casing + the branch's code, `git add`, `git commit --no-edit`.
 
 - [ ] **Step 3: Verify the transport HAL is now present**
 
 Run:
 ```bash
-ls firmware/gd32-bridge/hal/transport_hw_gd32.c firmware/gd32-bridge/hal/bridge_board_config.h firmware/gd32-bridge/src/transport.h
-grep -n "transport_hw_gd32.c" firmware/gd32-bridge/CMakeLists.txt
+ls gd32-bridge-firmware:hal/transport_hw_gd32.c gd32-bridge-firmware:hal/bridge_board_config.h gd32-bridge-firmware:src/transport.h
+grep -n "transport_hw_gd32.c" gd32-bridge-firmware:CMakeLists.txt
 ```
 Expected: all three files exist; `CMakeLists.txt` lists `hal/transport_hw_gd32.c` under the `gd32` backend.
 
@@ -93,10 +93,10 @@ Expected: all three files exist; `CMakeLists.txt` lists `hal/transport_hw_gd32.c
 
 Run:
 ```bash
-cmake -B firmware/gd32-bridge/build/stub -S firmware/gd32-bridge \
-  -DCMAKE_TOOLCHAIN_FILE="$PWD/firmware/gd32-bridge/toolchain/arm-none-eabi.cmake" \
+cmake -B gd32-bridge-firmware:build/stub -S firmware/gd32-bridge \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/gd32-bridge-firmware:toolchain/arm-none-eabi.cmake" \
   -DBRIDGE_HAL_BACKEND=stub
-cmake --build firmware/gd32-bridge/build/stub --parallel
+cmake --build gd32-bridge-firmware:build/stub --parallel
 ```
 Expected: configures and builds with no errors (gcc 13.3 `-Wshadow`/`-Wpedantic` warnings acceptable; no `-Werror`). Produces `build/stub/gd32-bridge` (ELF; no `.hex`/`.bin` by design for stub).
 
@@ -104,10 +104,10 @@ Expected: configures and builds with no errors (gcc 13.3 `-Wshadow`/`-Wpedantic`
 
 Run:
 ```bash
-cmake -B firmware/gd32-bridge/build/gd32 -S firmware/gd32-bridge \
-  -DCMAKE_TOOLCHAIN_FILE="$PWD/firmware/gd32-bridge/toolchain/arm-none-eabi.cmake" \
+cmake -B gd32-bridge-firmware:build/gd32 -S firmware/gd32-bridge \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/gd32-bridge-firmware:toolchain/arm-none-eabi.cmake" \
   -DBRIDGE_HAL_BACKEND=gd32
-cmake --build firmware/gd32-bridge/build/gd32 --parallel
+cmake --build gd32-bridge-firmware:build/gd32 --parallel
 ```
 Expected: configures (prints `gd32-bridge firmware version: 0.1.0`), links the GigaDevice library + `transport_hw_gd32.c`, and emits `build/gd32/gd32-bridge.elf` + `.hex` + `.bin`.
 If the build FAILS (not just warns): STOP and triage — this is the gcc-13.3-vs-CI-10.3 risk (spec A1). Fix the compile error on the branch (it is a real defect); do not work around it in tooling.
@@ -116,8 +116,8 @@ If the build FAILS (not just warns): STOP and triage — this is the gcc-13.3-vs
 
 Run:
 ```bash
-arm-none-eabi-size firmware/gd32-bridge/build/gd32/gd32-bridge
-sha256sum firmware/gd32-bridge/build/gd32/gd32-bridge.hex firmware/gd32-bridge/build/gd32/gd32-bridge.bin
+arm-none-eabi-size gd32-bridge-firmware:build/gd32/gd32-bridge
+sha256sum gd32-bridge-firmware:build/gd32/gd32-bridge.hex gd32-bridge-firmware:build/gd32/gd32-bridge.bin
 ```
 Expected: a size line (text+data fits 512 KB flash; bss fits 96 KB SRAM) and two SHA-256 hashes. **Copy these four values** into a scratch note — Task 4 records them in the SOP as the v0.1.0-candidate fingerprint.
 
@@ -125,7 +125,7 @@ Expected: a size line (text+data fits 512 KB flash; bss fits 96 KB SRAM) and two
 
 Run:
 ```bash
-git check-ignore firmware/gd32-bridge/build && echo "build/ ignored (nothing to commit)"
+git check-ignore gd32-bridge-firmware:build && echo "build/ ignored (nothing to commit)"
 git log --oneline -1
 ```
 Expected: `build/ ignored`; HEAD is the merge commit.
@@ -179,7 +179,7 @@ Update each occurrence:
 
 In each of `metadata/e1m_modules/E1M-V2N101.yaml`, `E1M-V2N102.yaml`, `E1M-V2M101.yaml`, `E1M-V2M102.yaml`, under the `gd32_bridge` helper entry:
 - `flash_method: swd_v2n_host` → `flash_method: swd_probe`
-- `firmware_path: firmware/gd32-bridge/build/gd32_bridge.bin` → `firmware_path: firmware/gd32-bridge/build/gd32/gd32-bridge.bin` (the build never emits `gd32_bridge.bin`; the `gd32` backend emits `gd32-bridge.bin` under `build/gd32/`).
+- `firmware_path: gd32-bridge-firmware:build/gd32_bridge.bin` → `firmware_path: gd32-bridge-firmware:build/gd32/gd32-bridge.bin` (the build never emits `gd32_bridge.bin`; the `gd32` backend emits `gd32-bridge.bin` under `build/gd32/`).
 
 - [ ] **Step 5: Verify the rename is clean (no behaviour change)**
 
@@ -598,7 +598,7 @@ git commit -m "feat(flash): add scripts/openocd/ alternative-probe configs (GD32
 
 **Files:**
 - Create: `docs/gd32-flashing.md`
-- Modify: `docs/gd32-bridge.md`, `firmware/gd32-bridge/README.md`, `docs/firmware-quickstart.md`
+- Modify: `docs/gd32-bridge.md`, `gd32-bridge-firmware:README.md`, `docs/firmware-quickstart.md`
 
 - [ ] **Step 1: Write the SOP**
 
@@ -628,13 +628,13 @@ over SWD.
 
 ```bash
 cd <alp-sdk>
-cmake -B firmware/gd32-bridge/build/gd32 -S firmware/gd32-bridge \
-  -DCMAKE_TOOLCHAIN_FILE="$PWD/firmware/gd32-bridge/toolchain/arm-none-eabi.cmake" \
+cmake -B gd32-bridge-firmware:build/gd32 -S firmware/gd32-bridge \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/gd32-bridge-firmware:toolchain/arm-none-eabi.cmake" \
   -DBRIDGE_HAL_BACKEND=gd32
-cmake --build firmware/gd32-bridge/build/gd32 --parallel
+cmake --build gd32-bridge-firmware:build/gd32 --parallel
 ```
 
-Output: `firmware/gd32-bridge/build/gd32/gd32-bridge.{elf,hex,bin}` — a single
+Output: `gd32-bridge-firmware:build/gd32/gd32-bridge.{elf,hex,bin}` — a single
 full-flash image linked at `0x08000000` (transports on; OTA inert).
 
 v0.1.0-candidate fingerprint (this commit):
@@ -681,7 +681,7 @@ west alp-flash examples/v2n/v2n-gd32-bridge-ping --helper gd32_bridge           
 cat > /tmp/flash.jlink <<'EOF'
 r
 halt
-loadfile <alp-sdk>/firmware/gd32-bridge/build/gd32/gd32-bridge.hex
+loadfile <alp-sdk>/gd32-bridge-firmware:build/gd32/gd32-bridge.hex
 r
 g
 qc
@@ -694,7 +694,7 @@ JLink -device GD32G553MEY7TR -if SWD -speed 4000 -AutoConnect 1 \
 build**, see `scripts/openocd/README.md`):
 ```bash
 openocd -f scripts/openocd/cmsis-dap.cfg -f scripts/openocd/gd32g553.cfg \
-        -c "program firmware/gd32-bridge/build/gd32/gd32-bridge.hex verify reset exit 0x08000000"
+        -c "program gd32-bridge-firmware:build/gd32/gd32-bridge.hex verify reset exit 0x08000000"
 ```
 
 ## 5. Verify
@@ -746,7 +746,7 @@ for a future rev; protocol §10 Path B.)
 > (build → wire SWD → flash via J-Link → verify IDCODE + PING).
 ```
 
-- [ ] **Step 3: Cross-link from `firmware/gd32-bridge/README.md`** — replace:
+- [ ] **Step 3: Cross-link from `gd32-bridge-firmware:README.md`** — replace:
 ```markdown
 The build emits `build/gd32-bridge.elf` + `.hex` + `.bin`.  Flashing
 in the development case is done with an external SWD probe on
@@ -791,7 +791,7 @@ Expected: `BROKEN LINKS: none`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add docs/gd32-flashing.md docs/gd32-bridge.md firmware/gd32-bridge/README.md docs/firmware-quickstart.md
+git add docs/gd32-flashing.md docs/gd32-bridge.md gd32-bridge-firmware:README.md docs/firmware-quickstart.md
 git commit -m "docs(gd32-bridge): add public flashing SOP (build -> SWD -> verify) + cross-links" \
   -m "Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```
@@ -806,7 +806,7 @@ git commit -m "docs(gd32-bridge): add public flashing SOP (build -> SWD -> verif
 
 Run:
 ```bash
-python firmware/gd32-bridge/tests/gen_protocol_vectors.py --check
+python gd32-bridge-firmware:tests/gen_protocol_vectors.py --check
 ```
 Expected: exits 0 (generated vectors match the committed `protocol_vectors.txt`).
 
@@ -825,7 +825,7 @@ assert be is not None, "swd_probe not registered"
 with patch("flash_backends.swd_probe.shutil.which",
            side_effect=lambda t: "/usr/bin/JLinkExe" if t == "JLinkExe" else None):
     r = be.flash(FlashContext(
-        artefact_path=pathlib.Path("firmware/gd32-bridge/build/gd32/gd32-bridge.hex"),
+        artefact_path=pathlib.Path("gd32-bridge-firmware:build/gd32/gd32-bridge.hex"),
         flash_args={"base": "0x08000000"}, core_id="gd32_bridge",
         sku="E1M-V2N101", dry_run=True))
 print("ok:", r.ok)
@@ -851,7 +851,7 @@ Run:
 git log --oneline dev..HEAD
 git diff --stat dev..HEAD
 ```
-Expected: spec/plan commits + the firmware merge + the rename + J-Link + openocd + docs commits. Diffstat touches `firmware/gd32-bridge/**`, `scripts/flash_backends/swd_probe.py`, `tests/scripts/*`, `metadata/e1m_modules/*`, `metadata/schemas/som-preset-v1.schema.json`, `scripts/openocd/**`, `docs/**`.
+Expected: spec/plan commits + the firmware merge + the rename + J-Link + openocd + docs commits. Diffstat touches `gd32-bridge-firmware:**`, `scripts/flash_backends/swd_probe.py`, `tests/scripts/*`, `metadata/e1m_modules/*`, `metadata/schemas/som-preset-v1.schema.json`, `scripts/openocd/**`, `docs/**`.
 
 - [ ] **Step 5: Integrate to dev (via finishing-a-development-branch)**
 
