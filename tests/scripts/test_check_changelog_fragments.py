@@ -63,6 +63,16 @@ def test_a_non_conforming_filename_is_flagged(tmp_path: Path) -> None:
     assert "401.fixed.md" in problems[0]
 
 
+def test_a_suffixed_filename_disambiguating_a_second_fragment_passes(tmp_path: Path) -> None:
+    """alp-sdk#1941: a second fragment for one issue may add a `-slug` suffix
+    instead of colliding with `<issue>.md` or being misnamed after the PR."""
+    root = _repo(tmp_path, {
+        "1909.md": "### Fixed — First fragment for #1909\n\nBody.",
+        "1909-diagnostic-format-uri.md": "### Fixed — Second fragment for #1909\n\nBody.",
+    })
+    assert gate.find_problems(root) == []
+
+
 def test_a_missing_category_enum_is_not_flagged(tmp_path: Path) -> None:
     """No category enum by design (#1395) -- any heading text is accepted."""
     root = _repo(tmp_path, {"501.md": "### Whatever — Entry\n\nBody."})

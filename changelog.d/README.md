@@ -20,13 +20,34 @@ Disjoint files cannot conflict. One file per change removes the entire class.
 ## How
 
 Create `changelog.d/<issue>.md`, where `<issue>` is the GitHub issue or PR
-number the entry belongs to — it only has to make the filename unique, it is
-not parsed for meaning.
+number the entry belongs to.
 
 ```
 changelog.d/1358.md
 changelog.d/1366.md
 changelog.d/1379.md
+```
+
+### A second fragment for the same issue
+
+An issue can legitimately be closed by more than one PR — a tiered fix, a
+split, or two independent defects filed under one number. If
+`changelog.d/<issue>.md` is already taken, do **not** overwrite it, append
+into it (that just trades the file conflict for a merge conflict), or rename
+your fragment after the PR instead of the issue. Add a disambiguating suffix
+and keep the issue number leading:
+
+```
+changelog.d/<issue>-<slug>.md
+```
+
+`<slug>` is lowercase `[a-z0-9-]+` — short, hyphenated, descriptive (matches
+`^\d+(-[a-z0-9-]+)?\.md$`). The leading digits stay the join key back to the
+issue for `assemble_changelog.py`'s sort order and for anyone grepping
+`changelog.d/` by number; the suffix only breaks the filename tie.
+
+```
+changelog.d/1909-diagnostic-format-uri.md
 ```
 
 The file's content is **the entry exactly as it should appear** in

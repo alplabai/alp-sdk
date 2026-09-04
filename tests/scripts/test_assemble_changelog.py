@@ -178,6 +178,32 @@ def test_assembly_order_is_numeric_by_issue_not_lexicographic(tmp_path: Path) ->
     assert text.index("Body two.") < text.index("Body ten.")
 
 
+def test_a_suffixed_fragment_disambiguates_a_collision(tmp_path: Path) -> None:
+    """alp-sdk#1941: two fragments for the same issue may coexist via a
+    `-slug` suffix instead of one overwriting the other or being renamed
+    after the PR that lands it."""
+    root = _repo(tmp_path, {
+        "1909.md": "### Fixed — First #1909 fix\n\nBody first.",
+        "1909-diagnostic-format-uri.md": "### Fixed — Second #1909 fix\n\nBody second.",
+    })
+    assert ac.main(["--root", str(root)]) == 0
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "Body first." in text
+    assert "Body second." in text
+
+
+def test_suffixed_fragment_sorts_by_leading_issue_number(tmp_path: Path) -> None:
+    """A suffix must not knock the fragment out of numeric issue order --
+    `2-slug.md` sorts by `2`, not lexicographically ahead of `10.md`."""
+    root = _repo(tmp_path, {
+        "10.md": "### Fixed — Ten\n\nBody ten.",
+        "2-slug.md": "### Fixed — Two\n\nBody two.",
+    })
+    assert ac.main(["--root", str(root)]) == 0
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert text.index("Body two.") < text.index("Body ten.")
+
+
 def test_dry_run_writes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = _repo(tmp_path, {"1101.md": "### Fixed — Entry\n\nBody."})
     before = (root / "CHANGELOG.md").read_text(encoding="utf-8")

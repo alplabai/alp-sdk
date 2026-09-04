@@ -44,7 +44,11 @@ import re
 import sys
 from pathlib import Path
 
-FRAGMENT_NAME_RE = re.compile(r"^\d+\.md$")
+#: `<issue>.md` or `<issue>-<slug>.md` -- the leading digits are the issue
+#: number (the join key back to GitHub); an optional `-slug` disambiguates a
+#: second fragment for the same issue (alp-sdk#1941) without displacing the
+#: number from the front of the filename.
+FRAGMENT_NAME_RE = re.compile(r"^\d+(-[a-z0-9-]+)?\.md$")
 UNRELEASED_PREFIX = "## [Unreleased]"
 SECTION_PREFIX = "## ["
 
@@ -64,13 +68,17 @@ def repo_root(start: Path) -> Path:
     )
 
 
-def _fragment_sort_key(path: Path) -> tuple[int, object]:
-    """Numeric order by issue number where possible, so `2.md` sorts before
-    `10.md` -- lexicographic sort would put them the other way round."""
+def _fragment_sort_key(path: Path) -> tuple[int, int, str]:
+    """Numeric order by LEADING issue number where possible, so `2.md` sorts
+    before `10.md`, and a suffixed fragment (`1909-diagnostic-format-uri.md`,
+    alp-sdk#1941) sorts alongside plain `1909.md` by its issue number rather
+    than lexicographically by its slug -- lexicographic sort would put both
+    kinds of case the wrong way round."""
     stem = path.stem
-    if stem.isdigit():
-        return (0, int(stem))
-    return (1, stem)
+    m = re.match(r"^(\d+)", stem)
+    if m:
+        return (0, int(m.group(1)), stem)
+    return (1, 0, stem)
 
 
 def load_fragments(frag_dir: Path) -> list[tuple[Path, str]]:
@@ -89,7 +97,8 @@ def load_fragments(frag_dir: Path) -> list[tuple[Path, str]]:
     fragments: list[tuple[Path, str]] = []
     for path in candidates:
         if not FRAGMENT_NAME_RE.match(path.name):
-            bad.append(f"{path.name} (expected `<issue>.md`, digits only)")
+            bad.append(f"{path.name} (expected `<issue>.md` or `<issue>-<slug>.md`, "
+                       "issue digits first)")
             continue
         body = path.read_text(encoding="utf-8").strip("\n")
         if not body.strip():
