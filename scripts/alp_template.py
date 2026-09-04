@@ -83,11 +83,13 @@ catalog ships today: metadata/schemas/template-catalog-v1.schema.json's
 description / default / constraints only) -- no shipped parameter can
 declare WHERE in its example's files it applies. render() validates any
 `--param name=value` override against the declared parameter's type and
-`constraints` (so a bogus name or an out-of-enum/out-of-range value is a
-hard error), but performs no textual substitution unless the parameter
-carries an opt-in `substitute: {"file": ..., "literal": ...}` mapping --
-a library-level extension the shipped schema doesn't emit yet. That
-keeps `minimal` (and every other template today) a pure faithful copy,
+`constraints` (so a bogus name, an out-of-enum/out-of-range value, or a
+numeric bound the parameter's declared type cannot satisfy -- see
+`_check_constraints` and #1916 -- is a hard error), but performs no
+textual substitution unless the parameter carries an opt-in
+`substitute: {"file": ..., "literal": ...}` mapping -- a library-level
+extension the shipped schema doesn't emit yet. That keeps `minimal` (and
+every other template today) a pure faithful copy,
 per #610 SS3's requirement to keep substitution "minimal + honest".
 """
 
