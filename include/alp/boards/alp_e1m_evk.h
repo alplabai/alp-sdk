@@ -57,14 +57,18 @@
 #include "alp/e1m_pinout.h"
 
 /* GENERATED board route bindings (EVK_PIN_*, EVK_*_BUS_*,
- * EVK_UART_PORT_*, EVK_PWM_*, EVK_ARD_PWM*, EVK_MB_PWM) and
+ * EVK_UART_PORT_*, EVK_PWM_*, EVK_ARD_PWM*, EVK_MB_PWM),
  * GENERATED on-board I2C device facts (EVK_I2C_ADDR_*,
- * EVK_INA236_SHUNT_*_OHMS, EVK_INA236_MAX_*_A).
+ * EVK_INA236_SHUNT_*_OHMS, EVK_INA236_MAX_*_A), GENERATED
+ * overlay-pad indices (EVK_PIN_OVERLAY_BASE + friends), and
+ * GENERATED mux-select enums (evk_sdio_select_t,
+ * evk_pcie_ioexp_pin_t, ...).
  * Source of truth: metadata/boards/e1m-evk.yaml
- * `e1m_routes:` and `i2c_devices:` blocks. Regenerate via:
+ * `e1m_routes:`, `i2c_devices:`, `overlay_pins:` and `mux_enums:`
+ * blocks. Regenerate via:
  *     python scripts/gen_board_header.py
- * The prose blocks below describe the hardware those macros bind
- * to; the macro values themselves come from the included header. */
+ * The prose blocks below describe the hardware those macros/enums
+ * bind to; the values themselves come from the included header. */
 #include "alp/boards/alp_e1m_evk_routes.h"
 
 #ifdef __cplusplus
@@ -111,12 +115,9 @@ extern "C" {
  * NOT via Alif's GPIO peripheral.
  *
  * EVK_PIN_SDIO_MUX_EN (= ALP_E1M_GPIO_IO20) and EVK_PIN_SDIO_MUX_SEL
- * (= ALP_E1M_GPIO_IO21) are defined in the generated routes header. */
-
-typedef enum {
-	EVK_SDIO_M2E_KEY = 0, /**< MUX_SEL.SDIO low. */
-	EVK_SDIO_SDCARD  = 1, /**< MUX_SEL.SDIO high. */
-} evk_sdio_select_t;
+ * (= ALP_E1M_GPIO_IO21), and the `evk_sdio_select_t` enum, are
+ * defined in the generated routes header `alp_e1m_evk_routes.h`
+ * (from `mux_enums:` in metadata/boards/e1m-evk.yaml, issue #637). */
 
 /* I2S0 74LVC157 multiplexer (TAS2563 amplifier vs M.2 E-key I2S).
  *
@@ -148,12 +149,9 @@ typedef enum {
  * switch the I2S routing need both code paths.
  *
  * EVK_PIN_I2S_MUX_EN (= ALP_E1M_GPIO_IO8) and EVK_PIN_I2S_MUX_SEL
- * (= ALP_E1M_GPIO_IO13) are defined in the generated routes header. */
-
-typedef enum {
-	EVK_I2S_AMP     = 0, /**< I2S0 routed to the TAS2563 amplifiers. */
-	EVK_I2S_M2E_KEY = 1, /**< I2S0 routed to the M.2 E-key slot. */
-} evk_i2s_select_t;
+ * (= ALP_E1M_GPIO_IO13), and the `evk_i2s_select_t` enum, are
+ * defined in the generated routes header `alp_e1m_evk_routes.h`
+ * (from `mux_enums:` in metadata/boards/e1m-evk.yaml, issue #637). */
 
 /* USB2 TMUXHS221 multiplexer (USB-A connector vs M.2 E-key USB).
  *
@@ -170,13 +168,10 @@ typedef enum {
  * drives the mux via ALP_CC3501E_CMD_GPIO_WRITE on the inter-chip
  * SPI1, NOT via Alif's GPIO peripheral.
  *
- * EVK_PIN_USB2_MUX_SEL (= ALP_E1M_GPIO_IO11) is defined in the
- * generated routes header. */
-
-typedef enum {
-	EVK_USB2_CONNECTOR = 0, /**< External USB-A jack. */
-	EVK_USB2_M2E_KEY   = 1, /**< M.2 E-key USB.        */
-} evk_usb2_select_t;
+ * EVK_PIN_USB2_MUX_SEL (= ALP_E1M_GPIO_IO11), and the
+ * `evk_usb2_select_t` enum, are defined in the generated routes
+ * header `alp_e1m_evk_routes.h` (from `mux_enums:` in
+ * metadata/boards/e1m-evk.yaml, issue #637). */
 
 /* M.2 E-key wake signals.  Asserted by the M.2 module to request
  * the host come out of low-power state.  Two independent lines:
@@ -265,25 +260,13 @@ typedef enum {
  * to think about that; the level shifter is transparent.
  *
  * EVK_PIN_PCIE_MUX_PD (= ALP_E1M_GPIO_IO22) and EVK_PIN_PCIE_MUX_SEL
- * (= ALP_E1M_GPIO_IO23) are defined in the generated routes header. */
-
-typedef enum {
-	EVK_PCIE_E_KEY = 0, /**< Lanes 0 routed to PCIe E-key (Wi-Fi/BT modules). */
-	EVK_PCIE_M_KEY = 1, /**< Lanes 0..3 routed to PCIe M-key (NVMe SSD).      */
-} evk_pcie_select_t;
-
-/** PCIe IO expander pin layout (TCAL9538 #2 on I2C0 at 0x71). */
-typedef enum {
-	EVK_PCIE_IOEXP_I2C_SEL =
-	    0, /**< P0: PCIE0_I2C.SEL -- selects which slot the I2C mux routes to. */
-	EVK_PCIE_IOEXP_M2E_ALERT      = 1, /**< P1: M.2 E-key alert input.        */
-	EVK_PCIE_IOEXP_E_PCIE0_RST    = 2, /**< P2: E-key PCIe reset output.       */
-	EVK_PCIE_IOEXP_E_PCIE0_WAKE   = 3, /**< P3: E-key PCIe wake input.         */
-	EVK_PCIE_IOEXP_E_PCIE0_CLKREQ = 4, /**< P4: E-key PCIe clock-request input.*/
-	EVK_PCIE_IOEXP_M_PCIE0_RST    = 5, /**< P5: M-key PCIe reset output.       */
-	EVK_PCIE_IOEXP_M_PCIE0_WAKE   = 6, /**< P6: M-key PCIe wake input.         */
-	EVK_PCIE_IOEXP_M_PCIE0_CLKREQ = 7, /**< P7: M-key PCIe clock-request input.*/
-} evk_pcie_ioexp_pin_t;
+ * (= ALP_E1M_GPIO_IO23), and the `evk_pcie_select_t` enum, are
+ * defined in the generated routes header `alp_e1m_evk_routes.h`
+ * (from `mux_enums:` in metadata/boards/e1m-evk.yaml, issue #637).
+ *
+ * The PCIe IO expander pin layout (`evk_pcie_ioexp_pin_t`, TCAL9538
+ * #2 on I2C0 at 0x71) is also defined in the generated routes
+ * header, same source. */
 
 /* The rotary encoder's quadrature signals run through the SoC's
  * hardware quadrature counter on E1M's `ENC0_X` / `ENC0_Y` pads.
@@ -408,19 +391,11 @@ typedef enum {
 /*        BIT(EVK_IOEXP_CTP_RST),                                 */
 /*        TCAL9538_DIR_OUTPUT);                                       */
 /*    tcal9538_set(&io_exp, EVK_IOEXP_CAM_EN, true);              */
+/*                                                                    */
+/* The `evk_ioexp_pin_t` enum is defined in the generated routes      */
+/* header `alp_e1m_evk_routes.h` (from `mux_enums:` in                */
+/* metadata/boards/e1m-evk.yaml, issue #637).                         */
 /* ================================================================== */
-
-typedef enum {
-	EVK_IOEXP_LCD_PWR_EN = 0, /**< P0: LCD power enable.            */
-	EVK_IOEXP_LCD_RST    = 1, /**< P1: LCD reset.                    */
-	EVK_IOEXP_CAM_EN =
-	    2, /**< P2: Camera-module enable (drives the camera sensor's EN/STBY pin -- NOT the +V_CAM0/+V_CAM1 power rails, which are gated separately). */
-	EVK_IOEXP_CTP_RST        = 3, /**< P3: Capacitive touch panel reset. */
-	EVK_IOEXP_ICM42670_INT1  = 4, /**< P4: ICM-42670 INT1 input.         */
-	EVK_IOEXP_ICM42670_INT2  = 5, /**< P5: ICM-42670 INT2 input.         */
-	EVK_IOEXP_ICM42670_FSYNC = 6, /**< P6: ICM-42670 frame-sync input.   */
-	EVK_IOEXP_BMP581_INT1    = 7, /**< P7: BMP581 INT1 input.            */
-} evk_ioexp_pin_t;
 
 /* ================================================================== */
 /* EVK bus assignments  -- GENERATED, see alp_e1m_evk_routes.h        */
@@ -571,11 +546,11 @@ typedef enum {
 /* The EVK populates TWO TCAL9538 I/O expanders, both on ALP_E1M_I2C0
  * but at different strap-selected addresses:
  *   - The "main" expander handles LCD / camera / capacitive-touch
- *     control + four sensor interrupt inputs (see
- *     evk_ioexp_pin_t).  Strap A1=1, A0=0 -> 0x72.
+ *     control + four sensor interrupt inputs (see the generated
+ *     `evk_ioexp_pin_t`).  Strap A1=1, A0=0 -> 0x72.
  *   - The "PCIe" expander handles the I2C-mux SEL + PCIe slot
- *     RST/WAKE/CLKREQ signals + M2E_ALERT (see
- *     evk_pcie_ioexp_pin_t above).  Strap A0=1, A1=0 -> 0x71.
+ *     RST/WAKE/CLKREQ signals + M2E_ALERT (see the generated
+ *     `evk_pcie_ioexp_pin_t`).  Strap A0=1, A1=0 -> 0x71.
  *
  * EVK_I2C_ADDR_TCAL9538_MAIN and EVK_I2C_ADDR_TCAL9538_PCIE are defined
  * in the generated routes header. */
