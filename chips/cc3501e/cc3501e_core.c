@@ -696,7 +696,8 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
                                            size_t            tx_len,
                                            uint8_t          *rx_buf,
                                            size_t            rx_cap,
-                                           size_t           *rx_len)
+                                           size_t           *rx_len,
+                                           uint8_t           req_seq)
 {
 	alp_status_t s;
 
@@ -720,7 +721,14 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	 * CS-less r1 board with no ready_pin the fallback is the same short settle the
 	 * other phases use. */
 	cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE_US);
-	encode_header(ctx->tx_scratch, cmd, ALP_CC3501E_FLAG_RESP_REQUIRED, (uint16_t)tx_len);
+	/* req_seq rides flags bits 3..7 (proto v8).  Callers that have no retry
+	 * loop pass ALP_CC3501E_REQ_SEQ_NONE, which the firmware treats as "no
+	 * identity" and never latches -- so the masking here is the only place
+	 * the seq touches the wire, and a v7 firmware simply ignores the bits. */
+	const uint8_t flags =
+	    (uint8_t)(ALP_CC3501E_FLAG_RESP_REQUIRED | (uint8_t)((req_seq & ALP_CC3501E_REQ_SEQ_MASK)
+	                                                         << ALP_CC3501E_FLAG_REQ_SEQ_SHIFT));
+	encode_header(ctx->tx_scratch, cmd, flags, (uint16_t)tx_len);
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
 	if (s != ALP_OK) goto out;
 
@@ -918,7 +926,12 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 	 * touching the lock). */
 	alp_status_t s = cc3501e_lock_acquire(ctx);
 	if (s != ALP_OK) return s;
-	s = cc3501e_request_locked(ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len);
+	/* Single-shot: no retry loop, so nothing here is a repeat of anything and
+	 * the frame must not be latchable.  ALP_CC3501E_REQ_SEQ_NONE says exactly
+	 * that on the wire (proto v8).  Retryable callers go through
+	 * poll_by_repeat(), which allocates a real seq. */
+	s = cc3501e_request_locked(
+	    ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len, ALP_CC3501E_REQ_SEQ_NONE);
 	cc3501e_lock_release(ctx);
 	return s;
 }
@@ -994,6 +1007,18 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 	uint32_t     remaining   = (timeout_ms > 0u) ? timeout_ms : 1u;
 	uint32_t     next_gap_ms = CC3501E_POLL_GAP_MIN_MS;
 	alp_status_t s;
+	/* ONE seq for this whole logical command, allocated BEFORE the loop and
+	 * re-sent unchanged on every attempt below -- that constancy is what lets
+	 * the firmware answer a repeat from its latch instead of re-executing the
+	 * operation (proto v8, cc3501e-bridge-firmware#102).  Allocating inside
+	 * the loop would make every retry look like a new command, i.e. exactly
+	 * the bug this exists to fix.
+	 *
+	 * Skips 0, which is reserved for "no identity": the space is 1..31 and
+	 * this pre-increments, so a fresh ctx's first retryable command is seq 1
+	 * (same shape as sock_send_seq / spi1_seq). */
+	ctx->req_seq = (ctx->req_seq >= ALP_CC3501E_REQ_SEQ_LAST) ? 1u : (uint8_t)(ctx->req_seq + 1u);
+	const uint8_t req_seq = ctx->req_seq;
 	for (;;) {
 		/* Sentinel + peek bracketed in the SAME lock hold as the request
 		 * itself (issue #1116 follow-up): both touch the shared
@@ -1016,7 +1041,7 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 		 * -EBUSY) rather than resp_to_status() then leaves the sentinel, so it
 		 * can never masquerade as RESP_ERR_STATE. */
 		ctx->rx_scratch[0] = 0xFFu;
-		s = cc3501e_request_locked(ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len);
+		s = cc3501e_request_locked(ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len, req_seq);
 		/* resp_to_status() maps BOTH RESP_ERR_BUSY (worker still running --
 		 * genuinely retryable) and RESP_ERR_STATE (a deterministic firmware
 		 * reject -- e.g. BLE_GATT_REGISTER's NimBLE ordering guard) to the

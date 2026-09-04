@@ -117,14 +117,25 @@ static int cmd_companion_diag_stats(const struct shell *sh, size_t argc, char **
 		return -ENODEV;
 	}
 
-	uint32_t     frames_ok = 0, frames_err = 0;
-	alp_status_t s = cc3501e_diag_stats(companion_cc3501e, &frames_ok, &frames_err);
+	cc3501e_diag_stats_t st = { 0 };
+	alp_status_t         s  = cc3501e_diag_stats(companion_cc3501e, &st);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "diag stats failed (%d)", (int)s);
 		return -EIO;
 	}
-	shell_print(sh, "frames ok=%u err=%u", (unsigned int)frames_ok, (unsigned int)frames_err);
+	shell_print(sh, "frames ok=%u err=%u", (unsigned int)st.frames_ok, (unsigned int)st.frames_err);
+	/* Print the v8 counters only when the firmware actually answered them.
+	 * Printing "worker execs=0" against v7 firmware would read as a measured
+	 * zero, which is the one thing a bench run must not be told. */
+	if (st.has_worker_counters) {
+		shell_print(sh,
+		            "worker execs=%u retry-latch hits=%u",
+		            (unsigned int)st.worker_execs,
+		            (unsigned int)st.retry_latch_hits);
+	} else {
+		shell_print(sh, "worker execs/retry-latch hits: not reported (firmware < protocol 8)");
+	}
 	return 0;
 }
 

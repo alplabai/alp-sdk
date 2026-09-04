@@ -585,13 +585,28 @@ alp_status_t cc3501e_wifi_rssi(cc3501e_t *ctx, int8_t *rssi)
 	return ALP_OK;
 }
 
-alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4])
+alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t iface, uint8_t ip[4])
 {
 	if (ip == NULL) return ALP_ERR_INVAL;
+	if (iface != (uint8_t)ALP_CC3501E_WIFI_IFACE_STA &&
+	    iface != (uint8_t)ALP_CC3501E_WIFI_IFACE_AP) {
+		return ALP_ERR_INVAL;
+	}
+	/* Protocol v9: the request carries one interface-selector byte.  A
+	 * zero-length request still means STA on the firmware side, but this host
+	 * only ever talks to a matching-version firmware (cc3501e_reset()'s
+	 * GET_VERSION gate), so always send the explicit byte. */
+	uint8_t      req[1]   = { iface };
 	uint8_t      reply[4] = { 0 };
 	size_t       got      = 0;
-	alp_status_t s        = cc3501e_request(
-	    ctx, ALP_CC3501E_CMD_WIFI_GET_IP, NULL, 0, reply, sizeof(reply), &got, CC3501E_REQ_TMO_MS);
+	alp_status_t s        = cc3501e_request(ctx,
+	                                        ALP_CC3501E_CMD_WIFI_GET_IP,
+	                                        req,
+	                                        sizeof(req),
+	                                        reply,
+	                                        sizeof(reply),
+	                                        &got,
+	                                        CC3501E_REQ_TMO_MS);
 	if (s != ALP_OK) return s;
 	if (got < 4u) return ALP_ERR_IO;
 	/* Byte-order normalise (host-only): the firmware derives these 4 bytes from the

@@ -139,6 +139,10 @@
         "address":     { "type": "string", "pattern": "^0x[0-9A-Fa-f]{2}$", "description": "7-bit I2C address, hex string." },
         "alias":       { "type": "string", "pattern": "^X?EVK_I2C_ADDR_[A-Z0-9_]+$", "description": "Extra macro name emitted as `#define <alias> <macro>` (e.g. a shorter convenience name for a device populated in only one variant)." },
         "doc":         { "type": "string", "description": "One-line Doxygen @brief documenting the strap / collision / respin context." },
+        "broadcast_address": {
+          "type": "boolean",
+          "description": "True when `address` is a broadcast / global-call address multiple devices on this bus legitimately answer BY DESIGN (e.g. the TAS2563 family's 0x48 global-call write-only address, metadata/chips/tas2563.yaml). Excludes this entry from scripts/validate_metadata.py's duplicate-(bus,address) collision check (#1845). Do NOT set this to silence a real strap conflict between two unrelated devices -- document a real conflict via `doc:` instead and fix the strap."
+        },
         "calibration": {
           "type": "object",
           "additionalProperties": false,

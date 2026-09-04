@@ -259,10 +259,12 @@
       "files": {
         "user_owned": [
           "board.yaml",
+          "CMakeLists.txt",
           "m55_hp/prj.conf",
           "m55_hp/CMakeLists.txt",
           "m55_hp/src/main.c",
           "linux/CMakeLists.txt",
+          "linux/src/main.c",
           "README.md"
         ],
         "generated": [

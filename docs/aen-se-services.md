@@ -93,6 +93,20 @@ uint8_t rev[80];
 se_service_get_se_revision(rev);   /* "SES A0 v1.110.0 Mar 4 2026" */
 ```
 
+**The SDK now runs this check for you, automatically, on the portable path.**
+`src/backends/soc_info/alif_se.c` parses the SERAM number out of every
+`alp_soc_info_read()` / `alp_soc_secure_fw_ping()` revision read and logs one
+`LOG_WRN` the first time it sees a version below the v110 floor, naming ADR-0030
+and this issue. **This is a diagnostic, not a fix** — it cannot re-establish a
+clock the SE itself dropped (see the "no workaround is safe to ship" reasoning
+above; the same reasoning rules out attempting one here), so it only turns a
+silent 76.8 MHz stall into an actionable log line. It also only fires on THIS
+backend's own read path — whichever `se_service_*` call an application happens
+to issue first (the customer's #1700 trigger was `SERVICE_CRYPTOCELL_GET_RND`,
+not a soc-info read) is not intercepted. Call `se_service_get_se_revision()` (or
+`alp_soc_info_read()`) explicitly as the first diagnostic step regardless of
+whether the warning has fired.
+
 A module below v109 must have its SERAM updated — a **System Package update**
 over the SE-UART with SETOOLS. Changing the application cannot fix a mismatched
 pair; it can only move the symptom.
@@ -187,12 +201,15 @@ unit: power-cycle it with the SE-UART open and read the first two lines.
 **Two other facts fall out of the same header and are worth keeping here.**
 
 `[SES] No LF XTAL` — this unit has no low-frequency crystal detected, so the
-LPRTC runs from the internal LFRC rather than the 32 kHz LFXO. That compounds
-the RTC errata recorded in `src/backends/rtc/lprtc_calendar_shim.c`: AERR0012
-ER002 describes the LFXO-to-LFRC fallback as a transient during POR_N, but on a
-board with no LF XTAL at all it is the steady state. Treat LPRTC calendar
-accuracy on this unit as LFRC-grade (Alif quote ~5% offset from LFXO) at all
-times, not only across a reset. See #1814.
+LPRTC runs from the internal LFRC rather than the 32 kHz LFXO, and it does so
+**permanently**, not only while POR_N is asserted. That compounds the RTC
+errata recorded in `src/backends/rtc/lprtc_calendar_shim.c`: AERR0012 ER002
+describes the LFXO-to-LFRC fallback as a transient during POR_N, but on a
+board with no LF XTAL at all it is the steady state, present on every boot —
+not a transient startup condition and not a warning that clears itself. Treat
+LPRTC calendar accuracy on this unit as LFRC-grade at all times, not only
+across a reset: Alif quotes ~5% offset from LFXO, which is roughly **72
+minutes of drift per day** of continuous operation. See #1814.
 
 `[SES] SE frequency is 78.31 MHz` — an independent corroboration of the ADC
 clock measurement in #1823, which derived `ADC_CLK` at `clock_div = 2` as

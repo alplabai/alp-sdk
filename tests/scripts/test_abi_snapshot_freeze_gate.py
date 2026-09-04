@@ -197,6 +197,19 @@ def test_current_snapshot_version_reads_sdk_version_yaml(tmp_path):
     assert abi.current_snapshot_version(sdk_yaml) == "v2.3"
 
 
+def test_current_snapshot_version_tolerates_a_prerelease_suffix(tmp_path):
+    """#1902: `version:` may carry a SemVer pre-release suffix during an rc
+    window (`scripts/bump_version.py --to X.Y.Z-rcN` writes it verbatim).
+    Snapshots are keyed MAJOR.MINOR only, so the suffix is irrelevant to
+    the label -- but pre-fix, the regex's `\\s*$` anchor rejected the whole
+    line and this returned None ("can't verify") for the entire rc window,
+    silently SKIPPING `stage_abi_strict` (scripts/test-all.sh) instead of
+    running it."""
+    sdk_yaml = tmp_path / "sdk_version.yaml"
+    sdk_yaml.write_text("version: 2.3.4-rc1\nstatus: released\n", encoding="utf-8")
+    assert abi.current_snapshot_version(sdk_yaml) == "v2.3"
+
+
 def test_current_snapshot_version_none_when_missing(tmp_path):
     assert abi.current_snapshot_version(tmp_path / "does-not-exist.yaml") is None
 

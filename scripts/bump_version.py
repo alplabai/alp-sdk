@@ -39,6 +39,25 @@ Bump rules (per docs/release-policy.md):
 The script doesn't enforce these -- the operator chooses the version
 and the ABI workflow gates whether it was correct.
 
+Pre-release cuts (issue #1902 -- a build made from an rc must identify
+itself as one, not as its eventual GA version):
+
+    python3 scripts/bump_version.py --to 1.0.0-rc1
+
+Ordinary SemVer 2.0.0 pre-release syntax, not a bespoke flag.  This writes
+the FULL "1.0.0-rc1" into metadata/sdk_version.yaml's `version:` and
+include/alp/version.h's ALP_VERSION_STRING (ALP_VERSION_MAJOR/MINOR/PATCH
+stay the plain core integers, 1/0/0).  pyproject.toml's `[project]` version
+and the alp_banner.c sample line stay pinned to the core "1.0.0" -- PEP 440
+doesn't accept a bare hyphenated suffix, and neither is the identification
+surface; the banner's *code* always prints the live ALP_VERSION_STRING at
+runtime regardless of what this static sample line says.  CHANGELOG.md is
+left untouched: an rc has no GA section of its own yet, and slicing one
+here would starve `.github/workflows/release.yml`'s documented pre-release
+fallback (it reads `## [Unreleased]` when the core `## [vX.Y.Z]` heading
+doesn't exist) of any content to publish.  The later GA bump
+(`--to 1.0.0`, no suffix) does the real CHANGELOG slice.
+
 What this touches:
 
     metadata/sdk_version.yaml       -- the declared version.
@@ -159,7 +178,23 @@ def slice_changelog(new_version: str, dry_run: bool) -> None:
     the new [vX] heading, so every fragment authored this cycle would
     silently ship with no changelog entry at all. Run
     `python3 scripts/assemble_changelog.py` first.
+
+    No-op (prints and returns) when `new_version` carries a SemVer
+    pre-release suffix (#1902): an rc has no GA CHANGELOG section of its
+    own yet, and `.github/workflows/release.yml`'s "Verify + slice
+    CHANGELOG" step only ever searches for the CORE version's heading,
+    falling back to `## [Unreleased]` for a pre-release tag. Slicing here
+    would create a `## [vX.Y.Z-rcN]` heading that step never looks for AND
+    leave `## [Unreleased]` freshly emptied -- the exact "empty body"
+    failure that step's own fallback exists to avoid. The GA bump
+    (`--to X.Y.Z`, no suffix) does the real slice.
     """
+    _major, _minor, _patch, pre = parse_version(new_version)
+    if pre:
+        print(f"  skipped {CHANGELOG.relative_to(REPO)}: {new_version} is a "
+              f"pre-release; '[Unreleased]' stays open until the GA bump")
+        return
+
     pending = _pending_changelog_fragments()
     if pending:
         names = ", ".join(p.name for p in pending)
@@ -205,6 +240,12 @@ def update_version_h(new_version: str, dry_run: bool) -> None:
     clang-format aligns consecutive macro values), substituting only
     the numeric / string values.  Keep in lockstep with
     scripts/check_version_doc_sync.py's version.h parsers.
+
+    ALP_VERSION_MAJOR/MINOR/PATCH are always the plain core integers
+    (`_pre` discarded); ALP_VERSION_STRING gets `new_version` VERBATIM,
+    suffix included -- this is what makes a pre-release build report
+    itself as one (#1902), e.g. `--to 1.0.0-rc1` -> `ALP_VERSION_STRING
+    "1.0.0-rc1"` while MAJOR/MINOR/PATCH are still 1/0/0.
     """
     major, minor, patch, _pre = parse_version(new_version)
     text = version_h_text = VERSION_H.read_text(encoding="utf-8")
@@ -233,34 +274,51 @@ def update_banner_c(new_version: str, dry_run: bool) -> None:
     The banner *code* always prints the live ALP_VERSION_STRING at runtime;
     only this illustrative comment line can drift.  Keep in lockstep with
     scripts/check_version_doc_sync.py's check_banner_c().
+
+    Always the CORE MAJOR.MINOR.PATCH, even when `new_version` carries a
+    SemVer pre-release suffix (#1902): the sample line isn't the
+    self-identification surface (ALP_VERSION_STRING is, and the banner's
+    *code* prints that live), so it stays pinned to the target GA triple
+    the same way pyproject.toml does below.
     """
+    major, minor, patch, _pre = parse_version(new_version)
+    core = f"{major}.{minor}.{patch}"
     text = BANNER_C.read_text(encoding="utf-8")
-    new_text, n = re.subn(r"Alp SDK \d+\.\d+\.\d+", f"Alp SDK {new_version}", text, count=1)
+    new_text, n = re.subn(r"Alp SDK \d+\.\d+\.\d+", f"Alp SDK {core}", text, count=1)
     if n != 1:
         raise SystemExit(f"bump_version: no 'Alp SDK X.Y.Z' sample banner line in "
                          f"{BANNER_C.relative_to(REPO)}")
     if new_text == text:
-        print(f"  unchanged {BANNER_C.relative_to(REPO)} (already at {new_version})")
+        print(f"  unchanged {BANNER_C.relative_to(REPO)} (already at {core})")
         return
     if not dry_run:
         BANNER_C.write_text(new_text, encoding="utf-8", newline="")
-    print(f"  updated {BANNER_C.relative_to(REPO)}: sample banner -> \"Alp SDK {new_version}\"")
+    print(f"  updated {BANNER_C.relative_to(REPO)}: sample banner -> \"Alp SDK {core}\"")
 
 
 def update_pyproject(new_version: str, dry_run: bool) -> None:
-    """Rewrite the [project] version in pyproject.toml (alp-sdk-cli)."""
+    """Rewrite the [project] version in pyproject.toml (alp-sdk-cli).
+
+    Always the CORE MAJOR.MINOR.PATCH, even when `new_version` carries a
+    SemVer pre-release suffix (#1902): PEP 440 doesn't accept a bare
+    hyphenated suffix like "-rc1", and packaging metadata isn't where an rc
+    identifies itself -- include/alp/version.h's ALP_VERSION_STRING and
+    metadata/sdk_version.yaml's `version:` carry the full string instead.
+    """
+    major, minor, patch, _pre = parse_version(new_version)
+    core = f"{major}.{minor}.{patch}"
     text = PYPROJECT.read_text(encoding="utf-8")
-    new_text, n = re.subn(r'^version\s*=\s*"[^"]*"', f'version = "{new_version}"',
+    new_text, n = re.subn(r'^version\s*=\s*"[^"]*"', f'version = "{core}"',
                           text, count=1, flags=re.MULTILINE)
     if n != 1:
         raise SystemExit(f"bump_version: no 'version = \"...\"' line in "
                          f"{PYPROJECT.relative_to(REPO)}")
     if new_text == text:
-        print(f"  unchanged {PYPROJECT.relative_to(REPO)} (already at {new_version})")
+        print(f"  unchanged {PYPROJECT.relative_to(REPO)} (already at {core})")
         return
     if not dry_run:
         PYPROJECT.write_text(new_text, encoding="utf-8", newline="")
-    print(f"  updated {PYPROJECT.relative_to(REPO)}: -> version = \"{new_version}\"")
+    print(f"  updated {PYPROJECT.relative_to(REPO)}: -> version = \"{core}\"")
 
 
 def regenerate_abi_snapshot(new_version: str, dry_run: bool) -> None:
