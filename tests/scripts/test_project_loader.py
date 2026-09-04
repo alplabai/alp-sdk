@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _project_support import REPO, TEMPLATE, _run_loader, _write_board  # noqa: E402
+from alp_project_loader import _resolve_sku  # noqa: E402
 
 
 class TestLoaderContract(unittest.TestCase):
@@ -158,6 +159,23 @@ class TestLoaderContract(unittest.TestCase):
                 "no preset" in lower or "alp-b005" in lower,
                 msg=f"expected 'no preset' or 'ALP-B005' in stderr; got: {rv.stderr}",
             )
+
+    def test_resolve_sku_outside_repo_metadata_root_does_not_raise_valueerror(
+            self) -> None:
+        """`_resolve_sku` is reachable from `emit_zephyr_board` on a
+        `--metadata-root` override (`scripts/gen_zephyr_board.py:1397`,
+        the #1354 branch's own scenario), and its sibling `_resolve_board`
+        already guards `relative_to(REPO)` with `is_relative_to(REPO)`.
+        Pre-fix, a metadata root outside REPO (any `--metadata-root`
+        pointed at a vendored/customer tree) crashed this with a raw
+        `ValueError` instead of the intended diagnostic -- a leftover
+        instance of the #1485 class."""
+        with tempfile.TemporaryDirectory() as td:
+            metadata_root = Path(td) / "metadata"
+            metadata_root.mkdir()
+            with self.assertRaises(SystemExit) as ctx:
+                _resolve_sku("E1M-NOPE9999", metadata_root)
+            self.assertIn("no preset for SKU", str(ctx.exception))
 
     def test_inline_populated_flips_chip_kconfig(self) -> None:
         """An inline `populated:` block in a project's board.yaml

@@ -76,8 +76,8 @@ ships:
    ```
 
 3. Run a `BRIDGE_HAL_BACKEND=gd32` build; fix any HAL-layer
-   breakage in `firmware/gd32-bridge/hal/gd32/` (per-peripheral TUs)
-   or `firmware/gd32-bridge/hal/transport_hw_gd32.c` (SPI/I2C slave
+   breakage in `gd32-bridge-firmware:hal/gd32/` (per-peripheral TUs)
+   or `gd32-bridge-firmware:hal/transport_hw_gd32.c` (SPI/I2C slave
    transport).
 
 ## Licence + redistribution constraints

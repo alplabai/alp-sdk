@@ -494,6 +494,12 @@ struct rpc_be {
 
 	uint8_t tx_scratch[ALP_RPC_TX_FRAME_MAX];
 
+	/* Count of inbound frames dropped by uio_ept_cb() because len exceeded
+	 * ALP_RPC_TX_FRAME_MAX (issue #1645) -- written only from the single
+	 * libmetal IRQ-thread receive path for this channel, so a plain
+	 * counter needs no lock. */
+	uint32_t rx_oversized_drops;
+
 	/* Close protocol (GHSA-xhm8-7f87-93q5), shared-libmetal-worker
 	 * adaptation -- see this file's header comment. All guarded by
 	 * `call_mutex` except `cb_active` (atomic, decrement-only outside
@@ -511,14 +517,6 @@ struct rpc_be {
 	pthread_t       recv_thread; /* identity of the CURRENT recv (valid iff recv_active) */
 	atomic_int      cb_active;   /* drain count -- external y_shutdown() waits for 0 */
 	bool            close_from_worker;
-
-	/* Set the first time uio_ept_cb() drops an oversized peer frame
-	 * (#1645) -- uio_ept_cb() runs on libmetal's single shared IRQ
-	 * thread, never concurrently with itself for this channel, so no
-	 * lock is needed. Caps the fprintf() to one line per channel: a
-	 * peer spraying oversized frames must not make that shared thread
-	 * take the stdio lock on every single frame. */
-	bool logged_oversized_drop;
 
 	void *owner;
 };
@@ -739,20 +737,6 @@ static void rpc_recv_leave(struct rpc_be *ch)
 	atomic_fetch_sub(&ch->cb_active, 1);
 }
 
-/* Reports an oversized-frame drop ONCE per channel (#1645) -- see
- * struct rpc_be's logged_oversized_drop field. */
-static void log_dropped_oversized_frame(struct rpc_be *ch, size_t len)
-{
-	if (ch->logged_oversized_drop) return;
-	ch->logged_oversized_drop = true;
-	fprintf(stderr,
-	        "alp_rpc: dropping oversized peer frame(s) on %s (%zu > %zu); further drops on "
-	        "this channel are counted, not logged\n",
-	        ch->name,
-	        len,
-	        (size_t)ALP_RPC_TX_FRAME_MAX);
-}
-
 /* rpmsg endpoint rx callback -- invoked synchronously by
  * remoteproc_get_notification() -> rproc_virtio_notified() ->
  * virtqueue_notification() from INSIDE uio_rproc_notify_isr() below,
@@ -770,6 +754,23 @@ static int uio_ept_cb(struct rpmsg_endpoint *ept, void *data, size_t len, uint32
 		return RPMSG_SUCCESS;
 	}
 
+	if (len > ALP_RPC_TX_FRAME_MAX) {
+		/* Older code silently clipped an oversized frame to
+		 * sizeof(local_frame) below and dispatched the truncated prefix
+		 * as if it were the whole message -- alp_rpc_call()/a subscribe
+		 * callback saw ALP_OK with a partial response and no signal
+		 * anything was dropped.  Surface it instead (issue #1645). */
+		ch->rx_oversized_drops++;
+		fprintf(stderr,
+		        "alp_rpc: dropping %zu-byte inbound frame on channel '%s' (max %d "
+		        "bytes); %u frame(s) dropped so far\n",
+		        len,
+		        ch->name,
+		        ALP_RPC_TX_FRAME_MAX,
+		        ch->rx_oversized_drops);
+		goto epilogue;
+	}
+
 	/* The rpmsg buffer `data` lives in the UIO-mapped vring-shm, which is
 	 * Device/uncached memory -- an unaligned multi-byte load (as
 	 * __memcpy_generic issues) faults with SIGBUS on ARMv8.  Bench cycle 11
@@ -777,24 +778,10 @@ static int uio_ept_cb(struct rpmsg_endpoint *ept, void *data, size_t len, uint32
 	 * worked).  Copy the frame out BYTE-WISE into an aligned local buffer
 	 * first, then parse + dispatch from normal cached memory. */
 	unsigned char local_frame[ALP_RPC_TX_FRAME_MAX];
-	if (len > sizeof(local_frame)) {
-		/* A peer frame larger than the negotiated maximum is a protocol
-		 * error, not something to silently truncate and dispatch as a
-		 * complete message (#1645) -- the pre-fix clip below fed
-		 * frame_parse() only the first ALP_RPC_TX_FRAME_MAX bytes,
-		 * which still looked like a well-formed (method, payload) pair
-		 * whenever the method name landed inside that prefix, so the
-		 * subscriber ran with a silently-shortened payload and no
-		 * error anywhere. */
-		log_dropped_oversized_frame(ch, len);
-		goto epilogue;
-	}
-	size_t frame_len = len;
-	for (size_t i = 0; i < frame_len; ++i) {
+	for (size_t i = 0; i < len; ++i) {
 		local_frame[i] = ((const volatile unsigned char *)data)[i];
 	}
 	data = local_frame;
-	len  = frame_len;
 
 	const void *payload     = NULL;
 	size_t      payload_len = 0;

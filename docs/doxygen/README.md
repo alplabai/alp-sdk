@@ -17,7 +17,7 @@ and is a hard CI gate: any Doxygen warning fails the build.
   (`chips/README.md`, `vendors/alif/README.md`,
   `vendors/deepx-dxm1/README.md`,
   `vendors/gd32_firmware_library/README.md`,
-  `firmware/cc3501e/README.md`, `keys/README.md`,
+  `cc3501e-bridge-firmware:README.md`, `keys/README.md`,
   `meta-alp-sdk/README.md`, `examples/README.md`,
   `metadata/library-profiles/README.md`,
   `zephyr/sysbuild/aen/README.md`).  `USE_MDFILE_AS_MAINPAGE =

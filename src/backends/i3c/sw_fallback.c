@@ -3,9 +3,13 @@
  *
  * Software I3C fallback backend.  Registered (priority 0, "*") only
  * to keep the i3c class section non-empty for the registry's
- * __start_/__stop_ linker bounds.  native_sim / plain-CMake builds
- * have no real I3C controller, so open() succeeds with an empty
- * capability set but write / read / write_read return
+ * __start_/__stop_ linker bounds.  zephyr_drv (priority 100, "*")
+ * wins the backend match on Zephyr and native_sim, and yocto_drv
+ * (priority 100, __linux__-gated) wins on Yocto, so this backend's
+ * open() is reached through alp_i3c_open() only on plain-CMake /
+ * baremetal builds, where src/baremetal/CMakeLists.txt links it as
+ * the sole registered i3c backend.  Its open() itself still succeeds
+ * with an empty capability set, but write / read / write_read return
  * ALP_ERR_NOSUPPORT -- there is no bus to drive.
  *
  * @par Cost: ROM ~300 B, RAM 0 B (stateless; no device, no buffer).

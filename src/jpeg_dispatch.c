@@ -41,48 +41,6 @@ static void _free(struct alp_jpeg *h)
 	alp_slot_release(&h->in_use);
 }
 
-/**
- * @brief True if @p req's plane strides are wide enough for its own
- * width/subsample, false otherwise (#1645).
- *
- * Backend-independent by design so every future backend inherits the
- * guard instead of re-deriving it: an unchecked y_stride let sw_baseline
- * alias every row to row 0 on a stride of 0 (returning ALP_OK for the
- * wrong image) and let alif_hantro hand an under-sized stride straight
- * to the JPEG AXI master.  @c y_plane is consulted by both buffer
- * layouts (@ref alp_jpeg_encode_req_t::format) -- NV12's interleaved UV
- * plane lives inside it -- so y_stride is always checked; u_stride /
- * v_stride only apply to the fully-planar layout with real chroma
- * planes (not @ref ALP_JPEG_SUBSAMPLE_400 mono, and not NV12, where
- * they are unused and must be NULL).
- *
- * The width-in-bytes assumption below (1 byte/sample) is only true for
- * the two layouts this class currently ships; a @c format this function
- * does not recognize is left unchecked here and refused by the backend
- * itself (@ref ALP_ERR_NOSUPPORT) instead of silently under-checking a
- * wider-than-1-byte-per-pixel layout by 2-4x (#1645 review).
- */
-static bool _req_strides_ok(const alp_jpeg_encode_req_t *req)
-{
-	if (req->format != ALP_PIXFMT_YUV420_PLANAR && req->format != ALP_PIXFMT_NV12) {
-		return true;
-	}
-	if (req->y_stride == 0u || req->y_stride < req->width) {
-		return false;
-	}
-	if (req->format == ALP_PIXFMT_YUV420_PLANAR && req->subsample != ALP_JPEG_SUBSAMPLE_400) {
-		/* 4:2:0 / 4:2:2 chroma planes are half-width -- round up so an
-		 * odd width still gets a real per-row sample for every column. */
-		uint32_t chroma_min_width = ((uint32_t)req->width + 1u) / 2u;
-
-		if (req->u_stride == 0u || req->u_stride < chroma_min_width || req->v_stride == 0u ||
-		    req->v_stride < chroma_min_width) {
-			return false;
-		}
-	}
-	return true;
-}
-
 alp_jpeg_t *alp_jpeg_open(const alp_jpeg_config_t *cfg)
 {
 	alp_z_clear_last_error();
@@ -129,20 +87,55 @@ alp_status_t alp_jpeg_encode(alp_jpeg_t                  *h,
 		return ALP_ERR_NOT_READY;
 	}
 	alp_status_t rc;
-	if (req == NULL || out_buf == NULL || out_len == NULL || req->width < 8u || req->height < 8u) {
+	bool         chroma_active = req != NULL && req->format == ALP_PIXFMT_YUV420_PLANAR &&
+	                             req->subsample != ALP_JPEG_SUBSAMPLE_400;
+	uint32_t     chroma_min    = (req != NULL) ? (req->width + 1u) / 2u : 0u;
+	if (req == NULL || out_buf == NULL || out_len == NULL || req->width == 0u ||
+	    req->height == 0u) {
 		rc = ALP_ERR_INVAL;
+	} else if (h->state.ops->encode == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
 	} else if ((h->cached_caps.max_width != 0u && req->width > h->cached_caps.max_width) ||
 	           (h->cached_caps.max_height != 0u && req->height > h->cached_caps.max_height)) {
-		/* The backend's own advertised bound, never enforced before
-		 * (#1645) -- a caller could request a frame no encode path on
-		 * this handle was ever set up to size, e.g. sw_baseline's
-		 * 16384x16384.  0 means "no limit advertised" (zephyr_stub's
-		 * zeroed caps), not "reject everything". */
+		/* Caps width/height to the backend's own advertised limit before
+		 * any backend derives a length from them (issue #1645). A backend
+		 * that advertises 0/0 (the NOT_IMPLEMENTED stub, zephyr_stub.c --
+		 * it has no real bound to advertise) is exempt from this check so
+		 * its encode() is still reached and returns its documented
+		 * ALP_ERR_NOT_IMPLEMENTED, instead of every request being rejected
+		 * here with ALP_ERR_OUT_OF_RANGE first.
+		 *
+		 * This bounds width/height and, transitively, the IMPLICIT stride
+		 * (the zero-stride sentinel normalized below to width / width/2).
+		 * It does NOT bound an explicit, caller-supplied y_stride/
+		 * u_stride/v_stride -- those are only floor-checked (>= the row
+		 * they claim to describe) just below, never capped, because
+		 * nothing here is handed the caller's real buffer length to check
+		 * a larger stride against. See the @note on alp_jpeg_encode() in
+		 * <alp/jpeg.h>. */
 		rc = ALP_ERR_OUT_OF_RANGE;
-	} else if (!_req_strides_ok(req)) {
+	} else if ((req->y_stride != 0u && req->y_stride < req->width) ||
+	           (chroma_active && ((req->u_stride != 0u && req->u_stride < chroma_min) ||
+	                              (req->v_stride != 0u && req->v_stride < chroma_min)))) {
+		/* A nonzero stride smaller than the row it claims to describe
+		 * does not describe a buffer the caller could actually own --
+		 * reject before any backend indexes with it (issue #1645). Zero
+		 * stays a valid "tightly packed" sentinel, normalized below. */
 		rc = ALP_ERR_INVAL;
 	} else {
-		rc = h->state.ops->encode(&h->state, req, out_buf, out_cap, out_len);
+		/* Normalize the zero-stride ("tightly packed, no row padding")
+		 * sentinel to an explicit value ONCE, here, so every backend
+		 * downstream -- sw_baseline's toojpeg encoder AND alif_hantro's
+		 * DMA-span derivation -- sees the same non-zero stride for the
+		 * same request instead of each reimplementing (or, per
+		 * sw_baseline before this fix, never implementing) the default. */
+		alp_jpeg_encode_req_t norm = *req;
+		norm.y_stride              = (req->y_stride != 0u) ? req->y_stride : req->width;
+		if (chroma_active) {
+			norm.u_stride = (req->u_stride != 0u) ? req->u_stride : chroma_min;
+			norm.v_stride = (req->v_stride != 0u) ? req->v_stride : chroma_min;
+		}
+		rc = h->state.ops->encode(&h->state, &norm, out_buf, out_cap, out_len);
 	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;

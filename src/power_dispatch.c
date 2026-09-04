@@ -93,13 +93,15 @@ alp_power_t *alp_power_open(void)
 	h->backend              = be;
 	h->state.ops            = ops;
 	alp_capabilities_t caps = { .flags = be->base_caps };
-	alp_status_t       rc   = ops->open(&h->state, &caps);
+	uint32_t           wake_caps = 0u;
+	alp_status_t       rc        = ops->open(&h->state, &caps, &wake_caps);
 	if (rc != ALP_OK) {
 		_free(h);
 		alp_z_set_last_error(rc);
 		return NULL;
 	}
 	h->cached_caps = caps;
+	h->wake_caps   = wake_caps;
 	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
@@ -111,8 +113,66 @@ alp_status_t alp_power_configure_wake_source(alp_power_t *h, uint32_t wake_bitma
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	h->state.wake_bitmap = wake_bitmap;
-	alp_status_t rc      = h->state.ops->configure_wake_source(&h->state, wake_bitmap);
+	/* Reported-capability + error contract (#1812/#1813), enforced
+	 * ONCE here for every backend: reject a bitmap containing any bit
+	 * outside what open() reported via wake_caps, before the backend
+	 * ever sees the call.  No per-backend duplication needed. */
+	if ((wake_bitmap & ~h->wake_caps) != 0u) {
+		alp_handle_op_leave(&h->active_ops);
+		return ALP_ERR_NOSUPPORT;
+	}
+	alp_status_t rc;
+	if (h->state.ops->configure_wake_source == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->configure_wake_source(&h->state, wake_bitmap);
+	}
+	/* Mirror only on acceptance: a REJECTED bitmap must never surface
+	 * through state.wake_bitmap -- alp_renesas_power_supervisor_mode_set
+	 * (src/backends/ext/renesas/power.c) reads this mirror directly and
+	 * forwards it to hardware, and alp_power_request_sleep's own
+	 * no-wake-configured guard below depends on a rejected request not
+	 * silently counting as "configured" either. */
+	if (rc == ALP_OK) {
+		h->state.wake_bitmap = wake_bitmap;
+	}
+	alp_handle_op_leave(&h->active_ops);
+	return rc;
+}
+
+alp_status_t alp_power_configure_retention(alp_power_t *h, const alp_power_retain_t *retain)
+{
+	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (retain == NULL || retain->level > ALP_POWER_RETAIN_FULL) {
+		alp_handle_op_leave(&h->active_ops);
+		return ALP_ERR_INVAL;
+	}
+	/* retain_kb only means something for TCM; 0 KiB of TCM is not a
+	 * valid spelling of "retain nothing" (that's ALP_POWER_RETAIN_NONE)
+	 * -- reject the ambiguous request instead of silently accepting a
+	 * no-op. */
+	if (retain->level == ALP_POWER_RETAIN_TCM && retain->retain_kb == 0u) {
+		alp_handle_op_leave(&h->active_ops);
+		return ALP_ERR_INVAL;
+	}
+	alp_status_t rc;
+	if (h->state.ops->configure_retention != NULL) {
+		rc = h->state.ops->configure_retention(&h->state, retain);
+	} else {
+		/* No backend opinion on retention: NONE is a no-op (accept),
+		 * anything else asks for a footprint the backend never
+		 * promised -- report it rather than silently ignoring it
+		 * (the same reported-capability + error contract as the
+		 * wake-source bitmap, #1813). */
+		rc = (retain->level == ALP_POWER_RETAIN_NONE) ? ALP_OK : ALP_ERR_NOSUPPORT;
+	}
+	/* Mirror only on acceptance -- same reasoning as configure_wake_source
+	 * above: a rejected retention request must not appear configured. */
+	if (rc == ALP_OK) {
+		h->state.retain = *retain;
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -132,7 +192,7 @@ alp_status_t alp_power_request_sleep(alp_power_t           *h,
 		return ALP_ERR_INVAL;
 	}
 	if (mode != ALP_POWER_MODE_SLEEP && mode != ALP_POWER_MODE_DEEP_SLEEP &&
-	    mode != ALP_POWER_MODE_STANDBY) {
+	    mode != ALP_POWER_MODE_STANDBY && mode != ALP_POWER_MODE_STOP) {
 		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_INVAL;
 	}
@@ -142,7 +202,12 @@ alp_status_t alp_power_request_sleep(alp_power_t           *h,
 		alp_handle_op_leave(&h->active_ops);
 		return ALP_ERR_INVAL;
 	}
-	alp_status_t rc = h->state.ops->request_sleep(&h->state, mode, wake_after_ms, info);
+	alp_status_t rc;
+	if (h->state.ops->request_sleep == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->request_sleep(&h->state, mode, wake_after_ms, info);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -168,6 +233,11 @@ void alp_power_close(alp_power_t *h)
 const alp_capabilities_t *alp_power_capabilities(const alp_power_t *h)
 {
 	return (h != NULL) ? &h->cached_caps : NULL;
+}
+
+uint32_t alp_power_wake_capabilities(const alp_power_t *h)
+{
+	return (h != NULL) ? h->wake_caps : 0u;
 }
 
 /* ================================================================== */

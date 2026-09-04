@@ -39,7 +39,7 @@ Both carry the same command set; the host picks per-call:
 ## The command set
 
 Protocol version (`PROTOCOL_VERSION_MAJOR.MINOR.PATCH`) at the time
-of writing: `0.2.0` -- minor revisions are additive (new opcodes,
+of writing: `0.9.0` -- minor revisions are additive (new opcodes,
 older firmware replies `STATUS_NOSUPPORT` for what it doesn't
 implement); the host driver refuses to operate on a mismatched
 major.

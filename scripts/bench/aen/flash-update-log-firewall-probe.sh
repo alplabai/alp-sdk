@@ -156,9 +156,6 @@ device $JLINK_DEVICE_FLASH
 connect
 loadbin $PKG $ATOC_ADDR
 verifybin $PKG $ATOC_ADDR
-RSetType 2
-r
-g
 exit
 EOF
 
@@ -187,34 +184,54 @@ fi
 # only thing that could fail this script, so a `Verify failed.` exited 0 and
 # reported a good flash.
 #
-# What this gate actually does -- and does NOT do: `loadbin`, `verifybin`,
-# `RSetType 2`, `r`, and `g` are all inside the SAME CommanderScript JLinkExe
-# has already finished executing by the time the greps below run, and the
-# ATOC entry above carries `"flags": ["load", "boot"]` -- the SE has already
-# pin-reset and BOOTED the HE probe. So this gate can only suppress the false
-# "flash complete" report and the beacon read-back
-# (read-update-log-proof.sh) that follows; it does NOT and CANNOT prevent the
-# write, or the boot that lets the HE probe attempt it. See the exit-3 data-
-# loss caveats below.
+# This gate is now LOAD-BEARING (#1526).  The CommanderScript above carries
+# only `loadbin` + `verifybin`; `RSetType 2` / `r` / `g` moved to a SECOND
+# script that runs further down, and only if the checks below pass.  So a
+# failed verify now stops the board being reset into an image that did not
+# verify -- and because the ATOC entry carries `"flags": ["load", "boot"]`,
+# not booting is what keeps the HE probe from running and overwriting
+# `alp_ulog_partition`.
+#
+# The MRAM write itself has of course already happened -- that is what
+# `loadbin` is.  What is prevented is acting on it.
 if grep -qiE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-firewall-probe-write.out; then
 	echo "!! VERIFY FAILED -- the bytes on the part do NOT match $PKG." >&2
 	grep -iE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-firewall-probe-write.out | head -5 >&2
 	echo "   Do not treat this board as flashed." >&2
-	echo "   DATA LOSS: the board was already pin-reset and released (RSetType 2; r; g" >&2
-	echo "   already ran inside the same CommanderScript), so alp_ulog_partition may" >&2
-	echo "   ALREADY have been overwritten by the HE probe -- re-read the partition from a" >&2
-	echo "   known-good state before trusting BASELINE_WORDS captured earlier in this run." >&2
+	echo "   The board was NOT reset or booted (#1526): the reset/boot CommanderScript" >&2
+	echo "   runs only past this gate, so the HE probe never ran and" >&2
+	echo "   alp_ulog_partition is intact.  MRAM now holds an image that failed verify --" >&2
+	echo "   reflash before booting this board." >&2
 	exit 3
 fi
 if ! grep -qi "verify successful" /tmp/firmware-update-log-firewall-probe-write.out; then
 	echo "!! no verifybin success reported -- treating as FAILED (the verify never ran)." >&2
-	echo "   DATA LOSS: the board was already pin-reset and released (RSetType 2; r; g" >&2
-	echo "   already ran inside the same CommanderScript), so alp_ulog_partition may" >&2
-	echo "   ALREADY have been overwritten by the HE probe -- re-read the partition from a" >&2
-	echo "   known-good state before trusting BASELINE_WORDS captured earlier in this run." >&2
+	echo "   The board was NOT reset or booted (#1526), so alp_ulog_partition is intact." >&2
+	echo "   MRAM now holds an unverified image -- reflash before booting this board." >&2
 	exit 3
 fi
 echo "verify: verifybin OK ($PKG @ $ATOC_ADDR)" >&2
+
+# ONLY NOW reset into the image (#1526).  Separate CommanderScript so the boot
+# is genuinely downstream of the verify result -- inside one script JLinkExe
+# runs everything before the shell can read anything, which is what made the
+# old gate advisory.
+cat > /tmp/firmware-update-log-firewall-probe-boot.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_FLASH
+connect
+RSetType 2
+r
+g
+exit
+EOF
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-firewall-probe-boot.jlink 	> /tmp/firmware-update-log-firewall-probe-boot.out 2>&1 || true
+if grep -qiE "Could not connect to the target device|Cannot connect to the probe/programmer" 	/tmp/firmware-update-log-firewall-probe-boot.out; then
+	echo "!! reset/boot script failed to connect -- image is verified in MRAM but the" >&2
+	echo "   board was not booted; alp_ulog_partition is untouched." >&2
+	exit 2
+fi
 
 echo "flash complete; reading firewall-probe beacon" >&2
 sleep 3

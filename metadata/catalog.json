@@ -1094,41 +1094,6 @@
           "models": false,
           "peripherals": false
         },
-        "name": "mqtt-sn-publish",
-        "osSet": [
-          "yocto",
-          "zephyr"
-        ],
-        "path": "examples/connectivity/mqtt-sn-publish",
-        "som": "E1M-AEN801",
-        "summary": "coreMQTT-SN teaching example. Encodes an MQTT-SN PUBLISH packet into a buffer, then parses it back out of the same buffer and asserts the topic id, message id, QoS, retain flag, and payload all survive the round trip. No socket, no gateway, no live transport -- this is the unit-test shape you'd run before wiring the encoder to a real UDP/ BLE/UART MQTT-SN link."
-      },
-      {
-        "board": "e1m-evk",
-        "coreCount": 3,
-        "cores": [
-          {
-            "app": "alp-image-edge",
-            "id": "a32_cluster",
-            "os": "yocto"
-          },
-          {
-            "app": "alp-stock-shim",
-            "id": "m55_he",
-            "os": "zephyr"
-          },
-          {
-            "app": "./src",
-            "id": "m55_hp",
-            "os": "zephyr"
-          }
-        ],
-        "declares": {
-          "chips": false,
-          "ipc": false,
-          "models": false,
-          "peripherals": false
-        },
         "name": "mqtt-telemetry",
         "osSet": [
           "yocto",
@@ -1557,7 +1522,7 @@
         "name": "rpmsg-imx93",
         "path": "examples/multicore/rpmsg-imx93",
         "som": "E1M-NX9101",
-        "summary": "> `[UNTESTED]` -- v0.6 structural draft, targeting **E1M-NX9101** > (NXP i.MX 93), which is **not yet buildable**. Its only hw_rev, > `metadata/e1m_modules/imx93/hw-revisions.yaml`'s `r1`, is > `status: tbd` -- the hw_rev-buildable gate > ([#1025](https://github.com/alplabai/alp-sdk/issues/1025)) refuses > it outright, before the orchestrator ever reaches carve-out > resolution against the also-TBD iMX93 memory-map values in > `metadata/e1m_modules/E1M-NX9101.yaml`. Both are TBD by design > (project memory note: don't invent HW values) pending real NX9101 > silicon; this example is excluded from the build/emit-snapshot/ > build-plan/system-manifest/parity-oracle gates for the same reason > (see those gates' own `#1025` comments) but its source and this > README stay -- the declarative structural files are the contract > that lets the orchestrator land cleanly the moment a real hw_rev > status lands."
+        "summary": "> `[UNTESTED]` -- v0.6 structural draft, targeting **E1M-NX9101** > (NXP i.MX 93), which is **not yet buildable**. Its only hw_rev, > `metadata/e1m_modules/imx93/hw-revisions.yaml`'s `r1`, is > `status: tbd` -- the hw_rev-buildable gate > ([#1025](https://github.com/alplabai/alp-sdk/issues/1025)) refuses > it outright, before the orchestrator ever reaches carve-out > resolution against the iMX93 memory map, which > `metadata/e1m_modules/E1M-NX9101.yaml` cannot resolve either > (`silicon_variant: TBD`). Both are TBD by design > (project memory note: don't invent HW values) pending real NX9101 > silicon; this example is excluded from the build/emit-snapshot/ > build-plan/system-manifest/parity-oracle gates for the same reason > (see those gates' own `#1025` comments) but its source and this > README stay -- the declarative structural files are the contract > that lets the orchestrator land cleanly the moment a real hw_rev > status lands."
       },
       {
         "board": "e1m-x-evk",
@@ -3217,6 +3182,10 @@
       "script": "scripts/check_agents_md_generators.py"
     },
     {
+      "purpose": "Cross-core pad-claim gate for the AMP RZ/V2N SoM (issue #1142).",
+      "script": "scripts/check_amp_pad_claims.py"
+    },
+    {
       "purpose": "Reject a raw `apt-get update`/`apt-get install` in a workflow step.",
       "script": "scripts/check_apt_bounded.py"
     },
@@ -3279,6 +3248,10 @@
     {
       "purpose": "Lint repo content for Linux-only idioms in customer-facing surfaces.",
       "script": "scripts/check_cross_platform.py"
+    },
+    {
+      "purpose": "Assert every ALP-Bxxx code scripts/alp_cli/validator.py can emit has a docs/diagnostics/ALP-Bxxx.md landing page (issue #1569).",
+      "script": "scripts/check_diagnostic_emission_coverage.py"
     },
     {
       "purpose": "Reject a placeholder-only ALP-Bxxx diagnostic landing page (issue #1207).",
@@ -3353,6 +3326,10 @@
       "script": "scripts/check_helper_firmware_path.py"
     },
     {
+      "purpose": "Reject two declared I2C devices claiming the same 7-bit address on the same bus (issue #1675).",
+      "script": "scripts/check_i2c_address_uniqueness.py"
+    },
+    {
       "purpose": "CI gate: doc/example prose that names a known on-module I2C part next to an I2C bus name must agree with that part's bus in the owning SoM preset's `on_module.i2c_devices:` block. #1270 added this block to `metadata/e1m_modules/E1M-AEN801.yaml` and its five AEN siblings (`E1M-V2N101.yaml` / `E1M-V2M101.yaml` already carried one); this gate is the cross-check #1270 asked for, reading across every SoM preset -- not AEN's alone -- mirroring what check_pin_conflicts.py does for silicon pads.",
       "script": "scripts/check_i2c_bus_doc_consistency.py"
     },
@@ -3385,6 +3362,10 @@
       "script": "scripts/check_plain_cmake_link_complete.py"
     },
     {
+      "purpose": "Protocol version policy gate for the CC3501E wire (ADR 0033).",
+      "script": "scripts/check_protocol_version_policy.py"
+    },
+    {
       "purpose": "CI gate: root public headers stay chip-neutral.",
       "script": "scripts/check_public_header_purity.py"
     },
@@ -3399,6 +3380,10 @@
     {
       "purpose": "CI gate: gen_sbom.py produces a valid, deterministic CycloneDX SBOM (#610 §7).",
       "script": "scripts/check_sbom.py"
+    },
+    {
+      "purpose": "Reject the unlocked check-then-set slot claim (issue #1630).",
+      "script": "scripts/check_slot_claim_atomic.py"
     },
     {
       "purpose": "Validate SoM-release bundle manifests against the public metadata/schemas/som-release-bundle-v1.schema.json contract.",
@@ -3831,11 +3816,13 @@
       "functions": [
         "alp_power_capabilities",
         "alp_power_close",
+        "alp_power_configure_retention",
         "alp_power_configure_wake_source",
         "alp_power_open",
         "alp_power_profile_get",
         "alp_power_profile_set",
-        "alp_power_request_sleep"
+        "alp_power_request_sleep",
+        "alp_power_wake_capabilities"
       ],
       "header": "include/alp/power.h"
     },

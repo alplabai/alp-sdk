@@ -68,6 +68,24 @@ if [ -z "$BUF_SYM" ]; then
 	echo "      the MRAM write above still completed -- this is not a boot failure. Read the" >&2
 	echo "      console via the labgrid 'console' resource instead." >&2
 else
+	# SAFETY GATE (alp-sdk#813) -- confirm the AEN E8 answered BEFORE the
+	# halt+mem8 read below. This bench has two probes sharing OEM serial
+	# 603000869 (one of them on a DIFFERENT board, the GD32 bridge on
+	# V2N-M1); JLinkExe selects by serial only, so JLINK_SN alone cannot
+	# prove which board is on the other end -- see bench-env.sh. Read-only
+	# connect first; nothing is halted until the DP ID matches.
+	cat > /tmp/flash-run-preflight.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_READ
+connect
+exit
+EOF
+	"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flash-run-preflight.jlink \
+		> /tmp/flash-run-preflight.out 2>&1 || true
+	bench_jlink_assert_connected /tmp/flash-run-preflight.out "Flow A preflight" || exit 7
+	bench_jlink_assert_aen_dpidr /tmp/flash-run-preflight.out "Flow A preflight" || exit 4
+
 	cat > /tmp/flash-read.jlink <<EOF
 connect
 halt

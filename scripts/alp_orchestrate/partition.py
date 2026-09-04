@@ -276,7 +276,7 @@ def _has_real_dt_label(
     matching a controller node's label 1:1 on paper. Measured against the
     generated Zephyr board trees (#1484 re-review): `ospi0` is the ONLY
     `ospi<n>` label that exists anywhere under `zephyr/`
-    (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:503`), it is included by
+    (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:688`), it is included by
     only the two E1M-AEN801 board `.dts` files, and there it is the OSPI
     CONTROLLER node (`compatible = "snps,designware-ospi"`,
     `status = "disabled"`) -- neither AEN801 board tree enables it or gives

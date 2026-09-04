@@ -874,7 +874,7 @@ def _resolve_zephyr_dir() -> Path:
     """Same resolution order as `scripts/check_toolchain_lock.py`'s
     `_resolve_zephyr_dir` (and `tests/scripts/test_hil_blocks_coverage.py`'s
     `_pinned_zephyr_sysbuild_kconfig_symbols`): `$ZEPHYR_BASE` (the
-    convention every `west` command and `scripts/alp_cli/doctor.py` use),
+    convention every `west` command and `tan doctor` use),
     falling back to the west-workspace topdir's conventional `zephyr/`
     project directory (`scripts/bootstrap.sh` does `west init -l <alp-sdk>`,
     so alp-sdk's parent is the topdir). Duplicated here rather than
@@ -1145,7 +1145,7 @@ def _check_install_commands(manifest: dict) -> list[str]:
          `scripts/bootstrap.ps1`'s `$Prereqs` but left behind in
          `install.windows`) would sit undetected forever. A tool with no
          install command at all is the exact hole that produced the drifted/
-         incomplete ninja hint in scripts/alp_cli/doctor.py this change
+         incomplete ninja hint in the now-retired scripts/alp_cli/doctor.py this change
          fixes. This is the ONLY assertion covering install.linux /
          install.macos -- see point 3's own note on why.
       2. scripts/bootstrap.ps1 agreement -- each `$Prereqs` entry's
@@ -1161,7 +1161,7 @@ def _check_install_commands(manifest: dict) -> list[str]:
          `Python.Python.3.12`, `Ninja-build.Ninja` today -- never
          hardcoded a second time here). A line containing an ID without
          its full canonical command string is a drifted copy -- this is
-         exactly the shape scripts/alp_cli/doctor.py's old ninja hint
+         exactly the shape the now-retired scripts/alp_cli/doctor.py's old ninja hint
          had (`winget install Ninja-build.Ninja.` contains the ID but not
          `winget install -e --id Ninja-build.Ninja`).
 

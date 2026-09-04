@@ -36,8 +36,23 @@ for this hardware" two ways:
   itself only reads and integrity-checks it (magic + schema_version +
   CRC32).  Matching it against the firmware build (`board.yaml`'s
   `som.sku` / `hw_rev`, via the generated `ALP_HW_BUILD_SOM_SKU` /
-  `ALP_HW_BUILD_SOM_HW_REV`) is an explicit call the application
-  makes, not something the SDK does automatically -- see below.
+  `ALP_HW_BUILD_SOM_HW_REV`) with SKU precision, or as a hard
+  boot-refusing failure, is still an explicit call the application
+  makes (`alp_hw_info_assert_matches_build()` -- typically halt) --
+  see below.  Separately (issue #1853), the SDK's own boot banner
+  (`CONFIG_ALP_SDK_BANNER`, on by default) now does a narrower version
+  of this automatically: it compares the live manifest's `hw_rev`
+  against `CONFIG_ALP_SDK_SOM_HW_REV` (the hw_rev this firmware build
+  resolved -- nothing in the compiled firmware derives a pad-routing
+  table from it; some E1M pads physically route to a different chip
+  depending on `hw_rev`, e.g. the AEN family's IO8/IO10/IO21, and
+  application code that hardcodes a pin-to-chip map is what can
+  actually mis-target one -- see
+  [#1859](https://github.com/alplabai/alp-sdk/issues/1859)) and
+  prints a loud warning on a disagreement, without refusing to boot; a
+  factory-fresh module's NOT_PROVISIONED read never reaches this check.
+  A production build that would rather halt than risk driving a pad on
+  the wrong chip opts in via `CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL`.
   There is no SoM-side ADC cross-check (`<alp/hw_info.h>`).  A
   carrier/EVK board may
   separately encode its own revision on a board-side BOARD_ID
@@ -183,4 +198,58 @@ som:
 
 The loader merges your overrides onto the preset before generating
 the build config.  No SDK fork needed.
+
+## I2C address collisions: the `broadcast_address` opt-out
+
+`scripts/validate_metadata.py` rejects two I2C device entries on the
+same bus that declare the same fixed address -- SoM
+`on_module.i2c_devices.<bus>.devices[].address_7bit`, board
+`i2c_devices[].address`, and board `audio.codecs[].i2c_address` are
+each checked independently.  Two devices cannot physically answer the
+same strap on the same bus; this caught two real prior defects,
+[#1163](https://github.com/alplabai/alp-sdk/issues/1163) (TMP112 vs.
+the DEEPX LPDDR buck, both at `0x48`) and
+[#1659](https://github.com/alplabai/alp-sdk/issues/1659) (an INA236 vs.
+the TAS2563 broadcast address, also `0x48`) -- see
+[#1845](https://github.com/alplabai/alp-sdk/issues/1845).
+
+The gate treats an entry as not-a-fixed-checkable-address, and skips
+it, when:
+
+- the address field is the literal `"TBD"` or `"configurable"`;
+- `assembled: false` (DNI -- the footprint exists but is empty);
+- **`broadcast_address: true`** -- the address is a real
+  broadcast/global-call address the *part itself* defines, which
+  multiple device entries legitimately share by design.
+
+Worked example -- a stereo pair of TI TAS2563 amps whose metadata
+entries record the part family's shared write-only global-call
+address (`0x48`, see `metadata/chips/tas2563.yaml`), not a
+per-part strap, so both entries answer the same address by design:
+
+```yaml
+i2c_devices:
+  brd_i2c:
+    devices:
+      - { chip: tas2563, role: amp_left,  address_7bit: "0x48", broadcast_address: true }
+      - { chip: tas2563, role: amp_right, address_7bit: "0x48", broadcast_address: true }
+```
+
+Without `broadcast_address: true` on both entries, the gate would
+FAIL with:
+
+```
+on_module.i2c_devices.brd_i2c: tas2563/amp_left, tas2563/amp_right all
+declare address_7bit=0x48 on the same bus -- two devices cannot share
+a fixed I2C address (#1845); set broadcast_address: true only if this
+is a real broadcast/global-call address
+```
+
+Only set `broadcast_address: true` when the datasheet documents the
+shared address as a broadcast mechanism of the part.  Do NOT reach for
+it to silence a real strap conflict between two unrelated devices --
+that is the gate doing its job; fix the strap instead (or, if the real
+strap genuinely isn't known yet, mark the address `"TBD"` with a
+`notes:` / `doc:` comment explaining why -- never guess a value to
+make the check pass).
 

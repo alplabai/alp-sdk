@@ -12,6 +12,22 @@ silicon_variant: AE512F80F55D5LS         # see metadata/socs/alif/ensemble/e5.js
 display_name: "E1M-AEN501 (Alif Ensemble E5 -- 1x A32 + 2x M55 + 2x Ethos-U55, preliminary)"
 
 on_module:
+  # POR_N / ER004: the module carries NO reset or brownout supervisor.  The
+  # E1M-AEN-2626-R2 netlist routes the SoC POR_N only to a pull-up and to the
+  # E1M edge connector, so satisfying the supervisor requirement is the
+  # CARRIER's job, not the module's.
+  #
+  # This is a hardware-damage requirement, not a robustness nicety.  Errata
+  # AERR0012 v2.0 ER004 applies to every E4/E6/E8 revision with no fix
+  # planned: "the voltage on the VDD_MAIN and VDD_BUCK pins must never drop
+  # below 1.65V once 1.65V is reached.  If this cannot be guaranteed, an
+  # external reset supervisor device must be used to drive (active low) the
+  # Ensemble system reset pin, POR_N" -- and, if it is not, "there is
+  # potential to damage the Ensemble SoC rendering it non-functional".
+  # Datasheet ADTS0013 v1.2 5.2.1 has since made it normative: "An external
+  # brownout supervisor must be connected to VDD_MAIN/VDD_BUCK.  The brownout
+  # supervisor must assert before voltage input to the chip falls below
+  # 1.65V."  (#1810)
   silicon:              alif:ensemble:e5       # 1x Cortex-A32 @ 800 + 2x M55 + Ethos-U55
   wifi_ble:             cc3501e
   secure_element:       optiga_trust_m
@@ -47,12 +63,21 @@ on_module:
     chip_select:    1
 
   i2c_devices:
-    # Tier-3 SE-mediated housekeeping bus (ADR 0017:74-79): the SoC can only
-    # be a slave on the Alif LPI2C0 (hardcoded address 0x40, TRM §3.17.4), so
-    # the Secure Enclave masters it, not on-module silicon -- `bus_master` is
-    # omitted per the schema's `i2c_bus.bus_master` description. Addresses
-    # per docs/bring-up-aen.md §5.1's bench-verified table; pad names per
-    # examples/aen/aen-secure-element-sign/README.md:14-15.
+    # HELD, NOT the disproven LPI2C0 claim (#1848, ADR 0017 amended
+    # 2026-08-30): E1M-AEN801 shares this SoM PCB and its BRD_I2C is SoC
+    # I2C0 (function C), master-capable, not the slave-only Alif LPI2C0
+    # this comment used to assert for the whole family. `bus_master` stays
+    # OMITTED here pending a per-part check that this silicon variant's
+    # datasheet backs I2C0_SCL_C/I2C0_SDA_C on the same pads (E1M-AEN801 is
+    # the only one confirmed against ADTS0013 + a netlist so far) --
+    # holding this back is deliberate, not an unreviewed leftover.
+    #
+    # Even on E1M-AEN801 this is the intended master, not a working bus:
+    # the shared netlist shows no pull-up path on BRD_I2C, and the
+    # datasheet/HWRM disagree on whether that is fatal -- see
+    # docs/bring-up-aen.md §5.1. Addresses per docs/bring-up-aen.md
+    # §5.1's bench-verified table; pad names per
+    # examples/aen/aen-secure-element-sign/README.md.
     brd_i2c:
       devices:
         - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }
@@ -181,6 +206,8 @@ pad_routes:
       doc: "CC3501E GPIO_19." }
   - { e1m: E1M_GPIO_IO20, dispatch: cc3501e, dispatch_pin: 26,
       doc: "CC3501E GPIO_26." }
+  - { e1m: E1M_GPIO_IO21, dispatch: unrouted,
+      doc: "Physically open on board 2626-R2 (no CC3501E or Alif termination); r1 routed it to CC3501E GPIO_30 -- see aen/hw-revisions.yaml pad_route_overrides (#1854)." }
 
 # On-module helper MCUs.  CC3501E (TI Wi-Fi 6 + BLE 5.4) is wired
 # on the AEN module; firmware is embedded in alp-sdk at
@@ -188,7 +215,15 @@ pad_routes:
 helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e
-    firmware_path: firmware/cc3501e/prebuilt/cc3501e-v0.3.0.bin
+    # firmware_path is deliberately OMITTED: the CC3501E firmware and its
+    # signed artefacts moved to alplabai/cc3501e-bridge-firmware (ADR 0031),
+    # so there is no repo-relative file to point at.  Obtain the image from
+    # that repo's prebuilt/ directory, and verify it against the .sha256 and
+    # .sig shipped beside it before flashing.  The schema and
+    # scripts/check_helper_firmware_path.py both treat an absent key as
+    # meaningful rather than missing -- a stale path that no longer resolves
+    # would be worse, because it stays indistinguishable from a good one
+    # until someone tries to flash it.
     # CC3501E firmware is Alp-released, applied over the bridge SPI
     # programming OTP.  Alp Lab programs it in production; a customer
     # flash is permitted only to recover a bricked device, using

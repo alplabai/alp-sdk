@@ -58,11 +58,12 @@
       "summary": "board preset does not exist"
     },
     "ALP-B007": {
+      "cause": "- Picking an EVK preset by habit or copy/paste instead of by family -- `metadata/boards/e1m-evk.yaml` hosts `alif-ensemble` and `nxp-imx9` (E1M-AEN3xx..AEN8xx, E1M-NX9101); `metadata/boards/e1m-x-evk.yaml` hosts `renesas-rzv2n` and `renesas-rzv2n-deepx` (E1M-V2N1xx, E1M-V2M1xx). Per [ADR-0011](../adr/0011-intra-family-portability.md), the two families are not interchangeable -- there is no single preset that hosts both. - Swapping `som.sku` to a different family's module (e.g. moving a project from an AEN SoM to a V2N SoM) without also swapping `preset:`. - A custom preset's `hosts_som_families:` list that was never updated after the preset started being used with a new family.",
       "code": "ALP-B007",
       "doc": "docs/diagnostics/ALP-B007.md",
-      "fix": "Use a board preset that hosts the SoM family, or define a compatible custom board inline in `board.yaml`.",
+      "fix": "Either: - Point `preset:` at a board preset whose `hosts_som_families:` includes the SoM's family (the hint names one when this checkout ships a match), or - Drop `preset:` and declare the board inline instead (`name:` + `populated:` + `e1m_routes:` -- see [`docs/board-config-schema.md`](../board-config-schema.md)); an inline board carries no `hosts_som_families:` constraint because it isn't shared across SoM families the way a stock EVK preset is. `preset:` and inline fields are mutually exclusive, so only one of the two applies to a given `board.yaml`.",
       "kind": "runtime-diagnostic",
-      "summary": "The selected board preset does not list the selected SoM preset's `family:` in `hosts_som_families:`."
+      "summary": "board preset does not host the SoM's family"
     },
     "ALP-B008": {
       "cause": "- A typo in the chip name (e.g. `bme208` for `bme280`). - A chip driver that was renamed or retired since the `board.yaml` was written. - A part that genuinely has no Alp SDK driver yet -- see [`chips/README.md`](../../chips/README.md) for the shape a new driver takes, or file an issue. - The manifest exists but is `driver_status: planned` -- the part is on the roadmap, but no `chips/<id>/` driver or `ALP_SDK_CHIP_<NAME>` Kconfig symbol has shipped for it yet, so naming it in `chips:` would emit an undeclared symbol the same way a typo would.",
@@ -146,7 +147,7 @@
       "code": "ALP_ERR_NOT_READY",
       "doc": "include/alp/peripheral.h",
       "kind": "api-error",
-      "summary": "Peripheral not initialised."
+      "summary": "The handle is not in a state to perform this operation."
     },
     "ALP_ERR_NO_BACKEND": {
       "code": "ALP_ERR_NO_BACKEND",

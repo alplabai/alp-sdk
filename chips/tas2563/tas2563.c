@@ -35,15 +35,32 @@ static alp_status_t select_page(tas2563_t *ctx, uint8_t page)
 	return reg_write(ctx, TAS2563_REG_PAGE, page);
 }
 
-/* Table 7-3: only five 7-bit addresses are wired -- the four
- * AD0/SPICLK strap options plus the global broadcast address.
- * Anything else (including an out-of-range/8-bit-encoded value)
- * cannot correspond to a real strap and is rejected before any bus
- * access. */
+/* Table 7-3: only the four AD0/SPICLK strap options identify a real,
+ * individually-addressable chip.  TAS2563_I2C_ADDR_BROADCAST (0x48) is
+ * deliberately excluded here -- not because these ops only read (they
+ * don't: select_page(), called by every function below, WRITEs the page
+ * register first, and set_mode() ends on a write too), but because 0x48
+ * does not pin down exactly one physical chip the way a strap address
+ * does.  Whatever answers a transaction at 0x48 -- every TAS2563 on the
+ * bus, an unrelated device strapped there by coincidence (a real EVK
+ * pre-respin had an INA236 there, #1846), or nothing -- is undefined
+ * from this per-instance context's point of view, for a write as much
+ * as for a read.
+ *
+ * This is the ONLY place addr is validated: tas2563_init() calls it
+ * before ctx->addr is ever assigned (below), and every other
+ * bus-touching function (read_revision, set_mode) gates on
+ * ctx->initialised rather than re-checking the address -- that flag is
+ * set true only after this check has already passed, so excluding 0x48
+ * here is sufficient for the whole life of the context.
+ *
+ * A future group-write helper that targets every chip on the bus at
+ * once BY DESIGN (e.g. a synchronized MODE_CTRL broadcast across a
+ * stereo pair) is free to accept TAS2563_I2C_ADDR_BROADCAST on its own
+ * terms -- this per-instance, single-chip context must not. */
 static bool addr_is_valid(uint8_t addr)
 {
-	return addr == TAS2563_I2C_ADDR_BROADCAST ||
-	       (addr >= TAS2563_I2C_ADDR_GND_DIRECT && addr <= TAS2563_I2C_ADDR_VDD_DIRECT);
+	return addr >= TAS2563_I2C_ADDR_GND_DIRECT && addr <= TAS2563_I2C_ADDR_VDD_DIRECT;
 }
 
 alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp_gpio_t *sd_n)

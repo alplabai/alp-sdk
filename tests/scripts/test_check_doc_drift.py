@@ -268,6 +268,42 @@ def test_matrix_total_unrelated_fraction_not_flagged(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
+def _write_example_board_yaml(root: Path, rel: str, preset: str) -> None:
+    p = root / "examples" / rel / "board.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f"preset: {preset}\n", encoding="utf-8")
+
+
+def test_example_preset_count_matches_passes(tmp_path):
+    _scaffold(tmp_path, docs={
+        "board-config-schema.md": (
+            "Most example projects under `examples/` target the EVK or "
+            "X-EVK (2 do today — 1 on `e1m-evk`, 1 on `e1m-x-evk`), "
+            "so they share a single board definition each.\n"
+        ),
+    })
+    _write_example_board_yaml(tmp_path, "a", "e1m-evk")
+    _write_example_board_yaml(tmp_path, "b", "e1m-x-evk")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_example_preset_count_mismatch_fails(tmp_path):
+    _scaffold(tmp_path, docs={
+        "board-config-schema.md": (
+            "(2 do today — 1 on `e1m-evk`, 1 on `e1m-x-evk`)\n"
+        ),
+    })
+    _write_example_board_yaml(tmp_path, "a", "e1m-evk")
+    _write_example_board_yaml(tmp_path, "b", "e1m-evk")
+    _write_example_board_yaml(tmp_path, "c", "e1m-x-evk")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    out = proc.stdout + proc.stderr
+    assert "1 on `e1m-evk`" in out  # the stale stated count
+    assert "3 do today" in out  # the expected value
+
+
 def test_yocto_machine_var_is_known(tmp_path):
     # A Yocto MACHINE variable defined in meta-alp-sdk is a real identifier.
     _scaffold(tmp_path, docs={"build-yocto-v2n.md": "Set `ALP_BOOT_DEVICE`.\n"})

@@ -134,13 +134,36 @@ alp_inference_dtype_t dxrt_dtype_to_alp(dxrt::DataType t)
 	}
 }
 
+/** True when every tensor in @p tensors has rank <= 4 -- the maximum
+ *  alp_inference_tensor_t's fixed shape[4] descriptor can hold without
+ *  truncating.  fill_tensor_descriptor() below used to silently truncate a
+ *  longer shape to the first 4 dims instead of saying so; the caller read
+ *  back a shape that no longer matched the model, with no signal anything
+ *  was wrong (issue #1729).  Called at open() time, before any tensor
+ *  descriptor is handed to a caller -- validates st->inputs/st->outputs,
+ *  the DECLARED metadata dx_rt reports before any Run().  It does NOT
+ *  cover the LIVE last_outputs a Run() actually hands back; get_output()
+ *  re-checks that path itself right before calling fill_tensor_descriptor()
+ *  on it. */
+bool all_tensor_ranks_fit(dxrt::Tensors &tensors)
+{
+	for (auto &t : tensors) {
+		if (t.shape().size() > 4) {
+			return false;
+		}
+	}
+	return true;
+}
+
 /** True if every dim of every tensor in @p tensors fits the descriptor's
- *  uint16_t shape[4] -- called from open() so a model with an
- *  unrepresentable dim fails to load instead of lying about its shape
- *  on the first get_input()/get_output().  Mirrors inference_ort.cpp's
- *  _gather_tensor_info() gate: a dim <= 0 (symbolic/dynamic) is never
- *  rejected -- fill_tensor_descriptor() pins it to 1, same as ORT --
- *  only a dim too large to fit is (#1645). */
+ *  uint16_t shape[4] slots -- called from open(), alongside
+ *  all_tensor_ranks_fit() above, so a model with an unrepresentable dim
+ *  VALUE fails to load instead of lying about its shape on the first
+ *  get_input()/get_output().  A separate concern from the rank check
+ *  above: rank bounds how many dims fit, this bounds how big each one
+ *  can be.  Mirrors inference_ort.cpp's _gather_tensor_info() gate: a
+ *  dim <= 0 (symbolic/dynamic) is never rejected -- fill_tensor_descriptor()
+ *  pins it to 1, same as ORT -- only a dim too large to fit is (#1645). */
 bool shapes_fit_descriptor(const dxrt::Tensors &tensors)
 {
 	for (const dxrt::Tensor &t : tensors) {
@@ -154,11 +177,18 @@ bool shapes_fit_descriptor(const dxrt::Tensors &tensors)
 }
 
 /** Fill an alp tensor descriptor from a dx_rt Tensor.  `data` points at
- *  the engine/SDK-owned buffer; the app must not free it.  Every dim has
- *  already been bound-checked by shapes_fit_descriptor() at open(), so
- *  the cast below cannot truncate -- only the symbolic-dim pin (dim <= 0
- *  -> 1) happens here, matching inference_ort.cpp's _gather_tensor_info().
- */
+ *  the engine/SDK-owned buffer; the app must not free it.
+ *
+ *  PRECONDITION: @p t's rank is <= 4 AND every dim value fits a
+ *  uint16_t.  For st->inputs/st->outputs, open() refuses
+ *  (ALP_ERR_NOSUPPORT) any model carrying a tensor that doesn't hold,
+ *  via all_tensor_ranks_fit() / shapes_fit_descriptor() above; for a
+ *  live st->last_outputs[i] tensor (get_output() after invoke()), the
+ *  caller re-checks the rank itself immediately before this call, for
+ *  the same reason -- either way this never truncates a live rank > 4
+ *  or dim value > UINT16_MAX (issues #1729, #1645). Only the
+ *  symbolic-dim pin (dim <= 0 -> 1) happens here, matching
+ *  inference_ort.cpp's _gather_tensor_info(). */
 void fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t *out)
 {
 	out->data       = data;
@@ -218,13 +248,12 @@ extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h
 		st->inputs  = st->engine->GetInputs();
 		st->outputs = st->engine->GetOutputs();
 
-		if (st->inputs.size() > 1u) {
-			/* dx_rt's Run() takes ONE pointer to the concatenated inputs,
-             * but input_bufs holds a separate allocation per tensor --
-             * passing input_bufs[0].data() would have dx_rt read
-             * sum(size_in_bytes) past that allocation and DMA unrelated
-             * heap to the DX-M1 over PCIe (#1645).  Refuse at open,
-             * before a bad model can ever reach invoke(). */
+		if (!all_tensor_ranks_fit(st->inputs) || !all_tensor_ranks_fit(st->outputs)) {
+			/* alp_inference_tensor_t's shape[] has exactly 4 slots; refuse
+			 * the model rather than let get_input()/get_output() hand back
+			 * a shape silently truncated to the first 4 dims (issue
+			 * #1729). NOSUPPORT, not IO: the model loaded fine, it is this
+			 * portable descriptor that has no slot for its rank. */
 			delete st->engine;
 			delete st;
 			return ALP_ERR_NOSUPPORT;
@@ -241,11 +270,31 @@ extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h
 			return ALP_ERR_NOSUPPORT;
 		}
 
+		if (st->inputs.size() > 1) {
+			/* invoke() hands dx_rt's Run() a SINGLE pointer --
+			 * st->input_bufs[0].data() -- which dx_rt treats as the base
+			 * of one contiguous blob concatenating every input tensor
+			 * (see the DeepxState::input_bufs doc above). This backend
+			 * stages each input in its OWN separate std::vector
+			 * allocation instead, so for any model with more than one
+			 * input dx_rt would read past input_bufs[0]'s real size and
+			 * DMA whatever unrelated heap memory follows it over PCIe to
+			 * the DX-M1 (issue #1645). Refuse rather than mis-run until a
+			 * real concatenating staging buffer lands -- this path is
+			 * gated behind ALP_SDK_USE_DEEPX_DXM1 (default OFF) and
+			 * bench-unverified either way, so getting it wrong here would
+			 * be read as a hardware/model problem on first DEEPX
+			 * bring-up. */
+			delete st->engine;
+			delete st;
+			return ALP_ERR_NOSUPPORT;
+		}
+
 		/* Stage one SDK-owned buffer per input tensor.  The app writes
          * into these via get_input(); invoke() hands inputs[0].data() to
-         * Run() -- the common V2N-M1 vision model is single-input, and
-         * multi-input models are refused above until the staging buffer
-         * is flattened into one contiguous blob. */
+         * Run().  (dx_rt concatenates multi-input models; the common
+         * V2N-M1 vision model is single-input -- multi-input is refused
+         * above until a real concatenating staging buffer lands.) */
 		st->input_bufs.resize(st->inputs.size());
 		for (size_t i = 0; i < st->inputs.size(); ++i) {
 			st->input_bufs[i].resize(static_cast<size_t>(st->inputs[i].size_in_bytes()));
@@ -307,9 +356,19 @@ extern "C" alp_status_t alp_inference_deepx_get_output(struct alp_inference   *h
 
 	/* After the first invoke(), last_outputs[index] points at the live
      * engine-owned result buffer; before any invoke the descriptor's
-     * data() is the engine's zero-initialised output area. */
+     * data() is the engine's zero-initialised output area.
+     *
+     * all_tensor_ranks_fit() at open() time only validated st->outputs --
+     * the declared metadata dx_rt reported before any Run().  It says
+     * nothing about what a live Run() actually hands back in
+     * last_outputs; fill_tensor_descriptor()'s PRECONDITION (rank <= 4)
+     * does not hold for that path on its own, so re-check the live
+     * tensor's rank here too before trusting it (issue #1729). */
 	void *data = nullptr;
 	if (index < st->last_outputs.size() && st->last_outputs[index] != nullptr) {
+		if (st->last_outputs[index]->shape().size() > 4) {
+			return ALP_ERR_NOSUPPORT;
+		}
 		data = st->last_outputs[index]->data();
 		fill_tensor_descriptor(*st->last_outputs[index], data, out);
 	} else {

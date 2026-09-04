@@ -9,8 +9,8 @@
  * read goes through the SoM-portable <alp/...> API, so the only AEN-specific fact
  * is the bus: the EEPROM's interface is selected by bridge/DNP resistors onto
  * the **SoC I2C2** DesignWare master bus (P5_6 SCL_C / P5_7 SDA_C), surfaced as
- * portable bus 0 -- NOT the slave-only LPI2C0 (which carries the RTC/TMP this
- * board rev; a master-capable respin moves those off LPI2C0).  I2C2 is driven by
+ * portable bus 0 -- NOT BRD_I2C (SoC I2C0, which carries the RTC/TMP/OPTIGA
+ * instead -- see examples/aen/aen-secure-element-sign).  I2C2 is driven by
  * upstream Zephyr's i2c_dw (full master read+write), per ADR 0017 (alp-sdk over
  * the vendor SDK -- Tier-1 upstream-native).
  *
@@ -79,7 +79,7 @@ int main(void)
 	    .bitrate_hz = 100000u,
 	});
 	/* Unlike the AEN Trust M probe (which SKIPs on ALP_ERR_NOT_READY because
-	 * BRD_I2C/LPI2C0 population varies by assembly), I2C2 backs the manifest
+	 * OPTIGA population on BRD_I2C varies by assembly), I2C2 backs the manifest
 	 * EEPROM that every E1M-AEN801 module ships with populated -- so any
 	 * open failure here is a real fault, not an expected-absent-part SKIP. */
 	if (bus == NULL) {

@@ -116,14 +116,16 @@ typedef struct {
 	alp_jpeg_subsample_t subsample;
 	uint8_t              quality; /**< 1..100. */
 	const void          *y_plane;
-	uint32_t             y_stride; /**< Bytes per row of @c y_plane.  Must be non-zero and
-	                                 *   >= @c width -- a zero or under-sized stride is
+	uint32_t             y_stride; /**< Bytes per row of @c y_plane.  0 is a "tightly
+	                                 *   packed" sentinel the dispatcher fills in as
+	                                 *   @c width; a NONZERO value under @c width is
 	                                 *   rejected with @ref ALP_ERR_INVAL rather than
 	                                 *   silently aliasing every row to row 0 or reading
 	                                 *   across row boundaries (#1645). */
 	const void          *u_plane;  /**< NULL when subsample is _400, or format is _NV12. */
-	uint32_t             u_stride; /**< Bytes per row of @c u_plane.  Consulted (and must
-	                                 *   be non-zero and >= (@c width + 1) / 2) only when
+	uint32_t             u_stride; /**< Bytes per row of @c u_plane.  Same 0-sentinel /
+	                                 *   floor-check rule as @c y_stride, against
+	                                 *   (@c width + 1) / 2; consulted only when
 	                                 *   @c format is @ref ALP_PIXFMT_YUV420_PLANAR and
 	                                 *   @c subsample is not @ref ALP_JPEG_SUBSAMPLE_400. */
 	const void          *v_plane;  /**< NULL when subsample is _400, or format is _NV12. */
@@ -161,15 +163,27 @@ alp_jpeg_t *alp_jpeg_open(const alp_jpeg_config_t *cfg);
  *
  * @param[in]  h         Handle from @ref alp_jpeg_open.
  * @param[in]  req       Frame + quality descriptor.  Must be non-NULL,
- *                       with @c width / @c height in the documented
- *                       8..16384 range and no larger than the opened
- *                       backend's @ref alp_jpeg_caps_t::max_width /
- *                       @c max_height (0 there means the backend
- *                       advertises no limit), plane strides per the
- *                       @c y_stride / @c u_stride / @c v_stride field
- *                       docs above, and a @c format the opened
+ *                       with non-zero @c width / @c height not exceeding
+ *                       the opened backend's @ref alp_jpeg_caps_t::max_width
+ *                       / @c max_height (a 0 value on either field means
+ *                       the backend advertises no bound on that axis, and
+ *                       the request is not rejected on it here -- see
+ *                       @ref ALP_ERR_OUT_OF_RANGE below), a @c format the
  *                       backend's @ref alp_jpeg_caps_t::pixfmt_mask
- *                       advertises.
+ *                       advertises, and
+ *                       @c y_stride / @c u_stride / @c v_stride each
+ *                       either 0 (a "tightly packed" sentinel -- the
+ *                       dispatcher fills in @c width / @c width/2) or no
+ *                       smaller than the row it describes.  @c width and
+ *                       @c height are bounded against the backend's
+ *                       advertised max (issue #1645); an explicit nonzero
+ *                       stride is only floor-checked against the row it
+ *                       claims to describe, never capped, so it remains the
+ *                       CALLER's responsibility that @c y_plane / @c u_plane
+ *                       / @c v_plane are each large enough for
+ *                       stride * height -- neither the dispatcher nor a
+ *                       backend is handed a buffer-length to check a larger
+ *                       stride against.
  * @param[out] out_buf   Destination buffer for the encoded stream.
  * @param[in]  out_cap   Capacity of @p out_buf, in bytes.
  * @param[out] out_len   Receives the encoded length on success; on
@@ -191,12 +205,16 @@ alp_jpeg_t *alp_jpeg_open(const alp_jpeg_config_t *cfg);
  *
  * @return @ref ALP_OK on success, or one of:
  *         - @ref ALP_ERR_INVAL -- NULL @p h / @p req / @p out_buf /
- *           @p out_len, @c width / @c height outside 8..16384, or a
- *           plane stride that violates the @c y_stride / @c u_stride /
- *           @c v_stride field docs on @ref alp_jpeg_encode_req_t.
- *         - @ref ALP_ERR_OUT_OF_RANGE -- @c width / @c height exceeds
- *           the opened backend's advertised @ref alp_jpeg_caps_t::max_width
- *           / @c max_height (when non-zero).
+ *           @p out_len, a zero @c width / @c height, or a nonzero
+ *           @c y_stride / @c u_stride / @c v_stride smaller than the row
+ *           it describes (issue #1645).
+ *         - @ref ALP_ERR_OUT_OF_RANGE -- @c width or @c height exceeds the
+ *           opened backend's advertised @ref alp_jpeg_caps_t::max_width /
+ *           @c max_height (issue #1645). A backend that advertises 0 for
+ *           either field (no bound to advertise -- e.g. a stub with no
+ *           real encode path) is exempt on that axis: the request instead
+ *           falls through to the backend, which returns its own status
+ *           (typically @ref ALP_ERR_NOT_IMPLEMENTED).
  *         - @ref ALP_ERR_NOSUPPORT -- @c format or @c subsample the
  *           backend can't do, or (hardware backends only) a buffer that
  *           is not DMA-reachable -- see the @note above.

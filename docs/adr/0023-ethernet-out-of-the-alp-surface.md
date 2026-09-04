@@ -28,7 +28,7 @@ The per-family hardware, tree-verified:
 - **AEN**: `"ethernet": 1` in every Ensemble SoC JSON (e.g.
   `metadata/socs/alif/ensemble/e8.json:152`). The on-module PHY is the
   TI DP83825 (`metadata/e1m_modules/aen/CHANGELOG.md:16`); RMII,
-  100/full (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:282`). The
+  100/full (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:467`). The
   MDIO address was contested in-tree when this ADR was written — the
   Zephyr DT recorded a managed-MDIO PHY at address 1, flagged "fork
   reference … confirm this address before relying on it", while the
@@ -42,7 +42,7 @@ The per-family hardware, tree-verified:
   variant read the PHY over the managed controller itself —
   `[eth] MDIO PHY@0 id=2000a140 (DP83825=2000a140)` — so the DT node
   is now `ethernet-phy@0` with `reg = <0>`
-  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:353-375`). The
+  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:538-560`). The
   order-code suffix stays TBD: `id=2000a140` is die/OUI identity only.
 - **NX91**: `ethernet_phy: TBD`
   (`metadata/e1m_modules/E1M-NX9101.yaml:28`);

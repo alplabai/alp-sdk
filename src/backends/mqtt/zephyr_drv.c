@@ -46,6 +46,7 @@
 #include <alp/iot.h>
 #include <alp/peripheral.h>
 
+#include "alp_errno.h"
 #include "alp_slot_claim.h"
 #include "mqtt_ops.h"
 
@@ -54,7 +55,7 @@
 #include <zephyr/net/mqtt.h>
 #include <zephyr/net/socket.h>
 
-LOG_MODULE_REGISTER(alp_mqtt, CONFIG_LOG_DEFAULT_LEVEL);
+LOG_MODULE_REGISTER(alp_iot_mqtt_zephyr, CONFIG_LOG_DEFAULT_LEVEL);
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -121,26 +122,11 @@ static void mqtt_be_release(struct mqtt_be *be)
 
 static alp_status_t errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	case -ENOMEM:
-		return ALP_ERR_NOMEM;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 /* Parse "mqtt(s)?://host[:port]" into host/port/tls.  Returns 0 on
@@ -261,6 +247,14 @@ static int alp_mqtt_get_fd(struct mqtt_client *c)
  * deadline is the middle ground: keep waiting for more bytes, but only
  * up to ALP_MQTT_DRAIN_TIMEOUT_MS.
  *
+ * NOTE for reviewers of the sibling fix on `dev` (#1918): that landing's
+ * mqtt_drain_remaining() stops on the FIRST -EAGAIN, which is exactly
+ * the "not here yet" case above, not a hard failure -- so it can still
+ * leave internal.remaining_payload > 0, and therefore the connection
+ * wedged at -EBUSY, for any oversized payload that arrives split across
+ * more than one TCP segment. This deadline-polling version is kept here
+ * because it closes that gap; `dev`'s simpler helper does not.
+ *
  * Returns true once `remaining` reaches 0. Returns false on a hard read
  * error OR on hitting `deadline` with bytes still owed -- either way
  * internal.remaining_payload is left non-zero, so the caller must treat
@@ -340,7 +334,10 @@ static void alp_mqtt_evt_cb(struct mqtt_client *client, const struct mqtt_evt *e
          * makes every later mqtt_input() return -EBUSY and the
          * connection stops delivering permanently -- and if this is a
          * QoS-1+ message, we are about to ack it below, so the broker
-         * will not resend either (#1645). */
+         * will not resend either (#1645). alp_mqtt_msg_cb_t (<alp/iot.h>)
+         * has no channel to report a truncated delivery to the caller --
+         * got below is silently short; widening the callback signature
+         * is a public-API change out of scope for this fix. */
 		if (pub->message.payload.len > got) {
 			size_t remaining = pub->message.payload.len - got;
 			if (!drain_mqtt_payload(

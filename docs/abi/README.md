@@ -10,8 +10,8 @@ changes between releases without diffing every header by hand.
 ## Exactly one snapshot is CURRENT; every other one is FROZEN
 
 At any time exactly one file in this directory -- the one named for
-the release `metadata/sdk_version.yaml` currently declares (`0.15.0`
--> `v0.15-snapshot.json`) -- is the *working* snapshot: it tracks
+the release `metadata/sdk_version.yaml` currently declares (`0.16.0`
+-> `v0.16-snapshot.json`) -- is the *working* snapshot: it tracks
 `HEAD` and gets regenerated (symbols change, and `generated` bumps to
 the date of that change) as the SDK's public headers evolve between
 releases. A regen that finds the public surface byte-identical to
@@ -119,7 +119,37 @@ snapshot" step) -- diffs against the newest FROZEN snapshot on disk
 label), not the current snapshot, and blocks only on a `REMOVED`
 public symbol (a `CHANGED` entry still prints, but doesn't fail the
 step -- pre-1.0 a signature/field change is allowed by
-`docs/contribution.md`'s ABI policy either way). This used to compare
+`docs/contribution.md`'s ABI policy either way).
+
+There is a fourth verdict, `MOVED`, which the gate deliberately does
+NOT fire on. The diff keys every symbol as `header::symbol`, so
+relocating one between public headers -- a header split, or lifting a
+hand-written block into its generated `*_routes.h` sibling -- would
+otherwise read as `REMOVED` + `ADDED` and block the PR even though no
+consumer lost anything. `MOVED` is reported instead when ALL of:
+
+* the symbol name and category are unchanged,
+* its recorded hash (value for a macro, full signature for a function,
+  normalised body for a typedef) is unchanged, and
+* the OLD header still `#include`s the new one, so a translation unit
+  including the old header still sees the symbol.
+
+That last condition is reachability and it is proven from the current
+tree, not assumed -- without it the verdict would let a genuine removal
+pass. Two deliberate restrictions on how it is proven, both erring
+toward `REMOVED`:
+
+* **Unconditional includes only.** An `#include` inside an `#if` arm is
+  not counted, because the arm may not be taken -- `include/alp/board.h`
+  selects between the two carriers' routes headers with mutually
+  exclusive arms, and counting either would let a symbol moved out of it
+  read `MOVED` while every consumer building the other board really lost
+  it. The condition is never evaluated, only its presence.
+* **One hop only.** A symbol that moves to a header reachable only
+  transitively stays `REMOVED`.
+
+Both failure modes produce a false `REMOVED`, which is noise a human
+resolves at review; the opposite error would be a silent ABI break. This used to compare
 against a frozen `docs/abi/v0.1-snapshot.json` baseline via `git show
 v0.1:...`, gated on a `v0.1` git tag that has never existed and never
 will (v0.1 predates the `vX.Y.Z` release-tag convention -- see the (†)
@@ -136,6 +166,49 @@ of already-accepted pre-1.0 evolution.
 Post-1.0 a per-release CI workflow (`pr-abi-snapshot.yml`, ships
 in v1.0) gates on the diff: any `REMOVED` or `CHANGED` entry
 requires a major-version bump.  `ADDED` entries always pass.
+
+## Recording an INTENTIONAL removal
+
+A `REMOVED` public symbol is not always a mistake -- issue #1622 found
+three EVK ADC macros whose *names* described nets that don't exist on
+the board (`EVK_ADC_BOARD_ID`, `EVK_ADC_MB_AN`, `EVK_ADC_VBAT_SENSE` --
+the last one invited a customer to read a battery voltage off a DAC
+output loopback). The fix renamed them; that is a deliberate,
+correct-for-the-customer removal of the old names, not a regression
+the freeze gate should silently block or a customer should silently
+lose track of on their next upgrade.
+
+`docs/abi/removed-symbols.json` is the record of every such removal.
+Each entry names the symbol, its header, the category
+(`function`/`typedef`/`macro`/`variable`), the release it was removed
+in, the issue that removed it, a one-sentence customer-actionable
+reason, and either a replacement symbol or an explicit `null` stating
+there is none. `scripts/abi_snapshot.py`'s `diff()` loads it (via
+`load_removed_allowlist`) and reports a matching removal as `ALLOWED`
+instead of a bare `REMOVED`:
+
+```
+  ALLOWED macro alp/boards/alp_e1m_evk_routes.h::EVK_ADC_BOARD_ID (intentional removal, #1622 -> EVK_ADC_ARDUINO_A0)
+```
+
+`ALLOWED` is reported, not silently dropped from the diff, for the
+same reason `MOVED` is reported and not dropped: a reviewer scanning
+the diff output should see EVERY symbol that stopped existing, whether
+that's cause for alarm (`REMOVED`) or already explained (`ALLOWED`).
+It deliberately does not start with `REMOVED ` -- the freeze gate's
+`grep -q '^  REMOVED '` and `diff()`'s own exit-code check
+(`m.startswith(("REMOVED", "CHANGED"))`) must never trip on an
+allowlisted entry, the same non-collision requirement `MOVED` already
+has to satisfy.
+
+The match is exact on `(header, category, symbol)` -- allowlisting one
+symbol never suppresses a same-named removal in a different header or
+category, so a genuinely new, unrelated removal still reads as a plain
+`REMOVED` and still blocks the gate. A malformed entry (a missing
+required field, an unknown category, a non-integer `issue`) is a hard
+error (`AbiAllowlistError`) from `load_removed_allowlist` -- never
+skipped, since silently dropping a bad entry would silently
+un-allowlist the removal it was meant to explain.
 
 ## What the snapshot is *not*
 
@@ -166,7 +239,8 @@ requires a major-version bump.  `ADDED` entries always pass.
 | [`v0.12-snapshot.json`](v0.12-snapshot.json)       | v0.12.0         | 2026-07-22 | frozen                    |
 | [`v0.13-snapshot.json`](v0.13-snapshot.json)       | v0.13.0         | 2026-07-24 | frozen                    |
 | [`v0.14-snapshot.json`](v0.14-snapshot.json)       | v0.14.0         | 2026-07-29 | frozen                    |
-| [`v0.15-snapshot.json`](v0.15-snapshot.json)       | v0.15.0-rc1 (release candidate; no final `v0.15.0` tag exists yet -- see the note below) | tracks HEAD | **CURRENT** (regenerated by CI/`test-all.sh` until `v0.15.0` ships) |
+| [`v0.15-snapshot.json`](v0.15-snapshot.json)       | v0.15.0-rc1 / v0.15.0 | 2026-08-12 | frozen (see note below) |
+| [`v0.16-snapshot.json`](v0.16-snapshot.json)       | v0.16.0 (see note below) | tracks HEAD | **CURRENT** (regenerated by CI/`test-all.sh` until the next release bumps `metadata/sdk_version.yaml`) |
 
 (†) `v0.1`/`v0.3`/`v0.5` predate `scripts/bump_version.py` and the
 `vX.Y.Z` release-tag convention (no `v0.1.0`/`v0.3.0`/`v0.5.0` git tag
@@ -177,22 +251,31 @@ produced byte-identical public-header fingerprints (the patch release
 touched no public header), so `v0.8-snapshot.json` is sourced from
 `v0.8.0`, the tag that originally minted the file.
 
-**Note on v0.15.0 (measured 2026-08-02 via `git tag --list`, rechecked
-2026-08-07):** the only `v0.15*` tag in the repo is `v0.15.0-rc1`;
-there is no plain `v0.15.0` tag.  `metadata/sdk_version.yaml` declares
-`version: 0.15.0` / `status: released` -- bumped 2026-07-31 by
-`4d0f4aae` for a tag that was never pushed.  This table follows the tag
-list, the only artefact that can't drift: it marks
-`v0.15-snapshot.json` **CURRENT** (it is still the label
-`scripts/abi_snapshot.py --print-current-version` derives from
-`sdk_version.yaml`'s `0.15.0`, and its `generated` date still moves
-whenever a regen finds real ABI content changed), not
-frozen-and-released.  Reconciling `sdk_version.yaml`'s `released`
-status against the missing tag is outside this file's ownership; it
-resolves when the GA tag lands.
+**Note on v0.15/v0.16 (updated #1622, 2026-08-25):** `v0.15.0` has
+since been tagged for real, superseding the earlier "only
+`v0.15.0-rc1` exists" situation this note used to describe.
+`v0.15-snapshot.json` froze -- stopped tracking `HEAD` -- the moment
+`metadata/sdk_version.yaml` was bumped to `0.16.0`, which happened
+several days *after* the `v0.15.0` tag itself (`generated: 2026-08-12`
+in the frozen file vs. `2026-08-07` in the tag). A frozen snapshot's
+content is whatever `HEAD` held at that bump, not necessarily the
+older tag's content byte-for-byte -- that's by design, see "Exactly
+one snapshot is CURRENT" above.
 
-The `CHANGELOG.md` half of that mismatch **is** now reconciled (#1292):
-the dated section is titled `[v0.15.0-rc1] - 2026-07-31`, naming the
-tag that actually shipped it, and the accumulated work since sits under
-`[Unreleased] - v0.15.0 candidate` to be cut as the GA.  So this note
-no longer describes the CHANGELOG as claiming a released `[v0.15.0]`.
+The same lag is repeating for `v0.16` right now: the `v0.16.0` tag
+exists and shipped (`CHANGELOG.md`'s `[v0.16.0] - 2026-08-23` section),
+but `metadata/sdk_version.yaml` still declares `version: 0.16.0` /
+`status: released` -- unbumped -- even though `CHANGELOG.md`'s
+`[Unreleased]` section already targets `v0.17.0 candidate`. Until that
+bump lands, `scripts/abi_snapshot.py --print-current-version` keeps
+deriving `v0.16`, so `v0.16-snapshot.json` keeps tracking `HEAD` (it
+already differs from the `v0.16.0` tag's own content) instead of
+freezing. This is expected, not a bug to fix reactively in this file --
+it resolves itself the next time a release cut bumps
+`metadata/sdk_version.yaml`, exactly as it did for v0.15 above.
+Tooling that needs "the last released, frozen baseline" (the ABI
+freeze gate, `tests/scripts/test_abi_snapshot.py`) must derive it the
+same way the freeze gate step does -- the newest
+`docs/abi/v*-snapshot.json` that ISN'T CURRENT -- never a hardcoded
+version literal, for exactly this reason: a literal goes stale on
+every single release.

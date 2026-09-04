@@ -1,9 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Parity tests for the board.yaml validation entry points."""
+"""Script-level guard for `scripts/validate_board_yaml.py`'s exit codes.
+
+Was a parity pair against `python -m alp_cli.main validate` (alp_cli.main
+retired #1367/#1368; `tan validate` spawns this same script now -- see its
+own docstring). Only the `_run_script()` half survives: it is the ONLY
+script-level guard that a warning-only ALP-B010 run exits 0 rather than a
+nonzero failure code, which docs/test-plan.md's `validate_board_yaml.py v0.3
+capability cross-check` row cites as its evidence.
+"""
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import textwrap
@@ -35,31 +42,11 @@ def _run_script(path: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _run_alp_validate(path: Path) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(REPO / "scripts")
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "alp_cli.main",
-            "validate",
-            "--no-color",
-            str(path),
-        ],
-        cwd=REPO,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-
 def _combined(proc: subprocess.CompletedProcess[str]) -> str:
     return proc.stdout + proc.stderr
 
 
-def test_entrypoints_both_report_per_core_peripheral_warning(
+def test_reports_per_core_peripheral_warning(
     tmp_path: Path,
 ) -> None:
     # E1M-AEN801, not E1M-NX9101: NX9101's only hw_rev (imx93 r1) is
@@ -80,15 +67,12 @@ cores:
 """)
 
     script = _run_script(path)
-    cli = _run_alp_validate(path)
 
     assert script.returncode == 0, _combined(script)
-    assert cli.returncode == 0, _combined(cli)
     assert "ALP-B010" in _combined(script)
-    assert "ALP-B010" in _combined(cli)
 
 
-def test_entrypoints_both_reject_orchestrator_consistency_error(
+def test_rejects_orchestrator_consistency_error(
     tmp_path: Path,
 ) -> None:
     path = _write_board(tmp_path, """
@@ -102,11 +86,7 @@ cores:
 """)
 
     script = _run_script(path)
-    cli = _run_alp_validate(path)
 
     assert script.returncode == 1
-    assert cli.returncode == 1
     assert "iot.tls" in _combined(script)
     assert "TLS provider" in _combined(script)
-    assert "iot.tls" in _combined(cli)
-    assert "TLS provider" in _combined(cli)

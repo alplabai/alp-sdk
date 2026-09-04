@@ -96,8 +96,10 @@ not the distro.
 
 > **Machine fragments:** `alp-image-edge` picks up per-machine `.cfg`
 > fragments from `meta-alp-sdk/recipes-kernel/linux/`.  For V2N with the
-> display and audio features enabled, the active fragment list includes
-> `display.cfg` + `tas2563-audio.cfg`.  To build a minimal image without
+> display feature enabled, the active fragment list is `display.cfg`.
+> (There is no audio fragment: the carrier TAS2563 codec has no DT node
+> yet, so nothing would bind — see the audio TODO in `e1m-x-evk.dtsi`.)
+> To build a minimal image without
 > Weston/display, remove the `alp-lvgl-dashboard`, `weston`, and
 > `weston-init` packages from `IMAGE_INSTALL` in your `local.conf` and
 > drop the `display.cfg` fragment from the `SRC_URI` override.

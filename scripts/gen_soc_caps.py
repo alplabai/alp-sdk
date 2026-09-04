@@ -493,6 +493,12 @@ def emit(meta_dir: Path = META_DIR, som_dir: Path = SOM_DIR) -> str:
     for path in sorted(meta_dir.rglob("*.json")):
         soc = json.loads(path.read_text(encoding="utf-8"))
         ref = soc["ref"]
+        # 0 on every real SoC today, deliberately -- this is an
+        # integration/partition decision, not a datasheet constant any
+        # vendor publishes (issue #1731 investigation).  Do not "fix" this
+        # by filling in a plausible-looking number here; see
+        # metadata/schemas/soc-spec-v1.schema.json's field description and
+        # src/backends/inference/alp_model_select.c's _fits().
         arena_kib = int(soc.get("inference_arena_sram_kib", 0))
         socs.append((ref, kconfig_token(ref), extract_caps(soc), extract_bool_caps(soc),
                      arena_kib, extract_unverified_peripherals(soc)))

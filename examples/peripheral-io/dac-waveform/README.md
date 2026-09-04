@@ -53,7 +53,8 @@ west build -b native_sim/native/64 examples/peripheral-io/dac-waveform \
 west build -t run
 
 # On real V2N silicon:
-west build -b alp_e1m_v2n101_m33_sm examples/peripheral-io/dac-waveform
+west build -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 \
+    examples/peripheral-io/dac-waveform
 west flash
 ```
 

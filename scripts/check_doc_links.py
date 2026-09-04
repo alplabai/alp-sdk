@@ -21,7 +21,7 @@ covers more ground:
 
     README.md, VERSIONS.md, docs/*.md (top-level only), docs/tutorials/**,
     docs/soms/**, docs/boards/**, docs/diagnostics/**, docs/adr/**,
-    docs/abi/**, docs/ci/**, examples/**/README.md
+    docs/abi/**, docs/ci/**, docs/bench/**, examples/**/README.md
 
 Deliberately NOT scanned: docs/superpowers/** (living/draft design docs,
 excluded from the doc-drift gate for the same reason) and CHANGELOG.md
@@ -64,10 +64,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 
 # docs/ subdirectories recursed into for link-checking.  Wider than
-# check_doc_drift.py's own _DOC_SUBDIRS (tutorials/soms/boards only) --
+# check_doc_drift.py's own _DOC_SUBDIRS (tutorials/soms/boards/bench only) --
 # see the module docstring for why a path check safely covers adr/abi/
 # diagnostics/ci where a symbol-drift check cannot.
-_DOC_SUBDIRS = ("tutorials", "soms", "boards", "diagnostics", "adr", "abi", "ci")
+_DOC_SUBDIRS = ("tutorials", "soms", "boards", "diagnostics", "adr", "abi", "ci", "bench")
 
 _LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
@@ -189,7 +189,7 @@ def main() -> int:
         return 1
 
     print("OK   customer docs (README.md, docs/*.md, "
-          "docs/{tutorials,soms,boards,diagnostics,adr,abi,ci}/**, "
+          "docs/{tutorials,soms,boards,diagnostics,adr,abi,ci,bench}/**, "
           "examples/**/README.md) carry no dead relative-path links")
     return 0
 

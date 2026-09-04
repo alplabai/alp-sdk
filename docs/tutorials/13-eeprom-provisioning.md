@@ -61,9 +61,8 @@ Hardware:
   **This is family-specific -- don't assume BRD_I²C:** on AEN
   the EEPROM is bridge/DNP-selected onto its own **SoC I2C2**
   (`P5_6 SCL_C` / `P5_7 SDA_C`), separate from BRD_I²C -- BRD_I²C
-  on AEN **is** the slave-only LPI2C0 (`P7_4`/`P7_5`) and carries
-  the RTC/TMP112/OPTIGA instead, a bus the silicon can only be a
-  slave on (see `docs/bring-up-aen.md` §5.1 and
+  on AEN **is** SoC I2C0 (`P7_0`/`P7_1`, function C) and carries
+  the RTC/TMP112/OPTIGA instead (see `docs/bring-up-aen.md` §5.1 and
   `examples/aen/aen-eeprom-manifest/README.md`); on V2N / V2N-M1
   the EEPROM sits on its own `e1m_i2c0` bus, separate from
   BRD_I²C (which carries the PMICs/RTC/OPTIGA/GD32 instead) --

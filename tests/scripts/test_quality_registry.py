@@ -108,3 +108,89 @@ def test_gate_flags_phantom(tmp_path):
         '"profiles":["pr"],"output":"none","ci":null}]}')
     probs = qgate.find_problems(tmp_path)
     assert any("check_nonexistent.py" in p for p in probs)
+
+
+def _seed_registry_tree(tmp_path, tasks: str, script_text: str = "# no subprocess here\n") -> None:
+    """A minimal registry+schema+scripts tree for the `quick`-bar tests.
+
+    Seeds a single `scripts/check_a.py`; `tasks` is the raw JSON for the
+    registry's `tasks` array contents.
+    """
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "metadata" / "schemas").mkdir(parents=True)
+    (tmp_path / "scripts" / "check_a.py").write_text(script_text)
+    (tmp_path / "metadata" / "schemas" / "quality-tasks-v1.schema.json").write_text(
+        (REPO / "metadata/schemas/quality-tasks-v1.schema.json").read_text())
+    (tmp_path / "metadata" / "quality-tasks-v1.json").write_text(
+        '{"schemaVersion":1,"description":"x","tasks":[' + tasks + ']}')
+
+
+def test_gate_flags_empty_quick_profile(tmp_path):
+    # #1463 round 1's own regression: `quick` re-emptied, everything else
+    # (schema, orphan/phantom, ci-claim checks) stays green.
+    _seed_registry_tree(tmp_path, (
+        '{"id":"a","description":"x","runner":"check-script",'
+        '"script":"scripts/check_a.py","gate":true,'
+        '"profiles":["pr"],"output":"none","ci":null}'
+    ))
+    probs = qgate.find_problems(tmp_path)
+    assert any("quick profile is empty" in p for p in probs)
+
+
+def test_gate_flags_quick_not_subset_of_pr(tmp_path):
+    _seed_registry_tree(tmp_path, (
+        '{"id":"a","description":"x","runner":"check-script",'
+        '"script":"scripts/check_a.py","gate":true,'
+        '"profiles":["quick","full"],"output":"none","ci":null}'
+    ))
+    probs = qgate.find_problems(tmp_path)
+    assert any("in quick profile but not in pr" in p for p in probs)
+
+
+def test_gate_flags_quick_member_that_shells_out(tmp_path):
+    # The reviewer's second mutation: a slow, subprocess-spawning task added
+    # to `quick` (e.g. a real zephyr-conf-parity-shaped script).
+    _seed_registry_tree(
+        tmp_path,
+        (
+            '{"id":"a","description":"x","runner":"check-script",'
+            '"script":"scripts/check_a.py","gate":true,'
+            '"profiles":["quick","pr"],"output":"none","ci":null}'
+        ),
+        script_text="import subprocess\nsubprocess.run(['git', 'status'])\n",
+    )
+    probs = qgate.find_problems(tmp_path)
+    assert any("imports subprocess at module level" in p for p in probs)
+
+
+def test_gate_allows_quick_member_with_lazy_subprocess_import(tmp_path):
+    # A `subprocess` import nested inside a function (only reachable if that
+    # function is called by some OTHER, non-quick task) must not
+    # false-positive -- matches alp_template.py's real shape.
+    _seed_registry_tree(
+        tmp_path,
+        (
+            '{"id":"a","description":"x","runner":"check-script",'
+            '"script":"scripts/check_a.py","gate":true,'
+            '"profiles":["quick","pr"],"output":"none","ci":null}'
+        ),
+        script_text="def _rare_path():\n    import subprocess\n    subprocess.run(['git'])\n",
+    )
+    probs = qgate.find_problems(tmp_path)
+    assert probs == []
+
+
+def test_gate_allows_quick_member_that_merely_mentions_subprocess(tmp_path):
+    # A docstring/comment mention of "subprocess" (check_diagnostic_schema.py's
+    # real shape) must not false-positive either.
+    _seed_registry_tree(
+        tmp_path,
+        (
+            '{"id":"a","description":"x","runner":"check-script",'
+            '"script":"scripts/check_a.py","gate":true,'
+            '"profiles":["quick","pr"],"output":"none","ci":null}'
+        ),
+        script_text='"""Note: the old form used the subprocess module; no longer.\n"""\n',
+    )
+    probs = qgate.find_problems(tmp_path)
+    assert probs == []

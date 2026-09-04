@@ -70,6 +70,7 @@
 #include <alp/jpeg.h>
 #include <alp/peripheral.h>
 
+#include "alp_errno.h"
 #include "jpeg_ops.h"
 #include "alp_slot_claim.h"
 
@@ -160,29 +161,22 @@ static void _free_state(alif_hantro_jpeg_state_t *st)
 	}
 }
 
+/* -ENOBUFS from the Hantro encoder means the caller's OUTPUT buffer was too
+ * small for the encoded frame -- an allocation-shaped failure specific to this
+ * backend, not a general allocation failure, so it has no arm in the shared
+ * baseline and is carried here instead.  The key is NEGATIVE: this table is
+ * matched in the Zephyr domain, unlike can/yocto_drv.c's positively-keyed
+ * POSIX one.  Issue #1638. */
+static const alp_errno_override_t _hantro_errno_overrides[] = {
+	{ -ENOBUFS, ALP_ERR_NOMEM },
+};
+
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOSPC:
-	case -ENOBUFS:
-		return ALP_ERR_NOMEM;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	return alp_status_from_zephyr_errno_ex(err,
+	                                       _hantro_errno_overrides,
+	                                       sizeof(_hantro_errno_overrides) /
+	                                           sizeof(_hantro_errno_overrides[0]));
 }
 
 static alp_status_t hantro_open(const alp_jpeg_config_t  *cfg,
@@ -210,6 +204,14 @@ static alp_status_t hantro_open(const alp_jpeg_config_t  *cfg,
 	struct video_caps vcaps = { .type = VIDEO_BUF_TYPE_INPUT };
 	int               err   = video_get_caps(dev, &vcaps);
 
+	/* If video_get_caps() fails or reports no format, max_w/max_h stay at
+	 * UINT16_MAX -- the ceiling of their own uint16_t type, not a real
+	 * silicon bound. This is NOT the same as the 0 sentinel
+	 * src/jpeg_dispatch.c's alp_jpeg_encode() treats as "no bound
+	 * advertised" (that path skips the OUT_OF_RANGE check entirely so a
+	 * NOT_IMPLEMENTED-only stub still gets reached); here the dispatcher's
+	 * check still runs, it just never rejects anything, because no
+	 * uint16_t width/height can exceed UINT16_MAX in the first place. */
 	uint16_t max_w = UINT16_MAX;
 	uint16_t max_h = UINT16_MAX;
 	if (err == 0 && vcaps.format_caps != NULL && vcaps.format_caps[0].pixelformat != 0u) {
@@ -258,22 +260,31 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 		return ALP_ERR_NOSUPPORT;
 	}
 
-	/* An under-sized y_stride is not a wrong picture -- it is the Hantro
-	 * AXI master reading memory the caller did not intend to expose
-	 * (#1645).  A zero stride is rejected as part of the same rule (see
-	 * the y_stride doc in <alp/jpeg.h>): the dispatcher already refuses
-	 * it unconditionally, so req->y_stride >= req->width here also
-	 * covers 0 (req->width is never 0).  The dispatcher enforces this,
-	 * but a backend handing a pointer to a DMA master validates its own
-	 * inputs rather than trusting every caller reached it only through
-	 * the portable API. */
-	if (req->y_stride < req->width) {
-		return ALP_ERR_INVAL;
-	}
-
 	/* NV12: one Y plane immediately followed, at stride*height, by an
 	 * interleaved half-height UV plane -- see the struct doc on
-	 * alp_jpeg_encode_req_t. Total footprint = stride*height*3/2. */
+	 * alp_jpeg_encode_req_t. Total footprint = stride*height*3/2.
+	 *
+	 * req->y_stride/width/height reach here only after src/jpeg_dispatch.c's
+	 * alp_jpeg_encode() has rejected a nonzero stride smaller than width and
+	 * capped width/height to this backend's own advertised max_width/
+	 * max_height (issue #1645), and has already normalized a zero stride to
+	 * width -- req->y_stride here is therefore always nonzero. That bounds
+	 * width/height and gives stride a FLOOR, not a ceiling: an explicit
+	 * y_stride larger than the caller's real y_plane allocation passes both
+	 * checks unchanged, so in_len below can still exceed the buffer the
+	 * caller actually owns -- neither the dispatcher nor _is_dma_reachable()
+	 * below has a buffer-length parameter to check it against; both only
+	 * ever see a pointer + the fields the caller chose to describe it with.
+	 *
+	 * `in_len`'s `size_t` multiply is also not a wrap-proof width on every
+	 * target: on a build where size_t is 32 bits (this backend's own M55
+	 * target), a large enough in_stride/height combination wraps in_len to
+	 * a SMALL value, which then makes _is_dma_reachable() pass on a short
+	 * range even though the HW transfer below is NOT programmed from
+	 * in_len -- video_set_format() gets the un-wrapped .width/.height/
+	 * .pitch directly, and the VC9000E's own DMA master walks the real,
+	 * un-wrapped span those describe. _is_dma_reachable() therefore only
+	 * ever catches a TCM-placement mistake, never an oversized stride. */
 	uint32_t in_stride = req->y_stride;
 	size_t   in_len    = (size_t)in_stride * req->height * 3u / 2u;
 
@@ -297,7 +308,11 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 		.pixelformat = VIDEO_PIX_FMT_NV12,
 		.width       = req->width,
 		.height      = req->height,
-		.pitch       = req->y_stride,
+		/* Reuse the same in_stride computed above -- was a second,
+		 * independently-evaluated copy of the identical ternary
+		 * (issue #1645); one value now feeds both the DMA-span
+		 * derivation and the HW pitch register. */
+		.pitch = in_stride,
 	};
 	int err = video_set_format(st->dev, &fmt);
 	if (err != 0) {

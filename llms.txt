@@ -60,7 +60,6 @@ For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent gu
 
 ## Validation
 
-- [scripts/alp_cli/doctor.py](scripts/alp_cli/doctor.py): alp-sdk's internal/reference preflight, distinct from Python Tan's user-facing `tan doctor`.
 - [scripts/validate_board_yaml.py](scripts/validate_board_yaml.py): the SDK's full `board.yaml` reference validator; Python Tan currently provides bundled structural checks via `tan validate --offline` while its SDK-backed path is ported.
 - [scripts/check_example_portability.py](scripts/check_example_portability.py): gate enforcing the portable-API rule for examples.
 - [scripts/check_doc_drift.py](scripts/check_doc_drift.py): gate catching docs that drifted from code/metadata.

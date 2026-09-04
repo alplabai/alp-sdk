@@ -117,18 +117,25 @@ static void test_nonexistent_port_returns_null_and_stamps_not_ready(void)
 	ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_NOT_READY);
 }
 
-static void test_write_on_null_port_returns_invalid(void)
+/* NULL `port` is a lifecycle condition, not a malformed argument --
+ * ALP_ERR_NOT_READY, matching every Zephyr dispatcher and ADR-0002's
+ * 2026-08-27 amendment (issue #1834, same shape as #1734's GPIO fix).
+ * tests/yocto/peripheral_uart_closed_status.c covers the sharper
+ * non-NULL, closed-handle case and the INVAL-still-fires-on-a-good-
+ * handle counterpart, which this public-API-only file can't fabricate
+ * without a real /dev/tty*. */
+static void test_write_on_null_port_returns_not_ready(void)
 {
 	uint8_t      buf[1] = { 0x55 };
 	alp_status_t rc     = alp_uart_write(NULL, buf, sizeof(buf));
-	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOT_READY);
 }
 
-static void test_read_on_null_port_returns_invalid(void)
+static void test_read_on_null_port_returns_not_ready(void)
 {
 	uint8_t      buf[1] = { 0 };
 	alp_status_t rc     = alp_uart_read(NULL, buf, sizeof(buf), 100u);
-	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOT_READY);
 }
 
 static void test_close_null_is_safe(void)
@@ -335,8 +342,8 @@ int main(void)
 	test_invalid_stop_bits_returns_null_and_stamps_invalid();
 	test_unsupported_baud_returns_null_and_stamps_invalid();
 	test_nonexistent_port_returns_null_and_stamps_not_ready();
-	test_write_on_null_port_returns_invalid();
-	test_read_on_null_port_returns_invalid();
+	test_write_on_null_port_returns_not_ready();
+	test_read_on_null_port_returns_not_ready();
 	test_close_null_is_safe();
 
 	test_read_fd_no_data_times_out_instead_of_blocking_forever();

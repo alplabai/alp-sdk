@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "alp-sdk-cli"
 version = "0.16.0"
-description = "Command-line front-end for the Alp SDK"
+description = "Alp SDK internal/reference Python tooling: board.yaml validation, model build, and the alp-mcp server -- not a command surface (tan-cli is)"
 requires-python = ">=3.10"
 dependencies = [
     "PyYAML>=6.0",
@@ -22,7 +22,6 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-snapshot>=0.9",
-    "pytest-mock>=3.10",
 ]
 # Lightweight TFLite read/parse deps (tensor-I/O extraction + the hermetic
 # fixture generator) -- pure-Python, no compiler.  CI installs this so the
@@ -44,9 +43,12 @@ mcp = [
     "mcp>=1.2",
 ]
 
-# No `alp` console-script: standalone Python Tan is the user-facing command
-# surface (ADR-0020). The `alp_cli` package remains an SDK-internal reference
-# and parity CLI for direct maintenance, never a user-installed `alp` binary.
+# No `alp` console-script, and no `python -m alp_cli <verb>` front door
+# either: standalone Python Tan is the whole command surface (ADR-0020
+# end-state B). The `alp_cli` package remains, but only as SDK-internal
+# LIBRARY modules other scripts import (board.yaml validation/rendering,
+# diagnostic-v1/SARIF export) -- its command-line wrappers retired once
+# `tan` had ported every one of them (alp-sdk#1367, alp-sdk#1368).
 [project.scripts]
 alp-mcp = "alp_mcp.server:main"
 

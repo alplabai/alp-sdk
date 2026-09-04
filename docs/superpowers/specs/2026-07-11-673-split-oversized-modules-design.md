@@ -29,7 +29,7 @@ vendor fork, or ABI surface is out of scope or handled by its own workflow.
 - **P3 deferred:** public-header partitioning (`peripheral.h`, `chips/*.h`) is
   documented and non-urgent; revisit only if Doxygen/navigation metrics justify.
 - No touching vendored (`vendors/`, `zephyr/drivers/` Tier-2 forks,
-  `firmware/cc3501e/hal/ti/`) — those move by upstreaming/provenance/regen, not
+  `cc3501e-bridge-firmware:hal/ti/`) — those move by upstreaming/provenance/regen, not
   local refactor.
 
 ## Invariant spine (Definition of Done, applies to every phase)
@@ -58,8 +58,8 @@ A split is done only when all of the following hold:
 | `tests/scripts/test_alp_orchestrate.py` | 3380 | 108 tests, 8 contracts |
 | `tests/scripts/test_alp_project.py` | 1360 | 70 tests, emitter+schema+loader |
 | `tests/zephyr/chips/src/main.c` | 2962 | >100 chip/block ztests, one TU |
-| `firmware/gd32-bridge/tests/gen_protocol_vectors.py` | 736 | vector render + CLI |
-| `firmware/cc3501e/tests/gen_protocol_vectors.py` | 206 | vector render + CLI |
+| `gd32-bridge-firmware:tests/gen_protocol_vectors.py` | 736 | vector render + CLI |
+| `cc3501e-bridge-firmware:tests/gen_protocol_vectors.py` | 206 | vector render + CLI |
 
 Line counts confirmed by direct measurement; all named seams exist.
 

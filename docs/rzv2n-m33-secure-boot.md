@@ -75,7 +75,7 @@ Recovery if a bad BL2 won't boot: SCIF Flash Writer + a known-good `bl2_bp_spi*.
 The CM33's Zephyr console is `sci0`/P05 (a separate UART). Instead, read the GD32
 bridge over SWD (live reads, no halt): `JLink -device GD32G553MEY7TR`,
 `mem8 0x20000000, 0x10`. A serviced PING leaves `spi_rx_buf = A5 00 FF 84`
-(symbols from `firmware/gd32-bridge/build/gd32/gd32-bridge`:
+(symbols from `gd32-bridge-firmware:build/gd32/gd32-bridge`:
 `spi_rx_buf@0x20000000`, `spi_tx_buf@0x2000004c`, `spi_tx_cursor@0x20000098`).
 
 ## ⚠ Open: the M33→GD32 SPI link is SCI7 Simple-SPI, not the dedicated SPI_B

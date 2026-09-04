@@ -49,6 +49,8 @@
 #define MAX_NUM_CHANNELS          (8U)   /* Max number of channel   */
 #define MAX_QUEUE_LEN             (100U) /* Max Queue length      */
 #define PDM_CH_OFFSET             (0x100U)
+#define PDM_CLK_MODE_MASK         (0xFU << 16U) /* PDM_CTL0[19:16] PDM_MODE: a FIELD */
+#define PDM_FIFO_STAT_CNT_MASK    (0xFU)        /* PDM_FIFO_STAT[3:0] CNT; 31-4 reserved */
 
 #define PDM_CHANNEL_0             (1U << 0U)
 #define PDM_CHANNEL_1             (1U << 1U)

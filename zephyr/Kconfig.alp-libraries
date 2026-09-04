@@ -167,17 +167,8 @@ config ALP_MODBUS_SYNC_IO
 	default y
 
 # ----------------------------------------------------------------------
-# IoT libs (coremqtt_sn / libcoap / nanopb / libwebsockets /
-# jsmn / bearssl)
+# IoT libs (libcoap / nanopb / libwebsockets / jsmn / bearssl)
 # ----------------------------------------------------------------------
-
-config ALP_MQTTSN_MBEDTLS
-	bool "coreMQTT-SN with mbedTLS"
-config ALP_MQTTSN_BEARSSL
-	bool "coreMQTT-SN with BearSSL"
-config ALP_MQTTSN_NO_TLS
-	bool "coreMQTT-SN without TLS (SW fallback)"
-	default y
 
 config ALP_COAP_MBEDTLS
 	bool "libcoap with mbedTLS DTLS"

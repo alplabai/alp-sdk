@@ -10,8 +10,8 @@ The AEN sibling of [`v2n-eeprom-manifest-dump`](../../v2n/v2n-eeprom-manifest-du
 On the E1M-AEN801 the EEPROM's interface is selected by **bridge/DNP resistors**
 onto **SoC I2C2** — a Synopsys DesignWare master bus (pins `P5_6 SCL_C` /
 `P5_7 SDA_C`), driven by **upstream Zephyr's `i2c_dw`** (full master read+write).
-It is **not** on the slave-only LPI2C0 (which carries the RTC/TMP112 in this
-board rev; a respin moves those to a master bus). This is Tier-1 upstream-native
+It is **not** on BRD_I2C (SoC I2C0, which carries the RTC/TMP112/OPTIGA
+instead -- see `examples/aen/aen-secure-element-sign`). This is Tier-1 upstream-native
 per [ADR 0017](../../../docs/adr/0017-alp-sdk-over-the-vendor-sdk.md) — no vendor
 driver, just the DT node (`i2c2@49012000`, authoritative `I2C2_BASE`/`I2C2_IRQ`
 from the AE822 DFP device header) + the portable backend.

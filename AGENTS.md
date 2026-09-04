@@ -87,10 +87,12 @@ report.
   find why a build won't work before you build. `--build` remains accepted
   for v0.4 compatibility but no longer changes the check list.
 - `tan validate --offline --board-yaml board.yaml` — Python Tan's bundled
-  structural checks. The SDK-backed subprocess is not yet ported; use
-  `python3 scripts/validate_board_yaml.py --board-yaml board.yaml` for the
-  full diagnostic-rich schema/preset/capability/consistency validator. Try it
-  against a fixture under `tests/fixtures/board_yaml_bad/` to learn the output
+  structural checks, without resolving an SDK. Without `--offline`, Tan
+  resolves the SDK checkout and spawns its full validator itself (ported in
+  tan-cli#376, shipped in tan v0.6.0). The same validator can also be run
+  directly, without Tan: `python3 scripts/validate_board_yaml.py --input
+  board.yaml` — note the flag is `--input`, not `--board-yaml`. Try it against
+  a fixture under `tests/fixtures/board_yaml_bad/` to learn the output
   format.
 - `python -m alp_orchestrate --input board.yaml --emit build-plan` — the SDK
   reference validation/planning path used for parity before compile work.
