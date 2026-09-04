@@ -11164,8 +11164,8 @@
           "value": "(id) ((alp_spi_target_config_t){ .bus_id = (id), .mode = ALP_SPI_MODE_0, .bits_per_word = 0u })"
         },
         "ALP_UART_CONFIG_DEFAULT": {
-          "hash": "3186ecc94f7ca975",
-          "value": "(id) ((alp_uart_config_t){ .port_id = (id), .baudrate = 115200u, .data_bits = 8u, .stop_bits = 1u, .parity = ALP_UART_PARITY_NONE })"
+          "hash": "8294a351f7c5504f",
+          "value": "(id) ((alp_uart_config_t){ .port_id = (id), .baudrate = 115200u, .data_bits = 8u, .stop_bits = 1u, .parity = ALP_UART_PARITY_NONE, .flow_control = ALP_UART_FLOW_NONE })"
         }
       },
       "typedefs": {
@@ -11337,16 +11337,27 @@
           "kind": "enum"
         },
         "alp_uart_config_t": {
-          "definition": "typedef struct { uint32_t port_id; uint32_t baudrate; uint8_t data_bits; uint8_t stop_bits; alp_uart_parity_t parity; } alp_uart_config_t;",
+          "definition": "typedef struct { uint32_t port_id; uint32_t baudrate; uint8_t data_bits; uint8_t stop_bits; alp_uart_parity_t parity; alp_uart_flow_t flow_control; } alp_uart_config_t;",
           "fields": [
             "uint32_t port_id",
             "uint32_t baudrate",
             "uint8_t data_bits",
             "uint8_t stop_bits",
-            "alp_uart_parity_t parity"
+            "alp_uart_parity_t parity",
+            "alp_uart_flow_t flow_control"
           ],
-          "hash": "fd0724f00181ce0f",
+          "hash": "c6ea5fb1ad7ef326",
           "kind": "struct"
+        },
+        "alp_uart_flow_t": {
+          "definition": "typedef enum { ALP_UART_FLOW_NONE = 0, ALP_UART_FLOW_RTS_CTS = 1, ALP_UART_FLOW_XON_XOFF = 2 } alp_uart_flow_t;",
+          "enumerators": [
+            "ALP_UART_FLOW_NONE = 0",
+            "ALP_UART_FLOW_RTS_CTS = 1",
+            "ALP_UART_FLOW_XON_XOFF = 2"
+          ],
+          "hash": "2cdcb3e6a951a1ef",
+          "kind": "enum"
         },
         "alp_uart_parity_t": {
           "definition": "typedef enum { ALP_UART_PARITY_NONE = 0, ALP_UART_PARITY_EVEN = 1, ALP_UART_PARITY_ODD = 2 } alp_uart_parity_t;",

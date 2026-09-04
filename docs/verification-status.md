@@ -32,7 +32,7 @@ ledger is the one to trust.
 
 ## Summary
 
-92 silicon/HIL-gated ledger rows parsed across 8 sections.  A row can carry more than one glyph
+93 silicon/HIL-gated ledger rows parsed across 8 sections.  A row can carry more than one glyph
 (e.g. half a feature done, half pending), so glyph counts can
 exceed the row count.  This total EXCLUDES three kinds of row that
 would otherwise inflate it: the rows under "CI-only / tooling rows (no HIL gate)"
@@ -47,7 +47,7 @@ duplicated from the v0.4 section already counted above).
 
 | Glyph | Meaning | Count |
 |---|---|---|
-| `⏳` | untested | 36 |
+| `⏳` | untested | 37 |
 | `🟡` | partial | 44 |
 | `✅` | verified | 13 |
 | `❌` | failing | 1 |
@@ -395,6 +395,7 @@ silicon-facing row is bench-gated as usual.
 | `alp_dac_capabilities()` | `src/dac_dispatch.c` + backends | 🟡 partial | Caps reported on an opened handle match the silicon (resolution, channel count) on a real target | Live capabilities row in the conformance suite on native_sim | v0.9 |
 | `alp_wdt_open(const alp_wdt_config_t *)` single-arg + ADC `_mv` read renames | `include/alp/wdt.h` / `include/alp/adc.h` + all in-tree callers | 🟡 partial | Pre-1.0 signature migration: no stale two-arg / unsuffixed callers anywhere in tree; behaviour unchanged | Conformance suite adopted the new signatures (`eec8868d`); grep-clean tree; ABI snapshot regenerated | v0.9 |
 | `alp_wdt_close()` no longer disarms the whole device; `ALP_WDT_INTERRUPT_ONLY` gains `on_expire`/`user` | `include/alp/wdt.h` + `src/backends/wdt/{zephyr_drv,yocto_drv,sw_fallback}.c` + `src/wdt_dispatch.c` | ⏳ untested | On the Zephyr backend: `z_close()` no longer calls `wdt_disable(dev)`, so closing one handle should no longer disarm a device a non-SDK Zephyr consumer (e.g. `CONFIG_TASK_WDT`) might share; a reopen of the same `wdt_id` should still succeed (`z_open()` reclaims a stale `wdt_setup()` with one `wdt_disable()` + retry on `-EBUSY`, when the underlying driver actually permits disable); an `ALP_WDT_INTERRUPT_ONLY` open with `on_expire` set should invoke the callback when the deadline is missed, on a driver that calls back at all (driver-dependent -- see `include/alp/wdt.h`) | `native_sim` has no `alp-wdt0` DT alias, so `zephyr_drv`'s `z_open()` always returns `NOT_READY` before reaching `wdt_install_timeout()` -- not even native_sim exercises the reclaim path or the ISR trampoline, so this stays `⏳ untested` rather than `🟡 partial` (no non-canonical happy-path run exists for either). NULL/INVAL/close-NULL/interrupt-only-without-callback failure paths are covered by 8 wdt cases (7 in `tests/zephyr/peripheral/src/wdt.c` plus `test_wdt_config_default` in `config_defaults.c`) and `alp.unit.wdt_exclusivity` (3 cases), exercised by the required `twister · native_sim/native/64` CI gate; **needs-silicon**: whether the reclaim actually reopens a still-armed device, whether the ISR trampoline actually fires, and the close-vs-latched-interrupt race window all need an E1M-AEN801 or E1M-V2N101 bench run | v0.17 |
+| UART flow control (`alp_uart_config_t.flow_control`, `alp_uart_flow_t`) | `include/alp/peripheral.h` + `src/backends/uart/zephyr_drv.c` + `src/yocto/peripheral_uart.c` | ⏳ untested | `ALP_UART_FLOW_RTS_CTS` actually holds off an overrunning peer at a high baud rate against a real UART peer; `ALP_UART_FLOW_XON_XOFF` in-band framing round-trips on Linux | `tests/zephyr/peripheral/src/config_defaults.c` (default-macro field) + `tests/zephyr/peripheral/src/uart.c` (`ALP_UART_FLOW_XON_XOFF` -> `ALP_ERR_NOSUPPORT` on Zephyr, deterministic on native_sim since the backend refuses it before ever calling `uart_configure()`; `test_uart_open_rejects_rts_cts_when_controller_cannot_configure` -> `ALP_ERR_NOSUPPORT` when the controller can't attempt runtime configuration at all (native_sim uart0's `-ENOSYS` path); `test_uart_open_rts_cts_reaches_the_driver_on_uart1` -> an accepted RTS/CTS request actually lands as `UART_CFG_FLOW_CTRL_RTS_CTS` on the emulated uart1's `uart_config_get()` readback) + `tests/yocto/peripheral_uart_flow_control.c` (pure `apply_flow_control()` bit-mapping against a scratch `struct termios`, both enumerators); no board currently routes RTS/CTS pads, so the `scripts/alp_project.py` devicetree/pinmux side is unimplemented pending real per-SoM pad metadata (issue #1639) -- **RTS/CTS overrun prevention + XON/XOFF round-trip via a manual bench run** | v0.17 |
 
 ## CI-only / tooling rows (no HIL gate)
 
