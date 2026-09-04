@@ -360,17 +360,20 @@ and the board `.dts` all derive from the SoM preset + SoC JSON
 (`tests/scripts/test_gen_zephyr_board.py` pins them byte-identical to the
 committed tree).  The Renesas RZ/V2N family (`v2n` / `v2n-m1`) generates
 the family-agnostic files (`board.yml`, `Kconfig.alp_<board>`, the
-twister `.yaml`) PLUS the pinctrl `.dtsi` and `_defconfig`, sourced from
+twister `.yaml`) PLUS the pinctrl `.dtsi`, `_defconfig`, and the board
+`.dts` (issue #655), sourced from
 `metadata/e1m_modules/v2n/supervisor-links.yaml` -- a hand-authored,
 family-scoped source for the on-module GD32G553 supervisor's Renesas-side
 pin assignments (SCI7 SPI, RIIC8/BRD_I2C, the disabled SCI0 console),
 deliberately kept out of `metadata/pinmux/*.yaml` (itself generated
 DO-NOT-EDIT output, so it cannot also be a hand-authored generation
-source).  Only the board `.dts` stays hand-authored for this family; it
-has no metadata source yet.  `board.cmake` (flasher/debugger runner args)
-stays hand-authored for every family -- its prose is a documentation
-choice (which sibling board's file carries the full bring-up runbook),
-not a hardware fact derivable from metadata.
+source) -- plus, gated on the SoM preset's `topology.m33_sm.openamp_ipc`
+flag, the OpenAMP/MHU-B reserved-memory block and CAN-FD-unavailable
+analysis that only E1M-V2N101's committed board tree carries today.
+This family has no `Kconfig.defconfig` at all.  `board.cmake`
+(flasher/debugger runner args) stays hand-authored for every family --
+its prose is a documentation choice (which sibling board's file carries
+the full bring-up runbook), not a hardware fact derivable from metadata.
 
 **Not in the inventory above -- a standalone dev tool, not a build-time
 generator.** `scripts/gen_rzv2n_cm33_svd.py` (issue #1029 step 2) projects a

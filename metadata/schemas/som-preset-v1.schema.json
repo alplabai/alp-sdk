@@ -412,6 +412,10 @@
         "zephyr_twister_name": {
           "type": "string",
           "description": "Twister board-metadata `name:` field for `os: zephyr` entries, when it differs from `zephyr_full_name` (some families drop the SoC parenthetical here). Defaults to `zephyr_full_name` when absent."
+        },
+        "openamp_ipc": {
+          "type": "boolean",
+          "description": "True when this core's board `.dts` (V2N/V2M family, `--emit zephyr-board`'s `_v2n_dts()`, issue #655 slice 2) carries the OpenAMP/MHU-B reserved-memory block and the CAN-FD-unavailable analysis comment.  A board-tree-content fact, not a claim that OpenAMP is unsupported where absent: E1M-V2M101 simply does not carry either block in the currently-committed tree yet, and this flag lets the generator reproduce that gap byte-for-byte instead of inventing content for a board nobody wrote it for. Absent defaults to false."
         }
       },
       "allOf": [
