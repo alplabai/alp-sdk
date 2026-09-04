@@ -51,6 +51,56 @@
       }
     }
   },
+  "artifactProvenance": {
+    "git": {
+      "tier": "A",
+      "source": "https://git-scm.com/",
+      "sizeBytes": null,
+      "licence": "GPL-2.0-only"
+    },
+    "cmake": {
+      "tier": "A",
+      "source": "https://cmake.org/",
+      "sizeBytes": null,
+      "licence": "BSD-3-Clause"
+    },
+    "ninja": {
+      "tier": "A",
+      "source": "https://ninja-build.org/",
+      "sizeBytes": null,
+      "licence": "Apache-2.0"
+    },
+    "python3": {
+      "tier": "A",
+      "source": "https://www.python.org/",
+      "sizeBytes": null,
+      "licence": "PSF-2.0"
+    },
+    "python": {
+      "tier": "A",
+      "source": "https://www.python.org/",
+      "sizeBytes": null,
+      "licence": "PSF-2.0"
+    },
+    "xz": {
+      "tier": "A",
+      "source": "https://tukaani.org/xz/",
+      "sizeBytes": null,
+      "licence": null
+    },
+    "wget": {
+      "tier": "A",
+      "source": "https://www.gnu.org/software/wget/",
+      "sizeBytes": null,
+      "licence": "GPL-3.0-or-later"
+    },
+    "7zip": {
+      "tier": "A",
+      "source": "https://www.7-zip.org/",
+      "sizeBytes": null,
+      "licence": null
+    }
+  },
   "west": {
     "pipSpec": "west>=0.14.0",
     "initArgs": ["init", "-l"],

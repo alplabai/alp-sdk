@@ -93,12 +93,12 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["targetTriple", "compiler", "sysroot", "id"],
-            "description": "This slice's compiler identity (#610 §4 per-slice tooling index), grounded in the SoM preset's `topology.<core>.toolchain` -- never invented. A field genuinely not derivable for this slice's runtime is null rather than guessed (e.g. a Yocto slice's exact GCC triple depends on the Yocto build's own TUNE_FEATURES/TCLIBC, outside board.yaml/SoM metadata).",
+            "description": "This slice's compiler identity (#610 §4 per-slice tooling index), grounded in the SoM preset's `topology.<core>.toolchain` default or a project's `cores.<core>.toolchain` override (board.schema.json, issue #964) -- never invented. A field genuinely not derivable for this slice's runtime is null rather than guessed (e.g. a Yocto slice's exact GCC triple depends on the Yocto build's own TUNE_FEATURES/TCLIBC, outside board.yaml/SoM metadata).",
             "properties": {
               "targetTriple": { "type": ["string", "null"], "description": "GCC target triple for this slice's compiler (e.g. `arm-zephyr-eabi` for a Zephyr Cortex-M slice, which is both the Zephyr SDK toolchain directory name and its real GCC triple). null when not derivable (e.g. Yocto -- the triple depends on the Yocto build's own TCLIBC/TUNE_FEATURES)." },
               "compiler": { "type": ["string", "null"], "description": "Compiler executable name for this slice (e.g. `arm-zephyr-eabi-gcc`). null when not derivable." },
               "sysroot": { "type": ["string", "null"], "description": "Cross-compile sysroot path for this slice, when the runtime has one. Always null today -- Zephyr bundles its own libc per architecture inside the Zephyr SDK (no conventional sysroot), and Yocto's sysroot lives inside the Yocto build tree, not in board.yaml/SoM metadata." },
-              "id": { "type": ["string", "null"], "description": "Stable toolchain identifier, taken verbatim from the SoM preset's `topology.<core>.toolchain` (e.g. `arm-zephyr-eabi`, `poky-glibc`) -- the same field `system-manifest.yaml`'s `slices[].toolchain` already surfaces. null when the SoM preset doesn't declare one for this core." }
+              "id": { "type": ["string", "null"], "description": "Stable toolchain identifier, taken verbatim from the SoM preset's `topology.<core>.toolchain` default, or a project's `cores.<core>.toolchain` override when set (e.g. `arm-zephyr-eabi`, `poky-glibc`, `llvm`) -- the same field `system-manifest.yaml`'s `slices[].toolchain` already surfaces. null when neither the SoM preset nor board.yaml declares one for this core." }
             }
           },
           "artifacts": {

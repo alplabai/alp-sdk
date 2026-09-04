@@ -106,14 +106,22 @@ typedef enum {
 	ALP_INFERENCE_MODEL_VELA       = 1, /**< Vela-compiled `.tflite`. */
 	ALP_INFERENCE_MODEL_DRPAI      = 2, /**< Renesas DRP-AI binary. */
 	ALP_INFERENCE_MODEL_DXNN       = 3, /**< DEEPX DXNN binary. */
-	ALP_INFERENCE_MODEL_EXECUTORCH = 4, /**< ExecuTorch program.  RESERVED --
-					     *   no adapter produces this format
-					     *   and no backend consumes it, so a
-					     *   blob claiming it is rejected with
-					     *   @ref ALP_ERR_INVAL -- the value
-					     *   is kept rather than removed to
-					     *   avoid renumbering; see issue
-					     *   #1260. */
+	ALP_INFERENCE_MODEL_EXECUTORCH = 4, /**< ExecuTorch program.  Write side is
+					     *   live: ExecutorchAdapter (issue #1260)
+					     *   produces this format from a .pte
+					     *   source.  No backend runtime consumes
+					     *   it yet.  Backend selection is
+					     *   silicon_ref+priority and never reads
+					     *   cfg->format, so the outcome depends on
+					     *   which backend wins: on a TFLM-linked
+					     *   build, alp_inference_open() falls
+					     *   through to the CPU/TFLM backend, whose
+					     *   flatbuffer verify rejects the raw .pte
+					     *   bytes, failing with @ref ALP_ERR_INVAL
+					     *   (not a deliberate format check); with no
+					     *   TFLM linked, sw_fallback (priority 0)
+					     *   wins instead and fails with @ref
+					     *   ALP_ERR_NOSUPPORT.  See issue #1260. */
 	ALP_INFERENCE_MODEL_ONNX       = 5  /**< Raw `.onnx` graph (ONNX Runtime CPU backend). */
 } alp_inference_model_format_t;
 
@@ -210,9 +218,13 @@ typedef struct {
  *         ALP_ERR_NOT_IMPLEMENTED (registered backend has no open
  *         hook), ALP_ERR_NOSUPPORT (a pinned @c backend the selected
  *         backend can't serve, e.g. ETHOS_U pinned on a CPU-only
- *         build), ALP_ERR_NOMEM (handle-pool or arena allocation
- *         failure), or ALP_ERR_IO (backend's tensor-arena allocation
- *         failed).
+ *         build; OR, on the ONNX Runtime / DEEPX DX-M1 / TFLM backends,
+ *         any model tensor whose rank exceeds 4 -- @ref
+ *         alp_inference_tensor_t's @c shape has exactly 4 slots, and
+ *         a model that doesn't fit is refused rather than opened with
+ *         a silently-truncated shape), ALP_ERR_NOMEM (handle-pool or
+ *         arena allocation failure), or ALP_ERR_IO (backend's
+ *         tensor-arena allocation failed).
  */
 alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg);
 
@@ -313,6 +325,160 @@ alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tenso
  *         ALP_ERR_IO (NPU error).
  */
 alp_status_t alp_inference_invoke(alp_inference_t *inf);
+
+/**
+ * @brief Wall-clock duration of the most recent successful @ref
+ *        alp_inference_invoke call, in microseconds.
+ *
+ * Brackets the backend's synchronous invoke -- every shipped backend
+ * (TFLM/Ethos-U, DRP-AI3, DEEPX DX-M1, ONNX Runtime) blocks the
+ * calling thread until the result lands (see @ref alp_inference_invoke),
+ * so this is a real per-invoke measurement taken by the dispatcher
+ * itself, not an estimate a backend opts into -- there is no backend
+ * that "can't" report it.
+ *
+ * Reports only the LAST successful invoke; it does not accumulate
+ * statistics or retain a history.  A caller building a latency
+ * distribution (mean / p95 / run count) calls this once per @ref
+ * alp_inference_invoke and keeps the samples itself -- the SDK holds
+ * no ring buffer, so this accessor's memory cost is fixed regardless
+ * of how many samples a caller wants, on a part where the inference
+ * arena is already the binding constraint.
+ *
+ * A failed invoke (any return other than @ref ALP_OK) does not update
+ * the stored value -- reading after a failed invoke still returns the
+ * last value a *successful* invoke produced (or @ref ALP_ERR_NOT_READY
+ * if none has succeeded yet).
+ *
+ * Overlapping invokes on one handle -- two threads calling @ref
+ * alp_inference_invoke on the SAME @p inf concurrently, a real
+ * interleaving this handle's op-counting permits (it is a drain
+ * counter, not a mutex) -- are last-STORE-wins, not largest-duration-
+ * or largest-finish-time-wins: the stored value is whichever invoke's
+ * atomic store instruction executes last, which is not necessarily the
+ * invoke that finished last in wall-clock time (a scheduler can
+ * preempt between an invoke's compute finishing and its store
+ * running). Concurrent invokes on one handle are unusual -- most
+ * callers own one handle per thread -- but the SDK does not forbid it,
+ * and this accessor makes no attempt to attribute a reading to a
+ * specific invoke call when more than one is in flight. Read this only
+ * when you know at most one @ref alp_inference_invoke is outstanding
+ * on this handle, or treat a reading taken while invokes may overlap
+ * as "some recent invoke's duration," not "this specific call's."
+ *
+ * Units: MICROSECONDS. A caller feeding this into the tier-2 benchmark
+ * recipe schema's `latency_ms_mean` / `latency_ms_p95` fields
+ * (MILLISECONDS) must divide by 1000 itself -- this accessor performs
+ * no unit conversion, and a missed division publishes a number 1000x
+ * too large.
+ *
+ * @param[in]  inf     Handle from @ref alp_inference_open.
+ * @param[out] out_us  Filled with the last successful invoke's
+ *                     duration in whole microseconds (rounded to
+ *                     nearest, not floored -- a sub-microsecond
+ *                     invoke reports 0 only when it truly rounds to
+ *                     0, not by truncation bias).  Must be non-NULL.
+ *
+ *                     Ceiling: the Zephyr/M-class dispatcher stores the
+ *                     value in a 32-bit field internally -- a
+ *                     naturally-aligned @c uint32_t load/store is
+ *                     lock-free on every Cortex-M this SDK targets,
+ *                     unlike the @c uint64_t the field used to be
+ *                     (M-profile has no 64-bit atomic instruction, so
+ *                     GCC lowers a 64-bit @c __atomic_store_n /
+ *                     @c __atomic_load_n to a libatomic call, and the
+ *                     Zephyr SDK's arm-zephyr-eabi toolchain ships no
+ *                     libatomic -- every Cortex-M app failed to link).
+ *                     A duration exceeding @c UINT32_MAX - 1
+ *                     microseconds (4294967294 us, just under
+ *                     ~71.58 minutes) therefore SATURATES at
+ *                     @c UINT32_MAX - 1 rather than wrapping -- the
+ *                     raw @c UINT32_MAX value is reserved as the "no
+ *                     successful invoke yet" sentinel (see
+ *                     @ref ALP_ERR_NOT_READY below) and is never
+ *                     returned as a measured duration, so the ceiling
+ *                     is one microsecond short of the field's true
+ *                     numeric range. Saturating here is implausible
+ *                     for one invoke in practice, but it is the
+ *                     honest, OBSERVABLE ceiling: a caller reads
+ *                     @c ALP_OK plus this saturated value, not
+ *                     @ref ALP_ERR_NOT_READY.
+ *
+ *                     A second, TIGHTER, and considerably more
+ *                     dangerous limit sits in front of that one on a
+ *                     target without
+ *                     @c CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER: the
+ *                     underlying hardware cycle counter itself wraps
+ *                     modulo 2^32 cycles first (depends on
+ *                     @c CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC), and this
+ *                     accessor has no way to detect that wrap -- unlike
+ *                     the 32-bit storage ceiling above, which fails
+ *                     safe (a saturated value that reads back as
+ *                     implausibly huge), a wrapped cycle-counter delta
+ *                     produces a plausible-looking, too-small duration
+ *                     reported with @c ALP_OK, not an error. Zephyr's
+ *                     @c CORTEX_M_SYSTICK_64BIT_CYCLE_COUNTER Kconfig
+ *                     (which a plain Cortex-M SysTick target's
+ *                     @c CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER depends
+ *                     on) defaults to `y` only when
+ *                     @c CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC exceeds
+ *                     60 MHz, so under STOCK Kconfig the 32-bit-counter
+ *                     fallback this paragraph describes only actually
+ *                     compiles in on a target clocked at 60 MHz or
+ *                     below, where the wrap ceiling is
+ *                     >= ~71.58 s (2^32 cycles / 60 MHz) -- a
+ *                     400 MHz target left at Kconfig defaults selects
+ *                     the 64-bit counter instead and never hits this
+ *                     wrap at all; "~10.74 s at 400 MHz" (a naive
+ *                     2^32-cycles-at-400 MHz calculation) is not a
+ *                     combination stock Kconfig produces. On
+ *                     @c CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER targets
+ *                     (e.g. the E1M-AEN801 M55 cores, and any target
+ *                     with an ARM architected/GIC timer, which selects
+ *                     this Kconfig unconditionally) the wrap limit
+ *                     does not apply and the 32-bit storage ceiling
+ *                     above is the binding one. The Yocto/A-class
+ *                     dispatcher has neither limit (native 64-bit
+ *                     atomics on x86-64/aarch64, a 64-bit
+ *                     @c CLOCK_MONOTONIC nanosecond delta), so it has
+ *                     no ceiling to saturate against at all.
+ *
+ *                     Cross-OS ceiling contract: on BOTH OSes, once
+ *                     @ref alp_inference_invoke has completed with
+ *                     @ref ALP_OK at least once, this accessor reports
+ *                     @c ALP_OK with a real duration -- never
+ *                     @ref ALP_ERR_NOT_READY merely because that
+ *                     duration was long. Zephyr's UINT32_MAX - 1 clamp
+ *                     (above) is what makes this true there: without
+ *                     it, a duration landing exactly on the field's
+ *                     raw numeric ceiling would collide with the "no
+ *                     successful invoke yet" sentinel and read back as
+ *                     @ref ALP_ERR_NOT_READY with @p out_us never
+ *                     written, silently contradicting the SATURATES
+ *                     wording above. @ref ALP_ERR_NOT_READY means
+ *                     exactly one thing on either OS: @p inf is
+ *                     NULL/closed, or no invoke has ever completed
+ *                     with @ref ALP_OK on this handle yet -- never "the
+ *                     invoke was too slow to report."
+ *
+ * @return ALP_OK, or one of:
+ *         - @ref ALP_ERR_INVAL -- @p out_us is NULL.
+ *         - @ref ALP_ERR_NOT_READY -- @p inf is NULL/closed, or no
+ *           @ref alp_inference_invoke call has completed with
+ *           @ref ALP_OK on this handle yet. Never returned merely
+ *           because the last successful invoke's duration was long --
+ *           see the Cross-OS ceiling contract above.
+ *         - @ref ALP_ERR_NOSUPPORT -- the stub build only (no
+ *           inference backend compiled in at all): there is no timing
+ *           mechanism here that could ever have been populated, so
+ *           this is the honest answer regardless of @p out_us or
+ *           handle state.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      New accessor; the file-level marker stays [ABI-STABLE] -- see
+ *      docs/abi-markers.md's mixed-tier note.
+ */
+alp_status_t alp_inference_last_invoke_latency_us(alp_inference_t *inf, uint64_t *out_us);
 
 /**
  * @brief Release the model + tensor buffers.  NULL-safe.

@@ -12,10 +12,11 @@
  * drive AE / AWB / AF + the picture-tuning offsets through the same vtable.
  *
  * Mirrors src/backends/camera/v2n_n44_isp.c (the V2N N44 ISP backend): same
- * stub-vs-real split, but talks the UPSTREAM v4.4 video API (the v2n backend
- * still uses the pre-v4.4 endpoint-id helpers; this one uses the ported API:
+ * stub-vs-real split, and both now talk the UPSTREAM v4.4 video API --
  * video_get_caps(dev, &caps) with caps.type, video_set_format(dev, &fmt),
- * video_buffer_alloc(size, K_NO_WAIT), video_stream_start(dev, type)).
+ * video_buffer_alloc(size, K_NO_WAIT), video_stream_start(dev, type).  This
+ * file was the first to use it, which is why it reads as the reference; the
+ * v2n backend and the portable zephyr_video.c were ported to match.
  *
  * Why a separate backend rather than a Kconfig switch on the portable one:
  *   1. The ISP-Pico is an Alif Ensemble m2m video device (vsi,isp-pico, driven
@@ -60,6 +61,7 @@
 #include <alp/cap_instance.h>
 #include <alp/peripheral.h>
 
+#include "alp_errno.h"
 #include "camera_ops.h"
 #include "alif_isp_pico.h"
 #include "alp_slot_claim.h"
@@ -105,25 +107,11 @@ static void _free_state(alp_alif_isp_pico_state_t *s)
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-		return ALP_ERR_TIMEOUT;
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Single source of truth for the SDK's quality tasks: which check_*.py gates exist, whether each is a hard CI gate or informational, and which profiles (quick/pr/full/release) run it. check_quality_registry.py keeps it == scripts/check_*.py on disk. Additive-only within schemaVersion 1.",
+  "description": "Single source of truth for the SDK's quality tasks: which check_*.py gates exist, whether each is a hard CI gate or informational, and which profiles (quick/pr/full/release) run it. check_quality_registry.py keeps it == scripts/check_*.py on disk and (#1463 round 2) enforces `quick`'s own membership bar: non-empty, a subset of `pr`, and no member's script executing `import subprocess` at module load time. Additive-only within schemaVersion 1. `quick` membership criterion (#1463, measured against the `pr` set): pure-Python (no `subprocess` call of any kind -- not even `git`), no build/toolchain dependency, and a median wall-clock time under 0.5s (median of 5 interleaved reps on an otherwise-idle checkout -- a sequential sweep under load inverts this measurement, don't trust one of those). The subprocess/toolchain exclusion is a hermeticity rule, not a speed rule: `quick` must stay runnable in a dirty working tree or a bare checkout with no `git`/`west` on PATH, which is why it excludes some of the fastest gates in the whole registry (e.g. changelog-citations at ~0.05s) alongside genuinely slow ones -- do not read the exclusion as \"shells out, therefore slow\". Add `quick` only once you've measured a task against this bar, not by assuming a short script qualifies.",
   "tasks": [
     {
       "id": "agents-md-generators",
@@ -9,6 +9,7 @@
       "script": "scripts/check_agents_md_generators.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -17,8 +18,37 @@
       "ci": "pr-doc-drift.yml:doc-drift"
     },
     {
+      "id": "amp-pad-claims",
+      "description": "No Linux devicetree pad claim (RZV2N_GPIO / RZV2N_PORT_PINMUX under meta-alp-sdk/recipes-kernel/linux/) lands on an RZ/V2N pad metadata/pinmux/v2n.yaml attributes to the CM33 -- the errata E3 P9.6/SCK7 clobber class (#1142).",
+      "runner": "check-script",
+      "script": "scripts/check_amp_pad_claims.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "apt-bounded",
+      "description": "No .github/workflows/*.yml step calls apt-get update/install directly -- Acquire::http::Timeout bounds an idle read, not a trickling one, so it must go through scripts/ci/apt-bounded.sh's wall-clock retry wrapper (#1575).",
+      "runner": "check-script",
+      "script": "scripts/check_apt_bounded.py",
+      "gate": true,
+      "profiles": [
+        "quick",
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "atoc-reservation",
-      "description": "Every AEN board .dts and every SoM preset memory_map reserves the top of the App MRAM window as an 'atoc' region -- SETOOLS top-anchors the ATOC boot table there (#1289).",
+      "description": "Every AEN board .dts and every SoM preset memory_map reserves the top of the App MRAM window as an 'atoc' region -- SETOOLS top-anchors the ATOC boot table there (#1289) -- and every AEN board .dts with an m55_he/m55_hp role publishes a slot0 flash address that agrees with loader._resolve_slot0_load_address() (#1482).",
       "runner": "check-script",
       "script": "scripts/check_atoc_reservation.py",
       "gate": true,
@@ -37,6 +67,7 @@
       "script": "scripts/check_board_id_doc_parity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -65,6 +96,7 @@
       "script": "scripts/check_board_target_tree_parity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -107,6 +139,7 @@
       "script": "scripts/check_build_receipt.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -121,6 +154,7 @@
       "script": "scripts/check_changelog_fragments.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -149,6 +183,7 @@
       "script": "scripts/check_chip_header_status.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -163,6 +198,22 @@
       "script": "scripts/check_chip_manifest_parity.py",
       "gate": true,
       "profiles": [
+        "quick",
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "chip-subsystems-parity",
+      "description": "_CHIP_SUBSYSTEMS <-> Kconfig depends-on parity gate -- fails when a chip's Zephyr subsystem dependency isn't mirrored from zephyr/kconfigs/chips.kconfig.",
+      "runner": "check-script",
+      "script": "scripts/check_chip_subsystems_parity.py",
+      "gate": true,
+      "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -177,6 +228,7 @@
       "script": "scripts/check_cmake_chip_list_parity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -211,12 +263,27 @@
       "ci": "cross-platform-zephyr.yml:python-smoke"
     },
     {
+      "id": "diagnostic-emission-coverage",
+      "description": "Every ALP-Bxxx code scripts/alp_cli/validator.py can emit must have a docs/diagnostics/ALP-Bxxx.md landing page (#1569).",
+      "runner": "check-script",
+      "script": "scripts/check_diagnostic_emission_coverage.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
       "id": "diagnostic-narratives",
       "description": "Reject a placeholder-only ALP-Bxxx diagnostic landing page under docs/diagnostics/ -- every page must carry a real narrative and a Fix/Resolution/Remedy section (#1207).",
       "runner": "check-script",
       "script": "scripts/check_diagnostic_narratives.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -231,6 +298,7 @@
       "script": "scripts/check_diagnostic_schema.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -245,6 +313,7 @@
       "script": "scripts/check_doc_drift.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -259,6 +328,7 @@
       "script": "scripts/check_doc_inventory.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -287,6 +357,7 @@
       "script": "scripts/check_doxyfile_single_source.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -301,6 +372,7 @@
       "script": "scripts/check_doxygen_coverage.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -309,12 +381,27 @@
       "ci": "pr-doxygen.yml:doxygen"
     },
     {
+      "id": "doxygen-output-untracked",
+      "description": "No tracked file lives under Doxygen's OUTPUT_DIRECTORY (docs/doxygen/Doxyfile) -- it is a generated build artifact, not source (#1573).",
+      "runner": "check-script",
+      "script": "scripts/check_no_committed_doxygen_output.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "driver-status-backing",
       "description": "driver_status declarations outside metadata/chips/*.yaml (mailbox.driver_status, on_module.{nor_flash,emmc}_driver_status, soc_peripheral_instances[].driver_status) are bound to a real zephyr/drivers/** artefact when they claim partial/complete (issue #1216).",
       "runner": "check-script",
       "script": "scripts/check_driver_status_backing.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -329,6 +416,7 @@
       "script": "scripts/check_e1m_pinout.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -343,6 +431,7 @@
       "script": "scripts/check_e1m_route_capability.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -371,6 +460,7 @@
       "script": "scripts/check_emit_registry.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -427,6 +517,7 @@
       "script": "scripts/check_example_sdk_root.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -453,6 +544,21 @@
       "description": "Every metadata/e1m_modules/*.yaml helper_firmware[].firmware_path (when present) resolves to a real file; omission is legal and left alone (issue #1372).",
       "runner": "check-script",
       "script": "scripts/check_helper_firmware_path.py",
+      "gate": true,
+      "profiles": [
+        "quick",
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "i2c-address-uniqueness",
+      "description": "No two declared I2C devices claim the same 7-bit address on the same bus, across metadata/e1m_modules/*.yaml and metadata/boards/*.yaml (issue #1675).",
+      "runner": "check-script",
+      "script": "scripts/check_i2c_address_uniqueness.py",
       "gate": true,
       "profiles": [
         "pr",
@@ -483,6 +589,7 @@
       "script": "scripts/check_inference_backend_parity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -497,6 +604,7 @@
       "script": "scripts/check_library_pin_parity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -539,6 +647,7 @@
       "script": "scripts/check_pin_conflicts.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -561,12 +670,27 @@
       "ci": "pr-plain-cmake.yml:link-complete"
     },
     {
+      "id": "protocol-version-policy",
+      "description": "CC3501E wire ALP_CC3501E_PROTOCOL_MAJOR/_MINOR must match ADR 0033's Version ledger, the ledger must be monotonic, MAJOR never 0, and every MAJOR row must justify itself with 'an old host would be misread' (ADR 0033).",
+      "runner": "check-script",
+      "script": "scripts/check_protocol_version_policy.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
       "id": "public-header-purity",
       "description": "CI gate: root public headers stay chip-neutral.",
       "runner": "check-script",
       "script": "scripts/check_public_header_purity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -595,6 +719,7 @@
       "script": "scripts/check_sbom.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -603,12 +728,28 @@
       "ci": null
     },
     {
+      "id": "slot-claim-atomic",
+      "description": "Backend handle pools claim slots with alp_slot_try_claim(), not an unlocked check-then-set (issue #1630).",
+      "runner": "check-script",
+      "script": "scripts/check_slot_claim_atomic.py",
+      "gate": true,
+      "profiles": [
+        "quick",
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "som-bundle",
       "description": "Validate SoM-release bundle manifests against the public som-release-bundle-v1 schema contract.",
       "runner": "check-script",
       "script": "scripts/check_som_bundle.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -623,6 +764,7 @@
       "script": "scripts/check_som_topology_parity.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -637,6 +779,7 @@
       "script": "scripts/check_stub_issues.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -665,6 +808,7 @@
       "script": "scripts/check_sw_fallback_tags.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -745,6 +889,7 @@
       "script": "scripts/check_vendor_ext_tags.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -759,6 +904,7 @@
       "script": "scripts/check_version_doc_sync.py",
       "gate": true,
       "profiles": [
+        "quick",
         "pr",
         "full",
         "release"
@@ -773,6 +919,22 @@
       "script": "scripts/check_west_manifest_module_resolution.py",
       "gate": true,
       "profiles": [
+        "quick",
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "workflow-expressions",
+      "description": "Reject a jobs.<job_id>.if that references a context GitHub Actions does not expose there (e.g. matrix, steps) -- valid YAML but rejected by GitHub at workflow-load time on every event (#1528).",
+      "runner": "check-script",
+      "script": "scripts/check_workflow_expressions.py",
+      "gate": true,
+      "profiles": [
+        "quick",
         "pr",
         "full",
         "release"

@@ -4,8 +4,8 @@
 Reject a placeholder-only ALP-Bxxx diagnostic landing page (issue #1207).
 
 metadata/error-catalog.json exports every docs/diagnostics/ALP-B*.md page as
-the `doc:` destination for a stable diagnostic code -- `python -m alp_cli
-explain`, the IDE, and CI all link a coded failure straight to that file
+the `doc:` destination for a stable diagnostic code -- `tan explain --code`,
+the IDE, and CI all link a coded failure straight to that file
 (scripts/gen_error_catalog.py globs the same docs/diagnostics/ALP-B*.md set
 the catalog is built from, so "referenced by the catalog" and "exists under
 docs/diagnostics/" are the same set by construction).  A page that still
@@ -14,6 +14,13 @@ reads
     (Diagnostic landing page -- narrative to be added.)
 
 sends a user from a coded failure to an empty page instead of a diagnosis.
+
+This gate, like scripts/gen_error_catalog.py, walks the docs/diagnostics/
+ALP-B*.md page set -- it does not walk the scripts/alp_cli/validator.py
+`code="ALP-B..."` emission sites, so a code that validator.py starts
+emitting without ever getting a page would stay invisible to this gate.
+scripts/check_diagnostic_emission_coverage.py closes that gap by walking
+the emission sites and asserting each has a page (#1569).
 
 This gate fails when a docs/diagnostics/ALP-B*.md page:
 

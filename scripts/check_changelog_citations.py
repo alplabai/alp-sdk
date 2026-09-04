@@ -32,8 +32,12 @@ CATCHES, only when the fragment opts in (see ANCHORS below):
 
 DOES NOT CATCH:
   * a citation into another repository (e.g. an alp-sdk fragment citing
-    `python/tan/...`). Those are reported as SKIPPED with a reason, never as a
-    silent pass.
+    `python/tan/...` or `python/tests/...`, both tan-cli). Any path rooted at
+    one of `_FOREIGN_PREFIXES`'s top-level directories is skipped, not just
+    the specific subpath in this example -- alp-sdk has no `python/`,
+    `crates/`, or `contract/` directory of its own, so the whole subtree is
+    unresolvable here regardless of which subpath is cited. Those are
+    reported as SKIPPED with a reason, never as a silent pass.
 
 ANCHORS -- how to make a citation checkable
 -------------------------------------------
@@ -88,7 +92,7 @@ FRAGMENT_DIR = REPO / "changelog.d"
 #: the gate reported neither -- the citation matched no pattern at all. Add the
 #: extension when you add the first citation that uses it.
 _CITATION = re.compile(
-    r"`(?P<path>[A-Za-z0-9_][A-Za-z0-9_/.+-]*\.(?:c|h|cpp|hpp|py|sh|ya?ml|md|json|bb|bbappend|cmake|txt|dts|dtsi|overlay|kconfig|conf))"
+    r"`(?P<path>\.?[A-Za-z0-9_][A-Za-z0-9_/.+-]*\.(?:c|h|cpp|hpp|py|sh|ya?ml|md|json|bb|bbappend|cmake|txt|dts|dtsi|overlay|kconfig|conf))"
     r":(?P<start>\d+)(?:-(?P<end>\d+))?`"
 )
 
@@ -96,9 +100,51 @@ _CITATION = re.compile(
 #: immediately following the citation.
 _ANCHOR = re.compile(r"""^\s*\(\s*["“`](?P<text>[^"”`]{4,120})["”`]""")
 
-#: Prefixes that belong to a different repository. Reported as SKIPPED with the
-#: reason, never silently passed.
-_FOREIGN_PREFIXES = ("python/tan/", "crates/", "contract/")
+#: Top-level directories that belong to a different repository, in full --
+#: not a hand-picked list of subpaths within them. alp-sdk has no `python/`,
+#: `crates/`, or `contract/` directory of its own (verified: `ls -d python
+#: crates contract` all fail here), so ANY path rooted at one of these is
+#: unresolvable in this tree regardless of which subpath is cited --
+#: `python/tan/...` and `python/tests/...` are equally foreign. An earlier
+#: version of this list matched only `python/tan/` and hard-failed the
+#: equally-foreign `python/tests/...` (alp-sdk#1522, alp-sdk#1525). Reported
+#: as SKIPPED with the reason, never silently passed.
+_FOREIGN_PREFIXES = ("python/", "crates/", "contract/")
+
+
+#: `CHANGELOG.md` is scanned too, not just `changelog.d/` fragments -- a citation
+#: used to stop being checked the moment its fragment was folded in at release
+#: time, which is exactly when it starts to rot (alp-sdk#1715; alp-sdk#1498 was
+#: the symptom).  But the two halves of that file have different contracts and
+#: must NOT be graded the same way:
+#:
+#:   * `[Unreleased]` describes the CURRENT tree.  A citation there must resolve,
+#:     same as a fragment -- ERROR.
+#:   * A released section is a HISTORICAL RECORD of a tree that no longer exists.
+#:     Some of its citations are unfixable by construction, and "fixing" them
+#:     would falsify what shipped.  Measured on dev: `alp_cli/new_som.py:154`
+#:     (deleted with the alp_cli retirement, #1367/#1368), `docs/Overview.md`
+#:     (deleted), and `docs/abi/README.md:157`, whose anchor "no final `v0.15.0`
+#:     tag exists yet" was correctly removed once v0.15.0 GA shipped.  Those are
+#:     reported as WARNINGS -- visible, never silently passed, never blocking.
+#:
+#: Grading released history as errors would make this gate unlandable without
+#: rewriting shipped release notes to suit today's tree, which is the opposite of
+#: what a changelog is for.
+CHANGELOG = REPO / "CHANGELOG.md"
+
+
+def _split_changelog(text: str) -> tuple[str, str]:
+    """Return (unreleased_part, released_part) of CHANGELOG.md.
+
+    The split is the SECOND `## [` heading: the first is `[Unreleased]`, and
+    everything from the next one on has shipped.  A file with no released
+    section yet yields an empty tail.
+    """
+    heads = [m.start() for m in re.finditer(r"^## \[", text, re.MULTILINE)]
+    if len(heads) < 2:
+        return text, ""
+    return text[:heads[1]], text[heads[1]:]
 
 
 def _iter_fragments() -> list[Path]:
@@ -200,12 +246,33 @@ def main() -> int:
         total_checked += checked
         total_anchored += anchored
 
+    # CHANGELOG.md: [Unreleased] is graded like a fragment; released history is
+    # reported as warnings only (see CHANGELOG's comment above).
+    all_warnings: list[str] = []
+    if CHANGELOG.is_file():
+        head, tail = _split_changelog(
+            CHANGELOG.read_text(encoding="utf-8", errors="replace"))
+        errs, skips, checked, anchored = _check_one(CHANGELOG, head)
+        all_errors += errs
+        all_skips += skips
+        total_checked += checked
+        total_anchored += anchored
+        if tail:
+            werrs, wskips, wchecked, wanchored = _check_one(CHANGELOG, tail)
+            all_warnings += werrs
+            all_skips += wskips
+            total_checked += wchecked
+            total_anchored += wanchored
+
+    for w in all_warnings:
+        print(f"  WARN (released history, not blocking) {w}")
+
     for s in all_skips:
         print(f"  SKIP {s}")
 
     if all_errors:
         print(f"\ncheck-changelog-citations: {len(all_errors)} broken "
-              f"citation(s) across {len(fragments)} fragment(s):",
+              f"citation(s) across {len(fragments)} fragment(s) + CHANGELOG.md:",
               file=sys.stderr)
         for e in all_errors:
             print(f"  {e}", file=sys.stderr)
@@ -217,7 +284,7 @@ def main() -> int:
 
     unanchored = total_checked - total_anchored
     print(f"check-changelog-citations: OK -- {total_checked} citation(s) "
-          f"resolved across {len(fragments)} fragment(s) "
+          f"resolved across {len(fragments)} fragment(s) + CHANGELOG.md "
           f"({total_anchored} anchored and text-verified, {unanchored} "
           f"range-checked only"
           + (f", {len(all_skips)} skipped" if all_skips else "") + ").")

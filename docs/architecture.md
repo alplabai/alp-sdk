@@ -316,7 +316,15 @@ emits `CONFIG_ALP_SDK_CHIP_<NAME>=y` per chip slug (or
 helper rather than a `chips/` driver — the `button_led` and
 `pdm_mic` exceptions).  The orchestrator also pulls in each chip
 driver's required Zephyr subsystems (`CONFIG_I2C=y`, `CONFIG_SPI=y`,
-…) via the `_CHIP_SUBSYSTEMS` table in `scripts/alp_project.py`.
+…) via the `_CHIP_SUBSYSTEMS` table in
+`scripts/alp_project_emit/__init__.py` (`scripts/alp_project.py`
+re-exports the name, but the table itself lives in the emit package).
+A chip whose Kconfig `depends on` line is an OR (e.g. `gd32g553`'s
+`depends on (SPI || I2C)`) turns **both** sides of the `||` on rather
+than picking one — always sufficient for the OR, and it can't silently
+drop whichever transport a future board relies on
+(`scripts/check_chip_subsystems_parity.py` pins this table against
+`zephyr/kconfigs/chips.kconfig`, issue #1487).
 
 Devices marked `assembled: optional` in `i2c_devices:` (DNI on some
 builds) are **not** auto-enabled; the customer opts them in via
@@ -351,14 +359,18 @@ twister board `.yaml`, `_defconfig`, pinctrl `.dtsi`, `Kconfig.defconfig`,
 and the board `.dts` all derive from the SoM preset + SoC JSON
 (`tests/scripts/test_gen_zephyr_board.py` pins them byte-identical to the
 committed tree).  The Renesas RZ/V2N family (`v2n` / `v2n-m1`) generates
-only the family-agnostic files (`board.yml`, `Kconfig.alp_<board>`, the
-twister `.yaml`); its `.dts` / pinctrl `.dtsi` / `_defconfig` stay
-hand-authored because the on-module GD32G553 supervisor's Renesas-side pin
-assignments (SCI7 SPI, RIIC8/BRD_I2C, the disabled SCI0 console) aren't
-yet captured in `metadata/pinmux/*.yaml`.  `board.cmake` (flasher/debugger
-runner args) stays hand-authored for every family -- its prose is a
-documentation choice (which sibling board's file carries the full
-bring-up runbook), not a hardware fact derivable from metadata.
+the family-agnostic files (`board.yml`, `Kconfig.alp_<board>`, the
+twister `.yaml`) PLUS the pinctrl `.dtsi` and `_defconfig`, sourced from
+`metadata/e1m_modules/v2n/supervisor-links.yaml` -- a hand-authored,
+family-scoped source for the on-module GD32G553 supervisor's Renesas-side
+pin assignments (SCI7 SPI, RIIC8/BRD_I2C, the disabled SCI0 console),
+deliberately kept out of `metadata/pinmux/*.yaml` (itself generated
+DO-NOT-EDIT output, so it cannot also be a hand-authored generation
+source).  Only the board `.dts` stays hand-authored for this family; it
+has no metadata source yet.  `board.cmake` (flasher/debugger runner args)
+stays hand-authored for every family -- its prose is a documentation
+choice (which sibling board's file carries the full bring-up runbook),
+not a hardware fact derivable from metadata.
 
 **Not in the inventory above -- a standalone dev tool, not a build-time
 generator.** `scripts/gen_rzv2n_cm33_svd.py` (issue #1029 step 2) projects a

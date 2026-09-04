@@ -144,7 +144,8 @@ device $JLINK_DEVICE_READ
 connect
 exit
 EOF
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/fwprobe-preflight.jlink \n  > /tmp/fwprobe-preflight.out 2>&1 || true
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/fwprobe-preflight.jlink \
+  > /tmp/fwprobe-preflight.out 2>&1 || true
 bench_jlink_assert_connected /tmp/fwprobe-preflight.out "firewall-probe preflight" || exit 7
 bench_jlink_assert_aen_dpidr /tmp/fwprobe-preflight.out "firewall-probe preflight" || exit 4
 
@@ -155,18 +156,80 @@ device $JLINK_DEVICE_FLASH
 connect
 loadbin $PKG $ATOC_ADDR
 verifybin $PKG $ATOC_ADDR
+exit
+EOF
+
+# Write the transcript FIRST, fully, then grep|head it for display (#1488
+# finding 5) -- a `... | tee out | grep ... | head -N` pipeline lets `head`
+# exit after N lines and SIGPIPE grep, which then closes tee's stdout pipe;
+# tee can die from that SIGPIPE before JLinkExe's full transcript (including
+# the `Verify successful.` / `Verify failed.` line the gate below depends on)
+# is written to disk. Once a genuinely good flash's transcript got truncated
+# that way, the absence of "verify successful" in the truncated file would
+# read as a hard exit 3 on a board that actually flashed fine.
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-firewall-probe-write.jlink \
+	> /tmp/firmware-update-log-firewall-probe-write.out 2>&1 || true
+grep -iE "could not connect|fail|error|Verify|O\\.K\\.|Reset|Writing|Programming" \
+	/tmp/firmware-update-log-firewall-probe-write.out | head -40
+
+if grep -qiE "Could not connect to the target device|Cannot connect to the probe/programmer" \
+	/tmp/firmware-update-log-firewall-probe-write.out; then
+	echo "!! $JLINK_DEVICE_FLASH profile failed to connect" >&2
+	exit 2
+fi
+
+# GATE ON THE VERIFY RESULT (#1488) -- same defect flash-jlink-hp.sh was fixed
+# for under #1343. The `verifybin` above was issued but its outcome was never
+# read: the output went to a display-only pipe and the connect check was the
+# only thing that could fail this script, so a `Verify failed.` exited 0 and
+# reported a good flash.
+#
+# This gate is now LOAD-BEARING (#1526).  The CommanderScript above carries
+# only `loadbin` + `verifybin`; `RSetType 2` / `r` / `g` moved to a SECOND
+# script that runs further down, and only if the checks below pass.  So a
+# failed verify now stops the board being reset into an image that did not
+# verify -- and because the ATOC entry carries `"flags": ["load", "boot"]`,
+# not booting is what keeps the HE probe from running and overwriting
+# `alp_ulog_partition`.
+#
+# The MRAM write itself has of course already happened -- that is what
+# `loadbin` is.  What is prevented is acting on it.
+if grep -qiE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-firewall-probe-write.out; then
+	echo "!! VERIFY FAILED -- the bytes on the part do NOT match $PKG." >&2
+	grep -iE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-firewall-probe-write.out | head -5 >&2
+	echo "   Do not treat this board as flashed." >&2
+	echo "   The board was NOT reset or booted (#1526): the reset/boot CommanderScript" >&2
+	echo "   runs only past this gate, so the HE probe never ran and" >&2
+	echo "   alp_ulog_partition is intact.  MRAM now holds an image that failed verify --" >&2
+	echo "   reflash before booting this board." >&2
+	exit 3
+fi
+if ! grep -qi "verify successful" /tmp/firmware-update-log-firewall-probe-write.out; then
+	echo "!! no verifybin success reported -- treating as FAILED (the verify never ran)." >&2
+	echo "   The board was NOT reset or booted (#1526), so alp_ulog_partition is intact." >&2
+	echo "   MRAM now holds an unverified image -- reflash before booting this board." >&2
+	exit 3
+fi
+echo "verify: verifybin OK ($PKG @ $ATOC_ADDR)" >&2
+
+# ONLY NOW reset into the image (#1526).  Separate CommanderScript so the boot
+# is genuinely downstream of the verify result -- inside one script JLinkExe
+# runs everything before the shell can read anything, which is what made the
+# old gate advisory.
+cat > /tmp/firmware-update-log-firewall-probe-boot.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_FLASH
+connect
 RSetType 2
 r
 g
 exit
 EOF
-
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-firewall-probe-write.jlink 2>&1 | tee /tmp/firmware-update-log-firewall-probe-write.out | \
-	grep -iE "could not connect|fail|error|Verify|O\\.K\\.|Reset|Writing|Programming" | head -40
-
-if grep -qiE "Could not connect to the target device|Cannot connect to the probe/programmer" \
-	/tmp/firmware-update-log-firewall-probe-write.out; then
-	echo "!! $JLINK_DEVICE_FLASH profile failed to connect" >&2
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-firewall-probe-boot.jlink 	> /tmp/firmware-update-log-firewall-probe-boot.out 2>&1 || true
+if grep -qiE "Could not connect to the target device|Cannot connect to the probe/programmer" 	/tmp/firmware-update-log-firewall-probe-boot.out; then
+	echo "!! reset/boot script failed to connect -- image is verified in MRAM but the" >&2
+	echo "   board was not booted; alp_ulog_partition is untouched." >&2
 	exit 2
 fi
 

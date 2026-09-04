@@ -66,8 +66,8 @@ def test_missing_firmware_path_fails(tmp_path):
 
 def test_omitted_firmware_path_is_legal_and_passes(tmp_path):
     """Omitting firmware_path entirely is schema-legal (means "no artefact
-    yet", so `tan flash` refuses cleanly) -- must NOT be flagged as broken,
-    the exact case the issue calls out explicitly."""
+    yet") -- must NOT be flagged as broken, the exact case the issue calls
+    out explicitly."""
     _write_preset(
         tmp_path, "E1M-TEST",
         "helper_firmware:\n"

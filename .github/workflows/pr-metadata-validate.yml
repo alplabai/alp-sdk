@@ -20,6 +20,9 @@ on:
       - 'include/alp/boards/**'
       - 'include/alp/chips/**'
       - 'zephyr/boards/alp/**'
+      - 'zephyr/kconfigs/**'
+      - 'scripts/alp_project_emit/**'
+      - 'scripts/check_chip_subsystems_parity.py'
       - '.github/workflows/pr-metadata-validate.yml'
       - 'scripts/validate_metadata.py'
       - 'scripts/validate_board_yaml.py'
@@ -38,17 +41,25 @@ on:
       - 'scripts/check_stub_symbol_matrix.py'
       - 'src/common/stub_backend.c'
       - 'src/common/stub/**'
+      # This job hosts three gates that sweep src/ wholesale --
+      # check_slot_claim_atomic.py (every handle pool),
+      # check_stub_issues.py (src/backends/**/*_stub.c) and
+      # check_sw_fallback_tags.py (src/backends/**/sw_fallback.c) -- so the
+      # trigger has to cover src/ or a PR that adds the exact defect they
+      # exist to catch never runs them (issue #1630).
+      - 'src/**'
+      - 'scripts/check_slot_claim_atomic.py'
       - 'scripts/lint_doc_yaml_fragments.py'
       - 'scripts/check_som_bundle.py'
       - 'scripts/check_chip_header_status.py'
+      - 'scripts/check_i2c_address_uniqueness.py'
       - 'scripts/check_e1m_pinout.py'
+      - 'scripts/check_amp_pad_claims.py'
       - 'scripts/sync_e1m_spec.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
       - 'tests/fixtures/emit-snapshots/**'
       - 'tests/fixtures/stub-symbol-matrix/**'
-      - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
-      - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
       - 'docs/**/*.md'
       - 'examples/**/*.md'
@@ -61,11 +72,17 @@ on:
       - 'scripts/alp_cli/__init__.py'
       - 'scripts/alp_lock/**'
       - 'scripts/west_commands/alp_lock.py'
-      - 'alp.lock'
       - 'changelog.d/**'
       - 'scripts/assemble_changelog.py'
       - 'scripts/check_changelog_fragments.py'
       - 'scripts/check_changelog_citations.py'
+      # check_no_committed_doxygen_output.py (#1573) reads OUTPUT_DIRECTORY out
+      # of the Doxyfile and sweeps what is tracked under it, so both are its
+      # inputs -- a gate absent from its own trigger is the #1585 defect class.
+      - 'docs/doxygen/Doxyfile'
+      - 'doxygen-out/**'
+      - 'scripts/check_no_committed_doxygen_output.py'
+      - 'scripts/check_doxyfile_single_source.py'
   push:
     branches: [main, dev]
     paths:
@@ -76,6 +93,9 @@ on:
       - 'include/alp/boards/**'
       - 'include/alp/chips/**'
       - 'zephyr/boards/alp/**'
+      - 'zephyr/kconfigs/**'
+      - 'scripts/alp_project_emit/**'
+      - 'scripts/check_chip_subsystems_parity.py'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/check_board_target_tree_parity.py'
       - 'scripts/check_atoc_reservation.py'
@@ -90,16 +110,24 @@ on:
       - 'scripts/check_stub_symbol_matrix.py'
       - 'src/common/stub_backend.c'
       - 'src/common/stub/**'
+      # This job hosts three gates that sweep src/ wholesale --
+      # check_slot_claim_atomic.py (every handle pool),
+      # check_stub_issues.py (src/backends/**/*_stub.c) and
+      # check_sw_fallback_tags.py (src/backends/**/sw_fallback.c) -- so the
+      # trigger has to cover src/ or a PR that adds the exact defect they
+      # exist to catch never runs them (issue #1630).
+      - 'src/**'
+      - 'scripts/check_slot_claim_atomic.py'
       - 'scripts/lint_doc_yaml_fragments.py'
       - 'scripts/check_som_bundle.py'
       - 'scripts/check_chip_header_status.py'
+      - 'scripts/check_i2c_address_uniqueness.py'
       - 'scripts/check_e1m_pinout.py'
+      - 'scripts/check_amp_pad_claims.py'
       - 'scripts/sync_e1m_spec.py'
       - 'metadata/templates/som-release-bundle.example.json'
       - 'tests/scripts/**'
       - 'tests/fixtures/stub-symbol-matrix/**'
-      - 'firmware/gd32-bridge/tests/gen_protocol_vectors.py'
-      - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
       - 'docs/**/*.md'
       - 'examples/**/*.md'
@@ -112,11 +140,17 @@ on:
       - 'scripts/alp_cli/__init__.py'
       - 'scripts/alp_lock/**'
       - 'scripts/west_commands/alp_lock.py'
-      - 'alp.lock'
       - 'changelog.d/**'
       - 'scripts/assemble_changelog.py'
       - 'scripts/check_changelog_fragments.py'
       - 'scripts/check_changelog_citations.py'
+      # check_no_committed_doxygen_output.py (#1573) reads OUTPUT_DIRECTORY out
+      # of the Doxyfile and sweeps what is tracked under it, so both are its
+      # inputs -- a gate absent from its own trigger is the #1585 defect class.
+      - 'docs/doxygen/Doxyfile'
+      - 'doxygen-out/**'
+      - 'scripts/check_no_committed_doxygen_output.py'
+      - 'scripts/check_doxyfile_single_source.py'
   workflow_dispatch:
 
 concurrency:
@@ -127,22 +161,48 @@ jobs:
   validate:
     name: validate · soc-spec-v1
     runs-on: ubuntu-latest
+    # #1477: worst observed successful run 812s/13.5min for the "Pytest
+    # -- linter + schema regression + topology defaults" step alone
+    # (corrected from a 3-run sample and now given its own explicit cap
+    # below rather than riding the 1min/step uncapped-step budget --
+    # that budget was never true for this step, see the comment on
+    # `_UNCAPPED_STEP_BUDGET_MINUTES` in the test file). With that step
+    # capped at 20min, the sum-of-step-caps model is: 12min (5
+    # already-capped steps) + 20min (the pytest step) + 45min (the
+    # remaining ~45 trivial local `Gate — ...`/schema-check steps,
+    # budgeted 1min each by the test) = 77min, so the ceiling needs
+    # real headroom above that, not just above the ~18min the job
+    # actually takes on a real run.
+    timeout-minutes: 80
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 5
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 
       - name: Install Python deps
-        # cbor2 (the .alpmodel container codec) is a base dep. The model-io
-        # extra (tflite + flatbuffers) was here for scripts/alp_model/'s
-        # tensor-I/O tests; that package moved to tan.model (ADR-0028) and
-        # took the extra with it -- alp-sdk keeps only the on-device C reader.
-        run: pip install -e ".[dev]"
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        # model-compile is model-io (tflite + flatbuffers, for the .alpmodel
+        # tensor-I/O tests, which importorskip otherwise) PLUS ethos-u-vela:
+        # without it, the four vela-gated tests in test_alp_model_adapters.py
+        # (test_vela_real_compile_of_tiny_fixture and the three
+        # test_vela_real_compile_for_e8_accel_configs cases, both
+        # shutil.which("vela")-skipif'd) SKIP in every automatic run instead
+        # of actually exercising the real compiler. cbor2 is a base dep
+        # either way. scripts/alp_model/ stays in alp-sdk for now (PR #1470's
+        # ADR-0028 Task 6 relocation to tan.model is declined in this merge
+        # -- see the PR's merge report), so this extra stays installed.
+        run: pip install -e ".[dev,model-compile]"
 
       - name: Validate every SoC file against the v1 schema
         run: python3 scripts/validate_metadata.py
@@ -151,6 +211,14 @@ jobs:
       # accidentally claim the same silicon pad on a SoM pinout.
       - name: Check pin conflicts in every SoM peripheral map
         run: python3 scripts/check_pin_conflicts.py
+
+      # #1142: the A55's pad claims live in the Linux devicetree under
+      # meta-alp-sdk/, the CM33's in metadata/pinmux/v2n.yaml's `core`
+      # field (#1157), and neither side could see the other -- which is
+      # how the usb20 OVC gpio-hog silently clobbered the CM33's live
+      # SCK7 mux on P9.6 (errata E3) until a bench session found it.
+      - name: Check no Linux DT pad claim lands on a CM33-owned pad
+        run: python3 scripts/check_amp_pad_claims.py
 
       # Cross-checks every non-TBD E1M pad/function claimed by a SoM
       # pin-mux table against the vendored e1m-spec standard snapshot
@@ -178,6 +246,7 @@ jobs:
           cat /tmp/alp.conf
 
       - name: Smoke-test board.yaml loader (cmake-args)
+        timeout-minutes: 2
         run: |
           python3 scripts/alp_project.py \
               --input metadata/templates/board.yaml.example \
@@ -353,7 +422,7 @@ jobs:
 
       # Issue #1372: nothing validated that a SoM preset's
       # helper_firmware[].firmware_path (six AEN presets pointed at
-      # firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin) actually resolves to a
+      # a prebuilt companion image) actually resolves to a
       # file in the tree -- not the schema, not the validator, not the
       # manifest emitter, not tan. Omission of the key is legal (means "no
       # artefact yet") and is left alone; only a present-but-broken path
@@ -368,6 +437,7 @@ jobs:
       # Catches both the literal-agreement drift and the actual trap --
       # two distinct cores resolving app: to the same CMakeLists.txt.
       - name: "Gate — Zephyr core app: <-> CMakeLists.txt --core mapping"
+        timeout-minutes: 3
         run: python3 scripts/check_core_cmakelists_mapping.py
 
       # Unit-test the loader contract -- schema pass/fail, missing-
@@ -398,6 +468,9 @@ jobs:
       - name: Gate — no hard-coded home-directory paths in build/exec files
         run: python3 scripts/check_local_paths.py
 
+      - name: "Gate — handle pools claim slots atomically (#1630)"
+        run: python3 scripts/check_slot_claim_atomic.py
+
       - name: Gate — sw_fallback.c files carry Cost + Performance tags
         run: python3 scripts/check_sw_fallback_tags.py
 
@@ -407,6 +480,13 @@ jobs:
       - name: Gate — chip driver <-> metadata manifest parity
         run: python3 scripts/check_chip_manifest_parity.py
 
+      # #1487: _CHIP_SUBSYSTEMS in scripts/alp_project_emit/__init__.py is a
+      # hand-typed copy of each config ALP_SDK_CHIP_*/ALP_SDK_BLOCK_*
+      # block's `depends on` line in zephyr/kconfigs/chips.kconfig; a miss
+      # is swallowed silently at the loader call site, so this pins parity.
+      - name: Gate — chip subsystem Kconfig depends-on parity
+        run: python3 scripts/check_chip_subsystems_parity.py
+
       # #1270: doc/example prose naming an on-module I2C part next to a bus
       # name (BRD_I2C/LPI2C0, I2C2/E1M_I2C0, ...) must agree with the
       # SoM preset's own on_module.i2c_devices block -- four consecutive
@@ -414,6 +494,13 @@ jobs:
       # another before this gate existed to check prose against metadata.
       - name: Gate — I2C bus name in docs/examples agrees with i2c_devices metadata
         run: python3 scripts/check_i2c_bus_doc_consistency.py
+
+      # #1675: no two declared I2C devices may claim the same 7-bit
+      # address on the same bus -- #1163 (TMP112 vs TPS628640 both
+      # claiming brd_i2c 0x48 on two SoM presets) sat unremediated in
+      # metadata with nothing to catch it in CI.
+      - name: Gate — I2C 7-bit address uniqueness per declared bus
+        run: python3 scripts/check_i2c_address_uniqueness.py
 
       # #1136: pr-twister.yml inits its topdir from Zephyr's OWN west.yml
       # (`west init -m zephyr`), so it never notices a Zephyr module that's
@@ -463,7 +550,22 @@ jobs:
       - name: Gate — no re-embedded Doxyfile outside docs/doxygen/Doxyfile
         run: python3 scripts/check_doxyfile_single_source.py
 
-      - name: alp.lock in sync
+      - name: "Gate — no tracked file under Doxygen's OUTPUT_DIRECTORY (#1573)"
+        run: python3 scripts/check_no_committed_doxygen_output.py
+
+      - name: "Gate — job-level if: stays within its allowed context list (#1528)"
+        run: python3 scripts/check_workflow_expressions.py
+
+      - name: "Gate — apt-get update/install goes through scripts/ci/apt-bounded.sh (#1575)"
+        run: python3 scripts/check_apt_bounded.py
+
+      - name: alp.lock generator self-check
+        # alp.lock is generated on demand, not committed (#1576): its
+        # `digests.metadata` is a single hash over the whole metadata/**
+        # tree, so any two PRs touching different metadata files rewrote
+        # the same line from different bases and conflicted by
+        # construction. `--check` builds a lock in memory and
+        # schema-validates it instead of diffing against a tracked copy.
         run: python3 scripts/west_commands/alp_lock.py --workspace . --check
 
       # Validate every HiL smoke spec under tests/hil/ parses against
@@ -488,6 +590,11 @@ jobs:
       # for commit e3a4c6b's bulk-strip).  These all share fixtures
       # with the orchestrator tests and run in <2 s.
       - name: Pytest -- linter + schema regression + topology defaults
+        # #1477: worst observed successful run 812s/13.5min -- explicit
+        # cap instead of the (untrue for this step) 1min uncapped-step
+        # budget; see the job-level comment above for the sum-of-caps
+        # this ceiling has to clear.
+        timeout-minutes: 20
         run: |
           python3 -m pytest tests/scripts/ -v --tb=short
 
@@ -501,7 +608,6 @@ jobs:
       # only surface in a HiL run.
       - name: gd32-bridge protocol vectors are not drifted
         run: |
-          python3 firmware/gd32-bridge/tests/gen_protocol_vectors.py --check
 
       # Cross-family portability lint -- catches an example that
       # silently reaches for a chip that isn't populated on its own

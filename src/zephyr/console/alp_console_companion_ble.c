@@ -70,7 +70,7 @@ static int cmd_companion_ble_scan(const struct shell *sh, size_t argc, char **ar
 
 	static cc3501e_ble_scan_record_t recs[ALP_COMPANION_BLE_SCAN_MAX];
 	size_t                           n = 0;
-	alp_status_t s = cc3501e_ble_scan(
+	alp_status_t                     s = cc3501e_ble_scan(
 	    companion_cc3501e, recs, ALP_COMPANION_BLE_SCAN_MAX, &n, ALP_COMPANION_BLE_MS);
 
 	if (s == ALP_ERR_NOT_READY) {
@@ -117,24 +117,6 @@ static int companion_parse_ble_addr(const char *s, uint8_t addr[6])
 			return -1;
 		}
 	}
-	return 0;
-}
-
-/* Parse a contiguous hex string ("0011aabb") into bytes (two nibbles/byte).
- * Rejects an empty string, an odd length, a non-hex char, or an overflow of
- * @cap.  Returns 0 on success, -1 otherwise. */
-static int companion_parse_hex(const char *s, uint8_t *out, size_t cap, size_t *out_len)
-{
-	size_t n = strlen(s);
-	if (n == 0u || (n % 2u) != 0u || (n / 2u) > cap) return -1;
-	for (size_t i = 0; i < n; i += 2u) {
-		char          oct[3] = { s[i], s[i + 1u], '\0' };
-		char         *end    = NULL;
-		unsigned long v      = strtoul(oct, &end, 16);
-		if (end != oct + 2) return -1;
-		out[i / 2u] = (uint8_t)v;
-	}
-	*out_len = n / 2u;
 	return 0;
 }
 
@@ -216,16 +198,29 @@ static int cmd_companion_ble_scan_stop(const struct shell *sh, size_t argc, char
 
 static int cmd_companion_ble_connect(const struct shell *sh, size_t argc, char **argv)
 {
-	if (companion_cc3501e == NULL) {
-		shell_warn(sh, "companion not registered");
-		return -ENODEV;
-	}
 	uint8_t addr[6];
 	if (companion_parse_ble_addr(argv[1], addr) != 0) {
 		shell_error(sh, "usage: alp companion ble connect <aa:bb:cc:dd:ee:ff> [random]");
 		return -EINVAL;
 	}
-	uint8_t addr_type = (argc >= 3 && strcmp(argv[2], "random") == 0) ? 1u : 0u;
+	/* The 3rd token is the ONLY optional flag, and it must be "random" (the
+	 * companion wifi connect/ap fix, #1376/#1480, applies here too): a
+	 * mistyped token used to be compared `== 0` and otherwise silently
+	 * IGNORED, so `ble connect <addr> randm` connected as address type
+	 * public with no diagnostic -- the exact silent-fallback those fixes
+	 * remove. An unrecognised token is now an error instead. */
+	if (argc >= 3 && strcmp(argv[2], "random") != 0) {
+		shell_error(sh,
+		            "unrecognised argument \"%s\" -- the only optional 3rd token is "
+		            "\"random\".",
+		            argv[2]);
+		return -EINVAL;
+	}
+	if (companion_cc3501e == NULL) {
+		shell_warn(sh, "companion not registered");
+		return -ENODEV;
+	}
+	uint8_t      addr_type = (argc >= 3) ? 1u : 0u;
 	alp_status_t s = cc3501e_ble_connect(companion_cc3501e, addr, addr_type, ALP_COMPANION_BLE_MS);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble connect failed (%d)", (int)s);
@@ -261,19 +256,19 @@ static int cmd_companion_ble_gatt_register(const struct shell *sh, size_t argc, 
 	}
 	uint8_t desc[ALP_COMPANION_BLE_GATT_MAX];
 	size_t  len = 0;
-	if (companion_parse_hex(argv[1], desc, sizeof(desc), &len) != 0) {
+	if (alp_console_parse_hex(argv[1], desc, sizeof(desc), &len) != 0) {
 		shell_error(sh, "usage: alp companion ble gatt register <hexbytes> (opaque descriptor)");
 		return -EINVAL;
 	}
-	uint16_t handles[ALP_CC3501E_BLE_GATT_MAX_CHARS];
-	size_t   num_handles = 0;
-	alp_status_t s = cc3501e_ble_gatt_register(companion_cc3501e,
-	                                           desc,
-	                                           len,
-	                                           handles,
-	                                           ARRAY_SIZE(handles),
-	                                           &num_handles,
-	                                           ALP_COMPANION_BLE_MS);
+	uint16_t     handles[ALP_CC3501E_BLE_GATT_MAX_CHARS];
+	size_t       num_handles = 0;
+	alp_status_t s           = cc3501e_ble_gatt_register(companion_cc3501e,
+	                                                     desc,
+	                                                     len,
+	                                                     handles,
+	                                                     ARRAY_SIZE(handles),
+	                                                     &num_handles,
+	                                                     ALP_COMPANION_BLE_MS);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble gatt register failed (%d)", (int)s);
 		return -EIO;
@@ -299,9 +294,9 @@ static int cmd_companion_ble_gatt_read(const struct shell *sh, size_t argc, char
 		shell_error(sh, "usage: alp companion ble gatt read <handle>");
 		return -EINVAL;
 	}
-	uint8_t val[ALP_COMPANION_BLE_GATT_MAX];
-	size_t  got = 0;
-	alp_status_t s = cc3501e_ble_gatt_read(
+	uint8_t      val[ALP_COMPANION_BLE_GATT_MAX];
+	size_t       got = 0;
+	alp_status_t s   = cc3501e_ble_gatt_read(
 	    companion_cc3501e, (uint16_t)handle, val, sizeof(val), &got, ALP_COMPANION_BLE_MS);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble gatt read failed (%d)", (int)s);
@@ -333,7 +328,7 @@ static int companion_ble_gatt_send(const struct shell *sh, char **argv, bool not
 	}
 	uint8_t val[ALP_COMPANION_BLE_GATT_MAX];
 	size_t  len = 0;
-	if (companion_parse_hex(argv[2], val, sizeof(val), &len) != 0) {
+	if (alp_console_parse_hex(argv[2], val, sizeof(val), &len) != 0) {
 		shell_error(sh,
 		            "usage: alp companion ble gatt %s <handle> <hexbytes>",
 		            notify ? "notify" : "write");

@@ -10,25 +10,34 @@
  * examples/peripheral-io/i2c-scanner which probes every 7-bit address for ACKs
  * without knowing what's behind them.
  *
- * Hardware: the TMP112 +/-0.5 C temperature sensor sits on the
- * BRD_I2C management bus on every E1M-AEN, E1M-V2N, and E1M-V2N-M1
- * SoM per metadata/chips/tmp112.yaml.  7-bit address depends on
- * the ADD0 strap, which selects one of 0x48..0x4B; every current
- * SoM family straps ADD0 = GND, so the address is 0x48 throughout.
- * On a brand-new bring-up you may want to run examples/peripheral-io/i2c-scanner
- * first to confirm which address ACKs.
+ * Hardware: the BMP581 barometer sits on BOARD_I2C_SENSORS on every
+ * E1M and E1M-X EVK, strapped to 7-bit address 0x47 (SDO -> VDDIO)
+ * on both -- see metadata/boards/e1m-evk.yaml and
+ * metadata/boards/e1m-x-evk.yaml `i2c_devices:`.  On a brand-new
+ * bring-up you may want to build and run the alp-sdk repo's
+ * examples/peripheral-io/i2c-scanner example first to confirm which
+ * address ACKs -- it isn't part of this scaffolded project.
+ *
+ * (#1269: this example used to target the TMP112 temperature
+ * sensor, but TMP112 lives on BRD_I2C, not on BOARD_I2C_SENSORS --
+ * opening BOARD_I2C_SENSORS and probing for TMP112 NACKs on real
+ * hardware.  BRD_I2C is a separate controller instance regardless
+ * (on the E1M-AEN family it is SoC I2C0, function C -- #1848), so
+ * simply repointing the bus_id would still not reach a TMP112 there; see
+ * examples/v2n/v2n-temp-sensor for the V2N-only BRD_I2C/TMP112
+ * pattern.)
  *
  * What success looks like (real hardware):
  *
  *   [i2c-master] open BOARD_I2C_SENSORS @ 400 kHz
- *   [i2c-master] tmp112_init @ 0x48 -> 0 (OK)
- *   [i2c-master] sample 0: 23.625 degC
- *   [i2c-master] sample 1: 23.687 degC
+ *   [i2c-master] bmp581_init @ 0x47 -> 0 (OK)
+ *   [i2c-master] sample 0: 96234 Pa, 23.625 degC
+ *   [i2c-master] sample 1: 96231 Pa, 23.687 degC
  *   ...
  *   [i2c-master] done
  *
  * On native_sim (CI lane) the alp-i2c0 alias maps to the emul I2C
- * driver -- no TMP112 is registered as a target, so tmp112_init
+ * driver -- no BMP581 is registered as a target, so bmp581_init
  * gets NACKed and the example exits with the diagnostic.  Either
  * way the [i2c-master] done marker latches the harness.
  */
@@ -36,7 +45,7 @@
 #include <stdio.h>
 
 #include "alp/peripheral.h"
-#include "alp/chips/tmp112.h"
+#include "alp/chips/bmp581.h"
 
 /* BOARD_I2C_SENSORS is a portable cross-EVK alias from <alp/board.h>:
  *   E1M EVK  -> EVK_I2C_BUS_SENSORS  -> ALP_E1M_I2C0
@@ -44,22 +53,22 @@
  * Rebind it in board.yaml `pins:` to port to another board. */
 #include "alp/board.h"
 
-/* TMP112 7-bit I2C address with ADD0 = GND -- the default strap
- * on both the E1M-AEN and E1M-V2N SoM families (see
- * metadata/chips/tmp112.yaml).  The ADD0 strap selects one of
- * 0x48..0x4B; see the TMP112 datasheet SBOS473K table 2 or
- * include/alp/chips/tmp112.h if your board straps differently. */
-#define TMP112_ADDR_7BIT TMP112_I2C_ADDR_GND /* 0x48 */
+/* BMP581 7-bit I2C address with SDO -> VDDIO -- the on-board strap
+ * on both the E1M EVK (U14) and E1M-X EVK (see
+ * metadata/boards/e1m-evk.yaml / e1m-x-evk.yaml `i2c_devices:`).
+ * SDO -> GND gives 0x46 instead; see the BMP581 datasheet
+ * BST-BMP581-DS004 s5.6 or include/alp/chips/bmp581.h if your
+ * board straps differently. */
+#define BMP581_ADDR_7BIT BMP581_I2C_ADDR_HIGH /* 0x47 */
 
 /* Number of samples to take before exiting.  Capped so the
  * native_sim build doesn't stall the twister harness; real
  * firmware would loop forever. */
 #define SAMPLE_COUNT 5u
 
-/* Wait between samples.  TMP112's continuous-conversion mode
- * runs at 4 Hz by default (250 ms between fresh readings); waiting
- * a full second gives a comfortable margin and prints once per
- * watch-tick which is easy on the eyes. */
+/* Wait between samples.  50 Hz ODR (below) means a fresh reading
+ * every 20 ms; waiting a full second gives a comfortable margin
+ * and prints once per watch-tick which is easy on the eyes. */
 #define SAMPLE_PERIOD_MS 1000u
 
 int main(void)
@@ -70,11 +79,11 @@ int main(void)
 
 	printf("[i2c-master] open BOARD_I2C_SENSORS @ 400 kHz\n");
 
-	/* Open the bus at 400 kHz (I2C Fast-mode).  TMP112 supports up
-     * to 400 kHz per its datasheet; the SDK rounds DOWN to the
+	/* Open the bus at 400 kHz (I2C Fast-mode).  BMP581 supports up
+     * to 1 MHz (Fast-mode Plus) per its datasheet, so 400 kHz is
+     * comfortably inside spec; the SDK rounds DOWN to the
      * controller's closest achievable rate.  100 kHz is the safe
-     * baseline for unknown devices; 1 MHz (Fast-mode Plus) needs
-     * confirmation in the chip's datasheet and short bus traces. */
+     * baseline for unknown devices. */
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
 	    .bus_id     = BOARD_I2C_SENSORS, /* E1M EVK: ALP_E1M_I2C0; E1M-X EVK: ALP_E1M_X_I2C0 */
 	    .bitrate_hz = 400000,
@@ -93,76 +102,81 @@ int main(void)
 		return 0;
 	}
 
-	/* Initialise the TMP112 driver.  This:
-     *   1. Issues a write to register 0x01 (CONF) to put the chip
-     *      in continuous-conversion mode at 4 Hz.
-     *   2. Verifies the write by reading back CONF -- catches the
-     *      "wrong address" case (NACK on probe) up-front.
-     * If init fails the example exits cleanly -- maybe the chip
-     * isn't populated, maybe the address is wrong, maybe the
-     * bus is held low by another device.  i2c-scanner can
-     * confirm which devices ACK. */
-	tmp112_t     sensor;
-	alp_status_t s = tmp112_init(&sensor, bus, TMP112_ADDR_7BIT);
+	/* Initialise the BMP581 driver.  This reads CHIP_ID and verifies
+     * it matches BMP581_CHIP_ID -- catches the "wrong address" case
+     * (NACK on probe) up-front.  If init fails the example exits
+     * cleanly -- maybe the chip isn't populated, maybe the address
+     * is wrong, maybe the bus is held low by another device.
+     * examples/peripheral-io/i2c-scanner can confirm which devices ACK. */
+	bmp581_t     sensor;
+	alp_status_t s = bmp581_init(&sensor, bus, BMP581_ADDR_7BIT);
 	if (s != ALP_OK) {
 		/* Most-frequent failure modes:
-         *   * ALP_ERR_IO   -- bus error or NACK.  No TMP112 here,
+         *   * ALP_ERR_IO   -- bus error or NACK.  No BMP581 here,
          *                     wrong address, or pull-ups missing
          *                     (the bus floats high without them).
          *   * ALP_ERR_INVAL -- bad argument (NULL ctx or NULL bus).
          *
-         * Use i2c-scanner to enumerate what IS on this bus before
-         * chasing a TMP112 that may not be populated. */
-		printf("[i2c-master] tmp112_init @ 0x%02x -> %d "
+         * Use the alp-sdk repo's examples/peripheral-io/i2c-scanner
+         * example to enumerate what IS on this bus before chasing a
+         * BMP581 that may not be populated. */
+		printf("[i2c-master] bmp581_init @ 0x%02x -> %d "
 		       "(populated? right address?)\n",
-		       TMP112_ADDR_7BIT,
+		       BMP581_ADDR_7BIT,
 		       (int)s);
 		alp_i2c_close(bus);
 		printf("[i2c-master] done\n");
 		return 0;
 	}
-	printf("[i2c-master] tmp112_init @ 0x%02x -> %d (OK)\n", TMP112_ADDR_7BIT, (int)s);
+	printf("[i2c-master] bmp581_init @ 0x%02x -> %d (OK)\n", BMP581_ADDR_7BIT, (int)s);
 
-	/* Optional: tune the conversion rate.  4 Hz is the datasheet
-     * default; reach for 8 Hz when you want lower latency at the
-     * cost of more power, or 0.25 Hz for very low-power monitoring.
-     * Skipping this call keeps the default. */
-	s = tmp112_set_rate(&sensor, TMP112_RATE_4_HZ);
+	/* Configure oversampling + ODR + power mode in one call.  x8
+     * oversampling at 50 Hz normal mode is a reasonable general-
+     * purpose default; reach for higher OSR when you want lower
+     * noise at the cost of more power/latency. */
+	s = bmp581_set_sampling(
+	    &sensor, BMP581_OSR_X8, BMP581_OSR_X8, BMP581_ODR_50_HZ, BMP581_MODE_NORMAL);
 	if (s != ALP_OK) {
-		printf("[i2c-master] tmp112_set_rate -> %d\n", (int)s);
-		/* Non-fatal: the chip stays at whatever rate init set. */
+		printf("[i2c-master] bmp581_set_sampling -> %d\n", (int)s);
+		/* Non-fatal: the chip stays at whatever mode init left it in. */
 	}
 
-	/* Sample loop: read SAMPLE_COUNT temperatures, one per second.
-     * Real-life firmware would publish each reading over MQTT,
-     * push to a ring buffer for trend analysis, or compare against
-     * an alert threshold and pull a GPIO. */
+	/* Sample loop: read SAMPLE_COUNT pressure+temperature pairs, one
+     * per second.  Real-life firmware would publish each reading
+     * over MQTT, push to a ring buffer for trend analysis, or
+     * compare against an alert threshold and pull a GPIO. */
 	for (uint32_t i = 0; i < SAMPLE_COUNT; i++) {
-		int32_t milli_c = 0;
-		s               = tmp112_read_temp_milli_c(&sensor, &milli_c);
+		bmp581_raw_t         raw  = { 0 };
+		bmp581_compensated_t comp = { 0 };
+		s                         = bmp581_read_raw(&sensor, &raw);
+		if (s == ALP_OK) {
+			s = bmp581_compensate(&raw, &comp);
+		}
 		if (s == ALP_OK) {
 			/* Format integer + fractional parts so we avoid float
-             * printf on M-class targets.  milli_c is signed -- the
-             * fractional part takes the absolute value so e.g.
-             * -1750 milli-C prints as "-1.750 degC" (not
-             * "-1.-750 degC"). */
-			int whole = milli_c / 1000;
-			int frac  = (milli_c < 0 ? -milli_c : milli_c) % 1000;
-			printf("[i2c-master] sample %u: %d.%03d degC\n", i, whole, frac);
+             * printf on M-class targets.  temperature_c1000 is
+             * signed -- the fractional part takes the absolute
+             * value so e.g. -1750 milli-C prints as "-1.750 degC"
+             * (not "-1.-750 degC"). */
+			int whole = comp.temperature_c1000 / 1000;
+			int frac =
+			    (comp.temperature_c1000 < 0 ? -comp.temperature_c1000 : comp.temperature_c1000) %
+			    1000;
+			printf(
+			    "[i2c-master] sample %u: %d Pa, %d.%03d degC\n", i, comp.pressure_pa, whole, frac);
 		} else {
-			/* Read errors during steady-state are rare -- usually
-             * a transient bus glitch (EMI, ground bounce).  Log
-             * and continue rather than aborting; the next sample
-             * will likely succeed. */
+			/* Read/compensate errors during steady-state are rare --
+             * usually a transient bus glitch (EMI, ground bounce).
+             * Log and continue rather than aborting; the next
+             * sample will likely succeed. */
 			printf("[i2c-master] sample %u: read -> %d\n", i, (int)s);
 		}
 		alp_delay_ms(SAMPLE_PERIOD_MS);
 	}
 
-	/* Clean shutdown -- deinit the chip driver (which leaves the
-     * chip in continuous-conversion mode; harmless), then close
-     * the bus handle (which releases the slot back to the pool). */
-	tmp112_deinit(&sensor);
+	/* Clean shutdown -- deinit the chip driver, then close the bus
+     * handle (which releases the slot back to the pool). */
+	bmp581_deinit(&sensor);
 	alp_i2c_close(bus);
 	printf("[i2c-master] done\n");
 	return 0;

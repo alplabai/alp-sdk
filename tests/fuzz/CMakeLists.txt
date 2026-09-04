@@ -65,12 +65,30 @@ target_include_directories(alp_fuzz_update_log_entry PRIVATE
 # against the firmware-side `crc16_ccitt_false` symbol on every
 # iteration -- silent divergence between the two impls becomes a
 # fuzz failure.
+#
+# The firmware now lives in alplabai/gd32-bridge-firmware (ADR 0031), so this
+# harness needs a checkout of it.  ALP_GD32_BRIDGE_FIRMWARE_DIR names one.
+#
+# REFUSED rather than skipped when it is absent: this harness guards a parser
+# that eats peer-supplied bytes, and a silently-dropped fuzz target is worse
+# than a build error -- exactly how it stopped linking once before, unnoticed,
+# because nothing in CI built it.
+set(ALP_GD32_BRIDGE_FIRMWARE_DIR "" CACHE PATH
+    "Checkout of alplabai/gd32-bridge-firmware (for the gd32_bridge_frame harness)")
+if(NOT ALP_GD32_BRIDGE_FIRMWARE_DIR OR
+   NOT EXISTS "${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/protocol.c")
+    message(FATAL_ERROR
+        "alp_fuzz_gd32_bridge_frame needs the GD32 bridge firmware sources, which "
+        "moved out of this repo (ADR 0031).\n"
+        "Clone https://github.com/alplabai/gd32-bridge-firmware and configure with "
+        "-DALP_GD32_BRIDGE_FIRMWARE_DIR=<path-to-that-checkout>.")
+endif()
 target_sources(alp_fuzz_gd32_bridge_frame PRIVATE
-    ${CMAKE_SOURCE_DIR}/firmware/gd32-bridge/src/protocol.c
-    ${CMAKE_SOURCE_DIR}/firmware/gd32-bridge/src/bootloader/bootloader.c
-    ${CMAKE_SOURCE_DIR}/firmware/gd32-bridge/hal/bridge_hw_stub.c
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/protocol.c
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src/bootloader/bootloader.c
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/hal/bridge_hw_stub.c
 )
 target_include_directories(alp_fuzz_gd32_bridge_frame PRIVATE
-    ${CMAKE_SOURCE_DIR}/firmware/gd32-bridge/src
-    ${CMAKE_SOURCE_DIR}/firmware/gd32-bridge/hal
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/src
+    ${ALP_GD32_BRIDGE_FIRMWARE_DIR}/hal
 )

@@ -7,7 +7,7 @@
  *
  * The defect this suite pins (issue #1387): the WIFI_STATUS reply carries an
  * rssi_dbm byte that the firmware NEVER populates -- every terminal outcome in
- * firmware/cc3501e/hal/ti/cc3501e_hw_ti_wifi.c publishes it through
+ * cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti_wifi.c publishes it through
  * wifi_conn_set(), which always sets it to 0 -- and the console printed that
  * byte as a measurement.
  * 0 dBm is a legal int8 RSSI near the top of the range, so nothing downstream

@@ -3,7 +3,7 @@
 # `madgwick_ahrs`).
 #
 # Grounding (this checkout):
-#   * scripts/alp_orchestrate/libraries.py:197-223 (zephyr_kconfig_lines) --
+#   * scripts/alp_orchestrate/libraries.py:321-359 (zephyr_kconfig_lines) --
 #     the per-library Kconfig mechanism is the manifest's own
 #     `integration.zephyr.kconfig` array below, spliced verbatim into a
 #     Zephyr slice's alp.conf.  (A prior version of this header cited

@@ -177,7 +177,7 @@ alp_status_t alp_i2c_regfile_open(uint32_t            bus_id,
 alp_status_t alp_i2c_regfile_set_write_window(alp_i2c_regfile_t *rf, size_t first, size_t count)
 {
 	if (rf == NULL || !alp_handle_op_enter(&rf->lifecycle, &rf->active_ops)) {
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	/* Window must fit the file: first may equal len only when the
 	 * window is empty (count == 0 -> fully read-only). */
@@ -202,7 +202,7 @@ alp_status_t alp_i2c_regfile_stats(const alp_i2c_regfile_t *rf, alp_i2c_regfile_
 	 * still count it so a racing close cannot recycle the slot mid-read. */
 	struct alp_i2c_regfile *m = (struct alp_i2c_regfile *)rf;
 	if (m == NULL || !alp_handle_op_enter(&m->lifecycle, &m->active_ops)) {
-		return ALP_ERR_INVAL;
+		return ALP_ERR_NOT_READY;
 	}
 	out->writes_seen = rf->writes_seen;
 	out->reads_seen  = rf->reads_seen;

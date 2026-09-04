@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Refuse an Alif Ensemble (AEN) layout that leaves the top of the App MRAM
-window writable by the application.
+window writable by the application, or that publishes a slot0 flash address
+disagreeing with `loader._resolve_slot0_load_address()` (#1482).
 
 Alif's SETOOLS (`app-gen-toc` / `app-write-mram`) does not place the ATOC
 application table at a fixed address: it top-anchors the generated package at
@@ -26,11 +27,17 @@ machinery:
      `atoc`.
 
      Board trees, because tests/scripts/test_gen_zephyr_board.py CANNOT cover
-     `e1m_aen401_m55_hp` / `e1m_aen601_m55_hp`: their SoC spec entries have no
-     `zephyr_cpucluster`, so `emit_zephyr_board()` refuses to generate them
-     and the byte-parity test skips them entirely (#1332). A generator-only
-     check misses those two boards -- it did exactly that while this change
-     was being written.
+     `e1m_aen401_m55_hp` / `e1m_aen601_m55_hp`: e4.json/e6.json publish no
+     `zephyr_peripherals_dtsi`, so `emit_zephyr_board()` raises and the
+     byte-parity test skips them entirely -- see that test's NOT_EMITTABLE
+     table, which carries the same reason. A generator-only check misses
+     those two boards -- it did exactly that while this change was being
+     written.
+
+     (This used to name a missing `zephyr_cpucluster` as the blocker, citing
+     #1332. #1332 is what ADDED that key: e4.json and e6.json both declare
+     `zephyr_cpucluster` now, so that reason no longer holds and pointed a
+     reader at the wrong file to fix.)
 
      Example overlays, because an app can `/delete-node/` the generated
      partitions and declare its own table, escaping the board tree completely
@@ -46,6 +53,25 @@ The window top is DERIVED per board/preset (the highest partition/region end
 in that same table), never hardcoded: the AEN SKUs do not share an MRAM size,
 and a hardcoded 0x80580000 would pass vacuously on every part that isn't the
 E8.
+
+Three checks, because two invariants over the same AEN partition tables have
+turned out to need three different sources of truth (#1482):
+
+  1. DTS check -- as above.
+
+  2. Preset check -- as above.
+
+  3. Slot0-address check -- every committed AEN board `.dts` whose directory
+     names an `m55_he`/`m55_hp` role: the offset its `zephyr,code-partition`
+     points at must equal `loader._resolve_slot0_load_address()`'s answer for
+     that SKU/core, so the planner never publishes a `slot0_load_address`
+     that lands the linked image in a DIFFERENT partition than the one the
+     board actually links against (#1482 -- E1M-AEN401/E1M-AEN601's HP board
+     trees kept the pre-#1069 symmetric layout after their presets moved to
+     disjoint slot0, so `tan flash` would have written the primary-slot image
+     into the DT's `image-1`, silently). Covers the same two `NOT_EMITTABLE`
+     boards as check 1, for the same reason -- nothing else reads a committed
+     board `.dts` for these two SKUs.
 
 Run locally:
 
@@ -63,6 +89,11 @@ from typing import Any
 import yaml
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
+
+from alp_orchestrate.loader import _resolve_slot0_load_address  # noqa: E402
+from alp_orchestrate.models import OrchestratorError  # noqa: E402
+from gen_zephyr_board import _AEN_MRAM_BASE  # noqa: E402
 
 PRESETS = REPO / "metadata" / "e1m_modules"
 
@@ -77,6 +108,20 @@ _PARTITION_RE = re.compile(
     r'[^}]*?label\s*=\s*"(?P<label>[^"]+)"\s*;'
     r'[^}]*?reg\s*=\s*<\s*0x(?P<off>[0-9a-fA-F]+)\s+DT_SIZE_K\((?P<kib>\d+)\)\s*>\s*;',
     re.DOTALL)
+
+# Same shape as `_PARTITION_RE` but also captures the DT node label (the
+# `slot0_partition:` before `partition@...`), so a `zephyr,code-partition =
+# &slot0_partition;` reference can be resolved back to its own `reg` offset.
+_LABELED_PARTITION_RE = re.compile(
+    r'(?P<node>[A-Za-z0-9_]+):\s*partition@(?P<at>[0-9a-fA-F]+)\s*\{'
+    r'[^}]*?reg\s*=\s*<\s*0x(?P<off>[0-9a-fA-F]+)\s+DT_SIZE_K\((?P<kib>\d+)\)\s*>\s*;',
+    re.DOTALL)
+
+_CODE_PARTITION_RE = re.compile(
+    r'zephyr,code-partition\s*=\s*&(?P<node>[A-Za-z0-9_]+)\s*;')
+
+# `zephyr/boards/alp/e1m_<part>_m55_<role>/*.dts` -> (SoM preset SKU, core_id).
+_BOARD_DIR_RE = re.compile(r'^e1m_(?P<part>[a-z0-9]+)_m55_(?P<role>he|hp)$')
 
 
 def _aen_board_dts() -> "list[Path]":
@@ -127,6 +172,64 @@ def _check_dts(path: Path) -> "list[str]":
         f"    Reserve the top band as a partition labelled 'atoc' -- see "
         f"scripts/gen_zephyr_board.py `_AEN_ATOC_KIB` for the sizing "
         f"evidence."]
+
+
+def _check_slot0_address(path: Path) -> "list[str]":
+    """This board's `zephyr,code-partition` offset must match the SoM
+    preset's resolved slot0 load address for the same SKU/core (#1482).
+
+    Only board trees whose directory names an `m55_he`/`m55_hp` role are in
+    scope -- the a32_cluster / non-AEN boards this same walk visits have no
+    preset resolver to check against, and skipping them silently is correct,
+    not a gap (`_resolve_slot0_load_address` itself returns None for them).
+    """
+    board_dir = _BOARD_DIR_RE.match(path.parent.name)
+    if board_dir is None:
+        return []
+    sku = f"E1M-{board_dir.group('part').upper()}"
+    core_id = f"m55_{board_dir.group('role')}"
+    preset_path = PRESETS / f"{sku}.yaml"
+    if not preset_path.is_file():
+        return []
+    try:
+        preset = yaml.safe_load(preset_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        return [f"{preset_path.relative_to(REPO).as_posix()}: unparseable YAML ({exc})"]
+
+    text = path.read_text(encoding="utf-8")
+    code_partition = _CODE_PARTITION_RE.search(text)
+    if code_partition is None:
+        # No `zephyr,code-partition` chosen -- nothing to compare.
+        return []
+    target_node = code_partition.group("node")
+    node_offsets = {m.group("node"): int(m.group("off"), 16)
+                    for m in _LABELED_PARTITION_RE.finditer(text)}
+    if target_node not in node_offsets:
+        rel = path.relative_to(REPO).as_posix()
+        return [f"{rel}: zephyr,code-partition references &{target_node}, "
+                f"which no partition{{}} node in this .dts declares."]
+    dts_address = _AEN_MRAM_BASE + node_offsets[target_node]
+
+    try:
+        expected = _resolve_slot0_load_address(preset, core_id)
+    except OrchestratorError as exc:
+        return [f"{preset_path.relative_to(REPO).as_posix()}: {exc}"]
+    if expected is None:
+        return []
+    if int(expected, 16) != dts_address:
+        rel = path.relative_to(REPO).as_posix()
+        return [
+            f"{rel}: zephyr,code-partition links at 0x{dts_address:08x} but "
+            f"{sku}'s SoM preset (metadata/e1m_modules/{sku}.yaml) resolves "
+            f"{core_id}'s slot0 to {expected}.\n"
+            f"    The planner publishes flash_args.slot0_load_address from "
+            f"the PRESET (loader._resolve_slot0_load_address), so a "
+            f"mismatched board tree makes `tan flash` write the slot0-linked "
+            f"image into whatever partition actually owns {expected} -- not "
+            f"the one the image is linked against.  Reprogram this board's "
+            f"fixed-partitions table to match the preset's `memory_map:` "
+            f"(#1069, #1482)."]
+    return []
 
 
 def _region_size_kib(region: "dict[str, Any]") -> "int | None":
@@ -185,6 +288,7 @@ def main(argv=None) -> int:
     for path in _aen_board_dts():
         checked_dts += 1
         failures += _check_dts(path)
+        failures += _check_slot0_address(path)
 
     checked_presets = 0
     for path in sorted(PRESETS.glob("*.yaml")) if PRESETS.is_dir() else []:
@@ -197,7 +301,8 @@ def main(argv=None) -> int:
             print(f"  {f}", file=sys.stderr)
         return 1
     print(f"OK: {checked_dts} AEN board .dts + {checked_presets} SoM preset(s) "
-          f"checked, ATOC band reserved in each.")
+          f"checked, ATOC band reserved and slot0 address matches its preset "
+          f"in each.")
     return 0
 
 

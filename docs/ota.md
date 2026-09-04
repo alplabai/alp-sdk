@@ -120,6 +120,16 @@ AEN's MCUboot scaffolding (see [`docs/secure-boot.md`](secure-boot.md))
 sets up the signed-image verification half.  The delivery half
 is open between two viable options:
 
+**Current AEN family hardware note:** the flash map below assumes a
+secondary (OTA) slot.  The AEN family's MRAM partition map does not
+have one -- `slot1_partition` and `scratch_partition` were removed by
+#1100 (AEN801) and #1445 (the rest of the family) to fit the disjoint
+dual-core slot0 budget (see
+[`zephyr/sysbuild/aen/sysbuild.conf`](../zephyr/sysbuild/aen/sysbuild.conf)
+and ADR-0006's 2026-08-25 amendment).  Both options below need that
+slot added back, or a different delivery shape, before OTA is possible
+on the AEN family.
+
 ### Option A — Mender Zephyr client (preferred)
 
 Mender's Zephyr support is upstream as the
@@ -163,9 +173,9 @@ Alif Ensemble main SoC through the inter-chip SPI1 bus, not
 the CC3501E's own flash.  The CC3501E firmware is **not** updated
 via the same OTA path -- it has its own upgrade flow (Alp-internal
 release tooling in `alp-sdk-internal` produces the version-pinned
-blob under `firmware/cc3501e/prebuilt/`; the firmware source is
+blob under `cc3501e-bridge-firmware:prebuilt/`; the firmware source is
 embedded in alp-sdk at
-[`firmware/cc3501e/`](../firmware/cc3501e/) per
+[`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware) per
 [ADR 0015](adr/0015-cc3501e-firmware-embedded.md)).
 Decoupling the two firmwares means a failed CC3501E update can't
 brick the Alif side and vice versa.

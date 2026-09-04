@@ -87,14 +87,89 @@ def test_non_object_variants_and_cores_entries_do_not_crash_the_gate(tmp_path, m
     """`variants[]`/`cores[]` entries are schema-typed objects, but the
     schema pass that would reject a non-object entry runs separately and is
     not guaranteed to have run first. A bare string in either list used to
-    reach a bare `.get()` (or, for `cores[]`, an even less forgiving `c["id"]`
-    direct index) and raise `AttributeError`/`TypeError` here, hiding the
-    schema FAIL line that already explains the real problem. Filtered to
-    dicts, this doc must return cleanly -- no real variant/core survives the
-    filter, so there is nothing left to cross-reference."""
+    reach a bare `.get()` and raise `AttributeError` here, hiding the schema
+    FAIL line that already explains the real problem. Filtered to dicts,
+    this doc must return cleanly -- no real variant survives the filter, so
+    there is nothing left to cross-reference.
+
+    `variants` also carries ONE real dict entry (whose `jlink_device` names
+    the one real `cores` dict entry) so the function does not short-circuit
+    at `if not variants: continue` before ever reaching the `core_ids` /
+    `m_core_ids` filters this test exists to exercise -- a prior version of
+    this fixture (`variants: ["not-a-dict"]` only) never actually reached
+    either line, so reverting either guard alone would not have reddened
+    this test."""
     doc = {
-        "cores": ["not-a-dict"],
-        "variants": ["not-a-dict"],
+        "cores": ["not-a-dict", {"id": "m55_hp", "type": "cortex-m55"}],
+        "variants": ["not-a-dict", {"order_code": "AE999X",
+                                     "debug": {"jlink_device": {"m55_hp": "Cortex-M55"}}}],
+    }
+    assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
+
+
+def test_non_object_top_level_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """The SoC doc's top level is schema-typed as an object, but a
+    malformed file could parse to a bare JSON array -- `doc.get("variants")`
+    used to raise `AttributeError: 'list' object has no attribute 'get'`
+    here, aborting the whole gate mid-run instead of leaving the schema
+    FAIL line (which already flags the type mismatch) to explain the real
+    problem."""
+    monkeypatch.setattr(V, "REPO", tmp_path)
+    p = tmp_path / "soc.json"
+    p.write_text(json.dumps([]))
+    assert V._check_soc_debug_probe_identity([p]) == []  # must not raise
+
+
+def test_non_list_variants_and_cores_do_not_crash_the_gate(tmp_path, monkeypatch):
+    """`variants`/`cores` are themselves schema-typed as arrays, but a
+    malformed document can carry a non-list scalar there (e.g. the bare int
+    `5`, which is truthy) -- iterating the unfiltered value used to raise
+    `TypeError: 'int' object is not iterable`, aborting the whole gate
+    mid-run instead of leaving the schema FAIL line (which already flags
+    the type mismatch) to explain the real problem."""
+    doc = {"cores": 5, "variants": 5}
+    assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
+
+
+def test_non_object_debug_block_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`variants[].debug` is schema-typed as an object, but a malformed
+    document can still carry a scalar there (e.g. a bare string), which is
+    truthy and used to reach `debug.get(...)` and raise `AttributeError`.
+    Normalised to `{}`, the variant is treated as carrying no debug facts."""
+    doc = {
+        "cores": [{"id": "m55_hp"}],
+        "variants": [{"order_code": "AE999X", "debug": "not-a-dict"}],
+    }
+    assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
+
+
+def test_non_string_core_id_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`cores[].id` is schema-typed as a string, but a malformed doc can
+    carry a dict/list there -- both `core_ids` and (for Cortex-M rows)
+    `m_core_ids` are built via unfiltered set comprehensions that used to
+    raise `TypeError: unhashable type: 'dict'`. A real dict-typed `id`
+    alongside a real string `id` (whose `jlink_device` entry the one real
+    variant carries) proves the filter runs, not an early short-circuit."""
+    doc = {
+        "cores": [{"id": {"nested": "dict"}, "type": "cortex-m55"},
+                  {"id": "m55_hp", "type": "cortex-m55"}],
+        "variants": [{"order_code": "AE999X",
+                      "debug": {"jlink_device": {"m55_hp": "Cortex-M55"}}}],
+    }
+    assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
+
+
+def test_non_object_jlink_device_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`debug.jlink_device` is schema-typed as an object, but
+    `debug.get("jlink_device") or {}` does not protect a non-empty NON-STRING
+    scalar (e.g. a bare integer, which is truthy) -- that used to reach
+    `for core_id in jlink_device` and raise `TypeError: 'int' object is not
+    iterable` (a string would merely iterate characters and not crash, which
+    is why this needs its own scalar type). Normalised to `{}`, there is
+    nothing to cross-reference."""
+    doc = {
+        "cores": [{"id": "m55_hp"}],
+        "variants": [{"order_code": "AE999X", "debug": {"jlink_device": 5}}],
     }
     assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
 

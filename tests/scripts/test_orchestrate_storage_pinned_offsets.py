@@ -22,14 +22,28 @@ a bare whole-device alias to allocate into: alp-sdk#1445 gave all five
 remaining AEN SoMs the same explicit MRAM partitioning E1M-AEN801 always had,
 and that layout fills the 5632 KiB device EXACTLY
 (64 + 2688 + 2688 + 64 + 96 + 32), so the whole-MRAM overlay has nothing free
-on any AEN part. Customer storage on these SoMs belongs in the SoM's own
-96 KiB `storage` region, which is what these fixtures now use -- the same
-shape test_orchestrate_storage_region_bounds.py already uses.
+on any AEN part. These fixtures used to target the SoM's own 96 KiB `storage`
+region directly -- alp-sdk#1484 removed that as a legal `flash_device:`
+target: `storage` is a `carveout: false` region, a partition label *inside*
+the `mram_storage` flash node, not a Devicetree label of its own, so naming
+it decorated a node the board tree never defines. These fixtures now target
+`ospi0` (32 MiB, `capacity_mbit: 256`, declared in
+`metadata/e1m_modules/E1M-AEN301.yaml`'s `on_module.ospi_memories`) --
+`_resolve_flash_device()` still resolves it with room to spare, unaffected
+by this fix, so it works for the pin-vs-bump allocator logic under test
+here (device-independent). NOT a claim that `ospi0` is a verified,
+board-tree-backed flash device on E1M-AEN301: #1484 re-review found that
+SKU has no board tree at all under `zephyr/boards/alp/`, so `ospi0` has no
+Devicetree label the resolver will recommend as an alternative
+(`_has_real_dt_label()`).
 
-Sizes are half their original values so the largest fixture still fits that
-96 KiB region exactly. What is under test is the pinned-vs-bump interaction --
-pin ordering, overlap detection, auto-layout stability -- and that is
-scale-invariant; only the arithmetic in the expected offsets moved with it.
+Sizes are left at the reduced values #1445 introduced for the 96 KiB
+`storage` region (settings 64->16, app_data 128->32, mcuboot_scratch /
+pinned_low 32->8, etc.) -- `ospi0` has 32 MiB of room and did not need
+the shrink, but there was no reason to re-inflate them either. What is
+under test is the pinned-vs-bump interaction -- pin ordering, overlap
+detection, auto-layout stability -- and that is device-independent; only the
+`flash_device:` fixtures moved.
 
 Run locally:
 
@@ -107,10 +121,10 @@ class TestPinnedPartitionSurvivesTheBumpAllocator:
         the one that disappeared from dts-partitions.dtsi.
         """
         parts = _resolve(tmp_path, """
-      - { name: settings,        fs: littlefs, size_kib: 16,  mount: /lfs/settings, flash_device: storage }
-      - { name: app_data,        fs: littlefs, size_kib: 32,  mount: /lfs/app,      flash_device: storage }
-      - { name: mcuboot_scratch, fs: raw,      size_kib: 8,                         flash_device: storage }
-      - { name: pinned_low,      fs: raw,      size_kib: 8,   offset_kib: 0,        flash_device: storage }
+      - { name: settings,        fs: littlefs, size_kib: 16,  mount: /lfs/settings, flash_device: ospi0 }
+      - { name: app_data,        fs: littlefs, size_kib: 32,  mount: /lfs/app,      flash_device: ospi0 }
+      - { name: mcuboot_scratch, fs: raw,      size_kib: 8,                         flash_device: ospi0 }
+      - { name: pinned_low,      fs: raw,      size_kib: 8,   offset_kib: 0,        flash_device: ospi0 }
     """)
         by_name = _by_name(parts)
         assert set(by_name) == {
@@ -136,8 +150,8 @@ class TestPinnedPartitionSurvivesTheBumpAllocator:
         pins the behaviour so the two-pass rewrite cannot regress it.
         """
         parts = _by_name(_resolve(tmp_path, """
-      - { name: boot_slot, offset_kib: 0, size_kib: 32, fs: raw,      flash_device: storage }
-      - { name: cfg,                      size_kib: 32, fs: littlefs, flash_device: storage, mount: /cfg }
+      - { name: boot_slot, offset_kib: 0, size_kib: 32, fs: raw,      flash_device: ospi0 }
+      - { name: cfg,                      size_kib: 32, fs: littlefs, flash_device: ospi0, mount: /cfg }
     """))
         assert parts["boot_slot"].status == "ok", parts["boot_slot"].reason
         assert parts["boot_slot"].base_kib == 0
@@ -150,9 +164,9 @@ class TestPinnedPartitionSurvivesTheBumpAllocator:
         for an "explicit offset_kib=None" it never declared.  No emitted
         reason may ever contain that string."""
         parts = _resolve(tmp_path, """
-      - { name: aaa, offset_kib: 0,  size_kib: 32, fs: raw, flash_device: storage }
-      - { name: bbb, offset_kib: 16, size_kib: 32, fs: raw, flash_device: storage }
-      - { name: ccc,                 size_kib: 32, fs: raw, flash_device: storage }
+      - { name: aaa, offset_kib: 0,  size_kib: 32, fs: raw, flash_device: ospi0 }
+      - { name: bbb, offset_kib: 16, size_kib: 32, fs: raw, flash_device: ospi0 }
+      - { name: ccc,                 size_kib: 32, fs: raw, flash_device: ospi0 }
     """)
         for part in parts:
             assert "offset_kib=None" not in (part.reason or ""), part.reason
@@ -160,8 +174,8 @@ class TestPinnedPartitionSurvivesTheBumpAllocator:
     def test_two_pins_on_one_offset_still_block(self, tmp_path):
         """Placing pins first must not make them mutually invisible."""
         parts = _by_name(_resolve(tmp_path, """
-      - { name: aaa, offset_kib: 0, size_kib: 32, fs: raw, flash_device: storage }
-      - { name: bbb, offset_kib: 0, size_kib: 32, fs: raw, flash_device: storage }
+      - { name: aaa, offset_kib: 0, size_kib: 32, fs: raw, flash_device: ospi0 }
+      - { name: bbb, offset_kib: 0, size_kib: 32, fs: raw, flash_device: ospi0 }
     """))
         assert parts["aaa"].status == "ok", parts["aaa"].reason
         assert parts["bbb"].status == "blocked"
@@ -173,8 +187,8 @@ class TestPinnedPartitionSurvivesTheBumpAllocator:
         Offsets must stay exactly where they were before the two-pass
         rewrite (name-sorted, bottom-up, 4 KiB pages)."""
         parts = _by_name(_resolve(tmp_path, """
-      - { name: settings, fs: littlefs, size_kib: 32,  mount: /lfs/settings, flash_device: storage }
-      - { name: app_data, fs: littlefs, size_kib: 64,  mount: /lfs/app,      flash_device: storage }
+      - { name: settings, fs: littlefs, size_kib: 32,  mount: /lfs/settings, flash_device: ospi0 }
+      - { name: app_data, fs: littlefs, size_kib: 64,  mount: /lfs/app,      flash_device: ospi0 }
     """))
         assert parts["app_data"].base_kib == 0
         assert parts["settings"].base_kib == 64

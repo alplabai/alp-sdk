@@ -48,7 +48,7 @@ const char *alp_status_name(alp_status_t status)
 static const char *const _status_descriptions[ALP_STATUS_TABLE_SIZE] = {
     [-ALP_OK]                          = "success",
     [-ALP_ERR_INVAL]                   = "Invalid argument.",
-    [-ALP_ERR_NOT_READY]               = "Peripheral not initialised.",
+    [-ALP_ERR_NOT_READY]               = "The handle is not in a state to perform this operation.",
     [-ALP_ERR_BUSY]                    = "Peripheral busy.",
     [-ALP_ERR_TIMEOUT]                 = "Transfer timed out.",
     [-ALP_ERR_IO]                      = "Bus / line error.",

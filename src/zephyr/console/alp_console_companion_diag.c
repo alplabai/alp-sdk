@@ -76,7 +76,7 @@ static int cmd_companion_diag_info(const struct shell *sh, size_t argc, char **a
 	}
 
 	alp_cc3501e_diag_info_t di = { 0 };
-	alp_status_t s = cc3501e_diag_info(companion_cc3501e, &di);
+	alp_status_t            s  = cc3501e_diag_info(companion_cc3501e, &di);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "diag info failed (%d)", (int)s);
@@ -95,6 +95,16 @@ static int cmd_companion_diag_info(const struct shell *sh, size_t argc, char **a
 	shell_print(sh, "uptime: %u ms", (unsigned int)di.uptime_ms);
 	shell_print(sh, "heap:   %u B free", (unsigned int)di.free_heap_bytes);
 	shell_print(sh, "lasterr:%u", di.last_error);
+	/* Last Wi-Fi event ID (reserved[0]).  Printed because it is the cheap
+	 * single-radio signal for #1562: 0 after an `ap start` means no WLAN event
+	 * ever fired, which separates "the radio never got going" from "it came up
+	 * and stopped" without needing a second radio to watch for the SSID. */
+	shell_print(sh, "wifievt:%u", di.reserved[0]);
+	/* #1610: psa_status_t low byte of the last OTA flush fault; pairs with
+	 * `ota status`'s stage.  Quiet when nothing failed. */
+	if (di.reserved[1] != 0u) {
+		shell_print(sh, "otafault:psa 0x%02x", di.reserved[1]);
+	}
 	return 0;
 }
 
@@ -107,14 +117,25 @@ static int cmd_companion_diag_stats(const struct shell *sh, size_t argc, char **
 		return -ENODEV;
 	}
 
-	uint32_t frames_ok = 0, frames_err = 0;
-	alp_status_t s = cc3501e_diag_stats(companion_cc3501e, &frames_ok, &frames_err);
+	cc3501e_diag_stats_t st = { 0 };
+	alp_status_t         s  = cc3501e_diag_stats(companion_cc3501e, &st);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "diag stats failed (%d)", (int)s);
 		return -EIO;
 	}
-	shell_print(sh, "frames ok=%u err=%u", (unsigned int)frames_ok, (unsigned int)frames_err);
+	shell_print(sh, "frames ok=%u err=%u", (unsigned int)st.frames_ok, (unsigned int)st.frames_err);
+	/* Print the v8 counters only when the firmware actually answered them.
+	 * Printing "worker execs=0" against v7 firmware would read as a measured
+	 * zero, which is the one thing a bench run must not be told. */
+	if (st.has_worker_counters) {
+		shell_print(sh,
+		            "worker execs=%u retry-latch hits=%u",
+		            (unsigned int)st.worker_execs,
+		            (unsigned int)st.retry_latch_hits);
+	} else {
+		shell_print(sh, "worker execs/retry-latch hits: not reported (firmware < protocol 8)");
+	}
 	return 0;
 }
 

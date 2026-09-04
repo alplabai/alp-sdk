@@ -4,19 +4,27 @@
 """Resolve merge conflicts in GENERATED files by regenerating them.
 
 Some files in this tree are derived from other files and committed anyway:
-`alp.lock` carries a digest over `metadata/**`, `metadata/catalog.json` is
-emitted from the gate registry, the ABI snapshot is emitted from the public
-headers, and the `--emit` goldens are emitted from the projects.  Every branch
-that touches their inputs rewrites them, so **any two such branches conflict on
-them by construction** -- textually, while the two sides do not actually
-disagree about anything.  Each side simply computed the value over a different
-tree, and neither value is right for the merge; only a value computed over the
-MERGED tree is.
+`metadata/catalog.json` is emitted from the gate registry, the ABI snapshot is
+emitted from the public headers, and the `--emit` goldens are emitted from the
+projects.  Every branch that touches their inputs rewrites them, so **any two
+such branches conflict on them by construction** -- textually, while the two
+sides do not actually disagree about anything.  Each side simply computed the
+value over a different tree, and neither value is right for the merge; only a
+value computed over the MERGED tree is.
 
 Measured 2026-08-12 across the open PRs: `alp.lock` conflicted on 3,
 `docs/abi/v<minor>-snapshot.json` on 2, the `--emit` goldens on 2 and
 `metadata/catalog.json` on 1 -- and they re-fire on every subsequent merge, so
 the cost is paid per PR per merge, not once.
+
+`alp.lock` used to be in this list too. It was inflated first by
+`sdk.revision` (retired #1615), which recorded the repo's own HEAD and so
+conflicted on every commit, and its remaining conflicts were structural: its
+`digests.metadata` is a single hash over the entire `metadata/**` tree, so any
+two branches touching *different* metadata files conflicted on the same line.
+#1576 stopped committing it at all -- it is generated on demand instead, so it
+can no longer appear in a merge conflict and has no entry in REGENERATORS
+below. The other three files are unaffected by #1576.
 
 This is the same shape `changelog.d/` (#1395) removed for `CHANGELOG.md`, and
 the same remedy: stop hand-merging a file whose content is not in dispute.
@@ -25,9 +33,10 @@ Why regenerate rather than a git merge driver
 ---------------------------------------------
 A `merge=<driver>` in `.gitattributes` is tempting, but the driver is invoked
 per-file with no guarantee about which OTHER paths git has already written to
-the worktree.  `alp.lock`'s digest covers all of `metadata/**`, so a driver that
-regenerated it mid-merge could hash a half-materialised tree and produce a
-confidently wrong value -- worse than the conflict, because it would be silent.
+the worktree. `metadata/catalog.json`'s regenerator reads across `metadata/**`,
+so a driver that regenerated it mid-merge could hash a half-materialised tree
+and produce a confidently wrong value -- worse than the conflict, because it
+would be silent.
 
 By the time a conflicted merge STOPS, git has written every cleanly-merged path
 to the worktree and left only the conflicted ones marked.  Running afterwards is
@@ -102,8 +111,6 @@ def _abi_snapshot_cmd() -> list[str]:
 # path glob -> argv factory.  A path is matched against every pattern and the
 # FIRST match wins.
 REGENERATORS: list[tuple[str, object]] = [
-    ("alp.lock",
-     lambda: [sys.executable, "scripts/west_commands/alp_lock.py"]),
     ("metadata/catalog.json",
      lambda: [sys.executable, "scripts/gen_catalog.py"]),
     ("docs/abi/*-snapshot.json",
@@ -166,9 +173,10 @@ def main() -> int:
         return 1 if other else 0
 
     # REFUSE while a non-generated conflict remains.  A derived file is
-    # computed FROM the tree -- alp.lock digests all of `metadata/**`, the ABI
-    # snapshot reads the public headers -- so regenerating while any input is
-    # still conflicted would hash a file that literally contains `<<<<<<<`
+    # computed FROM the tree -- metadata/catalog.json digests across
+    # `metadata/**`, the ABI snapshot reads the public headers -- so
+    # regenerating while any input is still conflicted would hash a file
+    # that literally contains `<<<<<<<`
     # markers and emit a confidently wrong value.  That is worse than the
     # conflict, because the wrong value looks resolved and the gate that would
     # have caught it is the very gate being satisfied.  Order matters: settle

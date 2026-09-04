@@ -195,6 +195,7 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE_CMD_COMPANION
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_diag.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_ota.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_sock.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_spi.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/console/alp_console_companion_gpio.c)
 
 
@@ -205,8 +206,12 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CONSOLE_CMD_COMPANION
 # <alp/storage.h> ABI always link cleanly; each backend gates on its
 # own Kconfig so builds that don't enable a path don't pay its code
 # size.  Vendor-ext bodies under src/backends/ext/{alif,nxp}/storage.c
-# compile unconditionally -- they only emit NOSUPPORT + parameter
-# validation today, so they pull zero vendor dependencies.
+# compile unconditionally -- the NXP OTFAD surface still only emits
+# NOSUPPORT + parameter validation (zero vendor dependencies), and the
+# Alif SecAES key-provision body (issue #224) internally #ifdefs its
+# one vendor include (<se_service.h>) behind
+# CONFIG_ALP_SDK_STORAGE_ALIF_SECAES, so both files still link on every
+# board regardless of which vendor Kconfig is on.
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/storage_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/alif/storage.c
@@ -1067,6 +1072,7 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_CC3501E
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_sockets.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_ble.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_gpio.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_spi.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_camera.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_power.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/cc3501e/cc3501e_ota.c
@@ -1452,8 +1458,12 @@ zephyr_library_sources_ifdef(CONFIG_GPIO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/zephyr_drv.c)
 # CC3501E GPIO proxy: routes proxied IOs through the inter-chip bridge,
 # delegates the rest to zephyr_drv.  AEN-only (CONFIG_ALP_SDK_GPIO_CC3501E_PROXY).
+# cc3501e_proxy_routes_weak.c is the WEAK empty route-table default, split
+# into its own TU so cc3501e_proxy.c never sees a same-TU `const` definition
+# to constant-fold a board's strong override away at -Os (issue #1860).
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
-    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/cc3501e_proxy.c)
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/cc3501e_proxy.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/cc3501e_proxy_routes_weak.c)
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/sw_fallback.c)
 # PWM class dispatcher + backends.

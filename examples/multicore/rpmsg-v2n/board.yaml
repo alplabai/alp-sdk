@@ -48,6 +48,17 @@ cores:
 # E1M-V2N101's `memory_map:` -- ocram_low for the default
 # non-cacheable region.  Endpoint IDs + mailbox channel are derived
 # from the channel name and emitted into <alp/system_ipc.h>.
+#
+# carve_out_kb: 512 below is sized for the real transport this
+# example's M33 side actually runs on -- OpenAMP's resource table
+# (512 rpmsg buffers x 512 B x 2 vrings, m33_sm/src/resource_table.h's
+# RSC_TABLE_NUM_RPMSG_BUFF), which lives in a hand-authored DDR
+# window (see that board file's carve-out comment), not in
+# ocram_low.  It happens to equal the entire ocram_low region (512
+# KiB total -- metadata/socs/renesas/rzv2n/n44.json), which is what
+# this entry actually resolves against today.  Harmless while
+# nothing consumes the resolved paper address, but it leaves no
+# ocram_low headroom for a second `ipc:` entry on this SoM.
 ipc:
   - kind: rpmsg
     endpoints: [a55_cluster, m33_sm]

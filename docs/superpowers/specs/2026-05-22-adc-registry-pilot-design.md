@@ -334,7 +334,7 @@ Builds on every SoM. Customer reading the example learns both gating mechanisms 
 ## Open questions deferred to implementation
 
 1. `alif_e7.c` vendor-ext function bodies: whether `set_oversampling` re-opens the Zephyr ADC sequence (slow but always-correct) or queues the ratio for the next `read_raw` (fast but ordering-sensitive). Decided during the plan's TDD step that exercises both call orders.
-2. GD32 bridge ABI: the existing supervisor MCU command set is in `firmware/gd32-bridge/protocol_vectors.txt`. The plan should verify the `CMD_ADC_*` opcodes haven't shifted since the legacy `peripheral_adc.c` was written.
+2. GD32 bridge ABI: the existing supervisor MCU command set is in `gd32-bridge-firmware:protocol_vectors.txt`. The plan should verify the `CMD_ADC_*` opcodes haven't shifted since the legacy `peripheral_adc.c` was written.
 3. Whether `alp_adc_capabilities` returns a const pointer or a copy. Spec says const pointer; if the team prefers value semantics for ABI stability, swap during implementation. Cost is one struct copy per call.
 
 ## References

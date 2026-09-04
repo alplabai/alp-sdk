@@ -12,6 +12,8 @@ CONFIG_LOG_DEFAULT_LEVEL=3
 # enables alp_hw_info_read() + the console banner manifest line.
 CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0
 
+CONFIG_ALP_SDK_SOM_HW_REV="r1"
+
 # SoM silicon (renesas:rzv2n:n44 via E1M-V2N101)
 CONFIG_ALP_SOC_RENESAS_RZV2N_N44=y
 
@@ -50,4 +52,5 @@ CONFIG_ALP_SDK_CHIP_TCAL9538=y
 # Zephyr subsystems required on core `m33_sm` (chip drivers + peripherals)
 CONFIG_GPIO=y
 CONFIG_I2C=y
+CONFIG_SPI=y
 

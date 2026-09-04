@@ -40,10 +40,46 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from alp_project_loader import _sku_family, resolve_soc_path  # noqa: E402
 from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
+from alp_model.targets import resolve_targets, _npu_backend, _accel_config  # noqa: E402
 from strict_loaders import strict_json_loads, strict_yaml_load  # noqa: E402
 
 # Power/ground nets are allowed as pin signals without a signals[] entry.
 _POWER_NETS = {"VDD", "VDDIO", "VCC", "GND", "VSS", "AVDD", "DVDD"}
+
+
+def _as_list(value) -> list:
+    """Normalise a schema-typed array field to a list, tolerating a
+    non-list value (e.g. an errant scalar/mapping in a malformed YAML/JSON
+    manifest) instead of raising `TypeError` on iteration.
+
+    JSON Schema validation is supposed to reject the shape, but every
+    semantic pass below runs whether or not that pass already ran on this
+    file -- and, for a file with no matching schema at all (a registry
+    whose schema file is absent), it may never run.  Degrade to `[]`
+    rather than let a bare scalar (`npus: 5`, `variants: 5`, ...) abort
+    the whole gate mid-run with a traceback instead of a clean FAIL.
+    """
+    return value if isinstance(value, list) else []
+
+
+def _as_dict(value) -> dict:
+    """Normalise a schema-typed object field to a dict, tolerating a
+    non-dict value instead of raising on `.get()`/`.items()`/`.keys()`.
+    See `_as_list()` for why this runs regardless of schema-pass order.
+    """
+    return value if isinstance(value, dict) else {}
+
+
+def _dict_entries(value) -> list[dict]:
+    """`_as_list(value)` filtered to its dict entries -- the "array of
+    schema-typed objects" shape used throughout this file (`npus[]`,
+    `cores[]`, `variants[]`, `pins[]`, `realizations[]`, ...).  Combines
+    the container-level guard (`_as_list`) with the existing per-entry
+    `isinstance(x, dict)` filter so neither a non-list container nor a
+    non-object entry can reach a bare `.get()`/`[...]` downstream.
+    """
+    return [v for v in _as_list(value) if isinstance(v, dict)]
+
 
 SCHEMA = REPO / "metadata" / "schemas" / "soc-spec-v1.schema.json"
 SOM_SCHEMA = REPO / "metadata" / "schemas" / "som-preset-v1.schema.json"
@@ -63,6 +99,13 @@ BOARD_PRESETS = REPO / "metadata" / "boards"
 LIBRARIES = REPO / "metadata" / "libraries"
 CHIP_SCHEMA = REPO / "metadata" / "schemas" / "chip-v1.schema.json"
 CHIPS = REPO / "metadata" / "chips"
+# The V2N/V2M on-module GD32G553 supervisor pin-wiring source
+# scripts/gen_zephyr_board.py's `_v2n_pinctrl_dtsi()` / `_v2n_defconfig()`
+# read (#655).  There is NO auto-discovery in this script -- an
+# unregistered schema is silently unvalidated -- so this constant pair is
+# load-bearing, not decorative.
+SUPERVISOR_LINKS_SCHEMA = REPO / "metadata" / "schemas" / "supervisor-links-v1.schema.json"
+SUPERVISOR_LINKS_DATA = REPO / "metadata" / "e1m_modules" / "v2n" / "supervisor-links.yaml"
 BLOCK_SCHEMA = REPO / "metadata" / "schemas" / "block-v1.schema.json"
 BLOCKS = REPO / "metadata" / "blocks"
 NPU_OPS_SCHEMA = REPO / "metadata" / "schemas" / "npu-ops-v1.schema.json"
@@ -179,6 +222,7 @@ def _check_silicon_capability_restrictions(som_files) -> list:
 
         msgs: list[str] = []
         soc_caps: dict = {}
+        have_soc_caps = False
         silicon = str(doc.get("silicon", ""))
         soc_path = resolve_soc_path(silicon, SOCS.parent)
         if soc_path is None or not soc_path.is_file():
@@ -186,12 +230,38 @@ def _check_silicon_capability_restrictions(som_files) -> list:
                         f"resolve to a metadata/socs/ spec, cannot validate "
                         f"`unpopulated:` against the silicon capability set")
         else:
-            soc_doc = json.loads(soc_path.read_text(encoding="utf-8"))
-            soc_caps = soc_doc.get("capabilities") or {}
+            # A bare `json.loads` here used to raise `JSONDecodeError`
+            # straight out of the gate on a syntactically invalid SoC
+            # file -- the schema pass over `soc_files` reports THAT
+            # failure separately; this cross-check only needs to
+            # degrade gracefully when it can't read the referenced doc.
+            try:
+                soc_doc = json.loads(soc_path.read_text(encoding="utf-8"))
+            except Exception as e:
+                msgs.append(
+                    f"silicon_capabilities: silicon ref `{silicon}` resolves to "
+                    f"{soc_path.relative_to(REPO).as_posix()} but it fails to "
+                    f"parse ({e}), cannot validate `unpopulated:` against the "
+                    f"silicon capability set")
+            else:
+                # `capabilities:` is schema-typed as an object, but a
+                # malformed SoC doc (or a non-dict top level entirely)
+                # can carry a scalar there -- `soc_caps.get(name)` /
+                # `.items()` below would raise on that. Normalise to `{}`
+                # rather than crash the gate.
+                soc_caps = _as_dict(soc_doc.get("capabilities") if isinstance(soc_doc, dict) else None)
+                have_soc_caps = True
 
-        som_caps = doc.get("capabilities") or {}
+        # Same reasoning for the preset's own `capabilities:` block.
+        som_caps = _as_dict(doc.get("capabilities"))
         for name in unpopulated:
-            if soc_path is not None and soc_path.is_file() and not soc_caps.get(name):
+            if not isinstance(name, str):
+                # A non-string entry (e.g. a nested dict) is already a
+                # schema-shape violation reported by the schema pass; used
+                # unfiltered it would also raise `TypeError: unhashable
+                # type` on `soc_caps.get(name)` / `name in som_caps` below.
+                continue
+            if have_soc_caps and not soc_caps.get(name):
                 offered = ", ".join(sorted(k for k, v in soc_caps.items() if v)) or "<none>"
                 msgs.append(
                     f"silicon_capabilities/unpopulated[{name}]: not a capability the "
@@ -262,6 +332,79 @@ def _check_som_peripheral_instance_uniqueness(som_files) -> list:
         else:
             print(f"OK   {rel}  (soc_peripheral_instances: {len(entries)} "
                   f"unique instance slug(s))")
+    return failures
+
+
+def _check_som_i2c_address_collisions(som_files) -> list:
+    """Reject two on-module I2C devices sharing (bus, address_7bit).
+
+    `on_module.i2c_devices.<bus>.devices[]` records the schematic
+    strap-selected address per on-module device.  Two chips answering the
+    same address on the same bus is a real silicon defect, not an
+    editorial nit: #1163 (TMP112 vs the DEEPX LPDDR buck, both at 0x48)
+    and #1659 (an INA236 vs the TAS2563 broadcast address, also 0x48) are
+    real prior instances (#1845).  JSON Schema has no way to express
+    "unique across sibling array entries by a derived key", so enforce it
+    here.
+
+    An entry does NOT count as a fixed, collision-checkable address when:
+      * `address_7bit` is the literal `"TBD"` -- pending the HW-config
+        writeup, not yet a real value;
+      * `address_7bit` is the literal `"configurable"` -- picked by the
+        chip's own firmware (e.g. the GD32 supervisor MCU), not a
+        hardware-fixed strap two devices could physically contend over;
+      * `assembled: false` -- DNI, physically absent from the bus;
+      * `broadcast_address: true` -- a broadcast/global-call address
+        legitimately shared by design (e.g. TAS2563's 0x48, see
+        metadata/chips/tas2563.yaml). Do not reach for this opt-out to
+        silence a real strap conflict.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in som_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        buses = _as_dict(_as_dict(doc.get("on_module")).get("i2c_devices"))
+
+        msgs: list[str] = []
+        checked = 0
+        for bus_name, bus in sorted(buses.items()):
+            if not isinstance(bus, dict):
+                continue
+            seen: dict[int, list[dict]] = {}
+            for dev in _dict_entries(bus.get("devices")):
+                if dev.get("assembled") is False or dev.get("broadcast_address") is True:
+                    continue
+                addr = dev.get("address_7bit")
+                if not isinstance(addr, str) or not re.fullmatch(r"0x[0-9A-Fa-f]{1,2}", addr):
+                    continue  # "TBD" / "configurable" / malformed -- not a fixed address
+                checked += 1
+                seen.setdefault(int(addr, 16), []).append(dev)
+            for addr_int, devs in sorted(seen.items()):
+                if len(devs) < 2:
+                    continue
+                names = ", ".join(f"{d.get('chip')}/{d.get('role')}" for d in devs)
+                msgs.append(
+                    f"on_module.i2c_devices.{bus_name}: {names} all declare "
+                    f"address_7bit=0x{addr_int:02X} on the same bus -- two "
+                    f"devices cannot share a fixed I2C address (#1845); set "
+                    f"broadcast_address: true only if this is a real "
+                    f"broadcast/global-call address")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}  (i2c_devices: {checked} address(es) checked, "
+                  f"no collisions)")
     return failures
 
 
@@ -578,6 +721,17 @@ def _check_silicon_kconfig() -> list:
         print(f"FAIL {rel}: parse error ({e})")
         return [(rel, [f"invalid JSON parse: {e}"])]
 
+    # `data.get("knownSilicon", [])` below ran unconditionally, before this
+    # guard existed, regardless of whether the schema pass below already
+    # flagged a non-object top level -- a registry parsing to a bare JSON
+    # list (or any other non-dict) reached `data.get(...)` and raised
+    # `AttributeError`, aborting the gate mid-run instead of reporting the
+    # schema FAIL line that already names the real problem.
+    if not isinstance(data, dict):
+        msg = f"top-level value is a {type(data).__name__}, expected an object"
+        print(f"FAIL {rel}: {msg}")
+        return [(rel, [msg])]
+
     msgs: list[str] = []
     if SILICON_KCONFIG_SCHEMA.is_file():
         schema = json.loads(SILICON_KCONFIG_SCHEMA.read_text(encoding="utf-8"))
@@ -586,7 +740,19 @@ def _check_silicon_kconfig() -> list:
             loc = "/".join(str(p) for p in err.absolute_path) or "<root>"
             msgs.append(f"{loc}: {err.message}")
 
-    for ref in data.get("knownSilicon", []):
+    for ref in _as_list(data.get("knownSilicon")):
+        if ref and not isinstance(ref, str):
+            # A TRUTHY non-string entry (e.g. a nested dict/int) is already
+            # a schema-shape violation reported by the schema pass; used
+            # unfiltered it would also raise `AttributeError` inside
+            # `resolve_soc_path()` -> `split_silicon_ref()`'s colon split
+            # on a non-string value. A FALSY entry (JSON `null`, `0`, `""`)
+            # is deliberately let through instead of skipped here --
+            # `split_silicon_ref()`'s own falsy check already handles
+            # every falsy value safely, and a `null` entry is pinned
+            # elsewhere to still report the "not a ref" message rather
+            # than being silently skipped.
+            continue
         soc_path = resolve_soc_path(ref, SOCS.parent)
         if soc_path is None:
             msgs.append(f"knownSilicon[{ref}]: not a <vendor>:<family>:<part> ref")
@@ -601,7 +767,7 @@ def _check_silicon_kconfig() -> list:
             print(f"  · {m}")
         failures.append((rel, msgs))
     else:
-        n = len(data.get("knownSilicon", []))
+        n = len(_as_list(data.get("knownSilicon")))
         print(f"OK   {rel}  (knownSilicon={n}, all resolve to socs/)")
     return failures
 
@@ -618,6 +784,31 @@ def _check_peripheral_kconfig() -> list:
         print(f"FAIL {rel}: parse error ({e})")
         return [(rel, [f"invalid JSON parse: {e}"])]
 
+    # `data.get("peripherals", {})` below is reached only when `msgs` stays
+    # empty, and today it stays safe only BY ACCIDENT: when
+    # PERIPHERAL_KCONFIG_SCHEMA exists, a non-dict `data` fails the object
+    # type check and lands in `msgs`, skipping the `else` branch below --
+    # but that's incidental to the schema pass running at all, not a
+    # guarantee. Make it deliberate (same shape as _check_silicon_kconfig).
+    #
+    # Reachability, stated honestly: on the real CLI path this guard
+    # cannot fire against a malformed ON-DISK registry. Importing this
+    # module already transitively imports `alp_orchestrate`, which calls
+    # `alp_registries.peripheral_kconfig()` at MODULE scope
+    # (`alp_orchestrate/slugs.py`) against the SAME
+    # PERIPHERAL_KCONFIG_REGISTRY file, before `main()` -- and this
+    # function -- ever run. A malformed registry now raises there first
+    # (a `ValueError`, not a crash), aborting `import validate_metadata`
+    # itself. Kept anyway, deliberately, because it IS reachable when
+    # this function runs against a registry path re-pointed after a
+    # successful import -- every regression test for this function does
+    # exactly that -- and as defence in depth should the import-time
+    # guard's shape ever change.
+    if not isinstance(data, dict):
+        msg = f"top-level value is a {type(data).__name__}, expected an object"
+        print(f"FAIL {rel}: {msg}")
+        return [(rel, [msg])]
+
     msgs: list[str] = []
     if PERIPHERAL_KCONFIG_SCHEMA.is_file():
         schema = json.loads(PERIPHERAL_KCONFIG_SCHEMA.read_text(encoding="utf-8"))
@@ -632,8 +823,101 @@ def _check_peripheral_kconfig() -> list:
             print(f"  · {m}")
         failures.append((rel, msgs))
     else:
-        n = len(data.get("peripherals", {}))
+        n = len(_as_dict(data.get("peripherals")))
         print(f"OK   {rel}  (peripherals={n})")
+    return failures
+
+
+def _check_board_i2c_address_collisions(board_files) -> list:
+    """Reject two on-board I2C device instances sharing an address.
+
+    A board preset declares on-board I2C devices two ways, checked
+    separately here because each carries its own bus scope:
+
+      * `i2c_devices[]` -- ONE array per file; every entry sits on the
+        single implicit on-board I2C bus documented in-file (e.g.
+        e1m-evk.yaml: "all on ALP_E1M_I2C0, the sensor bus"). The schema
+        has no per-entry bus field because the board only has the one.
+      * `audio.codecs[]` -- each entry names its own `i2c_bus` explicitly
+        (a board can carry more than one audio-adjacent bus).
+
+    Two chips answering the same address on the same bus is a real
+    silicon defect, not an editorial nit: #1163 (TMP112 vs the DEEPX
+    LPDDR buck, both at 0x48) and #1659 (an INA236 vs the TAS2563
+    broadcast address, also 0x48) are real prior instances (#1845). JSON
+    Schema has no way to express "unique across sibling array entries by
+    a derived key", so enforce it here. An entry with
+    `broadcast_address: true` is skipped: a broadcast/global-call address
+    is legitimately shared by design (e.g. TAS2563's 0x48, see
+    metadata/chips/tas2563.yaml) -- do not reach for that opt-out to
+    silence a real strap conflict.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in board_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+
+        msgs: list[str] = []
+        checked = 0
+
+        # i2c_devices[] -- one implicit on-board bus per file.
+        seen: dict[int, list[dict]] = {}
+        for dev in _dict_entries(doc.get("i2c_devices")):
+            if dev.get("broadcast_address") is True:
+                continue
+            addr = dev.get("address")
+            if not isinstance(addr, str) or not re.fullmatch(r"0x[0-9A-Fa-f]{2}", addr):
+                continue
+            checked += 1
+            seen.setdefault(int(addr, 16), []).append(dev)
+        for addr_int, devs in sorted(seen.items()):
+            if len(devs) < 2:
+                continue
+            names = ", ".join(f"{d.get('part')}/{d.get('designator')}" for d in devs)
+            msgs.append(
+                f"i2c_devices: {names} all declare address=0x{addr_int:02X} "
+                f"on the board's on-board I2C bus -- two devices cannot "
+                f"share a fixed I2C address (#1845); set "
+                f"broadcast_address: true only if this is a real "
+                f"broadcast/global-call address")
+
+        # audio.codecs[] -- each entry names its own bus.
+        seen_by_bus: dict[tuple[str, int], list[dict]] = {}
+        for dev in _dict_entries(_as_dict(doc.get("audio")).get("codecs")):
+            if dev.get("broadcast_address") is True:
+                continue
+            bus = dev.get("i2c_bus")
+            addr = dev.get("i2c_address")
+            if not isinstance(bus, str) or not isinstance(addr, str):
+                continue
+            if not re.fullmatch(r"0x[0-9A-Fa-f]{1,2}", addr):
+                continue
+            checked += 1
+            seen_by_bus.setdefault((bus, int(addr, 16)), []).append(dev)
+        for (bus, addr_int), devs in sorted(seen_by_bus.items()):
+            if len(devs) < 2:
+                continue
+            names = ", ".join(f"{d.get('chip')}/{d.get('designator')}" for d in devs)
+            msgs.append(
+                f"audio.codecs: {names} all declare i2c_address=0x{addr_int:02X} "
+                f"on {bus} -- two devices cannot share a fixed I2C address "
+                f"(#1845); set broadcast_address: true only if this is a "
+                f"real broadcast/global-call address")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}  (i2c address(es): {checked} checked, no collisions)")
     return failures
 
 
@@ -742,24 +1026,40 @@ def _check_soc_npu_pairing(soc_files) -> list:
             doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
-        # `npus[]`/`cores[]` entries are schema-typed objects, but the
-        # schema pass that would reject a malformed one is not guaranteed to
-        # have run first -- filter to dicts rather than let a non-object
-        # raise `AttributeError` here and abort the whole gate mid-run,
-        # hiding the schema FAIL line that already explains the real
-        # problem (same shape as `_check_soc_vela_memory_profile`).
-        npus = [n for n in (doc.get("npus") or []) if isinstance(n, dict)]
+        if not isinstance(doc, dict):
+            continue  # non-object top level; schema pass already flags it
+        # `npus[]`/`cores[]` may themselves be a non-list scalar, and their
+        # entries are schema-typed objects -- but the schema pass that
+        # would reject either malformation is not guaranteed to have run
+        # first. `_dict_entries()` filters to dicts rather than let a
+        # non-list container or a non-object entry raise `AttributeError`/
+        # `TypeError` here and abort the whole gate mid-run, hiding the
+        # schema FAIL line that already explains the real problem (same
+        # shape as `_check_chip_physical`).
+        npus = _dict_entries(doc.get("npus"))
         if not npus:
             continue
         rel = path.relative_to(REPO).as_posix()
-        core_ids = {c.get("id") for c in (doc.get("cores") or [])
-                    if isinstance(c, dict) and c.get("id")}
+        # `c.get("id")` is schema-typed as a string, but a malformed SoC
+        # doc can carry any value there -- an unfiltered set comprehension
+        # raises `TypeError: unhashable type` building this set from a
+        # dict/list `id`, and a mixed str/int `id` set raises on the
+        # `sorted()` call below. Filter to strings, same idiom as the
+        # `unpopulated` guard in `_check_silicon_capability_restrictions()`.
+        core_ids = {
+            c.get("id") for c in _dict_entries(doc.get("cores"))
+            if isinstance(c.get("id"), str)
+        }
         msgs: list[str] = []
 
         # (1) referential integrity of every declared paired_core.
         for i, n in enumerate(npus):
             pc = n.get("paired_core")
-            if pc is not None and pc not in core_ids:
+            # `pc not in core_ids` alone raises `TypeError: unhashable
+            # type` when `pc` is a dict/list -- short-circuit on a
+            # non-string `pc` first so a malformed value is reported as a
+            # mismatch instead of aborting the gate.
+            if pc is not None and (not isinstance(pc, str) or pc not in core_ids):
                 msgs.append(
                     f"npus[{i}] ({n.get('type')}/{n.get('subtype')}): "
                     f"paired_core={pc!r} is not a cores[].id "
@@ -770,7 +1070,15 @@ def _check_soc_npu_pairing(soc_files) -> list:
         for n in npus:
             by_type.setdefault(str(n.get("type", "")), []).append(n)
         for ntype, insts in by_type.items():
-            macs = {n.get("mac_per_cycle") for n in insts if n.get("mac_per_cycle")}
+            # `mac_per_cycle` is schema-typed as an integer, but a
+            # malformed doc can carry a dict/list there (unhashable --
+            # `TypeError` building this set) or a str alongside a real
+            # int (mixed-type `sorted()` below raises too). Filter to
+            # ints, same idiom as `core_ids` above.
+            macs = {
+                n.get("mac_per_cycle") for n in insts
+                if isinstance(n.get("mac_per_cycle"), int)
+            }
             if len(macs) > 1:
                 unpaired = [n for n in insts if not n.get("paired_core")]
                 if unpaired:
@@ -971,18 +1279,31 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
             doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
-        # `variants[]`/`cores[]` entries are schema-typed objects, but the
-        # schema pass that would reject a malformed one is not guaranteed to
-        # have run first -- filter to dicts rather than let a non-object
-        # raise `AttributeError`/`TypeError` here and abort the whole gate
-        # mid-run, hiding the schema FAIL line that already explains the
-        # real problem (same shape as `_check_soc_vela_memory_profile`).
-        variants = [v for v in (doc.get("variants") or []) if isinstance(v, dict)]
+        if not isinstance(doc, dict):
+            continue  # non-object top level; schema pass already flags it
+        # `variants[]`/`cores[]` may themselves be a non-list scalar, and
+        # their entries are schema-typed objects -- but the schema pass
+        # that would reject either malformation is not guaranteed to have
+        # run first. `_dict_entries()` filters to dicts rather than let a
+        # non-list container or a non-object entry raise `AttributeError`/
+        # `TypeError` here and abort the whole gate mid-run, hiding the
+        # schema FAIL line that already explains the real problem (same
+        # shape as `_check_chip_physical`).
+        variants = _dict_entries(doc.get("variants"))
         if not variants:
             continue
         rel = path.relative_to(REPO).as_posix()
-        cores = [c for c in (doc.get("cores") or []) if isinstance(c, dict)]
-        core_ids = {c.get("id") for c in cores if c.get("id")}
+        # `c.get("id")` is schema-typed as a string, but a malformed SoC
+        # doc can carry any value there -- an unfiltered set comprehension
+        # raises `TypeError: unhashable type` building this set from a
+        # dict/list `id`, and a mixed str/int `id` set raises on the
+        # `sorted()` calls below (`core_id!r ... sorted(core_ids)` and the
+        # `expect_dpidr` uncovered-core sort). Filter to strings, same
+        # idiom as `_check_soc_npu_pairing()`'s `core_ids`.
+        core_ids = {
+            c.get("id") for c in _dict_entries(doc.get("cores"))
+            if isinstance(c.get("id"), str)
+        }
         # Cortex-M cores only for the `expect_dpidr` pairing rule below: the
         # DPIDR preflight guards the Zephyr-on-M J-Link flash path, and
         # `debug.jlink_device` is legitimately sparse across `cores[]` --
@@ -991,14 +1312,16 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
         # being J-Link flashed. Demanding coverage of every core would fail
         # the very variant this rule exists to protect.
         m_core_ids = {
-            c["id"] for c in cores
-            if c.get("id") and str(c.get("type") or "").startswith("cortex-m")
+            c.get("id") for c in _dict_entries(doc.get("cores"))
+            if isinstance(c.get("id"), str) and str(c.get("type") or "").startswith("cortex-m")
         }
         msgs: list[str] = []
 
         for i, v in enumerate(variants):
-            debug = v.get("debug") or {}
+            debug = v.get("debug")
+            debug = debug if isinstance(debug, dict) else {}
             jlink_device = debug.get("jlink_device") or {}
+            jlink_device = jlink_device if isinstance(jlink_device, dict) else {}
             for core_id in jlink_device:
                 if core_id not in core_ids:
                     msgs.append(
@@ -1053,21 +1376,27 @@ def _check_soc_jlink_flash_device_declared(soc_files) -> list:
             doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue  # non-object top level; schema pass already flags it
         if doc.get("vendor") != "Alif Semiconductor" or doc.get("family") != "Ensemble":
             continue
-        # `variants[]` entries are schema-typed objects, but the schema pass
-        # that would reject a malformed one is not guaranteed to have run
-        # first -- filter to dicts rather than let a non-object raise
-        # `AttributeError` here (same shape as
-        # `_check_soc_vela_memory_profile`).
-        variants = [v for v in (doc.get("variants") or []) if isinstance(v, dict)]
+        # `variants[]` may itself be a non-list scalar, and its entries are
+        # schema-typed objects -- but the schema pass that would reject
+        # either malformation is not guaranteed to have run first.
+        # `_dict_entries()` filters to dicts rather than let a non-list
+        # container or a non-object entry raise `AttributeError`/`TypeError`
+        # here and abort the whole gate mid-run, hiding the schema FAIL line
+        # that already explains the real problem (same shape as
+        # `_check_chip_physical`).
+        variants = _dict_entries(doc.get("variants"))
         if not variants:
             continue
         rel = path.relative_to(REPO).as_posix()
         msgs: list[str] = []
 
         for i, v in enumerate(variants):
-            debug = v.get("debug") or {}
+            debug = v.get("debug")
+            debug = debug if isinstance(debug, dict) else {}
             if "jlink_flash_device" not in debug:
                 msgs.append(
                     f"variants[{i}] ({v.get('order_code')}): "
@@ -1115,19 +1444,30 @@ def _check_soc_no_wlcsp_variants(soc_files) -> list:
             doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue  # non-object top level; schema pass already flags it
         if doc.get("vendor") != "Alif Semiconductor" or doc.get("family") != "Ensemble":
             continue
         rel = path.relative_to(REPO).as_posix()
         msgs: list[str] = []
 
-        # `variants[]` entries are schema-typed objects, but the schema pass
-        # that would reject a malformed one is not guaranteed to have run
-        # first -- filter to dicts rather than let a non-object raise
-        # `AttributeError` here (same shape as
-        # `_check_soc_vela_memory_profile`).
-        variants = [v for v in (doc.get("variants") or []) if isinstance(v, dict)]
+        # `variants[]` may itself be a non-list scalar, and its entries are
+        # schema-typed objects -- but the schema pass that would reject
+        # either malformation is not guaranteed to have run first.
+        # `_dict_entries()` filters to dicts rather than let a non-list
+        # container or a non-object entry raise `AttributeError`/`TypeError`
+        # here and abort the whole gate mid-run, hiding the schema FAIL line
+        # that already explains the real problem (same shape as
+        # `_check_chip_physical`).
+        variants = _dict_entries(doc.get("variants"))
         for i, v in enumerate(variants):
-            package = v.get("package") or ""
+            # `package` is schema-typed as a string, but a malformed
+            # document can carry a non-string truthy value there (e.g. the
+            # bare int `208`) -- `package.upper()` would raise
+            # `AttributeError` on that. Normalise to a string first, same
+            # shape as every other scalar guard in this file.
+            package = v.get("package")
+            package = package if isinstance(package, str) else ""
             if "WLCSP" in package.upper():
                 msgs.append(
                     f"variants[{i}] ({v.get('order_code')}): package "
@@ -1169,25 +1509,231 @@ def _check_chip_physical(chip_files) -> list:
         phys = doc.get("physical")
         if not phys:
             continue
-        sig_names = {s["name"] for s in doc.get("signals", []) if isinstance(s, dict) and "name" in s}
+        if not isinstance(phys, dict):
+            # `physical` is schema-typed as an object, but the schema pass
+            # that would reject a non-object value (e.g. a bare string,
+            # which passes the `if not phys` truthiness guard above when
+            # non-empty) is not guaranteed to have run first -- skip rather
+            # than let `phys.get(...)` raise `AttributeError` here and abort
+            # the whole gate mid-run, hiding the schema FAIL line that
+            # already explains the real problem (same shape as
+            # `_check_board_targets`'s `topology` guard below).
+            continue
+        # `signals[]`/`pins[]`/`passives[]` may themselves be a non-list
+        # scalar, and their entries are schema-typed objects -- but the
+        # schema pass that would reject either malformation is not
+        # guaranteed to have run first. `_dict_entries()` filters to dicts
+        # rather than let a non-list container or a non-object entry raise
+        # `AttributeError`/`TypeError` on `.get()` here (same shape as
+        # `_check_soc_npu_pairing`).
+        # `s.get("name")` is schema-typed as a string, but a malformed chip
+        # manifest can carry a dict/list there -- an unfiltered set
+        # comprehension raises `TypeError: unhashable type` building this
+        # set. Filter to strings, same idiom as `core_ids` in
+        # `_check_soc_npu_pairing()`.
+        sig_names = {
+            s["name"] for s in _dict_entries(doc.get("signals"))
+            if isinstance(s.get("name"), str)
+        }
         msgs: list = []
         seen_pads: dict = {}
-        for pin in phys.get("pins", []):
+        for pin in _dict_entries(phys.get("pins")):
             sig = pin.get("signal"); pad = pin.get("pad")
-            if sig not in sig_names and sig not in _POWER_NETS:
+            # `sig`/`pad` are schema-typed strings, but a malformed
+            # manifest can carry a dict/list there -- `sig not in
+            # sig_names` / `pad in seen_pads` raise `TypeError: unhashable
+            # type` unfiltered. Scope the skip to the actual hazard
+            # (dict/list is unhashable) rather than a blanket
+            # `not isinstance(..., str)`: every other schema-shape
+            # violation (int, bool, YAML `null`) IS hashable and safe to
+            # membership-test, and a blanket str-only filter would
+            # silently drop the "not in signals[]" / "used more than
+            # once" diagnostics for those values instead of reporting
+            # them.
+            if isinstance(sig, (dict, list)) or (sig not in sig_names and sig not in _POWER_NETS):
                 msgs.append(f"physical.pins pad {pad}: signal '{sig}' not in signals[] or power nets")
-            if pad in seen_pads:
-                msgs.append(f"physical.pins: pad '{pad}' used more than once")
-            seen_pads[pad] = True
-        for passive in phys.get("passives", []):
+            if not isinstance(pad, (dict, list)):
+                if pad in seen_pads:
+                    msgs.append(f"physical.pins: pad '{pad}' used more than once")
+                seen_pads[pad] = True
+        for passive in _dict_entries(phys.get("passives")):
             net = passive.get("net")
-            if net not in sig_names and net not in _POWER_NETS:
+            # Same reasoning as `sig` above -- guard the unhashable case
+            # before the set-membership tests.
+            if isinstance(net, (dict, list)) or (net not in sig_names and net not in _POWER_NETS):
                 msgs.append(f"physical.passives: net '{net}' not in signals[] or power nets")
         if msgs:
             failures.append((rel, msgs))
             print(f"FAIL {rel}")
             for m in msgs:
                 print(f"  · {m}")
+    return failures
+
+
+def _check_supervisor_links_cross_refs(supervisor_links_files) -> list:
+    """Cross-check metadata/e1m_modules/v2n/supervisor-links.yaml against
+    the pad-ownership ground truth in metadata/pinmux/v2n.yaml, and the
+    GD32 I2C address against metadata/chips/gd32g553.yaml (#655).
+
+    JSON Schema validates each link's shape but has no way to express a
+    cross-file reference: every (silicon_peripheral, silicon_pad) pair
+    this file claims for the GD32 supervisor bridge -- every pin row plus
+    the `gd32_spi.gpio_chip_select` entry -- must resolve to EXACTLY one
+    `owner: "renesas"` row in metadata/pinmux/v2n.yaml.  Zero matches or
+    more than one is a hard error naming the offending pair.  Where that
+    matched row itself carries a `core:` key, the value MUST be "m33" --
+    but a matched row with NO `core:` key is not an error: the console's
+    UART0_TXD0/UART0_RXD0 rows legitimately carry no `core:` attribution
+    in metadata/pinmux/v2n.yaml (see
+    metadata/e1m_modules/v2n/core-ownership.yaml's own note on why
+    absence is never treated as "a55 by elimination"), so requiring
+    `core: "m33"` unconditionally would fail the console link.
+
+    Also cross-checks `brd_i2c.peer_address_7bit` against
+    metadata/chips/gd32g553.yaml `i2c.default_address_7bit` -- the value
+    is recorded in supervisor-links.yaml to be CROSS-CHECKED, not as an
+    independent authority.
+
+    Also cross-checks every pin row's `pfc_port`/`pfc_pin` against its own
+    `silicon_pad`: the two restate the same fact (`silicon_pad: "P76"`
+    implies `pfc_port: "PORT_07"`, `pfc_pin: 6`) and nothing else in this
+    file catches a typo'd pairing -- a mismatched `pfc_port`/`pfc_pin`
+    would emit a wrong `RZV_PINMUX(...)` to real silicon even though the
+    `silicon_pad` alone still resolves cleanly against
+    metadata/pinmux/v2n.yaml above. Only pads of the `P<digit><digit>`
+    shape are derivable this way; a pad that doesn't match is a hard
+    error too (naming the pad), never a silent skip, so a future non-`Pnn`
+    pad shape forces a deliberate decision here instead of quietly losing
+    the check.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    if not supervisor_links_files:
+        return failures
+    path = supervisor_links_files[0]
+    rel = path.relative_to(REPO).as_posix()
+    try:
+        doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+    except Exception:
+        return failures  # parse errors already reported by the schema pass
+    if not isinstance(doc, dict):
+        return failures
+    links = _as_dict(doc.get("supervisor_links"))
+    if not links:
+        return failures
+
+    msgs: list[str] = []
+
+    pinmux_path = REPO / "metadata" / "pinmux" / "v2n.yaml"
+    pads_by_pair: dict[tuple[str, str], list[dict]] = {}
+    if not pinmux_path.is_file():
+        msgs.append(
+            f"no {pinmux_path.relative_to(REPO).as_posix()} -- cannot "
+            f"cross-check pad ownership")
+    else:
+        try:
+            pm_doc = strict_yaml_load(
+                pinmux_path.read_text(encoding="utf-8"), source=pinmux_path)
+        except Exception as e:
+            msgs.append(
+                f"cannot cross-check against "
+                f"{pinmux_path.relative_to(REPO).as_posix()}: parse error ({e})")
+            pm_doc = None
+        if isinstance(pm_doc, dict):
+            for row in _dict_entries(pm_doc.get("pads")):
+                sp, pad = row.get("silicon_peripheral"), row.get("silicon_pad")
+                if isinstance(sp, str) and isinstance(pad, str):
+                    pads_by_pair.setdefault((sp, pad), []).append(row)
+
+    def _check_pair(sp: object, pad: object, where: str) -> None:
+        if not isinstance(sp, str) or not isinstance(pad, str):
+            return  # already a schema-shape violation reported elsewhere
+        matches = [r for r in pads_by_pair.get((sp, pad), [])
+                   if r.get("owner") == "renesas"]
+        if len(matches) != 1:
+            msgs.append(
+                f"{where}: (silicon_peripheral={sp!r}, silicon_pad={pad!r}) "
+                f"matches {len(matches)} owner=\"renesas\" row(s) in "
+                f"metadata/pinmux/v2n.yaml (need exactly 1)")
+            return
+        core = matches[0].get("core")
+        if core is not None and core != "m33":
+            msgs.append(
+                f"{where}: (silicon_peripheral={sp!r}, silicon_pad={pad!r}) "
+                f"resolves to a metadata/pinmux/v2n.yaml row with "
+                f"core={core!r}, expected \"m33\"")
+
+    _PAD_SHAPE = re.compile(r"^P([0-9])([0-9])$")
+
+    def _check_pad_derivation(pad: object, pfc_port: object, pfc_pin: object,
+                               where: str) -> None:
+        if not isinstance(pad, str):
+            return  # already a schema-shape violation reported elsewhere
+        m = _PAD_SHAPE.match(pad)
+        if not m:
+            msgs.append(
+                f"{where}: silicon_pad={pad!r} does not match the "
+                f"P<port-digit><pin-digit> shape this derivation check "
+                f"understands -- add explicit handling for this pad shape "
+                f"rather than silently skipping the pfc_port/pfc_pin check")
+            return
+        expected_port = f"PORT_0{m.group(1)}"
+        expected_pin = int(m.group(2))
+        if pfc_port != expected_port or pfc_pin != expected_pin:
+            msgs.append(
+                f"{where}: silicon_pad={pad!r} implies "
+                f"pfc_port={expected_port!r}, pfc_pin={expected_pin} but "
+                f"this row declares pfc_port={pfc_port!r}, "
+                f"pfc_pin={pfc_pin!r}")
+
+    for link_name, link in sorted(links.items()):
+        if not isinstance(link, dict):
+            continue
+        for pin in _dict_entries(link.get("pins")):
+            sp, pad = pin.get("silicon_peripheral"), pin.get("silicon_pad")
+            _check_pair(sp, pad, f"supervisor_links.{link_name}.pins")
+            _check_pad_derivation(pad, pin.get("pfc_port"), pin.get("pfc_pin"),
+                                   f"supervisor_links.{link_name}.pins")
+        gcs = link.get("gpio_chip_select")
+        if isinstance(gcs, dict):
+            _check_pair(gcs.get("silicon_peripheral"), gcs.get("silicon_pad"),
+                        f"supervisor_links.{link_name}.gpio_chip_select")
+
+    brd_i2c = links.get("brd_i2c")
+    if isinstance(brd_i2c, dict) and "peer_address_7bit" in brd_i2c:
+        chip_path = REPO / "metadata" / "chips" / "gd32g553.yaml"
+        if not chip_path.is_file():
+            msgs.append(
+                f"no {chip_path.relative_to(REPO).as_posix()} -- cannot "
+                f"cross-check brd_i2c.peer_address_7bit")
+        else:
+            try:
+                chip_doc = strict_yaml_load(
+                    chip_path.read_text(encoding="utf-8"), source=chip_path)
+            except Exception as e:
+                msgs.append(
+                    f"cannot cross-check brd_i2c.peer_address_7bit against "
+                    f"{chip_path.relative_to(REPO).as_posix()}: parse error ({e})")
+                chip_doc = None
+            if isinstance(chip_doc, dict):
+                chip_addr = _as_dict(chip_doc.get("i2c")).get("default_address_7bit")
+                link_addr = brd_i2c.get("peer_address_7bit")
+                if chip_addr != link_addr:
+                    msgs.append(
+                        f"supervisor_links.brd_i2c.peer_address_7bit="
+                        f"{link_addr!r} does not match "
+                        f"{chip_path.relative_to(REPO).as_posix()} "
+                        f"i2c.default_address_7bit={chip_addr!r}")
+
+    if msgs:
+        print(f"FAIL {rel}")
+        for m in msgs:
+            print(f"  · {m}")
+        failures.append((rel, msgs))
+    else:
+        print(f"OK   {rel}  (supervisor_links cross-checked against "
+              f"metadata/pinmux/v2n.yaml + metadata/chips/gd32g553.yaml)")
     return failures
 
 
@@ -1213,18 +1759,42 @@ def _check_block_realizations(block_files, chip_files) -> list:
             continue  # parse errors already reported by the schema pass
         if not isinstance(doc, dict):
             continue
-        iface = {e["signal"] for e in doc.get("interface", []) if isinstance(e, dict) and "signal" in e}
+        # `e.get("signal")` is schema-typed as a string, but a malformed
+        # block manifest can carry a dict/list there -- an unfiltered set
+        # comprehension raises `TypeError: unhashable type` building this
+        # set. Filter to strings, same idiom as `sig_names` in
+        # `_check_chip_physical()`.
+        iface = {
+            e["signal"] for e in _dict_entries(doc.get("interface"))
+            if isinstance(e.get("signal"), str)
+        }
         msgs: list = []
-        for r in doc.get("realizations", []):
-            for part in r.get("parts", []):
-                if part.get("chip") not in chip_ids:
-                    msgs.append(f"realization '{r.get('id')}': part chip '{part.get('chip')}' has no metadata/chips manifest")
-                for _pin, sig in (part.get("maps") or {}).items():
-                    if sig not in iface:
+        # `realizations[]`/`parts[]`/`passives[]` may themselves be a
+        # non-list scalar, and their entries are schema-typed objects -- but
+        # the schema pass that would reject either malformation is not
+        # guaranteed to have run first. `_dict_entries()` filters to dicts
+        # rather than let a non-list container or a non-object entry raise
+        # `AttributeError`/`TypeError` on `.get()` here (same shape as
+        # `_check_soc_npu_pairing`).
+        for r in _dict_entries(doc.get("realizations")):
+            for part in _dict_entries(r.get("parts")):
+                # `chip` is schema-typed as a string, but a malformed
+                # manifest can carry a dict/list there -- `not in
+                # chip_ids` raises `TypeError: unhashable type`
+                # unfiltered. Guard before the membership test.
+                chip = part.get("chip")
+                if not isinstance(chip, str) or chip not in chip_ids:
+                    msgs.append(f"realization '{r.get('id')}': part chip '{chip}' has no metadata/chips manifest")
+                maps = _as_dict(part.get("maps"))
+                for _pin, sig in maps.items():
+                    # Same reasoning -- a `maps` value can be any YAML
+                    # type; `sig not in iface` raises unfiltered.
+                    if not isinstance(sig, str) or sig not in iface:
                         msgs.append(f"realization '{r.get('id')}': maps target '{sig}' not in interface[]")
-            for passive in r.get("passives", []):
+            for passive in _dict_entries(r.get("passives")):
                 net = passive.get("net")
-                if net not in iface and net not in _POWER_NETS:
+                # Same reasoning as `chip`/`sig` above.
+                if not isinstance(net, str) or (net not in iface and net not in _POWER_NETS):
                     msgs.append(f"realization '{r.get('id')}': passives net '{net}' not in interface[] or power nets")
         if msgs:
             failures.append((rel, msgs))
@@ -1368,885 +1938,6 @@ def _check_npu_ops_semantics(npu_ops_files) -> list:
     return failures
 
 
-def _npu_backend(npu_type: str, subtype: str) -> str | None:
-    """Map a SoC `npus[].type`/`.subtype` pair onto an inference backend id.
-
-    Deliberately the SAME mapping as `tan.model.targets._npu_backend`, because
-    both sides must agree on what `metadata/socs/**/*.json` means: alp-sdk
-    validates that a perf point names a target the SKU has, and tan resolves
-    the targets it compiles for.  Neither repo can import the other, so the
-    defence against drift is that both read the SAME source of truth (the
-    SoC's own `npus[]`) rather than a hand-kept backend<->SKU table, and that
-    the derived set is pinned in `tests/scripts/test_model_perf_metadata.py`
-    against the values `resolve_targets()` itself produces.
-
-    Returns None for an NPU no backend claims -- an unknown accelerator is
-    not this function's to guess at.
-    """
-    if npu_type.startswith("ethos-u"):
-        return "ethos_u"
-    if "drp" in npu_type or "drp" in subtype:      # renesas ("drp-ai" / "ai-mac+drp")
-        return "drpai"
-    if npu_type.startswith("dx") or "deepx" in npu_type:
-        return "deepx_dxm1"
-    return None
-
-
-def _soc_perf_targets(soc: dict) -> dict[tuple[str, str], str | None]:
-    """`(backend, accel_config)` -> declared `paired_core`, from one SoC's `npus[]`.
-
-    `accel_config` is vela's `--accelerator-config` (`<type>-<mac_per_cycle>`)
-    for Ethos-U and the empty string for every other backend, which has no
-    such knob.  The KEY set mirrors `tan.model.targets._soc_targets`.
-
-    The value is the `npus[].paired_core` the spec declares, or None when it
-    declares none -- and None is a real answer, not a placeholder.  The Alif E8
-    pairs each Ethos-U55 to a specific M55 (`m55_hp` / `m55_he`) and pairs the
-    Ethos-U85 to nothing, so a caller may only enforce a pairing where one is
-    written down.  Two `npus[]` entries that collapse onto the same
-    `(backend, accel_config)` with DIFFERENT `paired_core` values make the
-    pairing ambiguous, and ambiguity resolves to None: the metadata does not
-    know, so nothing downstream may act as if it does.
-    """
-    out: dict[tuple[str, str], str | None] = {}
-    for npu in soc.get("npus") or []:
-        if not isinstance(npu, dict):
-            continue
-        npu_type = str(npu.get("type", ""))
-        backend = _npu_backend(npu_type, str(npu.get("subtype", "")))
-        if backend is None:
-            continue
-        accel = (f"{npu_type}-{npu['mac_per_cycle']}"
-                 if backend == "ethos_u" and npu.get("mac_per_cycle") else "")
-        paired = npu.get("paired_core")
-        paired = paired if isinstance(paired, str) and paired else None
-        key = (backend, accel)
-        if key in out and out[key] != paired:
-            out[key] = None
-        else:
-            out[key] = paired
-    return out
-
-
-def _load_som_preset(sku: str, metadata_root: Path) -> dict:
-    """The SoM preset for a SKU, or `LookupError`.
-
-    FAILS CLOSED for every caller below: they all state "this SKU does not
-    have that <thing>" as a hard failure, so an empty or partial answer built
-    from a file we could not read would reject a legitimate point.
-    """
-    preset_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
-    if not preset_path.is_file():
-        raise LookupError(f"no SoM preset at {preset_path.name}")
-    try:
-        preset = strict_yaml_load(preset_path.read_text(encoding="utf-8"),
-                                  source=preset_path)
-    except Exception as exc:                                # pragma: no cover
-        raise LookupError(f"{preset_path.name} does not parse: {exc}") from exc
-    if not isinstance(preset, dict):                        # pragma: no cover
-        raise LookupError(f"{preset_path.name} does not parse to a mapping")
-    return preset
-
-
-def _resolve_perf_cores(sku: str, metadata_root: Path) -> set[str]:
-    """Every core id a SoM SKU declares, i.e. the keys of its `topology:` map.
-
-    `E1M-AEN801` -> {`a32_cluster`, `m55_hp`, `m55_he`};
-    `E1M-V2N101` -> {`a55_cluster`, `m33_sm`}.  A perf point names the core
-    that drove the inference because the core changes the number outright --
-    an A-cluster and an M-class CPU inference of the same model are not the
-    same measurement, and without the core every `backend: "cpu"` point on one
-    SKU would resolve to a single filename.
-
-    Raises `LookupError` on an unresolvable SKU, for the same fail-closed
-    reason as `_resolve_perf_targets`.
-    """
-    topology = _load_som_preset(sku, metadata_root).get("topology")
-    if not isinstance(topology, dict) or not topology:
-        raise LookupError(f"{sku}.yaml declares no `topology:` cores")
-    return set(topology)
-
-
-def _resolve_host_soc(sku: str, metadata_root: Path) -> dict:
-    """The SKU's HOST SoC spec -- the `silicon:` ref its preset names -- parsed.
-
-    Factored out of `_perf_target_map` so `_soc_npu_toolchain_names` can share
-    the same preset -> `silicon:` -> SoC-spec resolution instead of a second,
-    hand-copied walk of the same three files that could silently drift from
-    this one.
-
-    Raises `LookupError` when the SKU's preset or its `silicon:` SoC spec
-    cannot be resolved.  FAILS CLOSED, never partial.
-    """
-    preset = _load_som_preset(sku, metadata_root)
-    preset_name = f"{sku}.yaml"
-
-    silicon = str(preset.get("silicon", ""))
-    soc_path = resolve_soc_path(silicon, metadata_root)
-    if soc_path is None:
-        raise LookupError(f"malformed `silicon:` ref {silicon!r} in {preset_name}")
-    if not soc_path.is_file():
-        raise LookupError(f"no SoC spec for {silicon} at {soc_path}")
-    return strict_json_loads(soc_path.read_text(encoding="utf-8"), source=soc_path)
-
-
-def _soc_npu_toolchain_names(sku: str, metadata_root: Path) -> set[str]:
-    """The toolchain names the SKU's HOST SoC spec's `npu_toolchain` block
-    declares -- today always a subset of `{"vela"}`, since `npu_toolchain` is
-    only ever written for an Ethos-U part (`_check_soc_vela_memory_profile`
-    enforces that pairing on the SoC spec itself).  Empty when the SoC
-    declares no `npu_toolchain` block at all, OR when it declares one that is
-    not a mapping (guarded rather than left to raise `AttributeError` here --
-    the same shape as `_check_soc_vela_memory_profile`'s `vela` lookup, and
-    the schema pass that would reject the malformed shape runs separately).
-
-    Raises `LookupError` for the same reason `_resolve_host_soc` does.
-    """
-    host = _resolve_host_soc(sku, metadata_root)
-    npu_toolchain = host.get("npu_toolchain")
-    npu_toolchain = npu_toolchain if isinstance(npu_toolchain, dict) else {}
-    return set(npu_toolchain.keys())
-
-
-def _soc_npu_toolchain_profile(sku: str, metadata_root: Path, name: str) -> dict | None:
-    """The SKU's HOST SoC spec's declared `npu_toolchain.<name>` PROFILE dict
-    (e.g. `npu_toolchain.vela`), or `None` when the SoC declares no block for
-    that name at all.  Sibling of `_soc_npu_toolchain_names`, which returns
-    only the declared toolchain NAMES; this returns the profile itself so a
-    caller can check a measured toolchain field against the part's own
-    declared value, not merely against whether the name is one this SoC
-    recognises.
-
-    Guarded rather than left to raise `AttributeError` on a malformed
-    (non-mapping) `npu_toolchain` or profile entry -- the schema pass that
-    would reject that shape runs separately and is not guaranteed to have run
-    first (same shape as `_soc_npu_toolchain_names`).
-
-    Raises `LookupError` for the same reason `_resolve_host_soc` does.
-    """
-    host = _resolve_host_soc(sku, metadata_root)
-    npu_toolchain = host.get("npu_toolchain")
-    npu_toolchain = npu_toolchain if isinstance(npu_toolchain, dict) else {}
-    profile = npu_toolchain.get(name)
-    return profile if isinstance(profile, dict) else None
-
-
-def _perf_target_map(sku: str, metadata_root: Path) -> dict[tuple[str, str], str | None]:
-    """`(backend, accel_config)` -> declared `paired_core`, for one SoM SKU.
-
-    Host SoC `npus[]` + every OTHER SoC spec whose `variants[].alp_module_skus`
-    lists this SKU (an on-module discrete accelerator -- the DEEPX DX-M1 on the
-    V2M SKUs) + `("cpu", "")`, which is always present and pairs to no
-    particular core.  Same derivation, off the same files, as
-    `tan.model.targets.resolve_targets`.
-
-    Raises `LookupError` when the SKU's preset or its `silicon:` SoC spec
-    cannot be resolved.  FAILS CLOSED, never partial.
-    """
-    host = _resolve_host_soc(sku, metadata_root)
-    targets = _soc_perf_targets(host)
-    host_ref = host.get("ref")
-    for path in sorted((metadata_root / "socs").glob("**/*.json")):
-        soc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
-        ref = soc.get("ref")
-        if not ref or ref == host_ref:
-            continue
-        # `variants[]` entries are schema-typed objects, but the schema pass
-        # that would reject a malformed one is not guaranteed to have run
-        # first -- filter to dicts rather than let a non-object raise
-        # `AttributeError` here (same shape as
-        # `_check_soc_vela_memory_profile`).
-        skus = {s for v in (soc.get("variants") or []) if isinstance(v, dict)
-                for s in (v.get("alp_module_skus") or [])}
-        if sku in skus:
-            for key, paired in _soc_perf_targets(soc).items():
-                if key in targets and targets[key] != paired:
-                    targets[key] = None
-                else:
-                    targets[key] = paired
-    targets.setdefault(("cpu", ""), None)
-    return targets
-
-
-def _resolve_perf_targets(sku: str, metadata_root: Path) -> set[tuple[str, str]]:
-    """Every `(backend, accel_config)` a SoM SKU actually resolves.
-
-    The key set of `_perf_target_map`; see it for the derivation and the
-    fail-closed contract.
-    """
-    return set(_perf_target_map(sku, metadata_root))
-
-
-#: The stores a `<store>:<path>` citation may legitimately name.  This
-#: allowlists the STORE SEGMENT itself, not the character class in front of
-#: the colon: the previous expression (`^[A-Za-z0-9][A-Za-z0-9._+-]*:\S`)
-#: accepted ANY colon-bearing string as a citation, so `todo:findit`,
-#: `x:y`, `ask:Caner` and `note:see the log` all routed down the citation
-#: branch and skipped reachability + the sha256/size_bytes re-hash a
-#: repo-relative path gets -- the exact `see the log` / `ask Caner` / `n/a`
-#: shapes `metadata/schemas/model-perf-v1.schema.json`'s `capture.reference`
-#: names as what the citation allowlist replaced a denylist to keep out,
-#: still let through the moment a colon follows them.  Defined before
-#: `_LOCAL_PATH_REFERENCE` because that pattern's drive-letter alternative
-#: needs it too.  The bare names, not the full citation prefixes: those are
-#: `_STORE_CITATION_PREFIXES` below, derived from this single list so the
-#: two never carry a different store count.
-_STORE_NAMES = ("alp-sdk-internal", "https", "http")
-
-#: The separator that follows each `_STORE_NAMES` entry in a legitimate
-#: citation.  `alp-sdk-internal` is not URL-shaped, so its citation is
-#: `<name>:<path>` -- a bare colon.  `https`/`http` ARE URL-shaped, so
-#: requiring their own scheme separator (`://`) is what refuses
-#: `https:findit` and `http:x`: a colon with no authority slashes names an
-#: allowlisted SCHEME but is not a URL (the schema's own `capture.reference`
-#: example is `https://example.org/...`, never `https:...`), yet it used to
-#: satisfy the store-segment allowlist all the same, taking `model.source`'s
-#: reachability + sha256/size_bytes re-hash off for a citation that
-#: resolves for nobody -- see changelog.d/1520.md.  Every `_STORE_NAMES`
-#: entry MUST have one; `test_store_citation_prefixes_cover_every_store_name`
-#: enforces that a name added to one is not forgotten in the other.
-_STORE_SEPARATORS = {"alp-sdk-internal": ":", "https": "://", "http": "://"}
-
-#: `capture.reference` / `model.source` shapes that name a path on ONE
-#: developer's machine rather than citing a store every reader can resolve.  A
-#: public repo must never carry them (see the repo-wide "no local paths" rule);
-#: a citation that resolves for nobody else also makes the point
-#: unreproducible, which is the only thing a bench measurement is worth.
-#:
-#: The drive-letter alternative is discriminated on the SEPARATOR, not a word
-#: boundary in front of the letter.  An earlier shape,
-#: `(?:^|[^A-Za-z0-9])[A-Za-z]:[/\\]`, treated a single letter followed by
-#: `:/` ANYWHERE in the string as a drive path -- which fires on the `a` in
-#: `https://example.org/a:/b.log`'s path, the `c` in
-#: `.../bench/c:/run.log`, the `a` in `?q=a:/b`, and the `b` in
-#: `alp-sdk-internal:a/b:/c.log`, refusing every one of those legitimate
-#: citations because a URL path or query is free to contain a bare
-#: single-letter segment before a `:/`.  The two separators do not carry
-#: that risk equally, so they are no longer treated alike:
-#:
-#:   * `[A-Za-z]:\` (backslash) is checked ANYWHERE in the string.  A
-#:     backslash is not a legal URL character and never appears mid-path or
-#:     mid-query in a real citation, so `https:C:\Users\user\log.txt` and
-#:     `http:D:\bench\run.log` -- a Windows drive path tacked on AFTER a
-#:     legitimate-looking store -- are still caught wherever the drive
-#:     letter lands.
-#:   * `[A-Za-z]:/` (forward slash) is checked ONLY at the string start, or
-#:     immediately after one of `_STORE_NAMES`'s colon (`https:C:/...`,
-#:     `alp-sdk-internal:C:/...`) -- the two positions a drive letter can
-#:     legitimately open a reference.  Anywhere else the same three
-#:     characters are an ordinary URL path or query segment, not a drive
-#:     letter, and a real `https://` / `http://` URL's `//` never matches
-#:     either position (the character right after the store colon is `/`,
-#:     not a letter).
-_LOCAL_PATH_REFERENCE = re.compile(
-    r"^[/\\]"
-    r"|[A-Za-z]:\\"
-    r"|^[A-Za-z]:/"
-    r"|^(?:" + "|".join(_STORE_NAMES) + r"):[A-Za-z]:/"
-    r"|onedrive",
-    re.IGNORECASE)
-
-#: `alp-sdk-internal:models/person_detect_int8.tflite`,
-#: `https://example.org/zoo/x.tflite`.  Derived from `_STORE_NAMES` +
-#: `_STORE_SEPARATORS`, never a second hand-typed store list, so the store
-#: count cannot drift between the two.  Used to tell the two legal
-#: `model.source` shapes apart; `_LOCAL_PATH_REFERENCE` is applied FIRST, so
-#: a `C:\...` never reaches this and gets read as a store named `C`.
-_STORE_CITATION_PREFIXES = tuple(
-    name + _STORE_SEPARATORS[name] for name in _STORE_NAMES)
-
-#: MUST stay byte-identical to `capture.reference`'s `pattern` in
-#: metadata/schemas/model-perf-v1.schema.json -- JSON Schema has no way to
-#: `$ref` a Python constant, so the two are kept in lockstep by
-#: `test_model_source_and_capture_reference_agree_on_the_store_allowlist`
-#: instead, which fails the moment one is edited without the other.
-#: Joined WITHOUT `re.escape`: none of the three prefixes contain a regex
-#: metacharacter (a `-` needs escaping only INSIDE a character class, and
-#: `:` / `/` are not metacharacters at all), and `re.escape` used to escape
-#: the bare store names anyway, producing `alp\-sdk\-internal` -- legal for
-#: Python's `re` (Annex-B leniency lets `\-` mean a literal `-` outside a
-#: class) but an invalid escape under ECMA-262 `u`/`v` mode, which is what
-#: Ajv (and any JS/TS JSON Schema consumer, e.g. alp-sdk-vscode) compiles a
-#: `pattern` string under by default (`unicodeRegExp: true`) -- so the
-#: shipped schema could not be compiled by a JavaScript consumer at all.
-#: `test_store_citation_pattern_has_no_non_ecma262_escape` guards this.
-_STORE_CITATION = re.compile(
-    r"^(?:" + "|".join(_STORE_CITATION_PREFIXES) + r")\S")
-
-#: The bench recipe's timed-run floor (docs/bench/model-perf-capture.md §4).
-#: 100 timed runs after >= 10 discarded warm-ups, so `latency_ms_p95` is the
-#: 95th percentile of at least a hundred samples rather than an interpolation
-#: across a handful.
-_MIN_TIMED_RUNS = 100
-
-
-def _toolchain_profile_digest(toolchain: dict) -> str:
-    """The 12-hex digest of a perf point's toolchain PROFILE.
-
-    The profile is every key under `toolchain` OTHER than `name` and `version`
-    -- today `system_config`, `memory_mode` and `pins` -- canonicalised as JSON
-    with sorted keys and no whitespace, sha256'd, truncated to 12.  Derived as
-    "everything except name and version" rather than from a hard-coded key list
-    so that a profile key added to the schema later enters the identity
-    automatically instead of silently sharing a filename with the points that
-    predate it.
-
-    It is in the filename because it changes the number: `Ethos_U85_SRAM_Only`
-    and `Ethos_U85_SYS_DRAM_Mid` are different machines (the second is
-    DRAM-backed and this part has no DRAM), and two points measured under them
-    would otherwise resolve to one path, where the survivor is whichever was
-    written last.  It is deliberately NOT part of the consumer match key: a
-    customer holding no toolchain cannot state a profile.
-    """
-    profile = {k: v for k, v in toolchain.items() if k not in ("name", "version")}
-    canonical = json.dumps(profile, sort_keys=True, separators=(",", ":"),
-                           ensure_ascii=False)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
-
-
-def _check_model_perf_semantics(perf_files) -> list:
-    """Cross-checks on bench-measured model perf points beyond pure schema
-    validation, mirroring `_check_npu_ops_semantics` for the same reasons.
-
-    A perf point is the one data asset in this tree that a customer reads as
-    an EXACT answer about their own hardware, taken on our authority, with no
-    toolchain and no board of their own to check it against.  Everything below
-    exists so a point cannot quietly stop describing the thing that produced
-    it:
-
-      1. The PATH is a claim -- `<sku>/<target>/<slug>-<sha12>@<toolchain>-
-         <version>+<hw_rev>+<core>+<profile12>.json` -- and the body must
-         reproduce every segment exactly.  `<target>` is `accel_config` when
-         the backend has one and `backend` when it does not; `<profile12>` is
-         `_toolchain_profile_digest`.  EVERY SEGMENT AFTER THE SLUG IS THERE
-         BECAUSE IT CHANGES THE NUMBER, and a segment left out is a segment on
-         which the second measurement silently overwrites the first: the model
-         sha (a re-bench of changed bytes must ACCUMULATE a second point --
-         the first is still right for a customer holding the old bytes), the
-         hardware revision, the core, and the toolchain profile.
-      2. `measured_on.sku` must exist under `metadata/e1m_modules/`.
-      3. `(measured_on.backend, measured_on.accel_config)` must be a target
-         that SKU actually resolves, so a point cannot claim silicon the
-         module does not carry.
-      4. `measured_on.hw_rev` must be a key in that SoM family's
-         `hw-revisions.yaml`.  Existence only, deliberately: a point measured
-         on a `reserved` or pre-production revision is still a real
-         measurement of that revision.
-      5. `measured_on.core` must be a core that SKU's `topology:` declares,
-         and -- only where the SoC spec declares a `paired_core` for the
-         matched NPU -- must be that core.  Where the spec declares no pairing
-         (the Alif E8's Ethos-U85 today) nothing is inferred: the metadata does
-         not know, so the gate does not guess.
-      6. An `ethos_u` point must record BOTH `toolchain.system_config` and
-         `toolchain.memory_mode`.  Invoked with neither flag, `ethos-u-vela`
-         5.1.0 silently picks a default per accelerator -- on the U85 that is
-         `Ethos_U85_SYS_DRAM_Mid` / `Dedicated_Sram_384KB`, a DRAM-backed
-         profile on a part whose `external_memory_interfaces` declares no
-         DRAM.  A point captured that way is exactly measured and describes a
-         machine the module is not; recording the profile is what lets a
-         reader tell the two apart.  Its `toolchain.name` must also be one the
-         SoC spec's own `npu_toolchain` block names (today always `vela`) --
-         `toolchain.name` is one of the eight consumer match-key fields, so an
-         `ethos_u` point naming, say, `dxcom` is not cosmetic: it makes the
-         point unmatchable, or matchable by the wrong consumer.  This
-         `toolchain.name` cross-check is `ethos_u`-only, for two DIFFERENT
-         reasons on the two kinds of backend it excludes -- they are not the
-         same claim and must not be stated as one.  `drpai` and `deepx_dxm1`
-         are excluded because their host SoC specs
-         (`metadata/socs/renesas/rzv2n/n44.json`,
-         `metadata/socs/deepx/dx/m1.json`) declare no `npu_toolchain` block
-         at all, since that block is written only for an Ethos-U part, so
-         there is nothing to cross-check `toolchain.name` against.  `cpu` is
-         excluded for a DIFFERENT reason: every Alif Ensemble and NXP i.MX93
-         host SoC spec a `cpu` target resolves to (`alif:ensemble:e3`..`e8`,
-         `nxp:imx9:imx93`) DOES declare `npu_toolchain.vela` -- a CPU point
-         simply has no accelerator toolchain to check `toolchain.name`
-         against in the first place, which is a fact about the backend
-         itself, not about whether its host SoC spec happens to carry the
-         block.  A SoC that resolves as `ethos_u` yet declares no
-         `npu_toolchain` block is a refusal, not a skip, matching this
-         function's other fail-closed rules -- unreachable while every
-         shipping Ethos-U SoC spec's own `npu_toolchain.vela` block is itself
-         enforced present by `_check_soc_vela_memory_profile`, but not
-         provably so from this function alone.
-      7. `measured.latency_ms_p95` must be >= `measured.latency_ms_mean`.  A
-         p95 below the mean is not a tighter number, it is two runs' figures
-         pasted into one point.
-      8. `measured.req_sram_kib * 1024` must be >= `measured.arena_bytes` when
-         both are present.  The on-device selector's fit test is
-         `e->arena_sram_kib == 0u || t->req_sram_kib <= e->arena_sram_kib`
-         (`src/backends/inference/alp_model_select.c`), so a footprint that
-         undercuts the arena the same compile reported -- a zero above all --
-         fits every arena on every engine and turns the fit gate into a check
-         that cannot fail.  This is the defect the tier exists to close, so it
-         is enforced rather than described.
-      9. `measured.runs` must be >= `_MIN_TIMED_RUNS` when latency is present.
-         The recipe's floor; a `runs: 1` point whose mean and p95 are the same
-         single number is a single shot wearing a measurement's clothes.
-     10. `capture.date` must PARSE, not merely match the ISO shape:
-         `2026-13-45` satisfies the pattern and is not a day.
-     11. A `backend: "cpu"` point may not report a nonzero `measured.npu_ops`.
-         There is no NPU on that path to place an operator on, so a figure
-         there came from another run's report and everything beside it is
-         suspect.
-     12. No file under `metadata/model_perf/` may carry `_fixture`.  That key
-         marks the synthetic documents under `tests/fixtures/model_perf/`
-         whose `measured` values are placeholders; the published tree must be
-         incapable of absorbing one.
-     13. `capture.reference` and `model.source` must cite a store, not a local
-         filesystem path.
-     14. An `ethos_u` point's `toolchain.memory_mode` (and `toolchain.
-         system_config`, where the SoC spec declares one) must EQUAL the
-         module's own SoC spec's declared `npu_toolchain.vela` profile, not
-         merely be present (rule 6).  Refused at publish time, with no
-         override field: a point measured under a profile the part does not
-         use is a mis-measurement, not a deliberate off-profile record --
-         tan already catches this class of mismatch on read (a 5.3x SRAM
-         overstatement published at `confidence: "certain"`), and leaving it
-         publishable would force every future consumer to re-implement the
-         refusal or repeat the error. A genuine off-profile experiment
-         belongs in the raw capture log `capture.reference` already cites,
-         never in `metadata/model_perf/`.
-     15. Where the SoC spec flags `npu_toolchain.vela.
-         system_config_requires_vendor_config: true`, an `ethos_u` point's
-         `toolchain.system_config` must NOT be one of vela's own Arm
-         built-ins (`_VELA_BUILTIN_SYSTEM_CONFIGS`, the same set
-         `_check_soc_vela_memory_profile` cross-checks the SoC spec itself
-         against).  This closes a hole rule 14 cannot reach: the E8 declares
-         `system_config_requires_vendor_config: true` but no
-         `system_config` VALUE of its own (a `System_Config` section
-         describes one core subsystem's memory view, and the E8 carries
-         three distinct Ethos-U accelerators, so the SoC-level block is
-         deliberately silent on it -- see rule 14's own docstring).  Rule 14
-         only compares fields the SoC spec DECLARES, so with no declared
-         `system_config` to compare against, a point can record `Sram_Only`
-         (correct -- an Arm BUILT-IN memory_mode, reachable with no vendor
-         `.ini` at all: `vela --accelerator-config ethos-u85-256
-         --memory-mode Sram_Only` with no `--config` exits 0) alongside
-         `system_config: "Ethos_U85_SYS_DRAM_Mid"` (vela's flagless
-         default, DRAM-backed) and pass rule 14 outright -- a correct arena
-         next to a latency modelled on a machine the part does not have,
-         at `confidence: "certain"`, undetected.  The flag is the SoC
-         spec's own declaration that Arm's built-in `System_Config` set does
-         not describe this part (every Arm BUILT-IN `System_Config` section
-         models `OffChipFlash` or `Dram` bandwidth; none is SRAM-only --
-         Alif's own sections are the opposite of that: SRAM-only is
-         precisely what `ensemble_vela.ini` adds) -- so this rule keys off
-         the FLAG rather than off a `system_config` value the spec may not
-         carry.  This IS an enumerated list of Arm's own built-in names
-         (`_VELA_BUILTIN_SYSTEM_CONFIGS`, eleven today, pinned against
-         `ethos-u-vela` 5.1.0's own `Arm/vela.ini`, measured via `vela
-         --list-configs`), not a self-updating derivation -- it goes stale
-         the moment a later `ethos-u-vela` release ships a twelfth
-         `System_Config` section, because that new name is not "one of
-         Arm's" as far as this hardcoded set is concerned, and a point
-         recording it would pass this rule silently, undetected, the same
-         way rule 14 misses the DRAM-backed-default case this rule exists
-         to catch.  What keeps the set honest is
-         `tests/scripts/test_vela_profile_metadata.py::
-         test_builtin_system_config_names_are_fresh_against_the_installed_vela_ini`:
-         it re-derives the section names from the INSTALLED `Arm/vela.ini`
-         on every run where `ethos-u-vela` is importable, and fails --
-         never a silent skip when the toolchain IS present -- the moment
-         this literal, or its second hand-kept copy in that same test
-         file, drifts from what the toolchain actually ships.  Bump
-         `_VELA_BUILTIN_SYSTEM_CONFIGS` (and that test-file twin) when that
-         test does.  Silent (like rule 14) wherever the flag is absent or
-         `false` -- imx93 declares `system_config_requires_vendor_config:
-         false`, so this rule never fires there, even when its point
-         happens to record an Arm built-in `system_config` (imx93's own
-         `Shared_Sram` is itself an Arm built-in `memory_mode`).  No
-         override field, same reasoning as rule 14: a genuinely off-profile
-         experiment belongs in the raw capture log, never in
-         `metadata/model_perf/`.
-
-    Reading `model.source` back -- re-hashing the in-repo model file and
-    requiring it to equal `model.sha256` -- deliberately does NOT live here.
-    That path points into `tests/fixtures/`, which does not exist in the
-    metadata-ONLY scratch clone `tests/scripts/test_alp_cli_new_som.py`'s
-    `_clone_metadata_gates` runs this script against, so a copy here could
-    only be a silent skip.  It lives in
-    `tests/scripts/test_model_perf_metadata.py`, which always runs against the
-    real checkout -- the same split, for the same reason, as
-    `_check_soc_vela_memory_profile`'s `source` citations.
-
-    Returns a failure list shaped like `_check_files()`.
-    """
-    metadata_root = REPO / "metadata"
-    published_root = metadata_root / "model_perf"
-    failures: list[tuple[str, list[str]]] = []
-    for path in perf_files:
-        rel = path.relative_to(REPO).as_posix()
-        try:
-            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
-        except Exception:
-            continue  # parse errors already reported by the schema pass
-        if not isinstance(doc, dict):
-            continue
-
-        msgs: list[str] = []
-        measured_on = doc.get("measured_on") if isinstance(doc.get("measured_on"), dict) else {}
-        model = doc.get("model") if isinstance(doc.get("model"), dict) else {}
-        toolchain = doc.get("toolchain") if isinstance(doc.get("toolchain"), dict) else {}
-        measured = doc.get("measured") if isinstance(doc.get("measured"), dict) else {}
-        capture = doc.get("capture") if isinstance(doc.get("capture"), dict) else {}
-
-        sku = measured_on.get("sku")
-        hw_rev = measured_on.get("hw_rev")
-        core = measured_on.get("core")
-        backend = measured_on.get("backend")
-        accel = measured_on.get("accel_config")
-
-        # (1) the path is a claim the body must reproduce.
-        if isinstance(sku, str) and path.parent.parent.name != sku:
-            msgs.append(
-                f"measured_on.sku={sku!r} but this file sits under "
-                f"`{path.parent.parent.name}/` -- a consumer resolving points "
-                f"for a SKU by path would load a measurement taken on another "
-                f"module")
-        if isinstance(backend, str) and isinstance(accel, str):
-            expected_dir = accel or backend
-            if path.parent.name != expected_dir:
-                msgs.append(
-                    f"measured_on (backend={backend!r}, accel_config={accel!r}) "
-                    f"implies directory `{expected_dir}/`, but this file sits "
-                    f"under `{path.parent.name}/`")
-        slug = model.get("slug")
-        sha256 = model.get("sha256")
-        tc_name = toolchain.get("name")
-        tc_version = toolchain.get("version")
-        if (isinstance(slug, str) and isinstance(sha256, str) and len(sha256) >= 12
-                and isinstance(tc_name, str) and isinstance(tc_version, str)
-                and isinstance(hw_rev, str) and isinstance(core, str)):
-            profile12 = _toolchain_profile_digest(toolchain)
-            expected_stem = (f"{slug}-{sha256[:12]}@{tc_name}-{tc_version}"
-                             f"+{hw_rev}+{core}+{profile12}")
-            if path.stem != expected_stem:
-                msgs.append(
-                    f"model (slug={slug!r}, sha256[:12]={sha256[:12]!r}) + "
-                    f"toolchain (name={tc_name!r}, version={tc_version!r}, "
-                    f"profile digest {profile12!r}) + measured_on "
-                    f"(hw_rev={hw_rev!r}, core={core!r}) imply "
-                    f"filename `{expected_stem}.json`, but this file is "
-                    f"`{path.name}` -- the filename is the measurement identity, "
-                    f"and every segment of it is one that changes the number, so "
-                    f"a mismatch means one measurement is sitting where another "
-                    f"belongs and the point that was there is gone")
-
-        # (2)+(3)+(5) the SKU exists, it really has this target, and the core
-        # that drove the inference is one the module declares.
-        if isinstance(sku, str):
-            try:
-                target_map = _perf_target_map(sku, metadata_root)
-                cores = _resolve_perf_cores(sku, metadata_root)
-            except LookupError as exc:
-                msgs.append(
-                    f"measured_on.sku={sku!r}: cannot resolve this module's "
-                    f"accelerator targets and cores ({exc}) -- refused rather "
-                    f"than skipped, because skipping would accept a point "
-                    f"naming any target at all")
-            else:
-                if isinstance(backend, str) and isinstance(accel, str):
-                    if (backend, accel) not in target_map:
-                        offered = ", ".join(
-                            f"{b}/{a or '-'}" for b, a in sorted(target_map))
-                        msgs.append(
-                            f"measured_on (backend={backend!r}, "
-                            f"accel_config={accel!r}) is not a target "
-                            f"{sku} resolves -- it offers: {offered}")
-                if isinstance(core, str):
-                    if core not in cores:
-                        msgs.append(
-                            f"measured_on.core={core!r} is not a core {sku} "
-                            f"declares -- its `topology:` names "
-                            f"{sorted(cores)}. The core is part of the "
-                            f"measurement identity because it changes the "
-                            f"number, so a point cannot name one the module "
-                            f"does not have")
-                    paired = target_map.get((backend, accel)) \
-                        if isinstance(backend, str) and isinstance(accel, str) else None
-                    if paired and core != paired:
-                        msgs.append(
-                            f"measured_on.core={core!r} but the SoC spec pairs "
-                            f"accelerator {accel or backend!r} to "
-                            f"`{paired}` (`npus[].paired_core`) -- that "
-                            f"accelerator cannot have been driven by this core, "
-                            f"so either the core or the target is the wrong one")
-
-        # (4) the hardware revision exists in the family table.
-        if isinstance(sku, str) and isinstance(hw_rev, str):
-            try:
-                family_dir = _sku_family(sku)
-            except ValueError:
-                msgs.append(f"measured_on.sku={sku!r}: unrecognised SoM SKU pattern, "
-                            f"so `hw_rev` cannot be checked against a family table")
-            else:
-                table = metadata_root / "e1m_modules" / family_dir / "hw-revisions.yaml"
-                if not table.is_file():
-                    msgs.append(
-                        f"measured_on.hw_rev={hw_rev!r}: no "
-                        f"metadata/e1m_modules/{family_dir}/hw-revisions.yaml to "
-                        f"check it against")
-                else:
-                    revisions = strict_yaml_load(table.read_text(encoding="utf-8"),
-                                                 source=table)
-                    # `revisions` is a mapping in every valid hw-revisions.yaml,
-                    # but the schema pass that would reject a malformed one
-                    # (e.g. a bare list) is not guaranteed to have run first --
-                    # guard rather than let a non-mapping raise `AttributeError`
-                    # here (same shape as `_check_soc_vela_memory_profile`).
-                    revisions = revisions if isinstance(revisions, dict) else {}
-                    known = revisions.get("hw_revisions")
-                    known = known if isinstance(known, dict) else {}
-                    if hw_rev not in known:
-                        msgs.append(
-                            f"measured_on.hw_rev={hw_rev!r} is not a revision of the "
-                            f"{family_dir} family -- "
-                            f"metadata/e1m_modules/{family_dir}/hw-revisions.yaml "
-                            f"declares {sorted(known) or '(none)'}")
-
-        # (6) an Ethos-U point without its vela profile describes an unknown machine.
-        if backend == "ethos_u":
-            missing = [k for k in ("system_config", "memory_mode")
-                       if not isinstance(toolchain.get(k), str) or not toolchain[k]]
-            if missing:
-                msgs.append(
-                    f"backend `ethos_u` but toolchain records no "
-                    f"{' and no '.join(missing)} -- invoked flagless, "
-                    f"ethos-u-vela picks a default per accelerator "
-                    f"(`Ethos_U85_SYS_DRAM_Mid` / `Dedicated_Sram_384KB` on the "
-                    f"U85, which is DRAM-backed), so the arena figures would "
-                    f"describe that profile and not this module")
-
-            # toolchain.name is one of the eight consumer match-key fields
-            # (measured_on.sku + hw_rev + core + backend + accel_config +
-            # model.sha256 + toolchain.name + toolchain.version), so a name
-            # that does not match the accelerator is not cosmetic -- it makes
-            # the point unmatchable, or matchable by the wrong consumer.  The
-            # SoC spec's own npu_toolchain block already names the only
-            # toolchain that compiles for this accelerator.
-            #
-            # This is ETHOS_U ONLY, for two DIFFERENT reasons on the two
-            # kinds of backend it excludes.  drpai/deepx_dxm1 are excluded
-            # because their host SoC specs (metadata/socs/renesas/rzv2n/
-            # n44.json, metadata/socs/deepx/dx/m1.json) declare no
-            # `npu_toolchain` block at all; `npu_toolchain` is written only
-            # for an Ethos-U part.  Adding that block to those SoC specs
-            # would let this same cross-check run for those backends too.
-            # cpu is excluded for a DIFFERENT reason: every Alif Ensemble
-            # and NXP i.MX93 host SoC spec a `cpu` target resolves to DOES
-            # carry `npu_toolchain.vela` -- a CPU point simply has no
-            # accelerator toolchain to check `toolchain.name` against, a
-            # fact about the backend rather than about the host SoC spec.
-            if isinstance(sku, str) and isinstance(tc_name, str):
-                try:
-                    known_toolchains = _soc_npu_toolchain_names(sku, metadata_root)
-                except LookupError as exc:
-                    msgs.append(
-                        f"measured_on.sku={sku!r}: cannot resolve this "
-                        f"module's SoC spec to check toolchain.name against "
-                        f"its npu_toolchain block ({exc})")
-                else:
-                    if not known_toolchains:
-                        msgs.append(
-                            f"measured_on.sku={sku!r}: backend `ethos_u` but "
-                            f"this module's SoC spec declares no "
-                            f"npu_toolchain block at all -- refused rather "
-                            f"than skipped, because toolchain.name="
-                            f"{tc_name!r} cannot be checked against a "
-                            f"toolchain list that is not there, and this "
-                            f"function's other rules already refuse an "
-                            f"unresolvable SKU rather than pass over it")
-                    elif tc_name not in known_toolchains:
-                        msgs.append(
-                            f"backend `ethos_u` but toolchain.name={tc_name!r} "
-                            f"-- {sku}'s SoC spec's npu_toolchain block names "
-                            f"{sorted(known_toolchains)}, and only that "
-                            f"toolchain compiles for this accelerator")
-
-        # (7) p95 below the mean is two runs pasted into one point.
-        mean = measured.get("latency_ms_mean")
-        p95 = measured.get("latency_ms_p95")
-        if isinstance(mean, (int, float)) and isinstance(p95, (int, float)) and p95 < mean:
-            msgs.append(
-                f"measured.latency_ms_p95={p95} is below "
-                f"measured.latency_ms_mean={mean} -- a 95th percentile cannot "
-                f"undercut the mean of the same runs")
-
-        # (8) a footprint that undercuts its own arena fits everything.
-        #
-        # The on-device selector's fit test is
-        # `e->arena_sram_kib == 0u || t->req_sram_kib <= e->arena_sram_kib`
-        # (src/backends/inference/alp_model_select.c), so a `req_sram_kib` of 0
-        # -- or any figure below the arena the SAME compile reported -- passes
-        # against every engine on every module.  Publishing one would re-open
-        # the always-fits defect this tier exists to close, from the data side
-        # instead of the code side, and it would do it wearing
-        # `basis: "bench"` / `confidence: "certain"`.
-        arena_bytes = measured.get("arena_bytes")
-        req_sram_kib = measured.get("req_sram_kib")
-        if (isinstance(arena_bytes, int) and not isinstance(arena_bytes, bool)
-                and isinstance(req_sram_kib, int) and not isinstance(req_sram_kib, bool)
-                and req_sram_kib * 1024 < arena_bytes):
-            msgs.append(
-                f"measured.req_sram_kib={req_sram_kib} is {req_sram_kib * 1024} "
-                f"bytes, below measured.arena_bytes={arena_bytes} from the same "
-                f"compile -- the on-device fit test is `req_sram_kib <= "
-                f"arena_sram_kib` and treats 0 as `fits anything`, so a footprint "
-                f"that does not even cover its own arena makes the fit gate "
-                f"incapable of failing. A footprint that could not be measured is "
-                f"OMITTED, never zero-filled")
-
-        # (9) the recipe's timed-run floor.
-        runs = measured.get("runs")
-        if (isinstance(mean, (int, float))
-                and isinstance(runs, int) and not isinstance(runs, bool)
-                and runs < _MIN_TIMED_RUNS):
-            msgs.append(
-                f"measured.runs={runs} is below the {_MIN_TIMED_RUNS}-run floor "
-                f"docs/bench/model-perf-capture.md §4 sets -- below it "
-                f"`latency_ms_p95` is an interpolation across a handful of "
-                f"samples rather than a percentile, and a point whose mean and "
-                f"p95 are the same single number is a single shot wearing a "
-                f"measurement's clothes")
-
-        # (10) an ISO-shaped string is not necessarily a day: `2026-13-45`
-        # satisfies the schema pattern.
-        date = capture.get("date")
-        if isinstance(date, str):
-            try:
-                datetime.date.fromisoformat(date)
-            except ValueError:
-                msgs.append(
-                    f"capture.date={date!r} matches the ISO shape but is not a "
-                    f"real calendar date -- a capture nobody can place in time "
-                    f"cannot be correlated with the raw log it cites")
-
-        # (11) a CPU point has no NPU to place an operator on.
-        npu_ops = measured.get("npu_ops")
-        if (backend == "cpu" and isinstance(npu_ops, int)
-                and not isinstance(npu_ops, bool) and npu_ops != 0):
-            msgs.append(
-                f"backend `cpu` but measured.npu_ops={npu_ops} -- there is no "
-                f"accelerator on this path to place an operator on, so that "
-                f"figure came from another run's report and every figure beside "
-                f"it is suspect")
-
-        # (12) the published tree cannot absorb a synthetic fixture.
-        if "_fixture" in doc and path.is_relative_to(published_root):
-            msgs.append(
-                "`_fixture` marks a synthetic document whose `measured` values "
-                "are placeholders, not measurements -- it belongs under "
-                "tests/fixtures/model_perf/ and must never ship under "
-                "metadata/model_perf/, where a consumer would read it as bench "
-                "data")
-
-        # (13) citations, not somebody's disk -- for the capture AND for the
-        # model bytes, which carry exactly the same leak and the same
-        # resolves-for-nobody-else failure.
-        source = model.get("source")
-        for field, value in (("capture.reference", capture.get("reference")),
-                             ("model.source", source)):
-            if isinstance(value, str) and _LOCAL_PATH_REFERENCE.search(value):
-                msgs.append(
-                    f"{field}={value!r} looks like a path on one "
-                    f"machine rather than a `<store>:<path>` citation or a "
-                    f"repo-relative path -- this repo is public and such a "
-                    f"reference resolves for nobody else, so the measurement "
-                    f"stops being reproducible")
-        # A `model.source` that is not a citation is a repo-relative path, and
-        # a repo-relative path that climbs out of the checkout names a machine
-        # as surely as `/home/...` does.  Re-hashing those bytes is the pytest
-        # suite's job (they do not exist in the metadata-only scratch clone);
-        # refusing the SHAPE needs no bytes and so belongs here.
-        if (isinstance(source, str) and not _STORE_CITATION.match(source)
-                and ".." in Path(source.replace("\\", "/")).parts):
-            msgs.append(
-                f"model.source={source!r} is not a `<store>:<path>` citation, "
-                f"so it is read as a repo-relative path -- and it climbs out "
-                f"of the checkout with `..`, which resolves somewhere different "
-                f"on every machine")
-
-        # (14) an ethos_u point's recorded vela profile must not CONTRADICT
-        # what the module's own SoC spec declares under `npu_toolchain.vela`.
-        # Rule 6 already requires the fields to be PRESENT; this checks them
-        # against the part's own declared answer instead of taking the
-        # point's word for it -- tan catches exactly this mismatch on read
-        # (a 5.3x SRAM overstatement was published at `confidence: "certain"`
-        # before this existed), and publish time is where it belongs: a
-        # point captured under a profile the part does not use is a
-        # mis-measurement, not a deliberate off-profile record, and there is
-        # NO override field -- a genuinely off-profile experiment belongs in
-        # the raw capture log (`capture.reference`), never in
-        # `metadata/model_perf/`.  Only fields the SoC spec actually declares
-        # are compared: `memory_mode` is `required` on every `vela_profile`
-        # and so is always checked; `system_config` is OPTIONAL there
-        # (permitted only on a SoC with exactly one distinct Ethos-U type --
-        # every Alif Ensemble part declares two or three and so declares
-        # none today), and is compared only when the SoC spec happens to
-        # carry one. Where the SoC spec is silent, this rule is silent too --
-        # it never infers a contradiction from an absence.
-        if backend == "ethos_u" and isinstance(sku, str):
-            try:
-                declared_vela = _soc_npu_toolchain_profile(sku, metadata_root, "vela")
-            except LookupError:
-                declared_vela = None
-            if declared_vela:
-                for field in ("memory_mode", "system_config"):
-                    declared_value = declared_vela.get(field)
-                    point_value = toolchain.get(field)
-                    if (isinstance(declared_value, str) and isinstance(point_value, str)
-                            and point_value != declared_value):
-                        msgs.append(
-                            f"toolchain.{field}={point_value!r} contradicts "
-                            f"{sku}'s SoC spec's declared "
-                            f"npu_toolchain.vela.{field}={declared_value!r} -- "
-                            f"a point captured under a different profile is a "
-                            f"mis-measurement, not a deliberate record, and "
-                            f"there is no override: fix the capture and "
-                            f"re-bench, or omit the point")
-
-                # (15) a SoC that flags system_config_requires_vendor_config:
-                # true has said, in its own words, that no section in Arm's
-                # built-in vela.ini describes this part -- rule 14 cannot
-                # reach that case when the spec itself declares no
-                # system_config VALUE to compare (the E8: `Sram_Only` alone
-                # is a legitimate, Arm-built-in memory_mode, so rule 14's
-                # memory_mode check is satisfied while system_config is
-                # silently vela's DRAM-backed flagless default, and rule 14
-                # stays silent because there is nothing declared to
-                # contradict).  `_VELA_BUILTIN_SYSTEM_CONFIGS` IS a hardcoded
-                # enumeration of Arm's eleven names, not a self-updating
-                # derivation (see this function's own docstring, rule 15,
-                # for why and for the freshness test that catches the drift
-                # when ethos-u-vela ships a twelfth section).
-                if declared_vela.get("system_config_requires_vendor_config") is True:
-                    point_sysconf = toolchain.get("system_config")
-                    if (isinstance(point_sysconf, str) and point_sysconf
-                            and point_sysconf in _VELA_BUILTIN_SYSTEM_CONFIGS):
-                        msgs.append(
-                            f"toolchain.system_config={point_sysconf!r} is one "
-                            f"of vela's own Arm built-ins "
-                            f"({sorted(_VELA_BUILTIN_SYSTEM_CONFIGS)}), but "
-                            f"{sku}'s SoC spec flags npu_toolchain.vela."
-                            f"system_config_requires_vendor_config=true -- "
-                            f"only its own vendor config "
-                            f"({declared_vela.get('vendor_config_filename')!r}) "
-                            f"actually describes this part's system config; a "
-                            f"built-in section is vela's flagless-default "
-                            f"substitute for it, and the point measures a "
-                            f"machine this SoC is not")
-
-        if msgs:
-            print(f"FAIL {rel}")
-            for m in msgs:
-                print(f"  · {m}")
-            failures.append((rel, msgs))
-        else:
-            print(f"OK   {rel}")
-    return failures
-
-
 def _check_library_semantics(library_files) -> list:
     """Cross-checks on library manifests beyond pure schema validation (ADR 0018).
 
@@ -2286,8 +1977,15 @@ def _check_library_semantics(library_files) -> list:
 
         requires = doc.get("requires") or {}
         if isinstance(requires, dict):
-            for cap in requires.get("capabilities") or []:
-                if cap not in vocab:
+            # `capabilities` may itself be a non-list scalar (e.g. a bare
+            # int) in a malformed manifest -- iterate `_as_list()` rather
+            # than the raw value so that reaches a clean skip instead of
+            # `TypeError: 'int' object is not iterable`.
+            for cap in _as_list(requires.get("capabilities")):
+                # `cap` is schema-typed as a string, but a malformed
+                # manifest can carry a dict/list there -- `cap not in
+                # vocab` raises `TypeError: unhashable type` unfiltered.
+                if not isinstance(cap, str) or cap not in vocab:
                     offered = ", ".join(sorted(vocab)) or "<none>"
                     msgs.append(
                         f"requires/capabilities[{cap}]: not a known SoC capability "
@@ -2325,6 +2023,16 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
         print(f"FAIL {rel}: parse error ({e})")
         return [(rel, [f"invalid JSON parse: {e}"])]
 
+    # Unlike the other registry checks, this function keeps gathering
+    # referential-integrity messages even when the schema pass below
+    # already flagged a shape problem -- so a non-object top level must be
+    # refused up front, before `data.get(...)` runs unconditionally further
+    # down (same shape as `_check_silicon_kconfig`).
+    if not isinstance(data, dict):
+        msg = f"top-level value is a {type(data).__name__}, expected an object"
+        print(f"FAIL {rel}: {msg}")
+        return [(rel, [msg])]
+
     msgs: list[str] = []
     if TIER_A_LIBRARY_CI_SCHEMA.is_file():
         schema = json.loads(TIER_A_LIBRARY_CI_SCHEMA.read_text(encoding="utf-8"))
@@ -2343,9 +2051,20 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
             library_docs[doc["name"]] = doc
 
     tier_a = {name for name, doc in library_docs.items() if doc.get("tier") == "A"}
-    host = data.get("hostBuild", {}) if isinstance(data.get("hostBuild"), dict) else {}
-    host_libraries = set(host.get("libraries") or [])
-    excluded = set((host.get("excludedLibraries") or {}).keys())
+    host = _as_dict(data.get("hostBuild"))
+    # `libraries`/`excludedLibraries` may themselves be a non-list/non-dict
+    # scalar in a malformed registry -- `set(host.get("libraries") or [])`
+    # used to reach `set(<int>)` (`TypeError: 'int' object is not
+    # iterable`) and `.keys()` used to reach a non-dict directly
+    # (`AttributeError`). Route both through the same container guards as
+    # every other array/object field in this file. And a `libraries[]`
+    # ITEM is schema-typed as a string, but a malformed registry can carry
+    # a dict/list entry there -- `set()` raises `TypeError: unhashable
+    # type` unfiltered, and a mixed str/int set raises on the `sorted()`
+    # calls below. Filter to strings, same idiom used throughout this
+    # file.
+    host_libraries = {x for x in _as_list(host.get("libraries")) if isinstance(x, str)}
+    excluded = set(_as_dict(host.get("excludedLibraries")).keys())
     known = set(library_docs)
 
     for name in sorted(host_libraries | excluded):
@@ -2379,7 +2098,7 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
 
     families_seen: set[str] = set()
     family_to_som: dict[str, str] = {}
-    for idx, cell in enumerate(data.get("familyMatrix") or []):
+    for idx, cell in enumerate(_as_list(data.get("familyMatrix"))):
         if not isinstance(cell, dict):
             continue
         family = cell.get("family")
@@ -2389,6 +2108,17 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
             families_seen.add(family)
             if isinstance(som, str):
                 family_to_som[family] = som
+        if isinstance(som, (dict, list)):
+            # A dict/list `som` is unhashable -- `som_docs.get(som)` below
+            # would raise `TypeError: unhashable type`. Every other
+            # schema-shape violation (int, bool, or a JSON `null`) IS
+            # hashable and safe to look up; a blanket `not isinstance(som,
+            # str)` would also silently drop the "has no SoM preset"
+            # diagnostic `dcda807d` used to emit for a `null` `som` --
+            # scope the skip to the actual hazard (unhashability), same as
+            # the truthy-only skip in `_check_silicon_kconfig`'s
+            # `knownSilicon[]` guard.
+            continue
         doc = som_docs.get(som)
         if doc is None:
             msgs.append(f"familyMatrix[{idx}]/som: `{som}` has no SoM preset")
@@ -2396,9 +2126,28 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
         if doc.get("family") != family:
             msgs.append(f"familyMatrix[{idx}]: family `{family}` does not match "
                         f"{som}'s preset family `{doc.get('family')}`")
-        topology = doc.get("topology") or {}
+        topology = doc.get("topology")
+        # `topology` is schema-typed as an object, but a non-empty scalar
+        # (e.g. a bare string) is truthy and would otherwise reach
+        # `topology.get(core)` below and raise `AttributeError` -- normalise
+        # to `{}` rather than crash the gate (same shape as
+        # `_check_board_targets`).
+        topology = topology if isinstance(topology, dict) else {}
+        if isinstance(core, (dict, list)):
+            # Same reasoning as `som` above -- `core not in topology` /
+            # `topology.get(core)` below would raise on an unhashable
+            # value, but every other value (int, bool, `null`) is
+            # hashable and must still surface the `core` `is not a
+            # topology core` diagnostic below.
+            continue
         if core not in topology:
-            available = ", ".join(sorted(topology)) or "<none>"
+            # `topology` is a YAML mapping (unlike the JSON-sourced
+            # `core_ids`/`macs` sets above) -- YAML permits int/float/bool/
+            # null keys, so an unfiltered `sorted(topology)` over its keys
+            # raises `TypeError` on a mixed str/non-str key set, or on an
+            # all-non-str key set at the `join()` (non-str items). Filter
+            # to strings, same idiom as `core_ids` above.
+            available = ", ".join(sorted(k for k in topology if isinstance(k, str))) or "<none>"
             msgs.append(f"familyMatrix[{idx}]/core: `{core}` is not a topology core "
                         f"on {som} (available: {available})")
         elif not isinstance(topology.get(core), dict) or "board" not in topology[core]:
@@ -2418,7 +2167,7 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     # its family's SoM has no buildable hw_rev at all -- assert that against
     # live metadata the same way `excludedLibraries` above is asserted to
     # still be Tier A, instead of trusting the prose forever.
-    for family, _reason in sorted((data.get("excludedFamilies") or {}).items()):
+    for family, _reason in sorted(_as_dict(data.get("excludedFamilies")).items()):
         som = family_to_som.get(family)
         if som is None:
             msgs.append(f"excludedFamilies[{family}]: no familyMatrix cell "
@@ -2448,7 +2197,7 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     else:
         n_libs = len(host_libraries)
         n_excluded = len(excluded)
-        n_cells = len(data.get("familyMatrix") or [])
+        n_cells = len(_as_list(data.get("familyMatrix")))
         print(f"OK   {rel}  (hostBuild={n_libs}, excluded={n_excluded}, "
               f"familyMatrix={n_cells})")
     return failures
@@ -2525,7 +2274,21 @@ def _check_board_targets(som_files) -> list:
 
         msgs: list[str] = []
         checked = 0
-        topology = doc.get("topology") or {}
+        raw_topology = doc.get("topology")
+        if raw_topology is not None and not isinstance(raw_topology, dict):
+            # `topology` is schema-typed as an object, but a non-empty
+            # scalar (e.g. a bare string, which is truthy) would otherwise
+            # reach `.items()` below and raise `AttributeError`, aborting
+            # the whole gate mid-run instead of leaving the schema FAIL
+            # line (which already explains the real problem) to do the
+            # talking (same shape as `_check_chip_physical`'s `physical`
+            # guard). `_as_dict` alone is NOT equivalent here: it would
+            # degrade this to `{}` and fall through to `checked == 0` ->
+            # an `OK ... (board targets: 0 Zephyr slice(s) resolve)` line
+            # printed for a file the schema pass FAILs in the same run --
+            # skip the file instead so this check stays silent on it.
+            continue
+        topology = _as_dict(raw_topology)
         for core_id, entry in topology.items():
             if not isinstance(entry, dict):
                 continue
@@ -2559,6 +2322,401 @@ def _check_board_targets(som_files) -> list:
             failures.append((rel, msgs))
         else:
             print(f"OK   {rel}  (board targets: {checked} Zephyr slice(s) resolve)")
+    return failures
+
+
+_MODEL_PERF_FIXTURE_MARKER = "_fixture"
+_MODEL_PERF_LATENCY_RUN_FLOOR = 30
+_MODEL_PERF_ALLOWED_ROOT_FILES = {"README.md"}
+
+
+def _collect_model_perf_files(root: Path) -> tuple[list[Path], list[tuple[str, list[str]]]]:
+    """Collect metadata/model_perf/<SKU>/<hash>.yaml -- and FAIL loudly on
+    anything that doesn't fit that exact two-level shape, instead of
+    silently skipping it (issue #1520 review, PR #1884).
+
+    The one-level `MODEL_PERF.glob("*/*.yaml")` this replaces never opens a
+    point placed one directory too deep (`<SKU>/_fixture/<hash>.yaml` --
+    the precise evasion the `_MODEL_PERF_FIXTURE_MARKER` refusal below
+    exists to catch), a `.yml` sibling, or a stray file dropped directly
+    under `root` -- none of those reach the schema or semantic pass, so
+    the gate prints a clean `0 failure(s)` for a file nobody looked at.
+
+    Walks the whole tree with `rglob("*")` and classifies every FILE it
+    finds (directories are structure, not data):
+      * `root/README.md` is the tree's own doc -- the one root-level file
+        allowed, silently skipped;
+      * `root/<dir>/<name>.yaml` (exactly two path segments below `root`,
+        `.yaml` -- not `.yml` -- suffix) is a real candidate, returned for
+        the schema + semantic passes to validate;
+      * anything else -- a stray root-level file, a nested-one-level-too-
+        deep file, a non-`.yaml` sibling -- is a structural violation and
+        comes back as a FAILURE, shaped like every other check's failure
+        list, not a silent skip.
+    """
+    candidates: list[Path] = []
+    failures: list[tuple[str, list[str]]] = []
+    if not root.is_dir():
+        return candidates, failures
+    for path in sorted(root.rglob("*")):
+        if path.is_dir():
+            continue
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        parts = path.relative_to(root).parts
+        if len(parts) == 1 and path.name in _MODEL_PERF_ALLOWED_ROOT_FILES:
+            continue  # the tree's own doc, not a data file
+        if len(parts) != 2:
+            failures.append((rel, [
+                f"sits {len(parts)} path segment(s) below metadata/model_perf/ "
+                f"-- a real point is exactly <SKU>/<hash>.yaml (2 segments); "
+                f"a file this shallow or this deep is never opened by the "
+                f"schema/semantic passes and validates nothing"]))
+            continue
+        if path.suffix != ".yaml":
+            failures.append((rel, [
+                f"extension `{path.suffix}` is not `.yaml` -- collection "
+                f"only looks for *.yaml, so this file is silently invisible "
+                f"to every check below"]))
+            continue
+        candidates.append(path)
+    return candidates, failures
+
+
+def _model_perf_identity_hash(doc) -> str:
+    """16-hex-char content hash of a model-perf point's MEASUREMENT identity
+    (issue #1520) -- the single source `docs/bench/model-perf-capture.md` and
+    `metadata/schemas/model-perf-v1.schema.json` both point back at.
+
+    Deliberately keyed on the full measurement context (SoM SKU + hw_rev +
+    compile target, including the exact compiler build + the exact
+    source-model bytes + the vela profile when one applies) rather than on
+    the model alone or the SoM alone: two points that share a model but
+    differ in backend/accel_config/core/compiler_version/vela profile are
+    different measurements and must not collide on one path.  Changing ANY
+    identity field must produce a different hash, so a stale filename can
+    never silently point at an edited body -- `_check_model_perf_semantics()`
+    below is what enforces that the on-disk filename actually matches this.
+
+    `target.compiler_version` (e.g. `vela 4.1.0`) is in this key because a
+    compiler upgrade alone -- no other identity field changing -- can move
+    `arena_bytes`/`latency_ms`: a point captured under vela 4.1.0 and the
+    same point re-captured under vela 5.x would otherwise hash identically
+    and the second capture would silently overwrite the first at the same
+    filename (issue #1520 review, PR #1884).  Two fields the same review
+    raised are DELIBERATELY left out of this key for now: vela's
+    `--optimise`/`--arena-cache-size` flags and the core/NPU clock. Neither
+    has a machine-source field anywhere in this repo today (unlike
+    compiler_version, which already lives on the `.alpmodel` manifest's
+    `Target.compiler_version` and `scripts/alp_model/adapters/ethos_u.py`'s
+    `_vela_version()`) -- adding them here would mean inventing new capture
+    plumbing this contract doesn't build, and an identity field nothing
+    writes is worse than no field: it can never be verified, only trusted.
+    Revisit once a capture path actually records them.
+    """
+    target = _as_dict(doc.get("target")) if isinstance(doc, dict) else {}
+    model = _as_dict(doc.get("model")) if isinstance(doc, dict) else {}
+    vela = doc.get("vela") if isinstance(doc, dict) else None
+    vela = vela if isinstance(vela, dict) else {}
+    parts = [
+        str(doc.get("sku", "")) if isinstance(doc, dict) else "",
+        str(doc.get("hw_rev", "")) if isinstance(doc, dict) else "",
+        str(target.get("backend", "")),
+        str(target.get("accel_config", "")),
+        str(target.get("core", "")),
+        str(target.get("compiler_version", "")),
+        str(model.get("src_sha", "")),
+        str(vela.get("system_config", "")),
+        str(vela.get("memory_mode", "")),
+    ]
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _model_perf_target_context(sku: str):
+    """(target_pairs, core_ids, paired_core_by_target) for a SKU, or None
+    when the SKU itself can't be resolved (the caller already reports that
+    separately as "SKU exists").
+
+    target_pairs -- the (backend, accel_config) pairs
+    `alp_model.targets.resolve_targets()` actually resolves for this SKU --
+    the SAME resolver `alp model check` uses, so a perf point can't name a
+    target the tiered resolution could never route a compile to.
+
+    core_ids -- the SoM preset's `topology:` role keys (e.g. `m55_hp`,
+    `a32_cluster`) -- the core-name vocabulary for this SKU.
+
+    paired_core_by_target -- for the subset of the HOST SoC's `npus[]`
+    entries that pin a `paired_core`, the one core id that (backend,
+    accel_config) target is allowed to name.  An NPU entry with no
+    `paired_core` (accessible from more than one core, or not yet known)
+    imposes no stricter constraint than "any topology core id" here --
+    `accel_config`'s one-line format mirrors `targets.py::_soc_targets()`,
+    the only other place this string is built, deliberately kept in sync by
+    hand rather than by extending that function's return shape for one
+    caller.
+    """
+    preset_path = SOM_PRESETS / f"{sku}.yaml"
+    try:
+        specs = resolve_targets(sku, metadata_root=SOM_PRESETS.parent)
+        preset = strict_yaml_load(preset_path.read_text(encoding="utf-8"), source=preset_path)
+    except Exception:
+        return None
+    if not isinstance(preset, dict):
+        return None
+
+    target_pairs = {(s.backend, s.accel_config) for s in specs}
+    topology = preset.get("topology")
+    core_ids = set(topology.keys()) if isinstance(topology, dict) else set()
+
+    paired: dict[tuple[str, str], str] = {}
+    silicon = str(preset.get("silicon", ""))
+    soc_path = resolve_soc_path(silicon, SOM_PRESETS.parent)
+    if soc_path is not None and soc_path.is_file():
+        try:
+            soc = json.loads(soc_path.read_text(encoding="utf-8"))
+        except Exception:
+            soc = {}
+        for npu in _dict_entries(soc.get("npus") if isinstance(soc, dict) else None):
+            pc = npu.get("paired_core")
+            if not isinstance(pc, str) or not pc:
+                continue
+            backend = _npu_backend(str(npu.get("type", "")), str(npu.get("subtype", "")))
+            if backend is None:
+                continue
+            accel = _accel_config(npu, backend)
+            paired[(backend, accel)] = pc
+
+    return target_pairs, core_ids, paired
+
+
+def _check_model_perf_semantics(model_perf_files) -> list:
+    """metadata/model_perf/<SKU>/<hash>.yaml semantic cross-checks a JSON
+    Schema shape pass can't express (issue #1520): the path reproduces the
+    body; the SKU exists; the (backend, accel_config) pair and the core are
+    ones the SKU actually resolves; hw_rev is in the family table; an
+    ethos_u point records its vela profile and a non-ethos_u point carries
+    none; req_sram_kib covers arena_bytes; p95 is not below the mean and
+    p50 is not above p95; the run-count floor; capture.date parses; the
+    published tree cannot absorb a `_fixture`.  Returns a failure list
+    shaped like `_check_files()`.
+    """
+    failures: list[tuple[str, list[str]]] = []  # (rel-path str, msgs), not Path -- see below
+    for path in model_perf_files:
+        try:
+            rel = path.relative_to(REPO).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        msgs: list[str] = []
+
+        # The published tree cannot absorb a `_fixture` -- checked on the
+        # PATH alone, before the body is even parsed: a test/dev fixture
+        # checked in here is wrong regardless of whether its body validates.
+        # Scoped to the two path components that are actually PART of the
+        # published-tree naming -- the SKU directory and the identity-hash
+        # filename -- rather than the full absolute path: an ancestor
+        # directory (a developer's checkout path, a CI workspace) can
+        # coincidentally contain this substring with nothing to do with the
+        # tree's own content, which a whole-path scan would misreport.
+        if (_MODEL_PERF_FIXTURE_MARKER in path.parent.name
+                or _MODEL_PERF_FIXTURE_MARKER in path.name):
+            msgs.append(
+                f"path contains `{_MODEL_PERF_FIXTURE_MARKER}` -- a fixture "
+                f"belongs under tests/fixtures/model_perf/, never in the "
+                f"published metadata/model_perf/ tree")
+
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            doc = None  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            if msgs:
+                print(f"FAIL {rel}")
+                for m in msgs:
+                    print(f"  · {m}")
+                failures.append((rel, msgs))
+            continue
+
+        sku = doc.get("sku")
+        hw_rev = doc.get("hw_rev")
+        target = _as_dict(doc.get("target"))
+        model = _as_dict(doc.get("model"))
+        vela = doc.get("vela")
+        perf = _as_dict(doc.get("perf"))
+        capture = _as_dict(doc.get("capture"))
+        backend = target.get("backend")
+        accel_config = target.get("accel_config", "")
+        core = target.get("core")
+
+        # The path reproduces the body: the containing directory IS the SKU,
+        # and the filename IS the measurement-identity hash of this body.
+        if isinstance(sku, str) and sku:
+            if path.parent.name != sku:
+                msgs.append(
+                    f"path directory `{path.parent.name}` != body `sku: "
+                    f"{sku}` -- the containing directory is the SKU, not an "
+                    f"independently-chosen label")
+            expected_stem = _model_perf_identity_hash(doc)
+            if path.stem != expected_stem:
+                msgs.append(
+                    f"filename `{path.stem}` doesn't reproduce this body's "
+                    f"measurement-identity hash (`{expected_stem}`) -- "
+                    f"sku/hw_rev/target/model.src_sha/vela changed without "
+                    f"renaming the file, or two different measurements "
+                    f"collided on one path")
+
+        # The SKU exists.
+        som_ctx = None
+        if not isinstance(sku, str) or not sku:
+            msgs.append("sku: missing/not a string")
+        elif not (SOM_PRESETS / f"{sku}.yaml").is_file():
+            msgs.append(f"sku `{sku}`: no metadata/e1m_modules/{sku}.yaml preset")
+        else:
+            som_ctx = _model_perf_target_context(sku)
+
+        # The (backend, accel_config) pair and the core are ones the SKU
+        # actually resolves.
+        if som_ctx is not None:
+            target_pairs, core_ids, paired = som_ctx
+            key = (backend, accel_config)
+            if key not in target_pairs:
+                msgs.append(
+                    f"target: (backend={backend!r}, accel_config="
+                    f"{accel_config!r}) is not a target `{sku}` actually "
+                    f"resolves (alp_model.targets.resolve_targets) -- valid: "
+                    f"{sorted(target_pairs)}")
+            if not isinstance(core, str) or not core:
+                msgs.append("target.core: missing/not a string")
+            elif core_ids and core not in core_ids:
+                msgs.append(
+                    f"target.core `{core}` is not a `topology:` role of "
+                    f"`{sku}` -- valid: {sorted(core_ids)}")
+            required_core = paired.get(key)
+            if required_core is not None and core != required_core:
+                msgs.append(
+                    f"target.core `{core}` != `{required_core}`, the core "
+                    f"this SoC JSON pins (backend={backend!r}, accel_config="
+                    f"{accel_config!r}) to via npus[].paired_core")
+
+        # hw_rev is in the family table.
+        if not isinstance(hw_rev, str) or not hw_rev:
+            msgs.append("hw_rev: missing/not a string")
+        elif isinstance(sku, str) and sku:
+            try:
+                family = _sku_family(sku)
+            except ValueError:
+                family = None
+            if family is not None:
+                hwrev_path = SOM_PRESETS / family / "hw-revisions.yaml"
+                if not hwrev_path.is_file():
+                    msgs.append(
+                        f"hw_rev `{hw_rev}`: no metadata/e1m_modules/"
+                        f"{family}/hw-revisions.yaml family table to check "
+                        f"against")
+                else:
+                    try:
+                        table = strict_yaml_load(
+                            hwrev_path.read_text(encoding="utf-8"), source=hwrev_path)
+                    except Exception:
+                        table = None
+                    revs = _as_dict(table.get("hw_revisions")) if isinstance(table, dict) else {}
+                    if hw_rev not in revs:
+                        msgs.append(
+                            f"hw_rev `{hw_rev}` is not a key in "
+                            f"metadata/e1m_modules/{family}/hw-revisions.yaml "
+                            f"hw_revisions: -- valid: {sorted(revs)}")
+
+        # An ethos_u point records its vela profile.
+        if backend == "ethos_u":
+            if not isinstance(vela, dict):
+                msgs.append(
+                    "target.backend is `ethos_u` but `vela:` is missing -- "
+                    "vela silently falls back to its OWN built-in default "
+                    "(Ethos_U85_SYS_DRAM_Mid / Dedicated_Sram_384KB, a "
+                    "DRAM-backed profile) when --system-config/--memory-mode "
+                    "aren't passed; record whichever profile this capture "
+                    "actually used")
+            else:
+                if not vela.get("system_config"):
+                    msgs.append("vela.system_config: missing/empty")
+                if not vela.get("memory_mode"):
+                    msgs.append("vela.memory_mode: missing/empty")
+        elif isinstance(vela, dict):
+            # A `vela:` block on a non-ethos_u point is meaningless (no vela
+            # compile happened) and hashes into the identity for nothing --
+            # a stray copy-paste from an ethos_u point silently produces a
+            # different hash for what is otherwise the same measurement
+            # (issue #1520 review, PR #1884).
+            msgs.append(
+                f"target.backend is `{backend}`, not `ethos_u`, but `vela:` "
+                f"is present -- vela only runs for an ethos_u target; drop "
+                f"this block (it plays no part in a {backend} compile)")
+
+        # req_sram_kib covers arena_bytes.
+        req_sram_kib = perf.get("req_sram_kib")
+        arena_bytes = perf.get("arena_bytes")
+        if isinstance(req_sram_kib, int) and isinstance(arena_bytes, int):
+            if req_sram_kib * 1024 < arena_bytes:
+                msgs.append(
+                    f"perf.req_sram_kib ({req_sram_kib} KiB = "
+                    f"{req_sram_kib * 1024} B) is smaller than "
+                    f"perf.arena_bytes ({arena_bytes} B) -- the declared "
+                    f"SRAM budget doesn't cover the compiler-reported arena "
+                    f"it's supposed to hold")
+
+        # p95 is not below the mean; p50 is not above p95; the run-count floor.
+        latency = perf.get("latency_ms")
+        if isinstance(latency, dict):
+            def _num(v):
+                return isinstance(v, (int, float)) and not isinstance(v, bool)
+            mean, p50, p95, runs = (latency.get("mean"), latency.get("p50"),
+                                     latency.get("p95"), latency.get("runs"))
+            if _num(mean) and _num(p95) and p95 < mean:
+                msgs.append(
+                    f"perf.latency_ms.p95 ({p95}) is below "
+                    f"perf.latency_ms.mean ({mean}) -- a p95 below the mean "
+                    f"of the same sample is not a valid percentile (mean/"
+                    f"p50/p95 swapped, or a stale value left over from a "
+                    f"re-run)")
+            if _num(p50) and _num(p95) and p95 < p50:
+                # p50 <= p95 always holds for any real sample (a percentile
+                # function is non-decreasing) -- unlike mean-vs-p50, which a
+                # right-skewed latency tail can legitimately invert, so that
+                # relationship is deliberately NOT enforced here (issue
+                # #1520 review, PR #1884).
+                msgs.append(
+                    f"perf.latency_ms.p50 ({p50}) is above "
+                    f"perf.latency_ms.p95 ({p95}) -- the 50th percentile of "
+                    f"a sample can never exceed its 95th percentile (mean/"
+                    f"p50/p95 swapped, or a stale value left over from a "
+                    f"re-run)")
+            if isinstance(runs, int) and not isinstance(runs, bool) and runs < _MODEL_PERF_LATENCY_RUN_FLOOR:
+                msgs.append(
+                    f"perf.latency_ms.runs ({runs}) is below the floor of "
+                    f"{_MODEL_PERF_LATENCY_RUN_FLOOR} -- a p95 over fewer "
+                    f"runs is noise, not a percentile")
+
+        # capture.date parses.
+        date = capture.get("date")
+        if not isinstance(date, str):
+            msgs.append("capture.date: missing/not a string")
+        else:
+            try:
+                datetime.date.fromisoformat(date)
+            except ValueError:
+                msgs.append(
+                    f"capture.date `{date}` does not parse as an ISO-8601 "
+                    f"date (YYYY-MM-DD)")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}  (sku={sku}, target={backend}/"
+                  f"{accel_config or 'cpu'}/{core})")
     return failures
 
 
@@ -2634,6 +2792,9 @@ def main() -> int:
                 lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "name",
             )
+            # #1845: two chips declaring the same (bus, address) reaches
+            # silicon as two devices answering one address.
+            board_failures += _check_board_i2c_address_collisions(board_files)
 
     # Chip manifests (YAML) against chip-v1 schema.
     chip_failures: list = []
@@ -2651,6 +2812,39 @@ def main() -> int:
             )
             chip_failures += _check_chip_semantics(chip_files)
             chip_failures += _check_chip_physical(chip_files)
+
+    # V2N/V2M on-module GD32G553 supervisor pin-wiring source (#655)
+    # against supervisor-links-v1.
+    supervisor_links_failures: list = []
+    supervisor_links_files: list = []
+    if SUPERVISOR_LINKS_SCHEMA.is_file():
+        # SUPERVISOR_LINKS_DATA is an explicit single-file constant, not a
+        # glob -- a deleted/renamed data file used to silently no-op this
+        # whole registration (`0 supervisor-links file(s) checked, 0
+        # failure(s)`, exit 0). That is a hard error, not a skip: the
+        # V2N/V2M pinctrl.dtsi/_defconfig emitters have no other source.
+        if not SUPERVISOR_LINKS_DATA.is_file():
+            rel = SUPERVISOR_LINKS_DATA.relative_to(REPO).as_posix()
+            msg = ("missing -- the V2N/V2M on-module GD32G553 supervisor "
+                   "pin-wiring source (#655) must exist at this exact path")
+            print()
+            print(f"FAIL {rel}")
+            print(f"  · {msg}")
+            supervisor_links_failures.append((rel, [msg]))
+        else:
+            sl_schema = json.loads(SUPERVISOR_LINKS_SCHEMA.read_text(encoding="utf-8"))
+            sl_validator = jsonschema.Draft202012Validator(sl_schema)
+            supervisor_links_files = [SUPERVISOR_LINKS_DATA]
+            print()
+            supervisor_links_failures = _check_files(
+                "YAML", supervisor_links_files, sl_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "schemaVersion",
+            )
+            # Cross-ref against metadata/pinmux/v2n.yaml (pad ownership +
+            # core attribution) and metadata/chips/gd32g553.yaml (peer I2C
+            # address) -- neither is expressible in the schema alone.
+            supervisor_links_failures += _check_supervisor_links_cross_refs(supervisor_links_files)
 
     # Block manifests (YAML) against block-v1 schema.
     block_failures: list = []
@@ -2694,48 +2888,29 @@ def main() -> int:
             )
             npu_ops_failures += _check_npu_ops_semantics(npu_ops_files)
 
-    # Bench-measured model perf points (the tier-2 data asset).  One file per
-    # MEASUREMENT IDENTITY under metadata/model_perf/<sku>/<target>/<slug>-
-    # <sha12>@<toolchain>-<version>+<hw_rev>+<core>+<profile12>.json -- `**`
-    # for the same reason npu_ops uses it: a file dropped at any other depth
-    # must still reach the schema and semantic passes rather than silently
-    # matching nothing.
-    #
-    # `metadata/model_perf/` is EMPTY until the first bench campaign, and an
-    # empty glob makes every check below pass over nothing.  That vacuum is
-    # closed in tests/scripts/test_model_perf_metadata.py, which drives this
-    # same schema + `_check_model_perf_semantics` against a real fixture point
-    # under tests/fixtures/model_perf/ and against a mutation of every rule.
-    # Absence of a point is never a verdict: a model/SKU/target combination
-    # with no file here is `undetermined`, not `does not fit`.
+    # Tier-2 model-perf points (YAML) against model-perf v1 (#1520).
+    # metadata/model_perf/ ships EMPTY today -- a perf point comes off real
+    # silicon or it does not exist (docs/bench/model-perf-capture.md) -- so
+    # this section exists to gate the FIRST bench capture from day one,
+    # rather than being bolted on after the tree already has content in it.
     model_perf_failures: list = []
-    model_perf_files: list = sorted(MODEL_PERF.glob("**/*.json"))
-    if not MODEL_PERF_SCHEMA.is_file():
-        # The glob comes FIRST and this branch fails loudly, because the
-        # obvious spelling -- wrapping the whole pass in `if
-        # MODEL_PERF_SCHEMA.is_file()` -- makes deleting or renaming the
-        # schema turn every published point into an unchecked one at rc=0.
-        # A point broken fifteen ways would then validate silently, and this is
-        # the one data asset a customer reads as an exact answer about their
-        # own hardware.  No schema plus no points is legitimately nothing to
-        # check; no schema WITH points is a gate that has been removed.
-        if model_perf_files:
-            print()
-            print(f"FAIL metadata/schemas/{MODEL_PERF_SCHEMA.name}")
-            print(f"  · missing, but {len(model_perf_files)} perf point(s) are "
-                  f"published under metadata/model_perf/ -- they would be "
-                  f"accepted unchecked")
-            model_perf_failures = [(f"metadata/schemas/{MODEL_PERF_SCHEMA.name}",
-                                    ["schema missing while perf points ship"])]
-    else:
+    model_perf_files: list = []
+    if MODEL_PERF_SCHEMA.is_file():
         model_perf_schema = json.loads(MODEL_PERF_SCHEMA.read_text(encoding="utf-8"))
         model_perf_validator = jsonschema.Draft202012Validator(model_perf_schema)
-        if model_perf_files:
+        model_perf_files, model_perf_collector_failures = _collect_model_perf_files(MODEL_PERF)
+        if model_perf_files or model_perf_collector_failures:
             print()
-            model_perf_failures = _check_files(
-                "JSON", model_perf_files, model_perf_validator,
-                lambda p: strict_json_loads(p.read_text(encoding="utf-8"), source=p),
-                "stance",
+        for rel, msgs in model_perf_collector_failures:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+        model_perf_failures += model_perf_collector_failures
+        if model_perf_files:
+            model_perf_failures += _check_files(
+                "YAML", model_perf_files, model_perf_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "sku",
             )
             model_perf_failures += _check_model_perf_semantics(model_perf_files)
 
@@ -2786,6 +2961,12 @@ def main() -> int:
         print()
         memory_population_failures = _check_som_memory_population(som_files)
 
+    # SoM `on_module.i2c_devices.<bus>.devices[]` (bus, address_7bit) uniqueness (#1845).
+    i2c_collision_failures: list = []
+    if som_files:
+        print()
+        i2c_collision_failures = _check_som_i2c_address_collisions(som_files)
+
     # Silicon -> Kconfig registry + socs/ correspondence.
     print()
     silicon_kconfig_failures = _check_silicon_kconfig()
@@ -2807,16 +2988,19 @@ def main() -> int:
                       + len(instance_uniqueness_failures)
                       + len(slot0_address_failures)
                       + len(memory_population_failures)
+                      + len(i2c_collision_failures)
                       + len(silicon_kconfig_failures)
                       + len(peripheral_kconfig_failures)
-                      + len(tier_a_library_ci_failures))
+                      + len(tier_a_library_ci_failures)
+                      + len(supervisor_links_failures))
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
           f"{len(hwrev_files)} hw-revisions file(s) + "
           f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
           f"{len(block_files)} block file(s) + {len(npu_ops_files)} npu-ops file(s) + "
           f"{len(model_perf_files)} model-perf point(s) + "
           f"{len(library_files)} library manifest(s) + Kconfig registries + "
-          f"tier-a-library-ci registry "
+          f"tier-a-library-ci registry + "
+          f"{len(supervisor_links_files)} supervisor-links file(s) "
           f"checked, {total_failures} failure(s)")
     return 0 if total_failures == 0 else 1
 

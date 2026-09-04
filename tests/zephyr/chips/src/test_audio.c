@@ -80,7 +80,18 @@ ZTEST(alp_chips, test_tas2563_calls_reject_uninitialised)
 
 /* #739: every documented strap address (Table 7-3) must be accepted;
  * anything else -- including the two out-of-range/UB-adjacent boundary
- * probes 0x80 and 0xFF -- must be rejected before any bus access. */
+ * probes 0x80 and 0xFF -- must be rejected before any bus access.
+ *
+ * #1846: TAS2563_I2C_ADDR_BROADCAST (0x48) moved from valid[] to
+ * invalid[] -- it is a real datasheet address but not a single,
+ * individually-addressable chip, and init's own probe both reads AND
+ * writes through ctx->addr (select_page() writes the page register
+ * before the REVID read).  Accepting it let init -- and every later
+ * read_revision()/set_mode() call, all gated only on ctx->initialised,
+ * never re-checking the address -- silently land on whatever else is
+ * strapped to 0x48 on the bus (a real EVK pre-respin had an INA236
+ * there); see test_tas2563_init_rejects_broadcast_address below for
+ * the dedicated regression. */
 ZTEST(alp_chips, test_tas2563_init_validates_address_strap_range)
 {
 	tas2563_t ctx;
@@ -100,8 +111,10 @@ ZTEST(alp_chips, test_tas2563_init_validates_address_strap_range)
 	 * native_sim with no real amp on the bus -- only the validation
 	 * gate is under test here). */
 	const uint8_t valid[] = {
-		TAS2563_I2C_ADDR_GND_DIRECT, TAS2563_I2C_ADDR_GND_PULL,  TAS2563_I2C_ADDR_VDD_PULL,
-		TAS2563_I2C_ADDR_VDD_DIRECT, TAS2563_I2C_ADDR_BROADCAST,
+		TAS2563_I2C_ADDR_GND_DIRECT,
+		TAS2563_I2C_ADDR_GND_PULL,
+		TAS2563_I2C_ADDR_VDD_PULL,
+		TAS2563_I2C_ADDR_VDD_DIRECT,
 	};
 	for (size_t i = 0; i < ARRAY_SIZE(valid); ++i) {
 		alp_status_t s = tas2563_init(&ctx, bus, valid[i], NULL);
@@ -109,15 +122,43 @@ ZTEST(alp_chips, test_tas2563_init_validates_address_strap_range)
 		    s, ALP_ERR_INVAL, "addr 0x%02x must pass the strap-range check", valid[i]);
 	}
 
-	/* 0x00, the low neighbor 0x4B, the high neighbor 0x50, and the
-	 * 0x7F/0x80/0xFF domain boundaries are all outside the strap set. */
-	const uint8_t invalid[] = { 0x00u, 0x4Bu, 0x50u, 0x7Fu, 0x80u, 0xFFu };
+	/* 0x00, the low neighbor 0x4B, the high neighbor 0x50, the
+	 * 0x7F/0x80/0xFF domain boundaries, and the broadcast address
+	 * itself (#1846) are all outside the individually-addressable
+	 * strap set. */
+	const uint8_t invalid[] = {
+		0x00u, 0x4Bu, TAS2563_I2C_ADDR_BROADCAST, 0x50u, 0x7Fu, 0x80u, 0xFFu
+	};
 	for (size_t i = 0; i < ARRAY_SIZE(invalid); ++i) {
 		zassert_equal(tas2563_init(&ctx, bus, invalid[i], NULL),
 		              ALP_ERR_INVAL,
 		              "addr 0x%02x must be rejected",
 		              invalid[i]);
 	}
+
+	alp_i2c_close(bus);
+}
+
+/* #1846 regression: a bare, explicit assertion that init at the
+ * global broadcast address is refused -- kept separate from the
+ * strap-range sweep above so this exact defect (broadcast init
+ * clobbering an unrelated 0x48 device, e.g. an INA236) has one
+ * test that names it and cannot be silently widened away. */
+ZTEST(alp_chips, test_tas2563_init_rejects_broadcast_address)
+{
+	tas2563_t  ctx;
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = ALP_E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
+	zassert_not_null(bus);
+
+	zassert_equal(tas2563_init(&ctx, bus, TAS2563_I2C_ADDR_BROADCAST, NULL),
+	              ALP_ERR_INVAL,
+	              "init must refuse the write-only broadcast address (#1846): 0x48 does "
+	              "not pin down one physical chip, and every op this driver exposes but "
+	              "set_hw_enable() both reads and writes through ctx->addr, which a "
+	              "device sharing 0x48 (e.g. an INA236) would answer instead of the amp");
 
 	alp_i2c_close(bus);
 }

@@ -51,8 +51,23 @@
  * while the real failure (a crash before the RESULT line) went unreported.
  * This app instead states the SKIP explicitly: "no XiP slave in DT;
  * SOC_FEAT_OSPI_HAS_XIP_SER=0 on AE822".  A live XiP read stays additionally
- * unverifiable regardless (no octal-NOR/HyperBus part is populated on ANY AEN
- * SKU) but is not the reason for the skip.
+ * unverifiable regardless, and the reason has TWO layers that must not be
+ * collapsed into one (#915):
+ *
+ *   - As DESIGNED on board rev 2626-R2, the OSPI memory is not a hole in the
+ *     schematic: the module netlist carries a Macronix MX25UM25645GXDI00
+ *     (256 Mbit octal NOR, SPI Octal I/O DTR) wired to OSPI0_D0..D7 / SCLK /
+ *     SS1 / RXDS, and its BOM line is marked populated (DNP = 0).
+ *   - As ASSEMBLED, the bench unit has NO OSPI memory fitted (maintainer,
+ *     2026-08-30).  DNP = 0 is a build-intent field; it does not promise that
+ *     any particular physical module was stuffed with the part.
+ *
+ * So on THIS board a live XiP read is blocked by an empty footprint, exactly
+ * as the original comment said, and no amount of DT or driver work will make
+ * the XiP step pass here.  The design-level fact only means a future
+ * fully-stuffed module would not need a board respin to run it.  Do not read
+ * the BOM as evidence about the unit on your desk -- confirm the part is
+ * physically there before treating an OSPI failure as a software defect.
  *
  * This example has caught three real, distinct silicon/build bugs on a board
  * with nothing on the OSPI bus (the clock-gate fault, the MPU Device-mapping
@@ -194,10 +209,20 @@ int main(void)
 	 * POST_KERNEL init already took slot 0, so this call takes slot 1 --
 	 * both succeed against the fixed two-slot table.
 	 */
+	/*
+	 * core_clk: DT_PROP(OSPI_NODE, clock_frequency), NOT a `bus-speed`
+	 * fallback -- see flash_ospi_alif.c:30-80. A fallback here wrote
+	 * OSPI_BAUDR = core_clk / bus_speed = 1, and HWRM AHRM0012NDA v0.3
+	 * S16.1.5.3.5 defines OSPI_BAUDR[SCKDV] = 0 as "OSPI_SCLK is
+	 * disabled" -- a dead bus, not an overclock. The node always sets
+	 * `clock-frequency` now, so this app mirrors the driver's plain
+	 * DT_PROP() instead of quietly re-growing the same fallback one file
+	 * over from the fix.
+	 */
 	HAL_OSPI_Handle_T app_handle = -1;
 	struct ospi_init  app_cfg    = {
 		.bus_speed       = DT_PROP(OSPI_NODE, bus_speed),
-		.core_clk        = DT_PROP_OR(OSPI_NODE, clock_frequency, DT_PROP(OSPI_NODE, bus_speed)),
+		.core_clk        = DT_PROP(OSPI_NODE, clock_frequency),
 		.cs_pin          = DT_PROP(OSPI_NODE, cs_pin),
 		.rx_ds_delay     = DT_PROP(OSPI_NODE, rx_ds_delay),
 		.ddr_drive_edge  = DT_PROP(OSPI_NODE, ddr_drive_edge),
@@ -248,15 +273,16 @@ int main(void)
 	 * both from the driver's own init and directly from this app -- AND the
 	 * register file reads back its documented CTRLR0 reset value. XiP setup
 	 * is out of scope for this gate (see the module header SKIP note); a
-	 * live XiP read stays HW-blocked regardless (no octal-NOR/HyperBus part
-	 * is populated on ANY AEN SKU).
+	 * live XiP read stays HW-blocked regardless (no OSPI memory is fitted
+	 * on this bench unit -- design-populated per BOM, not assembled here,
+	 * see the module header's DESIGNED-vs-ASSEMBLED note, #915).
 	 */
 	if (node_ok && hal_init_ok && ctrlr0_ok) {
 		printk("RESULT PASS: OSPI/HexSPI node BINDS -- ospi0@83000000 binds to "
 		       "snps,designware-ospi at the fork reg/aes-reg base with IRQ 96; "
 		       "alif_hal_ospi_initialize() is reachable and links; CTRLR0 reads "
 		       "its documented reset value; XiP SKIPPED (no XIP_SER on this die), "
-		       "live XiP HW-blocked (no part populated on any AEN SKU)\n");
+		       "live XiP HW-blocked (no OSPI part assembled on this unit, #915)\n");
 	} else {
 		printk("RESULT FAIL: OSPI/HexSPI node NOT staged "
 		       "(bound=%d base_ok=%d irq_ok=%d hal_init_ok=%d ctrlr0_ok=%d -- node "

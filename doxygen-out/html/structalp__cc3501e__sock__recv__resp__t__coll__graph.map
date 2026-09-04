@@ -1,5 +1,0 @@
-<map id="alp_cc3501e_sock_recv_resp_t" name="alp_cc3501e_sock_recv_resp_t">
-<area shape="rect" id="Node000001" title="Reply DATA header for CMD_SOCK_RECV (precedes the received bytes, which follow inline with no padding..." alt="" coords="12,93,187,133"/>
-<area shape="rect" id="Node000002" href="$structalp__cc3501e__sock__addr__t.html" title="Endpoint address shared by CMD_SOCK_CONNECT and the from&#45;address of a received datagram." alt="" coords="5,5,193,31"/>
-<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="102,44,102,93,97,93,97,44"/>
-</map>

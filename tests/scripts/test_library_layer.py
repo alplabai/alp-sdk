@@ -132,6 +132,38 @@ def test_validate_metadata_rejects_name_filename_mismatch(tmp_path: Path) -> Non
     assert failures and "must match the manifest filename" in failures[0][1][0]
 
 
+def test_non_list_requires_capabilities_does_not_crash_the_gate(tmp_path: Path) -> None:
+    """`requires.capabilities` is itself schema-typed as an array, but a
+    malformed manifest can carry a non-list scalar there (e.g. the bare int
+    `5`, which is truthy) -- iterating the unfiltered value used to raise
+    `TypeError: 'int' object is not iterable`, aborting the whole gate
+    mid-run instead of leaving the schema FAIL line (which already flags
+    the type mismatch) to explain the real problem."""
+    import validate_metadata as vm
+    bad = tmp_path / "badcap2.yaml"
+    doc = _valid_manifest()
+    doc["name"] = "badcap2"
+    doc["requires"] = {"capabilities": 5}
+    bad.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    failures = vm._check_library_semantics([bad])  # must not raise
+    assert failures == []
+
+
+def test_non_string_requires_capability_entry_does_not_crash_the_gate(tmp_path: Path) -> None:
+    """`requires.capabilities[]` entries are schema-typed as strings, but a
+    malformed manifest can carry a dict/list entry there -- the unfiltered
+    `cap not in vocab` membership test used to raise `TypeError: unhashable
+    type: 'dict'`."""
+    import validate_metadata as vm
+    bad = tmp_path / "badcap3.yaml"
+    doc = _valid_manifest()
+    doc["name"] = "badcap3"
+    doc["requires"] = {"capabilities": [{"nested": "dict"}]}
+    bad.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    failures = vm._check_library_semantics([bad])  # must not raise
+    assert failures  # non-string capability is reported as unknown
+
+
 def test_capability_vocabulary_is_grounded() -> None:
     import validate_metadata as vm
     vocab = vm._capability_vocabulary()
@@ -237,7 +269,7 @@ def test_emit_cmsis_cv_module_only_no_kconfig(tmp_path: Path) -> None:
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "# library: cmsis-cv v25c6c111ee04dcfb0ae9093fd6dee4586872982c" in out
     # Nothing invented: the library layer emits the tag line and nothing else.
-    assert liblayer.zephyr_kconfig_lines(project, project.cores["m33_sm"]) == [
+    assert liblayer.zephyr_kconfig_lines(project, project.cores["m33_sm"], liblayer.METADATA_ROOT) == [
         "# library: cmsis-cv v25c6c111ee04dcfb0ae9093fd6dee4586872982c"
     ]
 
@@ -250,7 +282,7 @@ def test_emit_arm_2d_module_only_no_kconfig(tmp_path: Path) -> None:
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "# library: arm-2d v1.2.6" in out
     # Nothing invented: the library layer emits the tag line and nothing else.
-    assert liblayer.zephyr_kconfig_lines(project, project.cores["m33_sm"]) == [
+    assert liblayer.zephyr_kconfig_lines(project, project.cores["m33_sm"], liblayer.METADATA_ROOT) == [
         "# library: arm-2d v1.2.6"
     ]
 
@@ -262,14 +294,14 @@ def test_emit_zero_diff_without_libraries(tmp_path: Path) -> None:
     assert "ADR 0018" not in out
     assert "CONFIG_LVGL=y" not in out
     # Helper returns nothing for an unselected project (guards the guard).
-    assert liblayer.zephyr_kconfig_lines(project, project.cores["m33_sm"]) == []
+    assert liblayer.zephyr_kconfig_lines(project, project.cores["m33_sm"], liblayer.METADATA_ROOT) == []
 
 
 def test_emit_unknown_library_lists_available(tmp_path: Path) -> None:
     body = _V2N_NOLIB.replace("cores:", "libraries: [lvglx]\ncores:")
     project = load_board_yaml(_write_board(tmp_path, body))
     with pytest.raises(OrchestratorError) as exc:
-        liblayer.zephyr_kconfig_lines(project, project.cores["m33_sm"])
+        liblayer.zephyr_kconfig_lines(project, project.cores["m33_sm"], liblayer.METADATA_ROOT)
     msg = str(exc.value)
     assert "unknown library `lvglx`" in msg
     # lists the available manifests so the typo is self-correcting
@@ -335,7 +367,7 @@ def test_incompatible_selection_not_wireable(tmp_path: Path) -> None:
     """
     project = load_board_yaml(_write_board(tmp_path, body))
     with pytest.raises(OrchestratorError) as exc:
-        liblayer.resolve_selection(project)
+        liblayer.resolve_selection(project, liblayer.METADATA_ROOT)
     assert "cannot be wired" in str(exc.value)
 
 
@@ -362,29 +394,14 @@ def test_emit_lvgl_yocto_image_install(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------
 # alp doctor
 # ---------------------------------------------------------------------
-
-def test_doctor_libraries_none_without_project(monkeypatch, tmp_path: Path) -> None:
-    from alp_cli import doctor
-    monkeypatch.chdir(tmp_path)  # no board.yaml here
-    assert doctor._check_libraries() is None
-
-
-def test_doctor_libraries_reports_selection(monkeypatch, tmp_path: Path) -> None:
-    from alp_cli import doctor
-    _write_board(tmp_path, _V2N_LVGL)
-    monkeypatch.chdir(tmp_path)
-    result = doctor._check_libraries()
-    assert result is not None
-    assert result.status == doctor.PASS
-    assert "lvgl" in result.message
-    assert "tier A" in result.message and "MIT" in result.message
-
-
-def test_doctor_libraries_none_when_empty(monkeypatch, tmp_path: Path) -> None:
-    from alp_cli import doctor
-    _write_board(tmp_path, _V2N_NOLIB)
-    monkeypatch.chdir(tmp_path)
-    assert doctor._check_libraries() is None
+#
+# `alp_cli.doctor._check_libraries()`'s three tests retired here alongside
+# `scripts/alp_cli/doctor.py` itself (alp-sdk#1368): tan's own
+# `tan/core/doctor_libraries.py` is the native, released port (tan-cli#629,
+# shipped in tan-cli v0.6.0) and carries its own tan-cli test coverage.
+# `scripts/alp_orchestrate/libraries.py`'s `resolve_selection()` -- the
+# selection logic both readers report on -- is untouched and still covered
+# directly by test_orchestrate_libraries.py.
 
 
 # ---------------------------------------------------------------------
@@ -498,7 +515,7 @@ def test_microros_requires_zephyr_core(tmp_path: Path) -> None:
     """
     project = load_board_yaml(_write_board(tmp_path, body))
     with pytest.raises(OrchestratorError) as exc:
-        liblayer.resolve_selection(project)
+        liblayer.resolve_selection(project, liblayer.METADATA_ROOT)
     assert "zephyr" in str(exc.value)
 
 
@@ -540,7 +557,7 @@ def test_ros2_on_non_yocto_target_errors(tmp_path: Path) -> None:
     """
     project = load_board_yaml(_write_board(tmp_path, body))
     with pytest.raises(OrchestratorError) as exc:
-        liblayer.resolve_selection(project)
+        liblayer.resolve_selection(project, liblayer.METADATA_ROOT)
     msg = str(exc.value)
     assert "ros2" in msg and "yocto" in msg
 
@@ -663,7 +680,7 @@ def test_lwm2m_on_non_zephyr_target_errors(tmp_path: Path) -> None:
     """
     project = load_board_yaml(_write_board(tmp_path, body))
     with pytest.raises(OrchestratorError) as exc:
-        liblayer.resolve_selection(project)
+        liblayer.resolve_selection(project, liblayer.METADATA_ROOT)
     msg = str(exc.value)
     assert "lwm2m" in msg and "zephyr" in msg
 

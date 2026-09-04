@@ -46,17 +46,25 @@ jobs:
   peripheral-instances-check:
     name: metadata · RZ/V2N peripheral-instances DTSI projection
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Raised from 5 -> 10 (#1477): 3 flagged network steps (Checkout,
+    # Set up Python, the sparse-checkout of the pinned RZ/V2N devicetree)
+    # each need their own timeout-minutes cap; their sum (6min) left no
+    # headroom under the old 5-minute ceiling, which would fail
+    # test_job_ceiling_exceeds_the_sum_of_its_step_timeouts.
+    timeout-minutes: 25
 
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
         with:
+          persist-credentials: false
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 5
         with:
           python-version-file: alp-sdk/.python-version
 
@@ -80,6 +88,9 @@ jobs:
       # (dts/arm/renesas/rz/rzv/r9a09g056.dtsi) out of the whole Zephyr
       # tree, not a full west workspace/SDK/toolchain. Runs in seconds.
       - name: Sparse-checkout the RZ/V2N devicetree at the pinned tag
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         env:
           ZEPHYR_TAG: ${{ steps.pin.outputs.tag }}
         run: |

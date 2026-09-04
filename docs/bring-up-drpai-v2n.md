@@ -222,16 +222,21 @@ applies to the other `meta-rz-*` feature layers.
 
 ```sh
 export ALP_DRPAI_TVM_HOME=<rzv_drp-ai_tvm checkout>
-tan model build --board <path>/board.yaml
+tan model build --sdk-root <alp-sdk> --board <path>/board.yaml
 ```
 
-`tan model build` is the only front door now (ADR-0028): the host-side model
-engine that used to live in this repo as `scripts/alp_model/`, driven by
-`scripts/alp_cli/model.py`'s `python3 -m alp_cli model build`, moved into
-`tan.model` and `python/tan/commands/model_cmd.py` in `alplabai/tan-cli`.
-`alp-sdk` keeps every per-NPU fact the engine reads (`metadata/npu_ops/`,
-`metadata/model_zoo/`, `metadata/schemas/`) and the on-device `.alpmodel`
-reader (`src/common/alp_model.c`); it no longer ships a Python build path.
+`tan` is a standalone binary — it must resolve an alp-sdk checkout before it
+can compile anything, and `--sdk-root` is how you bind one explicitly rather
+than relying on discovery (cwd-inside-the-checkout, a project pin, or a
+global default) picking the right one.
+
+`tan` is the whole command surface (ADR-0020 end-state B); `scripts/alp_cli`'s
+former `model` command (and the rest of its command-line wrappers) retired
+once `tan model` shipped a native port (alp-sdk#1368). There is no `alp`
+console script, and no `python -m alp_cli <verb>` front door either any
+more. The host-side model engine itself (`scripts/alp_model/`) still lives
+in alp-sdk today — ADR-0028's relocation to `tan.model` is Proposed, not yet
+enacted (see the ADR).
 There is no `--target`/`--product` flag and no positional `<model.onnx>`
 argument. `tan model build` compiles every `models:` entry declared in
 `board.yaml` for every backend the SoM resolves to; `PRODUCT` for DRP-AI
@@ -247,19 +252,13 @@ geometry. `tan.model.adapters.drpai` never reads `spec`; it reads
 `input_shape`, `input_name`, `images` and `product` straight out of the
 `compile.drpai` block, so `tan validate` rejects a `board.yaml` written this
 way. That does not block the command in step 5 above: `tan model build`
-(the `_resolve_compile` helper in tan-cli's `python/tan/commands/model_cmd.py`) reads `board.yaml`
-with a plain `yaml.safe_load` and never calls the schema validator itself —
-only the separate `tan validate` command does — so `compile.drpai.input_shape`
-/ `input_name` / `images` / `product` reach the adapter unchanged through the
-documented CLI today, exactly as
-tan-cli's `python/tests/commands/test_model_command.py` covers with the
-`test_resolve_compile_leaves_non_path_options_unchanged` case, which exercises
-that helper directly (alp-sdk#1271 fixed this same
-path-corruption defect here first; tan's hand-ported copy did not receive the
-fix until tan-cli#776, after the relocation made it a moot distinction). Until
-the schema is reconciled with what the adapter actually reads, `tan validate`
-cannot be used against a `board.yaml` with a `compile.drpai` block;
-`tan model build` can.
+reads `board.yaml` with a plain `yaml.safe_load` and never calls the schema
+validator itself — only the separate `tan validate` command does — so
+`compile.drpai.input_shape` / `input_name` / `images` / `product` reach the
+adapter unchanged through the documented CLI today. Until the schema is
+reconciled with what the adapter actually reads, `tan validate` cannot be
+used against a `board.yaml` with a `compile.drpai` block; `tan model build`
+can.
 
 `tan.model.adapters.drpai` drives
 `$ALP_DRPAI_TVM_HOME/tutorials/compile_onnx_model_quant.py` with `PRODUCT` in the
@@ -331,11 +330,18 @@ already, via the `CONFIG_BOOTCOMMAND` override in
   `mmcblk0` and microSD is always `mmcblk1`; the vendor env's
   `alp_root=/dev/mmcblk2p2` names a device that cannot exist.
 
-> **Neither fix has booted a board.** `dev`'s version is code-complete and its
-> own CHANGELOG says so; a second, independent implementation exists unmerged
-> on `feat/1145-drpai-v2n-bringup` using per-MACHINE `CONFIG_ALP_FDT_FILE` /
-> `CONFIG_ALP_SD_ROOT` Kconfig strings, which would also close the V2M gap
-> `dev`'s hardcoded filename leaves open. See #1175 before relying on either.
+> **Neither fix has booted a board.** #1175 is closed and `dev` carries the fix
+> (#1182, with the eMMC half completed in #1186), but it was settled by
+> inspection of the patch, not by a boot. The second, independent
+> implementation once carried on `feat/1145-drpai-v2n-bringup` -- per-MACHINE
+> Kconfig strings for the dtb filename and the SD root -- was deliberately
+> **not** landed: two mechanisms both setting the boot dtb is worse than
+> either (reasons recorded on #1175 and #1238). Its one advantage, the V2M
+> gap, has since been closed in-tree by a different mechanism --
+> `CONFIG_ALP_E1M_FDTFILE`, defaulting to the V2N basename and overridden per
+> MACHINE by `meta-alp-sdk/recipes-bsp/u-boot/u-boot/fdtfile-v2m.cfg` (#1252,
+> itself bench-gated). Treat that branch as recoverable history, not a live
+> option.
 
 > **Operational trap.** The manual FIP flow has no `merge_config.sh` step, so it
 > builds from the Kconfig defaults — the vendor values — and will boot the

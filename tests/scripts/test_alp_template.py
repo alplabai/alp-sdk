@@ -39,6 +39,31 @@ def _minimal_record() -> dict:
     return alp_template.find_template(_catalog(), "minimal")
 
 
+def _no_paragraph_break_between(text: str, start_marker: str, end_marker: str) -> bool:
+    """True iff the span from `start_marker` to `end_marker` has no blank
+    line and no HTML-block opener (`<...`, optionally indented 0-3 spaces
+    per CommonMark's rule for HTML blocks types 1-6 -- a `<!--` comment is
+    type 2) between them. This is a targeted proxy for the #1794 defect
+    shape, NOT a general CommonMark block-boundary oracle: it does not
+    detect the other paragraph-interrupting constructs (ATX headings,
+    thematic breaks, fenced code, block quotes, list markers, setext
+    underlines) -- those are out of scope here. A stray HTML-block opener
+    at column 0-3 is how issue #1794 silently split a sentence into two
+    `<p>` tags; a 4-space indent is an indented code block and does NOT
+    interrupt a paragraph, so it must NOT trip this check. `markdown_it`
+    is not a declared project dependency (not in
+    pyproject.toml/scripts/requirements.txt, so not installed by the CI
+    `pip install -e ".[dev,model-compile]"` step that runs `pytest
+    tests/scripts/`) -- this stdlib-only check pins the same fact without
+    adding one."""
+    start = text.index(start_marker)
+    end = text.index(end_marker, start)
+    between = text[start + len(start_marker):end]
+    if "\n\n" in between:
+        return False
+    return not any(re.match(r" {0,3}<", line) for line in between.split("\n"))
+
+
 # --------------------------------------------------------------------------
 # render(): faithful copy of files.user_owned, files.generated excluded
 # --------------------------------------------------------------------------
@@ -171,6 +196,63 @@ def test_integer_parameter_below_minimum_raises(tmp_path):
 
 def test_minimal_has_no_declared_parameters_so_it_is_a_pure_copy():
     assert _minimal_record()["parameters"] == []
+
+
+# --------------------------------------------------------------------------
+# find_template_by_cores() -- the --cores scaffold selector (issue #1652)
+# --------------------------------------------------------------------------
+
+def test_find_template_by_cores_selects_multicore_mailbox():
+    rec = alp_template.find_template_by_cores(
+        _catalog(), {"m55_hp": "zephyr", "m55_he": "zephyr"})
+    assert rec["id"] == "multicore-mailbox"
+
+
+def test_find_template_by_cores_selects_multicore_rpmsg():
+    rec = alp_template.find_template_by_cores(
+        _catalog(), {"a32_cluster": "yocto", "m55_hp": "zephyr"})
+    assert rec["id"] == "multicore-rpmsg"
+
+
+def test_find_template_by_cores_topology_order_does_not_matter():
+    """dict equality, not list equality -- {a: 1, b: 2} == {b: 2, a: 1}."""
+    rec = alp_template.find_template_by_cores(
+        _catalog(), {"m55_hp": "zephyr", "a32_cluster": "yocto"})
+    assert rec["id"] == "multicore-rpmsg"
+
+
+def test_find_template_by_cores_no_match_names_known_topologies():
+    with pytest.raises(alp_template.TemplateNotFoundError) as exc:
+        alp_template.find_template_by_cores(
+            _catalog(), {"m55_hp": "zephyr", "m55_he": "yocto"})
+    # `multicore-mailbox`'s real topology (m55_hp+m55_he, both zephyr)
+    # is in the "known" list, so a wizard can see what IS on offer.
+    assert "m55_he" in str(exc.value)
+    assert "zephyr" in str(exc.value)
+
+
+def test_find_template_by_cores_ambiguous_topology_names_candidates():
+    """`{"m55_hp": "zephyr"}` alone matches every single-M55-core AEN
+    template (minimal/peripheral/sensor/diagnostics/iot) -- an
+    AmbiguousCoresError naming them all, not a silent pick of one."""
+    with pytest.raises(alp_template.AmbiguousCoresError) as exc:
+        alp_template.find_template_by_cores(_catalog(), {"m55_hp": "zephyr"})
+    assert "minimal" in str(exc.value)
+    assert "peripheral" in str(exc.value)
+
+
+def test_scaffold_via_cores_matches_scaffold_via_template():
+    """The two selectors are alternative INPUTS to the same render
+    path -- --cores must never diverge from what --template already
+    produces for the template it resolves to (issue #1652's fallback-
+    unchanged requirement)."""
+    rec = alp_template.find_template_by_cores(
+        _catalog(), {"m55_hp": "zephyr", "m55_he": "zephyr"})
+    assert rec["id"] == "multicore-mailbox"
+    via_cores = alp_template.render_to_envelope(rec["id"], "E1M-AEN801")
+    via_template = alp_template.render_to_envelope(
+        "multicore-mailbox", "E1M-AEN801")
+    assert via_cores == via_template
 
 
 # --------------------------------------------------------------------------
@@ -519,10 +601,19 @@ def test_render_to_envelope_preserves_trailing_comment_when_value_unchanged():
     byte-passthrough, comment included (already covered end-to-end by
     test_render_to_envelope_is_passthrough_for_the_examples_own_sku for
     `minimal`; this pins it for a record whose lines DO carry inline
-    comments)."""
+    comments) -- MODULO the unconditional issue #1855 bare-repo-path
+    rewrite (`_scaffold_bare_repo_paths`, e.g. this file's own bare
+    `examples/peripheral-io/gpio-button-led/` + `docs/board-config-
+    schema.md` mentions), which is not sku-gated and so applies here too;
+    expected is that same rewrite applied to the raw source once, so this
+    still pins "nothing ELSE changed" rather than papering over a
+    regression in either transform."""
     example = REPO / "examples" / "peripheral-io" / "gpio-button-led"
     envelope = dict(alp_template.render_to_envelope("peripheral", "E1M-AEN801"))
-    assert envelope["board.yaml"] == (example / "board.yaml").read_text(encoding="utf-8")
+    docs_ref = alp_template._docs_ref(alp_template.REPO)
+    expected = alp_template._scaffold_bare_repo_paths(
+        (example / "board.yaml").read_text(encoding="utf-8"), docs_ref)
+    assert envelope["board.yaml"] == expected
 
 
 # --------------------------------------------------------------------------
@@ -634,6 +725,63 @@ def test_scaffold_cmakelists_leaves_a_detached_comment_run_alone():
     assert "# Resolve the alp-sdk root." not in peer
 
 
+def _fake_sdk_checkout(root, version, status, tags=()):
+    """A minimal git checkout carrying `metadata/sdk_version.yaml` and
+    `tags` -- enough for `_docs_ref` to read and for `git rev-parse` to
+    answer against. One empty commit, because a tag needs an object."""
+    (root / "metadata").mkdir(parents=True)
+    (root / "metadata" / "sdk_version.yaml").write_text(
+        f"version: {version}\nstatus:  {status}\n", encoding="utf-8")
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    subprocess.run(["git", "init", "-q", str(root)], check=True, env=env)
+    subprocess.run(["git", "-C", str(root), "commit", "-q", "--allow-empty", "-m", "x"],
+                   check=True, env=env)
+    for tag in tags:
+        subprocess.run(["git", "-C", str(root), "tag", tag], check=True, env=env)
+    return root
+
+
+def test_docs_ref_falls_back_to_main_when_the_declared_tag_does_not_exist(tmp_path):
+    """#1508. Between an rc cut and its GA tag `metadata/sdk_version.yaml`
+    declares `version: 0.16.0` / `status: released` while only
+    `v0.16.0-rc1` exists, and pinning on that declared pair alone put
+    three unresolvable `blob/v0.16.0/docs/...` links in every scaffolded
+    README for the whole window (six days, for v0.15.0).
+
+    The rc tag being present is the point: this is not "no tags at all",
+    it is the exact shape that fooled the old check.
+    """
+    root = _fake_sdk_checkout(tmp_path / "rc", "0.16.0", "released", tags=("v0.16.0-rc1",))
+    assert alp_template._docs_ref(root) == "main"
+
+
+def test_docs_ref_pins_the_tag_once_it_actually_resolves(tmp_path):
+    """The other direction, so the fix cannot degrade into "always main"
+    -- that would silently drop the stable-docs pin #864 added."""
+    root = _fake_sdk_checkout(tmp_path / "ga", "0.16.0", "released",
+                              tags=("v0.16.0-rc1", "v0.16.0"))
+    assert alp_template._docs_ref(root) == "v0.16.0"
+
+
+def test_docs_ref_is_main_for_a_development_checkout(tmp_path):
+    """Unchanged pre-#1508 behaviour: a non-`released` status never pins,
+    tag present or not."""
+    root = _fake_sdk_checkout(tmp_path / "dev", "0.17.0", "development", tags=("v0.17.0",))
+    assert alp_template._docs_ref(root) == "main"
+
+
+def test_docs_ref_is_main_outside_a_git_checkout(tmp_path):
+    """A tarball export or `--no-tags` clone has the metadata but no refs.
+    `_tag_resolves` must degrade to `main`, never raise -- an exception
+    here would abort the whole scaffold over a README link."""
+    root = tmp_path / "tarball"
+    (root / "metadata").mkdir(parents=True)
+    (root / "metadata" / "sdk_version.yaml").write_text(
+        "version: 0.16.0\nstatus:  released\n", encoding="utf-8")
+    assert alp_template._docs_ref(root) == "main"
+
+
 def test_scaffold_readme_has_no_dangling_sdk_tree_links_or_self_path():
     envelope = dict(alp_template.render_to_envelope("minimal", "E1M-AEN801"))
     readme = envelope["README.md"]
@@ -653,6 +801,54 @@ def test_scaffold_readme_rewrites_sibling_example_links_too():
     assert "../i2c-scanner/" not in readme
     assert (f"https://github.com/alplabai/alp-sdk/tree/{ref}"
             "/examples/peripheral-io/i2c-scanner") in readme
+
+
+def test_scaffold_readme_cold_chain_models_link_survives_scaffolding():
+    """Issues #1688/#1749: cold-chain-monitor's README deliberately links
+    `../cold-chain-monitor/models/README.md` -- climbing out of the
+    example dir and back in -- because `_RELATIVE_LINK_RE` only matches
+    `../`-prefixed links and `models/README.md` is a CHILD of the example
+    dir, not a sibling. A future edit that "tidies" the link to the more
+    natural `](models/README.md)` would stop matching the rewriter
+    entirely and ship a dangling relative link in every scaffold; assert
+    on the EMITTED output, not the source text, so this catches that.
+
+    Also pins issue #1798's rendering regression: a URL substring alone
+    survives even when an explanatory HTML comment sitting at column 0
+    silently splits the "No model is shipped ... See [link]" sentence
+    into two paragraphs, so also assert the lead-in and the link render
+    in the SAME CommonMark block."""
+    envelope = dict(alp_template.render_to_envelope("edge-ai", "E1M-AEN801"))
+    readme = envelope["README.md"]
+    ref = alp_template._docs_ref(alp_template.REPO)
+    assert (f"https://github.com/alplabai/alp-sdk/blob/{ref}"
+            "/examples/ai/cold-chain-monitor/models/README.md") in readme
+    assert _no_paragraph_break_between(
+        readme, "No model is shipped", "[`models/README.md`](")
+
+
+def test_scaffold_readme_mqtt_native_sim_conf_link_survives_scaffolding():
+    """Issue #1794: mqtt-telemetry's README deliberately links
+    `../mqtt-telemetry/native_sim.conf` -- climbing out of the example
+    dir and back in -- because `_RELATIVE_LINK_RE` only matches
+    `../`-prefixed links and `native_sim.conf` is a CHILD of the example
+    dir, not a sibling. A future edit that "tidies" the link to the more
+    natural `](native_sim.conf)` would stop matching the rewriter
+    entirely and ship a dangling relative link in every scaffold; assert
+    on the EMITTED output, not the source text, so this catches that.
+
+    Also pins issue #1798's rendering regression: a URL substring alone
+    survives even when an explanatory HTML comment sitting at column 0
+    silently splits the "turns mbedtls off (see [link])" sentence into
+    two paragraphs, so also assert the lead-in and the link render in
+    the SAME CommonMark block."""
+    envelope = dict(alp_template.render_to_envelope("iot", "E1M-AEN801"))
+    readme = envelope["README.md"]
+    ref = alp_template._docs_ref(alp_template.REPO)
+    assert (f"https://github.com/alplabai/alp-sdk/blob/{ref}"
+            "/examples/connectivity/mqtt-telemetry/native_sim.conf") in readme
+    assert _no_paragraph_break_between(
+        readme, "turns mbedtls off (see", "[`native_sim.conf`](")
 
 
 def test_scaffold_readme_extra_zephyr_modules_uses_alp_sdk_root_not_pwd():
@@ -750,6 +946,84 @@ def test_scaffold_readme_rewrites_west_flash_after_every_m33_sm_board_line():
     )
     assert out.count("west flash --host <board-ip>") == 2
     assert "\nwest flash\n" not in out
+
+
+def test_scaffold_readme_rewrites_a_subpath_of_the_example_path_too():
+    """Issue #1855: mproc-mailbox's README names the HE-side peer core
+    with `west build -b <board> examples/multicore/mproc-mailbox/peer`
+    -- a SUBPATH of the template's own `example_path`, not an exact
+    match. The plain `example_path` token rewrite (which turns the bare
+    example_path itself into `.`) never fired on this before: its
+    `(?!\\S)` right boundary failed on the following `/peer`, so the
+    scaffold shipped a `west build` argument naming a directory that
+    only exists inside the alp-sdk tree, not the customer's copied-out
+    project."""
+    text = (
+        "west build -b board/soc/core "
+        "examples/multicore/mproc-mailbox/peer\n"
+        "west flash\n"
+    )
+    out = alp_template._scaffold_readme(text, "examples/multicore/mproc-mailbox", "main")
+    assert "examples/multicore/mproc-mailbox" not in out
+    assert "west build -b board/soc/core ./peer\n" in out
+
+
+def test_scaffold_bare_repo_paths_rewrites_a_bare_doc_mention():
+    """Issue #1855: `docs/cc3501e-bridge.md` named bare (no markdown
+    `[...]()` around it) in a board.yaml/src/main.c comment survives a
+    scaffold verbatim -- README.md is the only file any existing
+    transform touches for this class of reference."""
+    ref = "v9.9.9"
+    text = "# the CC3501E bridge (see docs/cc3501e-bridge.md), selected\n"
+    out = alp_template._scaffold_bare_repo_paths(text, ref)
+    assert "(see docs/cc3501e-bridge.md)" not in out
+    assert f"https://github.com/alplabai/alp-sdk/blob/{ref}/docs/cc3501e-bridge.md" in out
+
+
+def test_scaffold_bare_repo_paths_rewrites_a_bare_example_dir_mention():
+    """Same class, `examples/<category>/<name>` form (i2c-master's
+    board.yaml/src/main.c "-- see examples/v2n/v2n-temp-sensor for
+    ..." cross-reference) -- a directory, so it gets a `tree/` URL, not
+    `blob/`."""
+    ref = "v9.9.9"
+    text = "# BRD_I2C/TMP112 -- see examples/v2n/v2n-temp-sensor for the pattern\n"
+    out = alp_template._scaffold_bare_repo_paths(text, ref)
+    assert "see examples/v2n/v2n-temp-sensor" not in out
+    assert f"https://github.com/alplabai/alp-sdk/tree/{ref}/examples/v2n/v2n-temp-sensor" in out
+
+
+def test_scaffold_bare_repo_paths_is_noop_without_a_match():
+    text = "# nothing here names docs/ or examples/ at all\n"
+    assert alp_template._scaffold_bare_repo_paths(text, "main") == text
+
+
+@pytest.mark.parametrize(
+    "template_id,rel,needle",
+    [
+        ("iot", "board.yaml", "docs/cc3501e-bridge.md"),
+        ("iot", "src/main.c", "docs/cc3501e-bridge.md"),
+        ("sensor", "board.yaml", "examples/v2n/v2n-temp-sensor"),
+        ("sensor", "src/main.c", "examples/v2n/v2n-temp-sensor"),
+        ("edge-ai", "src/main.c", "examples/ai/cold-chain-monitor/models/README.md"),
+        ("multicore-mailbox", "src/main.c", "examples/multicore/mproc-mailbox/peer/main.c"),
+    ],
+)
+def test_render_to_envelope_leaves_no_bare_alp_sdk_only_path(template_id, rel, needle):
+    """Issue #1855: each of these (template, file) pairs names an
+    alp-sdk-tree-only path bare in a source comment for the CANONICAL
+    (passthrough) sku, where no OTHER substitution would have touched
+    it -- pins the fix against the real catalog content, not just the
+    helper in isolation."""
+    envelope = dict(alp_template.render_to_envelope(template_id, "E1M-AEN801"))
+    text = envelope[rel]
+    # `needle` still appears as the TAIL of the rewritten GitHub URL --
+    # assert every occurrence sits right after `github.com/alplabai/
+    # alp-sdk/`, i.e. it is never present BARE any more.
+    matches = list(re.finditer(re.escape(needle), text))
+    assert matches, (template_id, rel, needle)
+    for m in matches:
+        prefix = text[max(0, m.start() - 80):m.start()]
+        assert "github.com/alplabai/alp-sdk/" in prefix, (rel, prefix)
 
 
 def test_substitute_board_yaml_sku_rejects_ambiguous_sku_line():
@@ -1327,9 +1601,9 @@ def test_alp_sdk_root_required_block_checks_both_d_and_env_and_prefers_d():
 
 
 # --------------------------------------------------------------------------
-# render(..., sku=...) / default_sku() -- `alp generate`'s other scaffold
-# front door now agrees with `alp emit scaffold` (issue #864 Fable-review
-# MINOR G)
+# render(..., sku=...) / default_sku() -- tan-cli's scaffold front doors
+# (`tan init`, `tan scaffold`) now agree with `west alp-emit scaffold`
+# (issue #864 Fable-review MINOR G)
 # --------------------------------------------------------------------------
 
 def test_default_sku_is_the_examples_own_som_sku():

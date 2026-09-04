@@ -29,13 +29,18 @@ template until that port lands.
 
 ## TLS status -- preview
 
+<!-- The ../mqtt-telemetry/ detour is deliberate: the scaffold
+     rewriter's _RELATIVE_LINK_RE only matches `../`-prefixed links, and
+     native_sim.conf is a child of this dir, not a sibling -- don't "fix" this. -->
+
 The `mqtts://` path is configured through the portable API (broker
 URI + a pinned CA), but **`CONFIG_MBEDTLS` is held OFF in the build
 today**. Zephyr v4.4's mbedtls 3.6 has an `ssl_misc.h`
 include-order bug (`unknown type name 'mbedtls_error_pair_t'`); full
 `tf-psa-crypto` wiring is a v0.6 work item. On real AEN silicon the
 build follows the TF-M stack and is unaffected; the native_sim leg
-turns mbedtls off (see [`native_sim.conf`](native_sim.conf)) so the
+turns mbedtls off (see
+[`native_sim.conf`](../mqtt-telemetry/native_sim.conf)) so the
 framing path still builds and runs. This is why the catalog record
 is `preview`.
 
@@ -44,13 +49,16 @@ is `preview`.
 To keep the focus on the transport, this template publishes a
 **synthetic metric** (device uptime). Swap
 `read_telemetry_value()` for a real sensor read -- e.g. compose it
-with the [`sensor` template](../../peripheral-io/i2c-master/) (TMP112
-over `<alp/chips/tmp112.h>`) -- and the publish path is unchanged.
+with the [`sensor` template](../../peripheral-io/i2c-master/) (BMP581
+over `<alp/chips/bmp581.h>`) -- and the publish path is unchanged.
 
 ## Build
 
 ```bash
 # Standalone, native_sim (no radio; framing-only, mbedtls off):
+# native_sim.conf ships only in the alp-sdk tree, not in this
+# scaffold -- copy it in first (see the link above) before
+# running this leg.
 west build -b native_sim/native/64 examples/connectivity/mqtt-telemetry \
     -- -DEXTRA_ZEPHYR_MODULES=$(pwd) -DEXTRA_CONF_FILE=native_sim.conf
 west build -t run

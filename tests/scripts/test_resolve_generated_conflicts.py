@@ -33,7 +33,6 @@ rgc = _load()
 @pytest.mark.parametrize(
     "path",
     [
-        "alp.lock",
         "metadata/catalog.json",
         "docs/abi/v0.15-snapshot.json",
         "docs/abi/v0.16-snapshot.json",          # survives the next bump
@@ -56,6 +55,10 @@ def test_generated_paths_are_recognised(path):
         "CHANGELOG.md",                             # changelog.d/ handles this
         "metadata/boards/e1m-evk.yaml",
         "tests/fixtures/emit-snapshots/README.md",  # not a .snap
+        # #1576: alp.lock is generated on demand and no longer committed, so
+        # it can never appear in a merge conflict -- REGENERATORS has no
+        # entry for it any more.
+        "alp.lock",
     ],
 )
 def test_source_paths_are_not_touched(path):
@@ -85,19 +88,19 @@ def _repo_with_conflict(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     (repo / "shared.txt").write_text("base\n", encoding="utf-8")
-    (repo / "alp.lock").write_text("base\n", encoding="utf-8")
+    (repo / "gen.json").write_text("base\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "base")
 
     _git(repo, "checkout", "-q", "-b", "side")
     (repo / "shared.txt").write_text("side\n", encoding="utf-8")
-    (repo / "alp.lock").write_text("side\n", encoding="utf-8")
+    (repo / "gen.json").write_text("side\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "side")
 
     _git(repo, "checkout", "-q", "main")
     (repo / "shared.txt").write_text("main\n", encoding="utf-8")
-    (repo / "alp.lock").write_text("main\n", encoding="utf-8")
+    (repo / "gen.json").write_text("main\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "main")
 
@@ -112,16 +115,16 @@ def test_conflicted_paths_reads_the_index_not_markers(tmp_path, monkeypatch):
 
     paths = rgc.conflicted_paths()
 
-    assert sorted(paths) == ["alp.lock", "shared.txt"], paths
+    assert sorted(paths) == ["gen.json", "shared.txt"], paths
     assert "doc.md" not in paths, "a file containing marker TEXT is not conflicted"
 
 
 def test_refuses_to_regenerate_while_a_source_conflict_remains(
     tmp_path, monkeypatch, capsys
 ):
-    """The whole point: alp.lock digests the tree, so regenerating while
-    shared.txt still carries markers would hash them into a wrong value that
-    LOOKS resolved."""
+    """The whole point: metadata/catalog.json digests the tree, so
+    regenerating while shared.txt still carries markers would hash them into
+    a wrong value that LOOKS resolved."""
     repo = _repo_with_conflict(tmp_path)
     monkeypatch.setattr(rgc, "REPO", repo)
     monkeypatch.setattr(sys, "argv", ["rgc"])
@@ -133,7 +136,7 @@ def test_refuses_to_regenerate_while_a_source_conflict_remains(
 
     # conflicted_paths uses subprocess too, so stub it directly instead.
     monkeypatch.setattr(rgc, "conflicted_paths",
-                        lambda: ["alp.lock", "shared.txt"])
+                        lambda: ["metadata/catalog.json", "shared.txt"])
 
     rc = rgc.main()
 
@@ -148,7 +151,7 @@ def test_dry_run_changes_nothing_and_flags_source_conflicts(
     monkeypatch, capsys
 ):
     monkeypatch.setattr(rgc, "conflicted_paths",
-                        lambda: ["alp.lock", "src/x.c"])
+                        lambda: ["metadata/catalog.json", "src/x.c"])
     monkeypatch.setattr(sys, "argv", ["rgc", "--dry-run"])
     monkeypatch.setattr(rgc.subprocess, "run",
                         lambda *a, **k: (_ for _ in ()).throw(
@@ -158,7 +161,7 @@ def test_dry_run_changes_nothing_and_flags_source_conflicts(
     out = capsys.readouterr().out
 
     assert rc == 1
-    assert "generated: alp.lock" in out
+    assert "generated: metadata/catalog.json" in out
     assert "NOT generated (left alone): src/x.c" in out
 
 

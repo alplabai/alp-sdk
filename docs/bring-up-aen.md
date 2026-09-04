@@ -188,27 +188,68 @@ SoM preset at `metadata/e1m_modules/<SKU>.yaml` automatically).
 Run these in order; each one exercises a different on-module
 or on-board subsystem.
 
-### 5.1 On-module I2C: EEPROM (I2C2) vs BRD_I2C (LPI2C0) housekeeping
+### 5.1 On-module I2C: EEPROM (I2C2) vs BRD_I2C (I2C0) housekeeping
 
 **Two separate buses -- don't assume a single shared bus.** The
 EEPROM manifest is bridge/DNP-selected onto its own **SoC I2C2**
 (`P5_6 SCL_C` / `P5_7 SDA_C`); the EVK carrier's sensor + IO-expander
 + INA236 parts share that same **I2C2** bus (`metadata/boards/e1m-evk.yaml`
-`buses:` `E1M_I2C0` -> `EVK_I2C_BUS_SENSORS`). Only the on-module
-housekeeping trio (OPTIGA / RTC / TMP112) is on the separate, shared,
-slave-only **BRD_I2C** (**LPI2C0**, `P7_4`/`P7_5`) -- the silicon can
-only be a slave on that bus, so an external master must never be
-clipped onto it, and the M55 reaches it only via SE services (see
-§5.2), not a direct `i2cdetect`. Scan **I2C2 only** from a built
-`i2c-scanner` example or via the console; the BRD_I2C trio isn't
-scannable from the host:
+`buses:` `E1M_I2C0` -> `EVK_I2C_BUS_SENSORS`). The on-module housekeeping
+trio (OPTIGA / RTC / TMP112) is on the separate, shared **BRD_I2C**
+(**SoC I2C0, function C**, `P7_0` SDA / `P7_1` SCL).
+
+> **Corrected 2026-08-30 (#1848).** This used to say BRD_I2C was
+> "**LPI2C0**, `P7_4`/`P7_5`" -- wrong on both halves. The netlist puts
+> `BRD_I2C_SCL` on ball B3 = **`P7_1`** and `BRD_I2C_SDA` on ball B8 =
+> **`P7_0`**; the datasheet's LPI2C0 pads are `P7_4`/`P7_5`, which carry
+> different nets on this module. `ADTS0013` v1.2 Table 3-16 gives
+> `P7_0`/`P7_1` the alternate function `I2C0_SDA_C`/`I2C0_SCL_C`, confirmed
+> a second time in the per-pin alternate-function grid -- **not**
+> undocumented, and **not** LPI2C0. I2C0 is master-or-slave capable (HWRM
+> section 15.4.1), unlike LPI2C0, so the M55 can master BRD_I2C directly;
+> "the M55 reaches it via SE services" was never true either -- the
+> pinned hal_alif SE services expose no I2C service at all.
+>
+> **That is necessary, not sufficient.** `BRD_I2C` has no pull-up to any
+> rail on the R2 design -- the jumpers that would bridge it into the
+> pulled-up I2C2 segment (`R93`/`R94`) are DNP, unlike the ones I2C2 itself
+> uses (`R95`/`R96`, stuffed). Whether that leaves a working bus is an
+> unresolved document conflict: the datasheet calls `I2C0_SCL_C`/
+> `I2C0_SDA_C` open-drain, requiring an external pull-up, while the HWRM's
+> per-pin note for these ports says I2C "is operating properly with the
+> push-pull (default) driver type" and that open-drain "must not be
+> selected for I2C". Mastering this bus needs either `R93`/`R94` stuffed
+> (a board rework) or the push-pull reading to be the correct one -- not
+> settled on paper. See `examples/aen/aen-secure-element-sign`'s board
+> overlay, which wires the pads with no internal bias pending a bench
+> answer, and blocks using the on-module `rv3028c7` as the accurate time
+> source Alif's own RTC errata workaround calls for (#1814).
+>
+> Unrelated but corrected in the same pass: `LPI2C1` **is** master-capable
+> (HWRM: "Two Low-Power I2C modules (LPI2C0 slave-only and LPI2C1
+> master-only) in the RTSS-HE"), so the RTSS-HE is not slave-only on I2C
+> in general.
+
+`alp_i2c_open()` reaches BRD_I2C at portable bus **2**
+(`aen-secure-element-sign`'s own board overlay aliases `alp-i2c2 = &i2c0`
+-- bus 0 and 1 are already the E1M edge I2C buses, so BRD_I2C could not
+reuse either without silently repointing other examples at a bus carrying
+a secure element). **Do not blind-scan it**: OPTIGA Trust M lives on it at
+`0x30`, and a scan is a real bus transaction against a secure element, not
+a free operation -- probe known addresses only. Scan **I2C2** freely from
+a built `i2c-scanner` example or via the console.
+
+The BRD_I2C routing above is **R2-sourced**: it comes from the
+E1M-AEN-2626-R2 netlist + `ADTS0013`; no R1 netlist is available, and the
+current bench module is r1 (`alp board` -> `E1M-AEN801 r1`) -- probe
+`P7_0`/`P7_1` on the actual unit before treating this as bench-verified.
 
 | Slave | 7-bit addr | What | Bus | Where |
 |-------|------------|------|-----|-------|
 | 24C128 | `0x50` | EEPROM (manifest) | I2C2 | SoM |
-| OPTIGA TM | `0x30` | Secure element | BRD_I2C (LPI2C0) | SoM — **DNI on this bench batch** |
-| RV-3028-C7 | `0x52` | RTC | BRD_I2C (LPI2C0) | SoM |
-| TMP112 | `0x48` | Thermometer | BRD_I2C (LPI2C0) | SoM |
+| OPTIGA TM | `0x30` | Secure element | BRD_I2C (I2C0) | SoM — **DNI on this bench batch** |
+| RV-3028-C7 | `0x52` | RTC | BRD_I2C (I2C0) | SoM |
+| TMP112 | `0x48` | Thermometer | BRD_I2C (I2C0) | SoM |
 | TCAL9538 | `0x72` | GPIO expander (U35 main) | I2C2 | EVK carrier |
 | TCAL9538 | `0x71` | GPIO expander (U37, PCIe) | I2C2 | EVK carrier |
 | INA236 | `0x40`..`0x42`, `0x49`..`0x4B` | Power monitor (6x) | I2C2 | EVK carrier |
@@ -228,9 +269,12 @@ scannable from the host:
 > populated**, and that is *expected*, not a fault. OPTIGA is in the
 > E1M-AEN801 SoM design (`on_module`); the absence is a current-batch
 > population fact (like the un-stuffed OSPI memories). Skip §5.2 on these
-> boards. Note the evidence is the population record, **not** an `i2cdetect`
-> miss — OPTIGA sits on BRD_I2C, which the host cannot scan, so a scan would
-> not have ACKed 0x30 on a fully-populated board either.
+> boards. Note the evidence is the population record, **not** a scan miss --
+> OPTIGA sits on BRD_I2C, whose electrical readiness is still an open
+> question (see the pull-up caveat in §5.1), and which is deliberately not
+> blind-scanned here regardless (a scan is a real transaction against a
+> secure element); the driver's targeted `optiga_trust_m_init` probe is the
+> evidence to trust instead.
 
 A missing slave that's *expected* is a real fault.  The on-module
 set is authoritative in
@@ -251,7 +295,8 @@ The AEN secure-element example
 ([`examples/aen/aen-secure-element-sign`](../examples/aen/aen-secure-element-sign))
 exercises the OPTIGA Trust M over the portable `<alp/*>` API on
 BRD_I2C.  (It is the AEN sibling of the V2N variant -- identical
-`src/`, AEN `board.yaml` with `m55_he` as the BRD_I2C owner.)
+`src/`; the AEN `board.yaml` targets `m55_he`, whose own overlay wires
+BRD_I2C to portable bus 2.)
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-secure-element-sign
@@ -262,8 +307,8 @@ Expect an I2C_STATE probe result on the console.  On an OPTIGA-populated
 SoM the current driver then reports `ALP_ERR_NOSUPPORT` for product-info
 and raw-APDU calls; a future Infineon host-library integration owns the
 read/sign path.  On the current bench batch the example reports
-`RESULT SKIP` if BRD_I2C/LPI2C0 is not ready yet, or if BRD_I2C opens
-but the OPTIGA is DNI and the probe returns `ALP_ERR_NOT_READY`.
+`RESULT SKIP` if BRD_I2C fails to open, or if BRD_I2C opens but the OPTIGA
+is DNI and the probe returns `ALP_ERR_NOT_READY`.
 
 ### 5.3 Ethernet PHY link
 
@@ -286,6 +331,27 @@ These are optional and SKU-/carrier-dependent.  The E1M-EVK
 carries a `CAM_MUX_PI3WVR626` MIPI CSI 2:1 mux (selected via
 `EVK_PIN_CAM_MUX_SEL`), but no camera-mux truth table is published
 yet -- treat the wiring as TBD until the carrier camera doc lands.
+
+
+**Bench-settled 2026-08-31** on the r1 module (`E1M-AEN801`, serial `2617-0001`),
+`i2c0` at 100 kHz, read-only `i2c_write_read` of register `0x00`:
+
+| pad bias | result on `0x48` (TMP112), `0x52` (RV-3028-C7), `0x30` (OPTIGA) |
+|---|---|
+| High-Z, no bias | `rc=-116` (`-ETIMEDOUT`) with `E: User Abort on i2c@49010000` |
+| same build + internal pull-up (~50 kΩ) | `rc=-5` (`-EIO`), no abort |
+
+A bias-only edit changing the error class proves the pinctrl is correct and the
+controller reaches the wire, and that the net has **no usable pull-up**. It also
+settles the open-drain question against the HWRM's push-pull note: had these pads
+driven push-pull, the High-Z run would have worked. The I2C IP tri-states for the
+high phase, so an **external pull-up is required**. Nothing ACKed under the internal
+pull-up either, which is expected — ~50 kΩ is far too weak for 100 kHz rise time.
+
+**So this bus is not usable as built.** It needs `R93`/`R94` stuffed — bridging
+BRD_I2C into the segment the carrier already pulls up via `R137`/`R144` — or
+dedicated pull-ups on the net. That is a board change, not a firmware one, which is
+why #1814 stays open.
 
 ## 6. Bench-day bring-up runbook (first physical SoM)
 
@@ -379,7 +445,7 @@ top of the per-subsystem checks.
 4. **CC3501E PING / GET_VERSION.**  Bring the on-module Wi-Fi/BLE
    coprocessor to life over the inter-chip SPI1 bus.  Issue the
    two META-group opcodes from the bridge host driver (see the
-   wire frame in `firmware/cc3501e/DESIGN.md`):
+   wire frame in `cc3501e-bridge-firmware:DESIGN.md`):
    `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`).
    A standalone host-side helper for the M55 side is **TBD**
    (only the device firmware ships today), so drive it from app
@@ -389,7 +455,7 @@ top of the per-subsystem checks.
      signal.
    * `GET_VERSION` must return the firmware's wire-protocol
      version; cross-check it against
-     `firmware/cc3501e/prebuilt/CHANGELOG.md`.
+     `cc3501e-bridge-firmware:prebuilt/CHANGELOG.md`.
 
    No `RESP_OK` usually means the CC3501E hasn't been flashed yet
    (`helper_firmware[].firmware_path` is still TBD in the SKU
@@ -510,8 +576,11 @@ Once §6's runbook passes:
    [`zephyr/sysbuild/aen/sysbuild.conf`](../zephyr/sysbuild/aen/sysbuild.conf).
    Dev key under [`keys/`](../keys/); production key never
    leaves OPTIGA Trust M secure NVM.
-3. Flash the signed image with `west flash`; the MCUboot
-   secondary slot stays empty until OTA lands.
+3. Flash the signed image with `west flash`; the AEN family's
+   MRAM map has no secondary/scratch slot at all (see
+   [ADR-0006](adr/0006-secure-boot-secure-ota.md)'s 2026-08-25
+   amendment), so there is nothing to revert to and OTA stays
+   deferred until a slot budget is found.
 
 ## 8. Troubleshooting
 
@@ -519,10 +588,10 @@ Once §6's runbook passes:
   image-rejected scenario.  Re-flash with the dev key or check
   the MCUboot trailer.
 * **`i2cdetect` returns no slaves at all** -- I2C2 pull-ups
-  missing or wrong voltage (I2C2 is the bus the scan in §5.1
-  reaches; the BRD_I2C trio is not host-scannable).  Standard
-  Alp boards pull to 1.8 V; some custom boards use 3.3 V
-  (re-strap the SoC side accordingly).
+  missing or wrong voltage (I2C2 is the bus the recommended scan in
+  §5.1 reaches; don't blind-scan BRD_I2C instead -- see §5.1's OPTIGA
+  caveat).  Standard Alp boards pull to 1.8 V; some custom boards use
+  3.3 V (re-strap the SoC side accordingly).
 * **PHY won't link** -- the DP83825 requires its 25 MHz REFCLK
   before the strap latches.  Check `OSC_25M` on the board
   with a scope; the PHY won't link if the clock is missing at

@@ -21,15 +21,36 @@ name: pr-doxygen
 on:
   pull_request:
     branches: [main, dev]
-    paths:
+    # This list must cover docs/doxygen/Doxyfile's INPUT -- the gate reads
+    # every one of these, so a change to any of them can turn the build red.
+    # It previously listed only include/**, docs/doxygen/** and docs/adr/**,
+    # while INPUT already covered ALL of docs plus the root and component
+    # READMEs, so a docs/ci/ edit could (and did, #1585) leave dev red with
+    # nothing running to notice.  tests/scripts/test_doxygen_paths_cover_input.py
+    # pins the two together.
+    paths: &doxygen-inputs
       - 'include/**'
-      - 'docs/doxygen/**'
-      - 'docs/adr/**'
+      - 'docs/**'
+      - '!docs/superpowers/**'
+      - 'README.md'
+      - 'VERSIONS.md'
+      - 'CONTRIBUTING.md'
+      - 'TRADEMARKS.md'
+      - 'chips/README.md'
+      - 'vendors/*/README.md'
+      # All three firmware/*/README.md are in INPUT, so this glob matches it
+      # exactly today and keeps matching when a fourth is added -- the gate
+      # cannot go unreachable for a firmware README the way #1585 did.
+      - 'firmware/*/README.md'
+      - 'keys/README.md'
+      - 'meta-alp-sdk/README.md'
+      - 'examples/README.md'
+      - 'metadata/library-profiles/README.md'
+      - 'zephyr/sysbuild/aen/README.md'
       - '.github/workflows/pr-doxygen.yml'
   push:
     branches: [main, dev]
-    paths:
-      - 'include/**'
+    paths: *doxygen-inputs
   workflow_dispatch:
 
 concurrency:
@@ -40,20 +61,33 @@ jobs:
   doxygen:
     name: doxygen · public headers
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+        timeout-minutes: 5
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 5
         with:
           python-version-file: .python-version
 
       - name: Install Doxygen
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
+        # #1477 set this to 3 from observed runs; it then TIMED OUT on a
+        # real PR (2026-08-18, run 32129302623) -- the step fetches a
+        # ~50 MB tarball from GitHub releases and a slow mirror blows a
+        # tight cap. A step cap exists to catch a HANG, not to enforce a
+        # download SLA, so this is deliberately generous.
         run: |
-          sudo apt-get update -o Acquire::Retries=3
-          sudo apt-get install -o Acquire::Retries=3 -y doxygen graphviz
+          scripts/ci/apt-bounded.sh update
+          scripts/ci/apt-bounded.sh install -y doxygen graphviz
 
       # Fast pre-flight: catch a missing @brief before we spin up
       # the full Doxygen build.  Currently at 100% coverage on main;
@@ -86,7 +120,8 @@ jobs:
 
       - name: Upload HTML artefact
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        timeout-minutes: 2
         with:
           name: doxygen-html
           path: doxygen-out/html/

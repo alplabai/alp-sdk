@@ -3,8 +3,8 @@
 `tan` is the Alp SDK's user-facing command line (ADR
 [0020](adr/0020-sdk-owns-build-execution.md)): it scaffolds and validates
 projects, renders configuration, diagnoses the host, builds and flashes every
-core, packages images and models, runs Renode, opens a serial console, and
-provides the inspection/debugging commands used by Alp IDE.
+core, packages images and models, opens a serial console, and provides the
+inspection/debugging commands used by Alp IDE.
 
 The current implementation is Python and is independently versioned in
 [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli). As of
@@ -64,82 +64,31 @@ now internal to Tan's normal build path.
 
 alp-sdk keeps the original planner and emitters as the canonical reference and
 parity producer while the port settles. Direct `python -m alp_orchestrate` /
-`python -m alp_cli emit` and `west alp-emit` calls are maintainer/inspection
-surfaces; normal `tan build` does not import or spawn
-`scripts/alp_orchestrate/`. `tan generate` renders its supported targets from
-the relocated planner in process and uses the SDK subprocess only as an explicit
-or reported compatibility fallback.
+`west alp-emit` calls are maintainer/inspection surfaces; normal `tan build`
+does not import or spawn `scripts/alp_orchestrate/`. `tan generate` renders
+its supported targets from the relocated planner in process and uses the SDK
+subprocess only as an explicit or reported compatibility fallback.
 
 Most of Tan's 32 verbs are native Python implementations, including `doctor`,
 `init`, `validate`, `generate`, `model`, `new-som`, `faultdecode`, `monitor`,
-`run`, and the build/flash/image/simulation surface. Only `migrate`, `lock`, and
-`quality` still forward to the corresponding `west alp-*` maintenance command.
-The seven former stubs (`scaffold`, `completion`, `diff`, `pinmux`, `inspect`,
-`trace`, `support-bundle`) are implemented too. The SDK's `alp_cli` package is
-still installed in the workspace venv for direct SDK maintenance, parity, and
-the surviving west commands, but it is no longer Tan's command backend.
+`run`, `explain`, and the build/flash/image/simulation surface. Only
+`migrate`, `lock`, and `quality` still forward to the corresponding
+`west alp-*` maintenance command. The seven former stubs (`scaffold`,
+`completion`, `diff`, `pinmux`, `inspect`, `trace`, `support-bundle`) are
+implemented too.
 
-No `alp` console script is installed (`pyproject.toml` registers only
-`alp-mcp`). Maintainers can run the SDK reference CLI straight from a checkout:
-
-```bash
-PYTHONPATH=scripts python3 -m alp_cli --help
-```
-
-### `tan` vs `python -m alp_cli` -- five verb names collide, contracts differ
-
-`scripts/alp_cli` (this repo's internal reference/parity package) and `tan`
-register several identically-named verbs that do **different jobs**. Do not
-read `python -m alp_cli <verb> --help` as documentation for `tan <verb>`, or
-vice versa -- five names collide with an incompatible contract
-(alp-sdk#1193):
-
-| Verb | `python -m alp_cli` contract (measured) | `tan` contract |
-|---|---|---|
-| `generate` | `generate TEMPLATE_ID DEST [--dry-run] [--force] [--param name=value]` -- materialises a **catalog template** into a directory (`scripts/alp_cli/generate.py:67-90`) | `tan generate --target <mode>` (also `--all`, `--core`, `--output`, `--force`) -- emits a **board-derived config artefact**; no positional `TEMPLATE_ID`/`DEST` (see [`#tan-generate`](#tan-generate) below) |
-| `init` | `init NAME [--som] [--preset] [--peripherals]` -- positional project name (`scripts/alp_cli/init.py:76-90`) | `tan init` -- **options only**, no positional `NAME` (see "`tan init`" below) |
-| `doctor` | `doctor [--json] [--strict] [--no-color]` (`scripts/alp_cli/doctor.py:789-793`) | `tan doctor` (also `--format json`, `--build`) -- `--json` is spelled `--format json`; `--strict` has no `tan` equivalent (see "`tan doctor`" below) |
-| `explain` | `explain CODE [--json] [--no-color]` -- looks up an `ALP_ERR_*`/`ALP-Bxxx` **diagnostic code** (`scripts/alp_cli/explain.py:68-74`) | `tan explain [--template] [--target]` -- describes a **project/module template or generation target**; also takes an optional positional `[TEMPLATE]` (`python/tan/commands/explain_cmd.py`), but never a diagnostic `CODE` lookup (see "`tan explain`" below) |
-| `run` | `run [--board] [--flash]` -- one direct `west build` + optional flash, single image (`scripts/alp_cli/run.py:76-79`) | `tan run` (also `--flash`, `--core`) -- a **distinct command**, not an alias for `tan build`/`tan flash`: builds the full multi-slice plan, then for a `native_sim` target executes the produced binary, or for a hardware target (with `--flash`) flashes it (`python/tan/commands/run_cmd.py`) |
-
-Three more `alp_cli` verbs (`monitor`, `new-som`, `faultdecode`) share a name
-with a `tan` verb too but were not found to diverge in shape on inspection --
-they are not re-verified field-by-field here, so do not treat "same option
-list" as a proven-identical envelope either. `emit` is the one `alp_cli` verb
-with no `tan` namesake (`tan` reaches the same ground via `tan generate
---target <mode>`). `alp_cli` registers 10 verbs today
-(`scripts/alp_cli/main.py:26-35`: `doctor`, `emit`, `explain`, `faultdecode`,
-`generate`, `init`, `monitor`, `new-som`, `run`, `validate`) -- `build` is not
-one of them; ADR 0020 retired the SDK-side fan-out executor and no `build.py`
-remains in `scripts/alp_cli/` to collide with `tan build`. `model` was an
-eleventh verb until ADR-0028 deleted `scripts/alp_cli/model.py` along with the
-host-side model engine it drove (`scripts/alp_model/`, relocated into
-`tan.model`) -- `tan model` is unaffected; only the `alp_cli` reference copy
-is gone, so there is nothing left for this table to compare it against.
-
-None of the five is planned to become a console-script front door under its
-current contract -- `scripts/alp_cli/__main__.py`'s own docstring names this
-issue and refuses the `alp` binary framing. That is the only part of
-alp-sdk#1193 this table closes. The rest of #1193's required work is still
-open: a per-verb port/rename/delete disposition for every `alp_cli` verb (not
-just these five), removing the `alp`-prefixed front-door language that
-`__main__.py` disclaims but the other modules still carry (e.g.
-`main.py`'s `prog_name="alp"`, `init.py`'s scaffolded "Generated by `alp
-init`." README text, and the `alp <verb>:` message prefixes across
-`doctor.py`/`emit.py`/`generate.py`/`init.py`/`monitor.py`/`new_som.py`/
-`run.py`), and parity tests. This table exists so no one assumes name parity
-as documentation in the meantime; the disposition and cleanup remain a
-separate, not-yet-started piece of work.
-
-A sixth verb, `validate`, also diverges on inspection though it is not one
-of the five alp-sdk#1193 names: `python -m alp_cli validate` takes an
-**optional** positional `PATH` (default `board.yaml`, so a bare invocation
-works) and `--format human|json|sarif` (`scripts/alp_cli/validate.py:16-20`),
-while `tan validate` is options-only (`--board-yaml`, `--offline`) with
-`--format text|json|diagnostic-v1|sarif` (see "`tan validate`" below) --
-different vocabulary, different flag names, and `alp_cli` accepts the
-positional form `tan` does not. Flagged here for the same disposition work;
-not added to alp-sdk#1193's own five-name scope.
+alp-sdk itself owns zero user commands (ADR-0020 end-state B): `tan` is the
+whole command surface. `scripts/alp_cli/` still exists in this repo, but only
+as a set of internal LIBRARY modules other SDK scripts import (the board.yaml
+validator/renderer, the diagnostic-v1/SARIF exporters) -- its command-line
+wrappers (`main.py`, `validate.py`, `doctor.py`, `emit.py`, `explain.py`,
+`faultdecode.py`, `generate.py`, `init.py`, `model.py`, `monitor.py`,
+`new_som.py`, `run.py`, and the `python -m alp_cli` entry point itself) were
+deleted once `tan` had ported every one of them and nothing else in-repo
+still called them (alp-sdk#1367, alp-sdk#1368). There is no `python -m
+alp_cli <verb>` front door left to run, and no `alp` console script is
+installed (`pyproject.toml` registers only `alp-mcp`) -- the `alp`
+console-script was retired in v0.12.0.
 
 ## `tan` vs `west alp-*` -- which one do I use?
 
@@ -147,10 +96,10 @@ Two front doors, two different jobs -- pick by what you're doing:
 
 | You are... | Use |
 |---|---|
-| Scaffolding a project, validating `board.yaml`, compiling a model, checking your host, opening a serial console, explaining a template/generation target, decoding a fault, or running a native_sim/single-board loop | `tan init` / `tan new-som` / `tan validate` / `tan model` / `tan doctor` / `tan monitor` / `tan explain` / `tan faultdecode` / `tan run` |
+| Scaffolding a project, validating `board.yaml`, compiling a model, checking your host, opening a serial console, explaining a template/generation target/diagnostic code, decoding a fault, or running a native_sim/single-board loop | `tan init` / `tan new-som` / `tan validate` / `tan model` / `tan doctor` / `tan monitor` / `tan explain` / `tan faultdecode` / `tan run` |
 | Inspecting a board-derived config artefact without building | `tan generate --target <mode>`; see the target table below |
 | Inspecting an orchestrator-owned artefact without building (system manifest, build plan, Kconfig menu, IPC contract header, DTS reservations/partitions, storage mounts, TF-M sysbuild overlay) | `west alp-emit <mode>` from a west workspace |
-| Building, flashing, sizing, bundling, cleaning, or Renode-booting a project | `tan build` / `tan flash` / `tan size` / `tan image` / `tan clean` / `tan renode` -- see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) |
+| Building, flashing, sizing, bundling, or cleaning a project | `tan build` / `tan flash` / `tan size` / `tan image` / `tan clean` -- see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) |
 | Scripting the surviving west-centric maintenance commands | `tan migrate` / `tan lock` / `tan quality` (forwarders), or their direct `west alp-*` forms; `west alp-emit` remains the generated-artefact subset |
 
 Rules of thumb:
@@ -255,7 +204,7 @@ Omit `--sku` / `--soc-ref` / `--family` to be prompted interactively
 (requires a terminal; in a pipe or CI the command fails fast naming
 the missing flags).
 
-### `tan build` / `flash` / `size` / `image` / `clean` / `renode` -- build execution
+### `tan build` / `flash` / `size` / `image` / `clean` -- build execution
 
 Before ADR [0020](adr/0020-sdk-owns-build-execution.md) these were
 `alp build` / `alp flash` / `alp size` / `alp image` / `alp clean` /
@@ -264,8 +213,13 @@ Before ADR [0020](adr/0020-sdk-owns-build-execution.md) these were
 retired the SDK-side fan-out executor (`Orchestrator.fan_out()`,
 `_dispatch_slice()`, and the
 `west alp-{build,image,flash,clean,size,renode}` extensions).  The
-multi-slice build/flash/size/image/clean/renode surface moved to the
-standalone, public **`tan` CLI**:
+multi-slice build/flash/size/image/clean surface moved to the
+standalone, public **`tan` CLI**.  The sixth slot in those historical
+lists, `renode`, has no successor: it was retired outright rather than
+moved -- see [ADR 0022](adr/0022-python-executor-renode-retirement.md),
+Amendment 2, and "Verifying without a board" in
+[heterogeneous-builds.md](heterogeneous-builds.md) for what to do
+instead.
 
 ```bash
 tan build                          # materialise the plan + run every slice's build command (default)
@@ -277,7 +231,6 @@ tan flash                          # program every slice + helper MCU
 tan size --fail-over-budget        # footprint vs the SoM memory budget
 tan image                          # assemble a flashable bundle
 tan clean                          # remove build outputs
-tan renode                         # headless smoke boot in Renode
 ```
 
 Python Tan's relocated planner produces the machine-readable, write-free build
@@ -439,10 +392,10 @@ tan validate --offline --format sarif --board-yaml path/to/board.yaml
 ```
 
 `--offline` runs Tan's bundled structural checks without resolving an SDK.
-Without `--offline`, Python Tan currently reports that the SDK-backed rich
-validator subprocess is not yet ported (exit 2); use the direct SDK reference
-command below when you need schema, preset, capability, and orchestrator
-consistency checks during this transition.
+Without `--offline`, Tan resolves the SDK checkout and spawns
+`<sdk-root>/scripts/validate_board_yaml.py` itself (tan-cli#376) for the
+schema, preset, capability, and orchestrator consistency pass, reporting its
+verdict in Tan's own envelope.
 
 `--format` selects the rendering:
 
@@ -461,10 +414,10 @@ consistency checks during this transition.
 `json`/`diagnostic-v1`/`sarif` print only the structured document to stdout, no
 interleaved human prose.
 
-The full SDK reference validator remains:
+The same validator can also be run directly, without Tan:
 
 ```bash
-python3 scripts/validate_board_yaml.py --board-yaml path/to/board.yaml
+python3 scripts/validate_board_yaml.py --input path/to/board.yaml
 ```
 
 It runs the rich validator plus the reference orchestrator consistency pass.
@@ -496,14 +449,21 @@ programming dependencies such as J-Link and Alif SETOOLS. Every failed or
 warning check includes a remediation hint; an unhealthy host exits 4.
 
 `--build` is retained for existing callers but no longer changes the checklist.
-In an interactive text-mode run, `--fix` may run the manifest's elevation-free
-install commands. It never runs `sudo`; `--ci`, `--non-interactive`, and JSON
-mode disable repairs and leave the commands as printed guidance.
+As of tan-cli `dev` (ahead of the tagged `v0.5.1` release -- ships in
+`v0.6.0-rc1`+): in an interactive text-mode run with a TTY, `--fix` may run
+the manifest's install commands. An install command that needs no elevation
+(macOS `brew`, Windows `winget`) runs for any caller. It never spawns the
+`sudo` program: a `sudo`-prefixed command (Linux `apt`/`dnf`) is refused
+with `doctor.fix-needs-sudo` and printed to run by hand for a non-root
+caller, and has its literal `sudo ` prefix stripped and the rest executed
+for a caller who is already root. Without a TTY on both stdin and stderr --
+and under `--ci`, `--non-interactive`, or JSON mode -- repairs are disabled
+and the commands are left as printed guidance.
 
-`PYTHONPATH=scripts python3 -m alp_cli doctor` is alp-sdk's separate reference
-preflight. It has its own checks, `--strict`/`--json` flags, and
-`[PASS]`/`[WARN]`/`[FAIL]` markers. It is maintained for SDK development and
-parity checks; it is not the implementation behind `tan doctor`.
+`tan doctor` is the only preflight front door -- `scripts/alp_cli/doctor.py`,
+alp-sdk's former reference preflight, retired alongside the rest of the
+`alp_cli` command surface once `tan doctor` shipped a native port
+(alp-sdk#1368).
 
 ### `tan monitor` -- serial console
 
@@ -521,18 +481,24 @@ Opens pyserial's miniterm (Ctrl+] to quit).  Baud defaults to 115200
 doesn't exist, it lists every serial port on the host and exits
 non-zero instead of hanging on a wrong device.
 
-### `tan explain` -- explain a project/module template or generation target
+### `tan explain` -- explain a project/module template, generation target, or diagnostic code
 
 ```bash
 tan explain                          # list every topic (templates + targets)
 tan explain --template sensor-driver # explain one project/module template
 tan explain --target dts-overlay     # explain one generation target
+tan explain --code ALP-B003          # look up an ALP-Bxxx / ALP_ERR_* diagnostic code
 ```
 
-`tan explain` has no positional code-lookup argument -- an `ALP-Bxxx`
-validator diagnostic (the codes `tan validate` emits) is decoded by its
-own `see: docs/diagnostics/ALP-Bxxx.md` hint line in `tan validate`'s
-human-mode output, not by `tan explain`.
+`--template` and `--target` are project-agnostic and read no checkout.
+`--code` is the one mode that DOES read one -- it resolves an SDK via the
+`--sdk-root` ladder and looks the code up in that checkout's
+`metadata/error-catalog.json`, refusing (`explain.sdk-root-unresolved`)
+rather than guessing when no SDK resolves. This ported alp-sdk's former
+`scripts/alp_cli/explain.py` (alp-sdk#1367); the `see:
+docs/diagnostics/ALP-Bxxx.md` hint line `tan validate`'s human-mode output
+still prints is a separate, still-live pointer to the same doc page, not a
+substitute for the lookup.
 
 ### `tan faultdecode` -- decode a Cortex-M fault dump
 
@@ -549,7 +515,10 @@ human-readable cause chain.
 # AEN (E1M-AEN801 M55): build every slice + flash over SWD, one line.
 cd examples/peripheral-io/gpio-button-led && tan build && tan flash
 
-# V2N helper MCU only (GD32 bridge), preview first:
+# V2N helper MCU (GD32 bridge): `flash_policy: recovery_only`, so both
+# commands below skip today. GD32 programming was separated out of
+# `tan` (#1439, tan-cli#732); see docs/gd32-bridge.md for the
+# out-of-`tan` bricked-bridge recovery path.
 tan flash examples/v2n/v2n-gd32-bridge-functional --helper gd32_bridge --dry-run
 tan flash examples/v2n/v2n-gd32-bridge-functional --helper gd32_bridge
 
@@ -588,4 +557,4 @@ see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli).
   isn't enough.
 - [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) -- the
   standalone executor's own docs (`tan build` / `flash` / `size` /
-  `image` / `clean` / `renode`).
+  `image` / `clean`).

@@ -71,17 +71,19 @@ def _sku_form_factor(sku: str) -> str:
 # scripts/alp_orchestrate/ consume `silicon_to_kconfig()` so the
 # mapping has exactly one definition (the prior _SILICON_TO_KCONFIG dict
 # was duplicated across both files -- "duplicated truth is a bug").
-SILICON_KCONFIG_REGISTRY = METADATA_ROOT / "registries" / "silicon-kconfig.json"
 
 
-@functools.lru_cache(maxsize=1)
-def _load_silicon_kconfig() -> tuple[str, frozenset[str]]:
-    """Load (socSymbolPrefix, knownSilicon) from the versioned registry."""
-    data = json.loads(SILICON_KCONFIG_REGISTRY.read_text(encoding="utf-8"))
+@functools.lru_cache(maxsize=None)
+def _load_silicon_kconfig(metadata_root: Path) -> tuple[str, frozenset[str]]:
+    """Load (socSymbolPrefix, knownSilicon) from *metadata_root*'s versioned
+    registry. Cache is keyed on *metadata_root* so a second root in the
+    same process doesn't silently reuse the first root's table (#1485)."""
+    registry = Path(metadata_root) / "registries" / "silicon-kconfig.json"
+    data = json.loads(registry.read_text(encoding="utf-8"))
     return data["socSymbolPrefix"], frozenset(data["knownSilicon"])
 
 
-def silicon_to_kconfig(silicon: str | None) -> str | None:
+def silicon_to_kconfig(silicon: str | None, metadata_root: Path) -> str | None:
     """Return the Zephyr Kconfig symbol that selects *silicon*, or ``None``.
 
     The symbol is computed as ``socSymbolPrefix + ref.upper().replace(':','_')``;
@@ -89,10 +91,15 @@ def silicon_to_kconfig(silicon: str | None) -> str | None:
     returned for any ref not in the registry allowlist (so an accelerator
     such as ``deepx:dx:m1`` -- or an unknown ref -- emits no CONFIG line,
     matching the prior dict's ``.get()`` behaviour).
+
+    *metadata_root* is REQUIRED -- callers must pass the project's own
+    ``project.effective_metadata_root()``, never a module default: a
+    silent fall-through to the SDK's own in-tree registry regardless of a
+    project's `--metadata-root` override was #1485's exact defect.
     """
     if silicon is None:
         return None
-    prefix, known = _load_silicon_kconfig()
+    prefix, known = _load_silicon_kconfig(metadata_root)
     if silicon not in known:
         return None
     return prefix + silicon.upper().replace(":", "_")
@@ -181,7 +188,8 @@ def _resolve_sku(sku: str, metadata_root: Path) -> dict[str, Any]:
     preset_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
     if not preset_path.is_file():
         sys.exit(
-            f"alp_project: no preset for SKU {sku} at {preset_path.relative_to(REPO)} "
+            f"alp_project: no preset for SKU {sku} at "
+            f"{preset_path.relative_to(REPO) if preset_path.is_relative_to(REPO) else preset_path} "
             f"(remaining SKUs land alongside the user-supplied HW config writeup)"
         )
     return _load_yaml(preset_path)
@@ -237,13 +245,6 @@ def split_silicon_ref(silicon: str | None) -> tuple[str, str, str] | None:
     want the slugs themselves, use this and root it their own way. Either
     way there is ONE place that knows a `silicon:` ref is three
     colon-separated parts.
-
-    Note the one remaining independent encoding of that fact:
-    `alp_cli/new_som.py::_SOC_REF_RE` (`^[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]+$`)
-    validates the arity up front for its own `--soc-ref` flag, and would
-    also need widening if the format ever grows a 4th part. It is a CLI
-    input validator rather than a resolution site, so it is deliberately
-    not folded in here -- but it is the other thing to change.
     """
     if not silicon:
         return None
@@ -276,22 +277,19 @@ def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
     each behind a thin wrapper that preserves that site's original
     exception type or soft-fail shape.
 
-    Issue #1096 closed out the remaining hand-rolled copies. The two that
-    root at a metadata root called this helper (`alp_model/targets.py`,
-    `alp_cli/new_som.py`'s preset-path site); the rest root elsewhere and
-    call `split_silicon_ref()` directly, including the three slug-extraction
-    sites in `alp_cli/new_som.py` that #1096 originally scoped out -- they
-    were the same three-part split, so leaving them would have left the
-    drift the issue exists to close.
+    Issue #1096 closed out the remaining hand-rolled copies. The one that
+    roots at a metadata root now calls this helper (`alp_model/targets.py`;
+    `alp_cli/new_som.py` held a second preset-path site until that module
+    retired, alp-sdk#1367/#1368); the rest root elsewhere and call
+    `split_silicon_ref()` directly -- that set used to include three
+    slug-extraction sites in `alp_cli/new_som.py` that #1096 originally
+    scoped out because they were the same three-part split, so leaving them
+    would have left the drift the issue exists to close; those sites are
+    gone with the module now.
 
-    ADR-0028 later relocated `alp_model/targets.py` into tan-cli's
-    `tan.model.targets`, so this alp-sdk module's only in-tree caller of that
-    kind is `alp_cli/new_som.py`. `tan.model.targets` calls tan-cli's own
-    `tan.soc_ref.resolve_soc_path` -- a deliberate re-implementation of this
-    same contract on that side of the repo boundary, not a shared import
-    (`tan.soc_ref`'s own docstring: "one definition, re-exported" within
-    tan-cli, mirroring the single-source discipline #997/#1004/#1096
-    established here).
+    ADR-0028 proposes relocating `alp_model/targets.py` into tan-cli's
+    `tan.model.targets` (Status: Proposed, not yet enacted) -- until that
+    lands, `alp_model/targets.py` stays this module's in-tree caller.
 
     There is no remaining `silicon.split(":")` outside this module; a
     regression test pins that.

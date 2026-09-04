@@ -287,7 +287,15 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
 
 alp_status_t alp_uart_write(alp_uart_t *port, const uint8_t *data, size_t len)
 {
-	if (port == NULL || !port->in_use || (data == NULL && len > 0)) {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1834, same shape as
+	 * #1734's GPIO fix).  A malformed @p data/@p len pairing is a
+	 * separate condition -- ALP_ERR_INVAL, checked only once the
+	 * handle itself is known good. */
+	if (port == NULL || !port->in_use) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (data == NULL && len > 0) {
 		return ALP_ERR_INVAL;
 	}
 	size_t written = 0;
@@ -397,7 +405,14 @@ alp_status_t alp_uart_read_fd_bounded(int fd, uint8_t *data, size_t len, uint32_
 
 alp_status_t alp_uart_read(alp_uart_t *port, uint8_t *data, size_t len, uint32_t timeout_ms)
 {
-	if (port == NULL || !port->in_use || (data == NULL && len > 0)) {
+	/* NULL-or-closed is a lifecycle condition -- ALP_ERR_NOT_READY,
+	 * matching every Zephyr dispatcher (issue #1834).  A malformed
+	 * @p data/@p len pairing is a separate condition -- ALP_ERR_INVAL,
+	 * checked only once the handle itself is known good. */
+	if (port == NULL || !port->in_use) {
+		return ALP_ERR_NOT_READY;
+	}
+	if (data == NULL && len > 0) {
 		return ALP_ERR_INVAL;
 	}
 	return alp_uart_read_fd_bounded(port->fd, data, len, timeout_ms);

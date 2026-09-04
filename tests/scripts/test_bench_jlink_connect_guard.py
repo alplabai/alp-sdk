@@ -165,6 +165,44 @@ def test_missing_file_is_a_hard_error(tmp_path: Path) -> None:
     assert res.returncode == 7
 
 
+# alp-sdk#1551: the guard enumerated FAILURE strings, so any failure mode that
+# stopped JLinkExe before it printed one of them passed. Verbatim capture from
+# the bench probe (J-Link Commander V9.46) running the pre-alp-sdk#1478 line
+# shape, whose stray literal `n` made JLinkExe reject its own command line --
+# this is the COMPLETE 147-byte transcript, nothing is trimmed.
+REAL_REJECTED_COMMAND_LINE = """\
+SEGGER J-Link Commander V9.46 (Compiled May 27 2026 12:24:58)
+DLL version V9.46, compiled May 27 2026 12:23:54
+
+Unknown command line option n.
+"""
+
+
+@_NEEDS_BASH
+def test_transcript_with_no_commander_prompt_is_a_hard_error(tmp_path: Path) -> None:
+    """JLinkExe that never ran the script must not read as a good connect.
+
+    This transcript contains none of the guard's failure strings -- no "Cannot
+    connect to the probe/programmer", no "Failed to connect to target" -- and it
+    is not empty, so before alp-sdk#1551 it returned 0. On the read-back-only
+    paths (reread.sh, the post-flash console dumps) this guard is the ONLY
+    check, with no DPIDR gate behind it, so a 0 here decoded the absent output
+    as a silent app.
+    """
+    out = tmp_path / "jlink.out"
+    out.write_text(REAL_REJECTED_COMMAND_LINE, encoding="utf-8")
+
+    res = _call_guard(out)
+
+    assert res.returncode == 7, f"expected exit 7, got {res.returncode}\n{res.stderr}"
+    # Say what actually happened -- an operator reading this must not go hunting
+    # for a probe/cable fault when JLinkExe rejected its own arguments.
+    assert "no 'J-Link>' command" in res.stderr
+    assert "never executed" in res.stderr
+    # The offending line has to be visible, not just described.
+    assert "Unknown command line option n." in res.stderr
+
+
 # Every `-CommanderScript ... > <file> || true` read-back site. Derived from the
 # script bodies, NOT a hand-maintained allowlist -- a new read-back added
 # without the assertion fails this test rather than slipping through.
@@ -287,6 +325,55 @@ def test_no_dpidr_at_all_is_refused(tmp_path):
     assert res.returncode == 4
 
 
+@_NEEDS_BASH
+def test_aen_dpidr_is_not_environment_overridable(tmp_path):
+    """alp-sdk#1716: a pre-set AEN_DPIDR must NOT win.
+
+    Before the fix, bench-env.sh assigned
+    `AEN_DPIDR="${AEN_DPIDR:-4C013477}"` -- a caller-exported value silently
+    replaced the real AEN E8 constant, so `export AEN_DPIDR=<whatever the
+    wrong board answers>` before running any of 5 of the 6
+    bench_jlink_assert_aen_dpidr call sites made the wrong-board interlock
+    accept that board. Simulate exactly that: set AEN_DPIDR to a bogus value
+    *before* sourcing bench-env.sh (the same shape an operator's `export
+    AEN_DPIDR=...` would leave), and feed the guard a transcript that answers
+    with that bogus value, not the real AEN E8 ID. A correctly-hardened
+    bench-env.sh ignores the caller's AEN_DPIDR and still expects the real
+    4C013477, so this must be REFUSED (returncode 4), not silently accepted
+    (returncode 0).
+
+    Deliberately does NOT use `bash -c "...$AEN_DPIDR..."` or
+    `subprocess.run(..., env=...)`: on this host, a literal `$VAR` inside a
+    `-c` argument does not survive the Windows argv round-trip (the exact
+    `list2cmdline`/MSYS re-parse trap `_run_verify_gate` above documents),
+    and an env var added only via the `env=` kwarg was observed NOT to reach
+    this MSYS bash at all -- both would make this test pass vacuously
+    regardless of the fix. Writing the override as a literal (no `$`)
+    assignment in a script FILE run as `bash gate.sh` sidesteps both: proven
+    by hand to flip 0 (pre-fix) / 4 (post-fix) for this exact scenario.
+    """
+    workdir = tmp_path
+    out = workdir / "pf.out"
+    out.write_text("Found SW-DP with ID 0xDEADBEEF\n", encoding="utf-8")
+    (workdir / "bench-env.sh").write_bytes(ENV.read_bytes())
+    gate = workdir / "gate.sh"
+    gate.write_bytes(
+        (
+            'AEN_DPIDR="DEADBEEF"\n'          # the attempted override
+            "source ./bench-env.sh\n"
+            f'bench_jlink_assert_aen_dpidr "{out.name}" "unit-test"\n'
+        ).encode("utf-8")
+    )
+    res = subprocess.run(
+        ["bash", "gate.sh"], cwd=workdir, capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=60,
+    )
+    assert res.returncode == 4, (
+        "AEN_DPIDR override was honoured -- the wrong-board MRAM-write "
+        f"interlock is bypassable via a bare env var (alp-sdk#1716)\n{res.stderr}"
+    )
+
+
 def _loadbins(body: str) -> bool:
     """True when the script really issues `loadbin`, not merely mentions it.
 
@@ -310,3 +397,257 @@ def test_every_target_touching_helper_gates_on_the_dpidr():
             and "bench_jlink_assert_aen_dpidr" not in p.read_text(encoding="utf-8"))
     ]
     assert not missing, f"helper writes/executes on a target with no DPIDR gate: {missing}"
+
+
+# --- alp-sdk#1488: `verifybin`'s outcome must gate the script, not just the
+# connect check -------------------------------------------------------------
+#
+# flash-jlink.sh / flash-update-log-dual.sh / flash-update-log-firewall-probe.sh
+# each issued `verifybin` and never read its result: the transcript went to a
+# display-only pipe, the connect check was the only thing that could fail the
+# script, so a `Verify failed.` line exited 0 and reported a good flash on a
+# board that was NOT actually written. flash-jlink-hp.sh and
+# flash-jlink-mramxip.sh had already been fixed for the identical defect under
+# alp-sdk#1343 -- but nothing derived the FULL set of verifybin sites from the
+# script bodies, so the other 3 went uncaught for months (before this test,
+# this file had ZERO occurrences of "verifybin" or "verify successful"). This
+# is that derivation: a NEW verifybin site that does not also grep ITS OWN
+# capture file for both outcomes fails here rather than shipping ungated.
+
+# Any `verifybin` invocation, wherever it lives (these all sit inside a
+# `cat > /tmp/*.jlink <<EOF ... EOF` CommanderScript heredoc).
+_VERIFYBIN_RE = re.compile(r"^[ \t]*verifybin[ \t]", re.M)
+
+# The file each write step's JLinkExe transcript lands in, resolved from
+# whichever capture shape follows the `-CommanderScript` invocation --
+# either the SIGPIPE-prone `... | tee <file> | ...` shape (still used by
+# flash-jlink-hp.sh / flash-jlink-mramxip.sh, deliberately left alone by
+# alp-sdk#1488 finding 5 -- out of scope, pre-existing) or the
+# write-then-grep-the-finished-file shape finding 5 moved the other three
+# scripts to (`... > <file> 2>&1 || true`, then a separate grep pass).
+_CAPTURE_RE = re.compile(r"\|\s*tee\s+(?P<tee>/tmp/\S+)|>\s*(?P<redir>/tmp/\S+)\s*2>&1")
+
+
+def _verifybin_capture_file(body: str, after: int) -> str | None:
+    """The transcript file the write step immediately after a `verifybin`
+    line (at body[after:]) captures its JLinkExe output to. Bounded window --
+    the capture always follows within the same CommanderScript write block,
+    not somewhere else in the file."""
+    m = _CAPTURE_RE.search(body[after : after + 2000])
+    return (m.group("tee") or m.group("redir")) if m else None
+
+
+def test_every_verifybin_site_is_gated_on_its_own_transcript() -> None:
+    """Every `verifybin` site must grep its OWN transcript file.
+
+    This half is pure text: it derives the set of verifybin sites from the
+    actual `verifybin` invocations in each script, resolves each one's OWN
+    transcript file, and pins that the greps name that file -- so a site
+    accidentally checking a SIBLING script's stale transcript (the exact
+    copy-paste trap the changelog calls out) fails here.
+
+    It pins the FILENAME only, which is not the same as pinning the gate:
+    deleting the `exit 3`s while leaving the greps in place still satisfies
+    it. `test_every_verifybin_gate_actually_gates` below is the half that
+    runs the gate and asserts it changes the exit status; the two are
+    deliberately separate because only the second one needs a working bash
+    (Windows CI has none, see _NEEDS_BASH) and this derivation must keep
+    running there.
+    """
+    missing: list[str] = []
+
+    for path in _bench_scripts():
+        body = path.read_text(encoding="utf-8")
+        for m in _VERIFYBIN_RE.finditer(body):
+            line_no = body[: m.start()].count("\n") + 1
+            out = _verifybin_capture_file(body, m.end())
+            if out is None:
+                missing.append(f"{path.name}:{line_no} issues verifybin but no capture file could be resolved")
+                continue
+            fail_re = re.compile(
+                r'grep\s+-\w*\s+"verify failed\|verification failed\|mismatch"\s+' + re.escape(out)
+            )
+            ok_re = re.compile(r'grep\s+-\w*\s+"verify successful"\s+' + re.escape(out))
+            if not fail_re.search(body):
+                missing.append(f"{path.name}:{line_no} verifybin -> {out}, never greps that file for verify-failed/mismatch")
+            if not ok_re.search(body):
+                missing.append(f"{path.name}:{line_no} verifybin -> {out}, never greps that file for verify-successful")
+
+    assert not missing, "verifybin site with no verify-outcome gate on its own transcript:\n  " + "\n  ".join(missing)
+
+
+def test_the_verifybin_regex_actually_matches_something() -> None:
+    """Guard against the guard: if the regex stops matching (a refactor
+    changes the invocation shape), test_every_verifybin_site_is_gated_on_its_own_transcript
+    would pass vacuously and cover nothing.
+
+    Six SITES across five SCRIPTS (flash-jlink-mramxip.sh issues two, one per
+    loadbin): flash-jlink.sh 1, flash-jlink-hp.sh 1, flash-jlink-mramxip.sh 2,
+    flash-update-log-dual.sh 1, flash-update-log-firewall-probe.sh 1. Same
+    floor as the sibling read-back guard above."""
+    total = sum(len(_VERIFYBIN_RE.findall(p.read_text(encoding="utf-8"))) for p in _bench_scripts())
+    assert total >= 6, f"expected >=6 verifybin sites, matched {total} -- regex has drifted"
+
+
+# The shell block that turns a verifybin OUTCOME into an exit status. Two
+# shapes exist in the tree and both open with the same explicit-failure `if`:
+#
+#   flash-jlink.sh / flash-jlink-hp.sh / flash-update-log-dual.sh /
+#   flash-update-log-firewall-probe.sh   fail-`if`, then
+#                                        `if ! grep -qi "verify successful"`
+#   flash-jlink-mramxip.sh               fail-`if`, then a `grep -ci` COUNT
+#                                        compared against its two passes
+_VERIFY_GATE_START_RE = re.compile(
+    r'^[ \t]*if\s+grep\s+-\w*\s+"verify failed\|verification failed\|mismatch"'
+    r"\s+(?P<out>/tmp/\S+)\s*;\s*then[ \t]*$"
+)
+
+
+def _verify_gate_block(body: str) -> tuple[str, str] | None:
+    """`(capture-file, shell block)` for a script's verify gate, or None.
+
+    The block is the contiguous source region from the explicit-failure `if`
+    through the `fi` that closes the success check -- everything that turns a
+    transcript into an exit status and nothing else, so it can be run
+    standalone against a synthetic transcript.
+    """
+    lines = body.splitlines()
+    start: int | None = None
+    out = ""
+    for i, line in enumerate(lines):
+        m = _VERIFY_GATE_START_RE.match(line)
+        if m:
+            start, out = i, m.group("out")
+            break
+    if start is None:
+        return None
+
+    depth = 0
+    saw_success = False
+    for i in range(start, len(lines)):
+        stripped = lines[i].strip()
+        if re.match(r"^if\b", stripped):
+            depth += 1
+        if "verify successful" in stripped.lower():
+            saw_success = True
+        if stripped == "fi":
+            depth -= 1
+            if depth == 0 and saw_success:
+                return out, "\n".join(lines[start : i + 1]) + "\n"
+    return None
+
+
+def _run_verify_gate(
+    tmp_path: Path, block: str, out: str, transcript: str | None
+) -> subprocess.CompletedProcess[str]:
+    """Run one extracted verify gate against a synthetic JLinkExe transcript.
+
+    `transcript=None` means the file does not exist at all. Same
+    no-absolute-paths discipline as _call_guard: the gate's `/tmp/...` path is
+    rewritten to a bare filename and bash runs with cwd=tmp_path, so the
+    drive-letter flavour of whichever bash Python resolves cannot matter.
+    `set -e` matches the real scripts, all of which run under errexit.
+
+    The block is written to a FILE and run as `bash gate.sh`, never handed to
+    `bash -c` as a string. On Windows, `subprocess` rebuilds the argument list
+    into one command line (`list2cmdline`) which the MSYS runtime then re-parses,
+    and double quotes inside a `$( ... )` command substitution do not survive the
+    round trip: `v=$(grep -ci "verify successful" t.out || true)` reaches grep as
+    the three arguments `-ci`, `"verify`, `successful"`, so grep reports
+    `grep: successful": No such file or directory` and the count comes back empty.
+    flash-jlink-mramxip.sh's gate is the only one that puts a quoted grep inside a
+    command substitution -- the other four use a bare `if grep -qi "..."`, which
+    survives -- so this manifested as exactly one parametrisation failing, naming a
+    script whose gate is CORRECT (run from a file it returns 0 on a good transcript
+    and 3 on a failing one). GitHub's windows-latest never saw it because
+    _NEEDS_BASH skips there; a developer with Git Bash installed sees a red test
+    pointing at the wrong file, which is the same misleading-failure class
+    _NEEDS_BASH exists to prevent. A file has no second parse, so it cannot recur.
+    """
+    name = "transcript.out"
+    target = tmp_path / name
+    if transcript is None:
+        target.unlink(missing_ok=True)
+    else:
+        target.write_text(transcript, encoding="utf-8")
+    gate = tmp_path / "gate.sh"
+    # write_bytes, not write_text: the gate must keep LF endings whatever the
+    # host default is -- CRLF inside the block would reach bash as stray \r.
+    gate.write_bytes(("set -e\n" + block.replace(out, name)).encode("utf-8"))
+    return subprocess.run(
+        ["bash", gate.name],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
+
+
+def _scripts_with_verifybin() -> list[str]:
+    """Derived, never hand-maintained -- a new verifybin script is covered the
+    moment it lands, which is the whole point of this file."""
+    return [p.name for p in _bench_scripts() if _VERIFYBIN_RE.search(p.read_text(encoding="utf-8"))]
+
+
+@_NEEDS_BASH
+@pytest.mark.parametrize("script", _scripts_with_verifybin())
+def test_every_verifybin_gate_actually_gates(script: str, tmp_path: Path) -> None:
+    """The gate must CHANGE THE EXIT STATUS, not merely mention the strings.
+
+    test_every_verifybin_site_is_gated_on_its_own_transcript is text-only and
+    is fail-open on the alp-sdk#1488 defect itself: delete both `exit 3` from
+    a gate, or invert `if ! grep -qi "verify successful"` to `if grep -qi
+    ...`, and the greps still sit in the body against the right file, so it
+    stays green while a failed flash reports success again. This one extracts
+    the gate and RUNS it, so those mutations go red:
+
+      - a transcript whose verify FAILED must exit non-zero (3, the status
+        flash-all-flowd.sh maps to the FLASH-UNVERIFIED batch-summary entry);
+      - a transcript whose verifies all SUCCEEDED must exit 0;
+      - those two statuses must DIFFER (an inverted polarity fails both, so
+        equality alone catches it);
+      - `Verify failed.` alongside a full set of success lines must still be
+        non-zero, so the explicit-failure branch cannot be deleted and hidden
+        behind the success check;
+      - a missing or empty transcript must be non-zero -- absence of a
+        `Verify successful.` line is not evidence the verify passed.
+    """
+    body = (BENCH / script).read_text(encoding="utf-8")
+    sites = len(_VERIFYBIN_RE.findall(body))
+    found = _verify_gate_block(body)
+    assert found is not None, f"{script} issues verifybin but has no runnable verify-outcome gate"
+    out, block = found
+
+    # One "Verify successful." per verifybin issued: flash-jlink-mramxip.sh
+    # writes two blobs and its gate demands both passes, so a single success
+    # line is a FAILURE there, not a pass.
+    ok_lines = "Verify successful.\n" * sites
+    header = "J-Link>verifybin\n"
+
+    good = _run_verify_gate(tmp_path, block, out, header + ok_lines)
+    bad = _run_verify_gate(tmp_path, block, out, header + "Verify failed.\n")
+    bad_with_ok = _run_verify_gate(tmp_path, block, out, header + "Verify failed.\n" + ok_lines)
+    empty = _run_verify_gate(tmp_path, block, out, "")
+    absent = _run_verify_gate(tmp_path, block, out, None)
+
+    assert good.returncode == 0, (
+        f"{script}: a fully successful verify must pass the gate, got "
+        f"{good.returncode}\n{good.stdout}{good.stderr}"
+    )
+    assert bad.returncode != 0, (
+        f"{script}: 'Verify failed.' must fail the gate -- it exited "
+        f"{bad.returncode}, the exact alp-sdk#1488 defect\n{bad.stdout}{bad.stderr}"
+    )
+    assert bad.returncode == 3, f"{script}: expected exit 3, got {bad.returncode}"
+    assert bad.returncode != good.returncode, (
+        f"{script}: the gate returns {bad.returncode} for BOTH a failed and a "
+        "successful verify -- it does not gate"
+    )
+    assert bad_with_ok.returncode == 3, (
+        f"{script}: 'Verify failed.' alongside {sites} success line(s) must still "
+        f"fail, got {bad_with_ok.returncode}"
+    )
+    assert empty.returncode == 3, f"{script}: an empty transcript must fail, got {empty.returncode}"
+    assert absent.returncode == 3, f"{script}: a missing transcript must fail, got {absent.returncode}"

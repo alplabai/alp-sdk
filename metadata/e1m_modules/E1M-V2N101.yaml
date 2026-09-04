@@ -257,10 +257,17 @@ pad_routes:
   - { e1m: E1M_X_GPIO_IO35, dispatch: gd32_bridge, dispatch_pin: PD1  }
 
 # On-module helper MCUs whose firmware images the orchestrator
-# registers into the system manifest so the customer's flash flow
-# covers them.  These are NOT heterogeneous-compute peers (they
-# don't appear in `topology:`); they're independently-flashed
-# supervisor MCUs.
+# registers into the system manifest for Alp Lab's factory/production
+# flash flow -- NOT the customer's routine one.  gd32_bridge below is
+# programmed by Alp Lab at the factory; customers get the bridge's
+# command-frame API (SPI + I2C, docs/gd32-bridge.md) for normal
+# operation and update_channel: alp_ota_spi_bridge for field updates.
+# Local reflashing is recovery_only -- an out-of-tan SWD procedure with
+# Alp Lab-supplied binaries, for a bricked device only (see
+# docs/gd32-bridge.md's "Who flashes it, and when" section), not a
+# routine customer flash path.
+# These are NOT heterogeneous-compute peers (they don't appear in
+# `topology:`); they're independently-flashed supervisor MCUs.
 helper_firmware:
   - name:          gd32_bridge
     chip:          gd32g553
@@ -268,15 +275,22 @@ helper_firmware:
     # a gitignored build output, absent from every clone (#852).  Build it
     # yourself per firmware/gd32-bridge/README.md before flashing, or wait
     # for an Alp Lab firmware release.  `firmware_path` is deliberately
-    # ABSENT (not `TBD`) so `tan flash` refuses cleanly ("has no
-    # output_artefact / firmware_path; can't flash") instead of spawning a
-    # real flasher against a nonexistent `TBD` path -- see
+    # ABSENT (not `TBD`) so nothing resolves a sentinel path.  It is
+    # `flash_policy: recovery_only`, not `update_channel`, that decides this
+    # entry's fate: `tan flash` declines it ahead of any `flash_method`
+    # check (`python/tan/core/flash_plan.py::helper_flash_gate`, tan-cli#611)
+    # with `flash: helper 'gd32_bridge' is programmed by Alp Lab in
+    # production and is customer-flashable only to recover a bricked
+    # device...; skipping.  Field updates arrive over update_channel:
+    # alp_ota_spi_bridge.  To recover a bricked device deliberately, re-run
+    # with `--helper gd32_bridge --recover`.` (status `skipped`, rc `-1` --
+    # see docs/gd32-bridge.md's "Who flashes it, and when" section) rather
+    # than spawning a real flasher against a nonexistent `TBD` path -- see
     # docs/v0.6-tbd-and-assumptions.md §1.4.
-    # No local flash path.  GD32 programming is separated out of tan
-    # entirely (#1439, tan-cli#732), so `flash_method` and `flash_args`
-    # are ABSENT rather than set -- tan does not flash this part, and an
-    # entry naming a backend tan has removed would hit
-    # `executionPolicy.unknownBackend`, which is `fail`.  Alp Lab flashes
+    # No local flash path.  GD32 programming is separated out of tan's
+    # scope entirely (#1439, tan-cli#732), so `flash_method` and
+    # `flash_args` are ABSENT rather than set -- tan does not flash this
+    # part, and no preset names a local flash path for it.  Alp Lab flashes
     # it in production over SWD with its own tooling, and the on-SoM
     # host-driven bit-bang route (`chips/gd32_swd/`, Path B,
     # metadata/chips/gd32_swd.yaml) is unaffected by any of this.

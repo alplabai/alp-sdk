@@ -16,10 +16,7 @@ malformed ref from a well-formed ref naming a missing file, and the naive
 migration collapses those two into one.
 """
 
-import os
 import re
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -138,44 +135,20 @@ def test_load_soc_caps_roots_at_the_injected_soc_dir_not_a_metadata_parent(tmp_p
     assert _load_soc_caps("alif:ensemble:e8", soc_dir=odd) == {"uart": 4}
 
 
-def test_new_som_scaffold_still_writes_under_output_root(tmp_path):
-    """new_som's site roots at output_root/metadata, not the repo metadata root.
-
-    Deliberately NOT skip-on-nonzero: a skip here would enforce nothing,
-    which is the same inert-gate shape this PR's sibling work keeps finding.
-    Supplying --sku/--soc-ref/--family is what suppresses the interactive
-    prompts; there is no --non-interactive flag. The SKU must satisfy the
-    som-preset SKU pattern (#1089), hence E1M-NX9999 rather than a freeform
-    name.
-    """
-    # sys.executable, not "python3": the CLI needs `click`, which lives in
-    # whatever interpreter/venv is running pytest -- a bare "python3" picks
-    # up the system one on the macOS and Linux CI legs and dies with
-    # ModuleNotFoundError. Likewise inherit os.environ and override only
-    # PYTHONPATH; replacing the whole environment strips the venv's
-    # site-packages resolution along with it.
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(SCRIPTS)
-    result = subprocess.run(
-        [sys.executable, "-m", "alp_cli", "new-som",
-         "--sku", "E1M-NX9999", "--soc-ref", "testvendor:testfam:testpart",
-         "--family", "testfam", "--output-root", str(tmp_path)],
-        cwd=REPO, capture_output=True, text=True, env=env,
-    )
-    assert result.returncode == 0, (
-        f"alp new-som failed (rc={result.returncode}):\n"
-        f"stdout: {result.stdout[-800:]}\nstderr: {result.stderr[-800:]}"
-    )
-    assert (tmp_path / "metadata" / "socs" / "testvendor" / "testfam"
-            / "testpart.json").is_file(), (
-        "scaffold did not land under output_root -- the resolve_soc_path() "
-        "migration must keep rooting at output_root/metadata, not the repo's"
-    )
-    assert (tmp_path / "metadata" / "e1m_modules" / "E1M-NX9999.yaml").is_file()
-    # The preset banner cites the repo-relative SoC path built by the
-    # str-not-Path site (#1096) -- pin its shape, since a Path leaking in
-    # there would render backslashes on Windows.
-    banner = (tmp_path / "metadata" / "e1m_modules" / "E1M-NX9999.yaml").read_text(
-        encoding="utf-8"
-    )
-    assert "metadata/socs/testvendor/testfam/testpart.json" in banner
+# test_new_som_scaffold_still_writes_under_output_root() lived here through
+# #1367/#1368's own PR: it spawned `python -m alp_cli new-som ...`, a
+# subprocess argv STRING an AST import scan (the audit #1367/#1368 relied on)
+# structurally cannot see -- the retirement deleted scripts/alp_cli/new_som.py
+# and __main__.py out from under it, so it failed hard
+# (`No module named alp_cli.__main__`) rather than skipping. The next
+# retirement of a scripts/alp_cli/** module must grep subprocess argv strings
+# too, not just `import` statements.
+#
+# It is deleted rather than re-pointed at `tan new-som`: alp-sdk owns no
+# new-som scaffolding logic any more (it moved to tan-cli's in-process
+# `python/tan/commands/new_som_cmd.py`, released at tan-cli v0.6.0, which
+# carries its own coverage there) and this repo's own test-all.sh /
+# tests/scripts/ stage never puts a `tan` binary on PATH -- see
+# scripts/bootstrap.sh:689 ("Tan is installed separately"). A subprocess call
+# to `tan new-som` here would just trade one hard failure for another on
+# every host that runs this suite without a separate tan-cli install.

@@ -51,22 +51,28 @@ concurrency:
 jobs:
   fetch-and-verify:
     runs-on: ubuntu-22.04
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
         with:
+          persist-credentials: false
           path: alp-sdk
 
       - name: Set up Python + west
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        timeout-minutes: 5
         with:
           # Repo is checked out under alp-sdk/ (path:), but setup-python (a
           # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
           python-version-file: alp-sdk/.python-version
 
       - name: Install west
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         run: pip3 install --user west pyyaml
 
       - name: Derive extras-tier1 library list from west.yml
@@ -119,8 +125,15 @@ jobs:
           # (runtime substitution) instead of a template (source
           # substitution), not by quoting.
           EXTRAS_TIER1_NAMES: ${{ steps.extras-tier1.outputs.names }}
+        timeout-minutes: 5
         run: |
           set -e
+          # #1549: see pr-twister.yml's `west init zephyr workspace` step
+          # for the full rationale and the measurement.  `west init -l .`
+          # is local and clones nothing, but the `west update` below is
+          # git-over-https and had no transport timeout at all.
+          git config --global http.lowSpeedLimit 1000
+          git config --global http.lowSpeedTime 30
           west init -l .
           # `--narrow --depth 1` bounds this to a shallow fetch of just
           # the pinned project tips (no history); `timeout-minutes: 20`
@@ -132,13 +145,28 @@ jobs:
           # `|| echo ... ; continue-on-error: true` is deliberate: it
           # lets the per-library "Verify pins populated content" step
           # report WHICH library failed to fetch, rather than dying
-          # here on the first bad project and hiding the rest.
-          west update \
-            --group-filter +extras-tier1 \
-            --narrow \
-            -o=--depth=1 \
-            zephyr $EXTRAS_TIER1_NAMES \
-            || echo "west update returned non-zero"
+          # here on the first bad project and hiding the rest.  #1549
+          # adds a retry AROUND that, and deliberately does NOT convert
+          # the final failure into a hard exit: this step's whole design
+          # is to let the verify step name the culprit, so attempt 3
+          # falls through to the same message and the same
+          # continue-on-error path as before.  `west init` stays outside
+          # the loop -- it refuses on an already-initialised workspace.
+          for attempt in 1 2 3; do
+            west update \
+              --group-filter +extras-tier1 \
+              --narrow \
+              -o=--depth=1 \
+              zephyr $EXTRAS_TIER1_NAMES \
+              && break
+            rc=$?
+            if [ "$attempt" = 3 ]; then
+              echo "west update returned non-zero"
+              break
+            fi
+            echo "west update failed (exit $rc); retry $attempt/3 in 15s" >&2
+            sleep 15
+          done
         continue-on-error: true
 
       # NB: no `working-directory: alp-sdk`.  `west init -l .` (run in
@@ -151,6 +179,7 @@ jobs:
           # See the env: comment on the "West init + update" step above --
           # same injection rationale applies to this step's run: body.
           EXTRAS_TIER1_PATHS: ${{ steps.extras-tier1.outputs.paths }}
+        timeout-minutes: 2
         run: |
           set -euo pipefail
           status=0
@@ -212,8 +241,9 @@ jobs:
           done
         continue-on-error: true
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         if: always()
+        timeout-minutes: 3
         with:
           name: extras-tier1-audit
           path: /tmp/extras-tier1-audit/

@@ -3,23 +3,25 @@
 
   * scripts/alp_cli/diagnostic_format.py (to_machine_json / to_sarif)
   * metadata/schemas/diagnostic-v1.schema.json
-  * the `alp validate --format json|sarif` CLI wiring
 
 These lock: the zero-based LSP range conversion, the one-based SARIF
 region conversion, schema self-validity + conformance, and -- the
 regression lock the epic explicitly asks for -- that the human `render()`
 path is byte-for-byte UNCHANGED by any of this.
+
+The `alp validate --format json|sarif` CLI-wiring tests this file used to
+carry retired with `scripts/alp_cli/validate.py` itself (alp-sdk#1368): tan
+is the whole command surface (ADR-0020 end-state B), and `tan validate`
+spawns `scripts/validate_board_yaml.py` directly, never `alp_cli.main` --
+see that script's own module docstring. `machine_json_for_board_yaml()`
+remains exercised directly, below.
 """
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import jsonschema
-import pytest
 
 from alp_cli.diagnostic import Diagnostic, render
 from alp_cli.diagnostic_format import (machine_json_for_board_yaml,
@@ -219,69 +221,3 @@ def test_machine_json_for_board_yaml_honours_tool_overrides():
     doc = machine_json_for_board_yaml(FIX_BAD / "ALP-B005-bad-sku.yaml",
                                       tool_name="alp-lsp", tool_version="9.9.9")
     assert doc["tool"] == {"name": "alp-lsp", "version": "9.9.9"}
-
-
-# ---------------------------------------------------------------------------
-# CLI wiring: `alp validate --format json|sarif`
-# ---------------------------------------------------------------------------
-
-
-def _run_alp_validate(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(REPO / "scripts")
-    return subprocess.run(
-        [sys.executable, "-m", "alp_cli.main", "validate", str(path), *args],
-        cwd=REPO, env=env, capture_output=True, text=True, check=False,
-    )
-
-
-def test_cli_format_json_emits_conformant_document_on_stdout():
-    fixture = FIX_BAD / "ALP-B005-bad-sku.yaml"
-    proc = _run_alp_validate(fixture, "--format", "json")
-    doc = json.loads(proc.stdout)
-    _validator().validate(doc)
-    assert any(d["code"] == "ALP-B005" for d in doc["diagnostics"])
-    # stdout carries ONLY the JSON document -- no interleaved human prose.
-    assert "error[ALP-B005]" not in proc.stdout
-
-
-def test_cli_format_sarif_emits_valid_sarif_on_stdout():
-    fixture = FIX_BAD / "ALP-B005-bad-sku.yaml"
-    proc = _run_alp_validate(fixture, "--format", "sarif")
-    doc = json.loads(proc.stdout)
-    assert doc["version"] == "2.1.0"
-    results = doc["runs"][0]["results"]
-    assert any(r["ruleId"] == "ALP-B005" for r in results)
-    assert "error[ALP-B005]" not in proc.stdout
-
-
-def test_cli_json_is_document_identical_to_the_library_entry_point():
-    # `alp_cli.validate` routes --format json through machine_json_for_board_yaml()
-    # directly (not a parallel to_machine_json(collector) call), so this is a
-    # structural equality, not a coincidence two paths happen to agree on. It's
-    # what keeps scripts/check_diagnostic_schema.py's verdict (which validates the
-    # LIBRARY document) identical to the CLI's, for as long as the CLI exists
-    # (ADR 0020 retires it). Compares parsed documents, not raw bytes -- an
-    # indent=2 -> indent=4 change at validate.py's json.dumps() call would not
-    # redden this.
-    fixture = FIX_BAD / "ALP-B005-bad-sku.yaml"
-    from_cli = json.loads(_run_alp_validate(fixture, "--format", "json").stdout)
-    assert from_cli == machine_json_for_board_yaml(fixture)
-
-
-def test_cli_json_matches_library_on_the_zero_diagnostics_branch_too():
-    # The drift lock above only exercises a fixture that produces
-    # diagnostics; a clean board.yaml is a distinct code path (an empty
-    # `diagnostics` array) and must agree with the library door too.
-    fixture = REPO / "tests" / "fixtures" / "board_yaml_good" / "minimal.yaml"
-    from_cli = json.loads(_run_alp_validate(fixture, "--format", "json").stdout)
-    assert from_cli == machine_json_for_board_yaml(fixture)
-    assert from_cli["diagnostics"] == []
-
-
-def test_cli_default_format_is_human():
-    fixture = FIX_BAD / "ALP-B005-bad-sku.yaml"
-    proc = _run_alp_validate(fixture, "--no-color")
-    assert "error[ALP-B005]" in proc.stdout
-    with pytest.raises(json.JSONDecodeError):
-        json.loads(proc.stdout)

@@ -101,8 +101,8 @@ CMake Error: CMAKE_CXX_COMPILER not set, after EnableLanguage
 
 Despite what the first line suggests, the fix is not to pick a
 different build tool -- `ninja` is Zephyr's build generator on every
-host.  `scripts/bootstrap.sh` / `bootstrap.ps1` and `python -m alp_cli
-doctor` both check for it and FAIL with an install command when it's
+host.  `scripts/bootstrap.sh` / `bootstrap.ps1` and `tan doctor`
+both check for it and FAIL with an install command when it's
 missing; if you hit the raw CMake error above instead, check whether
 you resolved the `hostPrerequisites` finding from `tan doctor`. Installing it
 clears all three lines above (the
@@ -157,7 +157,7 @@ success.  Decode tips:
 |-------------------------|--------------------------------------------------------------------|-------------------------------------------------------|
 | `ALP_OK` (0)            | Success.                                                           | —                                                     |
 | `ALP_ERR_INVAL` (-1)    | Invalid argument (NULL pointer, out-of-range value).               | Function args + caller's input validation.            |
-| `ALP_ERR_NOT_READY` (-2)| Peripheral not initialised or chip not ACKing.                     | Was `_open` / `_init` called?  Bus / address correct? |
+| `ALP_ERR_NOT_READY` (-2)| The handle is not in a state to perform this operation.            | Was `_open` / `_init` called?  Bus / address correct? |
 | `ALP_ERR_BUSY` (-3)     | Peripheral busy.                                                   | Concurrent access?  DMA still running?                |
 | `ALP_ERR_TIMEOUT` (-4)  | Transfer timed out.                                                | Slave not responding -- physical wiring?              |
 | `ALP_ERR_IO` (-5)       | Bus / line error.                                                  | CRC mismatch (GD32 bridge), I2C NACK, SPI mode wrong. |
@@ -249,6 +249,20 @@ minimal mode costs you, in
   `VDD_1V8` should all be at their CMI / strap targets within
   a few ms of `V_IN` rising.
 
+On an E1M-AEN module, rule the rails out first as above -- but if they
+are healthy *and* SWD is alive (SW-DP IDR reads `0x4C013477`, memory
+reads and writes work) while `VTOR` stays `0` and the cores never
+start, the supply is not your problem and the Secure Enclave is
+probably not damaged either.  That combination usually means the SES
+has nothing valid to boot -- either no valid application TOC, or MCUboot
+rejecting the image in slot0 (`E: Unable to find bootable image` /
+`E: Bad image magic`) -- which is a reflash rather than a dead module,
+and several of the observations that feel like evidence of a dead Secure
+Enclave are not evidence at all.  See
+[`debugging-aen.md` §7](debugging-aen.md#7-the-secure-enclave-boots-nothing-at-all--cores-parked-vtor-0),
+which also covers how to tell that case apart from a genuine SE-side
+fault with one passive SEUART capture.
+
 ### Ethernet PHY doesn't link
 
 * MDIO probe should read `PHYID1 == 0x001C` (Realtek OUI).  If it
@@ -295,7 +309,7 @@ The EEPROM-side hw_info reader isn't configured.  Set
 id carrying the on-module 24C128.  On V2N / V2N-M1 this is the bus
 matching `ALP_E1M_I2C0` (Renesas RIIC0, `P31`/`P30`); on AEN it's
 SoC I2C2 (DesignWare `i2c_dw`, `P5_6`/`P5_7`, bridge/DNP-selected --
-NOT the slave-only LPI2C0 / BRD_I2C).
+NOT BRD_I2C, a separate bus (SoC I2C0 on the E1M-AEN801 -- #1848)).
 
 ## CI / tooling issues
 
@@ -313,7 +327,7 @@ file but a misconfigured global setting can override that.
 ## Where to file bugs
 
 * SDK metadata, schema, portable API, or reference-emitter bug: [`github.com/alplabai/alp-sdk/issues`](https://github.com/alplabai/alp-sdk/issues)
-* Tan planner, executor, or command bug: [`github.com/alplabai/tan-cli`](https://github.com/alplabai/tan-cli). Python Tan owns build/run/flash/size/image/clean/Renode and the relocated planner; only `migrate`, `lock`, and `quality` still forward to west.
+* Tan planner, executor, or command bug: [`github.com/alplabai/tan-cli`](https://github.com/alplabai/tan-cli). Python Tan owns build/run/flash/size/image/clean and the relocated planner; only `migrate`, `lock`, and `quality` still forward to west.
 * Chip driver bug: file against alp-sdk; include the `driver_status` from the
   chip's metadata yaml.
 

@@ -13,6 +13,7 @@ Run locally:
 
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -20,7 +21,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _orchestrate_support import _write_board  # noqa: E402
+from _orchestrate_support import REPO, _write_board  # noqa: E402
 
 from alp_orchestrate import (                       # noqa: E402
     OrchestratorError,
@@ -208,5 +209,75 @@ def test_extra_libraries_profile_file_missing(tmp_path: Path) -> None:
     msg = str(excinfo.value)
     assert "phantom" in msg
     assert "does not resolve" in msg
+
+
+# ---------------------------------------------------------------------
+# #1485 follow-up -- the ADR-0018 library layer (scripts/alp_orchestrate/
+# libraries.py) is a SECOND resolver family the original #1485 fix missed:
+# `resolve_selection` / `zephyr_kconfig_lines` / `yocto_unwireable` /
+# `yocto_image_install` / `baremetal_cmake_args` all take a `metadata_root:
+# Path = METADATA_ROOT` DEFAULT ARGUMENT, so a kconfig.py call site that
+# passes `project` + `slice_` but omits the third positional arg silently
+# binds the module-global default instead of `project.effective_
+# metadata_root()` -- the exact two-trees-in-one-artifact shape #1485
+# describes, just one layer further out than the fixed loader/carveout/
+# partition call sites.
+# ---------------------------------------------------------------------
+
+
+def test_curated_library_kconfig_resolves_against_explicit_metadata_root(
+    tmp_path: Path,
+) -> None:
+    """#1485 follow-up: a project-wide `libraries: [cmsis-dsp]` Kconfig
+    line must come from the manifest at `metadata_root`, not the SDK's
+    own in-tree `metadata/libraries/cmsis-dsp.yaml` -- pre-fix,
+    `kconfig.py`'s `_library_layer.zephyr_kconfig_lines(project, slice_)`
+    (and four siblings) called the ADR-0018 layer without its third
+    `metadata_root` argument, so they always read the in-tree manifest
+    even under `load_board_yaml(..., metadata_root=<scratch>)`.
+
+    Mutates the scratch root's cmsis-dsp manifest exactly as the
+    adversarial review's manual repro did: swap
+    `CONFIG_CMSIS_DSP_TRANSFORM=y` for a scratch-only marker line. The
+    emitted alp.conf must carry the marker and must NOT carry the
+    in-tree-only symbol.
+    """
+    meta = tmp_path / "metadata"
+    shutil.copytree(REPO / "metadata", meta)
+    manifest = meta / "libraries" / "cmsis-dsp.yaml"
+    text = manifest.read_text(encoding="utf-8")
+    assert "CONFIG_CMSIS_DSP_TRANSFORM=y" in text, (
+        "cmsis-dsp.yaml no longer declares CONFIG_CMSIS_DSP_TRANSFORM=y")
+    manifest.write_text(
+        text.replace("CONFIG_CMSIS_DSP_TRANSFORM=y",
+                     "CONFIG_SCRATCH_ONLY_MARKER=y"),
+        encoding="utf-8")
+
+    body = """
+name: test-v2n-metadata-root-libs
+som:
+  sku: E1M-V2N101
+  hw_rev: r1
+
+libraries:
+  - cmsis-dsp
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path, metadata_root=meta)
+    out = _slice_alp_conf(project, project.cores["m33_sm"])
+    assert "CONFIG_SCRATCH_ONLY_MARKER=y" in out
+    assert "CONFIG_CMSIS_DSP_TRANSFORM=y" not in out
+
+    # Same board, no override: must resolve against the real in-tree
+    # manifest and emit the REAL symbol, not the scratch marker.
+    project_intree = load_board_yaml(path)
+    out_intree = _slice_alp_conf(project_intree, project_intree.cores["m33_sm"])
+    assert "CONFIG_CMSIS_DSP_TRANSFORM=y" in out_intree
+    assert "CONFIG_SCRATCH_ONLY_MARKER=y" not in out_intree
 
 

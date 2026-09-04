@@ -7,9 +7,9 @@
   "status": "released",
   "pending_alif_datasheet": false,
   "datasheet": {
-    "version": "1.0",
-    "extracted_at": "2026-05-11",
-    "source": "Alif_E8_Datasheet_v1.0.pdf",
+    "version": "1.2",
+    "extracted_at": "2026-08-30",
+    "source": "Alif_E8_Datasheet_v1.2.pdf",
     "doc_id": "ADTS0013"
   },
   "hwrm": {
@@ -217,7 +217,8 @@
   ],
   "power": {
     "stop_ua": 1.3,
-    "active_ua_per_mhz": 29
+    "active_ua_per_mhz": 27,
+    "vin_v": [1.75, 4.8]
   },
   "operating_temp_c": {
     "ambient": [-40, 85]
@@ -249,7 +250,10 @@
   ],
   "notes": [
     "2026-07-25 DFP audit (Device/soc/AE822FA0E5597/include/), partially discharging the 'reconcile against v1.0' note above: spi_lp 1->2 (LPSPI0_BASE + LPSPI1_BASE -- the old 1 was wrong on the part we bench), and dma_general_32ch added as 3 (DMA0/DMA1/DMA2, each with _NS and _SEC views) -- the key was simply missing here while E4/E6 already carried it.  Every other count in this block was re-verified against the DFP base symbols and soc_features.h and is correct.",
-    "Datasheet v1.0 released (Alif_E8_Datasheet_v1.0.pdf, ADTS0013, 2026-05-11) -- supersedes the prior v0.51 pre-release reference.  Peripheral counts above were ingested against v0.51 and remain provisional; reconcile against v1.0 in the next dedicated re-ingest pass.",
+    "Datasheet re-pointed to ADTS0013 v1.2 (June 2026) on 2026-08-30, from v1.0 (#1811).  active_ua_per_mhz corrected 29 -> 27: 29 traced to the pre-1.0 Alif E8 Datasheet 0.51 draft, while v1.2 Features reads 'As Low as 27 uA/MHz Dynamic Consumption for High-Efficiency Cortex-M55'.  vin_v added as 1.75-4.8 V (Features, '1.75 V to 4.8 V Primary Supply Range'; Table 5-4 note 5 requires VDD_MAIN and VDD_BUCK tied together).  Peripheral counts were re-verified against the DFP in the 2026-07-25 audit above and are not re-derived here.",
+    "I2C ceiling is 1.0 Mbps, not 3.4 Mbps: v1.2 Features reads '4x I2C Channels up to 1.0 Mbps Throughput', and Table 9-1 records 'Updated I2C throughput from 3.4 Mbps to 1.0 Mbps in Section Features, Section 3.17.4 I2C Overview, and Table 5-3' plus 'Removed HS mode column ... in Table 5-30 I2C Timing Characteristics'.  I2C High-Speed mode is therefore no longer a specified capability on this part.  Not encoded as a field because soc-spec-v1 has no per-bus throughput ceiling, so a board.yaml asking for a faster clock-frequency still passes validation (#1811).",
+    "spi_lp = 2 counts REGISTER BLOCKS, not usable buses.  v1.2: 'Up to two Low-Power SPI modules (LPSPI0 and LPSPI1) in the RTSS-HE, sharing device pins and thus forming a single LPSPI channel', with master mode only on LPSPI0 and slave mode only on LPSPI1.  The count stays 2 to match the DFP base symbols (2026-07-25 audit note above); a consumer must not read it as two independent buses (#1811).",
+    "power.stop_ua = 1.3 is a single scalar over what Table 5-5 defines as STOP_0 through STOP_5, each with a different retention set, a different typical current and separate retention adders.  soc-spec-v1 cannot express that ladder; the number is kept as the best single figure and must not be read as the current in any particular STOP mode (#1811).",
     "HWRM v0.3 is Alif-confidential -- referenced here for traceability; the file itself stays out of git.",
     "Errata AERR0012 v2.0 covers E4/E6/E8 jointly; individual `items` list is pending ingestion against the errata doc.",
     "E8 adds 1× Ethos-U85 NPU (Generative AI, supports Transformers) on top of the E7 NPU pair.",
@@ -258,6 +262,6 @@
     "WLCSP216 package exposes 136× 1.8-V GPIOs; FBGA194 exposes 120 (note: 'GPIO[0-14]' subset on FBGA per datasheet table 7-1).",
     "AE822FA0E5597LS0 is the variant Alp Lab uses on the E1M-AEN801 module SKU.",
     "USB = xHCI USB-2.0 dual-role @ 0x48200000 (IRQ 101), 16 endpoints; grounded from the Alif DFP soc.h/soc_features.h (AE822FA0E5597). Host mode supported.",
-    "debug.expect_dpidr = 0x4C013477 on AE822FA0E5597LS0 is a MEASUREMENT, not a derivation (#1355): re-confirmed on real silicon 2026-08-10 (`Found SW-DP with ID 0x4C013477`), and independently recorded across docs/bring-up-aen.md, docs/debugging-aen.md, docs/aen-provisioning.md, docs/aen-bench-bringup.md and docs/_aen-runbook-section.md, plus scripts/bench/aen/bench-env.sh's AEN_DPIDR default.  It is deliberately NOT set on the sibling AE822FA0E5597BS0: no BS0 part is on this bench, and a same-family assumption is exactly the guess the key's own schema description forbids -- an unarmed guard is recoverable, a guard armed at the wrong ID passes on the board it exists to exclude."
+    "debug.expect_dpidr = 0x4C013477 on AE822FA0E5597LS0 is a MEASUREMENT, not a derivation (#1355): re-confirmed on real silicon 2026-08-10 (`Found SW-DP with ID 0x4C013477`), and independently recorded across docs/bring-up-aen.md, docs/debugging-aen.md, docs/aen-provisioning.md, docs/aen-bench-bringup.md and docs/_aen-runbook-section.md, plus scripts/bench/aen/bench-env.sh's AEN_DPIDR default.  It is set for the single remaining variant; the AE822FA0E5597BS0 (WLCSP216) row this note used to contrast against was dropped by #1444, and validate_metadata.py::_check_soc_no_wlcsp_variants now refuses to let it back in.  The rule that contrast existed to state still holds generally: never arm expect_dpidr from a same-family assumption -- an unarmed guard is recoverable, a guard armed at the wrong ID passes on the board it exists to exclude.  (The WLCSP216 entries at `packages` and the GPIO-count note above are vendor facts about the silicon, not variant rows, and stay.)"
   ]
 }

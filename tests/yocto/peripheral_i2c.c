@@ -55,26 +55,33 @@ static void test_nonexistent_bus_returns_null_and_stamps_not_ready(void)
 	ALP_ASSERT_EQ_INT(alp_last_error(), ALP_ERR_NOT_READY);
 }
 
-static void test_write_on_null_bus_returns_invalid(void)
+/* NULL `bus` is a lifecycle condition, not a malformed argument --
+ * ALP_ERR_NOT_READY, matching every Zephyr dispatcher and ADR-0002's
+ * 2026-08-27 amendment (issue #1834, same shape as #1734's GPIO fix).
+ * tests/yocto/peripheral_i2c_closed_status.c covers the sharper
+ * non-NULL, closed-handle case and the INVAL-still-fires-on-a-good-
+ * handle counterpart, which this public-API-only file can't fabricate
+ * without a real /dev/i2c-N. */
+static void test_write_on_null_bus_returns_not_ready(void)
 {
 	uint8_t      buf[1] = { 0x00 };
 	alp_status_t rc     = alp_i2c_write(NULL, 0x6Bu, buf, sizeof(buf));
-	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOT_READY);
 }
 
-static void test_read_on_null_bus_returns_invalid(void)
+static void test_read_on_null_bus_returns_not_ready(void)
 {
 	uint8_t      buf[1] = { 0 };
 	alp_status_t rc     = alp_i2c_read(NULL, 0x6Bu, buf, sizeof(buf));
-	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOT_READY);
 }
 
-static void test_write_read_on_null_bus_returns_invalid(void)
+static void test_write_read_on_null_bus_returns_not_ready(void)
 {
 	uint8_t      wbuf[1] = { 0x0F };
 	uint8_t      rbuf[1] = { 0 };
 	alp_status_t rc      = alp_i2c_write_read(NULL, 0x6Bu, wbuf, sizeof(wbuf), rbuf, sizeof(rbuf));
-	ALP_ASSERT_EQ_INT(rc, ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(rc, ALP_ERR_NOT_READY);
 }
 
 static void test_close_null_is_safe(void)
@@ -87,9 +94,9 @@ int main(void)
 {
 	test_null_cfg_returns_null_and_stamps_invalid();
 	test_nonexistent_bus_returns_null_and_stamps_not_ready();
-	test_write_on_null_bus_returns_invalid();
-	test_read_on_null_bus_returns_invalid();
-	test_write_read_on_null_bus_returns_invalid();
+	test_write_on_null_bus_returns_not_ready();
+	test_read_on_null_bus_returns_not_ready();
+	test_write_read_on_null_bus_returns_not_ready();
 	test_close_null_is_safe();
 
 	ALP_TEST_SUMMARY();

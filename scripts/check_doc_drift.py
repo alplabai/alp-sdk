@@ -40,7 +40,7 @@ Five independent checks:
 
       Scanned surfaces (customer-facing only):
         README.md, docs/*.md (top-level), docs/tutorials/**,
-        docs/soms/**, docs/boards/**, vendors/**/*.md
+        docs/soms/**, docs/boards/**, docs/bench/**, vendors/**/*.md
       Deliberately NOT scanned:
         * historical / generated / internal: CHANGELOG.md,
           docs/superpowers/**, docs/abi/**, docs/adr/**
@@ -126,6 +126,16 @@ _ALLOWLIST: set[str] = {
     # Real identifier; *.dtsi is deliberately outside the harvested surfaces
     # (harvest scans meta-alp-sdk *.conf/*.bb/*.bbappend/*.inc only).
     "ALP_CA55_1P8GHZ",
+    # U-Boot Kconfig string selecting the board dtb basename for
+    # CONFIG_BOOTCOMMAND (#1252), named by bring-up-drpai-v2n.md's deploy
+    # section.  Real identifier, but it is DEFINED in
+    # meta-alp-sdk/recipes-bsp/u-boot/u-boot/0002-rzv2n-dev-ALP-E1M-production-boot.patch
+    # and set in fdtfile-v2m.cfg -- a *.patch and a *.cfg, neither of which
+    # is a harvested surface (meta-alp-sdk harvest scans *.conf/*.bb/
+    # *.bbappend/*.inc only).  The one .bbappend that does mention it spells
+    # it CONFIG_-prefixed, which _BARE_SYMBOL_RE deliberately does not strip
+    # during harvest.  Same shape as ALP_CA55_1P8GHZ above.
+    "ALP_E1M_FDTFILE",
     # docs/porting-new-som.md's worked example walks through porting a
     # HYPOTHETICAL 7th AEN-family SKU, E1M-AEN901 (see its Sec 3) -- these
     # Zephyr board targets are deliberately illustrative and never land in
@@ -149,11 +159,6 @@ _ALLOWLIST: set[str] = {
     # OLD per-file config looked like before board.yaml replaced it.
     "ALP_SDK_USE_LWRB",
     "ALP_SDK_USE_NANOPB",
-    # docs/bring-up-drpai-v2n.md names the per-MACHINE Kconfig strings an
-    # independent, still-unmerged fix on `feat/1145-drpai-v2n-bringup` uses
-    # (see #1175) -- real on that branch, not yet on this one.
-    "ALP_FDT_FILE",
-    "ALP_SD_ROOT",
     # docs/board-config-features.md's PSA-attestation section names the
     # exact Kconfig line and driver-path comment
     # scripts/alp_orchestrate/secure.py emits for `attestation_root:
@@ -167,19 +172,29 @@ _ALLOWLIST: set[str] = {
     # re-widening the harvest, pending a maintainer decision to finish
     # the PSA<->OPTIGA wiring or mark it not-yet-implemented in the doc.
     "ALP_SDK_PSA_ATTESTATION_OPTIGA",
-    # docs/gd32-bridge.md's recovery-runbook step names an env var read by
-    # tan-cli's flash_cmd.py (a different repo), not an alp-sdk symbol --
-    # it will never appear in this repo's headers/Kconfig/generators.
+    # docs/gd32-bridge.md's recovery-runbook narration names this env var
+    # read by tan-cli's flash_cmd.py (a different repo,
+    # python/tan/commands/flash_cmd.py's REQUIRE_DPIDR_ENV, tan-cli#589),
+    # not an alp-sdk symbol.  Allowlisted BECAUSE it will never appear in
+    # this repo's headers/Kconfig/generators; drop the entry if
+    # docs/gd32-bridge.md ever stops naming it.
     "ALP_FLASH_REQUIRE_DPIDR",
-    # docs/bring-up-drpai-v2n.md's Model-compile section names the maintainer-
-    # exported env var tan.model.adapters.drpai reads (`os.environ.get(
-    # "ALP_DRPAI_TVM_HOME")`). Until ADR-0028 this was a real harvested token
-    # via scripts/alp_model/adapters/drpai.py's own copy of that same
-    # os.environ.get() call; that file relocated to tan-cli's
-    # python/tan/model/adapters/drpai.py, so the symbol is genuinely gone from
-    # this repo's tree now -- same shape as ALP_FLASH_REQUIRE_DPIDR above, a
-    # different repo's env var, not an alp-sdk symbol.
-    "ALP_DRPAI_TVM_HOME",
+    # docs/aen-provisioning.md's app-device-config.json section names these
+    # two bench env vars (scripts/bench/aen/flash-update-log-firewall-probe.sh,
+    # scripts/bench/aen/flash-update-log-dual.sh) to bound the doc's guidance
+    # against the firewall-policy carve-out those scripts already encode.
+    # Real identifiers, but *.sh under scripts/bench/ is deliberately outside
+    # the harvested surfaces (collect_known_symbols() scans headers/Kconfig/
+    # generators/vendor CMakeLists/board.yml only). Same shape as
+    # ALP_FLASH_REQUIRE_DPIDR above.
+    "ALP_AEN_INCLUDE_DEVICE_CONFIG",
+    "ALP_AEN_DEVICE_CONFIG_JSON",
+    # NOTE: no ALP_DRPAI_TVM_HOME entry here. PR #1470's ADR-0028 Task 6
+    # (retiring scripts/alp_model/ to tan.model) is declined in this merge --
+    # see the PR's merge report -- so scripts/alp_model/adapters/drpai.py's
+    # own `os.environ.get("ALP_DRPAI_TVM_HOME")` still lives under the
+    # harvested scripts/**/*.py surface and resolves this symbol as real
+    # without an allowlist entry.
 }
 
 # Identifier shapes we treat as SDK symbols.  The optional `CONFIG_`
@@ -224,7 +239,7 @@ _BARE_SYMBOL_RE = re.compile(r"\b(ALP_[A-Z0-9_]+|alp_[a-z0-9_]+)\b")
 _BOARD_YML_NAME_RE = re.compile(r"^\s*name:\s*(\S+)", re.MULTILINE)
 
 # docs/ subdirectories scanned recursively for dead symbols.
-_DOC_SUBDIRS = ("tutorials", "soms", "boards")
+_DOC_SUBDIRS = ("tutorials", "soms", "boards", "bench")
 
 # Top-level docs/*.md that are forward-looking design / proposal docs:
 # they document APIs that don't exist yet *by intent*, so they are
@@ -248,7 +263,6 @@ _CC3501E_BRIDGE_SCAN_SUFFIXES = {
 
 _CC3501E_BRIDGE_SCAN_GLOBS = (
     "docs/cc3501e*.md",
-    "firmware/cc3501e/**/*",
     "examples/aen/aen-cc3501e-*/**/*",
     "examples/aen/aen-usb-firstlight/**/*",
     "examples/peripheral-io/alp-console/**/*",
@@ -316,6 +330,14 @@ _MATRIX_TOTAL_QUOTING_DOCS = (
 # 4-way enumeration as a spurious "10/12" fraction.
 _STATED_SLASH_FRACTION_RE = re.compile(r"(?<![\d/])(\d+)\s*/\s*(\d+)(?![\d/])")
 _STATED_OF_FRACTION_RE = re.compile(r"(\d+)\s+of\s+(\d+)")
+
+# The example/preset-adoption count docs/board-config-schema.md hand-quotes
+# ("100 do today -- 75 on `e1m-evk`, 25 on `e1m-x-evk`") -- checked live
+# against examples/**/board.yaml's `preset:` field so it can't re-rot the
+# way 66/46/20 did before it.
+_EXAMPLE_PRESET_COUNT_RE = re.compile(
+    r"\((\d+) do today — (\d+) on `e1m-evk`, (\d+) on `e1m-x-evk`\)"
+)
 
 
 def collect_known_symbols(root: pathlib.Path) -> set[str]:
@@ -618,6 +640,48 @@ def find_matrix_total_drift(root: pathlib.Path) -> list[tuple[str, int, str, str
     return drift
 
 
+def find_example_preset_count_drift(root: pathlib.Path) -> list[tuple[str, int, str, str]]:
+    """Return a stale hand-quoted example/preset-adoption count.
+
+    docs/board-config-schema.md hand-quotes how many `examples/**/board.yaml`
+    files exist and how many use each preset ("100 do today -- 75 on
+    `e1m-evk`, 25 on `e1m-x-evk`"). Recompute the real counts by walking the
+    tree and comparing `preset:` values, instead of trusting the prose to
+    stay in sync -- the same drift this line has already suffered twice
+    (66/46/20, then 100/75/25).
+    """
+    doc_path = root / "docs" / "board-config-schema.md"
+    examples_dir = root / "examples"
+    if not doc_path.is_file() or not examples_dir.is_dir():
+        return []
+
+    board_yamls = sorted(examples_dir.glob("**/board.yaml"))
+    evk = x_evk = 0
+    for p in board_yamls:
+        m = re.search(r"(?m)^preset:\s*(\S+)",
+                       p.read_text(encoding="utf-8", errors="replace"))
+        if not m:
+            continue
+        if m.group(1) == "e1m-evk":
+            evk += 1
+        elif m.group(1) == "e1m-x-evk":
+            x_evk += 1
+    actual = (len(board_yamls), evk, x_evk)
+
+    text = doc_path.read_text(encoding="utf-8", errors="replace")
+    drift: list[tuple[str, int, str, str]] = []
+    for m in _EXAMPLE_PRESET_COUNT_RE.finditer(text):
+        stated = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        if stated != actual:
+            line_no = text.count("\n", 0, m.start()) + 1
+            drift.append((
+                "docs/board-config-schema.md", line_no, m.group(0),
+                f"({actual[0]} do today — {actual[1]} on `e1m-evk`, "
+                f"{actual[2]} on `e1m-x-evk`)",
+            ))
+    return drift
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -638,6 +702,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     stale_cc3501e = find_cc3501e_bridge_stale_claims(root)
     e1m_x_pinout_gaps = find_e1m_x_pinout_guidance_gaps(root)
     matrix_total_drift = find_matrix_total_drift(root)
+    example_preset_count_drift = find_example_preset_count_drift(root)
 
     if dead:
         print("Dead SDK-symbol references "
@@ -670,18 +735,27 @@ def main(argv: Optional[list[str]] = None) -> int:
         for rel, line_no, matched, expected in matrix_total_drift:
             print(f"  {rel}:{line_no}  \"{matched}\" -- matrix says {expected}",
                   file=sys.stderr)
+    if example_preset_count_drift:
+        print("Example/preset-adoption count quoted in prose doesn't match "
+              "examples/**/board.yaml's preset: fields:", file=sys.stderr)
+        for rel, line_no, matched, expected in example_preset_count_drift:
+            print(f"  {rel}:{line_no}  \"{matched}\" -- tree says {expected}",
+                  file=sys.stderr)
 
-    if dead or gaps or stale_cc3501e or e1m_x_pinout_gaps or matrix_total_drift:
+    if (dead or gaps or stale_cc3501e or e1m_x_pinout_gaps
+            or matrix_total_drift or example_preset_count_drift):
         print(f"\ndoc-drift: {len(dead)} dead ref(s), {len(gaps)} index "
               f"gap(s), {len(stale_cc3501e)} stale CC3501E bridge "
               f"claim(s), {len(e1m_x_pinout_gaps)} E1M-X pinout "
               f"guidance gap(s), {len(matrix_total_drift)} stale matrix "
-              f"total(s) -- failing.", file=sys.stderr)
+              f"total(s), {len(example_preset_count_drift)} stale example "
+              f"preset count(s) -- failing.", file=sys.stderr)
         return 1
 
     print("doc-drift: OK (no dead symbol refs, docs index complete, "
           "CC3501E bridge wording current, E1M-X pinout guidance current, "
-          "portability-matrix totals in sync).")
+          "portability-matrix totals in sync, example preset count in "
+          "sync).")
     return 0
 
 

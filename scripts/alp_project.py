@@ -96,7 +96,6 @@ from alp_project_loader import (  # noqa: F401  (compat re-export)
 )
 from alp_project_emit import (  # noqa: F401  (compat re-export)
     _CHIP_SUBSYSTEMS,
-    _PERIPHERAL_KCONFIG,
     _SOC_FAMILY_TOKEN,
     _emit_carrier_netlist,
     _emit_composed_route_table,
@@ -133,11 +132,55 @@ def _write_or_print(out: str, target: Path | None) -> int:
     return 0
 
 
+def _parse_cores_arg(raw: str) -> dict[str, str]:
+    """`--cores` (issue #1652): `core_id:os[,core_id:os...]` -- the
+    topology an IDE wizard already knows (which cores it's targeting
+    and which OS each runs), NOT a directory. `--cores` is a SELECTOR
+    over the catalog's existing templates (see
+    `alp_template.find_template_by_cores`'s docstring for why this
+    stops short of an arbitrary core -> app-dir renderer): the
+    directory each core lands in is whatever the matched template
+    already uses, same as picking that template by `--template` would
+    give.
+    """
+    cores: dict[str, str] = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if ":" not in entry:
+            raise ValueError(
+                f"--cores entry {entry!r} must be core_id:os (e.g. "
+                f"m55_hp:zephyr)")
+        core_id, _, os_name = entry.partition(":")
+        core_id, os_name = core_id.strip(), os_name.strip()
+        if not core_id or not os_name:
+            raise ValueError(
+                f"--cores entry {entry!r} must be core_id:os (e.g. "
+                f"m55_hp:zephyr)")
+        if core_id in cores:
+            raise ValueError(
+                f"--cores names {core_id!r} more than once")
+        cores[core_id] = os_name
+    if not cores:
+        raise ValueError("--cores must name at least one core_id:os pair")
+    return cores
+
+
 def _run_scaffold_emit(args: argparse.Namespace) -> int:
-    """`--emit scaffold --template <id> --sku <SKU>` (issue #864): print
-    the `[{path, contents}, ...]` envelope for a NEW project's
-    `files.user_owned` -- no board.yaml required (there is no project
-    yet), so this never touches `_validate_and_load`/`--input` at all.
+    """`--emit scaffold --template <id> --sku <SKU>` (issue #864), or
+    `--emit scaffold --cores <core_id:os,...> --sku <SKU>` (issue
+    #1652): print the `[{path, contents}, ...]` envelope for a NEW
+    project's `files.user_owned` -- no board.yaml required (there is
+    no project yet), so this never touches `_validate_and_load`/
+    `--input` at all.
+
+    `--cores` is an ALTERNATIVE way to pick the template -- a selector
+    by core/OS topology instead of by id (`alp_template.
+    find_template_by_cores`) -- resolved to the same `template_id`
+    `--template` would name, then handed to the exact same
+    `render_to_envelope()` call below. `--template` keeps working
+    unchanged; this is an additional input mode, not a replacement.
 
     Delegates to `alp_template.render_to_envelope()`, the same
     planning + read/substitute path `alp_template.py render` uses to
@@ -147,9 +190,13 @@ def _run_scaffold_emit(args: argparse.Namespace) -> int:
     integration conventions Python Tan's relocated scaffold renderer keeps in
     parity with this SDK reference.
     """
-    if not args.template:
-        print("alp_project: --emit scaffold requires --template <id>",
-              file=sys.stderr)
+    if args.template and args.cores:
+        print("alp_project: --emit scaffold takes --template OR --cores, "
+              "not both", file=sys.stderr)
+        return 1
+    if not args.template and not args.cores:
+        print("alp_project: --emit scaffold requires --template <id> or "
+              "--cores <core_id:os,...>", file=sys.stderr)
         return 1
     if not args.sku:
         print("alp_project: --emit scaffold requires --sku <SKU>",
@@ -157,9 +204,24 @@ def _run_scaffold_emit(args: argparse.Namespace) -> int:
         return 1
 
     import alp_template
+    template_id = args.template
+    if args.cores:
+        try:
+            cores = _parse_cores_arg(args.cores)
+        except ValueError as e:
+            print(f"alp_project: {e}", file=sys.stderr)
+            return 1
+        try:
+            record = alp_template.find_template_by_cores(
+                alp_template.load_catalog(), cores)
+        except alp_template.TemplateError as e:
+            print(f"alp_project: {e}", file=sys.stderr)
+            return 1
+        template_id = record["id"]
+
     try:
         envelope = alp_template.render_to_envelope(
-            args.template, args.sku, metadata_root=args.metadata_root)
+            template_id, args.sku, metadata_root=args.metadata_root)
     except alp_template.TemplateError as e:
         print(f"alp_project: {e}", file=sys.stderr)
         return 1
@@ -362,6 +424,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             project.board_preset,
             v2_libraries=v2_libraries,
             v2_project_libraries=sorted(project.libraries),
+            metadata_root=project.effective_metadata_root(),
         )
         return _write_or_print(out, args.output)
 
@@ -493,7 +556,16 @@ def main() -> int:
                         help="Override the metadata search root.")
     parser.add_argument("--template", default=None,
                         help="metadata/templates/catalog-v1.json template "
-                             "id; required for --emit scaffold.")
+                             "id; required for --emit scaffold (unless "
+                             "--cores is given instead).")
+    parser.add_argument("--cores", default=None,
+                        help="core_id:os[,core_id:os...] topology (e.g. "
+                             "'m55_hp:zephyr,m55_he:zephyr'); an "
+                             "alternative to --template for --emit "
+                             "scaffold -- selects whichever catalog "
+                             "template's own cores: topology matches "
+                             "exactly (issue #1652). Mutually exclusive "
+                             "with --template.")
     parser.add_argument("--sku", default=None,
                         help="Target SoM SKU (e.g. E1M-V2N101); required "
                              "for --emit scaffold -- substitutes the "

@@ -78,11 +78,20 @@
  *   validated before it reaches this file.  ORT itself does not check the
  *   declared shape against how much real tensor data follows, so
  *   _gather_tensor_info() is the trust boundary for that data: it bounds
- *   ndim, checks every accumulation for overflow, and rejects a shape
- *   whose element count would overflow size_t or blow a policy cap on
- *   total tensor bytes, rather than handing back a wrapped/undersized
- *   size_bytes alongside a shape[]/rank that still claims the original
- *   (huge) dimensions.
+ *   ndim -- against TWO SEPARATE ceilings, not one (kHostileTensorRankCeiling
+ *   vs. kMaxTensorRank below): a corrupt/hostile ndim (ALP_ERR_INVAL) is a
+ *   different condition from a well-formed model whose rank this 4-slot
+ *   descriptor simply cannot represent (ALP_ERR_NOSUPPORT) -- checks every
+ *   accumulation for overflow, and rejects a shape whose element count
+ *   would overflow size_t or blow a policy cap on total tensor bytes,
+ *   rather than handing back a wrapped/undersized size_bytes alongside a
+ *   shape[]/rank that still claims the original (huge) dimensions.  It also
+ *   refuses (ALP_ERR_NOSUPPORT) any tensor whose real rank exceeds 4:
+ *   alp_inference_tensor_t's shape[] has exactly 4 slots, and this backend
+ *   used to silently truncate a longer shape to the first 4 dims in
+ *   get_input()/get_output() instead of saying so --
+ *   the caller read back a shape that no longer matched the model, with no
+ *   signal anything was wrong (issue #1729).
  *
  * OrtErrorCode -> alp_status_t mapping
  *   No ORT precedent exists in this tree to reuse: inference_drpai.cpp's
@@ -287,11 +296,28 @@ struct OrtTensorInfo {
                                           * _gather_tensor_info() */
 };
 
-/* Sane ceiling on a tensor's rank -- a real ONNX model's tensors run to a
- * handful of dims; this exists to reject a corrupt/hostile ndim before it
- * drives an oversized std::vector<int64_t> allocation, not to constrain any
- * legitimate model. */
-constexpr size_t kMaxTensorRank = 32;
+/* Hostile/corrupt-input ceiling -- NOT the same concern as kMaxTensorRank
+ * below.  A real ONNX model's tensors run to a handful of dims; this exists
+ * only to reject a corrupt/hostile ndim before it drives an oversized
+ * std::vector<int64_t> allocation a few lines down in _gather_tensor_info(),
+ * not to constrain any legitimate model -- INVAL, the same "malformed input"
+ * verdict _ort_errorcode_to_status() gives ORT_INVALID_GRAPH.  A rank this
+ * large is implausible for ANY real graph, representable or not, so it is
+ * screened out before the representable-rank question below is even asked. */
+constexpr size_t kHostileTensorRankCeiling = 32;
+
+/* Hard ceiling on a tensor's rank: the portable alp_inference_tensor_t
+ * descriptor (include/alp/inference.h) carries a FIXED shape[4] / uint8_t
+ * rank pair -- there is no wire format here to widen, unlike kMaxTensorBytes
+ * below, which is this backend's own policy choice. A tensor whose real rank
+ * exceeds 4 -- but is still under kHostileTensorRankCeiling above, i.e. a
+ * well-formed model this API just has no slot for -- is refused outright at
+ * open() (see the kMaxTensorRank check in _gather_tensor_info() below)
+ * rather than silently reported as a truncated 4-dim shape that no longer
+ * matches the model (issue #1729: a caller trusting that truncated shape
+ * gets confidently wrong tensor geometry, not a truncated-but-honest one --
+ * worse than a refusal). */
+constexpr size_t kMaxTensorRank = 4;
 
 /* Policy ceiling on one tensor's SDK-owned buffer.  This backend targets
  * the CPU floor on an A55/Yocto SoM, not a datacenter accelerator -- a
@@ -347,9 +373,27 @@ alp_status_t _gather_tensor_info(const OrtApi  *api,
 		api->ReleaseTypeInfo(type_info);
 		return rc;
 	}
-	if (ndim > kMaxTensorRank) {
+	if (ndim > kHostileTensorRankCeiling) {
+		/* Different concern from the kMaxTensorRank check below: this ndim
+		 * is implausible for ANY real model (corrupt/hostile input), and
+		 * is rejected here -- before it drives an oversized
+		 * std::vector<int64_t> allocation just below -- rather than
+		 * refused as merely "unrepresentable". */
 		api->ReleaseTypeInfo(type_info);
 		return ALP_ERR_INVAL;
+	}
+	if (ndim > kMaxTensorRank) {
+		/* Rank > 4 cannot be represented by alp_inference_tensor_t's
+		 * fixed shape[4] -- refuse the model rather than let
+		 * get_input()/get_output() hand back a shape[] silently
+		 * truncated to the first 4 dims (issue #1729). NOSUPPORT, not
+		 * INVAL: the model itself is well-formed (ndim already passed the
+		 * hostile-ceiling check above), it is this portable descriptor
+		 * that has no slot for its rank -- same "API can't represent it"
+		 * sense ALP_ERR_NOSUPPORT already carries for
+		 * ORT_NOT_IMPLEMENTED/ORT_EP_FAIL above. */
+		api->ReleaseTypeInfo(type_info);
+		return ALP_ERR_NOSUPPORT;
 	}
 
 	std::vector<int64_t> dims(ndim);
@@ -410,12 +454,36 @@ alp_status_t _gather_tensor_info(const OrtApi  *api,
 	return ALP_OK;
 }
 
+/** Release every OrtValue in @p values (NULL-safe per entry) via @p api. */
+void _release_values(const OrtApi *api, std::vector<OrtValue *> &values)
+{
+	for (OrtValue *v : values) {
+		if (v != nullptr) {
+			api->ReleaseValue(v);
+		}
+	}
+	values.clear();
+}
+
 /** Per-handle ORT state.  Owns the OrtEnv/OrtSession, the SDK-owned input
  *  and output staging buffers, and an OrtValue wrapping each one (created
  *  once at open() time and reused every invoke() -- CreateTensorWithDataAsOrtValue
  *  aliases the given memory rather than copying it, so Run() reads inputs
  *  from / writes outputs into these buffers directly, symmetric to how
- *  DRP-AI's input_bufs get pushed via SetInput()). */
+ *  DRP-AI's input_bufs get pushed via SetInput()).
+ *
+ *  RAII (issue #1494): ~OrtState() is the ONE place that releases every
+ *  vendor resource this struct owns.  open() drives an std::unique_ptr<OrtState>
+ *  through several fallible steps -- each one an std::vector::resize/assign,
+ *  std::make_unique, or std::string assignment that can throw -- and used to
+ *  hand-roll a matching cleanup at every early return plus a SEPARATE,
+ *  incomplete copy in its catch(...) handler (the catch arm released
+ *  cpu_mem_info/session/env but skipped the OrtValue vectors entirely,
+ *  leaking every OrtValue already created before the throw).  Now every exit
+ *  path -- an early `return rc;` inside open()'s try, the catch(...) handler,
+ *  and close() -- destroys the same std::unique_ptr<OrtState>/raw OrtState*
+ *  and gets the same cleanup for free; open()'s success path is the only one
+ *  that escapes it, via std::unique_ptr::release(). */
 struct OrtState {
 	OrtEnv        *env          = nullptr;
 	OrtSession    *session      = nullptr;
@@ -435,18 +503,31 @@ struct OrtState {
 	std::vector<std::vector<uint8_t>> output_bufs;
 	std::vector<OrtValue *>           output_values;
 	std::vector<const char *>         output_name_ptrs;
-};
 
-/** Release every OrtValue in @p values (NULL-safe per entry) via @p api. */
-void _release_values(const OrtApi *api, std::vector<OrtValue *> &values)
-{
-	for (OrtValue *v : values) {
-		if (v != nullptr) {
-			api->ReleaseValue(v);
+	/** NULL-safe on every member; safe on a partially-populated state (any
+	 *  prefix of open()'s steps may not have run yet).  Uses _ort_api()
+	 *  rather than a stored pointer -- it is a memoised static, already
+	 *  proven non-NULL by the time open() constructs the first OrtState,
+	 *  so there is no ordering hazard resolving it again here. */
+	~OrtState()
+	{
+		const OrtApi *api = _ort_api();
+		if (api == nullptr) {
+			return;
+		}
+		_release_values(api, output_values);
+		_release_values(api, input_values);
+		if (cpu_mem_info != nullptr) {
+			api->ReleaseMemoryInfo(cpu_mem_info);
+		}
+		if (session != nullptr) {
+			api->ReleaseSession(session);
+		}
+		if (env != nullptr) {
+			api->ReleaseEnv(env);
 		}
 	}
-	values.clear();
-}
+};
 
 } /* namespace */
 
@@ -476,11 +557,13 @@ extern "C" alp_status_t alp_inference_ort_open(struct alp_inference         *h_,
 		return ALP_ERR_VERSION;
 	}
 
-	/* Declared outside the try so the catch handler below can still reach
-     * st's raw OrtEnv/OrtSession/OrtMemoryInfo (already-acquired vendor
-     * resources that std::unique_ptr's default deleter does not itself
-     * release) if a std::vector/std::string operation throws partway
-     * through populating st. */
+	/* Declared outside the try so the catch handler below can still see it;
+     * either way, whatever st owns is released by exactly one place --
+     * ~OrtState() (see its own doc comment, issue #1494) -- when st is
+     * destroyed, whether that is an early `return rc;` below, the
+     * catch(...) handler falling through to the function's own return, or
+     * (on success) never, because st.release() hands ownership to h->be_state
+     * first. */
 	std::unique_ptr<OrtState> st;
 	try {
 		st = std::make_unique<OrtState>();
@@ -494,7 +577,6 @@ extern "C" alp_status_t alp_inference_ort_open(struct alp_inference         *h_,
 		OrtSessionOptions *opts = nullptr;
 		rc                      = _ort_status_to_alp(api->CreateSessionOptions(&opts));
 		if (rc != ALP_OK) {
-			api->ReleaseEnv(st->env);
 			return rc;
 		}
 
@@ -502,24 +584,18 @@ extern "C" alp_status_t alp_inference_ort_open(struct alp_inference         *h_,
 		    st->env, cfg->model_data, cfg->model_size, opts, &st->session));
 		api->ReleaseSessionOptions(opts);
 		if (rc != ALP_OK) {
-			api->ReleaseEnv(st->env);
 			return rc;
 		}
 
 		rc = _ort_status_to_alp(
 		    api->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &st->cpu_mem_info));
 		if (rc != ALP_OK) {
-			api->ReleaseSession(st->session);
-			api->ReleaseEnv(st->env);
 			return rc;
 		}
 
 		OrtAllocator *alloc = nullptr;
 		rc                  = _ort_status_to_alp(api->GetAllocatorWithDefaultOptions(&alloc));
 		if (rc != ALP_OK) {
-			api->ReleaseMemoryInfo(st->cpu_mem_info);
-			api->ReleaseSession(st->session);
-			api->ReleaseEnv(st->env);
 			return rc;
 		}
 
@@ -581,28 +657,17 @@ extern "C" alp_status_t alp_inference_ort_open(struct alp_inference         *h_,
 		}
 
 		if (rc != ALP_OK) {
-			_release_values(api, st->output_values);
-			_release_values(api, st->input_values);
-			api->ReleaseMemoryInfo(st->cpu_mem_info);
-			api->ReleaseSession(st->session);
-			api->ReleaseEnv(st->env);
 			return rc;
 		}
 
 		h->be_state = st.release();
 		return ALP_OK;
 	} catch (...) {
-		if (st) {
-			if (st->cpu_mem_info != nullptr) {
-				api->ReleaseMemoryInfo(st->cpu_mem_info);
-			}
-			if (st->session != nullptr) {
-				api->ReleaseSession(st->session);
-			}
-			if (st->env != nullptr) {
-				api->ReleaseEnv(st->env);
-			}
-		}
+		/* st (if constructed) is destroyed when this function returns --
+         * ~OrtState() releases every vendor resource it owns, however far
+         * open() got before throwing (issue #1494: this used to be a
+         * separate, incomplete hand-rolled copy that skipped the OrtValue
+         * vectors; see the struct's doc comment). */
 		return ALP_ERR_NOMEM;
 	}
 }
@@ -643,12 +708,14 @@ alp_inference_ort_get_input(struct alp_inference *h_, size_t index, alp_inferenc
 		}
 
 		const OrtTensorInfo &info = st->in_info[index];
-		/* shape[] holds 4 entries; a rank > 4 tensor is sized correctly via
-         * size_bytes but its descriptor's shape[] is truncated to the first 4
-         * dims (uint8_t rank field mirrors that truncation).  Every dim
-         * that reaches here has already been bounds-checked against
-         * UINT16_MAX in _gather_tensor_info(), so the cast below never
-         * truncates. */
+		/* info.shape.size() is <= 4 by construction: _gather_tensor_info()
+         * refuses (ALP_ERR_NOSUPPORT) any tensor whose rank exceeds
+         * out->shape[]'s 4 slots at open() time (issue #1729), so this
+         * clamp is defense-in-depth against that invariant ever slipping,
+         * not a truncation this accessor performs on a live rank > 4 --
+         * such a tensor never reaches here.  Every dim that reaches here
+         * has also been bounds-checked against UINT16_MAX in
+         * _gather_tensor_info(), so the cast below never truncates. */
 		const size_t rank = (info.shape.size() > 4) ? 4 : info.shape.size();
 
 		out->data       = st->input_bufs[index].data();
@@ -683,7 +750,10 @@ alp_inference_ort_get_output(struct alp_inference *h_, size_t index, alp_inferen
 		}
 
 		const OrtTensorInfo &info = st->out_info[index];
-		const size_t         rank = (info.shape.size() > 4) ? 4 : info.shape.size();
+		/* See the matching comment in alp_inference_ort_get_input() above:
+         * info.shape.size() is <= 4 by construction (issue #1729); this
+         * clamp is defense-in-depth, not a live truncation. */
+		const size_t rank = (info.shape.size() > 4) ? 4 : info.shape.size();
 
 		out->data       = st->output_bufs[index].data();
 		out->size_bytes = info.size_bytes;
@@ -733,26 +803,14 @@ extern "C" void alp_inference_ort_close(struct alp_inference *h_)
 		return;
 	}
 	try {
-		auto *h  = h_;
-		auto *st = static_cast<OrtState *>(h->be_state);
-		if (st == nullptr) {
-			return;
-		}
-
-		const OrtApi *api = _ort_api();
-		_release_values(api, st->output_values);
-		_release_values(api, st->input_values);
-		if (st->cpu_mem_info != nullptr) {
-			api->ReleaseMemoryInfo(st->cpu_mem_info);
-		}
-		/* Release session THEN env, in that order. */
-		if (st->session != nullptr) {
-			api->ReleaseSession(st->session);
-		}
-		if (st->env != nullptr) {
-			api->ReleaseEnv(st->env);
-		}
-		delete st;
+		auto *h = h_;
+		/* delete on a NULL OrtState* is well-defined (no-op); ~OrtState()
+         * (see its own doc comment, issue #1494) is the ONE place that
+         * releases the OrtValue vectors then cpu_mem_info then session
+         * then env, in that order -- the same routine open()'s error/throw
+         * paths rely on, so there is exactly one cleanup sequence to keep
+         * in sync instead of two. */
+		delete static_cast<OrtState *>(h->be_state);
 		h->be_state = nullptr;
 	} catch (...) {
 		/* Nothing throws in practice on this path (no allocation), but the

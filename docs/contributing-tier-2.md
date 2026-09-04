@@ -15,7 +15,7 @@ to "customers can drop it into their workspace."
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │ Tier 1: alp-sdk (this repo)                                      │
-│   80 chips, 36 libraries.  Maintainer-curated, Apache-2.0,       │
+│   80 chips, 35 libraries.  Maintainer-curated, Apache-2.0,       │
 │   portability-tested, doxygen-clean, ABI-tracked, CHANGELOG'd.   │
 └──────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────┐

@@ -14,7 +14,7 @@
  * example that touches GPIO on real silicon ships its own.  Without
  * this file the example builds, links, boots, reaches main() and then
  * fails at the first call with ALP_ERR_INVAL, because the array does
- * not exist.  Verified in Renode before this overlay was added:
+ * not exist.  Verified before this overlay was added:
  *
  *     [blink] init led=BOARD_PIN_LED_RED
  *     [blink] failed: open status=-1
@@ -32,7 +32,7 @@
  *     A6       PWM0          UT11_T1_C        P12_7
  *
  * P12_7 is port 12 pin 7 -> `gpio12` (gpio@4900c000,
- * zephyr/dts/alif/ensemble_e8_peripherals.dtsi:214).  Its GPIO function
+ * zephyr/dts/alif/ensemble_e8_peripherals.dtsi:222).  Its GPIO function
  * is alt-0 (PIN_P12_7__GPIO = ALIF_PINMUX(12, 7, 0)); the pad's default
  * peripheral function UT11_T1_C is alt-4, which is the PWM path a real
  * PWM fade on this pad would claim instead.  Same silicon -- never

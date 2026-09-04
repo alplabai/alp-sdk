@@ -31,6 +31,7 @@
 #include <alp/i2s.h>
 #include <alp/soc_caps.h>
 
+#include "alp_errno.h"
 #include "i2s_ops.h"
 #include "alp_slot_claim.h"
 
@@ -56,7 +57,12 @@ typedef struct {
 	struct k_mem_slab mem_slab;
 	uint8_t          *slab_buf;
 	size_t            slab_buf_bytes;
-	bool              in_use;
+	/* Negotiated slab block size.  z_write() bounds the caller's byte
+	 * count against this: without it a caller-supplied length was
+	 * memcpy'd into a fixed-size block, corrupting the neighbouring
+	 * slab block and the k_malloc heap. */
+	size_t block_bytes;
+	bool   in_use;
 } alp_z_i2s_side_t;
 
 static alp_z_i2s_side_t _sides[CONFIG_ALP_SDK_MAX_I2S_HANDLES];
@@ -83,24 +89,11 @@ static void _free_side(alp_z_i2s_side_t *s)
 
 static alp_status_t _errno_to_alp(int err)
 {
-	switch (err) {
-	case 0:
-		return ALP_OK;
-	case -EINVAL:
-		return ALP_ERR_INVAL;
-	case -EBUSY:
-		return ALP_ERR_BUSY;
-	case -EAGAIN:
-	case -ETIMEDOUT:
-		return ALP_ERR_TIMEOUT;
-	case -EIO:
-		return ALP_ERR_IO;
-	case -ENOTSUP:
-	case -ENOSYS:
-		return ALP_ERR_NOSUPPORT;
-	default:
-		return ALP_ERR_IO;
-	}
+	/* Delegates to the shared negative-errno baseline (issue #1638).
+	 * This switch was one of 27 hand-copied copies that had drifted; the
+	 * arms it carried all agreed with the baseline, so the mapping it
+	 * produced for them is unchanged. */
+	return alp_status_from_zephyr_errno(err);
 }
 
 static enum i2s_dir _to_dir(alp_i2s_dir_t d)
@@ -153,6 +146,7 @@ z_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st, alp_capabilitie
 	size_t block_bytes =
 	    (size_t)cfg->block_frames * (size_t)cfg->channels * (size_t)((cfg->word_bits + 7u) / 8u);
 	s->slab_buf_bytes = block_bytes * 2u;
+	s->block_bytes    = block_bytes;
 	s->slab_buf       = k_malloc(s->slab_buf_bytes);
 	if (s->slab_buf == NULL) {
 		_free_side(s);
@@ -209,6 +203,10 @@ z_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes, uint32_t t
 	alp_z_i2s_side_t    *s   = (alp_z_i2s_side_t *)st->be_data;
 	const struct device *dev = (const struct device *)st->dev;
 	if (s == NULL || dev == NULL) return ALP_ERR_NOT_READY;
+	/* Bound the caller's length against the block negotiated at open()
+	 * BEFORE claiming a block: i2s_write() below would reject an oversize
+	 * length with -EINVAL, but only after the memcpy has already run. */
+	if (bytes > s->block_bytes) return ALP_ERR_OUT_OF_RANGE;
 
 	void *slab_block = NULL;
 	int   err        = k_mem_slab_alloc(&s->mem_slab, &slab_block, K_MSEC(timeout_ms));

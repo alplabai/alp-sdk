@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from .paths import METADATA_ROOT
+
 
 class OrchestratorError(RuntimeError):
     """Raised when the orchestrator can't resolve / build a project.
@@ -390,6 +392,20 @@ class BoardProject:
     storage: list[StorageEntry] = field(default_factory=list)
     security: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
+    # The metadata root `load_board_yaml(..., metadata_root=...)` resolved
+    # this project against.  `None` means the default in-tree `metadata/`
+    # (the common case); an explicit override (`--metadata-root <path>`)
+    # sets it so every post-load resolver reads the SAME tree the loader
+    # validated against, instead of quietly falling back to the SDK's own
+    # in-tree metadata (#1485).
+    metadata_root: Optional[Path] = None
+
+    def effective_metadata_root(self) -> Path:
+        """The metadata root every resolver must use for this project --
+        the explicit override if `load_board_yaml` was given one, else the
+        SDK's own in-tree `metadata/`."""
+        return (self.metadata_root if self.metadata_root is not None
+                else METADATA_ROOT)
 
     def hw_info_eeprom_feature(self) -> Optional[dict[str, Any]]:
         """Return the explicit ``features.hw_info.eeprom`` projection."""

@@ -14,7 +14,7 @@
  * documented field-by-field, not a directly-castable struct), but has NO
  * payload struct for CONNECT (0x36) or the other three GATT ops
  * (0x39..0x3B); those wire layouts are defined only by the firmware handlers
- * (firmware/cc3501e/src/protocol.c handle_ble_*) and are documented
+ * (cc3501e-bridge-firmware:src/protocol.c handle_ble_*) and are documented
  * per-function + in cc3501e.c.  GATT async notifications
  * (EVT_BLE_GATT_WRITE_REQ, 0x3F) need the async-event path (not wired on
  * this HW rev); these wrappers issue the outbound commands only.
@@ -202,7 +202,7 @@ alp_status_t cc3501e_ble_disconnect(cc3501e_t *ctx, uint32_t timeout_ms);
  * @note Service registration must complete BEFORE advertising starts.  The
  *       firmware's @c cc3501e_nimble_gatt_register re-runs NimBLE's
  *       @c ble_gatts_start() (via @c ble_gatts_reset(), see
- *       firmware/cc3501e/hal/ti/cc3501e_nimble_host.c), and NimBLE's own
+ *       cc3501e-bridge-firmware:hal/ti/cc3501e_nimble_host.c), and NimBLE's own
  *       @c ble_gatts_mutable() constraint refuses that while advertising,
  *       scanning, or connected -- register the service, THEN call
  *       @ref cc3501e_ble_adv_start.

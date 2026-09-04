@@ -90,12 +90,14 @@ jobs:
   detect:
     if: github.event_name != 'merge_group'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       manifest: ${{ steps.filter.outputs.manifest }}
     steps:
       - name: Detect bootstrap-manifest-relevant changes
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
+        timeout-minutes: 5
         with:
           filters: |
             manifest:
@@ -103,7 +105,6 @@ jobs:
               - 'metadata/schemas/bootstrap-v1.schema.json'
               - 'scripts/bootstrap.sh'
               - 'scripts/bootstrap.ps1'
-              - 'scripts/alp_cli/doctor.py'
               - 'scripts/check_bootstrap_manifest.py'
               - '.github/workflows/pr-bootstrap-distro-install.yml'
 
@@ -155,7 +156,7 @@ jobs:
     # matching branch-protection update.
     name: distro install · ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     container:
       image: ${{ matrix.image }}
     # `set -euo pipefail` below is bash-only. GitHub Actions' own default
@@ -175,8 +176,10 @@ jobs:
         shell: bash
     steps:
       - name: Checkout alp-sdk
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
         with:
+          persist-credentials: false
           fetch-depth: 1
 
       # python3 itself is one of the tracked prerequisites.posix tools, so
@@ -197,6 +200,9 @@ jobs:
       # (load-bearing for tan-cli#650's root-strip on a customer's non-root
       # host) is dropped the same way tan's --fix does before executing.
       - name: Render prerequisites.install.linux.${{ matrix.pm }} as a runnable script
+        # 20min: generous for a slow package mirror, finite so a
+        # HUNG fetch fails here and names this step (#1549).
+        timeout-minutes: 20
         env:
           PM: ${{ matrix.pm }}
         run: |

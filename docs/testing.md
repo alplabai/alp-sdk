@@ -91,7 +91,7 @@ It does **not** prove:
 | `<alp/peripheral.h>` — UART       | `tests/yocto/peripheral_uart.c` + `tests/unit/uart_registry/` + `examples/peripheral-io/uart-echo/`                                   | AEN bench + Yocto bench       |
 | `<alp/peripheral.h>` — UART RX ringbuf | `tests/unit/uart_registry/` (rx_ringbuf scenario) + `examples/peripheral-io/uart-rx-ringbuf/`                              | AEN bench                     |
 | `<alp/peripheral.h>` — GPIO       | `tests/yocto/peripheral_gpio.c` + `tests/unit/gpio_registry/` + `examples/peripheral-io/gpio-button-led/`                             | AEN bench + Yocto bench       |
-| Portable-class lifecycle contract — every `alp_<class>_open/close/capabilities` (14 classes + I²C/SPI target modes, `alp_init`/`alp_deinit`, UART RX ringbuf) | `tests/zephyr/conformance/` — the data-driven conformance gate a new backend must pass; on real-SoM builds expectations derive from `alp_has()` (caps↔backend parity) and WDT arming is opt-in (`CONFIG_TEST_ALP_CONFORMANCE_WDT_ARM`); see the matrix in its `src/main.c` + `docs/porting-new-som.md` §11 | AEN bench (qualified boards in `platform_allow` build via `--build-only` today; CI runs native_sim) |
+| Portable-class lifecycle contract — every `alp_<class>_open/close/capabilities` (14 classes + I²C/SPI target modes, `alp_init`/`alp_deinit`, UART RX ringbuf, dispatcher ops-vtable NULL-slot guard) | `tests/zephyr/conformance/` — the data-driven conformance gate a new backend must pass; on real-SoM builds expectations derive from `alp_has()` (caps↔backend parity) and WDT arming is opt-in (`CONFIG_TEST_ALP_CONFORMANCE_WDT_ARM`); see the matrix in its `src/main.c` + `docs/porting-new-som.md` §11 | AEN bench (qualified boards in `platform_allow` build via `--build-only` today; CI runs native_sim) |
 | `<alp/pwm.h>`                     | `tests/unit/pwm_registry/` + `examples/peripheral-io/pwm-led-fade/`                                             | AEN bench                     |
 | `<alp/adc.h>`                     | `tests/unit/adc_registry/` + `examples/peripheral-io/adc-voltmeter/`                                                                 | AEN bench                     |
 | `<alp/dac.h>`                     | `tests/zephyr/conformance/` only (no `tests/unit/dac_registry/`) + `examples/peripheral-io/dac-waveform/` + `examples/aen/aen-dac-regcheck/`                                          | AEN bench                     |
@@ -196,7 +196,7 @@ Every CI workflow has a local counterpart that runs the same coverage:
 |--------------------------------|-----------------------------------------------------------|
 | `pr-plain-cmake.yml`           | `bash scripts/test-all.sh --yocto-only`                   |
 | `pr-twister.yml`               | `bash scripts/test-all.sh --zephyr-only`                  |
-| `pr-static-analysis.yml`       | `bash scripts/test-all.sh` (clang-format-diff stage)      |
+| `pr-static-analysis.yml`       | `bash scripts/test-all.sh` (clang-format-diff + shellcheck stages) |
 | `pr-generated-files.yml`       | `python3 scripts/gen_soc_caps.py --check`                 |
 | `pr-metadata-validate.yml`     | `python3 scripts/validate_metadata.py` + alp_project.py   |
 | public/private classifier      | `python3 scripts/check_public_private.py`                 |

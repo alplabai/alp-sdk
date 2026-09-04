@@ -176,6 +176,25 @@ when:
       Makefile -- but "only matters sometimes" is exactly what let it drift
       unnoticed before, so it stays gated like every other pin here. See
       `_check_containerfile`.
+  15. `artifactProvenance` (issue #1574, ADR 0021 §3's one-consent-screen
+      artifact/source/size/licence facts) has a key set that disagrees with
+      the union of tool names `prerequisites.install.linux.apt` /
+      `.linux.dnf` / `.macos` / `.windows` actually name an install command
+      for -- a tool gaining an install command with no matching provenance
+      entry, or a stale provenance entry for a tool no install command
+      names anymore, fails here (`_check_artifact_provenance`), the same
+      drift bar point 11 already holds `prerequisites.posix/macos/windows`
+      to, one level further out. `artifactProvenance.*` is exempted from
+      point 7's generic per-script orphan-leaf scan
+      (`_PRODUCER_ONLY_LEAF_PREFIX`), for a DIFFERENT reason than
+      `prerequisites.*`/`zephyr.pythonMinVersion` are: those two are read
+      by neither script BY DESIGN (bootstrapping-before-the-manifest-is-
+      trustworthy, and a derived-not-declared value, respectively) and have
+      their own dedicated cross-check instead; `artifactProvenance` has no
+      consumer in this repo AT ALL yet -- it is producer-only data for a
+      future IDE/tan consumer (a companion tan-cli issue, filed only once
+      this shape has proven itself) -- so its gate is "stays in lockstep
+      with prerequisites.install", not "is read by bootstrap.sh/ps1".
 
 --fix propagates a changed `zephyr.version` OUT to every machine pin site
 this gate verifies above (points 2, 4, 5, 10, 14 -- west.yml, the CI
@@ -262,7 +281,8 @@ CI_WORKFLOWS = [
 # copy). This is the generalisation past just zephyr.version (issue #917).
 KNOWN_KEYS = {
     "_comment", "schemaVersion", "zephyr", "venv", "prerequisites",
-    "west", "pip", "verdict", "env", "nativeLibHints", "manualInstallHints",
+    "artifactProvenance", "west", "pip", "verdict", "env", "nativeLibHints",
+    "manualInstallHints",
 }
 
 # The `revision:` line under `- name: zephyr` in west.yml. Hoisted to a
@@ -304,6 +324,15 @@ _GATE_ASSERTED_LEAF_PREFIX = "prerequisites."
 # or bootstrap.ps1 (neither enforces a Zephyr-scoped floor today; that is
 # tan-cli's still-outstanding half of issue #1078).
 _GATE_ASSERTED_LEAVES = {"zephyr.pythonMinVersion"}
+# `artifactProvenance.*` (issue #1574, module docstring point 15): producer-
+# only data with NO consumer in this repo yet -- neither bootstrap.sh nor
+# bootstrap.ps1 has any reason to read it, since it is ADR 0021 §3's
+# IDE/tan-facing consent-screen data, not workspace-assembly control flow.
+# Gate-asserted-instead by `_check_artifact_provenance` (keyed against
+# `prerequisites.install`'s own tool-name set) rather than by the generic
+# per-script-read scan, which would otherwise demand a reader that has no
+# reason to exist yet.
+_PRODUCER_ONLY_LEAF_PREFIX = "artifactProvenance."
 # Purely structural: the manifest's own self-description, never something a
 # script "reads" as a fact. (`schemaVersion` is NOT here -- both scripts
 # assert it at run time, see the orphan-leaf scan.)
@@ -845,7 +874,7 @@ def _resolve_zephyr_dir() -> Path:
     """Same resolution order as `scripts/check_toolchain_lock.py`'s
     `_resolve_zephyr_dir` (and `tests/scripts/test_hil_blocks_coverage.py`'s
     `_pinned_zephyr_sysbuild_kconfig_symbols`): `$ZEPHYR_BASE` (the
-    convention every `west` command and `scripts/alp_cli/doctor.py` use),
+    convention every `west` command and `tan doctor` use),
     falling back to the west-workspace topdir's conventional `zephyr/`
     project directory (`scripts/bootstrap.sh` does `west init -l <alp-sdk>`,
     so alp-sdk's parent is the topdir). Duplicated here rather than
@@ -1116,7 +1145,7 @@ def _check_install_commands(manifest: dict) -> list[str]:
          `scripts/bootstrap.ps1`'s `$Prereqs` but left behind in
          `install.windows`) would sit undetected forever. A tool with no
          install command at all is the exact hole that produced the drifted/
-         incomplete ninja hint in scripts/alp_cli/doctor.py this change
+         incomplete ninja hint in the now-retired scripts/alp_cli/doctor.py this change
          fixes. This is the ONLY assertion covering install.linux /
          install.macos -- see point 3's own note on why.
       2. scripts/bootstrap.ps1 agreement -- each `$Prereqs` entry's
@@ -1132,7 +1161,7 @@ def _check_install_commands(manifest: dict) -> list[str]:
          `Python.Python.3.12`, `Ninja-build.Ninja` today -- never
          hardcoded a second time here). A line containing an ID without
          its full canonical command string is a drifted copy -- this is
-         exactly the shape scripts/alp_cli/doctor.py's old ninja hint
+         exactly the shape the now-retired scripts/alp_cli/doctor.py's old ninja hint
          had (`winget install Ninja-build.Ninja.` contains the ID but not
          `winget install -e --id Ninja-build.Ninja`).
 
@@ -1589,6 +1618,7 @@ def _check_no_orphaned_leaves(manifest: dict) -> list[str]:
     problems = []
     for leaf, value in _iter_leaf_paths(manifest):
         if (leaf in _STRUCTURAL_LEAVES or leaf.startswith(_GATE_ASSERTED_LEAF_PREFIX)
+                or leaf.startswith(_PRODUCER_ONLY_LEAF_PREFIX)
                 or leaf in _GATE_ASSERTED_LEAVES):
             continue
         sh_needle = _bash_needle(leaf)
@@ -1651,6 +1681,45 @@ def _check_native_lib_hints_consumption(manifest: dict) -> list[str]:
     return problems
 
 
+def _check_artifact_provenance(manifest: dict) -> list[str]:
+    """`artifactProvenance` (issue #1574, module docstring point 15) must
+    name exactly the tools `prerequisites.install` actually ships an
+    install command for -- the union of `install.linux.apt` /
+    `install.linux.dnf` / `install.macos` / `install.windows` keys, not
+    `prerequisites.posix/macos/windows` directly (those three lists mix
+    `python3` and `python` for the same upstream project, the identical
+    split `install.*` and therefore `artifactProvenance` already make).
+    Catches a tool gaining an install command with no provenance entry
+    (silently unable to render ADR 0021 §3's consent screen for it) and a
+    stale provenance entry for a tool no install command names anymore, the
+    same two-directional drift bar `_check_install_commands` already holds
+    `prerequisites.posix/macos/windows` to for the install commands
+    themselves."""
+    install = manifest["prerequisites"]["install"]
+    expected: set[str] = set()
+    expected |= set(install["linux"]["apt"].keys())
+    expected |= set(install["linux"].get("dnf", {}).keys())
+    expected |= set(install["macos"].keys())
+    expected |= set(install["windows"].keys())
+    actual = set(manifest.get("artifactProvenance", {}).keys())
+    problems = []
+    missing = expected - actual
+    if missing:
+        problems.append(
+            f"artifactProvenance is missing entries for {sorted(missing)} -- every tool "
+            f"prerequisites.install names an install command for needs a "
+            f"tier/source/sizeBytes/licence entry (ADR 0021 §3, issue #1574)"
+        )
+    extra = actual - expected
+    if extra:
+        problems.append(
+            f"artifactProvenance has stale entries for {sorted(extra)} -- no "
+            f"prerequisites.install.* map names an install command for them anymore; "
+            f"remove the entry or restore the matching install command"
+        )
+    return problems
+
+
 def _check_known_keys(manifest: dict) -> list[str]:
     unknown = set(manifest.keys()) - KNOWN_KEYS
     if unknown:
@@ -1709,6 +1778,7 @@ def main() -> int:
     problems += _check_python_min_version_windows(manifest)
     problems += _check_install_commands(manifest)
     problems += _check_bootstrap_sh_install_hints(manifest)
+    problems += _check_artifact_provenance(manifest)
     problems += _check_no_orphaned_leaves(manifest)
     problems += _check_native_lib_hints_consumption(manifest)
     for wf in CI_WORKFLOWS:

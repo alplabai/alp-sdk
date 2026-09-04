@@ -128,7 +128,7 @@
     "inference_arena_sram_kib": {
       "type": "integer",
       "minimum": 0,
-      "description": "Usable SRAM budget (KiB) for an NPU tensor arena on this SoC. The .alpmodel loader admits a blob only if its requires.sram_kib <= this budget. 0 = unknown/unbounded (fit-check skips). This is integration/partition-dependent silicon data; author per-SoC before production."
+      "description": "Usable SRAM budget (KiB) for an NPU tensor arena on this SoC. The .alpmodel loader admits a blob only if its requires.sram_kib <= this budget. 0 = unknown/unbounded (fit-check skips, and alp_model_select_result_t::arena_fit_unverified is set on the winning selection so the skip is not silent -- see src/backends/inference/alp_model_select.h). This is NOT a datasheet constant: it is an integration/partition decision (how much on-die SRAM this SKU's firmware reserves for the NPU tensor arena vs. everything else), which is why every real SoC in this repo carries 0 today (issue #1731) -- author per-SoC only when that partition decision is actually made, never a plausible-looking guess."
     },
     "tcm_kb": {
       "type": "integer",
@@ -357,11 +357,18 @@
         { "required": ["gops"] },
         { "required": ["tops"] }
       ],
+      "if": {
+        "properties": { "type": { "pattern": "^ethos-u" } },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["mac_per_cycle"]
+      },
       "properties": {
         "type":            { "type": "string", "description": "e.g. ethos-u55, ethos-u85, drp-ai3, dx-m1." },
         "subtype":         { "type": "string", "description": "e.g. high-perf (NPU-HP), high-efficiency (NPU-HE), generative (NPU-HG)." },
         "paired_core":     { "type": "string", "description": "`cores[].id` of the CPU core this NPU instance is wired to (Alif: the High-Efficiency M55 drives the 128-MAC high-efficiency Ethos-U55, the High-Performance M55 the 256-MAC high-perf one). Lets the build emit size the accelerator per target core instead of assuming the SoC's most-capable instance. Omit for a shared, SoC-level NPU that is not wired to one core -- the E8's Ethos-U85 (Alif block name NPU_HG) at 0x49042000, mapped identically into both M55 peripheral views (rtss_hp/soc.h and rtss_he/soc.h both define NPU_HG_BASE 0x49042000, vs. the two U55s' per-core-aliased NPU_HP_BASE / NPU_HE_BASE at the shared local address 0x400E1000). The A32 cluster can reach it too, register-programmable and not merely interrupt-notified: Alif E8 HWRM (AHRM0012NDA v0.3) Table 10-2 places 0x49042000 inside the Shared Peripherals row (0x48000000, 32MB -- A32/M55-HP/M55-HE all Y), unlike the M55-local-peripherals row above it (A32 N); Table 10-6 lists NPU-HG at that same 0x49042000 among the Shared Peripherals; and Table 4-13 fans NPU_HG_IRQ to all three cores -- GIC400_IRQS[355] on the A32, M55HP_IRQS[366] / M55HE_IRQS[366] on the M55s. The i.MX 93 Ethos-U65 (`nxp:imx9:imx93`) also omits `paired_core`, but on WEAKER evidence than the E8 case above -- the two must not be conflated: IMX93RM Rev. 7 (2026-02-10) §2.2 Table 4 lists the NPU Controller in the system memory map used by ALL initiators (not naming one), Table 5 repeats the identical row in the Cortex-M33's own memory map (so the block is in both, not exclusively either), and §17.2.8 points NPU interrupt documentation at Arm's GIC -- the Cortex-A55's controller, not the M33's NVIC -- while Chapter 17 never names a host core, using only Arm's generic Ethos-U wording ('the external host application processor', §17.2, §17.2.9). Unlike the E8 HWRM's Table 10-2, this is an all-initiators memory map plus a GIC pointer, not a per-master access table: it does not enumerate which masters may reach the NPU (that is TRDC's job, undocumented here), and it names no host core at all. So imx93's single Ethos-U65 instance omits `paired_core` for a different reason than the E8's U85: not 'verified as shared', but 'no pairing documented, period'. That silicon-documentation gap does not mean no core drives the NPU today: NXP's own shipped Yocto/Linux driver stack (`nxp-imx/ethos-u-driver-stack-imx`) runs the Ethos-U driver on the Cortex-M33, with Linux on the Cortex-A55 dispatching to it over shared memory and mailbox IRQs -- a separate, sourced, software-stack fact (see `vendors/nxp-imx93/README.md`) that this silicon-pairing omission does not contradict. `paired_core` records documented silicon wiring, not which core a given software stack happens to run on, so it still carries no value here." },
-        "mac_per_cycle":   { "type": "integer" },
+        "mac_per_cycle":   { "type": "integer", "description": "Required for every ethos-u* NPU -- the emit's accelerator sizing (scripts/alp_orchestrate/kconfig.py) and target derivation (scripts/alp_model/targets.py) both read npus[].mac_per_cycle directly for this backend; an absent value either raises KeyError (targets.py) or falls through to a silent 256-MAC default (kconfig.py) instead of failing at the metadata source (#1849)." },
         "freq_mhz":        { "type": "integer" },
         "gops":            { "type": "number", "description": "Giga ops per second.  Provide either gops or tops (= gops × 1000)." },
         "tops":            { "type": "number", "description": "Tera ops per second.  Provide either gops or tops." },
@@ -480,7 +487,7 @@
         "debug": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Debug-probe identity for this variant (#987), consumed by alp-sdk-vscode to generate a working cortex-debug launch.json without human input. Every key is optional -- an absent key is a published 'unknown', not a guess, and must be copied verbatim from the owning tool's own list or a working in-tree invocation; a plausible-looking guess fails at the probe rather than at validation.",
+          "description": "Debug-probe identity for this variant (#987), consumed by alp-sdk-vscode to generate a working cortex-debug launch.json without human input. Every key is optional -- an absent key is a published 'unknown', not a guess, and must be copied verbatim from the owning tool's own list or a working in-tree invocation; a plausible-looking guess fails at the probe rather than at validation. EXCEPTION: `jlink_flash_device` on an Alif Ensemble SoC is not optional -- see its own description below and scripts/validate_metadata.py::_check_soc_jlink_flash_device_declared.",
           "properties": {
             "pyocd_target": {
               "type": "string",

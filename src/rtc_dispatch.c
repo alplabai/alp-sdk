@@ -95,7 +95,12 @@ alp_status_t alp_rtc_set_time(alp_rtc_t *h, const alp_rtc_time_t *t)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->set_time(&h->state, t);
+	alp_status_t rc;
+	if (h->state.ops->set_time == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->set_time(&h->state, t);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }
@@ -106,7 +111,12 @@ alp_status_t alp_rtc_get_time(alp_rtc_t *h, alp_rtc_time_t *t)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
-	alp_status_t rc = h->state.ops->get_time(&h->state, t);
+	alp_status_t rc;
+	if (h->state.ops->get_time == NULL) {
+		rc = ALP_ERR_NOSUPPORT;
+	} else {
+		rc = h->state.ops->get_time(&h->state, t);
+	}
 	alp_handle_op_leave(&h->active_ops);
 	return rc;
 }

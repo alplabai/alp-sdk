@@ -106,7 +106,7 @@ table stale.
 The cell reflects the SoM at its full topology (the SoM's maximum
 capability), matching the SKU-row axis of the swap-test matrix above.  It is
 a *compatibility* verdict, not a byte-identity claim: it says the selection
-resolves and can be wired, exactly the guarantee `python -m alp_cli doctor`
+resolves and can be wired, exactly the guarantee `tan doctor`
 reports before a build.
 
 <!-- BEGIN GENERATED: gen_portability_matrix_libraries -->
@@ -136,7 +136,6 @@ reports before a build.
 | `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-stream` | B | `v3.2.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `coremqtt-sn` | B | `v1.0.1` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -162,7 +161,7 @@ reports before a build.
 | `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-**248 / 252 (library × SKU) cells compatible (4 incompatible, 0 n/a).**
+**241 / 245 (library × SKU) cells compatible (4 incompatible, 0 n/a).**
 
 ### E1M-X family (Cortex-A55 + Cortex-M33)
 
@@ -179,7 +178,6 @@ reports before a build.
 | `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-stream` | B | `v3.2.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `coremqtt-sn` | B | `v1.0.1` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ |
@@ -205,7 +203,7 @@ reports before a build.
 | `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 
-**144 / 144 (library × SKU) cells compatible.**
+**140 / 140 (library × SKU) cells compatible.**
 
 Legend: ✅ `requires:` satisfied and wireable on the SoM · ❌ incompatible (the named `requires:` constraint fails) · — not applicable (no `integration:` for any OS this SoM runs).
 <!-- END GENERATED: gen_portability_matrix_libraries -->
@@ -235,34 +233,39 @@ U85-carrying SKUs (AEN401 / AEN601 / AEN801, visible as
 `Ethos-U U55+U85` in the Notes column) are the population that
 motivated Gap G-1 below.
 
-**AEN301 / AEN501 / AEN601 / AEN701 were briefly ❌ under #1295, for a
-different reason than NX9101 — not a Kconfig-content regression.**
+**AEN301 / AEN501 / AEN601 / AEN701 were briefly RECORDED here as ❌
+under #1295, for a different reason than NX9101 — not a Kconfig-content
+regression.**
 #1295 populated `debug.jlink_flash_device` for the E3/E5/E6/E7 SoC
 variants (previously only E8's did), which is what promotes an AEN
 Zephyr slice to J-Link Flow D flashing in the first place. Doing so
-made `scripts/alp_orchestrate/loader.py`'s `_enforce_slot0_disjoint_across_roles`
-reachable for these four SoMs for the first time (it was previously
-inert -- see its docstring and #1384): the swap-test's temp
-`board.yaml` sets only ONE explicit `cores.<key>:` (per the Method's
-step 2); the sibling M55 core is left at the SoM preset's
-`topology:` default (`alp-stock-shim`, which defaults to `os: zephyr`
-for a `cortex-m*` core). With no `memory_map:` override, BOTH the
-target core and the stock-shim sibling resolved `flash_args.
-slot0_load_address` to the SAME default address -- the exact #1069
-HE/HP MRAM collision E1M-AEN801's own `memory_map:` override was
-written to prevent, then live for four more SoMs. `load_board_yaml`
-refused this loudly (by design -- see `_enforce_flow_d_preflight_pair`'s
+would have made `scripts/alp_orchestrate/loader.py`'s
+`_enforce_slot0_disjoint_across_roles` reachable for these four SoMs for
+the first time (it was previously inert -- see its docstring and
+#1384): the swap-test's temp `board.yaml` sets only ONE explicit
+`cores.<key>:` (per the Method's step 2); the sibling M55 core is left
+at the SoM preset's `topology:` default (`alp-stock-shim`, which
+defaults to `os: zephyr` for a `cortex-m*` core). With no `memory_map:`
+override, BOTH the target core and the stock-shim sibling would have
+resolved `flash_args.slot0_load_address` to the SAME default address --
+the exact #1069 HE/HP MRAM collision E1M-AEN801's own `memory_map:`
+override was written to prevent. `load_board_yaml` WOULD HAVE refused
+this loudly (by design -- see `_enforce_flow_d_preflight_pair`'s
 identical philosophy immediately above it in that file) *before*
-`--emit zephyr-conf` ever reached the target core's own config, so the
-byte-identical-`alp.conf` claim above was unprovable by the automated
-probe for those four SKUs, not falsified: nothing about the
-Kconfig content changed. #1445 landed the fix: every AEN preset now
-declares `he_slot0` at `0x80010000` and `hp_slot0` at `0x802b0000`,
-2688 KiB each, so these four SKUs generate cleanly again and the
-byte-identity claim above is provable by the automated probe once
-more. (E1M-AEN401 is unaffected: its E4 variant's
-`jlink_flash_device` is explicit `null`, a declared known-unknown, so
-`_resolve_slot0_load_address` is never invoked for it.)
+`--emit zephyr-conf` ever reached the target core's own config -- a
+state that never reached `dev`, since #1445's `memory_map:` overrides
+landed in the same commit (`bd8be484`, PR #1447) as #1295: every AEN
+preset declares `he_slot0` at `0x80010000` and `hp_slot0` at
+`0x802b0000`, 2688 KiB each, from that commit on, so the
+byte-identical-`alp.conf` claim above was never actually unprovable by
+the automated probe for those four SKUs -- nothing about the Kconfig
+content ever changed, and these four SKUs have always generated
+cleanly on `dev`. (E1M-AEN401 never hit this refusal: at the time, the loader only
+invoked `_resolve_slot0_load_address` when `jlink_flash_device` was truthy,
+and its E4 variant's explicit `null` is not truthy. #1444/#1446 later
+changed that gate to test key presence instead of truthiness, so the
+resolver runs for it today — see `metadata/e1m_modules/E1M-AEN401.yaml`,
+which now declares the same disjoint pair.)
 
 Expected diffs (legitimate — driven by silicon / SoM facts):
 

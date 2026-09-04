@@ -96,8 +96,88 @@ def test_non_object_npus_and_cores_entries_do_not_crash_the_gate(tmp_path, monke
     a bare `.get()` and raise `AttributeError` here, hiding the schema FAIL
     line that already explains the real problem. Filtered to dicts, this doc
     must return cleanly -- no real npu survives the filter, so there is
-    nothing left to pair."""
-    doc = {"cores": ["not-a-dict"], "npus": ["not-a-dict"]}
+    nothing left to pair.
+
+    `npus` also carries ONE real dict entry (paired to the one real `cores`
+    dict entry) so the function does not short-circuit at `if not npus:
+    continue` before ever reaching the `cores[]` filter this test exists to
+    exercise -- a prior version of this fixture (`npus: ["not-a-dict"]`
+    only) never actually reached that line, so reverting its guard alone
+    would not have reddened this test."""
+    doc = {
+        "cores": ["not-a-dict", {"id": "m55_hp"}],
+        "npus": ["not-a-dict", {"type": "ethos-u55", "subtype": "high-perf",
+                                 "mac_per_cycle": 256, "paired_core": "m55_hp"}],
+    }
+    assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
+
+
+def test_non_object_top_level_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """The SoC doc's top level is schema-typed as an object, but a
+    malformed file could parse to a bare JSON array -- `doc.get("npus")`
+    used to raise `AttributeError: 'list' object has no attribute 'get'`
+    here, aborting the whole gate mid-run instead of leaving the schema
+    FAIL line (which already flags the type mismatch) to explain the real
+    problem."""
+    monkeypatch.setattr(V, "REPO", tmp_path)
+    p = tmp_path / "soc.json"
+    p.write_text(json.dumps([]))
+    assert V._check_soc_npu_pairing([p]) == []  # must not raise
+
+
+def test_non_list_npus_and_cores_do_not_crash_the_gate(tmp_path, monkeypatch):
+    """`npus`/`cores` are themselves schema-typed as arrays, but a malformed
+    document can carry a non-list scalar there (e.g. the bare int `5`,
+    which is truthy) -- iterating the unfiltered value used to raise
+    `TypeError: 'int' object is not iterable`, aborting the whole gate
+    mid-run instead of leaving the schema FAIL line (which already flags
+    the type mismatch) to explain the real problem."""
+    doc = {"cores": 5, "npus": 5}
+    assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
+
+
+def test_non_string_core_id_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`cores[].id` is schema-typed as a string, but a malformed doc can
+    carry a dict/list there -- the unfiltered `core_ids` set comprehension
+    used to raise `TypeError: unhashable type: 'dict'` building the set.
+    A real dict-typed `id` alongside a real string `id` (paired to the one
+    real npu) proves the filter, not just an early-continue."""
+    doc = {
+        "cores": [{"id": {"nested": "dict"}}, {"id": "m55_he"}],
+        "npus": [{"type": "ethos-u55", "subtype": "high-efficiency",
+                   "mac_per_cycle": 128, "paired_core": "m55_he"}],
+    }
+    assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
+
+
+def test_non_string_paired_core_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`npus[].paired_core` is schema-typed as a string, but a malformed
+    doc can carry a dict/list there -- the unfiltered `pc not in core_ids`
+    membership test used to raise `TypeError: unhashable type: 'dict'`.
+    A non-string `paired_core` is reported as a mismatch, not skipped."""
+    doc = {
+        "cores": [{"id": "m55_he"}],
+        "npus": [{"type": "ethos-u55", "subtype": "high-efficiency",
+                   "mac_per_cycle": 128, "paired_core": {"nested": "dict"}}],
+    }
+    assert _run(tmp_path, monkeypatch, doc) == 1  # must not raise; reported as a mismatch
+
+
+def test_non_int_mac_per_cycle_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`npus[].mac_per_cycle` is schema-typed as an integer, but a malformed
+    doc can carry a dict/list there -- the unfiltered `macs` set
+    comprehension used to raise `TypeError: unhashable type: 'dict'`
+    building the set (and a mixed str/int set would separately raise on
+    the `sorted(macs)` message below it)."""
+    doc = {
+        "cores": [{"id": "m55_hp"}, {"id": "m55_he"}],
+        "npus": [
+            {"type": "ethos-u55", "subtype": "high-perf",
+             "mac_per_cycle": {"nested": "dict"}, "paired_core": "m55_hp"},
+            {"type": "ethos-u55", "subtype": "high-efficiency",
+             "mac_per_cycle": 128, "paired_core": "m55_he"},
+        ],
+    }
     assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
 
 

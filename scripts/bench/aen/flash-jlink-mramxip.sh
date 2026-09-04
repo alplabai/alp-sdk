@@ -100,12 +100,36 @@ esac
 
 # 0b. SAFETY GATE -- confirm we are talking to the AEN E8, not some other probe
 # on the bench, BEFORE any MRAM write. The AEN E8 SW-DP IDR is 0x4C013477
-# (BENCH-VERIFIED, see docs/bring-up-aen.md); the V2N-M1 GD32 probe reads
-# 0x0BE12477. Flashing the wrong board is the one unrecoverable bench mistake,
-# so this is a hard ABORT, not a warning -- read-only connect first, no writes
-# happen until the ID is confirmed.
-AEN_DPIDR="4C013477"
-GD32_DPIDR="0BE12477"
+# (BENCH-VERIFIED, see docs/bring-up-aen.md); GD32_DPIDR (0x0BE12477,
+# exported by bench-env.sh) is the only GD32 candidate on record but has
+# NOT been measured on a GD32 with a probe attached (see #1369) -- treat
+# it as unattested, not bench-verified. Flashing the wrong board is the one
+# unrecoverable bench mistake, so this is a hard ABORT, not a warning --
+# read-only connect first, no writes happen until the ID is confirmed.
+# `${VAR:-default}`, NOT a bare assignment: bench-env.sh (sourced above) is
+# the documented single source and declares these overridable
+# (`export AEN_DPIDR="${AEN_DPIDR:-4C013477}"`), which its own header states:
+# "Override any of them by exporting the variable before invoking a helper".
+# A bare assignment here silently discarded that export and then aborted
+# against the value the operator had explicitly overridden -- and this was the
+# ONLY one of the six callers of bench_jlink_assert_aen_dpidr that did so
+# (#1497).  V2N_CM33_DPIDR was never re-declared here either, so the file used
+# one source for two IDs and another for the third.
+#
+# The declarations stay (#1527: deleting the pair to silence shellcheck
+# weakened the wrong-board MRAM-write gate during #1488 and was reverted) --
+# they are now defaulting rather than overriding, which satisfies both.
+AEN_DPIDR="${AEN_DPIDR:-4C013477}"
+# GD32_DPIDR IS read -- just not in THIS file. bench_jlink_assert_aen_dpidr,
+# defined in the sourced bench-env.sh (line ~165, `grep -qi "$GD32_DPIDR"
+# "$out"`), reads it to name the wrong board. Plain shellcheck can't see a
+# cross-file use like that, which is why CI and stage_shellcheck both
+# invoke shellcheck with -x (follow `source`) here -- with -x this line
+# correctly reports no SC2034. Kept as the documented wrong-board value
+# alongside AEN_DPIDR's pin -- #1527: do NOT delete this pair to silence
+# the linter, that weakened the wrong-board MRAM-write gate during #1488
+# and had to be reverted.
+GD32_DPIDR="${GD32_DPIDR:-0BE12477}"
 cat > /tmp/flowd-mramxip-preflight.jlink <<EOF
 $SEL
 si SWD

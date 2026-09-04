@@ -23,6 +23,14 @@
 # NOTHING host-specific is hard-coded into the committed scripts — the
 # originals lived outside the repo with absolute /home paths; this
 # layer is the single place those values come from.
+#
+# EXCEPTION: AEN_DPIDR (below, "DP-ID safety gate") is a silicon-fixed,
+# bench-verified identity constant for the wrong-board MRAM-write interlock,
+# not host-specific config -- it is deliberately NOT environment-overridable,
+# unlike everything else in this file. GD32_DPIDR and V2N_CM33_DPIDR sit in
+# the same gate but keep the normal override (alp-sdk#1716 scoped the
+# closure to AEN_DPIDR only; GD32_DPIDR is also not bench-verified, see the
+# gate's own comment).
 
 # --------------------------------------------------------------------
 # Workspace + Zephyr
@@ -142,10 +150,56 @@ export JLINK_SN="${JLINK_SN:-${JLINK_SERIAL:-}}"
 # writes to or executes on a target checks it and aborts on a mismatch
 # (alp-sdk#1312).
 #
-# BENCH-VERIFIED IDs. AEN and GD32 per docs/aen-bench-bringup.md; the V2N
-# CM33 measured 2026-08-08 on the bench (`Found SW-DP with ID 0x6BA02477`,
+# AEN_DPIDR is BENCH-VERIFIED per docs/aen-bench-bringup.md. The V2N CM33
+# was measured 2026-08-08 on the bench (`Found SW-DP with ID 0x6BA02477`,
 # `Found Cortex-M33 r0p4`) -- note that core answers on SWD, NOT JTAG.
-export AEN_DPIDR="${AEN_DPIDR:-4C013477}"
+# GD32_DPIDR is NOT bench-verified: 0x0BE12477 is the only GD32 candidate
+# on record but has NOT been measured on a GD32 with a probe attached
+# (see #1369) -- treat it as unattested, not bench-verified, matching
+# flash-jlink-mramxip.sh's "0b. SAFETY GATE" comment.
+#
+# That is a labelling defect, NOT a hole in the guard, and the difference
+# matters to whoever reads this next.  bench_jlink_assert_aen_dpidr() below
+# is fail-CLOSED on the POSITIVE AEN_DPIDR match: GD32_DPIDR and
+# V2N_CM33_DPIDR only pick which board the abort message NAMES.  Land on a
+# real GD32 with a wrong GD32_DPIDR and the first branch simply misses,
+# then the `! grep -qi "$AEN_DPIDR"` branch aborts anyway -- with a bare
+# "expected AEN E8 SW-DP IDR ... not seen" instead of "you are on the GD32
+# bridge".  So do NOT weaken the AEN_DPIDR check to compensate.
+#
+# To close the gap: attach a probe to a GD32 bridge, connect, and read the
+# reported SW-DP ID off the transcript -- the same evidence shape that
+# settled V2N_CM33_DPIDR.  Note there is currently no J-Link path to the
+# GD32 on this bench (2026-08-07), which is why it is still open.
+#
+# NOT operator-overridable (alp-sdk#1716) -- AEN_DPIDR ONLY. The issue
+# scoped this narrowly: "I lean (a), scoped to AEN_DPIDR only ... Note
+# GD32_DPIDR should keep its override -- bench-env.sh:148 records that
+# 0x0BE12477 is not bench-verified." A pre-exported AEN_DPIDR winning here
+# is exactly backwards for a wrong-board interlock: `export
+# AEN_DPIDR=<whatever the wrong board answers>` before running any helper
+# below would make bench_jlink_assert_aen_dpidr() accept that board
+# silently, on 5 of its 6 call sites -- flash-jlink.sh, flash-jlink-hp.sh,
+# flash-update-log-dual.sh, flash-update-log-firewall-probe.sh and
+# ram-run.sh all resolve it from here alone. AEN_DPIDR is bench-verified
+# (see above), so there is no legitimate reason for it to differ from the
+# real AEN E8 constant; assign it unconditionally, not via a
+# caller-visible default, so the same defense-in-depth applies at every
+# call site with one change instead of five.
+#
+# GD32_DPIDR and V2N_CM33_DPIDR keep the `${VAR:-default}` shape used
+# everywhere else in this file -- they are deliberately left
+# operator-overridable, NOT closed. GD32_DPIDR in particular is NOT
+# bench-verified (see above): nobody has measured a real GD32 with a probe
+# attached, so hard-closing it would risk blocking a legitimate future
+# recovery against whatever a real GD32 actually answers -- the opposite
+# of a safety improvement. V2N_CM33_DPIDR is left open alongside it per
+# the same "AEN_DPIDR only" scoping in the issue, even though it is itself
+# bench-verified (see above). If a future part genuinely needs a
+# different expected DPIDR, that is a new named constant for that part's
+# own helper, not a way to override AEN_DPIDR.
+AEN_DPIDR="4C013477"
+export AEN_DPIDR
 export GD32_DPIDR="${GD32_DPIDR:-0BE12477}"
 export V2N_CM33_DPIDR="${V2N_CM33_DPIDR:-6BA02477}"
 
@@ -254,6 +308,48 @@ bench_jlink_assert_connected() {
 		echo "           OEM serial, so an unselected JLinkExe can fail outright or attach" >&2
 		echo "           the wrong board. Export the probe serial and retry:" >&2
 		echo "               export JLINK_SN=<serial>     # the AEN E8 answers SW-DP IDR 0x4C013477" >&2
+		echo "           Full J-Link transcript: $out" >&2
+		return 7
+	fi
+	# POSITIVE evidence, not just the absence of a known negative (alp-sdk#1551).
+	# The checks above enumerate failure strings, so any failure mode that stops
+	# JLinkExe BEFORE it prints one of them passed. Measured case: the alp-sdk#1478
+	# stray literal `n` made JLinkExe reject its own command line and exit, giving
+	# this COMPLETE 147-byte transcript -- no connect attempted, no DP read:
+	#
+	#     SEGGER J-Link Commander V9.46 (Compiled May 27 2026 12:24:58)
+	#     DLL version V9.46, compiled May 27 2026 12:23:54
+	#
+	#     Unknown command line option n.
+	#
+	# It contains none of the strings above, so this function returned 0 on it.
+	# Only the sibling DPIDR gate caught that run, and the read-back-only paths
+	# (the post-flash console dumps, e.g. flash-jlink.sh step 4 and
+	# flash-run.sh's Flow A read) have no DPIDR gate on the READ ITSELF --
+	# they rely on an earlier preflight DPIDR check in the same script run, so
+	# for the read's own transcript this function is the sole check. (reread.sh
+	# used to be in this list too; alp-sdk#813 gave it its own preflight.)
+	#
+	# The marker is the `J-Link>` command prompt: JLinkExe echoes it for every
+	# CommanderScript line it executes, so its presence proves the script ran at
+	# all. Deliberately NOT "Connecting to J-Link ...O.K." -- that is the stronger
+	# signal but it is absent from trimmed transcripts (the alp-sdk#1318 REAL_GOOD_READ
+	# fixture starts at the first `J-Link>` line), and this guard must not reject a
+	# genuine read-back just because its capture began mid-run.
+	#
+	# ponytail: prompt-presence only, which cannot tell "connected" from "ran but
+	# reached no target" -- that is bench_jlink_assert_aen_dpidr's job. Tighten to
+	# the O.K. line if a failure mode ever slips past this that still prints a prompt.
+	if ! grep -q 'J-Link>' "$out"; then
+		echo "bench-env: $ctx produced J-Link output containing no 'J-Link>' command" >&2
+		echo "           prompt, so the CommanderScript never executed -- JLinkExe" >&2
+		echo "           exited before running it. Nothing was read from the target;" >&2
+		echo "           any decoded output is empty for an infrastructure reason." >&2
+		echo >&2
+		head -5 "$out" >&2
+		echo >&2
+		echo "           A rejected command line does this (see alp-sdk#1478: a stray" >&2
+		echo "           argument gave 'Unknown command line option n.' and nothing else)." >&2
 		echo "           Full J-Link transcript: $out" >&2
 		return 7
 	fi

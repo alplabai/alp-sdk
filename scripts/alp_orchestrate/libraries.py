@@ -41,7 +41,7 @@ def _libraries_dir(metadata_root: Path) -> Path:
     return metadata_root / "libraries"
 
 
-def available_libraries(metadata_root: Path = METADATA_ROOT) -> list[str]:
+def available_libraries(metadata_root: Path) -> list[str]:
     """Sorted list of every curated library token (manifest filename stem)."""
     d = _libraries_dir(metadata_root)
     if not d.is_dir():
@@ -49,7 +49,7 @@ def available_libraries(metadata_root: Path = METADATA_ROOT) -> list[str]:
     return sorted(p.stem for p in d.glob("*.yaml"))
 
 
-def load_manifest(name: str, metadata_root: Path = METADATA_ROOT) -> dict[str, Any]:
+def load_manifest(name: str, metadata_root: Path) -> dict[str, Any]:
     """Load one library manifest, or raise OrchestratorError naming the options.
 
     The error lists every available library so a typo in ``libraries: [...]``
@@ -194,7 +194,7 @@ def scoped_names(
 
 def resolve_selection(
     project: BoardProject,
-    metadata_root: Path = METADATA_ROOT,
+    metadata_root: Path,
     *,
     slice_: Optional[Slice] = None,
 ) -> list[tuple[str, dict[str, Any]]]:
@@ -321,7 +321,7 @@ def zephyr_library_kconfig(manifest: dict[str, Any]) -> list[str]:
 def zephyr_kconfig_lines(
     project: BoardProject,
     slice_: Slice,
-    metadata_root: Path = METADATA_ROOT,
+    metadata_root: Path,
 ) -> list[str]:
     """Kconfig lines for every project-wide library with a Zephyr integration.
 
@@ -362,7 +362,7 @@ def zephyr_kconfig_lines(
 def yocto_image_install(
     project: BoardProject,
     slice_: Slice,
-    metadata_root: Path = METADATA_ROOT,
+    metadata_root: Path,
 ) -> list[str]:
     """IMAGE_INSTALL recipe names for libraries with a Yocto integration.
 
@@ -389,7 +389,7 @@ def yocto_image_install(
 def yocto_unwireable(
     project: BoardProject,
     slice_: Slice,
-    metadata_root: Path = METADATA_ROOT,
+    metadata_root: Path,
 ) -> list[str]:
     """In-scope library names whose manifest has NO `integration.yocto:`.
 
@@ -409,7 +409,7 @@ def yocto_unwireable(
 def baremetal_cmake_args(
     project: BoardProject,
     slice_: Slice,
-    metadata_root: Path = METADATA_ROOT,
+    metadata_root: Path,
 ) -> list[str]:
     """cmake hint lines for libraries with a baremetal integration.
 

@@ -38,8 +38,17 @@
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/clock_control.h>
+#include <zephyr/sys/sys_io.h>
 
 #include "utimer.h"
+
+/*
+ * UTIMERn_CNTR_CTRL bit 5 CNTR_TRIG, HWRM 13.2.6.3.26: "Set this bit if
+ * incrementing or decrementing the counter via triggers."  hal_alif's
+ * utimer.h defines CNTR_CTRL bits 0, 1, 2, 4, 8 but not this one, and exposes
+ * no setter for it (#1828).
+ */
+#define QDEC_CNTR_CTRL_TRIG_BIT 5U
 
 LOG_MODULE_REGISTER(qdec_alif_utimer, CONFIG_SENSOR_LOG_LEVEL);
 
@@ -79,7 +88,13 @@ static int qdec_alif_utimer_sample_fetch(const struct device *dev, enum sensor_c
 	}
 
 	counter_value = alif_utimer_get_counter_value(timer_base);
-	data->position = (counter_value * 360) / cfg->counts_per_revolution;
+
+	/* 64-bit intermediate: counter_value * 360 overflows a uint32_t once
+	 * counts_per_revolution exceeds 11930464, and the DT value is only checked
+	 * against < 1 at init -- which on an unsigned type catches nothing but
+	 * zero.  A typo of counts-per-revolution = <20000000> produced a wrapped,
+	 * arbitrary angle rather than any kind of failure (#1828). */
+	data->position = (uint32_t)(((uint64_t)counter_value * 360ULL) / cfg->counts_per_revolution);
 
 	return 0;
 }
@@ -134,28 +149,79 @@ static int qdec_alif_utimer_init(const struct device *dev)
 	}
 
 	alif_utimer_enable_timer_clock(global_base, cfg->timer_id);
-	alif_utimer_disable_soft_counter_ctrl(timer_base);
+
+	/*
+	 * ENABLE the software counter control, do not disable it.  HWRM 13.2.6.3.8
+	 * defines START_1_SRC[31] PGM_EN as "0x0: Global programmatic start is
+	 * disabled", and 13.2.5 step 2 names exactly the global START/STOP/CLEAR
+	 * writes as how a channel is turned on.  The old
+	 * alif_utimer_disable_soft_counter_ctrl() here cleared that enable and
+	 * nothing ever wrote GLB_CNTR_START, so the counter had no start source at
+	 * all (#1828).
+	 */
+	alif_utimer_enable_soft_counter_ctrl(timer_base);
 	alif_utimer_set_up_counter(timer_base);
 	alif_utimer_set_counter_value(timer_base, 0x0);
 	alif_utimer_set_counter_reload_value(timer_base, cfg->counts_per_revolution - 1);
 	alif_utimer_enable_counter(timer_base);
 
 	if (cfg->filter_enable) {
-		alif_utimer_enable_filter(timer_base, cfg->filter_prescaler, cfg->filter_taps);
+		/*
+		 * Open-coded instead of alif_utimer_enable_filter(), which never
+		 * applies its own shift constants:
+		 *
+		 *     reg |= (prescaler | taps | CHAN_FILTER_CTRL_FILTER_EN);
+		 *
+		 * HWRM 13.2.6.3.27 UTIMERn_FILTER_CTRL_A: "21-16 PRESCALER, 15-12
+		 * RESERVED, 11-8 FILTER_TAPS, 7-1 RESERVED, 0 FILTER_EN".  With
+		 * prescaler 4 and taps 3 the HAL wrote 0x7 -- two RESERVED bits plus
+		 * FILTER_EN -- leaving both real fields at 0, so the noise filter the
+		 * board author configured ran with zero taps and zero prescaler.  Its
+		 * clear mask was wrong the same way (#1828).
+		 */
+		uint32_t filt = sys_read32(UTIMER_FILTER_CTRL_A(timer_base));
+
+		filt &= ~((uint32_t)CHAN_FILTER_CTRL_FILTER_PRESCALER_Msk
+		          << CHAN_FILTER_CTRL_FILTER_PRESCALER_BIT);
+		filt &= ~((uint32_t)CHAN_FILTER_CTRL_FILTER_TAPS_Msk << CHAN_FILTER_CTRL_FILTER_TAPS_BIT);
+		filt |= ((uint32_t)cfg->filter_prescaler & CHAN_FILTER_CTRL_FILTER_PRESCALER_Msk)
+		        << CHAN_FILTER_CTRL_FILTER_PRESCALER_BIT;
+		filt |= ((uint32_t)cfg->filter_taps & CHAN_FILTER_CTRL_FILTER_TAPS_Msk)
+		        << CHAN_FILTER_CTRL_FILTER_TAPS_BIT;
+		filt |= CHAN_FILTER_CTRL_FILTER_EN;
+
+		sys_write32(filt, UTIMER_FILTER_CTRL_A(timer_base));
 	}
 
 	alif_utimer_config_qdec_triggers(timer_base);
 
+	/*
+	 * Put the channel in trigger-based counting.  HWRM 13.2.6.3.26
+	 * UTIMERn_CNTR_CTRL bit 5 CNTR_TRIG: "Set this bit if incrementing or
+	 * decrementing the counter via triggers.  0x0: Not in trigger based
+	 * increment/decrement mode.  0x1: Trigger based increment/decrement mode."
+	 * The quadrature edge triggers are programmed just above via UP_1_SRC /
+	 * DOWN_1_SRC, but nothing set this bit and the HAL exposes no way to, so
+	 * the channel sat in non-trigger mode while triggers were its only count
+	 * source: rotating the encoder left the counter at 0 and sample_fetch()
+	 * still returned success (#1828).
+	 */
+	sys_set_bit(UTIMER_CNTR_CTRL(timer_base), QDEC_CNTR_CTRL_TRIG_BIT);
+
 	return 0;
 }
 
-#define CHECK_FILTER_PARAM_VALUES(n)								\
-	BUILD_ASSERT((DT_INST_PROP(n, filter_prescaler) < CHAN_FILTER_CTRL_FILTER_PRESCALER_Msk),\
-		"UTIMER QDEC filter prescaler value exceeds maximum of "			\
-		STRINGIFY(CHAN_FILTER_CTRL_FILTER_PRESCALER_Msk));				\
-	BUILD_ASSERT((DT_INST_PROP(n, filter_taps) < CHAN_FILTER_CTRL_FILTER_TAPS_Msk),		\
-		"UTIMER QDEC filter taps value exceeds maximum of "				\
-		STRINGIFY(CHAN_FILTER_CTRL_FILTER_TAPS_Msk));					\
+#define CHECK_FILTER_PARAM_VALUES(n) \
+	/* <=, not <: HWRM 13.2.6.3.27 gives PRESCALER the range 0x0-0x3F and    \
+	 * FILTER_TAPS four bits, so the mask value IS legal -- the assert used  \
+	 * to reject exactly 63 while its message said "exceeds maximum of 63"   \
+	 * (#1828). */ \
+	BUILD_ASSERT((DT_INST_PROP(n, filter_prescaler) <= CHAN_FILTER_CTRL_FILTER_PRESCALER_Msk), \
+	             "UTIMER QDEC filter prescaler value exceeds maximum of " STRINGIFY( \
+	                 CHAN_FILTER_CTRL_FILTER_PRESCALER_Msk)); \
+	BUILD_ASSERT((DT_INST_PROP(n, filter_taps) <= CHAN_FILTER_CTRL_FILTER_TAPS_Msk), \
+	             "UTIMER QDEC filter taps value exceeds maximum of " STRINGIFY( \
+	                 CHAN_FILTER_CTRL_FILTER_TAPS_Msk));
 
 #define QDEC_ALIF_UTIMER_INIT(n)								\
 	PINCTRL_DT_INST_DEFINE(n);								\

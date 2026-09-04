@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Optional
 
 from . import libraries as _library_layer
 from .models import OrchestratorError, Slice
+from .orchestrator import STOCK_IMAGE_APP, STOCK_SHIM_APP
 from .paths import METADATA_ROOT, REPO
 from .topology import _core_os_choices, _cross_class_os
 
@@ -124,7 +125,16 @@ def _validate_consistency(project: "BoardProject") -> None:
       - Names globally unique across every core's `extra_libraries:`.
       - Names don't collide with the curated `libraries:` enum.
       - `profile:` paths resolve to a real file (repo-relative).
+
+    The curated set is recomputed against `project.effective_metadata_root()`
+    (NOT the module-level `_CURATED_LIBRARIES`, which stays pinned to the
+    SDK's own in-tree metadata/ for `check_library_registry.py`'s
+    self-consistency gate) so an `--metadata-root` override's own curated
+    libraries collide correctly instead of the SDK's in-tree set (#1485).
     """
+    curated_libraries = _curated_library_names(
+        project.effective_metadata_root())
+
     # ---- extra_libraries invariants (P2.1) -----------------------
     seen_names: dict[str, str] = {}    # name -> first core_id seen on
     for core_id, slice_ in project.cores.items():
@@ -145,7 +155,7 @@ def _validate_consistency(project: "BoardProject") -> None:
                     f"{'both' if has_kc and has_pf else 'neither'}).  "
                     f"Inline `kconfig:` is the fast path; `profile:` "
                     f"points at a hw-backends.yaml-style file.")
-            if name in _CURATED_LIBRARIES:
+            if name in curated_libraries:
                 raise OrchestratorError(
                     f"core '{core_id}' extra_libraries entry '{name}' "
                     f"collides with the curated `libraries:` enum; "
@@ -273,7 +283,7 @@ def _enforce_os_matches_core_class(slice_: Slice, core_type: str) -> None:
             f"disable it or 'baremetal' for no-OS firmware -- got os: '{slice_.os}'.")
 
 
-def _enforce_loader_rules(slice_: Slice) -> None:
+def _enforce_loader_rules(slice_: Slice, metadata_root: Path) -> None:
     """Loader rules from spec §4.5: every non-off slice must declare
     enough to actually build."""
     if slice_.os == "off":
@@ -284,6 +294,53 @@ def _enforce_loader_rules(slice_: Slice) -> None:
                 f"core '{slice_.core_id}': os: zephyr requires `app:` "
                 f"pointing at a prj.conf / CMakeLists.txt directory")
     elif slice_.os == "baremetal":
+        # #1889: a core with no `app:` of its own still resolves one --
+        # `_resolve_topology_for_core` (loader.py) merges the SoM
+        # topology default OVER a project entry that omits `app:`, and
+        # every topology default is one of the two stock tokens below
+        # (`alp-stock-shim` for a Cortex-M slot, `alp-image-edge` for a
+        # Cortex-A slot) -- see every metadata/e1m_modules/<SKU>.yaml
+        # `topology:` block. Neither is a bare-metal app (the shim's
+        # CMakeLists.txt is `find_package(Zephyr REQUIRED)`; the image
+        # token is a bitbake recipe name, not a directory), and there is
+        # no third, bare-metal-flavoured stock default anywhere in the
+        # tree. Left unchecked, `not slice_.app` is always False here --
+        # the inherited token is truthy -- so this whole branch never
+        # fires for a preset-backed core.
+        #
+        # It is NOT a quiet skip, though: reran the exact #1889 fixture
+        # (`m55_he: os: baremetal`, no `app:`, under `preset: e1m-evk`)
+        # through `emit_build_plan` on the pre-fix parent commit
+        # (1c3c8e46) and confirmed `orchestrator._slice_command` does
+        # NOT return None here -- `slice_.app` is truthy, so the
+        # baremetal branch's `if not slice_.app: return None` guard
+        # never triggers either. Instead `_resolve_app_path` resolves
+        # `alp-stock-shim` to the real `${SDK_ROOT}/firmware/alp-stock-shim`
+        # directory (the Cortex-M shim's own zephyr app) and the branch
+        # emits a genuine, non-null `cmake -S
+        # ${SDK_ROOT}/firmware/alp-stock-shim -B .` configure command plus
+        # a `cmake --build .` postCommand -- a wrong-target build, not a
+        # skip. Running that emitted configure line for real dies loudly
+        # inside the shim's own `find_package(Zephyr REQUIRED)`
+        # (CMakeLists.txt calls it) with `CMake Error: BOARD is not being
+        # defined`, because a bare `cmake` invocation carries none of the
+        # `west build -b <board>` context Zephyr's CMake package needs.
+        # The Cortex-A / `alp-image-edge` shape fails the same way for a
+        # different reason: `_resolve_app_path` has no special case for
+        # it, so it resolves to the literal, nonexistent
+        # `${PROJECT_ROOT}/alp-image-edge` directory and the configure
+        # dies on "source directory does not exist" instead. Either way
+        # the slice reaches the executor with a real command and fails
+        # there -- confusingly, on the wrong target -- rather than being
+        # carried as `command: null` and silently dropped.
+        if slice_.app in (STOCK_SHIM_APP, STOCK_IMAGE_APP):
+            other_os = "zephyr" if slice_.app == STOCK_SHIM_APP else "yocto"
+            raise OrchestratorError(
+                f"core '{slice_.core_id}': os: baremetal requires `app:` "
+                f"pointing at a CMakeLists.txt directory -- `{slice_.app}` "
+                f"is the {other_os} stock default (inherited from the SoM "
+                f"topology preset when no `app:` was given), and there is "
+                f"no bare-metal stock default to fall back to")
         if not slice_.app:
             raise OrchestratorError(
                 f"core '{slice_.core_id}': os: baremetal requires `app:` "
@@ -293,6 +350,6 @@ def _enforce_loader_rules(slice_: Slice) -> None:
             raise OrchestratorError(
                 f"core '{slice_.core_id}': os: yocto requires either "
                 f"`app:` (custom recipe) or `image:` (stock recipe)")
-    elif slice_.os not in _core_os_choices():
+    elif slice_.os not in _core_os_choices(metadata_root):
         raise OrchestratorError(
             f"core '{slice_.core_id}': unknown os '{slice_.os}'")

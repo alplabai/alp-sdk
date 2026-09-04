@@ -148,6 +148,20 @@ static int cmd_companion_wifi_connect(const struct shell *sh, size_t argc, char 
 		            "wifi connect \"my ssid\" \"my pass\" [wpa3]");
 		return -EINVAL;
 	}
+	/* WPA3-SAE has no open mode, so "wpa3" with an EMPTY passphrase is a
+	 * contradiction, not a configuration (#1552). It used to be accepted: the
+	 * empty passphrase selected open and the token then overwrote that with
+	 * WPA3-SAE-and-no-PSK. Same reasoning as the token guard above -- a
+	 * contradictory argument shape is wrong whether or not a companion is
+	 * bound, so it is refused HERE, before the state checks. `argc >= 4`
+	 * implies `argc >= 3`, so argv[2] is always readable in this branch. */
+	if (argc >= 4 && argv[2][0] == '\0') {
+		shell_error(sh, "\"wpa3\" requires a passphrase -- WPA3-SAE has no open mode.");
+		shell_error(sh,
+		            "for an open network drop the token: "
+		            "wifi connect \"my ssid\"");
+		return -EINVAL;
+	}
 	if (companion_cc3501e == NULL) {
 		shell_warn(sh, "companion not registered");
 		return -ENODEV;
@@ -158,12 +172,16 @@ static int cmd_companion_wifi_connect(const struct shell *sh, size_t argc, char 
 	}
 	const char *ssid = argv[1];
 	const char *pass = (argc >= 3) ? argv[2] : "";
-	/* No passphrase -> open; a passphrase -> WPA2-PSK (the common case).  A
-	 * trailing "wpa3" token forces WPA3-SAE (validated above). */
-	uint8_t sec = (pass[0] == '\0') ? 0u : 1u;
-	if (argc >= 4) {
-		sec = 2u;
-	}
+	/* No passphrase -> open; a passphrase -> WPA2-PSK (the common case); a
+	 * trailing "wpa3" token -> WPA3-SAE (the token itself validated above).
+	 *
+	 * ONE expression, deliberately: this used to be an assignment followed by
+	 * `if (argc >= 4) { sec = 2u; }`, i.e. a later step silently overriding an
+	 * earlier decision -- the shape that produced #1552, where an empty
+	 * passphrase decided "open" and the wpa3 token then overwrote it with
+	 * WPA3-SAE-with-no-PSK. Stating the precedence in a single expression
+	 * leaves no window for one branch to undo another. */
+	uint8_t sec = (argc >= 4) ? 2u : ((pass[0] == '\0') ? 0u : 1u);
 
 	strncpy(conn_ssid, ssid, sizeof(conn_ssid) - 1u);
 	conn_ssid[sizeof(conn_ssid) - 1u] = '\0';
@@ -199,18 +217,49 @@ static int cmd_companion_wifi_disconnect(const struct shell *sh, size_t argc, ch
 
 static int cmd_companion_wifi_ap(const struct shell *sh, size_t argc, char **argv)
 {
+	/* Validate the token shape BEFORE any state check -- same ordering
+	 * rationale as cmd_companion_wifi_connect() above (#1376): a wrong
+	 * argument shape is wrong regardless of whether a companion is bound,
+	 * and this guard was the one `wifi ap` was missing (#1480). The 4th
+	 * token is the ONLY optional flag, and it must be "wpa3". It used to be
+	 * tested with `== 0` and otherwise IGNORED, which made the dangerous
+	 * case silent: an UNQUOTED SSID containing a space splits across
+	 * argv[1]/argv[2], pushing the real passphrase into argv[3], where it
+	 * was dropped without a word -- the AP came up on an SSID fragment as
+	 * its PSK, and a mistyped security token silently downgraded WPA3-SAE
+	 * to WPA2-PSK. Both are worse than refusing, so an unrecognised token
+	 * is now an error. */
+	if (argc >= 4 && strcmp(argv[3], "wpa3") != 0) {
+		shell_error(sh,
+		            "unrecognised argument \"%s\" -- the only optional 4th token is "
+		            "\"wpa3\".",
+		            argv[3]);
+		shell_error(sh,
+		            "an SSID or passphrase containing spaces must be quoted: "
+		            "wifi ap \"my ssid\" \"my pass\" [wpa3]");
+		return -EINVAL;
+	}
+	/* Same contradiction as `wifi connect`'s, refused the same way and in the
+	 * same position (#1552): WPA3-SAE has no open mode, so the "wpa3" token
+	 * with an empty passphrase would have started a soft-AP declaring
+	 * WPA3-SAE with no PSK. */
+	if (argc >= 4 && argv[2][0] == '\0') {
+		shell_error(sh, "\"wpa3\" requires a passphrase -- WPA3-SAE has no open mode.");
+		shell_error(sh,
+		            "for an open soft-AP drop the token: "
+		            "wifi ap \"my ssid\"");
+		return -EINVAL;
+	}
 	if (companion_cc3501e == NULL) {
 		shell_warn(sh, "companion not registered");
 		return -ENODEV;
 	}
 	const char *ssid = argv[1];
 	const char *pass = (argc >= 3) ? argv[2] : "";
-	/* Same security rule as `wifi connect`: no passphrase -> open, a
-	 * passphrase -> WPA2-PSK, a trailing "wpa3" token -> WPA3-SAE. */
-	uint8_t sec = (pass[0] == '\0') ? 0u : 1u;
-	if (argc >= 4 && strcmp(argv[3], "wpa3") == 0) {
-		sec = 2u;
-	}
+	/* Same security rule as `wifi connect`, and the same single-expression
+	 * form for the same reason (#1552): no passphrase -> open, a passphrase ->
+	 * WPA2-PSK, a trailing "wpa3" token -> WPA3-SAE (validated above). */
+	uint8_t sec = (argc >= 4) ? 2u : ((pass[0] == '\0') ? 0u : 1u);
 
 	/* cc3501e_wifi_ap_start() submits WIFI_AP_START exactly ONCE and returns
 	 * immediately (#1385) -- it does not block for seconds here the way it
@@ -258,9 +307,28 @@ static int cmd_companion_wifi_ap_stop(const struct shell *sh, size_t argc, char 
 	alp_status_t s = cc3501e_wifi_ap_stop(companion_cc3501e);
 
 	if (s != ALP_OK) {
-		shell_error(sh, "ap stop failed (%d)", (int)s);
+		/* #1553: reaching here does NOT mean the teardown failed.
+		 * Bench-measured on E1M-AEN801 (2026-08-18), reproducibly: with no AP
+		 * running cc3501e_wifi_ap_stop() returns ALP_OK (the firmware does ack
+		 * this opcode), but with an AP ACTUALLY RUNNING it returns
+		 * ALP_ERR_TIMEOUT every time -- the teardown takes the bridge through
+		 * the radio-down window and the ack is not observed across it. So the
+		 * one case a caller cares about is exactly the one that cannot report
+		 * its own outcome, the same shape `ap start` above has (#1385).
+		 *
+		 * "failed" therefore stated more than was known. Say "unconfirmed",
+		 * as `ap start` does, and keep the error return -- inconclusive, not
+		 * success. */
+		shell_error(sh,
+		            "ap stop unconfirmed (%d) -- firmware v4 has no AP-stop acknowledgement "
+		            "(#1553, same gap as #1385); confirm the SSID is gone out of band",
+		            (int)s);
 		return -EIO;
 	}
+	/* Reachable, unlike the matching branch in `ap start`: bench-measured,
+	 * cc3501e_wifi_ap_stop() returns ALP_OK when there was no AP to stop. So
+	 * this line prints for the no-op case -- which is exactly the case where
+	 * "stopped" is unambiguously true. */
 	shell_print(sh, "ap stopped");
 	return 0;
 }
@@ -303,7 +371,7 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 	if (st.state == ALP_CC3501E_WIFI_CONNECTED) {
 		/* Do NOT print st.rssi_dbm: the WIFI_STATUS latch byte is NOT a
 		 * measurement.  Every terminal outcome in
-		 * firmware/cc3501e/hal/ti/cc3501e_hw_ti_wifi.c publishes it through
+		 * cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti_wifi.c publishes it through
 		 * wifi_conn_set(), which always sets it to 0 (the firmware may not read
 		 * it there -- a Wlan_Get(WLAN_GET_RSSI) close to associate blocks the
 		 * worker), so that byte has only ever held 0.  And 0 dBm is a LEGAL
@@ -338,7 +406,8 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 			shell_print(sh, "rssi:  unavailable (%d)", (int)rs);
 		}
 		uint8_t      ip[4] = { 0 };
-		alp_status_t ips   = cc3501e_wifi_get_ip(companion_cc3501e, ip);
+		alp_status_t ips =
+		    cc3501e_wifi_get_ip(companion_cc3501e, (uint8_t)ALP_CC3501E_WIFI_IFACE_STA, ip);
 		if (ips == ALP_OK) {
 			shell_print(sh, "ip:    %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
 		} else {

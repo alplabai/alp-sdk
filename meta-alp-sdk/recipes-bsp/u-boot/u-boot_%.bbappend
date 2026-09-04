@@ -77,6 +77,21 @@ SRC_URI:append:rzv2n-family = " \
 ALP_PROD_BOOT ?= "0"
 SRC_URI:append:rzv2n-family = "${@' file://prod-boot.cfg' if bb.utils.to_boolean(d.getVar('ALP_PROD_BOOT')) else ''}"
 
+# Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
+# binary serves both families, so the dtb basename is a Kconfig string
+# (CONFIG_ALP_E1M_FDTFILE, patch 0002) whose default suits the V2N SKUs;
+# the V2M MACHINEs override it through the same *.cfg channel
+# prod-boot.cfg uses (u-boot-configure.inc's find_cfgs() +
+# merge_config.sh pick up any *.cfg in SRC_URI).
+#
+# Scoped by MACHINE, not by rzv2n-family: the family override covers the
+# V2N SKUs too, and applying the V2M name there would invert the bug.
+# Any new V2M MACHINE needs a line here -- there is no wildcard that is
+# safe, because "which dtb does this image contain" is a per-MACHINE fact
+# (KERNEL_DEVICETREE), not a family one.
+SRC_URI:append:e1m-v2m101-a55 = " file://fdtfile-v2m.cfg"
+SRC_URI:append:e1m-v2m102-a55 = " file://fdtfile-v2m.cfg"
+
 # Build U-Boot with the rzv2n-dev config, not the machine's stock rzv2n-evk.
 # The DEEPX bring-up patched above lives in board/renesas/rzv2n-dev/rzv2n-dev.c,
 # which is ONLY compiled under CONFIG_TARGET_RZV2N_DEV -- so the dev config is

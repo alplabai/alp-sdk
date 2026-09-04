@@ -6,13 +6,15 @@ without the DEEPX DX-M1 NPU).
 
 ## Files
 
-| File                              | Schema                                   |
-|-----------------------------------|------------------------------------------|
-| `renesas-peripheral-map.tsv`      | `peripheral \t renesas_pad`              |
-| `renesas-peripheral-map.csv`      | `row, peripheral, renesas_pad`           |
-| `gd32-io-mcu-map.tsv`             | `peripheral \t gd32_pad`                 |
-| `gd32-io-mcu-map.csv`             | `row, peripheral, gd32_pad`              |
-| `hw-revisions.yaml`               | Per-rev SDK-version compatibility window |
+| File                              | Schema                                     |
+|-----------------------------------|--------------------------------------------|
+| `renesas-peripheral-map.tsv`      | `peripheral \t renesas_pad`                |
+| `renesas-peripheral-map.csv`      | `row, peripheral, renesas_pad`             |
+| `gd32-io-mcu-map.tsv`             | `peripheral \t gd32_pad`                   |
+| `gd32-io-mcu-map.csv`             | `row, peripheral, gd32_pad`                |
+| `hw-revisions.yaml`               | Per-rev SDK-version compatibility window   |
+| `core-ownership.yaml`             | `(peripheral, pad) -> core`, verified pads |
+| `supervisor-links.yaml`           | `supervisor-links-v1`                      |
 
 ## Two MCUs on the module
 
@@ -32,6 +34,12 @@ sources:
 
 The two MCUs share a board-management I²C bus (BRD_I2C) plus a
 dedicated SPI link.
+
+Renesas RZ/V2N is itself AMP (Cortex-A55 running Linux, Cortex-M33
+running Zephyr).  `core-ownership.yaml` attributes a small,
+silicon-verified subset of Renesas-owned pads to whichever core
+actually drives them; see
+[issue #1157](https://github.com/alplabai/alp-sdk/issues/1157).
 
 ## V2N-M1 vs V2N base
 

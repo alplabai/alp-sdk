@@ -2,30 +2,26 @@
 # SPDX-License-Identifier: Apache-2.0
 """CI gate: gen_sbom.py produces a valid, deterministic CycloneDX SBOM (#610 §7).
 
-Generates the SBOM from the real alp.lock and asserts CycloneDX shape
+alp.lock is generated on demand, not committed (#1576), so this gate builds
+one in memory (same call `west alp-lock` makes) and asserts CycloneDX shape
 (bomFormat/specVersion/components present, every component has a name) plus
 determinism (build_sbom(lock) called twice yields the identical bom -- no
-wall-clock, no randomness). stdlib only.
+wall-clock, no randomness).
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import alp_lock  # noqa: E402
 import gen_sbom  # noqa: E402
 
-LOCK = ROOT / "alp.lock"
 
-
-def find_problems(lock_path: Path) -> list[str]:
+def find_problems(lock: dict) -> list[str]:
     problems: list[str] = []
-    if not lock_path.is_file():
-        return [f"missing {lock_path}"]
-    lock = json.loads(lock_path.read_text(encoding="utf-8"))
     a = gen_sbom.build_sbom(lock)
     b = gen_sbom.build_sbom(lock)
     if a.get("bomFormat") != "CycloneDX":
@@ -45,7 +41,12 @@ def find_problems(lock_path: Path) -> list[str]:
 
 
 def main() -> int:
-    problems = find_problems(LOCK)
+    try:
+        lock = alp_lock.build_lock(ROOT)
+    except alp_lock.LockError as e:
+        print(f"sbom: {e}", file=sys.stderr)
+        return 1
+    problems = find_problems(lock)
     if problems:
         for p in problems:
             print(f"sbom: {p}", file=sys.stderr)
