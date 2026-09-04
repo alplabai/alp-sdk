@@ -72,7 +72,7 @@ into the topic-specific docs.
   doc's *Silicon scope — which E-part has what* section).
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
-  index (32 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
+  index (33 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
 
 ## Per-SoM bring-up
 
