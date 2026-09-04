@@ -208,23 +208,87 @@ static int resolve_broker_addr(const char *host, uint16_t port, struct sockaddr_
 #endif
 }
 
-/* Read + discard `remaining` bytes of an inbound PUBLISH payload the
- * caller isn't keeping, so Zephyr's mqtt_client::internal.remaining_payload
- * reaches 0 -- left non-zero, client_read() returns -EBUSY on every
- * subsequent mqtt_input(), wedging the connection permanently (issue
- * #1645).  Shared by both MQTT_EVT_PUBLISH branches in
- * alp_mqtt_evt_cb() below: the no-callback branch draining the whole
- * payload, and the callback branch draining what didn't fit rx_buf. */
-static void mqtt_drain_remaining(struct mqtt_client *client, size_t remaining)
+/* Pull the active socket fd out of the mqtt client.  Path differs
+ * between non-secure (transport.tcp) and TLS (transport.tls) variants;
+ * v0.2 only ships non-secure (TLS lands with security.h in v0.3) but
+ * the helper is shaped to extend cleanly.  Moved above the payload-read
+ * helper below (was originally defined after alp_mqtt_evt_cb) so that
+ * helper can poll the socket fd while waiting on -EAGAIN (issue #1938). */
+static int alp_mqtt_get_fd(struct mqtt_client *c)
+{
+#if defined(CONFIG_MQTT_LIB_TLS)
+	if (c->transport.type == MQTT_TRANSPORT_SECURE) {
+		return c->transport.tls.sock;
+	}
+#endif
+	return c->transport.tcp.sock;
+}
+
+/* How long a PUBLISH payload read below will keep polling the socket for
+ * more bytes on -EAGAIN before giving up (issue #1938, same budget PR
+ * #1658 used for #1645). */
+#define ALP_MQTT_DRAIN_TIMEOUT_MS 5000u
+
+/* Reads up to `len` bytes of the CURRENT PUBLISH's payload into `dst`
+ * (discarding through a small on-stack scratch buffer when `dst == NULL`,
+ * for callers that just want the bytes off the wire), retrying on
+ * -EAGAIN up to `deadline` (a k_uptime_get_32() timestamp) instead of
+ * giving up on the first one.
+ *
+ * mqtt_rx.c sets internal.remaining_payload from the PUBLISH's advertised
+ * header length the instant the header is decoded -- before the payload
+ * bytes have necessarily all arrived on the wire.
+ * mqtt_read_publish_payload() is the non-blocking variant and returns
+ * -EAGAIN verbatim once the socket has no more buffered bytes right now,
+ * which for any payload spanning more than one TCP segment is not a hard
+ * failure, just "not here yet".  Stopping on the first -EAGAIN (as every
+ * caller here used to) leaves remaining_payload > 0, and client_read()
+ * then answers -EBUSY on every subsequent mqtt_input() -- the connection
+ * is wedged until torn down (issue #1645, reopened as #1938 because the
+ * #1918 landing still stopped on the first -EAGAIN).  Polling to a
+ * deadline is the middle ground: keep waiting for more bytes, but only up
+ * to ALP_MQTT_DRAIN_TIMEOUT_MS, so a broker that goes silent mid-payload
+ * doesn't hang alp_mqtt_loop() forever either.
+ *
+ * Returns the number of bytes actually placed/discarded via `*got_out`.
+ * Returns false on a hard read error or on hitting `deadline` with bytes
+ * still owed -- either way remaining_payload is left non-zero, so the
+ * caller must treat the connection as unusable (mqtt_abort()) rather than
+ * let it sit at -EBUSY forever. */
+static bool mqtt_read_payload_deadline(struct mqtt_client *client,
+                                       uint8_t            *dst,
+                                       size_t              len,
+                                       uint32_t            deadline,
+                                       size_t             *got_out)
 {
 	uint8_t scratch[64];
-	while (remaining > 0) {
-		int n = mqtt_read_publish_payload(client, scratch, MIN(remaining, sizeof(scratch)));
-		if (n <= 0) {
-			break;
+	size_t  got = 0;
+
+	while (got < len) {
+		uint8_t *buf   = (dst != NULL) ? dst + got : scratch;
+		size_t   chunk = (dst != NULL) ? (len - got) : MIN(len - got, sizeof(scratch));
+		int      n     = mqtt_read_publish_payload(client, buf, chunk);
+
+		if (n > 0) {
+			got += (size_t)n;
+			continue;
 		}
-		remaining -= (size_t)n;
+		if (n != -EAGAIN) {
+			*got_out = got;
+			return false; /* hard error -- client already torn down below us */
+		}
+
+		int32_t left_ms = (int32_t)(deadline - k_uptime_get_32());
+		if (left_ms <= 0) {
+			*got_out = got;
+			return false; /* out of time, bytes still owed */
+		}
+
+		struct zsock_pollfd pfd = { .fd = alp_mqtt_get_fd(client), .events = ZSOCK_POLLIN };
+		(void)zsock_poll(&pfd, 1, left_ms);
 	}
+	*got_out = got;
+	return true;
 }
 
 /* Event handler -- called from mqtt_input() in the user's loop
@@ -242,13 +306,24 @@ static void alp_mqtt_evt_cb(struct mqtt_client *client, const struct mqtt_evt *e
 		be->connected = false;
 		break;
 	case MQTT_EVT_PUBLISH: {
-		const struct mqtt_publish_param *pub = &evt->param.publish;
+		const struct mqtt_publish_param *pub      = &evt->param.publish;
+		uint32_t                         deadline = k_uptime_get_32() + ALP_MQTT_DRAIN_TIMEOUT_MS;
+
 		if (be->msg_cb == NULL) {
 			/* Drop the payload off the wire so the broker doesn't
              * stall on QoS-1+ acknowledgement -- but keep the
              * topic-string and length for callers that subscribed
              * without binding a callback. */
-			mqtt_drain_remaining(client, pub->message.payload.len);
+			size_t got;
+			if (!mqtt_read_payload_deadline(
+			        client, NULL, pub->message.payload.len, deadline, &got)) {
+				LOG_WRN("mqtt: could not drain an unlistened publish (%zu of %zu bytes "
+				        "owed); aborting the connection rather than leaving it wedged "
+				        "at -EBUSY",
+				        pub->message.payload.len - got,
+				        pub->message.payload.len);
+				(void)mqtt_abort(client);
+			}
 			break;
 		}
 
@@ -258,13 +333,23 @@ static void alp_mqtt_evt_cb(struct mqtt_client *client, const struct mqtt_evt *e
 		memcpy(be->topic_buf, pub->message.topic.topic.utf8, topic_len);
 		be->topic_buf[topic_len] = '\0';
 
-		/* Read payload directly into rx_buf -- bounded by buffer size. */
+		/* Read payload directly into rx_buf -- bounded by buffer size.
+		 * Retries -EAGAIN to `deadline` (issue #1938): a payload split
+		 * across more than one TCP segment is the ordinary shape of a
+		 * large publish on a slow link, not a hard failure, and giving
+		 * up on the first -EAGAIN here just hands legitimate bytes to
+		 * the drain below as an unnecessary truncation. */
 		size_t want = MIN(pub->message.payload.len, sizeof(be->rx_buf));
-		size_t got  = 0;
-		while (got < want) {
-			int n = mqtt_read_publish_payload(client, be->rx_buf + got, want - got);
-			if (n <= 0) break;
-			got += (size_t)n;
+		size_t got;
+		if (!mqtt_read_payload_deadline(client, be->rx_buf, want, deadline, &got)) {
+			LOG_WRN("mqtt: publish on \"%s\" could not be read (delivered %zu of %zu "
+			        "bytes); aborting the connection rather than leaving it wedged at "
+			        "-EBUSY",
+			        be->topic_buf,
+			        got,
+			        pub->message.payload.len);
+			(void)mqtt_abort(client);
+			break;
 		}
 
 		/* A payload bigger than rx_buf leaves the excess unread on the
@@ -280,8 +365,20 @@ static void alp_mqtt_evt_cb(struct mqtt_client *client, const struct mqtt_evt *e
 			LOG_WRN("mqtt: payload %u B truncated to rx_buf's %u B",
 			        (unsigned)pub->message.payload.len,
 			        (unsigned)got);
+
+			size_t drained;
+			if (!mqtt_read_payload_deadline(
+			        client, NULL, pub->message.payload.len - got, deadline, &drained)) {
+				LOG_WRN("mqtt: publish on \"%s\" could not be drained past rx_buf "
+				        "(delivered %zu of %zu bytes); aborting the connection "
+				        "rather than leaving it wedged at -EBUSY",
+				        be->topic_buf,
+				        got + drained,
+				        pub->message.payload.len);
+				(void)mqtt_abort(client);
+				break;
+			}
 		}
-		mqtt_drain_remaining(client, pub->message.payload.len - got);
 
 		if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {
 			const struct mqtt_puback_param ack = { .message_id = pub->message_id };
@@ -293,20 +390,6 @@ static void alp_mqtt_evt_cb(struct mqtt_client *client, const struct mqtt_evt *e
 	default:
 		break;
 	}
-}
-
-/* Pull the active socket fd out of the mqtt client.  Path differs
- * between non-secure (transport.tcp) and TLS (transport.tls) variants;
- * v0.2 only ships non-secure (TLS lands with security.h in v0.3) but
- * the helper is shaped to extend cleanly. */
-static int alp_mqtt_get_fd(struct mqtt_client *c)
-{
-#if defined(CONFIG_MQTT_LIB_TLS)
-	if (c->transport.type == MQTT_TRANSPORT_SECURE) {
-		return c->transport.tls.sock;
-	}
-#endif
-	return c->transport.tcp.sock;
 }
 #endif /* CONFIG_ALP_SDK_IOT_MQTT */
 

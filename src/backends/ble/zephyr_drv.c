@@ -340,6 +340,32 @@ static void _read_ctx_free(struct ble_read_ctx *p)
 	 * with a context it owns itself, so falling through is the answer. */
 }
 
+/* Called from z_gatt_read() below once its k_sem_take() deadline passes.
+ * Split out (issue #1939) so the CONFIG_ZTEST seam can drive this exact
+ * logic directly -- z_gatt_read() itself needs a live bt_gatt_read() to
+ * ever reach a real timeout, and native_sim has no controller to drive
+ * that offline.  This half has no such dependency: given a ctx already
+ * past its deadline, it either wins the LIVE->ABANDONED CAS (the
+ * "abandon path") or loses it because ble_read_cb() already completed
+ * the procedure, in which case it waits out that in-flight callback the
+ * same way the normal-completion branch above does. */
+static alp_status_t _read_ctx_on_timeout(struct ble_read_ctx *ctx)
+{
+	/* Abandon the procedure to its callback and leave the slot claimed --
+	 * unless ble_read_cb() won the CAS in the gap between the semaphore
+	 * expiring and this line, in which case it is running right now with
+	 * our out/out_len and will signal ctx->done.  Waiting that out is
+	 * what keeps this frame alive underneath it, and the wait is
+	 * bounded: the callback body blocks on nothing. */
+	if (alp_lifecycle_cas(&ctx->state, BLE_PROC_LIVE, BLE_PROC_ABANDONED)) {
+		return ALP_ERR_TIMEOUT;
+	}
+	(void)k_sem_take(&ctx->done, K_FOREVER);
+	alp_status_t rc = ctx->result;
+	_read_ctx_free(ctx);
+	return rc;
+}
+
 static struct ble_write_ctx *_write_ctx_alloc(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_write_ctx_pool); ++i) {
@@ -359,6 +385,19 @@ static void _write_ctx_free(struct ble_write_ctx *p)
 			return;
 		}
 	}
+}
+
+/* Write-side twin of _read_ctx_on_timeout() above -- same split, same
+ * reason (issue #1939). */
+static alp_status_t _write_ctx_on_timeout(struct ble_write_ctx *ctx)
+{
+	if (alp_lifecycle_cas(&ctx->state, BLE_PROC_LIVE, BLE_PROC_ABANDONED)) {
+		return ALP_ERR_TIMEOUT;
+	}
+	(void)k_sem_take(&ctx->done, K_FOREVER);
+	alp_status_t rc = ctx->result;
+	_write_ctx_free(ctx);
+	return rc;
 }
 
 static uint8_t ble_read_cb(struct bt_conn             *conn,
@@ -442,6 +481,59 @@ alp_status_t alp_ble_test_read_cb(uint8_t err, const void *data, uint16_t length
 	}
 	return ctx.result;
 }
+
+/* Issue #1939 branch 2 ("the CAS loss"): same call as
+ * alp_ble_test_read_cb() above, except the ctx starts BLE_PROC_ABANDONED
+ * -- modelling a caller that already timed out and abandoned the
+ * procedure (_read_ctx_on_timeout() below won that CAS first).
+ * ble_read_cb()'s own LIVE->DONE CAS must then lose, so it must return
+ * via _read_ctx_free() without touching ctx->out/result or signalling
+ * ctx->done -- verified here by ctx.done never being given (so this
+ * always reads back ALP_ERR_TIMEOUT, regardless of `err`/`data`) and by
+ * the caller-visible buffer being left untouched. */
+alp_status_t alp_ble_test_read_cb_after_abandon(uint8_t err, const void *data, uint16_t length)
+{
+	uint8_t out_buf[16];
+	memset(out_buf, 0xAA, sizeof(out_buf));
+	struct ble_read_ctx ctx = {
+		.params  = { .func = ble_read_cb },
+		.state   = BLE_PROC_ABANDONED, /* already lost to the timeout side */
+		.out     = out_buf,
+		.out_cap = sizeof(out_buf),
+		.out_len = NULL,
+		.result  = ALP_ERR_TIMEOUT,
+	};
+	k_sem_init(&ctx.done, 0, 1);
+
+	(void)ble_read_cb(NULL, err, &ctx.params, data, length);
+
+	bool untouched = true;
+	for (size_t i = 0; i < sizeof(out_buf); ++i) {
+		if (out_buf[i] != 0xAA) untouched = false;
+	}
+	if (!untouched) return ALP_ERR_IO; /* the loss branch must not have run */
+
+	if (k_sem_take(&ctx.done, K_NO_WAIT) != 0) {
+		return ALP_ERR_TIMEOUT; /* expected: the loss branch never signals */
+	}
+	return ctx.result; /* would only happen if the CAS wrongly won */
+}
+
+/* Issue #1939 branch 1 ("the abandon path"): drives _read_ctx_on_timeout()
+ * directly with a ctx that has never had its callback fire, proving the
+ * caller wins the LIVE->ABANDONED CAS and returns ALP_ERR_TIMEOUT with
+ * the slot left claimed (state == BLE_PROC_ABANDONED) rather than freed. */
+alp_status_t alp_ble_test_read_timeout(void)
+{
+	struct ble_read_ctx ctx = { .state = BLE_PROC_LIVE, .result = ALP_ERR_IO };
+	k_sem_init(&ctx.done, 0, 1);
+
+	alp_status_t rc = _read_ctx_on_timeout(&ctx);
+	if (ctx.state != BLE_PROC_ABANDONED) {
+		return ALP_ERR_IO; /* the abandon CAS did not win as expected */
+	}
+	return rc;
+}
 #endif /* CONFIG_ZTEST */
 
 static void ble_write_cb(struct bt_conn *conn, uint8_t err, struct bt_gatt_write_params *params)
@@ -458,6 +550,69 @@ static void ble_write_cb(struct bt_conn *conn, uint8_t err, struct bt_gatt_write
 	ctx->result = (err == 0) ? ALP_OK : ALP_ERR_IO;
 	k_sem_give(&ctx->done);
 }
+
+#if defined(CONFIG_ZTEST)
+/* Write-side twin of alp_ble_test_read_cb_after_abandon() above (issue
+ * #1939 branch 2, write side): ctx starts BLE_PROC_ABANDONED, so
+ * ble_write_cb()'s own CAS must lose and return via _write_ctx_free()
+ * without signalling ctx->done -- verified the same way, by ctx.done
+ * never being given. */
+alp_status_t alp_ble_test_write_cb_after_abandon(uint8_t err)
+{
+	struct ble_write_ctx ctx = {
+		.params = { .func = ble_write_cb },
+		.state  = BLE_PROC_ABANDONED,
+		.result = ALP_ERR_TIMEOUT,
+	};
+	k_sem_init(&ctx.done, 0, 1);
+
+	ble_write_cb(NULL, err, &ctx.params);
+
+	if (k_sem_take(&ctx.done, K_NO_WAIT) != 0) {
+		return ALP_ERR_TIMEOUT; /* expected: the loss branch never signals */
+	}
+	return ctx.result; /* would only happen if the CAS wrongly won */
+}
+
+/* Write-side twin of alp_ble_test_read_timeout() above (issue #1939
+ * branch 1, write side). */
+alp_status_t alp_ble_test_write_timeout(void)
+{
+	struct ble_write_ctx ctx = { .state = BLE_PROC_LIVE, .result = ALP_ERR_IO };
+	k_sem_init(&ctx.done, 0, 1);
+
+	alp_status_t rc = _write_ctx_on_timeout(&ctx);
+	if (ctx.state != BLE_PROC_ABANDONED) {
+		return ALP_ERR_IO; /* the abandon CAS did not win as expected */
+	}
+	return rc;
+}
+
+/* Issue #1939 branch 3 ("the ALP_ERR_BUSY refusal"): claims (or releases)
+ * every slot in both context pools so a ztest can drive z_gatt_read()/
+ * z_gatt_write() through the real ALP_ERR_BUSY return with an exhausted
+ * pool, then restore the pools for tests that run after it. */
+void alp_ble_test_set_ctx_pools_exhausted(bool exhausted)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(_read_ctx_in_use); ++i) {
+		_read_ctx_in_use[i] = exhausted;
+	}
+	for (size_t i = 0; i < ARRAY_SIZE(_write_ctx_in_use); ++i) {
+		_write_ctx_in_use[i] = exhausted;
+	}
+}
+
+/* Issue #1939 branch 3 support: a conn state whose ble_conn_be has a
+ * non-NULL (but never dereferenced) `bt`, so z_gatt_read()/z_gatt_write()
+ * pass their `c->bt == NULL` guard and reach the pool-exhausted check
+ * below it.  MUST NOT be used past that point -- neither op dereferences
+ * `bt` before the ALP_ERR_BUSY return, but every line after it does. */
+void *alp_ble_test_fake_conn_be(void)
+{
+	static struct ble_conn_be fake = { .bt = (struct bt_conn *)0x1 };
+	return &fake;
+}
+#endif /* CONFIG_ZTEST */
 #endif /* CONFIG_ALP_SDK_BLE */
 
 /* ================================================================== */
@@ -882,19 +1037,8 @@ static alp_status_t z_gatt_read(alp_ble_conn_state_t *conn_st,
 		return rc;
 	}
 
-	/* Deadline passed.  Abandon the procedure to its callback and leave
-	 * the slot claimed -- unless ble_read_cb() won the CAS in the gap
-	 * between the semaphore expiring and this line, in which case it is
-	 * running right now with our out/out_len and will signal ctx->done.
-	 * Waiting that out is what keeps this frame alive underneath it, and
-	 * the wait is bounded: the callback body blocks on nothing. */
-	if (alp_lifecycle_cas(&ctx->state, BLE_PROC_LIVE, BLE_PROC_ABANDONED)) {
-		return ALP_ERR_TIMEOUT;
-	}
-	(void)k_sem_take(&ctx->done, K_FOREVER);
-	alp_status_t rc = ctx->result;
-	_read_ctx_free(ctx);
-	return rc;
+	/* Deadline passed -- see _read_ctx_on_timeout() above. */
+	return _read_ctx_on_timeout(ctx);
 #else
 	(void)conn_st;
 	(void)handle;
@@ -949,14 +1093,9 @@ static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st,
 		return rc;
 	}
 
-	/* Timeout handoff, identical to z_gatt_read()'s above. */
-	if (alp_lifecycle_cas(&ctx->state, BLE_PROC_LIVE, BLE_PROC_ABANDONED)) {
-		return ALP_ERR_TIMEOUT;
-	}
-	(void)k_sem_take(&ctx->done, K_FOREVER);
-	alp_status_t rc = ctx->result;
-	_write_ctx_free(ctx);
-	return rc;
+	/* Timeout handoff, identical to z_gatt_read()'s above -- see
+	 * _write_ctx_on_timeout(). */
+	return _write_ctx_on_timeout(ctx);
 #else
 	(void)conn_st;
 	(void)handle;

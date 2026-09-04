@@ -38,6 +38,20 @@
  * offline-reproducible harness for the STOP-suppresses-completion bug. */
 extern alp_status_t alp_ble_test_read_cb(uint8_t err, const void *data, uint16_t length);
 
+/* White-box seams for the GATT read/write context pool's three branches
+ * that changelog.d/1620.md records as unexecuted (issue #1939) --
+ * native_sim has no BLE controller to drive a real peer through them, so
+ * each one calls the real backend function directly with a synthetic
+ * ctx. See src/backends/ble/zephyr_drv.c for the CONFIG_ZTEST
+ * definitions. */
+extern alp_status_t
+alp_ble_test_read_cb_after_abandon(uint8_t err, const void *data, uint16_t length);
+extern alp_status_t alp_ble_test_read_timeout(void);
+extern alp_status_t alp_ble_test_write_cb_after_abandon(uint8_t err);
+extern alp_status_t alp_ble_test_write_timeout(void);
+extern void         alp_ble_test_set_ctx_pools_exhausted(bool exhausted);
+extern void        *alp_ble_test_fake_conn_be(void);
+
 ZTEST_SUITE(alp_ble_gatt_server, NULL, NULL, NULL, NULL, NULL);
 
 static uint8_t find_attr_cb(const struct bt_gatt_attr *attr, uint16_t handle, void *user_data)
@@ -255,4 +269,94 @@ ZTEST(alp_ble_gatt_server, test_client_read_cb_att_error_maps_to_io)
 	zassert_equal(alp_ble_test_read_cb(BT_ATT_ERR_INVALID_HANDLE, NULL, 0),
 	              ALP_ERR_IO,
 	              "a peer-rejected read must surface as ALP_ERR_IO, not ALP_ERR_TIMEOUT");
+}
+
+/* GATT read/write context pool regression tests -- issue #1939.
+ * changelog.d/1620.md records the abandon path, the alp_lifecycle_cas()
+ * loss and the ALP_ERR_BUSY refusal as unexecuted anywhere: native_sim
+ * has no BLE controller, so no real peer can drive a late callback race
+ * or a timeout. Each test below drives the exact backend function the
+ * real path would reach, with a synthetic ctx standing in for the part
+ * that needs a live connection (see the CONFIG_ZTEST seams this calls,
+ * in src/backends/ble/zephyr_drv.c, for why each one is safe offline). */
+
+ZTEST(alp_ble_gatt_server, test_client_read_timeout_abandons_procedure)
+{
+	/* Branch 1, "the abandon path": z_gatt_read()'s k_sem_take() deadline
+	 * passes before ble_read_cb() ever fires, so the caller must win the
+	 * LIVE->ABANDONED CAS and return ALP_ERR_TIMEOUT with the slot left
+	 * claimed (asserted inside the seam) rather than freed. */
+	zassert_equal(alp_ble_test_read_timeout(),
+	              ALP_ERR_TIMEOUT,
+	              "an abandoned read must surface as ALP_ERR_TIMEOUT");
+}
+
+ZTEST(alp_ble_gatt_server, test_client_write_timeout_abandons_procedure)
+{
+	/* Write-side twin of the read timeout test above. */
+	zassert_equal(alp_ble_test_write_timeout(),
+	              ALP_ERR_TIMEOUT,
+	              "an abandoned write must surface as ALP_ERR_TIMEOUT");
+}
+
+ZTEST(alp_ble_gatt_server, test_client_read_cb_after_abandon_loses_cas)
+{
+	/* Branch 2, "the CAS loss": ble_read_cb() fires after the caller has
+	 * already abandoned the procedure (ctx->state == BLE_PROC_ABANDONED).
+	 * Its own LIVE->DONE CAS must lose, so a real data-bearing callback
+	 * here must NOT be delivered -- it must return via _read_ctx_free()
+	 * untouched, which the seam verifies by checking the caller-visible
+	 * buffer was never written and ctx->done was never signalled. */
+	static const uint8_t late_data[] = { 0xCC, 0xDD };
+	zassert_equal(alp_ble_test_read_cb_after_abandon(0, late_data, sizeof(late_data)),
+	              ALP_ERR_TIMEOUT,
+	              "a callback losing the CAS to an already-abandoned ctx must not "
+	              "deliver its result");
+}
+
+ZTEST(alp_ble_gatt_server, test_client_write_cb_after_abandon_loses_cas)
+{
+	/* Write-side twin of the read CAS-loss test above. */
+	zassert_equal(alp_ble_test_write_cb_after_abandon(0),
+	              ALP_ERR_TIMEOUT,
+	              "a callback losing the CAS to an already-abandoned ctx must not "
+	              "deliver its result");
+}
+
+ZTEST(alp_ble_gatt_server, test_client_gatt_read_busy_when_pool_exhausted)
+{
+	/* Branch 3, "the ALP_ERR_BUSY refusal": z_gatt_read() must refuse
+	 * with ALP_ERR_BUSY when _read_ctx_alloc() finds every slot claimed
+	 * -- reached through the real registered op, not a stand-in, since
+	 * the busy check runs before anything that would need a live
+	 * bt_conn. */
+	const alp_ble_ops_t *ops     = zephyr_ble_ops();
+	alp_ble_conn_state_t conn_st = { .radio   = NULL,
+		                             .be_data = alp_ble_test_fake_conn_be(),
+		                             .ops     = ops };
+	uint8_t              buf[4];
+	size_t               out_len = 0;
+
+	alp_ble_test_set_ctx_pools_exhausted(true);
+	alp_status_t rc = ops->gatt_read(&conn_st, 1, buf, sizeof(buf), &out_len, 10);
+	alp_ble_test_set_ctx_pools_exhausted(false);
+
+	zassert_equal(rc, ALP_ERR_BUSY, "gatt_read against an exhausted ctx pool must be ALP_ERR_BUSY");
+}
+
+ZTEST(alp_ble_gatt_server, test_client_gatt_write_busy_when_pool_exhausted)
+{
+	/* Write-side twin of the read ALP_ERR_BUSY test above. */
+	const alp_ble_ops_t *ops     = zephyr_ble_ops();
+	alp_ble_conn_state_t conn_st = { .radio   = NULL,
+		                             .be_data = alp_ble_test_fake_conn_be(),
+		                             .ops     = ops };
+	static const uint8_t data[]  = { 0x01 };
+
+	alp_ble_test_set_ctx_pools_exhausted(true);
+	alp_status_t rc = ops->gatt_write(&conn_st, 1, data, sizeof(data), 10);
+	alp_ble_test_set_ctx_pools_exhausted(false);
+
+	zassert_equal(
+	    rc, ALP_ERR_BUSY, "gatt_write against an exhausted ctx pool must be ALP_ERR_BUSY");
 }
