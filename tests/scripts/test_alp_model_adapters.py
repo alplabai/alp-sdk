@@ -333,14 +333,22 @@ def test_dxcom_version_fallback_keeps_the_vendor_token(monkeypatch):
     assert _dxcom_version() == "DX-COM"
 
 
-def test_every_adapter_version_fallback_shares_its_success_vendor_token(monkeypatch):
-    # The invariant #1923 broke, stated once for the two probe-based adapters:
-    # whatever the probe fails on, the vendor token must survive -- only the
-    # digits are unknown. ethos_u ('vela X.Y.Z' / 'vela') already held it;
-    # deepx was the outlier.
+def test_every_adapter_version_fallback_shares_its_success_vendor_token(monkeypatch, tmp_path):
+    # The invariant #1923 broke, stated once for ALL THREE version-reporting
+    # adapters: whatever the version lookup fails on, the vendor token must
+    # survive -- only the digits are unknown. ethos_u ('vela X.Y.Z' / 'vela')
+    # and drpai ('drp-ai_tvm X.Y.Z' / 'drp-ai_tvm') already held it; deepx was
+    # the outlier, returning a lowercase 'dxcom' that renamed the vendor.
+    #
+    # drpai is covered here even though it is not subprocess-probed -- it reads
+    # a version file out of the TVM checkout. #1923 asks for the siblings to be
+    # checked, and "how the lookup fails" is not the point; "the vendor token
+    # must not depend on whether it failed" is. A tmp_path with no version file
+    # is drpai's failure route.
     from importlib.metadata import PackageNotFoundError
 
     from alp_model.adapters.deepx import _dxcom_version
+    from alp_model.adapters.drpai import _compiler_version
     from alp_model.adapters.ethos_u import _vela_version
 
     def raises(cmd, capture_output, text, timeout):
@@ -354,6 +362,9 @@ def test_every_adapter_version_fallback_shares_its_success_vendor_token(monkeypa
 
     monkeypatch.setattr("alp_model.adapters.ethos_u.version", no_pkg)
     assert _vela_version().split()[0] == "vela 4.1.0".split()[0]
+
+    # No setup/version, version or VERSION file anywhere under tmp_path.
+    assert _compiler_version(tmp_path).split()[0] == "drp-ai_tvm 3.0.1".split()[0]
 
 
 @pytest.mark.skipif(shutil.which("dxcom") is None, reason="dxcom (dx-com wheel) not installed")
