@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-03",
+  "generated": "2026-09-04",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -13482,14 +13482,21 @@
           "kind": "enum"
         },
         "alp_wdt_config_t": {
-          "definition": "typedef struct { uint32_t wdt_id; uint32_t timeout_ms; alp_wdt_action_t on_timeout; } alp_wdt_config_t;",
+          "definition": "typedef struct { uint32_t wdt_id; uint32_t timeout_ms; alp_wdt_action_t on_timeout; alp_wdt_expiry_cb_t on_expire; void *user; } alp_wdt_config_t;",
           "fields": [
             "uint32_t wdt_id",
             "uint32_t timeout_ms",
-            "alp_wdt_action_t on_timeout"
+            "alp_wdt_action_t on_timeout",
+            "alp_wdt_expiry_cb_t on_expire",
+            "void *user"
           ],
-          "hash": "f7ae928097ebe8d7",
+          "hash": "4d8abadbb3481b00",
           "kind": "struct"
+        },
+        "alp_wdt_expiry_cb_t": {
+          "definition": "typedef void (*alp_wdt_expiry_cb_t)(alp_wdt_t *wdt, void *user);",
+          "hash": "dcb108c0e15c61eb",
+          "kind": "fnptr"
         },
         "alp_wdt_t": {
           "definition": "typedef struct alp_wdt alp_wdt_t;",
