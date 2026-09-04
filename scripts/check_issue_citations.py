@@ -106,8 +106,12 @@ _YAML_STATUS_FIELD_RE = re.compile(
     r"^\s*[A-Za-z0-9_]*driver_status\s*:\s*\S*\s*(?:#(.*))?$"
 )
 #: A line that is nothing but a trailing-comment continuation -- the shape
-#: this repo's hand-wrapped YAML comments use (see gd32g553.yaml).
-_YAML_CONT_RE = re.compile(r"^\s*#(.*)$")
+#: this repo's hand-wrapped YAML comments use (see gd32g553.yaml). Captures
+#: the leading whitespace separately so the caller can require it to be
+#: indented at least as far as the `driver_status:` field's own comment --
+#: otherwise a comment-only banner belonging to the NEXT key (indented less,
+#: e.g. back at column 0) gets swallowed into this block.
+_YAML_CONT_RE = re.compile(r"^(\s*)#(.*)$")
 
 #: `#NNNN`, not part of a longer token (so `PWM_CAPTURE` etc. never match).
 _CITATION_RE = re.compile(r"(?<!\w)#(\d{1,6})\b")
@@ -166,12 +170,13 @@ def _iter_yaml_status_blocks(root: Path):
                 i += 1
                 continue
             parts = [m.group(1) or ""]
+            hash_col = lines[i].find("#")
             j = i + 1
-            while j < len(lines):
+            while j < len(lines) and hash_col != -1:
                 cm = _YAML_CONT_RE.match(lines[j])
-                if not cm:
+                if not cm or len(cm.group(1)) < hash_col:
                     break
-                parts.append(cm.group(1))
+                parts.append(cm.group(2))
                 j += 1
             block_text = " ".join(p.strip() for p in parts).strip()
             if block_text:

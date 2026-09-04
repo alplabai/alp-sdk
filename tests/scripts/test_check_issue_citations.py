@@ -182,6 +182,63 @@ def test_citation_unknown_to_snapshot_is_warning_not_error(tmp_path):
     assert any("no record of it" in w for w in warnings)
 
 
+# -- continuation-comment indentation scoping (#1950 round 2) -----------------
+
+
+def test_next_key_banner_not_swallowed_into_driver_status_block(tmp_path):
+    """Reproduces the round-2 review finding verbatim: a comment-only banner
+    belonging to the NEXT key, indented less than driver_status's own
+    trailing comment, must not be read into this block and must not turn
+    #1234 into a fake blocker citation."""
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "widget",
+        "chip_id: widget\n"
+        "driver_status:    complete    # done, no open issues.\n"
+        "# Kconfig symbols below are hand-maintained pending the upstream rework (#1234).\n"
+        "kconfig_symbols:\n"
+        "  - WIDGET_EN\n",
+    )
+    _snapshot(tmp_path, {"1234": "CLOSED"})
+    assert mod.find_problems(tmp_path) == []
+
+
+def test_next_key_banner_not_swallowed_when_field_line_has_no_comment(tmp_path):
+    """Same shape as above but with the field line exactly as worded in the
+    review (`driver_status: complete`, no trailing comment at all)."""
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "widget",
+        "chip_id: widget\n"
+        "driver_status: complete\n"
+        "# Kconfig symbols below are hand-maintained pending the upstream rework (#1234).\n"
+        "kconfig_symbols:\n"
+        "  - WIDGET_EN\n",
+    )
+    _snapshot(tmp_path, {"1234": "CLOSED"})
+    assert mod.find_problems(tmp_path) == []
+
+
+def test_aligned_continuation_comment_is_still_read(tmp_path):
+    """Non-vacuity for the fix above: a continuation comment indented to at
+    least the field's own `#` column is still part of the block and still
+    enforced."""
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "widget",
+        "chip_id: widget\n"
+        "driver_status:    partial   # still blocked on\n"
+        "                            # #1234 for the rest of the register map.\n",
+    )
+    _snapshot(tmp_path, {"1234": "CLOSED"})
+    problems = mod.find_problems(tmp_path)
+    assert len(problems) == 1
+    assert "#1234" in problems[0]
+
+
 # -- header @par Driver status: blocks -----------------------------------------
 
 
