@@ -12,7 +12,10 @@ system exists to prevent, just deferred to the worst possible moment.
 This gate fails a PR the moment it adds a fragment that would be REFUSED by
 the assembler:
 
-  1. the filename isn't `<digits>.md` (`changelog.d/README.md` is exempt);
+  1. the filename isn't `<issue>.md` or `<issue>-<slug>.md` -- issue digits
+     first, so the number stays the greppable join key even when a slug
+     disambiguates a second fragment for the same issue (`changelog.d/README.md`
+     is exempt from this rule);
   2. the file is empty (or whitespace-only);
   3. the file doesn't start with its own `### <Category> - <Title>` heading
      line -- alp-sdk's format gives every entry its own heading rather than
