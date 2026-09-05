@@ -85,14 +85,20 @@ def _emit_extra_library_profile(
     `CONFIG_*=y` or `# ...` comment); empty list when the profile
     parses but nothing matches and there's no sw_fallback.
 
-    Failures (malformed YAML, missing keys) emit a single `#`-prefixed
-    diagnostic comment so the customer sees the failure in the slice's
-    alp.conf rather than getting silent drop-out.
+    Failures reading or parsing the profile (missing/unreadable file,
+    a symlink loop, non-UTF-8 bytes, malformed YAML, missing keys) emit
+    a single `#`-prefixed diagnostic comment so the customer sees the
+    failure in the slice's alp.conf rather than getting silent
+    drop-out or an unhandled exception out of an emit-time helper
+    (issue #1961: `.resolve()` raises `RuntimeError` on a symlink loop
+    and `read_text(encoding="utf-8")` raises `UnicodeDecodeError` --
+    a `ValueError` subclass, not an `OSError` -- on non-UTF-8 bytes;
+    both must be inside this try, not just the parser call).
     """
-    profile_path = (REPO / profile_rel).resolve()
     try:
+        profile_path = (REPO / profile_rel).resolve()
         doc = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as e:
+    except (OSError, RuntimeError, ValueError, yaml.YAMLError) as e:
         return [f"# extra_libraries[{name}] profile parse failed: {e}"]
     if not isinstance(doc, dict):
         return [f"# extra_libraries[{name}] profile is not a mapping"]
