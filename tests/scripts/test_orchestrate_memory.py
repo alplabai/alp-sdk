@@ -54,12 +54,12 @@ ipc:
 
 
 # AEN701 resolves its mailbox controller (alif_mhuv2), so it sails past
-# the controller-TBD guard -- but its memory map is derived from the SoC
-# variant JSON, which carries no per-region `base` yet. Before the
-# region.get("base") fix this crashed resolve_carve_outs with `KeyError:
-# 'base'`; it MUST instead land a clean blocked carve-out.  Regression
-# guard for that crash.  (E1M-AEN801 used to share this fixture -- #1069
-# gave it a real `memory_map:`, so it now RESOLVES instead; see
+# the controller-TBD guard -- but its own `memory_map:` (metadata/
+# e1m_modules/E1M-AEN701.yaml) still keeps `mram_main`'s `base: "TBD"`.
+# Before the region.get("base") fix this crashed resolve_carve_outs with
+# `KeyError: 'base'`; it MUST instead land a clean blocked carve-out.
+# Regression guard for that crash.  (E1M-AEN801 used to share this fixture
+# -- #1069 gave it a real `memory_map:`, so it now RESOLVES instead; see
 # test_resolve_carve_outs_aen801_resolves_after_1069_memory_map below.)
 AEN701_UNMAPPED = """
 som:
@@ -180,9 +180,20 @@ def test_resolve_carve_outs_blocks_on_unmapped_base(
 ) -> None:
     """AEN presets have a RESOLVED mailbox controller (alif_mhuv2), so
     they proceed past the controller-TBD guard into the region allocator.
-    A stock (no memory_map:) AEN preset is still base-unmapped, so
-    resolve_carve_outs MUST emit a blocked carve-out rather than crash
-    with `KeyError: 'base'`."""
+    E1M-AEN701's `memory_map:` authors six flash-class regions plus
+    `mram_main` (still `base: "TBD"`), so resolve_carve_outs MUST emit a
+    blocked carve-out rather than crash with `KeyError: 'base'`.
+
+    #1365 split B changed the reason text this asserts. Pre-split-B,
+    `mram_main` was the sole candidate (no `carveout:` key excluded it), so
+    the block came from the base-unmapped check ("... hasn't been HW-mapped
+    yet") in `_region_top_init()`. Split B derives eligibility against the
+    SoC's declared MRAM aperture first: the six fine regions are excluded
+    as flash-class (contained in the aperture), and `mram_main` is ALSO
+    excluded on its own terms -- its base is still unresolved, and its
+    authored `write_authority: composite` (not `customer_runtime`)
+    disqualifies it -- so every candidate is excluded before the
+    base-unmapped check ever runs, and the reason names that instead."""
     path = _write_board(tmp_path, body)
     project = load_board_yaml(path)
     resolved = resolve_carve_outs(project)        # must not raise
@@ -191,7 +202,9 @@ def test_resolve_carve_outs_blocks_on_unmapped_base(
     assert entry.status == "blocked"
     assert entry.reason is not None
     assert sku in entry.reason
-    assert "HW-mapped" in entry.reason
+    assert "ineligible for an IPC carve-out" in entry.reason
+    assert "mram_main" in entry.reason
+    assert "write_authority is 'composite'" in entry.reason
 
 
 def test_resolve_carve_outs_aen801_stays_blocked_after_1069_memory_map(

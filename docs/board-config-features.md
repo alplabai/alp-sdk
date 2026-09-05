@@ -285,14 +285,31 @@ WHO may write the region, and when, a different axis from `carveout:`
 `reserved` is `none`, `storage` is `customer_runtime`, and `atoc` is
 `secure_enclave` (`mram_main` is `composite`, spanning all six); see
 `docs/porting-new-som.md`'s "Field rules" section for the full six-value
-enum and the absent-means-unresolved rule. **`carveout:` is still the
-only field the allocator actually reads today**
-(`scripts/alp_orchestrate/carveout.py` `resolve_carve_outs()`) --
-`write_authority` derives the flash/RAM class for GATE PURPOSES ONLY
-(`scripts/validate_metadata.py`, `scripts/check_atoc_reservation.py`),
-so this change moves no emitted byte and flips no allocator decision.
-`carveout: false` is not deprecated by this: it remains the sole
-allocator-facing flag on these regions.
+enum and the absent-means-unresolved rule.
+
+As of #1365 split B, **`carveout:` is a LEGACY OVERRIDE that must AGREE
+with the derived class, not the only signal the allocator reads.**
+`scripts/alp_orchestrate/carveout.py` (`resolve_carve_outs()`) and
+`scripts/alp_orchestrate/partition.py` (the flash-device resolver) now
+derive a region's class against the SoC's declared on-die MRAM aperture
+(`scripts/alp_orchestrate/aperture.py`, the same math
+`scripts/check_atoc_reservation.py` validates every region against in
+CI): a region CONTAINED in the aperture is `flash` regardless of what
+`carveout:` says, and -- for a region the SoM preset authored itself --
+landing an IPC carve-out there additionally requires
+`write_authority: customer_runtime`. A region the loader DERIVED (SoC-level
+`memory_regions`, or the silicon-variant fallback, e.g. every V2N/V2M/NX9101
+row) needs no authority at all: it is RAM by construction. The legacy
+`carveout:` flag is honoured VERBATIM only where the derivation can't
+resolve an answer -- no aperture declared for this SoC (every non-Alif
+SoM), or the region's own `base:` is unresolved (`mram_main`'s `"TBD"`,
+unchanged by split B) -- which is also what keeps every non-Alif SoM's
+resolution byte-identical to before this change. `carveout: false` is
+NOT deprecated or removed by this (doing so would break every existing
+`carveout: false` row and any customer copy of the schema); it becomes
+the fallback answer instead of the primary one, and a `carveout:` value
+that DISAGREES with a resolvable derived class is a metadata bug, not a
+silently-honoured override.
 
 No AEN SKU has a working `storage[].flash_device:` target today. Neither
 candidate the resolver will accept resolves to a verified DT label:

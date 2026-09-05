@@ -92,9 +92,10 @@ import yaml
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
+from alp_orchestrate.aperture import region_extent as _region_extent  # noqa: E402
+from alp_orchestrate.aperture import resolve_aperture as _resolve_aperture_impl  # noqa: E402
 from alp_orchestrate.loader import _resolve_slot0_load_address  # noqa: E402
 from alp_orchestrate.models import OrchestratorError  # noqa: E402
-from alp_project_loader import resolve_soc_path, _resolve_silicon_variant  # noqa: E402
 from gen_zephyr_board import _AEN_MRAM_BASE  # noqa: E402
 
 PRESETS = REPO / "metadata" / "e1m_modules"
@@ -333,60 +334,16 @@ def _check_aperture_cross_check() -> "list[str]":
     return out
 
 
+# `_resolve_aperture` / `_region_extent` used to be defined here (#1365 split
+# A); the math now lives in `alp_orchestrate.aperture` so `carveout.py` /
+# `partition.py` (#1365 split B) derive a region's flash/RAM class off the
+# SAME aperture math this gate already validates, instead of a second copy
+# drifting from it. `_region_extent` is a straight re-export (unchanged
+# signature); `_resolve_aperture` keeps this module's original one-argument
+# call signature -- the shared `resolve_aperture(preset, metadata_root)`
+# always takes this module's own `METADATA_ROOT` here.
 def _resolve_aperture(preset: "dict[str, Any]") -> "tuple[int, int] | None":
-    """Resolve a SoM preset's declared on-die MRAM aperture as
-    `[base, top)` (#1365 split A).
-
-    `base` comes from the preset's SoC's `soc_flash_base`; `top` is
-    `base + variants[].mram_mb * 1 MiB` for the VARIANT the preset
-    resolves to -- never the SoC's top-level `soc_flash_mb`, because an
-    E3 ships a 5.5 MB and a 1.5 MB variant off the same base
-    (metadata/socs/alif/ensemble/e3.json). `resolve_soc_path` and
-    `_resolve_silicon_variant` (scripts/alp_project_loader.py, #997) are
-    the single source for the SoC-path and variant resolution; this
-    function does not re-derive the vendor/family/part split.
-
-    Returns None -- "no aperture declared, skip every aperture-anchored
-    check" -- when the preset names no SoC, the SoC omits
-    `soc_flash_base`, or the resolved variant has no usable `mram_mb`.
-    Never guesses (ADR-0034 clause 4).
-    """
-    soc_path = resolve_soc_path(preset.get("silicon"), METADATA_ROOT)
-    if soc_path is None or not soc_path.is_file():
-        return None
-    try:
-        soc_spec = json.loads(soc_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(soc_spec, dict):
-        return None
-    base = soc_spec.get("soc_flash_base")
-    if not isinstance(base, int):
-        return None
-    variant = _resolve_silicon_variant(preset, METADATA_ROOT)
-    if not isinstance(variant, dict):
-        return None
-    mram_mb = variant.get("mram_mb")
-    if not isinstance(mram_mb, (int, float)) or isinstance(mram_mb, bool):
-        return None
-    top = base + int(round(mram_mb * 1024 * 1024))
-    return base, top
-
-
-def _region_extent(region: "dict[str, Any]") -> "tuple[int, int] | None":
-    """`[base, base + size)` for one `memory_map:` region, or None when
-    the base is unresolved (the `"TBD"` string, or absent) or the size
-    can't be read. Callers must skip an unresolved extent rather than
-    guessing at it (ADR-0034 clause 4) -- never fold it into a gap or a
-    class verdict.
-    """
-    base = region.get("base")
-    if not isinstance(base, int) or isinstance(base, bool):
-        return None
-    size_kib = _region_size_kib(region)
-    if size_kib is None:
-        return None
-    return base, base + size_kib * 1024
+    return _resolve_aperture_impl(preset, METADATA_ROOT)
 
 
 def _check_aperture_tiling(
