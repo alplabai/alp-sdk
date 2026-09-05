@@ -22,33 +22,101 @@ from typing import Any, Optional
 from alp_project import resolve_memory_map
 from sentinels import is_tbd
 
+from .aperture import is_partition_inside_aperture, resolve_aperture
 from .memregion import _PAGE, _region_size_bytes
 from .models import BoardProject, ResolvedPartition, StorageEntry
+
+# Sentinel distinguishing "caller has no hoisted aperture yet, resolve it"
+# from a genuinely-resolved `aperture is None` ("this SoC declares none").
+# `resolve_storage_partitions()` resolves the aperture ONCE and threads it
+# through every helper below (the way `carveout.py:218` hoists it once per
+# `resolve_carve_outs()` call) instead of each helper -- and each region a
+# helper loops over -- re-parsing the SoC JSON and re-resolving the silicon
+# variant on its own. Callers outside this module (`loader.py`'s eager
+# cross-check, and the direct-call pytest suite) don't pass `aperture` at
+# all, so they keep resolving it themselves via this sentinel's default --
+# unchanged behaviour, just no longer redundant inside one resolve.
+_APERTURE_UNSET: Any = object()
+
+
+def _resolve_aperture_arg(
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+    aperture: Any,
+) -> Optional[tuple[int, int]]:
+    """Return `aperture` verbatim when a caller already hoisted it;
+    resolve it fresh only when `aperture` is the `_APERTURE_UNSET`
+    sentinel (no caller has resolved it yet for this call)."""
+    if aperture is _APERTURE_UNSET:
+        return resolve_aperture(som_preset, metadata_root)
+    return aperture
+
+
+def _is_flash_sub_partition(
+    region: dict[str, Any],
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+    aperture: Any = _APERTURE_UNSET,
+) -> bool:
+    """#1365 split B (P2): is `region` a partition INSIDE a flash device,
+    not a device of its own?
+
+    Derives the verdict against the SoC's declared on-die MRAM aperture
+    (`aperture.is_partition_inside_aperture`) instead of trusting the
+    legacy `carveout:` flag outright. Falls back to the legacy flag
+    verbatim whenever the derivation can't resolve a definite verdict --
+    no aperture declared for this SoC (every non-Alif SoM), this region's
+    own `base` still unresolved (e.g. AEN's `mram_main`), OR this region's
+    resolved extent lying OUTSIDE the declared aperture (containment is
+    one-sided: outside proves nothing, so it does not by itself mean
+    "this is a device", #1365 split B review MAJOR 3): this is what keeps
+    split B a no-op everywhere it can't prove a better answer (ADR-0034
+    clause 4).
+
+    `aperture` defaults to the `_APERTURE_UNSET` sentinel, resolving it
+    fresh per call; pass an already-resolved aperture to avoid re-parsing
+    the SoC JSON when a caller is looping over many regions/devices in one
+    resolve.
+    """
+    aperture = _resolve_aperture_arg(som_preset, metadata_root, aperture)
+    inside = is_partition_inside_aperture(region, aperture)
+    if inside is None:
+        return region.get("carveout") is False
+    return inside
 
 
 def _known_flash_devices(
     som_preset: dict[str, Any],
     metadata_root: Path,
+    aperture: Any = _APERTURE_UNSET,
 ) -> list[str]:
     """Enumerate every flash-device name a `storage[].flash_device:` may
     reference for the given SoM preset.
 
     Today this is the union of:
       - `memory_map:` region names (explicit override or derived from
-        the SoC variant), excluding any region marked `carveout: false`
-        (a partition INSIDE a flash-class node, not a device of its
-        own, #1484), AND
+        the SoC variant), excluding any region `_is_flash_sub_partition()`
+        calls a partition INSIDE a flash-class node rather than a device
+        of its own (#1484) -- derived against the SoC's declared on-die
+        MRAM aperture, falling back to the legacy `carveout: false` flag
+        wherever containment can't prove a verdict (#1365 split B), AND
       - `on_module.ospi_memories:` keys (when declared on the SoM).
 
     Kept as a list so the loader's "did you mean..." message can sort
     it deterministically.
+
+    `aperture` defaults to `_APERTURE_UNSET`, resolving it once for this
+    call (rather than once per region, as a call embedded in the loop
+    used to); pass an already-resolved aperture to share it across many
+    calls in one resolve (see `_APERTURE_UNSET`'s module comment).
     """
+    aperture = _resolve_aperture_arg(som_preset, metadata_root, aperture)
     names: set[str] = set()
     for region in resolve_memory_map(som_preset, metadata_root):
         n = region.get("name")
         if not isinstance(n, str):
             continue
-        if region.get("carveout") is False:
+        if _is_flash_sub_partition(region, som_preset, metadata_root, aperture):
             # A flash-class SUB-region -- an MRAM partition living inside a
             # `mram_storage`-class flash node, not a flash device of its own
             # (see the schema's `memory_region.carveout` description). On
@@ -57,6 +125,9 @@ def _known_flash_devices(
             # and decorating one with a `partitions { }` child targets a
             # node the board tree never defines (#1484). Keep it out of the
             # advertised set and out of `_resolve_flash_device()` below.
+            # #1365 split B: derived against the SoC's declared on-die MRAM
+            # aperture (containment), not the legacy `carveout:` flag --
+            # see `_is_flash_sub_partition()`.
             continue
         names.add(n)
     om = som_preset.get("on_module") or {}
@@ -171,6 +242,7 @@ def _resolve_flash_device(
     flash_device: str,
     som_preset: dict[str, Any],
     metadata_root: Path,
+    aperture: Any = _APERTURE_UNSET,
 ) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     """Resolve a board.yaml `flash_device:` reference to a device descriptor.
 
@@ -185,20 +257,27 @@ def _resolve_flash_device(
     NOT carry a physical base because Zephyr's flash-mapping layer
     derives that from the DT controller node.  The emitted overlay
     references `&<dt_label>` and lets Zephyr handle the physical mapping.
+
+    `aperture` defaults to `_APERTURE_UNSET` (resolve fresh); pass an
+    already-resolved aperture to share it across many calls in one
+    resolve (see `_APERTURE_UNSET`'s module comment).
     """
+    aperture = _resolve_aperture_arg(som_preset, metadata_root, aperture)
     # memory_map: region match first (covers the auto-derived MRAM /
     # SRAM region table from resolve_memory_map()).
     for region in resolve_memory_map(som_preset, metadata_root):
         if region.get("name") != flash_device:
             continue
-        if region.get("carveout") is False:
+        if _is_flash_sub_partition(region, som_preset, metadata_root, aperture):
             # Defense in depth for a hand-built project that skips the
             # loader's `_known_flash_devices()` check: refuse rather than
             # fabricate a `dt_label` from the region name.  This region is
             # a partition INSIDE a flash-class node (e.g. AEN's
             # `mram_storage`), not a flash device -- it has no Devicetree
             # label of its own and a `partitions { }` child on it targets
-            # a node the board tree never defines (#1484).
+            # a node the board tree never defines (#1484). #1365 split B:
+            # derived against the declared MRAM aperture, not the legacy
+            # `carveout:` flag -- see `_is_flash_sub_partition()`.
             return None, (
                 f"flash device '{flash_device}' is a partition inside a "
                 f"flash-class region on SoM "
@@ -323,6 +402,7 @@ def _verified_alt_devices(
     exclude: str,
     som_preset: dict[str, Any],
     metadata_root: Path,
+    aperture: Any = _APERTURE_UNSET,
 ) -> list[str]:
     """Every known flash device other than `exclude` that both resolves
     (`_resolve_flash_device()`) and carries a verified Devicetree label
@@ -335,12 +415,17 @@ def _verified_alt_devices(
     also excludes the SoM's own reserved region names, which don't apply
     here) rather than risk a shared-helper refactor rippling into that
     already-reviewed code path.
+
+    `aperture` defaults to `_APERTURE_UNSET` (resolve fresh); pass an
+    already-resolved aperture to share it across many calls in one
+    resolve (see `_APERTURE_UNSET`'s module comment).
     """
+    aperture = _resolve_aperture_arg(som_preset, metadata_root, aperture)
     return sorted(
-        d for d in _known_flash_devices(som_preset, metadata_root)
+        d for d in _known_flash_devices(som_preset, metadata_root, aperture)
         if d != exclude
         and _has_real_dt_label(d, som_preset, metadata_root)
-        and _resolve_flash_device(d, som_preset, metadata_root)[0] is not None)
+        and _resolve_flash_device(d, som_preset, metadata_root, aperture)[0] is not None)
 
 
 def _blocked_partition(
@@ -414,11 +499,22 @@ def resolve_storage_partitions(
             f"declared; add one referencing a SoM memory_map region "
             f"or an on_module.ospi_memories key")))
 
+    # #1365 split B (Also fix): hoist the aperture ONCE for this whole
+    # resolve, the way `carveout.py:218` hoists it once per
+    # `resolve_carve_outs()` call -- every downstream helper below
+    # (`_resolve_flash_device`, `_known_flash_devices` via
+    # `_verified_alt_devices`, the alt-device scan inlined in `_place()`)
+    # otherwise re-parses the SoC JSON and re-resolves the silicon variant
+    # once per region AND once per storage entry / alt-device enumeration.
+    aperture = resolve_aperture(
+        project.som_preset, project.effective_metadata_root())
+
     # Iterate flash devices in alphabetical order; within each device,
     # entries are name-sorted for byte-stable allocation.
     for device_name in sorted(by_device.keys()):
         descriptor, block_reason = _resolve_flash_device(
-            device_name, project.som_preset, project.effective_metadata_root())
+            device_name, project.som_preset,
+            project.effective_metadata_root(), aperture)
         if descriptor is None:
             for entry in by_device[device_name]:
                 resolved.append(_blocked_partition(
@@ -570,7 +666,7 @@ def resolve_storage_partitions(
                     alt_devices = [
                         d for d in _known_flash_devices(
                             project.som_preset,
-                            project.effective_metadata_root())
+                            project.effective_metadata_root(), aperture)
                         if d != device_name
                         and d not in reserved_names
                         and _has_real_dt_label(
@@ -578,7 +674,7 @@ def resolve_storage_partitions(
                             project.effective_metadata_root())
                         and _resolve_flash_device(
                             d, project.som_preset,
-                            project.effective_metadata_root())[0]
+                            project.effective_metadata_root(), aperture)[0]
                         is not None]
                     # Only lead with "pick an offset on <device>" when the
                     # device actually has free room outside its reserved
@@ -645,7 +741,7 @@ def resolve_storage_partitions(
                 # gets that more actionable reason instead.
                 alt = _verified_alt_devices(
                     device_name, project.som_preset,
-                    project.effective_metadata_root())
+                    project.effective_metadata_root(), aperture)
                 remedy = (
                     f"use a different flash_device: ({', '.join(alt)})"
                     if alt else

@@ -471,6 +471,68 @@ def _check_som_slot0_address_resolved(som_files) -> list:
     return failures
 
 
+def _check_som_write_authority_present(som_files) -> list:
+    """Refuse a `memory_map:` region that carries no `write_authority`
+    (#1365 split A).
+
+    `metadata/schemas/som-preset-v1.schema.json`'s `memory_region.
+    write_authority` is deliberately NOT in `required` for som-preset v1
+    (`docs/porting-new-som.md` is a public porting guide; making it
+    `required` there would break a customer-ported preset on upgrade --
+    see the field's own description). That means the schema alone cannot
+    catch an author who forgets it, so this is the semantic gate the
+    schema defers, exactly like `_check_som_slot0_address_resolved` above
+    is the semantic gate for `*_slot0` regions the schema can't express.
+
+    Per ADR-0034 clause 4 ("no `default` or catch-all entry -- absence is
+    a validation failure"), an authored region with no `write_authority`
+    is UNRESOLVED, never `customer_runtime` -- the schema's own
+    description says so in terms ("ABSENT MEANS UNRESOLVED, NEVER
+    `customer_runtime`") a consumer must honour, and this check is what
+    makes that non-negotiable instead of a comment nobody reads. Returns
+    a failure list shaped like `_check_files()`. Presets with no
+    `memory_map:` are skipped.
+    """
+    failures: list[tuple[str, list[str]]] = []
+    for path in som_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        memory_map = doc.get("memory_map")
+        if not isinstance(memory_map, list):
+            continue
+
+        msgs: list[str] = []
+        checked = 0
+        for region in memory_map:
+            if not isinstance(region, dict):
+                continue
+            name = region.get("name")
+            checked += 1
+            if "write_authority" not in region:
+                msgs.append(
+                    f"memory_map: region `{name}` carries no "
+                    f"`write_authority` -- absence means UNRESOLVED, "
+                    f"never `customer_runtime` (ADR-0034 clause 4); a "
+                    f"consumer must treat this region as ineligible for "
+                    f"both IPC carve-out and runtime write until the "
+                    f"field is authored")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        elif checked:
+            print(f"OK   {rel}  (memory_map: {checked} region(s) all "
+                  f"carry write_authority)")
+    return failures
+
+
 def _check_silicon_kconfig() -> list:
     """Validate the silicon->Kconfig registry and its socs/ correspondence.
 
@@ -2540,6 +2602,12 @@ def main() -> int:
         print()
         slot0_address_failures = _check_som_slot0_address_resolved(som_files)
 
+    # SoM `memory_map:` regions must all carry `write_authority` (#1365).
+    write_authority_failures: list = []
+    if som_files:
+        print()
+        write_authority_failures = _check_som_write_authority_present(som_files)
+
     # SoM `on_module.i2c_devices.<bus>.devices[]` (bus, address_7bit) uniqueness (#1845).
     i2c_collision_failures: list = []
     if som_files:
@@ -2564,6 +2632,7 @@ def main() -> int:
                       + len(restriction_failures)
                       + len(instance_uniqueness_failures)
                       + len(slot0_address_failures)
+                      + len(write_authority_failures)
                       + len(i2c_collision_failures)
                       + len(silicon_kconfig_failures)
                       + len(peripheral_kconfig_failures)

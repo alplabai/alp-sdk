@@ -81,6 +81,7 @@ Run locally:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -91,11 +92,16 @@ import yaml
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
+from alp_orchestrate.aperture import region_extent as _region_extent  # noqa: E402
+from alp_orchestrate.aperture import resolve_aperture as _resolve_aperture_impl  # noqa: E402
 from alp_orchestrate.loader import _resolve_slot0_load_address  # noqa: E402
+from alp_orchestrate.memregion import _region_size_bytes  # noqa: E402
 from alp_orchestrate.models import OrchestratorError  # noqa: E402
 from gen_zephyr_board import _AEN_MRAM_BASE  # noqa: E402
 
 PRESETS = REPO / "metadata" / "e1m_modules"
+METADATA_ROOT = REPO / "metadata"
+SOCS = METADATA_ROOT / "socs"
 
 # The one region name allowed to own the top of the window.  An explicit
 # allowlist rather than a "doesn't look like storage" heuristic, so a future
@@ -232,14 +238,254 @@ def _check_slot0_address(path: Path) -> "list[str]":
     return []
 
 
-def _region_size_kib(region: "dict[str, Any]") -> "int | None":
-    size_kib = region.get("size_kib")
-    if isinstance(size_kib, int):
-        return size_kib
-    size_mib = region.get("size_mib")
-    if isinstance(size_mib, int):
-        return size_mib * 1024
-    return None
+def _rel_or_str(path: Path) -> str:
+    """`path.relative_to(REPO)` when possible, else the raw path.
+
+    A test that monkeypatches `SOCS` to a directory outside the checkout
+    (so it never has to write a fixture into tracked `metadata/socs/`)
+    hands these functions a `path` that isn't under `REPO` -- fall back
+    to the raw string instead of raising `ValueError` out of a message
+    builder.
+    """
+    try:
+        return path.relative_to(REPO).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _check_aperture_declared() -> "list[str]":
+    """4a: every Alif Ensemble SoC must declare `soc_flash_base`
+    (#1365 split A).
+
+    `_resolve_aperture()` treats an absent `soc_flash_base` as "no
+    aperture declared, skip every aperture-anchored check" -- the
+    correct read for a non-Alif SoC (Renesas RZ/V2N legitimately
+    declares none), but it is silently indistinguishable from an
+    Ensemble part that simply forgot the field: 4b/4c switch off for
+    every preset resolving to that SoC while `validate_metadata.py`,
+    `gen_catalog.py`, and every other new test stay green, because
+    nothing else asserts the field is actually there (reviewer
+    mutation, 2026-09: deleting `soc_flash_base` from e3-e7.json left
+    `check_atoc_reservation.py` rc=0). `soc_flash_base` must stay
+    OPTIONAL in `soc-spec-v1` -- this is a family-scoped presence
+    check, not schema-wide requiredness, so RZ/V2N keeps declaring
+    none without tripping it.
+    """
+    out: "list[str]" = []
+    ensemble_dir = SOCS / "alif" / "ensemble"
+    if not ensemble_dir.is_dir():
+        return out
+    for path in sorted(ensemble_dir.glob("*.json")):
+        try:
+            spec = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            out.append(f"{_rel_or_str(path)}: unparseable JSON ({exc})")
+            continue
+        if not isinstance(spec, dict) or spec.get("family") != "Ensemble":
+            continue
+        if "soc_flash_base" not in spec:
+            out.append(
+                f"{_rel_or_str(path)}: Alif Ensemble SoC declares no "
+                f"`soc_flash_base` -- every Ensemble part must declare "
+                f"the on-die MRAM aperture base, or 4b/4c (aperture "
+                f"tiling, flash-class agreement) silently skip every "
+                f"preset resolving to this SoC with every other signal "
+                f"green (#1365 split A).")
+    return out
+
+
+def _check_aperture_cross_check() -> "list[str]":
+    """4a-adjacent: every Alif SoC declaring `soc_flash_base` must agree
+    with `_AEN_MRAM_BASE` (#1365 split A).
+
+    `gen_zephyr_board.py`'s `_aen_flash_partitions` already REFUSES a
+    board whose `mcuboot` region disagrees with `_AEN_MRAM_BASE`, and
+    `alp_orchestrate/loader.py::_resolve_slot0_load_address` resolves
+    every AEN slot0 load address off the very same constant --
+    `soc_flash_base` is therefore a SECOND declared source of one
+    hardware fact. A wrong aperture base does not fail loudly: it
+    silently reclassifies every region in that SKU, because 4b/4c below
+    both key off it. Scoped to Alif only -- `_AEN_MRAM_BASE` is an
+    Ensemble-family constant, so a non-Alif SoC is out of scope no
+    matter what (or whether) it declares `soc_flash_base`.
+    """
+    out: "list[str]" = []
+    if not SOCS.is_dir():
+        return out
+    for path in sorted((SOCS / "alif").glob("**/*.json")) if (SOCS / "alif").is_dir() else []:
+        try:
+            spec = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            out.append(f"{_rel_or_str(path)}: unparseable JSON ({exc})")
+            continue
+        if not isinstance(spec, dict):
+            continue
+        base = spec.get("soc_flash_base")
+        if base is None:
+            continue  # OPTIONAL -- omitted is a valid, if incomplete, state.
+        rel = _rel_or_str(path)
+        if not isinstance(base, int) or base != _AEN_MRAM_BASE:
+            out.append(
+                f"{rel}: soc_flash_base={base!r} disagrees with "
+                f"scripts/gen_zephyr_board.py's _AEN_MRAM_BASE "
+                f"(0x{_AEN_MRAM_BASE:x}) -- these are two declared "
+                f"sources of the same Ensemble App MRAM window base and "
+                f"must never drift; a wrong aperture base silently "
+                f"reclassifies every region in this SKU (#1365).")
+    return out
+
+
+# `_resolve_aperture` / `_region_extent` used to be defined here (#1365 split
+# A); the math now lives in `alp_orchestrate.aperture` so `carveout.py` /
+# `partition.py` (#1365 split B) derive a region's flash/RAM class off the
+# SAME aperture math this gate already validates, instead of a second copy
+# drifting from it. `_region_extent` is a straight re-export (unchanged
+# signature); `_resolve_aperture` keeps this module's original one-argument
+# call signature -- the shared `resolve_aperture(preset, metadata_root)`
+# always takes this module's own `METADATA_ROOT` here.
+def _resolve_aperture(preset: "dict[str, Any]") -> "tuple[int, int] | None":
+    return _resolve_aperture_impl(preset, METADATA_ROOT)
+
+
+def _check_aperture_tiling(
+    path: Path, doc: "dict[str, Any]", memory_map: "list[Any]",
+    aperture: "tuple[int, int]",
+) -> "tuple[list[str], list[str]]":
+    """4b: the authored regions CONTAINED IN the declared aperture must
+    tile it exactly -- no gaps, no overlaps (#1365 split A).
+
+    Anchors on the SoC aperture, never on `mram_main`: that region's
+    `base` is the string `"TBD"` while its children are concrete, so
+    anchoring there would collapse the check. Rows that fall entirely
+    OUTSIDE the aperture are ignored, not counted as gaps -- Ensemble's
+    OSPI XIP windows and the E1M-AEN801 SRAM row an IPC carve-out might
+    one day author both live outside `[soc_flash_base, ...)` legitimately
+    (E1M-AEN801.yaml:241-243). A region whose extent equals the FULL
+    aperture (`mram_main`, once its `base` stops being `"TBD"`) is the
+    whole-device alias, not a partition, and is exempt. A region with an
+    unresolved base is skipped -- returned as a non-failing entry in the
+    second tuple element so the caller can print it -- never guessed at.
+
+    Returns `(failures, skips)`. `skips` must never make the gate red.
+    """
+    rel = path.relative_to(REPO).as_posix()
+    sku = doc.get("sku", rel)
+    full_lo, full_hi = aperture
+    contained: "list[tuple[int, int, str]]" = []
+    skips: "list[str]" = []
+    for region in memory_map:
+        if not isinstance(region, dict):
+            continue
+        name = str(region.get("name"))
+        ext = _region_extent(region)
+        if ext is None:
+            skips.append(
+                f"{rel}: preset {sku} -- region {name!r} has an "
+                f"unresolved base ({region.get('base')!r}) -- skipped "
+                f"from aperture tiling (4b), not guessed at.")
+            continue
+        lo, hi = ext
+        if lo == full_lo and hi == full_hi:
+            continue  # whole-device alias -- the device, not a partition.
+        if hi <= full_lo or lo >= full_hi:
+            continue  # entirely outside the aperture -- not a gap.
+        contained.append((lo, hi, name))
+
+    if not contained:
+        return [], skips
+
+    contained.sort()
+    out: "list[str]" = []
+    cursor = full_lo
+    for lo, hi, name in contained:
+        if lo < full_lo:
+            out.append(
+                f"{rel}: preset {sku} -- region {name!r} "
+                f"[0x{lo:x}, 0x{hi:x}) starts at 0x{lo:x}, below the "
+                f"declared aperture floor 0x{full_lo:x}: it straddles "
+                f"the aperture's own boundary, not a preceding contained "
+                f"region (the symmetric top-overflow case is reported "
+                f"separately, below).")
+        elif lo > cursor:
+            out.append(
+                f"{rel}: preset {sku} -- aperture gap [0x{cursor:x}, "
+                f"0x{lo:x}) precedes region {name!r}: no authored region "
+                f"covers this span of the declared MRAM aperture "
+                f"[0x{full_lo:x}, 0x{full_hi:x}).")
+        elif lo < cursor:
+            out.append(
+                f"{rel}: preset {sku} -- region {name!r} "
+                f"[0x{lo:x}, 0x{hi:x}) overlaps the preceding contained "
+                f"region ending at 0x{cursor:x}.")
+        cursor = max(cursor, hi)
+    if cursor < full_hi:
+        out.append(
+            f"{rel}: preset {sku} -- aperture gap [0x{cursor:x}, "
+            f"0x{full_hi:x}) at the top of the declared MRAM aperture "
+            f"[0x{full_lo:x}, 0x{full_hi:x}): no authored region covers "
+            f"it.")
+    elif cursor > full_hi:
+        out.append(
+            f"{rel}: preset {sku} -- contained regions extend to "
+            f"0x{cursor:x}, past the declared aperture top 0x{full_hi:x}.")
+    return out, skips
+
+
+def _check_class_disagreement(
+    path: Path, doc: "dict[str, Any]", memory_map: "list[Any]",
+    aperture: "tuple[int, int]",
+) -> "tuple[list[str], list[str]]":
+    """4c: a region CONTAINED IN the declared aperture must carry
+    `carveout: false` (#1365 split A -- the check that keeps the six
+    hand-authored flags from rotting).
+
+    Containment is a ONE-DIRECTIONAL test: inside the aperture proves
+    flash, so `carveout` must be exactly `False` there. Outside the
+    aperture proves NOTHING -- Ensemble's OSPI XIP windows sit outside
+    `[soc_flash_base, ...)` and are still flash, and the same OSPI0
+    controller also carries the W958D8NBYA5I HyperRAM on
+    `chip_select: 1`, so a row outside the aperture with
+    `carveout: false` is a legitimate RAM reservation (the schema's own
+    text: reserving SRAM for a hardware secure enclave), not a defect --
+    the symmetric direction is never asserted. A region with an
+    unresolved base is skipped, never classified -- returned as a
+    non-failing entry in the second tuple element so the caller can
+    print it. The whole-device alias (extent == full aperture) is
+    exempt, same as 4b.
+
+    Returns `(failures, skips)`. `skips` must never make the gate red.
+    """
+    rel = path.relative_to(REPO).as_posix()
+    sku = doc.get("sku", rel)
+    full_lo, full_hi = aperture
+    out: "list[str]" = []
+    skips: "list[str]" = []
+    for region in memory_map:
+        if not isinstance(region, dict):
+            continue
+        name = str(region.get("name"))
+        ext = _region_extent(region)
+        if ext is None:
+            skips.append(
+                f"{rel}: preset {sku} -- region {name!r} has an "
+                f"unresolved base ({region.get('base')!r}) -- skipped "
+                f"from flash-class agreement (4c), never classified.")
+            continue
+        lo, hi = ext
+        if lo == full_lo and hi == full_hi:
+            continue  # whole-device alias -- exempt, same as 4b.
+        contained = lo >= full_lo and hi <= full_hi
+        if not contained:
+            continue  # outside proves nothing -- one-directional (#1365).
+        if region.get("carveout") is not False:
+            out.append(
+                f"{rel}: preset {sku} -- region {name!r} "
+                f"[0x{lo:x}, 0x{hi:x}) is contained in the declared MRAM "
+                f"aperture [0x{full_lo:x}, 0x{full_hi:x}) (flash by "
+                f"containment) but carries carveout={region.get('carveout')!r}, "
+                f"not `false` -- a flash-class region must be excluded "
+                f"from IPC carve-out allocation.")
+    return out, skips
 
 
 def _check_preset(path: Path) -> "list[str]":
@@ -255,10 +501,10 @@ def _check_preset(path: Path) -> "list[str]":
         if not isinstance(region, dict):
             continue
         base = region.get("base")
-        size_kib = _region_size_kib(region)
+        size_bytes = _region_size_bytes(region)
         # `base: TBD` regions (not yet HW-mapped) carry no address to check.
-        if isinstance(base, int) and size_kib is not None:
-            spans.append((base, base + size_kib * 1024, str(region.get("name"))))
+        if isinstance(base, int) and size_bytes is not None:
+            spans.append((base, base + size_bytes, str(region.get("name"))))
     if not spans:
         return []
     rel = path.relative_to(REPO).as_posix()
@@ -276,6 +522,26 @@ def _check_preset(path: Path) -> "list[str]":
             f"    That band is where SETOOLS top-anchors the ATOC "
             f"application table (#1289); a region there that reads as "
             f"customer storage is the boot table in disguise.")
+
+    # 4b/4c (#1365 split A): where the SoC declares an on-die MRAM
+    # aperture, the contained regions must tile it and agree with it on
+    # flash/RAM class. Skipped entirely when no aperture resolves (a
+    # non-Alif SoC, or an Alif SoC/variant that omits the field) --
+    # never guessed at (ADR-0034 clause 4). A region skipped WITHIN an
+    # aperture that DID resolve (an unresolved `base:` on that region,
+    # e.g. `mram_main`'s `"TBD"`) is not silently absorbed either: both
+    # checks hand back a non-failing skip note, printed here so the
+    # gate says so instead of a docstring nobody reads at gate-run time.
+    aperture = _resolve_aperture(doc)
+    if aperture is not None:
+        tiling_failures, tiling_skips = _check_aperture_tiling(
+            path, doc, memory_map, aperture)
+        class_failures, class_skips = _check_class_disagreement(
+            path, doc, memory_map, aperture)
+        for note in tiling_skips + class_skips:
+            print(f"SKIP {note}")
+        out += tiling_failures
+        out += class_failures
     return out
 
 
@@ -295,14 +561,19 @@ def main(argv=None) -> int:
         checked_presets += 1
         failures += _check_preset(path)
 
+    failures += _check_aperture_declared()
+    aperture_cross_check_failures = _check_aperture_cross_check()
+    failures += aperture_cross_check_failures
+
     if failures:
         print("check_atoc_reservation: FAIL", file=sys.stderr)
         for f in failures:
             print(f"  {f}", file=sys.stderr)
         return 1
-    print(f"OK: {checked_dts} AEN board .dts + {checked_presets} SoM preset(s) "
-          f"checked, ATOC band reserved and slot0 address matches its preset "
-          f"in each.")
+    print(f"OK: {checked_dts} AEN board .dts + {checked_presets} SoM "
+          f"preset(s) checked -- ATOC band reserved, slot0 address "
+          f"matches its preset, aperture tiling/class agree, and every "
+          f"declared aperture matches _AEN_MRAM_BASE, in each.")
     return 0
 
 
