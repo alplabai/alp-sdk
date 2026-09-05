@@ -600,8 +600,7 @@ static alp_status_t z_connect(alp_mqtt_backend_state_t *st, uint32_t timeout_ms)
 	struct mqtt_be *be = (struct mqtt_be *)st->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
 
-	/* A drain left pending by a PREVIOUS session (e.g. z_publish()'s
-	 * ALP_ERR_IO path leaves drain_pending set, or a caller that just
+	/* A drain left pending by a PREVIOUS session (a caller that just
 	 * retries alp_mqtt_connect() on the same handle per
 	 * docs/tutorials/11-mqtt-tls-publish.md:219) must not resume against
 	 * the FRESH socket mqtt_connect() is about to open below -- its
