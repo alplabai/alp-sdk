@@ -174,9 +174,13 @@ def test_a32_address_near_mram_end_rejected(aen_atoc):
 
 
 @pytest.mark.parametrize("address", [
-    "0x80010000",  # M55_HE slot0 base -- numerically coincident, not concurrently staged
+    "0x80010000",  # the A32 chain's own device tree, per #1981's shipped
+                   # layout -- numerically the same as the M55_HE slot0
+                   # base, but not concurrently staged in one config
     "0x802b0000",  # M55_HP slot0 base -- same
     "0x80300000",  # mid M55_HP window
+    "0x80380000",  # cramfs root (#1981), the highest real A32 mramAddress
+                   # in the issue's shipped layout
     "0x80550000",  # `reserved` band base
     "0x80560000",  # `storage` band base
 ])

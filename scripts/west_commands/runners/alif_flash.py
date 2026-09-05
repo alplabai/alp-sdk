@@ -169,7 +169,7 @@ def _select_app_shape(reset_vector, cpu_suffix):
         # behind a message that means "nothing to see here".
         vector_cpu_id = None
         for candidate_cpu_id, (win_base, win_size) in _aen_atoc.SLOT0_WINDOWS.items():
-            if candidate_cpu_id not in _aen_atoc._M55_CPU_IDS:
+            if candidate_cpu_id not in _aen_atoc.M55_CPU_IDS:
                 continue
             if win_base <= reset_vector < win_base + win_size:
                 vector_cpu_id = candidate_cpu_id
@@ -178,7 +178,7 @@ def _select_app_shape(reset_vector, cpu_suffix):
             windows_desc = ', '.join(
                 f'{cid} 0x{b:08x}..0x{b + s:08x}'
                 for cid, (b, s) in _aen_atoc.SLOT0_WINDOWS.items()
-                if cid in _aen_atoc._M55_CPU_IDS)
+                if cid in _aen_atoc.M55_CPU_IDS)
             raise RuntimeError(
                 f'reset vector 0x{reset_vector:08x} is in App MRAM but '
                 f'outside every declared slot0 window ({windows_desc}) -- '

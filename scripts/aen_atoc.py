@@ -56,7 +56,7 @@ ALSO present -- the real, shipped A32 Linux boot config stages its M55
 entries as `loadAddress` only (see `test_a32_linux_boot_config_passes`),
 so the check never fires for it. For a PURE A32_0 config the window
 bounds below are the entire guard: they are what stop an A32 mramAddress
-entry from wandering into the SE-owned `atoc` band or the M55 windows.
+entry from wandering into the SE-owned `atoc` band.
 
 Two known gaps, NOT closed by this guard (see #1069's PR body):
   - A sequential single-core `west flash` writes a whole fresh TOC each
@@ -93,9 +93,9 @@ _ATOC_BAND_KIB = 32
 # i.e. MRAM_END minus the band's own size -- 0x80580000 - 32 KiB =
 # 0x80578000, matching both presets' `atoc` `base:` verbatim. #1981
 # initially used the raw MRAM_END here instead, which silently accepted
-# an A32 mramAddress entry anywhere inside the SE-owned atoc band (or the
-# `reserved`/`storage` bands below it) -- the exact vacuous-hardcode
-# failure scripts/check_atoc_reservation.py's own docstring warns against.
+# an A32 mramAddress entry anywhere inside the SE-owned atoc band -- the
+# exact vacuous-hardcode failure scripts/check_atoc_reservation.py's own
+# docstring warns against.
 _A32_0_CEILING = MRAM_END - _ATOC_BAND_KIB * 1024  # 0x80578000
 
 # (base, size_bytes) per cpu_id -- see module docstring; mirrors
@@ -120,7 +120,7 @@ SLOT0_WINDOWS = {
 # guaranteed to hold exactly {M55_HE, M55_HP, A32_0} forever; testing
 # equality against this set keeps a future A32_1 entry from being
 # mislabelled "an M55 mramAddress entry" and wrongly tripping the check.
-_M55_CPU_IDS = {'M55_HE', 'M55_HP'}
+M55_CPU_IDS = {'M55_HE', 'M55_HP'}
 
 
 class AtocValidationError(ValueError):
@@ -185,7 +185,7 @@ def validate_atoc_entries(entries: "dict[str, Any]") -> None:
     # (ITCM) M55 stub entries never reach `mram_entries` above, so they
     # are unaffected by this check.
     a32_names = [n for n, _b, cid in mram_entries if cid == 'A32_0']
-    m55_names = [n for n, _b, cid in mram_entries if cid in _M55_CPU_IDS]
+    m55_names = [n for n, _b, cid in mram_entries if cid in M55_CPU_IDS]
     if a32_names and m55_names:
         raise AtocValidationError(
             f"ATOC mixes an A32 mramAddress entry ({a32_names[0]!r}) with "
