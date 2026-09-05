@@ -664,10 +664,9 @@ def som_unpopulated_capabilities(sku_preset: dict[str, Any]) -> list[str]:
 # PR-blocking gate -- is a genuine consumer of `resolve_targets()` /
 # `npu_backend()` / `accel_config()`, and that gate must not import
 # `alp_model` -- a package that is due for deletion outright, and this gate
-# must not break when that happens. `scripts/alp_model/targets.py` re-exports
-# `resolve_targets`/`TargetSpec` (the two names its own `build.py` still
-# imports) instead of duplicating the logic; nothing there needs
-# `npu_backend()`/`accel_config()` any more.
+# must not break when that happens. `scripts/alp_model/build.py` (the only
+# other caller) imports `resolve_targets` from here directly; there is no
+# re-export shim left in `scripts/alp_model/`.
 
 
 @dataclass(frozen=True)

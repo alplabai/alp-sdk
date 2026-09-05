@@ -69,7 +69,7 @@ different measurements and get two different files; see
 
 1. **Resolve the target.** For the SKU under test, run
    `alp model check <model> --sku <SKU>` (or read
-   `scripts/alp_model/targets.py`'s `resolve_targets()` directly) to
+   `scripts/alp_project_loader.py`'s `resolve_targets()` directly) to
    get the exact `(backend, accel_config, core)` triples that SKU
    resolves. A perf point naming anything else fails
    `scripts/validate_metadata.py`'s target cross-check.

@@ -1,9 +1,12 @@
-# tests/scripts/test_alp_model_targets.py
+# tests/scripts/test_alp_project_loader_targets.py
 """som.sku -> SoM preset -> SoC npus[] -> compile targets.
 
-Issue #1943: this logic lives in `alp_project_loader` (imported directly
-below, not via `alp_model.targets`'s compat re-export) so this coverage
-survives the eventual deletion of `scripts/alp_model/`."""
+Issue #1943: this logic lives in `alp_project_loader`, imported directly
+below rather than via `scripts/alp_model/targets.py`'s compat re-export.
+Filename matches that home (not `test_alp_model_*`) so a Task-6 `git rm
+tests/scripts/test_alp_model_*.py` -- which deletes `scripts/alp_model/`'s
+own test suite alongside the package -- does not sweep up this coverage
+too; it is the only place `resolve_targets()`/`TargetSpec` are tested."""
 from pathlib import Path
 from alp_project_loader import resolve_targets, TargetSpec
 
