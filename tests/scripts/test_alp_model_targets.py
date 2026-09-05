@@ -1,7 +1,11 @@
 # tests/scripts/test_alp_model_targets.py
-"""som.sku -> SoM preset -> SoC npus[] -> compile targets."""
+"""som.sku -> SoM preset -> SoC npus[] -> compile targets.
+
+Issue #1943: this logic lives in `alp_project_loader` (imported directly
+below, not via `alp_model.targets`'s compat re-export) so this coverage
+survives the eventual deletion of `scripts/alp_model/`."""
 from pathlib import Path
-from alp_model.targets import resolve_targets, TargetSpec
+from alp_project_loader import resolve_targets, TargetSpec
 
 _ROOT = Path(__file__).resolve().parents[2]
 _META = _ROOT / "metadata"

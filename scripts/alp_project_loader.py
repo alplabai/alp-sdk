@@ -663,11 +663,11 @@ def som_unpopulated_capabilities(sku_preset: dict[str, Any]) -> list[str]:
 # model-perf-v1 semantic cross-check in `scripts/validate_metadata.py` -- a
 # PR-blocking gate -- is a genuine consumer of `resolve_targets()` /
 # `npu_backend()` / `accel_config()`, and that gate must not import
-# `alp_model` (ADR-0028 Task 6 needs to be able to delete the package
-# without breaking it). `scripts/alp_model/targets.py` re-exports these
-# three under its historic names instead of duplicating the logic, so
-# `scripts/alp_model/build.py` and the `alp_model` test suite are
-# unaffected by the move.
+# `alp_model` -- a package that is due for deletion outright, and this gate
+# must not break when that happens. `scripts/alp_model/targets.py` re-exports
+# `resolve_targets`/`TargetSpec` (the two names its own `build.py` still
+# imports) instead of duplicating the logic; nothing there needs
+# `npu_backend()`/`accel_config()` any more.
 
 
 @dataclass(frozen=True)

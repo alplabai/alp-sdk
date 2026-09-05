@@ -40,7 +40,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from alp_project_loader import (  # noqa: E402
     _sku_family,
-    accel_config,
+    accel_config as _resolve_accel_config,
     npu_backend,
     resolve_soc_path,
     resolve_targets,
@@ -2100,7 +2100,7 @@ def _model_perf_target_context(sku: str):
             backend = npu_backend(str(npu.get("type", "")), str(npu.get("subtype", "")))
             if backend is None:
                 continue
-            accel = accel_config(npu, backend)
+            accel = _resolve_accel_config(npu, backend)
             paired[(backend, accel)] = pc
 
     return target_pairs, core_ids, paired
