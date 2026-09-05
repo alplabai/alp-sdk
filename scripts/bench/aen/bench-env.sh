@@ -279,9 +279,11 @@ bench_jlink_exe() {
 	#
 	# Prefer the newest versioned install; fall back to PATH.  Set JLINK_EXE to
 	# pin a specific one deliberately (e.g. to reproduce an older result).
+	# Search root is overridable and defaults under $HOME -- never a hardcoded
+	# maintainer path (scripts/check_public_private.py enforces this).
 	if [ -z "$exe" ]; then
 		local cand
-		for cand in /home/caner/segger-latest/JLink_Linux_V*_x86_64/JLinkExe; do
+		for cand in "${ALP_JLINK_SEARCH_ROOT:-$HOME/segger-latest}"/JLink_Linux_V*_x86_64/JLinkExe; do
 			[ -x "$cand" ] && exe="$cand"
 		done
 		[ -n "$exe" ] || exe="JLinkExe"

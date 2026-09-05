@@ -4,6 +4,14 @@
 # Install a custom J-Link device that unlocks Flow D (MRAM programming) on probes
 # that CANNOT select SEGGER's built-in Alif part profile.
 #
+# Cross-platform scope: Linux-side bench helper.  It writes under
+# ~/.config/SEGGER/JLinkDevices (the Linux J-Link search path) and drives the
+# Linux JLinkExe on the bench host; it runs under WSL2 on Windows.  On Windows
+# or macOS the equivalent is to place the same device.xml + patched .FLM under
+# that platform's J-Link devices directory -- the XML and the FLM patch are
+# host-independent, only the install location differs.  See
+# docs/aen-bench-bringup.md.
+#
 # WHY THIS EXISTS
 # ---------------
 # Flow D writes the app to MRAM slot0, and MRAM -- unlike ITCM -- needs a flash
@@ -34,8 +42,8 @@
 #
 # JLINK_Connect() fails in 0.308 ms on that capability check, BEFORE any SWD line
 # activity -- which is why `Found SW-DP with ID 0x4C013477` never prints on this
-# path.  Probe S/N 600107451 (Hardware version V10.10, Firmware "J-Link V10
-# compiled Jan 30 2023") returns 0 for capability 0x52.
+# path.  The affected probe was a J-Link PLUS reporting Hardware version V10.10
+# with firmware "J-Link V10 compiled Jan 30 2023"; it returns 0 for 0x52.
 #
 # Isolated by control: applying `exec SetDormantModeHandling = 1` to the GENERIC
 # Cortex-M55 device -- which connects perfectly without it -- reproduces the Alif
@@ -128,7 +136,7 @@
 # Nothing outside $HOME is touched; the stock J-Link install is left alone.
 set -euo pipefail
 
-DFP="${ALIF_DFP_DIR:-/home/caner/alif-dfp-ref}"
+DFP="${ALIF_DFP_DIR:-$HOME/alif-dfp-ref}"
 SRC_FLM="$DFP/Flash/algorithms/Ensemble.FLM"
 DEST="${JLINK_DEVICES_DIR:-$HOME/.config/SEGGER/JLinkDevices}/AlifSemiconductor/AE822_ALP"
 DEV_NAME="AE822_ALP_M55_HE"

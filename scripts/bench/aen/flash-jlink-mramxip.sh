@@ -318,6 +318,17 @@ fi
 # The count is necessary, not sufficient: `verifybin` reads through the same debug
 # AP, so the app's own `RESULT` line off the RAM console in step 4 remains the
 # only end-to-end proof that the flashed image actually runs.
+#
+# The failure `if` below deliberately keeps the BROAD, canonical pattern that
+# every other bench flash script uses, and that
+# tests/scripts/test_bench_jlink_connect_guard.py extracts and RUNS against
+# synthetic transcripts.  A narrower `^Verify failed\.`-only form was tried and
+# reverted: it silenced this guard, and the false positives it was avoiding came
+# from `loadbin`'s internal verify during the patched-FLM path's reset race --
+# a path now retired in favour of the built-in AE822FA0E5597LS0_M55_HE profile.
+# Do not narrow it again without updating that test; the informational
+# `?? loadbin reported an internal verify error` note above already distinguishes
+# the benign case for a human reader.
 # #1902 -- CONFIRM THE HALT, SCOPED TO BEFORE PROGRAMMING.
 #
 # SCOPE IS LOAD-BEARING.  The halt that matters is the one BEFORE the first
@@ -349,11 +360,6 @@ if ! grep -qE "^PC = [0-9A-F]{8}, CycleCnt = " /tmp/flowd-mramxip.preprog; then
 fi
 echo "halt: core halted before programming ($(grep -oE '^PC = [0-9A-F]{8}' /tmp/flowd-mramxip.preprog | head -1))"
 
-if grep -qiE "verification failed @|error while programming flash" /tmp/flowd-mramxip.out; then
-  echo "?? loadbin reported an internal verify error -- NOT failing on it (#1902)."
-  grep -iE "verification failed @|error while programming flash" /tmp/flowd-mramxip.out | head -3
-  echo "   Deferring to the explicit verifybin results below, which read the whole image back."
-fi
 # #1902 -- A FAILED `loadbin` IS NOT SURVIVABLE, AND `verifybin` DOES NOT CATCH IT.
 #
 # Bench-measured 2026-09-04: a run whose ATOC `loadbin` died with
@@ -376,13 +382,17 @@ if grep -qiE "Failed to perform RAMCode-sided Prepare\(\)|Timeout while preparin
   echo "   slot0 and/or the ATOC are now MIXED -- erase and reflash before using this board."
   exit 6
 fi
-verify_ok=$(grep -ci "verify successful" /tmp/flowd-mramxip.out || true)
-if grep -qiE "^Verify failed\.|mismatch" /tmp/flowd-mramxip.out; then
+# Order matters and is asserted by tests/scripts/test_bench_jlink_connect_guard.py:
+# the explicit-failure `if` comes FIRST, then the success COUNT, then the count
+# check -- the guard extracts exactly that contiguous span and runs it against
+# synthetic transcripts.  Keep the three together and in this order.
+if grep -qiE "verify failed|verification failed|mismatch" /tmp/flowd-mramxip.out; then
   echo "!! VERIFY FAILED -- the bytes on the part do NOT match the image."
-  grep -iE "^Verify failed\.|mismatch" /tmp/flowd-mramxip.out | head -5
+  grep -iE "verify failed|verification failed|mismatch" /tmp/flowd-mramxip.out | head -5
   echo "   slot0 content is NOT what you built.  Do not treat this board as flashed."
   exit 3
 fi
+verify_ok=$(grep -ci "verify successful" /tmp/flowd-mramxip.out || true)
 if [ "${verify_ok:-0}" -lt 2 ]; then
   echo "!! only ${verify_ok:-0} of 2 verifybin passes reported success -- treating as FAILED."
   echo "   (expected one per loadbin: the app image and the AppTocPackage.)"
