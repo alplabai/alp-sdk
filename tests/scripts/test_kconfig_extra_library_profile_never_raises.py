@@ -58,7 +58,6 @@ Run locally:
 
 from __future__ import annotations
 
-import errno
 import os
 import sys
 from pathlib import Path
@@ -204,27 +203,37 @@ def test_never_raises_contract_holds(
 # `_make_symlink_loop` above needs unprivileged `os.symlink`, which
 # Windows refuses outside Developer Mode/admin (confirmed on this
 # host: `OSError: [WinError 1314] A required privilege is not held`)
-# -- it skips there instead of failing.  This test reproduces the same
-# failure mode deterministically on every platform by monkeypatching
-# `pathlib.Path.read_text` to raise the exact `OSError` CPython raises
-# reading through a real ELOOP on POSIX (`[Errno 40] Too many levels
-# of symbolic links`) -- the never-raises CONTRACT (returns a list,
-# doesn't raise), not today's implementation.  It intentionally does
-# NOT assert on the diagnostic's wording or on which call
-# (`.resolve()` vs. `read_text()`) produced it: pinning that would
-# block the fix from ever converging on tan-cli's shape, which drops
-# `.resolve()` and lets `read_text()` raise this exact `OSError`
-# instead (verified: this test goes RED under `Path.resolve`
-# monkeypatching once `.resolve()` is removed from the source, which
-# is exactly the fix tan-cli's copy already shipped).
+# -- it skips there instead of failing.  This test reproduces the
+# ORIGINAL #1961 crash deterministically on every platform by
+# monkeypatching `pathlib.Path.resolve` -- the call that actually sat
+# outside the pre-fix `try`, not `read_text` -- to raise the exact
+# `RuntimeError` CPython's `Path.resolve(strict=False)` raises
+# detecting an ELOOP cycle itself on POSIX ("Symlink loop from ...").
+#
+# Patching `read_text` instead (an earlier draft of this test did)
+# proves NOTHING: `except (OSError, ...)` already covered `read_text`
+# raising `OSError` on the ORIGINAL, pre-#1961 dev baseline too, so
+# that version of this test passed unchanged on the exact code #1961
+# reports as broken -- confirmed empirically two ways, a parent-commit
+# overlay and an isolated `kconfig.py` revert, both leaving the old
+# test green (round-12b review finding #5). `.resolve()` is the call
+# that actually raised unhandled; patch that one.
+#
+# The current source drops `.resolve()` entirely (matching tan-cli's
+# shape), so patching it here is inert against today's code -- the
+# assertions below pass because `read_text()` on a nonexistent path
+# raises its own (already-caught) `OSError`. The mutation proof is
+# that reverting `kconfig.py` to the pre-#1961 shape (`.resolve()`
+# outside the `try`, `except (OSError, yaml.YAMLError)` only) turns
+# this test RED: the patched `.resolve()` then raises `RuntimeError`
+# unhandled, before the `try` is ever entered.
 # ---------------------------------------------------------------------
 
 def test_symlink_loop_deterministic(project, monkeypatch) -> None:
-    def _raise_eloop(self, encoding=None, errors=None):
-        raise OSError(errno.ELOOP, "Too many levels of symbolic links",
-                       str(self))
+    def _raise_symlink_loop(self, strict=False):
+        raise RuntimeError(f"Symlink loop from {self!r}")
 
-    monkeypatch.setattr(Path, "read_text", _raise_eloop)
+    monkeypatch.setattr(Path, "resolve", _raise_symlink_loop)
 
     result = _emit_extra_library_profile("thelib", "somewhere.yaml", project)
 

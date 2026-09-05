@@ -290,6 +290,51 @@ def test_extra_libraries_profile_permission_denied_clean_error(
     assert "could not be resolved" in msg
 
 
+def test_extra_libraries_profile_windows_shape_clean_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The two tests above encode the POSIX exception SHAPES
+    (`RuntimeError` from `.resolve()`, `PermissionError` from
+    `.is_file()`) as the thing under test -- round-12b review finding
+    #6. That is structurally blind to what a REAL symlink loop raises
+    on Windows: driving the actual CLI against a real WSL-created
+    symlink loop on an NTFS drive with Windows CPython 3.11.3 shows
+    `.resolve()` returns *without* raising at all, and it is
+    `.is_file()` that raises a plain `OSError` (`WinError 1920`, "The
+    file cannot be accessed by the system") -- not a `RuntimeError`
+    and not a `PermissionError`. Both tests above passed while that
+    real CLI invocation was dying unhandled, because neither one
+    exercises this shape.
+
+    This is the CONTRACT check the other two should have been: any
+    resolve-time failure -- whatever exception class the platform
+    happens to raise -- must surface as a clean `OrchestratorError`,
+    not the CLI crashing. Reverting the `except` clause to the
+    POSIX-only `(RuntimeError, PermissionError)` turns this test red
+    while leaving the two tests above green, which is exactly how
+    blocker #1 shipped unseen."""
+    prof_name = "winloop-hw-backends.yaml"
+    real_is_file = Path.is_file
+
+    def _raise_windows_shape_for_profile(self):
+        if self.name == prof_name:
+            raise OSError(22, "The file cannot be accessed by the system")
+        return real_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", _raise_windows_shape_for_profile)
+
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: winloop\n"
+        f"        profile: {prof_name}\n")
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "winloop" in msg
+    assert "could not be resolved" in msg
+
+
 # ---------------------------------------------------------------------
 # #1485 follow-up -- the ADR-0018 library layer (scripts/alp_orchestrate/
 # libraries.py) is a SECOND resolver family the original #1485 fix missed:

@@ -177,16 +177,24 @@ def _validate_consistency(project: "BoardProject") -> None:
                 try:
                     prof_path = (REPO / prof).resolve()
                     prof_is_file = prof_path.is_file()
-                except (RuntimeError, PermissionError) as e:
-                    # `.resolve()` raises `RuntimeError` on a symlink
-                    # loop (ELOOP) and `Path.is_file()` re-raises
-                    # `PermissionError` on EACCES rather than
-                    # swallowing it like ENOENT/ENOTDIR/EBADF/ELOOP --
-                    # the "same defect class" note in issue #1961.
-                    # Same treatment as every other extra_libraries
-                    # invariant in this loop: a clean OrchestratorError
-                    # a `board.yaml` load can report, not an unhandled
-                    # crash out of the loader.
+                except (OSError, RuntimeError) as e:
+                    # A symlink loop (ELOOP) surfaces differently per
+                    # platform: on POSIX, `Path.resolve()` detects the
+                    # cycle itself and raises `RuntimeError` before
+                    # `Path.is_file()` is ever reached; on Windows,
+                    # `.resolve()` returns without raising and it's
+                    # `Path.is_file()` that raises a plain `OSError`
+                    # (`WinError 1920`, "The file cannot be accessed
+                    # by the system") -- confirmed on both platforms
+                    # against a real symlink loop, not a mock. `.is_file()`
+                    # also re-raises `PermissionError` (an `OSError`
+                    # subclass) on EACCES rather than swallowing it
+                    # like ENOENT/ENOTDIR/EBADF/ELOOP -- the "same
+                    # defect class" note in issue #1961. Same treatment
+                    # as every other extra_libraries invariant in this
+                    # loop: a clean OrchestratorError a `board.yaml`
+                    # load can report, not an unhandled crash out of
+                    # the loader.
                     raise OrchestratorError(
                         f"core '{core_id}' extra_libraries entry "
                         f"'{name}' `profile: {prof}` could not be "
