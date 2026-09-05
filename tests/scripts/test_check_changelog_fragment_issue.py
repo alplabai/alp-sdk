@@ -84,6 +84,23 @@ def test_a_heading_citing_a_range_is_not_flagged(tmp_path: Path) -> None:
     assert gate.find_problems(root) == []
 
 
+def test_a_multi_citation_heading_outside_the_cited_range_is_flagged(tmp_path: Path) -> None:
+    """changelog.d/1940.md's real shape: a heading citing two distinct
+    issues, `(#1848, #1814)`, where the filename's leading digits (1940)
+    are neither one of those two numbers nor inside the 1814..1848 span
+    between them -- unlike changelog.d/1761.md's genuine range citation,
+    there is no ambiguity to under-flag here, since #1940 cannot be either
+    cited issue's fragment."""
+    root = _repo(tmp_path, {
+        "1940.md": "### Added — Entry (#1848, #1814)\n\nBody.",
+    })
+    problems = gate.find_problems(root)
+    assert len(problems) == 1
+    assert "1940.md" in problems[0]
+    assert "#1848" in problems[0]
+    assert "#1814" in problems[0]
+
+
 def test_a_heading_repeating_the_same_number_is_still_checked(tmp_path: Path) -> None:
     """changelog.d/1818.md's shape: `#1818` cited twice in the heading --
     same value both times, so it collapses to one distinct citation and is
@@ -116,6 +133,35 @@ def test_body_only_citations_are_never_scoped(tmp_path: Path) -> None:
     scope."""
     root = _repo(tmp_path, {
         "853.md": "### Changed\n\n- Documented something, fixes #999.",
+    })
+    assert gate.find_problems(root) == []
+
+
+def test_a_leading_blank_line_before_the_heading_is_skipped(tmp_path: Path) -> None:
+    """`_heading_line`'s contract is the first NON-BLANK line, not the first
+    line outright. Mutating that to always return the literal first line
+    would return the blank line here, fail the `### ` prefix check, and
+    silently skip a fragment whose heading actually disagrees with its
+    filename -- so this fixture only passes when the blank line is genuinely
+    stepped over."""
+    root = _repo(tmp_path, {
+        "902.md": "\n### Added — Entry (#901)\n\nBody.",
+    })
+    problems = gate.find_problems(root)
+    assert len(problems) == 1
+    assert "902.md" in problems[0]
+
+
+def test_an_alp_sdk_prefixed_citation_is_not_recognized(tmp_path: Path) -> None:
+    """`_HEADING_ISSUE_RE` requires a non-word character immediately before
+    `#` -- the repo-common `alp-sdk#N` form has a `k` there, so it is NOT
+    recognized as a citation at all, even though the heading's number
+    disagrees with the filename. This pins that as current, documented
+    behaviour: dropping the `(?<!\\w)` guard would make this heading's
+    `#901` citation visible, disagree with the `902.md` filename, and flag
+    it -- so this fixture discriminates that mutation."""
+    root = _repo(tmp_path, {
+        "902.md": "### Added — Entry (alp-sdk#901)\n\nBody.",
     })
     assert gate.find_problems(root) == []
 

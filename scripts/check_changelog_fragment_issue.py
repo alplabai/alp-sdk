@@ -9,9 +9,12 @@ WHY THIS EXISTS
 `changelog.d/README.md` documents the leading digits of a fragment's
 filename as the join key back to its GitHub issue -- but until now nothing
 checked that those digits actually agree with the `(#N)` the fragment's own
-`### ... (#N)` heading cites. Three fragments on `dev` disagreed:
+`### ... (#N)` heading cites. Four fragments on `dev` disagreed:
 `changelog.d/1909.md` cited `(#1700)`, `changelog.d/1917.md` cited
-`(#1648)`, and `changelog.d/1932.md` cited `(#1909)`.
+`(#1648)`, `changelog.d/1932.md` cited `(#1909)`, and `changelog.d/1940.md`
+cited `(#1848, #1814)` -- the last of those was invisible to the original
+single-citation-only check because it cites two issue numbers, and the
+guard tightened below is what makes it checkable at all.
 
 That mismatch was not cosmetic. `changelog.d/1909.md` holding a `#1700`
 entry is what *caused* the collision alp-sdk#1941 exists to fix: the 1909
@@ -26,6 +29,12 @@ CATCHES:
   * a fragment whose first non-blank line (its `### ...` heading) cites
     EXACTLY ONE distinct `#N`, and that N does not match the fragment
     filename's leading digits.
+  * a fragment whose heading cites MORE THAN ONE distinct `#N`, where the
+    filename's leading digits are neither one of the cited numbers NOR
+    inside the [min, max] span between them -- `changelog.d/1940.md`
+    citing `(#1848, #1814)` is this case: 1940 is outside both `{1848,
+    1814}` and the range `1814..1848`, so it cannot be either issue's
+    fragment and is flagged even though the heading names two issues.
 
 DOES NOT CATCH, on purpose -- under-flag on ambiguity:
   * a heading with NO `#N` citation at all -- `changelog.d/813.md` and
@@ -34,15 +43,21 @@ DOES NOT CATCH, on purpose -- under-flag on ambiguity:
     `changelog.d/README.md` does not document) all fall here, as does
     `changelog.d/1949.md` (a titled heading that simply never cites an
     issue number). There is nothing to compare the filename against, so
-    nothing is flagged.
-  * a heading citing MORE THAN ONE DISTINCT issue number -- e.g. a range
-    (`changelog.d/1761.md`'s heading reads `(#1757-#1783)`) or a list of
-    several issues closed by one sweep. Which one, if any, is "the" issue
-    the filename should match is not decidable from the heading alone, so
-    this is left unflagged rather than guessed at. A heading repeating the
+    nothing is flagged. The same is true of a heading citing an issue via
+    the `alp-sdk#N` form (e.g. `(alp-sdk#1957)`): `_HEADING_ISSUE_RE`
+    requires a non-word character right before `#`, and the `k` immediately
+    before it there fails that, so the citation is not recognized either
+    and the fragment is treated as citing nothing.
+  * a heading citing MORE THAN ONE DISTINCT issue number, where the
+    filename's leading digits fall inside the [min, max] span of the cited
+    numbers -- e.g. a range (`changelog.d/1761.md`'s heading reads
+    `(#1757-#1783)`, and 1757 <= 1761 <= 1783) or a list of several issues
+    closed by one sweep. Which one, if any, is "the" issue the filename
+    should match is not decidable from the heading alone in that case, so
+    it is left unflagged rather than guessed at. A heading repeating the
     SAME number more than once (`changelog.d/1818.md` cites `#1818` twice)
     is not ambiguous by this rule -- it collapses to one distinct value and
-    is still checked.
+    is checked as the single-citation case above.
   * anything in the fragment's BODY. A fragment legitimately cites many
     issues in its prose (a root-cause writeup, a "see also"); only the
     heading is a claim about which issue this fragment's file slot belongs
@@ -73,8 +88,11 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
-#: `#NNNN`, not part of a longer token (so `PWM_CAPTURE` etc. never match) --
-#: same shape as `check_issue_citations.py`'s `_CITATION_RE`.
+#: `#NNNN`, not part of a longer token (so `PWM_CAPTURE` etc. never match,
+#: and so does an `alp-sdk#N`-form citation -- the `k` before `#` is a word
+#: char too) -- similar shape to `check_issue_citations.py`'s
+#: `_CITATION_RE` (`(?<!\w)#(\d{1,6})\b`), but this one has no digit-count
+#: cap (`\d+`, not `\d{1,6}`).
 _HEADING_ISSUE_RE = re.compile(r"(?<!\w)#(\d+)\b")
 
 #: The leading digits of a fragment's filename stem -- the join key
@@ -114,17 +132,40 @@ def find_problems(root: Path) -> list[str]:
         if leading is None:
             continue  # malformed filename; not this gate's job to flag
 
-        cited = sorted(set(_HEADING_ISSUE_RE.findall(heading)))
-        if len(cited) != 1:
-            continue  # zero or ambiguous multi-issue heading -- under-flag
+        cited = sorted(set(int(n) for n in _HEADING_ISSUE_RE.findall(heading)))
+        if not cited:
+            continue  # no citation to compare against -- under-flag
 
-        if int(cited[0]) != int(leading.group(1)):
+        filename_n = int(leading.group(1))
+
+        if len(cited) == 1:
+            if cited[0] != filename_n:
+                problems.append(
+                    f"{path.name}: filename leads with issue #{leading.group(1)}, "
+                    f"but its own heading cites (#{cited[0]}) -- rename the "
+                    f"fragment to `{cited[0]}.md` (or `{cited[0]}-<slug>.md` if "
+                    f"that issue already has a fragment) so the leading digits "
+                    f"stay the join key back to the issue (changelog.d/README.md)"
+                )
+            continue
+
+        # More than one distinct citation: which one, if any, is "the" issue
+        # is not decidable from the heading alone (a range like
+        # `#1757-#1783`, or a list of several issues one sweep closed) --
+        # UNLESS the filename number is not even a candidate: not one of the
+        # cited numbers, and not inside the [min, max] span between them
+        # either (a genuine range citation legitimately covers every number
+        # in between, so falling inside the span is not a mismatch). Outside
+        # both is not ambiguity, it is simply the wrong slot.
+        if filename_n not in cited and not (cited[0] <= filename_n <= cited[-1]):
+            cited_list = ", ".join(f"#{n}" for n in cited)
             problems.append(
-                f"{path.name}: filename leads with issue #{leading.group(1)}, "
-                f"but its own heading cites (#{cited[0]}) -- rename the "
-                f"fragment to `{cited[0]}.md` (or `{cited[0]}-<slug>.md` if "
-                f"that issue already has a fragment) so the leading digits "
-                f"stay the join key back to the issue (changelog.d/README.md)"
+                f"{path.name}: filename leads with issue #{filename_n}, but "
+                f"its own heading cites {cited_list} -- that is neither one "
+                f"of those issues nor within the range between them, so "
+                f"#{filename_n} cannot be the issue this fragment belongs "
+                f"to; rename it to the issue it actually documents "
+                f"(changelog.d/README.md)"
             )
 
     return problems

@@ -60,9 +60,13 @@ fragment's own `### ... (#N)` heading cites, keeping them the join key back
 to that issue for `assemble_changelog.py`'s sort order and for anyone
 grepping `changelog.d/` by number. `scripts/check_changelog_fragment_issue.py`
 (alp-sdk#1957) checks the two agree wherever a heading cites exactly one
-issue number; a heading citing a range or several issues, or no `(#N)` at
-all, is outside what that check can decide and is left to hand review — the
-suffix only breaks the filename tie.
+issue number, or cites several and the filename's leading digits are outside
+both the cited set and the span between the smallest and largest of them
+(e.g. citing `#1848, #1814` from a `1940.md` filename); a heading citing a
+range or several issues that the filename's leading digits DO fall inside
+(e.g. `#1757-#1783` from a `1761.md` filename), or no `(#N)` at all, is
+outside what that check can decide and is left to hand review — the suffix
+only breaks the filename tie.
 
 The file's content is **the entry exactly as it should appear** in
 `CHANGELOG.md`, starting with its own heading line:
