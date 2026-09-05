@@ -174,8 +174,24 @@ def _validate_consistency(project: "BoardProject") -> None:
                     raise OrchestratorError(
                         f"core '{core_id}' extra_libraries entry "
                         f"'{name}' has non-string `profile:`")
-                prof_path = (REPO / prof).resolve()
-                if not prof_path.is_file():
+                try:
+                    prof_path = (REPO / prof).resolve()
+                    prof_is_file = prof_path.is_file()
+                except (RuntimeError, PermissionError) as e:
+                    # `.resolve()` raises `RuntimeError` on a symlink
+                    # loop (ELOOP) and `Path.is_file()` re-raises
+                    # `PermissionError` on EACCES rather than
+                    # swallowing it like ENOENT/ENOTDIR/EBADF/ELOOP --
+                    # the "same defect class" note in issue #1961.
+                    # Same treatment as every other extra_libraries
+                    # invariant in this loop: a clean OrchestratorError
+                    # a `board.yaml` load can report, not an unhandled
+                    # crash out of the loader.
+                    raise OrchestratorError(
+                        f"core '{core_id}' extra_libraries entry "
+                        f"'{name}' `profile: {prof}` could not be "
+                        f"resolved: {e}") from e
+                if not prof_is_file:
                     raise OrchestratorError(
                         f"core '{core_id}' extra_libraries entry "
                         f"'{name}' `profile: {prof}` does not resolve "

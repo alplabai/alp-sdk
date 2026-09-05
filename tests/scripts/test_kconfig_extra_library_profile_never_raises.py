@@ -17,13 +17,39 @@ narrower than the failure modes of the I/O it wraps:
     non-UTF-8 bytes -- a `ValueError` subclass, not an `OSError` --
     *before* the YAML parser ever runs.
 
-This module drives the seven shapes tan-cli's sibling gate
+The fix drops `.resolve()` entirely (nothing downstream of it needs a
+canonicalized path -- only `read_text` does), which removes the
+`RuntimeError` failure mode at the source instead of widening the
+`except` tuple to catch it; a real symlink loop still fails, but via
+`read_text`'s own `OSError` (`[Errno 40] Too many levels of symbolic
+links`), already inside the original `except (OSError, ...)`.  This
+also reconverges this function with tan-cli's relocated copy
+(`python/tan/planner/kconfig.py`), which made the same call.
+
+A *board.yaml load-time* symlink loop / permission-denied `profile:`
+is a separate, actually-reachable defect on the same field:
+`scripts/alp_orchestrate/validate.py`'s `_validate_consistency` (run
+by every `load_board_yaml`, i.e. every `--emit` mode including the
+`--emit build-plan` tan-cli's planner fallback runs) does its own
+`(REPO / prof).resolve()` + `.is_file()` on the identical
+user-supplied path, BEFORE this module's emitter is ever reached --
+so leaving that call unguarded left the CLI path this issue's
+reachability argument rests on still crashing with an unhandled
+`RuntimeError`/`PermissionError`.  That call is now wrapped too and
+raises a normal `OrchestratorError` (the cli's usual exit-1 path)
+instead.
+
+This module drives the eight shapes tan-cli's sibling gate
 (`python/tan/planner/kconfig.py`'s `test_never_raises_contract_holds.py`,
-tan-cli#1122) exercises, table-driven, plus the two mutation-proof tests
-that show each fix is load-bearing.  Symlink loops and `chmod 000`
-permission denial are POSIX-only (Windows has no unprivileged
-`os.symlink` and `chmod` doesn't restrict owner-read) -- those two
-shapes skip cleanly on `nt` rather than fail.
+tan-cli#1122, seven shapes) plus `parent_is_a_file` from issue #1961's
+acceptance list, table-driven, plus a deterministic reproduction of
+the symlink-loop failure mode and an end-to-end check that the
+reachable shape survives the full `load_board_yaml` ->
+`_slice_alp_conf` path, not just a direct call into the private
+function.  Symlink loops and `chmod 000` permission denial are
+POSIX-only (Windows has no unprivileged `os.symlink` and `chmod`
+doesn't restrict owner-read) -- those two shapes skip cleanly on `nt`
+rather than fail.
 
 Run locally:
 
@@ -32,6 +58,7 @@ Run locally:
 
 from __future__ import annotations
 
+import errno
 import os
 import sys
 from pathlib import Path
@@ -42,7 +69,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _orchestrate_support import V2N_HAPPY, _write_board  # noqa: E402
 
-from alp_orchestrate import load_board_yaml  # noqa: E402
+from alp_orchestrate import _slice_alp_conf, load_board_yaml  # noqa: E402
 from alp_orchestrate.kconfig import _emit_extra_library_profile  # noqa: E402
 
 _WINDOWS = os.name == "nt"
@@ -96,6 +123,20 @@ def _make_directory(tmp_path: Path) -> Path:
     return d
 
 
+def _make_parent_is_file(tmp_path: Path) -> Path:
+    """Issue #1961's acceptance list also names "a parent that is a
+    file": a `profile:` path whose parent component is itself a
+    regular file, not a directory.  `read_text()` on the child raises
+    `NotADirectoryError` on POSIX / `FileNotFoundError` on Windows --
+    both `OSError` subclasses, so either way this is an existing
+    catch, not a new failure mode; it was just missing from this
+    table."""
+    parent = tmp_path / "not_a_directory.yaml"
+    parent.write_text("sw_fallback: { kconfig: CONFIG_X=y }\n",
+                       encoding="utf-8")
+    return parent / "child.yaml"
+
+
 def _make_malformed_yaml(tmp_path: Path) -> Path:
     p = tmp_path / "malformed.yaml"
     p.write_text("key: [unterminated\n", encoding="utf-8")
@@ -122,6 +163,7 @@ _SHAPES = [
     ("symlink_loop", _make_symlink_loop, False),
     ("permission_denied", _make_permission_denied, False),
     ("directory_where_file_expected", _make_directory, False),
+    ("parent_is_a_file", _make_parent_is_file, False),
     ("malformed_yaml", _make_malformed_yaml, False),
     ("missing_file", _make_missing, False),
     ("valid_profile", _make_valid, True),
@@ -163,22 +205,66 @@ def test_never_raises_contract_holds(
 # Windows refuses outside Developer Mode/admin (confirmed on this
 # host: `OSError: [WinError 1314] A required privilege is not held`)
 # -- it skips there instead of failing.  This test reproduces the same
-# defect deterministically on every platform by monkeypatching
-# `pathlib.Path.resolve` to raise the exact `RuntimeError` CPython's
-# real ELOOP path raises (`Lib/pathlib.py`'s `check_eloop`), so the
-# "is `.resolve()` inside the try" structural fix is always exercised,
-# not just where the OS happens to grant symlink privileges.
+# failure mode deterministically on every platform by monkeypatching
+# `pathlib.Path.read_text` to raise the exact `OSError` CPython raises
+# reading through a real ELOOP on POSIX (`[Errno 40] Too many levels
+# of symbolic links`) -- the never-raises CONTRACT (returns a list,
+# doesn't raise), not today's implementation.  It intentionally does
+# NOT assert on the diagnostic's wording or on which call
+# (`.resolve()` vs. `read_text()`) produced it: pinning that would
+# block the fix from ever converging on tan-cli's shape, which drops
+# `.resolve()` and lets `read_text()` raise this exact `OSError`
+# instead (verified: this test goes RED under `Path.resolve`
+# monkeypatching once `.resolve()` is removed from the source, which
+# is exactly the fix tan-cli's copy already shipped).
 # ---------------------------------------------------------------------
 
 def test_symlink_loop_deterministic(project, monkeypatch) -> None:
-    def _raise_eloop(self, strict=False):
-        raise RuntimeError(f"Symlink loop from {str(self)!r}")
+    def _raise_eloop(self, encoding=None, errors=None):
+        raise OSError(errno.ELOOP, "Too many levels of symbolic links",
+                       str(self))
 
-    monkeypatch.setattr(Path, "resolve", _raise_eloop)
+    monkeypatch.setattr(Path, "read_text", _raise_eloop)
 
     result = _emit_extra_library_profile("thelib", "somewhere.yaml", project)
 
     assert isinstance(result, list)
     assert len(result) == 1
     assert result[0].startswith("# extra_libraries[thelib] profile parse failed:")
-    assert "Symlink loop" in result[0]
+
+
+# ---------------------------------------------------------------------
+# End-to-end: the one shape that survives board.yaml load-time
+# validation (`validate.py`'s `_validate_consistency` rejects
+# missing_file / directory_where_file_expected / parent_is_a_file /
+# symlink_loop / permission_denied before this emitter is ever
+# reached -- a real `.is_file()` check can't see non-UTF-8 content or
+# malformed YAML) must still resolve to the diagnostic comment when
+# driven through the REAL `load_board_yaml` -> `_slice_alp_conf` path,
+# not just a direct call into the private function every other case
+# in this module uses.
+# ---------------------------------------------------------------------
+
+def test_non_utf8_bytes_end_to_end(tmp_path: Path) -> None:
+    profile = tmp_path / "nonutf8-hw-backends.yaml"
+    profile.write_bytes(b"\xff\xfe\x00bad")
+    # `(REPO / prof)` with an absolute `prof` yields `prof` unchanged
+    # (pathlib drops the left operand for an absolute right operand),
+    # so an absolute tmp_path profile stands in for a repo-relative
+    # one without writing into the real repo tree.
+    body = (
+        "som:\n"
+        "  sku: E1M-V2N101\n"
+        "\n"
+        "cores:\n"
+        "  m33_sm:\n"
+        "    os: zephyr\n"
+        "    app: ./m33\n"
+        "    extra_libraries:\n"
+        "      - name: badbytes\n"
+        f"        profile: {profile}\n"
+    )
+    path = _write_board(tmp_path, body, name="e2e-board.yaml")
+    board_project = load_board_yaml(path)
+    conf = _slice_alp_conf(board_project, board_project.cores["m33_sm"])
+    assert "# extra_libraries[badbytes] profile parse failed:" in conf

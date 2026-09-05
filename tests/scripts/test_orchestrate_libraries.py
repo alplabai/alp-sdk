@@ -211,6 +211,48 @@ def test_extra_libraries_profile_file_missing(tmp_path: Path) -> None:
     assert "does not resolve" in msg
 
 
+def test_extra_libraries_profile_symlink_loop_clean_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A `profile:` path that hits a symlink loop (ELOOP) must fail
+    with a clean `OrchestratorError`, not an unhandled `RuntimeError`
+    out of `load_board_yaml` (issue #1961's reachable half:
+    `_validate_consistency` runs this identical
+    `(REPO / prof).resolve()` on the same user-supplied path on
+    *every* `load_board_yaml` call -- i.e. every `--emit` mode,
+    including `--emit build-plan`, tan-cli's documented planner
+    fallback -- strictly BEFORE `_emit_extra_library_profile`'s own
+    never-raises fix in `kconfig.py` is ever reached).
+
+    Windows has no unprivileged `os.symlink` (confirmed on this host:
+    `OSError: [WinError 1314] A required privilege is not held`), so
+    this reproduces the ELOOP `RuntimeError` deterministically by
+    monkeypatching `pathlib.Path.resolve` for this one profile path
+    only -- the same exception CPython's own `check_eloop` raises,
+    without disturbing every other `.resolve()` call `load_board_yaml`
+    makes along the way."""
+    prof_name = "loopy-hw-backends.yaml"
+    real_resolve = Path.resolve
+
+    def _raise_eloop_for_profile(self, strict=False):
+        if self.name == prof_name:
+            raise RuntimeError(f"Symlink loop from {str(self)!r}")
+        return real_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", _raise_eloop_for_profile)
+
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: loopy\n"
+        f"        profile: {prof_name}\n")
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "loopy" in msg
+    assert "could not be resolved" in msg
+
+
 # ---------------------------------------------------------------------
 # #1485 follow-up -- the ADR-0018 library layer (scripts/alp_orchestrate/
 # libraries.py) is a SECOND resolver family the original #1485 fix missed:
