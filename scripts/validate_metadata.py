@@ -38,9 +38,14 @@ REPO = Path(__file__).resolve().parent.parent
 # check_system_manifest.py / check_emit_snapshots.py already use.
 sys.path.insert(0, str(REPO / "scripts"))
 
-from alp_project_loader import _sku_family, resolve_soc_path  # noqa: E402
+from alp_project_loader import (  # noqa: E402
+    _sku_family,
+    accel_config,
+    npu_backend,
+    resolve_soc_path,
+    resolve_targets,
+)
 from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
-from alp_model.targets import resolve_targets, _npu_backend, _accel_config  # noqa: E402
 from strict_loaders import strict_json_loads, strict_yaml_load  # noqa: E402
 
 # Power/ground nets are allowed as pin signals without a signals[] entry.
@@ -2050,7 +2055,7 @@ def _model_perf_target_context(sku: str):
     separately as "SKU exists").
 
     target_pairs -- the (backend, accel_config) pairs
-    `alp_model.targets.resolve_targets()` actually resolves for this SKU --
+    `alp_project_loader.resolve_targets()` actually resolves for this SKU --
     the SAME resolver `alp model check` uses, so a perf point can't name a
     target the tiered resolution could never route a compile to.
 
@@ -2092,10 +2097,10 @@ def _model_perf_target_context(sku: str):
             pc = npu.get("paired_core")
             if not isinstance(pc, str) or not pc:
                 continue
-            backend = _npu_backend(str(npu.get("type", "")), str(npu.get("subtype", "")))
+            backend = npu_backend(str(npu.get("type", "")), str(npu.get("subtype", "")))
             if backend is None:
                 continue
-            accel = _accel_config(npu, backend)
+            accel = accel_config(npu, backend)
             paired[(backend, accel)] = pc
 
     return target_pairs, core_ids, paired
@@ -2194,7 +2199,7 @@ def _check_model_perf_semantics(model_perf_files) -> list:
                 msgs.append(
                     f"target: (backend={backend!r}, accel_config="
                     f"{accel_config!r}) is not a target `{sku}` actually "
-                    f"resolves (alp_model.targets.resolve_targets) -- valid: "
+                    f"resolves (alp_project_loader.resolve_targets) -- valid: "
                     f"{sorted(target_pairs)}")
             if not isinstance(core, str) or not core:
                 msgs.append("target.core: missing/not a string")
