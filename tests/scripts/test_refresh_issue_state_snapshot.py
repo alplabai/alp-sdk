@@ -8,7 +8,11 @@ script makes a live `gh` call and is out of scope for an offline unit test.
 
 import importlib.util
 import json
+import sys
+import types
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "refresh_issue_state_snapshot.py"
@@ -75,13 +79,54 @@ def test_all_unresolved_refuses_even_against_an_existing_snapshot():
 
 
 def test_drastic_shrink_against_disk_refuses_to_write():
-    """9 issues on disk, `gh` only resolves 2 of them this run -- a partial
-    outage, not 7 issues really vanishing. Must refuse."""
+    """9 issues still cited, `gh` only resolves 2 of them this run -- a
+    partial outage, not 7 issues really vanishing. Must refuse (#1950
+    round 4: on DROPPED KEYS, not a size ratio)."""
     mod = _load()
     existing = {str(n): "CLOSED" for n in range(1, 10)}
-    reason = mod._refuse_reason([1, 2], {"1": "CLOSED", "2": "CLOSED"}, existing)
+    numbers = list(range(1, 10))
+    reason = mod._refuse_reason(numbers, {"1": "CLOSED", "2": "CLOSED"}, existing)
     assert reason is not None
-    assert "less than half" in reason
+    assert "did not resolve via `gh`" in reason
+
+
+def test_dropping_under_half_still_refuses_the_old_blind_spot():
+    """8 on disk, 4 silently dropped (exactly half) -- the old
+    `len(issues) < len(existing_issues) / 2` ratio missed this (4 is not
+    < 4) and let it degrade to a non-blocking warning. Dropped-key
+    detection has no such threshold."""
+    mod = _load()
+    existing = {str(n): "CLOSED" for n in range(1, 9)}  # 1..8
+    numbers = list(range(1, 9))
+    issues = {str(n): "CLOSED" for n in range(1, 5)}  # 1..4 resolved, 5..8 dropped
+    reason = mod._refuse_reason(numbers, issues, existing)
+    assert reason is not None
+    assert "4 still-cited issue(s)" in reason
+
+
+def test_allow_shrink_overrides_the_dropped_key_refusal():
+    """The explicit override (#1950 round 4): the same drop that refuses
+    above must write clean when `allow_shrink=True`."""
+    mod = _load()
+    existing = {str(n): "CLOSED" for n in range(1, 10)}
+    numbers = list(range(1, 10))
+    reason = mod._refuse_reason(
+        numbers, {"1": "CLOSED", "2": "CLOSED"}, existing, allow_shrink=True
+    )
+    assert reason is None
+
+
+def test_legitimate_shrink_from_removed_citations_is_never_refused():
+    """A citation that stopped being cited at all (removed from `numbers`,
+    not just missing from `issues`) is not a drop -- refusing this
+    unconditionally, with no override, was the round-3 bug (#1950 round
+    4): a real cleanup that shrinks the cited set must write clean without
+    needing --allow-shrink."""
+    mod = _load()
+    existing = {str(n): "CLOSED" for n in range(1, 10)}  # 9 were cited once
+    numbers = [1, 2]  # only 2 are cited now; 3..9's citations were deleted
+    reason = mod._refuse_reason(numbers, {"1": "CLOSED", "2": "CLOSED"}, existing)
+    assert reason is None
 
 
 def test_normal_refresh_does_not_refuse():
@@ -116,3 +161,33 @@ def test_read_existing_issues_returns_the_issues_object(tmp_path):
         encoding="utf-8",
     )
     assert mod._read_existing_issues(out) == {"1": "CLOSED"}
+
+
+# -- main() wiring, not just the _refuse_reason predicate (#1950 round 4) -----
+
+
+def test_main_refuses_and_leaves_snapshot_untouched_on_a_total_gh_outage(tmp_path, monkeypatch):
+    """The tests above pin `_refuse_reason`'s PREDICATE, never its WIRING
+    into `main()`. Deleting the `reason = _refuse_reason(...)` /
+    `if reason: sys.exit(...)` call site restores the original defect -- a
+    total `gh` outage silently overwrites the snapshot with `{}` and exits
+    0 -- while every test above still passes unchanged. Drive `main()` for
+    real with `_issue_state` stubbed to always return None (total outage)
+    and check BOTH the exit code and that whatever was already on disk is
+    byte-for-byte untouched."""
+    mod = _load()
+    out = tmp_path / "issue-state-snapshot.json"
+    existing_bytes = json.dumps(
+        {"generated_at": "2020-01-01T00:00:00Z", "issues": {"1": "CLOSED"}}
+    ).encode("utf-8")
+    out.write_bytes(existing_bytes)
+
+    monkeypatch.setattr(mod, "find_citations", lambda root: [types.SimpleNamespace(issue=494)])
+    monkeypatch.setattr(mod, "_issue_state", lambda n: None)
+    monkeypatch.setattr(sys, "argv", ["refresh_issue_state_snapshot.py", "--out", str(out)])
+
+    with pytest.raises(SystemExit) as exc_info:
+        mod.main()
+
+    assert exc_info.value.code != 0
+    assert out.read_bytes() == existing_bytes

@@ -88,7 +88,11 @@ def _read_existing_issues(path: Path) -> dict[str, str]:
 
 
 def _refuse_reason(
-    numbers: list[int], issues: dict[str, str], existing_issues: dict[str, str]
+    numbers: list[int],
+    issues: dict[str, str],
+    existing_issues: dict[str, str],
+    *,
+    allow_shrink: bool = False,
 ) -> str | None:
     """None if it is safe to write `issues` to the snapshot; otherwise the
     reason to refuse and exit non-zero instead (#1950 round 3). Pulled out
@@ -98,10 +102,21 @@ def _refuse_reason(
     A `gh` auth/network failure makes every `_issue_state()` call return
     None, so `numbers` (citations harvested) is non-empty but `issues`
     (citations actually resolved) comes out empty -- refuse rather than
-    silently wipe a real snapshot down to `{}` and exit 0. A drastic shrink
-    against what is already on disk gets the same refusal: `gh` failing on
-    *most* (not all) of the cited numbers looks, to a human `git diff`,
-    exactly like a real mass issue-closure -- which never actually happens.
+    silently wipe a real snapshot down to `{}` and exit 0.
+
+    A *partial* failure is caught by DROPPED KEYS, not a size ratio (#1950
+    round 4): a number still cited (still in `numbers`) that has a record
+    on disk (`existing_issues`) but did not resolve this run (missing from
+    `issues`) is a dropped key regardless of how many other numbers
+    resolved fine -- the old `len(issues) < len(existing_issues) / 2` ratio
+    missed anything under half (8 on disk, 4 silently dropped, 4 remain --
+    4 is not < 4) and, in the other direction, unconditionally refused a
+    real shrink (citations legitimately removed from the source so
+    `numbers` itself is smaller) with no way to say "yes, on purpose".
+    Sizing never enters it: a number no longer in `numbers` at all is not a
+    drop, it is a citation that stopped existing, and is never refused.
+    `allow_shrink` is the override for when a dropped key IS legitimate
+    (e.g. the GitHub issue itself was deleted, not just slow to resolve).
     """
     if numbers and not issues:
         return (
@@ -109,13 +124,20 @@ def _refuse_reason(
             f"refusing to overwrite the snapshot with an empty one. Check "
             f"`gh auth status` and network connectivity, then retry."
         )
-    if existing_issues and len(issues) < len(existing_issues) / 2:
+    if allow_shrink:
+        return None
+    still_cited = set(numbers)
+    dropped = sorted(
+        (n for n in existing_issues if int(n) in still_cited and n not in issues),
+        key=int,
+    )
+    if dropped:
         return (
-            f"new issue set ({len(issues)} resolved) is less than half the "
-            f"size of the snapshot already on disk ({len(existing_issues)}) "
-            f"-- refusing to write; this looks like a partial `gh` failure, "
-            f"not a real mass issue-closure. Check `gh auth status` and "
-            f"network connectivity, then retry."
+            f"{len(dropped)} still-cited issue(s) have a record on disk but "
+            f"did not resolve via `gh` this run: {dropped} -- refusing to "
+            f"drop them from the snapshot (they would silently stop being "
+            f"enforced). Check `gh auth status` and network connectivity, "
+            f"then retry, or pass --allow-shrink if this is intentional."
         )
     return None
 
@@ -136,6 +158,16 @@ def _pick_generated_at(out_path: Path, issues: dict[str, str]) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out", type=Path, default=REPO / SNAPSHOT_RELPATH)
+    ap.add_argument(
+        "--allow-shrink",
+        action="store_true",
+        help=(
+            "write the snapshot even though a number that resolved on a "
+            "prior run did not resolve this time (see _refuse_reason) -- "
+            "use when that is a deliberate change (e.g. the GitHub issue "
+            "was deleted), not a `gh` auth/network hiccup."
+        ),
+    )
     args = ap.parse_args()
 
     numbers = sorted({c.issue for c in find_citations(REPO)})
@@ -157,7 +189,9 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    reason = _refuse_reason(numbers, issues, _read_existing_issues(args.out))
+    reason = _refuse_reason(
+        numbers, issues, _read_existing_issues(args.out), allow_shrink=args.allow_shrink
+    )
     if reason:
         sys.exit(f"refresh_issue_state_snapshot: {reason}")
 

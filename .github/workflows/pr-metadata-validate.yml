@@ -87,10 +87,11 @@ on:
       - 'scripts/check_doxyfile_single_source.py'
       # check_issue_citations.py (#1950) reads driver-status prose out of
       # metadata/**/*.yaml and include/alp/chips/*.h against its committed
-      # snapshot, metadata/issue-state-snapshot.json. The first two inputs
-      # are already covered by the metadata/** and include/alp/chips/**
-      # triggers above -- only the snapshot and the script itself are new
-      # here.
+      # snapshot, metadata/issue-state-snapshot.json. All three inputs are
+      # already covered by the metadata/** and include/alp/chips/**
+      # triggers above -- only the script itself is genuinely new coverage;
+      # the snapshot's own explicit entry below is redundant but kept, same
+      # as this file's style elsewhere.
       - 'scripts/check_issue_citations.py'
       - 'metadata/issue-state-snapshot.json'
   push:
@@ -165,10 +166,11 @@ on:
       - 'scripts/check_doxyfile_single_source.py'
       # check_issue_citations.py (#1950) reads driver-status prose out of
       # metadata/**/*.yaml and include/alp/chips/*.h against its committed
-      # snapshot, metadata/issue-state-snapshot.json. The first two inputs
-      # are already covered by the metadata/** and include/alp/chips/**
-      # triggers above -- only the snapshot and the script itself are new
-      # here.
+      # snapshot, metadata/issue-state-snapshot.json. All three inputs are
+      # already covered by the metadata/** and include/alp/chips/**
+      # triggers above -- only the script itself is genuinely new coverage;
+      # the snapshot's own explicit entry below is redundant but kept, same
+      # as this file's style elsewhere.
       - 'scripts/check_issue_citations.py'
       - 'metadata/issue-state-snapshot.json'
   workflow_dispatch:

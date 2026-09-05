@@ -221,6 +221,28 @@ def test_next_key_banner_not_swallowed_when_field_line_has_no_comment(tmp_path):
     assert mod.find_problems(tmp_path) == []
 
 
+def test_indentation_drift_warns_when_field_has_no_trailing_comment(tmp_path):
+    """Round-4 finding: `driver_status:` with NO trailing `#` at all (the
+    real-tree shape for `nor_flash_driver_status`/`emmc_driver_status` in
+    the E1M-V2N*/E1M-V2M* module YAMLs -- 52 of 97 driver_status fields
+    have this exact shape) must still be able to warn about a slipped
+    continuation indented deeper than the field itself, instead of the old
+    `hash_col != -1` guard silently skipping the check altogether."""
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "widget",
+        "chip_id: widget\n"
+        "driver_status: none\n"
+        "  # meant to explain the gap but never attached to the field (#1234).\n",
+    )
+    _snapshot(tmp_path, {"1234": "CLOSED"})
+
+    assert mod.find_problems(tmp_path) == []  # never read -- same documented cost
+    warnings = mod.find_warnings(tmp_path)
+    assert any("widget.yaml" in w and "no trailing comment" in w for w in warnings), warnings
+
+
 def test_one_space_indentation_drift_warns_instead_of_silently_dropping(tmp_path):
     """Reproduces the round-2 review finding literally: the field's own `#`
     sits at column 28, the very next continuation line is hand-wrapped one

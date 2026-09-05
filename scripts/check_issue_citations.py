@@ -163,7 +163,16 @@ def _iter_yaml_status_blocks(root: Path, warnings: list[str] | None = None):
     block silently, with zero diagnostic (#1950 round 3). A continuation
     indented no further than the field line's own leading whitespace is a
     different key's banner comment, not a slipped continuation, and stays
-    silent -- see `test_next_key_banner_not_swallowed_*`."""
+    silent -- see `test_next_key_banner_not_swallowed_*`.
+
+    The field line itself having NO trailing `#` at all (`hash_col == -1`,
+    true for most `driver_status:`/`nor_flash_driver_status:`/
+    `emmc_driver_status:` fields on the real tree) is the same slip, not an
+    exemption: an indented comment line right after such a field is just as
+    unreachable-without-a-warning as a one-column-short one would be, so it
+    is treated as falling short of every column rather than skipped
+    entirely (#1950 round 4) -- see
+    `test_indentation_drift_warns_when_field_has_no_trailing_comment`."""
     meta_dir = root / "metadata"
     if not meta_dir.is_dir():
         return
@@ -183,22 +192,34 @@ def _iter_yaml_status_blocks(root: Path, warnings: list[str] | None = None):
             hash_col = lines[i].find("#")
             field_indent = len(lines[i]) - len(lines[i].lstrip())
             j = i + 1
-            while j < len(lines) and hash_col != -1:
+            while j < len(lines):
                 cm = _YAML_CONT_RE.match(lines[j])
                 if not cm:
                     break
                 indent = len(cm.group(1))
-                if indent < hash_col:
+                if hash_col == -1 or indent < hash_col:
                     if warnings is not None and indent > field_indent:
-                        warnings.append(
-                            f"{relpath.as_posix()}:{j + 1}: comment "
-                            f"continuation is indented to column {indent}, "
-                            f"short of the driver_status field's own "
-                            f"comment at column {hash_col} -- treated as "
-                            f"ending the block; this line and everything "
-                            f"after it were NOT read as part of it. Align "
-                            f"it to column {hash_col} if it belongs there."
-                        )
+                        if hash_col == -1:
+                            warnings.append(
+                                f"{relpath.as_posix()}:{j + 1}: comment "
+                                f"continuation follows a driver_status field "
+                                f"with no trailing comment of its own to "
+                                f"continue -- treated as ending the block; "
+                                f"this line and everything after it were NOT "
+                                f"read as part of it. Add a `#` comment on "
+                                f"the driver_status line itself if this "
+                                f"belongs there."
+                            )
+                        else:
+                            warnings.append(
+                                f"{relpath.as_posix()}:{j + 1}: comment "
+                                f"continuation is indented to column {indent}, "
+                                f"short of the driver_status field's own "
+                                f"comment at column {hash_col} -- treated as "
+                                f"ending the block; this line and everything "
+                                f"after it were NOT read as part of it. Align "
+                                f"it to column {hash_col} if it belongs there."
+                            )
                     break
                 parts.append(cm.group(2))
                 j += 1
