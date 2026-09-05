@@ -19,8 +19,8 @@ Disjoint files cannot conflict. One file per change removes the entire class.
 
 ## How
 
-Create `changelog.d/<issue>.md`, where `<issue>` is the GitHub issue or PR
-number the entry belongs to.
+Create `changelog.d/<issue>.md`, where `<issue>` is the GitHub issue number
+the entry belongs to.
 
 ```
 changelog.d/1358.md
@@ -41,14 +41,27 @@ and keep the issue number leading:
 changelog.d/<issue>-<slug>.md
 ```
 
-`<slug>` is lowercase `[a-z0-9-]+` — short, hyphenated, descriptive (matches
-`^\d+(-[a-z0-9-]+)?\.md$`). The leading digits stay the join key back to the
-issue for `assemble_changelog.py`'s sort order and for anyone grepping
-`changelog.d/` by number; the suffix only breaks the filename tie.
+`<slug>` is lowercase alphanumeric segments joined by single hyphens — short,
+descriptive, no leading/trailing/doubled hyphen (matches
+`^\d+(-[a-z0-9]+(-[a-z0-9]+)*)?\.md$`).
 
 ```
 changelog.d/1909-diagnostic-format-uri.md
 ```
+
+**Ordering.** `assemble_changelog.py` sorts fragments by leading issue
+number, then by the full filename as a tie-breaker, so `<issue>.md` always
+sorts before `<issue>-<slug>.md` for the same issue — the plain filename is
+a strict prefix of the suffixed one, so it compares as "less". Two suffixed
+fragments for the same issue sort against each other by slug text.
+
+**Convention, not enforced.** By convention the leading digits should match
+the issue number this fragment's own `### ... (#N)` heading cites, keeping
+them the join key back to that issue for `assemble_changelog.py`'s sort
+order and for anyone grepping `changelog.d/` by number. Nothing checks that
+the two actually agree today — alp-sdk#1957 tracks adding that check — so a
+mismatched leading number folds into `CHANGELOG.md` without complaint.
+Double-check it by hand; the suffix only breaks the filename tie.
 
 The file's content is **the entry exactly as it should appear** in
 `CHANGELOG.md`, starting with its own heading line:

@@ -48,7 +48,7 @@ from pathlib import Path
 #: number (the join key back to GitHub); an optional `-slug` disambiguates a
 #: second fragment for the same issue (alp-sdk#1941) without displacing the
 #: number from the front of the filename.
-FRAGMENT_NAME_RE = re.compile(r"^\d+(-[a-z0-9-]+)?\.md$")
+FRAGMENT_NAME_RE = re.compile(r"^\d+(-[a-z0-9]+(-[a-z0-9]+)*)?\.md$")
 UNRELEASED_PREFIX = "## [Unreleased]"
 SECTION_PREFIX = "## ["
 

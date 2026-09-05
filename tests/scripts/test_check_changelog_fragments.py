@@ -61,6 +61,10 @@ def test_a_non_conforming_filename_is_flagged(tmp_path: Path) -> None:
     problems = gate.find_problems(root)
     assert len(problems) == 1
     assert "401.fixed.md" in problems[0]
+    # The docstring (lines 15-18) is the gate's user-facing contract: it
+    # promises the error names both accepted shapes. Assert the actual text,
+    # not just that the filename appears in it.
+    assert "expected `<issue>.md` or `<issue>-<slug>.md`, issue digits first" in problems[0]
 
 
 def test_a_suffixed_filename_disambiguating_a_second_fragment_passes(tmp_path: Path) -> None:

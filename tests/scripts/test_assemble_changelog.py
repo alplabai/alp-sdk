@@ -131,6 +131,44 @@ def test_a_non_numeric_filename_is_refused(tmp_path: Path) -> None:
     assert (root / "changelog.d" / "701.fixed.md").is_file()
 
 
+def test_an_uppercase_slug_is_refused(tmp_path: Path) -> None:
+    """The slug charset is lowercase-only -- `FRAGMENT_NAME_RE` must not
+    widen past `[a-z0-9]` (mutation: `^\\d+(-.+)?\\.md$` would accept this)."""
+    root = _repo(tmp_path, {"1909-Diagnostic.md": "### Fixed — Entry\n\nBody."})
+    assert ac.main(["--root", str(root)]) == 1
+    assert (root / "changelog.d" / "1909-Diagnostic.md").is_file()
+
+
+def test_an_underscore_slug_is_refused(tmp_path: Path) -> None:
+    """The slug charset is hyphenated, not underscored (mutation:
+    `^\\d+(-.+)?\\.md$` would accept this too)."""
+    root = _repo(tmp_path, {"1909-bad_slug.md": "### Fixed — Entry\n\nBody."})
+    assert ac.main(["--root", str(root)]) == 1
+    assert (root / "changelog.d" / "1909-bad_slug.md").is_file()
+
+
+def test_a_double_hyphen_slug_is_refused(tmp_path: Path) -> None:
+    """No empty slug segment -- `1909--x.md` is not a legal `<slug>`."""
+    root = _repo(tmp_path, {"1909--x.md": "### Fixed — Entry\n\nBody."})
+    assert ac.main(["--root", str(root)]) == 1
+    assert (root / "changelog.d" / "1909--x.md").is_file()
+
+
+def test_a_trailing_hyphen_slug_is_refused(tmp_path: Path) -> None:
+    """No empty trailing slug segment -- `1909-x-.md` is not a legal `<slug>`."""
+    root = _repo(tmp_path, {"1909-x-.md": "### Fixed — Entry\n\nBody."})
+    assert ac.main(["--root", str(root)]) == 1
+    assert (root / "changelog.d" / "1909-x-.md").is_file()
+
+
+def test_a_purely_numeric_slug_is_accepted_and_sorts_by_leading_issue(tmp_path: Path) -> None:
+    """`1909-1932.md` reads like a range but is a legal (if confusing) slug --
+    it is accepted and, per `_fragment_sort_key`, still sorts under issue 1909,
+    not 1932. Pinned here so that behaviour cannot silently drift either way."""
+    root = _repo(tmp_path, {"1909-1932.md": "### Fixed — Entry\n\nBody."})
+    assert ac.main(["--root", str(root)]) == 0
+
+
 def test_missing_unreleased_header_refuses_rather_than_guessing(tmp_path: Path) -> None:
     root = _repo(
         tmp_path,
@@ -202,6 +240,23 @@ def test_suffixed_fragment_sorts_by_leading_issue_number(tmp_path: Path) -> None
     assert ac.main(["--root", str(root)]) == 0
     text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
     assert text.index("Body two.") < text.index("Body ten.")
+
+
+def test_a_same_issue_collision_pair_sorts_deterministically(tmp_path: Path) -> None:
+    """`_fragment_sort_key`'s `stem` element is the ONLY thing that orders two
+    fragments for the same issue -- without it, `sorted()` is stable and the
+    result depends on whatever order the filesystem enumerated `*.md` in,
+    which is not guaranteed across machines. Feed the key function the
+    collision pair in the "wrong" (suffixed-first) order and require it to
+    still come out plain-before-suffixed, regardless of input order.
+
+    Mutation: `(0, int(m.group(1)), stem)` -> `(0, int(m.group(1)), "")`
+    makes both keys equal, `sorted()` then preserves the input order given
+    here (suffixed first), and this assertion goes RED.
+    """
+    paths = [Path("1909-diagnostic-format-uri.md"), Path("1909.md")]
+    ordered = sorted(paths, key=ac._fragment_sort_key)
+    assert [p.name for p in ordered] == ["1909.md", "1909-diagnostic-format-uri.md"]
 
 
 def test_dry_run_writes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
