@@ -10586,6 +10586,412 @@ only ever hand-built the first handle and called `alp_ble_open()`
 single-threaded) plus a stray-third-close underflow check; both
 mutation-proved against the round-1 shapes (fail) and the fix (pass).
 
+### Added — the RZ/V2N on-die DRP-AI3 NPU backend, opt-in and BENCH-UNVERIFIED (#1145)
+
+`src/yocto/inference_drpai.cpp` existed but could not have worked: it passed
+`LoadModel()` a hard-coded working-memory base of `0x80000000`, which on the
+E1M-V2N SoM is `mmp_reserved` — the mmngr video buffer pool — not the DRP-AI
+carve-out at `0xd0000000`. That is a memory-corruption class bug, not a
+failed-open: the NPU DMAs against that base directly, so a wrong value
+scribbles over the video pipeline silently. `_drpai_mem_start()` now asks the
+driver via `DRPAI_GET_DRPAI_AREA` on a fresh `/dev/drpai0` fd, so the address
+tracks board DT instead of duplicating it. Fresh per call is deliberate: the
+region cursor is per-fd state (`get_drpai_area_count`, zeroed in
+`drpai_open()`) and alternates once `drpai_region2_size != 0`, so only a
+fresh fd reliably yields region 1. It is also not free — `drpai_open()` takes
+a 1000 ms `down_timeout()` and the matching `close()` resets the DRP-AI when
+it is the sole opener — so this runs once at open() time and never per
+inference.
+
+Driver failures are mapped rather than flattened, so a caller can tell "no
+DRP-AI on this board" from "busy, retry": `ETIMEDOUT` → `ALP_ERR_TIMEOUT`
+(the driver semaphore expired), `EINPROGRESS` and `EADDRNOTAVAIL` →
+`ALP_ERR_BUSY` (the V2N shared-memory exclusion lock is contended or already
+held), and everything else → `ALP_ERR_IO` — including the `ENOENT` of an
+absent `/dev/drpai0`, and a successful ioctl reporting a zero-sized area,
+which is treated as a hard failure rather than a DMA at 0.
+
+**The shipped dtb changes only when `meta-rz-drpai` is in `bblayers.conf`**,
+and that conditional is the load-bearing decision in the DT work. The
+pristine linux-renesas tree has no `drpai0` label at all: the node, the
+label and the driver behind them are created by that layer's
+`0001-add-drpai-property-to-devicetree.patch` against `r9a09g056.dtsi`,
+which ships the node `status = "disabled"`. The layer is a soft dep
+(`LAYERRECOMMENDS_alp-sdk`) on purpose — the AEN and NX91 machines have no
+DRP-AI silicon and must not be forced to carry an RZ/V-only vendor layer —
+so an unconditional `&drpai0` override would abort `dtc` for every board
+that includes the SoM dtsi, taking the V2M dtb down with the V2N one.
+
+So `e1m-v2n-som.dtsi` gains an unconditional
+`#include "e1m-v2n-drpai.dtsi"`, and the `linux-renesas` bbappend decides
+what that filename contains: layer present → the real override
+(`memory-region = <&drp_reserved>`,
+`memory-shared-for-drpai-ext-cont = <&shared_drp_reserved>`,
+`status = "okay"`); layer absent → a comment-only stub, and the dtb is
+byte-unchanged from before. The gate is `ALP_DRPAI_LAYER`, read from
+`BBFILE_COLLECTIONS` but reduced to `0`/`1` before it reaches the signature
+(`vardepvalue`), so adding an unrelated layer does not re-run the kernel
+configure; `do_configure:prepend()` branches on that variable rather than on
+the unpacked file, because dropping the layer from `bblayers.conf` does not
+scrub a previously-unpacked `${WORKDIR}`.
+
+The reserved regions themselves were already in `e1m-v2n-som.dtsi` and
+bought nothing on their own — nothing claimed them, `/dev/drpai0` never
+appeared, and every `alp_inference_open(.backend = DRPAI)` failed before it
+reached the runtime. Both memory properties are set, not just
+`memory-region`: `drpai-if.c` defines `ENABLE_DRP_SUPPORT_SHARED_MEMORY`
+inside its `CONFIG_ARCH_R9A09G056` branch, so on V2N a probe without
+`memory-shared-for-drpai-ext-cont` hard-fails `-ENOMEM` instead of degrading
+to a single-region mode.
+
+A build that cannot supply the stack now behaves like one.
+`src/yocto/CMakeLists.txt` used to add `inference_drpai.cpp` and define
+`ALP_SDK_USE_DRPAI_V2N=1` up front and only then `message(WARNING)` about
+missing libraries — which is not a degrade at all, since the TU still
+`#include`s headers that may be absent and still references symbols nothing
+provides. It now probes the whole stack first — `MeraDrpRuntimeWrapper.h`,
+`<linux/drpai.h>` (previously unprobed, and reachable with no PACKAGECONFIG
+in play), the `tvm/runtime/profiling.h` + `dlpack/dlpack.h` +
+`dmlc/logging.h` header tree `MeraDrpRuntimeWrapper.h` transitively
+hard-includes (previously unprobed too — a checkout with the wrapper header
+but an uninitialised `tvm` submodule sailed through the old gate and died at
+compile), `mera2_runtime`, `mera2_plan_io` (which the link needs and the old
+list omitted), `drp_tvm_rt`, `tvm_runtime` — nine inputs in all — and adds
+the source and the define only if all nine resolve.
+
+**What a miss costs depends on who asked for the backend**, and the new
+`ALP_SDK_DRPAI_REQUIRED` option says which. OFF, the default, is the safe
+choice for a builder who passes `-DALP_SDK_USE_DRPAI_V2N=ON` to a direct
+plain-CMake configure by hand, outside any recipe: an incomplete host
+degrades cleanly instead of hard-failing configure. (This is *not* about
+`scripts/alp_orchestrate/kconfig.py`'s `capabilities.drp_ai` auto-emit —
+that mechanism does not reach this option for any Yocto A55 build today:
+`alp_project.py --emit cmake-args` refuses `os: yocto` cores, `--emit
+yocto-conf` never emits the flag, and the one core class the auto-emit can
+reach, the M33 Zephyr slice, never runs this listfile at all. Earlier text
+in this repo cited that mechanism as the reason for the OFF default; it
+doesn't fire, so it wasn't a real reason, and the default now stands on the
+plain-CMake case alone.) ON is the explicit opt-in, and there a miss is a
+`FATAL_ERROR` naming every missing piece, because handing back a
+`libalp_sdk.so` that silently lacks the backend the builder named by hand is
+the wrong answer.
+
+`alp-sdk_0.6.bb` is that opt-in: a new `PACKAGECONFIG[drpai]`, absent from
+the default `PACKAGECONFIG ??= "mqtt security audio"`, which passes
+`-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON` and adds `drpai` +
+`lib-tvm` to `DEPENDS` in one switch, so the flags and the deps cannot drift
+apart. That covers two of the nine inputs — `${includedir}/linux/drpai.h`
+and `libtvm_runtime.so`. The switch is **not** self-contained, and the
+recipe now says so: `MeraDrpRuntimeWrapper.h`, the TVM header tree it
+hard-includes, and `mera2_runtime`, `mera2_plan_io`, `drp_tvm_rt` are
+packaged by no recipe in any layer. They exist only inside a built
+`rzv_drp-ai_tvm` (RUHMI) checkout under `obj/build_runtime/v2h/lib` and
+`apps/` + `tvm/` for the headers — RZ/V2N consumes the v2h runtime build;
+`obj/build_runtime/v2m` is the older Renesas RZ/V2M and is never ours — and
+the builder hand-stages them into the recipe sysroot before enabling this
+PACKAGECONFIG. `ALP_DRPAI_TVM_APPS` + `CMAKE_LIBRARY_PATH` do **not** work
+for this: poky's `cmake.bbclass` sets `CMAKE_FIND_ROOT_PATH_MODE_LIBRARY`
+and `CMAKE_FIND_ROOT_PATH_MODE_INCLUDE` to `ONLY`, so every `find_path()`/
+`find_library()` — hints included — is re-rooted under the recipe's own
+sysroot and a path outside it is never tried; that env-var pair is a
+plain-CMake-only hint (see `meta-alp-sdk/README.md`'s "Making the RUHMI
+checkout visible to the bake"). The consequence is
+spelled out in the recipe because it is silent: on the scarthgap poky in use
+(`DISTRO_VERSION 5.0.11`) an unresolvable `DT_NEEDED` is a `bb.note` and
+records no RDEPENDS, so the `file-rdeps` QA check has nothing to fire on, an
+enabled bake goes green, and `ld.so` refuses `libalp_sdk.so` on target. No
+`INSANE_SKIP` was added — none is required today, and one would suppress the
+single diagnostic that exists.
+
+The stale "DRP-AI3 is a `NOT_IMPLEMENTED` stub today — issue #58" claim, and
+its neighbours in the same family, are corrected in all six places that
+carried them: `alp-sdk_0.6.bb`, the four RZ/V machine confs
+(`e1m-v2n101-a55.conf`, `e1m-v2n102-a55.conf`, `e1m-v2m101-a55.conf`,
+`e1m-v2m102-a55.conf`) and `meta-alp-sdk/README.md`. The V2M pair carried a
+different falsehood — that the build "compiles in dispatchers for both" and
+offers DRP-AI3 "as a fallback for ops the NPU doesn't accelerate", when the
+recipe passes no `ALP_SDK_USE_DEEPX_DXM1` either — and `e1m-v2n102-a55.conf`
+cited a `DEPENDS:append:e1m-v2n102` that has never existed in the recipe. The
+README's "DRP-AI is fully covered by `meta-rz-drpai`" is replaced by the four
+things that layer actually supplies (driver, `drpai0` DT label, UAPI header,
+`libtvm_runtime.so`), and its "vendor NPU runtimes are not build-time
+dependencies of the `alp-sdk` library" is scoped: still true for DEEPX, which
+compiles against an in-tree stub header, false for DRP-AI3, the one backend
+with real build-time deps. Every corrected site now names **which** of the two
+enable paths — the `kconfig.py` auto-emit or the recipe PACKAGECONFIG — it
+means.
+
+Honest in the other direction as well: **DRP-AI has never run on silicon,
+and no `drpai`-enabled `alp-image-edge` bake has completed on any host
+either.** See the `mera2-drpai-tvm` packaging entry below for exactly what
+IS established (`do_compile` succeeds cross-compiling
+`apps/MeraDrpRuntimeWrapper.cpp` on an x86_64 host up to the final aarch64
+link) and what is UNTESTED (the final link against the real aarch64 RUHMI
+payload, packaging QA, and symbol resolution). Everything above is
+code-complete and BENCH-UNVERIFIED; on-silicon execution remains
+unverified.
+
+### Added — `mera2-drpai-tvm` closes the `PACKAGECONFIG[drpai]` packaging gap (#1145)
+
+`alp-sdk_0.6.bb`'s `PACKAGECONFIG[drpai]` supplied only `<linux/drpai.h>`
+(via `drpai`) and `libtvm_runtime.so` (via `lib-tvm`) — two of the nine
+inputs `src/yocto/CMakeLists.txt` probes for. The other seven —
+`MeraDrpRuntimeWrapper.h`, the `tvm/runtime/profiling.h` + `dlpack/dlpack.h`
++ `dmlc/logging.h` header tree it hard-includes, and `libmera2_runtime.so` /
+`libmera2_plan_io.so` / `libdrp_tvm_rt.so` — were packaged by no recipe
+anywhere, so an enabled bake linked `libalp_sdk.so` against DT_NEEDED
+entries no package in the image provided; the recipe's own RESIDUAL GAP
+comment already spelled out that the failure would surface as `ld.so`
+refusing to load the library on target.
+
+New recipe `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb`
+closes the gap without vendoring anything: the MERA2/TVM libraries and
+headers are Renesas/EdgeCortix account-gated prebuilts that must never land
+in this public repo, so the recipe has an empty `SRC_URI` and only *stages*
+them out of a built `rzv_drp-ai_tvm` (RUHMI) checkout the builder already
+has on disk, pointed to by a new `RUHMI_DRPAI_TVM_DIR` variable — the same
+"public shell over a local, licensed payload" shape `recipes-deepx/dx-rt`
+already uses for the DEEPX runtime, but staging-only rather than
+permanently `SKIP_RECIPE`d, since a builder who sets the variable can
+actually build it. `do_install` fails loudly (`bb.fatal`) rather than
+producing an empty package when the variable is unset, the checkout is
+missing the payload, or `tvm/` was left as an uninitialised submodule; it
+also refuses a `v2m` runtime build by construction, since it only ever
+reads `obj/build_runtime/v2h/lib` (RZ/V2N; `v2m` is the older, different
+Renesas RZ/V2M SoC). `LICENSE = "CLOSED"` — there is no redistributable
+license text this recipe could checksum — and `EXCLUDE_FROM_WORLD = "1"`
+keeps a bare `bitbake world` from tripping the fatal by default.
+
+**First cut of this recipe staged only three of the eight libraries the
+runtime actually needs, and shipped even those into the wrong package —
+both would surface as `do_package_qa` failures on an enabled bake, not
+just on static inspection.** The two-line takeaway this
+CHANGELOG entry previously carried (three libraries, gap closed) was
+wrong on both counts:
+
+- **Runtime closure is eight libraries, not three.**
+  `obj/build_runtime/v2h/lib/` in a built RUHMI checkout holds exactly
+  eight `.so` files. `src/yocto/inference_drpai.cpp` links three of them
+  directly (`libmera2_runtime.so`, `libmera2_plan_io.so`,
+  `libdrp_tvm_rt.so`), but those three in turn DT_NEED the other five
+  (`libdrp_rt.so`, `libacl_rt.so`, `libarm_compute.so`,
+  `libarm_compute_core.so`, `libarm_compute_graph.so`) — Arm Compute
+  Library plus the DRP runtime shim. Omitting them passes `do_configure`
+  and `do_compile` (the link line only names three) but fails
+  `do_package_qa`'s `file-rdeps` check with `no providers found in
+  RDEPENDS` for each missing `.so`. The recipe now stages all eight.
+  `obj/build_runtime/v2h/lib/` also carries three non-library files
+  (`log_out.bin`, `softmax_out.bin`, `split_out.bin`) — RUHMI's own
+  sample-output fixtures, referenced by no DT_NEEDED entry or CMake
+  probe — which the recipe deliberately leaves unstaged.
+- **Two more runtime deps live outside RUHMI entirely.**
+  `libmmngr.so.1` / `libmmngrbuf.so.1`, DT_NEEDED by two of the eight
+  libraries, are provided by meta-rz-drpai's `mmngr-user-module` /
+  `mmngrbuf-user-module` recipes, not by RUHMI. `mera2-drpai-tvm` now
+  carries `RDEPENDS:${PN} += "mmngr-user-module mmngrbuf-user-module
+  kernel-module-mmngr"` — the third because the two user-space libraries
+  are ioctl wrappers around `/dev/mmngr`, which only that kernel module
+  provides; `file-rdeps` cannot ask for it on its own since a kernel
+  module never shows up as a DT_NEEDED entry, but it is required all the
+  same. `alp-image-edge.bb` was already installing `kernel-module-mmngr`
+  explicitly (worked around the fact that meta-rz-drpai's DRP-AI payload
+  only hooks `core-image-%`, which `alp-image-edge` doesn't match); the
+  new recipe-level RDEPENDS is a harmless duplicate for that image and
+  makes the recipe correct standalone for any other image that pulls it
+  in.
+- **The three originally-staged libraries were landing in `-dev`, not
+  the main package, regardless of `FILES:${PN} += ...`.** Bitbake's
+  default `PACKAGES` order lists `${PN}-dev` ahead of `${PN}`, and
+  `${PN}-dev`'s own built-in `FILES` default already globs
+  `${libdir}/*.so` — so every unversioned `.so` this recipe staged was
+  claimed by `-dev` before `FILES:${PN}` was ever consulted. That would
+  surface as the `do_package_qa` error `-dev package
+  mera2-drpai-tvm-dev contains non-symlink .so '/usr/lib/libmera2_runtime.so'`,
+  followed by `file-rdeps` failures on that same misplaced package. The
+  fix redefines (does not append to) `FILES:${PN}-dev = "${includedir}"`
+  — this recipe never ships a `.la`/`.a`/`.pc`/cmake file, so
+  headers-only is a complete definition — which drops the default `.so`
+  glob and lets `FILES:${PN}` claim the libraries as intended. With
+  nothing left for `-dev` to misclassify, `insane.bbclass`'s `dev-so`
+  QA check no longer fires, so the `INSANE_SKIP:${PN} += "dev-so"` this
+  entry previously added (on the wrong package suffix besides — that
+  skip targets `${PN}`, and the QA check runs against `${PN}-dev`) is
+  removed rather than kept as an unneeded, mis-scoped suppression.
+
+`alp-sdk_0.6.bb`'s RESIDUAL GAP comment and `meta-alp-sdk/README.md` are
+both corrected to describe this real, eight-library-plus-three-RDEPENDS
+closure — both previously said "three libraries, gap closed," which
+overstated it the same way this entry did.
+
+**Packaging is fixed on paper; no bake has confirmed it.** No
+`drpai`-enabled `alp-image-edge` bake has completed on any host yet — see
+`mera2-drpai-tvm_2.7.0.bb` for exactly what IS established (`do_compile`
+succeeds cross-compiling `apps/MeraDrpRuntimeWrapper.cpp` on an x86_64
+host up to the final aarch64 link) and what is UNTESTED (the final link
+against the real aarch64 RUHMI payload, packaging QA, and whether
+`libalp_sdk.so`'s `DT_NEEDED` on `libmera_drpai_wrapper.so` actually
+resolves). The MERA2/TVM closure this recipe packages is nine libraries,
+not ten (eight staged verbatim, one — `libmera_drpai_wrapper.so` —
+compiled from RUHMI's own glue source; `libtvm_runtime.so` is a tenth
+input but comes from `meta-rz-drpai`'s `lib-tvm`, not this recipe).
+**BENCH-UNVERIFIED**: on-silicon inference has never
+run — the image has not booted on a board — and the compiled
+YOLOX-S/VOC model was quantised against 8 random frames, not RUHMI's
+real calibration set (its 200 images ship as 129-byte Git LFS pointer
+stubs in this checkout), so quantisation accuracy is unvalidated.
+
+### Added — `v2n-drpai-inference`, the exhibition-booth DRP-AI3 demo, and its Yocto packaging (#1145, #1268)
+
+`examples/v2n/v2n-drpai-inference` runs a compiled `drpai_dir` model bundle
+through `<alp/inference.h>` (`backend = ALP_INFERENCE_BACKEND_DRPAI`) against
+one or more raw pre-processed 640x640x3 float32 NHWC frames given on argv,
+and prints per-frame timing plus the top-5 largest raw output values (see the
+README's "Output: raw scores, not decoded detections" -- the compiled
+YOLOX-S/VOC bundle is fully NPU-fused, so there is no decoded detection to
+print, only the documented raw-tensor fallback). Same NOSUPPORT-on-missing-
+backend contract shape as the `v2n-m1-deepx-inference` sibling.
+
+The new `alp-drpai-inference_0.6.bb` recipe (`meta-alp-sdk/recipes-examples/`)
+builds it and packages the binary as `alp-drpai-inference`, `IMAGE_INSTALL`ed
+into `alp-image-edge` on every RZ/V2N-family machine (`e1m-v2n101-a55`,
+`e1m-v2n102-a55`, `e1m-v2m101-a55`, `e1m-v2m102-a55`) by the SAME
+`ALP_ENABLE_DRPAI = "1"` opt-in that already gates the `drpai` PACKAGECONFIG
+and the `lib-tvm kernel-module-mmngr` payload -- one switch, so the demo
+binary cannot drift out of sync with the backend it needs. Like
+`alp-lvgl-dashboard_0.6.bb`, the recipe's `SRC_URI` tracks alp-sdk's `dev`
+branch (this example is not on `main` yet); flip `branch=dev` to
+`branch=main` at the next promotion.
+
+### Fixed — `mera2-drpai-tvm` staged a header with no library behind it; `libalp_sdk.so` now fails its OWN link instead of a downstream consumer's (#1145)
+
+**Third correction to this closure, and this one was not caught by
+`do_package_qa` at all — it surfaced via the direct plain-CMake path
+(`-DALP_SDK_USE_DRPAI_V2N=ON`, which predates this recipe), not a Yocto
+bake.** A `libalp_sdk.so` built that way linked "successfully" (a shared
+library permits undefined symbols by default), but a separate consumer
+(`alp-perception`) linking against it hit:
+
+```
+libalp_sdk.so: undefined reference to `MeraDrpRuntimeWrapper::MeraDrpRuntimeWrapper()'
+libalp_sdk.so: undefined reference to `MeraDrpRuntimeWrapper::Run()'
+libalp_sdk.so: undefined reference to `MeraDrpRuntimeWrapper::SetInput(int, float const*)'
+libalp_sdk.so: undefined reference to `MeraDrpRuntimeWrapper::GetInputInfo[abi:cxx11]()'
+```
+
+**Root cause: `MeraDrpRuntimeWrapper` was never a prebuilt library at all.**
+`mera2-drpai-tvm` staged `MeraDrpRuntimeWrapper.h` — the declarations — and
+the eight `obj/build_runtime/v2h/lib/*.so` files, and `nm -D
+--defined-only` across all eight confirms the class's own symbols are in
+none of them. They are application-side glue *source*
+(`apps/MeraDrpRuntimeWrapper.cpp`, 18506 bytes in a real RUHMI checkout)
+that every RUHMI sample app compiles for itself
+(`apps/CMakeLists.txt` lists the `.cpp` directly in every executable's
+`SRC`). `src/yocto/inference_drpai.cpp` `#include`s the header and calls
+the class, but nothing compiled the `.cpp` — and a shared library permits
+undefined symbols at link time by default, so `libalp_sdk.so` built
+"successfully" while shipping unusable.
+
+**Fix chosen: compile the glue once, in the recipe, not per consumer.**
+`mera2-drpai-tvm` gets a real `do_compile` (previously `noexec`, prebuilt
+payload only) that builds `apps/MeraDrpRuntimeWrapper.cpp` into a ninth
+library, `libmera_drpai_wrapper.so`, packaged alongside the other eight;
+`src/yocto/CMakeLists.txt`'s `ALP_SDK_USE_DRPAI_V2N` block gains a tenth
+probe (`find_library(MERA_DRPAI_WRAPPER_LIB mera_drpai_wrapper)`) and links
+it. This was the preferred of two options (over adding the `.cpp` straight
+to `src/yocto/CMakeLists.txt`'s own `target_sources`): it is a
+library-packaging concern, keeps one copy of the vendor glue instead of
+every consumer recompiling it, and the recipe already stages everything
+else this same source needs from `RUHMI_DRPAI_TVM_DIR`.
+
+**Compiling the class body needs substantially more than the four include
+dirs a header-only consumer of `MeraDrpRuntimeWrapper.h` needs**
+(`apps/`, `tvm/include`, the nested `tvm/3rdparty/dlpack/include`,
+`tvm/3rdparty/dmlc-core/include`). The `.cpp` itself hard-includes
+`apps/include/mera_runtime.h` → `apps/include/rt.h` +
+`apps/include/mera2_runtime_plan/plan_io.h` (the MERA2 in-process runtime
+API — previously unstaged), `<spdlog/spdlog.h>` + `<asio.hpp>` +
+`<asio/io_context.hpp>` (new build-time `DEPENDS = "spdlog asio"`, both
+reachable through meta-oe, already a hard layer dep — no `bblayers.conf`
+change needed), and `tvm/3rdparty/compiler-rt/builtin_fp16.h`. On top of
+that, the constructor's `int device_type_{kDLDrpAi};` default member
+initialiser needs `kDLDrpAi`, an enum value RUHMI's own *upstream*
+`tvm/include/tvm/runtime/c_runtime_api.h` does not define — it is a
+Renesas extension that RUHMI's `setup/README.md` installs with `cp
+${TVM_ROOT}/setup/include/*.h ${TVM_ROOT}/tvm/include/tvm/runtime/` as a
+manual install-time step, not a submodule pin, so a checkout whose
+libraries are already built can still carry the pristine header. `git
+status` on the checkout would never flag this as missing. `do_compile`
+never mutates the builder's own checkout in place (`RUHMI_DRPAI_TVM_DIR`
+may be reused across bakes) — it copies `tvm/include` into a private
+`WORKDIR` tree and overlays `setup/include/*.h` onto that copy before
+compiling, mirroring RUHMI's own install step without touching the
+source checkout. `do_install` applies the same overlay to the SHIPPED
+headers, so a consumer of this package's sysroot sees the patched
+`tvm/runtime/*.h` too, not the pristine one still on disk in the
+checkout.
+
+**THE DURABLE FIX**, so this entire class of bug fails loudly at
+`alp-sdk`'s own link from here on, not a downstream consumer's:
+`libalp_sdk.so`'s link (`CMakeLists.txt`, the top-level `add_library(alp_sdk
+SHARED)` branch) now carries `-Wl,--no-undefined` (via
+`target_link_options`, GNU ld / lld only — guarded on `UNIX AND NOT APPLE`).
+Checked first whether anything in this tree legitimately relies on
+undefined symbols being tolerated (a `dlopen()` pattern, a weak *reference*
+left intentionally unresolved): grepping `dlopen` and
+`__attribute__((weak))` across `src/` turns up none — every weak symbol
+present (`cc3501e_proxy.c`'s GPIO route table, `zephyr_drv.c`'s
+`alp_z_gpio_resolve` fallback, `update_log`'s TF-M secure-service seam) is
+a weak *definition* with a real fallback body, not an unresolved weak
+reference, so none is affected by the flag; nothing needed scoping the fix
+to just the DRP-AI configuration. Verified with a real local build:
+`cmake -DALP_OS=yocto -DALP_SDK_BUILD_SHARED=ON` (the same configuration
+`pr-plain-cmake.yml`'s `find-package-consumer` job runs in CI) links clean
+with the flag active and the default backend set (no DRP-AI/DEEPX), and
+`readelf`/`link.txt` confirm `--no-undefined` actually reached the linker
+invocation.
+
+**Proof level, stated precisely because this closure has been overstated
+twice already:** a real (non-BitBake) `g++` compile of
+`apps/MeraDrpRuntimeWrapper.cpp` was run by hand against a real RUHMI
+checkout's headers (plus Ubuntu's `libspdlog-dev`/`libasio-dev` standing in
+for meta-oe's) and produced a valid object file; `nm` confirms
+`MeraDrpRuntimeWrapper::{ctor,Run,SetInput,GetInputInfo}` as defined
+global `T` symbols in it — the exact four the bug report named as
+undefined. The FINAL LINK against the real `obj/build_runtime/v2h/lib`
+libraries could not be exercised on that x86_64 dev host (`ld: skipping
+incompatible ... -lmera2_runtime` — an architecture mismatch against the
+real aarch64 RUHMI libraries, not a symbol error), and no `bitbake` run of
+this recipe, with or without the new `do_compile` step, has happened at
+all. **This entry is unverified until the next `drpai`-enabled bake**;
+treat it as proven only at the "source compiles cleanly against the real
+vendor headers" level, nothing further.
+
+### Fixed — `do_generate_toolchain_file`'s stamp outlives the file it writes, so an `alp-sdk` reconfigure could never recover
+
+`cmake.bbclass` sequences its toolchain-file generator as
+`addtask generate_toolchain_file after do_patch before do_configure`, and
+`do_patch` is that task's only dependency. CI bakes this recipe under
+`INHERIT += "externalsrc"`, which `deltask`s `do_patch` — and `deltask` also
+strips the deleted task out of every other task's deps, so
+`do_generate_toolchain_file` keeps its `before do_configure` ordering edge and
+ends up with no task dependencies at all. `WORKDIR` sits in
+`basehash_ignore_vars`, so its stamp becomes a pure function of toolchain
+variables that never change: once stamped, it can never go stale. There is no
+sstate to restore `${WORKDIR}` from either, since `externalsrc` sets
+`SSTATE_SKIP_CREATION = "1"`. `do_configure`, meanwhile, is forced to re-run
+on every source change by `externalsrc`'s `do_configure[file-checksums]`. So
+the moment anything removes `${WORKDIR}/toolchain.cmake` the pair
+desynchronises permanently and every subsequent configure dies with
+`Could not find toolchain file`, then `CMAKE_C_COMPILER not set, after
+EnableLanguage`.
+
+`alp-sdk_0.6.bb` now sets
+`do_configure[prefuncs] += "do_generate_toolchain_file"`, rewriting the file
+immediately before the task that reads it — idempotent, self-healing, and
+poky's own idiom for materialising a `${WORKDIR}` input at configure time
+(`autotools.bbclass`, `waf.bbclass`, `recipes-kernel/perf/perf.bb`).
+Unrelated to the DRP-AI work above; it is simply where it surfaced.
+
 ### Fixed — `test-all.sh` ran 1 of 34 required gate scripts on Windows (#1109)
 
 `scripts/quality_tasks.py --gate-scripts` wrote CRLF line endings on
