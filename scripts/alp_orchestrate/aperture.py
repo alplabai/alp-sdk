@@ -96,54 +96,64 @@ def classify_region(
     """Classify one `memory_map:` row against the SoC's declared aperture
     (#1365 split B).
 
-    Four verdicts, in priority order:
+    Four verdicts. Containment is tested BEFORE `is_preset_authored` is
+    ever consulted -- a derived row's extent can still prove `"flash"`,
+    and skipping straight to `"ram"` for every non-authored row would
+    discard that proof in the exact direction this module exists to
+    protect (containment is ONE-SIDED: inside proves flash, outside
+    proves nothing -- it does not follow that "not proven flash" means
+    "safe to call RAM without looking"). Order of evaluation:
 
-      - `"unresolved"` -- the region's own `base` doesn't resolve, OR no
-        aperture is declared for this SoC at all (`aperture is None`).
-        There is nothing to compare in either case; callers must honour an
-        authored flag (`write_authority`, or the legacy `carveout`) if one
-        is present rather than guess (ADR-0034 clause 4). This is also
-        what makes split B a provable no-op on every non-Alif SoM: with no
-        declared aperture, EVERY row on that SoM lands here, so a caller
-        that special-cases `aperture is None` before ever calling this
-        function reproduces the pre-split-B behaviour byte-for-byte.
+      1. `"unresolved"` -- the region's own `base` doesn't resolve, OR no
+         aperture is declared for this SoC at all (`aperture is None`).
+         There is nothing to compare in either case; callers must honour
+         an authored flag (`write_authority`, or the legacy `carveout`)
+         if one is present rather than guess (ADR-0034 clause 4). This is
+         also what makes split B a provable no-op on every non-Alif SoM:
+         with no declared aperture, EVERY row on that SoM lands here, so
+         a caller that special-cases `aperture is None` before ever
+         calling this function reproduces the pre-split-B behaviour
+         byte-for-byte.
 
-      - `"ram"` -- the region was NOT authored by the SoM preset itself
-        (a SoC-level `memory_regions` row from soc-spec-v1, or a row
-        `alp_project_loader.resolve_memory_map`'s derivation branch built
-        from the silicon variant). RAM by construction, needs no
-        authority -- these rows are what keep every V2N/V2M/NX9101
-        derivation byte-identical.
+      2. `"flash"` -- the region's resolved extent is CONTAINED in the
+         aperture (including the whole-device alias case, extent ==
+         aperture exactly, e.g. `mram_main` once its `base` stops being
+         `"TBD"`). Containment is proof regardless of authorship: the
+         on-die MRAM aperture holds nothing else, so a DERIVED row that
+         happens to sit inside it is flash too, not RAM by default.
 
-      - `"flash"` -- the region's resolved extent is CONTAINED in the
-        aperture (including the whole-device alias case, extent ==
-        aperture exactly, e.g. `mram_main` once its `base` stops being
-        `"TBD"`). Containment is proof: the on-die MRAM aperture holds
-        nothing else.
+      3. `"ram"` -- containment did NOT prove flash (the extent lies
+         outside the aperture), AND the region was NOT authored by the
+         SoM preset itself (a SoC-level `memory_regions` row from
+         soc-spec-v1, or a row `alp_project_loader.resolve_memory_map`'s
+         derivation branch built from the silicon variant). RAM by
+         construction, needs no authority -- these rows are what keep
+         every V2N/V2M/NX9101 derivation byte-identical.
 
-      - `"unclassified"` -- the region resolves a base OUTSIDE the
-        aperture. Containment is ONE-DIRECTIONAL (#1365 split A/B):
-        outside proves NOTHING -- Ensemble's OSPI XIP windows sit outside
-        `[soc_flash_base, ...)` and are still flash, and the same OSPI0
-        controller carries a HyperRAM alongside the NOR on a different
-        chip_select. A preset-authored row landing here needs
-        `write_authority: customer_runtime` to be IPC-eligible (P1); a
-        future authored OSPI XIP row must NOT silently become an IPC
-        candidate just because it resolves outside the aperture.
+      4. `"unclassified"` -- containment did NOT prove flash, and the
+         region WAS authored by the SoM preset. Containment is
+         ONE-DIRECTIONAL (#1365 split A/B): outside proves NOTHING --
+         Ensemble's OSPI XIP windows sit outside `[soc_flash_base, ...)`
+         and are still flash, and the same OSPI0 controller carries a
+         HyperRAM alongside the NOR on a different chip_select. A
+         preset-authored row landing here needs `write_authority:
+         customer_runtime` to be IPC-eligible (P1); a future authored
+         OSPI XIP row must NOT silently become an IPC candidate just
+         because it resolves outside the aperture.
     """
     ext = region_extent(region)
     if ext is None:
         return "unresolved"
     if aperture is None:
         return "unresolved"
-    if not is_preset_authored:
-        return "ram"
     lo, hi = ext
     full_lo, full_hi = aperture
     if lo == full_lo and hi == full_hi:
         return "flash"  # whole-device alias -- the device itself
     if lo >= full_lo and hi <= full_hi:
         return "flash"  # strictly contained -- a partition inside the device
+    if not is_preset_authored:
+        return "ram"  # outside the aperture, and not preset-authored
     return "unclassified"  # outside the aperture -- proves nothing
 
 
@@ -156,15 +166,26 @@ def is_partition_inside_aperture(
 
     True when the region's extent is a PROPER subset of `aperture` (e.g.
     AEN's `mcuboot` / `he_slot0` / `hp_slot0` / `reserved` / `storage` /
-    `atoc`, each a fine-grained slice of the on-die MRAM window); False
-    when the extent equals the aperture exactly (the region IS the
-    device -- `mram_main`, once resolved) or lies outside it entirely
-    (a legitimate device the aperture doesn't cover, e.g. an OSPI part).
-    None when the extent or the aperture itself can't be resolved --
-    callers must fall back to the legacy `carveout:` flag rather than
-    guess (ADR-0034 clause 4), which is also what keeps this a no-op
-    wherever the aperture never resolves (every non-Alif SoM) or the
-    row's own base is still TBD (`mram_main` today).
+    `atoc`, each a fine-grained slice of the on-die MRAM window). False
+    ONLY when the extent equals the aperture exactly (the region IS the
+    device -- `mram_main`, once resolved) -- that is the one case
+    containment proves is a device, not a partition. Everything else
+    is None, including when the extent lies OUTSIDE the aperture
+    entirely: containment is ONE-SIDED (this module's governing rule) --
+    inside proves flash, outside proves NOTHING, so a region outside the
+    aperture might legitimately be a device of its own (e.g. an OSPI
+    part) or might not; this function cannot tell, and returning a
+    definite `False` there let a caller read "not proven inside" as "is
+    a device" (#1365 split B review, MAJOR 3) when the honest answer is
+    "ask the authored flag instead".
+
+    None also covers the pre-existing case where the extent or the
+    aperture itself can't be resolved. In every None case callers must
+    fall back to the legacy `carveout:` flag rather than guess (ADR-0034
+    clause 4), which is also what keeps this a no-op wherever the
+    aperture never resolves (every non-Alif SoM), the row's own base is
+    still TBD (`mram_main` today), or the row resolves a base outside
+    the declared aperture.
     """
     if aperture is None:
         return None
@@ -174,7 +195,7 @@ def is_partition_inside_aperture(
     lo, hi = ext
     full_lo, full_hi = aperture
     if lo == full_lo and hi == full_hi:
-        return False  # the device itself
+        return False  # the device itself -- extent equals the aperture exactly
     if lo >= full_lo and hi <= full_hi:
         return True  # proper subset -- a partition inside the device
-    return False  # outside the aperture -- not this device's partition
+    return None  # outside the aperture -- proves nothing either way
