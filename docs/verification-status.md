@@ -32,7 +32,7 @@ ledger is the one to trust.
 
 ## Summary
 
-94 silicon/HIL-gated ledger rows parsed across 9 sections.  A row can carry more than one glyph
+102 silicon/HIL-gated ledger rows parsed across 13 sections.  A row can carry more than one glyph
 (e.g. half a feature done, half pending), so glyph counts can
 exceed the row count.  This total EXCLUDES three kinds of row that
 would otherwise inflate it: the rows under "CI-only / tooling rows (no HIL gate)"
@@ -48,8 +48,8 @@ duplicated from the v0.4 section already counted above).
 | Glyph | Meaning | Count |
 |---|---|---|
 | `⏳` | untested | 37 |
-| `🟡` | partial | 45 |
-| `✅` | verified | 13 |
+| `🟡` | partial | 52 |
+| `✅` | verified | 14 |
 | `❌` | failing | 1 |
 | `n/a` | n/a | 0 |
 
@@ -143,38 +143,48 @@ but a family having *some* `✅` rows does not mean every row for it is
 ## Ledger scope (issue #1893)
 
 This is a **partial backfill of issue #1893, not a fix for it** -- issue
-#1893 stays open.  This ledger previously stopped at a "v0.9.0 candidate"
-section while the SDK had already tagged five releases past it.  This
-pass adds the two releases whose bench evidence was missing outright --
-**v0.7.0** and **v0.8.0**, the latter carrying the E1M-AEN801
-first-full-bench-bring-up result as a structured ledger table (citing
-the authoritative `docs/aen-bench-bringup.md`, not just `CHANGELOG.md`'s
-summary of the same session) -- retitles the "v0.9.0 candidate" section
-to **v0.9.0** (it tagged 2026-07-06, it is not a candidate any more), and
-reconciles the v0.1.0 AEN I²C/SPI/UART/GPIO rows against the v0.8.0
-evidence (see those rows above).  After this pass the ledger's newest
-section is still **v0.9.0** while `metadata/sdk_version.yaml` reports
-**0.16.0** -- seven tagged releases (v0.10.0-v0.16.0) plus the in-flight
-v0.17.0 remain un-audited; see below.
+#1893 stays open, and this ledger is **not a per-release ledger for every
+tagged version** -- it audits headline claims, not every `CHANGELOG.md`
+entry (see the scope caveat below).  This ledger previously stopped at a
+"v0.9.0 candidate" section while the SDK had already tagged five releases
+past it.  An earlier pass added the two releases whose bench evidence was
+missing outright -- **v0.7.0** and **v0.8.0**, the latter carrying the
+E1M-AEN801 first-full-bench-bring-up result as a structured ledger table
+(citing the authoritative `docs/aen-bench-bringup.md`, not just
+`CHANGELOG.md`'s summary of the same session) -- retitled the "v0.9.0
+candidate" section to **v0.9.0** (it tagged 2026-07-06, it is not a
+candidate any more), and reconciled the v0.1.0 AEN I²C/SPI/UART/GPIO rows
+against the v0.8.0 evidence (see those rows above).
 
-It does **not** attempt a full per-release re-audit of **v0.10.0 through
-v0.16.0**, plus the in-flight **v0.17.0** (`metadata/sdk_version.yaml`
-reports `version: 0.16.0`, `status: released`; `CHANGELOG.md`'s
-`[Unreleased] - v0.17.0 candidate` section is the next one out) -- nine
-releases, each with a `CHANGELOG.md` section running from a few hundred
-to several thousand lines, the large majority of it code/build/doc
-changes with no new HIL claim to ledger.  Where a genuinely new silicon
-result landed inside that span for a row that already exists above (for
-example the peer-core boot row's 2026-08-01 HE-master→HP-peer date, or
-the CC3501E request-identity row's `v0.17` gate), that row's own Evidence
-column already carries it -- new evidence for an EXISTING row is folded
-in in place, not by adding a version section per release.  What is
-**not** done here: walking every `CHANGELOG.md` entry in v0.9.0-v0.16.0
-checking whether it silently extends or invalidates a row that is not
-already flagged.  Treat any row whose Evidence predates a version in
-that range as current only as far as its own Evidence line says --
-cross-check `CHANGELOG.md` for that feature before relying on it to gate
-a release.  Tracked as remaining scope on issue #1893.
+This pass adds **v0.11.0** through **v0.15.0** (five more tagged
+releases).  After this pass the ledger's newest per-release section is
+**v0.15.0** while `metadata/sdk_version.yaml` reports **0.16.0** and
+`CHANGELOG.md`'s `[Unreleased] - v0.17.0 candidate` section is the next
+one out (already partially ledgered above, under "v0.17.0 candidate").
+**v0.10.0 and v0.16.0 remain un-audited** -- down from the original
+seven-release gap to two -- tracked as remaining scope on issue #1893.
+
+It does **not** attempt a full per-entry re-audit of v0.11.0-v0.15.0:
+each of those `CHANGELOG.md` sections runs from a few hundred to several
+thousand lines, the large majority of it code/build/doc changes with no
+new HIL claim to ledger.  Rows were added below only for entries that
+read as a genuinely new portable-API surface or a real on-silicon result
+(the JPEG hardware encoder, a CC3501E BLE GATT bench proof, the AEN401
+USB-host skeleton, an OSPI clock-enable bus-fault reproduction, and four
+new Yocto backends) -- every other entry across those five releases is a
+bug fix folded into an already-ledgered row, CI/build/doc infrastructure,
+or `tan` CLI surface this ledger does not track.  **Every new row for
+v0.11.0-v0.15.0 defaults to its legend's `⏳ untested` state and says so
+explicitly ("no bench evidence in-tree") unless a bench log, dashboard
+screenshot, or equivalent silicon result exists in-tree** -- backfilling
+a plausible-looking `✅` for a release nobody re-verified would manufacture
+evidence nobody produced, which is worse than an honest gap.  What is
+**still not** done here, and remains true for v0.10.0/v0.16.0: walking
+every `CHANGELOG.md` entry checking whether it silently extends or
+invalidates a row that is not already flagged.  Treat any row whose
+Evidence predates a version in the v0.10.0/v0.16.0 gap as current only as
+far as its own Evidence line says -- cross-check `CHANGELOG.md` for that
+feature before relying on it to gate a release.
 
 ---
 
@@ -213,7 +223,7 @@ a release.  Tracked as remaining scope on issue #1893.
 |---|---|---|---|---|---|
 | `<alp/inference.h>` Ethos-U on AEN | `src/backends/inference/tflm.cpp` + `src/backends/inference/ethos_u_aen.cpp` (Kconfig gates `CONFIG_ALP_TFLM_ETHOS_U85`/`_U65`/`_U55`) | 🟡 underlying mechanism bench-proven, portable-backend dispatch untested | A Vela-compiled model dispatched THROUGH this portable backend outputs values matching a CPU/logit reference within tolerance, on real Ethos-U85 / Ethos-U55-HE silicon | `CONFIG_ALP_TFLM_ETHOS_U85/U65/U55` are Kconfig-reachable (`tests/scripts/test_project_backends.py`), but no Vela-compiled model has been dispatched THROUGH this portable backend yet -- `examples/aen/aen-npu-inference-person-mram` (+ `-alif`) bench-prove the underlying TFLM+Ethos-U85 mechanism directly (`ethosu_invoke`), bypassing `<alp/inference.h>` entirely: person_detect (100% NPU) + keyword_scrambled (mixed 6-NPU/9-CPU) both `runJob=OK` on real E8 silicon, 2026-06-17 (`docs/aen-bench-bringup.md`); output was not compared against a CPU/logit reference | v0.3 |
 | `<alp/inference.h>` DEEPX DX-M1 (A55) | `src/yocto/inference_yocto.c` + `inference_deepx.cpp` | 🟡 code-complete, bench-unverified | Real `dxrt::InferenceEngine` body loads a `.dxnn` model + runs inference; outputs match a host-CPU reference | Body header-compiles against the **real** `dx_rt` headers (`dxrt::InferenceEngine`, replacing a fictional `dxnn_*` API); `tests/yocto/inference_dispatcher.c` covers NULL/INVAL; **compiled + tensor-rank-regression-tested every PR** by `tests/yocto/inference_deepx_regression.cpp` against clean-room stand-in headers (`tests/yocto/fakes/dxrt/`), via `pr-plain-cmake.yml`'s `yocto`/`strict-warnings` jobs (issue #1747); **real link needs the RZ/V Yocto sysroot, on-silicon run needs the DX-M1 PCIe card** | v0.8 |
-| `<alp/inference.h>` DRP-AI (A55) | `src/yocto/inference_drpai.cpp` | 🟡 code-complete, bench-unverified | Real `MeraDrpRuntimeWrapper` body loads a `drpai_dir` model (tar staged to a tempdir) + runs inference | Body header-compiles against the **real** `MeraDrpRuntimeWrapper.h`; **compiled every PR** by `tests/yocto/inference_drpai_regression.cpp` against clean-room stand-in headers (`tests/yocto/fakes/drpai/`), via `pr-plain-cmake.yml`'s `yocto`/`strict-warnings` jobs (issue #1747) -- those tests cover the host-independent guards only (NULL/zero-size `model_data`, the no-`/dev/drpai0` `ALP_ERR_IO` path, NULL-`be_state` guards): no CI runner carries the device, so `LoadModel()`/`GetInputInfo()`/`Run()` stay unexercised until real hardware; **cross-link needs the RZ/V Yocto SDK sysroot + EdgeCortix MERA libs, on-silicon run needs the V2N board** | v0.8 |
+| `<alp/inference.h>` DRP-AI (A55) | `src/yocto/inference_drpai.cpp` | 🟡 code-complete, bench-unverified | Real `MeraDrpRuntimeWrapper` body loads a `drpai_dir` model (tar staged to a tempdir) + runs inference | Body header-compiles against the **real** `MeraDrpRuntimeWrapper.h`; **compiled every PR** by `tests/yocto/inference_drpai_regression.cpp` against clean-room stand-in headers (`tests/yocto/fakes/drpai/`), via `pr-plain-cmake.yml`'s `yocto`/`strict-warnings` jobs (issue #1747) -- those tests cover the host-independent guards only (NULL/zero-size `model_data`, the no-`/dev/drpai0` `ALP_ERR_IO` path, NULL-`be_state` guards): no CI runner carries the device, so `LoadModel()`/`GetInputInfo()`/`Run()` stay unexercised until real hardware; two independent default-OFF switches now gate the carve-out + backend separately (`PACKAGECONFIG[drpai]` compiles the backend, `ALP_ENABLE_DRPAI=1` claims the DT reserved-memory node), so neither can silently half-work (`CHANGELOG.md` [v0.15.0], #1145); **cross-link needs the RZ/V Yocto SDK sysroot + EdgeCortix MERA libs, on-silicon run needs the V2N board** | v0.8 |
 | `<alp/inference.h>` CPU floor via ONNX Runtime (A55) | `src/yocto/inference_ort.cpp` | 🟡 code-complete, bench-unverified | Real ONNX Runtime C API body opens a `.onnx` graph + runs inference; outputs match a reference run | Recipe BUILDS: `bitbake onnxruntime` completes against `E1M-V2N101` (MACHINE `e1m-v2n101-a55`, DISTRO `alp`) -- 997 tasks, all succeeded, producing `libonnxruntime.so.1.28.0` for `cortexa55` and `usr/include/onnxruntime/onnxruntime_c_api.h`; **but a green build is not a working inference and no SKU has run ORT on silicon**; default-off (`ALP_SDK_USE_ORT_CPU`), `resolve_auto()` orders it strictly last; no `.alpmodel` → ORT route on Yocto yet (hand-built `alp_inference_config_t` only -- zcbor has no Yocto build, so `alp_model_parse()` is the stub, see #1254); **compiled + tensor-rank/OrtValue-leak-regression-tested every PR** by `tests/yocto/inference_ort_regression.cpp` against a clean-room stand-in header (`tests/yocto/fakes/onnxruntime/`), via `pr-plain-cmake.yml`'s `yocto`/`strict-warnings` jobs (issue #1747) | v0.16 |
 | `<alp/audio.h>` real impl | `src/backends/audio/zephyr_drv.c` | ⏳ untested | PDM mic captures audio playable through I²S DAC, no buffer underruns | HIL | v0.3 |
 | `<alp/ble.h>` real impl | `src/backends/ble/zephyr_drv.c` + `src/backends/ble/cc3501e.c` | 🟡 partial | GATT server register + characteristic read/write host-tested under native_sim (`tests/zephyr/ble_gatt_server`, incl. client-read callback regression coverage); advertise + connect + client GATT read from a second BLE device over the air still needs a real two-device bench proof | native_sim (server register/read/write + client-read callback); HIL still pending for OTA connect/read/scan and the CC3501E provider | v0.3 |
@@ -396,6 +406,64 @@ silicon-facing row is bench-gated as usual.
 | `alp_wdt_open(const alp_wdt_config_t *)` single-arg + ADC `_mv` read renames | `include/alp/wdt.h` / `include/alp/adc.h` + all in-tree callers | 🟡 partial | Pre-1.0 signature migration: no stale two-arg / unsuffixed callers anywhere in tree; behaviour unchanged | Conformance suite adopted the new signatures (`eec8868d`); grep-clean tree; ABI snapshot regenerated | v0.9 |
 | `alp_wdt_close()` no longer disarms the whole device; `ALP_WDT_INTERRUPT_ONLY` gains `on_expire`/`user` | `include/alp/wdt.h` + `src/backends/wdt/{zephyr_drv,yocto_drv,sw_fallback}.c` + `src/wdt_dispatch.c` | ⏳ untested | On the Zephyr backend: `z_close()` no longer calls `wdt_disable(dev)`, so closing one handle should no longer disarm a device a non-SDK Zephyr consumer (e.g. `CONFIG_TASK_WDT`) might share; a reopen of the same `wdt_id` should still succeed (`z_open()` reclaims a stale `wdt_setup()` with one `wdt_disable()` + retry on `-EBUSY`, when the underlying driver actually permits disable); an `ALP_WDT_INTERRUPT_ONLY` open with `on_expire` set should invoke the callback when the deadline is missed, on a driver that calls back at all (driver-dependent -- see `include/alp/wdt.h`) | `native_sim` has no `alp-wdt0` DT alias, so `zephyr_drv`'s `z_open()` always returns `NOT_READY` before reaching `wdt_install_timeout()` -- not even native_sim exercises the reclaim path or the ISR trampoline, so this stays `⏳ untested` rather than `🟡 partial` (no non-canonical happy-path run exists for either). NULL/INVAL/close-NULL/interrupt-only-without-callback failure paths are covered by 8 wdt cases (7 in `tests/zephyr/peripheral/src/wdt.c` plus `test_wdt_config_default` in `config_defaults.c`) and `alp.unit.wdt_exclusivity` (3 cases), exercised by the required `twister · native_sim/native/64` CI gate; **needs-silicon**: whether the reclaim actually reopens a still-armed device, whether the ISR trampoline actually fires, and the close-vs-latched-interrupt race window all need an E1M-AEN801 or E1M-V2N101 bench run | v0.17 |
 | UART flow control (`alp_uart_config_t.flow_control`, `alp_uart_flow_t`) | `include/alp/peripheral.h` + `src/backends/uart/zephyr_drv.c` + `src/yocto/peripheral_uart.c` | ⏳ untested | `ALP_UART_FLOW_RTS_CTS` actually holds off an overrunning peer at a high baud rate against a real UART peer; `ALP_UART_FLOW_XON_XOFF` in-band framing round-trips on Linux | `tests/zephyr/peripheral/src/config_defaults.c` (default-macro field) + `tests/zephyr/peripheral/src/uart.c` (`ALP_UART_FLOW_XON_XOFF` -> `ALP_ERR_NOSUPPORT` on Zephyr, deterministic on native_sim since the backend refuses it before ever calling `uart_configure()`; `test_uart_open_rejects_rts_cts_when_controller_cannot_configure` -> `ALP_ERR_NOSUPPORT` when the controller can't attempt runtime configuration at all (native_sim uart0's `-ENOSYS` path); `test_uart_open_rts_cts_reaches_the_driver_on_uart1` -> an accepted RTS/CTS request actually lands as `UART_CFG_FLOW_CTRL_RTS_CTS` on the emulated uart1's `uart_config_get()` readback) + `tests/yocto/peripheral_uart_flow_control.c` (pure `apply_flow_control()` bit-mapping against a scratch `struct termios`, both enumerators); no board currently routes RTS/CTS pads, so the `scripts/alp_project.py` devicetree/pinmux side is unimplemented pending real per-SoM pad metadata (issue #1639) -- **RTS/CTS overrun prevention + XON/XOFF round-trip via a manual bench run** | v0.17 |
+
+## v0.11.0 / v0.11.1 — dual-core erratum docs, hw_rev gate, AEN401 USB-host skeleton (2026-07-16 / 2026-07-17)
+
+Mostly fixes to already-ledgered surfaces and CI/build infrastructure: the
+`alp_mproc_boot_core()` HP-peer image-residency erratum note, the GPIO
+"dark LED" root-cause correction (folded into the v0.8.0 GPIO row above,
+not duplicated here), an xHCI-DMA TCM-mapping fix and an Alif PDM FIR fix
+(both to already-ledgered rows), the `hw_rev`/SDK-version gate, and a
+customer-path build/flash/VS-Code documentation overhaul (#834).  One
+genuinely new surface landed:
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| USB host xHCI skeleton (AEN401 / E4) | `zephyr/drivers/usb/uhc/uhc_xhci_alif.c` + `src/backends/usb/zephyr_drv.c` (host section) | 🟡 code-complete, bench-gated | `alp_usb_host_open/enable/disable/close` drives a real xHCI/DWC3 host controller through mass-storage enumeration on real E1M-AEN401 (E4) silicon | Ring/context/init-sequence logic unit-tested on native_sim (`tests/unit/xhci_core`, 3/3 PASS); the AEN401 `usb-host-storage` example build links clean, but every MMIO-touching path (soft-reset, CAPLENGTH, HCRST/CNR poll, event ISR, transfer scheduling, enumeration) is marked `TODO(aen401-bench)` in-tree -- no bench evidence in-tree (`CHANGELOG.md` [v0.11.0]) | v0.11 |
+
+## v0.12.0 — tan build-plan surface (ADR-0020), no new silicon claim (2026-07-22)
+
+Entirely `tan`/build-plan CLI infrastructure: hermetic path tokenization,
+`--emit scaffold`, per-core `alp.conf` wiring, `executionPolicy`,
+`envAppendPath`, build-plan provenance, and callback self-close-deadlock
+fixes in MQTT/CAN/GPIO/CC3501E BLE (already-ledgered surfaces).  None of
+it is a portable-API or hardware behavioural claim this ledger tracks --
+`tan-cli`'s own repo owns that verification.  No rows added.
+
+## v0.13.0 — JPEG hardware encoder, CC3501E BLE GATT bench proof (2026-07-24)
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| `<alp/jpeg.h>` portable JPEG-encoder surface | `src/backends/jpeg/sw_baseline.c` (software, every SoM) + `src/backends/jpeg/alif_hantro.c` (Hantro VC9000E HW backend, `silicon_ref="alif:ensemble:e8"`, priority 100) | ✅ verified (HW backend on E1M-AEN801) | `alp_jpeg_capabilities()` reports the HW backend; `alp_jpeg_encode()` produces a correct JPEG stream on real Hantro VC9000E silicon | Bench-proven on real E1M-AEN801 (Ensemble E8): driver init reads `JPEG_SWREG0` back as `JPEG_HW_ID` `0x90001000` (HW version `0x00c0c200`); `alp_jpeg_encode()` returns `rc=0` `out_len=935` for a 64x64 NV12 frame, pulled off-target over SWD and round-tripped through libjpeg to a correct image (`CHANGELOG.md` [v0.13.0]).  A follow-up bench pass on the same hardware found + fixed a real vs. NV12 pixelformat-contract mismatch between `sw_baseline.c` and `alif_hantro.c`; the `[ABI-EXPERIMENTAL]` type change is additive-only per the ABI-snapshot diff | v0.13 |
+| CC3501E BLE GATT dynamic service registration + bench example | `chips/cc3501e/cc3501e_ble.c` (dynamic GATT registration) + `examples/aen/aen-cc3501e-ble-gatt` | 🟡 partial | Bridge PING, `alp_ble_open`, a GATT service register, and `advertise_start` succeed through the portable `<alp/ble.h>` only, on real AEN E8 silicon | Bench-proven PASS on physical E1M-AEN801 (SW-DP `0x4C013477`), persistent across a cold POR (`CHANGELOG.md` [v0.13.0], #480 #888); server-only -- no BLE central was on the bench, so end-to-end characteristic read/write against a peer stays HIL-deferred (the same gap the existing v0.3.0 `<alp/ble.h>` row above already tracks) | v0.13 |
+
+## v0.14.0 — build/CI/doc hardening; one real-silicon bug reproduction (2026-07-29)
+
+Overwhelmingly build, CI-gate, and documentation-accuracy fixes
+(peripheral-count audits, the `tan` advisory gate, debug-probe-identity
+metadata, `ninja`/`dtc`/`gperf` prerequisite fixes, the Renode CPU-halt
+fix, DT-existence guards on 33 backend sites) -- none of it a new
+portable-API claim.  One fix reproduced a real hardware defect:
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| OSPI0/OSPI1 clock-enable gate | `zephyr/drivers/flash/flash_ospi_alif.c` | 🟡 partial | Writing the OSPI per-instance clock-enable bit before the first register touch prevents the bus fault | Bus fault (`BFAR 0x83000018`) reproduced identically on two bench runs of `examples/aen/aen-ospi-regcheck` on real E8 silicon, then fixed by mirroring the DFP's enable-before-touch ordering (`CHANGELOG.md` [v0.14.0]); whether the gate bit controls the APB register interface specifically or only the serial/functional clock is explicitly UNVERIFIED in the driver's own file header -- a bench A/B is still pending | v0.14 |
+
+## v0.15.0 — real Yocto backends for display/I3C/storage/USB, DRP-AI3 opt-in (2026-08-07; rc1 2026-07-31)
+
+rc1 was mostly dual-core example/erratum fixes already folded into the
+v0.9.0 peer-core-boot row above, plus CI/cross-platform infra.  v0.15.0
+itself adds four real Yocto/Linux backends and wires the RZ/V2N on-die
+DRP-AI3 NPU into `<alp/inference.h>` (opt-in, folded into the existing
+v0.3.0 DRP-AI row above) -- all four backends are code-complete and
+link-clean but have not been run against real hardware:
+
+| Feature | Module / file | Status | What "verified" means | Evidence | Gates |
+|---|---|---|---|---|---|
+| Yocto `<alp/display.h>` real backend (DRM/KMS) | `src/backends/display/yocto_drv.c` | 🟡 code-complete, link-unverified | `alp_display_open` mode-sets a real DRM CRTC/connector; the `allow_modeset` gate refuses an implicit master-grab | No bench evidence in-tree -- `CHANGELOG.md` [v0.15.0] describes the ABI addition (`allow_modeset`) and the DRM ioctl hardening, not an on-target run | v0.15 |
+| Yocto `<alp/i3c.h>` real backend | `src/backends/i3c/yocto_drv.c` | 🟡 code-complete, link-unverified | `alp_i3c_open()` can fail against a real I3C controller instead of always succeeding through `sw_fallback` | No bench evidence in-tree -- `CHANGELOG.md` [v0.15.0] | v0.15 |
+| Yocto `<alp/storage.h>` real backend (mmcblk / mtd) | `src/backends/storage/yocto_drv.c` | 🟡 code-complete, link-unverified | `alp_storage_get_info`/`read`/`write`/`erase` round-trip against a real `/dev/mmcblkN` or `/dev/mtdN` | No bench evidence in-tree -- `CHANGELOG.md` [v0.15.0]; `write`/`erase` additionally gated behind `allow_unsafe_write` (default false) | v0.15 |
+| Yocto `<alp/usb.h>` host backend | `src/backends/usb/yocto_drv.c` | 🟡 code-complete, link-unverified | `alp_usb_host_open` enumerates real root hubs under `/sys/bus/usb/devices` on a Yocto target | No bench evidence in-tree -- `CHANGELOG.md` [v0.15.0]; host enable/disable and the device/gadget role are honest `ALP_ERR_NOSUPPORT`, not faked | v0.15 |
 
 ## v0.17.0 candidate — RPC link liveness (2026-09)
 
