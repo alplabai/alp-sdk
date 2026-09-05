@@ -663,10 +663,8 @@ def som_unpopulated_capabilities(sku_preset: dict[str, Any]) -> list[str]:
 # model-perf-v1 semantic cross-check in `scripts/validate_metadata.py` -- a
 # PR-blocking gate -- is a genuine consumer of `resolve_targets()` /
 # `npu_backend()` / `accel_config()`, and that gate must not import
-# `alp_model` -- a package that is due for deletion outright, and this gate
-# must not break when that happens. `scripts/alp_model/build.py` (the only
-# other caller) imports `resolve_targets` from here directly; there is no
-# re-export shim left in `scripts/alp_model/`.
+# `alp_model` -- a package that is due for deletion outright (ADR-0028
+# Task 6) -- or it breaks the moment that happens.
 
 
 @dataclass(frozen=True)

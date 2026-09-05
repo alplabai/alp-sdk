@@ -55,7 +55,7 @@
         },
         "accel_config": {
           "type": "string",
-          "description": "vela `--accelerator-config` string for an `ethos_u` target (e.g. `ethos-u55-256`, matching scripts/alp_model/targets.py's `TargetSpec.accel_config`); empty string for backends with no per-target accel-config (`cpu`, `drpai`, `deepx_dxm1`)."
+          "description": "vela `--accelerator-config` string for an `ethos_u` target (e.g. `ethos-u55-256`, matching scripts/alp_project_loader.py's `TargetSpec.accel_config`); empty string for backends with no per-target accel-config (`cpu`, `drpai`, `deepx_dxm1`)."
         },
         "core": {
           "type": "string",

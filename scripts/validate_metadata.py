@@ -2067,10 +2067,10 @@ def _model_perf_target_context(sku: str):
     accel_config) target is allowed to name.  An NPU entry with no
     `paired_core` (accessible from more than one core, or not yet known)
     imposes no stricter constraint than "any topology core id" here --
-    `accel_config`'s one-line format mirrors `targets.py::_soc_targets()`,
-    the only other place this string is built, deliberately kept in sync by
-    hand rather than by extending that function's return shape for one
-    caller.
+    `accel_config`'s one-line format mirrors
+    `alp_project_loader.py::_soc_targets()`, the only other place this
+    string is built, deliberately kept in sync by hand rather than by
+    extending that function's return shape for one caller.
     """
     preset_path = SOM_PRESETS / f"{sku}.yaml"
     try:

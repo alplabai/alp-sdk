@@ -2,11 +2,11 @@
 """som.sku -> SoM preset -> SoC npus[] -> compile targets.
 
 Issue #1943: this logic lives in `alp_project_loader`, imported directly
-below rather than via `scripts/alp_model/targets.py`'s compat re-export.
-Filename matches that home (not `test_alp_model_*`) so a Task-6 `git rm
-tests/scripts/test_alp_model_*.py` -- which deletes `scripts/alp_model/`'s
-own test suite alongside the package -- does not sweep up this coverage
-too; it is the only place `resolve_targets()`/`TargetSpec` are tested."""
+below. Filename matches that home (not `test_alp_model_*`) so a Task-6
+`git rm tests/scripts/test_alp_model_*.py` -- which deletes
+`scripts/alp_model/`'s own test suite alongside the package -- does not
+sweep up this coverage too; it is the only place `resolve_targets()`/
+`TargetSpec` are tested."""
 from pathlib import Path
 from alp_project_loader import resolve_targets, TargetSpec
 
