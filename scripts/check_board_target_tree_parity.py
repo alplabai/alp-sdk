@@ -89,6 +89,12 @@ _NOT_YET_SUPPORTED: frozenset[tuple[str, str, str]] = frozenset(
         # not happened yet.
         ("E1M-V2M102", "m33_sm", "alp_e1m_v2m102_m33_sm"),
         ("E1M-V2N102", "m33_sm", "alp_e1m_v2n102_m33_sm"),
+        # E1M-AEN803: dual-external-memory BOM variant of the same
+        # E1M-AEN-2626 PCB as the shipped E1M-AEN801 boards (both OSPI0
+        # memories fitted, vs AEN801's NOR-optional population); AEN801's
+        # tree exists, AEN803's own board bring-up has not happened yet.
+        ("E1M-AEN803", "m55_hp", "alp_e1m_aen803_m55_hp"),
+        ("E1M-AEN803", "m55_he", "alp_e1m_aen803_m55_he"),
     }
 )
 

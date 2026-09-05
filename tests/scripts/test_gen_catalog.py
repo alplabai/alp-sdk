@@ -58,9 +58,18 @@ def test_top_level_schema():
     }
 
 
-def test_eleven_soms_each_resolve_to_a_soc():
+def test_every_som_resolves_to_a_soc():
+    # Count derived from the preset files rather than hardcoded: a literal here
+    # turned every new SKU into a spurious test failure (adding E1M-AEN803 broke
+    # this and its support-matrix twin), which teaches people to bump the number
+    # instead of reading the assertion. What actually matters is that the
+    # catalog covers EVERY preset and that each entry resolves.
+    presets = sorted(
+        p.stem for p in (REPO / "metadata" / "e1m_modules").glob("E1M-*.yaml")
+    )
     soms = _catalog()["soms"]
-    assert len(soms) == 11
+    assert sorted(s["sku"] for s in soms) == presets
+    assert len(soms) == len(presets)
     for s in soms:
         # Every SoM must resolve to a SoC with a concrete part number,
         # a family, and a peripheral-presence map.

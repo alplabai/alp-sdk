@@ -4362,6 +4362,70 @@
     },
     {
       "capabilities": {
+        "cryptocell": true,
+        "dave2d": true,
+        "dma2d": true,
+        "ethos_u55_count": 2,
+        "ethos_u85_count": 1,
+        "gpu2d": true,
+        "helium_mve": true,
+        "hexspi_dma": true,
+        "inline_aes": true,
+        "neon": true
+      },
+      "family": "alif-ensemble",
+      "silicon": "alif:ensemble:e8",
+      "sku": "E1M-AEN803",
+      "soc_part": "E8",
+      "soc_peripherals": {
+        "adc": true,
+        "can": true,
+        "dac": true,
+        "ethernet": true,
+        "i2c": true,
+        "i2s": true,
+        "i3c": true,
+        "mipi_csi": true,
+        "mipi_dsi": true,
+        "npu": true,
+        "pcie": false,
+        "pdm": true,
+        "pwm": false,
+        "quadrature_encoder": true,
+        "rtc": true,
+        "sd1": false,
+        "sdio_emmc": true,
+        "spi": true,
+        "timer": true,
+        "uart": true,
+        "usb": true,
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
+      },
+      "topology": {
+        "a32_cluster": {
+          "app": "alp-image-edge",
+          "machine": "e1m-aen803-a32",
+          "os": "yocto",
+          "toolchain": "poky-glibc"
+        },
+        "m55_he": {
+          "app": "alp-stock-shim",
+          "board": "alp_e1m_aen803_m55_he",
+          "os": "zephyr",
+          "toolchain": "arm-zephyr-eabi"
+        },
+        "m55_hp": {
+          "app": "alp-stock-shim",
+          "board": "alp_e1m_aen803_m55_hp",
+          "os": "zephyr",
+          "toolchain": "arm-zephyr-eabi"
+        }
+      }
+    },
+    {
+      "capabilities": {
         "emmc_dma": true,
         "ethos_u65_count": 1,
         "neon": true

@@ -1,23 +1,31 @@
-# Stock preset for E1M-AEN801 (the SoM, NOT the EVK board).
+# Stock preset for E1M-AEN803 (the SoM, NOT the EVK board).
 #
 # Customer board.yaml files reference this preset by setting:
 #   som:
-#     sku: E1M-AEN801
+#     sku: E1M-AEN803
 #
 # This file lists ONLY components physically populated on the
 # E1M-AEN module PCB. Board-side parts live in metadata/boards/<name>.yaml.
+#
+# E1M-AEN803 is the SAME E1M-AEN-2626 PCB and silicon as E1M-AEN801 (Alif
+# Ensemble E8, AE822FA0E5597LS0) -- it is the BOM variant with BOTH external
+# OSPI0 memories populated: the 512 Mbit HyperRAM (S80KS5122GABHM02) AND the
+# 256 Mbit xSPI NOR (IS25WX256-JHLE), where E1M-AEN801 leaves the NOR
+# DNI/optional and carries only the HyperRAM. This population -- both parts
+# fitted, these exact MPNs -- IS the E1M-AEN803 SKU contract, not merely
+# what happens to be on one bench unit.
 #
 # Per the project memory note, any SKU-specific hardware value not
 # supplied authoritatively stays TBD rather than being inferred.
 
 schema_version: 1
 
-sku: E1M-AEN801
+sku: E1M-AEN803
 family: alif-ensemble
 silicon: alif:ensemble:e8
 silicon_variant: AE822FA0E5597LS0        # see metadata/socs/alif/ensemble/e8.json variants[]
 
-display_name: "E1M-AEN801 (Alif Ensemble E8 -- 2x A32 + 2x M55 + 3x Ethos-U, preliminary)"
+display_name: "E1M-AEN803 (Alif Ensemble E8 -- 2x A32 + 2x M55 + 3x Ethos-U, dual external memory: 512Mbit HyperRAM + 256Mbit NOR, preliminary)"
 
 on_module:
   # POR_N / ER004: the module carries NO reset or brownout supervisor.  The
@@ -49,41 +57,30 @@ on_module:
   # netlist/BOM -- see metadata/chips/dp83825.yaml and #1241 "Blocked on".
   ethernet_phy:         dp83825
   # Both OSPI0 devices below share the single OSPI0 octal bus, separated
-  # only by chip-select. CORRECTED: this block used to have the two chip-
-  # selects INVERTED (NOR at CS0, HyperRAM at CS1). The E1M-AEN-2626-R2
-  # netlist is the authoritative pinout source (PCB routing does not
-  # change with hand-assembly) and shows the opposite:
+  # only by chip-select.  The E1M-AEN-2626-R2 netlist is the authoritative
+  # pinout source (PCB routing does not change with hand-assembly):
   #   U9  (the RAM footprint) -> OSPI0_SS0 => CS0, plus OSPI0_RESETn/OSPI0_INTn
   #   U10 (the NOR footprint) -> OSPI0_SS1 => CS1, plus OSPI1_RESETn/OSPI1_INTn
-  # See metadata/e1m_modules/E1M-AEN803.yaml (same PCB, both memories
-  # fitted) for the same corrected mapping.
+  # See the matching correction + note in E1M-AEN801.yaml (that file's
+  # mapping was inverted until this fix).
   ospi_memories:
     ospi0:
-      chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
-      # NOT populated on this SKU.  E1M-AEN803 is the SKU that fits both external
-      # memories; E1M-AEN801 fits neither and runs from the SoC's on-die MRAM.
-      # The footprint exists on the shared PCB -- see the R2 netlist -- which is
-      # why the part is still described here.
-      assembled:      false
+      chip:           IS25WX256-JHLE      # ISSI xSPI NOR, U10 footprint
+      assembled:      true                # fitted on this SKU (not BOM-optional)
       capacity_mbit:  256                 # 256 Mbit (32 MiB)
       chip_select:    1                   # OSPI0 CS1 -- U10 -> OSPI0_SS1 per the R2 netlist
       role:           app_storage
     ospi1:
       chip:           TBD            # OSPI1 controller unused on this SoM: both OSPI devices
-      assembled:      false          # share the OSPI0 octal bus (HyperRAM = CS0, NOR = CS1)
+      assembled:      optional       # share the OSPI0 octal bus (HyperRAM = CS0, NOR = CS1)
       capacity_mbit:  TBD
       role:           data_log
   # External HyperRAM -- volatile XIP / scratch RAM, separate from the
   # NOR flash above.  Shares the OSPI0 octal controller with the flash,
   # separated only by chip-select (HyperRAM = CS0, NOR = CS1).
   hyperram:
-    chip:           W958D8NBYA5I    # Winbond OctalRAM (HyperBus)
-    # NOT populated on this SKU -- see the ospi0 note above.  This key is
-    # load-bearing: `assembled` defaults to TRUE, so omitting it made every
-    # consumer treat the HyperRAM as fitted, and the boot banner advertised
-    # 256 Mbit of external RAM on a module that has none.
-    assembled:      false
-    capacity_mbit:  256             # 256 Mbit (32 MiB) -- the part, if fitted
+    chip:           S80KS5122GABHM02  # Infineon/Cypress HyperRAM, U9 footprint
+    capacity_mbit:  512               # 512 Mbit (64 MiB)
     interface:      ospi0
     chip_select:    0                 # OSPI0 CS0 -- U9 -> OSPI0_SS0 per the R2 netlist
 
@@ -99,14 +96,14 @@ on_module:
     # service (the pinned SE services expose no I2C transaction at all).
     #
     # BENCH-SETTLED 2026-09-05 on 2626-R2 silicon (Flow A, cold-cycle
-    # proven): the push-pull reading HELD.  The R2 netlist shows no pull-up
-    # path to any rail on BRD_I2C (the bridging jumpers R93/R94 are DNP,
-    # unlike I2C2's stuffed R95/R96), and the bus works on the SoC pad's own
-    # internal pull-up (bias-pull-up = DSC=1) with the pad left PUSH-PULL --
-    # every non-response is a clean rc=-5 (-EIO) NACK, zero -ETIMEDOUT, zero
-    # "User Abort".  R93/R94 stay DNP and are not needed.  The earlier
-    # "unusable as built" verdict was measured on an r1 module, where these
-    # parts are not on P7_0/P7_1 at all.
+    # proven, same shared PCB as E1M-AEN801): the push-pull reading HELD.
+    # The R2 netlist shows no pull-up path to any rail on BRD_I2C (the
+    # bridging jumpers R93/R94 are DNP, unlike I2C2's stuffed R95/R96), and
+    # the bus works on the SoC pad's own internal pull-up (bias-pull-up =
+    # DSC=1) with the pad left PUSH-PULL -- every non-response is a clean
+    # rc=-5 (-EIO) NACK, zero -ETIMEDOUT, zero "User Abort".  R93/R94 stay
+    # DNP and are not needed.  The earlier "unusable as built" verdict was
+    # measured on an r1 module, where these parts are not on P7_0/P7_1 at all.
     #
     # Addresses per docs/bring-up-aen.md §5.1; pad names per
     # examples/aen/aen-secure-element-sign/README.md.  The DT-node shape of
@@ -132,19 +129,15 @@ on_module:
         - { chip: eeprom_24c128,    role: eeprom,          address_7bit: "0x50" }
 
 # Off-SoC module memory in the canonical cross-family shape (see
-# som-preset-v1.schema.json `memory:`).  Values are DERIVED from the
-# on_module facts above, never invented:
-#   dram_mbit  <- on_module.hyperram.capacity_mbit (populated on every
-#                 AEN BOM variant).
-#   flash_mbit <- TBD: the OSPI0 NOR (256 Mbit) is `assembled: optional`
-#                 (per-BOM variant), so a single number would be wrong
-#                 for the DNI variant.
+# som-preset-v1.schema.json `memory:`).  Values are the SKU's canonical
+# population (see on_module.hyperram / on_module.ospi_memories.ospi0
+# above) -- both memories are `assembled: true` on this SKU, so unlike
+# E1M-AEN801 neither figure is a per-BOM-variant TBD:
+#   dram_mbit  <- on_module.hyperram.capacity_mbit (S80KS5122GABHM02, 512 Mbit)
+#   flash_mbit <- on_module.ospi_memories.ospi0.capacity_mbit (IS25WX256-JHLE, 256 Mbit)
 memory:
-  # E1M-AEN801 populates NEITHER external memory (both `assembled: false`
-  # above); it runs from the SoC's on-die MRAM.  E1M-AEN803 is the SKU with
-  # both fitted (dram_mbit 512 / flash_mbit 256).
-  dram_mbit:            0
-  flash_mbit:           0
+  dram_mbit:            512
+  flash_mbit:           256
 
 inference:
   preferred_backend:    ethos_u                # E8 ships Ethos-U85 alongside two U55s.
@@ -156,47 +149,40 @@ capabilities:
 topology:
   a32_cluster:
     app: alp-image-edge
-    machine: e1m-aen801-a32             # Yocto MACHINE
+    machine: e1m-aen803-a32             # Yocto MACHINE
     toolchain: poky-glibc
   m55_hp:
     app: alp-stock-shim
-    # Qualified Zephyr board target: the Ensemble E8 die is multi-cluster
-    # (RTSS-HE + RTSS-HP), so `west build -b` needs the <soc>/<cpucluster>
-    # qualifiers -- the bare name is ambiguous and fails to resolve under
-    # Zephyr 4.4 (#720).  Must match the generated board tree's twister
-    # identifier (zephyr/boards/alp/e1m_aen801_m55_hp/...).
-    board: alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+    # No generated Zephyr board tree yet -- board bring-up for this SKU has
+    # not happened (same precedent as E1M-V2M102/E1M-V2N102: a larger/
+    # differing-memory BOM variant of an already-shipping PCB, awaiting its
+    # own tree). Bare (unqualified) name, per scripts/check_board_target_
+    # tree_parity.py's _NOT_YET_SUPPORTED convention -- do NOT qualify with
+    # a <soc>/<cpucluster> suffix until the tree actually exists (#720).
+    board: alp_e1m_aen803_m55_hp
     toolchain: arm-zephyr-eabi
-    zephyr_full_name: "E1M-AEN801 (Alif Ensemble E8) Cortex-M55 HP carrier"
+    zephyr_full_name: "E1M-AEN803 (Alif Ensemble E8) Cortex-M55 HP carrier"
   m55_he:
     app: alp-stock-shim
-    board: alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    board: alp_e1m_aen803_m55_he
     toolchain: arm-zephyr-eabi
-    zephyr_full_name: "E1M-AEN801 (Alif Ensemble E8) Cortex-M55 HE carrier"
+    zephyr_full_name: "E1M-AEN803 (Alif Ensemble E8) Cortex-M55 HE carrier"
 
 # Memory layout (SRAM banks + MRAM) is normally derived from the SoC
 # variant resolved via `silicon_variant:` -- see
 # metadata/socs/<vendor>/<family>/<part>.json `variants[].sram_banks_kb`
-# + `mram_mb`. E1M-AEN801 is the one SKU (of 11) that overrides it: both
-# M55 cores boot from the SAME physical App MRAM, and a stock symmetric
-# two-slot partition map puts HE and HP slot0 at the SAME address
-# (0x80010000) -- flashing both cores then silently overwrites one image
-# (#1069, bench-confirmed on e1m-aen-evk-01).  This is SDK build policy,
-# not a silicon fact (see scripts/gen_zephyr_board.py's memory_map: vs
-# metadata/socs/ split), so the fix lives here rather than in the SoC JSON.
-#
-# DECIDED layout (maintainer, #1069): disjoint per-core slot0 windows,
-# OTA DEFERRED on both cores (CONFIG_SINGLE_APPLICATION_SLOT=y, no
-# secondary/scratch slot).  Keeping swap-OTA on both cores would force
-# slot0_HP + slot0_HE = 2688 KiB each, which breaks the ~2.6 MiB NPU
-# MRAM-model budget on at least one core; zephyr/sysbuild/aen/README.md
-# records CONFIG_SINGLE_APPLICATION_SLOT=y as the only silicon-proven
-# MCUboot chain on this part, so nothing proven is lost by dropping the
-# untested swap path.  HE keeps the low window (unchanged address)
-# because everything else canonical is HE: the runner's default core,
-# the factory MCUboot ATOC (cpu_id M55_HE), the canonical person_detect
-# slot0, and the MRAM-XIP NPU example overlays -- Alif's own DevKit-e8
-# dual-core example (`M55_HP_HE_mram_cfg.json`) also orders HE low.
+# + `mram_mb`. E1M-AEN803 shares E1M-AEN801's override: both M55 cores
+# boot from the SAME physical App MRAM (an AE822 silicon fact, unrelated
+# to the external OSPI memory population that distinguishes this SKU), and
+# a stock symmetric two-slot partition map puts HE and HP slot0 at the SAME
+# address (0x80010000) -- flashing both cores then silently overwrites one
+# image (#1069, bench-confirmed on e1m-aen-evk-01 -- an E1M-AEN801 unit,
+# but the MRAM geometry is a shared-silicon fact, not an AEN801-specific
+# one). This is SDK build policy, not a silicon fact (see
+# scripts/gen_zephyr_board.py's memory_map: vs metadata/socs/ split), so the
+# fix lives here rather than in the SoC JSON.  See E1M-AEN801.yaml for the
+# full DECIDED-layout rationale (#1069) -- reproduced verbatim below since
+# it is identical hardware, not restated per-SKU logic.
 #
 #   region     offset      size      absolute      accessible_from
 #   mcuboot    0x000000    64 KiB    0x80000000    m55_he, m55_hp
@@ -206,65 +192,6 @@ topology:
 #   storage    0x560000    96 KiB    0x80560000    m55_he, m55_hp
 #   atoc       0x578000    32 KiB    0x80578000    m55_he, m55_hp  (SE-owned)
 #   64 + 2688 + 2688 + 64 + 96 + 32 = 5632 KiB == the full 5.5 MiB App MRAM.
-#
-# `atoc` is the SE-owned band at the very top of the App MRAM window
-# (#1289).  Alif's SETOOLS (`app-gen-toc` / `app-write-mram`) top-anchors
-# the generated ATOC application package at 0x80580000 and grows it
-# DOWNWARD, sized to the package -- placement happens at provisioning
-# time, not link time, so there is no fixed address to carve around, only
-# a band to reserve.  It was carved out of `storage` (128 -> 96 + 32)
-# rather than out of a slot, so every other region above is byte-identical
-# to the #1069 layout and no image geometry moved.
-#
-# Sizing evidence (all against window top 0x80580000):
-#   5552 B   bench-observed 2026-08-08 -- ATOC magic `ckBS` (0x53426B63)
-#            read at 0x8057EA50, intact, while an app erased 0x80560000
-#            inside what was then the SAME `storage` partition
-#   13552 B  E7 SETOOLS transcript, Alif DFP docs/Overview.md:193-224
-#   23696 B  worst case from SETOOLS' build/app-package-map.txt sizing
-#            rule at the 8-image maximum (that rule reproduces the 5552 B
-#            above exactly)
-# 32 KiB leaves 9072 B spare at 8 images.  UNVERIFIED: no documented
-# maximum TOC entry count was found, so 8 images is an assumption -- widen
-# the band, never narrow it, if a larger configuration appears.
-#
-# `mcuboot`/`he_slot0`/`hp_slot0` are marked `cacheable: true` (real XIP
-# code, matches the auto-derived `mram_main` region's default); `reserved`/
-# `storage`/`atoc` are left non-cacheable (NVS/settings-style access at the
-# register level -- `atoc` is boot-table, not settings, despite sharing the
-# access mode).
-#
-# All six fine-grained regions are MRAM (behind `alif,mram-flash-controller`
-# -- 16-byte program granularity, finite write endurance), not RAM, even
-# though `mcuboot`/`reserved`/`storage`/`atoc` publish a real `base` (needed so
-# scripts/gen_zephyr_board.py's `_aen_flash_partitions()` can lay out the
-# DTS partition table).  A real `base` alone would make them look like
-# legitimate IPC carve-out candidates to scripts/alp_orchestrate/carveout.py
-# resolve_carve_outs() -- an `ipc: raw_shmem`/`rpmsg` entry ranks a
-# cacheable-mismatch region behind a matching one, so a non-cacheable
-# carve-out (e.g. examples/multicore/mproc-mailbox/board.yaml) would prefer
-# the smaller `reserved` region over `storage`/`mcuboot` and silently place
-# a shared-memory ring inside non-volatile flash.  Note the allocator
-# allocates TOP-DOWN within a region (carveout.py step 4) -- the same
-# direction the ATOC grows -- so for `atoc` the flag is belt-and-braces
-# only; what actually makes that band safe is being a declared, named,
-# non-storage region (#1289).  `carveout: false` marks
-# all six as ineligible for that allocator (schema field, see
-# metadata/schemas/som-preset-v1.schema.json `memory_region.carveout`)
-# while leaving their `base` available for the DTS/partition-table use above.
-#
-# `mram_main` is kept alongside the six fine-grained regions above,
-# `base: TBD` and unchanged from the auto-derived shape it replaces
-# (whole-MRAM, all three cores, cacheable) -- this is the coarse
-# generic-storage-carve-out device name (`board.yaml storage[].flash_device:
-# mram_main`, e.g. examples/connectivity/production-deployment/board.yaml)
-# that predates this fine-grained MCUboot map and isn't part of the
-# sysbuild/aen boot chain.  Since `resolve_storage_partitions()` only reads
-# `size_kib` (never `base`) it keeps resolving; `base: TBD` deliberately
-# keeps it BLOCKED for `ipc:` carve-out allocation (which does read `base`)
-# too, belt-and-suspenders alongside `carveout: false` above.  Bottom line:
-# every `ipc:` entry on this SoM stays `status: blocked` until a real SRAM
-# region with a real `base` exists in this table.
 memory_map:
   - { name: mcuboot,   base: 0x80000000, size_kib: 64,   accessible_from: [m55_he, m55_hp], cacheable: true, carveout: false }
   - { name: he_slot0,  base: 0x80010000, size_kib: 2688, accessible_from: [m55_he],          cacheable: true, carveout: false }
@@ -274,17 +201,8 @@ memory_map:
   - { name: atoc,      base: 0x80578000, size_kib: 32,   accessible_from: [m55_he, m55_hp],                  carveout: false }
   - { name: mram_main, base: "TBD",      size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true }
 
-# Inter-core mailbox IP: ARM MHUv2.  Confirmed via the alifsemi/zephyr_alif
-# fork DTS (dts/arm/alif/ensemble/common/e1.dtsi plus ensemble_rtss_{hp,he}.dtsi),
-# corroborated by the Alif Linux BSP (meta-alif-ensemble + linux_alif:
-# apss-mhu -> mhuv2.cfg).  The earlier `alif_mhu` candidate /
-# MHUv2-vs-mhuv3 uncertainty is RESOLVED: it is MHUv2.
-#
-# `controller: alif_mhuv2` is the node/driver-family token (matches alp-sdk's
-# distinct `alif,mhuv2-mbox` compatible).  The E1M-AEN801 bench validated the
-# MHUv2 MBOX driver with a dual-M55 OpenAMP RPMsg ping/pong on 2026-06-19
-# (#225); endpoint-specific overlays still choose the appropriate MHU pair
-# (A32<->M55 or M55-HP<->M55-HE).
+# Inter-core mailbox IP: ARM MHUv2. Same silicon as E1M-AEN801 -- see that
+# file for the full evidence trail (#225).
 mailbox:
   controller: alif_mhuv2                    # ARM MHUv2 (compatible alif,mhuv2-mbox)
   channels:
@@ -299,7 +217,7 @@ mailbox:
 # get CC3501E command dispatch automatically; the board-side
 # role (e.g. EVK_PIN_BMI323_INT1) stays SoM-agnostic.
 #
-# Source of truth:
+# Same shared PCB routing as E1M-AEN801 -- source of truth:
 #   - metadata/e1m_modules/aen/from-cc3501e.tsv
 #   - AEN family hardware design (CC3501E-owned GPIO pads)
 pad_routes:
