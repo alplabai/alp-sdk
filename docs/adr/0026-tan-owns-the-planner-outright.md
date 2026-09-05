@@ -150,12 +150,15 @@ converts this from a deletion into a silent behaviour change.
   the subprocess boundary the Python port removed, for a repo-layout
   preference rather than a technical gain.
 
-## Amendment, 2026-08-30 — accepted, with the migration re-scoped
+## Amendment, 2026-08-30 (accepted by alpCaner, #1844) — with the migration re-scoped
 
 The decision above is **accepted**. Reading both repos before executing it
 found that the Decision and the Migration sections disagree with each other,
 and that three things the Migration does not mention have to be decided before
-anything is deleted. Nothing in the Decision changes; steps 2-4 are replaced.
+anything is deleted. Nothing in the Decision changes except clause 4's
+frozen-`crates/` bullet, struck in place below as already stale. Migration
+steps 2-4 are replaced; §G restates the sequence as six steps, of which step 1
+is the original step 1 unchanged, repeated because the order is the point.
 
 ### A. Migration step 3 is not executable as written
 
@@ -187,7 +190,7 @@ moves to tan**. Without that enumeration "stops producing plans" can be
 executed as anything from "delete `buildplan.py`" to "delete the tree", and
 those two differ by every example build.
 
-### B. The deletion would remove a hardware-safety gate, not just a planner
+### B. The deletion would remove the SDK's refusal to build an unsupported hardware revision, not just a planner
 
 `SdkRevisionUnknown`, `SdkRevisionNotBuildable` and `SdkRevisionUnsupported`
 come from `alp_orchestrate.models` (`:30`, `:41`, `:56`). They are raised
@@ -210,10 +213,13 @@ Two consequences the Migration section does not state:
 
 1. A naive `rm -rf scripts/alp_orchestrate/` deletes that enforcement.
 2. `scripts/validate_board_yaml.py` is the script **tan itself spawns** on the
-   default `tan validate` path (`tan-cli/python/tan/commands/validate_cmd.py:319`,
-   spawned at `:1497-1508`; `tan diff` does the same at
-   `python/tan/commands/diff_cmd.py:608-628,678`). Deleting the directory
-   breaks tan's own default validate path, after tan has become the only CLI.
+   default `tan validate` path. Measured on `tan-cli` at `b9aa697`, the pin §E
+   uses: `python/tan/commands/validate_cmd.py:319` names the script, and the
+   `subprocess.run` call is `:1508-1519` (`:1497-1508` in the first draft of
+   this amendment started mid-comment and stopped at the opening line); `tan
+   diff` does the same at `python/tan/commands/diff_cmd.py:608-628,678`.
+   Deleting the directory breaks tan's own default validate path, after tan has
+   become the only CLI.
 
 The split in §A must keep the loader and its revision gate.
 
@@ -222,8 +228,10 @@ The split in §A must keep the loader and its revision gate.
 Scaffolded and example `CMakeLists.txt` invoke
 `alp_project.py --emit zephyr-conf --core <id>` at cmake-configure time. That
 call is load-bearing enough that the template engine rewrites it per-SKU
-(`scripts/alp_template.py:1007-1013`) and carries dedicated SDK-root discovery
-for it (`:1186-1210`). After this ADR, either a surviving emitter core in
+(`scripts/alp_template.py:1007-1013`, `_substitute_cmake_core`) and carries
+dedicated SDK-root discovery for it (`:1186-1210`, the `_ALP_SDK_ROOT_GUESS_RE`
+rewrite loop) — both measured at `00627b88`, as in §A, and both since moved by
+`722320a1a`; the symbol names are the durable anchors. After this ADR, either a surviving emitter core in
 alp-sdk answers it, or it is repointed at `tan` — which makes tan a hard
 dependency of **every user project build, including a plain `west build` with
 tan nowhere in the loop**. That is materially larger than the Consequences
@@ -287,9 +295,20 @@ Steps 2-4 above are replaced by the following. The order is load-bearing.
    configure and roughly a dozen gate scripts in one commit.
 3. **Repoint alp-sdk's own consumers** — CI workflows, `docs/cli.md`,
    `docs/board-config-features.md`, `docs/heterogeneous-builds.md`, and the
-   emit-registry `owner` fields — at tan or at the surviving core. Exit
-   condition: `git grep alp_orchestrate` returns only history and CHANGELOG.
-   Done before step 1, this repoints onto a divergent planner.
+   emit-registry `owner` fields — at tan or at the surviving core. Done before
+   step 1, this repoints onto a divergent planner.
+
+   **Exit condition, corrected.** The first draft of this amendment said
+   "`git grep alp_orchestrate` returns only history and CHANGELOG". That is not
+   reachable and contradicts §A: `alp_orchestrate` is named in 263 tracked files
+   on `dev` at `ed91fde0`, including `west.yml`, `include/alp/rpc.h`,
+   `src/zephyr/alp_banner.c`, `zephyr/kconfigs/core.kconfig` and
+   `meta-alp-sdk/conf/machine/*.conf` — and under §A's split the emitter/loader
+   core *survives*, so a live reference is the correct end state, not a leak.
+   The exit condition is instead: **no module outside the surviving core
+   imports `alp_orchestrate`, and `metadata/emit-registry-v1.json` names no
+   doomed-axis module as an `owner`.** Both are checkable; "returns only
+   history" is not.
 4. **Move oracle and snapshot custody to tan** per §E. Exit condition: tan CI
    runs the shape check with no alp-sdk planner checkout.
 5. **Delete the plan producer** in one commit naming this ADR, retiring

@@ -263,6 +263,20 @@
       "ci": "cross-platform-zephyr.yml:python-smoke"
     },
     {
+      "id": "delay-us-literal",
+      "description": "No chips/**.c passes a fixed literal >= 1000 to the non-yielding alp_delay_us() -- use alp_delay_ms() so the calling thread yields (#1621).",
+      "runner": "check-script",
+      "script": "scripts/check_delay_us_literal.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "diagnostic-emission-coverage",
       "description": "Every ALP-Bxxx code scripts/alp_cli/validator.py can emit must have a docs/diagnostics/ALP-Bxxx.md landing page (#1569).",
       "runner": "check-script",
