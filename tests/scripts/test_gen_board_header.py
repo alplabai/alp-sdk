@@ -12,6 +12,8 @@ Covers:
 - issue #515: `i2c_devices:` (on-board I2C addresses + INA236
   calibration) reproduces the previously hand-authored values
   exactly, and the generator-level fixture proves the mechanism.
+- issue #637: `mux_enums:` (mux-select / IO-expander-pin enums)
+  reproduces the previously hand-authored enum values exactly.
 """
 
 from __future__ import annotations
@@ -178,16 +180,22 @@ def test_real_evk_header_covers_known_macros(real_headers):
 def test_no_clash_with_existing_alp_e1m_evk_h(real_headers):
     """The generated routes header MUST NOT also re-define macros
     that live in the surviving hand-authored sections of
-    `alp_e1m_evk.h` (mux enums).  On-board I2C device addresses +
-    INA236 calibration constants (#515) and the overlay-pad indices
-    (#1636) were lifted into metadata and are generated now -- see
-    `test_real_evk_header_covers_i2c_device_macros` and
-    `test_real_evk_header_covers_overlay_pin_macros` below.  This
-    guards against accidental over-lift of what's still hand-authored
-    in future slices."""
+    `alp_e1m_evk.h` (currently just `evk_cam_select_t` + prose).
+    On-board I2C device addresses + INA236 calibration constants
+    (#515), the overlay-pad indices (#1636), and the mux-select /
+    IO-expander-pin enums (#637) were all lifted into metadata and
+    are generated now -- see `test_real_evk_header_covers_i2c_device_macros`,
+    `test_real_evk_header_covers_overlay_pin_macros`, and
+    `test_real_evk_header_covers_mux_enums` below.  This guards
+    against accidental over-lift of what's still hand-authored in
+    future slices."""
     evk_out, _xevk_out = real_headers
     out = evk_out.read_text(encoding="utf-8")
     must_not_appear = [
+        # evk_cam_select_t (MIPI CSI camera mux) -- out of #637's scope
+        "EVK_CAM_A",
+        "EVK_CAM_B",
+        "evk_cam_select_t",
         # ADC spellings not generated (the shipped ADC routes are
         # EVK_ADC_ARDUINO_A0..A5 / EVK_ADC_DAC0_LOOPBACK /
         # EVK_ADC_DAC1_LOOPBACK -- #1622 corrected the ADC0 entry from
@@ -201,7 +209,7 @@ def test_no_clash_with_existing_alp_e1m_evk_h(real_headers):
     for macro in must_not_appear:
         assert macro not in out, (
             f"{macro} unexpectedly appears in generated header -- "
-            f"slice scope is gpio/buses/pwm/i2c_devices/overlay_pins only"
+            f"slice scope is gpio/buses/pwm/i2c_devices/overlay_pins/mux_enums only"
         )
 
 
@@ -320,6 +328,114 @@ def test_i2c_devices_reproduce_metadata_values(gen_module):
     assert defined["EVK_I2C_ADDR_FOO_LEGACY"] == "EVK_I2C_ADDR_FOO"
     assert defined["EVK_INA236_SHUNT_FOO_OHMS"] == "0.030f"
     assert defined["EVK_INA236_MAX_FOO_A"] == "2.5f"
+
+
+def test_real_evk_header_covers_mux_enums(real_headers):
+    """Issue #637: mux-select / IO-expander-pin enums are now
+    single-sourced from `metadata/boards/e1m-evk.yaml`'s
+    `mux_enums:` block and generated -- assert every typedef +
+    enumerator value hand-written firmware relies on is still
+    defined, with the pre-migration hand-authored values preserved
+    verbatim (not just presence -- bind each enumerator to ITS OWN
+    value so a metadata transposition between two enumerators of
+    the same enum can't pass a membership-only check)."""
+    evk_out, _xevk_out = real_headers
+    out = evk_out.read_text(encoding="utf-8")
+
+    for typedef_name in (
+        "evk_sdio_select_t",
+        "evk_i2s_select_t",
+        "evk_usb2_select_t",
+        "evk_pcie_select_t",
+        "evk_pcie_ioexp_pin_t",
+        "evk_ioexp_pin_t",
+    ):
+        assert f"}} {typedef_name};" in out, f"{typedef_name} missing from generated header"
+
+    enum_values = {
+        "EVK_SDIO_M2E_KEY": "0",
+        "EVK_SDIO_SDCARD": "1",
+        "EVK_I2S_AMP": "0",
+        "EVK_I2S_M2E_KEY": "1",
+        "EVK_USB2_CONNECTOR": "0",
+        "EVK_USB2_M2E_KEY": "1",
+        "EVK_PCIE_E_KEY": "0",
+        "EVK_PCIE_M_KEY": "1",
+        "EVK_PCIE_IOEXP_I2C_SEL": "0",
+        "EVK_PCIE_IOEXP_M2E_ALERT": "1",
+        "EVK_PCIE_IOEXP_E_PCIE0_RST": "2",
+        "EVK_PCIE_IOEXP_E_PCIE0_WAKE": "3",
+        "EVK_PCIE_IOEXP_E_PCIE0_CLKREQ": "4",
+        "EVK_PCIE_IOEXP_M_PCIE0_RST": "5",
+        "EVK_PCIE_IOEXP_M_PCIE0_WAKE": "6",
+        "EVK_PCIE_IOEXP_M_PCIE0_CLKREQ": "7",
+        "EVK_IOEXP_LCD_PWR_EN": "0",
+        "EVK_IOEXP_LCD_RST": "1",
+        "EVK_IOEXP_CAM_EN": "2",
+        "EVK_IOEXP_CTP_RST": "3",
+        "EVK_IOEXP_ICM42670_INT1": "4",
+        "EVK_IOEXP_ICM42670_INT2": "5",
+        "EVK_IOEXP_ICM42670_FSYNC": "6",
+        "EVK_IOEXP_BMP581_INT1": "7",
+    }
+    found = dict(re.findall(r"(EVK_[A-Z0-9_]+)\s*=\s*(\d+),", out))
+    for name, value in enum_values.items():
+        assert found.get(name) == value, (
+            f"{name} = {found.get(name)!r}, expected {value!r} -- enum value "
+            f"drifted from the hand-authored original"
+        )
+
+
+def test_mux_enums_reproduce_metadata_values(gen_module):
+    """Generator unit test (issue #637): feed a hand-built YAML dict
+    with a `mux_enums:` block and assert the emitted `typedef enum`
+    text carries exactly the metadata's names/values -- not just
+    presence.  Complements the real-YAML coverage check above with a
+    minimal, generator-only fixture."""
+    doc = {
+        "name": "TEST-MUX",
+        "e1m_routes": {},
+        "mux_enums": [
+            {
+                "name": "test_select_t",
+                "doc": "Test mux.",
+                "values": [
+                    {"name": "TEST_SEL_A", "value": 0, "doc": "A."},
+                    {"name": "TEST_SEL_B", "value": 1, "doc": "B."},
+                ],
+            },
+        ],
+    }
+    out = gen_module.emit_board("TEST-MUX", doc)
+    assert out is not None
+    assert "/** Test mux. */" in out
+    assert "typedef enum {" in out
+    assert "TEST_SEL_A = 0, /**< A. */" in out
+    assert "TEST_SEL_B = 1, /**< B. */" in out
+    assert "} test_select_t;" in out
+
+
+def test_mux_enums_reject_duplicate_enumerator_values(gen_module):
+    """A schema `mux_enum_entry` can't express cross-item uniqueness
+    within its own `values:` list -- two enumerators silently sharing
+    a numeric value would read as a typo in the generated header, not
+    a build error.  `_emit_mux_enums()` enforces it at generation
+    time instead (issue #637)."""
+    doc = {
+        "name": "TEST-MUX-DUP",
+        "e1m_routes": {},
+        "mux_enums": [
+            {
+                "name": "test_dup_select_t",
+                "values": [
+                    {"name": "TEST_DUP_A", "value": 0},
+                    {"name": "TEST_DUP_B", "value": 0},
+                ],
+            },
+        ],
+    }
+    with pytest.raises(ValueError, match="must be unique"):
+        gen_module.emit_board("TEST-MUX-DUP", doc)
 
 
 def test_emit_board_selects_e1m_x_pinout_for_x_routes(gen_module):

@@ -51,6 +51,11 @@
       "description": "Board-repurposed pads exposed past the standard E1M pinout's 52 entries, for boards that expose them to an `alp,pin-array` devicetree overlay (see zephyr/dts/bindings/alp,pin-array.yaml).  Each entry gets `EVK_PIN_OVERLAY_BASE + N`, where N is the entry's position in THIS list (0-based) -- an ordinal, not an independent hardware fact, so it is never written by hand; scripts/gen_board_header.py computes it from list order via `enumerate()`.  Reordering entries changes every macro after the moved one, exactly like reordering the backing devicetree overlay's `gpios` phandle list would.",
       "items": { "$ref": "#/$defs/overlay_pin_entry" }
     },
+    "mux_enums": {
+      "type": "array",
+      "description": "Board mux-select / IO-expander-pin enums (evk_sdio_select_t, evk_pcie_ioexp_pin_t, ...).  scripts/gen_board_header.py reads this block and emits a `typedef enum { ... } <name>;` per entry into include/alp/boards/alp_<name>_routes.h.  Single source of truth for enum values that used to be hand-authored in the board header (issue #637).",
+      "items": { "$ref": "#/$defs/mux_enum_entry" }
+    },
     "defaults": {
       "type": "object",
       "additionalProperties": true,
@@ -165,6 +170,31 @@
       "properties": {
         "macro": { "type": "string", "pattern": "^EVK_PIN_[A-Z0-9_]+$", "description": "C macro name emitted as `#define <macro> (EVK_PIN_OVERLAY_BASE + N)`, N = list position.  `EVK_` only -- `_emit_overlay_pins()` hard-codes `EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT` (the 35x35 count) with no E1M-X branch, so an `XEVK_PIN_*` entry would emit a base macro from the wrong pinout's GPIO count. Widen this in lockstep with the generator if the 45x65 carrier ever needs its own overlay_pins:." },
         "doc":   { "type": "string", "description": "Doxygen @brief: which standard E1M pad was repurposed (E1M name + Alif pin) and what it now does on this board." }
+      }
+    },
+    "mux_enum_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "values"],
+      "description": "One `typedef enum { ... } <name>;` block.",
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*_t$", "description": "Typedef name (e.g. evk_sdio_select_t). Deliberately NOT locked to an `evk_` prefix: this schema is generic across board presets, and an `^evk_` pattern would reject every non-EVK board outright." },
+        "doc":  { "type": "string", "description": "One-line Doxygen `@brief` emitted immediately above the typedef (only for enums that had one hand-authored, e.g. evk_pcie_ioexp_pin_t). Omit for enums whose original prose comment lived several lines above the typedef instead." },
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "description": "At least one enumerator -- an empty list has no valid C rendering, and the emitter's column-alignment `max()` raises on it.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "value"],
+            "properties": {
+              "name":  { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+              "value": { "type": "integer", "minimum": 0 },
+              "doc":   { "type": "string", "description": "One-line Doxygen `@brief` (`/**< ... */`) trailing the enumerator." }
+            }
+          }
+        }
       }
     }
   }

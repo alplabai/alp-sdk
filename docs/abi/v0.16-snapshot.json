@@ -715,72 +715,6 @@
           ],
           "hash": "65e349d6c8ddd4d5",
           "kind": "enum"
-        },
-        "evk_i2s_select_t": {
-          "definition": "typedef enum { EVK_I2S_AMP = 0, EVK_I2S_M2E_KEY = 1, } evk_i2s_select_t;",
-          "enumerators": [
-            "EVK_I2S_AMP = 0",
-            "EVK_I2S_M2E_KEY = 1"
-          ],
-          "hash": "21a3cd613a2850f9",
-          "kind": "enum"
-        },
-        "evk_ioexp_pin_t": {
-          "definition": "typedef enum { EVK_IOEXP_LCD_PWR_EN = 0, EVK_IOEXP_LCD_RST = 1, EVK_IOEXP_CAM_EN = 2, EVK_IOEXP_CTP_RST = 3, EVK_IOEXP_ICM42670_INT1 = 4, EVK_IOEXP_ICM42670_INT2 = 5, EVK_IOEXP_ICM42670_FSYNC = 6, EVK_IOEXP_BMP581_INT1 = 7, } evk_ioexp_pin_t;",
-          "enumerators": [
-            "EVK_IOEXP_LCD_PWR_EN = 0",
-            "EVK_IOEXP_LCD_RST = 1",
-            "EVK_IOEXP_CAM_EN = 2",
-            "EVK_IOEXP_CTP_RST = 3",
-            "EVK_IOEXP_ICM42670_INT1 = 4",
-            "EVK_IOEXP_ICM42670_INT2 = 5",
-            "EVK_IOEXP_ICM42670_FSYNC = 6",
-            "EVK_IOEXP_BMP581_INT1 = 7"
-          ],
-          "hash": "a7b070eac54f8f11",
-          "kind": "enum"
-        },
-        "evk_pcie_ioexp_pin_t": {
-          "definition": "typedef enum { EVK_PCIE_IOEXP_I2C_SEL = 0, EVK_PCIE_IOEXP_M2E_ALERT = 1, EVK_PCIE_IOEXP_E_PCIE0_RST = 2, EVK_PCIE_IOEXP_E_PCIE0_WAKE = 3, EVK_PCIE_IOEXP_E_PCIE0_CLKREQ = 4, EVK_PCIE_IOEXP_M_PCIE0_RST = 5, EVK_PCIE_IOEXP_M_PCIE0_WAKE = 6, EVK_PCIE_IOEXP_M_PCIE0_CLKREQ = 7, } evk_pcie_ioexp_pin_t;",
-          "enumerators": [
-            "EVK_PCIE_IOEXP_I2C_SEL = 0",
-            "EVK_PCIE_IOEXP_M2E_ALERT = 1",
-            "EVK_PCIE_IOEXP_E_PCIE0_RST = 2",
-            "EVK_PCIE_IOEXP_E_PCIE0_WAKE = 3",
-            "EVK_PCIE_IOEXP_E_PCIE0_CLKREQ = 4",
-            "EVK_PCIE_IOEXP_M_PCIE0_RST = 5",
-            "EVK_PCIE_IOEXP_M_PCIE0_WAKE = 6",
-            "EVK_PCIE_IOEXP_M_PCIE0_CLKREQ = 7"
-          ],
-          "hash": "63dbfe53fd804643",
-          "kind": "enum"
-        },
-        "evk_pcie_select_t": {
-          "definition": "typedef enum { EVK_PCIE_E_KEY = 0, EVK_PCIE_M_KEY = 1, } evk_pcie_select_t;",
-          "enumerators": [
-            "EVK_PCIE_E_KEY = 0",
-            "EVK_PCIE_M_KEY = 1"
-          ],
-          "hash": "ed02ad775ad2e7bf",
-          "kind": "enum"
-        },
-        "evk_sdio_select_t": {
-          "definition": "typedef enum { EVK_SDIO_M2E_KEY = 0, EVK_SDIO_SDCARD = 1, } evk_sdio_select_t;",
-          "enumerators": [
-            "EVK_SDIO_M2E_KEY = 0",
-            "EVK_SDIO_SDCARD = 1"
-          ],
-          "hash": "e77c6dfa63ab9cb0",
-          "kind": "enum"
-        },
-        "evk_usb2_select_t": {
-          "definition": "typedef enum { EVK_USB2_CONNECTOR = 0, EVK_USB2_M2E_KEY = 1, } evk_usb2_select_t;",
-          "enumerators": [
-            "EVK_USB2_CONNECTOR = 0",
-            "EVK_USB2_M2E_KEY = 1"
-          ],
-          "hash": "86578c894044f279",
-          "kind": "enum"
         }
       },
       "variables": {}
@@ -1221,7 +1155,74 @@
           "value": "ALP_E1M_UART0"
         }
       },
-      "typedefs": {},
+      "typedefs": {
+        "evk_i2s_select_t": {
+          "definition": "typedef enum { EVK_I2S_AMP = 0, EVK_I2S_M2E_KEY = 1, } evk_i2s_select_t;",
+          "enumerators": [
+            "EVK_I2S_AMP = 0",
+            "EVK_I2S_M2E_KEY = 1"
+          ],
+          "hash": "21a3cd613a2850f9",
+          "kind": "enum"
+        },
+        "evk_ioexp_pin_t": {
+          "definition": "typedef enum { EVK_IOEXP_LCD_PWR_EN = 0, EVK_IOEXP_LCD_RST = 1, EVK_IOEXP_CAM_EN = 2, EVK_IOEXP_CTP_RST = 3, EVK_IOEXP_ICM42670_INT1 = 4, EVK_IOEXP_ICM42670_INT2 = 5, EVK_IOEXP_ICM42670_FSYNC = 6, EVK_IOEXP_BMP581_INT1 = 7, } evk_ioexp_pin_t;",
+          "enumerators": [
+            "EVK_IOEXP_LCD_PWR_EN = 0",
+            "EVK_IOEXP_LCD_RST = 1",
+            "EVK_IOEXP_CAM_EN = 2",
+            "EVK_IOEXP_CTP_RST = 3",
+            "EVK_IOEXP_ICM42670_INT1 = 4",
+            "EVK_IOEXP_ICM42670_INT2 = 5",
+            "EVK_IOEXP_ICM42670_FSYNC = 6",
+            "EVK_IOEXP_BMP581_INT1 = 7"
+          ],
+          "hash": "a7b070eac54f8f11",
+          "kind": "enum"
+        },
+        "evk_pcie_ioexp_pin_t": {
+          "definition": "typedef enum { EVK_PCIE_IOEXP_I2C_SEL = 0, EVK_PCIE_IOEXP_M2E_ALERT = 1, EVK_PCIE_IOEXP_E_PCIE0_RST = 2, EVK_PCIE_IOEXP_E_PCIE0_WAKE = 3, EVK_PCIE_IOEXP_E_PCIE0_CLKREQ = 4, EVK_PCIE_IOEXP_M_PCIE0_RST = 5, EVK_PCIE_IOEXP_M_PCIE0_WAKE = 6, EVK_PCIE_IOEXP_M_PCIE0_CLKREQ = 7, } evk_pcie_ioexp_pin_t;",
+          "enumerators": [
+            "EVK_PCIE_IOEXP_I2C_SEL = 0",
+            "EVK_PCIE_IOEXP_M2E_ALERT = 1",
+            "EVK_PCIE_IOEXP_E_PCIE0_RST = 2",
+            "EVK_PCIE_IOEXP_E_PCIE0_WAKE = 3",
+            "EVK_PCIE_IOEXP_E_PCIE0_CLKREQ = 4",
+            "EVK_PCIE_IOEXP_M_PCIE0_RST = 5",
+            "EVK_PCIE_IOEXP_M_PCIE0_WAKE = 6",
+            "EVK_PCIE_IOEXP_M_PCIE0_CLKREQ = 7"
+          ],
+          "hash": "63dbfe53fd804643",
+          "kind": "enum"
+        },
+        "evk_pcie_select_t": {
+          "definition": "typedef enum { EVK_PCIE_E_KEY = 0, EVK_PCIE_M_KEY = 1, } evk_pcie_select_t;",
+          "enumerators": [
+            "EVK_PCIE_E_KEY = 0",
+            "EVK_PCIE_M_KEY = 1"
+          ],
+          "hash": "ed02ad775ad2e7bf",
+          "kind": "enum"
+        },
+        "evk_sdio_select_t": {
+          "definition": "typedef enum { EVK_SDIO_M2E_KEY = 0, EVK_SDIO_SDCARD = 1, } evk_sdio_select_t;",
+          "enumerators": [
+            "EVK_SDIO_M2E_KEY = 0",
+            "EVK_SDIO_SDCARD = 1"
+          ],
+          "hash": "e77c6dfa63ab9cb0",
+          "kind": "enum"
+        },
+        "evk_usb2_select_t": {
+          "definition": "typedef enum { EVK_USB2_CONNECTOR = 0, EVK_USB2_M2E_KEY = 1, } evk_usb2_select_t;",
+          "enumerators": [
+            "EVK_USB2_CONNECTOR = 0",
+            "EVK_USB2_M2E_KEY = 1"
+          ],
+          "hash": "86578c894044f279",
+          "kind": "enum"
+        }
+      },
       "variables": {}
     },
     "alp/boards/alp_e1m_x_evk.h": {
