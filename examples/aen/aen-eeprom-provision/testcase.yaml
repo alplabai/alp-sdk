@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: aen-eeprom-provision
+  description: |
+    WRITE the 128-byte Alp hardware-info manifest into the on-module 24C128
+    EEPROM on the E1M-AEN (Alif Ensemble) SoM, then read it back and verify.
+    Write sibling of aen-eeprom-manifest; EEPROM on SoC I2C2 (i2c_dw).
+
+tests:
+  alp_sdk.examples.aen.eeprom_provision.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - eeprom
+      - hw-info
+      - provisioning
+    build_only: true
+    # This app refuses to build without a manifest blob, on purpose: it writes a
+    # module identity and must never invent one (see CMakeLists.txt). CI therefore
+    # has to supply a blob, so it supplies a deliberately unusable one -- serial
+    # CI-FIXTURE-DO-NOT-USE, dated 2000-01-01 -- which is build-only and never
+    # reaches hardware. Real provisioning passes an operator-generated blob from
+    # scripts/program_eeprom.py.
+    extra_args:
+      - ALP_MANIFEST_BIN=ci-fixture-manifest.bin

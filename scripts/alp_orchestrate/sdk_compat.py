@@ -402,3 +402,29 @@ def check(
     if not reasons:
         return None
     return "; ".join(reasons)
+
+
+def board_designator(table: Any, hw_rev: Optional[str]) -> Optional[str]:
+    """Compose the full board designator for a revision, e.g. `2626-r2`.
+
+    The physical board is `E1M-AEN-2626-R2`: `2626` is a YYWW datecode carried by
+    the Altium board number and declared once, per family, as `board_datecode:`
+    in `hw-revisions.yaml`.  A module whose identity says only `r2` cannot be tied
+    back to its board number, so the identity written into the EEPROM -- and the
+    build-side value the boot banner compares it against -- both carry the
+    composed form.
+
+    IMPORTANT: this is NOT a replacement for the bare revision key.  `hw_rev`
+    stays `r2` everywhere it is used as a LOOKUP KEY (board.yaml, the loader's
+    `family_revision_known()` check, `pad_route_overrides`).  Composing there
+    would break the lookup.  Only the identity/compare surfaces use this.
+
+    Returns the bare `hw_rev` unchanged when the family declares no datecode, so
+    families that have not adopted one are untouched.
+    """
+    if not hw_rev:
+        return hw_rev
+    if not isinstance(table, dict):
+        return hw_rev
+    datecode = table.get("board_datecode")
+    return f"{datecode}-{hw_rev}" if datecode else hw_rev

@@ -39,7 +39,13 @@ class TestHwInfoHEmit(unittest.TestCase):
         self.assertIn("#define ALP_HW_INFO_BUILD_H", out)
         self.assertIn('#define ALP_HW_BUILD_SOM_SKU         "E1M-AEN801"', out)
         self.assertIn('#define ALP_HW_BUILD_SOM_FAMILY      "aen"', out)
-        self.assertIn('#define ALP_HW_BUILD_SOM_HW_REV      "r2"', out)
+        # Composed board designator, not the bare revision key: the physical
+        # board is E1M-AEN-2626-R2 and `2626` is a family-level board_datecode
+        # in metadata/e1m_modules/aen/hw-revisions.yaml.  This macro is compared
+        # against the module's EEPROM identity, which carries the same composed
+        # form, so the two must agree -- CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL
+        # turns a disagreement into k_panic().  See sdk_compat.board_designator().
+        self.assertIn('#define ALP_HW_BUILD_SOM_HW_REV      "2626-r2"', out)
         self.assertIn('#define ALP_HW_BUILD_BOARD_NAME      "E1M-EVK"', out)
         self.assertIn('#define ALP_HW_BUILD_BOARD_HW_REV    "r1"', out)
         self.assertIn('#define ALP_HW_BUILD_OS              "zephyr"', out)
@@ -77,7 +83,9 @@ class TestHwInfoHEmit(unittest.TestCase):
             """)
             rv = _run_loader(input_path=path, emit="hw-info-h")
             self.assertEqual(rv.returncode, 0, msg=rv.stderr)
-            self.assertIn('ALP_HW_BUILD_SOM_HW_REV      "r1"', rv.stdout)
+            # `r1` composes to `2626-r1` -- the datecode is a property of the
+            # AEN module PCB and shared by every revision of it.
+            self.assertIn('ALP_HW_BUILD_SOM_HW_REV      "2626-r1"', rv.stdout)
 
 
 if __name__ == "__main__":

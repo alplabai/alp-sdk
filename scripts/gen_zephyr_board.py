@@ -27,6 +27,15 @@ Scope (issue #523, first slice; extended by #655 slice 1):
     here, byte-identical to the committed tree -- proven by
     `tests/scripts/test_gen_zephyr_board.py`, whose `HAND_MAINTAINED`
     exemption set is exactly those two names.
+
+    Its pinctrl `.dtsi` and `.dts` take a THIRD source alongside the SoM
+    preset + SoC JSON: `metadata/e1m_modules/aen/on-module-links.yaml`,
+    the authority for pads that reach no E1M edge pin (BRD_I2C on
+    P7_0/P7_1 and the RV-3028 alarm on P15_0) and for the devices that
+    hang off them.  `metadata/pinmux/aen.yaml` cannot carry those: it is
+    a generated projection of the EDGE pad TSVs, so an on-module pad has
+    no row there by construction.  Same shape, and same reasoning, as
+    `supervisor-links.yaml` below.
   - Renesas RZ/V2N-family boards (`v2n` / `v2n-m1`, e.g. E1M-V2N101,
     E1M-V2M101 `m33_sm`) generate the family-agnostic files (`board.yml`,
     `Kconfig.alp_<board>`, the twister `.yaml`) PLUS the pinctrl `.dtsi`
@@ -87,6 +96,7 @@ from __future__ import annotations
 
 import json
 import re
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -903,9 +913,99 @@ def _uart_node_label(row: dict[str, Any]) -> str:
     return m.group(1).lower()
 
 
+# ---------------------------------------------------------------------
+# AEN on-module (non-edge) links: BRD_I2C + its devices, the RTC alarm
+# ---------------------------------------------------------------------
+
+
+def _load_aen_on_module_links(metadata_root: Path) -> dict[str, Any]:
+    """Load + shape-check `metadata/e1m_modules/aen/on-module-links.yaml`.
+
+    The AEN counterpart of `_load_supervisor_links()`, and the ONLY
+    authority for pads that reach no E1M edge pin: `metadata/pinmux/aen.yaml`
+    is a generated projection of the EDGE pad TSVs and carries no row for
+    P7_0 / P7_1 (BRD_I2C) or P15_0 (RTC_ALARM), which run SoC <-> on-module
+    chip and never leave the module.  Family-scoped -- one file backs every
+    AEN SKU and both M55 cores.
+    """
+    path = metadata_root / "e1m_modules" / "aen" / "on-module-links.yaml"
+    if not path.is_file():
+        raise ZephyrBoardEmitError(
+            f"no {path} -- the AEN pinctrl.dtsi/.dts emitters need the "
+            "on-module pad + device source (BRD_I2C, the RV-3028 alarm)")
+    doc = _load_yaml(path)
+    links = doc.get("on_module_links")
+    if not isinstance(links, dict):
+        raise ZephyrBoardEmitError(f"{path} has no on_module_links: block")
+    for key in ("brd_i2c", "rtc_alarm"):
+        if key not in links:
+            raise ZephyrBoardEmitError(
+                f"{path} on_module_links: is missing {key!r}")
+    return links
+
+
+def _c_comment(text: str, indent: str, width: int = 79) -> list[str]:
+    """Reflow a metadata `evidence:` / `risk:` string into a C block comment.
+
+    Keeps the prose in the YAML (one source per hardware fact) instead of
+    duplicating it as template text here.
+    """
+    body = " ".join(text.split())
+    prefix = f"{indent} * "
+    wrapped = textwrap.wrap(body, width=width - len(prefix)) or [""]
+    return [f"{indent}/*"] + [f"{prefix}{line}".rstrip() for line in wrapped] + [f"{indent} */"]
+
+
+def _dt_property(name: str, value: Any) -> str:
+    """One devicetree property line from a metadata `properties:` entry."""
+    if isinstance(value, bool):
+        if not value:
+            raise ZephyrBoardEmitError(
+                f"on-module-links.yaml property {name!r}: `false` has no "
+                "devicetree meaning -- omit the property instead")
+        return f"{name};"
+    if isinstance(value, int):
+        return f"{name} = <{value}>;"
+    if isinstance(value, str):
+        return f'{name} = "{value}";'
+    raise ZephyrBoardEmitError(
+        f"on-module-links.yaml property {name!r}: unsupported value type "
+        f"{type(value).__name__}")
+
+
+def _aen_i2c_device_nodes(
+    bus: dict[str, Any], links: dict[str, Any], indent: str = "\t",
+) -> list[str]:
+    """The `&i2c0` child nodes for the on-module devices, from metadata.
+
+    Only devices the metadata actually lists get a node -- the DNP=1 OPTIGA
+    Trust M is absent from `devices:` for exactly that reason, so it can
+    never be emitted as a phantom node.
+    """
+    lines: list[str] = []
+    for dev in bus.get("devices") or []:
+        lines.append("")
+        if dev.get("evidence"):
+            lines += _c_comment(dev["evidence"], indent)
+        lines.append(f"{indent}{dev['node_label']}: {dev['node_name']} {{")
+        lines.append(f'{indent}\tcompatible = "{dev["compatible"]}";')
+        lines.append(f"{indent}\treg = <{dev['address_7bit']:#04x}>;")
+        for name, value in (dev.get("properties") or {}).items():
+            lines.append(f"{indent}\t{_dt_property(name, value)}")
+        int_link = dev.get("int_gpio_link")
+        if int_link:
+            alarm = links[int_link]
+            flag = "GPIO_ACTIVE_LOW" if alarm.get("active_low") else "GPIO_ACTIVE_HIGH"
+            lines.append(
+                f"{indent}\tint-gpios = <&{alarm['gpio_node']} "
+                f"{alarm['gpio_pin']} {flag}>;")
+        lines.append(f"{indent}}};")
+    return lines
+
+
 def _aen_pinctrl_dtsi(
     role: str, sku_display: str, rx_row: dict[str, Any], tx_row: dict[str, Any],
-    family_display: str,
+    family_display: str, links: dict[str, Any],
 ) -> str:
     other_role = "he" if role == "hp" else "hp"
     rx_macro, tx_macro = _pin_macro(rx_row), _pin_macro(tx_row)
@@ -937,8 +1037,15 @@ def _aen_pinctrl_dtsi(
         " * the AEN module PCB; the Alp E1M-EVK carrier wires its USB-UART console to it.\n"
         + confirm_block +
         " *\n"
-        " * GPIO / I2C / SPI / Ethernet pin groups are added alongside their drivers\n"
-        " * (the alp-sdk Alif peripheral drivers); only the console is wired here.\n"
+        " *\n"
+        " * BRD_I2C (SoC I2C0, function C) is wired here too: it is an ON-MODULE bus\n"
+        " * carrying SoM-resident parts (RTC + temperature sensor), present on every\n"
+        " * board built from this SoM -- not a per-app choice, so it belongs in the\n"
+        " * board layer rather than in each consumer's overlay.  Pads, macros and pad\n"
+        " * config come from metadata/e1m_modules/aen/on-module-links.yaml.\n"
+        " *\n"
+        " * Remaining GPIO / SPI / Ethernet pin groups are added alongside their\n"
+        " * drivers (the alp-sdk Alif peripheral drivers).\n"
         " */\n"
         "\n"
         "#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>\n"
@@ -954,8 +1061,163 @@ def _aen_pinctrl_dtsi(
         f"\t\t\tpinmux = <{tx_macro}>;\n"
         "\t\t};\n"
         "\t};\n"
+        "\n"
+        + _aen_i2c_pinctrl_group(links) +
         "};\n"
     )
+
+
+def _aen_i2c_pinctrl_group(links: dict[str, Any]) -> str:
+    """The BRD_I2C pinctrl group (+ the RTC alarm pad), from metadata.
+
+    The alarm pad rides in THIS group rather than one of its own because
+    `snps,designware-gpio` (the lpgpio controller's binding) has no
+    `pinctrl-0` property: on Alif the pad input buffer is a PADCTRL bit only
+    pinctrl can set, gpio_dw drives direction in the controller and never
+    touches the pad, so an un-referenced group would simply never be applied
+    and the alarm line would read 0 forever.  Same pattern as P2_6 (the
+    CC3501E READY input) riding in `pinctrl_spi1`.
+    """
+    bus = links["brd_i2c"]
+    alarm = links["rtc_alarm"]
+    sda = _pin_by_peripheral(bus["pins"], "I2C0_SDA_C")
+    scl = _pin_by_peripheral(bus["pins"], "I2C0_SCL_C")
+    return (
+        "\t/*\n"
+        f"\t * {sda['net'].rsplit('_', 1)[0]} = SoC {bus['peripheral']} function C: "
+        f"{sda['silicon_pad']} {sda['net'].rsplit('_', 1)[-1]} / "
+        f"{scl['silicon_pad']} {scl['net'].rsplit('_', 1)[-1]},\n"
+        "\t * the on-module housekeeping bus (see the board .dts for the parts on it).\n"
+        "\t *\n"
+        "\t * BOTH pins get input-enable, in one group -- Alif's own DFP sets\n"
+        f"\t * PADCTRL_READ_ENABLE on {sda['silicon_pad']} AND {scl['silicon_pad']}.  "
+        "With it on SDA only, the\n"
+        "\t * i2c_dw controller cannot SENSE SCL (clock-stretch detect / arbitration)\n"
+        "\t * and NACKs every address for a reason that looks electrical but is not.\n"
+        "\t *\n"
+        "\t * bias-pull-up is DSC=1, a REAL pull-up (soc/alif/ensemble/pinctrl_soc.h\n"
+        "\t * encodes bits 19:20 [DSC] as 0=high-Z, 1=pull-up, 2=pull-down,\n"
+        "\t * 3=bus-keeper).  Do NOT copy the I2C2/EEPROM overlay's bias-pull-down:\n"
+        "\t * DSC=2 is a pull-DOWN, harmless there only because that bus has external\n"
+        "\t * carrier pull-ups (R137/R144).  This net has NO external pull-up at all,\n"
+        "\t * so a pull-down would park both lines low and look like a busy bus.\n"
+        "\t *\n"
+        "\t * drive-open-drain is deliberately NOT set, so bit 23 [DRV] stays 0 =\n"
+        "\t * PUSH-PULL: the pad actively drives the high phase instead of relying on\n"
+        "\t * a pull-up this net does not have.  input-schmitt-enable + max\n"
+        "\t * drive-strength/slew-rate cover the resulting slow edges.  Bench-proven\n"
+        "\t * 2026-09-05 on E1M-AEN801 2626-R2: every non-response is a clean rc=-5\n"
+        "\t * (-EIO) NACK, zero -ETIMEDOUT, zero \"User Abort\".\n"
+        "\t */\n"
+        f"\t{bus['pinctrl_group_label']}: {bus['pinctrl_group_label']} {{\n"
+        "\t\tgroup0 {\n"
+        f"\t\t\tpinmux = <{_pin_macro(sda)}>, <{_pin_macro(scl)}>;\n"
+        "\t\t\tinput-enable;\n"
+        "\t\t\tbias-pull-up;\n"
+        "\t\t\tinput-schmitt-enable;\n"
+        "\t\t\tdrive-strength = <12>;\n"
+        "\t\t\tslew-rate = \"fast\";\n"
+        "\t\t};\n"
+        "\n"
+        "\t\t/*\n"
+        f"\t\t * {alarm['net']}: the RV-3028 /INT line on {alarm['silicon_pad']} "
+        f"({alarm['gpio_node']} bit {alarm['gpio_pin']}).\n"
+        "\t\t * Muxed + input-enabled here because snps,designware-gpio has no\n"
+        "\t\t * pinctrl-0 of its own (see this function's docstring); without it the\n"
+        "\t\t * pad input buffer stays off and the alarm reads 0 forever.\n"
+        "\t\t */\n"
+        "\t\tgroup1 {\n"
+        f"\t\t\tpinmux = <{_pin_macro(alarm)}>;\n"
+        "\t\t\tinput-enable;\n"
+        "\t\t};\n"
+        "\t};\n"
+    )
+
+
+
+def _aen_brd_i2c_dts(links: dict[str, Any]) -> list[str]:
+    """`&i2c0` (BRD_I2C) + its on-module device nodes, `&lpgpio`, and the
+    aliases that make all three reachable portably.
+
+    Board layer, not a per-app overlay and not the SoC peripherals dtsi:
+    these parts are soldered on the E1M-AEN SoM, so every app built for this
+    board should get them for free -- while
+    `zephyr/dts/alif/ensemble_e8_peripherals.dtsi` describes the E8 DIE, which
+    every AEN SKU shares whether or not it carries these chips.
+    """
+    bus = links["brd_i2c"]
+    alarm = links["rtc_alarm"]
+    sda = _pin_by_peripheral(bus["pins"], "I2C0_SDA_C")
+    scl = _pin_by_peripheral(bus["pins"], "I2C0_SCL_C")
+    devices = bus.get("devices") or []
+
+    lines = [
+        "/*",
+        f" * BRD_I2C -- the on-module housekeeping bus: SoC {bus['peripheral']} in its function-C",
+        f" * muxing ({sda['silicon_pad']} SDA / {scl['silicon_pad']} SCL), NOT the slave-only LPI2C0 it was",
+        " * believed to be before #1848.  Driven by UPSTREAM",
+        ' * Zephyr i2c_dw ("snps,designware-i2c"), ADR 0017 Tier-1 -- no vendored code.',
+        " *",
+        " * ISOLATED: R93/R94 (the 0-ohm bridge to the I2C2/EEPROM segment) are DNP, so",
+        " * the 24C128 manifest EEPROM is NOT on this bus -- it stays on i2c2.  The",
+        " * OPTIGA Trust M (IC1, @0x30) is DNP=1 on this batch and so has NO node here;",
+        " * its silence is a negative control, not a fault.",
+        " *",
+        " * Both device drivers are upstream and Kconfig `default y` on their own",
+        " * DT_HAS_*_ENABLED, so an app needs only CONFIG_RTC / CONFIG_SENSOR in its",
+        " * prj.conf -- the board layer deliberately forces neither.",
+        " */",
+        f"&{bus['dt_label']} {{",
+        '\tstatus = "okay";',
+        f"\tpinctrl-0 = <&{bus['pinctrl_group_label']}>;",
+        '\tpinctrl-names = "default";',
+        f"\tclock-frequency = <{bus['clock_frequency_macro']}>;",
+    ]
+    lines += _aen_i2c_device_nodes(bus, links)
+    lines += ["};", ""]
+
+    lines += [
+        "/*",
+        f" * {alarm['gpio_node']} -- needed so the RV-3028 alarm on {alarm['silicon_pad']} "
+        f"({alarm['net']}, bit {alarm['gpio_pin']} =>",
+        f" * IRQ {alarm['gpio_irq']}) is usable as an interrupt source.  Active LOW,",
+        " * open-drain, pulled up on-module by R98 (100k to +1V8, FITTED).  The pad",
+        " * itself is muxed in the pinctrl dtsi's BRD_I2C group (that binding has no",
+        " * pinctrl-0 of its own).",
+        " *",
+    ]
+    # The port-15 control-register warning, straight from the metadata's own
+    # `risk:` string -- the most likely bench failure on this path, and the
+    # one a reader must not mistake for a dead RTC.
+    lines += _c_comment(alarm["risk"], "")[1:-1]
+    lines += [
+        " */",
+        f"&{alarm['gpio_node']} {{",
+        '\tstatus = "okay";',
+        "};",
+        "",
+    ]
+
+    alias_lines = [f"\t\t{bus['alias']} = &{bus['dt_label']};"]
+    for dev in devices:
+        if dev.get("alias"):
+            alias_lines.append(f"\t\t{dev['alias']} = &{dev['node_label']};")
+    lines += [
+        "/*",
+        " * Portable aliases.  The bus alias is what alp_i2c_open(.bus_id = N)",
+        " * resolves (src/backends/i2c/zephyr_drv.c -> DT_ALIAS(alp_i2cN)), matching",
+        " * the on-module EEPROM's own convention on i2c2; the device aliases let an",
+        " * example say DT_ALIAS(rtc) / DT_ALIAS(ambient_temp0) instead of hardcoding",
+        " * this board's node labels.",
+        " */",
+        "/ {",
+        "\taliases {",
+        *alias_lines,
+        "\t};",
+        "};",
+        "",
+    ]
+    return lines
 
 
 def _aen_ethos_u(soc_spec: dict[str, Any]) -> tuple[str, str] | None:
@@ -1127,7 +1389,7 @@ def _aen_kconfig_defconfig(dir_name: str, role: str, part: str) -> str:
 def _aen_dts(
     sku: str, core_id: str, soc_spec: dict[str, Any], variant: dict[str, Any],
     dir_name: str, basename: str, rx_row: dict[str, Any], tx_row: dict[str, Any],
-    metadata_root: Path,
+    metadata_root: Path, links: dict[str, Any],
     ethos_u: tuple[str, str] | None = None,
     memory_map: "list[dict[str, Any]] | None" = None,
 ) -> str:
@@ -1200,9 +1462,10 @@ def _aen_dts(
         ]
     lines += [
         " *",
-        f" * Inter-core IPC (the APSS<->RTSS-{role_u} MHUv2 doorbell pair) + the on-module",
-        " * peripheral buses (GPIO / I2C / SPI / Ethernet) are added alongside the",
-        " * alp-sdk Alif peripheral drivers; this base wires boot + console only.",
+        f" * Inter-core IPC (the APSS<->RTSS-{role_u} MHUv2 doorbell pair) + the remaining",
+        " * on-module peripheral buses (GPIO / SPI / Ethernet) are added alongside the",
+        " * alp-sdk Alif peripheral drivers; this base wires boot, console and the",
+        " * on-module BRD_I2C housekeeping bus (RTC + temperature sensor, below).",
         " */",
         "",
         "/dts-v1/;",
@@ -1210,6 +1473,8 @@ def _aen_dts(
         f"#include <alif/ensemble/{display_variant.lower()}.dtsi>",
         f"#include <alif/ensemble/common/ensemble_rtss_{role}.dtsi>",
         f"#include <{peripherals_dtsi}>",
+        "#include <zephyr/dt-bindings/gpio/gpio.h>",
+        "#include <zephyr/dt-bindings/i2c/i2c.h>",
         f'#include "{dir_name}-pinctrl.dtsi"',
         "",
         "/ {",
@@ -1425,6 +1690,7 @@ def _aen_dts(
         "};",
         "",
     ]
+    lines += _aen_brd_i2c_dts(links)
 
     if ethos_u is not None:
         _accel, node = ethos_u
@@ -1505,12 +1771,13 @@ def _load_supervisor_links(metadata_root: Path) -> dict[str, Any]:
     return links
 
 
-def _v2n_pin_by_peripheral(pins: list[dict[str, Any]], peripheral: str) -> dict[str, Any]:
+def _pin_by_peripheral(pins: list[dict[str, Any]], peripheral: str) -> dict[str, Any]:
     for p in pins:
         if p.get("silicon_peripheral") == peripheral:
             return p
     raise ZephyrBoardEmitError(
-        f"supervisor-links.yaml has no {peripheral!r} row in this link's pins[]")
+        f"no {peripheral!r} row in this link's pins[] "
+        "(supervisor-links.yaml / on-module-links.yaml)")
 
 
 def _rzv_pinmux(row: dict[str, Any]) -> str:
@@ -1557,13 +1824,13 @@ def _v2n_pinctrl_dtsi(links: dict[str, Any]) -> str:
     gd32_spi = links["gd32_spi"]
     brd_i2c = links["brd_i2c"]
 
-    txd0 = _v2n_pin_by_peripheral(console["pins"], "UART0_TXD0")
-    rxd0 = _v2n_pin_by_peripheral(console["pins"], "UART0_RXD0")
-    mosi = _v2n_pin_by_peripheral(gd32_spi["pins"], "GD32_SPI.MOSI")
-    miso = _v2n_pin_by_peripheral(gd32_spi["pins"], "GD32_SPI.MISO")
-    sclk = _v2n_pin_by_peripheral(gd32_spi["pins"], "GD32_SPI.SCLK")
-    sda = _v2n_pin_by_peripheral(brd_i2c["pins"], "RIIC8_SDA8")
-    scl = _v2n_pin_by_peripheral(brd_i2c["pins"], "RIIC8_SCL8")
+    txd0 = _pin_by_peripheral(console["pins"], "UART0_TXD0")
+    rxd0 = _pin_by_peripheral(console["pins"], "UART0_RXD0")
+    mosi = _pin_by_peripheral(gd32_spi["pins"], "GD32_SPI.MOSI")
+    miso = _pin_by_peripheral(gd32_spi["pins"], "GD32_SPI.MISO")
+    sclk = _pin_by_peripheral(gd32_spi["pins"], "GD32_SPI.SCLK")
+    sda = _pin_by_peripheral(brd_i2c["pins"], "RIIC8_SDA8")
+    scl = _pin_by_peripheral(brd_i2c["pins"], "RIIC8_SCL8")
     cs0 = gd32_spi["gpio_chip_select"]
 
     # PFC alternate-function mnemonics + the console's own TXD0 reference,
@@ -1711,7 +1978,8 @@ def emit_zephyr_board(
             sku_preset, core_id, variant),
     }
 
-    v2n_banner_extra_source: set[str] = set()
+    # relpath -> the extra generation-authority file its banner must name.
+    banner_extra_source: dict[str, str] = {}
     if family == "aen":
         rx_row, tx_row = _aen_console_pinmux_rows(metadata_root)
         role = core_id.split("_")[-1]
@@ -1727,15 +1995,26 @@ def emit_zephyr_board(
         slot0_region = _aen_role_slot0_map(memory_map, role)
         slot0_base = (slot0_region["base"] if slot0_region
                       else _AEN_MRAM_BASE + _AEN_MCUBOOT_KIB * 1024)
-        files[f"{dir_name}/{dir_name}-pinctrl.dtsi"] = _aen_pinctrl_dtsi(
-            role, sku, rx_row, tx_row, _aen_family_display(soc_spec))
+        # The on-module (non-edge) pad + device source: BRD_I2C's P7_0/P7_1 and
+        # the RV-3028 alarm on P15_0 reach no E1M edge pin, so metadata/pinmux/
+        # aen.yaml (an edge-pad projection) has no row for them -- see
+        # _load_aen_on_module_links().
+        on_module_links = _load_aen_on_module_links(metadata_root)
+        aen_pinctrl_relpath = f"{dir_name}/{dir_name}-pinctrl.dtsi"
+        aen_dts_relpath = f"{dir_name}/{basename}.dts"
+        files[aen_pinctrl_relpath] = _aen_pinctrl_dtsi(
+            role, sku, rx_row, tx_row, _aen_family_display(soc_spec),
+            on_module_links)
         files[f"{dir_name}/{basename}_defconfig"] = _aen_defconfig(
             uart_node, rx_row, tx_row, slot0_base)
         files[f"{dir_name}/Kconfig.defconfig"] = _aen_kconfig_defconfig(
             dir_name, role, _aen_part(soc_spec))
-        files[f"{dir_name}/{basename}.dts"] = _aen_dts(
+        files[aen_dts_relpath] = _aen_dts(
             sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row,
-            metadata_root, _aen_ethos_u(soc_spec), memory_map)
+            metadata_root, on_module_links, _aen_ethos_u(soc_spec), memory_map)
+        banner_extra_source.update(dict.fromkeys(
+            (aen_pinctrl_relpath, aen_dts_relpath),
+            "metadata/e1m_modules/aen/on-module-links.yaml"))
     elif family in _v2n_declared_families(metadata_root):
         # Two files only -- `.dts` and `Kconfig.defconfig` stay
         # hand-authored in this slice (neither exists in the V2N/V2M
@@ -1753,7 +2032,9 @@ def emit_zephyr_board(
         # sku_rel/soc_json_rel below -- every one of those facts comes from
         # supervisor-links.yaml, so its path is threaded into these two
         # files' banners too (below), not just the family-agnostic ones.
-        v2n_banner_extra_source = {v2n_pinctrl_relpath, v2n_defconfig_relpath}
+        banner_extra_source.update(dict.fromkeys(
+            (v2n_pinctrl_relpath, v2n_defconfig_relpath),
+            "metadata/e1m_modules/v2n/supervisor-links.yaml"))
 
     # `_load_soc_spec()` above already raised ZephyrBoardEmitError if
     # `sku_preset["silicon"]` didn't resolve, so `soc_path` can't be None
@@ -1766,9 +2047,7 @@ def emit_zephyr_board(
     soc_json_rel = f"metadata/{soc_path.relative_to(metadata_root).as_posix()}"
     for relpath in list(files):
         style = "c" if relpath.endswith((".dts", "-pinctrl.dtsi")) else "hash"
-        extra_source = (
-            "metadata/e1m_modules/v2n/supervisor-links.yaml"
-            if relpath in v2n_banner_extra_source else None)
+        extra_source = banner_extra_source.get(relpath)
         files[relpath] = _with_generated_banner(
             files[relpath], style, sku, soc_json_rel, extra_source)
 

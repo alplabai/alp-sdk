@@ -10,9 +10,9 @@
  * @par Driver status: [partial-impl] -- probe (ACK-only DEV_ID read) +
  *   raw register R/W + INT1 latched-interrupt decode + per-rail
  *   enable/disable + per-rail voltage set/get (microvolts) on all 6
- *   bucks and 5 LDOs.  NOT yet exercised on real E1M-NX9101 silicon --
- *   that board doesn't exist on the bench yet (issue #474) -- so
- *   treat every number and sequencing decision here as paper-correct
+ *   bucks and 5 LDOs, landed via #474.  NOT yet exercised on real
+ *   E1M-NX9101 silicon -- that board doesn't exist on the bench yet --
+ *   so treat every number and sequencing decision here as paper-correct
  *   only, validated by the host-side `tests/zephyr/chips` unit suite
  *   against NULL-arg / uninitialised-context / table-bounds
  *   properties, not against a real transceiver.  HiL bring-up happens

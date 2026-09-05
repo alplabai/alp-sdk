@@ -85,6 +85,15 @@ on:
       - 'doxygen-out/**'
       - 'scripts/check_no_committed_doxygen_output.py'
       - 'scripts/check_doxyfile_single_source.py'
+      # check_issue_citations.py (#1950) reads driver-status prose out of
+      # metadata/**/*.yaml and include/alp/chips/*.h against its committed
+      # snapshot, metadata/issue-state-snapshot.json. All three inputs are
+      # already covered by the metadata/** and include/alp/chips/**
+      # triggers above -- only the script itself is genuinely new coverage;
+      # the snapshot's own explicit entry below is redundant but kept, same
+      # as this file's style elsewhere.
+      - 'scripts/check_issue_citations.py'
+      - 'metadata/issue-state-snapshot.json'
   push:
     branches: [main, dev]
     paths:
@@ -155,6 +164,15 @@ on:
       - 'doxygen-out/**'
       - 'scripts/check_no_committed_doxygen_output.py'
       - 'scripts/check_doxyfile_single_source.py'
+      # check_issue_citations.py (#1950) reads driver-status prose out of
+      # metadata/**/*.yaml and include/alp/chips/*.h against its committed
+      # snapshot, metadata/issue-state-snapshot.json. All three inputs are
+      # already covered by the metadata/** and include/alp/chips/**
+      # triggers above -- only the script itself is genuinely new coverage;
+      # the snapshot's own explicit entry below is redundant but kept, same
+      # as this file's style elsewhere.
+      - 'scripts/check_issue_citations.py'
+      - 'metadata/issue-state-snapshot.json'
   workflow_dispatch:
 
 concurrency:
@@ -545,6 +563,9 @@ jobs:
 
       - name: "Gate — changelog.d/ path:line citations still resolve (#1416)"
         run: python3 scripts/check_changelog_citations.py
+
+      - name: "Gate — driver-status prose doesn't cite a closed issue as an open blocker (#1950)"
+        run: python3 scripts/check_issue_citations.py
 
       - name: Gate — scripts/ and firmware/ write_text() writers pass newline=""
         run: python3 scripts/check_write_text_newline.py

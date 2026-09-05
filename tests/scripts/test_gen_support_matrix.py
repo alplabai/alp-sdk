@@ -79,6 +79,9 @@ def test_known_presence_cells():
 def test_every_module_resolves_to_a_soc():
     socs = gsm.load_socs()
     mods = gsm.load_modules()
-    assert len(mods) == 11
+    # Derived, not hardcoded -- see the note in test_gen_catalog.py: a literal
+    # count makes every new SKU look like a regression.
+    n_presets = len(list((REPO / "metadata" / "e1m_modules").glob("E1M-*.yaml")))
+    assert len(mods) == n_presets
     rows = gsm.build_rows(mods, socs)  # raises if any ref is unresolved
-    assert len(rows) == 11
+    assert len(rows) == n_presets

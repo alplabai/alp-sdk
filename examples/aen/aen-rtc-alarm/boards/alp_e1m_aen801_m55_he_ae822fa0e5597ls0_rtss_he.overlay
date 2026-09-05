@@ -1,0 +1,175 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * On-module RV-3028-C7 RTC + alarm-interrupt overlay for the E1M-AEN801
+ * (Alif Ensemble E8, M55-HE).
+ *
+ * Everything here is a MODULE fact, not an application choice, so it is on its
+ * way DOWN one layer: the board files
+ * (zephyr/boards/alp/e1m_aen801_m55_he/) are gaining the BRD_I2C bus + the
+ * on-module device nodes so every AEN801 app gets them for free.  Until that
+ * lands this overlay carries them; because devicetree merges by node PATH and
+ * the content below is identical to what the board layer emits, the two
+ * compose harmlessly, and this file can then shrink to just the pieces the
+ * board layer does not own.
+ *
+ * The filename must be the FULLY-QUALIFIED board id with '/' -> '_'
+ * (alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he).  Zephyr auto-applies a
+ * boards/<name>.overlay only on an exact match against the build's qualified
+ * board id -- a bare `alp_e1m_aen801_m55_he.overlay` is SILENTLY ignored, and
+ * the app then builds with no RTC node at all.
+ *
+ * ---------------------------------------------------------------------------
+ * BUS -- BRD_I2C is SoC I2C0 function C
+ * ---------------------------------------------------------------------------
+ * E1M-AEN-2626-R2 netlist pinmap rows:
+ *     "BRD_I2C_SDA",U6,B8,"P7_0/SCP0_A"
+ *     "BRD_I2C_SCL",U6,B3,"P7_1/SCP1_A"
+ * AE822 DFP pin table: P7_0 alt-fn [4] = I2C0_SDA_C, P7_1 alt-fn [4] =
+ * I2C0_SCL_C.  So BRD_I2C is the DesignWare master i2c0 (i2c@49010000,
+ * "snps,designware-i2c", interrupts = <132 3>), driven by UPSTREAM Zephyr's
+ * i2c_dw -- ADR 0017 Tier-1, no vendored driver.
+ *
+ * Two pad traps, each of which has already cost a wasted bench run:
+ *
+ *   input-enable on BOTH pins.  Alif's own DFP sets PADCTRL_READ_ENABLE on
+ *   P7_0 *and* P7_1.  With it on SDA only, i2c_dw cannot sense SCL
+ *   (clock-stretch detect / arbitration) and NACKs every address for a reason
+ *   that looks electrical but is not.
+ *
+ *   bias-pull-up, NOT bias-pull-down.  soc/alif/ensemble/pinctrl_soc.h encodes
+ *   pad bits 19:20 [DSC] as 0 = high-Z, 1 = pull-up, 2 = pull-down,
+ *   3 = bus-keeper, so bias-pull-up here is a REAL pull-up.  Do NOT copy the
+ *   I2C2/EEPROM overlay's bias-pull-down: that is DSC=2, a pull-DOWN, and it is
+ *   harmless there only because that segment has external carrier pull-ups
+ *   (R137/R144) that overpower it.  BRD_I2C has NO external pull-up anywhere --
+ *   it never reaches the E1M edge connector, so no carrier can add one.
+ *
+ * drive-open-drain is deliberately NOT set, so pad bit 23 [DRV] stays 0 =
+ * push-pull and the pad actively drives the high phase instead of waiting on a
+ * pull-up.  BENCH-PROVEN 2026-09-05 on E1M-AEN801 2626-R2 (Flow A, cold-cycle
+ * proven): every non-response on this bus is a clean rc=-5 (-EIO) NACK, with
+ * ZERO -ETIMEDOUT and ZERO "User Abort" -- the bus works on the internal pull
+ * alone.  (An older ensemble_e8_peripherals.dtsi comment calling this bus "NOT
+ * usable as built" was measured on an r1 module, where these parts are not on
+ * P7_0/P7_1 at all.  It does not apply to R2.)
+ *
+ * ---------------------------------------------------------------------------
+ * ALARM LINE -- RV-3028 /INT -> P15_0 -> LPGPIO bit 0 -> IRQ 171
+ * ---------------------------------------------------------------------------
+ * U21 pin 2 (/INT) drives net RTC_ALARM to SoC pad U6 V2 = P15_0_FLEX, with
+ * R98 = 100k to +1V8 FITTED as the open-drain pull-up.  ACTIVE LOW.
+ *
+ * P15 is the Alif low-power GPIO island (lpgpio @ 0x42002000,
+ * "snps,designware-gpio", ngpios = <8>, interrupts = <171 3> .. <178 3>, one
+ * IRQ per bit).  P15_0 is bit 0, so the alarm lands on IRQ 171.
+ *
+ * No pinctrl group is needed for P15_0: PIN_P15_0__LPGPIO is
+ * ALIF_PINMUX(15, 0, 0) -- function 0, the pad's RESET DEFAULT.  Same reasoning
+ * as examples/aen/aen-usb-firstlight, which drives P15_1/P15_5 with a bare
+ * `&lpgpio { status = "okay"; }`.
+ *
+ * RISK, and the first thing to check if the interrupt never fires: the AE822
+ * DFP warns "Note that LPGPIO_CTRL_n register has a different layout!" for
+ * port 15.  If rtc_get_time() works but the alarm callback never arrives, that
+ * layout difference (not the RTC) is the leading suspect -- see the RESULT
+ * PARTIAL wording in src/main.c.
+ *
+ * ---------------------------------------------------------------------------
+ * POWER -- why backup-switch-mode is "disabled" and there is no trickle charger
+ * ---------------------------------------------------------------------------
+ * VDD_BAT / VBACKUP (U21 pin 6) has NO SUPPLY FITTED on this batch.  Its only
+ * other net members are R4 and R68, both 0-ohm and both DNP=1.  There is no
+ * backup cell and no trickle source, so:
+ *
+ *   backup-switch-mode = "disabled"   (the binding REQUIRES this property, and
+ *                                      "direct"/"level" would arm a switchover
+ *                                      to a rail that does not exist)
+ *   trickle-resistor-ohms OMITTED     (enabling a trickle charger into an
+ *                                      unpopulated VBACKUP would be wrong)
+ *
+ * CONSEQUENCE, and the thing customers get bitten by: the RV-3028 does NOT
+ * retain the time OR a pending alarm across a power cycle on this batch.  Every
+ * cold boot starts from an unset clock.  Do not build persistence on it.
+ *
+ * clkout-frequency is also OMITTED.  RTC_CLKOUT (U21 pin 1) goes ONLY to the
+ * E1M edge connector (E1 pin AH16); it does NOT reach the SoC, so firmware
+ * cannot consume it.  Leaving the property out keeps the pin LOW; enabling it
+ * is a CARRIER designer's choice, not a firmware one.
+ *
+ * MODULE_STBY (U21 pin 8, the EVI external-event input) likewise comes FROM the
+ * edge connector (E1 pin O2) with R43 = 100k to +1V8.  It is carrier-driven; no
+ * firmware on this module can assert it.
+ */
+
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+&pinctrl {
+	/* One group, both pins, identical config -- see the header for why
+	 * input-enable must be on BOTH and why the bias is a pull-UP. */
+	pinctrl_i2c0: pinctrl_i2c0 {
+		group0 {
+			pinmux = <PIN_P7_0__I2C0_SDA_C>, <PIN_P7_1__I2C0_SCL_C>;
+			input-enable;
+			bias-pull-up;
+			/* This net's rise time is set by the weak internal pull, so
+			 * the edges are slow; hysteresis stops a slow edge being read
+			 * as several transitions. */
+			input-schmitt-enable;
+			/* The pad is push-pull here, so drive strength and slew rate
+			 * really do shorten the rising edge.  Max both. */
+			drive-strength = <12>;
+			slew-rate = "fast";
+		};
+	};
+};
+
+/* Enable the LP GPIO island so the RTC_ALARM input (P15_0 = lpgpio bit 0,
+ * IRQ 171) is readable and interruptible.  gpio_dw needs no clocks and no
+ * pinctrl on the controller, and P15_0's reset-default mux is already LPGPIO. */
+&lpgpio {
+	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c0>;
+	pinctrl-names = "default";
+	/* 100 kHz standard mode.  No fast-mode margin: this net's only pull is
+	 * the SoC pad's internal one (see the header). */
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+
+	/*
+	 * U21 = RV-3028-C7 32.768KHZ 1PPM-TA-QA (Micro Crystal), DNP=0 FITTED.
+	 * 7-bit address 0x52, bench-confirmed 2026-09-05 (ID register 0x28 reads
+	 * 0x44, and the Seconds register advanced 0x01 -> 0x02, so the oscillator
+	 * is genuinely running).
+	 *
+	 * Bound by UPSTREAM Zephyr's drivers/rtc/rtc_rv3028.c
+	 * (compatible "microcrystal,rv3028", CONFIG_RTC_RV3028) -- ADR 0017
+	 * Tier-1, no vendored code.
+	 */
+	rv3028: rtc@52 {
+		compatible = "microcrystal,rv3028";
+		reg = <0x52>;
+
+		/* REQUIRED by the binding.  "disabled" is the only correct value on
+		 * this batch: VBACKUP (U21 pin 6) has no supply fitted -- R4 and R68
+		 * are both DNP -- so there is nothing to switch over TO. */
+		backup-switch-mode = "disabled";
+
+		/* trickle-resistor-ohms deliberately ABSENT: no backup cell exists to
+		 * charge.  clkout-frequency deliberately ABSENT: RTC_CLKOUT reaches
+		 * only the E1M edge connector (E1 pin AH16), never the SoC. */
+
+		/* /INT -> P15_0 -> lpgpio bit 0 -> IRQ 171.  Open-drain, ACTIVE LOW,
+		 * pulled to +1V8 by R98 = 100k (fitted).  The driver configures this
+		 * as GPIO_INT_EDGE_TO_ACTIVE, which is why a stale, still-asserted
+		 * /INT from a previous run produces no edge and no callback -- see the
+		 * flag-clearing note in src/main.c. */
+		int-gpios = <&lpgpio 0 GPIO_ACTIVE_LOW>;
+	};
+};

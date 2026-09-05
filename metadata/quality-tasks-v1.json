@@ -612,6 +612,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "issue-citations",
+      "description": "A `#NNNN` cited inside a driver_status-family YAML comment block or an `@par Driver status:` header paragraph must not name a closed/merged issue as an apparent open blocker (#1950); checked offline against the committed metadata/issue-state-snapshot.json (refreshed manually via scripts/refresh_issue_state_snapshot.py), degrading to a non-blocking warning only when the snapshot is entirely missing/unparsable or has no record of the cited number yet -- a stale-but-present snapshot still enforces every citation it can resolve.",
+      "runner": "check-script",
+      "script": "scripts/check_issue_citations.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "library-pin-parity",
       "description": "A meta-alp-sdk recipe's SRCREV/tag must match its metadata/libraries version and, when west.yml resolves one, its west grounding (#1281).",
       "runner": "check-script",

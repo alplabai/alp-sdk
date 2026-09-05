@@ -143,7 +143,46 @@ $JLINK -nogui 1 -CommanderScript /tmp/flowd-mramxip-preflight.jlink \
 bench_jlink_assert_aen_dpidr /tmp/flowd-mramxip-preflight.out "MRAM write preflight" || exit 4
 echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 
+# #1902 -- THE CUSTOM PATCHED-FLM PATH DOES NOT PRODUCE TRUSTWORTHY BYTES.
+# This warns rather than refuses: on a J-Link V11+ probe that can select SEGGER's
+# built-in AE822FA0E5597LS0_M55_HE profile, this script is fine and is the
+# documented fast path.  The custom AE822_ALP_M55_HE device -- generic Cortex-M55
+# connect + a hand-patched copy of Alif's Ensemble.FLM -- is the one that fails.
+if [ "$DEV" = "AE822_ALP_M55_HE" ]; then
+  echo "?? WARNING: JLINK_DEVICE_FLASH=$DEV is the hand-patched-FLM workaround." >&2
+  echo "   Bench-measured 2026-09-04: only 1 of 4 flashes on this path survived a" >&2
+  echo "   cold power-cycle byte-exact.  Failures corrupt slot0 in a specific way --" >&2
+  echo "   of the 128-bit MRAM ECC words that differ, the LAST 32-bit word is wrong" >&2
+  echo "   in 107/107 and 66/66 (a torn 128-bit commit; NOT a sector or page fault," >&2
+  echo "   0 of 127 cluster starts are 0x400-aligned).  A corrupted image then fails" >&2
+  echo "   SES verification (cert_verify_wrapper returned 0xF1000009, TOC flags 'u s'" >&2
+  echo "   not 'u VB') and never boots." >&2
+  echo "   It cannot be fixed by quiescing the core first: AP[3] (APAddr 0x00300000)," >&2
+  echo "   the AHB-AP carrying the M55 debug domain, exists ONLY while the SES has" >&2
+  echo "   booted a slot0 image.  Erase slot0 and this profile cannot connect at all" >&2
+  echo "   (0 of 5 attempts reached programming).  Attachable and quiesced are" >&2
+  echo "   mutually exclusive on this part." >&2
+  echo "   FIXED 2026-09-05 -- USE THE BUILT-IN PROFILE INSTEAD:" >&2
+  echo "     JLINK_DEVICE_FLASH=AE822FA0E5597LS0_M55_HE" >&2
+  echo "   on a probe whose firmware reports capability 0x52.  Bench-proven on" >&2
+  echo "   J-Link 603000869 (Hardware version V13.00, firmware V13 compiled" >&2
+  echo "   Aug 26 2026): 3 of 3 flashes cold-cycle byte-exact with flags 'u VB'," >&2
+  echo "   including aen-wdt-feed twice -- the app THIS path corrupted 2 of 2." >&2
+  echo "   Flow A (scripts/bench/aen/flash-run.sh) also remains correct." >&2
+  echo "   ALWAYS confirm any write on this path with a cold-cycle readback." >&2
+fi
+
 # 1. stage the app + write the slot0 (mramAddress) signed-ATOC config.
+#
+# HAZARD (found 2026-09-05): this cp OVERWRITES the staged image of the same
+# name, and for the canonical restore that matters.  The staged
+# aen-npu-inference-person-mram.bin is 314784 B (md5
+# 5839e003d5d069f6fd912eb22774d037), while the in-tree build dir currently holds
+# a DIFFERENT 314772 B binary -- so "just re-run this script on the person_detect
+# build dir" silently replaces the canonical staged image with another one, and
+# the thing you restore is not the thing you think.  To restore canonical slot0,
+# run app-gen-toc + app-write-mram against the STAGED .bin directly instead of
+# re-staging from a build dir, and prove it with a cold-cycle savebin diff.
 cp -f "$BIN" "$SET/build/images/$NAME.bin"
 cat > "$SET/build/config/$NAME-slot0.json" <<JSON
 {
@@ -171,14 +210,67 @@ echo "    atoc -> $ATOC_ADDR ($(stat -c%s "$PKG") B)" >&2
 
 # 3. J-Link: part-number device unlocks the MRAM loader; write BOTH blobs, verify,
 #    sanity-check the reset vector, then PIN reset (RSetType 2) -> SE boot ROM boots it.
+# `, noreset` on BOTH loadbins is load-bearing -- see #1902.  By default
+# `loadbin` does an "implicit reset & halt of MCU", which on the E8 is an
+# AIRCR.SYSRESETREQ that resets the WHOLE system including the Secure Enclave.
+# The SES then re-boots slot0, so the M55 starts executing XIP out of the very
+# MRAM J-Link is mid-way through erasing and programming.  Bench log evidence
+# (2026-09-04, aen-qenc-readout): the second loadbin's own reset reported
+#   Reset: ARMv8M core with Security Extension enabled detected. Switch to secure domain.
+# and then died with the app demonstrably running out of slot0 --
+#   ****** Error: PC of target system has unexpected value after preparing target. (PC = 0x8001D38E)!
+#   Failed to perform RAMCode-sided Prepare()
+# -- while the first loadbin, whose reset could NOT switch to the secure domain
+# ("switching to secure domain is not possible"), had already reported
+#   ****** Error: Verification failed @ address 0x80010000
+# This is a RACE between the SES re-booting slot0 and J-Link's program/verify,
+# which is why the SAME app passed and failed under identical settings and why
+# a busy resident app (aen-wdt-feed feeding a watchdog, aen-sdcard-readout doing
+# long I/O) failed far more often than one that idles quickly.  It is NOT flaky
+# MRAM and NOT a probe-firmware limit.  `noreset` keeps the single explicit
+# reset+halt below as the only reset in the sequence, so nothing is executing
+# from MRAM while MRAM is being written.
+#
+# NO RESET BEFORE PROGRAMMING -- `h` alone, on the live core.
+# Bench-measured 2026-09-04, 8 back-to-back probe-only sessions whose logs are
+# BYTE-IDENTICAL apart from a 1 mV probe ADC reading (`VTref=1.820V` vs
+# `VTref=1.819V`) -- so this is not timing.  The AHB-AP carrying the M55 debug
+# domain, AP[3] (APAddr 0x00300000): AHB-AP (IDR: 0x34770008), is present in the
+# PRE-reset scan 8/8 (`AP[3]: Core found`, `CPUID register: 0x411FD220`,
+# `Found Cortex-M55 r1p0, Little endian.`) and ABSENT from every post-reset scan,
+# which stops at AP[2] (APAddr 0x00070000): AXI-AP (IDR: 0x34770017) and then
+# `Could not find core in Coresight setup`.  So `RSetType 2; r` was DESTROYING the
+# debug access the halt needs: 0/8 halts after a reset, versus a core reachable on
+# a plain `connect` 8/8 here and 15/15 across the earlier flashing logs.
+# Attaching to the live core and halting it took programming from 6/12 to 12/12.
+# The reset that BOOTS the new image still happens, AFTER both blobs are written.
+#
+# !! ACCEPTANCE ON THIS PATH IS A COLD-CYCLE READBACK, NOT `verifybin`.  Halting a
+# !! long-running app and programming from that state has a 2026-07-09 bench
+# !! precedent of a SILENT NON-PERSIST -- `Verify successful.` followed by a cold
+# !! power-cycle REVERTING slot0.  This probe also warns its firmware
+# !! "does not handle I/D-cache correctly" on ARMv8-M, and an app that left
+# !! D-cache on is exactly that case.  Prove a flash by cutting power at the
+# !! DPS-150 and re-reading slot0.  RESOLVED 2026-09-04: the AEN place now drives
+# !! DPS-150 10A2617F4486 at the documented 16.0 V (pwr-only.yaml re-cabled, the
+# !! retired e1mx-v2n-m1-01 agent disabled), so
+# !!   LG_ENV=~/board-farm/labgrid/pwr-only.yaml labgrid-client -p e1m-aen-evk-01 power off|on
+# !! really cuts power and the cold-cycle proof is available on this bench.
+#
+# SetSkipProgOnCRCMatch = 0: never let J-Link decide a page is already correct
+# from a debug READ.  Debug-AP reads of this part are documented to lie in some
+# states (see reference_aen_e8_bench_traps), and trusting one here would silently
+# skip programming a page that does not actually match.
 cat > /tmp/flowd-mramxip.jlink <<EOF
 $SEL
 si SWD
 speed $JLINK_SPEED
 device $DEV
 connect
-loadbin $SET/build/images/$NAME.bin $APP_ADDR
-loadbin $PKG $ATOC_ADDR
+exec SetSkipProgOnCRCMatch = 0
+h
+loadbin $SET/build/images/$NAME.bin $APP_ADDR, noreset
+loadbin $PKG $ATOC_ADDR, noreset
 verifybin $SET/build/images/$NAME.bin $APP_ADDR
 verifybin $PKG $ATOC_ADDR
 mem32 $APP_ADDR 2
@@ -205,10 +297,95 @@ fi
 # `verifybin` and reasonably concluded writes were checked.  The absence would at
 # least have been visible.
 #
-# Both directions are checked, deliberately.  An explicit failure string is the
-# common case; the COUNT catches the quieter one -- a run that aborted before the
-# verifies executed at all reports neither success nor failure, and a
-# "no news is good news" gate would pass it.
+# #1902 -- the gate must key on the EXPLICIT `verifybin` results ONLY, never on a
+# blanket grep of the whole log.  `loadbin` runs its own internal post-program
+# verify and prints "Verification failed @ address ..." / "Error while programming
+# flash: Verify failed." from inside the reset race described above.  A blanket
+# grep matched THOSE lines and failed the run even when both explicit `verifybin`
+# passes reported "Verify successful." on the full image -- i.e. it reported a
+# GOOD flash as a failure and exited before ever booting the app or reading its
+# console.  Bench-measured 2026-09-04 on aen-qenc-readout: internal verify failed
+# at 0x80010000, `verifybin` of all 77776 bytes @0x80010000 and all 5552 bytes
+# @0x8057EA50 both succeeded.
+#
+# This does NOT weaken corruption detection.  `verifybin` reads the image back off
+# the part and compares every byte; if the bytes are wrong it prints "Verify
+# failed." and the 2/2 count below does not reach 2, so the script still exits 3.
+# The count also catches the quieter case -- a run that aborted before the
+# verifies executed reports neither success nor failure, and a "no news is good
+# news" gate would pass it.
+#
+# The count is necessary, not sufficient: `verifybin` reads through the same debug
+# AP, so the app's own `RESULT` line off the RAM console in step 4 remains the
+# only end-to-end proof that the flashed image actually runs.
+#
+# The failure `if` below deliberately keeps the BROAD, canonical pattern that
+# every other bench flash script uses, and that
+# tests/scripts/test_bench_jlink_connect_guard.py extracts and RUNS against
+# synthetic transcripts.  A narrower `^Verify failed\.`-only form was tried and
+# reverted: it silenced this guard, and the false positives it was avoiding came
+# from `loadbin`'s internal verify during the patched-FLM path's reset race --
+# a path now retired in favour of the built-in AE822FA0E5597LS0_M55_HE profile.
+# Do not narrow it again without updating that test; the informational
+# `?? loadbin reported an internal verify error` note above already distinguishes
+# the benign case for a human reader.
+# #1902 -- CONFIRM THE HALT, SCOPED TO BEFORE PROGRAMMING.
+#
+# SCOPE IS LOAD-BEARING.  The halt that matters is the one BEFORE the first
+# `loadbin`.  The trailing `RSetType 2; r; g` that BOOTS the image also tries to
+# halt and on this part ALWAYS fails, because AP[3] (APAddr 0x00300000) is gone
+# after any reset (see above).  That trailing failure is EXPECTED and harmless:
+# the bytes are written and verified by then and the SES boots the image anyway.
+#
+# An earlier version of this gate grepped the WHOLE log, tripped on that trailing
+# reset, and failed 12 of 12 runs whose programming had actually SUCCEEDED
+# (`Program: 2.272s`, both blobs, 2/2 `Verify successful.`), printing
+# "NOTHING was written" over a log showing the opposite.  Never widen it back.
+#
+# Split at the first `Downloading file` -- J-Link prints it when loadbin starts.
+awk '/Downloading file/{exit} {print}' /tmp/flowd-mramxip.out > /tmp/flowd-mramxip.preprog
+
+# Confirm the halt POSITIVELY: `h` prints this register dump ONLY when the core
+# actually halted (on failure it prints `WARNING: CPU could not be halted` and no
+# PC line).  Do NOT gate on `Cortex-M55 identified.` -- that is printed at every
+# connect while the app is still running.
+if ! grep -qE "^PC = [0-9A-F]{8}, CycleCnt = " /tmp/flowd-mramxip.preprog; then
+  echo "!! HALT FAILED before programming -- the core was RUNNING for the flash."
+  grep -iE "Could not find core in Coresight setup|CPU could not be halted|Failed to halt CPU|Failed to preserve target RAM" /tmp/flowd-mramxip.preprog | head -5
+  echo "   With 'loadbin ..., noreset' there is no fallback reset, so the RAMCode"
+  echo "   workspace at 0x00000000-0x0001FFFF could not be preserved and both blobs"
+  echo "   were skipped.  NOTHING was written -- slot0 still holds its previous"
+  echo "   contents.  This is NOT MRAM corruption."
+  exit 5
+fi
+echo "halt: core halted before programming ($(grep -oE '^PC = [0-9A-F]{8}' /tmp/flowd-mramxip.preprog | head -1))"
+
+# #1902 -- A FAILED `loadbin` IS NOT SURVIVABLE, AND `verifybin` DOES NOT CATCH IT.
+#
+# Bench-measured 2026-09-04: a run whose ATOC `loadbin` died with
+#   ****** Error: Timeout while preparing target, core does not stop. (PC = 0x80015190, XPSR = 0x01000003, SP = 0x20002EA8)!
+#   Failed to perform RAMCode-sided Prepare()
+#   Unspecified error -1
+# still reported `verify: 2/2` and exited 0.  It passed because the PREVIOUS
+# app's ATOC was still resident and happened to satisfy the comparison -- the
+# resident ATOC reported size 78932 (aen-gpu2d-bench's) while the app being
+# flashed was aen-wdt-feed at 78752.  So counting `verifybin` successes is NOT
+# sufficient: a stale-but-self-consistent blob verifies clean.
+#
+# Fail on the loadbin error directly.  This must run BEFORE the verify count, so
+# a false 2/2 can never mask it.
+if grep -qiE "Failed to perform RAMCode-sided Prepare\(\)|Timeout while preparing target|Failed to prepare for programming|Unspecified error -1" /tmp/flowd-mramxip.out; then
+  echo "!! LOADBIN FAILED -- at least one blob was NOT written to MRAM."
+  grep -iE "Timeout while preparing target|Failed to perform RAMCode-sided Prepare|Failed to prepare for programming|Unspecified error -1" /tmp/flowd-mramxip.out | head -4
+  echo "   Do NOT trust any 'Verify successful.' in this run: a stale resident blob"
+  echo "   from a previous flash can satisfy verifybin while the new one never landed."
+  echo "   slot0 and/or the ATOC are now MIXED -- erase and reflash before using this board."
+  exit 6
+fi
+# Order matters and is asserted by tests/scripts/test_bench_jlink_connect_guard.py:
+# the explicit-failure `if` comes FIRST, then the success COUNT, then the count
+# check -- the guard extracts exactly that contiguous span and runs it against
+# synthetic transcripts.  Keep the three together and in this order.
 if grep -qiE "verify failed|verification failed|mismatch" /tmp/flowd-mramxip.out; then
   echo "!! VERIFY FAILED -- the bytes on the part do NOT match the image."
   grep -iE "verify failed|verification failed|mismatch" /tmp/flowd-mramxip.out | head -5
@@ -222,6 +399,11 @@ if [ "${verify_ok:-0}" -lt 2 ]; then
   exit 3
 fi
 echo "verify: ${verify_ok}/2 verifybin passes OK (app image + AppTocPackage)"
+if grep -qi "CPU could not be halted" /tmp/flowd-mramxip.out; then
+  echo "note: the trailing boot reset could not halt the core -- EXPECTED on this part"
+  echo "      (AP[3] (APAddr 0x00300000) is absent after any reset).  The image is"
+  echo "      already written and verified; the SES boots it regardless."
+fi
 
 # 4. SES has re-booted the app; attach read-only (generic device) + dump RAM console.
 sleep 3

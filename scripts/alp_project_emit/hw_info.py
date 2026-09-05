@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from alp_project_loader import _sku_family
+from alp_project_loader import METADATA_ROOT, _sku_family
 
 
 # ---------------------------------------------------------------------
@@ -95,6 +95,19 @@ def _emit_hw_info_h(
                   or sku_preset.get("default_hw_rev")
                   or "unknown")
     family = _sku_family(sku)
+
+    # Carry the composed board designator (`2626-r2`) rather than the bare
+    # revision key, matching what the module's EEPROM identity holds and what
+    # CONFIG_ALP_SDK_SOM_HW_REV emits.  These three must agree: the boot banner
+    # compares the build value against the live EEPROM, and
+    # CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL can turn a disagreement into k_panic().
+    # The bare key is still what board.yaml and the loader's hw_revisions lookup
+    # use -- see sdk_compat.board_designator().
+    # Imported lazily: alp_orchestrate imports alp_project_emit, so a
+    # module-level import here closes a cycle.
+    from alp_orchestrate.sdk_compat import board_designator, load_family_table
+    som_hw_rev = board_designator(
+        load_family_table(METADATA_ROOT, family), som_hw_rev)
 
     board_block = project.get("board") or {}
     board_name = board_block.get("name") or ""

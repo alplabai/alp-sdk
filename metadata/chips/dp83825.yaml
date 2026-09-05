@@ -2,7 +2,8 @@
 schema_version:   1
 chip_id:          dp83825
 driver_status:    none              # no alp-sdk chip driver exists (ADR 0023
-                                     # layer 3 gap, #1241). The bench-verified
+                                     # layer 3 gap; this manifest itself
+                                     # landed via #1241). The bench-verified
                                      # PASS (examples/aen/aen-ethernet-link)
                                      # reaches the PHY via the upstream
                                      # eth_dwmac_alif_ensemble Tier-1.5 MAC
@@ -13,9 +14,10 @@ driver_status:    none              # no alp-sdk chip driver exists (ADR 0023
                                      # phy_ti_dp83825,
                                      # zephyr/kconfigs/vendor-alif-peripherals.kconfig:139-158)
                                      # has been exercised on real E8 silicon
-                                     # at the MDIO layer only (#1244: PHY-ID
-                                     # + register reads at address 0);
-                                     # link/traffic over it is still unproven.
+                                     # at the MDIO layer only, confirmed via
+                                     # #1244 (PHY-ID + register reads at
+                                     # address 0); link/traffic over it is
+                                     # still unproven.
 display_name:     "TI DP83825 10/100 Mbps RMII Ethernet PHY (exact order code TBD)"
 vendor:           ti
 mpn_population:

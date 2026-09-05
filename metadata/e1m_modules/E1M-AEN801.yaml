@@ -48,26 +48,44 @@ on_module:
   # (link up, DHCP lease). Exact order-code suffix is data-gated on the
   # netlist/BOM -- see metadata/chips/dp83825.yaml and #1241 "Blocked on".
   ethernet_phy:         dp83825
+  # Both OSPI0 devices below share the single OSPI0 octal bus, separated
+  # only by chip-select. CORRECTED: this block used to have the two chip-
+  # selects INVERTED (NOR at CS0, HyperRAM at CS1). The E1M-AEN-2626-R2
+  # netlist is the authoritative pinout source (PCB routing does not
+  # change with hand-assembly) and shows the opposite:
+  #   U9  (the RAM footprint) -> OSPI0_SS0 => CS0, plus OSPI0_RESETn/OSPI0_INTn
+  #   U10 (the NOR footprint) -> OSPI0_SS1 => CS1, plus OSPI1_RESETn/OSPI1_INTn
+  # See metadata/e1m_modules/E1M-AEN803.yaml (same PCB, both memories
+  # fitted) for the same corrected mapping.
   ospi_memories:
     ospi0:
       chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
-      assembled:      optional            # BOM variant
+      # NOT populated on this SKU.  E1M-AEN803 is the SKU that fits both external
+      # memories; E1M-AEN801 fits neither and runs from the SoC's on-die MRAM.
+      # The footprint exists on the shared PCB -- see the R2 netlist -- which is
+      # why the part is still described here.
+      assembled:      false
       capacity_mbit:  256                 # 256 Mbit (32 MiB)
-      chip_select:    0                   # OSPI0 CS0
+      chip_select:    1                   # OSPI0 CS1 -- U10 -> OSPI0_SS1 per the R2 netlist
       role:           app_storage
     ospi1:
       chip:           TBD            # OSPI1 controller unused on this SoM: both OSPI devices
-      assembled:      optional       # share the OSPI0 octal bus (NOR = CS0, HyperRAM = CS1)
+      assembled:      false          # share the OSPI0 octal bus (HyperRAM = CS0, NOR = CS1)
       capacity_mbit:  TBD
       role:           data_log
   # External HyperRAM -- volatile XIP / scratch RAM, separate from the
   # NOR flash above.  Shares the OSPI0 octal controller with the flash,
-  # separated only by chip-select (NOR flash = CS0, HyperRAM = CS1).
+  # separated only by chip-select (HyperRAM = CS0, NOR = CS1).
   hyperram:
     chip:           W958D8NBYA5I    # Winbond OctalRAM (HyperBus)
-    capacity_mbit:  256             # 256 Mbit (32 MiB)
+    # NOT populated on this SKU -- see the ospi0 note above.  This key is
+    # load-bearing: `assembled` defaults to TRUE, so omitting it made every
+    # consumer treat the HyperRAM as fitted, and the boot banner advertised
+    # 256 Mbit of external RAM on a module that has none.
+    assembled:      false
+    capacity_mbit:  256             # 256 Mbit (32 MiB) -- the part, if fitted
     interface:      ospi0
-    chip_select:    1
+    chip_select:    0                 # OSPI0 CS0 -- U9 -> OSPI0_SS0 per the R2 netlist
 
   i2c_devices:
     # CORRECTED #1848 (ADR 0017 amended 2026-08-30 -- this bus was believed
@@ -80,26 +98,29 @@ on_module:
     # i2c_dw, no Secure Enclave mediation), NOT LPI2C1 or any hal_alif SE
     # service (the pinned SE services expose no I2C transaction at all).
     #
-    # `bus_master` below records the INTENDED master, not a working bus:
-    # the R2 netlist shows no pull-up path to any rail on BRD_I2C (the
-    # bridging jumpers R93/R94 are DNP, unlike I2C2's stuffed R95/R96), and
-    # the datasheet (open-drain, needs an external pull-up) and the HWRM
-    # (push-pull is the correct I2C driver type on these pins) disagree on
-    # whether that is fatal. Mastering this bus for real needs R93/R94
-    # stuffed or the push-pull reading to hold -- unresolved on paper; see
-    # docs/bring-up-aen.md §5.1 and examples/aen/aen-secure-element-sign's
-    # board overlay (which wires no internal bias pending a bench answer).
+    # BENCH-SETTLED 2026-09-05 on 2626-R2 silicon (Flow A, cold-cycle
+    # proven): the push-pull reading HELD.  The R2 netlist shows no pull-up
+    # path to any rail on BRD_I2C (the bridging jumpers R93/R94 are DNP,
+    # unlike I2C2's stuffed R95/R96), and the bus works on the SoC pad's own
+    # internal pull-up (bias-pull-up = DSC=1) with the pad left PUSH-PULL --
+    # every non-response is a clean rc=-5 (-EIO) NACK, zero -ETIMEDOUT, zero
+    # "User Abort".  R93/R94 stay DNP and are not needed.  The earlier
+    # "unusable as built" verdict was measured on an r1 module, where these
+    # parts are not on P7_0/P7_1 at all.
     #
     # Addresses per docs/bring-up-aen.md §5.1; pad names per
-    # examples/aen/aen-secure-element-sign/README.md.
-    # R2-SOURCED, NOT ON-UNIT-VERIFIED: no R1 netlist is available
-    # and the only bench unit on hand is r1 -- probe P7_0/P7_1 before calling
-    # this confirmed on that module.
+    # examples/aen/aen-secure-element-sign/README.md.  The DT-node shape of
+    # this bus (pads, pinctrl group, alias, child nodes) lives in
+    # metadata/e1m_modules/aen/on-module-links.yaml, which the Zephyr board
+    # emitter reads; this block stays the address/population inventory.
     brd_i2c:
       bus_master: alif-ensemble
       devices:
         - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }
-        - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30" }
+        # DNP=1 on this batch (netlist IC1) -- NOT fitted, so it must never
+        # reach a shipped devicetree.  `assembled` defaults to true, so the
+        # key is load-bearing, not decorative.
+        - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30", assembled: false }
         - { chip: tmp112,           role: temp_sensor,     address_7bit: "0x48" }
     # SoC I2C2, bridge/DNP-selected onto the E1M portable I2C0 pads -- the
     # SoM-manifest EEPROM only, a SEPARATE bus from the trio above (see
@@ -119,8 +140,11 @@ on_module:
 #                 (per-BOM variant), so a single number would be wrong
 #                 for the DNI variant.
 memory:
-  dram_mbit:            256
-  flash_mbit:           TBD
+  # E1M-AEN801 populates NEITHER external memory (both `assembled: false`
+  # above); it runs from the SoC's on-die MRAM.  E1M-AEN803 is the SKU with
+  # both fitted (dram_mbit 512 / flash_mbit 256).
+  dram_mbit:            0
+  flash_mbit:           0
 
 inference:
   preferred_backend:    ethos_u                # E8 ships Ethos-U85 alongside two U55s.
