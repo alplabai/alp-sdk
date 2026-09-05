@@ -170,6 +170,22 @@ def _select_app_shape(reset_vector, cpu_suffix):
                 f'outside every declared slot0 window ({windows_desc}) -- '
                 'refusing to burn (see metadata/e1m_modules/'
                 'E1M-AEN801.yaml memory_map:).')
+        # #1981 added scripts/aen_atoc.SLOT0_WINDOWS['A32_0'], a window
+        # that (by design, per that module's docstring) entirely covers
+        # both M55 windows plus a margin above/below them. This runner is
+        # Zephyr `west flash`-only (see _CPU_PROFILES/capabilities()) and
+        # never stages an A32 Linux image, so a vector_cpu_id of 'A32_0'
+        # here means the reset vector fell in that margin, outside both
+        # real M55 windows -- reject explicitly instead of falling through
+        # to an else-branch that used to safely mean "M55_HP" back when
+        # M55_HE/M55_HP were the only two dict keys.
+        if vector_cpu_id not in ('M55_HE', 'M55_HP'):
+            raise RuntimeError(
+                f'reset vector 0x{reset_vector:08x} falls in the '
+                f'{vector_cpu_id} slot0 window, not an M55 one -- this '
+                'runner (Zephyr `west flash`) only stages M55-HE/M55-HP '
+                'images; an A32 Linux image is staged by a different '
+                'flash path.')
         vector_suffix = 'HE' if vector_cpu_id == 'M55_HE' else 'HP'
         if vector_suffix != cpu_suffix:
             raise RuntimeError(

@@ -32,12 +32,23 @@ from a bare west/SETOOLS environment with no PyYAML dependency:
     M55_HE  0x80010000 .. 0x802b0000  (2688 KiB, unchanged since before #1069)
     M55_HP  0x802b0000 .. 0x80550000  (2688 KiB, moved off the old shared
                                         0x80010000 window)
+    A32_0   0x80002000 .. 0x80580000  (5624 KiB, up to MRAM_END -- #1981;
+                                        an A32 Linux chain's mramAddress
+                                        span runs from TF-A BL32 through
+                                        the signed ATOC and so owns
+                                        essentially the whole System MRAM)
 
 Only `mramAddress` (slot0-XIP) entries are window/overlap-checked here.
 `loadAddress` (ITCM) entries -- the shape every current AEN dual-core
 *example* uses -- are already disjoint by construction (0x50000000
 M55-HP vs 0x58000000 M55-HE) and are left alone; a mixed config (one
 ITCM entry + one slot0-XIP entry) is legitimate and not rejected.
+
+#1981: an `A32_0` `mramAddress` entry and an `M55_HE`/`M55_HP`
+`mramAddress` entry may never coexist in the same config -- the A32
+window above entirely covers both M55 windows, so mixing them would
+stage an M55 slot0 image into memory the A32 chain is executing from.
+`loadAddress` (ITCM) M55 stub entries are exempt, same as above.
 
 Two known gaps, NOT closed by this guard (see #1069's PR body):
   - A sequential single-core `west flash` writes a whole fresh TOC each
@@ -61,6 +72,16 @@ from typing import Any
 SLOT0_WINDOWS = {
     'M55_HE': (0x80010000, 2688 * 1024),
     'M55_HP': (0x802b0000, 2688 * 1024),
+    # #1981: floor 0x80002000 is the bench-verified BOOTLOAD (TF-A BL32)
+    # boot address -- Secure Enclave boot table, two E1M-AEN803 modules,
+    # 2026-09-05. Ceiling is fixed at MRAM_END (0x80580000, below) rather
+    # than the true ceiling -- the signed ATOC's own start address --
+    # because that address moves with ATOC package size (SETOOLS
+    # build/app-package-map.txt) and this module has no per-build input to
+    # re-derive it from. The mutual-exclusivity check in
+    # validate_atoc_entries() below, not this window, is what actually
+    # keeps an A32 config out of M55 slot0 territory.
+    'A32_0': (0x80002000, 5624 * 1024),  # 5624 KiB = MRAM_END - 0x80002000
 }
 
 # System MRAM end (bench-confirmed; matches alif_flash.py's prior
@@ -81,7 +102,7 @@ def validate_atoc_entries(entries: "dict[str, Any]") -> None:
     `loadAddress` (ITCM) entry. Raises AtocValidationError on the first
     violation found.
     """
-    mram_entries: "list[tuple[str, int]]" = []  # (name, base)
+    mram_entries: "list[tuple[str, int, str]]" = []  # (name, base, cpu_id)
     for name, entry in entries.items():
         if not isinstance(entry, dict) or 'mramAddress' not in entry:
             continue  # DEVICE entry, or a loadAddress (ITCM) entry
@@ -111,10 +132,10 @@ def validate_atoc_entries(entries: "dict[str, Any]") -> None:
                 f"ATOC entry '{name}' mramAddress 0x{base:x} falls outside "
                 f'the {cpu_id} slot0 window (0x{win_base:x}..0x{win_top:x})')
 
-        mram_entries.append((name, base))
+        mram_entries.append((name, base, cpu_id))
 
     seen: "dict[int, str]" = {}
-    for name, base in mram_entries:
+    for name, base, _cpu_id in mram_entries:
         prior = seen.get(base)
         if prior is not None:
             raise AtocValidationError(
@@ -122,6 +143,22 @@ def validate_atoc_entries(entries: "dict[str, Any]") -> None:
                 f'same mramAddress 0x{base:x} -- flashing both would '
                 'silently overwrite one image (#1069)')
         seen[base] = name
+
+    # #1981: an A32_0 mramAddress entry's slot0-XIP span covers both M55
+    # windows entirely (see module docstring), so an A32 config and an M55
+    # mramAddress entry must never coexist -- that would stage an M55
+    # slot0 image into memory the A32 chain is executing from. loadAddress
+    # (ITCM) M55 stub entries never reach `mram_entries` above, so they
+    # are unaffected by this check.
+    a32_names = [n for n, _b, cid in mram_entries if cid == 'A32_0']
+    m55_names = [n for n, _b, cid in mram_entries if cid != 'A32_0']
+    if a32_names and m55_names:
+        raise AtocValidationError(
+            f"ATOC mixes an A32 mramAddress entry ({a32_names[0]!r}) with "
+            f'an M55 mramAddress entry ({m55_names[0]!r}) -- an A32_0 '
+            "chain's slot0-XIP span covers the whole M55 window range "
+            '(#1981); no M55 mramAddress entry may coexist with an A32_0 '
+            'one')
 
 
 def validate_atoc_config_file(path: "str | Path") -> None:
