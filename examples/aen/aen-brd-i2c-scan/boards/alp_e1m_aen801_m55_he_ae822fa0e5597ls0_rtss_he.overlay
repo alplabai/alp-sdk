@@ -55,9 +55,6 @@
  * the present app's result, on R2 hardware, as the authoritative one.
  */
 
-#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
-#include <zephyr/dt-bindings/i2c/i2c.h>
-
 /*
  * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
  * without programming MRAM, and drop the MCUboot code-partition fixup.
@@ -72,44 +69,23 @@
 	};
 };
 
-&pinctrl {
-	pinctrl_i2c0: pinctrl_i2c0 {
-		/* BOTH pins get the same config, in one group -- matching the
-		 * bench-validated I2C2/EEPROM pinctrl and Alif's own DFP, which
-		 * sets PADCTRL_READ_ENABLE on BOTH P7_0 and P7_1
-		 * (Boards/StartKit-e1c/pins.h, the I2C0_SDA_C / I2C0_SCL_C
-		 * entries).  An earlier revision of this file set input-enable on
-		 * SDA only; the i2c_dw controller must be able to SENSE SCL as
-		 * well (clock-stretch detect / arbitration), and without REN on
-		 * SCL the scan can NACK every address for a reason that looks
-		 * electrical but is not. */
-		group0 {
-			pinmux = <PIN_P7_0__I2C0_SDA_C>, <PIN_P7_1__I2C0_SCL_C>;
-			input-enable;
-			bias-pull-up;
-			/* Schmitt trigger: this net's rise time is set by the weak
-			 * internal pull rather than a proper external resistor, so
-			 * the edges are slow.  Hysteresis stops a slow edge being
-			 * read as multiple transitions. */
-			input-schmitt-enable;
-			/* Rise time is the binding constraint on this net: it has no
-			 * external pull-up, and the first good bench run showed
-			 * something answering at 0x40 while 0x48 NACKed -- one bit
-			 * apart, which is what too slow an edge looks like.  The pad is
-			 * PUSH-PULL here (drive-open-drain deliberately NOT set, so bit
-			 * 23 DRV = 0), so it actively drives the high phase and these
-			 * two knobs really do shorten the edge.  Max both. */
-			drive-strength = <12>;
-			slew-rate = "fast";
-		};
-	};
-};
-
-&i2c0 {
-	status = "okay";
-	pinctrl-0 = <&pinctrl_i2c0>;
-	pinctrl-names = "default";
-	/* 100 kHz: standard mode, no fast-mode margin -- this net has no usable
-	 * pull-up strong enough for faster rise times (see file header). */
-	clock-frequency = <I2C_BITRATE_STANDARD>;
-};
+/*
+ * BRD_I2C ITSELF IS NO LONGER SET UP HERE.  &i2c0 (status okay, pinctrl-0,
+ * 100 kHz), the pinctrl_i2c0 pad group (both pads, input-enable on BOTH,
+ * bias-pull-up, input-schmitt-enable, no drive-open-drain), the
+ * RV-3028/TMP112 child nodes and the alp-i2c2 alias all moved DOWN a layer
+ * into the board, where a SoM-resident bus belongs:
+ *
+ *   zephyr/boards/alp/e1m_aen801_m55_he/alp_e1m_aen801_m55_he-pinctrl.dtsi
+ *   zephyr/boards/alp/e1m_aen801_m55_he/alp_e1m_aen801_m55_he_...rtss_he.dts
+ *
+ * both GENERATED from metadata/e1m_modules/aen/on-module-links.yaml -- edit
+ * the pad config or the bus speed THERE and regenerate, never here.  This
+ * overlay keeps only the ITCM retarget, which is a bench-flow concern and
+ * must never ship in a board file.
+ *
+ * The scan itself is unchanged: it still walks 0x08..0x77 and still treats a
+ * NACK at any address as data, so it remains the app that decides what is
+ * actually on this bus on a given module -- including the 0x40 anomaly, which
+ * the shipped devicetree deliberately does NOT encode.
+ */

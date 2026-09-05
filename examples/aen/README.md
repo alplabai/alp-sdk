@@ -86,6 +86,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`aen-eeprom-manifest`](aen-eeprom-manifest/)      | Read + decode the on-module 24C128 Alp hardware-info manifest over SoC I2C2 (upstream `i2c_dw`) via `<alp/*>`. |
 | [`aen-i2c2-eeprom-regcheck`](aen-i2c2-eeprom-regcheck/) | **regcheck** -- I2C2 + EEPROM over the upstream DesignWare `i2c_dw` driver (Tier-1, `snps,designware-i2c`). |
+| [`aen-temp-sensor`](aen-temp-sensor/)              | Read the on-module TMP112 through the upstream Zephyr sensor API (`CONFIG_SENSOR` + `CONFIG_TMP112`, `SENSOR_CHAN_AMBIENT_TEMP`), in integer milli-degrees C. |
 | [`aen-gpio-bench`](aen-gpio-bench/)                | **bench** -- GPIO over the upstream DesignWare `gpio_dw` driver (Tier-1, `snps,designware-gpio`). |
 | [`aen-dma-regcheck`](aen-dma-regcheck/)            | **bench** -- ARM PL330 DMA (`arm,dma-pl330`, Tier-1): a real memory-to-memory copy through RTSS-HE local DMA2 in global SRAM0. |
 | [`aen-hwsem-regcheck`](aen-hwsem-regcheck/)        | **regcheck** -- HWSEM instance 0 (`alif,hwsem`) take/give readout over the in-tree driver. |

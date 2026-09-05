@@ -1,0 +1,148 @@
+# On-module (non-edge) SoC pad wiring for the E1M-AEN family (Alp Lab
+# hand-authored source -- not vendor pinout data and not generated).
+#
+# WHY THIS FILE EXISTS.  metadata/pinmux/aen.yaml is a generated
+# projection of from-alif.tsv + from-cc3501e.tsv, and both of those are
+# E1M EDGE pad tables: they answer "which SoC pad backs E1M pin X".  The
+# pads below back nothing on the edge connector -- they run between the
+# Alif SoC and chips soldered on the module itself -- so they have no row
+# there and never will.  This file is their authority, in the same role
+# metadata/e1m_modules/v2n/supervisor-links.yaml plays for the RZ/V2N
+# family's on-module GD32G553 supervisor links.
+#
+# It carries the pad <-> signal facts AND the DT-node-shape facts the
+# pad tables do not model: dt_label, pinctrl group label, portable
+# alp-i2cN alias, the on-bus device nodes (compatible + 7-bit address +
+# binding properties), and the RTC alarm's GPIO controller/pin/IRQ.
+#
+# scripts/gen_zephyr_board.py's `_aen_pinctrl_dtsi()` / `_aen_dts()`
+# emitters read this file to produce the AEN `<board>-pinctrl.dtsi` and
+# `<board>.dts`; every pad, macro, address and alias in those generated
+# files comes from here.  Edit here, then regenerate (see
+# docs/porting-new-som.md, "Regenerating a board").
+#
+# Every entry carries an `evidence:` string citing a NON-DERIVATIVE
+# source -- the E1M-AEN-2626-R2 netlist (alp-sdk-internal), the AE822 DFP
+# pin table, or a dated bench measurement -- never a generated file.
+schemaVersion: on-module-links-v1
+families:
+  - aen
+
+on_module_links:
+  # BRD_I2C -- the on-module housekeeping bus.  SoC I2C0 in its function-C
+  # muxing, NOT the slave-only LPI2C0 it was believed to be before #1848.
+  brd_i2c:
+    peripheral: "I2C0"
+    dt_label: i2c0
+    pinctrl_group_label: pinctrl_i2c0
+    status: enabled
+    # Portable bus index 2: 0 and 1 are the E1M EDGE buses (ALP_E1M_I2C0 /
+    # ALP_E1M_I2C1).  BRD_I2C has no E1M route of its own, so it takes the
+    # next free portable index rather than one an edge bus already claims
+    # (#1848; docs/bring-up-aen.md).
+    alias: alp-i2c2
+    # 100 kHz standard mode.  This net has no external pull-up anywhere
+    # (see the pins' evidence), so it relies on the pad's own internal
+    # pull-up + push-pull drive; no fast-mode rise-time margin exists.
+    clock_frequency_macro: I2C_BITRATE_STANDARD
+    pins:
+      - silicon_peripheral: "I2C0_SDA_C"
+        silicon_pad: "P7_0"
+        net: "BRD_I2C_SDA"
+        evidence: >-
+          E1M-AEN-2626-R2 netlist pinmap CSV row
+          "BRD_I2C_SDA",U6,B8,"P7_0/SCP0_A"; AE822 DFP pin table
+          (AE822FA0E5597LS0_M55_HE/RTE/BSP pins.h) gives P7_0 alt-fn [4] =
+          I2C0_SDA_C.  Bench-proven 2026-09-05 on E1M-AEN801 2626-R2
+          (Flow A, cold-cycle proven): every non-response is a clean
+          rc=-5 (-EIO) NACK, zero -ETIMEDOUT, zero "User Abort".
+      - silicon_peripheral: "I2C0_SCL_C"
+        silicon_pad: "P7_1"
+        net: "BRD_I2C_SCL"
+        evidence: >-
+          E1M-AEN-2626-R2 netlist pinmap CSV row
+          "BRD_I2C_SCL",U6,B3,"P7_1/SCP1_A"; AE822 DFP pin table gives
+          P7_1 alt-fn [4] = I2C0_SCL_C.  Alif's own DFP sets
+          PADCTRL_READ_ENABLE on BOTH P7_0 and P7_1 -- with input-enable
+          on SDA only the controller NACKs every address for a reason
+          that looks electrical (cost one bench run, 2026-09-05).
+    devices:
+      # U21 -- Micro Crystal RV-3028-C7 32.768KHZ 1PPM-TA-QA.
+      - chip: rv3028c7
+        node_label: rv3028
+        node_name: "rtc@52"
+        compatible: "microcrystal,rv3028"
+        address_7bit: 0x52
+        alias: rtc
+        int_gpio_link: rtc_alarm
+        properties:
+          # REQUIRED by dts/bindings/rtc/microcrystal,rv3028.yaml, and
+          # "disabled" is the only correct value on this module: VBACKUP
+          # (U21 pin 6) has NO supply fitted -- its only other net members
+          # are R4 and R68, both 0-ohm DNP=1.  No backup cell means no
+          # switchover to select and (see below) no trickle source.
+          backup-switch-mode: "disabled"
+        # trickle-resistor-ohms is deliberately ABSENT: charging into an
+        # unpopulated VBACKUP would be wrong.
+        # clkout-frequency is deliberately ABSENT: RTC_CLKOUT (U21 pin 1)
+        # goes ONLY to the E1M edge connector (E1 pin AH16) and never
+        # reaches the SoC, so firmware cannot consume it.  Omitting it
+        # leaves the pin LOW; it is a CARRIER-facing choice.
+        evidence: >-
+          E1M-AEN-2626-R2 components CSV: U21 = RV-3028-C7, DNP=0 fitted.
+          Bench 2026-09-05: ACKs at 0x52, ID register 0x28 reads 0x44, and
+          the seconds register advanced 0x01 -> 0x02, so the oscillator is
+          RUNNING.  CAVEAT for docs and examples: with no VBACKUP cell the
+          RTC does NOT retain time or a pending alarm across a power cycle
+          on this batch.
+      # U20 -- TI TMP112DIDPWR, ADD0 tied to 0V.
+      - chip: tmp112
+        node_label: tmp112
+        node_name: "tmp112@48"
+        compatible: "ti,tmp112"
+        address_7bit: 0x48
+        alias: ambient-temp0
+        evidence: >-
+          E1M-AEN-2626-R2 components CSV: U20 = TMP112DIDPWR, DNP=0
+          fitted, ADD0 tied to 0V.  The TMP112 strap table is ADD0->GND =
+          0x48, ->V+ = 0x49, ->SDA = 0x4A, ->SCL = 0x4B, so 0x48 is the
+          DESIGN address.  ANOMALY, do not "fix" this to match it: one
+          bench unit (2026-09-05) answered at 0x40 -- not a legal TMP112
+          address at all -- while confirming a three-of-three TMP112
+          register fingerprint there (CONFIG=0x60a0, T_LOW=0x4b00,
+          T_HIGH=0x5000, the datasheet power-on defaults; read 28.062
+          degC).  That points at ADD0 not actually sitting at GND on that
+          module (suspected open joint on U20 pin 3): a defect on ONE
+          unit, not the design.  The shipped devicetree carries 0x48;
+          examples tolerate and report the observed 0x40.
+      # IC1 (OPTIGA Trust M, SLS32AIA010MLUSON10XTMA2, @0x30) is DNP=1 --
+      # NOT fitted on this batch, so it gets no node.  It must not ACK; its
+      # silence is a negative control, not a fault.
+
+  # RV-3028 /INT (U21 pin 2) -> net RTC_ALARM -> SoC pad P15_0_FLEX.
+  rtc_alarm:
+    net: "RTC_ALARM"
+    silicon_peripheral: "LPGPIO"
+    silicon_pad: "P15_0"
+    gpio_node: lpgpio
+    gpio_pin: 0
+    gpio_irq: 171
+    active_low: true
+    status: enabled
+    evidence: >-
+      E1M-AEN-2626-R2 netlist: U21 pin 2 (/INT) -> RTC_ALARM -> SoC pad U6
+      V2 = P15_0_FLEX, with R98 = 100k to +1V8 FITTED as the open-drain
+      pull-up; active LOW.  P15_0 is LPGPIO bit 0, so its interrupt is the
+      first of the lpgpio controller's eight, IRQ 171 (gpio@42002000,
+      interrupts = <171 3>, <172 3> ... in
+      zephyr/dts/alif/ensemble_e8_peripherals.dtsi).  Pinctrl macro
+      PIN_P15_0__LPGPIO = ALIF_PINMUX(15, 0, 0).
+    risk: >-
+      The AE822 DFP warns for port 15: "Note that LPGPIO_CTRL_n register
+      has a different layout!".  That is the most likely bench failure on
+      this alarm path and must NOT be mistaken for an RTC fault -- if the
+      alarm never fires, suspect the port-15 control-register layout
+      before suspecting U21.
+    # MODULE_STBY (U21 pin 8, EVI) is a CARRIER-driven external event
+    # input (E1M edge pin O2, R43 100k to +1V8) -- no SoC pad, so no link
+    # here.

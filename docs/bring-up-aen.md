@@ -209,20 +209,18 @@ trio (OPTIGA / RTC / TMP112) is on the separate, shared **BRD_I2C**
 > "the M55 reaches it via SE services" was never true either -- the
 > pinned hal_alif SE services expose no I2C service at all.
 >
-> **That is necessary, not sufficient.** `BRD_I2C` has no pull-up to any
-> rail on the R2 design -- the jumpers that would bridge it into the
-> pulled-up I2C2 segment (`R93`/`R94`) are DNP, unlike the ones I2C2 itself
-> uses (`R95`/`R96`, stuffed). Whether that leaves a working bus is an
-> unresolved document conflict: the datasheet calls `I2C0_SCL_C`/
-> `I2C0_SDA_C` open-drain, requiring an external pull-up, while the HWRM's
-> per-pin note for these ports says I2C "is operating properly with the
-> push-pull (default) driver type" and that open-drain "must not be
-> selected for I2C". Mastering this bus needs either `R93`/`R94` stuffed
-> (a board rework) or the push-pull reading to be the correct one -- not
-> settled on paper. See `examples/aen/aen-secure-element-sign`'s board
-> overlay, which wires the pads with no internal bias pending a bench
-> answer, and blocks using the on-module `rv3028c7` as the accurate time
-> source Alif's own RTC errata workaround calls for (#1814).
+> **Bench-settled 2026-09-05 on 2626-R2 silicon.** This paragraph used to
+> say the bus needed `R93`/`R94` stuffed before it could be mastered. It does
+> not: it works on the SoC pad's **internal pull-up alone**, with the RTC
+> ACKing at `0x52` (oscillator proven running) and the TMP112 fingerprinting
+> correctly, every non-response a clean `-EIO` NACK and zero `-ETIMEDOUT` /
+> `User Abort`. `R93`/`R94` stay DNP by design -- BRD_I2C is **isolated** from
+> the I2C2/EEPROM segment, and the EEPROM is not on it. See
+> [`docs/soms/aen.md`](soms/aen.md) "On-module housekeeping I2C (BRD_I2C)" for
+> the customer-facing writeup, its limitations (no `VBACKUP` supply, so no
+> timekeeping across a power cycle; `RTC_CLKOUT` carrier-only), and the
+> `0x40`-instead-of-`0x48` per-unit TMP112 defect. #1814's blocker is cleared:
+> `rv3028c7` is reachable.
 >
 > Unrelated but corrected in the same pass: `LPI2C1` **is** master-capable
 > (HWRM: "Two Low-Power I2C modules (LPI2C0 slave-only and LPI2C1
@@ -238,10 +236,11 @@ a secure element). **Do not blind-scan it**: OPTIGA Trust M lives on it at
 a free operation -- probe known addresses only. Scan **I2C2** freely from
 a built `i2c-scanner` example or via the console.
 
-The BRD_I2C routing above is **R2-sourced**: it comes from the
-E1M-AEN-2626-R2 netlist + `ADTS0013`; no R1 netlist is available, and the
-current bench module is r1 (`alp board` -> `E1M-AEN801 r1`) -- probe
-`P7_0`/`P7_1` on the actual unit before treating this as bench-verified.
+The BRD_I2C routing above is **R2-sourced** (E1M-AEN-2626-R2 netlist +
+`ADTS0013`) and is now **bench-verified on an R2 unit** (2026-09-05). It does
+**not** describe r1 modules: there the RTC and TMP112 sit on LPI2C0
+(`P7_4`/`P7_5`) with nothing on `P7_0`/`P7_1`, which is what an r1 probe of
+this bus actually measured.
 
 | Slave | 7-bit addr | What | Bus | Where |
 |-------|------------|------|-----|-------|
@@ -269,9 +268,8 @@ current bench module is r1 (`alp board` -> `E1M-AEN801 r1`) -- probe
 > E1M-AEN801 SoM design (`on_module`); the absence is a current-batch
 > population fact (like the un-stuffed OSPI memories). Skip §5.2 on these
 > boards. Note the evidence is the population record, **not** a scan miss --
-> OPTIGA sits on BRD_I2C, whose electrical readiness is still an open
-> question (see the pull-up caveat in §5.1), and which is deliberately not
-> blind-scanned here regardless (a scan is a real transaction against a
+> OPTIGA sits on BRD_I2C, a working bus as of the 2026-09-05 R2 run (§5.1)
+> that is deliberately not blind-scanned here regardless (a scan is a real transaction against a
 > secure element); the driver's targeted `optiga_trust_m_init` probe is the
 > evidence to trust instead.
 
@@ -332,25 +330,34 @@ carries a `CAM_MUX_PI3WVR626` MIPI CSI 2:1 mux (selected via
 yet -- treat the wiring as TBD until the carrier camera doc lands.
 
 
-**Bench-settled 2026-08-31** on the r1 module (`E1M-AEN801`, serial `2617-0001`),
-`i2c0` at 100 kHz, read-only `i2c_write_read` of register `0x00`:
+**Bench-settled 2026-09-05** on an **R2** module (`E1M-AEN801` 2626-R2, Flow A,
+cold-cycle proven), `i2c0` at 100 kHz: **BRD_I2C works on the SoC's internal
+pull-up alone.**
 
-| pad bias | result on `0x48` (TMP112), `0x52` (RV-3028-C7), `0x30` (OPTIGA) |
-|---|---|
-| High-Z, no bias | `rc=-116` (`-ETIMEDOUT`) with `E: User Abort on i2c@49010000` |
-| same build + internal pull-up (~50 kΩ) | `rc=-5` (`-EIO`), no abort |
+| Address | Part | Result |
+|---|---|---|
+| `0x52` | RV-3028-C7 | ACK; ID reg `0x28` = `0x44`; seconds `0x01` -> `0x02` (oscillator running) |
+| `0x48` | TMP112 | ACK; `CONFIG` `0x60a0` / `T_LOW` `0x4b00` / `T_HIGH` `0x5000` = datasheet defaults; 28.062 °C |
+| `0x30` | OPTIGA Trust M | no answer -- DNP on this batch, the expected negative control |
 
-A bias-only edit changing the error class proves the pinctrl is correct and the
-controller reaches the wire, and that the net has **no usable pull-up**. It also
-settles the open-drain question against the HWRM's push-pull note: had these pads
-driven push-pull, the High-Z run would have worked. The I2C IP tri-states for the
-high phase, so an **external pull-up is required**. Nothing ACKed under the internal
-pull-up either, which is expected — ~50 kΩ is far too weak for 100 kHz rise time.
+Every non-response was a clean `rc=-5` (`-EIO`) NACK: **zero `-ETIMEDOUT`,
+zero `User Abort on i2c@49010000`**. That distinction is the diagnostic --
+a NACK means the pads reach the wire and nobody answered; a timeout plus
+`User Abort` means the pinctrl is wrong.
 
-**So this bus is not usable as built.** It needs `R93`/`R94` stuffed — bridging
-BRD_I2C into the segment the carrier already pulls up via `R137`/`R144` — or
-dedicated pull-ups on the net. That is a board change, not a firmware one, which is
-why #1814 stays open.
+> **The earlier 2026-08-31 verdict on this bus is withdrawn.** That run --
+> pads High-Z giving `rc=-116` (`-ETIMEDOUT`) + `User Abort`, an internal
+> pull-up clearing the abort but nothing ACKing (`rc=-5`) -- was measured on
+> the **r1** module (serial `2617-0001`), where the RTC and TMP112 are on
+> LPI2C0 (`P7_4`/`P7_5`) and **nothing is connected to `P7_0`/`P7_1`**. It
+> characterised two floating pins, so its conclusions ("no usable pull-up",
+> "the pads must be open-drain", "not usable as built, needs `R93`/`R94`
+> stuffed") do not carry to R2. The measurement was real; the inference was
+> about the wrong revision.
+
+Full customer-facing writeup, including the RTC alarm path
+(`/INT` -> `P15_0` -> LPGPIO bit 0 -> IRQ 171) and the limitations that bite:
+[`docs/soms/aen.md`](soms/aen.md) "On-module housekeeping I2C (BRD_I2C)".
 
 ## 6. Bench-day bring-up runbook (first physical SoM)
 

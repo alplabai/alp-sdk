@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the upstream TMP112 sensor driver (Tier-1) on the
+# E1M-AEN801 (Ensemble E8, M55-HE): compiles the sensor-subsystem read path
+# against the board layer's "ti,tmp112" node on BRD_I2C.
+#
+# Compile-checks the driver + DT binding on the real E8 board target; filtered
+# OUT of the native_sim PR gate (platform_allow = the AEN801 HE board only),
+# because the node this app binds exists only in the AEN801 board files -- on
+# native_sim the app would compile to its "no ti,tmp112 node" branch and prove
+# nothing.
+
+sample:
+  name: aen-temp-sensor
+  description: |
+    Read the E1M-AEN801's on-module TMP112 temperature sensor (BRD_I2C, design
+    address 0x48) through the upstream Zephyr sensor API -- CONFIG_SENSOR +
+    CONFIG_TMP112, SENSOR_CHAN_AMBIENT_TEMP -- printing integer milli-degrees
+    C, sanity-banding each sample, and emitting one RESULT line.
+
+tests:
+  alp_sdk.examples.aen.temp_sensor.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - i2c
+      - sensors
+    build_only: true   # the temperature reading needs the real bench; not a CI run.

@@ -25,13 +25,15 @@
  *          it ticks).
  *   4. Print one machine-greppable RESULT line.
  *
- * IMPORTANT CAVEAT: this net has no pull-up resistor anywhere (see the
- * overlay header) and relies on the SoC pad's own weak internal pull-up. A
- * prior bench trial on this exact net already found that pull too weak to get
- * an ACK at 100 kHz (ensemble_e8_peripherals.dtsi, i2c0 comment,
- * BENCH-SETTLED 2026-08-31).  A FAIL/PARTIAL result from this app is expected
- * evidence of that electrical limit, not proof this firmware is wrong -- see
- * the RESULT line's wording, which says so explicitly.
+ * PULL-UP: this net has no pull-up resistor anywhere (see the overlay header)
+ * and relies on the SoC pad's own internal pull-up.  On 2626-R2 silicon that
+ * is ENOUGH: this app ACKed the RTC at 0x52 and the TMP112 on 2026-09-05 at
+ * 100 kHz, with every non-response a clean -EIO NACK and no -ETIMEDOUT / "User
+ * Abort" anywhere in the run.  The older "the internal pull is too weak"
+ * verdict (BENCH-SETTLED 2026-08-31) was measured on an r1 module, where these
+ * parts sit on LPI2C0 (P7_4/P7_5) and nothing is attached to P7_0/P7_1 at all
+ * -- see the corrected i2c0/LPI2C0 comments in ensemble_e8_peripherals.dtsi.
+ * So on R2, a FAIL result IS a real finding; treat it as one.
  *
  * Console is the RAM buffer 'ram_console_buf' (see prj.conf); the bench UART
  * is not wired to USB.  BENCH-VALIDATION app -- not a customer teaching
