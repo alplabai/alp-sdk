@@ -54,8 +54,12 @@ in that same table), never hardcoded: the AEN SKUs do not share an MRAM size,
 and a hardcoded 0x80580000 would pass vacuously on every part that isn't the
 E8.
 
-Four checks, because three invariants over the same AEN partition tables have
-turned out to need four different sources of truth (#1482, #1981):
+Four checks, because the same "keep the SE-owned ATOC band unwritable" invariant
+is asserted in four different places and each needs its own source of truth
+(#1482, #1981). Note check 4 is the odd one: checks 1-3 read AEN partition
+tables (board DTS, SoM preset memory_map), while check 4 reads a Python
+constant -- `aen_atoc.SLOT0_WINDOWS` -- because that is where the guard the
+provisioning path actually consults lives:
 
   1. DTS check -- as above.
 
