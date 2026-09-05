@@ -144,13 +144,29 @@ static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)
  * stop + drain-dequeue detaches the buffers from the device before
  * video_buffer_release() returns them to the shared pool.  Releasing a
  * buffer the driver still queues would recycle a pool slot the device can
- * later hand back -- a stale pointer on the next open (#246). */
-static void _release_vbufs(alp_z_video_state_t *st)
+ * later hand back -- a stale pointer on the next open (#246).
+ *
+ * @param stop_stream  Call video_stream_stop() first.  The open()
+ *                     rollback paths pass false: the stream was never
+ *                     started there, and a driver that treats a
+ *                     stop-while-idle as an error (or powers the sensor
+ *                     down on it) should not see one.  z_close() passes
+ *                     true unconditionally -- it needs the real stop. */
+static void _release_vbufs(alp_z_video_state_t *st, bool stop_stream)
 {
 	struct video_buffer *vb = NULL;
 
-	(void)video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
-	while (video_dequeue(st->dev, &vb, K_NO_WAIT) == 0 && vb != NULL) {
+	if (stop_stream) {
+		(void)video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
+	}
+	/* Bounded by ARRAY_SIZE(st->vbufs): that is the most buffers this
+	 * handle can ever have queued, so a driver whose dequeue never
+	 * returns non-zero (re-queues, or always "succeeds") cannot hang
+	 * this close() path forever. */
+	for (size_t i = 0; i < ARRAY_SIZE(st->vbufs); ++i) {
+		if (video_dequeue(st->dev, &vb, K_NO_WAIT) != 0 || vb == NULL) {
+			break;
+		}
 		vb = NULL;
 	}
 	for (size_t i = 0; i < ARRAY_SIZE(st->vbufs); ++i) {
@@ -243,33 +259,47 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 	/* Per-buffer size: prefer the driver-negotiated pitch; when the driver
 	 * reports none, derive bytes-per-pixel from the negotiated fourcc via
 	 * Zephyr's own format table (video_bits_per_pixel: RGB565 = 16 bpp,
-	 * RGB24 = 24 bpp, XRGB32 = 32 bpp).  A flat 2 B/px guess here
-	 * under-allocates the RGB888 (3 B/px) and ARGB8888 (4 B/px) frames
-	 * _to_video_fourcc() can negotiate, while the capture engine DMAs the
-	 * full frame regardless (#245). */
-	uint32_t bytes_per_buf = (st->fmt.pitch != 0u) ? (st->fmt.pitch * st->fmt.height)
-	                                               : (((uint32_t)st->fmt.width * st->fmt.height *
-	                                                   video_bits_per_pixel(st->fmt.pixelformat)) /
-	                                                  BITS_PER_BYTE);
+	 * RGB24 = 24 bpp, XRGB32 = 32 bpp), rounded up so a table entry that
+	 * isn't byte-aligned (e.g. the 10/12-bit packed Bayer formats) can't
+	 * under-allocate by truncating.  The previous flat 2 B/px guess
+	 * under-allocated RGB888 (3 B/px) and ARGB8888 (4 B/px) frames (#245,
+	 * propagated to this backend in #1628). */
+	uint32_t bytes_per_buf = (st->fmt.pitch != 0u)
+	                             ? (st->fmt.pitch * st->fmt.height)
+	                             : DIV_ROUND_UP((uint32_t)st->fmt.width * st->fmt.height *
+	                                                video_bits_per_pixel(st->fmt.pixelformat),
+	                                            BITS_PER_BYTE);
 	if (bytes_per_buf == 0u) {
-		if (st->fmt.width != 0u && st->fmt.height != 0u) {
+		if (st->fmt.pixelformat == VIDEO_PIX_FMT_JPEG && st->fmt.width != 0u &&
+		    st->fmt.height != 0u) {
+			/* Compressed formats have no fixed bits-per-pixel --
+			 * video_bits_per_pixel() has no JPEG entry and returns 0.
+			 * Fall back to the pre-#1628 flat w*h*2 heuristic: not a
+			 * guaranteed compressed-frame ceiling, just the best a
+			 * portable backend can do without a codec-specific max. */
+			bytes_per_buf = (uint32_t)st->fmt.width * st->fmt.height * 2u;
+		} else if (st->fmt.width != 0u && st->fmt.height != 0u) {
 			/* Real dimensions but a fourcc Zephyr's table can't size:
 			 * refuse rather than under-allocate and let the capture
-			 * DMA past the end of the pool block. */
+			 * engine DMA past the end of the pool block. */
 			_free_state(st);
 			return ALP_ERR_NOSUPPORT;
+		} else {
+			/* No format negotiated at all (driver without
+			 * get_format): fail loudly rather than open a handle
+			 * whose first capture overruns a 64 B dummy buffer. */
+			_free_state(st);
+			return ALP_ERR_NOT_READY;
 		}
-		/* No format negotiated at all (driver without get_format):
-		 * keep open() alive with a minimal dummy allocation. */
-		bytes_per_buf = 64u;
 	}
 
 	for (uint8_t i = 0; i < want; ++i) {
 		st->vbufs[i] = video_buffer_alloc(bytes_per_buf, K_NO_WAIT);
 		if (st->vbufs[i] == NULL) {
 			/* Pool exhausted: give back vbufs[0..i-1] (already
-			 * enqueued) before failing (#246). */
-			_release_vbufs(st);
+			 * enqueued) before failing (#246).  Stream was never
+			 * started here, so don't stop it. */
+			_release_vbufs(st, false);
 			_free_state(st);
 			return ALP_ERR_NOMEM;
 		}
@@ -278,8 +308,9 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 		if (err != 0) {
 			/* Mid-loop enqueue failure: vbufs[0..i-1] sit in the
 			 * driver's queue and vbufs[i] is loose -- release them
-			 * all instead of leaking the pool (#246). */
-			_release_vbufs(st);
+			 * all instead of leaking the pool (#246).  Stream was
+			 * never started here, so don't stop it. */
+			_release_vbufs(st, false);
 			_free_state(st);
 			return _errno_to_alp(err);
 		}
@@ -370,9 +401,10 @@ static void z_close(alp_camera_backend_state_t *state)
 	if (st == NULL) return;
 	st->streaming = false;
 	/* Stop + drain + release every buffer this handle allocated --
-	 * _release_vbufs stops the stream itself (harmless when already
-	 * stopped), so the pool is whole again for the next open (#246). */
-	_release_vbufs(st);
+	 * _release_vbufs(st, true) stops the stream itself (harmless when
+	 * already stopped), so the pool is whole again for the next open
+	 * (#246). */
+	_release_vbufs(st, true);
 	_free_state(st);
 	state->be_data = NULL;
 }

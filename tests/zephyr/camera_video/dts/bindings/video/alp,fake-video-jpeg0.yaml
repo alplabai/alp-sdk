@@ -1,0 +1,17 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake video device for the alp-sdk camera_video ztest (#1628 review
+# follow-up).  Lives only in this test.
+
+description: |
+  Boots with VIDEO_PIX_FMT_JPEG already set as its current format and
+  pitch left at 0 -- video_bits_per_pixel() has no JPEG entry and returns
+  0, the exact arrangement a real MJPEG sensor (e.g. drivers/video/
+  ov2640.c) exposes.  Advertises no format_caps entries a portable
+  ALP_PIXFMT_* enum value maps to, so alp_camera_open() with the enum's
+  zero value (ALP_PIXFMT_MONO_VLSB) takes the readback branch and must
+  fall back to the flat w*h*2 heuristic bound instead of hard-refusing
+  with ALP_ERR_NOSUPPORT.
+
+compatible: "alp,fake-video-jpeg0"
