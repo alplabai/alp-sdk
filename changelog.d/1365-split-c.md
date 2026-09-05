@@ -7,14 +7,23 @@ aperture (split A) and the region's authored `write_authority`. Rows join
 the manifest's existing panes by name — `ipc[].region` and
 `storage[].flash_device` each name a `memory[].name`.
 
-**No emitter writes this key yet, and that is deliberate.** Teaching both
-producers to emit it waits on ADR-0026 section D, which decides who owns
-manifest *bytes* once the planner moves to tan. This schema is alp-sdk's
-under every outcome of that decision (ADR-0026 clause 2), so publishing the
-contract now moves no emitted byte — `check_emit_snapshots.py` still reports
-37 `--emit` surfaces byte-identical and `check_system_manifest.py` still
-validates all four manifests. Emitting it now would instead rewrite roughly
-a hundred byte-parity fixtures in a repo that may not own them next quarter.
+**No emitter writes this key yet, and that is deliberate.** The emit half is
+deferred on **fixture churn**, not on an open decision: emitting this key
+rewrites every `system-manifest.yaml` under tan's planner-oracle corpus — 98
+files, 94 of them carrying `ipc: []` — and landing that as its own
+single-cause diff is what keeps it reviewable beside a schema addition.
+
+Ownership is already settled. ADR-0026 §D decided that alp-sdk's emitters are
+canonical and that `tan` consumes plan-embedded bytes rather than
+re-implementing the renderers; and this schema is alp-sdk's under every
+migration outcome regardless (ADR-0026 clause 2). What §D leaves open is a
+different thing — *"Something must FAIL when tan's copy of the rendered bytes
+diverges from alp-sdk's canonical output. That gate is required; its
+implementation is not decided here."*
+
+Declaring the contract now moves no emitted byte: `check_emit_snapshots.py`
+still reports 37 `--emit` surfaces byte-identical and
+`check_system_manifest.py` still validates all four manifests.
 
 So a consumer must read an absent `memory:` as *"this producer does not emit
 it yet"*, never as *"this SoM has no memory regions"*. The field description
