@@ -54,7 +54,7 @@ modules.
 You'll also need `tan`, the standalone Python planner and build executor -- a
 separate public repo, not installed by `bootstrap.sh`. As of `tan-cli`
 [v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0) (current
-release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+release: [v0.6.0](https://github.com/alplabai/tan-cli/releases/tag/v0.6.0)),
 the published installer (`install.sh`/`install.ps1`) installs the real Python
 `tan` directly -- it no longer resolves the frozen Rust v0.4.1 release. This
 guide instead installs from `tan-cli`'s `dev` branch in a Python 3.12+ venv,
