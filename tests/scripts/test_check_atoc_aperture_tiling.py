@@ -197,14 +197,22 @@ def test_aperture_cross_check_fails_on_disagreeing_base(tmp_path, monkeypatch):
     assert "_AEN_MRAM_BASE" in joined
 
 
-def test_all_six_aen_presets_resolve_a_non_none_aperture():
+def test_every_aen_preset_resolves_a_non_none_aperture():
     """#1365 split A MAJOR 1: coverage must not depend on the new
     `_check_aperture_declared()` gate alone -- pin directly that every
     shipped AEN preset still resolves a concrete aperture (base, top),
-    not None."""
+    not None.
+
+    Asserts the PROPERTY over however many AEN presets ship, not a fixed
+    count: `dev` added E1M-AEN803 while #1365 was in flight, and a
+    hardcoded `== 6` turned a new SoM into a red test instead of the
+    coverage it should have been.  The named six are pinned as a floor so
+    a preset going missing still fails.
+    """
     cr = _load_cr()
     aen_presets = sorted(cr.PRESETS.glob("E1M-AEN*.yaml"))
-    assert len(aen_presets) == 6
+    known = {f"E1M-AEN{n}.yaml" for n in (301, 401, 501, 601, 701, 801)}
+    assert known <= {p.name for p in aen_presets}
     for path in aen_presets:
         doc = cr.yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         aperture = cr._resolve_aperture(doc)

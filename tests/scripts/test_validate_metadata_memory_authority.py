@@ -103,12 +103,20 @@ def test_accepts_preset_with_no_memory_map():
 
 
 def test_real_aen_presets_all_carry_write_authority():
-    """The six real shipped AEN presets this rule guards -- must all
-    stay clean against the live checkout."""
+    """Every real shipped AEN preset this rule guards -- all must stay
+    clean against the live checkout.
+
+    Asserts the PROPERTY over however many AEN presets ship, not a fixed
+    count: `dev` added E1M-AEN803 while #1365 was in flight, and a
+    hardcoded `== 6` turned a new SoM into a red test instead of the
+    coverage it should have been.  The named six are pinned as a floor so
+    a preset going missing still fails.
+    """
     vm = _load_vm()
     aen_presets = sorted(
         (REPO / "metadata" / "e1m_modules").glob("E1M-AEN*.yaml"))
-    assert len(aen_presets) == 6
+    known = {f"E1M-AEN{n}.yaml" for n in (301, 401, 501, 601, 701, 801)}
+    assert known <= {p.name for p in aen_presets}
     failures = vm._check_som_write_authority_present(aen_presets)
     assert not failures
 
