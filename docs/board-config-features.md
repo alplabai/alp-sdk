@@ -304,12 +304,18 @@ row) needs no authority at all: it is RAM by construction. The legacy
 resolve an answer -- no aperture declared for this SoC (every non-Alif
 SoM), or the region's own `base:` is unresolved (`mram_main`'s `"TBD"`,
 unchanged by split B) -- which is also what keeps every non-Alif SoM's
-resolution byte-identical to before this change. `carveout: false` is
+resolution byte-identical to before this change. In that fallback,
+`carveout:` decides BEFORE `write_authority:`: when a region's `base:`
+is unresolved and the preset authors both fields, `carveout:` wins (the
+conservative, pre-split-B signal), and `write_authority:` is consulted
+only when `carveout:` is absent. `carveout: false` is
 NOT deprecated or removed by this (doing so would break every existing
 `carveout: false` row and any customer copy of the schema); it becomes
 the fallback answer instead of the primary one, and a `carveout:` value
-that DISAGREES with a resolvable derived class is a metadata bug, not a
-silently-honoured override.
+that DISAGREES with a resolvable derived class -- `flash`, `ram`, or an
+`unclassified` row's `write_authority`-derived answer -- is a metadata
+bug, refused loudly and naming both facts, not a silently-honoured
+override.
 
 No AEN SKU has a working `storage[].flash_device:` target today. Neither
 candidate the resolver will accept resolves to a verified DT label:

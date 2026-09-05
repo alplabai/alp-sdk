@@ -26,6 +26,25 @@ from .models import BoardProject, IpcEntry, ResolvedCarveOut
 from .memregion import _PAGE, _region_size_bytes
 
 
+# Cap on how many per-region details join into one ineligibility reason
+# (#1365 split B review, Nit). The joined string is emitted VERBATIM as a
+# SINGLE-LINE C comment in `alp_system_ipc.h` and a single-line DTS
+# comment (`scripts/alp_orchestrate/headers.py`); on the real
+# E1M-AEN801 preset (5 excluded regions -- today's ceiling: every AEN
+# SKU's memory_map has exactly 7 rows, and the widest `ipc:` endpoint
+# set that isn't a32_cluster-only ever matches 5 of them) the uncapped
+# string reached ~1.5 kB, and a preset with more `memory_map:` rows
+# grows it unboundedly. Set one above today's proven ceiling so no
+# current preset ever truncates (excluded regions can carry DIFFERENT
+# reasons -- flash-class containment vs. an unresolved base -- so
+# silently dropping one is a real loss of diagnostic precision, not
+# just length; see `tests/scripts/test_orchestrate_memory.py`'s
+# `mram_main`-specific assertions, which depend on that region's
+# distinct write_authority reason surviving in the message). This still
+# bounds genuinely pathological growth (a preset with many more rows)
+# without touching any output produced by metadata that exists today.
+_MAX_EXCLUDED_DETAIL = 6
+
 
 def _fnv1a_32(data: bytes) -> int:
     """FNV-1a 32-bit hash.  10 lines, no deps."""
@@ -86,11 +105,49 @@ def _region_ipc_eligibility(
     Once `base` resolves, its extent equals the aperture exactly (the
     whole-device alias) and `classify_region` calls it `"flash"` outright
     -- the hazard is closed on BOTH sides of that resolution.
+
+    AGREE contract (#1365 split B review, BLOCKER): `carveout:` is a
+    LEGACY OVERRIDE that must AGREE with a resolvable derived class
+    (`metadata/schemas/som-preset-v1.schema.json`'s `carveout` field,
+    `docs/board-config-features.md`'s #1365-split-B paragraph). It is
+    NOT a second vote that can silently win against `flash`/`ram`, nor
+    against the `write_authority`-derived answer on an `unclassified`
+    row -- a disagreement is a metadata bug, refused loudly, naming BOTH
+    the derived class (with the addresses that produced it) and the
+    authored flag. Proven regression this closes: a preset-authored row
+    OUTSIDE the aperture with `write_authority: customer_runtime` AND
+    `carveout: false` used to resolve `status: ok` on the write_authority
+    answer alone, silently dropping the author's explicit `carveout:
+    false` -- exactly the OSPI-XIP-row shape `classify_region`'s
+    `"unclassified"` docstring warns must never become an IPC candidate
+    just because it resolves outside the aperture.
     """
     name = region.get("name")
     cls = classify_region(region, aperture, is_preset_authored)
+    carveout = region.get("carveout")
+
+    def _agree_or_refuse(
+        class_desc: str,
+        derived_eligible: bool,
+    ) -> Optional[tuple[bool, str]]:
+        """None when `carveout:` is absent or agrees; else the refusal."""
+        if carveout is None or bool(carveout) == derived_eligible:
+            return None
+        ext = region_extent(region)
+        where = f" [0x{ext[0]:x}, 0x{ext[1]:x})" if ext else ""
+        verdict = "eligible" if derived_eligible else "not eligible"
+        return False, (
+            f"region {name!r}{where} derives {class_desc} against the "
+            f"SoC's declared on-die MRAM aperture [0x{aperture[0]:x}, "
+            f"0x{aperture[1]:x}) -- {verdict} for an IPC carve-out -- but "
+            f"its authored `carveout: {carveout!r}` disagrees; fix the "
+            f"metadata, the derived class is authoritative, not a "
+            f"silently-honoured override")
 
     if cls == "flash":
+        disagreement = _agree_or_refuse("flash-class", False)
+        if disagreement is not None:
+            return disagreement
         ext = region_extent(region)
         where = f" [0x{ext[0]:x}, 0x{ext[1]:x})" if ext else ""
         return False, (
@@ -99,11 +156,21 @@ def _region_ipc_eligibility(
             f"carve-out target")
 
     if cls == "ram":
+        disagreement = _agree_or_refuse(
+            "ram-class (outside the aperture, not preset-authored)", True)
+        if disagreement is not None:
+            return disagreement
         return True, ""
 
     if cls == "unclassified":
         wa = region.get("write_authority")
-        if wa == "customer_runtime":
+        derived_eligible = wa == "customer_runtime"
+        disagreement = _agree_or_refuse(
+            f"an unclassified class outside the aperture "
+            f"(write_authority={wa!r})", derived_eligible)
+        if disagreement is not None:
+            return disagreement
+        if derived_eligible:
             return True, ""
         return False, (
             f"region {name!r} resolves outside the declared MRAM "
@@ -115,9 +182,22 @@ def _region_ipc_eligibility(
     # caller never reaches here when the SoC declares no aperture at all
     # -- that case is handled before this function is called.)  Nothing
     # to compare against, so honour whichever authored flag is present
-    # rather than guess (ADR-0034 clause 4): `write_authority` first
-    # (the newer, more specific signal), then the legacy `carveout`,
-    # then refuse.
+    # rather than guess (ADR-0034 clause 4): the legacy `carveout:` FIRST
+    # -- it is the conservative, pre-split-B signal and both
+    # `docs/board-config-features.md` and the schema's `carveout`
+    # description say it is honoured VERBATIM as the fallback answer here
+    # -- then `write_authority` when no `carveout:` is authored, then
+    # refuse. (#1365 split B review, MAJOR 2: this used to check
+    # `write_authority` first, silently dropping an authored
+    # `carveout: false` whenever `write_authority: customer_runtime` was
+    # also present.)
+    if carveout is not None:
+        if carveout is False:
+            return False, (
+                f"region {name!r} has an unresolved base "
+                f"({region.get('base')!r}); honouring its legacy "
+                f"`carveout: false`")
+        return True, ""
     wa = region.get("write_authority")
     if wa is not None:
         if wa == "customer_runtime":
@@ -128,14 +208,6 @@ def _region_ipc_eligibility(
             f"declared MRAM aperture can't be verified, and its "
             f"authored write_authority is {wa!r}, not "
             f"'customer_runtime'")
-    carveout = region.get("carveout")
-    if carveout is not None:
-        if carveout is False:
-            return False, (
-                f"region {name!r} has an unresolved base "
-                f"({region.get('base')!r}); honouring its legacy "
-                f"`carveout: false`")
-        return True, ""
     return False, (
         f"region {name!r} has an unresolved base "
         f"({region.get('base')!r}) and carries neither "
@@ -406,11 +478,18 @@ def resolve_carve_outs(
                     f"or omitted) to metadata/e1m_modules/{project.sku}.yaml "
                     f"or remove the matching ipc entry from board.yaml.")
             if excluded_detail:
+                shown = excluded_detail[:_MAX_EXCLUDED_DETAIL]
+                omitted = len(excluded_detail) - len(shown)
+                more = (
+                    f"; and {omitted} more region(s) also excluded (reasons "
+                    f"omitted, not necessarily the same one -- list capped "
+                    f"at {_MAX_EXCLUDED_DETAIL})"
+                    if omitted > 0 else "")
                 return [], (
                     f"ipc entry '{entry.name}' endpoints {entry.endpoints} "
                     f"only match memory_map region(s) in SoM {project.sku} "
                     f"that are ineligible for an IPC carve-out: "
-                    f"{'; '.join(excluded_detail)}.  Add a region whose "
+                    f"{'; '.join(shown)}{more}.  Add a region whose "
                     f"resolved base sits outside the SoC's declared MRAM "
                     f"aperture (or, if inside it, one that resolves "
                     f"`write_authority: customer_runtime`) to "

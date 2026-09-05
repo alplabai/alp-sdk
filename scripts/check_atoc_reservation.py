@@ -95,6 +95,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 from alp_orchestrate.aperture import region_extent as _region_extent  # noqa: E402
 from alp_orchestrate.aperture import resolve_aperture as _resolve_aperture_impl  # noqa: E402
 from alp_orchestrate.loader import _resolve_slot0_load_address  # noqa: E402
+from alp_orchestrate.memregion import _region_size_bytes  # noqa: E402
 from alp_orchestrate.models import OrchestratorError  # noqa: E402
 from gen_zephyr_board import _AEN_MRAM_BASE  # noqa: E402
 
@@ -487,16 +488,6 @@ def _check_class_disagreement(
     return out, skips
 
 
-def _region_size_kib(region: "dict[str, Any]") -> "int | None":
-    size_kib = region.get("size_kib")
-    if isinstance(size_kib, int):
-        return size_kib
-    size_mib = region.get("size_mib")
-    if isinstance(size_mib, int):
-        return size_mib * 1024
-    return None
-
-
 def _check_preset(path: Path) -> "list[str]":
     try:
         doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -510,10 +501,10 @@ def _check_preset(path: Path) -> "list[str]":
         if not isinstance(region, dict):
             continue
         base = region.get("base")
-        size_kib = _region_size_kib(region)
+        size_bytes = _region_size_bytes(region)
         # `base: TBD` regions (not yet HW-mapped) carry no address to check.
-        if isinstance(base, int) and size_kib is not None:
-            spans.append((base, base + size_kib * 1024, str(region.get("name"))))
+        if isinstance(base, int) and size_bytes is not None:
+            spans.append((base, base + size_bytes, str(region.get("name"))))
     if not spans:
         return []
     rel = path.relative_to(REPO).as_posix()

@@ -6,6 +6,22 @@ were filled in tomorrow.  Split B deliberately does NOT fill that field (a
 separate, later step); this test proves the field staying `"TBD"` is not
 secretly load-bearing for safety.
 
+Also covers two gaps a #1365 split B review found in
+`_region_ipc_eligibility()` (`scripts/alp_orchestrate/carveout.py`):
+
+  - `TestUnclassifiedWriteAuthorityLegCoverage` (MAJOR 4) -- the positive
+    mirror of the ordering guard: a preset-authored row OUTSIDE the
+    aperture with `write_authority: customer_runtime` must resolve
+    `status: ok`. Mutating away the `write_authority == "customer_runtime"`
+    check on the `cls == "unclassified"` branch was caught by NOTHING --
+    not the ordering guard above, not the wider pytest sweep, not
+    `check_emit_snapshots.py` -- until this test existed.
+  - `TestCarveoutAgreementBlocker` (BLOCKER) -- a present `carveout:`
+    that DISAGREES with the derived class must refuse, naming both the
+    derived class (with addresses) and the authored flag, instead of
+    letting `write_authority: customer_runtime` alone silently drop an
+    authored `carveout: false`.
+
 The hazard this closes (metadata/e1m_modules/E1M-AEN801.yaml, verbatim):
 
     #   5552 B   bench-observed 2026-08-08 -- ATOC magic `ckBS` (0x53426B63)
@@ -53,6 +69,9 @@ MPROC_MAILBOX_BOARD = REPO / "examples" / "multicore" / "mproc-mailbox" / "board
 
 # metadata/socs/alif/ensemble/e8.json's `soc_flash_base` (#1365 split A).
 _E8_APERTURE_BASE = 0x80000000
+# E8's declared aperture top (base + variant AE822FA0E5597LS0's 5.5 MiB
+# mram_mb): [0x80000000, 0x80580000).  A row resolving here is OUTSIDE it.
+_OUTSIDE_APERTURE_BASE = 0xA0000000
 
 
 def _with_mram_main_resolved(project):
@@ -118,3 +137,120 @@ class TestMramMainOrderingGuard:
         entry = _by_name(resolve_carve_outs(project))["alp_shmem0"]
         assert entry.status == "blocked"
         assert "flash-class" in entry.reason
+
+
+def _with_outside_aperture_row_added(project):
+    """Return `project` with an extra preset-authored `memory_map:` row
+    appended in-memory, resolving OUTSIDE the declared aperture
+    `[0x80000000, 0x80580000)` (e.g. an OSPI XIP window) and carrying
+    `write_authority: customer_runtime` -- no `carveout:` key, so the
+    #1365-split-B-review BLOCKER's AGREE check (which fires only when
+    `carveout:` is authored) never triggers here; this isolates the
+    `write_authority == "customer_runtime"` leg on
+    `_region_ipc_eligibility()`'s `cls == "unclassified"` branch.
+
+    Deep-copies `som_preset` first -- never mutates the tracked
+    `metadata/e1m_modules/E1M-AEN801.yaml`."""
+    project.som_preset = copy.deepcopy(project.som_preset)
+    project.som_preset["memory_map"].append({
+        "name": "ospi_xip_test",
+        "base": _OUTSIDE_APERTURE_BASE,
+        "size_kib": 1024,
+        "accessible_from": ["a32_cluster", "m55_hp"],
+        "write_authority": "customer_runtime",
+    })
+    return project
+
+
+class TestUnclassifiedWriteAuthorityLegCoverage:
+    """MAJOR 4: the ordering guard above had zero coverage on the leg that
+    stops a future authored OSPI XIP row from silently becoming an IPC
+    candidate just because it resolves outside the aperture -- dropping
+    ONLY the `write_authority == "customer_runtime"` check on the
+    `cls == "unclassified"` branch (`carveout.py`'s
+    `_region_ipc_eligibility()`) is caught by NOTHING else: the 3 tests
+    in `TestMramMainOrderingGuard` above, the wider pytest sweep, and
+    `check_emit_snapshots.py` all stay green under that mutation.
+
+    This test is the positive mirror of `TestMramMainOrderingGuard`: it
+    asserts a preset-authored row OUTSIDE the aperture with
+    `write_authority: customer_runtime` DOES resolve `status: ok` --
+    losing that leg (mutated to never grant eligibility) flips this
+    entry to `blocked` and turns this test red. Verified by hand
+    (#1365 split B review, MAJOR 4): mutating
+    `derived_eligible = wa == "customer_runtime"` to
+    `derived_eligible = False` in `_region_ipc_eligibility()` turns this
+    test red; reverting turns it green again.
+    """
+
+    def test_outside_aperture_authored_row_with_customer_runtime_resolves_ok(self):
+        project = _with_outside_aperture_row_added(load_board_yaml(RPMSG_AEN_BOARD))
+        entry = _by_name(resolve_carve_outs(project))["alp_default_rpmsg"]
+
+        assert entry.status == "ok", (
+            f"a32_cluster ipc entry resolved {entry.status!r} against an "
+            f"outside-aperture authored row carrying "
+            f"write_authority: customer_runtime; reason={entry.reason!r}")
+        assert entry.region == "ospi_xip_test"
+        assert _OUTSIDE_APERTURE_BASE <= entry.base < (
+            _OUTSIDE_APERTURE_BASE + 1024 * 1024)
+
+
+def _with_carveout_disagreement_row_added(project):
+    """Return `project` with an extra preset-authored `memory_map:` row
+    appended in-memory carrying BOTH `carveout: false` AND
+    `write_authority: customer_runtime` -- the exact shape proven
+    end-to-end against the real `rpmsg-aen` project (#1365 split B
+    review, BLOCKER): a live IPC carve-out landing in a region the
+    author explicitly flagged off-limits via the legacy `carveout:`
+    flag, with `_region_ipc_eligibility()` never reading it because
+    `write_authority: customer_runtime` alone used to decide eligibility
+    on the `cls == "unclassified"` branch.
+
+    Deep-copies `som_preset` first -- never mutates the tracked
+    `metadata/e1m_modules/E1M-AEN801.yaml`."""
+    project.som_preset = copy.deepcopy(project.som_preset)
+    project.som_preset["memory_map"].append({
+        "name": "ospi_xip",
+        "base": _OUTSIDE_APERTURE_BASE,
+        "size_kib": 1024,
+        "accessible_from": ["a32_cluster", "m55_hp"],
+        "carveout": False,
+        "write_authority": "customer_runtime",
+    })
+    return project
+
+
+class TestCarveoutAgreementBlocker:
+    """BLOCKER (#1365 split B review): a present `carveout:` that
+    DISAGREES with the derived class must refuse, naming BOTH facts --
+    the derived class (with the addresses that produced it) and the
+    authored flag. Before the fix, `_region_ipc_eligibility()` decided
+    eligibility from `write_authority` alone on both the `cls == "ram"`
+    and `cls == "unclassified"` branches, silently dropping a
+    contradicting `carveout:` value.
+
+    Reproduces the exact probe run against the real `rpmsg-aen` project:
+    appending `{name: ospi_xip, base: 0xA0000000, size_kib: 1024,
+    carveout: false, write_authority: customer_runtime}` to
+    E1M-AEN801.yaml's `memory_map:`. Pre-fix this resolved
+    `status: ok base=0xa00c0000 region=ospi_xip` -- a live IPC carve-out
+    placed in a region the author explicitly flagged off-limits, with no
+    diagnostic. Post-fix it must refuse."""
+
+    def test_carveout_false_disagreeing_with_write_authority_refuses(self):
+        project = _with_carveout_disagreement_row_added(
+            load_board_yaml(RPMSG_AEN_BOARD))
+        entry = _by_name(resolve_carve_outs(project))["alp_default_rpmsg"]
+
+        assert entry.status == "blocked", (
+            f"a32_cluster ipc entry resolved {entry.status!r} onto a "
+            f"region carrying `carveout: false` -- the AGREE contract "
+            f"did not hold; base={entry.base:#x} region={entry.region!r}")
+        assert "ospi_xip" not in entry.region
+        # Both facts named: the derived class (with the addresses that
+        # produced it) AND the authored flag it disagrees with.
+        assert "unclassified" in entry.reason
+        assert "0xa0000000" in entry.reason and "0xa0100000" in entry.reason
+        assert "carveout: False" in entry.reason
+        assert "disagrees" in entry.reason
