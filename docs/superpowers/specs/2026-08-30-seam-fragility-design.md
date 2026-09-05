@@ -280,18 +280,17 @@ straight into the emitted `core_type` field as well as into the crash. Closing
 one instance does not close the class — that is this paragraph's point, and the
 next instance will arrive the same way until there is one implementation.
 
-### Sequencing — this question is downstream of ADR-0026 sections C and D
+### Sequencing — decided by ADR-0026 sections C and D
 
-Where this artefact lives depends on an unresolved decision. ADR-0026's
-amendment section C (who answers the configure-time CMake call) and section D
-(who owns rendered-artefact bytes) determine whether both repos still need this
-answer at all. If they land on "tan owns the renderers and alp-sdk's emitters
-die", the honest end state is one function in one repo, and a schema, a gate, a
-required field and a migration would be ceremony added in the middle of a
-programme whose whole purpose is removing ceremony. **Answering the shape before
-C and D is answering out of order.** What is safe now regardless: populate the
-26 fields, since a preset stating its own core's runtime is correct under every
-outcome.
+Where this artefact lives depended on ADR-0026's amendment section C (who
+answers the configure-time CMake call) and section D (who owns
+rendered-artefact bytes); both are now decided. They did not land on "tan owns
+the renderers and alp-sdk's emitters die" — alp-sdk keeps the configure-time
+call and stays canonical for rendered bytes, so a surviving emitter core lives
+in alp-sdk and is not repointed at `tan`. The schema, gate, required field and
+migration this question was waiting on are no longer ceremony added out of
+order: populate the 26 fields, since a preset stating its own core's runtime is
+correct under every outcome, and make the field `required`.
 
 ### A correction to this document's own arithmetic
 
@@ -507,7 +506,7 @@ producer or a drift gate: `scripts/gen_error_catalog.py:45` writes it,
 `scripts/alp_cli/explain.py`, which would have been the in-repo consumer, no
 longer exists. So the heading undersells it: this is not a half-consumed in-repo
 artefact but a **pure cross-repo export with exactly one consumer, in another
-repo**, and there is no error-catalog schema among the 28 under
+repo**, and there is no error-catalog schema among the 29 under
 `metadata/schemas/`. That is a stronger argument for schema-gating than
 "half-consumed" makes — the only thing standing between a shape change and a
 broken `tan explain` is a regenerate-and-diff of the producer, which passes by
@@ -707,22 +706,34 @@ Recorded so they are not re-litigated:
    26 existing `som-preset-v1` `topology.<core>` entries, make the field
    `required`, and keep the class rule as a producer-side gate. See the revised
    Problem 2 proposal and the "What a rule looks like when it becomes data"
-   section. One thing stays open behind it, and it is a **sequencing**
-   dependency rather than a design one: ADR-0026 amendment sections C and D
-   decide whether both repos still need this answer at all, so the schema
-   change waits on them. Populating the 26 fields does not.
+   section. One thing sat open behind it, a **sequencing** dependency rather
+   than a design one: ADR-0026 amendment sections C and D would decide whether
+   both repos still need this answer at all. That dependency is now resolved —
+   ADR-0026 decided alp-sdk keeps the configure-time call and stays canonical
+   for rendered bytes, so both repos still need this answer, and the schema
+   change no longer waits: make the field `required` alongside populating the
+   26 fields.
 3. Is the `_fix_link` base-URL extraction in scope now, or deferred? It is the
    smallest item and the least urgent.
-4. ~~`metadata/schemas/hw-revisions-v1.schema.json` is the only schema of the 28
+4. ~~`metadata/schemas/hw-revisions-v1.schema.json` is the only schema of the 29
    under `metadata/schemas/` with top-level `additionalProperties: true`. Its
    description ("Per-SoM-family hardware-revision compatibility table") gives
    no rationale for the exception. Is the open door deliberate — because a
    vendor's revision table carries fields the schema cannot enumerate ahead of
-   time — or is it an oversight?~~ **Answered.**
+   time — or is it an oversight? The difference is whether a typo in a new SoM
+   family's revision entry is caught or silently accepted, which matters
+   because that table is the input to the SDK-version compatibility window.~~
+   **Answered, and two facts in the question were wrong.** Corrected in place
+   rather than left standing, because this spec is the in-tree source #1850
+   was written from and the next reader would hit the same wrong count.
 
-   * **The count is 28, not 27** (`ls metadata/schemas/*.json | wc -l`) — the
+   * **The schema count is a moving target, recorded here as history rather
+     than re-measured live** (`ls metadata/schemas/*.json | wc -l`): the
      original [#1850](https://github.com/alplabai/alp-sdk/issues/1850) filing
-     undercounted it; this spec already carried the corrected figure above.
+     undercounted it at 27; it was 28 when #1887 closed the root and this spec
+     first carried the corrected figure above; it is 29 now that
+     `supervisor-links-v1.schema.json` has landed. Expect this note to age
+     again.
    * **The door was narrower than "caught or silently accepted" implies.**
      `$defs.hw_rev_entry` was already `additionalProperties: false` and
      `hw_revisions` already constrains its keys with `propertyNames:
@@ -731,7 +742,7 @@ Recorded so they are not re-litigated:
      top level was admitted.
    * **The root is now closed** (#1887, closing
      [#1850](https://github.com/alplabai/alp-sdk/issues/1850)), and it was
-     genuinely the last one: after that change all 28 schemas carry
+     genuinely the last one: after that change all 29 schemas carry
      `additionalProperties: false` at their root.
 ## Decided during review — the unused `substitute` hook stays, because the schema already locks the door
 
