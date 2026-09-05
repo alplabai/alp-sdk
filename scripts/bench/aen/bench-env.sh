@@ -263,7 +263,32 @@ bench_tool_prefix() {
 # with JLINK_EXE if your install uses a non-PATH location. The binary
 # is "JLinkExe" on Linux/macOS (SEGGER J-Link software pack).
 bench_jlink_exe() {
-	local exe="${JLINK_EXE:-JLinkExe}"
+	local exe="${JLINK_EXE:-}"
+
+	# WHICH JLinkExe YOU LAUNCH DECIDES WHICH DLL YOU GET, and a bare `JLinkExe`
+	# picks the wrong one.  On alplab-gw `/usr/bin/JLinkExe` is a symlink to
+	# /opt/SEGGER/JLink_V950/JLinkExe, so a bare name silently ran
+	# `DLL version V9.50` for a whole session while a newer install sat unused --
+	# every log said V9.50 even with the V9.74 directory on PATH.  Each JLinkExe
+	# dlopen()s libjlinkarm from its OWN directory (no RUNPATH, and ldconfig has
+	# no jlinkarm entry), so the binary is the choice, not the library path.
+	#
+	# This is a reproducibility hazard, not just cosmetics: the built-in Alif part
+	# profile is documented to need DLL >= V9.50, and probe-capability results are
+	# only comparable across runs on the same DLL.
+	#
+	# Prefer the newest versioned install; fall back to PATH.  Set JLINK_EXE to
+	# pin a specific one deliberately (e.g. to reproduce an older result).
+	# Search root is overridable and defaults under $HOME -- never a hardcoded
+	# maintainer path (scripts/check_public_private.py enforces this).
+	if [ -z "$exe" ]; then
+		local cand
+		for cand in "${ALP_JLINK_SEARCH_ROOT:-$HOME/segger-latest}"/JLink_Linux_V*_x86_64/JLinkExe; do
+			[ -x "$cand" ] && exe="$cand"
+		done
+		[ -n "$exe" ] || exe="JLinkExe"
+	fi
+
 	if ! command -v "$exe" >/dev/null 2>&1 && [ ! -x "$exe" ]; then
 		echo "bench-env: '$exe' not found — install the SEGGER J-Link software or set JLINK_EXE" >&2
 		return 1
@@ -292,7 +317,15 @@ bench_jlink_exe() {
 # read-only path needs this one.
 bench_jlink_assert_connected() {
 	local out="$1" ctx="${2:-J-Link}"
-	local pat='Cannot connect to the probe/programmer|Failed to connect to target|Could not connect to target|No J-Link device found'
+		# 'Could not connect to' is deliberately left OPEN-ENDED.  JLinkExe prints
+	# "Could not connect to the target device." -- the old pattern demanded
+	# "Could not connect to target" (no "the ... device"), so it NEVER matched,
+	# and because the log still contained a `J-Link>` prompt the guard passed a
+	# session that had connected to nothing.  A read-back from that session
+	# decoded to an EMPTY RAM console and was rendered as app output -- exactly
+	# the alp-sdk#1318 failure this function exists to catch.  Bench-measured
+	# again 2026-09-04.
+	local pat='Cannot connect to the probe/programmer|Failed to connect to target|Could not connect to|No J-Link device found'
 	if [ ! -s "$out" ]; then
 		echo "bench-env: $ctx produced no J-Link output at all ('$out' missing or empty)." >&2
 		return 7

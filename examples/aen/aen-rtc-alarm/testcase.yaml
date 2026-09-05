@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the on-module RV-3028-C7 RTC on the E1M-AEN801
+# (Ensemble E8, M55-HE): compile-checks upstream's rtc_rv3028 driver, its
+# CONFIG_RTC_ALARM half, and the devicetree node (i2c0 child + int-gpios onto
+# lpgpio) against the real E8 board target. Filtered OUT of the native_sim PR
+# gate (platform_allow = the AEN801 HE board only) -- the alarm interrupt is an
+# electrical outcome that needs the bench, not a CI run.
+
+sample:
+  name: aen-rtc-alarm
+  description: |
+    On-module RV-3028-C7 real-time clock + alarm interrupt on the E1M-AEN801
+    (Alif Ensemble E8, Cortex-M55-HE) over upstream Zephyr's rtc_* API: sets
+    and reads back the time, proves the 32.768 kHz oscillator advances it,
+    then waits for the alarm callback on /INT -> P15_0 -> lpgpio bit 0
+    (IRQ 171) with a bounded timeout, and clears the flag afterwards.
+
+tests:
+  alp_sdk.examples.aen.rtc_alarm.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - rtc
+      - i2c
+    build_only: true   # the alarm interrupt is a bench outcome, not a CI run.

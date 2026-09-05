@@ -82,20 +82,27 @@
  * slave-only LPI2C0 this bus was first believed to be (#1848).  The transport
  * exists.
  *
- * What blocks it is electrical, bench-settled 2026-08-31 on the r1 module
- * (E1M-AEN801, serial 2617-0001), i2c0 @ 100 kHz, read-only against
- * 0x52/0x48/0x30: pads High-Z abort every address (-116 / -ETIMEDOUT, "User
- * Abort on i2c@49010000"); the pad's internal ~50 kOhm pull-up clears the
- * abort but nothing ACKs (-5 / -EIO).  That bias-only change proves the
- * pinctrl is right and the controller reaches the wire, and that the net has
- * no usable pull-up: the E1M-AEN-2626-R2 netlist shows BRD_I2C's bridging
- * jumpers (R93/R94) DNP, unlike I2C2/EEPROM's own pull-up path (R95/R96,
- * stuffed) -- see docs/bring-up-aen.md Sec.5.1.
+ * The bus is no longer the blocker.  BENCH-SETTLED 2026-09-05 on 2626-R2
+ * silicon: BRD_I2C works on the SoC pad's internal pull-up alone, the rv3028c7
+ * ACKs at 0x52, its ID register 0x28 reads 0x44 and its seconds register
+ * advances (0x01 -> 0x02), so the oscillator runs.  The earlier verdict here --
+ * "no usable pull-up, needs R93/R94 stuffed", bench-settled 2026-08-31 on the
+ * r1 module (serial 2617-0001) -- was measured on hardware where the rv3028c7
+ * sits on LPI2C0 (P7_4/P7_5) and NOTHING is attached to P7_0/P7_1, so it
+ * characterised two floating pins.  It does not carry to R2 and is withdrawn;
+ * see docs/soms/aen.md, "On-module housekeeping I2C (BRD_I2C)".
  *
- * So rv3028c7 cannot back the AEN calendar until the board supplies a real
- * pull-up (R93/R94 stuffed, or dedicated resistors on the net) -- a board
- * change, not firmware, which is why #1814 stays open and this shim stays
- * the only calendar source on AEN.
+ * What is left is a backend-SELECTION change, not an electrical one: on the E8
+ * this shim registers with silicon_ref "alif:ensemble:e8" and beats the
+ * wildcard zephyr_drv registration at equal priority, so alp_rtc_open() binds
+ * the LPRTC counter here regardless of any rv3028c7 node in the devicetree.
+ * Repointing the AEN calendar at the external part means changing that
+ * selection deliberately (#1814).
+ *
+ * And it is NOT a free upgrade: on this batch the rv3028c7's VDD_BAT/VBACKUP
+ * has no supply fitted (R4/R68 both DNP), so it loses the time on every power
+ * cycle just as the LPRTC does.  It buys ER001/ER002 accuracy while powered,
+ * not persistence across a cold boot.
  */
 
 #include <errno.h>

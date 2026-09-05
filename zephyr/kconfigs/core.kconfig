@@ -14,6 +14,47 @@ config ALP_SDK_BANNER
 	  hardware revision from the EEPROM manifest; otherwise it falls
 	  back to the build-time board name (CONFIG_BOARD).
 
+config ALP_SDK_BANNER_HOUSEKEEPING
+	bool "Report on-module housekeeping devices (RTC, temperature) in the boot banner"
+	default y
+	depends on ALP_SDK_BANNER
+	help
+	  Extend the boot banner with a short line per on-module housekeeping
+	  device that the devicetree enables:
+
+	    - RTC (Micro Crystal RV-3028-C7, compatible "microcrystal,rv3028"):
+	      reports it is present and whether its time is currently set --
+	      "time not set" after a cold boot is EXPECTED on modules with no
+	      VBACKUP supply fitted, not a fault.
+	    - Ambient temperature (TI TMP112, compatible "ti,tmp112"): reports
+	      one reading, as integer milli-degrees C.
+
+	  Bound by compatible, not by node label or alias, so this compiles
+	  out to nothing on a board with neither device (e.g. native_sim or a
+	  different SoM) -- no dependency on any AEN-specific alias.  Each
+	  line ALSO requires its own driver's Kconfig symbol (CONFIG_RTC_RV3028
+	  / CONFIG_TMP112, i.e. CONFIG_RTC / CONFIG_SENSOR turned on): the
+	  AEN801 board layer enables both devicetree nodes unconditionally, but
+	  upstream only compiles the driver in when the app also opts into the
+	  RTC/sensor subsystem, so an app that enables ALP_SDK without doing so
+	  gets neither line -- gating on DT status alone linked clean but failed
+	  the final link step ("undefined reference to __device_dts_ord_*") on
+	  such an app.
+
+	  REPORT ONLY, deliberately: a missing, absent or failing device never
+	  fails the boot and never halts -- there is no "fatal" option for
+	  this check, unlike CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL, because
+	  these are non-critical parts and this code runs in every customer
+	  product.  Bounded, too: no retry loop and no wait for an RTC tick --
+	  a failed read prints one line and moves on.
+
+	  COST, stated honestly: this performs additional I2C reads during
+	  APPLICATION-level init, on every boot, for whichever of these
+	  devices the devicetree enables.  On by default because the SDK
+	  already does I2C on this same boot path (CONFIG_ALP_SDK_HW_INFO's
+	  EEPROM manifest read); turn this off for a faster/quieter boot
+	  without losing the rest of the identity banner.
+
 config ALP_SDK_STRICT_WARNINGS
 	bool "Build the alp_sdk zephyr_library with the Alp-maintainer strict warning profile"
 	default n
@@ -172,6 +213,27 @@ config ALP_SDK_SOC_MRAM_KB
 	help
 	  On-chip MRAM/flash of the SoC (soc_flash_mb from the SoC spec JSON,
 	  in KB).  The boot banner prefers this over the chosen flash region.
+
+config ALP_SDK_SOM_DRAM_MBIT
+	int "External OSPI/HyperRAM populated on this SoM, in Mbit (boot banner; 0 = none)"
+	default 0
+	help
+	  Off-SoC RAM the SoM SKU actually populates (som-preset `memory.
+	  dram_mbit`, e.g. the AEN HyperRAM on OSPI0 CS0) -- this is a MODULE
+	  fact, not a SoC one: two SKUs on the same PCB/silicon can differ
+	  here (E1M-AEN803 populates 512 Mbit, E1M-AEN801 256 Mbit).  0 means
+	  the preset declares none or leaves it TBD; the banner omits the
+	  line entirely rather than print a false zero.
+
+config ALP_SDK_SOM_FLASH_MBIT
+	int "External OSPI/xSPI NOR flash populated on this SoM, in Mbit (boot banner; 0 = none)"
+	default 0
+	help
+	  Off-SoC NOR flash the SoM SKU actually populates (som-preset
+	  `memory.flash_mbit`, e.g. the AEN xSPI NOR on OSPI0 CS1).  A SKU
+	  whose BOM leaves this part DNI/optional (som-preset `memory.
+	  flash_mbit: TBD`, e.g. E1M-AEN801) resolves to 0 here -- the banner
+	  must not claim a chip that build may not have.
 
 config ALP_SDK_CONSOLE
 	bool "Alp SoM interactive console (Zephyr shell + `alp` commands)"

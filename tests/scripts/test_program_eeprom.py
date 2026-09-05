@@ -112,5 +112,46 @@ class TestManifestLayout(unittest.TestCase):
             self.assertEqual(struct.unpack_from("<I", data, 4)[0], 1)
 
 
+class TestBoardDatecode(unittest.TestCase):
+    """The manifest's hw_rev carries the FULL board designator.
+
+    The physical board is `E1M-AEN-2626-R2`; a module whose manifest says only
+    `r2` cannot be tied back to its board number.  The datecode is a family
+    property in metadata/e1m_modules/<family>/hw-revisions.yaml and the tool
+    composes `<datecode>-<rev key>` into the field.
+    """
+
+    def test_aen_manifest_carries_the_composed_designator(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "eeprom.bin"
+            rv = subprocess.run(
+                [sys.executable, str(TOOL),
+                 "--board-yaml", str(REPO / "examples" / "aen" / "aen-eeprom-provision" / "board.yaml"),
+                 "--serial", "2026W36-0001",
+                 "--mfg-date", "2026-09-04",
+                 "--output", str(out)],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+            # hw_rev sits at offset 4 + 4 + 16 + 24 = 48, width 8.
+            hw_rev = out.read_bytes()[48:56].split(b"\0", 1)[0].decode("ascii")
+            self.assertEqual(hw_rev, "2626-r2")
+
+    def test_composed_designator_has_no_slack_left(self) -> None:
+        """`2626-r2` is 7 chars in an 8-byte NUL-terminated field -- an EXACT fit.
+
+        This is not a style nit: the next revision key wide enough to matter
+        (`r10` -> `2626-r10`, 8 chars) does not fit, and the tool must refuse it
+        loudly rather than silently truncate a module's board number.  If this
+        test ever fails because the field was widened, that is a
+        schema_version bump, not a test to relax.
+        """
+        mod = _import_tool()
+        self.assertEqual(mod.HW_REV_LEN, 8)
+        self.assertEqual(len("2626-r2"), mod.HW_REV_LEN - 1)
+        with self.assertRaises(SystemExit):
+            mod._check_string("hw_rev", "2626-r10", mod.HW_REV_LEN)
+
+
 if __name__ == "__main__":
     unittest.main()
