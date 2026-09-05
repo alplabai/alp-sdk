@@ -351,10 +351,20 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 				                                                         : ALP_ERR_IO;
 			}
 			/* DISCONNECTED (not yet latched) or CONNECTING: keep polling.
-			 * No attempt_cost debit here -- the read itself succeeded, so
-			 * this iteration's only real wall-clock spend is the poll gap
-			 * slept below; see the #1481 note in the else branch for why
-			 * charging CC3501E_REQ_TMO_MS here too was wrong. */
+			 * No attempt_cost debit here -- see the #1481 note in the else
+			 * branch for why charging CC3501E_REQ_TMO_MS here too was
+			 * wrong. That does NOT mean a successful read is free: it
+			 * still spends real wall-clock time, exactly the premise
+			 * issue #1953 disproved for poll_by_repeat()'s identical
+			 * "the read itself succeeded" reasoning. This loop has not
+			 * been converted to #1953's alp_uptime_ms() deadline model --
+			 * #1985 tracks it (deferred, not fixed here): converting
+			 * changes the exact retry counts
+			 * test_wifi_connect_bounds_status_attempts_on_wedged_transport_1382
+			 * and test_wifi_connect_healthy_poll_not_over_debited_1481
+			 * assert, which needs re-deriving, not a drop-in swap, and
+			 * this file is bench-held (#1937) while the AEN bench is
+			 * down (#1883). */
 		} else {
 			/* ss != ALP_OK: a single status read failing (e.g. a transient
 			 * down-window IO) is worth one more pass rather than an
@@ -527,8 +537,11 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 			if (di.role == (uint8_t)ALP_CC3501E_ROLE_WIFI_AP) {
 				return ALP_OK;
 			}
-			/* Role not up yet: the only wall-clock spend this iteration is
-			 * the poll gap slept below (#1481). */
+			/* Role not up yet: no attempt_cost debit here, same #1481
+			 * reasoning as cc3501e_wifi_connect() above -- but a
+			 * successful read is not actually free wall-clock time, the
+			 * same premise issue #1953 disproved for poll_by_repeat().
+			 * Deferred, not fixed here: #1985. */
 		} else {
 			/* One failed read is worth another pass, but charge its declared
 			 * worst case so `remaining` cannot ignore the failure path --

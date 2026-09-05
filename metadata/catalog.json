@@ -3841,7 +3841,8 @@
         "alp_uart_rx_ringbuf_count",
         "alp_uart_rx_ringbuf_detach",
         "alp_uart_rx_ringbuf_pop",
-        "alp_uart_write"
+        "alp_uart_write",
+        "alp_uptime_ms"
       ],
       "header": "include/alp/peripheral.h"
     },

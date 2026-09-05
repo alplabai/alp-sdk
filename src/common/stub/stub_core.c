@@ -130,8 +130,15 @@ uint64_t alp_uptime_ms(void)
  * No non-Linux target builds this file today (the plain-CMake baremetal
  * config compiles + runs on the Linux CI host absent a cross toolchain, so
  * it hits the __linux__ branch above instead) -- this is the dormant path
- * a genuine bare-metal port will exercise first. */
-static uint64_t z_uptime_stub_ms;
+ * a genuine bare-metal port will exercise first.
+ *
+ * Accumulated in MICROSECONDS, not milliseconds: cc3501e_core.c's
+ * cc3501e_reply_gate() settles on sub-millisecond alp_delay_us() calls
+ * (e.g. CC3501E_READY_POLL_US), and a millisecond-granularity counter would
+ * truncate every one of those to zero -- an unbounded undercount over a
+ * long poll, not a rounding nit, since a caller that never sleeps a whole
+ * millisecond at once would see alp_uptime_ms() stand still forever. */
+static uint64_t z_uptime_stub_us;
 
 void alp_delay_us(uint32_t us)
 {
@@ -141,7 +148,7 @@ void alp_delay_us(uint32_t us)
 			--spin;
 		}
 	}
-	z_uptime_stub_ms += us / 1000u;
+	z_uptime_stub_us += us;
 }
 
 void alp_delay_ms(uint32_t ms)
@@ -154,7 +161,7 @@ void alp_delay_ms(uint32_t ms)
 
 uint64_t alp_uptime_ms(void)
 {
-	return z_uptime_stub_ms;
+	return z_uptime_stub_us / 1000u;
 }
 
 #endif /* __linux__ */

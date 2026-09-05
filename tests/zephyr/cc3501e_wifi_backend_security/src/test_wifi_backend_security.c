@@ -127,13 +127,23 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	return ALP_OK;
 }
 
+/* alp_delay_ms and alp_uptime_ms share one fake millisecond counter (same
+ * pattern as tests/zephyr/cc3501e_poll_deadline), so poll_by_repeat()'s
+ * deadline (issue #1953) resolves deterministically for any RESP_ERR_BUSY
+ * retry this suite drives, without any real sleeping. */
+static uint64_t g_fake_now_ms;
+
 void alp_delay_us(uint32_t us)
 {
 	(void)us;
 }
 void alp_delay_ms(uint32_t ms)
 {
-	(void)ms;
+	g_fake_now_ms += ms;
+}
+uint64_t alp_uptime_ms(void)
+{
+	return g_fake_now_ms;
 }
 alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 {
