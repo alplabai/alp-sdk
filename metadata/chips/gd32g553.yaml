@@ -10,13 +10,26 @@ driver_status:    partial               # host driver: full surface.
                                         # COUNTER/TRNG/TMU/PWM_CAPTURE/PWM_SINGLE_PULSE/
                                         # TIMER_SYNC/POWER_MODE_SET/ADC_STREAM/ADC_DSP_CHAIN_*
                                         # bodies landed (see docs/gd32-bridge-protocol.md +
-                                        # firmware/gd32-bridge/hal/gd32/init.c).  Still partial:
-                                        # PWM_CONFIGURE + ADC_CONFIGURE only accept defaults
-                                        # (#495 / #494); ADC DSP chains bind but don't yet
-                                        # transform stream samples (#496); PWM_CAPTURE edges
-                                        # pending a V2N pad-routing rework.  All of the above
-                                        # are still HiL-gated end to end -- see
-                                        # docs/v1.0-readiness.md §1a.
+                                        # firmware/gd32-bridge/hal/gd32/init.c).
+                                        #
+                                        # Still partial, for reasons that are NOT open issues
+                                        # -- #494, #495 and #496 all closed (#494/#495 via
+                                        # #730, #496 via #764).  What remains:
+                                        #   * PWM dead-time + break stay NOSUPPORT because the
+                                        #     V2N connector routes neither the complementary
+                                        #     CHxN pad nor a BRK pad.  A carrier-routing limit
+                                        #     needing a future carrier revision, not firmware
+                                        #     (#495's closing comment).
+                                        #   * ADC 14/16-bit effective-resolution modes need the
+                                        #     GD32G553 RM's effective-resolution table plus
+                                        #     bench proof (#494's closing comment).
+                                        #   * End-to-end DSP-chain analog measurement is
+                                        #     deferred: the bench ADC pins float (#496's
+                                        #     closing comment).
+                                        #   * PWM_CAPTURE edges pending a V2N pad-routing
+                                        #     rework.
+                                        # All of the above are still HiL-gated end to end --
+                                        # see docs/v1.0-readiness.md §1a.
 display_name:     "GigaDevice GD32G553MEY7TR Cortex-M33 supervisor MCU"
 vendor:           gigadevice
 mpn_population:
