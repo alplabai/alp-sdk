@@ -253,6 +253,43 @@ def test_extra_libraries_profile_symlink_loop_clean_error(
     assert "could not be resolved" in msg
 
 
+def test_extra_libraries_profile_permission_denied_clean_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A `profile:` path that hits EACCES must also fail with a clean
+    `OrchestratorError`, not an unhandled `PermissionError`.
+
+    `pathlib.Path.is_file()` swallows `ENOENT`/`ENOTDIR`/`EBADF`/
+    `ELOOP` but re-raises `PermissionError` on EACCES -- the "same
+    defect class" note in issue #1961 -- a DIFFERENT branch of the
+    `except (RuntimeError, PermissionError)` clause than the
+    symlink-loop test above, which only exercises the `RuntimeError`
+    half. `chmod 000` doesn't restrict owner-read on Windows, so this
+    reproduces EACCES deterministically by monkeypatching
+    `pathlib.Path.is_file` for this one profile path only, the same
+    technique used for the symlink-loop shape above."""
+    prof_name = "denied-hw-backends.yaml"
+    real_is_file = Path.is_file
+
+    def _raise_eacces_for_profile(self):
+        if self.name == prof_name:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", _raise_eacces_for_profile)
+
+    body = _v2n_with_extra(
+        "    extra_libraries:\n"
+        "      - name: denied\n"
+        f"        profile: {prof_name}\n")
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "denied" in msg
+    assert "could not be resolved" in msg
+
+
 # ---------------------------------------------------------------------
 # #1485 follow-up -- the ADR-0018 library layer (scripts/alp_orchestrate/
 # libraries.py) is a SECOND resolver family the original #1485 fix missed:
