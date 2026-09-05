@@ -148,6 +148,11 @@ void alp_delay_us(uint32_t us)
 			--spin;
 		}
 	}
+	/* Non-atomic read-modify-write on z_uptime_stub_us: fine on this
+	 * dormant, single-core-assumed path (no non-Linux target builds this
+	 * file today, so nothing else can call alp_delay_us() concurrently);
+	 * a real multi-core bring-up on this backend would need an atomic or
+	 * a lock here. */
 	z_uptime_stub_us += us;
 }
 
