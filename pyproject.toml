@@ -42,6 +42,18 @@ model-compile = [
 mcp = [
     "mcp>=1.2",
 ]
+# License-free INT8 quantize + fp32-vs-int8 accuracy report ("alp model prep").
+# onnxruntime.quantization + sympy (symbolic shape inference) only -- no vendor
+# toolchain (Vela/dxcom/DRP-AI).
+model-prep = [
+    "onnxruntime>=1.17",
+    "onnx>=1.15",
+    "numpy>=1.23",
+    "sympy>=1.11",
+]
+# TFLite->ONNX conversion for "alp model prep" (.tflite input) -- heavy
+# (pulls tensorflow); kept out of the base and the lighter model-prep extra.
+model-convert = ["tf2onnx>=1.16", "tensorflow-cpu>=2.15"]
 
 # No `alp` console-script, and no `python -m alp_cli <verb>` front door
 # either: standalone Python Tan is the whole command surface (ADR-0020

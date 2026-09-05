@@ -1,0 +1,122 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-inference-energy overlay for the E1M-AEN801 (Ensemble E8, M55-HE)
+ * bench RAM-run.  This app needs BOTH subsystems wired at once, so the
+ * overlay is the union of two already-bench-validated overlays:
+ *
+ *   1. the NPU half -- ITCM retarget + itcm/dtcm global_base + the Ethos-U85
+ *      node -- transcribed from examples/aen/aen-npu-inference-alif (the
+ *      silicon-proven matched-runtime inference app);
+ *   2. the I2C half -- SoC I2C2 + its pad config -- transcribed from
+ *      examples/aen/aen-i2c2-eeprom-regcheck (bench-validated 2026-06-15).
+ *
+ * WHY I2C2 IS THE RAIL-MONITOR BUS.  The six EVK INA236 rail monitors sit on
+ * the carrier's shared sensor bus, which the E1M standard calls I2C0.  On the
+ * AEN SoM that E1M bus lands on SoC I2C2: metadata/pinmux/aen.yaml routes
+ * E1M pad AE2 (I2C0_SCL) -> I2C2_SCL_C on P5_6 and AD2 (I2C0_SDA) ->
+ * I2C2_SDA_C on P5_7.  So `alp-i2c0 = &i2c2` below is not a workaround -- it
+ * is the pad map, and it is the same physical bus the on-module 24C128
+ * EEPROM already reads and writes on this bench.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/*
+ * RAM-run: the SoC `select` puts code in XIP; retarget ROM to ITCM so the
+ * image links + runs from RAM (J-Link loadbin+go, no reset).  PATH-REFERENCE
+ * form (&itcm) -- the phandle-array form <&itcm> makes FLASH_SIZE=0 and the
+ * image overflows the (empty) FLASH region at link time.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	aliases {
+		/* <alp/peripheral.h> resolves alp_i2c_open(ALP_E1M_I2C0) through
+		 * DT_ALIAS(alp_i2c0) (src/backends/i2c/zephyr_drv.c). */
+		alp-i2c0 = &i2c2;
+	};
+};
+
+/*
+ * global_base for hal_alif's local_to_global() (soc_memory_map.h), which the
+ * strong ethosu_address_remap in src/main.cpp calls.  The board's upstream
+ * itcm/dtcm nodes are compatible "arm,itcm"/"arm,dtcm", whose binding has no
+ * global_base, so re-`compatible` them onto the alp-sdk alif,itcm/alif,dtcm
+ * bindings (which declare it) and set the E8 RTSS-HE global views, transcribed
+ * from the Apache-2.0 zephyr_alif fork
+ * (dts/arm/alif/ensemble/common/ensemble_rtss_he.dtsi):
+ *     ITCM global_base = 0x58000000, DTCM global_base = 0x58800000.
+ * reg / zephyr,memory-region are unchanged, so the linker regions and the
+ * RAM-run retarget above are unaffected.
+ */
+&itcm {
+	compatible = "alif,itcm";
+	global_base = <0x58000000>;
+};
+
+&dtcm {
+	compatible = "alif,dtcm";
+	global_base = <0x58800000>;
+};
+
+&soc {
+	/*
+	 * Arm Ethos-U85 NPU.  compatible "arm,ethos-u", driven by the Arm
+	 * Ethos-U core driver's Zephyr frontend (drivers/misc/ethos_u).
+	 * Base 0x49042000, IRQ 366 + secure/privilege flags transcribed
+	 * verbatim from the fork node (e4_e6_e8.dtsi ethosu1).  No `clocks`
+	 * property: the fork's ethosu85 node carries none, and regcheck already
+	 * confirmed the block is clocked (device_is_ready=1, ID=0x20007001).
+	 */
+	ethosu_npu: ethosu85@49042000 {
+		compatible = "arm,ethos-u";
+		reg = <0x49042000 0x1000>;
+		interrupts = <366 3>;
+		interrupt-parent = <&nvic>;
+		secure-enable;
+		privilege-enable;
+		status = "okay";
+	};
+};
+
+&pinctrl {
+	pinctrl_i2c2: pinctrl_i2c2 {
+		group0 {
+			pinmux = <PIN_P5_6__I2C2_SCL_C>, <PIN_P5_7__I2C2_SDA_C>;
+			/* I2C pad config -- BENCH-VALIDATED on the E8 (2026-06-15),
+			 * matching Alif's own reference i2c pinctrl:
+			 *   input-enable    -> pad REN bit: the i2c_dw controller MUST be
+			 *                      able to SENSE SDA/SCL or it reads every
+			 *                      address as a NACK (no ACK detect).
+			 *   bias-pull-down  -> upstream pinctrl_soc.h encodes the pad
+			 *                      driver-state-control field as DSC=2 from
+			 *                      bias-pull-down, which is the value Alif's
+			 *                      reference uses for I2C.  (bias-pull-up
+			 *                      gives DSC=1 -> DEAD bus: the upstream
+			 *                      binding's pull naming is effectively
+			 *                      inverted vs the Alif pad HW.)
+			 * Do NOT "correct" bias-pull-down to bias-pull-up.
+			 */
+			input-enable;
+			bias-pull-down;
+		};
+	};
+};
+
+&i2c2 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	pinctrl-names = "default";
+	/* 100 kHz standard-mode: the rate every device on this shared bus is
+	 * guaranteed to support (the same choice i2c-device-hub makes), and the
+	 * bench-validated rate for this bus.  It also sets the sampling ceiling:
+	 * one CVRF poll + one POWER read is ~4 register bytes, ~0.5 ms here, so
+	 * the INA236 conversion period must stay well above that.  See
+	 * src/main.cpp's sample-rate budget. */
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+};

@@ -271,6 +271,48 @@ bench_jlink_exe() {
 	echo "$exe"
 }
 
+# bench_jlink_select — echo the probe-selection argv fragment (empty when
+# JLINK_SN is unset), so a caller can splice it into a JLinkExe invocation:
+#
+#     $JLINK $(bench_jlink_select) -device "$JLINK_DEVICE_READ" ...
+#
+# WHY THIS EXISTS: JLinkExe selects a probe ONLY by serial, and it does NOT
+# prompt in -nogui/CommanderScript mode — with two or more J-Links attached
+# and no selector it just fails every command with "Cannot connect to the
+# probe/programmer". bench-env has always exported JLINK_SN for this, but the
+# read/RAM-run helpers never consumed it, so every Flow B/C run on a host with
+# a second probe attached (alplab-gw carries three) silently produced an EMPTY
+# console — indistinguishable from an app that booted and printed nothing.
+# Centralised here so the selection rule has ONE definition.
+#
+# Deliberately unquoted at the call site (word-splitting is the point). Callers
+# building an argv ARRAY should keep appending -SelectEmuBySN directly instead.
+bench_jlink_select() {
+	[ -n "${JLINK_SN:-}" ] && printf '%s %s' "-SelectEmuBySN" "$JLINK_SN"
+	return 0
+}
+
+# bench_jlink_mem8_chunks <addr> <size> — echo one or more `mem8` commands
+# covering [addr, addr+size), each no larger than JLinkExe's per-command limit.
+#
+# WHY: JLinkExe rejects a single `mem8` larger than 0x10000 with
+# "NumBytes should be <= 0x10000" and reads NOTHING — and because the
+# CommanderScript keeps going, the caller just sees an EMPTY console dump,
+# indistinguishable from an app that never printed. Apps with a large
+# CONFIG_RAM_CONSOLE_BUFFER_SIZE (a sample stream, a long trace) hit this the
+# first time they are read back. Both args accept hex (0x…) or decimal.
+bench_jlink_mem8_chunks() {
+	local addr="$1" size="$2" limit=$((0x10000)) off=0 n
+	addr=$((addr))
+	size=$((size))
+	while [ "$off" -lt "$size" ]; do
+		n=$((size - off))
+		[ "$n" -gt "$limit" ] && n="$limit"
+		printf 'mem8 0x%X, 0x%X\n' "$((addr + off))" "$n"
+		off=$((off + n))
+	done
+}
+
 # bench_jlink_assert_connected <jlink-output-file> [context] — fail when
 # JLinkExe never reached the probe.
 #

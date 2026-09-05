@@ -108,6 +108,10 @@ SUPERVISOR_LINKS_SCHEMA = REPO / "metadata" / "schemas" / "supervisor-links-v1.s
 SUPERVISOR_LINKS_DATA = REPO / "metadata" / "e1m_modules" / "v2n" / "supervisor-links.yaml"
 BLOCK_SCHEMA = REPO / "metadata" / "schemas" / "block-v1.schema.json"
 BLOCKS = REPO / "metadata" / "blocks"
+NPU_OPS_SCHEMA = REPO / "metadata" / "schemas" / "npu-ops-v1.schema.json"
+NPU_OPS = REPO / "metadata" / "npu_ops"
+MODEL_ZOO_SCHEMA = REPO / "metadata" / "schemas" / "model-zoo-v1.schema.json"
+MODEL_ZOO = REPO / "metadata" / "model_zoo"
 MODEL_PERF_SCHEMA = REPO / "metadata" / "schemas" / "model-perf-v1.schema.json"
 MODEL_PERF = REPO / "metadata" / "model_perf"
 # Generated Zephyr board trees (one dir per <board>; each carries a twister
@@ -2473,6 +2477,36 @@ def main() -> int:
             )
             block_failures += _check_block_realizations(block_files, chip_files)
 
+    # Per-NPU op-support lists (the static-analyzer data asset).
+    npu_ops_failures: list = []
+    npu_ops_files: list = []
+    if NPU_OPS_SCHEMA.is_file():
+        npu_ops_schema = json.loads(NPU_OPS_SCHEMA.read_text(encoding="utf-8"))
+        npu_ops_validator = jsonschema.Draft202012Validator(npu_ops_schema)
+        npu_ops_files = sorted(NPU_OPS.glob("*.json"))
+        if npu_ops_files:
+            print()
+            npu_ops_failures = _check_files(
+                "JSON", npu_ops_files, npu_ops_validator,
+                lambda p: json.loads(p.read_text(encoding="utf-8")),
+                "backend",
+            )
+
+    # Model-zoo entries (YAML) against model-zoo v1.
+    model_zoo_failures: list = []
+    model_zoo_files: list = []
+    if MODEL_ZOO_SCHEMA.is_file():
+        model_zoo_schema = json.loads(MODEL_ZOO_SCHEMA.read_text(encoding="utf-8"))
+        model_zoo_validator = jsonschema.Draft202012Validator(model_zoo_schema)
+        model_zoo_files = sorted(MODEL_ZOO.glob("*.yaml"))
+        if model_zoo_files:
+            print()
+            model_zoo_failures = _check_files(
+                "YAML", model_zoo_files, model_zoo_validator,
+                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                "id",
+            )
+
     # Tier-2 model-perf points (YAML) against model-perf v1 (#1520).
     # metadata/model_perf/ ships EMPTY today -- a perf point comes off real
     # silicon or it does not exist (docs/bench/model-perf-capture.md) -- so
@@ -2558,7 +2592,10 @@ def main() -> int:
     print()
     total_failures = (len(soc_failures) + len(som_failures)
                       + len(hwrev_failures) + len(board_failures) + len(chip_failures)
-                      + len(block_failures) + len(model_perf_failures)
+                      + len(block_failures)
+                      + len(npu_ops_failures)
+                      + len(model_zoo_failures)
+                      + len(model_perf_failures)
                       + len(library_failures) + len(library_semantic_failures)
                       + len(board_target_failures)
                       + len(restriction_failures)
@@ -2573,6 +2610,8 @@ def main() -> int:
           f"{len(hwrev_files)} hw-revisions file(s) + "
           f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
           f"{len(block_files)} block file(s) + "
+          f"{len(npu_ops_files)} npu-ops file(s) + "
+          f"{len(model_zoo_files)} model-zoo entry(ies) + "
           f"{len(model_perf_files)} model-perf point(s) + "
           f"{len(library_files)} library manifest(s) + Kconfig registries + "
           f"tier-a-library-ci registry + "

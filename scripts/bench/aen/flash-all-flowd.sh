@@ -64,14 +64,17 @@ EOF
     > /tmp/rdc-preflight.out 2>&1 || true
   bench_jlink_assert_connected /tmp/rdc-preflight.out "Flow D console read preflight" || exit 7
   bench_jlink_assert_aen_dpidr /tmp/rdc-preflight.out "Flow D console read preflight" || exit 4
-  cat > /tmp/rdc.jlink <<EOF
-device $JLINK_DEVICE_READ
-si SWD
-speed $JLINK_SPEED
-connect
-mem8 $BUF, $SIZE
-exit
-EOF
+  # bench_jlink_mem8_chunks: JLinkExe rejects a single mem8 read over 0x10000
+  # and fails silently -- SIZE here (0xB00) is well under that, but chunk
+  # anyway so this stays correct if SIZE ever grows.
+  {
+    echo "device $JLINK_DEVICE_READ"
+    echo si SWD
+    echo "speed $JLINK_SPEED"
+    echo connect
+    bench_jlink_mem8_chunks "$BUF" "$SIZE"
+    echo exit
+  } > /tmp/rdc.jlink
   "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/rdc.jlink 2>/dev/null > /tmp/rdc.out || true
   # JLinkExe exits 0 even when it never opened the probe, so `|| true` above
   # hides a total connect failure and the decode below would render it as

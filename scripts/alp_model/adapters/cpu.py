@@ -7,6 +7,10 @@ from . import CompilerAdapter, Blob
 
 class CpuAdapter(CompilerAdapter):
     backend = "cpu"
+    tool = ""
+
+    def version(self) -> str:
+        return "builtin"
 
     def is_available(self) -> bool:
         return True              # always available; no external tool

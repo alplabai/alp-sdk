@@ -84,7 +84,7 @@ by exporting before you invoke a helper.
 | `JLINK_DEVICE_FLASH` | `AE822FA0E5597LS0_M55_HE` | Part-number device profile — unlocks the built-in Alif MRAM loader (Flow D). |
 | `JLINK_DEVICE_READ` | `Cortex-M55` | Generic device for all reads/attach/RAM-run (attaches to the live core). |
 | `JLINK_SPEED` | `4000` | SWD clock (kHz). |
-| `JLINK_SN` / `JLINK_SERIAL` | *(none)* | Optional SEGGER probe serial selector; set this on benches with multiple J-Links. |
+| `JLINK_SN` / `JLINK_SERIAL` | *(none)* | SEGGER probe serial selector. **REQUIRED on a bench with more than one J-Link attached** (alplab-gw has three): JLinkExe selects a probe only by serial and does not prompt in `-nogui` CommanderScript mode, so with no selector every command fails `Cannot connect to the probe/programmer` while the script runs to the end — an empty console, indistinguishable from an app that printed nothing. Consumed by every helper via `bench_jlink_select` (`bench-env.sh`); the AEN E8 answers SW-DP ID `0x4C013477`. |
 | `JLINK_EXE` | `JLinkExe` | JLink Commander binary (override for a non-PATH install). |
 
 ## Which flow? (A / B / C / D)

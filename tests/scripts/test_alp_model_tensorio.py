@@ -48,3 +48,26 @@ def test_extract_io_honors_raw_bytes_without_reading_file(tmp_path):
     ins, outs = extract_io(tmp_path / "does-not-exist.tflite", raw=raw)
     assert len(ins) == 1 and ins[0].shape == [1, 4]
     assert len(outs) == 1 and outs[0].shape == [1, 2]
+
+
+def test_extract_ops_non_tflite_returns_empty(tmp_path):
+    from alp_model.tensorio import extract_ops
+    src = tmp_path / "m.onnx"
+    src.write_bytes(b"not a tflite model")
+    assert extract_ops(src) == []
+
+
+def test_extract_ops_walks_fixture_operators():
+    pytest.importorskip("tflite")
+    from alp_model.tensorio import extract_ops
+    ops = extract_ops(_FIXTURE)              # tests/fixtures/models/tiny_int8.tflite
+    assert len(ops) == 1
+    fc = ops[0]
+    assert fc.op == "FULLY_CONNECTED"
+    # activation input [1,4] int8 (not const) + weight [2,4] int8 (const)
+    act = [t for t in fc.inputs if not t.is_const]
+    wts = [t for t in fc.inputs if t.is_const]
+    assert [t.shape for t in act] == [[1, 4]]
+    assert act[0].dtype == "int8" and act[0].nbytes == 4
+    assert any(t.shape == [2, 4] for t in wts)          # weights present, flagged const
+    assert fc.outputs[0].shape == [1, 2] and fc.outputs[0].nbytes == 2

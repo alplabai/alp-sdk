@@ -63,8 +63,9 @@ DEV="$JLINK_DEVICE_FLASH"
 # silent default can pick the WRONG board (the V2N-M1 GD32, not the AEN E8).
 # Export JLINK_SN yourself if you need to disambiguate by serial -- either way,
 # the DPIDR gate below (step 0b), not the serial, is what stops a write to the
-# wrong target.
-SEL="${JLINK_SN:+SelectEmuBySN $JLINK_SN}"
+# wrong target. Selection itself is bench_jlink_select (bench-env.sh), spliced
+# onto each JLinkExe command line below -- ONE definition for the rule, not a
+# second copy of the JLINK_SN check here.
 NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
 ELF="$BD/zephyr/zephyr.elf"
@@ -131,14 +132,14 @@ AEN_DPIDR="${AEN_DPIDR:-4C013477}"
 # and had to be reverted.
 GD32_DPIDR="${GD32_DPIDR:-0BE12477}"
 cat > /tmp/flowd-mramxip-preflight.jlink <<EOF
-$SEL
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_READ
 connect
 exit
 EOF
-$JLINK -nogui 1 -CommanderScript /tmp/flowd-mramxip-preflight.jlink \
+# shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
+$JLINK $(bench_jlink_select) -nogui 1 -CommanderScript /tmp/flowd-mramxip-preflight.jlink \
   > /tmp/flowd-mramxip-preflight.out 2>&1 || true
 bench_jlink_assert_aen_dpidr /tmp/flowd-mramxip-preflight.out "MRAM write preflight" || exit 4
 echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
@@ -172,7 +173,6 @@ echo "    atoc -> $ATOC_ADDR ($(stat -c%s "$PKG") B)" >&2
 # 3. J-Link: part-number device unlocks the MRAM loader; write BOTH blobs, verify,
 #    sanity-check the reset vector, then PIN reset (RSetType 2) -> SE boot ROM boots it.
 cat > /tmp/flowd-mramxip.jlink <<EOF
-$SEL
 si SWD
 speed $JLINK_SPEED
 device $DEV
@@ -187,7 +187,8 @@ r
 g
 exit
 EOF
-$JLINK -nogui 1 -CommanderScript /tmp/flowd-mramxip.jlink 2>&1 | tee /tmp/flowd-mramxip.out | \
+# shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
+$JLINK $(bench_jlink_select) -nogui 1 -CommanderScript /tmp/flowd-mramxip.jlink 2>&1 | tee /tmp/flowd-mramxip.out | \
   grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Reset|Cortex|Found|= " | head -40
 echo "----- (full log: /tmp/flowd-mramxip.out) -----"
 if grep -qi "Could not connect to the target device" /tmp/flowd-mramxip.out; then
@@ -230,16 +231,18 @@ if [ -z "$BUF_SYM" ]; then
   echo "      the flash above still completed -- this is not a boot failure. Read the" >&2
   echo "      console via the labgrid 'console' resource instead." >&2
 else
-  cat > /tmp/flowd-mramxip-read.jlink <<EOF
-$SEL
-device $JLINK_DEVICE_READ
-si SWD
-speed $JLINK_SPEED
-connect
-mem8 $BUF, $SIZE
-exit
-EOF
-  $JLINK -nogui 1 -CommanderScript /tmp/flowd-mramxip-read.jlink 2>/tmp/flowd-mramxip-rd.err > /tmp/flowd-mramxip-rd.out || true
+  # SIZE is caller-supplied ($2); chunk the mem8 read (bench_jlink_mem8_chunks) --
+  # a single read over JLinkExe's 0x10000 cap fails silently (empty console).
+  {
+    echo "device $JLINK_DEVICE_READ"
+    echo si SWD
+    echo "speed $JLINK_SPEED"
+    echo connect
+    bench_jlink_mem8_chunks "$BUF" "$SIZE"
+    echo exit
+  } > /tmp/flowd-mramxip-read.jlink
+  # shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
+  $JLINK $(bench_jlink_select) -nogui 1 -CommanderScript /tmp/flowd-mramxip-read.jlink 2>/tmp/flowd-mramxip-rd.err > /tmp/flowd-mramxip-rd.out || true
   # JLinkExe exits 0 even when it never opened the probe, so `|| true` above
   # hides a total connect failure and the decode below would render it as
   # empty target output (alp-sdk#1318).

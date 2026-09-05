@@ -1,0 +1,37 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Flow-D variant: undo the ITCM RAM-run retarget and link into MRAM slot0.
+ *
+ * WHY A SECOND OVERLAY EXISTS.  The app's auto-applied board overlay retargets
+ * ROM to ITCM so J-Link can loadbin+go without writing MRAM (Flow C) -- that is
+ * the right default for iterating.  But a REAL model does not fit: the
+ * Vela-compiled person_detect MobileNet is ~237 KiB of rodata, and 256 KiB of
+ * ITCM cannot hold that plus the application.  A real model is also the only
+ * way this app produces a meaningful number: the hermetic tiny_int8 fixture is
+ * 8 MACs, whose incremental energy is below the noise floor of every rail on
+ * the board (bench-confirmed -- the app reports RESULT FAIL rather than a
+ * fabricated figure).  person_detect is 7,077,252 MACs, 100 % NPU.
+ *
+ * `chosen` entries are ordinary properties, so re-stating them in a later
+ * overlay wins -- this restores the board defaults the ITCM overlay replaced.
+ * Pair it with flowd/mram-slot0.conf (CONFIG_USE_DT_CODE_PARTITION=y) or the
+ * image links at the MRAM base instead of the slot0 offset.
+ *
+ * Apply with:
+ *   scripts/bench/aen/build.sh <app> \
+ *     -DEXTRA_DTC_OVERLAY_FILE=<app>/flowd/mram-slot0.overlay \
+ *     -DEXTRA_CONF_FILE=<app>/flowd/mram-slot0.conf \
+ *     -DAEN_NPU_MODEL=<tflite-micro>/tensorflow/lite/micro/models/person_detect.tflite \
+ *     -DAEN_NPU_MODEL_NAME=person_detect_u85
+ * then flash with scripts/bench/aen/flash-jlink-mramxip.sh (and confirm the
+ * commit with a COLD-CYCLE read of the reset vector -- a J-Link verifybin alone
+ * has been seen to pass without committing).
+ */
+/ {
+	chosen {
+		zephyr,flash = &mram_storage;
+		zephyr,code-partition = &slot0_partition;
+	};
+};

@@ -173,7 +173,7 @@ SCRIPT=$(mktemp /tmp/jlink.XXXX.jlink)
   echo go
   echo "Sleep $SLEEP"
   echo halt
-  echo "mem8 $BUF, $SIZE"
+  bench_jlink_mem8_chunks "$BUF" "$SIZE"
   echo qc
 } > "$SCRIPT"
 echo ">>> RAM-run $(basename "$BD")  entry=$ENTRY  base=$BASE  ram_console_buf=$BUF  sleep=${SLEEP}ms" >&2

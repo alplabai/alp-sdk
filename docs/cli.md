@@ -422,17 +422,365 @@ python3 scripts/validate_board_yaml.py --input path/to/board.yaml
 
 It runs the rich validator plus the reference orchestrator consistency pass.
 
-### `tan model` -- compile + package AI models
+### `tan model` -- compile, package, and pre-flight check AI models
 
 ```bash
 tan model build                          # compile board.yaml `models:` entries
 tan model build --board path/to/board.yaml --out build/models
+tan model build --model demo             # build only the `demo` models: entry
 ```
 
 Compiles every `models:` entry declared in `board.yaml` into a
 `.alpmodel` package via the SoM-appropriate backend (Vela for
-Ethos-U, DRP-AI for RZ/V2N, ...).  See the model-pipeline docs under
-`docs/tutorials/` for the end-to-end inference flow.
+Ethos-U, DRP-AI for RZ/V2N, ...).  `--model NAME` restricts the build
+to the single named entry instead of all of them; an unknown NAME
+exits 1 instead of building everything.  See the model-pipeline docs
+under `docs/tutorials/` for the end-to-end inference flow.
+
+`tan model` fronts the whole model lifecycle -- `tan model build` /
+`tan model list` / `tan model info` / `tan model doctor` (compile `board.yaml` `models:` into `.alpmodel`,
+enumerate them, decode a built package, and report the compile
+toolchains), `check` (static pre-flight fit/perf), `zoo` / `add`
+(browse and pull curated model-zoo entries), and `prep` / `run` / `ab`
+(license-free quantize + accuracy, host reference run, host A/B).  Each
+`tan model <cmd>` mirrors the SDK backend's `alp model <cmd>` (invoked
+here as `python -m alp_cli model <cmd>`); driven through tan-cli the
+result is delivered in tan-cli's `{command, ok, exitCode, project,
+data, issues}` envelope, and the `--format json` payloads below are the
+model-specific `data` those envelopes carry.
+
+#### `tan model list` / `tan model info` / `tan model doctor` -- inspect models + toolchains
+
+```bash
+tan model list                           # enumerate the board.yaml `models:` entries
+tan model info <model.alpmodel>          # decode a compiled `.alpmodel` package
+tan model doctor                         # report the model-compile toolchains present
+```
+
+`tan model list` enumerates the declared/compiled models, `tan model info` decodes a built
+`.alpmodel` package, and `tan model doctor` reports which model-compile toolchains
+(Vela, DRP-AI, ...) are available -- distinct from the host-wide `tan
+doctor` preflight below.
+
+#### `tan model check` -- static pre-flight fit/perf check (no toolchain)
+
+Two modes:
+
+```bash
+# single-model: check one .tflite file against an explicit SKU
+tan model check my_model.tflite --sku E1M-AEN801
+tan model check my_model.tflite --sku E1M-AEN801 --format json
+tan model check my_model.tflite --sku E1M-V2N101 --metadata-root path/to/metadata
+
+# board-mode: check every (or one) board.yaml `models:` entry; SKU comes
+# from `som.sku` unless overridden
+tan model check --board path/to/board.yaml
+tan model check --board path/to/board.yaml --model demo
+tan model check --board path/to/board.yaml --sku E1M-V2N101 --format json
+```
+
+Offline, no-toolchain static analysis: parses the TFLite graph and,
+for every backend the SKU exposes (`cpu` plus each on-SoM NPU),
+answers "will this model fit, and roughly how fast" *before* any
+compile.  Each backend gets a fit verdict -- `fits` / `cpu-fallback`
+(one or more ops fall back to CPU) / `no-fit` (SRAM arena overflow) --
+plus conservative `est_sram_kib` / `est_latency_ms` /
+`op_coverage_pct` estimates.  MODEL and `--board` are mutually
+exclusive.
+
+In single-model mode `--sku` is required (e.g. `E1M-AEN801`). In
+`--board` mode the SKU defaults to the board's `som.sku`; passing
+`--sku` alongside `--board` overrides it. `--metadata-root` overrides
+the SDK's own `metadata/` root (defaults to it) in either mode.
+
+Exit 0 for any completed analysis -- a `no-fit` verdict is a valid
+answer, not a CLI error. Exit 1 for a per-model analysis failure (an
+unknown SKU, or a non-TFLite model -- ONNX static analysis is a
+follow-on, not yet supported): in board-mode this is per-model --
+one un-analysable `models:` entry does not abort the run, it's
+recorded as an error entry and the whole invocation still exits 1
+after printing the full payload. MODEL and `--board` together, or
+neither MODEL nor `--sku` given in single-model mode, is a usage
+error (exit 2); a missing/unreadable model path is likewise a usage
+error (exit 2), same as any other `tan model` path argument.
+
+Single-model `--format json` payload:
+
+```json
+{
+  "model": "my_model.tflite",
+  "sku": "E1M-AEN801",
+  "backends": [
+    {
+      "backend": "ethos_u",
+      "verdict": "fits",
+      "est_sram_kib": 1,
+      "budget_sram_kib": null,
+      "est_latency_ms": 0.02,
+      "op_coverage_pct": 100.0,
+      "unsupported_ops": [],
+      "source": "static"
+    }
+  ],
+  "suggestion": null
+}
+```
+
+Board-mode `--format json` payload -- one entry per `models:` entry
+checked, each either a full result or (when that model's source isn't
+analysable) a per-model `error`:
+
+```json
+{
+  "board": "path/to/board.yaml",
+  "sku": "E1M-AEN801",
+  "models": [
+    {
+      "name": "demo",
+      "source": "models/demo.tflite",
+      "backends": [ { "backend": "ethos_u", "verdict": "fits", "...": "..." } ],
+      "suggestion": null
+    },
+    {
+      "name": "other",
+      "source": "models/other.onnx",
+      "error": "static check supports .tflite models in this release; cannot analyse other.onnx (ONNX static analysis is a follow-on)"
+    }
+  ]
+}
+```
+
+Every backend result carries `"source": "static"` -- this slice ships
+fidelity tier 1 only, a conservative estimator with no NPU toolchain
+involved (round SRAM up, treat unknown/unsupported ops as
+CPU-fallback, assume <=50% NPU utilisation for latency -- a false
+"fits" is the worst failure this analyzer can make).  Tier 2
+(manufacturer-precomputed bench data, `source: "precomputed"`) and
+tier 3 (exact, on-demand toolchain compile) are follow-ons, as is ONNX
+static analysis.  `budget_sram_kib` is `null` until a SoC's
+`inference_arena_sram_kib` metadata field is authored -- every SoC's
+value is currently a `0` placeholder, so `no-fit` can never fire from
+an SRAM overflow yet, and the in-family cross-sell suggestion (move to
+a larger-arena SoM) stays dormant until those budgets exist.
+
+#### `tan model zoo` -- browse the curated model zoo
+
+```bash
+tan model zoo --sku E1M-AEN801           # entries marked for this SoM
+tan model zoo --board path/to/board.yaml # SKU from the board's `som.sku`
+tan model zoo --format json
+```
+
+Lists the curated model-zoo entries (`metadata/model_zoo/<id>.yaml`),
+each flagged `runs_here` for the target SoM -- computed from the entry's
+`validated_soms` against the SKU (`--sku`) or the board's `som.sku`
+(`--board`).  Link, fetch, and layer only -- no model weights are
+redistributed.  `--format` is `human` (default) or `json`.
+
+#### `tan model add` -- pull a zoo entry into board.yaml
+
+```bash
+tan model add <zoo-id> --board path/to/board.yaml
+tan model add <zoo-id> --board path/to/board.yaml --name my-detector
+tan model add <zoo-id> --board path/to/board.yaml --models-dir models/
+```
+
+Fetches the zoo entry's source -- a URL verified against its recorded
+sha256, or a bundled asset -- and appends a `{name, source}` item to the
+board's `models:` list.  Non-destructive: a duplicate model `name` is an
+error, never an overwrite.  `--name` overrides the derived entry name;
+`--models-dir` sets where the fetched source lands.
+
+#### `tan model prep` -- license-free INT8 quantize + accuracy report
+
+```bash
+tan model prep raw.onnx --calibration path/to/calib_dir
+tan model prep raw.onnx --calibration path/to/calib_dir --out raw.int8.onnx
+tan model prep raw.onnx --calibration path/to/calib_dir --per-channel
+tan model prep raw.onnx --calibration path/to/calib_dir --format json
+```
+
+Quantizes an ONNX model to INT8 (QDQ static quantization) and reports
+the **fp32-vs-int8 accuracy delta** -- turning "quantization is a dark
+art" into a guided, measured flow. Entirely on free `onnxruntime`/`onnx`
+(`onnxruntime.quantization` + `onnxruntime.InferenceSession`); no
+vendor toolchain (Vela/dxcom/DRP-AI) is invoked here -- that compile
+step is a separate, later stage.
+
+`--calibration` is a directory of `*.npy` samples, each a single-sample
+batch matching the model's input shape (dynamic/-1 dims wildcard). The
+calibration set is validated *before* quantizing: fewer than
+`--min-samples` (default 8) samples, or any sample whose shape doesn't
+match the model input, is a clear error -- a bad calibration set is the
+silent accuracy killer this guards against. `--per-channel` enables
+per-channel weight quantization, which often recovers accuracy lost to
+per-tensor quantization. `RAW` must be `.onnx` or `.tflite`; other
+formats are a clear "not supported" error, never a wrong result.
+Requires the `model-prep` extra (`pip install alp-sdk-cli[model-prep]`).
+
+`.tflite` (the SDK's native format) is converted to ONNX via `tf2onnx`
+before quantizing -- the intermediate ONNX is a temp file, cleaned up
+after `prep` finishes (or fails). This needs the additional `model-convert`
+extra (`pip install alp-sdk-cli[model-convert]`, which adds `tf2onnx` +
+`tensorflow`) -- kept separate from `model-prep` because it's heavy
+(pulls in tensorflow); a `.tflite` input without it errors with a clear
+message naming the extra, never a raw import traceback. `.onnx` input
+still only needs the lighter `model-prep` extra. PyTorch/Keras -> ONNX
+conversion is a further follow-on.
+
+After quantizing, both the fp32 and INT8 models run on every
+calibration sample and the outputs are compared: top-1 agreement %,
+mean cosine similarity, and max absolute error, rolled up into a
+`verdict` of `good` or `degraded` (top-1 agreement below 95% by
+default) plus concrete `guidance` when degraded (try `--per-channel`,
+add more representative calibration data, keep sensitive ops in fp16).
+A quantize or inference failure exits 1 -- it never emits a "prepped"
+model that didn't actually quantize or that can't run.
+
+`--format json` payload:
+
+```json
+{
+  "raw": "raw.onnx",
+  "quantized": "raw.int8.onnx",
+  "accuracy": {
+    "samples": 8,
+    "top1_agreement_pct": 100.0,
+    "mean_cosine": 0.9998,
+    "max_abs_err": 0.010144,
+    "verdict": "good",
+    "guidance": null
+  }
+}
+```
+
+#### `tan model run` -- host reference run (functional + host latency + accuracy)
+
+```bash
+tan model run model.onnx                              # deterministic random input
+tan model run model.onnx --input sample.npy            # a real input sample
+tan model run model.onnx --input sample.npy --expected 3
+tan model run model.onnx --runs 50 --format json
+tan model run model.onnx --on-device                   # + a real on-target energy measurement
+```
+
+Loads the ONNX model into `onnxruntime` on the **CPU** and runs it: a
+functional smoke test (does it load and produce an output) plus a
+**host** latency number (`latency_ms`, the median of `--runs`, default
+20, timed inferences after one warm-up run) and (with `--expected`) a
+top-1 accuracy check against a known label. `MODEL` must be `.onnx` in
+this release. Without `--input`, a deterministic random sample
+(seeded, matching the model's first input shape) is used and the
+payload marks `"random_input": true`.
+
+**This is not the target SoM's performance.** `backend` is always
+`"cpu-host"` and every payload -- human or JSON -- carries a `note`
+stating the host-reference caveat explicitly. `peak_sram_kib` and
+`power_mj` stay `null` here (the on-device arena high-water mark and
+per-rail power reads are a separate, still-HW-gated surface).
+`energy` stays `null` unless `--on-device` is given (see below). A
+model that fails to load or run raises a clean error (exit 1), never
+a raw traceback.
+
+**`--on-device`** -- after the host reference run, also runs a REAL
+on-target energy measurement: builds and RAM-runs an energy-sampling
+app on an Alif Ensemble E8 (AEN801), reads back its console capture (a
+`ENERGY-CFG`/`ENERGY-S`/`ENERGY-W`/`ENERGY-RESULT` protocol over the
+on-board INA236 shunt monitor), and idle-subtracts active vs. idle
+windows into mJ/inference. This needs a **held labgrid reservation**
+for the target bench place and real hardware -- it never acquires or
+releases that reservation itself (that is the human/orchestrator's
+responsibility). On any failure (no reservation held, build/flash
+failure, malformed capture) it **errors out (exit 1) instead of
+reporting a null or fabricated energy figure** -- a silent `null`
+would read as "measured nothing" when the truth is "the bench run
+failed". On success, the JSON payload gains a top-level `on_device`
+key with cross-check diagnostics: `cycles_per_s_used`,
+`cycles_per_s_dt`, `cycles_per_s_measured` (the DT-constant-vs-
+kernel-uptime reconciliation), `device_value_mj_per_inference` (the
+on-target app's own computed figure, `null` when the capture carried
+no `ENERGY-RESULT` line), `host_vs_device_ratio`, `npu_dispatched`,
+`windows`, and `werr_lines`/`warn_lines` (the raw `ENERGY-WERR`/
+`ENERGY-WARN` diagnostic lines seen, so a degraded run -- I2C errors, a
+timed-out window, a too-long window span -- stays visible instead of
+looking identical to a clean one). The human-readable form says the
+device cross-check is unavailable rather than printing a formatted
+`None` when there is no on-target result to compare against.
+
+`--format json` payload:
+
+```json
+{
+  "model": "model.onnx",
+  "backend": "cpu-host",
+  "latency_ms": 3.214,
+  "output_argmax": 5,
+  "peak_sram_kib": null,
+  "power_mj": null,
+  "energy": null,
+  "runs": 20,
+  "random_input": false,
+  "note": "host reference run (backend=cpu-host): functional + host latency, NOT the target SoM. On-device latency/SRAM/power is the HW-gated follow-on.",
+  "accuracy": { "expected": 3, "match": false }
+}
+```
+
+`accuracy` is present only when `--expected` is given. `energy` is
+`null` on the host reference run shown above (no `--on-device`); with
+`--on-device` and a successful bench run it is a structured object:
+`{"source": "measured", "scope": "carrier-rail-delta",
+"value_mj_per_inference", "rails", "n_inferences", "window_ms",
+"sample_count", "spread_mj"}`. `source` and `scope` are fixed,
+validated labels -- `energy` is only ever `null` or that honest
+board-level-delta shape, never a fabricated or silicon-scoped number,
+and a failed `--on-device` run exits non-zero rather than emitting a
+payload with `energy: null` (see above).
+
+#### `tan model ab` -- A/B two models on the host (latency + size)
+
+```bash
+tan model ab a.onnx b.onnx                             # deterministic random input
+tan model ab a.onnx b.onnx --input sample.npy --runs 50
+tan model ab a.onnx b.onnx --format json
+```
+
+Runs both `MODEL_A` and `MODEL_B` on the host (same `onnxruntime` CPU
+session machinery as `tan model run`) with the **same** input sample,
+then compares them: which is faster, the latency ratio (`b/a`), and
+the file-size delta. Both models must be `.onnx`; the shared input
+defaults to a deterministic random sample sized from `MODEL_A`'s input
+(or `--input` if given). The comparison itself is pure/deterministic
+given the two measured results -- no additional timing happens inside
+it. Same host-reference caveat as `model run`: `backend` is
+`"cpu-host"` for both sides and the payload carries the same `note`.
+
+`--format json` payload:
+
+```json
+{
+  "a": { "model": "a.onnx", "backend": "cpu-host", "latency_ms": 3.2, "output_argmax": 5, "runs": 20, "peak_sram_kib": null, "power_mj": null, "energy": null },
+  "b": { "model": "b.onnx", "backend": "cpu-host", "latency_ms": 1.8, "output_argmax": 5, "runs": 20, "peak_sram_kib": null, "power_mj": null, "energy": null },
+  "comparison": { "faster": "b", "latency_ratio": 0.5625, "a_latency_ms": 3.2, "b_latency_ms": 1.8, "size_delta_bytes": -40960 },
+  "note": "host reference run (backend=cpu-host): functional + host latency, NOT the target SoM. On-device latency/SRAM/power is the HW-gated follow-on."
+}
+```
+
+Each side's `energy` is `null` on the host reference run shown above
+(same structured-object-or-null shape as `model run`, see above).
+`comparison.energy_delta_mj_per_inference` (`b.energy -
+a.energy`, mJ/inference, rounded to 4 decimals) appears in
+`comparison` only when **both** `a` and `b` carry a real (non-null)
+`energy` measurement -- it is omitted entirely, not `null`, when
+either side is a host-only run (as above).
+
+**The self-improving loop.** `alp_model.measure.estimate_vs_measured(est_latency_ms,
+measured_latency_ms)` (not yet wired to a CLI flag) is the intended
+bridge from `tan model check`'s static tier-1 `est_latency_ms` estimate
+to a `tan model run` measured `latency_ms`: it returns
+`{"est_latency_ms", "measured_latency_ms", "ratio"}` (`ratio =
+measured/est`, or `null` if there was no estimate). Repeated across
+models, that ratio is the feedback signal that (later) calibrates the
+tier-1 estimator against reality instead of staying a fixed guess.
 
 ### `tan doctor` -- build and flash readiness {#tan-doctor}
 

@@ -1,0 +1,9 @@
+# Minimal board.yaml for `alp model check --board` tests: a SoM SKU plus one
+# models: entry pointing at the shared tiny_int8.tflite fixture.
+som:
+  sku: E1M-AEN801
+cores:
+  m55_hp: {}
+models:
+  - name: tiny
+    source: ../models/tiny_int8.tflite
