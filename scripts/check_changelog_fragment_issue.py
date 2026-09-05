@@ -30,8 +30,9 @@ CATCHES:
     EXACTLY ONE distinct `#N`, and that N does not match the fragment
     filename's leading digits.
   * a fragment whose heading cites MORE THAN ONE distinct `#N`, where the
-    filename's leading digits are neither one of the cited numbers NOR
-    inside the [min, max] span between them -- `changelog.d/1940.md`
+    filename's leading digits fall outside the [min, max] span between the
+    smallest and largest cited number (which, for a sorted set, also means
+    the filename is none of the cited numbers) -- `changelog.d/1940.md`
     citing `(#1848, #1814)` is this case: 1940 is outside both `{1848,
     1814}` and the range `1814..1848`, so it cannot be either issue's
     fragment and is flagged even though the heading names two issues.
@@ -157,6 +158,11 @@ def find_problems(root: Path) -> list[str]:
         # either (a genuine range citation legitimately covers every number
         # in between, so falling inside the span is not a mismatch). Outside
         # both is not ambiguity, it is simply the wrong slot.
+        #
+        # The membership half is REDUNDANT and kept only for readability:
+        # `cited` is a sorted set, so `filename_n in cited` already implies
+        # `cited[0] <= filename_n <= cited[-1]`. The span test alone is
+        # equivalent -- do not read the two clauses as independent checks.
         if filename_n not in cited and not (cited[0] <= filename_n <= cited[-1]):
             cited_list = ", ".join(f"#{n}" for n in cited)
             problems.append(
