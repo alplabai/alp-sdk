@@ -162,7 +162,28 @@ def _mask_split_chars(text: str) -> str:
     citation, not one ending at its own first internal full stop; splitting
     on an in-parenthetical `.`/`;` reproduces the same false-positive shape
     as a decimal point, just with real sentence punctuation instead of a
-    number, so it gets the same treatment."""
+    number, so it gets the same treatment.
+
+    KNOWN LIMIT, deliberately not "fixed" -- an UNBALANCED `(` leaves the
+    depth counter above zero for the rest of the block, so every later
+    `.`/`;` is masked and the whole block collapses into one clause.  A
+    genuine blocker sitting after a historical marker can then read as
+    historical and go UNFLAGGED.  Measured on the masking itself:
+
+        "a (b. c; d. e"   ->  "a (b@ c@ d@ e"    3 boundaries masked
+        "a (b. c; d.) e"  ->  "a (b@ c@ d@) e"   3 boundaries masked
+        "a b. c; d. e"    ->  unchanged           0 masked
+
+    i.e. the unmatched `(` masks exactly as much as a closed one, for the
+    whole remainder.  Tracking only balanced spans would close that, but it
+    would swap a silent miss for a
+    hard CI failure on prose with a stray `(` -- and this gate is `gate:
+    true`, so a false positive blocks the merge queue while a false negative
+    only fails to catch a stale citation.  Under-flagging is this module's
+    documented bias, so the miss is the correct trade.  Zero occurrences on
+    the tree today (all 77 status blocks checked); written down rather than
+    silently relied upon, because a gate whose limits are not stated gets
+    trusted for things it cannot do."""
     chars = list(text)
     for m in _DOTTED_NUM_RE.finditer(text):
         for i in range(m.start(), m.end()):
