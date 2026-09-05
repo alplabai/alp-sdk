@@ -60,10 +60,12 @@ map; closed via #730)" split to "#494 (full register map;"). Both
 misclassified a plainly-historical citation as a live blocker -- the
 false-positive direction this gate must never take. This is a word-list
 heuristic, not comprehension -- it is deliberately biased to UNDER-flag:
-"if you cannot distinguish blocked-on from landed-via, do not flag it"
-(#1958). A blocker phrased with one of those words (e.g. "not yet fixed")
-can still slip through unflagged; that is the accepted cost of not
-spamming every "landed via #N" reference as a fresh failure.
+"if you cannot distinguish blocked-on from landed-via, do not flag it".
+A blocker phrased with one of those words (e.g. "not yet fixed") can still
+slip through unflagged; that is the accepted cost of not spamming every
+"landed via #N" reference as a fresh failure. Measured: 4 of 11 realistic
+blocker phrasings are skipped this way. Tracked in #1963 -- NOT #1958,
+which is the unrelated harvester-scope widening cited at the top.
 
 STALENESS -- this gate is OFFLINE
 ----------------------------------
