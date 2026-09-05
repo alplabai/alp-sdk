@@ -19,7 +19,7 @@ not a single stream -- `alp_project.py` handles that distinction; this
 module only returns ``{relative_path: content}`` (paths relative to the
 board-tree root, e.g. ``"alp_e1m_aen801_m55_hp/board.yml"``).
 
-Scope (issue #523, first slice; extended by #655 slice 1):
+Scope (issue #523, first slice; extended by #655 slices 1 and 2):
 
   - Alif Ensemble (the `aen` family, e.g. E1M-AEN801 m55_hp/m55_he) is
     fully generated: every file in the hand-authored board tree except
@@ -29,12 +29,13 @@ Scope (issue #523, first slice; extended by #655 slice 1):
     exemption set is exactly those two names.
   - Renesas RZ/V2N-family boards (`v2n` / `v2n-m1`, e.g. E1M-V2N101,
     E1M-V2M101 `m33_sm`) generate the family-agnostic files (`board.yml`,
-    `Kconfig.alp_<board>`, the twister `.yaml`) PLUS the pinctrl `.dtsi`
-    and `_defconfig`, sourced from
-    `metadata/e1m_modules/v2n/supervisor-links.yaml` (#655) -- a
-    hand-authored, family-scoped source for the Renesas-side pin
-    assignments of the on-module GD32G553 supervisor bridge (SCI7
-    Simple-SPI, RIIC8/BRD_I2C, the disabled SCI0 console).
+    `Kconfig.alp_<board>`, the twister `.yaml`) PLUS the pinctrl `.dtsi`,
+    `_defconfig` (#655 slice 1) and the board `.dts` (#655 slice 2).  The
+    pinctrl.dtsi/_defconfig/`.dts` all read
+    `metadata/e1m_modules/v2n/supervisor-links.yaml` -- a hand-authored,
+    family-scoped source for the Renesas-side pin assignments of the
+    on-module GD32G553 supervisor bridge (SCI7 Simple-SPI, RIIC8/BRD_I2C,
+    the disabled SCI0 console).
 
     That source was deliberately NOT placed under
     `metadata/pinmux/<family>.yaml`, despite that tree already carrying
@@ -49,11 +50,15 @@ Scope (issue #523, first slice; extended by #655 slice 1):
     pad there, with `core: "m33"` attribution where one is recorded --
     rather than re-declaring pad<->signal authority a second time.
 
-    The board `.dts` stays hand-authored in this slice: this module's
-    scope is the pinctrl `.dtsi` and `_defconfig` only.  A future slice
-    may extend `emit_zephyr_board()`'s `v2n`/`v2n-m1` branch to cover it
-    too, once the `.dts`-only facts (flash partitioning, node topology
-    beyond pinctrl) have a metadata source of their own.
+    The board `.dts` (`_v2n_dts()`, #655 slice 2) reuses the upstream
+    RZ/V2N SoC devicetree and layers on the supervisor-links pin wiring,
+    plus -- gated on the SoM preset's `topology.m33_sm.openamp_ipc`
+    (`metadata/schemas/som-preset-v1.schema.json`) -- the OpenAMP/MHU-B
+    reserved-memory block and the CAN-FD-unavailable analysis
+    (alp-sdk #683/#1146).  Only E1M-V2N101 sets that flag today:
+    E1M-V2M101's committed board tree does not carry either block, and
+    this generator reproduces that gap byte-for-byte rather than
+    "completing" a board nobody has written that content for yet.
 
   NOT GENERATED (any family): `board.cmake` and a bare `Kconfig`.
   BOTH must be copied across by hand when a generated board tree is
@@ -1626,6 +1631,468 @@ def _v2n_pinctrl_dtsi(links: dict[str, Any]) -> str:
     )
 
 
+def _v2n_part_display(order_code: str) -> tuple[str, str]:
+    """Split an RZ/V2N `silicon_variant` order code into the board `.dts`
+    header's part display (`"R9A09G056N44GBG"` -> `"R9A09G056-N44"`, the
+    package suffix dropped and a hyphen inserted before the variant code)
+    and the upstream Zephyr SoC dtsi include path both n44 and n48gbg
+    variants share (`"arm/renesas/rz/rzv/r9a09g056.dtsi"`).  Raises rather
+    than guessing if a future RZ/V2N part doesn't fit this
+    base+variant+package shape -- see the no-inventing-values rule.
+    """
+    m = re.match(r"^(R9A09G056)(N[0-9]+)([A-Z]+)$", order_code)
+    if not m:
+        raise ZephyrBoardEmitError(
+            f"silicon_variant order_code {order_code!r} doesn't match the "
+            "RZ/V2N R9A09G056<variant><pkg> shape the board .dts header "
+            "and #include path expect")
+    base, variant_code, _pkg = m.groups()
+    return f"{base}-{variant_code}", f"arm/renesas/rz/rzv/{base.lower()}.dtsi"
+
+
+_V2N_WDT0_MID_OPENAMP: tuple[str, ...] = (
+    ' * hand-author one from (unlike mbox1 below, which had a real FSP',
+    ' * register map, bsp_mhu_b.h, to draw from).  Full analysis:',
+)
+
+_V2N_WDT0_MID_PLAIN: tuple[str, ...] = (
+    " * hand-author one from (contrast the V2N101 sibling board's mbox1",
+    ' * node, which had a real FSP register map, bsp_mhu_b.h, to draw',
+    ' * from).  Full analysis:',
+)
+
+_V2N_WDT0_TAIL: tuple[str, ...] = (
+    " * meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi's",
+    ' * &wdt1 comment block.  <alp/wdt.h> on this core returns',
+    ' * ALP_ERR_NOT_PRESENT_ON_THIS_SOC (src/wdt_dispatch.c).',
+    ' */',
+)
+
+_V2N_OPENAMP_TAIL: tuple[str, ...] = (
+    '',
+    '/*',
+    ' * No &canfd node here (alp-sdk#1146): CAN-FD cannot be enabled on this',
+    ' * core at the pinned Zephyr v4.4.1 / hal_renesas 06282060fa, and what is',
+    ' * missing is vendor data this tree does not carry -- not lines nobody has',
+    ' * got round to writing.  Upstream DOES ship the driver',
+    ' * (drivers/can/can_renesas_rz_canfd.c) and both bindings',
+    ' * (dts/bindings/can/renesas,rz-canfd.yaml + renesas,rz-canfd-global.yaml),',
+    ' * and src/backends/can/zephyr_drv.c already binds any DT_ALIAS(alp_canN),',
+    ' * so this is an enablement gap and not a missing backend.  Four things',
+    ' * block the enablement:',
+    ' *',
+    ' *   1. No FSP CAN-FD module for RZ/V.  CONFIG_CAN_RENESAS_RZ_CANFD',
+    ' *      selects USE_RZ_FSP_CANFD (Zephyr drivers/can/Kconfig.renesas_rz),',
+    ' *      which compiles fsp/src/${SOC_SERIES_PREFIX}/r_canfd/r_canfd.c',
+    ' *      (hal_renesas drivers/rz/CMakeLists.txt).  hal_renesas carries that',
+    ' *      module for RZ/G only: fsp/src/rzg/r_canfd/ and',
+    ' *      fsp/inc/instances/rzg/r_canfd.h exist, the rzv counterparts do',
+    ' *      not.  Setting the symbol under SOC_SERIES_RZV2N is a CMake',
+    " *      configure error on a missing source file, and the driver's",
+    ' *      #include "r_canfd.h" does not resolve on the rzv include path.',
+    ' *',
+    ' *   2. No CAN-FD node in the SoC devicetree.  arm/renesas/rz/rzv/',
+    ' *      r9a09g056.dtsi declares none -- no label to reference, no reg and',
+    ' *      no interrupts to inherit.  The only RZ SoC dtsi that carries them',
+    " *      is RZ/G3S's r9a08g045.dtsi (canfd-global@400c0000, global",
+    ' *      interrupts 373 and 374, per-channel 375..380).  DO NOT COPY THOSE',
+    ' *      NUMBERS: different SoC, different vector map, different base.  On',
+    ' *      THIS part the CAN-FD register base is 0x42440000 -- hal_renesas',
+    ' *      .../Include/R9A09G056N/iodefines/canfd_iodefine.h, R_CANFD_BASE.',
+    " *      The `(@ 0x400B0000)` in that same file's R_CANFD struct",
+    " *      doc-comment is a template annotation, not this SoC's base; it is",
+    ' *      the second trap in one header.',
+    ' *',
+    " *   3. No static NVIC vector exists to write.  RZ/V2N's CM33 gives CAN-FD",
+    " *      no dedicated vector at all: bsp_irq_id.h's IRQn_Type enum has zero",
+    ' *      CANFD entries, and all 20 CAN-FD sources live in the separate',
+    ' *      IRQSELn_Type enum (354..373 -- per-channel err/rec/trx, plus',
+    ' *      CANFD_INTRCANGERR_IRQSELn 366 and CANFD_INTRCANGRECC_IRQSELn 367',
+    ' *      for the global controller).  Reaching the NVIC means routing an',
+    ' *      IRQSEL source onto one of the selectable slots',
+    ' *      SEL0_IRQn..SEL126_IRQn (NVIC 353..479) at run time, through',
+    " *      R_BSP_SelectIrqSet() (bsp/mcu/all/bsp_mcu_api.h).  Upstream's dtsi",
+    ' *      hands those slots out itself (adc0 = 403 = SEL50, gpt0 = 406..408',
+    ' *      = SEL53..55, on up to 453) and both CAN-FD bindings require',
+    ' *      `interrupts`, so choosing slots here means inventing an allocation',
+    ' *      that collides with whatever upstream picks when it adds the nodes.',
+    ' *',
+    ' *   4. No PFC function index for the pads.  The module bonds out two of',
+    " *      the SoC's six controllers -- CANFD2 (CTX2 = P84, CRX2 = P85) and",
+    ' *      CANFD3 (CTX3 = P86, CRX3 = P87), per',
+    ' *      metadata/e1m_modules/v2n/renesas-peripheral-map.tsv -- but',
+    ' *      metadata/pinmux/v2n.yaml carries pad <-> signal only, with no',
+    ' *      alternate-function number.  RZV_PINMUX() needs one, and it comes',
+    " *      from the RZ/V2N hardware manual's PFC table (the same source",
+    ' *      sci7_spi_pins above cites), not from this tree.',
+    ' *',
+    ' * What IS already in place, so a future port does not re-derive it: the',
+    ' * clock path.  RZ_CLOCK_CANFD(ch) exists',
+    ' * (dt-bindings/clock/renesas_rzv_clock.h) and',
+    ' * clock_control_renesas_rz_cpg.c already maps RZ_IP_CANFD onto',
+    ' * R_BSP_MODULE_START(FSP_IP_CANFD, ch); the rzv2n bsp_feature.h declares',
+    ' * 6 channels, CAN-FD support and 96 RX message buffers for this part.',
+    ' *',
+    " * Carrier note: the TCAN1044 transceivers' standby line is NOT a Renesas",
+    ' * pad.  CAN_STBY belongs to the GD32 IO-MCU on PB13',
+    ' * (metadata/pinmux/v2n.yaml, metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv),',
+    ' * so taking the transceivers out of standby is a bridge GPIO call, not a',
+    ' * pinctrl entry.',
+    ' *',
+    ' * Until those clear, <alp/can.h> on this core returns ALP_ERR_NOT_READY',
+    ' * from src/backends/can/zephyr_drv.c -- the alp-canN aliases resolve to',
+    ' * nothing.',
+    ' */',
+    '',
+    '/*',
+    ' * OpenAMP / RPMsg carve-out for the M33-SM <-> A55-Linux link (alp-sdk #683,',
+    ' * Path B Phase 1).  Addresses are the Renesas RZ/V Multi-OS Package memory',
+    " * map, NOT the paper `ipc:` carve-out in this project's board.yaml.  The two",
+    ' * are different regions by construction, not by omission: `resolve_carve_outs()`',
+    " * (scripts/alp_orchestrate/carveout.py) allocates board.yaml's `ipc:` entry",
+    ' * from `ocram_low` (512 KiB, non-cacheable -- the only region it can reach',
+    ' * from both `a55_cluster` and `m33_sm`; metadata/socs/renesas/rzv2n/n44.json)',
+    ' * purely because the resolver needs *some* region and that is the only',
+    ' * candidate -- nothing in this firmware reads or writes the address it',
+    ' * resolves to.  The real transport uses the hand-authored DDR window below',
+    " * instead, sized from this responder's OpenAMP resource table (512 rpmsg",
+    " * buffers x 512 B x 2 vrings -- m33_sm/src/resource_table.h's",
+    ' * RSC_TABLE_NUM_RPMSG_BUFF).  That sizing happens to consume the whole of',
+    ' * `ocram_low` when expressed as `carve_out_kb` in board.yaml (both examples',
+    ' * on this SoM request 512, i.e. all 512 KiB of `ocram_low`) -- harmless',
+    ' * today because nothing consumes the resolved address, but it means a',
+    ' * second `ipc:` entry on this SoM has no ocram_low headroom left to land',
+    ' * in.  Whether the fix is teaching the resolver about this DDR window, or',
+    ' * shrinking the paper `carve_out_kb` values to leave ocram_low headroom, is',
+    ' * an open sizing question for whoever picks it up next -- it is not settled',
+    ' * by #683, which is about bench-validating the real `/dev/rpmsg` transport,',
+    ' * not this address reconciliation.',
+    ' *',
+    ' * CORRECTED (alp-sdk #683, address root-cause fix): this region used to be',
+    ' * quoted at the RZ/V2L CM33-NS offset (0x62f00000, i.e. A55 - 0x20000000),',
+    ' * which is the V2N xSPI-NOR secure window on THIS SoC -- writes there never',
+    ' * reach DRAM.  The authoritative V2N map (Renesas FSP',
+    ' * drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/bsp_slave_address.h, confirmed by',
+    " * this board's upstream ddr node) is CM33-secure 0x80000000 / CM33-NS",
+    ' * 0x90000000 / A55 0x40000000, a 256 MiB window, i.e. A55 phys = CM33-NS -',
+    ' * 0x50000000.  Of that window only A55 0x48000000..0x4FFFFFFF is real,',
+    ' * populated NS RAM (0x40000000..0x47FFFFFF reads back 0xFF) -- the base',
+    ' * below is chosen so the whole carve-out (0x4F700000..0x4FFFFFFF) sits',
+    ' * entirely inside that populated range, right up against its top.  The',
+    ' * rsctbl/vring/shm regions below are all quoted in the CM33 view, matching',
+    " * upstream's openamp_linux_zephyr sample; see resource_table.h for the",
+    ' * CM33->A55 translation macro this same fix corrected.',
+    ' *',
+    ' * mbox1 is hand-authored: unlike the RZ/V2L SoC dtsi (r9a07g054.dtsi, which',
+    ' * ships mbox1/mbox3/mbox4/mbox5), the upstream RZ/V2N SoC dtsi',
+    ' * (r9a09g056.dtsi) has no MHU node at all yet -- added here at board level',
+    ' * per the "board .dts stays hand-authored for the v2n family"',
+    ' * (scripts/gen_zephyr_board.py) rather than editing the vendored SoC dtsi.',
+    ' *',
+    ' * RESOLVED (alp-sdk #683 Phase 2): RZ/V2N\'s MHU hardware is the newer "MHU-B"',
+    ' * variant (hal_renesas drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/bsp_mhu_b.h) with',
+    ' * only channels {5, 11, 17, 23} valid (BSP_FEATURE_MHU_B_NS_VALID_CHANNEL_MASK)',
+    ' * and a non-linear per-channel register/IRQ pairing -- NOT the plain linear MHU',
+    " * that Zephyr's mbox_renesas_rz_mhu.c + FSP r_mhu_ns.c implement (that pair does",
+    ' * not compile for rzv2n). This node now uses the vendored MHU-B port instead',
+    ' * (compatible `renesas,rz-mhu-b-mbox`, driver',
+    ' * zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c, FSP module',
+    " * zephyr/drivers/mbox/r_mhu_b_ns/r_mhu_b_ns.c -- see that file's header for the",
+    ' * register-semantic notes and the "FLAG FOR REVIEW" send_type caveat, and',
+    " * mbox_renesas_rz_mhu_b.c's header for the bounded #697 verification status:",
+    ' * init/attach and A55->M33 receive are silicon-proven, mbox_send() M33->A55',
+    ' * is unexercised and does not reach the A55 on this topology).',
+    " * `channel = <5>` is the lowest MHU-B-valid channel.  Per bsp_mhu_b.h's",
+    ' * R_BSP_MHU_B_NS_REG_PAIR_BODY, channel 5 sends via R_MHU_NS36 (base',
+    ' * 0x50480480) and receives via R_MHU_NS8 (base 0x50480100) -- `reg` below',
+    ' * documents the send register only (the driver resolves both from the',
+    ' * pair-body table by channel number, not from this property; the binding',
+    ' * schema requires `reg` regardless).  `interrupts = <293 2>` is',
+    ' * MHU_MSG5_NS_IRQn (bsp_irq_id.h), which r_mhu_b_ns.c matches against',
+    " * bsp_mhu_b.h's R_BSP_MHU_B_NS_SEND_TYPE_RSP_BODY to derive send_type = RSP",
+    ' * for this instance.',
+    ' */',
+    '/ {',
+    '\treserved-memory {',
+    '\t\t#address-cells = <1>;',
+    '\t\t#size-cells = <1>;',
+    '\t\tranges;',
+    '',
+    '\t\t/* Whole OpenAMP region as one reservation to save MPU entries',
+    "\t\t * (matches the vendor sample's rationale). */",
+    '\t\topenamp_shm: memory@9f700000 {',
+    '\t\t\tcompatible = "zephyr,memory-region";',
+    '\t\t\treg = <0x9f700000 0x900000>;',
+    '\t\t\tzephyr,memory-region = "openamp_memory";',
+    '\t\t\tzephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_IO)>;',
+    '\t\t};',
+    '\t};',
+    '',
+    '\tchosen {',
+    '\t\t/* The A55 master (DRIVER role) allocates every rpmsg buffer from',
+    '\t\t * vring_shm1 (0x4fc00000 A55 / 0x9fc00000 CM33-NS) -- the',
+    '\t\t * "mst-alloc = vring-shm1" contract in the backend REFERENCE.  The',
+    "\t\t * M33's descriptor-translation window MUST cover that pool, so it",
+    '\t\t * points at vring_shm1, not vring_shm0 (whose window ends exactly at',
+    '\t\t * 0x9fc00000, leaving every buffer outside it).  Silicon-root-caused',
+    '\t\t * alongside the vring-DA fix (#683/#697 bench, 2026-07-11). */',
+    '\t\tzephyr,ipc_shm = &vring_shm1;',
+    '\t\tzephyr,ipc = &mbox_consumer;',
+    '\t};',
+    '',
+    '\trsctbl: memory@9f700000 {',
+    '\t\tcompatible = "mmio-sram";',
+    '\t\treg = <0x9f700000 0x1000>;',
+    '\t};',
+    '',
+    "\t/* Widened from the RZ/V2L layout's 8-byte mhu1_shm (@ +0x1008) to a",
+    '\t * full 4 KiB region immediately after rsctbl, so it lines up with the',
+    "\t * A55/kernel-overlay side's 4f701000.mhu-shm node 1:1 (alp-sdk #683",
+    '\t * address fix). */',
+    '\tmhu1_shm: memory@9f701000 {',
+    '\t\tcompatible = "mmio-sram";',
+    '\t\treg = <0x9f701000 0x1000>;',
+    '\t};',
+    '',
+    '\tvring_ctrl0: memory@9f800000 {',
+    '\t\tcompatible = "mmio-sram";',
+    '\t\treg = <0x9f800000 0x50000>;',
+    '\t};',
+    '',
+    '\tvring_ctrl1: memory@9f850000 {',
+    '\t\tcompatible = "mmio-sram";',
+    '\t\treg = <0x9f850000 0x50000>;',
+    '\t};',
+    '',
+    '\tvring_shm0: memory@9f900000 {',
+    '\t\tcompatible = "mmio-sram";',
+    '\t\treg = <0x9f900000 0x300000>;',
+    '\t};',
+    '',
+    '\t/* The rpmsg buffer pool: the A55 master allocates from here, so this is',
+    "\t * the M33's zephyr,ipc_shm window (see the chosen node above).",
+    '\t * vring_shm0 is kept reserved so the region layout still matches the A55',
+    "\t * kernel overlay's 6 nodes 1:1. */",
+    '\tvring_shm1: memory@9fc00000 {',
+    '\t\tcompatible = "mmio-sram";',
+    '\t\treg = <0x9fc00000 0x300000>;',
+    '\t};',
+    '',
+    '\tmbox_consumer: mbox-consumer {',
+    '\t\tcompatible = "vnd,mbox-consumer";',
+    '\t\tmboxes = <&mbox1 1>, <&mbox1 0>;',
+    '\t\tmbox-names = "tx", "rx";',
+    '\t};',
+    '',
+    '\tsoc {',
+    '\t\t/* CA55_0 <-> CM33 -- see the MHU-B note above. */',
+    '\t\tmbox1: mhu@50480480 {',
+    '\t\t\tcompatible = "renesas,rz-mhu-b-mbox";',
+    '\t\t\tchannel = <5>;',
+    '\t\t\treg = <0x50480480 0x20>; /* R_MHU_NS36 (send reg) -- see the MHU-B note above */',
+    '\t\t\ttx-mask = <0x00000002>; /* Channel 1 is for TX */',
+    '\t\t\trx-mask = <0x00000001>; /* Channel 0 is for RX */',
+    '\t\t\tchannels-count = <2>;',
+    '\t\t\tinterrupts = <293 2>; /* MHU_MSG5_NS_IRQn, bsp_irq_id.h -- verified against the vendor header */',
+    '\t\t\tinterrupt-names = "mhuns";',
+    '\t\t\t#mbox-cells = <1>;',
+    '\t\t\tshared-memory = <&mhu1_shm>;',
+    '\t\t\tstatus = "okay";',
+    '\t\t};',
+    '\t};',
+    '};',
+)
+
+
+def _v2n_dts(
+    sku: str, dir_name: str, soc_spec: dict[str, Any], variant: dict[str, Any],
+    sku_preset: dict[str, Any], links: dict[str, Any],
+) -> str:
+    """Board `.dts` for a V2N/V2M `m33_sm` board (#655 slice 2).
+
+    Reuses the upstream RZ/V2N SoC devicetree; adds the on-module GD32G553
+    supervisor links from `supervisor-links.yaml` (the same source
+    `_v2n_pinctrl_dtsi()` reads).  Only SoMs whose
+    `topology.m33_sm.openamp_ipc` preset field is true also get the
+    OpenAMP/MHU-B reserved-memory block and the CAN-FD-unavailable
+    analysis (alp-sdk #683/#1146) -- E1M-V2M101 does not carry either
+    block in the currently-committed tree, so this generator reproduces
+    that gap rather than "fixing" it; the byte-identity pin
+    (`tests/scripts/test_gen_zephyr_board.py`) is against what is
+    committed today, not against what a more "complete" V2M101 board
+    would look like.
+    """
+    slug = sku[len("E1M-"):].lower()
+    compatible = f"alp,e1m-{slug}-m33-sm"
+    model = f"Alp {sku} Cortex-M33 system manager"
+
+    part_display, soc_dtsi_include = _v2n_part_display(variant["order_code"])
+    family = soc_spec.get("family")
+    if not family or is_tbd(family):
+        raise ZephyrBoardEmitError(f"SoC spec {soc_spec.get('ref')} declares no usable `family`")
+    family_display = f"{family} {part_display}"
+    if (sku_preset.get("on_module") or {}).get("npu") == "deepx_dxm1":
+        family_display += " + DEEPX DX-M1"
+
+    console = links["console"]
+    gd32_spi = links["gd32_spi"]
+    brd_i2c = links["brd_i2c"]
+    txd0 = _v2n_pin_by_peripheral(console["pins"], "UART0_TXD0")
+    rxd0 = _v2n_pin_by_peripheral(console["pins"], "UART0_RXD0")
+    mosi = _v2n_pin_by_peripheral(gd32_spi["pins"], "GD32_SPI.MOSI")
+    miso = _v2n_pin_by_peripheral(gd32_spi["pins"], "GD32_SPI.MISO")
+    sclk = _v2n_pin_by_peripheral(gd32_spi["pins"], "GD32_SPI.SCLK")
+    sda = _v2n_pin_by_peripheral(brd_i2c["pins"], "RIIC8_SDA8")
+    scl = _v2n_pin_by_peripheral(brd_i2c["pins"], "RIIC8_SCL8")
+    cs0 = gd32_spi["gpio_chip_select"]
+    peer_addr = brd_i2c["peer_address_7bit"]
+    ch = _v2n_sci_channel(gd32_spi["dt_label"])  # "7"
+
+    has_openamp = bool(
+        (sku_preset.get("topology") or {}).get("m33_sm", {}).get("openamp_ipc"))
+
+    lines: list[str] = [
+        "/*",
+        " * Copyright (c) 2026 Alp Lab AB",
+        " * SPDX-License-Identifier: Apache-2.0",
+        " *",
+        f" * {sku} ({family_display}) Cortex-M33 system-manager.",
+        " *",
+        " * Reuses the upstream RZ/V2N SoC devicetree + the EVK SCI_UART0 console and",
+        " * adds the on-module GD32G553 supervisor links:",
+        f" *   - SCI{ch} Simple-SPI (alias {gd32_spi['alias']}): {mosi['silicon_pad']} MOSI{ch} / "
+        f"{miso['silicon_pad']} MISO{ch} / {sclk['silicon_pad']} SCK{ch} +",
+        f" *     {cs0['silicon_pad']} GPIO chip-select (master SCI-SPI has no hardware slave-select)",
+        f" *   - RIIC8 / BRD_I2C (alias {brd_i2c['alias']}): {sda['silicon_pad']} SDA / "
+        f"{scl['silicon_pad']} SCL  (GD32 slave @ 0x{peer_addr:02x})",
+        " *",
+        " * The on-module silicon is the n44 variant; Zephyr only models the n48gbg",
+        " * SoC, which is devicetree-identical for the M33 + SPI/I2C peripherals",
+        " * (the n44/n48 delta is GPU/ISP/crypto fusing only).",
+        " */",
+        "",
+        "/dts-v1/;",
+        "",
+        "#include <zephyr/dt-bindings/i2c/i2c.h>",
+        "#include <zephyr/dt-bindings/gpio/gpio.h>",
+    ]
+    if has_openamp:
+        lines.append("#include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>")
+    lines += [
+        f"#include <{soc_dtsi_include}>",
+        f'#include "{dir_name}-pinctrl.dtsi"',
+        "",
+        "/ {",
+        f'\tmodel = "{model}";',
+        f'\tcompatible = "{compatible}";',
+        "",
+        "\tchosen {",
+        "\t\tzephyr,sram = &sram;",
+        "\t\t/*",
+        "\t\t * No CM33 serial console on this board.  The only console is the",
+        "\t\t * A55's (Linux, on the shared debug UART); sci0 here is the EVK",
+        '\t\t * "Pmod USB-UART", which is NOT wired as a CM33 console on the SoM.',
+        "\t\t * Bringing it up enables RX on a floating RXD, whose receive-error",
+        "\t\t * interrupt (sci0 eri = NVIC 114) escalates to a Zephyr fatal",
+        "\t\t * (arch_system_halt) and hangs the CM33 before main() ever runs.",
+        "\t\t * Leave the console unset (sci0 is disabled below).  Re-add these",
+        "\t\t * and re-enable sci0 only when a Pmod USB-UART is attached.",
+        "\t\t */",
+        "\t};",
+        "",
+        "\taliases {",
+        f"\t\t{gd32_spi['alias']} = &gd32_spi;",
+        f"\t\t{brd_i2c['alias']} = &{brd_i2c['dt_label']};",
+        "\t};",
+        "",
+        "\tsram: memory@8003000 {",
+        '\t\tcompatible = "mmio-sram";',
+        "\t\treg = <0x08003000 0xfbfff>;",
+        "\t};",
+        "",
+        "\t/*",
+        "\t * alp pin map for alp_spi/alp_gpio id resolution.  alp_spi_open(cs_pin_id=N)",
+        "\t * resolves its chip-select gpio_dt_spec from gpios[N] of this node (see the",
+        "\t * SPI backend's alp_z_gpio_resolve()).  Index 0 = the GD32 SPI chip-select",
+        f"\t * on {cs0['silicon_pad']}, matching the example's cs_pin_id = 0.",
+        "\t */",
+        "\talp_pins: alp-pins {",
+        '\t\tcompatible = "alp,pin-array";',
+        f"\t\tgpios = <&{cs0['gpio_node']} {cs0['gpio_pin']} GPIO_ACTIVE_LOW>;",
+        "\t};",
+        "};",
+        "",
+        "/*",
+        f' * {console["dt_label"]} = EVK "Pmod USB-UART" console.  DISABLED on this board: it is not wired',
+        " * as a CM33 console here, and opening it (RX enabled on a floating RXD) faults",
+        " * the CM33 in its receive-error ISR (sci0 eri / NVIC 114) -> Zephyr fatal ->",
+        " * arch_system_halt, before the app runs.  Keep pinctrl for easy re-enable.",
+        " */",
+        f"&{console['dt_label']} {{",
+        f"\tpinctrl-0 = <&{console['pinctrl_group_label']}>;",
+        '\tpinctrl-names = "default";',
+        '\tstatus = "disabled";',
+        "",
+        "\tuart0: uart {",
+        "\t\tcurrent-speed = <115200>;",
+        '\t\tstatus = "disabled";',
+        "\t};",
+        "};",
+        "",
+        "/*",
+        f" * GD32 supervisor SPI fast path -- SCI channel {ch} in clock-synchronous",
+        ' * "Simple SPI" mode (sci7@42802800, compatible renesas,rz-sci-b).  The board',
+        f" * wires the GD32 to {mosi['silicon_pad']}/{miso['silicon_pad']}/{sclk['silicon_pad']}/{cs0['silicon_pad']}, "
+        f"which per the RZ/V2N PFC (Table 1.2-3) are",
+        f" * MOSI{ch}/MISO{ch}/SCK{ch}/SS{ch} = SCI channel {ch} -- NOT the dedicated SPI_B IP.  The sci{ch}",
+        " * parent (from the SoC dtsi) already supplies reg, channel = <7> and the fixed",
+        " * CM33 vectors (eri=156, rxi=157, txi=158, tei=159); here we enable it, point it",
+        " * at the SCI7 SPI pins, and attach the SPI child.",
+        " *",
+        " * Master Simple-SPI has NO hardware slave-select (the FSP sets CCR0.SSE only in",
+        f" * slave mode), so the GD32 chip-select on {cs0['silicon_pad']} is driven as a GPIO via cs-gpios",
+        f" * ({cs0['gpio_node']} pin {cs0['gpio_pin']}) -- the GD32's PA8 CS-EXTI needs per-transaction framing.",
+        " */",
+        f"&{gd32_spi['dt_label']} {{",
+        f"\tpinctrl-0 = <&{gd32_spi['pinctrl_group_label']}>;",
+        '\tpinctrl-names = "default";',
+        '\tstatus = "okay";',
+        "",
+        "\tgd32_spi: spi {",
+        '\t\tcompatible = "renesas,rz-sci-b-spi";',
+        "\t\t#address-cells = <1>;",
+        "\t\t#size-cells = <0>;",
+        f"\t\tcs-gpios = <&{cs0['gpio_node']} {cs0['gpio_pin']} GPIO_ACTIVE_LOW>;",
+        '\t\tstatus = "okay";',
+        "\t};",
+        "};",
+        "",
+        f"&{cs0['gpio_node']} {{",
+        '\tstatus = "okay";',
+        "};",
+        "",
+        f"&{brd_i2c['dt_label']} {{",
+        f"\tpinctrl-0 = <&{brd_i2c['pinctrl_group_label']}>;",
+        '\tpinctrl-names = "default";',
+        "\tclock-frequency = <I2C_BITRATE_FAST>;",
+        '\tstatus = "okay";',
+        "};",
+        "",
+        "/*",
+        " * No wdt0 node here (alp-sdk#1153): the upstream Zephyr RZ/V2N SoC",
+        " * devicetree (arm/renesas/rz/rzv/r9a09g056.dtsi, checked against the",
+        " * pinned v4.4.0 tag) declares no watchdog node and no driver binds",
+        " * this SoC's WDT hardware at all yet -- there is no label to",
+        " * reference and no register base address in this tree to",
+    ]
+    lines += list(_V2N_WDT0_MID_OPENAMP if has_openamp else _V2N_WDT0_MID_PLAIN)
+    lines += list(_V2N_WDT0_TAIL)
+    if has_openamp:
+        lines += list(_V2N_OPENAMP_TAIL)
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _v2n_defconfig(links: dict[str, Any]) -> str:
     """`<board>_defconfig` for a V2N/V2M `m33_sm` board.
 
@@ -1737,9 +2204,10 @@ def emit_zephyr_board(
             sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row,
             metadata_root, _aen_ethos_u(soc_spec), memory_map)
     elif family in _v2n_declared_families(metadata_root):
-        # Two files only -- `.dts` and `Kconfig.defconfig` stay
-        # hand-authored in this slice (neither exists in the V2N/V2M
-        # board directories); see the module docstring for why.  Which
+        # `Kconfig.defconfig` stays hand-authored (it doesn't exist in the
+        # V2N/V2M board directories at all -- see the NOT GENERATED section
+        # of the module docstring).  The pinctrl.dtsi/_defconfig (#655 slice
+        # 1) and the board `.dts` (#655 slice 2) are all generated.  Which
         # families this branch covers is read from
         # metadata/e1m_modules/v2n/supervisor-links.yaml's own
         # `families:` list, not a local constant -- dropping `v2n-m1`
@@ -1747,13 +2215,17 @@ def emit_zephyr_board(
         supervisor_links = _load_supervisor_links(metadata_root)
         v2n_pinctrl_relpath = f"{dir_name}/{dir_name}-pinctrl.dtsi"
         v2n_defconfig_relpath = f"{dir_name}/{basename}_defconfig"
+        v2n_dts_relpath = f"{dir_name}/{basename}.dts"
         files[v2n_pinctrl_relpath] = _v2n_pinctrl_dtsi(supervisor_links)
         files[v2n_defconfig_relpath] = _v2n_defconfig(supervisor_links)
-        # Neither file carries a single pad, PFC triple or I2C address from
-        # sku_rel/soc_json_rel below -- every one of those facts comes from
-        # supervisor-links.yaml, so its path is threaded into these two
+        files[v2n_dts_relpath] = _v2n_dts(
+            sku, dir_name, soc_spec, variant, sku_preset, supervisor_links)
+        # None of the three carries a single pad, PFC triple or I2C address
+        # from sku_rel/soc_json_rel below -- every one of those facts comes
+        # from supervisor-links.yaml, so its path is threaded into all three
         # files' banners too (below), not just the family-agnostic ones.
-        v2n_banner_extra_source = {v2n_pinctrl_relpath, v2n_defconfig_relpath}
+        v2n_banner_extra_source = {
+            v2n_pinctrl_relpath, v2n_defconfig_relpath, v2n_dts_relpath}
 
     # `_load_soc_spec()` above already raised ZephyrBoardEmitError if
     # `sku_preset["silicon"]` didn't resolve, so `soc_path` can't be None
