@@ -39,7 +39,7 @@ typedef struct {
     uint32_t schema_version;    /* currently 1 */
     char     family[16];        /* e.g. "v2n", "v2n-m1", "aen" */
     char     sku[24];           /* e.g. "E1M-V2N101"            */
-    char     hw_rev[8];         /* e.g. "r1"                    */
+    char     hw_rev[8];         /* e.g. "2626-r2" -- see below  */
     char     serial[24];        /* factory-assigned             */
     uint16_t mfg_year;
     uint8_t  mfg_month;
@@ -126,6 +126,28 @@ alp_hw_info_assert_matches_build(&info,
                                   /* expected_sku    */ "E1M-V2N101",
                                   /* expected_hw_rev */ "r1");
 ```
+
+### `hw_rev` carries the full board designator
+
+The field holds `<board_datecode>-<revision key>`, e.g. **`2626-r2`** — the
+physical board is `E1M-AEN-2626-R2`, where `2626` is a YYWW datecode carried by
+the Altium board number. A module whose manifest said only `r2` could not be tied
+back to its board number, so `scripts/program_eeprom.py` composes the two.
+
+The datecode is a **family** property, declared once as `board_datecode:` in
+`metadata/e1m_modules/<family>/hw-revisions.yaml` and shared by every revision of
+that PCB. The revision **key** stays bare (`r2`) everywhere else — `board.yaml`,
+the loader's `hw_revisions` lookup, `pad_route_overrides` — because that is the key
+those tables are indexed by. Only the identity written onto the module carries the
+composed form, since only the module needs to name its own board. A family that
+declares no `board_datecode` gets the bare key, unchanged.
+
+> **The field has no slack.** `ALP_HW_INFO_HW_REV_LEN` is 8, so the composed
+> string may be at most 7 characters plus its NUL. `2626-r2` is exactly 7. A
+> revision key of `r10` (`2626-r10`, 8 chars) will not fit, and
+> `program_eeprom.py` refuses it rather than truncating a board number. Widening
+> the field is a `schema_version` bump. This is pinned by
+> `TestBoardDatecode` in `tests/scripts/test_program_eeprom.py`.
 
 A blank EEPROM (no `ALPH` magic) returns `ALP_ERR_NOT_PROVISIONED`; a
 manifest whose magic is present but whose `schema_version` or CRC32 is

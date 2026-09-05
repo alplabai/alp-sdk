@@ -8,6 +8,14 @@ CONFIG_PRINTK=y
 CONFIG_THREAD_LOCAL_STORAGE=y
 CONFIG_LOG_DEFAULT_LEVEL=3
 
+# Boot-banner SoC identity + system summary (from the SoC spec JSON + SoM preset `memory:`; see alp_banner.c).
+CONFIG_ALP_SDK_SOC_NAME="Renesas RZ/V2N R9A09G056N44GBG"
+CONFIG_ALP_SDK_SOC_CPUS="Cortex-M33 @200MHz (active) + 4x Cortex-A55 @1800MHz"
+CONFIG_ALP_SDK_SOC_NPUS="Drp-Ai"
+CONFIG_ALP_SDK_SOC_SRAM_KB=1536
+CONFIG_ALP_SDK_SOM_DRAM_MBIT=32768
+CONFIG_ALP_SDK_SOM_FLASH_MBIT=32768
+
 # On-module HW manifest EEPROM -> portable bus 0 (alp-i2c0);
 # enables alp_hw_info_read() + the console banner manifest line.
 CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0

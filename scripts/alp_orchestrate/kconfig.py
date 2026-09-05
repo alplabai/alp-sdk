@@ -49,6 +49,7 @@ from alp_registries import peripheral_kconfig
 from sentinels import is_tbd
 
 from . import libraries as _library_layer
+from . import sdk_compat as _sdk_compat
 from .loader import _library_alias_table
 from .models import BoardProject, OrchestratorError, Slice
 from .paths import REPO
@@ -540,6 +541,159 @@ def _emit_console(diagnostics: dict[str, Any], slice_: Slice) -> list[str]:
     return _emit_zephyr_console(console, sim_console=sim)
 
 
+# Alif "high-perf"/"high-efficiency" M55 pair -> the "M55-HP"/"M55-HE"
+# short form the boot banner and Alif's own docs use, in place of the
+# fuller "Cortex-M55" every other core type gets (_core_display_label).
+_M55_SUBTYPE_SUFFIX = {"high-perf": "HP", "high-efficiency": "HE"}
+
+
+def _core_display_label(core: dict[str, Any]) -> str:
+    """Boot-banner label for one `soc_spec["cores"]` entry.
+
+    "Cortex-<X>" from the `type` field for the general case (e.g.
+    "cortex-a32" -> "Cortex-A32"); the Alif M55 HP/HE pair gets the
+    shorter "M55-HP"/"M55-HE" form instead, because that IS the name
+    Alif's own docs and the AEN board trees use for them -- printing
+    "Cortex-M55-HE" nobody else calls it that would be its own kind of
+    dishonesty.  Falls back to the bare (uppercased) type string when it
+    is not a "cortex-*" type at all (e.g. an NPU-only or vendor-specific
+    core class no SoC spec in the catalogue uses today).
+    """
+    ctype = str(core.get("type") or "").strip()
+    subtype = str(core.get("subtype") or "").strip().lower()
+    if ctype == "cortex-m55" and subtype in _M55_SUBTYPE_SUFFIX:
+        return f"M55-{_M55_SUBTYPE_SUFFIX[subtype]}"
+    if ctype.lower().startswith("cortex-"):
+        return "Cortex-" + ctype.split("-", 1)[1].upper()
+    return ctype.upper() if ctype else "core"
+
+
+def _soc_cpu_complement(soc_spec: dict[str, Any], active_core_id: Optional[str]) -> str:
+    """Pre-formatted core list for `CONFIG_ALP_SDK_SOC_CPUS`: every core
+    the SoC JSON declares, the active one marked and listed first --
+    e.g. "M55-HE @160MHz (active) + M55-HP @400MHz + 2x Cortex-A32
+    @800MHz".  A core with no `freq_mhz` (e.g. an internal-companion NPU
+    core with no independent clock in the SoC JSON) prints its label with
+    no `@...MHz` suffix rather than a fabricated frequency.
+    """
+    cores = list(soc_spec.get("cores") or [])
+    cores.sort(key=lambda c: 0 if c.get("id") == active_core_id else 1)
+    parts: list[str] = []
+    for core in cores:
+        label = _core_display_label(core)
+        count = core.get("count") or 1
+        freq = core.get("freq_mhz")
+        prefix = f"{int(count)}x " if isinstance(count, (int, float)) and count > 1 else ""
+        freq_str = f" @{int(freq)}MHz" if isinstance(freq, (int, float)) else ""
+        marker = " (active)" if core.get("id") == active_core_id else ""
+        parts.append(f"{prefix}{label}{freq_str}{marker}")
+    return " + ".join(parts)
+
+
+def _soc_npu_complement(soc_spec: dict[str, Any]) -> str:
+    """Pre-formatted NPU list for `CONFIG_ALP_SDK_SOC_NPUS`, e.g.
+    "Ethos-U85 + 2x Ethos-U55" -- same-`type` NPU instances (e.g. the
+    E8's two Ethos-U55s, one per M55 core) are grouped into a single
+    "Nx <Label>" entry rather than repeated, in the order their `type`
+    first appears in `soc_spec["npus"]`.
+    """
+    order: list[str] = []
+    counts: dict[str, int] = {}
+    for npu in (soc_spec.get("npus") or []):
+        ntype = str(npu.get("type") or "").strip()
+        if not ntype:
+            continue
+        label = "-".join(seg.capitalize() for seg in ntype.split("-"))
+        if label not in counts:
+            order.append(label)
+        counts[label] = counts.get(label, 0) + 1
+    return " + ".join(
+        f"{counts[label]}x {label}" if counts[label] > 1 else label
+        for label in order)
+
+
+def _soc_display_name(soc_spec: dict[str, Any]) -> str:
+    """Vendor + family + part for `CONFIG_ALP_SDK_SOC_NAME`, e.g. "Alif
+    Ensemble E8".  `vendor` contributes only its first word (Alif
+    Semiconductor -> Alif); `part` is dropped when it already restates
+    `family` verbatim as a prefix (NXP's family "i.MX 9" / part "i.MX 93"
+    would otherwise read "NXP i.MX 9 i.MX 93").
+    """
+    vendor = str(soc_spec.get("vendor") or "").strip()
+    family = str(soc_spec.get("family") or "").strip()
+    part = str(soc_spec.get("part") or "").strip()
+    vendor_short = vendor.split()[0] if vendor else ""
+    if family and part and part.startswith(family):
+        segments = [vendor_short, part]
+    else:
+        segments = [vendor_short, family, part]
+    return " ".join(s for s in segments if s)
+
+
+def _emit_soc_summary(project: "BoardProject", slice_: "Slice") -> list[str]:
+    """Boot-banner identity + system-summary Kconfig (`CONFIG_ALP_SDK_
+    SOC_*` / `CONFIG_ALP_SDK_SOM_*_MBIT`, `zephyr/kconfigs/core.kconfig`).
+
+    Every field here is transcribed, never invented, from data this
+    project already resolved: the SoC spec JSON (`project.soc_spec` --
+    `cores[]`, `npus[]`, `soc_ram_kb`, `soc_flash_mb`, the on-die SRAM +
+    MRAM the SoC itself carries) for the CONFIG_ALP_SDK_SOC_* facts, and
+    the SoM preset's `memory:` block (off-SoC OSPI RAM/flash the SKU's
+    BOM actually populates -- distinct from the SoC facts above: two SKUs
+    on the identical PCB/silicon can differ here, e.g. E1M-AEN803's 512
+    Mbit HyperRAM + 256 Mbit NOR vs E1M-AEN801's 256 Mbit HyperRAM only,
+    NOR left DNI/optional) for CONFIG_ALP_SDK_SOM_{DRAM,FLASH}_MBIT.
+
+    `alp_banner.c` prefers these over its devicetree fallback (one
+    image's chosen sram/flash REGION size, not the SoM's actual
+    hardware) whenever `CONFIG_ALP_SDK_SOC_CPUS` is non-empty -- see that
+    file's module docstring.  A project whose SoC spec is missing a field
+    (no `npus`, no `soc_ram_kb`, ...) still gets whatever IS known; only
+    `CONFIG_ALP_SDK_SOC_NAME`/`_CPUS` gate the whole banner section on the
+    C side, so those two are the only ones this function must guarantee
+    non-empty whenever `project.soc_spec` resolves at all.
+    """
+    soc_spec = project.soc_spec or {}
+    lines: list[str] = [
+        "# Boot-banner SoC identity + system summary (from the SoC spec "
+        "JSON + SoM preset `memory:`; see alp_banner.c).",
+    ]
+
+    name = _soc_display_name(soc_spec)
+    if name:
+        lines.append(f'CONFIG_ALP_SDK_SOC_NAME="{name}"')
+
+    cpus = _soc_cpu_complement(soc_spec, slice_.core_id)
+    if cpus:
+        lines.append(f'CONFIG_ALP_SDK_SOC_CPUS="{cpus}"')
+
+    npus = _soc_npu_complement(soc_spec)
+    if npus:
+        lines.append(f'CONFIG_ALP_SDK_SOC_NPUS="{npus}"')
+
+    soc_ram_kb = soc_spec.get("soc_ram_kb")
+    if isinstance(soc_ram_kb, (int, float)) and soc_ram_kb > 0:
+        lines.append(f"CONFIG_ALP_SDK_SOC_SRAM_KB={int(soc_ram_kb)}")
+
+    soc_flash_mb = soc_spec.get("soc_flash_mb")
+    if isinstance(soc_flash_mb, (int, float)) and soc_flash_mb > 0:
+        lines.append(f"CONFIG_ALP_SDK_SOC_MRAM_KB={int(round(soc_flash_mb * 1024))}")
+
+    # Off-SoC OSPI memory the SoM SKU actually populates (som-preset
+    # `memory:` -- a MODULE fact, not a SoC one; see the SKU contrast
+    # above).  `is_tbd`/absent/non-positive all mean "don't claim it".
+    mem = project.som_preset.get("memory") or {}
+    dram_mbit = mem.get("dram_mbit")
+    if isinstance(dram_mbit, (int, float)) and not is_tbd(dram_mbit) and dram_mbit > 0:
+        lines.append(f"CONFIG_ALP_SDK_SOM_DRAM_MBIT={int(dram_mbit)}")
+    flash_mbit = mem.get("flash_mbit")
+    if isinstance(flash_mbit, (int, float)) and not is_tbd(flash_mbit) and flash_mbit > 0:
+        lines.append(f"CONFIG_ALP_SDK_SOM_FLASH_MBIT={int(flash_mbit)}")
+
+    lines.append("")
+    return lines
+
+
 def _emit_som_caps(
     project: "BoardProject",
     silicon: Optional[str],
@@ -588,7 +742,25 @@ def _emit_som_caps(
     # alp_project_emit/hw_info.py's `_emit_hw_info_h` (project.hw_rev is
     # already `som.hw_rev or default_hw_rev`; add the same "unknown"
     # floor here so the two resolvers can't disagree on the empty case).
-    lines.append(f'CONFIG_ALP_SDK_SOM_HW_REV="{project.hw_rev or "unknown"}"')
+    # Emit the composed board designator (`2626-r2`), not the bare revision key,
+    # because that is what the module's EEPROM identity carries -- and this symbol
+    # exists only to be compared against it.  Getting this wrong is not cosmetic:
+    # CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL promotes the banner's mismatch warning
+    # to k_panic(), so a write side that composes and a compare side that does not
+    # would halt boot on a correctly provisioned module.
+    #
+    # project.hw_rev itself stays the BARE key -- loader.py passes it to
+    # family_revision_known() as a lookup key into hw_revisions, where a composed
+    # value would not resolve.
+    _som_hw_rev = project.hw_rev
+    if _som_hw_rev:
+        from .loader import _sku_family_dir
+        _fam = _sku_family_dir(project.sku)
+        if _fam:
+            _som_hw_rev = _sdk_compat.board_designator(
+                _sdk_compat.load_family_table(project.effective_metadata_root(), _fam),
+                _som_hw_rev)
+    lines.append(f'CONFIG_ALP_SDK_SOM_HW_REV="{_som_hw_rev or "unknown"}"')
     lines.append("")
 
     if kconfig:
@@ -1872,6 +2044,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     lines: list[str] = []
     lines.extend(_emit_baseline(slice_, diagnostics))
     lines.extend(_emit_console(diagnostics, slice_))
+    lines.extend(_emit_soc_summary(project, slice_))
     lines.extend(_emit_som_caps(project, silicon, kconfig))
 
     chip_lines, chip_subsystems, resolved_chip_state = _emit_chips(

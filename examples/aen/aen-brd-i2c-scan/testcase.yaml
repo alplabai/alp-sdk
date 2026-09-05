@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the upstream i2c_dw driver (Tier-1) on the
+# E1M-AEN801 (Ensemble E8, M55-HE): scans the BRD_I2C (SoC I2C0) housekeeping
+# bus for the on-module RTC/TMP112/OPTIGA trio.
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-brd-i2c-scan
+  description: |
+    Bench RAM-run BRD_I2C (I2C0, i2c_dw) probe for the E1M-AEN801 (Alif
+    Ensemble E8, Cortex-M55-HE): scans the on-module housekeeping bus for
+    the RV-3028-C7 RTC and TMP112 temperature sensor, decodes both, and
+    proves the RTC oscillator is running.
+
+tests:
+  alp_sdk.examples.aen.brd_i2c_scan.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - i2c
+    build_only: true   # electrical outcome needs the real bench; not a CI run.

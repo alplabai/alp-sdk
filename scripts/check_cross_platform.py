@@ -206,6 +206,11 @@ INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
     "scripts/bench/aen/erase-storage.sh",
     "scripts/bench/aen/flash-jlink.sh",
     "scripts/bench/aen/flash-jlink-mramxip.sh",
+    # Registers a custom J-Link device (patched Alif FLM) for probes that
+    # cannot select SEGGER's built-in Alif profile.  Linux-side bench tooling:
+    # it writes under ~/.config/SEGGER and drives JLinkExe.  Carries a
+    # "Cross-platform scope:" header note.
+    "scripts/bench/aen/install-jlink-alif-device.sh",
     "scripts/bench/aen/flash-jlink-hp.sh",
     "scripts/bench/aen/flash-run.sh",
     "scripts/bench/aen/flash-run-dualcore.sh",

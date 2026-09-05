@@ -95,13 +95,35 @@
 #endif
 
 /*
- * Destination for the TCP socket round-trip (only used when connected).  The
- * default is example.com's canonical IPv4 (93.184.216.34) on port 80 -- change
- * it to a host reachable from your bench network.  ip[] is network order,
- * ip[0] = the most-significant octet (a.b.c.d), which is exactly what
- * cc3501e_wifi_get_ip() also hands back, so a lease can feed a connect directly.
+ * Destination for the TCP socket round-trip (only used when connected).
+ *
+ * Override it at build time for your bench, the same way as the credentials:
+ *
+ *   west build ... -- -DEXTRA_CFLAGS="-DTOUR_TCP_A=192 -DTOUR_TCP_B=168 \
+ *                                     -DTOUR_TCP_C=1   -DTOUR_TCP_D=1"
+ *
+ * The default was example.com's old canonical IPv4 (93.184.216.34), which no
+ * longer serves -- a connect to it returns -4 and reads like a radio fault when
+ * it is only a dead address.  It now defaults to the .1 gateway of a 192.168.1/24
+ * bench LAN, which is far likelier to answer on port 80; point it wherever suits.
+ *
+ * ip[] is network order, ip[0] = the most-significant octet (a.b.c.d), which is
+ * exactly what cc3501e_wifi_get_ip() also hands back, so a lease can feed a
+ * connect directly.
  */
-static const uint8_t TOUR_TCP_IP[4] = { 93, 184, 216, 34 };
+#ifndef TOUR_TCP_A
+#define TOUR_TCP_A 192
+#endif
+#ifndef TOUR_TCP_B
+#define TOUR_TCP_B 168
+#endif
+#ifndef TOUR_TCP_C
+#define TOUR_TCP_C 1
+#endif
+#ifndef TOUR_TCP_D
+#define TOUR_TCP_D 1
+#endif
+static const uint8_t TOUR_TCP_IP[4] = { TOUR_TCP_A, TOUR_TCP_B, TOUR_TCP_C, TOUR_TCP_D };
 #define TOUR_TCP_PORT 80u
 
 typedef struct {

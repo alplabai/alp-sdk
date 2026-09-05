@@ -4,11 +4,20 @@
   "title": "ALP SoM hardware-revisions manifest (metadata/e1m_modules/<family>/hw-revisions.yaml) v1",
   "description": "Per-SoM-family hardware-revision compatibility table.  Each entry under `hw_revisions:` declares an rev label (e.g. r1, r2) with its SDK-version compatibility window + optional summary / changes bullets.  The customer-facing CHANGELOG.md alongside this file carries the full rev-by-rev narrative.",
   "type": "object",
-  "required": ["family", "display_name", "hw_revisions"],
+  "required": [
+    "family",
+    "display_name",
+    "hw_revisions"
+  ],
   "additionalProperties": false,
   "properties": {
-    "family": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-    "display_name": { "type": "string" },
+    "family": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "display_name": {
+      "type": "string"
+    },
     "hw_revisions": {
       "type": "object",
       "additionalProperties": {
@@ -17,31 +26,55 @@
       "propertyNames": {
         "pattern": "^r[0-9]+$"
       }
+    },
+    "board_datecode": {
+      "type": "string",
+      "pattern": "^[0-9]{4}$",
+      "description": "Optional YYWW datecode that forms part of the PHYSICAL board number, e.g. \"2626\" in E1M-AEN-2626-R2.  Composed with a revision key into the identity manifest's hw_rev field (\"2626-r2\"), so it is single-sourced here rather than repeated per preset.  Families whose board number carries no datecode omit it."
     }
   },
   "$defs": {
     "hw_rev_entry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status"],
+      "required": [
+        "status"
+      ],
       "properties": {
         "min_sdk_version": {
           "oneOf": [
-            { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([.-].*)?$" },
-            { "type": "null" }
+            {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([.-].*)?$"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Lowest SDK version that supports this rev.  null = unbounded."
         },
         "max_sdk_version": {
           "oneOf": [
-            { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([.-].*)?$" },
-            { "type": "null" }
+            {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([.-].*)?$"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Highest SDK version that supports this rev.  null = unbounded (no deprecation yet)."
         },
         "status": {
           "type": "string",
-          "enum": ["production", "preview", "preliminary", "reserved", "tbd", "deprecated"]
+          "enum": [
+            "production",
+            "preview",
+            "preliminary",
+            "reserved",
+            "tbd",
+            "deprecated"
+          ]
         },
         "board_rev": {
           "type": "string",
@@ -59,7 +92,9 @@
         },
         "changes": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Bullet list of changes from the previous rev (pin moves, chip swaps, RC bumps).  Customer-visible summary; deeper internal detail is held outside this tree."
         },
         "pad_route_overrides": {
@@ -68,16 +103,33 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["e1m"],
+            "required": [
+              "e1m"
+            ],
             "properties": {
-              "e1m": { "type": "string", "pattern": "^E1M_[A-Z0-9_]+$" },
+              "e1m": {
+                "type": "string",
+                "pattern": "^E1M_[A-Z0-9_]+$"
+              },
               "dispatch": {
                 "type": "string",
-                "enum": ["cc3501e", "gd32_bridge", "direct", "TBD"],
+                "enum": [
+                  "cc3501e",
+                  "gd32_bridge",
+                  "direct",
+                  "TBD"
+                ],
                 "description": "Same vocabulary as the SoM preset's pad_route_entry.dispatch (som-preset-v1.schema.json) -- a typo here would otherwise validate and silently reach scripts/gen_cc3501e_gpio_routes.py as a no-match, dropping the pad instead of failing the build."
               },
-              "dispatch_pin": { "type": ["integer", "string"] },
-              "doc": { "type": "string" }
+              "dispatch_pin": {
+                "type": [
+                  "integer",
+                  "string"
+                ]
+              },
+              "doc": {
+                "type": "string"
+              }
             }
           }
         }
