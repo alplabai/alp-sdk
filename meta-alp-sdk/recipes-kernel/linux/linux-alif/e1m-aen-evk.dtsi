@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * Alp E1M-AEN EVK carrier -- Cortex-A32 (Linux) view.
+ *
+ * Carrier layer only: everything here is a property of the EVK board, not
+ * of the SoM or the SoC.  Include it AFTER the vendor SoC dtsi
+ * (alif/ensemble/common/ensemble-ex.dtsi); the per-board dts on top adds
+ * only the SoM/SKU delta.  This is deliberately NOT a copy of Alif's
+ * devkit-e8-unicore.dts with the DevKit parts edited out -- it carries the
+ * carrier deltas and nothing else, so a vendor dtsi update is picked up
+ * instead of being shadowed.
+ *
+ * PROVENANCE, stated precisely because the distinction matters.  What booted
+ * on 2026-09-05 -- Linux 6.12.6 to an interactive shell on two E1M-AEN803
+ * modules (SE -> TF-A BL32/SP_MIN AArch32 -> Linux as BL33; no BL1/BL2/BL31,
+ * no U-Boot; kernel XIP from MRAM) -- was an ~805-line working copy of Alif's
+ * devkit-e8-unicore.dts with three edits applied in place.  THIS file is a
+ * distillation of those same three deltas into the layered form the repo
+ * wants.  It has been COMPILED and the resulting dtb checked node-by-node
+ * against the one that booted; it has NOT itself been booted.  Say so until
+ * a board has run this dtb.
+ *
+ * Nodes NOT touched below were not exercised and are left at their vendor
+ * defaults on purpose.
+ */
+
+/ {
+	aliases {
+		/*
+		 * This alias does NOT pick the 8250 line index -- see the
+		 * &uart2 comment below.  It only makes the console node
+		 * findable by name.
+		 */
+		serial0 = &uart5;
+	};
+
+	chosen {
+		/*
+		 * init=/init is required: the cramfs root is a real root
+		 * filesystem, not an initramfs, so without it the kernel runs
+		 * the default /sbin/init and the image's own /init -- which
+		 * mounts /proc, /sys and /dev -- is never reached.
+		 *
+		 * root=mtd:physmap-flash.0 resolves against the MTD physmap
+		 * over MRAM.  No DT node provides that mapping -- it comes
+		 * from the kernel config (CONFIG_MTD_PHYSMAP_START/_LEN, see
+		 * mram-physmap-atoc-guard.cfg in this directory), so this dtb
+		 * alone is not enough to boot this root.
+		 */
+		bootargs = "console=ttyS0,115200n8 \
+		root=mtd:physmap-flash.0 \
+		rootfstype=cramfs ro init=/init loglevel=9";
+	};
+};
+
+/*
+ * Kernel RAM: on-chip SRAM at 0x02000000.  The vendor SoC dtsi ships this
+ * node "disabled", so without this override the kernel gets no memory node
+ * at all.  Observed on the booting boards: 7528 kB.
+ *
+ * The 64 MB external HyperRAM at 0xa0000000 (&mem_hyperam) stays at its
+ * vendor "disabled" default: Alif's TF-A ships PSRAM init for AP Memory
+ * and ISSI only and the fitted part is a Winbond W958D8NBYA5I, so that
+ * window has never been shown to work (#1970; its capacity is disputed
+ * too, #1969).  Do not enable it here before it is measured.
+ */
+&mem_stitch {
+	status = "okay";
+};
+
+/*
+ * UART2 (serial@4901a000) is the Alif DevKit's console on P1_0/P1_1, and
+ * the vendor's devkit_ex_dct_defines.h sets UART2_STATUS "okay".  On this
+ * carrier it is not routed anywhere -- but left enabled it enumerates as
+ * ttyS0 ahead of UART5 and takes console=ttyS0, because the 8250 line
+ * index follows node probe order, NOT the serial0 alias.  Observed
+ * symptom: console output goes to a UART with no wire.  Disabling UART2
+ * here is what makes UART5 ttyS0.
+ */
+&uart2 {
+	status = "disabled";
+};
+
+/*
+ * Carrier console: SoC UART5 (serial@4901d000) on P3_4/P3_5, routed to the
+ * EVK console header.  Forced "okay" rather than taking the vendor's
+ * UART5_STATUS default ("disabled") -- on this carrier the console is not
+ * optional.
+ */
+&uart5 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_uart5>;
+	status = "okay";
+};
+
+&pinmux {
+	/*
+	 * Both pins are alternate function 2 (alif,ensemble-pinfunc.h).
+	 * 0x23 = read enable + Schmitt trigger + 4 mA push-pull, the pad
+	 * config the vendor uses for every UART group.
+	 *
+	 * Beware: P3_4/P3_5 are also I2C0_SCL_B/I2C0_SDA_B.  Enabling &i2c0
+	 * with the vendor's pinctrl_i2c0 group on this carrier would take
+	 * the console pins away.
+	 */
+	pinctrl_uart5: uart5grp {
+		pinmux = <
+			PIN_P3_4__UART5_RX_A	0x23
+			PIN_P3_5__UART5_TX_A	0x23
+		>;
+	};
+};

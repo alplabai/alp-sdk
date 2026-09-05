@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * Alp E1M-AEN803 SoM (Alif Ensemble E8 / AE822) on the E1M-AEN EVK carrier,
+ * Cortex-A32 running Linux.
+ *
+ * Layering: vendor SoC dtsi -> Alp carrier dtsi -> this per-board dts ->
+ * e1m-aen803-evk.dtb.  Keep SKU-specific facts here and carrier facts in
+ * e1m-aen-evk.dtsi, so another AEN SKU on the same carrier is a new dts of
+ * this size and not a second copy of the carrier.
+ *
+ * PROVENANCE: distilled from the working-copy dts that booted Linux 6.12.6 to
+ * an interactive shell on two E1M-AEN803 modules on 2026-09-05.  This layered
+ * form has been COMPILED and diffed against that dtb, not booted in this form
+ * -- do not upgrade that to "silicon-observed" until a board has run it.
+ *
+ * Kernel XIP from MRAM; the dtb is handed to the kernel in r2 by TF-A
+ * (ARM_PRELOADED_DTB_BASE), so it is not described by the Secure Enclave's
+ * ATOC.
+ */
+/dts-v1/;
+
+/*
+ * ensemble-ex.dtsi pulls in devkit_ex_dct_defines.h itself; no *_STATUS
+ * macro is used below or in the carrier dtsi, so it is not included here.
+ */
+#include "../common/ensemble-ex.dtsi"
+#include "e1m-aen-evk.dtsi"
+
+/ {
+	model = "Alp E1M-AEN803 on E1M-AEN EVK (Alif Ensemble E8, A32)";
+	compatible = "alif,ensemble";
+
+	cpus {
+		/*
+		 * Unicore.  The booting configuration deletes the second A32;
+		 * bringing up both cores has not been attempted (#1972).
+		 */
+		/delete-node/ cpu@1;
+	};
+};

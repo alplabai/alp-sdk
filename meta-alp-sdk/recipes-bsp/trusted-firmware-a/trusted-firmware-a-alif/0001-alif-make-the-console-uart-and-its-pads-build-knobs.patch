@@ -1,0 +1,126 @@
+From: Alp Lab <contact@alplab.ai>
+Subject: [PATCH] alif: make the console UART and its pads build knobs
+
+The devkit_e7 platform pins its console to the Alif DevKit's UART2 in two
+independent places: the register base in platform_def.h, and the pad mux in
+devkit_e7_pinmux_init(), which drives P1_0/P1_1 at alternate function 1.
+
+A carrier that routes a different UART has to move BOTH. Moving only the
+register base produces a console that initialises and runs but is not routed
+anywhere -- no output and no error, which is expensive to diagnose.
+
+Make both configurable, defaulting to the DevKit values so a devkit_e7 build
+is unchanged. The Alp E1M-AEN EVK routes UART5 on P3_4/P3_5 at alternate
+function 2 and builds with:
+
+  ALIF_CONSOLE_UART_BASE=0x4901D000 \
+  ALIF_CONSOLE_RX_PORT=PORT_3 ALIF_CONSOLE_RX_PIN=PIN_4 \
+  ALIF_CONSOLE_TX_PORT=PORT_3 ALIF_CONSOLE_TX_PIN=PIN_5 \
+  ALIF_CONSOLE_PIN_FUNC=PINMUX_ALTERNATE_FUNCTION_2
+
+Upstream-Status: Pending
+diff --git a/plat/alif/board/devkit_e7/common/include/platform_def.h b/plat/alif/board/devkit_e7/common/include/platform_def.h
+index 2c8e86a..fa81a33 100644
+--- a/plat/alif/board/devkit_e7/common/include/platform_def.h
++++ b/plat/alif/board/devkit_e7/common/include/platform_def.h
+@@ -183,11 +183,42 @@
+ #define PLATFORM_STACK_SIZE		UL(0x440)
+ 
+ /* platform console parameters */
+-#define PLAT_ALIF_BOOT_UART_BASE	UL(0x4901A000)
++/*
++ * The console UART is a CARRIER property, not a SoC one: the Alif DevKit
++ * brings out UART2 (0x4901A000) while other carriers route a different one
++ * (the Alp E1M-AEN EVK console is UART5, 0x4901D000).  Keep the DevKit value
++ * as the default and let the board override it from the build with
++ * ALIF_CONSOLE_UART_BASE.
++ */
++#ifndef ALIF_CONSOLE_UART_BASE
++#define ALIF_CONSOLE_UART_BASE		0x4901A000
++#endif
++
++/*
++ * Console pads, which must match ALIF_CONSOLE_UART_BASE.  DevKit default is
++ * UART2 on P1_0 (RX) / P1_1 (TX), alternate function 1.
++ */
++#ifndef ALIF_CONSOLE_RX_PORT
++#define ALIF_CONSOLE_RX_PORT		PORT_1
++#endif
++#ifndef ALIF_CONSOLE_RX_PIN
++#define ALIF_CONSOLE_RX_PIN		PIN_0
++#endif
++#ifndef ALIF_CONSOLE_TX_PORT
++#define ALIF_CONSOLE_TX_PORT		PORT_1
++#endif
++#ifndef ALIF_CONSOLE_TX_PIN
++#define ALIF_CONSOLE_TX_PIN		PIN_1
++#endif
++#ifndef ALIF_CONSOLE_PIN_FUNC
++#define ALIF_CONSOLE_PIN_FUNC		PINMUX_ALTERNATE_FUNCTION_1
++#endif
++
++#define PLAT_ALIF_BOOT_UART_BASE	UL(ALIF_CONSOLE_UART_BASE)
+ #define PLAT_ALIF_BOOT_UART_CLK_IN_HZ	100000000
+ #define PLAT_ALIF_CONSOLE_BAUDRATE	115200
+ 
+-#define PLAT_ALIF_RUN_UART_BASE		UL(0x4901A000)
++#define PLAT_ALIF_RUN_UART_BASE		UL(ALIF_CONSOLE_UART_BASE)
+ #define PLAT_ALIF_RUN_UART_CLK_IN_HZ	100000000
+ 
+ #define SYS_COUNTER_FREQ_IN_TICKS       UL(100000000) /* 100MHz */
+diff --git a/plat/alif/board/devkit_e7/platform.mk b/plat/alif/board/devkit_e7/platform.mk
+index 247fed9..b36fdd3 100644
+--- a/plat/alif/board/devkit_e7/platform.mk
++++ b/plat/alif/board/devkit_e7/platform.mk
+@@ -23,6 +23,25 @@ $(eval $(call add_define,AP_HYPERRAM_EN))
+ ALIF_SOC_E8		?=	1
+ $(eval $(call add_define,ALIF_SOC_E8))
+ 
++# Console UART base. Carrier-specific: the Alif DevKit routes UART2
++# (0x4901A000); the Alp E1M-AEN EVK routes UART5 (0x4901D000).
++ALIF_CONSOLE_UART_BASE	?=	0x4901A000
++$(eval $(call add_define,ALIF_CONSOLE_UART_BASE))
++
++# Console pads. Must match ALIF_CONSOLE_UART_BASE -- moving the UART base
++# without moving the pads gives a console that runs but is not routed out.
++# DevKit default: UART2 on P1_0/P1_1, alternate function 1.
++ALIF_CONSOLE_RX_PORT	?=	PORT_1
++ALIF_CONSOLE_RX_PIN	?=	PIN_0
++ALIF_CONSOLE_TX_PORT	?=	PORT_1
++ALIF_CONSOLE_TX_PIN	?=	PIN_1
++ALIF_CONSOLE_PIN_FUNC	?=	PINMUX_ALTERNATE_FUNCTION_1
++$(eval $(call add_define,ALIF_CONSOLE_RX_PORT))
++$(eval $(call add_define,ALIF_CONSOLE_RX_PIN))
++$(eval $(call add_define,ALIF_CONSOLE_TX_PORT))
++$(eval $(call add_define,ALIF_CONSOLE_TX_PIN))
++$(eval $(call add_define,ALIF_CONSOLE_PIN_FUNC))
++
+ ifeq "1" "${AES_EN}"
+ ifneq "1" "${ISSI_FLASH_EN}"
+ ifneq "1" "${MX_FLASH_EN}"
+diff --git a/plat/alif/board/devkit_e7/sp_min/devkit_e7_sp_min_setup.c b/plat/alif/board/devkit_e7/sp_min/devkit_e7_sp_min_setup.c
+index 0f03fd6..ce08f59 100644
+--- a/plat/alif/board/devkit_e7/sp_min/devkit_e7_sp_min_setup.c
++++ b/plat/alif/board/devkit_e7/sp_min/devkit_e7_sp_min_setup.c
+@@ -69,9 +69,18 @@ static void devkit_e7_clocks_init(void)
+  */
+ static void devkit_e7_pinmux_init(void)
+ {
+-    /* Configure pinmux for OSPI signals */
+-    pinconf_set(PORT_1, PIN_0, PINMUX_ALTERNATE_FUNCTION_1, PADCTRL_READ_ENABLE);
+-    pinconf_set(PORT_1, PIN_1, PINMUX_ALTERNATE_FUNCTION_1, 0);
++    /*
++     * Console pads.  These are a CARRIER property and must track
++     * ALIF_CONSOLE_UART_BASE: writing a different UART's registers while
++     * these pads still point at the DevKit's UART2 produces a console that
++     * runs but is not routed anywhere.  The DevKit defaults below are UART2
++     * on P1_0/P1_1 (alternate function 1); the Alp E1M-AEN EVK overrides
++     * them to UART5 on P3_4/P3_5 (alternate function 2).
++     */
++    pinconf_set(ALIF_CONSOLE_RX_PORT, ALIF_CONSOLE_RX_PIN,
++                ALIF_CONSOLE_PIN_FUNC, PADCTRL_READ_ENABLE);
++    pinconf_set(ALIF_CONSOLE_TX_PORT, ALIF_CONSOLE_TX_PIN,
++                ALIF_CONSOLE_PIN_FUNC, 0);
+ }
+ 
+ /**

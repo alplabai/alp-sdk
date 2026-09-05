@@ -41,13 +41,36 @@ Inventory check before powering anything:
   (Carrier parts ride **I2C2** (`ALP_E1M_I2C0`) / the EVK headers, not
   the SoM's BRD_I2C trio -- see the bus table in §5.1.)
 
-> **This batch: the SoM's OSPI memories are NOT populated.** The
-> OSPI0 octal bus (BOM-optional NOR flash on CS0 + HyperRAM on CS1,
-> both `assembled: optional` in the SKU preset) is un-stuffed on the
-> AEN801 modules on the bench, so boot **and** app storage run from
-> on-die **MRAM only** (5.5 MB on `AE822FA0E5597LS0`).  Don't expect
-> an external flash / XIP device on this hardware; MCUboot slots and
-> any storage partition must target MRAM, not OSPI.
+> **OSPI population is a per-batch, per-SKU fact -- read it off the
+> module in front of you, not off the AEN family (#1973).**  The batch
+> currently on the bench is an **E1M-AEN803**, now modelled at
+> [`E1M-AEN803.yaml`](../metadata/e1m_modules/E1M-AEN803.yaml), and it
+> has **both** external memories **fitted**: an OSPI0 octal NOR
+> (ISSI `IS25WX256-JHLE`) and a HyperRAM (Cypress/Infineon
+> `S80KS5122GABHM02`, 512 Mbit / 64 MiB). Those are the AS-BUILT parts,
+> not the ones named in the E1M-AEN-2626-R2 netlist BOM (a Winbond
+> HyperRAM and a Macronix NOR) -- the fitted parts define the SKU.
+> [`E1M-AEN801.yaml`](../metadata/e1m_modules/E1M-AEN801.yaml) models a
+> *different* SKU and is no longer consistent with this observation at
+> all: E1M-AEN801 carries **no** external memory (`memory.dram_mbit` /
+> `flash_mbit` are both `TBD`, standing in for "measured as none" --
+> there is no `ospi_memories:`/`hyperram:` block on it any more).  What
+> is on the bench module was read off the module, not off either
+> preset.
+>
+> **Which of the two sits on which OSPI0 chip-select is netlist-sourced,
+> not silicon-measured.** The internal E1M-AEN-2626-R2 netlist names the
+> OSPI0_SS1 device's select pin as a flash chip-select, so
+> `E1M-AEN803.yaml` records NOR = CS1, HyperRAM = CS0 -- but nothing has
+> measured it on silicon: probing OSPI0 needs code executing on an M55,
+> and the bench module's slot0 is blank. Do not treat that chip-select
+> as bench-confirmed until it has been read off real silicon.
+>
+> None of that changes where this guide puts images: boot **and** app
+> storage target on-die **MRAM** (5.5 MB on `AE822FA0E5597LS0`), and
+> MCUboot slots and storage partitions in this guide are MRAM-resident
+> because that is the path proven on the bench -- not because there is
+> no external memory to target.
 
 ## 1. First-power smoke test
 
@@ -266,9 +289,11 @@ current bench module is r1 (`alp board` -> `E1M-AEN801 r1`) -- probe
 
 > **This bench batch (2026-06-15):** the **OPTIGA Trust M (`0x30`) is not
 > populated**, and that is *expected*, not a fault. OPTIGA is in the
-> E1M-AEN801 SoM design (`on_module`); the absence is a current-batch
-> population fact (like the un-stuffed OSPI memories). Skip §5.2 on these
-> boards. Note the evidence is the population record, **not** a scan miss --
+> E1M-AEN801 SoM design (`on_module`); the absence is a population fact
+> for *this* batch, the same class of fact as the OSPI0 memories in §0 --
+> which on this batch are **fitted**, so read each one off the module
+> rather than carrying it across batches or SKUs (#1973). Skip §5.2 on
+> these boards. Note the evidence is the population record, **not** a scan miss --
 > OPTIGA sits on BRD_I2C, whose electrical readiness is still an open
 > question (see the pull-up caveat in §5.1), and which is deliberately not
 > blind-scanned here regardless (a scan is a real transaction against a
@@ -383,10 +408,10 @@ top of the per-subsystem checks.
 > toolchain + silicon before switching to the carrier board.  (Alif's
 > own `sdk-alif` / `zephyr_alif` fork -- board `alif_e8_dk` -- and the
 > CMSIS-Pack DFP (`alif_ensemble-cmsis-dfp`, device `AE822FA0E5597`)
-> are opt-in alternatives; Yocto/A32 is `meta-alif-ensemble` branch
-> **scarthgap**, `devkit-e8.conf` / `appkit-e8.conf`.  Note E7 is not in
-> upstream Zephyr v4.4 at all -- only e4/e6/e8/e1c -- another reason E8
-> leads.)
+> are opt-in alternatives; for the A32/Linux side see §7 -- **not**
+> `meta-alif-ensemble`, which is unusable for the E8 (#1971, #1968).
+> Note E7 is not in upstream Zephyr v4.4 at all -- only e4/e6/e8/e1c --
+> another reason E8 leads.)
 >
 > Per-core builds use plain `west build -b <target> <app>`.
 > (`tan build --project <app>` is the multi-core planner/executor: it fans a
@@ -439,7 +464,7 @@ top of the per-subsystem checks.
    Cross-check the magic/SKU/CRC fields against
    [`include/alp/hw_info.h`](../include/alp/hw_info.h).  An
    unprogrammed manifest is fine on a fresh assembly -- program it
-   in §7 -- but a *non-ACKing* EEPROM is a wiring/pull-up fault.
+   in §8 -- but a *non-ACKing* EEPROM is a wiring/pull-up fault.
 
 4. **CC3501E PING / GET_VERSION.**  Bring the on-module Wi-Fi/BLE
    coprocessor to life over the inter-chip SPI1 bus.  Issue the
@@ -558,9 +583,339 @@ top of the per-subsystem checks.
    in your model-compile config didn't match this SoM's NPU.
 
 Once §6's steps 0..8 all pass, the SoM is bench-validated; move
-to §7 to write the production manifest.
+to §8 to write the production manifest.  (§7 covers the A32/Linux
+cluster, which is not part of this M55 gate.)
 
-## 7. Going to production
+## 7. Cortex-A32 / Linux (APSS)
+
+Everything above drives the **M55** side.  The AEN801's other cluster
+is the **2x Cortex-A32** APSS, which runs a 32-bit (AArch32) Linux.
+
+> **Status (2026-09-05): the A32 reaches a live shell (#1972).**  The
+> §7.3 BL32 build was flashed together with a preloaded device tree, a
+> kernel and a rootfs, and **Linux 6.12.6** booted to a **shell prompt
+> on the carrier console** on **two separate E1M-AEN803 modules**.  The
+> root filesystem is a statically-linked **busybox cramfs**, mounted
+> **read-only from MRAM**.  Observed on the console (UART5 at
+> **115200**):
+>
+> ```text
+> NOTICE:  SP_MIN: v2.10.8(debug):59a39e0-dirty
+> INFO:    Entry point address = 0x80020000
+> INFO:    SPSR = 0x1d3
+> Booting Linux on physical CPU 0x0
+> OF: fdt: Machine model: Alp E1M-AEN EVK (Alif Ensemble E8, A32 unicore)
+> psci: PSCIv1.1 detected in firmware.
+> ensemble-clk: CPU clock registered, PLL rate=800000000 Hz
+> 4901d000.serial: ttyS0 at MMIO 0x4901d000 (irq = 54, base_baud = 6250000) is a 16550A
+> cramfs: linear cramfs image on mtd:physmap-flash.0 appears to be 1024 KB in size
+> VFS: Mounted root (cramfs filesystem) readonly on device 31:0.
+> Run /init as init process
+> ```
+>
+> `psci: PSCIv1.1 detected in firmware` is BL32's runtime services
+> answering the kernel's SMCs -- BL32 was resident and handling calls,
+> not merely a binary that built.  From the resulting shell:
+> `CPU part : 0xd01` (Cortex-A32), `Hardware : Alif Ensemble`, and
+> `sysfs /sys sysfs rw,relatime 0 0` in `/proc/mounts`.
+>
+> **Still NOT proven, and the shell does not change any of it:**
+>
+> * **No `bitbake` and no Yocto build has ever been run.**  The boot
+>   above used **hand-built artefacts** -- TF-A, kernel and cramfs
+>   assembled by hand, not produced by a layer.
+> * `MACHINE = "e1m-aen801-a32"` and `e1m-aen701-a32` remain
+>   **non-buildable placeholders** (#1968, #1971).
+> * The rootfs is **hand-rolled**, not an `alp-image-*`.
+> * The six `ALIF_CONSOLE_*` TF-A knobs are a **local patch** to the
+>   vendor tree (#1979), so the BL32 in this chain is **not
+>   reproducible from a clean checkout**.
+> * The OSPI0 chip-select assignment is still **unmeasured on silicon**
+>   (#1973; the recorded values are netlist-sourced, not bench-confirmed).
+>   The HyperRAM capacity dispute (#1969) is **resolved**: the fitted
+>   part is 512 Mbit (64 MiB), matching Alif's `ensemble-ex.dtsi`
+>   `mem_hyperam` window exactly.
+
+### 7.1 Boot chain
+
+The Alif APSS boot flow is **AArch32** and starts directly at **BL32
+(SP_MIN)**.  There is **no BL1, no BL2, no BL31, and no U-Boot**: TF-A
+initialises the SoC in the Secure World and hands control to a
+*preloaded* non-secure payload (Linux, or Zephyr) as **BL33**.
+
+```
+Secure Enclave releases the Cortex-A32  ->  BL32 (SP_MIN, TF-A)  ->  BL33 payload
+```
+
+Both BL32 and the payload live in **MRAM** and **execute in place**.
+
+### 7.2 Upstream sources
+
+* **TF-A** -- `https://github.com/alifsemi/trusted-firmware-a_alif`,
+  branch **`alif_lts-v2.10.8`** (tag **`APSS-v2.3.0`**).
+  **`PLAT=devkit_e7` covers BOTH E7 and E8**; the `ALIF_SOC_E8` switch
+  selects the E8 register set and **defaults to 1**.  Build with
+  **`ALIF_SOC_E8=0`** for an E7 -- Alif's own `docs/plat/alif.rst`
+  states that leaving the default on an E7 faults.
+* **Kernel** -- `https://github.com/alifsemi/linux_alif`, branch
+  **`v6.12-dev`** (Linux **6.12.6**).  Branch `main` is an empty
+  placeholder -- don't clone the default.  E8 support is
+  `arch/arm/configs/devkit_e8_defconfig`,
+  `arch/arm/configs/devkit_e8_unicore_defconfig`,
+  `arch/arm/boot/dts/alif/ensemble/devkit/devkit-e8.dts` and
+  `devkit-e8-unicore.dts`.  The unicore variant deletes `cpu@1` and the
+  cpufreq node.
+* **Yocto** -- the `meta-alif-ensemble` layer is **NOT usable here**
+  (#1971, #1968): it is a zeus-era layer pinned to kernel **5.4.25**
+  with **no E8 machine**.  Build the kernel out of `linux_alif`
+  directly.
+
+### 7.3 Building BL32 for the E8
+
+This exact command was run on **2026-09-05** with the Zephyr SDK
+**1.0.1** `arm-zephyr-eabi` toolchain, and produced the **DEBUG**
+build `build/devkit_e7/debug/bl32.bin` at **20621 bytes** on disk
+(SETOOLS pads it to **20624** in the ATOC map).  That is the binary
+that was flashed and that booted -- there is no
+`build/devkit_e7/release/` output in this chain.  The build needs a
+**Linux (or WSL) host with GNU `make`** and the Zephyr SDK
+`arm-zephyr-eabi` toolchain on `PATH`; there is no native-Windows form
+of it:
+
+<!-- cross-platform-lint:ignore -->
+```bash
+make -j"$(nproc)" \
+  CROSS_COMPILE=arm-zephyr-eabi- ARCH=aarch32 PLAT=devkit_e7 \
+  DEBUG=1 LOG_LEVEL=40 ALIF_SOC_E8=1 \
+  ALIF_CONSOLE_UART_BASE=0x4901D000 \
+  ALIF_CONSOLE_RX_PORT=PORT_3 ALIF_CONSOLE_RX_PIN=PIN_4 \
+  ALIF_CONSOLE_TX_PORT=PORT_3 ALIF_CONSOLE_TX_PIN=PIN_5 \
+  ALIF_CONSOLE_PIN_FUNC=PINMUX_ALTERNATE_FUNCTION_2 \
+  ALIF_BL32_XIP_BASE=0x80002000 ALIF_BL32_XIP_SIZE=0xD000 \
+  ALIF_TRUSTED_SRAM_BASE=0x027DE000 \
+  ARM_LINUX_KERNEL_AS_BL33=1 ARM_PRELOADED_DTB_BASE=0x80010000 \
+  PRELOADED_BL33_BASE=0x80020000 \
+  bl32
+```
+<!-- cross-platform-lint:resume -->
+
+> **The six `ALIF_CONSOLE_*` knobs DO NOT EXIST UPSTREAM (#1979).**
+> They are a **local patch** to the vendor tree.  Upstream
+> `trusted-firmware-a_alif` @ `alif_lts-v2.10.8` hardcodes the console
+> to the DevKit's **UART2** in two places -- the register base in
+> `plat/alif/board/devkit_e7/common/include/platform_def.h` and the
+> pads in `devkit_e7_pinmux_init()` in
+> `plat/alif/board/devkit_e7/sp_min/devkit_e7_sp_min_setup.c`.  **A
+> reader with a clean checkout cannot run the command above as
+> written:** `make` ignores variables the build system never reads, so
+> an unpatched tree builds a BL32 that still drives the DevKit console.
+> Carry the #1979 patch (or edit those two files) first.  See §7.7 --
+> the console is a *two-part* move, and TF-A is only one part.
+
+Two of the remaining switches are deliberate, not defaults:
+
+* `DEBUG=1 LOG_LEVEL=40` so BL32 emits **INFO** lines; a release build
+  prints NOTICE and above only.
+* `ALIF_BL32_XIP_SIZE=0xD000` is what the flashed image was built with,
+  but it is **not required** — measured 2026-09-05: the same build with
+  the knob omitted links and produces a 20621-byte `bl32.bin` too, since
+  20621 fits the `0x8000` (32768-byte) default window.  The value is
+  compiled in and sizes the mapped XIP region, so the two images are not
+  byte-identical; do not copy this knob forward as if the debug build
+  needed it.
+
+(The `make` line is inside a cross-platform-lint skip block: TF-A's own
+build system is GNU-make-only, the invocation above is the one actually
+run, and the paragraph above states the Linux/WSL host requirement.
+`west build` / `cmake --build` are not substitutes here.)
+
+`ALIF_TRUSTED_SRAM_BASE=0x027DE000` is the "0x20000 @ 0x027DE000
+reserved for arm-tf" region named by Alif's own
+`arch/arm/boot/dts/alif/ensemble/common/ensemble-ex.dtsi`.
+
+### 7.4 Memory map for first light
+
+From `devkit_e8_unicore_defconfig`:
+
+| Kconfig | Value | What |
+| --- | --- | --- |
+| `CONFIG_XIP_KERNEL` | `y` | kernel executes in place... |
+| `CONFIG_XIP_PHYS_ADDR` | `0x80020000` | ...from MRAM |
+| `CONFIG_PHYS_OFFSET` | `0x2000000` | kernel RAM is on-chip SRAM |
+| `CONFIG_MTD_PHYSMAP_START` | `0x80380000` | cramfs rootfs in MRAM... |
+| `CONFIG_MTD_PHYSMAP_LEN` | `0x200000` | ...2 MB of it |
+| `CONFIG_CRAMFS` / `CONFIG_CRAMFS_MTD` | `y` | mount it read-only |
+
+With `bl32` at **`0x80002000`** and the dtb at **`0x80010000`** -- the
+address the §7.3 build passes as `ARM_PRELOADED_DTB_BASE` (alongside
+`ARM_LINUX_KERNEL_AS_BL33=1`), and the one the 2026-09-05 boot handed
+Linux 6.12.6 its device tree at.  It originates as
+`KERNEL_DTB_ADDR ?= "0x80010000"` in the zeus-era
+`meta-alif-ensemble/conf/machine/devkit-e7.conf`, whose paired
+`RAM_PRELOADED_DTB_BASE` knob current `trusted-firmware-a_alif` no
+longer defines -- the value carried over, the knob name did not.  The
+whole chain fits inside the **5.5 MB MRAM** (`0x80000000` ..
+`0x80580000`).  The external **HyperRAM at `0xa0000000` is therefore
+NOT needed for a first boot**, and it matters because TF-A has **no
+driver for the fitted part** (#1970).
+
+> **Resolved -- the HyperRAM capacity (#1969).**  The E1M-AEN-2626-R2
+> netlist BOM names a Winbond `W958D8NBYA5I` (256 Mbit / 32 MiB), but
+> the bench modules were built with a different, as-built HyperRAM
+> (Cypress/Infineon, 512 Mbit / 64 MiB) --
+> [`metadata/e1m_modules/E1M-AEN803.yaml`](../metadata/e1m_modules/E1M-AEN803.yaml)
+> now declares `capacity_mbit: 512` for it.  That is EXACTLY what
+> Alif's `arch/arm/boot/dts/alif/ensemble/common/ensemble-ex.dtsi`
+> gives for `mem_hyperam` (`reg = <0xa0000000 0x4000000>`, 64 MiB).
+> Alif's number and the fitted part agree; the earlier "disputed"
+> framing here was an artefact of reading the unfitted BOM part's
+> datasheet instead of the as-built part's.
+
+### 7.5 Flashing
+
+The documented path is the **Alif Security Toolkit over the SE-UART**
+(same tooling as [`aen-provisioning.md`](aen-provisioning.md)):
+`app-gen-toc` on a JSON carrying
+
+* a **`BOOTLOAD`** entry -- `bl32.bin`, `cpu_id` **`"A32_0"`**, flags
+  **`["boot"]`**, and
+* an **`A32_APP`** entry -- the payload, `cpu_id` **`"A32_0"`**,
+
+plus the M55 stub images that ship with SETOOLS, then
+`app-write-mram -p`.
+
+> **BL32 executes in place, so the addresses must agree exactly:**
+> `ALIF_BL32_XIP_BASE` must equal the `BOOTLOAD` entry's `mramAddress`,
+> and `PRELOADED_BL33_BASE` must equal the `A32_APP` entry's
+> `mramAddress`.  Per the XIP/TOC contract described in Alif's
+> `docs/plat/alif.rst`, a mismatch does not boot; that is the vendor
+> documentation's statement, not an outcome observed here.
+
+### 7.6 Bench caveats
+
+* **Not every EVK is wired for the SE-UART.**  A board that breaks out
+  only the app console (UART5 at **115200**) and SWD cannot run the
+  SETOOLS flash path in §7.5 at all — that path needs the SE-UART.  On
+  such a board the J-Link MRAM loader
+  ([`aen-bench-bringup.md`](aen-bench-bringup.md) §2, **Flow D**) is
+  the only way to write MRAM, which requires a probe whose firmware carries capability
+  `0x52`; check that before planning the session.
+* **The DevKit console pin-out is not the EVK's.**  `devkit-e8.dts`
+  sets `aliases { serial0 = &uart4; }` (SoC **UART4** on `P12_1`/
+  `P12_2`) with bootargs `console=ttyS0,115200n8`.  The Alp E1M-AEN EVK
+  breaks out SoC **UART5** (`P3_4`/`P3_5`, level-shifted to **`J17`**)
+  instead.  `uart5: serial@4901d000` already exists in Alif's
+  `ensemble-ex.dtsi`, but retargeting `serial0` at it is **not enough
+  on its own** -- see §7.7.
+
+### 7.7 Gotcha: the console moves in TWO places, not one
+
+Moving the A32 console from the DevKit's UART to the carrier's is a
+**two-part** change, in two different code bases.  Do only one half and
+you get a console that runs and is routed nowhere -- no error, no
+warning, just silence on the pins you are watching.  This was the single
+most expensive thing found during first light.
+
+1. **TF-A (BL32) -- base *and* pads.**  Upstream pins the console to the
+   DevKit's **UART2** twice over: the register base in
+   `plat/alif/board/devkit_e7/common/include/platform_def.h`, and the
+   **pad mux** in `devkit_e7_pinmux_init()` in
+   `plat/alif/board/devkit_e7/sp_min/devkit_e7_sp_min_setup.c`.  Move
+   the base without the pads and BL32 drives a UART whose pins are still
+   muxed for the DevKit.  The `ALIF_CONSOLE_*` make variables in §7.3
+   are the local patch that lifts *both* onto the command line
+   (**#1979**); they are not upstream.
+
+2. **Linux -- `ttyS0` is not the `serial0` alias.**  Alif's
+   `devkit_ex_dct_defines.h` sets `UART2_STATUS "okay"`, and that is
+   what wins the **`ttyS0`** name -- an `aliases { serial0 = &uart5; }`
+   in the carrier device tree does **not** take it away.  The carrier DT
+   must also disable the DevKit's UART:
+
+   ```dts
+   &uart2 { status = "disabled"; };
+   ```
+
+Both parts, or neither: fixing TF-A alone gives you BL32 output on the
+carrier and a kernel console still on the DevKit pads; fixing the device
+tree alone gives you the reverse.
+
+### 7.8 Evidence: the Secure Enclave's own boot table
+
+The strongest artifact from the 2026-09-05 boot is the SE's boot table,
+read over the **SE-UART at 57600** on one of the two modules.  It is the
+Secure Enclave stating, in its own words, what it verified and what it
+released:
+
+```text
+|   Name   |  CPU   | Store Addr |  Obj Addr  | Boot Addr  |   Size   |  Flags |
+| BOOTLOAD | A32_0  | 0x80002000 | 0x8057A8F0 | 0x80002000 |    20621 | u VB   |
+|  A32_APP | A32_0  | 0x80020000 | 0x8057B2F0 | ---------- |  2290045 | u V    |
+|   HP_APP | M55-HP | 0x8057D230 | 0x8057C830 | 0x50000000 |     4480 | uLVB   |
+|   HE_APP | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 |     4480 | uLVB   |
+Legend: (u)(C)ompressed,(L)oaded,(V)erified,(s)kipped verification,(B)ooted,(E)ncrypted,(D)eferred
+```
+
+Two rows carry the whole A32 story:
+
+* **`BOOTLOAD`** -- `cpu_id` **`A32_0`**, flags **`u VB`**:
+  uncompressed, **V**erified, **B**ooted.  The SE validated the ATOC and
+  **released the A32 at `0x80002000`**, which is §7.3's
+  `ALIF_BL32_XIP_BASE` and §7.5's `BOOTLOAD` `mramAddress`.  Its size,
+  **20621**, is the §7.3 debug `bl32.bin` byte-for-byte.
+* **`A32_APP`** -- flags **`u V`**: verified, and **deliberately not
+  loaded**.  Its `Boot Addr` is `----------` because the SE never boots
+  it; the kernel **executes in place** from `0x80020000` and **BL32
+  jumps to it** as BL33.  A missing `L` here is the expected state for
+  this chain, not a failure.
+
+> **This table is only observable on a module that brings out the
+> SE-UART.**  A board that breaks out only the app console (§7.6) cannot
+> show it at all.  That asymmetry matters when a boot goes quiet: here,
+> a silent app console can be checked against the SE's own verdict on
+> the ATOC; on an app-console-only board a silent console is
+> **ambiguous** -- ATOC rejected, BL32 console misrouted (§7.7), and a
+> hung kernel all look identical.
+
+The same SE-UART session recorded the SE-side facts below.  They are
+observed values from these modules, not a specification:
+
+| Observed | Value |
+| --- | --- |
+| SEROM version | `SEROM v1.109.46 0x000002A1` |
+| SES version | `SES A1 v1.110.0` |
+| ATOC verdict | `[SES] ATOC ok` |
+| Lifecycle state | `[SES] LCS=1` |
+| SE clock | `[SES] SE frequency is 74.36 MHz` |
+| LF crystal | `[SES] No LF XTAL` |
+
+### 7.9 Getting from "kernel booted" to a shell
+
+Three things stood between the kernel mounting the rootfs and a usable
+prompt.  All three were found the hard way on 2026-09-05:
+
+1. **Put `init=/init` in the bootargs.**  A real root filesystem is not
+   an initramfs, so the kernel does not look for `/init` on its own --
+   it runs the default **`/sbin/init`**.  With the busybox cramfs image
+   that path does not exist and the boot ends without a prompt.  The
+   `Run /init as init process` line in §7's log is this argument taking
+   effect.
+2. **Ship `/etc/inittab` and `/etc/init.d/rcS` even though busybox init
+   works without them.**  Busybox init's compiled-in default respawns a
+   getty on **`/dev/tty2`**, **`/dev/tty3`** and **`/dev/tty4`**, none
+   of which exist on this image, and it **spams the console forever**
+   retrying them.  An explicit `inittab` is what stops that.
+3. **Enable `CONFIG_SYSFS` and `CONFIG_DEVTMPFS_MOUNT`.**  Without them
+   `/sys` cannot be mounted at all:
+
+   ```text
+   mount: mounting sysfs on /sys failed: No such device
+   ```
+
+   The `sysfs /sys sysfs rw,relatime 0 0` line in §7's `/proc/mounts` is
+   the fixed state.
+
+## 8. Going to production
 
 Once §6's runbook passes:
 
@@ -581,7 +936,7 @@ Once §6's runbook passes:
    amendment), so there is nothing to revert to and OTA stays
    deferred until a slot budget is found.
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 * **Boot ROM banner but then silence** -- usually a signed-
   image-rejected scenario.  Re-flash with the dev key or check

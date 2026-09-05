@@ -75,12 +75,28 @@ tan build
 
 Tan's relocated planner fans out:
 
-- `build/a32_cluster-yocto/` (bitbake against `MACHINE = e1m-aen801-a32`).
+- `build/a32_cluster-yocto/` (bitbake against `MACHINE = e1m-aen801-a32`)
+  -- `[BLOCKED]`, see below.
 - `build/m55_hp-zephyr/` (Zephyr against `BOARD = alp_e1m_aen801_m55_hp`).
 
+> `[BLOCKED]` -- the A32/Yocto slice of this example does not build
+> today.  `MACHINE = e1m-aen801-a32` is the intended shape, not a
+> working target: its `require conf/machine/devkit-e8.conf` is
+> commented out because no branch of `meta-alif-ensemble` ships that
+> file (#1968), and the layer is zeus-era, so it cannot be layered
+> into meta-alp-sdk's Scarthgap baseline at all (#1971).  Rehosting
+> `linux_alif` + `trusted-firmware-a_alif` on Scarthgap is the tracked
+> path forward (#1972).  Blocker detail:
+> [`meta-alp-sdk/README.md`](../../../meta-alp-sdk/README.md#alif-ensemble-e8--via-meta-alif-ensemble-blocked).
+>
+> This blocks the *build path*, not the silicon: the Cortex-A32 itself
+> booted Linux on 2026-09-05 (#1972).  The `m55_hp` Zephyr slice is
+> unaffected and builds normally.
+
 `tan build` has no per-slice `--core` flag -- it rebuilds every slice
-on each invocation.  To iterate on the M-side only, just re-run the
-same command: the already-built Yocto slice is reused (bitbake
+on each invocation.  Once the A32 slice builds, iterating on the M-side
+only is just a re-run of the same command: the already-built Yocto
+slice is reused (bitbake
 short-circuits an up-to-date tree) while the Zephyr slice rebuilds
 incrementally in seconds. See
 [`docs/heterogeneous-builds.md`](../../../docs/heterogeneous-builds.md#iterating-on-one-slice).

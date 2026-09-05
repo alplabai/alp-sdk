@@ -82,6 +82,54 @@ def test_itcm_loadaddress_entries_are_not_window_checked(aen_atoc):
     })
 
 
+def test_a32_boot_config_accepted(aen_atoc):
+    """#1981: the A32 Linux chain measured booting on E1M-AEN803 --
+    BOOTLOAD (TF-A SP_MIN, XIP at 0x80002000) + A32_APP (xipImage at
+    0x80020000), both cpu_id A32_0 -- must be accepted. Before the fix
+    the guard rejected it as an 'unknown cpu_id'."""
+    aen_atoc.validate_atoc_entries({
+        "DEVICE": {"disabled": False, "binary": "app-device-config.json"},
+        "BOOTLOAD": {"cpu_id": "A32_0", "mramAddress": "0x80002000", "flags": ["boot"]},
+        "A32_APP": {"cpu_id": "A32_0", "mramAddress": "0x80020000", "flags": []},
+    })
+
+
+def test_a32_and_m55_slot0_entries_rejected(aen_atoc):
+    """The A32 chain spans both M55 slot0 windows, so an M55 slot0-XIP
+    entry alongside an A32 mramAddress entry is a layout the SE cannot
+    boot -- mutually exclusive, not merely overlapping."""
+    with pytest.raises(aen_atoc.AtocValidationError, match="mutually exclusive"):
+        aen_atoc.validate_atoc_entries({
+            "A32_APP": {"cpu_id": "A32_0", "mramAddress": "0x80020000", "flags": []},
+            "ALP-HP": {"cpu_id": "M55_HP", "mramAddress": "0x802b0000", "flags": ["boot"]},
+        })
+
+
+def test_a32_config_with_itcm_m55_stubs_accepted(aen_atoc):
+    """The M55 entries of a real A32 ATOC are ITCM stubs (HP 0x50000000
+    / HE 0x58000000, per the measured SE boot table) -- loadAddress
+    entries, so the exclusivity rule must not trip on them."""
+    aen_atoc.validate_atoc_entries({
+        "BOOTLOAD": {"cpu_id": "A32_0", "mramAddress": "0x80002000", "flags": ["boot"]},
+        "A32_APP": {"cpu_id": "A32_0", "mramAddress": "0x80020000", "flags": []},
+        "HP_APP": {"cpu_id": "M55_HP", "loadAddress": "0x50000000",
+                   "flags": ["load", "boot"]},
+        "HE_APP": {"cpu_id": "M55_HE", "loadAddress": "0x58000000",
+                   "flags": ["load", "boot"]},
+    })
+
+
+def test_a32_address_below_bl32_base_rejected(aen_atoc):
+    """0x80001000 is inside System MRAM but below the A32 region base
+    0x80002000 (the TF-A BL32 XIP base), so it is out of window. The
+    region's TOP is not checked here -- it is the per-build APP Package
+    start, not a constant (see the module docstring)."""
+    with pytest.raises(aen_atoc.AtocValidationError, match="below the A32_0 MRAM region"):
+        aen_atoc.validate_atoc_entries({
+            "BOOTLOAD": {"cpu_id": "A32_0", "mramAddress": "0x80001000", "flags": ["boot"]},
+        })
+
+
 def test_validate_atoc_config_file(tmp_path, aen_atoc):
     cfg = tmp_path / "dualcore.json"
     cfg.write_text(

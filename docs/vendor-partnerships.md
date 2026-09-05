@@ -149,27 +149,47 @@ far and removed `sdk-alif` from `vendor-sdks` entirely -- which
 broke the stock-EVK path.  §C.42 restores `sdk-alif` to
 `vendor-sdks` with the two-path documentation above.
 
+**A32 Linux path (`linux_alif` + `trusted-firmware-a_alif`)**:
+Separate from the Zephyr story above -- the Cortex-A32 side of
+the E8 rides two more upstreams, neither a Zephyr module and
+neither reachable through `sdk-alif`.
+[`linux_alif`](https://github.com/alifsemi/linux_alif) branch
+`v6.12-dev` (Linux 6.12.6) is the Alif kernel fork carrying the
+E8 support: `arch/arm/configs/devkit_e8_defconfig`,
+`devkit_e8_unicore_defconfig`, and
+`arch/arm/boot/dts/alif/ensemble/devkit/devkit-e8.dts` /
+`devkit-e8-unicore.dts`.  Branch `main` is an empty placeholder
+-- don't clone the default.
+[`trusted-firmware-a_alif`](https://github.com/alifsemi/trusted-firmware-a_alif)
+branch `alif_lts-v2.10.8` (tag `APSS-v2.3.0`) is the AArch32
+BL32 / `SP_MIN` secure bootloader for the A32 cluster;
+`PLAT=devkit_e7` covers both E7 and E8 via `ALIF_SOC_E8`.
+Rehosting the pair on Scarthgap -- rather than layering the
+zeus-era `meta-alif-ensemble` as-is -- is the tracked
+go-forward path (#1972).
+
 **Vendor-licensed Alif drivers** (`alif_dave2d-driver`,
 `alif_image-processing-lib`): source-visible under the Alif
 Semiconductor Software License Agreement, not Apache.  Stay
 in the `vendor-sdks` opt-in group alongside `sdk-alif` so the
 explicit opt-in matches the licence consent story.
 
-**Genuinely open (Apache-2.0 / MIT, inherited from upstream
-forks)**:
+**Genuinely open (inherited from upstream forks)**:
 
-| Repo                       | License     | Purpose                                           |
-|----------------------------|-------------|---------------------------------------------------|
-| `zephyr_alif`              | Apache-2.0  | Alif's Zephyr fork                                |
-| `hal_alif`                 | Apache-2.0  | HAL integration layer for Zephyr                  |
-| `cmsis_alif`               | Apache-2.0  | CMSIS fork                                        |
-| `mcuboot_alif`             | Apache-2.0  | MCUboot port for Ensemble                         |
-| `matter_alif`              | Apache-2.0  | Matter port                                       |
-| `tinyusb` (Alif's port)    | MIT         | TinyUSB stack                                     |
-| `meta-alif`                | MIT         | Ensemble BSP Yocto layer                          |
-| `meta-alif-ensemble`       | MIT         | Ensemble device recipes                           |
-| `meta-alif-iot`            | MIT         | IoT meta layer                                    |
-| `alif-sdk-containers`      | MIT         | Docker containers for building releases           |
+| Repo                      | License                         | Purpose                                                   |
+|---------------------------|---------------------------------|-----------------------------------------------------------|
+| `zephyr_alif`             | Apache-2.0                      | Alif's Zephyr fork                                        |
+| `hal_alif`                | Apache-2.0                      | HAL integration layer for Zephyr                          |
+| `cmsis_alif`              | Apache-2.0                      | CMSIS fork                                                |
+| `mcuboot_alif`            | Apache-2.0                      | MCUboot port for Ensemble                                 |
+| `matter_alif`             | Apache-2.0                      | Matter port                                               |
+| `tinyusb` (Alif's port)   | MIT                             | TinyUSB stack                                             |
+| `meta-alif`               | MIT                             | Ensemble BSP Yocto layer                                  |
+| `meta-alif-ensemble`      | MIT                             | Ensemble device recipes                                   |
+| `meta-alif-iot`           | MIT                             | IoT meta layer                                            |
+| `alif-sdk-containers`     | MIT                             | Docker containers for building releases                   |
+| `linux_alif`              | GPL-2.0 WITH Linux-syscall-note | Alif kernel fork, branch `v6.12-dev` -- the E8 A32 kernel |
+| `trusted-firmware-a_alif` | BSD-3-Clause                    | AArch32 BL32 / `SP_MIN` for the A32, `alif_lts-v2.10.8`   |
 
 **Vendor-licensed (Alif Semiconductor Software License
 Agreement) for the differentiating drivers**:
