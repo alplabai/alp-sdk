@@ -195,12 +195,14 @@ as "pure data plus N interpreters". Clause 4 is the brake, and it works only if
 a proposed addition that needs a new matcher is read as evidence the rule is
 mechanism, not as a gap in the vocabulary.
 
-**Sequencing.** Where a declared policy physically lives is downstream of
+**Sequencing.** Where a declared policy physically lives was downstream of
 ADR-0026's amendment sections C and D, which decide who owns rendered-artefact
-bytes and who answers the configure-time CMake call. If those land on "tan owns
-the renderers and alp-sdk's emitters die", clause 2's premise changes and this
-ADR needs revisiting. Clause 6's field population is safe under every outcome
-and does not wait.
+bytes and who answers the configure-time CMake call. Those landed the other
+way: alp-sdk keeps the configure-time call via a surviving emitter core and
+stays canonical for rendered-artefact bytes, so clause 2's premise is
+confirmed rather than changed, and this ADR does not need revisiting on that
+account. Clause 6's field population was already safe under every outcome and
+did not wait.
 
 ## Alternatives considered
 

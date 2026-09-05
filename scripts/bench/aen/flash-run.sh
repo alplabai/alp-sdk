@@ -46,12 +46,54 @@ BUF_SYM=$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
 BUF=0x$BUF_SYM
 
 # 1. stage the image + a per-app signed-ATOC config (keeps the factory DEVICE cfg)
+#
+# THE ATOC SHAPE MUST MATCH HOW THE IMAGE IS LINKED (#1902).  Two shapes exist:
+#
+#   ITCM load-and-boot : "loadAddress": "0x58000000", flags ["load","boot"]
+#                        -- the SE copies the image into ITCM and starts it.
+#   MRAM slot0 XIP     : "mramAddress": "0x80010000", flags ["boot"]
+#                        -- the image already sits in MRAM; the SE just boots it.
+#
+# This script used to hardcode the ITCM shape.  That silently MIS-BOOTS every
+# slot0-linked app (`CONFIG_USE_DT_CODE_PARTITION=y`, `CONFIG_FLASH_LOAD_OFFSET=
+# 0x10000`, reset vector 0x8001xxxx), which since alp-sdk#1067 is what a plain
+# build produces -- and most of examples/aen/* are now that shape.
+#
+# It fails in two ways, neither of which says "wrong ATOC", which is why it went
+# unnoticed.  Bench-measured 2026-09-04:
+#   - With a slot0 image still resident, `app-write-mram` reports
+#     "MRAM write: Done" and the SES boots the RESIDENT slot0 image in preference
+#     to the freshly written ITCM-load ATOC.  The console shows the OLD app, so
+#     the flash looks like it worked.  (`PC = 8001A652`, and mem32 0x80010000
+#     matching the PREVIOUS image, is the tell.)
+#   - With slot0 erased, the MRAM-linked image is copied into ITCM and branches
+#     into now-empty MRAM: `CFSR (0xE000ED28) = 0x00010000` (UFSR UNDEFINSTR),
+#     `BFAR (0xE000ED38) = 0x00000000`.
+#
+# So select the shape from the image's own reset vector, exactly as
+# flash-jlink-mramxip.sh does.
 cp -f "$BIN" "$SET/build/images/$NAME.bin"
+RV=$(xxd -e -l 8 "$BIN" | awk '{print $3}')   # 2nd LE word = reset vector
+case "$RV" in
+  8001*)
+    echo ">>> ATOC shape: MRAM slot0 XIP (reset vector 0x$RV)" >&2
+    ENTRY='"mramAddress": "0x80010000", "flags": ["boot"]'
+    ;;
+  802b*)
+    echo "!! reset vector 0x$RV is HP-slot0-linked (0x802bxxxx), not HE." >&2
+    echo "   flash-run.sh is HE-only (cpu_id M55_HE); use the HP flow." >&2
+    exit 3
+    ;;
+  *)
+    echo ">>> ATOC shape: ITCM load-and-boot (reset vector 0x$RV)" >&2
+    ENTRY='"loadAddress": "0x58000000", "flags": ["load", "boot"]'
+    ;;
+esac
 cat > "$SET/build/config/$NAME.json" <<JSON
 {
     "DEVICE":  { "disabled": false, "binary": "app-device-config.json", "version": "0.5.00", "signed": true },
     "ALP-HE":  { "disabled": false, "binary": "$NAME.bin", "version": "1.0.0", "signed": true,
-                 "cpu_id": "M55_HE", "loadAddress": "0x58000000", "flags": ["load", "boot"] }
+                 "cpu_id": "M55_HE", $ENTRY }
 }
 JSON
 

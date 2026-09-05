@@ -89,11 +89,21 @@ on_module:
     # the only one confirmed against ADTS0013 + a netlist so far) --
     # holding this back is deliberate, not an unreviewed leftover.
     #
-    # Even on E1M-AEN801 this is the intended master, not a working bus:
-    # the shared netlist shows no pull-up path on BRD_I2C, and the
-    # datasheet/HWRM disagree on whether that is fatal -- see
-    # docs/bring-up-aen.md §5.1. Addresses per docs/bring-up-aen.md
-    # §5.1's bench-verified table; pad names per
+    # BENCH-SETTLED on E1M-AEN801 (2026-09-05, 2626-R2 silicon, Flow A,
+    # cold-cycle proven -- same shared PCB as this SKU): this bus WORKS.
+    # The RV-3028-C7 RTC answers at 0x52 with its oscillator confirmed
+    # running, and the TMP112 answers and reads a plausible temperature.
+    # The earlier "intended master, not a working bus" concern (no pull-up
+    # path to any rail on BRD_I2C, datasheet/HWRM disagreeing on whether
+    # that is fatal) does not carry: the bus runs on the SoC pad's own
+    # internal pull-up (bias-pull-up = DSC=1) with the pad left PUSH-PULL.
+    # That earlier "unusable as built" verdict was measured on an r1
+    # module, where these parts are not on P7_0/P7_1 at all -- see
+    # E1M-AEN801.yaml for the full evidence trail. Per-part uncertainty for
+    # THIS SKU remains only over whether E7's datasheet backs
+    # I2C0_SCL_C/I2C0_SDA_C on the same pads (E1M-AEN801 is the only SKU
+    # confirmed against its own datasheet + netlist so far). Addresses per
+    # docs/bring-up-aen.md §5.1; pad names per
     # examples/aen/aen-secure-element-sign/README.md.
     brd_i2c:
       devices:

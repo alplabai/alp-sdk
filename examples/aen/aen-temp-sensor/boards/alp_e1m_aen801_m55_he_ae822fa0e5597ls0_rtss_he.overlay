@@ -1,0 +1,42 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-temp-sensor -- app overlay for the E1M-AEN801 (Alif Ensemble E8, M55-HE).
+ *
+ * THIS OVERLAY DELIBERATELY ADDS NOTHING, AND THAT IS THE POINT.
+ *
+ * The on-module TMP112 is a property of the SoM, not of this app: every
+ * E1M-AEN801 has one, so every AEN801 application should get it for free from
+ * the BOARD layer.  The board files declare both halves --
+ *
+ *   - BRD_I2C, the on-module housekeeping bus.  It is SoC I2C0
+ *     (i2c@49010000, "snps,designware-i2c") on pads P7_0 (I2C0_SDA_C) and
+ *     P7_1 (I2C0_SCL_C), per the E1M-AEN-2626-R2 netlist rows
+ *     "BRD_I2C_SDA",U6,B8,"P7_0/SCP0_A" and "BRD_I2C_SCL",U6,B3,"P7_1/SCP1_A"
+ *     and the AE822 DFP pin table's alt-function [4] entries.
+ *   - the "ti,tmp112" child node on it, at the design address 0x48: the
+ *     netlist ties U20 pin 3 (ADD0) to 0V, and TI SBOS397 maps ADD0 -> GND to
+ *     0x48.
+ *
+ * -- so an app overlay that re-declared them would be duplicating a SoM fact
+ * one layer too high.  That duplication is exactly the smell that
+ * examples/aen/aen-secure-element-sign and examples/aen/aen-brd-i2c-scan carry
+ * today: each hand-rolls its own &pinctrl group and &i2c0 enable, and every
+ * copy is a place the pad config can drift out of step with the netlist.
+ *
+ * The file exists at all because Zephyr auto-applies a board overlay only when
+ * its stem matches the FULLY-QUALIFIED board id -- so the name here is the
+ * contract, even when the contents are empty.  If you need an app-scoped
+ * devicetree tweak (a different `conversion-rate`, say, or the ITCM retarget
+ * for a Flow C RAM-run), this is where it goes.
+ *
+ * NOT here, on purpose: the observed-0x40 address anomaly.  One bench module
+ * answered at 0x40 rather than 0x48, confirmed a real TMP112 by its register
+ * fingerprint (CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000).  0x40 is not a
+ * legal TMP112 address, so that unit's ADD0 strap is not actually at GND --
+ * a suspected open joint on U20 pin 3, i.e. a per-unit board defect.  The
+ * devicetree keeps the DESIGN address; src/main.c reports the anomaly with an
+ * actionable diagnostic instead.  Re-addressing the node here would ship one
+ * module's defect to every module.
+ */

@@ -58,6 +58,15 @@ tan-cli/
 *.bin
 *.hex
 
+# EXCEPTION: the CI build fixture for examples/aen/aen-eeprom-provision.  That
+# app refuses to build without a manifest blob (it writes a module identity and
+# must never invent one), so twister has to supply one -- and `*.bin` above
+# silently excluded it, which made the committed example unbuildable in CI while
+# passing locally.  The blob is 128 bytes and carries the deliberately unusable
+# serial CI-FIXTURE-DO-NOT-USE, dated 2000-01-01; it is build-only and never
+# reaches hardware.
+!examples/aen/aen-eeprom-provision/ci-fixture-manifest.bin
+
 # Libraries
 *.a
 *.lib
