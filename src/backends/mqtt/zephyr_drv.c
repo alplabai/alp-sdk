@@ -108,7 +108,9 @@ struct mqtt_be {
 	uint16_t drain_msg_id;
 	uint8_t  drain_qos;
 	bool     drain_pending; /* a drain is in progress, possibly spanning calls */
-	bool     drain_deliver; /* false: pure discard (msg_cb == NULL, or past rx_buf's cap) */
+	bool     drain_deliver; /* false: pure discard (msg_cb == NULL).  A payload past
+	                         * rx_buf's cap stays drain_deliver == true -- mqtt_drain_step()
+	                         * just redirects the overflow into a scratch buffer instead. */
 
 	/* Moved to the last member (was first) so the atomic-claim zeroing
 	 * below (memset up to offsetof(..., in_use)) still resets every
@@ -256,6 +258,18 @@ static uint32_t mqtt_clamp_timeout_ms(uint32_t timeout_ms)
 	return (timeout_ms > (uint32_t)INT32_MAX) ? (uint32_t)INT32_MAX : timeout_ms;
 }
 
+/* True when a POSITIVE zsock_poll() return means the fd itself is torn
+ * down or errored, not that data is ready.  Zephyr reports a torn-down/
+ * invalid fd as POLLNVAL/POLLERR in revents with a POSITIVE poll() return
+ * -- never rc < 0 -- so every zsock_poll() call in this file (the drain's
+ * own, plus z_connect()'s and z_loop()'s connection-wide polls) has to
+ * check revents in addition to rc, or a dead socket hot-spins at 100% CPU
+ * for the rest of whatever deadline is in play (issue #1938 item 4). */
+static bool mqtt_poll_fd_is_dead(short revents)
+{
+	return (revents & (ZSOCK_POLLNVAL | ZSOCK_POLLERR)) != 0;
+}
+
 /* Advances the pending PUBLISH-payload drain in `be` by whatever the
  * socket has ready before `until` (a k_uptime_get_32() timestamp -- the
  * CURRENT alp_mqtt_loop()/alp_mqtt_connect() call's own deadline, never
@@ -348,13 +362,9 @@ static bool mqtt_drain_step(struct mqtt_be *be, uint32_t until)
 			        be->drain_total);
 			goto tear_down;
 		}
-		/* Zephyr reports a torn-down/invalid fd as POLLNVAL/POLLERR in
-		 * revents with a POSITIVE return -- never as rc < 0.  Missing
-		 * this would have mqtt_read_publish_payload() answer -EAGAIN
-		 * forever while zsock_poll() returns instantly every time,
-		 * hot-spinning at 100% CPU for the rest of the deadline
-		 * (issue #1938). */
-		if (rc > 0 && (pfd.revents & (ZSOCK_POLLNVAL | ZSOCK_POLLERR)) != 0) {
+		/* See mqtt_poll_fd_is_dead()'s doc comment (issue #1938 item 4):
+		 * a torn-down/invalid fd reports here as rc > 0, not rc < 0. */
+		if (rc > 0 && mqtt_poll_fd_is_dead(pfd.revents)) {
 			LOG_WRN("mqtt: publish drain socket torn down (revents 0x%x) with %zu of "
 			        "%zu bytes still owed; aborting the connection",
 			        pfd.revents,
@@ -385,9 +395,20 @@ tear_down:
 /* Finishes a drain mqtt_drain_step() has just reported complete: the QoS-1
  * PUBACK (withheld until now -- see mqtt_drain_step()'s doc comment on
  * issue #1645) and the user's msg_cb, if this drain was for a bound
- * subscription rather than a background discard. */
+ * subscription rather than a background discard.
+ *
+ * The PUBACK is unconditional on QoS, never on drain_deliver: a discarded
+ * PUBLISH (msg_cb == NULL) is still a PUBLISH the broker is owed an ack
+ * for, or it redelivers forever.  Returning before it here was issue
+ * #1938 item 5's regression -- pre-restructure, every drain path acked
+ * before this function existed at all. */
 static void mqtt_drain_finish(struct mqtt_be *be)
 {
+	if (be->drain_qos == MQTT_QOS_1_AT_LEAST_ONCE) {
+		const struct mqtt_puback_param ack = { .message_id = be->drain_msg_id };
+		(void)mqtt_publish_qos1_ack(&be->client, &ack);
+	}
+
 	if (!be->drain_deliver) return;
 
 	if (be->drain_rx_got < be->drain_total) {
@@ -401,10 +422,6 @@ static void mqtt_drain_finish(struct mqtt_be *be)
 		        (unsigned)be->drain_rx_got);
 	}
 
-	if (be->drain_qos == MQTT_QOS_1_AT_LEAST_ONCE) {
-		const struct mqtt_puback_param ack = { .message_id = be->drain_msg_id };
-		(void)mqtt_publish_qos1_ack(&be->client, &ack);
-	}
 	be->msg_cb((const char *)be->topic_buf, be->rx_buf, be->drain_rx_got, be->msg_user);
 }
 
@@ -583,6 +600,21 @@ static alp_status_t z_connect(alp_mqtt_backend_state_t *st, uint32_t timeout_ms)
 	struct mqtt_be *be = (struct mqtt_be *)st->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
 
+	/* A drain left pending by a PREVIOUS session (e.g. z_publish()'s
+	 * ALP_ERR_IO path leaves drain_pending set, or a caller that just
+	 * retries alp_mqtt_connect() on the same handle per
+	 * docs/tutorials/11-mqtt-tls-publish.md:219) must not resume against
+	 * the FRESH socket mqtt_connect() is about to open below -- its
+	 * spanning deadline is stale and mqtt_drain_step() would abort the
+	 * brand-new connection the instant it next runs.  Clear it before
+	 * connecting so the wait loop's mqtt_drain_resume() call never sees
+	 * state from before this connect (issue #1938 item 3). */
+	be->drain_pending  = false;
+	be->drain_deadline = 0;
+	be->drain_owed     = 0;
+	be->drain_rx_got   = 0;
+	be->topic_buf[0]   = '\0';
+
 	int err = mqtt_connect(&be->client);
 	if (err != 0) {
 		return errno_to_alp(err);
@@ -609,6 +641,12 @@ static alp_status_t z_connect(alp_mqtt_backend_state_t *st, uint32_t timeout_ms)
 		fds[0].events              = ZSOCK_POLLIN;
 		int rc                     = zsock_poll(fds, 1, 200);
 		if (rc < 0) return errno_to_alp(-errno);
+		/* See mqtt_poll_fd_is_dead()'s doc comment (issue #1938 item 4):
+		 * a torn-down/invalid fd reports here as rc > 0, not rc < 0. */
+		if (rc > 0 && mqtt_poll_fd_is_dead(fds[0].revents)) {
+			be->connected = false;
+			return ALP_ERR_IO;
+		}
 		if (rc > 0) {
 			err = mqtt_input(&be->client);
 			if (err != 0) return errno_to_alp(err);
@@ -730,6 +768,12 @@ static alp_status_t z_loop(alp_mqtt_backend_state_t *st, uint32_t timeout_ms)
 	fds[0].events              = ZSOCK_POLLIN;
 	int rc                     = zsock_poll(fds, 1, remaining_ms);
 	if (rc < 0) return errno_to_alp(-errno);
+	/* See mqtt_poll_fd_is_dead()'s doc comment (issue #1938 item 4): a
+	 * torn-down/invalid fd reports here as rc > 0, not rc < 0. */
+	if (rc > 0 && mqtt_poll_fd_is_dead(fds[0].revents)) {
+		be->connected = false;
+		return ALP_ERR_IO;
+	}
 	if (rc > 0) {
 		int err = mqtt_input(&be->client);
 		if (err != 0) return errno_to_alp(err);
