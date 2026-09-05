@@ -292,6 +292,57 @@ static void test_external_close_without_callback_is_synchronous(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* 2b. Issue #1962: a torn-down/invalid socket fd terminates the RX    */
+/*     thread instead of hot-spinning it forever.                      */
+/* ------------------------------------------------------------------ */
+
+static void test_invalid_fd_terminates_instead_of_spinning(void)
+{
+	atomic_int worker_done;
+
+	/* A closed fd number reproduces POLLNVAL deterministically: poll()
+     * returns a POSITIVE rc with ONLY the error bit set in revents --
+     * never POLLIN -- exactly issue #1962's "torn down or invalid fd"
+     * shape.  Unlike a peer-closed socketpair (which also sets POLLIN
+     * because a buffered EOF is readable, so the pre-fix code's
+     * `if (n == 0) break;` path already covers it), this gives the
+     * pre-fix `!(fds[0].revents & POLLIN)` guard nothing to fall
+     * through on, so it `continue`s straight back into another
+     * immediate-return poll() -- the actual #1962 hot spin. */
+	int throwaway = socket(AF_UNIX, SOCK_DGRAM, 0);
+	ALP_ASSERT_TRUE(throwaway >= 0);
+
+	alp_can_backend_state_t st;
+	memset(&st, 0, sizeof(st));
+	/* make_test_can() must run BEFORE the close() below: it opens
+     * d->rx_wake_pipe itself, and closing `throwaway` first would free
+     * its fd number for THAT pipe() call to immediately reuse --
+     * aliasing d->fd onto the (perfectly valid) wake-pipe read end
+     * instead of leaving it invalid. */
+	y_can_data_t *d = make_test_can(throwaway, &st, noop_frame_cb, NULL);
+	st.owner        = &st;
+	ALP_ASSERT_EQ_INT(close(throwaway), 0);
+
+	ALP_ASSERT_EQ_INT(spawn_rx_thread(d, &worker_done), 0);
+
+	/* Pre-#1962 fix: this never fires within TEST_TIMEOUT_MS -- the RX
+     * thread spins poll() at 100% of a core forever instead, exactly
+     * the bug this test exists to catch. */
+	ALP_ASSERT_TRUE(wait_until(&worker_done, TEST_TIMEOUT_MS));
+
+	/* The thread returned on its own via the fatal-error path, not a
+     * close (close_from_worker was never set), so it is still
+     * joinable and was never handed to y_destroy() -- join and free it
+     * by hand instead of through do_close(), which would try to
+     * close(throwaway) a second time. */
+	ALP_ASSERT_EQ_INT(pthread_join(d->rx_thread, NULL), 0);
+	close(d->rx_wake_pipe[0]);
+	close(d->rx_wake_pipe[1]);
+	pthread_mutex_destroy(&d->lock);
+	free(d);
+}
+
+/* ------------------------------------------------------------------ */
 /* 3. External close racing a callback self-close: single-shot.        */
 /* ------------------------------------------------------------------ */
 
@@ -363,6 +414,7 @@ int main(void)
 {
 	test_self_close_no_uaf_no_selfjoin();
 	test_external_close_without_callback_is_synchronous();
+	test_invalid_fd_terminates_instead_of_spinning();
 	test_concurrent_external_vs_self_close_is_single_shot();
 	ALP_TEST_SUMMARY();
 }
