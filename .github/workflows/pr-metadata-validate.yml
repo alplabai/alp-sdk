@@ -525,7 +525,7 @@ jobs:
       - name: "Gate — SoM preset board: targets resolve to a real board tree"
         run: python3 scripts/check_board_target_tree_parity.py
 
-      - name: "Gate — AEN App MRAM top is reserved for the SE-owned ATOC (#1289)"
+      - name: "Gate — AEN ATOC reservation, aperture tiling/class, and slot0 address (#1289, #1365)"
         run: python3 scripts/check_atoc_reservation.py
 
       - name: Gate — example board.yaml declared cores match their boards/ overlays

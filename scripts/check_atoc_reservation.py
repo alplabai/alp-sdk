@@ -236,6 +236,62 @@ def _check_slot0_address(path: Path) -> "list[str]":
     return []
 
 
+def _rel_or_str(path: Path) -> str:
+    """`path.relative_to(REPO)` when possible, else the raw path.
+
+    A test that monkeypatches `SOCS` to a directory outside the checkout
+    (so it never has to write a fixture into tracked `metadata/socs/`)
+    hands these functions a `path` that isn't under `REPO` -- fall back
+    to the raw string instead of raising `ValueError` out of a message
+    builder.
+    """
+    try:
+        return path.relative_to(REPO).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _check_aperture_declared() -> "list[str]":
+    """4a: every Alif Ensemble SoC must declare `soc_flash_base`
+    (#1365 split A).
+
+    `_resolve_aperture()` treats an absent `soc_flash_base` as "no
+    aperture declared, skip every aperture-anchored check" -- the
+    correct read for a non-Alif SoC (Renesas RZ/V2N legitimately
+    declares none), but it is silently indistinguishable from an
+    Ensemble part that simply forgot the field: 4b/4c switch off for
+    every preset resolving to that SoC while `validate_metadata.py`,
+    `gen_catalog.py`, and every other new test stay green, because
+    nothing else asserts the field is actually there (reviewer
+    mutation, 2026-09: deleting `soc_flash_base` from e3-e7.json left
+    `check_atoc_reservation.py` rc=0). `soc_flash_base` must stay
+    OPTIONAL in `soc-spec-v1` -- this is a family-scoped presence
+    check, not schema-wide requiredness, so RZ/V2N keeps declaring
+    none without tripping it.
+    """
+    out: "list[str]" = []
+    ensemble_dir = SOCS / "alif" / "ensemble"
+    if not ensemble_dir.is_dir():
+        return out
+    for path in sorted(ensemble_dir.glob("*.json")):
+        try:
+            spec = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            out.append(f"{_rel_or_str(path)}: unparseable JSON ({exc})")
+            continue
+        if not isinstance(spec, dict) or spec.get("family") != "Ensemble":
+            continue
+        if "soc_flash_base" not in spec:
+            out.append(
+                f"{_rel_or_str(path)}: Alif Ensemble SoC declares no "
+                f"`soc_flash_base` -- every Ensemble part must declare "
+                f"the on-die MRAM aperture base, or 4b/4c (aperture "
+                f"tiling, flash-class agreement) silently skip every "
+                f"preset resolving to this SoC with every other signal "
+                f"green (#1365 split A).")
+    return out
+
+
 def _check_aperture_cross_check() -> "list[str]":
     """4a-adjacent: every Alif SoC declaring `soc_flash_base` must agree
     with `_AEN_MRAM_BASE` (#1365 split A).
@@ -258,14 +314,14 @@ def _check_aperture_cross_check() -> "list[str]":
         try:
             spec = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            out.append(f"{path.relative_to(REPO).as_posix()}: unparseable JSON ({exc})")
+            out.append(f"{_rel_or_str(path)}: unparseable JSON ({exc})")
             continue
         if not isinstance(spec, dict):
             continue
         base = spec.get("soc_flash_base")
         if base is None:
             continue  # OPTIONAL -- omitted is a valid, if incomplete, state.
-        rel = path.relative_to(REPO).as_posix()
+        rel = _rel_or_str(path)
         if not isinstance(base, int) or base != _AEN_MRAM_BASE:
             out.append(
                 f"{rel}: soc_flash_base={base!r} disagrees with "
@@ -336,7 +392,7 @@ def _region_extent(region: "dict[str, Any]") -> "tuple[int, int] | None":
 def _check_aperture_tiling(
     path: Path, doc: "dict[str, Any]", memory_map: "list[Any]",
     aperture: "tuple[int, int]",
-) -> "list[str]":
+) -> "tuple[list[str], list[str]]":
     """4b: the authored regions CONTAINED IN the declared aperture must
     tile it exactly -- no gaps, no overlaps (#1365 split A).
 
@@ -349,20 +405,27 @@ def _check_aperture_tiling(
     (E1M-AEN801.yaml:241-243). A region whose extent equals the FULL
     aperture (`mram_main`, once its `base` stops being `"TBD"`) is the
     whole-device alias, not a partition, and is exempt. A region with an
-    unresolved base is skipped -- said so via `_region_extent` returning
-    None -- never guessed at.
+    unresolved base is skipped -- returned as a non-failing entry in the
+    second tuple element so the caller can print it -- never guessed at.
+
+    Returns `(failures, skips)`. `skips` must never make the gate red.
     """
     rel = path.relative_to(REPO).as_posix()
     sku = doc.get("sku", rel)
     full_lo, full_hi = aperture
     contained: "list[tuple[int, int, str]]" = []
+    skips: "list[str]" = []
     for region in memory_map:
         if not isinstance(region, dict):
             continue
         name = str(region.get("name"))
         ext = _region_extent(region)
         if ext is None:
-            continue  # unresolved base -- skip, never guess.
+            skips.append(
+                f"{rel}: preset {sku} -- region {name!r} has an "
+                f"unresolved base ({region.get('base')!r}) -- skipped "
+                f"from aperture tiling (4b), not guessed at.")
+            continue
         lo, hi = ext
         if lo == full_lo and hi == full_hi:
             continue  # whole-device alias -- the device, not a partition.
@@ -371,13 +434,21 @@ def _check_aperture_tiling(
         contained.append((lo, hi, name))
 
     if not contained:
-        return []
+        return [], skips
 
     contained.sort()
     out: "list[str]" = []
     cursor = full_lo
     for lo, hi, name in contained:
-        if lo > cursor:
+        if lo < full_lo:
+            out.append(
+                f"{rel}: preset {sku} -- region {name!r} "
+                f"[0x{lo:x}, 0x{hi:x}) starts at 0x{lo:x}, below the "
+                f"declared aperture floor 0x{full_lo:x}: it straddles "
+                f"the aperture's own boundary, not a preceding contained "
+                f"region (the symmetric top-overflow case is reported "
+                f"separately, below).")
+        elif lo > cursor:
             out.append(
                 f"{rel}: preset {sku} -- aperture gap [0x{cursor:x}, "
                 f"0x{lo:x}) precedes region {name!r}: no authored region "
@@ -399,13 +470,13 @@ def _check_aperture_tiling(
         out.append(
             f"{rel}: preset {sku} -- contained regions extend to "
             f"0x{cursor:x}, past the declared aperture top 0x{full_hi:x}.")
-    return out
+    return out, skips
 
 
 def _check_class_disagreement(
     path: Path, doc: "dict[str, Any]", memory_map: "list[Any]",
     aperture: "tuple[int, int]",
-) -> "list[str]":
+) -> "tuple[list[str], list[str]]":
     """4c: a region CONTAINED IN the declared aperture must carry
     `carveout: false` (#1365 split A -- the check that keeps the six
     hand-authored flags from rotting).
@@ -419,20 +490,29 @@ def _check_class_disagreement(
     `carveout: false` is a legitimate RAM reservation (the schema's own
     text: reserving SRAM for a hardware secure enclave), not a defect --
     the symmetric direction is never asserted. A region with an
-    unresolved base is skipped, never classified. The whole-device alias
-    (extent == full aperture) is exempt, same as 4b.
+    unresolved base is skipped, never classified -- returned as a
+    non-failing entry in the second tuple element so the caller can
+    print it. The whole-device alias (extent == full aperture) is
+    exempt, same as 4b.
+
+    Returns `(failures, skips)`. `skips` must never make the gate red.
     """
     rel = path.relative_to(REPO).as_posix()
     sku = doc.get("sku", rel)
     full_lo, full_hi = aperture
     out: "list[str]" = []
+    skips: "list[str]" = []
     for region in memory_map:
         if not isinstance(region, dict):
             continue
         name = str(region.get("name"))
         ext = _region_extent(region)
         if ext is None:
-            continue  # unresolved base -- skipped, never classified.
+            skips.append(
+                f"{rel}: preset {sku} -- region {name!r} has an "
+                f"unresolved base ({region.get('base')!r}) -- skipped "
+                f"from flash-class agreement (4c), never classified.")
+            continue
         lo, hi = ext
         if lo == full_lo and hi == full_hi:
             continue  # whole-device alias -- exempt, same as 4b.
@@ -447,7 +527,7 @@ def _check_class_disagreement(
                 f"containment) but carries carveout={region.get('carveout')!r}, "
                 f"not `false` -- a flash-class region must be excluded "
                 f"from IPC carve-out allocation.")
-    return out
+    return out, skips
 
 
 def _region_size_kib(region: "dict[str, Any]") -> "int | None":
@@ -499,11 +579,21 @@ def _check_preset(path: Path) -> "list[str]":
     # aperture, the contained regions must tile it and agree with it on
     # flash/RAM class. Skipped entirely when no aperture resolves (a
     # non-Alif SoC, or an Alif SoC/variant that omits the field) --
-    # never guessed at (ADR-0034 clause 4).
+    # never guessed at (ADR-0034 clause 4). A region skipped WITHIN an
+    # aperture that DID resolve (an unresolved `base:` on that region,
+    # e.g. `mram_main`'s `"TBD"`) is not silently absorbed either: both
+    # checks hand back a non-failing skip note, printed here so the
+    # gate says so instead of a docstring nobody reads at gate-run time.
     aperture = _resolve_aperture(doc)
     if aperture is not None:
-        out += _check_aperture_tiling(path, doc, memory_map, aperture)
-        out += _check_class_disagreement(path, doc, memory_map, aperture)
+        tiling_failures, tiling_skips = _check_aperture_tiling(
+            path, doc, memory_map, aperture)
+        class_failures, class_skips = _check_class_disagreement(
+            path, doc, memory_map, aperture)
+        for note in tiling_skips + class_skips:
+            print(f"SKIP {note}")
+        out += tiling_failures
+        out += class_failures
     return out
 
 
@@ -523,6 +613,7 @@ def main(argv=None) -> int:
         checked_presets += 1
         failures += _check_preset(path)
 
+    failures += _check_aperture_declared()
     aperture_cross_check_failures = _check_aperture_cross_check()
     failures += aperture_cross_check_failures
 

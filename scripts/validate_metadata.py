@@ -493,7 +493,7 @@ def _check_som_write_authority_present(som_files) -> list:
     a failure list shaped like `_check_files()`. Presets with no
     `memory_map:` are skipped.
     """
-    failures: list[tuple[Path, list[str]]] = []
+    failures: list[tuple[str, list[str]]] = []
     for path in som_files:
         rel = path.relative_to(REPO).as_posix()
         try:

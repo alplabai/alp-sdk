@@ -282,7 +282,7 @@ a later refactor from turning "unknown" into "not flash".
 - `python3 scripts/gen_catalog.py`, commit `metadata/catalog.json` if it moves.
 - `changelog.d/1365.md` — a fragment naming the ATOC and `storage` hazard and
   stating plainly that A changes no allocator behaviour.
-- `docs/board-config-hardware.md` and `docs/porting-new-som.md` — a porting
+- `docs/board-config-features.md` and `docs/porting-new-som.md` — a porting
   author now has a field to fill; say what it means and how to choose a value.
 
 ## Verification
