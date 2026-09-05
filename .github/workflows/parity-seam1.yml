@@ -4,10 +4,14 @@
 # token/App/cross-repo dispatch. seam1 is pure Python: it emits this checkout's
 # own `--emit build-plan` and diffs it (checkout-root + sdkCommit normalized)
 # against the frozen oracle at tests/parity/oracle (captured at df312cec^ =
-# 97ad481b, the last SHA with both fan_out and the Phase-1 fields). The only
-# allowed delta is debug.probe "openocd"->null (#848, hand-reviewed); any other
-# emit change fails the gate ON THIS PR -- which is exactly where the ADR wants
-# it surfaced. seam2 (real build + Renode smoke, needs a toolchain runner) is a
+# 97ad481b, the last SHA with both fan_out and the Phase-1 fields). Only a
+# handful of hand-reviewed deltas are allowed through (debug.probe
+# "openocd"->null #848; the postCommands/outputDir additive keys and the
+# zephyr build/ artifact nesting, tan-cli#550/alp-sdk#1360; the AEN A32
+# unbuildable-MACHINE refusal, #1982 -- see tests/parity/seam1_field_diff.py's
+# module docstring for the authoritative, current list); any other emit
+# change fails the gate ON THIS PR -- which is exactly where the ADR wants it
+# surfaced. seam2 (real build + Renode smoke, needs a toolchain runner) is a
 # separate follow-up. Tracked in #855.
 name: parity-seam1
 

@@ -80,11 +80,18 @@ This matches what `scripts/alp_orchestrate/` writes into the
 emitted `system-manifest.yaml` per the heterogeneous-OS spec at
 `docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md`.
 
-The AEN A32-class MACHINEs (`e1m-aen801-a32`, `e1m-aen701-a32`)
-ship the carrier scaffolding today -- they `require` the upstream
-Alif `devkit-e8` base and override the carrier specifics; the carrier
-DTB + TF-A memory map + full image-bake gate on the maintainer's AEN
-HW config (marked `# TBD(alif-hw-config)` in the machine confs).
+The AEN A32-class MACHINEs (`e1m-aen801-a32`, `e1m-aen701-a32`) carry
+carrier scaffolding in-tree, but neither builds today, for related but
+distinct reasons: `e1m-aen801-a32.conf`'s active `require` names an
+upstream `devkit-e8.conf` that exists in no branch of the public
+`meta-alif-ensemble` (#1968), while `e1m-aen701-a32.conf`'s `require`
+on `devkit-e7.conf` (which DOES exist upstream, unlike `devkit-e8.conf`)
+is commented out pending that layer being vendored at all. Both are
+unbuildable regardless: `meta-alif-ensemble` is Yocto-series-incompatible
+with this repo's Scarthgap baseline (#1971).  The orchestrator refuses
+to emit a `bitbake` command for either MACHINE for the same reason
+(#1982).  See the
+"Alif Ensemble E8" section below and issue #264 for the rebuild.
 
 ## How customers consume it
 
@@ -218,38 +225,79 @@ MACHINE = "e1m-nx9101-a55"
 bitbake alp-image-edge
 ```
 
-### Alif Ensemble E8 — via meta-alif-ensemble
+### Alif Ensemble E8 — via meta-alif-ensemble (BROKEN today — see #264)
 
-The AEN801 (E8) A32 path rides on Alif's
+> **This path does not build. Do not follow the steps below as
+> written; they are kept only to document what does not work and
+> why.** `e1m-aen801-a32` fails at BitBake's own `require` step (its
+> `require conf/machine/devkit-e8.conf` names a file absent from every
+> branch of the public upstream, issue #1968); `e1m-aen701-a32` never
+> reaches that step because its own `require` is commented out pending
+> the layer being vendored, so it parses with no base tune / kernel
+> provider / TF-A platform set at all. The orchestrator refuses to emit
+> a `bitbake` command for either MACHINE (`YOCTO_MACHINE_UNBUILDABLE`
+> in `scripts/alp_orchestrate/orchestrator.py`, issue #1982). PR
+> **#264** is rebuilding this path on a real base; this section will be
+> rewritten once that lands.
+
+The AEN801 (E8) A32 path was intended to ride on Alif's
 [`meta-alif-ensemble`](https://github.com/alifsemi/meta-alif-ensemble)
-BSP, branch **scarthgap** (matching alp-sdk's Yocto series).  That
-layer ships the upstream-complete `devkit-e8` MACHINE (+ `appkit-e8`)
-— linux-alif, the TF-A platform, and `devkit-e8.dtb` — which the
-`e1m-aen801-a32.conf` carrier `require`s and then overrides.  On the
-M55 side the same E8 platform builds on upstream Zephyr's
-`ensemble_e8_dk` board, so the heterogeneous E8 stack is
-upstream-native top to bottom; alp-sdk only adds the thin carrier
-overlay (ADR-0017).  alp-sdk does **not** redistribute or fork the
-Alif BSP.
+BSP.  Three independent things are wrong with that plan as documented
+here previously:
+
+- **There is no `scarthgap` branch.** Verified 2026-09-05: the public
+  repo has exactly one branch, `devkit-ex-b0` (also `origin/HEAD`) —
+  see issue #1967.
+- **Even on `devkit-ex-b0`, `conf/machine/devkit-e8.conf` does not
+  exist.** `conf/machine/` there carries only `appkit-e7.conf`,
+  `devkit-e5.conf`, `devkit-e7.conf`.  `e1m-aen801-a32.conf`'s active
+  `require` names that missing file — see issue #1968. (`devkit-e7.conf`
+  DOES exist there; `e1m-aen701-a32.conf`'s `require` on it is
+  commented out in-tree pending the layer being vendored at all, a
+  separate gap from #1968.) Whether a `scarthgap`-series layer with
+  `devkit-e8.conf` exists behind Alif's login-gated support portal is
+  unconfirmed; that question needs asking Alif directly, not assuming
+  either answer.
+- **The layer is structurally incompatible with this repo's Yocto
+  baseline regardless.** `devkit-ex-b0`'s `layer.conf` declares
+  `LAYERSERIES_COMPAT = "warrior zeus"` (Yocto 3.0, 2019) against
+  meta-alp-sdk's Scarthgap (5.0.11) baseline, uses pre-honister
+  `_append`/`_prepend` override syntax removed in Yocto 4.0+, pins a
+  stale `linux-alif_5.4.bb` kernel (the E8 kernel work that actually
+  exists upstream is on `linux_alif` branch `v6.12-dev`, Linux
+  6.12.6), and its machine confs pass TF-A build knobs
+  (`UART`/`HYPRAM_EN`/`FLASH_EN`/`MODEM_SRAM`/`RAM_PRELOADED_DTB_BASE`)
+  that current `trusted-firmware-a_alif` no longer defines — see issue
+  #1971.
+
+None of this affects the **M55 side**: the E8 platform builds on
+upstream Zephyr's `ensemble_e8_dk` board today, so the heterogeneous
+E8 story is real for the M55 HP/HE cores (see
+[`../docs/bring-up-aen.md`](../docs/bring-up-aen.md)) — it is only the
+A32 Linux cluster's Yocto path that is unbuilt.  alp-sdk does **not**
+redistribute or fork the Alif BSP.
 
 ```bash
-# 1. Clone the Alif Ensemble BSP (scarthgap) under your own licence:
-git clone -b scarthgap https://github.com/alifsemi/meta-alif-ensemble ../meta-alif-ensemble
+# BROKEN -- kept for documentation only, see the callout above.
+# 1. Clone the Alif Ensemble BSP under your own licence (there is no
+#    `scarthgap` branch; this clones the only branch that exists):
+git clone -b devkit-ex-b0 https://github.com/alifsemi/meta-alif-ensemble ../meta-alif-ensemble
 bitbake-layers add-layer ../meta-alif-ensemble
 
 # 2. Add meta-alp-sdk (if not already) and pick the MACHINE:
 MACHINE = "e1m-aen801-a32"
-bitbake alp-image-edge
+bitbake alp-image-edge   # fails: MACHINE parse error, `require
+                          # conf/machine/devkit-e8.conf` -- see #1968
 ```
 
-The `e1m-aen801-a32.conf` MACHINE ships the carrier scaffolding today;
-the carrier DTB, TF-A memory map, and boot-media routing are
-maintainer-supplied AEN HW-config inputs and are marked
-`# TBD(alif-hw-config)` until that config lands (E8 silicon is also
-flagged `status.preliminary` in `metadata/e1m_modules/E1M-AEN801.yaml`).
-The `e1m-aen701-a32.conf` (E7) MACHINE follows the same pattern but is
-deprioritised both ways — Alp Lab leads with AEN801/E8, and upstream
-Alif demotes E7 on scarthgap (only `devkit-e7.conf.orig` remains).
+The `e1m-aen801-a32.conf` / `e1m-aen701-a32.conf` MACHINEs carry carrier
+scaffolding in-tree, but neither builds today for the reasons above
+(one fails BitBake's `require` parse outright, the other never wires up
+a base at all); their carrier DTB, TF-A memory map, and boot-media
+routing were also pending maintainer-supplied AEN HW-config inputs (marked
+`# TBD(alif-hw-config)`) independent of this defect (E8 silicon is
+also flagged `status.preliminary` in
+`metadata/e1m_modules/E1M-AEN801.yaml`).  Track the rebuild at #264.
 
 ## Per-machine inference runtime
 

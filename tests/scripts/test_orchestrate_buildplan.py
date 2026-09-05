@@ -407,6 +407,48 @@ def test_emit_build_plan_missing_board_tree_blocks_command_not_dropped(
     assert "alp_e1m_aen801_m55_hp" not in warning["message"]
 
 
+AEN801_STOCK_A32_DEFAULT = """
+som:
+  sku: E1M-AEN801
+
+cores:
+  m55_hp:
+    os: "off"
+  m55_he:
+    os: "off"
+"""
+
+
+def test_emit_build_plan_aen_a32_machine_unbuildable_blocks_command(
+    tmp_path: Path,
+) -> None:
+    """The AEN A32 cluster's default topology (`app: alp-image-edge`,
+    `machine: e1m-aen801-a32`) is the `STOCK_IMAGE_APP` token, exempt
+    from the `recipe:` requirement -- but `e1m-aen801-a32` is a
+    known-non-buildable MACHINE (issue #1982: its base `require` names
+    a file absent from every branch of the public meta-alif-ensemble,
+    #1968, on a layer that is Yocto-series-incompatible with this
+    repo's Scarthgap baseline regardless, #1971).  The plan must never
+    carry `bitbake alp-image-edge` for it -- the slice is still
+    carried (never dropped) with `command: null` plus a
+    `yocto-machine-unbuildable` warning naming the blocking issues."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    path = _write_board(tmp_path, AEN801_STOCK_A32_DEFAULT)
+    plan = _json.loads(emit_build_plan(
+        load_board_yaml(path), board_yaml=path, build_root=Path("build")))
+
+    a32 = next(s for s in plan["slices"] if s["coreId"] == "a32_cluster")
+    assert a32["command"] is None
+
+    warning = next(w for w in plan["warnings"] if w["coreId"] == "a32_cluster")
+    assert warning["code"] == "yocto-machine-unbuildable"
+    assert "e1m-aen801-a32" in warning["message"]
+    assert "#1968" in warning["message"]
+    assert "#1971" in warning["message"]
+
+
 def test_real_zephyr_board_names_lists_every_shipped_tree() -> None:
     """No test named the actual members of `_real_zephyr_board_names`,
     only that ONE of them showed up in a warning message -- a regression
