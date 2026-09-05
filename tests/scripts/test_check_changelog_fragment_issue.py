@@ -54,6 +54,27 @@ def test_a_heading_with_no_citation_at_all_is_not_flagged(tmp_path: Path) -> Non
     assert gate.find_problems(root) == []
 
 
+def test_a_non_heading_first_line_is_not_flagged(tmp_path: Path) -> None:
+    """A fragment whose first non-blank line is not a `### ` heading at all
+    (a structural defect `check_changelog_fragments.py` already owns) is
+    skipped by this gate, even though its filename's leading digits would
+    mismatch a `#N` mentioned in that first line."""
+    root = _repo(tmp_path, {
+        "500.md": "Not a heading, just prose mentioning #501.\n\nBody.",
+    })
+    assert gate.find_problems(root) == []
+
+
+def test_a_non_digit_leading_filename_is_not_flagged(tmp_path: Path) -> None:
+    """A fragment whose filename does not start with digits (a structural
+    defect `check_changelog_fragments.py` already owns) is skipped by this
+    gate, even though it has a normal single-citation heading."""
+    root = _repo(tmp_path, {
+        "notes.md": "### Fixed — Entry (#42)\n\nBody.",
+    })
+    assert gate.find_problems(root) == []
+
+
 def test_a_heading_citing_a_range_is_not_flagged(tmp_path: Path) -> None:
     """changelog.d/1761.md's shape: `(#1757-#1783)` cites two distinct
     numbers -- ambiguous which one, if any, should be the filename; under-flag."""
@@ -85,10 +106,16 @@ def test_a_heading_repeating_the_same_number_is_still_checked(tmp_path: Path) ->
 
 
 def test_body_only_citations_are_never_scoped(tmp_path: Path) -> None:
-    """Only the heading (first non-blank line) is scoped -- a body citing a
-    different issue is not this gate's concern."""
+    """Only the heading (first non-blank line) is scoped -- a body citing an
+    issue is not this gate's concern, even when the heading itself cites
+    none. A whole-file scan (rather than heading-only) would pick up the
+    body's `#999`, treat it as the sole citation, and wrongly flag this
+    against the filename's leading `853` -- so this fixture, unlike a
+    heading that already cites its own filename number, actually
+    discriminates a whole-file-scan mutant from the real heading-only
+    scope."""
     root = _repo(tmp_path, {
-        "201.md": "### Fixed — Entry (#201)\n\nSee also #999 for background.",
+        "853.md": "### Changed\n\n- Documented something, fixes #999.",
     })
     assert gate.find_problems(root) == []
 

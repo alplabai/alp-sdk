@@ -148,6 +148,20 @@
       "ci": null
     },
     {
+      "id": "changelog-fragment-issue",
+      "description": "A changelog.d/*.md fragment's filename leading digits match the single issue its own heading cites (where decidable), so the leading digits stay the join key back to the issue instead of silently drifting (#1957).",
+      "runner": "check-script",
+      "script": "scripts/check_changelog_fragment_issue.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "changelog-fragments",
       "description": "Every changelog.d/*.md fragment is well-formed (foldable filename, non-empty, starts with its own ### heading) so a malformed fragment fails the PR instead of the release cut (#1395).",
       "runner": "check-script",
@@ -167,20 +181,6 @@
       "description": "Every `path:line` citation in a changelog.d/*.md fragment resolves to a real file and an in-range line, and an anchored citation's quoted text is still inside the cited range, so a release note cannot point at code that moved (#1416).",
       "runner": "check-script",
       "script": "scripts/check_changelog_citations.py",
-      "gate": true,
-      "profiles": [
-        "pr",
-        "full",
-        "release"
-      ],
-      "output": "none",
-      "ci": "pr-metadata-validate.yml:validate"
-    },
-    {
-      "id": "changelog-fragment-issue",
-      "description": "A changelog.d/*.md fragment's filename leading digits match the single issue its own heading cites (where decidable), so the leading digits stay the join key back to the issue instead of silently drifting (#1957).",
-      "runner": "check-script",
-      "script": "scripts/check_changelog_fragment_issue.py",
       "gate": true,
       "profiles": [
         "pr",

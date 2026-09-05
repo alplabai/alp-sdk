@@ -31,8 +31,10 @@ DOES NOT CATCH, on purpose -- under-flag on ambiguity:
   * a heading with NO `#N` citation at all -- `changelog.d/813.md` and
     `changelog.d/853.md`/`changelog.d/1652.md` (the latter two are bare
     `### Added`/`### Changed` bullet-body fragments with no title, a shape
-    `changelog.d/README.md` does not document) all fall here. There is
-    nothing to compare the filename against, so nothing is flagged.
+    `changelog.d/README.md` does not document) all fall here, as does
+    `changelog.d/1949.md` (a titled heading that simply never cites an
+    issue number). There is nothing to compare the filename against, so
+    nothing is flagged.
   * a heading citing MORE THAN ONE DISTINCT issue number -- e.g. a range
     (`changelog.d/1761.md`'s heading reads `(#1757-#1783)`) or a list of
     several issues closed by one sweep. Which one, if any, is "the" issue
