@@ -5,7 +5,7 @@
   "description": "Per-SoM-family hardware-revision compatibility table.  Each entry under `hw_revisions:` declares an rev label (e.g. r1, r2) with its SDK-version compatibility window + optional summary / changes bullets.  The customer-facing CHANGELOG.md alongside this file carries the full rev-by-rev narrative.",
   "type": "object",
   "required": ["family", "display_name", "hw_revisions"],
-  "additionalProperties": true,
+  "additionalProperties": false,
   "properties": {
     "family": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
     "display_name": { "type": "string" },
