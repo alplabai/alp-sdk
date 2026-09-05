@@ -38,7 +38,7 @@ their own preset files pending the same netlist evidence.
 
 Memory + per-SKU specifics: [`metadata/e1m_modules/E1M-AEN<NNN>.yaml`](../../metadata/e1m_modules/).
 
-## On-module housekeeping I2C (BRD_I2C)
+## On-module housekeeping I2C (BRD_I2C) {#on-module-housekeeping-i2c-brd_i2c}
 
 **E1M-AEN801 only.** BRD_I2C is the module's own housekeeping bus: a real
 time clock and a temperature sensor your application can use without a

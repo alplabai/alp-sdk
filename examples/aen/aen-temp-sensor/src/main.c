@@ -128,8 +128,11 @@ static void print_address_anomaly_hint(void)
 	       "    3. Only if the joint is genuinely open: rework it.  Do NOT change\n"
 	       "       the devicetree to 0x%02x -- that would bake one unit's defect\n"
 	       "       into the product and break every correctly-built module.\n",
-	       TMP112_DT_ADDR, TMP112_DESIGN_ADDR, TMP112_OBSERVED_ANOMALY_ADDR,
-	       TMP112_DESIGN_ADDR, TMP112_OBSERVED_ANOMALY_ADDR,
+	       TMP112_DT_ADDR,
+	       TMP112_DESIGN_ADDR,
+	       TMP112_OBSERVED_ANOMALY_ADDR,
+	       TMP112_DESIGN_ADDR,
+	       TMP112_OBSERVED_ANOMALY_ADDR,
 	       TMP112_OBSERVED_ANOMALY_ADDR);
 }
 
@@ -197,7 +200,8 @@ int main(void)
 	if (!device_is_ready(tmp112)) {
 		printk("TMP112 \"%s\" @0x%02x failed to initialise "
 		       "(upstream tmp112_init() writes CONFIG/T_LOW/T_HIGH; no ACK).\n",
-		       tmp112->name, TMP112_DT_ADDR);
+		       tmp112->name,
+		       TMP112_DT_ADDR);
 		print_address_anomaly_hint();
 		printk("RESULT FAIL: TMP112 @0x%02x not ready -- see the address "
 		       "diagnostic above\n",
@@ -207,7 +211,8 @@ int main(void)
 
 	printk("TMP112 \"%s\" ready at devicetree address 0x%02x (design address, "
 	       "U20 ADD0 tied to 0V)\n",
-	       tmp112->name, TMP112_DT_ADDR);
+	       tmp112->name,
+	       TMP112_DT_ADDR);
 	printk("taking %d samples %d ms apart ...\n", TMP112_SAMPLES, TMP112_PERIOD_MS);
 
 	/* 2 + 3. Poll, print, band-check.  Every sample is reported individually
@@ -222,11 +227,10 @@ int main(void)
 			 * NACK -- the bus works, the part did not answer; -116
 			 * (-ETIMEDOUT) is the line never being released, an electrical
 			 * signature.  Printing the value keeps those distinguishable. */
-			printk("  sample %d/%d: fetch failed, rc=%d\n", i + 1, TMP112_SAMPLES,
-			       rc);
+			printk("  sample %d/%d: fetch failed, rc=%d\n", i + 1, TMP112_SAMPLES, rc);
 		} else {
-			bool plausible = (milli_c >= TMP112_PLAUSIBLE_LO_MILLI_C &&
-					  milli_c <= TMP112_PLAUSIBLE_HI_MILLI_C);
+			bool plausible =
+			    (milli_c >= TMP112_PLAUSIBLE_LO_MILLI_C && milli_c <= TMP112_PLAUSIBLE_HI_MILLI_C);
 
 			n_ok++;
 			n_in_band += plausible ? 1U : 0U;
@@ -234,12 +238,14 @@ int main(void)
 			/* Integer milli-degrees C, printed as-is.  Divide by 1000 for
 			 * whole degrees if you want them -- but keep the raw integer in
 			 * any log you intend to parse later. */
-			printk("  sample %d/%d: %d milli-degC%s\n", i + 1, TMP112_SAMPLES,
+			printk("  sample %d/%d: %d milli-degC%s\n",
+			       i + 1,
+			       TMP112_SAMPLES,
 			       milli_c,
 			       plausible ? ""
-					 : "  <-- outside the plausible indoor band "
-					   "(15000..35000); PLAUSIBILITY only, not a "
-					   "correctness verdict");
+			                 : "  <-- outside the plausible indoor band "
+			                   "(15000..35000); PLAUSIBILITY only, not a "
+			                   "correctness verdict");
 		}
 
 		/* Not slept after the last sample: nothing follows it. */
@@ -258,20 +264,25 @@ int main(void)
 	if (n_ok == (unsigned int)TMP112_SAMPLES && n_in_band == n_ok) {
 		printk("RESULT PASS: %u/%u TMP112 samples read at 0x%02x, all within the "
 		       "plausible indoor band (plausibility check, not an accuracy claim)\n",
-		       n_ok, (unsigned int)TMP112_SAMPLES, TMP112_DT_ADDR);
+		       n_ok,
+		       (unsigned int)TMP112_SAMPLES,
+		       TMP112_DT_ADDR);
 	} else if (n_ok > 0U) {
 		printk("RESULT PARTIAL: %u/%u TMP112 samples read at 0x%02x, %u of those "
 		       "within the plausible indoor band -- the sensor answers, so check "
 		       "the per-sample lines above for dropped fetches or an environment "
 		       "genuinely outside 15..35 degC\n",
-		       n_ok, (unsigned int)TMP112_SAMPLES, TMP112_DT_ADDR, n_in_band);
+		       n_ok,
+		       (unsigned int)TMP112_SAMPLES,
+		       TMP112_DT_ADDR,
+		       n_in_band);
 	} else {
-		printk("TMP112 @0x%02x initialised but every fetch failed.\n",
-		       TMP112_DT_ADDR);
+		printk("TMP112 @0x%02x initialised but every fetch failed.\n", TMP112_DT_ADDR);
 		print_address_anomaly_hint();
 		printk("RESULT FAIL: 0/%u TMP112 samples read at 0x%02x -- see the address "
 		       "diagnostic above\n",
-		       (unsigned int)TMP112_SAMPLES, TMP112_DT_ADDR);
+		       (unsigned int)TMP112_SAMPLES,
+		       TMP112_DT_ADDR);
 	}
 
 	return 0;

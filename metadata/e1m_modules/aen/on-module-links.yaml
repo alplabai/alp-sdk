@@ -22,8 +22,8 @@
 # docs/porting-new-som.md, "Regenerating a board").
 #
 # Every entry carries an `evidence:` string citing a NON-DERIVATIVE
-# source -- the E1M-AEN-2626-R2 netlist (alp-sdk-internal), the AE822 DFP
-# pin table, or a dated bench measurement -- never a generated file.
+# source -- the E1M-AEN-2626-R2 netlist, the AE822 DFP pin table, or a
+# dated bench measurement -- never a generated file.
 schemaVersion: on-module-links-v1
 families:
   - aen
