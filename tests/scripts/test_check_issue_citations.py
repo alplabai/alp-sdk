@@ -221,6 +221,43 @@ def test_next_key_banner_not_swallowed_when_field_line_has_no_comment(tmp_path):
     assert mod.find_problems(tmp_path) == []
 
 
+def test_one_space_indentation_drift_warns_instead_of_silently_dropping(tmp_path):
+    """Reproduces the round-2 review finding literally: the field's own `#`
+    sits at column 28, the very next continuation line is hand-wrapped one
+    column short (27) -- the strict `>=` rule ends the block on THAT first
+    continuation, before ever reading it or anything after it. Two CLOSED
+    citations (#1234 on the dropped line, #5678 on a would-be-aligned line
+    that is now unreachable) vanish with ZERO diagnostic before this fix --
+    both `find_problems()` and `find_warnings()` return `[]`. Must now WARN
+    instead (still under-flagged -- the accepted, documented cost -- but no
+    longer silent)."""
+    mod = _load()
+    field_line = "driver_status:".ljust(28) + "# partial, still blocked."
+    cont_line_1234 = " " * 27 + "# See #1234 for the details."
+    cont_line_5678 = " " * 28 + "# Also #5678 for the rest."
+    assert field_line.index("#") == 28
+    assert len(cont_line_1234) - len(cont_line_1234.lstrip()) == 27
+    _chip_yaml(
+        tmp_path,
+        "widget",
+        "chip_id: widget\n"
+        + field_line
+        + "\n"
+        + cont_line_1234
+        + "\n"
+        + cont_line_5678
+        + "\n",
+    )
+    _snapshot(tmp_path, {"1234": "CLOSED", "5678": "CLOSED"})
+
+    assert mod.find_problems(tmp_path) == []  # #1234/#5678 never read -- documented cost
+    warnings = mod.find_warnings(tmp_path)
+    assert any(
+        "widget.yaml" in w and "indented to column 27" in w and "column 28" in w
+        for w in warnings
+    ), warnings
+
+
 def test_aligned_continuation_comment_is_still_read(tmp_path):
     """Non-vacuity for the fix above: a continuation comment indented to at
     least the field's own `#` column is still part of the block and still

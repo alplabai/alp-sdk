@@ -66,20 +66,70 @@ def _issue_state(number: int) -> str | None:
     return state or None
 
 
+def _read_existing_doc(path: Path) -> dict | None:
+    """The JSON object already on disk at `path`, or None if it is
+    missing/unparsable/not an object. Shared by `_pick_generated_at`
+    (idempotency) and `main` (empty/shrink refusal, #1950 round 3)."""
+    if not path.is_file():
+        return None
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def _read_existing_issues(path: Path) -> dict[str, str]:
+    """The `issues` object already on disk at `path`, or `{}` if the file
+    is missing/unparsable/malformed."""
+    doc = _read_existing_doc(path)
+    issues = doc.get("issues") if doc else None
+    return issues if isinstance(issues, dict) else {}
+
+
+def _refuse_reason(
+    numbers: list[int], issues: dict[str, str], existing_issues: dict[str, str]
+) -> str | None:
+    """None if it is safe to write `issues` to the snapshot; otherwise the
+    reason to refuse and exit non-zero instead (#1950 round 3). Pulled out
+    of `main()`, same as `_pick_generated_at`, so it is unit-testable
+    without a live `gh` call.
+
+    A `gh` auth/network failure makes every `_issue_state()` call return
+    None, so `numbers` (citations harvested) is non-empty but `issues`
+    (citations actually resolved) comes out empty -- refuse rather than
+    silently wipe a real snapshot down to `{}` and exit 0. A drastic shrink
+    against what is already on disk gets the same refusal: `gh` failing on
+    *most* (not all) of the cited numbers looks, to a human `git diff`,
+    exactly like a real mass issue-closure -- which never actually happens.
+    """
+    if numbers and not issues:
+        return (
+            f"resolved 0 of {len(numbers)} cited issue(s) via `gh` -- "
+            f"refusing to overwrite the snapshot with an empty one. Check "
+            f"`gh auth status` and network connectivity, then retry."
+        )
+    if existing_issues and len(issues) < len(existing_issues) / 2:
+        return (
+            f"new issue set ({len(issues)} resolved) is less than half the "
+            f"size of the snapshot already on disk ({len(existing_issues)}) "
+            f"-- refusing to write; this looks like a partial `gh` failure, "
+            f"not a real mass issue-closure. Check `gh auth status` and "
+            f"network connectivity, then retry."
+        )
+    return None
+
+
 def _pick_generated_at(out_path: Path, issues: dict[str, str]) -> str:
     """The `generated_at` timestamp to write: the existing one, unchanged,
     if `out_path` already records the exact same `issues` object, else a
     fresh UTC stamp. Pulled out of `main()` so the idempotency rule (#1950
     round 2) is unit-testable without a live `gh` call."""
-    if out_path.is_file():
-        try:
-            existing = json.loads(out_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            existing = None
-        if isinstance(existing, dict) and existing.get("issues") == issues:
-            ts = existing.get("generated_at")
-            if isinstance(ts, str):
-                return ts
+    existing = _read_existing_doc(out_path)
+    if existing is not None and existing.get("issues") == issues:
+        ts = existing.get("generated_at")
+        if isinstance(ts, str):
+            return ts
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -106,6 +156,10 @@ def main() -> int:
             f"rather than blocks on a number the snapshot has no record of.",
             file=sys.stderr,
         )
+
+    reason = _refuse_reason(numbers, issues, _read_existing_issues(args.out))
+    if reason:
+        sys.exit(f"refresh_issue_state_snapshot: {reason}")
 
     doc = {"generated_at": _pick_generated_at(args.out, issues), "issues": issues}
     args.out.parent.mkdir(parents=True, exist_ok=True)

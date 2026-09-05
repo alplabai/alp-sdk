@@ -32,7 +32,7 @@ DOES NOT CATCH, on purpose (scope, per #1950's own design discussion):
     `notes:` blocks, any other YAML field's comment. Those files are full of
     legitimate historical references ("fixed in #N") and a blanket `#NNNN`
     harvest over them is noise from day one. Widening the harvester there is
-    left for a follow-up if it turns out to be cheap.
+    filed as a follow-up, #1958, if it turns out to be cheap.
   * a citation whose surrounding clause reads as historical rather than a
     blocker claim (see HISTORICAL below) -- reported as neither pass nor
     fail; it is simply not examined.
@@ -152,9 +152,18 @@ def _citations_in_block(block_text: str) -> list[tuple[int, bool, str]]:
     return out
 
 
-def _iter_yaml_status_blocks(root: Path):
+def _iter_yaml_status_blocks(root: Path, warnings: list[str] | None = None):
     """Yield (relpath, 1-based line, block text) for every
-    `*driver_status:` field's trailing comment block under metadata/**."""
+    `*driver_status:` field's trailing comment block under metadata/**.
+
+    `warnings`, if given, collects one entry per continuation line that
+    LOOKS like an attempted continuation (indented further than the
+    `driver_status:` line itself) but falls short of the field's own `#`
+    column -- a one-space hand-wrapping slip that would otherwise end the
+    block silently, with zero diagnostic (#1950 round 3). A continuation
+    indented no further than the field line's own leading whitespace is a
+    different key's banner comment, not a slipped continuation, and stays
+    silent -- see `test_next_key_banner_not_swallowed_*`."""
     meta_dir = root / "metadata"
     if not meta_dir.is_dir():
         return
@@ -163,6 +172,7 @@ def _iter_yaml_status_blocks(root: Path):
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             continue
+        relpath = path.relative_to(root)
         i = 0
         while i < len(lines):
             m = _YAML_STATUS_FIELD_RE.match(lines[i])
@@ -171,16 +181,30 @@ def _iter_yaml_status_blocks(root: Path):
                 continue
             parts = [m.group(1) or ""]
             hash_col = lines[i].find("#")
+            field_indent = len(lines[i]) - len(lines[i].lstrip())
             j = i + 1
             while j < len(lines) and hash_col != -1:
                 cm = _YAML_CONT_RE.match(lines[j])
-                if not cm or len(cm.group(1)) < hash_col:
+                if not cm:
+                    break
+                indent = len(cm.group(1))
+                if indent < hash_col:
+                    if warnings is not None and indent > field_indent:
+                        warnings.append(
+                            f"{relpath.as_posix()}:{j + 1}: comment "
+                            f"continuation is indented to column {indent}, "
+                            f"short of the driver_status field's own "
+                            f"comment at column {hash_col} -- treated as "
+                            f"ending the block; this line and everything "
+                            f"after it were NOT read as part of it. Align "
+                            f"it to column {hash_col} if it belongs there."
+                        )
                     break
                 parts.append(cm.group(2))
                 j += 1
             block_text = " ".join(p.strip() for p in parts).strip()
             if block_text:
-                yield path.relative_to(root), i + 1, block_text
+                yield relpath, i + 1, block_text
             i = j
 
 
@@ -216,11 +240,14 @@ def _iter_header_status_blocks(root: Path):
                 yield path.relative_to(root), i + 1, block_text
 
 
-def find_citations(root: Path) -> list[Citation]:
+def find_citations(root: Path, warnings: list[str] | None = None) -> list[Citation]:
     """Every `#NNNN` citation inside a driver-status prose block, in scope
-    order (metadata/**/*.yaml, then include/alp/chips/*.h)."""
+    order (metadata/**/*.yaml, then include/alp/chips/*.h). `warnings`, if
+    given, collects non-blocking diagnostics from the harvest itself (e.g.
+    an indentation-drift-truncated block, see `_iter_yaml_status_blocks`)
+    -- separate from the state-lookup warnings `_evaluate` adds."""
     out: list[Citation] = []
-    for relpath, lineno, block in _iter_yaml_status_blocks(root):
+    for relpath, lineno, block in _iter_yaml_status_blocks(root, warnings):
         for num, hist, clause in _citations_in_block(block):
             out.append(Citation(relpath.as_posix(), lineno, num, hist, clause))
     for relpath, lineno, block in _iter_header_status_blocks(root):
@@ -258,15 +285,25 @@ def _is_stale(generated_at: str) -> bool:
     return datetime.now(timezone.utc) - ts > timedelta(days=_STALE_AFTER_DAYS)
 
 
-def _evaluate(root: Path, snapshot_path: Path) -> tuple[list[str], list[str]]:
+def _evaluate(
+    root: Path, snapshot_path: Path
+) -> tuple[list[str], list[str], dict[str, int]]:
     """Enforce every citation the snapshot CAN resolve, regardless of its
     age -- a closed issue stays closed. Staleness only earns one loud,
     non-blocking WARNING naming the refresh command; it never silently
     downgrades an otherwise-resolvable ERROR (see STALENESS in the module
-    docstring, #1950 round 2)."""
-    citations = find_citations(root)
-    issues_map, generated_at, warnings = _load_snapshot(snapshot_path)
-    warnings = list(warnings)
+    docstring, #1950 round 2).
+
+    The third return value is a harvest/evaluation count breakdown (#1950
+    round 3, so `main()`'s "OK" output can say what it actually did): how
+    many citations were harvested at all, how many were historical (skipped,
+    never examined), and how many were actually evaluated against the
+    snapshot (the rest have no record in the snapshot yet -- a warning, not
+    an evaluation)."""
+    warnings: list[str] = []
+    citations = find_citations(root, warnings)
+    issues_map, generated_at, snapshot_warnings = _load_snapshot(snapshot_path)
+    warnings.extend(snapshot_warnings)
 
     if generated_at is not None and _is_stale(generated_at):
         warnings.append(
@@ -278,9 +315,12 @@ def _evaluate(root: Path, snapshot_path: Path) -> tuple[list[str], list[str]]:
         )
 
     errors: list[str] = []
+    historical = 0
+    evaluated = 0
 
     for c in citations:
         if c.historical:
+            historical += 1
             continue
         state = (issues_map or {}).get(str(c.issue))
         if state is None:
@@ -290,13 +330,15 @@ def _evaluate(root: Path, snapshot_path: Path) -> tuple[list[str], list[str]]:
                 f"citation, or the snapshot predates it) -- not enforced"
             )
             continue
+        evaluated += 1
         if state.strip().upper() != "OPEN":
             errors.append(
                 f"{c.file}:{c.line}: cites #{c.issue} ({state}) as an "
                 f'apparent open blocker: "{c.clause}"'
             )
 
-    return errors, warnings
+    stats = {"harvested": len(citations), "historical": historical, "evaluated": evaluated}
+    return errors, warnings, stats
 
 
 def find_problems(root: Path, snapshot_path: Path | None = None) -> list[str]:
@@ -307,14 +349,14 @@ def find_problems(root: Path, snapshot_path: Path | None = None) -> list[str]:
     use `find_warnings` for the non-blocking picture."""
     if snapshot_path is None:
         snapshot_path = root / SNAPSHOT_RELPATH
-    errors, _ = _evaluate(root, snapshot_path)
+    errors, _, _ = _evaluate(root, snapshot_path)
     return errors
 
 
 def find_warnings(root: Path, snapshot_path: Path | None = None) -> list[str]:
     if snapshot_path is None:
         snapshot_path = root / SNAPSHOT_RELPATH
-    _, warnings = _evaluate(root, snapshot_path)
+    _, warnings, _ = _evaluate(root, snapshot_path)
     return warnings
 
 
@@ -325,7 +367,7 @@ def main() -> int:
     args = ap.parse_args()
 
     snapshot_path = args.snapshot or (args.root / SNAPSHOT_RELPATH)
-    errors, warnings = _evaluate(args.root, snapshot_path)
+    errors, warnings, stats = _evaluate(args.root, snapshot_path)
 
     for w in warnings:
         print(f"  WARN {w}")
@@ -346,8 +388,10 @@ def main() -> int:
         return 1
 
     print(
-        f"check-issue-citations: OK -- {len(warnings)} warning(s), no "
-        f"blocking findings."
+        f"check-issue-citations: OK -- harvested {stats['harvested']} "
+        f"citation(s), {stats['historical']} historical (not evaluated), "
+        f"{stats['evaluated']} evaluated against the snapshot, "
+        f"{len(warnings)} warning(s), no blocking findings."
     )
     return 0
 

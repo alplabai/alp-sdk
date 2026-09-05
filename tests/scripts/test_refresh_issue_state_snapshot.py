@@ -51,3 +51,68 @@ def test_missing_file_gets_a_fresh_timestamp(tmp_path):
     assert not out.exists()
     ts = mod._pick_generated_at(out, {"1": "CLOSED"})
     assert ts and ts != "2020-01-01T00:00:00Z"
+
+
+# -- refusing to wipe the snapshot on a `gh` auth/network failure (#1950 round 3) --
+
+
+def test_all_unresolved_refuses_to_write():
+    """MUST fail: every `_issue_state()` call returning None (a `gh` auth
+    or network outage) must not be allowed to overwrite the snapshot with
+    `{}` -- reproduces the round-2 review finding verbatim."""
+    mod = _load()
+    reason = mod._refuse_reason([494, 495, 496], {}, {})
+    assert reason is not None
+    assert "0 of 3" in reason
+
+
+def test_all_unresolved_refuses_even_against_an_existing_snapshot():
+    mod = _load()
+    reason = mod._refuse_reason(
+        [494, 495, 496], {}, {"494": "CLOSED", "495": "CLOSED", "496": "CLOSED"}
+    )
+    assert reason is not None
+
+
+def test_drastic_shrink_against_disk_refuses_to_write():
+    """9 issues on disk, `gh` only resolves 2 of them this run -- a partial
+    outage, not 7 issues really vanishing. Must refuse."""
+    mod = _load()
+    existing = {str(n): "CLOSED" for n in range(1, 10)}
+    reason = mod._refuse_reason([1, 2], {"1": "CLOSED", "2": "CLOSED"}, existing)
+    assert reason is not None
+    assert "less than half" in reason
+
+
+def test_normal_refresh_does_not_refuse():
+    """Non-vacuity: a real refresh that resolves everything it harvested,
+    or a small legitimate shrink, must not trip the guard."""
+    mod = _load()
+    assert mod._refuse_reason([1, 2, 3], {"1": "OPEN", "2": "CLOSED", "3": "OPEN"}, {}) is None
+    existing = {"1": "OPEN", "2": "CLOSED", "3": "OPEN"}
+    assert mod._refuse_reason([1, 2], {"1": "OPEN", "2": "CLOSED"}, existing) is None
+
+
+def test_no_citations_and_no_existing_snapshot_does_not_refuse():
+    """A repo with zero driver-status citations at all (numbers == []) is
+    not a `gh` failure -- must not refuse."""
+    mod = _load()
+    assert mod._refuse_reason([], {}, {}) is None
+
+
+# -- _read_existing_issues -----------------------------------------------------
+
+
+def test_read_existing_issues_missing_file(tmp_path):
+    mod = _load()
+    assert mod._read_existing_issues(tmp_path / "nope.json") == {}
+
+
+def test_read_existing_issues_returns_the_issues_object(tmp_path):
+    mod = _load()
+    out = tmp_path / "issue-state-snapshot.json"
+    out.write_text(
+        json.dumps({"generated_at": "2020-01-01T00:00:00Z", "issues": {"1": "CLOSED"}}),
+        encoding="utf-8",
+    )
+    assert mod._read_existing_issues(out) == {"1": "CLOSED"}
