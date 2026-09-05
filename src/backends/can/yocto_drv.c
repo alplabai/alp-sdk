@@ -332,6 +332,15 @@ static void *_rx_loop(void *arg)
 			if (errno == EINTR) continue;
 			break; /* fatal poll() error -> stop */
 		}
+		if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+			/* A torn-down/invalid socket fd makes poll() return a
+             * POSITIVE rc with the error bit set in revents, NOT
+             * rc < 0 (issue #1962) -- the rc<0 guard above never
+             * catches this, and with this loop's infinite timeout
+             * there is nothing else to stop it from re-polling and
+             * returning immediately forever. */
+			break; /* fatal socket error -> stop, same as rc < 0 above */
+		}
 		if (fds[1].revents & POLLIN) {
 			break; /* close-side wake notification (issue #756) */
 		}
