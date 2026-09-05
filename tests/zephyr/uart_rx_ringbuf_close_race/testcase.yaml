@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Native-sim concurrency regression test for issue #1634:
+# alp_uart_rx_ringbuf_detach() must drain an in-flight
+# alp_uart_rx_ringbuf_pop() before recycling the handle's pool slot.
+# Lives under tests/zephyr/ (not tests/unit/) so the pr-twister gate
+# actually runs it.
+
+tests:
+  alp_sdk.uart_rx_ringbuf.close_race:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - uart
+      - concurrency
