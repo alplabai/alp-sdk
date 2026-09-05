@@ -3342,6 +3342,10 @@
       "script": "scripts/check_inference_backend_parity.py"
     },
     {
+      "purpose": "Flag a closed/merged GitHub issue cited as an open blocker in a driver-status prose block (issue #1950).",
+      "script": "scripts/check_issue_citations.py"
+    },
+    {
       "purpose": "Recipe-vs-west pin-parity gate (issue #1281).",
       "script": "scripts/check_library_pin_parity.py"
     },
