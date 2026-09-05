@@ -198,6 +198,41 @@ def test_minimal_has_no_declared_parameters_so_it_is_a_pure_copy():
     assert _minimal_record()["parameters"] == []
 
 
+def test_minimum_on_a_string_parameter_raises_curated_error_not_typeerror():
+    # #1916: this record validates clean against
+    # metadata/schemas/template-catalog-v1.schema.json, but used to crash
+    # with a bare `TypeError: '<' not supported between instances of
+    # 'str' and 'int'`. It must now raise the curated ParameterError.
+    spec = {"name": "knob", "type": "string", "description": "x",
+            "default": "a", "constraints": {"minimum": 5}}
+    with pytest.raises(alp_template.ParameterError, match=r"only applies to type 'integer'"):
+        alp_template._check_constraints("minimal", spec, "a")
+
+
+def test_maximum_on_an_enum_parameter_raises_curated_error():
+    spec = {"name": "knob", "type": "enum", "description": "x",
+            "default": "a", "constraints": {"maximum": 5}}
+    with pytest.raises(alp_template.ParameterError, match=r"only applies to type 'integer'"):
+        alp_template._check_constraints("minimal", spec, "a")
+
+
+def test_minimum_on_a_boolean_parameter_raises_curated_error():
+    # bool < int never raises (no crash), but the bound is still
+    # meaningless for a boolean -- refuse it too.
+    spec = {"name": "knob", "type": "boolean", "description": "x",
+            "default": False, "constraints": {"minimum": 5}}
+    with pytest.raises(alp_template.ParameterError, match=r"only applies to type 'integer'"):
+        alp_template._check_constraints("minimal", spec, False)
+
+
+def test_minimum_on_an_integer_parameter_still_enforces_the_bound():
+    spec = {"name": "knob", "type": "integer", "description": "x",
+            "default": 10, "constraints": {"minimum": 5}}
+    alp_template._check_constraints("minimal", spec, 10)  # no raise
+    with pytest.raises(alp_template.ParameterError, match=r"< minimum"):
+        alp_template._check_constraints("minimal", spec, 1)
+
+
 # --------------------------------------------------------------------------
 # find_template_by_cores() -- the --cores scaffold selector (issue #1652)
 # --------------------------------------------------------------------------

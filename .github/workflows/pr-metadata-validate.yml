@@ -23,6 +23,8 @@ on:
       - 'zephyr/kconfigs/**'
       - 'scripts/alp_project_emit/**'
       - 'scripts/check_chip_subsystems_parity.py'
+      - 'chips/**'
+      - 'scripts/check_delay_us_literal.py'
       - '.github/workflows/pr-metadata-validate.yml'
       - 'scripts/validate_metadata.py'
       - 'scripts/validate_board_yaml.py'
@@ -96,6 +98,8 @@ on:
       - 'zephyr/kconfigs/**'
       - 'scripts/alp_project_emit/**'
       - 'scripts/check_chip_subsystems_parity.py'
+      - 'chips/**'
+      - 'scripts/check_delay_us_literal.py'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/check_board_target_tree_parity.py'
       - 'scripts/check_atoc_reservation.py'
@@ -556,6 +560,9 @@ jobs:
 
       - name: "Gate — apt-get update/install goes through scripts/ci/apt-bounded.sh (#1575)"
         run: python3 scripts/check_apt_bounded.py
+
+      - name: "Gate — no fixed-literal alp_delay_us(N>=1000) under chips/ (#1621)"
+        run: python3 scripts/check_delay_us_literal.py
 
       - name: alp.lock generator self-check
         # alp.lock is generated on demand, not committed (#1576): its

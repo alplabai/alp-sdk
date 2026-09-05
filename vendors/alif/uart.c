@@ -13,6 +13,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "alp_internal.h"
+
 #include "Driver_USART.h"
 
 extern ARM_DRIVER_USART        Driver_USART0;
@@ -70,14 +72,47 @@ alp_uart_t *alp_uart_open(const alp_uart_config_t *cfg)
     }
     uint32_t stop_bits = (cfg->stop_bits == 2) ? ARM_USART_STOP_BITS_2 : ARM_USART_STOP_BITS_1;
     uint32_t data_bits = (cfg->data_bits == 7) ? ARM_USART_DATA_BITS_7 : ARM_USART_DATA_BITS_8;
-    uint32_t mode      = ARM_USART_MODE_ASYNCHRONOUS;
+
+    /* flow_control (issue #1639): this used to be hardcoded to
+     * ARM_USART_FLOW_CONTROL_NONE regardless of cfg->flow_control,
+     * silently dropping a caller's RTS/CTS request while still
+     * returning a valid handle.  CMSIS-Driver USART has no in-band
+     * XON/XOFF mode, so that request is refused up front instead of
+     * being configured as NONE. */
+    uint32_t flow_bits;
+    switch (cfg->flow_control) {
+    case ALP_UART_FLOW_NONE:
+        flow_bits = ARM_USART_FLOW_CONTROL_NONE;
+        break;
+    case ALP_UART_FLOW_RTS_CTS:
+        flow_bits = ARM_USART_FLOW_CONTROL_RTS_CTS;
+        break;
+    default:
+        (void)d->PowerControl(ARM_POWER_OFF);
+        (void)d->Uninitialize();
+        alp_internal_set_last_error(ALP_ERR_NOSUPPORT);
+        return NULL;
+    }
+
+    uint32_t mode = ARM_USART_MODE_ASYNCHRONOUS;
     mode |= data_bits;
     mode |= parity_bits;
     mode |= stop_bits;
-    mode |= ARM_USART_FLOW_CONTROL_NONE;
-    if (d->Control(mode, cfg->baudrate) != ARM_DRIVER_OK) return NULL;
+    mode |= flow_bits;
+    int32_t ctrl_st = d->Control(mode, cfg->baudrate);
+    if (ctrl_st != ARM_DRIVER_OK) {
+        /* Reached for e.g. ARM_DRIVER_ERROR_UNSUPPORTED when this
+         * silicon's CMSIS-Driver instance can't honour RTS/CTS --
+         * alif_to_alp() maps that to ALP_ERR_NOSUPPORT, matching the
+         * contract in <alp/peripheral.h>. */
+        (void)d->PowerControl(ARM_POWER_OFF);
+        (void)d->Uninitialize();
+        alp_internal_set_last_error(alif_to_alp(ctrl_st));
+        return NULL;
+    }
     (void)d->Control(ARM_USART_CONTROL_TX, 1);
     (void)d->Control(ARM_USART_CONTROL_RX, 1);
+    alp_internal_set_last_error(ALP_OK);
     return (alp_uart_t *)d;
 }
 

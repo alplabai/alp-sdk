@@ -9,7 +9,7 @@ inspection/debugging commands used by Alp IDE.
 The current implementation is Python and is independently versioned in
 [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli). As of
 [v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0) (current
-release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+release: [v0.6.0](https://github.com/alplabai/tan-cli/releases/tag/v0.6.0)),
 the published release installs the real Python `tan` directly -- it no
 longer resolves the frozen Rust v0.4.1 release. alp-sdk `dev` tracks
 `tan-cli/dev` instead, to stay ahead of the last tagged release; install the
@@ -449,8 +449,7 @@ programming dependencies such as J-Link and Alif SETOOLS. Every failed or
 warning check includes a remediation hint; an unhealthy host exits 4.
 
 `--build` is retained for existing callers but no longer changes the checklist.
-As of tan-cli `dev` (ahead of the tagged `v0.5.1` release -- ships in
-`v0.6.0-rc1`+): in an interactive text-mode run with a TTY, `--fix` may run
+As of tan v0.6.0: in an interactive text-mode run with a TTY, `--fix` may run
 the manifest's install commands. An install command that needs no elevation
 (macOS `brew`, Windows `winget`) runs for any caller. It never spawns the
 `sudo` program: a `sudo`-prefixed command (Linux `apt`/`dnf`) is refused

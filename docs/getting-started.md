@@ -27,7 +27,7 @@ firmware as a first-class consumer.
 >   [README Quickstart](../README.md#quickstart) — if you just want
 >   a hello-world running in two minutes, start there. As of `tan-cli`
 >   [v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0) (current
->   release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+>   release: [v0.6.0](https://github.com/alplabai/tan-cli/releases/tag/v0.6.0)),
 >   the published release installer (`curl -fsSL
 >   https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh`
 >   on Linux/macOS, `irm
@@ -226,9 +226,8 @@ tan doctor --format json      # machine-readable
 
 It is HW-free (no build and no flash), so it is safe to run anytime. An
 unhealthy environment exits 4. `--build` remains accepted for compatibility
-with v0.4 callers but no longer changes the checklist. On tan-cli `dev`
-(ahead of the tagged `v0.5.1` release the installer above ships -- lands in
-`v0.6.0-rc1`+), interactive `--fix` (it needs a TTY on both stdin and
+with v0.4 callers but no longer changes the checklist. As of tan v0.6.0,
+interactive `--fix` (it needs a TTY on both stdin and
 stderr) can run manifest remedies: a remedy that needs no elevation (macOS
 `brew`, Windows `winget`) runs for any caller; a `sudo`-prefixed remedy
 (Linux `apt`/`dnf`) is refused with the command printed to run by hand for

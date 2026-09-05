@@ -116,7 +116,7 @@ To reproduce CI byte-for-byte, match the pin locally — `pyenv` and `uv` pick
 ### 1.2 Installing Tan from source
 
 As of `tan-cli` [v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0)
-(current release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+(current release: [v0.6.0](https://github.com/alplabai/tan-cli/releases/tag/v0.6.0)),
 the published installer (`install.sh`/`install.ps1`) installs the real Python
 `tan` directly -- it no longer resolves the frozen Rust v0.4.1 release.
 alp-sdk `dev` tracks `tan-cli/dev` instead, to stay ahead of the last tagged

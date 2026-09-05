@@ -3250,6 +3250,10 @@
       "script": "scripts/check_cross_platform.py"
     },
     {
+      "purpose": "Reject a fixed-literal `alp_delay_us(N)` with N >= 1000 under chips/.",
+      "script": "scripts/check_delay_us_literal.py"
+    },
+    {
       "purpose": "Assert every ALP-Bxxx code scripts/alp_cli/validator.py can emit has a docs/diagnostics/ALP-Bxxx.md landing page (issue #1569).",
       "script": "scripts/check_diagnostic_emission_coverage.py"
     },
@@ -3360,6 +3364,10 @@
     {
       "purpose": "Plain-CMake link-completeness gate (issue #593).",
       "script": "scripts/check_plain_cmake_link_complete.py"
+    },
+    {
+      "purpose": "Protocol version policy gate for the CC3501E wire (ADR 0033).",
+      "script": "scripts/check_protocol_version_policy.py"
     },
     {
       "purpose": "CI gate: root public headers stay chip-neutral.",
@@ -3842,8 +3850,10 @@
         "alp_rpc_call",
         "alp_rpc_capabilities",
         "alp_rpc_close",
+        "alp_rpc_link_state",
         "alp_rpc_open",
         "alp_rpc_send",
+        "alp_rpc_set_link_callback",
         "alp_rpc_subscribe",
         "alp_rpc_unsubscribe"
       ],

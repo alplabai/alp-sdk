@@ -308,6 +308,47 @@ def test_deepx_compile_raises_when_no_dxnn_produced(tmp_path, monkeypatch):
         DeepxAdapter().compile(src, accel_config="", out_dir=tmp_path, opts={"config": str(cfg)})
 
 
+def _vendor_token(compiler_version: str) -> str:
+    """First whitespace-separated token of a compiler_version string --
+    the part downstream consumers (e.g. tan-cli) match a bench perf point
+    against a build by (case-folded)."""
+    return compiler_version.split()[0]
+
+
+def test_dxcom_version_fallback_matches_success_vendor_token(monkeypatch):
+    # Issue #1923: the probe-failure fallback used to emit the lowercase
+    # console-script name 'dxcom' while the success path emits 'DX-COM
+    # <version>' -- a perf point written during a probe failure carried a
+    # different vendor token and never matched downstream. Both paths must
+    # share the same first token.
+    from alp_model.adapters.deepx import _dxcom_version
+
+    def fail_run(cmd, capture_output, text, timeout):
+        raise OSError("dxcom not found on PATH")
+
+    monkeypatch.setattr("alp_model.adapters.deepx.subprocess.run", fail_run)
+    assert _vendor_token(_dxcom_version()) == "DX-COM"
+
+
+def test_vela_and_drpai_version_fallback_already_matches_success_token(monkeypatch):
+    # Sibling check requested by #1923: ethos_u.py and drpai.py were read and
+    # found NOT to share the same divergence -- their failure fallback is a
+    # bare vendor token (no version suffix), so the first token still matches
+    # the success path. Pinned here so a future edit can't reintroduce the
+    # deepx-style split.
+    from importlib.metadata import PackageNotFoundError
+    from alp_model.adapters.ethos_u import _vela_version
+    from alp_model.adapters.drpai import _compiler_version
+
+    def raise_not_found(pkg):
+        raise PackageNotFoundError(pkg)
+
+    monkeypatch.setattr("alp_model.adapters.ethos_u.version", raise_not_found)
+    assert _vendor_token(_vela_version()) == "vela"
+
+    assert _vendor_token(_compiler_version(Path("/nonexistent-tvm-home"))) == "drp-ai_tvm"
+
+
 @pytest.mark.skipif(shutil.which("dxcom") is None, reason="dxcom (dx-com wheel) not installed")
 def test_deepx_real_dxcom_version_smoke():
     # Against the REAL installed dx-com wheel (e.g. a WSL venv): the adapter's

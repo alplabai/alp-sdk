@@ -74,16 +74,68 @@ in the matching SoC JSON: `cortex-m*` -> `zephyr`, `cortex-a*`
 `_default_os_from_core_type()` in
 [`scripts/alp_orchestrate/`](../scripts/alp_orchestrate/).
 
-The OS is **not** user-selectable: the runtime follows the core
-class, full stop.  A `board.yaml` may only **disable** a core
-(`os: off`) or drop it to **no-OS** (`os: baremetal`); selecting the
-*other* class's OS — `zephyr` on a Cortex-A, `yocto` on a Cortex-M —
-is **rejected by the loader** (`OrchestratorError`).  We support
-exactly two OSes — Yocto for Linux, Zephyr for the RTOS — mapped to
-the silicon class, not chosen.  (The check lives in the loader, not
-the schema, because it's cross-file: board.yaml `os:` vs the SoC
-`cores[].type`.)  Custom SoMs ported via
-[`docs/porting-new-som.md`](porting-new-som.md) get this for free as
+#### The refusal is a support policy, not a hardware limit
+
+Stated plainly, because the SDK's own wording has said otherwise and a
+customer reading "not selectable" deserves to know which kind of "not"
+it is.
+
+A `board.yaml` may **disable** a core (`os: off`) or drop it to **no-OS**
+(`os: baremetal`).  Selecting the *other* class's OS — `zephyr` on a
+Cortex-A, `yocto` on a Cortex-M — is **refused**, at
+`scripts/alp_orchestrate/validate.py:270-282`
+(`_enforce_os_matches_core_class`), with this exact message:
+
+```text
+core '<id>' (<type>): its runtime is determined by the core class
+(Cortex-A -> Yocto/Linux, Cortex-M -> Zephyr/RTOS) and is not
+selectable. Set os: 'off' to disable it or 'baremetal' for no-OS
+firmware -- got os: '<os>'.
+```
+
+**"Determined by the core class" is how the SDK reports it, not why it
+is true.**  Zephyr runs on Cortex-A: upstream Zephyr at the pinned
+[v4.4.1](zephyr-version-policy.md) ships `arch/arm/core/cortex_a_r/` and
+`include/zephyr/arch/arm/cortex_a_r/`.  So `zephyr` on an A-class core
+is not physically impossible — **alp-sdk has chosen not to support that
+combination**.  We carry exactly two OSes, Yocto for Linux and Zephyr
+for the RTOS, and pair one to each core class so that a SoM swap within
+a family keeps the same runtime per core.  That pairing is a product
+decision about what this SDK carries, tests and ships, and it is a
+defensible one; it is simply not a fact about the silicon.
+(`scripts/alp_orchestrate/topology.py:92`'s "A Cortex-A can't run
+Zephyr" overstates it the same way, and is inaccurate as written.)
+
+What that means in practice:
+
+- For a supported build, the refusal is telling you the truth about
+  **this SDK**: pick `off` or `baremetal`, or use the class's runtime.
+- A genuine Zephyr-on-Cortex-A requirement is a **support request**, not
+  a bug report, and it is decidable — file it rather than patching the
+  loader, because the pairing reaches board files, sysbuild, the Yocto
+  machine layer and the OS support matrix, not just this one check.
+
+Two mechanical notes:
+
+- The check lives in the loader, not the schema, because it is
+  cross-file: `board.yaml` `os:` against the SoC `cores[].type`.
+- An **unclassified** core type (empty, or matching neither prefix)
+  makes the refusal reject *both* real runtimes, because the "other
+  class's OS" set becomes `{yocto, zephyr}`; the error then reads
+  `(unclassified)`.  That is **deliberate, and it is what tan does too** —
+  `cross_class_os` carries no guard in either implementation, and
+  declining both runtimes for a core whose class nobody established is the
+  conservative answer on a refusal path.
+  [#1852](https://github.com/alplabai/alp-sdk/issues/1852) is a
+  *different* half of the same area and does not change this behaviour:
+  what diverged was the **advertised** `allowed_os` set, which offered
+  `["baremetal", "off"]` for such a core where tan offered `[]`, and a
+  non-string `cores[].type`, which raised `AttributeError` instead of
+  resolving to the unresolved sentinel.  Both were corrected in #1888,
+  merged 2026-09-01.
+
+Custom SoMs ported via
+[`docs/porting-new-som.md`](porting-new-som.md) inherit all of this as
 long as their SoC JSON declares core types correctly.
 
 **Querying it (for IDEs / tooling).**  Rather than re-deriving the

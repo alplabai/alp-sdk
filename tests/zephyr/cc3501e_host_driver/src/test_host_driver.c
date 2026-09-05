@@ -155,6 +155,13 @@ static bool     g_get_version_override_active; /* stage a specific reply value b
 static uint16_t g_get_version_override_value;
 static uint32_t g_get_version_io_down_remaining; /* fail the transaction outright, N times */
 
+/* ADR 0033 mutant controls for CMD_GET_CAPABILITIES (opcode 0x06).  Both
+ * cleared by slave_reset(), so a test that never touches them still gets a
+ * deterministic (zero) bitmap back rather than whatever the previous test
+ * left staged. */
+static uint32_t g_caps_override_value; /* bitmap staged for the next GET_CAPABILITIES reply */
+static bool     g_caps_reply_short;    /* stage a <4-byte reply -- must decode as ALP_ERR_IO */
+
 /* SPI1 TRANSFER mutant control: when true, the reply echoes seq+1 instead of
  * the request's real seq -- models a desynced/stale reply (the firmware
  * answering some OTHER request) so a test can prove cc3501e_spi1_transfer()
@@ -189,6 +196,8 @@ static void slave_reset(void)
 	g_get_version_io_down_remaining    = 0u;
 	g_spi1_reply_bad_seq               = false;
 	g_diag_stats_v8                    = false;
+	g_caps_override_value              = 0u;
+	g_caps_reply_short                 = false;
 }
 
 static void stage_status(uint8_t st)
@@ -581,6 +590,28 @@ static void slave_dispatch(void)
 		/* Argless escape hatch: bare OK, same as the real firmware. */
 		stage_status(ALP_CC3501E_RESP_OK);
 		break;
+	case ALP_CC3501E_CMD_GET_CAPABILITIES: {
+		/* reply DATA = alp_cc3501e_capabilities_t { caps(LE32) | reserved(LE32) }. */
+		if (g_caps_reply_short) {
+			/* Fewer than 4 data bytes -- the host must treat this as a wire
+			 * gap (ALP_ERR_IO), not decode a truncated bitmap. */
+			const uint8_t d[2] = { 0xAAu, 0xBBu };
+			stage_reply(ALP_CC3501E_RESP_OK, d, 2u);
+			break;
+		}
+		const uint8_t d[8] = {
+			(uint8_t)(g_caps_override_value & 0xFFu),
+			(uint8_t)((g_caps_override_value >> 8) & 0xFFu),
+			(uint8_t)((g_caps_override_value >> 16) & 0xFFu),
+			(uint8_t)((g_caps_override_value >> 24) & 0xFFu),
+			0u,
+			0u,
+			0u,
+			0u, /* reserved, always 0 in this revision */
+		};
+		stage_reply(ALP_CC3501E_RESP_OK, d, 8u);
+		break;
+	}
 	default:
 		stage_status(ALP_CC3501E_RESP_ERR_INVALID);
 		break;
@@ -752,12 +783,19 @@ ZTEST(cc3501e_host_driver, test_reset_refuses_protocol_version_mismatch_1371)
 	fw.reset_pin  = FAKE_RESET_PIN;
 	fw.enable_pin = FAKE_ENABLE_PIN;
 
+	/* A genuine MAJOR mismatch (ADR 0033).  This test used to add 1 to the
+	 * flat composed value; under MAJOR.MINOR that only bumps MINOR (0x0301 +
+	 * 1 = 0x0302, still MAJOR 3) and must NOT refuse any more -- see
+	 * test_reset_accepts_higher_minor_0033.  Bump MAJOR explicitly instead so
+	 * this test keeps pinning what it always meant to: a wire disagreement
+	 * this host cannot connect across. */
 	g_get_version_override_active = true;
-	g_get_version_override_value  = (uint16_t)ALP_CC3501E_PROTOCOL_VERSION + 1u;
+	g_get_version_override_value  = (uint16_t)(((uint16_t)(ALP_CC3501E_PROTOCOL_MAJOR + 1) << 8) |
+	                                           (uint16_t)ALP_CC3501E_PROTOCOL_MINOR);
 
 	zassert_equal(cc3501e_reset(&fw),
 	              ALP_ERR_VERSION,
-	              "GET_VERSION answered with a different value -> ALP_ERR_VERSION");
+	              "GET_VERSION answered with a different MAJOR -> ALP_ERR_VERSION");
 	zassert_false(fw.initialised, "a refused context is left uninitialised");
 
 	/* The dead end this leaves behind, deliberately: once refused, EVERY
@@ -793,6 +831,107 @@ ZTEST(cc3501e_host_driver, test_reset_tolerates_transport_failure_during_probe_1
 	uint16_t v = 0u;
 	zassert_equal(cc3501e_get_version(&fw, &v), ALP_OK, "a following GET_VERSION works");
 	zassert_equal(v, (uint16_t)ALP_CC3501E_PROTOCOL_VERSION, "and reads the real value");
+}
+
+/* ---- ADR 0033: MAJOR.MINOR wire versioning --------------------------------
+ *
+ * cc3501e_reset()'s GET_VERSION gate now refuses ONLY on a MAJOR mismatch; a
+ * MINOR difference in either direction is additive by definition and must
+ * leave the link usable -- that split is the entire point of ADR 0033. */
+
+ZTEST(cc3501e_host_driver, test_reset_accepts_lower_minor_0033)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	/* Same MAJOR, a MINOR one BELOW this host's -- an older, additive-only
+	 * firmware that simply lacks a newer feature.  The pre-0033 flat-integer
+	 * gate refused on ANY difference; this is the exact case that gate cost a
+	 * customer a needless reflash for. */
+	g_get_version_override_active = true;
+	g_get_version_override_value  = (uint16_t)(((uint16_t)ALP_CC3501E_PROTOCOL_MAJOR << 8) |
+	                                           (uint16_t)(ALP_CC3501E_PROTOCOL_MINOR - 1));
+
+	zassert_equal(
+	    cc3501e_reset(&fw), ALP_OK, "a lower MINOR, same MAJOR, must not refuse the link");
+	zassert_true(fw.initialised, "the context stays usable across a lower MINOR");
+	zassert_equal(fw.fw_proto_major, (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR, "MAJOR recorded");
+	zassert_equal(fw.fw_proto_minor,
+	              (uint8_t)(ALP_CC3501E_PROTOCOL_MINOR - 1),
+	              "the firmware's own (lower) MINOR is recorded, not this host's");
+}
+
+ZTEST(cc3501e_host_driver, test_reset_accepts_higher_minor_0033)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	/* Same MAJOR, a MINOR one ABOVE this host's -- a newer firmware carrying
+	 * features this host does not use yet.  Also additive, also must connect. */
+	g_get_version_override_active = true;
+	g_get_version_override_value  = (uint16_t)(((uint16_t)ALP_CC3501E_PROTOCOL_MAJOR << 8) |
+	                                           (uint16_t)(ALP_CC3501E_PROTOCOL_MINOR + 1));
+
+	zassert_equal(
+	    cc3501e_reset(&fw), ALP_OK, "a higher MINOR, same MAJOR, must not refuse the link");
+	zassert_true(fw.initialised, "the context stays usable across a higher MINOR");
+	zassert_equal(fw.fw_proto_minor,
+	              (uint8_t)(ALP_CC3501E_PROTOCOL_MINOR + 1),
+	              "the firmware's own (higher) MINOR is recorded");
+}
+
+ZTEST(cc3501e_host_driver, test_reset_refuses_legacy_raw_integer_0033)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	/* A pre-ADR-0033 firmware answers with its old raw v1..v9 integer -- e.g.
+	 * 9 (0x0009), the last released flat value -- which decodes to MAJOR 0.
+	 * MAJOR 0 is RESERVED (never a real release) and refuses like any other
+	 * MAJOR mismatch, but recording it lets a caller tell "older than the
+	 * versioning scheme" from "disagrees about the frame layout". */
+	g_get_version_override_active = true;
+	g_get_version_override_value  = 9u;
+
+	zassert_equal(cc3501e_reset(&fw),
+	              ALP_ERR_VERSION,
+	              "a pre-0033 raw integer decodes to MAJOR 0 and is refused");
+	zassert_false(fw.initialised, "a refused context is left uninitialised");
+	zassert_equal(
+	    fw.fw_proto_major, 0u, "MAJOR 0 marks 'older than the versioning scheme', not corrupt");
+}
+
+/* ---- ADR 0033: CMD_GET_CAPABILITIES (0x06) --------------------------------- */
+
+ZTEST(cc3501e_host_driver, test_get_capabilities_decodes_le32_bitmap_0033)
+{
+	g_caps_override_value =
+	    (uint32_t)(ALP_CC3501E_CAP_WIFI_STA | ALP_CC3501E_CAP_BLE | ALP_CC3501E_CAP_SPI1_MASTER);
+
+	uint32_t caps = 0xDEADBEEFu;
+	zassert_equal(cc3501e_get_capabilities(&fw, &caps), ALP_OK, "GET_CAPABILITIES -> OK");
+	zassert_equal(slave.cmd, ALP_CC3501E_CMD_GET_CAPABILITIES, "opcode 0x06");
+	zassert_equal(
+	    caps,
+	    (uint32_t)(ALP_CC3501E_CAP_WIFI_STA | ALP_CC3501E_CAP_BLE | ALP_CC3501E_CAP_SPI1_MASTER),
+	    "decoded LE32 capability bitmap");
+}
+
+ZTEST(cc3501e_host_driver, test_get_capabilities_null_out_invalid_0033)
+{
+	zassert_equal(cc3501e_get_capabilities(&fw, NULL), ALP_ERR_INVAL, "NULL out -> INVAL");
+	zassert_equal(slave.cmd, 0u, "no transfer clocked");
+}
+
+ZTEST(cc3501e_host_driver, test_get_capabilities_short_reply_is_io_0033)
+{
+	g_caps_reply_short = true;
+
+	uint32_t caps = 0x11111111u;
+	zassert_equal(cc3501e_get_capabilities(&fw, &caps),
+	              ALP_ERR_IO,
+	              "fewer than 4 data bytes must not decode a half-formed bitmap");
+	zassert_equal(caps, 0u, "the out-pointer is zeroed up front, not left half-decoded");
 }
 
 /* ============================ DIAGNOSTICS ================================== */

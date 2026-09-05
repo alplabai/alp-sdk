@@ -297,6 +297,21 @@ def test_bad_archetype_enum_rejected(tmp_path):
     assert proc.returncode != 0
 
 
+def test_minimum_constraint_on_non_integer_parameter_rejected_by_schema(tmp_path):
+    # #1916: {"type": "string", "constraints": {"minimum": 5}} used to
+    # validate clean and crash scripts/alp_template.py with a bare
+    # TypeError. The schema now refuses it outright.
+    doc = copy.deepcopy(_catalog())
+    rec = next(t for t in doc["templates"] if t["parameters"])
+    rec["parameters"][0] = {
+        "name": "knob", "type": "string", "description": "x",
+        "default": "a", "constraints": {"minimum": 5},
+    }
+    p = _write(tmp_path, doc)
+    proc = _run("--catalog", str(p))
+    assert proc.returncode != 0
+
+
 def test_malformed_json_rejected(tmp_path):
     p = tmp_path / "catalog.json"
     p.write_text("not json", encoding="utf-8")
