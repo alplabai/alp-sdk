@@ -100,7 +100,7 @@ struct scan_result {
 static struct scan_result scan_bus(void)
 {
 	struct scan_result res = { 0 };
-	uint8_t             dummy;
+	uint8_t            dummy;
 
 	printk("scanning 0x%02x..0x%02x ...\n", SCAN_LO, SCAN_HI);
 	for (uint16_t addr = SCAN_LO; addr <= SCAN_HI; addr++) {
@@ -118,8 +118,7 @@ static struct scan_result scan_bus(void)
 			 *                        that address.
 			 * Printing only for the expected addresses keeps the scan
 			 * output readable instead of 112 error lines. */
-			if (addr == TMP112_ADDR || addr == RTC_ADDR ||
-			    addr == OPTIGA_ADDR) {
+			if (addr == TMP112_ADDR || addr == RTC_ADDR || addr == OPTIGA_ADDR) {
 				printk("  no ACK @ 0x%02x (rc=%d)\n", addr, rc);
 			}
 			continue;
@@ -168,12 +167,12 @@ int main(void)
 {
 	int                rc;
 	struct scan_result scan;
-	bool               tmp112_ok  = false;
+	bool               tmp112_ok = false;
 	/* Sensor identified at EITHER address -- see the ADD0-strap note below:
 	 * on this module it answers at 0x40, not the strapped 0x48. */
-	bool               tmp112_any = false;
-	bool               rtc_id_ok  = false;
-	bool               rtc_ticked = false;
+	bool tmp112_any = false;
+	bool rtc_id_ok  = false;
+	bool rtc_ticked = false;
 
 	printk("\n=== AEN801 BRD_I2C housekeeping-bus bench (i2c_dw / i2c0 @ 0x49010000) ===\n");
 
@@ -190,15 +189,15 @@ int main(void)
 	printk("  0x48 (TMP112) %s, 0x52 (RV-3028-C7) %s, 0x30 (OPTIGA) %s%s\n",
 	       scan.tmp112_present ? "PRESENT" : "missing",
 	       scan.rtc_present ? "PRESENT" : "missing",
-	       scan.optiga_present ? "PRESENT (unexpected -- check DNP population!)"
-				    : "absent",
+	       scan.optiga_present ? "PRESENT (unexpected -- check DNP population!)" : "absent",
 	       scan.optiga_present ? "" : " (expected -- IC1 is DNP=1 on this rev)");
 
 	if (scan.n_found == 0U) {
 		printk("RESULT FAIL: scan found nothing on 0x%02x..0x%02x -- likely "
 		       "electrical (this net has no pull-up but the SoC pad's weak "
 		       "internal one; see the overlay comment), not a software bug\n",
-		       SCAN_LO, SCAN_HI);
+		       SCAN_LO,
+		       SCAN_HI);
 		return 0;
 	}
 
@@ -208,14 +207,14 @@ int main(void)
 
 		rc = read_tmp112_milli_c_at(TMP112_ADDR, &milli_c);
 		if (rc == 0) {
-			tmp112_ok = true;
+			tmp112_ok  = true;
 			tmp112_any = true;
 			printk("TMP112 @0x48: %d milli-degC (%s)\n",
 			       milli_c,
 			       (milli_c >= 15000 && milli_c <= 35000)
-				       ? "plausible room-temperature reading"
-				       : "OUTSIDE the plausible 15..35 degC room range -- "
-					 "check the probe/environment, not necessarily a bug");
+			           ? "plausible room-temperature reading"
+			           : "OUTSIDE the plausible 15..35 degC room range -- "
+			             "check the probe/environment, not necessarily a bug");
 		} else {
 			printk("TMP112 @0x48: read failed, rc=%d\n", rc);
 		}
@@ -266,7 +265,9 @@ int main(void)
 		int32_t milli_c;
 
 		printk("0x%02x responded but 0x%02x did not -- probing 0x%02x as a TMP112\n",
-		       TMP112_ALIAS_ADDR, TMP112_ADDR, TMP112_ALIAS_ADDR);
+		       TMP112_ALIAS_ADDR,
+		       TMP112_ADDR,
+		       TMP112_ALIAS_ADDR);
 		rc = read_tmp112_milli_c_at(TMP112_ALIAS_ADDR, &milli_c);
 		if (rc == 0 && milli_c >= -40000 && milli_c <= 125000) {
 			uint8_t  ptr;
@@ -275,7 +276,8 @@ int main(void)
 			bool     fp_ok = true;
 
 			printk("0x%02x: %d milli-degC (in the TMP112 -40..125 degC range)\n",
-			       TMP112_ALIAS_ADDR, milli_c);
+			       TMP112_ALIAS_ADDR,
+			       milli_c);
 
 			/* FINGERPRINT, not a guess.  A plausible temperature alone proves
 			 * little -- many registers decode to a believable number.  The
@@ -294,28 +296,36 @@ int main(void)
 
 			if (!fp_ok) {
 				printk("0x%02x: fingerprint reads failed -- identity NOT "
-				       "established.\n", TMP112_ALIAS_ADDR);
+				       "established.\n",
+				       TMP112_ALIAS_ADDR);
 			} else {
 				printk("0x%02x: CONFIG=0x%04x T_LOW=0x%04x T_HIGH=0x%04x "
 				       "(TMP112 defaults 0x60A0 / 0x4B00 / 0x5000)\n",
-				       TMP112_ALIAS_ADDR, cfg, tlo, thi);
+				       TMP112_ALIAS_ADDR,
+				       cfg,
+				       tlo,
+				       thi);
 				tmp112_any = (tlo == 0x4B00U && thi == 0x5000U);
-				printk("0x%02x: %s\n", TMP112_ALIAS_ADDR,
+				printk("0x%02x: %s\n",
+				       TMP112_ALIAS_ADDR,
 				       (tlo == 0x4B00U && thi == 0x5000U)
-					       ? "T_LOW/T_HIGH match the TMP112 defaults -- this IS "
-						 "a TMP112, strapped to 0x40, NOT 0x48 as the netlist "
-						 "records (ADD0 tied to 0V)."
-					       : "registers do NOT match TMP112 defaults -- the part "
-						 "at this address is something else; do not assume the "
-						 "BOM.");
+				           ? "T_LOW/T_HIGH match the TMP112 defaults -- this IS "
+				             "a TMP112, strapped to 0x40, NOT 0x48 as the netlist "
+				             "records (ADD0 tied to 0V)."
+				           : "registers do NOT match TMP112 defaults -- the part "
+				             "at this address is something else; do not assume the "
+				             "BOM.");
 			}
 		} else if (rc == 0) {
 			printk("0x%02x: read ok but %d milli-degC is outside the TMP112 -40..125 "
 			       "degC range -- identity NOT established.\n",
-			       TMP112_ALIAS_ADDR, milli_c);
+			       TMP112_ALIAS_ADDR,
+			       milli_c);
 		} else {
 			printk("0x%02x: ACKed the scan but the register read failed, rc=%d -- "
-			       "identity NOT established.\n", TMP112_ALIAS_ADDR, rc);
+			       "identity NOT established.\n",
+			       TMP112_ALIAS_ADDR,
+			       rc);
 		}
 	}
 
@@ -337,12 +347,12 @@ int main(void)
 			printk("RV-3028-C7 @0x52: ID register read failed, rc=%d\n", rc);
 		}
 
-		rc = i2c_write_read(i2c0, RTC_ADDR, &sec_ptr, sizeof(sec_ptr), &sec_before,
-				     sizeof(sec_before));
+		rc = i2c_write_read(
+		    i2c0, RTC_ADDR, &sec_ptr, sizeof(sec_ptr), &sec_before, sizeof(sec_before));
 		if (rc == 0) {
 			k_sleep(K_SECONDS(1));
-			rc = i2c_write_read(i2c0, RTC_ADDR, &sec_ptr, sizeof(sec_ptr), &sec_after,
-					     sizeof(sec_after));
+			rc = i2c_write_read(
+			    i2c0, RTC_ADDR, &sec_ptr, sizeof(sec_ptr), &sec_after, sizeof(sec_after));
 		}
 		if (rc == 0) {
 			/* Seconds is BCD, not binary: at a minute rollover (0x59 ->
@@ -352,7 +362,8 @@ int main(void)
 			rtc_ticked = (sec_before != sec_after);
 			printk("RV-3028-C7 @0x52: Seconds (BCD) 0x%02x -> 0x%02x after ~1s: "
 			       "oscillator %s\n",
-			       sec_before, sec_after,
+			       sec_before,
+			       sec_after,
 			       rtc_ticked ? "RUNNING (advanced)" : "DID NOT ADVANCE");
 		} else {
 			printk("RV-3028-C7 @0x52: Seconds read failed, rc=%d\n", rc);
@@ -364,8 +375,8 @@ int main(void)
 		printk("RESULT PASS: BRD_I2C (I2C0) scan found TMP112 + RV-3028-C7, "
 		       "both decoded, and the RTC oscillator is confirmed running%s\n",
 		       tmp112_ok ? ""
-				 : " (NOTE: the TMP112 answered at 0x40, not its strapped "
-				   "0x48 -- check U20 pin 3 ADD0 continuity to GND)");
+		                 : " (NOTE: the TMP112 answered at 0x40, not its strapped "
+		                   "0x48 -- check U20 pin 3 ADD0 continuity to GND)");
 	} else {
 		/* Deliberately does NOT blame the pull-ups.  Bench-measured
 		 * 2026-09-05: every non-response on this bus is a clean -EIO NACK,

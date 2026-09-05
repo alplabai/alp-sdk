@@ -215,9 +215,9 @@ static void alp_print_unit_identity(const alp_hw_info_t *info)
 	bool have_serial = (info->som_serial[0] != '\0');
 	/* Plausibility, not validation: the point is to reject a zeroed or
 	 * never-written region, not to police the calendar. */
-	bool have_date = (info->som_mfg_year >= 2000U && info->som_mfg_year <= 2199U &&
-			  info->som_mfg_month >= 1U && info->som_mfg_month <= 12U &&
-			  info->som_mfg_day >= 1U && info->som_mfg_day <= 31U);
+	bool have_date =
+	    (info->som_mfg_year >= 2000U && info->som_mfg_year <= 2199U && info->som_mfg_month >= 1U &&
+	     info->som_mfg_month <= 12U && info->som_mfg_day >= 1U && info->som_mfg_day <= 31U);
 
 	if (!have_serial && !have_date) {
 		return;
@@ -228,8 +228,10 @@ static void alp_print_unit_identity(const alp_hw_info_t *info)
 		printk(" %s", info->som_serial);
 	}
 	if (have_date) {
-		printk("%s%04u-%02u-%02u", have_serial ? "  |  mfg " : " mfg ",
-		       (unsigned int)info->som_mfg_year, (unsigned int)info->som_mfg_month,
+		printk("%s%04u-%02u-%02u",
+		       have_serial ? "  |  mfg " : " mfg ",
+		       (unsigned int)info->som_mfg_year,
+		       (unsigned int)info->som_mfg_month,
 		       (unsigned int)info->som_mfg_day);
 	}
 	printk("\n");
