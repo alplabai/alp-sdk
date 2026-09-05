@@ -162,14 +162,27 @@ if [ "$DEV" = "AE822_ALP_M55_HE" ]; then
   echo "   booted a slot0 image.  Erase slot0 and this profile cannot connect at all" >&2
   echo "   (0 of 5 attempts reached programming).  Attachable and quiesced are" >&2
   echo "   mutually exclusive on this part." >&2
-  echo "   USE FLOW A INSTEAD: scripts/bench/aen/flash-run.sh (SETOOLS over the" >&2
-  echo "   SE-UART).  Same image, same ATOC config: Flow A gives 'u VB', boots, and" >&2
-  echo "   is cold-cycle byte-exact -- including aen-wdt-feed, which Flow D corrupted" >&2
-  echo "   2 of 2 times." >&2
+  echo "   FIXED 2026-09-05 -- USE THE BUILT-IN PROFILE INSTEAD:" >&2
+  echo "     JLINK_DEVICE_FLASH=AE822FA0E5597LS0_M55_HE" >&2
+  echo "   on a probe whose firmware reports capability 0x52.  Bench-proven on" >&2
+  echo "   J-Link 603000869 (Hardware version V13.00, firmware V13 compiled" >&2
+  echo "   Aug 26 2026): 3 of 3 flashes cold-cycle byte-exact with flags 'u VB'," >&2
+  echo "   including aen-wdt-feed twice -- the app THIS path corrupted 2 of 2." >&2
+  echo "   Flow A (scripts/bench/aen/flash-run.sh) also remains correct." >&2
   echo "   ALWAYS confirm any write on this path with a cold-cycle readback." >&2
 fi
 
 # 1. stage the app + write the slot0 (mramAddress) signed-ATOC config.
+#
+# HAZARD (found 2026-09-05): this cp OVERWRITES the staged image of the same
+# name, and for the canonical restore that matters.  The staged
+# aen-npu-inference-person-mram.bin is 314784 B (md5
+# 5839e003d5d069f6fd912eb22774d037), while the in-tree build dir currently holds
+# a DIFFERENT 314772 B binary -- so "just re-run this script on the person_detect
+# build dir" silently replaces the canonical staged image with another one, and
+# the thing you restore is not the thing you think.  To restore canonical slot0,
+# run app-gen-toc + app-write-mram against the STAGED .bin directly instead of
+# re-staging from a build dir, and prove it with a cold-cycle savebin diff.
 cp -f "$BIN" "$SET/build/images/$NAME.bin"
 cat > "$SET/build/config/$NAME-slot0.json" <<JSON
 {
@@ -238,11 +251,11 @@ echo "    atoc -> $ATOC_ADDR ($(stat -c%s "$PKG") B)" >&2
 # !! power-cycle REVERTING slot0.  This probe also warns its firmware
 # !! "does not handle I/D-cache correctly" on ARMv8-M, and an app that left
 # !! D-cache on is exactly that case.  Prove a flash by cutting power at the
-# !! DPS-150 and re-reading slot0.  As of 2026-09-04 that is BLOCKED on this bench:
-# !! the AEN place drives DPS-150 13E502BA4055, which is cabled to nothing, while
-# !! the board is actually fed by 10A2617F4486 owned by the retired
-# !! e1mx-v2n-m1-01 agent at 15.0 V -- so the board also runs OFF-RAIL (documented
-# !! AEN Vin is 16.0 V) until the telemetry agents are repointed.
+# !! DPS-150 and re-reading slot0.  RESOLVED 2026-09-04: the AEN place now drives
+# !! DPS-150 10A2617F4486 at the documented 16.0 V (pwr-only.yaml re-cabled, the
+# !! retired e1mx-v2n-m1-01 agent disabled), so
+# !!   LG_ENV=~/board-farm/labgrid/pwr-only.yaml labgrid-client -p e1m-aen-evk-01 power off|on
+# !! really cuts power and the cold-cycle proof is available on this bench.
 #
 # SetSkipProgOnCRCMatch = 0: never let J-Link decide a page is already correct
 # from a debug READ.  Debug-AP reads of this part are documented to lie in some
