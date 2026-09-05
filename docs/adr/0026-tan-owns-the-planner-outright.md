@@ -283,8 +283,11 @@ shrinks to the render envelope rather than being deleted along with the
 planner axis.
 
 Something must FAIL when tan's copy of the rendered bytes diverges from
-alp-sdk's canonical output. That gate is required; its implementation is not
-decided here.
+alp-sdk's canonical output. Left undetected, that divergence is the
+#320 -> #485 drift class (Context, above) recurring one layer down: a
+renderer that quietly disagrees with its source of truth takes exactly that
+shape, only now on rendered bytes instead of the plan. That gate is required;
+its implementation is not decided here.
 
 ### E. Oracle and snapshot custody
 
@@ -332,7 +335,7 @@ Steps 2-4 above are replaced by the following. The order is load-bearing.
    `build-plan` — at tan. Renderer-owned emit-registry entries (`zephyr-conf`,
    kconfig, headers, secure, topology, manifest, and the rest) are **not**
    repointed: per §C/§D they keep resolving to alp-sdk's surviving emitter
-   core, and the eleven vendored `CMakeLists.txt` templates that spawn
+   core, and tan-cli's eleven vendored `CMakeLists.txt` templates that spawn
    `alp_project.py --emit zephyr-conf` at build time are correct as written and
    stay unchanged. Done before step 1, this repoints onto a divergent planner.
 
