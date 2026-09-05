@@ -177,6 +177,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "changelog-fragment-issue",
+      "description": "A changelog.d/*.md fragment's filename leading digits match the single issue its own heading cites (where decidable), so the leading digits stay the join key back to the issue instead of silently drifting (#1957).",
+      "runner": "check-script",
+      "script": "scripts/check_changelog_fragment_issue.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "chip-header-status",
       "description": "CI gate: chip-header `@par Driver status:` labels match metadata truth.",
       "runner": "check-script",

@@ -3251,6 +3251,10 @@
       "script": "scripts/check_changelog_citations.py"
     },
     {
+      "purpose": "Guard: a changelog.d/ fragment's leading digits match the issue its own heading cites (#1957).",
+      "script": "scripts/check_changelog_fragment_issue.py"
+    },
+    {
       "purpose": "Guard: every `changelog.d/*.md` fragment is well-formed (#1395).",
       "script": "scripts/check_changelog_fragments.py"
     },
