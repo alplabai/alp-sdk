@@ -142,6 +142,78 @@ def test_landed_phrasing_is_not_flagged(tmp_path):
     assert mod.find_problems(tmp_path) == []
 
 
+# -- clause-truncation false positives (#1950 round 5) -------------------------
+#
+# `_clause_around()` used to split on ANY `.`/`;`. A decimal, a version, a
+# unit, or a semicolon sitting between the citation and its historical
+# marker word truncated the clause before the marker was ever seen, so
+# `historical` came back False and a CLOSED issue cited as HISTORY
+# hard-failed CI. Fixed by deciding `historical` from the whole enclosing
+# block instead of the citation's own clause (see `_citations_in_block`).
+
+
+def test_decimal_between_citation_and_marker_is_not_flagged(tmp_path):
+    """'#494 (the 0.75 V DEEPX core rail) was closed via #730.' -- the '.'
+    in '0.75' used to truncate the clause to '#494 (the 0.', before ever
+    reaching 'closed via'."""
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "gd32g553",
+        "chip_id: gd32g553\n"
+        "driver_status:    partial   # #494 (the 0.75 V DEEPX core rail)\n"
+        "                            # was closed via #730.\n",
+    )
+    _snapshot(tmp_path, {"494": "CLOSED", "730": "MERGED"})
+    assert mod.find_problems(tmp_path) == []
+
+
+def test_version_between_citation_and_marker_is_not_flagged(tmp_path):
+    """'#494 (targeted for v0.3.x) was closed via #730.' -- the '.'s inside
+    'v0.3.x' used to truncate the clause before 'closed via'."""
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "gd32g553",
+        "chip_id: gd32g553\n"
+        "driver_status:    partial   # #494 (targeted for v0.3.x) was\n"
+        "                            # closed via #730.\n",
+    )
+    _snapshot(tmp_path, {"494": "CLOSED", "730": "MERGED"})
+    assert mod.find_problems(tmp_path) == []
+
+
+def test_unit_between_citation_and_marker_is_not_flagged(tmp_path):
+    """'#494 (29.5 MHz refclk) was closed via #730.' -- the '.' in '29.5'
+    used to truncate the clause before 'closed via'."""
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "gd32g553",
+        "chip_id: gd32g553\n"
+        "driver_status:    partial   # #494 (29.5 MHz refclk) was closed\n"
+        "                            # via #730.\n",
+    )
+    _snapshot(tmp_path, {"494": "CLOSED", "730": "MERGED"})
+    assert mod.find_problems(tmp_path) == []
+
+
+def test_semicolon_between_citation_and_marker_is_not_flagged(tmp_path):
+    """Reproduces `metadata/chips/da9292.yaml:4` verbatim: '#494 (full
+    register map; closed via #730)' -- the ';' used to truncate the clause
+    to '#494 (full register map;', before ever reaching 'closed via'."""
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "da9292",
+        "chip_id: da9292\n"
+        "driver_status:    partial   # #494 (full register map; closed via\n"
+        "                            # #730).\n",
+    )
+    _snapshot(tmp_path, {"494": "CLOSED", "730": "MERGED"})
+    assert mod.find_problems(tmp_path) == []
+
+
 # -- staleness is loud, never a silent pass (#1950 round 2) -------------------
 
 

@@ -49,12 +49,21 @@ history ("#494, #495 and #496 all closed (#494/#495 via #730 ...)"). This
 gate splits each block into clauses on `.`/`;` and skips a citation whose
 own clause contains a historical marker word (`via`, `closed`, `closing`,
 `landed`, `land[s]`, `fixed`, `resolved`, `merged`, `shipped`, `done`,
-`already`). This is a word-list heuristic, not comprehension -- it is
-deliberately biased to UNDER-flag: "if you cannot distinguish blocked-on
-from landed-via, do not flag it" (#1950). A blocker phrased with one of
-those words (e.g. "not yet fixed") can slip through unflagged; that is the
-accepted cost of not spamming every "landed via #N" reference as a fresh
-failure.
+`already`). Clause-splitting itself skips two false-boundary shapes before
+looking for `.`/`;` (round 5, see `_mask_split_chars`): a `.` inside a
+decimal or dotted version (`0.75 V`, `29.5 MHz`, `v0.3.x`) sitting between
+the citation and its marker word used to end the clause before the marker
+was ever reached (e.g. "#494 (the 0.75 V DEEPX core rail) was closed via
+#730." split to "#494 (the 0."); so did a `;` used as an in-parenthetical
+list separator rather than a real clause end (e.g. "#494 (full register
+map; closed via #730)" split to "#494 (full register map;"). Both
+misclassified a plainly-historical citation as a live blocker -- the
+false-positive direction this gate must never take. This is a word-list
+heuristic, not comprehension -- it is deliberately biased to UNDER-flag:
+"if you cannot distinguish blocked-on from landed-via, do not flag it"
+(#1958). A blocker phrased with one of those words (e.g. "not yet fixed")
+can still slip through unflagged; that is the accepted cost of not
+spamming every "landed via #N" reference as a fresh failure.
 
 STALENESS -- this gate is OFFLINE
 ----------------------------------
@@ -73,6 +82,16 @@ the snapshot yet (e.g. cited in the same PR that adds it) -- the snapshot
 cannot know about a number it has never seen. A stale-but-present snapshot
 additionally prints one WARNING per run naming the exact refresh command,
 so the drift is visible without silently disabling enforcement.
+
+TODAY'S ENFORCEMENT SURFACE -- read the "OK" line, not this paragraph
+----------------------------------------------------------------------
+On the tree this gate ships against, every existing driver-status citation
+classifies as historical (see HISTORICAL above) -- #1949 already reworded
+the one block that was phrased as a live blocker. So right now this gate's
+live enforcement surface is zero: `harvested N, N historical, 0 evaluated`.
+That is expected, not a bug -- it activates the next time someone writes a
+blocker-phrased clause citing a since-closed issue, which is exactly the
+defect class this gate exists to catch before it repeats.
 
 Exit codes:
     0  no ERROR-level findings (WARNINGs may still be printed)
@@ -122,6 +141,43 @@ _HISTORICAL_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: A decimal or dotted-version token -- `0.75`, `29.5`, `1.5`, `v0.3.x`.
+#: `.`s inside one of these are never a clause boundary (round 5): naively
+#: splitting clauses on ANY `.` treated the decimal point in a voltage/
+#: frequency/version figure as a sentence end, truncating the clause before
+#: it ever reached a historical marker word sitting later in the same
+#: sentence (e.g. "#494 (the 0.75 V DEEPX core rail) was closed via #730."
+#: split to "#494 (the 0.", never reaching "closed via").
+_DOTTED_NUM_RE = re.compile(r"\b[vV]?\d+(?:\.(?:\d+|[a-zA-Z]))+\b")
+
+
+def _mask_split_chars(text: str) -> str:
+    """Return `text` with the `.`s inside a `_DOTTED_NUM_RE` token, and any
+    `.`/`;` sitting inside an unmatched `(...)` span, replaced by a NUL
+    placeholder -- so `_clause_around`'s boundary search skips them without
+    disturbing `text`'s length/positions (round 5, see `_DOTTED_NUM_RE`).
+    A parenthetical aside -- however many real sentences of old prose it
+    quotes, e.g. "#494 (<the entire old multi-sentence driver_status
+    comment>) was closed via #730." -- reads as ONE clause belonging to the
+    citation, not one ending at its own first internal full stop; splitting
+    on an in-parenthetical `.`/`;` reproduces the same false-positive shape
+    as a decimal point, just with real sentence punctuation instead of a
+    number, so it gets the same treatment."""
+    chars = list(text)
+    for m in _DOTTED_NUM_RE.finditer(text):
+        for i in range(m.start(), m.end()):
+            if chars[i] == ".":
+                chars[i] = "\x00"
+    depth = 0
+    for i, ch in enumerate(text):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif ch in ".;" and depth > 0:
+            chars[i] = "\x00"
+    return "".join(chars)
+
 
 #: file: relpath (posix); line: 1-based; issue: int; historical: bool (see
 #: HISTORICAL above); clause: the `.`/`;`-delimited clause the citation sits
@@ -134,10 +190,15 @@ Citation = namedtuple("Citation", "file line issue historical clause")
 
 
 def _clause_around(text: str, start: int, end: int) -> str:
-    """The `.`/`;`-delimited clause containing text[start:end]."""
-    left = max(text.rfind(".", 0, start), text.rfind(";", 0, start))
-    right_dot = text.find(".", end)
-    right_semi = text.find(";", end)
+    """The `.`/`;`-delimited clause containing text[start:end]. Boundary
+    search runs over a masked copy (see `_mask_split_chars`) so a decimal,
+    dotted version, or in-parenthetical `;` near the citation is never
+    mistaken for a sentence end (round 5); the returned slice is still cut
+    from the original, unmasked `text`."""
+    masked = _mask_split_chars(text)
+    left = max(masked.rfind(".", 0, start), masked.rfind(";", 0, start))
+    right_dot = masked.find(".", end)
+    right_semi = masked.find(";", end)
     candidates = [x for x in (right_dot, right_semi) if x != -1]
     right = min(candidates) if candidates else len(text)
     return text[left + 1 : right + 1].strip()
