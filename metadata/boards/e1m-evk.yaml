@@ -269,7 +269,7 @@ i2c_devices:
   - { macro: EVK_I2C_ADDR_BMI323, part: bmi323, designator: U13, address: "0x68",
       doc: "U13 IMU; respin target (SDO->GND = datasheet default). Pre-respin batch mis-straps it to 0x69 (collides w/ U12, see EVK_I2C_ADDR_ICM42670)." }
   - { macro: EVK_I2C_ADDR_BMP581, part: bmp581, designator: U14, address: "0x47",
-      doc: "U14 barometer (SDO->VIO; 0x46 if SDO->GND). CONFLICT, unresolved (alp-sdk#1974): the maintainer EVK I2C schedule lists U14 at 0x46 (SDO->GND), but 2 of 2 boards ACK at 0x47 with CHIP_ID(0x01)=0x50. Both are legal straps, so this is schedule-vs-as-built, not a fault. NOT changed -- firmware must address the silicon." }
+      doc: "U14 barometer. SDO is connected to VIO on this EVK (maintainer-confirmed 2026-09-05), which is the 0x47 strap; 0x46 would be SDO->GND. Matches 2 of 2 boards, which ACK at 0x47 with CHIP_ID(0x01)=0x50." }
   # RESOLVED 2026-09-05 (alp-sdk#1974): U35 is at 0x73, not 0x72.
   #
   # The maintainer's EVK I2C schedule gives "TCAL9538RSVR U35 = 1110011" = 0x73
