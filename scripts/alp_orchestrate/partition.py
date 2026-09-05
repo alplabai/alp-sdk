@@ -22,8 +22,32 @@ from typing import Any, Optional
 from alp_project import resolve_memory_map
 from sentinels import is_tbd
 
+from .aperture import is_partition_inside_aperture, resolve_aperture
 from .memregion import _PAGE, _region_size_bytes
 from .models import BoardProject, ResolvedPartition, StorageEntry
+
+
+def _is_flash_sub_partition(
+    region: dict[str, Any],
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+) -> bool:
+    """#1365 split B (P2): is `region` a partition INSIDE a flash device,
+    not a device of its own?
+
+    Derives the verdict against the SoC's declared on-die MRAM aperture
+    (`aperture.is_partition_inside_aperture`) instead of trusting the
+    legacy `carveout:` flag outright. Falls back to the legacy flag
+    verbatim whenever the derivation can't resolve (no aperture declared
+    for this SoC -- every non-Alif SoM -- or this region's own `base` is
+    still unresolved, e.g. AEN's `mram_main`): this is what keeps split B
+    a no-op everywhere it can't prove a better answer (ADR-0034 clause 4).
+    """
+    aperture = resolve_aperture(som_preset, metadata_root)
+    inside = is_partition_inside_aperture(region, aperture)
+    if inside is None:
+        return region.get("carveout") is False
+    return inside
 
 
 def _known_flash_devices(
@@ -48,7 +72,7 @@ def _known_flash_devices(
         n = region.get("name")
         if not isinstance(n, str):
             continue
-        if region.get("carveout") is False:
+        if _is_flash_sub_partition(region, som_preset, metadata_root):
             # A flash-class SUB-region -- an MRAM partition living inside a
             # `mram_storage`-class flash node, not a flash device of its own
             # (see the schema's `memory_region.carveout` description). On
@@ -57,6 +81,9 @@ def _known_flash_devices(
             # and decorating one with a `partitions { }` child targets a
             # node the board tree never defines (#1484). Keep it out of the
             # advertised set and out of `_resolve_flash_device()` below.
+            # #1365 split B: derived against the SoC's declared on-die MRAM
+            # aperture (containment), not the legacy `carveout:` flag --
+            # see `_is_flash_sub_partition()`.
             continue
         names.add(n)
     om = som_preset.get("on_module") or {}
@@ -191,14 +218,16 @@ def _resolve_flash_device(
     for region in resolve_memory_map(som_preset, metadata_root):
         if region.get("name") != flash_device:
             continue
-        if region.get("carveout") is False:
+        if _is_flash_sub_partition(region, som_preset, metadata_root):
             # Defense in depth for a hand-built project that skips the
             # loader's `_known_flash_devices()` check: refuse rather than
             # fabricate a `dt_label` from the region name.  This region is
             # a partition INSIDE a flash-class node (e.g. AEN's
             # `mram_storage`), not a flash device -- it has no Devicetree
             # label of its own and a `partitions { }` child on it targets
-            # a node the board tree never defines (#1484).
+            # a node the board tree never defines (#1484). #1365 split B:
+            # derived against the declared MRAM aperture, not the legacy
+            # `carveout:` flag -- see `_is_flash_sub_partition()`.
             return None, (
                 f"flash device '{flash_device}' is a partition inside a "
                 f"flash-class region on SoM "

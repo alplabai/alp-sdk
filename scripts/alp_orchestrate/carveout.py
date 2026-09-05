@@ -21,6 +21,7 @@ from typing import Any, Optional
 from alp_project import resolve_memory_map
 from sentinels import is_tbd
 
+from .aperture import classify_region, region_extent, resolve_aperture
 from .models import BoardProject, IpcEntry, ResolvedCarveOut
 from .memregion import _PAGE, _region_size_bytes
 
@@ -53,6 +54,93 @@ def _resolve_default_mailbox_channel(
         if ch.get("reserved_for") == entry_name:
             return int(ch["id"])
     return 0
+
+
+def _region_ipc_eligibility(
+    region: dict[str, Any],
+    aperture: tuple[int, int],
+    is_preset_authored: bool,
+) -> tuple[bool, str]:
+    """#1365 split B (P1): is `region` a legal IPC carve-out target?
+
+    Called only once `aperture` has already resolved non-`None` -- the
+    caller (`_candidate_regions` below) special-cases `aperture is None`
+    itself, honouring the legacy `carveout:` flag verbatim so this whole
+    function is a no-op on every non-Alif SoM (V2N/V2M/NX9101).
+
+    Eligible iff the region's derived class (`aperture.classify_region`)
+    is not `flash`, AND -- for a region the SoM preset authored itself --
+    its `write_authority` is `customer_runtime`. A DERIVED region (SoC-level
+    `memory_regions`, or the silicon-variant fallback) needs no authority:
+    it is RAM by construction.
+
+    `mram_main` (metadata/e1m_modules/E1M-AEN80{1,...} and its AEN
+    siblings) is the reason this function exists: it lists an
+    `a32_cluster`/`m55_*` endpoint, carries NO `carveout` key at all, and
+    -- while its `base` stays `"TBD"` -- was the only thing standing
+    between an `ipc:` entry and a carve-out inside the live ATOC band
+    (0x80578000..0x80580000; bench-observed intact ATOC magic `ckBS`
+    under a live app write at 0x80560000, 2026-08-08). Its class is
+    `"unresolved"` today (base TBD); its authored `write_authority:
+    composite` (not `customer_runtime`) already disqualifies it below.
+    Once `base` resolves, its extent equals the aperture exactly (the
+    whole-device alias) and `classify_region` calls it `"flash"` outright
+    -- the hazard is closed on BOTH sides of that resolution.
+    """
+    name = region.get("name")
+    cls = classify_region(region, aperture, is_preset_authored)
+
+    if cls == "flash":
+        ext = region_extent(region)
+        where = f" [0x{ext[0]:x}, 0x{ext[1]:x})" if ext else ""
+        return False, (
+            f"region {name!r}{where} is flash-class (contained in the "
+            f"SoC's declared on-die MRAM aperture) -- not safe as an IPC "
+            f"carve-out target")
+
+    if cls == "ram":
+        return True, ""
+
+    if cls == "unclassified":
+        wa = region.get("write_authority")
+        if wa == "customer_runtime":
+            return True, ""
+        return False, (
+            f"region {name!r} resolves outside the declared MRAM "
+            f"aperture (containment doesn't classify it) and its "
+            f"authored write_authority is {wa!r}, not "
+            f"'customer_runtime'")
+
+    # cls == "unresolved": this region's OWN base doesn't resolve.  (The
+    # caller never reaches here when the SoC declares no aperture at all
+    # -- that case is handled before this function is called.)  Nothing
+    # to compare against, so honour whichever authored flag is present
+    # rather than guess (ADR-0034 clause 4): `write_authority` first
+    # (the newer, more specific signal), then the legacy `carveout`,
+    # then refuse.
+    wa = region.get("write_authority")
+    if wa is not None:
+        if wa == "customer_runtime":
+            return True, ""
+        return False, (
+            f"region {name!r} has an unresolved base "
+            f"({region.get('base')!r}) so containment against the "
+            f"declared MRAM aperture can't be verified, and its "
+            f"authored write_authority is {wa!r}, not "
+            f"'customer_runtime'")
+    carveout = region.get("carveout")
+    if carveout is not None:
+        if carveout is False:
+            return False, (
+                f"region {name!r} has an unresolved base "
+                f"({region.get('base')!r}); honouring its legacy "
+                f"`carveout: false`")
+        return True, ""
+    return False, (
+        f"region {name!r} has an unresolved base "
+        f"({region.get('base')!r}) and carries neither "
+        f"`write_authority` nor a legacy `carveout` flag -- class "
+        f"unresolved, never guessed (ADR-0034 clause 4)")
 
 
 def _blocked_carve_out(entry: IpcEntry, reason: str) -> ResolvedCarveOut:
@@ -120,6 +208,16 @@ def resolve_carve_outs(
     memory_map = resolve_memory_map(
         project.som_preset, project.effective_metadata_root())
     mailbox = dict(project.som_preset.get("mailbox") or {})
+
+    # #1365 split B (P1): the SoC's declared on-die flash aperture (None on
+    # every non-Alif SoM, or an Alif SoC/variant that hasn't declared one),
+    # and whether THIS SoM preset authored `memory_map:` itself -- both feed
+    # `_region_ipc_eligibility()` below.  `memory_map` above is an all-or-
+    # nothing derivation (`resolve_memory_map`'s own precedence rule): every
+    # row in it is preset-authored, or none is.
+    aperture = resolve_aperture(
+        project.som_preset, project.effective_metadata_root())
+    is_preset_authored = bool(project.som_preset.get("memory_map"))
 
     # Phase 3 strict mailbox checks (spec §6.4).  Surfaces preset
     # bugs before the user spends time on a build that would silently
@@ -266,19 +364,35 @@ def resolve_carve_outs(
         endpoint_set = set(entry.endpoints)
 
         # Filter candidates: accessibility covers every endpoint, and the
-        # region isn't marked non-allocatable for IPC carve-outs
-        # (`carveout: false` -- e.g. a flash-class MRAM sub-region that
-        # must publish a real `base` for the board generator's partition
-        # table but isn't byte-addressable shared memory a raw_shmem/
-        # rpmsg carve-out can safely land in).
+        # region is eligible for IPC carve-out allocation.
+        #
+        # #1365 split B (P1): eligibility is now DERIVED against the SoC's
+        # declared on-die MRAM aperture (`_region_ipc_eligibility`) instead
+        # of trusting the legacy `carveout:` flag outright -- that flag is
+        # what previously left `mram_main` (no `carveout` key at all, base
+        # `TBD`) eligible by default, one `base:` fill away from resolving
+        # an `a32_cluster` carve-out inside the live ATOC band. When the
+        # SoC declares NO aperture (`aperture is None` -- every non-Alif
+        # SoM, or an Alif SoC/variant that omits `soc_flash_base`), this
+        # keeps the exact pre-split-B `carveout: false` filter so those
+        # SoMs resolve byte-identically.
         candidates: list[dict[str, Any]] = []
-        excluded_names: list[str] = []
+        excluded_names: list[str] = []      # aperture is None: legacy path
+        excluded_detail: list[str] = []     # aperture resolved: derived path
         for region in memory_map:
             af = set(region.get("accessible_from") or [])
             if not endpoint_set.issubset(af):
                 continue
-            if region.get("carveout") is False:
-                excluded_names.append(region["name"])
+            if aperture is None:
+                if region.get("carveout") is False:
+                    excluded_names.append(region["name"])
+                    continue
+                candidates.append(region)
+                continue
+            eligible, reason = _region_ipc_eligibility(
+                region, aperture, is_preset_authored)
+            if not eligible:
+                excluded_detail.append(f"{region['name']!r} ({reason})")
                 continue
             candidates.append(region)
         if not candidates:
@@ -291,6 +405,17 @@ def resolve_carve_outs(
                     f"memory); add an allocatable region (`carveout: true` "
                     f"or omitted) to metadata/e1m_modules/{project.sku}.yaml "
                     f"or remove the matching ipc entry from board.yaml.")
+            if excluded_detail:
+                return [], (
+                    f"ipc entry '{entry.name}' endpoints {entry.endpoints} "
+                    f"only match memory_map region(s) in SoM {project.sku} "
+                    f"that are ineligible for an IPC carve-out: "
+                    f"{'; '.join(excluded_detail)}.  Add a region whose "
+                    f"resolved base sits outside the SoC's declared MRAM "
+                    f"aperture (or, if inside it, one that resolves "
+                    f"`write_authority: customer_runtime`) to "
+                    f"metadata/e1m_modules/{project.sku}.yaml, or remove "
+                    f"the matching ipc entry from board.yaml.")
             return [], (
                 f"ipc entry '{entry.name}' endpoints {entry.endpoints} "
                 f"have no matching memory_map region in SoM "
