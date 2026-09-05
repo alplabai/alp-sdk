@@ -58,26 +58,38 @@ on_module:
   # + metadata/chips/dp83825.yaml for the bench evidence and the order-code
   # caveat (#1241 "Blocked on").
   ethernet_phy:         dp83825
+  # Both OSPI0 devices below share the single OSPI0 octal bus, separated
+  # only by chip-select. Per metadata/e1m_modules/E1M-AEN801.yaml (the
+  # E1M-AEN-2626-R2 netlist -- one shared PCB across the family, so PCB
+  # routing does not change with SoC tier or population): U9 (RAM
+  # footprint) -> OSPI0_SS0 => CS0; U10 (NOR footprint) -> OSPI0_SS1 => CS1.
   ospi_memories:
     ospi0:
       chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
       assembled:      optional            # BOM variant
       capacity_mbit:  256                 # 256 Mbit (32 MiB)
-      chip_select:    0                   # OSPI0 CS0
+      chip_select:    1                   # OSPI0 CS1 -- U10 -> OSPI0_SS1 per the R2 netlist
       role:           app_storage
     ospi1:
       chip:           TBD            # OSPI1 controller unused on this SoM: both OSPI devices
-      assembled:      optional       # share the OSPI0 octal bus (NOR = CS0, HyperRAM = CS1)
+      assembled:      optional       # share the OSPI0 octal bus (HyperRAM = CS0, NOR = CS1)
       capacity_mbit:  TBD
       role:           data_log
   # External HyperRAM -- volatile XIP / scratch RAM, separate from the
   # NOR flash above.  Shares the OSPI0 octal controller with the flash,
-  # separated only by chip-select (NOR flash = CS0, HyperRAM = CS1).
+  # separated only by chip-select (HyperRAM = CS0, NOR = CS1).
   hyperram:
     chip:           W958D8NBYA5I    # Winbond OctalRAM (HyperBus)
+    # Explicit, not the true default left implicit: `memory.dram_mbit` below
+    # derives from this capacity and is documented as "populated on every
+    # AEN BOM variant" (unlike ospi0 NOR, which is `assembled: optional`).
+    # Written out per #1990 so this SKU does not repeat E1M-AEN801's
+    # omitted-key bug (schema comment: omitting this key silently claims a
+    # HyperRAM that may not be fitted).
+    assembled:      true
     capacity_mbit:  256             # 256 Mbit (32 MiB)
     interface:      ospi0
-    chip_select:    1
+    chip_select:    0                 # OSPI0 CS0 -- U9 -> OSPI0_SS0 per the R2 netlist
 
   i2c_devices:
     # HELD, NOT the disproven LPI2C0 claim (#1848, ADR 0017 amended

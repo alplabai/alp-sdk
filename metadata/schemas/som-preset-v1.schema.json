@@ -485,7 +485,9 @@
         },
         "chip_select": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 1,
+          "description": "OSPI0 chip-select index. Every AEN preset's shared OSPI0 octal bus has exactly two chip-select lines wired (OSPI0_SS0/OSPI0_SS1 per the E1M-AEN-2626-R2 netlist) -- 0 or 1, never more."
         },
         "role": {
           "type": "string",
@@ -526,7 +528,9 @@
         },
         "chip_select": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 1,
+          "description": "OSPI0 chip-select index. Mirrors ospi_memory.chip_select: the shared OSPI0 octal bus has exactly two chip-select lines wired (OSPI0_SS0/OSPI0_SS1 per the E1M-AEN-2626-R2 netlist) -- 0 or 1, never more."
         },
         "assembled": {
           "oneOf": [
