@@ -32,11 +32,13 @@ from a bare west/SETOOLS environment with no PyYAML dependency:
     M55_HE  0x80010000 .. 0x802b0000  (2688 KiB, unchanged since before #1069)
     M55_HP  0x802b0000 .. 0x80550000  (2688 KiB, moved off the old shared
                                         0x80010000 window)
-    A32_0   0x80002000 .. 0x80580000  (5624 KiB, up to MRAM_END -- #1981;
-                                        an A32 Linux chain's mramAddress
-                                        span runs from TF-A BL32 through
-                                        the signed ATOC and so owns
-                                        essentially the whole System MRAM)
+    A32_0   0x80002000 .. 0x80578000  (5592 KiB, up to the base of the
+                                        SE-owned `atoc` band -- #1981; an
+                                        A32 Linux chain's mramAddress span
+                                        runs from TF-A BL32 through the
+                                        kernel and so owns essentially the
+                                        whole App MRAM window below the
+                                        boot table)
 
 Only `mramAddress` (slot0-XIP) entries are window/overlap-checked here.
 `loadAddress` (ITCM) entries -- the shape every current AEN dual-core
@@ -48,7 +50,13 @@ ITCM entry + one slot0-XIP entry) is legitimate and not rejected.
 `mramAddress` entry may never coexist in the same config -- the A32
 window above entirely covers both M55 windows, so mixing them would
 stage an M55 slot0 image into memory the A32 chain is executing from.
-`loadAddress` (ITCM) M55 stub entries are exempt, same as above.
+`loadAddress` (ITCM) M55 stub entries are exempt, same as above. That
+mutual-exclusivity check only fires when an M55 `mramAddress` entry is
+ALSO present -- the real, shipped A32 Linux boot config stages its M55
+entries as `loadAddress` only (see `test_a32_linux_boot_config_passes`),
+so the check never fires for it. For a PURE A32_0 config the window
+bounds below are the entire guard: they are what stop an A32 mramAddress
+entry from wandering into the SE-owned `atoc` band or the M55 windows.
 
 Two known gaps, NOT closed by this guard (see #1069's PR body):
   - A sequential single-core `west flash` writes a whole fresh TOC each
@@ -67,6 +75,29 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# System MRAM end (bench-confirmed; matches alif_flash.py's prior
+# _SLOT0_REGION_END and the top of metadata's `storage` region).
+MRAM_END = 0x80580000
+
+# Size of the SE-owned `atoc` band at the very top of the App MRAM window
+# (#1289) -- verbatim from both AEN presets' `memory_map:` `atoc` region,
+# which is byte-identical on each part: metadata/e1m_modules/
+# E1M-AEN801.yaml:274 and metadata/e1m_modules/E1M-AEN803.yaml:201, both
+# `{ name: atoc, base: 0x80578000, size_kib: 32, ... }`. A generator-policy
+# constant, not re-derived from that YAML at flash time -- same convention
+# scripts/gen_zephyr_board.py's own `_AEN_ATOC_KIB` already uses, so this
+# module stays stdlib-only (see module docstring).
+_ATOC_BAND_KIB = 32
+
+# Ceiling for the A32_0 slot0 window below: the base of that atoc band,
+# i.e. MRAM_END minus the band's own size -- 0x80580000 - 32 KiB =
+# 0x80578000, matching both presets' `atoc` `base:` verbatim. #1981
+# initially used the raw MRAM_END here instead, which silently accepted
+# an A32 mramAddress entry anywhere inside the SE-owned atoc band (or the
+# `reserved`/`storage` bands below it) -- the exact vacuous-hardcode
+# failure scripts/check_atoc_reservation.py's own docstring warns against.
+_A32_0_CEILING = MRAM_END - _ATOC_BAND_KIB * 1024  # 0x80578000
+
 # (base, size_bytes) per cpu_id -- see module docstring; mirrors
 # metadata/e1m_modules/E1M-AEN801.yaml `memory_map:` he_slot0 / hp_slot0.
 SLOT0_WINDOWS = {
@@ -74,25 +105,22 @@ SLOT0_WINDOWS = {
     'M55_HP': (0x802b0000, 2688 * 1024),
     # #1981: floor 0x80002000 is the bench-verified BOOTLOAD (TF-A BL32)
     # boot address -- Secure Enclave boot table, two E1M-AEN803 modules,
-    # 2026-09-05. Ceiling is fixed at MRAM_END (0x80580000, below) rather
-    # than the true ceiling -- the signed ATOC's own start address --
-    # because that address moves with ATOC package size (SETOOLS
-    # build/app-package-map.txt) and this module has no per-build input to
-    # re-derive it from. MRAM_END as the ceiling is corroborated by
-    # metadata/e1m_modules/E1M-AEN801.yaml `memory_map:`'s own `mram_main`
-    # entry (`accessible_from: [a32_cluster, ...]`, `size_kib: 5632`,
-    # `base: "TBD"`) -- from base 0x80000000 that region's top is also
-    # 0x80580000; its base is explicitly marked TBD, not 0x80002000, so it
-    # is corroboration for the ceiling only, not a source for this floor.
-    # The mutual-exclusivity check in validate_atoc_entries() below, not
-    # this window, is what actually keeps an A32 config out of M55 slot0
-    # territory.
-    'A32_0': (0x80002000, 5624 * 1024),  # 5624 KiB = MRAM_END - 0x80002000
+    # 2026-09-05. Ceiling is _A32_0_CEILING (0x80578000, above), the base
+    # of the SE-owned atoc band -- NOT the true per-build ceiling (the
+    # signed ATOC's own start address moves with ATOC package size, see
+    # SETOOLS' build/app-package-map.txt), but a fixed reservation band,
+    # the same convention scripts/check_atoc_reservation.py enforces for
+    # every other AEN partition table.
+    'A32_0': (0x80002000, _A32_0_CEILING - 0x80002000),  # 5592 KiB
 }
 
-# System MRAM end (bench-confirmed; matches alif_flash.py's prior
-# _SLOT0_REGION_END and the top of metadata's `storage` region).
-MRAM_END = 0x80580000
+# Explicit M55 membership for the mutual-exclusivity check below -- NOT
+# "every cpu_id that isn't A32_0". The Alif E8's A32 cluster is dual-core
+# (a future `A32_1` key is plausible), and `SLOT0_WINDOWS` is not
+# guaranteed to hold exactly {M55_HE, M55_HP, A32_0} forever; testing
+# equality against this set keeps a future A32_1 entry from being
+# mislabelled "an M55 mramAddress entry" and wrongly tripping the check.
+_M55_CPU_IDS = {'M55_HE', 'M55_HP'}
 
 
 class AtocValidationError(ValueError):
@@ -157,7 +185,7 @@ def validate_atoc_entries(entries: "dict[str, Any]") -> None:
     # (ITCM) M55 stub entries never reach `mram_entries` above, so they
     # are unaffected by this check.
     a32_names = [n for n, _b, cid in mram_entries if cid == 'A32_0']
-    m55_names = [n for n, _b, cid in mram_entries if cid != 'A32_0']
+    m55_names = [n for n, _b, cid in mram_entries if cid in _M55_CPU_IDS]
     if a32_names and m55_names:
         raise AtocValidationError(
             f"ATOC mixes an A32 mramAddress entry ({a32_names[0]!r}) with "

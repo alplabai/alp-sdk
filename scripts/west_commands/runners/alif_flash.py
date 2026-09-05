@@ -156,36 +156,34 @@ def _select_app_shape(reset_vector, cpu_suffix):
         # window contains this build's reset vector, the same way the
         # ITCM branch below finds the core from the vector's top byte,
         # then cross-check --device agrees.
+        # #1981 review: scripts/aen_atoc.SLOT0_WINDOWS['A32_0'] is (by
+        # design, per that module's docstring) a window covering
+        # essentially the whole low App MRAM span, INCLUDING a margin
+        # above M55_HP's own window ceiling that belongs to neither real
+        # M55 window. This runner is Zephyr `west flash`-only (see
+        # _CPU_PROFILES/capabilities()) and never stages an A32 Linux
+        # image, so A32_0 is excluded from this lookup entirely -- an
+        # earlier version matched against it and reported a genuine M55
+        # mis-link into that margin (e.g. 0x80560000) as "staged by a
+        # different flash path", masking a real refusal-worthy error
+        # behind a message that means "nothing to see here".
         vector_cpu_id = None
         for candidate_cpu_id, (win_base, win_size) in _aen_atoc.SLOT0_WINDOWS.items():
+            if candidate_cpu_id not in _aen_atoc._M55_CPU_IDS:
+                continue
             if win_base <= reset_vector < win_base + win_size:
                 vector_cpu_id = candidate_cpu_id
                 break
         if vector_cpu_id is None:
             windows_desc = ', '.join(
                 f'{cid} 0x{b:08x}..0x{b + s:08x}'
-                for cid, (b, s) in _aen_atoc.SLOT0_WINDOWS.items())
+                for cid, (b, s) in _aen_atoc.SLOT0_WINDOWS.items()
+                if cid in _aen_atoc._M55_CPU_IDS)
             raise RuntimeError(
                 f'reset vector 0x{reset_vector:08x} is in App MRAM but '
                 f'outside every declared slot0 window ({windows_desc}) -- '
                 'refusing to burn (see metadata/e1m_modules/'
                 'E1M-AEN801.yaml memory_map:).')
-        # #1981 added scripts/aen_atoc.SLOT0_WINDOWS['A32_0'], a window
-        # that (by design, per that module's docstring) entirely covers
-        # both M55 windows plus a margin above/below them. This runner is
-        # Zephyr `west flash`-only (see _CPU_PROFILES/capabilities()) and
-        # never stages an A32 Linux image, so a vector_cpu_id of 'A32_0'
-        # here means the reset vector fell in that margin, outside both
-        # real M55 windows -- reject explicitly instead of falling through
-        # to an else-branch that used to safely mean "M55_HP" back when
-        # M55_HE/M55_HP were the only two dict keys.
-        if vector_cpu_id not in ('M55_HE', 'M55_HP'):
-            raise RuntimeError(
-                f'reset vector 0x{reset_vector:08x} falls in the '
-                f'{vector_cpu_id} slot0 window, not an M55 one -- this '
-                'runner (Zephyr `west flash`) only stages M55-HE/M55-HP '
-                'images; an A32 Linux image is staged by a different '
-                'flash path.')
         vector_suffix = 'HE' if vector_cpu_id == 'M55_HE' else 'HP'
         if vector_suffix != cpu_suffix:
             raise RuntimeError(
