@@ -78,9 +78,15 @@ SLOT0_WINDOWS = {
     # than the true ceiling -- the signed ATOC's own start address --
     # because that address moves with ATOC package size (SETOOLS
     # build/app-package-map.txt) and this module has no per-build input to
-    # re-derive it from. The mutual-exclusivity check in
-    # validate_atoc_entries() below, not this window, is what actually
-    # keeps an A32 config out of M55 slot0 territory.
+    # re-derive it from. MRAM_END as the ceiling is corroborated by
+    # metadata/e1m_modules/E1M-AEN801.yaml `memory_map:`'s own `mram_main`
+    # entry (`accessible_from: [a32_cluster, ...]`, `size_kib: 5632`,
+    # `base: "TBD"`) -- from base 0x80000000 that region's top is also
+    # 0x80580000; its base is explicitly marked TBD, not 0x80002000, so it
+    # is corroboration for the ceiling only, not a source for this floor.
+    # The mutual-exclusivity check in validate_atoc_entries() below, not
+    # this window, is what actually keeps an A32 config out of M55 slot0
+    # territory.
     'A32_0': (0x80002000, 5624 * 1024),  # 5624 KiB = MRAM_END - 0x80002000
 }
 
