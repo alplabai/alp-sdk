@@ -31,7 +31,7 @@
 > [tan-cli#1220](https://github.com/alplabai/tan-cli/issues/1220); see
 > alp-sdk#1944 and `changelog.d/1944.md` for why this stays a tan-cli
 > port rather than an alp-sdk one). Fill both blocks in by hand from
-> [§5's template](#5-step-2--create-the-som-yaml) below —
+> the template in §5, "Step 2 — Create the SoM YAML", below —
 > `validate_metadata.py` enforces their schema shape either way, so this
 > is a generation-time convenience gap, not a validation gap.
 
