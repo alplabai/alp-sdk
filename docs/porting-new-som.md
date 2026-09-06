@@ -25,6 +25,15 @@
 > graduate (clear `status.preliminary`) until the real silicon
 > backend replaces the placeholder.  Preview a scaffold without
 > writing anything via `tan new-som ... --dry-run`.
+>
+> **Known gap: `tan new-som` does not scaffold `ospi_memories:` /
+> `hyperram:` for `alif:ensemble` parts** (tracked at
+> [tan-cli#1220](https://github.com/alplabai/tan-cli/issues/1220); see
+> alp-sdk#1944 and `changelog.d/1944.md` for why this stays a tan-cli
+> port rather than an alp-sdk one). Fill both blocks in by hand from
+> the template in §5, "Step 2 — Create the SoM YAML", below —
+> `validate_metadata.py` enforces their schema shape either way, so this
+> is a generation-time convenience gap, not a validation gap.
 
 "Porting a new SoM" in the Alp SDK means *adding one row of
 machine-readable metadata*.  It is **not**:
@@ -281,6 +290,8 @@ on_module:
   rtc_external:         rv3028c7
   temperature_sensor:   tmp112
   eeprom:               eeprom_24c128
+  # `tan new-som` does not generate this block yet (see the "Known gap"
+  # note in §1) -- fill it in by hand until the scaffold is ported.
   ospi_memories:
     ospi0:
       chip:           TBD
