@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Detect a silently ejected merge-queue entry on `dev` (issue #1952).
+#
+# GitHub's merge queue drops an entry whose checks have not *reported*
+# within the ruleset's `check_response_timeout_minutes` -- even when none
+# of them failed. PR #1887 hit this on 2026-09-04: enqueued, sat at
+# AWAITING_CHECKS while its four `merge_group` runs waited for a starved
+# runner pool, then was ejected past the deadline. It stayed OPEN,
+# MERGEABLE, CLEAN, every one of its own checks green -- nothing in the PR
+# view says "dropped an hour ago and will never merge on its own" rather
+# than "still waiting". This workflow is the alarm for that: it never
+# blocks or fails CI, it only surfaces the state a human would otherwise
+# have to notice by hand (dev not moving while the queue looks healthy).
+#
+# `check_response_timeout_minutes` was raised 60 -> 180 on 2026-09-05,
+# which fixed the common case (see the issue for the overnight evidence).
+# This workflow covers what that config change cannot: a long enough
+# runner drought still ejects entries, just less often, and each one is
+# still silent when it happens.
+#
+# scripts/merge_queue_ejection_alarm.py has the full detection writeup
+# (state signature, the actor-based ejection-vs-manual-dequeue split, the
+# once-per-ejection dedup marker). Run `--dry-run` locally to preview
+# without posting comments.
+
+name: merge-queue-ejection-alarm
+
+on:
+  schedule:
+    # Every 30 minutes -- an ejected entry is worth catching well inside
+    # the 180-minute check-response deadline, not just after it.
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: Detect ejected dev merge-queue entries
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            scripts/merge_queue_ejection_alarm.py
+          sparse-checkout-cone-mode: false
+
+      - name: Run detector
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/merge_queue_ejection_alarm.py
