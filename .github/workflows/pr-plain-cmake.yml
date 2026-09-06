@@ -25,6 +25,12 @@ on:
       - 'CMakeLists.txt'
       - 'cmake/**'
       - 'meta-alp-sdk/recipes-devtools/zcbor/**'
+      # tests/** is BUILT by this workflow (-DALP_BUILD_TESTS=ON below, plus
+      # CMakeLists.txt's add_subdirectory(tests)), so a change there decides
+      # which targets these jobs compile and which ctest cases run.  It was
+      # missing here until #1997: PR #1996 guarded a tests/yocto/ target
+      # behind CMAKE_SYSTEM_NAME and this workflow did not run on it at all.
+      - 'tests/**'
       - '.github/workflows/pr-plain-cmake.yml'
   push:
     branches: [main, dev]
@@ -34,6 +40,7 @@ on:
       - 'CMakeLists.txt'
       - 'cmake/**'
       - 'meta-alp-sdk/recipes-devtools/zcbor/**'
+      - 'tests/**'
   workflow_dispatch:
 
 concurrency:
@@ -163,6 +170,29 @@ jobs:
       # the I2C/SPI/UART/GPIO wrappers' failure-path coverage, and
       # the MQTT wrapper's URI-parse + NULL-arg paths.  Real-adapter
       # HIL coverage is parked behind docs/ci/HW-IN-LOOP.md.
+      # A vanished target is a SILENT failure: CMake happily produces a
+      # smaller build and ctest a shorter list, both exit 0, and nothing
+      # compares either against an expectation.  These three are the ones
+      # whose definition is conditional, so they are the ones that can
+      # disappear unnoticed -- alp_test_inference_drpai_regression is
+      # Linux-only by construction (#1995/#1996: it compiles
+      # src/yocto/inference_drpai.cpp, which hard-includes <sys/ioctl.h>),
+      # and THIS job is the platform that covers it.  Assert presence by
+      # name rather than by counting tests, so adding a test never trips
+      # it.  Same reasoning the yocto-zcbor leg below gives for its own
+      # REQUIRED flag: fail loudly here instead of degrading quietly.
+      - name: Assert the conditional test targets still exist (#1997)
+        run: |
+          set -euo pipefail
+          listed="$(ctest --test-dir build/yocto -N)"
+          missing=0
+          for t in alp_test_inference_drpai_regression                    alp_test_inference_ort_regression                    alp_test_inference_deepx_regression; do
+              if ! printf '%s' "$listed" | grep -q "$t"; then
+                  echo "::error::ctest no longer lists $t -- a conditional under tests/ dropped it on Linux, the platform that covers it (#1997)"
+                  missing=1
+              fi
+          done
+          [ "$missing" -eq 0 ]
       - name: Test
         run: ctest --test-dir build/yocto --output-on-failure
 
