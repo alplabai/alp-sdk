@@ -65,7 +65,7 @@ populated:
   tas2563:                  true                # 2x speaker amps (U27, U28)
 
   # I/O expander
-  tcal9538:                 true                # TCA9538/TCAL9538 at 0x72
+  tcal9538:                 true                # TCA9538/TCAL9538 at 0x73 (U35 main; U37 PCIe expander NOT assembled)
 
   # Power instrumentation
   ina236:                   true                # 6x current monitors at 0x40..0x42, 0x49..0x4B
@@ -295,8 +295,8 @@ i2c_devices:
       doc: "U35 main I/O expander (A1=1, A0=1). Handles LCD/camera/capacitive-touch control + four sensor interrupt inputs. CORRECTED 2026-09-05 from 0x72 / A1=1,A0=0 (alp-sdk#1974): the maintainer's EVK I2C schedule gives 1110011 = 0x73, and 2 of 2 boards answer there and are silent at 0x72." }
   - { macro: EVK_I2C_ADDR_TCAL9538_PCIE, part: tcal9538, designator: U37, address: "0x71", assembled: false,
       doc: "U37 PCIe I/O expander (A0=1, A1=0). NOT ASSEMBLED on this EVK revision -- confirmed by the maintainer 2026-09-05 (alp-sdk#1974): this revision, built for Alif, does not need the second expander. Consistent with the evidence: never observed on either board, and absent from the maintainer EVK I2C schedule, which lists only ONE TCAL9538 (U35, at 0x73). The entry is kept, not deleted, because it describes a real footprint that earlier/other revisions populate. Anything that would have used it -- the I2C-mux SEL, PCIe slot RST/WAKE/CLKREQ, M2E_ALERT -- has no expander behind it here." }
-  - { macro: EVK_I2C_ADDR_TCA6408A_MAIN, part: tcal9538, designator: U35, address: "0x20",
-      doc: "U35 main I/O expander, TCA6408ARSVR alternative (R112 fitted, R145 DNP). PCA9538-register-compatible, so chips/tcal9538 drives it unchanged. BENCH-CONFIRMED 2026-06-16 on an EARLIER EVK revision: read back config=0xFF + a live input port. NOT OBSERVED on either 2026-09-05 board (0x20 a clean NACK on both) and absent from the maintainer EVK I2C schedule for this revision, which places U35 at 0x73. Treat 0x20 as an earlier-revision population; do not expect it on an Alif-revision EVK." }
+  - { macro: EVK_I2C_ADDR_TCA6408A_MAIN, part: tcal9538, designator: U35, address: "0x20", assembled: false,
+      doc: "U35 main I/O expander, TCA6408ARSVR alternative (R112 fitted, R145 DNP). PCA9538-register-compatible, so chips/tcal9538 drives it unchanged. BENCH-CONFIRMED 2026-06-16 on an EARLIER EVK revision: read back config=0xFF + a live input port. NOT ASSEMBLED on this EVK revision: NOT OBSERVED on either 2026-09-05 board (0x20 a clean NACK on both) and absent from the maintainer EVK I2C schedule for this revision, which places U35 at 0x73. Treat 0x20 as an earlier-revision population; do not expect it on an Alif-revision EVK." }
   - { macro: EVK_I2C_ADDR_TAS2563_LOW, part: tas2563, designator: U27, address: "0x4D",
       doc: "U27 smart amp (AD0 = 10k to GND). CONFIRMED 2026-09-05: 0x4D, ACKing on 2 of 2 boards, and confirmed correct by the maintainer." }
   - { macro: EVK_I2C_ADDR_TAS2563_HIGH, part: tas2563, designator: U28, address: "0x4E",

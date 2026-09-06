@@ -119,7 +119,7 @@ def _is_assembled(entry: dict[str, Any]) -> bool:
     """`assembled:` defaults to true (metadata/schemas/board-preset.schema.json);
     only an explicit `false` means the footprint is unpopulated on this board
     revision."""
-    return entry.get("assembled", True) is not False
+    return bool(entry.get("assembled", True))
 
 
 def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
@@ -152,7 +152,7 @@ def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
         assembled = _is_assembled(entry)
         macro = _tag(entry["macro"], assembled)
         doc = entry.get("doc", "")
-        if not assembled:
+        if not assembled and "NOT ASSEMBLED" not in doc:
             doc = f"NOT ASSEMBLED on this board revision. {doc}".strip()
         addr_lines.append((macro, f"{entry['address']}u", doc))
         alias = entry.get("alias")

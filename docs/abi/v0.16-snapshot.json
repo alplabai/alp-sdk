@@ -910,8 +910,8 @@
           "hash": "30f8c138329a7e74",
           "value": "0x4Du"
         },
-        "EVK_I2C_ADDR_TCA6408A_MAIN": {
-          "hash": "ff97f8a717d7b230",
+        "EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED": {
+          "hash": "04604f0c875ffde7",
           "value": "0x20u"
         },
         "EVK_I2C_ADDR_TCAL9538": {

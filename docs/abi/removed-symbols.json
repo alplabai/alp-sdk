@@ -45,6 +45,15 @@
       "issue": 1980,
       "reason": "U37 (the PCIe I/O expander this macro addresses) is `assembled: false` in metadata/boards/e1m-evk.yaml -- confirmed absent on both bench boards and from the maintainer's I2C schedule (#1974). gen_board_header.py now renames every macro an unfitted i2c_devices: entry contributes with a `_NOT_ASSEMBLED` suffix instead of emitting the plain name, so a reader can't reach for this macro and get a real-looking address for silicon that was never fitted.",
       "replacement": "EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED"
+    },
+    {
+      "header": "alp/boards/alp_e1m_evk_routes.h",
+      "category": "macro",
+      "symbol": "EVK_I2C_ADDR_TCA6408A_MAIN",
+      "release": "v0.17.0",
+      "issue": 1980,
+      "reason": "The TCA6408ARSVR alt-population footprint (U35, R112 fitted / R145 DNP) is now `assembled: false` in metadata/boards/e1m-evk.yaml -- neither 2026-09-05 bench board answers at 0x20, and the maintainer's EVK I2C schedule places U35 at 0x73 (TCAL9538) instead (#1974). Same `_NOT_ASSEMBLED` rename gen_board_header.py already applies to EVK_I2C_ADDR_TCAL9538_PCIE.",
+      "replacement": "EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED"
     }
   ]
 }
