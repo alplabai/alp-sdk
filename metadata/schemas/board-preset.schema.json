@@ -5,7 +5,9 @@
   "description": "Schema for a shared board definition under metadata/boards/<name>.yaml.  Referenced from project board.yaml files via the top-level `preset:` field.  Exists only as SDK-internal plumbing so multiple projects targeting the same physical board (e.g. the EVK + its ~40 demo apps) share one source of truth for chip population + E1M-pad routing.  Customers building a custom board put these fields inline at the top level of their board.yaml instead.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["name"],
+  "required": [
+    "name"
+  ],
   "properties": {
     "name": {
       "type": "string",
@@ -18,12 +20,17 @@
     },
     "hosts_som_families": {
       "type": "array",
-      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*$"
+      },
       "description": "SoM families this board mechanically + electrically supports (alif-ensemble, renesas-rzv2n, ...).  The validators reject `board.yaml` files that pair a shared board preset with a SoM preset whose `family:` is not listed here."
     },
     "populated": {
       "type": "object",
-      "additionalProperties": { "type": "boolean" },
+      "additionalProperties": {
+        "type": "boolean"
+      },
       "description": "Per-component populated flags.  Keys match chip-driver / block names; each `true` enables the corresponding CONFIG_ALP_SDK_{CHIP,BLOCK}_<name>=y."
     },
     "e1m_routes": {
@@ -31,25 +38,45 @@
       "additionalProperties": false,
       "description": "E1M-pad routing.  scripts/gen_board_header.py reads this block and emits include/alp/boards/alp_<name>_routes.h.",
       "properties": {
-        "gpio":  { "$ref": "#/$defs/route_entry_list_gpio" },
-        "buses": { "$ref": "#/$defs/route_entry_list_buses" },
-        "pwm":   { "$ref": "#/$defs/route_entry_list_pwm" },
-        "adc":   { "$ref": "#/$defs/route_entry_list_adc" },
-        "dac":   { "$ref": "#/$defs/route_entry_list_dac" },
-        "i2s":   { "$ref": "#/$defs/route_entry_list_i2s" },
-        "can":   { "$ref": "#/$defs/route_entry_list_can" },
-        "qenc":  { "$ref": "#/$defs/route_entry_list_qenc" }
+        "gpio": {
+          "$ref": "#/$defs/route_entry_list_gpio"
+        },
+        "buses": {
+          "$ref": "#/$defs/route_entry_list_buses"
+        },
+        "pwm": {
+          "$ref": "#/$defs/route_entry_list_pwm"
+        },
+        "adc": {
+          "$ref": "#/$defs/route_entry_list_adc"
+        },
+        "dac": {
+          "$ref": "#/$defs/route_entry_list_dac"
+        },
+        "i2s": {
+          "$ref": "#/$defs/route_entry_list_i2s"
+        },
+        "can": {
+          "$ref": "#/$defs/route_entry_list_can"
+        },
+        "qenc": {
+          "$ref": "#/$defs/route_entry_list_qenc"
+        }
       }
     },
     "i2c_devices": {
       "type": "array",
       "description": "On-board I2C device instances (chip address / strap facts, optionally with power-monitor calibration).  scripts/gen_board_header.py reads this block and emits `#define <macro> 0x..u` (+ per-entry `alias` + `calibration` shunt/max-current macros) into include/alp/boards/alp_<name>_routes.h.  Single source of truth for chip-instance addresses that used to be hand-authored in the board header.",
-      "items": { "$ref": "#/$defs/i2c_device_entry" }
+      "items": {
+        "$ref": "#/$defs/i2c_device_entry"
+      }
     },
     "overlay_pins": {
       "type": "array",
       "description": "Board-repurposed pads exposed past the standard E1M pinout's 52 entries, for boards that expose them to an `alp,pin-array` devicetree overlay (see zephyr/dts/bindings/alp,pin-array.yaml).  Each entry gets `EVK_PIN_OVERLAY_BASE + N`, where N is the entry's position in THIS list (0-based) -- an ordinal, not an independent hardware fact, so it is never written by hand; scripts/gen_board_header.py computes it from list order via `enumerate()`.  Reordering entries changes every macro after the moved one, exactly like reordering the backing devicetree overlay's `gpios` phandle list would.",
-      "items": { "$ref": "#/$defs/overlay_pin_entry" }
+      "items": {
+        "$ref": "#/$defs/overlay_pin_entry"
+      }
     },
     "defaults": {
       "type": "object",
@@ -70,13 +97,22 @@
       "description": "Per-rev metadata (min/max SDK versions, board_id ADC channel + thresholds, status, notes).",
       "additionalProperties": {
         "type": "object",
-        "required": ["status"],
+        "required": [
+          "status"
+        ],
         "additionalProperties": true,
         "description": "Same `status:` shape as $defs/hw_rev_entry in hw-revisions-v1.schema.json (kept in lockstep by hand -- this file's validator loads standalone, with no cross-file $ref resolution).  additionalProperties stays true here (not false, unlike the family-level schema) because board presets carry extra per-rev keys the family schema doesn't (board_id, notes).",
         "properties": {
           "status": {
             "type": "string",
-            "enum": ["production", "preview", "preliminary", "reserved", "tbd", "deprecated"]
+            "enum": [
+              "production",
+              "preview",
+              "preliminary",
+              "reserved",
+              "tbd",
+              "deprecated"
+            ]
           }
         }
       }
@@ -85,8 +121,12 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "preliminary":       { "type": "boolean" },
-        "partial_hw_config": { "type": "boolean" }
+        "preliminary": {
+          "type": "boolean"
+        },
+        "partial_hw_config": {
+          "type": "boolean"
+        }
       }
     }
   },
@@ -94,19 +134,46 @@
     "route_entry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["e1m", "macro"],
+      "required": [
+        "e1m",
+        "macro"
+      ],
       "description": "Mirrors board.schema.json's route_entry (the shared preset carries the same e1m_routes shape a customer would write inline).  Keep the two in lockstep.",
       "properties": {
-        "e1m":         { "type": "string" },
-        "macro":       { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$" },
-        "doc":         { "type": "string", "description": "One-line Doxygen @brief documenting what the pad is wired to on this board." },
-        "active_low":  { "type": "boolean", "description": "Board convention -- pressed/asserted = 0 V.  Documentation only; the app passes ALP_GPIO_ACTIVE_LOW at alp_gpio_open() time if it wants auto-inversion." },
-        "pull":        { "type": "string", "enum": ["up", "down", "none"], "default": "none", "description": "Physical pull-resistor present on the PCB (board-static fact).  Apps still pass the matching ALP_GPIO_PULL_{UP,DOWN} at alp_gpio_open() time -- this field documents what the board ships with, it does not drive the controller's internal pulls." },
-        "debounce_ms": { "type": "integer", "minimum": 0, "description": "RC-debounce time constant in milliseconds for the board's hardware debounce (mostly buttons).  Documentation hint; the app may add software debounce on top." },
+        "e1m": {
+          "type": "string"
+        },
+        "macro": {
+          "type": "string",
+          "pattern": "^[A-Z_][A-Z0-9_]*$"
+        },
+        "doc": {
+          "type": "string",
+          "description": "One-line Doxygen @brief documenting what the pad is wired to on this board."
+        },
+        "active_low": {
+          "type": "boolean",
+          "description": "Board convention -- pressed/asserted = 0 V.  Documentation only; the app passes ALP_GPIO_ACTIVE_LOW at alp_gpio_open() time if it wants auto-inversion."
+        },
+        "pull": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "none"
+          ],
+          "default": "none",
+          "description": "Physical pull-resistor present on the PCB (board-static fact).  Apps still pass the matching ALP_GPIO_PULL_{UP,DOWN} at alp_gpio_open() time -- this field documents what the board ships with, it does not drive the controller's internal pulls."
+        },
+        "debounce_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "RC-debounce time constant in milliseconds for the board's hardware debounce (mostly buttons).  Documentation hint; the app may add software debounce on top."
+        },
         "board_alias": {
           "type": "string",
           "pattern": "^BOARD_[A-Z0-9_]+$",
-          "description": "Portable cross-EVK alias (e1m-spec STANDARD.md §7.2 common role). gen_board_header.py emits `#define <board_alias> <macro>` into the generated routes header. The SAME board_alias MUST be declared on every board that exposes the role (enforced by tests/scripts/test_board_alias_parity.py)."
+          "description": "Portable cross-EVK alias (e1m-spec STANDARD.md \u00a77.2 common role). gen_board_header.py emits `#define <board_alias> <macro>` into the generated routes header. The SAME board_alias MUST be declared on every board that exposes the role (enforced by tests/scripts/test_board_alias_parity.py)."
         }
       }
     },
@@ -115,30 +182,175 @@
       "description": "GPIO routes.  Accepts the IO pads (E1M_GPIO_IO<N>) and the GPIO-secondary index of any analog/timer pad (E1M_GPIO_PWM<N> / ADC<N> / DAC<N> / ENC<N>_<X|Y>).  The `E1M_X_` prefix form covers the 45x65 E1M-X form factor's connector namespace.",
       "items": {
         "allOf": [
-          { "$ref": "#/$defs/route_entry" },
-          { "properties": { "e1m": { "pattern": "^E1M(_X)?_GPIO_(IO[0-9]+|PWM[0-9]+|ADC[0-9]+|DAC[0-9]+|ENC[0-9]+_[XY])$" } } }
+          {
+            "$ref": "#/$defs/route_entry"
+          },
+          {
+            "properties": {
+              "e1m": {
+                "pattern": "^E1M(_X)?_GPIO_(IO[0-9]+|PWM[0-9]+|ADC[0-9]+|DAC[0-9]+|ENC[0-9]+_[XY])$"
+              }
+            }
+          }
         ]
       }
     },
-    "route_entry_list_buses": { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_(I2C[0-9]+|I3C[0-9]+|SPI[0-9]+|UART[0-9]+)$" } } }] } },
-    "route_entry_list_pwm":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_PWM[0-9]+$" } } }] } },
-    "route_entry_list_adc":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_ADC[0-9]+$" } } }] } },
-    "route_entry_list_dac":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_DAC[0-9]+$" } } }] } },
-    "route_entry_list_i2s":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_I2S[0-9]+$" } } }] } },
-    "route_entry_list_can":   { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_CAN[0-9]+$" } } }] } },
-    "route_entry_list_qenc":  { "type": "array", "items": { "allOf": [{ "$ref": "#/$defs/route_entry" }, { "properties": { "e1m": { "pattern": "^E1M(_X)?_ENC[0-9]+$" } } }] } },
+    "route_entry_list_buses": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/route_entry"
+          },
+          {
+            "properties": {
+              "e1m": {
+                "pattern": "^E1M(_X)?_(I2C[0-9]+|I3C[0-9]+|SPI[0-9]+|UART[0-9]+)$"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "route_entry_list_pwm": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/route_entry"
+          },
+          {
+            "properties": {
+              "e1m": {
+                "pattern": "^E1M(_X)?_PWM[0-9]+$"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "route_entry_list_adc": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/route_entry"
+          },
+          {
+            "properties": {
+              "e1m": {
+                "pattern": "^E1M(_X)?_ADC[0-9]+$"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "route_entry_list_dac": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/route_entry"
+          },
+          {
+            "properties": {
+              "e1m": {
+                "pattern": "^E1M(_X)?_DAC[0-9]+$"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "route_entry_list_i2s": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/route_entry"
+          },
+          {
+            "properties": {
+              "e1m": {
+                "pattern": "^E1M(_X)?_I2S[0-9]+$"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "route_entry_list_can": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/route_entry"
+          },
+          {
+            "properties": {
+              "e1m": {
+                "pattern": "^E1M(_X)?_CAN[0-9]+$"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "route_entry_list_qenc": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/route_entry"
+          },
+          {
+            "properties": {
+              "e1m": {
+                "pattern": "^E1M(_X)?_ENC[0-9]+$"
+              }
+            }
+          }
+        ]
+      }
+    },
     "i2c_device_entry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["macro", "address"],
+      "required": [
+        "macro",
+        "address"
+      ],
       "description": "One on-board I2C device instance: schematic strap-selected address (+ optional current-monitor calibration).",
       "properties": {
-        "macro":       { "type": "string", "pattern": "^X?EVK_I2C_ADDR_[A-Z0-9_]+$", "description": "C macro name emitted as `#define <macro> <address>u`.  `EVK_` for the 35x35 E1M carrier, `XEVK_` for the 45x65 E1M-X carrier (same two-namespace convention as `E1M(_X)?_...` pad names)." },
-        "part":        { "type": "string", "description": "Chip-driver key (bmi323, icm42670, bmp581, tcal9538, tca6408a, tas2563, ina236, ...) -- not a vendor MPN." },
-        "designator":  { "type": "string", "pattern": "^U[0-9]+$", "description": "Schematic reference designator." },
-        "address":     { "type": "string", "pattern": "^0x[0-9A-Fa-f]{2}$", "description": "7-bit I2C address, hex string." },
-        "alias":       { "type": "string", "pattern": "^X?EVK_I2C_ADDR_[A-Z0-9_]+$", "description": "Extra macro name emitted as `#define <alias> <macro>` (e.g. a shorter convenience name for a device populated in only one variant)." },
-        "doc":         { "type": "string", "description": "One-line Doxygen @brief documenting the strap / collision / respin context." },
+        "macro": {
+          "type": "string",
+          "pattern": "^X?EVK_I2C_ADDR_[A-Z0-9_]+$",
+          "description": "C macro name emitted as `#define <macro> <address>u`.  `EVK_` for the 35x35 E1M carrier, `XEVK_` for the 45x65 E1M-X carrier (same two-namespace convention as `E1M(_X)?_...` pad names)."
+        },
+        "part": {
+          "type": "string",
+          "description": "Chip-driver key (bmi323, icm42670, bmp581, tcal9538, tca6408a, tas2563, ina236, ...) -- not a vendor MPN."
+        },
+        "designator": {
+          "type": "string",
+          "pattern": "^U[0-9]+$",
+          "description": "Schematic reference designator."
+        },
+        "address": {
+          "type": "string",
+          "pattern": "^0x[0-9A-Fa-f]{2}$",
+          "description": "7-bit I2C address, hex string."
+        },
+        "alias": {
+          "type": "string",
+          "pattern": "^X?EVK_I2C_ADDR_[A-Z0-9_]+$",
+          "description": "Extra macro name emitted as `#define <alias> <macro>` (e.g. a shorter convenience name for a device populated in only one variant)."
+        },
+        "doc": {
+          "type": "string",
+          "description": "One-line Doxygen @brief documenting the strap / collision / respin context."
+        },
         "broadcast_address": {
           "type": "boolean",
           "description": "True when `address` is a broadcast / global-call address multiple devices on this bus legitimately answer BY DESIGN (e.g. the TAS2563 family's 0x48 global-call write-only address, metadata/chips/tas2563.yaml). Excludes this entry from scripts/validate_metadata.py's duplicate-(bus,address) collision check (#1845). Do NOT set this to silence a real strap conflict between two unrelated devices -- document a real conflict via `doc:` instead and fix the strap."
@@ -146,25 +358,59 @@
         "calibration": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["shunt_macro", "shunt_ohms", "max_macro", "max_current_a"],
+          "required": [
+            "shunt_macro",
+            "shunt_ohms",
+            "max_macro",
+            "max_current_a"
+          ],
           "description": "INA236-style current-monitor calibration for this instance.",
           "properties": {
-            "shunt_macro":   { "type": "string", "pattern": "^X?EVK_INA236_SHUNT_[A-Z0-9_]+_OHMS$" },
-            "shunt_ohms":    { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$", "description": "Shunt resistance in ohms, as a decimal string (preserves the exact digits emitted into the `f`-suffixed C float literal)." },
-            "max_macro":     { "type": "string", "pattern": "^X?EVK_INA236_MAX_[A-Z0-9_]+_A$" },
-            "max_current_a": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$", "description": "Rail max current in amps, as a decimal string (see `shunt_ohms`)." }
+            "shunt_macro": {
+              "type": "string",
+              "pattern": "^X?EVK_INA236_SHUNT_[A-Z0-9_]+_OHMS$"
+            },
+            "shunt_ohms": {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+$",
+              "description": "Shunt resistance in ohms, as a decimal string (preserves the exact digits emitted into the `f`-suffixed C float literal)."
+            },
+            "max_macro": {
+              "type": "string",
+              "pattern": "^X?EVK_INA236_MAX_[A-Z0-9_]+_A$"
+            },
+            "max_current_a": {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+$",
+              "description": "Rail max current in amps, as a decimal string (see `shunt_ohms`)."
+            }
           }
+        },
+        "assembled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Population status of this instance on THIS board revision: true (default, fitted) or false (DNI on this revision). Mirrors the `assembled` key on SoM presets, and exists for the same reason: without it the default `true` silently asserts that a part is present, and a consumer will emit a devicetree node for silicon that is not on the board. Keep the entry with `assembled: false` rather than deleting it -- the footprint is real and other revisions populate it.  LIMITATION as of 2026-09-05: scripts/gen_board_header.py does NOT read this key -- it emits the address macro for every entry, fitted or not. So `assembled: false` is documentation today, not suppression. Firmware that must not touch an unfitted part has to check this metadata, because the macro's existence proves nothing about the board."
         }
       }
     },
     "overlay_pin_entry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["macro", "doc"],
+      "required": [
+        "macro",
+        "doc"
+      ],
       "description": "One board-repurposed pad exposed past the standard E1M pinout, addressed by `alp,pin-array` position rather than an E1M pad token.  No `e1m:` / index field -- the index is this entry's position in the containing `overlay_pins:` list, computed by the generator.",
       "properties": {
-        "macro": { "type": "string", "pattern": "^EVK_PIN_[A-Z0-9_]+$", "description": "C macro name emitted as `#define <macro> (EVK_PIN_OVERLAY_BASE + N)`, N = list position.  `EVK_` only -- `_emit_overlay_pins()` hard-codes `EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT` (the 35x35 count) with no E1M-X branch, so an `XEVK_PIN_*` entry would emit a base macro from the wrong pinout's GPIO count. Widen this in lockstep with the generator if the 45x65 carrier ever needs its own overlay_pins:." },
-        "doc":   { "type": "string", "description": "Doxygen @brief: which standard E1M pad was repurposed (E1M name + Alif pin) and what it now does on this board." }
+        "macro": {
+          "type": "string",
+          "pattern": "^EVK_PIN_[A-Z0-9_]+$",
+          "description": "C macro name emitted as `#define <macro> (EVK_PIN_OVERLAY_BASE + N)`, N = list position.  `EVK_` only -- `_emit_overlay_pins()` hard-codes `EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT` (the 35x35 count) with no E1M-X branch, so an `XEVK_PIN_*` entry would emit a base macro from the wrong pinout's GPIO count. Widen this in lockstep with the generator if the 45x65 carrier ever needs its own overlay_pins:."
+        },
+        "doc": {
+          "type": "string",
+          "description": "Doxygen @brief: which standard E1M pad was repurposed (E1M name + Alif pin) and what it now does on this board."
+        }
       }
     }
   }

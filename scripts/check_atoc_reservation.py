@@ -54,8 +54,12 @@ in that same table), never hardcoded: the AEN SKUs do not share an MRAM size,
 and a hardcoded 0x80580000 would pass vacuously on every part that isn't the
 E8.
 
-Three checks, because two invariants over the same AEN partition tables have
-turned out to need three different sources of truth (#1482):
+Four checks, because the same "keep the SE-owned ATOC band unwritable" invariant
+is asserted in four different places and each needs its own source of truth
+(#1482, #1981). Note check 4 is the odd one: checks 1-3 read AEN partition
+tables (board DTS, SoM preset memory_map), while check 4 reads a Python
+constant -- `aen_atoc.SLOT0_WINDOWS` -- because that is where the guard the
+provisioning path actually consults lives:
 
   1. DTS check -- as above.
 
@@ -72,6 +76,14 @@ turned out to need three different sources of truth (#1482):
      into the DT's `image-1`, silently). Covers the same two `NOT_EMITTABLE`
      boards as check 1, for the same reason -- nothing else reads a committed
      board `.dts` for these two SKUs.
+
+  4. Slot0-window-ceiling check -- every preset that declares an `atoc`
+     `memory_map:` region: none of `scripts/aen_atoc.SLOT0_WINDOWS`'s
+     per-cpu_id ceilings may reach past that region's `base:` (#1981 --
+     the module originally hardcoded its `A32_0` ceiling at raw System
+     MRAM end instead of the atoc band's base, silently accepting an A32
+     mramAddress entry inside the SE-owned boot table; this check exists
+     so that specific vacuous-hardcode shape can't recur unnoticed).
 
 Run locally:
 
@@ -92,6 +104,7 @@ import yaml
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
+import aen_atoc  # noqa: E402  -- scripts/aen_atoc.py's shared slot0 windows (#1981)
 from alp_orchestrate.loader import _resolve_slot0_load_address  # noqa: E402
 from alp_orchestrate.models import OrchestratorError  # noqa: E402
 from alp_project_loader import resolve_soc_path, _resolve_silicon_variant  # noqa: E402
@@ -560,13 +573,35 @@ def _check_preset(path: Path) -> "list[str]":
     if not spans:
         return []
     rel = path.relative_to(REPO).as_posix()
+    out: "list[str]" = []
+
+    # #1981 review: scripts/aen_atoc.py hardcodes its own slot0-window
+    # ceilings rather than parsing this YAML at flash time (see that
+    # module's docstring -- it must stay stdlib-only and importable from
+    # a bare west/SETOOLS environment), so nothing else in the tree
+    # catches one of those ceilings drifting past the SE-owned `atoc`
+    # band the way the checks below already catch it for a DTS partition
+    # table or a `memory_map:` region. A ceiling landing IN the band is
+    # exactly the vacuous-hardcode failure this module's own docstring
+    # warns against, just reproduced inside aen_atoc.py instead of here.
+    atoc_base = next((lo for lo, _hi, name in spans if name == "atoc"), None)
+    if atoc_base is not None:
+        for cpu_id, (win_base, win_size) in aen_atoc.SLOT0_WINDOWS.items():
+            win_top = win_base + win_size
+            if win_top > atoc_base:
+                out.append(
+                    f"{rel}: scripts/aen_atoc.SLOT0_WINDOWS[{cpu_id!r}] "
+                    f"ceiling 0x{win_top:x} reaches past this preset's "
+                    f"'atoc' band base 0x{atoc_base:x} -- an aen_atoc "
+                    "mramAddress entry could be accepted inside the "
+                    "SE-owned boot table (#1289, #1981).")
+
     window_top = max(hi for _, hi, _ in spans)
     # A whole-device region (e.g. `mram_main`) legitimately spans the window;
     # the check is about the SMALLEST region owning the top.
     at_top = sorted((hi - lo, lo, hi, name)
                     for lo, hi, name in spans if hi == window_top)
     _, _, _, top_name = at_top[0]
-    out: "list[str]" = []
     if top_name not in _ATOC_NAMES:
         out.append(
             f"{rel}: region {top_name!r} reaches the top of the declared "
@@ -624,8 +659,9 @@ def main(argv=None) -> int:
         return 1
     print(f"OK: {checked_dts} AEN board .dts + {checked_presets} SoM "
           f"preset(s) checked -- ATOC band reserved, slot0 address "
-          f"matches its preset, aperture tiling/class agree, and every "
-          f"declared aperture matches _AEN_MRAM_BASE, in each.")
+          f"matches its preset, aen_atoc.SLOT0_WINDOWS stays inside the "
+          f"atoc band, aperture tiling/class agree, and every declared "
+          f"aperture matches _AEN_MRAM_BASE, in each.")
     return 0
 
 

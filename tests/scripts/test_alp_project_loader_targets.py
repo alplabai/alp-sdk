@@ -1,7 +1,14 @@
-# tests/scripts/test_alp_model_targets.py
-"""som.sku -> SoM preset -> SoC npus[] -> compile targets."""
+# tests/scripts/test_alp_project_loader_targets.py
+"""som.sku -> SoM preset -> SoC npus[] -> compile targets.
+
+Issue #1943: this logic lives in `alp_project_loader`, imported directly
+below. Filename matches that home (not `test_alp_model_*`) so a Task-6
+`git rm tests/scripts/test_alp_model_*.py` -- which deletes
+`scripts/alp_model/`'s own test suite alongside the package -- does not
+sweep up this coverage too; it is the only place `resolve_targets()`/
+`TargetSpec` are tested."""
 from pathlib import Path
-from alp_model.targets import resolve_targets, TargetSpec
+from alp_project_loader import resolve_targets, TargetSpec
 
 _ROOT = Path(__file__).resolve().parents[2]
 _META = _ROOT / "metadata"

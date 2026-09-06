@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-04",
+  "generated": "2026-09-05",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -985,8 +985,8 @@
           "value": "EVK_I2C_ADDR_TCAL9538_MAIN"
         },
         "EVK_I2C_ADDR_TCAL9538_MAIN": {
-          "hash": "71e59a7fa3f6d029",
-          "value": "0x72u"
+          "hash": "59bb560cc6bb4275",
+          "value": "0x73u"
         },
         "EVK_I2C_ADDR_TCAL9538_PCIE": {
           "hash": "91c57f3a0b3df6c3",
