@@ -53,9 +53,10 @@ ipc:
     carve-out: ''mram_main'' (region ''mram_main'' has an unresolved base (''TBD'')
     so containment against the declared MRAM aperture can''t be verified, and its
     authored write_authority is ''composite'', not ''customer_runtime'').  Add a region
-    whose resolved base sits outside the SoC''s declared MRAM aperture (or, if inside
-    it, one that resolves `write_authority: customer_runtime`) to metadata/e1m_modules/E1M-AEN801.yaml,
-    or remove the matching ipc entry from board.yaml.'
+    whose resolved base sits outside the SoC''s declared MRAM aperture (and, if the
+    SoM preset authors the row itself, carries `write_authority: customer_runtime`)
+    to metadata/e1m_modules/E1M-AEN801.yaml, or remove the matching ipc entry from
+    board.yaml.'
 helper_mcus:
 - name: cc3501e_otp
   chip: cc3501e

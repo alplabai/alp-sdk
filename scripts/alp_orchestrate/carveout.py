@@ -491,8 +491,9 @@ def resolve_carve_outs(
                     f"that are ineligible for an IPC carve-out: "
                     f"{'; '.join(shown)}{more}.  Add a region whose "
                     f"resolved base sits outside the SoC's declared MRAM "
-                    f"aperture (or, if inside it, one that resolves "
-                    f"`write_authority: customer_runtime`) to "
+                    f"aperture (and, if the SoM preset authors the row "
+                    f"itself, carries `write_authority: "
+                    f"customer_runtime`) to "
                     f"metadata/e1m_modules/{project.sku}.yaml, or remove "
                     f"the matching ipc entry from board.yaml.")
             return [], (

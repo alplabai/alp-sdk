@@ -295,9 +295,11 @@ derive a region's class against the SoC's declared on-die MRAM aperture
 (`scripts/alp_orchestrate/aperture.py`, the same math
 `scripts/check_atoc_reservation.py` validates every region against in
 CI): a region CONTAINED in the aperture is `flash` regardless of what
-`carveout:` says, and -- for a region the SoM preset authored itself --
-landing an IPC carve-out there additionally requires
-`write_authority: customer_runtime`. A region the loader DERIVED (SoC-level
+`carveout:` says, and is refused as an IPC carve-out target
+unconditionally -- no `write_authority:` value makes a contained region
+eligible. A region OUTSIDE the aperture that the SoM preset authored
+itself needs `write_authority: customer_runtime` to land an IPC
+carve-out there. A region the loader DERIVED (SoC-level
 `memory_regions`, or the silicon-variant fallback, e.g. every V2N/V2M/NX9101
 row) needs no authority at all: it is RAM by construction. The legacy
 `carveout:` flag is honoured VERBATIM only where the derivation can't
