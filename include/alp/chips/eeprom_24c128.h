@@ -7,16 +7,28 @@
  * @file eeprom_24c128.h
  * @brief Generic 24Cxx-class 128-Kbit (16 KB) I2C EEPROM driver.
  *
- * @par Verification status: `eeprom_24c128_read_identity()`'s second-header
- *   objects are [BENCH-VERIFIED] -- measured 2026-09-06 on an E1M-AEN803
- *   (serial 2026W36-0003, SoC I2C2, Flow C RAM-run, labgrid place
- *   e1m-aen-evk-01): Unique ID / Lock Status / Device Configuration Register
- *   all read back at `0x58` and matched the datasheet delivery state, and
- *   `0x58` was proven distinct from the array read at `0x50`.  The rest of
- *   the driver (`eeprom_24c128_init/read/write/deinit`, the array read/write
- *   path) remains [UNTESTED] -- compiles + passes NULL-arg smokes only; treat
- *   those numbers + lifecycle sequencing as paper-correct until the v1.0
- *   verification sweep lands.
+ * @par Verification status: split, because only part of this driver has run
+ *   on silicon.
+ *   - `eeprom_24c128_init()` and `eeprom_24c128_read_identity()` are
+ *     [BENCH-VERIFIED].  Both were EXECUTED -- not merely linked -- on an
+ *     E1M-AEN803 (serial 2026W36-0003) over SoC I2C2 on 2026-09-06, from a
+ *     build in which `eeprom_24c128_read_identity` resolved to this driver's
+ *     own object.  `init()` returned ::ALP_OK against the part at `0x50`;
+ *     `read_identity()` returned ::ALP_OK with all four second-header objects
+ *     answering at `0x58` -- Secure Data Page 64 bytes all `0xFF` (erased),
+ *     a stable 16-byte Unique ID, Lock Status reporting unlocked, and a
+ *     Device Configuration Register reading the datasheet delivery state
+ *     `0x1D`.  The three documented error paths (`NULL` out, `NULL` ctx,
+ *     uninitialised ctx) each returned their documented status on the same
+ *     run, and `0x58` was proven to be a different address space from the
+ *     array at `0x50` rather than an alias of it.
+ *   - `eeprom_24c128_read()`, `eeprom_24c128_write()` and
+ *     `eeprom_24c128_deinit()` are still [UNTESTED] here: that run did not
+ *     exercise the array read/write path, so treat its offsets, page
+ *     splitting and write-cycle timing as paper-correct until the v1.0
+ *     verification sweep covers them.  (The one exception already recorded
+ *     in the implementation is the write acknowledge-polling delay, bench-found
+ *     on this same SoC I2C2 bus on 2026-06-15 -- see `poll_for_ack()`.)
  *
  * Covers the two footprint-compatible variants populated on the
  * E1M-AEN module: **N24S128C4DYT3G** (Onsemi, default) and

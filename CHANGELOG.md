@@ -22,11 +22,15 @@ header, so on that part every read NACKs and the function still returns
 Read-only by design — a stray write at the Device Configuration Register
 selector would move the EEPROM off its strapped I2C address and can
 permanently write-protect the array, so this change adds no write/lock path.
-Bench-verified 2026-09-06 on an E1M-AEN803 (serial 2026W36-0003, SoC I2C2,
-Flow C RAM-run): Unique ID, Lock Status (unlocked), and Device Configuration
-Register (delivery-state `0x1D`) all read back as expected at `0x58`, and
-`0x58` was confirmed distinct from the manifest stored in the array at
-`0x50`.
+Bench-verified 2026-09-06 on an E1M-AEN803 (serial 2026W36-0003) over SoC
+I2C2 — the shipped function itself was executed on silicon, not just linked.
+It returned `ALP_OK` with all four objects answering at `0x58`: the Secure
+Data Page erased (64 bytes of `0xFF`), a stable 16-byte Unique ID, Lock Status
+reporting unlocked, and the Device Configuration Register reading the
+datasheet delivery state `0x1D`. `0x58` was confirmed to be a distinct address
+space rather than an alias of the manifest in the array at `0x50`, and the
+three documented error paths each returned their documented status on the same
+run.
 
 ### Fixed — `cc3501e_ble_enable()` honours the caller's timeout instead of flooring it to 90 s
 
