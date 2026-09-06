@@ -46,7 +46,16 @@ signals:
   - { name: NRST,  type: open_drain,   v2n_route: "P74 <-> GD32 NRST",
       notes: "shared with primary PMIC reset out; host pad MUST be open-drain" }
 
-target_expected_idcode:  "0x6BA02477"   # Cortex-M33 r0p1 SW-DPv2
+# NOT a GD32G553 measurement -- this is the GENERIC Cortex-M33 r0p1
+# SW-DPv2 value, and a correctly-wired GD32 is expected to FAIL a
+# comparison against it, which is why gd32_swd_connect() deliberately
+# does not treat a mismatch as fatal (see the @warning on
+# GD32_SWD_EXPECTED_IDCODE in include/alp/chips/gd32_swd.h). The bench
+# reads 0x0BE12477 off the GD32 bridge and 0x6BA02477 off the V2N CM33
+# DAP, both on place e1mx-v2n-m1-01; neither candidate has been measured
+# on a GD32 with a probe attached. Do not read this field as a
+# wrong-board guard until one has been (#1440, #1369).
+target_expected_idcode:  "0x6BA02477"   # generic Cortex-M33 r0p1 SW-DPv2, UNVERIFIED on GD32
 
 physical:
   # gd32_swd is a host-side bit-bang SWD *controller*, not a physical
