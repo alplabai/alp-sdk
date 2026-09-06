@@ -140,23 +140,53 @@ add_test(NAME alp_test_inference_deepx_regression
 # reason).  See inference_drpai_regression.cpp's own header comment for
 # what these tests do and do not reach.  Linux-only, like the file it
 # tests (<fcntl.h>/<sys/ioctl.h>/<linux/drpai.h>/<unistd.h> are hard
-# #includes, matching inference_drpai.cpp's own real-build posture) --
-# no platform guard here beyond the one this whole `yocto` leg already
-# implies (issue #1747's CI gate runs on ubuntu-latest).
-add_executable(alp_test_inference_drpai_regression
-    ${CMAKE_CURRENT_SOURCE_DIR}/inference_drpai_regression.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/inference_drpai.cpp
-)
-target_include_directories(alp_test_inference_drpai_regression PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/drpai
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto
-)
-target_compile_features(alp_test_inference_drpai_regression PRIVATE cxx_std_17)
+# #includes, matching inference_drpai.cpp's own real-build posture).
+#
+# #1995: this used to carry "no platform guard here beyond the one this
+# whole `yocto` leg already implies (issue #1747's CI gate runs on
+# ubuntu-latest)".  That implication does NOT hold locally.
+# scripts/test-all.sh:1029-1033 skips the yocto leg only for
+# `--target dev`, so on every other target it runs on the maintainer's
+# Windows host, where <sys/ioctl.h> does not exist and the whole stage
+# dies:
+#
+#   src/yocto/inference_drpai.cpp:117:10: fatal error: sys/ioctl.h:
+#       No such file or directory
+#   [yocto-build-and-ctest] FAIL (exit=1)
+#
+# That made `bash scripts/test-all.sh` unable to pass on Windows at all,
+# which matters because this repo's workflow is local-first CI on BOTH
+# Windows and WSL: a stage that can never be green on one host teaches
+# the reader to ignore its FAIL, and that is how a real failure in this
+# stage gets waved through.
+#
+# So guard the TARGET rather than skipping the whole leg -- the sibling
+# ORT and DEEPX regression targets are host-portable and still build and
+# run on Windows, so the leg keeps its coverage there.  On a non-Linux
+# host this one target is not defined and CI's ubuntu-latest yocto job
+# remains its only home, exactly as before.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(alp_test_inference_drpai_regression
+        ${CMAKE_CURRENT_SOURCE_DIR}/inference_drpai_regression.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/inference_drpai.cpp
+    )
+    target_include_directories(alp_test_inference_drpai_regression PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fakes/drpai
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto
+    )
+    target_compile_features(alp_test_inference_drpai_regression PRIVATE cxx_std_17)
 
-add_test(NAME alp_test_inference_drpai_regression
-         COMMAND alp_test_inference_drpai_regression)
+    add_test(NAME alp_test_inference_drpai_regression
+             COMMAND alp_test_inference_drpai_regression)
+else()
+    message(STATUS
+        "alp-sdk yocto: alp_test_inference_drpai_regression skipped on "
+        "${CMAKE_SYSTEM_NAME} -- src/yocto/inference_drpai.cpp hard-includes "
+        "<sys/ioctl.h>/<linux/drpai.h>/<fcntl.h>/<unistd.h> and only builds on "
+        "Linux (#1995).  CI's ubuntu-latest yocto job covers it (#1747).")
+endif()
 
 # alp_inference_last_invoke_latency_us() end-to-end regression: the last-
 # successful-invoke-latency accessor added alongside <alp/inference.h>'s
