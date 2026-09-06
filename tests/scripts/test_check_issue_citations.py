@@ -547,3 +547,56 @@ def test_header_block_stops_at_next_par_tag(tmp_path):
     )
     _snapshot(tmp_path, {"999": "CLOSED"})
     assert mod.find_problems(tmp_path) == []
+
+
+# ---------------------------------------------------------------------
+# A coordinating conjunction is not English's only pivot.  A parenthetical,
+# a colon and an em/en dash each open a new sub-thought inside the SAME
+# `.`/`;`-delimited clause, so a futurity cue after one of them belongs to
+# that new subject, not to the marker verb before it (`_SUBTHOUGHT_RE`).
+# Without it these three flip a plainly historical citation to a live
+# blocker -- and this gate is `gate: true`, so that blocks the merge queue.
+# ---------------------------------------------------------------------
+
+
+def test_futurity_cue_after_a_parenthetical_does_not_override(tmp_path):
+    """`closed via #1234 (... must be ...)` -- the parenthetical introduces
+    a separate remark; "must be" describes the register map, not #1234."""
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "widget",
+        "chip_id: widget\n"
+        "driver_status:    none      # register access closed via #1234\n"
+        "                            # (the register map must be\n"
+        "                            # re-derived from the datasheet).\n",
+    )
+    _snapshot(tmp_path, {"1234": "CLOSED"})
+    assert mod.find_problems(tmp_path) == []
+
+
+def test_futurity_cue_after_a_colon_does_not_override(tmp_path):
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "widget",
+        "chip_id: widget\n"
+        "driver_status:    none      # landed via #1234: the C driver must\n"
+        "                            # be reworked for an unrelated field.\n",
+    )
+    _snapshot(tmp_path, {"1234": "CLOSED"})
+    assert mod.find_problems(tmp_path) == []
+
+
+def test_futurity_cue_after_an_em_dash_does_not_override(tmp_path):
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "widget",
+        "chip_id: widget\n"
+        "driver_status:    none      # landed via #1234 -- the C driver\n"
+        "                            # must be reworked for an unrelated\n"
+        "                            # field.\n",
+    )
+    _snapshot(tmp_path, {"1234": "CLOSED"})
+    assert mod.find_problems(tmp_path) == []

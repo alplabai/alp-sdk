@@ -222,6 +222,27 @@ _CONJUNCTION_RE = re.compile(
     r"\b(?:and|but|or|nor|so|yet|though|although|while)\b", re.IGNORECASE
 )
 
+#: Punctuation that opens a new sub-thought just as a coordinating
+#: conjunction does, inside the same `.`/`;`-delimited clause.  A
+#: conjunction is not English's only pivot: a parenthetical, a colon and
+#: an em/en dash each introduce a second subject that a following
+#: futurity cue belongs to, rather than to the marker verb before it.
+#: Measured against the `_CONJUNCTION_RE`-only rule, both of these
+#: wrongly flipped a plainly historical citation to a live blocker:
+#:
+#:     "register access closed via #730 (the register map must be
+#:      re-derived from the datasheet)."     -> BLOCKER, want historical
+#:     "landed via #1241: the C driver must be reworked."
+#:                                            -> BLOCKER, want historical
+#:
+#: while the `, and` / `, but` / `;` shapes the conjunction rule already
+#: covered stayed correct.  Neither shape occurs in the tree today -- the
+#: whole-tree run is rc=0, 15 of 15 citations historical, 0 evaluated --
+#: so this closes the hole before prose reaches it rather than after.
+#: This gate is `gate: true`: a false positive blocks the merge queue,
+#: while a false negative only misses one stale citation.
+_SUBTHOUGHT_RE = re.compile(r"[(:]|--|—|–")
+
 
 def _is_historical(clause: str) -> bool:
     """Whether `clause` reads as historical narration rather than a live
@@ -256,9 +277,9 @@ def _is_historical(clause: str) -> bool:
                 gap = clause[fm.end() : hm.start()]
             else:
                 gap = ""  # overlapping matches -- trivially bound
-            if not _CONJUNCTION_RE.search(gap):
+            if not _CONJUNCTION_RE.search(gap) and not _SUBTHOUGHT_RE.search(gap):
                 return False  # a bound pair -- futurity overrides
-    return True  # every marker/cue pair is split by a conjunction
+    return True  # every pair is split by a conjunction or sub-thought pivot
 
 
 #: A decimal or dotted-version token -- `0.75`, `29.5`, `1.5`, `v0.3.x`.
