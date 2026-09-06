@@ -175,6 +175,53 @@ extern "C" {
 #define EVK_PIN_CTP_INT    (EVK_PIN_OVERLAY_BASE + 10u)  /**< SPI1_CS1 pad (E1M AH8 -- CC3501E side, GPIO_15) repurposed as the capacitive touch panel interrupt input. Routed through the on-module CC3501E -- firmware reads CTP touches by registering an interrupt callback on the CC3501E's GPIO_15 via ALP_CC3501E_CMD_GPIO_SET_INTERRUPT. */
 
 /* ------------------------------------------------------------------ */
+/* Board mux-select enums (from `mux_enums:`) */
+/* ------------------------------------------------------------------ */
+
+typedef enum {
+	EVK_SDIO_M2E_KEY = 0, /**< MUX_SEL.SDIO low. */
+	EVK_SDIO_SDCARD  = 1, /**< MUX_SEL.SDIO high. */
+} evk_sdio_select_t;
+
+typedef enum {
+	EVK_I2S_AMP     = 0, /**< I2S0 routed to the TAS2563 amplifiers. */
+	EVK_I2S_M2E_KEY = 1, /**< I2S0 routed to the M.2 E-key slot. */
+} evk_i2s_select_t;
+
+typedef enum {
+	EVK_USB2_CONNECTOR = 0, /**< External USB-A jack. */
+	EVK_USB2_M2E_KEY   = 1, /**< M.2 E-key USB. */
+} evk_usb2_select_t;
+
+typedef enum {
+	EVK_PCIE_E_KEY = 0, /**< Lanes 0 routed to PCIe E-key (Wi-Fi/BT modules). */
+	EVK_PCIE_M_KEY = 1, /**< Lanes 0..3 routed to PCIe M-key (NVMe SSD). */
+} evk_pcie_select_t;
+
+/** PCIe IO expander pin layout (TCAL9538 #2 on I2C0 at 0x71). */
+typedef enum {
+	EVK_PCIE_IOEXP_I2C_SEL        = 0, /**< P0: PCIE0_I2C.SEL -- selects which slot the I2C mux routes to. */
+	EVK_PCIE_IOEXP_M2E_ALERT      = 1, /**< P1: M.2 E-key alert input. */
+	EVK_PCIE_IOEXP_E_PCIE0_RST    = 2, /**< P2: E-key PCIe reset output. */
+	EVK_PCIE_IOEXP_E_PCIE0_WAKE   = 3, /**< P3: E-key PCIe wake input. */
+	EVK_PCIE_IOEXP_E_PCIE0_CLKREQ = 4, /**< P4: E-key PCIe clock-request input. */
+	EVK_PCIE_IOEXP_M_PCIE0_RST    = 5, /**< P5: M-key PCIe reset output. */
+	EVK_PCIE_IOEXP_M_PCIE0_WAKE   = 6, /**< P6: M-key PCIe wake input. */
+	EVK_PCIE_IOEXP_M_PCIE0_CLKREQ = 7, /**< P7: M-key PCIe clock-request input. */
+} evk_pcie_ioexp_pin_t;
+
+typedef enum {
+	EVK_IOEXP_LCD_PWR_EN     = 0, /**< P0: LCD power enable. */
+	EVK_IOEXP_LCD_RST        = 1, /**< P1: LCD reset. */
+	EVK_IOEXP_CAM_EN         = 2, /**< P2: Camera-module enable (drives the camera sensor's EN/STBY pin -- NOT the +V_CAM0/+V_CAM1 power rails, which are gated separately). */
+	EVK_IOEXP_CTP_RST        = 3, /**< P3: Capacitive touch panel reset. */
+	EVK_IOEXP_ICM42670_INT1  = 4, /**< P4: ICM-42670 INT1 input. */
+	EVK_IOEXP_ICM42670_INT2  = 5, /**< P5: ICM-42670 INT2 input. */
+	EVK_IOEXP_ICM42670_FSYNC = 6, /**< P6: ICM-42670 frame-sync input. */
+	EVK_IOEXP_BMP581_INT1    = 7, /**< P7: BMP581 INT1 input. */
+} evk_ioexp_pin_t;
+
+/* ------------------------------------------------------------------ */
 /* Portable cross-EVK aliases (e1m-spec STANDARD.md §7.2 common set). */
 /* Same BOARD_* names on every board; include via <alp/board.h>.       */
 /* ------------------------------------------------------------------ */

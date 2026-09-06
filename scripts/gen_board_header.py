@@ -3,7 +3,7 @@
 """
 Generate include/alp/boards/alp_<board>_routes.h from each
 metadata/boards/<name>.yaml `e1m_routes:` + `i2c_devices:` +
-`overlay_pins:` blocks.
+`overlay_pins:` + `mux_enums:` blocks.
 
 The generated header mirrors the YAML `e1m_routes:` block into plain
 `#define EVK_* ALP_E1M_*` lines so hand-written firmware can keep using
@@ -19,12 +19,15 @@ carry a literal hex/float value rather than an `ALP_E1M_*` token.  The
 boards that expose repurposed pads past the standard E1M pinout to an
 `alp,pin-array` devicetree overlay; N is the entry's position in the
 YAML list (an ordinal, not a hardware fact), computed via `enumerate()`
-rather than read from the YAML.  Idempotent: running twice produces
-byte-identical output.
+rather than read from the YAML.  The `mux_enums:` block emits
+mux-select / IO-expander-pin `typedef enum { ... }` blocks
+(evk_sdio_select_t, evk_pcie_ioexp_pin_t, ...) -- issue #637.
+Idempotent: running twice produces byte-identical output.
 
-The remaining sections of `include/alp/boards/alp_<board>.h`
-(mux enums, prose comments) stay hand-authored until follow-up slices
-lift them too.
+The remaining content of `include/alp/boards/alp_<board>.h` is prose
+explaining the hardware those generated macros/enums bind to (plus
+any board-specific enum a slice hasn't lifted yet, e.g.
+`evk_cam_select_t`).
 
 Run:
 
@@ -194,6 +197,52 @@ def _emit_overlay_pins(entries: list[dict[str, Any]]) -> list[str]:
     return out
 
 
+def _emit_mux_enums(enums: list[dict[str, Any]]) -> list[str]:
+    """Emit one `typedef enum { ... } <name>;` block per `mux_enums:`
+    entry.  Column-aligns each enum's `=` signs independently (resets
+    per enum, mirroring `Consecutive` clang-format alignment) so a
+    long enumerator name in one enum doesn't reflow a sibling enum."""
+    if not enums:
+        return []
+
+    out: list[str] = [
+        "/* ------------------------------------------------------------------ */",
+        "/* Board mux-select enums (from `mux_enums:`) */",
+        "/* ------------------------------------------------------------------ */",
+        "",
+    ]
+    for enum in enums:
+        name = enum["name"]
+        values = enum["values"]
+        doc = enum.get("doc")
+        # Duplicate enumerator values emit silently and read as a typo
+        # in the header; the schema cannot express cross-item
+        # uniqueness, so enforce it here rather than shipping two names
+        # bound to the same selector.
+        seen: dict[int, str] = {}
+        for v in values:
+            prev = seen.get(v["value"])
+            if prev is not None:
+                raise ValueError(
+                    f"{name}: {v['name']} and {prev} both use value "
+                    f"{v['value']} -- enumerator values must be unique"
+                )
+            seen[v["value"]] = v["name"]
+        if doc:
+            out.append(f"/** {doc} */")
+        out.append("typedef enum {")
+        widest = max(len(v["name"]) for v in values)
+        for v in values:
+            line = f"\t{v['name']:<{widest}} = {v['value']},"
+            vdoc = v.get("doc")
+            if vdoc:
+                line += f" /**< {vdoc} */"
+            out.append(line)
+        out.append(f"}} {name};")
+        out.append("")
+    return out
+
+
 def _emit_board_aliases(routes: dict[str, Any]) -> list[str]:
     """Emit portable BOARD_* aliases for every entry carrying a
     `board_alias:` (the e1m-spec §7.2 common roles).  Same BOARD_* name
@@ -249,12 +298,13 @@ def _emit_section(title: str, entries: list[dict[str, Any]]) -> list[str]:
 def emit_board(name: str, doc: dict[str, Any]) -> str | None:
     """Return the full text of the generated routes header for one board,
     or `None` if the shared board YAML has none of an `e1m_routes:`,
-    `i2c_devices:`, or `overlay_pins:` block.
+    `i2c_devices:`, `overlay_pins:`, or `mux_enums:` block.
     """
     routes = doc.get("e1m_routes")
     i2c_devices = doc.get("i2c_devices")
     overlay_pins = doc.get("overlay_pins")
-    if not routes and not i2c_devices and not overlay_pins:
+    mux_enums = doc.get("mux_enums")
+    if not routes and not i2c_devices and not overlay_pins and not mux_enums:
         return None
     routes = routes or {}
     slug = _board_slug(name)
@@ -304,6 +354,8 @@ def emit_board(name: str, doc: dict[str, Any]) -> str | None:
     lines.extend(_emit_i2c_devices(doc.get("i2c_devices") or []))
 
     lines.extend(_emit_overlay_pins(doc.get("overlay_pins") or []))
+
+    lines.extend(_emit_mux_enums(mux_enums or []))
 
     lines.extend(_emit_board_aliases(routes))
 
