@@ -92,8 +92,6 @@ rail) on PRE-RESPIN carriers, not the TMP112.
 E1M-EVK board-populated (`metadata/boards/e1m-evk.yaml` `i2c_devices:`):
 
 ```
-0x20 ACK   -- TCA6408A U35 alt I/O expander (BOM variant -- ACKs INSTEAD
-              OF 0x72, not alongside it: R112/R145 are mutually exclusive)
 0x40 ACK   -- INA236 U21, +3V3 rail current monitor
 0x41 ACK   -- INA236 U31, +1V8 rail current monitor
 0x42 ACK   -- INA236 U33, +VIO rail current monitor
@@ -107,10 +105,19 @@ E1M-EVK board-populated (`metadata/boards/e1m-evk.yaml` `i2c_devices:`):
 0x69 ACK   -- ICM-42670 U12 IMU (collides with BMI323 on pre-respin
               boards, which mis-strap U13 to 0x69 too -- BENCH-CONFIRMED
               2026-06-16)
-0x71 ACK   -- TCAL9538 U37 PCIe I/O expander
-0x72 ACK   -- TCAL9538 U35 main I/O expander (BOM default -- see the
-              0x20 note above)
+0x73 ACK   -- TCAL9538 U35 main I/O expander.  CORRECTED 2026-09-05
+              from 0x72 (alp-sdk#1974): the maintainer's EVK I2C
+              schedule gives 1110011 = 0x73, and 2 of 2 boards answer
+              there and are silent at 0x72.
 ```
+
+Do NOT expect an ACK at `0x71` or `0x20` on this EVK revision: both are
+genuine footprints (`EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED` for U37,
+`EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED` for U35's TCA6408ARSVR
+alternative -- R112/R145 are mutually exclusive, so at most one of
+TCAL9538-at-`0x73` / TCA6408A-at-`0x20` is ever populated) but neither
+is assembled here (alp-sdk#1974) -- confirmed silent (clean `-EIO`
+NACK) on both 2026-09-05 bench boards.
 
 ## On V2N's on-board sensor bus
 

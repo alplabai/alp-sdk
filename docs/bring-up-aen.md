@@ -248,18 +248,23 @@ this bus actually measured.
 | OPTIGA TM | `0x30` | Secure element | BRD_I2C (I2C0) | SoM — **DNI on this bench batch** |
 | RV-3028-C7 | `0x52` | RTC | BRD_I2C (I2C0) | SoM |
 | TMP112 | `0x48` | Thermometer | BRD_I2C (I2C0) | SoM |
-| TCAL9538 | `0x72` | GPIO expander (U35 main) | I2C2 | EVK carrier |
-| TCAL9538 | `0x71` | GPIO expander (U37, PCIe) | I2C2 | EVK carrier |
+| TCAL9538 | `0x73` | GPIO expander (U35 main) | I2C2 | EVK carrier |
+| TCAL9538 | `0x71` | GPIO expander (U37, PCIe -- NOT ASSEMBLED, alp-sdk#1974) | I2C2 | EVK carrier |
 | INA236 | `0x40`..`0x42`, `0x49`..`0x4B` | Power monitor (6x) | I2C2 | EVK carrier |
 | BMP581 | `0x47` | Barometer | I2C2 | EVK carrier |
 
+> **CORRECTED 2026-09-05 (alp-sdk#1974):** U35 main is `0x73` (A1=1, A0=1),
+> not `0x72` as this table said when first written -- the maintainer's EVK
+> I2C schedule gives `1110011 = 0x73`, and 2 of 2 boards answer there and
+> are silent at `0x72`.
+>
 > Two address caveats when reading a scan of I2C2:
 >
 > * **`0x48` on I2C2 is not the TMP112.** The TMP112 above is on BRD_I2C,
 >   which this scan cannot reach. On **PRE-RESPIN** carriers `0x48` on I2C2
 >   is U32 INA236B (+V_CAM0 rail), re-strapped to `0x4B` from the next batch
 >   (`metadata/boards/e1m-evk.yaml:294-295`).
-> * **U35 answers at `0x20`, not `0x72`,** when it is assembled as the
+> * **U35 answers at `0x20`, not `0x73`,** when it is assembled as the
 >   TCA6408ARSVR alternative (R112 fitted, R145 DNP) — register-compatible,
 >   so `chips/tcal9538` drives it unchanged (`metadata/boards/e1m-evk.yaml:276-277`).
 

@@ -377,13 +377,15 @@ typedef enum {
 /* ================================================================== */
 /* TCAL9538 I/O expander pin layout                                   */
 /*                                                                    */
-/* The TCAL9538 sits on ALP_E1M_I2C0 at 7-bit address 0x72 (A1=1, A0=0    */
-/* per the EVK schematic).  Its 8 GPIO pins fan out to the LCD /      */
+/* The TCAL9538 sits on ALP_E1M_I2C0 at 7-bit address 0x73 (A1=1, A0=1),   */
+/* CORRECTED 2026-09-05 from 0x72 (alp-sdk#1974): the maintainer's EVK    */
+/* I2C schedule gives 1110011 = 0x73, and 2 of 2 boards answer there and  */
+/* are silent at 0x72.  Its 8 GPIO pins fan out to the LCD /          */
 /* camera / capacitive-touch control lines and four sensor interrupt  */
 /* inputs.  Apps drive them via the chips/tcal9538 driver:            */
 /*                                                                    */
 /*    tcal9538_t io_exp;                                              */
-/*    tcal9538_init(&io_exp, i2c_bus, 0x72);                          */
+/*    tcal9538_init(&io_exp, i2c_bus, 0x73);                          */
 /*    tcal9538_set_direction(&io_exp,                                 */
 /*        BIT(EVK_IOEXP_LCD_PWR_EN) |                             */
 /*        BIT(EVK_IOEXP_LCD_RST) |                                */
@@ -514,7 +516,8 @@ typedef enum {
 /*   - ICM-42670-P  (U12) AD0 -> VIO   -> 0x69  *** COLLISION, see note ***  */
 /*   - BMI323       (U13) SDO -> VIO   -> 0x69  *** COLLISION, see note ***  */
 /*   - BMP581       (U14) SDO -> VIO   -> 0x47  (SDO must not float)    */
-/*   - TCAL9538     A1=1, A0=0         -> 0x72                          */
+/*   - TCAL9538 MAIN  (U35) A1=1, A0=1  -> 0x73                          */
+/*   - TCAL9538 PCIE  (U37) A0=1, A1=0  -> 0x71  NOT ASSEMBLED (#1974)   */
 /* ================================================================== */
 
 /* BENCH-CONFIRMED (2026-06-16, E1M-AEN801): U12 (ICM-42670) and U13 (BMI323) BOTH
@@ -543,27 +546,38 @@ typedef enum {
  * EVK_PIN_BMI323_INT1 (= ALP_E1M_GPIO_IO15) is defined in the generated
  * routes header. */
 
-/* The EVK populates TWO TCAL9538 I/O expanders, both on ALP_E1M_I2C0
- * but at different strap-selected addresses:
+/* The EVK footprint has TWO TCAL9538 I/O expanders on ALP_E1M_I2C0,
+ * but only the first is assembled on this revision:
  *   - The "main" expander handles LCD / camera / capacitive-touch
  *     control + four sensor interrupt inputs (see the generated
- *     `evk_ioexp_pin_t`).  Strap A1=1, A0=0 -> 0x72.
+ *     `evk_ioexp_pin_t`).  Strap A1=1, A0=1 -> 0x73.  CORRECTED
+ *     2026-09-05 from 0x72 / A1=1,A0=0 (alp-sdk#1974): the
+ *     maintainer's EVK I2C schedule gives 1110011 = 0x73, and 2 of 2
+ *     boards answer there and are silent at 0x72.
  *   - The "PCIe" expander handles the I2C-mux SEL + PCIe slot
  *     RST/WAKE/CLKREQ signals + M2E_ALERT (see the generated
- *     `evk_pcie_ioexp_pin_t`).  Strap A0=1, A1=0 -> 0x71.
+ *     `evk_pcie_ioexp_pin_t`).  Strap A0=1, A1=0 -> 0x71.  NOT
+ *     ASSEMBLED on this EVK revision (alp-sdk#1974) -- the generator
+ *     (#1980) renames its macro to EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED
+ *     so the plain name below does not compile against nonexistent
+ *     silicon.
  *
- * EVK_I2C_ADDR_TCAL9538_MAIN and EVK_I2C_ADDR_TCAL9538_PCIE are defined
- * in the generated routes header. */
+ * EVK_I2C_ADDR_TCAL9538_MAIN is defined in the generated routes header;
+ * EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED per the note above. */
 
-/* BENCH-CONFIRMED (2026-06-16): U35 can be assembled with the TCA6408ARSVR
- * alternative (R112 fitted, R145 DNP) instead of the TCAL9538, which moves it to
- * 0x20. It is PCA9538-register-compatible (0x00 input / 0x01 output / 0x02 polarity
- * / 0x03 config), so the chips/tcal9538 driver drives it unchanged at 0x20 -- read
- * back config=0xFF + a live input port on the bench.
+/* BENCH-CONFIRMED (2026-06-16, on an EARLIER EVK revision): U35 can be
+ * assembled with the TCA6408ARSVR alternative (R112 fitted, R145 DNP)
+ * instead of the TCAL9538, which moves it to 0x20. It is PCA9538-
+ * register-compatible (0x00 input / 0x01 output / 0x02 polarity / 0x03
+ * config), so the chips/tcal9538 driver drives it unchanged at 0x20 --
+ * read back config=0xFF + a live input port on that earlier bench.  NOT
+ * ASSEMBLED on the current EVK revision (alp-sdk#1974): a clean NACK at
+ * 0x20 on both 2026-09-05 bench boards.
  *
- * EVK_I2C_ADDR_TCA6408A_MAIN (the TCA6408A-populated variant) and
- * EVK_I2C_ADDR_TCAL9538 (convenience alias for EVK_I2C_ADDR_TCAL9538_MAIN)
- * are defined in the generated routes header. */
+ * EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED (the TCA6408A-populated
+ * variant) and EVK_I2C_ADDR_TCAL9538 (convenience alias for
+ * EVK_I2C_ADDR_TCAL9538_MAIN) are defined in the generated routes
+ * header. */
 
 /* Two TAS2563RPP smart-amp ICs share the same I2C0 bus.  AD0
  * strap selects address per TAS2563 datasheet table 7-3:

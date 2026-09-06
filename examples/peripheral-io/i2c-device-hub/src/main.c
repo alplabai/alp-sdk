@@ -14,7 +14,7 @@
  *   BMP581     barometer   0x47   CHIP_ID + a raw pressure/temperature sample
  *   INA236 x6  rail monitors      bus voltage (mV) + current (uA) per rail
  *   TAS2563 x2 I2S amps     0x4d/0x4e  revision + ACTIVE-mode configuration
- *   TCA6408A   I/O expander 0x20   config + input port (TCAL9538 @0x72 alt)
+ *   TCA6408A   I/O expander 0x20   config + input port (NOT ASSEMBLED; TCAL9538 @0x73 alt)
  *   24C128     EEPROM       0x50   first 16 bytes
  *
  * Each device is independent: a missing / DNP part is reported and skipped,
@@ -212,13 +212,18 @@ int main(void)
 		}
 	}
 
-	/* --- I/O expander (U35): the EVK fits either a TCAL9538 @0x72 or, when the
-	 * TCA6408A alternative is populated (R112 fitted / R145 DNP), a TCA6408A @0x20.
-	 * Both are PCA9538-register-compatible, so the tcal9538 driver drives either --
-	 * probe both addresses. Read the config reg + input port P0 to prove I2C R/W. */
+	/* --- I/O expander (U35): the EVK fits a TCAL9538 @0x73 by default; an
+	 * earlier/other revision instead populates the TCA6408A alternative
+	 * (R112 fitted / R145 DNP) @0x20 -- NOT ASSEMBLED on this revision
+	 * (neither 2026-09-05 bench board answers there, alp-sdk#1974), so its
+	 * macro carries the generator's `_NOT_ASSEMBLED` suffix (#1980). Both
+	 * parts are PCA9538-register-compatible, so the tcal9538 driver drives
+	 * either -- probe both addresses. Read the config reg + input port P0
+	 * to prove I2C R/W. */
 	{
 		attempted++;
-		const uint8_t ioexp_addrs[] = { EVK_I2C_ADDR_TCA6408A_MAIN, EVK_I2C_ADDR_TCAL9538_MAIN };
+		const uint8_t ioexp_addrs[] = { EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED,
+			                            EVK_I2C_ADDR_TCAL9538_MAIN };
 		bool          ioexp_ok      = false;
 		for (size_t i = 0; i < ARRAY_SIZE(ioexp_addrs) && !ioexp_ok; i++) {
 			tcal9538_t io;

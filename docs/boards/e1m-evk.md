@@ -87,8 +87,8 @@ schematic (UG-E1M-001) and exposed as `EVK_I2C_ADDR_*` macros in
 | `0x4E`          | TAS2563 (U28)            | `EVK_I2C_ADDR_TAS2563_HIGH`        | Smart-amp #2 (AD0 = 10 kΩ to VDD)                   |
 | `0x68`          | BMI323 (U13)             | `EVK_I2C_ADDR_BMI323`              | Secondary 6-axis IMU (SDO=0; no collision with ICM) |
 | `0x69`          | ICM-42670-P (U12)        | `EVK_I2C_ADDR_ICM42670`            | Primary 6-axis IMU (AD0=1)                          |
-| `0x71`          | TCAL9538 PCIe (U37)      | `EVK_I2C_ADDR_TCAL9538_PCIE`       | PCIe-side I/O expander (PCIe slot RST/WAKE/CLKREQ)  |
-| `0x72`          | TCAL9538 main (U35)      | `EVK_I2C_ADDR_TCAL9538_MAIN`       | Main I/O expander (LCD/cam/CTP control + IMU IRQs)  |
+| `0x71`          | TCAL9538 PCIe (U37)      | `EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED` | **NOT ASSEMBLED** on this EVK revision (alp-sdk#1974) -- would be the PCIe-side I/O expander (PCIe slot RST/WAKE/CLKREQ). The generator (#1980) renames the macro so the plain `EVK_I2C_ADDR_TCAL9538_PCIE` name is not defined. |
+| `0x73`          | TCAL9538 main (U35)      | `EVK_I2C_ADDR_TCAL9538_MAIN`       | Main I/O expander (LCD/cam/CTP control + IMU IRQs). CORRECTED 2026-09-05 from `0x72` (alp-sdk#1974): the maintainer's EVK I2C schedule gives 1110011 = `0x73`, and 2 of 2 boards answer there and are silent at `0x72`. |
 
 > **TMUX121 is not in this table.**  It's a passive analog/digital
 > I²C bus switch — addressless, controlled via dedicated pins
