@@ -129,6 +129,11 @@
       "type": "number",
       "description": "Maximum on-die non-volatile memory in MB (MRAM on Alif). Per-variant overrides go into variants[].mram_mb."
     },
+    "soc_flash_base": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "OPTIONAL base address of the on-die non-volatile aperture -- the window a SoM's flash-class `memory_map:` regions are carved out of (2147483648 = 0x80000000 on Alif Ensemble, where upstream Zephyr declares `mram: flash@80000000` in every Ensemble SoC dtsi). Declared per SoC and NOT per variant because only the aperture's LENGTH varies by SKU, and that length already comes from `variants[].mram_mb` -- an E3 ships 5.5 MB and 1.5 MB variants off one base, so a per-variant base would give one hardware fact a second declared source. A SKU's aperture is [soc_flash_base, soc_flash_base + variants[].mram_mb * 1 MiB); `soc_flash_mb` is only the family-default length. Scoped to the on-die DEVICE WINDOW, never to a controller or an XIP window: E1M-AEN801 puts the NOR MX25UM25645GXDI00 on `chip_select: 0` and the HyperRAM W958D8NBYA5I on `chip_select: 1` behind the SAME OSPI0 controller, so a controller-scoped aperture would classify byte-addressable RAM as flash. OMIT for a SoC whose flash never enters `memory_map:` -- on Renesas RZ/V2N the eMMC and NOR are routing annotations and every `memory_regions` entry is RAM, so an aperture there would gate nothing and block the family for no benefit. An Alif SoC that declares it must agree with `scripts/gen_zephyr_board.py`'s `_AEN_MRAM_BASE`, the single source for that constant; `scripts/validate_metadata.py` enforces the agreement so the two cannot drift."
+    },
     "always_on_sram_kb": {
       "type": "integer",
       "description": "Always-on / utility SRAM that survives STOP mode."

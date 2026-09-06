@@ -240,7 +240,7 @@ presets with no `memory_map:`.
   Disagreement is an error. This is the check that makes the six hand-authored
   flags unable to rot.
 
-  **Miss semantics are normative, per ADR-0033 clause 4:** a region whose base
+  **Miss semantics are normative, per ADR-0034 clause 4:** a region whose base
   does not resolve — the `"TBD"` string, or a derived region with no base at all
   (`scripts/alp_project_loader.py`, "silicon-default bases stay unset") — is
   **unresolved**, and unresolved is never silently "not flash". Skip it and say
@@ -282,7 +282,7 @@ a later refactor from turning "unknown" into "not flash".
 - `python3 scripts/gen_catalog.py`, commit `metadata/catalog.json` if it moves.
 - `changelog.d/1365.md` — a fragment naming the ATOC and `storage` hazard and
   stating plainly that A changes no allocator behaviour.
-- `docs/board-config-hardware.md` and `docs/porting-new-som.md` — a porting
+- `docs/board-config-features.md` and `docs/porting-new-som.md` — a porting
   author now has a field to fill; say what it means and how to choose a value.
 
 ## Verification
@@ -342,8 +342,8 @@ a real platform bug, not a base-baseline flake.
 - **ADR-0026 clause 2** keeps `metadata/` and `metadata/schemas/` in alp-sdk
   under every migration outcome, which is what makes A safe to land during the
   migration. Its amendment section G step 2 is what B waits on.
-- **ADR-0033** supplies two rules A follows: deriving the class and shipping the
-  outcome is its prong (b), and clause 4's normative miss semantics are why step
-  4c must skip an unresolved base instead of guessing. The authority field is
-  **not** ADR-0033 declared policy; who writes the ATOC changes when the silicon
-  changes, so it is hardware truth.
+- **ADR-0034** supplies two rules A follows: deriving the class and shipping the
+  outcome is its clause 6 prong (b), and clause 4's normative miss semantics are
+  why step 4c must skip an unresolved base instead of guessing. The authority
+  field is **not** ADR-0034 declared policy; who writes the ATOC changes when
+  the silicon changes, so it is hardware truth.

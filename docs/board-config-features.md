@@ -278,6 +278,22 @@ Devicetree label of its own. Naming one as `flash_device:` refuses
 with a reason instead of silently decorating a DT label that doesn't
 exist on the board.
 
+Each of those six regions also carries a `write_authority:` value --
+WHO may write the region, and when, a different axis from `carveout:`
+(whether the allocator may land shared memory there). On E1M-AEN301..801,
+`mcuboot` is `vendor_image`, `he_slot0`/`hp_slot0` are `customer_image`,
+`reserved` is `none`, `storage` is `customer_runtime`, and `atoc` is
+`secure_enclave` (`mram_main` is `composite`, spanning all six); see
+`docs/porting-new-som.md`'s "Field rules" section for the full six-value
+enum and the absent-means-unresolved rule. **`carveout:` is still the
+only field the allocator actually reads today**
+(`scripts/alp_orchestrate/carveout.py` `resolve_carve_outs()`) --
+`write_authority` derives the flash/RAM class for GATE PURPOSES ONLY
+(`scripts/validate_metadata.py`, `scripts/check_atoc_reservation.py`),
+so this change moves no emitted byte and flips no allocator decision.
+`carveout: false` is not deprecated by this: it remains the sole
+allocator-facing flag on these regions.
+
 No AEN SKU has a working `storage[].flash_device:` target today. Neither
 candidate the resolver will accept resolves to a verified DT label:
 
