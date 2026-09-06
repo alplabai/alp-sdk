@@ -263,7 +263,12 @@ def test_real_evk_header_covers_i2c_device_macros(real_headers):
         # SoC I2C2 on E1M-AEN803 units both answer at 0x73 and nothing
         # answers at 0x72.  Corrected in metadata, so corrected here.
         "EVK_I2C_ADDR_TCAL9538_MAIN": "0x73u",
-        "EVK_I2C_ADDR_TCAL9538_PCIE": "0x71u",
+        # U37 is `assembled: false` in metadata/boards/e1m-evk.yaml (#1974);
+        # the generator (#1980) renames every macro an unfitted entry
+        # contributes with a `_NOT_ASSEMBLED` suffix, so the PLAIN name
+        # below must NOT be defined -- see
+        # test_real_evk_header_omits_plain_macro_for_unassembled_entry.
+        "EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED": "0x71u",
         "EVK_I2C_ADDR_TCA6408A_MAIN": "0x20u",
         "EVK_I2C_ADDR_TAS2563_LOW": "0x4Du",
         "EVK_I2C_ADDR_TAS2563_HIGH": "0x4Eu",
@@ -299,6 +304,82 @@ def test_real_evk_header_covers_i2c_device_macros(real_headers):
             f"{macro} = {defined[macro]!r}, expected {value!r} -- value drifted "
             f"from the hand-authored original"
         )
+
+
+def test_real_evk_header_omits_plain_macro_for_unassembled_entry(real_headers):
+    """Issue #1980: U37 (`EVK_I2C_ADDR_TCAL9538_PCIE`) is `assembled: false`
+    in `metadata/boards/e1m-evk.yaml` -- confirmed NOT fitted on either
+    2026-09-05 bench board (alp-sdk#1974). The plain macro name must NOT
+    appear in the generated header at all, so a reader reaching for the
+    obvious name gets a compile error rather than a real-looking address
+    for silicon that was never fitted. The renamed
+    `_NOT_ASSEMBLED`-suffixed macro (checked in
+    test_real_evk_header_covers_i2c_device_macros) still carries the
+    address + reason for anyone deliberately probing an earlier/other
+    revision's population."""
+    evk_out, _xevk_out = real_headers
+    out = evk_out.read_text(encoding="utf-8")
+    assert "#define EVK_I2C_ADDR_TCAL9538_PCIE " not in out, (
+        "the plain (unassembled) macro name must not be defined -- "
+        "see EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED instead"
+    )
+    assert "#define EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED 0x71u" in out
+
+
+def test_assembled_false_renames_every_macro_the_entry_contributes(gen_module):
+    """Generator unit test (#1980), mutation-proof shape: flip `assembled`
+    on one fixture entry (with BOTH an alias and a calibration block, so
+    every code path in `_emit_i2c_devices` is exercised) and assert the
+    generated header changes in exactly the way claimed, in both
+    directions."""
+    base_doc: dict[str, Any] = {
+        "name": "TEST-ASSEMBLED",
+        "e1m_routes": {},
+        "i2c_devices": [
+            {
+                "macro": "EVK_I2C_ADDR_BAR",
+                "address": "0x55",
+                "alias": "EVK_I2C_ADDR_BAR_LEGACY",
+                "doc": "Test rail monitor.",
+                "calibration": {
+                    "shunt_macro": "EVK_INA236_SHUNT_BAR_OHMS",
+                    "shunt_ohms": "0.010",
+                    "max_macro": "EVK_INA236_MAX_BAR_A",
+                    "max_current_a": "1.0",
+                },
+            },
+        ],
+    }
+
+    # Direction 1: no `assembled:` key -> default true -> plain names.
+    out_fitted = gen_module.emit_board("TEST-ASSEMBLED", base_doc)
+    assert out_fitted is not None
+    defined_fitted = dict(re.findall(r"#define\s+(\S+)\s+(\S+)", out_fitted))
+    assert defined_fitted["EVK_I2C_ADDR_BAR"] == "0x55u"
+    assert defined_fitted["EVK_I2C_ADDR_BAR_LEGACY"] == "EVK_I2C_ADDR_BAR"
+    assert defined_fitted["EVK_INA236_SHUNT_BAR_OHMS"] == "0.010f"
+    assert defined_fitted["EVK_INA236_MAX_BAR_A"] == "1.0f"
+    assert "_NOT_ASSEMBLED" not in out_fitted
+
+    # Direction 2: `assembled: false` -> every contributed macro renamed,
+    # the plain names vanish, and the reason lands in the doc comment.
+    unfitted_doc = json.loads(json.dumps(base_doc))  # cheap deep copy
+    unfitted_doc["i2c_devices"][0]["assembled"] = False
+    out_unfitted = gen_module.emit_board("TEST-ASSEMBLED", unfitted_doc)
+    assert out_unfitted is not None
+    defined_unfitted = dict(re.findall(r"#define\s+(\S+)\s+(\S+)", out_unfitted))
+    assert "EVK_I2C_ADDR_BAR" not in defined_unfitted
+    assert "EVK_I2C_ADDR_BAR_LEGACY" not in defined_unfitted
+    assert "EVK_INA236_SHUNT_BAR_OHMS" not in defined_unfitted
+    assert "EVK_INA236_MAX_BAR_A" not in defined_unfitted
+    assert defined_unfitted["EVK_I2C_ADDR_BAR_NOT_ASSEMBLED"] == "0x55u"
+    assert (
+        defined_unfitted["EVK_I2C_ADDR_BAR_LEGACY_NOT_ASSEMBLED"]
+        == "EVK_I2C_ADDR_BAR_NOT_ASSEMBLED"
+    )
+    assert defined_unfitted["EVK_INA236_SHUNT_BAR_OHMS_NOT_ASSEMBLED"] == "0.010f"
+    assert defined_unfitted["EVK_INA236_MAX_BAR_A_NOT_ASSEMBLED"] == "1.0f"
+    assert "NOT ASSEMBLED on this board revision. Test rail monitor." in out_unfitted
 
 
 def test_i2c_devices_reproduce_metadata_values(gen_module):

@@ -550,10 +550,14 @@ typedef enum {
  *     `evk_ioexp_pin_t`).  Strap A1=1, A0=0 -> 0x72.
  *   - The "PCIe" expander handles the I2C-mux SEL + PCIe slot
  *     RST/WAKE/CLKREQ signals + M2E_ALERT (see the generated
- *     `evk_pcie_ioexp_pin_t`).  Strap A0=1, A1=0 -> 0x71.
+ *     `evk_pcie_ioexp_pin_t`).  Strap A0=1, A1=0 -> 0x71.  NOT
+ *     ASSEMBLED on this EVK revision (alp-sdk#1974) -- the generator
+ *     (#1980) renames its macro to EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED
+ *     so the plain name below does not compile against nonexistent
+ *     silicon.
  *
- * EVK_I2C_ADDR_TCAL9538_MAIN and EVK_I2C_ADDR_TCAL9538_PCIE are defined
- * in the generated routes header. */
+ * EVK_I2C_ADDR_TCAL9538_MAIN is defined in the generated routes header;
+ * EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED per the note above. */
 
 /* BENCH-CONFIRMED (2026-06-16): U35 can be assembled with the TCA6408ARSVR
  * alternative (R112 fitted, R145 DNP) instead of the TCAL9538, which moves it to

@@ -21,7 +21,13 @@ boards that expose repurposed pads past the standard E1M pinout to an
 YAML list (an ordinal, not a hardware fact), computed via `enumerate()`
 rather than read from the YAML.  The `mux_enums:` block emits
 mux-select / IO-expander-pin `typedef enum { ... }` blocks
-(evk_sdio_select_t, evk_pcie_ioexp_pin_t, ...) -- issue #637.
+(evk_sdio_select_t, evk_pcie_ioexp_pin_t, ...) -- issue #637.  An
+`i2c_devices:` entry marked `assembled: false` gets every macro it
+contributes (address / alias / calibration) renamed with a
+`_NOT_ASSEMBLED` suffix (#1980) rather than omitted -- the plain name a
+caller would reach for out of habit does not exist, so accidental use is
+a compile error, while the address and the `doc:` reason stay reachable
+under the renamed macro for deliberate cross-revision probing.
 Idempotent: running twice produces byte-identical output.
 
 The remaining content of `include/alp/boards/alp_<board>.h` is prose
@@ -106,21 +112,52 @@ def _build_doc(entry: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+_NOT_ASSEMBLED_SUFFIX = "_NOT_ASSEMBLED"
+
+
+def _is_assembled(entry: dict[str, Any]) -> bool:
+    """`assembled:` defaults to true (metadata/schemas/board-preset.schema.json);
+    only an explicit `false` means the footprint is unpopulated on this board
+    revision."""
+    return entry.get("assembled", True) is not False
+
+
 def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
     """Emit the on-board I2C device address block (+ any `alias`) and,
     for entries carrying a `calibration:` block, the paired INA236
     shunt/max-current macros.  Mirrors `_emit_section`'s column-aligned
     style but the value is a literal hex/float, not an `ALP_E1M_*`
-    pinout token."""
+    pinout token.
+
+    An entry marked `assembled: false` (#1980) is NOT skipped outright --
+    firmware legitimately probes an address that only some board revisions
+    populate (see `examples/peripheral-io/i2c-device-hub` trying both
+    EVK_I2C_ADDR_TCA6408A_MAIN and EVK_I2C_ADDR_TCAL9538_MAIN for the same
+    footprint) -- but every macro the entry contributes (address, alias,
+    calibration) is renamed with a `_NOT_ASSEMBLED` suffix so the PLAIN
+    name a reader would reach for out of habit does not exist: any existing
+    caller of the plain name fails at compile time instead of silently
+    issuing a real bus transaction against silicon that was never fitted.
+    The address value and the `doc:` reason both survive under the renamed
+    macro for anyone who deliberately wants to probe for an earlier/other
+    revision's population."""
     if not devices:
         return []
 
+    def _tag(name: str, assembled: bool) -> str:
+        return name if assembled else f"{name}{_NOT_ASSEMBLED_SUFFIX}"
+
     addr_lines: list[tuple[str, str, str]] = []  # (macro, value, doc)
     for entry in devices:
-        macro = entry["macro"]
-        addr_lines.append((macro, f"{entry['address']}u", entry.get("doc", "")))
+        assembled = _is_assembled(entry)
+        macro = _tag(entry["macro"], assembled)
+        doc = entry.get("doc", "")
+        if not assembled:
+            doc = f"NOT ASSEMBLED on this board revision. {doc}".strip()
+        addr_lines.append((macro, f"{entry['address']}u", doc))
         alias = entry.get("alias")
         if alias:
+            alias = _tag(alias, assembled)
             addr_lines.append((alias, macro, f"Alias for {macro}."))
 
     calib_lines: list[tuple[str, str, str]] = []
@@ -128,12 +165,15 @@ def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
         cal = entry.get("calibration")
         if not cal:
             continue
-        macro = entry["macro"]
+        assembled = _is_assembled(entry)
+        macro = _tag(entry["macro"], assembled)
+        shunt_macro = _tag(cal["shunt_macro"], assembled)
+        max_macro = _tag(cal["max_macro"], assembled)
         calib_lines.append(
-            (cal["shunt_macro"], f"{cal['shunt_ohms']}f", f"Shunt for {macro}.")
+            (shunt_macro, f"{cal['shunt_ohms']}f", f"Shunt for {macro}.")
         )
         calib_lines.append(
-            (cal["max_macro"], f"{cal['max_current_a']}f", f"Max current for {macro}.")
+            (max_macro, f"{cal['max_current_a']}f", f"Max current for {macro}.")
         )
 
     out: list[str] = [
