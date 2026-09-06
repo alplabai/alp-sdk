@@ -105,8 +105,8 @@ SLOT0_WINDOWS = {
     'M55_HP': (0x802b0000, 2688 * 1024),
     # #1981: floor 0x80002000 is the BOOTLOAD (TF-A BL32) boot address
     # from the Alif APSS application-note A32 Linux config quoted in
-    # #1981.  It is NOT verified on silicon: no bench run in this repo
-    # has booted an A32 chain, and the AEN bench unit is down (#1883).
+    # #1981.  It is NOT verified on silicon: Linux has not been booted
+    # on the A32 cluster of any AEN module -- #1972 tracks first light.
     # It also falls INSIDE the mcuboot region every AEN preset declares
     # (base 0x80000000, 64 KiB) -- consistent with an A32 chain the SE
     # boots without MCUboot, but do not read this floor as a measured
