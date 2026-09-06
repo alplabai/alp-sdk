@@ -1135,7 +1135,7 @@ def _aen_i2c_pinctrl_group(links: dict[str, Any]) -> str:
 
 
 
-def _aen_brd_i2c_dts(links: dict[str, Any]) -> list[str]:
+def _aen_brd_i2c_dts(links: dict[str, Any], part: str) -> list[str]:
     """`&i2c0` (BRD_I2C) + its on-module device nodes, `&lpgpio`, and the
     aliases that make all three reachable portably.
 
@@ -1144,6 +1144,12 @@ def _aen_brd_i2c_dts(links: dict[str, Any]) -> list[str]:
     board should get them for free -- while
     `zephyr/dts/alif/ensemble_e8_peripherals.dtsi` describes the E8 DIE, which
     every AEN SKU shares whether or not it carries these chips.
+
+    `part` (the Ensemble part designator this board tree is for, e.g. "E8")
+    scopes the RTC-alarm `risk:` paragraph to the SoC it was actually
+    evidenced against -- `on_module_links` is family-scoped (one file for
+    every AEN SKU), but a DFP register-layout warning is part-specific, not
+    family-wide (#1988).
     """
     bus = links["brd_i2c"]
     alarm = links["rtc_alarm"]
@@ -1184,12 +1190,15 @@ def _aen_brd_i2c_dts(links: dict[str, Any]) -> list[str]:
         " * open-drain, pulled up on-module by R98 (100k to +1V8, FITTED).  The pad",
         " * itself is muxed in the pinctrl dtsi's BRD_I2C group (that binding has no",
         " * pinctrl-0 of its own).",
-        " *",
     ]
     # The port-15 control-register warning, straight from the metadata's own
-    # `risk:` string -- the most likely bench failure on this path, and the
-    # one a reader must not mistake for a dead RTC.
-    lines += _c_comment(alarm["risk"], "")[1:-1]
+    # per-part `risk:` map -- evidenced only against this board's own SoC
+    # part's DFP.  A part with no entry gets no paragraph: an unstated DFP
+    # citation is not evidence for this silicon (#1988).
+    risk_text = (alarm.get("risk") or {}).get(part)
+    if risk_text:
+        lines += [" *"]
+        lines += _c_comment(risk_text, "")[1:-1]
     lines += [
         " */",
         f"&{alarm['gpio_node']} {{",
@@ -1690,7 +1699,7 @@ def _aen_dts(
         "};",
         "",
     ]
-    lines += _aen_brd_i2c_dts(links)
+    lines += _aen_brd_i2c_dts(links, part)
 
     if ethos_u is not None:
         _accel, node = ethos_u

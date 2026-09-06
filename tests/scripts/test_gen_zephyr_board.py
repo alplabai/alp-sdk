@@ -530,6 +530,30 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
             self.assertNotIn("Ensemble E8", emitted)
             self.assertNotIn("Alif E8", emitted)
 
+    def test_rtc_alarm_risk_is_scoped_to_the_part_it_was_evidenced_against(
+            self) -> None:
+        """`on_module_links.rtc_alarm.risk` is a per-part map, keyed by the
+        SoC's own `part` designator -- its only entry (`E8`) is evidenced
+        against the AE822 DFP alone, so a board tree for any OTHER part must
+        not carry that sentence (#1988).  Mutating `part` to `E4` is the
+        narrowest stand-in for onboarding E1M-AEN401 down this same emit
+        path (real E1M-AEN401 is refused earlier for lacking
+        `zephyr_peripherals_dtsi` -- see NOT_EMITTABLE above)."""
+        with _MutatedMetadata() as mm:
+            mm.json_set(E8_SOC, "part", "E4")
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+            dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        self.assertNotIn("AE822 DFP", dts)
+        self.assertNotIn("LPGPIO_CTRL_n", dts)
+        # The genuine, unmutated E8 board must still carry the paragraph --
+        # this is the byte-parity case the suite pins elsewhere, restated
+        # here so a broken lookup (e.g. dropping the risk map entirely)
+        # can't pass this test by omitting the sentence for everyone.
+        real_files = emit_zephyr_board("E1M-AEN801", "m55_hp", METADATA_ROOT)
+        real_dts = next(v for k, v in real_files.items() if k.endswith(".dts"))
+        self.assertIn("AE822 DFP", real_dts)
+        self.assertIn("LPGPIO_CTRL_n", real_dts)
+
     def test_peripherals_overlay_is_read_from_the_soc_json(self) -> None:
         with _MutatedMetadata() as mm:
             mm.json_set(E8_SOC, "zephyr_peripherals_dtsi",
