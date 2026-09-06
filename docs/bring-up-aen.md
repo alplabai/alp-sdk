@@ -395,10 +395,14 @@ top of the per-subsystem checks.
 > toolchain + silicon before switching to the carrier board.  (Alif's
 > own `sdk-alif` / `zephyr_alif` fork -- board `alif_e8_dk` -- and the
 > CMSIS-Pack DFP (`alif_ensemble-cmsis-dfp`, device `AE822FA0E5597`)
-> are opt-in alternatives; Yocto/A32 is `meta-alif-ensemble` branch
-> **scarthgap**, `devkit-e8.conf` / `appkit-e8.conf`.  Note E7 is not in
-> upstream Zephyr v4.4 at all -- only e4/e6/e8/e1c -- another reason E8
-> leads.)
+> are opt-in alternatives; Yocto/A32 is intended to ride
+> `meta-alif-ensemble`, but that path does not build today -- there is
+> no `scarthgap` branch, no `devkit-e8.conf` on the one branch that
+> exists, and the layer is Yocto-series-incompatible with this repo's
+> Scarthgap baseline regardless (issues #1967 / #1968 / #1971 / #1982;
+> see `meta-alp-sdk/README.md`'s "Alif Ensemble E8" section and #264
+> for the rebuild).  Note E7 is not in upstream Zephyr v4.4 at all --
+> only e4/e6/e8/e1c -- another reason E8 leads.)
 >
 > Per-core builds use plain `west build -b <target> <app>`.
 > (`tan build --project <app>` is the multi-core planner/executor: it fans a

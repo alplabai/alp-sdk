@@ -183,7 +183,13 @@ def test_generated_output_with_tool_path_rejected_by_gate(monkeypatch):
 
     def _tampered(*args, **kwargs):
         doc = json.loads(real_emit(*args, **kwargs))
-        doc["slices"][0]["command"]["tool"] = "/usr/bin/west"
+        # First slice that actually HAS a command -- not necessarily
+        # index 0: an AEN A32-cluster slice's command is `null` (issue
+        # #1982, `yocto-machine-unbuildable`), so a fixed index 0 can
+        # land on a slice with nothing to tamper.
+        slice_with_cmd = next(
+            s for s in doc["slices"] if s["command"] is not None)
+        slice_with_cmd["command"]["tool"] = "/usr/bin/west"
         return json.dumps(doc)
 
     monkeypatch.setattr(alp_orchestrate, "emit_build_plan", _tampered)

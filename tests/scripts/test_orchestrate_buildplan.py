@@ -407,6 +407,75 @@ def test_emit_build_plan_missing_board_tree_blocks_command_not_dropped(
     assert "alp_e1m_aen801_m55_hp" not in warning["message"]
 
 
+AEN_A32_STOCK_DEFAULT = """
+som:
+  sku: {sku}
+
+cores:
+  m55_hp:
+    os: "off"
+  m55_he:
+    os: "off"
+"""
+
+
+@pytest.mark.parametrize(
+    ("sku", "machine", "expect_in_message", "expect_not_in_message"),
+    [
+        # e1m-aen501/601/803-a32 ship NO meta-alp-sdk/conf/machine/*.conf
+        # at all -- the "strictly more unbuildable" class; only #1971
+        # applies (there is no broken/commented-out `require` to blame,
+        # so no #1968). AEN803 is the bench module #1982 itself names.
+        ("E1M-AEN501", "e1m-aen501-a32", ("#1971",), ("#1968",)),
+        ("E1M-AEN601", "e1m-aen601-a32", ("#1971",), ("#1968",)),
+        ("E1M-AEN803", "e1m-aen803-a32", ("#1971",), ("#1968",)),
+        # e1m-aen701-a32 ships a conf but its `require` is commented out
+        # pending meta-alif-ensemble being vendored -- also #1971 only.
+        ("E1M-AEN701", "e1m-aen701-a32", ("#1971",), ("#1968",)),
+        # e1m-aen801-a32 ships a conf with an ACTIVE `require` naming a
+        # file absent upstream -- the one class that also cites #1968.
+        ("E1M-AEN801", "e1m-aen801-a32", ("#1968", "#1971"), ()),
+    ],
+)
+def test_emit_build_plan_aen_a32_machine_unbuildable_blocks_command(
+    tmp_path: Path,
+    sku: str,
+    machine: str,
+    expect_in_message: tuple[str, ...],
+    expect_not_in_message: tuple[str, ...],
+) -> None:
+    """Every AEN A32 cluster's default topology (`app: alp-image-edge`,
+    `machine: <sku>-a32`) is the `STOCK_IMAGE_APP` token, exempt from
+    the `recipe:` requirement -- but all five AEN SoMs that declare a
+    `topology.a32_cluster.machine:` (`E1M-AEN{501,601,701,801,803}`)
+    are known-non-buildable MACHINEs (issue #1982), split into two
+    failure classes covered here so neither regresses silently: AEN701
+    and AEN801 ship a conf with a broken or commented-out `require`;
+    AEN501/601/803 (the bench module) ship no conf at all. The plan
+    must never carry `bitbake alp-image-edge` for any of them -- the
+    slice is still carried (never dropped) with `command: null` plus a
+    `yocto-machine-unbuildable` warning naming the blocking issues.
+    Regression: before this was parametrized, only AEN801 (the lead
+    part, not the bench module) had end-to-end coverage."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    path = _write_board(tmp_path, AEN_A32_STOCK_DEFAULT.format(sku=sku))
+    plan = _json.loads(emit_build_plan(
+        load_board_yaml(path), board_yaml=path, build_root=Path("build")))
+
+    a32 = next(s for s in plan["slices"] if s["coreId"] == "a32_cluster")
+    assert a32["command"] is None
+
+    warning = next(w for w in plan["warnings"] if w["coreId"] == "a32_cluster")
+    assert warning["code"] == "yocto-machine-unbuildable"
+    assert machine in warning["message"]
+    for needle in expect_in_message:
+        assert needle in warning["message"]
+    for needle in expect_not_in_message:
+        assert needle not in warning["message"]
+
+
 def test_real_zephyr_board_names_lists_every_shipped_tree() -> None:
     """No test named the actual members of `_real_zephyr_board_names`,
     only that ONE of them showed up in a warning message -- a regression
@@ -1178,3 +1247,79 @@ def test_emit_build_plan_no_toolchain_override_keeps_todays_default(
     assert alpha["toolchain"]["id"] == "arm-zephyr-eabi"
     assert bravo["toolchain"]["id"] == "arm-zephyr-eabi"
     assert zulu["toolchain"]["id"] == "poky-glibc"
+
+
+# ---------------------------------------------------------------------
+# Issue #1987 -- `cores.<id>.app:` is the THIRD raw path that reached
+# `.resolve()` / `.is_file()` unguarded, after #1961 closed the same
+# antipattern in `validate.py`'s `extra_libraries.<name>.profile:` and
+# in `loader.py`'s `--input`.  A guard added without a test is a guard
+# nothing keeps: these two tests fail if either `except` clause in
+# `_resolve_app_path()` / `_zephyr_app_dir()` is removed or narrowed
+# back to a POSIX-only exception tuple.
+# ---------------------------------------------------------------------
+
+
+def test_resolve_app_path_posix_symlink_loop_clean_error(monkeypatch) -> None:
+    """POSIX shape: a symlink loop makes `Path.resolve()` raise
+    `RuntimeError` (ELOOP).  `_resolve_app_path()` must turn that into a
+    clean `OrchestratorError` naming the offending `app:` value, not let
+    it escape as an unhandled crash."""
+    from alp_orchestrate.orchestrator import (
+        OrchestratorError,
+        _resolve_app_path,
+    )
+
+    def _raise_eloop(self, *args, **kwargs):
+        raise RuntimeError("Symlink loop from '/tmp/loop-app'")
+
+    monkeypatch.setattr(Path, "resolve", _raise_eloop)
+
+    with pytest.raises(OrchestratorError) as excinfo:
+        _resolve_app_path("./loop-app", Path("/nonexistent-base"))
+    msg = str(excinfo.value)
+    assert "loop-app" in msg
+    assert "could not be resolved" in msg
+
+
+def test_zephyr_app_dir_windows_symlink_loop_clean_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Windows shape, and the reason the POSIX test above is not enough.
+
+    Driving a real WSL-created symlink loop on an NTFS drive with
+    Windows CPython shows `.resolve()` returning *without* raising, and
+    `.is_file()` raising a plain `OSError` (`WinError 1920`, "The file
+    cannot be accessed by the system") -- neither a `RuntimeError` nor a
+    `PermissionError`.  `_zephyr_app_dir()` calls `.is_file()` twice (the
+    app dir's own `CMakeLists.txt`, then its parent's), so both call
+    sites need the guard; this test covers the first.  Reverting either
+    `except (OSError, RuntimeError)` to a POSIX-only tuple turns this
+    red while the test above stays green -- exactly how the original
+    #1961 blocker shipped unseen."""
+    from alp_orchestrate.orchestrator import (
+        OrchestratorError,
+        _zephyr_app_dir,
+    )
+
+    app_dir = tmp_path / "winloop-app"
+    app_dir.mkdir()
+    real_is_file = Path.is_file
+
+    def _raise_windows_shape(self):
+        if self.name == "CMakeLists.txt":
+            # `OSError(22, msg)` alone leaves `.winerror` None, so set it
+            # explicitly -- this must reproduce the real shape
+            # (errno=22, winerror=1920), not merely an errno match.
+            err = OSError(22, "The file cannot be accessed by the system")
+            err.winerror = 1920
+            raise err
+        return real_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", _raise_windows_shape)
+
+    with pytest.raises(OrchestratorError) as excinfo:
+        _zephyr_app_dir("./winloop-app", tmp_path)
+    msg = str(excinfo.value)
+    assert "winloop-app" in msg
+    assert "could not be resolved" in msg

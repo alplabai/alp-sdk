@@ -417,6 +417,7 @@ def emit_build_plan(
     # a buildplan<->package import cycle.
     from .orchestrator import (
         STOCK_IMAGE_APP,
+        UnbuildableYoctoMachineError,
         UnknownBoardTargetError,
         UnrootedPathError,
         _resolve_app_path,
@@ -475,6 +476,21 @@ def emit_build_plan(
             cmd = None
             warnings.append({
                 "code":    "board-tree-missing",
+                "coreId":  slice_.core_id,
+                "message": str(e),
+            })
+        except UnbuildableYoctoMachineError as e:
+            # The slice's `machine:` is a known-non-buildable Yocto MACHINE
+            # (issue #1982 -- the two AEN A32-cluster carriers, unbuildable
+            # for related but distinct reasons: see
+            # `orchestrator.YOCTO_MACHINE_UNBUILDABLE`'s own comment,
+            # issues #1968 / #1971): block the command rather than ever
+            # hand a consumer a `bitbake` target that cannot succeed --
+            # same "carry the slice, never emit a broken command"
+            # convention as `no-command` below.
+            cmd = None
+            warnings.append({
+                "code":    "yocto-machine-unbuildable",
                 "coreId":  slice_.core_id,
                 "message": str(e),
             })
