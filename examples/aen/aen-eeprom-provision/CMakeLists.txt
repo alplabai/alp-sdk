@@ -34,10 +34,10 @@ list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 #
 #   python3 scripts/program_eeprom.py \
 #       --board-yaml examples/aen/aen-eeprom-provision/board.yaml \
-#       --serial 2026W36-0001 --mfg-date 2026-09-04 \
-#       --output /tmp/manifest-2026W36-0001.bin
+#       --serial <SERIAL> --mfg-date <MFG-DATE> \
+#       --output /tmp/manifest-<SERIAL>.bin
 #
-#   ... -DALP_MANIFEST_BIN=/tmp/manifest-2026W36-0001.bin
+#   ... -DALP_MANIFEST_BIN=/tmp/manifest-<SERIAL>.bin
 if(NOT DEFINED ALP_MANIFEST_BIN)
     message(FATAL_ERROR
         "ALP_MANIFEST_BIN is not set.\n"

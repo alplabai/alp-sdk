@@ -54,14 +54,14 @@ labgrid-client -p e1m-aen-evk-01 acquire
 #    allocation ledger, not from your head.
 python3 scripts/program_eeprom.py \
     --board-yaml examples/aen/aen-eeprom-provision/board.yaml \
-    --serial 2026W36-0001 \
-    --mfg-date 2026-09-04 \
-    --output /tmp/manifest-2026W36-0001.bin
+    --serial <SERIAL> \
+    --mfg-date <MFG-DATE> \
+    --output /tmp/manifest-<SERIAL>.bin
 
 # 2. Build ITCM-linked, with that blob baked in.
 B=scripts/bench/aen
 bash $B/build.sh "$PWD/examples/aen/aen-eeprom-provision" \
-    -DALP_MANIFEST_BIN=/tmp/manifest-2026W36-0001.bin \
+    -DALP_MANIFEST_BIN=/tmp/manifest-<SERIAL>.bin \
     "-DEXTRA_CONF_FILE=$PWD/$B/aen-bench-shared.conf;$PWD/$B/aen-flowc-itcm.conf" \
     "-DEXTRA_DTC_OVERLAY_FILE=$PWD/$B/aen-flowc-itcm.overlay"
 
@@ -71,12 +71,20 @@ bash $B/ram-run.sh "$PWD/build/aen-eeprom-provision"
 labgrid-client -p e1m-aen-evk-01 release
 ```
 
+`<SERIAL>` and `<MFG-DATE>` are placeholders on purpose. An earlier revision of
+this file used the real allocated serial `2026W36-0001` with `sku=E1M-AEN801`,
+which is wrong twice over: that unit is an **E1M-AEN803** (alp-sdk#2001), and a
+worked example is not a provisioning record. The SKU below comes from this
+example's own `board.yaml` (`som.sku: E1M-AEN801`), not from any module -- keep
+it that way, and take the serial from the allocation ledger as step 1 already
+says.
+
 Expected on a blank module:
 
 ```
-[provision] to write: family=aen sku=E1M-AEN801 hw_rev=r2 serial=2026W36-0001 mfg=2026-09-04
+[provision] to write: family=aen sku=E1M-AEN801 hw_rev=r2 serial=<SERIAL> mfg=<MFG-DATE>
 [provision] wrote 128 bytes at offset 0
-[provision] verified on device: family=aen sku=E1M-AEN801 hw_rev=r2 serial=2026W36-0001 mfg=2026-09-04
+[provision] verified on device: family=aen sku=E1M-AEN801 hw_rev=r2 serial=<SERIAL> mfg=<MFG-DATE>
 RESULT PASS: manifest written and verified on device
 ```
 
