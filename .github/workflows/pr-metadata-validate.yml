@@ -80,6 +80,7 @@ on:
       - 'scripts/assemble_changelog.py'
       - 'scripts/check_changelog_fragments.py'
       - 'scripts/check_changelog_citations.py'
+      - 'scripts/check_changelog_fragment_issue.py'
       # check_no_committed_doxygen_output.py (#1573) reads OUTPUT_DIRECTORY out
       # of the Doxyfile and sweeps what is tracked under it, so both are its
       # inputs -- a gate absent from its own trigger is the #1585 defect class.
@@ -161,6 +162,7 @@ on:
       - 'scripts/assemble_changelog.py'
       - 'scripts/check_changelog_fragments.py'
       - 'scripts/check_changelog_citations.py'
+      - 'scripts/check_changelog_fragment_issue.py'
       # check_no_committed_doxygen_output.py (#1573) reads OUTPUT_DIRECTORY out
       # of the Doxyfile and sweeps what is tracked under it, so both are its
       # inputs -- a gate absent from its own trigger is the #1585 defect class.
@@ -567,6 +569,9 @@ jobs:
 
       - name: "Gate — changelog.d/ path:line citations still resolve (#1416)"
         run: python3 scripts/check_changelog_citations.py
+
+      - name: "Gate — changelog.d/ fragment's heading issue matches its filename (#1957)"
+        run: python3 scripts/check_changelog_fragment_issue.py
 
       - name: "Gate — driver-status prose doesn't cite a closed issue as an open blocker (#1950)"
         run: python3 scripts/check_issue_citations.py
