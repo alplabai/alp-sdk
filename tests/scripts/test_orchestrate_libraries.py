@@ -318,7 +318,15 @@ def test_extra_libraries_profile_windows_shape_clean_error(
 
     def _raise_windows_shape_for_profile(self):
         if self.name == prof_name:
-            raise OSError(22, "The file cannot be accessed by the system")
+            # `OSError(22, msg)` alone only sets `.errno` -- `winerror`
+            # stays `None` regardless of the first positional value
+            # (confirmed: CPython's OSError has no 2-arg form that
+            # derives one from the other). Set it explicitly so this
+            # actually reproduces the real WSL-symlink-loop shape
+            # (errno=22, winerror=1920), not just an errno match.
+            err = OSError(22, "The file cannot be accessed by the system")
+            err.winerror = 1920
+            raise err
         return real_is_file(self)
 
     monkeypatch.setattr(Path, "is_file", _raise_windows_shape_for_profile)
