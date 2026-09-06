@@ -18,7 +18,8 @@ bus:              i2c
 i2c:
   addresses:
     - { addr_7bit: 0x70, scope: "A1=0, A0=0 (TCAL9538_I2C_ADDR_BASE)" }
-    - { addr_7bit: 0x72, scope: "A1=1, A0=0 (E1M EVK: U35/U37, 2x instances at BRD_I2C0)" }
+    - { addr_7bit: 0x72, scope: "A1=1, A0=0 (E1M-X EVK: U35, unverified strap; matches XEVK_I2C_ADDR_TCAL9538. NOT the E1M EVK -- that U35 is 0x73, and U37 is not assembled there. See alp-sdk#1974)" }
+    - { addr_7bit: 0x73, scope: "A1=1, A0=1 (E1M EVK: U35 main I/O expander, matches EVK_I2C_ADDR_TCAL9538_MAIN. BENCH-CONFIRMED -- 2 of 2 boards ACK here and are silent at 0x72. See alp-sdk#1974)" }
   address_strap_range: "0x70..0x73 (A1A0 2-bit strap)"
   max_clock_hz:   1000000         # 100kHz / 400kHz / 1MHz (fast-mode-plus) per datasheet.
 

@@ -60,11 +60,15 @@
 #define RTC_ADDR    0x52U /* U21, RV-3028-C7. */
 #define OPTIGA_ADDR 0x30U /* IC1, DNP=1 -- expected ABSENT. */
 /* The address something actually answers on for the temperature sensor.
- * BENCH 2026-09-05: 0x48 NACKs and 0x40 ACKs with a plausible temperature.
- * 0x48 = 0b1001000 and 0x40 = 0b1000000 differ only in bit 3, which first
- * suggested a slow-edge address mis-sample -- but the bench disproved that
- * (see the alias-probe block in main() for the evidence).  Treated here simply
- * as an observed second address to be identified, not as a known fault. */
+ * BENCH FINDING, alp-sdk#1978 -- confirmed on 2 of 2 modules tested
+ * (2026W36-0001, 2026W36-0003): 0x48 NACKs and 0x40 ACKs with a plausible
+ * temperature.  This is a BATCH property of the 2026W36 E1M-AEN803 build,
+ * not a per-unit fault.  0x48 = 0b1001000 and 0x40 = 0b1000000 differ only
+ * in bit 3, which first suggested a slow-edge address mis-sample -- but the
+ * bench disproved that (see the alias-probe block in main() for the
+ * evidence).  0x40 is not a legal TMP112 strap address, so what answers
+ * there has not been proven to be the TMP112 at all -- identifying it is
+ * open work under alp-sdk#1978. */
 #define TMP112_ALIAS_ADDR 0x40U
 
 /* TMP112 datasheet (TI SBOS397, Table 2): pointer register 0x00 is the
@@ -240,27 +244,34 @@ int main(void)
 	 *
 	 * That leaves the address strap itself: the netlist has U20 = TMP112DIDPWR
 	 * with ADD0 tied to 0V, which the datasheet maps to 0x48 (ADD0 to V+ / SDA /
-	 * SCL give 0x49 / 0x4A / 0x4B -- none of them 0x40).  A part answering at
-	 * 0x40 is therefore either a different device than the BOM says, or fitted
-	 * with a different strap than the netlist records.  Reading the TMP112
-	 * configuration registers below distinguishes those without guessing. */
-	/* BENCH-IDENTIFIED 2026-09-05: the TMP112 on this module answers at
-	 * TMP112_ALIAS_ADDR (0x40), not at the strapped TMP112_ADDR (0x48).
-	 * Identification is a three-of-three register fingerprint, not a guess:
-	 * CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000 all equal the TMP112
-	 * power-on defaults, and it returns a plausible temperature.
+	 * SCL give 0x49 / 0x4A / 0x4B -- none of them 0x40).  0x40 is not a legal
+	 * TMP112 strap address at all, so a part answering there has NOT been
+	 * proven to be the TMP112 the BOM calls out -- it could be a different
+	 * device, or the same device with something the netlist does not capture.
+	 * Confirmed on 2 of 2 modules tested (2026W36-0001, 2026W36-0003): this is
+	 * a BATCH property of the 2026W36 E1M-AEN803 build, not a fault on one
+	 * board, so a single-unit explanation does not fit the evidence either.
+	 * Reading the TMP112 configuration registers below narrows this without
+	 * guessing, but does not settle it -- see alp-sdk#1978. */
+	/* BENCH FINDING, alp-sdk#1978 -- confirmed on 2 of 2 modules tested
+	 * (2026W36-0001, 2026W36-0003): the declared TMP112 (TMP112_ADDR, 0x48)
+	 * does not answer; something at TMP112_ALIAS_ADDR (0x40) does, and
+	 * fingerprints TMP112-shaped: CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000
+	 * all equal the TMP112 power-on defaults, and it returns a plausible
+	 * temperature.
 	 *
-	 * 0x40 is NOT a legal TMP112 address.  The datasheet strap table is
-	 * ADD0->GND = 0x48, ADD0->V+ = 0x49, ADD0->SDA = 0x4A, ADD0->SCL = 0x4B.
-	 * The netlist has U20 pin 3 (ADD0) on 0V, which should give 0x48.  A part
-	 * decoding 0x40 therefore points at the ADD0 strap not actually being at
-	 * GND on the built module (an open joint on U20 pin 3 would leave ADD0
-	 * floating) -- a board/production question, NOT a firmware one.  Check
-	 * continuity from U20 pin 3 to GND before assuming anything else.
+	 * That fingerprint does NOT prove identity.  0x40 is NOT a legal TMP112
+	 * address -- the datasheet strap table is ADD0->GND = 0x48, ADD0->V+ =
+	 * 0x49, ADD0->SDA = 0x4A, ADD0->SCL = 0x4B -- so a part that cannot be
+	 * strapped to 0x40 answering there is unexplained, not identified.  This
+	 * is a BATCH property of the 2026W36 build, so it is open work under
+	 * alp-sdk#1978, not a per-board continuity check to run first.  One
+	 * consequence: the stock CONFIG_TMP112 driver does not bind on these
+	 * modules, since it only ever probes the devicetree's 0x48.
 	 *
 	 * This is reported, not silently accepted: the summary below still names
-	 * the address the part actually answered on, so a module that is strapped
-	 * correctly reads differently from this one. */
+	 * the address the part actually answered on, so a module that behaves
+	 * differently from this batch stands out immediately. */
 	if (!scan.tmp112_present && scan.tmp112_alias_present) {
 		int32_t milli_c;
 
@@ -309,9 +320,9 @@ int main(void)
 				printk("0x%02x: %s\n",
 				       TMP112_ALIAS_ADDR,
 				       (tlo == 0x4B00U && thi == 0x5000U)
-				           ? "T_LOW/T_HIGH match the TMP112 defaults -- this IS "
-				             "a TMP112, strapped to 0x40, NOT 0x48 as the netlist "
-				             "records (ADD0 tied to 0V)."
+				           ? "T_LOW/T_HIGH match the TMP112 defaults -- TMP112-shaped, "
+				             "but 0x40 is not a legal TMP112 strap address, so this "
+				             "does NOT prove identity; open work under alp-sdk#1978."
 				           : "registers do NOT match TMP112 defaults -- the part "
 				             "at this address is something else; do not assume the "
 				             "BOM.");
@@ -375,8 +386,10 @@ int main(void)
 		printk("RESULT PASS: BRD_I2C (I2C0) scan found TMP112 + RV-3028-C7, "
 		       "both decoded, and the RTC oscillator is confirmed running%s\n",
 		       tmp112_ok ? ""
-		                 : " (NOTE: the TMP112 answered at 0x40, not its strapped "
-		                   "0x48 -- check U20 pin 3 ADD0 continuity to GND)");
+		                 : " (NOTE: something TMP112-shaped answered at 0x40, not "
+		                   "the strapped 0x48 -- batch finding, alp-sdk#1978; "
+		                   "identity not yet proven, see the alias-probe block "
+		                   "above)");
 	} else {
 		/* Deliberately does NOT blame the pull-ups.  Bench-measured
 		 * 2026-09-05: every non-response on this bus is a clean -EIO NACK,

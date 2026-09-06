@@ -394,13 +394,13 @@ typedef enum {
 /* ================================================================== */
 /* TCAL9538 I/O expander pin layout                                   */
 /*                                                                    */
-/* The TCAL9538 sits on ALP_E1M_I2C0 at 7-bit address 0x72 (A1=1, A0=0    */
+/* The TCAL9538 sits on ALP_E1M_I2C0 at 7-bit address 0x73 (A1=1, A0=1    */
 /* per the EVK schematic).  Its 8 GPIO pins fan out to the LCD /      */
 /* camera / capacitive-touch control lines and four sensor interrupt  */
 /* inputs.  Apps drive them via the chips/tcal9538 driver:            */
 /*                                                                    */
 /*    tcal9538_t io_exp;                                              */
-/*    tcal9538_init(&io_exp, i2c_bus, 0x72);                          */
+/*    tcal9538_init(&io_exp, i2c_bus, EVK_I2C_ADDR_TCAL9538_MAIN);    */
 /*    tcal9538_set_direction(&io_exp,                                 */
 /*        BIT(EVK_IOEXP_LCD_PWR_EN) |                             */
 /*        BIT(EVK_IOEXP_LCD_RST) |                                */
@@ -539,7 +539,7 @@ typedef enum {
 /*   - ICM-42670-P  (U12) AD0 -> VIO   -> 0x69  *** COLLISION, see note ***  */
 /*   - BMI323       (U13) SDO -> VIO   -> 0x69  *** COLLISION, see note ***  */
 /*   - BMP581       (U14) SDO -> VIO   -> 0x47  (SDO must not float)    */
-/*   - TCAL9538     A1=1, A0=0         -> 0x72                          */
+/*   - TCAL9538     A1=1, A0=1         -> 0x73                          */
 /* ================================================================== */
 
 /* BENCH-CONFIRMED (2026-06-16, E1M-AEN801): U12 (ICM-42670) and U13 (BMI323) BOTH
@@ -568,14 +568,17 @@ typedef enum {
  * EVK_PIN_BMI323_INT1 (= ALP_E1M_GPIO_IO15) is defined in the generated
  * routes header. */
 
-/* The EVK populates TWO TCAL9538 I/O expanders, both on ALP_E1M_I2C0
- * but at different strap-selected addresses:
- *   - The "main" expander handles LCD / camera / capacitive-touch
- *     control + four sensor interrupt inputs (see
- *     evk_ioexp_pin_t).  Strap A1=1, A0=0 -> 0x72.
- *   - The "PCIe" expander handles the I2C-mux SEL + PCIe slot
- *     RST/WAKE/CLKREQ signals + M2E_ALERT (see
- *     evk_pcie_ioexp_pin_t above).  Strap A0=1, A1=0 -> 0x71.
+/* The EVK routes for TWO TCAL9538 I/O expander positions, both on
+ * ALP_E1M_I2C0 but at different strap-selected addresses.  Only the
+ * "main" expander (U35) is assembled on this EVK revision:
+ *   - The "main" expander (U35) handles LCD / camera / capacitive-touch
+ *     control + four sensor interrupt inputs (see evk_ioexp_pin_t).
+ *     BENCH-CONFIRMED, 2 of 2 boards (alp-sdk#1974): strap A1=1, A0=1
+ *     -> 0x73 (silent at 0x72).
+ *   - The "PCIe" expander (U37) handles the I2C-mux SEL + PCIe slot
+ *     RST/WAKE/CLKREQ signals + M2E_ALERT (see evk_pcie_ioexp_pin_t
+ *     above).  Strap A0=1, A1=0 -> 0x71.  NOT ASSEMBLED on this EVK
+ *     revision (alp-sdk#1974).
  *
  * EVK_I2C_ADDR_TCAL9538_MAIN and EVK_I2C_ADDR_TCAL9538_PCIE are defined
  * in the generated routes header. */

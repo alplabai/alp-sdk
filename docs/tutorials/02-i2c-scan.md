@@ -93,11 +93,14 @@ E1M-EVK board-populated (`metadata/boards/e1m-evk.yaml` `i2c_devices:`):
 
 ```
 0x20 ACK   -- TCA6408A U35 alt I/O expander (BOM variant -- ACKs INSTEAD
-              OF 0x72, not alongside it: R112/R145 are mutually exclusive)
+              OF 0x73, not alongside it: R112/R145 are mutually exclusive)
 0x40 ACK   -- INA236 U21, +3V3 rail current monitor
 0x41 ACK   -- INA236 U31, +1V8 rail current monitor
 0x42 ACK   -- INA236 U33, +VIO rail current monitor
 0x47 ACK   -- BMP581 U14 barometer
+0x48 ACK   -- TAS2563 GLOBAL/broadcast address (every fitted TAS2563
+              answers here in addition to its own 0x4D/0x4E unit
+              address, alp-sdk#1976) -- not an unidentified device
 0x49 ACK   -- INA236 U34, +V_CAM1 rail current monitor
 0x4A ACK   -- INA236 U30, +5V rail current monitor
 0x4B ACK   -- INA236 U32, +V_CAM0 rail current monitor
@@ -108,8 +111,8 @@ E1M-EVK board-populated (`metadata/boards/e1m-evk.yaml` `i2c_devices:`):
               boards, which mis-strap U13 to 0x69 too -- BENCH-CONFIRMED
               2026-06-16)
 0x71 ACK   -- TCAL9538 U37 PCIe I/O expander
-0x72 ACK   -- TCAL9538 U35 main I/O expander (BOM default -- see the
-              0x20 note above)
+0x73 ACK   -- TCAL9538 U35 main I/O expander (BOM default -- see the
+              0x20 note above; corrected from 0x72, alp-sdk#1974)
 ```
 
 ## On V2N's on-board sensor bus
@@ -168,6 +171,12 @@ Expected:
               address, see below)
               (include/alp/boards/alp_e1m_x_evk.h:51)
 ```
+
+> **Note:** the E1M-EVK's sibling macro (`EVK_I2C_ADDR_TCAL9538_MAIN`) was
+> bench-corrected from `0x72` to `0x73` under alp-sdk#1974. `XEVK_I2C_ADDR_TCAL9538`
+> above is still `0x72u` and has **not** been bench-checked on X-EVK silicon --
+> its strap may or may not match the E1M-EVK's. If a real X-EVK scan ACKs at
+> `0x73` instead of `0x72`, that is where to look first, not a new fault.
 
 Ten of the twelve addresses above come from the `XEVK_I2C_ADDR_*`
 macros (`include/alp/boards/alp_e1m_x_evk.h:48-52,80-86`), BENCH-

@@ -127,6 +127,18 @@ on_module:
       bus_master: alif-ensemble
       devices:
         - { chip: eeprom_24c128,    role: eeprom,          address_7bit: "0x50" }
+        # SAME PHYSICAL PART as the 0x50 entry above -- not a second chip, and
+        # nothing new to buy or place.  The onsemi N24S128 decodes two
+        # device-select headers off the same A2/A1/A0 straps: `1010` -> 0x50
+        # (the 16 KB array) and `1011` -> 0x58 (four read-only objects: the
+        # lockable 64-byte Secure Data Page, the 128-bit factory Unique ID,
+        # the lock-status byte, and the Device Configuration Register).  It is
+        # listed because an I2C census of this bus DOES see 0x58 ACK, and an
+        # unclaimed ACK is an address a future part could be assigned to and
+        # collide with (alp-sdk#1976).  Bench-measured 2026-09-06 on
+        # E1M-AEN803 serial 2026W36-0003 over SoC I2C2; read via
+        # eeprom_24c128_read_identity().
+        - { chip: eeprom_24c128,    role: eeprom_identity, address_7bit: "0x58" }
 
 # Off-SoC module memory in the canonical cross-family shape (see
 # som-preset-v1.schema.json `memory:`).  Values are the SKU's canonical

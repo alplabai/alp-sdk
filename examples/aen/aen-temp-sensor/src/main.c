@@ -63,8 +63,12 @@ static const struct device *const tmp112 = NULL;
  * from the devicetree above. */
 #define TMP112_DESIGN_ADDR 0x48u
 
-/* The address ONE bench module was observed answering on instead.  Never
- * probed by this example -- see print_address_anomaly_hint(). */
+/* The address something answers at instead of the declared 0x48 -- confirmed
+ * on 2 of 2 modules tested (2026W36-0001, 2026W36-0003), so this is a BATCH
+ * property of the 2026W36 E1M-AEN803 build, not a one-off.  0x40 is not a
+ * legal TMP112 strap address, so what answers here has not been proven to be
+ * the TMP112 at all -- open work under alp-sdk#1978.  Never probed by this
+ * example -- see print_address_anomaly_hint(). */
 #define TMP112_OBSERVED_ANOMALY_ADDR 0x40u
 
 /* Poll shape: 8 samples 500 ms apart is ~4 s of console output -- long enough
@@ -94,9 +98,10 @@ static const struct device *const tmp112 = NULL;
 
 /*
  * The actionable diagnostic for "the sensor is in the devicetree but does not
- * answer".  Printed instead of silently probing somewhere else: a per-unit
- * board defect has to be SEEN and fixed, and firmware that quietly works
- * around it ships the defect to every customer.
+ * answer".  Printed instead of silently probing somewhere else: 0x40 has not
+ * been proven to be the TMP112 -- it is not even a legal TMP112 strap address
+ * -- so firmware quietly falling back to it would be guessing at a device's
+ * identity instead of reporting the real, still-open question (alp-sdk#1978).
  */
 static void print_address_anomaly_hint(void)
 {
@@ -108,30 +113,35 @@ static void print_address_anomaly_hint(void)
 	       "  (TI SBOS397) maps ADD0 -> GND = 0x48, -> V+ = 0x49, -> SDA = 0x4A,\n"
 	       "  -> SCL = 0x4B.\n"
 	       "\n"
-	       "  KNOWN OBSERVED ANOMALY -- one bench module, 2026-09-05: on that\n"
-	       "  unit the TMP112 answered at 0x%02x instead of 0x%02x.  The part\n"
-	       "  itself was fine: it was confirmed a genuine TMP112 by a\n"
-	       "  three-of-three register fingerprint against the datasheet\n"
-	       "  power-on defaults -- CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000 --\n"
-	       "  and it read back 28.062 degC.  Only its address was wrong.\n"
+	       "  BATCH FINDING, alp-sdk#1978 -- confirmed on 2 of 2 modules tested\n"
+	       "  (2026W36-0001, 2026W36-0003): nothing answers at 0x%02x, and\n"
+	       "  something answers at 0x%02x instead.  Whatever is at 0x%02x\n"
+	       "  fingerprints TMP112-shaped -- CONFIG=0x60a0, T_LOW=0x4b00,\n"
+	       "  T_HIGH=0x5000 against the datasheet power-on defaults -- and\n"
+	       "  reads back a plausible temperature.\n"
 	       "\n"
-	       "  0x%02x is NOT a legal TMP112 address, so on that module ADD0 is\n"
-	       "  not actually sitting at GND.  Suspected cause: an OPEN JOINT on\n"
-	       "  U20 pin 3 (ADD0), leaving the strap floating.  That is a per-unit\n"
-	       "  board defect, NOT a design error and NOT a firmware bug.\n"
+	       "  0x%02x is NOT a legal TMP112 address (the part only straps to\n"
+	       "  0x48/0x49/0x4A/0x4B), so that fingerprint does NOT prove the part\n"
+	       "  at 0x%02x is actually a TMP112.  This is a BATCH property of the\n"
+	       "  2026W36 E1M-AEN803 build, not a per-unit board defect, and one\n"
+	       "  consequence is that the stock CONFIG_TMP112 driver does not bind\n"
+	       "  on these modules.\n"
 	       "\n"
 	       "  WHAT TO DO\n"
-	       "    1. Check continuity from U20 pin 3 (ADD0) to GND on this module.\n"
-	       "    2. Confirm what is actually on the bus with\n"
+	       "    1. This is open work under alp-sdk#1978, not a settled per-board\n"
+	       "       fault -- do not go hunting a solder defect on this module.\n"
+	       "    2. See what is actually on the bus with\n"
 	       "       examples/aen/aen-brd-i2c-scan -- it scans every 7-bit address\n"
 	       "       and fingerprints whatever answers.\n"
-	       "    3. Only if the joint is genuinely open: rework it.  Do NOT change\n"
-	       "       the devicetree to 0x%02x -- that would bake one unit's defect\n"
-	       "       into the product and break every correctly-built module.\n",
+	       "    3. Do NOT change the devicetree to 0x%02x -- it is not a legal\n"
+	       "       TMP112 address, so that would tell the driver to treat an\n"
+	       "       unidentified device as a TMP112 before its identity is known.\n",
 	       TMP112_DT_ADDR,
 	       TMP112_DESIGN_ADDR,
-	       TMP112_OBSERVED_ANOMALY_ADDR,
 	       TMP112_DESIGN_ADDR,
+	       TMP112_OBSERVED_ANOMALY_ADDR,
+	       TMP112_OBSERVED_ANOMALY_ADDR,
+	       TMP112_OBSERVED_ANOMALY_ADDR,
 	       TMP112_OBSERVED_ANOMALY_ADDR,
 	       TMP112_OBSERVED_ANOMALY_ADDR);
 }

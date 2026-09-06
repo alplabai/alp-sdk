@@ -22,13 +22,19 @@
  *     uninitialised ctx) each returned their documented status on the same
  *     run, and `0x58` was proven to be a different address space from the
  *     array at `0x50` rather than an alias of it.
- *   - `eeprom_24c128_read()`, `eeprom_24c128_write()` and
- *     `eeprom_24c128_deinit()` are still [UNTESTED] here: that run did not
- *     exercise the array read/write path, so treat its offsets, page
- *     splitting and write-cycle timing as paper-correct until the v1.0
- *     verification sweep covers them.  (The one exception already recorded
- *     in the implementation is the write acknowledge-polling delay, bench-found
- *     on this same SoC I2C2 bus on 2026-06-15 -- see `poll_for_ack()`.)
+ *   - `eeprom_24c128_read()` and `eeprom_24c128_deinit()` are also
+ *     [BENCH-VERIFIED], on the same unit and bus: `examples/aen/aen-eeprom-manifest`
+ *     read the 128-byte manifest from array offset `0x0000` and its stored
+ *     CRC-32 `0x03BBD0FD` matched the one computed over the bytes that came
+ *     back, which a mis-ordered address pointer or a short read would not
+ *     survive.  That covers the read path only at a single aligned offset --
+ *     it does not exercise a cross-page or unaligned read.
+ *   - `eeprom_24c128_write()` is still [UNTESTED] here: nothing in that run
+ *     wrote to the part, so treat its page splitting and write-cycle timing as
+ *     paper-correct until the v1.0 verification sweep covers them.  (The one
+ *     exception already recorded in the implementation is the write
+ *     acknowledge-polling delay, bench-found on this same SoC I2C2 bus on
+ *     2026-06-15 -- see `poll_for_ack()`.)
  *
  * Covers the two footprint-compatible variants populated on the
  * E1M-AEN module: **N24S128C4DYT3G** (Onsemi, default) and

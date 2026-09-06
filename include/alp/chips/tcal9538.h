@@ -27,7 +27,7 @@
  * re-narrow the address check to the TCAL9538-only range (0x70..0x73)
  * without first checking for TCA6408A-populated boards.
  *
- * On the E1M EVK the chip sits on ALP_E1M_I2C0 at 0x72 (A1=1, A0=0)
+ * On the E1M EVK the chip sits on ALP_E1M_I2C0 at 0x73 (A1=1, A0=1)
  * and fans out LCD / camera / capacitive-touch control lines plus
  * four sensor interrupt inputs.  See
  * `<alp/boards/alp_e1m_evk.h>`'s `evk_ioexp_pin_t` enum

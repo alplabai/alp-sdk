@@ -24,7 +24,7 @@ matches the `e1m-evk` board preset.
 | BMP581      | Barometer         | 0x47        | CHIP_ID + a raw pressure/temperature sample |
 | INA236 x6   | Rail monitors     | per rail    | Bus voltage (mV) + current (uA) per rail   |
 | TAS2563 x2  | I2S smart-amps    | 0x4d / 0x4e | Revision + ACTIVE-mode config readback     |
-| TCA6408A    | I/O expander      | 0x20 (TCAL9538 @0x72 alt) | Config + input port          |
+| TCA6408A    | I/O expander      | 0x20 (TCAL9538 @0x73 alt) | Config + input port          |
 | 24C128      | EEPROM            | 0x50        | First 16 bytes                             |
 
 Each device is independent: a missing / DNP part is reported and
