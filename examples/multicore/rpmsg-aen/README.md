@@ -75,14 +75,22 @@ tan build
 
 Tan's relocated planner fans out:
 
-- `build/a32_cluster-yocto/` (bitbake against `MACHINE = e1m-aen801-a32`).
-- `build/m55_hp-zephyr/` (Zephyr against `BOARD = alp_e1m_aen801_m55_hp`).
+- `build/a32_cluster-yocto/` -- **not built today.** `MACHINE =
+  e1m-aen801-a32` is a known-non-buildable Yocto MACHINE (issue #1982:
+  its base `require` names a file absent from every branch of the
+  public meta-alif-ensemble, #1968, on a layer that is
+  Yocto-series-incompatible with this repo's Scarthgap baseline
+  regardless, #1971), so the planner emits `command: null` plus a
+  `yocto-machine-unbuildable` warning for this slice instead of a
+  `bitbake` command. Track the rebuild at #264.
+- `build/m55_hp-zephyr/` (Zephyr against `BOARD = alp_e1m_aen801_m55_hp`)
+  -- this slice is real and builds today; see
+  [`docs/bring-up-aen.md`](../../../docs/bring-up-aen.md).
 
 `tan build` has no per-slice `--core` flag -- it rebuilds every slice
-on each invocation.  To iterate on the M-side only, just re-run the
-same command: the already-built Yocto slice is reused (bitbake
-short-circuits an up-to-date tree) while the Zephyr slice rebuilds
-incrementally in seconds. See
+on each invocation. The blocked `a32_cluster` slice is carried, not
+dropped, so `tan build` still succeeds overall and rebuilds the Zephyr
+slice incrementally in seconds. See
 [`docs/heterogeneous-builds.md`](../../../docs/heterogeneous-builds.md#iterating-on-one-slice).
 
 ## Reference

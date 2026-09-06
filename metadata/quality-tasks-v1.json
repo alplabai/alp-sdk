@@ -999,6 +999,21 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "yocto-machine-tree-parity",
+      "description": "Every SoM preset's topology.<core>.machine: Yocto MACHINE resolves to a real meta-alp-sdk/conf/machine/ conf, or is a declared entry in orchestrator.YOCTO_MACHINE_UNBUILDABLE (issue #1982 follow-up).",
+      "runner": "check-script",
+      "script": "scripts/check_yocto_machine_tree_parity.py",
+      "gate": true,
+      "profiles": [
+        "quick",
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "zephyr-conf-parity",
       "description": "Byte-parity gate: an example CMakeLists.txt's --core-scoped alp_project.py --emit zephyr-conf and the planner's build-plan configArtefacts must materialise the identical alp.conf per Zephyr core.",
       "runner": "check-script",

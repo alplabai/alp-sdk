@@ -3487,6 +3487,10 @@
       "script": "scripts/check_write_text_newline.py"
     },
     {
+      "purpose": "CI gate: every `topology.<core>.machine:` Yocto MACHINE declared in a `metadata/e1m_modules/E1M-*.yaml` SoM preset must either ship a real conf under `meta-alp-sdk/conf/machine/` or be explicitly named, with a reason, in `alp_orchestrate.orchestrator.YOCTO_MACHINE_UNBUILDABLE`.",
+      "script": "scripts/check_yocto_machine_tree_parity.py"
+    },
+    {
       "purpose": "Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which shells `alp_project.py --emit zephyr-conf --core <id>` at configure time) and the SDK reference build-plan `configArtefacts` MUST materialise the identical `alp.conf` for the same core; Python Tan tests its relocated producer against the same contract.",
       "script": "scripts/check_zephyr_conf_parity.py"
     }

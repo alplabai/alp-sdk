@@ -61,7 +61,7 @@ PR #24, substitutes them at materialise time). The frozen 97ad481b oracle
 predates that and stays absolute -- `normalize_plan` reconciles the two
 shapes onto the same normalized form; see its docstring for the mapping.
 
-Four hand-reviewed deltas are allowed to pass without failing the gate.
+Three hand-reviewed deltas are allowed to pass without failing the gate.
 
 The first is ``slices[*].debug.probe`` going from ``"openocd"`` (the oracle,
 at 97ad481b)
@@ -90,18 +90,17 @@ appends its own default ``build`` level. Allowed ONLY for the six named
 fields and ONLY for that exact one-segment insertion -- see
 ``_NESTED_ARTIFACT_TAILS``.
 
-The fourth is the AEN801 ``a32_cluster`` slice's ``command`` going from
-the oracle's ``bitbake alp-image-edge`` to ``null``, plus a new
-``yocto-machine-unbuildable`` entry in ``warnings`` -- alp-sdk #1982's
-hand-reviewed fix: ``e1m-aen801-a32`` (and its sibling
-``e1m-aen701-a32``, unbuildable for a related but distinct proximate
-reason -- see ``alp_orchestrate.orchestrator.YOCTO_MACHINE_UNBUILDABLE``)
-are known-non-buildable MACHINEs on a layer that is Yocto-series-
-incompatible with this repo's Scarthgap baseline regardless (#1971), so
-``_slice_command`` now refuses to emit a command for them instead of
-handing out one that cannot succeed. The 97ad481b oracle predates that
-refusal. Allowed ONLY for ``coreId == "a32_cluster"`` and ONLY the exact
-old command value -- see ``_strip_1982_aen_a32_unbuildable``.
+alp-sdk #1982 (the AEN801/AEN701 ``a32_cluster`` MACHINE refusal) is
+NOT a fourth allowance: it is the same class of change as alp-sdk#999
+above (a doomed command the planner now refuses to emit) and is handled
+the same way #999 was -- by re-freezing the two affected oracle
+fixtures (``multicore_rpmsg-aen.build-plan.json`` and
+``audio_i2s-tone.build-plan.json``, both ``a32_cluster`` slices)
+directly, recorded in ``ORACLE-PROVENANCE.txt``, rather than by adding
+a comparator tolerance. See ADR-0020's post-mortem of tan-cli's
+``_ALLOWED_COMMAND_TO_NULL`` for why a permanent comparator allowance
+standing in for a one-file oracle sync is the failure mode to avoid
+here.
 
 Any OTHER diff -- a changed command, a changed env value, a changed slice
 count, a probe change to anything other than that exact openocd->null
@@ -286,45 +285,6 @@ def _strip_863_extra_conf_file_arg(plan):
     return plan
 
 
-# The fourth hand-reviewed allowance: alp-sdk #1982.  The AEN A32-cluster
-# MACHINEs (`e1m-aen801-a32` / `e1m-aen701-a32`) are known-non-buildable,
-# for related but distinct proximate reasons -- see
-# `alp_orchestrate.orchestrator.YOCTO_MACHINE_UNBUILDABLE`'s own comment
-# -- and structurally incompatible with this repo's Scarthgap baseline
-# regardless (#1971).  `_slice_command` now refuses both rather than emit
-# a `bitbake` command that cannot succeed.  The 97ad481b oracle predates
-# that refusal; its only affected corpus member is the AEN801
-# `multicore_rpmsg-aen` / `audio_i2s-tone` boards' `a32_cluster` slice
-# (no oracle board uses AEN701), which still carries the old `bitbake
-# alp-image-edge` command plus no matching warning. Strip BOTH the
-# refused command and the new `yocto-machine-unbuildable` warning from
-# either side so the comparison lands on the shape both sides actually
-# agree on -- same "reviewed addition, strip from both sides" pattern as
-# `_strip_863_extra_conf_file_arg` above, rather than a leaf-level
-# allowed-value pair (the accompanying `warnings` list-length change isn't
-# expressible as a single leaf diff).
-# KEEP IN LOCKSTEP with tan-cli's vendored copy of this comparator.
-_AEN_A32_STOCK_COMMAND = {
-    "tool": "bitbake",
-    "args": ["alp-image-edge"],
-    "cwd": "build/a32_cluster-yocto",
-}
-
-
-def _strip_1982_aen_a32_unbuildable(plan):
-    """Normalize the #1982 AEN801/AEN701 `a32_cluster` refusal to the same
-    shape on both the oracle and a live plan -- see the module docstring's
-    "fourth" allowed delta."""
-    for slice_ in plan.get("slices", []) or []:
-        if slice_.get("coreId") != "a32_cluster":
-            continue
-        if slice_.get("command") in (_AEN_A32_STOCK_COMMAND, None):
-            slice_["command"] = None
-    plan["warnings"] = [w for w in (plan.get("warnings") or [])
-                        if w.get("code") != "yocto-machine-unbuildable"]
-    return plan
-
-
 def _drop_artefact_contents(plan):
     """Drop the materialised CONTENT of every artefact, keeping only its
     `path` in the shape check.
@@ -394,7 +354,6 @@ def normalize_plan(plan: dict) -> dict:
     # -- drop it rather than diff it, same treatment as `sdkCommit`.
     normalized.pop("sdkVersion", None)
     normalized = _strip_863_extra_conf_file_arg(normalized)
-    normalized = _strip_1982_aen_a32_unbuildable(normalized)
     normalized = _drop_artefact_contents(normalized)
     # `planPathMode` is itself a #865 addition the oracle predates (like
     # the #863/#871 command-arg addition above) -- drop it rather than diff

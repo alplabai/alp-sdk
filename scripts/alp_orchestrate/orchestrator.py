@@ -136,8 +136,16 @@ STOCK_IMAGE_APP = "alp-image-edge"
 # Yocto MACHINEs that cannot build today, keyed to the issue(s) that
 # establish why -- consulted by `_slice_command` so the planner refuses
 # these rather than hand a consumer a `bitbake` command guaranteed to
-# fail.  The two AEN A32-cluster carriers are unbuildable for DIFFERENT
-# proximate reasons (do not conflate them):
+# fail.  This is the SAME dict `scripts/check_yocto_machine_tree_parity.py`
+# consults for its self-cleaning CI gate (issue #1982 follow-up) -- do
+# not fork a second list; that gate fails the PR the day an entry here
+# no longer matches the tree (a conf ships, or a listed conf stops
+# existing), so it is safe to trust this dict is current.
+#
+# Five AEN A32-cluster carriers declare a `topology.a32_cluster.machine:`
+# today (`metadata/e1m_modules/E1M-AEN{501,601,701,801,803}.yaml`); all
+# five are unbuildable, split into two distinct failure classes -- do
+# not conflate them:
 #
 #   * `e1m-aen801-a32.conf` has an ACTIVE, uncommented `require
 #     conf/machine/devkit-e8.conf` -- and that file exists in NEITHER
@@ -150,14 +158,20 @@ STOCK_IMAGE_APP = "alp-image-edge"
 #     `devkit-ex-b0` branch, but nothing here references it yet, so this
 #     MACHINE parses with no DEFAULTTUNE / kernel provider / TF-A
 #     platform set at all.
+#   * `e1m-aen501-a32` / `e1m-aen601-a32` / `e1m-aen803-a32` ship NO
+#     `meta-alp-sdk/conf/machine/*.conf` at all -- strictly MORE
+#     unbuildable than the two above, since BitBake fails to find the
+#     MACHINE before it can parse a single `require`. E1M-AEN803 is the
+#     SoM issue #1982 names as the bench module.
 #
-# Both are unbuildable regardless of the above: meta-alif-ensemble
+# All five are unbuildable regardless of the above: meta-alif-ensemble
 # declares `LAYERSERIES_COMPAT = "warrior zeus"` and is structurally
 # incompatible with this repo's Scarthgap baseline (issue #1971:
 # pre-honister override syntax, a stale 5.4 kernel pin, obsolete TF-A
-# build knobs), so even a corrected/uncommented `require` would not make
-# either MACHINE buildable. Issue #264 is rebuilding this path on a real
-# base; remove an entry here only once its MACHINE resolves against a
+# build knobs), so even a corrected/uncommented `require` (or a shipped
+# conf, for the three missing ones) would not make any of them buildable
+# on its own. Issue #264 is rebuilding this path on a real base; remove
+# an entry here only once its MACHINE resolves against a
 # Scarthgap-compatible layer.
 YOCTO_MACHINE_UNBUILDABLE: dict[str, str] = {
     "e1m-aen801-a32": (
@@ -176,6 +190,31 @@ YOCTO_MACHINE_UNBUILDABLE: dict[str, str] = {
         "upstream layer's LAYERSERIES_COMPAT (\"warrior zeus\") is "
         "incompatible with this repo's Scarthgap baseline regardless "
         "(issue #1971). Tracked by issue #264."
+    ),
+    "e1m-aen501-a32": (
+        "MACHINE 'e1m-aen501-a32' cannot build: meta-alp-sdk/conf/machine/ "
+        "ships no conf for it at all, so BitBake fails before any `require` "
+        "is even parsed -- strictly more unbuildable than 'e1m-aen801-a32' / "
+        "'e1m-aen701-a32' above, and, like them, on a meta-alif-ensemble "
+        "base that is Yocto-series-incompatible with this repo's Scarthgap "
+        "baseline regardless (issue #1971). Tracked by issue #264."
+    ),
+    "e1m-aen601-a32": (
+        "MACHINE 'e1m-aen601-a32' cannot build: meta-alp-sdk/conf/machine/ "
+        "ships no conf for it at all, so BitBake fails before any `require` "
+        "is even parsed -- strictly more unbuildable than 'e1m-aen801-a32' / "
+        "'e1m-aen701-a32' above, and, like them, on a meta-alif-ensemble "
+        "base that is Yocto-series-incompatible with this repo's Scarthgap "
+        "baseline regardless (issue #1971). Tracked by issue #264."
+    ),
+    "e1m-aen803-a32": (
+        "MACHINE 'e1m-aen803-a32' cannot build: meta-alp-sdk/conf/machine/ "
+        "ships no conf for it at all, so BitBake fails before any `require` "
+        "is even parsed -- strictly more unbuildable than 'e1m-aen801-a32' / "
+        "'e1m-aen701-a32' above, and, like them, on a meta-alif-ensemble "
+        "base that is Yocto-series-incompatible with this repo's Scarthgap "
+        "baseline regardless (issue #1971). E1M-AEN803 is the bench module "
+        "issue #1982 names. Tracked by issue #264."
     ),
 }
 

@@ -442,9 +442,18 @@ such in the matching recipes' `LICENSE` field.
   acknowledgement closes the legal review per
   [`docs/vendor-partnerships.md`](../docs/vendor-partnerships.md)
   §C.31.
-- AEN A32-class MACHINE carrier scaffolding (`e1m-aen801-a32`,
-  `e1m-aen701-a32`) ships; the carrier DTB + TF-A memory map + full
-  image-bake await the maintainer's AEN HW config (the
+- AEN A32-class MACHINE carrier scaffolding ships for five SKUs
+  (`e1m-aen{501,601,701,801,803}-a32`), but NONE of the five build
+  today -- `e1m-aen801-a32` / `e1m-aen701-a32` carry a broken or
+  commented-out `require` on a real-but-unbuildable meta-alif-ensemble
+  base (issues #1968 / #1971); `e1m-aen501-a32` / `e1m-aen601-a32` /
+  `e1m-aen803-a32` ship no conf at all. The orchestrator refuses to
+  emit a `bitbake` command for any of the five
+  (`YOCTO_MACHINE_UNBUILDABLE` in
+  `scripts/alp_orchestrate/orchestrator.py`, issue #1982). See the
+  "Alif Ensemble E8" section above and issue #264 for the rebuild;
+  the carrier DTB + TF-A memory map + full image-bake for whichever
+  SKU #264 lands first also await the maintainer's AEN HW config (the
   `# TBD(alif-hw-config)` overrides in the machine confs).
 - `alp-image-edge.bb`'s minimal package set is documentary; the
   v1.0 sysbuild matrix in `docs/test-plan.md` adds the BLE
