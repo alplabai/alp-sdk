@@ -232,6 +232,69 @@ class TestSlot0AddressCheck(unittest.TestCase):
         self.assertIn("hp", failures[0])
 
 
+class TestSlot0WindowCeilingCheck(unittest.TestCase):
+    """alp-sdk#1981, review round-12b finding 3: the 4th `_check_preset`
+    check -- no `aen_atoc.SLOT0_WINDOWS` ceiling may reach past this
+    preset's own 'atoc' band base. Had no dedicated test; deleting the
+    check left the suite green."""
+
+    def setUp(self):
+        import tempfile
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+        self._orig_repo = atoc.REPO
+        atoc.REPO = self.tmp
+        self._orig_windows = dict(atoc.aen_atoc.SLOT0_WINDOWS)
+
+    def tearDown(self):
+        atoc.REPO = self._orig_repo
+        atoc.aen_atoc.SLOT0_WINDOWS = self._orig_windows
+        self._tmpdir.cleanup()
+
+    def _preset(self, body: str) -> Path:
+        p = self.tmp / "E1M-TEST.yaml"
+        p.write_text(body, encoding="utf-8")
+        return p
+
+    def test_ceiling_at_atoc_base_passes(self):
+        atoc.aen_atoc.SLOT0_WINDOWS = {
+            "A32_0": (0x80002000, 0x80578000 - 0x80002000)}  # ceiling == atoc base
+        p = self._preset(
+            "memory_map:\n"
+            "  - { name: storage, base: 0x80560000, size_kib: 96 }\n"
+            "  - { name: atoc,    base: 0x80578000, size_kib: 32 }\n")
+        self.assertEqual(atoc._check_preset(p), [])
+
+    def test_ceiling_past_atoc_base_fails(self):
+        """The #1981-regression shape: a window ceiling one byte past the
+        atoc band's own base (the raw-MRAM_END bug this check exists to
+        catch)."""
+        atoc.aen_atoc.SLOT0_WINDOWS = {
+            "A32_0": (0x80002000, 0x80578001 - 0x80002000)}  # ceiling one byte past
+        p = self._preset(
+            "memory_map:\n"
+            "  - { name: storage, base: 0x80560000, size_kib: 96 }\n"
+            "  - { name: atoc,    base: 0x80578000, size_kib: 32 }\n")
+        failures = atoc._check_preset(p)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("'A32_0'", failures[0])
+        self.assertIn("0x80578001", failures[0])
+        self.assertIn("0x80578000", failures[0])
+
+    def test_no_atoc_region_does_not_crash_or_fire(self):
+        """No 'atoc' region in this preset -- atoc_base is None, so the
+        ceiling check must skip cleanly (the top-region check below it
+        still fires on its own, unrelated grounds)."""
+        atoc.aen_atoc.SLOT0_WINDOWS = {
+            "A32_0": (0x80002000, 0x80580000 - 0x80002000)}
+        p = self._preset(
+            "memory_map:\n"
+            "  - { name: storage, base: 0x80560000, size_kib: 128 }\n")
+        failures = atoc._check_preset(p)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("reaches the top of the declared window", failures[0])
+
+
 class TestRealTree(unittest.TestCase):
     def test_the_committed_tree_passes(self):
         self.assertEqual(atoc.main([]), 0)

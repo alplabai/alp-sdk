@@ -30,6 +30,8 @@ on:
       - 'scripts/validate_board_yaml.py'
       - 'scripts/check_board_target_tree_parity.py'
       - 'scripts/check_atoc_reservation.py'
+      # check 4 reads aen_atoc.SLOT0_WINDOWS, so an aen_atoc-only PR must fire it too (#1981)
+      - 'scripts/aen_atoc.py'
       - 'scripts/check_example_board_overlay_parity.py'
       - 'scripts/check_example_sdk_root.py'
       - 'scripts/check_som_topology_parity.py'
@@ -112,6 +114,8 @@ on:
       - 'scripts/validate_board_yaml.py'
       - 'scripts/check_board_target_tree_parity.py'
       - 'scripts/check_atoc_reservation.py'
+      # check 4 reads aen_atoc.SLOT0_WINDOWS, so an aen_atoc-only PR must fire it too (#1981)
+      - 'scripts/aen_atoc.py'
       - 'scripts/check_example_board_overlay_parity.py'
       - 'scripts/check_example_sdk_root.py'
       - 'scripts/check_som_topology_parity.py'
