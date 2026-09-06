@@ -50,3 +50,21 @@ target_compile_features(alp_test_baremetal_eeprom_24c128_range PRIVATE c_std_99)
 
 add_test(NAME alp_test_baremetal_eeprom_24c128_range
          COMMAND alp_test_baremetal_eeprom_24c128_range)
+
+# eeprom_24c128_read_identity() unit checks (N24S128 second device-select
+# header) -- shared with tests/yocto/ for the same reason as
+# alp_test_baremetal_eeprom_24c128_range above.
+add_executable(alp_test_baremetal_eeprom_24c128_read_identity
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/eeprom_24c128_read_identity.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../chips/eeprom_24c128/eeprom_24c128.c
+)
+target_link_libraries(alp_test_baremetal_eeprom_24c128_read_identity PRIVATE alp::sdk)
+target_include_directories(alp_test_baremetal_eeprom_24c128_read_identity PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../yocto
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+)
+target_compile_features(alp_test_baremetal_eeprom_24c128_read_identity PRIVATE c_std_99)
+
+add_test(NAME alp_test_baremetal_eeprom_24c128_read_identity
+         COMMAND alp_test_baremetal_eeprom_24c128_read_identity)
