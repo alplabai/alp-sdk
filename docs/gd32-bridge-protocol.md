@@ -462,8 +462,15 @@ On V2N every E1M PWM channel maps to a TIMER0 / TIMER7 channel
 (see `metadata/chips/gd32g553.yaml` `pwm_routing:` for the table).
 Both timers are 16-bit advanced timers running at the 216 MHz
 CK_TIMER (= CK_APB at DIV1 = the core clock; this part has no
-separate timer PLL), so the achievable resolution is ~4.63 ns LSB
-and the longest single-counter period is ~303 us.  `CMD_PWM_GET` reads the live
+separate timer PLL).  Unprescaled that would be a ~4.63 ns LSB and a
+~303 us longest single-counter period -- but **the firmware never runs
+the timer unprescaled**, so neither figure is the achievable limit.  It
+programs a fixed 216:1 prescale to a 1 MHz counter tick
+(`PWM_TIMER_PRESCALER` / `PWM_TIMER_TICK_NS` in the `gd32-bridge-firmware`
+repo), giving a **1 us LSB and a 65.536 ms** longest period at full
+16-bit count.  The 65.536 ms figure is the one this document already
+quotes below as the boot default, and the one an over-long `PWM_SET` is
+silently clamped to (#1730).  `CMD_PWM_GET` reads the live
 timer registers (auto-reload + compare) and converts ticks back to
 nanoseconds -- it reports what the pad is actually generating, never
 an echo of the request.  Two consequences of the hardware truth:

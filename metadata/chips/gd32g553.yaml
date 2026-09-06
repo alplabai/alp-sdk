@@ -105,8 +105,12 @@ signals:
 # clock is the 216 MHz CK_TIMER (= CK_APB at DIV1 = the Cortex-M33
 # core clock; this part has NO separate timer PLL -- a long-standing
 # "240 MHz timer clock" claim here was invented and is corrected as
-# of fw v0.2.4); effective LSB ~4.63 ns; maximum period ~303 us at
-# full 16-bit count.  Firmware translates caller `period_ns` /
+# of fw v0.2.4).  UNPRESCALED that clock would give a ~4.63 ns LSB and a
+# ~303 us maximum period at full 16-bit count, and this file asserted
+# those as the achievable figures -- but the firmware always programs a
+# fixed 216:1 prescale to a 1 MHz tick, so the real numbers are a 1 us
+# LSB and a 65.536 ms maximum period (#1730).  Firmware translates caller
+# `period_ns` /
 # `duty_ns` from CMD_PWM_SET into the timer's CAR / CHnCV register
 # pair and reports the register-derived actual via CMD_PWM_GET.
 pwm_routing:
@@ -123,10 +127,15 @@ pwm_routing:
   notes: |
     Both TIMER0 and TIMER7 are 16-bit advanced-control timers with
     dead-time generation, complementary output, and break-input
-    support.  The 16-bit counter at the 216 MHz CK_TIMER gives
-    ~4.63 ns LSB; periods longer than ~303 us require the firmware's
-    repetition-counter / prescaler logic (firmware-internal, not
-    surfaced via CMD_PWM_SET).  Channel ordering matches the
+    support.  The 16-bit counter runs off the 216 MHz CK_TIMER, but
+    the firmware always applies a fixed 216:1 prescale to a 1 MHz
+    tick, so the surfaced resolution is a 1 us LSB and the longest
+    period is 65.536 ms -- NOT the ~4.63 ns / ~303 us unprescaled
+    figures this note previously gave, and not something a
+    repetition-counter path extends (#1730).  A period longer than
+    65.536 ms is currently clamped by the firmware and still reported
+    as success, so a caller cannot detect it from the return code
+    alone; read it back with CMD_PWM_GET.  Channel ordering matches the
     GD32G553 datasheet -- note that on TIMER0, MCH2 (not MCH1) maps
     to E1M PWM1 on V2N pad PB1; firmware honours the datasheet
     layout.
