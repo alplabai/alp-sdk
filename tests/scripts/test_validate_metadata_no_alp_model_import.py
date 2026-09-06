@@ -35,7 +35,13 @@ def test_validate_metadata_survives_alp_model_deletion(tmp_path):
         _REPO / "zephyr" / "boards" / "alp",
         tmp_path / "zephyr" / "boards" / "alp",
     )
-    shutil.rmtree(tmp_path / "scripts" / "alp_model")
+    # ignore_errors=True is load-bearing, not defensive tidiness: this test
+    # exists to prove validate_metadata.py survives ADR-0028 Task 6 deleting
+    # scripts/alp_model/, and once Task 6 lands the package is already gone from
+    # the copytree source. Without it this test raises
+    # FileNotFoundError: [WinError 3] the moment the deletion it guards happens
+    # -- the test written to unblock Task 6 would be the thing blocking it.
+    shutil.rmtree(tmp_path / "scripts" / "alp_model", ignore_errors=True)
 
     result = subprocess.run(
         [sys.executable, str(tmp_path / "scripts" / "validate_metadata.py")],
