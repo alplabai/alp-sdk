@@ -1247,3 +1247,79 @@ def test_emit_build_plan_no_toolchain_override_keeps_todays_default(
     assert alpha["toolchain"]["id"] == "arm-zephyr-eabi"
     assert bravo["toolchain"]["id"] == "arm-zephyr-eabi"
     assert zulu["toolchain"]["id"] == "poky-glibc"
+
+
+# ---------------------------------------------------------------------
+# Issue #1987 -- `cores.<id>.app:` is the THIRD raw path that reached
+# `.resolve()` / `.is_file()` unguarded, after #1961 closed the same
+# antipattern in `validate.py`'s `extra_libraries.<name>.profile:` and
+# in `loader.py`'s `--input`.  A guard added without a test is a guard
+# nothing keeps: these two tests fail if either `except` clause in
+# `_resolve_app_path()` / `_zephyr_app_dir()` is removed or narrowed
+# back to a POSIX-only exception tuple.
+# ---------------------------------------------------------------------
+
+
+def test_resolve_app_path_posix_symlink_loop_clean_error(monkeypatch) -> None:
+    """POSIX shape: a symlink loop makes `Path.resolve()` raise
+    `RuntimeError` (ELOOP).  `_resolve_app_path()` must turn that into a
+    clean `OrchestratorError` naming the offending `app:` value, not let
+    it escape as an unhandled crash."""
+    from alp_orchestrate.orchestrator import (
+        OrchestratorError,
+        _resolve_app_path,
+    )
+
+    def _raise_eloop(self, *args, **kwargs):
+        raise RuntimeError("Symlink loop from '/tmp/loop-app'")
+
+    monkeypatch.setattr(Path, "resolve", _raise_eloop)
+
+    with pytest.raises(OrchestratorError) as excinfo:
+        _resolve_app_path("./loop-app", Path("/nonexistent-base"))
+    msg = str(excinfo.value)
+    assert "loop-app" in msg
+    assert "could not be resolved" in msg
+
+
+def test_zephyr_app_dir_windows_symlink_loop_clean_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Windows shape, and the reason the POSIX test above is not enough.
+
+    Driving a real WSL-created symlink loop on an NTFS drive with
+    Windows CPython shows `.resolve()` returning *without* raising, and
+    `.is_file()` raising a plain `OSError` (`WinError 1920`, "The file
+    cannot be accessed by the system") -- neither a `RuntimeError` nor a
+    `PermissionError`.  `_zephyr_app_dir()` calls `.is_file()` twice (the
+    app dir's own `CMakeLists.txt`, then its parent's), so both call
+    sites need the guard; this test covers the first.  Reverting either
+    `except (OSError, RuntimeError)` to a POSIX-only tuple turns this
+    red while the test above stays green -- exactly how the original
+    #1961 blocker shipped unseen."""
+    from alp_orchestrate.orchestrator import (
+        OrchestratorError,
+        _zephyr_app_dir,
+    )
+
+    app_dir = tmp_path / "winloop-app"
+    app_dir.mkdir()
+    real_is_file = Path.is_file
+
+    def _raise_windows_shape(self):
+        if self.name == "CMakeLists.txt":
+            # `OSError(22, msg)` alone leaves `.winerror` None, so set it
+            # explicitly -- this must reproduce the real shape
+            # (errno=22, winerror=1920), not merely an errno match.
+            err = OSError(22, "The file cannot be accessed by the system")
+            err.winerror = 1920
+            raise err
+        return real_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", _raise_windows_shape)
+
+    with pytest.raises(OrchestratorError) as excinfo:
+        _zephyr_app_dir("./winloop-app", tmp_path)
+    msg = str(excinfo.value)
+    assert "winloop-app" in msg
+    assert "could not be resolved" in msg

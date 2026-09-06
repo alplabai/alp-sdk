@@ -85,14 +85,27 @@ def _emit_extra_library_profile(
     `CONFIG_*=y` or `# ...` comment); empty list when the profile
     parses but nothing matches and there's no sw_fallback.
 
-    Failures (malformed YAML, missing keys) emit a single `#`-prefixed
-    diagnostic comment so the customer sees the failure in the slice's
-    alp.conf rather than getting silent drop-out.
+    Failures reading or parsing the profile (missing/unreadable file,
+    non-UTF-8 bytes, malformed YAML, missing keys) emit a single
+    `#`-prefixed diagnostic comment so the customer sees the failure in
+    the slice's alp.conf rather than getting silent drop-out or an
+    unhandled exception out of an emit-time helper (issue #1961:
+    `read_text(encoding="utf-8")` raises `UnicodeDecodeError` -- a
+    `ValueError` subclass, not an `OSError` -- on non-UTF-8 bytes,
+    before the YAML parser ever runs; the original `except (OSError,
+    yaml.YAMLError)` missed it).  Matches tan-cli's relocated copy
+    (`python/tan/planner/kconfig.py`): `.resolve()` is dropped -- only
+    `read_text` needs the path, so nothing here needs a canonicalized
+    one -- which also removes `.resolve()`'s own `RuntimeError` on a
+    symlink loop (ELOOP) as a source of failure.  A symlink-loop or
+    permission-denied `profile:` is rejected earlier, at board.yaml
+    load time, by `validate.py`'s `_validate_consistency` before this
+    emit-time helper is ever reached.
     """
-    profile_path = (REPO / profile_rel).resolve()
     try:
+        profile_path = REPO / profile_rel
         doc = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as e:
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as e:
         return [f"# extra_libraries[{name}] profile parse failed: {e}"]
     if not isinstance(doc, dict):
         return [f"# extra_libraries[{name}] profile is not a mapping"]

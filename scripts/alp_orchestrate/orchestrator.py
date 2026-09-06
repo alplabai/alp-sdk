@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 import yaml
 
-from .models import BoardProject, Slice
+from .models import BoardProject, OrchestratorError, Slice
 from .paths import REPO
 from .secure import (emit_sysbuild_conf, emit_tfm_sysbuild_conf,
                       sysbuild_family_base_conf)
@@ -752,13 +752,31 @@ def _resolve_app_path(app: str, base_dir: Path) -> Path:
     Relative paths resolve against `base_dir` (the project's board.yaml
     directory) -- never the process's current working directory, so the
     result is identical regardless of the caller's CWD (issue #596).
+
+    `cores.<id>.app:` is a raw caller-supplied filesystem path -- like
+    `--input` and `extra_libraries[].profile:` (#1961) -- and unlike
+    `preset:`/`som.sku`, board.schema.json types it a bare `"string"`
+    with no pattern, so it reaches this `.resolve()` unsanitised. A
+    symlink loop (ELOOP) surfaces differently per platform: on POSIX,
+    `Path.resolve()` detects the cycle itself and raises `RuntimeError`
+    before returning; on Windows it returns without raising at all (the
+    `.is_file()` calls in `_zephyr_app_dir` below are where the Windows
+    crash actually surfaces for a zephyr slice) -- confirmed against a
+    real symlink loop on both platforms, not a mock. Same `except`
+    shape as `validate.py`'s `profile:` guard and `loader.py`'s
+    `_load_yaml` (#1961/#1987): raise a clean `OrchestratorError`
+    instead of letting the raw `RuntimeError`/`OSError` crash the CLI.
     """
     if app == STOCK_SHIM_APP:
         return STOCK_SHIM_DIR
     p = Path(app)
     if p.is_absolute():
         return p
-    return (Path(base_dir) / p).resolve()
+    try:
+        return (Path(base_dir) / p).resolve()
+    except (OSError, RuntimeError) as e:
+        raise OrchestratorError(
+            f"app: '{app}' could not be resolved: {e}") from e
 
 
 def _zephyr_app_dir(app: str, base_dir: Path) -> Path:
@@ -777,10 +795,28 @@ def _zephyr_app_dir(app: str, base_dir: Path) -> Path:
         ``target_sources(app PRIVATE src/main.c)``).  The sources dir has
         no CMakeLists.txt of its own, so fall back to its parent (the
         example root) which does.
+
+    Same unguarded-path defect class as `_resolve_app_path` above
+    (#1961/#1987): a symlink-loop `app:` reaches `.resolve()` clean on
+    Windows (see there), then crashes HERE instead -- `Path.is_file()`
+    raising a plain `OSError` (`WinError 1920`, "The file cannot be
+    accessed by the system") -- confirmed by driving a real WSL-made
+    symlink loop through the real CLI on Windows CPython 3.11.3, not a
+    mock. Both `.is_file()` calls are wrapped the same way.
     """
     p = _resolve_app_path(app, base_dir)
-    if (p / "CMakeLists.txt").is_file():
+    try:
+        has_cmakelists = (p / "CMakeLists.txt").is_file()
+    except (OSError, RuntimeError) as e:
+        raise OrchestratorError(
+            f"app: '{app}' could not be resolved: {e}") from e
+    if has_cmakelists:
         return p
-    if (p.parent / "CMakeLists.txt").is_file():
+    try:
+        parent_has_cmakelists = (p.parent / "CMakeLists.txt").is_file()
+    except (OSError, RuntimeError) as e:
+        raise OrchestratorError(
+            f"app: '{app}' could not be resolved: {e}") from e
+    if parent_has_cmakelists:
         return p.parent
     return p
