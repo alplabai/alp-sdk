@@ -250,7 +250,11 @@ def test_real_evk_header_covers_i2c_device_macros(real_headers):
         "EVK_I2C_ADDR_ICM42670": "0x69u",
         "EVK_I2C_ADDR_BMI323": "0x68u",
         "EVK_I2C_ADDR_BMP581": "0x47u",
-        "EVK_I2C_ADDR_TCAL9538_MAIN": "0x72u",
+        # U35 is strapped 1110011 = 0x73, not 0x72.  The hand-authored
+        # header carried 0x72; the EVK netlist and a full bench sweep of
+        # SoC I2C2 on E1M-AEN803 units both answer at 0x73 and nothing
+        # answers at 0x72.  Corrected in metadata, so corrected here.
+        "EVK_I2C_ADDR_TCAL9538_MAIN": "0x73u",
         "EVK_I2C_ADDR_TCAL9538_PCIE": "0x71u",
         "EVK_I2C_ADDR_TCA6408A_MAIN": "0x20u",
         "EVK_I2C_ADDR_TAS2563_LOW": "0x4Du",
