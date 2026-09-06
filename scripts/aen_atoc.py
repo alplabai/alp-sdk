@@ -103,9 +103,15 @@ _A32_0_CEILING = MRAM_END - _ATOC_BAND_KIB * 1024  # 0x80578000
 SLOT0_WINDOWS = {
     'M55_HE': (0x80010000, 2688 * 1024),
     'M55_HP': (0x802b0000, 2688 * 1024),
-    # #1981: floor 0x80002000 is the bench-verified BOOTLOAD (TF-A BL32)
-    # boot address -- Secure Enclave boot table, two E1M-AEN803 modules,
-    # 2026-09-05. Ceiling is _A32_0_CEILING (0x80578000, above), the base
+    # #1981: floor 0x80002000 is the BOOTLOAD (TF-A BL32) boot address
+    # from the Alif APSS application-note A32 Linux config quoted in
+    # #1981.  It is NOT verified on silicon: no bench run in this repo
+    # has booted an A32 chain, and the AEN bench unit is down (#1883).
+    # It also falls INSIDE the mcuboot region every AEN preset declares
+    # (base 0x80000000, 64 KiB) -- consistent with an A32 chain the SE
+    # boots without MCUboot, but do not read this floor as a measured
+    # hardware fact.  Confirming it against a real SE boot table is
+    # bench-owed.  Ceiling is _A32_0_CEILING (0x80578000, above), the base
     # of the SE-owned atoc band -- NOT the true per-build ceiling (the
     # signed ATOC's own start address moves with ATOC package size, see
     # SETOOLS' build/app-package-map.txt), but a fixed reservation band,
