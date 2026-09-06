@@ -130,6 +130,14 @@ on_module:
       bus_master: alif-ensemble
       devices:
         - { chip: eeprom_24c128,    role: eeprom,          address_7bit: "0x50" }
+        # SAME PHYSICAL PART as the 0x50 entry above, not a second chip --
+        # the E1M-AEN line is one shared PCB differing only in SoC MPN, so
+        # every AEN SKU carries the same onsemi N24S128C4DYT3G decoding
+        # `1010` -> 0x50 and `1011` -> 0x58 (Secure Data Page / Unique ID /
+        # lock byte / Device Configuration Register).  Listed so the
+        # unclaimed 0x58 ACK doesn't collide with a future part
+        # (alp-sdk#1976).  Measured on E1M-AEN803 serial 2026W36-0003.
+        - { chip: eeprom_24c128,    role: eeprom_identity, address_7bit: "0x58" }
 
 # Off-SoC module memory in the canonical cross-family shape (see
 # som-preset-v1.schema.json `memory:`).  Values are DERIVED from the

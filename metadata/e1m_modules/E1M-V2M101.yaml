@@ -67,6 +67,16 @@ on_module:
       bus_master: renesas-rzv2n
       devices:
         - { chip: eeprom_24c128,    role: eeprom,                    address_7bit: "0x50" }
+        # SAME PHYSICAL PART as the 0x50 entry above, not a second chip --
+        # this line's default population is the onsemi N24S128C4DYT3G (see
+        # metadata/chips/eeprom_24c128.yaml mpn_population), which decodes
+        # `1010` -> 0x50 and `1011` -> 0x58 (Secure Data Page / Unique ID /
+        # lock byte / Device Configuration Register).  The
+        # footprint-compatible M24128-BFMH6TG is an alternate/DNP part, not
+        # the fitted default.  Listed so the unclaimed 0x58 ACK doesn't
+        # collide with a future part (alp-sdk#1976).  Measured on
+        # E1M-AEN803 serial 2026W36-0003.
+        - { chip: eeprom_24c128,    role: eeprom_identity,           address_7bit: "0x58" }
 
 memory:
   dram_mbit:            32768                  # 32 Gbit LPDDR4X
