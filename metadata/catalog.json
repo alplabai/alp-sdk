@@ -3423,6 +3423,10 @@
       "script": "scripts/check_sbom.py"
     },
     {
+      "purpose": "Require a hardware-value-backed silicon/bench-verification claim in a changelog.d/ fragment to be corroborated somewhere outside that fragment (issue #1993).",
+      "script": "scripts/check_silicon_claim_provenance.py"
+    },
+    {
       "purpose": "Reject the unlocked check-then-set slot claim (issue #1630).",
       "script": "scripts/check_slot_claim_atomic.py"
     },
