@@ -22,13 +22,17 @@
  *     uninitialised ctx) each returned their documented status on the same
  *     run, and `0x58` was proven to be a different address space from the
  *     array at `0x50` rather than an alias of it.
- *   - `eeprom_24c128_read()` and `eeprom_24c128_deinit()` are also
- *     [BENCH-VERIFIED], on the same unit and bus: `examples/aen/aen-eeprom-manifest`
+ *   - `eeprom_24c128_read()` is also [BENCH-VERIFIED], on the same unit and
+ *     bus: `examples/aen/aen-eeprom-manifest`
  *     read the 128-byte manifest from array offset `0x0000` and its stored
  *     CRC-32 `0x03BBD0FD` matched the one computed over the bytes that came
  *     back, which a mis-ordered address pointer or a short read would not
  *     survive.  That covers the read path only at a single aligned offset --
  *     it does not exercise a cross-page or unaligned read.
+ *   - `eeprom_24c128_deinit()` EXECUTED on silicon in that same run without
+ *     error, but nothing observed its postcondition, so it is not claimed as
+ *     bench-verified.  Running without complaint is not the same as being
+ *     checked.
  *   - `eeprom_24c128_write()` is still [UNTESTED] here: nothing in that run
  *     wrote to the part, so treat its page splitting and write-cycle timing as
  *     paper-correct until the v1.0 verification sweep covers them.  (The one
@@ -106,7 +110,13 @@ typedef struct {
 	bool    lock_valid;
 	bool    secure_page_locked; /**< Lock Status Read bit 1; 1 = locked (permanent). */
 	bool    device_config_valid;
-	uint8_t device_config; /**< A2/A1/A0 + SWP write-protect bit; delivery state 0x1D. */
+	/** Device Configuration Register.  Per the N24S128 datasheet Table 9 the
+	 *  layout is `b7 b6 b5 = A2 A1 A0`, `b1 = SWP`, and `b4 b3 b2 b0`
+	 *  don't-care -- the device-address bits are the HIGH three bits, not
+	 *  the low ones.  Bench-measured `0x1D` = `0b0001_1101` is consistent:
+	 *  `b7..b5 = 000` (this part answers at `0x50`), `b1 = 0` (not
+	 *  write-protected), don't-cares reading 1. */
+	uint8_t device_config;
 } eeprom_24c128_identity_t;
 
 /** @brief Probe the EEPROM (1-byte read at offset 0; ACK -> success). */
@@ -127,10 +137,14 @@ alp_status_t eeprom_24c128_read(eeprom_24c128_t *ctx, uint16_t offset, uint8_t *
  *
  * READ-ONLY, deliberately: this function must never write a data byte to
  * the device.  A stray write at selector `0x06` lands in the Device
- * Configuration Register, whose low bits are the device's own A2/A1/A0
- * straps -- writing it moves the EEPROM off @p ctx's configured address --
- * and whose SWP bit permanently write-protects the array, the Secure Data
- * Page, and this register together.  For the same reason this function
+ * Configuration Register.  Per the N24S128 datasheet Table 9 that register
+ * is `b7 b6 b5 = A2 A1 A0` and `b1 = SWP`: the device-address bits are the
+ * HIGH three bits.  Writing it moves the EEPROM off @p ctx's configured
+ * address, and `SWP` permanently write-protects the array, the Secure Data
+ * Page, and this register together.  The bit positions matter to anyone who
+ * later builds the write path: a byte composed as if the address lived in the
+ * LOW bits puts it in the don't-care field, leaves `A2/A1/A0` untouched, and
+ * -- for any address value with bit 1 set -- lands on `SWP` instead.  For the same reason this function
  * only ever issues the Lock Status Read; it deliberately does NOT use the
  * datasheet's other lock-check method (attempt a Secure Data Page write
  * and see whether it ACKs), because that method is itself a write.
@@ -141,9 +155,12 @@ alp_status_t eeprom_24c128_read(eeprom_24c128_t *ctx, uint16_t offset, uint8_t *
  * @param ctx  Initialised driver context (see @ref eeprom_24c128_init).
  * @param out  Destination.  Zeroed first, then filled per-field; see
  *   ::eeprom_24c128_identity_t's `_valid` flags -- a `_valid` field being
- *   false (with this function still returning ::ALP_OK) means that object
- *   NACKed, which is the expected result on a board populated with the
- *   footprint-compatible alternate part (no second header to answer).
+ *   false (with this function still returning ::ALP_OK) means that object did
+ *   not read back, which is the expected result on a board populated with the
+ *   footprint-compatible alternate part (no second header to answer).  When a
+ *   flag is false the matching payload is UNDEFINED, not guaranteed zero: the
+ *   struct is zeroed on entry, but a transfer that fails part-way can still
+ *   have written bytes into it.  Read a payload only when its flag is true.
  * @return ::ALP_ERR_INVAL if @p ctx or @p out is `NULL`;
  *   ::ALP_ERR_NOT_READY if @p ctx has not been initialised;
  *   ::ALP_OK otherwise, regardless of how many of the four objects

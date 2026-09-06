@@ -166,8 +166,11 @@ int main(void)
 	 *
 	 * This example deliberately never calls eeprom_24c128_write() -- here or
 	 * anywhere else: a stray write at selector 0x06 lands in the Device
-	 * Configuration Register, whose low bits are the device's own strapped
-	 * A2/A1/A0 (writing it would move the EEPROM off 0x50), and whose SWP
+	 * Configuration Register.  Per the N24S128 datasheet Table 9 that
+	 * register is `b7 b6 b5 = A2 A1 A0` and `b1 = SWP` -- the device-address
+	 * bits are the HIGH three, which is why the bench-measured 0x1D
+	 * (0b0001_1101) reads as address 000 with SWP clear.  Writing it would
+	 * move the EEPROM off 0x50, and whose SWP
 	 * bit permanently write-protects the array, the Secure Data Page, and
 	 * this register together -- there is no way back from that on this
 	 * part, so this read-only example won't go near it. */

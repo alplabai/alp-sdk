@@ -20,11 +20,12 @@
  * are wired only into the Zephyr build, see zephyr/CMakeLists.txt), so the
  * actual byte written on the wire for the alt address is not observable
  * from this test layer without inventing new test infrastructure -- out of
- * scope here.  What IS checked directly is the alt-address arithmetic
- * itself (EEPROM_24C128_ALT_ADDR_OFFSET applied across the full legal
- * 7-bit address range from eeprom_24c128_init()'s 0x50..0x57 check), which
- * is exactly the computation eeprom_24c128_read_identity() performs before
- * issuing any transfer.
+ * scope here.  So this file does NOT claim to check the address the driver
+ * puts on the wire -- that is covered by the silicon run recorded in the
+ * header's @par Verification status block.  What it checks is the argument
+ * and state contract (NULL ctx, NULL out, uninitialised ctx), the
+ * per-field-`_valid`-not-all-or-nothing behaviour on a NACKing part, and the
+ * public alt-address offset CONSTANT.
  *
  * Build with:
  *   cmake -B build -DALP_OS=yocto     -DALP_BUILD_TESTS=ON
@@ -99,34 +100,59 @@ static void test_nack_equivalent_all_invalid(void)
 	ALP_ASSERT_EQ_INT(out.device_config_valid, false);
 	ALP_ASSERT_EQ_INT(out.secure_page_locked, false);
 	ALP_ASSERT_EQ_INT(out.device_config, 0);
-}
 
-/* Alt-address arithmetic: eeprom_24c128_read_identity() must target
- * ctx->addr + EEPROM_24C128_ALT_ADDR_OFFSET (0x08), never ctx->addr itself
- * or some other constant.  Exercised across the full legal 7-bit address
- * range eeprom_24c128_init() accepts (0x50..0x57 -> alt 0x58..0x5F), which
- * is exactly the range this arithmetic has to hold for on real hardware --
- * see the header's device-select-header doc comment. */
-static void test_alt_address_offset_across_legal_range(void)
-{
-	ALP_ASSERT_EQ_INT(EEPROM_24C128_ALT_ADDR_OFFSET, 0x08u);
-
-	for (uint8_t addr = 0x50u; addr <= 0x57u; ++addr) {
-		uint8_t alt = (uint8_t)(addr + EEPROM_24C128_ALT_ADDR_OFFSET);
-		/* Board fact this whole driver rests on: BOTH addresses are the
-		 * SAME physical part (header 1010 vs 1011), never separate
-		 * devices -- see chips/eeprom_24c128/eeprom_24c128.c's device-select
-		 * comment. */
-		ALP_ASSERT_EQ_INT(alt, addr + 0x08u);
-		if (alt < 0x58u || alt > 0x5Fu) {
-			ALP_TEST_FAIL("alt address 0x%02X out of the expected 0x58..0x5F band "
-			              "for primary 0x%02X",
-			              alt,
-			              addr);
-		} else {
-			ALP_TEST_PASS();
+	/* The four bools plus device_config are only 4 of the 84 poisoned bytes.
+	 * The two arrays are the other 80, and they are where a missing
+	 * memset(out, 0, sizeof(*out)) would actually hide: delete that memset
+	 * and every assertion above still passes, because the driver writes all
+	 * five scalars unconditionally.  Check the arrays byte-by-byte so the
+	 * poison can do the job its own comment claims. */
+	for (size_t i = 0; i < sizeof(out.secure_page); ++i) {
+		if (out.secure_page[i] != 0u) {
+			ALP_TEST_FAIL("secure_page[%zu] = 0x%02X, expected 0 -- the 0xAA "
+			              "poison survived, so out was not zeroed on entry",
+			              i,
+			              out.secure_page[i]);
+			return;
 		}
 	}
+	ALP_TEST_PASS();
+	for (size_t i = 0; i < sizeof(out.unique_id); ++i) {
+		if (out.unique_id[i] != 0u) {
+			ALP_TEST_FAIL("unique_id[%zu] = 0x%02X, expected 0 -- the 0xAA "
+			              "poison survived, so out was not zeroed on entry",
+			              i,
+			              out.unique_id[i]);
+			return;
+		}
+	}
+	ALP_TEST_PASS();
+}
+
+/* Pin the public alt-address offset constant.
+ *
+ * This deliberately does NOT re-derive `addr + EEPROM_24C128_ALT_ADDR_OFFSET`
+ * and then assert it equals `addr + 0x08`.  An earlier version of this test did
+ * exactly that across 0x50..0x57 and was a tautology: it never called
+ * eeprom_24c128_read_identity(), so changing the driver to use ctx->addr with no
+ * offset at all, or +0x10, left it green.  A check that cannot fail is worse
+ * than no check, because it reads as coverage.
+ *
+ * What is genuinely checkable from this layer is the CONSTANT: 0x08 is the gap
+ * between device-select header 1010 (the array, 0x50..0x57) and header 1011
+ * (the identity objects, 0x58..0x5F) at identical A2/A1/A0 straps, so it is a
+ * fixed property of the N24S128 and not a tuning knob.  If someone changes the
+ * macro, this fails.
+ *
+ * That the DRIVER actually puts that address on the wire is not observable
+ * here -- see this file's header comment for why -- and is covered instead by
+ * the silicon run recorded in include/alp/chips/eeprom_24c128.h's @par
+ * Verification status block, where all four objects answered at 0x58 on a part
+ * whose array is at 0x50. */
+static void test_alt_address_offset_constant(void)
+{
+	ALP_ASSERT_EQ_INT(EEPROM_24C128_ALT_ADDR_OFFSET, 0x08u);
+	ALP_ASSERT_EQ_INT(EEPROM_24C128_I2C_ADDR_LOW + EEPROM_24C128_ALT_ADDR_OFFSET, 0x58u);
 }
 
 int main(void)
@@ -135,7 +161,7 @@ int main(void)
 	test_null_out();
 	test_uninitialised_ctx();
 	test_nack_equivalent_all_invalid();
-	test_alt_address_offset_across_legal_range();
+	test_alt_address_offset_constant();
 
 	ALP_TEST_SUMMARY();
 }

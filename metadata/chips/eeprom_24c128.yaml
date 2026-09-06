@@ -1,7 +1,7 @@
 # Alp SDK chip manifest: 24Cxx-class 128-Kbit I2C EEPROM.
 schema_version:   1
 chip_id:          eeprom_24c128
-driver_status:    complete         # init / read / write / page-aligned splitting.
+driver_status:    complete         # init / read / write (page-aligned splitting) / read_identity / deinit.
 display_name:     "Generic 24Cxx-class 128-Kbit (16 KB) I2C EEPROM"
 vendor:           multi             # On-Semi N24S128C4DYT3G (default), STMicro M24128-BFMH6TG (alt)
 mpn_population:
@@ -15,8 +15,9 @@ datasheet:
 bus:              i2c
 i2c:
   addresses:
-    - { addr_7bit: 0x50, scope: "A2:A1:A0 strap = 000 (default on E1M-AEN + E1M-V2N)" }
-  address_strap_range: "0x50..0x57 (A2:A1:A0)"
+    - { addr_7bit: 0x50, scope: "A2:A1:A0 strap = 000 (default on E1M-AEN + E1M-V2N). Device-select header 1010 -- the 16 KB memory array." }
+    - { addr_7bit: 0x58, scope: "SAME physical part as 0x50, not a second device. Device-select header 1011 with the SAME A2:A1:A0 straps, exposing four read-only-addressable objects: Secure Data Page (64 B, lockable), 128-bit factory Unique ID, Secure Page Lock Status, Device Configuration Register. N24S128 ONLY -- the M24128-BFMH6TG alternate has no second header and NACKs here. Read via eeprom_24c128_read_identity(); measured on E1M-AEN803 serial 2026W36-0003." }
+  address_strap_range: "0x50..0x57 (A2:A1:A0) for the array (header 1010), and 0x58..0x5F for the identity objects (header 1011) -- the same eight strap settings decoded twice, so ONE part occupies one address in each band."
   max_clock_hz:   400000          # Fast-mode
 
 signals:
@@ -69,5 +70,12 @@ families:
   - imx93                          # plain I2C; NX9 exposes E1M I2C0 directly (see ssd1306.yaml note)
 
 verification:
-  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  # Split, because only part of the driver has run on silicon -- see the same
+  # split in include/alp/chips/eeprom_24c128.h's @par Verification status.
+  # BENCH-VERIFIED on E1M-AEN803 serial 2026W36-0003 over SoC I2C2, 2026-09-06:
+  # eeprom_24c128_init(), _read() (128-byte manifest, stored CRC-32 0x03BBD0FD
+  # matched the computed one) and _read_identity() (all four second-header
+  # objects answered).  eeprom_24c128_write() is still UNTESTED -- nothing in
+  # that run wrote to the part.
+  hil_silicon:    partial
   smoke_tests:    null_arg_guard

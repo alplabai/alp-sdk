@@ -69,7 +69,10 @@ CRC-32, so the bench's grep for `RESULT PASS:` / `RESULT FAIL:` is unaffected.
 
 This example is deliberately **read-only** and never calls
 `eeprom_24c128_write()`: a stray write at selector `0x06` lands in the Device
-Configuration Register, whose low bits are the device's own strapped A2/A1/A0
+Configuration Register. Per the N24S128 datasheet Table 9 that register is
+`b7 b6 b5 = A2 A1 A0` and `b1 = SWP` -- the device-address bits are the HIGH
+three, not the low ones, which is why the measured `0x1D` (`0b0001_1101`)
+reads as address `000` with `SWP` clear. Writing it moves the EEPROM off `0x50`
 (a write there would move the EEPROM off `0x50`), and whose SWP bit
 permanently write-protects the array, the Secure Data Page, and the register
 together.

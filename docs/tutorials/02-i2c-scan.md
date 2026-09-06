@@ -77,6 +77,9 @@ On-module (E1M-AEN801 `i2c_devices:` `e1m_i2c0:` block):
 
 ```
 0x50 ACK   -- 24C128 EEPROM
+0x58 ACK   -- SAME 24C128 EEPROM (onsemi N24S128), its second device-select
+              header -- `1010` -> 0x50, `1011` -> 0x58, same A2/A1/A0 straps.
+              Not a second chip; nothing to source (alp-sdk#1976).
 ```
 
 The SoM's three other I²C parts -- OPTIGA Trust M (`0x30`), TMP112
@@ -86,8 +89,10 @@ tutorial's scan (`metadata/e1m_modules/E1M-AEN801.yaml` `i2c_devices:`
 `brd_i2c:`; `docs/bring-up-aen.md` §5.1, which also carries the OPTIGA
 scan caveat -- don't blind-scan that bus; see
 `examples/aen/aen-secure-element-sign` for a dedicated, targeted BRD_I2C
-probe instead).  A `0x48` in a scan of this bus is U32 INA236B (+V_CAM0
-rail) on PRE-RESPIN carriers, not the TMP112.
+probe instead).  A `0x48` in a scan of this bus is not the TMP112: on
+PRE-RESPIN carriers it's U32 INA236B (+V_CAM0 rail); on POST-RESPIN
+carriers it's the TAS2563 GLOBAL/broadcast address instead -- see the
+`0x48` entry in the board-populated list below.
 
 E1M-EVK board-populated (`metadata/boards/e1m-evk.yaml` `i2c_devices:`):
 
@@ -110,10 +115,15 @@ E1M-EVK board-populated (`metadata/boards/e1m-evk.yaml` `i2c_devices:`):
 0x69 ACK   -- ICM-42670 U12 IMU (collides with BMI323 on pre-respin
               boards, which mis-strap U13 to 0x69 too -- BENCH-CONFIRMED
               2026-06-16)
-0x71 ACK   -- TCAL9538 U37 PCIe I/O expander
 0x73 ACK   -- TCAL9538 U35 main I/O expander (BOM default -- see the
               0x20 note above; corrected from 0x72, alp-sdk#1974)
 ```
+
+`0x71` (the second TCAL9538, U37, PCIe-side) does NOT ACK on this EVK
+revision -- U37 is **NOT ASSEMBLED** here (confirmed by the maintainer,
+alp-sdk#1974): this revision, built for Alif, doesn't need the second
+expander. The footprint is real and other revisions populate it; a NACK
+here is expected, not a fault.
 
 ## On V2N's on-board sensor bus
 
@@ -162,6 +172,10 @@ Expected:
               (metadata/boards/e1m-x-evk.yaml:262)
 0x50 ACK   -- 24C128 EEPROM, the SoM's `e1m_i2c0:` block
               (metadata/e1m_modules/E1M-V2N101.yaml:56-59)
+0x58 ACK   -- SAME 24C128 EEPROM, its second device-select header
+              (`1010` -> 0x50, `1011` -> 0x58, same A2/A1/A0 straps) --
+              not a second chip, nothing to source (alp-sdk#1976)
+              (metadata/e1m_modules/E1M-V2N101.yaml:69)
 0x68 ACK   -- BMI323 U13 IMU (alternate)
               (include/alp/boards/alp_e1m_x_evk.h:48)
 0x69 ACK   -- ICM-42670 U12 IMU (canonical primary)

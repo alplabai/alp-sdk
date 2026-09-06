@@ -82,7 +82,8 @@ on_module:
       devices:
         - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }
         - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30" }
-        - { chip: tmp112,           role: temp_sensor,     address_7bit: "0x48" }
+        - { chip: tmp112,           role: temp_sensor,     address_7bit: "0x48",
+            notes: "Declared design address. On the 2026W36 E1M-AEN803 batch nothing answers here and something answers at 0x40 instead, on 2 of 2 modules tested -- a batch property, not a per-unit defect (alp-sdk#1978). 0x40 is NOT a legal TMP112 strap address (the part straps only to 0x48/0x49/0x4A/0x4B), so the responder is unidentified and this entry deliberately keeps the design address rather than encoding a guess. Consequence: the stock CONFIG_TMP112 driver does not bind on these modules." }
     # SoC I2C2, bridge/DNP-selected onto the E1M portable I2C0 pads -- the
     # SoM-manifest EEPROM only, a SEPARATE bus from the trio above (see
     # docs/bring-up-aen.md §5.1: "Two separate buses -- don't assume a
