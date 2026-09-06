@@ -79,8 +79,21 @@ without rewriting the layer above.
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
   │ AI Models &   │ ─► │  Train (off-device):  TensorFlow · PyTorch  →  .tflite / .onnx         │
   │ Pipeline      │    │                                                                        │
-  │               │    │  Compile (host):  tan model build  →  one fat .alpmodel package        │
+  │               │    │  Pre-flight (host, offline, no toolchain):                             │
+  │               │    │    alp model check  — per-SoM verdict fits | cpu-fallback |            │
+  │               │    │      no-fit + est SRAM (vs arena) / latency / op-coverage %            │
+  │               │    │      source:static — CONSERVATIVE, never over-promises "fits"          │
+  │               │    │    alp model prep   — license-free INT8 quantize (QDQ) +               │
+  │               │    │      fp32-vs-int8 accuracy report (top1 % · cosine · verdict)          │
+  │               │    │                                                                        │
+  │               │    │  Compile (host):  alp model build  →  one fat .alpmodel package        │
   │               │    │     per-backend blobs:  Vela (Ethos-U) · DRP-AI · dxcom · CPU/TFLM     │
+  │               │    │                                                                        │
+  │               │    │  Model zoo:  alp model zoo  — browse entries marked runs_here          │
+  │               │    │    for your SoM;  alp model add <zoo-id>  → board.yaml models:         │
+  │               │    │                                                                        │
+  │               │    │  Host reference (NOT target-SoM perf):  alp model run / ab             │
+  │               │    │     functional + host-latency + accuracy;  power/on-device HW-gated    │
   │               │    │                                                                        │
   │               │    │  Model families:  classification · detection (YOLO v5/v8) ·            │
   │               │    │                   segmentation · keyword-spotting · pose               │
@@ -93,7 +106,8 @@ without rewriting the layer above.
   │               │    │  SDK reference emits: alp_project.py · alp_orchestrate                 │
   │               │    │  tan build / flash / image / size / clean                              │
   │               │    │  validate_board_yaml.py · program_eeprom.py · VS Code extension        │
-  │               │    │  tan model build  →  .alpmodel   (the model-compile front-end)         │
+  │               │    │  alp model build · check · prep · zoo · add · run · ab  (model CLI)    │
+  │               │    │     pre-flight fit · INT8+accuracy prep · curated zoo · host run/ab    │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐

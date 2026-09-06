@@ -79,6 +79,60 @@ A `_AUTO` open on AEN routes to Ethos-U if the model is Vela-
 compiled (Ethos-U requires the Vela pre-compilation step);
 falls back to CPU otherwise.
 
+## 1b. Before you compile: host pre-flight helpers (optional)
+
+Vela compilation (§2) is the long pole and needs the NPU
+toolchain.  Before you spend that time, the `alp model` host
+helpers answer "will it fit + how fast + is it accurate"
+**offline** — no toolchain, no silicon:
+
+- **Will it fit my SoM's NPU, and how fast?**
+
+  ```bash
+  alp model check mobilenet_v2_1.0_224_quant.tflite --sku E1M-AEN801
+  # or against a board.yaml:  alp model check <model> --board board.yaml [--model NAME]
+  # add --format json for a machine-readable envelope
+  ```
+
+  Static pre-flight fit/perf.  Per SoM-backend verdict — `fits`,
+  `cpu-fallback`, or `no-fit` — plus estimated SRAM (against the
+  SoC arena budget), estimated latency, op-coverage %, and any
+  unsupported ops.  The estimate is labelled `source:static` and
+  is biased **conservative** — it never over-promises "fits".
+  It is a conservative estimate, verified on real silicon only
+  after you compile + flash (§5).
+
+- **Quantize + check accuracy first (license-free INT8):**
+
+  ```bash
+  alp model prep mobilenet_v2_1.0_224.onnx --calibration calib/ [--per-channel]
+  ```
+
+  ONNXRuntime QDQ INT8 quantization plus an fp32-vs-int8 accuracy
+  report (top-1 agreement %, mean cosine, max-abs-err, verdict
+  `good` | `degraded` with guidance).  A `.tflite` input is
+  converted to ONNX first via tf2onnx.
+
+- **Browse models that run on your SoM, and add one:**
+
+  ```bash
+  alp model zoo --sku E1M-AEN801              # curated entries marked runs_here for this SoM
+  alp model add <zoo-id> --board board.yaml   # fetch (sha256-verified) + append to models:
+  ```
+
+- **Host reference run / A-B compare (functional + host latency):**
+
+  ```bash
+  alp model run mobilenet.onnx --input sample.npy --expected 285
+  alp model ab  a.onnx b.onnx  --input sample.npy
+  ```
+
+  Backend `cpu-host` — this is a **host reference run, not the
+  target SoM's performance**.  `peak_sram_kib` / `power_mj` come
+  back null on the host; on-device SRAM + power measurement are
+  hardware-gated (they need the EVK power-topology + Yocto NPU
+  runtimes).
+
 ## 2. Prepare a Vela-compiled MobileNet
 
 Pre-compile the model offline on your host:

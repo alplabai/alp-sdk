@@ -1,0 +1,11 @@
+{
+  "backend": "deepx_dxm1",
+  "version": "2026.07-seed",
+  "source": "Conservative subset from DEEPX DX-M1 CNN-accelerator docs; refine from bench probing.",
+  "supported_ops": [
+    "CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED",
+    "AVERAGE_POOL_2D", "MAX_POOL_2D",
+    "ADD", "CONCATENATION", "RESHAPE",
+    "SOFTMAX", "RELU", "RELU6"
+  ]
+}

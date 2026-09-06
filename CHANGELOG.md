@@ -13088,6 +13088,70 @@ Not built (scope confirmed not gaps): DMA2D (the existing D/AVE2D GPU2D backend
 covers it), `<alp/display.h>` (the generic Zephyr-display wrapper already serves
 CDC200), `<alp/dsp.h>` (CMSIS-DSP Helium is already the E8 path), `<alp/tmu.h>`
 (E8 has no CORDIC hardware).
+### Fixed — INA236 power and calibration scaling (BEHAVIOUR CHANGE for every caller)
+
+- `chips/ina236` reported power **625x too low**. `ina236_read_power_uw()`
+  applied the 1.6 mV bus-voltage LSB a second time on top of the 32 that
+  already carries it; datasheet SBOSA81D eq. 4 is
+  `Power [W] = 32 x CURRENT_LSB x POWER`, where the 32 is not dimensionless
+  (the internal register math divides by 20000, and 20000 x 1.6 mV = 32 V).
+  The public header had documented the correct equation all along; only the
+  implementation was wrong. **Any consumer that logged, thresholded or
+  alerted on `ina236_read_power_uw()` now sees values 625x larger** — the
+  correct ones. Bus voltage, shunt voltage and current readings are
+  unaffected on the default ADC range.
+- `apply_calibration()` never rescaled `SHUNT_CAL` for `ADCRANGE=1`.
+  SBOSA81D §8.1.2 requires it be divided by 4, because the finer 625 nV
+  shunt LSB makes the raw SHUNT register 4x larger for the same physical
+  voltage. Current **and** power therefore read 4x high on the ±20.48 mV
+  range. Callers using the default `INA236_ADCRANGE_81MV` are unaffected.
+- `CURRENT_LSB` is now derived from the requested scale clamped to what the
+  selected `ADCRANGE` can actually measure, and the ceiling is exposed as
+  `ina236_t.full_scale_a`. A reporting scale wider than the shunt's full
+  scale coarsens every reading while spending register range on currents the
+  hardware cannot measure; on the E1M EVK +5V rail (20 mOhm, rated 4.0 A) on
+  the fine range that was 3.91x coarser than the ADC had resolved. Only the
+  wasteful direction is clamped — a deliberately tighter scale is honoured.
+- Both scaling errors were confirmed on E1M-AEN801 silicon by an independent
+  cross-check (bus voltage x shunt-derived current gave 0.5125 W where the
+  POWER register reported 0.492 W). Neither was reachable by the existing
+  tests, which only checked argument rejection; the two new pure helpers are
+  now value-pinned by bus-free ztests.
+
+### Added — on-device inference energy measurement (E1M-AEN801)
+
+- `examples/aen/aen-inference-energy` measures the incremental energy of one
+  Ethos-U inference as a carrier-rail delta on real silicon: **0.017 mJ per
+  inference** for `person_detect` on the +5V rail. It picks the compute rail
+  from the board (six INA236 monitors, three-sigma significance test with a
+  highest-current fallback), samples on the INA236 conversion-ready flag so
+  each conversion is consumed exactly once, and integrates matched
+  active/idle windows. `docs/measuring-inference-energy.md` records the
+  method, an error budget built only from measured quantities, the
+  whole-board PSU cross-check, and an explicit list of what the number is
+  **not** (not NPU energy, not silicon energy, not vendor-comparable).
+- `scripts/alp_model/ondevice.py` + `alp model run --on-device` build a real
+  `EnergyMeasurement` from a bench capture using the existing pure math in
+  `measure.py` (unchanged). The flag errors rather than reporting
+  `energy: null`, because a silent null claims "measured nothing" when the
+  truth is "the bench run failed".
+- `chips/ina236` gains the averaging / conversion-time / operating-mode and
+  conversion-ready controls an energy sampler needs: `ina236_configure()`,
+  `ina236_sample_period_us()`, `ina236_conversion_ready()`,
+  `ina236_read_power_raw()`, `ina236_power_lsb_w()`.
+
+### Fixed — AEN bench helpers silently read an empty console
+
+- `scripts/bench/aen/{ram-run,reread,flash-run}.sh` never consumed the
+  `JLINK_SN` that `bench-env.sh` has always exported, so on a host with more
+  than one J-Link attached (alplab-gw has three) every JLinkExe command
+  failed with `Cannot connect to the probe/programmer` while the script ran
+  to completion — indistinguishable from an app that printed nothing. The
+  selection rule now lives once in `bench_jlink_select`.
+- `mem8` rejects reads larger than `0x10000` and returns nothing, so any app
+  with a large `CONFIG_RAM_CONSOLE_BUFFER_SIZE` read back empty;
+  `bench_jlink_mem8_chunks` splits the read. Both helpers now report which
+  failure they hit.
 
 ### Added — `check_bootstrap_manifest.py --fix`: the pin propagator
 

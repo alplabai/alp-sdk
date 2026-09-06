@@ -27,6 +27,7 @@ Top-level fields:
 | `cores`          | yes      | Per-core app + library/peripheral knobs.  Each core's `os:` is optional; the SoM topology supplies the natural runtime per core class (Cortex-M → Zephyr, Cortex-A → Yocto). |
 | `ipc`            | no       | Cross-core IPC carve-outs (rpmsg / raw_shmem / mailbox_only). |
 | `chips`          | no       | Project-level chip drivers beyond what the board ships.     |
+| `models`         | no       | AI/NPU models the project compiles for the SoM inference backend.  Each entry `{name, source, compile?}`.  Read by `alp model build` / `alp model check --board`; written by `alp model add`.  See [`models` block](#models-block) below. |
 | `libraries`      | no       | Curated third-party libraries (ADR 0018).  One top-level list, each entry a `{name, cores?}` object (or a bare name as shorthand for a project-wide `{name}`), e.g. `[{name: lvgl}, {name: cmsis-dsp, cores: [m33_sm]}]`.  `name` resolves to a manifest under `metadata/libraries/<name>.yaml`; omit `cores:` for a project-wide selection or list core ids to scope it.  The planner emits the per-OS wiring and rejects an incompatible selection at emit time.  See [`libraries` (ADR 0018)](#libraries-project-wide-adr-0018) below. |
 | `diagnostics`    | no       | `alp_last_error()` + log level.                               |
 
@@ -454,6 +455,54 @@ not in the silicon datasheet stay `TBD` (e.g.
 entry -- `metadata/boards/e1m-evk.yaml`, not the SoM's
 `metadata/e1m_modules/` family file) until the user supplies them
 authoritatively.
+
+### `models` block (AI-accelerator models) {#models-block}
+
+Optional top-level list of AI/NPU models the project compiles for the
+SoM's inference backend. Each entry names a model and its source; the
+`alp model` CLI verbs read and write this block.
+
+```yaml
+som:
+  sku: E1M-AEN801
+models:
+  - name: person-detect                      # unique within the list
+    source: ./models/person_detect.tflite    # local path or URL (.tflite / .onnx)
+  - name: yolov8n
+    source: https://example.com/yolov8n.onnx
+    compile:                                  # only for backends that need a
+      deepx_dxm1:                             # per-model config the SDK cannot derive
+        config: ./models/yolov8n-dxcom.json    # keys are BACKEND IDS
+        calibration: ./models/calib/           # both required for deepx_dxm1
+cores:
+  m55_hp:
+    app: ./src
+```
+
+| Field     | Required | What it picks                                                                                          |
+|-----------|----------|--------------------------------------------------------------------------------------------------------|
+| `name`    | yes      | Model identifier, unique within `models:`.  Selects the entry for `alp model check --board board.yaml --model <name>`. |
+| `source`  | yes      | Model file the build ingests — a local path or a URL (sha256-verified on fetch).  `.tflite` / `.onnx`. |
+| `compile` | no       | Per-backend compile configuration, keyed by **backend id** (`deepx_dxm1`, `drpai`) — only for NPU toolchains that need a per-model config + calibration the SDK cannot derive.  Arm Ethos-U (Vela) needs none and has no key here: the SDK derives its accelerator config from the SoM.  A backend with no block is recorded as a coverage skip (`"no compile config"`) rather than guessed. |
+
+**CLI verbs that manage this block** (`alp model …`; tan-cli mirrors
+each as `tan model …`, a thin envelope wrapper):
+
+- `alp model build` reads `models:` and compiles each entry to a
+  `.alpmodel` for the SoM's inference backend.  `alp model list` lists
+  the compiled artifacts; `alp model info` decodes one.
+- `alp model add <zoo-id> [--board board.yaml] [--name NAME] [--models-dir DIR]`
+  fetches a curated model-zoo source (URL sha256-verified, or bundled)
+  and appends a `{name, source}` entry here.  Non-destructive — a
+  duplicate name errors rather than overwriting.
+- `alp model check --board board.yaml [--model NAME] [--format human|json]`
+  (or `alp model check <model.tflite|.onnx> --sku <SKU>`) runs a static,
+  offline pre-flight — no toolchain: per SoM-backend verdict
+  (`fits` | `cpu-fallback` | `no-fit`), estimated SRAM vs the SoC arena
+  budget, estimated latency, op-coverage %, and unsupported ops.  The
+  estimate is labelled `source:static` and biased **conservative** — it
+  never over-promises "fits"; the real number is verified on silicon at
+  build time.
 
 ### `libraries` block (user-facing, no wrapper)
 
