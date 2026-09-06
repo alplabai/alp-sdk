@@ -19,16 +19,32 @@ generator consumer today (`scripts/alp_orchestrate/*` reads
 `chip_select`), so this is a metadata correctness fix with no generated-file
 fallout, not a behaviour change.
 
+**Bench-owed.** The corrected `chip_select` mapping is not an electrical
+measurement on E1M-AEN301/401/501/601/701 silicon — it is inferred from
+the E1M-AEN-2626-R2 netlist notes recorded against E1M-AEN801/E1M-AEN803
+plus the family's "one shared PCB" invariant. That inference is strong
+(one PCB, one netlist; the U9/U10 footprints don't move with SoC tier or
+population) but nobody has probed OSPI0_SS0/OSPI0_SS1 on E3–E7 silicon to
+confirm it.
+
 The same audit found the five presets' `hyperram:` blocks omitted
 `assembled:` entirely — the exact key `som-preset-v1.schema.json`'s own
 description calls "load-bearing" (defaults `true`, and E1M-AEN801 is on
 record for advertising 256 Mbit of external RAM it does not populate
-because of this same omission). Here the omission happened to resolve to
-the right answer — each file's own `memory.dram_mbit` derivation comment
-already states the HyperRAM is "populated on every AEN BOM variant" — but
-leaving it implicit meant the fix was one accidental edit away from
-repeating E1M-AEN801's bug. Made explicit (`assembled: true`) on all five,
-citing that same in-file source.
+because of this same omission). This fragment's first pass made it
+explicit as `assembled: true`, citing each file's own `memory.dram_mbit`
+derivation comment ("populated on every AEN BOM variant") as the source.
+Round-2 review caught that this is the same boilerplate comment present
+verbatim in `E1M-AEN801.yaml`, whose own HyperRAM is `assembled: false` —
+so it falsifies the claim for at least one family member and cannot stand
+as evidence either way for E3–E7. No BOM, netlist, or bench measurement
+backs `true` on these five, so it is now `assembled: optional` (the same
+per-BOM-variant shape as `ospi0` above), with `memory.dram_mbit`
+correspondingly `TBD`, not `256`. `E1M-AEN803.yaml`'s `hyperram:` — left
+with `assembled:` omitted entirely by this fragment's first pass, the very
+antipattern the fix targets — is now explicit `assembled: true`, sourced
+from that file's own header ("both parts fitted ... IS the E1M-AEN803 SKU
+contract").
 
 **A stray value would have passed every gate anyway.** `chip_select` was
 `{"type": "integer", "minimum": 0}` with no upper bound, on a bus that only

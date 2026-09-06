@@ -75,14 +75,18 @@ on_module:
   # separated only by chip-select (HyperRAM = CS0, NOR = CS1).
   hyperram:
     chip:           W958D8NBYA5I    # Winbond OctalRAM (HyperBus)
-    # Explicit, not the true default left implicit: `memory.dram_mbit` below
-    # derives from this capacity and is documented as "populated on every
-    # AEN BOM variant" (unlike ospi0 NOR, which is `assembled: optional`).
-    # Written out per #1990 so this SKU does not repeat E1M-AEN801's
-    # omitted-key bug (schema comment: omitting this key silently claims a
-    # HyperRAM that may not be fitted).
-    assembled:      true
-    capacity_mbit:  256             # 256 Mbit (32 MiB)
+    # UNCONFIRMED, not `true` (round-2 correction, #1990): the prior
+    # `assembled: true` here cited this file's own "populated on every AEN
+    # BOM variant" memory-derivation note as its source -- that note is
+    # boilerplate shared verbatim across the whole AEN family and is
+    # directly falsified by E1M-AEN801.yaml, which shares this SoM's PCB
+    # and the same family invariant yet ships HyperRAM `assembled: false`
+    # (DNI). No BOM, netlist, or bench measurement confirms population on
+    # THIS SKU either way, so `optional` (per-BOM-variant, same shape as
+    # ospi0 NOR above) replaces the unsupported `true`. Do not set this
+    # back to `true` without a per-row source.
+    assembled:      optional
+    capacity_mbit:  256             # 256 Mbit (32 MiB) -- the part, if fitted
     interface:      ospi0
     chip_select:    0                 # OSPI0 CS0 -- U9 -> OSPI0_SS0 per the R2 netlist
 
@@ -119,13 +123,15 @@ on_module:
 # Off-SoC module memory in the canonical cross-family shape (see
 # som-preset-v1.schema.json `memory:`).  Values are DERIVED from the
 # on_module facts above, never invented:
-#   dram_mbit  <- on_module.hyperram.capacity_mbit (populated on every
-#                 AEN BOM variant).
+#   dram_mbit  <- TBD: on_module.hyperram is `assembled: optional` above --
+#                 whether this SKU's HyperRAM ships fitted is unconfirmed
+#                 (#1990), so a single number would be wrong for the DNI
+#                 variant.
 #   flash_mbit <- TBD: the OSPI0 NOR (256 Mbit) is `assembled: optional`
 #                 (per-BOM variant), so a single number would be wrong
 #                 for the DNI variant.
 memory:
-  dram_mbit:            256
+  dram_mbit:            TBD
   flash_mbit:           TBD
 
 inference:
