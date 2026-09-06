@@ -89,13 +89,27 @@ measured at 4 of 11 realistic blocker phrasings (#1963): "not yet fixed",
 "until ... lands", "waiting on ... resolved", "must be done before ...".
 `_FUTURITY_RE` now overrides `_HISTORICAL_RE` back to a live blocker when
 one of those four negation/futurity cues (`not yet`, `until`, `waiting on`,
-`must be`) sits in the same clause as the marker -- the marker word alone no
-longer wins. This is still a word-list heuristic, not comprehension: a
-blocker phrased with a marker word and NONE of those four cues (e.g. bare
-"not fixed", no "yet") still slips through unflagged; that residual gap is
-the accepted cost of not spamming every "landed via #N" reference as a
-fresh failure. #1963 is otherwise closed by this change -- NOT #1958, which
-is the unrelated harvester-scope widening cited at the top.
+`must be`) is BOUND to the marker match -- adjacent to it, with no
+coordinating conjunction (`_CONJUNCTION_RE`: `and`, `but`, `or`, ...)
+sitting between them -- the marker word alone no longer wins. Binding, not
+mere co-occurrence anywhere in the clause, matters: a clause can narrate
+history for one citation and then, joined only by ", and"/", but"/etc.,
+go on to describe an unrelated live TODO for a different subject ("landed
+via #1241, and the C driver must be reworked") -- treating any cue
+anywhere in the clause as attaching to the marker read that as a live
+blocker for #1241 too. Caught in review before this change shipped:
+reproduced against `metadata/chips/dp83825.yaml`'s real "landed via
+#1241" prose plus five constructed variants of the same shape, 6 for 6.
+See `_is_historical` for the pairwise binding check.
+This is still a word-list heuristic, not comprehension, and it is still
+biased to UNDER-flag by construction: a blocker phrased with a marker word
+and NONE of those four cues (e.g. bare "not fixed", no "yet"), or with a
+cue only reachable through a coordinating conjunction, still slips through
+unflagged; that residual gap is the accepted cost of never flipping a
+historical citation into a false positive. #1963 is otherwise addressed by
+this change (a PR closing it needs the `Closes #1963` keyword, not just
+the number in the subject) -- NOT #1958, which is the unrelated
+harvester-scope widening cited at the top and which closed separately.
 
 STALENESS -- this gate is OFFLINE
 ----------------------------------
@@ -194,6 +208,59 @@ _FUTURITY_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: A coordinating conjunction marking a NEW sub-thought within the same
+#: `.`/`;`-delimited clause -- `_clause_around` only splits on
+#: `.`/`;`, so "landed via #1241, and the C driver must be reworked" stays
+#: ONE clause. `_is_historical` below used to run `_FUTURITY_RE` over that
+#: whole clause, so it found "must be" and overrode the "via"/"landed"
+#: marker for #1241, though "must be" describes an unrelated LATER subject
+#: ("the C driver"), not #1241's own verb -- mere co-occurrence in the
+#: clause is not the same as the cue actually attaching to the marker it is
+#: meant to override. A futurity cue only counts now if no coordinating
+#: conjunction sits between it and the marker match -- see `_is_historical`.
+_CONJUNCTION_RE = re.compile(
+    r"\b(?:and|but|or|nor|so|yet|though|although|while)\b", re.IGNORECASE
+)
+
+
+def _is_historical(clause: str) -> bool:
+    """Whether `clause` reads as historical narration rather than a live
+    blocker claim (see HISTORICAL in the module docstring).
+
+    A marker word (`_HISTORICAL_RE`) makes a clause historical UNLESS a
+    negation/futurity cue (`_FUTURITY_RE`) is BOUND to that same marker
+    match: adjacent to it, with no coordinating conjunction
+    (`_CONJUNCTION_RE`) sitting between them. Binding, not mere
+    co-occurrence anywhere in the clause -- "not yet fixed (#1234)" binds
+    ("not yet" sits directly against "fixed"); "landed via #1241, and the
+    C driver must be reworked" does NOT bind ("must be" is separated from
+    "via"/"landed" by ", and", so it describes the driver, not #1241's own
+    verb). Reproduced against `metadata/chips/dp83825.yaml`'s real
+    "... this manifest itself landed via #1241 ..." prose plus five
+    constructed variants sharing this shape -- all 6 wrongly flipped a
+    historical citation to a live blocker before this fix. Every pair of
+    marker/cue matches is checked (not just the first of each): if ANY
+    pair binds, the futurity override applies.
+    """
+    hist_matches = list(_HISTORICAL_RE.finditer(clause))
+    if not hist_matches:
+        return False
+    fut_matches = list(_FUTURITY_RE.finditer(clause))
+    if not fut_matches:
+        return True
+    for hm in hist_matches:
+        for fm in fut_matches:
+            if hm.end() <= fm.start():
+                gap = clause[hm.end() : fm.start()]
+            elif fm.end() <= hm.start():
+                gap = clause[fm.end() : hm.start()]
+            else:
+                gap = ""  # overlapping matches -- trivially bound
+            if not _CONJUNCTION_RE.search(gap):
+                return False  # a bound pair -- futurity overrides
+    return True  # every marker/cue pair is split by a conjunction
+
+
 #: A decimal or dotted-version token -- `0.75`, `29.5`, `1.5`, `v0.3.x`.
 #: `.`s inside one of these are never a clause boundary (round 5): naively
 #: splitting clauses on ANY `.` treated the decimal point in a voltage/
@@ -282,9 +349,7 @@ def _citations_in_block(block_text: str) -> list[tuple[int, bool, str]]:
     out = []
     for m in _CITATION_RE.finditer(block_text):
         clause = _clause_around(block_text, m.start(), m.end())
-        historical = bool(_HISTORICAL_RE.search(clause)) and not _FUTURITY_RE.search(
-            clause
-        )
+        historical = _is_historical(clause)
         out.append((int(m.group(1)), historical, clause))
     return out
 

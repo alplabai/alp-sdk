@@ -285,6 +285,70 @@ def test_must_be_done_before_is_flagged_as_live_blocker(tmp_path):
     assert "#1234" in problems[0]
 
 
+# -- a futurity cue must BIND to the marker it overrides, not merely share
+# -- its clause -----------------------------------------------------------
+#
+# `_FUTURITY_RE` used to be searched over the WHOLE clause, so a marker
+# attached to one citation and a futurity cue attached to an unrelated
+# LATER subject, joined only by a coordinating conjunction (", and"/",
+# but"/etc.), wrongly flipped a historical citation to a live blocker.
+# Reproduced verbatim against `metadata/chips/dp83825.yaml`'s real
+# "... this manifest itself landed via #1241 ..." prose (mutation proof:
+# reverting `_is_historical` to `bool(_HISTORICAL_RE.search(clause)) and
+# not _FUTURITY_RE.search(clause)` turns every one of these RED).
+
+
+def test_futurity_cue_for_a_different_subject_does_not_override(tmp_path):
+    """Real-prose shape: `metadata/chips/dp83825.yaml:4-6` says "...this
+    manifest itself landed via #1241...)"; a hypothetical continuation
+    naming a live TODO for a DIFFERENT field, joined by ", and", must not
+    flip #1241 back to a live blocker."""
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "widget",
+        "chip_id: widget\n"
+        "driver_status:    none      # this manifest itself landed via\n"
+        "                            # #1241, and the C driver must be\n"
+        "                            # written before driver_status can\n"
+        "                            # move off none.\n",
+    )
+    _snapshot(tmp_path, {"1241": "CLOSED"})
+    assert mod.find_problems(tmp_path) == []
+
+
+def test_futurity_cue_joined_by_though_does_not_override(tmp_path):
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "widget",
+        "chip_id: widget\n"
+        "driver_status:    none      # closed via #1234, though the\n"
+        "                            # header must be regenerated for an\n"
+        "                            # unrelated field.\n",
+    )
+    _snapshot(tmp_path, {"1234": "CLOSED"})
+    assert mod.find_problems(tmp_path) == []
+
+
+def test_futurity_cue_directly_against_the_marker_still_overrides(tmp_path):
+    """Sanity check alongside the two tests above: when the cue IS bound
+    to the marker (no conjunction between them), the override still
+    applies -- this isn't a blanket re-widening of the under-flag."""
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "widget",
+        "chip_id: widget\n"
+        "driver_status:    partial   # Not yet closed via #1234; still\n"
+        "                            # blocked.\n",
+    )
+    _snapshot(tmp_path, {"1234": "CLOSED"})
+    problems = mod.find_problems(tmp_path)
+    assert len(problems) == 1, problems
+    assert "#1234" in problems[0]
+
+
 # -- staleness is loud, never a silent pass (#1950 round 2) -------------------
 
 
