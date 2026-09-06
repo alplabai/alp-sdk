@@ -47,10 +47,22 @@ ipc:
   - m55_hp
   - m55_he
   status: blocked
-  reason: memory_map.base is TBD for region 'mram_main' in SoM E1M-AEN801; this SoM
-    hasn't been HW-mapped yet so IPC carve-outs cannot be allocated.  Add a `memory_map:`
-    block to metadata/e1m_modules/E1M-AEN801.yaml (or per-region `base`) or remove
-    the matching ipc entry from board.yaml.
+  reason: 'ipc entry ''alp_shmem0'' endpoints [''m55_hp'', ''m55_he''] only match
+    memory_map region(s) in SoM E1M-AEN801 that are ineligible for an IPC carve-out:
+    ''mcuboot'' (region ''mcuboot'' [0x80000000, 0x80010000) is flash-class (contained
+    in the SoC''s declared on-die MRAM aperture) -- not safe as an IPC carve-out target);
+    ''reserved'' (region ''reserved'' [0x80550000, 0x80560000) is flash-class (contained
+    in the SoC''s declared on-die MRAM aperture) -- not safe as an IPC carve-out target);
+    ''storage'' (region ''storage'' [0x80560000, 0x80578000) is flash-class (contained
+    in the SoC''s declared on-die MRAM aperture) -- not safe as an IPC carve-out target);
+    ''atoc'' (region ''atoc'' [0x80578000, 0x80580000) is flash-class (contained in
+    the SoC''s declared on-die MRAM aperture) -- not safe as an IPC carve-out target);
+    ''mram_main'' (region ''mram_main'' has an unresolved base (''TBD'') so containment
+    against the declared MRAM aperture can''t be verified, and its authored write_authority
+    is ''composite'', not ''customer_runtime'').  Add a region whose resolved base
+    sits outside the SoC''s declared MRAM aperture (or, if inside it, one that resolves
+    `write_authority: customer_runtime`) to metadata/e1m_modules/E1M-AEN801.yaml,
+    or remove the matching ipc entry from board.yaml.'
 helper_mcus:
 - name: cc3501e_otp
   chip: cc3501e
