@@ -214,6 +214,77 @@ def test_semicolon_between_citation_and_marker_is_not_flagged(tmp_path):
     assert mod.find_problems(tmp_path) == []
 
 
+# -- negation/futurity overrides a bare marker word (#1963) --------------------
+#
+# `_HISTORICAL_RE` used to win outright on a marker word anywhere in the
+# clause, so a genuine still-blocking claim that merely names what would
+# eventually land it ("not yet fixed", "until ... lands", "waiting on ...
+# resolved", "must be done before ...") classified as historical and was
+# silently skipped. Each of these four MUST now be flagged as a live
+# blocker (mutation proof: revert `_FUTURITY_RE` and each goes back to
+# skipped).
+
+
+def test_not_yet_fixed_is_flagged_as_live_blocker(tmp_path):
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "widget",
+        "chip_id: widget\n"
+        "driver_status:    partial   # Still partial: DMA path not yet\n"
+        "                            # fixed (#1234).\n",
+    )
+    _snapshot(tmp_path, {"1234": "CLOSED"})
+    problems = mod.find_problems(tmp_path)
+    assert len(problems) == 1, problems
+    assert "#1234" in problems[0]
+
+
+def test_until_lands_is_flagged_as_live_blocker(tmp_path):
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "widget",
+        "chip_id: widget\n"
+        "driver_status:    partial   # Blocked on #1234 until the\n"
+        "                            # pad-routing rework lands.\n",
+    )
+    _snapshot(tmp_path, {"1234": "CLOSED"})
+    problems = mod.find_problems(tmp_path)
+    assert len(problems) == 1, problems
+    assert "#1234" in problems[0]
+
+
+def test_waiting_on_resolved_is_flagged_as_live_blocker(tmp_path):
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "widget",
+        "chip_id: widget\n"
+        "driver_status:    partial   # Waiting on #1234 to be resolved\n"
+        "                            # before this can go complete.\n",
+    )
+    _snapshot(tmp_path, {"1234": "CLOSED"})
+    problems = mod.find_problems(tmp_path)
+    assert len(problems) == 1, problems
+    assert "#1234" in problems[0]
+
+
+def test_must_be_done_before_is_flagged_as_live_blocker(tmp_path):
+    mod = _load()
+    _chip_yaml(
+        tmp_path,
+        "widget",
+        "chip_id: widget\n"
+        "driver_status:    partial   # Open: #1234 must be done before\n"
+        "                            # the driver is complete.\n",
+    )
+    _snapshot(tmp_path, {"1234": "CLOSED"})
+    problems = mod.find_problems(tmp_path)
+    assert len(problems) == 1, problems
+    assert "#1234" in problems[0]
+
+
 # -- staleness is loud, never a silent pass (#1950 round 2) -------------------
 
 

@@ -29,10 +29,32 @@ CATCHES:
 
 DOES NOT CATCH, on purpose (scope, per #1950's own design discussion):
   * a citation anywhere else -- `changelog.d/`, `CHANGELOG.md`, ADR prose,
-    `notes:` blocks, any other YAML field's comment. Those files are full of
-    legitimate historical references ("fixed in #N") and a blanket `#NNNN`
-    harvest over them is noise from day one. Widening the harvester there is
-    filed as a follow-up, #1958, if it turns out to be cheap.
+    `notes:` blocks, any other YAML field's comment. #1958 asked whether
+    widening the harvester there is cheap enough to do; it was MEASURED, not
+    guessed, and the answer is no, not with this heuristic. Applying the same
+    historical/futurity classifier to a naive `#NNNN` harvest over all four
+    locations on the real tree (2026-09) found 1627 citations, of which 17
+    would have hard-failed the gate. All 17 were read by hand and every one
+    is a false positive: changelog/ADR prose narrates history in vocabulary
+    the driver-status word-list was never tuned for ("Added ADC oversample +
+    resolution control (#494)", "Settled (#1244): ...", "#495, #494 and #496
+    ... wasn't complete") with none of `_HISTORICAL_RE`'s marker words
+    nearby, so each reads as a live blocker to this classifier though every
+    cited issue is long since closed. Worse, `CHANGELOG.md`'s released
+    sections describe a past tree on purpose (see
+    `check_changelog_citations.py`'s identical carve-out for `path:line`
+    citations) -- a "the order code stays TBD (#1241)" note that was
+    accurate the day it shipped becomes an unfixable false positive the
+    moment #1241 later closes, with no way to "correct" already-published
+    history. And widening would have missed the one REAL drift the same
+    corpus already contains (`docs/adr/0023-ethernet-out-of-the-alp-
+    surface.md:221`, "#1241, still open" -- #1241 is in fact CLOSED): the
+    neighbouring clause's "#1244, now fixed" trips `_HISTORICAL_RE` for the
+    whole compound sentence, clearing #1241's flag too. A gate that is
+    `gate: true` cannot ship 17-for-17 false positives to buy one still-
+    missed catch. Declined; #1958 is closed with this measurement rather
+    than widened. If the corpus or the classifier changes enough to move
+    that count, re-run the measurement -- don't re-guess it.
   * a citation whose surrounding clause reads as historical rather than a
     blocker claim (see HISTORICAL below) -- reported as neither pass nor
     fail; it is simply not examined.
@@ -61,11 +83,19 @@ misclassified a plainly-historical citation as a live blocker -- the
 false-positive direction this gate must never take. This is a word-list
 heuristic, not comprehension -- it is deliberately biased to UNDER-flag:
 "if you cannot distinguish blocked-on from landed-via, do not flag it".
-A blocker phrased with one of those words (e.g. "not yet fixed") can still
-slip through unflagged; that is the accepted cost of not spamming every
-"landed via #N" reference as a fresh failure. Measured: 4 of 11 realistic
-blocker phrasings are skipped this way. Tracked in #1963 -- NOT #1958,
-which is the unrelated harvester-scope widening cited at the top.
+A blocker phrased with one of those words used to slip through unflagged
+whenever the marker sat anywhere in the clause, regardless of tense --
+measured at 4 of 11 realistic blocker phrasings (#1963): "not yet fixed",
+"until ... lands", "waiting on ... resolved", "must be done before ...".
+`_FUTURITY_RE` now overrides `_HISTORICAL_RE` back to a live blocker when
+one of those four negation/futurity cues (`not yet`, `until`, `waiting on`,
+`must be`) sits in the same clause as the marker -- the marker word alone no
+longer wins. This is still a word-list heuristic, not comprehension: a
+blocker phrased with a marker word and NONE of those four cues (e.g. bare
+"not fixed", no "yet") still slips through unflagged; that residual gap is
+the accepted cost of not spamming every "landed via #N" reference as a
+fresh failure. #1963 is otherwise closed by this change -- NOT #1958, which
+is the unrelated harvester-scope widening cited at the top.
 
 STALENESS -- this gate is OFFLINE
 ----------------------------------
@@ -140,6 +170,27 @@ _CITATION_RE = re.compile(r"(?<!\w)#(\d{1,6})\b")
 #: Word-list historical marker -- see the HISTORICAL section above.
 _HISTORICAL_RE = re.compile(
     r"\b(via|closed|closing|land(?:ed|s)?|fixed|resolved|merged|shipped|done|already)\b",
+    re.IGNORECASE,
+)
+
+#: Negation/futurity override for `_HISTORICAL_RE` (#1963) -- a marker word
+#: anywhere in the clause used to win outright, so a genuine blocker claim
+#: that merely *mentions* what would land it ("not yet fixed", "until ...
+#: lands", "waiting on ... resolved", "must be done before ...") classified
+#: as historical and was silently skipped. Measured: 4 of 11 realistic
+#: blocker phrasings probed on #1963 do this. Each pairs a marker word with
+#: one of these four cues signalling the marker verb HASN'T happened yet;
+#: any hit here overrides `_HISTORICAL_RE` back to a live blocker regardless
+#: of where the marker sits. Checked against the real tree's 15 harvested
+#: citations (`python3 scripts/check_issue_citations.py`): none contain any
+#: of these cues, so this tightening flags zero currently-passing citations
+#: -- the four fixtures below are synthetic, not from the tree.
+#: Deliberately NOT a general leading-vs-trailing-phrase classifier (the
+#: gate's bias is to under-flag): a blocker phrased without one of these
+#: four cues (e.g. bare "not fixed" with no "yet") still slips through
+#: unflagged, same as before.
+_FUTURITY_RE = re.compile(
+    r"\bnot\s+yet\b|\buntil\b|\bwaiting\s+on\b|\bmust\s+be\b",
     re.IGNORECASE,
 )
 
@@ -231,7 +282,9 @@ def _citations_in_block(block_text: str) -> list[tuple[int, bool, str]]:
     out = []
     for m in _CITATION_RE.finditer(block_text):
         clause = _clause_around(block_text, m.start(), m.end())
-        historical = bool(_HISTORICAL_RE.search(clause))
+        historical = bool(_HISTORICAL_RE.search(clause)) and not _FUTURITY_RE.search(
+            clause
+        )
         out.append((int(m.group(1)), historical, clause))
     return out
 
