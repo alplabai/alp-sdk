@@ -604,7 +604,21 @@ static void cc3501e_wifi_probe(cc3501e_t *fw)
 /* Cap each STATUS frame so the hold-off budget above is REAL.  Charging only the
  * sleep while cc3501e_ota_status blocked for CC3501E_OTA_BENCH_TIMEOUT_MS made
  * the nominal 60 s hold-off run for up to ~1 h, which is why the 2026-08-21 run
- * sat at off=16384 forever and printed nothing. */
+ * sat at off=16384 forever and printed nothing.
+ *
+ * #1953 round-18: this was defined but never actually passed to
+ * cc3501e_ota_status() below -- both call sites used a bare `0u`.  That was
+ * harmless under the pre-#1953 sleep-only poll_by_repeat(), which floored a
+ * zero timeout to a 1 ms retry budget and so still made a second attempt on a
+ * still-busy peer.  The #1953 deadline rewrite makes `timeout_ms == 0` an
+ * honest zero-budget, single-attempt poll (see poll_by_repeat()'s own
+ * `test_zero_timeout_still_makes_one_attempt_1953`), which silently dropped
+ * that second attempt here.  Passing this real, already-intended budget
+ * instead of `0u` restores retry room for a STATUS query that lands on a
+ * transient BUSY/IO, without reintroducing an unbounded wait -- matches
+ * chips/cc3501e/cc3501e_ota.c's own CC3501E_OTA_BLACKOUT_POLL_TIMEOUT_MS
+ * (also 200 ms), the driver's per-frame cap during the same kind of
+ * flash-blackout window. */
 #define CC3501E_OTA_BENCH_FLUSH_POLL_TIMEOUT_MS 200u
 
 /* #1610 DISCRIMINATOR: set to 0 to run the OTA with NO preceding radio activity.
@@ -758,7 +772,10 @@ static void cc3501e_demo_ota(cc3501e_t *fw)
 		s = cc3501e_ota_begin(fw, (uint32_t)image_len, CC3501E_OTA_DEMO_TIMEOUT_MS);
 		if (s == ALP_OK) break;
 		alp_cc3501e_ota_status_t bs = { 0 };
-		const alp_status_t       bq = cc3501e_ota_status(fw, &bs, 0u);
+		/* Real budget, not 0u (#1953 round-18) -- see
+		 * CC3501E_OTA_BENCH_FLUSH_POLL_TIMEOUT_MS's definition above. */
+		const alp_status_t bq =
+		    cc3501e_ota_status(fw, &bs, CC3501E_OTA_BENCH_FLUSH_POLL_TIMEOUT_MS);
 		printf("[cc3501e-bringup] OTA begin attempt %u -> %d after %u ms; device: "
 		       "status=%d state=%d cursor=%d busy=%d\n",
 		       attempt,
@@ -839,7 +856,9 @@ static void cc3501e_demo_ota(cc3501e_t *fw)
 			 * short hold-offs that dominate a healthy stream. */
 			int64_t last_beat = 0;
 			for (;;) {
-				qs = cc3501e_ota_status(fw, &ps, 0u);
+				/* Real budget, not 0u (#1953 round-18) -- see
+				 * CC3501E_OTA_BENCH_FLUSH_POLL_TIMEOUT_MS's definition above. */
+				qs = cc3501e_ota_status(fw, &ps, CC3501E_OTA_BENCH_FLUSH_POLL_TIMEOUT_MS);
 				if (qs == ALP_OK) {
 					last_ok = ps;
 					have_ok = true;

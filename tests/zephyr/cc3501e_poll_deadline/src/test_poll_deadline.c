@@ -176,10 +176,19 @@ ZTEST(cc3501e_poll_deadline, test_zero_timeout_still_makes_one_attempt_1953)
 	alp_status_t s = cc3501e_ble_adv_stop(&fw, 0u);
 
 	zassert_equal(s, ALP_ERR_TIMEOUT, "zero budget must still resolve, not hang (got %d)", s);
-	zassert_true(g_transceive_calls >= 3u,
-	             "zero timeout_ms must still make at least one full attempt (got %u transceive "
-	             "calls)",
-	             g_transceive_calls);
+	/* Exactly 3, not >= 3: the pre-fix sleep-only budget (`remaining =
+	 * (timeout_ms > 0u) ? timeout_ms : 1u`) floors a zero timeout to a 1 ms
+	 * sleep budget, buying a SECOND attempt (6 calls) before the retry-wrapper
+	 * gives up -- so `>= 3u` passed on both the fixed and the reverted form
+	 * and locked nothing (round-18 review). The deadline form's
+	 * `deadline_ms == alp_uptime_ms()` at entry is already elapsed as soon as
+	 * the first attempt's simulated cost advances the fake clock, so exactly
+	 * ONE attempt (3 calls) is the only value this test may accept. */
+	zassert_equal(g_transceive_calls,
+	              3u,
+	              "zero timeout_ms must make exactly one attempt, no more (got %u transceive "
+	              "calls)",
+	              g_transceive_calls);
 }
 
 ZTEST_SUITE(cc3501e_poll_deadline, NULL, NULL, reset_before, NULL, NULL);
