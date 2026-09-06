@@ -941,6 +941,12 @@ def _load_aen_on_module_links(metadata_root: Path) -> dict[str, Any]:
         if key not in links:
             raise ZephyrBoardEmitError(
                 f"{path} on_module_links: is missing {key!r}")
+    risk = links["rtc_alarm"].get("risk")
+    if risk is not None and not isinstance(risk, dict):
+        raise ZephyrBoardEmitError(
+            f"{path} on_module_links.rtc_alarm.risk must be a map keyed by "
+            "SoC `part` designator (e.g. {\"E8\": \"...\"}), not a bare "
+            "string -- a part-scoped risk note needs the part key (#1988)")
     return links
 
 

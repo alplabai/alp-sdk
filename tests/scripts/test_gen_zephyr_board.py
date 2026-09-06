@@ -525,10 +525,14 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
         self.assertIn("(Alif Ensemble E9)", pinctrl)
         # The SoC-JSON path in the generated-file banner and the peripherals
         # overlay name legitimately still say `e8` -- they are the file names,
-        # not the part designator. Nothing else may.
+        # not the part designator. Nothing else may. "AE822 DFP" pins the
+        # CLASS this loop guards against (#1988): any string evidenced only
+        # against the E8's own DFP must not survive onto a board mutated to
+        # another part, not just the one instance already fixed below.
         for emitted in (dts, kconfig, pinctrl):
             self.assertNotIn("Ensemble E8", emitted)
             self.assertNotIn("Alif E8", emitted)
+            self.assertNotIn("AE822 DFP", emitted)
 
     def test_rtc_alarm_risk_is_scoped_to_the_part_it_was_evidenced_against(
             self) -> None:
@@ -553,6 +557,23 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
         real_dts = next(v for k, v in real_files.items() if k.endswith(".dts"))
         self.assertIn("AE822 DFP", real_dts)
         self.assertIn("LPGPIO_CTRL_n", real_dts)
+
+    def test_rtc_alarm_risk_must_be_a_part_keyed_map(self) -> None:
+        """`_load_aen_on_module_links()` shape-checks `rtc_alarm.risk` the
+        same way it already shape-checks `brd_i2c` / `rtc_alarm` themselves
+        (#1988): reverting the YAML to the pre-#1988 flat-string form must
+        raise the same `ZephyrBoardEmitError`, naming the file, rather than
+        an uncaught `AttributeError` from the `.get(part)` lookup deep in
+        `_aen_brd_i2c_dts()`."""
+        with _MutatedMetadata() as mm:
+            mm.sub(
+                "e1m_modules/aen/on-module-links.yaml",
+                "    risk:\n      E8: >-\n",
+                "    risk: >-\n")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        self.assertIn("on-module-links.yaml", str(ctx.exception))
+        self.assertIn("rtc_alarm.risk", str(ctx.exception))
 
     def test_peripherals_overlay_is_read_from_the_soc_json(self) -> None:
         with _MutatedMetadata() as mm:
