@@ -86,11 +86,15 @@ Tan's relocated planner fans out:
 - `build/m55_hp-zephyr/` (Zephyr against `BOARD = alp_e1m_aen801_m55_hp`)
   -- this slice is real and builds today; see
   [`docs/bring-up-aen.md`](../../../docs/bring-up-aen.md).
+- `build/m55_he-zephyr/` (Zephyr against
+  `BOARD = alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`) -- the SoM
+  topology default stock-shim image (see the intro above); builds
+  today, has no RPMsg role in this demo.
 
 `tan build` has no per-slice `--core` flag -- it rebuilds every slice
 on each invocation. The blocked `a32_cluster` slice is carried, not
-dropped, so `tan build` still succeeds overall and rebuilds the Zephyr
-slice incrementally in seconds. See
+dropped, so `tan build` still succeeds overall and rebuilds the two
+Zephyr slices incrementally in seconds. See
 [`docs/heterogeneous-builds.md`](../../../docs/heterogeneous-builds.md#iterating-on-one-slice).
 
 ## Reference

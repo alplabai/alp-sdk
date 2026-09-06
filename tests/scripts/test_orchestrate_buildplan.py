@@ -407,9 +407,9 @@ def test_emit_build_plan_missing_board_tree_blocks_command_not_dropped(
     assert "alp_e1m_aen801_m55_hp" not in warning["message"]
 
 
-AEN801_STOCK_A32_DEFAULT = """
+AEN_A32_STOCK_DEFAULT = """
 som:
-  sku: E1M-AEN801
+  sku: {sku}
 
 cores:
   m55_hp:
@@ -419,23 +419,48 @@ cores:
 """
 
 
+@pytest.mark.parametrize(
+    ("sku", "machine", "expect_in_message", "expect_not_in_message"),
+    [
+        # e1m-aen501/601/803-a32 ship NO meta-alp-sdk/conf/machine/*.conf
+        # at all -- the "strictly more unbuildable" class; only #1971
+        # applies (there is no broken/commented-out `require` to blame,
+        # so no #1968). AEN803 is the bench module #1982 itself names.
+        ("E1M-AEN501", "e1m-aen501-a32", ("#1971",), ("#1968",)),
+        ("E1M-AEN601", "e1m-aen601-a32", ("#1971",), ("#1968",)),
+        ("E1M-AEN803", "e1m-aen803-a32", ("#1971",), ("#1968",)),
+        # e1m-aen701-a32 ships a conf but its `require` is commented out
+        # pending meta-alif-ensemble being vendored -- also #1971 only.
+        ("E1M-AEN701", "e1m-aen701-a32", ("#1971",), ("#1968",)),
+        # e1m-aen801-a32 ships a conf with an ACTIVE `require` naming a
+        # file absent upstream -- the one class that also cites #1968.
+        ("E1M-AEN801", "e1m-aen801-a32", ("#1968", "#1971"), ()),
+    ],
+)
 def test_emit_build_plan_aen_a32_machine_unbuildable_blocks_command(
     tmp_path: Path,
+    sku: str,
+    machine: str,
+    expect_in_message: tuple[str, ...],
+    expect_not_in_message: tuple[str, ...],
 ) -> None:
-    """The AEN A32 cluster's default topology (`app: alp-image-edge`,
-    `machine: e1m-aen801-a32`) is the `STOCK_IMAGE_APP` token, exempt
-    from the `recipe:` requirement -- but `e1m-aen801-a32` is a
-    known-non-buildable MACHINE (issue #1982: its base `require` names
-    a file absent from every branch of the public meta-alif-ensemble,
-    #1968, on a layer that is Yocto-series-incompatible with this
-    repo's Scarthgap baseline regardless, #1971).  The plan must never
-    carry `bitbake alp-image-edge` for it -- the slice is still
-    carried (never dropped) with `command: null` plus a
-    `yocto-machine-unbuildable` warning naming the blocking issues."""
+    """Every AEN A32 cluster's default topology (`app: alp-image-edge`,
+    `machine: <sku>-a32`) is the `STOCK_IMAGE_APP` token, exempt from
+    the `recipe:` requirement -- but all five AEN SoMs that declare a
+    `topology.a32_cluster.machine:` (`E1M-AEN{501,601,701,801,803}`)
+    are known-non-buildable MACHINEs (issue #1982), split into two
+    failure classes covered here so neither regresses silently: AEN701
+    and AEN801 ship a conf with a broken or commented-out `require`;
+    AEN501/601/803 (the bench module) ship no conf at all. The plan
+    must never carry `bitbake alp-image-edge` for any of them -- the
+    slice is still carried (never dropped) with `command: null` plus a
+    `yocto-machine-unbuildable` warning naming the blocking issues.
+    Regression: before this was parametrized, only AEN801 (the lead
+    part, not the bench module) had end-to-end coverage."""
     import json as _json
     from alp_orchestrate import emit_build_plan
 
-    path = _write_board(tmp_path, AEN801_STOCK_A32_DEFAULT)
+    path = _write_board(tmp_path, AEN_A32_STOCK_DEFAULT.format(sku=sku))
     plan = _json.loads(emit_build_plan(
         load_board_yaml(path), board_yaml=path, build_root=Path("build")))
 
@@ -444,9 +469,11 @@ def test_emit_build_plan_aen_a32_machine_unbuildable_blocks_command(
 
     warning = next(w for w in plan["warnings"] if w["coreId"] == "a32_cluster")
     assert warning["code"] == "yocto-machine-unbuildable"
-    assert "e1m-aen801-a32" in warning["message"]
-    assert "#1968" in warning["message"]
-    assert "#1971" in warning["message"]
+    assert machine in warning["message"]
+    for needle in expect_in_message:
+        assert needle in warning["message"]
+    for needle in expect_not_in_message:
+        assert needle not in warning["message"]
 
 
 def test_real_zephyr_board_names_lists_every_shipped_tree() -> None:
