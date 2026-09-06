@@ -107,6 +107,10 @@ Makefile
 # via `doxygen docs/doxygen/Doxyfile`, never committed (#1573: a stale
 # committed snapshot drifted from source docs with nothing to catch it).
 doxygen-out/
+# Doxygen's WARN_LOGFILE (docs/doxygen/Doxyfile:32) -- the same local run
+# drops this beside doxygen-out/.  `doxygen-out/` was already ignored; this
+# one was not, so running the doxygen gate locally left a dirty tree.
+doxygen-warnings.log
 
 # Test results
 Testing/

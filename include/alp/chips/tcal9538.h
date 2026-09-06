@@ -20,14 +20,18 @@
  *
  * This driver also drives the register-compatible TCA6408A/PCA9538
  * family (single A0 strap -> 0x20..0x21) used as the E1M EVK's U35
- * alt-population (TCA6408ARSVR, R112 fitted / R145 DNP).  0x20 is
- * BENCH-CONFIRMED 2026-06-16 on the E1M EVK -- see
- * `EVK_I2C_ADDR_TCA6408A_MAIN` in `<alp/boards/alp_e1m_evk_routes.h>`.
- * `tcal9538_init()` therefore accepts both strap families; do not
- * re-narrow the address check to the TCAL9538-only range (0x70..0x73)
- * without first checking for TCA6408A-populated boards.
+ * alt-population (TCA6408ARSVR, R112 fitted / R145 DNP).  0x20 was
+ * BENCH-CONFIRMED 2026-06-16 on an EARLIER E1M EVK revision, but is
+ * NOT ASSEMBLED on the current (Alif) revision -- neither of two
+ * 2026-09-05 boards answers there (alp-sdk#1974) -- see
+ * `EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED` in
+ * `<alp/boards/alp_e1m_evk_routes.h>`.  `tcal9538_init()` therefore
+ * accepts both strap families; do not re-narrow the address check to
+ * the TCAL9538-only range (0x70..0x73) without first checking for
+ * TCA6408A-populated boards.
  *
- * On the E1M EVK the chip sits on ALP_E1M_I2C0 at 0x73 (A1=1, A0=1)
+ * On the current E1M EVK revision the chip sits on ALP_E1M_I2C0 at
+ * 0x73 (A1=1, A0=1) -- CORRECTED 2026-09-05 from 0x72 (alp-sdk#1974) --
  * and fans out LCD / camera / capacitive-touch control lines plus
  * four sensor interrupt inputs.  See
  * `<alp/boards/alp_e1m_evk.h>`'s `evk_ioexp_pin_t` enum
@@ -58,8 +62,10 @@ extern "C" {
 
 /**
  * TCA6408A/PCA9538 alt-part single-strap base (A0=0).  Strap range:
- * ALT_BASE..+1 (0x20..0x21).  0x20 is BENCH-CONFIRMED 2026-06-16 on the
- * E1M EVK -- see EVK_I2C_ADDR_TCA6408A_MAIN in <alp/boards/alp_e1m_evk_routes.h>.
+ * ALT_BASE..+1 (0x20..0x21).  0x20 was BENCH-CONFIRMED 2026-06-16 on an
+ * EARLIER E1M EVK revision; NOT ASSEMBLED on the current one (alp-sdk#1974)
+ * -- see EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED in
+ * <alp/boards/alp_e1m_evk_routes.h>.
  *
  * Kept on ONE line deliberately: scripts/abi_snapshot.py only captures a
  * macro's value when the `#define` is not line-continued, so a wrapped form

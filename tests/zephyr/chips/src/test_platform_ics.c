@@ -266,7 +266,8 @@ ZTEST(alp_chips, test_tcal9538_init_null_args)
 /* #739: address must fall inside either the TCA9538/TCAL9538 A1A0
  * strap range (0x70..0x73) or the register-compatible TCA6408A/
  * PCA9538 alt-part's single-A0 strap range (0x20..0x21 -- E1M EVK's
- * TCA6408A alt-population, EVK_I2C_ADDR_TCA6408A_MAIN); 0 is the
+ * TCA6408A alt-population, EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED on
+ * the current EVK revision, alp-sdk#1974/#1980); 0 is the
  * documented "use base" sentinel and stays legal. */
 ZTEST(alp_chips, test_tcal9538_init_validates_address_strap_range)
 {
@@ -294,8 +295,8 @@ ZTEST(alp_chips, test_tcal9538_init_validates_address_strap_range)
 
 /* Regression for the reviewed fix: a strap-range check that only
  * admits 0x70..0x73 silently breaks every E1M EVK assembled with the
- * TCA6408A alt-population (EVK_I2C_ADDR_TCA6408A_MAIN = 0x20, bench-
- * confirmed) -- the exact case examples/peripheral-io/i2c-device-hub
+ * TCA6408A alt-population (EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED
+ * = 0x20, bench-confirmed) -- the exact case examples/peripheral-io/i2c-device-hub
  * probes. This bus is backed by native_sim's i2c-emul controller with
  * no fake TCA6408A/TCAL9538 target attached, so init() can't reach
  * ALP_OK here (reg_read fails past the address check, same as every

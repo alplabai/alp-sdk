@@ -34,8 +34,10 @@ alp_status_t tcal9538_init(tcal9538_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
 	 * TCAL9538 A1A0 strap range (0x70..0x73) or the register-
 	 * compatible TCA6408A/PCA9538 alt-part's single-A0 strap range
 	 * (0x20..0x21 -- E1M EVK's TCA6408A alt-population, BENCH-
-	 * CONFIRMED at 0x20; see EVK_I2C_ADDR_TCA6408A_MAIN). Do not
-	 * narrow this back to the TCAL9538-only range. */
+	 * CONFIRMED at 0x20 on an earlier EVK revision; NOT ASSEMBLED on
+	 * the current one, see EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED,
+	 * alp-sdk#1974/#1980). Do not narrow this back to the
+	 * TCAL9538-only range. */
 	bool is_tcal9538_strap =
 	    addr_7bit >= TCAL9538_I2C_ADDR_BASE && addr_7bit <= TCAL9538_I2C_ADDR_BASE + 3u;
 	bool is_tca6408a_strap =

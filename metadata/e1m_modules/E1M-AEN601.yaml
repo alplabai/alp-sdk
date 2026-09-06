@@ -41,26 +41,42 @@ on_module:
   # metadata/e1m_modules/E1M-AEN801.yaml + metadata/chips/dp83825.yaml for
   # the bench evidence and the order-code caveat (#1241 "Blocked on").
   ethernet_phy:         dp83825
+  # Both OSPI0 devices below share the single OSPI0 octal bus, separated
+  # only by chip-select. Per metadata/e1m_modules/E1M-AEN801.yaml (the
+  # E1M-AEN-2626-R2 netlist -- one shared PCB across the family, so PCB
+  # routing does not change with SoC tier or population): U9 (RAM
+  # footprint) -> OSPI0_SS0 => CS0; U10 (NOR footprint) -> OSPI0_SS1 => CS1.
   ospi_memories:
     ospi0:
       chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
       assembled:      optional            # BOM variant
       capacity_mbit:  256                 # 256 Mbit (32 MiB)
-      chip_select:    0                   # OSPI0 CS0
+      chip_select:    1                   # OSPI0 CS1 -- U10 -> OSPI0_SS1 per the R2 netlist
       role:           app_storage
     ospi1:
       chip:           TBD            # OSPI1 controller unused on this SoM: both OSPI devices
-      assembled:      optional       # share the OSPI0 octal bus (NOR = CS0, HyperRAM = CS1)
+      assembled:      optional       # share the OSPI0 octal bus (HyperRAM = CS0, NOR = CS1)
       capacity_mbit:  TBD
       role:           data_log
   # External HyperRAM -- volatile XIP / scratch RAM, separate from the
   # NOR flash above.  Shares the OSPI0 octal controller with the flash,
-  # separated only by chip-select (NOR flash = CS0, HyperRAM = CS1).
+  # separated only by chip-select (HyperRAM = CS0, NOR = CS1).
   hyperram:
     chip:           W958D8NBYA5I    # Winbond OctalRAM (HyperBus)
-    capacity_mbit:  256             # 256 Mbit (32 MiB)
+    # UNCONFIRMED, not `true` (round-2 correction, #1990): the prior
+    # `assembled: true` here cited this file's own "populated on every AEN
+    # BOM variant" memory-derivation note as its source -- that note is
+    # boilerplate shared verbatim across the whole AEN family and is
+    # directly falsified by E1M-AEN801.yaml, which shares this SoM's PCB
+    # and the same family invariant yet ships HyperRAM `assembled: false`
+    # (DNI). No BOM, netlist, or bench measurement confirms population on
+    # THIS SKU either way, so `optional` (per-BOM-variant, same shape as
+    # ospi0 NOR above) replaces the unsupported `true`. Do not set this
+    # back to `true` without a per-row source.
+    assembled:      optional
+    capacity_mbit:  256             # 256 Mbit (32 MiB) -- the part, if fitted
     interface:      ospi0
-    chip_select:    1
+    chip_select:    0                 # OSPI0 CS0 -- U9 -> OSPI0_SS0 per the R2 netlist
 
   i2c_devices:
     # HELD, NOT the disproven LPI2C0 claim (#1848, ADR 0017 amended
@@ -104,13 +120,15 @@ on_module:
 # Off-SoC module memory in the canonical cross-family shape (see
 # som-preset-v1.schema.json `memory:`).  Values are DERIVED from the
 # on_module facts above, never invented:
-#   dram_mbit  <- on_module.hyperram.capacity_mbit (populated on every
-#                 AEN BOM variant).
+#   dram_mbit  <- TBD: on_module.hyperram is `assembled: optional` above --
+#                 whether this SKU's HyperRAM ships fitted is unconfirmed
+#                 (#1990), so a single number would be wrong for the DNI
+#                 variant.
 #   flash_mbit <- TBD: the OSPI0 NOR (256 Mbit) is `assembled: optional`
 #                 (per-BOM variant), so a single number would be wrong
 #                 for the DNI variant.
 memory:
-  dram_mbit:            256
+  dram_mbit:            TBD
   flash_mbit:           TBD
 
 inference:

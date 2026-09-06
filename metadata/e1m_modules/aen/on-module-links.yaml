@@ -137,12 +137,19 @@ on_module_links:
       interrupts = <171 3>, <172 3> ... in
       zephyr/dts/alif/ensemble_e8_peripherals.dtsi).  Pinctrl macro
       PIN_P15_0__LPGPIO = ALIF_PINMUX(15, 0, 0).
-    risk: >-
-      The AE822 DFP warns for port 15: "Note that LPGPIO_CTRL_n register
-      has a different layout!".  That is the most likely bench failure on
-      this alarm path and must NOT be mistaken for an RTC fault -- if the
-      alarm never fires, suspect the port-15 control-register layout
-      before suspecting U21.
+    # Keyed by the SoC's own `part` designator ("E8", "E3", ...), NOT by
+    # family: this file's `families: [aen]` scope covers every AEN SKU, but
+    # each part's DFP is a SEPARATE document, so a warning evidenced against
+    # one part's DFP is not evidence for another's silicon.  A part with no
+    # key here gets no risk paragraph emitted at all (#1988) -- an absent
+    # DFP citation is not a hedge-worded restatement, it is silence.
+    risk:
+      E8: >-
+        The AE822 DFP warns for port 15: "Note that LPGPIO_CTRL_n register
+        has a different layout!".  That is the most likely bench failure on
+        this alarm path and must NOT be mistaken for an RTC fault -- if the
+        alarm never fires, suspect the port-15 control-register layout
+        before suspecting U21.
     # MODULE_STBY (U21 pin 8, EVI) is a CARRIER-driven external event
     # input (E1M edge pin O2, R43 100k to +1V8) -- no SoC pad, so no link
     # here.

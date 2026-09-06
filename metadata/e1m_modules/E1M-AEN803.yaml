@@ -80,6 +80,15 @@ on_module:
   # separated only by chip-select (HyperRAM = CS0, NOR = CS1).
   hyperram:
     chip:           S80KS5122GABHM02  # Infineon/Cypress HyperRAM, U9 footprint
+    # Explicit, not the schema-default `true` left implicit -- the same
+    # omitted-key shape that made every consumer treat E1M-AEN801's DNI
+    # HyperRAM as fitted (see that file's `assembled: false` note). Here
+    # the explicit value is backed by a real per-SKU source: this file's
+    # own header states "both parts fitted, these exact MPNs -- IS the
+    # E1M-AEN803 SKU contract, not merely what happens to be on one bench
+    # unit," matching ospi0's own `assembled: true # fitted on this SKU
+    # (not BOM-optional)` just above.
+    assembled:      true
     capacity_mbit:  512               # 512 Mbit (64 MiB)
     interface:      ospi0
     chip_select:    0                 # OSPI0 CS0 -- U9 -> OSPI0_SS0 per the R2 netlist

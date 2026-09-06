@@ -68,10 +68,9 @@ E1M-X SoMs (`E1M-V2N101/102`, `E1M-V2M101/102`) target the separate
 ## I²C bus map (`alp-i2c0`)
 
 The EVK shares **one I²C bus** (`I2C0.SCL` / `I2C0.SDA`, pulled up
-4.7 kΩ to `+VIO`) across the on-board sensors, one populated TCAL9538
-I/O expander (a second footprint, U37, exists but is not assembled on
-this revision -- see the `0x71` row below), the INA236 current
-monitors, and the two TAS2563 smart amplifiers.  All addresses below are confirmed against the EVK
+4.7 kΩ to `+VIO`) across the on-board sensors, two TCAL9538 I/O
+expanders, the INA236 current monitors, and the two TAS2563 smart
+amplifiers.  All addresses below are confirmed against the EVK
 schematic (UG-E1M-001) and exposed as `EVK_I2C_ADDR_*` macros in
 [`<alp/boards/alp_e1m_evk.h>`](../../include/alp/boards/alp_e1m_evk.h).
 
@@ -88,8 +87,8 @@ schematic (UG-E1M-001) and exposed as `EVK_I2C_ADDR_*` macros in
 | `0x4E`          | TAS2563 (U28)            | `EVK_I2C_ADDR_TAS2563_HIGH`        | Smart-amp #2 (AD0 = 10 kΩ to VDD)                   |
 | `0x68`          | BMI323 (U13)             | `EVK_I2C_ADDR_BMI323`              | Secondary 6-axis IMU (SDO=0; no collision with ICM) |
 | `0x69`          | ICM-42670-P (U12)        | `EVK_I2C_ADDR_ICM42670`            | Primary 6-axis IMU (AD0=1)                          |
-| `0x71`          | TCAL9538 PCIe (U37)      | `EVK_I2C_ADDR_TCAL9538_PCIE`       | PCIe-side I/O expander (PCIe slot RST/WAKE/CLKREQ). **NOT ASSEMBLED on this EVK revision** -- confirmed by the maintainer (alp-sdk#1974): this revision, built for Alif, doesn't need the second expander. Kept as documentation for the footprint other revisions populate; expect a NACK here, not an ACK. |
-| `0x73`          | TCAL9538 main (U35)      | `EVK_I2C_ADDR_TCAL9538_MAIN`       | Main I/O expander (LCD/cam/CTP control + IMU IRQs).  Corrected from `0x72` to `0x73` (strapped `1110011`, A1=1, A0=1); 2 of 2 boards ACK at `0x73` and are silent at `0x72` (alp-sdk#1974). |
+| `0x71`          | TCAL9538 PCIe (U37)      | `EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED` | **NOT ASSEMBLED** on this EVK revision (alp-sdk#1974) -- would be the PCIe-side I/O expander (PCIe slot RST/WAKE/CLKREQ). The generator (#1980) renames the macro so the plain `EVK_I2C_ADDR_TCAL9538_PCIE` name is not defined. |
+| `0x73`          | TCAL9538 main (U35)      | `EVK_I2C_ADDR_TCAL9538_MAIN`       | Main I/O expander (LCD/cam/CTP control + IMU IRQs). CORRECTED 2026-09-05 from `0x72` (alp-sdk#1974): the maintainer's EVK I2C schedule gives 1110011 = `0x73`, and 2 of 2 boards answer there and are silent at `0x72`. |
 
 > **TMUX121 is not in this table.**  It's a passive analog/digital
 > I²C bus switch — addressless, controlled via dedicated pins
@@ -173,9 +172,8 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   through LSF0108 / LSF0102 to the IO-voltage select rail.
 - **PCIe / M.2:** Key M and Key E with PI3DBS12212A lane mux,
   SY75602 refclk buffer, **TMUX121NKGR** passive I²C mux
-  (pin-controlled, no I²C address), and an unpopulated footprint for a
-  second TCAL9538 (`0x71`, U37) for the PCIe-side resets/WAKE/CLKREQ
-  signals -- **NOT ASSEMBLED on this EVK revision** (alp-sdk#1974).
+  (pin-controlled, no I²C address), and a second TCAL9538 (`0x71`)
+  for the PCIe-side resets/WAKE/CLKREQ signals.
 - **Display:** 40-pin MIPI DSI connector for the **RK055HDMIPI4MA0**
   720p panel (NXP-supplied reference panel; drivers are available
   from NXP's MIPI-DSI panel collection).  Backlight rails + the

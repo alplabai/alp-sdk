@@ -89,23 +89,16 @@ tutorial's scan (`metadata/e1m_modules/E1M-AEN801.yaml` `i2c_devices:`
 `brd_i2c:`; `docs/bring-up-aen.md` §5.1, which also carries the OPTIGA
 scan caveat -- don't blind-scan that bus; see
 `examples/aen/aen-secure-element-sign` for a dedicated, targeted BRD_I2C
-probe instead).  A `0x48` in a scan of this bus is not the TMP112: on
-PRE-RESPIN carriers it's U32 INA236B (+V_CAM0 rail); on POST-RESPIN
-carriers it's the TAS2563 GLOBAL/broadcast address instead -- see the
-`0x48` entry in the board-populated list below.
+probe instead).  A `0x48` in a scan of this bus is U32 INA236B (+V_CAM0
+rail) on PRE-RESPIN carriers, not the TMP112.
 
 E1M-EVK board-populated (`metadata/boards/e1m-evk.yaml` `i2c_devices:`):
 
 ```
-0x20 ACK   -- TCA6408A U35 alt I/O expander (BOM variant -- ACKs INSTEAD
-              OF 0x73, not alongside it: R112/R145 are mutually exclusive)
 0x40 ACK   -- INA236 U21, +3V3 rail current monitor
 0x41 ACK   -- INA236 U31, +1V8 rail current monitor
 0x42 ACK   -- INA236 U33, +VIO rail current monitor
 0x47 ACK   -- BMP581 U14 barometer
-0x48 ACK   -- TAS2563 GLOBAL/broadcast address (every fitted TAS2563
-              answers here in addition to its own 0x4D/0x4E unit
-              address, alp-sdk#1976) -- not an unidentified device
 0x49 ACK   -- INA236 U34, +V_CAM1 rail current monitor
 0x4A ACK   -- INA236 U30, +5V rail current monitor
 0x4B ACK   -- INA236 U32, +V_CAM0 rail current monitor
@@ -115,15 +108,19 @@ E1M-EVK board-populated (`metadata/boards/e1m-evk.yaml` `i2c_devices:`):
 0x69 ACK   -- ICM-42670 U12 IMU (collides with BMI323 on pre-respin
               boards, which mis-strap U13 to 0x69 too -- BENCH-CONFIRMED
               2026-06-16)
-0x73 ACK   -- TCAL9538 U35 main I/O expander (BOM default -- see the
-              0x20 note above; corrected from 0x72, alp-sdk#1974)
+0x73 ACK   -- TCAL9538 U35 main I/O expander.  CORRECTED 2026-09-05
+              from 0x72 (alp-sdk#1974): the maintainer's EVK I2C
+              schedule gives 1110011 = 0x73, and 2 of 2 boards answer
+              there and are silent at 0x72.
 ```
 
-`0x71` (the second TCAL9538, U37, PCIe-side) does NOT ACK on this EVK
-revision -- U37 is **NOT ASSEMBLED** here (confirmed by the maintainer,
-alp-sdk#1974): this revision, built for Alif, doesn't need the second
-expander. The footprint is real and other revisions populate it; a NACK
-here is expected, not a fault.
+Do NOT expect an ACK at `0x71` or `0x20` on this EVK revision: both are
+genuine footprints (`EVK_I2C_ADDR_TCAL9538_PCIE_NOT_ASSEMBLED` for U37,
+`EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED` for U35's TCA6408ARSVR
+alternative -- R112/R145 are mutually exclusive, so at most one of
+TCAL9538-at-`0x73` / TCA6408A-at-`0x20` is ever populated) but neither
+is assembled here (alp-sdk#1974) -- confirmed silent (clean `-EIO`
+NACK) on both 2026-09-05 bench boards.
 
 ## On V2N's on-board sensor bus
 
@@ -185,12 +182,6 @@ Expected:
               address, see below)
               (include/alp/boards/alp_e1m_x_evk.h:51)
 ```
-
-> **Note:** the E1M-EVK's sibling macro (`EVK_I2C_ADDR_TCAL9538_MAIN`) was
-> bench-corrected from `0x72` to `0x73` under alp-sdk#1974. `XEVK_I2C_ADDR_TCAL9538`
-> above is still `0x72u` and has **not** been bench-checked on X-EVK silicon --
-> its strap may or may not match the E1M-EVK's. If a real X-EVK scan ACKs at
-> `0x73` instead of `0x72`, that is where to look first, not a new fault.
 
 Ten of the twelve addresses above come from the `XEVK_I2C_ADDR_*`
 macros (`include/alp/boards/alp_e1m_x_evk.h:48-52,80-86`), BENCH-
