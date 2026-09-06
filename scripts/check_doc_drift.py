@@ -189,6 +189,20 @@ _ALLOWLIST: set[str] = {
     # ALP_FLASH_REQUIRE_DPIDR above.
     "ALP_AEN_INCLUDE_DEVICE_CONFIG",
     "ALP_AEN_DEVICE_CONFIG_JSON",
+    # docs/bring-up-drpai-v2n.md's host-toolchain setup has the developer
+    # `export ALP_DRPAI_TVM_HOME=<rzv_drp-ai_tvm checkout>` and derive
+    # `ALP_DRPAI_TVM_APPS=$ALP_DRPAI_TVM_HOME/apps` from it by hand in their
+    # shell; ALP_DRPAI_TVM_APPS itself is a real, harvested identifier
+    # (src/yocto/CMakeLists.txt's `HINTS $ENV{ALP_DRPAI_TVM_APPS}`), but
+    # ALP_DRPAI_TVM_HOME is consumed nowhere in the CMake build -- its only
+    # in-tree reader is scripts/alp_model/adapters/drpai.py's
+    # `os.environ.get("ALP_DRPAI_TVM_HOME")`, an alp-sdk-side convenience
+    # auto-detect that ADR-0028 Task 6 deletes outright (the host-side model
+    # engine moves to tan-cli's tan.model). Allowlisted rather than
+    # harvest-widened so the doc's shell-export guidance -- which stays true
+    # regardless of what alp-sdk's own Python tooling does -- doesn't regress
+    # to "dead" the moment scripts/alp_model/ is gone (#1943).
+    "ALP_DRPAI_TVM_HOME",
 }
 
 # Identifier shapes we treat as SDK symbols.  The optional `CONFIG_`

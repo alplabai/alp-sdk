@@ -12,7 +12,7 @@ validated cleanly. Three in-tree consumers then disagree about what that
 means, which is the reason the refusal belongs in the schema rather than in
 any one of them:
 
-  * `alp_model.targets._accel_config` raises `KeyError` -- deliberately, per
+  * `alp_project_loader.accel_config` raises `KeyError` -- deliberately, per
     its own docstring: the truncated `ethos-u55-` must never be emitted.
   * `alp_orchestrate.kconfig._emit_inference` filters the entry out and falls
     back to `mac = 256`, which on a 128-MAC part emits `CONFIG_ETHOS_U55_256=y`
