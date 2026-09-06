@@ -137,10 +137,19 @@ STOCK_IMAGE_APP = "alp-image-edge"
 # establish why -- consulted by `_slice_command` so the planner refuses
 # these rather than hand a consumer a `bitbake` command guaranteed to
 # fail.  This is the SAME dict `scripts/check_yocto_machine_tree_parity.py`
-# consults for its self-cleaning CI gate (issue #1982 follow-up) -- do
-# not fork a second list; that gate fails the PR the day an entry here
-# no longer matches the tree (a conf ships, or a listed conf stops
-# existing), so it is safe to trust this dict is current.
+# consults (issue #1982 follow-up) -- do not fork a second list.  Be
+# precise about what that gate does and does not buy you: it is a
+# ONE-WAY absence check.  It fails the PR only for a `machine:` that
+# has NO conf under `meta-alp-sdk/conf/machine/` AND no entry here, so
+# a new SKU cannot fall through both unnoticed.  It does NOT fire when
+# a conf ships for a MACHINE listed here, and it does NOT fire when a
+# listed MACHINE's conf disappears -- a `.conf` merely existing is not
+# proof the MACHINE builds (`e1m-aen801-a32.conf` and
+# `e1m-aen701-a32.conf` both exist and are both still unbuildable).
+# So this dict is NOT self-maintaining: removing an entry once its
+# MACHINE genuinely builds is a human call, and nothing in CI will
+# remind you.  Re-read the per-entry reasons below before trusting
+# them; the gate's own docstring draws the same line.
 #
 # Five AEN A32-cluster carriers declare a `topology.a32_cluster.machine:`
 # today (`metadata/e1m_modules/E1M-AEN{501,601,701,801,803}.yaml`); all
