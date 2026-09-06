@@ -4007,6 +4007,11 @@
   "schema_version": 2,
   "soms": [
     {
+      "boot": {
+        "allowed_swap_algorithms": [],
+        "default_swap_algorithm": "none",
+        "single_slot": true
+      },
       "capabilities": {
         "cryptocell": true,
         "dma2d": true,
@@ -4061,6 +4066,11 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [],
+        "default_swap_algorithm": "none",
+        "single_slot": true
+      },
       "capabilities": {
         "cryptocell": true,
         "dma2d": true,
@@ -4116,6 +4126,11 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [],
+        "default_swap_algorithm": "none",
+        "single_slot": true
+      },
       "capabilities": {
         "cryptocell": true,
         "dma2d": true,
@@ -4177,6 +4192,11 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [],
+        "default_swap_algorithm": "none",
+        "single_slot": true
+      },
       "capabilities": {
         "cryptocell": true,
         "dave2d": true,
@@ -4241,6 +4261,11 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [],
+        "default_swap_algorithm": "none",
+        "single_slot": true
+      },
       "capabilities": {
         "cau": false,
         "cryptocell": true,
@@ -4305,6 +4330,11 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [],
+        "default_swap_algorithm": "none",
+        "single_slot": true
+      },
       "capabilities": {
         "cryptocell": true,
         "dave2d": true,
@@ -4369,6 +4399,11 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [],
+        "default_swap_algorithm": "none",
+        "single_slot": true
+      },
       "capabilities": {
         "cryptocell": true,
         "dave2d": true,
@@ -4433,6 +4468,15 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [
+          "scratch",
+          "move",
+          "overwrite"
+        ],
+        "default_swap_algorithm": "scratch",
+        "single_slot": false
+      },
       "capabilities": {
         "emmc_dma": true,
         "ethos_u65_count": 1,
@@ -4484,6 +4528,15 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [
+          "scratch",
+          "move",
+          "overwrite"
+        ],
+        "default_swap_algorithm": "scratch",
+        "single_slot": false
+      },
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
@@ -4535,6 +4588,15 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [
+          "scratch",
+          "move",
+          "overwrite"
+        ],
+        "default_swap_algorithm": "scratch",
+        "single_slot": false
+      },
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
@@ -4586,6 +4648,15 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [
+          "scratch",
+          "move",
+          "overwrite"
+        ],
+        "default_swap_algorithm": "scratch",
+        "single_slot": false
+      },
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
@@ -4637,6 +4708,15 @@
       }
     },
     {
+      "boot": {
+        "allowed_swap_algorithms": [
+          "scratch",
+          "move",
+          "overwrite"
+        ],
+        "default_swap_algorithm": "scratch",
+        "single_slot": false
+      },
       "capabilities": {
         "drp_ai": true,
         "emmc_dma": true,
