@@ -179,12 +179,13 @@ def test_baremetal_slice_and_stock_image_appdir_null_conform(tmp_path: Path):
     assert stock_image["appDir"] is None
 
 
-AEN801_YOCTO_APP_NO_RECIPE = """
+V2N_YOCTO_APP_NO_RECIPE = """
 som:
-  sku: E1M-AEN801
+  sku: E1M-V2N101
+  hw_rev: r1
 
 cores:
-  a32_cluster:
+  a55_cluster:
     os: yocto
     app: ./linux
 """
@@ -193,15 +194,22 @@ cores:
 def test_yocto_recipe_missing_warning_conforms(tmp_path: Path):
     """An app-only Yocto slice with no `recipe:` (issue #597) is carried
     with `command: null` plus a `yocto-recipe-missing` warning -- and the
-    resulting plan still validates against the schema."""
-    path = _write_board(tmp_path, AEN801_YOCTO_APP_NO_RECIPE)
+    resulting plan still validates against the schema.
+
+    Uses V2N101's `a55_cluster` (a buildable MACHINE), not an AEN A32
+    cluster: `e1m-aen801-a32` / `e1m-aen701-a32` are known-non-buildable
+    (issue #1982) and `_slice_command` now refuses those before ever
+    considering `recipe:`, which would fire a DIFFERENT warning
+    (`yocto-machine-unbuildable`, covered in
+    test_orchestrate_buildplan.py) and defeat the point of this test."""
+    path = _write_board(tmp_path, V2N_YOCTO_APP_NO_RECIPE)
     project = load_board_yaml(path)
     plan = json.loads(emit_build_plan(
         project, board_yaml=path, build_root=Path("build")))
 
     codes = [w["code"] for w in plan["warnings"]]
     assert "yocto-recipe-missing" in codes
-    slice_ = next(s for s in plan["slices"] if s["coreId"] == "a32_cluster")
+    slice_ = next(s for s in plan["slices"] if s["coreId"] == "a55_cluster")
     assert slice_["command"] is None
 
     validator = jsonschema.Draft202012Validator(

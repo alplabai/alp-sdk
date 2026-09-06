@@ -127,8 +127,123 @@ STOCK_SHIM_DIR = REPO / "firmware" / "alp-stock-shim"
 # filesystem path to their app source), this token IS already the real
 # bitbake recipe name for the stock alp-image-edge image, so it is exempt
 # from the `recipe:` requirement `_slice_command` enforces for a
-# project-supplied app-only Yocto slice (issue #597).
+# project-supplied app-only Yocto slice (issue #597).  That exemption
+# assumes `bitbake <STOCK_IMAGE_APP>` is actually a buildable target for
+# the slice's `machine:` -- see YOCTO_MACHINE_UNBUILDABLE below for the
+# machines where that assumption is currently false (issue #1982).
 STOCK_IMAGE_APP = "alp-image-edge"
+
+# Yocto MACHINEs that cannot build today, keyed to the issue(s) that
+# establish why -- consulted by `_slice_command` so the planner refuses
+# these rather than hand a consumer a `bitbake` command guaranteed to
+# fail.  This is the SAME dict `scripts/check_yocto_machine_tree_parity.py`
+# consults (issue #1982 follow-up) -- do not fork a second list.  Be
+# precise about what that gate does and does not buy you: it is a
+# ONE-WAY absence check.  It fails the PR only for a `machine:` that
+# has NO conf under `meta-alp-sdk/conf/machine/` AND no entry here, so
+# a new SKU cannot fall through both unnoticed.  It does NOT fire when
+# a conf ships for a MACHINE listed here, and it does NOT fire when a
+# listed MACHINE's conf disappears -- a `.conf` merely existing is not
+# proof the MACHINE builds (`e1m-aen801-a32.conf` and
+# `e1m-aen701-a32.conf` both exist and are both still unbuildable).
+# So this dict is NOT self-maintaining: removing an entry once its
+# MACHINE genuinely builds is a human call, and nothing in CI will
+# remind you.  Re-read the per-entry reasons below before trusting
+# them; the gate's own docstring draws the same line.
+#
+# Five AEN A32-cluster carriers declare a `topology.a32_cluster.machine:`
+# today (`metadata/e1m_modules/E1M-AEN{501,601,701,801,803}.yaml`); all
+# five are unbuildable, split into two distinct failure classes -- do
+# not conflate them:
+#
+#   * `e1m-aen801-a32.conf` has an ACTIVE, uncommented `require
+#     conf/machine/devkit-e8.conf` -- and that file exists in NEITHER
+#     branch of the public meta-alif-ensemble upstream (issue #1968), so
+#     this MACHINE fails at BitBake's own parse step.
+#   * `e1m-aen701-a32.conf`'s `require conf/machine/devkit-e7.conf` is
+#     already commented out in-tree (its own header: "Until the layer is
+#     vendored this require has no target ... intentional") -- unlike
+#     AEN801, `devkit-e7.conf` DOES exist on meta-alif-ensemble's
+#     `devkit-ex-b0` branch, but nothing here references it yet, so this
+#     MACHINE parses with no DEFAULTTUNE / kernel provider / TF-A
+#     platform set at all.
+#   * `e1m-aen501-a32` / `e1m-aen601-a32` / `e1m-aen803-a32` ship NO
+#     `meta-alp-sdk/conf/machine/*.conf` at all -- strictly MORE
+#     unbuildable than the two above, since BitBake fails to find the
+#     MACHINE before it can parse a single `require`. E1M-AEN803 is the
+#     SoM issue #1982 names as the bench module.
+#
+# All five are unbuildable regardless of the above: meta-alif-ensemble
+# declares `LAYERSERIES_COMPAT = "warrior zeus"` and is structurally
+# incompatible with this repo's Scarthgap baseline (issue #1971:
+# pre-honister override syntax, a stale 5.4 kernel pin, obsolete TF-A
+# build knobs), so even a corrected/uncommented `require` (or a shipped
+# conf, for the three missing ones) would not make any of them buildable
+# on its own. Issue #264 is rebuilding this path on a real base; remove
+# an entry here only once its MACHINE resolves against a
+# Scarthgap-compatible layer.
+YOCTO_MACHINE_UNBUILDABLE: dict[str, str] = {
+    "e1m-aen801-a32": (
+        "MACHINE 'e1m-aen801-a32' cannot build: its base `require "
+        "conf/machine/devkit-e8.conf` names a file that exists in no "
+        "branch of the public meta-alif-ensemble upstream (issue #1968), "
+        "and that upstream layer's LAYERSERIES_COMPAT (\"warrior zeus\") "
+        "is incompatible with this repo's Scarthgap baseline regardless "
+        "(issue #1971). Tracked by issue #264."
+    ),
+    "e1m-aen701-a32": (
+        "MACHINE 'e1m-aen701-a32' cannot build: its base `require "
+        "conf/machine/devkit-e7.conf` is commented out pending "
+        "meta-alif-ensemble being vendored (no DEFAULTTUNE / kernel "
+        "provider / TF-A platform is set), and even once wired up that "
+        "upstream layer's LAYERSERIES_COMPAT (\"warrior zeus\") is "
+        "incompatible with this repo's Scarthgap baseline regardless "
+        "(issue #1971). Tracked by issue #264."
+    ),
+    "e1m-aen501-a32": (
+        "MACHINE 'e1m-aen501-a32' cannot build: meta-alp-sdk/conf/machine/ "
+        "ships no conf for it at all, so BitBake fails before any `require` "
+        "is even parsed -- strictly more unbuildable than 'e1m-aen801-a32' / "
+        "'e1m-aen701-a32' above, and, like them, on a meta-alif-ensemble "
+        "base that is Yocto-series-incompatible with this repo's Scarthgap "
+        "baseline regardless (issue #1971). Tracked by issue #264."
+    ),
+    "e1m-aen601-a32": (
+        "MACHINE 'e1m-aen601-a32' cannot build: meta-alp-sdk/conf/machine/ "
+        "ships no conf for it at all, so BitBake fails before any `require` "
+        "is even parsed -- strictly more unbuildable than 'e1m-aen801-a32' / "
+        "'e1m-aen701-a32' above, and, like them, on a meta-alif-ensemble "
+        "base that is Yocto-series-incompatible with this repo's Scarthgap "
+        "baseline regardless (issue #1971). Tracked by issue #264."
+    ),
+    "e1m-aen803-a32": (
+        "MACHINE 'e1m-aen803-a32' cannot build: meta-alp-sdk/conf/machine/ "
+        "ships no conf for it at all, so BitBake fails before any `require` "
+        "is even parsed -- strictly more unbuildable than 'e1m-aen801-a32' / "
+        "'e1m-aen701-a32' above, and, like them, on a meta-alif-ensemble "
+        "base that is Yocto-series-incompatible with this repo's Scarthgap "
+        "baseline regardless (issue #1971). E1M-AEN803 is the bench module "
+        "issue #1982 names. Tracked by issue #264."
+    ),
+}
+
+
+class UnbuildableYoctoMachineError(ValueError):
+    """Raised by `_slice_command` when a yocto slice's `machine:` is a
+    known-non-buildable MACHINE (`YOCTO_MACHINE_UNBUILDABLE`, issue
+    #1982): the planner refuses to emit `bitbake` for it rather than
+    hand a consumer a command that cannot succeed -- see
+    `YOCTO_MACHINE_UNBUILDABLE`'s own comment for why each listed
+    MACHINE fails (not always the same proximate failure mode).
+    Carries the machine name + reason so the caller can render both,
+    same as `UnknownBoardTargetError` below.
+    """
+
+    def __init__(self, core_id: str, machine: str, reason: str) -> None:
+        self.core_id = core_id
+        self.machine = machine
+        self.reason = reason
+        super().__init__(f"core '{core_id}': {reason}")
 
 
 class UnrootedPathError(ValueError):
@@ -228,8 +343,8 @@ def _slice_command(
     """Resolve the build command for a slice.  Returns None when there is no
     buildable command yet -- the caller carries the slice as `skipped` /
     `no-command`, never dropped.  Raises `UnrootedPathError` /
-    `UnknownBoardTargetError` for a slice the plan must block rather than
-    mis-emit.
+    `UnknownBoardTargetError` / `UnbuildableYoctoMachineError` for a slice
+    the plan must block rather than mis-emit.
 
     `base_dir` anchors every relative `app:` path -- the directory holding
     the project's `board.yaml` (or an equivalent explicit root), NEVER the
@@ -384,6 +499,13 @@ def _slice_command(
         cmd += ["--", *defines]
         return cmd
     if slice_.os == "yocto":
+        # Refuse a known-non-buildable MACHINE before considering
+        # image/app/recipe at all (issue #1982): none of those fields
+        # matter if `bitbake`'s own MACHINE parse cannot succeed.
+        if slice_.machine in YOCTO_MACHINE_UNBUILDABLE:
+            raise UnbuildableYoctoMachineError(
+                slice_.core_id, slice_.machine,
+                YOCTO_MACHINE_UNBUILDABLE[slice_.machine])
         # `image:` always names a real recipe (e.g. `alp-image-edge`) --
         # safe to hand straight to bitbake.  `app:` is a filesystem path to
         # the app's source directory (mirrors the zephyr/baremetal `app:`

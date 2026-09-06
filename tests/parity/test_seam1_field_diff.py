@@ -43,7 +43,10 @@ def _fails(oracle: dict, mutated: dict) -> bool:
 def test_mutated_command_fails():
     oracle = _load("multicore_rpmsg-aen")
     mutated = copy.deepcopy(oracle)
-    mutated["slices"][0]["command"]["tool"] = "not-cmake"
+    # slices[0] (a32_cluster) carries `command: null` -- issue #1982, the
+    # MACHINE is known-non-buildable; slices[1] (m55_he) is this fixture's
+    # real, non-null command.
+    mutated["slices"][1]["command"]["tool"] = "not-cmake"
     assert _fails(oracle, mutated)
 
 
@@ -139,7 +142,9 @@ def test_non_sysbuild_slice_extra_conf_file_still_stripped():
     stripped and does not, on its own, fail the comparator."""
     oracle = _load("multicore_rpmsg-aen")
     mutated = copy.deepcopy(oracle)
-    sl = mutated["slices"][0]
+    # slices[0] (a32_cluster) carries `command: null` (#1982); slices[1]
+    # (m55_he) is this fixture's real, non-sysbuild command.
+    sl = mutated["slices"][1]
     assert "--sysbuild" not in (sl["command"].get("args") or [])
     sl["command"]["args"] = list(sl["command"]["args"]) + [
         "-DEXTRA_CONF_FILE=/some/path/alp.conf"]
