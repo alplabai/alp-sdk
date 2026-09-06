@@ -94,6 +94,13 @@ topology:
     hw_console: false
     zephyr_full_name: "E1M-V2N101 (RZ/V2N) Cortex-M33 system manager"
     zephyr_twister_name: "E1M-V2N101 Cortex-M33 system manager"
+    # This board's .dts carries the OpenAMP/MHU-B reserved-memory block +
+    # the CAN-FD-unavailable analysis (alp-sdk #683/#1146) -- see
+    # `openamp_ipc` in metadata/schemas/som-preset-v1.schema.json.
+    # E1M-V2M101 does not set this (#655 slice 2): the committed V2M101
+    # board tree carries neither block today, not because the hardware
+    # differs.
+    openamp_ipc: true
 
 # Memory layout (SRAM banks + MRAM) is derived from the SoC variant
 # resolved via `silicon_variant:` -- see metadata/socs/<vendor>/<family>/<part>.json
