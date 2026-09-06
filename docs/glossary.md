@@ -160,9 +160,19 @@ heterogeneous-compute peer.
 
 **IDCODE** -- The 32-bit Arm Coresight SW-DP identification value
 returned by the target on the first SWD read after a line reset.
-Documented as `0x6BA02477` for the GD32G553 (Cortex-M33 r0p1
-SW-DPv2); used by `gd32_swd_connect` to confirm the link reaches
-the right silicon.
+`GD32_SWD_EXPECTED_IDCODE` is `0x6BA02477`, but that is the
+**generic** Cortex-M33 r0p1 SW-DPv2 value, **not a GD32G553
+measurement** -- `include/alp/chips/gd32_swd.h` carries a
+`@warning UNVERIFIED on a GD32G553` on it, and the bench reads
+`0x0BE12477` off the GD32 bridge and `0x6BA02477` off the V2N CM33
+DAP, both on place `e1mx-v2n-m1-01`. A correctly-wired GD32 is
+therefore expected to *fail* a comparison against the macro, so
+`gd32_swd_connect()` deliberately does **not** treat a mismatch as
+fatal: it reports the value, it does not confirm the link reached
+the right silicon. Neither candidate value has been measured on a
+GD32 with a probe attached; settling that needs one (#1440, #1369).
+A production test that wants to refuse on a mismatch must match a
+value measured on its own board.
 
 **HiL** -- Hardware-in-the-Loop testing.  See
 the HiL rig plan in the internal `alp-sdk-internal` repo.
