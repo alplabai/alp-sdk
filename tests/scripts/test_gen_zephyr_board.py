@@ -15,12 +15,14 @@ Two things are pinned:
 2. The `scripts/alp_project.py --emit zephyr-board` CLI wiring actually
    writes those files to `--output`.
 
-`e1m_v2n101_m33_sm` / `e1m_v2m101_m33_sm` are covered for the three
+`e1m_v2n101_m33_sm` / `e1m_v2m101_m33_sm` are fully covered: the three
 family-agnostic files (`board.yml`, `Kconfig.alp_<board>`, the twister
-`.yaml`) PLUS the pinctrl `.dtsi` and `_defconfig`, generated from
-`metadata/e1m_modules/v2n/supervisor-links.yaml` (#655).  Only the board
-`.dts` stays hand-authored for this family (see the module docstring in
-`gen_zephyr_board.py`) and is intentionally not checked here.
+`.yaml`) PLUS the pinctrl `.dtsi`, `_defconfig` (#655 slice 1), and the
+board `.dts` (#655 slice 2), all generated from
+`metadata/e1m_modules/v2n/supervisor-links.yaml` plus the SoM preset and
+SoC JSON.  `Kconfig.defconfig` doesn't exist for this family at all (see
+the module docstring in `gen_zephyr_board.py`), so it stays outside
+either board's claim set.
 """
 
 from __future__ import annotations
@@ -70,12 +72,12 @@ METADATA_ROOT = REPO / "metadata"
 PARITY_COVERED: dict[str, tuple[str, str]] = {
     "e1m_aen801_m55_hp": ("E1M-AEN801", "m55_hp"),
     "e1m_aen801_m55_he": ("E1M-AEN801", "m55_he"),
-    # V2N/V2M: `emit_zephyr_board()` now also claims the two files sourced
-    # from metadata/e1m_modules/v2n/supervisor-links.yaml
-    # (`<board>-pinctrl.dtsi`, `<board>_defconfig`) alongside the three
-    # family-agnostic ones (#655) -- `_assert_matches_committed()` below
-    # diffs every file the generator returns, so no separate file list is
-    # needed here; only the `.dts` stays outside this SKU/core mapping.
+    # V2N/V2M: `emit_zephyr_board()` now also claims the pinctrl.dtsi,
+    # _defconfig (#655 slice 1) and the board `.dts` (#655 slice 2), all
+    # sourced from metadata/e1m_modules/v2n/supervisor-links.yaml plus the
+    # SoM preset / SoC JSON, alongside the three family-agnostic files --
+    # `_assert_matches_committed()` below diffs every file the generator
+    # returns, so no separate file list is needed here.
     "e1m_v2n101_m33_sm": ("E1M-V2N101", "m33_sm"),
     "e1m_v2m101_m33_sm": ("E1M-V2M101", "m33_sm"),
 }
@@ -199,13 +201,13 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
             "board.cmake / Kconfig should stay hand-authored -- see "
             "gen_zephyr_board.py's NOT GENERATED docstring section")
 
-    def test_v2n_dts_stays_hand_authored(self) -> None:
-        """The board `.dts` is the only V2N/V2M file this generator does
-        NOT claim (#655 slice 1 covers pinctrl.dtsi/_defconfig; the `.dts`
-        itself needs a metadata source of its own -- see the module
-        docstring).  Narrowing this from a 3-file to a 5-file claim set is
-        deliberate: it stays a ratchet against silent scope creep into
-        `.dts`, not a relaxation of the check."""
+    def test_v2n_full_tree_claimed(self) -> None:
+        """V2N101 now claims all six board-tree files -- `.dts` included
+        (#655 slice 2; slice 1 covered everything but the `.dts`).
+        `Kconfig.defconfig` isn't in this set because it doesn't exist for
+        this family at all (see the module docstring), not because it's
+        exempt -- there's nothing hand-authored left to ratchet against
+        here, unlike the AEN `board.cmake`/`Kconfig` exemptions."""
         files = emit_zephyr_board("E1M-V2N101", "m33_sm", METADATA_ROOT)
         claimed = {relpath.split("/", 1)[1] for relpath in files}
         self.assertEqual(
@@ -216,9 +218,27 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
                 "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.yaml",
                 "alp_e1m_v2n101_m33_sm-pinctrl.dtsi",
                 "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33_defconfig",
+                "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts",
             },
         )
-        self.assertNotIn("alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts", claimed)
+
+    def test_v2m_dts_reproduces_the_missing_openamp_block(self) -> None:
+        """E1M-V2M101's `topology.m33_sm.openamp_ipc` is absent (defaults
+        false), so its generated `.dts` must NOT carry the OpenAMP/MHU-B
+        block or the CAN-FD analysis that E1M-V2N101's does -- the
+        committed V2M101 tree doesn't have either, and `_parity()` only
+        catches drift if this generator can actually produce the SHORTER
+        file, not just the longer one."""
+        files = emit_zephyr_board("E1M-V2M101", "m33_sm", METADATA_ROOT)
+        dts = files["alp_e1m_v2m101_m33_sm/alp_e1m_v2m101_m33_sm_r9a09g056n48gbg_cm33.dts"]
+        self.assertNotIn("OpenAMP", dts)
+        self.assertNotIn("reserved-memory", dts)
+        self.assertNotIn("mbox1: mhu@", dts)
+        self.assertNotIn("No &canfd node", dts)
+        # The wdt0 comment DOES mention "mbox1" in prose (contrasting the
+        # V2N101 sibling, which has the real node) -- that's the exact
+        # committed V2M101 text, not a leak of the OpenAMP block.
+        self.assertIn("contrast the V2N101 sibling board's mbox1", dts)
 
     def test_families_list_is_load_bearing_for_v2m(self) -> None:
         """`supervisor-links.yaml`'s `families:` list gates
