@@ -94,7 +94,7 @@ export HAL_ALIF_DIR
 export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he}"
 
 # --------------------------------------------------------------------
-# Labgrid PLACE resolution (alp-sdk#2027)
+# Labgrid PLACE resolution (alp-sdk#2032)
 # --------------------------------------------------------------------
 # The maintainer's hard rule: never touch a bench connection by hand --
 # every connection goes through labgrid, addressed by PLACE NAME. A

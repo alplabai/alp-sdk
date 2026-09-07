@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""alp-sdk#2027 -- LG_PLACE resolves bench addresses from labgrid, never a
+"""alp-sdk#2032 -- LG_PLACE resolves bench addresses from labgrid, never a
 raw device-path table.
 
 The maintainer's hard rule: every bench connection goes through labgrid,
@@ -162,7 +162,7 @@ Matching resource 'swd' (alplab-gw/e1m-aen-evk-02/NetworkUSBDebugger/swd):
 
 # e1m-aen-evk-03: NOT acquired, swd USB path "3-4.4.3" -- a DIFFERENT board
 # from evk-01's "3-4.1". This is the exact wrong-board hazard named in
-# alp-sdk#2027: a stale table pointed a J-Link probe selector at THIS path
+# alp-sdk#2032: a stale table pointed a J-Link probe selector at THIS path
 # while believing it was talking to evk-01.
 REAL_EVK03_UNACQUIRED = """\
 Place 'e1m-aen-evk-03':

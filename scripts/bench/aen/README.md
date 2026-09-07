@@ -44,7 +44,7 @@ scripts/bench/aen/flash-run.sh   "$BENCH_ROOT/build/aen-gpio-bench"   # Flow A
 scripts/bench/aen/ram-run.sh     "$BENCH_ROOT/build/aen-gpio-bench"   # Flow C
 ```
 
-## `LG_PLACE` — the bench board is addressed by labgrid PLACE NAME (alp-sdk#2027)
+## `LG_PLACE` — the bench board is addressed by labgrid PLACE NAME (alp-sdk#2032)
 
 **The maintainer's hard rule: never touch a bench connection by hand — every
 connection goes through labgrid, addressed by PLACE NAME, never a raw device
@@ -136,7 +136,7 @@ by exporting before you invoke a helper.
 | `ZEPHYR_SDK_INSTALL_DIR` | *(none)* | Zephyr SDK root; the `arm-zephyr-eabi-*` tools are resolved from here, else off `PATH`. |
 | `HAL_ALIF_DIR` | `west list hal_alif` | hal_alif module path (passed as an extra Zephyr module). **TBD fallback:** export it if `west list` can't resolve it — we do not invent a path. |
 | `AEN_BOARD` | `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` | Qualified board target. |
-| `LG_PLACE` | *(none)* | **Primary input (alp-sdk#2027).** The bench board, addressed by labgrid PLACE NAME (e.g. `e1m-aen-evk-01`) — you must already hold its reservation. Resolves `SE_UART`, `LG_CONSOLE_DEV`, `LG_CONSOLE_HOST`, `LG_CONSOLE_PORT` and `LG_SWD_PATH` LIVE from `labgrid-client -p "$LG_PLACE" show`. No default place; wins over a raw `SE_UART` if both are set. See "`LG_PLACE`" above. |
+| `LG_PLACE` | *(none)* | **Primary input (alp-sdk#2032).** The bench board, addressed by labgrid PLACE NAME (e.g. `e1m-aen-evk-01`) — you must already hold its reservation. Resolves `SE_UART`, `LG_CONSOLE_DEV`, `LG_CONSOLE_HOST`, `LG_CONSOLE_PORT` and `LG_SWD_PATH` LIVE from `labgrid-client -p "$LG_PLACE" show`. No default place; wins over a raw `SE_UART` if both are set. See "`LG_PLACE`" above. |
 | `LG_COORDINATOR` | `100.64.0.1:20408` | labgrid coordinator address used to resolve `LG_PLACE`. |
 | `SE_UART` | *(none)* | SE-UART serial device for Flow A (`<your-serial-device>`; host-specific). **Resolved automatically when `LG_PLACE` is set** (the normal path); exporting it directly with no `LG_PLACE` is the WARNED off-labgrid escape hatch (see above) — `erase-storage.sh`'s BENCH-VERIFIED run is the documented case for it. Also required by `flash-update-log-dual.sh` and `flash-update-log-firewall-probe.sh` (Flow D, otherwise no SE-UART dependency): both now call the shared `bench_atoc_replace_guard()` (#2025), which queries the resident ATOC over `$SE_UART` before their `loadbin` write — unset `SE_UART` aborts them (exit 5) unless `--replace-atoc` is also passed. |
 | `LG_CONSOLE_DEV` / `LG_CONSOLE_HOST` / `LG_CONSOLE_PORT` | *(none)* | Read-only, `LG_PLACE`-resolved: the app console's exporter-local device path and ser2net `host`/`port`. Not yet consumed by a helper here — read the labgrid `console` resource directly, or via these, until one is wired up. |
