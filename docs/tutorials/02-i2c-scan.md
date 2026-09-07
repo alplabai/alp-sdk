@@ -77,6 +77,9 @@ On-module (E1M-AEN801 `i2c_devices:` `e1m_i2c0:` block):
 
 ```
 0x50 ACK   -- 24C128 EEPROM
+0x58 ACK   -- SAME 24C128 EEPROM (onsemi N24S128), its second device-select
+              header -- `1010` -> 0x50, `1011` -> 0x58, same A2/A1/A0 straps.
+              Not a second chip; nothing to source (alp-sdk#1976).
 ```
 
 The SoM's three other I²C parts -- OPTIGA Trust M (`0x30`), TMP112
@@ -166,6 +169,10 @@ Expected:
               (metadata/boards/e1m-x-evk.yaml:262)
 0x50 ACK   -- 24C128 EEPROM, the SoM's `e1m_i2c0:` block
               (metadata/e1m_modules/E1M-V2N101.yaml:56-59)
+0x58 ACK   -- SAME 24C128 EEPROM, its second device-select header
+              (`1010` -> 0x50, `1011` -> 0x58, same A2/A1/A0 straps) --
+              not a second chip, nothing to source (alp-sdk#1976)
+              (metadata/e1m_modules/E1M-V2N101.yaml:69)
 0x68 ACK   -- BMI323 U13 IMU (alternate)
               (include/alp/boards/alp_e1m_x_evk.h:48)
 0x69 ACK   -- ICM-42670 U12 IMU (canonical primary)

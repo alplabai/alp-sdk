@@ -385,7 +385,7 @@ typedef enum {
 /* inputs.  Apps drive them via the chips/tcal9538 driver:            */
 /*                                                                    */
 /*    tcal9538_t io_exp;                                              */
-/*    tcal9538_init(&io_exp, i2c_bus, 0x73);                          */
+/*    tcal9538_init(&io_exp, i2c_bus, EVK_I2C_ADDR_TCAL9538_MAIN);    */
 /*    tcal9538_set_direction(&io_exp,                                 */
 /*        BIT(EVK_IOEXP_LCD_PWR_EN) |                             */
 /*        BIT(EVK_IOEXP_LCD_RST) |                                */

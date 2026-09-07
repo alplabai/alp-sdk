@@ -76,24 +76,34 @@ E1M-AEN-2626-R2 netlist ties `U20` pin 3 (`ADD0`) to 0V, and the TMP112 strap
 table (TI SBOS397) maps `ADD0 → GND = 0x48`, `→ V+ = 0x49`, `→ SDA = 0x4A`,
 `→ SCL = 0x4B`.
 
-**One bench module (2026-09-05) answered at `0x40` instead.** The part was
-genuine and healthy — confirmed a TMP112 by a three-of-three register
-fingerprint against the datasheet power-on defaults (`CONFIG=0x60a0`,
-`T_LOW=0x4b00`, `T_HIGH=0x5000`) and reading back 28.062 °C. Only its address
-was wrong. `0x40` is **not a legal TMP112 address**, so on that unit `ADD0` is
-not actually sitting at GND: the suspected cause is an **open joint on U20 pin
-3**. That is a per-unit board defect, not a design error and not a firmware
-bug.
+**Nothing answers at `0x48`. Something answers at `0x40` instead — confirmed
+on 2 of 2 modules tested (`2026W36-0001`, `2026W36-0003`).** This is a
+**batch** property of the 2026W36 E1M-AEN803 build, not a defect on one
+module — tracked as **alp-sdk#1978**. Whatever is at `0x40` fingerprints
+TMP112-shaped on both units (`CONFIG=0x60a0`, `T_LOW=0x4b00`, `T_HIGH=0x5000`,
+reading a plausible temperature), but `0x40` is **not a legal TMP112 strap
+address** (the part only straps to `0x48`/`0x49`/`0x4A`/`0x4B`), so that
+fingerprint does **not** prove the part at `0x40` is a TMP112. The honest
+state: the declared part does not answer where it should, something answers
+at an address the part cannot be strapped to, and identifying it is open
+work under alp-sdk#1978. One consequence: the stock `CONFIG_TMP112` driver
+does not bind on these modules, because it only ever probes the devicetree's
+`0x48`.
 
 So when the sensor does not respond, this example prints an actionable
-diagnostic naming `0x40` as a known observed anomaly, and tells you to check
-continuity from U20 pin 3 to GND. It deliberately does **not** silently probe
-`0x40` and carry on: firmware that papers over a bad joint ships that defect to
-every customer. If you want to see what is really on the bus, run
-[`aen-brd-i2c-scan`](../aen-brd-i2c-scan), which scans every 7-bit address and
-fingerprints whatever answers.
+diagnostic naming `0x40` and alp-sdk#1978, rather than sending you to inspect
+one board's solder joints — with a batch-wide finding, "go check this
+module" is not the honest next step. It deliberately does **not** silently
+probe `0x40` and carry on: `0x40` has not been proven to be a TMP112 at all,
+and quietly falling back to an unidentified device would hide the open
+question instead of reporting it. If you want to see what is really on the
+bus, run [`aen-brd-i2c-scan`](../aen-brd-i2c-scan), which scans every 7-bit
+address and fingerprints whatever answers.
 
-Do not change the devicetree to `0x40`.
+Do not change the devicetree to `0x40` — `0x40` is not a legal TMP112
+address, so pointing `tmp112@48` there would tell the driver to treat an
+unidentified device as a TMP112 before alp-sdk#1978 has established what it
+actually is.
 
 ## Expected output
 

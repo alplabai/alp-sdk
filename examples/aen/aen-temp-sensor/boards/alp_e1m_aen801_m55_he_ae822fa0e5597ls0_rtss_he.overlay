@@ -31,12 +31,17 @@
  * devicetree tweak (a different `conversion-rate`, say, or the ITCM retarget
  * for a Flow C RAM-run), this is where it goes.
  *
- * NOT here, on purpose: the observed-0x40 address anomaly.  One bench module
- * answered at 0x40 rather than 0x48, confirmed a real TMP112 by its register
- * fingerprint (CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000).  0x40 is not a
- * legal TMP112 address, so that unit's ADD0 strap is not actually at GND --
- * a suspected open joint on U20 pin 3, i.e. a per-unit board defect.  The
- * devicetree keeps the DESIGN address; src/main.c reports the anomaly with an
- * actionable diagnostic instead.  Re-addressing the node here would ship one
- * module's defect to every module.
+ * NOT here, on purpose: the observed-0x40 address anomaly.  Nothing answers
+ * at 0x48; something answers at 0x40 instead, confirmed on 2 of 2 modules
+ * tested (2026W36-0001, 2026W36-0003) -- a BATCH property of the 2026W36
+ * E1M-AEN803 build (alp-sdk#1978), not a one-off.  That does NOT make 0x40
+ * the right address to declare here: it fingerprints TMP112-shaped
+ * (CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000) but 0x40 is not a legal
+ * TMP112 strap address at all (only 0x48/0x49/0x4A/0x4B are), so the part
+ * answering there has NOT been proven to be a TMP112 -- identifying it is
+ * open work under alp-sdk#1978.  Re-addressing the node to 0x40 now would
+ * bind the stock TMP112 driver to a device whose identity is still unknown.
+ * The devicetree keeps the DESIGN address; src/main.c reports the anomaly
+ * with an actionable diagnostic instead.  One consequence of leaving this
+ * open: the stock CONFIG_TMP112 driver does not bind on these modules.
  */

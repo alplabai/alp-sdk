@@ -156,6 +156,85 @@ int main(void)
 	printf("[manifest] crc32         = 0x%08x (stored) vs 0x%08x (computed)", m->crc32, calc);
 	printf(crc_ok ? "  (OK)\n" : "  (FAIL -- partial program or corruption)\n");
 
+	/* --- second device-select header (0x58) --------------------------------
+	 * This is the SAME physical N24S128 part answering a second, read-only
+	 * identity space -- not a second chip on the bus.  Its `1011` header sits
+	 * at ctx's array address (0x50) + EEPROM_24C128_ALT_ADDR_OFFSET (0x08) =
+	 * 0x58, and exposes four objects instead of the 16 KB array:
+	 * Secure Data Page, Unique ID, Lock Status, and Device Configuration
+	 * Register. eeprom_24c128_read_identity() reads all four in one call.
+	 *
+	 * This example deliberately never calls eeprom_24c128_write() -- here or
+	 * anywhere else: a stray write at selector 0x06 lands in the Device
+	 * Configuration Register.  Per the N24S128 datasheet Table 9 that
+	 * register is `b7 b6 b5 = A2 A1 A0` and `b1 = SWP` -- the device-address
+	 * bits are the HIGH three, which is why the bench-measured 0x1D
+	 * (0b0001_1101) reads as address 000 with SWP clear.  Writing that
+	 * register would move the EEPROM off 0x50, and its SWP bit permanently
+	 * write-protects the array, the Secure Data Page, and the register
+	 * together -- there is no way back from that on this part, so this
+	 * read-only example won't go near it. */
+	eeprom_24c128_identity_t id;
+	s = eeprom_24c128_read_identity(&ee, &id);
+	if (s != ALP_OK) {
+		/* Only a NULL out/ctx or an uninitialised ctx return non-OK here -- a
+		 * NACK from the silicon itself still returns ALP_OK with the
+		 * per-field _valid flags clear (handled below). So landing in this
+		 * branch means a programming error in this example, not a hardware
+		 * condition, and it is deliberately kept out of the RESULT verdict:
+		 * it can't happen without a code bug, unlike the identity objects'
+		 * _valid flags below, which legitimately vary by populated part. */
+		printf("[manifest] eeprom_24c128_read_identity -> %d (programming error, not "
+		       "a hardware condition)\n",
+		       (int)s);
+	} else {
+		printf("\n[manifest] second device-select header (0x58, N24S128 only):\n");
+
+		/* A _valid flag reading false here, with read_identity() itself still
+		 * ALP_OK, is NOT a failure -- it is the expected, documented result on
+		 * a board populated with the footprint-compatible M24128-BFMH6TG
+		 * alternate part, which has no second device-select header to answer
+		 * at all. None of the four checks below feed the RESULT verdict at
+		 * the end of main(): an absent second header is an absent capability,
+		 * not a fault. */
+		if (id.secure_page_valid) {
+			printf("[manifest]   Secure Data Page (%u bytes, erased = all 0xff):\n",
+			       (unsigned)sizeof(id.secure_page));
+			hex_dump(id.secure_page, sizeof(id.secure_page));
+		} else {
+			printf("[manifest]   Secure Data Page        : NACK (expected on the "
+			       "M24128-BFMH6TG alternate -- no second header to answer)\n");
+		}
+
+		if (id.unique_id_valid) {
+			/* Factory-set, but NOT uniform-random: bytes 8..14 are a
+			 * printable ASCII lot code (bench-observed "7321261" on the
+			 * 2026W36 unit) -- callers must not treat this as an entropy
+			 * source. */
+			printf("[manifest]   Unique ID (factory-set, not uniform-random -- a "
+			       "trailing run is a printable lot code):\n");
+			hex_dump(id.unique_id, sizeof(id.unique_id));
+		} else {
+			printf("[manifest]   Unique ID               : NACK (expected on the "
+			       "M24128-BFMH6TG alternate -- no second header to answer)\n");
+		}
+
+		if (id.lock_valid) {
+			printf("[manifest]   Secure Page Lock Status : %s\n",
+			       id.secure_page_locked ? "LOCKED (permanent)" : "UNLOCKED");
+		} else {
+			printf("[manifest]   Secure Page Lock Status : NACK (expected on the "
+			       "M24128-BFMH6TG alternate -- no second header to answer)\n");
+		}
+
+		if (id.device_config_valid) {
+			printf("[manifest]   Device Configuration Reg: 0x%02x\n", (unsigned)id.device_config);
+		} else {
+			printf("[manifest]   Device Configuration Reg: NACK (expected on the "
+			       "M24128-BFMH6TG alternate -- no second header to answer)\n");
+		}
+	}
+
 	/* Production apps call alp_hw_info_read() instead of decoding by hand;
 	 * that path is enabled by setting CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID
 	 * >= 0 in prj.conf (0 selects `e1m_i2c0`, agreeing with the EEPROM's

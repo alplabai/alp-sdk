@@ -3613,12 +3613,20 @@
           "hash": "7d64b9814f81e45b",
           "signature": "alp_status_t eeprom_24c128_read(eeprom_24c128_t *ctx, uint16_t offset, uint8_t *out, size_t len);"
         },
+        "eeprom_24c128_read_identity": {
+          "hash": "d30d3542af66bd6a",
+          "signature": "alp_status_t eeprom_24c128_read_identity(eeprom_24c128_t *ctx, eeprom_24c128_identity_t *out);"
+        },
         "eeprom_24c128_write": {
           "hash": "7f9df036749910ae",
           "signature": "alp_status_t eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data, size_t len);"
         }
       },
       "macros": {
+        "EEPROM_24C128_ALT_ADDR_OFFSET": {
+          "hash": "8c692daca866ab05",
+          "value": "0x08u"
+        },
         "EEPROM_24C128_BYTES": {
           "hash": "c1e8dcb81f1cb12a",
           "value": "(16u * 1024u)"
@@ -3630,9 +3638,32 @@
         "EEPROM_24C128_PAGE_BYTES": {
           "hash": "cc4835a7b690dcd1",
           "value": "64u"
+        },
+        "EEPROM_24C128_SECURE_PAGE_BYTES": {
+          "hash": "637d50baa9febdbe",
+          "value": "64u"
+        },
+        "EEPROM_24C128_UNIQUE_ID_BYTES": {
+          "hash": "adc4deb3491256f2",
+          "value": "16u"
         }
       },
       "typedefs": {
+        "eeprom_24c128_identity_t": {
+          "definition": "typedef struct { bool secure_page_valid; uint8_t secure_page[EEPROM_24C128_SECURE_PAGE_BYTES]; bool unique_id_valid; uint8_t unique_id[EEPROM_24C128_UNIQUE_ID_BYTES]; bool lock_valid; bool secure_page_locked; bool device_config_valid; uint8_t device_config; } eeprom_24c128_identity_t;",
+          "fields": [
+            "bool secure_page_valid",
+            "uint8_t secure_page[EEPROM_24C128_SECURE_PAGE_BYTES]",
+            "bool unique_id_valid",
+            "uint8_t unique_id[EEPROM_24C128_UNIQUE_ID_BYTES]",
+            "bool lock_valid",
+            "bool secure_page_locked",
+            "bool device_config_valid",
+            "uint8_t device_config"
+          ],
+          "hash": "1bbd940540929b8e",
+          "kind": "struct"
+        },
         "eeprom_24c128_t": {
           "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; } eeprom_24c128_t;",
           "fields": [

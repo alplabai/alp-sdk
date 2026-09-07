@@ -74,6 +74,65 @@ alp_status_t eeprom_24c128_read(eeprom_24c128_t *ctx, uint16_t offset, uint8_t *
 	return alp_i2c_write_read(ctx->bus, ctx->addr, addr_buf, sizeof(addr_buf), out, len);
 }
 
+/* Second device-select header (`1011`) selector bytes -- see the table on
+ * EEPROM_24C128_ALT_ADDR_OFFSET's doc comment.  Only bits A10/A9 (bits 2/1
+ * of the first address byte) matter; the second pointer byte is always 0
+ * (each object is smaller than 256 bytes, so it never needs a nonzero
+ * low byte). */
+#define EEPROM_IDENTITY_SEL_SECURE_PAGE   0x00u
+#define EEPROM_IDENTITY_SEL_UNIQUE_ID     0x02u
+#define EEPROM_IDENTITY_SEL_LOCK_STATUS   0x04u
+#define EEPROM_IDENTITY_SEL_DEVICE_CONFIG 0x06u
+
+alp_status_t eeprom_24c128_read_identity(eeprom_24c128_t *ctx, eeprom_24c128_identity_t *out)
+{
+	if (ctx == NULL || out == NULL) return ALP_ERR_INVAL;
+	if (!ctx->initialised) return ALP_ERR_NOT_READY;
+
+	memset(out, 0, sizeof(*out));
+
+	/* Same strapped A2/A1/A0 as the array, second device-select header --
+     * see EEPROM_24C128_ALT_ADDR_OFFSET's doc comment. Read-only: every
+     * transfer below is a 2-byte pointer write followed by a
+     * repeated-start read, never a data write -- see this function's
+     * doc comment for why a write here is dangerous. */
+	uint8_t alt_addr = (uint8_t)(ctx->addr + EEPROM_24C128_ALT_ADDR_OFFSET);
+	uint8_t ptr[2];
+
+	ptr[0] = EEPROM_IDENTITY_SEL_SECURE_PAGE;
+	ptr[1] = 0x00;
+	if (alp_i2c_write_read(
+	        ctx->bus, alt_addr, ptr, sizeof(ptr), out->secure_page, sizeof(out->secure_page)) ==
+	    ALP_OK) {
+		out->secure_page_valid = true;
+	}
+
+	ptr[0] = EEPROM_IDENTITY_SEL_UNIQUE_ID;
+	ptr[1] = 0x00;
+	if (alp_i2c_write_read(
+	        ctx->bus, alt_addr, ptr, sizeof(ptr), out->unique_id, sizeof(out->unique_id)) ==
+	    ALP_OK) {
+		out->unique_id_valid = true;
+	}
+
+	ptr[0]            = EEPROM_IDENTITY_SEL_LOCK_STATUS;
+	ptr[1]            = 0x00;
+	uint8_t lock_byte = 0;
+	if (alp_i2c_write_read(ctx->bus, alt_addr, ptr, sizeof(ptr), &lock_byte, 1) == ALP_OK) {
+		out->lock_valid         = true;
+		out->secure_page_locked = (lock_byte & 0x02u) != 0u;
+	}
+
+	ptr[0] = EEPROM_IDENTITY_SEL_DEVICE_CONFIG;
+	ptr[1] = 0x00;
+	if (alp_i2c_write_read(ctx->bus, alt_addr, ptr, sizeof(ptr), &out->device_config, 1) ==
+	    ALP_OK) {
+		out->device_config_valid = true;
+	}
+
+	return ALP_OK;
+}
+
 alp_status_t
 eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data, size_t len)
 {
