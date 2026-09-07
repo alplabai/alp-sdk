@@ -96,10 +96,21 @@ alp_status_t bmi323_init(bmi323_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	dev->gyro_fs     = BMI323_GYRO_FS_2000_DPS;
 	dev->initialised = false;
 
-	/* Power-up / I2C-interface bring-up.  After POR the BMI323 returns 0x00 for
-	 * CHIP_ID until it is soft-reset (CMD <- 0xDEAF); the reset write is also the
-	 * first I2C transaction, which selects the I2C interface (the part auto-detects
-	 * SPI vs I2C from the first access).  Wait t_soft_reset before reading the ID. */
+	/* Power-up / I2C-interface bring-up.  The soft reset (CMD <- 0xDEAF) is the
+	 * first I2C transaction, which also selects the I2C interface (the part
+	 * auto-detects SPI vs I2C from the first access).  Wait t_soft_reset before
+	 * reading the ID.
+	 *
+	 * DO NOT treat a correct CHIP_ID as evidence that this reset -- or any later
+	 * write -- landed.  CHIP_ID's RESET VALUE is already 0x0043 (BST-BMI323-DS000-13
+	 * Rev 1.7, Table 36 p.61) and is readable straight out of POR with no reset at
+	 * all (Figure 1 p.14 reads it as the very first transaction).  An earlier
+	 * comment here claimed POR returns 0x00 until a soft reset; that was wrong, and
+	 * it came from a raw register sweep that did not strip the two dummy bytes the
+	 * BMI323 read protocol prepends (Table 53 p.204).  The false claim made a dead
+	 * data path look like a live one for a whole bench session: a part that ACKs
+	 * every write without applying any of them reads back exactly the same
+	 * CHIP_ID.  To prove a write landed, read the register back. */
 	alp_status_t s = reg_write(dev, REG_CMD, BMI323_CMD_SOFT_RESET);
 	if (s != ALP_OK) return s;
 	alp_delay_ms(BMI323_SOFT_RESET_MS);
