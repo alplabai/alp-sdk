@@ -37,13 +37,21 @@ that produced the data it reports, plus whatever data-validity check
 that device actually supports:
 
 * **IMUs (ICM-42670, BMI323)** -- waited their documented startup
-  time, then gated on the config-write and read return codes *and*
-  the chip's own invalid/reset sentinel (`0x8000` on every accel
-  axis at once).
-* **BMP581** -- put into `BMP581_MODE_FORCED`, waited its conversion
-  time, then gated on the sampling-config and read return codes
-  *and* the chip's power-on-reset sentinel (`0x7F7F7F` on both raw
-  pressure and temperature).
+  floor, then *polled the chip's own data-ready flag* (a bounded
+  timeout, not a second guessed sleep) before reading, and gated on
+  the config-write and read return codes, the drdy flag actually
+  having asserted, *and* the chip's own invalid/reset sentinel
+  (`0x8000` on every accel axis at once) as a backstop. A bench
+  read-back on real E1M-AEN803 silicon found the config write ACKs
+  well before the chip has produced a sample -- an ACK is not a
+  sample, and this example now checks each one separately. A device
+  that never signals ready reports `DRDY TIMEOUT`, distinct from one
+  that signals ready but still returns the invalid pattern.
+* **BMP581** -- put into `BMP581_MODE_FORCED`, then polled
+  `drdy_data_reg` (same bounded-timeout approach) before reading, and
+  gated on the sampling-config and read return codes, the drdy flag
+  having asserted, *and* the chip's power-on-reset sentinel
+  (`0x7F7F7F` on both raw pressure and temperature) as a backstop.
 * **INA236 x6** -- gated on all three read return codes (bus
   voltage, shunt voltage, current). There is no documented
   invalid/reset encoding for these registers -- a genuinely idle
@@ -88,9 +96,12 @@ both IMU rows fail until the respin.
   into `BMP581_MODE_FORCED` via `bmp581_set_sampling()` before its raw
   read (the driver never starts sampling on its own), the INA236 reads
   wait out one full post-calibration conversion cycle before trusting
-  `CURRENT`, and both IMUs wait their documented startup time plus one
-  ODR period before the first accel sample is read -- each wait is
-  sized off the part's own datasheet, cited in `src/main.c`.
+  `CURRENT`, and all three sensors (both IMUs + the barometer) wait
+  their documented startup floor and then *poll the chip's own
+  data-ready flag* (`icm42670_data_ready()` / `bmi323_data_ready()` /
+  `bmp581_data_ready()`, each with a bounded timeout) instead of
+  guessing a second fixed delay -- every floor and timeout is sized
+  off the part's own datasheet, cited in `src/main.c`.
 
 ## Build
 

@@ -121,18 +121,56 @@ int main(void)
 		alp_status_t cfg_rc = icm42670_set_accel(&imu, ICM42670_ODR_100_HZ, ICM42670_ACCEL_FS_2G);
 
 		/* Accel startup is 10 ms typ from sleep to a valid sample (TDK
-		 * DS-000451 Rev 1.0 p.11); reading right after set_accel() would
-		 * just catch the chip mid-startup and report its 0x8000 sentinel
-		 * -- which is exactly the bug this fix closes. Add one ODR period
-		 * (100 Hz -> 10 ms) so the FIRST real sample has landed in the
-		 * output register by the time we read it. p.55 also bars register
-		 * WRITES for 200 us after a PWR_MGMT0 change; our next op is a
-		 * read, so that guard is moot here, but this wait clears it too. */
-		k_msleep(20);
+		 * DS-000451 Rev 1.0 p.11) -- that is a FLOOR, not a substitute for
+		 * checking the part: the chip cannot possibly be ready before it,
+		 * but only the chip's own data-ready flag proves it actually is.
+		 * p.55 also bars register WRITES for 200 us after a PWR_MGMT0
+		 * change; our next op is a read, so that guard is moot here, but
+		 * this floor clears it too. */
+		k_msleep(10);
 
-		icm42670_axes_t a  = { 0 };
-		alp_status_t    rs = icm42670_read_accel(&imu, &a);
-		bool valid = (cfg_rc == ALP_OK) && (rs == ALP_OK) && !imu_axes_invalid(a.x, a.y, a.z);
+		/* Poll DATA_RDY_INT (INT_STATUS bit 0, TDK DS-000451 Rev 1.0 p.67)
+		 * instead of guessing a second fixed delay. A register read-back
+		 * on the sibling BMI323 (same 100 Hz ODR, same "0x8000 == never
+		 * sampled" encoding) found the config write ACKs long before the
+		 * chip actually produces data: drdy still clear at ~17 ms, set by
+		 * ~100 ms, against a configured ODR period of only 10 ms -- a
+		 * fixed post-config sleep either races that or pads every run
+		 * with dead time regardless of how fast the part really was. 30x
+		 * the ODR period (300 ms) is generous against the ~100 ms
+		 * observed without being an unbounded wait; poll every half
+		 * period (5 ms) so a real miss isn't hidden by a coarse step. */
+		const uint32_t drdy_poll_step_ms = 5;
+		const uint32_t drdy_timeout_ms   = 300;
+		bool           ready             = false;
+		for (uint32_t waited = 0; waited < drdy_timeout_ms; waited += drdy_poll_step_ms) {
+			alp_status_t drdy_rc = icm42670_data_ready(&imu, &ready);
+			if (drdy_rc == ALP_OK && ready) break;
+			ready = false;
+			k_msleep(drdy_poll_step_ms);
+		}
+
+		icm42670_axes_t a            = { 0 };
+		alp_status_t    rs           = icm42670_read_accel(&imu, &a);
+		bool            axes_invalid = imu_axes_invalid(a.x, a.y, a.z);
+		bool            valid = (cfg_rc == ALP_OK) && (rs == ALP_OK) && ready && !axes_invalid;
+
+		/* Three distinct failure shapes now get three distinct words: a
+		 * comms/config failure, a drdy flag that never asserted within
+		 * the timeout (the part is stuck or genuinely slower than
+		 * expected), and a drdy flag that DID assert but the sample is
+		 * still the reset sentinel (the flag lied -- keep the sentinel
+		 * check as the backstop it always was). */
+		const char *reason;
+		if (valid)
+			reason = "ok";
+		else if (cfg_rc != ALP_OK || rs != ALP_OK)
+			reason = "READ FAIL";
+		else if (!ready)
+			reason = "DRDY TIMEOUT (never ready)";
+		else
+			reason = "INVALID SAMPLE (0x8000 sentinel)";
+
 		printf("[devhub] ICM42670 @0x%02x id=0x%02x accel{%d,%d,%d} cfg_rc=%d rs=%d %s\n",
 		       EVK_I2C_ADDR_ICM42670,
 		       id,
@@ -141,7 +179,7 @@ int main(void)
 		       a.z,
 		       (int)cfg_rc,
 		       (int)rs,
-		       valid ? "ok" : "STALE/RESET DATA");
+		       reason);
 		if (valid) answered++;
 	} else {
 		/* Pre-respin batch: U12 + U13 both strap to 0x69 and collide (garbage). */
@@ -160,15 +198,59 @@ int main(void)
 		bmi323_read_id(&bmi, &id);
 		alp_status_t cfg_rc = bmi323_set_accel(&bmi, BMI323_ODR_100_HZ, BMI323_ACCEL_FS_2G);
 
-		/* tA,SU = 2 ms typ (BST-BMI323-DS000-13 Rev 1.7, Table 2 p.9) plus
-		 * one ODR period (100 Hz -> 10 ms) before the first real sample is
-		 * guaranteed in the output register -- same reasoning as the
-		 * ICM-42670 above, this part just has a shorter startup. */
-		k_msleep(15);
+		/* tA,SU = 2 ms typ (BST-BMI323-DS000-13 Rev 1.7, Table 2 p.9) --
+		 * a FLOOR, not a substitute: the chip cannot possibly be ready
+		 * before it, but only STATUS.drdy_acc proves it actually is. */
+		k_msleep(2);
 
-		bmi323_axes_t a  = { 0 };
-		alp_status_t  rs = bmi323_read_accel(&bmi, &a);
-		bool valid       = (cfg_rc == ALP_OK) && (rs == ALP_OK) && !imu_axes_invalid(a.x, a.y, a.z);
+		/* This is the bench-measured case: an E1M-AEN803 register
+		 * read-back (2026W36-0002, examples/aen/aen-bmi323-regcheck) put
+		 * the part into normal mode / 100 Hz / 2G, confirmed ERR_REG was
+		 * clean, then sampled STATUS.drdy_acc (BST-BMI323-DS000-13 Rev
+		 * 1.7, p.66) over time: still 0 at ~17 ms, 1 by ~100 ms, for a
+		 * configured ODR period of only 10 ms. A fixed post-config sleep
+		 * shorter than that reads exactly the "no valid sample yet"
+		 * sentinel and reports it as stale hardware -- this was that bug.
+		 * Poll drdy_acc instead. 30x the ODR period (300 ms) is generous
+		 * against the ~100 ms observed without being unbounded; poll
+		 * every half period (5 ms) so a real miss isn't hidden by a
+		 * coarse step. Reading this also clears drdy_acc (Rev 1.7 p.23),
+		 * the same as reading ACC_DATA_X..Z does, so the flag is
+		 * consumed exactly once per sample either way. */
+		const uint32_t      drdy_poll_step_ms = 5;
+		const uint32_t      drdy_timeout_ms   = 300;
+		bmi323_data_ready_t drdy              = { 0 };
+		bool                ready             = false;
+		for (uint32_t waited = 0; waited < drdy_timeout_ms; waited += drdy_poll_step_ms) {
+			alp_status_t drdy_rc = bmi323_data_ready(&bmi, &drdy);
+			if (drdy_rc == ALP_OK && drdy.accel) {
+				ready = true;
+				break;
+			}
+			k_msleep(drdy_poll_step_ms);
+		}
+
+		bmi323_axes_t a            = { 0 };
+		alp_status_t  rs           = bmi323_read_accel(&bmi, &a);
+		bool          axes_invalid = imu_axes_invalid(a.x, a.y, a.z);
+		bool          valid        = (cfg_rc == ALP_OK) && (rs == ALP_OK) && ready && !axes_invalid;
+
+		/* Three distinct failure shapes now get three distinct words: a
+		 * comms/config failure, drdy_acc that never asserted within the
+		 * timeout (the part is stuck or genuinely slower than expected),
+		 * and drdy_acc that DID assert but the sample is still the reset
+		 * sentinel (the flag lied -- keep the sentinel check as the
+		 * backstop it always was). */
+		const char *reason;
+		if (valid)
+			reason = "ok";
+		else if (cfg_rc != ALP_OK || rs != ALP_OK)
+			reason = "READ FAIL";
+		else if (!ready)
+			reason = "DRDY TIMEOUT (never ready)";
+		else
+			reason = "INVALID SAMPLE (0x8000 sentinel)";
+
 		printf("[devhub] BMI323   @0x%02x id=0x%02x accel{%d,%d,%d} cfg_rc=%d rs=%d %s\n",
 		       EVK_I2C_ADDR_BMI323,
 		       id,
@@ -177,7 +259,7 @@ int main(void)
 		       a.z,
 		       (int)cfg_rc,
 		       (int)rs,
-		       valid ? "ok" : "STALE/RESET DATA");
+		       reason);
 		if (valid) answered++;
 	} else {
 		printf("[devhub] BMI323   @0x%02x init fail (rc=%d; pre-respin it's at 0x69)\n",
@@ -205,14 +287,43 @@ int main(void)
 		alp_status_t cfg_rc = bmp581_set_sampling(
 		    &baro, BMP581_OSR_X1, BMP581_OSR_X1, BMP581_ODR_50_HZ, BMP581_MODE_FORCED);
 
-		/* Conversion is 1.0 ms typ at OSR x1 (same datasheet, p.12); 5 ms
-		 * is a ~5x margin so the example doesn't need to poll INT_STATUS
-		 * (reg 0x27 bit 0, drdy_data_reg, clear-on-read) itself. */
-		k_msleep(5);
+		/* bmp581_set_sampling() above already triggered the FORCED
+		 * conversion, so poll drdy_data_reg (INT_STATUS reg 0x27 bit 0,
+		 * BST-BMP581-DS004-13 Rev 1.13 p.58, clear-on-read) instead of
+		 * guessing how long a P+T conversion at OSR x1 takes. Per-channel
+		 * tconv is ~1.0 ms typ (p.12), so pressure+temperature end to end
+		 * is roughly 2.0 ms; poll at that same ~2 ms grain up to 10x it
+		 * (20 ms) -- generous margin without being unbounded. */
+		const uint32_t drdy_poll_step_ms = 2;
+		const uint32_t drdy_timeout_ms   = 20;
+		bool           ready             = false;
+		for (uint32_t waited = 0; waited < drdy_timeout_ms; waited += drdy_poll_step_ms) {
+			alp_status_t drdy_rc = bmp581_data_ready(&baro, &ready);
+			if (drdy_rc == ALP_OK && ready) break;
+			ready = false;
+			k_msleep(drdy_poll_step_ms);
+		}
 
-		bmp581_raw_t raw   = { 0 };
-		alp_status_t rs    = bmp581_read_raw(&baro, &raw);
-		bool         valid = (cfg_rc == ALP_OK) && (rs == ALP_OK) && !bmp581_raw_invalid(&raw);
+		bmp581_raw_t raw         = { 0 };
+		alp_status_t rs          = bmp581_read_raw(&baro, &raw);
+		bool         raw_invalid = bmp581_raw_invalid(&raw);
+		bool         valid       = (cfg_rc == ALP_OK) && (rs == ALP_OK) && ready && !raw_invalid;
+
+		/* Same three-way split as the IMU blocks above: comms/config
+		 * failure, drdy_data_reg that never asserted within the timeout,
+		 * or drdy_data_reg that DID assert but the raw pair is still the
+		 * power-on-reset sentinel (the flag lied -- the sentinel check
+		 * remains the backstop). */
+		const char *reason;
+		if (valid)
+			reason = "ok";
+		else if (cfg_rc != ALP_OK || rs != ALP_OK)
+			reason = "READ FAIL";
+		else if (!ready)
+			reason = "DRDY TIMEOUT (never ready)";
+		else
+			reason = "INVALID SAMPLE (0x7f7f7f sentinel)";
+
 		printf("[devhub] BMP581   @0x%02x id=0x%02x p_raw=%d t_raw=%d cfg_rc=%d rs=%d %s\n",
 		       EVK_I2C_ADDR_BMP581,
 		       id,
@@ -220,7 +331,7 @@ int main(void)
 		       raw.temperature_raw,
 		       (int)cfg_rc,
 		       (int)rs,
-		       valid ? "ok" : "STALE/RESET DATA");
+		       reason);
 		if (valid) answered++;
 	} else {
 		printf("[devhub] BMP581   @0x%02x absent (err=%d)\n",
