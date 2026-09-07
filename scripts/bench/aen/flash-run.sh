@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/bench/aen/flash-run.sh <build-dir> [post_boot_read_bytes_hex]
+# scripts/bench/aen/flash-run.sh [--replace-atoc] <build-dir> [post_boot_read_bytes_hex]
 #
 # Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
 # drives the Alif SETOOLS over the SE-UART + JLinkExe, both Linux
@@ -21,6 +21,11 @@ set -e
 # shellcheck source=scripts/bench/aen/bench-env.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 
+REPLACE_ATOC=0
+if [ "${1:-}" = "--replace-atoc" ]; then
+	REPLACE_ATOC=1
+	shift
+fi
 BD="$1"
 SIZE="${2:-0x500}"
 bench_require_setools || exit $?
@@ -39,13 +44,18 @@ NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
 ELF="$BD/zephyr/zephyr.elf"
 # See ram-run.sh (issue #935): if BUF_SYM is empty, do NOT fold it into BUF --
-# BUF would silently become the bare string "0x" and step 3's `mem8 $BUF,
+# BUF would silently become the bare string "0x" and step 4's `mem8 $BUF,
 # $SIZE` would run as `mem8 0x, $SIZE`, printing an EMPTY "RAM console" block
-# indistinguishable from a boot failure. Step 3 below checks BUF_SYM directly.
+# indistinguishable from a boot failure. Step 4 below checks BUF_SYM directly.
 BUF_SYM=$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
 BUF=0x$BUF_SYM
 
-# 1. stage the image + a per-app signed-ATOC config (keeps the factory DEVICE cfg)
+# 1. stage the image + a per-app signed-ATOC config. app-write-mram -p REPLACES
+#    the device's ENTIRE ATOC with exactly what is in this JSON -- it is not a
+#    merge. Only "DEVICE" and "ALP-HE" below survive the write; any OTHER
+#    resident entry (a second core's app, MCUboot+slot0, an A32 Linux boot
+#    chain, ...) is silently delisted with no error and no SES warning. See
+#    the GUARD in step 2, alp-sdk#2025.
 #
 # THE ATOC SHAPE MUST MATCH HOW THE IMAGE IS LINKED (#1902).  Two shapes exist:
 #
@@ -100,11 +110,82 @@ JSON
 cd "$SET"
 echo ">>> FLASH $NAME  (ram_console_buf=${BUF_SYM:-none (UART console)})" >&2
 ./app-gen-toc -f "build/config/$NAME.json" >/tmp/gentoc.log 2>&1 || { echo "gen-toc FAILED"; tail /tmp/gentoc.log; exit 1; }
-# 2. write to MRAM over the SE-UART (SES auto-enters maintenance, burns, resets+boots)
+
+# 2. GUARD (alp-sdk#2025) -- app-write-mram -p below REPLACES the whole
+# resident ATOC, it does not merge (step 1 comment). One Flow A run on
+# e1m-aen-evk-01 (2026-09-07) silently delisted a live A32 Linux boot chain
+# (BOOTLOAD/A32_APP/HP_APP/HE_APP) down to just DEVICE + the freshly written
+# ALP-HE -- no error, no SES warning ("[SES] ATOC ok" prints either way).
+#
+# Read what is CURRENTLY resident before burning anything new, using
+# SETOOLS' `maintenance` tool: `-opt gettoc` is a non-destructive TOC query
+# (AUGD0005 Alif Security Toolkit User Guide v1.110.0, "Command line options
+# (-opt)": gettoc "Returns the TOC information") -- not a merge engine, just
+# a read, so this cannot invent a second failure mode the way attempting to
+# reassemble a resident entry's binary would. The dump is logged
+# unconditionally -- even on --replace-atoc -- so a run always leaves a
+# record of what was resident immediately before a destructive write.
+ATOC_BEFORE=/tmp/flash-run-atoc-before.log
+if [ -x "$SET/maintenance" ]; then
+	./maintenance -c "$SE_UART" -opt gettoc >"$ATOC_BEFORE" 2>&1 || true
+else
+	echo "GUARD: SETOOLS 'maintenance' tool not found in $SET -- cannot query the resident ATOC" >"$ATOC_BEFORE"
+fi
+echo ">>> resident ATOC before this write ($ATOC_BEFORE):" >&2
+cat "$ATOC_BEFORE" >&2
+
+# Table rows look like "|   DEVICE |  CM0+  | 0x... | ... |" (docs/aen-provisioning.md
+# shows a real one) -- the Name column is the literal JSON key of whatever wrote it.
+RESIDENT=()
+while IFS= read -r n; do
+	RESIDENT+=("$n")
+done < <(awk -F'|' '
+	/^\|/ {
+		name = $2
+		gsub(/^[ \t]+|[ \t]+$/, "", name)
+		if (name != "" && name != "Name" && name !~ /^-+$/) print name
+	}' "$ATOC_BEFORE")
+
+QUERY_STATUS=unverified
+if grep -qi "no atoc" "$ATOC_BEFORE"; then
+	QUERY_STATUS=empty
+elif [ "${#RESIDENT[@]}" -gt 0 ]; then
+	QUERY_STATUS=ok
+fi
+
+EXTRA=()
+for n in "${RESIDENT[@]}"; do
+	case "$n" in
+	DEVICE | ALP-HE) ;;
+	*) EXTRA+=("$n") ;;
+	esac
+done
+
+if [ "$REPLACE_ATOC" -ne 1 ]; then
+	if [ "$QUERY_STATUS" = unverified ]; then
+		echo "!! ABORT: could not read the resident ATOC via 'maintenance -c \$SE_UART -opt gettoc'" >&2
+		echo "   (see $ATOC_BEFORE). app-write-mram -p REPLACES the whole table, so writing" >&2
+		echo "   blind risks silently delisting anything already on this board -- that is" >&2
+		echo "   exactly how e1m-aen-evk-01 lost its A32 Linux boot chain on 2026-09-07." >&2
+		echo "   Confirm by hand what is resident, then re-run with --replace-atoc." >&2
+		exit 5
+	fi
+	if [ "${#EXTRA[@]}" -gt 0 ]; then
+		echo "!! ABORT: app-write-mram -p REPLACES the whole ATOC -- it does NOT merge." >&2
+		echo "   This board also carries: ${EXTRA[*]}" >&2
+		echo "   Writing now would SILENTLY DELIST ${EXTRA[*]} -- no error, no SES warning" >&2
+		echo "   (this destroyed the A32 Linux boot chain on e1m-aen-evk-01, 2026-09-07)." >&2
+		echo "   Re-run with --replace-atoc only once you can restore ${EXTRA[*]}, or if" >&2
+		echo "   losing them is genuinely intended." >&2
+		exit 5
+	fi
+fi
+
+# 3. write to MRAM over the SE-UART (SES auto-enters maintenance, burns, resets+boots)
 ./app-write-mram -c "$SE_UART" -p >/tmp/wrmram.log 2>&1 || true
 if grep -q "Done" /tmp/wrmram.log; then echo "MRAM write: Done ($(grep -oE '[0-9]+\.[0-9]+ seconds' /tmp/wrmram.log | tail -1))"; else echo "MRAM write FAILED:"; tail -5 /tmp/wrmram.log; exit 1; fi
 
-# 3. SES has booted the app; attach J-Link read-only and dump the RAM console
+# 4. SES has booted the app; attach J-Link read-only and dump the RAM console
 if [ -z "$BUF_SYM" ]; then
 	echo "----- $NAME RAM console: no 'ram_console_buf' in this image (UART-console app) -----" >&2
 	echo "      the MRAM write above still completed -- this is not a boot failure. Read the" >&2
