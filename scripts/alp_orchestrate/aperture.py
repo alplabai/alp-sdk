@@ -3,11 +3,17 @@
 """SoC on-die flash aperture resolution + region classification (#1365 split B).
 
 `resolve_aperture()` was `check_atoc_reservation.py`'s private `_resolve_aperture`
-(#1365 split A) -- moved here, unchanged in behaviour, so `carveout.py` and
-`partition.py` can derive the same `flash` / `ram` / `unclassified` /
-`unresolved` verdict the gate already computes, instead of re-deriving the
-aperture math a second time. `check_atoc_reservation.py` now imports this
-module instead of carrying its own copy.
+(#1365 split A) -- moved here so `carveout.py` and `partition.py` can derive
+the same `flash` / `ram` / `unclassified` / `unresolved` verdict the gate
+already computes, instead of re-deriving the aperture math a second time.
+`check_atoc_reservation.py` now imports this module instead of carrying its
+own copy. Moved with ONE behaviour change, not none (#2010): the original
+only guarded `mram_mb` against a Python `bool`, not `soc_flash_base` itself
+(`if not isinstance(base, int): return None`); this version guards both
+(`resolve_aperture()` below). `soc_flash_base` is schema-typed `integer`
+(`soc-spec-v1.schema.json`) so no real `metadata/socs/**` file can trip
+this, but the guard is kept for the same reason its `mram_mb` sibling
+already had one -- moved and hardened, not moved unchanged.
 
 Depends only downward -- `alp_project_loader` (`resolve_soc_path`,
 `_resolve_silicon_variant`) and `memregion` (`_region_size_bytes`); nothing

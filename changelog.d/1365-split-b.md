@@ -44,10 +44,17 @@ dropping the author's `carveout: false` -- proven end-to-end by appending
 write_authority: customer_runtime}` to a real AEN preset's `memory_map:`.
 `tests/scripts/test_orchestrate_carveout_aperture_ordering.py`'s
 `TestCarveoutAgreementBlocker` reproduces exactly this probe and asserts
-the refusal; `TestUnclassifiedWriteAuthorityLegCoverage` separately proves
-the `write_authority == "customer_runtime"` leg on the `unclassified`
-branch is still load-bearing on its own (mutation-tested: dropping it
-turns that test red).
+the refusal; `TestUnclassifiedWriteAuthorityLegCoverage` separately proves the
+`write_authority == "customer_runtime"` leg on the `unclassified` branch
+is still load-bearing on its own -- verified by hand: mutating
+`derived_eligible = wa == "customer_runtime"` to `derived_eligible = False`
+in `_region_ipc_eligibility()` turns that test red. That test is
+positive-only, though, so it catches only that one direction; it does
+NOT catch `derived_eligible` mutated to `True` unconditionally (dropping
+the requirement rather than inverting it), which leaves the hazard this
+same paragraph names -- "a future authored OSPI XIP row must NOT
+silently become an IPC candidate" -- unguarded on its own. #2010 closes
+that gap with a dedicated negative case.
 
 Closes the ordering hazard split A's changelog entry documented: an
 `a32_cluster`/`m55_*` `ipc:` entry can no longer resolve into the on-die

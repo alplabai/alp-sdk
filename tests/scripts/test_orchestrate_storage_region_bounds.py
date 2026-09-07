@@ -32,6 +32,7 @@ Run locally:
 
 from __future__ import annotations
 
+import copy
 import sys
 from pathlib import Path
 
@@ -46,7 +47,9 @@ from alp_orchestrate import (  # noqa: E402
     load_board_yaml,
     resolve_storage_partitions,
 )
+from alp_orchestrate.models import StorageEntry  # noqa: E402
 from alp_orchestrate.partition import (  # noqa: E402
+    _is_flash_sub_partition,
     _known_flash_devices,
     _resolve_flash_device,
 )
@@ -437,3 +440,81 @@ class TestNoFalsePositives:
         settings = _by_name(parts)["settings"]
         assert getattr(settings, "status", None) != "blocked", settings.reason
         assert settings.base_kib == 0, settings
+
+
+class TestLegacyCarveoutFallback:
+    """P1 (#2010): `_is_flash_sub_partition()`'s legacy `carveout: false`
+    fallback (`if inside is None: return region.get("carveout") is False`)
+    has no test at all -- it is what the docstring's "MAJOR 3" and the
+    non-Alif no-op argument both rest on. No non-Alif preset in
+    `metadata/e1m_modules/*.yaml` authors `carveout: false` today
+    (`git grep -rn "carveout:" metadata/e1m_modules/` is AEN-only), so
+    this is a direct-call pin with an explicit `aperture=None` -- the
+    exact value `resolve_aperture()` returns for every non-Alif SoM,
+    bypassing the `_APERTURE_UNSET` sentinel's own re-resolution."""
+
+    def test_carveout_false_still_excludes_when_aperture_is_none(self):
+        region = {"name": "legacy_subpart", "base": 0x1000, "size_kib": 64,
+                   "carveout": False}
+        assert _is_flash_sub_partition(
+            region, {}, METADATA_ROOT, aperture=None) is True, (
+            "a carveout: false region was NOT treated as a flash "
+            "sub-partition when no aperture is declared -- the legacy "
+            "fallback every non-Alif SoM depends on did not fire")
+
+
+class TestDerivedVerdictLoadBearingEndToEnd:
+    """P4 (#2010): `resolve_storage_partitions()` hoists ONE real aperture
+    per call and threads it through every helper it calls -- mutating that
+    hoisted value to `None` (silently bypassing split B in the actual
+    production entry point) survived every gate, because the P2/P3 fixes
+    were proven only via a direct `_resolve_flash_device()` /
+    `_is_flash_sub_partition()` call, never through `resolve_storage_
+    partitions()` itself. No SHIPPED preset makes the derived and legacy
+    (`carveout:`-only) verdicts disagree -- every AEN flash-class sub-
+    region already authors an explicit, agreeing `carveout: false` -- so
+    this fixture adds ONE synthetic `memory_map:` row, in-memory only
+    (never touching tracked YAML), that the two verdicts read differently:
+    strictly INSIDE the declared aperture (derived: flash-class, by
+    containment) but carrying NO `carveout:` key at all (legacy-only
+    fallback: not `False`, so "not a sub-partition" -- treated as a real
+    device). This is exactly the #1365 hazard shape (an unflagged row
+    silently becoming a customer-writable target) with the roles of
+    `mram_main` played by a plain synthetic row instead."""
+
+    def test_undeclared_row_inside_the_aperture_is_still_refused(self, tmp_path):
+        path = _write_board(tmp_path, """
+        name: test-aen801-p4-fixture
+        som:
+          sku: E1M-AEN801
+          hw_rev: r2
+
+        cores:
+          m55_hp:
+            os: zephyr
+            app: ./m55_hp
+        """)
+        project = load_board_yaml(path)
+        project.som_preset = copy.deepcopy(project.som_preset)
+        project.som_preset["memory_map"].append({
+            "name": "undeclared_sub_region",
+            "base": 0x80000000 + 0x100000,   # strictly inside the aperture
+            "size_kib": 64,
+            "accessible_from": ["m55_hp", "m55_he"],
+        })
+        project.storage = [StorageEntry(
+            name="leak_test", size_kib=32, fs="littlefs",
+            flash_device="undeclared_sub_region")]
+
+        parts = resolve_storage_partitions(project)
+        entry = _by_name(parts)["leak_test"]
+
+        assert entry.status == "blocked", (
+            f"a memory_map row strictly inside the declared aperture, "
+            f"with no carveout: key authored, resolved status "
+            f"{entry.status!r} -- the legacy-only fallback silently "
+            f"treated it as a real, customer-writable device")
+        assert "partition inside a flash-class region" in (entry.reason or ""), (
+            f"blocked for the wrong reason -- the DERIVED (aperture-"
+            f"containment) verdict must be the one that decided this, "
+            f"not some other check: {entry.reason!r}")
