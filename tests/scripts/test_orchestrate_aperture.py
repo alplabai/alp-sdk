@@ -34,6 +34,8 @@ Run locally:
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Optional
 
 from alp_orchestrate.aperture import (
@@ -79,6 +81,28 @@ class TestResolveAperture:
         preset = {"silicon": "not-a-vendor-family-part"}
         assert resolve_aperture(preset, METADATA_ROOT) is None
 
+    def test_none_when_soc_flash_base_is_a_bool(self, tmp_path: Path):
+        """#2010 (A9): `soc_flash_base` is schema-typed `integer`
+        (`soc-spec-v1.schema.json`), but `resolve_aperture()` guards
+        against a Python `bool` anyway (`isinstance(base, bool)`) --
+        a guard `check_atoc_reservation.py`'s original `_resolve_aperture`
+        (#1365 split A) did NOT have, despite this module's docstring
+        claiming the move was "unchanged in behaviour". Pins the guard's
+        actual behaviour directly, via a synthetic SoC spec, since no
+        real `metadata/socs/**` file can carry a JSON boolean there
+        (`validate_metadata.py` would already reject it)."""
+        soc_dir = tmp_path / "socs" / "testvendor" / "testfam"
+        soc_dir.mkdir(parents=True)
+        (soc_dir / "testpart.json").write_text(json.dumps({
+            "soc_flash_base": True,
+            "variants": [{"order_code": "V1", "mram_mb": 1}],
+        }), encoding="utf-8")
+        preset = {
+            "silicon": "testvendor:testfam:testpart",
+            "silicon_variant": "V1",
+        }
+        assert resolve_aperture(preset, tmp_path) is None
+
 
 class TestRegionExtent:
     def test_size_kib_field(self):
@@ -96,6 +120,13 @@ class TestRegionExtent:
     def test_unresolved_when_base_is_absent(self):
         assert region_extent({"name": "r", "size_kib": 4}) is None
 
+    def test_unresolved_when_base_is_a_bool(self):
+        """#2010 (A10): pre-existing behaviour (carried over verbatim from
+        `check_atoc_reservation.py`'s original `_region_extent`), never
+        directly tested until now -- `base` must be a real `int`, not a
+        Python `bool` (a JSON `true`/`false` would decode to one)."""
+        assert region_extent({"name": "r", "base": True, "size_kib": 4}) is None
+
     def test_unresolved_when_neither_size_field_is_set(self):
         assert region_extent({"name": "r", "base": 0x1000}) is None
 
@@ -109,6 +140,16 @@ class TestRegionExtent:
     def test_tbd_size_kib_does_not_mask_a_usable_size_mib(self):
         r = _region(0x1000, size_mib=1, size_kib="TBD")
         assert region_extent(r) == (0x1000, 0x1000 + 1024 * 1024)
+
+    def test_size_mib_wins_when_both_fields_are_valid_ints(self):
+        """#2010 (M1): `size_mib` and `size_kib` may both be authored as
+        real integers (the schema does not forbid it, though no shipped
+        preset does it). `_region_size_bytes()` -- and so `region_extent()`
+        -- must resolve via `size_mib` in that case: mib-first is this
+        module's real precedent (`carveout.py` / `partition.py`, both
+        mib-first before #1365 split B), not kib-first."""
+        r = _region(0x1000, size_kib=64, size_mib=2)
+        assert region_extent(r) == (0x1000, 0x1000 + 2 * 1024 * 1024)
 
 
 class TestClassifyRegion:
@@ -174,6 +215,17 @@ class TestClassifyRegion:
 class TestIsPartitionInsideAperture:
     def test_true_for_a_proper_subset(self):
         r = _region(APERTURE[0] + 0x10000, size_kib=64)
+        assert is_partition_inside_aperture(r, APERTURE) is True
+
+    def test_true_for_a_proper_subset_flush_with_the_low_edge(self):
+        """#2010 (A8): a region whose base is EXACTLY the aperture floor
+        but whose extent is smaller than the whole aperture is still a
+        proper subset (`lo >= full_lo`, not `lo > full_lo`) -- this is
+        the real shape of `mcuboot` on every AEN SKU
+        (metadata/e1m_modules/E1M-AEN801.yaml: base 0x80000000, size_kib
+        64, flush with `soc_flash_base`)."""
+        r = _region(APERTURE[0], size_kib=64)
+        assert region_extent(r) != APERTURE
         assert is_partition_inside_aperture(r, APERTURE) is True
 
     def test_false_only_when_extent_equals_the_aperture_exactly(self):

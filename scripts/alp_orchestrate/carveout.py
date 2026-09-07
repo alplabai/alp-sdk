@@ -156,6 +156,24 @@ def _region_ipc_eligibility(
             f"carve-out target")
 
     if cls == "ram":
+        # #2010: likely UNREACHABLE on every SoM shipped today.  `cls ==
+        # "ram"` requires `not is_preset_authored`, i.e. a row derived
+        # from the SoC's own `memory_regions:` rather than authored by
+        # the SoM preset -- but every Alif preset that resolves an
+        # aperture at all also authors an explicit `memory_map:` block
+        # (`is_preset_authored` is True for all of them), and no
+        # non-Alif SoM ever resolves an aperture in the first place
+        # (`aperture is None` short-circuits before this function is
+        # even called -- see `_candidate_regions()`). `git grep -n
+        # "carveout:" metadata/socs/` returns zero hits, confirming no
+        # SoC-derived row carries the flag either. Kept, not deleted: a
+        # future minimal Alif SoM port that relies entirely on SoC-level
+        # `memory_regions:` (no preset `memory_map:` override) would
+        # make `is_preset_authored` False while an aperture still
+        # resolves, reaching this leg for real. Pinned by direct call
+        # (`TestRamLegReachability`,
+        # tests/scripts/test_orchestrate_carveout_aperture_ordering.py)
+        # since no board.yaml in this tree can reach it end-to-end.
         disagreement = _agree_or_refuse(
             "ram-class (outside the aperture, not preset-authored)", True)
         if disagreement is not None:

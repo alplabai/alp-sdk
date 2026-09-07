@@ -63,7 +63,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _orchestrate_support import REPO  # noqa: E402
 
 from alp_orchestrate import load_board_yaml, resolve_carve_outs  # noqa: E402
-from alp_orchestrate.carveout import _region_ipc_eligibility  # noqa: E402
+from alp_orchestrate.carveout import (  # noqa: E402
+    _MAX_EXCLUDED_DETAIL,
+    _region_ipc_eligibility,
+)
 
 RPMSG_AEN_BOARD = REPO / "examples" / "multicore" / "rpmsg-aen" / "board.yaml"
 MPROC_MAILBOX_BOARD = REPO / "examples" / "multicore" / "mproc-mailbox" / "board.yaml"
@@ -164,24 +167,33 @@ def _with_outside_aperture_row_added(project):
 
 
 class TestUnclassifiedWriteAuthorityLegCoverage:
-    """MAJOR 4: the ordering guard above had zero coverage on the leg that
-    stops a future authored OSPI XIP row from silently becoming an IPC
-    candidate just because it resolves outside the aperture -- dropping
-    ONLY the `write_authority == "customer_runtime"` check on the
-    `cls == "unclassified"` branch (`carveout.py`'s
+    """MAJOR 4 / #2010: the ordering guard above had zero coverage on the
+    leg that stops a future authored OSPI XIP row from silently becoming
+    an IPC candidate just because it resolves outside the aperture --
+    dropping ONLY the `write_authority == "customer_runtime"` check on
+    the `cls == "unclassified"` branch (`carveout.py`'s
     `_region_ipc_eligibility()`) is caught by NOTHING else: the 3 tests
     in `TestMramMainOrderingGuard` above, the wider pytest sweep, and
     `check_emit_snapshots.py` all stay green under that mutation.
 
-    This test is the positive mirror of `TestMramMainOrderingGuard`: it
-    asserts a preset-authored row OUTSIDE the aperture with
-    `write_authority: customer_runtime` DOES resolve `status: ok` --
-    losing that leg (mutated to never grant eligibility) flips this
-    entry to `blocked` and turns this test red. Verified by hand
-    (#1365 split B review, MAJOR 4): mutating
+    The first test below is the positive mirror of
+    `TestMramMainOrderingGuard`: it asserts a preset-authored row OUTSIDE
+    the aperture with `write_authority: customer_runtime` DOES resolve
+    `status: ok` -- losing that leg (mutated to never grant eligibility)
+    flips this entry to `blocked` and turns this test red. Verified by
+    hand (#1365 split B review, MAJOR 4): mutating
     `derived_eligible = wa == "customer_runtime"` to
     `derived_eligible = False` in `_region_ipc_eligibility()` turns this
     test red; reverting turns it green again.
+
+    That test is positive-only, though, so it is blind to the OPPOSITE
+    mutation -- `derived_eligible = wa == "customer_runtime"` replaced
+    with `derived_eligible = True` unconditionally, dropping the
+    requirement rather than inverting it (#2010, mutant C4). The second
+    test below closes that: an outside-aperture, preset-authored row
+    whose `write_authority` is anything OTHER than `customer_runtime`
+    (or absent) must still be refused. Verified by hand: applying the
+    `-> True` mutation turns this test red; reverting turns it green.
     """
 
     def test_outside_aperture_authored_row_with_customer_runtime_resolves_ok(self):
@@ -195,6 +207,40 @@ class TestUnclassifiedWriteAuthorityLegCoverage:
         assert entry.region == "ospi_xip_test"
         assert _OUTSIDE_APERTURE_BASE <= entry.base < (
             _OUTSIDE_APERTURE_BASE + 1024 * 1024)
+
+    def test_outside_aperture_authored_row_with_wrong_write_authority_blocks(self):
+        """#2010 mutant C4: `derived_eligible = wa == "customer_runtime"`
+        mutated to `derived_eligible = True` unconditionally survived
+        every gate because nothing exercised the refusal direction on
+        this branch. A preset-authored row resolving OUTSIDE the
+        aperture with `write_authority: vendor_image` (any value other
+        than `customer_runtime`) must be refused -- this is exactly the
+        hazard `_region_ipc_eligibility()`'s own docstring names: "a
+        future authored OSPI XIP row must NOT silently become an IPC
+        candidate just because it resolves outside the aperture."""
+        eligible, reason = _region_ipc_eligibility(
+            {"base": _OUTSIDE_APERTURE_BASE, "size_kib": 1024,
+             "write_authority": "vendor_image"},
+            (_E8_APERTURE_BASE, 0x80580000),
+            True)
+        assert eligible is False, (
+            "an outside-aperture, preset-authored row with "
+            "write_authority: vendor_image (not customer_runtime) "
+            "became IPC-eligible -- mutant C4 (derived_eligible -> True "
+            "unconditionally) is back")
+        assert "vendor_image" in reason
+        assert "customer_runtime" in reason
+
+    def test_outside_aperture_authored_row_with_no_write_authority_blocks(self):
+        """Same hazard, absent `write_authority:` rather than a wrong
+        value -- `ABSENT MEANS UNRESOLVED, NEVER customer_runtime`
+        (`som-preset-v1.schema.json`'s `write_authority` description)."""
+        eligible, reason = _region_ipc_eligibility(
+            {"base": _OUTSIDE_APERTURE_BASE, "size_kib": 1024},
+            (_E8_APERTURE_BASE, 0x80580000),
+            True)
+        assert eligible is False
+        assert "None" in reason
 
 
 def _with_carveout_disagreement_row_added(project):
@@ -345,3 +391,113 @@ class TestContainedRegionWriteAuthorityNeverRescues:
             f"a region OUTSIDE the aperture, preset-authored, carrying "
             f"write_authority: customer_runtime was refused: {reason!r} "
             f"-- the corrected remedy no longer describes a working fix")
+
+
+class TestUnresolvedLegOrdering:
+    """#2010: the `cls == "unresolved"` tail of `_region_ipc_eligibility()`
+    (this region's OWN `base` doesn't resolve) had zero direct coverage of
+    its own precedence and terminal cases -- every existing end-to-end test
+    that reaches this tail (`mram_main`) carries `write_authority: composite`
+    and no `carveout:` key at all, so it only ever exercises the "neither
+    field customer_runtime" refusal, never the ordering between the two
+    fields or the true no-authored-flag terminal case."""
+
+    def test_unresolved_base_honours_carveout_false_over_customer_runtime(self):
+        """C6 (#1365 split B review, MAJOR 2): `carveout:` must be checked
+        BEFORE `write_authority` on this tail -- this used to check
+        `write_authority` first, silently dropping an authored
+        `carveout: false` whenever `write_authority: customer_runtime` was
+        also present. No shipped preset authors both fields on an
+        unresolved-base row (defensive-only), so this is a direct-call
+        pin, not an end-to-end one."""
+        eligible, reason = _region_ipc_eligibility(
+            {"base": "TBD", "carveout": False,
+             "write_authority": "customer_runtime"},
+            (0x80000000, 0x80580000),
+            True)
+        assert eligible is False, (
+            "an unresolved-base region with carveout: False became "
+            "IPC-eligible because write_authority: customer_runtime was "
+            "checked first -- MAJOR 2 is back")
+        assert "carveout: false" in reason.lower()
+
+    def test_unresolved_base_with_neither_flag_refuses_terminal(self):
+        """C12 (ADR-0034 clause 4): with base unresolved and NEITHER
+        `carveout:` nor `write_authority:` authored, the region must
+        refuse -- never guess. This is the function's terminal fallback,
+        reached by nothing else in the existing suite."""
+        eligible, reason = _region_ipc_eligibility(
+            {"base": "TBD"},
+            (0x80000000, 0x80580000),
+            True)
+        assert eligible is False, (
+            "an unresolved-base region with neither `carveout` nor "
+            "`write_authority` authored became IPC-eligible -- ADR-0034 "
+            "clause 4 (never guess) is broken")
+        assert "neither" in reason
+        assert "ADR-0034" in reason
+
+
+class TestMaxExcludedDetailCap:
+    def test_cap_is_six(self):
+        """C9 (#2010): the value is unpinned by any behavioural test --
+        pinned directly here. `board.schema.json`'s `/$defs/ipc_entry`
+        sets `endpoints.minItems: 2`, and every AEN SKU's `memory_map:`
+        has exactly 7 rows, so the true maximum simultaneous exclusion
+        count on any SKU shipped today is 5 -- this cap (6) sits one
+        above that proven ceiling deliberately (see
+        `changelog.d/1365-split-b.md`); it is not itself derived from
+        anything that would break if it drifted by one, hence the direct
+        pin rather than a behavioural fixture with 7 excluded regions."""
+        assert _MAX_EXCLUDED_DETAIL == 6
+
+
+class TestRamLegReachability:
+    """C3 / C11 (#2010): the `cls == "ram"` leg of `_region_ipc_eligibility()`
+    -- a region OUTSIDE the aperture that the SoM preset did NOT author --
+    is likely UNREACHABLE through any real project today: `classify_region()`
+    only returns `"ram"` when `is_preset_authored` is False, but every Alif
+    SoM preset in `metadata/e1m_modules/*.yaml` that declares an aperture
+    (i.e. resolves to an Ensemble SoC with `soc_flash_base`) ALSO authors an
+    explicit `memory_map:` block, making `is_preset_authored` True for every
+    row `_region_ipc_eligibility()` is ever called with on a live preset.
+    `git grep -n "carveout:" metadata/socs/` returns zero hits, confirming a
+    SoC-derived (non-preset-authored) row never carries the flag either.
+
+    Kept (not deleted): a future minimal Alif SoM port that relies entirely
+    on SoC-level `memory_regions:` (no preset `memory_map:` override) would
+    make `is_preset_authored` False while an aperture still resolves,
+    reaching this leg for real -- the same shape every non-Alif SoM already
+    uses, just with an aperture declared. Pinned by direct call, the only
+    way to exercise it today; NOT reachable via `load_board_yaml()` +
+    `resolve_carve_outs()` against any board.yaml in this tree."""
+
+    def test_ram_class_outside_aperture_not_preset_authored_is_eligible(self):
+        """C11: the leg's own unconditional `return True, ""` once
+        `_agree_or_refuse` finds no disagreement (`carveout:` absent)."""
+        eligible, reason = _region_ipc_eligibility(
+            {"base": _OUTSIDE_APERTURE_BASE, "size_kib": 64},
+            (_E8_APERTURE_BASE, 0x80580000),
+            False)
+        assert eligible is True, (
+            f"a ram-class region (outside the aperture, not preset-"
+            f"authored) with no `carveout:` override was refused: "
+            f"{reason!r}")
+        assert reason == ""
+
+    def test_ram_class_disagreeing_carveout_false_refuses(self):
+        """C3: an authored `carveout: false` disagreeing with the derived
+        ram-eligible verdict must refuse, naming both facts -- the same
+        AGREE contract `TestCarveoutAgreementBlocker` proves on the
+        `unclassified` branch, exercised here on the `ram` branch instead."""
+        eligible, reason = _region_ipc_eligibility(
+            {"base": _OUTSIDE_APERTURE_BASE, "size_kib": 64,
+             "carveout": False},
+            (_E8_APERTURE_BASE, 0x80580000),
+            False)
+        assert eligible is False, (
+            "a ram-class region with an authored carveout: False became "
+            "eligible anyway -- the AGREE contract did not hold on the "
+            "ram leg")
+        assert "ram-class" in reason
+        assert "disagrees" in reason
