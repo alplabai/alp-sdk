@@ -1159,6 +1159,34 @@ def test_atoc_guard_seram_exemption_checks_the_cpu_column(tmp_path):
     assert "SERAM1" in res.stderr
 
 
+def test_atoc_guard_mktemp_template_has_trailing_x_placeholder() -> None:
+    """CI caught this, the Linux-only local suite did not: `mktemp
+    ".../${tag}-atoc-before.XXXXXX.log"` has the X's in the MIDDLE (a
+    literal ".log" after them). GNU mktemp tolerates that; BSD/macOS
+    mktemp requires the placeholder to be the literal END of the template
+    and fails EVERY call with a misleading "File exists" -- measured on
+    macOS CI (`python-smoke (macos-latest)`): the guard aborted (exit 5)
+    on every single run, dead on that platform, in the fail-closed
+    direction.
+
+    This is a STRUCTURAL check, not a behavioural one -- there is no
+    BSD/macOS mktemp to actually run here (this suite is Linux-only), so
+    this cannot prove the guard now WORKS on macOS, only that the specific
+    template shape that broke it cannot silently come back. A real
+    macOS run of this suite (CI) is what actually proves the fix; treat
+    this test as a tripwire against re-introducing a mid-template
+    placeholder, not as macOS coverage."""
+    body = ENV.read_text(encoding="utf-8")
+    m = re.search(r'mktemp\s+"[^"]*atoc-before\.([A-Za-z.]+)"', body)
+    assert m, "could not find the atoc-before mktemp call in bench-env.sh"
+    placeholder = m.group(1)
+    assert placeholder == "X" * 6, (
+        f"the mktemp template's X-placeholder must be exactly 6 trailing X's "
+        f"with NOTHING after them (BSD/macOS mktemp requires this) -- got "
+        f"{placeholder!r}"
+    )
+
+
 def test_every_atoc_committing_script_calls_the_shared_guard() -> None:
     """The four scripts known to commit a fresh ATOC must route through the
     ONE shared guard, not a hand-rolled copy -- that drift is exactly what

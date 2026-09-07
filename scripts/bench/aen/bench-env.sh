@@ -468,10 +468,19 @@ bench_atoc_replace_guard() {
 	# trail this guard exists to provide (see the function's own header
 	# comment), and a run that PASSED is exactly the run whose pre-write
 	# state you may later need to prove. Each run leaves one more
-	# ${TMPDIR:-/tmp}/<tag>-atoc-before.<random>.log; periodically clean
+	# ${TMPDIR:-/tmp}/<tag>-atoc-before.<random>; periodically clean
 	# TMPDIR by hand (see README.md's Quick start / troubleshooting).
+	#
+	# The X's MUST be trailing, no suffix after them (no ".log" here).
+	# BSD/macOS mktemp requires the placeholder to be the literal end of
+	# the template and fails EVERY call with a misleading "File exists"
+	# on a mid-template placeholder (`...XXXXXX.log`) that GNU mktemp
+	# tolerates -- measured on macOS CI: the guard aborted (exit 5) on
+	# every single run, silently dead on that platform, fail-closed. GNU
+	# mktemp's own --suffix flag is not the fix either: it does not exist
+	# on BSD/macOS mktemp, so it would only move the same break.
 	local before
-	before=$(mktemp "${TMPDIR:-/tmp}/${tag}-atoc-before.XXXXXX.log") || {
+	before=$(mktemp "${TMPDIR:-/tmp}/${tag}-atoc-before.XXXXXX") || {
 		echo "!! ABORT ($tag): cannot create the pre-write ATOC transcript in ${TMPDIR:-/tmp}" >&2
 		return 5
 	}
