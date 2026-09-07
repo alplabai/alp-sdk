@@ -1007,7 +1007,16 @@ def test_atoc_guard_aborts_when_tmpdir_is_unwritable(tmp_path):
     line left all `-k atoc` tests green. `mktemp` (this fix) makes the
     per-run path collision-proof by construction instead, so the genuine
     unremovable-target failure mode is now "the directory itself refuses a
-    new file" -- cover THAT directly with an unwritable directory."""
+    new file" -- cover THAT directly with an unwritable directory.
+
+    Round-3 review MAJOR: an earlier version of this test asserted only
+    `returncode == 5`, which does NOT distinguish this fix from either a
+    mutated `|| true` on the `mktemp` line (measured: still rc=5, from an
+    unrelated downstream redirect failure) or from round-2's pre-mktemp
+    code (101368cdf, fixed path + `rm -f`: also rc=5, via a bare "Permission
+    denied" from bash's own `>` redirect, never this guard's own message).
+    Assert the CAUSE: this fix's specific `mktemp`-failure abort message,
+    not present in either of those."""
     unwritable = tmp_path / "unwritable-tmp"
     unwritable.mkdir()
     unwritable.chmod(0o500)
@@ -1018,6 +1027,10 @@ def test_atoc_guard_aborts_when_tmpdir_is_unwritable(tmp_path):
         assert res.returncode == 5, (
             f"an unwritable TMPDIR must abort, not silently skip the transcript, "
             f"got {res.returncode}\n{res.stdout}{res.stderr}"
+        )
+        assert "cannot create the pre-write ATOC transcript" in res.stderr, (
+            f"must abort specifically because mktemp itself failed, not some "
+            f"unrelated downstream cause -- {res.stderr}"
         )
     finally:
         unwritable.chmod(0o700)
@@ -1115,6 +1128,62 @@ def test_atoc_guard_parses_a_real_ansi_coloured_clean_transcript(tmp_path):
     assert res.returncode == 0, (
         f"the real clean capture must pass, got {res.returncode}\n"
         f"{res.stdout}{res.stderr}"
+    )
+
+
+@_NEEDS_BASH
+def test_atoc_guard_seram_exemption_checks_the_cpu_column(tmp_path):
+    """Round-3 review MINOR: the DEVICE/SERAM0/SERAM1 baseline exemption
+    matched the Name cell alone, with no CPU-column cross-check. Measured
+    silent-pass: a row rendered `|   SERAM1 | M55-HE | ...` (a real app
+    entry that merely collides with the baseline SE-firmware bank's name)
+    was silently exempted -- rc=0 -- exactly like a genuine SERAM1 row.
+    Real captures show every baseline row as `CM0+`; no app entry ever is.
+    Gate the exemption on the CPU column too, so a same-named row on a
+    DIFFERENT core still trips the guard."""
+    res = _call_atoc_guard(
+        tmp_path,
+        "0",
+        ["ALP-HE"],
+        "fake-uart",
+        "|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |"
+        "      312 |  0.5.0| u V  |\n"
+        "|   SERAM1 | M55-HE | 0x80565070 | 0x80564670 | 0x58000000 | 0x58000000 |"
+        "   110356 |  1.0.0| uLVB |\n",
+    )
+    assert res.returncode == 5, (
+        f"a SERAM1-named row on M55-HE (not CM0+) is a real app entry, not SE "
+        f"firmware -- it must trip the guard, got {res.returncode}\n"
+        f"{res.stdout}{res.stderr}"
+    )
+    assert "SERAM1" in res.stderr
+
+
+def test_atoc_guard_mktemp_template_has_trailing_x_placeholder() -> None:
+    """CI caught this, the Linux-only local suite did not: `mktemp
+    ".../${tag}-atoc-before.XXXXXX.log"` has the X's in the MIDDLE (a
+    literal ".log" after them). GNU mktemp tolerates that; BSD/macOS
+    mktemp requires the placeholder to be the literal END of the template
+    and fails EVERY call with a misleading "File exists" -- measured on
+    macOS CI (`python-smoke (macos-latest)`): the guard aborted (exit 5)
+    on every single run, dead on that platform, in the fail-closed
+    direction.
+
+    This is a STRUCTURAL check, not a behavioural one -- there is no
+    BSD/macOS mktemp to actually run here (this suite is Linux-only), so
+    this cannot prove the guard now WORKS on macOS, only that the specific
+    template shape that broke it cannot silently come back. A real
+    macOS run of this suite (CI) is what actually proves the fix; treat
+    this test as a tripwire against re-introducing a mid-template
+    placeholder, not as macOS coverage."""
+    body = ENV.read_text(encoding="utf-8")
+    m = re.search(r'mktemp\s+"[^"]*atoc-before\.([A-Za-z.]+)"', body)
+    assert m, "could not find the atoc-before mktemp call in bench-env.sh"
+    placeholder = m.group(1)
+    assert placeholder == "X" * 6, (
+        f"the mktemp template's X-placeholder must be exactly 6 trailing X's "
+        f"with NOTHING after them (BSD/macOS mktemp requires this) -- got "
+        f"{placeholder!r}"
     )
 
 

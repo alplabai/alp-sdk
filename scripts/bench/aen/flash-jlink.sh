@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/bench/aen/flash-jlink.sh <build-dir> [post_boot_read_bytes_hex]
+# scripts/bench/aen/flash-jlink.sh [--atoc-unqueryable] <build-dir> [post_boot_read_bytes_hex]
 #
 # Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
 # drives JLinkExe + the Alif SETOOLS, both Linux binaries on this
@@ -29,6 +29,35 @@ set -e
 
 # shellcheck source=scripts/bench/aen/bench-env.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
+
+# #2025 -- Flow D has no SE-UART, so it cannot query the resident ATOC the way
+# the Flow A guard (bench_atoc_replace_guard, scripts/bench/aen/bench-env.sh)
+# does before `app-write-mram -p` / a J-Link `loadbin` REPLACES it. This flag
+# is a deliberate, differently-named acknowledgement, NOT the Flow A
+# `--replace-atoc` opt-out: an operator on a no-SE-UART slot (e.g.
+# e1m-aen-evk-03) will pass this on every single Flow D run, and that habit
+# must never also silence Flow A's guard on a board where the resident TOC
+# genuinely can be read. Do not merge or alias the two flags.
+ATOC_UNQUERYABLE=0
+POSITIONAL=()
+for arg in "$@"; do
+  case "$arg" in
+    --atoc-unqueryable) ATOC_UNQUERYABLE=1 ;;
+    *) POSITIONAL+=("$arg") ;;
+  esac
+done
+set -- "${POSITIONAL[@]}"
+
+if [ "$ATOC_UNQUERYABLE" != "1" ]; then
+  echo "!! REFUSING TO WRITE: this Flow D write REPLACES the entire ATOC." >&2
+  echo "   Flow D has no SE-UART channel, so this script cannot enumerate what" >&2
+  echo "   is currently resident before it writes -- any resident boot entry not" >&2
+  echo "   named in the config below (an A32 boot chain, an HP app, a diagnostic" >&2
+  echo "   image) is silently DELISTED, and the SES prints '[SES] ATOC ok'" >&2
+  echo "   afterwards with no warning (issue #2025)." >&2
+  echo "   Pass --atoc-unqueryable to acknowledge this and proceed anyway." >&2
+  exit 8
+fi
 
 BD="$1"
 SIZE="${2:-0x500}"
