@@ -447,12 +447,22 @@ bench_atoc_replace_guard() {
 	local allowed=("$@")
 
 	# ${TMPDIR:-/tmp}, not a bare /tmp literal, so a test (or a host with a
-	# non-default TMPDIR) can sandbox this. rm -f it FIRST and require that to
-	# succeed: a stale, unremovable log (root-owned from a sudo run, another
-	# user's file under sticky /tmp) must abort rather than let the parse
-	# below silently read the PREVIOUS run's transcript as if it were fresh.
-	local before="${TMPDIR:-/tmp}/${tag}-atoc-before.log"
-	rm -f "$before" || return 5
+	# non-default TMPDIR) can sandbox this. `tag` is a literal script name
+	# (flash-run, flash-run-dualcore, ...), NOT run-unique -- three AEN
+	# boards (evk-01/-02/-03) on this farm makes two concurrent runs of the
+	# SAME script against DIFFERENT boards a real scenario, and a fixed path
+	# let run A's write land between run B's redirect and B's read, so B
+	# parsed A's board (reproduced: B printed A's clean table and returned
+	# GUARD_RC=0 on a board that actually carried A32_APP + HE_APP -- the
+	# exact #2025 loss through a new door). `mktemp` both makes the path
+	# run-unique (its own randomised suffix, no two callers can collide) and
+	# creates the file atomically (O_CREAT|O_EXCL under the hood), closing
+	# the rm-then-open symlink-race window a predictable rm -f/`>` pair
+	# leaves open. A directory `mktemp` cannot create in (unwritable TMPDIR)
+	# fails here, which is the same "abort, do not guess" outcome the old
+	# rm -f/existence-check pair gave for an unremovable stale file.
+	local before
+	before=$(mktemp "${TMPDIR:-/tmp}/${tag}-atoc-before.XXXXXX.log") || return 5
 
 	# rc tracks whether the query itself succeeded -- defaults to failed
 	# (1) so the SE_UART-unset and maintenance-missing branches, which never
@@ -466,13 +476,30 @@ bench_atoc_replace_guard() {
 	elif [ -x "$SETOOLS_DIR/maintenance" ]; then
 		# Confirm the serial device that answers is actually the SES, not the
 		# app console (e.g. on e1m-aen-evk-01, /dev/ttyUSB0 is SE-UART,
-		# /dev/ttyUSB1 is the app console) -- docs/debugging-aen.md:548's
-		# "SES <rev> v<version>" getbanner line is the proof. A gettoc read
-		# off the wrong device is not a safe verdict, so a missing/garbled
-		# banner also forces the query unverified below.
-		local banner banner_ok=1
+		# /dev/ttyUSB1 is the app console). BENCH-VERIFIED: a real
+		# `getbanner` capture off e1m-aen-evk-01 (2026-09-07) reads
+		# " SES A1 v1.110.0 Mar  4 2026 19:06:23" after ANSI stripping --
+		# docs/debugging-aen.md:548 is only a doc placeholder
+		# ("SES <rev> v<version> <build date>"), not a transcript, and is
+		# NOT the proof. A gettoc read off the wrong device is not a safe
+		# verdict, so a missing/garbled banner also forces the query
+		# unverified below.
+		local banner banner_ok=1 banner_rc
 		banner=$( ( cd "$SETOOLS_DIR" && ./maintenance -b "${SE_UART_BAUD:-57600}" -c "$SE_UART" -opt getbanner ) 2>&1 )
-		printf '%s\n' "$banner" | sed 's/\x1b\[[0-9;]*m//g' | grep -qE '^SES [^ ]+ v[^ ]+' || banner_ok=0
+		banner_rc=$?
+		# Real capture off e1m-aen-evk-01 (2026-09-07), ANSI intact:
+		#   ^[[94m SES A1 v1.110.0 Mar  4 2026 19:06:23 ^[[0m
+		# Strip the ANSI FIRST, then match -- and the stripped line has a
+		# LEADING SPACE (SETOOLS' own padding, not a terminal artifact), so
+		# a bare `^SES` anchor rejects every real banner and aborts every
+		# run on real hardware. Tolerate leading whitespace.
+		printf '%s\n' "$banner" | sed -E 's/\x1b\[[0-9;?]*[a-zA-Z]//g' \
+			| grep -qE '^[[:space:]]*SES [^[:space:]]+ v[^[:space:]]+' || banner_ok=0
+		# getbanner exiting non-zero while still printing a well-formed
+		# banner line must not read as ok -- same class as the gettoc rc fix
+		# above (measured: getbanner rc=3 with a valid banner -> GUARD_RC=0
+		# before this).
+		[ "$banner_rc" -eq 0 ] || banner_ok=0
 		( cd "$SETOOLS_DIR" && ./maintenance -b "${SE_UART_BAUD:-57600}" -c "$SE_UART" -opt gettoc ) >"$before" 2>&1
 		rc=$?
 		[ "$banner_ok" -eq 1 ] || rc=1
@@ -483,20 +510,36 @@ bench_atoc_replace_guard() {
 	echo ">>> resident ATOC before this write ($before):" >&2
 	cat "$before" >&2
 
-	# SETOOLS emits ANSI colour codes on some terminals/versions -- strip
-	# them before parsing (read-update-log-proof.sh:150 does the same for
-	# its own maintenance read) so the guard never mistakes its own coloured,
-	# compliant output for a foreign entry.
+	# SETOOLS emits ANSI codes on some terminals/versions -- not just SGR
+	# colour (`...m`): a real capture also carries a cursor-show sequence
+	# (`^[[?25h`), and an erase-in-line (`^[[K`) landing inside a Name cell
+	# would otherwise survive an SGR-only strip and read as a foreign entry
+	# (false-alarm direction). Strip any CSI sequence (ESC [ ... final-byte),
+	# not just the `m`-terminated ones, before the awk table parse (also
+	# matches read-update-log-proof.sh:150's own maintenance-read strip).
+	# Also drop a trailing CR: SETOOLS on some hosts emits CRLF, and
+	# `grep -qix "no atoc found on target device."` below is anchored with
+	# `$`, so an untouched CR would make a genuinely blank board's "No ATOC"
+	# line fail to match and read as unverified (GUARD_RC=5) instead.
 	local stripped
-	stripped=$(sed 's/\x1b\[[0-9;]*m//g' "$before")
+	stripped=$(sed -E 's/\x1b\[[0-9;?]*[a-zA-Z]//g' "$before" | tr -d '\r')
 
 	# Table rows look like "|   DEVICE |  CM0+  | 0x... | ... |" (docs/aen-provisioning.md
 	# shows a real one) -- the Name column is the literal JSON key of whatever wrote it.
+	# BENCH-VERIFIED against a real 9-row getbanner+gettoc capture off
+	# e1m-aen-evk-01 (2026-09-07): SETOOLS' colour wraps the WHOLE LINE
+	# (`^[[94m |    DEVICE|...|`), not just the cell text, so the
+	# ANSI-stripped row keeps a LEADING SPACE before the pipe. A bare `/^\|/`
+	# anchor (no synthetic test fixture ever exercised this -- the test's
+	# ANSI table colours only the cell, not the line) never matched a single
+	# real row: `resident` silently computed empty on EVERY real coloured
+	# transcript, aborting every run as "unverified" rather than ever
+	# actually detecting -- or clearing -- a foreign entry.
 	local resident=()
 	while IFS= read -r n; do
 		resident+=("$n")
 	done < <(printf '%s\n' "$stripped" | awk -F'|' '
-		/^\|/ {
+		/^[ \t]*\|/ {
 			name = $2
 			gsub(/^[ \t]+|[ \t]+$/, "", name)
 			if (name != "" && name != "Name" && name !~ /^-+$/) print name
@@ -515,9 +558,24 @@ bench_atoc_replace_guard() {
 		fi
 	fi
 
-	local extra=() n a hit
+	# DEVICE plus the two SE firmware banks (SERAM0/SERAM1 -- one marked
+	# "* SERAM0" as the currently-booted bank, docs/aen-se-services.md:194)
+	# are baseline SE state, never touched by app-write-mram -p: only a
+	# System Package update rewrites SERAM (docs/aen-se-services.md
+	# section 0.1). Both real captures above show SERAM0/SERAM1 resident
+	# alongside completely different app entries, confirming they are
+	# independent of whatever app ATOC was last written -- without this
+	# exemption the guard flags them as "extra" on EVERY real board,
+	# unconditionally, which trains the operator to always pass
+	# --replace-atoc (discovered validating the parser against the real
+	# gettoc-BEFORE-2entry.txt capture, which must pass clean and instead
+	# aborted before this fix).
+	local extra=() n a hit nbase
 	for n in "${resident[@]}"; do
-		[ "$n" = "DEVICE" ] && continue
+		nbase="${n#\* }"
+		case "$nbase" in
+		DEVICE | SERAM0 | SERAM1) continue ;;
+		esac
 		hit=0
 		for a in "${allowed[@]}"; do
 			[ "$n" = "$a" ] && { hit=1; break; }

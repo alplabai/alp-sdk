@@ -682,6 +682,77 @@ _NO_ATOC = "No ATOC found on target device.\n"
 
 _COMPLIANT_BANNER = "SES A1 v1.8.0 Feb 20 2026\n"
 
+# Real captures off `e1m-aen-evk-01`, 2026-09-07, ANSI intact -- verbatim,
+# not synthesised. alp-sdk#2026 round-2 review measured these against the
+# fixed guard by hand before this suite pinned them:
+#
+# `getbanner`: SETOOLS pads the banner text with a LEADING SPACE
+# (" SES A1 v1.110.0 ..."), which a bare `^SES` anchor rejects outright --
+# every real run aborted before this fix, training the operator to always
+# pass --replace-atoc.
+_REAL_GETBANNER = (
+    "[INFO] port override /dev/ttyUSB0\n"
+    "[INFO] /dev/ttyUSB0 open Serial port success \n"
+    "[INFO] baud rate 57600\n"
+    "[INFO] Connecting to target...Device connected\n"
+    "\x1b[94m SES A1 v1.110.0 Mar  4 2026 19:06:23 \x1b[0m\n"
+    " \n"
+    "\x1b[?25h\n"
+    "\x1b[0m\n"
+)
+
+# `gettoc`, 9 rows: the actual A32 Linux boot chain (BOOTLOAD/A32_APP/
+# HP_APP/HE_APP) alongside the two baseline SE firmware banks (SERAM0/
+# SERAM1). SETOOLS colours the WHOLE LINE, not just the cell text (the
+# closing `\x1b[0m` opens the NEXT line, not the same one) -- a table-row
+# match anchored to a bare leading `|` never matches a real row at all,
+# silently computing an EMPTY resident set on every real coloured capture.
+_REAL_GETTOC_9ROW = (
+    "[INFO] port override /dev/ttyUSB0\n"
+    "[INFO] /dev/ttyUSB0 open Serial port success \n"
+    "[INFO] baud rate 57600\n"
+    "[INFO] Connecting to target...Device connected\n"
+    "\x1b[94m +----------+--------+------------+------------+------------+------------+----------+-----------+--------+----------+\n"
+    "\x1b[0m\x1b[94m |   Name   |  CPU   | Store Addr |  Obj Addr  | Dest Addr  | Boot Addr  |   Size   |  Version  |  Flags | Time (ms)|\n"
+    "\x1b[0m\x1b[94m +----------+--------+------------+------------+------------+------------+----------+-----------+--------+----------+\n"
+    "\x1b[0m\x1b[94m |    DEVICE|   CM0+ | 0x8057c6f0 | 0x8057BCF0 | ---------- | ---------- |      312 |      0.5.0|u V     |    14.92 |\n"
+    "\x1b[0m\x1b[94m |    DEVICE|   CM0+ | 0x805c1ec0 | 0x805C14C0 | ---------- | ---------- |      372 |      0.5.0|u V     |    15.04 |\n"
+    "\x1b[0m\x1b[94m |  * SERAM0|   CM0+ | ---------- | 0x000000C0 | ---------- | ---------- |    64508 |    1.110.0|u s     |     0.00 |\n"
+    "\x1b[0m\x1b[94m |    SERAM1|   CM0+ | ---------- | 0x00020AC0 | ---------- | ---------- |    64508 |    1.110.0|------- |     0.00 |\n"
+    "\x1b[0m\x1b[94m |  BOOTLOAD| A32_0  | 0x80002000 | 0x8057A8F0 | ---------- | 0x80002000 |    28816 |      0.4.3|u VB    |    16.89 |\n"
+    "\x1b[0m\x1b[94m |   A32_APP| A32_0  | 0x80020000 | 0x8057B2F0 | ---------- | ---------- |  2290048 |      1.0.0|u V     |   189.01 |\n"
+    "\x1b[0m\x1b[94m |    HP_APP| M55-HP | 0x8057d230 | 0x8057C830 | 0x50000000 | 0x50000000 |     4480 |      1.0.0|uLVB    |    15.90 |\n"
+    "\x1b[0m\x1b[94m |    HE_APP| M55-HE | 0x8057edb0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |     4480 |      1.0.0|uLVB    |    15.55 |\n"
+    "\x1b[0m\x1b[94m +----------+--------+------------+------------+------------+------------+----------+-----------+--------+----------+\n"
+    "\x1b[0m\x1b[?25h\n"
+    "\x1b[0m\n"
+)
+
+# `gettoc`, the same board's CLEAN, compliant state: only DEVICE and its own
+# ALP-HE app entry, plus the two baseline SERAM0/SERAM1 banks. Must pass
+# (rc=0) with allowed=["ALP-HE"] -- SERAM0/SERAM1 are SE firmware, never
+# touched by app-write-mram -p (only a System Package update rewrites them,
+# docs/aen-se-services.md section 0.1), so they must never count as a
+# would-be-delisted "extra" entry. Without that exemption the guard refused
+# this exact real, compliant capture unconditionally.
+_REAL_GETTOC_CLEAN = (
+    "[INFO] port override /dev/ttyUSB0\n"
+    "[INFO] /dev/ttyUSB0 open Serial port success \n"
+    "[INFO] baud rate 57600\n"
+    "[INFO] Connecting to target...Device connected\n"
+    "\x1b[94m +----------+--------+------------+------------+------------+------------+----------+-----------+--------+----------+\n"
+    "\x1b[0m\x1b[94m |   Name   |  CPU   | Store Addr |  Obj Addr  | Dest Addr  | Boot Addr  |   Size   |  Version  |  Flags | Time (ms)|\n"
+    "\x1b[0m\x1b[94m +----------+--------+------------+------------+------------+------------+----------+-----------+--------+----------+\n"
+    "\x1b[0m\x1b[94m |    DEVICE|   CM0+ | 0x80564530 | 0x80563B30 | ---------- | ---------- |      312 |      0.5.0|u V     |    14.92 |\n"
+    "\x1b[0m\x1b[94m |    DEVICE|   CM0+ | 0x805c1ec0 | 0x805C14C0 | ---------- | ---------- |      372 |      0.5.0|u V     |    15.04 |\n"
+    "\x1b[0m\x1b[94m |  * SERAM0|   CM0+ | ---------- | 0x000000C0 | ---------- | ---------- |    64508 |    1.110.0|u s     |     0.00 |\n"
+    "\x1b[0m\x1b[94m |    SERAM1|   CM0+ | ---------- | 0x00020AC0 | ---------- | ---------- |    64508 |    1.110.0|------- |     0.00 |\n"
+    "\x1b[0m\x1b[94m |    ALP-HE| M55-HE | 0x80565070 | 0x80564670 | 0x58000000 | 0x58000000 |   110356 |      1.0.0|uLVB    |    29.02 |\n"
+    "\x1b[0m\x1b[94m +----------+--------+------------+------------+------------+------------+----------+-----------+--------+----------+\n"
+    "\x1b[0m\x1b[?25h\n"
+    "\x1b[0m\n"
+)
+
 
 def _call_atoc_guard(
     tmp_path: Path,
@@ -895,47 +966,156 @@ def test_atoc_guard_allows_an_ansi_coloured_compliant_table(tmp_path):
     )
 
 
-@_NEEDS_BASH
-def test_atoc_guard_aborts_when_the_before_log_is_stale_and_unremovable(tmp_path):
-    """alp-sdk#2026 review finding 2: the transcript log sits at a
-    predictable, never-cleared path. A stale copy the guard cannot remove
-    (root-owned from a sudo run, another user's file under sticky /tmp --
-    reproduced here as merely read-only, which is enough to make the
-    redirect fail the same way) must abort rather than let the parse below
-    silently read the PREVIOUS run's transcript. Uses the guard's real,
-    un-overridden `/tmp` default (a PID+tmp_path-unique tag avoids colliding
-    with a concurrent run of this suite or a real bench script) because the
-    bug being proven red predates the `TMPDIR` override this same fix adds."""
-    import tempfile
+_BEFORE_LOG_RE = re.compile(r"resident ATOC before this write \((?P<path>[^)]+)\)")
 
-    real_tmp = Path(tempfile.gettempdir())
-    tag = f"pytest-atoc-guard-{os.getpid()}-{tmp_path.name}"
-    stale = real_tmp / f"{tag}-atoc-before.log"
-    stale.write_text(
-        "|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |"
-        "      312 |  0.5.0| u V  |\n"
-        "|   ALP-HE | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |"
-        "     4480 |  1.0.0| uLVB |\n",
-        encoding="utf-8",
+
+def _before_log_path(res: subprocess.CompletedProcess[str]) -> str:
+    m = _BEFORE_LOG_RE.search(res.stderr)
+    assert m, f"guard did not print a transcript path\n{res.stderr}"
+    return m.group("path")
+
+
+@_NEEDS_BASH
+def test_atoc_guard_transcript_path_is_run_unique(tmp_path):
+    """alp-sdk#2026 round-2 review BLOCKER: `tag` is a literal script name
+    (flash-run, flash-run-dualcore, ...), not run-unique. Three AEN boards
+    on this farm (evk-01/-02/-03) makes two concurrent runs of the SAME
+    script against DIFFERENT boards a real scenario, and a shared fixed
+    path let one run's write land between another run's redirect and read
+    -- reproduced: the second run printed the first run's clean table and
+    returned rc=0 on a board that actually carried a foreign A32_APP/HE_APP.
+    Two sequential invocations with the IDENTICAL tag and TMPDIR must land
+    on two DIFFERENT transcript paths."""
+    first = _call_atoc_guard(tmp_path, "0", ["ALP-HE"], "fake-uart", _ONLY_ALLOWED_ATOC)
+    second = _call_atoc_guard(tmp_path, "0", ["ALP-HE"], "fake-uart", _ONLY_ALLOWED_ATOC)
+    assert first.returncode == 0, first.stderr
+    assert second.returncode == 0, second.stderr
+    assert _before_log_path(first) != _before_log_path(second), (
+        "two runs of the same script (same tag) must not share a transcript path -- "
+        "that shared path is exactly the alp-sdk#2025-through-a-new-door hazard"
     )
-    stale.chmod(0o444)
+
+
+@_NEEDS_BASH
+def test_atoc_guard_aborts_when_tmpdir_is_unwritable(tmp_path):
+    """Rescoped from the round-1 fix's stale-log test: that test's own
+    docstring claim ("read-only, which is enough to make the redirect fail
+    the same way") is false -- `rm -f` on a 0o444 file you own in a
+    writable directory succeeds (unlink only checks the DIRECTORY's write
+    bit, never the file's own permissions), so the pre-fix guard's `rm -f
+    ... || return 5` line was never actually exercised by it; deleting that
+    line left all `-k atoc` tests green. `mktemp` (this fix) makes the
+    per-run path collision-proof by construction instead, so the genuine
+    unremovable-target failure mode is now "the directory itself refuses a
+    new file" -- cover THAT directly with an unwritable directory."""
+    unwritable = tmp_path / "unwritable-tmp"
+    unwritable.mkdir()
+    unwritable.chmod(0o500)
     try:
         res = _call_atoc_guard(
-            tmp_path,
-            "0",
-            ["ALP-HE"],
-            "fake-uart",
-            _REAL_MULTI_ENTRY_ATOC,
-            tag=tag,
-            tmpdir=real_tmp,
+            tmp_path, "0", ["ALP-HE"], "fake-uart", _ONLY_ALLOWED_ATOC, tmpdir=unwritable
         )
         assert res.returncode == 5, (
-            f"a stale, unremovable transcript at {stale} must abort, not silently "
-            f"parse it, got {res.returncode}\n{res.stdout}{res.stderr}"
+            f"an unwritable TMPDIR must abort, not silently skip the transcript, "
+            f"got {res.returncode}\n{res.stdout}{res.stderr}"
         )
     finally:
-        stale.chmod(0o644)
-        stale.unlink(missing_ok=True)
+        unwritable.chmod(0o700)
+
+
+# --- validated against REAL silicon captures off e1m-aen-evk-01 (2026-09-07),
+# ANSI intact, not synthesised (alp-sdk#2026 round-2 review) -----------------
+
+
+@_NEEDS_BASH
+def test_atoc_guard_accepts_the_real_getbanner_capture(tmp_path):
+    """The real `getbanner` line is " SES A1 v1.110.0 Mar  4 2026 19:06:23"
+    (ANSI-stripped) -- note the LEADING SPACE, which is SETOOLS' own
+    padding, not a terminal artifact. A bare `^SES` anchor rejected this
+    exact line, aborting every run on real hardware regardless of what
+    gettoc reported."""
+    res = _call_atoc_guard(
+        tmp_path,
+        "0",
+        ["ALP-HE"],
+        "fake-uart",
+        _ONLY_ALLOWED_ATOC,
+        banner_output=_REAL_GETBANNER,
+    )
+    assert res.returncode == 0, (
+        f"the real getbanner capture must be accepted, got {res.returncode}\n"
+        f"{res.stdout}{res.stderr}"
+    )
+
+
+@_NEEDS_BASH
+def test_atoc_guard_banner_exit_status_is_not_discarded(tmp_path):
+    """MAJOR: only the banner TEXT was checked, never getbanner's own exit
+    status. Measured: getbanner exiting 3 while still printing a
+    well-formed, compliant banner line let the query proceed and returned
+    rc=0. A non-zero getbanner must force the query unverified, same class
+    as the gettoc rc fix from round 1."""
+    res = _call_atoc_guard(
+        tmp_path,
+        "0",
+        ["ALP-HE"],
+        "fake-uart",
+        _ONLY_ALLOWED_ATOC,
+        banner_output=_COMPLIANT_BANNER,
+        banner_exit=3,
+    )
+    assert res.returncode == 5, (
+        f"a non-zero getbanner exit must abort even with a valid banner line, "
+        f"got {res.returncode}\n{res.stdout}{res.stderr}"
+    )
+
+
+@_NEEDS_BASH
+def test_atoc_guard_parses_a_real_ansi_coloured_9row_transcript(tmp_path):
+    """The exact alp-sdk#2025 incident shape, captured for real: SETOOLS
+    colours the WHOLE LINE (`\\x1b[94m |...|`, closing `\\x1b[0m` on the
+    NEXT line, not the same one), so a table-row match anchored to a bare
+    leading `|` never matched a single real row -- `resident` silently
+    computed empty on every real coloured transcript. Must abort (rc=5)
+    and name exactly the four foreign app entries -- never SERAM0/SERAM1
+    (SE firmware, not app state) or the duplicate DEVICE rows."""
+    res = _call_atoc_guard(tmp_path, "0", ["ALP-HE"], "fake-uart", _REAL_GETTOC_9ROW)
+    assert res.returncode == 5, (
+        f"the real 9-row incident capture must abort, got {res.returncode}\n"
+        f"{res.stdout}{res.stderr}"
+    )
+    # Must abort via the "this write REPLACES" foreign-entry path, i.e. the
+    # table was actually PARSED as containing foreign entries -- not the
+    # unrelated "could not read the resident ATOC" unverified path, which a
+    # broken parser (empty `resident`) would also land on with rc=5 while
+    # still dumping the raw (unparsed) transcript text -- including the
+    # literal substring "BOOTLOAD" -- to stderr. Anchoring only to rc==5 and
+    # substring presence would pass against the pre-fix `/^\|/` anchor too.
+    assert "this write REPLACES" in res.stderr, (
+        f"guard aborted for the wrong reason (parser likely found ZERO rows -- "
+        f"the pre-fix `/^\\|/` anchor bug) -- {res.stderr}"
+    )
+    for entry in ("BOOTLOAD", "A32_APP", "HP_APP", "HE_APP"):
+        assert entry in res.stderr, f"guard did not name {entry} as a delisted entry"
+    assert "SERAM0" not in res.stderr.split("also carries:", 1)[-1].split("\n")[0], (
+        "SERAM0 is SE firmware, never touched by app-write-mram -p -- "
+        "it must not be named as a would-be-delisted entry"
+    )
+
+
+@_NEEDS_BASH
+def test_atoc_guard_parses_a_real_ansi_coloured_clean_transcript(tmp_path):
+    """The same board's real, CLEAN, compliant state: only DEVICE + its own
+    ALP-HE, plus the two baseline SERAM0/SERAM1 banks that are resident on
+    every real board regardless of the last app write. Without treating
+    SERAM0/SERAM1 as baseline (like DEVICE), this exact real, compliant
+    capture aborted unconditionally -- the guard would never pass on real
+    hardware."""
+    res = _call_atoc_guard(tmp_path, "0", ["ALP-HE"], "fake-uart", _REAL_GETTOC_CLEAN)
+    assert res.returncode == 0, (
+        f"the real clean capture must pass, got {res.returncode}\n"
+        f"{res.stdout}{res.stderr}"
+    )
 
 
 def test_every_atoc_committing_script_calls_the_shared_guard() -> None:
