@@ -58,10 +58,14 @@ set -e
 source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 
 REPLACE_ATOC=0
-if [ "${1:-}" = "--replace-atoc" ]; then
-	REPLACE_ATOC=1
-	shift
-fi
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--replace-atoc) REPLACE_ATOC=1; shift ;;
+	--) shift; break ;;
+	-*) echo "unknown flag: $1" >&2; exit 2 ;;
+	*) break ;;
+	esac
+done
 HP_BD="$1"
 HE_BD="$2"
 if [ -z "$HP_BD" ] || [ -z "$HE_BD" ]; then

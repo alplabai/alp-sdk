@@ -17,6 +17,7 @@ the assertion silently reintroduces the bug, and no other check would notice.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -679,6 +680,9 @@ _ONLY_ALLOWED_ATOC = """\
 _NO_ATOC = "No ATOC found on target device.\n"
 
 
+_COMPLIANT_BANNER = "SES A1 v1.8.0 Feb 20 2026\n"
+
+
 def _call_atoc_guard(
     tmp_path: Path,
     replace_atoc: str,
@@ -686,10 +690,22 @@ def _call_atoc_guard(
     se_uart: str | None,
     gettoc_output: str | None,
     setools_has_maintenance: bool = True,
+    gettoc_exit: int = 0,
+    banner_output: str | None = None,
+    banner_exit: int = 0,
+    tag: str = "test-tag",
+    tmpdir: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run bench_atoc_replace_guard (bench-env.sh) against a synthetic
-    `maintenance -opt gettoc` transcript, without touching any real bench,
-    SETOOLS install, or probe.
+    `maintenance -opt gettoc` (and -opt getbanner) transcript, without
+    touching any real bench, SETOOLS install, or probe.
+
+    The stub `maintenance` distinguishes `-opt getbanner` from `-opt gettoc`
+    by scanning argv for the `-opt` value -- the guard now reads a banner
+    first (docs/debugging-aen.md:548's "SES <rev> v<version>") to confirm the
+    SE-UART actually answered, before trusting a gettoc read from it.
+    `banner_output` defaults to a compliant banner so callers that don't care
+    about the banner path keep exercising only what they name.
 
     Same file-based-script discipline as `_call_dpidr` /
     `test_aen_dpidr_is_not_environment_overridable` above: literal
@@ -698,6 +714,10 @@ def _call_atoc_guard(
     documented traps on the Windows/MSYS bash this suite also runs under
     (see that test's docstring). `_NEEDS_BASH` already skips this whole
     section there.
+
+    `tmpdir` overrides `TMPDIR` (the guard resolves its transcript log under
+    `${TMPDIR:-/tmp}`) -- pass a test-owned, sandboxed directory to avoid
+    colliding with real `/tmp` or with other tests running concurrently.
     """
     workdir = tmp_path
     (workdir / "bench-env.sh").write_bytes(ENV.read_bytes())
@@ -706,20 +726,48 @@ def _call_atoc_guard(
     setools_dir.mkdir(exist_ok=True)
     if setools_has_maintenance:
         maint = setools_dir / "maintenance"
-        maint.write_text('#!/usr/bin/env bash\ncat "$ATOC_STUB_FILE"\n', encoding="utf-8")
+        maint.write_text(
+            '#!/usr/bin/env bash\n'
+            'opt=""\n'
+            'prev=""\n'
+            'for a in "$@"; do\n'
+            '\t[ "$prev" = "-opt" ] && opt="$a"\n'
+            '\tprev="$a"\n'
+            'done\n'
+            'if [ "$opt" = "getbanner" ]; then\n'
+            '\tcat "$BANNER_STUB_FILE"\n'
+            '\texit "${BANNER_STUB_EXIT:-0}"\n'
+            'fi\n'
+            'cat "$ATOC_STUB_FILE"\n'
+            'exit "${GETTOC_STUB_EXIT:-0}"\n',
+            encoding="utf-8",
+        )
         maint.chmod(0o755)
+    # Absolute paths: the guard now runs `maintenance` via `( cd
+    # "$SETOOLS_DIR" && ./maintenance ... )` (matching
+    # read-update-log-proof.sh), so a relative stub path would resolve
+    # against setools_dir, not workdir.
     stub = workdir / "gettoc.out"
     stub.write_text(gettoc_output or "", encoding="utf-8")
+    banner_stub = workdir / "banner.out"
+    banner_stub.write_text(
+        banner_output if banner_output is not None else _COMPLIANT_BANNER, encoding="utf-8"
+    )
 
     se_uart_line = f'export SE_UART="{se_uart}"\n' if se_uart is not None else ""
+    tmpdir_line = f'export TMPDIR="{tmpdir}"\n' if tmpdir is not None else ""
     gate = workdir / "gate.sh"
     gate.write_bytes(
         (
+            f"{tmpdir_line}"
             f'export SETOOLS_DIR="{setools_dir.name}"\n'
             f"{se_uart_line}"
             "source ./bench-env.sh\n"
-            f'export ATOC_STUB_FILE="{stub.name}"\n'
-            f'bench_atoc_replace_guard "{replace_atoc}" test-tag {" ".join(allowed)}\n'
+            f'export ATOC_STUB_FILE="{stub}"\n'
+            f'export BANNER_STUB_FILE="{banner_stub}"\n'
+            f'export GETTOC_STUB_EXIT="{gettoc_exit}"\n'
+            f'export BANNER_STUB_EXIT="{banner_exit}"\n'
+            f'bench_atoc_replace_guard "{replace_atoc}" {tag} {" ".join(allowed)}\n'
             "exit $?\n"
         ).encode("utf-8")
     )
@@ -801,6 +849,93 @@ def test_atoc_guard_aborts_when_maintenance_tool_is_missing(tmp_path):
         tmp_path, "0", ["ALP-HE"], "fake-uart", None, setools_has_maintenance=False
     )
     assert res.returncode == 5, res.stderr
+
+
+@_NEEDS_BASH
+def test_atoc_guard_aborts_when_gettoc_fails_after_partial_output(tmp_path):
+    """alp-sdk#2026 review finding 1: a `maintenance -opt gettoc` that FAILS
+    (serial read timeout mid-table) after emitting only two `DEVICE` rows
+    must not decode as a verified, all-clear query from the transcript text
+    alone -- the exit status has to force `unverified`, not just the text."""
+    res = _call_atoc_guard(
+        tmp_path,
+        "0",
+        ["ALP-HE"],
+        "fake-uart",
+        "|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |"
+        "      312 |  0.5.0| u V  |\n"
+        "|   DEVICE |  CM0+  | 0x805C1EC0 | 0x805C14C0 | ---------- | ---------- |"
+        "      372 |  0.5.0| u V  |\n"
+        "ERROR: Target did not respond\n",
+        gettoc_exit=1,
+    )
+    assert res.returncode == 5, (
+        f"a gettoc that exited 1 after partial rows must abort, got {res.returncode}\n"
+        f"{res.stdout}{res.stderr}"
+    )
+
+
+@_NEEDS_BASH
+def test_atoc_guard_allows_an_ansi_coloured_compliant_table(tmp_path):
+    """alp-sdk#2026 review finding 3: SETOOLS colours its own output on some
+    terminals/versions. A compliant table (DEVICE + the caller's own
+    ALP-HE) wrapped in ANSI SGR codes must still parse as compliant -- not
+    misread the coloured names as foreign and abort on the guard's own
+    legitimate output."""
+    ansi_table = (
+        "|   \x1b[32mDEVICE\x1b[0m |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- |"
+        " ---------- |      312 |  0.5.0| u V  |\n"
+        "|   \x1b[32mALP-HE\x1b[0m | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 |"
+        " 0x58000000 |     4480 |  1.0.0| uLVB |\n"
+    )
+    res = _call_atoc_guard(tmp_path, "0", ["ALP-HE"], "fake-uart", ansi_table)
+    assert res.returncode == 0, (
+        f"an ANSI-coloured but compliant table must pass, got {res.returncode}\n"
+        f"{res.stdout}{res.stderr}"
+    )
+
+
+@_NEEDS_BASH
+def test_atoc_guard_aborts_when_the_before_log_is_stale_and_unremovable(tmp_path):
+    """alp-sdk#2026 review finding 2: the transcript log sits at a
+    predictable, never-cleared path. A stale copy the guard cannot remove
+    (root-owned from a sudo run, another user's file under sticky /tmp --
+    reproduced here as merely read-only, which is enough to make the
+    redirect fail the same way) must abort rather than let the parse below
+    silently read the PREVIOUS run's transcript. Uses the guard's real,
+    un-overridden `/tmp` default (a PID+tmp_path-unique tag avoids colliding
+    with a concurrent run of this suite or a real bench script) because the
+    bug being proven red predates the `TMPDIR` override this same fix adds."""
+    import tempfile
+
+    real_tmp = Path(tempfile.gettempdir())
+    tag = f"pytest-atoc-guard-{os.getpid()}-{tmp_path.name}"
+    stale = real_tmp / f"{tag}-atoc-before.log"
+    stale.write_text(
+        "|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |"
+        "      312 |  0.5.0| u V  |\n"
+        "|   ALP-HE | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |"
+        "     4480 |  1.0.0| uLVB |\n",
+        encoding="utf-8",
+    )
+    stale.chmod(0o444)
+    try:
+        res = _call_atoc_guard(
+            tmp_path,
+            "0",
+            ["ALP-HE"],
+            "fake-uart",
+            _REAL_MULTI_ENTRY_ATOC,
+            tag=tag,
+            tmpdir=real_tmp,
+        )
+        assert res.returncode == 5, (
+            f"a stale, unremovable transcript at {stale} must abort, not silently "
+            f"parse it, got {res.returncode}\n{res.stdout}{res.stderr}"
+        )
+    finally:
+        stale.chmod(0o644)
+        stale.unlink(missing_ok=True)
 
 
 def test_every_atoc_committing_script_calls_the_shared_guard() -> None:

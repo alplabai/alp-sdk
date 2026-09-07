@@ -446,34 +446,73 @@ bench_atoc_replace_guard() {
 	shift 2
 	local allowed=("$@")
 
-	local before="/tmp/${tag}-atoc-before.log"
+	# ${TMPDIR:-/tmp}, not a bare /tmp literal, so a test (or a host with a
+	# non-default TMPDIR) can sandbox this. rm -f it FIRST and require that to
+	# succeed: a stale, unremovable log (root-owned from a sudo run, another
+	# user's file under sticky /tmp) must abort rather than let the parse
+	# below silently read the PREVIOUS run's transcript as if it were fresh.
+	local before="${TMPDIR:-/tmp}/${tag}-atoc-before.log"
+	rm -f "$before" || return 5
+
+	# rc tracks whether the query itself succeeded -- defaults to failed
+	# (1) so the SE_UART-unset and maintenance-missing branches, which never
+	# run a real query, fall straight into "unverified" below rather than
+	# silently defaulting to a pass. A query that exits non-zero after
+	# emitting partial table rows (e.g. a serial timeout mid-read) must also
+	# land here, not decode as "ok" from the transcript text alone.
+	local rc=1
 	if [ -z "${SE_UART:-}" ]; then
-		echo "GUARD: SE_UART is unset -- cannot query the resident ATOC via 'maintenance -opt gettoc'" >"$before"
+		echo "GUARD: SE_UART is unset -- cannot query the resident ATOC via 'maintenance -opt gettoc'" >"$before" || return 5
 	elif [ -x "$SETOOLS_DIR/maintenance" ]; then
-		"$SETOOLS_DIR/maintenance" -c "$SE_UART" -opt gettoc >"$before" 2>&1 || true
+		# Confirm the serial device that answers is actually the SES, not the
+		# app console (e.g. on e1m-aen-evk-01, /dev/ttyUSB0 is SE-UART,
+		# /dev/ttyUSB1 is the app console) -- docs/debugging-aen.md:548's
+		# "SES <rev> v<version>" getbanner line is the proof. A gettoc read
+		# off the wrong device is not a safe verdict, so a missing/garbled
+		# banner also forces the query unverified below.
+		local banner banner_ok=1
+		banner=$( ( cd "$SETOOLS_DIR" && ./maintenance -b "${SE_UART_BAUD:-57600}" -c "$SE_UART" -opt getbanner ) 2>&1 )
+		printf '%s\n' "$banner" | sed 's/\x1b\[[0-9;]*m//g' | grep -qE '^SES [^ ]+ v[^ ]+' || banner_ok=0
+		( cd "$SETOOLS_DIR" && ./maintenance -b "${SE_UART_BAUD:-57600}" -c "$SE_UART" -opt gettoc ) >"$before" 2>&1
+		rc=$?
+		[ "$banner_ok" -eq 1 ] || rc=1
 	else
-		echo "GUARD: SETOOLS 'maintenance' tool not found in $SETOOLS_DIR -- cannot query the resident ATOC" >"$before"
+		echo "GUARD: SETOOLS 'maintenance' tool not found in $SETOOLS_DIR -- cannot query the resident ATOC" >"$before" || return 5
 	fi
+	[ -f "$before" ] || return 5
 	echo ">>> resident ATOC before this write ($before):" >&2
 	cat "$before" >&2
+
+	# SETOOLS emits ANSI colour codes on some terminals/versions -- strip
+	# them before parsing (read-update-log-proof.sh:150 does the same for
+	# its own maintenance read) so the guard never mistakes its own coloured,
+	# compliant output for a foreign entry.
+	local stripped
+	stripped=$(sed 's/\x1b\[[0-9;]*m//g' "$before")
 
 	# Table rows look like "|   DEVICE |  CM0+  | 0x... | ... |" (docs/aen-provisioning.md
 	# shows a real one) -- the Name column is the literal JSON key of whatever wrote it.
 	local resident=()
 	while IFS= read -r n; do
 		resident+=("$n")
-	done < <(awk -F'|' '
+	done < <(printf '%s\n' "$stripped" | awk -F'|' '
 		/^\|/ {
 			name = $2
 			gsub(/^[ \t]+|[ \t]+$/, "", name)
 			if (name != "" && name != "Name" && name !~ /^-+$/) print name
-		}' "$before")
+		}')
 
+	# Only trust the transcript's text when the query itself actually
+	# succeeded (rc=0) -- an error line containing "no atoc" (e.g. "no ATOC
+	# response from target") must not read as a genuinely empty board, and
+	# anchor to SETOOLS' exact message rather than a bare substring match.
 	local query_status=unverified
-	if grep -qi "no atoc" "$before"; then
-		query_status=empty
-	elif [ "${#resident[@]}" -gt 0 ]; then
-		query_status=ok
+	if [ "$rc" -eq 0 ]; then
+		if printf '%s\n' "$stripped" | grep -qix "no atoc found on target device."; then
+			query_status=empty
+		elif [ "${#resident[@]}" -gt 0 ]; then
+			query_status=ok
+		fi
 	fi
 
 	local extra=() n a hit
