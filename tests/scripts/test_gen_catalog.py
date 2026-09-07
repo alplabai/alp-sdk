@@ -218,6 +218,61 @@ def test_schema_version_bumped_for_facets():
     assert gc.SCHEMA_VERSION == 2
 
 
+def test_boot_single_slot_matches_orchestrator_predicate():
+    """#2004: `soms[*].boot` must publish EXACTLY what
+    `alp_orchestrate.secure._boot_target_is_single_slot` would compute for a
+    project built on that SoM using every m55 role the SoM's own
+    `topology:` declares -- never a second, independently-derived answer.
+
+    Cross-checked against the real predicate (not just against a hardcoded
+    expectation) via a minimal stub carrying only the two attributes
+    `_boot_target_is_single_slot` reads (`som_preset`, `cores`), so a
+    change to that predicate's logic that this catalog projection fails to
+    follow shows up here, not just a hardcoded per-SKU table drifting
+    silently in step with a bug.
+    """
+    from types import SimpleNamespace
+
+    import yaml as _yaml
+
+    from alp_orchestrate.secure import _boot_target_is_single_slot
+
+    soms = {s["sku"]: s for s in _catalog()["soms"]}
+    # Expected per-SKU shape (issue #2004): every dual-M55 AEN SoM's
+    # `memory_map:` declares disjoint `he_slot0`/`hp_slot0` windows
+    # (#1069/#1445) -- single-slot, `none`-only boot.  Every non-AEN SoM
+    # has no m55_he/m55_hp core at all, so the predicate never fires.
+    expected_single_slot = {
+        "E1M-AEN301": True, "E1M-AEN401": True, "E1M-AEN501": True,
+        "E1M-AEN601": True, "E1M-AEN701": True, "E1M-AEN801": True,
+        "E1M-AEN803": True,
+        "E1M-NX9101": False, "E1M-V2M101": False, "E1M-V2M102": False,
+        "E1M-V2N101": False, "E1M-V2N102": False,
+    }
+    assert set(soms) == set(expected_single_slot), (
+        "a SoM was added/removed -- update expected_single_slot")
+
+    for sku, want in expected_single_slot.items():
+        boot = soms[sku]["boot"]
+        assert boot["single_slot"] is want, sku
+        if want:
+            assert boot["default_swap_algorithm"] == "none", sku
+            assert boot["allowed_swap_algorithms"] == [], sku
+        else:
+            assert boot["default_swap_algorithm"] == "scratch", sku
+            assert boot["allowed_swap_algorithms"] == [
+                "scratch", "move", "overwrite"], sku
+
+        # Cross-check against the real orchestrator predicate directly,
+        # via the two fields it actually reads off a BoardProject.
+        doc = _yaml.safe_load(
+            (REPO / "metadata" / "e1m_modules" / f"{sku}.yaml")
+            .read_text(encoding="utf-8")) or {}
+        stub = SimpleNamespace(
+            som_preset=doc, cores=doc.get("topology") or {}, sku=sku)
+        assert _boot_target_is_single_slot(stub) is boot["single_slot"], sku
+
+
 def test_portable_api_lists_real_headers_and_functions():
     api = _catalog()["portable_api"]
     assert api

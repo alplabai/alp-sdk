@@ -63,6 +63,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _orchestrate_support import REPO  # noqa: E402
 
 from alp_orchestrate import load_board_yaml, resolve_carve_outs  # noqa: E402
+from alp_orchestrate.carveout import _region_ipc_eligibility  # noqa: E402
 
 RPMSG_AEN_BOARD = REPO / "examples" / "multicore" / "rpmsg-aen" / "board.yaml"
 MPROC_MAILBOX_BOARD = REPO / "examples" / "multicore" / "mproc-mailbox" / "board.yaml"
@@ -254,3 +255,93 @@ class TestCarveoutAgreementBlocker:
         assert "0xa0000000" in entry.reason and "0xa0100000" in entry.reason
         assert "carveout: False" in entry.reason
         assert "disagrees" in entry.reason
+
+
+def _with_mram_main_resolved_and_customer_runtime(project):
+    """Like `_with_mram_main_resolved` above, but ALSO overwrites
+    `mram_main`'s authored `write_authority` to `customer_runtime` --
+    the exact edit issue #2009's refused-remedy text used to instruct a
+    reader to make (`carveout.py`'s old wording: "...outside the ...
+    aperture (or, if inside it, one that resolves `write_authority:
+    customer_runtime`)"). `mram_main`'s real authored value is
+    `composite` (`metadata/e1m_modules/E1M-AEN801.yaml`); this
+    overwrite simulates a customer who followed that remedy verbatim.
+
+    Deep-copies `som_preset` first -- never mutates the tracked YAML."""
+    project.som_preset = copy.deepcopy(project.som_preset)
+    found = False
+    for region in project.som_preset["memory_map"]:
+        if region.get("name") == "mram_main":
+            region["base"] = _E8_APERTURE_BASE
+            region["write_authority"] = "customer_runtime"
+            found = True
+    assert found, "fixture drift: E1M-AEN801.yaml no longer declares mram_main"
+    return project
+
+
+class TestContainedRegionWriteAuthorityNeverRescues:
+    """#2009: `carveout.py`'s refused-remedy message (and
+    `docs/board-config-features.md`'s prose) used to tell the reader that
+    a region CONTAINED in the declared MRAM aperture could be made
+    IPC-eligible by adding `write_authority: customer_runtime`. False --
+    `cls == "flash"` refuses UNCONDITIONALLY
+    (`_region_ipc_eligibility()`); `write_authority` is consulted ONLY on
+    the `cls == "unclassified"` (outside-aperture) branch. These tests
+    pin the BEHAVIOUR the corrected remedy now describes truthfully, not
+    the wording -- a future change that made `write_authority` actually
+    override flash-class containment (implementing the OLD, false
+    remedy) would turn this red even though it never touches this file's
+    string literals.
+    """
+
+    def test_issue_repro_contained_region_with_customer_runtime_still_refuses(self):
+        """Direct repro from #2009: a region whose resolved extent sits
+        INSIDE the declared aperture, carrying `write_authority:
+        customer_runtime`, must still refuse as flash-class -- exactly
+        the call the issue used to prove the old remedy false."""
+        eligible, reason = _region_ipc_eligibility(
+            {"base": 0x80500000, "size_kib": 64,
+             "write_authority": "customer_runtime"},
+            (0x80000000, 0x80580000),
+            True)
+        assert eligible is False, (
+            "a region CONTAINED in the aperture became IPC-eligible via "
+            "write_authority: customer_runtime -- the #2009 inversion is "
+            "back")
+        assert "flash-class" in reason
+
+    def test_mram_main_resolved_with_customer_runtime_stays_blocked(self):
+        """End-to-end mirror of the unit repro above, through the same
+        `rpmsg-aen` project `TestMramMainOrderingGuard` uses: a customer
+        who followed the OLD (false) remedy on `mram_main` -- filling in
+        its `base` AND setting `write_authority: customer_runtime` --
+        must still see the ipc entry blocked, not resolved `status: ok`
+        inside the live ATOC-tiled aperture."""
+        project = _with_mram_main_resolved_and_customer_runtime(
+            load_board_yaml(RPMSG_AEN_BOARD))
+        entry = _by_name(resolve_carve_outs(project))["alp_default_rpmsg"]
+
+        assert entry.status == "blocked", (
+            f"a32_cluster ipc entry resolved {entry.status!r} after "
+            f"mram_main was given write_authority: customer_runtime -- "
+            f"the old (false) remedy would now silently work; "
+            f"reason={entry.reason!r}")
+        assert "flash-class" in entry.reason
+
+    def test_outside_aperture_authored_customer_runtime_is_actually_eligible(self):
+        """The positive half of the CORRECTED remedy: a region resolving
+        OUTSIDE the declared aperture, authored by the SoM preset itself,
+        with `write_authority: customer_runtime`, IS eligible -- proving
+        the new wording ("...sits outside the declared MRAM aperture
+        (and, if the SoM preset authors the row itself, carries
+        `write_authority: customer_runtime`)") describes a real, working
+        fix, not just different false wording."""
+        eligible, reason = _region_ipc_eligibility(
+            {"base": _OUTSIDE_APERTURE_BASE, "size_kib": 64,
+             "write_authority": "customer_runtime"},
+            (_E8_APERTURE_BASE, 0x80580000),
+            True)
+        assert eligible is True, (
+            f"a region OUTSIDE the aperture, preset-authored, carrying "
+            f"write_authority: customer_runtime was refused: {reason!r} "
+            f"-- the corrected remedy no longer describes a working fix")

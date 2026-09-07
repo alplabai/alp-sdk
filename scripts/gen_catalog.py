@@ -17,6 +17,12 @@ SDK it describes (a CI regen-diff gate keeps it byte-in-sync):
                   plus a few named-instance keys (see
                   `_named_instance_presence`) for pad-routed silicon
                   instances the SoC-level class counts merge together.
+                  A `boot` sub-object (issue #2004, see `_boot`) publishes
+                  whether the SoM is single-slot MCUboot, resolved through
+                  the SAME `gen_zephyr_board._aen_role_slot0_map` resolver
+                  `alp_orchestrate.secure._boot_target_is_single_slot`
+                  calls -- never a second derivation off `memory_map:`
+                  region names.
   - examples      examples/<category>/<name>/board.yaml -- the example's
                   default SoM + board target, a one-line summary from its
                   README / main.c, and per-example filter facets
@@ -93,6 +99,16 @@ from alp_orchestrate import (  # noqa: E402
     SdkRevisionNotBuildable,
     core_os_topology,
     load_board_yaml,
+)
+
+# `boot.single_slot` (#2004) reuses the SAME disjoint-slot0 resolver
+# `alp_orchestrate.secure._boot_target_is_single_slot` calls for a project's
+# cores -- never a second derivation off `memory_map:` region names (see
+# `_boot` below and secure.py's own docstring for why that disagrees with
+# the real resolver in general).
+from gen_zephyr_board import (  # noqa: E402
+    ZephyrBoardEmitError,
+    _aen_role_slot0_map,
 )
 
 MODULES = REPO / "metadata" / "e1m_modules"
@@ -223,6 +239,68 @@ def _topology(doc: dict) -> dict[str, dict]:
     return topo
 
 
+def _boot(sku: str, doc: dict) -> dict:
+    """Project this SoM's boot shape (#2004): single-slot MCUboot, or
+    stock two-slot.
+
+    `alp_orchestrate.secure._boot_target_is_single_slot` answers this per
+    PROJECT, off whichever `m55_he` / `m55_hp` cores that project's own
+    `cores:` declares -- there is no project here, only a SoM preset, so
+    this checks it against every m55 role the preset's OWN `topology:`
+    declares instead (a project can only ever pick a subset of its SoM's
+    cores, never a role the SoM doesn't have).  Both ask the same
+    question through the same resolver, `gen_zephyr_board.
+    _aen_role_slot0_map`: does this role have its own `<role>_slot0`
+    `memory_map:` region?  A scan of region names for "slot1"/"scratch"
+    would be a second implementation of that predicate -- secure.py's own
+    docstring documents why that disagrees with the real resolver.
+
+    Unlike `_boot_target_is_single_slot`, this checks EVERY declared m55
+    role rather than returning on the first hit: a `memory_map:` authored
+    for one m55 role but not its sibling (a half-authored #1069 map) makes
+    `_aen_role_slot0_map` raise for the undeclared role, and this SoM-level
+    fact must not silently pick whichever role happened to be checked
+    first.  On every preset in the current corpus this is moot -- each
+    dual-M55 AEN SoM declares BOTH `he_slot0`/`hp_slot0` or neither -- so
+    checking every role changes no output today; it only turns a future
+    half-authored preset into a loud regen failure instead of an
+    order-dependent guess.
+
+    `default_swap_algorithm` / `allowed_swap_algorithms` mirror
+    secure.py:239-269, the sole owner of the `swap_algorithm` ->
+    `SB_CONFIG_MCUBOOT_MODE_*` mapping: a single-slot target accepts only
+    the implicit `none` (single-app boot, no swap partition to offer), a
+    two-slot target accepts an explicit `scratch` / `move` / `overwrite`
+    and defaults to `scratch` unset.
+    """
+    memory_map = doc.get("memory_map")
+    m55_roles = sorted(
+        core_id[len("m55_"):]
+        for core_id in (doc.get("topology") or {})
+        if core_id in ("m55_he", "m55_hp")
+    )
+    single_slot = False
+    for role in m55_roles:
+        try:
+            resolved = _aen_role_slot0_map(memory_map, role)
+        except ZephyrBoardEmitError as exc:
+            raise SystemExit(
+                f"gen_catalog: {sku} boot.single_slot: {exc}") from exc
+        if resolved is not None:
+            single_slot = True
+    if single_slot:
+        return {
+            "single_slot":             True,
+            "default_swap_algorithm":  "none",
+            "allowed_swap_algorithms": [],
+        }
+    return {
+        "single_slot":             False,
+        "default_swap_algorithm":  "scratch",
+        "allowed_swap_algorithms": ["scratch", "move", "overwrite"],
+    }
+
+
 def build_soms() -> list[dict]:
     """One entry per E1M SoM SKU, resolved to its SoC + peripheral map."""
     socs = load_socs()
@@ -259,6 +337,7 @@ def build_soms() -> list[dict]:
             # ALP_BACKEND_REGISTER today -- see the issue thread.
             "soc_peripherals":  peripherals,
             "capabilities": soc.get("capabilities") or {},
+            "boot":         _boot(sku, doc),
         })
     return soms
 
