@@ -651,3 +651,167 @@ def test_every_verifybin_gate_actually_gates(script: str, tmp_path: Path) -> Non
     )
     assert empty.returncode == 3, f"{script}: an empty transcript must fail, got {empty.returncode}"
     assert absent.returncode == 3, f"{script}: a missing transcript must fail, got {absent.returncode}"
+
+
+# --- alp-sdk#2025 follow-up: bench_atoc_replace_guard, shared by every script
+# that commits a fresh ATOC (flash-run.sh, flash-run-dualcore.sh,
+# flash-update-log-dual.sh, flash-update-log-firewall-probe.sh) ------------
+
+# A real multi-entry ATOC table, trimmed from the alp-sdk#2025 incident
+# report (PR #2026): two DEVICE rows plus the A32 Linux boot chain that a
+# blind ALP-HE-only write silently delisted.
+_REAL_MULTI_ENTRY_ATOC = """\
+|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |      312 |  0.5.0| u V  |
+|   DEVICE |  CM0+  | 0x805C1EC0 | 0x805C14C0 | ---------- | ---------- |      372 |  0.5.0| u V  |
+| BOOTLOAD | A32_0  | 0x80002000 | 0x8057A8F0 | ---------- | 0x80002000 |    28813 |  0.4.3| u VB |
+|  A32_APP | A32_0  | 0x80020000 | 0x8057B2F0 | ---------- | ---------- |  2290048 |  1.0.0| u V  |
+|   HP_APP | M55-HP | 0x8057D230 | 0x8057C830 | 0x50000000 | 0x50000000 |     4480 |  1.0.0| uLVB |
+|   HE_APP | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |     4480 |  1.0.0| uLVB |
+"""
+
+# The same board immediately after a compliant write: only DEVICE and the
+# entries the caller itself is about to (re)write survive.
+_ONLY_ALLOWED_ATOC = """\
+|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |      312 |  0.5.0| u V  |
+|   ALP-HE | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |     4480 |  1.0.0| uLVB |
+"""
+
+_NO_ATOC = "No ATOC found on target device.\n"
+
+
+def _call_atoc_guard(
+    tmp_path: Path,
+    replace_atoc: str,
+    allowed: list[str],
+    se_uart: str | None,
+    gettoc_output: str | None,
+    setools_has_maintenance: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    """Run bench_atoc_replace_guard (bench-env.sh) against a synthetic
+    `maintenance -opt gettoc` transcript, without touching any real bench,
+    SETOOLS install, or probe.
+
+    Same file-based-script discipline as `_call_dpidr` /
+    `test_aen_dpidr_is_not_environment_overridable` above: literal
+    assignments in a script FILE run as `bash gate.sh`, never
+    `bash -c "...$VAR..."` or subprocess's `env=` kwarg -- both are
+    documented traps on the Windows/MSYS bash this suite also runs under
+    (see that test's docstring). `_NEEDS_BASH` already skips this whole
+    section there.
+    """
+    workdir = tmp_path
+    (workdir / "bench-env.sh").write_bytes(ENV.read_bytes())
+
+    setools_dir = workdir / "setools"
+    setools_dir.mkdir(exist_ok=True)
+    if setools_has_maintenance:
+        maint = setools_dir / "maintenance"
+        maint.write_text('#!/usr/bin/env bash\ncat "$ATOC_STUB_FILE"\n', encoding="utf-8")
+        maint.chmod(0o755)
+    stub = workdir / "gettoc.out"
+    stub.write_text(gettoc_output or "", encoding="utf-8")
+
+    se_uart_line = f'export SE_UART="{se_uart}"\n' if se_uart is not None else ""
+    gate = workdir / "gate.sh"
+    gate.write_bytes(
+        (
+            f'export SETOOLS_DIR="{setools_dir.name}"\n'
+            f"{se_uart_line}"
+            "source ./bench-env.sh\n"
+            f'export ATOC_STUB_FILE="{stub.name}"\n'
+            f'bench_atoc_replace_guard "{replace_atoc}" test-tag {" ".join(allowed)}\n'
+            "exit $?\n"
+        ).encode("utf-8")
+    )
+    return subprocess.run(
+        ["bash", "gate.sh"], cwd=workdir, capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=60,
+    )
+
+
+@_NEEDS_BASH
+def test_atoc_guard_allows_only_its_own_entries(tmp_path):
+    """DEVICE plus exactly the caller's own allowed entries -- the ordinary
+    post-write state -- must proceed."""
+    res = _call_atoc_guard(tmp_path, "0", ["ALP-HE"], "fake-uart", _ONLY_ALLOWED_ATOC)
+    assert res.returncode == 0, res.stderr
+
+
+@_NEEDS_BASH
+def test_atoc_guard_allows_a_genuinely_empty_atoc(tmp_path):
+    """A fresh/erased board reports 'No ATOC' -- nothing resident to delist,
+    so the guard must not treat that as unverified."""
+    res = _call_atoc_guard(tmp_path, "0", ["ALP-HE"], "fake-uart", _NO_ATOC)
+    assert res.returncode == 0, res.stderr
+
+
+@_NEEDS_BASH
+def test_atoc_guard_aborts_on_a_foreign_resident_entry(tmp_path):
+    """The alp-sdk#2025 scenario itself: a resident A32 Linux boot chain that
+    is NOT in the caller's allowed set must abort the write, exit 5, and
+    name what would be delisted."""
+    res = _call_atoc_guard(tmp_path, "0", ["ALP-HE"], "fake-uart", _REAL_MULTI_ENTRY_ATOC)
+    assert res.returncode == 5, res.stderr
+    for entry in ("BOOTLOAD", "A32_APP", "HP_APP", "HE_APP"):
+        assert entry in res.stderr, f"guard did not name {entry} as a delisted entry"
+
+
+@_NEEDS_BASH
+def test_atoc_guard_allows_its_own_multi_entry_write(tmp_path):
+    """flash-run-dualcore.sh's own two-entry write (ALP-HP + ALP-HE) must not
+    trip the guard on itself -- only a THIRD, foreign entry should."""
+    res = _call_atoc_guard(
+        tmp_path, "0", ["ALP-HP", "ALP-HE"], "fake-uart", _REAL_MULTI_ENTRY_ATOC
+    )
+    assert res.returncode == 5, res.stderr
+    # HP_APP/HE_APP are resident but named differently from the allowed
+    # ALP-HP/ALP-HE this run would write -- still foreign, still refused.
+    assert "HP_APP" in res.stderr and "HE_APP" in res.stderr
+
+
+@_NEEDS_BASH
+def test_atoc_guard_replace_atoc_bypasses_a_foreign_entry(tmp_path):
+    """--replace-atoc (replace_atoc=1) is the documented, explicit opt-out."""
+    res = _call_atoc_guard(tmp_path, "1", ["ALP-HE"], "fake-uart", _REAL_MULTI_ENTRY_ATOC)
+    assert res.returncode == 0, res.stderr
+
+
+@_NEEDS_BASH
+def test_atoc_guard_aborts_when_se_uart_is_unset(tmp_path):
+    """No SE_UART means the `gettoc` query cannot even be attempted --
+    writing blind is exactly the failure mode the guard exists to close
+    (this matters for the Flow-D-writing callers, which have no other
+    SE_UART dependency)."""
+    res = _call_atoc_guard(tmp_path, "0", ["ALP-HE"], None, None)
+    assert res.returncode == 5, res.stderr
+    assert "SE_UART" in res.stderr or "could not read the resident ATOC" in res.stderr
+
+
+@_NEEDS_BASH
+def test_atoc_guard_replace_atoc_bypasses_an_unverified_query(tmp_path):
+    res = _call_atoc_guard(tmp_path, "1", ["ALP-HE"], None, None)
+    assert res.returncode == 0, res.stderr
+
+
+@_NEEDS_BASH
+def test_atoc_guard_aborts_when_maintenance_tool_is_missing(tmp_path):
+    """SETOOLS_DIR set, SE_UART set, but no `maintenance` binary -- the query
+    cannot run and the guard must still refuse rather than assume safety."""
+    res = _call_atoc_guard(
+        tmp_path, "0", ["ALP-HE"], "fake-uart", None, setools_has_maintenance=False
+    )
+    assert res.returncode == 5, res.stderr
+
+
+def test_every_atoc_committing_script_calls_the_shared_guard() -> None:
+    """The four scripts known to commit a fresh ATOC must route through the
+    ONE shared guard, not a hand-rolled copy -- that drift is exactly what
+    alp-sdk#2025's follow-up closed."""
+    for script in (
+        "flash-run.sh",
+        "flash-run-dualcore.sh",
+        "flash-update-log-dual.sh",
+        "flash-update-log-firewall-probe.sh",
+    ):
+        body = (BENCH / script).read_text(encoding="utf-8")
+        assert "bench_atoc_replace_guard" in body, f"{script} does not call the shared ATOC guard"
