@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/bench/aen/flash-run-dualcore.sh <hp-build-dir> <he-build-dir> [post_boot_read_bytes_hex]
+# scripts/bench/aen/flash-run-dualcore.sh [--replace-atoc] <hp-build-dir> <he-build-dir> [post_boot_read_bytes_hex]
 #
 # Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
 # drives the Alif SETOOLS over the SE-UART + JLinkExe, both Linux
@@ -57,10 +57,15 @@ set -e
 # shellcheck source=scripts/bench/aen/bench-env.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 
+REPLACE_ATOC=0
+if [ "${1:-}" = "--replace-atoc" ]; then
+	REPLACE_ATOC=1
+	shift
+fi
 HP_BD="$1"
 HE_BD="$2"
 if [ -z "$HP_BD" ] || [ -z "$HE_BD" ]; then
-	echo "usage: $0 <hp-build-dir> <he-build-dir> [post_boot_read_bytes_hex]" >&2
+	echo "usage: $0 [--replace-atoc] <hp-build-dir> <he-build-dir> [post_boot_read_bytes_hex]" >&2
 	exit 2
 fi
 bench_require_setools || exit $?
@@ -78,8 +83,12 @@ HE_BIN="$HE_BD/zephyr/zephyr.bin"
 [ -f "$HE_BIN" ] || { echo "missing HE zephyr.bin: $HE_BIN" >&2; exit 2; }
 
 # 1. stage both images + a two-entry signed-ATOC config (keeps the
-#    factory DEVICE cfg). ALP-HP is the master; ALP-HE is the deferred
-#    peer the HP image un-defers at runtime via service 500.
+#    factory DEVICE cfg -- SETOOLS preserves DEVICE when a JSON omits it,
+#    docs/aen-provisioning.md section 4). ALP-HP is the master; ALP-HE is
+#    the deferred peer the HP image un-defers at runtime via service 500.
+#
+#    app-write-mram -p below REPLACES every OTHER app ATOC entry not in
+#    this JSON -- it does not merge (alp-sdk#2025, see the GUARD below).
 cp -f "$HP_BIN" "$SET/build/images/$HP_NAME.bin"
 cp -f "$HE_BIN" "$SET/build/images/$HE_NAME.bin"
 cat > "$SET/build/config/dualcore.json" <<JSON
@@ -103,6 +112,13 @@ python3 "$ALP_SDK_DIR/scripts/aen_atoc.py" "$SET/build/config/dualcore.json" || 
 cd "$SET"
 echo ">>> FLASH dual-core HP=$HP_NAME (master) HE=$HE_NAME (deferred peer, entry id ALP-HE)" >&2
 ./app-gen-toc -f "build/config/dualcore.json" >/tmp/gentoc-dual.log 2>&1 || { echo "gen-toc FAILED"; tail /tmp/gentoc-dual.log; exit 1; }
+
+# 1b. GUARD (alp-sdk#2025) -- see bench_atoc_replace_guard in bench-env.sh.
+# ALP-HP and ALP-HE are what THIS run itself is about to (re)write, so they
+# are the allowed set -- the guard fires only on a genuinely foreign resident
+# entry (e.g. an A32 Linux boot chain), never on this script's own output.
+bench_atoc_replace_guard "$REPLACE_ATOC" flash-run-dualcore ALP-HP ALP-HE || exit $?
+
 # 2. write to MRAM over the SE-UART (SES auto-enters maintenance, burns,
 #    resets+boots ALP-HP; ALP-HE stays loaded-but-not-released until the
 #    HP image un-defers it at runtime).

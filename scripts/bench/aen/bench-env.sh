@@ -406,3 +406,104 @@ bench_require_setools() {
 	fi
 	return 0
 }
+
+# bench_atoc_replace_guard <replace-atoc 0|1> <tag> [allowed-entry ...]
+#
+# GUARD (alp-sdk#2025) against the ATOC-replace hazard, shared by every
+# helper that burns a freshly-generated `app-gen-toc` package: that package
+# always contains exactly the app entries named in the JSON handed to it, and
+# writing it -- whether over the SE-UART (`app-write-mram -c $SE_UART -p`,
+# Flow A) or directly over SWD (`loadbin $PKG $ATOC_ADDR`, Flow D) -- burns
+# the SAME signed ATOC structure at the SAME MRAM location either way (see
+# docs/debugging-aen.md and docs/aen-bench-bringup.md: both call it "the
+# signed ATOC the SE reads at boot"). `DEVICE` is the one entry SETOOLS is
+# documented to preserve when a JSON omits it (docs/aen-provisioning.md
+# section 4, "write an app-only ATOC ... don't overwrite the device config");
+# every OTHER resident app entry NOT in the JSON you are about to burn is
+# gone the instant the write lands -- no error, no SES warning (`[SES] ATOC
+# ok` prints either way). This destroyed a live A32 Linux boot chain
+# (`BOOTLOAD`/`A32_APP`/`HP_APP`/`HE_APP`) on `e1m-aen-evk-01`, 2026-09-07.
+#
+# Originally written into flash-run.sh alone for its own single ALP-HE entry
+# (#2025); factored out here so every script that commits a TOC shares one
+# guard instead of drifting copies. <allowed-entry ...> is the set of app
+# entries THIS run is itself about to (re)write -- e.g. flash-run.sh passes
+# ALP-HE, flash-run-dualcore.sh passes ALP-HP ALP-HE (its own legitimate
+# two-entry write) -- so the guard fires only on a GENUINELY foreign resident
+# entry, never on the script's own output.
+#
+# Queries resident state with SETOOLS' `maintenance -c $SE_UART -opt gettoc`
+# -- a documented non-destructive TOC read (AUGD0005 Alif Security Toolkit
+# User Guide v1.110.0, "Command line options (-opt)": gettoc "Returns the TOC
+# information"), never a merge engine. Dumps it unconditionally, even under
+# replace-atoc=1, so a run always leaves a record of what was resident
+# immediately before a destructive write.
+#
+# Returns 0 to proceed, 5 to abort (could not verify what is resident, or a
+# foreign entry would be delisted) unless replace-atoc=1 was passed.
+bench_atoc_replace_guard() {
+	local replace_atoc="$1" tag="$2"
+	shift 2
+	local allowed=("$@")
+
+	local before="/tmp/${tag}-atoc-before.log"
+	if [ -z "${SE_UART:-}" ]; then
+		echo "GUARD: SE_UART is unset -- cannot query the resident ATOC via 'maintenance -opt gettoc'" >"$before"
+	elif [ -x "$SETOOLS_DIR/maintenance" ]; then
+		"$SETOOLS_DIR/maintenance" -c "$SE_UART" -opt gettoc >"$before" 2>&1 || true
+	else
+		echo "GUARD: SETOOLS 'maintenance' tool not found in $SETOOLS_DIR -- cannot query the resident ATOC" >"$before"
+	fi
+	echo ">>> resident ATOC before this write ($before):" >&2
+	cat "$before" >&2
+
+	# Table rows look like "|   DEVICE |  CM0+  | 0x... | ... |" (docs/aen-provisioning.md
+	# shows a real one) -- the Name column is the literal JSON key of whatever wrote it.
+	local resident=()
+	while IFS= read -r n; do
+		resident+=("$n")
+	done < <(awk -F'|' '
+		/^\|/ {
+			name = $2
+			gsub(/^[ \t]+|[ \t]+$/, "", name)
+			if (name != "" && name != "Name" && name !~ /^-+$/) print name
+		}' "$before")
+
+	local query_status=unverified
+	if grep -qi "no atoc" "$before"; then
+		query_status=empty
+	elif [ "${#resident[@]}" -gt 0 ]; then
+		query_status=ok
+	fi
+
+	local extra=() n a hit
+	for n in "${resident[@]}"; do
+		[ "$n" = "DEVICE" ] && continue
+		hit=0
+		for a in "${allowed[@]}"; do
+			[ "$n" = "$a" ] && { hit=1; break; }
+		done
+		[ "$hit" -eq 0 ] && extra+=("$n")
+	done
+
+	if [ "$replace_atoc" -ne 1 ]; then
+		if [ "$query_status" = unverified ]; then
+			echo "!! ABORT ($tag): could not read the resident ATOC via 'maintenance -c \$SE_UART -opt gettoc'" >&2
+			echo "   (see $before). A fresh ATOC write REPLACES every app entry not in it, so" >&2
+			echo "   writing blind risks silently delisting anything already on this board -- that is" >&2
+			echo "   exactly how e1m-aen-evk-01 lost its A32 Linux boot chain on 2026-09-07." >&2
+			echo "   Confirm by hand what is resident, then re-run with --replace-atoc." >&2
+			return 5
+		fi
+		if [ "${#extra[@]}" -gt 0 ]; then
+			echo "!! ABORT ($tag): this write REPLACES every app ATOC entry not in it -- it does NOT merge." >&2
+			echo "   This board also carries: ${extra[*]}" >&2
+			echo "   Writing now would SILENTLY DELIST ${extra[*]} -- no error, no SES warning" >&2
+			echo "   (this destroyed the A32 Linux boot chain on e1m-aen-evk-01, 2026-09-07)." >&2
+			echo "   Re-run with --replace-atoc only once you can restore ${extra[*]}, or if" >&2
+			echo "   losing them is genuinely intended." >&2
+			return 5
+		fi
+	fi
+	return 0
+}
