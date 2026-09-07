@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the aen-bmi323-regcheck bench app on the
+# E1M-AEN801/AEN803 (Ensemble E8, M55-HE): compiles the ACC_CONF/ERR_REG/
+# STATUS raw read-back sequence + the bmi323_init()/bmi323_set_accel()/
+# bmi323_read_accel() calls against the real board target.
+#
+# Compile-checks the raw-register + driver path on the real E8 board target;
+# filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
+# board only) -- the electrical settlement needs the real carrier I2C bus.
+
+sample:
+  name: aen-bmi323-regcheck
+  description: |
+    Diagnostic read-back settlement for the BMI323 "all axes read 0x8000"
+    bench report on the E1M-AEN801/AEN803 (Alif Ensemble E8, Cortex-M55-HE):
+    configures the accelerometer exactly as examples/peripheral-io/
+    i2c-device-hub does (bmi323_init() + bmi323_set_accel(ODR_100_HZ,
+    FS_2G) + the same wait), then reads back ACC_CONF (0x20), ERR_REG
+    (0x01) and STATUS (0x02) -- in that order, before touching the data
+    registers, since STATUS is clear-on-read and reading ACC_DATA_X..Z
+    clears drdy_acc too -- decodes each, and prints an explicit
+    interpretation of ACC_CONF (write landed / reset value / pre-fix
+    encoding / byte-swapped). Also samples STATUS a second time ~100 ms
+    after the first ~17 ms sample, and reads back ACC_CONF once before
+    bmi323_set_accel() runs, for a genuine before/after. This is a
+    diagnostic instrument, not a driver fix -- chips/bmi323/bmi323.c is
+    untouched.
+
+tests:
+  alp_sdk.examples.aen.bmi323_regcheck.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - i2c
+      - imu
+    build_only: true   # the register read-back settlement needs the real bench; not a CI run.

@@ -36,6 +36,20 @@
  * 16, set by soc/alif/ensemble/pinctrl_soc.h) so their input buffers actually
  * sense the encoder edges -- without it the count stays static regardless of
  * motion.
+ *
+ * counts-per-revolution = 96, not the encoder's PPR: hal_alif's
+ * alif_utimer_config_qdec_triggers() (drivers/utimer/src/utimer.c) arms BOTH
+ * rising and falling edges of BOTH X and Y as count triggers -- x4 quadrature
+ * decode -- and the qdec driver programs this value straight into the
+ * hardware counter's reload register, so it sets the real per-revolution
+ * wraparound, not just a display scale factor. The carrier's rotary encoder
+ * is 24 PPR (metadata/boards/e1m-evk.yaml: "PEC12R-4222F-S0024 ... 24 PPR"),
+ * so one mechanical revolution is 24 * 4 = 96 raw counts. The previous 1000
+ * was an arbitrary round number: it stretched one real revolution across
+ * only ~35 of the 0-359 reported degrees, and truncated any count below
+ * ceil(1000/360) = 3 raw ticks to a printed 0 -- indistinguishable from no
+ * motion at all. At 96, one raw tick is already 3.75 degrees, so it never
+ * silently rounds to 0.
  */
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
@@ -74,7 +88,7 @@
 
 		utimer12_qdec: qdec {
 			compatible = "alif,utimer-qdec";
-			counts-per-revolution = <1000>;
+			counts-per-revolution = <96>; /* 24 PPR * x4 decode -- see comment above */
 			input-filter-enable;
 			filter-prescaler = <16>;
 			filter-taps = <1>;

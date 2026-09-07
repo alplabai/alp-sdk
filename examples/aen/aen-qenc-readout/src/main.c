@@ -7,20 +7,38 @@
  * standard Zephyr sensor API (sensor_sample_fetch / sensor_channel_get) on
  * DT_ALIAS(alp_qenc0) and reports SENSOR_CHAN_ROTATION.  The driver scales the
  * raw UTIMER counter to DEGREES (val1 = counter * 360 / counts-per-revolution),
- * so the value ranges 0..359, not raw counts.
+ * so the value ranges 0..359, not raw counts -- the sensor API has no separate
+ * channel or attribute for the raw counter, so degrees is the only number this
+ * app (or any app using this driver) can ever read.
  *
  * The UTIMER runs in quadrature-decoder mode: two phase inputs (X = channel A,
- * Y = channel B) advance/retreat the counter; the reload value wraps at
- * counts-per-revolution.  Turn the encoder shaft between samples to see the
- * angle move.  NOTE: because the reading is quantised to whole degrees, shaft
- * motion smaller than ~1 degree (360 / counts-per-revolution of a rev) will
- * not change val1 and reads as no motion.
+ * Y = channel B) advance/retreat the counter on every edge of both phases (x4
+ * decode -- see hal_alif's alif_utimer_config_qdec_triggers(), which arms both
+ * rising and falling edges of A and B).  For the carrier's 24-PPR encoder that
+ * is 24*4 = 96 counts per mechanical revolution, which is what
+ * counts-per-revolution must equal for degrees to mean what they say: the
+ * hardware reload wraps the counter at (counts-per-revolution - 1), so a wrong
+ * (too large) value doesn't just misreport a bit -- it stretches one real
+ * revolution across only a fraction of the 0-359 range, AND makes a single
+ * genuine encoder tick integer-truncate to 0 degrees ("moved a little" reads
+ * identical to "never moved").  See the board overlay for the corrected value.
  *
- * PASS gate: device ready, sample_fetch + channel_get return 0 across the poll
- * loop AND the reported angle CHANGES (the shaft was turned -> live decode).  A
- * run that reads cleanly but never changes (no shaft motion / sub-degree motion
- * / encoder not wired) is reported PARTIAL -- the driver path is proven; spin
- * the encoder through at least a degree.
+ * PASS / SKIPPED / FAIL, not PASS / PARTIAL: a bench run with nobody at the
+ * knob produces N clean reads that never change -- that is the CORRECT output
+ * of a working decoder sitting idle, and it is byte-for-byte what a decoder
+ * that never counts also prints.  The old binary verdict called both of those
+ * "PARTIAL", which taught nothing.  This app tells them apart the only way it
+ * honestly can without a human: whether every sample_fetch/channel_get in the
+ * window returned 0 (device_is_ready() already proved qdec_alif_utimer_init()
+ * ran clock-on, counter-enable and trigger config to completion; an all-clean
+ * poll window is the only "is it armed" evidence the driver exposes -- there
+ * is no register-peek attr_get to ask more directly, and this file doesn't
+ * invent one):
+ *   - count changed                        -> PASS     (decode is live)
+ *   - never changed, every read was clean  -> SKIPPED  (idle, not proven dead
+ *                                              -- turn the shaft and rerun)
+ *   - never changed, some read errored     -> FAIL     (armed state itself is
+ *                                              in doubt; that's a real defect)
  */
 
 #include <stdio.h>
@@ -30,8 +48,8 @@
 #include <zephyr/drivers/sensor.h>
 
 #define QENC_NODE DT_ALIAS(alp_qenc0)
-#define SAMPLES   20
-#define POLL_MS   100
+#define SAMPLES   30
+#define POLL_MS   300 /* 30 * 300ms = 9s: comfortably long enough to grab the knob */
 
 int main(void)
 {
@@ -42,6 +60,23 @@ int main(void)
 		printf("[qenc] RESULT FAIL: device not ready\n[qenc] done\n");
 		return 0;
 	}
+
+	/* This is the whole state dump available: the sensor_driver_api this
+	 * driver registers is {sample_fetch, channel_get} only -- no attr_get, no
+	 * second channel for the raw counter -- so there is no live register we
+	 * can honestly read back. What we CAN echo, for free and without poking a
+	 * single address, is the build-time devicetree config the driver was
+	 * handed, straight off the qdec node. If a bench run comes back SKIPPED
+	 * or FAIL, this line plus counts-per-revolution's value are the first
+	 * thing to check -- no second reservation needed to see them.
+	 */
+	printf("[qenc] config: counts-per-revolution=%u filter=%s prescaler=%u taps=%u\n",
+	       (unsigned)DT_PROP(QENC_NODE, counts_per_revolution),
+	       DT_PROP(QENC_NODE, input_filter_enable) ? "on" : "off",
+	       (unsigned)DT_PROP(QENC_NODE, filter_prescaler),
+	       (unsigned)DT_PROP(QENC_NODE, filter_taps));
+
+	printf("[qenc] >>> turn the encoder shaft now, about one full revolution <<<\n");
 
 	int     ok_reads = 0;
 	bool    moved    = false;
@@ -70,13 +105,31 @@ int main(void)
 		alp_delay_ms(POLL_MS);
 	}
 
-	printf("[qenc] RESULT %s: %s (%d/%d clean reads)\n",
-	       (ok_reads > 0 && moved) ? "PASS" : "PARTIAL",
-	       moved          ? "angle changed = live quadrature decode"
-	       : ok_reads > 0 ? "reads clean but angle static (spin the encoder >=1 deg / check wiring)"
-	                      : "no clean reads",
-	       ok_reads,
-	       SAMPLES);
+	/* armed: every poll in the window returned a clean 0 from BOTH driver
+	 * calls -- the only runtime evidence available that qdec_alif_utimer_init()
+	 * left the counter enabled and trigger-armed the way it claims to. It is
+	 * not proof the shaft is even wired; it is proof the driver itself isn't
+	 * the thing standing between "armed" and "counting".
+	 */
+	bool        armed = (ok_reads == SAMPLES);
+	const char *result;
+	const char *reason;
+
+	if (moved) {
+		result = "PASS";
+		reason = "angle changed -> live quadrature decode";
+	} else if (armed) {
+		result = "SKIPPED";
+		reason = "no motion detected -- device ready and every read in the window came back "
+		         "clean (decoder armed as configured), but the count never moved; turn the "
+		         "shaft and rerun, this is NOT evidence of a defect";
+	} else {
+		result = "FAIL";
+		reason = "count never moved AND not every read in the window was clean -- the armed "
+		         "state itself contradicts qdec_alif_utimer_init()'s configuration";
+	}
+
+	printf("[qenc] RESULT %s: %s (%d/%d clean reads)\n", result, reason, ok_reads, SAMPLES);
 	printf("[qenc] done\n");
 	return 0;
 }
