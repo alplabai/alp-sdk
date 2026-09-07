@@ -16,6 +16,7 @@ from typing import Any, Optional
 import yaml
 
 from .carveout import resolve_carve_outs
+from .memory import resolve_memory_regions
 from .models import BoardProject, Slice, SystemManifest
 from .partition import resolve_storage_partitions
 
@@ -34,6 +35,7 @@ def emit_system_manifest(
     """
     carve_outs = resolve_carve_outs(project)
     partitions = resolve_storage_partitions(project)
+    memory_regions = resolve_memory_regions(project)
     effective_slices = list(slices) if slices is not None else list(project.cores.values())
 
     boot_order = list(project.som_preset.get("boot_order") or [])
@@ -45,6 +47,7 @@ def emit_system_manifest(
         partitions=partitions,
         boot_order=boot_order,
         helper_mcus=_helper_mcus(project),
+        memory_regions=memory_regions,
     )
 
     out = manifest.to_dict()

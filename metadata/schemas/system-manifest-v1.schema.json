@@ -105,12 +105,76 @@
     },
     "memory": {
       "type": "array",
-      "description": "Resolved memory-region view of the SoM: the regions `resolve_memory_map()` yields, each with the flash/RAM class derived from the SoC's declared aperture and the region's authored `write_authority` (#1365).  DECLARED AHEAD OF ITS PRODUCER, DELIBERATELY -- no emitter writes this key yet.  The emit half is deferred on FIXTURE CHURN, not on an open decision: emitting this key rewrites every `system-manifest.yaml` under tan's planner-oracle corpus (98 files, 94 of them carrying `ipc: []`), and landing that as its own single-cause diff is what keeps it reviewable. Ownership is already settled -- ADR-0026 section D decided alp-sdk's emitters are canonical and that `tan` consumes plan-embedded bytes rather than re-implementing the renderers -- and this schema is alp-sdk's under every migration outcome anyway (ADR-0026 clause 2). Declaring the contract here moves no emitted byte.  A consumer must therefore read an ABSENT `memory:` as \"this producer does not emit it yet\", NEVER as \"this SoM has no memory regions\".  Rows join the other panes by NAME: `ipc[].region` and `storage[].flash_device` each name a `memory[].name`.  That join is partial by construction -- an `on_module.ospi_memories:` key is a legal `storage[].flash_device` target but is a controller-instance name carrying a `capacity_mbit` and no base, so it lies outside every aperture and gets no `memory[]` row.  Partitions stay in `storage[]` and carve-outs in `ipc[]`; this array is the SoM-declared regions those two refer INTO, not a third copy of them.",
+      "description": "Resolved memory-region view of the SoM: the regions `resolve_memory_map()` yields, each with the flash/RAM class derived from the SoC's declared aperture and the region's authored `write_authority` (#1365).  Emitted since #1365 item 3 by `scripts/alp_orchestrate/memory.py`; before that the key was declared ahead of its producer and nothing wrote it.  OMITTED, never emitted empty: a SoM that resolves no regions at all (an unresolvable `silicon_variant`, e.g. NX9101's `TBD`) carries no `memory:` key, so a consumer must read an ABSENT `memory:` as either a producer older than #1365 item 3 or a SoM whose memory layout is still pending -- NEVER as \"this SoM has no memory regions\".  Rows join the other panes by NAME: `ipc[].carve_out_region` and `storage[].flash_device` each name a `memory[].name`.  That join is partial by construction -- an `on_module.ospi_memories:` key is a legal `storage[].flash_device` target but is a controller-instance name carrying a `capacity_mbit` and no base, so it lies outside every aperture and gets no `memory[]` row.  Partitions stay in `storage[]` and carve-outs in `ipc[]`; this array is the set of SoM-declared regions those two refer INTO, not a third copy of them.",
       "items": {
         "type": "object",
-        "required": ["name"],
-        "additionalProperties": true,
-        "description": "One resolved region.  `name` is the join key.  A region whose base does not resolve carries no `base` and says why (`status: unresolved` plus a `reason`) instead of guessing one -- an absent derived field means unresolved, never a default (ADR-0034 clause 4).  `dt_label` appears only when verified against the board `.dts` (#1556), never as the name-derived fallback."
+        "required": [
+          "name",
+          "source",
+          "kind",
+          "status"
+        ],
+        "additionalProperties": false,
+        "description": "One resolved region.  `name` is the join key.  Every field is DERIVED or passed through verbatim -- none is defaulted: a region whose base does not resolve carries no `base` and says why (`status: unresolved` plus a `reason`) instead of guessing one, and an absent derived field means unresolved, never a default (ADR-0034 clause 4).  `dt_label` is deliberately NOT carried: #1556 allows it only when verified against the board `.dts`, and this emitter has no access to that verification, so emitting it would mean shipping the name-derived fallback the issue forbids.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The region's name, verbatim from the SoM preset's `memory_map:` or the SoC's `memory_regions`.  The join key `ipc[].carve_out_region` and `storage[].flash_device` name."
+          },
+          "source": {
+            "enum": [
+              "som_preset",
+              "soc_derived"
+            ],
+            "description": "Provenance, and what a UI derives EDITABILITY from: `som_preset` when this SoM authors its own `memory_map:` (the table wins verbatim), `soc_derived` when the loader built the table from the SoC's fixed `memory_regions` or from the silicon variant.  Uniform across the pane, because `resolve_memory_map()`'s precedence is all-or-nothing.  There is no `board_yaml` value: board.yaml never AUTHORS a region, it only NAMES one via `ipc[].carve_out_region` / `storage[].flash_device`."
+          },
+          "kind": {
+            "enum": [
+              "flash",
+              "ram",
+              "unclassified",
+              "unresolved"
+            ],
+            "description": "`aperture.classify_region()`'s verdict, verbatim.  `flash` = the extent is CONTAINED in the SoC's declared on-die aperture (containment is proof regardless of authorship).  `ram` = outside the aperture and NOT preset-authored.  `unclassified` = outside the aperture and preset-authored -- containment is ONE-DIRECTIONAL, so outside proves NOTHING (an Ensemble OSPI XIP window sits outside and is still flash).  `unresolved` = no extent to test, or the SoC declares no aperture at all (every non-Alif SoM).  A consumer must treat `unclassified` and `unresolved` as \"not proven\", never fold either into `ram`."
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "unresolved"
+            ],
+            "description": "Whether the region resolved an ADDRESS.  `unresolved` rows carry a `reason` and no `base`.  Distinct from `ipc[].status`'s `ok`/`blocked`, which is a verdict about an allocation request rather than about a region."
+          },
+          "base": {
+            "type": "integer",
+            "description": "Resolved base address.  Present only when `status: ok` -- never guessed, never a placeholder."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "description": "Region size in bytes, from `size_mib` (preferred) or `size_kib`.  Resolves INDEPENDENTLY of `base`: a region with `base: \"TBD\"` and a declared size carries `size_bytes` alongside `status: unresolved`."
+          },
+          "write_authority": {
+            "enum": [
+              "customer_image",
+              "vendor_image",
+              "customer_runtime",
+              "secure_enclave",
+              "none",
+              "composite"
+            ],
+            "description": "WHO may write this region, passed through verbatim from som-preset-v1's `memory_region.write_authority`.  ABSENT means unresolved, never `customer_runtime` (ADR-0034 clause 4) -- a `soc_derived` row carries no authority field at all.  Two axes on purpose: `customer_image` (customer-owned, written at flash time) and `customer_runtime` (customer-owned, writable at runtime) are the distinction a single-axis owner vocabulary cannot express."
+          },
+          "accessible_from": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Core ids that can address this region, verbatim from the authored or derived table.  A per-core TCM bank names one core; a shared bank names every core the SoC variant declares."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the address did not resolve.  Required whenever `status: unresolved`; names the missing field and where to declare it, so an unresolved row is actionable instead of merely absent."
+          }
+        }
       }
     }
   }
