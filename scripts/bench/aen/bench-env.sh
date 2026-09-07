@@ -94,13 +94,163 @@ export HAL_ALIF_DIR
 export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he}"
 
 # --------------------------------------------------------------------
+# Labgrid PLACE resolution (alp-sdk#2027)
+# --------------------------------------------------------------------
+# The maintainer's hard rule: never touch a bench connection by hand --
+# every connection goes through labgrid, addressed by PLACE NAME. A
+# stale device-path table (SE_UART/console swapped, a J-Link USB path
+# that named a DIFFERENT board) caused the 2026-09-07 incident. LG_PLACE
+# is therefore the PRIMARY input below: set it and the SE-UART, console
+# and SWD probe values are resolved live from labgrid, never guessed.
+#
+# NO default place -- if LG_PLACE is unset we do not fall back to
+# guessing e1m-aen-evk-01 or any other board. The raw SE_UART variable
+# stays available as an explicit, WARNED escape hatch for genuinely
+# off-labgrid work (erase-storage.sh documents such a case); LG_PLACE
+# wins whenever both are set.
+export LG_COORDINATOR="${LG_COORDINATOR:-100.64.0.1:20408}"
+
+# bench_labgrid_show <place> — echo `labgrid-client -p <place> show`.
+# Strips a trailing CR from every line: a real interactive run (pty)
+# emits CRLF line endings (measured 2026-09-07; labgrid-client itself
+# prints no ANSI/SGR codes, so this is the actual "real output doesn't
+# match a synthesised fixture" hazard here), and an untouched CR breaks
+# any `$`-anchored match downstream the same way SETOOLS' CRLF does
+# elsewhere in this file.
+bench_labgrid_show() {
+	LG_COORDINATOR="$LG_COORDINATOR" labgrid-client -p "$1" show 2>/dev/null | tr -d '\r'
+}
+
+# bench_labgrid_resource_field <show-output> <resource-name> <key>
+# Parse ONE resource block the way board-farm/bin/jlink-run.sh:34-50
+# already does: anchor on the block's OWN header line
+# (^(Acquired|Matching) resource '<name>'), then scan only the
+# indented continuation lines that follow it until the next
+# unindented line. A naive whole-output regex is wrong here -- the
+# `matches:` list near the top of `show` repeats the same resource
+# names, and without block-scoping a search for e.g. the swd path can
+# latch onto that list instead of the resource's own params dict.
+# <key> may be a top-level params key (host, port) or nested inside
+# 'extra' (path) -- both sit on their own pformat line, so a per-line
+# regex finds either without needing to track dict nesting depth.
+bench_labgrid_resource_field() {
+	local show_output="$1" resource="$2" key="$3"
+	printf '%s\n' "$show_output" | python3 -c "
+import re, sys
+name, key = sys.argv[1], sys.argv[2]
+lines = sys.stdin.read().splitlines()
+inblk = False
+for ln in lines:
+    if re.match(r\"^(Acquired|Matching) resource '\" + re.escape(name) + r\"'\", ln):
+        inblk = True
+        continue
+    if inblk:
+        if ln and not ln[0].isspace():
+            break
+        m = re.search(r\"'\" + re.escape(key) + r\"':\s*'([^']*)'\", ln)
+        if not m:
+            m = re.search(r\"'\" + re.escape(key) + r\"':\s*([^,}]+)\", ln)
+        if m:
+            print(m.group(1).strip())
+            break
+" "$resource" "$key"
+}
+
+# bench_labgrid_resolve <place> — resolve SE_UART, LG_CONSOLE_DEV,
+# LG_CONSOLE_HOST, LG_CONSOLE_PORT and LG_SWD_PATH from a live
+# `labgrid-client -p <place> show`, after confirming the reservation is
+# actually held (show's place-level `acquired:` non-empty) -- a lapsed
+# reservation fails loudly here rather than silently resolving whatever
+# labgrid last remembered. Returns non-zero on ANY resolution failure;
+# callers must treat that as fatal, not fall back to a guess.
+bench_labgrid_resolve() {
+	local place="$1" out acquired se_path console_dev console_host console_port swd_path
+
+	if ! command -v labgrid-client >/dev/null 2>&1; then
+		echo "bench-env: LG_PLACE=$place set but 'labgrid-client' is not on PATH" >&2
+		return 1
+	fi
+
+	out="$(bench_labgrid_show "$place")"
+	if [ -z "$out" ]; then
+		echo "bench-env: 'labgrid-client -p $place show' returned nothing -- is" >&2
+		echo "           LG_COORDINATOR ($LG_COORDINATOR) reachable and does the place exist?" >&2
+		return 1
+	fi
+
+	acquired=$(printf '%s\n' "$out" | awk -F': ' '/^  acquired:/{print $2; exit}')
+	if [ -z "$acquired" ] || [ "$acquired" = "None" ]; then
+		echo "bench-env: LG_PLACE=$place is NOT acquired (reservation lapsed or never taken)." >&2
+		echo "           Acquire it first: labgrid-client -p $place acquire" >&2
+		return 1
+	fi
+
+	se_path=$(bench_labgrid_resource_field "$out" seuart path)
+	console_dev=$(bench_labgrid_resource_field "$out" console path)
+	console_host=$(bench_labgrid_resource_field "$out" console host)
+	console_port=$(bench_labgrid_resource_field "$out" console port)
+	swd_path=$(bench_labgrid_resource_field "$out" swd path)
+
+	if [ -z "$se_path" ]; then
+		echo "bench-env: LG_PLACE=$place ($acquired) exports no 'seuart' resource path" >&2
+		return 1
+	fi
+	if [ -z "$swd_path" ]; then
+		echo "bench-env: LG_PLACE=$place ($acquired) exports no 'swd' resource path" >&2
+		return 1
+	fi
+
+	SE_UART="$se_path"
+	LG_CONSOLE_DEV="$console_dev"
+	LG_CONSOLE_HOST="$console_host"
+	LG_CONSOLE_PORT="$console_port"
+	LG_SWD_PATH="$swd_path"
+	return 0
+}
+
+# --------------------------------------------------------------------
 # Serial + SETOOLS (Flow A — production MRAM flash over the SE-UART)
 # --------------------------------------------------------------------
 
 # SE_UART — the FT232R SE-UART device SETOOLS' app-write-mram talks to.
-# NO default: serial enumeration is host-specific (Linux /dev/ttyUSB*,
-# macOS /dev/cu.usbserial-*, Windows COMx). Export it for Flow A.
-export SE_UART="${SE_UART:-}"
+#
+# LG_PLACE is the primary input (see "Labgrid PLACE resolution" above):
+# set it and SE_UART is resolved live from labgrid's `seuart` resource,
+# never guessed from a device-path table. LG_PLACE wins when both are
+# set -- a raw SE_UART is then IGNORED, not merged.
+#
+# A raw SE_UART with NO LG_PLACE remains a supported escape hatch for
+# genuinely off-labgrid work (erase-storage.sh documents such a case),
+# but it is warned: serial enumeration is host-specific (Linux
+# /dev/ttyUSB*, macOS /dev/cu.usbserial-*, Windows COMx), ttyUSBn
+# numbering is enumeration-order-assigned and NOT stable across a
+# reboot/replug, and this bench carries three AEN boards whose SE-UART
+# and app-console paths have been measured swapped in a stale table --
+# the exact mistake behind the 2026-09-07 incident.
+if [ -n "${LG_PLACE:-}" ]; then
+	if [ -n "${SE_UART:-}" ]; then
+		echo "bench-env: LG_PLACE=$LG_PLACE is set; ignoring the raw SE_UART=$SE_UART" >&2
+		echo "           you also exported -- LG_PLACE wins, resolving live instead." >&2
+	fi
+	if ! bench_labgrid_resolve "$LG_PLACE"; then
+		echo "bench-env: labgrid resolution FAILED for LG_PLACE=$LG_PLACE -- refusing to" >&2
+		echo "           fall back to a raw/guessed device path. Fix the reservation or" >&2
+		echo "           coordinator reachability and re-source this file." >&2
+		return 1 2>/dev/null || exit 1
+	fi
+	export SE_UART LG_CONSOLE_DEV LG_CONSOLE_HOST LG_CONSOLE_PORT LG_SWD_PATH
+elif [ -n "${SE_UART:-}" ]; then
+	echo "bench-env: WARNING -- SE_UART=$SE_UART is set WITHOUT LG_PLACE." >&2
+	echo "           This is the off-labgrid ESCAPE HATCH, not the normal path: raw" >&2
+	echo "           device paths go stale, /dev/ttyUSBn is enumeration-ordered (not" >&2
+	echo "           stable across a reboot/replug), and this bench's three AEN boards" >&2
+	echo "           have had their SE-UART/app-console paths measured SWAPPED in a" >&2
+	echo "           stale table -- the exact mistake behind the 2026-09-07 incident." >&2
+	echo "           Prefer: export LG_PLACE=<labgrid-place-name>" >&2
+	export SE_UART
+else
+	export SE_UART="${SE_UART:-}"
+fi
 
 # SETOOLS_DIR — the Alif Security Toolkit "app-release-exec-linux"
 # directory (contains app-gen-toc, app-write-mram, build/). NO default
@@ -131,6 +281,19 @@ export JLINK_SPEED="${JLINK_SPEED:-4000}"
 
 # JLINK_SN / JLINK_SERIAL — optional SEGGER probe serial selector. Leave unset
 # on a single-probe bench; set it when multiple J-Links are visible on the host.
+#
+# NOTE: on THIS bench JLINK_SN cannot disambiguate at all -- all three
+# probes answer the SAME cloned OEM serial (see "DP-ID safety gate"
+# below). When LG_PLACE is set, LG_SWD_PATH above is the labgrid-known
+# USB path (e.g. "3-4.1") for the probe this place actually owns; the
+# safe way to drive it directly is `board-farm/bin/jlink-run.sh
+# "$LG_PLACE" ...`, which masks the other probes in a private mount
+# namespace before invoking JLinkExe. The AEN scripts in THIS directory
+# do not route their own JLinkExe invocations through it yet -- see
+# README.md ("Known limitation") for why (they pass `-CommanderScript`,
+# which jlink-run.sh does not recognise, and each issues several
+# JLinkExe calls per run) -- so this bench continues to rely on the
+# DPIDR safety gate below for those, not on JLINK_SN alone.
 export JLINK_SN="${JLINK_SN:-${JLINK_SERIAL:-}}"
 
 # --------------------------------------------------------------------
