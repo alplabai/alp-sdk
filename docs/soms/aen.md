@@ -186,20 +186,20 @@ event input (U21 pin 8) comes from E1M edge pin **O2**, with `R43` (100 kΩ
 to `+1V8`). Nothing on the module drives it; timestamping an event there is
 a carrier design decision.
 
-**4. The declared TMP112 does not answer at `0x48`; something answers at
-`0x40` instead -- confirmed on 2 of 2 modules tested (`2026W36-0001`,
-`2026W36-0003`).** This is a **batch** property of the 2026W36 E1M-AEN803
-build, not a defect on one module -- tracked as **alp-sdk#1978**. Whatever is
-at `0x40` fingerprints TMP112-shaped on both units (`CONFIG` `0x60a0`,
-`T_LOW` `0x4b00`, `T_HIGH` `0x5000`, reading a plausible temperature), but
-`0x40` is **not a legal TMP112 address at all** -- the strap table is
-ADD0→GND `0x48`, →V+ `0x49`, →SDA `0x4A`, →SCL `0x4B` -- so that fingerprint
-does **not** prove the part at `0x40` is a TMP112. The honest state: the
-declared part does not answer where it should, something answers at an
-address the part cannot be strapped to, and identifying it is open work
-under alp-sdk#1978. One consequence: the stock `CONFIG_TMP112` driver does
-not bind on these modules. The design address is `0x48` and the shipped
-devicetree uses `0x48`.
+**4. The declared TMP112 does not answer; something else answers instead.**
+Nothing ACKs at the declared `0x48`; a device ACKs at `0x40`. Confirmed on
+2 of 2 modules tested (`2026W36-0001`, `2026W36-0003`), so this is a batch
+property of the 2026W36 E1M-AEN803 build, not a defect on one module --
+tracked as alp-sdk#1978. Whatever sits at `0x40` fingerprints TMP112-shaped
+on both units (`CONFIG` `0x60a0`, `T_LOW` `0x4b00`, `T_HIGH` `0x5000`,
+reading a plausible temperature), but `0x40` is not a legal TMP112 address
+at all -- the strap table is ADD0→GND `0x48`, →V+ `0x49`, →SDA `0x4A`,
+→SCL `0x4B` -- so that fingerprint does not prove the part at `0x40` is a
+TMP112. The honest state: the declared part does not answer where it should,
+something answers at an address the part cannot be strapped to, and
+identifying it is open work under alp-sdk#1978. One consequence: the stock
+`CONFIG_TMP112` driver does not bind on these modules. The design address is
+`0x48` and the shipped devicetree uses `0x48`.
 
 > **How to spot it:** nothing ACKs at `0x48`, but a device ACKs at `0x40` --
 > on every 2026W36 E1M-AEN803 module tested so far. This is open work under
@@ -219,7 +219,7 @@ proven), `i2c0` at 100 kHz:
   `R93`/`R94` stay DNP.
 * **RV-3028-C7 @ `0x52`:** ACK. ID register `0x28` reads `0x44`; the
   seconds register advanced `0x01` → `0x02`, so the oscillator runs.
-* **TMP112 declared at `0x48`** (design address; see limitation 4): clean
+* **TMP112**, declared at `0x48` (design address; see limitation 4): clean
   NACK (`rc=-5`). Something ACKs instead at `0x40` and fingerprints
   TMP112-shaped (`CONFIG` `0x60a0`, `T_LOW` `0x4b00`, `T_HIGH` `0x5000`),
   reading 28.062 °C -- confirmed on 2 of 2 modules tested (`2026W36-0001`,
