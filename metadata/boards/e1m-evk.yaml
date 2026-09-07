@@ -266,11 +266,11 @@ e1m_routes:
 # generated header.
 i2c_devices:
   - { macro: EVK_I2C_ADDR_ICM42670, part: icm42670, designator: U12, address: "0x69",
-      doc: "U12 IMU (AD0->VIO). Collides with U13 @0x69 until the respin. BENCH-CONFIRMED 2026-06-16 (E1M-AEN801): U12 + U13 both answer at 0x69 and collide -- see EVK_I2C_ADDR_BMI323." }
+      doc: "U12 IMU (AD0->VIO). The 0x69 collision with U13 is PRE-RESPIN ONLY and does NOT apply to the 2026W36 batch: bench-confirmed 2026-06-16 on an E1M-AEN801 that U12 + U13 both answered at 0x69 and collided, but on E1M-AEN803 serial 2026W36-0002 (2026-09-07) U12 answers 0x69 with WHO_AM_I(0x75)=0x67 while U13 answers 0x68 separately -- the two are distinct. See EVK_I2C_ADDR_BMI323." }
   - { macro: EVK_I2C_ADDR_BMI323, part: bmi323, designator: U13, address: "0x68",
-      doc: "U13 IMU; respin target (SDO->GND = datasheet default). Pre-respin batch mis-straps it to 0x69 (collides w/ U12, see EVK_I2C_ADDR_ICM42670)." }
+      doc: "U13 IMU (SDO->GND = datasheet default). The 2026W36 batch carries the respin: 0x68 ACKs on E1M-AEN803 serial 2026W36-0002 (2026-09-07) with 0x69 answering U12 separately -- no collision. Pre-respin boards mis-strapped U13 to 0x69 (see EVK_I2C_ADDR_ICM42670). Chip ID is NOT confirmed by that census: reg 0x00 reads 0x0000, the documented POR state until a soft-reset (CMD <- 0xDEAF), and the read-only sweep issued no write." }
   - { macro: EVK_I2C_ADDR_BMP581, part: bmp581, designator: U14, address: "0x47",
-      doc: "U14 barometer. SDO is connected to VIO on this EVK (maintainer-confirmed 2026-09-05), which is the 0x47 strap; 0x46 would be SDO->GND. Matches 2 of 2 boards, which ACK at 0x47 with CHIP_ID(0x01)=0x50." }
+      doc: "U14 barometer. SDO is connected to VIO on this EVK (maintainer-confirmed 2026-09-05), which is the 0x47 strap; 0x46 would be SDO->GND. Matches 3 of 3 boards, which ACK at 0x47 with CHIP_ID(0x01)=0x50 (2026W36-0001 and -0003 on 2026-09-05; -0002 on 2026-09-07, with 0x46 silent). NOTE: the maintainer's EVK I2C schedule lists U14 at 0x46; reviewed 2026-09-07 and confirmed a slip in the schedule, not a strap the boards carry -- do not 'correct' this back to 0x46." }
   # RESOLVED 2026-09-05 (alp-sdk#1974): U35 is at 0x73, not 0x72.
   #
   # The maintainer's EVK I2C schedule gives "TCAL9538RSVR U35 = 1110011" = 0x73
@@ -322,7 +322,7 @@ i2c_devices:
       calibration: { shunt_macro: EVK_INA236_SHUNT_VCAM1_OHMS, shunt_ohms: "0.050",
                      max_macro: EVK_INA236_MAX_VCAM1_A, max_current_a: "1.6" } }
   - { macro: EVK_I2C_ADDR_INA236_5V, part: ina236, designator: U30, address: "0x4A",
-      doc: "U30 INA236B, +5V rail (20 mOhm shunt, 4.0 A max). A0 = SDA. NOT OBSERVED on 2026W36-0001 (alp-sdk#1975) -- but PRESENT and TI-confirmed on 2026W36-0003, which is instead missing 0x41 (U31, +1V8). So each of the two boards tested answers on exactly five of six INA236, and WHICH one is missing differs per board. 'U30 unpopulated' cannot explain both. Five-of-six looks batch-wide; the identity of the missing one is per-unit. Power characterisation on either board silently omits one rail.",
+      doc: "U30 INA236B, +5V rail (20 mOhm shunt, 4.0 A max). A0 = SDA. A MISSING INA236 IS PER-UNIT, NOT A BATCH TRAIT -- an earlier reading of this data claimed 'five-of-six looks batch-wide' and that is DISPROVEN: E1M-AEN803 serial 2026W36-0002 answers on ALL SIX (2026-09-07), each reading MFG_ID(0x3E)=0x5449. The two prior boards each missed a different one: 0x4A (U30) not observed on 2026W36-0001 (alp-sdk#1975), 0x41 (U31, +1V8) not observed on 2026W36-0003. So six-of-six is achievable on this batch, 'U30 unpopulated' explains neither absence, and power characterisation must check which rails actually answer on the board in hand rather than assuming one is always missing.",
       calibration: { shunt_macro: EVK_INA236_SHUNT_5V_OHMS, shunt_ohms: "0.020",
                      max_macro: EVK_INA236_MAX_5V_A, max_current_a: "4.0" } }
 
@@ -337,7 +337,7 @@ i2c_devices:
 # backing overlay's `gpios` phandle list would.
 overlay_pins:
   - { macro: EVK_PIN_IO_EXP_INT,
-      doc: "AUDIO_CLK pad (E1M Z2 / Alif P9_6) repurposed as the I/O expander INT line on this EVK. When the audio path is in use the IO expander interrupt is unavailable; firmware should poll the expander instead." }
+      doc: "AUDIO_CLK pad (E1M Z2 / Alif P9_6) carries the I/O expander \\INT line. Netlist-confirmed on E1M-EVK-2626-R2: net IO_EXP.INT has exactly three members -- U35 pin 11 (\\INT), E2 pin Z2 (pad AUDIO_CLK) and R140 pin 1 (10k pull-up, fitted). The pad assignment is UNCHANGED from R1. What changed on R2 is contention: the audio path no longer claims this pad, so the expander interrupt is available and firmware need not fall back to polling. On R1 the two shared the pad, and the interrupt was unavailable whenever audio was active. Polling the expander over I2C (register 0x00 input port) remains valid on both." }
   - { macro: EVK_PIN_IO_EXP_RST,
       doc: "SPI0_CS1 pad (E1M N1 / Alif P3_6) repurposed as the I/O expander reset line. When SPI0 is used with two chip-selects this pin can't double as IO_EXP_RST -- the EVK assumes SPI0 is in single-CS mode at most." }
   - { macro: EVK_PIN_AMP_FAULT,
@@ -419,7 +419,7 @@ defaults:
 # so the rev is sampled on a dedicated ADC channel exposed at one
 # of the E1M-spec ADC pads.  Board-specific ADC channel is TBD
 # pending the EVK schematic's BOARD_ID net assignment.
-default_hw_rev:             r1
+default_hw_rev:             r2
 
 hw_revisions:
   r1:
@@ -437,6 +437,30 @@ hw_revisions:
     notes: |
       First production revision of the E1M EVK (35x35 board).
       Wiring authoritative per the `e1m_routes:` block above
+      (`include/alp/boards/alp_e1m_evk_routes.h` is generated
+      from it).
+  r2:
+    min_sdk_version: "0.3.0"
+    max_sdk_version: ~
+    status: production
+    board_id:
+      adc_channel:    TBD
+      # Divider resistor values + per-rev `expected_mv` + `bin_radius_mv`
+      # thresholds live in the private `alp-sdk-internal` repo per
+      # the public/private split policy.  This is a board-side-only
+      # BOARD_ID path, independent of SoM identity; its runtime ADC
+      # decode is not implemented yet -- hw_info_zephyr.c has no ADC
+      # cross-check today (see include/alp/hw_info.h).
+    notes: |
+      Current bench revision of the E1M EVK (E1M-EVK-2626-R2). The
+      I/O expander \INT still shares the AUDIO_CLK pad (E1M Z2 / Alif
+      P9_6) here, exactly as on r1 -- netlist-confirmed, net IO_EXP.INT
+      = U35 pin 11 + E2 pin Z2 + R140 (10k, fitted). What changed on
+      R2 is that the audio path no longer contends for the pad, so the
+      expander interrupt is usable rather than mutually exclusive with
+      audio (see the `EVK_PIN_IO_EXP_INT` entry in the `overlay_pins:`
+      block above).
+      Wiring otherwise authoritative per the `e1m_routes:` block above
       (`include/alp/boards/alp_e1m_evk_routes.h` is generated
       from it).
 

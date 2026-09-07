@@ -15,6 +15,17 @@
 # alp-i2cN alias, the on-bus device nodes (compatible + 7-bit address +
 # binding properties), and the RTC alarm's GPIO controller/pin/IRQ.
 #
+# EXCEPTION: `e1m_i2c0` (SoC I2C2, below).  Unlike brd_i2c/rtc_alarm its
+# pads (P5_6/P5_7) DO have a row in metadata/pinmux/aen.yaml -- I2C2
+# also rides the E1M edge connector as ALP_E1M_I2C0/EVK_I2C_BUS_SENSORS,
+# carrying the EVK carrier's sensor/IO-expander/INA236 parts.  It still
+# belongs here because the SoM's own 24C128 manifest EEPROM (see
+# metadata/e1m_modules/E1M-AEN801.yaml on_module.i2c_devices.e1m_i2c0)
+# is bridge/DNP-selected onto this SAME physical bus, and the board
+# layer -- not a per-app overlay -- is the right place to enable the
+# controller + pinctrl for an on-module chip present on every board
+# built from this SoM (docs/bring-up-aen.md §5.1: "Two separate buses").
+#
 # scripts/gen_zephyr_board.py's `_aen_pinctrl_dtsi()` / `_aen_dts()`
 # emitters read this file to produce the AEN `<board>-pinctrl.dtsi` and
 # `<board>.dts`; every pad, macro, address and alias in those generated
@@ -98,26 +109,89 @@ on_module_links:
       # U20 -- TI TMP112DIDPWR, ADD0 tied to 0V.
       - chip: tmp112
         node_label: tmp112
-        node_name: "tmp112@48"
+        node_name: "tmp112@40"
         compatible: "ti,tmp112"
-        address_7bit: 0x48
+        address_7bit: 0x40
         alias: ambient-temp0
         evidence: >-
-          E1M-AEN-2626-R2 components CSV: U20 = TMP112DIDPWR, DNP=0
-          fitted, ADD0 tied to 0V.  The TMP112 strap table is ADD0->GND =
-          0x48, ->V+ = 0x49, ->SDA = 0x4A, ->SCL = 0x4B, so 0x48 is the
-          DESIGN address.  ANOMALY, do not "fix" this to match it: one
-          bench unit (2026-09-05) answered at 0x40 -- not a legal TMP112
-          address at all -- while confirming a three-of-three TMP112
-          register fingerprint there (CONFIG=0x60a0, T_LOW=0x4b00,
-          T_HIGH=0x5000, the datasheet power-on defaults; read 28.062
-          degC).  That points at ADD0 not actually sitting at GND on that
-          module (suspected open joint on U20 pin 3): a defect on ONE
-          unit, not the design.  The shipped devicetree carries 0x48;
-          examples tolerate and report the observed 0x40.
+          E1M-AEN-2626-R2 components CSV: U20 = TMP112DIDPWR, DNP=0 fitted,
+          ADD0 tied to 0V.  Per TI SBOS473L p.44 (package option addendum),
+          the exact orderable MPN TMP112DIDPWR is X2SON (DPW), 5 pins -- no
+          SOT563-6 orderable carries that MPN (the SOT563-6 parts are
+          TMP112AIDRLR / TMP112BIDRLR / TMP112NAIDRLR).  Per TI SBOS473L Table
+          7-4, the X2SON-5 "Address Variant Only" TMP112D row straps ADD0->GND
+          = 0x40 (->V+ = 0x41, ->SDA = 0x42, ->SCL = 0x43); the SOT563-6
+          "Address + Alert Variant" row (ADD0->GND = 0x48) does not apply to
+          this MPN.  So 0x40 is the DESIGN address for the part this board
+          specifies, and the bench observation matches that design rather than
+          being an anomaly to explain away: two bench units answered at 0x40
+          instead of 0x48 (28.062 degC, 2026-09-05; 27.687 degC, 2026-09-07,
+          serial 2026W36-0002), each confirming a three-of-three TMP112
+          register fingerprint (CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000,
+          the datasheet power-on defaults).  Design and silicon agree, so this
+          entry and the devicetree node it emits now both carry 0x40; the
+          earlier 0x48 was simply wrong, which is also why the stock
+          CONFIG_TMP112 driver never bound -- the node put it at an address
+          nothing answers.  Recorded under alp-sdk#1978.
       # IC1 (OPTIGA Trust M, SLS32AIA010MLUSON10XTMA2, @0x30) is DNP=1 --
       # NOT fitted on this batch, so it gets no node.  It must not ACK; its
       # silence is a negative control, not a fault.
+
+  # e1m_i2c0 -- SoC I2C2 (function C), portable alp-i2c0 (E1M edge bus 0:
+  # ALP_E1M_I2C0 / EVK_I2C_BUS_SENSORS / BOARD_I2C_SENSORS).  Carries the
+  # SoM's own 24C128 manifest EEPROM (metadata/e1m_modules/E1M-AEN801.yaml
+  # on_module.i2c_devices.e1m_i2c0) plus, on the same physical bus once it
+  # leaves the module, the EVK carrier's sensor/IO-expander/INA236 parts --
+  # see docs/bring-up-aen.md Sec 5.1.  No device child nodes here: every
+  # part this board layer would otherwise declare is EVK-carrier silicon,
+  # not SoM-resident, except the EEPROM, which the SDK addresses by 7-bit
+  # address over the bus (no DT device node) the same way
+  # examples/aen/aen-i2c2-eeprom-regcheck and examples/aen/aen-eeprom-manifest
+  # already do.
+  #
+  # BEFORE this entry existed, `zephyr/dts/alif/ensemble_e8_peripherals.dtsi`
+  # left i2c2 `status = "disabled"` with no board-layer pinctrl_i2c2, so
+  # DT_ALIAS(alp_i2c0) resolved to nothing, src/backends/i2c/zephyr_drv.c's
+  # `_devs[0]` stayed NULL, and alp_i2c_open(.bus_id = ALP_E1M_I2C0)
+  # returned ALP_ERR_NOT_READY (-2) before touching any device --
+  # bench-observed on `examples/peripheral-io/i2c-device-hub` (alp-sdk,
+  # 2026-09-07): "[devhub] bus open failed: alp_last_error=-2".
+  e1m_i2c0:
+    peripheral: "I2C2"
+    dt_label: i2c2
+    pinctrl_group_label: pinctrl_i2c2
+    status: enabled
+    # Portable bus index 0: this is one of the two E1M EDGE buses
+    # (ALP_E1M_I2C0), unlike BRD_I2C which has no edge route and takes
+    # index 2 (see the brd_i2c entry's alias comment above).
+    alias: alp-i2c0
+    # 100 kHz standard mode, matching the bench-validated
+    # aen-i2c2-eeprom-regcheck / aen-eeprom-manifest overlays.
+    clock_frequency_macro: I2C_BITRATE_STANDARD
+    pins:
+      - silicon_peripheral: "I2C2_SDA_C"
+        silicon_pad: "P5_7"
+        evidence: >-
+          metadata/e1m_modules/aen/from-alif.tsv row AD2 I2C0_SDA
+          I2C2_SDA_C P5_7 (projected, byte-for-byte, into
+          metadata/pinmux/aen.yaml's e1m_pad "AD2" row) gives the AE822
+          DFP alt-function assignment P5_7 = I2C2_SDA_C.  Pad config
+          (input-enable + bias-pull-down) bench-validated 2026-06-15 on
+          the E8 -- see the identical, verbatim-copied group in
+          examples/aen/aen-i2c2-eeprom-regcheck's board overlay and
+          examples/aen/aen-eeprom-manifest's overlay, both of which cite
+          the same date.  NO E1M-AEN-2626-R2 netlist net name has been
+          read for this ball yet (unlike BRD_I2C_SDA/SCL above) -- do
+          not infer one; add it only from an actual netlist row.
+      - silicon_peripheral: "I2C2_SCL_C"
+        silicon_pad: "P5_6"
+        evidence: >-
+          metadata/e1m_modules/aen/from-alif.tsv row AE2 I2C0_SCL
+          I2C2_SCL_C P5_6 (projected, byte-for-byte, into
+          metadata/pinmux/aen.yaml's e1m_pad "AE2" row) gives the AE822
+          DFP alt-function assignment P5_6 = I2C2_SCL_C.  Same
+          2026-06-15 bench-validated pad config and same netlist-net-name
+          caveat as I2C2_SDA_C above.
 
   # RV-3028 /INT (U21 pin 2) -> net RTC_ALARM -> SoC pad P15_0_FLEX.
   rtc_alarm:

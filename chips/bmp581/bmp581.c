@@ -16,7 +16,7 @@
 #include "alp/chips/bmp581.h"
 
 /* ------------------------------------------------------------------ */
-/* Register map (BST-BMP581-DS004)                                    */
+/* Register map (BST-BMP581-DS004-13 Rev 1.13)                        */
 /* ------------------------------------------------------------------ */
 
 #define REG_CHIP_ID    0x01
@@ -25,8 +25,15 @@
 #define REG_ODR_CONF   0x37
 #define REG_TEMP_XLSB  0x1D /* T = [TEMP_MSB][TEMP_LSB][TEMP_XLSB] */
 #define REG_PRESS_XLSB 0x20 /* P = [PRESS_MSB][PRESS_LSB][PRESS_XLSB] */
+#define REG_INT_CONFIG \
+	0x14 /* int_mode[0] | int_pol[1] | int_od[2] | int_en[3] | pad_int_drv[7:4] */
+#define REG_INT_SOURCE \
+	0x15 /* drdy_data_reg_en[0] | fifo_full_en[1] | fifo_ths_en[2] | oor_p_en[3] */
+#define REG_INT_STATUS 0x27 /* drdy_data_reg[0] | ... -- clear-on-read (whole register). */
 
 #define CMD_SOFT_RESET 0xB6
+
+#define INT_SOURCE_MASK_ALL 0x0Fu /* Only bits[3:0] are defined; [7:4] reserved. */
 
 static alp_status_t reg_write(bmp581_t *dev, uint8_t reg, uint8_t val)
 {
@@ -149,6 +156,46 @@ alp_status_t bmp581_compensate(const bmp581_raw_t *raw, bmp581_compensated_t *ou
 	int64_t t              = ((int64_t)raw->temperature_raw * 1000) / 65536;
 	out->temperature_c1000 = (int32_t)t;
 	return ALP_OK;
+}
+
+alp_status_t bmp581_data_ready(bmp581_t *dev, bool *ready_out)
+{
+	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+	if (ready_out == NULL) return ALP_ERR_INVAL;
+
+	uint8_t      status = 0;
+	alp_status_t s      = reg_read(dev, REG_INT_STATUS, &status, 1);
+	if (s != ALP_OK) return s;
+	/* NOTE: this read just cleared every asserted bit in INT_STATUS,
+     * not only drdy_data_reg -- see the Doxygen warning on this
+     * function in the header. */
+	*ready_out = (status & 0x01u) != 0;
+	return ALP_OK;
+}
+
+alp_status_t bmp581_configure_int_pin(bmp581_t             *dev,
+                                      bool                  enable,
+                                      bmp581_int_drive_t    drive,
+                                      bmp581_int_polarity_t polarity,
+                                      bmp581_int_mode_t     mode)
+{
+	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+
+	/* INT_CONFIG: pad_int_drv[7:4] | int_en[3] | int_od[2] | int_pol[1] | int_mode[0].
+     * pad_int_drv is left at its reset value (0x3) -- this driver only
+     * exposes the fields a board-level consumer needs to match its
+     * wiring; drive strength tuning can be added if a board needs it. */
+	uint8_t conf =
+	    (uint8_t)((3u << 4) | ((enable ? 1u : 0u) << 3) | (((uint8_t)drive & 0x01u) << 2) |
+	              (((uint8_t)polarity & 0x01u) << 1) | ((uint8_t)mode & 0x01u));
+	return reg_write(dev, REG_INT_CONFIG, conf);
+}
+
+alp_status_t bmp581_set_int_sources(bmp581_t *dev, uint8_t source_mask)
+{
+	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+	if ((source_mask & ~INT_SOURCE_MASK_ALL) != 0) return ALP_ERR_INVAL;
+	return reg_write(dev, REG_INT_SOURCE, source_mask);
 }
 
 alp_status_t bmp581_soft_reset(bmp581_t *dev)

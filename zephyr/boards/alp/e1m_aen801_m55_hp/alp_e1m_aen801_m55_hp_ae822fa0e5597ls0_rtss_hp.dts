@@ -229,19 +229,26 @@
 
 	/*
 	 * E1M-AEN-2626-R2 components CSV: U20 = TMP112DIDPWR, DNP=0 fitted, ADD0 tied
-	 * to 0V. The TMP112 strap table is ADD0->GND = 0x48, ->V+ = 0x49, ->SDA =
-	 * 0x4A, ->SCL = 0x4B, so 0x48 is the DESIGN address. ANOMALY, do not "fix"
-	 * this to match it: one bench unit (2026-09-05) answered at 0x40 -- not a
-	 * legal TMP112 address at all -- while confirming a three-of-three TMP112
-	 * register fingerprint there (CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000, the
-	 * datasheet power-on defaults; read 28.062 degC). That points at ADD0 not
-	 * actually sitting at GND on that module (suspected open joint on U20 pin 3):
-	 * a defect on ONE unit, not the design. The shipped devicetree carries 0x48;
-	 * examples tolerate and report the observed 0x40.
+	 * to 0V. Per TI SBOS473L p.44 (package option addendum), the exact orderable
+	 * MPN TMP112DIDPWR is X2SON (DPW), 5 pins -- no SOT563-6 orderable carries
+	 * that MPN (the SOT563-6 parts are TMP112AIDRLR / TMP112BIDRLR /
+	 * TMP112NAIDRLR). Per TI SBOS473L Table 7-4, the X2SON-5 "Address Variant
+	 * Only" TMP112D row straps ADD0->GND = 0x40 (->V+ = 0x41, ->SDA = 0x42, ->SCL
+	 * = 0x43); the SOT563-6 "Address + Alert Variant" row (ADD0->GND = 0x48) does
+	 * not apply to this MPN. So 0x40 is the DESIGN address for the part this
+	 * board specifies, and the bench observation matches that design rather than
+	 * being an anomaly to explain away: two bench units answered at 0x40 instead
+	 * of 0x48 (28.062 degC, 2026-09-05; 27.687 degC, 2026-09-07, serial
+	 * 2026W36-0002), each confirming a three-of-three TMP112 register fingerprint
+	 * (CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000, the datasheet power-on
+	 * defaults). Design and silicon agree, so this entry and the devicetree node
+	 * it emits now both carry 0x40; the earlier 0x48 was simply wrong, which is
+	 * also why the stock CONFIG_TMP112 driver never bound -- the node put it at
+	 * an address nothing answers. Recorded under alp-sdk#1978.
 	 */
-	tmp112: tmp112@48 {
+	tmp112: tmp112@40 {
 		compatible = "ti,tmp112";
-		reg = <0x48>;
+		reg = <0x40>;
 	};
 };
 
@@ -273,6 +280,33 @@
 		alp-i2c2 = &i2c0;
 		rtc = &rv3028;
 		ambient-temp0 = &tmp112;
+	};
+};
+
+/*
+ * e1m_i2c0 -- SoC I2C2 in its function-C muxing (P5_7 SDA / P5_6 SCL), portable
+ * alp-i2c0 (E1M edge bus 0).  Carries the SoM's own 24C128 manifest
+ * EEPROM; the same physical bus also reaches the EVK carrier's sensor bus
+ * once the pads leave the module (docs/bring-up-aen.md Sec 5.1).  Driven by
+ * UPSTREAM Zephyr i2c_dw ("snps,designware-i2c"), ADR 0017 Tier-1 -- no
+ * vendored code.
+ */
+&i2c2 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+};
+
+/*
+ * Portable alias for e1m_i2c0.  alp_i2c_open(.bus_id = ALP_E1M_I2C0)
+ * resolves this via src/backends/i2c/zephyr_drv.c -> DT_ALIAS(alp_i2c0);
+ * matches the EEPROM manifest reader's own
+ * CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0 convention.
+ */
+/ {
+	aliases {
+		alp-i2c0 = &i2c2;
 	};
 };
 

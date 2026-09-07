@@ -22,8 +22,11 @@
  * devices answered.
  */
 
+#include <stdbool.h>
+#include <stdint.h> /* INT16_MIN -- the IMU "no valid sample yet" sentinel */
 #include <stdio.h>
 
+#include <zephyr/kernel.h>   /* k_msleep -- conversion / startup waits below */
 #include <zephyr/sys/util.h> /* ARRAY_SIZE */
 
 #include "alp/peripheral.h"
@@ -57,6 +60,28 @@ static const struct {
 	{ "+VCAM1", EVK_I2C_ADDR_INA236_VCAM1, EVK_INA236_SHUNT_VCAM1_OHMS, EVK_INA236_MAX_VCAM1_A },
 	{ "+5V", EVK_I2C_ADDR_INA236_5V, EVK_INA236_SHUNT_5V_OHMS, EVK_INA236_MAX_5V_A },
 };
+
+/* Both IMU datasheets document the "no valid sample yet" register state as
+ * every axis reading -32768 (0x8000) at once -- verbatim from the BMI323
+ * datasheet (BST-BMI323-DS000-13 Rev 1.7, Table 2 p.9): "The default value
+ * for each axis is invalid value with 0x8000."  ICM-42670 shares the same
+ * reset/pre-first-sample encoding.  A bench that reads this triple has
+ * caught the chip mid-startup, not measured "stationary" -- the whole point
+ * of gating on it instead of just tallying init() success. */
+static bool imu_axes_invalid(int16_t x, int16_t y, int16_t z)
+{
+	return x == INT16_MIN && y == INT16_MIN && z == INT16_MIN;
+}
+
+/* TEMP_DATA_XLSB (0x1D) through PRESS_DATA_MSB (0x22) power-on-reset to 0x7F
+ * each (BST-BMP581-DS004-13 Rev 1.13, pp.63-65), and stay there until the
+ * chip has actually run a conversion -- so the sign-extended 24-bit
+ * pattern 0x7F7F7F on BOTH pressure and temperature means "never sampled",
+ * not "reading zero". */
+static bool bmp581_raw_invalid(const bmp581_raw_t *raw)
+{
+	return raw->pressure_raw == 0x7F7F7F && raw->temperature_raw == 0x7F7F7F;
+}
 
 int main(void)
 {
@@ -93,17 +118,31 @@ int main(void)
 	if (irc == ALP_OK) {
 		uint8_t id = 0;
 		icm42670_read_id(&imu, &id);
-		icm42670_set_accel(&imu, ICM42670_ODR_100_HZ, ICM42670_ACCEL_FS_2G);
+		alp_status_t cfg_rc = icm42670_set_accel(&imu, ICM42670_ODR_100_HZ, ICM42670_ACCEL_FS_2G);
+
+		/* Accel startup is 10 ms typ from sleep to a valid sample (TDK
+		 * DS-000451 Rev 1.0 p.11); reading right after set_accel() would
+		 * just catch the chip mid-startup and report its 0x8000 sentinel
+		 * -- which is exactly the bug this fix closes. Add one ODR period
+		 * (100 Hz -> 10 ms) so the FIRST real sample has landed in the
+		 * output register by the time we read it. p.55 also bars register
+		 * WRITES for 200 us after a PWR_MGMT0 change; our next op is a
+		 * read, so that guard is moot here, but this wait clears it too. */
+		k_msleep(20);
+
 		icm42670_axes_t a  = { 0 };
 		alp_status_t    rs = icm42670_read_accel(&imu, &a);
-		printf("[devhub] ICM42670 @0x%02x id=0x%02x accel{%d,%d,%d} rs=%d\n",
+		bool valid = (cfg_rc == ALP_OK) && (rs == ALP_OK) && !imu_axes_invalid(a.x, a.y, a.z);
+		printf("[devhub] ICM42670 @0x%02x id=0x%02x accel{%d,%d,%d} cfg_rc=%d rs=%d %s\n",
 		       EVK_I2C_ADDR_ICM42670,
 		       id,
 		       a.x,
 		       a.y,
 		       a.z,
-		       (int)rs);
-		answered++;
+		       (int)cfg_rc,
+		       (int)rs,
+		       valid ? "ok" : "STALE/RESET DATA");
+		if (valid) answered++;
 	} else {
 		/* Pre-respin batch: U12 + U13 both strap to 0x69 and collide (garbage). */
 		printf("[devhub] ICM42670 @0x%02x init fail (rc=%d; pre-respin collides w/ BMI323 @0x69)\n",
@@ -119,17 +158,27 @@ int main(void)
 	if (irc == ALP_OK) {
 		uint8_t id = 0;
 		bmi323_read_id(&bmi, &id);
-		bmi323_set_accel(&bmi, BMI323_ODR_100_HZ, BMI323_ACCEL_FS_2G);
+		alp_status_t cfg_rc = bmi323_set_accel(&bmi, BMI323_ODR_100_HZ, BMI323_ACCEL_FS_2G);
+
+		/* tA,SU = 2 ms typ (BST-BMI323-DS000-13 Rev 1.7, Table 2 p.9) plus
+		 * one ODR period (100 Hz -> 10 ms) before the first real sample is
+		 * guaranteed in the output register -- same reasoning as the
+		 * ICM-42670 above, this part just has a shorter startup. */
+		k_msleep(15);
+
 		bmi323_axes_t a  = { 0 };
 		alp_status_t  rs = bmi323_read_accel(&bmi, &a);
-		printf("[devhub] BMI323   @0x%02x id=0x%02x accel{%d,%d,%d} rs=%d\n",
+		bool valid       = (cfg_rc == ALP_OK) && (rs == ALP_OK) && !imu_axes_invalid(a.x, a.y, a.z);
+		printf("[devhub] BMI323   @0x%02x id=0x%02x accel{%d,%d,%d} cfg_rc=%d rs=%d %s\n",
 		       EVK_I2C_ADDR_BMI323,
 		       id,
 		       a.x,
 		       a.y,
 		       a.z,
-		       (int)rs);
-		answered++;
+		       (int)cfg_rc,
+		       (int)rs,
+		       valid ? "ok" : "STALE/RESET DATA");
+		if (valid) answered++;
 	} else {
 		printf("[devhub] BMI323   @0x%02x init fail (rc=%d; pre-respin it's at 0x69)\n",
 		       EVK_I2C_ADDR_BMI323,
@@ -142,15 +191,37 @@ int main(void)
 	if (bmp581_init(&baro, bus, EVK_I2C_ADDR_BMP581) == ALP_OK) {
 		uint8_t id = 0;
 		bmp581_read_id(&baro, &id);
-		bmp581_raw_t raw = { 0 };
-		alp_status_t rs  = bmp581_read_raw(&baro, &raw);
-		printf("[devhub] BMP581   @0x%02x id=0x%02x p_raw=%d t_raw=%d rs=%d\n",
+
+		/* init() only verifies CHIP_ID -- by the driver's own contract
+		 * (<alp/chips/bmp581.h>) it "does not start sampling". At POR,
+		 * OSR_CONFIG's press_en (reg 0x36 bit 6) and ODR_CONFIG's
+		 * pwr_mode (reg 0x37 bits[1:0]) are both 0 -- pressure OFF,
+		 * mode STANDBY (BST-BMP581-DS004-13 Rev 1.13 pp.50,58) -- so
+		 * reading raw data without this call just replays the reset
+		 * value forever, which is the exact bug the bench caught.
+		 * FORCED mode runs one conversion and returns to standby by
+		 * itself, which fits a "read once" example; the odr argument
+		 * is a don't-care outside NORMAL/CONTINUOUS mode. */
+		alp_status_t cfg_rc = bmp581_set_sampling(
+		    &baro, BMP581_OSR_X1, BMP581_OSR_X1, BMP581_ODR_50_HZ, BMP581_MODE_FORCED);
+
+		/* Conversion is 1.0 ms typ at OSR x1 (same datasheet, p.12); 5 ms
+		 * is a ~5x margin so the example doesn't need to poll INT_STATUS
+		 * (reg 0x27 bit 0, drdy_data_reg, clear-on-read) itself. */
+		k_msleep(5);
+
+		bmp581_raw_t raw   = { 0 };
+		alp_status_t rs    = bmp581_read_raw(&baro, &raw);
+		bool         valid = (cfg_rc == ALP_OK) && (rs == ALP_OK) && !bmp581_raw_invalid(&raw);
+		printf("[devhub] BMP581   @0x%02x id=0x%02x p_raw=%d t_raw=%d cfg_rc=%d rs=%d %s\n",
 		       EVK_I2C_ADDR_BMP581,
 		       id,
 		       raw.pressure_raw,
 		       raw.temperature_raw,
-		       (int)rs);
-		answered++;
+		       (int)cfg_rc,
+		       (int)rs,
+		       valid ? "ok" : "STALE/RESET DATA");
+		if (valid) answered++;
 	} else {
 		printf("[devhub] BMP581   @0x%02x absent (err=%d)\n",
 		       EVK_I2C_ADDR_BMP581,
@@ -168,16 +239,36 @@ int main(void)
 		                              INA_RAILS[i].max_a,
 		                              INA236_ADCRANGE_81MV);
 		if (rc == ALP_OK) {
-			int32_t mv = 0, ua = 0;
-			ina236_read_bus_mv(&mon, &mv);
-			alp_status_t rs = ina236_read_current_ua(&mon, &ua);
-			printf("[devhub] INA236 %-6s @0x%02x  %ld mV  %ld uA  rs=%d\n",
+			/* init() programs CALIBRATION (reg 05h) as its last step, and
+			 * writing CONFIG (reg 00h) along the way clears the CVRF
+			 * conversion-ready flag (TI SBOSA81D pp.19-24) -- CURRENT only
+			 * becomes meaningful after the NEXT shunt conversion completes,
+			 * not the moment CAL is written. At the reset defaults
+			 * VBUSCT=VSHCT=1100 us, one full bus+shunt cycle is 2.2 ms;
+			 * wait a safe margin (here, >2x) rather than polling
+			 * MASK_ENABLE (06h) bit 3 (CVRF) ourselves. */
+			k_msleep(5);
+
+			int32_t      mv = 0, uv = 0, ua = 0;
+			alp_status_t mv_rc = ina236_read_bus_mv(&mon, &mv);
+			/* shunt_uv is printed alongside current on purpose: a non-zero
+			 * shunt reading with a reported 0 uA current is exactly what
+			 * distinguishes "this rail is genuinely idle" from "this
+			 * register is stale/never converted" -- the open question the
+			 * bench run couldn't answer because current was the only
+			 * number on screen. */
+			alp_status_t uv_rc = ina236_read_shunt_uv(&mon, &uv);
+			alp_status_t rs    = ina236_read_current_ua(&mon, &ua);
+			bool         valid = (mv_rc == ALP_OK) && (uv_rc == ALP_OK) && (rs == ALP_OK);
+			printf("[devhub] INA236 %-6s @0x%02x  %ld mV  %ld uV(shunt)  %ld uA  rs=%d %s\n",
 			       INA_RAILS[i].name,
 			       INA_RAILS[i].addr,
 			       (long)mv,
+			       (long)uv,
 			       (long)ua,
-			       (int)rs);
-			answered++;
+			       (int)rs,
+			       valid ? "ok" : "READ FAIL");
+			if (valid) answered++;
 		} else {
 			printf("[devhub] INA236 %-6s @0x%02x absent (rc=%d)\n",
 			       INA_RAILS[i].name,
@@ -196,17 +287,40 @@ int main(void)
 		attempted++;
 		tas2563_t amp;
 		if (tas2563_init(&amp, bus, tas_addrs[i], NULL) == ALP_OK) {
+			/* REVID (reg 0x7D) has no fixed value documented for this part --
+			 * tas2563_init() already used it as a bare connectivity probe (an
+			 * ACK, nothing more), and reading it again here proves only that
+			 * the chip is still answering, not that ACTIVE mode took. It is
+			 * printed for visibility and deliberately left OUT of the `valid`
+			 * gate below. */
 			uint8_t rev = 0;
 			tas2563_read_revision(&amp, &rev);
-			alp_status_t cs   = tas2563_set_mode(&amp, TAS2563_MODE_ACTIVE);
-			uint8_t      mreg = 0x02u, mode = 0xeeu;
-			alp_i2c_write_read(bus, tas_addrs[i], &mreg, 1, &mode, 1);
-			printf("[devhub] TAS2563  @0x%02x rev=0x%02x set_active=%d MODE_CTRL=0x%02x\n",
+
+			alp_status_t cs = tas2563_set_mode(&amp, TAS2563_MODE_ACTIVE);
+
+			/* MODE_CTRL's low 3 bits are the operating-mode field the driver
+			 * writes (TAS2563_MODE_CTRL_MASK in chips/tas2563/tas2563.c,
+			 * datasheet Table 7-58); set_mode() preserves the rest via
+			 * read-modify-write, so a full-byte match against
+			 * TAS2563_MODE_ACTIVE isn't safe -- only the field is. `mode`
+			 * starts at the 0xee sentinel (not a valid MODE_CTRL encoding),
+			 * so it staying there catches a readback that silently no-op'd
+			 * even if the transfer reports ALP_OK -- the same trap the
+			 * bench run found: every device answering init while the
+			 * config write never actually landed. */
+			const uint8_t mode_ctrl_field_mask = 0x07u;
+			uint8_t       mreg = 0x02u, mode = 0xeeu;
+			alp_status_t  rr    = alp_i2c_write_read(bus, tas_addrs[i], &mreg, 1, &mode, 1);
+			bool          valid = (cs == ALP_OK) && (rr == ALP_OK) &&
+			                      ((mode & mode_ctrl_field_mask) == TAS2563_MODE_ACTIVE);
+			printf("[devhub] TAS2563  @0x%02x rev=0x%02x cs=%d rr=%d MODE_CTRL=0x%02x %s\n",
 			       tas_addrs[i],
 			       rev,
 			       (int)cs,
-			       mode);
-			answered++;
+			       (int)rr,
+			       mode,
+			       valid ? "ok" : "READ FAIL");
+			if (valid) answered++;
 		} else {
 			printf("[devhub] TAS2563  @0x%02x absent\n", tas_addrs[i]);
 		}
@@ -224,22 +338,44 @@ int main(void)
 		attempted++;
 		const uint8_t ioexp_addrs[] = { EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED,
 			                            EVK_I2C_ADDR_TCAL9538_MAIN };
-		bool          ioexp_ok      = false;
-		for (size_t i = 0; i < ARRAY_SIZE(ioexp_addrs) && !ioexp_ok; i++) {
+		/* Present vs answered are tracked separately on purpose: the two
+		 * addresses are alternate populations of the SAME part (only one is
+		 * ever fitted), not two devices to try in sequence. Once init()
+		 * finds the real one, we stop probing addresses -- but a present,
+		 * initialised part that then returns garbage must still fail, not
+		 * fall through to "try the other address" and get silently skipped. */
+		bool ioexp_found = false;
+		for (size_t i = 0; i < ARRAY_SIZE(ioexp_addrs) && !ioexp_found; i++) {
 			tcal9538_t io;
 			if (tcal9538_init(&io, bus, ioexp_addrs[i]) != ALP_OK) continue;
-			uint8_t cfg = 0xee, in0 = 0xee;
-			alp_i2c_write_read(bus, ioexp_addrs[i], (uint8_t[]){ 0x03 }, 1, &cfg, 1); /* config */
-			alp_i2c_write_read(
-			    bus, ioexp_addrs[i], (uint8_t[]){ 0x00 }, 1, &in0, 1); /* input port */
-			printf("[devhub] IOEXP    @0x%02x ok (PCA9538-class) config=0x%02x input=0x%02x\n",
+			ioexp_found = true;
+
+			/* Both reads must ACK AND land a byte other than the 0xee
+			 * sentinel these locals start at -- gating on the return code
+			 * alone was exactly the bug the review caught: a transfer that
+			 * reports ALP_OK without actually filling `cfg`/`in0` still
+			 * counted as "answered". 0xee isn't excluded by the register
+			 * map (config's POR default is 0xFF, all inputs -- a real
+			 * 0xee is merely unlikely, not unreachable), so this is the
+			 * same class of best-effort sentinel the IMU/BMP581 blocks
+			 * above use, not a value the datasheet declares invalid. */
+			uint8_t      cfg = 0xee, in0 = 0xee;
+			alp_status_t cfg_rc =
+			    alp_i2c_write_read(bus, ioexp_addrs[i], (uint8_t[]){ 0x03 }, 1, &cfg, 1);
+			alp_status_t in0_rc =
+			    alp_i2c_write_read(bus, ioexp_addrs[i], (uint8_t[]){ 0x00 }, 1, &in0, 1);
+			bool valid = (cfg_rc == ALP_OK) && (in0_rc == ALP_OK) && (cfg != 0xee) && (in0 != 0xee);
+			printf("[devhub] IOEXP    @0x%02x %s (PCA9538-class) config=0x%02x input=0x%02x "
+			       "cfg_rc=%d in0_rc=%d\n",
 			       ioexp_addrs[i],
+			       valid ? "ok" : "READ FAIL",
 			       cfg,
-			       in0);
-			answered++;
-			ioexp_ok = true;
+			       in0,
+			       (int)cfg_rc,
+			       (int)in0_rc);
+			if (valid) answered++;
 		}
-		if (!ioexp_ok)
+		if (!ioexp_found)
 			printf("[devhub] IOEXP    absent (@0x20 / @0x%02x)\n", EVK_I2C_ADDR_TCAL9538_MAIN);
 	}
 
@@ -252,8 +388,14 @@ int main(void)
 		printf("[devhub] EEPROM   @0x%02x rs=%d bytes:", EEPROM_24C128_I2C_ADDR_LOW, (int)rs);
 		for (size_t i = 0; i < sizeof b; i++)
 			printf(" %02x", b[i]);
-		printf("\n");
-		answered++;
+		printf("%s\n", (rs == ALP_OK) ? "" : " READ FAIL");
+		/* Unlike the sensor blocks above, EEPROM content has no reset/
+		 * power-on-default that's invalid to read -- an erased array
+		 * legitimately reads 0xFF, and any other stored byte pattern is
+		 * equally legitimate. There's no sentinel to gate on here; the
+		 * return code IS the whole check -- but it must actually be
+		 * checked (it wasn't, before this fix). */
+		if (rs == ALP_OK) answered++;
 	} else {
 		printf("[devhub] EEPROM   @0x%02x absent (err=%d)\n",
 		       EEPROM_24C128_I2C_ADDR_LOW,

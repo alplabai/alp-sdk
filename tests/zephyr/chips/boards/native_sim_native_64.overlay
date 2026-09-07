@@ -49,6 +49,42 @@
              *     reg = <0x76>;
              * };
              */
+
+            /* Fake targets for the 2026-09 chip-driver session's new
+             * register-protocol coverage (rv3028c7, tcal9538,
+             * icm42670, bmi323, bmp581, ina236) -- unlike the
+             * lsm6dso/ssd1306/bme280 fakes above, these stay ACTIVE:
+             * there is no real-silicon substitute test for these
+             * functions yet (see tests/zephyr/chips/src/fake_*.c file
+             * headers). */
+            fake_rv3028c7: fake_rv3028c7@52 {
+                compatible = "alp,fake-rv3028c7";
+                reg = <0x52>;
+            };
+            fake_tcal9538_main: fake_tcal9538_main@73 {
+                compatible = "alp,fake-tcal9538";
+                reg = <0x73>;
+            };
+            fake_tcal9538_alt: fake_tcal9538_alt@20 {
+                compatible = "alp,fake-tcal9538";
+                reg = <0x20>;
+            };
+            fake_icm42670: fake_icm42670@68 {
+                compatible = "alp,fake-icm42670";
+                reg = <0x68>;
+            };
+            fake_bmi323: fake_bmi323@69 {
+                compatible = "alp,fake-bmi323";
+                reg = <0x69>;
+            };
+            fake_bmp581: fake_bmp581@46 {
+                compatible = "alp,fake-bmp581";
+                reg = <0x46>;
+            };
+            fake_ina236: fake_ina236@40 {
+                compatible = "alp,fake-ina236";
+                reg = <0x40>;
+            };
         };
     };
 

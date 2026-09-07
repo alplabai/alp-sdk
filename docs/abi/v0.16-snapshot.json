@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-06",
+  "generated": "2026-09-07",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -2388,6 +2388,14 @@
     },
     "alp/chips/bmi323.h": {
       "functions": {
+        "bmi323_configure_int_pin": {
+          "hash": "b87fc6fa5ba949be",
+          "signature": "alp_status_t bmi323_configure_int_pin(bmi323_t *dev, bmi323_int_pin_t pin, const bmi323_int_pin_config_t *cfg);"
+        },
+        "bmi323_data_ready": {
+          "hash": "1da1e3bc2ae2fdbf",
+          "signature": "alp_status_t bmi323_data_ready(bmi323_t *dev, bmi323_data_ready_t *out);"
+        },
         "bmi323_deinit": {
           "hash": "f847424a6ccc6523",
           "signature": "void bmi323_deinit(bmi323_t *dev);"
@@ -2412,6 +2420,10 @@
           "hash": "a22c9c7ec2a0e184",
           "signature": "alp_status_t bmi323_read_temp(bmi323_t *dev, int16_t *temp_raw);"
         },
+        "bmi323_route_data_ready_int": {
+          "hash": "20c8b927b23f702f",
+          "signature": "alp_status_t bmi323_route_data_ready_int(bmi323_t *dev, bmi323_int_route_t accel_route, bmi323_int_route_t gyro_route);"
+        },
         "bmi323_set_accel": {
           "hash": "680dedb877dff022",
           "signature": "alp_status_t bmi323_set_accel(bmi323_t *dev, bmi323_odr_t odr, bmi323_accel_fs_t fs);"
@@ -2419,6 +2431,10 @@
         "bmi323_set_gyro": {
           "hash": "4f306713dabbe8f7",
           "signature": "alp_status_t bmi323_set_gyro(bmi323_t *dev, bmi323_odr_t odr, bmi323_gyro_fs_t fs);"
+        },
+        "bmi323_set_int_latch": {
+          "hash": "0df10317193dc183",
+          "signature": "alp_status_t bmi323_set_int_latch(bmi323_t *dev, bmi323_int_latch_t mode);"
         }
       },
       "macros": {
@@ -2457,6 +2473,15 @@
           "hash": "4b98c6aaeed4d9ae",
           "kind": "struct"
         },
+        "bmi323_data_ready_t": {
+          "definition": "typedef struct { bool accel; bool gyro; } bmi323_data_ready_t;",
+          "fields": [
+            "bool accel",
+            "bool gyro"
+          ],
+          "hash": "452dc3b3cc4d5aca",
+          "kind": "struct"
+        },
         "bmi323_gyro_fs_t": {
           "definition": "typedef enum { BMI323_GYRO_FS_125_DPS = 0x0, BMI323_GYRO_FS_250_DPS = 0x1, BMI323_GYRO_FS_500_DPS = 0x2, BMI323_GYRO_FS_1000_DPS = 0x3, BMI323_GYRO_FS_2000_DPS = 0x4 } bmi323_gyro_fs_t;",
           "enumerators": [
@@ -2467,6 +2492,63 @@
             "BMI323_GYRO_FS_2000_DPS = 0x4"
           ],
           "hash": "b8415dc8294230af",
+          "kind": "enum"
+        },
+        "bmi323_int_drive_t": {
+          "definition": "typedef enum { BMI323_INT_DRIVE_PUSH_PULL = 0, BMI323_INT_DRIVE_OPEN_DRAIN = 1 } bmi323_int_drive_t;",
+          "enumerators": [
+            "BMI323_INT_DRIVE_PUSH_PULL = 0",
+            "BMI323_INT_DRIVE_OPEN_DRAIN = 1"
+          ],
+          "hash": "fe574be1773697a9",
+          "kind": "enum"
+        },
+        "bmi323_int_latch_t": {
+          "definition": "typedef enum { BMI323_INT_LATCH_NON_LATCHED = 0, BMI323_INT_LATCH_PERMANENT = 1 } bmi323_int_latch_t;",
+          "enumerators": [
+            "BMI323_INT_LATCH_NON_LATCHED = 0",
+            "BMI323_INT_LATCH_PERMANENT = 1"
+          ],
+          "hash": "7e451c3e2afdbb36",
+          "kind": "enum"
+        },
+        "bmi323_int_level_t": {
+          "definition": "typedef enum { BMI323_INT_LEVEL_ACTIVE_LOW = 0, BMI323_INT_LEVEL_ACTIVE_HIGH = 1 } bmi323_int_level_t;",
+          "enumerators": [
+            "BMI323_INT_LEVEL_ACTIVE_LOW = 0",
+            "BMI323_INT_LEVEL_ACTIVE_HIGH = 1"
+          ],
+          "hash": "b8edfe4993101ddb",
+          "kind": "enum"
+        },
+        "bmi323_int_pin_config_t": {
+          "definition": "typedef struct { bmi323_int_level_t level; bmi323_int_drive_t drive; bool output_enable; } bmi323_int_pin_config_t;",
+          "fields": [
+            "bmi323_int_level_t level",
+            "bmi323_int_drive_t drive",
+            "bool output_enable"
+          ],
+          "hash": "3fd1415c69ab3c23",
+          "kind": "struct"
+        },
+        "bmi323_int_pin_t": {
+          "definition": "typedef enum { BMI323_INT_PIN1 = 0, BMI323_INT_PIN2 = 1 } bmi323_int_pin_t;",
+          "enumerators": [
+            "BMI323_INT_PIN1 = 0",
+            "BMI323_INT_PIN2 = 1"
+          ],
+          "hash": "8ac8db2153887ddf",
+          "kind": "enum"
+        },
+        "bmi323_int_route_t": {
+          "definition": "typedef enum { BMI323_INT_ROUTE_DISABLED = 0x0, BMI323_INT_ROUTE_INT1 = 0x1, BMI323_INT_ROUTE_INT2 = 0x2, BMI323_INT_ROUTE_I3C_IBI = 0x3 } bmi323_int_route_t;",
+          "enumerators": [
+            "BMI323_INT_ROUTE_DISABLED = 0x0",
+            "BMI323_INT_ROUTE_INT1 = 0x1",
+            "BMI323_INT_ROUTE_INT2 = 0x2",
+            "BMI323_INT_ROUTE_I3C_IBI = 0x3"
+          ],
+          "hash": "c32639f74d7e9635",
           "kind": "enum"
         },
         "bmi323_odr_t": {
@@ -2562,6 +2644,14 @@
           "hash": "e0479df9386046eb",
           "signature": "alp_status_t bmp581_compensate(const bmp581_raw_t *raw, bmp581_compensated_t *out);"
         },
+        "bmp581_configure_int_pin": {
+          "hash": "6cb67449378147e2",
+          "signature": "alp_status_t bmp581_configure_int_pin(bmp581_t *dev, bool enable, bmp581_int_drive_t drive, bmp581_int_polarity_t polarity, bmp581_int_mode_t mode);"
+        },
+        "bmp581_data_ready": {
+          "hash": "597597888e8722fe",
+          "signature": "alp_status_t bmp581_data_ready(bmp581_t *dev, bool *ready_out);"
+        },
         "bmp581_deinit": {
           "hash": "16a459462d245e59",
           "signature": "void bmp581_deinit(bmp581_t *dev);"
@@ -2577,6 +2667,10 @@
         "bmp581_read_raw": {
           "hash": "6a8a7715cfceb859",
           "signature": "alp_status_t bmp581_read_raw(bmp581_t *dev, bmp581_raw_t *out);"
+        },
+        "bmp581_set_int_sources": {
+          "hash": "56d81ebc9d3f0edd",
+          "signature": "alp_status_t bmp581_set_int_sources(bmp581_t *dev, uint8_t source_mask);"
         },
         "bmp581_set_sampling": {
           "hash": "caab90f19ee2303a",
@@ -2599,6 +2693,22 @@
         "BMP581_I2C_ADDR_LOW": {
           "hash": "1a6f08e1d9b59ae6",
           "value": "0x46"
+        },
+        "BMP581_INT_SRC_DRDY": {
+          "hash": "264a859b68f6abda",
+          "value": "(1u << 0)"
+        },
+        "BMP581_INT_SRC_FIFO_FULL": {
+          "hash": "7afa4a26f9090736",
+          "value": "(1u << 1)"
+        },
+        "BMP581_INT_SRC_FIFO_THS": {
+          "hash": "11c00c35d24391f2",
+          "value": "(1u << 2)"
+        },
+        "BMP581_INT_SRC_OOR_P": {
+          "hash": "8b691e4f726ecb29",
+          "value": "(1u << 3)"
         }
       },
       "typedefs": {
@@ -2610,6 +2720,33 @@
           ],
           "hash": "82988bedbfe85471",
           "kind": "struct"
+        },
+        "bmp581_int_drive_t": {
+          "definition": "typedef enum { BMP581_INT_PUSH_PULL = 0x0, BMP581_INT_OPEN_DRAIN = 0x1 } bmp581_int_drive_t;",
+          "enumerators": [
+            "BMP581_INT_PUSH_PULL = 0x0",
+            "BMP581_INT_OPEN_DRAIN = 0x1"
+          ],
+          "hash": "f976628356eec71c",
+          "kind": "enum"
+        },
+        "bmp581_int_mode_t": {
+          "definition": "typedef enum { BMP581_INT_PULSED = 0x0, BMP581_INT_LATCHED = 0x1 } bmp581_int_mode_t;",
+          "enumerators": [
+            "BMP581_INT_PULSED = 0x0",
+            "BMP581_INT_LATCHED = 0x1"
+          ],
+          "hash": "0601a4f606fce96d",
+          "kind": "enum"
+        },
+        "bmp581_int_polarity_t": {
+          "definition": "typedef enum { BMP581_INT_ACTIVE_LOW = 0x0, BMP581_INT_ACTIVE_HIGH = 0x1 } bmp581_int_polarity_t;",
+          "enumerators": [
+            "BMP581_INT_ACTIVE_LOW = 0x0",
+            "BMP581_INT_ACTIVE_HIGH = 0x1"
+          ],
+          "hash": "99b36989fdce4ad0",
+          "kind": "enum"
         },
         "bmp581_mode_t": {
           "definition": "typedef enum { BMP581_MODE_STANDBY = 0x0, BMP581_MODE_NORMAL = 0x1, BMP581_MODE_FORCED = 0x2, BMP581_MODE_CONTINUOUS = 0x3 } bmp581_mode_t;",
@@ -4448,6 +4585,14 @@
     },
     "alp/chips/icm42670.h": {
       "functions": {
+        "icm42670_configure_int_pin": {
+          "hash": "4c92ee49515ae86d",
+          "signature": "alp_status_t icm42670_configure_int_pin(icm42670_t *dev, icm42670_int_pin_t pin, const icm42670_int_pin_config_t *cfg);"
+        },
+        "icm42670_data_ready": {
+          "hash": "00fedfa728af25f7",
+          "signature": "alp_status_t icm42670_data_ready(icm42670_t *dev, bool *ready);"
+        },
         "icm42670_deinit": {
           "hash": "3b7526348f1b63e6",
           "signature": "void icm42670_deinit(icm42670_t *dev);"
@@ -4471,6 +4616,10 @@
         "icm42670_read_temp": {
           "hash": "cf1c3bea7bb63c4b",
           "signature": "alp_status_t icm42670_read_temp(icm42670_t *dev, int16_t *temp_raw);"
+        },
+        "icm42670_route_int": {
+          "hash": "01b841dea34da906",
+          "signature": "alp_status_t icm42670_route_int(icm42670_t *dev, icm42670_int_pin_t pin, uint8_t source_mask);"
         },
         "icm42670_set_accel": {
           "hash": "7bf97f9ee364674e",
@@ -4528,8 +4677,69 @@
           "hash": "77f36aac45970aa8",
           "kind": "enum"
         },
+        "icm42670_int_drive_t": {
+          "definition": "typedef enum { ICM42670_INT_DRIVE_OPEN_DRAIN = 0, ICM42670_INT_DRIVE_PUSH_PULL = 1 } icm42670_int_drive_t;",
+          "enumerators": [
+            "ICM42670_INT_DRIVE_OPEN_DRAIN = 0",
+            "ICM42670_INT_DRIVE_PUSH_PULL = 1"
+          ],
+          "hash": "2e338b9e67ba3621",
+          "kind": "enum"
+        },
+        "icm42670_int_mode_t": {
+          "definition": "typedef enum { ICM42670_INT_MODE_PULSED = 0, ICM42670_INT_MODE_LATCHED = 1 } icm42670_int_mode_t;",
+          "enumerators": [
+            "ICM42670_INT_MODE_PULSED = 0",
+            "ICM42670_INT_MODE_LATCHED = 1"
+          ],
+          "hash": "fc8dd4cf5ecc0b55",
+          "kind": "enum"
+        },
+        "icm42670_int_pin_config_t": {
+          "definition": "typedef struct { icm42670_int_mode_t mode; icm42670_int_drive_t drive; icm42670_int_polarity_t polarity; } icm42670_int_pin_config_t;",
+          "fields": [
+            "icm42670_int_mode_t mode",
+            "icm42670_int_drive_t drive",
+            "icm42670_int_polarity_t polarity"
+          ],
+          "hash": "c085002aeae904c9",
+          "kind": "struct"
+        },
+        "icm42670_int_pin_t": {
+          "definition": "typedef enum { ICM42670_INT_PIN1 = 0, ICM42670_INT_PIN2 = 1 } icm42670_int_pin_t;",
+          "enumerators": [
+            "ICM42670_INT_PIN1 = 0",
+            "ICM42670_INT_PIN2 = 1"
+          ],
+          "hash": "6703c8d58b19b62c",
+          "kind": "enum"
+        },
+        "icm42670_int_polarity_t": {
+          "definition": "typedef enum { ICM42670_INT_POLARITY_ACTIVE_LOW = 0, ICM42670_INT_POLARITY_ACTIVE_HIGH = 1 } icm42670_int_polarity_t;",
+          "enumerators": [
+            "ICM42670_INT_POLARITY_ACTIVE_LOW = 0",
+            "ICM42670_INT_POLARITY_ACTIVE_HIGH = 1"
+          ],
+          "hash": "c70f75782bce7aa2",
+          "kind": "enum"
+        },
+        "icm42670_int_src_t": {
+          "definition": "typedef enum { ICM42670_INT_SRC_AGC_RDY = 1u << 0, ICM42670_INT_SRC_FIFO_FULL = 1u << 1, ICM42670_INT_SRC_FIFO_THS = 1u << 2, ICM42670_INT_SRC_DATA_RDY = 1u << 3, ICM42670_INT_SRC_RESET_DONE = 1u << 4, ICM42670_INT_SRC_PLL_RDY = 1u << 5, ICM42670_INT_SRC_FSYNC = 1u << 6, ICM42670_INT_SRC_ST_DONE = 1u << 7 } icm42670_int_src_t;",
+          "enumerators": [
+            "ICM42670_INT_SRC_AGC_RDY = 1u << 0",
+            "ICM42670_INT_SRC_FIFO_FULL = 1u << 1",
+            "ICM42670_INT_SRC_FIFO_THS = 1u << 2",
+            "ICM42670_INT_SRC_DATA_RDY = 1u << 3",
+            "ICM42670_INT_SRC_RESET_DONE = 1u << 4",
+            "ICM42670_INT_SRC_PLL_RDY = 1u << 5",
+            "ICM42670_INT_SRC_FSYNC = 1u << 6",
+            "ICM42670_INT_SRC_ST_DONE = 1u << 7"
+          ],
+          "hash": "043e448954a4a957",
+          "kind": "enum"
+        },
         "icm42670_odr_t": {
-          "definition": "typedef enum { ICM42670_ODR_OFF = 0x0, ICM42670_ODR_1_5625_HZ = 0xF, ICM42670_ODR_3_125_HZ = 0xE, ICM42670_ODR_6_25_HZ = 0xD, ICM42670_ODR_12_5_HZ = 0xC, ICM42670_ODR_25_HZ = 0xB, ICM42670_ODR_50_HZ = 0xA, ICM42670_ODR_100_HZ = 0x8, ICM42670_ODR_200_HZ = 0x7, ICM42670_ODR_400_HZ = 0x6, ICM42670_ODR_800_HZ = 0x5, ICM42670_ODR_1600_HZ = 0x4 } icm42670_odr_t;",
+          "definition": "typedef enum { ICM42670_ODR_OFF = 0x0, ICM42670_ODR_1_5625_HZ = 0xF, ICM42670_ODR_3_125_HZ = 0xE, ICM42670_ODR_6_25_HZ = 0xD, ICM42670_ODR_12_5_HZ = 0xC, ICM42670_ODR_25_HZ = 0xB, ICM42670_ODR_50_HZ = 0xA, ICM42670_ODR_100_HZ = 0x9, ICM42670_ODR_200_HZ = 0x8, ICM42670_ODR_400_HZ = 0x7, ICM42670_ODR_800_HZ = 0x6, ICM42670_ODR_1600_HZ = 0x5 } icm42670_odr_t;",
           "enumerators": [
             "ICM42670_ODR_OFF = 0x0",
             "ICM42670_ODR_1_5625_HZ = 0xF",
@@ -4538,13 +4748,13 @@
             "ICM42670_ODR_12_5_HZ = 0xC",
             "ICM42670_ODR_25_HZ = 0xB",
             "ICM42670_ODR_50_HZ = 0xA",
-            "ICM42670_ODR_100_HZ = 0x8",
-            "ICM42670_ODR_200_HZ = 0x7",
-            "ICM42670_ODR_400_HZ = 0x6",
-            "ICM42670_ODR_800_HZ = 0x5",
-            "ICM42670_ODR_1600_HZ = 0x4"
+            "ICM42670_ODR_100_HZ = 0x9",
+            "ICM42670_ODR_200_HZ = 0x8",
+            "ICM42670_ODR_400_HZ = 0x7",
+            "ICM42670_ODR_800_HZ = 0x6",
+            "ICM42670_ODR_1600_HZ = 0x5"
           ],
-          "hash": "6327802ed331266f",
+          "hash": "7d94aa2a7423f312",
           "kind": "enum"
         },
         "icm42670_t": {
@@ -4845,6 +5055,10 @@
     },
     "alp/chips/ina236.h": {
       "functions": {
+        "ina236_conversion_ready": {
+          "hash": "610691cc52d5ecfc",
+          "signature": "alp_status_t ina236_conversion_ready(ina236_t *ctx, bool *ready_out);"
+        },
         "ina236_deinit": {
           "hash": "071e9b37aebdc9d8",
           "signature": "void ina236_deinit(ina236_t *ctx);"
@@ -6814,6 +7028,10 @@
         "rv3028c7_set_time": {
           "hash": "fbe619f222d9b13d",
           "signature": "alp_status_t rv3028c7_set_time(rv3028c7_t *ctx, const rv3028c7_time_t *t);"
+        },
+        "rv3028c7_was_cold_start": {
+          "hash": "6b9757bb5af7441f",
+          "signature": "alp_status_t rv3028c7_was_cold_start(rv3028c7_t *ctx, bool *out);"
         }
       },
       "macros": {
@@ -6870,14 +7088,15 @@
           "kind": "enum"
         },
         "rv3028c7_t": {
-          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; void *src_user[7]; void *src_handler[7]; } rv3028c7_t;",
+          "definition": "typedef struct { bool initialised; bool cold_start; alp_i2c_t *bus; void *src_user[7]; void *src_handler[7]; } rv3028c7_t;",
           "fields": [
             "bool initialised",
+            "bool cold_start",
             "alp_i2c_t *bus",
             "void *src_user[7]",
             "void *src_handler[7]"
           ],
-          "hash": "6ecc6d488239ce6f",
+          "hash": "5e25cba0723b92b4",
           "kind": "struct"
         },
         "rv3028c7_time_t": {
@@ -7333,6 +7552,10 @@
           "hash": "6ca6bc37d3b5fb6e",
           "signature": "alp_status_t tcal9538_get(tcal9538_t *ctx, uint8_t pin, bool *level_out);"
         },
+        "tcal9538_get_interrupt_status": {
+          "hash": "ac273a15cd9fb410",
+          "signature": "alp_status_t tcal9538_get_interrupt_status(tcal9538_t *ctx, uint8_t *status_out);"
+        },
         "tcal9538_init": {
           "hash": "e9e0fb5e12998f2b",
           "signature": "alp_status_t tcal9538_init(tcal9538_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);"
@@ -7352,6 +7575,18 @@
         "tcal9538_set_directions": {
           "hash": "5bb8ed02d8bbbeb3",
           "signature": "alp_status_t tcal9538_set_directions(tcal9538_t *ctx, uint8_t mask, uint8_t value);"
+        },
+        "tcal9538_set_input_latch": {
+          "hash": "24f2c1d1d38aadce",
+          "signature": "alp_status_t tcal9538_set_input_latch(tcal9538_t *ctx, uint8_t mask);"
+        },
+        "tcal9538_set_interrupt_mask": {
+          "hash": "009889980640bd89",
+          "signature": "alp_status_t tcal9538_set_interrupt_mask(tcal9538_t *ctx, uint8_t mask);"
+        },
+        "tcal9538_set_pull": {
+          "hash": "0d1fbe830acfe580",
+          "signature": "alp_status_t tcal9538_set_pull(tcal9538_t *ctx, uint8_t pin, tcal9538_pull_t pull);"
         },
         "tcal9538_write_all": {
           "hash": "f29c77f487f65612",
@@ -7378,16 +7613,27 @@
           "hash": "8afc0894ea2cf926",
           "kind": "enum"
         },
+        "tcal9538_pull_t": {
+          "definition": "typedef enum { TCAL9538_PULL_NONE = 0, TCAL9538_PULL_DOWN = 1, TCAL9538_PULL_UP = 2, } tcal9538_pull_t;",
+          "enumerators": [
+            "TCAL9538_PULL_NONE = 0",
+            "TCAL9538_PULL_DOWN = 1",
+            "TCAL9538_PULL_UP = 2"
+          ],
+          "hash": "5a9b1c66d07c3964",
+          "kind": "enum"
+        },
         "tcal9538_t": {
-          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; uint8_t cfg_cache; uint8_t out_cache; } tcal9538_t;",
+          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; uint8_t cfg_cache; uint8_t out_cache; bool has_latched_irq; } tcal9538_t;",
           "fields": [
             "bool initialised",
             "alp_i2c_t *bus",
             "uint8_t addr",
             "uint8_t cfg_cache",
-            "uint8_t out_cache"
+            "uint8_t out_cache",
+            "bool has_latched_irq"
           ],
-          "hash": "54e1b7eccc94e4d0",
+          "hash": "73e248f4063f5b56",
           "kind": "struct"
         }
       },
@@ -7563,6 +7809,22 @@
         }
       },
       "macros": {
+        "TMP112_I2C_ADDR_ADDRVAR_GND": {
+          "hash": "c8923582b2972ad7",
+          "value": "0x40u"
+        },
+        "TMP112_I2C_ADDR_ADDRVAR_SCL": {
+          "hash": "fcff4b383b80b178",
+          "value": "0x43u"
+        },
+        "TMP112_I2C_ADDR_ADDRVAR_SDA": {
+          "hash": "a0926584addc7eab",
+          "value": "0x42u"
+        },
+        "TMP112_I2C_ADDR_ADDRVAR_VPLUS": {
+          "hash": "18a20a4479b85b8f",
+          "value": "0x41u"
+        },
         "TMP112_I2C_ADDR_GND": {
           "hash": "f3e4ec52b97bf968",
           "value": "0x48u"

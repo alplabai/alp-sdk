@@ -7,8 +7,9 @@
  * The BMI323 differs from the typical IMU register protocol on two
  * axes:
  *
- *   1. 16-bit register addressing.  Each transaction writes a
- *      2-byte address pointer (LSB first) before the data phase.
+ *   1. 16-bit register values.  Each register holds a 16-bit value
+ *      (LSB first); the register index itself is a single 8-bit
+ *      byte -- NOT 16-bit addressing.
  *   2. Read responses are prefixed with 2 dummy bytes.  The wrapper
  *      reads `2 + len` and discards the first two.  This is a
  *      Bosch consistency choice for SPI compatibility and applies
@@ -24,13 +25,17 @@
 /* Register map (BST-BMI323-DS000)                                     */
 /* ------------------------------------------------------------------ */
 
-#define REG_CHIP_ID    0x00
-#define REG_ACC_CONF   0x20
-#define REG_GYR_CONF   0x21
-#define REG_TEMP_DATA  0x09 /* 16-bit signed; LSB first on this reg */
-#define REG_ACC_DATA_X 0x03 /* X, Y, Z = 3 × int16, LSB first */
-#define REG_GYR_DATA_X 0x06
-#define REG_CMD        0x7E /* Command register. */
+#define REG_CHIP_ID     0x00
+#define REG_STATUS      0x02 /* drdy_acc bit7 / drdy_gyr bit6, both R/C (Rev 1.7 p.66) */
+#define REG_ACC_CONF    0x20
+#define REG_GYR_CONF    0x21
+#define REG_TEMP_DATA   0x09 /* 16-bit signed; LSB first on this reg */
+#define REG_ACC_DATA_X  0x03 /* X, Y, Z = 3 × int16, LSB first */
+#define REG_GYR_DATA_X  0x06
+#define REG_CMD         0x7E /* Command register. */
+#define REG_IO_INT_CTRL 0x38 /* INT1/INT2 level+drive+output_en, packed (Rev 1.7 p.102) */
+#define REG_INT_CONF    0x39 /* int_latch, bit0 only (Rev 1.7 p.103) */
+#define REG_INT_MAP2    0x3B /* acc_drdy_int[11:10] / gyr_drdy_int[9:8] (Rev 1.7 pp.106-107) */
 
 #define BMI323_CMD_SOFT_RESET 0xDEAFu /* Soft-reset command (BST-BMI323-DS000). */
 #define BMI323_SOFT_RESET_MS  3u      /* >= t_soft_reset (~1.5 ms) before CHIP_ID is valid. */
@@ -63,6 +68,17 @@ static alp_status_t reg_read16(bmi323_t *dev, uint8_t reg, uint8_t *out, size_t 
 static int16_t le16(const uint8_t *p)
 {
 	return (int16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+}
+
+/* Unsigned counterpart of le16(), used for register bitfields (int_latch,
+ * IO_INT_CTRL, INT_MAP2) rather than signed sensor data. */
+static alp_status_t reg_read_u16(bmi323_t *dev, uint8_t reg, uint16_t *out)
+{
+	uint8_t      buf[2] = { 0 };
+	alp_status_t s      = reg_read16(dev, reg, buf, 1);
+	if (s != ALP_OK) return s;
+	*out = (uint16_t)((uint16_t)buf[0] | ((uint16_t)buf[1] << 8));
+	return ALP_OK;
 }
 
 /* ------------------------------------------------------------------ */
@@ -120,14 +136,35 @@ alp_status_t bmi323_set_accel(bmi323_t *dev, bmi323_odr_t odr, bmi323_accel_fs_t
 	if ((int)fs < (int)BMI323_ACCEL_FS_2G || (int)fs > (int)BMI323_ACCEL_FS_16G) {
 		return ALP_ERR_INVAL;
 	}
-	/* ACC_CONF[6:4] = FS, [3:0] = ODR.  Bosch reset value enables
-     * normal mode bandwidth + averaging which is fine for v0.2. */
+	/* ACC_CONF[6:4] = FS, [3:0] = ODR.  This is a full 16-bit write, not
+     * a read-modify-write, so it always forces acc_bw=0 and acc_avg_num=0
+     * regardless of any prior configuration -- it does not "preserve the
+     * reset value", it happens to land on the same bit pattern.  That's
+     * harmless today: 0b100 (normal mode, forced below) is the only
+     * acc_mode this driver uses, and BST-BMI323-DS000-13 Rev 1.7 p.22
+     * states acc_avg_num has no effect in normal/high-performance mode,
+     * while acc_bw=0 (ODR/2) is itself the documented reset default.  If
+     * v0.3 exposes acc_bw or low-power mode (where acc_avg_num does
+     * matter), this write must become read-modify-write so it stops
+     * silently clobbering it. */
 	uint16_t v = (uint16_t)((((uint16_t)fs & 0x07u) << 4) | ((uint16_t)odr & 0x0Fu));
-	/* Bit 12 selects normal-power mode (vs low-power). */
-	v |= (1u << 12);
+	/* ACC_CONF[14:12] = acc_mode, a 3-bit field (BST-BMI323-DS000-13
+     * Rev 1.7, pp.21-22, 61, 88-91): 0b000 disabled, 0b011 duty-cycled,
+     * 0b100 normal (continuous, reduced current), 0b111 high
+     * performance.  0b100 is used here.  The previous `v |= (1u << 12)`
+     * produced 0b001, an encoding not in the table, which left the
+     * accelerometer disabled -- this is why the bench read -32768 on
+     * all three axes. */
+	v              = (uint16_t)((v & (uint16_t)~(0x7u << 12)) | (uint16_t)(0x4u << 12));
 	alp_status_t s = reg_write(dev, REG_ACC_CONF, v);
-	if (s == ALP_OK) dev->accel_fs = fs;
-	return s;
+	if (s != ALP_OK) return s;
+	dev->accel_fs = fs;
+	/* tA,SU (BST-BMI323-DS000-13 Rev 1.7, Table 2 p.9): accelerometer
+     * start-up from suspend is 2 ms typ.  Wait here so a caller that
+     * reads immediately after configuring never races an unready
+     * conversion. */
+	alp_delay_ms(2);
+	return ALP_OK;
 }
 
 alp_status_t bmi323_set_gyro(bmi323_t *dev, bmi323_odr_t odr, bmi323_gyro_fs_t fs)
@@ -142,10 +179,23 @@ alp_status_t bmi323_set_gyro(bmi323_t *dev, bmi323_odr_t odr, bmi323_gyro_fs_t f
 		return ALP_ERR_INVAL;
 	}
 	uint16_t v = (uint16_t)((((uint16_t)fs & 0x07u) << 4) | ((uint16_t)odr & 0x0Fu));
-	v |= (1u << 12);
+	/* GYR_CONF[14:12] = gyr_mode, a 3-bit field (BST-BMI323-DS000-13
+     * Rev 1.7, pp.21-22, 61, 88-91): 0b000 disabled, 0b001 disabled
+     * with drive kept enabled, 0b011 duty-cycled, 0b100 normal,
+     * 0b111 high performance (0b010/0b101/0b110 reserved).  0b100 is
+     * used here; see bmi323_set_accel for the same field-width bug
+     * this replaces. */
+	v              = (uint16_t)((v & (uint16_t)~(0x7u << 12)) | (uint16_t)(0x4u << 12));
 	alp_status_t s = reg_write(dev, REG_GYR_CONF, v);
-	if (s == ALP_OK) dev->gyro_fs = fs;
-	return s;
+	if (s != ALP_OK) return s;
+	dev->gyro_fs = fs;
+	/* tG,SU (BST-BMI323-DS000-13 Rev 1.7, Table 5 p.10): gyroscope
+     * start-up from suspend to high-performance mode, including filter
+     * settling, is 30 ms typ -- 15x the accelerometer's tA,SU (2 ms).
+     * Wait here so a caller that reads immediately after configuring
+     * never races the 0x8000 "no valid sample" reset value. */
+	alp_delay_ms(30);
+	return ALP_OK;
 }
 
 alp_status_t bmi323_read_accel(bmi323_t *dev, bmi323_axes_t *out)
@@ -182,6 +232,72 @@ alp_status_t bmi323_read_temp(bmi323_t *dev, int16_t *temp_raw)
 	alp_status_t s      = reg_read16(dev, REG_TEMP_DATA, buf, 1);
 	if (s != ALP_OK) return s;
 	*temp_raw = le16(buf);
+	return ALP_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/* Interrupt configuration                                             */
+/* ------------------------------------------------------------------ */
+
+alp_status_t
+bmi323_configure_int_pin(bmi323_t *dev, bmi323_int_pin_t pin, const bmi323_int_pin_config_t *cfg)
+{
+	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+	if (cfg == NULL) return ALP_ERR_INVAL;
+	if (pin != BMI323_INT_PIN1 && pin != BMI323_INT_PIN2) return ALP_ERR_INVAL;
+
+	/* IO_INT_CTRL packs INT1 into bits[2:0] (lvl, od, output_en from
+	 * LSB up) and INT2 into bits[10:8], same field order
+	 * (BST-BMI323-DS000-13 Rev 1.7, p.102).  Read-modify-write so
+	 * configuring one pin never disturbs the other. */
+	uint16_t     cur = 0;
+	alp_status_t s   = reg_read_u16(dev, REG_IO_INT_CTRL, &cur);
+	if (s != ALP_OK) return s;
+
+	uint16_t shift = (pin == BMI323_INT_PIN1) ? 0u : 8u;
+	uint16_t mask  = (uint16_t)(0x7u << shift);
+	uint16_t bits  = (uint16_t)((((uint16_t)cfg->output_enable << 2) | ((uint16_t)cfg->drive << 1) |
+	                             (uint16_t)cfg->level)
+	                            << shift);
+	uint16_t v     = (uint16_t)((cur & (uint16_t)~mask) | bits);
+	return reg_write(dev, REG_IO_INT_CTRL, v);
+}
+
+alp_status_t bmi323_set_int_latch(bmi323_t *dev, bmi323_int_latch_t mode)
+{
+	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+	return reg_write(dev, REG_INT_CONF, (uint16_t)mode & 0x1u);
+}
+
+alp_status_t bmi323_route_data_ready_int(bmi323_t          *dev,
+                                         bmi323_int_route_t accel_route,
+                                         bmi323_int_route_t gyro_route)
+{
+	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+
+	/* INT_MAP2 also carries temp_drdy_int, fifo_watermark_int,
+	 * fifo_full_int, tap_out, i3c_out and err_status routing this
+	 * driver does not manage -- read-modify-write so routing
+	 * accel/gyro DRDY never disturbs those. */
+	uint16_t     cur = 0;
+	alp_status_t s   = reg_read_u16(dev, REG_INT_MAP2, &cur);
+	if (s != ALP_OK) return s;
+
+	uint16_t v = cur;
+	v          = (uint16_t)((v & (uint16_t)~(0x3u << 10)) | (((uint16_t)accel_route & 0x3u) << 10));
+	v          = (uint16_t)((v & (uint16_t)~(0x3u << 8)) | (((uint16_t)gyro_route & 0x3u) << 8));
+	return reg_write(dev, REG_INT_MAP2, v);
+}
+
+alp_status_t bmi323_data_ready(bmi323_t *dev, bmi323_data_ready_t *out)
+{
+	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+	if (out == NULL) return ALP_ERR_INVAL;
+	uint8_t      buf[2] = { 0 };
+	alp_status_t s      = reg_read16(dev, REG_STATUS, buf, 1);
+	if (s != ALP_OK) return s;
+	out->accel = (buf[0] & (1u << 7)) != 0;
+	out->gyro  = (buf[0] & (1u << 6)) != 0;
 	return ALP_OK;
 }
 

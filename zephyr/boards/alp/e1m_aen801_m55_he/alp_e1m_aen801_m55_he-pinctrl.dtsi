@@ -19,6 +19,12 @@
  * board layer rather than in each consumer's overlay.  Pads, macros and pad
  * config come from metadata/e1m_modules/aen/on-module-links.yaml.
  *
+ * SoC I2C2 (function C, portable alp-i2c0) is wired here too, for the same
+ * reason: the SoM's own 24C128 manifest EEPROM is bridge/DNP-selected onto
+ * it, so every board built from this SoM needs the controller enabled --
+ * even though the same pads also carry the EVK carrier's sensor bus once
+ * they leave the module (docs/bring-up-aen.md Sec 5.1).
+ *
  * Remaining GPIO / SPI / Ethernet pin groups are added alongside their
  * drivers (the alp-sdk Alif peripheral drivers).
  */
@@ -79,6 +85,28 @@
 		group1 {
 			pinmux = <PIN_P15_0__LPGPIO>;
 			input-enable;
+		};
+	};
+
+	/*
+	 * e1m_i2c0 = SoC I2C2 function C: P5_7 SDA / P5_6 SCL,
+	 * portable alp-i2c0 (E1M edge bus 0 -- ALP_E1M_I2C0 /
+	 * EVK_I2C_BUS_SENSORS).  Carries the SoM's own 24C128 manifest EEPROM;
+	 * the same pads also reach the EVK carrier's sensor bus once they leave
+	 * the module (docs/bring-up-aen.md Sec 5.1 -- two separate buses).
+	 *
+	 * input-enable + bias-pull-down: bench-validated 2026-06-15 on the E8,
+	 * matching Alif's own reference I2C pinctrl and the identical group in
+	 * examples/aen/aen-i2c2-eeprom-regcheck / aen-eeprom-manifest.  Do NOT
+	 * change bias-pull-down to bias-pull-up: upstream pinctrl_soc.h's
+	 * driver-state-control encoding reads inverted vs the Alif pad hardware,
+	 * and bias-pull-up gives a DEAD bus.
+	 */
+	pinctrl_i2c2: pinctrl_i2c2 {
+		group0 {
+			pinmux = <PIN_P5_6__I2C2_SCL_C>, <PIN_P5_7__I2C2_SDA_C>;
+			input-enable;
+			bias-pull-down;
 		};
 	};
 };

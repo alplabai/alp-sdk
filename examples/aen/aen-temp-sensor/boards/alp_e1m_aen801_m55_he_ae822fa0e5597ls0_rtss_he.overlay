@@ -15,9 +15,11 @@
  *     P7_1 (I2C0_SCL_C), per the E1M-AEN-2626-R2 netlist rows
  *     "BRD_I2C_SDA",U6,B8,"P7_0/SCP0_A" and "BRD_I2C_SCL",U6,B3,"P7_1/SCP1_A"
  *     and the AE822 DFP pin table's alt-function [4] entries.
- *   - the "ti,tmp112" child node on it, at the design address 0x48: the
- *     netlist ties U20 pin 3 (ADD0) to 0V, and TI SBOS397 maps ADD0 -> GND to
- *     0x48.
+ *   - the "ti,tmp112" child node on it, at the design address 0x40: the
+ *     netlist ties U20 pin 3 (ADD0) to 0V, and U20 (TMP112DIDPWR) is the
+ *     X2SON-5 "Address Variant Only" package -- per TI SBOS473L p.44 no
+ *     SOT563-6 orderable carries that MPN -- whose SBOS473L Table 7-4 strap
+ *     row maps ADD0 -> GND to 0x40.
  *
  * -- so an app overlay that re-declared them would be duplicating a SoM fact
  * one layer too high.  That duplication is exactly the smell that
@@ -30,18 +32,4 @@
  * contract, even when the contents are empty.  If you need an app-scoped
  * devicetree tweak (a different `conversion-rate`, say, or the ITCM retarget
  * for a Flow C RAM-run), this is where it goes.
- *
- * NOT here, on purpose: the observed-0x40 address anomaly.  Nothing answers
- * at 0x48; something answers at 0x40 instead, confirmed on 2 of 2 modules
- * tested (2026W36-0001, 2026W36-0003) -- a BATCH property of the 2026W36
- * E1M-AEN803 build (alp-sdk#1978), not a one-off.  That does NOT make 0x40
- * the right address to declare here: it fingerprints TMP112-shaped
- * (CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000) but 0x40 is not a legal
- * TMP112 strap address at all (only 0x48/0x49/0x4A/0x4B are), so the part
- * answering there has NOT been proven to be a TMP112 -- identifying it is
- * open work under alp-sdk#1978.  Re-addressing the node to 0x40 now would
- * bind the stock TMP112 driver to a device whose identity is still unknown.
- * The devicetree keeps the DESIGN address; src/main.c reports the anomaly
- * with an actionable diagnostic instead.  One consequence of leaving this
- * open: the stock CONFIG_TMP112 driver does not bind on these modules.
  */

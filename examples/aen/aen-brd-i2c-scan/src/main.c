@@ -8,7 +8,7 @@
  *
  * BRD_I2C is I2C0 function C (P7_0 SDA / P7_1 SCL) -- see the overlay header
  * for the netlist citations.  It carries three on-module devices: the
- * RV-3028-C7 RTC (@0x52), the TMP112 temperature sensor (@0x48), and the
+ * RV-3028-C7 RTC (@0x52), the TMP112 temperature sensor (@0x40), and the
  * OPTIGA Trust M secure element (@0x30, but DNP=1 on this board rev -- it must
  * NOT ack, and that absence is an expected negative control, not a failure).
  *
@@ -18,7 +18,7 @@
  *   2. SCAN the 7-bit address space 0x08..0x77 with a benign 1-byte-read probe
  *      (never a data write to an unknown address) and print every ACK.
  *   3. For addresses that actually responded, decode what we can:
- *        - TMP112 @0x48: read the temperature register and print milli-C.
+ *        - TMP112 @0x40: read the temperature register and print milli-C.
  *        - RV-3028-C7 @0x52: read the ID register, then read the seconds
  *          register twice ~1s apart to prove the oscillator is actually
  *          running (an ID read alone only proves the chip answers, not that
@@ -27,13 +27,14 @@
  *
  * PULL-UP: this net has no pull-up resistor anywhere (see the overlay header)
  * and relies on the SoC pad's own internal pull-up.  On 2626-R2 silicon that
- * is ENOUGH: this app ACKed the RTC at 0x52 and the TMP112 on 2026-09-05 at
- * 100 kHz, with every non-response a clean -EIO NACK and no -ETIMEDOUT / "User
- * Abort" anywhere in the run.  The older "the internal pull is too weak"
- * verdict (BENCH-SETTLED 2026-08-31) was measured on an r1 module, where these
- * parts sit on LPI2C0 (P7_4/P7_5) and nothing is attached to P7_0/P7_1 at all
- * -- see the corrected i2c0/LPI2C0 comments in ensemble_e8_peripherals.dtsi.
- * So on R2, a FAIL result IS a real finding; treat it as one.
+ * is ENOUGH: this app ACKed the RTC at 0x52 and the TMP112 at 0x40 on
+ * 2026-09-05 at 100 kHz, with every non-response a clean -EIO NACK and no
+ * -ETIMEDOUT / "User Abort" anywhere in the run.  The older "the internal pull
+ * is too weak" verdict (BENCH-SETTLED 2026-08-31) was measured on an r1
+ * module, where these parts sit on LPI2C0 (P7_4/P7_5) and nothing is attached
+ * to P7_0/P7_1 at all -- see the corrected i2c0/LPI2C0 comments in
+ * ensemble_e8_peripherals.dtsi. So on R2, a FAIL result IS a real finding;
+ * treat it as one.
  *
  * Console is the RAM buffer 'ram_console_buf' (see prj.conf); the bench UART
  * is not wired to USB.  BENCH-VALIDATION app -- not a customer teaching
@@ -56,20 +57,14 @@
 #define SCAN_HI 0x77U
 
 /* Netlist-sourced 7-bit addresses (see the overlay header for the BOM rows). */
-#define TMP112_ADDR 0x48U /* U20, ADD0 tied to 0V. */
+/* U20, TMP112DIDPWR: exact orderable MPN is X2SON (DPW), 5 pins -- per TI
+ * SBOS473L p.44, no SOT563-6 orderable carries this MPN (those are
+ * TMP112AIDRLR / TMP112BIDRLR / TMP112NAIDRLR).  Per SBOS473L Table 7-4, the
+ * X2SON-5 "Address Variant Only" TMP112D row straps ADD0->GND = 0x40; that is
+ * the address, not the SOT563-6 row's 0x48. */
+#define TMP112_ADDR 0x40U
 #define RTC_ADDR    0x52U /* U21, RV-3028-C7. */
 #define OPTIGA_ADDR 0x30U /* IC1, DNP=1 -- expected ABSENT. */
-/* The address something actually answers on for the temperature sensor.
- * BENCH FINDING, alp-sdk#1978 -- confirmed on 2 of 2 modules tested
- * (2026W36-0001, 2026W36-0003): 0x48 NACKs and 0x40 ACKs with a plausible
- * temperature.  This is a BATCH property of the 2026W36 E1M-AEN803 build,
- * not a per-unit fault.  0x48 = 0b1001000 and 0x40 = 0b1000000 differ only
- * in bit 3, which first suggested a slow-edge address mis-sample -- but the
- * bench disproved that (see the alias-probe block in main() for the
- * evidence).  0x40 is not a legal TMP112 strap address, so what answers
- * there has not been proven to be the TMP112 at all -- identifying it is
- * open work under alp-sdk#1978. */
-#define TMP112_ALIAS_ADDR 0x40U
 
 /* TMP112 datasheet (TI SBOS397, Table 2): pointer register 0x00 is the
  * temperature result, 2 bytes big-endian, 12-bit left-justified, 0.0625 degC
@@ -95,7 +90,6 @@ struct scan_result {
 	bool         tmp112_present;
 	bool         rtc_present;
 	bool         optiga_present;
-	bool         tmp112_alias_present;
 };
 
 /* Probe every 7-bit address with a 1-byte read (the most portable ACK probe
@@ -135,8 +129,6 @@ static struct scan_result scan_bus(void)
 			res.rtc_present = true;
 		} else if (addr == OPTIGA_ADDR) {
 			res.optiga_present = true;
-		} else if (addr == TMP112_ALIAS_ADDR) {
-			res.tmp112_alias_present = true;
 		}
 	}
 	printk("scan done: %u device(s) responded\n", res.n_found);
@@ -171,12 +163,9 @@ int main(void)
 {
 	int                rc;
 	struct scan_result scan;
-	bool               tmp112_ok = false;
-	/* Sensor identified at EITHER address -- see the ADD0-strap note below:
-	 * on this module it answers at 0x40, not the strapped 0x48. */
-	bool tmp112_any = false;
-	bool rtc_id_ok  = false;
-	bool rtc_ticked = false;
+	bool               tmp112_ok  = false;
+	bool               rtc_id_ok  = false;
+	bool               rtc_ticked = false;
 
 	printk("\n=== AEN801 BRD_I2C housekeeping-bus bench (i2c_dw / i2c0 @ 0x49010000) ===\n");
 
@@ -190,7 +179,7 @@ int main(void)
 
 	/* 2. scan for every device that answers. */
 	scan = scan_bus();
-	printk("  0x48 (TMP112) %s, 0x52 (RV-3028-C7) %s, 0x30 (OPTIGA) %s%s\n",
+	printk("  0x40 (TMP112) %s, 0x52 (RV-3028-C7) %s, 0x30 (OPTIGA) %s%s\n",
 	       scan.tmp112_present ? "PRESENT" : "missing",
 	       scan.rtc_present ? "PRESENT" : "missing",
 	       scan.optiga_present ? "PRESENT (unexpected -- check DNP population!)" : "absent",
@@ -211,132 +200,15 @@ int main(void)
 
 		rc = read_tmp112_milli_c_at(TMP112_ADDR, &milli_c);
 		if (rc == 0) {
-			tmp112_ok  = true;
-			tmp112_any = true;
-			printk("TMP112 @0x48: %d milli-degC (%s)\n",
+			tmp112_ok = true;
+			printk("TMP112 @0x40: %d milli-degC (%s)\n",
 			       milli_c,
 			       (milli_c >= 15000 && milli_c <= 35000)
 			           ? "plausible room-temperature reading"
 			           : "OUTSIDE the plausible 15..35 degC room range -- "
 			             "check the probe/environment, not necessarily a bug");
 		} else {
-			printk("TMP112 @0x48: read failed, rc=%d\n", rc);
-		}
-	}
-
-	/* 3a-bis. IDENTIFY WHAT IS AT TMP112_ALIAS_ADDR.
-	 *
-	 * BENCH RESULT 2026-09-05: 0x48 NACKs (rc=-5) while 0x40 ACKs and returns
-	 * 28312 milli-degC -- a plausible board temperature.
-	 *
-	 * The original theory was a rise-time fault: 0x48 and 0x40 differ only in
-	 * bit 3, so a slow SDA edge could make the part mis-sample its own address.
-	 * THAT THEORY IS NOT SUPPORTED by the measurements:
-	 *   - Raising the pads to drive-strength = <12> and slew-rate = "fast" did
-	 *     NOT bring 0x48 back.  A marginal edge should have improved.
-	 *   - Every failure is a clean -EIO NACK; there is not one -ETIMEDOUT and
-	 *     not one "User Abort" in the capture.
-	 *   - Decisively: address bits and DATA bits ride the same wire.  If bit 3
-	 *     of the address were being sampled low, the data bytes would corrupt
-	 *     too -- yet the temperature reads back clean and self-consistent.
-	 * So signal integrity is fine and the device really IS at 0x40; it is not
-	 * being mis-addressed.
-	 *
-	 * That leaves the address strap itself: the netlist has U20 = TMP112DIDPWR
-	 * with ADD0 tied to 0V, which the datasheet maps to 0x48 (ADD0 to V+ / SDA /
-	 * SCL give 0x49 / 0x4A / 0x4B -- none of them 0x40).  0x40 is not a legal
-	 * TMP112 strap address at all, so a part answering there has NOT been
-	 * proven to be the TMP112 the BOM calls out -- it could be a different
-	 * device, or the same device with something the netlist does not capture.
-	 * Confirmed on 2 of 2 modules tested (2026W36-0001, 2026W36-0003): this is
-	 * a BATCH property of the 2026W36 E1M-AEN803 build, not a fault on one
-	 * board, so a single-unit explanation does not fit the evidence either.
-	 * Reading the TMP112 configuration registers below narrows this without
-	 * guessing, but does not settle it -- see alp-sdk#1978. */
-	/* BENCH FINDING, alp-sdk#1978 -- confirmed on 2 of 2 modules tested
-	 * (2026W36-0001, 2026W36-0003): the declared TMP112 (TMP112_ADDR, 0x48)
-	 * does not answer; something at TMP112_ALIAS_ADDR (0x40) does, and
-	 * fingerprints TMP112-shaped: CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000
-	 * all equal the TMP112 power-on defaults, and it returns a plausible
-	 * temperature.
-	 *
-	 * That fingerprint does NOT prove identity.  0x40 is NOT a legal TMP112
-	 * address -- the datasheet strap table is ADD0->GND = 0x48, ADD0->V+ =
-	 * 0x49, ADD0->SDA = 0x4A, ADD0->SCL = 0x4B -- so a part that cannot be
-	 * strapped to 0x40 answering there is unexplained, not identified.  This
-	 * is a BATCH property of the 2026W36 build, so it is open work under
-	 * alp-sdk#1978, not a per-board continuity check to run first.  One
-	 * consequence: the stock CONFIG_TMP112 driver does not bind on these
-	 * modules, since it only ever probes the devicetree's 0x48.
-	 *
-	 * This is reported, not silently accepted: the summary below still names
-	 * the address the part actually answered on, so a module that behaves
-	 * differently from this batch stands out immediately. */
-	if (!scan.tmp112_present && scan.tmp112_alias_present) {
-		int32_t milli_c;
-
-		printk("0x%02x responded but 0x%02x did not -- probing 0x%02x as a TMP112\n",
-		       TMP112_ALIAS_ADDR,
-		       TMP112_ADDR,
-		       TMP112_ALIAS_ADDR);
-		rc = read_tmp112_milli_c_at(TMP112_ALIAS_ADDR, &milli_c);
-		if (rc == 0 && milli_c >= -40000 && milli_c <= 125000) {
-			uint8_t  ptr;
-			uint8_t  raw[2];
-			uint16_t cfg = 0U, tlo = 0U, thi = 0U;
-			bool     fp_ok = true;
-
-			printk("0x%02x: %d milli-degC (in the TMP112 -40..125 degC range)\n",
-			       TMP112_ALIAS_ADDR,
-			       milli_c);
-
-			/* FINGERPRINT, not a guess.  A plausible temperature alone proves
-			 * little -- many registers decode to a believable number.  The
-			 * TMP112 datasheet gives power-on defaults for three more
-			 * registers: Configuration (0x01) = 0x60A0, T_LOW (0x02) = 0x4B00,
-			 * T_HIGH (0x03) = 0x5000.  Matching those identifies the part. */
-			ptr = TMP112_REG_CONFIG;
-			fp_ok &= (i2c_write_read(i2c0, TMP112_ALIAS_ADDR, &ptr, 1U, raw, 2U) == 0);
-			cfg = fp_ok ? sys_get_be16(raw) : 0U;
-			ptr = TMP112_REG_TLOW;
-			fp_ok &= (i2c_write_read(i2c0, TMP112_ALIAS_ADDR, &ptr, 1U, raw, 2U) == 0);
-			tlo = fp_ok ? sys_get_be16(raw) : 0U;
-			ptr = TMP112_REG_THIGH;
-			fp_ok &= (i2c_write_read(i2c0, TMP112_ALIAS_ADDR, &ptr, 1U, raw, 2U) == 0);
-			thi = fp_ok ? sys_get_be16(raw) : 0U;
-
-			if (!fp_ok) {
-				printk("0x%02x: fingerprint reads failed -- identity NOT "
-				       "established.\n",
-				       TMP112_ALIAS_ADDR);
-			} else {
-				printk("0x%02x: CONFIG=0x%04x T_LOW=0x%04x T_HIGH=0x%04x "
-				       "(TMP112 defaults 0x60A0 / 0x4B00 / 0x5000)\n",
-				       TMP112_ALIAS_ADDR,
-				       cfg,
-				       tlo,
-				       thi);
-				tmp112_any = (tlo == 0x4B00U && thi == 0x5000U);
-				printk("0x%02x: %s\n",
-				       TMP112_ALIAS_ADDR,
-				       (tlo == 0x4B00U && thi == 0x5000U)
-				           ? "T_LOW/T_HIGH match the TMP112 defaults -- TMP112-shaped, "
-				             "but 0x40 is not a legal TMP112 strap address, so this "
-				             "does NOT prove identity; open work under alp-sdk#1978."
-				           : "registers do NOT match TMP112 defaults -- the part "
-				             "at this address is something else; do not assume the "
-				             "BOM.");
-			}
-		} else if (rc == 0) {
-			printk("0x%02x: read ok but %d milli-degC is outside the TMP112 -40..125 "
-			       "degC range -- identity NOT established.\n",
-			       TMP112_ALIAS_ADDR,
-			       milli_c);
-		} else {
-			printk("0x%02x: ACKed the scan but the register read failed, rc=%d -- "
-			       "identity NOT established.\n",
-			       TMP112_ALIAS_ADDR,
-			       rc);
+			printk("TMP112 @0x40: read failed, rc=%d\n", rc);
 		}
 	}
 
@@ -381,15 +253,12 @@ int main(void)
 		}
 	}
 
-	/* 4. verdict. */
-	if (tmp112_any && rtc_id_ok && rtc_ticked) {
-		printk("RESULT PASS: BRD_I2C (I2C0) scan found TMP112 + RV-3028-C7, "
-		       "both decoded, and the RTC oscillator is confirmed running%s\n",
-		       tmp112_ok ? ""
-		                 : " (NOTE: something TMP112-shaped answered at 0x40, not "
-		                   "the strapped 0x48 -- batch finding, alp-sdk#1978; "
-		                   "identity not yet proven, see the alias-probe block "
-		                   "above)");
+	/* 4. verdict: PASS is TMP112 answering at 0x40 and decoding, plus the
+	 * RTC answering at 0x52 with its seconds register advancing. */
+	if (tmp112_ok && rtc_id_ok && rtc_ticked) {
+		printk("RESULT PASS: BRD_I2C (I2C0) scan found TMP112 @0x40 and "
+		       "RV-3028-C7 @0x52, both decoded, and the RTC oscillator is "
+		       "confirmed running\n");
 	} else {
 		/* Deliberately does NOT blame the pull-ups.  Bench-measured
 		 * 2026-09-05: every non-response on this bus is a clean -EIO NACK,

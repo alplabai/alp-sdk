@@ -12,7 +12,7 @@ same part on the V2N through the alp-sdk chip driver instead.
 
 | Layer | What it owns |
 | --- | --- |
-| Board (`zephyr/boards/alp/e1m_aen801_m55_he/`) | BRD_I2C — SoC I2C0, `i2c@49010000`, `"snps,designware-i2c"`, pads P7_0 `I2C0_SDA_C` / P7_1 `I2C0_SCL_C` — **and** the `"ti,tmp112"` child node on it at `reg = <0x48>`. |
+| Board (`zephyr/boards/alp/e1m_aen801_m55_he/`) | BRD_I2C — SoC I2C0, `i2c@49010000`, `"snps,designware-i2c"`, pads P7_0 `I2C0_SDA_C` / P7_1 `I2C0_SCL_C` — **and** the `"ti,tmp112"` child node on it at `reg = <0x40>`. |
 | Driver | Upstream `drivers/sensor/ti/tmp112/`, binding `dts/bindings/sensor/ti,tmp112.yaml`. |
 | App (`src/main.c`) | `sensor_sample_fetch_chan()` + `sensor_channel_get()`. No I2C register pokes, no chip driver, no vendor header. |
 
@@ -69,53 +69,29 @@ not an ITCM RAM-run. For Flow C, add
    | `RESULT PARTIAL` | The sensor answers, but some fetches dropped or some values fell outside the band. |
    | `RESULT FAIL` | No `ti,tmp112` node bound, the device failed to initialise, or every fetch failed. |
 
-## The 0x48 / 0x40 address anomaly
+## Design address
 
-**The devicetree address is `0x48` and that is correct.** The
-E1M-AEN-2626-R2 netlist ties `U20` pin 3 (`ADD0`) to 0V, and the TMP112 strap
-table (TI SBOS397) maps `ADD0 → GND = 0x48`, `→ V+ = 0x49`, `→ SDA = 0x4A`,
-`→ SCL = 0x4B`.
-
-**Nothing answers at `0x48`. Something answers at `0x40` instead — confirmed
-on 2 of 2 modules tested (`2026W36-0001`, `2026W36-0003`).** This is a
-**batch** property of the 2026W36 E1M-AEN803 build, not a defect on one
-module — tracked as **alp-sdk#1978**. Whatever is at `0x40` fingerprints
-TMP112-shaped on both units (`CONFIG=0x60a0`, `T_LOW=0x4b00`, `T_HIGH=0x5000`,
-reading a plausible temperature), but `0x40` is **not a legal TMP112 strap
-address** (the part only straps to `0x48`/`0x49`/`0x4A`/`0x4B`), so that
-fingerprint does **not** prove the part at `0x40` is a TMP112. The honest
-state: the declared part does not answer where it should, something answers
-at an address the part cannot be strapped to, and identifying it is open
-work under alp-sdk#1978. One consequence: the stock `CONFIG_TMP112` driver
-does not bind on these modules, because it only ever probes the devicetree's
-`0x48`.
-
-So when the sensor does not respond, this example prints an actionable
-diagnostic naming `0x40` and alp-sdk#1978, rather than sending you to inspect
-one board's solder joints — with a batch-wide finding, "go check this
-module" is not the honest next step. It deliberately does **not** silently
-probe `0x40` and carry on: `0x40` has not been proven to be a TMP112 at all,
-and quietly falling back to an unidentified device would hide the open
-question instead of reporting it. If you want to see what is really on the
-bus, run [`aen-brd-i2c-scan`](../aen-brd-i2c-scan), which scans every 7-bit
-address and fingerprints whatever answers.
-
-Do not change the devicetree to `0x40` — `0x40` is not a legal TMP112
-address, so pointing `tmp112@48` there would tell the driver to treat an
-unidentified device as a TMP112 before alp-sdk#1978 has established what it
-actually is.
+The E1M-AEN-2626-R2 components CSV specifies `U20` as the exact orderable MPN
+`TMP112DIDPWR`, with pin 3 (`ADD0`) tied to 0V. Per TI **SBOS473L p.44**
+(package option addendum), `TMP112DIDPWR` is **X2SON (DPW), 5 pins** only —
+no SOT563-6 orderable carries that MPN (the SOT563-6 parts are
+`TMP112AIDRLR` / `TMP112BIDRLR` / `TMP112NAIDRLR`). Per TI **SBOS473L Table
+7-4**, the X2SON-5 "Address Variant Only" `TMP112D` row maps
+`ADD0 → GND = 0x40` (`→ V+ = 0x41`, `→ SDA = 0x42`, `→ SCL = 0x43`) — so
+`0x40` is the address, and the devicetree node is `tmp112@40`.
 
 ## Expected output
 
 ```
 === aen-temp-sensor: on-module TMP112 via the Zephyr sensor API ===
-TMP112 "tmp112@48" ready at devicetree address 0x48 (design address, U20 ADD0 tied to 0V)
+TMP112 "tmp112@40" ready at devicetree address 0x40 (U20's X2SON-5 package, ADD0 tied to 0V -- SBOS473L Table 7-4)
 taking 8 samples 500 ms apart ...
-  sample 1/8: 28062 milli-degC
+  sample 1/8: 27687 milli-degC
   ...
-RESULT PASS: 8/8 TMP112 samples read at 0x48, all within the plausible indoor band (plausibility check, not an accuracy claim)
+RESULT PASS: 8/8 TMP112 samples read at 0x40, all within the plausible indoor band (plausibility check, not an accuracy claim)
 ```
 
 > **NOT YET BENCH-RUN.** The temperature read itself has been proven on
-> 2626-R2 silicon by `aen-brd-i2c-scan` (raw register read, 28.062 °C); this
-> app's upstream-driver path is build-verified only until it gets a bench slot.
+> 2626-R2 silicon by `aen-brd-i2c-scan` (raw register read at `0x40`, 27.687 °C
+> on 2026-09-07, serial `2026W36-0002`); this app's upstream-driver path is
+> build-verified only until it gets a bench slot.

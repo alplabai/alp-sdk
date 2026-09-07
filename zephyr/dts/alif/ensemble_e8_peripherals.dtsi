@@ -494,9 +494,13 @@
 	 *
 	 *   U21 RV-3028-C7 (DNP=0) ACKs at 0x52; ID register 0x28 = 0x44 and the
 	 *   seconds register advanced 0x01 -> 0x02, so the oscillator is running.
-	 *   U20 TMP112 (DNP=0, ADD0 to 0V) fingerprints as a TMP112 on three of three
-	 *   registers -- CONFIG 0x60a0, T_LOW 0x4b00, T_HIGH 0x5000, the datasheet
-	 *   power-on defaults -- reading 28.062 degC.
+	 *   Only the upper nibble of 0x28 is an identity claim: per the RV-3028-C7
+	 *   Application Manual Rev. 1.4 Sec. 3.14 the byte splits into HID [7:4]
+	 *   (hardware identification) and VID [3:0] (production-line version), so a
+	 *   check should mask -- (id & 0xF0) == 0x40 -- not require the full 0x44.
+	 *   U20 TMP112 (DNP=0, ADD0 to 0V) ACKs at 0x40 and fingerprints as a TMP112
+	 *   on three of three registers -- CONFIG 0x60a0, T_LOW 0x4b00, T_HIGH
+	 *   0x5000, the datasheet power-on defaults -- reading 28.062 degC.
 	 *   IC1 OPTIGA Trust M is DNP=1 on this batch: silence at 0x30 is the
 	 *   negative control, not a fault, and it must not appear in a shipped DT.
 	 *   Every non-response was a clean rc=-5 (-EIO) NACK: ZERO -ETIMEDOUT and
@@ -505,11 +509,13 @@
 	 * R93/R94 stay DNP and are NOT needed: BRD_I2C is ISOLATED from the
 	 * I2C2/EEPROM segment by design, so the EEPROM is not on this bus.
 	 *
-	 * ADDRESS: the shipped DT uses the DESIGN address 0x48 for the TMP112.  One
-	 * bench unit answered at 0x40 instead -- not a legal TMP112 address (ADD0
-	 * strap table: GND 0x48, V+ 0x49, SDA 0x4A, SCL 0x4B), so that unit's ADD0 is
-	 * not actually at GND (suspected open joint on U20 pin 3).  A per-unit board
-	 * defect; the EXAMPLES tolerate and report it, the DT must not encode it.
+	 * ADDRESS: the DT declares 0x40 for the TMP112, and that IS the design
+	 * address for the part this board specifies.  Per TI SBOS473L p.44
+	 * (package option addendum), the BOM's exact orderable MPN for U20,
+	 * TMP112DIDPWR, is X2SON (DPW), 5 pins ONLY -- no SOT563-6 orderable
+	 * carries that MPN.  Per SBOS473L Table 7-4, the X2SON-5 "Address
+	 * Variant Only" row straps ADD0->GND to 0x40 (the SOT563-6 row,
+	 * ADD0->GND = 0x48, does not apply to this MPN).
 	 *
 	 * Customer-facing writeup, including the unpopulated-VBACKUP and
 	 * carrier-only-RTC_CLKOUT limits: docs/soms/aen.md, "On-module housekeeping

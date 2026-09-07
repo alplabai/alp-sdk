@@ -14,6 +14,13 @@
 #define TCAL9538_REG_OUTPUT 0x01u
 #define TCAL9538_REG_POL    0x02u
 #define TCAL9538_REG_CFG    0x03u
+/* Agile IO block -- TCAL9538-only, absent on the TCA6408A/PCA9538 alt
+ * part.  SCPS280B Table 7-3 (p.24). */
+#define TCAL9538_REG_INPUT_LATCH 0x42u
+#define TCAL9538_REG_PULL_EN     0x43u
+#define TCAL9538_REG_PULL_SEL    0x44u
+#define TCAL9538_REG_IRQ_MASK    0x45u
+#define TCAL9538_REG_IRQ_STATUS  0x46u
 
 static alp_status_t reg_read(tcal9538_t *ctx, uint8_t reg, uint8_t *val_out)
 {
@@ -48,6 +55,13 @@ alp_status_t tcal9538_init(tcal9538_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit)
 	memset(ctx, 0, sizeof(*ctx));
 	ctx->bus  = bus;
 	ctx->addr = (addr_7bit == 0) ? TCAL9538_I2C_ADDR_BASE : addr_7bit;
+	/* No ID register exists on either part, so the init-time strap
+	 * range is the only signal for whether the 0x40+ Agile IO block
+	 * (latched interrupts, pull config) is present.  Recomputed from
+	 * the resolved ctx->addr (not the raw addr_7bit param) so the
+	 * addr_7bit==0 fallback also lands in the TCAL9538 range. */
+	ctx->has_latched_irq =
+	    ctx->addr >= TCAL9538_I2C_ADDR_BASE && ctx->addr <= TCAL9538_I2C_ADDR_BASE + 3u;
 
 	/* Probe + read back the configuration / output state so the
      * cached values stay coherent if the chip was already in a
@@ -128,6 +142,61 @@ alp_status_t tcal9538_write_all(tcal9538_t *ctx, uint8_t port)
 	alp_status_t s = reg_write(ctx, TCAL9538_REG_OUTPUT, port);
 	if (s == ALP_OK) ctx->out_cache = port;
 	return s;
+}
+
+alp_status_t tcal9538_set_input_latch(tcal9538_t *ctx, uint8_t mask)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (!ctx->has_latched_irq) return ALP_ERR_NOSUPPORT;
+	return reg_write(ctx, TCAL9538_REG_INPUT_LATCH, mask);
+}
+
+alp_status_t tcal9538_set_interrupt_mask(tcal9538_t *ctx, uint8_t mask)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (!ctx->has_latched_irq) return ALP_ERR_NOSUPPORT;
+	return reg_write(ctx, TCAL9538_REG_IRQ_MASK, mask);
+}
+
+alp_status_t tcal9538_get_interrupt_status(tcal9538_t *ctx, uint8_t *status_out)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (status_out == NULL) return ALP_ERR_INVAL;
+	if (!ctx->has_latched_irq) return ALP_ERR_NOSUPPORT;
+	/* Register 0x46 is read-only and NOT clear-on-read (SCPS280B
+	 * p.26) -- the caller still has to read the input port register
+	 * (0x00), via tcal9538_get()/tcal9538_read_all(), to clear the
+	 * condition and let \INT de-assert. */
+	return reg_read(ctx, TCAL9538_REG_IRQ_STATUS, status_out);
+}
+
+alp_status_t tcal9538_set_pull(tcal9538_t *ctx, uint8_t pin, tcal9538_pull_t pull)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (pin > 7) return ALP_ERR_INVAL;
+	if (!ctx->has_latched_irq) return ALP_ERR_NOSUPPORT;
+	uint8_t      bit = (uint8_t)(1u << pin);
+	uint8_t      en  = 0;
+	alp_status_t s   = reg_read(ctx, TCAL9538_REG_PULL_EN, &en);
+	if (s != ALP_OK) return s;
+	uint8_t sel = 0;
+	s           = reg_read(ctx, TCAL9538_REG_PULL_SEL, &sel);
+	if (s != ALP_OK) return s;
+
+	if (pull == TCAL9538_PULL_NONE) {
+		en &= (uint8_t)~bit;
+	} else {
+		en |= bit;
+		if (pull == TCAL9538_PULL_UP) {
+			sel |= bit;
+		} else {
+			sel &= (uint8_t)~bit;
+		}
+	}
+
+	s = reg_write(ctx, TCAL9538_REG_PULL_EN, en);
+	if (s != ALP_OK) return s;
+	return reg_write(ctx, TCAL9538_REG_PULL_SEL, sel);
 }
 
 void tcal9538_deinit(tcal9538_t *ctx)

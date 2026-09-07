@@ -49,7 +49,7 @@ single carrier-side component. It is **SoC I2C0, function C** -- `P7_0`
 | Part | 7-bit address | Fitted on this batch | Upstream driver |
 |------|---------------|----------------------|-----------------|
 | Micro Crystal **RV-3028-C7** RTC (U21) | `0x52` | yes | `CONFIG_RTC_RV3028`, compatible `microcrystal,rv3028` |
-| TI **TMP112** temperature sensor (U20) | `0x48` (ADD0 strapped to GND) | yes | `CONFIG_TMP112`, compatible `ti,tmp112` |
+| TI **TMP112** temperature sensor (U20) | `0x40` | yes | `CONFIG_TMP112`, compatible `ti,tmp112` |
 | Infineon **OPTIGA Trust M** (IC1) | `0x30` | **no -- DNP** | n/a |
 
 The bus is **isolated**: the two 0 Ω jumpers that would bridge it into the
@@ -130,7 +130,7 @@ Worked examples:
 * [`examples/aen/aen-rtc-alarm`](../../examples/aen/aen-rtc-alarm) -- set the
   time, arm an alarm, take the interrupt.
 * [`examples/aen/aen-temp-sensor`](../../examples/aen/aen-temp-sensor) -- read
-  the temperature in a loop, and report the `0x40` anomaly below if it sees it.
+  the temperature in a loop.
 
 [`examples/aen/aen-brd-i2c-scan`](../../examples/aen/aen-brd-i2c-scan) is the
 bench probe that proved the bus. Read it for evidence, not as an application
@@ -186,29 +186,6 @@ event input (U21 pin 8) comes from E1M edge pin **O2**, with `R43` (100 kΩ
 to `+1V8`). Nothing on the module drives it; timestamping an event there is
 a carrier design decision.
 
-**4. The declared TMP112 does not answer; something else answers instead.**
-Nothing ACKs at the declared `0x48`; a device ACKs at `0x40`. Confirmed on
-2 of 2 modules tested (`2026W36-0001`, `2026W36-0003`), so this is a batch
-property of the 2026W36 E1M-AEN803 build, not a defect on one module --
-tracked as alp-sdk#1978. Whatever sits at `0x40` fingerprints TMP112-shaped
-on both units (`CONFIG` `0x60a0`, `T_LOW` `0x4b00`, `T_HIGH` `0x5000`,
-reading a plausible temperature), but `0x40` is not a legal TMP112 address
-at all -- the strap table is ADD0→GND `0x48`, →V+ `0x49`, →SDA `0x4A`,
-→SCL `0x4B` -- so that fingerprint does not prove the part at `0x40` is a
-TMP112. The honest state: the declared part does not answer where it should,
-something answers at an address the part cannot be strapped to, and
-identifying it is open work under alp-sdk#1978. One consequence: the stock
-`CONFIG_TMP112` driver does not bind on these modules. The design address is
-`0x48` and the shipped devicetree uses `0x48`.
-
-> **How to spot it:** nothing ACKs at `0x48`, but a device ACKs at `0x40` --
-> on every 2026W36 E1M-AEN803 module tested so far. This is open work under
-> alp-sdk#1978, not a per-board continuity check: do not assume a bad joint
-> on U20 pin 3 until the part at `0x40` is actually identified. Do not
-> re-point the devicetree at `0x40` -- it is not a legal TMP112 address, so
-> doing so would bind the driver to a device whose identity is still
-> unknown.
-
 ### Bench evidence
 
 Measured 2026-09-05 on an E1M-AEN801 **2626-R2** module (Flow A, cold-cycle
@@ -217,15 +194,17 @@ proven), `i2c0` at 100 kHz:
 * **The bus works on the SoC's internal pull-up alone.** No external
   pull-up resistor is fitted anywhere on the net, and none is needed:
   `R93`/`R94` stay DNP.
-* **RV-3028-C7 @ `0x52`:** ACK. ID register `0x28` reads `0x44`; the
-  seconds register advanced `0x01` → `0x02`, so the oscillator runs.
-* **TMP112**, declared at `0x48` (design address; see limitation 4): clean
-  NACK (`rc=-5`). Something ACKs instead at `0x40` and fingerprints
-  TMP112-shaped (`CONFIG` `0x60a0`, `T_LOW` `0x4b00`, `T_HIGH` `0x5000`),
-  reading 28.062 °C -- confirmed on 2 of 2 modules tested (`2026W36-0001`,
-  `2026W36-0003`), a **batch** property of the 2026W36 build. `0x40` is not
-  a legal TMP112 strap address, so this is not yet a positive identification
-  -- tracked under alp-sdk#1978.
+* **RV-3028-C7 @ `0x52`:** ACK. ID register `0x28` reads `0x44` -- per the
+  RV-3028-C7 Application Manual Rev. 1.4 §3.14 the high nibble (HID `0x4`)
+  is the hardware-identity field and matches; the low nibble (VID `0x4`) is
+  a production-line code, not an identity claim. The seconds register
+  advanced `0x01` → `0x02`, so the oscillator runs.
+* **TMP112 @ `0x40`:** ACK. `0x40` is the design address for U20's exact
+  orderable MPN (`TMP112DIDPWR`, X2SON-5 package per SBOS473L p.44 + Table
+  7-4, ADD0→GND). Reads back a plausible temperature (28.062 °C on
+  2026-09-05; 27.687 °C on 2026-09-07, serial `2026W36-0002`), and
+  fingerprints TMP112-shaped (`CONFIG` `0x60a0`, `T_LOW` `0x4b00`, `T_HIGH`
+  `0x5000` -- the datasheet power-on defaults).
 * **Every non-response was a clean `rc=-5` (`-EIO`) NACK** -- zero
   `-ETIMEDOUT`, zero `User Abort on i2c@49010000` in the whole run. That
   distinction matters when you debug this bus: a NACK means the controller
