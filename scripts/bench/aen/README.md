@@ -33,7 +33,7 @@ error out if `SETOOLS_DIR` is unset. Flow C (`ram-run.sh`), `reread.sh`, and
 #    layer; override any host-specific value by exporting it first.
 export ZEPHYR_SDK_INSTALL_DIR=<your-zephyr-sdk>     # for the arm-zephyr-eabi tools
 export SETOOLS_DIR=<...>/app-release-exec-linux     # Flow A/D only (license-gated)
-export LG_PLACE=e1m-aen-evk-01                      # the bench board, addressed by labgrid PLACE NAME
+export LG_PLACE=<your-bench-place>                  # the bench board, by PLACE NAME (resolved via labgrid)
 
 # 2. Build an app for the AEN801 M55-HE target.
 scripts/bench/aen/build.sh examples/aen/aen-gpio-bench
@@ -44,22 +44,22 @@ scripts/bench/aen/flash-run.sh   "$BENCH_ROOT/build/aen-gpio-bench"   # Flow A
 scripts/bench/aen/ram-run.sh     "$BENCH_ROOT/build/aen-gpio-bench"   # Flow C
 ```
 
-## `LG_PLACE` — the bench board is addressed by labgrid PLACE NAME (alp-sdk#2032)
+## `LG_PLACE` — the bench board is addressed by PLACE NAME, not a raw device path (alp-sdk#2032)
 
 **The maintainer's hard rule: never touch a bench connection by hand — every
 connection goes through labgrid, addressed by PLACE NAME, never a raw device
-path.** `export LG_PLACE=<labgrid-place-name>` (e.g. `e1m-aen-evk-01`) before
-sourcing `bench-env.sh` (directly, or via any helper that sources it) and
-`SE_UART` plus the console and SWD-probe addresses are all resolved LIVE from
-`labgrid-client -p "$LG_PLACE" show` — never from a hand-maintained
-device-path table. This is not optional hygiene: the 2026-09-07 incident
-happened because a stale table had the SE-UART and app-console device paths
-for one board **swapped**, and pointed a J-Link selector at a **different**
-board's probe entirely (all three probes on this bench share one cloned OEM
-serial, so a serial alone cannot tell them apart).
+path.** `export LG_PLACE=<your-bench-place>` before sourcing `bench-env.sh`
+(directly, or via any helper that sources it) and `SE_UART` plus the console
+and SWD-probe addresses are all resolved LIVE from `labgrid-client -p
+"$LG_PLACE" show` — never from a hand-maintained device-path table. This is
+not optional hygiene: the 2026-09-07 incident happened because a stale table
+had the SE-UART and app-console device paths for one board **swapped**, and
+pointed a J-Link selector at a **different** board's probe entirely (all
+three probes on this bench share one cloned OEM serial, so a serial alone
+cannot tell them apart).
 
 ```sh
-export LG_PLACE=e1m-aen-evk-01     # you must already hold this place's reservation
+export LG_PLACE=<your-bench-place>     # you must already hold this place's reservation
 source scripts/bench/aen/bench-env.sh
 echo "$SE_UART $LG_CONSOLE_HOST:$LG_CONSOLE_PORT $LG_SWD_PATH"
 ```
@@ -83,7 +83,7 @@ a raw `SE_UART` exported alongside it is ignored, with a note saying so.
 ### Known limitation: J-Link probe selection is not yet routed through labgrid
 
 `board-farm/bin/jlink-run.sh <place>` is the safe way to drive a probe by
-labgrid PLACE NAME directly — it resolves the probe's real USB path from
+PLACE NAME directly (labgrid-resolved) — it resolves the probe's real USB path from
 `labgrid-client show` (`bench-env.sh`'s resolver above follows the same
 parsing approach) and masks the bench's other J-Links in a private mount
 namespace before invoking `JLinkExe`, which is the only way to disambiguate
@@ -136,7 +136,7 @@ by exporting before you invoke a helper.
 | `ZEPHYR_SDK_INSTALL_DIR` | *(none)* | Zephyr SDK root; the `arm-zephyr-eabi-*` tools are resolved from here, else off `PATH`. |
 | `HAL_ALIF_DIR` | `west list hal_alif` | hal_alif module path (passed as an extra Zephyr module). **TBD fallback:** export it if `west list` can't resolve it — we do not invent a path. |
 | `AEN_BOARD` | `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` | Qualified board target. |
-| `LG_PLACE` | *(none)* | **Primary input (alp-sdk#2032).** The bench board, addressed by labgrid PLACE NAME (e.g. `e1m-aen-evk-01`) — you must already hold its reservation. Resolves `SE_UART`, `LG_CONSOLE_DEV`, `LG_CONSOLE_HOST`, `LG_CONSOLE_PORT` and `LG_SWD_PATH` LIVE from `labgrid-client -p "$LG_PLACE" show`. No default place; wins over a raw `SE_UART` if both are set. See "`LG_PLACE`" above. |
+| `LG_PLACE` | *(none)* | **Primary input (alp-sdk#2032).** The bench board, addressed by PLACE NAME (`<your-bench-place>`) — you must already hold its reservation. Resolves `SE_UART`, `LG_CONSOLE_DEV`, `LG_CONSOLE_HOST`, `LG_CONSOLE_PORT` and `LG_SWD_PATH` LIVE from `labgrid-client -p "$LG_PLACE" show`. No default place; wins over a raw `SE_UART` if both are set. See "`LG_PLACE`" above. |
 | `LG_COORDINATOR` | `100.64.0.1:20408` | labgrid coordinator address used to resolve `LG_PLACE`. |
 | `SE_UART` | *(none)* | SE-UART serial device for Flow A (`<your-serial-device>`; host-specific). **Resolved automatically when `LG_PLACE` is set** (the normal path); exporting it directly with no `LG_PLACE` is the WARNED off-labgrid escape hatch (see above) — `erase-storage.sh`'s BENCH-VERIFIED run is the documented case for it. Also required by `flash-update-log-dual.sh` and `flash-update-log-firewall-probe.sh` (Flow D, otherwise no SE-UART dependency): both now call the shared `bench_atoc_replace_guard()` (#2025), which queries the resident ATOC over `$SE_UART` before their `loadbin` write — unset `SE_UART` aborts them (exit 5) unless `--replace-atoc` is also passed. |
 | `LG_CONSOLE_DEV` / `LG_CONSOLE_HOST` / `LG_CONSOLE_PORT` | *(none)* | Read-only, `LG_PLACE`-resolved: the app console's exporter-local device path and ser2net `host`/`port`. Not yet consumed by a helper here — read the labgrid `console` resource directly, or via these, until one is wired up. |
@@ -186,7 +186,7 @@ export SETOOLS_DIR=<...>/app-release-exec-linux   # license-gated; not shipped
 # alif_flash.py is a separate west-runner (Python), not bench-env.sh -- it
 # reads $SE_UART directly and has no LG_PLACE resolution of its own, so
 # source bench-env.sh first to populate SE_UART from labgrid in THIS shell:
-export LG_PLACE=e1m-aen-evk-01
+export LG_PLACE=<your-bench-place>
 source scripts/bench/aen/bench-env.sh
 west flash                                        # -> alif_flash -> SETOOLS, using the resolved $SE_UART
 ```

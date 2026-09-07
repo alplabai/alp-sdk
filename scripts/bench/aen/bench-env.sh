@@ -94,7 +94,7 @@ export HAL_ALIF_DIR
 export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he}"
 
 # --------------------------------------------------------------------
-# Labgrid PLACE resolution (alp-sdk#2032)
+# LG_PLACE resolution (alp-sdk#2032)
 # --------------------------------------------------------------------
 # The maintainer's hard rule: never touch a bench connection by hand --
 # every connection goes through labgrid, addressed by PLACE NAME. A
@@ -104,8 +104,8 @@ export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he}"
 # and SWD probe values are resolved live from labgrid, never guessed.
 #
 # NO default place -- if LG_PLACE is unset we do not fall back to
-# guessing e1m-aen-evk-01 or any other board. The raw SE_UART variable
-# stays available as an explicit, WARNED escape hatch for genuinely
+# guessing any particular board. The raw SE_UART variable stays
+# available as an explicit, WARNED escape hatch for genuinely
 # off-labgrid work (erase-storage.sh documents such a case); LG_PLACE
 # wins whenever both are set.
 export LG_COORDINATOR="${LG_COORDINATOR:-100.64.0.1:20408}"
@@ -214,7 +214,7 @@ bench_labgrid_resolve() {
 
 # SE_UART — the FT232R SE-UART device SETOOLS' app-write-mram talks to.
 #
-# LG_PLACE is the primary input (see "Labgrid PLACE resolution" above):
+# LG_PLACE is the primary input (see "LG_PLACE resolution" above):
 # set it and SE_UART is resolved live from labgrid's `seuart` resource,
 # never guessed from a device-path table. LG_PLACE wins when both are
 # set -- a raw SE_UART is then IGNORED, not merged.
