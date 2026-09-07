@@ -33,7 +33,8 @@ error out if `SETOOLS_DIR` is unset. Flow C (`ram-run.sh`), `reread.sh`, and
 #    layer; override any host-specific value by exporting it first.
 export ZEPHYR_SDK_INSTALL_DIR=<your-zephyr-sdk>     # for the arm-zephyr-eabi tools
 export SETOOLS_DIR=<...>/app-release-exec-linux     # Flow A/D only (license-gated)
-export SE_UART=<your-serial-device>                 # Flow A only
+export LG_COORDINATOR=<host>:<port>                 # your labgrid coordinator; no default
+export LG_PLACE=<your-bench-place>                  # the bench board, by PLACE NAME (resolved via labgrid)
 
 # 2. Build an app for the AEN801 M55-HE target.
 scripts/bench/aen/build.sh examples/aen/aen-gpio-bench
@@ -44,6 +45,73 @@ scripts/bench/aen/flash-run.sh   "$BENCH_ROOT/build/aen-gpio-bench"   # Flow A
 scripts/bench/aen/ram-run.sh     "$BENCH_ROOT/build/aen-gpio-bench"   # Flow C
 ```
 
+## `LG_PLACE` — the bench board is addressed by PLACE NAME, not a raw device path (alp-sdk#2032)
+
+**The maintainer's hard rule: never touch a bench connection by hand — every
+connection goes through labgrid, addressed by PLACE NAME, never a raw device
+path.** `export LG_PLACE=<your-bench-place>` before sourcing `bench-env.sh`
+(directly, or via any helper that sources it) and `SE_UART` plus the console
+and SWD-probe addresses are all resolved LIVE from `labgrid-client -p
+"$LG_PLACE" show` — never from a hand-maintained device-path table. This is
+not optional hygiene: the 2026-09-07 incident happened because a stale table
+had the SE-UART and app-console device paths for one board **swapped**, and
+pointed a J-Link selector at a **different** board's probe entirely (all
+three probes on this bench share one cloned OEM serial, so a serial alone
+cannot tell them apart).
+
+```sh
+export LG_COORDINATOR=<host>:<port>    # your labgrid coordinator; no default
+export LG_PLACE=<your-bench-place>     # you must already hold this place's reservation
+source scripts/bench/aen/bench-env.sh
+echo "$SE_UART $LG_CONSOLE_HOST:$LG_CONSOLE_PORT $LG_SWD_PATH"
+```
+
+`bench-env.sh` also verifies the reservation is actually held (`show`'s
+`acquired:` must be non-empty) before resolving anything — a lapsed or never
+taken reservation aborts loudly (non-zero from the `source`), it never
+silently resolves whatever labgrid last remembered. There is **no default
+place**: leaving `LG_PLACE` unset never falls back to guessing a board.
+
+### The raw device-path variables are an escape hatch, not the normal path
+
+`SE_UART` (and `JLINK_SN`) can still be exported directly for genuinely
+off-labgrid work — `erase-storage.sh`'s BENCH-VERIFIED run documents exactly
+that case. Doing so **without** `LG_PLACE` set now prints an explicit warning
+naming the hazard (stale paths, wrong board, `/dev/ttyUSBn` numbering is
+enumeration-order-assigned and not stable across a reboot/replug) — it is
+still honoured, just no longer silent. `LG_PLACE` wins whenever both are set:
+a raw `SE_UART` exported alongside it is ignored, with a note saying so.
+
+### Known limitation: J-Link probe selection is not yet routed through labgrid
+
+**The hazard, plainly: every `JLinkExe` invocation in this directory still
+selects its probe with `-SelectEmuBySN`, which CANNOT tell this bench's three
+J-Link probes apart — all three answer the same cloned OEM serial
+(`000603000869`). A script on this path can silently attach to a DIFFERENT
+board than the one you hold the labgrid reservation for**, with no error —
+the only thing standing between that and a wrong-board MRAM write or RAM-run
+is the SW-DP IDR safety gate (`bench_jlink_assert_aen_dpidr`, below), which
+catches it only after the fact (probe already opened) and only for the boards
+its DPIDR table knows about.
+
+`board-farm/bin/jlink-run.sh <place>` is the safe way to drive a probe by
+PLACE NAME directly (labgrid-resolved) — it resolves the probe's real USB path from
+`labgrid-client show` (`bench-env.sh`'s resolver above follows the same
+parsing approach) and masks the bench's other J-Links in a private mount
+namespace before invoking `JLinkExe`, which is the only way to disambiguate
+probes that share a cloned OEM serial. The helpers in **this directory** do
+**not** route their own `JLinkExe` invocations through it yet: every one of
+them calls `JLinkExe ... -CommanderScript <file>`, a flag `jlink-run.sh`
+does not recognise (it looks for `-CommandFile` to inject a firmware-update
+suppression ahead of it), and each helper issues several separate `JLinkExe`
+calls per run (preflight / write / boot / read) rather than the single
+pass-through invocation `jlink-run.sh` wraps. Converting all of that is a
+larger, separate change (tracked as follow-up) — until then, these helpers
+keep relying on `JLINK_SN` plus the SW-DP IDR safety gate
+(`bench_jlink_assert_aen_dpidr`, below) to catch a wrong-board attach, and
+`bench-env.sh` exports `LG_SWD_PATH` (the labgrid-resolved probe USB path,
+e.g. `3-4.1`) for anyone driving `jlink-run.sh` by hand in the meantime.
+
 ## Scripts
 
 | Script | Flow | What it does |
@@ -53,10 +121,10 @@ scripts/bench/aen/ram-run.sh     "$BENCH_ROOT/build/aen-gpio-bench"   # Flow C
 | `flash-jlink.sh [--atoc-unqueryable] <build-dir> [read-bytes]` | **D** | J-Link **direct MRAM flash** (no SE-UART). `app-gen-toc` builds the signed ATOC, the part-number device profile unlocks the built-in Alif MRAM loader, `loadbin`/`verifybin` write the package at its per-build start address (parsed from `app-package-map.txt`), `RSetType 2`/`r`/`g` pin-resets so the SE reloads it, then a generic-device RAM-console read-back. **`app-write-mram -p`/`loadbin` REPLACE the whole ATOC (#2025), and Flow D has no SE-UART to query what's resident first — refuses (exit 8) unless `--atoc-unqueryable` is passed to acknowledge that any other resident boot entry (an A32 chain, an HP app) will be silently delisted.** This is a DIFFERENT flag from Flow A's `--replace-atoc` (`flash-run.sh` et al.) and the two must never be merged or aliased: `--atoc-unqueryable` says "I cannot check", `--replace-atoc` says "I checked and I still want to replace it" — an operator on a no-SE-UART slot passes `--atoc-unqueryable` on every run, and that habit must not also silence the Flow A guard on a board where the resident TOC genuinely can be read. **Gates on the `verifybin` outcome (#1488): exit 3** when the transcript reports `verify failed`/`verification failed`/`mismatch`, and **exit 3** when it carries no `verify successful` line at all (the verify never ran) — either way the read-back is skipped and the board must not be treated as flashed. Also **exit 4** (DPIDR preflight says this is not the AEN E8), **exit 2** (the part-number device profile could not connect), **exit 7** (flash verified, but the post-boot console read never opened the probe). |
 | `flash-jlink-hp.sh [--atoc-unqueryable] <build-dir> [sram0_beacon_addr]` | **D** | J-Link **direct MRAM flash for the M55-HP core** (no SE-UART) — same shape as `flash-jlink.sh` but authors an `M55_HP` ATOC (`loadAddress 0x50000000`) and reads back a liveness beacon from SRAM0 instead of the RAM console. **Same `--atoc-unqueryable` requirement, same exit 8, same distinction from `--replace-atoc` as `flash-jlink.sh` above (#2025)** — an HP ATOC replaces whatever was resident, including a slot0 image. **Gates on the `verifybin` outcome (#1343): exit 3** on a failed verify or none reported. Also **exit 4** (DPIDR gate), **exit 2** (part-number profile could not connect), **exit 7** (beacon read-back never opened the probe). |
 | `flash-jlink-mramxip.sh [--atoc-unqueryable] <build-dir> [read-bytes]` | **D** | J-Link **MRAM-XIP / slot0 two-blob** flash for an app linked into MRAM slot0 (a real NPU model that overflows ITCM). Writes the app → `0x80010000` + the signed ATOC → its parsed address; the slot0 link comes from the board `_defconfig` (`CONFIG_USE_DT_CODE_PARTITION=y`), so a plain build already qualifies — a `0x8000xxxx` vector means a Flow C fragment/overlay is still layered. See the script header for the gotcha on returning to ITCM apps afterwards. **Same `--atoc-unqueryable` requirement, same exit 8, same distinction from `--replace-atoc` as `flash-jlink.sh` above (#2025).** Open question recorded in the script and in `changelog.d/`: whether `maintenance -c $SE_UART -opt gettoc` itself resets the target — if it does, this script's own pre-programming halt gate (exit 5, AP[3] absence after any reset) would fail regardless of SE-UART availability, so the query-based guard cannot front this script until that's verified on silicon. |
-| `flash-run.sh <build-dir> [read-bytes]` | **A** | **Production MRAM flash** over the SE-UART. Stages the signed-ATOC JSON, `app-gen-toc` + `app-write-mram` burn over `$SE_UART` (SES auto-enters maintenance, resets + boots), then a J-Link read-back of the RAM console. |
-| `flash-run-dualcore.sh <hp-build-dir> <he-build-dir>` | **A** | **Dual-core deferred-TOC** two-entry ATOC over the SE-UART: `ALP-HP` boots normally (`["load","boot"]`), `ALP-HE` is flagged `["load","boot","deferred"]` so the SES skips its boot-time release and the HP image un-defers + releases it at runtime with `se_service_process_toc_entry()` (service 500) via `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC`. Fixes the `["load"]`-only pattern, which reports "Loaded, Verified" while the ITCM destination holds no image and locks up the peer on release — see the script header and `docs/aen-bench-bringup.md`. |
-| `flash-update-log-firewall-probe.sh [--package-only] <he-build-dir>` | **D** | Firmware-update-log HE direct-write MRAM firewall probe. Builds an app-only ATOC by default so any already-provisioned DEVICE/firewall policy is preserved; set `ALP_AEN_INCLUDE_DEVICE_CONFIG=yes` only for deliberate DEVICE replacement, and `ALP_AEN_DEVICE_CONFIG_JSON=<file>` to name a board-specific config already staged under SETOOLS `build/config`. **Gates on the `verifybin` outcome (#1488): exit 3** on a failed verify, **exit 3** when no `verify successful` line is present. **DATA LOSS at either exit 3:** `loadbin`, `verifybin`, `RSetType 2`, `r`, `g` are one CommanderScript JLinkExe has already finished, and the `HE-PROBE` ATOC entry is `"flags": ["load", "boot"]` — the board has already been pin-reset, booted and released, so `alp_ulog_partition` may ALREADY have been overwritten by the HE probe. The gate suppresses the false "flash complete" report and the beacon read-back; it cannot prevent the write or the boot. Re-read the partition from a known-good state before trusting the `BASELINE_WORDS` captured earlier in the same run. |
-| `flash-update-log-dual.sh [--package-only] <hp-build-dir> <he-build-dir>` | **D** | Firmware-update-log dual-M55 package: HP owner boots first and releases HE client. Builds an app-only ATOC by default for the same firewall-policy reason as the probe helper. **Gates on the `verifybin` outcome (#1488): exit 3** on a failed verify, **exit 3** when no `verify successful` line is present. **DATA LOSS at either exit 3:** same one-CommanderScript shape as the firewall probe, and the `HP-OWNER` ATOC entry is `"flags": ["load", "boot"]` — the board has already been pin-reset and the HP owner booted and released the HE client, so `alp_ulog_partition` may ALREADY have been appended to by this unverified package. Re-read the partition from a known-good state before trusting the update log the run produced. |
+| `flash-run.sh [--replace-atoc] <build-dir> [read-bytes]` | **A** | **Production MRAM flash** over the SE-UART. Stages the signed-ATOC JSON, `app-gen-toc` + `app-write-mram` burn over `$SE_UART` (SES auto-enters maintenance, resets + boots), then a J-Link read-back of the RAM console. **GUARD (#2025, exit 5):** before the write, queries the resident ATOC (`maintenance -opt gettoc`) and refuses to proceed if any entry other than `DEVICE`/`ALP-HE` is resident, or if the query itself can't be verified — `app-write-mram -p` replaces the whole ATOC, not a merge. `--replace-atoc` opts out for an intentional replace. |
+| `flash-run-dualcore.sh [--replace-atoc] <hp-build-dir> <he-build-dir>` | **A** | **Dual-core deferred-TOC** two-entry ATOC over the SE-UART: `ALP-HP` boots normally (`["load","boot"]`), `ALP-HE` is flagged `["load","boot","deferred"]` so the SES skips its boot-time release and the HP image un-defers + releases it at runtime with `se_service_process_toc_entry()` (service 500) via `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC`. Fixes the `["load"]`-only pattern, which reports "Loaded, Verified" while the ITCM destination holds no image and locks up the peer on release — see the script header and `docs/aen-bench-bringup.md`. **GUARD (#2025, exit 5):** same resident-ATOC check as `flash-run.sh`, allowing this script's own `ALP-HP`/`ALP-HE` pair and refusing any other resident entry. `--replace-atoc` opts out. |
+| `flash-update-log-firewall-probe.sh [--package-only] [--replace-atoc] <he-build-dir>` | **D** | Firmware-update-log HE direct-write MRAM firewall probe. Builds an app-only ATOC by default so any already-provisioned DEVICE/firewall policy is preserved; set `ALP_AEN_INCLUDE_DEVICE_CONFIG=yes` only for deliberate DEVICE replacement, and `ALP_AEN_DEVICE_CONFIG_JSON=<file>` to name a board-specific config already staged under SETOOLS `build/config`. **GUARD (#2025, exit 5):** before the write, queries the resident ATOC and refuses to proceed if any entry other than `DEVICE`/`HE-PROBE` is resident, or if the query can't be verified — the `loadbin` below writes the same replacing (not merging) ATOC structure `app-write-mram -p` does. `--replace-atoc` opts out. **Gates on the `verifybin` outcome (#1488): exit 3** on a failed verify, **exit 3** when no `verify successful` line is present. **DATA LOSS at either exit 3:** `loadbin`, `verifybin`, `RSetType 2`, `r`, `g` are one CommanderScript JLinkExe has already finished, and the `HE-PROBE` ATOC entry is `"flags": ["load", "boot"]` — the board has already been pin-reset, booted and released, so `alp_ulog_partition` may ALREADY have been overwritten by the HE probe. The gate suppresses the false "flash complete" report and the beacon read-back; it cannot prevent the write or the boot. Re-read the partition from a known-good state before trusting the `BASELINE_WORDS` captured earlier in the same run. |
+| `flash-update-log-dual.sh [--package-only] [--replace-atoc] <hp-build-dir> <he-build-dir>` | **D** | Firmware-update-log dual-M55 package: HP owner boots first and releases HE client. Builds an app-only ATOC by default for the same firewall-policy reason as the probe helper. **GUARD (#2025, exit 5):** before the write, queries the resident ATOC and refuses to proceed if any entry other than `DEVICE`/`HP-OWNER`/`HE-CLIENT` is resident, or if the query can't be verified. `--replace-atoc` opts out. **Gates on the `verifybin` outcome (#1488): exit 3** on a failed verify, **exit 3** when no `verify successful` line is present. **DATA LOSS at either exit 3:** same one-CommanderScript shape as the firewall probe, and the `HP-OWNER` ATOC entry is `"flags": ["load", "boot"]` — the board has already been pin-reset and the HP owner booted and released the HE client, so `alp_ulog_partition` may ALREADY have been appended to by this unverified package. Re-read the partition from a known-good state before trusting the update log the run produced. |
 | `read-update-log-proof.sh [--expect-hw\|--expect-firewall-probe]` | (B) | Re-read the firmware-update-log SRAM0 proof beacons without reflashing. Use this after the probe or dual-M55 run to prove what the silicon actually did; the firewall mode decodes PASS/FAIL and exits non-zero if HE changed the MRAM log partition. |
 | `ram-run.sh <build-dir> [sleep_ms] [size] [preload]` | **C** | **RAM-run** an ITCM image (no MRAM write): the load base is DERIVED from the LOAD segment with the lowest `p_paddr` among segments with nonzero `p_filesz` (`readelf -l`) — NOT just the first LOAD segment (an ITCM-retargeted link's first LOAD segment is often a zero-FileSiz `.bss` in DTCM) and not hard-coded `0x0` — an app that hard-codes a slot0 `CONFIG_FLASH_LOAD_OFFSET` still links at a non-zero ITCM address and is loaded there. `loadbin` to that base, `setpc <entry>` (thumb-bit cleared), `go`, sleep, halt, dump + ASCII-decode the RAM console. **Refuses (exit 5)** if the derived base is `>= 0x80000000` (slot0/MRAM-linked). **Refuses (exit 6)** if the derived base isn't `0x0`, the ITCM global alias (`0x50000000`/`0x58000000`), or SRAM (`0x02xxxxxx`) — catches picking the wrong LOAD segment before it splats RAM. Optional `preload` JLink file runs after halt / before loadbin (e.g. clear a SoC integration reg). |
 | `erase-storage.sh [--dry-run]` | **D** | **PROVISIONING (#1430) — erase the customer storage window before a SoM ships**, so the module does not leave manufacturing carrying a previous app's image where the customer's first NVS write lands (#1334 measured ~110 KiB of stale app image there). **[BENCH-VERIFIED 2026-08-30]** — run once against a real module (off-labgrid E1M-AEN801, `AE822FA0E5597LS0`), `verify successful`, cold power-cycle confirmed `u VB` on the `ALP-HE` row (ATOC band untouched). Still confirm the DPIDR gate and re-read the transcript on each subsequent unit — one bench run is not a standing guarantee against a different module. The window is DERIVED from `metadata/e1m_modules/E1M-AEN801.yaml`'s `memory_map:` (today `0x80560000`, 96 KiB) and refused (**exit 5**) unless it ends exactly where the SE-owned `atoc` band begins — an overshoot lands in the live ATOC and drops the board to `No ATOC`. **The erased value on this MRAM is `0x00`, NOT `0xFF`** (#1430: `write_block_size=16 erase_value=0x00`), so the pattern written is `/dev/zero`, which doubles as the `verifybin` reference; a J-Link `erase` does **not** clear MRAM on this part, hence `loadbin` through the part-number device profile. Same gates as `flash-jlink.sh`: **exit 4** (DPIDR says this is not the AEN E8), **exit 2** (part profile could not connect), **exit 3** (verify failed, or no verify result at all). Does **not** reset or boot the board — cold power-cycle by hand afterwards and confirm the SE still finds its ATOC. `--dry-run` prints the derived window and CommanderScript without opening a probe. |
@@ -80,13 +148,18 @@ by exporting before you invoke a helper.
 | `ZEPHYR_SDK_INSTALL_DIR` | *(none)* | Zephyr SDK root; the `arm-zephyr-eabi-*` tools are resolved from here, else off `PATH`. |
 | `HAL_ALIF_DIR` | `west list hal_alif` | hal_alif module path (passed as an extra Zephyr module). **TBD fallback:** export it if `west list` can't resolve it — we do not invent a path. |
 | `AEN_BOARD` | `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` | Qualified board target. |
-| `SE_UART` | *(none)* | SE-UART serial device for Flow A (`<your-serial-device>`; host-specific). |
+| `LG_PLACE` | *(none)* | **Primary input (alp-sdk#2032).** The bench board, addressed by PLACE NAME (`<your-bench-place>`) — you must already hold its reservation. Resolves `SE_UART`, `LG_CONSOLE_DEV`, `LG_CONSOLE_HOST`, `LG_CONSOLE_PORT` and `LG_SWD_PATH` LIVE from `labgrid-client -p "$LG_PLACE" show`. No default place; wins over a raw `SE_UART` if both are set. See "`LG_PLACE`" above. |
+| `LG_COORDINATOR` | *(none, error-if-unset when `LG_PLACE` is set)* | labgrid coordinator address (`<host>:<port>`) used to resolve `LG_PLACE`. No default — a coordinator address is bench-specific, not a portable SDK value. |
+| `SE_UART` | *(none)* | SE-UART serial device for Flow A (`<your-serial-device>`; host-specific). **Resolved automatically when `LG_PLACE` is set** (the normal path); exporting it directly with no `LG_PLACE` is the WARNED off-labgrid escape hatch (see above) — `erase-storage.sh`'s BENCH-VERIFIED run is the documented case for it. Also required by `flash-update-log-dual.sh` and `flash-update-log-firewall-probe.sh` (Flow D, otherwise no SE-UART dependency): both now call the shared `bench_atoc_replace_guard()` (#2025), which queries the resident ATOC over `$SE_UART` before their `loadbin` write — unset `SE_UART` aborts them (exit 5) unless `--replace-atoc` is also passed. |
+| `LG_CONSOLE_DEV` / `LG_CONSOLE_HOST` / `LG_CONSOLE_PORT` | *(none)* | Read-only, `LG_PLACE`-resolved: the app console's exporter-local device path and ser2net `host`/`port`. Not yet consumed by a helper here — read the labgrid `console` resource directly, or via these, until one is wired up. |
+| `LG_SWD_PATH` | *(none)* | Read-only, `LG_PLACE`-resolved: the SWD probe's real USB path (e.g. `3-4.1`) from labgrid's `swd` resource — the safe input to `board-farm/bin/jlink-run.sh "$LG_PLACE"` (see "Known limitation" above). Not yet consumed by the `JLinkExe` invocations in this directory. |
 | `SETOOLS_DIR` | *(none, error-if-unset)* | Alif SETOOLS `app-release-exec-linux` dir. **License-gated, not shipped.** |
 | `JLINK_DEVICE_FLASH` | `AE822FA0E5597LS0_M55_HE` | Part-number device profile — unlocks the built-in Alif MRAM loader (Flow D). |
 | `JLINK_DEVICE_READ` | `Cortex-M55` | Generic device for all reads/attach/RAM-run (attaches to the live core). |
 | `JLINK_SPEED` | `4000` | SWD clock (kHz). |
-| `JLINK_SN` / `JLINK_SERIAL` | *(none)* | Optional SEGGER probe serial selector; set this on benches with multiple J-Links. |
+| `JLINK_SN` / `JLINK_SERIAL` | *(none)* | Optional SEGGER probe serial selector; set this on benches with multiple J-Links. **Cannot disambiguate on this bench** — all three probes share one cloned OEM serial; see "Known limitation" above and the DP-ID safety gate in `bench-env.sh`. |
 | `JLINK_EXE` | `JLinkExe` | JLink Commander binary (override for a non-PATH install). |
+| `TMPDIR` | `/tmp` | Where `bench_atoc_replace_guard()` (#2025) writes its pre-write `gettoc` transcript, `<tag>-atoc-before.<random>`. **Retention is deliberate, not a leak:** every run leaves its file, whether the run passed or aborted — it is the record of what was resident immediately before the write. Never auto-cleaned; sweep `$TMPDIR` by hand periodically. |
 
 ## Which flow? (A / B / C / D)
 
@@ -123,8 +196,13 @@ debug/attach runner.
 ```sh
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> --sysbuild
 export SETOOLS_DIR=<...>/app-release-exec-linux   # license-gated; not shipped
-export SE_UART=<your-serial-device>               # the SE-UART (host-specific)
-west flash                                        # -> alif_flash -> SETOOLS
+# alif_flash.py is a separate west-runner (Python), not bench-env.sh -- it
+# reads $SE_UART directly and has no LG_PLACE resolution of its own, so
+# source bench-env.sh first to populate SE_UART from labgrid in THIS shell:
+export LG_COORDINATOR=<host>:<port>
+export LG_PLACE=<your-bench-place>
+source scripts/bench/aen/bench-env.sh
+west flash                                        # -> alif_flash -> SETOOLS, using the resolved $SE_UART
 ```
 
 The runner reads `SETOOLS_DIR` / `SE_UART` (the same env vars these helpers

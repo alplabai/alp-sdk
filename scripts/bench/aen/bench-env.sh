@@ -94,13 +94,180 @@ export HAL_ALIF_DIR
 export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he}"
 
 # --------------------------------------------------------------------
+# LG_PLACE resolution (alp-sdk#2032)
+# --------------------------------------------------------------------
+# The maintainer's hard rule: never touch a bench connection by hand --
+# every connection goes through labgrid, addressed by PLACE NAME. A
+# stale device-path table (SE_UART/console swapped, a J-Link USB path
+# that named a DIFFERENT board) caused the 2026-09-07 incident. LG_PLACE
+# is therefore the PRIMARY input below: set it and the SE-UART, console
+# and SWD probe values are resolved live from labgrid, never guessed.
+#
+# NO default place -- if LG_PLACE is unset we do not fall back to
+# guessing any particular board. The raw SE_UART variable stays
+# available as an explicit, WARNED escape hatch for genuinely
+# off-labgrid work (erase-storage.sh documents such a case); LG_PLACE
+# wins whenever both are set.
+#
+# LG_COORDINATOR has NO default either, and deliberately so: a labgrid
+# coordinator address is bench-specific infrastructure, not a portable
+# SDK default -- baking in any one real address here would mean this
+# file, shipped in a public repo, always resolves against ONE bench's
+# coordinator regardless of who runs it. Export the coordinator you
+# actually use before setting LG_PLACE; bench_labgrid_resolve() below
+# refuses outright (rather than silently trying labgrid-client's own
+# 127.0.0.1:20408 fallback, which would just hang or resolve nothing on
+# every other host) when LG_PLACE is set but this is not.
+export LG_COORDINATOR="${LG_COORDINATOR:-}"
+
+# bench_labgrid_show <place> — echo `labgrid-client -p <place> show`.
+# Strips a trailing CR from every line: a real interactive run (pty)
+# emits CRLF line endings (measured 2026-09-07; labgrid-client itself
+# prints no ANSI/SGR codes, so this is the actual "real output doesn't
+# match a synthesised fixture" hazard here), and an untouched CR breaks
+# any `$`-anchored match downstream the same way SETOOLS' CRLF does
+# elsewhere in this file.
+bench_labgrid_show() {
+	LG_COORDINATOR="$LG_COORDINATOR" labgrid-client -p "$1" show 2>/dev/null | tr -d '\r'
+}
+
+# bench_labgrid_resource_field <show-output> <resource-name> <key>
+# Parse ONE resource block the way board-farm/bin/jlink-run.sh:34-50
+# already does: anchor on the block's OWN header line
+# (^(Acquired|Matching) resource '<name>'), then scan only the
+# indented continuation lines that follow it until the next
+# unindented line. A naive whole-output regex is wrong here -- the
+# `matches:` list near the top of `show` repeats the same resource
+# names, and without block-scoping a search for e.g. the swd path can
+# latch onto that list instead of the resource's own params dict.
+# <key> may be a top-level params key (host, port) or nested inside
+# 'extra' (path) -- both sit on their own pformat line, so a per-line
+# regex finds either without needing to track dict nesting depth.
+bench_labgrid_resource_field() {
+	local show_output="$1" resource="$2" key="$3"
+	printf '%s\n' "$show_output" | python3 -c "
+import re, sys
+name, key = sys.argv[1], sys.argv[2]
+lines = sys.stdin.read().splitlines()
+inblk = False
+for ln in lines:
+    if re.match(r\"^(Acquired|Matching) resource '\" + re.escape(name) + r\"'\", ln):
+        inblk = True
+        continue
+    if inblk:
+        if ln and not ln[0].isspace():
+            break
+        m = re.search(r\"'\" + re.escape(key) + r\"':\s*'([^']*)'\", ln)
+        if not m:
+            m = re.search(r\"'\" + re.escape(key) + r\"':\s*([^,}]+)\", ln)
+        if m:
+            print(m.group(1).strip())
+            break
+" "$resource" "$key"
+}
+
+# bench_labgrid_resolve <place> — resolve SE_UART, LG_CONSOLE_DEV,
+# LG_CONSOLE_HOST, LG_CONSOLE_PORT and LG_SWD_PATH from a live
+# `labgrid-client -p <place> show`, after confirming the reservation is
+# actually held (show's place-level `acquired:` non-empty) -- a lapsed
+# reservation fails loudly here rather than silently resolving whatever
+# labgrid last remembered. Returns non-zero on ANY resolution failure;
+# callers must treat that as fatal, not fall back to a guess.
+bench_labgrid_resolve() {
+	local place="$1" out acquired se_path console_dev console_host console_port swd_path
+
+	if ! command -v labgrid-client >/dev/null 2>&1; then
+		echo "bench-env: LG_PLACE=$place set but 'labgrid-client' is not on PATH" >&2
+		return 1
+	fi
+	if [ -z "${LG_COORDINATOR:-}" ]; then
+		echo "bench-env: LG_PLACE=$place set but LG_COORDINATOR is unset -- there is no" >&2
+		echo "           default coordinator. Export the address of the labgrid" >&2
+		echo "           coordinator you actually use, e.g.:" >&2
+		echo "               export LG_COORDINATOR=<host>:<port>" >&2
+		return 1
+	fi
+
+	out="$(bench_labgrid_show "$place")"
+	if [ -z "$out" ]; then
+		echo "bench-env: 'labgrid-client -p $place show' returned nothing -- is" >&2
+		echo "           LG_COORDINATOR ($LG_COORDINATOR) reachable and does the place exist?" >&2
+		return 1
+	fi
+
+	acquired=$(printf '%s\n' "$out" | awk -F': ' '/^  acquired:/{print $2; exit}')
+	if [ -z "$acquired" ] || [ "$acquired" = "None" ]; then
+		echo "bench-env: LG_PLACE=$place is NOT acquired (reservation lapsed or never taken)." >&2
+		echo "           Acquire it first: labgrid-client -p $place acquire" >&2
+		return 1
+	fi
+
+	se_path=$(bench_labgrid_resource_field "$out" seuart path)
+	console_dev=$(bench_labgrid_resource_field "$out" console path)
+	console_host=$(bench_labgrid_resource_field "$out" console host)
+	console_port=$(bench_labgrid_resource_field "$out" console port)
+	swd_path=$(bench_labgrid_resource_field "$out" swd path)
+
+	if [ -z "$se_path" ]; then
+		echo "bench-env: LG_PLACE=$place ($acquired) exports no 'seuart' resource path" >&2
+		return 1
+	fi
+	if [ -z "$swd_path" ]; then
+		echo "bench-env: LG_PLACE=$place ($acquired) exports no 'swd' resource path" >&2
+		return 1
+	fi
+
+	SE_UART="$se_path"
+	LG_CONSOLE_DEV="$console_dev"
+	LG_CONSOLE_HOST="$console_host"
+	LG_CONSOLE_PORT="$console_port"
+	LG_SWD_PATH="$swd_path"
+	return 0
+}
+
+# --------------------------------------------------------------------
 # Serial + SETOOLS (Flow A — production MRAM flash over the SE-UART)
 # --------------------------------------------------------------------
 
 # SE_UART — the FT232R SE-UART device SETOOLS' app-write-mram talks to.
-# NO default: serial enumeration is host-specific (Linux /dev/ttyUSB*,
-# macOS /dev/cu.usbserial-*, Windows COMx). Export it for Flow A.
-export SE_UART="${SE_UART:-}"
+#
+# LG_PLACE is the primary input (see "LG_PLACE resolution" above):
+# set it and SE_UART is resolved live from labgrid's `seuart` resource,
+# never guessed from a device-path table. LG_PLACE wins when both are
+# set -- a raw SE_UART is then IGNORED, not merged.
+#
+# A raw SE_UART with NO LG_PLACE remains a supported escape hatch for
+# genuinely off-labgrid work (erase-storage.sh documents such a case),
+# but it is warned: serial enumeration is host-specific (Linux
+# /dev/ttyUSB*, macOS /dev/cu.usbserial-*, Windows COMx), ttyUSBn
+# numbering is enumeration-order-assigned and NOT stable across a
+# reboot/replug, and this bench carries three AEN boards whose SE-UART
+# and app-console paths have been measured swapped in a stale table --
+# the exact mistake behind the 2026-09-07 incident.
+if [ -n "${LG_PLACE:-}" ]; then
+	if [ -n "${SE_UART:-}" ]; then
+		echo "bench-env: LG_PLACE=$LG_PLACE is set; ignoring the raw SE_UART=$SE_UART" >&2
+		echo "           you also exported -- LG_PLACE wins, resolving live instead." >&2
+	fi
+	if ! bench_labgrid_resolve "$LG_PLACE"; then
+		echo "bench-env: labgrid resolution FAILED for LG_PLACE=$LG_PLACE -- refusing to" >&2
+		echo "           fall back to a raw/guessed device path. Fix the reservation or" >&2
+		echo "           coordinator reachability and re-source this file." >&2
+		return 1 2>/dev/null || exit 1
+	fi
+	export SE_UART LG_CONSOLE_DEV LG_CONSOLE_HOST LG_CONSOLE_PORT LG_SWD_PATH
+elif [ -n "${SE_UART:-}" ]; then
+	echo "bench-env: WARNING -- SE_UART=$SE_UART is set WITHOUT LG_PLACE." >&2
+	echo "           This is the off-labgrid ESCAPE HATCH, not the normal path: raw" >&2
+	echo "           device paths go stale, /dev/ttyUSBn is enumeration-ordered (not" >&2
+	echo "           stable across a reboot/replug), and this bench's three AEN boards" >&2
+	echo "           have had their SE-UART/app-console paths measured SWAPPED in a" >&2
+	echo "           stale table -- the exact mistake behind the 2026-09-07 incident." >&2
+	echo "           Prefer: export LG_PLACE=<labgrid-place-name>" >&2
+	export SE_UART
+else
+	export SE_UART="${SE_UART:-}"
+fi
 
 # SETOOLS_DIR — the Alif Security Toolkit "app-release-exec-linux"
 # directory (contains app-gen-toc, app-write-mram, build/). NO default
@@ -131,6 +298,19 @@ export JLINK_SPEED="${JLINK_SPEED:-4000}"
 
 # JLINK_SN / JLINK_SERIAL — optional SEGGER probe serial selector. Leave unset
 # on a single-probe bench; set it when multiple J-Links are visible on the host.
+#
+# NOTE: on THIS bench JLINK_SN cannot disambiguate at all -- all three
+# probes answer the SAME cloned OEM serial (see "DP-ID safety gate"
+# below). When LG_PLACE is set, LG_SWD_PATH above is the labgrid-known
+# USB path (e.g. "3-4.1") for the probe this place actually owns; the
+# safe way to drive it directly is `board-farm/bin/jlink-run.sh
+# "$LG_PLACE" ...`, which masks the other probes in a private mount
+# namespace before invoking JLinkExe. The AEN scripts in THIS directory
+# do not route their own JLinkExe invocations through it yet -- see
+# README.md ("Known limitation") for why (they pass `-CommanderScript`,
+# which jlink-run.sh does not recognise, and each issues several
+# JLinkExe calls per run) -- so this bench continues to rely on the
+# DPIDR safety gate below for those, not on JLINK_SN alone.
 export JLINK_SN="${JLINK_SN:-${JLINK_SERIAL:-}}"
 
 # --------------------------------------------------------------------
@@ -403,6 +583,241 @@ bench_require_setools() {
 	if [ ! -x "$SETOOLS_DIR/app-gen-toc" ]; then
 		echo "bench-env: '$SETOOLS_DIR' does not look like a SETOOLS app-release-exec-linux dir (no app-gen-toc)" >&2
 		return 2
+	fi
+	return 0
+}
+
+# bench_atoc_replace_guard <replace-atoc 0|1> <tag> [allowed-entry ...]
+#
+# GUARD (alp-sdk#2025) against the ATOC-replace hazard, shared by every
+# helper that burns a freshly-generated `app-gen-toc` package: that package
+# always contains exactly the app entries named in the JSON handed to it, and
+# writing it -- whether over the SE-UART (`app-write-mram -c $SE_UART -p`,
+# Flow A) or directly over SWD (`loadbin $PKG $ATOC_ADDR`, Flow D) -- burns
+# the SAME signed ATOC structure at the SAME MRAM location either way (see
+# docs/debugging-aen.md and docs/aen-bench-bringup.md: both call it "the
+# signed ATOC the SE reads at boot"). `DEVICE` is the one entry SETOOLS is
+# documented to preserve when a JSON omits it (docs/aen-provisioning.md
+# section 4, "write an app-only ATOC ... don't overwrite the device config");
+# every OTHER resident app entry NOT in the JSON you are about to burn is
+# gone the instant the write lands -- no error, no SES warning (`[SES] ATOC
+# ok` prints either way). This destroyed a live A32 Linux boot chain
+# (`BOOTLOAD`/`A32_APP`/`HP_APP`/`HE_APP`) on `e1m-aen-evk-01`, 2026-09-07.
+#
+# Originally written into flash-run.sh alone for its own single ALP-HE entry
+# (#2025); factored out here so every script that commits a TOC shares one
+# guard instead of drifting copies. <allowed-entry ...> is the set of app
+# entries THIS run is itself about to (re)write -- e.g. flash-run.sh passes
+# ALP-HE, flash-run-dualcore.sh passes ALP-HP ALP-HE (its own legitimate
+# two-entry write) -- so the guard fires only on a GENUINELY foreign resident
+# entry, never on the script's own output.
+#
+# Queries resident state with SETOOLS' `maintenance -c $SE_UART -opt gettoc`
+# -- a documented non-destructive TOC read (AUGD0005 Alif Security Toolkit
+# User Guide v1.110.0, "Command line options (-opt)": gettoc "Returns the TOC
+# information"), never a merge engine. Dumps it unconditionally, even under
+# replace-atoc=1, so a run always leaves a record of what was resident
+# immediately before a destructive write.
+#
+# Returns 0 to proceed, 5 to abort (could not verify what is resident, or a
+# foreign entry would be delisted) unless replace-atoc=1 was passed.
+bench_atoc_replace_guard() {
+	local replace_atoc="$1" tag="$2"
+	shift 2
+	local allowed=("$@")
+
+	# ${TMPDIR:-/tmp}, not a bare /tmp literal, so a test (or a host with a
+	# non-default TMPDIR) can sandbox this. `tag` is a literal script name
+	# (flash-run, flash-run-dualcore, ...), NOT run-unique -- three AEN
+	# boards (evk-01/-02/-03) on this farm makes two concurrent runs of the
+	# SAME script against DIFFERENT boards a real scenario, and a fixed path
+	# let run A's write land between run B's redirect and B's read, so B
+	# parsed A's board (reproduced: B printed A's clean table and returned
+	# GUARD_RC=0 on a board that actually carried A32_APP + HE_APP -- the
+	# exact #2025 loss through a new door). `mktemp` both makes the path
+	# run-unique (its own randomised suffix, no two callers can collide) and
+	# creates the file atomically (O_CREAT|O_EXCL under the hood), closing
+	# the rm-then-open symlink-race window a predictable rm -f/`>` pair
+	# leaves open. A directory `mktemp` cannot create in (unwritable TMPDIR)
+	# fails here, which is the same "abort, do not guess" outcome the old
+	# rm -f/existence-check pair gave for an unremovable stale file.
+	#
+	# RETENTION IS DELIBERATE, NOT A LEAK: this file is never removed on
+	# any exit path (success or abort) -- it is the "always leaves a record
+	# of what was resident immediately before a destructive write" audit
+	# trail this guard exists to provide (see the function's own header
+	# comment), and a run that PASSED is exactly the run whose pre-write
+	# state you may later need to prove. Each run leaves one more
+	# ${TMPDIR:-/tmp}/<tag>-atoc-before.<random>; periodically clean
+	# TMPDIR by hand (see README.md's Quick start / troubleshooting).
+	#
+	# The X's MUST be trailing, no suffix after them (no ".log" here).
+	# BSD/macOS mktemp requires the placeholder to be the literal end of
+	# the template and fails EVERY call with a misleading "File exists"
+	# on a mid-template placeholder (`...XXXXXX.log`) that GNU mktemp
+	# tolerates -- measured on macOS CI: the guard aborted (exit 5) on
+	# every single run, silently dead on that platform, fail-closed. GNU
+	# mktemp's own --suffix flag is not the fix either: it does not exist
+	# on BSD/macOS mktemp, so it would only move the same break.
+	local before
+	before=$(mktemp "${TMPDIR:-/tmp}/${tag}-atoc-before.XXXXXX") || {
+		echo "!! ABORT ($tag): cannot create the pre-write ATOC transcript in ${TMPDIR:-/tmp}" >&2
+		return 5
+	}
+
+	# rc tracks whether the query itself succeeded -- defaults to failed
+	# (1) so the SE_UART-unset and maintenance-missing branches, which never
+	# run a real query, fall straight into "unverified" below rather than
+	# silently defaulting to a pass. A query that exits non-zero after
+	# emitting partial table rows (e.g. a serial timeout mid-read) must also
+	# land here, not decode as "ok" from the transcript text alone.
+	local rc=1
+	if [ -z "${SE_UART:-}" ]; then
+		echo "GUARD: SE_UART is unset -- cannot query the resident ATOC via 'maintenance -opt gettoc'" >"$before" || return 5
+	elif [ -x "$SETOOLS_DIR/maintenance" ]; then
+		# Confirm the serial device that answers is actually the SES, not the
+		# app console (e.g. on e1m-aen-evk-01, /dev/ttyUSB0 is SE-UART,
+		# /dev/ttyUSB1 is the app console). BENCH-VERIFIED: a real
+		# `getbanner` capture off e1m-aen-evk-01 (2026-09-07) reads
+		# " SES A1 v1.110.0 Mar  4 2026 19:06:23" after ANSI stripping --
+		# docs/debugging-aen.md:548 is only a doc placeholder
+		# ("SES <rev> v<version> <build date>"), not a transcript, and is
+		# NOT the proof. A gettoc read off the wrong device is not a safe
+		# verdict, so a missing/garbled banner also forces the query
+		# unverified below.
+		local banner banner_ok=1 banner_rc
+		banner=$( ( cd "$SETOOLS_DIR" && ./maintenance -b "${SE_UART_BAUD:-57600}" -c "$SE_UART" -opt getbanner ) 2>&1 )
+		banner_rc=$?
+		# Real capture off e1m-aen-evk-01 (2026-09-07), ANSI intact:
+		#   ^[[94m SES A1 v1.110.0 Mar  4 2026 19:06:23 ^[[0m
+		# Strip the ANSI FIRST, then match -- and the stripped line has a
+		# LEADING SPACE (SETOOLS' own padding, not a terminal artifact), so
+		# a bare `^SES` anchor rejects every real banner and aborts every
+		# run on real hardware. Tolerate leading whitespace.
+		printf '%s\n' "$banner" | sed -E 's/\x1b\[[0-9;?]*[a-zA-Z]//g' \
+			| grep -qE '^[[:space:]]*SES [^[:space:]]+ v[^[:space:]]+' || banner_ok=0
+		# getbanner exiting non-zero while still printing a well-formed
+		# banner line must not read as ok -- same class as the gettoc rc fix
+		# above (measured: getbanner rc=3 with a valid banner -> GUARD_RC=0
+		# before this).
+		[ "$banner_rc" -eq 0 ] || banner_ok=0
+		( cd "$SETOOLS_DIR" && ./maintenance -b "${SE_UART_BAUD:-57600}" -c "$SE_UART" -opt gettoc ) >"$before" 2>&1
+		rc=$?
+		[ "$banner_ok" -eq 1 ] || rc=1
+	else
+		echo "GUARD: SETOOLS 'maintenance' tool not found in $SETOOLS_DIR -- cannot query the resident ATOC" >"$before" || return 5
+	fi
+	[ -f "$before" ] || return 5
+	echo ">>> resident ATOC before this write ($before):" >&2
+	cat "$before" >&2
+
+	# SETOOLS emits ANSI codes on some terminals/versions -- not just SGR
+	# colour (`...m`): a real capture also carries a cursor-show sequence
+	# (`^[[?25h`), and an erase-in-line (`^[[K`) landing inside a Name cell
+	# would otherwise survive an SGR-only strip and read as a foreign entry
+	# (false-alarm direction). Strip any CSI sequence (ESC [ ... final-byte),
+	# not just the `m`-terminated ones, before the awk table parse (also
+	# matches read-update-log-proof.sh:150's own maintenance-read strip).
+	# Also drop a trailing CR: SETOOLS on some hosts emits CRLF, and
+	# `grep -qix "no atoc found on target device."` below is anchored with
+	# `$`, so an untouched CR would make a genuinely blank board's "No ATOC"
+	# line fail to match and read as unverified (GUARD_RC=5) instead.
+	local stripped
+	stripped=$(sed -E 's/\x1b\[[0-9;?]*[a-zA-Z]//g' "$before" | tr -d '\r')
+
+	# Table rows look like "|   DEVICE |  CM0+  | 0x... | ... |" (docs/aen-provisioning.md
+	# shows a real one) -- the Name column is the literal JSON key of whatever wrote it.
+	# BENCH-VERIFIED against a real 9-row getbanner+gettoc capture off
+	# e1m-aen-evk-01 (2026-09-07): SETOOLS' colour wraps the WHOLE LINE
+	# (`^[[94m |    DEVICE|...|`), not just the cell text, so the
+	# ANSI-stripped row keeps a LEADING SPACE before the pipe. A bare `/^\|/`
+	# anchor (no synthetic test fixture ever exercised this -- the test's
+	# ANSI table colours only the cell, not the line) never matched a single
+	# real row: `resident` silently computed empty on EVERY real coloured
+	# transcript, aborting every run as "unverified" rather than ever
+	# actually detecting -- or clearing -- a foreign entry.
+	# Carries the CPU column (field 3, e.g. "CM0+"/"M55-HE"/"A32_0") alongside
+	# the name, tab-separated -- the DEVICE/SERAM0/SERAM1 baseline exemption
+	# below cross-checks it (a same-named row on the wrong CPU is never
+	# baseline SE state, just a coincidentally-named app entry).
+	local resident=()
+	while IFS= read -r n; do
+		resident+=("$n")
+	done < <(printf '%s\n' "$stripped" | awk -F'|' '
+		/^[ \t]*\|/ {
+			name = $2; cpu = $3
+			gsub(/^[ \t]+|[ \t]+$/, "", name)
+			gsub(/^[ \t]+|[ \t]+$/, "", cpu)
+			if (name != "" && name != "Name" && name !~ /^-+$/) print name "\t" cpu
+		}')
+
+	# Only trust the transcript's text when the query itself actually
+	# succeeded (rc=0) -- an error line containing "no atoc" (e.g. "no ATOC
+	# response from target") must not read as a genuinely empty board, and
+	# anchor to SETOOLS' exact message rather than a bare substring match.
+	local query_status=unverified
+	if [ "$rc" -eq 0 ]; then
+		if printf '%s\n' "$stripped" | grep -qix "no atoc found on target device."; then
+			query_status=empty
+		elif [ "${#resident[@]}" -gt 0 ]; then
+			query_status=ok
+		fi
+	fi
+
+	# DEVICE plus the two SE firmware banks (SERAM0/SERAM1 -- one marked
+	# "* SERAM0" as the currently-booted bank, docs/aen-se-services.md:194)
+	# are baseline SE state, never touched by app-write-mram -p: only a
+	# System Package update rewrites SERAM (docs/aen-se-services.md
+	# section 0.1). Both real captures above show SERAM0/SERAM1 resident
+	# alongside completely different app entries, confirming they are
+	# independent of whatever app ATOC was last written -- without this
+	# exemption the guard flags them as "extra" on EVERY real board,
+	# unconditionally, which trains the operator to always pass
+	# --replace-atoc (discovered validating the parser against the real
+	# gettoc-BEFORE-2entry.txt capture, which must pass clean and instead
+	# aborted before this fix).
+	#
+	# Cross-check the CPU column (both real captures show all three
+	# baseline rows as "CM0+", and no app entry ever is): the exemption is
+	# on (name, CPU), not name alone -- a row that merely happens to share
+	# one of these names on a DIFFERENT core (measured: a synthesized
+	# "SERAM1 | M55-HE | ..." row) is an app entry with a colliding name,
+	# not SE firmware, and must still trip the guard.
+	local extra=() entry name cpu a hit nbase
+	for entry in "${resident[@]}"; do
+		name="${entry%%$'\t'*}"
+		cpu="${entry#*$'\t'}"
+		nbase="${name#\* }"
+		case "$nbase" in
+		DEVICE | SERAM0 | SERAM1)
+			[ "$cpu" = "CM0+" ] && continue
+			;;
+		esac
+		hit=0
+		for a in "${allowed[@]}"; do
+			[ "$name" = "$a" ] && { hit=1; break; }
+		done
+		[ "$hit" -eq 0 ] && extra+=("$name")
+	done
+
+	if [ "$replace_atoc" -ne 1 ]; then
+		if [ "$query_status" = unverified ]; then
+			echo "!! ABORT ($tag): could not read the resident ATOC via 'maintenance -c \$SE_UART -opt gettoc'" >&2
+			echo "   (see $before). A fresh ATOC write REPLACES every app entry not in it, so" >&2
+			echo "   writing blind risks silently delisting anything already on this board -- that is" >&2
+			echo "   exactly how e1m-aen-evk-01 lost its A32 Linux boot chain on 2026-09-07." >&2
+			echo "   Confirm by hand what is resident, then re-run with --replace-atoc." >&2
+			return 5
+		fi
+		if [ "${#extra[@]}" -gt 0 ]; then
+			echo "!! ABORT ($tag): this write REPLACES every app ATOC entry not in it -- it does NOT merge." >&2
+			echo "   This board also carries: ${extra[*]}" >&2
+			echo "   Writing now would SILENTLY DELIST ${extra[*]} -- no error, no SES warning" >&2
+			echo "   (this destroyed the A32 Linux boot chain on e1m-aen-evk-01, 2026-09-07)." >&2
+			echo "   Re-run with --replace-atoc only once you can restore ${extra[*]}, or if" >&2
+			echo "   losing them is genuinely intended." >&2
+			return 5
+		fi
 	fi
 	return 0
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/bench/aen/flash-update-log-firewall-probe.sh [--package-only] <he-probe-build-dir>
+# scripts/bench/aen/flash-update-log-firewall-probe.sh [--package-only] [--replace-atoc] <he-probe-build-dir>
 #
 # Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
 # drives the Alif SETOOLS + JLinkExe over the labgrid-held AEN bench).
@@ -7,13 +7,19 @@
 #
 # Build and optionally flash the HE direct-write MRAM firewall probe for
 # examples/connectivity/firmware-update-log. The default package is app-only so
-# it preserves the board's existing DEVICE/firewall policy. Set
+# it preserves the board's existing DEVICE policy (SETOOLS keeps DEVICE when a
+# JSON omits it, docs/aen-provisioning.md section 4). Set
 # ALP_AEN_INCLUDE_DEVICE_CONFIG=yes only when intentionally replacing that
 # policy; set ALP_AEN_DEVICE_CONFIG_JSON to a config filename under the SETOOLS
-# build/config directory when using a board-specific policy. The probe is
-# destructive when the firewall is absent: the helper records the first 16 bytes
-# of alp_ulog_partition, lets HE try to overwrite them, then reports failure if
-# the SWD post-read differs from the baseline.
+# build/config directory when using a board-specific policy. Every OTHER
+# resident app entry NOT named HE-PROBE is a different matter: the `loadbin`
+# below writes the SAME signed ATOC structure `app-write-mram -p` would
+# (docs/debugging-aen.md), which REPLACES rather than merges, so a foreign app
+# entry (e.g. an A32 Linux boot chain) is silently delisted unless
+# --replace-atoc is passed (alp-sdk#2025 -- see the GUARD before the write,
+# below). The probe is destructive when the firewall is absent: the helper
+# records the first 16 bytes of alp_ulog_partition, lets HE try to overwrite
+# them, then reports failure if the SWD post-read differs from the baseline.
 set -e
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -21,13 +27,19 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$HERE/bench-env.sh"
 
 PACKAGE_ONLY=0
-if [ "${1:-}" = "--package-only" ]; then
-	PACKAGE_ONLY=1
-	shift
-fi
+REPLACE_ATOC=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--package-only) PACKAGE_ONLY=1; shift ;;
+	--replace-atoc) REPLACE_ATOC=1; shift ;;
+	--) shift; break ;;
+	-*) echo "unknown flag: $1" >&2; exit 2 ;;
+	*) break ;;
+	esac
+done
 
 if [ "$#" -ne 1 ]; then
-	echo "usage: $0 [--package-only] <he-probe-build-dir>" >&2
+	echo "usage: $0 [--package-only] [--replace-atoc] <he-probe-build-dir>" >&2
 	exit 2
 fi
 
@@ -128,6 +140,16 @@ if [ "${ALP_CONFIRM_DESTRUCTIVE_FLASH:-}" != "yes" ]; then
 	echo "refusing destructive MRAM flash: set ALP_CONFIRM_DESTRUCTIVE_FLASH=yes for this run" >&2
 	exit 4
 fi
+
+# GUARD (alp-sdk#2025) -- see bench_atoc_replace_guard in bench-env.sh.
+# HE-PROBE is what THIS run itself is about to (re)write, so it is the
+# allowed set -- the guard fires only on a genuinely foreign resident entry
+# (e.g. an A32 Linux boot chain), never on this script's own output. This
+# helper has no other SE_UART dependency (its write goes over JLinkExe, not
+# app-write-mram) -- the guard needs SE_UART only for its own read-only
+# `maintenance -opt gettoc` query and reports "unverified" (abort unless
+# --replace-atoc) if it is unset, same as any other missing input.
+bench_atoc_replace_guard "$REPLACE_ATOC" flash-update-log-firewall-probe HE-PROBE || exit $?
 
 BASELINE_WORDS=$(read_ulog_words before)
 [ -z "$BASELINE_WORDS" ] && { echo "could not read pre-flash alp_ulog_partition words at $ULOG_ADDR" >&2; exit 2; }
