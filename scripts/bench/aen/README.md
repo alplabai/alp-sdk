@@ -33,6 +33,7 @@ error out if `SETOOLS_DIR` is unset. Flow C (`ram-run.sh`), `reread.sh`, and
 #    layer; override any host-specific value by exporting it first.
 export ZEPHYR_SDK_INSTALL_DIR=<your-zephyr-sdk>     # for the arm-zephyr-eabi tools
 export SETOOLS_DIR=<...>/app-release-exec-linux     # Flow A/D only (license-gated)
+export LG_COORDINATOR=<host>:<port>                 # your labgrid coordinator; no default
 export LG_PLACE=<your-bench-place>                  # the bench board, by PLACE NAME (resolved via labgrid)
 
 # 2. Build an app for the AEN801 M55-HE target.
@@ -59,6 +60,7 @@ three probes on this bench share one cloned OEM serial, so a serial alone
 cannot tell them apart).
 
 ```sh
+export LG_COORDINATOR=<host>:<port>    # your labgrid coordinator; no default
 export LG_PLACE=<your-bench-place>     # you must already hold this place's reservation
 source scripts/bench/aen/bench-env.sh
 echo "$SE_UART $LG_CONSOLE_HOST:$LG_CONSOLE_PORT $LG_SWD_PATH"
@@ -81,6 +83,16 @@ still honoured, just no longer silent. `LG_PLACE` wins whenever both are set:
 a raw `SE_UART` exported alongside it is ignored, with a note saying so.
 
 ### Known limitation: J-Link probe selection is not yet routed through labgrid
+
+**The hazard, plainly: every `JLinkExe` invocation in this directory still
+selects its probe with `-SelectEmuBySN`, which CANNOT tell this bench's three
+J-Link probes apart — all three answer the same cloned OEM serial
+(`000603000869`). A script on this path can silently attach to a DIFFERENT
+board than the one you hold the labgrid reservation for**, with no error —
+the only thing standing between that and a wrong-board MRAM write or RAM-run
+is the SW-DP IDR safety gate (`bench_jlink_assert_aen_dpidr`, below), which
+catches it only after the fact (probe already opened) and only for the boards
+its DPIDR table knows about.
 
 `board-farm/bin/jlink-run.sh <place>` is the safe way to drive a probe by
 PLACE NAME directly (labgrid-resolved) — it resolves the probe's real USB path from
@@ -137,7 +149,7 @@ by exporting before you invoke a helper.
 | `HAL_ALIF_DIR` | `west list hal_alif` | hal_alif module path (passed as an extra Zephyr module). **TBD fallback:** export it if `west list` can't resolve it — we do not invent a path. |
 | `AEN_BOARD` | `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` | Qualified board target. |
 | `LG_PLACE` | *(none)* | **Primary input (alp-sdk#2032).** The bench board, addressed by PLACE NAME (`<your-bench-place>`) — you must already hold its reservation. Resolves `SE_UART`, `LG_CONSOLE_DEV`, `LG_CONSOLE_HOST`, `LG_CONSOLE_PORT` and `LG_SWD_PATH` LIVE from `labgrid-client -p "$LG_PLACE" show`. No default place; wins over a raw `SE_UART` if both are set. See "`LG_PLACE`" above. |
-| `LG_COORDINATOR` | `100.64.0.1:20408` | labgrid coordinator address used to resolve `LG_PLACE`. |
+| `LG_COORDINATOR` | *(none, error-if-unset when `LG_PLACE` is set)* | labgrid coordinator address (`<host>:<port>`) used to resolve `LG_PLACE`. No default — a coordinator address is bench-specific, not a portable SDK value. |
 | `SE_UART` | *(none)* | SE-UART serial device for Flow A (`<your-serial-device>`; host-specific). **Resolved automatically when `LG_PLACE` is set** (the normal path); exporting it directly with no `LG_PLACE` is the WARNED off-labgrid escape hatch (see above) — `erase-storage.sh`'s BENCH-VERIFIED run is the documented case for it. Also required by `flash-update-log-dual.sh` and `flash-update-log-firewall-probe.sh` (Flow D, otherwise no SE-UART dependency): both now call the shared `bench_atoc_replace_guard()` (#2025), which queries the resident ATOC over `$SE_UART` before their `loadbin` write — unset `SE_UART` aborts them (exit 5) unless `--replace-atoc` is also passed. |
 | `LG_CONSOLE_DEV` / `LG_CONSOLE_HOST` / `LG_CONSOLE_PORT` | *(none)* | Read-only, `LG_PLACE`-resolved: the app console's exporter-local device path and ser2net `host`/`port`. Not yet consumed by a helper here — read the labgrid `console` resource directly, or via these, until one is wired up. |
 | `LG_SWD_PATH` | *(none)* | Read-only, `LG_PLACE`-resolved: the SWD probe's real USB path (e.g. `3-4.1`) from labgrid's `swd` resource — the safe input to `board-farm/bin/jlink-run.sh "$LG_PLACE"` (see "Known limitation" above). Not yet consumed by the `JLinkExe` invocations in this directory. |
@@ -186,6 +198,7 @@ export SETOOLS_DIR=<...>/app-release-exec-linux   # license-gated; not shipped
 # alif_flash.py is a separate west-runner (Python), not bench-env.sh -- it
 # reads $SE_UART directly and has no LG_PLACE resolution of its own, so
 # source bench-env.sh first to populate SE_UART from labgrid in THIS shell:
+export LG_COORDINATOR=<host>:<port>
 export LG_PLACE=<your-bench-place>
 source scripts/bench/aen/bench-env.sh
 west flash                                        # -> alif_flash -> SETOOLS, using the resolved $SE_UART

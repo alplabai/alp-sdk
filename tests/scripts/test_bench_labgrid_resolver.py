@@ -367,6 +367,24 @@ def test_lg_place_wins_over_a_simultaneously_exported_raw_se_uart(tmp_path: Path
 
 
 @_NEEDS_BASH
+def test_lg_place_set_with_no_coordinator_fails_loudly_not_a_guessed_default(tmp_path: Path) -> None:
+    """No hardcoded LG_COORDINATOR default (alp-sdk#2032 review): a bench
+    coordinator address is bench-specific infra, not a portable SDK value,
+    so baking any one real address into a PUBLIC script would always
+    resolve against that one bench regardless of who runs it. LG_PLACE set
+    with LG_COORDINATOR unset must abort with an actionable message, never
+    silently fall through to labgrid-client's own 127.0.0.1:20408 default."""
+    res = _resolve(
+        tmp_path, "e1m-aen-evk-01", {"e1m-aen-evk-01": REAL_EVK01_ACQUIRED},
+        extra_env="unset LG_COORDINATOR\n",
+    )
+    assert res.returncode == 1
+    assert "LG_COORDINATOR is unset" in res.stderr
+    assert "export LG_COORDINATOR=<host>:<port>" in res.stderr
+    assert "SE_UART=/dev/ttyUSB0" not in res.stdout
+
+
+@_NEEDS_BASH
 def test_unreachable_coordinator_or_unknown_place_fails_loudly(tmp_path: Path) -> None:
     """`labgrid-client show` returning nothing (coordinator unreachable, or
     the place does not exist) must abort, not resolve an empty/guessed set

@@ -108,7 +108,17 @@ export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he}"
 # available as an explicit, WARNED escape hatch for genuinely
 # off-labgrid work (erase-storage.sh documents such a case); LG_PLACE
 # wins whenever both are set.
-export LG_COORDINATOR="${LG_COORDINATOR:-100.64.0.1:20408}"
+#
+# LG_COORDINATOR has NO default either, and deliberately so: a labgrid
+# coordinator address is bench-specific infrastructure, not a portable
+# SDK default -- baking in any one real address here would mean this
+# file, shipped in a public repo, always resolves against ONE bench's
+# coordinator regardless of who runs it. Export the coordinator you
+# actually use before setting LG_PLACE; bench_labgrid_resolve() below
+# refuses outright (rather than silently trying labgrid-client's own
+# 127.0.0.1:20408 fallback, which would just hang or resolve nothing on
+# every other host) when LG_PLACE is set but this is not.
+export LG_COORDINATOR="${LG_COORDINATOR:-}"
 
 # bench_labgrid_show <place> — echo `labgrid-client -p <place> show`.
 # Strips a trailing CR from every line: a real interactive run (pty)
@@ -168,6 +178,13 @@ bench_labgrid_resolve() {
 
 	if ! command -v labgrid-client >/dev/null 2>&1; then
 		echo "bench-env: LG_PLACE=$place set but 'labgrid-client' is not on PATH" >&2
+		return 1
+	fi
+	if [ -z "${LG_COORDINATOR:-}" ]; then
+		echo "bench-env: LG_PLACE=$place set but LG_COORDINATOR is unset -- there is no" >&2
+		echo "           default coordinator. Export the address of the labgrid" >&2
+		echo "           coordinator you actually use, e.g.:" >&2
+		echo "               export LG_COORDINATOR=<host>:<port>" >&2
 		return 1
 	fi
 
