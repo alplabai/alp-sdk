@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# scripts/bench/aen/flash-run-dualcore.sh [--replace-atoc] <hp-build-dir> <he-build-dir> [post_boot_read_bytes_hex]
+# scripts/bench/aen/flash-run-dualcore.sh [--replace-atoc] [--] <hp-build-dir> <he-build-dir> [post_boot_read_bytes_hex]
+#
+# A <hp-build-dir> that itself begins with "-" needs the "--" above ahead
+# of it (standard getopt-style shape) -- without it, the flag parser below
+# rejects it as an unknown flag (exit 2).
 #
 # Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
 # drives the Alif SETOOLS over the SE-UART + JLinkExe, both Linux

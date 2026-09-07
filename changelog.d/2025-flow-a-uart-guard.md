@@ -50,3 +50,21 @@ only) but currently have no SE-UART dependency at all — extending this guard
 to them means deciding whether they should newly depend on `SE_UART` for a
 read-only `gettoc` query, a design tradeoff against their "no SE-UART" Flow D
 premise that this change does not resolve. Refs #2027.
+
+**Validated against real silicon captures** off `e1m-aen-evk-01` (2026-09-07,
+ANSI intact), and three defects the earlier synthetic-fixture coverage
+missed fixed as a result: the transcript path (`${TMPDIR:-/tmp}/<tag>-atoc-
+before.log`) was NOT run-unique, so two concurrent runs of the same script
+against different boards could interleave and one could read the other's
+transcript — now `mktemp`-generated per run; `getbanner`'s real line has a
+LEADING SPACE ("` SES A1 v1.110.0 ...`"), which a bare `^SES` anchor
+rejected outright, aborting every run on real hardware — anchor now
+tolerates leading whitespace; SETOOLS colours the WHOLE LINE, not just the
+cell text, so the ANSI-stripped `gettoc` row also keeps a leading space,
+which the table-row match (`/^\|/`) never matched at all — `resident`
+silently computed empty on every real coloured transcript. Also: `SERAM0`/
+`SERAM1` (the two on-module SE firmware banks, never touched by
+`app-write-mram -p`) are resident on every real board regardless of the
+last app write and are now exempted alongside `DEVICE`, and `getbanner`'s
+own exit status is now folded into the precheck (a non-zero exit with an
+otherwise well-formed banner line no longer reads as verified).
