@@ -461,8 +461,20 @@ bench_atoc_replace_guard() {
 	# leaves open. A directory `mktemp` cannot create in (unwritable TMPDIR)
 	# fails here, which is the same "abort, do not guess" outcome the old
 	# rm -f/existence-check pair gave for an unremovable stale file.
+	#
+	# RETENTION IS DELIBERATE, NOT A LEAK: this file is never removed on
+	# any exit path (success or abort) -- it is the "always leaves a record
+	# of what was resident immediately before a destructive write" audit
+	# trail this guard exists to provide (see the function's own header
+	# comment), and a run that PASSED is exactly the run whose pre-write
+	# state you may later need to prove. Each run leaves one more
+	# ${TMPDIR:-/tmp}/<tag>-atoc-before.<random>.log; periodically clean
+	# TMPDIR by hand (see README.md's Quick start / troubleshooting).
 	local before
-	before=$(mktemp "${TMPDIR:-/tmp}/${tag}-atoc-before.XXXXXX.log") || return 5
+	before=$(mktemp "${TMPDIR:-/tmp}/${tag}-atoc-before.XXXXXX.log") || {
+		echo "!! ABORT ($tag): cannot create the pre-write ATOC transcript in ${TMPDIR:-/tmp}" >&2
+		return 5
+	}
 
 	# rc tracks whether the query itself succeeded -- defaults to failed
 	# (1) so the SE_UART-unset and maintenance-missing branches, which never
@@ -535,14 +547,19 @@ bench_atoc_replace_guard() {
 	# real row: `resident` silently computed empty on EVERY real coloured
 	# transcript, aborting every run as "unverified" rather than ever
 	# actually detecting -- or clearing -- a foreign entry.
+	# Carries the CPU column (field 3, e.g. "CM0+"/"M55-HE"/"A32_0") alongside
+	# the name, tab-separated -- the DEVICE/SERAM0/SERAM1 baseline exemption
+	# below cross-checks it (a same-named row on the wrong CPU is never
+	# baseline SE state, just a coincidentally-named app entry).
 	local resident=()
 	while IFS= read -r n; do
 		resident+=("$n")
 	done < <(printf '%s\n' "$stripped" | awk -F'|' '
 		/^[ \t]*\|/ {
-			name = $2
+			name = $2; cpu = $3
 			gsub(/^[ \t]+|[ \t]+$/, "", name)
-			if (name != "" && name != "Name" && name !~ /^-+$/) print name
+			gsub(/^[ \t]+|[ \t]+$/, "", cpu)
+			if (name != "" && name != "Name" && name !~ /^-+$/) print name "\t" cpu
 		}')
 
 	# Only trust the transcript's text when the query itself actually
@@ -570,17 +587,28 @@ bench_atoc_replace_guard() {
 	# --replace-atoc (discovered validating the parser against the real
 	# gettoc-BEFORE-2entry.txt capture, which must pass clean and instead
 	# aborted before this fix).
-	local extra=() n a hit nbase
-	for n in "${resident[@]}"; do
-		nbase="${n#\* }"
+	#
+	# Cross-check the CPU column (both real captures show all three
+	# baseline rows as "CM0+", and no app entry ever is): the exemption is
+	# on (name, CPU), not name alone -- a row that merely happens to share
+	# one of these names on a DIFFERENT core (measured: a synthesized
+	# "SERAM1 | M55-HE | ..." row) is an app entry with a colliding name,
+	# not SE firmware, and must still trip the guard.
+	local extra=() entry name cpu a hit nbase
+	for entry in "${resident[@]}"; do
+		name="${entry%%$'\t'*}"
+		cpu="${entry#*$'\t'}"
+		nbase="${name#\* }"
 		case "$nbase" in
-		DEVICE | SERAM0 | SERAM1) continue ;;
+		DEVICE | SERAM0 | SERAM1)
+			[ "$cpu" = "CM0+" ] && continue
+			;;
 		esac
 		hit=0
 		for a in "${allowed[@]}"; do
-			[ "$n" = "$a" ] && { hit=1; break; }
+			[ "$name" = "$a" ] && { hit=1; break; }
 		done
-		[ "$hit" -eq 0 ] && extra+=("$n")
+		[ "$hit" -eq 0 ] && extra+=("$name")
 	done
 
 	if [ "$replace_atoc" -ne 1 ]; then

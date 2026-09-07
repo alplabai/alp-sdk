@@ -87,6 +87,7 @@ by exporting before you invoke a helper.
 | `JLINK_SPEED` | `4000` | SWD clock (kHz). |
 | `JLINK_SN` / `JLINK_SERIAL` | *(none)* | Optional SEGGER probe serial selector; set this on benches with multiple J-Links. |
 | `JLINK_EXE` | `JLinkExe` | JLink Commander binary (override for a non-PATH install). |
+| `TMPDIR` | `/tmp` | Where `bench_atoc_replace_guard()` (#2025) writes its pre-write `gettoc` transcript, `<tag>-atoc-before.<random>.log`. **Retention is deliberate, not a leak:** every run leaves its file, whether the run passed or aborted — it is the record of what was resident immediately before the write. Never auto-cleaned; sweep `$TMPDIR` by hand periodically. |
 
 ## Which flow? (A / B / C / D)
 
