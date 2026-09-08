@@ -314,11 +314,32 @@ counter that never sees the encoder edges.
   `0x00290000` = AF 0, `P3_0`/`P3_1` deselected from the QEC entirely -- still
   counting); the asymmetric input filter (`FILTER_CTRL_B` `0x4800D088` was
   `0x00000000` against `FILTER_CTRL_A` `0x4800D084` = `0x00100101`; fixed, both
-  now read `0x00100101`, still counting); the trigger source (`UP_1_SRC`
-  `0x00000069` / `DOWN_1_SRC` `0x00000096` are a complete disjoint x4 decode);
-  and the channel driving its own input (`GLB_DRIVER_OEN` covers channels 0-11
-  only).  The leading remaining candidate is `CNTR_TYPE[4:2]` reading 0
-  (Sawtooth) where Alif's own QEC flow configures Triangle.
+  now read `0x00100101`, still counting); the channel driving its own input
+  (`GLB_DRIVER_OEN` covers channels 0-11 only); Sawtooth-vs-Triangle
+  (`CNTR_CTRL` written `0x00000033`, `CNTR_TYPE[4:2]` = `0b100` = Triangle,
+  still counting); and the trigger path itself (`CNTR_CTRL` written
+  `0x00000003` with `CNTR_TRIG` bit 5 clear, still counting).
+
+  **One row of this table was withdrawn, and the misreading behind it is worth
+  recording.** "The trigger source is not the problem, because the SVD
+  annotates `UP_0_SRC` with eight `For QEC channels: Reserved, not used` notes
+  and `UP_1_SRC` with none" was wrong. Those eight annotations sit on bits
+  `[31:24]` only (`TRIG12`..`TRIG15`); the other 24 fields, bits `[23:0]`, read
+  *"For QEC channels: Rising/Falling edge of `QEC_TRIGGER0..11` causes counter
+  to increment"*. `SRC_0` **is** a QEC-channel input path. Reading the top
+  eight bits as though they governed the whole register inverted the
+  conclusion, and that conclusion was used to reject a proposed fix.
+
+  **The leading hypothesis is now that the vendored `alif,utimer-qdec` driver
+  was written for a different channel class.** In Alif's own tree it is bound
+  only under `lputimer0/1/2`, where "channel input A/B" are that channel's real
+  pads; their channel-12 QEC flow counts through `SRC_0` with
+  `QEC_TRIGGER0`/`1`/`2` and never touches `SRC_1`. If "input A/B" on channels
+  12-15 is an internal net rather than `P3_0`/`P3_1`, that explains why
+  deselecting the pads changed nothing — the decode was never listening to them.
+  Unproven: what `QEC_TRIGGERn` maps to, and whether the QEC front-end
+  pre-decodes X/Y into direction pulses. `counts-per-revolution` = 96 holds
+  while the x4 matrix is programmed and must be revisited if the path changes.
 
 **Two traps when you measure this.**  The counter wraps at its programmed
 reload (`CNTR_PTR` = `counts-per-revolution - 1` = `0x0000005F`), so neither

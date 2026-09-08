@@ -67,13 +67,30 @@
  * UTIMER_STOP_1_SRC and UTIMER_CLEAR_1_SRC ONLY -- it gates the PROGRAMMATIC
  * start/stop/clear, and there is no programmatic up/down to gate.  For the
  * same reason UP_0_SRC (0x18) and DOWN_0_SRC (0x20) reading 0x00000000 is
- * EXPECTED, not a defect: SRC_0 is the QEC_TRIGGER0..11 raw-input crossbar,
- * and a quadrature decode is programmed through the SRC_1 A/B matrix, which
- * is what UP_1_SRC 0x69 / DOWN_1_SRC 0x96 already are (walk (A,B)
- * 00->10->11->01->00 against the SVD field names: all four transitions land
- * in the up mask, all four reverse transitions in the down mask -- a
- * complete, disjoint x4 decode, which is why counts-per-revolution is 24 PPR
- * * 4 = 96).
+ * not a PGM_EN defect.  Whether it is a defect at all is OPEN (#2038), and an
+ * earlier version of this comment got the reason wrong -- read the retraction
+ * below before relying on it.
+ *
+ * RETRACTED, and the misreading is worth stating so it is not repeated: this
+ * comment used to claim "the SVD annotates UP_0_SRC with eight 'For QEC
+ * channels: Reserved, not used' notes and UP_1_SRC with none, so SRC_1 is the
+ * path intended for QEC channels".  Those eight annotations sit on bits
+ * [31:24] ONLY (TRIG12..TRIG15).  The other 24 fields, bits [23:0], read "For
+ * QEC channels: Rising/Falling edge of QEC_TRIGGER0..11 causes counter to
+ * increment" -- so SRC_0 IS a QEC-channel input path, and reading the top
+ * eight bits as if they governed the whole register inverted the conclusion.
+ *
+ * What is still true: UP_1_SRC 0x69 / DOWN_1_SRC 0x96 form a complete,
+ * disjoint x4 matrix over (A,B) -- walk 00->10->11->01->00 and all four
+ * transitions land in the up mask, all four reverse transitions in the down
+ * mask.  What is NOT established is that "channel input A/B" on a QEC channel
+ * (12-15) is the encoder's X/Y pads at all.  Alif bind this same qdec driver
+ * only under lputimer0/1/2 in their own tree, where A/B are that channel's
+ * real pads; their channel-12 QEC flow counts through SRC_0 with
+ * QEC_TRIGGER0/1/2 and never touches SRC_1.  That would explain why
+ * deselecting P3_0/P3_1 (AF=0) changes nothing about the spurious count.
+ * counts-per-revolution stays 96 (24 PPR x4) while the x4 matrix is
+ * programmed; it must be revisited if the input path changes.
  *
  * NEXT STEP, not yet tried: CNTR_TYPE.  Measured CNTR_CTRL 0x00000023
  * decodes (SVD UTIMER_CNTR_CTRL, 0x80) as CNTR_EN[0]=1, CNTR_RUNNING[1]=1,
