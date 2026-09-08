@@ -34,9 +34,9 @@ as such, not collapsed into one generic "not implemented".
 | 1 | RTC + temperature | BRD_I2C (SoC I2C0) | RV-3028-C7 `init`/`was_cold_start`/`get_time`; seconds advance across a 1 s gap. TMP112 reading inside a plausible indoor band. | RTC accuracy/drift; TMP112 absolute accuracy (plausibility only). |
 | 2 | Sensors | carrier bus (SoC I2C2) | BMI323 / ICM-42670 / BMP581: documented startup floor, then a **bounded poll** of the chip's own data-ready flag, then a read; rejects the documented invalid/reset sentinels (`0x8000` per axis, `0x7f7f7f` raw). | Sensor calibration/accuracy; motion content of the sample. |
 | 3 | Power rails | carrier bus | All six INA236: bus voltage, **shunt microvolts**, current, gated on `ina236_conversion_ready()` having been observed set. | Whether a 0 mV/0 uV reading is "correct" for a given rail -- `+VCAM0`/`+VCAM1` are expected 0 (no camera fitted) and `+1V8`'s 0 uV shunt is an open question this demo reports but does not resolve. |
-| 4 | I/O expander | carrier bus | TCAL9538 configuration (0x03) and input port (0x00) register reads; also reads interrupt status (0x46) read-only (nothing here unmasks 0x45, so nothing is pending to acknowledge). | Any interrupt actually routing through a sensor -- see `aen-sensor-int-probe` for that. |
+| 4 | I/O expander answers | carrier bus | TCAL9538 configuration (0x03) and input port (0x00) register reads; also reads interrupt status (0x46) read-only (nothing here unmasks 0x45, so nothing is pending to acknowledge). | Any interrupt actually routing through a sensor -- see `aen-sensor-int-probe` for that. |
 | 5 | EEPROM identity | carrier bus | 24C128 read-only: `"ALPH"` magic + `"aen"` family string at the start of the manifest. | Manifest field accuracy beyond magic/family (see `aen-eeprom-manifest` for the full CRC/field decode). |
-| 6 | RGB LED | PWM0 (red) / PWM3 (green) / PWM1 (blue) | Drives each channel via `<alp/pwm.h>`, then asserts the UTIMER **register** the driver programmed (driver-enable + compare-enable bits, clock gate, run bit, a real fractional duty) -- restores each channel to idle before returning. | That the LED visibly lit -- unverifiable with no operator present; claiming it would be the same class of lie as counting an ID read as a pass. |
+| 6 | RGB LED | PWM0 (red) / PWM3 (green) / PWM1 (blue) | Drives each channel via `<alp/pwm.h>`, then asserts the UTIMER **register** the driver programmed (driver-enable + compare-enable bits, clock gate, run bit, a real fractional duty), then holds the colour lit for 1500 ms and names the colour it expects -- restores each channel to idle before returning. | That the LED visibly lit, and which colour it lit. The hold makes that checkable **by an operator watching the board**; the verdict itself is still the register read-back, and every channel programs identically, so a wrong `EVK_PWM_LED_*` colour mapping would still PASS. Only the eye settles the mapping. |
 | 7 | Rotary encoder | -- | Nothing (stub). | Needs an attended run (someone turning the knob) -- see `EVK-BRIEFING.md`'s open question about whether the driver can even distinguish "no motion" from "not counting". |
 | 8 | CC3501E Wi-Fi/BLE | -- | Nothing (stub). | Bridge protocol dispatch is a larger unit of work deferred to the next slice, not a hardware gap -- the coprocessor is already activated on every SoM. |
 | 9 | SD card | -- | Nothing (stub). | Blocked on phase 8: the SDIO mux sits behind the CC3501E bridge. |
@@ -95,7 +95,7 @@ on real silicon, which is why this phase verifies by register readback
 Standalone Zephyr app (no `alp_project.py` board.yaml flow):
 
 ```bash
-source /home/caner/alp-env.sh   # ZEPHYR_BASE, toolchain
+source <workspace>/alp-env.sh   # ZEPHYR_BASE, toolchain
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     examples/aen/aen-evk-demo -- \
     "-DEXTRA_ZEPHYR_MODULES=<path-to-this-alp-sdk-checkout>;<path-to-hal_alif>"
@@ -123,7 +123,7 @@ SWD instead.
 [evkdemo] phase  1/13: RTC + temperature (BRD_I2C)         PASS
 [evkdemo] phase  2/13: Sensors (BMI323/ICM42670/BMP581)     PASS
 [evkdemo] phase  3/13: Power rails (6x INA236)              PASS
-[evkdemo] phase  4/13: I/O expander (TCAL9538)              PASS
+[evkdemo] phase  4/13: I/O expander answers (TCAL9538, read-only) PASS
 [evkdemo] phase  5/13: EEPROM identity (24C128)             PASS
 [evkdemo] phase  6/13: RGB LED (PWM0/1/3)                   PASS
 [evkdemo] phase  7/13: Rotary encoder                       SKIPPED

@@ -683,6 +683,14 @@ static phase_verdict_t phase_eeprom_identity(demo_ctx_t *ctx)
 #define RGB_PERIOD_NS 1000000U             /* 1 kHz -- comfortably visible if anyone does look. */
 #define RGB_PULSE_NS  (RGB_PERIOD_NS / 4U) /* 25 % duty. */
 
+/* How long each colour is held lit. The register read-back below proves the
+ * controller and the pad are programmed; it cannot prove the LED lights, and
+ * it cannot confirm which colour sits on which channel -- the netlist labels
+ * for these pads are known wrong, so the mapping in EVK_PWM_LED_* came from a
+ * bench measurement. Only a human eye settles that, and a 1 ms pulse is not
+ * something a human eye can see. Hold each colour long enough to name it. */
+#define RGB_VISIBLE_HOLD_MS 1500U
+
 #define RGB_RED_NODE   DT_NODELABEL(evk_rgb_red)
 #define RGB_BLUE_NODE  DT_NODELABEL(evk_rgb_blue)
 #define RGB_GREEN_NODE DT_NODELABEL(evk_rgb_green)
@@ -729,6 +737,10 @@ static phase_verdict_t phase_rgb_led(demo_ctx_t *ctx)
 {
 	ARG_UNUSED(ctx); /* PWM is not on either I2C bus. */
 	printf("[evkdemo] -- Phase: RGB LED (PWM0 red / PWM3 green / PWM1 blue) --\n");
+	printf("[evkdemo] RGB: watch the LED -- each colour is held lit for %u ms, in the\n"
+	       "[evkdemo]      order RED, BLUE, GREEN. If the colour named does not match\n"
+	       "[evkdemo]      what lights, the EVK_PWM_LED_* mapping is wrong.\n",
+	       RGB_VISIBLE_HOLD_MS);
 
 	int ok_count = 0;
 	for (size_t i = 0; i < ARRAY_SIZE(RGB_CHANNELS); i++) {
@@ -787,6 +799,19 @@ static phase_verdict_t phase_rgb_led(demo_ctx_t *ctx)
 		       valid ? "ok" : "READ FAIL");
 
 		if (valid) ok_count++;
+
+		/* Hold the colour lit long enough for an operator to name it. This
+		 * is the only part of the phase a human can check, and it is the
+		 * only evidence that would catch a wrong EVK_PWM_LED_* mapping --
+		 * every channel programs identically, so the register read-back
+		 * above looks the same whether the mapping is right or wrong. */
+		if (valid) {
+			printf("[evkdemo] RGB %-5s: lit now for %u ms -- expect %s\n",
+			       ch->name,
+			       RGB_VISIBLE_HOLD_MS,
+			       ch->name);
+			k_msleep(RGB_VISIBLE_HOLD_MS);
+		}
 
 		/* Restore to idle before this phase returns. */
 		(void)alp_pwm_set_duty(pwm, 0u);
@@ -898,7 +923,7 @@ static const phase_t PHASES[] = {
 	{ "RTC + temperature (BRD_I2C)", phase_rtc_temp },
 	{ "Sensors (BMI323/ICM42670/BMP581)", phase_sensors },
 	{ "Power rails (6x INA236)", phase_power_rails },
-	{ "I/O expander (TCAL9538)", phase_io_expander },
+	{ "I/O expander answers (TCAL9538, read-only)", phase_io_expander },
 	{ "EEPROM identity (24C128)", phase_eeprom_identity },
 	{ "RGB LED (PWM0/1/3)", phase_rgb_led },
 	{ "Rotary encoder", phase_encoder_stub },
