@@ -29,16 +29,23 @@
  * that never counts also prints.  The old binary verdict called both of those
  * "PARTIAL", which taught nothing.  This app tells them apart the only way it
  * honestly can without a human: whether every sample_fetch/channel_get in the
- * window returned 0 (device_is_ready() already proved qdec_alif_utimer_init()
- * ran clock-on, counter-enable and trigger config to completion; an all-clean
- * poll window is the only "is it armed" evidence the driver exposes -- there
- * is no register-peek attr_get to ask more directly, and this file doesn't
- * invent one):
+ * window returned 0.
  *   - count changed                        -> PASS     (decode is live)
- *   - never changed, every read was clean  -> SKIPPED  (idle, not proven dead
- *                                              -- turn the shaft and rerun)
- *   - never changed, some read errored     -> FAIL     (armed state itself is
- *                                              in doubt; that's a real defect)
+ *   - never changed, every read was clean  -> SKIPPED  (reads work; the count
+ *                                              did not move -- turn the shaft
+ *                                              and rerun)
+ *   - never changed, some read errored     -> FAIL     (the driver itself is
+ *                                              failing reads; a real defect)
+ *
+ * What a SKIPPED verdict does NOT say: that the decoder is armed and running.
+ * The sensor API this driver registers is {sample_fetch, channel_get} only --
+ * no attr_get, no raw-counter channel -- so there is no way from here to see
+ * the counter's run state (UTIMERn_CNTR_CTRL bit 1 RUNNING).  Clean reads of a
+ * stopped counter look exactly like clean reads of an idle running one: that
+ * is precisely how #2037 (the counter was configured but never started)
+ * survived a bench run whose SKIPPED line claimed "decoder armed as
+ * configured".  Confirming the run state needs a debugger read of CNTR_CTRL /
+ * GLB_CNTR_RUNNING, not another print from this app.
  */
 
 #include <stdio.h>
@@ -105,28 +112,30 @@ int main(void)
 		alp_delay_ms(POLL_MS);
 	}
 
-	/* armed: every poll in the window returned a clean 0 from BOTH driver
-	 * calls -- the only runtime evidence available that qdec_alif_utimer_init()
-	 * left the counter enabled and trigger-armed the way it claims to. It is
-	 * not proof the shaft is even wired; it is proof the driver itself isn't
-	 * the thing standing between "armed" and "counting".
+	/* all_clean: every poll in the window returned a clean 0 from BOTH driver
+	 * calls. That is a statement about the READS, and nothing more -- it says
+	 * the driver answered every call without error. It is NOT evidence that the
+	 * counter is running (see the file header: nothing in this API can see
+	 * that), so do not name it "armed" and do not print it as such.
 	 */
-	bool        armed = (ok_reads == SAMPLES);
+	bool        all_clean = (ok_reads == SAMPLES);
 	const char *result;
 	const char *reason;
 
 	if (moved) {
 		result = "PASS";
 		reason = "angle changed -> live quadrature decode";
-	} else if (armed) {
+	} else if (all_clean) {
 		result = "SKIPPED";
-		reason = "no motion detected -- device ready and every read in the window came back "
-		         "clean (decoder armed as configured), but the count never moved; turn the "
-		         "shaft and rerun, this is NOT evidence of a defect";
+		reason = "no motion detected -- every read in the window succeeded but the reported "
+		         "count never changed; this app cannot see whether the counter is running, "
+		         "so this is neither proof of a working decoder nor of a broken one: turn "
+		         "the shaft and rerun, and if it still does not move, check CNTR_CTRL bit 1 "
+		         "RUNNING over SWD";
 	} else {
 		result = "FAIL";
-		reason = "count never moved AND not every read in the window was clean -- the armed "
-		         "state itself contradicts qdec_alif_utimer_init()'s configuration";
+		reason = "count never moved AND at least one read in the window returned an error -- "
+		         "the driver is failing calls it should not";
 	}
 
 	printf("[qenc] RESULT %s: %s (%d/%d clean reads)\n", result, reason, ok_reads, SAMPLES);

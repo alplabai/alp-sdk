@@ -11,8 +11,13 @@
  * ships no Alif qdec driver and hal_alif exposes no Zephyr device for the
  * quadrature block -- only the register-helper library (drivers/utimer/include/
  * utimer.h, alif_utimer_*) this file calls -- so the qdec source is carried
- * in-tree VERBATIM so it survives a `west update`.  Retire onto the opt-in
- * sdk-alif fork compatible once the qdec node is repointed AND bench-verified.
+ * in-tree as a VENDORED FORK-DRIVER COPY WITH LOCAL FIXES, not a verbatim
+ * vendor file.  It started as a verbatim copy; #1828 open-coded the filter
+ * programming, added the CNTR_TRIG write and a BUILD_ASSERT bound, and #2037
+ * added the missing GLB_CNTR_START write.  Anything that repoints this node
+ * onto the opt-in sdk-alif fork compatible MUST carry those four forward or
+ * silently reintroduce the defects; retire onto the fork only once the node is
+ * repointed AND bench-verified.
  * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==================================================================
  *
@@ -25,8 +30,14 @@
  * value (sensor_sample_fetch); the driver registers no ISR.  The reported
  * SENSOR_CHAN_ROTATION value is scaled to DEGREES
  * (counter * 360 / counts-per-revolution), not raw counts.
- * vendor-ext, BENCH-UNVERIFIED (compiles + links on the E8 he target; the live
- * quadrature decode / filter / clock programming are bench follow-ups).
+ * vendor-ext.  BENCH-VERIFIED for the counter-start path on E1M-AEN803 serial
+ * 2026W36-0002 (2026-09-08): after init, CNTR_CTRL (0x4800D080) reads
+ * 0x00000023 -- EN | RUNNING | CNTR_TRIG -- and GLB_CNTR_RUNNING (0x4800000C)
+ * reads 0x00001000, bit 12 for QEC0's channel.  Both were clear before #2037.
+ * STILL UNVERIFIED, and do not read the above as covering it: whether the
+ * counter is advancing on real quadrature edges.  In that same run, with
+ * nobody touching the shaft, the count advanced steadily at roughly 128
+ * counts/s, which no stationary encoder should do.
  */
 
 #define DT_DRV_COMPAT alif_utimer_qdec
@@ -153,11 +164,12 @@ static int qdec_alif_utimer_init(const struct device *dev)
 	/*
 	 * ENABLE the software counter control, do not disable it.  HWRM 13.2.6.3.8
 	 * defines START_1_SRC[31] PGM_EN as "0x0: Global programmatic start is
-	 * disabled", and 13.2.5 step 2 names exactly the global START/STOP/CLEAR
-	 * writes as how a channel is turned on.  The old
-	 * alif_utimer_disable_soft_counter_ctrl() here cleared that enable and
-	 * nothing ever wrote GLB_CNTR_START, so the counter had no start source at
-	 * all (#1828).
+	 * disabled": with it cleared, the global START write below is ignored.  The
+	 * old alif_utimer_disable_soft_counter_ctrl() here cleared it (#1828).  This
+	 * only ARMS the programmatic start/stop/clear sources (the helper sets
+	 * CNTR_SRC1_PGM_EN on START_1_SRC, STOP_1_SRC and CLEAR_1_SRC) -- it does
+	 * not start anything; the
+	 * GLB_CNTR_START write that does is at the end of this function (#2037).
 	 */
 	alif_utimer_enable_soft_counter_ctrl(timer_base);
 	alif_utimer_set_up_counter(timer_base);
@@ -207,6 +219,24 @@ static int qdec_alif_utimer_init(const struct device *dev)
 	 * still returned success (#1828).
 	 */
 	sys_set_bit(UTIMER_CNTR_CTRL(timer_base), QDEC_CNTR_CTRL_TRIG_BIT);
+
+	/*
+	 * Start the channel -- LAST, once every register above is programmed, since
+	 * this is the write that lets the hardware act on them.  Enabling and
+	 * starting are two separate steps: alif_utimer_enable_counter() above sets
+	 * the per-channel UTIMERn_CNTR_CTRL bit 0 EN, which only permits the channel
+	 * to run, while HWRM 13.2.5 names the GLOBAL START/STOP/CLEAR writes as how
+	 * a channel is actually turned on -- hence the GLOBAL base and the timer id
+	 * here, not timer_base (same calling convention as
+	 * alif_utimer_enable_timer_clock() above).  Without it the channel sat
+	 * configured and idle: measured on E1M-AEN803 2026W36-0002, CNTR_CTRL
+	 * (0x4800d080) read 0x00000021 -- EN and CNTR_TRIG set but bit 1 RUNNING
+	 * CLEAR -- with GLB_CNTR_START (0x48000000) never written and the counter
+	 * stuck at 0 while sample_fetch() still returned success (#2037).  CNTR_CTRL
+	 * bit 1 RUNNING (and GLB_CNTR_RUNNING bit <timer_id>) is what proves this
+	 * took effect on silicon.
+	 */
+	alif_utimer_start_counter(global_base, cfg->timer_id);
 
 	return 0;
 }
