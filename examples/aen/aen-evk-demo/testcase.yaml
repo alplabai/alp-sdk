@@ -2,15 +2,26 @@
 #
 # Build-only regression for the aen-evk-demo phased bench app on the
 # E1M-AEN801 (Ensemble E8, M55-HE): compiles the RTC/temperature, sensor,
-# power-rail, I/O-expander, EEPROM, RGB-LED, CC3501E Wi-Fi/BLE and
-# JPEG-encode phases -- plus the six not-yet-implemented phases' SKIPPED
+# power-rail, I/O-expander, EEPROM, RGB-LED, CC3501E Wi-Fi/BLE, Ethernet and
+# JPEG-encode phases -- plus the five not-yet-implemented phases' SKIPPED
 # stubs -- against the real board target.
 #
 # Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
-# board only): every phase needs real I2C/PWM silicon to produce a
+# board only): every phase needs real I2C/PWM/GMAC silicon to produce a
 # meaningful verdict, so this is a build-only compile check, not a
 # behavioural CI run -- the actual PASS/SKIPPED/FAIL verdicts only mean
-# something on e1m-aen-evk-03.
+# something on e1m-aen-evk-03, and phase 10's need a switch on the far end
+# of a cable as well.
+#
+# WHAT THE COMPILE ALONE IS WORTH FOR PHASE 10, since it can never run here:
+# it holds the app's memory map to its invariant. The Ethernet phase forced
+# system RAM out of the M55 DTCM into a carved window of the global SRAM0
+# bank, disjoint from the SRAM0 linker region phase 13's JPEG buffers live
+# in -- and the overlay deliberately shrinks &sram0 so that an oversized
+# SRAM0-tagged buffer becomes a LINK ERROR here rather than a silent
+# overlap on the bench. It also compile-checks the eth_dwmac_alif glue's
+# BUILD_ASSERT that the GMAC's descriptor memory is coherent
+# (CONFIG_DCACHE=n on this image).
 
 sample:
   name: aen-evk-demo
@@ -19,7 +30,7 @@ sample:
     the E1M EVK carrier. Runs fourteen named phases in a fixed order, each
     reporting PASS, SKIPPED, or FAIL -- never counting an absent part or an
     unimplemented phase as PASS -- and finishes with a summary table plus a
-    single RESULT line. This slice implements the framework plus the eight
+    single RESULT line. This slice implements the framework plus the nine
     phases whose drivers are bench-proven: RTC + temperature (BRD_I2C),
     sensors (BMI323/ICM-42670/BMP581), power rails (six INA236), the
     TCAL9538 I/O expander, the 24C128 EEPROM identity (read-only), the
@@ -28,11 +39,16 @@ sample:
     PING, GET_VERSION checked against the host's protocol version, GET_MAC
     checked for a structurally valid station address, GET_CAPABILITIES, a
     passive Wi-Fi scan that never associates, and BLE_ENABLE, with a PING
-    alone explicitly not sufficient for PASS -- and JPEG encode on the
+    alone explicitly not sufficient for PASS -- RMII Ethernet through the
+    GMAC and the on-module TI DP83825 PHY, which powers the PHY from a
+    SYS_INIT hook ahead of the driver's ref-clock probe, reads the real
+    wire state over MDIO because a fixed-link PHY's carrier_ok is
+    synthetic, and gates PASS on a DHCPv4 LEASE, never on carrier_ok or on
+    the MAC merely initialising -- and JPEG encode on the
     Alif Hantro VC9000E: a synthetic 64x64 NV12 frame through
     <alp/jpeg.h>, verified by the SOI/EOI markers and a plausible encoded
-    length, never by the return code alone. The remaining six phases
-    (encoder, SD card, Ethernet, sound, screen, NPU) are stubs
+    length, never by the return code alone. The remaining five phases
+    (encoder, SD card, sound, screen, NPU) are stubs
     that report SKIPPED with a phase-specific reason.
 
 tests:
@@ -51,4 +67,7 @@ tests:
       - spi
       - wifi
       - ble
+      - ethernet
+      - dwmac
+      - net
     build_only: true   # verdicts need the real bench; not a CI behavioural run.

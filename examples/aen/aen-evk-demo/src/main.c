@@ -30,12 +30,13 @@
  *
  * SCOPE OF THIS SLICE
  * --------------------
- * Fourteen phases are registered below, run in a fixed order. Eight have
+ * Fourteen phases are registered below, run in a fixed order. Nine have
  * real, bench-proven drivers behind them and are fully implemented: the
  * first six, plus phase 8 (the CC3501E Wi-Fi 6 / BLE 5.4 coprocessor over
- * the inter-chip SPI bridge) and phase 13 (JPEG encode on the Hantro
- * VC9000E). The remaining six (encoder, SD card, Ethernet, sound, screen,
- * NPU) are stubs that always report SKIPPED with a phase-specific reason
+ * the inter-chip SPI bridge), phase 10 (RMII Ethernet through the GMAC and
+ * the on-module DP83825 PHY) and phase 13 (JPEG encode on the Hantro
+ * VC9000E). The remaining five (encoder, SD card, sound, screen, NPU) are
+ * stubs that always report SKIPPED with a phase-specific reason
  * -- see the "STUBS" section below for why each one differs (an
  * attended-run requirement is not the same kind of gap as hardware
  * genuinely out of scope, a larger unit of work deferred to the next
@@ -44,6 +45,15 @@
  * one drop would have meant shipping several of them unverified against
  * real silicon; a working core that others can extend safely is worth more
  * than an unverifiable giant one.
+ *
+ * MEMORY: phase 10 moved the whole image's SYSTEM RAM out of the M55 DTCM
+ * into the global on-chip SRAM0 bank, because the GMAC DMA cannot reach
+ * DTCM and the descriptor rings and net_buf pool are driver-owned statics
+ * no application can place. That is an image-wide change affecting every
+ * phase, and the reasoning -- including why the naive form of it silently
+ * corrupts phase 13, and what it costs the other phases -- is written out
+ * in full at the top of this app's board overlay. Read that before
+ * changing anything about memory here.
  *
  * Neither implemented phase 13 nor the NPU stub is camera-gated: the JPEG
  * phase encodes a synthetic gradient it builds itself and the NPU model
@@ -90,10 +100,40 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
+#include <inttypes.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/sys/util.h> /* ARRAY_SIZE, BIT */
+
+/*
+ * Phase 10 only. Two Zephyr headers this app would otherwise never reach for,
+ * and both are deliberate rather than an oversight of the portable API:
+ *
+ *  - <zephyr/init.h> + <zephyr/drivers/gpio.h> + <zephyr/drivers/pinctrl.h>:
+ *    the PHY's power and reset lines have to be driven from a SYS_INIT hook,
+ *    BEFORE main() and before the Ethernet driver's own init (see
+ *    eth_phy_power_init() for why the ordering is the whole trick).
+ *    <alp/gpio.h> cannot serve that: its backend is not up that early, and
+ *    these two nets are board-control lines with no E1M instance ID to open
+ *    anyway -- the same reason src/cc3501e_bridge.c reaches for raw pad
+ *    control.
+ *  - the four zephyr/net headers: the portable API publishes no Ethernet or
+ *    IP peripheral class at all. Its Wi-Fi surface, <alp/iot.h>, is a
+ *    different peripheral on a different chip -- phase 8's coprocessor --
+ *    so there is nothing here to route through it.
+ */
+#include <zephyr/init.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/pinctrl.h>
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/sys/sys_io.h>
+#include <zephyr/net/net_if.h>
+#include <zephyr/net/ethernet.h>
+#include <zephyr/net/dhcpv4.h>
+#include <zephyr/net/net_ip.h>
 
 #include "alp/peripheral.h"
 #include "alp/pwm.h"
@@ -1563,6 +1603,371 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 }
 
 /* ==================================================================== */
+/* Phase 10 -- Ethernet (RMII GMAC + on-module TI DP83825 PHY)          */
+/* ==================================================================== */
+
+/*
+ * Grouped with the other IMPLEMENTED phases though it runs tenth, same as
+ * phase 13 above -- this file's organising principle is "real phases first,
+ * stubs after".
+ *
+ * WHAT THIS PHASE WILL AND WILL NOT COUNT AS A PASS
+ * --------------------------------------------------
+ * It gates on a DHCPv4 LEASE, and on nothing weaker. That choice is the whole
+ * point of the phase. The obvious cheaper gates are all lies of the exact
+ * shape this app exists to refuse:
+ *
+ *   - "the MAC initialised" is the chip-ID read all over again;
+ *   - net_if_is_carrier_ok() is worse, because it LOOKS like a link check. The
+ *     PHY here is unmanaged (a fixed-link DT child, no Zephyr MDIO bus), so
+ *     carrier is SYNTHETIC: it reports what devicetree hard-codes, not what is
+ *     on the cable. It reads true with the cable in your hand.
+ *
+ * A lease is unforgeable by comparison: DISCOVER -> OFFER -> REQUEST -> ACK
+ * completes only over a genuinely bidirectional link with a server on it. It
+ * is also what caught the bug this app's overlay is shaped around -- with the
+ * DMA buffers in DTCM the wire link came up and NOTHING moved.
+ *
+ * NO CABLE IS NOT A FAILURE, AND THAT DISTINCTION IS THE HARD PART
+ * ----------------------------------------------------------------
+ * A lease needs a switch with a DHCP server on the far end, which no bench run
+ * can be assumed to have. So the phase separates the cases by asking the PHY
+ * itself, over MDIO, what the wire is doing -- and then by asking the
+ * interface's own byte counters what actually moved:
+ *
+ *   PHY silent on MDIO (no ID at any of the 32 addresses)  -> FAIL
+ *         The DP83825 is fitted on every E1M-AEN SoM. If it does not answer
+ *         its management interface it is unpowered, unclocked or unreset --
+ *         our hardware, not the operator's cable.
+ *   PHY answers, auto-neg never completes                  -> SKIPPED
+ *         Nobody on the other end. This is "is a cable plugged in?", the
+ *         normal state of an unattended bench, and it is NOT a failure.
+ *   Link up but the MAC transmitted ZERO bytes             -> FAIL
+ *         We know DHCP queued DISCOVERs, so a zero TX count means no frame
+ *         ever left the part regardless of what is out there. Unambiguous.
+ *   Link up, TX moved, no lease                            -> SKIPPED
+ *         Either no DHCP server on this segment or a dead RX path; the two
+ *         are told apart by the printed rx_bytes, and the verdict carries a
+ *         qualifier into the summary table so a reader of the table alone
+ *         still sees which. Left as SKIPPED rather than FAIL because a live
+ *         switch port with no other talkers legitimately sends us nothing --
+ *         failing on that would be the mirror-image lie.
+ *   Link up + lease                                        -> PASS
+ *
+ * The reference for every register value and every ordering constraint below
+ * is examples/aen/aen-ethernet-link, which is BENCH-VERIFIED on this silicon
+ * (a real lease off the bench switch, server-side reachable). Read its header
+ * before changing anything here.
+ */
+
+#define PHY_RESET_PIN    6 /* E_PHY_RESET  = P11_6 (gpio11), SoM TSV */
+#define PHY_PWRDWN_PIN   4 /* E_PHY_PWRDWN = P15_4 (lpgpio), SoM TSV */
+#define ETH_LINK_POLL_MS 250
+#define ETH_LINK_POLLS   32 /* 32 x 250 ms = 8 s for auto-negotiation */
+#define ETH_DHCP_POLL_MS 500
+#define ETH_DHCP_POLLS   30 /* 30 x 500 ms = 15 s for DISCOVER..ACK */
+
+/* Pad-mux states for the two PHY control lines. gpio_dw applies no mux of its
+ * own, so the GPIO/LPGPIO function (function 0) has to be selected through the
+ * Alif pinctrl driver before the pins will do anything. */
+static const pinctrl_soc_pin_t eth_phy_reset_mux[]  = { PIN_P11_6__GPIO };
+static const pinctrl_soc_pin_t eth_phy_pwrdwn_mux[] = { PIN_P15_4__LPGPIO };
+
+/*
+ * THE PHY IS POWERED HERE, BEFORE main(), AND THE ORDERING IS THE WHOLE TRICK.
+ *
+ * The Ethernet glue's RMII reference-clock AUTO probe runs inside the eth
+ * driver's init and picks between the on-module external 50 MHz oscillator and
+ * an internal PLL fallback -- by looking for the external clock AT THAT
+ * MOMENT. The oscillator is downstream of this power enable. Power the PHY
+ * late (from the phase function, in main()) and the probe has already fallen
+ * back before the phase runs: bench-observed as ETH_CTRL bit4 = 1.
+ *
+ * So this is a SYS_INIT at POST_KERNEL priority 50, which lands in the only
+ * window that works: after gpio_dw (40) so the controllers exist, before
+ * eth_dwmac (ETH_INIT_PRIORITY, 60) so the probe sees a clocked PHY.
+ *
+ * It runs on every boot, including runs where phase 10 is never reached --
+ * unavoidable, and harmless: it touches two pads (P15_4, P11_6) that nothing
+ * else in this app or its board layer claims.
+ */
+static int eth_phy_power_init(void)
+{
+	const struct device *gpio11 = DEVICE_DT_GET(DT_NODELABEL(gpio11));
+	const struct device *lpgpio = DEVICE_DT_GET(DT_NODELABEL(lpgpio));
+
+	if (!device_is_ready(gpio11) || !device_is_ready(lpgpio)) {
+		return -ENODEV;
+	}
+
+	pinctrl_configure_pins(eth_phy_reset_mux, ARRAY_SIZE(eth_phy_reset_mux), 0U);
+	pinctrl_configure_pins(eth_phy_pwrdwn_mux, ARRAY_SIZE(eth_phy_pwrdwn_mux), 0U);
+
+	/* E_PHY_PWRDWN gates a board power switch rather than the PHY's own
+	 * power-down input on this module -- the "needs a power enable" the bench
+	 * called out IS this pin -- so it is driven HIGH to turn the supply on.
+	 * The SoM TSV gives the pad, not the polarity; both were bench-tried and
+	 * this is the one that produced a clocked PHY. */
+	gpio_pin_configure(lpgpio, PHY_PWRDWN_PIN, GPIO_OUTPUT_ACTIVE);
+	gpio_pin_set(lpgpio, PHY_PWRDWN_PIN, 1);
+	k_busy_wait(50000); /* let the supply and its reference clock settle */
+
+	/* Conventional DP83825 RST_N (active-low): LOW asserts, HIGH releases.
+	 * Long assert plus a long post-reset settle so the reference clock is
+	 * stable ACROSS the reset -- a clock that is not stable at deassert leaves
+	 * the analog front-end uninitialised, which presents as a PHY that answers
+	 * MDIO but never links. */
+	gpio_pin_configure(gpio11, PHY_RESET_PIN, GPIO_OUTPUT_ACTIVE);
+	gpio_pin_set(gpio11, PHY_RESET_PIN, 0);
+	k_busy_wait(50000);
+	gpio_pin_set(gpio11, PHY_RESET_PIN, 1);
+	k_busy_wait(100000); /* DP83825 post-reset settle, >= 50 ms */
+	return 0;
+}
+SYS_INIT(eth_phy_power_init, POST_KERNEL, 50);
+
+/*
+ * Raw MDIO through the DWMAC MAC_MDIO registers. The fixed-link configuration
+ * performs no MDIO of its own, so this is how the phase reads what the WIRE is
+ * doing rather than what devicetree claims -- see the carrier_ok note above.
+ *
+ * MAC_MDIO_ADDRESS = GMAC base + 0x200: PA[25:21] = PHY address,
+ * RDA[20:16] = register, CR[11:8] = MDC divider, GOC = bits 3..2 (read = both
+ * set, write = bit 2 only), GB = bit 0 = busy. MAC_MDIO_DATA = base + 0x204,
+ * data in [15:0]. CR = 4 selects a slow, safe MDC. Every value here is
+ * transcribed from aen-ethernet-link, not invented.
+ *
+ * This is the same "hand-rolled register poke" phase 13 above declines to do
+ * for the Hantro hardware ID, and the difference is not a double standard: for
+ * the JPEG block the portable API's own error path already surfaces the fact
+ * (a bad ID makes alp_jpeg_open() return NULL with ALP_ERR_NOT_READY), so the
+ * poke would add nothing. Here there is NO other source of the answer at all
+ * -- the only alternative reading, carrier_ok, is the synthetic one.
+ */
+#define GMAC_MDIO_ADDR 0x48100200U
+#define GMAC_MDIO_DATA 0x48100204U
+
+static uint16_t eth_mdio_read(uint8_t phy, uint8_t reg)
+{
+	while (sys_read32(GMAC_MDIO_ADDR) & BIT(0)) {
+	}
+	uint32_t a =
+	    ((uint32_t)phy << 21) | ((uint32_t)reg << 16) | (0x4U << 8) | BIT(3) | BIT(2) | BIT(0);
+	sys_write32(a, GMAC_MDIO_ADDR);
+	for (int i = 0; i < 100000 && (sys_read32(GMAC_MDIO_ADDR) & BIT(0)); i++) {
+		k_busy_wait(1);
+	}
+	return (uint16_t)(sys_read32(GMAC_MDIO_DATA) & 0xFFFFU);
+}
+
+static void eth_mdio_write(uint8_t phy, uint8_t reg, uint16_t val)
+{
+	while (sys_read32(GMAC_MDIO_ADDR) & BIT(0)) {
+	}
+	sys_write32(val, GMAC_MDIO_DATA);
+	uint32_t a = ((uint32_t)phy << 21) | ((uint32_t)reg << 16) | (0x4U << 8) | BIT(2) | BIT(0);
+	sys_write32(a, GMAC_MDIO_ADDR);
+	for (int i = 0; i < 100000 && (sys_read32(GMAC_MDIO_ADDR) & BIT(0)); i++) {
+		k_busy_wait(1);
+	}
+}
+
+/* Scan all 32 MDIO addresses for a PHY. Returns its address, or -1 if nothing
+ * answered. PHYIDR1 (reg 2) reading 0x0000 or 0xffff is "no device driving the
+ * bus"; the DP83825's identity is 0x2000a140, which pins the die/OUI but does
+ * NOT distinguish the part's grade or package suffix, so it is printed for the
+ * reader rather than compared against. */
+static int eth_phy_find(void)
+{
+	for (uint8_t phy = 0; phy < 32; phy++) {
+		uint16_t id1 = eth_mdio_read(phy, 2);
+		if (id1 != 0xFFFF && id1 != 0x0000) {
+			printf("[evkdemo] ETH: MDIO PHY@%u id=%04x%04x (DP83825 = 2000a140)\n",
+			       phy,
+			       id1,
+			       eth_mdio_read(phy, 3));
+			return phy;
+		}
+	}
+	return -1;
+}
+
+/* Put the PHY in 50 MHz-reference RMII mode, restart auto-negotiation and wait
+ * for the wire link. Returns true once BMSR reports both link-up (bit 2) and
+ * auto-neg-complete (bit 5). */
+static bool eth_phy_wait_link(int phy)
+{
+	/*
+	 * RCSR (0x17) bit 7 REF_CLK_SEL = 1 puts the PHY in 50 MHz-reference RMII
+	 * mode, i.e. makes it the RMII SLAVE clocked from the module's external
+	 * oscillator. Bench-confirmed on this silicon: with bit 7 set the PHY
+	 * forms a media link (BMSR 0x786d), with it clear it does not (0x7849).
+	 * This is a clock-domain setting only -- the separate data-plane stall
+	 * that looked like the same fault turned out to be the DTCM buffer
+	 * placement the app overlay now fixes.
+	 */
+	uint16_t rcsr = eth_mdio_read(phy, 0x17);
+	eth_mdio_write(phy, 0x17, rcsr | BIT(7));
+	printf("[evkdemo] ETH: RCSR 0x%04x -> 0x%04x (REF_CLK_SEL = 50 MHz reference)\n",
+	       rcsr,
+	       eth_mdio_read(phy, 0x17));
+
+	eth_mdio_write(phy, 0, BIT(12) | BIT(9)); /* BMCR: auto-neg enable + restart */
+	for (int i = 0; i < ETH_LINK_POLLS; i++) {
+		k_msleep(ETH_LINK_POLL_MS);
+		uint16_t bmsr = eth_mdio_read(phy, 1);
+		if ((bmsr & BIT(2)) && (bmsr & BIT(5))) {
+			printf("[evkdemo] ETH: wire link UP after %d ms (BMSR=%04x ANLPAR=%04x)\n",
+			       (i + 1) * ETH_LINK_POLL_MS,
+			       bmsr,
+			       eth_mdio_read(phy, 0x05));
+			return true;
+		}
+	}
+	/* ANLPAR (the partner's advertisement) reading 0 is the tell that nothing
+	 * is on the other end at all, as opposed to a partner that cannot agree. */
+	printf("[evkdemo] ETH: wire link DOWN after %d ms (BMSR=%04x ANLPAR=%04x)\n",
+	       ETH_LINK_POLLS * ETH_LINK_POLL_MS,
+	       eth_mdio_read(phy, 1),
+	       eth_mdio_read(phy, 0x05));
+	return false;
+}
+
+static phase_verdict_t phase_ethernet(demo_ctx_t *ctx)
+{
+	printf("[evkdemo] -- Phase: Ethernet (RMII GMAC + on-module DP83825 PHY) --\n");
+
+	struct net_if *iface = net_if_get_default();
+	if (iface == NULL) {
+		printf("[evkdemo] ETH: no default network interface -- the alif,ethernet node did "
+		       "not bind (check the overlay's &ethernet status and CONFIG_ETH_DWMAC_ALIF)\n");
+		return PHASE_FAIL;
+	}
+
+	struct net_linkaddr *la = net_if_get_link_addr(iface);
+	printf("[evkdemo] ETH: MAC %02x:%02x:%02x:%02x:%02x:%02x (per-boot random "
+	       "locally-administered, from the SoC dtsi's zephyr,random-mac-address)\n",
+	       la->addr[0],
+	       la->addr[1],
+	       la->addr[2],
+	       la->addr[3],
+	       la->addr[4],
+	       la->addr[5]);
+
+	/*
+	 * Which reference clock the driver's AUTO probe settled on, read back from
+	 * ETH_CTRL bit 4 (0 = the module's external 50 MHz oscillator, 1 = the
+	 * internal-PLL fallback). EXTERNAL is the bench-verified path and is the
+	 * proof that eth_phy_power_init() ran early enough: the oscillator is
+	 * behind the power enable, so the probe can only have found it if the PHY
+	 * was already powered when the eth driver initialised.
+	 *
+	 * ADDRESS PROVENANCE, stated because it matters if this is ever reused:
+	 * 0x4903F080 bit 4 was BENCH-OBSERVED over SWD during the E8 Ethernet
+	 * bring-up, not transcribed from a public TRM. It is not a FAIL gate here
+	 * -- the internal PLL is a real code path -- it is a diagnostic.
+	 */
+	bool refclk_external = (sys_read32(0x4903F080U) & BIT(4)) == 0U;
+	printf("[evkdemo] ETH: RMII refclk = %s (ETH_CTRL bit4=%d)\n",
+	       refclk_external ? "EXTERNAL oscillator -- the PHY was powered before the probe"
+	                       : "internal PLL -- the external oscillator was NOT seen at probe time",
+	       refclk_external ? 0 : 1);
+
+	int rc = net_if_up(iface);
+	printf("[evkdemo] ETH: net_if_up -> %d%s\n", rc, (rc == -EALREADY) ? " (already up)" : "");
+	if (rc != 0 && rc != -EALREADY) {
+		printf("[evkdemo] ETH: the interface refused to come up\n");
+		return PHASE_FAIL;
+	}
+
+	int phy = eth_phy_find();
+	if (phy < 0) {
+		printf("[evkdemo] ETH: NO PHY answered on any of the 32 MDIO addresses. The DP83825 "
+		       "is fitted on every E1M-AEN SoM, so this is on-module: check E_PHY_PWRDWN "
+		       "(P15_4) drove high, E_PHY_RESET (P11_6) released, and the MDC/MDIO pinmux "
+		       "(P11_2/P11_1)\n");
+		return PHASE_FAIL;
+	}
+
+	/* ANAR = what we advertise, ANLPAR = what the partner advertises (0 means
+	 * we are hearing nothing at all), PHYSTS = link/speed, RCSR = RMII mode. */
+	printf("[evkdemo] ETH: PHY regs ANAR=%04x ANLPAR=%04x PHYSTS=%04x RCSR=%04x\n",
+	       eth_mdio_read(phy, 0x04),
+	       eth_mdio_read(phy, 0x05),
+	       eth_mdio_read(phy, 0x10),
+	       eth_mdio_read(phy, 0x17));
+
+	if (!eth_phy_wait_link(phy)) {
+		/* The normal unattended-bench outcome. The PHY is alive and clocked
+		 * (it answered MDIO above); there is simply nobody on the wire. */
+		printf("[evkdemo] ETH: no carrier -- is a cable plugged into a live switch port?\n");
+		ctx->note = "no carrier -- cable?";
+		return PHASE_SKIPPED;
+	}
+
+	/* The real test. A lease requires DISCOVER out and OFFER/ACK back, so it
+	 * cannot complete unless both DMA directions genuinely work. */
+	bool bound = false;
+	net_dhcpv4_start(iface);
+	for (int i = 0; i < ETH_DHCP_POLLS; i++) {
+		if (iface->config.dhcpv4.state == NET_DHCPV4_BOUND) {
+			bound = true;
+			break;
+		}
+		k_msleep(ETH_DHCP_POLL_MS);
+	}
+
+	uint64_t tx = iface->stats.bytes.sent;
+	uint64_t rx = iface->stats.bytes.received;
+	printf("[evkdemo] ETH: admin_up=%d carrier_ok=%d(SYNTHETIC, not a link proof) "
+	       "tx_bytes=%" PRIu64 " rx_bytes=%" PRIu64 " dhcp_bound=%d\n",
+	       net_if_is_admin_up(iface),
+	       net_if_is_carrier_ok(iface),
+	       tx,
+	       rx,
+	       bound);
+
+	if (bound) {
+		char                ip[NET_IPV4_ADDR_LEN] = { 0 };
+		struct net_if_addr *ua                    = &iface->config.ip.ipv4->unicast[0].ipv4;
+		net_addr_ntop(AF_INET, &ua->address.in_addr, ip, sizeof(ip));
+		printf("[evkdemo] ETH: DHCP lease = %s -- wire link UP and both DMA directions "
+		       "proven end to end\n",
+		       ip);
+		return PHASE_PASS;
+	}
+
+	if (tx == 0u) {
+		/* Unambiguous: we know the DHCP client queued DISCOVERs and the link
+		 * is up, so a zero TX count means no frame left the MAC whatever is
+		 * on the far end. This is the TX half of the DMA-placement failure
+		 * the app overlay's memory block describes. */
+		printf("[evkdemo] ETH: link is UP but the MAC transmitted ZERO bytes -- no frame "
+		       "left the part. Suspect the descriptor rings / net_buf pool are not in "
+		       "DMA-reachable memory; see the placement block in this app's overlay\n");
+		return PHASE_FAIL;
+	}
+
+	/* Frames left, no lease came back. Two very different worlds, and rx_bytes
+	 * is what separates them -- but neither is provably a board fault, so
+	 * neither is a FAIL: a live switch port with no other talkers and no DHCP
+	 * server legitimately sends us nothing at all. */
+	if (rx == 0u) {
+		printf("[evkdemo] ETH: TX moved but NOTHING was received. Either this segment is "
+		       "silent (no DHCP server, no other talkers) or the RX path is dead -- the "
+		       "counters alone cannot tell those apart. Retry against a switch with a DHCP "
+		       "server to settle it\n");
+		ctx->note = "link UP, TX ok, RX silent -- no DHCP server, or dead RX";
+	} else {
+		printf("[evkdemo] ETH: the segment is live (we received frames) but no DHCP server "
+		       "answered in %d s\n",
+		       (ETH_DHCP_POLLS * ETH_DHCP_POLL_MS) / 1000);
+		ctx->note = "link UP, traffic seen, no DHCP server";
+	}
+	return PHASE_SKIPPED;
+}
+
+/* ==================================================================== */
 /* STUBS -- phases not in this slice.  Each reason differs; see below.  */
 /* ==================================================================== */
 
@@ -1600,15 +2005,6 @@ static phase_verdict_t phase_sdcard_stub(demo_ctx_t *ctx)
 	return PHASE_SKIPPED;
 }
 
-/* Ethernet: not implemented this slice; deferred alongside the other
- * SoC-peripheral phases below to keep this drop to a working core. */
-static phase_verdict_t phase_ethernet_stub(demo_ctx_t *ctx)
-{
-	ARG_UNUSED(ctx);
-	printf("[evkdemo] -- Phase: Ethernet -- SKIPPED (deferred to the next slice) --\n");
-	return PHASE_SKIPPED;
-}
-
 /* Sound out -> PDM-in loopback: the maintainer has confirmed speakers ARE
  * connected to both TAS2563 amps, so a real tone-out + mic-capture
  * end-to-end check is possible in a future slice -- but the I2S bring-up
@@ -1640,28 +2036,28 @@ static phase_verdict_t phase_screen_stub(demo_ctx_t *ctx)
  * Vela-compiled person_detect_u85 model is ~263 KiB, which is precisely
  * why THAT app links into MRAM slot0 and boots via Flow D instead of
  * RAM-running. This demo is a Flow C ITCM RAM-run: ITCM is 256 KB total
- * and the demo already occupies a little over half of it -- roughly
- * 93 KB (36.24%) before phase 13, about 106 KB (41.41%) after it, and the
- * CC3501E bridge driver in phase 8 added ~34 KB more, so the headroom is
- * shrinking, not growing. Deliberately not a byte-exact figure: the size depends on
- * which conf fragments the build layers, and a bench Flow C build
- * (RAM console, scripts/bench/aen/aen-bench-shared.conf) and a plain
- * scripts/bench/aen/build.sh differ by a few bytes. A byte count printed
- * from a string literal also goes stale the moment anything else in this
- * file changes -- it did exactly that, by 8 bytes, in the commit that
- * introduced it. The argument does not need the precision. A
- * ~263 KiB model does not fit in what is left, by a wide margin and not
- * by a trimmable one. Adding NPU inference here therefore means relinking the whole
- * demo into MRAM slot0 and switching its boot flow -- a different unit of
- * work from adding a phase, and out of scope for this slice. Shrinking
- * the model to fit would trade the proven artefact for an unproven one,
- * which is the opposite of what this app is for. */
+ * and the demo now occupies roughly two thirds of it -- phase 8's CC3501E
+ * bridge driver and phase 10's network stack were each worth tens of
+ * kilobytes, so the headroom is shrinking, not growing. Deliberately no
+ * byte-exact figure and no percentage: the size depends on which conf
+ * fragments the build layers (a bench Flow C build with the RAM console
+ * and scripts/bench/aen/aen-bench-shared.conf differs from a plain
+ * scripts/bench/aen/build.sh), and a number printed from a string literal
+ * goes stale the moment anything else in this file changes -- it did
+ * exactly that, twice, before this wording. The argument does not need the
+ * precision. A ~263 KiB model does not fit in what is left, by a wide
+ * margin and not by a trimmable one. Adding NPU inference here therefore
+ * means relinking the whole demo into MRAM slot0 and switching its boot
+ * flow -- a different unit of work from adding a phase, and out of scope
+ * for this slice. Shrinking the model to fit would trade the proven
+ * artefact for an unproven one, which is the opposite of what this app is
+ * for. */
 static phase_verdict_t phase_npu_stub(demo_ctx_t *ctx)
 {
 	ARG_UNUSED(ctx);
 	printf("[evkdemo] -- Phase: NPU inference -- SKIPPED (needs a boot-flow change, not a "
 	       "phase: aen-npu-inference-alp's person_detect_u85 model is ~263 KiB and this "
-	       "demo is a Flow C ITCM RAM-run -- 256 KB ITCM total, a little over half "
+	       "demo is a Flow C ITCM RAM-run -- 256 KB ITCM total, roughly two thirds "
 	       "already used, so the model would have to move the whole image to MRAM slot0 / "
 	       "Flow D) --\n");
 	return PHASE_SKIPPED;
@@ -1681,7 +2077,7 @@ static const phase_t PHASES[] = {
 	{ "Rotary encoder", phase_encoder_stub },
 	{ "CC3501E Wi-Fi/BLE", phase_cc3501e },
 	{ "SD card", phase_sdcard_stub },
-	{ "Ethernet", phase_ethernet_stub },
+	{ "Ethernet", phase_ethernet },
 	{ "Sound out -> PDM in", phase_sound_stub },
 	{ "Screen (DSI)", phase_screen_stub },
 	{ "JPEG encode (Hantro VC9000E)", phase_jpeg_encode },

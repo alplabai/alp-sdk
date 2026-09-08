@@ -6,10 +6,12 @@
  * bench RAM-run via J-Link.
  *
  * THIS OVERLAY CARRIES THE HARDWARE THE BOARD LAYER DOES NOT ALREADY ENABLE:
- * the mandatory bench ITCM retarget, the RGB LED's three UTIMER/PWM channels,
- * phase 13's JPEG block, and (at the end of the file) the SoM-internal
- * Alif <-> CC3501E bridge phase 8 drives -- SPI1 with its hardware SS0, the
- * LP-GPIO island carrying WIFI_EN / nRESET, and the READY input.
+ * the mandatory bench ITCM retarget, the SYSTEM-RAM RELOCATION phase 10 forces
+ * (read that block before changing anything about memory), the RGB LED's three
+ * UTIMER/PWM channels, phase 13's JPEG block, phase 10's RMII Ethernet route +
+ * PHY control GPIOs, and (at the end of the file) the SoM-internal Alif <->
+ * CC3501E bridge phase 8 drives -- SPI1 with its hardware SS0, the LP-GPIO
+ * island carrying WIFI_EN / nRESET, and the READY input.
  *
  * NOT here: BRD_I2C (SoC I2C0, alp-i2c2) and the carrier bus (SoC I2C2,
  * alp-i2c0) are both SoM/board facts already wired by the board tree
@@ -46,6 +48,98 @@
 #include <zephyr/dt-bindings/pwm/pwm.h>
 
 /*
+ * ============================================================================
+ * SYSTEM-RAM PLACEMENT -- read this before touching anything about memory
+ * ============================================================================
+ *
+ * THE WHOLE IMAGE'S SYSTEM RAM LIVES IN GLOBAL SRAM0, NOT IN THE M55 DTCM.
+ * Phase 10 (Ethernet) forces that, and the two nodes below are what keep the
+ * move from silently destroying phase 13.
+ *
+ * WHY THE MOVE IS UNAVOIDABLE. The GMAC is a DMA bus master: it fetches its
+ * descriptor rings and reads/writes the net_buf packet pool over its own AXI
+ * master, and the upstream DWMAC core hands it the RAW CPU POINTER (no
+ * local_to_global translation -- see zephyr/drivers/ethernet/
+ * eth_dwmac_alif_ensemble.c's header). The board default is
+ * `zephyr,sram = &dtcm`, and the M55 DTCM (CPU-local alias 0x20000000) is
+ * tightly-coupled and NOT on the GMAC's AXI path, so rings and buffers left
+ * there are invisible to the DMA and ZERO frames move in either direction even
+ * with the wire link up -- bench-observed on both sides at once (SoM
+ * rx_bytes=0 AND the server NIC RX=0). examples/aen/aen-ethernet-link
+ * root-caused that and calls the fix its DECISIVE one.
+ *
+ * There is no narrower fix available to an application. The descriptor rings
+ * are file-static in the Ethernet driver and the net_buf pool is file-static
+ * in the net subsystem; neither can be section-tagged from here the way phase
+ * 13's JPEG buffers are, and the driver's own header states the requirement is
+ * enforced "at the board/SoC layer, not in this glue". So system RAM moves.
+ *
+ * WHY NOT JUST `zephyr,sram = &sram0` LIKE aen-ethernet-link DOES. Because
+ * this app, unlike that one, already puts buffers in the SRAM0 LINKER REGION.
+ * The SoC dtsi's sram0 node is BOTH a `zephyr,memory-region` (which emits a
+ * linker MEMORY region named SRAM0, the one phase 13's
+ * __attribute__((section("SRAM0"))) buffers land in) AND, if chosen, the
+ * source of the main RAM region. Choose it and both regions start at
+ * 0x02000000, the linker allocates into them INDEPENDENTLY, and it does not
+ * warn: measured on this tree, .data/.bss/.noinit were placed on top of
+ * jpeg_out and jpeg_src, i.e. phase 13 writing its gradient would have
+ * scribbled over the whole image's static state. Silent, and exactly the class
+ * of regression this app exists to refuse.
+ *
+ * THE FIX: give the two consumers disjoint windows of the same 4 MiB bank.
+ * SRAM0 is one physical global on-chip SRAM at 0x02000000 -- the bank the GMAC
+ * DMA proof was measured against, and the bank phase 13's Hantro AXI master is
+ * already proven to reach -- so both windows inherit that reachability; only
+ * the offsets differ.
+ *
+ *     0x0200_0000 +64 KiB   SRAM0 linker region  -- phase 13's JPEG buffers
+ *                                                   (~14 KiB of it used), at
+ *                                                   the same addresses as
+ *                                                   before this phase existed
+ *     0x0201_0000 +512 KiB  system RAM           -- .data/.bss/.noinit, all
+ *                                                   stacks, the GMAC rings and
+ *                                                   the net_buf pool
+ *     0x0209_0000 ..        unused remainder of the bank
+ *
+ * Shrinking &sram0's reg to the 64 KiB window is deliberate and is the safety
+ * property, not a cosmetic tidy-up: it makes a future oversized SRAM0-tagged
+ * buffer a LINK ERROR ("region SRAM0 overflowed") instead of a silent walk
+ * into system RAM. Do not widen it back to the bank without moving the system
+ * RAM window out of the way first.
+ *
+ * WHAT THIS COSTS THE OTHER PHASES, stated plainly because it cannot be
+ * checked off the bench: CONFIG_DCACHE is off on this silicon (see prj.conf),
+ * so there is no cache to soften the move -- every data access that used to
+ * hit single-cycle DTCM now goes to uncached global SRAM over the fabric.
+ * Nothing becomes incorrect; things become slower. The one phase with an inner
+ * loop tight enough to care is phase 8, whose SPI1 FIFO refill feeds a 25 MHz
+ * link to the CC3501E, and a DW-SSI master that underruns its TX FIFO
+ * deasserts its own chip-select mid-frame -- which is the framing phase 8 is
+ * built around. That is a hypothesis, not a measurement. It is also LOUD
+ * rather than silent: phase 8 prints its own verdict in the same transcript as
+ * phase 10, so a bench run that regresses it says so. If it does, this block
+ * and phase 10 back out together.
+ */
+&sram0 {
+	reg = <0x02000000 DT_SIZE_K(64)>;
+};
+
+&soc {
+	/*
+	 * System RAM, above phase 13's window in the SAME global SRAM0 bank.
+	 * Plain "mmio-sram", NOT "zephyr,memory-region": a second memory-region
+	 * compatible here would emit a second linker MEMORY region overlapping
+	 * this one and reintroduce exactly the aliasing described above.
+	 * 512 KiB is twice the DTCM this image used to have; the build uses
+	 * well under a fifth of it.
+	 */
+	sram0_sys: sram@2010000 {
+		compatible = "mmio-sram";
+		reg = <0x02010000 DT_SIZE_K(512)>;
+	};
+};
+
+/*
  * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
  * without programming MRAM, and drop the MCUboot code-partition fixup.
  * PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form -- the
@@ -56,6 +150,7 @@
 	chosen {
 		zephyr,flash = &itcm;
 		/delete-property/ zephyr,code-partition;
+		zephyr,sram = &sram0_sys; /* see the placement block above */
 	};
 
 	evk_rgb_led: pwm-leds {
@@ -137,6 +232,97 @@
  * internal to the SoC, it drives no pad.
  */
 &jpeg0 {
+	status = "okay";
+};
+
+/*
+ * ============================================================================
+ * Phase 10 -- RMII Ethernet (GMAC) + the on-module TI DP83825 PHY
+ * ============================================================================
+ *
+ * The MAC itself (ethernet@48100000, the upstream eth_dwmac core under the
+ * alp-sdk `alif,ethernet` Tier-1.5 glue, with a fixed-link RMII PHY child)
+ * already lives in zephyr/dts/alif/ensemble_e8_peripherals.dtsi as
+ * status="disabled". Everything below is what turns it on: the RMII pin group,
+ * the MDIO pair, and the PHY's two control lines. Transcribed from
+ * examples/aen/aen-ethernet-link's overlay -- the BENCH-VERIFIED reference
+ * that pulled a real DHCP lease off the bench switch -- so read that file for
+ * the full derivation behind every value here. The system-RAM half of that
+ * app's fix lives at the top of THIS file, not down here, because it is an
+ * image-wide fact rather than an Ethernet one.
+ *
+ * RMII PADS are the AUTHORITATIVE E1M-AEN801 route from
+ * metadata/e1m_modules/aen/alif-ethernet-phy.tsv (NOT the Alif fork's
+ * reference route, which an earlier cut of the reference app wrongly used):
+ *
+ *     REFCLK P11_0 | RXD0 P11_3 | RXD1 P1_1 | CRS_DV P6_7   (inputs)
+ *     TXD0   P10_4 | TXD1 P10_5 | TXEN  P1_5                (outputs)
+ *     MDC    P11_2 | MDIO P11_1                             (management)
+ *
+ * None of those pads collides with anything else this app drives (the PWM
+ * trio P12_6/P12_7/P2_4, the SPI1 quad P14_4..P14_7, WIFI_EN P15_5, nRESET
+ * P15_1, READY P2_6, the carrier I2C pair P5_6/P5_7, the console P3_4/P3_5).
+ *
+ * `input-enable` on the input group is NOT decoration: on this SoC a pad's
+ * INPUT BUFFER is a PADCTRL bit that only pinctrl sets, so without it the RMII
+ * RX pads and MDIO never sense what the PHY drives -- the same trap the SPI1
+ * MISO group at the bottom of this file calls out.
+ *
+ * MDC/MDIO ARE MUXED EVEN THOUGH THE PHY IS UNMANAGED. The `alif,ethernet`
+ * node keeps its fixed-link child (no Zephyr MDIO bus, no managed PHY driver),
+ * which is the configuration bench-proven end to end -- the mdio-managed
+ * variant in aen-ethernet-link/mdio-managed.overlay is compile-proof only. But
+ * fixed-link means net_if_is_carrier_ok() is SYNTHETIC: it reports the DT's
+ * hard-coded link, not the wire. The phase therefore reads the PHY's own
+ * status registers directly over these two pads, which is the only way this
+ * configuration can tell "cable in a live switch port" from "nothing plugged
+ * in". See the phase's comment block in src/main.c.
+ */
+&pinctrl {
+	/* RMII inputs (REFCLK + RX) + MDIO (bidirectional, driven by the PHY
+	 * during a read) -- input-enable sets the pad REN bit so they sense. */
+	pinctrl_eth: pinctrl_eth {
+		group0 {
+			pinmux = <PIN_P11_0__ETH_REFCLK_B>, <PIN_P11_3__ETH_RXD0_B>,
+				 <PIN_P1_1__ETH_RXD1_C>, <PIN_P6_7__ETH_CRS_DV_A>,
+				 <PIN_P11_1__ETH_MDIO_B>;
+			input-enable;
+		};
+		/* RMII outputs (TX) + MDC (the management clock, master-driven). */
+		group1 {
+			pinmux = <PIN_P10_4__ETH_TXD0_B>, <PIN_P10_5__ETH_TXD1_B>,
+				 <PIN_P1_5__ETH_TXEN_C>, <PIN_P11_2__ETH_MDC_B>;
+		};
+	};
+};
+
+/*
+ * E_PHY_RESET = P11_6 lives on gpio11@4900b000, which the alp-sdk E8 dtsi does
+ * not declare (it carries gpio0..gpio9 and lpgpio only), so the node is created
+ * here -- reg/ngpios from the Alif fork dts. E_PHY_PWRDWN = P15_4 is on the
+ * lpgpio island, which THIS overlay already enables further down for phase 8's
+ * WIFI_EN / nRESET; phase 10 just borrows pin 4 of it. Both are ALIF pins per
+ * the SoM TSV, NOT CC3501E lines as the reference app first assumed.
+ */
+&soc {
+	gpio11: gpio@4900b000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900B000 0x1000>;
+		ngpios = <8>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "okay";
+	};
+};
+
+&ethernet {
+	pinctrl-0 = <&pinctrl_eth>;
+	pinctrl-names = "default";
+	/* Station MAC: inherits zephyr,random-mac-address from the SoC dtsi (a
+	 * per-boot random locally-administered 02:01:56:xx:xx:xx). DHCP does not
+	 * care which MAC asks, and a random one means two demo boards on the same
+	 * bench switch never collide. To pin a fixed per-unit MAC instead, delete
+	 * the flag here and supply local-mac-address = [ .. ]. */
 	status = "okay";
 };
 

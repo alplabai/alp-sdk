@@ -22,15 +22,19 @@ at the bench) never reads as a failed run.
 
 ## Scope of this slice
 
-Fourteen phases run in a fixed order. Eight are fully implemented against
+Fourteen phases run in a fixed order. Nine are fully implemented against
 bench-proven drivers -- the first six, plus phase 8 (the CC3501E Wi-Fi 6 /
-BLE 5.4 coprocessor over the inter-chip SPI bridge) and phase 13 (JPEG
-encode on the Hantro VC9000E); the remaining six are stubs that always
+BLE 5.4 coprocessor over the inter-chip SPI bridge), phase 10 (RMII Ethernet
+through the GMAC and the on-module DP83825 PHY) and phase 13 (JPEG encode on
+the Hantro VC9000E); the remaining five are stubs that always
 report `SKIPPED`, each with its own reason (see `src/main.c`'s "STUBS" section)
 -- an attended-run requirement, a larger deferred unit of work, "no panel
 on this bench", and a model that would need a different **boot flow** are
 different kinds of gaps and are described as such, not collapsed into one
 generic "not implemented".
+
+Phase 10 also changed the image's **memory map** for every other phase -- see
+[Memory map](#memory-map) before touching anything about placement.
 
 Neither phase 13 nor phase 14 is camera-gated: the JPEG phase encodes a
 synthetic gradient it builds itself and the NPU model carries its own
@@ -47,11 +51,79 @@ input. No camera module is required by, or in scope for, either.
 | 7 | Rotary encoder | -- | Nothing (stub). | Needs an attended run (someone turning the knob) -- see `EVK-BRIEFING.md`'s open question about whether the driver can even distinguish "no motion" from "not counting". |
 | 8 | CC3501E Wi-Fi/BLE | inter-chip SPI1 (P14_6/5/4 + hardware SS0 P14_7), WIFI_EN P15_5, nRESET P15_1_FLEX, READY P2_6 | Powers (`WIFI_EN` high) and resets the coprocessor -- **nothing answers before this**, its supply is host-gated -- then `PING` (`0x00`) with a bounded 25 x 200 ms retry, `GET_VERSION` (`0x01`) **compared on `ALP_CC3501E_PROTOCOL_MAJOR` only** (per ADR 0033 a MINOR delta is additive and safe -- it is reported, not gated), `GET_MAC` (`0x03`) checked for a structurally valid station address, `GET_CAPABILITIES` (`0x06`), a passive `WIFI_SCAN_START` (`0x10`), and `BLE_ENABLE` (`0x30`). Every return code is printed. `PASS` requires **all five** of major-version match, valid MAC, capabilities readable, scan round-tripped, BLE up -- a `PING` alone is explicitly not enough. | Signal quality, throughput, or that any network is reachable -- it never associates. An **empty scan is `PASS`-but-`UNCORROBORATED`**: zero networks is a statement about the RF environment, not about this board, so the gate is that the scan *round-tripped*, not that it found anything. Which colour of failure a dead link is (power / pinmux / firmware) -- the log names the three to check. |
 | 9 | SD card | -- | Nothing (stub). | No longer blocked on phase 8 (which now powers and resets the coprocessor and leaves it bound) -- what remains is the SD side itself: the SDIO mux sequence on CC35 `GPIO_26`/`GPIO_30`, which additionally needs `CONFIG_ALP_SDK_GPIO_CC3501E_PROXY` and a route table this app does not yet carry. |
-| 10 | Ethernet | -- | Nothing (stub). | Deferred to the next slice. |
+| 10 | Ethernet | RMII GMAC `ethernet@48100000` + on-module TI DP83825 PHY (REFCLK P11_0, RXD0 P11_3, RXD1 P1_1, CRS_DV P6_7, TXD0 P10_4, TXD1 P10_5, TXEN P1_5, MDC/MDIO P11_2/P11_1); PHY power `E_PHY_PWRDWN` P15_4, reset `E_PHY_RESET` P11_6 | Powers and resets the PHY from a `SYS_INIT` hook that runs **before the Ethernet driver's own init** -- the RMII ref-clock AUTO probe only finds the module's external 50 MHz oscillator if the PHY is already powered when it runs, so the phase reports which source `ETH_CTRL` bit 4 latched. Then reads the PHY's real status **over MDIO** (fixed-link does no MDIO of its own), sets `RCSR` bit 7 for 50 MHz-reference RMII, restarts auto-negotiation, and gates `PASS` on **a DHCPv4 lease** -- DISCOVER/OFFER/REQUEST/ACK completes only over a genuinely bidirectional link. Prints `tx_bytes`/`rx_bytes` throughout. | That `net_if_is_carrier_ok()` means anything: with an unmanaged fixed-link PHY it is **synthetic**, it reports what devicetree hard-codes, and it reads true with the cable in your hand. It is printed labelled as such and is never gated on. Also: link speed/throughput, and whether a segment that sends us nothing is quiet or broken -- see the verdict table below. |
 | 11 | Sound out -> PDM in | -- | Nothing (stub). | I2S bring-up + the low-volume ramp policy for the ~15 W class-D amps deferred to the next slice. |
 | 12 | Screen (DSI) | -- | Nothing (stub). | No panel on this bench; a clean DSI init would not prove one is attached anyway. |
 | 13 | JPEG encode | Hantro VC9000E @ `0x49044000` (`jpeg0`) | Encodes a synthetic 64x64 NV12 gradient through `<alp/jpeg.h>`. Prints which backend won (`caps.hw_accelerated`) and **fails a software-fallback win** -- on this board the hardware encoder is the phase. Asserts the output really is a JPEG: SOI `FF D8 FF` at the start, EOI `FF D9` at the end, and a plausible length (>= 256 B, < the 6144 B source). Every return code is printed verbatim. | The image is *correct* -- the checks are structural, not a decode. The Hantro hardware-ID readback: `<alp/jpeg.h>` exposes no accessor for `JPEG_SWREG0`, and this example will not hand-roll a register poke. A mismatch against `JPEG_HW_ID` (`0x90001000`) still surfaces, as `alp_jpeg_open() == NULL` with `ALP_ERR_NOT_READY` plus the driver's own `"JPEG hardware not found (ID: 0x%08x)"` `LOG_ERR` line (this app builds `CONFIG_LOG=y`). |
-| 14 | NPU inference | -- | Nothing (stub). | **A boot-flow change, not a phase.** `aen-npu-inference-alp` is the silicon-proven Ethos-U85 path through `<alp/inference.h>`, but its Vela-compiled `person_detect_u85` model is **~263 KiB** -- which is exactly why that app links into MRAM slot0 and boots via Flow D. This demo is a **Flow C ITCM RAM-run**: ITCM is **256 KB total** and the demo already uses **about 141 KB (55.04%)** of it -- roughly 93 KB (36.24%) before phase 13, about 106 KB (41.41%) after it, and phase 8's CC3501E bridge driver added ~34 KB more, so the headroom is shrinking, not growing. The model does not fit alongside it, so adding NPU here means relinking the whole demo into MRAM slot0. Shrinking the model to fit would swap a proven artefact for an unproven one. |
+| 14 | NPU inference | -- | Nothing (stub). | **A boot-flow change, not a phase.** `aen-npu-inference-alp` is the silicon-proven Ethos-U85 path through `<alp/inference.h>`, but its Vela-compiled `person_detect_u85` model is **~263 KiB** -- which is exactly why that app links into MRAM slot0 and boots via Flow D. This demo is a **Flow C ITCM RAM-run**: ITCM is **256 KB total** and the demo now uses roughly two thirds of it -- phase 8's CC3501E bridge driver and phase 10's network stack were each worth tens of kilobytes, so the headroom is shrinking, not growing. The model does not fit alongside it, so adding NPU here means relinking the whole demo into MRAM slot0. Shrinking the model to fit would swap a proven artefact for an unproven one. |
+
+### Phase 10's verdicts, and why "no cable" is not a failure
+
+A DHCP lease is the only honest `PASS` gate here, but it needs a switch with a
+DHCP server on the far end, which an arbitrary bench run cannot be assumed to
+have. The phase asks the PHY over MDIO what the wire is doing, and then asks
+the interface's own byte counters what actually moved:
+
+| Observation | Verdict | Why |
+|---|---|---|
+| No PHY answers on any of the 32 MDIO addresses | `FAIL` | The DP83825 is fitted on **every** E1M-AEN SoM. Silent means unpowered, unclocked or unreset -- our hardware, not the operator's cable. |
+| PHY answers, auto-negotiation never completes | `SKIPPED` | Nobody on the other end. This is "is a cable plugged in?", the normal state of an unattended bench. |
+| Link up, but the MAC transmitted **zero bytes** | `FAIL` | DHCP queued DISCOVERs and the link is up, so no frame left the part whatever is out there. Unambiguous, and the TX half of the DMA-placement failure the overlay's memory block exists to prevent. |
+| Link up, TX moved, no lease | `SKIPPED` + qualifier | Either no DHCP server on this segment or a dead RX path. `rx_bytes` separates them in the log and the qualifier carries it into the summary table -- but a live switch port with no other talkers legitimately sends us nothing, so failing on it would be the mirror-image lie. |
+| Link up **and** a lease acquired | `PASS` | DISCOVER/OFFER/REQUEST/ACK completes only over a genuinely bidirectional link. |
+
+`carrier_ok` appears in none of those rows on purpose. This app exists because
+an earlier example counted a successful ID read as a pass; a synthetic carrier
+bit is exactly that shape of claim.
+
+## Memory map
+
+**Phase 10 moved the whole image's system RAM out of the M55 DTCM into the
+global on-chip SRAM0 bank.** This affects every phase, so it is documented
+here as well as in full in the app overlay's header.
+
+The GMAC is a DMA bus master and the upstream DWMAC core hands it the raw CPU
+pointer -- no address translation. The M55 DTCM is tightly-coupled and **not**
+on the GMAC's AXI path, so descriptor rings and `net_buf`s left there are
+invisible to it and **zero frames move in either direction even with the wire
+link up** (bench-observed on both sides at once by `aen-ethernet-link`, which
+calls this its decisive fix). No narrower fix is available to an application:
+the rings are file-static in the Ethernet driver and the pool is file-static in
+the net subsystem, so neither can be section-tagged the way phase 13's JPEG
+buffers are -- and the driver's own header says the requirement is enforced
+"at the board/SoC layer, not in this glue".
+
+But this app, unlike `aen-ethernet-link`, **already** puts buffers in the
+`SRAM0` linker region. The SoC's `sram0` node is both a `zephyr,memory-region`
+(emitting the linker region phase 13's buffers land in) and, if chosen, the
+source of the main RAM region. Choosing it plainly makes both start at
+`0x02000000`; the linker then allocates into them independently **and does not
+warn**. Measured on this tree, `.data`/`.bss`/`.noinit` landed on top of
+`jpeg_out` and `jpeg_src` -- phase 13 writing its gradient would have scribbled
+over the whole image's static state, silently.
+
+So the overlay gives the two consumers disjoint windows of the same bank:
+
+| Window | Contents |
+|---|---|
+| `0x0200_0000` + 64 KiB | The `SRAM0` linker region: phase 13's two JPEG buffers, at the same addresses they had before phase 10 existed. |
+| `0x0201_0000` + 512 KiB | System RAM: `.data`/`.bss`/`.noinit`, every stack, the GMAC descriptor rings and the `net_buf` pool. |
+| above that | Unused remainder of the 4 MiB bank. |
+
+Shrinking `&sram0`'s `reg` to that 64 KiB window is the safety property, not a
+tidy-up: it turns a future oversized `SRAM0`-tagged buffer into a **link error**
+instead of a silent walk into system RAM.
+
+**What it costs the other phases**, stated plainly because it cannot be checked
+off the bench: `CONFIG_DCACHE` is off on this silicon, so there is no cache to
+soften the move -- data that used to hit single-cycle DTCM now goes to uncached
+global SRAM over the fabric. Nothing becomes incorrect; things become slower.
+The one phase with an inner loop tight enough to care is **phase 8**, whose
+SPI1 FIFO refill feeds a 25 MHz link and whose DW-SSI master deasserts its own
+chip-select if it underruns mid-frame. That is a hypothesis, not a measurement,
+and it is **loud rather than silent**: phase 8 prints its own verdict in the
+same transcript as phase 10, so a bench run that regresses it says so. If it
+does, phase 10 and this memory map back out together.
 
 ## Buses
 
@@ -67,8 +139,14 @@ Both are already enabled by the board layer
 -- this app's own overlay adds nothing for either. Confusing the two buses
 wastes a bench run; see `EVK-BRIEFING.md`.
 
-A third bus is **not** shared through `demo_ctx_t`:
+Two further buses are **not** shared through `demo_ctx_t`:
 
+- **RMII + MDIO** -- phase 10's Ethernet route to the on-module DP83825 PHY.
+  These *are* published by `metadata/e1m_modules/aen/alif-ethernet-phy.tsv`
+  (the authoritative SoM route -- **not** the Alif fork's reference route, which
+  an earlier cut of `aen-ethernet-link` wrongly used), but the `ethernet` node
+  ships `status = "disabled"` in the SoC dtsi, so this app's overlay enables it
+  and supplies the pin group. Phase 10 owns it end to end.
 - **SPI1** -- the SoM-internal Alif <-> CC3501E inter-chip link (SCK P14_6,
   MOSI P14_5, MISO P14_4, hardware SS0 P14_7, plus `WIFI_EN` P15_5, nRESET
   P15_1_FLEX and `READY` P2_6). Phase 8 owns it end to end: it has to power
@@ -126,22 +204,19 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     "-DEXTRA_ZEPHYR_MODULES=<path-to-this-alp-sdk-checkout>;<path-to-hal_alif>"
 ```
 
-Confirmed building clean against this tree:
-
-```
-Memory region         Used Size  Region Size  %age Used
-           FLASH:      144272 B       256 KB     55.04%   (plain build.sh)
-             RAM:       60496 B       256 KB     23.08%
-           SRAM0:         14 KB         4 MB      0.34%
-```
+Builds clean against this tree. Roughly two thirds of the 256 KB ITCM `FLASH`
+region is used, and well under a fifth of the 512 KiB system-RAM window; check
+the linker's own summary rather than a figure written down here, which is why
+no byte count or percentage is quoted (two of them have already gone stale).
 
 `SRAM0` holds phase 13's two JPEG buffers (6144 B source + 8192 B output).
-They live there and not in `RAM` because the Hantro block is an AXI bus
-master that cannot reach the M55's core-local DTCM -- see phase 13's
-comment block in `src/main.c`.
+They live in their own linker region and not in system RAM because the Hantro
+block is an AXI bus master that cannot reach the M55's core-local DTCM -- see
+phase 13's comment block in `src/main.c`, and [Memory map](#memory-map) for why
+that region and system RAM now need explicitly disjoint windows.
 
-`RAM` is mostly phase 8: `sizeof(cc3501e_t)` is ~32 KB (the driver keeps its
-tx/rx scratch, scan and socket buffers inside the handle), which is why that
+System RAM is mostly phase 8: `sizeof(cc3501e_t)` is ~32 KB (the driver keeps
+its tx/rx scratch, scan and socket buffers inside the handle), which is why that
 handle is **file-static and not a stack local** -- as a local it crosses
 `PSPLIM` and the M55 raises `STKOF` -> UsageFault before a line is printed.
 
@@ -184,7 +259,30 @@ during bring-up, so the phase short-circuits with the firmware's own
 major/minor rather than burning the full PING retry budget against a handle
 the driver has already marked down.
 
-The summary:
+Phase 10's own lines, on a bench where a cable IS plugged into a switch with a
+DHCP server:
+
+```
+[evkdemo] -- Phase: Ethernet (RMII GMAC + on-module DP83825 PHY) --
+[evkdemo] ETH: MAC 02:01:56:xx:xx:xx (per-boot random locally-administered, from the SoC dtsi's zephyr,random-mac-address)
+[evkdemo] ETH: RMII refclk = EXTERNAL oscillator -- the PHY was powered before the probe (ETH_CTRL bit4=0)
+[evkdemo] ETH: net_if_up -> 0
+[evkdemo] ETH: MDIO PHY@0 id=2000a140 (DP83825 = 2000a140)
+[evkdemo] ETH: PHY regs ANAR=01e1 ANLPAR=45e1 PHYSTS=0000 RCSR=0081
+[evkdemo] ETH: RCSR 0x0001 -> 0x0081 (REF_CLK_SEL = 50 MHz reference)
+[evkdemo] ETH: wire link UP after 2500 ms (BMSR=786d ANLPAR=45e1)
+[evkdemo] ETH: admin_up=1 carrier_ok=1(SYNTHETIC, not a link proof) tx_bytes=1188 rx_bytes=684 dhcp_bound=1
+[evkdemo] ETH: DHCP lease = 192.168.10.xxx -- wire link UP and both DMA directions proven end to end
+```
+
+The addresses, register values and byte counts are **shape, not expected
+values**; the DP83825 identity `2000a140` and `ETH_CTRL bit4=0` are the two
+parts a reader should treat as characteristic. On a bench with nothing plugged
+in, the same phase stops after `wire link DOWN` and reports
+`SKIPPED -- no carrier -- cable?`, which is a normal unattended run and not a
+failure.
+
+The summary, from a run with a cable and a DHCP server:
 
 ```
 [evkdemo] phase  1/14: RTC + temperature (BRD_I2C)         PASS
@@ -196,15 +294,19 @@ The summary:
 [evkdemo] phase  7/14: Rotary encoder                       SKIPPED
 [evkdemo] phase  8/14: CC3501E Wi-Fi/BLE                    PASS
 [evkdemo] phase  9/14: SD card                              SKIPPED
-[evkdemo] phase 10/14: Ethernet                             SKIPPED
+[evkdemo] phase 10/14: Ethernet                             PASS
 [evkdemo] phase 11/14: Sound out -> PDM in                  SKIPPED
 [evkdemo] phase 12/14: Screen (DSI)                         SKIPPED
 [evkdemo] phase 13/14: JPEG encode (Hantro VC9000E)         PASS
 [evkdemo] phase 14/14: NPU inference                        SKIPPED
 ...
-[evkdemo] RESULT: 8 PASS, 6 SKIPPED, 0 FAIL
+[evkdemo] RESULT: 9 PASS, 5 SKIPPED, 0 FAIL
 [evkdemo] done
 ```
+
+With no cable in the port, phase 10 reads
+`Ethernet   SKIPPED  no carrier -- cable?` and the tally is
+`8 PASS, 6 SKIPPED, 0 FAIL` -- still not a failed run.
 
 A run with skips is not a failed run -- the three counts are always
 reported together.
@@ -212,10 +314,12 @@ reported together.
 A phase may attach a one-line **qualifier** to its own verdict, printed after
 it on both the per-phase line and in the summary table. A qualifier explains a
 verdict, it is never a fourth one and never changes what a phase counts as.
-Today only phase 8 sets one -- an empty Wi-Fi scan renders as
-`CC3501E Wi-Fi/BLE   PASS    scan UNCORROBORATED -- 0 networks seen`, so a
-reader of the table alone can still tell that run apart from one that saw
-networks.
+Phase 8 sets one when its Wi-Fi scan comes back empty --
+`CC3501E Wi-Fi/BLE   PASS    scan UNCORROBORATED -- 0 networks seen` -- and
+phase 10 sets one on every non-`PASS` outcome, so a reader of the table alone
+can tell `Ethernet  SKIPPED  no carrier -- cable?` from
+`Ethernet  SKIPPED  link UP, TX ok, RX silent -- no DHCP server, or dead RX`
+without going back to the log.
 
 ## Reference
 
@@ -235,6 +339,13 @@ networks.
   lets the software fallback win, DMA buffers landing in unreachable DTCM,
   and `#ifdef`-ing the source layout instead of querying
   `alp_jpeg_caps_t::pixfmt_mask`).
+- [`examples/aen/aen-ethernet-link`](../aen-ethernet-link/) -- the
+  bench-verified Ethernet reference phase 10 follows (a real DHCP lease off the
+  bench switch, server-side reachable). Its file header records the three
+  things that had to be right and in what order: PHY power **before** the
+  driver's ref-clock probe, `RCSR` bit 7 for 50 MHz-reference RMII, and the
+  DMA buffers off the DTCM -- the last of which is why this app's memory map
+  looks the way it does.
 - [`examples/aen/aen-cc3501e-bringup`](../aen-cc3501e-bringup/) -- the
   silicon-proven host-side CC3501E bring-up phase 8 follows: its file header
   documents the wiring, the host-gated supply, the hardware-SS0 chip-select
