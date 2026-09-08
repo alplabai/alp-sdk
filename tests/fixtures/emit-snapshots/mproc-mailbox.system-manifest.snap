@@ -69,6 +69,79 @@ helper_mcus:
   flash_policy: recovery_only
   update_channel: alp_ota_spi_otp
 boot_order: []
+memory:
+- name: mcuboot
+  source: som_preset
+  kind: flash
+  status: ok
+  base: 2147483648
+  size_bytes: 65536
+  write_authority: vendor_image
+  accessible_from:
+  - m55_he
+  - m55_hp
+- name: he_slot0
+  source: som_preset
+  kind: flash
+  status: ok
+  base: 2147549184
+  size_bytes: 2752512
+  write_authority: customer_image
+  accessible_from:
+  - m55_he
+- name: hp_slot0
+  source: som_preset
+  kind: flash
+  status: ok
+  base: 2150301696
+  size_bytes: 2752512
+  write_authority: customer_image
+  accessible_from:
+  - m55_hp
+- name: reserved
+  source: som_preset
+  kind: flash
+  status: ok
+  base: 2153054208
+  size_bytes: 65536
+  write_authority: none
+  accessible_from:
+  - m55_he
+  - m55_hp
+- name: storage
+  source: som_preset
+  kind: flash
+  status: ok
+  base: 2153119744
+  size_bytes: 98304
+  write_authority: customer_runtime
+  accessible_from:
+  - m55_he
+  - m55_hp
+- name: atoc
+  source: som_preset
+  kind: flash
+  status: ok
+  base: 2153218048
+  size_bytes: 32768
+  write_authority: secure_enclave
+  accessible_from:
+  - m55_he
+  - m55_hp
+- name: mram_main
+  source: som_preset
+  kind: unresolved
+  status: unresolved
+  size_bytes: 5767168
+  write_authority: composite
+  accessible_from:
+  - a32_cluster
+  - m55_he
+  - m55_hp
+  reason: 'Region ''mram_main'' declares `base: TBD`, a placeholder, not an address,
+    so no extent can be resolved and no class derived. Its size resolves, so only
+    the address is missing. Declare `base:` in this SoM preset''s `memory_map:` to
+    resolve it.'
 
 # boot_order is empty -- add a `boot_order:` list to metadata/e1m_modules/E1M-AEN801.yaml when the
 # bring-up order is finalised.
