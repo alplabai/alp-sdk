@@ -130,7 +130,7 @@ Confirmed building clean against this tree:
 
 ```
 Memory region         Used Size  Region Size  %age Used
-           FLASH:      144272 B       256 KB     55.04%
+           FLASH:      144272 B       256 KB     55.04%   (plain build.sh)
              RAM:       60496 B       256 KB     23.08%
            SRAM0:         14 KB         4 MB      0.34%
 ```

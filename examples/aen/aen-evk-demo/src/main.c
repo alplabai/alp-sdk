@@ -1640,7 +1640,7 @@ static phase_verdict_t phase_screen_stub(demo_ctx_t *ctx)
  * Vela-compiled person_detect_u85 model is ~263 KiB, which is precisely
  * why THAT app links into MRAM slot0 and boots via Flow D instead of
  * RAM-running. This demo is a Flow C ITCM RAM-run: ITCM is 256 KB total
- * and the demo already occupies about 141 KB (55.04%) of it -- roughly
+ * and the demo already occupies a little over half of it -- roughly
  * 93 KB (36.24%) before phase 13, about 106 KB (41.41%) after it, and the
  * CC3501E bridge driver in phase 8 added ~34 KB more, so the headroom is
  * shrinking, not growing. Deliberately not a byte-exact figure: the size depends on
@@ -1661,7 +1661,7 @@ static phase_verdict_t phase_npu_stub(demo_ctx_t *ctx)
 	ARG_UNUSED(ctx);
 	printf("[evkdemo] -- Phase: NPU inference -- SKIPPED (needs a boot-flow change, not a "
 	       "phase: aen-npu-inference-alp's person_detect_u85 model is ~263 KiB and this "
-	       "demo is a Flow C ITCM RAM-run -- 256 KB ITCM total, about 141 KB (55.04%%) "
+	       "demo is a Flow C ITCM RAM-run -- 256 KB ITCM total, a little over half "
 	       "already used, so the model would have to move the whole image to MRAM slot0 / "
 	       "Flow D) --\n");
 	return PHASE_SKIPPED;
