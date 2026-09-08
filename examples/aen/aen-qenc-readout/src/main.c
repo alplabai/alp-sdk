@@ -67,8 +67,8 @@
  * so a long window costs nothing where it is not needed and is the difference
  * between usable and useless where it is.
  */
-#define SAMPLES   200
-#define POLL_MS   300
+#define SAMPLES 200
+#define POLL_MS 300
 
 int main(void)
 {
