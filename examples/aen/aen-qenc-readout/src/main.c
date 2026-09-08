@@ -58,8 +58,17 @@
 #include <zephyr/drivers/sensor.h>
 
 #define QENC_NODE DT_ALIAS(alp_qenc0)
-#define SAMPLES   30
-#define POLL_MS   300 /* 30 * 300ms = 9s: comfortably long enough to grab the knob */
+/*
+ * 200 * 300 ms = 60 s.  This was 30 samples = 9 s, described in this very
+ * comment as "comfortably long enough to grab the knob" -- it is not.  Nine
+ * seconds is not enough time to read the prompt, cross to the bench and turn
+ * a shaft, and the only measurement this app exists to make is the one a
+ * human has to be present for.  Every unattended run reports SKIPPED anyway,
+ * so a long window costs nothing where it is not needed and is the difference
+ * between usable and useless where it is.
+ */
+#define SAMPLES   200
+#define POLL_MS   300
 
 int main(void)
 {
@@ -86,7 +95,21 @@ int main(void)
 	       (unsigned)DT_PROP(QENC_NODE, filter_prescaler),
 	       (unsigned)DT_PROP(QENC_NODE, filter_taps));
 
-	printf("[qenc] >>> turn the encoder shaft now, about one full revolution <<<\n");
+	printf("\n"
+	       "[qenc] ============================================================\n"
+	       "[qenc]   TURN THE ENCODER SHAFT NOW.\n"
+	       "[qenc]\n"
+	       "[qenc]   You have %d seconds.  Do this, in order:\n"
+	       "[qenc]     1. one detent (one click) -- expect about 15 deg, which\n"
+	       "[qenc]        is 4 raw counts at x4 decode\n"
+	       "[qenc]     2. one full revolution clockwise\n"
+	       "[qenc]     3. one full revolution anticlockwise\n"
+	       "[qenc]\n"
+	       "[qenc]   If the angle never changes while you are turning it, that\n"
+	       "[qenc]   is the open defect reproduced under a hand (#2037) -- and\n"
+	       "[qenc]   it is the measurement nobody has taken yet.\n"
+	       "[qenc] ============================================================\n\n",
+	       (SAMPLES * POLL_MS) / 1000);
 
 	int     ok_reads = 0;
 	bool    moved    = false;
@@ -111,7 +134,15 @@ int main(void)
 		} else if (v.val1 != first) {
 			moved = true;
 		}
-		printf("[qenc] angle[%d] = %d deg (0-359)\n", i, v.val1);
+		/* Print every sample early (so a fast operator sees feedback), then
+		 * thin out -- 200 lines of unchanging angle buries the interesting
+		 * part, and the RAM console is a fixed-size buffer that wraps. */
+		if ((i < 20) || (v.val1 != first) || ((i % 10) == 0)) {
+			printf("[qenc] angle[%d] = %d deg (0-359)  [%d s left]\n",
+			       i,
+			       v.val1,
+			       ((SAMPLES - i) * POLL_MS) / 1000);
+		}
 		alp_delay_ms(POLL_MS);
 	}
 
