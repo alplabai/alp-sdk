@@ -291,63 +291,70 @@ counter that never sees the encoder edges.
 **The decode path is not yet proven.**  Two defects were found on
 `E1M-AEN803` serial `2026W36-0002`; the first is fixed, the second is open.
 
-* **Fixed (#2037): the counter was configured and never started.**
-  `qdec_alif_utimer_init()` set `CNTR_CTRL` bit 0 `EN` but never issued the
-  global `UTIMER_GLB_CNTR_START` write, so every reading was a constant `0`
-  regardless of shaft motion.  Measured before and after the fix:
+* **Withdrawn (#2037), and worth reading before you touch this driver.** The
+  driver leaves `CNTR_CTRL` (`0x4800D080`) = `0x00000021` — `CNTR_EN` and
+  `CNTR_TRIG` set, bit 1 `RUNNING` clear — and `GLB_CNTR_RUNNING`
+  (`0x4800000C`) = `0x00000000`. That was read as "the channel was never
+  started", and a `GLB_CNTR_START` write was added. **It is the correct resting
+  state for a trigger-counting channel, and starting the channel broke it.**
 
-  | register | address | before | after |
-  |---|---|---|---|
-  | `CNTR_CTRL` | `0x4800D080` | `0x00000021` | `0x00000023` |
-  | `GLB_CNTR_RUNNING` | `0x4800000C` | `0x00000000` | `0x00001000` |
-  | `GLB_CNTR_START` | `0x48000000` | `0x00000000` | `0x00000000` |
+  With the start call in place and the encoder untouched, `CNTR`
+  (`0x4800D0A0`) advanced 3,999,905,225 counts in 10.000 s = **400,010,738
+  counts/s** — with `UP_1_SRC` and `DOWN_1_SRC` both written `0x00000000`, so
+  no quadrature transition could contribute. Writing `GLB_CNTR_STOP`
+  (`0x48000004`) bit 12 froze it instantly: three `CNTR` reads 5 s apart,
+  bit-identical `0xF7E3EFEE`. At the shipped reload (`CNTR_PTR` =
+  `0x0000005F`) that free-run wraps a revolution every 240 ns, so the reported
+  angle was uncorrelated noise — worse than the stuck-at-zero symptom it was
+  meant to fix.
 
-  Bit 1 of `CNTR_CTRL` is `RUNNING` and bit 12 of `GLB_CNTR_RUNNING` is this
-  channel; both went from clear to set.  Every other channel register read
-  bit-identical across the two runs.
+  Alif's own QEC flow never starts the channel: `qec0_app()` in
+  `demo_qec.c` runs `ConfigCounter(TRIGGERING, TRIANGLE)` → `SetCount` → three
+  `ConfigTrigger` calls → `GetCount` → `Stop`, with no `Start()` anywhere.
 
-* **Open (#2038): the counter advances on a stationary encoder.**  Five raw
-  `CNTR` (`0x4800D0A0`) reads over ~27 s with nobody touching the shaft:
-  `0x0000002D`, `0x0000001B`, `0x0000005F`, `0x00000039`, `0x0000003E`.  The
-  source is internal to the channel.  Ruled out on the bench, each at the cost
-  of a reservation: the pads (four configurations walked, including
-  `0x00290000` = AF 0, `P3_0`/`P3_1` deselected from the QEC entirely -- still
-  counting); the asymmetric input filter (`FILTER_CTRL_B` `0x4800D088` was
-  `0x00000000` against `FILTER_CTRL_A` `0x4800D084` = `0x00100101`; fixed, both
-  now read `0x00100101`, still counting); the channel driving its own input
-  (`GLB_DRIVER_OEN` covers channels 0-11 only); Sawtooth-vs-Triangle
-  (`CNTR_CTRL` written `0x00000033`, `CNTR_TYPE[4:2]` = `0b100` = Triangle,
-  still counting); and the trigger path itself (`CNTR_CTRL` written
-  `0x00000003` with `CNTR_TRIG` bit 5 clear, still counting).
+  **Register trap:** `CNTR_CTRL` bit 1 `RUNNING` is status, not control. It is
+  set by `GLB_CNTR_START` and cleared by `GLB_CNTR_STOP`; writing `0x00000023`
+  into `CNTR_CTRL` reads back `0x00000021`. Watching that bit change is not
+  proof that your write did anything.
 
-  **One row of this table was withdrawn, and the misreading behind it is worth
-  recording.** "The trigger source is not the problem, because the SVD
-  annotates `UP_0_SRC` with eight `For QEC channels: Reserved, not used` notes
-  and `UP_1_SRC` with none" was wrong. Those eight annotations sit on bits
-  `[31:24]` only (`TRIG12`..`TRIG15`); the other 24 fields, bits `[23:0]`, read
-  *"For QEC channels: Rising/Falling edge of `QEC_TRIGGER0..11` causes counter
-  to increment"*. `SRC_0` **is** a QEC-channel input path. Reading the top
-  eight bits as though they governed the whole register inverted the
-  conclusion, and that conclusion was used to reject a proposed fix.
+* **Resolved (#2038): the counter advanced on a stationary encoder.** Cause:
+  the withdrawn `GLB_CNTR_START` write above, nothing else. Five raw `CNTR`
+  reads over ~27 s while it was in place showed `0x0000002D`, `0x0000001B`,
+  `0x0000005F`, `0x00000039`, `0x0000003E`; removing the start call removes the
+  free-run. Before the cause was found, five candidates were eliminated on the
+  bench, each at the cost of a reservation, and they stay eliminated: the pads
+  (four configurations including `0x00290000` = AF 0, `P3_0`/`P3_1` deselected
+  from the QEC entirely — still counting); the asymmetric input filter
+  (`FILTER_CTRL_B` was `0x00000000` against `FILTER_CTRL_A` `0x00100101`;
+  fixed, still counting); the channel driving its own input (`GLB_DRIVER_OEN`
+  covers channels 0-11 only); Sawtooth-vs-Triangle (`CNTR_CTRL` written
+  `0x00000033`, still counting); and the trigger path itself (`CNTR_TRIG`
+  cleared, still counting). Every one of those was measured against a channel
+  that was free-running for a reason none of them addressed — which is why they
+  all came back negative.
 
-  **The leading hypothesis is now that the vendored `alif,utimer-qdec` driver
-  was written for a different channel class.** In Alif's own tree it is bound
-  only under `lputimer0/1/2`, where "channel input A/B" are that channel's real
-  pads; their channel-12 QEC flow counts through `SRC_0` with
-  `QEC_TRIGGER0`/`1`/`2` and never touches `SRC_1`. If "input A/B" on channels
-  12-15 is an internal net rather than `P3_0`/`P3_1`, that explains why
-  deselecting the pads changed nothing — the decode was never listening to them.
-  Unproven: what `QEC_TRIGGERn` maps to, and whether the QEC front-end
-  pre-decodes X/Y into direction pulses. `counts-per-revolution` = 96 holds
-  while the x4 matrix is programmed and must be revisited if the path changes.
+* **Still open: the original stuck-at-zero reading is unexplained.** That
+  symptom is what started this, and "the counter was never started" was the
+  wrong explanation for it. With the channel in its correct resting state,
+  whether it increments on real quadrature edges has never been observed,
+  because no run has had a hand on the shaft. `UP_0_SRC` (`0x18`) and
+  `DOWN_0_SRC` (`0x20`) read `0x00000000`; whether that is a defect is open.
 
 **Two traps when you measure this.**  The counter wraps at its programmed
 reload (`CNTR_PTR` = `counts-per-revolution - 1` = `0x0000005F`), so neither
 the app's printed degrees nor a raw `CNTR` read can distinguish "static" from
 "advanced by exactly 96·k" -- no counts-per-second figure is derivable from
-either.  And while #2038 stands, **an attended run settles nothing**: a moving
-count appears whether or not anyone turns the shaft, so an operator cannot
-tell a working decoder from the spurious count.
+either.  Widen `CNTR_PTR` to `0xFFFFFFFF` first if you need a rate; that is how
+the 400 Mcount/s free-run was finally measured.  And **watching `CNTR_CTRL` bit
+1 `RUNNING` change is not proof your write landed** — it is status, set by
+`GLB_CNTR_START` and cleared by `GLB_CNTR_STOP`, and a write of `0x00000023`
+into `CNTR_CTRL` reads back `0x00000021`.
+
+**An attended run is now the right next step**, which it was not while #2038
+stood: with the free-run gone, a count that moves when someone turns the shaft
+means the decode works, and one that does not move is the original defect
+reproduced under a hand.  Turn one detent (expect ±4 raw counts at ×4 decode),
+then one full revolution each way.
 
 `counts-per-revolution` is **96** -- 24 PPR × 4 for the driver's x4 decode --
 and the qdec driver writes it into the hardware counter's reload register, so

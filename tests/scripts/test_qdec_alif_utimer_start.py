@@ -58,50 +58,49 @@ def init_body() -> str:
     return strip_comments(src[start:end])
 
 
-class QdecStartsTheCounter(unittest.TestCase):
-    def test_init_starts_the_counter(self):
-        """#2037: nothing wrote GLB_CNTR_START, so the channel never ran."""
-        self.assertRegex(
+class QdecMustNotStartTheCounter(unittest.TestCase):
+    """#2038: a trigger-counting channel must NOT be started.
+
+    This class asserts the OPPOSITE of what it asserted when it was written, and
+    the reversal is the point.  #2037 read "CNTR_CTRL bit 1 RUNNING clear,
+    GLB_CNTR_RUNNING 0x00000000, counter stuck at 0" as "the channel was never
+    started" and added alif_utimer_start_counter().  That was the wrong reading.
+
+    Measured on E1M-AEN803 serial 2026W36-0002, encoder untouched: with the start
+    call the counter advanced at 400,010,738 counts/s -- the peripheral clock rate
+    -- while UP_1_SRC and DOWN_1_SRC were BOTH ZEROED, so no quadrature transition
+    could have contributed.  Writing GLB_CNTR_STOP froze it instantly: three CNTR
+    reads 5 s apart, bit-identical.  Starting the channel puts it in free-running
+    clocked mode; it does not make it count encoder edges.
+
+    Alif never start a QEC channel either: qec0_app() in demo_qec.c runs
+    ConfigCounter(TRIGGERING, TRIANGLE) -> SetCount -> three ConfigTrigger calls
+    -> GetCount -> Stop, with no Start() anywhere, and their MODE_TRIGGERING does
+    exactly one hardware thing, utimer_glb_driver_output_disable().
+
+    So the resting state this driver leaves -- CNTR_CTRL 0x00000021, EN and
+    CNTR_TRIG set with bit 1 RUNNING clear -- is CORRECT, not a defect.
+    """
+
+    def test_init_does_not_start_the_counter(self):
+        self.assertNotRegex(
             init_body(),
             r"\balif_utimer_start_counter\s*\(",
-            "qdec_alif_utimer_init() must call alif_utimer_start_counter(); "
-            "alif_utimer_enable_counter() only sets CNTR_CTRL bit 0 EN, it does "
-            "not write GLB_CNTR_START (HWRM 13.2.5)",
+            "qdec_alif_utimer_init() must NOT call alif_utimer_start_counter(): "
+            "GLB_CNTR_START puts the channel in free-running clocked mode, where "
+            "the counter advances on the peripheral clock (~400 Mcount/s measured) "
+            "instead of on quadrature events (#2038)",
         )
 
-    def test_start_takes_the_global_base_and_timer_id(self):
-        """The helper writes GLB_CNTR_START |= 1 << timer_id -- global base, not timer_base."""
-        m = re.search(r"\balif_utimer_start_counter\s*\(([^;]*?)\)\s*;", init_body(), re.S)
-        self.assertIsNotNone(m, "no alif_utimer_start_counter() call to check")
-        args = [a.strip() for a in m.group(1).split(",")]
-        self.assertEqual(len(args), 2, f"expected two arguments, got {args}")
-        # Assert the MEANING, not the spelling: a cast or a renamed local is benign,
-        # passing the per-channel base is the actual defect this guards against.
-        self.assertNotIn(
-            "timer_base",
-            args[0],
-            "alif_utimer_start_counter() takes the GLOBAL reg base (same convention as "
-            "alif_utimer_enable_timer_clock()); passing timer_base would write the "
-            "per-channel window at +0x00 instead",
-        )
-        self.assertIn("global", args[0], f"first argument is not the global base: {args[0]}")
-        self.assertIn("timer_id", args[1], f"second argument is not the timer id: {args[1]}")
-
-    def test_start_comes_after_the_configuration(self):
-        """Start last: the write is what lets the hardware act on the config above it."""
+    def test_init_does_not_write_the_global_start_register_by_hand(self):
+        """Guard the same defect reintroduced without the helper."""
         body = init_body()
-        start_at = body.index("alif_utimer_start_counter")
-        for earlier in (
-            "alif_utimer_enable_soft_counter_ctrl",  # arms START_1_SRC[31] PGM_EN (#1828)
-            "alif_utimer_set_counter_reload_value",
-            "alif_utimer_enable_counter",  # CNTR_CTRL bit 0 EN
-            "alif_utimer_config_qdec_triggers",  # UP_1_SRC / DOWN_1_SRC
-            "QDEC_CNTR_CTRL_TRIG_BIT",  # CNTR_CTRL bit 5 CNTR_TRIG (#1828)
-        ):
-            self.assertLess(
-                body.index(earlier),
-                start_at,
-                f"{earlier} must be programmed BEFORE the channel is started",
+        for forbidden in ("GLB_CNTR_START", "UTIMER_GLB_CNTR_START"):
+            self.assertNotIn(
+                forbidden,
+                body,
+                f"{forbidden} must not be written here -- see "
+                "test_init_does_not_start_the_counter for the measurement",
             )
 
 

@@ -320,22 +320,43 @@ static int qdec_alif_utimer_init(const struct device *dev)
 	sys_set_bit(UTIMER_CNTR_CTRL(timer_base), QDEC_CNTR_CTRL_TRIG_BIT);
 
 	/*
-	 * Start the channel -- LAST, once every register above is programmed, since
-	 * this is the write that lets the hardware act on them.  Enabling and
-	 * starting are two separate steps: alif_utimer_enable_counter() above sets
-	 * the per-channel UTIMERn_CNTR_CTRL bit 0 EN, which only permits the channel
-	 * to run, while HWRM 13.2.5 names the GLOBAL START/STOP/CLEAR writes as how
-	 * a channel is actually turned on -- hence the GLOBAL base and the timer id
-	 * here, not timer_base (same calling convention as
-	 * alif_utimer_enable_timer_clock() above).  Without it the channel sat
-	 * configured and idle: measured on E1M-AEN803 2026W36-0002, CNTR_CTRL
-	 * (0x4800d080) read 0x00000021 -- EN and CNTR_TRIG set but bit 1 RUNNING
-	 * CLEAR -- with GLB_CNTR_START (0x48000000) never written and the counter
-	 * stuck at 0 while sample_fetch() still returned success (#2037).  CNTR_CTRL
-	 * bit 1 RUNNING (and GLB_CNTR_RUNNING bit <timer_id>) is what proves this
-	 * took effect on silicon.
+	 * DO NOT START THE COUNTER HERE.  This is deliberate, it is the opposite of
+	 * what an earlier version of this driver did, and the reason is measured.
+	 *
+	 * A trigger-counting channel must NOT be started.  GLB_CNTR_START puts the
+	 * channel into free-running clocked mode, where the counter advances on the
+	 * peripheral clock rather than on quadrature events.  Measured on
+	 * E1M-AEN803 serial 2026W36-0002 with an untouched encoder: after
+	 * alif_utimer_start_counter() the counter advanced at 400,010,738 counts/s
+	 * -- with UP_1_SRC and DOWN_1_SRC BOTH ZEROED, so no quadrature transition
+	 * of any polarity could have contributed.  Writing GLB_CNTR_STOP froze it
+	 * instantly and completely: three CNTR reads 5 s apart, bit-identical.
+	 *
+	 * With the shipped reload (CNTR_PTR = counts-per-revolution - 1 = 0x5F) that
+	 * free-run wraps a whole revolution every 240 ns, so the reported angle was
+	 * uncorrelated noise -- strictly worse than the stuck-at-zero symptom the
+	 * start call was added to fix (#2037, cause of #2038).
+	 *
+	 * Alif's own QEC flow agrees and never starts the channel: qec0_app() in
+	 * Boards/Templates/Baremetal/demo_qec.c calls ConfigCounter(TRIGGERING,
+	 * TRIANGLE), SetCount, three ConfigTrigger calls, then reads GetCount and
+	 * finally Stop -- there is no Start() anywhere in it.  Their MODE_TRIGGERING
+	 * performs exactly one hardware action, utimer_glb_driver_output_disable().
+	 * The counter increments from triggers alone.
+	 *
+	 * So CNTR_CTRL reading 0x00000021 here -- EN and CNTR_TRIG set, bit 1
+	 * RUNNING clear -- and GLB_CNTR_RUNNING reading 0x00000000 are the CORRECT
+	 * resting state for this channel, not evidence of a defect.  Note bit 1 is
+	 * status, not control: it is set by GLB_CNTR_START and cleared by
+	 * GLB_CNTR_STOP, and writing it into CNTR_CTRL does not take (measured --
+	 * a write of 0x00000023 reads back 0x00000021).
+	 *
+	 * STILL OPEN (#2038): whether the counter increments on real quadrature
+	 * edges in this resting state has never been observed, because no run has
+	 * had a hand on the shaft.  The stuck-at-zero reading that started all of
+	 * this is unexplained, and "the counter was never started" was the wrong
+	 * explanation for it.
 	 */
-	alif_utimer_start_counter(global_base, cfg->timer_id);
 
 	return 0;
 }
