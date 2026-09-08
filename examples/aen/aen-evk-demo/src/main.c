@@ -109,6 +109,9 @@
 #include "alp/chips/ina236.h"
 #include "alp/chips/tcal9538.h"
 #include "alp/chips/eeprom_24c128.h"
+#include "alp/chips/cc3501e.h"
+
+#include "cc3501e_bridge.h" /* cc3501e_bridge_bringup() -- the SoM bring-up template */
 
 /* ==================================================================== */
 /* Phase framework                                                       */
@@ -140,6 +143,20 @@ typedef struct {
 	alp_i2c_t *brd_bus; /**< SoC I2C0 / BRD_I2C, portable bus 2. NULL if open failed. */
 	alp_i2c_t
 	    *carrier_bus; /**< SoC I2C2 / EVK_I2C_BUS_SENSORS, portable bus 0. NULL if open failed. */
+
+	/**
+	 * Optional one-word QUALIFIER a phase may set on its own verdict, carried
+	 * into the summary table (NULL = none; main() clears it between phases).
+	 *
+	 * Three verdicts are the right number to gate on, but they are not always
+	 * the whole truth, and the summary table is what most readers actually
+	 * read. Phase 8's empty Wi-Fi scan is the case that forced this: it is a
+	 * genuine PASS -- the scan round-tripped -- but nothing corroborated it,
+	 * and a reader of the table alone could not tell that run from one that
+	 * saw a dozen networks. A qualifier is NOT a fourth verdict: it never
+	 * changes what the phase counts as.
+	 */
+	const char *note;
 } demo_ctx_t;
 
 typedef phase_verdict_t (*phase_fn_t)(demo_ctx_t *ctx);
@@ -1120,9 +1137,6 @@ static phase_verdict_t phase_jpeg_encode(demo_ctx_t *ctx)
  * both radios up; on a bench-diagnostic image that is the right trade.
  */
 
-#include "alp/chips/cc3501e.h"
-#include "cc3501e_bridge.h" /* cc3501e_bridge_bringup() -- the SoM bring-up template */
-
 /* Bounded retry for the first PING. cc3501e_reset() has already waited out
  * the boot budget, so attempt 1 usually lands; this only absorbs residual
  * ramp/boot jitter. 25 x 200 ms = 5 s, which is a bound, not a hope: a part
@@ -1157,7 +1171,6 @@ static phase_verdict_t phase_jpeg_encode(demo_ctx_t *ctx)
  *     gone by the time phase 9 ran.
  */
 static cc3501e_t cc35_fw;
-static bool      cc35_link_up; /**< true once a PING has been answered. */
 
 /*
  * Is this a real, factory-programmed station MAC?
@@ -1166,24 +1179,28 @@ static bool      cc35_link_up; /**< true once a PING has been answered. */
  * "the call succeeded, therefore the hardware works" reasoning that let
  * i2c-device-hub report a pass over sensors stuck at their reset sentinel.
  * A radio that has not read its identity out yet answers with a structurally
- * impossible address, and these are the three shapes that takes:
+ * impossible address, and these are the shapes that takes:
  *
  *   00:00:00:00:00:00  -- nothing was read; the field is still zeroed.
  *   ff:ff:ff:ff:ff:ff  -- the broadcast address; an erased/undriven read.
  *   xx with bit 0 of the first octet SET -- the IEEE 802 group bit. A
  *     GROUP address can never be a station's own source address, so any
- *     value with it set is garbage no matter how random it looks. This is
- *     the check that catches a shifted or half-populated reply, which the
- *     two constant patterns above do not.
+ *     value with it set is garbage however random it looks.
+ *   a ZERO OUI (first three octets all 00) -- IEEE never assigns one, so
+ *     no station can own such an address. This is the check that catches
+ *     the failure THIS LINK actually produces: the documented READY re-arm
+ *     race hands back a reply shifted one byte, with a leading 0x00, so a
+ *     good 44:3e:8a:10:b6:9e reads as 00:44:3e:8a:10:b6 -- group bit clear,
+ *     neither constant pattern, and it would otherwise pass. It also
+ *     catches a half-populated reply that only filled the tail.
  *
  * WHAT THIS DELIBERATELY DOES NOT REJECT, and why it would be wrong to:
  * the address the E1M-AEN SoMs actually carry is a TI FACTORY MAC in the
- * 44:3E:8A MA-L block (bench: 44:3e:8a:10:b6:9e on 2026W36-0001). Alp Lab
- * holds no IEEE OUI and needs none -- the MAC eFuse is an OVERRIDE that
- * reads 0 on a good part, and the TI-assigned address IS the valid one.
- * Rejecting "a TI-looking MAC" would fail every correctly provisioned
- * module in the fleet. The OUI is printed below so a reader can see which
- * block the address came from and judge for themselves.
+ * 44:3E:8A MA-L block. Alp Lab holds no IEEE OUI and needs none -- the MAC
+ * eFuse is an OVERRIDE that reads 0 on a good part, and the TI-assigned
+ * address IS the valid one. Rejecting "a TI-looking MAC" would fail every
+ * correctly provisioned module in the fleet. The OUI is printed below so a
+ * reader can see which block the address came from and judge for themselves.
  */
 static bool cc35_mac_plausible(const uint8_t mac[CC3501E_MAC_LEN])
 {
@@ -1193,7 +1210,9 @@ static bool cc35_mac_plausible(const uint8_t mac[CC3501E_MAC_LEN])
 		if (mac[i] != 0x00u) all_zero = false;
 		if (mac[i] != 0xFFu) all_ff = false;
 	}
-	return !all_zero && !all_ff && ((mac[0] & 0x01u) == 0u);
+	bool zero_oui = ((mac[0] | mac[1] | mac[2]) == 0x00u);
+
+	return !all_zero && !all_ff && !zero_oui && ((mac[0] & 0x01u) == 0u);
 }
 
 /*
@@ -1219,7 +1238,8 @@ static bool cc35_scan_record_plausible(const cc3501e_scan_record_t *r)
 
 static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 {
-	ARG_UNUSED(ctx); /* The coprocessor is on SPI1, not on either I2C bus. */
+	/* The coprocessor is on SPI1, not on either I2C bus -- ctx is used only
+	 * to hang the empty-scan qualifier off, at the end. */
 	printf("[evkdemo] -- Phase: CC3501E Wi-Fi 6 / BLE 5.4 (inter-chip SPI1 bridge) --\n");
 
 	/* --- 1. Power + reset + open the link ---------------------------- */
@@ -1246,57 +1266,110 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 		       (int)alp_last_error());
 		return PHASE_FAIL;
 	}
+	if (rc == ALP_ERR_VERSION) {
+		/* cc3501e_reset() refused on a MAJOR protocol skew and CLEARED
+		 * `initialised`, so every call below would return ALP_ERR_NOT_READY
+		 * the instant it was made -- 25 PINGs of nothing, five seconds of
+		 * sleeps, and then a cause list that does not contain the cause.
+		 * Short-circuit and print what the driver deliberately recorded on
+		 * exactly this path so a caller could report it. */
+		printf(
+		    "[evkdemo] CC3501E: firmware speaks protocol v%u.%u, this host is built for v%u.%u -- "
+		    "MAJOR skew, so the driver refused the link and marked the handle down. %s\n",
+		    cc35_fw.fw_proto_major,
+		    cc35_fw.fw_proto_minor,
+		    (unsigned)ALP_CC3501E_PROTOCOL_MAJOR,
+		    (unsigned)ALP_CC3501E_PROTOCOL_MINOR,
+		    (cc35_fw.fw_proto_major == 0u)
+		        ? "MAJOR 0 means the firmware predates the versioning scheme entirely (it answered "
+		          "a raw v1..v9 integer) -- reflash the bridge"
+		        : "The two binaries disagree about the frame layout; talking anyway would "
+		          "misread every reply");
+		return PHASE_FAIL;
+	}
 
 	/* --- 2. PING until it answers, bounded ---------------------------- */
 	/* META opcode 0x00. A serviced PING proves the firmware parsed a frame
 	 * and staged a reply across the SS0-framed, READY-gated link -- the
 	 * whole transport, both ends. It proves NOTHING about either radio,
 	 * which is why it is only the FIRST of five things gated on below. */
-	alp_status_t ping_rc = ALP_ERR_TIMEOUT;
-	unsigned     attempt = 0u;
-	for (; attempt < CC35_PING_RETRIES; ++attempt) {
+	alp_status_t ping_rc  = ALP_ERR_TIMEOUT;
+	unsigned     attempts = 0u;
+	for (; attempts < CC35_PING_RETRIES; ++attempts) {
 		ping_rc = cc3501e_ping(&cc35_fw);
-		if (ping_rc == ALP_OK) break;
+		if (ping_rc == ALP_OK) {
+			attempts++; /* count the one that succeeded, not the ones before it */
+			break;
+		}
 		k_msleep(CC35_PING_GAP_MS);
 	}
-	cc35_link_up = (ping_rc == ALP_OK);
 	printf("[evkdemo] CC3501E: PING (0x00) -> %d after %u attempt(s) of %u (%u ms apart)\n",
 	       (int)ping_rc,
-	       attempt + 1u,
+	       attempts,
 	       CC35_PING_RETRIES,
 	       CC35_PING_GAP_MS);
-	if (!cc35_link_up) {
+	if (ping_rc != ALP_OK) {
 		/* Every later call would time out against a dead link and add
 		 * seconds of nothing to a run that costs a bench reservation.
-		 * Stop here -- with the codes, not silently. */
-		printf("[evkdemo] CC3501E: no answer in %u ms -- check WIFI_EN (P15_5) actually went high, "
-		       "the SPI1 pinmux (P14_4/5/6/7), the READY line (P2_6), and that the coprocessor is "
-		       "running its bridge firmware. NOT a skip: the part is fitted and powered by this "
-		       "phase, so silence is a failure\n",
+		 * Stop here -- with the codes, not silently.
+		 *
+		 * The figure below is the SLEEP budget only. Each attempt also
+		 * spends its own transport timeout inside cc3501e_ping(), so real
+		 * elapsed time is longer -- stated rather than quietly understated,
+		 * because a reader timing the run against this line would otherwise
+		 * conclude something else was hanging. */
+		printf("[evkdemo] CC3501E: no answer after %u ms of retry gaps (plus each attempt's own "
+		       "transport timeout, so longer in wall-clock) -- check WIFI_EN (P15_5) actually went "
+		       "high, the SPI1 pinmux (P14_4/5/6/7), the READY line (P2_6), and that the "
+		       "coprocessor is running its bridge firmware. NOT a skip: the part is fitted and "
+		       "powered by this phase, so silence is a failure\n",
 		       (unsigned)(CC35_PING_RETRIES * CC35_PING_GAP_MS));
 		return PHASE_FAIL;
 	}
 
 	/* --- 3. Identity: VERSION, MAC, CAPABILITIES ---------------------- */
 
-	/* GET_VERSION (0x01) -- the PROTOCOL version, not the firmware build.
+	/*
+	 * GET_VERSION (0x01) -- the PROTOCOL version, not the firmware build.
 	 * cc3501e_get_version() deliberately does not compare it (its callers
-	 * include liveness soaks), so the comparison is made HERE and gated on:
-	 * a version that round-trips but disagrees with the header this image
-	 * was compiled against means the two ends do not share a wire contract,
-	 * and every reply parsed after it is being read against the wrong
-	 * layout. Answering is not the same as agreeing. */
-	uint16_t     version = 0u;
-	alp_status_t ver_rc  = cc3501e_get_version(&cc35_fw, &version);
-	bool         ver_ok  = (ver_rc == ALP_OK) && (version == ALP_CC3501E_PROTOCOL_VERSION);
+	 * include liveness soaks), so the comparison is made here.
+	 *
+	 * MAJOR ONLY, per ADR 0033 and the driver's own policy
+	 * (chips/cc3501e/cc3501e_core.c). MAJOR means "an unchanged host would be
+	 * MISREAD" -- reused reserved bytes, changed struct layout, changed
+	 * framing -- so it is the only difference that makes the replies below
+	 * untrustworthy. MINOR is defined as purely ADDITIVE, and connecting
+	 * across it is safe precisely because of that: this host never sends an
+	 * opcode it does not know, and the firmware never spontaneously emits an
+	 * event nobody armed. Demanding an exact match would fail a firmware ADR
+	 * 0033 declares compatible, which is a false FAIL on a good board.
+	 *
+	 * A minor delta is INFORMATION, printed and not gated: lower than this
+	 * host's minor means the firmware lacks newer features (GET_CAPABILITIES
+	 * below is the better question about that anyway), higher means it has
+	 * features this phase does not use.
+	 *
+	 * Note this line is not where a MAJOR skew is normally caught -- the
+	 * bring-up above already refused and returned. It stays gated as a
+	 * backstop for a firmware that somehow changes its answer afterwards.
+	 */
+	uint16_t     version  = 0u;
+	alp_status_t ver_rc   = cc3501e_get_version(&cc35_fw, &version);
+	unsigned     fw_major = ALP_CC3501E_PROTOCOL_VERSION_MAJOR(version);
+	unsigned     fw_minor = ALP_CC3501E_PROTOCOL_VERSION_MINOR(version);
+	bool         ver_ok = (ver_rc == ALP_OK) && (fw_major == (unsigned)ALP_CC3501E_PROTOCOL_MAJOR);
 	printf(
 	    "[evkdemo] CC3501E: GET_VERSION (0x01) -> %d protocol v%u.%u (host built for v%u.%u) %s\n",
 	    (int)ver_rc,
-	    ALP_CC3501E_PROTOCOL_VERSION_MAJOR(version),
-	    ALP_CC3501E_PROTOCOL_VERSION_MINOR(version),
-	    ALP_CC3501E_PROTOCOL_VERSION_MAJOR(ALP_CC3501E_PROTOCOL_VERSION),
-	    ALP_CC3501E_PROTOCOL_VERSION_MINOR(ALP_CC3501E_PROTOCOL_VERSION),
-	    ver_ok ? "match" : "MISMATCH -- replies below are parsed against the host's layout");
+	    fw_major,
+	    fw_minor,
+	    (unsigned)ALP_CC3501E_PROTOCOL_MAJOR,
+	    (unsigned)ALP_CC3501E_PROTOCOL_MINOR,
+	    !ver_ok ? "MAJOR MISMATCH -- replies below are parsed against the host's layout"
+	    : (fw_minor == (unsigned)ALP_CC3501E_PROTOCOL_MINOR)
+	        ? "match"
+	        : "major match, minor differs -- additive by definition (ADR 0033), so the link is "
+	          "compatible; not gated on");
 
 	/* GET_MAC (0x03) -- poll-by-repeat, so an OK here also proves the
 	 * firmware's worker seam (submit -> worker -> reply), not just META
@@ -1416,6 +1489,19 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 	/* No cc3501e_wifi_connect() call anywhere in this phase, and no
 	 * credentials in this file -- see the section header. */
 
+	if (scan_rc != ALP_OK) {
+		/* A timed-out scan may still be RUNNING on the coprocessor -- the
+		 * poll-by-repeat budget expiring says the host gave up, not that the
+		 * worker did. BLE_ENABLE below brings the Wi-Fi stack up first over
+		 * the shared HIF, so leaving a scan in flight would make BLE fail
+		 * too and misattribute one fault as two. Tear it down first; a stop
+		 * against a scan that already finished is harmless. */
+		alp_status_t stop_rc = cc3501e_wifi_scan_stop(&cc35_fw);
+		printf("[evkdemo] CC3501E: WIFI_SCAN_STOP (0x11) -> %d (scan did not complete; torn down "
+		       "before BLE_ENABLE so a still-running scan cannot fail the shared HIF too)\n",
+		       (int)stop_rc);
+	}
+
 	/* --- 5. BLE ------------------------------------------------------- */
 	/* BLE_ENABLE (0x30) brings up the BLE controller AND the NimBLE host on
 	 * the coprocessor. The firmware worker-routes it off the SPI ISR and
@@ -1441,8 +1527,9 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 	 * back" -- which is the bug this app was built around. PASS additionally
 	 * requires ALL of:
 	 *
-	 *   ver_ok   -- the firmware agrees on the WIRE CONTRACT, so every other
-	 *               reply below was parsed against the right layout.
+	 *   ver_ok   -- the firmware agrees on the MAJOR wire contract, so every
+	 *               other reply below was parsed against the right layout. A
+	 *               MINOR delta is additive and deliberately not gated.
 	 *   mac_ok   -- the radio produced its own identity AND that identity is
 	 *               structurally a station MAC, not a zeroed field.
 	 *   caps_rc  -- the firmware could state what it implements.
@@ -1465,6 +1552,13 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 	       scan_ok ? "ok" : "BAD",
 	       (ble_rc == ALP_OK) ? "ok" : "BAD",
 	       pass ? "PASS" : "FAIL");
+
+	/* Carry the empty-scan qualifier into the SUMMARY TABLE, not just this
+	 * line. The table is what most readers read, and a bare PASS there cannot
+	 * be told apart from a run that actually saw networks. */
+	if (pass && (n_scan == 0u)) {
+		ctx->note = "scan UNCORROBORATED -- 0 networks seen";
+	}
 	return pass ? PHASE_PASS : PHASE_FAIL;
 }
 
@@ -1546,7 +1640,7 @@ static phase_verdict_t phase_screen_stub(demo_ctx_t *ctx)
  * Vela-compiled person_detect_u85 model is ~263 KiB, which is precisely
  * why THAT app links into MRAM slot0 and boots via Flow D instead of
  * RAM-running. This demo is a Flow C ITCM RAM-run: ITCM is 256 KB total
- * and the demo already occupies about 140 KB (54.66%) of it -- roughly
+ * and the demo already occupies about 141 KB (55.04%) of it -- roughly
  * 93 KB (36.24%) before phase 13, about 106 KB (41.41%) after it, and the
  * CC3501E bridge driver in phase 8 added ~34 KB more, so the headroom is
  * shrinking, not growing. Deliberately not a byte-exact figure: the size depends on
@@ -1567,7 +1661,7 @@ static phase_verdict_t phase_npu_stub(demo_ctx_t *ctx)
 	ARG_UNUSED(ctx);
 	printf("[evkdemo] -- Phase: NPU inference -- SKIPPED (needs a boot-flow change, not a "
 	       "phase: aen-npu-inference-alp's person_detect_u85 model is ~263 KiB and this "
-	       "demo is a Flow C ITCM RAM-run -- 256 KB ITCM total, about 140 KB (54.66%%) "
+	       "demo is a Flow C ITCM RAM-run -- 256 KB ITCM total, about 141 KB (55.04%%) "
 	       "already used, so the model would have to move the whole image to MRAM slot0 / "
 	       "Flow D) --\n");
 	return PHASE_SKIPPED;
@@ -1624,15 +1718,20 @@ int main(void)
 	}
 
 	phase_verdict_t results[ARRAY_SIZE(PHASES)];
+	const char     *notes[ARRAY_SIZE(PHASES)] = { NULL };
 	int             n_pass = 0, n_skipped = 0, n_fail = 0;
 
 	for (size_t i = 0; i < ARRAY_SIZE(PHASES); i++) {
+		ctx.note   = NULL; /* cleared per phase: a note never leaks forward. */
 		results[i] = PHASES[i].run(&ctx);
-		printf("[evkdemo] phase %2zu/%2zu: %-34s %s\n",
+		notes[i]   = ctx.note;
+		printf("[evkdemo] phase %2zu/%2zu: %-34s %s%s%s\n",
 		       i + 1,
 		       ARRAY_SIZE(PHASES),
 		       PHASES[i].name,
-		       verdict_str(results[i]));
+		       verdict_str(results[i]),
+		       (notes[i] != NULL) ? " -- " : "",
+		       (notes[i] != NULL) ? notes[i] : "");
 		switch (results[i]) {
 		case PHASE_PASS:
 			n_pass++;
@@ -1652,7 +1751,12 @@ int main(void)
 
 	printf("\n[evkdemo] ==================== SUMMARY ====================\n");
 	for (size_t i = 0; i < ARRAY_SIZE(PHASES); i++) {
-		printf("[evkdemo]   %-38s %s\n", PHASES[i].name, verdict_str(results[i]));
+		/* A qualifier is printed alongside the verdict, never instead of it:
+		 * it explains a verdict, it is not a fourth one. */
+		printf("[evkdemo]   %-38s %-7s %s\n",
+		       PHASES[i].name,
+		       verdict_str(results[i]),
+		       (notes[i] != NULL) ? notes[i] : "");
 	}
 	printf("[evkdemo] ====================================================\n");
 

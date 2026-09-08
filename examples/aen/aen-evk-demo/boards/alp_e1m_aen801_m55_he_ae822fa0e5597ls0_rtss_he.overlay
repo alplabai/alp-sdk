@@ -225,15 +225,38 @@
  * edge SPI0), so the consuming app declares it. reg 0x48104000 = the SPI1 base
  * (+0x1000 per instance from spi0's 0x48103000).
  *
+ * BENCH-TBD on interrupts: <138 3> follows the consecutive pattern from spi0's
+ * IRQ 137 -- it is INFERRED, not read out of a document. "Confirm" therefore
+ * means: check SPI1_IRQ against the AE822 TRM (or the alifsemi/zephyr_alif
+ * fork's e1.dtsi) before relying on the interrupt-driven path on silicon.
+ *
  * clock-frequency is REQUIRED, not decorative: without it spi_dw_alif's
  * configure takes the clock-control path, which fails -EINVAL for the gateless
  * dummy ALIF_SPI_CLK, and every transceive then returns ALP_ERR_INVAL at zero
  * SCLK. 200 MHz is the real SSI functional clock (E8 HWRM); BAUDR =
  * clock-frequency / freq_hz, and cc3501e_bridge.h asks for 25 MHz = /8.
  *
- * rx-delay = <2> is mandatory at that clock: at a 40 ns bit period the MISO
- * capture needs the delay. Silicon-measured on e1m-aen-evk-01 -- 0 fails
- * outright and 4 fails too.
+ * rx-delay: THIS VALUE IS NOT WHAT CLOCKS THE LINK, and the tree contains two
+ * comments that disagree about what should. Read this before "fixing" either.
+ *
+ * The MISO capture delay is real and necessary -- at a 40 ns bit period the
+ * pad + on-SoM trace round-trip does not return the slave's bit by the SCLK
+ * edge. But spi_dw_alif.c writes RX_SAMPLE_DLY (0xf0) from this property in
+ * exactly two places, its init and its PM resume, and CONFIG_PM_DEVICE is off
+ * in this image; spi_dw_configure never touches the register. So this <2>
+ * lands once at init and is then OVERWRITTEN: src/cc3501e_bridge.c pokes
+ * 0x48104000+0xf0 with CC3501E_BRIDGE_RX_SAMPLE_DLY = 6 right after
+ * alp_spi_open() returns. Six is the value the bridge actually runs at, here
+ * and in every sibling CC3501E example -- all of which carry this same <2>.
+ *
+ * The conflict: cc3501e_bridge.h calls 6 silicon-tuned for ~14.3 MHz with a
+ * wide clean window of 4..8, while the sibling overlays this block was
+ * transcribed from call 2 the working point at 25 MHz and say 4 fails. Both
+ * cannot be right at 25 MHz. Neither has been re-measured since the clock
+ * moved, and this app has never run on silicon, so it asserts NEITHER as
+ * verified. The <2> is kept because it matches the siblings byte-for-byte and
+ * is inert anyway; if the link mis-samples on the bench, sweep
+ * CC3501E_BRIDGE_RX_SAMPLE_DLY -- not this property, which the poke discards.
  */
 &clockctrl {
 	status = "okay";

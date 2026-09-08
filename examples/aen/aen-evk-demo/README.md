@@ -45,13 +45,13 @@ input. No camera module is required by, or in scope for, either.
 | 5 | EEPROM identity | carrier bus | 24C128 read-only: `"ALPH"` magic + `"aen"` family string at the start of the manifest. | Manifest field accuracy beyond magic/family (see `aen-eeprom-manifest` for the full CRC/field decode). |
 | 6 | RGB LED | PWM0 (red) / PWM3 (green) / PWM1 (blue) | Drives each channel via `<alp/pwm.h>`, then asserts the UTIMER **register** the driver programmed (driver-enable + compare-enable bits, clock gate, run bit, a real fractional duty), then holds the colour lit for 1500 ms and names the colour it expects -- restores each channel to idle before returning. | That the LED visibly lit, and which colour it lit. The hold makes that checkable **by an operator watching the board**; the verdict itself is still the register read-back, and every channel programs identically, so a wrong `EVK_PWM_LED_*` colour mapping would still PASS. Only the eye settles the mapping. |
 | 7 | Rotary encoder | -- | Nothing (stub). | Needs an attended run (someone turning the knob) -- see `EVK-BRIEFING.md`'s open question about whether the driver can even distinguish "no motion" from "not counting". |
-| 8 | CC3501E Wi-Fi/BLE | inter-chip SPI1 (P14_6/5/4 + hardware SS0 P14_7), WIFI_EN P15_5, nRESET P15_1_FLEX, READY P2_6 | Powers (`WIFI_EN` high) and resets the coprocessor -- **nothing answers before this**, its supply is host-gated -- then `PING` (`0x00`) with a bounded 25 x 200 ms retry, `GET_VERSION` (`0x01`) **compared against `ALP_CC3501E_PROTOCOL_VERSION`**, `GET_MAC` (`0x03`) checked for a structurally valid station address, `GET_CAPABILITIES` (`0x06`), a passive `WIFI_SCAN_START` (`0x10`), and `BLE_ENABLE` (`0x30`). Every return code is printed. `PASS` requires **all five** of version-match, valid MAC, capabilities readable, scan round-tripped, BLE up -- a `PING` alone is explicitly not enough. | Signal quality, throughput, or that any network is reachable -- it never associates. An **empty scan is `PASS`-but-`UNCORROBORATED`**: zero networks is a statement about the RF environment, not about this board, so the gate is that the scan *round-tripped*, not that it found anything. Which colour of failure a dead link is (power / pinmux / firmware) -- the log names the three to check. |
+| 8 | CC3501E Wi-Fi/BLE | inter-chip SPI1 (P14_6/5/4 + hardware SS0 P14_7), WIFI_EN P15_5, nRESET P15_1_FLEX, READY P2_6 | Powers (`WIFI_EN` high) and resets the coprocessor -- **nothing answers before this**, its supply is host-gated -- then `PING` (`0x00`) with a bounded 25 x 200 ms retry, `GET_VERSION` (`0x01`) **compared on `ALP_CC3501E_PROTOCOL_MAJOR` only** (per ADR 0033 a MINOR delta is additive and safe -- it is reported, not gated), `GET_MAC` (`0x03`) checked for a structurally valid station address, `GET_CAPABILITIES` (`0x06`), a passive `WIFI_SCAN_START` (`0x10`), and `BLE_ENABLE` (`0x30`). Every return code is printed. `PASS` requires **all five** of major-version match, valid MAC, capabilities readable, scan round-tripped, BLE up -- a `PING` alone is explicitly not enough. | Signal quality, throughput, or that any network is reachable -- it never associates. An **empty scan is `PASS`-but-`UNCORROBORATED`**: zero networks is a statement about the RF environment, not about this board, so the gate is that the scan *round-tripped*, not that it found anything. Which colour of failure a dead link is (power / pinmux / firmware) -- the log names the three to check. |
 | 9 | SD card | -- | Nothing (stub). | No longer blocked on phase 8 (which now powers and resets the coprocessor and leaves it bound) -- what remains is the SD side itself: the SDIO mux sequence on CC35 `GPIO_26`/`GPIO_30`, which additionally needs `CONFIG_ALP_SDK_GPIO_CC3501E_PROXY` and a route table this app does not yet carry. |
 | 10 | Ethernet | -- | Nothing (stub). | Deferred to the next slice. |
 | 11 | Sound out -> PDM in | -- | Nothing (stub). | I2S bring-up + the low-volume ramp policy for the ~15 W class-D amps deferred to the next slice. |
 | 12 | Screen (DSI) | -- | Nothing (stub). | No panel on this bench; a clean DSI init would not prove one is attached anyway. |
 | 13 | JPEG encode | Hantro VC9000E @ `0x49044000` (`jpeg0`) | Encodes a synthetic 64x64 NV12 gradient through `<alp/jpeg.h>`. Prints which backend won (`caps.hw_accelerated`) and **fails a software-fallback win** -- on this board the hardware encoder is the phase. Asserts the output really is a JPEG: SOI `FF D8 FF` at the start, EOI `FF D9` at the end, and a plausible length (>= 256 B, < the 6144 B source). Every return code is printed verbatim. | The image is *correct* -- the checks are structural, not a decode. The Hantro hardware-ID readback: `<alp/jpeg.h>` exposes no accessor for `JPEG_SWREG0`, and this example will not hand-roll a register poke. A mismatch against `JPEG_HW_ID` (`0x90001000`) still surfaces, as `alp_jpeg_open() == NULL` with `ALP_ERR_NOT_READY` plus the driver's own `"JPEG hardware not found (ID: 0x%08x)"` `LOG_ERR` line (this app builds `CONFIG_LOG=y`). |
-| 14 | NPU inference | -- | Nothing (stub). | **A boot-flow change, not a phase.** `aen-npu-inference-alp` is the silicon-proven Ethos-U85 path through `<alp/inference.h>`, but its Vela-compiled `person_detect_u85` model is **~263 KiB** -- which is exactly why that app links into MRAM slot0 and boots via Flow D. This demo is a **Flow C ITCM RAM-run**: ITCM is **256 KB total** and the demo already uses **about 140 KB (54.66%)** of it -- roughly 93 KB (36.24%) before phase 13, about 106 KB (41.41%) after it, and phase 8's CC3501E bridge driver added ~34 KB more, so the headroom is shrinking, not growing. The model does not fit alongside it, so adding NPU here means relinking the whole demo into MRAM slot0. Shrinking the model to fit would swap a proven artefact for an unproven one. |
+| 14 | NPU inference | -- | Nothing (stub). | **A boot-flow change, not a phase.** `aen-npu-inference-alp` is the silicon-proven Ethos-U85 path through `<alp/inference.h>`, but its Vela-compiled `person_detect_u85` model is **~263 KiB** -- which is exactly why that app links into MRAM slot0 and boots via Flow D. This demo is a **Flow C ITCM RAM-run**: ITCM is **256 KB total** and the demo already uses **about 141 KB (55.04%)** of it -- roughly 93 KB (36.24%) before phase 13, about 106 KB (41.41%) after it, and phase 8's CC3501E bridge driver added ~34 KB more, so the headroom is shrinking, not growing. The model does not fit alongside it, so adding NPU here means relinking the whole demo into MRAM slot0. Shrinking the model to fit would swap a proven artefact for an unproven one. |
 
 ## Buses
 
@@ -130,8 +130,8 @@ Confirmed building clean against this tree:
 
 ```
 Memory region         Used Size  Region Size  %age Used
-           FLASH:      143296 B       256 KB     54.66%
-             RAM:       60504 B       256 KB     23.08%
+           FLASH:      144272 B       256 KB     55.04%
+             RAM:       60496 B       256 KB     23.08%
            SRAM0:         14 KB         4 MB      0.34%
 ```
 
@@ -162,8 +162,8 @@ Phase 8's own lines, which carry the whole diagnostic for the coprocessor
 [evkdemo] -- Phase: CC3501E Wi-Fi 6 / BLE 5.4 (inter-chip SPI1 bridge) --
 [evkdemo] CC3501E: bridge bring-up (WIFI_EN high, nRESET pulsed, SPI1 @ 25000000 Hz) -> 0
 [evkdemo] CC3501E: PING (0x00) -> 0 after 1 attempt(s) of 25 (200 ms apart)
-[evkdemo] CC3501E: GET_VERSION (0x01) -> 0 protocol v1.0 (host built for v1.0) match
-[evkdemo] CC3501E: GET_MAC (0x03) -> 0  44:3e:8a:10:b6:9e  OUI=44:3e:8a  plausible station MAC
+[evkdemo] CC3501E: GET_VERSION (0x01) -> 0 protocol v3.1 (host built for v3.1) match
+[evkdemo] CC3501E: GET_MAC (0x03) -> 0  44:3e:8a:xx:xx:xx  OUI=44:3e:8a  plausible station MAC
 [evkdemo] CC3501E: GET_CAPABILITIES (0x06) -> 0 caps=0x00000fff wifi_sta=yes ble=yes
 [evkdemo] CC3501E:   scan[0] "example-ap" ch6 -52 dBm wpa2 bssid=.. ok
 [evkdemo] CC3501E: WIFI_SCAN_START (0x10) -> 0  7 network(s) seen, 7 plausible  ok
@@ -171,10 +171,18 @@ Phase 8's own lines, which carry the whole diagnostic for the coprocessor
 [evkdemo] CC3501E: ping=ok version=ok mac=ok caps=ok scan=ok ble=ok -> PASS
 ```
 
-The MAC, SSIDs and counts above are **shape, not expected values** -- the
-protocol version and the `44:3e:8a` OUI (MA-L Texas Instruments; the CC3501E
-carries a TI factory MAC and Alp Lab holds no IEEE OUI) are the only parts a
-reader should treat as characteristic.
+The device-specific octets, SSIDs and counts above are **shape, not expected
+values** -- the protocol version and the `44:3e:8a` OUI (MA-L Texas
+Instruments; the CC3501E carries a TI factory MAC and Alp Lab holds no IEEE
+OUI) are the only parts a reader should treat as characteristic.
+
+A `v3.0` firmware against this `v3.1` host would print `major match, minor
+differs` and still `PASS` -- ADR 0033 defines MINOR as additive, so the link
+is compatible; ask `GET_CAPABILITIES` about features rather than the version.
+Only a MAJOR skew fails, and it fails earlier: `cc3501e_reset()` refuses it
+during bring-up, so the phase short-circuits with the firmware's own
+major/minor rather than burning the full PING retry budget against a handle
+the driver has already marked down.
 
 The summary:
 
@@ -200,6 +208,14 @@ The summary:
 
 A run with skips is not a failed run -- the three counts are always
 reported together.
+
+A phase may attach a one-line **qualifier** to its own verdict, printed after
+it on both the per-phase line and in the summary table. A qualifier explains a
+verdict, it is never a fourth one and never changes what a phase counts as.
+Today only phase 8 sets one -- an empty Wi-Fi scan renders as
+`CC3501E Wi-Fi/BLE   PASS    scan UNCORROBORATED -- 0 networks seen`, so a
+reader of the table alone can still tell that run apart from one that saw
+networks.
 
 ## Reference
 
