@@ -132,9 +132,20 @@ int main(void)
 		 * noise detector gets mistaken for a working decoder.  Measured on
 		 * E1M-AEN803 2026W36-0002 (2026-09-08): with the counter running and
 		 * the encoder untouched, the count advanced steadily the whole window.
-		 * The QEC0 X/Y pads are configured with neither a bias nor a Schmitt
-		 * trigger (pad word 0x00210005 = AF 5, REN=1, DSC=0, SMT=0) while the
-		 * PEC12R's A/B contacts are OPEN at a detent, so both inputs float.
+		 *
+		 * The cause is NOT the pads, though it looked like it.  Floating
+		 * inputs were the leading theory -- the pad word 0x00210005 gives
+		 * AF 5, REN=1, DSC=0 (no bias), SMT=0 (no Schmitt), and the PEC12R's
+		 * A/B contacts are open at a detent -- but a bench run walked four pad
+		 * configurations and the counter kept advancing through all of them:
+		 * no-bias (0x00210005), pull-up (0x00290005), pull-up + Schmitt
+		 * (0x002B0005), and AF=0 with the pads deselected from the QEC
+		 * altogether (0x00290000).  A floating-input mechanism has to stop
+		 * when the pin no longer drives the peripheral.  This does not, so the
+		 * count source is internal to the channel.  Still being diagnosed; the
+		 * open lead is that UP_1_SRC/DOWN_1_SRC carry the right x4 trigger
+		 * masks (0x69/0x96) with PGM_EN (bit 31) CLEAR, where
+		 * START_1_SRC/STOP_1_SRC/CLEAR_1_SRC all have it set.
 		 *
 		 * This app cannot tell spurious counts from real ones -- it has no
 		 * operator input to correlate against.  So it reports what it can
@@ -145,9 +156,10 @@ int main(void)
 		result = "FAIL";
 		reason = "the count moved, but this app cannot attest that anyone turned the shaft "
 		         "-- on an unattended run a moving count means SPURIOUS COUNTS, not a live "
-		         "decode (floating QEC0 X/Y inputs: no bias, no Schmitt).  If you DID turn "
-		         "the shaft, this run is the expected result of a working decoder and only "
-		         "your attestation distinguishes the two";
+		         "decode.  Their source is internal to the UTIMER channel, not the pads: "
+		         "the count keeps advancing even with P3_0/P3_1 deselected from the QEC "
+		         "(AF=0).  If you DID turn the shaft, this run is the expected result of a "
+		         "working decoder and only your attestation distinguishes the two";
 	} else if (all_clean) {
 		result = "SKIPPED";
 		reason = "no motion detected -- every read in the window succeeded but the reported "

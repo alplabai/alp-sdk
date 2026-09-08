@@ -41,7 +41,16 @@
  * mod-96 counter every ~300 ms, so the observable is only
  * (rate * 0.3) mod 96, and a whole family of rates share that residue.  Do
  * not quote a counts/s figure from that run; several 32.768 kHz-derived
- * rates fit it as well as any other.
+ * rates fit it as well as any other.  The source is INTERNAL to the channel,
+ * not the pads: a later run walked four pad configurations -- no bias
+ * (0x00210005), pull-up (0x00290005), pull-up + Schmitt (0x002B0005), and
+ * AF=0 with P3_0/P3_1 deselected from the QEC entirely (0x00290000) -- and
+ * the counter kept advancing through all four.  Open lead for whoever picks
+ * this up: UP_1_SRC/DOWN_1_SRC hold the correct x4 quadrature masks
+ * (0x69/0x96) with PGM_EN (bit 31) CLEAR, while START_1_SRC / STOP_1_SRC /
+ * CLEAR_1_SRC all have it set; and FILTER_CTRL_B (0x4800D088) is 0x00000000
+ * because this driver writes only FILTER_CTRL_A, so the B input is unfiltered
+ * while A is filtered.
  */
 
 #define DT_DRV_COMPAT alif_utimer_qdec
@@ -63,14 +72,12 @@
  * utimer.h defines CNTR_CTRL bits 0, 1, 2, 4, 8 but not this one, and exposes
  * no setter for it (#1828).
  *
- * TREAT THAT CITATION AS UNCONFIRMED.  Neither the HWRM nor any document
- * defining bit 5 is present in this tree, so nobody here has read the section
- * being quoted; the Alif DFP header (drivers/include/utimer.h) likewise
- * defines bits 0, 1, 2, 4 and 8 and no bit 5, and Alif's own QEC reference
- * flow (Boards/Templates/Baremetal/demo_qec.c) never sets it.  Setting it is
- * retained because #1828 measured a real behaviour change on silicon, not
- * because the quoted text has been verified.  Anyone who gets the HWRM should
- * check this section and either firm up the citation or delete it.
+ * CONFIRMED against the AE822 SVD, which is in this tree: peripheral UTIMER,
+ * register UTIMER_CNTR_CTRL (addressOffset 0x80), field CNTR_TRIG at bit 5 --
+ * "Set this bit if incrementing or decrementing the counter via triggers",
+ * the exact wording attributed to the HWRM above.  (hal_alif's utimer.h and
+ * the Alif DFP header both omit bit 5, and Alif's own QEC reference flow
+ * never sets it, which is why this looked unsourced for a while.)
  */
 #define QDEC_CNTR_CTRL_TRIG_BIT 5U
 
@@ -221,8 +228,8 @@ static int qdec_alif_utimer_init(const struct device *dev)
 	alif_utimer_config_qdec_triggers(timer_base);
 
 	/*
-	 * Put the channel in trigger-based counting.  Attributed to HWRM
-	 * 13.2.6.3.26 -- unconfirmed, see the QDEC_CNTR_CTRL_TRIG_BIT comment --
+	 * Put the channel in trigger-based counting.  HWRM 13.2.6.3.26, and
+	 * confirmed by the AE822 SVD -- see the QDEC_CNTR_CTRL_TRIG_BIT comment --
 	 * UTIMERn_CNTR_CTRL bit 5 CNTR_TRIG: "Set this bit if incrementing or
 	 * decrementing the counter via triggers.  0x0: Not in trigger based
 	 * increment/decrement mode.  0x1: Trigger based increment/decrement mode."
