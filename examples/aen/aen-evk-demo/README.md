@@ -22,12 +22,18 @@ at the bench) never reads as a failed run.
 
 ## Scope of this slice
 
-Thirteen phases run in a fixed order. The first six are fully implemented
-against bench-proven drivers; the remaining seven are stubs that always
-report `SKIPPED`, each with its own reason (see `src/main.c`'s "STUBS"
-section) -- an attended-run requirement, a larger deferred unit of work,
-and "no panel on this bench" are different kinds of gaps and are described
-as such, not collapsed into one generic "not implemented".
+Fourteen phases run in a fixed order. Seven are fully implemented against
+bench-proven drivers -- the first six plus phase 13 (JPEG encode on the
+Hantro VC9000E); the remaining seven are stubs that always report
+`SKIPPED`, each with its own reason (see `src/main.c`'s "STUBS" section)
+-- an attended-run requirement, a larger deferred unit of work, "no panel
+on this bench", and a model that would need a different **boot flow** are
+different kinds of gaps and are described as such, not collapsed into one
+generic "not implemented".
+
+Neither phase 13 nor phase 14 is camera-gated: the JPEG phase encodes a
+synthetic gradient it builds itself and the NPU model carries its own
+input. No camera module is required by, or in scope for, either.
 
 | # | Phase | Bus / hardware | Asserts | Cannot assert |
 |---|---|---|---|---|
@@ -43,7 +49,8 @@ as such, not collapsed into one generic "not implemented".
 | 10 | Ethernet | -- | Nothing (stub). | Deferred to the next slice. |
 | 11 | Sound out -> PDM in | -- | Nothing (stub). | I2S bring-up + the low-volume ramp policy for the ~15 W class-D amps deferred to the next slice. |
 | 12 | Screen (DSI) | -- | Nothing (stub). | No panel on this bench; a clean DSI init would not prove one is attached anyway. |
-| 13 | JPEG + NPU | -- | Nothing (stub). | Heaviest phase in the full design, deferred to keep this slice bench-provable. Not camera-gated -- JPEG encodes its own gradient, the NPU runs its own model. |
+| 13 | JPEG encode | Hantro VC9000E @ `0x49044000` (`jpeg0`) | Encodes a synthetic 64x64 NV12 gradient through `<alp/jpeg.h>`. Prints which backend won (`caps.hw_accelerated`) and **fails a software-fallback win** -- on this board the hardware encoder is the phase. Asserts the output really is a JPEG: SOI `FF D8 FF` at the start, EOI `FF D9` at the end, and a plausible length (>= 256 B, < the 6144 B source). Every return code is printed verbatim. | The image is *correct* -- the checks are structural, not a decode. The Hantro hardware-ID readback: `<alp/jpeg.h>` exposes no accessor for `JPEG_SWREG0`, and this example will not hand-roll a register poke. A mismatch against `JPEG_HW_ID` (`0x90001000`) still surfaces, as `alp_jpeg_open() == NULL` with `ALP_ERR_NOT_READY` plus the driver's own `"JPEG hardware not found (ID: 0x%08x)"` `LOG_ERR` line (this app builds `CONFIG_LOG=y`). |
+| 14 | NPU inference | -- | Nothing (stub). | **A boot-flow change, not a phase.** `aen-npu-inference-alp` is the silicon-proven Ethos-U85 path through `<alp/inference.h>`, but its Vela-compiled `person_detect_u85` model is **~263 KiB** -- which is exactly why that app links into MRAM slot0 and boots via Flow D. This demo is a **Flow C ITCM RAM-run**: ITCM is **256 KB total** and the demo already uses **108552 B (41.41%)** of it -- 95008 B (36.24%) before phase 13, so the headroom is shrinking, not growing. The model does not fit alongside it, so adding NPU here means relinking the whole demo into MRAM slot0. Shrinking the model to fit would swap a proven artefact for an unproven one. |
 
 ## Buses
 
@@ -105,9 +112,15 @@ Confirmed building clean against this tree:
 
 ```
 Memory region         Used Size  Region Size  %age Used
-           FLASH:       94700 B       256 KB     36.13%
-             RAM:       12136 B       256 KB      4.63%
+           FLASH:         106 KB       256 KB     41.41%
+             RAM:       13104 B       256 KB      5.00%
+           SRAM0:         14 KB         4 MB      0.34%
 ```
+
+`SRAM0` holds phase 13's two JPEG buffers (6144 B source + 8192 B output).
+They live there and not in `RAM` because the Hantro block is an AXI bus
+master that cannot reach the M55's core-local DTCM -- see phase 13's
+comment block in `src/main.c`.
 
 ## Console
 
@@ -120,21 +133,22 @@ SWD instead.
 ## Expected output shape
 
 ```
-[evkdemo] phase  1/13: RTC + temperature (BRD_I2C)         PASS
-[evkdemo] phase  2/13: Sensors (BMI323/ICM42670/BMP581)     PASS
-[evkdemo] phase  3/13: Power rails (6x INA236)              PASS
-[evkdemo] phase  4/13: I/O expander answers (TCAL9538, read-only) PASS
-[evkdemo] phase  5/13: EEPROM identity (24C128)             PASS
-[evkdemo] phase  6/13: RGB LED (PWM0/1/3)                   PASS
-[evkdemo] phase  7/13: Rotary encoder                       SKIPPED
-[evkdemo] phase  8/13: CC3501E Wi-Fi/BLE                    SKIPPED
-[evkdemo] phase  9/13: SD card                              SKIPPED
-[evkdemo] phase 10/13: Ethernet                             SKIPPED
-[evkdemo] phase 11/13: Sound out -> PDM in                  SKIPPED
-[evkdemo] phase 12/13: Screen (DSI)                         SKIPPED
-[evkdemo] phase 13/13: JPEG + NPU                           SKIPPED
+[evkdemo] phase  1/14: RTC + temperature (BRD_I2C)         PASS
+[evkdemo] phase  2/14: Sensors (BMI323/ICM42670/BMP581)     PASS
+[evkdemo] phase  3/14: Power rails (6x INA236)              PASS
+[evkdemo] phase  4/14: I/O expander answers (TCAL9538, read-only) PASS
+[evkdemo] phase  5/14: EEPROM identity (24C128)             PASS
+[evkdemo] phase  6/14: RGB LED (PWM0/1/3)                   PASS
+[evkdemo] phase  7/14: Rotary encoder                       SKIPPED
+[evkdemo] phase  8/14: CC3501E Wi-Fi/BLE                    SKIPPED
+[evkdemo] phase  9/14: SD card                              SKIPPED
+[evkdemo] phase 10/14: Ethernet                             SKIPPED
+[evkdemo] phase 11/14: Sound out -> PDM in                  SKIPPED
+[evkdemo] phase 12/14: Screen (DSI)                         SKIPPED
+[evkdemo] phase 13/14: JPEG encode (Hantro VC9000E)         PASS
+[evkdemo] phase 14/14: NPU inference                        SKIPPED
 ...
-[evkdemo] RESULT: 6 PASS, 7 SKIPPED, 0 FAIL
+[evkdemo] RESULT: 7 PASS, 7 SKIPPED, 0 FAIL
 [evkdemo] done
 ```
 
@@ -153,5 +167,13 @@ reported together.
   phase 4 here, which is read-only).
 - [`examples/aen/aen-pwm-utimer-pwmleds`](../aen-pwm-utimer-pwmleds/) --
   the register-readback verification pattern phase 6 reuses.
+- [`examples/aen/aen-jpeg-regcheck`](../aen-jpeg-regcheck/) -- the
+  silicon-proven JPEG reference phase 13 follows: its file header records
+  the three defects a real bench run exposed (the missing SoC select that
+  lets the software fallback win, DMA buffers landing in unreachable DTCM,
+  and `#ifdef`-ing the source layout instead of querying
+  `alp_jpeg_caps_t::pixfmt_mask`).
+- [`examples/aen/aen-npu-inference-alp`](../aen-npu-inference-alp/) -- the
+  NPU path phase 14 stubs out, and the reason it does.
 - [`<alp/boards/alp_e1m_evk_routes.h>`](../../../include/alp/boards/alp_e1m_evk_routes.h)
   -- `EVK_I2C_ADDR_*` / `EVK_PWM_LED_*` map.

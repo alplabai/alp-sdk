@@ -30,17 +30,24 @@
  *
  * SCOPE OF THIS SLICE
  * --------------------
- * Thirteen phases are registered below, run in a fixed order. The first
- * six have real, bench-proven drivers behind them and are fully
- * implemented. The remaining seven (encoder, CC3501E, SD card, Ethernet,
- * sound, screen, JPEG+NPU) are stubs that always report SKIPPED with a
- * phase-specific reason -- see the "STUBS" section below for why each one
- * differs (an attended-run requirement is not the same kind of gap as
- * hardware genuinely out of scope, or a larger unit of work deferred to
- * the next slice). Attempting all eleven-plus phases of the full design in
+ * Fourteen phases are registered below, run in a fixed order. Seven have
+ * real, bench-proven drivers behind them and are fully implemented: the
+ * first six, plus phase 13 (JPEG encode on the Hantro VC9000E). The
+ * remaining seven (encoder, CC3501E, SD card, Ethernet, sound, screen,
+ * NPU) are stubs that always report SKIPPED with a phase-specific reason
+ * -- see the "STUBS" section below for why each one differs (an
+ * attended-run requirement is not the same kind of gap as hardware
+ * genuinely out of scope, a larger unit of work deferred to the next
+ * slice, or -- for NPU -- an image that would have to change BOOT FLOW to
+ * hold the model). Attempting all eleven-plus phases of the full design in
  * one drop would have meant shipping several of them unverified against
- * real silicon; a working six-phase core that others can extend safely is
- * worth more than an unverifiable giant one.
+ * real silicon; a working core that others can extend safely is worth more
+ * than an unverifiable giant one.
+ *
+ * Neither implemented phase 13 nor the NPU stub is camera-gated: the JPEG
+ * phase encodes a synthetic gradient it builds itself and the NPU model
+ * carries its own input, so no camera module is required by, or in scope
+ * for, either one.
  *
  * BUSES
  * -----
@@ -82,6 +89,7 @@
 
 #include "alp/peripheral.h"
 #include "alp/pwm.h"
+#include "alp/jpeg.h"
 #include "alp/hw_info.h" /* alp_hw_info_eeprom_t, ALP_HW_INFO_MAGIC -- manifest layout only */
 #include "alp/boards/alp_e1m_evk.h"
 
@@ -823,6 +831,242 @@ static phase_verdict_t phase_rgb_led(demo_ctx_t *ctx)
 }
 
 /* ==================================================================== */
+/* Phase 13 -- JPEG encode: Alif Hantro VC9000E via <alp/jpeg.h>         */
+/* ==================================================================== */
+
+/*
+ * Grouped here with the other IMPLEMENTED phases even though it runs
+ * thirteenth -- the file's organising principle is "real phases first,
+ * stubs after", and this one has a real, bench-proven driver behind it.
+ *
+ * NO CAMERA. This phase encodes a synthetic gradient it builds itself, so
+ * nothing about it depends on a camera module being attached (none is on
+ * this bench, and one is out of scope for this slice). The gradient is
+ * real, varying luma the encoder cannot collapse into a single DCT
+ * coefficient -- the identical source examples/aen/aen-jpeg-regcheck
+ * encodes to produce its silicon-proven 935-byte result on this SoC.
+ *
+ * THREE TRAPS this phase deliberately walks around. Each is a defect a
+ * real AEN801 bench run exposed, and each is recorded in full in
+ * examples/aen/aen-jpeg-regcheck/src/main.c's file header:
+ *
+ *  1. BACKEND SELECTION. Without CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8 the build
+ *     resolves ALP_SOC_REF_STR="unknown", the selector (src/backend.c)
+ *     filters out alif_hantro (silicon_ref="alif:ensemble:e8", priority
+ *     100), and the portable software fallback (src/backends/jpeg/
+ *     sw_baseline.c, "*", priority 50) silently wins. The app then still
+ *     prints a perfectly valid JPEG while proving NOTHING about the
+ *     silicon -- the exact shape of lie this whole demo exists to avoid.
+ *     prj.conf sets the symbol; this phase prints caps.hw_accelerated so
+ *     the log itself names which backend ran, and a software win is a
+ *     FAIL here: on this board the hardware encoder IS the phase.
+ *  2. DMA PLACEMENT. The Hantro block is an AXI bus master -- it fetches
+ *     the source and writes the output through its OWN master, not via
+ *     the M55, so both buffers must sit at a GLOBAL address. This board's
+ *     default RAM (`zephyr,sram = &dtcm`) puts .bss in the M55's private
+ *     DTCM at 0x20000000, which that master cannot reach; the backend
+ *     detects the TCM window and returns ALP_ERR_NOSUPPORT rather than
+ *     encode garbage. Both buffers below are therefore tagged into the
+ *     "SRAM0" linker region (global on-chip SRAM0 @0x02000000), the same
+ *     fix aen-dma-regcheck needed for the PL330's AXI master.
+ *  3. SOURCE LAYOUT. The two backends want genuinely different layouts
+ *     (Hantro latches one raw pointer over a semi-planar NV12 buffer; the
+ *     software encoder wants three separate Y/U/V planes). aen-jpeg-
+ *     regcheck explicitly REMOVED the #ifdef-on-build-target approach
+ *     that encodes this at compile time: it needs a new arm for every
+ *     future backend, while asking the WON backend at runtime what it
+ *     advertises (alp_jpeg_caps_t::pixfmt_mask) never does. This phase
+ *     asks, and builds whichever layout comes back.
+ *
+ * WHAT THE PORTABLE API DOES NOT EXPOSE: the driver's jpeg_hw_init()
+ * reads JPEG_SWREG0 and compares it against JPEG_HW_ID (0x90001000) --
+ * the one read that proves the block is alive and mapped at 0x49044000
+ * independent of any encode. <alp/jpeg.h> has no accessor for it, and
+ * this example will NOT hand-roll a register poke to get at it. It is
+ * still observable two ways, both of which land in this app's log: an ID
+ * mismatch makes jpeg_hw_init() return -ENODEV, which fails the device's
+ * init, which makes hantro_open()'s device_is_ready() false, which
+ * surfaces here as alp_jpeg_open() == NULL with alp_last_error() ==
+ * ALP_ERR_NOT_READY (-14) -- and the driver's own
+ * "JPEG hardware not found (ID: 0x%08x)" LOG_ERR carries the actual
+ * register value, visible because this app builds with CONFIG_LOG=y.
+ */
+
+#define JPEG_FRAME_W 64
+#define JPEG_FRAME_H 64
+#define JPEG_OUT_CAP 8192u
+
+/* Bytes of NV12 source for one frame: full-resolution Y, then one
+ * interleaved U,V pair per 2x2 luma block (half as many bytes again). */
+#define JPEG_SRC_LEN ((JPEG_FRAME_W * JPEG_FRAME_H) + (JPEG_FRAME_W * JPEG_FRAME_H) / 2)
+
+/*
+ * "Not suspiciously tiny" floor for the encoded length. A baseline JPEG
+ * pays for its markers before it encodes a single pixel -- SOI, JFIF
+ * APP0, two quantization tables, SOF0, four Huffman tables, SOS -- which
+ * is already several hundred bytes, so anything under this floor is a
+ * marker skeleton with no image in it, not a small picture. 256 sits
+ * comfortably below the 935 bytes aen-jpeg-regcheck measured for this
+ * exact 64x64 frame on real AEN801 silicon, and comfortably above an
+ * empty stream. That 935 is an ORDER-OF-MAGNITUDE reference, not an
+ * expected value: quantization tables are quality- and backend-dependent,
+ * so pinning the exact figure would turn a legitimate encoder change into
+ * a bench failure.
+ */
+#define JPEG_MIN_PLAUSIBLE_LEN 256u
+
+/*
+ * Hantro AXI INPUT and OUTPUT -- both must be globally addressable (trap 2
+ * above). "SRAM0" is the linker region the board's dts maps onto the
+ * global on-chip SRAM0 bank at 0x02000000, which every AXI master on this
+ * SoC can see. Uninitialised on purpose: an INITIALISED array in a custom
+ * section is not init-copied by Zephyr, so these are filled at runtime.
+ */
+static uint8_t jpeg_src[JPEG_SRC_LEN] __attribute__((section("SRAM0")));
+static uint8_t jpeg_out[JPEG_OUT_CAP] __attribute__((section("SRAM0")));
+
+/* NV12: one contiguous buffer, Y plane then the interleaved UV plane at
+ * offset W*H -- what alif_hantro.c latches as a single raw pointer. */
+static void jpeg_build_nv12(alp_jpeg_encode_req_t *req)
+{
+	uint8_t *y  = jpeg_src;
+	uint8_t *uv = jpeg_src + (JPEG_FRAME_W * JPEG_FRAME_H);
+
+	for (int r = 0; r < JPEG_FRAME_H; ++r) {
+		for (int c = 0; c < JPEG_FRAME_W; ++c) {
+			y[r * JPEG_FRAME_W + c] = (uint8_t)((r + c) * 2);
+		}
+	}
+	/* Neutral grey chroma: the checks below are all structural (markers,
+	 * length), so chroma CONTENT is irrelevant -- but it still has to be
+	 * present and correctly sized or the encoder reads past the frame. */
+	memset(uv, 128, (JPEG_FRAME_W * JPEG_FRAME_H) / 2);
+
+	req->format   = ALP_PIXFMT_NV12;
+	req->y_plane  = y;
+	req->y_stride = JPEG_FRAME_W;
+	req->u_plane  = NULL; /* NV12: the UV plane lives inside y_plane. */
+	req->v_plane  = NULL;
+}
+
+static phase_verdict_t phase_jpeg_encode(demo_ctx_t *ctx)
+{
+	ARG_UNUSED(ctx); /* The JPEG block is on neither I2C bus. */
+	printf("[evkdemo] -- Phase: JPEG encode (Hantro VC9000E, %dx%d synthetic frame) --\n",
+	       JPEG_FRAME_W,
+	       JPEG_FRAME_H);
+
+	alp_jpeg_config_t cfg = ALP_JPEG_CONFIG_DEFAULT;
+	alp_jpeg_t       *h   = alp_jpeg_open(&cfg);
+	if (h == NULL) {
+		/* ALP_ERR_NOT_READY here is the closest this app gets to the
+		 * JPEG_SWREG0 hardware-ID readback -- see the file-section note
+		 * above; the driver's LOG_ERR line carries the actual value. */
+		printf("[evkdemo] JPEG: alp_jpeg_open -> NULL, err=%d (NOT_READY here means the driver's "
+		       "jpeg_hw_init() rejected JPEG_SWREG0 vs JPEG_HW_ID 0x90001000 -- its LOG_ERR "
+		       "line above carries the value it read)\n",
+		       (int)alp_last_error());
+		return PHASE_FAIL;
+	}
+
+	alp_jpeg_caps_t caps;
+	alp_status_t    caps_rc = alp_jpeg_capabilities(h, &caps);
+	printf("[evkdemo] JPEG: caps rc=%d hw_accelerated=%d mjpeg=%d max=%ux%u subsample_mask=0x%x "
+	       "pixfmt_mask=0x%x backend=%s\n",
+	       (int)caps_rc,
+	       (int)caps.hw_accelerated,
+	       (int)caps.mjpeg_supported,
+	       caps.max_width,
+	       caps.max_height,
+	       caps.subsample_mask,
+	       caps.pixfmt_mask,
+	       caps.hw_accelerated ? "alif_hantro (HW)" : "sw_baseline (SW) -- WRONG ON THIS BOARD");
+
+	alp_jpeg_encode_req_t req = {
+		.width     = JPEG_FRAME_W,
+		.height    = JPEG_FRAME_H,
+		.subsample = ALP_JPEG_SUBSAMPLE_420,
+		.quality   = 80,
+	};
+
+	/* Trap 3: build the layout the WON backend advertises, not the one
+	 * this build's CONFIG_* implies. Only NV12 is built here -- that is
+	 * what the hardware backend on this board asks for, and a backend
+	 * asking for anything else on THIS board is already the failure the
+	 * hw_accelerated check below reports, so there is no second layout
+	 * worth carrying. */
+	if ((caps.pixfmt_mask & (1u << ALP_PIXFMT_NV12)) == 0u) {
+		printf("[evkdemo] JPEG: won backend does not accept ALP_PIXFMT_NV12 (pixfmt_mask=0x%x) -- "
+		       "the Hantro backend advertises exactly that bit, so this is not it\n",
+		       caps.pixfmt_mask);
+		alp_jpeg_close(h);
+		return PHASE_FAIL;
+	}
+	jpeg_build_nv12(&req);
+
+	size_t       out_len = 0;
+	alp_status_t rc      = alp_jpeg_encode(h, &req, jpeg_out, sizeof(jpeg_out), &out_len);
+	alp_jpeg_close(h);
+
+	/*
+	 * rc == ALP_OK IS NOT THE VERDICT. i2c-device-hub counted a
+	 * successful chip-ID read as a pass while its sensors returned reset
+	 * sentinels; "the call returned 0" is the same claim. What is
+	 * asserted instead: the bytes that came back really are a JPEG --
+	 * they open with the SOI marker (FF D8, always followed by the FF of
+	 * the next marker), they close with EOI (FF D9), and the length is
+	 * plausible for a real image of this size.
+	 */
+	bool    len_ok = (out_len >= JPEG_MIN_PLAUSIBLE_LEN) && (out_len < (size_t)JPEG_SRC_LEN) &&
+	                 (out_len <= sizeof(jpeg_out));
+	uint8_t soi[3] = { 0, 0, 0 };
+	uint8_t eoi[2] = { 0, 0 };
+	bool    soi_ok = false, eoi_ok = false;
+	if (out_len >= 3u) {
+		soi[0] = jpeg_out[0];
+		soi[1] = jpeg_out[1];
+		soi[2] = jpeg_out[2];
+		soi_ok = (soi[0] == 0xFFu) && (soi[1] == 0xD8u) && (soi[2] == 0xFFu);
+	}
+	/* Deliberately NOT gated on len_ok: a stream that misses the plausible-
+	 * length band still has real trailing bytes, and printing them is how a
+	 * reader tells "the encoder produced a short but well-formed JPEG" from
+	 * "the encoder produced garbage". Gating this on len_ok would print
+	 * last2=0000 eoi=BAD for both, and the log is the entire diagnostic --
+	 * re-running it costs a bench reservation. len_ok is ANDed into the
+	 * verdict separately below, so the pass criterion is unchanged. */
+	if ((out_len >= 2u) && (out_len <= sizeof(jpeg_out))) {
+		eoi[0] = jpeg_out[out_len - 2u];
+		eoi[1] = jpeg_out[out_len - 1u];
+		eoi_ok = (eoi[0] == 0xFFu) && (eoi[1] == 0xD9u);
+	}
+
+	printf("[evkdemo] JPEG: encode rc=%d out_len=%u first3=%02x%02x%02x (expect ffd8ff SOI) "
+	       "last2=%02x%02x (expect ffd9 EOI)\n",
+	       (int)rc,
+	       (unsigned)out_len,
+	       soi[0],
+	       soi[1],
+	       soi[2],
+	       eoi[0],
+	       eoi[1]);
+	printf("[evkdemo] JPEG: soi=%s eoi=%s len=%s (floor %u B, source %u B; aen-jpeg-regcheck "
+	       "measured 935 B for this frame on real AEN801 -- magnitude reference, not an "
+	       "expected value) hw=%s\n",
+	       soi_ok ? "ok" : "BAD",
+	       eoi_ok ? "ok" : "BAD",
+	       len_ok ? "ok" : "BAD",
+	       JPEG_MIN_PLAUSIBLE_LEN,
+	       (unsigned)JPEG_SRC_LEN,
+	       caps.hw_accelerated ? "ok" : "BAD -- software fallback won, this proves nothing");
+
+	return ((caps_rc == ALP_OK) && caps.hw_accelerated && (rc == ALP_OK) && len_ok && soi_ok &&
+	        eoi_ok)
+	           ? PHASE_PASS
+	           : PHASE_FAIL;
+}
+
+/* ==================================================================== */
 /* STUBS -- phases not in this slice.  Each reason differs; see below.  */
 /* ==================================================================== */
 
@@ -903,15 +1147,28 @@ static phase_verdict_t phase_screen_stub(demo_ctx_t *ctx)
 	return PHASE_SKIPPED;
 }
 
-/* JPEG + NPU: deliberately NOT camera-gated (JPEG encodes its own
- * synthetic gradient, the NPU runs its own model -- neither needs a
- * sensor), but it is the heaviest phase in the full design and is
- * deferred to keep this slice to a working, bench-provable core. */
-static phase_verdict_t phase_jpeg_npu_stub(demo_ctx_t *ctx)
+/* NPU inference: blocked by a BOOT-FLOW constraint, not by missing code
+ * and not by a camera. examples/aen/aen-npu-inference-alp is the
+ * silicon-proven Ethos-U85 path through <alp/inference.h> -- but its
+ * Vela-compiled person_detect_u85 model is ~263 KiB, which is precisely
+ * why THAT app links into MRAM slot0 and boots via Flow D instead of
+ * RAM-running. This demo is a Flow C ITCM RAM-run: ITCM is 256 KB total
+ * and the demo already occupies 108552 B (41.41%) of it -- it was 95008 B
+ * (36.24%) before phase 13, so the headroom is shrinking, not growing. A
+ * ~263 KiB model does not fit in what is left, by a wide margin and not
+ * by a trimmable one. Adding NPU inference here therefore means relinking the whole
+ * demo into MRAM slot0 and switching its boot flow -- a different unit of
+ * work from adding a phase, and out of scope for this slice. Shrinking
+ * the model to fit would trade the proven artefact for an unproven one,
+ * which is the opposite of what this app is for. */
+static phase_verdict_t phase_npu_stub(demo_ctx_t *ctx)
 {
 	ARG_UNUSED(ctx);
-	printf("[evkdemo] -- Phase: JPEG + NPU -- SKIPPED (heaviest phase, deferred to the "
-	       "next slice -- not camera-gated) --\n");
+	printf("[evkdemo] -- Phase: NPU inference -- SKIPPED (needs a boot-flow change, not a "
+	       "phase: aen-npu-inference-alp's person_detect_u85 model is ~263 KiB and this "
+	       "demo is a Flow C ITCM RAM-run -- 256 KB ITCM total, 108552 B (41.41%%) already "
+	       "used, so the model would have to move the whole image to MRAM slot0 / Flow D) "
+	       "--\n");
 	return PHASE_SKIPPED;
 }
 
@@ -932,7 +1189,8 @@ static const phase_t PHASES[] = {
 	{ "Ethernet", phase_ethernet_stub },
 	{ "Sound out -> PDM in", phase_sound_stub },
 	{ "Screen (DSI)", phase_screen_stub },
-	{ "JPEG + NPU", phase_jpeg_npu_stub },
+	{ "JPEG encode (Hantro VC9000E)", phase_jpeg_encode },
+	{ "NPU inference", phase_npu_stub },
 };
 
 int main(void)

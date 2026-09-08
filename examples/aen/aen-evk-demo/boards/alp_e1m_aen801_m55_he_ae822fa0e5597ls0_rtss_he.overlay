@@ -125,3 +125,15 @@
 		pinctrl-names = "default";
 	};
 };
+
+/*
+ * Phase 13's JPEG encoder: the Alif Hantro VC9000E block
+ * (verisilicon,hantro-vc9000e-jpeg @ 0x49044000, IRQ 360). Disabled in the
+ * SoC dtsi by default, so it has to be enabled here for the driver to bind
+ * and for alp_jpeg_open() to reach hardware -- mirrors
+ * examples/aen/aen-jpeg-regcheck's overlay. No pinctrl: the block is
+ * internal to the SoC, it drives no pad.
+ */
+&jpeg0 {
+	status = "okay";
+};
