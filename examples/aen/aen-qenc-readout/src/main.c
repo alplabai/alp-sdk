@@ -157,16 +157,21 @@ int main(void)
 		reason = "the count moved, but this app cannot attest that anyone turned the shaft "
 		         "-- on an unattended run a moving count means SPURIOUS COUNTS, not a live "
 		         "decode.  Their source is internal to the UTIMER channel, not the pads: "
-		         "the count keeps advancing even with P3_0/P3_1 deselected from the QEC "
-		         "(AF=0).  If you DID turn the shaft, this run is the expected result of a "
-		         "working decoder and only your attestation distinguishes the two";
+		         "this app has no operator input to correlate against.  A free-run at the "
+		         "peripheral clock caused exactly this and was withdrawn (#2038); if it "
+		         "recurs, read CNTR (0x4800D0A0) over SWD with CNTR_PTR widened to "
+		         "0xFFFFFFFF -- the shipped reload wraps a revolution every 240 ns and "
+		         "hides the rate.  If you DID turn the shaft, this is the expected result "
+		         "of a working decoder and only your attestation distinguishes the two";
 	} else if (all_clean) {
 		result = "SKIPPED";
 		reason = "no motion detected -- every read in the window succeeded but the reported "
-		         "count never changed; this app cannot see whether the counter is running, "
-		         "so this is neither proof of a working decoder nor of a broken one: turn "
-		         "the shaft and rerun, and if it still does not move, check CNTR_CTRL bit 1 "
-		         "RUNNING over SWD";
+		         "count never changed.  On an UNATTENDED run this is the expected and "
+		         "correct result and proves nothing either way; the decode is only "
+		         "settled by turning the shaft.  Do NOT read CNTR_CTRL bit 1 RUNNING as a "
+		         "fault: bit 1 clear (CNTR_CTRL 0x00000021) is the CORRECT resting state "
+		         "for a trigger-counting channel, and starting the counter to 'fix' it "
+		         "makes it free-run on the peripheral clock instead (#2038)";
 	} else {
 		result = "FAIL";
 		reason = "count never moved AND at least one read in the window returned an error -- "
