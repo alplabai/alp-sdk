@@ -14,8 +14,9 @@
  * in-tree as a VENDORED FORK-DRIVER COPY WITH LOCAL FIXES, not a verbatim
  * vendor file.  It started as a verbatim copy; #1828 open-coded the filter
  * programming, added the CNTR_TRIG write and a BUILD_ASSERT bound, and #2037
- * added the missing GLB_CNTR_START write.  Anything that repoints this node
- * onto the opt-in sdk-alif fork compatible MUST carry those four forward or
+ * added the missing GLB_CNTR_START write and the FILTER_CTRL_B write that
+ * makes the two quadrature inputs filter alike.  Anything that repoints this
+ * node onto the opt-in sdk-alif fork compatible MUST carry those five forward or
  * silently reintroduce the defects; retire onto the fork only once the node is
  * repointed AND bench-verified.
  * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
@@ -45,12 +46,49 @@
  * not the pads: a later run walked four pad configurations -- no bias
  * (0x00210005), pull-up (0x00290005), pull-up + Schmitt (0x002B0005), and
  * AF=0 with P3_0/P3_1 deselected from the QEC entirely (0x00290000) -- and
- * the counter kept advancing through all four.  Open lead for whoever picks
- * this up: UP_1_SRC/DOWN_1_SRC hold the correct x4 quadrature masks
- * (0x69/0x96) with PGM_EN (bit 31) CLEAR, while START_1_SRC / STOP_1_SRC /
- * CLEAR_1_SRC all have it set; and FILTER_CTRL_B (0x4800D088) is 0x00000000
- * because this driver writes only FILTER_CTRL_A, so the B input is unfiltered
- * while A is filtered.
+ * the counter kept advancing through all four.  That measurement stands on
+ * its own and is unaffected by everything below.
+ *
+ * BENCH CRITERION for "the spurious count is gone", because nobody will be
+ * turning the shaft: read CNTR (0x4800D0A0) RAW over SWD at three
+ * well-separated intervals; all three must be BIT-IDENTICAL.  Any change is a
+ * FAIL.  Do not substitute the app's printed degrees -- it polls a mod-96
+ * counter, so it cannot tell "static" from "advanced by exactly 96*k".  What
+ * this criterion can NEVER show is that the counter tracks real quadrature
+ * edges; that needs a hand on the shaft (one detent = +-4 raw counts, one
+ * revolution CW = +96 back to the start, then CCW).
+ *
+ * RETRACTED (was an open lead here until #2037): "UP_1_SRC/DOWN_1_SRC hold
+ * the x4 masks with PGM_EN (bit 31) CLEAR while START/STOP/CLEAR_1_SRC have
+ * it set."  There is no bit 31 in those registers to be clear.  AE822 SVD,
+ * peripheral UTIMER: UTIMER_UP_1_SRC (addressOffset 0x1C) and
+ * UTIMER_DOWN_1_SRC (0x24) define eight fields in bits [7:0] and nothing
+ * else; PGM_EN [31:31] is a field of UTIMER_START_1_SRC (0x04),
+ * UTIMER_STOP_1_SRC and UTIMER_CLEAR_1_SRC ONLY -- it gates the PROGRAMMATIC
+ * start/stop/clear, and there is no programmatic up/down to gate.  For the
+ * same reason UP_0_SRC (0x18) and DOWN_0_SRC (0x20) reading 0x00000000 is
+ * EXPECTED, not a defect: SRC_0 is the QEC_TRIGGER0..11 raw-input crossbar,
+ * and a quadrature decode is programmed through the SRC_1 A/B matrix, which
+ * is what UP_1_SRC 0x69 / DOWN_1_SRC 0x96 already are (walk (A,B)
+ * 00->10->11->01->00 against the SVD field names: all four transitions land
+ * in the up mask, all four reverse transitions in the down mask -- a
+ * complete, disjoint x4 decode, which is why counts-per-revolution is 24 PPR
+ * * 4 = 96).
+ *
+ * NEXT STEP, not yet tried: CNTR_TYPE.  Measured CNTR_CTRL 0x00000023
+ * decodes (SVD UTIMER_CNTR_CTRL, 0x80) as CNTR_EN[0]=1, CNTR_RUNNING[1]=1,
+ * CNTR_TYPE[4:2]=0 = Sawtooth, CNTR_TRIG[5]=1, CNTR_DIR[8]=0 = Up.  Alif's
+ * own QEC flow configures TRIANGLE instead (demo_qec.c qec0_app() passes
+ * ARM_UTIMER_COUNTER_TRIANGLE, which utimer_config_direction() turns into
+ * CNTR_CTRL_TRIANGLE_BUF_TROUGH = 0x10).  Whether a sawtooth-UP channel
+ * honours a DECREMENT trigger at all is stated nowhere we can find; worth one
+ * bench comparison before anything more elaborate.
+ *
+ * DEAD END, documented so nobody spends a bench slot on it: the "channel
+ * drives its own input" theory.  SVD UTIMER_GLB_DRIVER_OEN (0x10) defines
+ * DRIVER_OEN_0..DRIVER_OEN_11 across bits [23:0] and nothing above -- QEC
+ * channels 12-15 have NO driver outputs, so there is no output to loop back,
+ * and Alif's utimer_glb_driver_output_disable() on channel 12 writes nothing.
  */
 
 #define DT_DRV_COMPAT alif_utimer_qdec
@@ -222,7 +260,30 @@ static int qdec_alif_utimer_init(const struct device *dev)
 		        << CHAN_FILTER_CTRL_FILTER_TAPS_BIT;
 		filt |= CHAN_FILTER_CTRL_FILTER_EN;
 
+		/*
+		 * BOTH inputs, identically -- the quadrature decode is
+		 * level-qualified ACROSS the pair, so filtering one phase and not
+		 * the other skews them relative to each other.  AE822 SVD, peripheral
+		 * UTIMER: UTIMER_FILTER_CTRL_A (addressOffset 0x84) "Allows the input
+		 * A to be sampled periodically", UTIMER_FILTER_CTRL_B (0x88) the same
+		 * for input B; UTIMER_UP_1_SRC (0x1C) bit 0 DRIVE_A_RISING_B_0 is
+		 * "channel input A is rising AND channel input B = 0 causes counter
+		 * to increment", and its seven siblings are qualified the same way.
+		 * Delaying A by the filter's sample depth while B arrives raw
+		 * therefore lets a transition be sampled against the OTHER phase's
+		 * stale level and be classified into the wrong direction -- exactly
+		 * how contact bounce on a mechanical encoder nets counts.  This
+		 * driver wrote only FILTER_CTRL_A, so B sat at its 0x00000000 reset
+		 * (unfiltered) whenever the board asked for a filter; measured
+		 * FILTER_CTRL_A 0x00100101 / FILTER_CTRL_B 0x00000000 on E1M-AEN803
+		 * 2026W36-0002.
+		 *
+		 * UNPROVEN AS A CURE: this is reasoned from the SVD, not measured.
+		 * It is a candidate for the spurious count, not a demonstrated fix --
+		 * see the file header for what the bench must show.
+		 */
 		sys_write32(filt, UTIMER_FILTER_CTRL_A(timer_base));
+		sys_write32(filt, UTIMER_FILTER_CTRL_B(timer_base));
 	}
 
 	alif_utimer_config_qdec_triggers(timer_base);

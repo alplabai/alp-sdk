@@ -105,6 +105,49 @@ class QdecStartsTheCounter(unittest.TestCase):
             )
 
 
+class QdecFiltersBothQuadratureInputs(unittest.TestCase):
+    """#2037: FILTER_CTRL_A was programmed and FILTER_CTRL_B left at reset.
+
+    The SRC_1 decode is level-qualified ACROSS the pair -- AE822 SVD
+    UTIMER_UP_1_SRC (0x1C) bit 0 DRIVE_A_RISING_B_0 is "channel input A is
+    rising and channel input B = 0 causes counter to increment" -- so
+    filtering A while B arrives raw skews the phases against each other and
+    can classify a bouncing transition into the wrong direction. Measured
+    FILTER_CTRL_A 0x00100101 / FILTER_CTRL_B 0x00000000 on E1M-AEN803
+    2026W36-0002.
+    """
+
+    def test_both_filter_registers_are_written(self):
+        body = init_body()
+        self.assertIn(
+            "UTIMER_FILTER_CTRL_B",
+            body,
+            "qdec_alif_utimer_init() writes UTIMER_FILTER_CTRL_A but not "
+            "UTIMER_FILTER_CTRL_B (SVD offset 0x88), so input B keeps its "
+            "0x00000000 reset and stays unfiltered while input A is filtered",
+        )
+
+    def test_both_filter_registers_get_the_same_value(self):
+        """Same word to both: a different value per input skews them just as much."""
+        written = dict(
+            (m.group(2), m.group(1).strip())
+            for m in re.finditer(
+                r"sys_write32\s*\(\s*([^,]+),\s*(UTIMER_FILTER_CTRL_[AB])\s*\(", init_body()
+            )
+        )
+        self.assertEqual(
+            sorted(written),
+            ["UTIMER_FILTER_CTRL_A", "UTIMER_FILTER_CTRL_B"],
+            f"expected one sys_write32() to each filter register, found {sorted(written)}",
+        )
+        self.assertEqual(
+            written["UTIMER_FILTER_CTRL_A"],
+            written["UTIMER_FILTER_CTRL_B"],
+            "both quadrature inputs must be filtered identically; the decode is "
+            "level-qualified across the pair",
+        )
+
+
 class ExampleClaimsOnlyWhatItObserves(unittest.TestCase):
     """#2037 item 3: the app printed 'decoder armed as configured' on a dead decoder."""
 
