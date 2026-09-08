@@ -21,3 +21,12 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(aen_evk_demo LANGUAGES C)
 
 target_sources(app PRIVATE src/main.c)
+# Phase 8's CC3501E bring-up. cc3501e_bridge.{c,h} is the SoM bring-up TEMPLATE
+# every AEN application copies verbatim (see its header): it opens the
+# inter-chip SPI bridge + the WIFI_EN / nRESET control pins, enables the LP-pad
+# output drivers pinctrl does not reach, binds the READY line, and runs the
+# power + reset sequence. Byte-identical to the copies in
+# examples/aen/aen-cc3501e-bringup, -gpio, -companion-tour, -ble-gatt and
+# -gatt-register -- copied rather than reached across into, because an example
+# that reads its sources out of a sibling example is not a copyable template.
+target_sources(app PRIVATE src/cc3501e_bridge.c)

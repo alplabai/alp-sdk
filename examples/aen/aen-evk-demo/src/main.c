@@ -30,10 +30,11 @@
  *
  * SCOPE OF THIS SLICE
  * --------------------
- * Fourteen phases are registered below, run in a fixed order. Seven have
+ * Fourteen phases are registered below, run in a fixed order. Eight have
  * real, bench-proven drivers behind them and are fully implemented: the
- * first six, plus phase 13 (JPEG encode on the Hantro VC9000E). The
- * remaining seven (encoder, CC3501E, SD card, Ethernet, sound, screen,
+ * first six, plus phase 8 (the CC3501E Wi-Fi 6 / BLE 5.4 coprocessor over
+ * the inter-chip SPI bridge) and phase 13 (JPEG encode on the Hantro
+ * VC9000E). The remaining six (encoder, SD card, Ethernet, sound, screen,
  * NPU) are stubs that always report SKIPPED with a phase-specific reason
  * -- see the "STUBS" section below for why each one differs (an
  * attended-run requirement is not the same kind of gap as hardware
@@ -70,6 +71,13 @@
  *
  * Confusing these two buses wastes a bench run (EVK-BRIEFING.md) -- every
  * phase below states which one it opens and why.
+ *
+ * A third bus exists but is NOT shared through demo_ctx_t: SPI1, the
+ * SoM-internal Alif <-> CC3501E inter-chip link. Phase 8 owns it end to
+ * end -- it has to power the coprocessor before the bus has anything on
+ * the other end of it, and no other phase touches it -- so opening it in
+ * main() alongside the two I2C buses would only move a phase-local concern
+ * somewhere it does not belong.
  *
  * CONSOLE
  * -------
@@ -1067,6 +1075,400 @@ static phase_verdict_t phase_jpeg_encode(demo_ctx_t *ctx)
 }
 
 /* ==================================================================== */
+/* Phase 8 -- CC3501E Wi-Fi 6 / BLE 5.4 coprocessor (inter-chip SPI)     */
+/* ==================================================================== */
+
+/*
+ * Grouped with the other IMPLEMENTED phases even though it runs eighth --
+ * the file's organising principle is "real phases first, stubs after".
+ *
+ * WHAT THIS PHASE TALKS TO. The CC3501E is a second microcontroller on the
+ * SoM (module U4 = BDE-BW35N) running Alp Lab's own bridge firmware. It is
+ * NOT a register-level peripheral: every operation below is a request/reply
+ * transaction over an inter-chip SPI link, four SS0-framed phases each, with
+ * the host gating every reply phase on the slave's READY line. That framing
+ * lives entirely in chips/cc3501e/ -- this phase calls the driver and never
+ * hand-rolls a frame.
+ *
+ * ITS SUPPLY IS HOST-GATED. The coprocessor has NO POWER until the Alif
+ * drives WIFI_EN (P15_5) high; a J-Link cannot even attach to it before
+ * that (VTref reads 0 V). So nothing here can answer until this phase runs
+ * its power + reset sequence, which is the first thing it does. A "the part
+ * didn't answer" result therefore has to be read as "power/reset/link", not
+ * "the radio is broken".
+ *
+ * HARD CONSTRAINT -- READ BEFORE EXTENDING THIS PHASE. There is NO path
+ * here that activates, re-activates, provisions or re-flashes the CC3501E's
+ * firmware, and there must never be one. The parts ship ALREADY ACTIVATED
+ * from SoM provisioning, no SDK opcode can activate one, and the fuses
+ * involved are OR-only -- a botched activation permanently bricks a unit's
+ * secure boot (one bench unit was lost that way). The OTA opcodes
+ * (cc3501e_ota_*) exist in the driver and are deliberately not called from
+ * this app at all. Radio operations -- scan, BLE enable -- are ordinary
+ * runtime commands and are exactly what this phase is for.
+ *
+ * NO NETWORK IS JOINED. The phase runs WIFI_SCAN_START and stops there: it
+ * never calls cc3501e_wifi_connect(), and there are no credentials anywhere
+ * in this file or its build. A scan is passive listening; associating would
+ * put a bench board on somebody's network and would need a secret to do it.
+ *
+ * WHAT IT LEAVES BEHIND. WIFI_EN stays HIGH, `cc35_fw` stays bound, and the
+ * BLE controller stays enabled when it came up -- deliberately, because the
+ * SD-card phase's SDIO mux (EN/SEL on CC35 GPIO_26 / GPIO_30) is reachable
+ * only through this coprocessor, so powering it back down here would make
+ * that phase impossible to add later. The cost is that phases 9-14 run with
+ * both radios up; on a bench-diagnostic image that is the right trade.
+ */
+
+#include "alp/chips/cc3501e.h"
+#include "cc3501e_bridge.h" /* cc3501e_bridge_bringup() -- the SoM bring-up template */
+
+/* Bounded retry for the first PING. cc3501e_reset() has already waited out
+ * the boot budget, so attempt 1 usually lands; this only absorbs residual
+ * ramp/boot jitter. 25 x 200 ms = 5 s, which is a bound, not a hope: a part
+ * that has not answered in five seconds is not late, it is not there. */
+#define CC35_PING_RETRIES 25u
+#define CC35_PING_GAP_MS  200u
+
+/* Poll-by-repeat budgets. GET_MAC, WIFI_SCAN_START and BLE_ENABLE are all
+ * worker-routed on the firmware side: it answers BUSY while its worker runs
+ * and the host driver re-issues until OK or the budget expires. These are
+ * the same budgets aen-cc3501e-bringup uses on real silicon. */
+#define CC35_MAC_TIMEOUT_MS  2000u
+#define CC35_SCAN_TIMEOUT_MS 8000u
+#define CC35_BLE_TIMEOUT_MS  10000u
+
+/* Scan records collected. 16 is plenty for a bench desk and bounds the
+ * static buffer at ~700 B; the firmware simply stops filling past `cap`. */
+#define CC35_SCAN_MAX_RECORDS 16u
+
+/*
+ * FILE-STATIC, not a local, for two independent reasons -- both bench-proven
+ * on this silicon:
+ *
+ *  1. sizeof(cc3501e_t) is ~32 KB (the driver keeps its tx/rx scratch, scan
+ *     and socket buffers INSIDE the handle). As a stack local the function
+ *     prologue crosses PSPLIM and the M55 raises STKOF -> UsageFault before
+ *     a single line is printed. aen-cc3501e-bringup pays for its own local
+ *     with CONFIG_MAIN_STACK_SIZE=32768; a static handle is cheaper and this
+ *     app has fourteen other phases to fund.
+ *  2. The SD-card phase needs this same bound handle to reach the SDIO mux
+ *     on CC35 GPIO_26/GPIO_30. A handle scoped to phase 8's frame would be
+ *     gone by the time phase 9 ran.
+ */
+static cc3501e_t cc35_fw;
+static bool      cc35_link_up; /**< true once a PING has been answered. */
+
+/*
+ * Is this a real, factory-programmed station MAC?
+ *
+ * GET_MAC returning ALP_OK is NOT the check -- that is precisely the
+ * "the call succeeded, therefore the hardware works" reasoning that let
+ * i2c-device-hub report a pass over sensors stuck at their reset sentinel.
+ * A radio that has not read its identity out yet answers with a structurally
+ * impossible address, and these are the three shapes that takes:
+ *
+ *   00:00:00:00:00:00  -- nothing was read; the field is still zeroed.
+ *   ff:ff:ff:ff:ff:ff  -- the broadcast address; an erased/undriven read.
+ *   xx with bit 0 of the first octet SET -- the IEEE 802 group bit. A
+ *     GROUP address can never be a station's own source address, so any
+ *     value with it set is garbage no matter how random it looks. This is
+ *     the check that catches a shifted or half-populated reply, which the
+ *     two constant patterns above do not.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT REJECT, and why it would be wrong to:
+ * the address the E1M-AEN SoMs actually carry is a TI FACTORY MAC in the
+ * 44:3E:8A MA-L block (bench: 44:3e:8a:10:b6:9e on 2026W36-0001). Alp Lab
+ * holds no IEEE OUI and needs none -- the MAC eFuse is an OVERRIDE that
+ * reads 0 on a good part, and the TI-assigned address IS the valid one.
+ * Rejecting "a TI-looking MAC" would fail every correctly provisioned
+ * module in the fleet. The OUI is printed below so a reader can see which
+ * block the address came from and judge for themselves.
+ */
+static bool cc35_mac_plausible(const uint8_t mac[CC3501E_MAC_LEN])
+{
+	bool all_zero = true, all_ff = true;
+
+	for (size_t i = 0; i < CC3501E_MAC_LEN; i++) {
+		if (mac[i] != 0x00u) all_zero = false;
+		if (mac[i] != 0xFFu) all_ff = false;
+	}
+	return !all_zero && !all_ff && ((mac[0] & 0x01u) == 0u);
+}
+
+/*
+ * Is one scan record a real access-point report, or filler?
+ *
+ * Same argument as the MAC check, applied to the scan payload: a worker
+ * that answered OK with a zeroed record array would otherwise be counted as
+ * "networks seen". A genuine report has a non-zero BSSID and an RSSI that
+ * is actually negative -- received power at an antenna is below 1 mW by a
+ * wide margin, so 0 dBm is not a weak signal, it is an unwritten field.
+ * -110 dBm is below the noise floor of any 802.11 receiver, so anything at
+ * or under it is equally unwritten.
+ */
+static bool cc35_scan_record_plausible(const cc3501e_scan_record_t *r)
+{
+	bool bssid_zero = true;
+
+	for (size_t i = 0; i < sizeof(r->bssid); i++) {
+		if (r->bssid[i] != 0x00u) bssid_zero = false;
+	}
+	return !bssid_zero && (r->rssi_dbm < 0) && (r->rssi_dbm > -110);
+}
+
+static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
+{
+	ARG_UNUSED(ctx); /* The coprocessor is on SPI1, not on either I2C bus. */
+	printf("[evkdemo] -- Phase: CC3501E Wi-Fi 6 / BLE 5.4 (inter-chip SPI1 bridge) --\n");
+
+	/* --- 1. Power + reset + open the link ---------------------------- */
+	/* One call: opens SPI1 (hardware SS0, ALP_SPI_NO_CS) and the WIFI_EN /
+	 * nRESET / READY pins, turns the LP pads' output drivers on (pinctrl
+	 * does not reach the LP island), binds them, then runs the power-up and
+	 * reset sequence -- including the Puya-flash double-boot workaround: a
+	 * cold power-on mis-reads the PY25Q64LB on the FIRST boot, so the part
+	 * is re-booted once with the rails already up. Blocks ~900 ms. */
+	alp_status_t rc = cc3501e_bridge_bringup(&cc35_fw);
+	printf("[evkdemo] CC3501E: bridge bring-up (WIFI_EN high, nRESET pulsed, SPI1 @ %u Hz) -> %d\n",
+	       (unsigned)CC3501E_BRIDGE_SPI_FREQ_HZ,
+	       (int)rc);
+	if (rc == ALP_ERR_NOT_PRESENT_ON_THIS_SOC) {
+		/* The backend authority itself says the bus/pins are absent --
+		 * i.e. this image's overlay does not declare the bridge. That is
+		 * a build fault, not a coprocessor fault, and the coprocessor is
+		 * fitted on every E1M-AEN SoM, so it is NOT a "hardware absent"
+		 * skip: nothing about this board justifies the phase not running. */
+		printf("[evkdemo] CC3501E: SPI bus %u / WIFI_EN+nRESET not in the devicetree (err=%d) -- "
+		       "this app's overlay must declare them; the part is fitted on every E1M-AEN SoM, so "
+		       "this is a build fault, not an absent part\n",
+		       (unsigned)CC3501E_BRIDGE_SPI_BUS_ID,
+		       (int)alp_last_error());
+		return PHASE_FAIL;
+	}
+
+	/* --- 2. PING until it answers, bounded ---------------------------- */
+	/* META opcode 0x00. A serviced PING proves the firmware parsed a frame
+	 * and staged a reply across the SS0-framed, READY-gated link -- the
+	 * whole transport, both ends. It proves NOTHING about either radio,
+	 * which is why it is only the FIRST of five things gated on below. */
+	alp_status_t ping_rc = ALP_ERR_TIMEOUT;
+	unsigned     attempt = 0u;
+	for (; attempt < CC35_PING_RETRIES; ++attempt) {
+		ping_rc = cc3501e_ping(&cc35_fw);
+		if (ping_rc == ALP_OK) break;
+		k_msleep(CC35_PING_GAP_MS);
+	}
+	cc35_link_up = (ping_rc == ALP_OK);
+	printf("[evkdemo] CC3501E: PING (0x00) -> %d after %u attempt(s) of %u (%u ms apart)\n",
+	       (int)ping_rc,
+	       attempt + 1u,
+	       CC35_PING_RETRIES,
+	       CC35_PING_GAP_MS);
+	if (!cc35_link_up) {
+		/* Every later call would time out against a dead link and add
+		 * seconds of nothing to a run that costs a bench reservation.
+		 * Stop here -- with the codes, not silently. */
+		printf("[evkdemo] CC3501E: no answer in %u ms -- check WIFI_EN (P15_5) actually went high, "
+		       "the SPI1 pinmux (P14_4/5/6/7), the READY line (P2_6), and that the coprocessor is "
+		       "running its bridge firmware. NOT a skip: the part is fitted and powered by this "
+		       "phase, so silence is a failure\n",
+		       (unsigned)(CC35_PING_RETRIES * CC35_PING_GAP_MS));
+		return PHASE_FAIL;
+	}
+
+	/* --- 3. Identity: VERSION, MAC, CAPABILITIES ---------------------- */
+
+	/* GET_VERSION (0x01) -- the PROTOCOL version, not the firmware build.
+	 * cc3501e_get_version() deliberately does not compare it (its callers
+	 * include liveness soaks), so the comparison is made HERE and gated on:
+	 * a version that round-trips but disagrees with the header this image
+	 * was compiled against means the two ends do not share a wire contract,
+	 * and every reply parsed after it is being read against the wrong
+	 * layout. Answering is not the same as agreeing. */
+	uint16_t     version = 0u;
+	alp_status_t ver_rc  = cc3501e_get_version(&cc35_fw, &version);
+	bool         ver_ok  = (ver_rc == ALP_OK) && (version == ALP_CC3501E_PROTOCOL_VERSION);
+	printf(
+	    "[evkdemo] CC3501E: GET_VERSION (0x01) -> %d protocol v%u.%u (host built for v%u.%u) %s\n",
+	    (int)ver_rc,
+	    ALP_CC3501E_PROTOCOL_VERSION_MAJOR(version),
+	    ALP_CC3501E_PROTOCOL_VERSION_MINOR(version),
+	    ALP_CC3501E_PROTOCOL_VERSION_MAJOR(ALP_CC3501E_PROTOCOL_VERSION),
+	    ALP_CC3501E_PROTOCOL_VERSION_MINOR(ALP_CC3501E_PROTOCOL_VERSION),
+	    ver_ok ? "match" : "MISMATCH -- replies below are parsed against the host's layout");
+
+	/* GET_MAC (0x03) -- poll-by-repeat, so an OK here also proves the
+	 * firmware's worker seam (submit -> worker -> reply), not just META
+	 * dispatch off the SPI ISR. The address itself is then checked for
+	 * structural validity; see cc35_mac_plausible(). */
+	uint8_t      mac[CC3501E_MAC_LEN] = { 0 };
+	alp_status_t mac_rc               = cc3501e_wifi_get_mac(&cc35_fw, mac, CC35_MAC_TIMEOUT_MS);
+	bool         mac_ok               = (mac_rc == ALP_OK) && cc35_mac_plausible(mac);
+	printf("[evkdemo] CC3501E: GET_MAC (0x03) -> %d  %02x:%02x:%02x:%02x:%02x:%02x  "
+	       "OUI=%02x:%02x:%02x  %s\n",
+	       (int)mac_rc,
+	       mac[0],
+	       mac[1],
+	       mac[2],
+	       mac[3],
+	       mac[4],
+	       mac[5],
+	       mac[0],
+	       mac[1],
+	       mac[2],
+	       mac_ok ? "plausible station MAC"
+	              : "INVALID (all-zero, broadcast, or the IEEE group bit set -- not an address a "
+	                "station can own)");
+
+	/* GET_CAPABILITIES (0x06) -- ASK what the firmware implements rather
+	 * than infer it from the version number. A build without Wi-Fi or
+	 * without BLE reports the SAME wire version as a full one while its
+	 * radio opcodes are NOTIMPL stubs, so the bitmap is the only honest
+	 * source. The two bits this phase then goes on to exercise are named in
+	 * the log; both are expected present on every shipped SoM. */
+	uint32_t     caps     = 0u;
+	alp_status_t caps_rc  = cc3501e_get_capabilities(&cc35_fw, &caps);
+	bool         cap_wifi = (caps & ALP_CC3501E_CAP_WIFI_STA) != 0u;
+	bool         cap_ble  = (caps & ALP_CC3501E_CAP_BLE) != 0u;
+	/* ALP_ERR_INVAL means "firmware predates this opcode", i.e. no
+	 * capability INFORMATION -- not "no capabilities". Said plainly in the
+	 * log so nobody reads a 0x00000000 bitmap as a stripped firmware. */
+	printf("[evkdemo] CC3501E: GET_CAPABILITIES (0x06) -> %d caps=0x%08x wifi_sta=%s ble=%s%s\n",
+	       (int)caps_rc,
+	       (unsigned)caps,
+	       cap_wifi ? "yes" : "no",
+	       cap_ble ? "yes" : "no",
+	       (caps_rc == ALP_ERR_INVAL)
+	           ? " (INVAL = firmware predates the opcode: no capability information, which is NOT "
+	             "the same as no capabilities)"
+	           : "");
+
+	/* --- 4. Wi-Fi scan -- listen only, never associate ----------------- */
+	/* WIFI_SCAN_START (0x10), poll-by-repeat: the firmware answers BUSY
+	 * while the scan runs and the driver re-issues until the records come
+	 * back as the reply payload. Passive: no probe of any network's
+	 * security, no association, no credentials. */
+	static cc3501e_scan_record_t scan[CC35_SCAN_MAX_RECORDS];
+	size_t                       n_scan = 0u;
+	alp_status_t                 scan_rc =
+	    cc3501e_wifi_scan(&cc35_fw, scan, CC35_SCAN_MAX_RECORDS, &n_scan, CC35_SCAN_TIMEOUT_MS);
+
+	size_t n_plausible = 0u;
+	for (size_t i = 0; i < n_scan; i++) {
+		if (cc35_scan_record_plausible(&scan[i])) n_plausible++;
+		printf("[evkdemo] CC3501E:   scan[%u] \"%s\" ch%u %d dBm %s bssid=%02x:%02x:%02x:%02x:%02x:"
+		       "%02x %s\n",
+		       (unsigned)i,
+		       scan[i].ssid,
+		       (unsigned)scan[i].channel,
+		       (int)scan[i].rssi_dbm,
+		       cc3501e_wifi_sec_name(scan[i].security_info),
+		       scan[i].bssid[0],
+		       scan[i].bssid[1],
+		       scan[i].bssid[2],
+		       scan[i].bssid[3],
+		       scan[i].bssid[4],
+		       scan[i].bssid[5],
+		       cc35_scan_record_plausible(&scan[i]) ? "ok" : "FILLER");
+	}
+
+	/*
+	 * HOW AN EMPTY SCAN IS JUDGED, and why it is judged this way.
+	 *
+	 * Zero networks does NOT fail this phase. A shielded room, a screened
+	 * bench, or simply a quiet band are all real, and a demo that turned an
+	 * honest empty result into a red line would be lying in the other
+	 * direction -- it would be asserting something about the RF environment
+	 * that this board cannot know.
+	 *
+	 * What IS gated is the thing the phase can actually establish: that the
+	 * scan round-tripped. WIFI_SCAN_START is poll-by-repeat, so ALP_OK means
+	 * the firmware accepted the request, ran its scan worker to completion,
+	 * and returned a well-formed reply payload -- radio submitted, radio
+	 * finished, answer parsed. That is a materially stronger claim than "a
+	 * register read returned a value", which is the claim this whole app
+	 * exists to stop counting as a pass.
+	 *
+	 * And when records DO come back, they are checked rather than tallied:
+	 * a reply full of zeroed records would otherwise be reported as
+	 * "networks seen". If any record arrived, at least one must look like a
+	 * real AP report or the payload is filler and the phase fails.
+	 *
+	 * The consequence is stated in the log every run: an empty scan is
+	 * PASS-but-UNCORROBORATED, and the reader is told so in words rather
+	 * than left to infer it from a 0.
+	 */
+	bool scan_ok = (scan_rc == ALP_OK) && ((n_scan == 0u) || (n_plausible > 0u));
+	printf(
+	    "[evkdemo] CC3501E: WIFI_SCAN_START (0x10) -> %d  %u network(s) seen, %u plausible  %s\n",
+	    (int)scan_rc,
+	    (unsigned)n_scan,
+	    (unsigned)n_plausible,
+	    (scan_rc != ALP_OK) ? "SCAN FAILED"
+	    : (n_scan == 0u)
+	        ? "UNCORROBORATED -- the scan completed and the reply parsed, which is what is gated "
+	          "on; zero networks is a statement about the RF environment, not about this board, "
+	          "so it does NOT fail the phase"
+	    : (n_plausible == 0u) ? "FILLER -- records came back but none is a real AP report "
+	                            "(zero BSSID / impossible RSSI)"
+	                          : "ok");
+	/* No cc3501e_wifi_connect() call anywhere in this phase, and no
+	 * credentials in this file -- see the section header. */
+
+	/* --- 5. BLE ------------------------------------------------------- */
+	/* BLE_ENABLE (0x30) brings up the BLE controller AND the NimBLE host on
+	 * the coprocessor. The firmware worker-routes it off the SPI ISR and
+	 * brings the Wi-Fi stack up first (shared HIF), so the bridge is briefly
+	 * down mid-op and the driver re-issues -- another real worker-seam
+	 * exercise, not a flag write. ALP_ERR_NOT_READY specifically means BLE
+	 * is not built into this firmware; that is a genuine deviation from what
+	 * every shipped SoM carries, so it fails rather than skips. */
+	alp_status_t ble_rc = cc3501e_ble_enable(&cc35_fw, CC35_BLE_TIMEOUT_MS);
+	printf(
+	    "[evkdemo] CC3501E: BLE_ENABLE (0x30) -> %d %s\n",
+	    (int)ble_rc,
+	    (ble_rc == ALP_OK) ? "(controller + NimBLE host up; left ENABLED for later phases)"
+	    : (ble_rc == ALP_ERR_NOT_READY)
+	        ? "(NOT_READY = BLE is not built into this firmware -- every shipped SoM carries it, "
+	          "so this is a real deviation, not an absent feature)"
+	        : "");
+
+	/* --- Verdict ------------------------------------------------------ */
+	/*
+	 * A PING is NOT enough. It proves the transport and nothing else, and
+	 * "the link answered" is the same shape of claim as "the chip ID read
+	 * back" -- which is the bug this app was built around. PASS additionally
+	 * requires ALL of:
+	 *
+	 *   ver_ok   -- the firmware agrees on the WIRE CONTRACT, so every other
+	 *               reply below was parsed against the right layout.
+	 *   mac_ok   -- the radio produced its own identity AND that identity is
+	 *               structurally a station MAC, not a zeroed field.
+	 *   caps_rc  -- the firmware could state what it implements.
+	 *   scan_ok  -- a real radio operation ran to completion on the Wi-Fi
+	 *               side and its reply parsed (see the empty-scan note).
+	 *   ble_rc   -- the other radio came up.
+	 *
+	 * Four of those five are radio-side, and three of them (MAC, scan, BLE)
+	 * are worker-routed rather than answered from the SPI ISR, so they
+	 * cannot be satisfied by a coprocessor that is merely running its
+	 * dispatch loop with dead radios.
+	 */
+	bool pass = ver_ok && mac_ok && (caps_rc == ALP_OK) && scan_ok && (ble_rc == ALP_OK);
+	/* ping is always "ok" on this line -- a failed PING returned above -- and
+	 * it is printed anyway so the gate list in the log is the complete one. */
+	printf("[evkdemo] CC3501E: ping=ok version=%s mac=%s caps=%s scan=%s ble=%s -> %s\n",
+	       ver_ok ? "ok" : "BAD",
+	       mac_ok ? "ok" : "BAD",
+	       (caps_rc == ALP_OK) ? "ok" : "BAD",
+	       scan_ok ? "ok" : "BAD",
+	       (ble_rc == ALP_OK) ? "ok" : "BAD",
+	       pass ? "PASS" : "FAIL");
+	return pass ? PHASE_PASS : PHASE_FAIL;
+}
+
+/* ==================================================================== */
 /* STUBS -- phases not in this slice.  Each reason differs; see below.  */
 /* ==================================================================== */
 
@@ -1086,25 +1488,16 @@ static phase_verdict_t phase_encoder_stub(demo_ctx_t *ctx)
 	return PHASE_SKIPPED;
 }
 
-/* CC3501E Wi-Fi/BLE: the coprocessor is ALREADY ACTIVATED on every SoM and
- * radio ops are expected -- but the bridge protocol dispatch (4-phase SPI
- * exchange, hardware SS0 + READY gating) is a larger unit of work than
- * fits this slice alongside six other phases, and a partial/rushed
- * implementation risks tripping the hard constraint against ever
- * re-activating or re-flashing the bridge. Deferred to the next slice,
- * not because the hardware is missing. */
-static phase_verdict_t phase_cc3501e_stub(demo_ctx_t *ctx)
-{
-	ARG_UNUSED(ctx);
-	printf("[evkdemo] -- Phase: CC3501E Wi-Fi/BLE -- SKIPPED (bridge protocol dispatch "
-	       "deferred to the next slice, not a hardware gap) --\n");
-	return PHASE_SKIPPED;
-}
-
 /* SD card: per DEMO-DESIGN.md's order constraint, the SDIO mux (EN/SEL on
- * CC35 GPIO_26/GPIO_30) is not reachable until the CC3501E bridge phase
- * above is implemented and running -- so this phase is blocked on that
- * one, not on whether a card is in the slot. Deferred alongside it. */
+ * CC35 GPIO_26/GPIO_30) hangs off the CC3501E's GPIO proxy, so it is not
+ * reachable until phase 8 has powered and reset the coprocessor. Phase 8
+ * now does exactly that and leaves `cc35_fw` bound and `cc35_link_up` set
+ * (see that phase), so the blocker is gone -- what remains is the SD side
+ * itself (the mux sequence, the SDIO host, a filesystem read), which is a
+ * unit of work of its own and out of scope for this slice. NOTE for whoever
+ * picks it up: driving the mux needs CONFIG_ALP_SDK_GPIO_CC3501E_PROXY plus
+ * a cc3501e_gpio_routes[] table, neither of which this app carries yet --
+ * see prj.conf's phase-8 block for why they are deliberately off today. */
 static phase_verdict_t phase_sdcard_stub(demo_ctx_t *ctx)
 {
 	ARG_UNUSED(ctx);
@@ -1153,9 +1546,10 @@ static phase_verdict_t phase_screen_stub(demo_ctx_t *ctx)
  * Vela-compiled person_detect_u85 model is ~263 KiB, which is precisely
  * why THAT app links into MRAM slot0 and boots via Flow D instead of
  * RAM-running. This demo is a Flow C ITCM RAM-run: ITCM is 256 KB total
- * and the demo already occupies about 106 KB (41.41%) of it -- it was
- * roughly 93 KB (36.24%) before phase 13, so the headroom is shrinking,
- * not growing. Deliberately not a byte-exact figure: the size depends on
+ * and the demo already occupies about 140 KB (54.66%) of it -- roughly
+ * 93 KB (36.24%) before phase 13, about 106 KB (41.41%) after it, and the
+ * CC3501E bridge driver in phase 8 added ~34 KB more, so the headroom is
+ * shrinking, not growing. Deliberately not a byte-exact figure: the size depends on
  * which conf fragments the build layers, and a bench Flow C build
  * (RAM console, scripts/bench/aen/aen-bench-shared.conf) and a plain
  * scripts/bench/aen/build.sh differ by a few bytes. A byte count printed
@@ -1173,7 +1567,7 @@ static phase_verdict_t phase_npu_stub(demo_ctx_t *ctx)
 	ARG_UNUSED(ctx);
 	printf("[evkdemo] -- Phase: NPU inference -- SKIPPED (needs a boot-flow change, not a "
 	       "phase: aen-npu-inference-alp's person_detect_u85 model is ~263 KiB and this "
-	       "demo is a Flow C ITCM RAM-run -- 256 KB ITCM total, about 106 KB (41.41%%) "
+	       "demo is a Flow C ITCM RAM-run -- 256 KB ITCM total, about 140 KB (54.66%%) "
 	       "already used, so the model would have to move the whole image to MRAM slot0 / "
 	       "Flow D) --\n");
 	return PHASE_SKIPPED;
@@ -1191,7 +1585,7 @@ static const phase_t PHASES[] = {
 	{ "EEPROM identity (24C128)", phase_eeprom_identity },
 	{ "RGB LED (PWM0/1/3)", phase_rgb_led },
 	{ "Rotary encoder", phase_encoder_stub },
-	{ "CC3501E Wi-Fi/BLE", phase_cc3501e_stub },
+	{ "CC3501E Wi-Fi/BLE", phase_cc3501e },
 	{ "SD card", phase_sdcard_stub },
 	{ "Ethernet", phase_ethernet_stub },
 	{ "Sound out -> PDM in", phase_sound_stub },
