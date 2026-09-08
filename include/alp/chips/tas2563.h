@@ -7,10 +7,15 @@
  * @file tas2563.h
  * @brief Texas Instruments TAS2563 smart Class-D mono speaker amp.
  *
- * @par Verification status: [UNTESTED] -- driver compiles + passes NULL-arg smokes;
- *   no HiL silicon bring-up yet.  Treat all numbers + lifecycle
- *   sequencing as paper-correct only until the v1.0 verification
- *   sweep lands.
+ * @par Verification status: [UNTESTED] -- driver compiles, passes NULL-arg
+ *   smokes, and passes register-protocol ZTests against a fake that
+ *   models this part's paged register map from the datasheet
+ *   (tests/zephyr/chips/src/fake_tas2563.c).  That is still a paper
+ *   check: the fake was built from the same document the driver was,
+ *   so the two agreeing proves consistency, not correctness.  No HiL
+ *   silicon bring-up yet, and no speaker has ever been connected.
+ *   Treat all numbers + lifecycle sequencing as paper-correct only
+ *   until the v1.0 verification sweep lands.
  *
  * @par Datasheet: every register address, bit field, reset value and
  *   mode encoding below is cited to TI **SLASET3D** ("TAS2563 6.1W
@@ -41,11 +46,24 @@
  *       the speaker terminals and then leaves the device ACTIVE
  *       (SLASET3D §7.3.11.5, p.35).
  *     - @ref tas2563_load_tuning refuses any record that writes
- *       `PWR_CTL`, so a caller-supplied tuning blob cannot bring the
- *       amp out of shutdown behind the caller's back.
- *   The output level itself (`PB_CFG1.AMP_LEVEL`) is left at its reset
- *   value of `10h` = 16.0 dBV / 8.92 Vpk (SLASET3D §7.5.5 Table 7-105,
- *   p.67) -- this driver never writes it; a tuning blob may.
+ *       `SW_RESET`, `PWR_CTL`, `MISC` (`IRQZ_POL`) or `TG_CFG0`, so a
+ *       caller-supplied tuning blob cannot bring the amp out of
+ *       shutdown, reset away the caller's configuration, invert the
+ *       fault pin under @ref tas2563_fault_asserted, or arm the tone
+ *       generator behind the caller's back.
+ *
+ *   @warning The output level is NOT low by default, and this is the
+ *   one place a caller with speakers attached has to act.
+ *   `PB_CFG1.AMP_LEVEL` powers up at `10h` = 16.0 dBV / 8.92 Vpk
+ *   (SLASET3D §7.5.5 Table 7-105, p.67) -- roughly 9.9 W peak into
+ *   4 ohm, near the top of the part's range, and only 6 dB below the
+ *   `1Ch` = 22 dBV / 17.8 Vpk maximum.  Call
+ *   @ref tas2563_set_amp_level with a level you have chosen for your
+ *   enclosure BEFORE the first @ref tas2563_set_mode with
+ *   @ref TAS2563_MODE_ACTIVE.  A tuning blob may also set this
+ *   register -- deliberately, since output level is what a smart-amp
+ *   tuning is for -- so set the level AFTER
+ *   @ref tas2563_load_tuning, not before, if you use both.
  *
  * v0.3 driver scope:
  *   - I2C connectivity probe (read CHIP_ID).
@@ -61,6 +79,8 @@
  *     transaction.  Converting a TI PPC3 export into that record
  *     stream is a host-side step and is deliberately NOT in this
  *     driver -- see @ref tas2563_load_tuning.
+ *   - an output-level setter (@ref tas2563_set_amp_level) -- see the
+ *     warning above.
  *   - I2S configuration (@ref tas2563_configure_i2s) derived from the
  *     same @ref alp_i2s_config_t the caller opened the host bus with,
  *     plus the IV-sense return path (@ref tas2563_configure_iv_sense):
@@ -125,6 +145,23 @@ typedef enum {
 	TAS2563_MODE_MUTE     = 0x01, /**< PWM muted, register state preserved. */
 	TAS2563_MODE_SHUTDOWN = 0x02, /**< Software shutdown, lowest IDD. */
 } tas2563_mode_t;
+
+/**
+ * @name `PB_CFG1.AMP_LEVEL` bounds accepted by @ref tas2563_set_amp_level
+ *
+ * SLASET3D §7.5.5 Table 7-105 (p.67) enumerates the level codes in
+ * 0.5 dBV steps from `01h` = 8.5 dBV (3.76 Vpk) to `1Ch` = 22 dBV
+ * (17.8 Vpk), marks `1Dh`-`1Fh` Reserved, and does not list `00h` at
+ * all.  Power-on value is `10h` = 16.0 dBV (8.92 Vpk).  Codes between
+ * the two bounds are passed through unnamed: naming 28 of them would
+ * be a second copy of a datasheet table, and a second copy is a second
+ * thing to get wrong.
+ * @{
+ */
+#define TAS2563_AMP_LEVEL_MIN 0x01u /**< 8.5 dBV (3.76 Vpk), the quietest listed. */
+#define TAS2563_AMP_LEVEL_POR 0x10u /**< 16.0 dBV (8.92 Vpk), the power-on value. */
+#define TAS2563_AMP_LEVEL_MAX 0x1Cu /**< 22 dBV (17.8 Vpk), the loudest listed. */
+/** @} */
 
 /**
  * Which TDM/I2S receive slot the amp takes its playback audio from --
@@ -194,9 +231,12 @@ typedef enum {
 
 /**
  * One register write in a tuning stream.  The device's memory map is
- * paged: 256 books of 256 pages of 128 registers (SLASET3D §7.3.10
- * "Register Organization", p.34), so a coefficient write is only
- * addressable as the triple (book, page, register).
+ * paged, so a coefficient write is only addressable as the triple
+ * (book, page, register).  SLASET3D §7.3.10 "Register Organization"
+ * (p.34) states the two inner sizes -- "Each page contains 128 bytes
+ * and each book contains 256 pages" -- and does not state a book
+ * count; that 256 books exist comes from `BOOK[7:0]`, whose field
+ * table enumerates 00h..FFh (§7.5.62 Table 7-162, p.94).
  */
 typedef struct {
 	uint8_t book; /**< Value for the `BOOK` register, 0x7F on page 0. */
@@ -289,6 +329,38 @@ alp_status_t tas2563_set_mode(tas2563_t *ctx, tas2563_mode_t mode);
 alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable);
 
 /**
+ * @brief Set the Class-D output level (`PB_CFG1.AMP_LEVEL`).
+ *
+ * The one knob in this API that decides how loud the part gets, and
+ * the reason it exists is that the power-on value is not quiet:
+ * `10h` = 16.0 dBV / 8.92 Vpk, roughly 9.9 W peak into 4 ohm and only
+ * 6 dB below the maximum (SLASET3D §7.5.5 Table 7-105, p.67).  A
+ * caller with speakers attached should call this with a level chosen
+ * for the enclosure before the first @ref tas2563_set_mode with
+ * @ref TAS2563_MODE_ACTIVE -- and after @ref tas2563_load_tuning if
+ * both are used, since a tuning may legitimately set this register
+ * too.
+ *
+ * Read-modify-write of bits 5..1 only; `DIS_DC_BLOCKER` (bit 6) and
+ * the reserved bits keep their values.
+ *
+ * @param[in] ctx         Initialised context.
+ * @param[in] level_code  Datasheet `AMP_LEVEL[4:0]` code,
+ *                        @ref TAS2563_AMP_LEVEL_MIN ..
+ *                        @ref TAS2563_AMP_LEVEL_MAX, in 0.5 dBV steps
+ *                        from 8.5 dBV.  Not a dB value -- the
+ *                        datasheet's own code, so a reader can check
+ *                        it against Table 7-105 without arithmetic.
+ *
+ * @return ALP_OK, or the underlying bus status.
+ * @retval ALP_ERR_NOT_READY    ctx is NULL or not initialised.
+ * @retval ALP_ERR_OUT_OF_RANGE @p level_code is `00h`, or falls in the
+ *                              Reserved `1Dh`-`1Fh` range, or is
+ *                              wider than the 5-bit field.
+ */
+alp_status_t tas2563_set_amp_level(tas2563_t *ctx, uint8_t level_code);
+
+/**
  * @brief Tell the amp what the host I2S bus is doing.
  *
  * Translates the @ref alp_i2s_config_t the caller passed to
@@ -303,9 +375,17 @@ alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable);
  *     is "44.1/48 kHz"), so 44100 and 48000 write the same value
  *     (SLASET3D §7.5.8 Table 7-108, p.69).
  *   - `TDM_CFG1.RX_OFFSET[5:1]` and `TDM_CFG1.RX_JUSTIFY` from
- *     @c format: one SBCLK of offset for @ref ALP_I2S_FMT_I2S, zero
- *     for @ref ALP_I2S_FMT_LEFT_JUSTIFIED, left justification for
- *     both (§7.5.9 Table 7-109, p.69).
+ *     @c format.  The fields are defined in §7.5.9 Table 7-109 (p.69)
+ *     but the offset VALUES come from §7.4.2 (p.41), which states the
+ *     mapping outright: `RX_OFFSET` is "typically set to a value of 0
+ *     for Left Justified format and 1 for an I2S format".  So: one
+ *     SBCLK of offset and left justification for
+ *     @ref ALP_I2S_FMT_I2S; zero offset and left justification for
+ *     @ref ALP_I2S_FMT_LEFT_JUSTIFIED; zero offset and RIGHT
+ *     justification for @ref ALP_I2S_FMT_RIGHT_JUSTIFIED.  That last
+ *     one is derived, not read off a table -- p.41's sentence covers
+ *     only the first two, and `RX_JUSTIFY` is what selects
+ *     justification within the slot.
  *   - `TDM_CFG2.RX_WLEN[3:2]` and `TDM_CFG2.RX_SLEN[1:0]` from
  *     @c word_bits, and `TDM_CFG2.RX_SCFG[5:4]` from @p channel
  *     (§7.5.10 Table 7-110, p.70).
@@ -318,7 +398,19 @@ alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable);
  * (§7.5.8 Table 7-108, p.69).  Slot length is set equal to word
  * length because @ref alp_i2s_config_t has no separate slot field --
  * a frame that carries 24-bit words in 32-bit slots needs a direct
- * `TDM_CFG2` write, not this helper.
+ * `TDM_CFG2` write, not this helper.  Table 7-110's 20-bit `RX_WLEN`
+ * encoding is not mapped: `word_bits` is documented 16/24/32, so no
+ * host bus this pairs with can be opened at 20 bits, and 20 lands in
+ * @ref ALP_ERR_OUT_OF_RANGE with every other unencodable width.
+ *
+ * Two Table 7-23 (§7.4.2, p.40) caveats the rate mapping does not
+ * change but a caller should know: that table marks the `000b`
+ * (7.35/8 kHz) and `010b` (22.05/24 kHz) encodings **Reserved**, while
+ * the Table 7-108 field description lists them as real rates -- the
+ * driver follows the field table and emits both, see
+ * `chips/tas2563/tas2563.c`'s `samp_rate_code()` for the full
+ * reasoning.  And 192 kHz is internally down-sampled to 96 kHz
+ * (p.40), so content above 40 kHz must not be applied at that rate.
  *
  * @param[in] ctx      Initialised context.
  * @param[in] host_cfg The config the host I2S bus was opened with.
@@ -330,9 +422,13 @@ alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable);
  *                              not a @ref tas2563_rx_channel_t value.
  * @retval ALP_ERR_OUT_OF_RANGE @c sample_rate_hz or @c word_bits has
  *                              no encoding in Table 7-108/7-110.
- * @retval ALP_ERR_NOSUPPORT    @c format is neither
- *                              @ref ALP_I2S_FMT_I2S nor
- *                              @ref ALP_I2S_FMT_LEFT_JUSTIFIED.
+ * @retval ALP_ERR_NOSUPPORT    @c format is a PCM frame-sync format
+ *                              (@ref ALP_I2S_FMT_PCM_SHORT /
+ *                              @ref ALP_I2S_FMT_PCM_LONG).  `TDM_CFG1`
+ *                              has no field expressing a short- or
+ *                              long-frame-sync PCM frame, so there is
+ *                              nothing to write; refused rather than
+ *                              silently framed as I2S.
  */
 alp_status_t tas2563_configure_i2s(tas2563_t              *ctx,
                                    const alp_i2s_config_t *host_cfg,
@@ -436,9 +532,22 @@ alp_status_t tas2563_fault_asserted(tas2563_t *ctx, bool *asserted_out);
  * Reads `INT_LTCH0` (0x24), `INT_LTCH1` (0x25), `INT_LTCH3` (0x26)
  * and `INT_LTCH4` (0x27) and packs them byte-aligned into bits
  * 0..7 / 8..15 / 16..23 / 24..31 -- see the `TAS2563_FAULT_*` macros.
- * Latched bits stay set until @ref tas2563_clear_faults, so this
- * reports every fault since the last clear, not just the live state
- * (SLASET3D §7.5.36-§7.5.39, p.82-85).
+ *
+ * @warning SLASET3D CONTRADICTS ITSELF ON WHAT THIS READ DOES TO THE
+ *   LATCHES, so this function promises neither behaviour.  §7.3.12
+ *   (p.36) says plainly: "Reading the latched fault status register
+ *   (INT_LTCH[7:0]) clears the register."  The field tables for the
+ *   same registers say the opposite -- every bit in §7.5.36-§7.5.39
+ *   (p.82-85) is described as "cleared using CLR_INTP_LTCH", which is
+ *   what @ref tas2563_clear_faults writes.  If p.36 is right this call
+ *   is destructive: a second reader, or a retry after a transient bus
+ *   error, sees zero and the fault is gone.  If the field tables are
+ *   right, bits persist until @ref tas2563_clear_faults.  Nobody has
+ *   run this on silicon and no test can decide it (the fake models the
+ *   field-table behaviour, which is a choice, not evidence), so treat
+ *   one read as possibly the only chance to see a given fault: capture
+ *   the returned mask and work from that copy rather than re-reading
+ *   and assuming the second read agrees.
  *
  * Does not require a fault pin; the latched registers are readable
  * whether or not IRQ_N is wired.
@@ -514,11 +623,22 @@ alp_status_t tas2563_clear_faults(tas2563_t *ctx);
  *                           @p count; or a record targets `PAGE`
  *                           (0x00) or `BOOK` (0x7F), which are this
  *                           function's own bookkeeping registers; or
- *                           a record targets `PWR_CTL` (0x02) in
- *                           book 0 / page 0, which would let a tuning
- *                           blob change the amplifier's operating
- *                           mode -- including bringing it out of
- *                           shutdown -- behind the caller's back.
+ *                           a record targets one of the driver-owned
+ *                           control registers in book 0 / page 0 --
+ *                           `SW_RESET` (0x01), `PWR_CTL` (0x02),
+ *                           `MISC` (0x32, `IRQZ_POL`) or `TG_CFG0`
+ *                           (0x3F).  Each of those changes something
+ *                           the caller believes it configured, with
+ *                           no readback saying so: the operating mode,
+ *                           a full register reset mid-load, the
+ *                           polarity @ref tas2563_fault_asserted
+ *                           assumes, or the tone generator.
+ *                           `PB_CFG1` (0x03, `AMP_LEVEL`) is
+ *                           deliberately NOT blocked -- output level
+ *                           is what a smart-amp tuning is for, and
+ *                           blocking it would refuse real PPC3
+ *                           exports; use @ref tas2563_set_amp_level
+ *                           afterwards instead.
  */
 alp_status_t tas2563_load_tuning(tas2563_t                  *ctx,
                                  const tas2563_tuning_reg_t *records,

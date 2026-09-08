@@ -29,6 +29,9 @@ names SLASET3D, matching what the `physical:` block already used.
   (`MISC_CFG1.IRQZ_PU`, §7.5.6 p.68), points `IRQZ_PIN_CFG` at latched
   interrupts (§7.5.43 p.86), and reads `INT_LTCH0/1/3/4` back as one
   byte-aligned `uint32_t` behind named `TAS2563_FAULT_*` bits.
+- `tas2563_set_amp_level()` — sets `PB_CFG1.AMP_LEVEL` (§7.5.5 Table 7-105,
+  p.67), validated against the `01h`..`1Ch` range the table lists. See the
+  safety note below for why this exists.
 - `tas2563_load_tuning()` — replays a `tas2563_tuning_reg_t`
   (book, page, register, value) stream, tracking the selected book/page and
   restoring book 0 / page 0 on both the success and the failure path, because
@@ -45,12 +48,36 @@ names SLASET3D, matching what the `physical:` block already used.
   `MODE = 11b` runs load diagnostics into the speaker terminals and then
   leaves the device ACTIVE (§7.3.11.5, p.35) — not somewhere a stray cast
   integer should be able to put the amplifier.
-- `tas2563_load_tuning()` rejects any record that writes `PWR_CTL`, so a
-  caller-supplied tuning blob cannot change the operating mode behind the
-  caller's back. Validation runs over the whole stream before the first
-  write, so an illegal record does not leave a half-applied tuning.
+- `tas2563_load_tuning()` rejects any record targeting a driver-owned control
+  register in book 0 / page 0 — `SW_RESET` (0x01, wipes the caller's whole
+  configuration mid-load), `PWR_CTL` (0x02, the operating mode), `MISC`
+  (0x32, `IRQZ_POL`: flipping it inverts the fault pin under
+  `tas2563_fault_asserted()` with no readback saying so, §7.5.45 Table 7-145
+  p.87) and `TG_CFG0` (0x3F, the tone generator, §7.5.50 p.89). Validation
+  runs over the whole stream before the first write, so an illegal record
+  does not leave a half-applied tuning.
 - `tas2563_deinit()` falls back to writing software shutdown when no `SD_N`
   pin was supplied; previously it did nothing in that case.
+
+**`PB_CFG1` is deliberately NOT on that blocklist, and the output level is not
+low by default.** `AMP_LEVEL` powers up at `10h` = 16.0 dBV / 8.92 Vpk —
+roughly 9.9 W peak into 4 Ω, only 6 dB below the `1Ch` = 22 dBV / 17.8 Vpk
+maximum. Blocking `PB_CFG1` would make the loader refuse real PPC3 exports,
+since output level is exactly what a smart-amp tuning sets; the hazard is
+handled the other way round instead. `tas2563_set_amp_level()` lets a caller
+pick a level for its enclosure, and the header now carries a `@warning`
+telling it to do so before the first `tas2563_set_mode(ACTIVE)` — and *after*
+`tas2563_load_tuning()` if both are used.
+
+### Fixed — TAS2563: `init` now selects book 0, not just page 0 (#2040)
+
+`tas2563_init()` selected `PAGE = 0` and then read `REVID` and wrote
+`PWR_CTL` — but never touched `BOOK`. `BOOK` survives software shutdown along
+with the rest of the register state (§7.3.11.2, p.34), which is exactly the
+warm-restart case the park-write exists for: a device left mid-tuning by a
+previous firmware comes up with a non-zero `BOOK`, and both accesses would
+then land in coefficient space instead of the control registers. `init` now
+uses the driver's existing `select_book0_page0()`.
 
 ### Fixed — TAS2563: mode writes no longer disturb the IV-sense power bits (#2040)
 
@@ -60,6 +87,34 @@ every mode change also cleared `VSNS_PD`, silently powering the voltage-sense
 block up as a side effect of going ACTIVE. The mask is now `0x03`. The
 in-code comment citing "Table 7-50"/"table 7-58" for this register was wrong
 in the same way and has been replaced with the real citations.
+
+### Datasheet conflicts, recorded rather than resolved
+
+SLASET3D contradicts itself in two places this driver touches. Neither is
+decidable without silicon, so both are documented at the point of use instead
+of being quietly picked:
+
+- **Reading `INT_LTCH` may or may not clear it.** §7.3.12 (p.36) says
+  "Reading the latched fault status register (INT_LTCH[7:0]) clears the
+  register"; the field tables for those same registers (§7.5.36–§7.5.39,
+  p.82–85) say every bit is "cleared using CLR_INTP_LTCH". If p.36 is right,
+  `tas2563_read_faults()` is destructive and a retry after a transient bus
+  error loses the fault. Its doc comment now carries that warning and no
+  longer promises latched bits survive the read. The fake models the
+  field-table behaviour only, and says so — that is a choice, not evidence,
+  and no test here can decide it.
+- **Two sample-rate encodings are listed twice, differently.** §7.4.2
+  Table 7-23 (p.40) marks `000b` and `010b` **Reserved**; §7.5.8 Table 7-108
+  (p.69) — the field description for the bits actually being written — lists
+  them as 7.35/8 kHz and 22.05/24 kHz. §1 (p.1) advertises "8kHz to 96kHz",
+  backing `000b`; nothing outside Table 7-108 backs `010b`. The driver follows
+  the field table and emits both, with the conflict spelled out in
+  `samp_rate_code()`: refusing a rate the field table documents is the more
+  surprising of the two guesses, and `FS_RATE` (§7.5.19, p.73) will settle it
+  once there is hardware. Two further Table 7-23 caveats are now recorded:
+  `110b` (176.4/192 kHz) is "supported only by QFN device package" (the fitted
+  TAS2563RPP is QFN, so it applies here), and 192 kHz is internally
+  down-sampled to 96 kHz, so content above 40 kHz aliases at that rate.
 
 ### Deliberately not included
 
@@ -75,6 +130,17 @@ in the same way and has been replaced with the real citations.
   write; §7.3.7 (p.33) titles itself "Multiple-Byte Write and Incremental
   Multiple-Byte Write" but never states that it does, and there is no silicon
   here to establish it. Single-byte writes only, for now.
+- **A 20-bit `RX_WLEN` mapping.** Table 7-110 encodes it, but `<alp/i2s.h>`
+  documents `alp_i2s_config_t.word_bits` as 16/24/32, so no host bus this
+  function pairs with can be opened at 20 bits. A mapping unreachable through
+  the real API is a mapping that cannot be tested, so 20 lands in
+  `ALP_ERR_OUT_OF_RANGE` with every other unencodable width.
+- **PCM frame-sync formats.** `ALP_I2S_FMT_PCM_SHORT`/`_PCM_LONG` return
+  `ALP_ERR_NOSUPPORT`: `TDM_CFG1` has no field expressing a short- or
+  long-frame-sync PCM frame, so there is nothing to write, and framing them
+  silently as I2S would be worse than refusing. `ALP_I2S_FMT_RIGHT_JUSTIFIED`
+  *is* now supported — `TDM_CFG1.RX_JUSTIFY` (bit 6, Table 7-109 p.69) encodes
+  exactly that.
 - **Widening the interrupt masks.** `INT_MASK0..3` keep their reset values,
   which already leave over-temperature, over-current, VBAT brown-out, VBAT POR
   and speaker open/short load unmasked (§7.5.28–§7.5.31, p.77–80). TDM clock
@@ -87,9 +153,9 @@ in the same way and has been replaced with the real citations.
 the book/page paging (§7.3.10, p.34, including BOOK being reachable only from
 page 0), seeds the datasheet POR values, models the self-clearing
 `CLR_INTP_LTCH`, and keeps an ordered write log so a test can assert write
-*sequence* rather than only end state. 15 ZTests in `test_audio.c` use it;
+*sequence* rather than only end state. 17 ZTests in `test_audio.c` use it;
 each was verified by mutation (break the datasheet fact, watch the test go
-red, restore, watch it go green).
+red, restore, watch it go green) — 24 mutations, none surviving.
 
 **Still unproven.** The header's `[UNTESTED]` status is unchanged and stays
 accurate: no speaker is connected to the bench, this driver has never run on

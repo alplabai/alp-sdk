@@ -19,7 +19,9 @@
 /* Register map, book 0 / page 0 -- SLASET3D §7.5.1 "Register Summary
  * Table Page=0x00", p.64-65. */
 #define TAS2563_REG_PAGE      0x00u /* Device page          (§7.5.2,  p.65). */
+#define TAS2563_REG_SW_RESET  0x01u /* Software reset       (§7.5.3,  p.65). */
 #define TAS2563_REG_PWR_CTL   0x02u /* Power control        (§7.5.4,  p.65). */
+#define TAS2563_REG_PB_CFG1   0x03u /* Playback config 1    (§7.5.5,  p.66). */
 #define TAS2563_REG_MISC_CFG1 0x04u /* Misc configuration 1 (§7.5.6,  p.67). */
 #define TAS2563_REG_TDM_CFG0  0x06u /* TDM configuration 0  (§7.5.8,  p.68). */
 #define TAS2563_REG_TDM_CFG1  0x07u /* TDM configuration 1  (§7.5.9,  p.69). */
@@ -31,6 +33,8 @@
 #define TAS2563_REG_INT_LTCH3 0x26u /* Latched interrupts 2 (§7.5.38, p.84). */
 #define TAS2563_REG_INT_LTCH4 0x27u /* Latched interrupts 3 (§7.5.39, p.84). */
 #define TAS2563_REG_INT_CLK   0x30u /* INT & CLK CFG        (§7.5.43, p.86). */
+#define TAS2563_REG_MISC      0x32u /* IRQZ pin polarity    (§7.5.45, p.87). */
+#define TAS2563_REG_TG_CFG0   0x3Fu /* Tone generator       (§7.5.50, p.89). */
 #define TAS2563_REG_REVID     0x7Du /* Revision + PG ID, RO (§7.5.60, p.93). */
 #define TAS2563_REG_BOOK      0x7Fu /* Device book          (§7.5.62, p.94). */
 
@@ -40,6 +44,13 @@
  * up or down as a side effect. */
 #define TAS2563_PWR_CTL_MODE_MASK 0x03u
 #define TAS2563_PWR_CTL_SENSE_PD  0x0Cu /* ISNS_PD (bit 3) | VSNS_PD (bit 2). */
+
+/* PB_CFG1 (0x03) -- §7.5.5 Table 7-105, p.66-67.  AMP_LEVEL is bits
+ * 5..1, reset 10h = 16.0 dBV (8.92 Vpk).  The table enumerates 01h
+ * (8.5 dBV / 3.76 Vpk) through 1Ch (22 dBV / 17.8 Vpk) in 0.5 dBV
+ * steps and marks 1Dh-1Fh Reserved; 00h is not listed at all. */
+#define TAS2563_PB_CFG1_AMP_LEVEL_MASK  0x3Eu
+#define TAS2563_PB_CFG1_AMP_LEVEL_SHIFT 1u
 
 /* MISC_CFG1 (0x04) -- §7.5.6 Table 7-106, p.68.  IRQZ_PU is bit 3,
  * reset 0h (internal 20 kOhm pull-up disabled; §7.3.12 Figure 7-10,
@@ -55,7 +66,6 @@
 /* TDM_CFG1 (0x07) -- §7.5.9 Table 7-109, p.69.  RX_JUSTIFY bit 6,
  * RX_OFFSET bits 5..1, RX_EDGE bit 0 (left at reset: rising edge). */
 #define TAS2563_TDM_CFG1_RX_JUSTIFY       0x40u
-#define TAS2563_TDM_CFG1_RX_OFFSET_MASK   0x3Eu
 #define TAS2563_TDM_CFG1_RX_OFFSET_SHIFT  1u
 #define TAS2563_TDM_CFG1_RX_FRAMING_FIELD 0x7Eu /* RX_JUSTIFY | RX_OFFSET. */
 
@@ -174,8 +184,14 @@ alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp
 		if (s != ALP_OK) return s;
 	}
 
-	/* I2C connectivity probe via REVID register on PAGE 0. */
-	alp_status_t s = select_page(ctx, 0);
+	/* I2C connectivity probe via REVID on BOOK 0 / PAGE 0.  Page 0
+	 * alone is not enough: BOOK survives software shutdown along
+	 * with the rest of the register state (§7.3.11.2, p.34), which
+	 * is exactly the warm-restart case the park-write below exists
+	 * for -- a previous firmware left mid-tuning would leave BOOK
+	 * non-zero, and REVID/PWR_CTL would then address coefficient
+	 * space instead of the control registers. */
+	alp_status_t s = select_book0_page0(ctx);
 	if (s != ALP_OK) return ALP_ERR_NOT_READY;
 	uint8_t rev = 0;
 	s           = reg_read(ctx, TAS2563_REG_REVID, &rev);
@@ -230,13 +246,53 @@ alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable)
 	return alp_gpio_write(ctx->sd_n, enable);
 }
 
+alp_status_t tas2563_set_amp_level(tas2563_t *ctx, uint8_t level_code)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	/* Table 7-105 (p.67) enumerates 01h..1Ch and marks 1Dh-1Fh
+	 * Reserved; 00h is not listed at all.  Both ends are refused
+	 * rather than written -- an unlisted code on a Class-D output
+	 * stage is not something to find out about through a speaker. */
+	if (level_code < TAS2563_AMP_LEVEL_MIN || level_code > TAS2563_AMP_LEVEL_MAX) {
+		return ALP_ERR_OUT_OF_RANGE;
+	}
+	alp_status_t s = select_page(ctx, 0);
+	if (s != ALP_OK) return s;
+	return reg_update(ctx,
+	                  TAS2563_REG_PB_CFG1,
+	                  TAS2563_PB_CFG1_AMP_LEVEL_MASK,
+	                  (uint8_t)(level_code << TAS2563_PB_CFG1_AMP_LEVEL_SHIFT));
+}
+
 /* ------------------------------------------------------------------ */
 /* I2S / TDM receive configuration                                     */
 /* ------------------------------------------------------------------ */
 
 /* SAMP_RATE[2:0] -- §7.5.8 Table 7-108, p.69.  Each encoding covers
  * one 44.1 kHz rate and one 48 kHz rate; which of the pair is running
- * is a clock fact, not a register fact, so both map to the same code. */
+ * is a clock fact, not a register fact, so both map to the same code.
+ *
+ * SLASET3D CONTRADICTS ITSELF ON TWO OF THESE CODES, and this driver
+ * follows the register field table.  §7.4.2 Table 7-23 "PCM Audio
+ * Sample Rates" (p.40) marks 000b and 010b Reserved, while §7.5.8
+ * Table 7-108 (p.69) -- the field description for the very bits being
+ * written -- lists them as 7.35/8 kHz and 22.05/24 kHz.  A third
+ * source, §1 "Features" (p.1), advertises "8kHz to 96kHz Sample
+ * Rates", which backs 000b; NOTHING outside Table 7-108 backs 010b.
+ * Both are still emitted rather than refused: picking a side on a
+ * datasheet self-contradiction with no silicon to measure would be a
+ * guess either way, and refusing a rate the field table documents is
+ * the more surprising of the two guesses.  A caller who cares should
+ * read back FS_RATE (§7.5.19, p.73) once there is hardware -- it
+ * reports what the part actually detected.
+ *
+ * Two more facts from Table 7-23 and its surrounding text (p.40) that
+ * do not change the mapping but do change what a caller should
+ * expect: 110b (176.4/192 kHz) is annotated "supported only by QFN
+ * device package" -- the fitted TAS2563RPP is the QFN, so it applies
+ * here, but a DSBGA build would not have it -- and 192 kHz is
+ * internally down-sampled to 96 kHz, so content above 40 kHz must not
+ * be applied at that rate or it aliases. */
 static alp_status_t samp_rate_code(uint32_t hz, uint8_t *code_out)
 {
 	switch (hz) {
@@ -275,18 +331,23 @@ static alp_status_t samp_rate_code(uint32_t hz, uint8_t *code_out)
 
 /* RX_WLEN[1:0] and RX_SLEN[1:0] -- §7.5.10 Table 7-110, p.70.  Slot
  * length is derived from word length because alp_i2s_config_t has no
- * separate slot field; 20-bit words have no 20-bit slot encoding, so
- * they ride in the next size up (24 bits). */
+ * separate slot field: 16-bit words in 16-bit slots, 24 in 24, 32 in
+ * 32.  A frame carrying narrow words in wider slots needs a direct
+ * TDM_CFG2 write, not this helper.
+ *
+ * Table 7-110 also encodes 20-bit words (RX_WLEN = 01b).  It is
+ * deliberately NOT mapped here: <alp/i2s.h> documents
+ * alp_i2s_config_t.word_bits as 16/24/32, so no host bus this
+ * function is paired with can be opened at 20 bits, and a mapping
+ * that cannot be reached through the real API is a mapping that
+ * cannot be tested.  20-bit lands in the ALP_ERR_OUT_OF_RANGE arm
+ * with every other unencodable width. */
 static alp_status_t word_len_codes(uint8_t bits, uint8_t *wlen_out, uint8_t *slen_out)
 {
 	switch (bits) {
 	case 16u:
 		*wlen_out = 0u;
 		*slen_out = 0u;
-		return ALP_OK;
-	case 20u:
-		*wlen_out = 1u;
-		*slen_out = 1u;
 		return ALP_OK;
 	case 24u:
 		*wlen_out = 2u;
@@ -312,19 +373,36 @@ alp_status_t tas2563_configure_i2s(tas2563_t              *ctx,
 		return ALP_ERR_INVAL;
 	}
 
-	/* RX_OFFSET / RX_JUSTIFY -- §7.5.9 Table 7-109, p.69.  I2S
-	 * delays the first data bit by one SBCLK after the frame edge;
-	 * left-justified does not.  Both are left-justified within the
-	 * slot, so RX_JUSTIFY stays 0 in either case. */
-	uint8_t rx_offset;
+	/* RX_OFFSET / RX_JUSTIFY -- fields defined in §7.5.9 Table 7-109
+	 * (p.69), but the OFFSET VALUES come from §7.4.2 (p.41), which
+	 * states the mapping outright: RX_OFFSET is "typically set to a
+	 * value of 0 for Left Justified format and 1 for an I2S format".
+	 * That sentence is the source for the two offsets below; the
+	 * table only says what the field means.
+	 *
+	 * RX_JUSTIFY selects justification WITHIN the slot (0 = left,
+	 * 1 = right, Table 7-109), which is the whole difference between
+	 * left- and right-justified framing; both share the frame start,
+	 * so right-justified takes the same zero offset as left.  That
+	 * last step is DERIVED -- p.41's sentence covers only I2S and
+	 * Left Justified -- and is the one framing value here not read
+	 * off a table. */
+	uint8_t rx_framing;
 	switch (host_cfg->format) {
 	case ALP_I2S_FMT_I2S:
-		rx_offset = 1u;
+		rx_framing = 1u << TAS2563_TDM_CFG1_RX_OFFSET_SHIFT;
 		break;
 	case ALP_I2S_FMT_LEFT_JUSTIFIED:
-		rx_offset = 0u;
+		rx_framing = 0u;
+		break;
+	case ALP_I2S_FMT_RIGHT_JUSTIFIED:
+		rx_framing = TAS2563_TDM_CFG1_RX_JUSTIFY;
 		break;
 	default:
+		/* ALP_I2S_FMT_PCM_SHORT / _PCM_LONG: TDM_CFG1 has no
+		 * field that expresses a short- or long-frame-sync PCM
+		 * frame, so there is nothing to write.  Refused rather
+		 * than silently framed as I2S. */
 		return ALP_ERR_NOSUPPORT;
 	}
 
@@ -345,10 +423,7 @@ alp_status_t tas2563_configure_i2s(tas2563_t              *ctx,
 	               (uint8_t)(rate_code << TAS2563_TDM_CFG0_SAMP_RATE_SHIFT));
 	if (s != ALP_OK) return s;
 
-	s = reg_update(ctx,
-	               TAS2563_REG_TDM_CFG1,
-	               TAS2563_TDM_CFG1_RX_FRAMING_FIELD,
-	               (uint8_t)(rx_offset << TAS2563_TDM_CFG1_RX_OFFSET_SHIFT));
+	s = reg_update(ctx, TAS2563_REG_TDM_CFG1, TAS2563_TDM_CFG1_RX_FRAMING_FIELD, rx_framing);
 	if (s != ALP_OK) return s;
 
 	return reg_update(ctx,
@@ -479,14 +554,45 @@ alp_status_t tas2563_clear_faults(tas2563_t *ctx)
 /* Tuning-blob replay                                                  */
 /* ------------------------------------------------------------------ */
 
+/* Book 0 / page 0 registers a tuning stream may not write.  Everything
+ * here is a control register this driver or its caller owns, not a DSP
+ * coefficient, and each one can be changed without any readback saying
+ * so:
+ *
+ *   SW_RESET (0x01, §7.5.3 p.65)  self-clearing; returns EVERY register
+ *       to POR mid-load, silently undoing the I2S, IV-sense and fault
+ *       configuration the caller set up before calling.
+ *   PWR_CTL  (0x02, §7.5.4 p.66)  the operating mode -- a blob must not
+ *       be able to bring the amplifier out of shutdown.
+ *   MISC     (0x32, §7.5.45 Table 7-145 p.87)  IRQZ_POL, reset 1h =
+ *       active low.  Flipping it inverts the pin without touching
+ *       anything tas2563_fault_asserted() reads, so every subsequent
+ *       fault poll would report the opposite of the truth.
+ *   TG_CFG0  (0x3F, §7.5.50 p.89)  the tone generator: the one other
+ *       register in the map that makes the part produce sound on its
+ *       own once the caller goes ACTIVE.
+ *
+ * PB_CFG1 (0x03, AMP_LEVEL) is deliberately NOT on this list even
+ * though it is the loudest register in the part.  Output level is
+ * exactly what a smart-amp tuning is for; blocking it would make this
+ * function refuse real PPC3 tunings, which is worse than the hazard.
+ * The hazard is handled the other way round -- tas2563_set_amp_level()
+ * exists so a caller can set the level explicitly AFTER loading, and
+ * the header says so. */
+static bool tuning_reg_is_reserved(const tas2563_tuning_reg_t *r)
+{
+	if (r->book != 0u || r->page != 0u) return false;
+	return r->reg == TAS2563_REG_SW_RESET || r->reg == TAS2563_REG_PWR_CTL ||
+	       r->reg == TAS2563_REG_MISC || r->reg == TAS2563_REG_TG_CFG0;
+}
+
 /* A record is rejected if it would write one of this function's own
- * paging registers, or PWR_CTL -- see tas2563_load_tuning()'s doc
- * comment for why the operating mode is off-limits to a blob. */
+ * paging registers, or one of the driver-owned control registers
+ * above. */
 static bool tuning_record_is_legal(const tas2563_tuning_reg_t *r)
 {
 	if (r->reg < TAS2563_TUNING_REG_MIN || r->reg > TAS2563_TUNING_REG_MAX) return false;
-	if (r->book == 0u && r->page == 0u && r->reg == TAS2563_REG_PWR_CTL) return false;
-	return true;
+	return !tuning_reg_is_reserved(r);
 }
 
 alp_status_t tas2563_load_tuning(tas2563_t                  *ctx,

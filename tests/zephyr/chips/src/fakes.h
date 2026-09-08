@@ -181,6 +181,12 @@ size_t                           fake_tas2563_log_len(void);
 const struct fake_tas2563_write *fake_tas2563_log(size_t i);
 void                             fake_tas2563_log_reset(void);
 
+/** Force the fake's current book/page selection without going through
+ *  a PAGE/BOOK write -- models a device left mid-tuning by a previous
+ *  firmware, which software shutdown would preserve (SLASET3D
+ *  §7.3.11.2, p.34). */
+void fake_tas2563_force_paging(uint8_t book, uint8_t page);
+
 /** Arm a one-shot NACK for the next write to (@p book, @p page,
  *  @p reg), so a test can fail one step of a multi-write sequence
  *  without disturbing the steps before it. */

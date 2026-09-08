@@ -21,6 +21,17 @@
  *      Table 7-143, p.86): setting it wipes INT_LTCH0/1/3/4 and reads
  *      back as 0.
  *
+ * WHAT THIS FAKE DELIBERATELY DOES NOT MODEL: read-to-clear on the
+ * latched registers.  SLASET3D contradicts itself -- §7.3.12 (p.36)
+ * says "Reading the latched fault status register (INT_LTCH[7:0])
+ * clears the register", while the field tables for those same
+ * registers (§7.5.36-§7.5.39, p.82-85) say every bit is "cleared using
+ * CLR_INTP_LTCH".  This fake implements the field-table behaviour
+ * only.  That is a CHOICE, not evidence: no test here can decide which
+ * sentence describes the silicon, and picking the other one would
+ * change nothing about that.  tas2563_read_faults()'s doc comment
+ * carries the warning for callers.
+ *
  * The ordered write log lets a test assert the SEQUENCE of writes,
  * not just the final register state -- which is the whole point for
  * the tuning loader (paging order) and for IV-sense enable (power the
@@ -241,6 +252,13 @@ const struct fake_tas2563_write *fake_tas2563_log(size_t i)
 void fake_tas2563_log_reset(void)
 {
 	if (g_fake_tas2563) g_fake_tas2563->log_len = 0u;
+}
+
+void fake_tas2563_force_paging(uint8_t book, uint8_t page)
+{
+	if (g_fake_tas2563 == NULL) return;
+	g_fake_tas2563->cur_book = book;
+	g_fake_tas2563->cur_page = page;
 }
 
 void fake_tas2563_fail_write_at(uint8_t book, uint8_t page, uint8_t reg)

@@ -188,6 +188,7 @@ ZTEST(alp_chips, test_tas2563_init_rejects_broadcast_address)
  * chips/tas2563/tas2563.c) so an assertion reads as the datasheet
  * register it checks.  SLASET3D section 7.5.1, p.64-65. */
 #define TAS_REG_PWR_CTL   0x02u
+#define TAS_REG_PB_CFG1   0x03u
 #define TAS_REG_MISC_CFG1 0x04u
 #define TAS_REG_TDM_CFG0  0x06u
 #define TAS_REG_TDM_CFG1  0x07u
@@ -289,6 +290,68 @@ ZTEST(alp_chips, test_tas2563_set_mode_refuses_load_diagnostics_encoding)
 	alp_i2c_close(bus);
 }
 
+/* BOOK survives software shutdown along with the rest of the register
+ * state (7.3.11.2, p.34), so a device left mid-tuning by a previous
+ * firmware comes up with a non-zero BOOK.  init must select book 0 as
+ * well as page 0, or REVID and PWR_CTL address coefficient space.
+ * The fake gives book 0 / page 0 a backing store and nowhere else, so
+ * "the park write actually landed" is the observable that proves it. */
+ZTEST(alp_chips, test_tas2563_init_selects_book0_not_just_page0)
+{
+	fake_tas2563_reset();
+	fake_tas2563_set_reg(TAS_REG_PWR_CTL, 0x00u); /* MODE = 00b, ACTIVE */
+	fake_tas2563_force_paging(8u, 5u);
+
+	tas2563_t  ctx;
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+	zassert_equal(tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL), ALP_OK);
+
+	zassert_equal(fake_tas2563_cur_book(), 0u, "init must select book 0");
+	zassert_equal(fake_tas2563_cur_page(), 0u, "init must select page 0");
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_PWR_CTL),
+	              0x02u,
+	              "the park write must have landed on book 0 / page 0, not in "
+	              "whatever page the previous firmware left selected");
+
+	alp_i2c_close(bus);
+}
+
+/* AMP_LEVEL is PB_CFG1 bits 5..1, reset 10h = 16.0 dBV / 8.92 Vpk;
+ * Table 7-105 (p.67) lists 01h..1Ch and marks 1Dh-1Fh Reserved, with
+ * 00h absent.  PB_CFG1's reset value is 20h, so bit 5 of the field is
+ * already set and DIS_DC_BLOCKER (bit 6) must survive untouched. */
+ZTEST(alp_chips, test_tas2563_set_amp_level_writes_field_and_rejects_unlisted_codes)
+{
+	tas2563_t  ctx;
+	alp_i2c_t *bus = tas_init(&ctx, 0x0Eu, NULL);
+
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_PB_CFG1), 0x20u, "POR value, 10h << 1");
+
+	/* Quietest listed level: 01h << 1 = 02h, everything else preserved. */
+	zassert_equal(tas2563_set_amp_level(&ctx, TAS2563_AMP_LEVEL_MIN), ALP_OK);
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_PB_CFG1), 0x02u, "AMP_LEVEL = 01h in bits 5..1");
+
+	/* DIS_DC_BLOCKER (bit 6) is not ours; a level change must not move it. */
+	fake_tas2563_set_reg(TAS_REG_PB_CFG1, 0x42u);
+	zassert_equal(tas2563_set_amp_level(&ctx, TAS2563_AMP_LEVEL_MAX), ALP_OK);
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_PB_CFG1),
+	              0x78u,
+	              "1Ch << 1 = 38h, with DIS_DC_BLOCKER (bit 6) preserved");
+
+	const uint32_t before = fake_tas2563_write_count(TAS_REG_PB_CFG1);
+	zassert_equal(tas2563_set_amp_level(&ctx, 0x00u), ALP_ERR_OUT_OF_RANGE, "00h is unlisted");
+	zassert_equal(tas2563_set_amp_level(&ctx, 0x1Du), ALP_ERR_OUT_OF_RANGE, "1Dh is Reserved");
+	zassert_equal(tas2563_set_amp_level(&ctx, 0x1Fu), ALP_ERR_OUT_OF_RANGE, "1Fh is Reserved");
+	zassert_equal(tas2563_set_amp_level(&ctx, 0xFFu), ALP_ERR_OUT_OF_RANGE, "wider than 5 bits");
+	zassert_equal(fake_tas2563_write_count(TAS_REG_PB_CFG1),
+	              before,
+	              "a refused level must not reach the bus");
+
+	alp_i2c_close(bus);
+}
+
 /* TDM_CFG0/1/2 field placement -- SLASET3D 7.5.8 Table 7-108 p.69,
  * 7.5.9 Table 7-109 p.69, 7.5.10 Table 7-110 p.70. */
 ZTEST(alp_chips, test_tas2563_configure_i2s_writes_tdm_fields)
@@ -326,6 +389,36 @@ ZTEST(alp_chips, test_tas2563_configure_i2s_writes_tdm_fields)
 	              "left-justified drops the one-SBCLK I2S offset");
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG2), 0x5Eu);
 
+	/* 44.1 kHz, 24-bit, I2S, stereo downmix -- the width that pins
+     * RX_WLEN=10b against RX_SLEN=01b (both 24-bit, but different
+     * encodings, so a slot/word mix-up shows here and nowhere else).
+     *   TDM_CFG0 = (0Bh & ~0Eh) | (100b << 1) = 09h
+     *   TDM_CFG1 = (00h & ~7Eh) | (1    << 1) = 02h
+     *   TDM_CFG2 = (5Eh & ~3Fh) | (11b<<4)|(10b<<2)|01b = 79h */
+	cfg.sample_rate_hz = 44100u;
+	cfg.word_bits      = 24u;
+	cfg.format         = ALP_I2S_FMT_I2S;
+	zassert_equal(tas2563_configure_i2s(&ctx, &cfg, TAS2563_RX_DOWNMIX), ALP_OK);
+	zassert_equal(
+	    fake_tas2563_get_reg(TAS_REG_TDM_CFG0), 0x09u, "44.1 and 48 kHz share the 100b encoding");
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG1), 0x02u);
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG2),
+	              0x79u,
+	              "RX_WLEN=10b (24-bit word) with RX_SLEN=01b (24-bit slot)");
+
+	/* 8 kHz, 16-bit, right-justified, slot from I2C address.
+     * Right-justified is the RX_JUSTIFY bit, not an offset.
+     *   TDM_CFG0 = (09h & ~0Eh) | (000b << 1) = 01h
+     *   TDM_CFG1 = (02h & ~7Eh) | 40h         = 40h
+     *   TDM_CFG2 = (79h & ~3Fh) | 0            = 40h */
+	cfg.sample_rate_hz = 8000u;
+	cfg.word_bits      = 16u;
+	cfg.format         = ALP_I2S_FMT_RIGHT_JUSTIFIED;
+	zassert_equal(tas2563_configure_i2s(&ctx, &cfg, TAS2563_RX_SLOT_FROM_ADDR), ALP_OK);
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG0), 0x01u);
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG1), 0x40u, "RX_JUSTIFY set, RX_OFFSET zero");
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG2), 0x40u);
+
 	alp_i2c_close(bus);
 }
 
@@ -350,8 +443,20 @@ ZTEST(alp_chips, test_tas2563_configure_i2s_rejects_unencodable_configs)
 	bad.word_bits = 12u; /* Not in Table 7-110. */
 	zassert_equal(tas2563_configure_i2s(&ctx, &bad, TAS2563_RX_LEFT), ALP_ERR_OUT_OF_RANGE);
 
+	/* 20-bit IS in Table 7-110 but is deliberately unmapped: word_bits
+     * is documented 16/24/32, so no host bus can be opened at 20 and
+     * the mapping would be unreachable through the real API. */
+	bad           = cfg;
+	bad.word_bits = 20u;
+	zassert_equal(tas2563_configure_i2s(&ctx, &bad, TAS2563_RX_LEFT), ALP_ERR_OUT_OF_RANGE);
+
+	/* TDM_CFG1 has no short-/long-frame-sync PCM encoding. */
 	bad        = cfg;
-	bad.format = ALP_I2S_FMT_PCM_SHORT; /* No TDM_CFG1 mapping claimed for it. */
+	bad.format = ALP_I2S_FMT_PCM_SHORT;
+	zassert_equal(tas2563_configure_i2s(&ctx, &bad, TAS2563_RX_LEFT), ALP_ERR_NOSUPPORT);
+
+	bad        = cfg;
+	bad.format = ALP_I2S_FMT_PCM_LONG;
 	zassert_equal(tas2563_configure_i2s(&ctx, &bad, TAS2563_RX_LEFT), ALP_ERR_NOSUPPORT);
 
 	zassert_equal(fake_tas2563_write_count(TAS_REG_TDM_CFG0),
@@ -601,6 +706,38 @@ ZTEST(alp_chips, test_tas2563_load_tuning_rejects_illegal_records_before_writing
 	              "a tuning blob must not be able to write PWR_CTL");
 	zassert_equal(failed, 1u, "the offending record index is reported");
 	zassert_equal(fake_tas2563_log_len(), 0u, "nothing may be written when a record is illegal");
+	fake_tas2563_log_reset();
+
+	/* SW_RESET, MISC (IRQZ_POL) and TG_CFG0 join PWR_CTL on the
+     * blocklist: each changes something the caller believes it
+     * configured, with no readback saying so. */
+	const tas2563_tuning_reg_t reserved[] = {
+		{ 0u, 0u, 0x01u, 0x01u }, /* SW_RESET  -- wipes the caller's config */
+		{ 0u, 0u, 0x32u, 0x00u }, /* MISC      -- IRQZ_POL inverts the fault pin */
+		{ 0u, 0u, 0x3Fu, 0xC0u }, /* TG_CFG0   -- arms the tone generator */
+	};
+	for (size_t i = 0; i < ARRAY_SIZE(reserved); ++i) {
+		failed = SIZE_MAX;
+		zassert_equal(tas2563_load_tuning(&ctx, &reserved[i], 1u, &failed),
+		              ALP_ERR_INVAL,
+		              "reg 0x%02x must be refused in book 0 / page 0",
+		              reserved[i].reg);
+		zassert_equal(failed, 0u);
+		/* Same register in another book is a coefficient, not ours. */
+		tas2563_tuning_reg_t elsewhere = reserved[i];
+		elsewhere.book                 = 3u;
+		zassert_equal(tas2563_load_tuning(&ctx, &elsewhere, 1u, NULL),
+		              ALP_OK,
+		              "the blocklist is book-0/page-0 only");
+	}
+
+	/* PB_CFG1 (AMP_LEVEL) is deliberately NOT blocked -- output level
+     * is what a smart-amp tuning is for. */
+	const tas2563_tuning_reg_t amp_level[] = { { 0u, 0u, TAS_REG_PB_CFG1, 0x3Au } };
+	zassert_equal(tas2563_load_tuning(&ctx, amp_level, 1u, NULL),
+	              ALP_OK,
+	              "a tuning must still be able to set the output level");
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_PB_CFG1), 0x3Au);
 
 	zassert_equal(tas2563_load_tuning(&ctx, NULL, 3u, NULL), ALP_ERR_INVAL);
 	zassert_equal(tas2563_load_tuning(&ctx, NULL, 0u, NULL), ALP_OK, "empty stream is a no-op");
