@@ -1,4 +1,4 @@
-### Added — TAS2563: tuning replay, I2S/TDM configuration and fault-pin handling (#1846)
+### Added — TAS2563: tuning replay, I2S/TDM configuration and fault-pin handling (#2040)
 
 `include/alp/chips/tas2563.h` promised three things for v0.3.x and shipped
 none of them: a tuning-blob loader, I2S configuration paired to the host bus,
@@ -52,7 +52,7 @@ names SLASET3D, matching what the `physical:` block already used.
 - `tas2563_deinit()` falls back to writing software shutdown when no `SD_N`
   pin was supplied; previously it did nothing in that case.
 
-### Fixed — TAS2563: mode writes no longer disturb the IV-sense power bits (#1846)
+### Fixed — TAS2563: mode writes no longer disturb the IV-sense power bits (#2040)
 
 `tas2563_set_mode()` masked `PWR_CTL` with `0x07`. `MODE` is bits 1..0 only —
 bit 2 is `VSNS_PD` and bit 3 is `ISNS_PD` (§7.5.4 Table 7-104, p.66) — so
