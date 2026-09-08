@@ -30,7 +30,10 @@
  * "PARTIAL", which taught nothing.  This app tells them apart the only way it
  * honestly can without a human: whether every sample_fetch/channel_get in the
  * window returned 0.
- *   - count changed                        -> PASS     (decode is live)
+ *   - count changed, unattended            -> FAIL     (spurious counts; see the
+ *                                                      verdict comment below --
+ *                                                      PASS needs a human to
+ *                                                      attest to the motion)
  *   - never changed, every read was clean  -> SKIPPED  (reads work; the count
  *                                              did not move -- turn the shaft
  *                                              and rerun)
@@ -123,8 +126,28 @@ int main(void)
 	const char *reason;
 
 	if (moved) {
-		result = "PASS";
-		reason = "angle changed -> live quadrature decode";
+		/*
+		 * A count that moves with NOBODY TOUCHING THE SHAFT is not success --
+		 * it is the signature of spurious counts, and calling it PASS is how a
+		 * noise detector gets mistaken for a working decoder.  Measured on
+		 * E1M-AEN803 2026W36-0002 (2026-09-08): with the counter running and
+		 * the encoder untouched, the count advanced steadily the whole window.
+		 * The QEC0 X/Y pads are configured with neither a bias nor a Schmitt
+		 * trigger (pad word 0x00210005 = AF 5, REN=1, DSC=0, SMT=0) while the
+		 * PEC12R's A/B contacts are OPEN at a detent, so both inputs float.
+		 *
+		 * This app cannot tell spurious counts from real ones -- it has no
+		 * operator input to correlate against.  So it reports what it can
+		 * defend: motion with no operator is a FAIL, and PASS is reserved for
+		 * a run where a human attests to turning the shaft.  Erring the other
+		 * way would let floating pins pass as a working encoder.
+		 */
+		result = "FAIL";
+		reason = "the count moved, but this app cannot attest that anyone turned the shaft "
+		         "-- on an unattended run a moving count means SPURIOUS COUNTS, not a live "
+		         "decode (floating QEC0 X/Y inputs: no bias, no Schmitt).  If you DID turn "
+		         "the shaft, this run is the expected result of a working decoder and only "
+		         "your attestation distinguishes the two";
 	} else if (all_clean) {
 		result = "SKIPPED";
 		reason = "no motion detected -- every read in the window succeeded but the reported "

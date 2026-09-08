@@ -36,8 +36,12 @@
  * reads 0x00001000, bit 12 for QEC0's channel.  Both were clear before #2037.
  * STILL UNVERIFIED, and do not read the above as covering it: whether the
  * counter is advancing on real quadrature edges.  In that same run, with
- * nobody touching the shaft, the count advanced steadily at roughly 128
- * counts/s, which no stationary encoder should do.
+ * nobody touching the shaft, the count advanced steadily -- which no
+ * stationary encoder should do.  The RATE is NOT known: the app polls a
+ * mod-96 counter every ~300 ms, so the observable is only
+ * (rate * 0.3) mod 96, and a whole family of rates share that residue.  Do
+ * not quote a counts/s figure from that run; several 32.768 kHz-derived
+ * rates fit it as well as any other.
  */
 
 #define DT_DRV_COMPAT alif_utimer_qdec
