@@ -1,0 +1,127 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-evk-demo -- app overlay for the E1M-AEN801 (Alif Ensemble E8, M55-HE),
+ * bench RAM-run via J-Link.
+ *
+ * THIS OVERLAY CARRIES TWO THINGS: the mandatory bench ITCM retarget, and the
+ * RGB LED's three UTIMER/PWM channels -- the only hardware this app touches
+ * that the board layer does NOT already enable.
+ *
+ * NOT here: BRD_I2C (SoC I2C0, alp-i2c2) and the carrier bus (SoC I2C2,
+ * alp-i2c0) are both SoM/board facts already wired by the board tree
+ * (metadata/e1m_modules/aen/on-module-links.yaml `brd_i2c` entry;
+ * metadata/pinmux/aen.yaml `e1m_i2c0` row) -- every AEN801 app gets them for
+ * free. Re-declaring either here would duplicate a board fact one layer too
+ * high; see examples/aen/aen-rtc-control2-probe's overlay for the same
+ * argument made in full for BRD_I2C, and aen-sensor-int-probe's for the
+ * carrier bus.
+ *
+ * RGB LED PWM routing (E1M-EVK, bench-measured -- the netlist net labels for
+ * this LED are WRONG, see metadata/boards/e1m-evk.yaml `pwm:`/`gpio:`
+ * blocks and <alp/boards/alp_e1m_evk_routes.h>'s EVK_PWM_LED_* macros, which
+ * already carry the corrected mapping):
+ *
+ *     EVK_PWM_LED_RED   = ALP_E1M_PWM0 = UT11_T1_C (utimer11, driver B) -> P12_7
+ *     EVK_PWM_LED_BLUE  = ALP_E1M_PWM1 = UT11_T0_C (utimer11, driver A) -> P12_6
+ *     EVK_PWM_LED_GREEN = ALP_E1M_PWM3 = UT10_T0_A (utimer10, driver A) -> P2_4
+ *
+ * (metadata/pinmux/aen.yaml pwm rows; zephyr/drivers/pwm/pwm_alif_utimer.c's
+ * file-header E1M-PWM map agrees exactly.) RED and BLUE share ONE physical
+ * UTIMER block (utimer11) on its two independent driver outputs; GREEN is a
+ * separate block (utimer10). Three `pwm-leds` consumer children below each
+ * carry the `pwms` phandle the alp_pwm portable backend's `alp-pwmN` alias
+ * needs to point at directly (src/backends/pwm/zephyr_drv.c) -- channel 0 =
+ * driver A, channel 1 = driver B, per the pwm child node's `#pwm-cells`.
+ *
+ * The PWM driver itself is marked INTERIM / BENCH-UNVERIFIED in its own file
+ * header -- this is the first app to load it on real silicon. The demo's RGB
+ * LED phase treats that as reason to verify by register readback rather than
+ * assume, exactly like examples/aen/aen-pwm-utimer-pwmleds.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ * PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form -- the
+ * phandle-array form yields CONFIG_FLASH_SIZE=0 and the image overflows the
+ * (empty) FLASH region at link time.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	evk_rgb_led: pwm-leds {
+		compatible = "pwm-leds";
+
+		/* ALP_E1M_PWM0: utimer11 driver B (channel 1). */
+		evk_rgb_red: led_red {
+			label = "evk-rgb-red";
+			pwms = <&pwm11 1 PWM_USEC(1000) PWM_POLARITY_NORMAL>;
+		};
+
+		/* ALP_E1M_PWM1: utimer11 driver A (channel 0). */
+		evk_rgb_blue: led_blue {
+			label = "evk-rgb-blue";
+			pwms = <&pwm11 0 PWM_USEC(1000) PWM_POLARITY_NORMAL>;
+		};
+
+		/* ALP_E1M_PWM3: utimer10 driver A (channel 0). */
+		evk_rgb_green: led_green {
+			label = "evk-rgb-green";
+			pwms = <&pwm10 0 PWM_USEC(1000) PWM_POLARITY_NORMAL>;
+		};
+	};
+
+	aliases {
+		/* alp_pwm_open(ALP_E1M_PWM0/1/3) resolves these via
+		 * src/backends/pwm/zephyr_drv.c -> DT_ALIAS(alp_pwmN). Each alias
+		 * points DIRECTLY at a consumer node carrying a `pwms` phandle
+		 * (the canonical pwm-leds pattern), not at the controller node. */
+		alp-pwm0 = &evk_rgb_red;
+		alp-pwm1 = &evk_rgb_blue;
+		alp-pwm3 = &evk_rgb_green;
+	};
+};
+
+&pinctrl {
+	/* Both RED (P12_7, driver B) and BLUE (P12_6, driver A) live on the
+	 * SAME utimer11/pwm11 controller node, so both pads are muxed together
+	 * in the one pinctrl state that node's pinctrl-0 applies. */
+	pinctrl_pwm11_rgb: pinctrl_pwm11_rgb {
+		group0 {
+			pinmux = <PIN_P12_6__UT11_T0_C>, <PIN_P12_7__UT11_T1_C>;
+		};
+	};
+
+	pinctrl_pwm10_rgb: pinctrl_pwm10_rgb {
+		group0 {
+			pinmux = <PIN_P2_4__UT10_T0_A>;
+		};
+	};
+};
+
+&utimer11 {
+	status = "okay";
+
+	pwm11 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_pwm11_rgb>;
+		pinctrl-names = "default";
+	};
+};
+
+&utimer10 {
+	status = "okay";
+
+	pwm10 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_pwm10_rgb>;
+		pinctrl-names = "default";
+	};
+};

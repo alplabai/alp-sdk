@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the aen-evk-demo phased bench app on the
+# E1M-AEN801 (Ensemble E8, M55-HE): compiles the RTC/temperature, sensor,
+# power-rail, I/O-expander, EEPROM and RGB-LED phases -- plus the seven
+# not-yet-implemented phases' SKIPPED stubs -- against the real board
+# target.
+#
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
+# board only): every phase needs real I2C/PWM silicon to produce a
+# meaningful verdict, so this is a build-only compile check, not a
+# behavioural CI run -- the actual PASS/SKIPPED/FAIL verdicts only mean
+# something on e1m-aen-evk-03.
+
+sample:
+  name: aen-evk-demo
+  description: |
+    Phased full-board demo for the E1M-AEN801 (Alif Ensemble E8, M55-HE) on
+    the E1M EVK carrier. Runs thirteen named phases in a fixed order, each
+    reporting PASS, SKIPPED, or FAIL -- never counting an absent part or an
+    unimplemented phase as PASS -- and finishes with a summary table plus a
+    single RESULT line. This slice implements the framework plus the six
+    phases whose drivers are bench-proven: RTC + temperature (BRD_I2C),
+    sensors (BMI323/ICM-42670/BMP581), power rails (six INA236), the
+    TCAL9538 I/O expander, the 24C128 EEPROM identity (read-only), and the
+    RGB LED (PWM0/1/3, register-readback verified). The remaining seven
+    phases (encoder, CC3501E, SD card, Ethernet, sound, screen, JPEG+NPU)
+    are stubs that report SKIPPED with a phase-specific reason.
+
+tests:
+  alp_sdk.examples.aen.evk_demo.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - i2c
+      - pwm
+      - sensors
+    build_only: true   # verdicts need the real bench; not a CI behavioural run.
