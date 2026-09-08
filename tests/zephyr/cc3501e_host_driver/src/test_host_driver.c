@@ -174,6 +174,17 @@ static bool g_spi1_reply_bad_seq;
  * firmware -- the compatibility direction that would otherwise go untested. */
 static bool g_diag_stats_v8;
 
+/* #2039 mutant control for CMD_GET_MAC: flip one bit in byte 0 of the reply,
+ * modelling the single-bit corruption a mis-tuned RX sample delay produced on
+ * E1M-AEN803 serial 2026W36-0002 (44:3e:8a:.. read back as 46:3e:8a:..).
+ * Counts down, so a test can corrupt exactly one read of several.  Cleared by
+ * slave_reset(). */
+static uint32_t g_get_mac_corrupt_remaining;
+
+/* How many CMD_GET_MAC requests the slave has served.  Proves a repeated
+ * cc3501e_wifi_get_mac() is a fresh wire transaction, not a cached reply. */
+static uint32_t g_get_mac_serve_count;
+
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
@@ -198,6 +209,8 @@ static void slave_reset(void)
 	g_diag_stats_v8                    = false;
 	g_caps_override_value              = 0u;
 	g_caps_reply_short                 = false;
+	g_get_mac_corrupt_remaining        = 0u;
+	g_get_mac_serve_count              = 0u;
 }
 
 static void stage_status(uint8_t st)
@@ -403,9 +416,17 @@ static void slave_dispatch(void)
 		stage_reply(ALP_CC3501E_RESP_OK, v, 2u);
 		break;
 	}
-	case ALP_CC3501E_CMD_GET_MAC:
-		stage_reply(ALP_CC3501E_RESP_OK, FIX_MAC, 6u);
+	case ALP_CC3501E_CMD_GET_MAC: {
+		uint8_t m[6];
+		memcpy(m, FIX_MAC, sizeof(m));
+		if (g_get_mac_corrupt_remaining > 0u) {
+			g_get_mac_corrupt_remaining--;
+			m[0] ^= 0x04u; /* one bit, exactly as the bench saw */
+		}
+		g_get_mac_serve_count++;
+		stage_reply(ALP_CC3501E_RESP_OK, m, 6u);
 		break;
+	}
 
 	case ALP_CC3501E_CMD_GET_DIAG_INFO: {
 		/* 16-byte alp_cc3501e_diag_info_t: fw_version(LE16) | reset_cause |
@@ -1069,6 +1090,37 @@ ZTEST(cc3501e_host_driver, test_wifi_get_mac_decodes_6_bytes)
 	zassert_equal(cc3501e_wifi_get_mac(&fw, mac, 100u), ALP_OK, "GET_MAC -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_GET_MAC, "opcode 0x03");
 	zassert_mem_equal(mac, FIX_MAC, CC3501E_MAC_LEN, "6-byte MAC decoded");
+}
+
+/* #2039: the property aen-evk-demo's phase-8 MAC gate rests on.
+ *
+ * That gate reads GET_MAC twice and requires the two replies to match, because
+ * a single flipped bit yields an address that passes every structural test --
+ * group bit clear, non-zero OUI, neither constant pattern -- and one bench run
+ * on E1M-AEN803 serial 2026W36-0002 produced exactly that. The gate is only
+ * worth anything if the second read is a SECOND WIRE TRANSACTION rather than a
+ * cached reply, so that is what is asserted here: two calls serve two
+ * CMD_GET_MAC requests, and corrupting only the first makes the two buffers
+ * differ.
+ *
+ * Mutation-verified: make the fake slave corrupt neither read (or make
+ * cc3501e_wifi_get_mac cache), and the mem_not_equal below fails. */
+ZTEST(cc3501e_host_driver, test_wifi_get_mac_repeat_is_a_second_wire_read)
+{
+	uint8_t first[CC3501E_MAC_LEN]  = { 0 };
+	uint8_t second[CC3501E_MAC_LEN] = { 0 };
+
+	g_get_mac_corrupt_remaining = 1u; /* corrupt the FIRST read only */
+	zassert_equal(cc3501e_wifi_get_mac(&fw, first, 100u), ALP_OK, "first GET_MAC -> OK");
+	zassert_equal(cc3501e_wifi_get_mac(&fw, second, 100u), ALP_OK, "second GET_MAC -> OK");
+
+	zassert_equal(g_get_mac_serve_count, 2u, "two calls issue two CMD_GET_MAC requests");
+	zassert_mem_equal(second, FIX_MAC, CC3501E_MAC_LEN, "uncorrupted read decodes the real MAC");
+	/* The corrupted read is still structurally a valid station address --
+	 * only the repeat separates it from the real one. */
+	zassert_equal(first[0] & 0x01u, 0u, "corrupted byte 0 still has the group bit clear");
+	zassert_true(memcmp(first, second, CC3501E_MAC_LEN) != 0,
+	             "a corrupted read differs from a clean one, so the repeat catches it");
 }
 
 ZTEST(cc3501e_host_driver, test_wifi_rssi_decodes_signed)

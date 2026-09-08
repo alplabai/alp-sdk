@@ -44,7 +44,9 @@ sample:
     RGB LED (PWM0/1/3, register-readback verified), the CC3501E Wi-Fi 6 /
     BLE 5.4 coprocessor over the inter-chip SPI1 bridge -- power + reset,
     PING, GET_VERSION checked against the host's protocol version, GET_MAC
-    checked for a structurally valid station address, GET_CAPABILITIES, a
+    checked for a structurally valid station address AND read twice so a
+    transient single-bit corruption cannot pass as a plausible one,
+    GET_CAPABILITIES, a
     passive Wi-Fi scan that never associates, and BLE_ENABLE, with a PING
     alone explicitly not sufficient for PASS -- RMII Ethernet through the
     GMAC and the on-module TI DP83825 PHY, which powers the PHY from a

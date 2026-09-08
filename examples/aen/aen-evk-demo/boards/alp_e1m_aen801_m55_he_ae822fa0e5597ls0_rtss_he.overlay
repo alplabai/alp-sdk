@@ -422,8 +422,8 @@
  * SCLK. 200 MHz is the real SSI functional clock (E8 HWRM); BAUDR =
  * clock-frequency / freq_hz, and cc3501e_bridge.h asks for 25 MHz = /8.
  *
- * rx-delay: THIS VALUE IS NOT WHAT CLOCKS THE LINK, and the tree contains two
- * comments that disagree about what should. Read this before "fixing" either.
+ * rx-delay: THIS VALUE IS NOT WHAT CLOCKS THE LINK. Read this before "fixing"
+ * it.
  *
  * The MISO capture delay is real and necessary -- at a 40 ns bit period the
  * pad + on-SoM trace round-trip does not return the slave's bit by the SCLK
@@ -431,18 +431,24 @@
  * exactly two places, its init and its PM resume, and CONFIG_PM_DEVICE is off
  * in this image; spi_dw_configure never touches the register. So this <2>
  * lands once at init and is then OVERWRITTEN: src/cc3501e_bridge.c pokes
- * 0x48104000+0xf0 with CC3501E_BRIDGE_RX_SAMPLE_DLY = 6 right after
- * alp_spi_open() returns. Six is the value the bridge actually runs at, here
- * and in every sibling CC3501E example -- all of which carry this same <2>.
+ * 0x48104000+0xf0 with CC3501E_BRIDGE_RX_SAMPLE_DLY right after alp_spi_open()
+ * returns. That constant is what the bridge actually runs at.
  *
- * The conflict: cc3501e_bridge.h calls 6 silicon-tuned for ~14.3 MHz with a
- * wide clean window of 4..8, while the sibling overlays this block was
- * transcribed from call 2 the working point at 25 MHz and say 4 fails. Both
- * cannot be right at 25 MHz. Neither has been re-measured since the clock
- * moved, and this app has never run on silicon, so it asserts NEITHER as
- * verified. The <2> is kept because it matches the siblings byte-for-byte and
- * is inert anyway; if the link mis-samples on the bench, sweep
- * CC3501E_BRIDGE_RX_SAMPLE_DLY -- not this property, which the poke discards.
+ * The <2> is kept anyway, for one reason: the poke is wrapped in
+ * `#if CC3501E_BRIDGE_RX_SAMPLE_DLY > 0`, so setting the constant to 0 does not
+ * mean "no delay" -- it means this property is what survives. Of the seven
+ * examples that share the bridge template only this one and
+ * aen-cc3501e-bringup declare rx-delay at all, so a sweep point of 0 measures 2
+ * here and 0 in the other five. Read 0x481040F0 back rather than trusting
+ * either number.
+ *
+ * The constant is now silicon-measured against this app, on E1M-AEN803 serial
+ * 2026W36-0002 at 25 MHz, N swept 0..10 with 0x481040F0 read back each time:
+ * 0..7 all pass, 8 hard-fails 3 runs of 3, 9 and 10 pass again. The full table
+ * and the reasoning for the value chosen are in src/cc3501e_bridge.h. The two
+ * comments that used to disagree here are both retired: the "4..8 clean window"
+ * was an evk-01 measurement at ~14.3 MHz and does not carry over, and the
+ * sibling overlay's "0 fails, 4 fails" is contradicted outright -- both passed.
  */
 &clockctrl {
 	status = "okay";

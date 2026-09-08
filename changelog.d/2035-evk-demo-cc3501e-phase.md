@@ -128,25 +128,42 @@ somebody a bench run:
   `spi_dw_alif.c` writes `RX_SAMPLE_DLY` only at init and at PM resume
   (`CONFIG_PM_DEVICE` is off here), and `spi_dw_configure` never touches it —
   so the DT value lands once and is then overwritten by
-  `cc3501e_bridge.c`'s poke of `CC3501E_BRIDGE_RX_SAMPLE_DLY` (**6**) right
-  after `alp_spi_open()`. The two upstream comments disagree about which
-  value is right at 25 MHz (`cc3501e_bridge.h` calls 6 silicon-tuned for
-  ~14.3 MHz with a clean 4..8 window; the sibling overlays call 2 the working
-  point at 25 MHz and say 4 fails), neither has been re-measured since the
-  clock moved, and this app has never run on silicon — so the overlay now
-  asserts **neither** as verified and points a bench sweep at the constant
-  that actually takes effect. The `interrupts = <138 3>` `BENCH-TBD` marker
+  `cc3501e_bridge.c`'s poke of `CC3501E_BRIDGE_RX_SAMPLE_DLY` right after
+  `alp_spi_open()`. The two upstream comments disagreed about which value is
+  right at 25 MHz and neither had been re-measured since the clock moved, so
+  the overlay asserted neither and pointed a bench sweep at the constant that
+  actually takes effect. That sweep has since run — see `#2039`, which settles
+  the value and retires both claims. The `interrupts = <138 3>` `BENCH-TBD` marker
   also regains the siblings' sentence explaining that it was inferred from
   spi0's IRQ 137, so a reader of this overlay alone knows what "confirm"
   means.
 
-Builds clean for `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` at
-`FLASH: 144272 B / 256 KB (55.04%)` — up from `108556 B (41.41%)`, the
-CC3501E bridge driver accounting for ~34 KB — and `RAM: 60496 B (23.08%)`,
-which is mostly the ~32 KB `cc3501e_t`. That handle is file-static rather
-than a stack local for two reasons: as a local it crosses `PSPLIM` and the
-M55 raises `STKOF` -> UsageFault before a line is printed, and the SD-card
-phase will need the same bound handle. Still inside the Flow C ITCM budget,
-with the NPU stub's headroom note updated to the new figure. The phase's own
-`PASS`/`FAIL` needs a bench run on `e1m-aen-evk-03`; the seven previously
+**Phase 8 no longer prints `PASS` on a corrupted MAC.** The first bench sweep
+of this phase (`#2039`) turned up a run where `GET_MAC` returned
+`46:3e:8a:10:b6:a7` — one bit flipped in byte 0 of a `44:3e:8a` address — and
+`cc35_mac_plausible()` accepted it, because every structural test it applies
+still holds: the group bit is clear, the OUI is non-zero, it is neither the
+all-zero nor the broadcast pattern. The log went as far as calling it a
+`plausible station MAC`. That is exactly the class of verdict this app exists
+to remove — a claim larger than what was proved, made over a link that was
+actively corrupting data.
+
+No structural test can distinguish a bit-flipped MAC from a legitimate one,
+and the check cannot hard-code an address because it is per-part. So the
+structural checks stay and a second gate is added on top: `GET_MAC` is issued
+**twice** and the two replies must match byte for byte. Each call is a full
+`CMD_GET_MAC` (`0x03`) round-trip — `cc3501e_wifi_get_mac()` runs its whole
+`poll_by_repeat` every time and the driver caches no MAC — so a repeat that
+agrees is two independent reads agreeing, not one reply read twice. When they
+disagree, the second address is printed in full alongside the first, because
+which bytes moved is the entire diagnostic. The comment states the limit
+plainly: this catches transient corruption, and it does **not** catch a stable
+misread that returns the same wrong address both times.
+
+Builds clean for `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`, still
+inside the Flow C ITCM budget with the same margin the NPU stub's headroom
+note describes; RAM is dominated by the ~32 KB `cc3501e_t`. That handle is
+file-static rather than a stack local for two reasons: as a local it crosses
+`PSPLIM` and the M55 raises `STKOF` -> UsageFault before a line is printed,
+and the SD-card phase will need the same bound handle. The seven previously
 implemented phases are unchanged.

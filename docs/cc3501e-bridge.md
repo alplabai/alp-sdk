@@ -119,25 +119,33 @@ work (see "Bench-validated" below) with no settle-gap dependence.
 
 #### Link speed
 
-The four AEN bridge examples request **14 MHz**, which is just under the
-**CC35 slave ceiling of ~15 MHz**.  Silicon-validated cold + warm on the
-E1M-AEN801 EVK, concurrently with Wi-Fi/BLE traffic.
+The AEN bridge examples request **25 MHz**, under the CC3501E's
+peripheral-mode maximum of **30 MHz** (SWRS343A §6.14.2.3.3).  Their
+predecessor ran at ~14.3 MHz, and that earlier rate is what the older
+silicon validation cold + warm on the E1M-AEN801 EVK, concurrently with
+Wi-Fi/BLE traffic, was taken at.
 
 The actual SCLK is the request quantised by the BAUDR divider, which
-`spi_dw` computes as an integer truncation of the SSI functional clock
-over the requested rate (`SPI_DW_CLK_DIVIDER`).  The overlay sets that
-functional clock to 200 MHz, so a 14 MHz request divides to 14 and the
-link runs at 200/14 ≈ **14.3 MHz** — slightly *above* the request, because
-truncating the divider rounds the clock up.  Treat that as derived from
-the driver's arithmetic, not as a scope measurement: no captured SCLK
-figure is recorded in-tree.
+`spi_dw` computes from the SSI functional clock over the requested rate.
+The overlay sets that functional clock to 200 MHz, and the divisor must be
+even, so a 25 MHz request lands exactly on `BAUDR = 0x00000008`.  The
+~14.3 MHz predecessor was scope-confirmed, which is what validates the
+200 MHz functional-clock figure the divider assumes; the 25 MHz step is
+derived from that arithmetic, not separately captured on a scope.
 
-Reaching that rate required tuning the master, not the slave: `spi_dw`
+Reaching those rates required tuning the master, not the slave: `spi_dw`
 leaves `RX_SAMPLE_DLY = 0`, and at 8 MHz and above the MISO round-trip
-over the on-SoM traces mis-samples.  Setting `RX_SAMPLE_DLY = 6` shifts
-the capture point past the round-trip, and the link then samples clean up
-to the slave ceiling — roughly 14× the throughput of the original 1 MHz
-bring-up setting.  The value is silicon-tuned, not derived; see
+over the on-SoM traces mis-samples.  Setting `RX_SAMPLE_DLY` shifts the
+capture point past the round-trip, and the link then samples clean up to
+the slave ceiling — roughly 14× the throughput of the original 1 MHz
+bring-up setting.  The value is silicon-tuned, not derived.  The current
+setting is **4**, chosen from a `0..10` sweep run at the examples' 25 MHz
+working point on `E1M-AEN803` serial `2026W36-0002`: `0..7` all passed,
+`8` hard-failed every run, and `9`/`10` passed again — so `4` sits in the
+middle of the measured-good span rather than near either edge, and
+anything above `7` is treated as unqualified.  A `RX_SAMPLE_DLY` set to
+`0` does not disable the delay, it hands the setting back to the SPI
+node's `rx-delay` devicetree property.  See
 `CC3501E_BRIDGE_SPI_FREQ_HZ` and the `RX_SAMPLE_DLY` note in the AEN
 bridge examples' `cc3501e_bridge.h` (e.g.
 [`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.h`](../examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.h)).

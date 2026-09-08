@@ -78,7 +78,14 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	 * data round-trip.  Zephyr spi_dw never writes it (leaves 0), so without this
 	 * >1 MHz mis-samples MISO (cold reqhdr_rx=0xFFFFFFFF).  Written with SSI disabled
 	 * (SSIENR=0); persists across the driver's per-transfer configure.  Value is
-	 * silicon-tuned -- sweep CC3501E_BRIDGE_RX_SAMPLE_DLY at the target SCLK. */
+	 * silicon-tuned -- sweep CC3501E_BRIDGE_RX_SAMPLE_DLY at the target SCLK.
+	 *
+	 * SWEEP TRAP -- read before setting the constant to 0: the `#if > 0` above
+	 * compiles this block out, so 0 does not mean "no delay", it means the SPI
+	 * node's `rx-delay` devicetree value is left in place.  aen-cc3501e-bringup
+	 * and aen-evk-demo declare rx-delay = <2>, so a naive N=0 sweep point on
+	 * those two silently measures 2.  Read 0x481040F0 back to see what the link
+	 * is actually running at. */
 	{
 		volatile uint32_t *ssienr =
 		    (volatile uint32_t *)(uintptr_t)(CC3501E_BRIDGE_SPI1_BASE + 0x08u);

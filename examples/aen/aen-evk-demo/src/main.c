@@ -1241,6 +1241,25 @@ static cc3501e_t cc35_fw;
  * address IS the valid one. Rejecting "a TI-looking MAC" would fail every
  * correctly provisioned module in the fleet. The OUI is printed below so a
  * reader can see which block the address came from and judge for themselves.
+ *
+ * WHY STRUCTURE ALONE IS NOT ENOUGH, and what the caller adds on top:
+ * a single flipped bit produces an address that is still structurally
+ * perfect. Measured, sweeping the master's RX sample delay on E1M-AEN803
+ * serial 2026W36-0002: one run came back with byte 0 reading 0x46 instead
+ * of 0x44 -- group bit clear, non-zero OUI, neither constant pattern -- and
+ * this function returned true, so the phase printed PASS over a link that
+ * was actively corrupting data. No structural test can tell a bit-flipped
+ * MAC from a legitimate one, because both are legitimate-looking addresses;
+ * the check cannot hard-code the right value either, since it is per-part.
+ * So the caller issues GET_MAC TWICE and requires the two replies to be
+ * identical. That is a genuine second wire round-trip, not a re-read of a
+ * cached reply: cc3501e_wifi_get_mac() runs the full poll_by_repeat of
+ * CMD_GET_MAC (0x03) every call, and the driver keeps no MAC state.
+ *
+ * What the repeat catches: TRANSIENT corruption -- a bit flip, a byte
+ * shift, a half-filled reply -- on either read. What it does NOT catch: a
+ * STABLE misread, where the radio or the link returns the same wrong
+ * address both times. Nothing available to this app catches that one.
  */
 static bool cc35_mac_plausible(const uint8_t mac[CC3501E_MAC_LEN])
 {
@@ -1414,10 +1433,22 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 	/* GET_MAC (0x03) -- poll-by-repeat, so an OK here also proves the
 	 * firmware's worker seam (submit -> worker -> reply), not just META
 	 * dispatch off the SPI ISR. The address itself is then checked for
-	 * structural validity; see cc35_mac_plausible(). */
-	uint8_t      mac[CC3501E_MAC_LEN] = { 0 };
-	alp_status_t mac_rc               = cc3501e_wifi_get_mac(&cc35_fw, mac, CC35_MAC_TIMEOUT_MS);
-	bool         mac_ok               = (mac_rc == ALP_OK) && cc35_mac_plausible(mac);
+	 * structural validity; see cc35_mac_plausible().
+	 *
+	 * Issued TWICE, and the two replies must match byte for byte. Structure
+	 * cannot catch a single flipped bit -- a corrupted address still looks
+	 * like an address -- and the correct value is per-part, so it cannot be
+	 * hard-coded either. Each call is a full CMD_GET_MAC round-trip (nothing
+	 * is cached host-side), so a repeat that agrees is two independent reads
+	 * agreeing. Transient corruption is caught; a stable misread is not.
+	 * See cc35_mac_plausible()'s header for the run that motivated this. */
+	uint8_t      mac[CC3501E_MAC_LEN]  = { 0 };
+	uint8_t      mac2[CC3501E_MAC_LEN] = { 0 };
+	alp_status_t mac_rc                = cc3501e_wifi_get_mac(&cc35_fw, mac, CC35_MAC_TIMEOUT_MS);
+	alp_status_t mac_rc2 =
+	    (mac_rc == ALP_OK) ? cc3501e_wifi_get_mac(&cc35_fw, mac2, CC35_MAC_TIMEOUT_MS) : mac_rc;
+	bool mac_repeatable = (mac_rc2 == ALP_OK) && (memcmp(mac, mac2, CC3501E_MAC_LEN) == 0);
+	bool mac_ok         = (mac_rc == ALP_OK) && cc35_mac_plausible(mac) && mac_repeatable;
 	printf("[evkdemo] CC3501E: GET_MAC (0x03) -> %d  %02x:%02x:%02x:%02x:%02x:%02x  "
 	       "OUI=%02x:%02x:%02x  %s\n",
 	       (int)mac_rc,
@@ -1430,9 +1461,24 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 	       mac[0],
 	       mac[1],
 	       mac[2],
-	       mac_ok ? "plausible station MAC"
-	              : "INVALID (all-zero, broadcast, or the IEEE group bit set -- not an address a "
-	                "station can own)");
+	       mac_ok ? "plausible station MAC, and a second read agreed"
+	              : "INVALID (all-zero, broadcast, the IEEE group bit set -- not an address a "
+	                "station can own -- or a second read disagreed)");
+	/* Print the disagreement in full when it happens: which bytes moved is
+	 * the whole diagnostic, and a verdict line that only said "INVALID"
+	 * would throw it away. */
+	if (mac_rc == ALP_OK && !mac_repeatable) {
+		printf("[evkdemo] CC3501E: GET_MAC re-read (0x03) -> %d  "
+		       "%02x:%02x:%02x:%02x:%02x:%02x -- DISAGREES with the first read, so the link "
+		       "corrupted at least one of them; the address is not trustworthy either way\n",
+		       (int)mac_rc2,
+		       mac2[0],
+		       mac2[1],
+		       mac2[2],
+		       mac2[3],
+		       mac2[4],
+		       mac2[5]);
+	}
 
 	/* GET_CAPABILITIES (0x06) -- ASK what the firmware implements rather
 	 * than infer it from the version number. A build without Wi-Fi or
@@ -1570,8 +1616,11 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 	 *   ver_ok   -- the firmware agrees on the MAJOR wire contract, so every
 	 *               other reply below was parsed against the right layout. A
 	 *               MINOR delta is additive and deliberately not gated.
-	 *   mac_ok   -- the radio produced its own identity AND that identity is
-	 *               structurally a station MAC, not a zeroed field.
+	 *   mac_ok   -- the radio produced its own identity, that identity is
+	 *               structurally a station MAC rather than a zeroed field,
+	 *               and a second GET_MAC round-trip returned the same bytes.
+	 *               The repeat is what keeps a corrupting link from passing
+	 *               on a structurally perfect but bit-flipped address.
 	 *   caps_rc  -- the firmware could state what it implements.
 	 *   scan_ok  -- a real radio operation ran to completion on the Wi-Fi
 	 *               side and its reply parsed (see the empty-scan note).
