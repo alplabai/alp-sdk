@@ -127,9 +127,12 @@ def _manifest(**panes):
     return doc
 
 
+# `base` is not decoration here: the schema's row invariant requires it
+# whenever `status: ok`, so a row without one is refused before the join
+# check is ever reached.
 _MRAM_ROW = {
     "name": "mram_main", "source": "som_preset",
-    "kind": "flash", "status": "ok",
+    "kind": "flash", "status": "ok", "base": 0x80000000,
 }
 
 

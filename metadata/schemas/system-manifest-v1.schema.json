@@ -116,6 +116,37 @@
         ],
         "additionalProperties": false,
         "description": "One resolved region.  `name` is the join key.  Every field is DERIVED or passed through verbatim -- none is defaulted: a region whose base does not resolve carries no `base` and says why (`status: unresolved` plus a `reason`) instead of guessing one, and an absent derived field means unresolved, never a default (ADR-0034 clause 4).  `dt_label` is deliberately NOT carried: #1556 allows it only when verified against the board `.dts`, and this emitter has no access to that verification, so emitting it would mean shipping the name-derived fallback the issue forbids.",
+        "allOf": [
+          {
+            "title": "an unresolved row says why and carries no base; a resolved one carries its base",
+            "description": "The items description's own rule, made enforceable.  `status: unresolved` means the address did not resolve, so `base` MUST be absent (ADR-0034 clause 4 -- never a guessed address) and `reason` MUST be present (an unresolved row that does not say why is not actionable).  `status: ok` means it did resolve, so `base` MUST be present.  Without this, `status: ok` with no `base` and `status: unresolved` with a `base` both validated clean and the rule lived only in prose.",
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "unresolved"
+                }
+              },
+              "required": [
+                "status"
+              ]
+            },
+            "then": {
+              "required": [
+                "reason"
+              ],
+              "not": {
+                "required": [
+                  "base"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "base"
+              ]
+            }
+          }
+        ],
         "properties": {
           "name": {
             "type": "string",

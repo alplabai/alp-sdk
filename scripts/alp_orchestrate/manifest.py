@@ -3,10 +3,14 @@
 """System-manifest emitter -- assembles system-manifest.yaml from the model.
 
 `emit_system_manifest` renders the spec-§5.2 manifest (slices, carve-outs,
-storage, helper-MCU block) off the parsed BoardProject + the resolved carve-outs
-/ partitions; `_helper_mcus` builds the manifest's `helper_mcus[]` block (shared
-with the Orchestrator's materialise path, which back-imports it). Extracted as
-the #285 manifest emit seam.
+storage, memory regions, helper-MCU block) off the parsed BoardProject + the
+resolved carve-outs / partitions / memory regions; `_helper_mcus` builds the
+manifest's `helper_mcus[]` block (shared with the Orchestrator's materialise
+path, which back-imports it). Extracted as the #285 manifest emit seam.
+
+`memory[]` is the region table the other two panes refer INTO by name
+(#1365 item 3) -- `memory.resolve_memory_regions` shapes it, and it is
+OMITTED rather than emitted empty when a SoM resolves no regions.
 """
 
 from __future__ import annotations

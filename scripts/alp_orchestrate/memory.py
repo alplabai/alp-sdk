@@ -56,8 +56,8 @@ from .models import BoardProject
 
 # The two provenance values a region row can carry.  `board_yaml` (the third
 # value #1365's issue body proposes) has no producer: board.yaml never
-# AUTHORS a region, it only NAMES one via `ipc[].region` / `storage[].
-# flash_device`, so a board_yaml-sourced region row cannot occur.
+# AUTHORS a region, it only NAMES one via `ipc[].carve_out_region` /
+# `storage[].flash_device`, so a board_yaml-sourced region row cannot occur.
 _SOURCE_PRESET = "som_preset"
 _SOURCE_SOC = "soc_derived"
 

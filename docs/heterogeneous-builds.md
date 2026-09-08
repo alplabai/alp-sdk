@@ -346,7 +346,12 @@ part of the declarative output either.
 single derived projection of `board.yaml` — one `slices[]` entry per
 per-core image (its `os`, `build_dir`, `output_artefact`,
 `board`/`machine`, and `flash_method`/`flash_args`), plus the `ipc:`
-links and `helper_mcus:`.  Tools — the alp-sdk-vscode extension, CI,
+links, `helper_mcus:`, the resolved `storage:` partitions, and the
+`memory:` region table those last two refer INTO by name
+(`ipc[].carve_out_region` and `storage[].flash_device` each name a
+`memory[].name`).  `storage:` and `memory:` are each OMITTED rather
+than emitted empty, so an absent pane means "nothing resolved here",
+never "this SoM has none".  Tools — the alp-sdk-vscode extension, CI,
 the flasher — read **this** to manage a multi-image project instead of
 re-deriving folder layout and build wiring from `board.yaml` + the SoM
 presets.  Its shape is pinned by

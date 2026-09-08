@@ -26,12 +26,14 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _orchestrate_support import REPO, _write_board   # noqa: E402
 
+from alp_orchestrate import memory                      # noqa: E402
 from alp_orchestrate import (                          # noqa: E402
     emit_system_manifest,
     load_board_yaml,
@@ -257,24 +259,54 @@ def test_the_memory_key_is_omitted_when_no_region_resolves(
 # ---------------------------------------------------------------------
 
 
-def test_ipc_and_storage_join_memory_by_name(tmp_path: Path) -> None:
-    """`ipc[].carve_out_region` and `storage[].flash_device` each name a
-    `memory[].name` -- partial by construction, since an
-    `on_module.ospi_memories:` key is a legal `flash_device` target that
-    carries a `capacity_mbit` and no base, so it gets no row."""
+def test_ipc_joins_memory_by_name() -> None:
+    """`ipc[].carve_out_region` names a `memory[].name`.
+
+    Uses the shipped `rpmsg-v2n` project deliberately: on every AEN SoM
+    the carve-out is REFUSED (`mram_main` has an unresolved base), and a
+    blocked `ipc[]` row carries no `carve_out_region` at all -- so an AEN
+    fixture makes this test vacuous, which is exactly how its first
+    version passed while asserting nothing. The explicit `checked` count
+    is what stops it silently degrading that way again.
+    """
+    project = load_board_yaml(
+        REPO / "examples" / "multicore" / "rpmsg-v2n" / "board.yaml")
+    parsed = yaml.safe_load(emit_system_manifest(project))
+    names = {r["name"] for r in parsed.get("memory", [])}
+
+    checked = 0
+    for link in parsed.get("ipc", []):
+        region = link.get("carve_out_region")
+        if region is None:
+            continue
+        checked += 1
+        assert region in names, (
+            f"ipc[] names carve_out_region {region!r}, absent from "
+            f"memory[] {sorted(names)}")
+
+    assert checked > 0, "fixture produced no resolved carve-out to join"
+
+
+def test_the_storage_join_is_partial_by_construction(tmp_path: Path) -> None:
+    """`storage[].flash_device` may name something that gets NO row.
+
+    An `on_module.ospi_memories:` key is a legal target but is a
+    controller-instance name carrying a `capacity_mbit` and no base, so
+    it lies outside every aperture. Pinning the partiality is the honest
+    test: no shipped project has a `flash_device` naming a `memory_map:`
+    region, so asserting that join would assert nothing.
+    """
     project = load_board_yaml(_write_board(tmp_path, AEN_BOARD))
     parsed = yaml.safe_load(emit_system_manifest(project))
     names = {r["name"] for r in parsed.get("memory", [])}
     ospi = set((project.som_preset.get("on_module") or {}).get("ospi_memories") or {})
 
-    for link in parsed.get("ipc", []):
-        region = link.get("carve_out_region")
-        if region is not None:
-            assert region in names, f"ipc[] names {region}, absent from memory[]"
-    for part in parsed.get("storage", []):
-        device = part.get("flash_device")
-        if device is not None and device not in ospi:
-            assert device in names, f"storage[] names {device}, absent from memory[]"
+    devices = {p.get("flash_device") for p in parsed.get("storage", [])}
+    assert devices, "fixture produced no storage partitions"
+    for device in devices:
+        assert device in ospi, f"unexpected flash_device {device!r}"
+        assert device not in names, (
+            f"{device!r} is a controller instance and must get no memory[] row")
 
 
 # ---------------------------------------------------------------------
@@ -296,6 +328,105 @@ def test_schema_declares_every_field_the_emitter_can_write(
     declared = set(items["properties"])
     for row in _memory(AEN_BOARD, tmp_path) + _memory(V2N_BOARD, tmp_path):
         assert set(row) <= declared, f"{set(row) - declared} not declared"
+
+
+# ---------------------------------------------------------------------
+# Direct-call pins for the legs no shipped preset reaches today.
+#
+# `kind: ram` and `kind: unclassified` have ZERO producers across all 12
+# `metadata/e1m_modules/E1M-*.yaml` presets (every AEN row that resolves
+# is contained in the aperture; every non-Alif SoM has no aperture at
+# all), and no preset authors a resolved base with an unresolvable size.
+# Waiting for a preset to grow one of those rows is how a safety
+# direction stays unpinned -- the same shape as #2022's mutants C3/C11.
+# ---------------------------------------------------------------------
+
+_AEN_APERTURE = (0x80000000, 0x80580000)
+
+
+def test_a_preset_authored_region_outside_the_aperture_is_unclassified() -> None:
+    """Containment is ONE-DIRECTIONAL: outside proves nothing. A future
+    authored OSPI XIP window must not be reported as RAM."""
+    row = memory._resolved_row(
+        {"name": "ospi_xip", "base": 0x90000000, "size_kib": 64},
+        _AEN_APERTURE, True, "som_preset")
+
+    assert row["kind"] == "unclassified"
+
+
+def test_a_derived_region_outside_the_aperture_is_ram() -> None:
+    """The same extent, NOT preset-authored, is RAM by construction --
+    this is the leg that keeps every V2N/V2M/NX9101 derivation intact."""
+    row = memory._resolved_row(
+        {"name": "sram0", "base": 0x90000000, "size_kib": 64},
+        _AEN_APERTURE, False, "soc_derived")
+
+    assert row["kind"] == "ram"
+
+
+def test_a_resolved_base_with_an_unresolvable_size_stays_status_ok() -> None:
+    """`status` keys off the BASE, not off `region_extent()`.
+
+    The address resolved; only the size did not. An extent-keyed rule
+    would report `status: unresolved` for a row whose address is known,
+    and no shipped preset has this shape to catch the difference.
+    """
+    row = memory._resolved_row(
+        {"name": "half_known", "base": 0x80600000, "size_kib": "TBD"},
+        _AEN_APERTURE, True, "som_preset")
+
+    assert row["status"] == "ok"
+    assert row["base"] == 0x80600000
+    assert "size_bytes" not in row
+    assert "reason" not in row
+
+
+def test_an_unresolved_row_never_carries_a_base() -> None:
+    """ADR-0034 clause 4, at the row level."""
+    row = memory._resolved_row(
+        {"name": "pending", "base": "TBD", "size_kib": 64},
+        _AEN_APERTURE, True, "som_preset")
+
+    assert row["status"] == "unresolved"
+    assert "base" not in row
+    assert row["reason"]
+
+
+# ---------------------------------------------------------------------
+# The schema enforces the row invariant, rather than describing it
+# ---------------------------------------------------------------------
+
+
+def _item_validator():
+    import jsonschema
+    items = json.loads(SCHEMA.read_text(encoding="utf-8"))[
+        "properties"]["memory"]["items"]
+    return jsonschema.Draft202012Validator(items)
+
+
+@pytest.mark.parametrize("row", [
+    {"name": "a", "source": "som_preset", "kind": "flash", "status": "ok"},
+    {"name": "a", "source": "som_preset", "kind": "unresolved",
+     "status": "unresolved"},
+    {"name": "a", "source": "som_preset", "kind": "unresolved",
+     "status": "unresolved", "reason": "why", "base": 1},
+])
+def test_the_schema_rejects_a_row_that_breaks_the_status_invariant(row) -> None:
+    """`status: ok` with no `base`, `unresolved` with no `reason`, and
+    `unresolved` carrying a `base` were all schema-legal while the rule
+    lived only in the items description -- which is the failure mode this
+    pane was typed to end."""
+    assert list(_item_validator().iter_errors(row)), f"{row} should be refused"
+
+
+@pytest.mark.parametrize("row", [
+    {"name": "a", "source": "som_preset", "kind": "flash", "status": "ok",
+     "base": 0x80000000},
+    {"name": "a", "source": "soc_derived", "kind": "unresolved",
+     "status": "unresolved", "reason": "no base declared"},
+])
+def test_the_schema_accepts_both_legal_row_shapes(row) -> None:
+    assert not list(_item_validator().iter_errors(row))
 
 
 def test_schema_pins_the_shipped_vocabularies(tmp_path: Path) -> None:
