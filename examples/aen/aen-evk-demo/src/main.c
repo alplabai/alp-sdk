@@ -2138,36 +2138,55 @@ static phase_verdict_t phase_screen_stub(demo_ctx_t *ctx)
 	return PHASE_SKIPPED;
 }
 
-/* NPU inference: blocked by a BOOT-FLOW constraint, not by missing code
- * and not by a camera. examples/aen/aen-npu-inference-alp is the
- * silicon-proven Ethos-U85 path through <alp/inference.h> -- but its
- * Vela-compiled person_detect_u85 model is ~263 KiB, which is precisely
- * why THAT app links into MRAM slot0 and boots via Flow D instead of
- * RAM-running. This demo is a Flow C ITCM RAM-run: ITCM is 256 KB total
- * and the demo now occupies roughly two thirds of it -- phase 8's CC3501E
- * bridge driver and phase 10's network stack were each worth tens of
- * kilobytes, so the headroom is shrinking, not growing. Deliberately no
- * byte-exact figure and no percentage: the size depends on which conf
- * fragments the build layers (a bench Flow C build with the RAM console
- * and scripts/bench/aen/aen-bench-shared.conf differs from a plain
- * scripts/bench/aen/build.sh), and a number printed from a string literal
- * goes stale the moment anything else in this file changes -- it did
- * exactly that, twice, before this wording. The argument does not need the
- * precision. A ~263 KiB model does not fit in what is left, by a wide
- * margin and not by a trimmable one. Adding NPU inference here therefore
- * means relinking the whole demo into MRAM slot0 and switching its boot
- * flow -- a different unit of work from adding a phase, and out of scope
- * for this slice. Shrinking the model to fit would trade the proven
- * artefact for an unproven one, which is the opposite of what this app is
- * for. */
+/* NPU inference: the CODE does not fit in ITCM. Not the model, not a
+ * boot flow, and not a camera.
+ *
+ * MEASURED, and it corrects what this comment used to say. Building this
+ * demo with the NPU Kconfig set from examples/aen/aen-npu-inference-alp
+ * (TFLM + ETHOS_U + ETHOS_U85_256 + CPP/STD_CPP17/REQUIRES_FULL_LIBCPP +
+ * the alp inference dispatch) and NO MODEL AT ALL gives:
+ *
+ *     ld.bfd: region `FLASH' overflowed by 10664 bytes
+ *
+ * So the software stack alone overruns the ITCM left after the other nine
+ * phases. That is the whole constraint.
+ *
+ * WHY THE OLD REASON WAS WRONG, since it pointed at the wrong fix. This
+ * comment previously said the ~263 KiB Vela person_detect_u85 model is
+ * what does not fit, and that adding NPU means relinking into MRAM slot0.
+ * The model never needed ITCM: the Ethos-U is a DMA master that reads its
+ * model and arena over the SRAM AXI port, so they must live in global
+ * SRAM0 (@0x02000000) whatever the image does -- which is exactly why
+ * aen-npu-inference-alp memcpy's the model out of rodata into SRAM0 at
+ * boot. Reading the old text, the obvious next move was "put the model in
+ * SRAM0", which was already mandatory and buys nothing.
+ *
+ * WHAT WOULD ACTUALLY WORK, for whoever picks this up. Nothing here needs
+ * MRAM. Phase 10 already carved the bank -- 64 KiB SRAM0 at 0x02000000 for
+ * phase 13's JPEG buffers, 512 KiB system RAM at 0x02010000 -- leaving
+ * 0x02090000..0x02400000 free, ample for a model plus a 256 KiB arena. The
+ * blob can be side-loaded straight into that window at Flow C time
+ * (scripts/bench/aen/ram-run.sh takes a preload J-Link file that runs
+ * after halt and before the image loadbin; Zephyr's init zeroes only its
+ * own .bss, so the blob survives). The phase would then open it with an
+ * explicit SRAM0 arena and PASS on the proven app's own criterion --
+ * alp_inference_invoke() == ALP_OK and a non-zero output tensor -- and
+ * report SKIPPED when no blob is present, the same shape as "no SD card
+ * fitted".
+ *
+ * The blocker for all of that is the 10664 bytes above. Closing it means
+ * dropping code the other nine phases need, and nine trustworthy phases
+ * are worth more than ten with one of them thinned to fit. Shrinking the
+ * MODEL would not help either -- the footprint above has no model in it,
+ * and a toy network would prove dispatch rather than inference. */
 static phase_verdict_t phase_npu_stub(demo_ctx_t *ctx)
 {
 	ARG_UNUSED(ctx);
-	printf("[evkdemo] -- Phase: NPU inference -- SKIPPED (needs a boot-flow change, not a "
-	       "phase: aen-npu-inference-alp's person_detect_u85 model is ~263 KiB and this "
-	       "demo is a Flow C ITCM RAM-run -- 256 KB ITCM total, roughly two thirds "
-	       "already used, so the model would have to move the whole image to MRAM slot0 / "
-	       "Flow D) --\n");
+	printf("[evkdemo] -- Phase: NPU inference -- SKIPPED (the CODE does not fit, not the "
+	       "model: building this demo with the NPU Kconfig set and no model at all "
+	       "overflows ITCM by 10664 bytes. The model belongs in SRAM0 either way -- the "
+	       "Ethos-U reads it over the SRAM AXI port -- so relinking to MRAM would not "
+	       "help. See the comment above this function for what would) --\n");
 	return PHASE_SKIPPED;
 }
 
