@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-07",
+  "generated": "2026-09-08",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -7474,17 +7474,49 @@
     },
     "alp/chips/tas2563.h": {
       "functions": {
+        "tas2563_clear_faults": {
+          "hash": "4107d72fd135ed12",
+          "signature": "alp_status_t tas2563_clear_faults(tas2563_t *ctx);"
+        },
+        "tas2563_configure_fault_pin": {
+          "hash": "eecc6fe0c44ecc68",
+          "signature": "alp_status_t tas2563_configure_fault_pin(tas2563_t *ctx, alp_gpio_t *irq_n, bool chip_internal_pullup);"
+        },
+        "tas2563_configure_i2s": {
+          "hash": "4bad2f9fd02f5901",
+          "signature": "alp_status_t tas2563_configure_i2s(tas2563_t *ctx, const alp_i2s_config_t *host_cfg, tas2563_rx_channel_t channel);"
+        },
+        "tas2563_configure_iv_sense": {
+          "hash": "2fa289a2a1418990",
+          "signature": "alp_status_t tas2563_configure_iv_sense(tas2563_t *ctx, bool enable, uint8_t v_slot, uint8_t i_slot);"
+        },
         "tas2563_deinit": {
           "hash": "253d74a9f5743f51",
           "signature": "void tas2563_deinit(tas2563_t *ctx);"
+        },
+        "tas2563_fault_asserted": {
+          "hash": "97696172dd8a11bf",
+          "signature": "alp_status_t tas2563_fault_asserted(tas2563_t *ctx, bool *asserted_out);"
         },
         "tas2563_init": {
           "hash": "cb3ab5964e8c2026",
           "signature": "alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp_gpio_t *sd_n);"
         },
+        "tas2563_load_tuning": {
+          "hash": "5c5062e39f3472ab",
+          "signature": "alp_status_t tas2563_load_tuning(tas2563_t *ctx, const tas2563_tuning_reg_t *records, size_t count, size_t *failed_index_out);"
+        },
+        "tas2563_read_faults": {
+          "hash": "c8d8ce05ed13619a",
+          "signature": "alp_status_t tas2563_read_faults(tas2563_t *ctx, uint32_t *faults_out);"
+        },
         "tas2563_read_revision": {
           "hash": "42548fad01644ebf",
           "signature": "alp_status_t tas2563_read_revision(tas2563_t *ctx, uint8_t *rev_out);"
+        },
+        "tas2563_set_amp_level": {
+          "hash": "bf594748f4b3a17c",
+          "signature": "alp_status_t tas2563_set_amp_level(tas2563_t *ctx, uint8_t level_code);"
         },
         "tas2563_set_hw_enable": {
           "hash": "fa19bbf771113c0a",
@@ -7496,6 +7528,122 @@
         }
       },
       "macros": {
+        "TAS2563_AMP_LEVEL_MAX": {
+          "hash": "188603200b261e33",
+          "value": "0x1Cu"
+        },
+        "TAS2563_AMP_LEVEL_MIN": {
+          "hash": "7c9fddaa16d33432",
+          "value": "0x01u"
+        },
+        "TAS2563_AMP_LEVEL_POR": {
+          "hash": "cf78694e711924cc",
+          "value": "0x10u"
+        },
+        "TAS2563_FAULT_ASI2_CLOCK": {
+          "hash": "5c8f3d774eb3e61b",
+          "value": "(1u << 27)"
+        },
+        "TAS2563_FAULT_BOOST_CLOCK": {
+          "hash": "c71abe91248393e2",
+          "value": "(1u << 22)"
+        },
+        "TAS2563_FAULT_BOOST_OV_CLAMP": {
+          "hash": "87b0adfe92d66a00",
+          "value": "(1u << 18)"
+        },
+        "TAS2563_FAULT_BROWNOUT_ACTIVE": {
+          "hash": "cb2ebfc8e07df406",
+          "value": "(1u << 9)"
+        },
+        "TAS2563_FAULT_BROWNOUT_SHUTDOWN": {
+          "hash": "4a29005cdc60c5c7",
+          "value": "(1u << 10)"
+        },
+        "TAS2563_FAULT_CP_PG": {
+          "hash": "df1b0b6b3487ec82",
+          "value": "(1u << 17)"
+        },
+        "TAS2563_FAULT_DAC_MOD_CLOCK": {
+          "hash": "61c60f850fc28c83",
+          "value": "(1u << 23)"
+        },
+        "TAS2563_FAULT_DC_DETECT": {
+          "hash": "61a2ac3e64abf441",
+          "value": "(1u << 19)"
+        },
+        "TAS2563_FAULT_DEVICE_POWER_DOWN": {
+          "hash": "733d8c20a4dd10e0",
+          "value": "(1u << 31)"
+        },
+        "TAS2563_FAULT_DEVICE_POWER_UP": {
+          "hash": "bd817407dc168dd7",
+          "value": "(1u << 16)"
+        },
+        "TAS2563_FAULT_LIMITER_ACTIVE": {
+          "hash": "ae9a86f85373f808",
+          "value": "(1u << 3)"
+        },
+        "TAS2563_FAULT_LIMITER_INF_HOLD": {
+          "hash": "522dc5a8b9d64399",
+          "value": "(1u << 6)"
+        },
+        "TAS2563_FAULT_LIMITER_MAX_ATTN": {
+          "hash": "c296c13c4c404a07",
+          "value": "(1u << 5)"
+        },
+        "TAS2563_FAULT_LIMITER_MUTE": {
+          "hash": "7884e6035c90674f",
+          "value": "(1u << 7)"
+        },
+        "TAS2563_FAULT_LOAD_DIAG_DONE": {
+          "hash": "c020a73cc29fa762",
+          "value": "(1u << 13)"
+        },
+        "TAS2563_FAULT_OVER_CURRENT": {
+          "hash": "505f6120a2a1c6d6",
+          "value": "(1u << 1)"
+        },
+        "TAS2563_FAULT_OVER_TEMP": {
+          "hash": "a696aab3b538e62c",
+          "value": "(1u << 0)"
+        },
+        "TAS2563_FAULT_PDM_MIC_CLOCK": {
+          "hash": "72f46b7e360273d0",
+          "value": "(1u << 28)"
+        },
+        "TAS2563_FAULT_PLL_LOCK": {
+          "hash": "3cf687409ff772f3",
+          "value": "(1u << 20)"
+        },
+        "TAS2563_FAULT_SHUTDOWN_CAUSES": {
+          "hash": "38ef18a2493e255f",
+          "value": "(TAS2563_FAULT_OVER_TEMP | TAS2563_FAULT_OVER_CURRENT | TAS2563_FAULT_TDM_CLOCK | TAS2563_FAULT_BROWNOUT_SHUTDOWN)"
+        },
+        "TAS2563_FAULT_SPK_OPEN_LOAD": {
+          "hash": "6e3696671dc65896",
+          "value": "(1u << 11)"
+        },
+        "TAS2563_FAULT_SPK_SHORT_LOAD": {
+          "hash": "cbadd0251b0e5579",
+          "value": "(1u << 12)"
+        },
+        "TAS2563_FAULT_TDM_CLOCK": {
+          "hash": "ac58463674286c8e",
+          "value": "(1u << 2)"
+        },
+        "TAS2563_FAULT_VBAT_BELOW_INFL": {
+          "hash": "1a23cba54b015dbf",
+          "value": "(1u << 4)"
+        },
+        "TAS2563_FAULT_VBAT_BROWNOUT": {
+          "hash": "76078b4e6174332c",
+          "value": "(1u << 8)"
+        },
+        "TAS2563_FAULT_VBAT_POR": {
+          "hash": "868be70c4dba80bc",
+          "value": "(1u << 21)"
+        },
         "TAS2563_I2C_ADDR_BROADCAST": {
           "hash": "d8b3307d25146bc9",
           "value": "0x48u"
@@ -7528,15 +7676,38 @@
           "hash": "d8683e4a9903ac6b",
           "kind": "enum"
         },
+        "tas2563_rx_channel_t": {
+          "definition": "typedef enum { TAS2563_RX_SLOT_FROM_ADDR = 0x0, TAS2563_RX_LEFT = 0x1, TAS2563_RX_RIGHT = 0x2, TAS2563_RX_DOWNMIX = 0x3, } tas2563_rx_channel_t;",
+          "enumerators": [
+            "TAS2563_RX_SLOT_FROM_ADDR = 0x0",
+            "TAS2563_RX_LEFT = 0x1",
+            "TAS2563_RX_RIGHT = 0x2",
+            "TAS2563_RX_DOWNMIX = 0x3"
+          ],
+          "hash": "c8b46522be8ce4bc",
+          "kind": "enum"
+        },
         "tas2563_t": {
-          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; alp_gpio_t *sd_n; } tas2563_t;",
+          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; alp_gpio_t *sd_n; alp_gpio_t *irq_n; } tas2563_t;",
           "fields": [
             "bool initialised",
             "alp_i2c_t *bus",
             "uint8_t addr",
-            "alp_gpio_t *sd_n"
+            "alp_gpio_t *sd_n",
+            "alp_gpio_t *irq_n"
           ],
-          "hash": "20cb3182222a4d3b",
+          "hash": "ff7d0ed9de3791da",
+          "kind": "struct"
+        },
+        "tas2563_tuning_reg_t": {
+          "definition": "typedef struct { uint8_t book; uint8_t page; uint8_t reg; uint8_t val; } tas2563_tuning_reg_t;",
+          "fields": [
+            "uint8_t book",
+            "uint8_t page",
+            "uint8_t reg",
+            "uint8_t val"
+          ],
+          "hash": "f663544c140cfd59",
           "kind": "struct"
         }
       },
