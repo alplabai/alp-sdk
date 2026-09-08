@@ -145,6 +145,51 @@ void     fake_ina236_set_reg(uint8_t reg, uint16_t val);
 uint32_t fake_ina236_read_count(uint8_t reg);
 void     fake_ina236_reset(void);
 
+/* ------------------------------------------------------------------ */
+/* fake TAS2563                                                        */
+/* ------------------------------------------------------------------ */
+/* Book/page-paged register file -- see fake_tas2563.c.  get_reg /
+ * set_reg / write_count address BOOK 0 / PAGE 0, the only page with a
+ * backing store; the write log below is how a test sees writes aimed
+ * at any other book or page. */
+
+/** One applied register write, tagged with the book/page selected at
+ *  the time -- so a test can assert the ORDER and the paging of a
+ *  sequence, not just its end state. */
+struct fake_tas2563_write {
+	uint8_t book;
+	uint8_t page;
+	uint8_t reg;
+	uint8_t val;
+};
+
+/** Write-log capacity.  Long enough for the tuning-replay sequences
+ *  the ztests exercise; writes past it are dropped, not wrapped. */
+#define FAKE_TAS2563_LOG_MAX 64
+
+uint8_t  fake_tas2563_get_reg(uint8_t reg);
+void     fake_tas2563_set_reg(uint8_t reg, uint8_t val);
+uint32_t fake_tas2563_write_count(uint8_t reg);
+
+/** Currently selected book/page, as the last PAGE/BOOK write left it. */
+uint8_t fake_tas2563_cur_book(void);
+uint8_t fake_tas2563_cur_page(void);
+
+/** Ordered log of every APPLIED write since the last reset.  A write
+ *  that a fake_tas2563_fail_write_at() fault NACKed is NOT logged. */
+size_t                           fake_tas2563_log_len(void);
+const struct fake_tas2563_write *fake_tas2563_log(size_t i);
+void                             fake_tas2563_log_reset(void);
+
+/** Arm a one-shot NACK for the next write to (@p book, @p page,
+ *  @p reg), so a test can fail one step of a multi-write sequence
+ *  without disturbing the steps before it. */
+void fake_tas2563_fail_write_at(uint8_t book, uint8_t page, uint8_t reg);
+
+/** Reset registers to their datasheet POR values, clear the write
+ *  log, the counters, the book/page selection and any armed fault. */
+void fake_tas2563_reset(void);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
